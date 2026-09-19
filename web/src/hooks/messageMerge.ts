@@ -110,8 +110,13 @@ function computeBaseHasCurrentTurn(
  *
  * Streaming assistants always correspond to the LAST N assistants in base
  * (the most recent turn). When the base hasn't caught up with the current
- * turn, no matching should occur at all, so the offset equals the total
- * number of base assistants (nothing will be reached).
+ * turn (`baseHasCurrentTurn` is false), the offset equals the total number
+ * of base assistants (nothing will be reached) — in that regime,
+ * `buildFilteredBase` falls back to content-confirmed matching instead.
+ *
+ * This offset is ONLY consulted when `baseHasCurrentTurn` is true; when
+ * false, the pairing decision is made entirely inside `buildFilteredBase`
+ * via `contentConfirmed`.
  */
 function computeMatchOffset(
   baseAssistantCount: number,
@@ -121,6 +126,18 @@ function computeMatchOffset(
   return baseHasCurrentTurn
     ? Math.max(0, baseAssistantCount - streamingAssistantCount)
     : baseAssistantCount
+}
+
+/**
+ * Whether the persisted copy `candidate` already represents `content`.
+ *
+ * Same 200-char prefix tolerance the confirmation checks use: a turn can end
+ * between two renders, so the streaming copy may be a prefix of the persisted
+ * one. An empty content never matches (an empty placeholder is not a copy).
+ */
+function contentConfirmed(content: string, candidate: string): boolean {
+  const prefix = content.slice(0, 200)
+  return prefix.length > 0 && candidate.startsWith(prefix)
 }
 
 // ── Base pass ───────────────────────────────────────────────────────────────
@@ -145,6 +162,7 @@ function buildFilteredBase(
   baseMessages: ChatMessage[],
   index: StreamingIndex,
   matchOffset: number,
+  baseHasCurrentTurn: boolean,
 ): BasePassResult {
   const consumedToolIds = new Set<string>()
   const filteredBase: ChatMessage[] = []
@@ -156,18 +174,33 @@ function buildFilteredBase(
     if (msg.role === 'assistant') {
       let stableId: string | undefined
       let confirmedAlready = false
-      if (baseAssistantIdx >= matchOffset && streamAsstIdx < index.assistants.length) {
-        const entry = index.assistants[streamAsstIdx]
-        if (!entry.isStreaming) {
-          // Both completed → base version wins; remember the streaming copy
-          // was consumed so it gets deduped later. Carry its stable id forward
-          // so the render key (and enter animation) survive the transition.
-          entry.used = true
-          stableId = entry.msg.stableId ?? entry.msg.id
-          confirmedAlready = true
-          streamAsstIdx++
+      let entry: AssistantEntry | undefined
+      if (baseHasCurrentTurn) {
+        // Positional matching: the Nth-from-the-end streaming assistant is the
+        // Nth-from-the-end base assistant.
+        if (baseAssistantIdx >= matchOffset && streamAsstIdx < index.assistants.length) {
+          const candidate = index.assistants[streamAsstIdx]
+          if (!candidate.isStreaming) {
+            entry = candidate
+            streamAsstIdx++
+          }
         }
-        // If entry.isStreaming, skip it (leave it for the append pass).
+      } else {
+        // Base has NOT caught up with the newest turn (several sends in
+        // flight), so positional matching is unsafe: a completed streaming
+        // assistant may be a NEW answer with no base counterpart yet, and
+        // pairing it with an older base assistant rendered the response ABOVE
+        // its user message. But a completed streaming assistant whose content
+        // is ALREADY present in base is provably the same message — leaving it
+        // unmatched rendered it TWICE (once here, once appended as a leftover).
+        entry = index.assistants.find(
+          (e) => !e.used && !e.isStreaming && contentConfirmed(e.msg.content, msg.content),
+        )
+      }
+      if (entry) {
+        entry.used = true
+        stableId = entry.msg.stableId ?? entry.msg.id
+        confirmedAlready = true
       }
       baseAssistantIdx++
       filteredBase.push(confirmedAlready && stableId ? { ...msg, stableId } : msg)
@@ -323,7 +356,12 @@ export function mergeMessages(
     baseHasCurrentTurn,
   )
 
-  const { filteredBase, consumedToolIds } = buildFilteredBase(baseMessages, index, matchOffset)
+  const { filteredBase, consumedToolIds } = buildFilteredBase(
+    baseMessages,
+    index,
+    matchOffset,
+    baseHasCurrentTurn,
+  )
 
   const filteredStreaming = filterStreamingLeftovers(
     streamingMessages,

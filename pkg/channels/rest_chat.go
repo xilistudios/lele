@@ -120,6 +120,9 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		msg providers.Message
 	}
 	validMessages := make([]indexedMessage, 0, len(history))
+	// Occurrence counters per content key: messages with identical content must
+	// still receive DISTINCT ids (see residentMessageID).
+	residentOccurrences := make(map[string]int, len(history))
 	for _, msg := range history {
 		if msg.Role != "user" && msg.Role != "assistant" && msg.Role != "tool" {
 			continue
@@ -139,10 +142,13 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		if msg.Streaming && processing {
 			continue
 		}
-		// Generate a stable ID from message content hash (position-independent).
-		// This ensures cursor-based pagination survives history mutations (pruning,
-		// new messages appended, etc.) because the ID only depends on the message itself.
-		msgID := residentMessageID(sessionKey, msg)
+		// Stable, position-independent content key + occurrence index. The
+		// first occurrence keeps the legacy id so existing pagination cursors
+		// keep working; repeats get a `-<n>` suffix so ids stay unique.
+		key := residentMessageKey(msg)
+		occurrence := residentOccurrences[key]
+		residentOccurrences[key]++
+		msgID := residentMessageID(sessionKey, key, occurrence)
 		validMessages = append(validMessages, indexedMessage{id: msgID, msg: msg})
 	}
 
@@ -247,9 +253,11 @@ func beforeSeqFromCursor(cursor string) int {
 	return -1
 }
 
-// residentMessageID builds a stable, position-independent ID for an
-// in-memory message.
-func residentMessageID(sessionKey string, msg providers.Message) string {
+// residentMessageKey derives the content-based discriminator of a message.
+// It is position-independent on purpose: cursor pagination must survive
+// pruning and appends. Two DIFFERENT messages can therefore share a key —
+// residentMessageID appends an occurrence suffix to keep their ids unique.
+func residentMessageKey(msg providers.Message) string {
 	hasher := sha256.New()
 	hasher.Write([]byte(msg.Role))
 	hasher.Write([]byte(msg.Content))
@@ -260,7 +268,22 @@ func residentMessageID(sessionKey string, msg providers.Message) string {
 		hasher.Write([]byte(tc.ID))
 		hasher.Write([]byte(tc.Name))
 	}
-	return fmt.Sprintf("%s:%x", sessionKey, hasher.Sum(nil)[:8])
+	return fmt.Sprintf("%x", hasher.Sum(nil)[:8])
+}
+
+// residentMessageID builds the wire id of a resident message. `occurrence` is
+// the 0-based index of this message among the resident messages sharing the
+// same content key: occurrence 0 keeps the historical
+// `<sessionKey>:<hash>` form (existing cursors keep resolving), later
+// occurrences get a `-<n>` suffix. Without the suffix two identical assistant
+// answers received the SAME id: the WebUI rendered them as duplicate React
+// keys (one bubble silently disappeared) and `before_id` matched the first
+// occurrence instead of the intended one.
+func residentMessageID(sessionKey, key string, occurrence int) string {
+	if occurrence <= 0 {
+		return fmt.Sprintf("%s:%s", sessionKey, key)
+	}
+	return fmt.Sprintf("%s:%s-%d", sessionKey, key, occurrence)
 }
 
 // chatHistoryBuilder converts providers.Message values into the wire format,

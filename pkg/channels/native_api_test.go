@@ -2555,3 +2555,101 @@ func TestNativeChannelChatSessionsMetaKindFilter(t *testing.T) {
 		t.Fatalf("kind=heartbeat filter should NOT include %q, got %#v", trackedSession, payload2.Sessions)
 	}
 }
+
+// TestChatHistory_DuplicateContentGetsDistinctIDs verifies that two messages
+// with identical content receive distinct IDs. Before the fix,
+// residentMessageID hashed only (role, content, toolCallID, toolCalls) so
+// duplicates collapsed into the same id — the WebUI lost one bubble (duplicate
+// React key) and before_id resolved to the first occurrence instead of the
+// intended one.
+func TestChatHistory_DuplicateContentGetsDistinctIDs(t *testing.T) {
+	ts := newNativeTestServer(t)
+	sessionKey := "native:" + ts.clientID + ":dup-content"
+	ts.channel.auth.TrackSessionKey(ts.clientID, sessionKey)
+
+	ts.loop.histories[sessionKey] = []providers.Message{
+		{Role: "user", Content: "same question"},
+		{Role: "assistant", Content: "same answer"},
+		{Role: "user", Content: "second question"},
+		{Role: "assistant", Content: "same answer"},
+	}
+
+	get := func(query string) *ChatHistoryResponse {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.QueryEscape(sessionKey)+"/history"+query, nil)
+		if err != nil {
+			t.Fatalf("NewRequest() error = %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+ts.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Do() error = %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		var payload ChatHistoryResponse
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		return &payload
+	}
+
+	payload := get("?limit=50")
+
+	// 1) All 4 messages returned in order.
+	if len(payload.Messages) != 4 {
+		t.Fatalf("len(messages) = %d, want 4", len(payload.Messages))
+	}
+	wantRoles := []string{"user", "assistant", "user", "assistant"}
+	for i, want := range wantRoles {
+		if payload.Messages[i].Role != want {
+			t.Fatalf("messages[%d].Role = %q, want %q", i, payload.Messages[i].Role, want)
+		}
+	}
+
+	ids := make([]string, 4)
+	for i, m := range payload.Messages {
+		ids[i] = m.ID
+	}
+
+	// 2) All 4 ids are distinct.
+	seen := make(map[string]bool, 4)
+	for i, id := range ids {
+		if seen[id] {
+			t.Fatalf("duplicate id at index %d: %q", i, id)
+		}
+		seen[id] = true
+	}
+
+	// 3) First assistant occurrence keeps the legacy format (no suffix).
+	expectedKey := residentMessageKey(ts.loop.histories[sessionKey][1])
+	expectedFirst := sessionKey + ":" + expectedKey
+	if ids[1] != expectedFirst {
+		t.Fatalf("messages[1].ID = %q, want %q (legacy format)", ids[1], expectedFirst)
+	}
+
+	// 4) Second assistant occurrence gets the -1 suffix.
+	expectedSecond := expectedFirst + "-1"
+	if ids[3] != expectedSecond {
+		t.Fatalf("messages[3].ID = %q, want %q", ids[3], expectedSecond)
+	}
+
+	// 5) Pagination targeting the SECOND occurrence (before_id = ids[3])
+	//    returns exactly 3 messages (all messages before the second "same answer").
+	payload2 := get("?limit=50&before_id=" + url.QueryEscape(ids[3]))
+	if len(payload2.Messages) != 3 {
+		t.Fatalf("before_id=ids[3] len(messages) = %d, want 3", len(payload2.Messages))
+	}
+
+	// 6) Pagination targeting the FIRST occurrence (before_id = ids[1])
+	//    returns exactly 1 message ("same question").
+	payload3 := get("?limit=50&before_id=" + url.QueryEscape(ids[1]))
+	if len(payload3.Messages) != 1 {
+		t.Fatalf("before_id=ids[1] len(messages) = %d, want 1", len(payload3.Messages))
+	}
+	if payload3.Messages[0].Content != "same question" {
+		t.Fatalf("before_id=ids[1] messages[0].Content = %q, want %q", payload3.Messages[0].Content, "same question")
+	}
+}
