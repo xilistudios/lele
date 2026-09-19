@@ -74,6 +74,8 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 	ch.base = NewBaseChannel("native", nil, nil, nil)
 	ch.pinLimiter = newRateLimiter(10, time.Minute)
 	ch.pairLimiter = newRateLimiter(5, time.Minute)
+	ch.refreshLimiter = newRateLimiter(20, time.Minute)
+	ch.authLogLimiter = newRateLimiter(6, time.Minute)
 	ch.apiLimiter = newRateLimiter(120, time.Minute)
 	ch.wsMessageLimiter = newRateLimiter(120, time.Minute)
 
