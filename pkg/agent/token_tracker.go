@@ -51,14 +51,17 @@ func trackTokenUsage(
 }
 
 // newSubagentTokenReporter builds the token-usage reporter wired into each
-// agent's SubagentManager (see tool_coordinator.go). It receives the owner
-// session key resolved by the subagent runner - the spawner's runtime session
-// key, falling back to the routing origin key - which is the same key the main
-// agent loop tracks under, so subagent spend lands in the parent's cumulative
-// counters instead of the subagent's own child session.
+// agent's SubagentManager (see tool_coordinator.go). Every key the subagent
+// runner bills arrives here: the owner session key (the spawner's runtime
+// session key, falling back to the routing origin key), which is the same key
+// the main agent loop tracks under, so subagent spend stays in the parent's
+// cumulative counters; and the subagent's own child session key
+// ("{origin}:{taskID}"), so opening that chat in the WebUI shows its own
+// counters instead of a zeroed block. The runner decides which keys to bill -
+// this reporter only writes them.
 //
-// Save flushes the parent's metadata immediately after each increment: an
-// async subagent typically finishes after the parent's turn-end Save, and its
+// Save flushes the session metadata immediately after each increment: an async
+// subagent typically finishes after the parent's turn-end Save, and its
 // contribution must not live only in RAM until some later turn (or a restart)
 // silently drops it. Persistence failures are logged and swallowed - losing a
 // delta is preferable to killing a running task.
