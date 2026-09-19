@@ -108,6 +108,10 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 type TokenState = {
   token: string | null
   refreshToken: string | null
+  // Which paired client this tab believes it is acting as. Used to tell a
+  // rotation of our own credential apart from an unrelated session that some
+  // other client wrote into the same localStorage slot.
+  clientId: string
   onTokenRefresh?: (session: AuthSession) => void
   onAuthFailure?: () => void
 }
@@ -152,6 +156,7 @@ export const createApiClient = (baseUrl: string) => {
   const tokenState: TokenState = {
     token: null,
     refreshToken: null,
+    clientId: '',
     onTokenRefresh: undefined,
   }
 
@@ -159,15 +164,22 @@ export const createApiClient = (baseUrl: string) => {
     token: string,
     refreshToken: string,
     onRefresh?: (session: AuthSession) => void,
+    clientId?: string,
   ) => {
     tokenState.token = token
     tokenState.refreshToken = refreshToken
     tokenState.onTokenRefresh = onRefresh
+    tokenState.clientId = clientId ?? ''
+    // A fresh credential must not inherit a backoff earned by the previous
+    // one: the cooldown protects against hammering with a token that was
+    // already rejected, and this token has never been offered.
+    refreshBlockedUntil = 0
   }
 
   const clearToken = () => {
     tokenState.token = null
     tokenState.refreshToken = null
+    tokenState.clientId = ''
     tokenState.onTokenRefresh = undefined
   }
 
@@ -200,7 +212,12 @@ export const createApiClient = (baseUrl: string) => {
     const raw = response.headers.get('retry-after')
     if (raw === null || raw.trim() === '') return null
     const seconds = Number(raw)
-    if (!Number.isFinite(seconds) || seconds < 0) return null
+    // Non-positive is treated as "no usable hint", not as "retry immediately".
+    // Honouring a 0 would switch the cooldown off entirely and put the client
+    // straight back into the request that was just rejected, which is the
+    // self-amplification this cooldown exists to prevent. Our own server
+    // floors the header at 1s, so a 0 here comes from a proxy or a bug.
+    if (!Number.isFinite(seconds) || seconds <= 0) return null
     return seconds * 1000
   }
 
@@ -209,6 +226,15 @@ export const createApiClient = (baseUrl: string) => {
     if (!stored?.token || !stored.refresh_token) return null
     // Unchanged means nobody rotated it; our token really is the rejected one.
     if (stored.refresh_token === staleRefreshToken) return null
+    // A rotation keeps the client, so a different client_id means this is not
+    // our credential that got refreshed -- it is some other client's session
+    // occupying the shared slot. Adopting that would silently re-point this
+    // tab at a device it never signed into, and if that device's token is
+    // valid the adoption sticks: no logout, no further attempt, and requests
+    // quietly attributed elsewhere. Signing out is the honest answer there.
+    if (tokenState.clientId && stored.client_id && tokenState.clientId !== stored.client_id) {
+      return null
+    }
     tokenState.token = stored.token
     tokenState.refreshToken = stored.refresh_token
     tokenState.onTokenRefresh?.(stored)
@@ -275,6 +301,17 @@ export const createApiClient = (baseUrl: string) => {
   }
 
   const refreshToken = (): Promise<string | null> => {
+    // Check for a rotated session before the cooldown, not after. Adoption is a
+    // local read with no request behind it, so sitting out a backoff we never
+    // needed would keep this tab failing for up to 15 s while a perfectly good
+    // token is already in localStorage -- and the multi-tab race is exactly the
+    // case the rescue exists for.
+    const current = tokenState.refreshToken
+    if (current) {
+      const adopted = adoptRotatedSession(current)
+      if (adopted) return Promise.resolve(adopted)
+    }
+
     if (Date.now() < refreshBlockedUntil) return Promise.resolve(null)
     if (!refreshInFlight) {
       refreshInFlight = runRefresh().finally(() => {

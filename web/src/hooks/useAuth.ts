@@ -52,15 +52,20 @@ export function useAuth(defaultApiUrl: string) {
   // Sync token separately so token changes don't recreate the client.
   useEffect(() => {
     if (session?.token && session.refresh_token) {
-      api.setToken(session.token, session.refresh_token, (nextSession) => {
-        const prev = sessionRef.current
-        persistRef.current({
-          ...prev,
-          ...nextSession,
-          client_id: prev?.client_id ?? '',
-          device_name: prev?.device_name ?? '',
-        })
-      })
+      api.setToken(
+        session.token,
+        session.refresh_token,
+        (nextSession) => {
+          const prev = sessionRef.current
+          persistRef.current({
+            ...prev,
+            ...nextSession,
+            client_id: prev?.client_id ?? '',
+            device_name: prev?.device_name ?? '',
+          })
+        },
+        session.client_id,
+      )
     } else {
       api.clearToken()
     }
