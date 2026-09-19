@@ -36,9 +36,34 @@ func (sm *SessionManager) loadSessionFromDisk(key string) (*Session, bool) {
 	}
 
 	// Check if we have metadata for this session
-	_, ok := sm.sessionMeta[key]
-	if !ok {
-		return nil, false
+	if _, ok := sm.sessionMeta[key]; !ok {
+		// The metadata index is bootstrapped once per manager (loadOnce →
+		// loadSessionMetadataFromSQLite). When multiple SessionManagers share
+		// one SQLite store — each agent has its own — a manager whose index
+		// was populated before another manager created a session will never
+		// see that session's key in its local map. Fall back to the store so
+		// cross-manager reads of sessions created later do not silently
+		// return zero/empty (real prod bug: subagent child sessions written
+		// by the spawner agent's manager and read through the executing
+		// agent's manager).
+		if sm.store == nil {
+			return nil, false
+		}
+		meta, err := sm.store.Sessions().GetSessionMeta(key)
+		if err != nil || meta == nil {
+			return nil, false
+		}
+		// Register the metadata locally so subsequent accesses skip the
+		// store round-trip.
+		sm.sessionMeta[key] = &sessionMetadata{
+			Key:            meta.Key,
+			Name:           meta.Name,
+			Mode:           meta.Mode,
+			Folder:         meta.Folder,
+			SubagentStatus: meta.SubagentStatus,
+			Created:        meta.CreatedAt,
+			Updated:        meta.UpdatedAt,
+		}
 	}
 
 	// Load from SQLite if available
