@@ -267,12 +267,25 @@ function buildMatrix() {
   // ── §2.4 mode identity, roles reales de uso ──
   // chip: text-mode-X sobre bg-mode-X/10 en L1 (header/sidebar)
   // selectedItem: text-mode-X sobre bg-mode-X/14 en L1 (lista de sesiones)
-  // tabActive/plain text: text-mode-X sobre L1 plano
+  // tabActive: text-mode-X + tinte/10 sobre L2 (track bg-background-tertiary)
   // exceptions: la regla §2.4 (group-claro) extendida por F1 — cuando el texto de
   // color no alcanza 4.5 sobre su propio tinte, el claro usa text-primary y el color
   // queda solo en dot/borde. Se verifica text-primary sobre ese fondo en su lugar.
   rows.push({ fg: 'mode-chat', bgs: ['L1', 'chat-tint10-L1'], min: 4.5 })
   rows.push({ fg: 'mode-agent', bgs: ['L1', 'agent-tint10-L1', 'agent-tint14-L1'], min: 4.5 })
+  // tabActive on L2: tint/10 over track layer; §2.4 exception — mode color fails AA on
+  // its own tint in light (chat 4.20, agent 4.33, group 3.95) and agent in dark (4.39),
+  // so text-primary unificado (10.10–12.95 all pass). Border-underline carries color.
+  rows.push({
+    fg: 'text-primary',
+    bgs: ['chat-tint10-L2', 'agent-tint10-L2', 'group-tint10-L2'],
+    min: 4.5, // §2.4: text-primary unificado sobre tinte/10 en L2
+  })
+  // Gate for the actual identity-color paint (MAJOR-1): chat/group pass in dark but
+  // fail in light → only:['dark']. agent fails BOTH themes (4.39 D / 4.33 L) so no
+  // passing row can be added; that failure is the reason agent has no dark: variant.
+  rows.push({ fg: 'mode-chat', bgs: ['chat-tint10-L2'], min: 4.5, only: ['dark'] })
+  rows.push({ fg: 'mode-group', bgs: ['group-tint10-L2'], min: 4.5, only: ['dark'] })
   // group: chip/selectedItem usan texto de color solo en oscuro; claro usa text-primary
   // N1 fix: L1 plano se verifica en AMBOS temas (claro 5.178 ✅). Antes estaba empaquetado
   // con los tintes bajo only:['dark'] y la celda L1 del claro nunca se medía.

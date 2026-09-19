@@ -438,7 +438,7 @@ export function PlusCircleIcon({
       <circle cx="12" cy="12" r="10" className="fill-brand-rosa" />
       <path
         d="M12 7v10M7 12h10"
-        stroke="var(--color-text-on-accent)"
+        stroke="rgb(var(--color-text-on-accent))"
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
