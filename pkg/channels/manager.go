@@ -327,22 +327,33 @@ func (m *Manager) ReloadConfig(cfg *config.Config) error {
 			}
 		}
 	}
-	if ctx != nil && len(m.channels) > 0 {
+	// Snapshot before releasing the lock. The restart loop below runs
+	// unlocked, and ranging over m.channels (or reading m.dispatchQueues)
+	// there races with any concurrent reader or a second reload. This used to
+	// be masked by a `newChannels` copy that was built and then never used.
+	reloaded := make(map[string]Channel, len(m.channels))
+	queues := make(map[string]chan bus.OutboundMessage, len(m.channels))
+	for name, channel := range m.channels {
+		reloaded[name] = channel
+		if q, ok := m.dispatchQueues[name]; ok {
+			queues[name] = q
+		}
+	}
+	if ctx != nil && len(reloaded) > 0 {
 		dispatchCtx, cancel := context.WithCancel(ctx)
 		m.dispatchTask = &asyncTask{cancel: cancel}
 		m.mu.Unlock()
 		go m.dispatchOutbound(dispatchCtx)
-		for name, channel := range m.channels {
+		for name, channel := range reloaded {
 			if err := channel.Start(ctx); err != nil {
 				logger.ErrorCF("channels", "Failed to restart channel during reload", map[string]interface{}{
 					"error": err.Error(),
 				})
 			}
-			queue := m.dispatchQueues[name]
-			go m.startChannelDispatcher(dispatchCtx, name, channel, queue)
+			go m.startChannelDispatcher(dispatchCtx, name, channel, queues[name])
 		}
 		logger.InfoCF("channels", "Channels reloaded", map[string]interface{}{
-			"count": len(m.channels),
+			"count": len(reloaded),
 		})
 		return nil
 	}
