@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
@@ -6,6 +6,11 @@ import { useAuthContext } from '../../contexts/AuthContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
 import { useSubagents } from '../../hooks/useSubagents'
 import { getModeTheme } from '../../lib/modeTheme'
+import {
+  resolveHeaderAgentName,
+  resolveHeaderTitle,
+  selectSubagentForSession,
+} from '../../lib/subagentHeader'
 import { formatSessionTitle } from '../../lib/utils'
 import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
 import { ContextIndicator } from '../atoms/ContextIndicator'
@@ -16,8 +21,16 @@ import { SubagentsSidebar } from './SubagentsSidebar'
 export const ChatHeader = memo(function ChatHeader() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { currentAgent, wsStatus, currentSessionKey, onOpenMobileSidebar, chatMode, isProcessing } =
-    useAppLogicContext()
+  const {
+    currentAgent,
+    wsStatus,
+    currentSessionKey,
+    parentSessionKey,
+    agents,
+    onOpenMobileSidebar,
+    chatMode,
+    isProcessing,
+  } = useAppLogicContext()
   const { apiUrl } = useAuthContext()
   const { currentSession, parentSession } = useChatPageContext()
   const [subagentsSidebarOpen, setSubagentsSidebarOpen] = useState(false)
@@ -25,6 +38,18 @@ export const ChatHeader = memo(function ChatHeader() {
   // Poll while the parent turn is live so a spawn that lands mid-turn shows
   // up even before the first refresh has seen a running task.
   const { subagents, loading, refresh } = useSubagents(currentSessionKey, 5000, isProcessing)
+
+  // When viewing a subagent chat, fetch the parent's subagent list so we can
+  // resolve the subagent's label and agent_id. This is a separate instance
+  // that does NOT affect the subagents indicator (which uses the above call).
+  const { subagents: parentSubagents } = useSubagents(parentSessionKey, 0, false)
+
+  // Resolve the subagent entry that matches the current session.
+  const matchedSubagent = useMemo(
+    () => selectSubagentForSession(parentSubagents, currentSessionKey),
+    [parentSubagents, currentSessionKey],
+  )
+
   const modeTheme = getModeTheme(chatMode)
   const ModeIcon = modeTheme.Icon
 
@@ -58,9 +83,17 @@ export const ChatHeader = memo(function ChatHeader() {
     [currentSessionKey, navigate],
   )
 
-  const currentTitle = currentSession
+  const baseTitle = currentSession
     ? formatSessionTitle(currentSession.key, currentSession.name)
     : t('chat.session')
+
+  const currentTitle = resolveHeaderTitle(matchedSubagent, baseTitle)
+
+  const headerAgentName = resolveHeaderAgentName(
+    matchedSubagent,
+    agents,
+    currentAgent?.name ?? t('chat.default'),
+  )
 
   const parentTitle = parentSession ? formatSessionTitle(parentSession.key, parentSession.name) : ''
 
@@ -89,9 +122,7 @@ export const ChatHeader = memo(function ChatHeader() {
             )}
             <h2 className="truncate text-sm font-medium text-text-primary">{currentTitle}</h2>
             <div className="flex items-center gap-2">
-              <p className="truncate text-xs text-text-tertiary">
-                {currentAgent?.name ?? t('chat.default')}
-              </p>
+              <p className="truncate text-xs text-text-tertiary">{headerAgentName}</p>
               <span
                 className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium ${modeTheme.chip}`}
               >
