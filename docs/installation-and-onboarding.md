@@ -67,7 +67,8 @@ Typical files and directories:
 ~/.lele/
 ├── config.json
 ├── logs/
-├── native_clients.json
+├── lele.db            # SQLite store (paired clients + pending PINs when available)
+├── native_clients.json # JSON store (used only when SQLite is unavailable)
 ├── tmp/
 └── workspace/
 ```
