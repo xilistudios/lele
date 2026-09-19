@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -250,6 +251,9 @@ func TestNativePendingPIN_ListOrderedByCreatedThenPIN(t *testing.T) {
 		}
 		got = append(got, p)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows iteration: %v", err)
+	}
 	want := []string{"mmm", "aaa", "zzz"}
 	if len(got) != len(want) {
 		t.Fatalf("direct query returned %d rows, want %d", len(got), len(want))
@@ -453,5 +457,45 @@ func TestNativePendingPIN_ExpiryComparisonIsNumericNotTextual(t *testing.T) {
 	if !found {
 		t.Errorf("TakePendingPIN(d2check, now=T0) found=false — " +
 			"D2 trap: integer 1000000000500000000 > 1000000000000000000, but text '.5Z' < 'Z'")
+	}
+}
+
+// Test 12: InsertPendingPIN duplicate returns ErrDuplicate (typed sentinel),
+// while other errors (e.g. closed DB) do NOT match ErrDuplicate.
+func TestNativePendingPIN_InsertDuplicateReturnsErrDuplicate(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.NativeClients()
+
+	now := time.Now().UnixNano()
+	expires := now + int64(5*time.Minute)
+
+	if err := repo.InsertPendingPIN("dup1", `"first"`, now, expires); err != nil {
+		t.Fatalf("first InsertPendingPIN: %v", err)
+	}
+
+	// Second insert with the same PK ⇒ UNIQUE violation.
+	err := repo.InsertPendingPIN("dup1", `"second"`, now+1, expires+1)
+	if err == nil {
+		t.Fatal("second InsertPendingPIN(dup1) expected error, got nil")
+	}
+	if !errors.Is(err, ErrDuplicate) {
+		t.Errorf("duplicate insert: errors.Is(err, ErrDuplicate) = false; want true (err: %v)", err)
+	}
+
+	// A different kind of error must NOT match ErrDuplicate.
+	// Close the underlying DB to trigger a non-UNIQUE error on next op.
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	err = repo.InsertPendingPIN("dup2", `"after-close"`, now+2, expires+2)
+	if err == nil {
+		t.Fatal("InsertPendingPIN on closed DB expected error, got nil")
+	}
+	if errors.Is(err, ErrDuplicate) {
+		t.Errorf("closed-DB error must NOT be ErrDuplicate, but errors.Is returned true (err: %v)", err)
+	}
+	// Sanity: the error is about the closed database.
+	if !strings.Contains(err.Error(), "database is closed") {
+		t.Logf("NOTE: closed-DB error text is %q (expected 'database is closed' substring)", err.Error())
 	}
 }

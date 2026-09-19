@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,6 +94,11 @@ func (am *AuthManager) SetStore(repo *store.NativeClientRepo) {
 func generateSecret() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
+		// crypto/rand.Read failing is effectively impossible on
+		// supported platforms, but a time-derived fallback is far
+		// weaker than a random secret: say so loudly rather than
+		// silently downgrading every client credential.
+		log.Printf("[auth] CRITICAL: crypto/rand failed (%v); using a time-derived client secret fallback", err)
 		return fmt.Sprintf("fallback-secret-%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
@@ -384,8 +391,9 @@ func (am *AuthManager) GeneratePIN(deviceName string) (*PendingPIN, error) {
 				am.store.PendingPINs[pin] = &pending
 				return &pending, nil
 			}
-			// Distinguish UNIQUE constraint violation from other errors.
-			if !strings.Contains(err.Error(), "UNIQUE") {
+			// Distinguish UNIQUE constraint violation (collision ⇒ retry)
+			// from other DB errors (fatal ⇒ return immediately).
+			if !errors.Is(err, store.ErrDuplicate) {
 				logger.ErrorCF("native", "GeneratePIN: InsertPendingPIN failed", map[string]interface{}{
 					"error": err.Error(),
 				})

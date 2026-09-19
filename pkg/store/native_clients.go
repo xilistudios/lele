@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -99,7 +100,15 @@ func (r *NativeClientRepo) InsertPendingPIN(pin, pendingJSON string, createdAt, 
 		pin, pendingJSON, createdAt, expiresAt,
 	)
 	if err != nil {
-		return fmt.Errorf("store: insert pending PIN: %w", err)
+		// Detect UNIQUE constraint violation by error text. We cannot
+		// use errors.As with modernc.org/sqlite types here because
+		// driver_sqlite.go is excluded on linux/mips64 (see
+		// driver_stub.go); importing the driver type in a universally
+		// compiled file would break the mips64 cross-compile CI job.
+		if strings.Contains(err.Error(), "UNIQUE") {
+			return fmt.Errorf("store: insert pending PIN %q: %w", pin, ErrDuplicate)
+		}
+		return fmt.Errorf("store: insert pending PIN %q: %w", pin, err)
 	}
 	return nil
 }

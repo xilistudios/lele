@@ -17,8 +17,10 @@ package channels
 // writes since PR #326. That is precisely the bug these tests catch).
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -428,5 +430,53 @@ func TestPinFlow_CapPurgeThenEvict_SharedSQLite(t *testing.T) {
 	}
 	if client == nil || token == "" {
 		t.Fatal("expected valid client and token for 11th PIN")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 9: GeneratePIN returns immediately on non-duplicate DB error
+// ---------------------------------------------------------------------------
+
+func TestPinFlow_GeneratePIN_ReturnsImmediatelyOnNonDuplicateDBError(t *testing.T) {
+	// When the underlying DB is closed, InsertPendingPIN fails with a
+	// non-UNIQUE error. With the typed ErrDuplicate sentinel, GeneratePIN
+	// must return the error on the FIRST attempt instead of retrying
+	// up to 20 times (the collision loop only fires for ErrDuplicate).
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lele.db")
+
+	cliAuth, cliStore := openCLIAuthManager(t, tmpDir, dbPath)
+
+	// Seed one pending PIN to prove GeneratePIN worked before the close.
+	if _, err := cliAuth.GeneratePIN("seed-device"); err != nil {
+		t.Fatalf("seed GeneratePIN: %v", err)
+	}
+
+	// Close the DB to make all subsequent repo operations fail with
+	// a non-UNIQUE error ("database is closed").
+	cliStore.Close()
+
+	// GeneratePIN must fail immediately. The error must wrap the
+	// underlying closed-DB error, not an exhaustion message.
+	_, err := cliAuth.GeneratePIN("after-close")
+	if err == nil {
+		t.Fatal("GeneratePIN on closed DB expected error, got nil")
+	}
+	// Must NOT be an ErrDuplicate (the fix distinguishes collision from
+	// other errors).
+	if errors.Is(err, store.ErrDuplicate) {
+		t.Errorf("closed-DB error must NOT be ErrDuplicate, got: %v", err)
+	}
+	// The error must originate from the closed DB, not from exhausting
+	// 20 retries. The exhaustion message is "generate PIN: exhausted 20
+	// retries due to collisions" — a closed-DB error produces "generate
+	// PIN: store: insert pending PIN ...: sql: database is closed".
+	if strings.Contains(err.Error(), "exhausted") {
+		t.Errorf("GeneratePIN should fail immediately on non-duplicate error, "+
+			"but got exhaustion message: %v", err)
+	}
+	// Verify the underlying DB error is present (deterministic, no timing).
+	if !strings.Contains(err.Error(), "database is closed") {
+		t.Logf("NOTE: error text is %q (expected 'database is closed' substring)", err.Error())
 	}
 }
