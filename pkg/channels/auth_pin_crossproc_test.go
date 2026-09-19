@@ -485,19 +485,68 @@ func TestPinFlow_GeneratePIN_ReturnsImmediatelyOnNonDuplicateDBError(t *testing.
 // Test 10: PairWithPIN fails gracefully when persistence fails (M2 fix)
 // ---------------------------------------------------------------------------
 
+// TestPairWithPIN_ClientWriteFails_NoTokenNoPhantomClient is the M2 guard.
+//
+// It isolates the narrow window where TakePendingPIN has already consumed the
+// PIN but persisting the new client fails. A BEFORE INSERT trigger on
+// native_clients makes every read succeed and only the client write fail, so
+// the failure lands exactly on saveStoreUnlocked. Closing the DB instead (as
+// the other test does) fails GetPendingPIN first and never reaches the branch.
+func TestPairWithPIN_ClientWriteFails_NoTokenNoPhantomClient(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lele.db")
+	auth, s := openCLIAuthManager(t, tmpDir, dbPath)
+
+	pending, err := auth.GeneratePIN("ghost-phone")
+	if err != nil {
+		t.Fatalf("GeneratePIN: %v", err)
+	}
+
+	if _, err := s.DB().Exec(`CREATE TRIGGER fail_client_insert
+		BEFORE INSERT ON native_clients
+		BEGIN SELECT RAISE(ABORT, 'injected: client write blocked'); END`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	client, token, refresh, err := auth.PairWithPIN(pending.PIN, "ghost-phone")
+	if err == nil {
+		t.Fatal("PairWithPIN must fail when the client cannot be persisted")
+	}
+	if token != "" || refresh != "" {
+		t.Errorf("must not hand back credentials on persistence failure; got token=%q refresh=%q", token, refresh)
+	}
+	if client != nil {
+		t.Errorf("must not return a client on persistence failure; got %+v", client)
+	}
+
+	// A credential left in the in-memory map would authenticate requests
+	// until the next restart and then vanish: fail closed instead.
+	if n := len(auth.store.Clients); n != 0 {
+		t.Errorf("in-memory client map must be rolled back, still holds %d client(s)", n)
+	}
+
+	// The PIN stays consumed on purpose: requiring a fresh PIN beats
+	// issuing a credential that cannot survive a restart. Single-transaction
+	// atomicity for PIN+client is tracked in #327.
+	if _, _, found, err := auth.repo.GetPendingPIN(pending.PIN); err != nil {
+		t.Fatalf("GetPendingPIN: %v", err)
+	} else if found {
+		t.Error("PIN is expected to remain consumed after a failed pairing (fail-closed tradeoff)")
+	}
+}
+
 func TestPairWithPIN_PersistenceFailureReturnsErrorNoToken(t *testing.T) {
 	// Scenario: server generated a PIN (repo was live), then the DB becomes
 	// unavailable before PairWithPIN completes. TakePendingPIN would fail
 	// first (closed DB → "invalid PIN"), and the M2 fix ensures no token is
 	// returned even if persistence were to fail independently.
 	//
-	// This is a regression guard: before the M2 fix, a failed
-	// saveStoreUnlocked could still return a valid token, leaving a
-	// non-persisted credential that would vanish on gateway restart.
-	//
-	// The real-world trigger is rare (DB closed between TakePendingPIN and
-	// saveStoreUnlocked), but the contract "persistence failure → no token"
-	// must hold unconditionally.
+	// NOTE: this covers the coarse contract "store unavailable -> PairWithPIN
+	// fails without handing back credentials". It does NOT reach the M2
+	// branch: with the DB closed, GetPendingPIN fails first and TakePendingPIN
+	// is never reached. The branch where the PIN is consumed but the client
+	// write fails is covered by
+	// TestPairWithPIN_ClientWriteFails_NoTokenNoPhantomClient.
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "lele.db")
 
