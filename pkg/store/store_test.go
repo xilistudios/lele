@@ -1,11 +1,24 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"testing"
 )
+
+// openRawDB opens a raw *sql.DB (without running migrations) at the
+// given path. Useful for tests that need to manipulate the schema
+// directly (e.g., simulating an older schema version).
+func openRawDB(path string) (*sql.DB, error) {
+	dsn := path +
+		"?_pragma=busy_timeout(5000)" +
+		"&_pragma=journal_mode(WAL)" +
+		"&_pragma=synchronous(NORMAL)" +
+		"&_pragma=foreign_keys(1)"
+	return sql.Open("sqlite", dsn)
+}
 
 // openTestStore opens a fresh Store in a temporary directory and
 // registers cleanup to close it.
@@ -36,6 +49,7 @@ func TestOpen_CreatesSchema(t *testing.T) {
 		"groups_state",
 		"auth_credentials",
 		"native_clients",
+		"native_pending_pins",
 		"kv",
 		"schema_meta",
 	}
@@ -159,5 +173,83 @@ func TestOpen_PragmasApplied(t *testing.T) {
 	}
 	if foreignKeys != 1 {
 		t.Errorf("foreign_keys = %d, want 1", foreignKeys)
+	}
+}
+
+func TestMigrations_UpgradeV6ToV7_PreservesClients(t *testing.T) {
+	// Open a fresh store (v7), insert a native client, then simulate a
+	// v6 database by dropping the native_pending_pins table and resetting
+	// the schema version. Re-open should re-run migration 7 without
+	// losing the existing client row.
+	path := filepath.Join(t.TempDir(), "test.db")
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open(%q) failed: %v", path, err)
+	}
+	if err := s.NativeClients().SetClient("client-1", `{"name":"test"}`); err != nil {
+		t.Fatalf("SetClient failed: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+
+	// Simulate v6: drop native_pending_pins and downgrade schema version.
+	db, err := openRawDB(path)
+	if err != nil {
+		t.Fatalf("openRawDB(%q) failed: %v", path, err)
+	}
+	if _, err := db.Exec(`DROP TABLE IF EXISTS native_pending_pins`); err != nil {
+		db.Close()
+		t.Fatalf("DROP native_pending_pins: %v", err)
+	}
+	if _, err := db.Exec(
+		`UPDATE schema_meta SET value = '6' WHERE key = 'schema_version'`,
+	); err != nil {
+		db.Close()
+		t.Fatalf("downgrade schema_version: %v", err)
+	}
+	db.Close()
+
+	// Re-open: migrate 6→7 runs.
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open(%q) after downgrade failed: %v", path, err)
+	}
+	defer func() {
+		if err := s2.Close(); err != nil {
+			t.Errorf("Close() failed: %v", err)
+		}
+	}()
+
+	// Verify schema version.
+	var version string
+	if err := s2.DB().QueryRow(
+		`SELECT value FROM schema_meta WHERE key = 'schema_version'`,
+	).Scan(&version); err != nil {
+		t.Fatalf("read schema_version: %v", err)
+	}
+	if version != "7" {
+		t.Errorf("schema_version = %q, want %q", version, "7")
+	}
+
+	// Verify native_pending_pins table exists.
+	var tableName string
+	if err := s2.DB().QueryRow(
+		`SELECT name FROM sqlite_master WHERE type='table' AND name='native_pending_pins'`,
+	).Scan(&tableName); err != nil {
+		t.Fatalf("native_pending_pins table missing: %v", err)
+	}
+
+	// Verify existing client survived.
+	client, found, err := s2.NativeClients().GetClient("client-1")
+	if err != nil {
+		t.Fatalf("GetClient(client-1) error: %v", err)
+	}
+	if !found {
+		t.Fatalf("GetClient(client-1) not found after v6→v7 upgrade")
+	}
+	if client != `{"name":"test"}` {
+		t.Errorf("GetClient(client-1) = %q, want %q", client, `{"name":"test"}`)
 	}
 }
