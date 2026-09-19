@@ -8,7 +8,7 @@ import (
 )
 
 // SchemaVersion is the latest schema version known to this build.
-const SchemaVersion = 6
+const SchemaVersion = 7
 
 // migrations lists schema migrations in version order. Each entry is
 // applied atomically inside a single transaction by migrate.
@@ -172,6 +172,30 @@ CREATE TABLE processed_messages (
 -- predates this column): the reader falls back to "completed" for those.
 ALTER TABLE sessions ADD COLUMN subagent_status TEXT NOT NULL DEFAULT '';
 CREATE INDEX idx_sessions_subagent_status ON sessions(subagent_status) WHERE subagent_status != '';
+`,
+	},
+	{
+		Version: 7,
+		DDL: `
+-- Pending native pairing PINs move from native_clients.json into the shared
+-- SQLite store. The JSON channel broke when the CLI started opening the DB
+-- (a0e256f): saveStoreUnlocked's SQLite branch persists Clients only and
+-- returns before the JSON write, so 'lele client pin' stopped persisting the
+-- PIN anywhere and the server answered 400 "invalid PIN".
+--
+-- created_at/expires_at are promoted to INTEGER unix-nanosecond columns so the
+-- atomic redeem predicate and the FIFO eviction order are computed in SQL.
+-- RFC3339 text is NOT lexicographically orderable when the fractional-digit
+-- count varies ('.' 0x2E < 'Z' 0x5A), which would silently corrupt both.
+-- The 'pending' column keeps the opaque JSON blob the domain layer owns.
+CREATE TABLE native_pending_pins (
+    pin        TEXT PRIMARY KEY,
+    pending    TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX idx_pending_pins_expires ON native_pending_pins(expires_at);
+CREATE INDEX idx_pending_pins_created ON native_pending_pins(created_at);
 `,
 	},
 }

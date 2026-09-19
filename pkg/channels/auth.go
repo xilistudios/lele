@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +25,7 @@ type AuthManager struct {
 	storePath string
 	mu        sync.RWMutex
 	secret    string
-	repo      *store.NativeClientRepo // SQLite store (nil = use JSON file)
+	repo      *store.NativeClientRepo // SQLite store (nil = use JSON file). When set, both clients and pending PINs live in the DB.
 }
 
 // DesktopClientID is the fixed client ID for the built-in trusted client used
@@ -52,7 +54,8 @@ func NewAuthManager(cfg *config.NativeConfig, leleDir string) (*AuthManager, err
 }
 
 // SetStore configures SQLite persistence for native clients. When set,
-// clients are read/written through the repository instead of the JSON file.
+// both clients and pending pairing PINs are read/written through the
+// repository instead of the JSON file.
 func (am *AuthManager) SetStore(repo *store.NativeClientRepo) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
@@ -91,6 +94,11 @@ func (am *AuthManager) SetStore(repo *store.NativeClientRepo) {
 func generateSecret() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
+		// crypto/rand.Read failing is effectively impossible on
+		// supported platforms, but a time-derived fallback is far
+		// weaker than a random secret: say so loudly rather than
+		// silently downgrading every client credential.
+		log.Printf("[auth] CRITICAL: crypto/rand failed (%v); using a time-derived client secret fallback", err)
 		return fmt.Sprintf("fallback-secret-%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
@@ -149,25 +157,23 @@ func (am *AuthManager) loadStore() error {
 			store.Clients[id] = &info
 		}
 
-		// The CLI (lele client pin) writes pending PINs to the JSON file
-		// because it doesn't have access to the server's SQLite store.
-		// Read them so pairing works across the CLI→server boundary.
-		if jsonStore, err := am.loadJSONStoreFromFile(); err == nil && jsonStore != nil {
-			for pin, pending := range jsonStore.PendingPINs {
-				if _, exists := store.PendingPINs[pin]; !exists {
-					store.PendingPINs[pin] = pending
+		// Load pending PINs from SQLite (the authoritative source).
+		// JSON merge is removed (D6): PINs from native_clients.json are
+		// abandoned — they may already have been redeemed (F-REPLAY) and
+		// the CLI now writes PINs to the shared DB via SetStore.
+		pinRows, err := am.repo.ListPendingPINs(time.Now().UnixNano())
+		if err != nil {
+			logger.WarnCF("native", "loadStore: could not list pending PINs from SQLite", map[string]interface{}{
+				"error": err.Error(),
+			})
+		} else {
+			for pin, blob := range pinRows {
+				var pending PendingPIN
+				if err := json.Unmarshal([]byte(blob), &pending); err != nil {
+					logger.WarnCF("native", fmt.Sprintf("loadStore: unmarshal pending PIN %s: %v", pin, err), nil)
+					continue
 				}
-			}
-		}
-
-		// Preserve any pending PINs already in memory (e.g. generated
-		// by the running server via GeneratePIN → saveStoreUnlocked
-		// which does not persist PendingPINs to SQLite).
-		if am.store != nil {
-			for pin, pending := range am.store.PendingPINs {
-				if _, exists := store.PendingPINs[pin]; !exists {
-					store.PendingPINs[pin] = pending
-				}
+				store.PendingPINs[pin] = &pending
 			}
 		}
 
@@ -202,30 +208,6 @@ func (am *AuthManager) loadStore() error {
 	}
 	am.cleanupExpired()
 	return nil
-}
-
-// loadJSONStoreFromFile reads the legacy JSON file from disk. Returns
-// (nil, nil) when the file does not exist. Used by loadStore() to pick
-// up pending PINs written by the CLI when the server uses SQLite.
-func (am *AuthManager) loadJSONStoreFromFile() (*ClientStore, error) {
-	data, err := os.ReadFile(am.storePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var store ClientStore
-	if err := json.Unmarshal(data, &store); err != nil {
-		return nil, err
-	}
-	if store.PendingPINs == nil {
-		store.PendingPINs = make(map[string]*PendingPIN)
-	}
-	if store.Clients == nil {
-		store.Clients = make(map[string]*ClientInfo)
-	}
-	return &store, nil
 }
 
 func (am *AuthManager) saveStore() error {
@@ -325,10 +307,112 @@ const maxPendingPINs = 10
 // stored with the pending PIN so PairWithPIN can verify the redeeming device
 // matches. When empty, PairWithPIN will require the caller to supply one at
 // redemption time.
+//
+// In SQLite mode the single-use guarantee comes from DELETE … RETURNING
+// in TakePendingPIN (PairWithPIN), not from the sync.RWMutex which only
+// protects intra-process.
 func (am *AuthManager) GeneratePIN(deviceName string) (*PendingPIN, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
+	expiryMinutes := am.cfg.PinExpiryMinutes
+	if expiryMinutes <= 0 {
+		expiryMinutes = 5
+	}
+
+	if am.repo != nil {
+		// SQLite path — purge-then-evict against the DB.
+		now := time.Now()
+		nowNano := now.UnixNano()
+
+		// Step 1: purge expired PINs.
+		if deleted, err := am.repo.DeleteExpiredPendingPINs(nowNano); err != nil {
+			logger.WarnCF("native", "GeneratePIN: DeleteExpiredPendingPINs failed", map[string]interface{}{
+				"error": err.Error(),
+			})
+		} else if deleted > 0 {
+			logger.DebugCF("native", fmt.Sprintf("GeneratePIN: purged %d expired pending PINs", deleted), nil)
+		}
+
+		// Step 2: cap check + evict oldest if needed.
+		count, err := am.repo.CountPendingPINs(nowNano)
+		if err != nil {
+			logger.WarnCF("native", "GeneratePIN: CountPendingPINs failed", map[string]interface{}{
+				"error": err.Error(),
+			})
+		}
+		if count >= maxPendingPINs {
+			evictedPin, err := am.repo.EvictOldestPendingPIN(nowNano)
+			if err != nil {
+				logger.WarnCF("native", "GeneratePIN: EvictOldestPendingPIN failed", map[string]interface{}{
+					"error": err.Error(),
+				})
+			} else if evictedPin != "" {
+				// Log with same fields as the JSON path for observability.
+				// We don't have the evicted PendingPIN struct here (the
+				// DB only stores the blob), so we log the pin and remove
+				// it from the in-memory map if present.
+				var evictedDevice string
+				var ageSeconds string
+				if p, ok := am.store.PendingPINs[evictedPin]; ok {
+					evictedDevice = p.DeviceName
+					ageSeconds = time.Since(p.Created).Round(time.Second).String()
+					delete(am.store.PendingPINs, evictedPin)
+				}
+				logger.WarnCF("native", "Pending PIN cap reached, evicted oldest pending PIN", map[string]interface{}{
+					"evicted_device": evictedDevice,
+					"age_seconds":    ageSeconds,
+				})
+			}
+		}
+
+		// Step 3: generate PIN with collision retry against the DB.
+		// Limit retries to avoid a potential infinite loop in an auth
+		// path (R11). With 10⁶ possible PINs and ≤10 rows the collision
+		// probability is negligible, but the limit is a safety net.
+		pin := generatePIN()
+		createdAt := now.UnixNano()
+		expiresAt := now.Add(time.Duration(expiryMinutes) * time.Minute).UnixNano()
+		pendingJSON, _ := json.Marshal(&PendingPIN{
+			PIN:        pin,
+			DeviceName: deviceName,
+			Created:    now,
+			Expires:    now.Add(time.Duration(expiryMinutes) * time.Minute),
+		})
+
+		const maxRetries = 20
+		for i := 0; i < maxRetries; i++ {
+			err := am.repo.InsertPendingPIN(pin, string(pendingJSON), createdAt, expiresAt)
+			if err == nil {
+				// Also keep in-memory map in sync for callers like
+				// GetPendingPINs that read the map before next loadStore.
+				var pending PendingPIN
+				json.Unmarshal(pendingJSON, &pending)
+				am.store.PendingPINs[pin] = &pending
+				return &pending, nil
+			}
+			// Distinguish UNIQUE constraint violation (collision ⇒ retry)
+			// from other DB errors (fatal ⇒ return immediately).
+			if !errors.Is(err, store.ErrDuplicate) {
+				logger.ErrorCF("native", "GeneratePIN: InsertPendingPIN failed", map[string]interface{}{
+					"error": err.Error(),
+				})
+				return nil, fmt.Errorf("generate PIN: %w", err)
+			}
+			// Collision — regenerate.
+			pin = generatePIN()
+			pendingJSON, _ = json.Marshal(&PendingPIN{
+				PIN:        pin,
+				DeviceName: deviceName,
+				Created:    now,
+				Expires:    now.Add(time.Duration(expiryMinutes) * time.Minute),
+			})
+		}
+
+		return nil, fmt.Errorf("generate PIN: exhausted %d retries due to collisions", maxRetries)
+	}
+
+	// JSON file path — unchanged.
 	am.cleanupExpired()
 
 	// Purge-then-evict: cleanupExpired already removed expired PINs, but
@@ -358,16 +442,12 @@ func (am *AuthManager) GeneratePIN(deviceName string) (*PendingPIN, error) {
 		pin = generatePIN()
 	}
 
-	expiryMinutes := am.cfg.PinExpiryMinutes
-	if expiryMinutes <= 0 {
-		expiryMinutes = 5
-	}
-
+	now := time.Now()
 	pending := &PendingPIN{
 		PIN:        pin,
 		DeviceName: deviceName,
-		Created:    time.Now(),
-		Expires:    time.Now().Add(time.Duration(expiryMinutes) * time.Minute),
+		Created:    now,
+		Expires:    now.Add(time.Duration(expiryMinutes) * time.Minute),
 	}
 
 	am.store.PendingPINs[pin] = pending
@@ -385,28 +465,153 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
+	pin = strings.TrimSpace(pin)
+
 	if am.repo != nil {
-		// When using SQLite, the CLI writes pending PINs to the JSON file
-		// (native_clients.json) because it doesn't have access to the
-		// server's SQLite store. Read the JSON file and merge any new
-		// PINs into the current store without recreating it.
-		if jsonStore, err := am.loadJSONStoreFromFile(); err == nil && jsonStore != nil {
-			for p, pending := range jsonStore.PendingPINs {
-				if _, exists := am.store.PendingPINs[p]; !exists {
-					am.store.PendingPINs[p] = pending
-				}
-			}
-		}
-	} else {
-		// JSON backend: full reload to pick up concurrent changes.
-		if err := am.loadStore(); err != nil {
-			logger.WarnCF("native", "Could not reload store before pairing", map[string]interface{}{
+		// SQLite path — validate-then-atomic-take (D4).
+		// Single-use guarantee: DELETE … RETURNING in TakePendingPIN
+		// ensures exactly one winner across concurrent processes.
+		// The sync.RWMutex only protects intra-process; the DB
+		// transaction is what makes the redeem atomic.
+
+		// Step 1: fetch the pending PIN.
+		pendingJSON, expiresAt, found, err := am.repo.GetPendingPIN(pin)
+		if err != nil {
+			logger.ErrorCF("native", "PairWithPIN: GetPendingPIN failed", map[string]interface{}{
 				"error": err.Error(),
 			})
+			return nil, "", "", fmt.Errorf("invalid PIN")
 		}
+		if !found {
+			return nil, "", "", fmt.Errorf("invalid PIN")
+		}
+
+		var pending PendingPIN
+		if err := json.Unmarshal([]byte(pendingJSON), &pending); err != nil {
+			logger.WarnCF("native", fmt.Sprintf("PairWithPIN: unmarshal pending PIN: %v", err), nil)
+			am.repo.DeletePendingPIN(pin)
+			return nil, "", "", fmt.Errorf("invalid PIN")
+		}
+
+		// Step 2: expired ⇒ delete + error (same text as the JSON path).
+		// Use the DB column (expiresAt) rather than the deserialized
+		// blob: direct SQL mutations (e.g. test backdoors) must be
+		// authoritative for the TTL policy.
+		if expiresAt <= time.Now().UnixNano() {
+			am.repo.DeletePendingPIN(pin)
+			return nil, "", "", fmt.Errorf("PIN expired")
+		}
+
+		// Step 3: device_name checks — return WITHOUT deleting the
+		// PIN so it remains redeemable (same semantics as JSON path).
+		if pending.DeviceName != "" && deviceName != "" && pending.DeviceName != deviceName {
+			return nil, "", "", fmt.Errorf("device name mismatch")
+		}
+		if pending.DeviceName == "" && strings.TrimSpace(deviceName) == "" {
+			return nil, "", "", fmt.Errorf("device_name is required")
+		}
+
+		// Opportunistic GC: purge expired PIN rows (not related to the
+		// MaxClients count checked below, which is a different table).
+		if deleted, err := am.repo.DeleteExpiredPendingPINs(time.Now().UnixNano()); err != nil {
+			logger.WarnCF("native", "PairWithPIN: DeleteExpiredPendingPINs failed", map[string]interface{}{
+				"error": err.Error(),
+			})
+		} else if deleted > 0 {
+			logger.DebugCF("native", fmt.Sprintf("PairWithPIN: purged %d expired pending PINs", deleted), nil)
+		}
+
+		// Step 4: MaxClients — count from the DB (the in-memory map
+		// is stale across processes, E5).
+		maxClients := am.cfg.MaxClients
+		if maxClients <= 0 {
+			maxClients = 5
+		}
+		clientCount, err := am.repo.CountClients()
+		if err != nil {
+			logger.ErrorCF("native", "PairWithPIN: CountClients failed", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return nil, "", "", fmt.Errorf("maximum clients reached")
+		}
+		if clientCount >= maxClients {
+			return nil, "", "", fmt.Errorf("maximum clients reached")
+		}
+
+		// Step 5: atomic take — DELETE … RETURNING.
+		// If another process redeemed this PIN between our Get and
+		// our Take, found will be false → "invalid PIN".
+		_, taken, err := am.repo.TakePendingPIN(pin, time.Now().UnixNano())
+		if err != nil {
+			logger.ErrorCF("native", "PairWithPIN: TakePendingPIN failed", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return nil, "", "", fmt.Errorf("invalid PIN")
+		}
+		if !taken {
+			return nil, "", "", fmt.Errorf("invalid PIN")
+		}
+
+		// Cosmetic: remove from the in-memory map so
+		// GetPendingPINs doesn't show a stale entry until next
+		// loadStore. The DB is the source of truth (D5).
+		delete(am.store.PendingPINs, pin)
+
+		// Step 6: create client + persist.
+		clientID := generateClientID()
+		token := generateToken()
+		refreshToken := generateToken()
+
+		expiryDays := am.cfg.TokenExpiryDays
+		if expiryDays <= 0 {
+			expiryDays = 30
+		}
+
+		finalDeviceName := deviceName
+		if finalDeviceName == "" {
+			finalDeviceName = pending.DeviceName
+		}
+		if finalDeviceName == "" {
+			finalDeviceName = "Unknown Device"
+		}
+
+		client := &ClientInfo{
+			ClientID:    clientID,
+			TokenHash:   hashToken(token),
+			RefreshHash: hashToken(refreshToken),
+			DeviceName:  finalDeviceName,
+			Created:     time.Now(),
+			Expires:     time.Now().AddDate(0, 0, expiryDays),
+			LastSeen:    time.Now(),
+			SessionKeys: []string{clientID},
+		}
+
+		am.store.Clients[clientID] = client
+
+		if err := am.saveStoreUnlocked(); err != nil {
+			// Fail closed: remove the in-memory client so no phantom
+			// credential survives until the next restart. The PIN is
+			// already consumed (TakePendingPIN succeeded) — that is
+			// intentional: better to require a fresh PIN than to emit
+			// a credential that cannot survive a gateway restart.
+			// Atomicity of PIN consumption + client persistence in a
+			// single transaction is tracked in #327.
+			delete(am.store.Clients, clientID)
+			logger.ErrorCF("native", "Failed to save store after pairing; removing in-memory client", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return nil, "", "", fmt.Errorf("pairing failed: could not persist client")
+		}
+
+		return client, token, refreshToken, nil
 	}
 
-	pin = strings.TrimSpace(pin)
+	// JSON file path — unchanged (full reload to pick up concurrent changes).
+	if err := am.loadStore(); err != nil {
+		logger.WarnCF("native", "Could not reload store before pairing", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
 
 	pending, exists := am.store.PendingPINs[pin]
 	if !exists {
@@ -707,10 +912,38 @@ func (am *AuthManager) ListClients() []*ClientInfo {
 	return clients
 }
 
+// GetPendingPINs returns all non-expired pending PINs. In SQLite mode
+// the authoritative source is the DB; we keep RLock to preserve the
+// concurrency contract of this method (callers expect a consistent
+// snapshot, even though the DB read is itself atomic). DB errors are
+// logged and result in an empty list — the function signature does not
+// return error, and its only consumers (clientPendingCmd and
+// clientStatusCmd in cmd/lele/client.go) simply print the result.
 func (am *AuthManager) GetPendingPINs() []*PendingPIN {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 
+	if am.repo != nil {
+		pinRows, err := am.repo.ListPendingPINs(time.Now().UnixNano())
+		if err != nil {
+			logger.WarnCF("native", "GetPendingPINs: ListPendingPINs failed", map[string]interface{}{
+				"error": err.Error(),
+			})
+			return []*PendingPIN{}
+		}
+		pins := make([]*PendingPIN, 0, len(pinRows))
+		for pin, blob := range pinRows {
+			var pending PendingPIN
+			if err := json.Unmarshal([]byte(blob), &pending); err != nil {
+				logger.WarnCF("native", fmt.Sprintf("GetPendingPINs: unmarshal PIN %s: %v", pin, err), nil)
+				continue
+			}
+			pins = append(pins, &pending)
+		}
+		return pins
+	}
+
+	// JSON path: read from in-memory map.
 	pins := make([]*PendingPIN, 0, len(am.store.PendingPINs))
 	for _, pending := range am.store.PendingPINs {
 		pins = append(pins, pending)

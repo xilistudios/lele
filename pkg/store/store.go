@@ -2,7 +2,6 @@ package store
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 )
 
@@ -35,7 +34,7 @@ type Store struct {
 // a requirement of the storage plan.
 func Open(path string) (*Store, error) {
 	if !sqliteSupported {
-		return nil, errors.New("store: SQLite is not supported on this platform (linux/mips64); use the legacy JSON backends")
+		return nil, fmt.Errorf("%w: SQLite is not supported on this platform (linux/mips64); use the legacy JSON backends", ErrUnsupportedPlatform)
 	}
 
 	dsn := path +
