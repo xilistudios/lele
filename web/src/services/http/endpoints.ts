@@ -127,6 +127,10 @@ export const endpoints = {
   },
   files: {
     upload: '/api/v1/files/upload',
+    // Public staging-only view (restricted to <leleDir>/tmp/{attachments,uploads}).
+    view: '/api/v1/files/view',
+    // Authenticated view — serves any path under leleDir (Bearer required).
+    viewSecure: '/api/v1/files/view-secure',
   },
   fs: {
     list: '/api/v1/fs/list',
