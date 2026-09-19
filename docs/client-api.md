@@ -112,6 +112,52 @@ Content-Type: application/json
 }
 ```
 
+Response (200 OK):
+
+```json
+{
+  "token": "a1b2c3...",
+  "refresh_token": "e7f8a9...",
+  "expires": "2026-05-05T12:00:00Z"
+}
+```
+
+Refresh tokens are **single-use**: a successful call rotates the token, so the
+previous value is invalid from that moment on. Store the returned
+`refresh_token` and use it for the next renewal.
+
+Errors:
+
+| Status | `code` | Meaning | Client should |
+| --- | --- | --- | --- |
+| 400 | `refresh_error` | Token unknown, expired, revoked, or already rotated | End the session and re-authenticate |
+| 400 | `body_invalid` | Malformed request body | Fix the request; the credential is untouched |
+| 429 | `rate_limit_exceeded` | Too many auth requests from this IP | Back off using `Retry-After`; **keep the session** |
+
+Only `refresh_error` proves the credential is dead. A 429 is answered by the
+limiter *before* the handler runs, so the refresh token has not been consumed
+and remains valid — clearing the session on a 429 turns a momentary slowdown
+into a sign-out.
+
+### Rate Limits
+
+Auth endpoints are limited per source IP, each with its own budget:
+
+| Endpoint | Limit | Rationale |
+| --- | --- | --- |
+| `GET /api/v1/auth/pin` | 10 / min | Requires a token; bounds PIN thrashing that would evict another device's pending PIN |
+| `POST /api/v1/auth/pair` | 5 / min | Bruteforceable 6-digit PIN |
+| `POST /api/v1/auth/refresh` | 20 / min | Background renewal; must never be reachable in normal use |
+| Other API endpoints | 120 / min | General traffic |
+
+Renewal deliberately does **not** share the pairing bucket. Pairing retries
+(typo'd PIN, several devices) can legitimately burst, and mixing that with the
+quiet, automatic renewal call lets ordinary use trip a limit whose only
+recovery is signing out.
+
+Every 429 carries a `Retry-After` header with the seconds remaining in the
+window.
+
 ### 4. Check Auth Status
 
 ```http

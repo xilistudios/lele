@@ -1,3 +1,4 @@
+import { loadSession } from '../../lib/storage'
 import type {
   AgentCatalogResponse,
   AgentCommandDeleteResponse,
@@ -77,6 +78,25 @@ import type {
 import { endpoints } from './endpoints'
 import { ApiError, parseApiError } from './errors'
 
+/**
+ * Decide whether a failed /auth/refresh response proves the credential is
+ * actually dead.
+ *
+ * Only an explicit rejection from the auth handler does: the server answers
+ * 400 with code "refresh_error" when the refresh token is unknown, expired,
+ * revoked or already rotated. Anything else is inconclusive and must leave the
+ * session alone -- 429 means "ask again later", 5xx means the server had a bad
+ * day, and a network error means we never got an answer at all.
+ *
+ * This distinction matters more than it looks: the session lives in
+ * localStorage and is shared by every tab, so treating a transient failure as
+ * fatal logs the user out of the entire browser on a single dropped request.
+ */
+export function isFatalRefreshFailure(status: number, code?: string): boolean {
+  if (status !== 400 && status !== 401) return false
+  return code === 'refresh_error'
+}
+
 const joinUrl = (baseUrl: string, path: string) => `${baseUrl.replace(/\/$/, '')}${path}`
 
 const isJsonBody = (body: BodyInit | null | undefined) => body !== null && body !== undefined
@@ -88,6 +108,10 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 type TokenState = {
   token: string | null
   refreshToken: string | null
+  // Which paired client this tab believes it is acting as. Used to tell a
+  // rotation of our own credential apart from an unrelated session that some
+  // other client wrote into the same localStorage slot.
+  clientId: string
   onTokenRefresh?: (session: AuthSession) => void
   onAuthFailure?: () => void
 }
@@ -132,22 +156,44 @@ export const createApiClient = (baseUrl: string) => {
   const tokenState: TokenState = {
     token: null,
     refreshToken: null,
+    clientId: '',
     onTokenRefresh: undefined,
   }
+
+  // Single-flight: refresh tokens are single-use, so concurrent 401s (parallel
+  // requests, or several tabs) must share one attempt instead of racing to
+  // rotate the same credential -- that race makes every caller but the first
+  // look like it holds an invalid token.
+  //
+  // The cooldown is the other half of the same problem: after a refresh fails
+  // for a transient reason the access token is still the rejected one, so
+  // every following request would trigger yet another refresh and dig itself
+  // deeper into the rate limit. Blocking retries for a moment lets the window
+  // pass instead.
+  let refreshInFlight: Promise<string | null> | null = null
+  let refreshBlockedUntil = 0
+  const REFRESH_COOLDOWN_MS = 15_000
 
   const setToken = (
     token: string,
     refreshToken: string,
     onRefresh?: (session: AuthSession) => void,
+    clientId?: string,
   ) => {
     tokenState.token = token
     tokenState.refreshToken = refreshToken
     tokenState.onTokenRefresh = onRefresh
+    tokenState.clientId = clientId ?? ''
+    // A fresh credential must not inherit a backoff earned by the previous
+    // one: the cooldown protects against hammering with a token that was
+    // already rejected, and this token has never been offered.
+    refreshBlockedUntil = 0
   }
 
   const clearToken = () => {
     tokenState.token = null
     tokenState.refreshToken = null
+    tokenState.clientId = ''
     tokenState.onTokenRefresh = undefined
   }
 
@@ -155,26 +201,70 @@ export const createApiClient = (baseUrl: string) => {
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-  const refreshToken = async (): Promise<string | null> => {
-    if (!tokenState.refreshToken) return null
 
+  const blockRefreshFor = (ms: number) => {
+    refreshBlockedUntil = Date.now() + Math.max(0, Math.min(ms, 60_000))
+  }
+
+  // A 429 may carry Retry-After; honour it when it is a sane number of seconds.
+  // Absent or malformed means "no hint", so the caller falls back to the
+  // default cooldown -- a missing header must not collapse the backoff to zero.
+  const retryAfterMs = (response: Response): number | null => {
+    const raw = response.headers.get('retry-after')
+    if (raw === null || raw.trim() === '') return null
+    const seconds = Number(raw)
+    // Non-positive is treated as "no usable hint", not as "retry immediately".
+    // Honouring a 0 would switch the cooldown off entirely and put the client
+    // straight back into the request that was just rejected, which is the
+    // self-amplification this cooldown exists to prevent. Our own server
+    // floors the header at 1s, so a 0 here comes from a proxy or a bug.
+    if (!Number.isFinite(seconds) || seconds <= 0) return null
+    return seconds * 1000
+  }
+
+  const adoptRotatedSession = (staleRefreshToken: string): string | null => {
+    const stored = loadSession()
+    if (!stored?.token || !stored.refresh_token) return null
+    // Unchanged means nobody rotated it; our token really is the rejected one.
+    if (stored.refresh_token === staleRefreshToken) return null
+    // A rotation keeps the client, so a different client_id means this is not
+    // our credential that got refreshed -- it is some other client's session
+    // occupying the shared slot. Adopting that would silently re-point this
+    // tab at a device it never signed into, and if that device's token is
+    // valid the adoption sticks: no logout, no further attempt, and requests
+    // quietly attributed elsewhere. Signing out is the honest answer there.
+    if (tokenState.clientId && stored.client_id && tokenState.clientId !== stored.client_id) {
+      return null
+    }
+    tokenState.token = stored.token
+    tokenState.refreshToken = stored.refresh_token
+    tokenState.onTokenRefresh?.(stored)
+    return stored.token
+  }
+
+  const runRefresh = async (): Promise<string | null> => {
+    const attempted = tokenState.refreshToken
+    if (!attempted) return null
+
+    let response: Response
     try {
-      const response = await fetch(joinUrl(baseUrl, endpoints.auth.refresh), {
+      response = await fetch(joinUrl(baseUrl, endpoints.auth.refresh), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: tokenState.refreshToken }),
+        body: JSON.stringify({ refresh_token: attempted }),
       })
+    } catch {
+      // A dropped request says nothing about the credential. Keep the session
+      // and back off before trying again.
+      blockRefreshFor(REFRESH_COOLDOWN_MS)
+      return null
+    }
 
-      if (!response.ok) {
-        const onFail = tokenState.onAuthFailure
-        clearToken()
-        onFail?.()
-        return null
-      }
-
+    if (response.ok) {
       const data = (await response.json()) as AuthRefreshResponse
       tokenState.token = data.token
       tokenState.refreshToken = data.refresh_token
+      refreshBlockedUntil = 0
 
       if (tokenState.onTokenRefresh) {
         const session: AuthSession = {
@@ -188,12 +278,48 @@ export const createApiClient = (baseUrl: string) => {
       }
 
       return data.token
-    } catch {
-      const onFail = tokenState.onAuthFailure
-      clearToken()
-      onFail?.()
+    }
+
+    const failure = await parseApiError(response)
+
+    if (!isFatalRefreshFailure(failure.status, failure.code)) {
+      // Rate limited or server-side trouble: the refresh token is untouched
+      // (the limiter answers before the handler ever rotates it), so the
+      // session stays signed in and simply tries again once the window passes.
+      blockRefreshFor(retryAfterMs(response) ?? REFRESH_COOLDOWN_MS)
       return null
     }
+
+    // The server rejected this exact token. Before tearing the session down,
+    // check whether another tab already rotated it and adopt its result.
+    const adopted = adoptRotatedSession(attempted)
+    if (adopted) return adopted
+
+    const onFail = tokenState.onAuthFailure
+    clearToken()
+    onFail?.()
+    return null
+  }
+
+  const refreshToken = (): Promise<string | null> => {
+    // Check for a rotated session before the cooldown, not after. Adoption is a
+    // local read with no request behind it, so sitting out a backoff we never
+    // needed would keep this tab failing for up to 15 s while a perfectly good
+    // token is already in localStorage -- and the multi-tab race is exactly the
+    // case the rescue exists for.
+    const current = tokenState.refreshToken
+    if (current) {
+      const adopted = adoptRotatedSession(current)
+      if (adopted) return Promise.resolve(adopted)
+    }
+
+    if (Date.now() < refreshBlockedUntil) return Promise.resolve(null)
+    if (!refreshInFlight) {
+      refreshInFlight = runRefresh().finally(() => {
+        refreshInFlight = null
+      })
+    }
+    return refreshInFlight
   }
 
   const requestWithRetry = async <T>(
@@ -203,6 +329,10 @@ export const createApiClient = (baseUrl: string) => {
   ): Promise<T> => {
     let lastError: Error | null = null
     let retryCount = 0
+    // Set once a refresh has been attempted for this call. Whether it produced
+    // a token or failed, replaying the request with whatever we hold now is
+    // pointless: a rejected access token stays rejected.
+    let refreshTried = false
 
     while (retryCount <= maxRetries) {
       try {
@@ -241,6 +371,7 @@ export const createApiClient = (baseUrl: string) => {
         }
 
         if (response.status === 401 && tokenState.refreshToken && retryCount === 0) {
+          refreshTried = true
           const newToken = await refreshToken()
           if (newToken) {
             retryCount++
@@ -269,7 +400,7 @@ export const createApiClient = (baseUrl: string) => {
           if (error.status >= 400 && error.status < 500 && error.status !== 401) {
             throw error
           }
-          if (error.status === 401 && retryCount > 0) {
+          if (error.status === 401 && (retryCount > 0 || refreshTried)) {
             throw error
           }
         }

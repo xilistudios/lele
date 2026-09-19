@@ -74,6 +74,8 @@ func newCatalogTestServer(t *testing.T, named map[string]config.NamedProviderCon
 		wsClients:        make(map[string]*WSClient),
 		pinLimiter:       newRateLimiter(10, time.Minute),
 		pairLimiter:      newRateLimiter(5, time.Minute),
+		refreshLimiter:   newRateLimiter(20, time.Minute),
+		authLogLimiter:   newRateLimiter(6, time.Minute),
 		apiLimiter:       newRateLimiter(120, time.Minute),
 		wsMessageLimiter: newRateLimiter(30, time.Minute),
 		skillsLoader:     &skills.SkillsLoader{},

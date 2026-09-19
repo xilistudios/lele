@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 // parseClientSubcommand extracts the subcommand for testability.
@@ -37,6 +40,18 @@ func clientCmd() {
 	if err != nil {
 		fmt.Printf("Error creating auth manager: %v\n", err)
 		os.Exit(1)
+	}
+
+	// The running server keeps paired clients in SQLite. Without the same store
+	// this manager falls back to an empty auth.json, so `lele client list`
+	// reported "No paired clients" for a server that had several, and
+	// `client remove` could not find a client the WebUI was actively using.
+	dbPath := filepath.Join(leleDir, "lele.db")
+	if s, dbErr := store.Open(dbPath); dbErr == nil {
+		authMgr.SetStore(s.NativeClients())
+		defer s.Close()
+	} else {
+		log.Printf("client: opening %s failed (%v); falling back to auth.json, paired clients stored in the database will not be listed", dbPath, dbErr)
 	}
 
 	switch subcommand {

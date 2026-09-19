@@ -37,6 +37,21 @@ type Manager struct {
 	outboundSpooler OutboundCompleter
 	peerFlusher     PeerFlusher
 
+	// nativeClientRepo and inboundSpooler are post-construction seams: the
+	// gateway hands them to the channels that were built at startup, but
+	// ReloadConfig throws those channels away and builds new ones. Like
+	// outboundSpooler/peerFlusher above, the values must live on the Manager so
+	// they can be re-applied to the replacements - otherwise a config reload
+	// silently un-wires them and the new channels run in their pre-seam mode.
+	//
+	// nativeClientRepo: without it the rebuilt NativeChannel's AuthManager has
+	// no SQLite repo and falls back to the JSON client file, which is empty on
+	// a SQLite-backed install, so that instance sees zero clients.
+	// inboundSpooler: without it the rebuilt channels stop spooling inbound
+	// messages, silently disabling durable inbound after the first reload.
+	nativeClientRepo *store.NativeClientRepo
+	inboundSpooler   InboundSpooler
+
 	mu sync.RWMutex
 }
 
@@ -294,26 +309,51 @@ func (m *Manager) ReloadConfig(cfg *config.Config) error {
 		m.mu.Unlock()
 		return err
 	}
-	newChannels := make([]Channel, 0, len(m.channels))
-	for _, channel := range m.channels {
-		newChannels = append(newChannels, channel)
+	// Re-apply the post-construction seams to the channels initChannels just
+	// built. This runs while m.mu is still held and iterates m.channels
+	// directly: the public setters take RLock/Lock themselves and sync.RWMutex
+	// is not reentrant, so calling them from here would deadlock the gateway.
+	if m.nativeClientRepo != nil {
+		if ch, ok := m.channels["native"]; ok {
+			if nc, ok := ch.(*NativeChannel); ok {
+				nc.auth.SetStore(m.nativeClientRepo)
+			}
+		}
 	}
-	if ctx != nil && len(newChannels) > 0 {
+	if m.inboundSpooler != nil {
+		for _, channel := range m.channels {
+			if setter, ok := channel.(spoolerSetter); ok {
+				setter.SetInboundSpooler(m.inboundSpooler)
+			}
+		}
+	}
+	// Snapshot before releasing the lock. The restart loop below runs
+	// unlocked, and ranging over m.channels (or reading m.dispatchQueues)
+	// there races with any concurrent reader or a second reload. This used to
+	// be masked by a `newChannels` copy that was built and then never used.
+	reloaded := make(map[string]Channel, len(m.channels))
+	queues := make(map[string]chan bus.OutboundMessage, len(m.channels))
+	for name, channel := range m.channels {
+		reloaded[name] = channel
+		if q, ok := m.dispatchQueues[name]; ok {
+			queues[name] = q
+		}
+	}
+	if ctx != nil && len(reloaded) > 0 {
 		dispatchCtx, cancel := context.WithCancel(ctx)
 		m.dispatchTask = &asyncTask{cancel: cancel}
 		m.mu.Unlock()
 		go m.dispatchOutbound(dispatchCtx)
-		for name, channel := range m.channels {
+		for name, channel := range reloaded {
 			if err := channel.Start(ctx); err != nil {
 				logger.ErrorCF("channels", "Failed to restart channel during reload", map[string]interface{}{
 					"error": err.Error(),
 				})
 			}
-			queue := m.dispatchQueues[name]
-			go m.startChannelDispatcher(dispatchCtx, name, channel, queue)
+			go m.startChannelDispatcher(dispatchCtx, name, channel, queues[name])
 		}
 		logger.InfoCF("channels", "Channels reloaded", map[string]interface{}{
-			"count": len(m.channels),
+			"count": len(reloaded),
 		})
 		return nil
 	}
@@ -659,8 +699,10 @@ func (m *Manager) forgetOutbound(msg bus.OutboundMessage, reason string) {
 //
 // s may be nil, which turns spooling off again for every channel.
 func (m *Manager) SetInboundSpooler(s InboundSpooler) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.inboundSpooler = s
 
 	for _, channel := range m.channels {
 		if setter, ok := channel.(spoolerSetter); ok {
@@ -677,9 +719,16 @@ type spoolerSetter interface {
 }
 
 // SetNativeClientStore wires the SQLite native client repository into the
-// native channel's auth manager. No-op if the native channel is not enabled.
+// native channel's auth manager and retains the reference so that
+// ReloadConfig can re-inject it after recreating channels. No-op if the
+// native channel is not enabled.
 func (m *Manager) SetNativeClientStore(repo *store.NativeClientRepo) {
-	if ch, ok := m.GetChannel("native"); ok {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.nativeClientRepo = repo
+
+	if ch, ok := m.channels["native"]; ok {
 		if nc, ok := ch.(*NativeChannel); ok {
 			nc.auth.SetStore(repo)
 		}

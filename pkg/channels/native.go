@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -35,31 +36,40 @@ const (
 )
 
 type NativeChannel struct {
-	base             *BaseChannel
-	cfg              *config.NativeConfig
-	auth             *AuthManager
-	bus              *bus.MessageBus
-	agentLoop        AgentProvidable
-	approvalManager  *ApprovalManager
-	running          bool
-	wsClients        map[string]*WSClient
-	restStreams      map[string]*restStreamSubscriber
-	leleDir          string
-	configPath       string // path to config file, defaults to DefaultConfigPath() if empty
-	mu               sync.RWMutex
-	startTime        time.Time
-	pinLimiter       *rateLimiter
-	pairLimiter      *rateLimiter
+	base            *BaseChannel
+	cfg             *config.NativeConfig
+	auth            *AuthManager
+	bus             *bus.MessageBus
+	agentLoop       AgentProvidable
+	approvalManager *ApprovalManager
+	running         bool
+	wsClients       map[string]*WSClient
+	restStreams     map[string]*restStreamSubscriber
+	leleDir         string
+	configPath      string // path to config file, defaults to DefaultConfigPath() if empty
+	mu              sync.RWMutex
+	startTime       time.Time
+	pinLimiter      *rateLimiter
+	pairLimiter     *rateLimiter
+	// refreshLimiter guards token renewal on its own bucket. Sharing the pairing
+	// bucket meant an ordinary signed-in browser competing for the same 5 req/min
+	// as every pairing attempt, and the pairing endpoint is the one that can
+	// legitimately burst (retries, several devices, a mistyped PIN).
+	refreshLimiter   *rateLimiter
 	apiLimiter       *rateLimiter
 	wsMessageLimiter *rateLimiter
-	skillsLoader     *skills.SkillsLoader
-	skillInstaller   *skills.SkillInstaller
-	workspacePath    string
-	reloadConfig     func() error // called after config save to reload runtime config
-	cronService      CronProvidable
-	keyringService   *keyring.Service
-	updateService    *update.Updater
-	localesMgr       *locales.Manager
+	// authLogLimiter samples auth/rate-limit rejections so a permanently dead
+	// token polling in a loop cannot flood the log, while still leaving a
+	// trace for a user reporting unexpected sign-outs.
+	authLogLimiter *rateLimiter
+	skillsLoader   *skills.SkillsLoader
+	skillInstaller *skills.SkillInstaller
+	workspacePath  string
+	reloadConfig   func() error // called after config save to reload runtime config
+	cronService    CronProvidable
+	keyringService *keyring.Service
+	updateService  *update.Updater
+	localesMgr     *locales.Manager
 
 	// outboundFlusher wakes the durable outbound pump when a native peer comes
 	// back. Set through SetOutboundFlusher by Manager.SetOutboundSpooler; nil
@@ -168,8 +178,12 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 
 	pinLimiter := newRateLimiter(10, time.Minute)
 	pairLimiter := newRateLimiter(5, time.Minute)
+	// Renewal is a background, client-driven call: it must be generous enough
+	// that normal use can never trip it, and tight enough to still bound abuse.
+	refreshLimiter := newRateLimiter(20, time.Minute)
 	apiLimiter := newRateLimiter(120, time.Minute)
 	wsMessageLimiter := newRateLimiter(120, time.Minute)
+	authLogLimiter := newRateLimiter(6, time.Minute)
 
 	workspacePath := cfg.WorkspacePath()
 	globalSkillsDir := filepath.Join(leleDir, "skills")
@@ -190,8 +204,10 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 		leleDir:          leleDir,
 		pinLimiter:       pinLimiter,
 		pairLimiter:      pairLimiter,
+		refreshLimiter:   refreshLimiter,
 		apiLimiter:       apiLimiter,
 		wsMessageLimiter: wsMessageLimiter,
+		authLogLimiter:   authLogLimiter,
 		skillsLoader:     skillsLoader,
 		skillInstaller:   skillInstaller,
 		workspacePath:    workspacePath,
@@ -346,8 +362,10 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 
 	n.pinLimiter.Stop()
 	n.pairLimiter.Stop()
+	n.refreshLimiter.Stop()
 	n.apiLimiter.Stop()
 	n.wsMessageLimiter.Stop()
+	n.authLogLimiter.Stop()
 
 	n.running = false
 	n.base.setRunning(false)
@@ -436,9 +454,13 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	// protocol: the PIN authenticates whoever redeems it because the issuer
 	// was already verified.  /auth/pair remains public (the new device has no
 	// token yet).
-	mux.HandleFunc("GET /api/v1/auth/pin", withAuth(n.handleGetPIN))
+	// pinLimiter was constructed, stopped and never attached to anything: the
+	// 10/min it advertises guarded nothing, so one authenticated client could
+	// generate PINs in a loop and keep evicting the oldest pending PIN (see
+	// maxPendingPINs) — including the one another device is about to redeem.
+	mux.HandleFunc("GET /api/v1/auth/pin", n.rateLimitMiddleware(n.pinLimiter, withAuth(n.handleGetPIN)).ServeHTTP)
 	mux.HandleFunc("POST /api/v1/auth/pair", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handlePair)).ServeHTTP)
-	mux.HandleFunc("POST /api/v1/auth/refresh", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handleRefresh)).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/auth/refresh", n.rateLimitMiddleware(n.refreshLimiter, http.HandlerFunc(n.handleRefresh)).ServeHTTP)
 	mux.HandleFunc("GET /api/v1/auth/status", n.rateLimitMiddleware(n.apiLimiter, http.HandlerFunc(n.handleAuthStatus)).ServeHTTP)
 	mux.HandleFunc("GET /api/v1/auth/clients", withAuth(n.handleListClients))
 	mux.HandleFunc("DELETE /api/v1/auth/clients/{clientID}", withAuth(n.handleRemoveClient))
@@ -657,22 +679,36 @@ func (n *NativeChannel) checkOrigin(r *http.Request) bool {
 }
 
 func (n *NativeChannel) authMiddleware(next http.Handler) http.Handler {
+	// Rejections used to leave no trace at all, so "I keep getting logged out"
+	// was impossible to confirm or locate after the fact. Sampled per source so
+	// a stuck client polling with a dead token cannot write the log full.
+	reject := func(w http.ResponseWriter, r *http.Request, status int, message, code, reason string) {
+		host := extractHost(r.RemoteAddr)
+		// Sampled per source address, so a client stuck polling with a dead
+		// token cannot fill the log, while a real user's sign-out still leaves
+		// a trace that names the endpoint and the reason.
+		if n.authLogLimiter.sample(host + "|auth") {
+			log.Printf("WARNING: auth rejected %s %s from %s: %s (%s)", r.Method, r.URL.Path, host, reason, code)
+		}
+		writeError(w, status, message, code)
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			writeError(w, http.StatusUnauthorized, "missing authorization header", "auth_missing")
+			reject(w, r, http.StatusUnauthorized, "missing authorization header", "auth_missing", "missing header")
 			return
 		}
 
 		token := strings.TrimPrefix(authHeader, "Bearer ")
 		if token == authHeader {
-			writeError(w, http.StatusUnauthorized, "invalid authorization format", "auth_invalid_format")
+			reject(w, r, http.StatusUnauthorized, "invalid authorization format", "auth_invalid_format", "not a Bearer token")
 			return
 		}
 
 		client, valid := n.auth.ValidateToken(token)
 		if !valid {
-			writeError(w, http.StatusUnauthorized, "invalid or expired token", "auth_invalid_token")
+			reject(w, r, http.StatusUnauthorized, "invalid or expired token", "auth_invalid_token", "unknown or expired token")
 			return
 		}
 
