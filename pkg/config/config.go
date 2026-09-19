@@ -430,18 +430,40 @@ type ChannelsConfig struct {
 	Web      WebConfig      `json:"web"`
 }
 
+// NativeRateLimitConfig tunes the throttling of the native channel's routes.
+// It is disabled by default: the server listens on loopback, and throttling
+// ordinary local use only managed to make a browser with several tabs sign
+// itself out. A zero rate means "use the built-in default" (see applyDefaults).
+type NativeRateLimitConfig struct {
+	Enabled             bool `json:"enabled" env:"LELE_CHANNELS_NATIVE_RATE_LIMIT_ENABLED"`
+	PinPerMinute        int  `json:"pin_per_minute" env:"LELE_CHANNELS_NATIVE_RATE_LIMIT_PIN_PER_MINUTE"`
+	PairPerMinute       int  `json:"pair_per_minute" env:"LELE_CHANNELS_NATIVE_RATE_LIMIT_PAIR_PER_MINUTE"`
+	RefreshPerMinute    int  `json:"refresh_per_minute" env:"LELE_CHANNELS_NATIVE_RATE_LIMIT_REFRESH_PER_MINUTE"`
+	APIPerMinute        int  `json:"api_per_minute" env:"LELE_CHANNELS_NATIVE_RATE_LIMIT_API_PER_MINUTE"`
+	WSMessagesPerMinute int  `json:"ws_messages_per_minute" env:"LELE_CHANNELS_NATIVE_RATE_LIMIT_WS_MESSAGES_PER_MINUTE"`
+}
+
+const (
+	DefaultNativeRateLimitPinPerMinute        = 10
+	DefaultNativeRateLimitPairPerMinute       = 5
+	DefaultNativeRateLimitRefreshPerMinute    = 20
+	DefaultNativeRateLimitAPIPerMinute        = 120
+	DefaultNativeRateLimitWSMessagesPerMinute = 120
+)
+
 type NativeConfig struct {
-	Enabled           bool     `json:"enabled" env:"LELE_CHANNELS_NATIVE_ENABLED"`
-	Host              string   `json:"host" env:"LELE_CHANNELS_NATIVE_HOST"`
-	Port              int      `json:"port" env:"LELE_CHANNELS_NATIVE_PORT"`
-	TokenExpiryDays   int      `json:"token_expiry_days" env:"LELE_CHANNELS_NATIVE_TOKEN_EXPIRY_DAYS"`
-	PinExpiryMinutes  int      `json:"pin_expiry_minutes" env:"LELE_CHANNELS_NATIVE_PIN_EXPIRY_MINUTES"`
-	MaxClients        int      `json:"max_clients" env:"LELE_CHANNELS_NATIVE_MAX_CLIENTS"`
-	CORSOrigins       []string `json:"cors_origins" env:"LELE_CHANNELS_NATIVE_CORS_ORIGINS"`
-	SessionExpiryDays int      `json:"session_expiry_days" env:"LELE_CHANNELS_NATIVE_SESSION_EXPIRY_DAYS"`
-	MaxUploadSizeMB   int64    `json:"max_upload_size_mb" env:"LELE_CHANNELS_NATIVE_MAX_UPLOAD_SIZE_MB"`
-	UploadTTLHours    int      `json:"upload_ttl_hours" env:"LELE_CHANNELS_NATIVE_UPLOAD_TTL_HOURS"`
-	LeleDir           string   `json:"lele_dir,omitempty" env:"LELE_CHANNELS_NATIVE_LELE_DIR"`
+	Enabled           bool                  `json:"enabled" env:"LELE_CHANNELS_NATIVE_ENABLED"`
+	Host              string                `json:"host" env:"LELE_CHANNELS_NATIVE_HOST"`
+	Port              int                   `json:"port" env:"LELE_CHANNELS_NATIVE_PORT"`
+	TokenExpiryDays   int                   `json:"token_expiry_days" env:"LELE_CHANNELS_NATIVE_TOKEN_EXPIRY_DAYS"`
+	PinExpiryMinutes  int                   `json:"pin_expiry_minutes" env:"LELE_CHANNELS_NATIVE_PIN_EXPIRY_MINUTES"`
+	MaxClients        int                   `json:"max_clients" env:"LELE_CHANNELS_NATIVE_MAX_CLIENTS"`
+	CORSOrigins       []string              `json:"cors_origins" env:"LELE_CHANNELS_NATIVE_CORS_ORIGINS"`
+	SessionExpiryDays int                   `json:"session_expiry_days" env:"LELE_CHANNELS_NATIVE_SESSION_EXPIRY_DAYS"`
+	MaxUploadSizeMB   int64                 `json:"max_upload_size_mb" env:"LELE_CHANNELS_NATIVE_MAX_UPLOAD_SIZE_MB"`
+	UploadTTLHours    int                   `json:"upload_ttl_hours" env:"LELE_CHANNELS_NATIVE_UPLOAD_TTL_HOURS"`
+	LeleDir           string                `json:"lele_dir,omitempty" env:"LELE_CHANNELS_NATIVE_LELE_DIR"`
+	RateLimit         NativeRateLimitConfig `json:"rate_limit"`
 }
 
 type WebConfig struct {
@@ -1274,6 +1296,14 @@ func DefaultConfig() *Config {
 				MaxUploadSizeMB:   50,
 				UploadTTLHours:    24,
 				LeleDir:           getDefaultLeleDir(),
+				RateLimit: NativeRateLimitConfig{
+					Enabled:             false,
+					PinPerMinute:        DefaultNativeRateLimitPinPerMinute,
+					PairPerMinute:       DefaultNativeRateLimitPairPerMinute,
+					RefreshPerMinute:    DefaultNativeRateLimitRefreshPerMinute,
+					APIPerMinute:        DefaultNativeRateLimitAPIPerMinute,
+					WSMessagesPerMinute: DefaultNativeRateLimitWSMessagesPerMinute,
+				},
 			},
 			Web: WebConfig{
 				Enabled: true,

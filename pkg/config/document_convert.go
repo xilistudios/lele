@@ -149,6 +149,7 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		SessionExpiryDays: doc.Channels.Native.SessionExpiryDays,
 		MaxUploadSizeMB:   doc.Channels.Native.MaxUploadSizeMB,
 		UploadTTLHours:    doc.Channels.Native.UploadTTLHours,
+		RateLimit:         doc.Channels.Native.RateLimit,
 	}
 
 	// Copiar providers
@@ -337,6 +338,7 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		"session_expiry_days": doc.Channels.Native.SessionExpiryDays,
 		"max_upload_size_mb":  doc.Channels.Native.MaxUploadSizeMB,
 		"upload_ttl_hours":    doc.Channels.Native.UploadTTLHours,
+		"rate_limit":          doc.Channels.Native.RateLimit,
 	}
 
 	// Telegram
@@ -591,7 +593,7 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 		Slack:    EditableSlackConfig{Enabled: cfg.Channels.Slack.Enabled, BotToken: literalOrEmptySecret(cfg.Channels.Slack.BotToken), AppToken: literalOrEmptySecret(cfg.Channels.Slack.AppToken), AllowFrom: cfg.Channels.Slack.AllowFrom},
 		LINE:     EditableLINEConfig{Enabled: cfg.Channels.LINE.Enabled, ChannelSecret: literalOrEmptySecret(cfg.Channels.LINE.ChannelSecret), ChannelAccessToken: literalOrEmptySecret(cfg.Channels.LINE.ChannelAccessToken), WebhookHost: cfg.Channels.LINE.WebhookHost, WebhookPort: cfg.Channels.LINE.WebhookPort, WebhookPath: cfg.Channels.LINE.WebhookPath, AllowFrom: cfg.Channels.LINE.AllowFrom},
 		OneBot:   EditableOneBotConfig{Enabled: cfg.Channels.OneBot.Enabled, WSUrl: cfg.Channels.OneBot.WSUrl, AccessToken: literalOrEmptySecret(cfg.Channels.OneBot.AccessToken), ReconnectInterval: cfg.Channels.OneBot.ReconnectInterval, GroupTriggerPrefix: cfg.Channels.OneBot.GroupTriggerPrefix, AllowFrom: cfg.Channels.OneBot.AllowFrom},
-		Native:   EditableNativeConfig{Enabled: cfg.Channels.Native.Enabled, Host: cfg.Channels.Native.Host, Port: cfg.Channels.Native.Port, TokenExpiryDays: cfg.Channels.Native.TokenExpiryDays, PinExpiryMinutes: cfg.Channels.Native.PinExpiryMinutes, MaxClients: cfg.Channels.Native.MaxClients, CORSOrigins: cfg.Channels.Native.CORSOrigins, SessionExpiryDays: cfg.Channels.Native.SessionExpiryDays, MaxUploadSizeMB: cfg.Channels.Native.MaxUploadSizeMB, UploadTTLHours: cfg.Channels.Native.UploadTTLHours},
+		Native:   EditableNativeConfig{Enabled: cfg.Channels.Native.Enabled, Host: cfg.Channels.Native.Host, Port: cfg.Channels.Native.Port, TokenExpiryDays: cfg.Channels.Native.TokenExpiryDays, PinExpiryMinutes: cfg.Channels.Native.PinExpiryMinutes, MaxClients: cfg.Channels.Native.MaxClients, CORSOrigins: cfg.Channels.Native.CORSOrigins, SessionExpiryDays: cfg.Channels.Native.SessionExpiryDays, MaxUploadSizeMB: cfg.Channels.Native.MaxUploadSizeMB, UploadTTLHours: cfg.Channels.Native.UploadTTLHours, RateLimit: cfg.Channels.Native.RateLimit},
 	}
 	doc.Providers = EditableProvidersConfig{}
 	for name, provider := range cfg.Providers.ListNamed() {
