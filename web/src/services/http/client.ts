@@ -160,6 +160,20 @@ export const createApiClient = (baseUrl: string) => {
     onTokenRefresh: undefined,
   }
 
+  // Single-flight: refresh tokens are single-use, so concurrent 401s (parallel
+  // requests, or several tabs) must share one attempt instead of racing to
+  // rotate the same credential -- that race makes every caller but the first
+  // look like it holds an invalid token.
+  //
+  // The cooldown is the other half of the same problem: after a refresh fails
+  // for a transient reason the access token is still the rejected one, so
+  // every following request would trigger yet another refresh and dig itself
+  // deeper into the rate limit. Blocking retries for a moment lets the window
+  // pass instead.
+  let refreshInFlight: Promise<string | null> | null = null
+  let refreshBlockedUntil = 0
+  const REFRESH_COOLDOWN_MS = 15_000
+
   const setToken = (
     token: string,
     refreshToken: string,
@@ -187,19 +201,6 @@ export const createApiClient = (baseUrl: string) => {
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-  // Single-flight: refresh tokens are single-use, so concurrent 401s (parallel
-  // requests, or several tabs) must share one attempt instead of racing to
-  // rotate the same credential -- that race makes every caller but the first
-  // look like it holds an invalid token.
-  //
-  // The cooldown is the other half of the same problem: after a refresh fails
-  // for a transient reason the access token is still the rejected one, so
-  // every following request would trigger yet another refresh and dig itself
-  // deeper into the rate limit. Blocking retries for a moment lets the window
-  // pass instead.
-  let refreshInFlight: Promise<string | null> | null = null
-  let refreshBlockedUntil = 0
-  const REFRESH_COOLDOWN_MS = 15_000
 
   const blockRefreshFor = (ms: number) => {
     refreshBlockedUntil = Date.now() + Math.max(0, Math.min(ms, 60_000))
