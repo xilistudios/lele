@@ -535,11 +535,22 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 	// through the tool context - each loop reports only its own responses, so
 	// nothing is counted twice. Retried attempts (runTask) bill per attempt,
 	// matching the real spend.
+	//
+	// Owner gets the aggregate (TUI/status/WebUI totals include subagent
+	// work); the child session additionally records its own spend so a
+	// subagent chat can show its own counters. The child key is sessionKey
+	// ("{origin}:{taskID}"), which equals loopOwner only when both spawner
+	// and origin keys are absent — in that case the child report is skipped
+	// to avoid double-counting the same key. A nil reporter keeps today's
+	// no-op behavior.
 	billTokens := func(in, out int) {
 		if tokenUsage == nil || loopOwner == "" {
 			return
 		}
 		tokenUsage(loopOwner, in, out)
+		if sessionKey != "" && sessionKey != loopOwner {
+			tokenUsage(sessionKey, in, out)
+		}
 	}
 
 	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
