@@ -163,12 +163,23 @@ Fields:
 - `session_expiry_days`
 - `max_upload_size_mb`
 - `upload_ttl_hours`
+- `rate_limit`
 
 Notes:
 
 - powers the local REST + WebSocket client API
 - used by the built-in web UI and native clients
 - supports pairing PINs and bearer-token auth
+- **behavioral change:** rate limiting on native routes is now **disabled by
+  default**.  Previously the server always enforced fixed limits (10 PINs/min,
+  5 pairings/min, 20 token refreshes/min, 120 API requests/min, 120 WebSocket
+  messages/min per source).  To restore that exact behavior, enable
+  `channels.native.rate_limit.enabled`; the default rates are the same.
+  **Enabling it is recommended when the native API listens on a non-loopback
+  interface** (`channels.native.host` other than `127.0.0.1`), because any host
+  on the network can then reach the pairing endpoints.  Requires a restart.
+  The authentication log-line sampler (6/min) is **not** a traffic limiter and
+  remains always active.
 
 ## Web
 

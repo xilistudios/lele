@@ -47,7 +47,15 @@ Add or adjust the `channels.native` block in `~/.lele/config.json`:
       ],
       "session_expiry_days": 30,
       "max_upload_size_mb": 50,
-      "upload_ttl_hours": 24
+      "upload_ttl_hours": 24,
+      "rate_limit": {
+        "enabled": false,
+        "pin_per_minute": 10,
+        "pair_per_minute": 5,
+        "refresh_per_minute": 20,
+        "api_per_minute": 120,
+        "ws_messages_per_minute": 120
+      }
     }
   }
 }
