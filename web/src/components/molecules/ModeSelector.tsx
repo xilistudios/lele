@@ -8,7 +8,7 @@ export function ModeSelector() {
   const modes = getModeList(groupsEnabled)
 
   return (
-    <div className="flex rounded-lg bg-background-secondary p-0.5 gap-0.5">
+    <div className="flex rounded-lg bg-background-tertiary p-0.5 gap-0.5">
       {modes.map((id) => {
         const theme = getModeTheme(id)
         const active = chatMode === id
@@ -21,7 +21,9 @@ export function ModeSelector() {
             aria-pressed={active}
             title={t(theme.descKey)}
             className={`flex flex-1 items-center justify-center gap-1 rounded-md border-b-2 px-2 py-1.5 text-xs font-medium transition-colors ${
-              active ? theme.tabActive : 'border-transparent text-text-secondary hover:text-text-primary'
+              active
+                ? theme.tabActive
+                : 'border-transparent text-text-secondary hover:text-text-primary'
             }`}
           >
             <Icon size={13} />
