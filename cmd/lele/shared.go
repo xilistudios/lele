@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -79,9 +80,17 @@ func newClientAuthManager(cfg *config.Config, leleDir string) (*channels.AuthMan
 	if s, dbErr := store.Open(dbPath); dbErr == nil {
 		authMgr.SetStore(s.NativeClients())
 		return authMgr, func() { s.Close() }, nil
-	} else {
-		log.Printf("client: opening %s failed (%v); falling back to auth.json, paired clients stored in the database will not be listed", dbPath, dbErr)
+	} else if errors.Is(dbErr, store.ErrUnsupportedPlatform) {
+		// Platform lacks SQLite (e.g. linux/mips64). JSON is the real
+		// backend here, so PINs minted via the JSON path ARE redeemable.
+		log.Printf("client: SQLite not available on this platform (%v); using JSON backends — PINs and clients will be stored in auth.json", dbErr)
 		return authMgr, func() {}, nil
+	} else {
+		// SQLite is supported but the database could not be opened
+		// (corrupted file, permissions, disk full, …). Minting a PIN
+		// here would produce a dead PIN: the gateway uses SQLite and
+		// will never find it in native_clients.json. Fail explicitly.
+		return nil, func() {}, fmt.Errorf("opening %s: %w — refusing to mint a PIN that the gateway cannot redeem; fix the database or run on a no-SQLite build", dbPath, dbErr)
 	}
 }
 

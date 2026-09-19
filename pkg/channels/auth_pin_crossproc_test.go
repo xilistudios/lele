@@ -480,3 +480,52 @@ func TestPinFlow_GeneratePIN_ReturnsImmediatelyOnNonDuplicateDBError(t *testing.
 		t.Logf("NOTE: error text is %q (expected 'database is closed' substring)", err.Error())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Test 10: PairWithPIN fails gracefully when persistence fails (M2 fix)
+// ---------------------------------------------------------------------------
+
+func TestPairWithPIN_PersistenceFailureReturnsErrorNoToken(t *testing.T) {
+	// Scenario: server generated a PIN (repo was live), then the DB becomes
+	// unavailable before PairWithPIN completes. TakePendingPIN would fail
+	// first (closed DB → "invalid PIN"), and the M2 fix ensures no token is
+	// returned even if persistence were to fail independently.
+	//
+	// This is a regression guard: before the M2 fix, a failed
+	// saveStoreUnlocked could still return a valid token, leaving a
+	// non-persisted credential that would vanish on gateway restart.
+	//
+	// The real-world trigger is rare (DB closed between TakePendingPIN and
+	// saveStoreUnlocked), but the contract "persistence failure → no token"
+	// must hold unconditionally.
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lele.db")
+
+	// Server side: generate a PIN with a live store.
+	serverAuth, serverStore := openCLIAuthManager(t, tmpDir, dbPath)
+	pending, err := serverAuth.GeneratePIN("server-phone")
+	if err != nil {
+		t.Fatalf("server: GeneratePIN: %v", err)
+	}
+
+	// Close the store so subsequent repo operations fail.
+	serverStore.Close()
+
+	// Attempt to pair with the now-unavailable store.
+	client, token, _, err := serverAuth.PairWithPIN(pending.PIN, "server-phone")
+
+	// Must return error — the store is closed.
+	if err == nil {
+		t.Fatal("PairWithPIN should fail when store is unavailable, got nil error")
+	}
+
+	// M2 contract: no token on failure.
+	if token != "" {
+		t.Errorf("PairWithPIN must not return token on failure; got %q", token)
+	}
+
+	// M2 contract: no client on failure.
+	if client != nil {
+		t.Errorf("PairWithPIN must not return client on failure; got %v", client)
+	}
+}

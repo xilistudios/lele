@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,11 +94,14 @@ func TestNewClientAuthManager_DBOpens_CleanupSafe(t *testing.T) {
 	cleanup()
 }
 
-// TestNewClientAuthManager_DBNotOpenable tests the fallback path: when the DB
-// cannot be opened (invalid path), the helper still returns a usable
-// AuthManager without a store (repo == nil), err == nil, and a non-nil
-// cleanup. This is the branch exercised on mips64 or when the DB file is
-// corrupted.
+// TestNewClientAuthManager_DBNotOpenable tests the error path: when the DB
+// cannot be opened (invalid path) on a platform that DOES support SQLite
+// (x86, arm64), the helper returns a non-nil error and a nil AuthManager.
+// This is the new contract after the M1 fix: minting a PIN here would
+// produce a dead PIN because the gateway uses SQLite and would never find it.
+//
+// Cleanup is still safe to call (nil-safe/idempotent) even when the store
+// was never opened.
 func TestNewClientAuthManager_DBNotOpenable(t *testing.T) {
 	cfg := defaultTestConfig()
 
@@ -108,36 +113,79 @@ func TestNewClientAuthManager_DBNotOpenable(t *testing.T) {
 	}
 
 	authMgr, cleanup, err := newClientAuthManager(cfg, tmpFile)
-	if err != nil {
-		t.Fatalf("newClientAuthManager should not return error on DB failure, got: %v", err)
+	if err == nil {
+		t.Fatal("newClientAuthManager should return error when DB cannot be opened on a supported platform, got nil")
 	}
-	if authMgr == nil {
-		t.Fatal("authMgr must not be nil even when DB is not openable")
+	// The error must NOT be ErrUnsupportedPlatform — on x86/arm64 the
+	// platform is supported, so any open failure is a real DB problem.
+	if errors.Is(err, store.ErrUnsupportedPlatform) {
+		t.Fatalf("error should be a real DB open failure, not ErrUnsupportedPlatform: %v", err)
+	}
+	if authMgr != nil {
+		t.Fatal("authMgr must be nil when DB open fails on a supported platform")
 	}
 	if cleanup == nil {
-		t.Fatal("cleanup must not be nil even when store was not opened")
+		t.Fatal("cleanup must not be nil (must be safe to call)")
 	}
 
-	// Must not panic.
+	// Must not panic even when store was never opened.
 	cleanup()
 }
 
 // TestNewClientAuthManager_CleanupNoStore verifies that cleanup() is safe to
-// call when the store was never opened (fallback path). This is the "always
-// non-nil, always safe" contract. Calling cleanup twice must also be safe.
+// call when the store was never opened (DB failure path). This is the "always
+// non-nil, always safe" contract. On a supported platform (x86/arm64) with a
+// nonexistent path, store.Open fails with a real DB error, so the helper
+// returns error — but cleanup must still be safe to call.
 func TestNewClientAuthManager_CleanupNoStore(t *testing.T) {
 	cfg := defaultTestConfig()
 
 	// Path that doesn't exist — store.Open will fail.
 	_, cleanup, err := newClientAuthManager(cfg, filepath.Join(t.TempDir(), "nonexistent", "deep", "path"))
 	if err != nil {
-		t.Fatalf("expected nil error on fallback, got: %v", err)
+		// On supported platforms (x86/arm64), a nonexistent path produces
+		// a real DB error, not ErrUnsupportedPlatform — this is expected.
+		if cleanup == nil {
+			t.Fatal("cleanup must not be nil")
+		}
+		// Must not panic.
+		cleanup()
+		// Calling twice must also be safe.
+		cleanup()
+		return
 	}
+	// err == nil: this is the mips64/unsupported-platform path where JSON
+	// fallback is legitimate. Cleanup must still be safe.
 	if cleanup == nil {
 		t.Fatal("cleanup must not be nil")
 	}
-	// Must not panic.
 	cleanup()
-	// Calling twice must also be safe.
 	cleanup()
+}
+
+// TestStoreOpen_ErrUnsupportedPlatform_Sentinel verifies that the sentinel
+// error is correctly wrapped in the error returned by store.Open when the
+// platform doesn't support SQLite. We can't test the real mips64 path on
+// x86/arm64, but we CAN verify that:
+//   - store.Open on a supported platform returns an error that is NOT
+//     ErrUnsupportedPlatform (proving the sentinel is not spuriously set).
+//   - errors.Is wrapping works correctly by testing the sentinel directly.
+func TestStoreOpen_ErrUnsupportedPlatform_Sentinel(t *testing.T) {
+	// On x86/arm64, store.Open with an invalid path returns a real DB error,
+	// NOT ErrUnsupportedPlatform. This proves the sentinel is not spuriously
+	// set on supported platforms.
+	_, err := store.Open(filepath.Join(t.TempDir(), "nonexistent", "deep", "path"))
+	if err == nil {
+		t.Skip("store.Open unexpectedly succeeded (should not happen with invalid path)")
+	}
+	if errors.Is(err, store.ErrUnsupportedPlatform) {
+		t.Errorf("store.Open on supported platform must NOT return ErrUnsupportedPlatform; got: %v", err)
+	}
+
+	// Direct sentinel wrapping test: fmt.Errorf("%w: ...", ErrUnsupportedPlatform)
+	// must be recognized by errors.Is.
+	wrapped := fmt.Errorf("%w: test wrapping", store.ErrUnsupportedPlatform)
+	if !errors.Is(wrapped, store.ErrUnsupportedPlatform) {
+		t.Errorf("errors.Is on wrapped ErrUnsupportedPlatform should be true")
+	}
 }

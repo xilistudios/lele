@@ -511,8 +511,15 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 			return nil, "", "", fmt.Errorf("device_name is required")
 		}
 
-		// Purge expired PINs from the DB before counting.
-		am.repo.DeleteExpiredPendingPINs(time.Now().UnixNano())
+		// Opportunistic GC: purge expired PIN rows (not related to the
+		// MaxClients count checked below, which is a different table).
+		if deleted, err := am.repo.DeleteExpiredPendingPINs(time.Now().UnixNano()); err != nil {
+			logger.WarnCF("native", "PairWithPIN: DeleteExpiredPendingPINs failed", map[string]interface{}{
+				"error": err.Error(),
+			})
+		} else if deleted > 0 {
+			logger.DebugCF("native", fmt.Sprintf("PairWithPIN: purged %d expired pending PINs", deleted), nil)
+		}
 
 		// Step 4: MaxClients — count from the DB (the in-memory map
 		// is stale across processes, E5).
@@ -582,9 +589,18 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 		am.store.Clients[clientID] = client
 
 		if err := am.saveStoreUnlocked(); err != nil {
-			logger.ErrorCF("native", "Failed to save store after pairing", map[string]interface{}{
+			// Fail closed: remove the in-memory client so no phantom
+			// credential survives until the next restart. The PIN is
+			// already consumed (TakePendingPIN succeeded) — that is
+			// intentional: better to require a fresh PIN than to emit
+			// a credential that cannot survive a gateway restart.
+			// Atomicity of PIN consumption + client persistence in a
+			// single transaction is tracked in #327.
+			delete(am.store.Clients, clientID)
+			logger.ErrorCF("native", "Failed to save store after pairing; removing in-memory client", map[string]interface{}{
 				"error": err.Error(),
 			})
+			return nil, "", "", fmt.Errorf("pairing failed: could not persist client")
 		}
 
 		return client, token, refreshToken, nil
@@ -901,8 +917,8 @@ func (am *AuthManager) ListClients() []*ClientInfo {
 // concurrency contract of this method (callers expect a consistent
 // snapshot, even though the DB read is itself atomic). DB errors are
 // logged and result in an empty list — the function signature does not
-// return error, and its only consumers (cmd/lele/client.go:152,187)
-// simply print the result.
+// return error, and its only consumers (clientPendingCmd and
+// clientStatusCmd in cmd/lele/client.go) simply print the result.
 func (am *AuthManager) GetPendingPINs() []*PendingPIN {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
