@@ -1,4 +1,4 @@
-import { lookupStableId } from '../hooks/stableIdRegistry'
+import { lookupStableId, stableIdKey } from '../hooks/stableIdRegistry'
 import type {
   Attachment,
   ChatMessage,
@@ -17,9 +17,15 @@ export function createHistoryMessageId(sessionKey: string, index: number, role: 
   return `${sessionKey}:${index}:${role}`
 }
 
-/** Ephemeral ID for optimistic user messages. */
+let lastOptimisticTs = 0
+
+/** Ephemeral ID for optimistic user messages. The timestamp is forced to be
+ *  monotonically increasing: two sends inside the same millisecond must not
+ *  share an id, or React sees duplicate keys and drops a bubble. */
 export function createOptimisticUserId(): string {
-  return `temp-user-${Date.now()}`
+  const now = Date.now()
+  lastOptimisticTs = now > lastOptimisticTs ? now : lastOptimisticTs + 1
+  return `temp-user-${lastOptimisticTs}`
 }
 
 /** Ephemeral ID for tool execution messages in streaming. */
@@ -323,27 +329,27 @@ export function createToolMessage(props: ToolMessageProps): ChatMessage {
 export function toChatMessages(history: RawHistoryMessage[], sessionKey: string): ChatMessage[] {
   const toolCallMap = buildToolCallMap(history)
   const seenIds = new Map<string, number>()
-  // Signature (role|content|tool_call_id) of the first message seen under each
-  // id, used to detect exact duplicates below.
-  const seenSignatures = new Map<string, string>()
+
+  // Occurrence index per role+content key: the stableId registry records one
+  // ephemeral id per confirmed copy, so the Nth message with the same content
+  // must look up the Nth recorded id. Without this two identical messages
+  // shared one stableId and React dropped one of their bubbles.
+  const stableOccurrences = new Map<string, number>()
 
   return history.flatMap((message, index) => {
     let msgId = message.id || createHistoryMessageId(sessionKey, index, message.role)
-    const signature = `${message.role}|${message.content}|${message.tool_call_id ?? ''}`
+
     const count = seenIds.get(msgId) ?? 0
     seenIds.set(msgId, count + 1)
     if (count > 0) {
-      // Exact duplicate (same id, role and content): the backend re-emitted
-      // the same message. Suffixing it renders a visible duplicate bubble that
-      // later disappears or swaps position when the list is rebuilt (flicker).
-      // Drop it and keep the first occurrence instead.
-      if (seenSignatures.get(msgId) === signature) {
-        return []
-      }
-      // Different content under the same id: keep both, disambiguate by suffix.
+      // The history id is derived from the message CONTENT (see
+      // residentMessageID in pkg/channels/rest_chat.go), so two genuinely
+      // different messages with identical content legitimately share an id.
+      // Treating the repeat as a backend re-emit and dropping it DELETED a real
+      // message from the UI (4 server messages rendered as 3 bubbles, with the
+      // remaining answer sitting above the wrong user message). Keep every
+      // message and disambiguate repeats by suffix so render keys stay unique.
       msgId = `${msgId}_${count}`
-    } else {
-      seenSignatures.set(msgId, signature)
     }
 
     let messageContent = message.content
@@ -357,8 +363,12 @@ export function toChatMessages(history: RawHistoryMessage[], sessionKey: string)
     // registered — the text the user typed, which for command-driven turns is
     // display_content, not the expanded content.
     // Tools additionally look up by tool_call_id (their content may be empty).
+    const stableContent = message.display_content || messageContent
+    const stableKey = stableIdKey(message.role, stableContent)
+    const stableOccurrence = stableOccurrences.get(stableKey) ?? 0
+    stableOccurrences.set(stableKey, stableOccurrence + 1)
     const stableId =
-      lookupStableId(message.role, message.display_content || messageContent) ??
+      lookupStableId(message.role, stableContent, stableOccurrence) ??
       (message.role === 'tool' && message.tool_call_id
         ? lookupStableId('tool', `id:${message.tool_call_id}`)
         : undefined)
