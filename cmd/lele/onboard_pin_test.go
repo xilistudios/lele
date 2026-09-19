@@ -189,3 +189,44 @@ func TestStoreOpen_ErrUnsupportedPlatform_Sentinel(t *testing.T) {
 		t.Errorf("errors.Is on wrapped ErrUnsupportedPlatform should be true")
 	}
 }
+
+// TestNewClientAuthManager_CreatesMissingLeleDir covers the fresh-install
+// path: onboarding calls maybeGeneratePIN before config.SaveConfig, so the
+// lele directory does not exist yet when the first PIN is minted. A missing
+// directory must not be treated as an unusable database (that guard is for
+// corrupt/unopenable files) — onboarding would otherwise end without a PIN.
+func TestNewClientAuthManager_CreatesMissingLeleDir(t *testing.T) {
+	root := t.TempDir()
+	leleDir := filepath.Join(root, "no-existe-todavia")
+	cfg := &config.Config{}
+	cfg.Channels.Native.Enabled = true
+	cfg.Channels.Native.PinExpiryMinutes = 5
+	cfg.Channels.Native.MaxClients = 5
+
+	authMgr, cleanup, err := newClientAuthManager(cfg, leleDir)
+	if err != nil {
+		t.Fatalf("newClientAuthManager on a fresh install: %v", err)
+	}
+	defer cleanup()
+
+	if _, statErr := os.Stat(leleDir); statErr != nil {
+		t.Fatalf("lele dir should have been created: %v", statErr)
+	}
+
+	pending, err := authMgr.GeneratePIN("fresh-install")
+	if err != nil {
+		t.Fatalf("GeneratePIN: %v", err)
+	}
+
+	// The whole point of the fix: a second process must find the PIN.
+	s, err := store.Open(filepath.Join(leleDir, "lele.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer s.Close()
+	if _, _, found, err := s.NativeClients().GetPendingPIN(pending.PIN); err != nil {
+		t.Fatalf("GetPendingPIN: %v", err)
+	} else if !found {
+		t.Errorf("PIN %s minted on a fresh install is not in SQLite", pending.PIN)
+	}
+}

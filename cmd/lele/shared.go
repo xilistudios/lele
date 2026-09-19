@@ -77,6 +77,16 @@ func newClientAuthManager(cfg *config.Config, leleDir string) (*channels.AuthMan
 	}
 
 	dbPath := filepath.Join(leleDir, "lele.db")
+	// A missing lele directory is not a corrupted-database condition:
+	// onboarding reaches the PIN step before SaveConfig creates the
+	// directory, so create it here (same 0755 as config.SaveConfig)
+	// rather than refusing to mint a PIN on a fresh install. Anything the
+	// OS still refuses to create is a real error and is reported as one.
+	if leleDir != "" {
+		if mkErr := os.MkdirAll(leleDir, 0755); mkErr != nil {
+			return nil, func() {}, fmt.Errorf("creating lele dir %s: %w", leleDir, mkErr)
+		}
+	}
 	if s, dbErr := store.Open(dbPath); dbErr == nil {
 		authMgr.SetStore(s.NativeClients())
 		return authMgr, func() { s.Close() }, nil
