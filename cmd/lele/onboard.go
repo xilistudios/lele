@@ -13,7 +13,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/xilistudios/lele/pkg/catalog"
-	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/tui"
 )
@@ -584,11 +583,12 @@ func maybeGeneratePIN(cfg *config.Config, leleDir string) {
 
 	deviceName := askString("Device name", "Desktop")
 
-	authMgr, err := channels.NewAuthManager(&cfg.Channels.Native, leleDir)
+	authMgr, cleanup, err := newClientAuthManager(cfg, leleDir)
 	if err != nil {
 		fmt.Printf("Error creating auth manager: %v\n", err)
 		return
 	}
+	defer cleanup()
 
 	pending, err := authMgr.GeneratePIN(deviceName)
 	if err != nil {
