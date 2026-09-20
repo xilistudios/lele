@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -394,6 +395,51 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		cmd.Dir = cwd
 	}
 
+	// ── Non-interactive environment hardening ─────────────────────────
+	// Prevent child processes from blocking on interactive prompts or
+	// pagers. GIT_TERMINAL_PROMPT=0 makes git fail fast instead of
+	// prompting for credentials (even if askpass machinery exists);
+	// GIT_PAGER/PAGER=cat prevents git-log/diff/etc from spawning
+	// interactive pagers that wait for 'q'; DEBIAN_FRONTEND=noninteractive
+	// prevents apt/dpkg configuration dialogs.
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_PAGER=cat",
+		"PAGER=cat",
+		"DEBIAN_FRONTEND=noninteractive",
+	)
+
+	// Stdin is nil by default (Go connects it to /dev/null). Set it
+	// explicitly as documentation: git reads /dev/tty for credential
+	// prompts (not stdin), so this alone is insufficient — that is what
+	// detachControllingTerminal (setsid) fixes.
+	cmd.Stdin = nil
+
+	// ── Detach controlling terminal (Unix) ────────────────────────────
+	// Prevent the child from inheriting the TUI's terminal. Without
+	// setsid, commands that open /dev/tty (git credential prompts, sudo,
+	// ssh, pagers) would write over the TUI and block forever.
+	detachControllingTerminal(cmd)
+
+	// ── Group-aware cancel ────────────────────────────────────────────
+	// Override the default CommandContext kill behavior. The default only
+	// signals the direct child (the sh wrapper), which orphans
+	// grandchildren (e.g. git spawned by sh -c "git push"). With
+	// Setsid the child is a session/group leader, so killProcessTree
+	// (kill -pgid) reaps everything. WaitDelay bounds the pipe-drain
+	// wait after the group kill.
+	//
+	// Background processes are NOT killed by these settings: Cancel only
+	// fires when bgCtx is canceled. bgCtx is canceled either:
+	//   (a) after cmd.Wait returns (process already exited — no-op), or
+	//   (b) when cmdCtx times out (we want to kill the tree here), or
+	//   (c) when the background manager calls stop (we also want tree kill).
+	cmd.Cancel = func() error {
+		killProcessTree(cmd)
+		return nil
+	}
+	cmd.WaitDelay = 3 * time.Second
+
 	// Thread-safe buffers so the background manager can read while the
 	// process is still writing.
 	stdout := newThreadSafeBuffer(1024 * 1024) // 1MB cap
@@ -421,6 +467,9 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 			if err != nil {
 				if exitErr, ok := err.(*exec.ExitError); ok {
 					exitCode = exitErr.ExitCode()
+				} else if errors.Is(err, exec.ErrWaitDelay) {
+					// Process exited cleanly; only the I/O drain timed out
+					// (a descendant kept the pipes open). Not a failure.
 				} else {
 					exitCode = 1
 				}
@@ -460,11 +509,19 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 				_, ownerSessionKey := AgentToolContextFromCtx(ctx)
 				proc := t.backgroundManager.Register(cmd, command, cwd, stdout, stderr, bgCancel, ownerSessionKey)
 				go func() {
-					err := cmd.Wait()
+					// Reuse the single Wait goroutine's result via `done`.
+					// Calling cmd.Wait() a second time here would race with
+					// the foreground Wait goroutine (Cmd.Wait is not
+					// reentrant): the duplicate returns an error, which used
+					// to mark successfully-finished processes as failed(1).
+					err := <-done
 					exitCode := 0
 					if err != nil {
 						if exitErr, ok := err.(*exec.ExitError); ok {
 							exitCode = exitErr.ExitCode()
+						} else if errors.Is(err, exec.ErrWaitDelay) {
+							// Process exited cleanly; only the I/O drain
+							// timed out. Not a failure.
 						} else {
 							exitCode = 1
 						}
@@ -515,8 +572,17 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		output += "\nSTDERR:\n" + stderr.String()
 	}
 
-	if execErr != nil {
+	// exec.ErrWaitDelay means the process itself exited successfully but a
+	// surviving descendant (e.g. a daemon spawned outside our process group)
+	// kept our stdout/stderr pipes open past cmd.WaitDelay. The captured
+	// output is valid; surfacing Go's internal error as a command failure
+	// would turn a successful run into a false error for the model.
+	ioDrainTimedOut := errors.Is(execErr, exec.ErrWaitDelay)
+	if execErr != nil && !ioDrainTimedOut {
 		output += fmt.Sprintf("\nExit code: %v", execErr)
+	}
+	if ioDrainTimedOut {
+		output += "\n(note: process exited successfully; a descendant still holding the output pipes was disconnected after the wait delay — trailing output may be truncated)"
 	}
 
 	if output == "" {
@@ -538,7 +604,7 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		t.feedbackCallback(t.channel, t.chatID, completionMsg)
 	}
 
-	if execErr != nil {
+	if execErr != nil && !ioDrainTimedOut {
 		return &ToolResult{
 			ForLLM:  output,
 			ForUser: output,

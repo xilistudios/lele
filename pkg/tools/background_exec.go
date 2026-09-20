@@ -344,9 +344,9 @@ func (m *BackgroundProcessManager) Stop(id string) bool {
 	if p.cancel != nil {
 		p.cancel()
 	}
-	if p.cmd != nil && p.cmd.Process != nil {
-		_ = p.cmd.Process.Kill()
-	}
+	// Use group-aware kill so that grandchildren (e.g. git spawned by
+	// sh -c "git push") are also reaped, not just the sh wrapper.
+	killProcessTree(p.cmd)
 
 	now := time.Now()
 	p.mu.Lock()
@@ -408,9 +408,9 @@ func (m *BackgroundProcessManager) stopLocked(p *BackgroundProcess) bool {
 	if p.cancel != nil {
 		p.cancel()
 	}
-	if p.cmd != nil && p.cmd.Process != nil {
-		_ = p.cmd.Process.Kill()
-	}
+	// Use group-aware kill so that grandchildren (e.g. git spawned by
+	// sh -c "git push") are also reaped, not just the sh wrapper.
+	killProcessTree(p.cmd)
 
 	now := time.Now()
 	p.mu.Lock()
