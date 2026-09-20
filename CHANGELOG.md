@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Session
 - Active turn resume (`session.resume_enabled`, default off) — when the gateway restarts mid-turn, the durable inbound replay now *resumes* the interrupted turn from a checkpoint instead of re-running it from scratch. Each in-flight inbound turn is checkpointed to the session-state KV (`sess:turn:<key>`: phase, iteration, agent, model, dedupe id); a replayed message whose dedupe id matches its checkpoint re-enters the loop with the user message already in history (no double-append, no duplicate work). Turns interrupted mid-tool-execution continue safely: pending tool calls are healed into "no recorded result" tool messages and the model decides whether to re-run them, instead of the executor blindly repeating side effects. Subagents that died with the process are snapshotted alongside the checkpoint and the model is warned on resume that their results are unavailable. Requires `session.durable_inbound` (the replay is the resume trigger).
 
+### Changed
+
+#### Native
+- Rate limiting on native routes is now opt-in — disabled by default, configurable via `channels.native.rate_limit` (config file, WebUI, and `LELE_CHANNELS_NATIVE_RATE_LIMIT_*` env vars).  Set `enabled: true` to restore the legacy per-source-IP budgets (10 PINs/min, 5 pairings/min, 20 token refreshes/min, 120 API requests/min, 120 WebSocket messages/min); individual fields can be overridden and `0` or omitted means the built-in default.  The change was motivated by a browser with several tabs continuously refreshing tokens and signing itself out when the limits were hard-coded.  A stock install binds all interfaces (`0.0.0.0`), so the unauthenticated `POST /api/v1/auth/pair` endpoint (6-digit PIN, 5-minute expiry) loses its only brute-force control when the feature is off; a non-loopback bind with rate limiting disabled now logs a startup warning suggesting `channels.native.rate_limit.enabled=true`.  Enable it on any network-reachable install.
+
 ### Fixed
 
 #### Native

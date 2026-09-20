@@ -119,6 +119,30 @@ Contains all channel configs such as:
 
 See `docs/channel-setup.md`.
 
+### `channels.native.rate_limit`
+
+Controls per-source-IP rate limiting on the native REST + WebSocket API.
+
+- `enabled` (default `false`) — master switch; all limits are inactive when off
+- `pin_per_minute` (default `10`) — `GET /api/v1/auth/pin` requests per minute
+- `pair_per_minute` (default `5`) — `POST /api/v1/auth/pair` attempts per minute
+- `refresh_per_minute` (default `20`) — `POST /api/v1/auth/refresh` renewals per minute
+- `api_per_minute` (default `120`) — all other API requests per minute
+- `ws_messages_per_minute` (default `120`) — WebSocket frames per minute
+
+Setting a field to `0` (or omitting it) means "use the built-in default"
+listed above.  Negative values are rejected by validation.
+
+Env overrides: `LELE_CHANNELS_NATIVE_RATE_LIMIT_ENABLED`,
+`LELE_CHANNELS_NATIVE_RATE_LIMIT_PIN_PER_MINUTE`,
+`LELE_CHANNELS_NATIVE_RATE_LIMIT_PAIR_PER_MINUTE`,
+`LELE_CHANNELS_NATIVE_RATE_LIMIT_REFRESH_PER_MINUTE`,
+`LELE_CHANNELS_NATIVE_RATE_LIMIT_API_PER_MINUTE`,
+`LELE_CHANNELS_NATIVE_RATE_LIMIT_WS_MESSAGES_PER_MINUTE`.
+
+See `docs/client-api.md` for the rationale behind separate pairing and
+renewal buckets.
+
 ## `providers`
 
 Contains built-in and custom provider entries.
