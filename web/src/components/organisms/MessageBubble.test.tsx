@@ -10,6 +10,7 @@ import { MessageBubble } from './MessageBubble'
 const originalCreateObjectURL = URL.createObjectURL
 const originalRevokeObjectURL = URL.revokeObjectURL
 const originalIntersectionObserver = globalThis.IntersectionObserver
+let savedOriginalCreateElement: typeof document.createElement | null = null
 
 function makeAuthCtx(overrides: Partial<{ fileBlob: ReturnType<typeof mock> }> = {}) {
   const fileBlob = overrides.fileBlob ?? mock(async () => new Blob(['test'], { type: 'image/png' }))
@@ -69,6 +70,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  if (savedOriginalCreateElement) {
+    document.createElement = savedOriginalCreateElement
+    savedOriginalCreateElement = null
+  }
   URL.createObjectURL = originalCreateObjectURL
   URL.revokeObjectURL = originalRevokeObjectURL
   globalThis.IntersectionObserver = originalIntersectionObserver
@@ -112,9 +117,10 @@ describe('MessageBubble — authenticated attachment preview', () => {
 
     // Track the created anchor for download
     const clickSpy = mock(() => {})
-    const originalCreateElement = document.createElement.bind(document)
+    const originalBound = document.createElement.bind(document)
+    savedOriginalCreateElement = originalBound
     document.createElement = ((tag: string) => {
-      const el = originalCreateElement(tag)
+      const el = originalBound(tag)
       if (tag === 'a') {
         el.click = clickSpy as () => void
         Object.defineProperty(el, 'download', {
@@ -157,7 +163,7 @@ describe('MessageBubble — authenticated attachment preview', () => {
       )
     })
 
-    document.createElement = originalCreateElement
+    document.createElement = originalBound
   })
 
   test('image alt attribute is the attachment name', async () => {

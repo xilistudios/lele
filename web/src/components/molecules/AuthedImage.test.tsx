@@ -148,7 +148,7 @@ describe('AuthedImage', () => {
     expect(container.querySelector('img')).toBeNull()
   })
 
-  test('cache: two AuthedImage with same path → fileBlob called once', async () => {
+  test('in-flight dedupe: two simultaneously mounted AuthedImage with same path → fileBlob called once', async () => {
     // @ts-expect-error removing for test
     globalThis.IntersectionObserver = undefined
 
@@ -170,6 +170,41 @@ describe('AuthedImage', () => {
     })
 
     // fileBlob should only be called once due to deduplication
+    expect(fileBlob).toHaveBeenCalledTimes(1)
+  })
+
+  test('cache: unmount then remount with same path → served from cache, fileBlob called once', async () => {
+    // @ts-expect-error removing for test
+    globalThis.IntersectionObserver = undefined
+
+    const blob = new Blob(['fake-png'], { type: 'image/png' })
+    const fileBlob = mock(async () => blob)
+    const ctx = makeAuthCtx(fileBlob)
+    const path = '/home/user/.lele/wk/attachments/20260919/abc_def_photo.png'
+
+    // --- First render: triggers a real fetch ---
+    const { container, unmount } = renderWithAuth(<AuthedImage path={path} alt="a" />, ctx)
+
+    await waitFor(() => {
+      const img = container.querySelector('img')
+      expect(img).toBeTruthy()
+      expect(img?.getAttribute('src')).toBe('blob:test-url/abc')
+    })
+
+    expect(fileBlob).toHaveBeenCalledTimes(1)
+
+    unmount()
+
+    // --- Second render: same path, module-level cache must still hold the entry ---
+    const { container: container2 } = renderWithAuth(<AuthedImage path={path} alt="a" />, ctx)
+
+    await waitFor(() => {
+      const img2 = container2.querySelector('img')
+      expect(img2).toBeTruthy()
+      expect(img2?.getAttribute('src')).toBe('blob:test-url/abc')
+    })
+
+    // fileBlob must STILL have been called exactly once (cache hit, no refetch)
     expect(fileBlob).toHaveBeenCalledTimes(1)
   })
 
