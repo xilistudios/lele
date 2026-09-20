@@ -272,9 +272,11 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 	if excludedCount == 0 {
 		t.Error("Expected some messages to be excluded from context")
 	}
-	// 3 included: first message (index 0, always preserved) + last 2 kept for continuity
-	if includedCount != 3 {
-		t.Errorf("Expected 3 messages included in context (first + last 2), got %d", includedCount)
+	// 4 included: first message (index 0, always preserved) + 1 preserved
+	// human turn inside the excluded range (one of the last preservedUserMessages
+	// human turns) + last 2 kept for continuity
+	if includedCount != 4 {
+		t.Errorf("Expected 4 messages included in context (first + preserved human + last 2), got %d", includedCount)
 	}
 }
 
@@ -456,9 +458,11 @@ func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
 	if excludedCount == 0 {
 		t.Error("Expected some messages to be excluded from context")
 	}
-	// 3 included: first message (index 0, always preserved) + last 2 kept for continuity
-	if includedCount != 3 {
-		t.Errorf("Expected 3 messages included in context (first + last 2), got %d", includedCount)
+	// 4 included: first message (index 0, always preserved) + 1 preserved
+	// human turn inside the excluded range (one of the last preservedUserMessages
+	// human turns) + last 2 kept for continuity
+	if includedCount != 4 {
+		t.Errorf("Expected 4 messages included in context (first + preserved human + last 2), got %d", includedCount)
 	}
 
 	// Summary messages (if any) should never be excluded from context.

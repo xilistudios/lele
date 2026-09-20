@@ -34,10 +34,10 @@ func TestCompactSession_Basic(t *testing.T) {
 		t.Fatalf("expected 10 messages retained in storage, got %d", len(session.Messages))
 	}
 	excluded := countExcluded(session.Messages)
-	// Messages 1..6 are excluded (7 kept: index 0 is always preserved plus the
-	// last keepCount=3).
-	if excluded != 6 {
-		t.Errorf("expected 6 excluded messages, got %d", excluded)
+	// Index 0 always preserved, indices 6 and 8 are the last preservedUserMessages
+	// human turns → also preserved. Indices 1, 2, 3, 4, 5 excluded (5 total).
+	if excluded != 5 {
+		t.Errorf("expected 5 excluded messages, got %d", excluded)
 	}
 	// First message must never be excluded.
 	if session.Messages[0].ExcludeFromContext {

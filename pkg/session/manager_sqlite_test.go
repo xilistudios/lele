@@ -419,7 +419,9 @@ func TestSQLite_SessionManager_ExcludeOldMessages(t *testing.T) {
 	sm.ExcludeOldMessagesFromContext(key, 3)
 	sm.Save(key)
 
-	// Verify excluded flag is persisted
+	// Verify excluded flag is persisted.
+	// With 10 user messages, keepCount=3: indices 1-5 are excluded (index 6 is
+	// one of the last preservedUserMessages human turns → preserved).
 	repo := s.Sessions()
 	msgJSONs, _ := repo.LoadMessages(key)
 	excludedCount := 0
@@ -1361,27 +1363,28 @@ func TestSQLite_ReloadAfterEviction_SeqAccounting(t *testing.T) {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// Evict: exclude first 5 (keep 0 + 3 in-context), save, evict. Index 0 is
-	// folded into the summary; the whole contiguous [0..5) prefix is evicted.
+	// Evict: exclude first 5 (keep 0 + last 2 human turns + 2 in-context), save, evict.
+	// Index 4 (user) is one of the last preservedUserMessages human turns → preserved.
+	// Indices 1-3 are excluded; after evicting [0..4), kept range is [4..8).
 	sm.ExcludeOldMessagesFromContext(key, 3)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("exclude Save failed: %v", err)
 	}
 	evicted := sm.EvictExcludedMessages(key)
-	if evicted != 5 {
-		t.Fatalf("evicted %d, want 5", evicted)
+	if evicted != 4 {
+		t.Fatalf("evicted %d, want 4", evicted)
 	}
 
 	// Append a new message after eviction; incremental save must write an
 	// absolute seq that fits after the evicted rows (seqs 0-7 exist in
-	// SQLite; firstInMemorySeq=5, in-memory index 3 -> abs seq 8).
+	// SQLite; firstInMemorySeq=4, in-memory index 4 -> abs seq 8).
 	sm.AddMessage(key, "user", "m8")
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("append-after-evict Save failed: %v", err)
 	}
 
-	// SQLite must have 9 rows: seqs 0-8 (evicted m0-m4 at 0-4, kept m5-m7 at
-	// 5-7, new m8 at 8).
+	// SQLite must have 9 rows: seqs 0-8 (evicted m0-m3 at 0-3, kept m4-m7 at
+	// 4-7, new m8 at 8).
 	rows, err := s.Sessions().LoadMessagesWithSeq(key)
 	if err != nil {
 		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
@@ -1403,24 +1406,24 @@ func TestSQLite_ReloadAfterEviction_SeqAccounting(t *testing.T) {
 
 	// Reload a fresh session manager over the same store. Per the
 	// context-only in-memory design (Phase 7), a cold load must NOT re-inflate
-	// evicted rows into RAM: it restores firstInMemorySeq (5) and loads only
-	// the non-evicted suffix (m5..m8) plus the appended m8, so SQLite rows
-	// (seqs 0-8) map to in-memory slice indices as seq = firstInMemorySeq + i.
+	// evicted rows into RAM: it restores firstInMemorySeq (4) and loads only
+	// the non-evicted suffix (m4..m8), so SQLite rows (seqs 0-8) map to
+	// in-memory slice indices as seq = firstInMemorySeq + i.
 	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	hist := sm2.GetHistoryView(key)
-	if len(hist) != 4 {
-		t.Fatalf("reloaded in-memory len = %d, want 4 (non-evicted only)", len(hist))
+	if len(hist) != 5 {
+		t.Fatalf("reloaded in-memory len = %d, want 5 (non-evicted only)", len(hist))
 	}
 	for i, msg := range hist {
-		want := fmt.Sprintf("m%d", i+5)
+		want := fmt.Sprintf("m%d", i+4)
 		if msg.Content != want {
 			t.Errorf("reloaded[%d].Content = %q, want %q", i, msg.Content, want)
 		}
 	}
-	// Evicted boundary restored: 5 evicted rows still in SQLite, 9 total.
-	if got := sm2.GetEvictedMessageCount(key); got != 5 {
-		t.Errorf("GetEvictedMessageCount after reload = %d, want 5", got)
+	// Evicted boundary restored: 4 evicted rows still in SQLite, 9 total.
+	if got := sm2.GetEvictedMessageCount(key); got != 4 {
+		t.Errorf("GetEvictedMessageCount after reload = %d, want 4", got)
 	}
 	if got := sm2.GetTotalMessageCount(key); got != 9 {
 		t.Errorf("GetTotalMessageCount after reload = %d, want 9", got)
@@ -1503,6 +1506,8 @@ func TestSQLite_ColdLoad_RestoresEvictionBoundary(t *testing.T) {
 	}
 
 	// Exclude all but the last 3 in-context (keep m7..m9), persist, then evict.
+	// Index 6 (user) is in the excluded range [1,7) and NOT one of the last 2
+	// human turns (those are 8,9, outside the range) → stays excluded.
 	sm.ExcludeOldMessagesFromContext(key, 3)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("exclude Save failed: %v", err)
@@ -1525,7 +1530,7 @@ func TestSQLite_ColdLoad_RestoresEvictionBoundary(t *testing.T) {
 		t.Errorf("first in-memory message after cold load = %q, want %q", hist[0].Content, "m7")
 	}
 	if hist[1].Content != "m8" || hist[2].Content != "m9" {
-		t.Errorf("unexpected kept suffix after cold load: %q, %q", hist[1].Content, hist[2].Content)
+		t.Errorf("unexpected kept suffix after cold load: %q, %q, %q", hist[0].Content, hist[1].Content, hist[2].Content)
 	}
 
 	// Boundary restored: 7 evicted, 10 total.
@@ -1583,28 +1588,32 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// Exclude the first 7 (m0..m6), keep m7..m9 in context; persist + evict.
-	sm.ExcludeOldMessagesFromContext(key, 3)
+	// Exclude the first 8 (keep 0 + last 2 human turns), persist + evict.
+	// keepCount=2 (not 3) because with preservedUserMessages the boundary
+	// is higher and PruneExcluded needs enough excluded rows to actually prune.
+	// With keepCount=2: excludeUpTo=8, preserved={0,8,9}, indices 1-7 excluded
+	// (m8 un-excluded). Evict [0..8), FirstInMemorySeq=8.
+	sm.ExcludeOldMessagesFromContext(key, 2)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("exclude Save failed: %v", err)
 	}
-	if evicted := sm.EvictExcludedMessages(key); evicted != 7 {
-		t.Fatalf("EvictExcludedMessages evicted %d, want 7", evicted)
+	if evicted := sm.EvictExcludedMessages(key); evicted != 8 {
+		t.Fatalf("EvictExcludedMessages evicted %d, want 8", evicted)
 	}
-	// EvictExcludedMessages persists the boundary (FirstInMemorySeq == 7);
+	// EvictExcludedMessages persists the boundary (FirstInMemorySeq == 8);
 	// confirm it survived in SQLite metadata.
 	meta, err := s.Sessions().GetSessionMeta(key)
 	if err != nil || meta == nil {
 		t.Fatalf("GetSessionMeta failed: %v (err=%v)", meta, err)
 	}
-	if meta.FirstInMemorySeq != 7 {
-		t.Fatalf("FirstInMemorySeq persisted = %d, want 7", meta.FirstInMemorySeq)
+	if meta.FirstInMemorySeq != 8 {
+		t.Fatalf("FirstInMemorySeq persisted = %d, want 8", meta.FirstInMemorySeq)
 	}
 
 	// Simulate the post-full-rewrite pruning of the OLDEST excluded rows
 	// (which live below the boundary) by calling the repo directly, the same
 	// method saveFullUnlocked uses. keepCount small enough that rows are
-	// actually deleted: total=10, keepCount=7 -> 3 oldest excluded rows pruned.
+	// actually deleted: boundary=8, keepCount=7 -> 3 oldest excluded rows pruned.
 	pruned, pErr := s.Sessions().PruneExcluded(key, 7)
 	if pErr != nil {
 		t.Fatalf("PruneExcluded failed: %v", pErr)
@@ -1613,8 +1622,8 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 		t.Fatalf("PruneExcluded deleted %d rows, want 3 (oldest excluded prefix)", pruned)
 	}
 
-	// rows remaining after pruning are m3..m9 (seq 3..9): m3..m6 still
-	// excluded (evicted + persisted), m7..m9 in-context. Boundary is still 7.
+	// rows remaining after pruning are m4..m9 (seq 4..9): m4..m7 still
+	// excluded (evicted + persisted), m8..m9 in-context. Boundary is still 8.
 	rows, err := s.Sessions().LoadMessagesWithSeq(key)
 	if err != nil {
 		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
@@ -1624,34 +1633,34 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 	}
 
 	// Cold load via a NEW manager over the same store. With the old guard,
-	// MessageCount - boundary = 7 - 7 = 0 != 3 would falsely trigger the
+	// MessageCount - boundary = 7 - 8 = -1 != 2 would falsely trigger the
 	// fallback and reset firstInMemorySeq to 0.
 	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 
 	hist := sm2.GetHistory(key) // triggers the cold load
-	if len(hist) != 3 {
-		t.Fatalf("in-memory len after cold load = %d, want 3", len(hist))
+	if len(hist) != 2 {
+		t.Fatalf("in-memory len after cold load = %d, want 2", len(hist))
 	}
-	if hist[0].Content != "m7" || hist[1].Content != "m8" || hist[2].Content != "m9" {
-		t.Fatalf("unexpected kept suffix after cold load: %q, %q, %q", hist[0].Content, hist[1].Content, hist[2].Content)
+	if hist[0].Content != "m8" || hist[1].Content != "m9" {
+		t.Fatalf("unexpected kept suffix after cold load: %q, %q", hist[0].Content, hist[1].Content)
 	}
 
 	// Boundary was NOT reset to 0: evicted rows still persisted = B - pruned
-	// (7 - 3 = 4), and total = 4 + in-memory 3 = 7.
-	if got := sm2.GetEvictedMessageCount(key); got != 7-pruned {
-		t.Fatalf("GetEvictedMessageCount after cold load = %d, want %d (B-pruned)", got, 7-pruned)
+	// (8 - 3 = 5), and total = 5 + in-memory 2 = 7.
+	if got := sm2.GetEvictedMessageCount(key); got != 8-pruned {
+		t.Fatalf("GetEvictedMessageCount after cold load = %d, want %d (B-pruned)", got, 8-pruned)
 	}
-	if inMem := len(sm2.GetHistory(key)); inMem != 3 {
-		t.Fatalf("GetHistory len after cold load = %d, want 3", inMem)
+	if inMem := len(sm2.GetHistory(key)); inMem != 2 {
+		t.Fatalf("GetHistory len after cold load = %d, want 2", inMem)
 	}
-	if got := sm2.GetTotalMessageCount(key); got != 7-pruned+len(hist) {
-		t.Fatalf("GetTotalMessageCount after cold load = %d, want %d", got, 7-pruned+len(hist))
+	if got := sm2.GetTotalMessageCount(key); got != 8-pruned+len(hist) {
+		t.Fatalf("GetTotalMessageCount after cold load = %d, want %d", got, 8-pruned+len(hist))
 	}
 
 	// The invariant seq = firstInMemorySeq + sliceIndex must hold after an
 	// append: appending one more message via the manager and saving must
-	// insert at absolute seq = firstInMemorySeq + sliceIndex (7 + 3 = 10) and
+	// insert at absolute seq = firstInMemorySeq + sliceIndex (8 + 2 = 10) and
 	// must NOT overwrite any existing row.
 	sm2.AddMessage(key, "user", "m10")
 	if err := sm2.Save(key); err != nil {
@@ -1666,7 +1675,7 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 	}
 	newRow := finalRows[len(finalRows)-1]
 	// No seq was overwritten: the new row's seq must equal firstInMemorySeq +
-	// sliceIndex (7 + 3 = 10), one beyond the previous max (9). The total row
+	// sliceIndex (8 + 2 = 10), one beyond the previous max (9). The total row
 	// count growing by exactly 1 already proves no existing row was replaced.
 	if newRow.Seq != 10 {
 		t.Fatalf("appended row seq = %d, want 10 (firstInMemorySeq+sliceIndex), json=%q", newRow.Seq, newRow.JSON)
@@ -1730,6 +1739,8 @@ func TestSQLite_EvictionBoundary_PersistedOnEvict(t *testing.T) {
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("exclude Save failed: %v", err)
 	}
+	// With 8 user messages, keepCount=2: indices 1-5 excluded (m6 is one of
+	// the last preservedUserMessages human turns → preserved). Evict [0..6).
 	if evicted := sm.EvictExcludedMessages(key); evicted != 6 {
 		t.Fatalf("EvictExcludedMessages evicted %d, want 6", evicted)
 	}
@@ -2041,7 +2052,8 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 
 	key := "test:gap-rebase"
 	sm.GetOrCreate(key)
-	for i := 0; i < 10; i++ {
+	// 12 alternating messages to have enough excluded rows for PruneExcluded.
+	for i := 0; i < 12; i++ {
 		role := "user"
 		if i%2 != 0 {
 			role = "assistant"
@@ -2052,19 +2064,22 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// Exclude the first 7 (m0..m6), keep m7..m9 in context; persist + evict.
-	sm.ExcludeOldMessagesFromContext(key, 3)
+	// Exclude most messages, keep 1 in-context + 2 preserved human turns.
+	// With keepCount=1: excludeUpTo=11, preserved={0,10,11}, indices 1-9
+	// excluded (m10 preserved as last human turn → un-excluded). Evict [0..10).
+	sm.ExcludeOldMessagesFromContext(key, 1)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("exclude Save failed: %v", err)
 	}
-	if evicted := sm.EvictExcludedMessages(key); evicted != 7 {
-		t.Fatalf("EvictExcludedMessages evicted %d, want 7", evicted)
+	if evicted := sm.EvictExcludedMessages(key); evicted != 10 {
+		t.Fatalf("EvictExcludedMessages evicted %d, want 10", evicted)
 	}
 
 	// Prune the OLDEST excluded rows to create a gap: excluded rows are
-	// m1..m6 (seq 1..6; index 0 is never excluded), keepCount=7 deletes the
-	// 3 oldest (seq 1,2,3), leaving rows at seq 0,4,5,6,7,8,9.
-	pruned, pErr := s.Sessions().PruneExcluded(key, 7)
+	// at seq 1..7 and 9 (8 rows; seq 0 never excluded, seq 8 and 10 are
+	// preserved human turns → un-excluded). total=12, keepCount=9 →
+	// toDelete=3, deletes the 3 oldest excluded rows (seq 1,2,3).
+	pruned, pErr := s.Sessions().PruneExcluded(key, 9)
 	if pErr != nil {
 		t.Fatalf("PruneExcluded failed: %v", pErr)
 	}
@@ -2101,40 +2116,42 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 	}
 
 	rowsBefore := loadRaw()
-	if len(rowsBefore) != 7 {
-		t.Fatalf("rows after prune = %d, want 7", len(rowsBefore))
+	if len(rowsBefore) != 9 {
+		t.Fatalf("rows after prune = %d, want 9", len(rowsBefore))
 	}
 	if rowsBefore[1].Seq != 4 {
 		t.Fatalf("second row seq = %d, want 4 (gap at seq 1..3 not present?)", rowsBefore[1].Seq)
 	}
 
 	// (1) An incremental append with the gap in place must land at absolute
-	// seq 10 (firstInMemorySeq 7 + sliceIndex 3), never on a gapped seq.
-	sm.AddMessage(key, "user", "m10")
+	// seq 12 (firstInMemorySeq 10 + sliceIndex 2), never on a gapped seq.
+	sm.AddMessage(key, "user", "m12")
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("append-with-gap Save failed: %v", err)
 	}
 	rowsAppend := loadRaw()
-	if len(rowsAppend) != 8 {
-		t.Fatalf("rows after append = %d, want 8 (grew by exactly 1, no overwrite)", len(rowsAppend))
+	if len(rowsAppend) != 10 {
+		t.Fatalf("rows after append = %d, want 10 (grew by exactly 1, no overwrite)", len(rowsAppend))
 	}
 	last := rowsAppend[len(rowsAppend)-1]
-	if last.Seq != 10 {
-		t.Fatalf("appended row seq = %d, want 10 (seqForIndex must skip pruned gap rows)", last.Seq)
+	if last.Seq != 12 {
+		t.Fatalf("appended row seq = %d, want 12 (seqForIndex must skip pruned gap rows)", last.Seq)
 	}
 	var lastMsg providers.Message
 	_ = json.Unmarshal([]byte(last.JSON), &lastMsg)
-	if lastMsg.Content != "m10" || last.Role != "user" {
-		t.Errorf("appended row misaligned: role=%q content=%q, want user/m10", last.Role, lastMsg.Content)
+	if lastMsg.Content != "m12" || last.Role != "user" {
+		t.Errorf("appended row misaligned: role=%q content=%q, want user/m12", last.Role, lastMsg.Content)
 	}
 
 	// (2) The on-demand window serves the gapped evicted region with REAL
 	// seqs so pagination cursors stay correct across the gap.
-	page := sm.LoadMessagesWindow(key, 7, 0, 10)
+	page := sm.LoadMessagesWindow(key, 9, 0, 10)
 	if page == nil {
 		t.Fatalf("window page below boundary = nil, want the evicted rows")
 	}
-	wantSeqs := []int{0, 4, 5, 6}
+	// Evicted rows below seq 9: seq 0,4,5,6,7,8 (6 rows; pruned 1,2,3;
+	// seq 8 is a preserved human turn that was folded+evicted).
+	wantSeqs := []int{0, 4, 5, 6, 7, 8}
 	if len(page.Seqs) != len(wantSeqs) {
 		t.Fatalf("window seqs = %v, want %v", page.Seqs, wantSeqs)
 	}
@@ -2150,14 +2167,14 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 	// (3) A full rewrite (SetHistory forces one, e.g. after compaction) must
 	// re-materialize the evicted rows and renumber everything contiguously
 	// from 0, healing the gap without shifting content relative to role.
-	kept := sm.GetHistoryView(key) // m7,m8,m9,m10
+	kept := sm.GetHistoryView(key) // m10,m11,m12
 	sm.SetHistory(key, kept)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("full-rewrite Save failed: %v", err)
 	}
 	rowsAfter := loadRaw()
-	if len(rowsAfter) != 8 {
-		t.Fatalf("rows after full rewrite = %d, want 8 (no data loss)", len(rowsAfter))
+	if len(rowsAfter) != 10 {
+		t.Fatalf("rows after full rewrite = %d, want 10 (no data loss)", len(rowsAfter))
 	}
 	for i, row := range rowsAfter {
 		if row.Seq != i {
@@ -2172,9 +2189,9 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 		}
 	}
 
-	// Content order after the rebase: m0,m4,m5,m6 (surviving evicted rows;
-	// pruned m1..m3 gone for good) then the resident m7..m10.
-	wantContent := []string{"m0", "m4", "m5", "m6", "m7", "m8", "m9", "m10"}
+	// Content order after the rebase: m0,m4,m5,m6,m7,m8,m9 (surviving
+	// evicted rows; pruned m1..m3 gone for good) then the resident m10..m12.
+	wantContent := []string{"m0", "m4", "m5", "m6", "m7", "m8", "m9", "m10", "m11", "m12"}
 	for i, row := range rowsAfter {
 		var msg providers.Message
 		_ = json.Unmarshal([]byte(row.JSON), &msg)
@@ -2183,9 +2200,10 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 		}
 	}
 
-	// Excluded flags must survive the rebase: m0 never excluded; m4..m6 stay
-	// excluded; resident m7..m10 in-context.
-	wantExcluded := []bool{false, true, true, true, false, false, false, false}
+	// Excluded flags must survive the rebase: m0 never excluded; m4..m7 stay
+	// excluded; m8 is preserved human turn (not excluded); m9 excluded;
+	// m10..m12 in-context.
+	wantExcluded := []bool{false, true, true, true, true, false, true, false, false, false}
 	for i, row := range rowsAfter {
 		if row.Excluded != wantExcluded[i] {
 			t.Errorf("row %d excluded = %v, want %v", i, row.Excluded, wantExcluded[i])
@@ -2193,21 +2211,21 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 	}
 
 	// Post-rewrite bookkeeping: the invariant seq == sliceIndex must hold for
-	// the next incremental append (row 8, content m11).
-	sm.AddMessage(key, "user", "m11")
+	// the next incremental append (row 10, content m13).
+	sm.AddMessage(key, "user", "m13")
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("post-rewrite append Save failed: %v", err)
 	}
 	rowsFinal := loadRaw()
-	if len(rowsFinal) != 9 {
-		t.Fatalf("rows after post-rewrite append = %d, want 9", len(rowsFinal))
+	if len(rowsFinal) != 11 {
+		t.Fatalf("rows after post-rewrite append = %d, want 11", len(rowsFinal))
 	}
-	if rowsFinal[8].Seq != 8 {
-		t.Fatalf("post-rewrite appended seq = %d, want 8", rowsFinal[8].Seq)
+	if rowsFinal[10].Seq != 10 {
+		t.Fatalf("post-rewrite appended seq = %d, want 10", rowsFinal[10].Seq)
 	}
 	var fm providers.Message
-	_ = json.Unmarshal([]byte(rowsFinal[8].JSON), &fm)
-	if fm.Content != "m11" {
-		t.Errorf("post-rewrite appended content = %q, want m11", fm.Content)
+	_ = json.Unmarshal([]byte(rowsFinal[10].JSON), &fm)
+	if fm.Content != "m13" {
+		t.Errorf("post-rewrite appended content = %q, want m13", fm.Content)
 	}
 }

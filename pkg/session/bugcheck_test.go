@@ -33,13 +33,14 @@ func TestSQLite_GapAware_FullRewriteThenAppend_PersistsSubsequentAppend(t *testi
 		t.Fatalf("initial Save: %v", err)
 	}
 
-	// Exclude first 7, save, evict → gap: firstInMemorySeq=7, evictedTotal=7.
+	// Exclude first 7, save, evict → gap: firstInMemorySeq=6, evictedTotal=6.
+	// Index 6 (user) is one of the last preservedUserMessages human turns → preserved.
 	sm.ExcludeOldMessagesFromContext(key, 3)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("exclude Save: %v", err)
 	}
-	if evicted := sm.EvictExcludedMessages(key); evicted != 7 {
-		t.Fatalf("evicted %d, want 7", evicted)
+	if evicted := sm.EvictExcludedMessages(key); evicted != 6 {
+		t.Fatalf("evicted %d, want 6", evicted)
 	}
 
 	sess := sm.sessions[key]
