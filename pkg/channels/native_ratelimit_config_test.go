@@ -673,8 +673,8 @@ func TestIsLoopbackHost(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.host, func(t *testing.T) {
-			if got := isLoopbackHost(tt.host); got != tt.want {
-				t.Errorf("isLoopbackHost(%q) = %v, want %v", tt.host, got, tt.want)
+			if got := IsLoopbackHost(tt.host); got != tt.want {
+				t.Errorf("IsLoopbackHost(%q) = %v, want %v", tt.host, got, tt.want)
 			}
 		})
 	}
@@ -695,7 +695,7 @@ func TestConfiguredRateIsEnforcedPerBucket(t *testing.T) {
 		PairPerMinute:       1,
 		RefreshPerMinute:    3,
 		APIPerMinute:        4,
-		WSMessagesPerMinute: 2,
+		WSMessagesPerMinute: 5,
 	}
 
 	ts := newRateLimitTestServer(t, cfg)
@@ -780,7 +780,7 @@ func TestConfiguredRateIsEnforcedPerBucket(t *testing.T) {
 
 	// WebSocket bucket — driven directly through handleWSClientMessage.
 	// The wsMessageLimiter keys on ClientID, not IP.
-	t.Run("ws_message (WSMessagesPerMinute=2)", func(t *testing.T) {
+	t.Run("ws_message (WSMessagesPerMinute=5)", func(t *testing.T) {
 		client := &WSClient{
 			ID:         "ws-bucket-test",
 			SessionKey: "test-session",
@@ -793,22 +793,26 @@ func TestConfiguredRateIsEnforcedPerBucket(t *testing.T) {
 			t.Fatalf("Marshal() error = %v", err)
 		}
 		allowed := 0
-		for i := 0; i < 4; i++ {
-			// handleWSClientMessage sends ack or error on client.SendChan.
-			// Run it in a goroutine because the bus consumer below may
-			// block if the handler publishes an inbound message.
+		firstErrIdx := -1
+		for i := 0; i < 6; i++ {
 			done := make(chan struct{})
 			go func(idx int) {
 				defer close(done)
 				ts.channel.handleWSClientMessage(client, payload, "evt-ws-"+strconv.Itoa(idx))
 			}(i)
 
-			dCtx, dCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			inbound, ok := ts.bus.ConsumeInbound(dCtx)
-			if ok {
-				_ = inbound
+			// Only await the inbound bus message when we expect the handler
+			// to publish one (i.e. the request is allowed).  Rate-limited
+			// requests return before publishing, so ConsumeInbound would
+			// block for the full timeout.
+			if i < 5 {
+				dCtx, dCancel := context.WithTimeout(context.Background(), 2*time.Second)
+				inbound, ok := ts.bus.ConsumeInbound(dCtx)
+				if ok {
+					_ = inbound
+				}
+				dCancel()
 			}
-			dCancel()
 
 			select {
 			case <-done:
@@ -824,24 +828,26 @@ func TestConfiguredRateIsEnforcedPerBucket(t *testing.T) {
 					t.Fatalf("Unmarshal: %v", err)
 				}
 				if msg.Event == "error" {
-					// Rate-limited: this should be the (rate+1)-th.
 					var errData map[string]string
 					json.Unmarshal(msg.Data, &errData)
-					if i < 2 {
-						t.Fatalf("ws: request %d got rate_limit error; expected 2 free", i+1)
-					}
 					if errData["code"] != "rate_limit_exceeded" {
 						t.Fatalf("ws: request %d error code = %q, want rate_limit_exceeded", i+1, errData["code"])
 					}
-					return // pass
+					if firstErrIdx == -1 {
+						firstErrIdx = i
+					}
+				} else {
+					allowed++
 				}
-				allowed++
 			default:
 				t.Fatal("expected message on SendChan")
 			}
 		}
-		if allowed != 2 {
-			t.Fatalf("ws: allowed %d requests, want exactly 2 (WSMessagesPerMinute=2)", allowed)
+		if allowed != 5 {
+			t.Fatalf("ws: allowed %d requests, want exactly 5 (WSMessagesPerMinute=5)", allowed)
+		}
+		if firstErrIdx != 5 {
+			t.Fatalf("ws: first rate-limit error at index %d, want 5 (WSMessagesPerMinute=5)", firstErrIdx)
 		}
 	})
 }

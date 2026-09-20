@@ -121,7 +121,7 @@ See `docs/channel-setup.md`.
 
 ### `channels.native.rate_limit`
 
-Controls per-source-IP rate limiting on the native REST + WebSocket API.
+Controls per-source-IP rate limiting on the native REST API, plus a per-client budget for WebSocket messages.
 
 - `enabled` (default `false`) — master switch; all limits are inactive when off
 - `pin_per_minute` (default `10`) — `GET /api/v1/auth/pin` requests per minute

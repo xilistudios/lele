@@ -140,12 +140,13 @@ Errors:
 | --- | --- | --- | --- |
 | 400 | `refresh_error` | Token unknown, expired, revoked, or already rotated | End the session and re-authenticate |
 | 400 | `body_invalid` | Malformed request body | Fix the request; the credential is untouched |
-| 429 | `rate_limit_exceeded` | Too many auth requests from this IP | Back off using `Retry-After`; **keep the session** |
+| 429 | `rate_limit_exceeded` | Too many auth requests from this IP (only when rate limiting is enabled) | Back off using `Retry-After`; **keep the session** |
 
 Only `refresh_error` proves the credential is dead. A 429 is answered by the
 limiter *before* the handler runs, so the refresh token has not been consumed
 and remains valid — clearing the session on a 429 turns a momentary slowdown
-into a sign-out.
+into a sign-out.  With rate limiting disabled (the default) no 429 is produced
+at all, so this branch is only exercised once you enable it.
 
 ### Rate Limits
 
@@ -174,8 +175,8 @@ Renewal deliberately does **not** share the pairing bucket.  Pairing retries
 quiet, automatic renewal call lets ordinary use trip a limit whose only
 recovery is signing out.
 
-Every 429 carries a `Retry-After` header with the seconds remaining in the
-window.
+When rate limiting is enabled, every 429 carries a `Retry-After` header with
+the seconds remaining in the window.
 
 **Security note:** with rate limiting disabled, the public
 `POST /api/v1/auth/pair` endpoint (6-digit PIN, 5-minute expiry) has no
