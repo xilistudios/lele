@@ -377,6 +377,34 @@ func TestCompaction_PreservesLastTwoHumanUserMessages_E2E_eviction(t *testing.T)
 	if len(rows) != 20 {
 		t.Errorf("SQLite rows = %d, want 20 (no data loss after eviction)", len(rows))
 	}
+
+	// --- (d) Restart path: cold-load a fresh SessionManager over the SAME
+	// store and verify the folded summary survives. Before the fix this
+	// assertion would fail because EvictExcludedMessages never persisted the
+	// folded summary to SQLite. ---
+	smCold := session.NewSessionManager()
+	smCold.SetStore(s)
+	coldSummary := smCold.GetSummary(sessionKey)
+	t.Logf("Cold-loaded summary: %q", coldSummary)
+	for _, tc := range []struct {
+		label, content string
+	}{
+		{"human0", human0},
+		{"human2", human2},
+		{"human8", human8},
+	} {
+		if !strings.Contains(coldSummary, tc.content) {
+			t.Errorf("cold-loaded summary missing %s: got %q", tc.label, coldSummary)
+		}
+	}
+
+	coldHist := smCold.GetHistory(sessionKey)
+	t.Logf("Cold-loaded history length: %d", len(coldHist))
+	for i, m := range coldHist {
+		if m.ExcludeFromContext {
+			t.Errorf("cold-loaded history[%d] has ExcludeFromContext=true (resurrected excluded row)", i)
+		}
+	}
 }
 
 // assertContextContains fails the test if none of the messages in ctx contain

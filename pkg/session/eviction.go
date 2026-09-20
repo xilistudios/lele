@@ -205,6 +205,12 @@ func (sm *SessionManager) SetEvictionTTL(ttl time.Duration) {
 // Because preserved messages inside the eviction region are also removed from
 // memory, their content is folded into the session summary first so no
 // information is lost (the summary stays in context and in SQLite metadata).
+// With eviction enabled the preserved messages are removed from memory together
+// with the excluded region and their content is appended to session.Summary
+// verbatim (so it still reaches the model inside the summary block). That fold
+// is persisted immediately via UpsertSession for that reason — the folded text
+// is about to leave memory entirely with the evicted region, so a crash before
+// the next Save would otherwise lose it.
 //
 // PRECONDITION: the caller must have already persisted the excluded flags
 // (Save returned nil). Eviction itself is memory-only and idempotent.
@@ -255,10 +261,12 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 			kept = append(kept, session.Messages[i])
 		}
 	}
+	foldedSummary := false
 	if len(kept) > 0 {
 		if folded := sm.foldEvictedIntoSummary(session, kept); folded != "" {
 			session.Summary = folded
 			session.Updated = time.Now()
+			foldedSummary = true
 		}
 	}
 
@@ -279,18 +287,35 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	// Save calls also carry it via sessionMetaFromSession. Failure to persist
 	// here only affects the durability of the boundary metadata (the in-memory
 	// eviction still succeeds), so it is logged, not fatal.
+	//
+	// When the fold changed the summary, we must persist the FULL metadata
+	// (via UpsertSession which carries both Summary and FirstInMemorySeq)
+	// instead of the targeted UpdateFirstInMemorySeq. The folded text is
+	// about to leave memory entirely with the evicted region, so a crash
+	// before the next Save would lose it — it must be durable immediately.
+	var metaPersistErr error
 	if sm.store != nil {
-		if perr := sm.store.Sessions().UpdateFirstInMemorySeq(key, session.firstInMemorySeq); perr != nil {
+		if foldedSummary {
+			metaPersistErr = sm.store.Sessions().UpsertSession(sessionMetaFromSession(session))
+		} else {
+			metaPersistErr = sm.store.Sessions().UpdateFirstInMemorySeq(key, session.firstInMemorySeq)
+		}
+		if metaPersistErr != nil {
 			logger.WarnCF("session", "Failed to persist eviction boundary", map[string]interface{}{
 				"session_key":     key,
 				"first_in_memory": session.firstInMemorySeq,
-				"error":           perr.Error(),
+				"error":           metaPersistErr.Error(),
 			})
 		}
 	}
 	// Dirty flags are reset: everything in memory is already persisted; the
 	// next Save must be a no-op (NOT a full rewrite).
 	session.clearDirtyFlags()
+	// If the fold happened but the metadata write failed, mark metaDirty
+	// AFTER clearDirtyFlags so the next Save retries via saveMetaOnlyUnlocked.
+	if foldedSummary && metaPersistErr != nil {
+		session.metaDirty = true
+	}
 	session.lastPersistedSeq = len(session.Messages) - 1
 	sm.touchSession(key)
 
