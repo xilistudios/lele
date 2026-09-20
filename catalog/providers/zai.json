@@ -98,6 +98,19 @@
       "tool_call": true
     },
     {
+      "id": "glm-5.3-flashx",
+      "name": "GLM-5.3-FlashX",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "glm-5v-turbo",
       "name": "GLM-5V-Turbo",
       "context_window": 200000,

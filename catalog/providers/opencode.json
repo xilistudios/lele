@@ -478,6 +478,19 @@
       "tool_call": true
     },
     {
+      "id": "qwen3.8-flash",
+      "name": "Qwen3.8 Flash",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "minimax-m3",
       "name": "MiniMax-M3",
       "context_window": 512000,
@@ -536,20 +549,6 @@
       "name": "Claude Fable 5.1",
       "context_window": 1000000,
       "max_output": 128000,
-      "vision": true,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "claude-haiku-4-5",
-      "name": "Claude Haiku 4.5",
-      "context_window": 200000,
-      "max_output": 64000,
       "vision": true,
       "thinking_levels": [
         "low",
