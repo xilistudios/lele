@@ -711,28 +711,181 @@ func TestExcludeOldMessages_PinIsNotSplitByToolPairFixup(t *testing.T) {
 		}
 	}
 
-	// No tool result kept without its assistant: if a tool result is kept,
-	// its assistant must also be kept.
-	for i, m := range session.Messages {
-		if isToolResultMessage(m) && !m.ExcludeFromContext {
-			// Find the assistant that produced this tool call.
+	// No tool result kept without its assistant: filter to the context slice
+	// (the subset of messages NOT excluded) and assert in both directions
+	// that no orphaned tool pairs exist.
+	var ctx []providers.Message
+	for _, m := range session.Messages {
+		if !m.ExcludeFromContext {
+			ctx = append(ctx, m)
+		}
+	}
+
+	// Direction 1 (reverse): a tool result in context whose assistant is NOT in context.
+	for i, m := range ctx {
+		if isToolResultMessage(m) {
 			foundAssistant := false
 			for j := i - 1; j >= 0; j-- {
-				if session.Messages[j].Role == "assistant" {
-					for _, tc := range session.Messages[j].ToolCalls {
+				if ctx[j].Role == "assistant" {
+					for _, tc := range ctx[j].ToolCalls {
 						if tc.ID == m.ToolCallID {
-							if !session.Messages[j].ExcludeFromContext {
-								foundAssistant = true
-							}
+							foundAssistant = true
 							break
 						}
 					}
-					break
+					if foundAssistant {
+						break
+					}
 				}
 			}
-			// It's OK if the assistant is in a different part of the conversation;
-			// the key invariant is that the fixup doesn't create orphans.
-			_ = foundAssistant
+			if !foundAssistant {
+				t.Errorf("orphaned tool result in context at index %d: ToolCallID=%q content=%q — no matching assistant tool_call found",
+					i, m.ToolCallID, m.Content)
+			}
+		}
+	}
+
+	// Direction 2 (forward): an assistant with ToolCalls in context whose
+	// tool_call IDs have no matching tool result in context.
+	for i, m := range ctx {
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			for _, tc := range m.ToolCalls {
+				if tc.ID == "" {
+					continue
+				}
+				foundResult := false
+				for j := i + 1; j < len(ctx); j++ {
+					if ctx[j].ToolCallID == tc.ID {
+						foundResult = true
+						break
+					}
+				}
+				if !foundResult {
+					t.Errorf("orphaned assistant tool_call in context at index %d: call ID=%q content=%q — no matching tool result found",
+						i, tc.ID, m.Content)
+				}
+			}
+		}
+	}
+}
+
+// TestExcludeOldMessages_PinIsNotSplitByToolPairFixup_ForwardAdjacentPin
+// exercises the forward boundary fixup when a preserved human turn is
+// adjacent to the tool result that the fixup must advance past.
+//
+// Layout (8 messages):
+//
+//	0: user   "initial request"
+//	1: assistant tool_use (call_x)
+//	2: tool   result for call_x
+//	3: assistant "intermediate answer"
+//	4: user   "pin-me: human question"  ← preserved pin
+//	5: assistant tool_use (call_y)       ← boundary: assistant with tool_use
+//	6: tool   result for call_y          ← excludeUpTo lands here → fixup advances
+//	7: user   "pin-me: final question"   ← preserved pin (in kept tail)
+//
+// keepCount=2: excludeUpTo=6 (tool result) → fixup advances to 7.
+// Preserved = {0, 4, 6}. Range [1, 7). Excluded: {1, 2, 3, 5}.
+// The pin at index 4 stays un-excluded; no orphans in filtered context.
+func TestExcludeOldMessages_PinIsNotSplitByToolPairFixup_ForwardAdjacentPin(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:pin-forward-fixup"
+
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "initial request"}) // 0
+	sm.AddFullMessage(key, providers.Message{                                           // 1
+		Role:      "assistant",
+		Content:   "searching...",
+		ToolCalls: []providers.ToolCall{{ID: "call_x", Function: &providers.FunctionCall{Name: "search"}}},
+	})
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "results_x", ToolCallID: "call_x"}) // 2
+	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "intermediate answer"})        // 3
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "pin-me: human question"})          // 4
+	sm.AddFullMessage(key, providers.Message{                                                           // 5
+		Role:      "assistant",
+		Content:   "searching again...",
+		ToolCalls: []providers.ToolCall{{ID: "call_y", Function: &providers.FunctionCall{Name: "search"}}},
+	})
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "results_y", ToolCallID: "call_y"}) // 6
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "pin-me: final question"})          // 7
+
+	// keepCount=2: excludeUpTo=6. Index 6 is a tool result → forward fixup → 7.
+	// Human turns: 0, 4, 7. Last 2 human: 4, 7. preserved = {0, 4, 7}.
+	// Fixed-up range: [1, 7). Index 4 is a pin inside range.
+	sm.ExcludeOldMessagesFromContext(key, 2)
+
+	session := sm.GetOrCreate(key)
+
+	// (a) The pin at index 4 must be kept.
+	if session.Messages[4].ExcludeFromContext {
+		t.Error("index 4 (adjacent pin) should NOT be excluded")
+	}
+	// Index 0 always preserved.
+	if session.Messages[0].ExcludeFromContext {
+		t.Error("index 0 should never be excluded")
+	}
+	// Index 7 (in kept tail) preserved.
+	if session.Messages[7].ExcludeFromContext {
+		t.Error("index 7 should not be excluded")
+	}
+
+	// Indices 1, 2, 3, 5 should be excluded.
+	for _, idx := range []int{1, 2, 3, 5} {
+		if !session.Messages[idx].ExcludeFromContext {
+			t.Errorf("index %d should be excluded", idx)
+		}
+	}
+
+	// (b) No orphaned tool pairs in the filtered context.
+	var ctx []providers.Message
+	for _, m := range session.Messages {
+		if !m.ExcludeFromContext {
+			ctx = append(ctx, m)
+		}
+	}
+
+	// Forward direction: assistant with ToolCalls in context must have
+	// matching tool results in context.
+	for i, m := range ctx {
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			for _, tc := range m.ToolCalls {
+				if tc.ID == "" {
+					continue
+				}
+				found := false
+				for j := i + 1; j < len(ctx); j++ {
+					if ctx[j].ToolCallID == tc.ID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("orphaned assistant tool_call in context at index %d: call ID=%q — no matching tool result", i, tc.ID)
+				}
+			}
+		}
+	}
+
+	// Reverse direction: tool result in context must have matching
+	// assistant in context.
+	for i, m := range ctx {
+		if isToolResultMessage(m) {
+			found := false
+			for j := i - 1; j >= 0; j-- {
+				if ctx[j].Role == "assistant" {
+					for _, tc := range ctx[j].ToolCalls {
+						if tc.ID == m.ToolCallID {
+							found = true
+							break
+						}
+					}
+					if found {
+						break
+					}
+				}
+			}
+			if !found {
+				t.Errorf("orphaned tool result in context at index %d: ToolCallID=%q — no matching assistant", i, m.ToolCallID)
+			}
 		}
 	}
 }

@@ -93,7 +93,7 @@ func lastHumanUserMessageIndices(messages []providers.Message, n int) []int {
 
 // ExcludeOldMessagesFromContext marks the first len(messages)-keepCount messages
 // as excluded from the LLM context, preserving them in storage for the web UI.
-// If keepCount <= 0, all messages are excluded.
+// If keepCount <= 0, all messages outside the preserved set are excluded.
 //
 // The first message (index 0) plus the last preservedUserMessages human user
 // turns are never excluded — the summary is lossy so the user's most recent
