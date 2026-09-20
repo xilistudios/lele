@@ -252,6 +252,30 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	}
 	evictUpTo := lastExcluded + 1
 
+	if session.excludeBoundary > 0 {
+		// A compaction recorded the boundary it meant. Rows excluded by OTHER
+		// writers (the WebUI approval/rejection message) sit in the kept tail and
+		// must stay resident: never evict past the compaction boundary.
+		if evictUpTo > session.excludeBoundary {
+			evictUpTo = session.excludeBoundary
+		}
+	} else {
+		// No boundary recorded (cold load, direct call): fall back to the
+		// contiguous excluded run, exactly like the pre-branch behaviour, so a
+		// trailing excluded row cannot drag the whole slice away.
+		runStart := 0
+		for runStart < len(session.Messages) && !session.Messages[runStart].ExcludeFromContext {
+			runStart++
+		}
+		evictUpTo = runStart
+		for evictUpTo < len(session.Messages) && session.Messages[evictUpTo].ExcludeFromContext {
+			evictUpTo++
+		}
+		if evictUpTo == 0 {
+			return 0
+		}
+	}
+
 	// Collect non-excluded messages in [0, evictUpTo) — these are preserved
 	// holes (index 0, recent human turns) that sit inside the eviction region.
 	// Their content is folded into the summary so nothing is lost.

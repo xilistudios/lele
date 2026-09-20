@@ -199,6 +199,7 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 		}
 		session.Updated = time.Now()
 		session.excludedRange = [2]int{rangeStart, hi}
+		session.excludeBoundary = hi
 		session.bumpEpoch()
 		return
 	}
@@ -231,6 +232,7 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 	}
 	session.Updated = time.Now()
 	session.excludedRange = [2]int{rangeStart, hi}
+	session.excludeBoundary = hi
 	session.bumpEpoch()
 }
 
