@@ -152,12 +152,23 @@ func expandArg(token, rawArgs string, args []string) string {
 // runShell executes one !`cmd` snippet with sh -c in WorkDir and returns the
 // text to inject. On failure any partial output is still injected, prefixed
 // with the error, so the model sees what the command managed to print.
+//
+// The child process is hardened against interactive-terminal hazards:
+// detachShellChild (setsid on Unix) prevents /dev/tty prompts from blocking
+// the parent, and non-interactive env vars prevent git/pager/apt dialogs.
 func runShell(command string, opts ExpandOptions) string {
 	ctx, cancel := context.WithTimeout(context.Background(), shellTimeout)
 	defer cancel()
 
 	c := exec.CommandContext(ctx, "sh", "-c", command)
 	c.Dir = opts.WorkDir
+	detachShellChild(c)
+	c.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_PAGER=cat",
+		"PAGER=cat",
+		"DEBIAN_FRONTEND=noninteractive",
+	)
 	out, err := c.CombinedOutput()
 	text := strings.TrimRight(string(out), " \t\r\n")
 	if err != nil {
