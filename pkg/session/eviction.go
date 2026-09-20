@@ -273,6 +273,25 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 		}
 	}
 
+	// Structural invariant: never evict the entire slice. excludeBoundary can
+	// legitimately be == len(Messages) (the anti-split guard in
+	// ExcludeOldMessagesFromContext pushes excludeUpTo to the end when the tail
+	// is a tool-result group), and the clamp above is then inert: evicting to
+	// len would leave the resident context empty and fold the in-flight turn
+	// and the pinned human turns into the lossy summary (the model would get
+	// no conversation message at all). Cap at the last in-context message so
+	// at least one message survives in RAM when any exists.
+	if evictUpTo >= len(session.Messages) {
+		for i := len(session.Messages) - 1; i >= 0; i-- {
+			if !session.Messages[i].ExcludeFromContext {
+				if i < evictUpTo {
+					evictUpTo = i
+				}
+				break
+			}
+		}
+	}
+
 	// Collect non-excluded messages in [0, evictUpTo) — these are preserved
 	// holes (index 0, recent human turns) that sit inside the eviction region.
 	// Their content is folded into the summary so nothing is lost.

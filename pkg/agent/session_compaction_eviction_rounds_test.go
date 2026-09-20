@@ -242,3 +242,199 @@ func TestCompaction_SecondRoundEvictsExcludedFromMemory(t *testing.T) {
 		t.Errorf("(c) summary grew too much: round1=%d, round2=%d (> 3× growth)", summary1Len, summary2Len)
 	}
 }
+
+// TestCompaction_TailToolResultsDoesNotEmptyContext exercises the production
+// path (summarizeSessionWithError) in 2 rounds where round 2 ends with a
+// tool-result tail (assistant with 2 tool_calls + 2 tool results, no
+// ContextMessages). The anti-split guard in ExcludeOldMessagesFromContext
+// pushes excludeUpTo to len, setting excludeBoundary == len. The structural
+// invariant in EvictExcludedMessages must prevent the entire context from
+// being wiped.
+//
+// Without FIX A (structural invariant), the clamp is inert when
+// boundary == len, and round 2 produces in_context=0 (the model gets no
+// conversation message at all).
+func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "tail-tools-e2e-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+		Providers: &config.ProvidersConfig{
+			Anthropic: config.ProviderConfig{
+				APIKey: "test-key",
+			},
+		},
+		Session: config.SessionConfig{
+			EvictExcludedFromMemory: true,
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus)
+
+	testSessionMgr := session.NewSessionManager()
+	al.registry.SetSharedSessionManager(testSessionMgr)
+
+	sm := newSessionManager(al)
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("No default agent found")
+	}
+
+	storePath := filepath.Join(tmpDir, "tail-tools-e2e.db")
+	s, err := store.Open(storePath)
+	if err != nil {
+		t.Fatalf("Failed to open store: %v", err)
+	}
+	defer s.Close()
+	agent.Sessions.SetStore(s)
+
+	agent.Provider = &llmRunnerMockLLMProvider{
+		response: &providers.LLMResponse{
+			Content:   "Summary: User is building a DHT crawler and needs search results.",
+			ToolCalls: []providers.ToolCall{},
+		},
+	}
+
+	const sessionKey = "test:tail-tools-e2e"
+
+	// --- Seed 20 messages: human at 0, 2, 8; rest assistant/tool ---
+	agent.Sessions.AddMessage(sessionKey, "user", "ORIGINAL GOAL: build the DHT crawler")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "I'll help you build a DHT crawler.")
+	agent.Sessions.AddMessage(sessionKey, "user", "FOLLOWUP ONE: does the routing table accept new nodes?")
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
+		Role:      "assistant",
+		Content:   "Let me search for DHT implementations.",
+		ToolCalls: []providers.ToolCall{{ID: "call_search", Function: &providers.FunctionCall{Name: "web_search"}}},
+	})
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
+		Role:       "tool",
+		Content:    "Found 3 DHT implementations on GitHub",
+		ToolCallID: "call_search",
+	})
+	agent.Sessions.AddMessage(sessionKey, "assistant", "The routing table accepts new nodes via Kademlia XOR distance.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Here is the architecture overview.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "I can also check the test suite for you.")
+	agent.Sessions.AddMessage(sessionKey, "user", "FOLLOWUP TWO: show me the failing test")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Let me look at the tests.")
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
+		Role:      "assistant",
+		Content:   "Searching for test files...",
+		ToolCalls: []providers.ToolCall{{ID: "call_grep", Function: &providers.FunctionCall{Name: "exec"}}},
+	})
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
+		Role:       "tool",
+		Content:    "Found: dht_test.go:42 TestBootstrapNode",
+		ToolCallID: "call_grep",
+	})
+	agent.Sessions.AddMessage(sessionKey, "assistant", "The failing test is TestBootstrapNode.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "It fails because the mock peer returns stale data.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "You need to update the mock in setup_test.go.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Specifically line 87 where the peer ID is set.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Changing it to the new format should fix it.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Would you like me to show the exact diff?")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Here is a summary of what we covered so far.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Let me know if you have more questions.")
+
+	if err := agent.Sessions.Save(sessionKey); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// --- Round 1: compact + evict ---
+	stats1, err := sm.summarizeSessionWithError(agent, sessionKey)
+	if err != nil {
+		t.Fatalf("round 1 summarizeSessionWithError failed: %v", err)
+	}
+	t.Logf("Round 1 stats: before=%d after=%d dropped=%d", stats1.BeforeMessages, stats1.AfterMessages, stats1.DroppedMessages)
+
+	summary1 := agent.Sessions.GetSummary(sessionKey)
+	t.Logf("Round 1 summary length: %d chars", len(summary1))
+
+	hist1 := agent.Sessions.GetHistory(sessionKey)
+	t.Logf("Round 1 resident: %d messages", len(hist1))
+
+	// --- Materialize summary (ensureSummaryMaterialized pattern) ---
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
+		Role:    "user",
+		Content: summaryMessageHeader + summary1,
+	})
+
+	// --- Add messages for round 2, ending with a tool-result tail ---
+	// The tail is assistant with 2 tool_calls + 2 tool results, no
+	// ContextMessages. This triggers the anti-split guard in
+	// ExcludeOldMessagesFromContext which pushes excludeUpTo to len.
+	agent.Sessions.AddMessage(sessionKey, "user", "search for DHT implementations and grep for test files") // human
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{                                            // assistant + 2 tool_calls
+		Role:    "assistant",
+		Content: "Let me search and grep.",
+		ToolCalls: []providers.ToolCall{
+			{ID: "call_search2", Function: &providers.FunctionCall{Name: "web_search"}},
+			{ID: "call_grep2", Function: &providers.FunctionCall{Name: "exec"}},
+		},
+	})
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{ // tool result call_search2
+		Role:       "tool",
+		Content:    "Found 5 DHT implementations",
+		ToolCallID: "call_search2",
+	})
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{ // tool result call_grep2
+		Role:       "tool",
+		Content:    "Found 3 test files matching DHT",
+		ToolCallID: "call_grep2",
+	})
+
+	if err := agent.Sessions.Save(sessionKey); err != nil {
+		t.Fatalf("round 2 pre-save failed: %v", err)
+	}
+
+	histPreR2 := agent.Sessions.GetHistory(sessionKey)
+	t.Logf("Round 2 pre-compact: %d messages", len(histPreR2))
+
+	// --- Round 2: compact + evict ---
+	agent.Provider = &llmRunnerMockLLMProvider{
+		response: &providers.LLMResponse{
+			Content:   "Summary: User is building a DHT crawler with test configuration.",
+			ToolCalls: []providers.ToolCall{},
+		},
+	}
+
+	stats2, err := sm.summarizeSessionWithError(agent, sessionKey)
+	if err != nil {
+		t.Fatalf("round 2 summarizeSessionWithError failed: %v", err)
+	}
+	t.Logf("Round 2 stats: before=%d after=%d dropped=%d", stats2.BeforeMessages, stats2.AfterMessages, stats2.DroppedMessages)
+
+	// --- Inspect post-round-2 state ---
+	hist2 := agent.Sessions.GetHistory(sessionKey)
+
+	excludedResident := 0
+	for _, m := range hist2 {
+		if m.ExcludeFromContext {
+			excludedResident++
+		}
+	}
+	ctx2 := filterContextMessages(hist2)
+	t.Logf("Round 2 post-eviction: len(hist)=%d, excluded_resident=%d, in_context=%d",
+		len(hist2), excludedResident, len(ctx2))
+
+	// --- (a) At least one context message must reach the model ---
+	if len(ctx2) == 0 {
+		t.Errorf("(a) filterContextMessages is empty after round 2 — model gets no conversation messages (in_context=0)")
+	}
+	// --- (b) History must not be empty ---
+	if len(hist2) == 0 {
+		t.Errorf("(b) history is empty after round 2 — eviction wiped all resident context")
+	}
+}
