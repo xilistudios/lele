@@ -76,6 +76,11 @@ type EditableAgentDefaults struct {
 	SubagentMaxRetries     int     `json:"subagent_max_retries,omitempty"`
 	SubagentMaxIterations  int     `json:"subagent_max_iterations,omitempty"`
 	LLMLoopTimeoutMinutes  int     `json:"llm_loop_timeout_minutes,omitempty"`
+	// PromptCache mirrors AgentDefaults.PromptCache: explicit prompt-cache
+	// breakpoints for providers that support them (Anthropic-style
+	// cache_control). Without this field the WebUI would silently drop the
+	// setting on every save cycle.
+	PromptCache PromptCacheConfig `json:"prompt_cache,omitempty"`
 }
 
 // EditableAgentConfig represents an agent in editable mode.
@@ -139,6 +144,16 @@ type EditableChannelsConfig struct {
 	LINE     EditableLINEConfig     `json:"line"`
 	OneBot   EditableOneBotConfig   `json:"onebot"`
 	Native   EditableNativeConfig   `json:"native"`
+	// Web is the Web UI server toggle (runtime: Channels.Web, env
+	// LELE_WEB_ENABLED, default enabled). Without it in the document the
+	// WebUI could neither see nor toggle it, and the key was silently
+	// dropped on every save.
+	Web EditableWebConfig `json:"web"`
+}
+
+// EditableWebConfig for the Web UI channel toggle.
+type EditableWebConfig struct {
+	Enabled bool `json:"enabled"`
 }
 
 // EditableWhatsAppConfig for WhatsApp.

@@ -33,6 +33,9 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		// agents-list Temperature drop); the round-trip test now guards it.
 		SubagentMaxIterations: doc.Agents.Defaults.SubagentMaxIterations,
 		LLMLoopTimeoutMinutes: doc.Agents.Defaults.LLMLoopTimeoutMinutes,
+		// PromptCache must be carried: without it a document→Config conversion
+		// silently reverts prompt-cache settings to the code default (off).
+		PromptCache: doc.Agents.Defaults.PromptCache,
 	}
 
 	for _, agent := range doc.Agents.List {
@@ -151,6 +154,9 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		UploadTTLHours:    doc.Channels.Native.UploadTTLHours,
 		RateLimit:         doc.Channels.Native.RateLimit,
 	}
+	// Web UI toggle: must be carried like every other channel, otherwise a
+	// document->Config conversion silently reverts it to the code default.
+	cfg.Channels.Web.Enabled = doc.Channels.Web.Enabled
 
 	// Copiar providers
 	cfg.Providers.Named = make(map[string]NamedProviderConfig)
@@ -215,13 +221,21 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 	}
 	cfg.Harness = doc.Harness
 
-	data, err := json.Marshal(doc.toSerializable())
+	serializable := doc.toSerializable()
+	data, err := json.Marshal(serializable)
 	if err != nil {
 		return nil, err
 	}
 	validated := DefaultConfig()
 	if err := json.Unmarshal(data, validated); err != nil {
 		return nil, err
+	}
+	// Mirror LoadConfig: an absent session.ephemeral means false, never
+	// DefaultConfig()'s true. The pruned serializer omits the key exactly when
+	// the document means false, so without this ToConfig would hand back true
+	// for a document that LoadConfig/LoadEditableDocument both read as false.
+	if !pinnedSessionEphemeral(serializable) {
+		validated.Session.Ephemeral = SessionEphemeralFileDefault
 	}
 	if validated.Session.EphemeralThreshold <= 0 {
 		validated.Session.EphemeralThreshold = DefaultEphemeralThresholdSeconds
@@ -264,10 +278,35 @@ func SaveEditableDocument(path string, doc *EditableDocument) error {
 	return nil
 }
 
+// SaveMinimalConfig writes cfg as JSON containing only values that differ
+// from the code defaults (via the editable-document serializer).
+//
+// It converts cfg to an EditableDocument and saves it with the same
+// prune-on-save path SaveEditableDocument uses: toSerializable emits a key
+// only when it differs from the default the file reloads to (DefaultConfig(),
+// with the documented session.ephemeral exception), and LoadConfig unmarshals
+// the file OVER the defaults, so every omitted key keeps its code default. The
+// result is a minimal, lossless config.json — what first-run onboarding
+// should write instead of SaveConfig's full dump.
+//
+// Note: fields the editable document does not model (e.g. server.*) are not
+// persisted; callers must express such settings through modeled fields
+// (gateway.* for the listen port) to avoid silent data loss.
+func SaveMinimalConfig(path string, cfg *Config) error {
+	return SaveEditableDocument(path, editableDocumentFromConfig(cfg))
+}
+
 // toSerializable converts the document to a serializable format
 // that can include ENV placeholders.
 func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	result := make(map[string]interface{})
+
+	// def is the runtime default every section below is diffed against.
+	// LoadConfig unmarshals the file OVER DefaultConfig() and
+	// LoadEditableDocument re-applies applyDefaults, so a key omitted here is
+	// restored to exactly this value on the next load: pruning the file is
+	// lossless. One exception is documented at "session.ephemeral" below.
+	def := DefaultConfig()
 
 	// Agents.
 	// STRUCTURAL FIX: "defaults" used to be a hand-written map with hardcoded
@@ -284,34 +323,45 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	}
 
 	// Session.
-	if doc.Session.DMScope != "" || doc.Session.Ephemeral || len(doc.Session.IdentityLinks) > 0 || doc.Session.CompactionModel != "" || doc.Session.EvictExcludedFromMemory ||
-		doc.Session.DurableInbound != nil || doc.Session.DurableOutbound != nil || doc.Session.Resume != nil {
-		session := map[string]interface{}{
-			"ephemeral":                    doc.Session.Ephemeral,
-			"ephemeral_threshold":          doc.Session.EphemeralThreshold,
-			"compaction_threshold_percent": doc.Session.CompactionThresholdPercent,
-			"compaction_model":             doc.Session.CompactionModel,
-			"evict_excluded_from_memory":   doc.Session.EvictExcludedFromMemory,
-		}
-		// Tri-state: only write the key when the user configured it, so an
-		// untouched file keeps inheriting the code default.
-		if doc.Session.DurableInbound != nil {
-			session["durable_inbound"] = *doc.Session.DurableInbound
-		}
-		if doc.Session.DurableOutbound != nil {
-			session["durable_outbound"] = *doc.Session.DurableOutbound
-		}
-		if doc.Session.Resume != nil {
-			session["resume_enabled"] = *doc.Session.Resume
-		}
-		if doc.Session.DMScope != "" {
-			session["dm_scope"] = doc.Session.DMScope
-		}
-		if len(doc.Session.IdentityLinks) > 0 {
-			session["identity_links"] = doc.Session.IdentityLinks
-		}
-		result["session"] = session
+	// Prune-on-save like channels and gateway: emit a key only when it
+	// differs from the default the file reloads to, and drop the whole section
+	// when nothing differs.
+	//
+	// The comparison value is the *effective file default* — what LoadConfig
+	// yields when the key is absent — which is not always DefaultConfig():
+	//   - session.ephemeral: DefaultConfig() holds true, but LoadConfig has
+	//     special handling that forces false when the file omits the key. The
+	//     prune therefore compares against false: omitting can only ever
+	//     restore false, so an explicit true must still be written (and is).
+	//   - session.evict_excluded_from_memory has no such override and prunes
+	//     against the runtime default (true).
+	//
+	// Tri-state pointers keep their existing "only when set" semantics: nil
+	// means "inherit". Pruning an explicit false would reload as nil — the same
+	// runtime answer (DurableInboundEnabled & friends resolve nil to false) but
+	// not the same document, so the key stays written (correctness beats
+	// minimalism).
+	session := make(map[string]interface{})
+	putIfDiff(session, "ephemeral", doc.Session.Ephemeral, SessionEphemeralFileDefault)
+	putIfDiff(session, "ephemeral_threshold", doc.Session.EphemeralThreshold, DefaultEphemeralThresholdSeconds)
+	putIfDiff(session, "compaction_threshold_percent", doc.Session.CompactionThresholdPercent, DefaultCompactionThresholdPercent)
+	putIfDiff(session, "compaction_model", doc.Session.CompactionModel, def.Session.CompactionModel)
+	putIfDiff(session, "evict_excluded_from_memory", doc.Session.EvictExcludedFromMemory, def.Session.EvictExcludedFromMemory)
+	putIfDiff(session, "dm_scope", doc.Session.DMScope, def.Session.DMScope)
+	// An empty/nil map is the default, so only a populated one is written.
+	if len(doc.Session.IdentityLinks) > 0 {
+		session["identity_links"] = doc.Session.IdentityLinks
 	}
+	if doc.Session.DurableInbound != nil {
+		session["durable_inbound"] = *doc.Session.DurableInbound
+	}
+	if doc.Session.DurableOutbound != nil {
+		session["durable_outbound"] = *doc.Session.DurableOutbound
+	}
+	if doc.Session.Resume != nil {
+		session["resume_enabled"] = *doc.Session.Resume
+	}
+	putSection(result, "session", session)
 
 	// Bindings
 	if len(doc.Bindings) > 0 {
@@ -323,116 +373,128 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		result["groups"] = doc.Groups
 	}
 
-	// Channels
+	// Channels.
+	// Prune-on-save: each key is emitted only when it differs from the
+	// corresponding runtime default (def.Channels.X), and a channel block is
+	// emitted only when at least one key differs. Omitted keys keep their code
+	// defaults on load (LoadConfig unmarshals the file OVER DefaultConfig), so
+	// this is lossless and keeps config.json minimal.
+	// Special case: native and web default to enabled:true, so a default
+	// native/web config writes nothing while a disabled one writes
+	// {"enabled": false}.
 	channels := make(map[string]interface{})
 
 	// Native
-	channels["native"] = map[string]interface{}{
-		"enabled":             doc.Channels.Native.Enabled,
-		"host":                doc.Channels.Native.Host,
-		"port":                doc.Channels.Native.Port,
-		"token_expiry_days":   doc.Channels.Native.TokenExpiryDays,
-		"pin_expiry_minutes":  doc.Channels.Native.PinExpiryMinutes,
-		"max_clients":         doc.Channels.Native.MaxClients,
-		"cors_origins":        doc.Channels.Native.CORSOrigins,
-		"session_expiry_days": doc.Channels.Native.SessionExpiryDays,
-		"max_upload_size_mb":  doc.Channels.Native.MaxUploadSizeMB,
-		"upload_ttl_hours":    doc.Channels.Native.UploadTTLHours,
-		"rate_limit":          doc.Channels.Native.RateLimit,
-	}
+	native := make(map[string]interface{})
+	putIfDiff(native, "enabled", doc.Channels.Native.Enabled, def.Channels.Native.Enabled)
+	putIfDiff(native, "host", doc.Channels.Native.Host, def.Channels.Native.Host)
+	putIfDiff(native, "port", doc.Channels.Native.Port, def.Channels.Native.Port)
+	putIfDiff(native, "token_expiry_days", doc.Channels.Native.TokenExpiryDays, def.Channels.Native.TokenExpiryDays)
+	putIfDiff(native, "pin_expiry_minutes", doc.Channels.Native.PinExpiryMinutes, def.Channels.Native.PinExpiryMinutes)
+	putIfDiff(native, "max_clients", doc.Channels.Native.MaxClients, def.Channels.Native.MaxClients)
+	putSliceIfDiff(native, "cors_origins", doc.Channels.Native.CORSOrigins, def.Channels.Native.CORSOrigins)
+	putIfDiff(native, "session_expiry_days", doc.Channels.Native.SessionExpiryDays, def.Channels.Native.SessionExpiryDays)
+	putIfDiff(native, "max_upload_size_mb", doc.Channels.Native.MaxUploadSizeMB, def.Channels.Native.MaxUploadSizeMB)
+	putIfDiff(native, "upload_ttl_hours", doc.Channels.Native.UploadTTLHours, def.Channels.Native.UploadTTLHours)
+	// rate_limit is a comparable struct (bool/int fields only): pruned as a
+	// whole block against the default; any single-field deviation persists it.
+	putIfDiff(native, "rate_limit", doc.Channels.Native.RateLimit, def.Channels.Native.RateLimit)
+	putSection(channels, "native", native)
+
+	// Web UI toggle
+	webChannel := make(map[string]interface{})
+	putIfDiff(webChannel, "enabled", doc.Channels.Web.Enabled, def.Channels.Web.Enabled)
+	putSection(channels, "web", webChannel)
 
 	// Telegram
-	telegram := map[string]interface{}{
-		"enabled":    doc.Channels.Telegram.Enabled,
-		"proxy":      doc.Channels.Telegram.Proxy,
-		"allow_from": doc.Channels.Telegram.AllowFrom,
-		"verbose":    doc.Channels.Telegram.Verbose,
-	}
-	writeSecret(telegram, "token", doc.Channels.Telegram.Token)
-	channels["telegram"] = telegram
+	telegram := make(map[string]interface{})
+	putIfDiff(telegram, "enabled", doc.Channels.Telegram.Enabled, def.Channels.Telegram.Enabled)
+	putSecretIfDiff(telegram, "token", doc.Channels.Telegram.Token, def.Channels.Telegram.Token)
+	putIfDiff(telegram, "proxy", doc.Channels.Telegram.Proxy, def.Channels.Telegram.Proxy)
+	putSliceIfDiff(telegram, "allow_from", doc.Channels.Telegram.AllowFrom, def.Channels.Telegram.AllowFrom)
+	putIfDiff(telegram, "verbose", doc.Channels.Telegram.Verbose, def.Channels.Telegram.Verbose)
+	putSection(channels, "telegram", telegram)
 
 	// Discord
-	discord := map[string]interface{}{
-		"enabled":    doc.Channels.Discord.Enabled,
-		"allow_from": doc.Channels.Discord.AllowFrom,
-	}
-	writeSecret(discord, "token", doc.Channels.Discord.Token)
-	channels["discord"] = discord
+	discord := make(map[string]interface{})
+	putIfDiff(discord, "enabled", doc.Channels.Discord.Enabled, def.Channels.Discord.Enabled)
+	putSecretIfDiff(discord, "token", doc.Channels.Discord.Token, def.Channels.Discord.Token)
+	putSliceIfDiff(discord, "allow_from", doc.Channels.Discord.AllowFrom, def.Channels.Discord.AllowFrom)
+	putSection(channels, "discord", discord)
 
 	// Feishu
-	feishu := map[string]interface{}{
-		"enabled":    doc.Channels.Feishu.Enabled,
-		"allow_from": doc.Channels.Feishu.AllowFrom,
-	}
-	writeSecret(feishu, "app_id", doc.Channels.Feishu.AppID)
-	writeSecret(feishu, "app_secret", doc.Channels.Feishu.AppSecret)
-	channels["feishu"] = feishu
+	feishu := make(map[string]interface{})
+	putIfDiff(feishu, "enabled", doc.Channels.Feishu.Enabled, def.Channels.Feishu.Enabled)
+	putSecretIfDiff(feishu, "app_id", doc.Channels.Feishu.AppID, def.Channels.Feishu.AppID)
+	putSecretIfDiff(feishu, "app_secret", doc.Channels.Feishu.AppSecret, def.Channels.Feishu.AppSecret)
+	putSecretIfDiff(feishu, "encrypt_key", doc.Channels.Feishu.EncryptKey, def.Channels.Feishu.EncryptKey)
+	putSecretIfDiff(feishu, "verification_token", doc.Channels.Feishu.VerificationToken, def.Channels.Feishu.VerificationToken)
+	putSliceIfDiff(feishu, "allow_from", doc.Channels.Feishu.AllowFrom, def.Channels.Feishu.AllowFrom)
+	putSection(channels, "feishu", feishu)
 
 	// Slack
-	slack := map[string]interface{}{
-		"enabled":    doc.Channels.Slack.Enabled,
-		"allow_from": doc.Channels.Slack.AllowFrom,
-	}
-	writeSecret(slack, "bot_token", doc.Channels.Slack.BotToken)
-	channels["slack"] = slack
+	slack := make(map[string]interface{})
+	putIfDiff(slack, "enabled", doc.Channels.Slack.Enabled, def.Channels.Slack.Enabled)
+	putSecretIfDiff(slack, "bot_token", doc.Channels.Slack.BotToken, def.Channels.Slack.BotToken)
+	putSecretIfDiff(slack, "app_token", doc.Channels.Slack.AppToken, def.Channels.Slack.AppToken)
+	putSliceIfDiff(slack, "allow_from", doc.Channels.Slack.AllowFrom, def.Channels.Slack.AllowFrom)
+	putSection(channels, "slack", slack)
 
 	// LINE
-	line := map[string]interface{}{
-		"enabled":      doc.Channels.LINE.Enabled,
-		"webhook_host": doc.Channels.LINE.WebhookHost,
-		"webhook_port": doc.Channels.LINE.WebhookPort,
-		"webhook_path": doc.Channels.LINE.WebhookPath,
-		"allow_from":   doc.Channels.LINE.AllowFrom,
-	}
-	writeSecret(line, "channel_secret", doc.Channels.LINE.ChannelSecret)
-	writeSecret(line, "channel_access_token", doc.Channels.LINE.ChannelAccessToken)
-	channels["line"] = line
+	line := make(map[string]interface{})
+	putIfDiff(line, "enabled", doc.Channels.LINE.Enabled, def.Channels.LINE.Enabled)
+	putSecretIfDiff(line, "channel_secret", doc.Channels.LINE.ChannelSecret, def.Channels.LINE.ChannelSecret)
+	putSecretIfDiff(line, "channel_access_token", doc.Channels.LINE.ChannelAccessToken, def.Channels.LINE.ChannelAccessToken)
+	putIfDiff(line, "webhook_host", doc.Channels.LINE.WebhookHost, def.Channels.LINE.WebhookHost)
+	putIfDiff(line, "webhook_port", doc.Channels.LINE.WebhookPort, def.Channels.LINE.WebhookPort)
+	putIfDiff(line, "webhook_path", doc.Channels.LINE.WebhookPath, def.Channels.LINE.WebhookPath)
+	putSliceIfDiff(line, "allow_from", doc.Channels.LINE.AllowFrom, def.Channels.LINE.AllowFrom)
+	putSection(channels, "line", line)
 
 	// OneBot
-	onebot := map[string]interface{}{
-		"enabled":              doc.Channels.OneBot.Enabled,
-		"ws_url":               doc.Channels.OneBot.WSUrl,
-		"reconnect_interval":   doc.Channels.OneBot.ReconnectInterval,
-		"group_trigger_prefix": doc.Channels.OneBot.GroupTriggerPrefix,
-		"allow_from":           doc.Channels.OneBot.AllowFrom,
-	}
-	writeSecret(onebot, "access_token", doc.Channels.OneBot.AccessToken)
-	channels["onebot"] = onebot
+	onebot := make(map[string]interface{})
+	putIfDiff(onebot, "enabled", doc.Channels.OneBot.Enabled, def.Channels.OneBot.Enabled)
+	putIfDiff(onebot, "ws_url", doc.Channels.OneBot.WSUrl, def.Channels.OneBot.WSUrl)
+	putSecretIfDiff(onebot, "access_token", doc.Channels.OneBot.AccessToken, def.Channels.OneBot.AccessToken)
+	putIfDiff(onebot, "reconnect_interval", doc.Channels.OneBot.ReconnectInterval, def.Channels.OneBot.ReconnectInterval)
+	putSliceIfDiff(onebot, "group_trigger_prefix", doc.Channels.OneBot.GroupTriggerPrefix, def.Channels.OneBot.GroupTriggerPrefix)
+	putSliceIfDiff(onebot, "allow_from", doc.Channels.OneBot.AllowFrom, def.Channels.OneBot.AllowFrom)
+	putSection(channels, "onebot", onebot)
 
 	// QQ
-	qq := map[string]interface{}{
-		"enabled":    doc.Channels.QQ.Enabled,
-		"allow_from": doc.Channels.QQ.AllowFrom,
-	}
-	writeSecret(qq, "app_id", doc.Channels.QQ.AppID)
-	writeSecret(qq, "app_secret", doc.Channels.QQ.AppSecret)
-	channels["qq"] = qq
+	qq := make(map[string]interface{})
+	putIfDiff(qq, "enabled", doc.Channels.QQ.Enabled, def.Channels.QQ.Enabled)
+	putSecretIfDiff(qq, "app_id", doc.Channels.QQ.AppID, def.Channels.QQ.AppID)
+	putSecretIfDiff(qq, "app_secret", doc.Channels.QQ.AppSecret, def.Channels.QQ.AppSecret)
+	putSliceIfDiff(qq, "allow_from", doc.Channels.QQ.AllowFrom, def.Channels.QQ.AllowFrom)
+	putSection(channels, "qq", qq)
 
 	// DingTalk
-	dingtalk := map[string]interface{}{
-		"enabled":    doc.Channels.DingTalk.Enabled,
-		"allow_from": doc.Channels.DingTalk.AllowFrom,
-	}
-	writeSecret(dingtalk, "client_id", doc.Channels.DingTalk.ClientID)
-	writeSecret(dingtalk, "client_secret", doc.Channels.DingTalk.ClientSecret)
-	channels["dingtalk"] = dingtalk
+	dingtalk := make(map[string]interface{})
+	putIfDiff(dingtalk, "enabled", doc.Channels.DingTalk.Enabled, def.Channels.DingTalk.Enabled)
+	putSecretIfDiff(dingtalk, "client_id", doc.Channels.DingTalk.ClientID, def.Channels.DingTalk.ClientID)
+	putSecretIfDiff(dingtalk, "client_secret", doc.Channels.DingTalk.ClientSecret, def.Channels.DingTalk.ClientSecret)
+	putSliceIfDiff(dingtalk, "allow_from", doc.Channels.DingTalk.AllowFrom, def.Channels.DingTalk.AllowFrom)
+	putSection(channels, "dingtalk", dingtalk)
 
 	// WhatsApp
-	channels["whatsapp"] = map[string]interface{}{
-		"enabled":    doc.Channels.WhatsApp.Enabled,
-		"bridge_url": doc.Channels.WhatsApp.BridgeURL,
-		"allow_from": doc.Channels.WhatsApp.AllowFrom,
-	}
+	whatsapp := make(map[string]interface{})
+	putIfDiff(whatsapp, "enabled", doc.Channels.WhatsApp.Enabled, def.Channels.WhatsApp.Enabled)
+	putIfDiff(whatsapp, "bridge_url", doc.Channels.WhatsApp.BridgeURL, def.Channels.WhatsApp.BridgeURL)
+	putSliceIfDiff(whatsapp, "allow_from", doc.Channels.WhatsApp.AllowFrom, def.Channels.WhatsApp.AllowFrom)
+	putSection(channels, "whatsapp", whatsapp)
 
 	// MaixCam
-	channels["maixcam"] = map[string]interface{}{
-		"enabled":    doc.Channels.MaixCam.Enabled,
-		"host":       doc.Channels.MaixCam.Host,
-		"port":       doc.Channels.MaixCam.Port,
-		"allow_from": doc.Channels.MaixCam.AllowFrom,
-	}
+	maixcam := make(map[string]interface{})
+	putIfDiff(maixcam, "enabled", doc.Channels.MaixCam.Enabled, def.Channels.MaixCam.Enabled)
+	putIfDiff(maixcam, "host", doc.Channels.MaixCam.Host, def.Channels.MaixCam.Host)
+	putIfDiff(maixcam, "port", doc.Channels.MaixCam.Port, def.Channels.MaixCam.Port)
+	putSliceIfDiff(maixcam, "allow_from", doc.Channels.MaixCam.AllowFrom, def.Channels.MaixCam.AllowFrom)
+	putSection(channels, "maixcam", maixcam)
 
-	result["channels"] = channels
+	if len(channels) > 0 {
+		result["channels"] = channels
+	}
 
 	// Providers
 	providers := make(map[string]interface{})
@@ -459,78 +521,92 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		result["providers"] = providers
 	}
 
-	// Gateway
-	result["gateway"] = map[string]interface{}{
-		"host": doc.Gateway.Host,
-		"port": doc.Gateway.Port,
+	// Gateway. Written only when it differs from the runtime default
+	// (same prune-on-save rule as channels).
+	gateway := make(map[string]interface{})
+	putIfDiff(gateway, "host", doc.Gateway.Host, def.Gateway.Host)
+	putIfDiff(gateway, "port", doc.Gateway.Port, def.Gateway.Port)
+	if len(gateway) > 0 {
+		result["gateway"] = gateway
 	}
 
-	// Tools
-	tools := map[string]interface{}{
-		"cron": map[string]interface{}{
-			"exec_timeout_minutes": doc.Tools.Cron.ExecTimeoutMinutes,
-		},
-		"exec": map[string]interface{}{
-			"enable_deny_patterns": doc.Tools.Exec.EnableDenyPatterns,
-			"custom_deny_patterns": doc.Tools.Exec.CustomDenyPatterns,
-			"timeout_seconds":      doc.Tools.Exec.TimeoutSeconds,
-			"whitelist_commands":   doc.Tools.Exec.WhitelistCommands,
-		},
-	}
+	// Tools.
+	// Prune-on-save with the same rule as channels: a key is written only
+	// when it differs from the runtime default, an engine block (brave,
+	// duckduckgo, perplexity, searxng, cron, exec) only when at least one of
+	// its keys differs, and "tools" itself only when a block survives. A
+	// config that never touched the tools no longer pins five engine blocks
+	// with every field in the file.
+	tools := make(map[string]interface{})
 
-	// Web tools
-	web := map[string]interface{}{
-		"duckduckgo": map[string]interface{}{
-			"enabled":     doc.Tools.Web.DuckDuckGo.Enabled,
-			"max_results": doc.Tools.Web.DuckDuckGo.MaxResults,
-		},
-	}
+	cron := make(map[string]interface{})
+	putIfDiff(cron, "exec_timeout_minutes", doc.Tools.Cron.ExecTimeoutMinutes, def.Tools.Cron.ExecTimeoutMinutes)
+	putSection(tools, "cron", cron)
 
-	brave := map[string]interface{}{
-		"enabled":     doc.Tools.Web.Brave.Enabled,
-		"max_results": doc.Tools.Web.Brave.MaxResults,
-	}
-	writeSecret(brave, "api_key", doc.Tools.Web.Brave.APIKey)
-	web["brave"] = brave
+	exec := make(map[string]interface{})
+	putIfDiff(exec, "enable_deny_patterns", doc.Tools.Exec.EnableDenyPatterns, def.Tools.Exec.EnableDenyPatterns)
+	putSliceIfDiff(exec, "custom_deny_patterns", doc.Tools.Exec.CustomDenyPatterns, def.Tools.Exec.CustomDenyPatterns)
+	// timeout_seconds: 0 is a real value ("no timeout", see pkg/tools/shell.go)
+	// and differs from the 60s default, so it keeps being written; only an
+	// untouched 60 disappears from the file.
+	putIfDiff(exec, "timeout_seconds", doc.Tools.Exec.TimeoutSeconds, def.Tools.Exec.TimeoutSeconds)
+	putSliceIfDiff(exec, "whitelist_commands", doc.Tools.Exec.WhitelistCommands, def.Tools.Exec.WhitelistCommands)
+	putSection(tools, "exec", exec)
 
-	perplexity := map[string]interface{}{
-		"enabled":     doc.Tools.Web.Perplexity.Enabled,
-		"max_results": doc.Tools.Web.Perplexity.MaxResults,
-	}
-	writeSecret(perplexity, "api_key", doc.Tools.Web.Perplexity.APIKey)
-	web["perplexity"] = perplexity
+	duckduckgo := make(map[string]interface{})
+	putIfDiff(duckduckgo, "enabled", doc.Tools.Web.DuckDuckGo.Enabled, def.Tools.Web.DuckDuckGo.Enabled)
+	putIfDiff(duckduckgo, "max_results", doc.Tools.Web.DuckDuckGo.MaxResults, def.Tools.Web.DuckDuckGo.MaxResults)
 
-	web["searxng"] = map[string]interface{}{
-		"enabled":      doc.Tools.Web.SearXNG.Enabled,
-		"instance_url": doc.Tools.Web.SearXNG.InstanceURL,
-		"categories":   doc.Tools.Web.SearXNG.Categories,
-		"language":     doc.Tools.Web.SearXNG.Language,
-		"safesearch":   doc.Tools.Web.SearXNG.SafeSearch,
-		"max_results":  doc.Tools.Web.SearXNG.MaxResults,
-	}
+	brave := make(map[string]interface{})
+	putIfDiff(brave, "enabled", doc.Tools.Web.Brave.Enabled, def.Tools.Web.Brave.Enabled)
+	putIfDiff(brave, "max_results", doc.Tools.Web.Brave.MaxResults, def.Tools.Web.Brave.MaxResults)
+	// Placeholder-aware: an env/keyring api_key always counts as configured
+	// and is written as a placeholder, even when the engine is disabled.
+	putSecretIfDiff(brave, "api_key", doc.Tools.Web.Brave.APIKey, def.Tools.Web.Brave.APIKey)
 
-	tools["web"] = web
-	result["tools"] = tools
+	perplexity := make(map[string]interface{})
+	putIfDiff(perplexity, "enabled", doc.Tools.Web.Perplexity.Enabled, def.Tools.Web.Perplexity.Enabled)
+	putIfDiff(perplexity, "max_results", doc.Tools.Web.Perplexity.MaxResults, def.Tools.Web.Perplexity.MaxResults)
+	putSecretIfDiff(perplexity, "api_key", doc.Tools.Web.Perplexity.APIKey, def.Tools.Web.Perplexity.APIKey)
 
-	// Heartbeat
-	result["heartbeat"] = map[string]interface{}{
-		"enabled":  doc.Heartbeat.Enabled,
-		"interval": doc.Heartbeat.Interval,
-	}
+	searxng := make(map[string]interface{})
+	putIfDiff(searxng, "enabled", doc.Tools.Web.SearXNG.Enabled, def.Tools.Web.SearXNG.Enabled)
+	putIfDiff(searxng, "instance_url", doc.Tools.Web.SearXNG.InstanceURL, def.Tools.Web.SearXNG.InstanceURL)
+	putIfDiff(searxng, "categories", doc.Tools.Web.SearXNG.Categories, def.Tools.Web.SearXNG.Categories)
+	putIfDiff(searxng, "language", doc.Tools.Web.SearXNG.Language, def.Tools.Web.SearXNG.Language)
+	putIfDiff(searxng, "safesearch", doc.Tools.Web.SearXNG.SafeSearch, def.Tools.Web.SearXNG.SafeSearch)
+	putIfDiff(searxng, "max_results", doc.Tools.Web.SearXNG.MaxResults, def.Tools.Web.SearXNG.MaxResults)
+
+	web := make(map[string]interface{})
+	putSection(web, "brave", brave)
+	putSection(web, "duckduckgo", duckduckgo)
+	putSection(web, "perplexity", perplexity)
+	putSection(web, "searxng", searxng)
+	putSection(tools, "web", web)
+	putSection(result, "tools", tools)
+
+	// Heartbeat. Default is enabled:true with a 30 minute interval, so an
+	// untouched heartbeat writes nothing.
+	heartbeat := make(map[string]interface{})
+	putIfDiff(heartbeat, "enabled", doc.Heartbeat.Enabled, def.Heartbeat.Enabled)
+	putIfDiff(heartbeat, "interval", doc.Heartbeat.Interval, def.Heartbeat.Interval)
+	putSection(result, "heartbeat", heartbeat)
 
 	// Devices.
-	result["devices"] = map[string]interface{}{
-		"enabled":     doc.Devices.Enabled,
-		"monitor_usb": doc.Devices.MonitorUSB,
-	}
+	devices := make(map[string]interface{})
+	putIfDiff(devices, "enabled", doc.Devices.Enabled, def.Devices.Enabled)
+	putIfDiff(devices, "monitor_usb", doc.Devices.MonitorUSB, def.Devices.MonitorUSB)
+	putSection(result, "devices", devices)
 
-	// Logs
-	result["logs"] = map[string]interface{}{
-		"enabled":  doc.Logs.Enabled,
-		"path":     doc.Logs.Path,
-		"max_days": doc.Logs.MaxDays,
-		"rotation": doc.Logs.Rotation,
-	}
+	// Logs. path/max_days/rotation are plain runtime defaults (LogsPath()
+	// resolves an empty path to <lele-dir>/logs), so omitting them is exactly
+	// what LoadConfig restores.
+	logs := make(map[string]interface{})
+	putIfDiff(logs, "enabled", doc.Logs.Enabled, def.Logs.Enabled)
+	putIfDiff(logs, "path", doc.Logs.Path, def.Logs.Path)
+	putIfDiff(logs, "max_days", doc.Logs.MaxDays, def.Logs.MaxDays)
+	putIfDiff(logs, "rotation", doc.Logs.Rotation, def.Logs.Rotation)
+	putSection(result, "logs", logs)
 
 	// Custom slash commands. ToConfig round-trips through this map, so any
 	// section missing here is silently dropped from the runtime config.
@@ -570,6 +646,7 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 		SubagentMaxRetries:     cfg.Agents.Defaults.SubagentMaxRetries,
 		SubagentMaxIterations:  cfg.Agents.Defaults.SubagentMaxIterations, // side-fix: was dropped (see ToConfig)
 		LLMLoopTimeoutMinutes:  cfg.Agents.Defaults.LLMLoopTimeoutMinutes,
+		PromptCache:            cfg.Agents.Defaults.PromptCache, // must be carried to avoid silent drop on save
 	}
 	doc.Agents.List = make([]EditableAgentConfig, 0, len(cfg.Agents.List))
 	for _, agent := range cfg.Agents.List {
@@ -594,6 +671,7 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 		LINE:     EditableLINEConfig{Enabled: cfg.Channels.LINE.Enabled, ChannelSecret: literalOrEmptySecret(cfg.Channels.LINE.ChannelSecret), ChannelAccessToken: literalOrEmptySecret(cfg.Channels.LINE.ChannelAccessToken), WebhookHost: cfg.Channels.LINE.WebhookHost, WebhookPort: cfg.Channels.LINE.WebhookPort, WebhookPath: cfg.Channels.LINE.WebhookPath, AllowFrom: cfg.Channels.LINE.AllowFrom},
 		OneBot:   EditableOneBotConfig{Enabled: cfg.Channels.OneBot.Enabled, WSUrl: cfg.Channels.OneBot.WSUrl, AccessToken: literalOrEmptySecret(cfg.Channels.OneBot.AccessToken), ReconnectInterval: cfg.Channels.OneBot.ReconnectInterval, GroupTriggerPrefix: cfg.Channels.OneBot.GroupTriggerPrefix, AllowFrom: cfg.Channels.OneBot.AllowFrom},
 		Native:   EditableNativeConfig{Enabled: cfg.Channels.Native.Enabled, Host: cfg.Channels.Native.Host, Port: cfg.Channels.Native.Port, TokenExpiryDays: cfg.Channels.Native.TokenExpiryDays, PinExpiryMinutes: cfg.Channels.Native.PinExpiryMinutes, MaxClients: cfg.Channels.Native.MaxClients, CORSOrigins: cfg.Channels.Native.CORSOrigins, SessionExpiryDays: cfg.Channels.Native.SessionExpiryDays, MaxUploadSizeMB: cfg.Channels.Native.MaxUploadSizeMB, UploadTTLHours: cfg.Channels.Native.UploadTTLHours, RateLimit: cfg.Channels.Native.RateLimit},
+		Web:      EditableWebConfig{Enabled: cfg.Channels.Web.Enabled},
 	}
 	doc.Providers = EditableProvidersConfig{}
 	for name, provider := range cfg.Providers.ListNamed() {

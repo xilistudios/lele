@@ -44,13 +44,22 @@ func (n *NativeChannel) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var doc config.EditableDocument
-	if err := json.Unmarshal(body, &doc); err != nil {
+	// Overlay semantics: load the current on-disk document first, then
+	// unmarshal the incoming payload ON TOP. Go's json.Unmarshal merges
+	// nested objects and leaves absent keys untouched, so a partial PUT
+	// (e.g. only touching agents) no longer wipes channels.web.enabled
+	// or native.cors_origins with zero values.
+	doc, _, err := config.LoadEditableDocument(configPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load current config: "+err.Error(), "config_load_failed")
+		return
+	}
+	if err := json.Unmarshal(body, doc); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid config payload: "+err.Error(), "body_invalid")
 		return
 	}
 
-	validationErrors := config.ValidateEditableDocument(&doc)
+	validationErrors := config.ValidateEditableDocument(doc)
 	if len(validationErrors) > 0 {
 		httpErrors := make([]ConfigError, len(validationErrors))
 		for i, err := range validationErrors {
@@ -71,7 +80,7 @@ func (n *NativeChannel) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := config.SaveEditableDocument(configPath, &doc); err != nil {
+	if err := config.SaveEditableDocument(configPath, doc); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save config: "+err.Error(), "config_save_failed")
 		return
 	}
@@ -93,7 +102,7 @@ func (n *NativeChannel) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, ConfigUpdateResponse{
-		Config: &doc,
+		Config: doc,
 		Metadata: ConfigMetadata{
 			ConfigPath:              meta.ConfigPath,
 			Source:                  meta.Source,
