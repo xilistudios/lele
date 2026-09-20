@@ -284,6 +284,10 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	if evictUpTo >= len(session.Messages) {
 		for i := len(session.Messages) - 1; i >= 0; i-- {
 			if !session.Messages[i].ExcludeFromContext {
+				// The block condition pins evictUpTo >= len(Messages), so
+				// i < evictUpTo holds by construction today; the min is kept
+				// so relaxing that condition later cannot turn this cap into
+				// an over-eviction.
 				if i < evictUpTo {
 					evictUpTo = i
 				}
