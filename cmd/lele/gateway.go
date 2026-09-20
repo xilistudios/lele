@@ -71,6 +71,22 @@ func parseGatewayFlags(args []string) (desktop bool, port int, debug bool) {
 	return desktop, port, debug
 }
 
+// shouldServeWebUI decides whether the gateway serves the Web UI SPA.
+// Desktop mode ALWAYS serves the SPA: the Tauri shell loads its interface
+// from this server, so disabling it there would break the desktop app
+// regardless of the config flag. Everywhere else the channels.web.enabled
+// flag decides. A nil config is treated as enabled, matching the
+// DefaultConfig value (zero friction for callers without a config).
+func shouldServeWebUI(cfg *config.Config, desktop bool) bool {
+	if desktop {
+		return true
+	}
+	if cfg == nil {
+		return true
+	}
+	return cfg.Channels.Web.Enabled
+}
+
 // emitDesktopError writes a machine-readable error line to stdout. It is only
 // used in desktop mode; the JSON is built with encoding/json so the error
 // field is properly escaped.
@@ -309,12 +325,25 @@ func gatewayCmd() {
 	// Register health endpoints
 	srv.RegisterHealth()
 
-	// Register web UI (SPA)
-	distFS, err := fs.Sub(embeddedFiles, "web/dist")
-	if err != nil {
-		logger.WarnC("server", "Web UI assets not available (build frontend with 'make build')")
+	// Register web UI (SPA). Gated by channels.web.enabled; desktop mode
+	// always serves it because the Tauri shell loads the UI from this server.
+	if shouldServeWebUI(cfg, desktop) {
+		distFS, err := fs.Sub(embeddedFiles, "web/dist")
+		if err != nil {
+			logger.WarnC("server", "Web UI assets not available (build frontend with 'make build')")
+		} else {
+			srv.RegisterWebUI(http.FS(distFS))
+		}
+
+		// Misconfiguration guard: the SPA's API and WebSocket calls are served
+		// by the native channel. With web on but native off, the UI would load
+		// with no backend behind it. Warn only; the operator may enable native
+		// later or prefer serving assets over a loopback-only tool.
+		if _, ok := channelManager.GetChannel("native"); !ok {
+			logger.WarnC("server", "Web UI is enabled (channels.web.enabled=true) but the native channel is disabled; the SPA would have no API/WebSocket backend. Enable channels.native or set channels.web.enabled=false")
+		}
 	} else {
-		srv.RegisterWebUI(http.FS(distFS))
+		logger.InfoCF("server", "Web UI disabled by config (channels.web.enabled=false); serving API only", nil)
 	}
 
 	// Register native channel API routes
@@ -403,7 +432,11 @@ func gatewayCmd() {
 	actualAddr := ln.Addr().String()
 
 	fmt.Fprintf(gatewayOut, "✓ Unified server starting on %s\n", actualAddr)
-	fmt.Fprintln(gatewayOut, "  • Web UI:      /")
+	if shouldServeWebUI(cfg, desktop) {
+		fmt.Fprintln(gatewayOut, "  • Web UI:      /")
+	} else {
+		fmt.Fprintln(gatewayOut, "  • Web UI:      disabled (channels.web.enabled=false)")
+	}
 	fmt.Fprintln(gatewayOut, "  • API:         /api/v1/*")
 	fmt.Fprintln(gatewayOut, "  • Health:      /health, /ready")
 	fmt.Fprintln(gatewayOut, "  • WebSocket:   /api/v1/ws")

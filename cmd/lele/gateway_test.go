@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/config"
 )
 
 func TestParseGatewayFlags(t *testing.T) {
@@ -83,5 +85,60 @@ func TestEmitDesktopError(t *testing.T) {
 	// pid may be a float64 after JSON round-trip.
 	if pid, ok := m["pid"].(float64); !ok || pid != 1234 {
 		t.Errorf("pid = %v, want 1234", m["pid"])
+	}
+}
+func TestShouldServeWebUI(t *testing.T) {
+	// cfg builds a config with the given channel flags.
+	cfg := func(webEnabled, nativeEnabled bool) *config.Config {
+		c := config.DefaultConfig()
+		c.Channels.Web.Enabled = webEnabled
+		c.Channels.Native.Enabled = nativeEnabled
+		return c
+	}
+
+	tests := []struct {
+		name    string
+		cfg     *config.Config
+		desktop bool
+		want    bool
+	}{
+		{
+			name:    "default config serves the SPA",
+			cfg:     config.DefaultConfig(),
+			desktop: false,
+			want:    true,
+		},
+		{
+			name:    "web disabled does not serve the SPA",
+			cfg:     cfg(false, true),
+			desktop: false,
+			want:    false,
+		},
+		{
+			name:    "desktop always serves the SPA even when web is disabled",
+			cfg:     cfg(false, true),
+			desktop: true,
+			want:    true,
+		},
+		{
+			name:    "native disabled with web enabled still serves the SPA (warning only)",
+			cfg:     cfg(true, false),
+			desktop: false,
+			want:    true,
+		},
+		{
+			name:    "nil config defaults to serving the SPA",
+			cfg:     nil,
+			desktop: false,
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldServeWebUI(tt.cfg, tt.desktop); got != tt.want {
+				t.Errorf("shouldServeWebUI() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

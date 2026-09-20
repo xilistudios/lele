@@ -4,6 +4,15 @@ import (
 	"encoding/json"
 )
 
+// overlayChannelsWithPlaceholders re-reads the "channels" section of a saved
+// file on top of the document that LoadConfig already filled with the runtime
+// defaults, so secret fields keep their ENV / keyring placeholders.
+//
+// Every parser below is a strict overlay: it receives the current channel as
+// its base and only replaces the keys present in the file. toSerializable
+// prunes default-valued keys, so an absent key is normal and must never reset
+// a non-zero default (telegram's verbose level, line's webhook host/port/path,
+// onebot's ws_url and reconnect_interval, ...).
 func overlayChannelsWithPlaceholders(cfg *EditableChannelsConfig, raw json.RawMessage, basePath string, secretsByPath map[string]string) {
 
 	var rawMap map[string]json.RawMessage
@@ -13,47 +22,48 @@ func overlayChannelsWithPlaceholders(cfg *EditableChannelsConfig, raw json.RawMe
 
 	// Parse Telegram with placeholders.
 	if telegramRaw, ok := rawMap["telegram"]; ok {
-		cfg.Telegram = parseTelegramWithPlaceholders(telegramRaw, basePath+".telegram", secretsByPath)
+		cfg.Telegram = parseTelegramWithPlaceholders(cfg.Telegram, telegramRaw, basePath+".telegram", secretsByPath)
 	}
 
 	// Parse Discord with placeholders.
 	if discordRaw, ok := rawMap["discord"]; ok {
-		cfg.Discord = parseDiscordWithPlaceholders(discordRaw, basePath+".discord", secretsByPath)
+		cfg.Discord = parseDiscordWithPlaceholders(cfg.Discord, discordRaw, basePath+".discord", secretsByPath)
 	}
 
 	// Parse Feishu with placeholders.
 	if feishuRaw, ok := rawMap["feishu"]; ok {
-		cfg.Feishu = parseFeishuWithPlaceholders(feishuRaw, basePath+".feishu", secretsByPath)
+		cfg.Feishu = parseFeishuWithPlaceholders(cfg.Feishu, feishuRaw, basePath+".feishu", secretsByPath)
 	}
 
 	// Parse Slack with placeholders.
 	if slackRaw, ok := rawMap["slack"]; ok {
-		cfg.Slack = parseSlackWithPlaceholders(slackRaw, basePath+".slack", secretsByPath)
+		cfg.Slack = parseSlackWithPlaceholders(cfg.Slack, slackRaw, basePath+".slack", secretsByPath)
 	}
 
 	// Parse LINE with placeholders.
 	if lineRaw, ok := rawMap["line"]; ok {
-		cfg.LINE = parseLINEWithPlaceholders(lineRaw, basePath+".line", secretsByPath)
+		cfg.LINE = parseLINEWithPlaceholders(cfg.LINE, lineRaw, basePath+".line", secretsByPath)
 	}
 
 	// Parse OneBot with placeholders.
 	if onebotRaw, ok := rawMap["onebot"]; ok {
-		cfg.OneBot = parseOneBotWithPlaceholders(onebotRaw, basePath+".onebot", secretsByPath)
+		cfg.OneBot = parseOneBotWithPlaceholders(cfg.OneBot, onebotRaw, basePath+".onebot", secretsByPath)
 	}
 
 	// Parse QQ with placeholders.
 	if qqRaw, ok := rawMap["qq"]; ok {
-		cfg.QQ = parseQQWithPlaceholders(qqRaw, basePath+".qq", secretsByPath)
+		cfg.QQ = parseQQWithPlaceholders(cfg.QQ, qqRaw, basePath+".qq", secretsByPath)
 	}
 
 	// Parse DingTalk with placeholders.
 	if dingtalkRaw, ok := rawMap["dingtalk"]; ok {
-		cfg.DingTalk = parseDingTalkWithPlaceholders(dingtalkRaw, basePath+".dingtalk", secretsByPath)
+		cfg.DingTalk = parseDingTalkWithPlaceholders(cfg.DingTalk, dingtalkRaw, basePath+".dingtalk", secretsByPath)
 	}
 }
 
-func parseTelegramWithPlaceholders(raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableTelegramConfig {
-	var cfg EditableTelegramConfig
+// parseTelegramWithPlaceholders overlays raw onto base (absent keys are kept).
+func parseTelegramWithPlaceholders(base EditableTelegramConfig, raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableTelegramConfig {
+	cfg := base
 
 	var rawMap map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &rawMap); err != nil {
@@ -83,8 +93,9 @@ func parseTelegramWithPlaceholders(raw json.RawMessage, basePath string, secrets
 	return cfg
 }
 
-func parseDiscordWithPlaceholders(raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableDiscordConfig {
-	var cfg EditableDiscordConfig
+// parseDiscordWithPlaceholders overlays raw onto base (absent keys are kept).
+func parseDiscordWithPlaceholders(base EditableDiscordConfig, raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableDiscordConfig {
+	cfg := base
 
 	var rawMap map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &rawMap); err != nil {
@@ -105,8 +116,9 @@ func parseDiscordWithPlaceholders(raw json.RawMessage, basePath string, secretsB
 	return cfg
 }
 
-func parseFeishuWithPlaceholders(raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableFeishuConfig {
-	var cfg EditableFeishuConfig
+// parseFeishuWithPlaceholders overlays raw onto base (absent keys are kept).
+func parseFeishuWithPlaceholders(base EditableFeishuConfig, raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableFeishuConfig {
+	cfg := base
 
 	var rawMap map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &rawMap); err != nil {
@@ -136,8 +148,9 @@ func parseFeishuWithPlaceholders(raw json.RawMessage, basePath string, secretsBy
 	return cfg
 }
 
-func parseSlackWithPlaceholders(raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableSlackConfig {
-	var cfg EditableSlackConfig
+// parseSlackWithPlaceholders overlays raw onto base (absent keys are kept).
+func parseSlackWithPlaceholders(base EditableSlackConfig, raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableSlackConfig {
+	cfg := base
 
 	var rawMap map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &rawMap); err != nil {
@@ -161,8 +174,9 @@ func parseSlackWithPlaceholders(raw json.RawMessage, basePath string, secretsByP
 	return cfg
 }
 
-func parseLINEWithPlaceholders(raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableLINEConfig {
-	var cfg EditableLINEConfig
+// parseLINEWithPlaceholders overlays raw onto base (absent keys are kept).
+func parseLINEWithPlaceholders(base EditableLINEConfig, raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableLINEConfig {
+	cfg := base
 
 	var rawMap map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &rawMap); err != nil {
@@ -195,8 +209,9 @@ func parseLINEWithPlaceholders(raw json.RawMessage, basePath string, secretsByPa
 	return cfg
 }
 
-func parseOneBotWithPlaceholders(raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableOneBotConfig {
-	var cfg EditableOneBotConfig
+// parseOneBotWithPlaceholders overlays raw onto base (absent keys are kept).
+func parseOneBotWithPlaceholders(base EditableOneBotConfig, raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableOneBotConfig {
+	cfg := base
 
 	var rawMap map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &rawMap); err != nil {
@@ -226,8 +241,9 @@ func parseOneBotWithPlaceholders(raw json.RawMessage, basePath string, secretsBy
 	return cfg
 }
 
-func parseQQWithPlaceholders(raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableQQConfig {
-	var cfg EditableQQConfig
+// parseQQWithPlaceholders overlays raw onto base (absent keys are kept).
+func parseQQWithPlaceholders(base EditableQQConfig, raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableQQConfig {
+	cfg := base
 
 	var rawMap map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &rawMap); err != nil {
@@ -251,8 +267,9 @@ func parseQQWithPlaceholders(raw json.RawMessage, basePath string, secretsByPath
 	return cfg
 }
 
-func parseDingTalkWithPlaceholders(raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableDingTalkConfig {
-	var cfg EditableDingTalkConfig
+// parseDingTalkWithPlaceholders overlays raw onto base (absent keys are kept).
+func parseDingTalkWithPlaceholders(base EditableDingTalkConfig, raw json.RawMessage, basePath string, secretsByPath map[string]string) EditableDingTalkConfig {
+	cfg := base
 
 	var rawMap map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &rawMap); err != nil {

@@ -421,6 +421,17 @@ export type EditableNativeConfig = {
   rate_limit: EditableNativeRateLimitConfig
 }
 
+/**
+ * Web UI serving toggle (`channels.web`).
+ *
+ * The gateway only serves the SPA when this is true (desktop mode always
+ * does). The save path prunes defaults, so an ABSENT block means enabled:
+ * keep the field optional and resolve it with `?? true` when reading.
+ */
+export type EditableWebConfig = {
+  enabled: boolean
+}
+
 export type EditableChannelsConfig = {
   whatsapp: EditableWhatsAppConfig
   telegram: EditableTelegramConfig
@@ -433,6 +444,8 @@ export type EditableChannelsConfig = {
   line: EditableLINEConfig
   onebot: EditableOneBotConfig
   native: EditableNativeConfig
+  /** Absent = enabled (defaults are pruned on save). */
+  web?: EditableWebConfig
 }
 
 export type ReasoningConfig = {

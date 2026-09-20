@@ -369,6 +369,15 @@ const DefaultEphemeralThresholdSeconds = 560
 // context window at which session history is summarized/compacted.
 const DefaultCompactionThresholdPercent = 75
 
+// SessionEphemeralFileDefault is the value used when a config file omits
+// session.ephemeral. It intentionally differs from DefaultConfig()'s
+// Ephemeral=true (the no-file first-run privacy default) so that a missing
+// key in an existing config file always resolves to false — matching
+// LoadConfig's absent-key override. Every path that interprets or writes the
+// file-default for session.ephemeral must use this constant instead of a
+// bare literal so the two defaults stay in sync.
+const SessionEphemeralFileDefault = false
+
 type AgentDefaults struct {
 	Workspace           string   `json:"workspace" env:"LELE_AGENTS_DEFAULTS_WORKSPACE"`
 	RestrictToWorkspace bool     `json:"restrict_to_workspace" env:"LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
@@ -1463,7 +1472,7 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	if !sessionEphemeralConfigured {
-		cfg.Session.Ephemeral = false
+		cfg.Session.Ephemeral = SessionEphemeralFileDefault
 	}
 	if cfg.Session.EphemeralThreshold <= 0 {
 		cfg.Session.EphemeralThreshold = DefaultEphemeralThresholdSeconds

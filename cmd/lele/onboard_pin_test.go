@@ -191,7 +191,7 @@ func TestStoreOpen_ErrUnsupportedPlatform_Sentinel(t *testing.T) {
 }
 
 // TestNewClientAuthManager_CreatesMissingLeleDir covers the fresh-install
-// path: onboarding calls maybeGeneratePIN before config.SaveConfig, so the
+// path: onboarding calls maybeGeneratePIN before config.SaveMinimalConfig, so the
 // lele directory does not exist yet when the first PIN is minted. A missing
 // directory must not be treated as an unusable database (that guard is for
 // corrupt/unopenable files) — onboarding would otherwise end without a PIN.

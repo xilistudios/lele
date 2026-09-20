@@ -20,6 +20,9 @@ func detectRestartRequiredSections(doc *EditableDocument) []string {
 		"channels.line",
 		"channels.onebot",
 		"channels.native",
+		// The gateway decides whether to serve the Web UI SPA once at startup
+		// (shouldServeWebUI), so toggling channels.web needs a restart.
+		"channels.web",
 		"gateway",
 	}
 }

@@ -42,6 +42,13 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 	// chain (agents.defaults.thinking_level -> model ReasoningConfig).
 
 	// Defaults for the native channel.
+	// NOTE: the Enabled flags (native, web, and every other channel) are
+	// intentionally NOT defaulted here. A plain bool cannot distinguish
+	// "missing" from an explicit false, and the load path already merged the
+	// file over DefaultConfig() (LoadConfig) before the document was built,
+	// so a missing key carries the code default and an explicit false must
+	// survive untouched. Defaulting "!enabled -> enabled" would clobber a
+	// user's deliberate "enabled: false" (e.g. disabling the Web UI).
 	if doc.Channels.Native.Host == "" {
 		doc.Channels.Native.Host = defaults.Channels.Native.Host
 	}
@@ -149,11 +156,17 @@ func defaultEditableDocument() *EditableDocument {
 				SubagentMaxConcurrent:  defaults.Agents.Defaults.SubagentMaxConcurrent,
 				SubagentMaxRetries:     defaults.Agents.Defaults.SubagentMaxRetries,
 				LLMLoopTimeoutMinutes:  defaults.Agents.Defaults.LLMLoopTimeoutMinutes,
+				PromptCache:            defaults.Agents.Defaults.PromptCache,
 			},
 			List: []EditableAgentConfig{},
 		},
 		Session: EditableSessionConfig{
-			Ephemeral:                  defaults.Session.Ephemeral,
+			// Ephemeral is NOT taken from DefaultConfig() (true) on purpose:
+			// LoadConfig forces session.ephemeral=false when the file omits
+			// the key, so SessionEphemeralFileDefault is the effective default
+			// of a document read from disk — and this document must be the one
+			// the pruned serializer writes nothing for (see toSerializable).
+			Ephemeral:                  SessionEphemeralFileDefault,
 			EphemeralThreshold:         defaults.Session.EphemeralThreshold,
 			CompactionThresholdPercent: defaults.Session.CompactionThresholdPercent,
 			CompactionModel:            defaults.Session.CompactionModel,
@@ -235,6 +248,9 @@ func defaultEditableDocument() *EditableDocument {
 				MaxUploadSizeMB:   defaults.Channels.Native.MaxUploadSizeMB,
 				UploadTTLHours:    defaults.Channels.Native.UploadTTLHours,
 				RateLimit:         defaults.Channels.Native.RateLimit,
+			},
+			Web: EditableWebConfig{
+				Enabled: defaults.Channels.Web.Enabled,
 			},
 		},
 		Providers: EditableProvidersConfig{},

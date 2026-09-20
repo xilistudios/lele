@@ -545,17 +545,26 @@ func configureAdditionalAgents(cfg *config.Config) {
 	}
 }
 
+// setWebUIEnabled applies the "Enable Web UI + native channel?" decision to
+// cfg. Pure (no terminal I/O) so it is unit-testable: the Web UI server and
+// the native channel (its auth backend) are turned on and off together.
+func setWebUIEnabled(cfg *config.Config, enabled bool) {
+	cfg.Channels.Web.Enabled = enabled
+	cfg.Channels.Native.Enabled = enabled
+}
+
 func configureWebUI(cfg *config.Config, leleDir string) {
 	fmt.Printf("\n%s\n", styleTitle.Render("=== Web UI Configuration ==="))
 
-	cfg.Channels.Web.Enabled = true
-	cfg.Server.Port = askInt("Server port", 8080)
-	cfg.Server.Host = "0.0.0.0"
+	setWebUIEnabled(cfg, true)
+	// Gateway is the section the editable document models (server.* is not).
+	// The prompt default matches the gateway code default (18790), so the
+	// common answer writes nothing extra to a minimal config.json.
+	cfg.Gateway.Port = askInt("Server port", 18790)
 
-	fmt.Printf("\n%s\n", styleSuccess.Render(fmt.Sprintf("✓ Web UI will be served on port %d", cfg.Server.Port)))
+	fmt.Printf("\n%s\n", styleSuccess.Render(fmt.Sprintf("✓ Web UI will be served on port %d", cfg.Gateway.Port)))
 
 	fmt.Println(styleSuccess.Render("✓ Native channel auto-enabled (required for Web UI)"))
-	cfg.Channels.Native.Enabled = true
 
 	if askYesNo("[Advanced] Configure native channel?", false) {
 		configureNativeAdvanced(cfg)
@@ -667,11 +676,27 @@ func printSummary(cfg *config.Config) {
 			styleHint.Render(fmt.Sprintf("%g", *agent.Temperature)))
 	}
 
+	fmt.Printf("\n%s\n", styleSubTitle.Render("Channels:"))
+	fmt.Printf("  Web UI: %s\n", enabledLabel(cfg.Channels.Web.Enabled))
+	fmt.Printf("  Native: %s\n", enabledLabel(cfg.Channels.Native.Enabled))
+
 	fmt.Printf("\n%s\n", styleSubTitle.Render("Server:"))
-	serverPort := cfg.EffectiveServerPort()
-	fmt.Printf("  port %s %s\n",
-		styleNumber.Render(fmt.Sprintf("%d", serverPort)),
-		styleHint.Render("(unified API + Web UI)"))
+	if cfg.Channels.Web.Enabled || cfg.Channels.Native.Enabled {
+		serverPort := cfg.EffectiveServerPort()
+		fmt.Printf("  port %s %s\n",
+			styleNumber.Render(fmt.Sprintf("%d", serverPort)),
+			styleHint.Render("(unified API + Web UI)"))
+	} else {
+		fmt.Printf("  %s\n", styleHint.Render("not serving (Web UI and native channel disabled)"))
+	}
+}
+
+// enabledLabel renders a boolean channel state for the summary.
+func enabledLabel(enabled bool) string {
+	if enabled {
+		return styleSuccess.Render("enabled")
+	}
+	return styleWarning.Render("disabled")
 }
 
 func onboard() {
@@ -696,9 +721,14 @@ func onboard() {
 	configureAgentDefaults(cfg)
 	configureAdditionalAgents(cfg)
 
-	if askYesNo("\nEnable Web UI?", true) {
+	if askYesNo("\nEnable Web UI + native channel?", true) {
 		configureWebUI(cfg, leleDir)
 		maybeGeneratePIN(cfg, leleDir)
+	} else {
+		// Defaults are enabled, so "no" must be written as an explicit
+		// deviation; without this branch the answer was a no-op. PIN
+		// generation and service start stay gated on Web.Enabled.
+		setWebUIEnabled(cfg, false)
 	}
 
 	printSummary(cfg)
@@ -708,7 +738,11 @@ func onboard() {
 		return
 	}
 
-	if err := config.SaveConfig(configPath, cfg); err != nil {
+	// Minimal save: persist only what the user configured (providers, agents)
+	// and explicit deviations from the code defaults (disabled channels, a
+	// custom gateway port). Values equal to the defaults are omitted and are
+	// restored by LoadConfig, which unmarshals the file over DefaultConfig.
+	if err := config.SaveMinimalConfig(configPath, cfg); err != nil {
 		fmt.Println(styleWarning.Render(fmt.Sprintf("Error saving config: %v", err)))
 		os.Exit(1)
 	}

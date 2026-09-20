@@ -9,6 +9,7 @@ import {
   QqChannelSettings,
   SlackChannelSettings,
   TelegramChannelSettings,
+  WebChannelSettings,
   WhatsAppChannelSettings,
 } from './channels'
 
@@ -16,6 +17,7 @@ export function ChannelSettings() {
   return (
     <div className="space-y-6">
       <NativeChannelSettings />
+      <WebChannelSettings />
       <TelegramChannelSettings />
       <DiscordChannelSettings />
       <WhatsAppChannelSettings />
