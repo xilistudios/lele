@@ -194,8 +194,12 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 			// Nothing changed at all — preserve today's return behaviour.
 			return
 		}
-		if hi < rangeStart {
-			hi = rangeStart
+		// The range is semi-open [rangeStart, hi). If rangeStart changed
+		// (index 0 was un-excluded), the range must include it — an empty
+		// range makes saveUnlocked skip the targeted UPDATE, leaving the
+		// un-excluded index 0 persisted as excluded=true in SQLite.
+		if hi <= rangeStart {
+			hi = rangeStart + 1
 		}
 		session.Updated = time.Now()
 		session.excludedRange = [2]int{rangeStart, hi}
@@ -227,8 +231,12 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 		}
 	}
 
-	if hi < rangeStart {
-		hi = rangeStart
+	// The range is semi-open [rangeStart, hi). If rangeStart changed
+	// (index 0 was un-excluded), the range must include it — an empty
+	// range makes saveUnlocked skip the targeted UPDATE, leaving the
+	// un-excluded index 0 persisted as excluded=true in SQLite.
+	if hi <= rangeStart {
+		hi = rangeStart + 1
 	}
 	session.Updated = time.Now()
 	session.excludedRange = [2]int{rangeStart, hi}

@@ -365,6 +365,14 @@ func (sm *SessionManager) foldEvictedIntoSummary(session *Session, evicted []pro
 		if content == "" {
 			continue
 		}
+		// Skip the previous summary message: its text is already in
+		// session.Summary (it was injected by the agent layer). Folding
+		// it would duplicate the body and nest the
+		// "## Summary of Previous Conversation" header inside the new
+		// summary, causing ≈1.9× growth per round.
+		if strings.HasPrefix(content, summaryMessageMarker) {
+			continue
+		}
 		parts = append(parts, content)
 	}
 	if len(parts) == 0 {
