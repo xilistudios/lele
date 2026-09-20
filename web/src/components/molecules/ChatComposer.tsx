@@ -14,6 +14,7 @@ import { useChatPageContext } from '../../contexts/ChatPageContext'
 import { useSlashCommands } from '../../hooks/useSlashCommands'
 import { getModeTheme } from '../../lib/modeTheme'
 import type { SlashCommandInfo } from '../../lib/types'
+import { endpoints } from '../../services/http/endpoints'
 import { IconButton } from '../atoms/IconButton'
 import { CloseIcon, FolderIcon, PlusIcon } from '../atoms/Icons'
 import { FolderPickerModal } from '../organisms/FolderPickerModal'
@@ -30,9 +31,11 @@ function isImageByExtension(name: string): boolean {
   return ext ? IMAGE_EXTENSIONS.has(`.${ext}`) : false
 }
 
+// Pending uploads live in tmp/uploads (public endpoint, no auth needed), so
+// they use the public /api/v1/files/view path via the endpoints constant.
 function buildFileUrl(apiUrl: string, path: string): string {
   const base = apiUrl.replace(/\/$/, '')
-  return `${base}/api/v1/files/view?path=${encodeURIComponent(path)}`
+  return `${base}${endpoints.files.view}?path=${encodeURIComponent(path)}`
 }
 
 export function ChatComposer() {
@@ -313,9 +316,7 @@ export function ChatComposer() {
                 </div>
                 <div className="flex flex-col min-w-0">
                   <span className="text-xs font-medium text-text-primary truncate">{filename}</span>
-                  <span className="text-2xs text-text-tertiary leading-none mt-1">
-                    {ext} File
-                  </span>
+                  <span className="text-2xs text-text-tertiary leading-none mt-1">{ext} File</span>
                 </div>
                 <button
                   type="button"
