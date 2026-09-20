@@ -785,7 +785,8 @@ func TestExcludeOldMessages_PinIsNotSplitByToolPairFixup(t *testing.T) {
 //	7: user   "pin-me: final question"   ← preserved pin (in kept tail)
 //
 // keepCount=2: excludeUpTo=6 (tool result) → fixup advances to 7.
-// Preserved = {0, 4, 6}. Range [1, 7). Excluded: {1, 2, 3, 5}.
+// Human turns: 0, 4, 7. Last 2 human: 4, 7. preserved = {0, 4, 7}.
+// Range [1, 7). Excluded: {1, 2, 3, 5, 6}.
 // The pin at index 4 stays un-excluded; no orphans in filtered context.
 func TestExcludeOldMessages_PinIsNotSplitByToolPairFixup_ForwardAdjacentPin(t *testing.T) {
 	sm := NewSessionManager()
@@ -985,5 +986,253 @@ func TestEvictExcluded_FoldsPreservedHoles(t *testing.T) {
 				t.Errorf("seq %d should be excluded", r.Seq)
 			}
 		}
+	}
+}
+
+// TestExcludeOldMessages_ZeroLowerBoundStillPersistsIndex0 verifies that
+// when the backward tool-pair fixup decrements excludeUpTo to 0 and index 0
+// is un-excluded (legacy migration), the excludedRange is never empty [0, 0).
+// An empty range makes saveUnlocked skip the targeted UPDATE (persist.go:518
+// requires excludedRange[1] > excludedRange[0]), leaving index 0 persisted as
+// excluded=true in SQLite even though memory says excluded=false. On cold load
+// the message comes back excluded — a data-loss of the un-exclusion.
+//
+// Fixture: [assistant+tool_calls (excluded), user, assistant], keepCount=2.
+// excludeUpTo=1 → backward fixup fires (assistant with tool_calls at index 0,
+// first kept = user at index 1 ≠ tool result) → excludeUpTo=0 → early path.
+// Legacy un-exclusion sets rangeStart=0; loop over preserved {0} does nothing;
+// hi stays at 0 → [0, 0) without the fix.
+//
+// Must FAIL before the fix (hi < rangeStart), PASS after (hi <= rangeStart).
+func TestExcludeOldMessages_ZeroLowerBoundStillPersistsIndex0(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:zero-bound"
+	sm.GetOrCreate(key)
+
+	// Fixture: 3 messages, message 0 was excluded by a previous compaction.
+	// Index 0: assistant with tool_calls (excluded, legacy state)
+	sm.AddFullMessage(key, providers.Message{
+		Role:      "assistant",
+		Content:   "tool use answer",
+		ToolCalls: []providers.ToolCall{{ID: "call-1", Function: &providers.FunctionCall{Name: "search"}}},
+	})
+	// Index 1: human turn
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "follow up question"})
+	// Index 2: assistant (no tool calls, kept tail)
+	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "final answer"})
+
+	// Simulate legacy state: message 0 was excluded by an older compaction.
+	session := sm.GetOrCreate(key)
+	session.Messages[0].ExcludeFromContext = true
+
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// keepCount=2 → excludeUpTo=1. Backward fixup: last excluded (index 0)
+	// is assistant with tool_calls, first kept (index 1) is user (≠ tool
+	// result) → decrement excludeUpTo to 0. Early path: legacy un-exclusion
+	// sets rangeStart=0; preserved={0}; loop has nothing to un-exclude; hi=0.
+	sm.ExcludeOldMessagesFromContext(key, 2)
+
+	session = sm.GetOrCreate(key)
+
+	// Message 0 must be un-excluded in memory (legacy migration).
+	if session.Messages[0].ExcludeFromContext {
+		t.Error("message 0 should be un-excluded in memory after legacy migration")
+	}
+
+	// The excluded range must be non-empty: excludedRange[1] > excludedRange[0].
+	// Without the fix this is [0, 0] — the targeted UPDATE is skipped.
+	if session.excludedRange[1] <= session.excludedRange[0] {
+		t.Errorf("excludedRange must be non-empty: [%d, %d] — saveUnlocked would skip the UPDATE",
+			session.excludedRange[0], session.excludedRange[1])
+	}
+
+	// Persist to SQLite.
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Row 0 in SQLite must have Excluded == false.
+	rows, err := s.Sessions().LoadMessagesWithSeq(key)
+	if err != nil {
+		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
+	}
+	if len(rows) < 1 {
+		t.Fatal("expected at least 1 row in SQLite")
+	}
+	if rows[0].Excluded {
+		t.Error("row 0 in SQLite has Excluded=true, want false (legacy un-exclusion should be persisted)")
+	}
+
+	// Cold load: new SessionManager on the same store.
+	sm2 := NewSessionManager()
+	sm2.SetStore(s)
+	session2 := sm2.GetOrCreate(key) // triggers loadSessionFromDisk → loadFromSQLite
+	if session2 == nil {
+		t.Fatal("cold load returned nil session")
+	}
+	if len(session2.Messages) < 1 {
+		t.Fatal("cold-loaded session has no messages")
+	}
+	if session2.Messages[0].ExcludeFromContext {
+		t.Error("cold-loaded message 0 is Excluded=true — un-exclusion was lost (empty range bug)")
+	}
+}
+
+// TestExcludeOldMessages_PinAboveExcludeUpToIsPersistedAndUnExcluded verifies
+// that a preserved human turn at an index >= excludeUpTo is correctly
+// persisted and recovered on cold load. Without the `if idx+1 > hi { hi =
+// idx + 1 }` widening blocks in ExcludeOldMessagesFromContext, the pin's
+// index would fall outside the persisted range and be left excluded=true in
+// SQLite.
+//
+// Fixture: 20 messages, keepCount=2 → excludeUpTo=18. A human turn pinned
+// at index 18 (>= excludeUpTo) was previously excluded by an older compaction;
+// the current compaction un-excludes it. hi must be widened to pinIdx+1=19.
+// Index 18 is not in [1, excludeUpTo) = [1, 18), so the normal un-exclude
+// loop never processes it — only the widening block covers it.
+//
+// Mutation check (M2): removing both `if idx+1 > hi { hi = idx + 1 }` blocks
+// makes this test fail (pin stays excluded in SQLite after cold load).
+func TestExcludeOldMessages_PinAboveExcludeUpToIsPersistedAndUnExcluded(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:pin-above"
+	sm.GetOrCreate(key)
+
+	// 20 alternating user/assistant messages.
+	for i := 0; i < 20; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		sm.AddMessage(key, role, fmt.Sprintf("msg-%02d", i))
+	}
+
+	// Simulate legacy state: index 18 (user) was excluded by a previous
+	// compaction. It is one of the last preservedUserMessages human turns,
+	// so the current compaction will un-exclude it.
+	session := sm.GetOrCreate(key)
+	session.Messages[18].ExcludeFromContext = true
+	session.Messages[18].Content = "pin-me: human question"
+
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// keepCount=2 → excludeUpTo=18.  Human turns: 0,2,4,6,8,10,12,14,16,18.
+	// preserved = {0} ∪ last 2 human = {0, 16, 18}.
+	// Index 18 is >= excludeUpTo=18 → NOT in the normal un-exclude loop's
+	// range [1, 18). The widening block (idx+1 > hi) fires for idx=18:
+	// hi starts at excludeUpTo=18; 18+1=19 > 18 → hi=19.
+	sm.ExcludeOldMessagesFromContext(key, 2)
+
+	session = sm.GetOrCreate(key)
+
+	// (a) Pin at index 18 must be un-excluded in memory.
+	if session.Messages[18].ExcludeFromContext {
+		t.Error("index 18 (preserved human turn above excludeUpTo) should NOT be excluded in memory")
+	}
+
+	// (b) excludedRange must cover index 18: excludedRange[1] == pinIdx+1 = 19.
+	//     Without the widening blocks hi stays at excludeUpTo=18.
+	if session.excludedRange[1] != 19 {
+		t.Errorf("excludedRange[1] = %d, want 19 (pin at index 18 needs widening)", session.excludedRange[1])
+	}
+
+	// Persist.
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// (c) Row 18 in SQLite must have Excluded == false.
+	rows, err := s.Sessions().LoadMessagesWithSeq(key)
+	if err != nil {
+		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
+	}
+	found := false
+	for _, r := range rows {
+		if r.Seq == 18 {
+			found = true
+			if r.Excluded {
+				t.Error("row 18 in SQLite has Excluded=true, want false (pin should be persisted as un-excluded)")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatal("row 18 not found in SQLite")
+	}
+
+	// (d) Cold load: pin must be resident and un-excluded.
+	sm2 := NewSessionManager()
+	sm2.SetStore(s)
+	session2 := sm2.GetOrCreate(key)
+	if session2 == nil {
+		t.Fatal("cold load returned nil session")
+	}
+
+	// Find the pin message in the cold-loaded session (may be at a different
+	// in-memory index if the load path skips an excluded prefix).
+	found = false
+	for _, m := range session2.Messages {
+		if strings.Contains(m.Content, "pin-me: human question") {
+			found = true
+			if m.ExcludeFromContext {
+				t.Error("cold-loaded pin message is Excluded=true — un-exclusion was lost (widening bug)")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("cold-loaded session does not contain the pin message — it was evicted or lost")
+	}
+}
+
+// TestSetHistory_ClearsExclusionState verifies that SetHistory resets
+// excludedRange and excludeBoundary, which pointed at indices of the old
+// message slice and would be stale after replacement.
+func TestSetHistory_ClearsExclusionState(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:sethistory-clears-exclusion"
+
+	// Seed 8 messages and compact so excludedRange / excludeBoundary are set.
+	for i := 0; i < 8; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		sm.AddMessage(key, role, fmt.Sprintf("msg-%d", i))
+	}
+
+	sm.ExcludeOldMessagesFromContext(key, 2)
+
+	session := sm.GetOrCreate(key)
+	if session.excludedRange == [2]int{} {
+		t.Fatal("precondition failed: excludedRange is empty after compaction")
+	}
+	if session.excludeBoundary == 0 {
+		t.Fatal("precondition failed: excludeBoundary is 0 after compaction")
+	}
+
+	// Replace with a fresh history.
+	sm.SetHistory(key, []providers.Message{
+		{Role: "user", Content: "new message 0"},
+		{Role: "assistant", Content: "new message 1"},
+	})
+
+	session = sm.GetOrCreate(key)
+	if session.excludedRange != [2]int{} {
+		t.Errorf("excludedRange not cleared after SetHistory: got %v", session.excludedRange)
+	}
+	if session.excludeBoundary != 0 {
+		t.Errorf("excludeBoundary not cleared after SetHistory: got %d", session.excludeBoundary)
 	}
 }

@@ -61,6 +61,13 @@ type Session struct {
 	// evictedTotal is the number of messages currently persisted in SQLite but
 	// not present in the in-memory slice (evicted after compaction).
 	evictedTotal int
+	// excludeBoundary is one past the last index the last compaction treated as
+	// "old" (the hi of the excluded range it computed). Eviction must never run
+	// past it: messages excluded by OTHER writers (the WebUI approval/rejection
+	// row, rest_chat.go) live in the kept tail and must stay resident.
+	// 0 = no compaction boundary recorded (cold load / direct call) → the
+	// eviction falls back to the contiguous excluded run, as before this branch.
+	excludeBoundary int // not persisted (in-memory only)
 	// saveEpoch is bumped on every logical mutation (content or metadata
 	// change). Save paths capture it before releasing the lock for disk I/O
 	// and compare after re-acquiring it; a mismatch means the session was

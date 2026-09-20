@@ -194,11 +194,16 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 			// Nothing changed at all — preserve today's return behaviour.
 			return
 		}
-		if hi < rangeStart {
-			hi = rangeStart
+		// The range is semi-open [rangeStart, hi). If rangeStart changed
+		// (index 0 was un-excluded), the range must include it — an empty
+		// range makes saveUnlocked skip the targeted UPDATE, leaving the
+		// un-excluded index 0 persisted as excluded=true in SQLite.
+		if hi <= rangeStart {
+			hi = rangeStart + 1
 		}
 		session.Updated = time.Now()
 		session.excludedRange = [2]int{rangeStart, hi}
+		session.excludeBoundary = hi
 		session.bumpEpoch()
 		return
 	}
@@ -226,11 +231,22 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 		}
 	}
 
-	if hi < rangeStart {
-		hi = rangeStart
+	// The range is semi-open [rangeStart, hi). If rangeStart changed
+	// (index 0 was un-excluded), the range must include it — an empty
+	// range makes saveUnlocked skip the targeted UPDATE, leaving the
+	// un-excluded index 0 persisted as excluded=true in SQLite.
+	// NOTE: In this normal-path branch (excludeUpTo >= 2), the condition
+	// hi <= rangeStart is unreachable: hi starts at excludeUpTo (>=2),
+	// rangeStart is 0 or 1, and hi only grows. Kept as a defensive mirror
+	// of the identical clamp in the early-exit path above, where the
+	// condition IS reachable (hi may stay at excludeUpTo=0 while
+	// rangeStart=1 if index 0 was un-excluded).
+	if hi <= rangeStart {
+		hi = rangeStart + 1
 	}
 	session.Updated = time.Now()
 	session.excludedRange = [2]int{rangeStart, hi}
+	session.excludeBoundary = hi
 	session.bumpEpoch()
 }
 

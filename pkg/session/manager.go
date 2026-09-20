@@ -294,6 +294,10 @@ func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 	session.Messages = msgs
 	session.Updated = time.Now()
 	session.lastPersistedSeq = -1 // force full rewrite on next save
+	// Reset exclusion state: it pointed into the old message slice whose
+	// indices no longer correspond to the replacement history.
+	session.excludedRange = [2]int{}
+	session.excludeBoundary = 0
 	session.bumpEpoch()
 	sm.touchSession(key)
 }

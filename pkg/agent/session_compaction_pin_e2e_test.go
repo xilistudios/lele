@@ -327,6 +327,19 @@ func TestCompaction_PreservesLastTwoHumanUserMessages_E2E_eviction(t *testing.T)
 			t.Errorf("Excluded message still in memory at in-memory index %d: %q", i, m.Content)
 		}
 	}
+	// Guard against vacuous assertions (B1 regression): the kept tail must
+	// contain at least keepCount messages and the filtered context sent to the
+	// model must be non-empty. Without these checks, iterating over an empty
+	// hist (0 messages after catastrophic eviction) would make every range
+	// assertion vacuously true.
+	const keepCount = 2
+	if len(hist) < keepCount {
+		t.Errorf("history length = %d, want >= %d (vacuity guard: eviction wiped the kept tail)", len(hist), keepCount)
+	}
+	ctxEvict := filterContextMessages(hist)
+	if len(ctxEvict) == 0 {
+		t.Error("filterContextMessages(hist) is empty (vacuity guard: no context reaches the model)")
+	}
 
 	// --- (b) The pinned human turns appear verbatim in the session summary.
 	// With eviction, the preserved holes (index 0, 2, 8) are folded into the
