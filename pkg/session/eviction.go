@@ -271,9 +271,6 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 		for evictUpTo < len(session.Messages) && session.Messages[evictUpTo].ExcludeFromContext {
 			evictUpTo++
 		}
-		if evictUpTo == 0 {
-			return 0
-		}
 	}
 
 	// Collect non-excluded messages in [0, evictUpTo) — these are preserved

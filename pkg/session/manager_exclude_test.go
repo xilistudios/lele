@@ -1196,9 +1196,17 @@ func TestExcludeOldMessages_PinAboveExcludeUpToIsPersistedAndUnExcluded(t *testi
 	}
 }
 
-// TestSetHistory_ClearsExclusionState verifies that SetHistory resets
-// excludedRange and excludeBoundary, which pointed at indices of the old
-// message slice and would be stale after replacement.
+// TestSetHistory_ClearsExclusionState verifies the new contract for
+// SetHistory's exclusion-state handling:
+//
+//	(a) excludedRange is always cleared (it described dirty rows of the old slice).
+//	(b) excludeBoundary survives when the new slice is at least as long as the
+//	    boundary (the production path in summarizeSessionCore replaces the
+//	    history between ExcludeOldMessagesFromContext and EvictExcludedMessages
+//	    to un-exclude the summary message; clearing the boundary there disabled
+//	    the eviction clamp in every compaction round ≥ 2).
+//	(c) excludeBoundary is cleared when the new slice is shorter than the
+//	    boundary (indices no longer correspond).
 func TestSetHistory_ClearsExclusionState(t *testing.T) {
 	sm := NewSessionManager()
 	key := "test:sethistory-clears-exclusion"
@@ -1221,18 +1229,81 @@ func TestSetHistory_ClearsExclusionState(t *testing.T) {
 	if session.excludeBoundary == 0 {
 		t.Fatal("precondition failed: excludeBoundary is 0 after compaction")
 	}
+	savedBoundary := session.excludeBoundary
 
-	// Replace with a fresh history.
+	// --- (a)+(b) New slice is AT LEAST as long as the boundary → boundary survives ---
 	sm.SetHistory(key, []providers.Message{
 		{Role: "user", Content: "new message 0"},
 		{Role: "assistant", Content: "new message 1"},
+		{Role: "user", Content: "new message 2"},
+		{Role: "assistant", Content: "new message 3"},
+		{Role: "user", Content: "new message 4"},
+		{Role: "assistant", Content: "new message 5"},
+		{Role: "user", Content: "new message 6"},
+		{Role: "assistant", Content: "new message 7"},
 	})
 
 	session = sm.GetOrCreate(key)
 	if session.excludedRange != [2]int{} {
-		t.Errorf("excludedRange not cleared after SetHistory: got %v", session.excludedRange)
+		t.Errorf("(a) excludedRange not cleared after SetHistory: got %v", session.excludedRange)
+	}
+	if session.excludeBoundary != savedBoundary {
+		t.Errorf("(b) excludeBoundary should survive when new slice len (%d) >= boundary (%d): got %d",
+			8, savedBoundary, session.excludeBoundary)
+	}
+
+	// --- (c) New slice is SHORTER than the boundary → boundary cleared ---
+	sm.SetHistory(key, []providers.Message{
+		{Role: "user", Content: "short 0"},
+		{Role: "assistant", Content: "short 1"},
+	})
+
+	session = sm.GetOrCreate(key)
+	if session.excludedRange != [2]int{} {
+		t.Errorf("(c) excludedRange not cleared after SetHistory: got %v", session.excludedRange)
 	}
 	if session.excludeBoundary != 0 {
-		t.Errorf("excludeBoundary not cleared after SetHistory: got %d", session.excludeBoundary)
+		t.Errorf("(c) excludeBoundary should be 0 when new slice len (2) < boundary (%d): got %d",
+			savedBoundary, session.excludeBoundary)
+	}
+}
+
+// TestTruncateHistory_ClearsExclusionState verifies that TruncateHistory
+// resets both excludedRange and excludeBoundary, which pointed at indices of
+// the old prefix and are stale after the suffix re-indexes every element.
+// TruncateHistory keeps a suffix of the message slice, so the old prefix's
+// boundary describes a region that no longer exists at those indices.
+func TestTruncateHistory_ClearsExclusionState(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:truncate-clears-exclusion"
+
+	// Seed 8 messages and compact so excludedRange / excludeBoundary are set.
+	for i := 0; i < 8; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		sm.AddMessage(key, role, fmt.Sprintf("msg-%d", i))
+	}
+
+	sm.ExcludeOldMessagesFromContext(key, 2)
+
+	session := sm.GetOrCreate(key)
+	if session.excludedRange == [2]int{} {
+		t.Fatal("precondition failed: excludedRange is empty after compaction")
+	}
+	if session.excludeBoundary == 0 {
+		t.Fatal("precondition failed: excludeBoundary is 0 after compaction")
+	}
+
+	// TruncateHistory re-indexes the suffix → both fields must be cleared.
+	sm.TruncateHistory(key, 4)
+
+	session = sm.GetOrCreate(key)
+	if session.excludedRange != [2]int{} {
+		t.Errorf("excludedRange not cleared after TruncateHistory: got %v", session.excludedRange)
+	}
+	if session.excludeBoundary != 0 {
+		t.Errorf("excludeBoundary not cleared after TruncateHistory: got %d", session.excludeBoundary)
 	}
 }
