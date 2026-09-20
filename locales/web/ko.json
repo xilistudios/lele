@@ -472,7 +472,7 @@
       "nativeMaxUploadSizeMb": "최대 업로드 크기 (MB)",
       "nativeUploadTtlHours": "업로드 TTL (시간)",
       "nativeRateLimitEnabled": "요청 제한",
-      "nativeRateLimitEnabledHint": "기본적으로 비활성화됩니다. 이 머신 외부에서 네이티브 API에 접근할 수 있는 경우 활성화하세요.",
+      "nativeRateLimitEnabledHint": "기본적으로 비활성화됩니다(탭을 여러 개 연 브라우저가 로그아웃되었습니다). 이 머신이 다른 호스트에서 접근 가능한 경우 활성화하세요. 페어링 엔드포인트에는 다른 무차별 대입 방어가 없습니다.",
       "nativeRateLimitPin": "분당 PIN 요청 수",
       "nativeRateLimitPair": "분당 페어링 시도 수",
       "nativeRateLimitRefresh": "분당 토큰 갱신 수",

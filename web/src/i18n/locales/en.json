@@ -472,7 +472,7 @@
       "nativeMaxUploadSizeMb": "Max upload size (MB)",
       "nativeUploadTtlHours": "Upload TTL (hours)",
       "nativeRateLimitEnabled": "Rate limiting",
-      "nativeRateLimitEnabledHint": "Off by default. Turn on if the native API is reachable from outside this machine.",
+      "nativeRateLimitEnabledHint": "Off by default (it was signing out browsers with several tabs). Turn it on if this machine is reachable from other hosts: the pairing endpoint has no other brute-force protection.",
       "nativeRateLimitPin": "PIN requests per minute",
       "nativeRateLimitPair": "Pairing attempts per minute",
       "nativeRateLimitRefresh": "Token renewals per minute",

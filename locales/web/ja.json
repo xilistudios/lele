@@ -474,7 +474,7 @@
       "nativeMaxUploadSizeMb": "最大アップロードサイズ（MB）",
       "nativeUploadTtlHours": "アップロード TTL（時間）",
       "nativeRateLimitEnabled": "レート制限",
-      "nativeRateLimitEnabledHint": "デフォルトでは無効です。このマシンの外部からネイティブAPIにアクセスできる場合は有効にしてください。",
+      "nativeRateLimitEnabledHint": "デフォルトでは無効です（複数のタブを開いたブラウザーがサインアウトされていました）。このマシンが他のホストから到達可能な場合は有効にしてください。ペアリングのエンドポイントには他にブルートフォース対策がありません。",
       "nativeRateLimitPin": "1分あたりのPINリクエスト数",
       "nativeRateLimitPair": "1分あたりのペアリング試行数",
       "nativeRateLimitRefresh": "1分あたりのトークン更新数",

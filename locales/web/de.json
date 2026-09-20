@@ -472,7 +472,7 @@
       "nativeMaxUploadSizeMb": "Max. Upload-Größe (MB)",
       "nativeUploadTtlHours": "Upload-TTL (Stunden)",
       "nativeRateLimitEnabled": "Anfragelimit",
-      "nativeRateLimitEnabledHint": "Standardmäßig deaktiviert. Aktiviere es, wenn die Native-API von außerhalb dieses Geräts erreichbar ist.",
+      "nativeRateLimitEnabledHint": "Standardmäßig deaktiviert (es meldete Browser mit mehreren Tabs ab). Aktiviere es, wenn dieser Rechner von anderen Geräten erreichbar ist: der Kopplungs-Endpunkt hat keinen weiteren Schutz gegen Brute-Force.",
       "nativeRateLimitPin": "PIN-Anfragen pro Minute",
       "nativeRateLimitPair": "Kopplungsversuche pro Minute",
       "nativeRateLimitRefresh": "Token-Erneuerungen pro Minute",

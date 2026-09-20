@@ -472,7 +472,7 @@
       "nativeMaxUploadSizeMb": "Tamaño máx de subida (MB)",
       "nativeUploadTtlHours": "TTL de subida (horas)",
       "nativeRateLimitEnabled": "Límite de peticiones",
-      "nativeRateLimitEnabledHint": "Desactivado por defecto. Actívalo si la API native es accesible desde fuera de esta máquina.",
+      "nativeRateLimitEnabledHint": "Desactivado por defecto (cerraba la sesión de los navegadores con varias pestañas). Actívalo si esta máquina es accesible desde otros equipos: el endpoint de emparejamiento no tiene otra protección contra fuerza bruta.",
       "nativeRateLimitPin": "Peticiones de PIN por minuto",
       "nativeRateLimitPair": "Intentos de emparejamiento por minuto",
       "nativeRateLimitRefresh": "Renovaciones de token por minuto",

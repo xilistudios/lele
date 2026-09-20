@@ -472,7 +472,7 @@
       "nativeMaxUploadSizeMb": "Макс. размер загрузки (МБ)",
       "nativeUploadTtlHours": "TTL загрузки (часы)",
       "nativeRateLimitEnabled": "Ограничение запросов",
-      "nativeRateLimitEnabledHint": "По умолчанию отключено. Включите, если нативный API доступен извне этого компьютера.",
+      "nativeRateLimitEnabledHint": "По умолчанию отключено (браузеры с несколькими вкладками выходили из сеанса). Включите, если этот компьютер доступен с других узлов: у конечной точки сопряжения нет другой защиты от перебора.",
       "nativeRateLimitPin": "PIN-запросов в минуту",
       "nativeRateLimitPair": "Попыток сопряжения в минуту",
       "nativeRateLimitRefresh": "Обновлений токена в минуту",

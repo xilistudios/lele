@@ -472,7 +472,7 @@
       "nativeMaxUploadSizeMb": "Tamanho máx de upload (MB)",
       "nativeUploadTtlHours": "TTL de upload (horas)",
       "nativeRateLimitEnabled": "Limite de requisições",
-      "nativeRateLimitEnabledHint": "Desativado por padrão. Ative se a API native for acessível de fora desta máquina.",
+      "nativeRateLimitEnabledHint": "Desativado por padrão (encerrava a sessão de navegadores com várias abas). Ative se esta máquina for acessível de outros dispositivos: o endpoint de pareamento não tem outra proteção contra força bruta.",
       "nativeRateLimitPin": "Requisições de PIN por minuto",
       "nativeRateLimitPair": "Tentativas de pareamento por minuto",
       "nativeRateLimitRefresh": "Renovações de token por minuto",

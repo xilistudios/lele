@@ -472,7 +472,7 @@
       "nativeMaxUploadSizeMb": "Taille de téléversement max (Mo)",
       "nativeUploadTtlHours": "TTL de téléversement (heures)",
       "nativeRateLimitEnabled": "Limitation de débit",
-      "nativeRateLimitEnabledHint": "Désactivé par défaut. Activez si l'API native est accessible depuis l'extérieur de cette machine.",
+      "nativeRateLimitEnabledHint": "Désactivé par défaut (il déconnectait les navigateurs à plusieurs onglets). Activez-le si cette machine est accessible depuis d'autres hôtes : le point de terminaison d'appairage n'a aucune autre protection contre la force brute.",
       "nativeRateLimitPin": "Requêtes de PIN par minute",
       "nativeRateLimitPair": "Tentatives d'appairage par minute",
       "nativeRateLimitRefresh": "Renouvellements de jeton par minute",

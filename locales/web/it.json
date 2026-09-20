@@ -472,7 +472,7 @@
       "nativeMaxUploadSizeMb": "Dimensione max upload (MB)",
       "nativeUploadTtlHours": "TTL upload (ore)",
       "nativeRateLimitEnabled": "Limitazione richieste",
-      "nativeRateLimitEnabledHint": "Disattivata per impostazione predefinita. Attivala se l'API native è raggiungibile dall'esterno di questa macchina.",
+      "nativeRateLimitEnabledHint": "Disattivata per impostazione predefinita (disconnetteva i browser con più schede). Attivala se questa macchina è raggiungibile da altri host: l'endpoint di associazione non ha altre protezioni contro la forza bruta.",
       "nativeRateLimitPin": "Richieste PIN al minuto",
       "nativeRateLimitPair": "Tentativi di associazione al minuto",
       "nativeRateLimitRefresh": "Rinnovi token al minuto",
