@@ -785,7 +785,8 @@ func TestExcludeOldMessages_PinIsNotSplitByToolPairFixup(t *testing.T) {
 //	7: user   "pin-me: final question"   ← preserved pin (in kept tail)
 //
 // keepCount=2: excludeUpTo=6 (tool result) → fixup advances to 7.
-// Preserved = {0, 4, 6}. Range [1, 7). Excluded: {1, 2, 3, 5}.
+// Human turns: 0, 4, 7. Last 2 human: 4, 7. preserved = {0, 4, 7}.
+// Range [1, 7). Excluded: {1, 2, 3, 5, 6}.
 // The pin at index 4 stays un-excluded; no orphans in filtered context.
 func TestExcludeOldMessages_PinIsNotSplitByToolPairFixup_ForwardAdjacentPin(t *testing.T) {
 	sm := NewSessionManager()
@@ -1192,5 +1193,46 @@ func TestExcludeOldMessages_PinAboveExcludeUpToIsPersistedAndUnExcluded(t *testi
 	}
 	if !found {
 		t.Error("cold-loaded session does not contain the pin message — it was evicted or lost")
+	}
+}
+
+// TestSetHistory_ClearsExclusionState verifies that SetHistory resets
+// excludedRange and excludeBoundary, which pointed at indices of the old
+// message slice and would be stale after replacement.
+func TestSetHistory_ClearsExclusionState(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:sethistory-clears-exclusion"
+
+	// Seed 8 messages and compact so excludedRange / excludeBoundary are set.
+	for i := 0; i < 8; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		sm.AddMessage(key, role, fmt.Sprintf("msg-%d", i))
+	}
+
+	sm.ExcludeOldMessagesFromContext(key, 2)
+
+	session := sm.GetOrCreate(key)
+	if session.excludedRange == [2]int{} {
+		t.Fatal("precondition failed: excludedRange is empty after compaction")
+	}
+	if session.excludeBoundary == 0 {
+		t.Fatal("precondition failed: excludeBoundary is 0 after compaction")
+	}
+
+	// Replace with a fresh history.
+	sm.SetHistory(key, []providers.Message{
+		{Role: "user", Content: "new message 0"},
+		{Role: "assistant", Content: "new message 1"},
+	})
+
+	session = sm.GetOrCreate(key)
+	if session.excludedRange != [2]int{} {
+		t.Errorf("excludedRange not cleared after SetHistory: got %v", session.excludedRange)
+	}
+	if session.excludeBoundary != 0 {
+		t.Errorf("excludeBoundary not cleared after SetHistory: got %d", session.excludeBoundary)
 	}
 }

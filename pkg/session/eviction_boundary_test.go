@@ -221,13 +221,3 @@ func TestEvictExcluded_NoBoundaryFallsBackToContiguousRun(t *testing.T) {
 func msgContent(i int) string {
 	return "message-" + string(rune('A'+i))
 }
-
-// containsSubstr is a simple substring check helper.
-func containsSubstr(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
