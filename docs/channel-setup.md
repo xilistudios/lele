@@ -175,11 +175,12 @@ Notes:
   5 pairings/min, 20 token refreshes/min, 120 API requests/min, 120 WebSocket
   messages/min per source).  To restore that exact behavior, enable
   `channels.native.rate_limit.enabled`; the default rates are the same.
-  **A stock install binds all interfaces** (`server.host` / `gateway.host`
-  default to `0.0.0.0`; `channels.native.host` does **not** control the bind
-  address), so the unauthenticated `POST /api/v1/auth/pair` endpoint
-  (6-digit PIN, 5-minute expiry, no brute-force counter) is reachable from the
-  LAN and, with rate limiting off, has no throttling at all.  Desktop mode
+  **A stock install binds all interfaces** (`gateway.host` defaults to
+  `0.0.0.0` and wins over `channels.native.host`, which defaults to
+  `127.0.0.1` but does **not** control the bind address), so the
+  unauthenticated `POST /api/v1/auth/pair` endpoint (6-digit PIN, 5-minute
+  expiry, no brute-force counter) is reachable from the LAN and, with rate
+  limiting off, has no throttling at all.  Desktop mode
   forces loopback automatically.  **Enable rate limiting on any machine
   reachable from an untrusted network.**  Requires a restart.  The
   authentication log-line sampler (6/min) is **not** a traffic limiter and

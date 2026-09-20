@@ -80,11 +80,11 @@ func (rl *rateLimiter) Stop() {
 // intentional — see the comment on sample below for the contrasting choice.
 // sample falls open (nil = "log everything") because a missing sampler floods
 // the log but does no further harm. allow falling open would silently leave an
-// endpoint unguarded, which is the exact bug
-// TestPINEndpointRateLimitIsEnforced catches: pinLimiter was once constructed,
-// stopped, and never wired to the route. A nil-safe allow would re-introduce
-// that class of failure in silence. All call sites are either inside
-// rateLimitMiddleware (which guards nil) or explicit nil-checked.
+// endpoint unguarded, which is the exact bug TestPINEndpointRateLimitIsEnforced
+// catches: pinLimiter was once constructed, stopped, and never wired to the
+// route. A nil-safe allow would re-introduce that class of failure in silence.
+// All call sites are either inside rateLimitMiddleware (which guards nil) or
+// explicit nil-checked.
 func (rl *rateLimiter) allow(key string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
