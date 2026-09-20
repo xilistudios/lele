@@ -300,7 +300,20 @@ func TestCompaction_PreservesLastTwoHumanUserMessages_E2E_eviction(t *testing.T)
 	agent.Sessions.AddMessage(sessionKey, "assistant", "Here is a summary of what we covered so far.")       // 18
 	agent.Sessions.AddMessage(sessionKey, "assistant", "Let me know if you have more questions.")            // 19
 
-	// Save so the store has all 20 rows before summarization.
+	// Simulate a trailing WebUI approval row as production writes it
+	// (pkg/channels/rest_chat.go:persistApprovalMessage). This row has
+	// ExcludeFromContext=true and sits at the end of the history. It is the
+	// real-world trigger for the eviction-boundary bug: without the boundary
+	// clamp, its ExcludeFromContext=true drags evictUpTo to len(Messages),
+	// wiping all resident context including the un-excluded summary message.
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{ // 20
+		Role:               "tool",
+		Content:            "✅ Command approved: `ls`",
+		ToolCallID:         "approval:test-req-1",
+		ExcludeFromContext: true,
+	})
+
+	// Save so the store has all 21 rows before summarization.
 	if err := agent.Sessions.Save(sessionKey); err != nil {
 		t.Fatalf("initial Save failed: %v", err)
 	}
@@ -315,23 +328,20 @@ func TestCompaction_PreservesLastTwoHumanUserMessages_E2E_eviction(t *testing.T)
 	}
 	t.Logf("Compaction stats: before=%d after=%d dropped=%d", stats.BeforeMessages, stats.AfterMessages, stats.DroppedMessages)
 
-	// --- (a) RAM invariant: NO message with ExcludeFromContext==true remains
-	// in memory. After eviction, the in-memory slice is a clean suffix
-	// starting at the first message after the last excluded index ---
+	// --- (a) RAM invariant: the kept tail must not be empty and the
+	// filtered context sent to the model must be non-empty. With main's
+	// rule (evictUpTo = lastExcluded + 1, no boundary clamp), the trailing
+	// approval row drags evictUpTo past the un-excluded summary message,
+	// wiping all resident context — the vacuity guards below catch that.
+	// The approval row itself is legitimately excluded from context (that
+	// is its production contract) and stays resident above the boundary;
+	// it is filtered out before the model sees it.
 	hist := agent.Sessions.GetHistory(sessionKey)
 	t.Log("=== Post-eviction in-memory history ===")
 	for i, m := range hist {
 		t.Logf("  [%2d] role=%-10s excluded=%-5v content=%q",
 			i, m.Role, m.ExcludeFromContext, truncForLog(m.Content, 60))
-		if m.ExcludeFromContext {
-			t.Errorf("Excluded message still in memory at in-memory index %d: %q", i, m.Content)
-		}
 	}
-	// Guard against vacuous assertions (B1 regression): the kept tail must
-	// contain at least keepCount messages and the filtered context sent to the
-	// model must be non-empty. Without these checks, iterating over an empty
-	// hist (0 messages after catastrophic eviction) would make every range
-	// assertion vacuously true.
 	const keepCount = 2
 	if len(hist) < keepCount {
 		t.Errorf("history length = %d, want >= %d (vacuity guard: eviction wiped the kept tail)", len(hist), keepCount)
@@ -339,6 +349,14 @@ func TestCompaction_PreservesLastTwoHumanUserMessages_E2E_eviction(t *testing.T)
 	ctxEvict := filterContextMessages(hist)
 	if len(ctxEvict) == 0 {
 		t.Error("filterContextMessages(hist) is empty (vacuity guard: no context reaches the model)")
+	}
+	// The compaction region must leave RAM entirely: the resident slice is
+	// exactly the kept tail (keepCount messages), never more. Before this PR
+	// the clamp could over-evict (empty slice, caught above) and, without the
+	// boundary surviving SetHistory, it could under-evict (extra excluded rows
+	// resident, caught here).
+	if len(hist) != keepCount {
+		t.Errorf("resident history = %d messages, want exactly %d (the kept tail; the compaction region must not stay in RAM)", len(hist), keepCount)
 	}
 
 	// --- (b) The pinned human turns appear verbatim in the session summary.
@@ -382,13 +400,13 @@ func TestCompaction_PreservesLastTwoHumanUserMessages_E2E_eviction(t *testing.T)
 		}
 	}
 
-	// --- (c) SQLite rows: all 20 seeded messages must still exist ---
+	// --- (c) SQLite rows: all 21 seeded messages must still exist ---
 	rows, err := s.Sessions().LoadMessagesWithSeq(sessionKey)
 	if err != nil {
 		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
 	}
-	if len(rows) != 20 {
-		t.Errorf("SQLite rows = %d, want 20 (no data loss after eviction)", len(rows))
+	if len(rows) != 21 {
+		t.Errorf("SQLite rows = %d, want 21 (no data loss after eviction)", len(rows))
 	}
 
 	// --- (d) Restart path: cold-load a fresh SessionManager over the SAME
@@ -414,9 +432,22 @@ func TestCompaction_PreservesLastTwoHumanUserMessages_E2E_eviction(t *testing.T)
 	coldHist := smCold.GetHistory(sessionKey)
 	t.Logf("Cold-loaded history length: %d", len(coldHist))
 	for i, m := range coldHist {
-		if m.ExcludeFromContext {
-			t.Errorf("cold-loaded history[%d] has ExcludeFromContext=true (resurrected excluded row)", i)
+		t.Logf("  [%2d] role=%-10s excluded=%-5v content=%q", i, m.Role, m.ExcludeFromContext, truncForLog(m.Content, 60))
+	}
+	// Verify: no compaction-excluded message resurrects on cold load.
+	// The approval row is the only legitimately excluded row (its production
+	// contract), so identify it exactly instead of exempting by role.
+	foundApproval := false
+	for i, m := range coldHist {
+		if m.ExcludeFromContext && m.ToolCallID != "approval:test-req-1" {
+			t.Errorf("cold-loaded history[%d] has ExcludeFromContext=true (resurrected excluded row): role=%s toolcall=%s content=%q", i, m.Role, m.ToolCallID, m.Content)
 		}
+		if m.ExcludeFromContext && m.ToolCallID == "approval:test-req-1" {
+			foundApproval = true
+		}
+	}
+	if !foundApproval {
+		t.Error("cold-loaded history is missing the legitimate approval row (ExcludeFromContext=true, ToolCallID=approval:test-req-1)")
 	}
 }
 

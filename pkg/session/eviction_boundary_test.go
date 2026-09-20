@@ -221,3 +221,103 @@ func TestEvictExcluded_NoBoundaryFallsBackToContiguousRun(t *testing.T) {
 func msgContent(i int) string {
 	return "message-" + string(rune('A'+i))
 }
+
+// TestEvictExcluded_BoundaryEqualToLenKeepsContext verifies the structural
+// invariant that EvictExcludedMessages never empties the entire resident
+// slice when excludeBoundary == len(Messages). The anti-split guard in
+// ExcludeOldMessagesFromContext pushes excludeUpTo to the end when the
+// session tail is a tool-result group (an assistant with ≥2 tool_calls
+// followed by their results). With the boundary preserved through SetHistory
+// (the production path in summarizeSessionCore), the clamp would be inert
+// and evictUpTo would reach len, wiping all context. The structural
+// invariant caps evictUpTo at the last non-excluded message so at least one
+// message survives.
+func TestEvictExcluded_BoundaryEqualToLenKeepsContext(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:boundary-eq-len"
+
+	// Build 6 messages: human turns at 0, 2. Assistant with 2 tool_calls at
+	// index 3, tool results at indices 4 and 5. The anti-split guard in
+	// ExcludeOldMessagesFromContext will push excludeUpTo past both tool
+	// results to len=6, setting excludeBoundary=6.
+	sm.AddMessage(key, "user", "initial request")           // 0
+	sm.AddMessage(key, "assistant", "I'll look into that.") // 1
+	sm.AddMessage(key, "user", "check both tools")          // 2
+	sm.AddFullMessage(key, providers.Message{               // 3: assistant with 2 tool_calls
+		Role:    "assistant",
+		Content: "Let me search and grep.",
+		ToolCalls: []providers.ToolCall{
+			{ID: "call_search", Function: &providers.FunctionCall{Name: "web_search"}},
+			{ID: "call_grep", Function: &providers.FunctionCall{Name: "exec"}},
+		},
+	})
+	sm.AddFullMessage(key, providers.Message{ // 4: tool result for call_search
+		Role:       "tool",
+		Content:    "Found 5 repos",
+		ToolCallID: "call_search",
+	})
+	sm.AddFullMessage(key, providers.Message{ // 5: tool result for call_grep
+		Role:       "tool",
+		Content:    "Found 3 files",
+		ToolCallID: "call_grep",
+	})
+
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// Exclude with keepCount=2: excludeUpTo = 6 - 2 = 4.
+	// Index 4 is a tool result → anti-split guard pushes to 5.
+	// Index 5 is a tool result → pushed to 6 = len.
+	// excludeBoundary = 6.
+	sm.ExcludeOldMessagesFromContext(key, 2)
+
+	session := sm.GetOrCreate(key)
+	t.Logf("after Exclude: len=%d boundary=%d", len(session.Messages), session.excludeBoundary)
+	if session.excludeBoundary != 6 {
+		t.Fatalf("precondition failed: excludeBoundary = %d, want 6 (= len)", session.excludeBoundary)
+	}
+
+	// Materialize a summary message via SetHistory (same slice, like
+	// summarizeSessionCore does in the production path).
+	sm.SetHistory(key, session.Messages)
+
+	session = sm.GetOrCreate(key)
+	t.Logf("after SetHistory: len=%d boundary=%d", len(session.Messages), session.excludeBoundary)
+	// Boundary must survive (6 <= 6 = len).
+	if session.excludeBoundary != 6 {
+		t.Fatalf("boundary should survive SetHistory: got %d, want 6", session.excludeBoundary)
+	}
+
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("Save after SetHistory failed: %v", err)
+	}
+
+	// Act: evict.
+	evicted := sm.EvictExcludedMessages(key)
+	t.Logf("evicted=%d", evicted)
+
+	// Inspect.
+	hist := sm.GetHistory(key)
+	t.Logf("resident after eviction: %d messages", len(hist))
+	for i, m := range hist {
+		t.Logf("  [%2d] role=%-10s excluded=%-5v content=%q", i, m.Role, m.ExcludeFromContext, m.Content)
+	}
+
+	// Assert: at least one non-excluded message must survive.
+	nonExcluded := 0
+	for _, m := range hist {
+		if !m.ExcludeFromContext {
+			nonExcluded++
+		}
+	}
+	if nonExcluded == 0 {
+		t.Errorf("all non-excluded context wiped — the structural invariant failed (boundary==len case)")
+	}
+	if len(hist) == 0 {
+		t.Errorf("entire resident slice emptied — eviction wiped everything")
+	}
+}

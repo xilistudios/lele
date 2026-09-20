@@ -214,6 +214,9 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 		session.Messages = []providers.Message{}
 		session.Updated = time.Now()
 		session.lastPersistedSeq = -1 // full rewrite: all messages removed
+		// The suffix is empty: both fields described the old prefix and are invalid.
+		session.excludedRange = [2]int{}
+		session.excludeBoundary = 0
 		session.bumpEpoch()
 		sm.touchSession(key)
 		return
@@ -226,6 +229,9 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 	session.Messages = session.Messages[len(session.Messages)-keepLast:]
 	session.Updated = time.Now()
 	session.lastPersistedSeq = -1 // full rewrite: kept messages re-indexed
+	// The suffix re-indexes every element, so the old prefix's boundary is stale.
+	session.excludedRange = [2]int{}
+	session.excludeBoundary = 0
 	session.bumpEpoch()
 	sm.touchSession(key)
 }
@@ -255,6 +261,12 @@ func (sm *SessionManager) RemoveLastMessage(key string) bool {
 	session.Messages = session.Messages[:len(session.Messages)-1]
 	session.Updated = time.Now()
 	session.lastMsgDeleted = true
+	// The prefix preserves its indices, so excludedRange (a targeted UPDATE
+	// span on a now-bounded row) is a harmless no-op and does not need
+	// clearing. But the boundary must stay within the new slice length.
+	if session.excludeBoundary > len(session.Messages) {
+		session.excludeBoundary = 0
+	}
 	session.bumpEpoch()
 	sm.touchSession(key)
 	return true
@@ -294,10 +306,17 @@ func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 	session.Messages = msgs
 	session.Updated = time.Now()
 	session.lastPersistedSeq = -1 // force full rewrite on next save
-	// Reset exclusion state: it pointed into the old message slice whose
-	// indices no longer correspond to the replacement history.
+	// excludedRange tracks dirty rows of the slice that was just replaced: clear it.
 	session.excludedRange = [2]int{}
-	session.excludeBoundary = 0
+	// excludeBoundary must SURVIVE this call: the agent layer replaces the history
+	// right here, between ExcludeOldMessagesFromContext and EvictExcludedMessages
+	// (pkg/agent/session_manager.go summarizeSessionCore), to un-exclude the summary
+	// message. Clearing it disabled the eviction clamp on every compaction round ≥ 2.
+	// It is dropped only when the replacement slice is too short for the boundary to
+	// refer to anything (indices re-indexed or truncated).
+	if session.excludeBoundary > len(msgs) {
+		session.excludeBoundary = 0
+	}
 	session.bumpEpoch()
 	sm.touchSession(key)
 }

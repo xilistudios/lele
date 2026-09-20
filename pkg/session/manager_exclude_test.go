@@ -1196,9 +1196,17 @@ func TestExcludeOldMessages_PinAboveExcludeUpToIsPersistedAndUnExcluded(t *testi
 	}
 }
 
-// TestSetHistory_ClearsExclusionState verifies that SetHistory resets
-// excludedRange and excludeBoundary, which pointed at indices of the old
-// message slice and would be stale after replacement.
+// TestSetHistory_ClearsExclusionState verifies the new contract for
+// SetHistory's exclusion-state handling:
+//
+//	(a) excludedRange is always cleared (it described dirty rows of the old slice).
+//	(b) excludeBoundary survives when the new slice is at least as long as the
+//	    boundary (the production path in summarizeSessionCore replaces the
+//	    history between ExcludeOldMessagesFromContext and EvictExcludedMessages
+//	    to un-exclude the summary message; clearing the boundary there disabled
+//	    the eviction clamp in every compaction round ≥ 2).
+//	(c) excludeBoundary is cleared when the new slice is shorter than the
+//	    boundary (indices no longer correspond).
 func TestSetHistory_ClearsExclusionState(t *testing.T) {
 	sm := NewSessionManager()
 	key := "test:sethistory-clears-exclusion"
@@ -1221,18 +1229,199 @@ func TestSetHistory_ClearsExclusionState(t *testing.T) {
 	if session.excludeBoundary == 0 {
 		t.Fatal("precondition failed: excludeBoundary is 0 after compaction")
 	}
+	savedBoundary := session.excludeBoundary
 
-	// Replace with a fresh history.
+	// --- (a)+(b) New slice is AT LEAST as long as the boundary → boundary survives ---
 	sm.SetHistory(key, []providers.Message{
 		{Role: "user", Content: "new message 0"},
 		{Role: "assistant", Content: "new message 1"},
+		{Role: "user", Content: "new message 2"},
+		{Role: "assistant", Content: "new message 3"},
+		{Role: "user", Content: "new message 4"},
+		{Role: "assistant", Content: "new message 5"},
+		{Role: "user", Content: "new message 6"},
+		{Role: "assistant", Content: "new message 7"},
 	})
 
 	session = sm.GetOrCreate(key)
 	if session.excludedRange != [2]int{} {
-		t.Errorf("excludedRange not cleared after SetHistory: got %v", session.excludedRange)
+		t.Errorf("(a) excludedRange not cleared after SetHistory: got %v", session.excludedRange)
+	}
+	if session.excludeBoundary != savedBoundary {
+		t.Errorf("(b) excludeBoundary should survive when new slice len (%d) >= boundary (%d): got %d",
+			8, savedBoundary, session.excludeBoundary)
+	}
+
+	// --- (c) New slice is SHORTER than the boundary → boundary cleared ---
+	sm.SetHistory(key, []providers.Message{
+		{Role: "user", Content: "short 0"},
+		{Role: "assistant", Content: "short 1"},
+	})
+
+	session = sm.GetOrCreate(key)
+	if session.excludedRange != [2]int{} {
+		t.Errorf("(c) excludedRange not cleared after SetHistory: got %v", session.excludedRange)
 	}
 	if session.excludeBoundary != 0 {
-		t.Errorf("excludeBoundary not cleared after SetHistory: got %d", session.excludeBoundary)
+		t.Errorf("(c) excludeBoundary should be 0 when new slice len (2) < boundary (%d): got %d",
+			savedBoundary, session.excludeBoundary)
+	}
+}
+
+// TestTruncateHistory_ClearsExclusionState verifies that TruncateHistory
+// resets both excludedRange and excludeBoundary, which pointed at indices of
+// the old prefix and are stale after the suffix re-indexes every element.
+// TruncateHistory keeps a suffix of the message slice, so the old prefix's
+// boundary describes a region that no longer exists at those indices.
+func TestTruncateHistory_ClearsExclusionState(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:truncate-clears-exclusion"
+
+	// Seed 8 messages and compact so excludedRange / excludeBoundary are set.
+	for i := 0; i < 8; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		sm.AddMessage(key, role, fmt.Sprintf("msg-%d", i))
+	}
+
+	sm.ExcludeOldMessagesFromContext(key, 2)
+
+	session := sm.GetOrCreate(key)
+	if session.excludedRange == [2]int{} {
+		t.Fatal("precondition failed: excludedRange is empty after compaction")
+	}
+	if session.excludeBoundary == 0 {
+		t.Fatal("precondition failed: excludeBoundary is 0 after compaction")
+	}
+
+	// TruncateHistory re-indexes the suffix → both fields must be cleared.
+	sm.TruncateHistory(key, 4)
+
+	session = sm.GetOrCreate(key)
+	if session.excludedRange != [2]int{} {
+		t.Errorf("excludedRange not cleared after TruncateHistory: got %v", session.excludedRange)
+	}
+	if session.excludeBoundary != 0 {
+		t.Errorf("excludeBoundary not cleared after TruncateHistory: got %d", session.excludeBoundary)
+	}
+}
+
+// TestRemoveLastMessage_BoundaryGuardPreventsWipe pins the contract of the
+// length guard in RemoveLastMessage (manager.go:265-269): a stale
+// excludeBoundary larger than the new slice length must not survive, because
+// the eviction clamp (evictUpTo = min(lastExcluded+1, excludeBoundary)) is
+// inert above len(Messages) and would evict the whole slice.
+//
+// Layout: 8 messages whose last two are tool results. The anti-split guard in
+// ExcludeOldMessagesFromContext walks excludeUpTo from 6 to 8 (indices 6 and 7
+// are tool results), so excludeBoundary == len == 8. RemoveLastMessage trims
+// the last message (len 8→7) and the guard must reset the boundary to 0.
+//
+// Note for future mutations: before the structural invariant landed in
+// EvictExcludedMessages, removing this guard also wiped the resident context
+// here (measured: resident=0, in_context=0). Today the invariant already
+// prevents the wipe, so the assertion with teeth for the guard is the
+// boundary one: without the guard the boundary stays 8 > len 7 and the test
+// fails there.
+func TestRemoveLastMessage_BoundaryGuardPreventsWipe(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:rm-last-boundary-guard"
+
+	// Build 8 messages: human turns at 0, 2, 4. Last 2 are tool results
+	// (an assistant with 2 tool_calls has its results appended at the end).
+	// Index 0: user
+	sm.AddMessage(key, "user", "initial request")
+	// Index 1: assistant
+	sm.AddMessage(key, "assistant", "I'll look into that.")
+	// Index 2: user
+	sm.AddMessage(key, "user", "check both search and grep")
+	// Index 3: assistant with 2 tool_calls
+	sm.AddFullMessage(key, providers.Message{
+		Role:    "assistant",
+		Content: "Let me search and grep.",
+		ToolCalls: []providers.ToolCall{
+			{ID: "call_search", Function: &providers.FunctionCall{Name: "web_search"}},
+			{ID: "call_grep", Function: &providers.FunctionCall{Name: "exec"}},
+		},
+	})
+	// Index 4: user (preserved human turn)
+	sm.AddMessage(key, "user", "great, do both")
+	// Index 5: assistant
+	sm.AddMessage(key, "assistant", "Here are the results.")
+	// Index 6: tool result for call_search
+	sm.AddFullMessage(key, providers.Message{
+		Role:       "tool",
+		Content:    "Found 5 repos",
+		ToolCallID: "call_search",
+	})
+	// Index 7: tool result for call_grep
+	sm.AddFullMessage(key, providers.Message{
+		Role:       "tool",
+		Content:    "Found 3 files",
+		ToolCallID: "call_grep",
+	})
+
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// Exclude with keepCount=2: excludeUpTo = 8 - 2 = 6.
+	// Index 6 is a tool result → anti-split guard pushes excludeUpTo to 7.
+	// Index 7 is also a tool result → pushed to 8.
+	// excludeBoundary = 8 = len(Messages).
+	sm.ExcludeOldMessagesFromContext(key, 2)
+
+	session := sm.GetOrCreate(key)
+	t.Logf("after Exclude: len=%d boundary=%d", len(session.Messages), session.excludeBoundary)
+	if session.excludeBoundary != 8 {
+		t.Fatalf("precondition failed: excludeBoundary = %d, want 8 (= len)", session.excludeBoundary)
+	}
+
+	// RemoveLastMessage: trims index 7 (len 8→7).
+	// Guard: boundary=8 > len=7 → boundary reset to 0.
+	sm.RemoveLastMessage(key)
+
+	session = sm.GetOrCreate(key)
+	t.Logf("after RemoveLastMessage: len=%d boundary=%d", len(session.Messages), session.excludeBoundary)
+
+	// Without the guard, boundary would stay 8 > len, and the eviction clamp
+	// would be inert (min(lastExcluded+1, 8) = lastExcluded+1 which can reach
+	// len=7). With the guard, boundary=0 and the fallback path handles it.
+	if session.excludeBoundary > len(session.Messages) {
+		t.Errorf("boundary %d > len %d after RemoveLastMessage — guard did not fire",
+			session.excludeBoundary, len(session.Messages))
+	}
+
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("Save after RemoveLastMessage failed: %v", err)
+	}
+
+	// Act: evict.
+	evicted := sm.EvictExcludedMessages(key)
+	t.Logf("evicted=%d", evicted)
+
+	// Assert: at least one non-excluded message must survive.
+	hist := sm.GetHistory(key)
+	t.Logf("resident after eviction: %d", len(hist))
+	for i, m := range hist {
+		t.Logf("  [%2d] role=%-10s excluded=%-5v content=%q", i, m.Role, m.ExcludeFromContext, m.Content)
+	}
+
+	nonExcluded := 0
+	for _, m := range hist {
+		if !m.ExcludeFromContext {
+			nonExcluded++
+		}
+	}
+	if nonExcluded == 0 {
+		t.Errorf("all non-excluded context wiped — RemoveLastMessage boundary guard is load-bearing but had no test")
+	}
+	if len(hist) == 0 {
+		t.Errorf("entire resident slice emptied — eviction wiped everything")
 	}
 }
