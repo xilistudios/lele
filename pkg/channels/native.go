@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -172,6 +173,27 @@ func rateOr(value, def int) int {
 	return value
 }
 
+// isLoopbackHost reports whether host is a loopback address that is only
+// reachable from the local machine. It recognises the empty string (Go's
+// net/http treats "" as "all interfaces" — return false), "localhost", the
+// IPv4 and IPv6 loopback literals, and any IP for which net.IP.IsLoopback is
+// true. IPv6 bracket notation (e.g. "[::1]") is accepted for convenience.
+func isLoopbackHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	// Strip optional IPv6 brackets.
+	if len(host) > 2 && host[0] == '[' && host[len(host)-1] == ']' {
+		host = host[1 : len(host)-1]
+	}
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable, approvalManager *ApprovalManager) (*NativeChannel, error) {
 	nativeCfg := cfg.Channels.Native
 
@@ -199,6 +221,9 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 		refreshLimiter = newRateLimiter(rateOr(rl.RefreshPerMinute, config.DefaultNativeRateLimitRefreshPerMinute), time.Minute)
 		apiLimiter = newRateLimiter(rateOr(rl.APIPerMinute, config.DefaultNativeRateLimitAPIPerMinute), time.Minute)
 		wsMessageLimiter = newRateLimiter(rateOr(rl.WSMessagesPerMinute, config.DefaultNativeRateLimitWSMessagesPerMinute), time.Minute)
+	}
+	if !nativeCfg.RateLimit.Enabled && !isLoopbackHost(cfg.EffectiveServerHost()) {
+		log.Printf("WARNING: native API rate limiting is disabled and the server binds %s:%d (reachable from the network) — set channels.native.rate_limit.enabled=true to throttle /api/v1/auth/pair", cfg.EffectiveServerHost(), cfg.EffectiveServerPort())
 	}
 	// authLogLimiter is not a traffic limiter: it samples log lines so a dead
 	// token polling in a loop cannot fill the log.  It stays on even when rate

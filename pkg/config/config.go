@@ -431,9 +431,13 @@ type ChannelsConfig struct {
 }
 
 // NativeRateLimitConfig tunes the throttling of the native channel's routes.
-// It is disabled by default: the server listens on loopback, and throttling
-// ordinary local use only managed to make a browser with several tabs sign
-// itself out. A zero rate means "use the built-in default" (see applyDefaults).
+// It is disabled by default: on ordinary local use, throttling managed to make
+// a browser with several tabs sign itself out (the #326 story). The server
+// binds all interfaces unless server.host or gateway.host says otherwise, so
+// on a shared network the pairing endpoint is reachable and unthrottled;
+// setting enabled to true is recommended for non-loopback installs, and the
+// server logs a warning when the combination is detected. A zero rate means
+// "use the built-in default" (see applyDefaults).
 type NativeRateLimitConfig struct {
 	Enabled             bool `json:"enabled" env:"LELE_CHANNELS_NATIVE_RATE_LIMIT_ENABLED"`
 	PinPerMinute        int  `json:"pin_per_minute" env:"LELE_CHANNELS_NATIVE_RATE_LIMIT_PIN_PER_MINUTE"`

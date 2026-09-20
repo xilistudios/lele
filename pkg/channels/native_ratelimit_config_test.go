@@ -656,3 +656,192 @@ func TestBareChannelWithExplicitLimitersStillWorks(t *testing.T) {
 // Note: postAuth from auth_ratelimit_test.go is also available in the same
 // package; this variant accepts a base URL rather than a full URL to keep
 // the call sites uniform.
+
+func TestIsLoopbackHost(t *testing.T) {
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"", false},
+		{"localhost", true},
+		{"127.0.0.1", true},
+		{"::1", true},
+		{"[::1]", true},
+		{"0.0.0.0", false},
+		{"::", false},
+		{"192.168.0.171", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			if got := isLoopbackHost(tt.host); got != tt.want {
+				t.Errorf("isLoopbackHost(%q) = %v, want %v", tt.host, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestConfiguredRateIsEnforcedPerBucket verifies, for every one of the five
+// traffic buckets, that the exact rate from config is the one enforced.  The
+// rates are deliberately non-default so that any mutant that ignores the
+// config field (falling back to the legacy 10/5/20/120/120) fails.
+func TestConfiguredRateIsEnforcedPerBucket(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Channels.Native.Enabled = true
+	cfg.Channels.Native.Host = "127.0.0.1"
+	cfg.Channels.Native.Port = 0
+	cfg.Channels.Native.RateLimit = config.NativeRateLimitConfig{
+		Enabled:             true,
+		PinPerMinute:        2,
+		PairPerMinute:       1,
+		RefreshPerMinute:    3,
+		APIPerMinute:        4,
+		WSMessagesPerMinute: 2,
+	}
+
+	ts := newRateLimitTestServer(t, cfg)
+
+	type bucket struct {
+		name       string
+		send       func(t *testing.T) *http.Response
+		wantRate   int
+		bucketName string
+	}
+
+	buckets := []bucket{
+		{
+			name: "pin (PinPerMinute=2)",
+			send: func(t *testing.T) *http.Response {
+				req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/auth/pin", nil)
+				if err != nil {
+					t.Fatalf("NewRequest: %v", err)
+				}
+				req.Header.Set("Authorization", "Bearer "+ts.token)
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					t.Fatalf("GET /auth/pin: %v", err)
+				}
+				t.Cleanup(func() { resp.Body.Close() })
+				return resp
+			},
+			wantRate:   2,
+			bucketName: "pinLimiter",
+		},
+		{
+			name: "pair (PairPerMinute=1)",
+			send: func(t *testing.T) *http.Response {
+				return postPair(t, ts.server.URL, "000000")
+			},
+			wantRate:   1,
+			bucketName: "pairLimiter",
+		},
+		{
+			name: "refresh (RefreshPerMinute=3)",
+			send: func(t *testing.T) *http.Response {
+				return postRefresh(t, ts.server.URL, "not-a-real-token")
+			},
+			wantRate:   3,
+			bucketName: "refreshLimiter",
+		},
+		{
+			name: "api (APIPerMinute=4)",
+			send: func(t *testing.T) *http.Response {
+				req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/auth/status", nil)
+				if err != nil {
+					t.Fatalf("NewRequest: %v", err)
+				}
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					t.Fatalf("GET /auth/status: %v", err)
+				}
+				t.Cleanup(func() { resp.Body.Close() })
+				return resp
+			},
+			wantRate:   4,
+			bucketName: "apiLimiter",
+		},
+	}
+
+	for _, b := range buckets {
+		t.Run(b.name, func(t *testing.T) {
+			for i := 0; i < b.wantRate; i++ {
+				resp := b.send(t)
+				if resp.StatusCode == http.StatusTooManyRequests {
+					t.Fatalf("%s: request %d got 429; expected %d free requests",
+						b.bucketName, i+1, b.wantRate)
+				}
+			}
+			resp := b.send(t)
+			if resp.StatusCode != http.StatusTooManyRequests {
+				t.Fatalf("%s: request %d: status = %d, want 429 (rate %d not enforced)",
+					b.bucketName, b.wantRate+1, resp.StatusCode, b.wantRate)
+			}
+		})
+	}
+
+	// WebSocket bucket — driven directly through handleWSClientMessage.
+	// The wsMessageLimiter keys on ClientID, not IP.
+	t.Run("ws_message (WSMessagesPerMinute=2)", func(t *testing.T) {
+		client := &WSClient{
+			ID:         "ws-bucket-test",
+			SessionKey: "test-session",
+			ClientInfo: &ClientInfo{ClientID: ts.clientID},
+			SendChan:   make(chan []byte, 16),
+			done:       make(chan struct{}),
+		}
+		payload, err := json.Marshal(WSMessagePayload{Content: "hello", SessionKey: "test-session"})
+		if err != nil {
+			t.Fatalf("Marshal() error = %v", err)
+		}
+		allowed := 0
+		for i := 0; i < 4; i++ {
+			// handleWSClientMessage sends ack or error on client.SendChan.
+			// Run it in a goroutine because the bus consumer below may
+			// block if the handler publishes an inbound message.
+			done := make(chan struct{})
+			go func(idx int) {
+				defer close(done)
+				ts.channel.handleWSClientMessage(client, payload, "evt-ws-"+strconv.Itoa(idx))
+			}(i)
+
+			dCtx, dCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			inbound, ok := ts.bus.ConsumeInbound(dCtx)
+			if ok {
+				_ = inbound
+			}
+			dCancel()
+
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatalf("handleWSClientMessage did not return for request %d", i+1)
+			}
+
+			// Drain the ack or error from SendChan.
+			select {
+			case raw := <-client.SendChan:
+				var msg WSMessage
+				if err := json.Unmarshal(raw, &msg); err != nil {
+					t.Fatalf("Unmarshal: %v", err)
+				}
+				if msg.Event == "error" {
+					// Rate-limited: this should be the (rate+1)-th.
+					var errData map[string]string
+					json.Unmarshal(msg.Data, &errData)
+					if i < 2 {
+						t.Fatalf("ws: request %d got rate_limit error; expected 2 free", i+1)
+					}
+					if errData["code"] != "rate_limit_exceeded" {
+						t.Fatalf("ws: request %d error code = %q, want rate_limit_exceeded", i+1, errData["code"])
+					}
+					return // pass
+				}
+				allowed++
+			default:
+				t.Fatal("expected message on SendChan")
+			}
+		}
+		if allowed != 2 {
+			t.Fatalf("ws: allowed %d requests, want exactly 2 (WSMessagesPerMinute=2)", allowed)
+		}
+	})
+}
