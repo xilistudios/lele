@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-09-18T14:54:09Z",
+  "updated_at": "2026-09-20T13:39:49Z",
   "source": "models.dev",
   "providers": {
     "alibaba": {
@@ -165,7 +165,7 @@
     },
     "minimax_cn": {
       "id": "minimax_cn",
-      "name": "MiniMax (minimaxi.com)",
+      "name": "MiniMax (minimax.cn)",
       "type": "anthropic",
       "api_base": "https://api.minimaxi.com/anthropic/v1",
       "file": "providers/minimax_cn.json",
@@ -369,7 +369,7 @@
       "type": "openai",
       "api_base": "https://api.z.ai/api/paas/v4",
       "file": "providers/zai.json",
-      "model_count": 16
+      "model_count": 17
     },
     "zai_coding_plan": {
       "id": "zai_coding_plan",
@@ -385,7 +385,7 @@
       "type": "openai",
       "api_base": "https://open.bigmodel.cn/api/paas/v4",
       "file": "providers/zhipu.json",
-      "model_count": 15
+      "model_count": 16
     }
   }
 }

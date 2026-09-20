@@ -1,6 +1,6 @@
 {
   "id": "minimax_cn",
-  "name": "MiniMax (minimaxi.com)",
+  "name": "MiniMax (minimax.cn)",
   "type": "anthropic",
   "api_base": "https://api.minimaxi.com/anthropic/v1",
   "models": [
