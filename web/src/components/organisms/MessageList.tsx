@@ -46,7 +46,7 @@ function messageKey(m: ChatMessage): string {
 export function MessageList() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { apiUrl, session } = useAuthContext()
+  const { session } = useAuthContext()
   const {
     approvalRequest,
     approvalResult,
@@ -204,7 +204,6 @@ export function MessageList() {
             message={item.message}
             isLast={item.index === visibleMessages.length - 1}
             onNavigateToSession={handleNavigateToSession}
-            apiUrl={apiUrl}
             onRetry={onRetry}
           />
         )
@@ -298,7 +297,7 @@ export function MessageList() {
         </div>
       )
     },
-    [visibleMessages, handleNavigateToSession, apiUrl, onRetry, t],
+    [visibleMessages, handleNavigateToSession, onRetry, t],
   )
 
   const computeItemKey = useCallback((index: number, item: RenderItem) => {

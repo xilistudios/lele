@@ -1,5 +1,7 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAuthContext } from '../../contexts/AuthContext'
+import { downloadFileViaApi } from '../../lib/fileDownload'
 import {
   isDiffStatLine,
   isFileDiffRow,
@@ -8,6 +10,7 @@ import {
   parseFileDiffRow,
 } from '../../lib/markdown'
 import type { Attachment, ChatMessage } from '../../lib/types'
+import { AuthedImage } from '../molecules/AuthedImage'
 import { CanvasBlock } from '../molecules/CanvasBlock'
 import { MarkdownText } from '../molecules/MarkdownText'
 import { ToolCallDisplay } from '../molecules/ToolCallDisplay'
@@ -26,24 +29,6 @@ function isImageAttachment(attachment: Attachment): boolean {
   if (attachment.name && isImageByExtension(attachment.name)) return true
   if (attachment.path && isImageByExtension(attachment.path)) return true
   return false
-}
-
-function buildFileUrl(apiUrl: string, path: string): string {
-  const base = apiUrl.replace(/\/$/, '')
-  return `${base}/api/v1/files/view?path=${encodeURIComponent(path)}`
-}
-
-/**
- * URL for the download flavour of a file. `download=1` makes the backend
- * answer with Content-Disposition: attachment (filename taken from `name`),
- * so the browser saves the file instead of rendering it inline. The inline
- * preview flavour is buildFileUrl above.
- */
-function buildDownloadUrl(apiUrl: string, path: string, name?: string): string {
-  const base = apiUrl.replace(/\/$/, '')
-  let url = `${base}/api/v1/files/view?path=${encodeURIComponent(path)}&download=1`
-  if (name) url += `&name=${encodeURIComponent(name)}`
-  return url
 }
 
 /** Download icon (12px) shared by the file card and the image overlay. */
@@ -86,12 +71,12 @@ type Props = {
   message: ChatMessage
   isLast?: boolean
   onNavigateToSession?: (sessionKey: string) => void
-  apiUrl?: string
   onRetry?: (message: ChatMessage) => void
 }
 
-function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRetry }: Props) {
+function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: Props) {
   const { t } = useTranslation()
+  const { api } = useAuthContext()
   const isUser = message.role === 'user'
   const isTool = message.role === 'tool'
   const [expanded, setExpanded] = useState(false)
@@ -143,6 +128,18 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
     wasStreamingRef.current = message.streaming
   }, [message.streaming])
 
+  const handleDownload = useCallback(
+    async (attachment: Attachment) => {
+      if (!attachment.path) return
+      try {
+        await downloadFileViaApi(api, attachment.path, attachment.name ?? undefined)
+      } catch (error) {
+        console.error('[lele] attachment download failed', error)
+      }
+    },
+    [api],
+  )
+
   const blocks = useMemo(() => {
     if (isUser || isTool) return null
     // Don't parse blocks while streaming — partial content causes false positives
@@ -189,12 +186,11 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
           {imageAttachments.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {imageAttachments.map((attachment, index) => (
-                <img
+                <AuthedImage
                   key={`${attachment.path ?? attachment.name ?? 'img'}:${index}`}
-                  src={buildFileUrl(apiUrl ?? '', attachment.path ?? '')}
+                  path={attachment.path ?? ''}
                   alt={attachment.name ?? 'image'}
                   className="max-w-full rounded-lg object-contain max-h-96"
-                  loading="lazy"
                 />
               ))}
             </div>
@@ -429,22 +425,21 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
                     key={`${attachment.path ?? attachment.name ?? 'img'}:${index}`}
                     className="relative inline-block max-w-full"
                   >
-                    <img
-                      src={buildFileUrl(apiUrl ?? '', attachment.path ?? '')}
+                    <AuthedImage
+                      path={attachment.path ?? ''}
                       alt={attachment.name ?? 'image'}
                       className="max-w-full rounded-lg object-contain max-h-96"
-                      loading="lazy"
                     />
                     {attachment.path ? (
-                      <a
-                        href={buildDownloadUrl(apiUrl ?? '', attachment.path, attachment.name)}
-                        download={attachment.name ?? true}
+                      <button
+                        type="button"
+                        onClick={() => void handleDownload(attachment)}
                         aria-label={`${t('chat.download')} ${label}`}
                         title={`${t('chat.download')} ${label}`}
                         className="absolute right-1.5 top-1.5 inline-flex items-center justify-center rounded-md border border-border bg-background-primary/90 p-1 text-text-secondary shadow-card transition-colors hover:text-text-primary"
                       >
                         <DownloadIcon />
-                      </a>
+                      </button>
                     ) : null}
                   </div>
                 )
@@ -460,15 +455,15 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
                   ) : null}
                   {attachment.path ? (
                     <>
-                      <a
-                        href={buildDownloadUrl(apiUrl ?? '', attachment.path, attachment.name)}
-                        download={attachment.name ?? true}
+                      <button
+                        type="button"
+                        onClick={() => void handleDownload(attachment)}
                         aria-label={`${t('chat.download')} ${label}`}
                         className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-border bg-background-primary px-2 py-1 font-medium text-text-primary transition-colors hover:text-text-secondary"
                       >
                         <DownloadIcon />
                         <span>{t('chat.download')}</span>
-                      </a>
+                      </button>
                       <p className="mt-1 font-mono text-text-tertiary">{attachment.path}</p>
                     </>
                   ) : null}

@@ -201,7 +201,6 @@ export const createApiClient = (baseUrl: string) => {
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-
   const blockRefreshFor = (ms: number) => {
     refreshBlockedUntil = Date.now() + Math.max(0, Math.min(ms, 60_000))
   }
@@ -956,6 +955,79 @@ export const createApiClient = (baseUrl: string) => {
         })
       },
       dates: () => request<LogsDatesResponse>(endpoints.logs.dates, { method: 'GET' }),
+    },
+    /**
+     * Fetch a file blob through the authenticated view-secure endpoint.
+     *
+     * WHY: the public /api/v1/files/view endpoint (restricted in PR 305) only
+     * serves files inside the staging dirs leleDir/tmp/attachments and
+     * leleDir/tmp/uploads. Agent-persisted attachments live in workspace paths
+     * (workspace attachments dirs) which return 403 on that public endpoint.
+     * A plain img-src or anchor href cannot carry an Authorization header,
+     * so the UI must fetch the blob authenticated and convert it to an
+     * object URL for display or download.
+     */
+    fileBlob: async (path: string, signal?: AbortSignal): Promise<Blob> => {
+      const url = `${joinUrl(baseUrl, endpoints.files.viewSecure)}?path=${encodeURIComponent(path)}`
+
+      const headers: Record<string, string> = {}
+      if (tokenState.token) {
+        headers.Authorization = `Bearer ${tokenState.token}`
+      }
+
+      const timeoutController = new AbortController()
+      const timeoutId = setTimeout(() => timeoutController.abort(), DEFAULT_REQUEST_TIMEOUT_MS)
+
+      let combinedSignal: AbortSignal
+      if (signal) {
+        combinedSignal = AbortSignal.any([signal, timeoutController.signal])
+      } else {
+        combinedSignal = timeoutController.signal
+      }
+
+      let response: Response
+      try {
+        response = await fetch(url, { method: 'GET', headers, signal: combinedSignal })
+      } finally {
+        clearTimeout(timeoutId)
+      }
+
+      if (response.status === 401 && tokenState.refreshToken) {
+        const newToken = await refreshToken()
+        if (newToken) {
+          headers.Authorization = `Bearer ${newToken}`
+          const retryTimeoutController = new AbortController()
+          const retryTimeoutId = setTimeout(
+            () => retryTimeoutController.abort(),
+            DEFAULT_REQUEST_TIMEOUT_MS,
+          )
+          let retrySignal: AbortSignal
+          if (signal) {
+            retrySignal = AbortSignal.any([signal, retryTimeoutController.signal])
+          } else {
+            retrySignal = retryTimeoutController.signal
+          }
+          try {
+            const retryResponse = await fetch(url, {
+              method: 'GET',
+              headers,
+              signal: retrySignal,
+            })
+            if (!retryResponse.ok) {
+              throw await parseApiError(retryResponse)
+            }
+            return await retryResponse.blob()
+          } finally {
+            clearTimeout(retryTimeoutId)
+          }
+        }
+      }
+
+      if (!response.ok) {
+        throw await parseApiError(response)
+      }
+
+      return await response.blob()
     },
     uploadFiles: async (files: File[]) => {
       const formData = new FormData()
