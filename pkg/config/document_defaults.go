@@ -69,6 +69,21 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 	if doc.Channels.Native.UploadTTLHours == 0 {
 		doc.Channels.Native.UploadTTLHours = defaults.Channels.Native.UploadTTLHours
 	}
+	if doc.Channels.Native.RateLimit.PinPerMinute == 0 {
+		doc.Channels.Native.RateLimit.PinPerMinute = defaults.Channels.Native.RateLimit.PinPerMinute
+	}
+	if doc.Channels.Native.RateLimit.PairPerMinute == 0 {
+		doc.Channels.Native.RateLimit.PairPerMinute = defaults.Channels.Native.RateLimit.PairPerMinute
+	}
+	if doc.Channels.Native.RateLimit.RefreshPerMinute == 0 {
+		doc.Channels.Native.RateLimit.RefreshPerMinute = defaults.Channels.Native.RateLimit.RefreshPerMinute
+	}
+	if doc.Channels.Native.RateLimit.APIPerMinute == 0 {
+		doc.Channels.Native.RateLimit.APIPerMinute = defaults.Channels.Native.RateLimit.APIPerMinute
+	}
+	if doc.Channels.Native.RateLimit.WSMessagesPerMinute == 0 {
+		doc.Channels.Native.RateLimit.WSMessagesPerMinute = defaults.Channels.Native.RateLimit.WSMessagesPerMinute
+	}
 
 	// Defaults for session.
 	if doc.Session.EphemeralThreshold == 0 {
@@ -219,6 +234,7 @@ func defaultEditableDocument() *EditableDocument {
 				SessionExpiryDays: defaults.Channels.Native.SessionExpiryDays,
 				MaxUploadSizeMB:   defaults.Channels.Native.MaxUploadSizeMB,
 				UploadTTLHours:    defaults.Channels.Native.UploadTTLHours,
+				RateLimit:         defaults.Channels.Native.RateLimit,
 			},
 		},
 		Providers: EditableProvidersConfig{},

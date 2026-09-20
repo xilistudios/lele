@@ -296,6 +296,11 @@ func gatewayCmd() {
 		serverPort = portOverride
 	}
 
+	if !desktop && cfg.Channels.Native.Enabled && !cfg.Channels.Native.RateLimit.Enabled && !channels.IsLoopbackHost(serverHost) {
+		logger.WarnCF("native", fmt.Sprintf("native API rate limiting is disabled and the server binds %s:%d (reachable from the network) — set channels.native.rate_limit.enabled=true to throttle /api/v1/auth/pair", serverHost, serverPort),
+			map[string]interface{}{"host": serverHost, "port": serverPort})
+	}
+
 	srv := server.New(&server.Config{
 		Host: serverHost,
 		Port: serverPort,

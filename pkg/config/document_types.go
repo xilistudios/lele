@@ -229,16 +229,17 @@ type EditableOneBotConfig struct {
 
 // EditableNativeConfig for Native channel.
 type EditableNativeConfig struct {
-	Enabled           bool     `json:"enabled"`
-	Host              string   `json:"host"`
-	Port              int      `json:"port"`
-	TokenExpiryDays   int      `json:"token_expiry_days"`
-	PinExpiryMinutes  int      `json:"pin_expiry_minutes"`
-	MaxClients        int      `json:"max_clients"`
-	CORSOrigins       []string `json:"cors_origins"`
-	SessionExpiryDays int      `json:"session_expiry_days"`
-	MaxUploadSizeMB   int64    `json:"max_upload_size_mb"`
-	UploadTTLHours    int      `json:"upload_ttl_hours"`
+	Enabled           bool                  `json:"enabled"`
+	Host              string                `json:"host"`
+	Port              int                   `json:"port"`
+	TokenExpiryDays   int                   `json:"token_expiry_days"`
+	PinExpiryMinutes  int                   `json:"pin_expiry_minutes"`
+	MaxClients        int                   `json:"max_clients"`
+	CORSOrigins       []string              `json:"cors_origins"`
+	SessionExpiryDays int                   `json:"session_expiry_days"`
+	MaxUploadSizeMB   int64                 `json:"max_upload_size_mb"`
+	UploadTTLHours    int                   `json:"upload_ttl_hours"`
+	RateLimit         NativeRateLimitConfig `json:"rate_limit"`
 }
 
 // EditableProvidersConfig for providers.

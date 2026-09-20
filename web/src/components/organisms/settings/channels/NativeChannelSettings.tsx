@@ -1,5 +1,5 @@
 import { useSettings } from '../../../../contexts/SettingsContext'
-import { isDirtyPath } from '../../../../hooks/useSettingsHelpers'
+import { getErrorForPath, isDirtyPath } from '../../../../hooks/useSettingsHelpers'
 import {
   BooleanInput,
   NumberInput,
@@ -10,7 +10,8 @@ import {
 } from '../../../molecules'
 
 export function NativeChannelSettings() {
-  const { draftConfig, dirtyPaths, updateField, isRestartRequired, t } = useSettings()
+  const { draftConfig, dirtyPaths, validationErrors, updateField, isRestartRequired, t } =
+    useSettings()
 
   if (!draftConfig) return null
   const ch = draftConfig.channels
@@ -140,6 +141,108 @@ export function NativeChannelSettings() {
               onChange={(v) => updateField('channels.native.cors_origins', v)}
             />
           </SettingsField>
+          <SettingsField
+            label={t('settings.fields.nativeRateLimitEnabled')}
+            path="channels.native.rate_limit.enabled"
+            isDirty={isDirtyPath(dirtyPaths, 'channels.native.rate_limit.enabled')}
+            description={t('settings.fields.nativeRateLimitEnabledHint')}
+            error={getErrorForPath(validationErrors, 'channels.native.rate_limit.enabled')}
+          >
+            <BooleanInput
+              id="channels.native.rate_limit.enabled"
+              value={ch.native.rate_limit.enabled}
+              onChange={(v) => updateField('channels.native.rate_limit.enabled', v)}
+            />
+          </SettingsField>
+          {ch.native.rate_limit.enabled && (
+            <>
+              <SettingsField
+                label={t('settings.fields.nativeRateLimitPin')}
+                path="channels.native.rate_limit.pin_per_minute"
+                isDirty={isDirtyPath(dirtyPaths, 'channels.native.rate_limit.pin_per_minute')}
+                error={getErrorForPath(
+                  validationErrors,
+                  'channels.native.rate_limit.pin_per_minute',
+                )}
+              >
+                <NumberInput
+                  id="channels.native.rate_limit.pin_per_minute"
+                  value={ch.native.rate_limit.pin_per_minute}
+                  onChange={(v) => updateField('channels.native.rate_limit.pin_per_minute', v)}
+                  min={0}
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.nativeRateLimitPair')}
+                path="channels.native.rate_limit.pair_per_minute"
+                isDirty={isDirtyPath(dirtyPaths, 'channels.native.rate_limit.pair_per_minute')}
+                error={getErrorForPath(
+                  validationErrors,
+                  'channels.native.rate_limit.pair_per_minute',
+                )}
+              >
+                <NumberInput
+                  id="channels.native.rate_limit.pair_per_minute"
+                  value={ch.native.rate_limit.pair_per_minute}
+                  onChange={(v) => updateField('channels.native.rate_limit.pair_per_minute', v)}
+                  min={0}
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.nativeRateLimitRefresh')}
+                path="channels.native.rate_limit.refresh_per_minute"
+                isDirty={isDirtyPath(dirtyPaths, 'channels.native.rate_limit.refresh_per_minute')}
+                error={getErrorForPath(
+                  validationErrors,
+                  'channels.native.rate_limit.refresh_per_minute',
+                )}
+              >
+                <NumberInput
+                  id="channels.native.rate_limit.refresh_per_minute"
+                  value={ch.native.rate_limit.refresh_per_minute}
+                  onChange={(v) => updateField('channels.native.rate_limit.refresh_per_minute', v)}
+                  min={0}
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.nativeRateLimitApi')}
+                path="channels.native.rate_limit.api_per_minute"
+                isDirty={isDirtyPath(dirtyPaths, 'channels.native.rate_limit.api_per_minute')}
+                error={getErrorForPath(
+                  validationErrors,
+                  'channels.native.rate_limit.api_per_minute',
+                )}
+              >
+                <NumberInput
+                  id="channels.native.rate_limit.api_per_minute"
+                  value={ch.native.rate_limit.api_per_minute}
+                  onChange={(v) => updateField('channels.native.rate_limit.api_per_minute', v)}
+                  min={0}
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.nativeRateLimitWs')}
+                path="channels.native.rate_limit.ws_messages_per_minute"
+                isDirty={isDirtyPath(
+                  dirtyPaths,
+                  'channels.native.rate_limit.ws_messages_per_minute',
+                )}
+                error={getErrorForPath(
+                  validationErrors,
+                  'channels.native.rate_limit.ws_messages_per_minute',
+                )}
+              >
+                <NumberInput
+                  id="channels.native.rate_limit.ws_messages_per_minute"
+                  value={ch.native.rate_limit.ws_messages_per_minute}
+                  onChange={(v) =>
+                    updateField('channels.native.rate_limit.ws_messages_per_minute', v)
+                  }
+                  min={0}
+                />
+              </SettingsField>
+            </>
+          )}
         </>
       )}
     </SettingsSection>

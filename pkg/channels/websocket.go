@@ -351,7 +351,10 @@ func (n *NativeChannel) handleWSMessage(client *WSClient, msg WSMessage) {
 }
 
 func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMessage, eventID string) {
-	if !n.wsMessageLimiter.allow(client.ClientInfo.ClientID) {
+	// nil wsMessageLimiter means rate limiting is disabled by config: skip the
+	// check entirely.  The gate is nil-ness, not the config flag — tests that
+	// build a NativeChannel with explicit limiters must keep throttling active.
+	if n.wsMessageLimiter != nil && !n.wsMessageLimiter.allow(client.ClientInfo.ClientID) {
 		n.sendError(client, "rate_limit_exceeded", "rate limit exceeded, please slow down")
 		return
 	}

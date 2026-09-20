@@ -103,6 +103,14 @@ const CONFIG_RESPONSE = {
         session_expiry_days: 365,
         max_upload_size_mb: 50,
         upload_ttl_hours: 24,
+        rate_limit: {
+          enabled: false,
+          pin_per_minute: 10,
+          pair_per_minute: 5,
+          refresh_per_minute: 20,
+          api_per_minute: 120,
+          ws_messages_per_minute: 120,
+        },
       },
       telegram: {
         enabled: false,

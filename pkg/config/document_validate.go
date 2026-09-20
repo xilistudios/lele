@@ -140,6 +140,30 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		}
 	}
 
+	// Validate native rate limits: negative values are always invalid.
+	// 0 is legal (means "use the built-in default"); validated regardless
+	// of whether rate limiting is enabled so bad values don't lie dormant
+	// until the user flips the flag.
+	type rateLimitCheck struct {
+		path string
+		val  int
+	}
+	for _, rc := range []rateLimitCheck{
+		{"channels.native.rate_limit.pin_per_minute", doc.Channels.Native.RateLimit.PinPerMinute},
+		{"channels.native.rate_limit.pair_per_minute", doc.Channels.Native.RateLimit.PairPerMinute},
+		{"channels.native.rate_limit.refresh_per_minute", doc.Channels.Native.RateLimit.RefreshPerMinute},
+		{"channels.native.rate_limit.api_per_minute", doc.Channels.Native.RateLimit.APIPerMinute},
+		{"channels.native.rate_limit.ws_messages_per_minute", doc.Channels.Native.RateLimit.WSMessagesPerMinute},
+	} {
+		if rc.val < 0 {
+			errors = append(errors, ValidationError{
+				Path:    rc.path,
+				Message: "rate limit must be 0 (use the built-in default) or greater",
+				Code:    "invalid_range",
+			})
+		}
+	}
+
 	// Validate duplicate providers.
 	providerNames := make(map[string]bool)
 	for name := range doc.Providers {

@@ -63,6 +63,9 @@ func (rl *rateLimiter) cleanup() {
 }
 
 func (rl *rateLimiter) Stop() {
+	if rl == nil {
+		return
+	}
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	select {
@@ -73,6 +76,15 @@ func (rl *rateLimiter) Stop() {
 	}
 }
 
+// allow is deliberately NOT nil-safe: a nil receiver panics. This is
+// intentional — see the comment on sample below for the contrasting choice.
+// sample falls open (nil = "log everything") because a missing sampler floods
+// the log but does no further harm. allow falling open would silently leave an
+// endpoint unguarded, which is the exact bug TestPINEndpointRateLimitIsEnforced
+// catches: pinLimiter was once constructed, stopped, and never wired to the
+// route. A nil-safe allow would re-introduce that class of failure in silence.
+// All call sites are either inside rateLimitMiddleware (which guards nil) or
+// explicit nil-checked.
 func (rl *rateLimiter) allow(key string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -155,6 +167,13 @@ func (rl *rateLimiter) timeUntilReset(key string) time.Duration {
 }
 
 func (n *NativeChannel) rateLimitMiddleware(limiter *rateLimiter, next http.Handler) http.Handler {
+	// nil means rate limiting is disabled by config: the traffic limiter was
+	// never constructed.  The gate is nil-ness, not the config flag, because
+	// tests that build a NativeChannel with explicit limiters (e.g.
+	// newNativeTestServer) must keep the middleware even when the flag is off.
+	if limiter == nil {
+		return next
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := extractHost(r.RemoteAddr)
 		if !limiter.allow(key) {

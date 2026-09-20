@@ -47,7 +47,15 @@ Add or adjust the `channels.native` block in `~/.lele/config.json`:
       ],
       "session_expiry_days": 30,
       "max_upload_size_mb": 50,
-      "upload_ttl_hours": 24
+      "upload_ttl_hours": 24,
+      "rate_limit": {
+        "enabled": false,
+        "pin_per_minute": 10,
+        "pair_per_minute": 5,
+        "refresh_per_minute": 20,
+        "api_per_minute": 120,
+        "ws_messages_per_minute": 120
+      }
     }
   }
 }
@@ -132,31 +140,48 @@ Errors:
 | --- | --- | --- | --- |
 | 400 | `refresh_error` | Token unknown, expired, revoked, or already rotated | End the session and re-authenticate |
 | 400 | `body_invalid` | Malformed request body | Fix the request; the credential is untouched |
-| 429 | `rate_limit_exceeded` | Too many auth requests from this IP | Back off using `Retry-After`; **keep the session** |
+| 429 | `rate_limit_exceeded` | Too many auth requests from this IP (only when rate limiting is enabled) | Back off using `Retry-After`; **keep the session** |
 
 Only `refresh_error` proves the credential is dead. A 429 is answered by the
 limiter *before* the handler runs, so the refresh token has not been consumed
 and remains valid — clearing the session on a 429 turns a momentary slowdown
-into a sign-out.
+into a sign-out.  With rate limiting disabled (the default) no 429 is produced
+at all, so this branch is only exercised once you enable it.
 
 ### Rate Limits
 
-Auth endpoints are limited per source IP, each with its own budget:
+Rate limiting is **disabled by default**.  Enable it with
+`channels.native.rate_limit.enabled` (config file, WebUI, or the
+`LELE_CHANNELS_NATIVE_RATE_LIMIT_*` env vars listed in
+`docs/config-reference.md`).  When enabled, auth endpoints are limited per
+source IP, each with its own budget:
 
-| Endpoint | Limit | Rationale |
+| Endpoint | Default limit | Rationale |
 | --- | --- | --- |
 | `GET /api/v1/auth/pin` | 10 / min | Requires a token; bounds PIN thrashing that would evict another device's pending PIN |
 | `POST /api/v1/auth/pair` | 5 / min | Bruteforceable 6-digit PIN |
 | `POST /api/v1/auth/refresh` | 20 / min | Background renewal; must never be reachable in normal use |
 | Other API endpoints | 120 / min | General traffic |
+| WebSocket messages | 120 / min | Per-source WS frame budget |
 
-Renewal deliberately does **not** share the pairing bucket. Pairing retries
+Individual rates can be overridden via `pin_per_minute`, `pair_per_minute`,
+`refresh_per_minute`, `api_per_minute`, and `ws_messages_per_minute` inside
+the `rate_limit` block (see the config sample above).  Setting a field to `0`
+or omitting it means "use the built-in default" listed in the table; negative
+values are rejected by validation.
+
+Renewal deliberately does **not** share the pairing bucket.  Pairing retries
 (typo'd PIN, several devices) can legitimately burst, and mixing that with the
 quiet, automatic renewal call lets ordinary use trip a limit whose only
 recovery is signing out.
 
-Every 429 carries a `Retry-After` header with the seconds remaining in the
-window.
+When rate limiting is enabled, every 429 carries a `Retry-After` header with
+the seconds remaining in the window.
+
+**Security note:** with rate limiting disabled, the public
+`POST /api/v1/auth/pair` endpoint (6-digit PIN, 5-minute expiry) has no
+brute-force control.  Enable rate limiting on any machine reachable from an
+untrusted network.
 
 ### 4. Check Auth Status
 

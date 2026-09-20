@@ -398,6 +398,15 @@ export type EditableOneBotConfig = {
   allow_from: string[]
 }
 
+export type EditableNativeRateLimitConfig = {
+  enabled: boolean
+  pin_per_minute: number
+  pair_per_minute: number
+  refresh_per_minute: number
+  api_per_minute: number
+  ws_messages_per_minute: number
+}
+
 export type EditableNativeConfig = {
   enabled: boolean
   host: string
@@ -409,6 +418,7 @@ export type EditableNativeConfig = {
   session_expiry_days: number
   max_upload_size_mb: number
   upload_ttl_hours: number
+  rate_limit: EditableNativeRateLimitConfig
 }
 
 export type EditableChannelsConfig = {

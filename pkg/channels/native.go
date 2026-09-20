@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -161,6 +162,38 @@ type WSClient struct {
 	activeWriteLoops atomic.Int64
 }
 
+// rateOr falls back to the built-in default when the config carries 0
+// ("unset / use the default") or a negative value (a hand-edited config.json).
+// Without it, newRateLimiter(-3, ...) would build a bucket that rejects
+// everything, since allow() compares count <= rate.
+func rateOr(value, def int) int {
+	if value <= 0 {
+		return def
+	}
+	return value
+}
+
+// IsLoopbackHost reports whether host is a loopback address that is only
+// reachable from the local machine. It recognises the empty string (Go's
+// net/http treats "" as "all interfaces" — return false), "localhost", the
+// IPv4 and IPv6 loopback literals, and any IP for which net.IP.IsLoopback is
+// true. IPv6 bracket notation (e.g. "[::1]") is accepted for convenience.
+func IsLoopbackHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	// Strip optional IPv6 brackets.
+	if len(host) > 2 && host[0] == '[' && host[len(host)-1] == ']' {
+		host = host[1 : len(host)-1]
+	}
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable, approvalManager *ApprovalManager) (*NativeChannel, error) {
 	nativeCfg := cfg.Channels.Native
 
@@ -176,13 +209,22 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 
 	base := NewBaseChannel(ChannelName, nativeCfg, messageBus, []string{})
 
-	pinLimiter := newRateLimiter(10, time.Minute)
-	pairLimiter := newRateLimiter(5, time.Minute)
-	// Renewal is a background, client-driven call: it must be generous enough
-	// that normal use can never trip it, and tight enough to still bound abuse.
-	refreshLimiter := newRateLimiter(20, time.Minute)
-	apiLimiter := newRateLimiter(120, time.Minute)
-	wsMessageLimiter := newRateLimiter(120, time.Minute)
+	// Traffic limiters are only constructed when rate limiting is enabled in
+	// config.  When disabled (the default), they remain nil — rateLimitMiddleware
+	// treats a nil limiter as "no throttle", and Stop() is nil-safe.
+	var pinLimiter, pairLimiter, refreshLimiter, apiLimiter, wsMessageLimiter *rateLimiter
+	if rl := nativeCfg.RateLimit; rl.Enabled {
+		pinLimiter = newRateLimiter(rateOr(rl.PinPerMinute, config.DefaultNativeRateLimitPinPerMinute), time.Minute)
+		pairLimiter = newRateLimiter(rateOr(rl.PairPerMinute, config.DefaultNativeRateLimitPairPerMinute), time.Minute)
+		// Renewal is a background, client-driven call: it must be generous enough
+		// that normal use can never trip it, and tight enough to still bound abuse.
+		refreshLimiter = newRateLimiter(rateOr(rl.RefreshPerMinute, config.DefaultNativeRateLimitRefreshPerMinute), time.Minute)
+		apiLimiter = newRateLimiter(rateOr(rl.APIPerMinute, config.DefaultNativeRateLimitAPIPerMinute), time.Minute)
+		wsMessageLimiter = newRateLimiter(rateOr(rl.WSMessagesPerMinute, config.DefaultNativeRateLimitWSMessagesPerMinute), time.Minute)
+	}
+	// authLogLimiter is not a traffic limiter: it samples log lines so a dead
+	// token polling in a loop cannot fill the log.  It stays on even when rate
+	// limiting is disabled, because authMiddleware rejects regardless of throttling.
 	authLogLimiter := newRateLimiter(6, time.Minute)
 
 	workspacePath := cfg.WorkspacePath()
