@@ -151,9 +151,9 @@
     "inputTokens": "Tokens de entrada",
     "outputTokens": "Tokens de saída",
     "contextWindow": "Janela de contexto",
-    "cumulativeInput": "Entrada enviada",
-    "cumulativeOutput": "Saída recebida",
-    "cumulativeTotal": "Total enviado",
+    "cumulativeInput": "Tokens de entrada",
+    "cumulativeOutput": "Tokens de saída",
+    "cumulativeTotal": "Total de tokens",
     "compactions": "Compactações"
   },
   "approval": {
