@@ -63,27 +63,27 @@ func TestLoadMessagesWindow_ResidentEvictedPrefix(t *testing.T) {
 	if w == nil {
 		t.Fatal("expected window, got nil")
 	}
-	// Evicted region is seq [0,7). Newest 5: seq 2..6, chronological.
+	// Evicted region is seq [0,6). Newest 5: seq 1..5, chronological.
 	if len(w.Messages) != 5 {
 		t.Fatalf("expected 5 messages, got %d", len(w.Messages))
 	}
-	if w.FirstSeq != 2 || w.LastSeq != 6 {
-		t.Errorf("expected seqs 2..6, got %d..%d", w.FirstSeq, w.LastSeq)
+	if w.FirstSeq != 1 || w.LastSeq != 5 {
+		t.Errorf("expected seqs 1..5, got %d..%d", w.FirstSeq, w.LastSeq)
 	}
-	if want := "msg-02"; w.Messages[0].Content != want {
+	if want := "msg-01"; w.Messages[0].Content != want {
 		t.Errorf("first message content = %q, want %q", w.Messages[0].Content, want)
 	}
-	if want := "msg-06"; w.Messages[4].Content != want {
+	if want := "msg-05"; w.Messages[4].Content != want {
 		t.Errorf("last message content = %q, want %q", w.Messages[4].Content, want)
 	}
 	if !w.HasOlder {
-		t.Error("expected HasOlder=true (seq 0,1 remain)")
+		t.Error("expected HasOlder=true (seq 0 remains)")
 	}
 	if w.HasNewer {
-		t.Error("expected HasNewer=false (seq 6 is adjacent to memory at 7)")
+		t.Error("expected HasNewer=false (seq 5 is adjacent to memory at 6)")
 	}
-	if w.EvictedCount != 7 {
-		t.Errorf("EvictedCount = %d, want 7", w.EvictedCount)
+	if w.EvictedCount != 6 {
+		t.Errorf("EvictedCount = %d, want 6", w.EvictedCount)
 	}
 	if w.TotalCount != 10 {
 		t.Errorf("TotalCount = %d, want 10", w.TotalCount)
@@ -94,27 +94,27 @@ func TestLoadMessagesWindow_PagingBefore(t *testing.T) {
 	key := "test:paging"
 	sm := setupEvictedSession(t, key, 10, 3)
 
-	// First page: newest 5 of evicted region [0,7) → seq 2..6
+	// First page: newest 5 of evicted region [0,6) → seq 1..5
 	w := sm.LoadMessagesWindow(key, -1, 0, 5)
-	if w == nil || w.FirstSeq != 2 {
+	if w == nil || w.FirstSeq != 1 {
 		t.Fatalf("bad first page: %+v", w)
 	}
-	// Second page: before=2 → seq 0,1 chronological
+	// Second page: before=1 → seq 0 chronological
 	w2 := sm.LoadMessagesWindow(key, w.FirstSeq, 0, 5)
 	if w2 == nil {
 		t.Fatal("expected second page, got nil")
 	}
-	if len(w2.Messages) != 2 || w2.FirstSeq != 0 || w2.LastSeq != 1 {
-		t.Fatalf("expected seqs 0..1, got %+v", w2)
+	if len(w2.Messages) != 1 || w2.FirstSeq != 0 || w2.LastSeq != 0 {
+		t.Fatalf("expected seqs 0..0, got %+v", w2)
 	}
-	if w2.Messages[0].Content != "msg-00" || w2.Messages[1].Content != "msg-01" {
-		t.Errorf("wrong page contents: %q %q", w2.Messages[0].Content, w2.Messages[1].Content)
+	if w2.Messages[0].Content != "msg-00" {
+		t.Errorf("wrong page content: %q", w2.Messages[0].Content)
 	}
 	if w2.HasOlder {
 		t.Error("expected HasOlder=false at transcript start")
 	}
 	if !w2.HasNewer {
-		t.Error("expected HasNewer=true (gap up to memory at seq 7)")
+		t.Error("expected HasNewer=true (gap up to memory at seq 6)")
 	}
 	// Third page: nothing older.
 	if w3 := sm.LoadMessagesWindow(key, w2.FirstSeq, 0, 5); w3 != nil {
@@ -127,30 +127,30 @@ func TestLoadMessagesWindow_FullyEvictedSession(t *testing.T) {
 	sm := setupEvictedSession(t, key, 10, 3)
 
 	// Simulate LRU eviction: drop the session object from memory (its rows
-	// were persisted by saveForEviction; seq 7..9 stay in SQLite too).
+	// were persisted by saveForEviction; seq 6..9 stay in SQLite too).
 	sm.mu.Lock()
 	delete(sm.sessions, key)
 	delete(sm.accessTimes, key)
 	sm.mu.Unlock()
 
 	// Non-resident: the window serves the persisted eviction prefix
-	// (seq < FirstInMemorySeq=7). The tail 7..9 comes back via the normal
+	// (seq < FirstInMemorySeq=6). The tail 6..9 comes back via the normal
 	// cold-load history path, so there is no overlap.
 	w := sm.LoadMessagesWindow(key, -1, 0, 5)
 	if w == nil {
 		t.Fatal("expected window for fully evicted session, got nil")
 	}
-	if len(w.Messages) != 5 || w.FirstSeq != 2 || w.LastSeq != 6 {
-		t.Fatalf("expected seqs 2..6, got %+v", w)
+	if len(w.Messages) != 5 || w.FirstSeq != 1 || w.LastSeq != 5 {
+		t.Fatalf("expected seqs 1..5, got %+v", w)
 	}
 	if !w.HasOlder {
 		t.Error("expected HasOlder=true")
 	}
 	if w.HasNewer {
-		t.Error("expected HasNewer=false (seq 6 adjacent to boundary 7)")
+		t.Error("expected HasNewer=false (seq 5 adjacent to boundary 6)")
 	}
-	if w.EvictedCount != 7 || w.TotalCount != 10 {
-		t.Errorf("counts = %d/%d, want 7/10", w.EvictedCount, w.TotalCount)
+	if w.EvictedCount != 6 || w.TotalCount != 10 {
+		t.Errorf("counts = %d/%d, want 6/10", w.EvictedCount, w.TotalCount)
 	}
 
 	// Page all the way to the beginning.
@@ -174,7 +174,7 @@ func TestLoadMessagesWindow_FullyEvictedSession(t *testing.T) {
 		t.Errorf("last page should reach seq 0, got %d", cur.FirstSeq)
 	}
 	if pages != 2 {
-		t.Errorf("expected 2 pages for 7 evicted at limit 5, got %d", pages)
+		t.Errorf("expected 2 pages for 6 evicted at limit 5, got %d", pages)
 	}
 
 	// Loading a window must NOT resurrect the session into memory.
@@ -188,8 +188,8 @@ func TestLoadMessagesWindow_FullyEvictedSession(t *testing.T) {
 	// Cold-loading the session afterwards must yield exactly the tail, and
 	// combined with the window the transcript is complete and gapless.
 	hist := sm.GetHistoryView(key)
-	if len(hist) != 3 {
-		t.Fatalf("cold load must bring only the tail (3 messages), got %d", len(hist))
+	if len(hist) != 4 {
+		t.Fatalf("cold load must bring only the tail (4 messages), got %d", len(hist))
 	}
 }
 
@@ -197,13 +197,13 @@ func TestLoadMessagesWindow_AfterCursor(t *testing.T) {
 	key := "test:after"
 	sm := setupEvictedSession(t, key, 10, 3)
 
-	// Gap fill after seq 3 within evicted region [0,7): rows 4,5,6.
+	// Gap fill after seq 3 within evicted region [0,6): rows 4,5.
 	w := sm.LoadMessagesWindow(key, -1, 3, 10)
 	if w == nil {
 		t.Fatal("expected window, got nil")
 	}
-	if len(w.Messages) != 3 || w.FirstSeq != 4 || w.LastSeq != 6 {
-		t.Fatalf("expected seqs 4..6, got %+v", w)
+	if len(w.Messages) != 2 || w.FirstSeq != 4 || w.LastSeq != 5 {
+		t.Fatalf("expected seqs 4..5, got %+v", w)
 	}
 	if !w.HasOlder {
 		t.Error("expected HasOlder=true")
@@ -214,7 +214,7 @@ func TestLoadMessagesWindow_AfterCursor(t *testing.T) {
 
 	// after >= memory floor returns nothing (the in-memory tail is served by
 	// the regular history endpoints, not the evicted window).
-	if w := sm.LoadMessagesWindow(key, -1, 7, 10); w != nil {
+	if w := sm.LoadMessagesWindow(key, -1, 6, 10); w != nil {
 		t.Errorf("expected nil for after >= memFloor, got %+v", w)
 	}
 }
@@ -223,10 +223,10 @@ func TestLoadMessagesWindow_LimitClampAndValidation(t *testing.T) {
 	key := "test:clamp"
 	sm := setupEvictedSession(t, key, 10, 3)
 
-	// limit larger than max is clamped; returns all 7 evicted rows.
+	// limit larger than max is clamped; returns all 6 evicted rows.
 	w := sm.LoadMessagesWindow(key, -1, 0, maxMessagesWindowLimit+100)
-	if w == nil || len(w.Messages) != 7 {
-		t.Fatalf("expected 7 messages, got %+v", w)
+	if w == nil || len(w.Messages) != 6 {
+		t.Fatalf("expected 6 messages, got %+v", w)
 	}
 	// limit <= 0 rejected.
 	if w := sm.LoadMessagesWindow(key, -1, 0, 0); w != nil {

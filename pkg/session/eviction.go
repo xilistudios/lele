@@ -189,17 +189,28 @@ func (sm *SessionManager) SetEvictionTTL(ttl time.Duration) {
 	sm.evictionTTL = ttl
 }
 
-// EvictExcludedMessages removes all excluded messages from the in-memory
-// slice and records the eviction gap in `firstInMemorySeq`/`evictedTotal`.
+// EvictExcludedMessages removes excluded messages from the in-memory slice
+// and records the eviction gap in `firstInMemorySeq`/`evictedTotal`.
 // The evicted messages remain persisted in SQLite (excluded = 1) and can be
-// reloaded on demand via LoadEvictedMessages. All excluded messages are a
-// contiguous prefix of the in-memory slice starting at index 0, so a single
-// firstInMemorySeq (= number of evicted rows) captures the gap and the
-// invariant `seq = firstInMemorySeq + sliceIndex` holds for every kept slot.
+// reloaded on demand via LoadEvictedMessages.
 //
-// Because index 0 (normally the original user request) is also excluded and
-// evicted, its content is folded into the session summary first so no
+// The eviction region spans from the first message through the last excluded
+// message. With the preserved-user-messages feature, non-excluded preserved
+// messages (index 0, recent human turns) can sit inside this region as holes.
+// These holes are folded into the summary (never silently dropped) and are
+// evicted together with the excluded messages, so the in-memory slice stays a
+// clean suffix and the invariant `seq = firstInMemorySeq + sliceIndex` holds
+// for every kept slot.
+//
+// Because preserved messages inside the eviction region are also removed from
+// memory, their content is folded into the session summary first so no
 // information is lost (the summary stays in context and in SQLite metadata).
+// With eviction enabled the preserved messages are removed from memory together
+// with the excluded region and their content is appended to session.Summary
+// verbatim (so it still reaches the model inside the summary block). That fold
+// is persisted immediately via UpsertSession for that reason — the folded text
+// is about to leave memory entirely with the evicted region, so a crash before
+// the next Save would otherwise lose it.
 //
 // PRECONDITION: the caller must have already persisted the excluded flags
 // (Save returned nil). Eviction itself is memory-only and idempotent.
@@ -227,39 +238,45 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 		}
 	}
 
-	// Locate the first excluded message.
-	runStart := 0
-	for runStart < len(session.Messages) && !session.Messages[runStart].ExcludeFromContext {
-		runStart++
+	// Find the last excluded message. If none → no-op.
+	lastExcluded := -1
+	for i := len(session.Messages) - 1; i >= 0; i-- {
+		if session.Messages[i].ExcludeFromContext {
+			lastExcluded = i
+			break
+		}
 	}
-	if runStart >= len(session.Messages) {
+	if lastExcluded < 0 {
 		// Nothing excluded; no-op.
 		return 0
 	}
+	evictUpTo := lastExcluded + 1
 
-	// Extend the boundary over the full contiguous excluded run.
-	evictUpTo := runStart
-	for evictUpTo < len(session.Messages) && session.Messages[evictUpTo].ExcludeFromContext {
-		evictUpTo++
+	// Collect non-excluded messages in [0, evictUpTo) — these are preserved
+	// holes (index 0, recent human turns) that sit inside the eviction region.
+	// Their content is folded into the summary so nothing is lost.
+	var kept []providers.Message
+	for i := 0; i < evictUpTo; i++ {
+		if !session.Messages[i].ExcludeFromContext {
+			kept = append(kept, session.Messages[i])
+		}
 	}
-
-	// Fold the leading in-context messages (just index 0, the original user
-	// request) into the summary so no context is lost when we evict the whole
-	// [0..evictUpTo) prefix to keep the in-memory slice contiguous.
-	if runStart > 0 {
-		if folded := sm.foldEvictedIntoSummary(session, session.Messages[:runStart]); folded != "" {
+	foldedSummary := false
+	if len(kept) > 0 {
+		if folded := sm.foldEvictedIntoSummary(session, kept); folded != "" {
 			session.Summary = folded
 			session.Updated = time.Now()
+			foldedSummary = true
 		}
 	}
 
 	// Rebuild the kept slice: the in-context suffix starting at evictUpTo.
-	kept := make([]providers.Message, len(session.Messages)-evictUpTo)
-	copy(kept, session.Messages[evictUpTo:])
+	tail := make([]providers.Message, len(session.Messages)-evictUpTo)
+	copy(tail, session.Messages[evictUpTo:])
 
-	session.Messages = kept
+	session.Messages = tail
 	// Absolute seq of the first kept message: the number of rows evicted
-	// before it. With the contiguous-prefix model this is exactly `evictUpTo`.
+	// before it.
 	session.firstInMemorySeq += evictUpTo
 	session.evictedTotal += evictUpTo
 	session.bumpEpoch()
@@ -270,25 +287,42 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	// Save calls also carry it via sessionMetaFromSession. Failure to persist
 	// here only affects the durability of the boundary metadata (the in-memory
 	// eviction still succeeds), so it is logged, not fatal.
+	//
+	// When the fold changed the summary, we must persist the FULL metadata
+	// (via UpsertSession which carries both Summary and FirstInMemorySeq)
+	// instead of the targeted UpdateFirstInMemorySeq. The folded text is
+	// about to leave memory entirely with the evicted region, so a crash
+	// before the next Save would lose it — it must be durable immediately.
+	var metaPersistErr error
 	if sm.store != nil {
-		if perr := sm.store.Sessions().UpdateFirstInMemorySeq(key, session.firstInMemorySeq); perr != nil {
+		if foldedSummary {
+			metaPersistErr = sm.store.Sessions().UpsertSession(sessionMetaFromSession(session))
+		} else {
+			metaPersistErr = sm.store.Sessions().UpdateFirstInMemorySeq(key, session.firstInMemorySeq)
+		}
+		if metaPersistErr != nil {
 			logger.WarnCF("session", "Failed to persist eviction boundary", map[string]interface{}{
 				"session_key":     key,
 				"first_in_memory": session.firstInMemorySeq,
-				"error":           perr.Error(),
+				"error":           metaPersistErr.Error(),
 			})
 		}
 	}
 	// Dirty flags are reset: everything in memory is already persisted; the
 	// next Save must be a no-op (NOT a full rewrite).
 	session.clearDirtyFlags()
+	// If the fold happened but the metadata write failed, mark metaDirty
+	// AFTER clearDirtyFlags so the next Save retries via saveMetaOnlyUnlocked.
+	if foldedSummary && metaPersistErr != nil {
+		session.metaDirty = true
+	}
 	session.lastPersistedSeq = len(session.Messages) - 1
 	sm.touchSession(key)
 
 	logger.InfoCF("session", "Evicted excluded messages from memory", map[string]interface{}{
 		"session_key":     key,
 		"evicted":         evictUpTo,
-		"remaining":       len(kept),
+		"remaining":       len(tail),
 		"evicted_total":   session.evictedTotal,
 		"first_in_memory": session.firstInMemorySeq,
 	})
