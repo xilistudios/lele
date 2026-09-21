@@ -18,7 +18,7 @@ func TestSessionExists(t *testing.T) {
 	t.Cleanup(func() { s.Close() })
 
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	if sm.SessionExists("") {
 		t.Error("SessionExists(\"\") should be false")
@@ -55,7 +55,7 @@ func TestSessionExists(t *testing.T) {
 
 	// A fresh manager (simulating a restart) must also see it.
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	if !sm2.SessionExists(subKey) {
 		t.Errorf("SessionExists(%q) = false in fresh manager, want true", subKey)
 	}
@@ -65,7 +65,7 @@ func TestSessionExists(t *testing.T) {
 		t.Fatalf("failed to delete session from db: %v", err)
 	}
 	sm3 := NewSessionManager()
-	sm3.SetStore(s)
+	sm3.SetSessionRepo(s.Sessions())
 	if sm3.SessionExists(subKey) {
 		t.Errorf("SessionExists(%q) = true after DB deletion and fresh load, want false", subKey)
 	}

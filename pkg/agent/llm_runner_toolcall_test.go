@@ -432,7 +432,7 @@ func TestRunAgentLoop_HealsPoisonedSessionOnLoad(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	defer s.Close()
-	agent.Sessions.SetStore(s)
+	agent.Sessions.SetSessionRepo(s.Sessions())
 
 	sessionKey := "poisoned-session"
 	poisoned := providers.ToolCall{
@@ -499,7 +499,7 @@ func TestRunAgentLoop_HealsPoisonedSessionOnLoad(t *testing.T) {
 	// The repair must reach the store, not just the in-memory copy, otherwise
 	// the session is broken again after a restart.
 	reopened := session.NewSessionManager()
-	reopened.SetStore(s)
+	reopened.SetSessionRepo(s.Sessions())
 	assertSessionWireClean(t, reopened.GetHistory(sessionKey))
 	assertStoreHasNoPoisonedToolCalls(t, s, sessionKey)
 }

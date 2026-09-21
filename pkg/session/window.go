@@ -65,7 +65,7 @@ const maxMessagesWindowLimit = 200
 // Returns nil when the session does not exist or has no out-of-memory rows
 // for the requested page.
 func (sm *SessionManager) LoadMessagesWindow(sessionKey string, before, after, limit int) *EvictedMessagesPage {
-	if sm.store == nil || limit <= 0 {
+	if sm.sessionRepo == nil || limit <= 0 {
 		return nil
 	}
 	if limit > maxMessagesWindowLimit {
@@ -88,7 +88,7 @@ func (sm *SessionManager) LoadMessagesWindow(sessionKey string, before, after, l
 	}
 	sm.mu.RUnlock()
 
-	repo := sm.store.Sessions()
+	repo := sm.sessionRepo
 	if !resident {
 		// Not loaded in memory. The persisted eviction boundary
 		// (FirstInMemorySeq) defines the out-of-memory prefix: a cold load
@@ -150,7 +150,7 @@ func (sm *SessionManager) LoadMessagesWindow(sessionKey string, before, after, l
 		rows, err = repo.LoadMessagesBeforeLimited(sessionKey, bound, limit)
 	}
 	if err != nil {
-		logger.WarnCF("session", "LoadMessagesWindow store read failed", map[string]interface{}{
+		logger.WarnCF("session", "LoadMessagesWindow repository read failed", map[string]interface{}{
 			"session_key": sessionKey,
 			"error":       err.Error(),
 		})

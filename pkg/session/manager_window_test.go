@@ -35,14 +35,14 @@ func buildEvictedSession(t *testing.T, sm *SessionManager, key string, total, ke
 func setupEvictedSession(t *testing.T, key string, total, keepLast int) *SessionManager {
 	t.Helper()
 	sm := NewSessionManager()
-	sm.SetStore(newTestStore(t))
+	sm.SetSessionRepo(newTestStore(t).Sessions())
 	buildEvictedSession(t, sm, key, total, keepLast)
 	return sm
 }
 
 func TestLoadMessagesWindow_ResidentNoEviction_ReturnsNil(t *testing.T) {
 	sm := NewSessionManager()
-	sm.SetStore(newTestStore(t))
+	sm.SetSessionRepo(newTestStore(t).Sessions())
 	key := "test:novict"
 	sm.GetOrCreate(key)
 	sm.AddMessage(key, "user", "hello")
@@ -249,12 +249,12 @@ func TestLoadMessagesWindow_ColdLoadKeepsBoundary(t *testing.T) {
 	// keep firstInMemorySeq intact (no RAM inflation).
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 	key := "test:cold"
 	buildEvictedSession(t, sm, key, 12, 4)
 
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	// Trigger cold load through the normal history path.
 	hist := sm2.GetHistoryView(key)
 	if len(hist) != 4 {

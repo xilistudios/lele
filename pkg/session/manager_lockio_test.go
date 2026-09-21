@@ -31,7 +31,7 @@ func newTestStoreLockIO(t *testing.T) *store.Store {
 func TestSaveDoesNotHoldLockDuringIO(t *testing.T) {
 	s := newTestStoreLockIO(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 	key := "test:lockio"
 
 	// Build a session large enough that encoding + fsync takes a while.
@@ -107,7 +107,7 @@ func TestSaveDoesNotHoldLockDuringIO(t *testing.T) {
 func TestConcurrentSavesNeverLoseNewestData(t *testing.T) {
 	s := newTestStoreLockIO(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 	key := "test:ordering"
 
 	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "base"})
@@ -136,7 +136,7 @@ func TestConcurrentSavesNeverLoseNewestData(t *testing.T) {
 
 	// Reload from disk into a fresh manager
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	sm2.ensureLoaded()
 	sm2.mu.Lock()
 	session, ok := sm2.loadSessionFromDisk(key)

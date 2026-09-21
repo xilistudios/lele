@@ -19,8 +19,8 @@ import (
 type SessionManager struct {
 	sessions map[string]*Session
 	mu       sync.RWMutex
-	store    *store.Store // SQLite store
-	loadOnce sync.Once    // ensures loadSessions runs exactly once, on first access
+	sessionRepo *store.SessionRepo // SQLite sessions repository
+	loadOnce     sync.Once          // ensures loadSessions runs exactly once, on first access
 
 	// Lazy loading: lightweight metadata for sessions not yet loaded into memory.
 	// Populated by loadSessionMetadata() instead of loading full message history.
@@ -44,10 +44,10 @@ func NewSessionManager() *SessionManager {
 	return sm
 }
 
-// SetStore sets the SQLite store for persistence. When set, the manager
-// will use SQLite instead of JSON files for session storage.
-func (sm *SessionManager) SetStore(s *store.Store) {
-	sm.store = s
+// SetSessionRepo sets the SQLite sessions repository for persistence. When
+// set, the manager will use SQLite instead of JSON files for session storage.
+func (sm *SessionManager) SetSessionRepo(r *store.SessionRepo) {
+	sm.sessionRepo = r
 }
 
 func (sm *SessionManager) GetOrCreate(key string) *Session {

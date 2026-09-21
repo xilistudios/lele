@@ -3,11 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/xilistudios/lele/pkg/auth"
 	"github.com/xilistudios/lele/pkg/config"
-	"github.com/xilistudios/lele/pkg/store"
 )
 
 // parseAuthSubcommand extracts the subcommand from auth arguments for testability.
@@ -56,12 +54,13 @@ func authCmd() {
 	}
 
 	// Wire SQLite store when available so auth commands read/write the
-	// same database as the running server. Falls back to auth.json.
-	leleDir := config.GetLeleDir()
-	dbPath := filepath.Join(leleDir, "lele.db")
-	if s, err := store.Open(dbPath); err == nil {
+	// same database as the running server. When the database cannot be
+	// opened (unsupported platform, corruption, …) the CLI intentionally
+	// falls back to auth.json, mirroring the server's fallback semantics.
+	s, cleanup, _ := openSharedStore(defaultDBPath(), "auth-cli")
+	defer cleanup() // no-op when the store could not be opened
+	if s != nil {
 		auth.UseStore(s.Auth())
-		defer s.Close()
 	}
 
 	switch os.Args[2] {

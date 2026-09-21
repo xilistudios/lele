@@ -13,7 +13,7 @@ import (
 func TestSetSubagentStatus_PersistsAndSurvivesReload(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "native:client-1:subagent-3"
 	sm.AddMessage(key, "user", "do the thing")
@@ -34,7 +34,7 @@ func TestSetSubagentStatus_PersistsAndSurvivesReload(t *testing.T) {
 	// A fresh SessionManager over the same store must see it too
 	// (restart/eviction path).
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	results := sm2.FindSubagentSessions("native:client-1")
 	var status string
 	for _, past := range results {
@@ -50,7 +50,7 @@ func TestSetSubagentStatus_PersistsAndSurvivesReload(t *testing.T) {
 func TestSetSubagentStatus_UnknownKeyIsNoop(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	// Must not create the session nor panic.
 	sm.SetSubagentStatus("native:ghost:subagent-1", "completed")
@@ -80,7 +80,7 @@ func TestFindSubagentSessions_StatusEmptyWithoutPersistence(t *testing.T) {
 func TestFindSubagentSessions_StatusAcrossManyTerminals(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	parent := "native:client-1"
 	statuses := map[string]string{
@@ -118,7 +118,7 @@ func TestFindSubagentSessions_StatusAcrossManyTerminals(t *testing.T) {
 func TestSetSubagentStatus_SyncsSessionAndMeta(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "native:client-1:subagent-9"
 	sm.AddMessage(key, "user", "task")
@@ -154,7 +154,7 @@ func sessStatus(s *Session) string {
 func TestSetSubagentStatus_DoesNotClobberMessageContent(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "native:client-1:subagent-11"
 	sm.AddMessage(key, "user", "probe")
@@ -166,7 +166,7 @@ func TestSetSubagentStatus_DoesNotClobberMessageContent(t *testing.T) {
 
 	// Reload everything from disk: messages must be intact.
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	hist := sm2.GetHistory(key)
 	if len(hist) != 2 {
 		t.Fatalf("history after status write = %d messages, want 2", len(hist))

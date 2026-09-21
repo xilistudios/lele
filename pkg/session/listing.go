@@ -28,17 +28,17 @@ func (sm *SessionManager) GetEvictedMessageCount(key string) int {
 		sm.mu.RUnlock()
 		return n
 	}
-	store := sm.store
+	repo := sm.sessionRepo
 	sm.mu.RUnlock()
 
-	if store == nil {
+	if repo == nil {
 		return 0
 	}
-	meta, err := store.Sessions().GetSessionMeta(key)
+	meta, err := repo.GetSessionMeta(key)
 	if err != nil || meta == nil || meta.FirstInMemorySeq <= 0 {
 		return 0
 	}
-	n, err := store.Sessions().CountMessagesBefore(key, meta.FirstInMemorySeq)
+	n, err := repo.CountMessagesBefore(key, meta.FirstInMemorySeq)
 	if err != nil || n < 0 {
 		return 0
 	}
@@ -62,8 +62,8 @@ func (sm *SessionManager) HasMessages(key string) bool {
 	// Cold session (metadata only): query the store count without materializing.
 	// Safe under RLock: SessionRepo.MessageCount only touches the SQLite
 	// connection (database/sql is goroutine-safe) and never acquires sm.mu.
-	if sm.store != nil {
-		if n, err := sm.store.Sessions().MessageCount(key); err == nil {
+	if sm.sessionRepo != nil {
+		if n, err := sm.sessionRepo.MessageCount(key); err == nil {
 			return n > 0
 		}
 	}
@@ -83,8 +83,8 @@ func (sm *SessionManager) GetTotalMessageCount(key string) int {
 		return len(session.Messages) + session.evictedTotal
 	}
 	// Not in memory: fall back to the store count if available.
-	if sm.store != nil {
-		if n, err := sm.store.Sessions().MessageCount(key); err == nil {
+	if sm.sessionRepo != nil {
+		if n, err := sm.sessionRepo.MessageCount(key); err == nil {
 			return n
 		}
 	}
@@ -192,8 +192,8 @@ func (sm *SessionManager) SessionExists(key string) bool {
 	}
 
 	// Check SQLite if available
-	if sm.store != nil {
-		exists, err := sm.store.Sessions().SessionExists(key)
+	if sm.sessionRepo != nil {
+		exists, err := sm.sessionRepo.SessionExists(key)
 		if err == nil && exists {
 			return true
 		}
@@ -280,7 +280,7 @@ func (sm *SessionManager) AllMessageCounts() map[string]int {
 	}
 
 	// For sessions only in metadata (not in memory), query SQLite in batch
-	if sm.store != nil {
+	if sm.sessionRepo != nil {
 		var needFromStore []string
 		for key := range sm.sessionMeta {
 			if _, ok := sm.sessions[key]; !ok {
@@ -290,7 +290,7 @@ func (sm *SessionManager) AllMessageCounts() map[string]int {
 		if len(needFromStore) > 0 {
 			// Release lock for I/O
 			sm.mu.RUnlock()
-			storeCounts, err := sm.store.Sessions().AllMessageCounts()
+			storeCounts, err := sm.sessionRepo.AllMessageCounts()
 			sm.mu.RLock()
 			if err == nil {
 				for _, key := range needFromStore {
@@ -325,7 +325,7 @@ func (sm *SessionManager) AllTotalMessageCounts() map[string]int {
 	}
 
 	// Cold sessions (metadata only): one batched store query.
-	if sm.store != nil {
+	if sm.sessionRepo != nil {
 		needFromStore := false
 		for key := range sm.sessionMeta {
 			if _, ok := sm.sessions[key]; !ok {
@@ -336,7 +336,7 @@ func (sm *SessionManager) AllTotalMessageCounts() map[string]int {
 		if needFromStore {
 			// Release lock for I/O (same pattern as AllMessageCounts).
 			sm.mu.RUnlock()
-			storeCounts, err := sm.store.Sessions().AllMessageCounts()
+			storeCounts, err := sm.sessionRepo.AllMessageCounts()
 			sm.mu.RLock()
 			if err == nil {
 				for key := range sm.sessionMeta {
@@ -526,13 +526,13 @@ func (sm *SessionManager) ListSessionIndex() []SessionIndexEntry {
 func (sm *SessionManager) SessionKeysWithMessages() map[string]bool {
 	sm.ensureLoaded()
 	sm.mu.RLock()
-	store := sm.store
+	repo := sm.sessionRepo
 	sm.mu.RUnlock()
 
-	if store == nil {
+	if repo == nil {
 		return nil
 	}
-	keys, err := store.Sessions().SessionKeysWithMessages()
+	keys, err := repo.SessionKeysWithMessages()
 	if err != nil {
 		return nil
 	}

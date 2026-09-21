@@ -17,10 +17,10 @@ import (
 // Must be called BEFORE acquiring sm.mu to avoid deadlock.
 func (sm *SessionManager) ensureLoaded() {
 	sm.loadOnce.Do(func() {
-		if sm.store != nil {
+		if sm.sessionRepo != nil {
 			sm.loadSessionMetadataFromSQLite()
 		} else {
-			logger.WarnCF("session", "SessionManager has no store — sessions will not persist to disk", nil)
+			logger.WarnCF("session", "SessionManager has no session repository — sessions will not persist to disk", nil)
 		}
 	})
 }
@@ -46,10 +46,10 @@ func (sm *SessionManager) loadSessionFromDisk(key string) (*Session, bool) {
 		// return zero/empty (real prod bug: subagent child sessions written
 		// by the spawner agent's manager and read through the executing
 		// agent's manager).
-		if sm.store == nil {
+		if sm.sessionRepo == nil {
 			return nil, false
 		}
-		meta, err := sm.store.Sessions().GetSessionMeta(key)
+		meta, err := sm.sessionRepo.GetSessionMeta(key)
 		if err != nil || meta == nil {
 			return nil, false
 		}
@@ -67,7 +67,7 @@ func (sm *SessionManager) loadSessionFromDisk(key string) (*Session, bool) {
 	}
 
 	// Load from SQLite if available
-	if sm.store != nil {
+	if sm.sessionRepo != nil {
 		return sm.loadFromSQLite(key)
 	}
 
@@ -77,7 +77,7 @@ func (sm *SessionManager) loadSessionFromDisk(key string) (*Session, bool) {
 // loadFromSQLite loads a session from the SQLite store.
 // Caller must hold sm.mu (write lock).
 func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
-	repo := sm.store.Sessions()
+	repo := sm.sessionRepo
 
 	// Load metadata
 	meta, err := repo.GetSessionMeta(key)
@@ -230,7 +230,7 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 
 // loadSessionMetadataFromSQLite loads session metadata from the SQLite store.
 func (sm *SessionManager) loadSessionMetadataFromSQLite() error {
-	repo := sm.store.Sessions()
+	repo := sm.sessionRepo
 	metas, err := repo.ListSessionMeta()
 	if err != nil {
 		return err

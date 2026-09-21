@@ -35,10 +35,10 @@ func (sm *SessionManager) Save(key string) error {
 func (sm *SessionManager) SaveAll() (saved int, failed int) {
 	sm.ensureLoaded()
 
-	if sm.store == nil {
+	if sm.sessionRepo == nil {
 		// Nothing to flush to: ensureLoaded already warned once about the
-		// missing store. Report (0, 0) so shutdown can proceed unblocked.
-		logger.DebugCF("session", "SaveAll skipped: SessionManager has no store", nil)
+		// missing repository. Report (0, 0) so shutdown can proceed unblocked.
+		logger.DebugCF("session", "SaveAll skipped: SessionManager has no session repository", nil)
 		return 0, 0
 	}
 
@@ -121,7 +121,7 @@ func sessionMetaFromSession(s *Session) store.SessionMeta {
 // saveMetaOnlyUnlocked persists only session metadata (no message rewrite).
 // Caller must hold sm.mu.
 func (sm *SessionManager) saveMetaOnlyUnlocked(key string) error {
-	if sm.store == nil {
+	if sm.sessionRepo == nil {
 		return nil
 	}
 	session, ok := sm.sessions[key]
@@ -132,7 +132,7 @@ func (sm *SessionManager) saveMetaOnlyUnlocked(key string) error {
 	meta := sessionMetaFromSession(session)
 	epoch := session.saveEpoch
 	sm.mu.Unlock()
-	err := sm.store.Sessions().UpsertSession(meta)
+	err := sm.sessionRepo.UpsertSession(meta)
 	sm.mu.Lock()
 
 	if err != nil {
@@ -153,7 +153,7 @@ func (sm *SessionManager) saveMetaOnlyUnlocked(key string) error {
 // Used for initial saves, after truncation, or when messages were reordered.
 // Caller must hold sm.mu.
 func (sm *SessionManager) saveFullUnlocked(key string) error {
-	if sm.store == nil {
+	if sm.sessionRepo == nil {
 		return nil
 	}
 	session, ok := sm.sessions[key]
@@ -170,7 +170,7 @@ func (sm *SessionManager) saveFullUnlocked(key string) error {
 	var evictedRows []store.MessageRowFull
 	var err error
 	if session.firstInMemorySeq > 0 {
-		evictedRows, err = sm.store.Sessions().LoadMessagesFullBeforeSeq(key, session.firstInMemorySeq)
+		evictedRows, err = sm.sessionRepo.LoadMessagesFullBeforeSeq(key, session.firstInMemorySeq)
 		if err != nil {
 			return fmt.Errorf("re-materialize evicted messages %q: %w", key, err)
 		}
@@ -213,11 +213,11 @@ func (sm *SessionManager) saveFullUnlocked(key string) error {
 	pruned := 0
 	epoch := session.saveEpoch
 	sm.mu.Unlock()
-	err = sm.store.Sessions().UpsertSession(meta)
+	err = sm.sessionRepo.UpsertSession(meta)
 	if err == nil {
-		err = sm.store.Sessions().ReplaceMessages(key, rows)
+		err = sm.sessionRepo.ReplaceMessages(key, rows)
 		if err == nil {
-			pruned, _ = sm.store.Sessions().PruneExcluded(key, maxStoredMessages)
+			pruned, _ = sm.sessionRepo.PruneExcluded(key, maxStoredMessages)
 		}
 	}
 	sm.mu.Lock()
@@ -258,7 +258,7 @@ func (sm *SessionManager) saveFullUnlocked(key string) error {
 // Uses InsertMessages (batch) for appended messages and UpdateMessage for
 // in-place changes (e.g., streaming). Caller must hold sm.mu.
 func (sm *SessionManager) saveIncrementalUnlocked(key string) error {
-	if sm.store == nil {
+	if sm.sessionRepo == nil {
 		return nil
 	}
 	session, ok := sm.sessions[key]
@@ -267,7 +267,7 @@ func (sm *SessionManager) saveIncrementalUnlocked(key string) error {
 	}
 
 	meta := sessionMetaFromSession(session)
-	repo := sm.store.Sessions()
+	repo := sm.sessionRepo
 	startSeq := session.lastPersistedSeq + 1
 
 	// Build batch rows for all new messages
@@ -357,7 +357,7 @@ func (sm *SessionManager) saveIncrementalUnlocked(key string) error {
 // Used when RemoveLastMessage removes the final message.
 // Caller must hold sm.mu.
 func (sm *SessionManager) saveDeleteLastUnlocked(key string) error {
-	if sm.store == nil {
+	if sm.sessionRepo == nil {
 		return nil
 	}
 	session, ok := sm.sessions[key]
@@ -366,7 +366,7 @@ func (sm *SessionManager) saveDeleteLastUnlocked(key string) error {
 	}
 
 	meta := sessionMetaFromSession(session)
-	repo := sm.store.Sessions()
+	repo := sm.sessionRepo
 	fromSeq := session.deleteFromSeq
 	epoch := session.saveEpoch
 
@@ -412,7 +412,7 @@ func (sm *SessionManager) saveDeleteLastUnlocked(key string) error {
 // serialized JSON to keep them in sync.
 // Caller must hold sm.mu.
 func (sm *SessionManager) saveExcludedRangeUnlocked(key string) error {
-	if sm.store == nil {
+	if sm.sessionRepo == nil {
 		return nil
 	}
 	session, ok := sm.sessions[key]
@@ -421,7 +421,7 @@ func (sm *SessionManager) saveExcludedRangeUnlocked(key string) error {
 	}
 
 	meta := sessionMetaFromSession(session)
-	repo := sm.store.Sessions()
+	repo := sm.sessionRepo
 	from, to := session.excludedRange[0], session.excludedRange[1]
 
 	// Build update rows for the excluded range (re-marshal with updated flag)
@@ -470,7 +470,7 @@ func (sm *SessionManager) saveExcludedRangeUnlocked(key string) error {
 }
 
 // saveUnlocked auto-detects the optimal save strategy:
-//   - If no store or session not in memory: no-op
+//   - If no session repository or session not in memory: no-op
 //   - If session is new (lastPersistedSeq == -1): full rewrite
 //   - If messages were truncated: targeted DELETE from SQLite
 //   - If last message was deleted: targeted DELETE from SQLite
@@ -481,7 +481,7 @@ func (sm *SessionManager) saveExcludedRangeUnlocked(key string) error {
 //
 // Caller must hold sm.mu.
 func (sm *SessionManager) saveUnlocked(key string) error {
-	if sm.store == nil {
+	if sm.sessionRepo == nil {
 		return nil
 	}
 	session, ok := sm.sessions[key]

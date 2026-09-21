@@ -92,7 +92,7 @@ func TestCompaction_SecondRoundEvictsExcludedFromMemory(t *testing.T) {
 		t.Fatalf("Failed to open store: %v", err)
 	}
 	defer s.Close()
-	agent.Sessions.SetStore(s)
+	agent.Sessions.SetSessionRepo(s.Sessions())
 
 	agent.Provider = &llmRunnerMockLLMProvider{
 		response: &providers.LLMResponse{
@@ -299,7 +299,7 @@ func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 		t.Fatalf("Failed to open store: %v", err)
 	}
 	defer s.Close()
-	agent.Sessions.SetStore(s)
+	agent.Sessions.SetSessionRepo(s.Sessions())
 
 	agent.Provider = &llmRunnerMockLLMProvider{
 		response: &providers.LLMResponse{

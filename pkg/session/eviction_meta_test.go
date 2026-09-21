@@ -13,7 +13,7 @@ import (
 func TestCleanupIdleSessions_KeepsNameAndUpdatedInMeta(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "tui:chat:idle-meta"
 	sm.GetOrCreate(key)
@@ -98,7 +98,7 @@ func TestCleanupIdleSessions_KeepsNameAndUpdatedInMeta(t *testing.T) {
 func TestEvictSession_SyncsMetaName(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "tui:chat:evict-meta"
 	sm.GetOrCreate(key)

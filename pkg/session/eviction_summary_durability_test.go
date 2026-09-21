@@ -25,7 +25,7 @@ import (
 func TestEvictExcluded_FoldedSummaryIsPersisted(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	const key = "test:fold-summary-persist"
 	const llmSummary = "LLMSUMMARY"
@@ -127,7 +127,7 @@ func TestEvictExcluded_FoldedSummaryIsPersisted(t *testing.T) {
 
 	// --- Assertion 3: cold load recovers the folded summary + no excluded rows ---
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	coldSummary := sm2.GetSummary(key)
 	for _, tc := range []struct {
 		label, text string

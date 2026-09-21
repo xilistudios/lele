@@ -25,7 +25,17 @@ func tuiCmd(sessionID string) {
 	setupFileLogging(cfg)
 
 	msgBus := bus.NewMessageBus()
-	agentLoop := agent.NewAgentLoop(cfg, msgBus)
+
+	// Open the shared SQLite store via the single helper.
+	dbPath := defaultDBPath()
+	s, storeCleanup, storeErr := openSharedStore(dbPath, "tui")
+	if storeErr != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open SQLite store at %s: %v — falling back to JSON storage\n", dbPath, storeErr)
+	}
+	if s == nil {
+		defer storeCleanup()
+	}
+	agentLoop := agent.NewAgentLoopWithStore(cfg, msgBus, s)
 
 	// Start agent loop background processing
 	ctx, cancel := context.WithCancel(context.Background())

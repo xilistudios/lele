@@ -38,7 +38,7 @@ func newTokenTestStore(t *testing.T) *store.Store {
 func TestNewSubagentTokenReporter_BillsAndPersistsParentSession(t *testing.T) {
 	s := newTokenTestStore(t)
 	sessions := session.NewSessionManager()
-	sessions.SetStore(s)
+	sessions.SetSessionRepo(s.Sessions())
 
 	report := newSubagentTokenReporter(sessions)
 	report("agent:main:telegram:42", 100, 25)
@@ -53,7 +53,7 @@ func TestNewSubagentTokenReporter_BillsAndPersistsParentSession(t *testing.T) {
 	// from SQLite sees the full cumulative total: the subagent's spend
 	// survives the process, not just the current turn.
 	reopened := session.NewSessionManager()
-	reopened.SetStore(s)
+	reopened.SetSessionRepo(s.Sessions())
 	in, out = reopened.GetTokenCounts("agent:main:telegram:42")
 	if in != 150 || out != 35 {
 		t.Errorf("persisted counts = (%d, %d), want (150, 35)", in, out)
@@ -63,7 +63,7 @@ func TestNewSubagentTokenReporter_BillsAndPersistsParentSession(t *testing.T) {
 func TestNewSubagentTokenReporter_IgnoresEmptyKeyAndNilSessions(t *testing.T) {
 	s := newTokenTestStore(t)
 	sessions := session.NewSessionManager()
-	sessions.SetStore(s)
+	sessions.SetSessionRepo(s.Sessions())
 
 	// Empty key: nothing billed, no phantom session created.
 	newSubagentTokenReporter(sessions)("", 10, 10)

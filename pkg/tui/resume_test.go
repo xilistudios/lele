@@ -80,7 +80,7 @@ func TestNewModel_ResolvesBareUUIDAndSetsMode(t *testing.T) {
 	defer st.Close()
 
 	sm := session.NewSessionManager()
-	sm.SetStore(st)
+	sm.SetSessionRepo(st.Sessions())
 	uuid := "574f2fc5-3e50-4415-9e7d-aa70e4d4ab36"
 	fullKey := "tui:chat:" + uuid
 
@@ -130,7 +130,7 @@ func TestNewModel_ResolvesPrefixedKey(t *testing.T) {
 	defer st.Close()
 
 	sm := session.NewSessionManager()
-	sm.SetStore(st)
+	sm.SetSessionRepo(st.Sessions())
 	uuid := "574f2fc5-3e50-4415-9e7d-aa70e4d4ab36"
 	fullKey := "tui:chat:" + uuid
 

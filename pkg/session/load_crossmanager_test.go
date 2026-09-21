@@ -40,13 +40,13 @@ func TestCrossManager_LoadSessionFromDisk(t *testing.T) {
 	// Manager B: bootstrap its metadata index BEFORE any session exists.
 	// This forces B's sessionMeta to be empty for childKey.
 	managerB := NewSessionManager()
-	managerB.SetStore(s)
+	managerB.SetSessionRepo(s.Sessions())
 	// Touch any API that triggers ensureLoaded to populate the index.
 	_ = managerB.ListSessions() // loadOnce fires here
 
 	// Manager A: create the session, add tokens, a message, and persist.
 	managerA := NewSessionManager()
-	managerA.SetStore(s)
+	managerA.SetSessionRepo(s.Sessions())
 
 	managerA.AddTokenCounts(childKey, 1200, 40)
 	managerA.AddMessage(childKey, "user", "hello from child")
@@ -91,7 +91,7 @@ func TestCrossManager_NonExistentKey_NoPhantomSession(t *testing.T) {
 	s := newCrossManagerTestStore(t)
 
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 	// Bootstrap the metadata index.
 	_ = sm.ListSessions()
 
@@ -128,7 +128,7 @@ func TestCrossManager_FallbackRegistersMetadata(t *testing.T) {
 
 	// Manager A: create and persist.
 	managerA := NewSessionManager()
-	managerA.SetStore(s)
+	managerA.SetSessionRepo(s.Sessions())
 	managerA.AddTokenCounts(childKey, 500, 20)
 	managerA.AddFullMessage(childKey, providers.Message{Role: "user", Content: "register test"})
 	if err := managerA.Save(childKey); err != nil {
@@ -137,7 +137,7 @@ func TestCrossManager_FallbackRegistersMetadata(t *testing.T) {
 
 	// Manager B: bootstrap, then trigger the fallback.
 	managerB := NewSessionManager()
-	managerB.SetStore(s)
+	managerB.SetSessionRepo(s.Sessions())
 	_ = managerB.ListSessions() // loadOnce
 
 	// Trigger the fallback by reading token counts.

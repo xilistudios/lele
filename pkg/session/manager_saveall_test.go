@@ -77,7 +77,7 @@ func TestSaveAllPersistsResidentSessions(t *testing.T) {
 	s := openStoreAt(t, dbPath)
 
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	// Three sessions, never individually saved: everything lives in RAM only.
 	wants := map[string][]string{
@@ -113,7 +113,7 @@ func TestSaveAllPersistsResidentSessions(t *testing.T) {
 	s2 := openStoreAt(t, dbPath)
 
 	sm2 := NewSessionManager()
-	sm2.SetStore(s2)
+	sm2.SetSessionRepo(s2.Sessions())
 	for _, key := range keys {
 		history := sm2.GetHistory(key)
 		if len(history) != len(wants[key]) {
@@ -130,7 +130,7 @@ func TestSaveAllPersistsResidentSessions(t *testing.T) {
 }
 
 func TestSaveAllNoStoreIsSafe(t *testing.T) {
-	sm := NewSessionManager() // deliberately no SetStore
+	sm := NewSessionManager() // deliberately no SetSessionRepo
 
 	// In-memory mutations still work without a store.
 	sm.AddMessage("nostore:1", "user", "hello")
@@ -148,7 +148,7 @@ func TestSaveAllNoStoreIsSafe(t *testing.T) {
 func TestSaveAllEmptyManager(t *testing.T) {
 	s := openStoreAt(t, filepath.Join(t.TempDir(), "empty.db"))
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	saved, failed := saveAllWithin(t, sm, 10*time.Second)
 	if saved != 0 || failed != 0 {
@@ -159,7 +159,7 @@ func TestSaveAllEmptyManager(t *testing.T) {
 func TestSaveAllConcurrentWithAppend(t *testing.T) {
 	s := openStoreAt(t, filepath.Join(t.TempDir(), "concurrent.db"))
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	keys := []string{"conc:0", "conc:1", "conc:2", "conc:3"}
 	for _, key := range keys {
@@ -233,7 +233,7 @@ func TestSaveAllSkipsEvicted(t *testing.T) {
 	s := openStoreAt(t, dbPath)
 
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 	// One resident session max, so creating the third session forces the LRU
 	// path to evict the first one (and persist it on the way out).
 	sm.SetMaxInMemory(1)
@@ -281,7 +281,7 @@ func TestSaveAllSkipsEvicted(t *testing.T) {
 
 	// A fresh manager over the same DB (i.e. after a restart) sees it too.
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	if history := sm2.GetHistory("evict:a"); len(history) != 2 {
 		t.Errorf("fresh manager reloaded %d messages for evict:a, want 2", len(history))
 	}

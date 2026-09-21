@@ -164,7 +164,17 @@ func gatewayCmd() {
 	coord := update.NewShutdownCoordinator(update.DefaultShutdownBudget)
 
 	msgBus := bus.NewMessageBus()
-	agentLoop := agent.NewAgentLoop(cfg, msgBus)
+
+	// Open the shared SQLite store via the single helper.
+	dbPath := defaultDBPath()
+	s, storeCleanup, storeErr := openSharedStore(dbPath, "gateway")
+	if storeErr != nil {
+		logger.WarnC("store", fmt.Sprintf("Failed to open SQLite store at %s: %v — falling back to JSON storage", dbPath, storeErr))
+	}
+	if s == nil {
+		defer storeCleanup()
+	}
+	agentLoop := agent.NewAgentLoopWithStore(cfg, msgBus, s)
 
 	fmt.Fprintln(gatewayOut, "\n📦 Agent Status:")
 	startupInfo := agentLoop.GetStartupInfo()

@@ -8,7 +8,7 @@ import "testing"
 func TestSessionManager_Folder_RoundTripAndPersistence(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "native:client-1:folder"
 	sm.GetOrCreate(key)
@@ -28,7 +28,7 @@ func TestSessionManager_Folder_RoundTripAndPersistence(t *testing.T) {
 	// Cold reload: a fresh manager over the same store must see the folder
 	// (proves the SQLite migration + meta-only save path persist it).
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	if got := sm2.GetFolder(key); got != "/home/user/projects/demo" {
 		t.Errorf("GetFolder after reload = %q, want %q", got, "/home/user/projects/demo")
 	}
@@ -41,7 +41,7 @@ func TestSessionManager_Folder_RoundTripAndPersistence(t *testing.T) {
 		t.Errorf("GetFolder after clear = %q, want \"\"", got)
 	}
 	sm3 := NewSessionManager()
-	sm3.SetStore(s)
+	sm3.SetSessionRepo(s.Sessions())
 	if got := sm3.GetFolder(key); got != "" {
 		t.Errorf("GetFolder after clear + reload = %q, want \"\"", got)
 	}
@@ -53,7 +53,7 @@ func TestSessionManager_Folder_RoundTripAndPersistence(t *testing.T) {
 func TestSessionManager_Folder_LightweightMetaRead(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "native:client-1:meta-read"
 	sm.GetOrCreate(key)
@@ -67,7 +67,7 @@ func TestSessionManager_Folder_LightweightMetaRead(t *testing.T) {
 	// Fresh manager: ensureLoaded populates metadata only; GetFolder on a
 	// cold session must answer from sessionMeta without loading messages.
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	if got := sm2.GetFolder(key); got != "/tmp/whatever" {
 		t.Fatalf("GetFolder cold = %q, want %q", got, "/tmp/whatever")
 	}
@@ -84,7 +84,7 @@ func TestSessionManager_Folder_LightweightMetaRead(t *testing.T) {
 func TestSessionManager_Folder_SetOnUnknownSession(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "native:client-1:ghost"
 	if err := sm.SetFolder(key, "/tmp/ghost"); err != nil {
@@ -100,7 +100,7 @@ func TestSessionManager_Folder_SetOnUnknownSession(t *testing.T) {
 func TestSessionManager_Folder_SetNameKeepsFolder(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "native:client-1:name"
 	sm.GetOrCreate(key)

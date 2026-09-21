@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
@@ -39,6 +40,31 @@ func loadConfig() (*config.Config, error) {
 	// resolved, then reload so secret-backed config values are populated.
 	registerKeyringResolver(cfg)
 	return config.LoadConfig(getConfigPath())
+}
+
+// defaultDBPath returns the default path for the SQLite store database.
+func defaultDBPath() string {
+	return filepath.Join(config.GetLeleDir(), "lele.db")
+}
+
+// openSharedStore opens the shared SQLite store at the given path.
+// On success it returns a ready-to-use store and an idempotent cleanup
+// function that closes it. On failure the store is nil and cleanup is
+// a no-op.
+//
+// Production callers must use this helper so every DB open goes through
+// a single code path; the returned store is then injected into
+// agent.NewAgentLoopWithStore, which takes ownership and closes it on
+// shutdown. Callers must NOT close the store themselves.
+func openSharedStore(dbPath string, component string) (s *store.Store, cleanup func(), err error) {
+	st, err := store.Open(dbPath)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	var once sync.Once
+	return st, func() {
+		once.Do(func() { st.Close() })
+	}, nil
 }
 
 // registerKeyringResolver installs a config-level resolver that reads secret
@@ -87,9 +113,10 @@ func newClientAuthManager(cfg *config.Config, leleDir string) (*channels.AuthMan
 			return nil, func() {}, fmt.Errorf("creating lele dir %s: %w", leleDir, mkErr)
 		}
 	}
-	if s, dbErr := store.Open(dbPath); dbErr == nil {
+	s, cleanup, dbErr := openSharedStore(dbPath, "client-auth")
+	if dbErr == nil {
 		authMgr.SetStore(s.NativeClients())
-		return authMgr, func() { s.Close() }, nil
+		return authMgr, cleanup, nil
 	} else if errors.Is(dbErr, store.ErrUnsupportedPlatform) {
 		// Platform lacks SQLite (e.g. linux/mips64). JSON is the real
 		// backend here, so PINs minted via the JSON path ARE redeemable.

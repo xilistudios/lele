@@ -463,8 +463,15 @@ type SummarizeStats struct {
 	SavedTokens     int
 }
 
-// NewAgentLoop creates a new agent loop instance.
-func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
+// NewAgentLoopWithStore creates a new agent loop instance with an injected
+// SQLite store. The store may be nil, in which case the loop falls back to
+// JSON-based storage for all state (identical semantics to a store open
+// failure).
+//
+// Ownership: the AgentLoop OWNS the injected store and closes it during
+// shutdown (Stop/StopWithContext). Callers MUST NOT close the store
+// themselves after passing it in.
+func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.Store) *AgentLoop {
 	registry := NewAgentRegistry(cfg)
 
 	// Create approval manager early so it can be passed to tools during registration
@@ -482,17 +489,13 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	})
 	redactor := keyring.NewRedactor(keyringSvc)
 
-	// Open the shared SQLite state store. This provides persistent storage
-	// for sessions, cron, goals, groups, auth, native clients, and KV data.
-	// Gracefully falls back to JSON-based storage if SQLite is not available
-	// (e.g., linux/mips64) or if opening fails.
+	// Wire the injected SQLite store. When s is nil (caller could not open
+	// the store, e.g. unsupported platform), the loop operates in JSON-only
+	// mode — identical to the old fallback path.
 	var dbStore *store.Store
-	dbPath := filepath.Join(config.GetLeleDir(), "lele.db")
-	if s, err := store.Open(dbPath); err != nil {
-		logger.WarnC("store", fmt.Sprintf("Failed to open SQLite store at %s: %v — falling back to JSON storage", dbPath, err))
-	} else {
+	if s != nil {
 		dbStore = s
-		logger.InfoC("store", fmt.Sprintf("SQLite store opened at %s", dbPath))
+		logger.InfoC("store", fmt.Sprintf("SQLite store opened"))
 		// Wire auth package to use SQLite for credential persistence.
 		auth.UseStore(dbStore.Auth())
 	}
@@ -507,7 +510,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 
 	// Wire SQLite store into session manager for persistent storage.
 	if dbStore != nil {
-		sharedSessionManager.SetStore(dbStore)
+		sharedSessionManager.SetSessionRepo(dbStore.Sessions())
 	}
 
 	// Warn if a legacy JSON sessions directory exists — it will be ignored.

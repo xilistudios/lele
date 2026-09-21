@@ -248,7 +248,7 @@ func TestCompaction_PreservesLastTwoHumanUserMessages_E2E_eviction(t *testing.T)
 		t.Fatalf("Failed to open store: %v", err)
 	}
 	defer s.Close()
-	agent.Sessions.SetStore(s)
+	agent.Sessions.SetSessionRepo(s.Sessions())
 
 	agent.Provider = &llmRunnerMockLLMProvider{
 		response: &providers.LLMResponse{
@@ -414,7 +414,7 @@ func TestCompaction_PreservesLastTwoHumanUserMessages_E2E_eviction(t *testing.T)
 	// assertion would fail because EvictExcludedMessages never persisted the
 	// folded summary to SQLite. ---
 	smCold := session.NewSessionManager()
-	smCold.SetStore(s)
+	smCold.SetSessionRepo(s.Sessions())
 	coldSummary := smCold.GetSummary(sessionKey)
 	t.Logf("Cold-loaded summary: %q", coldSummary)
 	for _, tc := range []struct {

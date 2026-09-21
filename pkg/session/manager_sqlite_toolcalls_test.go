@@ -17,7 +17,7 @@ import (
 func TestSQLite_StreamingFinalization_ToolCallsPersisted(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "webui:toolcalls-1"
 	sm.GetOrCreate(key)
@@ -89,7 +89,7 @@ func TestSQLite_StreamingFinalization_ToolCallsPersisted(t *testing.T) {
 func TestSQLite_StreamingFinalization_CompactionSameSave(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "webui:toolcalls-2"
 	sm.GetOrCreate(key)

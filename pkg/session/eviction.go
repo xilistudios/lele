@@ -223,7 +223,7 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	// is memory-only and relies on the store as the source of truth for
 	// lazy-load. Without a store, Save is a no-op and evicting would drop
 	// messages permanently.
-	if sm.store == nil {
+	if sm.sessionRepo == nil {
 		return 0
 	}
 
@@ -338,11 +338,11 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	// about to leave memory entirely with the evicted region, so a crash
 	// before the next Save would lose it — it must be durable immediately.
 	var metaPersistErr error
-	if sm.store != nil {
+	if sm.sessionRepo != nil {
 		if foldedSummary {
-			metaPersistErr = sm.store.Sessions().UpsertSession(sessionMetaFromSession(session))
+			metaPersistErr = sm.sessionRepo.UpsertSession(sessionMetaFromSession(session))
 		} else {
-			metaPersistErr = sm.store.Sessions().UpdateFirstInMemorySeq(key, session.firstInMemorySeq)
+			metaPersistErr = sm.sessionRepo.UpdateFirstInMemorySeq(key, session.firstInMemorySeq)
 		}
 		if metaPersistErr != nil {
 			logger.WarnCF("session", "Failed to persist eviction boundary", map[string]interface{}{
