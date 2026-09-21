@@ -231,7 +231,7 @@ func (sm *SessionManager) getOrCreateStreamingMsg(session *Session) *providers.M
 // the last stream flush. Uses incremental save to avoid rewriting all messages.
 // Caller must hold sm.mu.
 func (sm *SessionManager) maybeFlushStream(key string) {
-	if sm.store == nil {
+	if sm.sessionRepo == nil {
 		return
 	}
 
@@ -250,7 +250,7 @@ func (sm *SessionManager) maybeFlushStream(key string) {
 // flushStreamNow saves the session to disk immediately using incremental save.
 // Caller must hold sm.mu.
 func (sm *SessionManager) flushStreamNow(key string) {
-	if sm.store == nil {
+	if sm.sessionRepo == nil {
 		return
 	}
 	session, ok := sm.sessions[key]

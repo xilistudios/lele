@@ -42,7 +42,7 @@ func findSessionByKey(list []*Session, key string) *Session {
 func TestAddFullMessage_RegistersSessionMeta(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := cronSpawnSessionKey()
 	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "scheduled run"})
@@ -68,7 +68,7 @@ func TestAddFullMessage_RegistersSessionMeta(t *testing.T) {
 func TestEvictSession_SubagentStaysListedAndReloadable(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := cronSpawnSessionKey()
 	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "maintenance run"})
@@ -106,7 +106,7 @@ func TestEvictSession_SubagentStaysListedAndReloadable(t *testing.T) {
 func TestEvictSession_KeepsSessionMetaMirrorsStore(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	subKey := "native:cron-abc:subagent-1"
 	chatKey := "native:telegram:42"
@@ -121,7 +121,7 @@ func TestEvictSession_KeepsSessionMetaMirrorsStore(t *testing.T) {
 	sm.EvictSession(chatKey)
 
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	after := map[string]bool{}
 	for _, info := range sm2.ListSessions() {
 		after[info.Key] = true
@@ -157,7 +157,7 @@ func TestSetSummary_NonExistentDoesNotCreate(t *testing.T) {
 func TestGetOrCreate_SetsUpdatedOnCreation(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:updated-on-create"
 	before := time.Now().Add(-time.Second)

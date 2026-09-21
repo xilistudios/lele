@@ -204,7 +204,7 @@ func newEvictionTestModel(t *testing.T) *Model {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { s.Close() })
-	m.sessionMgr.SetStore(s)
+	m.sessionMgr.SetSessionRepo(s.Sessions())
 	return m
 }
 

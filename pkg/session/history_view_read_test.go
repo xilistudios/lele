@@ -20,7 +20,7 @@ import (
 func TestGetHistoryView_ResidentReadDoesNotTouchLRU(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "tui:chat:lru-read"
 	sm.AddMessage(key, "user", "hello")
@@ -53,7 +53,7 @@ func TestGetHistoryView_ResidentReadDoesNotTouchLRU(t *testing.T) {
 func TestGetHistoryView_ColdReadStillTouches(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "tui:chat:lru-cold"
 	sm.AddMessage(key, "user", "hello")
@@ -63,7 +63,7 @@ func TestGetHistoryView_ColdReadStillTouches(t *testing.T) {
 	// Fresh manager over the same store: session is cold (metadata only),
 	// exactly like a TUI process reopening a stored chat.
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 
 	view := sm2.GetHistoryView(key) // cold path → loadSessionFromDisk
 	if len(view) != 1 {
@@ -87,7 +87,7 @@ func TestGetHistoryView_ColdReadStillTouches(t *testing.T) {
 func TestGetHistoryView_ReadersRunDuringStreamFlush(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "tui:chat:readers-during-flush"
 	sm.AddMessage(key, "user", "start")

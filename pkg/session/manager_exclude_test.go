@@ -897,7 +897,7 @@ func TestExcludeOldMessages_PinIsNotSplitByToolPairFixup_ForwardAdjacentPin(t *t
 func TestEvictExcluded_FoldsPreservedHoles(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:fold-holes"
 	sm.GetOrCreate(key)
@@ -1007,7 +1007,7 @@ func TestEvictExcluded_FoldsPreservedHoles(t *testing.T) {
 func TestExcludeOldMessages_ZeroLowerBoundStillPersistsIndex0(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:zero-bound"
 	sm.GetOrCreate(key)
@@ -1071,7 +1071,7 @@ func TestExcludeOldMessages_ZeroLowerBoundStillPersistsIndex0(t *testing.T) {
 
 	// Cold load: new SessionManager on the same store.
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	session2 := sm2.GetOrCreate(key) // triggers loadSessionFromDisk → loadFromSQLite
 	if session2 == nil {
 		t.Fatal("cold load returned nil session")
@@ -1102,7 +1102,7 @@ func TestExcludeOldMessages_ZeroLowerBoundStillPersistsIndex0(t *testing.T) {
 func TestExcludeOldMessages_PinAboveExcludeUpToIsPersistedAndUnExcluded(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:pin-above"
 	sm.GetOrCreate(key)
@@ -1173,7 +1173,7 @@ func TestExcludeOldMessages_PinAboveExcludeUpToIsPersistedAndUnExcluded(t *testi
 
 	// (d) Cold load: pin must be resident and un-excluded.
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	session2 := sm2.GetOrCreate(key)
 	if session2 == nil {
 		t.Fatal("cold load returned nil session")
@@ -1328,7 +1328,7 @@ func TestTruncateHistory_ClearsExclusionState(t *testing.T) {
 func TestRemoveLastMessage_BoundaryGuardPreventsWipe(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:rm-last-boundary-guard"
 

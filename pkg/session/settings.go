@@ -94,7 +94,7 @@ func (sm *SessionManager) SetSubagentStatus(key string, status string) {
 
 	// Best-effort persistence: ignore errors, the in-memory task holds the
 	// authoritative status until eviction/restart regardless.
-	if sm.store != nil {
+	if sm.sessionRepo != nil {
 		_ = sm.saveMetaOnlyUnlocked(key)
 	}
 }

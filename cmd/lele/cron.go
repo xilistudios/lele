@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/store"
 )
@@ -28,13 +27,13 @@ func cronCmd() {
 	cronStorePath := filepath.Join(cfg.WorkspacePath(), "cron", "jobs.json")
 
 	// Open SQLite store when available so the CLI reads/writes the same
-	// database as the running server. Falls back to JSON file otherwise.
+	// database as the running server. Any open error is intentionally
+	// ignored here: the CLI falls back to the JSON file, exactly as before.
 	var cronRepo *store.CronRepo
-	leleDir := config.GetLeleDir()
-	dbPath := filepath.Join(leleDir, "lele.db")
-	if s, err := store.Open(dbPath); err == nil {
+	s, cleanup, _ := openSharedStore(defaultDBPath(), "cron-cli")
+	defer cleanup() // no-op when the store could not be opened
+	if s != nil {
 		cronRepo = s.Cron()
-		defer s.Close()
 	}
 
 	switch subcommand {

@@ -90,7 +90,7 @@ func TestListSessionIndex_ResidentSessions(t *testing.T) {
 func TestListSessionIndex_MatchesGetters(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	keys := []string{"meta:a", "meta:b", "meta:empty"}
 	for i, k := range keys {
@@ -146,7 +146,7 @@ func TestListSessionIndex_MatchesGetters(t *testing.T) {
 func TestSessionKeysWithMessages_MatchesHasMessages(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	sm.GetOrCreate("cold:with")
 	sm.AddMessage("cold:with", "user", "hello")

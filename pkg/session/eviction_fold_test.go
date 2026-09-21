@@ -22,7 +22,7 @@ import (
 func TestEvictExcluded_DoesNotFoldPreviousSummaryMessage(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:no-fold-summary"
 	sm.GetOrCreate(key)

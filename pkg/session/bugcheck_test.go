@@ -18,7 +18,7 @@ import (
 func TestSQLite_GapAware_FullRewriteThenAppend_PersistsSubsequentAppend(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:bugcheck"
 	sm.GetOrCreate(key)

@@ -29,7 +29,7 @@ func newTestStore(t *testing.T) *store.Store {
 func TestSQLite_SessionManager_CreateAndLoad(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	// Create a session
 	key := "test:session-1"
@@ -66,7 +66,7 @@ func TestSQLite_SessionManager_CreateAndLoad(t *testing.T) {
 
 	// Create a new manager and load from SQLite
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	history := sm2.GetHistory(key)
 	if len(history) != 2 {
 		t.Fatalf("expected 2 messages after reload, got %d", len(history))
@@ -82,7 +82,7 @@ func TestSQLite_SessionManager_CreateAndLoad(t *testing.T) {
 func TestSQLite_SessionManager_Streaming(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:streaming"
 	sm.GetOrCreate(key)
@@ -100,7 +100,7 @@ func TestSQLite_SessionManager_Streaming(t *testing.T) {
 
 	// Load and verify
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	history := sm2.GetHistory(key)
 	if len(history) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(history))
@@ -114,7 +114,7 @@ func TestSQLite_SessionManager_Streaming(t *testing.T) {
 func TestSQLite_SessionManager_TokenCounts(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:tokens"
 	sm.GetOrCreate(key)
@@ -128,7 +128,7 @@ func TestSQLite_SessionManager_TokenCounts(t *testing.T) {
 
 	// Load and verify
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	input, output := sm2.GetTokenCounts(key)
 	if input != 300 {
 		t.Errorf("expected input tokens 300, got %d", input)
@@ -141,7 +141,7 @@ func TestSQLite_SessionManager_TokenCounts(t *testing.T) {
 func TestSQLite_SessionManager_Mode(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:mode"
 	sm.GetOrCreate(key)
@@ -156,7 +156,7 @@ func TestSQLite_SessionManager_Mode(t *testing.T) {
 
 	// Load and verify
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	mode := sm2.GetMode(key)
 	if mode != "chat" {
 		t.Errorf("expected mode %q, got %q", "chat", mode)
@@ -175,7 +175,7 @@ func TestSQLite_SessionManager_Mode(t *testing.T) {
 func TestSQLite_SessionManager_ListSessions(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	// Create multiple sessions
 	sm.GetOrCreate("session-1")
@@ -200,7 +200,7 @@ func TestSQLite_SessionManager_ListSessions(t *testing.T) {
 func TestSQLite_SessionManager_SessionExists(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:exists"
 	sm.GetOrCreate(key)
@@ -219,7 +219,7 @@ func TestSQLite_SessionManager_SessionExists(t *testing.T) {
 func TestSQLite_SessionManager_StreamingUpdate(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:stream-update"
 	sm.GetOrCreate(key)
@@ -248,7 +248,7 @@ func TestSQLite_SessionManager_StreamingUpdate(t *testing.T) {
 
 	// Load and verify final content
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	history := sm2.GetHistory(key)
 	if len(history) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(history))
@@ -261,7 +261,7 @@ func TestSQLite_SessionManager_StreamingUpdate(t *testing.T) {
 func TestSQLite_SessionManager_Concurrent(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
@@ -292,7 +292,7 @@ func TestSQLite_SessionManager_Concurrent(t *testing.T) {
 func TestSQLite_SessionManager_CompactionCount(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:compaction"
 	sm.GetOrCreate(key)
@@ -302,7 +302,7 @@ func TestSQLite_SessionManager_CompactionCount(t *testing.T) {
 
 	// Load and verify
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	session := sm2.GetOrCreate(key)
 	if session.CompactionCount != 2 {
 		t.Errorf("expected compaction count 2, got %d", session.CompactionCount)
@@ -312,7 +312,7 @@ func TestSQLite_SessionManager_CompactionCount(t *testing.T) {
 func TestSQLite_SessionManager_ThinkingLevel(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:thinking"
 	sm.GetOrCreate(key)
@@ -321,7 +321,7 @@ func TestSQLite_SessionManager_ThinkingLevel(t *testing.T) {
 
 	// Load and verify
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	level := sm2.GetThinkingLevel(key)
 	if level != "high" {
 		t.Errorf("expected thinking level %q, got %q", "high", level)
@@ -331,7 +331,7 @@ func TestSQLite_SessionManager_ThinkingLevel(t *testing.T) {
 func TestSQLite_SessionManager_TruncateHistory(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:truncate"
 	sm.GetOrCreate(key)
@@ -355,7 +355,7 @@ func TestSQLite_SessionManager_TruncateHistory(t *testing.T) {
 func TestSQLite_SessionManager_ThinkingLevel_Persistence(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:thinking-persist"
 	sm.GetOrCreate(key)
@@ -364,7 +364,7 @@ func TestSQLite_SessionManager_ThinkingLevel_Persistence(t *testing.T) {
 
 	// Create new manager to test persistence
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 
 	level := sm2.GetThinkingLevel(key)
 	if level != "medium" {
@@ -375,7 +375,7 @@ func TestSQLite_SessionManager_ThinkingLevel_Persistence(t *testing.T) {
 func TestSQLite_SessionManager_SetHistory(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:set-history"
 	sm.GetOrCreate(key)
@@ -393,7 +393,7 @@ func TestSQLite_SessionManager_SetHistory(t *testing.T) {
 
 	// Verify
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	history := sm2.GetHistory(key)
 	if len(history) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(history))
@@ -406,7 +406,7 @@ func TestSQLite_SessionManager_SetHistory(t *testing.T) {
 func TestSQLite_SessionManager_ExcludeOldMessages(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:exclude"
 	sm.GetOrCreate(key)
@@ -440,7 +440,7 @@ func TestSQLite_SessionManager_ExcludeOldMessages(t *testing.T) {
 func TestSQLite_SessionManager_Name(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:name"
 	sm.GetOrCreate(key)
@@ -449,7 +449,7 @@ func TestSQLite_SessionManager_Name(t *testing.T) {
 
 	// Verify
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	name := sm2.GetName(key)
 	if name != "My Session" {
 		t.Errorf("expected name %q, got %q", "My Session", name)
@@ -459,7 +459,7 @@ func TestSQLite_SessionManager_Name(t *testing.T) {
 func TestSQLite_SessionManager_Summary(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:summary"
 	sm.GetOrCreate(key)
@@ -468,7 +468,7 @@ func TestSQLite_SessionManager_Summary(t *testing.T) {
 
 	// Verify
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	summary := sm2.GetSummary(key)
 	if summary != "This is a summary" {
 		t.Errorf("expected summary %q, got %q", "This is a summary", summary)
@@ -478,7 +478,7 @@ func TestSQLite_SessionManager_Summary(t *testing.T) {
 func TestSQLite_SessionManager_RemoveLastMessage(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:remove-last"
 	sm.GetOrCreate(key)
@@ -496,7 +496,7 @@ func TestSQLite_SessionManager_RemoveLastMessage(t *testing.T) {
 
 	// Verify
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	history := sm2.GetHistory(key)
 	if len(history) != 2 {
 		t.Fatalf("expected 2 messages after removal, got %d", len(history))
@@ -509,7 +509,7 @@ func TestSQLite_SessionManager_RemoveLastMessage(t *testing.T) {
 func TestSQLite_SessionManager_ShouldStartFreshSession(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:fresh"
 	sm.GetOrCreate(key)
@@ -536,7 +536,7 @@ func TestSQLite_SessionManager_ShouldStartFreshSession(t *testing.T) {
 func TestSQLite_SessionManager_GetOrCreate_NoMessages(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:empty"
 	session := sm.GetOrCreate(key)
@@ -549,7 +549,7 @@ func TestSQLite_SessionManager_GetOrCreate_NoMessages(t *testing.T) {
 
 	// Verify metadata exists
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	name := sm2.GetName(key)
 	if name != "" {
 		t.Errorf("expected empty name, got %q", name)
@@ -559,7 +559,7 @@ func TestSQLite_SessionManager_GetOrCreate_NoMessages(t *testing.T) {
 func TestSQLite_SessionManager_VerboseLevel(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:verbose"
 	sm.GetOrCreate(key)
@@ -568,7 +568,7 @@ func TestSQLite_SessionManager_VerboseLevel(t *testing.T) {
 
 	// Verify
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	level := sm2.GetVerboseLevel(key)
 	if level != "full" {
 		t.Errorf("expected verbose level %q, got %q", "full", level)
@@ -578,7 +578,7 @@ func TestSQLite_SessionManager_VerboseLevel(t *testing.T) {
 func TestSQLite_SessionManager_Model(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:model"
 	sm.GetOrCreate(key)
@@ -587,7 +587,7 @@ func TestSQLite_SessionManager_Model(t *testing.T) {
 
 	// Verify
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	model := sm2.GetModel(key)
 	if model != "gpt-4" {
 		t.Errorf("expected model %q, got %q", "gpt-4", model)
@@ -597,7 +597,7 @@ func TestSQLite_SessionManager_Model(t *testing.T) {
 func TestSQLite_SessionManager_CreatedUpdated(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:timestamps"
 	before := time.Now()
@@ -621,7 +621,7 @@ func TestSQLite_SessionManager_CreatedUpdated(t *testing.T) {
 func TestSQLite_SessionManager_GetHistory_NonExistent(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	// Get history for non-existent session
 	history := sm.GetHistory("nonexistent:session")
@@ -633,14 +633,14 @@ func TestSQLite_SessionManager_GetHistory_NonExistent(t *testing.T) {
 func TestSQLite_SessionManager_SetName_CreatesSession(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:setname-create"
 	sm.SetName(key, "New Name")
 
 	// Verify
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	name := sm2.GetName(key)
 	if name != "New Name" {
 		t.Errorf("expected name %q, got %q", "New Name", name)
@@ -650,7 +650,7 @@ func TestSQLite_SessionManager_SetName_CreatesSession(t *testing.T) {
 func TestSQLite_SessionManager_MultipleSaves(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:multi-save"
 	sm.GetOrCreate(key)
@@ -663,7 +663,7 @@ func TestSQLite_SessionManager_MultipleSaves(t *testing.T) {
 
 	// Verify final state
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	history := sm2.GetHistory(key)
 	if len(history) != 10 {
 		t.Fatalf("expected 10 messages, got %d", len(history))
@@ -673,7 +673,7 @@ func TestSQLite_SessionManager_MultipleSaves(t *testing.T) {
 func TestSQLite_SessionManager_ConcurrentReadersWriter(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:concurrent-rw"
 	sm.GetOrCreate(key)
@@ -717,7 +717,7 @@ func TestSQLite_SessionManager_ConcurrentReadersWriter(t *testing.T) {
 func TestSQLite_SessionManager_LoadFromDisk(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:lazy-load"
 	sm.GetOrCreate(key)
@@ -741,7 +741,7 @@ func TestSQLite_SessionManager_LoadFromDisk(t *testing.T) {
 func TestSQLite_SessionManager_AllMessageCounts(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	// Create sessions with messages
 	sm.GetOrCreate("sess-a")
@@ -791,7 +791,7 @@ func TestSQLite_SessionManager_AllMessageCounts(t *testing.T) {
 func TestSQLite_IncrementalSave_AppendOnly(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:incr-append"
 	sm.GetOrCreate(key)
@@ -838,7 +838,7 @@ func TestSQLite_IncrementalSave_AppendOnly(t *testing.T) {
 func TestSQLite_IncrementalSave_StreamingUpdate(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:incr-stream"
 	sm.GetOrCreate(key)
@@ -873,7 +873,7 @@ func TestSQLite_IncrementalSave_StreamingUpdate(t *testing.T) {
 func TestSQLite_MetaOnlySave(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:meta-only"
 	sm.GetOrCreate(key)
@@ -894,7 +894,7 @@ func TestSQLite_MetaOnlySave(t *testing.T) {
 
 	// Verify metadata was saved
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	name := sm2.GetName(key)
 	model := sm2.GetModel(key)
 	if name != "My Chat" {
@@ -916,7 +916,7 @@ func TestSQLite_MetaOnlySave(t *testing.T) {
 func TestSQLite_FullRewrite_AfterTruncate(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:truncate"
 	sm.GetOrCreate(key)
@@ -956,7 +956,7 @@ func TestSQLite_FullRewrite_AfterTruncate(t *testing.T) {
 func TestSQLite_DirtyFlags_Basic(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:dirty"
 	session := sm.GetOrCreate(key)
@@ -1002,7 +1002,7 @@ func TestSQLite_DirtyFlags_Basic(t *testing.T) {
 func TestSQLite_GapAware_IncrementalSave_SeqOffset(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:gap-incr"
 	sm.GetOrCreate(key)
@@ -1045,7 +1045,7 @@ func TestSQLite_GapAware_IncrementalSave_SeqOffset(t *testing.T) {
 func TestSQLite_GapAware_ExcludedRange_SeqOffset(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:gap-excl"
 	sm.GetOrCreate(key)
@@ -1117,7 +1117,7 @@ func TestSQLite_GapAware_ExcludedRange_SeqOffset(t *testing.T) {
 func TestSQLite_GapAware_FullRewrite_PreservesEvictionGap(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:gap-full"
 	sm.GetOrCreate(key)
@@ -1206,7 +1206,7 @@ func TestSQLite_GapAware_FullRewrite_PreservesEvictionGap(t *testing.T) {
 func TestSQLite_EvictExcluded_WindowRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:evict-window"
 	sm.GetOrCreate(key)
@@ -1348,7 +1348,7 @@ func TestSQLite_EvictExcluded_WindowRoundTrip(t *testing.T) {
 func TestSQLite_ReloadAfterEviction_SeqAccounting(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:reload-evict"
 	sm.GetOrCreate(key)
@@ -1410,7 +1410,7 @@ func TestSQLite_ReloadAfterEviction_SeqAccounting(t *testing.T) {
 	// the non-evicted suffix (m4..m8), so SQLite rows (seqs 0-8) map to
 	// in-memory slice indices as seq = firstInMemorySeq + i.
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	hist := sm2.GetHistoryView(key)
 	if len(hist) != 5 {
 		t.Fatalf("reloaded in-memory len = %d, want 5 (non-evicted only)", len(hist))
@@ -1442,7 +1442,7 @@ func TestSQLite_ReloadAfterEviction_SeqAccounting(t *testing.T) {
 func TestSQLite_EvictExcluded_WhenDisabled(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:evict-noop"
 	sm.GetOrCreate(key)
@@ -1494,7 +1494,7 @@ func TestSQLite_ColdLoad_RestoresEvictionBoundary(t *testing.T) {
 
 	// Manager 1: create + persist the session, exclude a prefix, save, evict.
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:coldload-evicted"
 	sm.GetOrCreate(key)
@@ -1518,7 +1518,7 @@ func TestSQLite_ColdLoad_RestoresEvictionBoundary(t *testing.T) {
 
 	// Manager 2: cold load from the same store.
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 
 	// Only the non-evicted suffix is resident in RAM (this also triggers the
 	// cold load for the count assertions below).
@@ -1577,7 +1577,7 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 
 	// Manager 1: create + persist a session, exclude a prefix, save, evict.
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:pruned-prefix-restore"
 	sm.GetOrCreate(key)
@@ -1636,7 +1636,7 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 	// MessageCount - boundary = 7 - 8 = -1 != 2 would falsely trigger the
 	// fallback and reset firstInMemorySeq to 0.
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 
 	hist := sm2.GetHistory(key) // triggers the cold load
 	if len(hist) != 2 {
@@ -1688,7 +1688,7 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 func TestSQLite_ColdLoad_NoEviction_BoundaryZero(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:coldload-noevict"
 	sm.GetOrCreate(key)
@@ -1700,7 +1700,7 @@ func TestSQLite_ColdLoad_NoEviction_BoundaryZero(t *testing.T) {
 	}
 
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	hist := sm2.GetHistory(key)
 	if len(hist) != 5 {
 		t.Fatalf("in-memory len after cold load = %d, want 5", len(hist))
@@ -1724,7 +1724,7 @@ func TestSQLite_ColdLoad_NoEviction_BoundaryZero(t *testing.T) {
 func TestSQLite_EvictionBoundary_PersistedOnEvict(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:boundary-persist"
 	sm.GetOrCreate(key)
@@ -1769,7 +1769,7 @@ func TestSQLite_EvictionBoundary_PersistedOnEvict(t *testing.T) {
 func TestSQLite_MultipleCompactions_ColdLoadContextOnly(t *testing.T) {
 	s := newTestStore(t)
 	sm1 := NewSessionManager()
-	sm1.SetStore(s)
+	sm1.SetSessionRepo(s.Sessions())
 
 	const key = "test:multi-compaction-cold-load"
 	sm1.GetOrCreate(key)
@@ -1830,7 +1830,7 @@ func TestSQLite_MultipleCompactions_ColdLoadContextOnly(t *testing.T) {
 
 	// Cold load with a new SessionManager (simulating app start).
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 
 	loadedHistory := sm2.GetHistory(key)
 	if len(loadedHistory) != 2 {
@@ -1878,7 +1878,7 @@ func TestSQLite_ColdLoad_UnmigratedExcludedPruned(t *testing.T) {
 
 	// Load with a new SessionManager.
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	history := sm.GetHistory(key)
 	if len(history) != 4 {
@@ -1913,7 +1913,7 @@ func seqsOf(rows []store.MessageRowFull) []int {
 func TestSQLite_AllTotalMessageCounts_MatchesPerKey(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	// Create 3 sessions with different message counts.
 	sm.GetOrCreate("sess-a")
@@ -1955,7 +1955,7 @@ func TestSQLite_AllTotalMessageCounts_MatchesPerKey(t *testing.T) {
 func TestSQLite_AllTotalMessageCounts_ColdSessions(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	sm.GetOrCreate("sess-a")
 	sm.AddMessage("sess-a", "user", "hello")
@@ -2048,7 +2048,7 @@ func TestAllTotalMessageCounts_NoStore(t *testing.T) {
 func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:gap-rebase"
 	sm.GetOrCreate(key)

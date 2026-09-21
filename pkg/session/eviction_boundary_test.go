@@ -21,7 +21,7 @@ import (
 func TestEvictExcluded_TrailingExcludedRowStaysResident(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	const key = "test:trailing-excluded"
 	const human0 = "ORIGINAL GOAL: build the DHT crawler"
@@ -145,7 +145,7 @@ func TestEvictExcluded_TrailingExcludedRowStaysResident(t *testing.T) {
 func TestEvictExcluded_NoBoundaryFallsBackToContiguousRun(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	const key = "test:no-boundary-fallback"
 
@@ -235,7 +235,7 @@ func msgContent(i int) string {
 func TestEvictExcluded_BoundaryEqualToLenKeepsContext(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "test:boundary-eq-len"
 

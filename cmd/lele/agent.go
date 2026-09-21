@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,7 +82,23 @@ func agentCmd() {
 	setupFileLogging(cfg)
 
 	msgBus := bus.NewMessageBus()
-	agentLoop := agent.NewAgentLoop(cfg, msgBus)
+
+	// Open the shared SQLite store via the single helper. On any error
+	// (including unsupported platform) the same warning is logged and the
+	// loop receives nil, falling back to JSON storage — identical to the
+	// old inline fallback in NewAgentLoop.
+	dbPath := defaultDBPath()
+	s, storeCleanup, storeErr := openSharedStore(dbPath, "agent-loop")
+	if storeErr != nil {
+		log.Printf("Failed to open SQLite store at %s: %v — falling back to JSON storage", dbPath, storeErr)
+	}
+	// cleanup is a no-op when s is nil. When non-nil the loop owns the
+	// store and closes it on shutdown, so we only use cleanup on the
+	// failure path (where the store was never handed over).
+	if s == nil {
+		defer storeCleanup()
+	}
+	agentLoop := agent.NewAgentLoopWithStore(cfg, msgBus, s)
 
 	startupInfo := agentLoop.GetStartupInfo()
 	toolsInfo, _ := startupInfo["tools"].(map[string]interface{})

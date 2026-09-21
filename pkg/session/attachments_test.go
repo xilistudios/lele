@@ -15,7 +15,7 @@ func att(name, path string) providers.MessageAttachment {
 
 func TestAttachFilesToLastAssistant_AppendsToLastAssistant(t *testing.T) {
 	sm := NewSessionManager()
-	sm.SetStore(newTestStore(t))
+	sm.SetSessionRepo(newTestStore(t).Sessions())
 
 	key := "native:attach-1"
 	sm.AddMessage(key, "user", "hola")
@@ -49,7 +49,7 @@ func TestAttachFilesToLastAssistant_AppendsToLastAssistant(t *testing.T) {
 
 func TestAttachFilesToLastAssistant_DedupesByPath(t *testing.T) {
 	sm := NewSessionManager()
-	sm.SetStore(newTestStore(t))
+	sm.SetSessionRepo(newTestStore(t).Sessions())
 
 	key := "native:attach-2"
 	sm.AddMessage(key, "assistant", "hola")
@@ -76,7 +76,7 @@ func TestAttachFilesToLastAssistant_DedupesByPath(t *testing.T) {
 
 func TestAttachFilesToLastAssistant_NoAssistantIsNoop(t *testing.T) {
 	sm := NewSessionManager()
-	sm.SetStore(newTestStore(t))
+	sm.SetSessionRepo(newTestStore(t).Sessions())
 
 	key := "native:attach-3"
 	sm.AddMessage(key, "user", "solo usuario")
@@ -95,7 +95,7 @@ func TestAttachFilesToLastAssistant_NoAssistantIsNoop(t *testing.T) {
 func TestAttachFilesToLastAssistant_PersistsAcrossReload(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
-	sm.SetStore(s)
+	sm.SetSessionRepo(s.Sessions())
 
 	key := "native:attach-4"
 	sm.AddMessage(key, "assistant", "hola")
@@ -103,7 +103,7 @@ func TestAttachFilesToLastAssistant_PersistsAcrossReload(t *testing.T) {
 
 	// Fresh manager over the same store → loads from SQLite/JSON rows.
 	sm2 := NewSessionManager()
-	sm2.SetStore(s)
+	sm2.SetSessionRepo(s.Sessions())
 	hist := sm2.GetHistory(key)
 	if len(hist) != 1 {
 		t.Fatalf("reloaded history len = %d, want 1", len(hist))
@@ -115,7 +115,7 @@ func TestAttachFilesToLastAssistant_PersistsAcrossReload(t *testing.T) {
 
 func TestAttachFilesToLastAssistant_EmptyInputNoop(t *testing.T) {
 	sm := NewSessionManager()
-	sm.SetStore(newTestStore(t))
+	sm.SetSessionRepo(newTestStore(t).Sessions())
 	key := "native:attach-5"
 	sm.AddMessage(key, "assistant", "hola")
 

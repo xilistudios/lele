@@ -21,7 +21,7 @@ func TestTUI_IdleEviction_KeepsChatAndReloadsMessages(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { s.Close() })
-	m.sessionMgr.SetStore(s)
+	m.sessionMgr.SetSessionRepo(s.Sessions())
 
 	const key = "tui:chat:idle-visible"
 	m.sessionMgr.GetOrCreate(key)
