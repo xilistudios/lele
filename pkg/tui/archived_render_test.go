@@ -39,7 +39,7 @@ func testEvictedPageSeqs(firstSeq int, pairs []struct{ role, content string }) *
 // lineViewport.visibleLines), so a transcript longer than the window cannot be
 // asserted against the painted output: the top of the history and its bottom
 // are never on screen at the same time. Assertions about whether a message,
-// the archived divider or the "earlier messages" banner is RENDERED must run
+// the "earlier messages" banner is RENDERED must run
 // against this buffer; assertions about what the user actually SEES must use
 // View() with an explicit scroll position.
 func renderedBase(m *Model) string {
@@ -129,49 +129,6 @@ func TestArchivedRender_DoesNotTouchSessionMemory(t *testing.T) {
 	}
 	if evictedBefore != evictedAfter {
 		t.Fatalf("evicted count changed: before=%d after=%d", evictedBefore, evictedAfter)
-	}
-}
-
-// TestArchivedRender_DividerOnlyWithArchived verifies the divider appears
-// in the rendered content when an archived prefix exists, and never for
-// sessions without evictions.
-func TestArchivedRender_DividerOnlyWithArchived(t *testing.T) {
-	divider := i18n.T("tui.archivedDivider")
-
-	// Session WITH archived prefix — buildRenderedHistoryLines should include divider.
-	m := newEvictionTestModel(t)
-	const keyA = "tui:chat:render-c"
-	seedEvictionSession(t, m, keyA, 12, 5)
-	m.currentKey = keyA
-	m.showWelcome = false
-	m.forceGotoBottom = true
-	m.refreshArchivedHistory()
-	renderLazyModel(t, m)
-
-	// Check the rendered base lines directly (not the viewport-visible slice).
-	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
-	baseLines := m.buildRenderedHistoryLines(history)
-	foundDivider := false
-	for _, line := range baseLines {
-		if strings.Contains(line, divider) {
-			foundDivider = true
-			break
-		}
-	}
-	if !foundDivider {
-		t.Fatalf("expected divider in base lines with archived prefix")
-	}
-
-	// Session WITHOUT evictions.
-	const keyB = "tui:chat:render-c2"
-	seedLazySession(t, m, keyB, 10)
-	renderLazyModel(t, m)
-	historyB := m.agentLoop.GetProvidable().GetHistoryView(keyB)
-	baseLinesB := m.buildRenderedHistoryLines(historyB)
-	for _, line := range baseLinesB {
-		if strings.Contains(line, divider) {
-			t.Fatalf("expected no divider for session without evictions, found in line: %s", line)
-		}
 	}
 }
 
@@ -304,9 +261,6 @@ func TestArchivedRender_SessionSwitchHidesOtherPrefix(t *testing.T) {
 	if strings.Contains(outB, msgA) {
 		t.Fatalf("session B view should not contain session A's archived message %q, got:\n%s", msgA, outB)
 	}
-	if strings.Contains(outB, i18n.T("tui.archivedDivider")) {
-		t.Fatalf("session B view should not contain archived divider, got:\n%s", outB)
-	}
 }
 
 // TestArchivedRender_WindowHeaderCountsCombined verifies that the "↑ N earlier
@@ -391,7 +345,7 @@ func TestArchivedRender_HeaderNumberDecreasesOnExpand(t *testing.T) {
 
 // TestArchivedRender_AllArchivedFitBelowCap verifies that when all evicted
 // messages fit within maxRenderedMessages, the rendered base lines contain
-// both archived and resident content with a divider but no "earlier messages" header.
+// both archived and resident content, and no "earlier messages" header.
 func TestArchivedRender_AllArchivedFitBelowCap(t *testing.T) {
 	m := newEvictionTestModel(t)
 	const key = "tui:chat:render-i"
@@ -414,11 +368,6 @@ func TestArchivedRender_AllArchivedFitBelowCap(t *testing.T) {
 	// No "earlier messages" header since everything fits.
 	if strings.Contains(baseStr, "earlier messages") {
 		t.Fatalf("expected no 'earlier messages' header when everything fits")
-	}
-
-	// Divider should be present.
-	if !strings.Contains(baseStr, i18n.T("tui.archivedDivider")) {
-		t.Fatalf("expected archived divider in base lines")
 	}
 
 	// Both archived and resident messages should be present.
@@ -583,8 +532,8 @@ func TestArchivedPrefix_RebuildsBaseWithoutCountChange(t *testing.T) {
 		t.Fatal("base was never rebuilt by the archive change")
 	}
 
-	// Sanity: the divider that marks the archive boundary is in the rebuilt base.
-	if !strings.Contains(after, i18n.T("tui.archivedDivider")) {
-		t.Fatalf("rebuilt base lost the archived divider:\n%s", after)
+	// The rebuild must still carry the archived rows themselves.
+	if !strings.Contains(after, "Evict question 0?") {
+		t.Fatalf("rebuilt base lost the archived content:\n%s", after)
 	}
 }

@@ -469,12 +469,6 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 
 	lastRole := ""
 	for i := startIdx; i < totalMsgs; i++ {
-		// Insert archived/resident divider when transitioning from archived
-		// to resident messages (display-only boundary).
-		if nArchived > 0 && i == nArchived {
-			result = append(result, CommentColorStyle.Render("  "+i18n.T("tui.archivedDivider")), "")
-		}
-
 		var msg providers.Message
 		if i < nArchived {
 			msg = archived[i]

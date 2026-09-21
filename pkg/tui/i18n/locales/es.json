@@ -350,6 +350,5 @@
   "tui.commands.noConfig": "no hay configuración cargada",
   "tui.commands.noBackend": "no hay bucle de agente disponible",
   "tui.commands.noWorkspace": "no hay workspace para archivos de comandos",
-  "tui.commands.noPath": "el comando no tiene ruta que borrar",
-  "tui.archivedDivider": "· · · historial archivado · fuera del contexto del modelo · · ·"
+  "tui.commands.noPath": "el comando no tiene ruta que borrar"
 }

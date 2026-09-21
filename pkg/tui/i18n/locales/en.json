@@ -350,6 +350,5 @@
   "tui.commands.noConfig": "no configuration loaded",
   "tui.commands.noBackend": "no agent loop available",
   "tui.commands.noWorkspace": "no workspace available for command files",
-  "tui.commands.noPath": "command has no file path to delete",
-  "tui.archivedDivider": "· · · archived history · not in model context · · ·"
+  "tui.commands.noPath": "command has no file path to delete"
 }
