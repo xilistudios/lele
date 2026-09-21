@@ -17,10 +17,10 @@ import (
 )
 
 type SessionManager struct {
-	sessions map[string]*Session
-	mu       sync.RWMutex
+	sessions    map[string]*Session
+	mu          sync.RWMutex
 	sessionRepo *store.SessionRepo // SQLite sessions repository
-	loadOnce     sync.Once          // ensures loadSessions runs exactly once, on first access
+	loadOnce    sync.Once          // ensures loadSessions runs exactly once, on first access
 
 	// Lazy loading: lightweight metadata for sessions not yet loaded into memory.
 	// Populated by loadSessionMetadata() instead of loading full message history.
