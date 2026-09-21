@@ -350,5 +350,6 @@
   "tui.commands.noConfig": "nenhuma configuração carregada",
   "tui.commands.noBackend": "nenhum loop de agente disponível",
   "tui.commands.noWorkspace": "nenhum workspace para arquivos de comandos",
-  "tui.commands.noPath": "o comando não tem caminho para excluir"
+  "tui.commands.noPath": "o comando não tem caminho para excluir",
+  "tui.archivedDivider": "· · · histórico arquivado · fora do contexto do modelo · · ·"
 }

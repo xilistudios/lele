@@ -227,6 +227,7 @@ func TestAllKeysExist(t *testing.T) {
 		"tui.queue.dropped",
 		"tui.queue.empty",
 		"tui.queue.flushConfirm",
+		"tui.archivedDivider",
 	}
 
 	Init()

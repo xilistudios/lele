@@ -10,6 +10,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/locales"
+	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/tui/theme"
 
@@ -489,6 +490,12 @@ type Model struct {
 	renderedBaseKey           string // session key the cache belongs to
 	renderedBaseMsgCount      int    // number of history messages when cache was built
 	renderedBaseLastStreaming bool   // whether the last msg was Streaming=true when cache was built
+	// renderedBaseArchiveKey fingerprints the display-only archived prefix at
+	// the time the base was built. Kept separate from renderedBaseKey because
+	// that key also gates msgRenderCacheLines, which must survive archive
+	// paging. See updateViewport for why the message count alone cannot cover
+	// an archived-prefix change.
+	renderedBaseArchiveKey string
 
 	// lastViewportKey is a fingerprint of the last rendered viewport state.
 	// shouldSkipViewportUpdate compares against it to skip redundant re-renders.
@@ -508,6 +515,17 @@ type Model struct {
 	// renderWindowSessionKey tracks which session renderStartIdx belongs to.
 	// When the session changes, the render window resets to the default.
 	renderWindowSessionKey string
+
+	// Archived (display-only) history prefix — messages that have been
+	// evicted from the agent context but are still shown in the TUI for
+	// reference. These messages are NEVER re-injected into the LLM context.
+	// Loaded lazily from SQLite via LoadMessagesWindow.
+	archivedPrefix       []providers.Message // display-only, chronological (oldest first)
+	archivedKey          string              // session to which archivedPrefix belongs
+	archivedTotal        int                 // evicted messages count at last read
+	archivedOldestSeq    int                 // seq of archivedPrefix[0]; cursor for older pages
+	archivedHasOlder     bool                // older archived rows exist beyond archivedOldestSeq
+	archivedVisibleCount int                 // user/assistant messages in archivedPrefix (O(1) render fingerprint)
 
 	// Cached token/context usage for the sidebar. GetCurrentContextUsage is
 	// expensive (it rebuilds the system prompt from disk and estimates tokens

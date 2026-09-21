@@ -304,6 +304,15 @@ func (m *Model) reloadSessions() {
 	// Clear streaming state if the assistant message is fully saved in history
 	m.cleanupStreamingIfComplete()
 
+	// Refresh the display-only archived prefix. Compaction (manual /compact or
+	// the automatic threshold) evicts out-of-context messages from the in-memory
+	// session while keeping them in SQLite; this reloads them for display only.
+	// Safe here because reloadSessions runs exclusively on Update()/Init() paths
+	// — never from View(), which would put SQLite I/O on the render hot path.
+	// Placed before shouldSkipViewportUpdate so that archivedPrefix changes are
+	// captured in getViewportContentKey and trigger a viewport rebuild.
+	m.refreshArchivedHistory()
+
 	// Skip the re-render if nothing user-visible changed. reloadSessions is
 	// called on many events (including unrelated outbound events) and without
 	// this guard every one of them would rebuild and re-render the entire
@@ -321,7 +330,7 @@ func (m *Model) reloadSessions() {
 // user-visible changed. This keeps idle CPU low even for very long sessions.
 func (m *Model) getViewportContentKey() string {
 	msgCount := m.getHistoryMessageCount()
-	return fmt.Sprintf("%s|%d|%d|%d|%s|%s|%s|%s|%s|%v|%v|%v|%d",
+	return fmt.Sprintf("%s|%d|%d|%d|%s|%s|%s|%s|%s|%v|%v|%v|%d|%s",
 		m.currentKey,
 		m.viewport.Width,
 		msgCount,
@@ -335,6 +344,12 @@ func (m *Model) getViewportContentKey() string {
 		m.compactFeedback != "",
 		m.statusFeedback != "",
 		m.renderStartIdx,
+		// Full archived fingerprint, not just the prefix length. This guard
+		// runs BEFORE updateViewport, so anything the inner rebuild check
+		// reacts to has to be visible here too — otherwise the frame is judged
+		// "unchanged" and never reaches that check. Both layers share
+		// archivedCacheKey precisely so they cannot drift apart.
+		m.archivedCacheKey(),
 	)
 }
 
@@ -452,6 +467,18 @@ func (m *Model) setCurrentChatKey(newKey string) {
 		}
 	}
 	m.currentKey = newKey
+	// The archived prefix belongs to the session we are LEAVING. Reset it
+	// immediately so the next frame cannot render stale archived messages
+	// from the outgoing session, then load the one for the session we are
+	// entering. Refreshing here — at the single choke point every switch
+	// converges on — is deliberate: the modal session picker and the
+	// subagent navigation switch keys WITHOUT calling reloadSessions(), so
+	// relying on that convention silently left compacted history invisible
+	// after switching chats. refreshArchivedHistory is a no-op (two O(1) stat
+	// reads) when there is nothing evicted, and this stays off the render
+	// path because every caller is an Update()-path route — never View().
+	m.resetArchivedHistory()
+	m.refreshArchivedHistory()
 	// TUI-H2: the streaming overlay (currentStream/currentThinking) is
 	// session-scoped presentation state. Every other session boundary clears
 	// it (publishUserMessage, /compact, message.complete cleanup), but this

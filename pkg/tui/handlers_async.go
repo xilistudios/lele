@@ -28,6 +28,11 @@ func (m *Model) handleAsyncResult(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.C
 			// if the rebuild path is skipped. Unconditional: a failed
 			// compaction only costs one re-render (hallazgo P5).
 			m.msgRenderCacheLines = nil
+			// Invalidate the rendered base so the next updateViewport does a
+			// full rebuild incorporating the refreshed archived prefix.
+			m.renderedBaseValid = false
+			m.renderedBaseKey = ""
+			m.renderedBaseMsgCount = -1
 		}
 
 	case skillsScanResultMsg:

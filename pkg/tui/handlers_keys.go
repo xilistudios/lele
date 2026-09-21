@@ -190,8 +190,14 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 	case "home":
 		// Expand the lazy render window all the way to the start of history
 		// before jumping, so Home lands on the first message rather than the
-		// "↑ N earlier messages" banner.
-		for m.maybeExpandRenderWindow() {
+		// "↑ N earlier messages" banner. Bounded: each iteration may hit
+		// SQLite for an archived page and rebuild the base, so a session
+		// with thousands of compacted messages must not turn Home into an
+		// unbounded loop.
+		for i := 0; i < maxHomeExpandIterations; i++ {
+			if !m.maybeExpandRenderWindow() {
+				break
+			}
 		}
 		m.viewport.GotoTop()
 		return m, nil, true
