@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
 )
 
 // ansiEscapeRe matches ANSI escape sequences for stripping.
@@ -212,7 +211,8 @@ func (m *Model) applySelectionHighlight(view string) string {
 
 // splitByColumns splits a plain-text string s into three parts at terminal
 // column boundaries: [0, startCol), [startCol, endCol), [endCol, ...).
-// It correctly handles wide characters (CJK, emoji) that occupy 2 columns.
+// It measures columns per grapheme cluster (matching ansi.StringWidth) so
+// wide characters (CJK, emoji) and multi-codepoint clusters are never split.
 // Column values are clamped to the string's actual width.
 func splitByColumns(s string, startCol, endCol int) (before, selected, after string) {
 	if startCol < 0 {
@@ -222,14 +222,18 @@ func splitByColumns(s string, startCol, endCol int) (before, selected, after str
 		endCol = startCol
 	}
 
-	runes := []rune(s)
-	widths := make([]int, len(runes))
-	totalWidth := 0
-	for i, r := range runes {
-		w := runewidth.RuneWidth(r)
-		widths[i] = w
-		totalWidth += w
+	// Collect clusters with their widths so column mapping and slicing share
+	// the same measurement used everywhere else in the package.
+	type clusterSpan struct {
+		bytes int // length of the cluster in bytes
+		width int // display width of the cluster
 	}
+	var spans []clusterSpan
+	totalWidth := 0
+	forEachGraphemeCluster(s, func(cluster string, width int) {
+		spans = append(spans, clusterSpan{bytes: len(cluster), width: width})
+		totalWidth += width
+	})
 
 	// Clamp to actual width
 	if startCol > totalWidth {
@@ -252,7 +256,7 @@ func splitByColumns(s string, startCol, endCol int) (before, selected, after str
 		startByteIdx = 0
 	}
 
-	for i, r := range runes {
+	for _, sp := range spans {
 		if !startFound && col >= startCol {
 			startByteIdx = byteIdx
 			startFound = true
@@ -264,9 +268,8 @@ func splitByColumns(s string, startCol, endCol int) (before, selected, after str
 		if startFound && endFound {
 			break
 		}
-		col += widths[i]
-		byteIdx += len(string(r))
-		_ = i
+		col += sp.width
+		byteIdx += sp.bytes
 	}
 
 	// Handle boundaries at exact end
