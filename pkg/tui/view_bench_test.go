@@ -82,7 +82,14 @@ func buildBenchModel(tb testing.TB, pairs int) *Model {
 		})
 	}
 	m.subagentsCacheKey = "native:" + key
-	m.subagentsCacheTime = time.Now()
+	// Pin the seeded cache so the 500ms TTL refresh never fires: the backend
+	// exposes no subagents to re-fetch (the loop is torn down right after
+	// newBenchModel returns), so an expiry would silently drop these sidebar
+	// rows mid-test. Frame-to-frame comparison tests (e.g.
+	// TestMergeAdjacentSGRCellEquivalence) then flake under load whenever
+	// their two frames straddle the expiry — a diff that has nothing to do
+	// with what they are comparing.
+	m.subagentsCacheTime = time.Now().Add(time.Hour)
 	m.subagentsCacheValue = subagents
 
 	return m
