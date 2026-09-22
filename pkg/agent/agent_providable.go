@@ -1211,6 +1211,14 @@ func (ap *agentProvidableImpl) GetInProgressAssistant(sessionKey string) *provid
 	return agent.Sessions.GetInProgressAssistant(resolvedKey)
 }
 
+// GetInProgressTool returns the tool the session is currently executing, if
+// any. UIs use it to restore the "running tool" row after a chat reload, which
+// the live tool.executing event stream cannot do on its own (see
+// session.InProgressTool). Callers must gate on IsSessionProcessing.
+func (ap *agentProvidableImpl) GetInProgressTool(sessionKey string) *session.InProgressTool {
+	return ap.al.GetInProgressTool(sessionKey)
+}
+
 // ============================================================================
 // AgentProvidable Interface - Background Exec Management
 // ============================================================================

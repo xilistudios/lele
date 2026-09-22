@@ -416,7 +416,7 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 		judgeAnswer := ""
 		if gm.judge != nil {
 			// Notify TUI that the goal is being reviewed.
-			lr.al.bus.PublishOutbound(bus.OutboundMessage{
+			lr.al.publishToolLifecycle(bus.OutboundMessage{
 				Channel: opts.Channel,
 				ChatID:  opts.ChatID,
 				Event:   "tool.executing",
@@ -430,7 +430,7 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 			var err error
 			isDone, judgeAnswer, err = gm.judge.JudgeGoal(ctx, opts.SessionKey, goal.Text, lastResponse)
 			// Clear the reviewing indicator.
-			lr.al.bus.PublishOutbound(bus.OutboundMessage{
+			lr.al.publishToolLifecycle(bus.OutboundMessage{
 				Channel: opts.Channel,
 				ChatID:  opts.ChatID,
 				Event:   "tool.result",
@@ -1077,7 +1077,7 @@ func (lr *llmRunnerImpl) maybeCompactLoopContext(ctx context.Context, agent *Age
 				"context_window": contextWindow,
 			})
 			if opts.Channel == "native" {
-				lr.al.bus.PublishOutbound(bus.OutboundMessage{
+				lr.al.publishToolLifecycle(bus.OutboundMessage{
 					Channel:  opts.Channel,
 					ChatID:   opts.ChatID,
 					Event:    "tool.executing",
@@ -1105,7 +1105,7 @@ func (lr *llmRunnerImpl) maybeCompactLoopContext(ctx context.Context, agent *Age
 			if compacted, ok := tools.CompactLoopMessages(ctx, compactProvider, compactModel, messages, 6); ok {
 				messages = compacted
 				if opts.Channel == "native" {
-					lr.al.bus.PublishOutbound(bus.OutboundMessage{
+					lr.al.publishToolLifecycle(bus.OutboundMessage{
 						Channel: opts.Channel,
 						ChatID:  opts.ChatID,
 						Event:   "tool.result",

@@ -1236,6 +1236,11 @@ export type ClientEvent =
         server_time: string
         processing?: boolean
         groups_enabled?: boolean
+        /** Tool the session is running right now, sent only while processing
+         *  (absent when there is nothing to restore). Lets the UI rebuild the
+         *  "running tool" card after a page reload: the in-flight call only
+         *  travels in the event stream and never reaches the message history. */
+        in_progress_tool?: ToolStatus & { tool_call_id?: string }
       }
     }
   | { event: 'message.ack'; data: { message_id: string; session_key: string } }
@@ -1286,7 +1291,15 @@ export type ClientEvent =
   | { event: 'approval.request'; data: ApprovalRequest }
   | { event: 'approve.ack'; data: { request_id: string; approved: string } }
   | { event: 'approve.result'; data: { request_id: string; approved: boolean; command: string } }
-  | { event: 'subscribe.ack'; data: { session_key: string; processing?: boolean } }
+  | {
+      event: 'subscribe.ack'
+      data: {
+        session_key: string
+        processing?: boolean
+        /** Tool the session is running right now (see the welcome event). */
+        in_progress_tool?: ToolStatus & { tool_call_id?: string }
+      }
+    }
   | { event: 'unsubscribe.ack'; data: { session_key: string } }
   | { event: 'cancel.ack'; data: { status: string } }
   | { event: 'pong'; data: { time: string } }

@@ -546,6 +546,15 @@ func (m *Model) clearStreamingState() {
 
 	m.resetStreamState()
 	m.currentToolAction = ""
+	// Switching to a chat that is still running a (possibly long) tool used to
+	// lose its "running tool" row: the row was set exclusively by live
+	// tool.executing events, and none is replayed on a switch. Ask the agent
+	// loop — the same source of truth those events feed — for the tool it is
+	// executing right now and restore the row, so the busy session looks
+	// exactly as it did before the switch.
+	if isActive {
+		m.currentToolAction = m.inProgressToolAction(m.currentKey)
+	}
 	m.currentMessageID = ""
 	m.currentAssistantMsgID = ""
 	m.pendingSubagentCompletions = 0
@@ -581,6 +590,42 @@ func (m *Model) clearStreamingState() {
 	m.renderedBaseKey = ""
 	m.msgRenderCacheLines = nil // clear per-message cache on session switch
 	m.forceGotoBottom = true
+}
+
+// inProgressToolAction returns the row the chat's running tool must display,
+// in the same "tool: arguments" form the live tool.executing handler uses (the
+// pre-formatted action, falling back to the bare tool name), or "" when the
+// session is not running a tool.
+//
+// It exists for the session-switch path: the row is otherwise only ever
+// written by live tool.executing events, so a switch to a busy chat left the
+// spinner running with no indication of what it was running.
+func (m *Model) inProgressToolAction(sessionKey string) string {
+	if m.agentLoop == nil || sessionKey == "" {
+		return ""
+	}
+	// The loop is the same source of truth the live tool.executing events are
+	// mirrored into, so the restored row and the live row agree.
+	return formatInProgressToolAction(m.agentLoop.GetProvidable().GetInProgressTool(sessionKey))
+}
+
+// formatInProgressToolAction turns a recorded in-flight tool into the overlay
+// activity row, preferring the backend's pre-formatted action ("tool:
+// arguments") over the bare tool name. It returns "" for a nil record.
+//
+// Pure (no Model, no loop) on purpose: the record lives unexported inside the
+// agent loop and is only ever populated by a real tool execution, so this is
+// the layer of the session-switch restore a TUI test can pin — the fallback
+// rule and the sanitization of a value that is LLM-controlled either way
+// (same ingress sanitization as the live tool.executing handler).
+func formatInProgressToolAction(tool *session.InProgressTool) string {
+	if tool == nil {
+		return ""
+	}
+	if tool.Action != "" {
+		return sanitizeDisplayText(tool.Action)
+	}
+	return sanitizeDisplayText(tool.Tool)
 }
 
 // isSubagentSessionKey returns true if the given session key belongs to a subagent.
