@@ -138,10 +138,13 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 			// Use the compact "tool: action" format from metadata.
 			toolName := msg.msg.Metadata["tool"]
 			action := msg.msg.Metadata["action"]
+			// action/tool come from tool.executing event metadata (LLM
+			// controlled): sanitize at ingress so control/bidi chars never
+			// reach the overlay row.
 			if action != "" {
-				m.currentToolAction = action
+				m.currentToolAction = sanitizeDisplayText(action)
 			} else if toolName != "" {
-				m.currentToolAction = toolName
+				m.currentToolAction = sanitizeDisplayText(toolName)
 			}
 			m.updateViewport()
 		case "tool.result":

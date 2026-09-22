@@ -17,7 +17,9 @@ func (m *Model) handleAsyncResult(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.C
 			m.lastDuration = time.Since(m.startTime)
 			m.processing = false
 			m.currentToolAction = ""
-			m.compactFeedback = msg.result
+			// msg.result is backend-produced text rendered raw into the
+			// overlay: sanitize so control/bidi chars cannot corrupt frame.
+			m.compactFeedback = sanitizeDisplayText(msg.result)
 			m.forceGotoBottom = true
 			m.reloadSessions()
 			// Compaction rewrites (or excludes) the session history, so every

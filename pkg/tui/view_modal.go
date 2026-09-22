@@ -202,8 +202,16 @@ func (m *Model) renderModal(modalTitle string) string {
 				continue
 			}
 		}
-		// Regular selectable items
+		// Regular selectable items. Item sources include user-controlled
+		// session names: sanitize so control/bidi chars cannot desync paint
+		// vs measured width, and truncate to a terminal-derived budget so an
+		// over-long name cannot widen the modal box beyond the frame.
 		item := m.modalItems[i]
+		itemBudget := m.width - 8
+		if itemBudget < 20 {
+			itemBudget = 20
+		}
+		item = truncateRightCells(sanitizeDisplayText(item), itemBudget)
 		if i == m.modalSelectedIdx {
 			modalSb.WriteString(ModalItemActive.Render("> "+item) + "\n")
 		} else {
