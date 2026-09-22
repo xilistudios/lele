@@ -37,6 +37,14 @@ export function Modal({
   const titleId = useId()
   const previouslyFocused = useRef<HTMLElement | null>(null)
 
+  // Keep the latest onClose in a ref so identity changes (inline closures from
+  // parents that re-render, e.g. per keystroke in a form) don't re-run the
+  // open/close effect below. Re-running it would steal focus from inputs.
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
   // Keep Tab focus inside the dialog while it is open.
   const trapFocus = useCallback((e: KeyboardEvent) => {
     if (e.key !== 'Tab') return
@@ -78,7 +86,7 @@ export function Modal({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose()
+        onCloseRef.current()
         return
       }
       trapFocus(e)
@@ -89,7 +97,7 @@ export function Modal({
       document.body.style.overflow = prevOverflow
       previouslyFocused.current?.focus?.()
     }
-  }, [isOpen, onClose, trapFocus])
+  }, [isOpen, trapFocus])
 
   if (!isOpen) return null
 

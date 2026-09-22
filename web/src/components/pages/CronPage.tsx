@@ -319,7 +319,7 @@ function Detail({ label, value, mono }: { label: string; value: string; mono?: b
 type ScheduleKind = 'at' | 'every' | 'cron'
 type ActionKind = 'message' | 'command' | 'spawn'
 
-function JobFormModal({
+export function JobFormModal({
   initial,
   agents,
   onClose,
@@ -488,17 +488,28 @@ function JobFormModal({
   const labelCls = 'mb-1 block text-xs font-medium text-text-secondary'
   const dialogRef = useRef<HTMLDialogElement>(null)
 
-  // Escape closes the dialog; initial focus lands on the first field.
+  // Keep the latest onClose in a ref so identity changes (inline closures from
+  // parents that re-render, e.g. a refetch of the cron jobs list) don't re-run
+  // the open/close effect below. Re-running it would steal focus from inputs.
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  // Escape closes the dialog; initial focus lands on the first field. Runs
+  // once on mount: the parent renders JobFormModal only while the form is open
+  // ({formOpen && <JobFormModal ... />}), so mount == open and the initial
+  // focus must happen exactly once per open — never on parent re-renders.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onCloseRef.current()
     }
     document.addEventListener('keydown', handleKeyDown)
     dialogRef.current
       ?.querySelector<HTMLElement>('input, select, textarea, button:not([disabled])')
       ?.focus()
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  }, [])
 
   const actionButtons: { kind: ActionKind; label: string }[] = [
     { kind: 'message', label: t('cron.actionMessage', 'Message') },
