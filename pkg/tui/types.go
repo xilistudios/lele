@@ -97,6 +97,7 @@ const (
 	ModalProviderDetail     // provider detail (edit/delete/add model)
 	ModalAddProvider        // form to add a new provider
 	ModalAddModel           // form to add a new model to a provider
+	ModalEditModel          // form to edit an existing model of a provider
 	ModalCron               // list of cron jobs
 	ModalSecrets            // list of keyring secrets
 	ModalAddSecret          // form to add a new secret
@@ -333,6 +334,24 @@ type Model struct {
 	providerSelectedName string   // currently selected provider name in detail view
 	providerEditMode     bool     // true when editing an existing provider
 	providerSavedInFlow  bool     // true after /connect saves provider (enables model config steps)
+
+	// Model edit flow state (ModalEditModel) + provider-detail row map.
+	modelEditAlias     string         // alias of the model being edited (original map key)
+	modelEditOrigModel string         // stored model name when the edit flow was opened
+	providerDetailRows map[int]string // ModalProviderDetail: item index -> model alias
+	// ModalProviderDetail action-row indices (from providerDetailList) so the
+	// ENTER branch compares indexes instead of localized label strings.
+	// resetModal clears them to -1; enterProviderDetail always sets valid values.
+	providerDetailAddIdx int // item index of the add-model action row (-1 when absent)
+	providerDetailDelIdx int // item index of the delete-provider action row (-1 when absent)
+	// Double-confirm delete state for models: the first "d" arms
+	// providerDeleteKey, the second within providerDeleteConfirmWindow
+	// executes it (mirrors commandsDeleteKey/commandsDeleteArmed).
+	providerDeleteKey   string    // model alias armed for deletion, "" when disarmed
+	providerDeleteArmed time.Time // when the pending model delete was armed
+	// providerFeedback is the feedback line rendered under the provider
+	// detail list (delete confirmations, delete results, errors).
+	providerFeedback string
 
 	// Form state for add-provider / add-model flows
 	formStepIndex   int      // current step in the form

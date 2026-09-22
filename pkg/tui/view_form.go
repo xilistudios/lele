@@ -295,7 +295,7 @@ func (m *Model) formStepNames() []string {
 			steps[5] = "Model name (thinking: " + m.addModelCatalogThink + ")"
 		}
 		return steps
-	case ModalAddModel:
+	case ModalAddModel, ModalEditModel:
 		nameLabel := "Model name"
 		if m.addModelCatalogThink != "" {
 			nameLabel += " (thinking: " + m.addModelCatalogThink + ")"

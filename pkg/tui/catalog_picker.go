@@ -53,7 +53,7 @@ func (m *Model) currentCatalogProviderKey() string {
 // name" field — the step that offers catalog autocomplete.
 func (m *Model) isModelNameFormStep() bool {
 	switch m.modalMode {
-	case ModalAddModel:
+	case ModalAddModel, ModalEditModel:
 		return m.formStepIndex == 1
 	case ModalAddProvider:
 		return m.providerSavedInFlow && m.formStepIndex == 5
@@ -162,20 +162,28 @@ func (m *Model) applyCatalogSelectionOnEnter() {
 }
 
 // prefillModelFormFromDefaults writes catalog defaults into the form value
-// slots for the active flow. ModalAddModel uses indices 1-4 (model_name,
-// context_window, max_tokens, vision); the connect flow uses 5-8.
+// slots for the active flow. ModalAddModel / ModalEditModel use indices 1-4
+// (model_name, context_window, max_tokens, vision); the connect flow uses 5-8.
 func (m *Model) prefillModelFormFromDefaults(modelID string, d catalog.ModelDefaults) {
 	vision := "no"
 	if d.Vision {
 		vision = "yes"
 	}
 	switch m.modalMode {
-	case ModalAddModel:
+	case ModalAddModel, ModalEditModel:
 		if len(m.formValues) >= 5 {
 			m.formValues[1] = modelID
-			m.formValues[2] = strconv.Itoa(d.ContextWindow)
-			m.formValues[3] = strconv.Itoa(d.MaxTokens)
-			m.formValues[4] = vision
+			// Editing an EXISTING model without changing it: only canonicalize
+			// the model name and keep the stored context window / max tokens /
+			// vision — catalog defaults must never clobber the user's saved
+			// values on a plain edit of an unchanged model.
+			sameStoredModel := m.modalMode == ModalEditModel &&
+				m.modelEditOrigModel != "" && modelID == m.modelEditOrigModel
+			if !sameStoredModel {
+				m.formValues[2] = strconv.Itoa(d.ContextWindow)
+				m.formValues[3] = strconv.Itoa(d.MaxTokens)
+				m.formValues[4] = vision
+			}
 		}
 	case ModalAddProvider:
 		if len(m.formValues) >= 9 {
