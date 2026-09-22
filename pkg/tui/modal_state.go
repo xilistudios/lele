@@ -38,6 +38,14 @@ func (m *Model) resetModal(mode modalType) {
 	m.providerModalKeys = nil
 	m.providerSelectedName = ""
 	m.providerEditMode = false
+	m.providerDetailRows = nil
+	m.providerDetailAddIdx = -1
+	m.providerDetailDelIdx = -1
+	m.providerDeleteKey = ""
+	m.providerDeleteArmed = time.Time{}
+	m.providerFeedback = ""
+	m.modelEditAlias = ""
+	m.modelEditOrigModel = ""
 	m.providerTypePicker = false
 	m.providerTypePickerIdx = 0
 	m.providerTypePickerMax = 0
@@ -70,7 +78,7 @@ func (m *Model) resetModal(mode modalType) {
 // treated as modal shortcuts.
 func isFormModal(mode modalType, editingField bool) bool {
 	switch mode {
-	case ModalAddProvider, ModalAddModel, ModalAddSecret, ModalSkillInstall, ModalAddCommand:
+	case ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret, ModalSkillInstall, ModalAddCommand:
 		return true
 	case ModalSettingsAgents, ModalSettingsAgentEdit, ModalSettingsSystemEdit, ModalSettingsTUI:
 		return editingField
@@ -83,7 +91,7 @@ func isFormModal(mode modalType, editingField bool) bool {
 // (navigable with up/down keys), as opposed to form-based modals.
 func isListModal(mode modalType) bool {
 	switch mode {
-	case ModalNone, ModalAddProvider, ModalAddModel, ModalAddSecret, ModalSkillInstall:
+	case ModalNone, ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret, ModalSkillInstall:
 		return false
 	case ModalSettings, ModalSettingsAgents, ModalSettingsAgentEdit, ModalSettingsSystem, ModalSettingsSystemEdit, ModalSettingsTUI:
 		return true

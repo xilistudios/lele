@@ -38,6 +38,8 @@ func (m *Model) modalTitleFor(mode modalType) string {
 		return i18n.T("tui.addProvider")
 	case ModalAddModel:
 		return i18n.T("tui.addModel")
+	case ModalEditModel:
+		return i18n.T("tui.editModel")
 	case ModalAddSecret:
 		return i18n.T("tui.addSecret")
 	case ModalSkills:
@@ -98,7 +100,7 @@ func (m *Model) renderActiveModal() string {
 	title := m.modalTitleFor(m.modalMode)
 
 	switch m.modalMode {
-	case ModalAddProvider, ModalAddModel, ModalAddSecret:
+	case ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret:
 		return m.renderFormModal(title, m.formStepNames())
 	case ModalSecrets:
 		return m.renderSecretsList(title)
@@ -243,6 +245,15 @@ func (m *Model) renderModal(modalTitle string) string {
 			modalSb.WriteString("\n" + SuccessStyle.Render("  "+m.commandsFeedback) + "\n")
 		}
 		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.commands.listHints")) + "\n")
+	}
+
+	// Provider detail: feedback line (double-press delete confirm / result)
+	// + row-action hints.
+	if m.modalMode == ModalProviderDetail {
+		if m.providerFeedback != "" {
+			modalSb.WriteString("\n" + SuccessStyle.Render("  "+m.providerFeedback) + "\n")
+		}
+		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.providerDetailHints")) + "\n")
 	}
 
 	modalView := ModalContainer.Render(modalSb.String())

@@ -177,6 +177,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.modalScrollOffset = m.modalSelectedIdx
 			}
 			m.clearCommandDeleteConfirm()
+			m.clearProviderDeleteConfirm()
 		}
 		// Theme picker live preview: after navigation, preview the
 		// highlighted theme without persisting. Esc reverts.
@@ -192,6 +193,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if isListModal(m.modalMode) && m.modalSelectedIdx < len(m.modalItems)-1 {
 			m.modalSelectedIdx++
 			m.clearCommandDeleteConfirm()
+			m.clearProviderDeleteConfirm()
 			maxVisible := m.height - 8 // title + borders + padding
 			if maxVisible < 3 {
 				maxVisible = 3
@@ -509,7 +511,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.providerSavedInFlow = false
 			m.formStepIndex = 10
 			return m, nil
-		} else if m.modalMode == ModalAddModel {
+		} else if m.modalMode == ModalAddModel || m.modalMode == ModalEditModel {
 			// Form-based modal: validate and advance steps
 			val := strings.TrimSpace(m.textInput.Value())
 			// Accept a pre-filled form value when the input is empty (catalog
@@ -557,6 +559,20 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					maxTok = n
 				}
 				vision := m.formValues[4] == "yes"
+				if m.modalMode == ModalEditModel {
+					// Edit flow: update in place (Temperature/Reasoning and any
+					// other field not covered by the form survive), then land
+					// back on the provider detail with the row highlighted.
+					if err := m.updateModelInProvider(m.providerSelectedName, m.modelEditAlias, m.formValues[0], m.formValues[1], ctxWin, maxTok, vision); err != nil {
+						m.formError = err.Error()
+						return m, nil // stay in the form; typed values are kept
+					}
+					saved := strings.ToLower(strings.TrimSpace(m.formValues[0]))
+					m.enterProviderDetail(m.providerSelectedName, saved)
+					m.closeCatalogPicker()
+					m.syncTextInputEcho()
+					return m, nil
+				}
 				if err := m.addModelToProvider(m.providerSelectedName, m.formValues[0], m.formValues[1], ctxWin, maxTok, vision); err != nil {
 					m.formError = err.Error()
 					return m, nil
@@ -736,45 +752,19 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						return m, m.executeCommand("/connect")
 					}
 					if m.modalSelectedIdx < len(m.providerModalKeys) {
-						providerName := m.providerModalKeys[m.modalSelectedIdx]
-						m.providerSelectedName = providerName
-						m.modalMode = ModalProviderDetail
-						// Build detail view items
-						m.modalItems = nil
-						m.modalSelectedIdx = 0
-						m.modalScrollOffset = 0
-						// Show provider info
-						snapshot := m.agentLoop.GetProvidable().GetConfigSnapshot()
-						if snapshot != nil && snapshot.Providers != nil {
-							if p, ok := snapshot.Providers.GetNamed(providerName); ok {
-								m.modalItems = append(m.modalItems, fmt.Sprintf("Type: %s", p.Type))
-								m.modalItems = append(m.modalItems, fmt.Sprintf("API Base: %s", p.APIBase))
-								// Never print raw key material — even short keys.
-								keyDisplay := maskAPIKey(p.APIKey)
-								if keyDisplay == "" {
-									keyDisplay = "(not set)"
-								}
-								m.modalItems = append(m.modalItems, fmt.Sprintf("API Key: %s", keyDisplay))
-							}
-						}
-						m.modalItems = append(m.modalItems, "---")
-						// List models
-						models := m.listProviderModels(providerName)
-						for _, alias := range models {
-							m.modalItems = append(m.modalItems, fmt.Sprintf("  %s", alias))
-						}
-						if len(models) == 0 {
-							m.modalItems = append(m.modalItems, "  (no models)")
-						}
-						m.modalItems = append(m.modalItems, "---")
-						m.modalItems = append(m.modalItems, "+ Add model")
-						m.modalItems = append(m.modalItems, "- Delete provider")
+						m.enterProviderDetail(m.providerModalKeys[m.modalSelectedIdx], "")
 					}
 					return m, nil
 				} else if m.modalMode == ModalProviderDetail {
 					if m.modalSelectedIdx < len(m.modalItems) {
-						selectedItem := m.modalItems[m.modalSelectedIdx]
-						if selectedItem == "+ Add model" {
+						// Action rows are matched by the indexes reported by
+						// providerDetailList (labels are localized), so info rows
+						// (Type:/API Base:/API Key:) and "---" separators match
+						// neither index and stay inert.
+						if m.modalSelectedIdx == m.providerDetailAddIdx {
+							// Keep providerSelectedName intact: ModalAddModel's save
+							// path calls addModelToProvider(m.providerSelectedName, ...).
+							m.clearProviderDeleteConfirm()
 							m.modalMode = ModalAddModel
 							m.formStepIndex = 0
 							m.formValues = make([]string, 5)
@@ -783,48 +773,20 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 							m.textInput.SetValue("")
 							m.textInput.Placeholder = "Model alias (e.g. gpt-4o)"
 							return m, nil
-						} else if selectedItem == "- Delete provider" {
+						} else if m.modalSelectedIdx == m.providerDetailDelIdx {
+							m.clearProviderDeleteConfirm()
 							if err := m.deleteProvider(m.providerSelectedName); err != nil {
 								m.formError = err.Error()
 								return m, nil
 							}
 							m.modalMode = ModalNone
 							return m, nil
-						} else if strings.HasPrefix(selectedItem, "  ") && !strings.HasPrefix(selectedItem, "  (") {
-							// Model entry — delete it
-							modelAlias := strings.TrimSpace(selectedItem)
-							if err := m.deleteModelFromProvider(m.providerSelectedName, modelAlias); err != nil {
-								m.formError = err.Error()
-								return m, nil
-							}
-							// Refresh detail view
-							providerName := m.providerSelectedName
-							m.modalItems = nil
-							m.modalSelectedIdx = 0
-							m.modalScrollOffset = 0
-							snapshot := m.agentLoop.GetProvidable().GetConfigSnapshot()
-							if snapshot != nil && snapshot.Providers != nil {
-								if p, ok := snapshot.Providers.GetNamed(providerName); ok {
-									m.modalItems = append(m.modalItems, fmt.Sprintf("Type: %s", p.Type))
-									m.modalItems = append(m.modalItems, fmt.Sprintf("API Base: %s", p.APIBase))
-									keyDisplay := maskAPIKey(p.APIKey)
-									if keyDisplay == "" {
-										keyDisplay = "(not set)"
-									}
-									m.modalItems = append(m.modalItems, fmt.Sprintf("API Key: %s", keyDisplay))
-								}
-							}
-							m.modalItems = append(m.modalItems, "---")
-							models := m.listProviderModels(providerName)
-							for _, alias := range models {
-								m.modalItems = append(m.modalItems, fmt.Sprintf("  %s", alias))
-							}
-							if len(models) == 0 {
-								m.modalItems = append(m.modalItems, "  (no models)")
-							}
-							m.modalItems = append(m.modalItems, "---")
-							m.modalItems = append(m.modalItems, "+ Add model")
-							m.modalItems = append(m.modalItems, "- Delete provider")
+						} else if alias, ok := m.providerDetailRows[m.modalSelectedIdx]; ok {
+							// Model row: ENTER edits the model. Deleting is the separate,
+							// double-confirmed "d" action — a stray Enter on a data row
+							// must never destroy config.
+							m.clearProviderDeleteConfirm()
+							m.openModelEditFlow(alias)
 							return m, nil
 						}
 					}
@@ -1028,6 +990,10 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.String() == "q" && isFormModal(m.modalMode, m.settingsEditField != "") {
 			break
 		}
+		// Any ESC/q leaving a provider view (detail, add/edit form, list)
+		// disarms a pending model delete so it can never carry over to
+		// another row or view.
+		m.clearProviderDeleteConfirm()
 		// Theme picker: ESC cancels and returns to the settings list.
 		if m.modalMode == ModalSettingsTUI && m.themePickerActive {
 			// Revert to the original theme if a preview was active
@@ -1163,6 +1129,16 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.formError = ""
 			return m, m.tickCmd()
 		}
+		if m.modalMode == ModalEditModel {
+			// Edit-model form: ESC discards the draft and returns to the
+			// provider detail with the edited row reselected.
+			provider, alias := m.providerSelectedName, m.modelEditAlias
+			m.closeCatalogPicker()
+			m.formError = ""
+			m.enterProviderDetail(provider, alias)
+			m.syncTextInputEcho()
+			return m, nil
+		}
 		// Reset provider-in-flow state when leaving AddProvider modal
 		if m.modalMode == ModalAddProvider {
 			m.providerSavedInFlow = false
@@ -1261,6 +1237,15 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "d":
+		// Delete a model from the provider detail. Double-confirm: the
+		// first press arms, the second one within the window deletes.
+		if m.modalMode == ModalProviderDetail {
+			if alias, ok := m.providerDetailRows[m.modalSelectedIdx]; ok {
+				return m, m.requestProviderModelDelete(m.providerSelectedName, alias)
+			}
+			m.providerFeedback = i18n.T("tui.modelDeleteNoRow") // cursor not on a model row
+			return m, nil
+		}
 		// Delete a cron job
 		if m.modalMode == ModalCron && m.cronService != nil {
 			jobID := m.selectedCronJobID()

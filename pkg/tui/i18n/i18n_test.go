@@ -227,6 +227,10 @@ func TestAllKeysExist(t *testing.T) {
 		"tui.queue.dropped",
 		"tui.queue.empty",
 		"tui.queue.flushConfirm",
+		"tui.editModel",
+		"tui.providerDetailHints",
+		"tui.modelDeleteConfirm",
+		"tui.modelDeleteNoRow",
 	}
 
 	Init()
