@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rivo/uniseg"
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/providers"
 )
@@ -34,6 +35,20 @@ func getGitBranch(dir string) string {
 	}
 	// Not a git repo (or git unavailable) — empty hides the branch line.
 	return ""
+}
+
+// forEachGraphemeCluster calls fn once per grapheme cluster in s, passing the
+// cluster and its terminal display width. Clusters are never split, so the
+// cluster widths of plain text sum to ansi.StringWidth(s): multi-codepoint
+// emoji (VS16 like "❤️", ZWJ sequences like "👨‍💻", flags like "🇪🇸") are
+// measured as one unit instead of per code point, where per-rune widths
+// disagree with the terminal's rendering.
+func forEachGraphemeCluster(s string, fn func(cluster string, width int)) {
+	g := uniseg.NewGraphemes(s)
+	for g.Next() {
+		cluster := g.Str()
+		fn(cluster, ansi.StringWidth(cluster))
+	}
 }
 
 func wrapText(text string, limit int) string {
@@ -70,22 +85,22 @@ func wrapText(text string, limit int) string {
 			}
 			if wordWidth > limit {
 				// Hard-break words wider than the limit (long URLs, tokens
-				// without spaces). Accumulate visual width rune by rune so
-				// wide runes (e.g. CJK, width 2) are never split mid-rune.
+				// without spaces). Accumulate display width per grapheme
+				// cluster so wide runes (e.g. CJK, width 2) and multi-codepoint
+				// emoji (VS16/ZWJ/flags) are never split mid-cluster.
 				// The trailing remainder stays as the current line so short
 				// words that follow can still join it if they fit.
 				var chunk strings.Builder
 				chunkWidth := 0
-				for _, r := range word {
-					rw := ansi.StringWidth(string(r))
-					if chunk.Len() > 0 && chunkWidth+rw > limit {
+				forEachGraphemeCluster(word, func(cluster string, clusterWidth int) {
+					if chunk.Len() > 0 && chunkWidth+clusterWidth > limit {
 						wrappedLines = append(wrappedLines, chunk.String())
 						chunk.Reset()
 						chunkWidth = 0
 					}
-					chunk.WriteRune(r)
-					chunkWidth += rw
-				}
+					chunk.WriteString(cluster)
+					chunkWidth += clusterWidth
+				})
 				currentLine = chunk.String()
 				currentWidth = chunkWidth
 			} else {
@@ -237,6 +252,65 @@ func truncateToolResult(content string, maxLen int) string {
 		summary = truncateRunes(summary, maxLen) + "…"
 	}
 	return summary
+}
+
+// renderToolCallRow renders one compact tool-call line ("  " + name) wrapped
+// to fit within width display cells. Continuation rows are indented to the
+// name column so the block stays aligned. Wrapping happens BEFORE styling:
+// lineViewport renders its lines through a lipgloss Width() pass that
+// word-wraps any over-wide styled row mid-content (reflow breaks at hyphens),
+// which would drop the label indent and shift every row below.
+func renderToolCallRow(name string, width int) string {
+	const indent = 2 // display cells of ToolCallLabel "  "
+	budget := width - indent
+	if budget < 1 {
+		budget = 1
+	}
+	rows := strings.Split(wrapText(name, budget), "\n")
+	var sb strings.Builder
+	for i, row := range rows {
+		if i == 0 {
+			sb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(row))
+		} else {
+			sb.WriteString(strings.Repeat(" ", indent) + ToolCallName.Render(row))
+		}
+		if i < len(rows)-1 {
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String()
+}
+
+// renderToolResultBlock renders the tool-result summary as a left-bordered box
+// preceded by the "  → " label, wrapped so every row fits within width display
+// cells and the box border sits on the same column on every row: row 0 carries
+// the label, continuation rows are padded with spaces of the same label width.
+// Content wraps at spaces BEFORE styling for the same reason as
+// renderToolCallRow: an over-wide composed row would be re-wrapped inside
+// lineViewport's lipgloss Width() pass, mid-word at hyphen breakpoints,
+// dropping both the "  → " prefix and the box border on the continuation.
+func renderToolResultBlock(summary string, width int) string {
+	const label = "  → "
+	labelWidth := ansi.StringWidth(label) // 4
+	boxOverhead := ToolResultBox.GetHorizontalFrameSize() + ToolResultBox.GetHorizontalPadding()
+	budget := width - labelWidth - boxOverhead
+	if budget < 1 {
+		budget = 1
+	}
+	rows := strings.Split(ToolResultBox.Render(wrapText(summary, budget)), "\n")
+	var sb strings.Builder
+	for i, row := range rows {
+		if i == 0 {
+			sb.WriteString(ToolResultLabel.Render(label))
+		} else {
+			sb.WriteString(strings.Repeat(" ", labelWidth))
+		}
+		sb.WriteString(row)
+		if i < len(rows)-1 {
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String()
 }
 
 func formatNumber(n int) string {

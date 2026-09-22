@@ -254,7 +254,7 @@ func (m *Model) updateViewport() {
 		}
 		// Show the currently executing tool call (cleared when stream resumes or completes)
 		if m.currentToolAction != "" {
-			overlaySb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(m.currentToolAction) + "\n")
+			overlaySb.WriteString(renderToolCallRow(m.currentToolAction, m.viewport.Width) + "\n")
 		}
 		overlaySb.WriteString("\n")
 	}
@@ -541,13 +541,13 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 					if args != "" {
 						line += ": " + args
 					}
-					msgSb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(line) + "\n")
+					msgSb.WriteString(renderToolCallRow(line, m.viewport.Width) + "\n")
 				}
 			}
 			msgSb.WriteString("\n")
 		} else if msg.Role == "tool" {
 			summary := truncateToolResult(msg.Content, 150)
-			msgSb.WriteString(ToolResultLabel.Render("  → ") + ToolResultBox.Render(summary) + "\n")
+			msgSb.WriteString(renderToolResultBlock(summary, m.viewport.Width) + "\n")
 		}
 		// Skip system messages — they are internal prompts, not user-facing
 
