@@ -93,7 +93,7 @@ func TestGraphemeClusterWidthsSumToAnsiStringWidth(t *testing.T) {
 	cases = append(cases,
 		"a❤️b👨‍💻c🇪🇸d😀e", // mixed ASCII + clusters
 		"plain ascii",
-		"你好世界", // CJK
+		"\u4f60\u597d\u4e16\u754c", // CJK
 		"",
 	)
 
