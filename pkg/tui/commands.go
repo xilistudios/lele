@@ -115,6 +115,12 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		if m.pendingModel != "" && m.currentKey != "" {
 			m.agentLoop.GetProvidable().SetSessionModel(m.currentKey, m.pendingModel)
 		}
+		// ClearSession erases the session history; the archived prefix in
+		// memory now references messages that no longer exist. Reset it
+		// explicitly rather than relying on refreshArchivedHistory's
+		// staleness detection (evictedTotal may or may not change depending
+		// on whether the evicted table was also cleared).
+		m.resetArchivedHistory()
 		m.reloadSessions()
 		return nil
 

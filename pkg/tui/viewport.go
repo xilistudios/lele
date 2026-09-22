@@ -19,6 +19,13 @@ const tokenCacheTTL = 2 * time.Second
 // batch when the render window expands toward the start of the history.
 const lazyLoadBatchSize = 50
 
+// maxHomeExpandIterations caps the number of maybeExpandRenderWindow calls
+// the Home key triggers. Without this bound, a session with thousands of
+// compacted messages would fire one SQLite page-load + viewport rebuild per
+// iteration — the "↑ N earlier messages" banner keeps telling the user there
+// is more history above.
+const maxHomeExpandIterations = 20
+
 // getTokenUsage returns cached token/context usage for the sidebar, refreshing
 // the underlying (expensive) backend calls at most once per tokenCacheTTL or
 // when the history message count changes. This keeps View() cheap: previously
@@ -90,8 +97,9 @@ func (m *Model) updateViewport() {
 	m.cleanupStreamingIfCompleteWithHistory(history)
 
 	// Compute message count from the already-fetched history (avoids another
-	// GetHistoryView call inside getHistoryMessageCount).
-	historyMsgCount := countHistoryMessages(history)
+	// GetHistoryView call inside getHistoryMessageCount). Uses the combined
+	// count (archived prefix + resident) so a prefix change triggers rebuild.
+	historyMsgCount := m.displayHistoryMessageCount(history)
 
 	// Determine if the rendered base cache is still valid.
 	// Invalidated when session key or viewport width changes.
@@ -111,11 +119,26 @@ func (m *Model) updateViewport() {
 	// Rebuild base if cache is invalid OR message count changed OR the last
 	// message transitioned from Streaming=true to Streaming=false (the count
 	// doesn't change but the rendered content does — the streaming message
-	// was skipped during processing and must now be included).
+	// was skipped during processing and must now be included) OR the archived
+	// prefix moved.
+	//
+	// The archive needs its own term: widthCacheKey must NOT carry it, because
+	// that key also decides whether msgRenderCacheLines is dropped (wiping it on
+	// every scroll-up page would re-run glamour over the whole window). And the
+	// message-count term alone is not enough: archivedVisibleCount only counts
+	// user/assistant rows, so an eviction that lands on other roles — or one
+	// that is offset by a same-tick append — can leave the combined count
+	// identical while the rendered archived rows and the "↑ N earlier messages"
+	// banner both change. Keyed on the prefix identity, not just its size, so a
+	// reset + reload of the same length still invalidates.
 	lastMsgStreaming := len(history) > 0 && history[len(history)-1].Streaming
-	if !cacheValid || m.renderedBaseMsgCount != historyMsgCount || (m.renderedBaseLastStreaming && !lastMsgStreaming) {
+	archiveKey := m.archivedCacheKey()
+	if !cacheValid || m.renderedBaseMsgCount != historyMsgCount ||
+		m.renderedBaseArchiveKey != archiveKey ||
+		(m.renderedBaseLastStreaming && !lastMsgStreaming) {
 		baseLines := m.buildRenderedHistoryLines(history)
 		m.renderedBaseKey = widthCacheKey
+		m.renderedBaseArchiveKey = archiveKey
 		m.renderedBaseMsgCount = historyMsgCount
 		m.renderedBaseValid = len(baseLines) > 0
 		m.renderedBaseLastStreaming = lastMsgStreaming
@@ -302,23 +325,41 @@ func (m *Model) updateViewport() {
 	}
 }
 
-// maybeExpandRenderWindow expands the lazy-load render window backwards by
-// lazyLoadBatchSize messages when the user has scrolled to the very top and
-// older unrendered messages exist in memory. It rebuilds the viewport and compensates
-// YOffset so the content that was at the top stays visible. Returns true if
-// the window was expanded.
+// maybeExpandRenderWindow expands the lazy-load render window backwards.
+// When renderStartIdx > 0, it shifts the in-memory window back by
+// lazyLoadBatchSize. When the in-memory window is fully expanded
+// (renderStartIdx == 0) but archived messages are not yet fully loaded, it
+// loads one older archived page from SQLite. Returns true if the window was
+// expanded. This method MUST only be called from Update() routes (not View())
+// since it may perform SQLite I/O.
 func (m *Model) maybeExpandRenderWindow() bool {
-	if m.currentKey == "" || !m.viewport.AtTop() || m.renderStartIdx <= 0 {
+	if m.currentKey == "" || !m.viewport.AtTop() {
 		return false
+	}
+	if m.renderStartIdx < 0 {
+		return false // uninitialized
 	}
 
 	oldTotal := m.viewport.totalLines()
+	expanded := false
 
-	newStart := m.renderStartIdx - lazyLoadBatchSize
-	if newStart < 0 {
-		newStart = 0
+	if m.renderStartIdx > 0 {
+		// In-memory window: shift backwards by lazyLoadBatchSize.
+		newStart := m.renderStartIdx - lazyLoadBatchSize
+		if newStart < 0 {
+			newStart = 0
+		}
+		m.renderStartIdx = newStart
+		expanded = true
+	} else if m.archivedHasOlder || m.archivedHiddenCount() > 0 {
+		// In-memory window is fully expanded: try loading one more archived
+		// page from SQLite (Update path — this is never called from View()).
+		expanded = m.loadOlderArchivedPage() > 0
 	}
-	m.renderStartIdx = newStart
+
+	if !expanded {
+		return false
+	}
 
 	// Force a base rebuild on the next updateViewport pass.
 	m.renderedBaseValid = false
@@ -377,12 +418,14 @@ func (m *Model) defaultRenderStartIdx(msgCount int) int {
 }
 
 // buildRenderedHistoryLines renders completed messages from the given
-// history slice using a per-message render cache. Returns []string lines
-// directly instead of a concatenated string — this avoids the O(n) string
-// concatenation + strings.Split roundtrip that the old string-based approach
-// required. Only new/changed messages go through glamour (O(k) where k = new).
+// history slice combined with the display-only archived prefix. Archived
+// messages are prepended before the resident history so the user sees a
+// continuous transcript after /compact. The archived prefix NEVER enters
+// the LLM context — it is purely for display.
 func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string {
-	totalMsgs := len(history)
+	archived := m.archivedForCurrentSession() // read-only, no I/O
+	nArchived := len(archived)
+	totalMsgs := nArchived + len(history)
 
 	// Virtualized rendering: only render the most recent N messages
 	// when the conversation is very long. The render window start index is
@@ -418,14 +461,20 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 	// Pre-allocate result with a reasonable capacity estimate.
 	result := make([]string, 0, min(totalMsgs-startIdx, m.maxRenderedMessages)*8)
 
-	if startIdx > 0 {
-		header := CommentColorStyle.Render("  " + fmt.Sprintf(i18n.T("tui.earlierMessages"), startIdx))
+	if startIdx > 0 || m.archivedHiddenCount() > 0 {
+		hiddenEarlier := startIdx + m.archivedHiddenCount()
+		header := CommentColorStyle.Render("  " + fmt.Sprintf(i18n.T("tui.earlierMessages"), hiddenEarlier))
 		result = append(result, header, "")
 	}
 
 	lastRole := ""
 	for i := startIdx; i < totalMsgs; i++ {
-		msg := history[i]
+		var msg providers.Message
+		if i < nArchived {
+			msg = archived[i]
+		} else {
+			msg = history[i-nArchived]
+		}
 
 		// Skip internal context-compaction summaries
 		if isCompactionSummary(msg) {

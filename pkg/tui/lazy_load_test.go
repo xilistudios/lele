@@ -241,12 +241,14 @@ func seedEvictionSession(t *testing.T, m *Model, key string, pairs, keep int) in
 	return evicted
 }
 
-// TestLazyLoad_EvictedMessagesNotLoadedInMemory verifies that when a session
+// TestLazyLoad_EvictedMessagesStayOutOfMemory verifies that when a session
 // has evicted messages (e.g. 19 evicted, 5 kept in context in memory), the TUI
-// only loads and renders the in-context messages. Scrolling to top does NOT
-// cross the eviction boundary, does NOT load evicted messages into RAM, and
-// does NOT show an 'earlier messages' header when all in-context messages are visible.
-func TestLazyLoad_EvictedMessagesNotLoadedInMemory(t *testing.T) {
+// only loads in-context messages into RAM. Scrolling to top does NOT inflate
+// evicted messages into the session history, and does NOT show an 'earlier
+// messages' header when all in-context messages are visible AND no archived
+// prefix is loaded. After an explicit refreshArchivedHistory call, the evicted
+// messages DO appear in View() via the display-only archived prefix.
+func TestLazyLoad_EvictedMessagesStayOutOfMemory(t *testing.T) {
 	m := newEvictionTestModel(t)
 	const key = "tui:chat:evict-a"
 
@@ -275,8 +277,11 @@ func TestLazyLoad_EvictedMessagesNotLoadedInMemory(t *testing.T) {
 
 	// Scrolling to the top does not trigger lazy-loading of evicted messages into memory.
 	m.viewport.GotoTop()
+	// Without archived prefix loaded, renderStartIdx=0 and no archive → should return false.
+	// (archivedHasOlder is false because refreshArchivedHistory was never called,
+	// and archivedHiddenCount is 0 because archivedKey != currentKey.)
 	if m.maybeExpandRenderWindow() {
-		t.Fatal("expected maybeExpandRenderWindow to return false (no in-memory expansion needed)")
+		t.Fatal("expected maybeExpandRenderWindow to return false (no archived prefix loaded)")
 	}
 
 	// Evicted messages remain evicted in SQLite and are not inflated into memory.
@@ -287,9 +292,23 @@ func TestLazyLoad_EvictedMessagesNotLoadedInMemory(t *testing.T) {
 		t.Fatalf("in-memory message count after scroll = %d, want 5", inMemCount)
 	}
 
-	// Render view should NOT show an earlier messages header because all in-context messages are rendered.
-	out := m.View()
-	if strings.Contains(out, "earlier messages") {
-		t.Fatalf("expected view not to contain earlier messages header for evicted messages, got:\n%s", out)
+	// Without archived prefix, View should NOT show earlier messages header
+	// (all in-context messages are rendered, no archive loaded).
+	outBefore := m.View()
+	if strings.Contains(outBefore, "earlier messages") {
+		t.Fatalf("expected view not to contain earlier messages header without archive, got:\n%s", outBefore)
+	}
+
+	// After explicit refresh, evicted messages appear in View via display-only prefix.
+	m.refreshArchivedHistory()
+	renderLazyModel(t, m)
+	m.viewport.GotoTop()
+	outAfter := m.View()
+	if !strings.Contains(outAfter, "Evict question 0?") {
+		t.Fatalf("expected view to contain evicted message 'Evict question 0?' after refresh, got:\n%s", outAfter)
+	}
+	// No earlier-messages header when everything (resident + archived) is visible.
+	if strings.Contains(outAfter, "earlier messages") {
+		t.Fatalf("expected no earlier messages header when all loaded, got:\n%s", outAfter)
 	}
 }
