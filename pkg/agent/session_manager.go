@@ -120,6 +120,12 @@ func (sm *sessionManagerImpl) RegisterSessionCancel(sessionKey string, cancel co
 		if current, ok := sm.sessionCancels.Load(sessionKey); ok && current == group {
 			sm.sessionCancels.Delete(sessionKey)
 		}
+		// The session's last registered operation just ended: the turn is
+		// over, so the in-flight tool record is stale by definition (its
+		// tool.result may even have been published after cancellation).
+		// Dropping it here keeps the record's lifetime tied to the turn
+		// instead of relying on a matching tool.result event arriving.
+		sm.al.clearInProgressTool(sessionKey)
 	}
 }
 
@@ -146,6 +152,7 @@ func (sm *sessionManagerImpl) CancelSession(sessionKey string) int {
 	case *sessionCancelGroup:
 		stopped := entry.cancelAll()
 		sm.sessionCancels.Delete(sessionKey)
+		sm.al.clearInProgressTool(sessionKey)
 		logger.InfoCF("agent", "CancelSession: cancelled session group", map[string]interface{}{
 			"session_key": sessionKey,
 			"stopped":     stopped,
@@ -156,12 +163,14 @@ func (sm *sessionManagerImpl) CancelSession(sessionKey string) int {
 			entry()
 		}
 		sm.sessionCancels.Delete(sessionKey)
+		sm.al.clearInProgressTool(sessionKey)
 		logger.InfoCF("agent", "CancelSession: cancelled single session func", map[string]interface{}{
 			"session_key": sessionKey,
 		})
 		return 1
 	default:
 		sm.sessionCancels.Delete(sessionKey)
+		sm.al.clearInProgressTool(sessionKey)
 		logger.WarnCF("agent", "CancelSession: unknown cancel entry type", map[string]interface{}{
 			"session_key": sessionKey,
 		})
@@ -243,7 +252,7 @@ func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, c
 			"resolved_context_window": contextWindow,
 		})
 		if channel == "native" {
-			sm.bus.PublishOutbound(bus.OutboundMessage{
+			sm.al.publishToolLifecycle(bus.OutboundMessage{
 				Channel: channel,
 				ChatID:  chatID,
 				Event:   "tool.executing",
@@ -273,7 +282,7 @@ func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, c
 			resultText := fmt.Sprintf("Messages: %d → %d (dropped %d), Tokens: ~%d → ~%d (saved ~%d)",
 				stats.BeforeMessages, stats.AfterMessages, stats.DroppedMessages,
 				stats.BeforeTokens, stats.AfterTokens, stats.SavedTokens)
-			sm.bus.PublishOutbound(bus.OutboundMessage{
+			sm.al.publishToolLifecycle(bus.OutboundMessage{
 				Channel: channel,
 				ChatID:  chatID,
 				Event:   "tool.result",

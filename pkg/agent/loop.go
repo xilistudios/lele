@@ -91,6 +91,14 @@ type AgentLoop struct {
 	subagentSessionAgent sync.Map                  // subagent session key -> agent ID (O(1) lookup, not O(N))
 	wg                   sync.WaitGroup            // tracks in-flight message goroutines
 
+	// inProgressTools mirrors the tool each session is currently executing
+	// (sessionKey -> *session.InProgressTool), fed by publishToolLifecycle and
+	// dropped when the turn ends. It exists so a chat reload (TUI session
+	// switch, WebUI page reload/re-subscribe) can restore the "running tool"
+	// row, which otherwise only travels in the live event stream. See
+	// in_progress_tool.go.
+	inProgressTools sync.Map
+
 	// Internal components (delegated operations)
 	messageProcessor   messageProcessor
 	llmRunner          llmRunner

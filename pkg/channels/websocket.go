@@ -541,6 +541,10 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 		if len(catchup) > 0 {
 			ackData["in_progress_messages"] = catchup
 		}
+		// Same for the running tool row: the tool call only lives in the event
+		// stream, so without it the row disappeared on every re-subscribe
+		// (chat switch, page reload) even though the tool kept running.
+		n.addInProgressTool(ackData, sessionKey, processing)
 	}
 
 	if err := client.Send(marshalWithID("subscribe.ack", ackData, eventID)); err != nil {
@@ -667,6 +671,49 @@ func (n *NativeChannel) sessionGroupSnapshots(sessionKey string) []group.GroupSn
 	return n.agentLoop.GroupSnapshotsForSession(sessionKey)
 }
 
+// inProgressToolPayload returns the tool.executing payload of the tool the
+// session is running right now, or nil when there is none to report.
+//
+// It is only produced while the session is processing: the record behind it is
+// in-memory turn state, so a stale one (turn cancelled, process restarted) must
+// never be replayed as "running". Clients restore the live "running tool" row
+// from this after a page reload or a re-subscribe — without it the row
+// vanished while the tool kept running, because the in-flight call only ever
+// travels in the event stream and never reaches the message history.
+func (n *NativeChannel) inProgressToolPayload(sessionKey string, processing bool) *WSToolExecutingPayload {
+	if !processing || n.agentLoop == nil {
+		return nil
+	}
+	inFlight := n.agentLoop.GetInProgressTool(sessionKey)
+	if inFlight == nil || inFlight.Tool == "" {
+		return nil
+	}
+	payload := &WSToolExecutingPayload{
+		SessionKey:         sessionKey,
+		Tool:               inFlight.Tool,
+		Action:             inFlight.Action,
+		ToolCallID:         inFlight.ToolCallID,
+		SubagentSessionKey: inFlight.SubagentSessionKey,
+	}
+	if inFlight.Arguments != "" {
+		var toolArgs map[string]interface{}
+		if err := json.Unmarshal([]byte(inFlight.Arguments), &toolArgs); err == nil {
+			payload.Arguments = toolArgs
+		}
+	}
+	return payload
+}
+
+// addInProgressTool copies the session's in-flight tool payload into a
+// welcome/reconnected/subscribe.ack data map, when there is one. The key is
+// added only when a tool is actually running so clients can treat its absence
+// as "nothing to restore" without distinguishing null from missing.
+func (n *NativeChannel) addInProgressTool(data map[string]interface{}, sessionKey string, processing bool) {
+	if payload := n.inProgressToolPayload(sessionKey, processing); payload != nil {
+		data["in_progress_tool"] = payload
+	}
+}
+
 func (n *NativeChannel) sendWelcome(client *WSClient) {
 	status := n.agentLoop.GetStatus(client.SessionKey)
 	agents := make([]map[string]interface{}, 0)
@@ -695,21 +742,24 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 
 	groupsEnabled := n.cfgSnapshot().GroupsFeatureEnabled()
 
+	welcomeData := map[string]interface{}{
+		"client_id":            client.ClientInfo.ClientID,
+		"device_name":          client.ClientInfo.DeviceName,
+		"session_key":          client.SessionKey,
+		"status":               status,
+		"agents":               agents,
+		"server_time":          time.Now().Format(time.RFC3339),
+		"processing":           processing,
+		"in_progress_messages": catchupMessages,
+		"groups":               groups,
+		"groups_enabled":       groupsEnabled,
+	}
+	n.addInProgressTool(welcomeData, client.SessionKey, processing)
+
 	if err := client.Send(mustMarshal(WSMessage{
 		Version: WSProtocolVersion,
 		Event:   "welcome",
-		Data: mustMarshal(map[string]interface{}{
-			"client_id":            client.ClientInfo.ClientID,
-			"device_name":          client.ClientInfo.DeviceName,
-			"session_key":          client.SessionKey,
-			"status":               status,
-			"agents":               agents,
-			"server_time":          time.Now().Format(time.RFC3339),
-			"processing":           processing,
-			"in_progress_messages": catchupMessages,
-			"groups":               groups,
-			"groups_enabled":       groupsEnabled,
-		}),
+		Data:    mustMarshal(welcomeData),
 	})); err != nil {
 		logger.WarnCF("native", "Failed to send welcome", map[string]interface{}{
 			"client_id": client.ID,
@@ -756,24 +806,27 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 	subsSnapshot := client.Subscriptions
 	client.mu.Unlock()
 
+	reconnectedData := map[string]interface{}{
+		"client_id":            client.ClientInfo.ClientID,
+		"device_name":          client.ClientInfo.DeviceName,
+		"session_key":          client.SessionKey,
+		"status":               status,
+		"agents":               agents,
+		"server_time":          time.Now().Format(time.RFC3339),
+		"processing":           processing,
+		"buffered_events":      len(buffered),
+		"disconnected_secs":    disconnectedSecs,
+		"subscriptions":        subsSnapshot,
+		"in_progress_messages": catchupMessages,
+		"groups":               groups,
+		"groups_enabled":       groupsEnabled,
+	}
+	n.addInProgressTool(reconnectedData, client.SessionKey, processing)
+
 	if err := client.Send(mustMarshal(WSMessage{
 		Version: WSProtocolVersion,
 		Event:   "reconnected",
-		Data: mustMarshal(map[string]interface{}{
-			"client_id":            client.ClientInfo.ClientID,
-			"device_name":          client.ClientInfo.DeviceName,
-			"session_key":          client.SessionKey,
-			"status":               status,
-			"agents":               agents,
-			"server_time":          time.Now().Format(time.RFC3339),
-			"processing":           processing,
-			"buffered_events":      len(buffered),
-			"disconnected_secs":    disconnectedSecs,
-			"subscriptions":        subsSnapshot,
-			"in_progress_messages": catchupMessages,
-			"groups":               groups,
-			"groups_enabled":       groupsEnabled,
-		}),
+		Data:    mustMarshal(reconnectedData),
 	})); err != nil {
 		logger.WarnCF("native", "Failed to send reconnected event", map[string]interface{}{
 			"client_id": client.ID,

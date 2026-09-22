@@ -34,21 +34,83 @@ export function handleToolExecuting(ctx: MessageEventContext, data: Record<strin
     notifySubagentsChanged()
   }
 
-  const toolCallId = data.tool_call_id as string | undefined
-  const toolArgsStr = data.arguments
-    ? `${data.tool as string} ${JSON.stringify(data.arguments)}`
-    : (data.action as string)
+  upsertToolExecuting(ctx, sessionKey, {
+    tool: data.tool as string,
+    action: data.action as string | undefined,
+    args: data.arguments,
+    toolCallId: data.tool_call_id as string | undefined,
+    subagentSessionKey: data.subagent_session_key as string | undefined,
+  })
+}
+
+/**
+ * Restores the tool card of a session that is still running a tool, from the
+ * `in_progress_tool` payload carried by the welcome / reconnected /
+ * subscribe.ack events.
+ *
+ * The in-flight tool call exists only in the live event stream — it never
+ * reaches the message history — so without this the "running tool" card
+ * disappeared on every chat reload (page refresh, chat switch, re-subscribe)
+ * while the tool kept running (a long sleep, wait_for_subagent, exec...).
+ * Idempotent, same as the live path: re-applying the same call updates the
+ * existing card instead of duplicating it.
+ */
+export function restoreInProgressTool(
+  ctx: MessageEventContext,
+  sessionKey: string,
+  data: Record<string, unknown> | null | undefined,
+) {
+  if (!sessionKey || !data || !(data.tool as string)) return
+
+  ctx.setToolStatus(data as unknown as ToolStatus)
+
+  if ((data.tool as string) === 'spawn') {
+    notifySubagentsChanged()
+  }
+
+  upsertToolExecuting(ctx, sessionKey, {
+    tool: data.tool as string,
+    action: data.action as string | undefined,
+    args: data.arguments,
+    toolCallId: data.tool_call_id as string | undefined,
+    subagentSessionKey: data.subagent_session_key as string | undefined,
+  })
+}
+
+/** Fields shared by the live tool.executing event and the restore payload. */
+type ExecutingToolInput = {
+  tool: string
+  action?: string
+  args?: unknown
+  toolCallId?: string
+  subagentSessionKey?: string
+}
+
+/**
+ * Upserts the card of a currently executing tool for `sessionKey`. Shared by
+ * the live tool.executing handler and the reload restore path so both produce
+ * byte-identical cards (same deterministic ids, same insertion point).
+ */
+function upsertToolExecuting(
+  ctx: MessageEventContext,
+  sessionKey: string,
+  input: ExecutingToolInput,
+) {
+  const toolCallId = input.toolCallId
+  const toolArgsStr = input.args
+    ? `${input.tool} ${JSON.stringify(input.args)}`
+    : (input.action ?? '')
 
   const toolMsg = createToolMessage({
     id: toolCallId
       ? createDeterministicToolMessageId('ws', toolCallId)
-      : createToolMessageId(data.tool as string),
+      : createToolMessageId(input.tool),
     sessionKey,
-    toolName: data.tool as string,
+    toolName: input.tool,
     toolArgs: toolArgsStr,
     toolStatus: 'executing',
     toolCallId,
-    subagentSessionKey: data.subagent_session_key as string | undefined,
+    subagentSessionKey: input.subagentSessionKey,
   })
 
   ctx.setStreamingMessages((current) => {

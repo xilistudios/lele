@@ -249,7 +249,10 @@ func formatCommandApplied(meta map[string]string) string {
 	if model := meta["model"]; model != "" {
 		line += " · model: " + model
 	}
-	return line
+	// Metadata arrives from the bus (command expansion is backend/LLM
+	// controlled): sanitize so control/bidi chars cannot desync paint vs
+	// measured width in the overlay activity row.
+	return sanitizeDisplayText(line)
 }
 
 // isCustomCommand reports whether name (with or without leading slash, any

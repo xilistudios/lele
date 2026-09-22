@@ -35,6 +35,7 @@ import {
   sessionKeysLooselyMatch,
   snapshotToGroupInfo,
 } from './helpers'
+import { restoreInProgressTool } from './tools'
 import type { ClientEvent, MessageEventContext } from './types'
 
 export function handleWelcome(ctx: MessageEventContext, data: Record<string, unknown>) {
@@ -72,6 +73,18 @@ export function handleWelcome(ctx: MessageEventContext, data: Record<string, unk
         [...current],
       ),
     )
+  }
+
+  // Restore the card of a tool that is still running. Like the in-progress
+  // assistant content above, the in-flight tool call is not part of the
+  // message history, so without it a page reload / reconnect showed the
+  // session as idle-but-spinning with the tool row gone.
+  //
+  // Gated on processing (unlike the content above): the backend only attaches
+  // the payload while the session is processing, and restoring it otherwise
+  // would paint a card that can never complete — the stuck-loading bug class.
+  if (processing) {
+    restoreInProgressTool(ctx, sessionKey ?? '', data.in_progress_tool as Record<string, unknown>)
   }
 
   // Rehydrate group snapshots from welcome/reconnected data

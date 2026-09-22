@@ -165,6 +165,19 @@ func (v *lineViewport) View() string {
 		return v.viewStyle.Render("")
 	}
 
+	// Hard clamp: truncate (never word-wrap) any row wider than the render
+	// width. lipgloss Width() re-wraps over-wide rows at render time (cellbuf
+	// treats '-' as a breakpoint), which drops row prefixes (tool-result
+	// "  → ", group-turn "┌ ") and ADDS rows inside the fixed-height window,
+	// shifting every row below — the full-frame corruption cascade. Producers
+	// already wrap to the viewport budget, so this only fires on a width-math
+	// bug or an unsanitized ingress; truncating keeps the frame intact.
+	for i, l := range visible {
+		if ansi.StringWidth(l) > w {
+			visible[i] = closeOpenSGR(ansi.Truncate(l, w, ""))
+		}
+	}
+
 	// Cache the content style (only recreated when dimensions change)
 	if v.viewStyleW != w || v.viewStyleH != h {
 		v.viewStyle = lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).MaxWidth(w)

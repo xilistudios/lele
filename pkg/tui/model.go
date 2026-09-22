@@ -546,6 +546,15 @@ func (m *Model) clearStreamingState() {
 
 	m.resetStreamState()
 	m.currentToolAction = ""
+	// Switching to a chat that is still running a (possibly long) tool used to
+	// lose its "running tool" row: the row was set exclusively by live
+	// tool.executing events, and none is replayed on a switch. Ask the agent
+	// loop — the same source of truth those events feed — for the tool it is
+	// executing right now and restore the row, so the busy session looks
+	// exactly as it did before the switch.
+	if isActive {
+		m.currentToolAction = m.inProgressToolAction(m.currentKey)
+	}
 	m.currentMessageID = ""
 	m.currentAssistantMsgID = ""
 	m.pendingSubagentCompletions = 0
@@ -581,6 +590,42 @@ func (m *Model) clearStreamingState() {
 	m.renderedBaseKey = ""
 	m.msgRenderCacheLines = nil // clear per-message cache on session switch
 	m.forceGotoBottom = true
+}
+
+// inProgressToolAction returns the row the chat's running tool must display,
+// in the same "tool: arguments" form the live tool.executing handler uses (the
+// pre-formatted action, falling back to the bare tool name), or "" when the
+// session is not running a tool.
+//
+// It exists for the session-switch path: the row is otherwise only ever
+// written by live tool.executing events, so a switch to a busy chat left the
+// spinner running with no indication of what it was running.
+func (m *Model) inProgressToolAction(sessionKey string) string {
+	if m.agentLoop == nil || sessionKey == "" {
+		return ""
+	}
+	// The loop is the same source of truth the live tool.executing events are
+	// mirrored into, so the restored row and the live row agree.
+	return formatInProgressToolAction(m.agentLoop.GetProvidable().GetInProgressTool(sessionKey))
+}
+
+// formatInProgressToolAction turns a recorded in-flight tool into the overlay
+// activity row, preferring the backend's pre-formatted action ("tool:
+// arguments") over the bare tool name. It returns "" for a nil record.
+//
+// Pure (no Model, no loop) on purpose: the record lives unexported inside the
+// agent loop and is only ever populated by a real tool execution, so this is
+// the layer of the session-switch restore a TUI test can pin — the fallback
+// rule and the sanitization of a value that is LLM-controlled either way
+// (same ingress sanitization as the live tool.executing handler).
+func formatInProgressToolAction(tool *session.InProgressTool) string {
+	if tool == nil {
+		return ""
+	}
+	if tool.Action != "" {
+		return sanitizeDisplayText(tool.Action)
+	}
+	return sanitizeDisplayText(tool.Tool)
 }
 
 // isSubagentSessionKey returns true if the given session key belongs to a subagent.
@@ -632,7 +677,11 @@ func (m *Model) recordSubagentProgress(taskID, action string) {
 			delete(m.subagentProgress, oldest)
 		}
 	}
-	m.subagentProgress[taskID] = action
+	// Sanitize at record time: the action comes from subagent tool.executing /
+	// message.stream events (agent/LLM-controlled) and may carry control
+	// chars, ANSI escapes or bidi/zero-width Cf that desync painted columns
+	// from measured widths. Eviction above stays untouched.
+	m.subagentProgress[taskID] = sanitizeDisplayText(action)
 }
 
 // oldestSubagentTaskID returns the task ID with the smallest "subagent-<n>"
@@ -705,8 +754,24 @@ func (m *Model) renderSubagentProgress() string {
 	sb.WriteString(ToolCallLabel.Render("  ⏳ subagents") + "\n")
 	shown := min(len(ids), maxSubagentProgressLines)
 	for _, id := range ids[:shown] {
-		short := strings.TrimPrefix(id, "subagent-")
-		sb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(short+" "+m.subagentProgress[id]) + "\n")
+		// id suffix and the stored action both originate from bus event
+		// metadata: sanitize both so no control/bidi char reaches the frame.
+		short := sanitizeDisplayText(strings.TrimPrefix(id, "subagent-"))
+		// Wrap-aware row construction: renderToolCallRow is the same primitive
+		// the streaming tool-action row uses — it wraps BEFORE styling with a
+		// 2-cell continuation indent and keeps the exact current row-0 style
+		// (ToolCallLabel "  " + ToolCallName), so an over-wide action can
+		// never hand lineViewport a row it would re-wrap at paint time (that
+		// re-wrap drops the indent and shifts every row below: frame corruption
+		// cascade). Chosen over a local wrapText+prefix loop because the
+		// wrap-before-style rule already lives in renderToolCallRow (DRY: one
+		// owner instead of a second copy of the indent/continuation logic).
+		// sanitizeDisplayText runs again here as defense in depth:
+		// recordSubagentProgress cleans event ingress, but this map is
+		// presentation state and must not leak controls/bidi into the frame
+		// regardless of writer (pinned by TestSpecialChars_SubagentProgressOverWide).
+		row := short + " " + sanitizeDisplayText(m.subagentProgress[id])
+		sb.WriteString(renderToolCallRow(row, m.viewport.Width) + "\n")
 	}
 	if extra := len(ids) - shown; extra > 0 {
 		sb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(fmt.Sprintf("+%d more", extra)) + "\n")

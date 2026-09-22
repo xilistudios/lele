@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
@@ -224,7 +226,7 @@ func (m *Model) updateViewport() {
 				m.pendingUserMessage = ""
 			} else {
 				overlaySb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
-				overlaySb.WriteString(UserMessageStyle.Render(wrapText(m.pendingUserMessage, m.viewport.Width-4)) + "\n\n")
+				overlaySb.WriteString(UserMessageStyle.Render(wrapText(sanitizeDisplayText(m.pendingUserMessage), m.viewport.Width-4)) + "\n\n")
 				lastRole = "user"
 			}
 		} else {
@@ -254,7 +256,7 @@ func (m *Model) updateViewport() {
 		}
 		// Show the currently executing tool call (cleared when stream resumes or completes)
 		if m.currentToolAction != "" {
-			overlaySb.WriteString(renderToolCallRow(m.currentToolAction, m.viewport.Width) + "\n")
+			overlaySb.WriteString(renderToolCallRow(sanitizeDisplayText(m.currentToolAction), m.viewport.Width) + "\n")
 		}
 		overlaySb.WriteString("\n")
 	}
@@ -288,9 +290,11 @@ func (m *Model) updateViewport() {
 		}
 	}
 
-	// Show compaction result feedback
+	// Show compaction result feedback (sanitized at render as defense in
+	// depth: the assignment site sanitizes too, but presentation state must
+	// never carry controls/bidi into the frame regardless of writer).
 	if m.compactFeedback != "" {
-		overlaySb.WriteString(m.compactFeedback + "\n\n")
+		overlaySb.WriteString(sanitizeDisplayText(m.compactFeedback) + "\n\n")
 	}
 
 	// Show /status report feedback
@@ -500,7 +504,7 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 		var msgSb strings.Builder
 		if msg.Role == "user" {
 			msgSb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
-			msgSb.WriteString(UserMessageStyle.Render(wrapText(msg.Content, m.viewport.Width-4)) + "\n\n")
+			msgSb.WriteString(UserMessageStyle.Render(wrapText(sanitizeDisplayText(msg.Content), m.viewport.Width-4)) + "\n\n")
 		} else if msg.Role == "assistant" {
 			// Only show agent name when coming from user (start of a turn)
 			if lastRole == "" || lastRole == "user" || lastRole == "system" {
@@ -702,18 +706,35 @@ func (m *Model) renderGroupTurns(turns []groupTurn, viewportWidth int) string {
 			prevLayer = turn.layer
 		}
 
-		// Turn header: ┌ [label · Layer N · role]
-		headerLabel := turn.label
+		// Turn header: ┌ [label · Layer N · role]. label/speaker/role arrive
+		// from group.turn event metadata (LLM-controlled): sanitize them so
+		// control/bidi chars cannot desync paint vs measured width, and wrap
+		// the composed header so an over-wide label cannot exceed the
+		// viewport budget and be re-wrapped by lineViewport at render time
+		// (the frame-corruption cascade). Continuation rows keep the "┌ "
+		// column via space padding, same pattern as renderToolCallRow.
+		headerLabel := sanitizeDisplayText(turn.label)
 		if headerLabel == "" {
-			headerLabel = turn.speaker
+			headerLabel = sanitizeDisplayText(turn.speaker)
 		}
-		roleDisplay := turn.role
+		roleDisplay := sanitizeDisplayText(turn.role)
 		if roleDisplay == "" {
 			roleDisplay = "participant"
 		}
 		layerLabel := fmt.Sprintf(i18n.T("tui.group.layer"), turn.layer)
-		headerText := fmt.Sprintf("┌ [%s · %s · %s]", headerLabel, layerLabel, roleDisplay)
-		sb.WriteString(GroupTurnHeader.Render(headerText) + "\n")
+		const headerPrefix = "┌ "
+		budget := viewportWidth - 4 - ansi.StringWidth(headerPrefix)
+		if budget < 1 {
+			budget = 1
+		}
+		body := fmt.Sprintf("[%s · %s · %s]", headerLabel, layerLabel, roleDisplay)
+		for i, row := range strings.Split(wrapText(body, budget), "\n") {
+			if i == 0 {
+				sb.WriteString(GroupTurnHeader.Render(headerPrefix+row) + "\n")
+			} else {
+				sb.WriteString(GroupTurnHeader.Render(strings.Repeat(" ", ansi.StringWidth(headerPrefix))+row) + "\n")
+			}
+		}
 
 		// Turn content with left border
 		content := turn.content

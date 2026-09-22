@@ -8,6 +8,7 @@
 import type { ChatMessage } from '../../lib/types'
 import { restoreInProgressAssistant, stopAllStreaming } from '../streamingOps'
 import { finalizeStreamingAssistantsForSession } from '../streamingOpsLocal'
+import { restoreInProgressTool } from './tools'
 import type { ClientEvent, MessageEventContext } from './types'
 
 export function handleApprovalRequest(ctx: MessageEventContext, event: ClientEvent) {
@@ -96,5 +97,13 @@ export function handleSubscribeAck(ctx: MessageEventContext, data: Record<string
         [...current],
       )
     })
+  }
+
+  // Restore the running-tool card for the chat being subscribed to. Same
+  // reason as the in-progress content above — and same gate: only while the
+  // backend confirms processing, so a leftover record from a finished turn is
+  // never replayed as an executing tool.
+  if (ackProcessing && ackSessionKey) {
+    restoreInProgressTool(ctx, ackSessionKey, data.in_progress_tool as Record<string, unknown>)
   }
 }

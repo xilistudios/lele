@@ -40,8 +40,9 @@ type nativeTestAgentLoop struct {
 	agentTools         []AgentToolInfo   // Override for ListAgentTools ("main" only; default: non-empty fake registry)
 	sessionNames       map[string]string
 	sessionThinkLevels map[string]string
-	sessionSubagents   map[string][]SubagentTaskInfo // sessionKey -> subagent tasks
-	processing         map[string]bool               // sessionKey -> is session processing
+	sessionSubagents   map[string][]SubagentTaskInfo      // sessionKey -> subagent tasks
+	processing         map[string]bool                    // sessionKey -> is session processing
+	inProgressTools    map[string]*session.InProgressTool // sessionKey -> running tool (chat-reload restore)
 
 	// groupSnapshotsBySession lets a test control what the store-backed session
 	// lookup returns; groupSnapshotCalls records that the channel delegated to
@@ -469,6 +470,17 @@ func (m *nativeTestAgentLoop) HasStreamedContent(sessionKey string) bool {
 
 func (m *nativeTestAgentLoop) GetInProgressAssistant(sessionKey string) *providers.Message {
 	return nil
+}
+
+func (m *nativeTestAgentLoop) GetInProgressTool(sessionKey string) *session.InProgressTool {
+	if m.inProgressTools == nil {
+		return nil
+	}
+	tool := m.inProgressTools[sessionKey]
+	if tool == nil {
+		return nil
+	}
+	return tool.Clone()
 }
 
 func (m *nativeTestAgentLoop) GetBackgroundExecs(includeCompleted bool) []BackgroundExecInfo {

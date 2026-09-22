@@ -512,6 +512,10 @@ func (m *Model) renderSidebarSessionName(cw int) string {
 	if sessionName == "" {
 		sessionName = i18n.T("tui.newChatDefault")
 	}
+	// Sanitize before the prefix/truncation below: the name is user-controlled
+	// and Cf/control chars would measure 0 cells yet repaint wider or reorder,
+	// breaking truncateRightCells' cell accounting.
+	sessionName = sanitizeDisplayText(sessionName)
 	if m.parentSessionKey != "" {
 		sessionName = "⇗ " + sessionName
 	}
@@ -573,15 +577,20 @@ func (m *Model) renderSidebarSubagents(rightBuilder *strings.Builder, cw, conten
 		if label == "" {
 			label = sa.TaskID
 		}
+		// Sanitize before truncation: label/status are agent-controlled and
+		// get interpolated into the row text below ("(status)"), so Cf/control
+		// chars must not survive into the frame or the width math.
+		label = sanitizeDisplayText(label)
+		status := sanitizeDisplayText(sa.Status)
 
-		maxLabelWidth := cw - (6 + len(sa.Status))
+		maxLabelWidth := cw - (6 + len(status))
 		if maxLabelWidth < 4 {
 			maxLabelWidth = 4
 		}
 		label = truncateRightCells(label, maxLabelWidth)
 
 		var statusDot string
-		switch sa.Status {
+		switch status {
 		case "running", "needs_context", "not_done":
 			statusDot = StatusRunning.Render("●")
 		case "completed":
@@ -592,7 +601,7 @@ func (m *Model) renderSidebarSubagents(rightBuilder *strings.Builder, cw, conten
 			statusDot = "○"
 		}
 
-		rightBuilder.WriteString(fmt.Sprintf(" %s %s (%s)\n", statusDot, label, sa.Status))
+		rightBuilder.WriteString(fmt.Sprintf(" %s %s (%s)\n", statusDot, label, status))
 
 		m.subagentClickTargets = append(m.subagentClickTargets, subagentClickTarget{
 			yStart: currentY,

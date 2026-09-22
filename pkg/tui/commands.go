@@ -315,7 +315,9 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 			if idx := strings.Index(goalText, "--turns"); idx > 0 {
 				goalText = strings.TrimSpace(goalText[:idx])
 			}
-			m.currentToolAction = "🎯 Goal set: " + goalText
+			// Goal text is user-typed: sanitize before it becomes an overlay
+			// activity row (control/bidi chars must not reach the frame).
+			m.currentToolAction = "🎯 Goal set: " + sanitizeDisplayText(goalText)
 			m.processing = true
 			m.startTime = time.Now()
 			m.elapsedTime = 0
@@ -324,7 +326,7 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 			return m.tickCmd()
 		}
 		// For status/pause/resume/clear, show result as tool action briefly
-		m.currentToolAction = result
+		m.currentToolAction = sanitizeDisplayText(result)
 		return nil
 
 	case "/quit":

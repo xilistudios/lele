@@ -173,6 +173,12 @@ type AgentProvidable interface {
 	HasStreamedContent(sessionKey string) bool
 	// GetInProgressAssistant returns the in-progress assistant message, if any.
 	GetInProgressAssistant(sessionKey string) *providers.Message
+	// GetInProgressTool returns the tool the session is currently executing, if
+	// any (nil otherwise). The UIs restore their "running tool" row from it
+	// after a chat reload — the row is live-event-only state that never
+	// reaches the session history. Only meaningful while IsSessionProcessing
+	// reports true: the record is in-memory turn state.
+	GetInProgressTool(sessionKey string) *session.InProgressTool
 
 	// ========================================================================
 	// Background exec management

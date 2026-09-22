@@ -248,7 +248,7 @@ func (te *toolExecutor) publishExecuting(opts toolExecOptions) {
 	level := te.al.verboseManager.GetLevel(opts.sessionKey)
 	if opts.channel == channels.ChannelName {
 		actionDesc := formatBasicToolMessage(opts.tc.Name, opts.tc.Arguments)
-		te.al.bus.PublishOutbound(bus.OutboundMessage{
+		te.al.publishToolLifecycle(bus.OutboundMessage{
 			Channel: opts.channel,
 			ChatID:  opts.sessionKey,
 			Event:   "tool.executing",
@@ -296,7 +296,7 @@ func (te *toolExecutor) publishResult(opts toolExecOptions, toolResult *tools.To
 				metadata["subagent_session_key"] = subagentSessionKey
 			}
 		}
-		te.al.bus.PublishOutbound(bus.OutboundMessage{
+		te.al.publishToolLifecycle(bus.OutboundMessage{
 			Channel:  opts.channel,
 			ChatID:   opts.sessionKey,
 			Event:    "tool.result",

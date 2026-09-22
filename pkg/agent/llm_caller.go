@@ -391,7 +391,7 @@ func (lc *llmCaller) executeWithRetry(
 
 			if retry == 0 && !constants.IsInternalChannel(opts.channel) {
 				if opts.channel == "native" {
-					lc.al.bus.PublishOutbound(bus.OutboundMessage{
+					lc.al.publishToolLifecycle(bus.OutboundMessage{
 						Channel: opts.channel,
 						ChatID:  opts.chatID,
 						Event:   "tool.executing",
