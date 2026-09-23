@@ -250,6 +250,7 @@ interface UserMessageProps extends BaseMessageProps {
   content: string
   optimistic?: boolean
   optimisticBaseCount?: number
+  optimisticAnchorId?: string
 }
 
 interface AssistantMessageProps extends BaseMessageProps {
@@ -278,6 +279,7 @@ export function createUserMessage(props: UserMessageProps): ChatMessage {
     attachments: props.attachments,
     optimistic: props.optimistic,
     optimisticBaseCount: props.optimisticBaseCount,
+    optimisticAnchorId: props.optimisticAnchorId,
     excludeFromContext: props.excludeFromContext,
     stableId: props.stableId,
   }

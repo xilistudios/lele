@@ -90,14 +90,29 @@ export function useMessages(
     [wsSend],
   )
 
-  const getHistoryUserCount = useCallback(
-    (sessionKey: string) => {
+  /**
+   * Snapshot of the HTTP history cache taken at send time. Used to decide when
+   * an optimistic user bubble has been confirmed by the server.
+   *
+   * `userCount` is the legacy signal (see optimisticBaseCount). `lastUserId` is
+   * the id of the newest confirmed user message in the cache — the anchor that
+   * stays valid when the history window slides and the count saturates.
+   */
+  const getHistorySendAnchor = useCallback(
+    (sessionKey: string): { userCount: number; lastUserId: string | undefined } => {
       const queryKey = buildChatHistoryQueryKey(
         sessionKey,
         parentSessionKeyRef.current ?? undefined,
       )
       const history = queryClient.getQueryData<{ messages?: ChatMessage[] }>(queryKey)
-      return history?.messages?.filter((m) => m.role === 'user' && !m.optimistic).length ?? 0
+      const confirmedUsers = (history?.messages ?? []).filter(
+        (m) => m.role === 'user' && !m.optimistic,
+      )
+      return {
+        userCount: confirmedUsers.length,
+        lastUserId:
+          confirmedUsers.length > 0 ? confirmedUsers[confirmedUsers.length - 1].id : undefined,
+      }
     },
     [queryClient],
   )
@@ -146,12 +161,17 @@ export function useMessages(
       const normalizedContent = content.trim()
       if (normalizedContent.length === 0) return
 
+      // Snapshot BOTH confirmation signals once, before the optimistic bubble
+      // enters streaming state (the snapshot must not see its own message).
+      const anchor = getHistorySendAnchor(sessionKey)
+
       const userMessage = createUserMessage({
         id: createOptimisticUserId(),
         sessionKey,
         content: normalizedContent,
         optimistic: true,
-        optimisticBaseCount: getHistoryUserCount(sessionKey),
+        optimisticBaseCount: anchor.userCount,
+        optimisticAnchorId: anchor.lastUserId,
         attachments: attachments.map((path) => ({
           path,
           name: path.split('/').pop() ?? path,
@@ -169,7 +189,7 @@ export function useMessages(
         attachments: attachments.length > 0 ? attachments : undefined,
       })
     },
-    [wsSend, getHistoryUserCount],
+    [wsSend, getHistorySendAnchor],
   )
 
   // ── Retry failed message ──────────────────────────────────────────────

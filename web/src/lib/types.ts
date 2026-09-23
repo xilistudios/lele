@@ -927,6 +927,26 @@ export type ChatMessage = {
   optimistic?: boolean
   failed?: boolean
   optimisticBaseCount?: number
+  /**
+   * Id of the LAST confirmed (non-optimistic) base user message present in the
+   * HTTP history cache at send time.
+   *
+   * Why this exists: `optimisticBaseCount` compares user counts, which is only
+   * valid while the cached history grows monotonically. It does not: the
+   * backend serves history as a sliding window of the last `limit` messages
+   * (pkg/channels/rest_chat.go) and useChatHistory replaces the cache with that
+   * window, so once a conversation exceeds the window the cached user count
+   * SATURATES and `baseUserCount > optimisticBaseCount` is false forever. The
+   * optimistic bubble then became immortal and mergeMessages stranded it at the
+   * END of the list, after newer answers — the "messages lose their order until
+   * I refresh the page" bug.
+   *
+   * Base message ids are content-derived and position-independent, so "a
+   * confirmed copy of my text exists AFTER the anchor" is a monotonic,
+   * window-size-independent novelty signal. `undefined` means the cache was
+   * empty at send time; callers must then fall back to the count rule.
+   */
+  optimisticAnchorId?: string
   attachments?: Attachment[]
   sessionKey?: string
   toolName?: string
