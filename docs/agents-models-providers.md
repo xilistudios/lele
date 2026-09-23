@@ -420,6 +420,7 @@ Exposure and gating:
 | OpenRouter | Yes — URL or base64 data URL | `google/gemini` video-capable models, `qwen-vl`, `kimi`, `grok`. Gemini via AI Studio through OpenRouter: YouTube URLs only. |
 | xAI Grok | Yes — URL, base64 data URL, or `file_id` | |
 | Qwen-VL (DashScope / vLLM / Ollama) | Yes — whole mp4 as `video_url` | Qwen3-VL understands the audio track; Qwen2.5-VL is frames-only (no audio). Optional `fps`. |
+| MiMo (Xiaomi, OpenAI-compatible endpoint) | Yes — URL or base64 data URL | `video_url` with mp4/webm/avi/mkv/mov, ≤100 MB / ≤1000 s per call. The v2.5 docs state the audio track is not processed; `mimo-v2.6-pro`/`mimo-v2.6-flash` were verified to transcribe speech from the video's audio track. `fps` is accepted but undocumented (treated as ignored). |
 | Moonshot Kimi | No (for lele v1) | Video via Files API `ms://` file ids is **not supported** by lele v1. |
 | Gemini direct (`generativelanguage` OpenAI-compat path used by lele) | Unverified | `video_url` support on this path is **unverified**; for Gemini video understanding, configure the model through OpenRouter. Native `inline_data`/File API support is future work. |
 | OpenAI / Anthropic | No | No native video — do not set `video: true`. With `vision: true` they now get `read_video` via frames mode, no video flag needed: keyframes as `image_url` parts plus the audio transcript as text. Audio reaches them only as transcript text, and visual motion/temporal detail is limited to the N keyframes. |
