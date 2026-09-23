@@ -10,6 +10,7 @@
 // ffmpeg (and ffprobe) are an OPTIONAL runtime dependency resolved at call
 // time via exec.LookPath — never a build dependency. Everything here uses
 // only the Go standard library and os/exec.
+
 package tools
 
 import (
