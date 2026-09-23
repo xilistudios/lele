@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -76,6 +77,34 @@ func TestProviderModelConfig_UnmarshalVision(t *testing.T) {
 	}
 	if !modelCfg.Vision {
 		t.Fatal("expected Vision to be true")
+	}
+}
+
+func TestProviderModelConfig_UnmarshalVideo(t *testing.T) {
+	var modelCfg ProviderModelConfig
+	if err := json.Unmarshal([]byte(`{"video":true}`), &modelCfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !modelCfg.Video {
+		t.Fatal("expected Video to be true")
+	}
+
+	// Omitted key defaults to false (no auto-enable).
+	var omitted ProviderModelConfig
+	if err := json.Unmarshal([]byte(`{"vision":true}`), &omitted); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if omitted.Video {
+		t.Fatal("expected Video to be false when the key is omitted")
+	}
+
+	// Zero value must stay off the wire (omitempty contract).
+	data, err := json.Marshal(ProviderModelConfig{Model: "gpt-4o", Vision: true})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"video"`) {
+		t.Errorf("zero Video must be omitted from marshaled JSON: %s", data)
 	}
 }
 

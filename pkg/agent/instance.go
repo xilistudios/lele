@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/tools"
+	"github.com/xilistudios/lele/pkg/voice"
 )
 
 // extractProviderFromModel extracts the provider name from a model string.
@@ -41,6 +43,7 @@ type AgentInstance struct {
 	Temperature           float64
 	ContextWindow         int
 	SupportsImages        bool
+	SupportsVideo         bool                     // model accepts native video input (video_url content parts)
 	Reasoning             *config.ReasoningConfig  // Reasoning configuration for the model
 	ThinkingLevel         string                   // resolved per-agent default reasoning effort ("", "off", "low", "medium", "high")
 	PromptCache           config.PromptCacheConfig // Explicit prompt-cache breakpoints (Anthropic-style providers)
@@ -125,6 +128,14 @@ func getSupportsImages(cfg *config.Config, model string, provider string) bool {
 	return false
 }
 
+// getSupportsVideo returns whether a model accepts native video input (video_url content parts), per the model's "video" capability flag.
+func getSupportsVideo(cfg *config.Config, model string, provider string) bool {
+	if modelCfg, ok := getProviderModelConfig(cfg, model, provider); ok {
+		return modelCfg.Video
+	}
+	return false
+}
+
 // getReasoningConfig returns the reasoning configuration for a model from provider config.
 func getReasoningConfig(cfg *config.Config, model string, provider string) *config.ReasoningConfig {
 	if modelCfg, ok := getProviderModelConfig(cfg, model, provider); ok && modelCfg.Reasoning != nil {
@@ -200,6 +211,40 @@ func NewAgentInstance(
 	// Always register read_image tool so it's available when the user switches to a vision model.
 	// It will be filtered out from tool definitions if the current session model doesn't support vision.
 	toolsRegistry.Register(tools.NewReadImageTool(workspace, restrict))
+	// Capability snapshot for read_video, computed here (before registration)
+	// from the agent's primary model: Video enables native video_url delivery,
+	// Vision enables the keyframes+transcript frames fallback. This snapshot
+	// is only the FALLBACK for callers that resolve no per-call model (unit
+	// tests, cron): per-call session/subagent model caps are stamped onto the
+	// tool context via tools.WithVideoCaps (agent tool executor + subagent
+	// runner), and mode=auto prefers the stamped caps. Tool-def filtering and
+	// the executor guard still gate availability.
+	videoCaps := tools.VideoCapabilities{
+		Video:  getSupportsVideo(cfg, model, providerName),
+		Vision: getSupportsImages(cfg, model, providerName),
+	}
+	// Audio transcription for frames mode. Config signal: the Groq API key —
+	// the same gate cmd/lele/gateway.go uses to build the voice transcriber
+	// for the messaging channels (cfg has no dedicated voice section). A nil
+	// TranscribeFunc means frames mode omits the transcript part entirely.
+	var transcribe tools.TranscribeFunc
+	if cfg != nil && cfg.Providers != nil && cfg.Providers.Groq.APIKey != "" {
+		// Build the transcriber (and its http.Client) ONCE: the closure only
+		// forwards each call, so per-invocation transcriptions reuse the same
+		// client instead of allocating a new one every time.
+		groqTranscriber := voice.NewGroqTranscriber(cfg.Providers.Groq.APIKey)
+		transcribe = func(ctx context.Context, audioPath string) (string, error) {
+			resp, err := groqTranscriber.Transcribe(ctx, audioPath)
+			if err != nil {
+				return "", err
+			}
+			return resp.Text, nil
+		}
+	}
+	// Always register read_video tool so it's available when the user switches to a
+	// video- or vision-capable model. It is filtered out from tool definitions unless
+	// the session model has the video OR vision capability flag (frames mode fallback).
+	toolsRegistry.Register(tools.NewReadVideoTool(workspace, restrict, videoCaps, transcribe))
 
 	// Apply the per-agent tools allowlist AFTER all default registrations so the
 	// filter always sees the complete tool set. nil/empty allowlist = all tools.
@@ -216,8 +261,11 @@ func NewAgentInstance(
 	contextBuilder := NewContextBuilder(workspace)
 	contextBuilder.SetToolsRegistry(toolsRegistry)
 	// Set vision support based on the agent's primary model so the system
-	// prompt correctly shows/hides the read_image tool.
-	contextBuilder.SetVisionSupported(getSupportsImages(cfg, model, providerName))
+	// prompt correctly shows/hides the read_image tool. Reuses the capability
+	// snapshot captured for the read_video registration above.
+	contextBuilder.SetVisionSupported(videoCaps.Vision)
+	// Same for native video support and the read_video tool.
+	contextBuilder.SetVideoSupported(videoCaps.Video)
 
 	agentID := routing.DefaultAgentID
 	agentName := ""
@@ -278,6 +326,7 @@ func NewAgentInstance(
 		Temperature:           temperature,
 		ContextWindow:         getContextWindow(cfg, model, providerName),
 		SupportsImages:        getSupportsImages(cfg, model, providerName),
+		SupportsVideo:         getSupportsVideo(cfg, model, providerName),
 		Reasoning:             getReasoningConfig(cfg, model, providerName),
 		ThinkingLevel:         resolveAgentThinkingLevel(agentCfg, defaults),
 		PromptCache:           defaults.PromptCache,

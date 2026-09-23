@@ -195,6 +195,7 @@ func (ap *agentProvidableImpl) GetAgentInfo(agentID string) (channels.AgentBasic
 		SkillsFilter:   agent.SkillsFilter,
 		Reasoning:      agent.Reasoning,
 		SupportsImages: agent.SupportsImages,
+		SupportsVideo:  agent.SupportsVideo,
 	}, true
 }
 
@@ -463,6 +464,21 @@ func (ap *agentProvidableImpl) GetSessionModelSupportsImages(sessionKey string) 
 	cfg := ap.al.cfg()
 	providerName := extractProviderFromModel(model, cfg.Agents.Defaults.Provider)
 	return getSupportsImages(cfg, model, providerName)
+}
+
+// GetSessionModelSupportsVideo returns true if the session's current model supports native video input.
+func (ap *agentProvidableImpl) GetSessionModelSupportsVideo(sessionKey string) bool {
+	model := ap.GetSessionModel(sessionKey)
+	if model == "" {
+		return false
+	}
+	agent := ap.al.agentForSession(ap.al.ResolveSessionKey(sessionKey))
+	if agent == nil {
+		return false
+	}
+	cfg := ap.al.cfg()
+	providerName := extractProviderFromModel(model, cfg.Agents.Defaults.Provider)
+	return getSupportsVideo(cfg, model, providerName)
 }
 
 // SetSessionModel sets the model for a session and persists it.

@@ -459,9 +459,12 @@ func agentConfigChanged(existing *AgentInstance, ac *config.AgentConfig, default
 	if existing.ContextWindow != newCtxWindow {
 		return true
 	}
-	// Check supports images — computed from provider model config
+	// Check supports images/video — computed from provider model config.
+	// Both capabilities gate per-request content stripping and tool exposure,
+	// so a switch between models that differ in vision OR video must rebuild.
 	newSupportsImages := getSupportsImages(cfg, newModel, newProvider)
-	if existing.SupportsImages != newSupportsImages {
+	newSupportsVideo := getSupportsVideo(cfg, newModel, newProvider)
+	if existing.SupportsImages != newSupportsImages || existing.SupportsVideo != newSupportsVideo {
 		return true
 	}
 	// Check reasoning config — computed from provider model config

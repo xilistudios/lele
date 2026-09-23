@@ -152,19 +152,21 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	lr.al.toolCoordinator.updateToolContexts(agent, opts.Channel, opts.ChatID, opts.SessionKey)
 
 	// 2. Build messages (skip history for heartbeat)
-	// Sync the system prompt's vision flag with the session's current model.
-	// The flag is initialized at instance creation, but the session model can
-	// change at runtime (/model, TUI model picker, REST). Without this sync,
-	// the tools section of the system prompt keeps hiding read_image based on
-	// a stale flag even after switching to a vision-capable model.
+	// Sync the system prompt's vision/video flags with the session's current
+	// model. The flags are initialized at instance creation, but the session
+	// model can change at runtime (/model, TUI model picker, REST). Without
+	// this sync, the tools section of the system prompt keeps hiding
+	// read_image/read_video based on stale flags even after switching to a
+	// vision-/video-capable model.
 	// A harness custom command's per-turn model wins over the session model so
-	// the vision flag matches the model actually used for this request. The
-	// override is never stored, so the next turn re-reads the session model.
+	// the flags match the model actually used for this request. The override
+	// is never stored, so the next turn re-reads the session model.
 	if agent.ContextBuilder != nil {
 		sessionModel := lr.modelForTurn(agent, opts)
 		if sessionModel != "" {
 			providerName := extractProviderFromModel(sessionModel, lr.al.cfg().Agents.Defaults.Provider)
 			agent.ContextBuilder.SetVisionSupported(getSupportsImages(lr.al.cfg(), sessionModel, providerName))
+			agent.ContextBuilder.SetVideoSupported(getSupportsVideo(lr.al.cfg(), sessionModel, providerName))
 		}
 	}
 	var history []providers.Message
@@ -602,27 +604,25 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		// Build tool definitions
 		providerToolDefs := agent.Tools.ToProviderDefs()
 
-		// Determine whether the current (primary) model supports vision. The
-		// read_image tool is exposed based on the primary model only. When the
-		// fallback chain fails over to a non-vision model, image content is
-		// stripped per-candidate in callWithFallback (see llm_caller.go), so a
-		// vision-capable primary model no longer loses read_image just because
-		// a fallback in the chain lacks vision.
-		modelHasVision := getSupportsImages(lr.al.cfg(), model, extractProviderFromModel(model, lr.al.cfg().Agents.Defaults.Provider))
-		if !modelHasVision {
-			filtered := make([]providers.ToolDefinition, 0, len(providerToolDefs))
-			for _, def := range providerToolDefs {
-				if def.Function.Name != "read_image" {
-					filtered = append(filtered, def)
-				}
-			}
-			providerToolDefs = filtered
+		// Determine whether the current (primary) model supports vision and
+		// native video. The read_image/read_video tools are exposed based on
+		// the primary model only. When the fallback chain fails over to a
+		// weaker model, image/video content is stripped per-candidate in
+		// callWithFallback (see llm_caller.go), so a capable primary model no
+		// longer loses read_image just because a fallback in the chain lacks
+		// vision. filterToolDefs is the same pure policy group turns use.
+		modelProvider := extractProviderFromModel(model, lr.al.cfg().Agents.Defaults.Provider)
+		modelHasVision := getSupportsImages(lr.al.cfg(), model, modelProvider)
+		modelHasVideo := getSupportsVideo(lr.al.cfg(), model, modelProvider)
+		providerToolDefs = filterToolDefs(providerToolDefs, modelHasVision, modelHasVideo, nil)
 
-			// Strip image_url ContentParts from messages. Historical messages
-			// may contain image data from previous turns (or from a different
-			// model that supported vision). Sending image content to a
-			// non-vision model causes API errors.
-			messages = stripImageContentParts(messages)
+		// Strip image_url/video_url ContentParts from messages. Historical
+		// messages may contain media data from previous turns (or from a
+		// different model that supported vision/video). Sending image content
+		// to a non-vision model, or video content to a model without native
+		// video support, causes API errors.
+		if !modelHasVision || !modelHasVideo {
+			messages = stripContentParts(messages, !modelHasVision, !modelHasVideo)
 		}
 
 		// In chat mode, only expose web_search and web_fetch tools.
@@ -987,8 +987,8 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		// Phase 3: Append all context messages (role: "user") after all tool messages
 		// This ensures tool messages are contiguous, satisfying the API requirement
 		// that all tool responses follow immediately after the assistant's tool_calls.
-		if !modelHasVision {
-			allContextMsgs = stripImageContentParts(allContextMsgs)
+		if !modelHasVision || !modelHasVideo {
+			allContextMsgs = stripContentParts(allContextMsgs, !modelHasVision, !modelHasVideo)
 		}
 		for _, ctxMsg := range allContextMsgs {
 			messages = append(messages, ctxMsg)
@@ -1025,12 +1025,20 @@ func iterationMsgID(baseID string, iteration int) string {
 	return baseID
 }
 
-// stripImageContentParts returns a copy of messages with all image_url
-// ContentParts removed. This is used when the current model does not support
-// vision — historical messages may contain image data from previous turns
-// (or from a different model that did support vision), and sending image
-// content to a non-vision model causes API errors.
-func stripImageContentParts(messages []providers.Message) []providers.Message {
+// stripContentParts returns a copy of messages with image_url ContentParts
+// removed when dropImage is set, and video_url ContentParts removed when
+// dropVideo is set. All other parts are preserved and the copy semantics match
+// the original stripImageContentParts helper. If neither flag is set the input
+// is returned unchanged (no allocation).
+//
+// This is used when the current model does not support vision and/or native
+// video — historical messages may contain media data from previous turns (or
+// from a different model that supported it), and sending unsupported image or
+// video content to the model causes API errors.
+func stripContentParts(messages []providers.Message, dropImage, dropVideo bool) []providers.Message {
+	if !dropImage && !dropVideo {
+		return messages
+	}
 	stripped := make([]providers.Message, len(messages))
 	for i, msg := range messages {
 		if len(msg.ContentParts) == 0 {
@@ -1039,14 +1047,25 @@ func stripImageContentParts(messages []providers.Message) []providers.Message {
 		}
 		filtered := make([]providers.ContentPart, 0, len(msg.ContentParts))
 		for _, part := range msg.ContentParts {
-			if part.Type != "image_url" {
-				filtered = append(filtered, part)
+			if dropImage && part.Type == "image_url" {
+				continue
 			}
+			if dropVideo && part.Type == "video_url" {
+				continue
+			}
+			filtered = append(filtered, part)
 		}
 		stripped[i] = msg
 		stripped[i].ContentParts = filtered
 	}
 	return stripped
+}
+
+// stripImageContentParts returns a copy of messages with all image_url
+// ContentParts removed. Thin wrapper around stripContentParts for callers (and
+// tests) that only need the vision path.
+func stripImageContentParts(messages []providers.Message) []providers.Message {
+	return stripContentParts(messages, true, false)
 }
 
 // maybeCompactLoopContext runs the proactive intra-loop context compaction

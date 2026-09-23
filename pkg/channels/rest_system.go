@@ -25,6 +25,7 @@ func (n *NativeChannel) handleTools(w http.ResponseWriter, r *http.Request) {
 	}
 
 	supportsImages := n.agentLoop.GetSessionModelSupportsImages(sessionKey)
+	supportsVideo := n.agentLoop.GetSessionModelSupportsVideo(sessionKey)
 
 	tools := []ToolInfo{
 		{Name: "read_file", Description: "Read file from workspace", Enabled: true},
@@ -38,6 +39,12 @@ func (n *NativeChannel) handleTools(w http.ResponseWriter, r *http.Request) {
 
 	if supportsImages {
 		tools = append(tools, ToolInfo{Name: "read_image", Description: "Read and analyze images", Enabled: true})
+	}
+
+	// read_video serves two modes: native video_url needs the video
+	// capability, keyframes+transcript needs vision — list it for either.
+	if supportsVideo || supportsImages {
+		tools = append(tools, ToolInfo{Name: "read_video", Description: "Read and analyze videos (native video_url or keyframe+transcript mode)", Enabled: true})
 	}
 
 	writeJSON(w, http.StatusOK, ToolsResponse{Tools: tools})

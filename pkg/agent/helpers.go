@@ -52,6 +52,9 @@ func FormatMessagesForLog(messages []providers.Message) string {
 						imageRef = utils.Truncate(part.ImageURL.URL, 120)
 					}
 					result += fmt.Sprintf("    - image_url: %s\n", imageRef)
+				case "video_url":
+					// Never log the URL/base64 — it can be huge.
+					result += "    - video_url: [video]\n"
 				}
 			}
 		}

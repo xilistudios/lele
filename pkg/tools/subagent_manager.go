@@ -26,6 +26,7 @@ type SubagentManager struct {
 	getAgentContext            func(agentID string) AgentContextInfo
 	modelOverrideResolver      func(model string) (providers.LLMProvider, string, int, error) // resolves a per-task model override to (provider, model, contextWindow, error)
 	visionChecker              func(model string) bool                                        // reports whether a model supports vision
+	videoChecker               func(model string) bool                                        // reports whether a model supports native video
 	maxIterations              int
 	maxTokens                  int
 	temperature                float64
@@ -228,6 +229,25 @@ func (sm *SubagentManager) SetVisionChecker(checker func(model string) bool) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.visionChecker = checker
+}
+
+// SetVideoChecker registers a callback that reports whether a given model
+// supports native video. When the checker reports false (or is nil), the
+// read_video tool is filtered out of subagent tool definitions.
+func (sm *SubagentManager) SetVideoChecker(checker func(model string) bool) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.videoChecker = checker
+}
+
+// getVideoChecker returns the registered video-capability checker (nil when
+// unset) under the manager lock. Callers use it to decide whether the
+// subagent's model should be offered read_video: a nil checker means the
+// tool stays filtered (same semantics as the vision checker).
+func (sm *SubagentManager) getVideoChecker() func(model string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.videoChecker
 }
 
 func (sm *SubagentManager) SetSessionRecorder(rec SessionRecorder) {

@@ -279,6 +279,26 @@ func (m *nativeTestAgentLoop) GetSessionModelSupportsImages(sessionKey string) b
 	return false
 }
 
+func (m *nativeTestAgentLoop) GetSessionModelSupportsVideo(sessionKey string) bool {
+	model := m.GetSessionModel(sessionKey)
+	if model == "" {
+		return false
+	}
+	if m.config == nil {
+		return false
+	}
+	providerName := "openai"
+	if idx := strings.Index(model, "/"); idx > 0 {
+		providerName = strings.ToLower(model[:idx])
+	}
+	if prov, ok := m.config.Providers.GetNamed(providerName); ok {
+		if modelCfg, exists := prov.Models[model]; exists {
+			return modelCfg.Video
+		}
+	}
+	return false
+}
+
 func (m *nativeTestAgentLoop) ListAvailableModels(agentID string) []string {
 	if agentID == "research" {
 		return []string{"gpt-4.1", "gpt-4.1-mini"}
@@ -729,6 +749,72 @@ func newNativeTestServerWithConfigPath(t *testing.T, configPath string) *nativeT
 		server:   server,
 		token:    token,
 		clientID: client.ClientID,
+	}
+}
+
+// TestHandleTools_ReadVideoGating pins the new read_video entry of the tools
+// endpoint: read_video is listed iff the session model's config sets the
+// "video" OR the "vision" capability flag (native video_url vs the
+// keyframes fallback), while read_image keeps tracking "vision" only.
+func TestHandleTools_ReadVideoGating(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	fetchToolNames := func(t *testing.T, sessionKey string) map[string]bool {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/tools?session_key="+url.QueryEscape(sessionKey), nil)
+		if err != nil {
+			t.Fatalf("NewRequest() error = %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+ts.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Do() error = %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		var payload ToolsResponse
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		names := make(map[string]bool, len(payload.Tools))
+		for _, tool := range payload.Tools {
+			names[tool.Name] = true
+		}
+		return names
+	}
+
+	// Model without either flag: read_video must be hidden.
+	noVideo := fetchToolNames(t, "native:gating-no-video")
+	if noVideo["read_video"] {
+		t.Fatal("expected read_video to be absent for a model without video: true and vision: true")
+	}
+
+	// Add video- and vision-capable models to the fake config and point
+	// sessions at them: read_video must appear for both.
+	prov := ts.loop.config.Providers.Named["openai"]
+	prov.Models["video-model"] = config.ProviderModelConfig{Model: "video-actual", Video: true}
+	prov.Models["vision-model"] = config.ProviderModelConfig{Model: "vision-actual", Vision: true}
+	ts.loop.config.Providers.Named["openai"] = prov
+	ts.loop.SetSessionModel("native:gating-video", "video-model")
+	ts.loop.SetSessionModel("native:gating-vision", "vision-model")
+
+	withVideo := fetchToolNames(t, "native:gating-video")
+	if !withVideo["read_video"] {
+		t.Fatal("expected read_video to be present for a model with video: true")
+	}
+	if withVideo["read_image"] {
+		t.Fatal("expected read_image to stay gated by vision, not video")
+	}
+
+	// Vision-only model: read_video listed (frames fallback), read_image too.
+	withVision := fetchToolNames(t, "native:gating-vision")
+	if !withVision["read_video"] {
+		t.Fatal("expected read_video to be present for a model with vision: true")
+	}
+	if !withVision["read_image"] {
+		t.Fatal("expected read_image to be present for a model with vision: true")
 	}
 }
 

@@ -702,6 +702,12 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		providerName := extractProviderFromModel(model, cfg.Agents.Defaults.Provider)
 		return getSupportsImages(cfg, model, providerName)
 	})
+	// Report whether a model supports native video so subagent tool loops can
+	// filter out read_video for models without video support.
+	subagentManager.SetVideoChecker(func(model string) bool {
+		providerName := extractProviderFromModel(model, cfg.Agents.Defaults.Provider)
+		return getSupportsVideo(cfg, model, providerName)
+	})
 	// Set subagent timeout from agent config (per-agent override or global default)
 	if agent.Subagents != nil && agent.Subagents.TimeoutMin > 0 {
 		subagentManager.SetTimeout(time.Duration(agent.Subagents.TimeoutMin) * time.Minute)

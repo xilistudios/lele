@@ -183,6 +183,28 @@ func TestFormatMessagesForLog_ToolCallWithoutFunction(t *testing.T) {
 	}
 }
 
+// TestFormatMessagesForLog_VideoPart verifies video_url parts render as the
+// "[video]" placeholder and the URL/base64 payload is never logged.
+func TestFormatMessagesForLog_VideoPart(t *testing.T) {
+	messages := []providers.Message{
+		{
+			Role: "user",
+			ContentParts: []providers.ContentPart{
+				{Type: "text", Text: "Analyze this video"},
+				{Type: "video_url", VideoURL: &providers.VideoURL{URL: "data:video/mp4;base64,SECRETBASE64PAYLOAD", FPS: 1}},
+			},
+		},
+	}
+	result := FormatMessagesForLog(messages)
+
+	if !strings.Contains(result, "video_url: [video]") {
+		t.Errorf("Expected video_url part to render as [video], got: %s", result)
+	}
+	if strings.Contains(result, "SECRETBASE64PAYLOAD") || strings.Contains(result, "data:video") {
+		t.Errorf("Video URL/base64 payload must never appear in logs: %s", result)
+	}
+}
+
 // ============================================================================
 // Tests for FormatToolsForLog
 // ============================================================================

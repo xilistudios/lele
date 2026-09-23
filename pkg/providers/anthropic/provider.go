@@ -191,6 +191,9 @@ func buildAnthropicContentBlocks(msg Message) []anthropic.ContentBlockParamUnion
 				continue
 			}
 			blocks = append(blocks, anthropic.NewImageBlockBase64(mediaType, encoded))
+		case "video_url":
+			// Anthropic has no native video input; video parts are gated upstream (model config video flag) and dropped here defensively.
+			continue
 		}
 	}
 

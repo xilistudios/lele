@@ -129,6 +129,38 @@ func TestBuildParams_WithVisionImage(t *testing.T) {
 	}
 }
 
+// TestBuildAnthropicContentBlocks_DropsVideoParts verifies the defensive
+// hardening: Anthropic has no native video input, so a video_url content part
+// must be silently dropped — the resulting block list is identical to the
+// text-only equivalent and nothing about the video leaks into the payload.
+func TestBuildAnthropicContentBlocks_DropsVideoParts(t *testing.T) {
+	textParts := []protocoltypes.ContentPart{
+		{Type: "text", Text: "Describe this"},
+	}
+	withVideoParts := []protocoltypes.ContentPart{
+		{Type: "text", Text: "Describe this"},
+		{Type: "video_url", VideoURL: &protocoltypes.VideoURL{URL: "https://example.com/clip.mp4", FPS: 2}},
+	}
+
+	textOnly := buildAnthropicContentBlocks(Message{Role: "user", ContentParts: textParts})
+	withVideo := buildAnthropicContentBlocks(Message{Role: "user", ContentParts: withVideoParts})
+
+	if len(textOnly) == 0 {
+		t.Fatal("expected at least one block for the text-only message")
+	}
+	if len(withVideo) != len(textOnly) {
+		t.Fatalf("video part changed block count: got %d, want %d", len(withVideo), len(textOnly))
+	}
+
+	data, err := json.Marshal(withVideo)
+	if err != nil {
+		t.Fatalf("marshal blocks: %v", err)
+	}
+	if strings.Contains(string(data), "video") {
+		t.Fatalf("video content leaked into anthropic payload: %s", data)
+	}
+}
+
 func TestParseResponse_TextOnly(t *testing.T) {
 	resp := &anthropic.Message{
 		Content: []anthropic.ContentBlockUnion{},

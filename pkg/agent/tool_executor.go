@@ -92,6 +92,36 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 		}
 	}
 
+	// Video guard: block read_video if the session's model supports neither
+	// native video (video_url delivery) nor vision (keyframes+transcript
+	// frames fallback). Same defense-in-depth rationale as the vision guard
+	// above (the definition is normally filtered out in llm_runner.go / the
+	// subagent tool loop), and the same historical skip behaviour: when no
+	// model can be resolved for the session (model == ""), the guard does not
+	// fire — parity with the read_image guard, which only checks resolvable
+	// models.
+	//
+	// When a model IS resolvable, the same resolved caps are kept in
+	// videoCaps and stamped onto the tool context below (only for
+	// read_video — the caps type is read_video-specific), so mode=auto
+	// resolves against the model handling this call (session/turn model)
+	// instead of the tool's construction-time snapshot. Nil = no stamp: the
+	// tool falls back to its snapshot.
+	var videoCaps *tools.VideoCapabilities
+	if opts.tc.Name == "read_video" && opts.agent != nil && te.al != nil {
+		model := te.al.sessionManager.ModelForSession(opts.agent, opts.sessionKey)
+		if model != "" {
+			cfg := te.al.cfg()
+			providerName := extractProviderFromModel(model, cfg.Agents.Defaults.Provider)
+			videoSup := getSupportsVideo(cfg, model, providerName)
+			visionSup := getSupportsImages(cfg, model, providerName)
+			if !videoSup && !visionSup {
+				return tools.ErrorResult("read_video is not available: the current model supports neither video nor vision"), nil
+			}
+			videoCaps = &tools.VideoCapabilities{Video: videoSup, Vision: visionSup}
+		}
+	}
+
 	// Publish tool execution notification
 	te.publishExecuting(opts)
 
@@ -122,6 +152,14 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 	// No nil guard here: the early return at the top of Execute guarantees
 	// opts.agent != nil by the time we reach this line.
 	opts.ctx = tools.WithAgentToolContext(opts.ctx, opts.agent.ID, opts.sessionKey)
+
+	// Per-call read_video capability stamp: videoCaps is only set inside the
+	// read_video guard above, so no other tool pays for this. Stamped caps
+	// take precedence over the tool's construction-time snapshot (see
+	// tools.WithVideoCaps), keeping mode=auto aligned with the session model.
+	if videoCaps != nil {
+		opts.ctx = tools.WithVideoCaps(opts.ctx, *videoCaps)
+	}
 
 	// Execute tool with approval handling for exec
 	var toolResult *tools.ToolResult

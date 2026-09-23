@@ -262,6 +262,139 @@ func TestNewAgentInstance_RegistersReadImageToolWithModelAlias(t *testing.T) {
 	}
 }
 
+// TestNewAgentInstance_RegistersReadVideoToolWhenVideoEnabled mirrors the
+// read_image registration test: read_video must be present in the tools
+// registry when the model has the video capability flag.
+func TestNewAgentInstance_RegistersReadVideoToolWhenVideoEnabled(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-instance-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = tmpDir
+	cfg.Agents.Defaults.Provider = "openai"
+	cfg.Agents.Defaults.Model = "openai:gpt-4o"
+	cfg.Providers.Named = map[string]config.NamedProviderConfig{
+		"openai": {
+			Type: "openai",
+			Models: map[string]config.ProviderModelConfig{
+				"gpt-4o": {Video: true},
+			},
+		},
+	}
+
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
+	if _, ok := agent.Tools.Get("read_video"); !ok {
+		t.Fatal("expected read_video tool to be registered")
+	}
+	if !agent.SupportsVideo {
+		t.Fatal("expected SupportsVideo to be true")
+	}
+}
+
+// TestNewAgentInstance_ReadVideoToolAlwaysRegistered mirrors the read_image
+// always-registered test: read_video is registered regardless of model
+// capabilities and filtered out dynamically per session model.
+func TestNewAgentInstance_ReadVideoToolAlwaysRegistered(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-instance-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = tmpDir
+	cfg.Agents.Defaults.Provider = "openai"
+	cfg.Agents.Defaults.Model = "openai:gpt-4o-mini"
+	cfg.Providers.Named = map[string]config.NamedProviderConfig{
+		"openai": {
+			Type: "openai",
+			Models: map[string]config.ProviderModelConfig{
+				"gpt-4o-mini": {Video: false},
+			},
+		},
+	}
+
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
+	// read_video is always registered now, but filtered out dynamically
+	// based on the current session model
+	if _, ok := agent.Tools.Get("read_video"); !ok {
+		t.Fatal("expected read_video tool to be registered regardless of video support")
+	}
+	if agent.SupportsVideo {
+		t.Fatal("expected SupportsVideo to be false for non-video model")
+	}
+}
+
+// TestNewAgentInstance_RegistersReadVideoToolWithModelAlias mirrors the
+// read_image model-alias registration test: read_video is registered when
+// using a model alias that maps to a different resolved model name.
+func TestNewAgentInstance_RegistersReadVideoToolWithModelAlias(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-instance-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = tmpDir
+	cfg.Agents.Defaults.Provider = "myprovider"
+	cfg.Agents.Defaults.Model = "myprovider:video-model"
+	cfg.Providers.Named = map[string]config.NamedProviderConfig{
+		"myprovider": {
+			Type: "openai",
+			Models: map[string]config.ProviderModelConfig{
+				// Alias "video-model" maps to resolved model "video-actual"
+				"video-model": {Model: "video-actual", Video: true},
+			},
+		},
+	}
+
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
+	if _, ok := agent.Tools.Get("read_video"); !ok {
+		t.Fatal("expected read_video tool to be registered when using model alias with video: true")
+	}
+	if !agent.SupportsVideo {
+		t.Fatal("expected SupportsVideo to be true")
+	}
+}
+
+// TestGetSupportsVideo_Cases locks the video capability predicate: it mirrors
+// getSupportsImages but reads the model config's "video" flag.
+func TestGetSupportsVideo_Cases(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Providers.Named = map[string]config.NamedProviderConfig{
+		"prov": {
+			Type: "openai",
+			Models: map[string]config.ProviderModelConfig{
+				"video-model": {Model: "video-actual", Video: true},
+				"text-model":  {Model: "text-actual"},
+			},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		model    string
+		provider string
+		want     bool
+	}{
+		{name: "video flag true", model: "prov:video-model", provider: "prov", want: true},
+		{name: "video flag absent defaults to false", model: "prov:text-model", provider: "prov", want: false},
+		{name: "unknown provider", model: "nope:video-model", provider: "nope", want: false},
+		{name: "unknown model", model: "prov:missing-model", provider: "prov", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := getSupportsVideo(cfg, tt.model, tt.provider); got != tt.want {
+				t.Errorf("getSupportsVideo(%q, %q) = %v, want %v", tt.model, tt.provider, got, tt.want)
+			}
+		})
+	}
+}
+
 // ============================================================================
 // resolveAgentThinkingLevel
 // ============================================================================

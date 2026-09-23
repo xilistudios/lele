@@ -17,6 +17,7 @@ type MessageAttachment = protocoltypes.MessageAttachment
 type CommandApplied = protocoltypes.CommandApplied
 type ContentPart = protocoltypes.ContentPart
 type ImageURL = protocoltypes.ImageURL
+type VideoURL = protocoltypes.VideoURL
 type ToolDefinition = protocoltypes.ToolDefinition
 type ToolFunctionDefinition = protocoltypes.ToolFunctionDefinition
 

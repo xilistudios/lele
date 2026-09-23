@@ -63,11 +63,15 @@ type ToolLoopConfig struct {
 	// intra-loop compaction triggers. 0 (or out of range) = use the default
 	// (pkg/config.DefaultCompactionThresholdPercent).
 	CompactionThresholdPercent int
-	MessageBus                 *bus.MessageBus   // Optional: publish real-time events to TUI.
-	Channel                    string            // Origin channel for events.
-	ChatID                     string            // Origin chatID for events (subagent sessionKey).
-	VisionSupported            bool              // Whether the model supports vision. When false, read_image is filtered from tool defs.
-	Redactor                   *keyring.Redactor // Optional: redacts secret values from tool results before they enter context.
+	MessageBus                 *bus.MessageBus // Optional: publish real-time events to TUI.
+	Channel                    string          // Origin channel for events.
+	ChatID                     string          // Origin chatID for events (subagent sessionKey).
+	VisionSupported            bool            // Whether the model supports vision. When false, read_image is filtered from tool defs.
+	// VideoSupported: whether the model supports native video. VisionSupported
+	// doubles as the frames-mode capability: read_video is filtered from tool
+	// defs only when BOTH are false (native needs video, keyframes need vision).
+	VideoSupported bool
+	Redactor       *keyring.Redactor // Optional: redacts secret values from tool results before they enter context.
 	// RetryWait optionally overrides the wait function used between
 	// empty-response retries (nil means time.After). Used by tests to
 	// avoid real sleeps.
@@ -391,14 +395,20 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			providerToolDefs = config.Tools.ToProviderDefs()
 		}
 
-		// Filter out read_image when the model doesn't support vision.
+		// Filter out read_image when the model doesn't support vision, and
+		// read_video when it supports neither native video nor vision
+		// (frames-mode fallback needs vision).
 		// Mirrors the filtering in the main agent loop (pkg/agent/llm_runner.go).
-		if !config.VisionSupported {
+		if !config.VisionSupported || !config.VideoSupported {
 			filtered := make([]providers.ToolDefinition, 0, len(providerToolDefs))
 			for _, def := range providerToolDefs {
-				if def.Function.Name != "read_image" {
-					filtered = append(filtered, def)
+				if !config.VisionSupported && def.Function.Name == "read_image" {
+					continue
 				}
+				if !config.VideoSupported && !config.VisionSupported && def.Function.Name == "read_video" {
+					continue
+				}
+				filtered = append(filtered, def)
 			}
 			providerToolDefs = filtered
 		}

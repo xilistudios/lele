@@ -154,3 +154,164 @@ func TestMessageDisplayFieldsRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// --- video_url content parts (read_video tool) ---
+
+// TestMessageVideoPartRoundTrip pins persistence of video content parts:
+// the session store round-trips messages through Message.MarshalJSON /
+// UnmarshalJSON, so type, url and fps must survive, while fps stays off the
+// wire entirely when unset (omitempty).
+func TestMessageVideoPartRoundTrip(t *testing.T) {
+	m := Message{
+		Role: "user",
+		ContentParts: []ContentPart{
+			{Type: "text", Text: "Analyze the video at /tmp/demo.mp4."},
+			{Type: "video_url", VideoURL: &VideoURL{URL: "data:video/mp4;base64,AAAA", FPS: 2.0}},
+		},
+	}
+	data, err := json.Marshal(&m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"video_url"`) {
+		t.Fatalf("marshal must persist the video_url part: %s", data)
+	}
+	if !strings.Contains(string(data), `"fps"`) {
+		t.Fatalf("marshal must persist fps when set: %s", data)
+	}
+
+	var got Message
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.ContentParts) != 2 {
+		t.Fatalf("content parts = %d, want 2 (%s)", len(got.ContentParts), data)
+	}
+	video := got.ContentParts[1]
+	if video.Type != "video_url" {
+		t.Errorf("part type = %q, want video_url", video.Type)
+	}
+	if video.VideoURL == nil {
+		t.Fatal("video_url part lost its VideoURL payload on decode")
+	}
+	if video.VideoURL.URL != "data:video/mp4;base64,AAAA" {
+		t.Errorf("url = %q, want data:video/mp4;base64,AAAA", video.VideoURL.URL)
+	}
+	if video.VideoURL.FPS != 2.0 {
+		t.Errorf("fps = %v, want 2.0", video.VideoURL.FPS)
+	}
+
+	// fps must be omitted from the wire when zero.
+	plainMsg := Message{
+		Role:         "user",
+		ContentParts: []ContentPart{{Type: "video_url", VideoURL: &VideoURL{URL: "data:video/mp4;base64,AAAA"}}},
+	}
+	plain, err := json.Marshal(&plainMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(plain), `"fps"`) {
+		t.Errorf("fps must be omitted when zero: %s", plain)
+	}
+}
+
+// TestTextFromParts_VideoPlaceholder pins the reload path: when a persisted
+// message's content is a parts array, UnmarshalJSON rebuilds Content through
+// textFromParts, which must keep a "[video]" placeholder (mirroring "[image]")
+// so a reloaded message never loses the fact that media was attached.
+func TestTextFromParts_VideoPlaceholder(t *testing.T) {
+	data := `{"role":"user","content":[` +
+		`{"type":"text","text":"Analyze the video"},` +
+		`{"type":"video_url","video_url":{"url":"data:video/mp4;base64,AAAA","fps":2.0}},` +
+		`{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KGgo="}}` +
+		`]}`
+	var m Message
+	if err := json.Unmarshal([]byte(data), &m); err != nil {
+		t.Fatal(err)
+	}
+	want := "Analyze the video\n[video]\n[image]"
+	if m.Content != want {
+		t.Errorf("Content = %q, want %q", m.Content, want)
+	}
+	if strings.Contains(m.Content, "base64") || strings.Contains(m.Content, "AAAA") {
+		t.Errorf("Content leaked media payload: %q", m.Content)
+	}
+
+	// TextContent falls back to textFromParts when Content is empty.
+	empty := Message{Role: "user", ContentParts: m.ContentParts}
+	if got, want := empty.TextContent(), want; got != want {
+		t.Errorf("TextContent() = %q, want %q", got, want)
+	}
+}
+
+func TestHasVideoContent(t *testing.T) {
+	cases := []struct {
+		name  string
+		parts []ContentPart
+		want  bool
+	}{
+		{
+			name:  "non-empty video url",
+			parts: []ContentPart{{Type: "video_url", VideoURL: &VideoURL{URL: "https://example.com/v.mp4"}}},
+			want:  true,
+		},
+		{
+			name:  "empty video url",
+			parts: []ContentPart{{Type: "video_url", VideoURL: &VideoURL{URL: ""}}},
+			want:  false,
+		},
+		{
+			name:  "whitespace video url",
+			parts: []ContentPart{{Type: "video_url", VideoURL: &VideoURL{URL: "   "}}},
+			want:  false,
+		},
+		{
+			name:  "nil VideoURL",
+			parts: []ContentPart{{Type: "video_url"}},
+			want:  false,
+		},
+		{
+			name:  "image only",
+			parts: []ContentPart{{Type: "image_url", ImageURL: &ImageURL{URL: "data:image/png;base64,AAAA"}}},
+			want:  false,
+		},
+		{
+			name:  "text only",
+			parts: []ContentPart{{Type: "text", Text: "hello"}},
+			want:  false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Message{Role: "user", ContentParts: tc.parts}
+			if got := m.HasVideoContent(); got != tc.want {
+				t.Errorf("HasVideoContent() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTextOnlyContent_ContentPartsWithVideo pins the compaction contract:
+// video parts render as a "[video]" placeholder and neither the base64
+// payload nor the URL ever reaches the summarization model.
+func TestTextOnlyContent_ContentPartsWithVideo(t *testing.T) {
+	dataURL := "data:video/mp4;base64,AAAA"
+	m := Message{
+		Role: "user",
+		ContentParts: []ContentPart{
+			{Type: "text", Text: "Analyze the video at /tmp/demo.mp4."},
+			{Type: "video_url", VideoURL: &VideoURL{URL: dataURL, FPS: 2.0}},
+		},
+	}
+	got := m.TextOnlyContent()
+	want := "Analyze the video at /tmp/demo.mp4.\n[video]"
+	if got != want {
+		t.Errorf("TextOnlyContent() = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "base64") {
+		t.Errorf("TextOnlyContent() leaked video data: %q", got)
+	}
+	if strings.Contains(got, dataURL) {
+		t.Errorf("TextOnlyContent() leaked the video URL: %q", got)
+	}
+}

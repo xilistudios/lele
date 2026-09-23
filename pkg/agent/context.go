@@ -54,6 +54,12 @@ type ContextBuilder struct {
 	// tools section. Defaults to false (safe default).
 	visionSupported bool
 
+	// videoSupported indicates whether the current model supports native
+	// video input. read_video is hidden from the system prompt's tools
+	// section only when this AND visionSupported are false (native mode needs
+	// video; the keyframes fallback needs vision). Defaults to false (safe default).
+	videoSupported bool
+
 	// skillsFilter is the per-agent allowlist of skill names (from
 	// AgentConfig.Skills) applied to the <skills> block of the system prompt.
 	// nil/empty = all enabled skills. Written once at construction via
@@ -97,13 +103,37 @@ func (cb *ContextBuilder) SetToolsRegistry(registry *tools.ToolRegistry) {
 // SetVisionSupported sets whether the current model supports vision.
 // When false, the read_image tool is hidden from the system prompt's
 // tools section. Invalidates cached prompts so the next turn rebuilds.
+// The flag read/write and the cache invalidation are done under initialMu,
+// the same mutex buildToolsSection reads the flag under (via GetInitialContext).
 func (cb *ContextBuilder) SetVisionSupported(v bool) {
+	cb.initialMu.Lock()
 	if cb.visionSupported == v {
+		cb.initialMu.Unlock()
 		return
 	}
 	cb.visionSupported = v
-	// Invalidate caches so the tools section is rebuilt
+	// Invalidate caches so the tools section is rebuilt. The invalidation is
+	// a plain field write — no other method taking initialMu is called here,
+	// so this stays deadlock-free.
+	cb.initialContext = ""
+	cb.initialMu.Unlock()
+}
+
+// SetVideoSupported sets whether the current model supports native video.
+// read_video is hidden from the system prompt's tools section only when this
+// AND the vision flag are false (frames mode fallback keeps it visible).
+// Invalidates cached prompts so the next turn rebuilds.
+// Like SetVisionSupported, the flag and the cache are both guarded by
+// initialMu to avoid a data race with buildToolsSection readers.
+func (cb *ContextBuilder) SetVideoSupported(v bool) {
 	cb.initialMu.Lock()
+	if cb.videoSupported == v {
+		cb.initialMu.Unlock()
+		return
+	}
+	cb.videoSupported = v
+	// Invalidate caches so the tools section is rebuilt. Plain field write
+	// under the already-held lock — no re-entrant acquisition.
 	cb.initialContext = ""
 	cb.initialMu.Unlock()
 }
@@ -279,6 +309,14 @@ func (cb *ContextBuilder) buildToolsSection() string {
 	for _, s := range summaries {
 		// Hide read_image when the model doesn't support vision
 		if !cb.visionSupported && strings.Contains(s, "`read_image`") {
+			continue
+		}
+		// Hide read_video when the model supports neither native video nor
+		// vision: native mode needs the video capability, the keyframes
+		// fallback needs vision — either one keeps the tool visible.
+		// "`read_video`" is a distinct backticked name — it is not a substring
+		// of "`read_image`" — so the two checks can never match the same line.
+		if !cb.videoSupported && !cb.visionSupported && strings.Contains(s, "`read_video`") {
 			continue
 		}
 		sb.WriteString(s)
