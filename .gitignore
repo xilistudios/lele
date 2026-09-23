@@ -61,3 +61,8 @@ web/dist/
 web/.vite/
 web/.bun/
 .zed
+
+# web e2e (playwright)
+web/test-results/
+web/playwright-report/
+web/e2e/harness/dist/

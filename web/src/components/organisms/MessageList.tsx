@@ -345,7 +345,7 @@ export function MessageList() {
   }
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full" data-testid="message-list">
       <Virtuoso
         ref={virtuosoRef}
         key={currentSessionKey ?? 'default'}

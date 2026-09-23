@@ -140,6 +140,29 @@ function contentConfirmed(content: string, candidate: string): boolean {
   return prefix.length > 0 && candidate.startsWith(prefix)
 }
 
+/**
+ * Whether a completed streaming assistant and a base assistant are the same
+ * logical message, for the purpose of transferring the streaming React key.
+ *
+ * Position alone is not enough (defect D3): it let a stale leftover from an
+ * old turn pair with an unrelated recent base assistant and STEAL its
+ * `stableId`, so the recent answer rendered under the wrong React key.
+ * Content must agree too, with the same 200-char prefix tolerance the
+ * confirmation checks use, in either direction (the persisted copy can have
+ * gained a suffix; the streaming copy can still be a prefix of it).
+ *
+ * Empty content on either side falls back to position-only: reasoning-only
+ * iterations legitimately carry `content === ''` on both sides with their
+ * payload in `reasoningContent`, so demanding a content match there would
+ * break the tool-turn shape pinned by gate R6.
+ */
+function pairCompatible(streamContent: string, baseContent: string): boolean {
+  const s = streamContent.trim()
+  const b = baseContent.trim()
+  if (s === '' || b === '') return true
+  return contentConfirmed(s, b) || contentConfirmed(b, s)
+}
+
 // ── Base pass ───────────────────────────────────────────────────────────────
 
 type BasePassResult = {
@@ -178,9 +201,20 @@ function buildFilteredBase(
       if (baseHasCurrentTurn) {
         // Positional matching: the Nth-from-the-end streaming assistant is the
         // Nth-from-the-end base assistant.
+        // Actively-streaming candidates are new messages with no base counterpart
+        // yet; they are appended later as leftovers. Parking streamAsstIdx on one
+        // used to block positional matching for EVERY later base assistant
+        // (defect D2), turning each later completed answer into a duplicate at the
+        // bottom of the list.
+        while (
+          streamAsstIdx < index.assistants.length &&
+          index.assistants[streamAsstIdx].isStreaming
+        ) {
+          streamAsstIdx++
+        }
         if (baseAssistantIdx >= matchOffset && streamAsstIdx < index.assistants.length) {
           const candidate = index.assistants[streamAsstIdx]
-          if (!candidate.isStreaming) {
+          if (pairCompatible(candidate.msg.content, msg.content)) {
             entry = candidate
             streamAsstIdx++
           }
@@ -250,7 +284,92 @@ function buildFilteredBase(
     filteredBase.push(msg)
   }
 
+  // Defect D3 sweep: a COMPLETED streaming assistant that positional matching
+  // refused (content-incompatible with the base assistant at its slot) but whose
+  // content is already rendered from base is a stale leftover from an earlier
+  // turn. Mark it used so filterStreamingLeftovers drops it instead of appending
+  // a second copy — WITHOUT transferring its stableId, which is what let it
+  // steal an unrelated recent base assistant's React key.
+  for (const e of index.assistants) {
+    if (e.used || e.isStreaming) continue
+    if (e.msg.content.trim() === '') continue
+    const alreadyRendered = baseMessages.some(
+      (bm) => bm.role === 'assistant' && contentConfirmed(e.msg.content, bm.content),
+    )
+    if (alreadyRendered) e.used = true
+  }
+
   return { filteredBase, consumedToolIds }
+}
+
+// ── Optimistic user confirmation ────────────────────────────────────────────
+
+/**
+ * Indexes of the confirmed base users that can vouch for optimistic user
+ * `msg`: content matches for its 200-char prefix that no EARLIER optimistic
+ * message has claimed yet. Empty content yields no candidates (an empty
+ * placeholder is not a copy).
+ */
+function collectConfirmCandidates(
+  msg: ChatMessage,
+  baseMessages: ChatMessage[],
+  claimed: Set<number>,
+): number[] {
+  const prefix = msg.content.slice(0, 200)
+  if (prefix.length === 0) return []
+  const candidates: number[] = []
+  for (let i = 0; i < baseMessages.length; i++) {
+    const bm = baseMessages[i]
+    if (bm.role === 'user' && !bm.optimistic && bm.content.startsWith(prefix) && !claimed.has(i)) {
+      candidates.push(i)
+    }
+  }
+  return candidates
+}
+
+/**
+ * Index of the base message that confirms optimistic user `msg`, or -1.
+ *
+ * `claimed` holds base indexes already consumed by an EARLIER optimistic
+ * message (streaming order is chronological, so claims are handed out in send
+ * order). Without it, two rapid sends of identical text both confirmed against
+ * the first base copy and the second bubble vanished.
+ *
+ * Two independent signals, OR-ed:
+ *  - legacy count rule: the cached confirmed-user count grew past the send-time
+ *    snapshot. Valid only while the history cache grows monotonically.
+ *  - anchor rule: a confirmed copy of the text exists AFTER the send-time
+ *    anchor id, or the anchor id has slid out of the window entirely (in which
+ *    case everything still in the window is newer than the anchor). This is the
+ *    window-independent signal that fixes the saturated-window bug.
+ */
+export function findConfirmingBaseUserIndex(
+  msg: ChatMessage,
+  baseMessages: ChatMessage[],
+  baseUserCount: number,
+  claimed: Set<number>,
+): number {
+  // Rule 1: content match on the 200-char prefix (empty content → no match).
+  const candidates = collectConfirmCandidates(msg, baseMessages, claimed)
+  if (candidates.length === 0) return -1
+
+  // Rule 2: legacy count rule — the cached user count grew past the snapshot.
+  if (baseUserCount > (msg.optimisticBaseCount ?? 0)) return candidates[0]
+
+  // Rule 3: anchor rule — window-size independent.
+  const anchorId = msg.optimisticAnchorId
+  if (typeof anchorId === 'string' && anchorId.length > 0) {
+    const anchorIdx = baseMessages.findIndex((m) => m.id === anchorId)
+    if (anchorIdx === -1) {
+      // The anchor slid out of the sliding window: everything still in the
+      // window postdates the send — confirm against the newest match.
+      return candidates[candidates.length - 1]
+    }
+    const after = candidates.filter((i) => i > anchorIdx)
+    if (after.length > 0) return after[0]
+  }
+
+  return -1
 }
 
 // ── Streaming pass ──────────────────────────────────────────────────────────
@@ -283,7 +402,13 @@ function filterStreamingLeftovers(
   const baseUserCount = baseMessages.filter((m) => m.role === 'user' && !m.optimistic).length
   const usedAssistantIds = new Set(index.assistants.filter((e) => e.used).map((e) => e.msg.id))
 
-  return streamingMessages.filter((msg) => {
+  // Base indexes already consumed by an EARLIER optimistic user. Threaded
+  // across the WHOLE pass so claims are handed out in streaming (= send)
+  // order: two in-flight sends of identical text can never confirm against
+  // the same base copy (the second would otherwise vanish).
+  const claimed = new Set<number>()
+
+  const kept = streamingMessages.filter((msg) => {
     if (msg.role === 'user') {
       if (!msg.optimistic) return true
       // Confirm an optimistic user only when BOTH hold:
@@ -295,13 +420,22 @@ function filterStreamingLeftovers(
       // appear earlier in the conversation. Count alone is not enough either:
       // two rapid sends share the same optimisticBaseCount, so confirming the
       // first used to drop the second (user message vanishes / order breaks).
-      const prefix = msg.content.slice(0, 200)
-      const contentConfirmed =
-        prefix.length > 0 &&
-        baseMessages.some(
-          (bm) => bm.role === 'user' && !bm.optimistic && bm.content.startsWith(prefix),
-        )
-      if (contentConfirmed && baseUserCount > (msg.optimisticBaseCount ?? 0)) {
+      //
+      // SATURATED-WINDOW BUG (why the anchor exists): rule 2 is only valid
+      // while the cached history grows monotonically — it does not. The
+      // backend serves history as a sliding window of the last `limit`
+      // messages (pkg/channels/rest_chat.go, `resultStartIdx := endIdx - limit`)
+      // and useChatHistory's queryFn REPLACES the cache with that window
+      // whenever `cachedData.messages.length <= DEFAULT_LIMIT` (DEFAULT_LIMIT
+      // = 50). Past 50 messages the cached confirmed-user count SATURATES, so
+      // `baseUserCount > optimisticBaseCount` is false forever, the bubble
+      // becomes immortal and mergeMessages strands it at the END — after newer
+      // answers — until a page refresh clears streamingMessages. The
+      // send-time anchor id (`optimisticAnchorId`, a position-independent
+      // content-derived base id) confirms against position instead of counts.
+      const confirmIdx = findConfirmingBaseUserIndex(msg, baseMessages, baseUserCount, claimed)
+      if (confirmIdx !== -1) {
+        claimed.add(confirmIdx)
         return false
       }
       return true
@@ -329,6 +463,50 @@ function filterStreamingLeftovers(
 
     return true
   })
+
+  return kept
+}
+
+// ── Render-key guard ───────────────────────────────────────────────────────
+
+/**
+ * Last-resort guard: the render key React/Virtuoso uses is `stableId ?? id`, and
+ * a duplicate key makes a virtualized list mis-render or silently drop a bubble
+ * — the "messages lose their order until I refresh the page" symptom.
+ *
+ * Base data never collides: residentMessageID occurrence-indexes repeated content
+ * (pkg/channels/rest_chat.go). Collisions can only be introduced by the merge
+ * itself, because buildFilteredBase ASSIGNS stableId when it pairs a streaming
+ * message onto a base message (defect D3 was such a key steal). Normalizing here
+ * keeps a future merge bug cosmetic instead of structural.
+ *
+ * The FIRST holder of a key keeps it unchanged — that is the bubble already on
+ * screen, so preserving its key avoids a remount. A later colliding entry is
+ * re-keyed onto its own `id`, or a `__dup<n>` variant when that is taken too.
+ * `id` itself is NEVER rewritten: retry and attachment logic key off it.
+ *
+ * Returns the input array untouched when there is nothing to fix, so the common
+ * path does not allocate.
+ */
+export function enforceUniqueRenderKeys(messages: ChatMessage[]): ChatMessage[] {
+  const seen = new Set<string>()
+  let collided = false
+  const out = messages.map((m) => {
+    const key = m.stableId ?? m.id
+    if (!seen.has(key)) {
+      seen.add(key)
+      return m
+    }
+    collided = true
+    let next = m.id
+    let n = 1
+    while (seen.has(next)) {
+      next = `${m.id}__dup${n++}`
+    }
+    seen.add(next)
+    return { ...m, stableId: next }
+  })
+  return collided ? out : messages
 }
 
 // ── Entry point ─────────────────────────────────────────────────────────────
@@ -350,9 +528,14 @@ export function mergeMessages(
   const index = indexStreaming(streamingMessages)
   const baseHasCurrentTurn = computeBaseHasCurrentTurn(baseMessages, streamingMessages)
   const baseAssistantCount = baseMessages.filter((m) => m.role === 'assistant').length
+  // Only COMPLETED streaming assistants are position-pairable: an actively
+  // streaming one is a new message with no base counterpart yet, and counting
+  // it shifted the offset so a completed answer paired with the WRONG (older)
+  // base assistant.
+  const matchableAssistantCount = index.assistants.filter((e) => !e.isStreaming).length
   const matchOffset = computeMatchOffset(
     baseAssistantCount,
-    index.assistants.length,
+    matchableAssistantCount,
     baseHasCurrentTurn,
   )
 
@@ -371,5 +554,8 @@ export function mergeMessages(
     consumedToolIds,
   )
 
-  return [...filteredBase, ...filteredStreaming]
+  // D4 guard on the COMBINED list — a collision can span the two halves (a
+  // base message and a streaming leftover can share a render key), so it is
+  // normalized only after concatenation, never per half.
+  return enforceUniqueRenderKeys([...filteredBase, ...filteredStreaming])
 }

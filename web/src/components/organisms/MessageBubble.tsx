@@ -156,6 +156,8 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
     return (
       <div
         data-message-id={message.stableId ?? message.id}
+        data-testid="message"
+        data-role={message.role}
         className={`py-1.5 ${animate ? 'animate-message-enter' : ''}`}
       >
         <ToolCallDisplay
@@ -179,6 +181,8 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
     return (
       <div
         data-message-id={message.stableId ?? message.id}
+        data-testid="message"
+        data-role={message.role}
         className={`flex justify-end py-1 ${animate ? 'animate-message-enter' : ''}`}
       >
         <div className="max-w-[70%] space-y-2 rounded-2xl bg-background-tertiary shadow-card px-4 py-2.5 text-sm text-text-primary whitespace-pre-wrap">
@@ -230,6 +234,8 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
   return (
     <div
       data-message-id={message.stableId ?? message.id}
+      data-testid="message"
+      data-role={message.role}
       className={`py-3 ${animate ? 'animate-message-enter' : ''}`}
     >
       {message.excludeFromContext && (
