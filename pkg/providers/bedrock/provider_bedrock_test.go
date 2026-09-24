@@ -293,6 +293,26 @@ func TestBuildUserContent_SkipsNonBase64Data(t *testing.T) {
 	assert.Len(t, content, 1)
 }
 
+// TestBuildUserContent_SkipsVideoParts verifies the defensive hardening:
+// Bedrock (Anthropic family) has no native video input, so a video_url
+// content part must be dropped without affecting the remaining blocks.
+func TestBuildUserContent_SkipsVideoParts(t *testing.T) {
+	msg := Message{
+		ContentParts: []protocoltypes.ContentPart{
+			{Type: "text", Text: "Watch this"},
+			{Type: "video_url", VideoURL: &protocoltypes.VideoURL{URL: "https://example.com/clip.mp4", FPS: 1}},
+		},
+	}
+
+	content := buildUserContent(msg)
+
+	// Only the text block survives — the video part is dropped, no panic.
+	assert.Len(t, content, 1)
+	textBlock, ok := content[0].(*types.ContentBlockMemberText)
+	require.True(t, ok)
+	assert.Equal(t, "Watch this", textBlock.Value)
+}
+
 func TestBuildAssistantContent_SkipsEmptyToolName(t *testing.T) {
 	msg := Message{
 		Content: "Response",

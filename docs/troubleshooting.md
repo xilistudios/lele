@@ -74,6 +74,51 @@ lele auth login --provider openai
 lele auth login --provider anthropic
 ```
 
+## `read_video is not available: the current model supports neither video nor vision`
+
+`read_video` is hidden (and blocked at execution time) unless the session
+model's config sets the `video` **or** the `vision` capability flag:
+
+```json
+"models": {
+  "gemini-2.5-pro": {
+    "model": "google/gemini-2.5-pro",
+    "video": true
+  }
+}
+```
+
+Set the flag on the model entry under `providers.<name>.models`:
+
+- `"video": true` — native `video_url` delivery (video-only models use this;
+  with both flags, `mode=auto` picks native).
+- `"vision": true` — models without native video get `read_video` through
+  frames mode (keyframes + transcript); no `video` flag needed.
+
+Providers that accept the `video_url` content part: OpenRouter (Gemini,
+Qwen-VL, Kimi, Grok routes), xAI Grok, Qwen-VL (DashScope/vLLM/Ollama), and
+Moonshot Kimi via plain URLs. OpenAI and Anthropic do **not** accept native
+video — leave `video` unset there and rely on `vision` (frames mode).
+
+### `frames mode requires ffmpeg and ffprobe on PATH`
+
+Frames mode (keyframes + transcript, used for vision-only models) shells
+out to `ffmpeg`/`ffprobe` at call time — an optional runtime dependency,
+not bundled with lele. Install ffmpeg (provides both binaries), e.g.
+`sudo apt install ffmpeg` or `brew install ffmpeg`, so both resolve on
+`PATH`. Alternative: enable native video via the model's `"video": true`
+flag so `mode=auto` delivers a `video_url` instead and never touches
+ffmpeg.
+
+### Provider returns 400 on `video_url`
+
+The endpoint rejected the `video_url` content part: that provider/model route
+does not accept inline video. Disable `"video": true` for that model — with
+`"vision": true` set, `mode=auto` then falls back to frames mode (or the tool
+becomes hidden again if `vision` is also unset) — or route the model through a
+provider that supports it (see the provider matrix in
+`docs/agents-models-providers.md`).
+
 ## No Channels Enabled
 
 If `lele gateway` starts but warns that no channels are enabled, check the `channels` section in config and verify the required credentials are present.

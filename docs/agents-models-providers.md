@@ -302,7 +302,12 @@ Supported per-model fields include:
 - `max_tokens`
 - `temperature`
 - `vision`
+- `video`
 - `reasoning`
+
+`vision: true` enables the `read_image` tool and `read_video`'s frames mode
+(keyframes + audio transcript); `video: true` adds native `video_url`
+delivery for `read_video` (see [Video input (read_video)](#video-input-read_video)).
 
 ### Example
 
@@ -319,6 +324,12 @@ Supported per-model fields include:
           "vision": true,
           "temperature": 0.7
         },
+        "gemini-pro": {
+          "model": "google/gemini-2.5-pro",
+          "context_window": 1048576,
+          "vision": true,
+          "video": true
+        },
         "o4-mini": {
           "model": "o4-mini",
           "context_window": 200000,
@@ -333,6 +344,127 @@ Supported per-model fields include:
   }
 }
 ```
+
+### Video input (read_video)
+
+`read_video` is offered to any model with **video or vision** capability.
+The `mode` argument picks the delivery:
+
+- **native** — the video is injected as a `video_url` multimodal content
+  part (base64 `data:` URL for local files, raw URL for `url`). Requires the
+  model's `video` flag.
+- **frames** — N evenly-spaced JPEG keyframes injected as `image_url`
+  content parts, plus the audio transcript as a text part. Requires the
+  model's `vision` flag and `ffmpeg`/`ffprobe` on `PATH` (optional
+  runtime-only dependency, never a build dependency).
+
+The tool contract:
+
+- `path` — a local video file (mp4, m4v, webm, mov, avi, mkv, mpeg, mpg,
+  ogv). Exactly one of `path`/`url` must be given (path XOR url).
+- `url` — a public `http(s)` URL, including YouTube URLs (only useful on
+  Gemini-backed routes). **Native mode only**: frames mode rejects URLs and
+  requires a local path.
+- `mode` — `auto` (default) | `native` | `frames`. `auto` resolves
+  against the model handling the current call — the session/turn model (or
+  the subagent's own model), not a capability snapshot taken when the agent
+  instance was created: native when that model has the `video` flag, frames
+  when it only has `vision`, and fails when it has neither.
+- `frames` — frames mode only: number of keyframes to extract, 1–16,
+  default 8.
+- `prompt` — optional text sent alongside the video.
+- `fps` — optional frame-sampling hint, `0 < fps ≤ 60`. **Native mode
+  only** — when set, lele always includes it in the `video_url` object;
+  support is provider-specific (Qwen-VL family honors it; others may ignore
+  or reject it).
+
+Exposure and gating:
+
+- The tool is offered when the model has `video` **or** `vision`:
+  video-only → native; vision-only → frames; both → `auto` picks native;
+  neither → the tool is hidden from the model and blocked at execution time
+  (exactly like `read_image` is hidden without `vision`).
+- Stripping of historical `video_url` content parts after switching to a
+  model that cannot ingest them is still keyed on the `video` flag only.
+
+#### Frames mode (keyframes + transcript)
+
+- Requires `ffmpeg` and `ffprobe` on `PATH`, checked at call time. Install
+  ffmpeg to use frames mode, or give the model native video support instead
+  (`"video": true`).
+- Extracts N evenly-spaced keyframes across the video as JPEGs capped at
+  1280 px wide, injected as base64 `image_url` parts.
+- Extracts the audio track (16 kHz mono WAV) and transcribes it when a Groq
+  API key is configured (`providers.groq.apiKey` — the same signal the
+  gateway uses for channel voice transcription); the transcript is injected
+  as a trailing text part.
+- Graceful degradation: a missing or failed transcript never aborts the
+  read. When transcription is configured, the model sees a placeholder text
+  part explaining the gap — `no audio track detected`, `no speech
+  detected`, or `audio transcription failed`. When transcription is NOT
+  configured (no Groq API key), no transcript part is added at all: the tool
+  result summary notes `transcription not configured` instead, and the model
+  never sees it as transcript content.
+- Local file cap: **200 MiB** (`maxVideoFramesReadSize` in
+  `pkg/tools/video.go`) — nothing from the video itself is base64'd; only
+  the extracted keyframes (a few hundred KB each) enter the context. Each
+  ffmpeg operation is bounded by a **60 s** timeout
+  (`videoFramesTimeout`).
+- Motion/temporal detail is limited to the N keyframes, and audio reaches
+  the model only as transcript text (no native audio understanding).
+
+#### Provider matrix
+
+| Provider | `video_url` support | Notes |
+| --- | --- | --- |
+| OpenRouter | Yes — URL or base64 data URL | `google/gemini` video-capable models, `qwen-vl`, `kimi`, `grok`. Gemini via AI Studio through OpenRouter: YouTube URLs only. |
+| xAI Grok | Yes — URL, base64 data URL, or `file_id` | |
+| Qwen-VL (DashScope / vLLM / Ollama) | Yes — whole mp4 as `video_url` | Qwen3-VL understands the audio track; Qwen2.5-VL is frames-only (no audio). Optional `fps`. |
+| MiMo (Xiaomi, OpenAI-compatible endpoint) | Yes — URL or base64 data URL | `video_url` with mp4/webm/avi/mkv/mov, ≤100 MB / ≤1000 s per call. The v2.5 docs state the audio track is not processed; `mimo-v2.6-pro`/`mimo-v2.6-flash` were verified to transcribe speech from the video's audio track. `fps` is accepted but undocumented (treated as ignored). |
+| Moonshot Kimi | No (for lele v1) | Video via Files API `ms://` file ids is **not supported** by lele v1. |
+| Gemini direct (`generativelanguage` OpenAI-compat path used by lele) | Unverified | `video_url` support on this path is **unverified**; for Gemini video understanding, configure the model through OpenRouter. Native `inline_data`/File API support is future work. |
+| OpenAI / Anthropic | No | No native video — do not set `video: true`. With `vision: true` they now get `read_video` via frames mode, no video flag needed: keyframes as `image_url` parts plus the audio transcript as text. Audio reaches them only as transcript text, and visual motion/temporal detail is limited to the N keyframes. |
+
+#### Tokens and limits
+
+- Gemini 2.5/3.x sample video at 1 fps plus 16 kbps audio by default,
+  ≈ **258 tokens per second** of video.
+- Native mode inlines local files up to **20 MiB** (`maxVideoReadSize` in
+  `pkg/tools/video.go`) as a base64 `data:` URL; larger files must be
+  referenced with `url`.
+- Frames mode accepts local files up to **200 MiB**
+  (`maxVideoFramesReadSize`): nothing is base64'd from the video itself —
+  only the extracted JPEG keyframes enter context — so the 20 MiB native cap
+  does not apply. Each ffmpeg operation has a 60 s timeout.
+- Base64 inflates the payload by ~33% on the wire (native mode), and — same
+  as `read_image` — the inlined video is persisted in session history (known
+  limitation).
+
+#### Recommended config
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "type": "openrouter",
+      "api_key": "{{ENV_OPENROUTER_API_KEY}}",
+      "models": {
+        "gemini-2.5-pro": {
+          "model": "google/gemini-2.5-pro",
+          "context_window": 1048576,
+          "vision": true,
+          "video": true
+        }
+      }
+    }
+  }
+}
+```
+
+Models without native video support (OpenAI, Anthropic) only need
+`"vision": true`: `read_video` is then served in frames mode (keyframes +
+transcript, requires `ffmpeg`/`ffprobe` on `PATH`).
+
 
 ## How Model Selection Works
 

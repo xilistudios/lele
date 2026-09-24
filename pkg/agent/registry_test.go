@@ -429,6 +429,57 @@ func TestAgentConfigChanged_ContextWindow(t *testing.T) {
 	}
 }
 
+// TestAgentConfigChanged_SupportsVideo locks the instance-rebuild path for
+// the video capability flag: flipping a model's `video` config while the
+// resolved model name stays the same must recreate the instance, otherwise
+// a /model switch (or config edit) would keep serving stale video gating
+// until gateway restart. Mirrors the SupportsImages rebuild check.
+func TestAgentConfigChanged_SupportsVideo(t *testing.T) {
+	cfg := testCfg(t, []config.AgentConfig{
+		{ID: "alpha", Default: true},
+	})
+	cfg.Providers.Named["testprovider"] = config.NamedProviderConfig{
+		Type: "openai",
+		ProviderConfig: config.ProviderConfig{
+			APIKey:  "test-key",
+			APIBase: "https://test.example.com/v1",
+		},
+		Models: map[string]config.ProviderModelConfig{
+			"test-model": {Video: false},
+		},
+	}
+	registry := NewAgentRegistry(cfg)
+	original, _ := registry.GetAgent("alpha")
+
+	if original.SupportsVideo {
+		t.Fatal("expected initial instance to not support video")
+	}
+
+	// Same model name, but the model config now advertises video support.
+	newCfg := testCfg(t, []config.AgentConfig{
+		{ID: "alpha", Default: true},
+	})
+	newCfg.Providers.Named["testprovider"] = config.NamedProviderConfig{
+		Type: "openai",
+		ProviderConfig: config.ProviderConfig{
+			APIKey:  "test-key",
+			APIBase: "https://test.example.com/v1",
+		},
+		Models: map[string]config.ProviderModelConfig{
+			"test-model": {Video: true},
+		},
+	}
+	registry.ReloadAgents(newCfg)
+
+	reloaded, _ := registry.GetAgent("alpha")
+	if reloaded == original {
+		t.Error("expected new agent instance when video capability changed, got same instance")
+	}
+	if !reloaded.SupportsVideo {
+		t.Error("expected reloaded instance to support video")
+	}
+}
+
 // TestAgentConfigChanged_ThinkingLevel locks the hot-reload path: saving a new
 // thinking_level in config.json must make ReloadRegistry recreate the instance
 // (agentConfigChanged=true), otherwise the stale resolved level survives until

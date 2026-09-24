@@ -303,14 +303,21 @@ func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
 func (lc *llmCaller) callWithFallback(opts llmCallOptions, llmOptions map[string]interface{}) (*providers.LLMResponse, error) {
 	fbResult, fbErr := lc.al.fallback.Execute(opts.ctx, opts.candidates,
 		func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
-			// Strip image content if this candidate model doesn't support
-			// vision. The read_image tool is exposed based on the primary
-			// model, so messages may contain image_url ContentParts that a
-			// non-vision fallback would reject with an API error.
+			// Strip media content this candidate model can't handle. The
+			// read_image tool is exposed based on the primary model, so
+			// messages may contain image_url ContentParts that a non-vision
+			// fallback would reject with an API error; likewise, messages may
+			// contain video_url ContentParts that a fallback without native
+			// video support would reject. Each capability is evaluated
+			// per-candidate, so a vision-capable fallback keeps images (and a
+			// video-capable fallback keeps videos) even when another candidate
+			// in the chain lacks them.
 			messages := opts.messages
 			candidateModel := provider + ":" + model
-			if !getSupportsImages(lc.al.cfg(), candidateModel, provider) {
-				messages = stripImageContentParts(messages)
+			candidateHasImages := getSupportsImages(lc.al.cfg(), candidateModel, provider)
+			candidateHasVideo := getSupportsVideo(lc.al.cfg(), candidateModel, provider)
+			if !candidateHasImages || !candidateHasVideo {
+				messages = stripContentParts(messages, !candidateHasImages, !candidateHasVideo)
 			}
 
 			providerInst, err := providers.CreateProviderForCandidate(lc.al.cfg(), provider)

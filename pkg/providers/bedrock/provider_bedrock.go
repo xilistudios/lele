@@ -328,6 +328,9 @@ func buildUserContent(msg Message) []types.ContentBlock {
 				}
 				blocks := dataURLToBedrockImages(part.ImageURL.URL)
 				content = append(content, blocks...)
+			case "video_url":
+				// Bedrock Claude models have no native video input; video parts are gated upstream (model config video flag) and dropped here defensively.
+				continue
 			}
 		}
 

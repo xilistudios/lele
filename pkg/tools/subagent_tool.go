@@ -76,12 +76,14 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 	// Resolve agent config using shared method (same as runTask)
 	agentProvider, agentModel, systemPrompt, maxIter, llmOptions, agentContextWindow := sm.resolveAgentConfig(agentID)
 
-	// Determine whether the resolved model supports vision so RunToolLoop
-	// can filter out read_image for non-vision models.
+	// Determine whether the resolved model supports vision and native video
+	// so RunToolLoop can filter out read_image/read_video accordingly.
 	sm.mu.RLock()
 	visionChecker := sm.visionChecker
 	sm.mu.RUnlock()
 	visionSupported := visionChecker != nil && visionChecker(agentModel)
+	videoChecker := sm.getVideoChecker()
+	videoSupported := videoChecker != nil && videoChecker(agentModel)
 
 	// Build messages the same way as runTask: system prompt + user task
 	messages := []providers.Message{
@@ -142,6 +144,11 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		defer timeoutCancel()
 	}
 
+	// Stamp the resolved model's capabilities so read_video resolves mode=auto
+	// per call instead of falling back to the shared registry snapshot (the
+	// async runner does the same in subagent_runner.go).
+	taskCtx = WithVideoCaps(taskCtx, VideoCapabilities{Video: videoSupported, Vision: visionSupported})
+
 	loopResult, err := RunToolLoop(taskCtx, ToolLoopConfig{
 		Provider:                   agentProvider,
 		Model:                      agentModel,
@@ -150,6 +157,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		LLMOptions:                 llmOptions,
 		Retry:                      retryConfigPtr(),
 		VisionSupported:            visionSupported,
+		VideoSupported:             videoSupported,
 		ContextWindow:              agentContextWindow,
 		CompactionThresholdPercent: sm.getCompactionThresholdPercent(),
 		Redactor:                   t.manager.getRedactor(),

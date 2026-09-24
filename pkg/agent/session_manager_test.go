@@ -472,3 +472,42 @@ func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
 		}
 	}
 }
+
+// TestEstimateTokens_VideoPartCounts pins the video token accounting fix:
+// a message carrying a video_url content part must be estimated substantially
+// higher than an identical text-only message, by at least
+// videoPartEstimateChars (converted through the same 2.5 chars/token
+// heuristic), so compaction triggers before the provider rejects an
+// over-length request.
+func TestEstimateTokens_VideoPartCounts(t *testing.T) {
+	sm := &sessionManagerImpl{}
+
+	textOnly := []providers.Message{
+		{
+			Role: "user",
+			ContentParts: []providers.ContentPart{
+				{Type: "text", Text: "Describe this clip."},
+			},
+		},
+	}
+	withVideo := []providers.Message{
+		{
+			Role: "user",
+			ContentParts: []providers.ContentPart{
+				{Type: "text", Text: "Describe this clip."},
+				{Type: "video_url", VideoURL: &providers.VideoURL{URL: "https://example.com/clip.mp4"}},
+			},
+		},
+	}
+
+	textTokens := sm.EstimateTokens(textOnly)
+	videoTokens := sm.EstimateTokens(withVideo)
+	// The video branch adds videoPartEstimateChars raw chars; EstimateTokens
+	// returns chars * 2 / 5, so the expected delta is at least that value
+	// converted with the same heuristic.
+	minDelta := videoPartEstimateChars * 2 / 5
+	if delta := videoTokens - textTokens; delta < minDelta {
+		t.Fatalf("video part raised estimate by %d tokens, want >= %d (text=%d, video=%d)",
+			delta, minDelta, textTokens, videoTokens)
+	}
+}

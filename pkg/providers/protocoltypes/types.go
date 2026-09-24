@@ -124,11 +124,20 @@ type ImageURL struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// VideoURL represents a video URL for multimodal content; URL may be an
+// http(s) URL or a data:video/...;base64 URL. FPS is an optional
+// sampling-hint forwarded only to providers that support it (Qwen-VL family).
+type VideoURL struct {
+	URL string  `json:"url"`
+	FPS float64 `json:"fps,omitempty"`
+}
+
 // ContentPart represents a part of multimodal content.
 type ContentPart struct {
 	Type     string    `json:"type"`
 	Text     string    `json:"text,omitempty"`
 	ImageURL *ImageURL `json:"image_url,omitempty"`
+	VideoURL *VideoURL `json:"video_url,omitempty"`
 }
 
 // MessageAttachment is a file attachment associated with a message. It is the
@@ -289,11 +298,21 @@ func (m *Message) HasImageContent() bool {
 	return false
 }
 
+func (m *Message) HasVideoContent() bool {
+	for _, part := range m.ContentParts {
+		if part.Type == "video_url" && part.VideoURL != nil && strings.TrimSpace(part.VideoURL.URL) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // TextOnlyContent returns a guaranteed text-only representation of the message,
 // suitable for feeding into a summarization/compaction model that may not
-// support vision. Image content parts are rendered as "[image]" and attached
-// media entries as "[media]" placeholders, so no base64 payloads or image URLs
-// ever reach the model. The result is always plain text.
+// support vision. Image content parts are rendered as "[image]", video content
+// parts as "[video]", and attached media entries as "[media]" placeholders, so
+// no base64 payloads, image URLs or video URLs ever reach the model. The
+// result is always plain text.
 func (m *Message) TextOnlyContent() string {
 	var builder strings.Builder
 
@@ -319,6 +338,11 @@ func (m *Message) TextOnlyContent() string {
 				builder.WriteByte('\n')
 			}
 			builder.WriteString("[image]")
+		case "video_url":
+			if builder.Len() > 0 {
+				builder.WriteByte('\n')
+			}
+			builder.WriteString("[video]")
 		}
 	}
 
@@ -333,6 +357,10 @@ func (m *Message) TextOnlyContent() string {
 	return builder.String()
 }
 
+// textFromParts rebuilds a plain-text Content value from multimodal content
+// parts (used when a persisted message is reloaded). Besides the joined text
+// parts it keeps "[image]" and "[video]" placeholders for media parts, so the
+// reloaded message never loses the fact that media was attached.
 func textFromParts(parts []ContentPart) string {
 	if len(parts) == 0 {
 		return ""
@@ -355,6 +383,11 @@ func textFromParts(parts []ContentPart) string {
 				builder.WriteByte('\n')
 			}
 			builder.WriteString("[image]")
+		case "video_url":
+			if builder.Len() > 0 {
+				builder.WriteByte('\n')
+			}
+			builder.WriteString("[video]")
 		}
 	}
 

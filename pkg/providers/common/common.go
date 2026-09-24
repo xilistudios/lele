@@ -202,8 +202,8 @@ type openaiMessage struct {
 
 // SerializeMessages converts internal Message structs to the OpenAI wire format.
 //   - Strips SystemParts (unknown to third-party endpoints)
-//   - Converts messages with ContentParts to multipart content (text + image_url)
-//   - Converts messages with Media to multipart content format (text + image_url parts)
+//   - Converts messages with ContentParts to multipart content (text + image_url + video_url)
+//   - Converts messages with Media to multipart content format (text + image_url/video_url/input_audio parts)
 //   - If both ContentParts and Media are present, merges them (ContentParts first)
 //   - Preserves ToolCallID, ToolCalls, and ReasoningContent for all messages
 func SerializeMessages(messages []Message) []any {
@@ -249,6 +249,18 @@ func SerializeMessages(messages []Message) []any {
 					"type":      "image_url",
 					"image_url": imageURL,
 				})
+			case "video_url":
+				if part.VideoURL == nil || strings.TrimSpace(part.VideoURL.URL) == "" {
+					continue
+				}
+				videoURL := map[string]any{"url": part.VideoURL.URL}
+				if part.VideoURL.FPS > 0 {
+					videoURL["fps"] = part.VideoURL.FPS
+				}
+				parts = append(parts, map[string]any{
+					"type":      "video_url",
+					"video_url": videoURL,
+				})
 			case "input_audio":
 				// Input audio is only available via Media path
 			}
@@ -268,6 +280,16 @@ func SerializeMessages(messages []Message) []any {
 				parts = append(parts, map[string]any{
 					"type": "image_url",
 					"image_url": map[string]any{
+						"url": mediaURL,
+					},
+				})
+				continue
+			}
+
+			if strings.HasPrefix(mediaURL, "data:video/") {
+				parts = append(parts, map[string]any{
+					"type": "video_url",
+					"video_url": map[string]any{
 						"url": mediaURL,
 					},
 				})

@@ -73,6 +73,8 @@ type AgentProvidable interface {
 	SetSessionMode(sessionKey, mode string) error
 	// GetSessionModelSupportsImages returns true if the session's current model supports vision
 	GetSessionModelSupportsImages(sessionKey string) bool
+	// GetSessionModelSupportsVideo returns true if the session's current model supports native video input
+	GetSessionModelSupportsVideo(sessionKey string) bool
 	// SetSessionModel establece el modelo de una sesión
 	SetSessionModel(sessionKey, model string) string
 	// SetSessionFolder establece el folder seleccionado por el usuario para una
@@ -219,6 +221,7 @@ type AgentBasicInfo struct {
 	SkillsFilter   []string
 	Reasoning      *config.ReasoningConfig
 	SupportsImages bool
+	SupportsVideo  bool
 }
 
 // AgentToolInfo describes one tool registered in an agent's tool registry.

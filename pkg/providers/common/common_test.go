@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
 
 // --- NewHTTPClient tests ---
@@ -237,6 +239,144 @@ func TestSerializeMessages_MediaWithToolCallID(t *testing.T) {
 
 	if msgs[0]["tool_call_id"] != "call_1" {
 		t.Errorf("tool_call_id not preserved, got %v", msgs[0]["tool_call_id"])
+	}
+}
+
+// serializeToMaps marshals SerializeMessages output and decodes it back the
+// same way the request body round-trips through JSON on the wire.
+func serializeToMaps(t *testing.T, result []any) []map[string]any {
+	t.Helper()
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var msgs []map[string]any
+	if err := json.Unmarshal(data, &msgs); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return msgs
+}
+
+// contentPartsOf returns the decoded content array of a wire message.
+func contentPartsOf(t *testing.T, msg map[string]any) []any {
+	t.Helper()
+	content, ok := msg["content"].([]any)
+	if !ok {
+		t.Fatalf("expected array content, got %T", msg["content"])
+	}
+	return content
+}
+
+// TestSerializeMessages_VideoContentPart pins the exact wire shape of a
+// video_url content part: fps is present only when > 0, and parts with an
+// empty/whitespace URL (or a nil VideoURL) are skipped entirely.
+func TestSerializeMessages_VideoContentPart(t *testing.T) {
+	dataURL := "data:video/mp4;base64,AAAA"
+
+	t.Run("fps forwarded when positive", func(t *testing.T) {
+		msgs := serializeToMaps(t, SerializeMessages([]Message{{
+			Role: "user",
+			ContentParts: []protocoltypes.ContentPart{
+				{Type: "text", Text: "watch this"},
+				{Type: "video_url", VideoURL: &protocoltypes.VideoURL{URL: dataURL, FPS: 2.5}},
+			},
+		}}))
+		content := contentPartsOf(t, msgs[0])
+		if len(content) != 2 {
+			t.Fatalf("content parts = %d, want 2", len(content))
+		}
+		videoPart, ok := content[1].(map[string]any)
+		if !ok {
+			t.Fatalf("video part = %T, want object", content[1])
+		}
+		if videoPart["type"] != "video_url" {
+			t.Fatalf("type = %v, want video_url", videoPart["type"])
+		}
+		video, ok := videoPart["video_url"].(map[string]any)
+		if !ok {
+			t.Fatalf("video_url = %T, want object", videoPart["video_url"])
+		}
+		if video["url"] != dataURL {
+			t.Errorf("url = %v, want %q", video["url"], dataURL)
+		}
+		if video["fps"] != 2.5 {
+			t.Errorf("fps = %v, want 2.5", video["fps"])
+		}
+	})
+
+	t.Run("omitted fps stays off the wire", func(t *testing.T) {
+		msgs := serializeToMaps(t, SerializeMessages([]Message{{
+			Role: "user",
+			ContentParts: []protocoltypes.ContentPart{
+				{Type: "video_url", VideoURL: &protocoltypes.VideoURL{URL: dataURL}},
+			},
+		}}))
+		content := contentPartsOf(t, msgs[0])
+		if len(content) != 1 {
+			t.Fatalf("content parts = %d, want 1", len(content))
+		}
+		videoPart, ok := content[0].(map[string]any)
+		if !ok {
+			t.Fatalf("video part = %T, want object", content[0])
+		}
+		video, ok := videoPart["video_url"].(map[string]any)
+		if !ok {
+			t.Fatalf("video_url = %T, want object", videoPart["video_url"])
+		}
+		if _, hasFPS := video["fps"]; hasFPS {
+			t.Errorf("fps must be omitted when <= 0: %v", video)
+		}
+	})
+
+	t.Run("empty url parts are skipped", func(t *testing.T) {
+		msgs := serializeToMaps(t, SerializeMessages([]Message{{
+			Role: "user",
+			ContentParts: []protocoltypes.ContentPart{
+				{Type: "text", Text: "watch this"},
+				{Type: "video_url", VideoURL: &protocoltypes.VideoURL{URL: ""}},
+				{Type: "video_url", VideoURL: &protocoltypes.VideoURL{URL: "   "}},
+				{Type: "video_url"},
+			},
+		}}))
+		content := contentPartsOf(t, msgs[0])
+		if len(content) != 1 {
+			t.Fatalf("content parts = %d, want 1 (only the text part)", len(content))
+		}
+	})
+}
+
+// TestSerializeMessages_WithVideoMedia mirrors TestSerializeMessages_WithAudioMedia
+// for data:video/... entries in Message.Media (channel attachments path).
+func TestSerializeMessages_WithVideoMedia(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "watch this", Media: []string{"data:video/mp4;base64,abc123"}},
+	}
+	result := SerializeMessages(messages)
+
+	msgs := serializeToMaps(t, result)
+	content := contentPartsOf(t, msgs[0])
+	if len(content) != 2 {
+		t.Fatalf("expected 2 content parts, got %d", len(content))
+	}
+
+	videoPart, ok := content[1].(map[string]any)
+	if !ok {
+		t.Fatalf("expected video content part to be an object, got %T", content[1])
+	}
+	if videoPart["type"] != "video_url" {
+		t.Fatalf("video part type = %v, want video_url", videoPart["type"])
+	}
+
+	video, ok := videoPart["video_url"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected video_url object, got %T", videoPart["video_url"])
+	}
+	if video["url"] != "data:video/mp4;base64,abc123" {
+		t.Fatalf("video url = %v, want data:video/mp4;base64,abc123", video["url"])
+	}
+	// The media path carries no fps hint.
+	if _, hasFPS := video["fps"]; hasFPS {
+		t.Errorf("media video part must not carry fps: %v", video)
 	}
 }
 

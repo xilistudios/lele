@@ -465,12 +465,20 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 			})
 	}
 
-	// Determine whether the resolved model supports vision so RunToolLoop
-	// can filter out read_image for non-vision models.
+	// Determine whether the resolved model supports vision and native video
+	// so RunToolLoop can filter out read_image/read_video accordingly.
 	sm.mu.RLock()
 	visionChecker := sm.visionChecker
 	sm.mu.RUnlock()
 	visionSupported := visionChecker != nil && visionChecker(agentModel)
+	videoChecker := sm.getVideoChecker()
+	videoSupported := videoChecker != nil && videoChecker(agentModel)
+
+	// Stamp the subagent's actual model capabilities onto the tool context so
+	// read_video's mode=auto resolves against THIS model (not the
+	// construction-time snapshot of the shared tool registry — see
+	// tools.WithVideoCaps). No stamp = the tool's snapshot applies.
+	ctx = WithVideoCaps(ctx, VideoCapabilities{Video: videoSupported, Vision: visionSupported})
 
 	messages := previousTask.buildMessages(systemPrompt)
 
@@ -569,6 +577,7 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		MessageBus:                 sm.bus,
 		ChatID:                     sessionKey,
 		VisionSupported:            visionSupported,
+		VideoSupported:             videoSupported,
 		Redactor:                   sm.getRedactor(),
 
 		CompactionModel:         compactionModel,

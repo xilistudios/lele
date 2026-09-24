@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -2895,5 +2896,106 @@ func TestRunAgentLoop_AlwaysEmpty_BoundedByEmptyLimit(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("runAgentLoop did not terminate — empty-response loop is unbounded")
+	}
+}
+
+// ============================================================================
+// stripContentParts — generalized image/video content stripping
+// ============================================================================
+
+// stripTestMessages builds a message slice containing one message of each
+// interesting shape: plain text, a mixed text/image/video message, and a
+// message with no ContentParts.
+func stripTestMessages() []providers.Message {
+	return []providers.Message{
+		{Role: "system", Content: "System prompt"},
+		{Role: "user", ContentParts: []providers.ContentPart{
+			{Type: "text", Text: "Analyze this"},
+			{Type: "image_url", ImageURL: &providers.ImageURL{URL: "data:image/png;base64,abcd", Detail: "auto"}},
+			{Type: "video_url", VideoURL: &providers.VideoURL{URL: "https://example.com/clip.mp4", FPS: 1}},
+		}},
+		{Role: "assistant", Content: "done"},
+	}
+}
+
+// partTypes collects the Type of every content part across all messages.
+func partTypes(messages []providers.Message) []string {
+	var out []string
+	for _, msg := range messages {
+		for _, part := range msg.ContentParts {
+			out = append(out, part.Type)
+		}
+	}
+	return out
+}
+
+func TestStripContentParts_DropsVideoOnly(t *testing.T) {
+	got := stripContentParts(stripTestMessages(), false, true)
+	types := partTypes(got)
+	want := []string{"text", "image_url"}
+	if !reflect.DeepEqual(types, want) {
+		t.Errorf("part types = %v, want %v", types, want)
+	}
+	// Messages without ContentParts keep their text content.
+	if got[0].Content != "System prompt" || got[2].Content != "done" {
+		t.Errorf("plain messages altered: %q / %q", got[0].Content, got[2].Content)
+	}
+}
+
+func TestStripContentParts_DropsImageOnly(t *testing.T) {
+	got := stripContentParts(stripTestMessages(), true, false)
+	types := partTypes(got)
+	want := []string{"text", "video_url"}
+	if !reflect.DeepEqual(types, want) {
+		t.Errorf("part types = %v, want %v", types, want)
+	}
+}
+
+func TestStripContentParts_DropsBoth(t *testing.T) {
+	got := stripContentParts(stripTestMessages(), true, true)
+	types := partTypes(got)
+	want := []string{"text"}
+	if !reflect.DeepEqual(types, want) {
+		t.Errorf("part types = %v, want %v", types, want)
+	}
+}
+
+func TestStripContentParts_NeitherFlagIsIdentity(t *testing.T) {
+	msgs := stripTestMessages()
+	got := stripContentParts(msgs, false, false)
+	// Identity: no allocation, same backing array.
+	if &got[0] != &msgs[0] {
+		t.Error("expected input returned unchanged (same backing array) when no flags are set")
+	}
+	if !reflect.DeepEqual(got, msgs) {
+		t.Errorf("messages altered with no flags: %v", partTypes(got))
+	}
+}
+
+func TestStripContentParts_PreservesNonMediaParts(t *testing.T) {
+	msgs := []providers.Message{
+		{Role: "user", ContentParts: []providers.ContentPart{
+			{Type: "text", Text: "keep me"},
+			{Type: "input_audio", Text: "audio placeholder"},
+			{Type: "image_url", ImageURL: &providers.ImageURL{URL: "data:image/png;base64,abcd"}},
+			{Type: "video_url", VideoURL: &providers.VideoURL{URL: "https://example.com/clip.mp4"}},
+		}},
+	}
+	got := stripContentParts(msgs, true, true)
+	types := partTypes(got)
+	want := []string{"text", "input_audio"}
+	if !reflect.DeepEqual(types, want) {
+		t.Errorf("part types = %v, want %v", types, want)
+	}
+}
+
+// TestStripImageContentParts_Wrapper locks the legacy single-flag helper: it
+// must drop image_url parts while leaving video_url parts alone.
+func TestStripImageContentParts_Wrapper(t *testing.T) {
+	got := stripImageContentParts(stripTestMessages())
+	types := partTypes(got)
+	want := []string{"text", "video_url"}
+	if !reflect.DeepEqual(types, want) {
+		t.Errorf("part types = %v, want %v", types, want)
 	}
 }

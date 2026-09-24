@@ -93,6 +93,20 @@ func (mockTool) Execute(_ context.Context, _ map[string]interface{}) *ToolResult
 	return &ToolResult{ForLLM: "ok"}
 }
 
+// namedMockTool is a trivial Tool with a caller-chosen name, used to exercise
+// the read_video filter with an isolated stand-in, so the gating logic is
+// tested independently of the real read_video tool's behaviour (pkg/tools/video.go).
+type namedMockTool struct{ toolName string }
+
+func (m namedMockTool) Name() string        { return m.toolName }
+func (m namedMockTool) Description() string { return "mock " + m.toolName }
+func (namedMockTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{"type": "object"}
+}
+func (namedMockTool) Execute(_ context.Context, _ map[string]interface{}) *ToolResult {
+	return &ToolResult{ForLLM: "ok"}
+}
+
 func TestRunToolLoop_FiltersReadImageWithoutVision(t *testing.T) {
 	registry := NewToolRegistry()
 	registry.Register(NewReadImageTool(t.TempDir(), false))
@@ -462,4 +476,90 @@ func TestRunToolLoop_InjectsOwnerIdentityWithoutSessionKey(t *testing.T) {
 	if probe.gotSess != "" {
 		t.Errorf("tool saw session key %q, want empty", probe.gotSess)
 	}
+}
+
+// TestRunToolLoop_FiltersReadVideoWithoutVideo mirrors
+// TestRunToolLoop_FiltersReadImageWithoutVision for the video capability:
+// read_video must be filtered from tool defs only when the model supports
+// NEITHER video (native mode) NOR vision (frames fallback).
+func TestRunToolLoop_FiltersReadVideoWithoutVideo(t *testing.T) {
+	registry := NewToolRegistry()
+	registry.Register(namedMockTool{toolName: "read_video"})
+	registry.Register(mockTool{})
+
+	provider := &captureProvider{}
+	messages := []providers.Message{{Role: "user", Content: "hello"}}
+
+	t.Run("filters read_video when neither vision nor video", func(t *testing.T) {
+		_, err := RunToolLoop(context.Background(), ToolLoopConfig{
+			Provider:        provider,
+			Model:           "test-model",
+			Tools:           registry,
+			MaxIterations:   1,
+			VisionSupported: false,
+			VideoSupported:  false,
+		}, messages, "cli", "direct")
+		if err != nil {
+			t.Fatalf("RunToolLoop returned error: %v", err)
+		}
+		names := provider.toolNames()
+		if contains("read_video", names) {
+			t.Fatalf("read_video should be filtered out when VisionSupported=false and VideoSupported=false, got tools: %v", names)
+		}
+		if !contains("echo", names) {
+			t.Fatalf("non-video tools should be preserved, got tools: %v", names)
+		}
+	})
+
+	t.Run("keeps read_video when vision only (frames fallback)", func(t *testing.T) {
+		_, err := RunToolLoop(context.Background(), ToolLoopConfig{
+			Provider:        provider,
+			Model:           "test-model",
+			Tools:           registry,
+			MaxIterations:   1,
+			VisionSupported: true,
+			VideoSupported:  false,
+		}, messages, "cli", "direct")
+		if err != nil {
+			t.Fatalf("RunToolLoop returned error: %v", err)
+		}
+		names := provider.toolNames()
+		if !contains("read_video", names) {
+			t.Fatalf("read_video should be present when VisionSupported=true, got tools: %v", names)
+		}
+	})
+
+	t.Run("keeps read_video when video supported", func(t *testing.T) {
+		_, err := RunToolLoop(context.Background(), ToolLoopConfig{
+			Provider:        provider,
+			Model:           "test-model",
+			Tools:           registry,
+			MaxIterations:   1,
+			VisionSupported: false,
+			VideoSupported:  true,
+		}, messages, "cli", "direct")
+		if err != nil {
+			t.Fatalf("RunToolLoop returned error: %v", err)
+		}
+		names := provider.toolNames()
+		if !contains("read_video", names) {
+			t.Fatalf("read_video should be present when VideoSupported=true, got tools: %v", names)
+		}
+	})
+
+	t.Run("filters read_video by default (zero value)", func(t *testing.T) {
+		_, err := RunToolLoop(context.Background(), ToolLoopConfig{
+			Provider:      provider,
+			Model:         "test-model",
+			Tools:         registry,
+			MaxIterations: 1,
+		}, messages, "cli", "direct")
+		if err != nil {
+			t.Fatalf("RunToolLoop returned error: %v", err)
+		}
+		names := provider.toolNames()
+		if contains("read_video", names) {
+			t.Fatalf("read_video should be filtered out by default (zero value), got tools: %v", names)
+		}
+	})
 }

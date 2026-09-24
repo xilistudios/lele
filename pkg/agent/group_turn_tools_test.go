@@ -51,8 +51,9 @@ func assertTool(t *testing.T, defs []providers.ToolDefinition, name string) {
 }
 
 // groupTurnSampleToolDefs builds the mixed toolset a participant typically has:
-// the recursive group_chat tool, the vision-only read_image tool, and a plain
-// tool (exec) that must always survive filtering.
+// the recursive group_chat tool, the vision-only read_image tool, the
+// video-only read_video tool, and a plain tool (exec) that must always survive
+// filtering.
 func groupTurnSampleToolDefs() []providers.ToolDefinition {
 	mk := func(name string) providers.ToolDefinition {
 		return providers.ToolDefinition{
@@ -60,25 +61,27 @@ func groupTurnSampleToolDefs() []providers.ToolDefinition {
 			Function: providers.ToolFunctionDefinition{Name: name, Description: "tool " + name},
 		}
 	}
-	return []providers.ToolDefinition{mk("group_chat"), mk("read_image"), mk("exec")}
+	return []providers.ToolDefinition{mk("group_chat"), mk("read_image"), mk("read_video"), mk("exec")}
 }
 
 // TestRegression_GroupTurnExcludesGroupChat guards B8: a group participant must
 // never be offered the group_chat tool, because calling it from inside a group
 // turn spawns sub-groups recursively (unbounded token burn). It also pins the
-// pre-existing vision behaviour so the extraction of filterToolDefs did not
-// change it.
+// pre-existing vision/video behaviour so the extraction of filterToolDefs did
+// not change it.
 func TestRegression_GroupTurnExcludesGroupChat(t *testing.T) {
-	// Vision model: only group_chat is dropped.
-	withVision := filterToolDefs(groupTurnSampleToolDefs(), true, groupTurnExcludedTools)
+	// Vision + video model: only group_chat is dropped.
+	withVision := filterToolDefs(groupTurnSampleToolDefs(), true, true, groupTurnExcludedTools)
 	assertNoTool(t, withVision, "group_chat")
 	assertTool(t, withVision, "exec")
 	assertTool(t, withVision, "read_image")
+	assertTool(t, withVision, "read_video")
 
 	// Non-vision model: group_chat AND read_image are dropped.
-	withoutVision := filterToolDefs(groupTurnSampleToolDefs(), false, groupTurnExcludedTools)
+	withoutVision := filterToolDefs(groupTurnSampleToolDefs(), false, true, groupTurnExcludedTools)
 	assertNoTool(t, withoutVision, "group_chat")
 	assertNoTool(t, withoutVision, "read_image")
+	assertTool(t, withoutVision, "read_video")
 	assertTool(t, withoutVision, "exec")
 
 	// The exclusion list is the documented one — group_chat only.
@@ -92,28 +95,54 @@ func TestRegression_GroupTurnExcludesGroupChat(t *testing.T) {
 
 // TestFilterToolDefs_PureBehaviour documents the helper's contract: input is
 // not mutated, order is preserved, and an empty exclusion map degrades to the
-// vision-only filter (i.e. the previous inline logic).
+// vision+video-only filter (i.e. the previous inline logic). It also pins the
+// video policy: read_video is removed only when hasVideo AND hasVision are
+// false (native mode needs video, the keyframes fallback needs vision).
 func TestFilterToolDefs_PureBehaviour(t *testing.T) {
 	defs := groupTurnSampleToolDefs()
 
-	got := filterToolDefs(defs, true, nil)
+	// Neither capability missing: nothing filtered.
+	got := filterToolDefs(defs, true, true, nil)
 	assertTool(t, got, "group_chat")
 	assertTool(t, got, "read_image")
+	assertTool(t, got, "read_video")
 	assertTool(t, got, "exec")
 
+	// Explicit OR-semantics case: vision-only model (hasVision=true,
+	// hasVideo=false) still gets read_video — the frames-mode fallback.
+	visionOnly := filterToolDefs(defs, true, false, nil)
+	assertTool(t, visionOnly, "read_video")
+	assertTool(t, visionOnly, "read_image")
+	assertTool(t, visionOnly, "group_chat")
+	assertTool(t, visionOnly, "exec")
+
+	// Video-only model: read_image gone (no vision), read_video kept (native).
+	videoOnly := filterToolDefs(defs, false, true, nil)
+	assertNoTool(t, videoOnly, "read_image")
+	assertTool(t, videoOnly, "read_video")
+	assertTool(t, videoOnly, "group_chat")
+	assertTool(t, videoOnly, "exec")
+
+	// Both removals: read_image AND read_video gone, plain tools survive.
+	neither := filterToolDefs(defs, false, false, nil)
+	assertNoTool(t, neither, "read_image")
+	assertNoTool(t, neither, "read_video")
+	assertTool(t, neither, "group_chat")
+	assertTool(t, neither, "exec")
+
 	// Input untouched (helper allocates a new slice).
-	if len(defs) != 3 {
-		t.Fatalf("input slice mutated: len = %d, want 3", len(defs))
+	if len(defs) != 4 {
+		t.Fatalf("input slice mutated: len = %d, want 4", len(defs))
 	}
 
 	// Order preserved for the surviving tools.
-	if names := toolNames(filterToolDefs(defs, true, map[string]bool{"read_image": true})); len(names) != 2 ||
-		names[0] != "group_chat" || names[1] != "exec" {
+	if names := toolNames(filterToolDefs(defs, true, true, map[string]bool{"read_image": true})); len(names) != 3 ||
+		names[0] != "group_chat" || names[1] != "read_video" || names[2] != "exec" {
 		t.Errorf("order not preserved: got %v", names)
 	}
 
 	// Empty input stays empty (and non-nil, so callers can append safely).
-	if out := filterToolDefs(nil, true, groupTurnExcludedTools); len(out) != 0 {
+	if out := filterToolDefs(nil, true, true, groupTurnExcludedTools); len(out) != 0 {
 		t.Errorf("empty input produced %v, want no definitions", toolNames(out))
 	}
 }

@@ -298,6 +298,7 @@ func buildRequestBody(
 			}
 
 		case "user":
+			// ContentParts (incl. video_url) are intentionally not forwarded — content is built from msg.Content only.
 			if msg.ToolCallID != "" {
 				// Tool result message — merge into previous user message if it contains tool_results
 				toolResultBlock := map[string]any{
@@ -318,7 +319,7 @@ func buildRequestBody(
 					"content": []map[string]any{toolResultBlock},
 				})
 			} else {
-				// Regular user message
+				// Regular user message — ContentParts (incl. video_url) are intentionally not forwarded.
 				apiMessages = append(apiMessages, map[string]any{
 					"role":    "user",
 					"content": msg.Content,

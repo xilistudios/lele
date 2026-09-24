@@ -459,6 +459,14 @@ func truncateUTF8Safe(s string, maxBytes int) string {
 	return s[:idx]
 }
 
+// videoPartEstimateChars is the fixed char estimate charged for one
+// video_url content part (≈5k tokens at 2.5 chars/token). Providers sample
+// video at ~1 fps plus audio (Gemini ≈258 tokens/s) and we cannot know the
+// clip duration client-side cheaply, so a fixed estimate far above the image
+// one (2500) is used: compaction must trigger before the provider rejects an
+// over-length request. Remote URLs get the same fixed estimate.
+const videoPartEstimateChars = 20000
+
 // EstimateTokens estimates the number of tokens in a message list.
 // Uses a safe heuristic of 2.5 characters per token to account for CJK and other
 // overheads better than the previous 3 chars/token.
@@ -491,6 +499,9 @@ func (sm *sessionManagerImpl) EstimateTokens(messages []providers.Message) int {
 				}
 				if part.ImageURL != nil {
 					totalChars += 2500
+				}
+				if part.VideoURL != nil {
+					totalChars += videoPartEstimateChars
 				}
 			}
 		}

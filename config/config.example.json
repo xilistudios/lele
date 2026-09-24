@@ -139,7 +139,15 @@
     "openrouter": {
       "type": "openrouter",
       "api_key": "{{ENV_OPENROUTER_API_KEY}}",
-      "api_base": "{{ENV_OPENROUTER_API_BASE:}}"
+      "api_base": "{{ENV_OPENROUTER_API_BASE:}}",
+      "models": {
+        "gemini-2.5-pro": {
+          "model": "google/gemini-2.5-pro",
+          "context_window": 1048576,
+          "vision": true,
+          "video": true
+        }
+      }
     },
     "groq": {
       "type": "groq",

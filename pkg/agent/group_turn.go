@@ -36,15 +36,23 @@ var groupTurnExcludedTools = map[string]bool{"group_chat": true}
 //
 //   - when hasVision is false, read_image is removed (the model could not
 //     interpret the returned image content);
-//   - every name present as true in excluded is removed regardless of vision.
+//   - when hasVideo is false AND hasVision is false, read_video is removed
+//     (the model could serve neither native video nor the keyframes
+//     fallback);
+//   - every name present as true in excluded is removed regardless of
+//     vision/video support.
 //
 // It is a pure function so the policy can be unit-tested without building a
-// full runner. A nil excluded map simply means "only apply the vision filter".
-func filterToolDefs(defs []providers.ToolDefinition, hasVision bool, excluded map[string]bool) []providers.ToolDefinition {
+// full runner. A nil excluded map simply means "only apply the vision and
+// video filters".
+func filterToolDefs(defs []providers.ToolDefinition, hasVision, hasVideo bool, excluded map[string]bool) []providers.ToolDefinition {
 	filtered := make([]providers.ToolDefinition, 0, len(defs))
 	for _, def := range defs {
 		name := def.Function.Name
 		if !hasVision && name == "read_image" {
+			continue
+		}
+		if !hasVideo && !hasVision && name == "read_video" {
 			continue
 		}
 		if excluded[name] {
@@ -115,21 +123,24 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 	}
 
 	// f. Build tool definitions if tools are enabled.
-	// Vision is determined by the primary model only. When the fallback chain
-	// fails over to a non-vision model, image content is stripped per-candidate
-	// in callWithFallback (see llm_caller.go).
+	// Vision and native video are determined by the primary model only. When
+	// the fallback chain fails over to a weaker model, image/video content is
+	// stripped per-candidate in callWithFallback (see llm_caller.go).
 	var providerToolDefs []providers.ToolDefinition
 	modelHasVision := getSupportsImages(lr.al.cfg(), agent.Model, extractProviderFromModel(agent.Model, lr.al.cfg().Agents.Defaults.Provider))
+	modelHasVideo := getSupportsVideo(lr.al.cfg(), agent.Model, extractProviderFromModel(agent.Model, lr.al.cfg().Agents.Defaults.Provider))
 	if req.EnableTools {
 		providerToolDefs = agent.Tools.ToProviderDefs()
 
 		// Drop tools the model must not be offered during a group turn:
 		// read_image when the primary model has no vision (it could not
-		// understand the returned image content) and group_chat, which would
-		// let a participant spawn nested group trees (B8). Only the definitions
-		// handed to the provider are filtered — a model cannot call what it
-		// does not see, so no second guard is needed in the executor.
-		providerToolDefs = filterToolDefs(providerToolDefs, modelHasVision, groupTurnExcludedTools)
+		// understand the returned image content), read_video when it has
+		// neither native video nor vision (no delivery mode available), and
+		// group_chat, which would let a participant spawn nested group trees
+		// (B8). Only the definitions handed to the provider are filtered — a
+		// model cannot call what it does not see, so no second guard is
+		// needed in the executor.
+		providerToolDefs = filterToolDefs(providerToolDefs, modelHasVision, modelHasVideo, groupTurnExcludedTools)
 	}
 
 	// g. Update tool contexts so tools know which channel/chat they're serving.
@@ -292,8 +303,8 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 			// Append any context messages from the tool result.
 			if toolResult != nil && len(toolResult.ContextMessages) > 0 {
 				ctxMsgs := toolResult.ContextMessages
-				if !modelHasVision {
-					ctxMsgs = stripImageContentParts(ctxMsgs)
+				if !modelHasVision || !modelHasVideo {
+					ctxMsgs = stripContentParts(ctxMsgs, !modelHasVision, !modelHasVideo)
 				}
 				messages = append(messages, ctxMsgs...)
 			}

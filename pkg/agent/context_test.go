@@ -344,6 +344,118 @@ func TestSetVisionSupported_InvalidatesCaches(t *testing.T) {
 	}
 }
 
+// TestBuildToolsSection_ReadVideoGating tests that read_video is hidden from
+// the tools section only when the model supports NEITHER native video NOR
+// vision (frames fallback), and shown when either is supported. read_image
+// must be unaffected by the video flag.
+func TestBuildToolsSection_ReadVideoGating(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+
+	// Register a read_video mock tool plus normal tools.
+	registry := tools.NewToolRegistry()
+	registry.Register(&mockTool{
+		name:        "read_video",
+		description: "Read a video file",
+	})
+	registry.Register(&mockTool{
+		name:        "read_image",
+		description: "Read an image file",
+	})
+	registry.Register(&mockTool{
+		name:        "read_file",
+		description: "Read a text file",
+	})
+	cb.SetToolsRegistry(registry)
+
+	// Default: neither video nor vision -> read_video hidden, read_file shown.
+	section := cb.buildToolsSection()
+	if strings.Contains(section, "`read_video`") {
+		t.Error("Expected read_video to be hidden when video and vision are not supported")
+	}
+	if !strings.Contains(section, "`read_file`") {
+		t.Error("Expected read_file to be present when video is not supported")
+	}
+
+	// Enable vision only: read_image appears (its own flag) AND read_video
+	// appears too — the keyframes+transcript fallback only needs vision.
+	cb.SetVisionSupported(true)
+	section = cb.buildToolsSection()
+	if !strings.Contains(section, "`read_image`") {
+		t.Error("Expected read_image to be present when vision is supported")
+	}
+	if !strings.Contains(section, "`read_video`") {
+		t.Error("Expected read_video present when only vision is supported (frames fallback)")
+	}
+
+	// Disable vision again: with video still off, read_video must hide.
+	cb.SetVisionSupported(false)
+	section = cb.buildToolsSection()
+	if strings.Contains(section, "`read_video`") {
+		t.Error("Expected read_video hidden again when both flags are off")
+	}
+
+	// Enable video -> read_video shown even without vision.
+	cb.SetVideoSupported(true)
+	section = cb.buildToolsSection()
+	if !strings.Contains(section, "`read_video`") {
+		t.Error("Expected read_video to be present when video is supported")
+	}
+	if strings.Contains(section, "`read_image`") {
+		t.Error("Expected read_image to stay gated by vision, not video")
+	}
+	if !strings.Contains(section, "`read_file`") {
+		t.Error("Expected read_file to be present when video is supported")
+	}
+}
+
+// TestSetVideoSupported_InvalidatesCaches tests that SetVideoSupported
+// invalidates cached prompts so the tools section is rebuilt — exactly like
+// SetVisionSupported does for read_image.
+func TestSetVideoSupported_InvalidatesCaches(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+
+	registry := tools.NewToolRegistry()
+	registry.Register(&mockTool{
+		name:        "read_video",
+		description: "Read a video file",
+	})
+	cb.SetToolsRegistry(registry)
+
+	// Build the initial context (caches it) with video disabled.
+	cb.SetVideoSupported(false)
+	initial := cb.GetInitialContext()
+	if strings.Contains(initial, "`read_video`") {
+		t.Error("Expected read_video hidden in initial context")
+	}
+
+	// Enable video; the cached initial context must be invalidated so the
+	// next build reflects the change.
+	cb.SetVideoSupported(true)
+	updated := cb.GetInitialContext()
+	if !strings.Contains(updated, "`read_video`") {
+		t.Error("Expected read_video present after enabling video")
+	}
+
+	// Setting the same value again must be a no-op (no unnecessary rebuild).
+	cb.SetVideoSupported(true)
+	again := cb.GetInitialContext()
+	if !strings.Contains(again, "`read_video`") {
+		t.Error("Expected read_video still present after redundant SetVideoSupported(true)")
+	}
+}
+
 // TestBuildSystemPrompt tests BuildSystemPrompt method
 func TestBuildSystemPrompt(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")

@@ -22,19 +22,22 @@ import (
 // TestCallWithFallback_StripsImagesForNonVisionCandidate verifies that when
 // the fallback chain fails over to a non-vision model, image_url content
 // parts are stripped from messages before being sent to that candidate.
+// Extended for video: the first candidate is vision+video capable and must
+// keep both media part types, while the non-vision fallback must lose both
+// image_url and video_url parts.
 func TestCallWithFallback_StripsImagesForNonVisionCandidate(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
-	// Configure two providers: prov-a (vision) and prov-b (non-vision).
-	// Neither has an API key, so CreateProviderForCandidate will fail and
-	// the mock agent.Provider will be used instead.
+	// Configure two providers: prov-a (vision+video) and prov-b (non-vision,
+	// no video). Neither has an API key, so CreateProviderForCandidate will
+	// fail and the mock agent.Provider will be used instead.
 	al.cfg().Providers = &config.ProvidersConfig{
 		Named: map[string]config.NamedProviderConfig{
 			"prov-a": {
 				Type: "openai",
 				Models: map[string]config.ProviderModelConfig{
-					"vision-model": {Vision: true},
+					"vision-model": {Vision: true, Video: true},
 				},
 			},
 			"prov-b": {
@@ -74,13 +77,15 @@ func TestCallWithFallback_StripsImagesForNonVisionCandidate(t *testing.T) {
 		},
 	}
 
-	// Messages containing image content (simulates a read_image result).
+	// Messages containing image and video content (simulates read_image /
+	// read_video results).
 	messages := []providers.Message{
 		{Role: "system", Content: "System prompt"},
 		{Role: "user", Content: "Describe this image"},
 		{Role: "user", ContentParts: []providers.ContentPart{
 			{Type: "text", Text: "Here is the image"},
 			{Type: "image_url", ImageURL: &providers.ImageURL{URL: "data:image/png;base64,abcd", Detail: "auto"}},
+			{Type: "video_url", VideoURL: &providers.VideoURL{URL: "https://example.com/clip.mp4", FPS: 1}},
 		}},
 	}
 
@@ -111,24 +116,35 @@ func TestCallWithFallback_StripsImagesForNonVisionCandidate(t *testing.T) {
 		t.Fatalf("Expected 2 calls, got %d", callCount)
 	}
 
-	// First call (vision model) should have image_url parts.
+	// First call (vision+video model) should have image_url parts.
 	firstCallHasImage := false
+	firstCallHasVideo := false
 	for _, msg := range receivedMessages[0] {
 		for _, part := range msg.ContentParts {
 			if part.Type == "image_url" {
 				firstCallHasImage = true
+			}
+			if part.Type == "video_url" {
+				firstCallHasVideo = true
 			}
 		}
 	}
 	if !firstCallHasImage {
 		t.Error("Expected first call (vision model) to receive image_url content parts")
 	}
+	if !firstCallHasVideo {
+		t.Error("Expected first call (video-capable model) to receive video_url content parts")
+	}
 
-	// Second call (non-vision model) should NOT have image_url parts.
+	// Second call (non-vision, non-video model) should NOT have image_url or
+	// video_url parts.
 	for _, msg := range receivedMessages[1] {
 		for _, part := range msg.ContentParts {
 			if part.Type == "image_url" {
 				t.Fatal("Expected second call (non-vision model) to have image_url content parts stripped")
+			}
+			if part.Type == "video_url" {
+				t.Fatal("Expected second call (non-video model) to have video_url content parts stripped")
 			}
 		}
 	}
@@ -136,7 +152,8 @@ func TestCallWithFallback_StripsImagesForNonVisionCandidate(t *testing.T) {
 
 // TestCallWithFallback_PreservesImagesForVisionCandidate verifies that when
 // the fallback chain uses a vision-capable model, image_url content parts
-// are preserved.
+// are preserved. Extended for video: a video-capable candidate must keep
+// video_url parts too.
 func TestCallWithFallback_PreservesImagesForVisionCandidate(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -146,7 +163,7 @@ func TestCallWithFallback_PreservesImagesForVisionCandidate(t *testing.T) {
 			"prov-a": {
 				Type: "openai",
 				Models: map[string]config.ProviderModelConfig{
-					"vision-model": {Vision: true},
+					"vision-model": {Vision: true, Video: true},
 				},
 			},
 		},
@@ -170,6 +187,7 @@ func TestCallWithFallback_PreservesImagesForVisionCandidate(t *testing.T) {
 		{Role: "user", ContentParts: []providers.ContentPart{
 			{Type: "text", Text: "Analyze"},
 			{Type: "image_url", ImageURL: &providers.ImageURL{URL: "data:image/png;base64,xyz", Detail: "auto"}},
+			{Type: "video_url", VideoURL: &providers.VideoURL{URL: "https://example.com/clip.mp4", FPS: 1}},
 		}},
 	}
 
@@ -191,17 +209,24 @@ func TestCallWithFallback_PreservesImagesForVisionCandidate(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// Vision model should receive image_url parts.
+	// Vision+video model should receive image_url and video_url parts.
 	hasImage := false
+	hasVideo := false
 	for _, msg := range receivedMessages {
 		for _, part := range msg.ContentParts {
 			if part.Type == "image_url" {
 				hasImage = true
 			}
+			if part.Type == "video_url" {
+				hasVideo = true
+			}
 		}
 	}
 	if !hasImage {
 		t.Error("Expected vision model to receive image_url content parts")
+	}
+	if !hasVideo {
+		t.Error("Expected video-capable model to receive video_url content parts")
 	}
 }
 
