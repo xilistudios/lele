@@ -145,13 +145,16 @@ function InlineMarkdown({ text }: { text: string }) {
 }
 
 export function MarkdownText({ content }: { content: string }) {
-  // Strip trailing empty lines — these are artifacts during character-by-character
-  // streaming when the last char is a newline, causing flickering blank divs.
-  const lines = content.split('\n')
-  while (lines.length > 0 && lines[lines.length - 1] === '') {
-    lines.pop()
-  }
   const chunks: ReactNode[] = useMemo(() => {
+    // Strip trailing empty lines — these are artifacts during character-by-character
+    // streaming when the last char is a newline, causing flickering blank divs.
+    // The split + trim live INSIDE the memo: `lines` used to be rebuilt on every
+    // render and used as the memo dependency, so the memo never hit and the whole
+    // message was re-parsed on every render (including every 32 ms typewriter tick).
+    const lines = content.split('\n')
+    while (lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop()
+    }
     const result: ReactNode[] = []
 
     for (let index = 0; index < lines.length; index += 1) {
@@ -221,7 +224,7 @@ export function MarkdownText({ content }: { content: string }) {
     }
 
     return result
-  }, [lines])
+  }, [content])
 
   return <div className="space-y-2">{chunks}</div>
 }

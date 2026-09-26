@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { invokeDesktop } from '../lib/desktop'
+import { usePageVisible } from './usePageVisible'
 
 export type BackendStatus = {
   running: boolean
@@ -16,11 +17,14 @@ const POLL_INTERVAL_MS = 3000
  * (`enabled`). Distinguishes "backend not ready yet" from "backend died" by
  * tracking whether a poll ever reported `running: true`; only then is a
  * non-running status reported as a disconnect.
+ *
+ * Visibility-gated: a hidden tab does no polling at all (see usePageVisible).
  */
 export function useBackendStatus(enabled: boolean) {
   const [status, setStatus] = useState<BackendStatus | null>(null)
   const [restarting, setRestarting] = useState(false)
   const seenRunning = useRef(false)
+  const pageVisible = usePageVisible()
 
   useEffect(() => {
     if (!enabled) {
@@ -28,6 +32,12 @@ export function useBackendStatus(enabled: boolean) {
       seenRunning.current = false
       return
     }
+
+    // Hidden tab: no interval, no request. Visibility is an effect dependency,
+    // so becoming visible re-runs the effect and the immediate `poll()` below
+    // refreshes once before the interval resumes — the status must never be
+    // left stale just because the interval happened not to fire again.
+    if (!pageVisible) return
 
     let cancelled = false
 
@@ -49,7 +59,7 @@ export function useBackendStatus(enabled: boolean) {
       cancelled = true
       clearInterval(intervalId)
     }
-  }, [enabled])
+  }, [enabled, pageVisible])
 
   const restart = useCallback(async () => {
     if (!enabled) return

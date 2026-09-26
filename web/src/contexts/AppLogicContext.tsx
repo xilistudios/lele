@@ -112,7 +112,9 @@ export type AppStreamingContextValue = {
 
 // Exported for tests that need to mount a consumer without the full provider tree.
 export const AppLogicContext = createContext<AppLogicContextValue | null>(null)
-const AppStreamingContext = createContext<AppStreamingContextValue | null>(null)
+// Same reason as above: exported so tests can mount a consumer (or a fake hot
+// value) without the full provider tree.
+export const AppStreamingContext = createContext<AppStreamingContextValue | null>(null)
 
 export function AppLogicProvider({ children }: { children: ReactNode }) {
   const { api, apiUrl, session, persistSession } = useAuthContext()
@@ -271,11 +273,20 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
 
   // ── HOT value: streaming fields only. Its identity changes every tick, but
   //    only MessageList & ChatPageContext subscribe to it.
-  const streamingValue: AppStreamingContextValue = {
-    messages: app.messages,
-    toolStatus: app.toolStatus,
-    typingIndicator: app.typingIndicator,
-  }
+  //
+  //    Memoized on the three fields alone: without this, every re-render of the
+  //    provider (any cold state change: sidebar, model load, approvals, …) built
+  //    a brand-new object and pushed it through the context, re-rendering every
+  //    hot consumer — including ChatPageContext and therefore ChatHeader and the
+  //    composer — even when nothing streaming-related had changed.
+  const streamingValue = useMemo<AppStreamingContextValue>(
+    () => ({
+      messages: app.messages,
+      toolStatus: app.toolStatus,
+      typingIndicator: app.typingIndicator,
+    }),
+    [app.messages, app.toolStatus, app.typingIndicator],
+  )
 
   return (
     <AppLogicContext.Provider value={value}>

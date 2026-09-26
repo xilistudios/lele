@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
-import { useSubagents } from '../../hooks/useSubagents'
+import { NO_POLL_MS, useSubagents } from '../../hooks/useSubagents'
 import { getModeTheme } from '../../lib/modeTheme'
 import {
   resolveHeaderAgentName,
@@ -39,10 +39,12 @@ export const ChatHeader = memo(function ChatHeader() {
   // up even before the first refresh has seen a running task.
   const { subagents, loading, refresh } = useSubagents(currentSessionKey, 5000, isProcessing)
 
-  // When viewing a subagent chat, fetch the parent's subagent list so we can
-  // resolve the subagent's label and agent_id. This is a separate instance
-  // that does NOT affect the subagents indicator (which uses the above call).
-  const { subagents: parentSubagents } = useSubagents(parentSessionKey, 0, false)
+  // When viewing a subagent chat, fetch the parent's subagent list once so we
+  // can resolve the subagent's label and agent_id. `NO_POLL_MS` (0) means "do
+  // not poll" — anything positive here would be an interval, and a tiny one
+  // would hammer /subagents. This is a separate instance that does NOT affect
+  // the subagents indicator (which uses the above call).
+  const { subagents: parentSubagents } = useSubagents(parentSessionKey, NO_POLL_MS, false)
 
   // Resolve the subagent entry that matches the current session.
   const matchedSubagent = useMemo(
