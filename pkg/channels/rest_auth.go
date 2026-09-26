@@ -2,6 +2,7 @@ package channels
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -52,6 +53,18 @@ func (n *NativeChannel) handleRefresh(w http.ResponseWriter, r *http.Request) {
 
 	client, token, refreshToken, err := n.auth.RefreshToken(req.RefreshToken)
 	if err != nil {
+		// A refresh whose store reload was suppressed by the per-manager
+		// budget is NOT a credential rejection: the token may be valid in the
+		// shared DB (another process rotated it) and we simply could not look.
+		// Answer 429 + Retry-After, which the WebUI treats as NON-fatal and
+		// retries, instead of the fatally-handled 400 below. Turning this into
+		// a 400 would expel a perfectly healthy session as soon as two
+		// processes rotate the same client inside slowReloadMinInterval.
+		if errors.Is(err, errRefreshUnavailable) {
+			w.Header().Set("Retry-After", "1")
+			writeError(w, http.StatusTooManyRequests, "auth store busy, retry", "refresh_unavailable")
+			return
+		}
 		writeError(w, http.StatusBadRequest, err.Error(), "refresh_error")
 		return
 	}

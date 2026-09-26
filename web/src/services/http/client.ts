@@ -97,6 +97,40 @@ export function isFatalRefreshFailure(status: number, code?: string): boolean {
   return code === 'refresh_error'
 }
 
+/**
+ * How long to wait before giving the adoption of a rotated session a second
+ * look.
+ *
+ * Refresh tokens are single-use, so when two tabs race the loser is answered
+ * 400/refresh_error even though the credential is alive -- the winner holds
+ * it. The winner's `saveSession` is not instantaneous, so a read landing in
+ * between sees the stale token and finds nothing to adopt. Waiting a moment
+ * lets that write land instead of declaring a live session dead.
+ */
+const ADOPTION_RETRY_DELAY_MS = 400
+
+/**
+ * The deadline to persist for a freshly refreshed session.
+ *
+ * `/auth/refresh` answers with the session's real `expires` (RFC3339); the
+ * server pushes an existing client's deadline forward on every refresh, so
+ * that field is the only source of truth for when the credential lapses.
+ *
+ * It used to be discarded in favour of a fabricated `now + 1h`, which barely
+ * mattered while refreshes only ever happened after a 401. It matters now that
+ * the UI renews BEFORE the deadline: a stored "one hour left" would look like a
+ * session in permanent need of renewal and refresh on every check.
+ *
+ * A missing or unparsable value (a proxy, an older gateway) keeps the old
+ * fallback so a degenerate answer changes no behaviour.
+ */
+export function refreshExpires(expires: unknown): string {
+  if (typeof expires === 'string' && Number.isFinite(Date.parse(expires))) {
+    return expires
+  }
+  return new Date(Date.now() + 3600000).toISOString()
+}
+
 const joinUrl = (baseUrl: string, path: string) => `${baseUrl.replace(/\/$/, '')}${path}`
 
 const isJsonBody = (body: BodyInit | null | undefined) => body !== null && body !== undefined
@@ -113,7 +147,11 @@ type TokenState = {
   // other client wrote into the same localStorage slot.
   clientId: string
   onTokenRefresh?: (session: AuthSession) => void
-  onAuthFailure?: () => void
+  // `mayClearStorage` tells the owner whether the session persisted in the
+  // browser is this client's own. It is false when the stored session belongs
+  // to another client: this tab must stop using it, but wiping the shared
+  // localStorage slot would delete a session it never owned.
+  onAuthFailure?: (mayClearStorage: boolean) => void
 }
 
 type SendMessageStreamOptions = {
@@ -271,7 +309,7 @@ export const createApiClient = (baseUrl: string) => {
           device_name: '',
           token: data.token,
           refresh_token: data.refresh_token,
-          expires: new Date(Date.now() + 3600000).toISOString(),
+          expires: refreshExpires(data.expires),
         }
         tokenState.onTokenRefresh(session)
       }
@@ -294,9 +332,28 @@ export const createApiClient = (baseUrl: string) => {
     const adopted = adoptRotatedSession(attempted)
     if (adopted) return adopted
 
+    // Nothing to adopt *yet* is not the same as "this credential is dead":
+    // the tab that won the rotation may still be mid-write. Give adoption one
+    // more chance after a short delay before concluding anything.
+    await sleep(ADOPTION_RETRY_DELAY_MS)
+    const adoptedLate = adoptRotatedSession(attempted)
+    if (adoptedLate) return adoptedLate
+
+    // No adoption: this tab's credential is not usable. Disconnecting the tab
+    // is always right; clearing the shared storage is only right when what is
+    // stored is ours (or there is nothing stored). Otherwise the session in
+    // localStorage belongs to a different client, and wiping it here would
+    // delete a device session this tab never held.
+    const stored = loadSession()
+    const storedIsOurs =
+      !stored ||
+      stored.refresh_token === attempted ||
+      stored.token === tokenState.token ||
+      (!!tokenState.clientId && stored.client_id === tokenState.clientId)
+
     const onFail = tokenState.onAuthFailure
     clearToken()
-    onFail?.()
+    onFail?.(storedIsOurs)
     return null
   }
 
@@ -531,7 +588,12 @@ export const createApiClient = (baseUrl: string) => {
     setToken,
     clearToken,
     getToken,
-    setAuthFailureHandler: (handler: (() => void) | undefined) => {
+    // Renew the credential on demand, for callers that know the deadline is
+    // near (see `shouldProactivelyRefresh`). This is the very same refresh the
+    // 401 path uses, so single-flight, cooldown and adoption apply unchanged:
+    // null means "not renewed this time", never "session destroyed".
+    refreshNow: (): Promise<string | null> => refreshToken(),
+    setAuthFailureHandler: (handler: ((mayClearStorage: boolean) => void) | undefined) => {
       tokenState.onAuthFailure = handler
     },
     logout: async () => {

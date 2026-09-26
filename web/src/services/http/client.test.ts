@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { loadSession, saveSession } from '../../lib/storage'
+import type { AuthSession } from '../../lib/types'
 import { createApiClient, isFatalRefreshFailure } from './client'
 import { ApiError } from './errors'
 
@@ -712,13 +713,314 @@ describe('refresh failure and session survival', () => {
       deny: 999,
     })
     const api = createApiClient('http://127.0.0.1:18793')
-    let failed = false
+    const wipe: boolean[] = []
     api.setToken('access-1', 'refresh-1')
-    api.setAuthFailureHandler(() => {
-      failed = true
+    api.setAuthFailureHandler((mayClearStorage) => {
+      wipe.push(mayClearStorage)
     })
 
     await expect(api.getAgentCatalog('coder')).rejects.toBeInstanceOf(ApiError)
-    expect(failed).toBe(true)
+    // Nothing stored means nothing to preserve: erasing is allowed.
+    expect(wipe).toEqual([true])
+  })
+
+  /**
+   * The stored session decides whether shared storage may be erased.
+   *
+   * One localStorage slot is shared by every tab and by every client that
+   * signed into this browser. When the credential that just failed is not the
+   * one sitting in that slot, the failure says nothing about the stored
+   * session, and deleting it would log a device out that never failed here.
+   */
+  const foreignSession = {
+    client_id: 'client-OTHER',
+    device_name: 'some other device',
+    token: 'access-of-other-client',
+    refresh_token: 'refresh-of-other-client',
+    expires: new Date(Date.now() + 3_600_000).toISOString(),
+  }
+
+  test("a fatal refresh leaves another client's stored session alone", async () => {
+    saveSession(foreignSession)
+
+    mockServer({
+      refreshes: [() => json({ error: 'invalid refresh token', code: 'refresh_error' }, 400)],
+      deny: 999,
+    })
+
+    const api = createApiClient('http://127.0.0.1:18793')
+    const wipe: boolean[] = []
+    api.setToken('access-1', 'refresh-1', undefined, 'client-MINE')
+    api.setAuthFailureHandler((mayClearStorage) => {
+      wipe.push(mayClearStorage)
+    })
+
+    await expect(api.getAgentCatalog('coder')).rejects.toBeInstanceOf(ApiError)
+
+    // This tab is disconnected...
+    expect(wipe).toEqual([false])
+    expect(api.getToken()).toBeNull()
+    // ...but the session in shared storage is not this tab's to delete.
+    expect(loadSession()?.client_id).toBe('client-OTHER')
+    expect(loadSession()?.refresh_token).toBe('refresh-of-other-client')
+  })
+
+  test('a fatal refresh may erase storage when the stored session is ours', async () => {
+    // Same client, same rejected refresh token stored: this is our own dead
+    // credential, so the whole browser should be signed out.
+    saveSession({
+      client_id: 'client-MINE',
+      device_name: 'My Desktop',
+      token: 'access-1',
+      refresh_token: 'refresh-1',
+      expires: new Date(Date.now() + 3_600_000).toISOString(),
+    })
+
+    mockServer({
+      refreshes: [() => json({ error: 'invalid refresh token', code: 'refresh_error' }, 400)],
+      deny: 999,
+    })
+
+    const api = createApiClient('http://127.0.0.1:18793')
+    const wipe: boolean[] = []
+    api.setToken('access-1', 'refresh-1', undefined, 'client-MINE')
+    api.setAuthFailureHandler((mayClearStorage) => {
+      wipe.push(mayClearStorage)
+    })
+
+    await expect(api.getAgentCatalog('coder')).rejects.toBeInstanceOf(ApiError)
+
+    expect(wipe).toEqual([true])
+    expect(api.getToken()).toBeNull()
+  })
+
+  test('adopts a rotation that lands during the second adoption look', async () => {
+    // The losing tab of a rotation race can read localStorage before the
+    // winner's `saveSession` has run: the first look sees the stale token and
+    // finds nothing to adopt. The winner writes a moment later, so the delayed
+    // retry is the difference between adopting a live session and wiping it.
+    saveSession({
+      client_id: 'client-MINE',
+      device_name: 'My Desktop',
+      token: 'access-1',
+      refresh_token: 'refresh-1',
+      expires: new Date(Date.now() + 3_600_000).toISOString(),
+    })
+
+    const winnerDelayMs = 100
+    const seen: (string | null)[] = []
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/auth/refresh')) {
+        setTimeout(() => {
+          saveSession({
+            client_id: 'client-MINE',
+            device_name: 'My Desktop',
+            token: 'access-from-winner',
+            refresh_token: 'refresh-from-winner',
+            expires: new Date(Date.now() + 3_600_000).toISOString(),
+          })
+        }, winnerDelayMs)
+        return json({ error: 'invalid refresh token', code: 'refresh_error' }, 400)
+      }
+
+      const auth = (init?.headers as Record<string, string> | undefined)?.Authorization ?? null
+      seen.push(auth)
+      if (auth === 'Bearer access-from-winner') {
+        return json({ agent_id: 'coder', tools: [], skills: [] })
+      }
+      return json({ error: 'unauthorized', code: 'auth_error' }, 401)
+    }) as unknown as typeof fetch
+
+    const api = createApiClient('http://127.0.0.1:18793')
+    const wipe: boolean[] = []
+    api.setToken('access-1', 'refresh-1', undefined, 'client-MINE')
+    api.setAuthFailureHandler((mayClearStorage) => {
+      wipe.push(mayClearStorage)
+    })
+
+    const catalog = await api.getAgentCatalog('coder')
+
+    expect(catalog.agent_id).toBe('coder')
+    // No sign-out: the request was replayed with the winner's token.
+    expect(wipe).toEqual([])
+    expect(seen).toContain('Bearer access-from-winner')
+    // The fresh pair survives in storage instead of being wiped.
+    expect(loadSession()?.refresh_token).toBe('refresh-from-winner')
+  })
+})
+/**
+ * The renewed credential's deadline.
+ *
+ * The old client stamped `expires: now + 1h` on every refreshed session and
+ * nobody looked at it, while the server's real answer is 30 days. Since the
+ * UI now renews BEFORE the deadline instead of after a 401, the fabricated
+ * value would make every browser believe it is about to expire and refresh in
+ * a loop. These tests pin that the server's own `expires` is what gets
+ * persisted, and that a degenerate answer still lands on the old fallback.
+ */
+describe('the renewed credential carries the server deadline', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  const json = (payload: unknown, status = 200) =>
+    new Response(JSON.stringify(payload), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+  /** 401 on the first protected call, then success; /auth/refresh answers `body`. */
+  function mockOnceExpiredRefresh(body: () => unknown) {
+    let denied = 0
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/auth/refresh')) {
+        return json(body())
+      }
+      if (denied++ === 0) {
+        return json({ error: 'unauthorized', code: 'auth_error' }, 401)
+      }
+      const auth = (init?.headers as Record<string, string> | undefined)?.Authorization
+      return json({ agent_id: 'coder', tools: [], skills: [], auth })
+    }) as unknown as typeof fetch
+  }
+
+  /** Mirrors what the provider does in `onTokenRefresh`: merge and persist. */
+  function trackingClient() {
+    const api = createApiClient('http://127.0.0.1:18793')
+    const persisted: AuthSession[] = []
+    api.setToken('access-1', 'refresh-1', (next) => {
+      persisted.push(next)
+      saveSession({ ...next, client_id: 'client-1', device_name: 'My Desktop' })
+    })
+    return { api, persisted }
+  }
+
+  test('persists the expires the server answered with', async () => {
+    const serverExpires = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString()
+    mockOnceExpiredRefresh(() => ({
+      token: 'access-2',
+      refresh_token: 'refresh-2',
+      expires: serverExpires,
+    }))
+
+    const { api, persisted } = trackingClient()
+    const catalog = await api.getAgentCatalog('coder')
+
+    expect(catalog.agent_id).toBe('coder')
+    expect(persisted).toHaveLength(1)
+    expect(persisted[0]?.expires).toBe(serverExpires)
+    expect(loadSession()?.expires).toBe(serverExpires)
+    expect(loadSession()?.token).toBe('access-2')
+    expect(loadSession()?.refresh_token).toBe('refresh-2')
+  })
+
+  test('keeps the old near-future fallback when the answer has no usable expires', async () => {
+    // A proxy or an older gateway could answer without the field. That must not
+    // turn into an unparsable stored deadline, so the previous fabricated value
+    // is kept -- degenerate responses change nothing.
+    const before = Date.now()
+    mockOnceExpiredRefresh(() => ({ token: 'access-2', refresh_token: 'refresh-2' }))
+
+    const { api, persisted } = trackingClient()
+    await api.getAgentCatalog('coder')
+
+    const fallback = Date.parse(persisted[0]?.expires ?? '')
+    expect(Number.isFinite(fallback)).toBe(true)
+    expect(fallback - before).toBeGreaterThan(0)
+    // Exactly the old one-hour fallback, within the couple of milliseconds the
+    // refresh round-trip and the clock may add.
+    expect(fallback - before).toBeLessThan(3600_000 + 5_000)
+  })
+
+  test('also rejects a malformed expires instead of storing an unparsable deadline', async () => {
+    mockOnceExpiredRefresh(() => ({
+      token: 'access-2',
+      refresh_token: 'refresh-2',
+      expires: 'not-a-date',
+    }))
+
+    const { api, persisted } = trackingClient()
+    await api.getAgentCatalog('coder')
+
+    expect(Number.isFinite(Date.parse(persisted[0]?.expires ?? ''))).toBe(true)
+  })
+})
+
+/**
+ * `refreshNow` is the same refresh the 401 path uses, exposed so the UI can
+ * renew a credential before it is ever rejected. It must not grow its own
+ * logic: single-flight, cooldown and adoption all live behind `refreshToken`.
+ */
+describe('refreshNow', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  const json = (payload: unknown, status = 200, headers: Record<string, string> = {}) =>
+    new Response(JSON.stringify(payload), {
+      status,
+      headers: { 'Content-Type': 'application/json', ...headers },
+    })
+
+  function mockRefresh(answers: (() => Response)[]) {
+    const calls: string[] = []
+    let taken = 0
+    globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      calls.push(url)
+      return answers[Math.min(taken++, answers.length - 1)]()
+    }) as unknown as typeof fetch
+    return {
+      refreshCount: () => calls.filter((url) => url.endsWith('/auth/refresh')).length,
+    }
+  }
+
+  test('rotates the session and returns the new access token', async () => {
+    const server = mockRefresh([
+      () =>
+        json({ token: 'access-2', refresh_token: 'refresh-2', expires: '2026-10-23T12:00:00Z' }),
+    ])
+    const api = createApiClient('http://127.0.0.1:18793')
+    api.setToken('access-1', 'refresh-1')
+
+    expect(await api.refreshNow()).toBe('access-2')
+    expect(api.getToken()).toBe('access-2')
+    expect(server.refreshCount()).toBe(1)
+  })
+
+  test('concurrent proactive refreshes share a single rotation', async () => {
+    const server = mockRefresh([
+      () =>
+        json({ token: 'access-2', refresh_token: 'refresh-2', expires: '2026-10-23T12:00:00Z' }),
+    ])
+    const api = createApiClient('http://127.0.0.1:18793')
+    api.setToken('access-1', 'refresh-1')
+
+    const tokens = await Promise.all([api.refreshNow(), api.refreshNow()])
+
+    expect(tokens).toEqual(['access-2', 'access-2'])
+    expect(server.refreshCount()).toBe(1)
+  })
+
+  test('a transient failure returns null and leaves the session untouched', async () => {
+    mockRefresh([() => json({ error: 'too many requests', code: 'rate_limit_exceeded' }, 429)])
+    const api = createApiClient('http://127.0.0.1:18793')
+    const wipes: boolean[] = []
+    api.setToken('access-1', 'refresh-1')
+    api.setAuthFailureHandler((mayClearStorage) => wipes.push(mayClearStorage))
+
+    expect(await api.refreshNow()).toBeNull()
+    expect(api.getToken()).toBe('access-1')
+    expect(wipes).toEqual([])
+  })
+
+  test('returns null when there is no refresh token to spend', async () => {
+    const server = mockRefresh([])
+    const api = createApiClient('http://127.0.0.1:18793')
+
+    expect(await api.refreshNow()).toBeNull()
+    expect(server.refreshCount()).toBe(0)
   })
 })

@@ -26,6 +26,14 @@ type AuthManager struct {
 	mu        sync.RWMutex
 	secret    string
 	repo      *store.NativeClientRepo // SQLite store (nil = use JSON file). When set, both clients and pending PINs live in the DB.
+
+	// lastSlowReload is the time of the last slow-path loadStore() taken by
+	// ValidateToken/RefreshToken on a cache miss. Guarded by am.mu and
+	// deliberately left at its ZERO value by SetStore/loadStore: the zero
+	// time means "this manager has never reloaded", so the first slow-path
+	// miss is always allowed to adopt clients another process persisted.
+	// Only allowSlowReloadLocked reads/writes it.
+	lastSlowReload time.Time
 }
 
 // DesktopClientID is the fixed client ID for the built-in trusted client used
@@ -154,6 +162,13 @@ func (am *AuthManager) loadStore() error {
 			if len(info.SessionKeys) == 0 {
 				info.SessionKeys = []string{id}
 			}
+			// The MAP KEY is authoritative: stamp it onto the blob's field so
+			// the invariant "ClientID == map key" holds for every loaded
+			// client. persistClientLocked and rotateClientLocked look clients
+			// up BY KEY, so a row whose stored client_id is empty or diverges
+			// (migrated/manual blob) would otherwise be written back to a
+			// phantom id — or skipped entirely, silently losing a rotation.
+			info.ClientID = id
 			store.Clients[id] = &info
 		}
 
@@ -205,11 +220,27 @@ func (am *AuthManager) loadStore() error {
 		if len(client.SessionKeys) == 0 {
 			client.SessionKeys = []string{clientID}
 		}
+		// Same key-authority invariant as the SQLite branch above: the map key
+		// wins over a divergent client_id in the JSON blob.
+		client.ClientID = clientID
 	}
 	am.cleanupExpired()
 	return nil
 }
 
+// saveStore is a WHOLE-STORE save. It is a latent bomb in SQLite mode and
+// must NOT be used on a production code path: saveStoreUnlocked upserts every
+// client in this process's map and DELETEs every table row absent from it, so
+// any row that another process paired or rotated (i.e. newer than this map,
+// the normal state in a multi-process setup) is silently reverted or dropped
+// — precisely the pattern that made an expelled WebUI session reappear.
+//
+// Production mutators must use the DIRECTED writes instead:
+// persistClientLocked (one client row) or DeleteClient (one row), both of
+// which leave foreign rows untouched.
+//
+// This whole-store entry point is kept only for migrations/tests (auth_test.go
+// still drives it); am.mu is taken here, unlike the ...Unlocked variant.
 func (am *AuthManager) saveStore() error {
 	am.mu.Lock()
 	defer am.mu.Unlock()
@@ -501,6 +532,13 @@ func (am *AuthManager) GeneratePIN(deviceName string) (*PendingPIN, error) {
 
 	am.store.PendingPINs[pin] = pending
 
+	// Documented limit (reviewed, intentionally left as-is): this is the JSON
+	// branch, reached only when am.repo == nil, so it cannot clobber a shared
+	// SQLite store. In SQLite mode the single-use PIN lives in the DB and this
+	// whole-store save is never executed — which is why GeneratePIN needs no
+	// directed-write treatment. A future pin-row API (repo.SetPendingPIN) is
+	// the place to make even the JSON path directed; today a pending PIN is
+	// written exactly here and nowhere else.
 	if err := am.saveStoreUnlocked(); err != nil {
 		logger.ErrorCF("native", "Failed to save store after generating PIN", map[string]interface{}{
 			"error": err.Error(),
@@ -637,7 +675,12 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 
 		am.store.Clients[clientID] = client
 
-		if err := am.saveStoreUnlocked(); err != nil {
+		// Directed write: the newly paired client is the only row that
+		// changed, and it is the only row this call may touch — a whole-store
+		// save would upsert every row from a possibly stale map and delete
+		// rows paired by another process (see persistClientLocked), i.e. it
+		// could expel a session that is perfectly valid on the shared DB.
+		if err := am.persistClientLocked(clientID); err != nil {
 			// Fail closed: remove the in-memory client so no phantom
 			// credential survives until the next restart. The PIN is
 			// already consumed (TakePendingPIN succeeded) — that is
@@ -645,6 +688,11 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 			// a credential that cannot survive a gateway restart.
 			// Atomicity of PIN consumption + client persistence in a
 			// single transaction is tracked in #327.
+			//
+			// The failed directed write leaves at most this one row
+			// absent/unwritten in the DB; other processes' rows are
+			// untouched, which is the point of not falling back to a
+			// whole-store save here.
 			delete(am.store.Clients, clientID)
 			logger.ErrorCF("native", "Failed to save store after pairing; removing in-memory client", map[string]interface{}{
 				"error": err.Error(),
@@ -770,7 +818,10 @@ func (am *AuthManager) RegisterDesktopClient(token, refreshToken string) error {
 
 	am.store.Clients[DesktopClientID] = client
 
-	if err := am.saveStoreUnlocked(); err != nil {
+	// Directed write: registering the built-in desktop client must not
+	// rewrite/delete the rows other processes paired (see
+	// persistClientLocked).
+	if err := am.persistClientLocked(DesktopClientID); err != nil {
 		logger.ErrorCF("native", "Failed to save store after registering desktop client", map[string]interface{}{
 			"error": err.Error(),
 		})
@@ -780,64 +831,417 @@ func (am *AuthManager) RegisterDesktopClient(token, refreshToken string) error {
 }
 
 func (am *AuthManager) ValidateToken(token string) (*ClientInfo, bool) {
-	am.mu.RLock()
-	defer am.mu.RUnlock()
-
 	tokenHash := hashToken(token)
 
-	for _, client := range am.store.Clients {
-		if client.TokenHash == tokenHash {
-			if time.Now().After(client.Expires) {
-				return nil, false
-			}
-			return client, true
-		}
+	// Hot path: shared lock, no reload. An unknown-but-invalid token is the
+	// only case that pays for the slow path below.
+	am.mu.RLock()
+	client := am.findClientByTokenHash(tokenHash)
+	hasRepo := am.repo != nil
+	am.mu.RUnlock()
+
+	if client != nil {
+		return client, true
+	}
+	if !hasRepo {
+		return nil, false
 	}
 
+	// Slow path (miss): this process's map may simply be behind the shared
+	// SQLite store — another process (CLI, TUI, a second gateway) can pair or
+	// rotate a client after this manager loaded its copy. Reloading once
+	// before declaring the token invalid is what keeps a session alive
+	// instead of expelling a client that is perfectly valid on disk.
+	//
+	// Double-checked locking: the reload needs the write lock, so it is
+	// re-scanned here under am.mu and never on the hot path.
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	// Budget the reload: this path is reachable anonymously (an invalid token
+	// matches nothing), so an attacker could otherwise force a full loadStore
+	// — SELECT of every blob + unmarshal per row — under the exclusive lock
+	// once per request. Inside the budget the miss is reported as a miss
+	// without touching the store; a legitimate token written by another
+	// process is still adopted by the next request after the interval.
+	if !am.allowSlowReloadLocked(time.Now()) {
+		return nil, false
+	}
+
+	if err := am.loadStore(); err != nil {
+		logger.WarnCF("native", "ValidateToken: could not reload client store", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil, false
+	}
+
+	if client := am.findClientByTokenHash(tokenHash); client != nil {
+		return client, true
+	}
 	return nil, false
 }
 
+// findClientByTokenHash returns the live client whose access-token hash
+// matches hash, or nil when there is none.
+//
+// Callers must hold at least am.mu.RLock. Expiry is part of the match
+// (unchanged semantics): an expired client is still kept in the map until
+// cleanupExpired/RefreshToken removes it, so it must not validate.
+func (am *AuthManager) findClientByTokenHash(hash string) *ClientInfo {
+	now := time.Now()
+	for _, client := range am.store.Clients {
+		if client.TokenHash != hash {
+			continue
+		}
+		if now.After(client.Expires) {
+			return nil
+		}
+		return client
+	}
+	return nil
+}
+
+// slowReloadMinInterval caps how often a single AuthManager may take its
+// slow-path (cache-miss) reload of the whole client store.
+//
+// Why a cap is needed: a miss in ValidateToken/RefreshToken is reachable
+// WITHOUT any credential — an unknown token simply does not match — and the
+// reload it triggers runs loadStore() under the EXCLUSIVE am.mu: a SELECT of
+// every client blob plus a json.Unmarshal per row (and ListPendingPINs).
+// The HTTP rate limiter in front of these handlers is disabled by default and
+// is per-IP, so an unauthenticated flood of invalid tokens would otherwise
+// force one full reload per request, amplifying cost and serialising all
+// authenticated traffic (which shares the same lock) behind the attacker.
+//
+// One reload per interval per process is enough for the feature the slow path
+// exists for: adopting a client that another process (CLI, TUI, a second
+// gateway) paired or rotated in the shared SQLite DB. That is a rare, human
+// paced event, not a per-request need.
+//
+// The interval is deliberately short (a few reloads per second is still a
+// negligible load, since a reload is one SELECT + N unmarshals over a table
+// of at most a handful of rows) so that the cap cannot itself expel a session:
+// the only legitimate case it can delay is a client whose credential another
+// process rotated in the sub-second window right after this manager's last
+// slow reload. That delay is signalled EXPLICITLY, not implicitly: a refresh
+// whose reload was suppressed because the budget was spent is answered with
+// HTTP 429 + Retry-After (see errRefreshUnavailable/handleRefresh), and the
+// WebUI treats a 429 as non-fatal — it backs off and retries — so the session
+// survives instead of being expelled. A larger window would widen that race
+// without measurably improving the DoS bound.
+const slowReloadMinInterval = 250 * time.Millisecond
+
+// errRefreshUnavailable signals that the refresh token could not be checked
+// against the shared store because the slow-path reload was rate-limited, NOT
+// that the credential is invalid. handleRefresh maps it to HTTP 429 +
+// Retry-After so the client backs off and retries instead of treating it as a
+// fatal, session-ending rejection.
+var errRefreshUnavailable = errors.New("auth store reload suppressed, retry")
+
+// allowSlowReloadLocked reports whether a slow-path store reload may run now,
+// and records the allowance when it does. The first call on a manager
+// (lastSlowReload is zero) is always allowed so a freshly started process can
+// immediately adopt clients another process persisted; afterwards reloads are
+// rate-limited to one per slowReloadMinInterval per manager, bounding the work
+// an unauthenticated flood of invalid tokens can force (each miss would
+// otherwise trigger a full loadStore under the exclusive lock).
+//
+// Callers MUST hold am.mu for writing (it mutates lastSlowReload and guards
+// the loadStore that follows).
+func (am *AuthManager) allowSlowReloadLocked(now time.Time) bool {
+	if !am.lastSlowReload.IsZero() && now.Sub(am.lastSlowReload) < slowReloadMinInterval {
+		return false
+	}
+	am.lastSlowReload = now
+	return true
+}
+
+// rotationGrace is how long the refresh token a client was rotated AWAY from
+// is still accepted once, issuing a fresh pair.
+//
+// Refresh is deliberately single-use, which makes a lost response fatal for
+// the client: it keeps presenting a token the server already replaced,
+// gets "invalid refresh token", and a WebUI treats that as a revoked session
+// (self-logout, while the server-side client record is perfectly alive). The
+// window is short because replaying an already-superseded token is only safe
+// for the client that just lost the answer — after a minute, a previous token
+// showing up again is far more likely to be a leaked credential than a
+// retry, so it is rejected.
+const rotationGrace = 60 * time.Second
+
+// RefreshToken exchanges a refresh token for a new token pair (single use,
+// both credentials rotate).
+//
+// A presented token is accepted in three cases, in this order:
+//
+//  1. it matches a client's CURRENT RefreshHash (normal rotation);
+//  2. it matches it only after reloading the store from SQLite — the
+//     multi-process case: another process rotated or persisted the client
+//     after this manager built its in-memory copy. That reload is
+//     rate-limited per manager (see slowReloadMinInterval): when the budget
+//     is spent the token is NOT declared invalid, it is reported as
+//     errRefreshUnavailable so the caller answers 429 + Retry-After and the
+//     client retries after the interval (the credential may well be valid on
+//     disk; we simply could not afford to look). The rate limit protects
+//     against an unauthenticated flood of unknown tokens.
+//  3. it matches a client's PREVIOUS RefreshHash within rotationGrace — the
+//     response of that rotation was lost, so the client is retrying with the
+//     credential it still holds and gets a usable pair (see rotationGrace).
+//     This grace is consumed globally: the replay clears Prev* on the
+//     persisted row, so the superseded token buys exactly one replacement
+//     pair across all processes, not one per process.
+//
+// Persistence is directed: only the rotated client's row is written. The
+// full-store saveStoreUnlocked is unusable here because its cleanup step
+// DELETEs rows present in the DB but absent from this process's map, i.e. it
+// reverts clients other processes paired — as well as rewriting every row.
 func (am *AuthManager) RefreshToken(refreshToken string) (*ClientInfo, string, string, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
 	refreshHash := hashToken(refreshToken)
 
-	for clientID, client := range am.store.Clients {
-		if client.RefreshHash == refreshHash {
-			if time.Now().After(client.Expires) {
-				delete(am.store.Clients, clientID)
-				return nil, "", "", fmt.Errorf("client expired")
-			}
+	clientID, client := am.findClientByRefreshHash(refreshHash)
 
-			newToken := generateToken()
-			newRefreshToken := generateToken()
-
-			expiryDays := am.cfg.TokenExpiryDays
-			if expiryDays <= 0 {
-				expiryDays = 30
-			}
-
-			client.TokenHash = hashToken(newToken)
-			client.RefreshHash = hashToken(newRefreshToken)
-			// Publish through the same lock-free field as UpdateLastSeen so
-			// LastSeen stays write-once-per-instance (creation + deserialise,
-			// both before the client is shared) and never has to be written
-			// under the lock while readers hold live pointers.
-			client.touchLastSeen(time.Now())
-			client.Expires = time.Now().AddDate(0, 0, expiryDays)
-
-			if err := am.saveStoreUnlocked(); err != nil {
-				logger.ErrorCF("native", "Failed to save store after refresh", map[string]interface{}{
+	// Cache miss: reload once from the DB (loadStore must be called with
+	// am.mu held — same pattern as the JSON branch of PairWithPIN) and
+	// rescan before deciding the token is unknown.
+	//
+	// The reload is rate-limited per manager (allowSlowReloadLocked): this
+	// branch is reachable with an invalid, unauthenticated token, and each
+	// reload is a full store read under the exclusive lock.
+	//
+	// A SUPPRESSED reload (budget spent) is tracked separately: if the token
+	// is also not replayable, the rejection must NOT claim the credential is
+	// invalid — the shared store was simply not consulted, so the token may
+	// be perfectly valid on disk (another process rotated it). That case
+	// returns errRefreshUnavailable, which the HTTP layer maps to 429 +
+	// Retry-After so the client backs off and retries instead of expelling
+	// the session.
+	reloadSuppressed := false
+	if client == nil && am.repo != nil {
+		if am.allowSlowReloadLocked(time.Now()) {
+			if err := am.loadStore(); err != nil {
+				logger.WarnCF("native", "RefreshToken: could not reload client store", map[string]interface{}{
 					"error": err.Error(),
 				})
+			} else {
+				clientID, client = am.findClientByRefreshHash(refreshHash)
 			}
-
-			return client, newToken, newRefreshToken, nil
+		} else {
+			reloadSuppressed = true
 		}
 	}
 
-	return nil, "", "", fmt.Errorf("invalid refresh token")
+	if client == nil {
+		// Replay inside the grace window: the client never saw the pair the
+		// previous rotation issued, so it retries with the token it has.
+		// Rotating again hands it a usable pair.
+		//
+		// The grace is CONSUMED by clearing Prev* on the persisted row: after
+		// this call any other process that reloads the store finds no replay
+		// material for the token just used, so a superseded refresh token buys
+		// exactly one replacement pair GLOBALLY, not one per process. Without
+		// that explicit consume, the re-arm done by rotateClientLocked (Prev*
+		// move on to this rotation's hashes) only bounds the replay inside
+		// this process: a second, stale process keeps its frozen Prev* +
+		// RotatedAt and would accept the same old token again, each acceptance
+		// minting another 30-day pair — O(number of processes with a stale
+		// map) redemptions of a single superseded credential.
+		replayID, replayClient, age := am.findClientByPrevRefreshHash(refreshHash)
+		if replayClient == nil {
+			if reloadSuppressed {
+				// We could not consult the shared store this instant; the token
+				// may be valid on disk. Ask the client to retry (429 + Retry-After)
+				// rather than expelling it with a fatal 400.
+				return nil, "", "", errRefreshUnavailable
+			}
+			// No reload was owed (budget available but the token was absent
+			// after loading, or repo == nil): the credential really is invalid.
+			return nil, "", "", fmt.Errorf("invalid refresh token")
+		}
+
+		replayed, newToken, newRefreshToken, err := am.rotateClientLocked(replayID, replayClient)
+		if err != nil {
+			return nil, "", "", err
+		}
+
+		// Explicit global consume: the token that was just replayed is now
+		// dead for every process, including ones whose in-memory copy still
+		// points at it (they either reload and see Prev* empty, or are
+		// rejected on their next attempt).
+		//
+		// Consequence for parallel clients: once this consume lands, the tab
+		// that was holding the "current" token of that rotated client can no
+		// longer be rescued server-side — its token is superseded on the row.
+		// That tab depends on the frontend adopting the pair this replay
+		// issued (ADOPTION_RETRY_DELAY_MS); this is the intended trade-off of
+		// consuming the grace globally instead of once per process.
+		replayClient.PrevRefreshHash = ""
+		replayClient.PrevTokenHash = ""
+		if err := am.persistClientLocked(replayID); err != nil {
+			logger.ErrorCF("native", "Failed to persist consumed replay grace", map[string]interface{}{
+				"client_id": replayID,
+				"error":     err.Error(),
+			})
+		}
+
+		logger.WarnCF("native", "refresh replay accepted within rotation grace", map[string]interface{}{
+			"client_id":   replayID,
+			"age_seconds": age.Round(time.Second).String(),
+		})
+		return replayed, newToken, newRefreshToken, nil
+	}
+
+	return am.rotateClientLocked(clientID, client)
+}
+
+// findClientByRefreshHash returns the id and live pointer of the client whose
+// CURRENT refresh hash matches hash ("", nil when there is none).
+// Callers must hold am.mu (write lock; the caller rotates the result).
+func (am *AuthManager) findClientByRefreshHash(hash string) (string, *ClientInfo) {
+	for id, client := range am.store.Clients {
+		if client.RefreshHash == hash {
+			return id, client
+		}
+	}
+	return "", nil
+}
+
+// findClientByPrevRefreshHash returns the id, live pointer and age of the
+// rotation whose PREVIOUS refresh hash matches hash, when that rotation is
+// still inside rotationGrace. Clients without a recorded rotation
+// (PrevRefreshHash empty: legacy blobs, freshly paired clients) never match.
+func (am *AuthManager) findClientByPrevRefreshHash(hash string) (string, *ClientInfo, time.Duration) {
+	now := time.Now()
+	for id, client := range am.store.Clients {
+		if client.PrevRefreshHash == "" || client.PrevRefreshHash != hash {
+			continue
+		}
+		if age := now.Sub(client.RotatedAt); age <= rotationGrace {
+			return id, client, age
+		}
+	}
+	return "", nil, 0
+}
+
+// rotateClientLocked issues a fresh token pair for client and persists just
+// that client. am.mu must be held for writing.
+//
+// The pre-rotation hashes are recorded before they are overwritten (Prev* /
+// RotatedAt), which is what makes the rotationGrace replay possible and what
+// pushes an older replay out of the window on the next rotation.
+func (am *AuthManager) rotateClientLocked(clientID string, client *ClientInfo) (*ClientInfo, string, string, error) {
+	// Unchanged behaviour: an expired client is dropped from memory and the
+	// caller is told the session expired. The row is left in the DB as
+	// before, so a later reload re-reads it and rejects it again on the next
+	// attempt.
+	if time.Now().After(client.Expires) {
+		delete(am.store.Clients, clientID)
+		return nil, "", "", fmt.Errorf("client expired")
+	}
+
+	newToken := generateToken()
+	newRefreshToken := generateToken()
+
+	expiryDays := am.cfg.TokenExpiryDays
+	if expiryDays <= 0 {
+		expiryDays = 30
+	}
+
+	// Record what this rotation supersedes BEFORE the hashes are overwritten.
+	// These are already hashes — never re-hash them.
+	client.PrevTokenHash = client.TokenHash
+	client.PrevRefreshHash = client.RefreshHash
+	// time.Now() once: RotatedAt and LastSeen describe the same event.
+	now := time.Now()
+	client.RotatedAt = now
+
+	client.TokenHash = hashToken(newToken)
+	client.RefreshHash = hashToken(newRefreshToken)
+	// Publish through the same lock-free field as UpdateLastSeen so
+	// LastSeen stays write-once-per-instance (creation + deserialise,
+	// both before the client is shared) and never has to be written
+	// under the lock while readers hold live pointers.
+	client.touchLastSeen(now)
+	client.Expires = now.AddDate(0, 0, expiryDays)
+
+	// Persist under the MAP KEY (clientID), never client.ClientID: the key is
+	// what identifies the row in the store, and loadStore forces the two to
+	// agree (it stamps info.ClientID = id), but a blob that predates that
+	// normalisation (migrated/manual row with an empty or divergent
+	// client_id) would make persistClientLocked miss the row and silently
+	// drop the rotation.
+	if err := am.persistClientLocked(clientID); err != nil {
+		logger.ErrorCF("native", "Failed to save store after refresh", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+
+	return client, newToken, newRefreshToken, nil
+}
+
+// persistClientLocked persists the CURRENT in-memory state of exactly one
+// client row. am.mu must be held (readers must not observe a half-written
+// row) and the client must already exist in am.store.Clients.
+//
+// It is the directed-write primitive for every mutator that touches a single
+// client, and it exists because saveStoreUnlocked is a WHOLE-STORE operation:
+// it upserts every client in memory (one transaction per row, on the auth hot
+// path) and DELETEs every row that exists in the table but not in this
+// process's map. In a multi-process setup (gateway + CLI/TUI sharing one
+// SQLite DB) rows in the DB are routinely newer than this map, so that delete
+// step silently drops — and the upsert step silently reverts — pairings and
+// rotations performed by another process. That is exactly how an expelled
+// WebUI session reappeared: TrackSessionKey ran on the WebUI hot path (GET
+// /api/session) and, via saveStoreUnlocked, rewrote the whole table from a
+// stale map on every new session key. One directed write of the row that
+// actually changed does neither.
+//
+// Backend split:
+//   - SQLite (am.repo != nil): marshal and SetClient ONLY the affected row.
+//   - JSON (am.repo == nil): unchanged behaviour — saveStoreUnlocked writes
+//     the whole file. Correct there because the JSON store is the single
+//     writer's read-modify-write document; there is no per-row API.
+//
+// Errors are returned for the caller to log and swallow, as before: the
+// mutation is already effective in memory, and the next write or reload
+// reconciles the row.
+func (am *AuthManager) persistClientLocked(clientID string) error {
+	if am.repo == nil {
+		// JSON backend: unchanged behaviour. Single writer, whole file, and
+		// the read-modify-write above keeps other processes' entries.
+		return am.saveStoreUnlocked()
+	}
+
+	client, ok := am.store.Clients[clientID]
+	if !ok {
+		// Nothing to write: the caller deleted the row (or the client was
+		// dropped from memory before persisting). Deleting rows absent from
+		// the map is saveStoreUnlocked's dangerous behaviour, never a
+		// directed write's.
+		//
+		// Logged (not just returned) because a caller that meant to persist a
+		// live client would otherwise lose the write in silence — e.g. a
+		// clientID that never made it into the map (key/field mismatch after
+		// a raw DB edit).
+		logger.DebugCF("native", "persistClientLocked: client not in memory, nothing written", map[string]interface{}{
+			"client_id": clientID,
+		})
+		return nil
+	}
+
+	data, err := json.Marshal(client)
+	if err != nil {
+		return fmt.Errorf("marshal client %s: %w", clientID, err)
+	}
+	if err := am.repo.SetClient(clientID, string(data)); err != nil {
+		return fmt.Errorf("save client %s: %w", clientID, err)
+	}
+	// saveStoreUnlocked always stamped this; keep the invariant even though
+	// the row itself carries the authoritative timestamps.
+	am.store.LastModified = time.Now()
+	return nil
 }
 
 // UpdateLastSeen records that clientID just made an authenticated request.
@@ -902,14 +1306,17 @@ func (c *ClientInfo) effectiveLastSeen() time.Time {
 // use — go vet's copylocks check rejects it too.
 func (c *ClientInfo) snapshot() *ClientInfo {
 	return &ClientInfo{
-		ClientID:    c.ClientID,
-		TokenHash:   c.TokenHash,
-		RefreshHash: c.RefreshHash,
-		DeviceName:  c.DeviceName,
-		Created:     c.Created,
-		Expires:     c.Expires,
-		LastSeen:    c.effectiveLastSeen(),
-		SessionKeys: append([]string(nil), c.SessionKeys...),
+		ClientID:        c.ClientID,
+		TokenHash:       c.TokenHash,
+		RefreshHash:     c.RefreshHash,
+		DeviceName:      c.DeviceName,
+		Created:         c.Created,
+		Expires:         c.Expires,
+		LastSeen:        c.effectiveLastSeen(),
+		SessionKeys:     append([]string(nil), c.SessionKeys...),
+		PrevTokenHash:   c.PrevTokenHash,
+		PrevRefreshHash: c.PrevRefreshHash,
+		RotatedAt:       c.RotatedAt,
 	}
 }
 
@@ -971,7 +1378,12 @@ func (am *AuthManager) TrackSessionKey(clientID, sessionKey string) {
 		"session_key": sessionKey,
 		"total_keys":  len(client.SessionKeys),
 	})
-	if err := am.saveStoreUnlocked(); err != nil {
+	// Directed write (SQLite) / whole-file save (JSON): this runs on the
+	// WebUI hot path (validating or adopting a session key via GET
+	// /api/session), so a whole-store save here would rewrite every row and
+	// delete rows this process does not know about — reverting the rotations
+	// and pairings another process just persisted. See persistClientLocked.
+	if err := am.persistClientLocked(clientID); err != nil {
 		logger.ErrorCF("native", "Failed to save store after tracking session", map[string]interface{}{
 			"client_id":   clientID,
 			"session_key": sessionKey,
@@ -1006,7 +1418,20 @@ func (am *AuthManager) RemoveClient(clientID string) error {
 
 	delete(am.store.Clients, clientID)
 
-	if err := am.saveStoreUnlocked(); err != nil {
+	// Revocation must remove ONLY the target row in SQLite.
+	// saveStoreUnlocked is wrong here: on top of the revoke it would upsert
+	// every other client from this (possibly stale) map and DELETE every row
+	// present in the table but absent from it — i.e. revoking one client
+	// would also drop clients this process had not loaded yet, including ones
+	// another process just paired. The JSON backend keeps the whole-file save
+	// (single writer, no per-row API).
+	var err error
+	if am.repo != nil {
+		err = am.repo.DeleteClient(clientID)
+	} else {
+		err = am.saveStoreUnlocked()
+	}
+	if err != nil {
 		logger.ErrorCF("native", "Failed to save store after removing client", map[string]interface{}{
 			"error": err.Error(),
 		})
@@ -1027,7 +1452,10 @@ func (am *AuthManager) RemoveSessionKey(clientID, sessionKey string) error {
 	for i, key := range client.SessionKeys {
 		if key == sessionKey {
 			client.SessionKeys = append(client.SessionKeys[:i], client.SessionKeys[i+1:]...)
-			if err := am.saveStoreUnlocked(); err != nil {
+			// Same directed write as TrackSessionKey: only this client's row
+			// changed, so a whole-store save would clobber rows owned by
+			// other processes sharing the DB.
+			if err := am.persistClientLocked(clientID); err != nil {
 				logger.ErrorCF("native", "Failed to save store after removing session key", map[string]interface{}{
 					"client_id":   clientID,
 					"session_key": sessionKey,
