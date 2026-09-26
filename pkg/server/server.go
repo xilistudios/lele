@@ -5,9 +5,11 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,15 +53,43 @@ func New(cfg *Config) *Server {
 		startTime: time.Now(),
 	}
 
-	// Build the handler chain: Security Headers -> CORS -> Mux
-	handler := s.securityHeadersMiddleware(s.corsMiddleware(mux))
+	// Handler chain: Security Headers -> CORS -> Compression -> Mux.
+	//
+	// The compressor wraps the mux rather than being installed per route, so
+	// every later-registered route (channels, webhooks) gets it for free. It
+	// sits inside CORS so it only sees real handler responses, and it
+	// self-disables on Connection: Upgrade/Upgrade: headers instead of
+	// matching paths — see compressionMiddleware for why the header test is
+	// the property that actually protects the /api/v1/ws hijack.
+	handler := s.securityHeadersMiddleware(s.corsMiddleware(compressionMiddleware(mux)))
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	s.http = &http.Server{
-		Addr:         addr,
-		Handler:      handler,
-		ReadTimeout:  30 * time.Second,
+		Addr:    addr,
+		Handler: handler,
+
+		// ReadHeaderTimeout bounds how long a client may take to send its
+		// request head: without it a slowloris connection can hold a slot
+		// open indefinitely. It only covers the head, so it never truncates
+		// a legitimately slow upload body.
+		ReadHeaderTimeout: 10 * time.Second,
+
+		// ReadTimeout additionally covers the request body.
+		ReadTimeout: 30 * time.Second,
+
+		// WriteTimeout is left at 30s on purpose. It is the deadline for the
+		// whole response, which would kill long-lived SSE streams — but the
+		// streaming handlers clear it per request with
+		// http.NewResponseController(w).SetWriteDeadline (GW-L9 in
+		// pkg/channels; the compression wrapper implements Unwrap so that
+		// still reaches the real writer). Lowering it here would break
+		// streams that do not clear it, and hijacked connections (WebSocket)
+		// do not use it at all.
 		WriteTimeout: 30 * time.Second,
+
+		// IdleTimeout reaps keep-alive connections that go quiet; without it
+		// they are only bounded by ReadTimeout.
+		IdleTimeout: 120 * time.Second,
 	}
 
 	return s
@@ -83,6 +113,11 @@ func (s *Server) RegisterHealth() {
 
 // RegisterWebUI serves the embedded frontend SPA from the given fs.FS.
 // The distFS should be rooted at the web/dist directory.
+//
+// distFS may be any http.FileSystem (http.FS over an embed.FS, http.Dir, a
+// test MapFS...). The ETag memo is keyed on (name, size, modTime), so a mutable
+// backing store keeps working: a replaced file is a new key and therefore gets
+// a new validator instead of a stale one.
 func (s *Server) RegisterWebUI(distFS http.FileSystem) {
 	spaHandler := newSPAHandler(distFS)
 	s.mux.Handle("/", spaHandler)
@@ -288,17 +323,42 @@ func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 
 // spaHandler serves a single-page application from an http.FileSystem,
 // falling back to index.html for client-side routing.
+//
+// Static-asset delivery (cache validators, Cache-Control, 304 handling) lives
+// in static.go; this type owns routing plus the one-off/memoised state
+// (index body, per-path ETags).
 type spaHandler struct {
 	fs     http.FileSystem
 	index  []byte
 	loaded bool
 	once   sync.Once
+
+	// indexETag is the strong validator for the index.html SPA fallback body.
+	indexETag string
+
+	// etagMu guards etags: per-(name, size, modTime) strong validators,
+	// computed lazily by the first request for a key and then reused. See
+	// etagForPath for the single-flight and eviction rules.
+	etagMu sync.RWMutex
+	etags  map[etagKey]*etagEntry
+	// etagCap bounds etags (see defaultETagMemoCap). A field rather than a
+	// constant so tests can shrink it.
+	etagCap int
 }
 
 func newSPAHandler(fs http.FileSystem) *spaHandler {
-	return &spaHandler{fs: fs}
+	return &spaHandler{
+		fs:      fs,
+		etags:   make(map[etagKey]*etagEntry),
+		etagCap: defaultETagMemoCap,
+	}
 }
 
+// loadIndex reads index.html once and keeps it in memory for the SPA
+// fallback. io.ReadAll is mandatory here: http.File gives no full-read
+// guarantee, so a single f.Read() could return fewer bytes than requested and
+// silently serve a truncated (zero-padded) index. On any error the handler
+// stays unloaded and requests are answered with 404 instead of a corrupt page.
 func (h *spaHandler) loadIndex() {
 	f, err := h.fs.Open("index.html")
 	if err != nil {
@@ -306,13 +366,13 @@ func (h *spaHandler) loadIndex() {
 	}
 	defer f.Close()
 
-	info, err := f.Stat()
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return
 	}
 
-	h.index = make([]byte, info.Size())
-	f.Read(h.index)
+	h.index = data
+	h.indexETag = strongETag(data)
 	h.loaded = true
 }
 
@@ -327,28 +387,39 @@ func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try to serve the exact file
-	f, err := h.fs.Open(path[1:]) // strip leading /
-	if err == nil {
-		defer f.Close()
-		info, _ := f.Stat()
-		if info != nil && !info.IsDir() {
-			// Serve file with appropriate content type
-			http.FileServer(h.fs).ServeHTTP(w, r)
+	// Try to serve the exact file. The handle is streamed directly (no
+	// per-request http.FileServer construction) with its cache validators.
+	name := strings.TrimPrefix(path, "/")
+	if f, err := h.fs.Open(name); err == nil {
+		if info, statErr := f.Stat(); statErr == nil && !info.IsDir() {
+			// info keys the ETag memo, so a changed file cannot keep serving
+			// a stale validator.
+			h.serveStaticFile(w, r, path, f, info) // takes ownership of f
 			return
 		}
+		f.Close()
 	}
 
 	// Fall back to index.html for SPA routing
 	h.once.Do(h.loadIndex)
 	if h.loaded {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(h.index)
+		h.serveIndex(w, r)
 		return
 	}
 
-	// Last resort: try FileServer
-	http.FileServer(h.fs).ServeHTTP(w, r)
+	// Last resort: index.html is unreadable, so there is no SPA to route into.
+	//
+	// This deliberately used to be http.FileServer(h.fs), which was wrong in
+	// two ways: (1) it rebuilt a FileServer on every request just to handle a
+	// path that is already known to miss on disk, and (2) pointing a
+	// FileServer at the *root* of an unreadable/broken FS makes it serve
+	// whatever it can still reach — directory listings and /index.html
+	// redirects — i.e. it can leak tree contents instead of failing closed.
+	// A root-level FS that cannot produce index.html is a broken build, not a
+	// browsable directory, so answer 404. Requests for real files never reach
+	// this branch (they are streamed above), and isAPIPath already 404s
+	// /api/* and /webhook/* before any fallback.
+	http.NotFound(w, r)
 }
 
 func isAPIPath(path string) bool {

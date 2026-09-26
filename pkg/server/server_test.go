@@ -29,6 +29,27 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestServerTimeouts(t *testing.T) {
+	s := New(&Config{Host: "127.0.0.1", Port: 0})
+
+	// ReadHeaderTimeout is the slowloris guard: a client that stalls while
+	// sending its request head must not hold a connection slot open.
+	if got := s.http.ReadHeaderTimeout; got != 10*time.Second {
+		t.Errorf("ReadHeaderTimeout = %v, want 10s", got)
+	}
+	if got := s.http.ReadTimeout; got != 30*time.Second {
+		t.Errorf("ReadTimeout = %v, want 30s", got)
+	}
+	// WriteTimeout is deliberately untouched: long-lived SSE streams clear it
+	// per request through http.ResponseController.
+	if got := s.http.WriteTimeout; got != 30*time.Second {
+		t.Errorf("WriteTimeout = %v, want 30s (streams rely on the headroom)", got)
+	}
+	if s.http.IdleTimeout <= 0 {
+		t.Errorf("IdleTimeout = %v, want a positive idle bound", s.http.IdleTimeout)
+	}
+}
+
 func TestAddr(t *testing.T) {
 	cfg := &Config{
 		Host: "0.0.0.0",
