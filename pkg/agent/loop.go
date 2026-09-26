@@ -262,6 +262,12 @@ func (al *AgentLoop) attachFolderResolver() {
 var subagentTaskIDPattern = regexp.MustCompile(`^subagent-\d+$`)
 
 // GetSubagentParentSessionKey returns the parent session key for a subagent session.
+//
+// Hot path: it is called by NativeChannel.validateSessionOwnership on every
+// subagent-scoped API request / WebSocket message, so its logs are debug-only.
+// At INFO level (the default) logger.logMessage returns before any work, while
+// an INFO call costs a global write mutex + runtime.Caller unwind +
+// json.Marshal + an unbuffered write per request.
 func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
 	var taskID string
 	if strings.HasPrefix(sessionKey, "subagent:") {
@@ -277,7 +283,7 @@ func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
 		task, ok := al.toolCoordinator.getSubagentTask(taskID)
 		if ok && task != nil {
 			resolved := al.ResolveSessionKey(task.OriginSessionKey)
-			logger.InfoCF("agent", "GetSubagentParentSessionKey: resolved from task", map[string]interface{}{
+			logger.DebugCF("agent", "GetSubagentParentSessionKey: resolved from task", map[string]interface{}{
 				"session_key":        sessionKey,
 				"task_id":            taskID,
 				"origin_session_key": task.OriginSessionKey,
@@ -294,7 +300,7 @@ func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
 	if subagentTaskIDPattern.MatchString(taskID) {
 		if idx := strings.LastIndex(sessionKey, ":"+taskID); idx > 0 {
 			parent := sessionKey[:idx]
-			logger.InfoCF("agent", "GetSubagentParentSessionKey: resolved from session key", map[string]interface{}{
+			logger.DebugCF("agent", "GetSubagentParentSessionKey: resolved from session key", map[string]interface{}{
 				"session_key": sessionKey,
 				"task_id":     taskID,
 				"parent_key":  parent,
@@ -303,7 +309,13 @@ func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
 		}
 	}
 
-	logger.WarnCF("agent", "GetSubagentParentSessionKey: unable to resolve parent", map[string]interface{}{
+	// Debug, not Warn: this is reached whenever the in-memory task registry no
+	// longer knows the task (gateway restarted, task expired/finished) or the
+	// key is not in the "<parent>:subagent-<N>" shape — both are expected for
+	// a reconnecting UI holding a stale subagent key, so a Warn here would fire
+	// on every such request without anything being wrong. The caller treats it
+	// as a plain ownership miss (validateSessionOwnership returns false).
+	logger.DebugCF("agent", "GetSubagentParentSessionKey: unable to resolve parent", map[string]interface{}{
 		"session_key": sessionKey,
 		"task_id":     taskID,
 	})
