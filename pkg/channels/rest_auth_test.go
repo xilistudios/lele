@@ -3,8 +3,11 @@ package channels
 import (
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 func TestHandleGetPIN(t *testing.T) {
@@ -218,6 +221,63 @@ func TestHandleRefreshInvalidToken(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+// newNativeTestServerSQLite builds the standard test server and switches its
+// auth manager to the shared SQLite backend (repo != nil). That is the only
+// mode in which the slow-path reload — and therefore its per-manager budget —
+// exists, so it is what a test of the suppressed-reload path needs.
+func newNativeTestServerSQLite(t *testing.T) (*nativeTestServer, *store.NativeClientRepo) {
+	t.Helper()
+
+	ts := newNativeTestServer(t)
+
+	s, err := store.Open(filepath.Join(t.TempDir(), "lele.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	// SetStore migrates the clients the server already holds (the paired
+	// "Test Desktop" client) into the DB and reloads from it.
+	ts.channel.auth.SetStore(s.NativeClients())
+	return ts, s.NativeClients()
+}
+
+// A refresh whose store reload was suppressed by the per-manager budget must
+// be answered 429 + Retry-After / code refresh_unavailable, NOT 400:
+// isFatalRefreshFailure only treats 400/401 as session-ending, so a 400 here
+// would expel a WebUI session whose token is valid in the shared DB (another
+// process rotated it inside slowReloadMinInterval).
+func TestHandleRefresh_SlowReloadSuppressedResponds429(t *testing.T) {
+	ts, repo := newNativeTestServerSQLite(t)
+
+	// Control: a client that exists ONLY in the shared DB is adopted by the
+	// reload while the budget is intact — the handler's normal behaviour.
+	control := seedForeignClient(t, repo, "handler-control")
+	if resp := postRefresh(t, ts.server.URL, control.ClientID+"-refresh"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("a DB-only client must be adopted on an intact budget, status = %d", resp.StatusCode)
+	}
+
+	// A second DB-only client appears after that reload, and the manager's
+	// budget is spent, so the reload is suppressed this time.
+	busy := seedForeignClient(t, repo, "handler-busy")
+	spendReloadBudget(t, ts.channel.auth)
+
+	resp := postRefresh(t, ts.server.URL, busy.ClientID+"-refresh")
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d (400 makes the WebUI clear its session)", resp.StatusCode, http.StatusTooManyRequests)
+	}
+	if got := resp.Header.Get("Retry-After"); got == "" {
+		t.Error("429 must carry Retry-After so the client knows when to retry")
+	}
+	var apiErr APIError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("Decode error body = %v", err)
+	}
+	if apiErr.Code != "refresh_unavailable" {
+		t.Errorf("error code = %q, want refresh_unavailable", apiErr.Code)
 	}
 }
 

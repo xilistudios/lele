@@ -20,6 +20,20 @@ type ClientInfo struct {
 	LastSeen    time.Time `json:"last_seen"`
 	SessionKeys []string  `json:"session_keys,omitempty"`
 
+	// PrevTokenHash / PrevRefreshHash / RotatedAt describe the LAST rotation
+	// of this client: the hashes that were superseded and when. They exist so
+	// a client whose rotation response was lost (network drop, killed tab)
+	// can still be served inside the rotationGrace window instead of being
+	// told its refresh token is invalid and logging itself out.
+	//
+	// Only the hashes are stored, never the raw credentials; omitempty keeps
+	// blobs written before these fields existed byte-comparable in shape (a
+	// legacy blob simply deserialises with empty values and no rotation
+	// history, in which case the grace window has nothing to match).
+	PrevRefreshHash string    `json:"prev_refresh_hash,omitempty"`
+	PrevTokenHash   string    `json:"prev_token_hash,omitempty"`
+	RotatedAt       time.Time `json:"rotated_at,omitempty"`
+
 	// lastSeenNanos holds the hot-path last-seen timestamp (UnixNano) so
 	// AuthManager.UpdateLastSeen can publish it WITHOUT the manager's
 	// exclusive lock, on every authenticated request. LastSeen above stays
