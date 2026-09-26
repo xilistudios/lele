@@ -3,7 +3,6 @@ package channels
 import (
 	"encoding/json"
 	"net/http"
-	"sort"
 	"strings"
 )
 
@@ -240,12 +239,36 @@ func (n *NativeChannel) handleSessionSubagents(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	tasks := n.agentLoop.GetSessionSubagents(sessionKey)
-
-	// Sort by Created descending (newest first)
-	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].Created > tasks[j].Created
+	// Defence in depth: a stale WebUI bundle can hammer this read endpoint
+	// (a buggy client was observed at ~250 req/s) and every miss runs
+	// GetSessionSubagents, which scans all subagent managers and calls
+	// FindSubagentSessions on each agent's SessionManager - that call takes the
+	// session manager write lock and may load full subagent sessions from disk.
+	// The cache collapses repeated identical reads within subagentsCacheTTL
+	// into one provider call per session. The validateSessionOwnership above
+	// still runs on every request and is cheap (in-memory lookups only), and no
+	// mutating endpoint is cached.
+	//
+	// The request context is passed through so a client that goes away while
+	// another fill is in flight stops waiting instead of pinning this handler
+	// goroutine; the fill itself finishes for its other waiters.
+	tasks, err := n.subagentsReadCache().get(r.Context(), sessionKey, func() ([]SubagentTaskInfo, error) {
+		// GetSessionSubagents has no error return, so the cache's error branch
+		// is unreachable in production; it stays because a provider panic is
+		// converted into an error there (and never cached) instead of leaving
+		// concurrent waiters blocked.
+		return n.agentLoop.GetSessionSubagents(sessionKey), nil
 	})
+	if err != nil {
+		// Either the provider failed/panicked (already logged with a stack by
+		// the cache) or the caller's context was cancelled; writing the error to
+		// a connection that is gone is a harmless no-op.
+		writeError(w, http.StatusInternalServerError, "failed to load subagents", "subagents_unavailable")
+		return
+	}
+
+	// The cache stores the list already sorted by Created descending (newest
+	// first), so the payload is ordered for every request without re-sorting.
 
 	// Convert to API response type
 	subagents := make([]SubagentTaskEntry, len(tasks))

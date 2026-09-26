@@ -6,9 +6,13 @@ package session
 // WebUI, cron and subagent machinery, without mutating session state.
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/providers"
 )
 
 // GetEvictedMessageCount returns the number of messages that have been evicted
@@ -370,76 +374,161 @@ type SubagentSessionInfo struct {
 	Status string
 }
 
+// subagentSummary returns the summary a subagent listing reports: the
+// session's stored summary when set, otherwise the text of its last assistant
+// message, trimmed and truncated to 200 bytes. Kept byte-identical to the
+// historical inline fallback so resident, evicted and restarted sessions all
+// report the same string.
+func subagentSummary(summary, lastAssistantContent string) string {
+	if summary != "" {
+		return summary
+	}
+	content := strings.TrimSpace(lastAssistantContent)
+	if len(content) > 200 {
+		content = content[:200] + "…"
+	}
+	return content
+}
+
+// decodeLastAssistantContent extracts the text of an assistant message from
+// its raw SQLite JSON. Rows that did not come back are empty and unreadable
+// rows decode to "", matching the "skip corrupted messages" policy of the
+// cold-load path (loadFromSQLite). The store-side query already filters
+// non-JSON payloads with json_valid (SessionRepo.SessionListingStats), so this
+// is the defensive half of that contract: what the loader would drop must not
+// become a summary either.
+func decodeLastAssistantContent(messageJSON string) string {
+	if messageJSON == "" {
+		return ""
+	}
+	var msg providers.Message
+	if err := json.Unmarshal([]byte(messageJSON), &msg); err != nil {
+		return ""
+	}
+	return msg.Content
+}
+
+// subagentInfoFromSession builds the listing entry for a session that is
+// RESIDENT in memory, whose message slice is exactly the in-context suffix
+// (seq >= firstInMemorySeq) that the store-side count queries too.
+func subagentInfoFromSession(key, parentPrefix string, session *Session) SubagentSessionInfo {
+	iterations := 0
+	lastAssistantContent := ""
+	haveLastAssistant := false
+	for i := len(session.Messages) - 1; i >= 0; i-- {
+		if session.Messages[i].Role != "assistant" {
+			continue
+		}
+		iterations++
+		if !haveLastAssistant {
+			lastAssistantContent = session.Messages[i].Content
+			haveLastAssistant = true
+		}
+	}
+	return SubagentSessionInfo{
+		Key:        key,
+		TaskID:     key[len(parentPrefix)+1:], // everything after "{parent}:"
+		Created:    session.Created,
+		Updated:    session.Updated,
+		Iterations: iterations,
+		Summary:    subagentSummary(session.Summary, lastAssistantContent),
+		Name:       session.Name,
+		Status:     session.SubagentStatus,
+	}
+}
+
 // FindSubagentSessions returns persisted subagent sessions whose keys start
 // with the given parent prefix followed by ":subagent-". This allows the API
 // to surface past subagents even after a server restart when the in-memory
 // SubagentManager no longer tracks them.
+//
+// Lock discipline: every in-memory read (the key scan, the metadata mirror and
+// the resident sessions' message slices) happens under sm.mu.RLock(); the
+// exclusive lock is never taken, and the store query runs with no lock held at
+// all. This path deliberately does NOT call loadSessionFromDisk: that needs the
+// write lock, deserializes whole message histories and inserts the loaded
+// sessions into the LRU, evicting live chats on every poll. Measured on this
+// repository's store with 94 subagents / 17.3k messages (~24 MB of JSON):
+// 654 ms with 51 sessions pulled into the LRU before, 24 ms with no residency
+// change after. The two facts that the metadata mirror does not carry — the
+// assistant-message count and the summary fallback — come from one batched
+// read-only store query.
+//
+// The LRU (sessions/accessTimes) is left untouched on purpose: a read-only
+// listing must neither make a session resident nor change eviction order.
 func (sm *SessionManager) FindSubagentSessions(parentPrefix string) []SubagentSessionInfo {
 	sm.ensureLoaded()
-	sm.mu.Lock() // need write lock for potential loadSessionFromDisk
-	defer sm.mu.Unlock()
 
 	prefix := parentPrefix + ":subagent-"
-	var results []SubagentSessionInfo
 
-	// Collect subagent keys from both metadata and in-memory sessions
-	subagentKeys := make(map[string]bool)
-	for key := range sm.sessionMeta {
-		if strings.HasPrefix(key, prefix) {
-			subagentKeys[key] = true
+	var (
+		results []SubagentSessionInfo
+		// Metadata-only entries (parallel to coldKeys): their name, timestamps
+		// and status are already known, iterations/summary are not.
+		cold     []SubagentSessionInfo
+		coldKeys []string
+	)
+
+	sm.mu.RLock()
+	// Resident sessions: everything is in memory, including the message
+	// derived fields.
+	for key, session := range sm.sessions {
+		if session == nil || !strings.HasPrefix(key, prefix) {
+			continue
 		}
+		results = append(results, subagentInfoFromSession(key, parentPrefix, session))
 	}
-	for key := range sm.sessions {
-		if strings.HasPrefix(key, prefix) {
-			subagentKeys[key] = true
+	// Metadata-only sessions: sessionMeta is the lightweight listing index
+	// built precisely to avoid loading sessions. Resident keys are skipped
+	// here because they were already reported above.
+	for key, meta := range sm.sessionMeta {
+		if meta == nil || !strings.HasPrefix(key, prefix) {
+			continue
 		}
-	}
-
-	// Load each matching session from disk on-demand (if not already in memory)
-	for key := range subagentKeys {
-		session, ok := sm.sessions[key]
-		if !ok {
-			session, ok = sm.loadSessionFromDisk(key)
-			if !ok {
-				continue
-			}
+		if _, resident := sm.sessions[key]; resident {
+			continue
 		}
-
-		taskID := key[len(parentPrefix)+1:] // everything after "{parent}:"
-
-		// Count assistant messages as iteration proxy
-		iterations := 0
-		for _, msg := range session.Messages {
-			if msg.Role == "assistant" {
-				iterations++
-			}
-		}
-
-		summary := session.Summary
-		if summary == "" && len(session.Messages) > 0 {
-			// Use the last assistant message content as a summary fallback
-			for i := len(session.Messages) - 1; i >= 0; i-- {
-				if session.Messages[i].Role == "assistant" {
-					content := strings.TrimSpace(session.Messages[i].Content)
-					if len(content) > 200 {
-						content = content[:200] + "…"
-					}
-					summary = content
-					break
-				}
-			}
-		}
-
-		results = append(results, SubagentSessionInfo{
-			Key:        key,
-			TaskID:     taskID,
-			Created:    session.Created,
-			Updated:    session.Updated,
-			Iterations: iterations,
-			Summary:    summary,
-			Name:       session.Name,
-			Status:     session.SubagentStatus,
+		cold = append(cold, SubagentSessionInfo{
+			Key:     key,
+			TaskID:  key[len(parentPrefix)+1:],
+			Created: meta.Created,
+			Updated: meta.Updated,
+			Name:    meta.Name,
+			Status:  meta.SubagentStatus,
 		})
+		coldKeys = append(coldKeys, key)
+	}
+	repo := sm.sessionRepo
+	sm.mu.RUnlock() // store I/O below must not run under the session lock
+
+	if len(coldKeys) == 0 || repo == nil {
+		// Without a store these sessions could not have been loaded by the
+		// pre-change code either (loadSessionFromDisk returns false), so they
+		// are still omitted rather than reported as empty shells.
+		return results
+	}
+
+	stats, err := repo.SessionListingStats(coldKeys)
+	if err != nil {
+		// Same policy as the load this replaces: a session whose rows cannot be
+		// read is omitted (not reported with empty fields) and the next poll
+		// retries.
+		logger.WarnCF("session", "Failed to read subagent listing stats; omitting metadata-only subagents", map[string]interface{}{
+			"error": err.Error(),
+			"count": len(coldKeys),
+		})
+		return results
+	}
+
+	for i, key := range coldKeys {
+		stat, ok := stats[key]
+		if !ok {
+			continue // sessions row is gone (deleted); the old load failed too
+		}
+		info := cold[i]
+		info.Iterations = stat.AssistantCount
+		info.Summary = subagentSummary(stat.Summary, decodeLastAssistantContent(stat.LastAssistantJSON))
+		results = append(results, info)
 	}
 
 	return results

@@ -1,8 +1,34 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAuthContext } from '../contexts/AuthContext'
 import type { SubagentTaskInfo } from '../lib/types'
+import { useOnPageVisible, usePageVisible } from './usePageVisible'
 
 export type { SubagentTaskInfo as SubagentInfo }
+
+/**
+ * Lowest interval this hook will ever use for polling the subagent list.
+ *
+ * Contract: `pollIntervalMs <= 0` means "do not poll at all", while any
+ * positive value below this floor is raised to it. Without the floor a caller
+ * asking for (or accidentally passing) a tiny interval ends up with
+ * `setInterval(fn, 0)`, which browsers clamp to ~4 ms — and this endpoint is
+ * expensive on the server (SessionManager exclusive write lock + full SQLite
+ * load), so a "0 means no polling" mistake floods the gateway with hundreds of
+ * requests per second and stalls streaming for every session.
+ */
+export const MIN_POLL_MS = 1000
+
+/**
+ * "Never poll" sentinel for `pollIntervalMs`.
+ *
+ * `useSubagents` treats a non-positive interval as polling disabled and raises
+ * any positive value below `MIN_POLL_MS` to it, because `setInterval(fn, 0)` is
+ * clamped by browsers to ~4 ms and this endpoint is expensive on the server.
+ * Use this constant — never a small number — wherever a one-shot read is
+ * enough; the refresh mechanisms are the mount/session-change fetch and the
+ * `notifySubagentsChanged()` fan-out.
+ */
+export const NO_POLL_MS = 0
 
 /**
  * Tiny fan-out so WS spawn events can wake every `useSubagents` instance.
@@ -31,6 +57,7 @@ export function useSubagents(
   const [subagents, setSubagents] = useState<SubagentTaskInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [hasRunning, setHasRunning] = useState(false)
+  const pageVisible = usePageVisible()
 
   const fetchSubagents = useCallback(async () => {
     if (!sessionKey) {
@@ -76,13 +103,42 @@ export function useSubagents(
   // spawn can land before the list has been refreshed once).
   const shouldPoll = hasRunning || active
   useEffect(() => {
-    if (!shouldPoll) return
+    // `pollIntervalMs <= 0` disables polling entirely (see MIN_POLL_MS).
+    if (!shouldPoll || pollIntervalMs <= 0) return
+    // Hidden tab: no interval at all. Visibility is an effect dependency, so
+    // this effect re-runs when the tab is shown again — and the
+    // `useOnPageVisible` refresh below fires the single immediate read.
+    if (!pageVisible) return
+
+    // Non-finite-safe floor, inlined so `pollIntervalMs` is the only interval
+    // dependency of this effect. A positive value below the floor is raised to
+    // it, and anything that is not a finite positive number (e.g. `NaN` from a
+    // caller's bad arithmetic) also falls back to it: `Math.max(NaN, floor)` is
+    // `NaN`, and `NaN <= 0` is false, so a bare `Math.max` would let the NaN
+    // straight into `setInterval` — clamped by browsers to ~4 ms, which is the
+    // request storm MIN_POLL_MS exists to prevent.
+    const intervalMs =
+      Number.isFinite(pollIntervalMs) && pollIntervalMs > 0
+        ? Math.max(pollIntervalMs, MIN_POLL_MS)
+        : MIN_POLL_MS
 
     const id = setInterval(() => {
       fetchSubagents()
-    }, pollIntervalMs)
+    }, intervalMs)
     return () => clearInterval(id)
-  }, [fetchSubagents, shouldPoll, pollIntervalMs])
+  }, [fetchSubagents, shouldPoll, pollIntervalMs, pageVisible])
+
+  // Refresh once when the tab becomes visible again: the interval above was
+  // cleared while hidden, so without this the list would stay stale for up to
+  // one interval after the user returns — and WS events delivered while the tab
+  // was backgrounded may never have been applied. Instances that do not poll
+  // (`pollIntervalMs <= 0`, the NO_POLL_MS contract) keep their
+  // mount/`notifySubagentsChanged` refresh path: the visibility refresh must not
+  // turn them into pollers, so it carries the same guard as the effect above.
+  useOnPageVisible(() => {
+    if (!shouldPoll || pollIntervalMs <= 0) return
+    void fetchSubagents()
+  })
 
   return { subagents, loading, refresh: fetchSubagents }
 }

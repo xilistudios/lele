@@ -1,8 +1,11 @@
 package channels
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -531,6 +534,11 @@ func TestAuthManager_Persistence(t *testing.T) {
 	}
 }
 
+// TestAuthManager_UpdateLastSeen asserts the observable effect of the
+// last-seen update through the public readers (GetClient / ListClients). The
+// timestamp is no longer written into the shared LastSeen field (that write
+// needed the manager's exclusive lock on every authenticated request); it goes
+// into the client's atomic field and the readers fold it back into LastSeen.
 func TestAuthManager_UpdateLastSeen(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.NativeConfig{
@@ -554,13 +562,206 @@ func TestAuthManager_UpdateLastSeen(t *testing.T) {
 		t.Fatalf("failed to pair: %v", err)
 	}
 
-	originalLastSeen := client.LastSeen
-	time.Sleep(10 * time.Millisecond)
+	before, ok := auth.GetClient(client.ClientID)
+	if !ok {
+		t.Fatal("expected client to exist")
+	}
+	originalLastSeen := before.LastSeen
 
+	time.Sleep(10 * time.Millisecond)
 	auth.UpdateLastSeen(client.ClientID)
 
-	if !client.LastSeen.After(originalLastSeen) {
-		t.Error("expected LastSeen to be updated")
+	after, ok := auth.GetClient(client.ClientID)
+	if !ok {
+		t.Fatal("expected client to exist after UpdateLastSeen")
+	}
+	if !after.LastSeen.After(originalLastSeen) {
+		t.Errorf("expected GetClient LastSeen after %v to be later than %v", after.LastSeen, originalLastSeen)
+	}
+
+	listed := auth.ListClients()
+	if len(listed) != 1 {
+		t.Fatalf("expected 1 client, got %d", len(listed))
+	}
+	if !listed[0].LastSeen.After(originalLastSeen) {
+		t.Errorf("expected ListClients LastSeen after %v to be later than %v", listed[0].LastSeen, originalLastSeen)
+	}
+}
+
+// TestAuthManager_UpdateLastSeen_DoesNotTakeWriteLock is the regression guard
+// for the latency finding: UpdateLastSeen runs on every authenticated HTTP
+// request and every WebSocket connect, so it must never need am.mu
+// exclusively. Holding a read lock for the whole call proves it — with the
+// previous implementation (am.mu.Lock()) this test times out.
+func TestAuthManager_UpdateLastSeen_DoesNotTakeWriteLock(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{PinExpiryMinutes: 5, MaxClients: 5, TokenExpiryDays: 30}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	pending, err := auth.GeneratePIN("TestDevice")
+	if err != nil {
+		t.Fatalf("failed to generate PIN: %v", err)
+	}
+	client, _, _, err := auth.PairWithPIN(pending.PIN, "TestDevice")
+	if err != nil {
+		t.Fatalf("failed to pair: %v", err)
+	}
+
+	auth.mu.RLock()
+	done := make(chan struct{})
+	go func() {
+		auth.UpdateLastSeen(client.ClientID)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		auth.mu.RUnlock()
+		t.Fatal("UpdateLastSeen blocked while a reader held am.mu: it must not take the exclusive lock")
+	}
+	auth.mu.RUnlock()
+
+	if got, _ := auth.GetClient(client.ClientID); !got.LastSeen.After(client.Created) {
+		t.Error("expected LastSeen to be updated after the lock-free write")
+	}
+}
+
+// TestAuthManager_UpdateLastSeen_ConcurrentReaders races the hot-path writer
+// against every reader that shares the client struct (GetClient, ListClients,
+// ValidateToken). Run with -race it proves the atomic field replaced the
+// lock-protected field write; without -race it still catches panics and
+// lost/degraded values.
+func TestAuthManager_UpdateLastSeen_ConcurrentReaders(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{PinExpiryMinutes: 5, MaxClients: 5, TokenExpiryDays: 30}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	pending, err := auth.GeneratePIN("TestDevice")
+	if err != nil {
+		t.Fatalf("failed to generate PIN: %v", err)
+	}
+	client, token, _, err := auth.PairWithPIN(pending.PIN, "TestDevice")
+	if err != nil {
+		t.Fatalf("failed to pair: %v", err)
+	}
+
+	const iterations = 200
+	var wg sync.WaitGroup
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				auth.UpdateLastSeen(client.ClientID)
+			}
+		}()
+	}
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				if got, ok := auth.GetClient(client.ClientID); ok && got.LastSeen.IsZero() {
+					t.Error("GetClient returned a zero LastSeen")
+					return
+				}
+				for _, c := range auth.ListClients() {
+					if c.LastSeen.IsZero() {
+						t.Error("ListClients returned a zero LastSeen")
+						return
+					}
+				}
+				if _, valid := auth.ValidateToken(token); !valid {
+					t.Error("expected token to stay valid while last-seen updates run")
+					return
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	got, ok := auth.GetClient(client.ClientID)
+	if !ok {
+		t.Fatal("expected client to exist")
+	}
+	if got.LastSeen.Before(client.Created) {
+		t.Errorf("LastSeen %v is older than the client creation time %v", got.LastSeen, client.Created)
+	}
+}
+
+// TestClientInfo_MarshalJSON_UsesFreshestLastSeen pins the JSON contract the
+// hot-path field must not break: an atomic.Int64 does not marshal like an
+// int64, so (*ClientInfo).MarshalJSON folds it into "last_seen" instead of
+// leaking a nested object or dropping the value.
+func TestClientInfo_MarshalJSON_UsesFreshestLastSeen(t *testing.T) {
+	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	touched := time.Date(2026, 6, 7, 8, 9, 10, 123456789, time.UTC)
+
+	client := &ClientInfo{
+		ClientID:    "cli-1",
+		DeviceName:  "Phone",
+		Created:     created,
+		LastSeen:    created,
+		SessionKeys: []string{"native:one"},
+	}
+	client.touchLastSeen(touched)
+
+	raw, err := json.Marshal(client)
+	if err != nil {
+		t.Fatalf("json.Marshal(ClientInfo) error = %v", err)
+	}
+
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(marshal output) error = %v", err)
+	}
+	if _, leaked := decoded["lastSeenNanos"]; leaked {
+		t.Errorf("atomic field leaked into JSON: %s", raw)
+	}
+
+	var lastSeen string
+	if err := json.Unmarshal(decoded["last_seen"], &lastSeen); err != nil {
+		t.Fatalf("last_seen missing or not a string: %s", raw)
+	}
+	// Compare instants, not strings: time.Unix (used by touchLastSeen) yields a
+	// local-zone time, exactly like the time.Now() values this field held
+	// before, so the rendered offset is the machine's, not the test's.
+	parsedSeen, err := time.Parse(time.RFC3339Nano, lastSeen)
+	if err != nil {
+		t.Fatalf("last_seen %q is not RFC3339Nano: %v", lastSeen, err)
+	}
+	if !parsedSeen.Equal(touched) {
+		t.Errorf("last_seen = %q (%v), want the touched instant %v", lastSeen, parsedSeen, touched)
+	}
+
+	// Round-trip: the value must survive a reload into the plain field.
+	var roundTripped ClientInfo
+	if err := json.Unmarshal(raw, &roundTripped); err != nil {
+		t.Fatalf("json.Unmarshal(raw) error = %v", err)
+	}
+	if !roundTripped.LastSeen.Equal(touched) {
+		t.Errorf("round-tripped LastSeen = %v, want %v", roundTripped.LastSeen, touched)
+	}
+	if !roundTripped.effectiveLastSeen().Equal(touched) {
+		t.Errorf("round-tripped effectiveLastSeen = %v, want %v", roundTripped.effectiveLastSeen(), touched)
+	}
+
+	// The plain field is still the fallback when nothing was touched (clients
+	// persisted by an older version only have "last_seen").
+	plain := &ClientInfo{ClientID: "cli-2", LastSeen: created}
+	if !plain.effectiveLastSeen().Equal(created) {
+		t.Errorf("effectiveLastSeen = %v, want the plain field %v", plain.effectiveLastSeen(), created)
 	}
 }
 
@@ -1195,5 +1396,249 @@ func TestAuthManager_PairWithPIN_InvalidAndExpiredPIN(t *testing.T) {
 	_, _, _, err = auth.PairWithPIN(pending.PIN, "Test")
 	if err == nil {
 		t.Fatal("expected error for expired PIN")
+	}
+}
+
+// TestPlanClientWrites_SkipsUnchangedRows unit-tests the store-write
+// de-duplication: only rows whose payload actually differs from the persisted
+// blob are returned (new rows always are).
+func TestPlanClientWrites_SkipsUnchangedRows(t *testing.T) {
+	unchanged := &ClientInfo{ClientID: "cli-unchanged", DeviceName: "Same", SessionKeys: []string{"native:a"}}
+	changed := &ClientInfo{ClientID: "cli-changed", DeviceName: "Renamed", SessionKeys: []string{"native:b"}}
+	fresh := &ClientInfo{ClientID: "cli-new", DeviceName: "New", SessionKeys: []string{"native:c"}}
+
+	unchangedJSON, err := json.Marshal(unchanged)
+	if err != nil {
+		t.Fatalf("marshal unchanged: %v", err)
+	}
+	changedJSON, err := json.Marshal(changed)
+	if err != nil {
+		t.Fatalf("marshal changed: %v", err)
+	}
+	// Persisted copy of the changed client differs by one session key.
+	staleChanged, err := json.Marshal(&ClientInfo{
+		ClientID:    changed.ClientID,
+		DeviceName:  changed.DeviceName,
+		SessionKeys: []string{"native:b", "native:b2"},
+	})
+	if err != nil {
+		t.Fatalf("marshal stale changed: %v", err)
+	}
+
+	clients := map[string]*ClientInfo{
+		unchanged.ClientID: unchanged,
+		changed.ClientID:   changed,
+		fresh.ClientID:     fresh,
+	}
+	// "cli-gone" exists only in the DB; it is not part of clients, so it is
+	// never a write candidate (the caller deletes it instead).
+	stored := map[string]string{
+		unchanged.ClientID: string(unchangedJSON),
+		changed.ClientID:   string(staleChanged),
+		"cli-gone":         `{"client_id":"cli-gone"}`,
+	}
+
+	writes, err := planClientWrites(clients, stored)
+	if err != nil {
+		t.Fatalf("planClientWrites() error = %v", err)
+	}
+
+	got := make(map[string]bool, len(writes))
+	for _, w := range writes {
+		got[w.id] = true
+	}
+	if len(writes) != 2 || !got[changed.ClientID] || !got[fresh.ClientID] {
+		t.Fatalf("planClientWrites() wrote %v, want exactly [%s %s]", writes, changed.ClientID, fresh.ClientID)
+	}
+	for _, w := range writes {
+		if w.id == changed.ClientID && w.payload != string(changedJSON) {
+			t.Errorf("planned payload for %s = %q, want %q", w.id, w.payload, changedJSON)
+		}
+		if w.id == "cli-gone" {
+			t.Errorf("planClientWrites() planned a write for a client absent from memory")
+		}
+	}
+}
+
+// TestAuthManager_TrackSessionKey_RewritesOnlyChangedClientRows is the
+// end-to-end guard for the write amplification: appending a session key used
+// to rewrite EVERY paired client row (one SetClient transaction each, against
+// a single-connection SQLite pool) while holding AuthManager.mu.
+//
+// The number of row writes is observed with an AFTER UPDATE trigger on
+// native_clients rather than a mock, so the real repo and real SQL are
+// exercised.
+func TestAuthManager_TrackSessionKey_RewritesOnlyChangedClientRows(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "writes.db")
+	cfg := &config.NativeConfig{PinExpiryMinutes: 5, MaxClients: 5, TokenExpiryDays: 30}
+
+	dbStore, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open(%q) error = %v", dbPath, err)
+	}
+	defer dbStore.Close()
+	repo := dbStore.NativeClients()
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+	auth.SetStore(repo)
+
+	var paired []*ClientInfo
+	for i := 0; i < 2; i++ {
+		pending, err := auth.GeneratePIN("Device")
+		if err != nil {
+			t.Fatalf("GeneratePIN(%d) failed: %v", i, err)
+		}
+		client, _, _, err := auth.PairWithPIN(pending.PIN, "Device")
+		if err != nil {
+			t.Fatalf("PairWithPIN(%d) failed: %v", i, err)
+		}
+		paired = append(paired, client)
+	}
+
+	secondBlobBefore, found, err := repo.GetClient(paired[1].ClientID)
+	if err != nil || !found {
+		t.Fatalf("GetClient(second) found=%v err=%v", found, err)
+	}
+
+	// Log every UPDATE on native_clients from here on.
+	if _, err := dbStore.DB().Exec(`CREATE TABLE client_write_log(id TEXT NOT NULL)`); err != nil {
+		t.Fatalf("create write log table: %v", err)
+	}
+	if _, err := dbStore.DB().Exec(
+		`CREATE TRIGGER log_client_writes AFTER UPDATE ON native_clients
+		 BEGIN INSERT INTO client_write_log(id) VALUES (NEW.id); END`); err != nil {
+		t.Fatalf("create write log trigger: %v", err)
+	}
+
+	const newKey = "native:first:chat-1"
+	auth.TrackSessionKey(paired[0].ClientID, newKey)
+
+	rows, err := dbStore.DB().Query(`SELECT id FROM client_write_log`)
+	if err != nil {
+		t.Fatalf("query write log: %v", err)
+	}
+	var written []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			t.Fatalf("scan write log: %v", err)
+		}
+		written = append(written, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatalf("read write log: %v", err)
+	}
+	// Close before any further query: the pool has a single connection.
+	rows.Close()
+
+	if len(written) != 1 || written[0] != paired[0].ClientID {
+		t.Errorf("TrackSessionKey rewrote %v; want exactly [%s] (the client whose payload changed)",
+			written, paired[0].ClientID)
+	}
+
+	// The changed client must really be persisted with the new key.
+	firstBlob, found, err := repo.GetClient(paired[0].ClientID)
+	if err != nil || !found {
+		t.Fatalf("GetClient(first) found=%v err=%v", found, err)
+	}
+	var firstStored ClientInfo
+	if err := json.Unmarshal([]byte(firstBlob), &firstStored); err != nil {
+		t.Fatalf("unmarshal first client: %v", err)
+	}
+	if !slices.Contains(firstStored.SessionKeys, newKey) {
+		t.Errorf("persisted session keys = %v, want %q tracked", firstStored.SessionKeys, newKey)
+	}
+
+	// The untouched client must be byte-identical (skipped, not rewritten).
+	secondBlobAfter, found, err := repo.GetClient(paired[1].ClientID)
+	if err != nil || !found {
+		t.Fatalf("GetClient(second, after) found=%v err=%v", found, err)
+	}
+	if secondBlobBefore != secondBlobAfter {
+		t.Errorf("untouched client row changed:\n before=%s\n after =%s", secondBlobBefore, secondBlobAfter)
+	}
+}
+
+// TestAuthManager_SQLitePersistsLockFreeLastSeen proves the hot-path last-seen
+// value still reaches the persisted blob (via (*ClientInfo).MarshalJSON) and
+// that UpdateLastSeen itself costs no disk write.
+func TestAuthManager_SQLitePersistsLockFreeLastSeen(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lastseen.db")
+	cfg := &config.NativeConfig{PinExpiryMinutes: 5, MaxClients: 5, TokenExpiryDays: 30}
+
+	dbStore, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open(%q) error = %v", dbPath, err)
+	}
+	defer dbStore.Close()
+	repo := dbStore.NativeClients()
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+	auth.SetStore(repo)
+
+	pending, err := auth.GeneratePIN("Device")
+	if err != nil {
+		t.Fatalf("GeneratePIN failed: %v", err)
+	}
+	client, _, _, err := auth.PairWithPIN(pending.PIN, "Device")
+	if err != nil {
+		t.Fatalf("PairWithPIN failed: %v", err)
+	}
+
+	persisted := func() *ClientInfo {
+		t.Helper()
+		blob, found, err := repo.GetClient(client.ClientID)
+		if err != nil || !found {
+			t.Fatalf("GetClient found=%v err=%v", found, err)
+		}
+		var stored ClientInfo
+		if err := json.Unmarshal([]byte(blob), &stored); err != nil {
+			t.Fatalf("unmarshal persisted client: %v", err)
+		}
+		return &stored
+	}
+
+	beforePair := persisted()
+
+	// Hot path: updates memory only.
+	time.Sleep(5 * time.Millisecond)
+	touchedFrom := time.Now()
+	auth.UpdateLastSeen(client.ClientID)
+
+	if afterTouch := persisted(); !afterTouch.LastSeen.Equal(beforePair.LastSeen) {
+		t.Errorf("UpdateLastSeen wrote to disk: last_seen %v -> %v", beforePair.LastSeen, afterTouch.LastSeen)
+	}
+
+	// A real (locked) save must fold the lock-free value into the blob.
+	if err := auth.saveStore(); err != nil {
+		t.Fatalf("saveStore failed: %v", err)
+	}
+	stored := persisted()
+	if stored.LastSeen.Before(touchedFrom) {
+		t.Errorf("persisted last_seen = %v, want >= %v (the lock-free update)", stored.LastSeen, touchedFrom)
+	}
+
+	// A restarted gateway must observe the same value.
+	auth2, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create second auth manager: %v", err)
+	}
+	auth2.SetStore(repo)
+	reloaded, ok := auth2.GetClient(client.ClientID)
+	if !ok {
+		t.Fatal("expected client after reload")
+	}
+	if !reloaded.LastSeen.Equal(stored.LastSeen) {
+		t.Errorf("reloaded LastSeen = %v, want %v", reloaded.LastSeen, stored.LastSeen)
 	}
 }

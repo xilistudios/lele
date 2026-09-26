@@ -2,6 +2,7 @@ package channels
 
 import (
 	"encoding/json"
+	"sync/atomic"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/config"
@@ -18,6 +19,19 @@ type ClientInfo struct {
 	Expires     time.Time `json:"expires"`
 	LastSeen    time.Time `json:"last_seen"`
 	SessionKeys []string  `json:"session_keys,omitempty"`
+
+	// lastSeenNanos holds the hot-path last-seen timestamp (UnixNano) so
+	// AuthManager.UpdateLastSeen can publish it WITHOUT the manager's
+	// exclusive lock, on every authenticated request. LastSeen above stays
+	// the plain, JSON-facing field, written only before the client is
+	// published (construction + deserialisation); the effective value is
+	// max(LastSeen, lastSeenNanos), see (*ClientInfo).effectiveLastSeen in
+	// auth.go.
+	//
+	// Excluded from JSON on purpose: an atomic.Int64 does not marshal like an
+	// int64 (it has unexported fields), so (*ClientInfo).MarshalJSON in
+	// auth.go folds this value into the "last_seen" key instead.
+	lastSeenNanos atomic.Int64 `json:"-"`
 }
 
 type SafeClientInfo struct {

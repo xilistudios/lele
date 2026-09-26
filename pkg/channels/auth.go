@@ -216,12 +216,61 @@ func (am *AuthManager) saveStore() error {
 	return am.saveStoreUnlocked()
 }
 
+// pendingClientWrite is one client row that must be persisted because its
+// serialised payload differs from the blob already stored for that id.
+type pendingClientWrite struct {
+	id      string
+	payload string
+}
+
+// planClientWrites marshals every in-memory client and returns only the rows
+// that actually need writing.
+//
+// Background: saveStoreUnlocked used to rewrite EVERY client row on EVERY
+// save. TrackSessionKey triggers a save on each new session key, i.e. from the
+// WebUI hot path, and each NativeClientRepo.SetClient is its own transaction
+// against a single-connection SQLite pool — so one new session key cost one
+// SELECT plus one write transaction per paired client, all while holding
+// AuthManager.mu.
+//
+// Comparing the marshalled payload against the blob already in the table
+// (read by the caller's ListClients inside the same locked section) removes
+// the redundant writes without changing persistence semantics: a row whose
+// bytes are identical would be updated to the exact same value (SetClient's
+// ON CONFLICT only sets the client column, created_at is preserved), so
+// skipping it is a no-op on the final DB contents. Rows that are new (id
+// absent from stored) are always written, and the ids returned are a subset of
+// the ids written before — the set of rows in the table is unchanged.
+//
+// Remaining cost left alone (out of scope: no transactional/bulk API exists on
+// store.NativeClientRepo): the writes that do happen are still one transaction
+// each, and the SELECT still reads every client blob. Batching them would need
+// a new repo method, e.g. SetClients(map[string]string) in a single tx.
+func planClientWrites(clients map[string]*ClientInfo, stored map[string]string) ([]pendingClientWrite, error) {
+	writes := make([]pendingClientWrite, 0, len(clients))
+
+	for id, client := range clients {
+		clientJSON, err := json.Marshal(client)
+		if err != nil {
+			return nil, fmt.Errorf("marshal client %s: %w", id, err)
+		}
+		if persisted, ok := stored[id]; ok && persisted == string(clientJSON) {
+			continue
+		}
+		writes = append(writes, pendingClientWrite{id: id, payload: string(clientJSON)})
+	}
+
+	return writes, nil
+}
+
 func (am *AuthManager) saveStoreUnlocked() error {
 	am.store.LastModified = time.Now()
 
-	// SQLite path — delete removed clients, then upsert remaining ones.
+	// SQLite path — delete removed clients, then upsert the ones that changed.
 	if am.repo != nil {
-		// Build the set of current client IDs so we can delete stale rows.
+		// A single SELECT gives us both the row set (stale rows must be
+		// deleted) and the persisted payloads (unchanged rows must not be
+		// rewritten). See planClientWrites.
 		existing, err := am.repo.ListClients()
 		if err != nil {
 			return fmt.Errorf("list clients for cleanup: %w", err)
@@ -233,13 +282,13 @@ func (am *AuthManager) saveStoreUnlocked() error {
 				}
 			}
 		}
-		for id, client := range am.store.Clients {
-			clientJSON, err := json.Marshal(client)
-			if err != nil {
-				return fmt.Errorf("marshal client %s: %w", id, err)
-			}
-			if err := am.repo.SetClient(id, string(clientJSON)); err != nil {
-				return fmt.Errorf("save client %s: %w", id, err)
+		writes, err := planClientWrites(am.store.Clients, existing)
+		if err != nil {
+			return err
+		}
+		for _, write := range writes {
+			if err := am.repo.SetClient(write.id, write.payload); err != nil {
+				return fmt.Errorf("save client %s: %w", write.id, err)
 			}
 		}
 		return nil
@@ -771,7 +820,11 @@ func (am *AuthManager) RefreshToken(refreshToken string) (*ClientInfo, string, s
 
 			client.TokenHash = hashToken(newToken)
 			client.RefreshHash = hashToken(newRefreshToken)
-			client.LastSeen = time.Now()
+			// Publish through the same lock-free field as UpdateLastSeen so
+			// LastSeen stays write-once-per-instance (creation + deserialise,
+			// both before the client is shared) and never has to be written
+			// under the lock while readers hold live pointers.
+			client.touchLastSeen(time.Now())
 			client.Expires = time.Now().AddDate(0, 0, expiryDays)
 
 			if err := am.saveStoreUnlocked(); err != nil {
@@ -787,13 +840,98 @@ func (am *AuthManager) RefreshToken(refreshToken string) (*ClientInfo, string, s
 	return nil, "", "", fmt.Errorf("invalid refresh token")
 }
 
+// UpdateLastSeen records that clientID just made an authenticated request.
+//
+// This is the hottest write in the channel: it runs on every HTTP request
+// (NativeChannel.authMiddleware) and on every WebSocket connect, so it must
+// never take AuthManager.mu exclusively — that would serialise all
+// authenticated traffic against ValidateToken/GetClient.
+//
+// The timestamp is therefore published into the client's atomic.Int64 field:
+// the manager lock is only held for the map lookup (RLock, shared with all
+// other readers) and the value itself is written lock-free. The in-memory
+// client struct is the source of truth for readers of GetClient/ListClients
+// and for persistence, which fold the atomic value into LastSeen (see
+// effectiveLastSeen and MarshalJSON).
 func (am *AuthManager) UpdateLastSeen(clientID string) {
-	am.mu.Lock()
-	defer am.mu.Unlock()
+	am.mu.RLock()
+	client, exists := am.store.Clients[clientID]
+	am.mu.RUnlock()
 
-	if client, exists := am.store.Clients[clientID]; exists {
-		client.LastSeen = time.Now()
+	if !exists {
+		return
 	}
+
+	client.touchLastSeen(time.Now())
+}
+
+// touchLastSeen publishes t as the client's most recent last-seen value.
+// Safe for concurrent use: it only stores into the client's atomic field, so
+// it never races with readers holding AuthManager.mu.RLock.
+func (c *ClientInfo) touchLastSeen(t time.Time) {
+	c.lastSeenNanos.Store(t.UnixNano())
+}
+
+// effectiveLastSeen returns the most recent last-seen timestamp: whichever is
+// newer of the plain LastSeen field (set at construction and when a client is
+// deserialised) and the lock-free hot-path value.
+//
+// Locking contract: the plain field must only ever be written BEFORE the
+// client is published in AuthManager.store (construction / deserialisation /
+// whole-entry replacement, all of which happen under am.mu). No setter mutates
+// it on a published client — that is what used to require the exclusive lock —
+// so reading it here is race-free for any caller holding a pointer obtained
+// through the store. A future setter that writes LastSeen directly must hold
+// am.mu for writing, and callers of this method must then hold at least RLock
+// (all current callers do).
+func (c *ClientInfo) effectiveLastSeen() time.Time {
+	seen := c.LastSeen
+	if nanos := c.lastSeenNanos.Load(); nanos > 0 {
+		if hot := time.Unix(0, nanos); hot.After(seen) {
+			seen = hot
+		}
+	}
+	return seen
+}
+
+// snapshot returns a copy of the client safe to hand out to callers, carrying
+// the freshest last-seen value.
+//
+// Fields are copied one by one on purpose: a struct assignment (copy := *c)
+// would copy the embedded atomic.Int64, which must never be copied after first
+// use — go vet's copylocks check rejects it too.
+func (c *ClientInfo) snapshot() *ClientInfo {
+	return &ClientInfo{
+		ClientID:    c.ClientID,
+		TokenHash:   c.TokenHash,
+		RefreshHash: c.RefreshHash,
+		DeviceName:  c.DeviceName,
+		Created:     c.Created,
+		Expires:     c.Expires,
+		LastSeen:    c.effectiveLastSeen(),
+		SessionKeys: append([]string(nil), c.SessionKeys...),
+	}
+}
+
+// MarshalJSON serialises the client with the freshest last-seen value.
+//
+// The hot-path timestamp lives in an unexported atomic.Int64 (json:"-"), which
+// encoding/json would drop, so the persisted blob would silently fall back to
+// the value LastSeen had at the last locked write. Folding the atomic in here
+// keeps the JSON contract (same "last_seen" RFC3339Nano value as before) for
+// both the JSON file store and the SQLite blob.
+//
+// The embedded alias keeps this in sync with the struct definition: it
+// contributes every exported field (tags included) without a hand-maintained
+// field list, and the outer LastSeen is at depth 0 so it wins over the
+// embedded one at depth 1.
+func (c *ClientInfo) MarshalJSON() ([]byte, error) {
+	type alias ClientInfo
+
+	return json.Marshal(struct {
+		*alias
+		LastSeen time.Time `json:"last_seen"`
+	}{(*alias)(c), c.effectiveLastSeen()})
 }
 
 func (am *AuthManager) TrackSessionKey(clientID, sessionKey string) {
@@ -851,9 +989,11 @@ func (am *AuthManager) GetClient(clientID string) (*ClientInfo, bool) {
 		return nil, false
 	}
 
-	copy := *client
-	copy.SessionKeys = append([]string(nil), client.SessionKeys...)
-	return &copy, true
+	// snapshot() rather than a struct copy: the client now embeds an
+	// atomic.Int64, which must not be copied (and go vet rejects it).
+	// It also folds in the lock-free last-seen value written by
+	// UpdateLastSeen, so callers always observe a fresh timestamp.
+	return client.snapshot(), true
 }
 
 func (am *AuthManager) RemoveClient(clientID string) error {
@@ -901,13 +1041,19 @@ func (am *AuthManager) RemoveSessionKey(clientID, sessionKey string) error {
 	return fmt.Errorf("session key not found")
 }
 
+// ListClients returns a snapshot of every paired client, each carrying its
+// freshest last-seen value (the lock-free value published by UpdateLastSeen
+// lives in an atomic field, so live pointers would hand callers a stale
+// timestamp — and an atomic that must not be copied).
+// The returned clients are copies: no caller mutates them (all consumers read
+// metadata / session-key sets), and callers must not rely on shared state.
 func (am *AuthManager) ListClients() []*ClientInfo {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 
 	clients := make([]*ClientInfo, 0, len(am.store.Clients))
 	for _, client := range am.store.Clients {
-		clients = append(clients, client)
+		clients = append(clients, client.snapshot())
 	}
 	return clients
 }

@@ -78,6 +78,12 @@ type NativeChannel struct {
 	// Guarded by mu: Send reads it on every dispatched message while the
 	// manager writes it at wiring time.
 	outboundFlusher PeerFlusher
+
+	// subagentsCached collapses repeated/stampeding reads of the subagents
+	// REST endpoint (see subagents_cache.go). Initialised by NewNativeChannel,
+	// with a lazy fallback for bare &NativeChannel{} literals in tests.
+	subagentsCacheMu sync.Mutex
+	subagentsCached  *subagentsCache
 }
 
 // CronProvidable is the interface for managing cron jobs via the API.
@@ -253,6 +259,7 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 		skillsLoader:     skillsLoader,
 		skillInstaller:   skillInstaller,
 		workspacePath:    workspacePath,
+		subagentsCached:  newSubagentsCache(subagentsCacheTTL, subagentsCacheMaxKeys, time.Now),
 	}, nil
 }
 
@@ -841,6 +848,15 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		if msg.Metadata != nil && msg.Metadata["result"] != "" {
 			result = msg.Metadata["result"]
 		}
+		// A completed spawn tool means a new subagent task exists: drop the
+		// cached list for the PARENT session (sessionKey is resolved from
+		// msg.ChatID above) before emitting, so the refresh the WebUI makes on
+		// this event cannot be served a pre-spawn payload. Same event set the
+		// TUI invalidates on (pkg/tui/handlers_events.go); without this the
+		// sidebar could miss a just-spawned task for up to subagentsCacheTTL.
+		if msg.Metadata["tool"] == "spawn" {
+			n.invalidateSubagentsCache(sessionKey)
+		}
 		n.emitNativeEvent(sessionKey, "tool.result", WSToolResultPayload{
 			SessionKey:         sessionKey,
 			Tool:               msg.Metadata["tool"],
@@ -850,6 +866,12 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		}, "")
 		return
 	case "subagent.result":
+		// The task reached a terminal state: invalidate before emitting so the
+		// list the client refetches carries the final status instead of the
+		// "running" entry cached moments earlier. sessionKey is the parent
+		// session (the event is published on the parent's key), which is also
+		// the key the REST endpoint caches under.
+		n.invalidateSubagentsCache(sessionKey)
 		n.emitNativeEvent(sessionKey, "subagent.result", WSToolResultPayload{
 			SessionKey:         sessionKey,
 			Tool:               msg.Metadata["tool"],

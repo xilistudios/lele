@@ -1,9 +1,9 @@
 package channels
 
 import (
-	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
@@ -114,44 +114,6 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 	// This is used to populate ToolName for tool result messages
 	builder := newChatHistoryBuilder(history)
 
-	// Build a list of valid messages (user, assistant, tool) with their IDs
-	type indexedMessage struct {
-		id  string
-		msg providers.Message
-	}
-	validMessages := make([]indexedMessage, 0, len(history))
-	// Occurrence counters per content key: messages with identical content must
-	// still receive DISTINCT ids (see residentMessageID).
-	residentOccurrences := make(map[string]int, len(history))
-	for _, msg := range history {
-		if msg.Role != "user" && msg.Role != "assistant" && msg.Role != "tool" {
-			continue
-		}
-		// Skip injected context messages (e.g. from read_image tool)
-		if msg.Role == "user" && msg.Content == "" && len(msg.ContentParts) > 0 {
-			continue
-		}
-		// NEW: skip the in-progress streaming assistant message while the
-		// session is actively processing. It is delivered live over the
-		// WebSocket (streaming events + reconnect catchup); leaking it into
-		// HTTP history races with the live frontend state and causes
-		// ordering glitches and disappearing/reappearing messages. When the
-		// session is NOT processing, a leftover Streaming=true message is a
-		// crash-recovery orphan (process died mid-stream) and MUST stay
-		// visible or it would be hidden forever.
-		if msg.Streaming && processing {
-			continue
-		}
-		// Stable, position-independent content key + occurrence index. The
-		// first occurrence keeps the legacy id so existing pagination cursors
-		// keep working; repeats get a `-<n>` suffix so ids stay unique.
-		key := residentMessageKey(msg)
-		occurrence := residentOccurrences[key]
-		residentOccurrences[key]++
-		msgID := residentMessageID(sessionKey, key, occurrence)
-		validMessages = append(validMessages, indexedMessage{id: msgID, msg: msg})
-	}
-
 	// Evicted history is served on demand from SQLite instead of being
 	// materialized into memory: a client scrolling to the top of the resident
 	// window pages into messages that stay out of the agent's context, so
@@ -172,21 +134,70 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Find the starting point based on before_id cursor
-	startIdx := len(validMessages)
-	if beforeID != "" {
-		for i, vm := range validMessages {
-			if vm.id == beforeID {
-				startIdx = i
-				break
-			}
+	// Resident window: ONE pass that records, per visible message, its index in
+	// `history` plus the occurrence index of its content key. Nothing else is
+	// kept — no message copy, no id string — so the pass costs one bounded key
+	// per message (residentMessageKeyBytes samples the content instead of
+	// hashing it whole) rather than a SHA-256 over every message's full body.
+	// The key only becomes the wire id of a message when that message lands on
+	// the returned page (≤ limit, max 200).
+	//
+	// The cursor is resolved inside the same pass: parseResidentHistoryCursor
+	// decodes the (key, occurrence) pair out of the `<sessionKey>:<key>[-<n>]`
+	// id the client sent back, and the walk reports the position whose pair
+	// matches. An unmatched cursor keeps the previous behaviour (start at the
+	// end of the resident window, i.e. serve the newest page and/or cross into
+	// the evicted region).
+	cursorKey, cursorOccurrence, hasResidentCursor := parseResidentHistoryCursor(sessionKey, beforeID)
+
+	type residentEntry struct {
+		msgIdx     int
+		key        residentKey
+		occurrence int
+	}
+	entries := make([]residentEntry, 0, len(history))
+	// Occurrence counters per content key: messages with identical content must
+	// still receive DISTINCT ids (see residentMessageID).
+	residentOccurrences := make(map[residentKey]int, len(history))
+	matchedIdx := -1
+	for i := range history {
+		msg := &history[i]
+		if !residentHistoryVisible(msg) {
+			continue
 		}
+		// NEW: skip the in-progress streaming assistant message while the
+		// session is actively processing. It is delivered live over the
+		// WebSocket (streaming events + reconnect catchup); leaking it into
+		// HTTP history races with the live frontend state and causes
+		// ordering glitches and disappearing/reappearing messages. When the
+		// session is NOT processing, a leftover Streaming=true message is a
+		// crash-recovery orphan (process died mid-stream) and MUST stay
+		// visible or it would be hidden forever.
+		if msg.Streaming && processing {
+			continue
+		}
+		// Stable, position-independent content key + occurrence index. The
+		// first occurrence keeps the legacy id so existing pagination cursors
+		// keep working; repeats get a `-<n>` suffix so ids stay unique.
+		key := residentMessageKeyBytes(msg)
+		occurrence := residentOccurrences[key]
+		residentOccurrences[key]++
+		if hasResidentCursor && matchedIdx < 0 && occurrence == cursorOccurrence && key == cursorKey {
+			matchedIdx = len(entries)
+		}
+		entries = append(entries, residentEntry{msgIdx: i, key: key, occurrence: occurrence})
+	}
+
+	// Find the starting point based on before_id cursor
+	startIdx := len(entries)
+	if matchedIdx >= 0 {
+		startIdx = matchedIdx
 	}
 
 	// Calculate the range to return (messages before the cursor)
 	endIdx := startIdx
-	if endIdx > len(validMessages) {
-		endIdx = len(validMessages)
+	if endIdx > len(entries) {
+		endIdx = len(entries)
 	}
 	resultStartIdx := endIdx - limit
 	if resultStartIdx < 0 {
@@ -200,7 +211,7 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 	// left the resident window since the last page — it was evicted or pruned.
 	// Falling through to the evicted region keeps history reachable; in the
 	// rare evicted case the message may reappear once under its seq-based ID.
-	if beforeID != "" && resultStartIdx == 0 && len(validMessages) > 0 && (startIdx == 0 || startIdx == len(validMessages)) {
+	if beforeID != "" && resultStartIdx == 0 && len(entries) > 0 && (startIdx == 0 || startIdx == len(entries)) {
 		if n.agentLoop != nil && n.agentLoop.GetEvictedMessageCount(sessionKey) > 0 {
 			n.writeEvictedHistory(w, sessionKey, -1, limit, processing, builder)
 			return
@@ -209,16 +220,18 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 	// No resident messages at all (entire transcript evicted and the cold
 	// tail is empty): the first page must come from the evicted region even
 	// without a cursor, or the session would look permanently empty.
-	if len(validMessages) == 0 && n.agentLoop != nil && n.agentLoop.GetEvictedMessageCount(sessionKey) > 0 {
+	if len(entries) == 0 && n.agentLoop != nil && n.agentLoop.GetEvictedMessageCount(sessionKey) > 0 {
 		n.writeEvictedHistory(w, sessionKey, beforeSeqFromCursor(beforeID), limit, processing, builder)
 		return
 	}
 
-	// Build response messages
+	// Build response messages. Only this loop materializes messages (and their
+	// ids) — everything older is left as an index into `history`.
 	messages := make([]ChatHistoryMessage, 0, endIdx-resultStartIdx)
 	for i := resultStartIdx; i < endIdx; i++ {
-		vm := validMessages[i]
-		messages = append(messages, builder.message(vm.id, vm.msg))
+		e := entries[i]
+		msgID := residentMessageID(sessionKey, residentKeyHex(e.key), e.occurrence)
+		messages = append(messages, builder.message(msgID, history[e.msgIdx]))
 	}
 
 	// Check if there are more messages available
@@ -253,22 +266,208 @@ func beforeSeqFromCursor(cursor string) int {
 	return -1
 }
 
-// residentMessageKey derives the content-based discriminator of a message.
-// It is position-independent on purpose: cursor pagination must survive
-// pruning and appends. Two DIFFERENT messages can therefore share a key —
-// residentMessageID appends an occurrence suffix to keep their ids unique.
-func residentMessageKey(msg providers.Message) string {
-	hasher := sha256.New()
-	hasher.Write([]byte(msg.Role))
-	hasher.Write([]byte(msg.Content))
+// ---------------------------------------------------------------------------
+// Resident message identity
+//
+// A resident message's wire id is `<sessionKey>:<key>[-<occurrence>]`, where
+// `key` discriminates messages by CONTENT and `occurrence` keeps the ids of
+// genuinely identical messages unique (see residentMessageID). Minting those
+// ids is the resident half of GET /api/v1/chat/history, which the WebUI polls
+// every ~4s while a turn streams.
+//
+// The key must satisfy, in order of importance:
+//
+//  1. Deterministic and position-independent: the same message must mint the
+//     same key on every request, after appends, after pruning and after a
+//     restart, or a cursor a client holds stops resolving.
+//  2. Identical content MUST produce an identical key: the `-<n>` suffix only
+//     exists because copies collide, so it can only work if they do.
+//  3. Bounded cost per message: the key is computed for EVERY visible message
+//     on every request, so its cost must not grow with len(content). Hashing
+//     the full body with SHA-256 was O(session bytes) — ~15MB copied and
+//     hashed per request on a 3.5k-message session to return 50 messages.
+//
+// It is therefore a 64-bit digest over the role, the content length, a bounded
+// sample of the content and the tool-call identity fields. Sampling can only
+// make two DIFFERENT messages share a key (never split identical ones), which
+// is benign by construction: messages sharing a key are treated as occurrences
+// of one identity, so they still get unique ids (`-1`, `-2`, …) and each id
+// still resolves back to its own message through the occurrence index. This is
+// a UI identity, not a security primitive.
+//
+// Upgrade note: wire ids are minted from this digest, so changing the digest
+// changes the VALUE of every resident message's id — not merely its form. The
+// layout (`<sessionKey>:<16 hex>[-<occurrence>]`) is untouched, but the 16 hex
+// characters differ for every message of every session, so ids minted before
+// the change (the truncated SHA-256 over the full content this key replaced)
+// stop resolving. A client that is mid-scroll across such a change sends a
+// cursor that no longer resolves and falls back to the newest page, which is
+// the documented behaviour for any stale cursor (see
+// parseResidentHistoryCursor): older pages can therefore appear once more
+// until the client reloads, and no message is lost. Within one version, ids
+// are stable.
+// ---------------------------------------------------------------------------
+
+// residentKeyBytes is the digest width. 8 bytes (16 hex characters) keeps the
+// wire id shape — and its length — unchanged.
+const residentKeyBytes = 8
+
+// residentKey is the fixed-size identity key of a resident message. A fixed
+// array (not a string) keeps the per-request occurrence index free of one
+// allocation per message.
+type residentKey [residentKeyBytes]byte
+
+const (
+	// residentKeySampleWindow is the size of each content window folded into
+	// the key; residentKeySampleWindows is how many are spread over the
+	// content (head, quarter, middle, three-quarter, tail).
+	residentKeySampleWindow  = 32
+	residentKeySampleWindows = 5
+	// residentKeySampleSpan is where sampling starts: content up to
+	// window*windows bytes is hashed whole, and that is also the maximum
+	// number of content bytes any message contributes.
+	residentKeySampleSpan = residentKeySampleWindow * residentKeySampleWindows
+)
+
+// residentKeyHash* are the FNV-1a 64-bit constants. The mixer only has to be
+// deterministic and well spread, not collision resistant.
+const (
+	residentKeyHashOffset = 14695981039346656037
+	residentKeyHashPrime  = 1099511628211
+)
+
+// residentHashBlock folds a byte span into the running digest, one 8-byte word
+// at a time: no allocation, no unsafe, no per-byte multiply. The windows are
+// short and hashed for every message on every request, so the word loop is the
+// one that matters — the byte loop only ever handles the 0-7 trailing bytes
+// (TestResidentMessageKeyBoundedWork pins the zero-allocation property).
+func residentHashBlock(h uint64, block string) uint64 {
+	i := 0
+	for ; i+8 <= len(block); i += 8 {
+		h = (h ^ binary.LittleEndian.Uint64([]byte(block[i:i+8]))) * residentKeyHashPrime
+	}
+	for ; i < len(block); i++ {
+		h = (h ^ uint64(block[i])) * residentKeyHashPrime
+	}
+	return h
+}
+
+// residentHashField folds a whole (short) field into the digest, separating
+// fields by length so that ("ab","c") cannot produce the digest of ("a","bc").
+func residentHashField(h uint64, field string) uint64 {
+	h = (h ^ uint64(len(field))) * residentKeyHashPrime
+	return residentHashBlock(h, field)
+}
+
+// residentHashContent folds the message content into the digest in bounded
+// time: its length plus at most residentKeySampleSpan bytes sampled at the
+// head, the quarter points, the exact middle and the tail.
+//
+// Two messages that share a length and differ ONLY inside an unsampled span
+// therefore share a key. That is the documented, benign failure mode of a
+// bounded key (see the block comment above); the sampled offsets include the
+// exact middle precisely because "same prefix, different middle" is the common
+// near-duplicate shape.
+func residentHashContent(h uint64, content string) uint64 {
+	h = (h ^ uint64(len(content))) * residentKeyHashPrime
+	if len(content) <= residentKeySampleSpan {
+		return residentHashBlock(h, content)
+	}
+	offsets := [residentKeySampleWindows]int{
+		0,
+		len(content) / 4,
+		len(content) / 2,
+		3 * len(content) / 4,
+		len(content) - residentKeySampleWindow,
+	}
+	for _, start := range offsets {
+		h = residentHashBlock(h, content[start:start+residentKeySampleWindow])
+	}
+	return h
+}
+
+// residentMessageKeyBytes derives the identity key of a message. Callers that
+// only compare keys (the per-request occurrence index and cursor match) use
+// this form; wire ids embed residentKeyHex of the very same value.
+func residentMessageKeyBytes(msg *providers.Message) residentKey {
+	h := uint64(residentKeyHashOffset)
+	h = residentHashField(h, msg.Role)
+	h = residentHashContent(h, msg.Content)
 	if msg.ToolCallID != "" {
-		hasher.Write([]byte(msg.ToolCallID))
+		h = residentHashField(h, msg.ToolCallID)
 	}
 	for _, tc := range msg.ToolCalls {
-		hasher.Write([]byte(tc.ID))
-		hasher.Write([]byte(tc.Name))
+		h = residentHashField(h, tc.ID)
+		h = residentHashField(h, tc.Name)
 	}
-	return fmt.Sprintf("%x", hasher.Sum(nil)[:8])
+	var key residentKey
+	for i := range key {
+		key[i] = byte(h >> (8 * uint(i)))
+	}
+	return key
+}
+
+// residentKeyHex renders a key in the exact form embedded in a wire id.
+func residentKeyHex(key residentKey) string {
+	return hex.EncodeToString(key[:])
+}
+
+// residentMessageKey derives the content-based discriminator of a message, as
+// embedded in its wire id. It is position-independent on purpose: cursor
+// pagination must survive pruning and appends. Two DIFFERENT messages can
+// therefore share a key — residentMessageID appends an occurrence suffix to
+// keep their ids unique.
+func residentMessageKey(msg providers.Message) string {
+	return residentKeyHex(residentMessageKeyBytes(&msg))
+}
+
+// parseResidentHistoryCursor decodes a resident wire id back into the key and
+// occurrence it was composed from (see residentMessageID), so a cursor can be
+// resolved without minting an id for every message.
+//
+// ok is false when the cursor is empty, belongs to the evicted region, was
+// minted for another session or is not a well-formed resident id; the caller
+// then treats it as an unmatched cursor, exactly like the previous id-equality
+// scan did.
+func parseResidentHistoryCursor(sessionKey, cursor string) (residentKey, int, bool) {
+	var key residentKey
+	if cursor == "" || strings.HasPrefix(cursor, evictedIDPrefix) {
+		return key, 0, false
+	}
+	rest, ok := strings.CutPrefix(cursor, sessionKey+":")
+	if !ok {
+		return key, 0, false
+	}
+	// The occurrence suffix is `-<n>`; nothing else in the id contains a dash.
+	occurrence := 0
+	if idx := strings.LastIndexByte(rest, '-'); idx >= 0 {
+		parsed, err := strconv.Atoi(rest[idx+1:])
+		if err != nil || parsed < 0 {
+			return key, 0, false
+		}
+		occurrence = parsed
+		rest = rest[:idx]
+	}
+	if len(rest) != 2*residentKeyBytes {
+		return key, 0, false
+	}
+	raw, err := hex.DecodeString(rest)
+	if err != nil {
+		return key, 0, false
+	}
+	copy(key[:], raw)
+	return key, occurrence, true
+}
+
+// residentHistoryVisible reports whether a stored message is part of the
+// transcript the WebUI renders. Shared by the resident window walk and the
+// evicted page so both filter alike.
+func residentHistoryVisible(msg *providers.Message) bool {
+	if msg.Role != "user" && msg.Role != "assistant" && msg.Role != "tool" {
+		return false
+	}
+	// Skip injected context messages (e.g. from read_image tool)
+	return !(msg.Role == "user" && msg.Content == "" && len(msg.ContentParts) > 0)
 }
 
 // residentMessageID builds the wire id of a resident message. `occurrence` is
@@ -281,33 +480,42 @@ func residentMessageKey(msg providers.Message) string {
 // occurrence instead of the intended one.
 func residentMessageID(sessionKey, key string, occurrence int) string {
 	if occurrence <= 0 {
-		return fmt.Sprintf("%s:%s", sessionKey, key)
+		return sessionKey + ":" + key
 	}
-	return fmt.Sprintf("%s:%s-%d", sessionKey, key, occurrence)
+	return sessionKey + ":" + key + "-" + strconv.Itoa(occurrence)
 }
 
-// chatHistoryBuilder converts providers.Message values into the wire format,
+// newChatHistoryBuilder converts providers.Message values into the wire format,
 // resolving tool_call_id -> tool name from the assistant messages that
 // initiated them.
+//
+// The map spans the whole slice on purpose: a tool result and its tool_call can
+// land in different pages (and even on different sides of the resident/evicted
+// boundary — see writeEvictedHistory), so restricting it to the returned page
+// would silently drop ToolName for those groups. The walk is content-free
+// (role + tool-call identity only) and iterates by index, so it neither hashes
+// nor copies the messages it passes over.
 type chatHistoryBuilder struct {
 	toolCallIDToName map[string]string
 }
 
 func newChatHistoryBuilder(history []providers.Message) *chatHistoryBuilder {
 	b := &chatHistoryBuilder{toolCallIDToName: make(map[string]string)}
-	for _, msg := range history {
-		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
-			for _, tc := range msg.ToolCalls {
-				if tc.ID == "" {
-					continue
-				}
-				toolName := tc.Name
-				if toolName == "" && tc.Function != nil {
-					toolName = tc.Function.Name
-				}
-				if toolName != "" {
-					b.toolCallIDToName[tc.ID] = toolName
-				}
+	for i := range history {
+		msg := &history[i]
+		if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
+			continue
+		}
+		for _, tc := range msg.ToolCalls {
+			if tc.ID == "" {
+				continue
+			}
+			toolName := tc.Name
+			if toolName == "" && tc.Function != nil {
+				toolName = tc.Function.Name
+			}
+			if toolName != "" {
+				b.toolCallIDToName[tc.ID] = toolName
 			}
 		}
 	}
@@ -377,17 +585,14 @@ func (n *NativeChannel) writeEvictedHistory(w http.ResponseWriter, sessionKey st
 			}
 		}
 		for i := range page.Messages {
-			msg := page.Messages[i]
-			if msg.Role != "user" && msg.Role != "assistant" && msg.Role != "tool" {
-				continue
-			}
-			if msg.Role == "user" && msg.Content == "" && len(msg.ContentParts) > 0 {
+			msg := &page.Messages[i]
+			if !residentHistoryVisible(msg) {
 				continue
 			}
 			// IDs carry the persisted seq (not a slice offset): the evicted
 			// region can contain gaps after PruneExcluded, and the seq is the
 			// cursor the next page request needs.
-			messages = append(messages, pageBuilder.message(evictedIDPrefix+strconv.Itoa(page.Seqs[i]), msg))
+			messages = append(messages, pageBuilder.message(evictedIDPrefix+strconv.Itoa(page.Seqs[i]), *msg))
 		}
 		hasMore = page.HasOlder
 	}
