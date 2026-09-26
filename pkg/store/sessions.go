@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -709,6 +710,147 @@ func (r *SessionRepo) AllMessageCounts() (map[string]int, error) {
 		return nil, fmt.Errorf("all message counts rows: %w", err)
 	}
 	return counts, nil
+}
+
+// sessionListingStatsChunk bounds how many keys go into one IN (...) clause.
+// SQLite's default parameter limit is 999 (32766 on newer builds), so a few
+// hundred keys per statement is safe everywhere while still collapsing the
+// common case (one parent with a handful of subagents) into one query.
+const sessionListingStatsChunk = 200
+
+// SessionListingStats carries the handful of message-shape facts a session
+// listing needs without materialising any message body.
+type SessionListingStats struct {
+	// Summary is the persisted sessions.summary ("" when unset).
+	Summary string
+	// AssistantCount is the number of in-context (non-evicted) assistant
+	// messages, the iteration proxy the subagent listing reports.
+	AssistantCount int
+	// LastAssistantJSON is the raw stored JSON of the highest-seq in-context
+	// assistant message, "" when there is none. It is the fallback source for
+	// the listing summary, which only needs the message's text.
+	LastAssistantJSON string
+}
+
+// SessionListingStats returns one entry per requested key that still has a
+// sessions row (keys with no row are absent from the map, so the caller can
+// tell "gone" from "empty"). It replaces loading each session's whole message
+// list — the subagent listing endpoint used to deserialize ~27 MB of JSON for
+// one parent with 94 subagents — with two correlated index lookups per key:
+// a COUNT over the assistant rows and a "newest assistant row" probe that
+// stops at the first index hit. Keys are batched so N subagents cost one
+// query per chunk of keys instead of N queries on the store's single
+// connection.
+//
+// Both per-key lookups select the same rows a cold load (loadFromSQLite) would
+// restore into memory, which is the only way the numbers can match the listing
+// for a resident session:
+//
+//   - rows below sessions.first_in_memory_seq were evicted (or pruned), so the
+//     in-memory slice never sees them; counting the full history would silently
+//     inflate the reported iteration count;
+//   - a stored boundary of 0 does not mean "everything is in context":
+//     loadFromSQLite then prunes a LEADING run of excluded rows (and rewrites
+//     the boundary), so excluded rows in that shape were not resident either
+//     and counting them inflated the iteration count. The predicate below drops
+//     every excluded row when the boundary is 0, which matches the prune
+//     because eviction/compaction exclude a run starting at seq 0; a sporadic
+//     excluded row ABOVE that run survives a load and is the one shape this
+//     under-counts.
+//   - a row the loader cannot unmarshal is dropped ("skip corrupted
+//     messages"), so a non-JSON message is neither an iteration nor the
+//     summary fallback. json_valid(m.message) is the SQLite-side equivalent of
+//     that skip; the residual gap is a row that is valid JSON but does not
+//     decode into providers.Message (a type mismatch), which the loader skips
+//     and this count still counts. It cannot be expressed in SQL and is not
+//     produced by any write path here (messages are always marshalled from
+//     providers.Message).
+func (r *SessionRepo) SessionListingStats(keys []string) (map[string]SessionListingStats, error) {
+	out := make(map[string]SessionListingStats, len(keys))
+	for start := 0; start < len(keys); start += sessionListingStatsChunk {
+		end := start + sessionListingStatsChunk
+		if end > len(keys) {
+			end = len(keys)
+		}
+		if err := r.sessionListingStatsChunk(out, keys[start:end]); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// sessionListingStatsChunk runs one batched query for up to
+// sessionListingStatsChunk keys and merges the rows into out.
+//
+// Caller must pass 1..sessionListingStatsChunk non-empty keys.
+func (r *SessionRepo) sessionListingStatsChunk(out map[string]SessionListingStats, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+
+	// One placeholder per key; the values themselves are always bound, never
+	// interpolated.
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",")
+	args := make([]any, 0, len(keys))
+	for _, key := range keys {
+		args = append(args, key)
+	}
+
+	// Driving the query from `sessions` (not from session_messages) is
+	// deliberate: a session row with zero messages must still be reported as
+	// "0 iterations, no summary", which the pre-change code did after loading
+	// an empty session.
+	//
+	// The correlated shape is what makes this cheap: (session_key, seq) drives
+	// idx_messages_session, so the newest-row probe is an index hit (DESC LIMIT
+	// 1) and the COUNT scans only the key's rows. The COUNT is NOT index-only
+	// though: `role` is not part of idx_messages_session, so every in-context
+	// row of the session is visited to test role/excluded. Measured cost with
+	// the current schema: ~24 ms for a 94-subagent parent (~17.3k rows).
+	// A covering index on (session_key, role, seq) would make the COUNT
+	// index-only; the schema is left alone on purpose (migration cost is not
+	// worth 24 ms, and the query stays correct either way).
+	//
+	// Both subqueries carry the same row predicate so the count and the
+	// "newest assistant row" can never disagree about which rows are in
+	// context (json_valid is JSON1, compiled in by the pure-Go driver:
+	// modernc.org/sqlite v1.56.0 / SQLite 3.53.3).
+	rows, err := r.db.Query(`
+		SELECT s.key, s.summary,
+		       (SELECT COUNT(*) FROM session_messages m
+		         WHERE m.session_key = s.key
+		           AND m.role = 'assistant'
+		           AND (s.first_in_memory_seq > 0 OR m.excluded = 0)
+		           AND m.seq >= s.first_in_memory_seq
+		           AND json_valid(m.message)),
+		       COALESCE((SELECT m.message FROM session_messages m
+		          WHERE m.session_key = s.key
+		            AND m.role = 'assistant'
+		            AND (s.first_in_memory_seq > 0 OR m.excluded = 0)
+		            AND m.seq >= s.first_in_memory_seq
+		            AND json_valid(m.message)
+		          ORDER BY m.seq DESC LIMIT 1), '')
+		  FROM sessions s
+		 WHERE s.key IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return fmt.Errorf("session listing stats: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			key  string
+			stat SessionListingStats
+		)
+		if err := rows.Scan(&key, &stat.Summary, &stat.AssistantCount, &stat.LastAssistantJSON); err != nil {
+			return fmt.Errorf("session listing stats scan: %w", err)
+		}
+		out[key] = stat
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("session listing stats rows: %w", err)
+	}
+	return nil
 }
 
 // LoadMessagesBeforeLimited returns up to limit message rows with seq <
