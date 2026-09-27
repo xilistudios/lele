@@ -1,7 +1,11 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, jest, mock, test } from 'bun:test'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, cleanup, renderHook } from '@testing-library/react'
+import { type ReactNode, createElement } from 'react'
 import { toChatMessages } from '../lib/chatMessageBuilder'
 import type { ChatMessage, GroupInfo, HistoryToolCall, ToolStatus } from '../lib/types'
 import { type MessageEventContext, dispatchMessageEvent } from './messageEventHandlers'
+import { useMessages } from './useMessages'
 
 // ── Test helpers for messageEventHandlers ────────────────────────────────────
 
@@ -987,5 +991,219 @@ describe('group.complete preserves terminal status', () => {
     expect(group.strategy).toBe('pipeline')
     expect(group.layers).toBe(2)
     expect(group.totalTokens).toBe(42)
+  })
+})
+// ── debouncedSessionRefresh: leading + trailing throttle (5 s window) ─────────
+//
+// These mount the REAL hook (the throttle lives in its refs) and inject the
+// trigger the way production does: dispatching a `history.updated` WS event,
+// whose handler calls `ctx.debouncedSessionRefresh()`. So the number of
+// `onSessionUpdated` runs asserted here is exactly the number of session-list
+// refreshes those events produce: a burst of N events must cost 2 passes at
+// most (1 leading + 1 trailing) instead of N.
+
+const THROTTLE_SESSION_KEY = 'native:test-throttle'
+
+type MessagesHook = ReturnType<typeof useMessages>
+
+/** Mounts useMessages with the given refresh callback (needs a QueryClient). */
+function renderMessagesWithRefresh(onSessionUpdated: () => void) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: queryClient }, children)
+
+  return renderHook(
+    ({ refresh }: { refresh: () => void }) =>
+      useMessages(() => {}, THROTTLE_SESSION_KEY, { current: THROTTLE_SESSION_KEY }, refresh),
+    { initialProps: { refresh: onSessionUpdated }, wrapper },
+  )
+}
+
+/** Fires the WS event that asks for a session-list refresh (production path). */
+function dispatchHistoryUpdated(result: { current: MessagesHook }): void {
+  result.current.handleEvent({
+    event: 'history.updated',
+    data: { session_key: THROTTLE_SESSION_KEY },
+  })
+}
+
+describe('debouncedSessionRefresh throttle (leading + trailing, 5 s window)', () => {
+  afterEach(() => {
+    cleanup()
+    jest.useRealTimers()
+  })
+
+  test('a burst of 10 events runs 1 leading + exactly 1 trailing (not 10)', () => {
+    jest.useFakeTimers()
+    const onSessionUpdated = mock(() => {})
+    const { result } = renderMessagesWithRefresh(onSessionUpdated)
+
+    act(() => {
+      for (let i = 0; i < 10; i += 1) dispatchHistoryUpdated(result)
+    })
+
+    // Leading edge: the first event refreshes immediately, so a brand-new chat
+    // shows up in the sidebar at once.
+    expect(onSessionUpdated).toHaveBeenCalledTimes(1)
+
+    // Trailing edge: the whole burst collapses into ONE extra call when the
+    // window closes (the final state after the burst must not be lost).
+    act(() => {
+      jest.advanceTimersByTime(5_000)
+    })
+    expect(onSessionUpdated).toHaveBeenCalledTimes(2)
+
+    // No timer is left hanging behind: nothing else happens later.
+    act(() => {
+      jest.advanceTimersByTime(60_000)
+    })
+    expect(onSessionUpdated).toHaveBeenCalledTimes(2)
+  })
+
+  test('a single event schedules NO trailing call (1 call total)', () => {
+    jest.useFakeTimers()
+    const onSessionUpdated = mock(() => {})
+    const { result } = renderMessagesWithRefresh(onSessionUpdated)
+
+    act(() => {
+      dispatchHistoryUpdated(result)
+    })
+    expect(onSessionUpdated).toHaveBeenCalledTimes(1)
+    // M1 invariant: the leading edge must NOT arm a timer. `useMessages` lives
+    // as long as the app, so an eagerly armed window would keep a `setTimeout`
+    // pending forever in an idle tab (one per event, forever). The window is
+    // anchored on a timestamp and simply expires.
+    expect(jest.getTimerCount()).toBe(0)
+
+    act(() => {
+      jest.advanceTimersByTime(5_000)
+    })
+    expect(onSessionUpdated).toHaveBeenCalledTimes(1)
+  })
+
+  test('once the window is closed the next event is leading again (3rd call)', () => {
+    jest.useFakeTimers()
+    const onSessionUpdated = mock(() => {})
+    const { result } = renderMessagesWithRefresh(onSessionUpdated)
+
+    act(() => {
+      dispatchHistoryUpdated(result) // leading → 1
+      dispatchHistoryUpdated(result) // swallowed, owes the trailing
+    })
+    act(() => {
+      jest.advanceTimersByTime(5_000) // trailing → 2
+    })
+    expect(onSessionUpdated).toHaveBeenCalledTimes(2)
+
+    act(() => {
+      dispatchHistoryUpdated(result) // new window → immediate
+    })
+    expect(onSessionUpdated).toHaveBeenCalledTimes(3)
+  })
+
+  test('unmount with a pending trailing: no refresh afterwards, no post-unmount warning', () => {
+    jest.useFakeTimers()
+    const onSessionUpdated = mock(() => {})
+    const originalError = console.error
+    const errors: unknown[][] = []
+    console.error = (...args: unknown[]) => {
+      errors.push(args)
+    }
+    try {
+      const { result, unmount } = renderMessagesWithRefresh(onSessionUpdated)
+
+      act(() => {
+        dispatchHistoryUpdated(result) // leading → 1
+        dispatchHistoryUpdated(result) // swallowed, trailing pending
+      })
+      expect(onSessionUpdated).toHaveBeenCalledTimes(1)
+      // The window is open: its trailing timer is still pending.
+      expect(jest.getTimerCount()).toBeGreaterThanOrEqual(1)
+
+      unmount()
+
+      // The cleanup must CANCEL the pending timer, not merely neutralise it
+      // with the mounted guard: otherwise a stale `setTimeout` stays armed for
+      // 5 s after the hook is gone (and would keep the tab's event loop busy).
+      expect(jest.getTimerCount()).toBe(0)
+
+      act(() => {
+        jest.advanceTimersByTime(60_000)
+      })
+      expect(onSessionUpdated).toHaveBeenCalledTimes(1)
+      expect(errors).toEqual([])
+    } finally {
+      console.error = originalError
+    }
+  })
+
+  test('the trailing call invokes the LATEST onSessionUpdated identity', () => {
+    jest.useFakeTimers()
+    const first = mock(() => {})
+    const second = mock(() => {})
+    const { result, rerender } = renderMessagesWithRefresh(first)
+
+    act(() => {
+      dispatchHistoryUpdated(result) // leading with `first` → 1
+      dispatchHistoryUpdated(result) // swallowed, trailing pending
+    })
+    expect(first).toHaveBeenCalledTimes(1)
+
+    // The callback changes identity (new render) BEFORE the window closes.
+    rerender({ refresh: second })
+
+    act(() => {
+      jest.advanceTimersByTime(5_000)
+    })
+    expect(first).toHaveBeenCalledTimes(1)
+    expect(second).toHaveBeenCalledTimes(1)
+  })
+
+  test('the leading edge of a new window disarms the trailing still pending from the previous one', () => {
+    jest.useFakeTimers()
+    const onSessionUpdated = mock(() => {})
+    const { result } = renderMessagesWithRefresh(onSessionUpdated)
+
+    act(() => {
+      dispatchHistoryUpdated(result) // t=0: leading → 1, window opens at 0
+    })
+    expect(onSessionUpdated).toHaveBeenCalledTimes(1)
+    // Nothing owed yet: the leading edge arms no timer (M1 invariant above).
+    expect(jest.getTimerCount()).toBe(0)
+
+    act(() => {
+      jest.advanceTimersByTime(1_000) // t=1 000
+    })
+    act(() => {
+      dispatchHistoryUpdated(result) // swallowed → trailing armed FOR t=5 000
+    })
+    expect(onSessionUpdated).toHaveBeenCalledTimes(1)
+    expect(jest.getTimerCount()).toBe(1)
+
+    // The trailing timer is due at t=5 000, but a busy event loop can delay it
+    // past its deadline: that is the only ordering in which the next trigger
+    // reaches the NEW window while the OLD timer is still pending. The fake
+    // clock is therefore moved past the edge (t=5 000) WITHOUT running the
+    // pending timer — `advanceTimersByTime` would run it first and destroy the
+    // scenario this test pins.
+    act(() => {
+      jest.setSystemTime(Date.now() + 4_000)
+    })
+    act(() => {
+      dispatchHistoryUpdated(result) // t=5 000 → leading edge of a fresh window
+    })
+
+    // The leading call already reflects state at least as fresh as the stale
+    // trailing one, so the timer left over from the previous window must have
+    // been DISARMED: exactly 2 refreshes for the two windows (before the fix it
+    // fired a 3rd one, inside a window it does not belong to, and re-anchored
+    // that window mid-flight).
+    expect(onSessionUpdated).toHaveBeenCalledTimes(2)
+    expect(jest.getTimerCount()).toBe(0)
+
+    act(() => {
+      jest.advanceTimersByTime(60_000)
+    })
+    expect(onSessionUpdated).toHaveBeenCalledTimes(2)
   })
 })
