@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Providers
+- Per-model `thinking_type` (`providers.<name>.models.<alias>.thinking_type`) — names the wire-level "think system" a model's endpoint uses to turn reasoning on/off (`auto`, `deepseek`, `openai`, `openrouter`, `qwen`, `none`). Makes `thinking_level: "off"` actually disable reasoning on endpoints that default thinking on and ignore the generic `reasoning` object (DeepSeek V3.2+, Xiaomi MiMo, Zhipu GLM-4.5+ → `thinking: {"type": "disabled"}`; Qwen3/DashScope → `enable_thinking: false`; o1/o3 → never send thinking params with `"none"`). With `"auto"` (or unset) known thinking-object model families (`deepseek`, `mimo`, `glm` in the name) get the explicit disable for free.
+- `thinking_type` is editable from both UIs: the TUI asks for a "Think system" when adding a provider/model (`/connect`, `/providers`), and the Web UI exposes a per-model **Think system** dropdown in the provider settings model editor.
+
 #### TUI
 - Queued-message preview band — when the composer is parked behind a busy turn, a band above the process indicator shows the pending depth plus the *next* message to be sent (the FIFO head), dimmed and truncated to the pane width. The queue no longer shares the status line with the process state: that strip (count + `alt+delete`/`alt+enter` hints) is gone, so the loading indicator reads on its own line and the pending count is stated once, in the band. Reading order now matches chronology: waiting work above, running turn below. The band costs a line only while it has something to say — the viewport budget measures the rendered string, so an idle queue keeps the transcript its full height. Multi-line payloads collapse to a single sanitized line (control sequences stripped, tabs expanded, single-line, width-truncated).
 

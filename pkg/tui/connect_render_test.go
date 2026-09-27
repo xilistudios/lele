@@ -130,6 +130,7 @@ func TestRenderConnectSuccess(t *testing.T) {
 	m = sendKeys(m, "\r")
 	m.textInput.SetValue("yes")
 	m = sendKeys(m, "\r")
+	m = sendKeys(m, "\r") // think system (auto) → review
 	m = sendKeys(m, "\r") // review → save → success
 
 	if !m.connectSuccess {
@@ -171,6 +172,7 @@ func TestConnectFlow_SuccessScreenCloses(t *testing.T) {
 	m = sendKeys(m, "\r")
 	m.textInput.SetValue("yes")
 	m = sendKeys(m, "\r")
+	m = sendKeys(m, "\r") // think system (auto) → review
 	m = sendKeys(m, "\r") // review → success
 
 	if !m.connectSuccess {

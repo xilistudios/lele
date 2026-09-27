@@ -454,6 +454,11 @@ export type ReasoningConfig = {
   enable?: boolean
 }
 
+// ThinkingType names the wire-level "think system" a model's endpoint uses to
+// turn reasoning on/off. Kept in sync with config.ThinkingType* in Go.
+// Omitted/undefined means "auto" (legacy heuristics).
+export type ThinkingType = 'auto' | 'deepseek' | 'openai' | 'openrouter' | 'qwen' | 'none'
+
 export type ProviderModelConfig = {
   context_window?: number
   model?: string
@@ -461,6 +466,7 @@ export type ProviderModelConfig = {
   temperature?: number
   vision?: boolean
   reasoning?: ReasoningConfig
+  thinking_type?: ThinkingType
 }
 
 export type EditableNamedProviderConfig = {

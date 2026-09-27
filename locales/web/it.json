@@ -539,6 +539,7 @@
       "modelTemperature": "Temperatura",
       "modelVision": "Visione",
       "modelThinking": "Pensiero",
+      "modelThinkingType": "Sistema di pensiero",
       "agentId": "ID agente",
       "agentName": "Nome",
       "agentDescription": "Descrizione",

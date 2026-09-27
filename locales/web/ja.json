@@ -541,6 +541,7 @@
       "modelTemperature": "温度",
       "modelVision": "ビジョン",
       "modelThinking": "思考",
+      "modelThinkingType": "思考システム",
       "agentId": "エージェント ID",
       "agentName": "名前",
       "agentDescription": "説明",

@@ -11,9 +11,15 @@ type mockProvider struct {
 	mockResponse string
 	shouldError  bool
 	returnEmpty  bool // if true, return empty content response
+	// lastOptions / lastModel capture the most recent call so tests can assert
+	// on what the agent loop actually sent to the provider.
+	lastOptions map[string]interface{}
+	lastModel   string
 }
 
 func (m *mockProvider) Chat(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
+	m.lastOptions = opts
+	m.lastModel = model
 	if m.shouldError {
 		return nil, fmt.Errorf("Mock provider error for testing")
 	}

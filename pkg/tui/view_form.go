@@ -35,7 +35,7 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 		return ModalContainer.Render(sb.String())
 	}
 
-	isReviewStep := m.modalMode == ModalAddProvider && m.formStepIndex == 9 && m.providerSavedInFlow
+	isReviewStep := m.modalMode == ModalAddProvider && m.formStepIndex == 10 && m.providerSavedInFlow
 
 	// ── Step list ──
 	sb.WriteString(m.renderFormSteps(steps, isReviewStep))
@@ -171,7 +171,7 @@ func (m *Model) renderFormSteps(steps []string, isReviewStep bool) string {
 
 	for i, step := range steps {
 		// Review mode: show completed steps
-		if isReviewStep && i < 9 {
+		if isReviewStep && i < 10 {
 			val := ""
 			if i < len(m.formValues) {
 				val = m.formValues[i]
@@ -289,7 +289,7 @@ func (m *Model) formStepNames() []string {
 		steps := []string{
 			"Provider name", "Provider type", "API Key", "API Base URL",
 			"Model alias", "Model name", "Context window", "Max tokens", "Vision (yes/no)",
-			i18n.T("tui.connectReview"),
+			"Think system", i18n.T("tui.connectReview"),
 		}
 		if m.addModelCatalogThink != "" && len(steps) > 5 {
 			steps[5] = "Model name (thinking: " + m.addModelCatalogThink + ")"
@@ -300,7 +300,7 @@ func (m *Model) formStepNames() []string {
 		if m.addModelCatalogThink != "" {
 			nameLabel += " (thinking: " + m.addModelCatalogThink + ")"
 		}
-		return []string{"Model alias", nameLabel, "Context window", "Max tokens", "Vision (yes/no)"}
+		return []string{"Model alias", nameLabel, "Context window", "Max tokens", "Vision (yes/no)", "Think system"}
 	case ModalAddCommand:
 		return []string{
 			i18n.T("tui.commands.fieldName"),

@@ -90,35 +90,7 @@ func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDef
 		}
 	}
 
-	// Handle reasoning config (for OpenAI o-series, OpenRouter, and compatible models)
-	if reasoning, ok := options["reasoning"].(map[string]interface{}); ok && reasoning != nil {
-		reasoningBody := map[string]interface{}{}
-		if v, ok := reasoning["effort"]; ok {
-			if s, ok := v.(string); ok && s != "" {
-				reasoningBody["effort"] = s
-			}
-		}
-		if maxTokens, ok := reasoning["max_tokens"].(int); ok && maxTokens > 0 {
-			reasoningBody["max_tokens"] = maxTokens
-		}
-		if exclude, ok := reasoning["exclude"].(bool); ok {
-			reasoningBody["exclude"] = exclude
-		}
-		if summary, ok := reasoning["summary"].(string); ok && summary != "" {
-			// summary is OpenAI-specific; only send to OpenAI API endpoints
-			if isOpenAIEndpoint(p.apiBase) {
-				reasoningBody["summary"] = summary
-			}
-		}
-		if enabled, ok := reasoning["enabled"].(bool); ok {
-			reasoningBody["enabled"] = enabled
-		}
-		if len(reasoningBody) > 0 {
-			requestBody["reasoning"] = reasoningBody
-		}
-	}
-
-	applyThinkingMode(requestBody, options, p.apiBase)
+	applyReasoningOptions(requestBody, options, p.apiBase)
 
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
@@ -197,34 +169,7 @@ func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []T
 		}
 	}
 
-	// Handle reasoning config (for OpenAI o-series, OpenRouter, and compatible models)
-	if reasoning, ok := options["reasoning"].(map[string]interface{}); ok && reasoning != nil {
-		reasoningBody := map[string]interface{}{}
-		if v, ok := reasoning["effort"]; ok {
-			if s, ok := v.(string); ok && s != "" {
-				reasoningBody["effort"] = s
-			}
-		}
-		if maxTokens, ok := reasoning["max_tokens"].(int); ok && maxTokens > 0 {
-			reasoningBody["max_tokens"] = maxTokens
-		}
-		if exclude, ok := reasoning["exclude"].(bool); ok {
-			reasoningBody["exclude"] = exclude
-		}
-		if summary, ok := reasoning["summary"].(string); ok && summary != "" {
-			if isOpenAIEndpoint(p.apiBase) {
-				reasoningBody["summary"] = summary
-			}
-		}
-		if enabled, ok := reasoning["enabled"].(bool); ok {
-			reasoningBody["enabled"] = enabled
-		}
-		if len(reasoningBody) > 0 {
-			requestBody["reasoning"] = reasoningBody
-		}
-	}
-
-	applyThinkingMode(requestBody, options, p.apiBase)
+	applyReasoningOptions(requestBody, options, p.apiBase)
 
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
@@ -536,6 +481,200 @@ func parseSSEStream(ctx context.Context, body io.Reader, onChunk func(chunk stri
 	}, nil
 }
 
+// Thinking wire styles accepted in options["thinking_type"], kept in sync with
+// config.ThinkingType* (per-model config: providers.<name>.models.<alias>.thinking_type).
+const (
+	thinkingStyleAuto       = "auto"
+	thinkingStyleDeepSeek   = "deepseek"
+	thinkingStyleOpenAI     = "openai"
+	thinkingStyleOpenRouter = "openrouter"
+	thinkingStyleQwen       = "qwen"
+	thinkingStyleNone       = "none"
+)
+
+// resolveThinkingStyle picks the wire dialect for reasoning params. An explicit
+// options["thinking_type"] wins; "auto"/absent/unknown keeps the legacy
+// behavior decided by endpoint and model-name heuristics.
+func resolveThinkingStyle(options map[string]interface{}) string {
+	if tt, ok := options["thinking_type"].(string); ok {
+		switch v := strings.ToLower(strings.TrimSpace(tt)); v {
+		case thinkingStyleDeepSeek, thinkingStyleOpenAI, thinkingStyleOpenRouter, thinkingStyleQwen, thinkingStyleNone:
+			return v
+		}
+	}
+	return thinkingStyleAuto
+}
+
+// reasoningState reports the explicit thinking on/off request carried in the
+// options, if any. options["reasoning"]["enabled"] wins, an explicit effort
+// implies enabled, and the legacy options["thinking"] bool is honored last.
+// ok=false means the caller has no opinion and the model default applies.
+func reasoningState(options map[string]interface{}) (enabled bool, ok bool) {
+	if r, ok := options["reasoning"].(map[string]interface{}); ok {
+		if e, ok := r["enabled"].(bool); ok {
+			return e, true
+		}
+		if effort, ok := r["effort"].(string); ok && effort != "" {
+			return true, true
+		}
+	}
+	if t, ok := options["thinking"].(bool); ok && t {
+		return true, true
+	}
+	return false, false
+}
+
+// reasoningEffort returns the requested effort level from the legacy
+// options["reasoning_effort"] or the agent's options["reasoning"]["effort"].
+func reasoningEffort(options map[string]interface{}) string {
+	if effort, ok := options["reasoning_effort"].(string); ok && effort != "" {
+		return effort
+	}
+	if reasoning, ok := options["reasoning"].(map[string]interface{}); ok {
+		if effort, ok := reasoning["effort"].(string); ok {
+			return effort
+		}
+	}
+	return ""
+}
+
+// thinkingObjectModelFragments lists model-name fragments for families whose
+// endpoints use DeepSeek's `thinking: {"type": ...}` object and default
+// thinking ON (so "off" must send an explicit disable).
+var thinkingObjectModelFragments = []string{"deepseek", "mimo", "glm"}
+
+// isThinkingObjectModel reports whether a model name belongs to a known
+// thinking-object family (DeepSeek, Xiaomi MiMo, Zhipu GLM).
+func isThinkingObjectModel(model interface{}) bool {
+	m, ok := model.(string)
+	if !ok {
+		return false
+	}
+	lower := strings.ToLower(m)
+	for _, frag := range thinkingObjectModelFragments {
+		if strings.Contains(lower, frag) {
+			return true
+		}
+	}
+	return false
+}
+
+// applyReasoningOptions translates the agent's reasoning options into the
+// wire-level "think system" parameters for the target endpoint. The dialect is
+// selected by options["thinking_type"] (per-model config field
+// providers.<name>.models.<alias>.thinking_type); "auto" keeps the legacy
+// behavior. This is the single translation point shared by Chat and ChatStream.
+func applyReasoningOptions(requestBody map[string]interface{}, options map[string]interface{}, apiBase string) {
+	switch resolveThinkingStyle(options) {
+	case thinkingStyleNone:
+		// The model has no thinking switch — never send thinking params.
+
+	case thinkingStyleDeepSeek:
+		// DeepSeek V3.2+, Xiaomi MiMo, Zhipu GLM-4.5+: `thinking` object with
+		// an explicit type. These endpoints default thinking ON, so "off" must
+		// send the disable or reasoning keeps running.
+		if enabled, ok := reasoningState(options); ok {
+			typ := "disabled"
+			if enabled {
+				typ = "enabled"
+			}
+			requestBody["thinking"] = map[string]interface{}{"type": typ}
+		}
+
+	case thinkingStyleQwen:
+		// Alibaba DashScope / Qwen3 compatible-mode: enable_thinking bool.
+		if enabled, ok := reasoningState(options); ok {
+			requestBody["enable_thinking"] = enabled
+		}
+
+	case thinkingStyleOpenAI:
+		// OpenAI o-series / gpt-5: top-level reasoning_effort ("none" disables
+		// on gpt-5.1+; models without a disable switch reject it — use
+		// thinking_type "none" for those).
+		if enabled, ok := reasoningState(options); ok && !enabled {
+			requestBody["reasoning_effort"] = "none"
+			return
+		}
+		if effort := reasoningEffort(options); effort != "" {
+			requestBody["reasoning_effort"] = effort
+		}
+		if reasoning, ok := options["reasoning"].(map[string]interface{}); ok {
+			if summary, ok := reasoning["summary"].(string); ok && summary != "" && isOpenAIEndpoint(apiBase) {
+				requestBody["reasoning"] = map[string]interface{}{"summary": summary}
+			}
+		}
+
+	case thinkingStyleOpenRouter:
+		// OpenRouter: everything lives inside the `reasoning` object.
+		if reasoning, ok := options["reasoning"].(map[string]interface{}); ok && reasoning != nil {
+			reasoningBody := map[string]interface{}{}
+			if effort := reasoningEffort(options); effort != "" {
+				reasoningBody["effort"] = effort
+			}
+			if maxTokens, ok := reasoning["max_tokens"].(int); ok && maxTokens > 0 {
+				reasoningBody["max_tokens"] = maxTokens
+			}
+			if exclude, ok := reasoning["exclude"].(bool); ok {
+				reasoningBody["exclude"] = exclude
+			}
+			if enabled, ok := reasoning["enabled"].(bool); ok {
+				reasoningBody["enabled"] = enabled
+			}
+			if len(reasoningBody) > 0 {
+				requestBody["reasoning"] = reasoningBody
+			}
+		}
+
+	default: // thinkingStyleAuto: legacy behavior.
+		applyLegacyReasoningBody(requestBody, options, apiBase)
+		applyThinkingMode(requestBody, options, apiBase)
+		// Thinking-object families (DeepSeek/MiMo/GLM) default thinking ON and
+		// ignore the `reasoning` object, so an explicit disable must go out as
+		// `thinking: {"type": "disabled"}` or "off" silently does nothing.
+		if enabled, ok := reasoningState(options); ok && !enabled && isThinkingObjectModel(requestBody["model"]) {
+			requestBody["thinking"] = map[string]interface{}{"type": "disabled"}
+		}
+	}
+}
+
+// applyLegacyReasoningBody is the pre-thinking_type behavior: every field in
+// options["reasoning"] is forwarded into a top-level `reasoning` object
+// (summary only for OpenAI endpoints).
+func applyLegacyReasoningBody(requestBody map[string]interface{}, options map[string]interface{}, apiBase string) {
+	reasoning, ok := options["reasoning"].(map[string]interface{})
+	if !ok || reasoning == nil {
+		return
+	}
+	reasoningBody := map[string]interface{}{}
+	if v, ok := reasoning["effort"]; ok {
+		if s, ok := v.(string); ok && s != "" {
+			reasoningBody["effort"] = s
+		}
+	}
+	if maxTokens, ok := reasoning["max_tokens"].(int); ok && maxTokens > 0 {
+		reasoningBody["max_tokens"] = maxTokens
+	}
+	if exclude, ok := reasoning["exclude"].(bool); ok {
+		reasoningBody["exclude"] = exclude
+	}
+	if summary, ok := reasoning["summary"].(string); ok && summary != "" {
+		// summary is OpenAI-specific; only send to OpenAI API endpoints
+		if isOpenAIEndpoint(apiBase) {
+			reasoningBody["summary"] = summary
+		}
+	}
+	if enabled, ok := reasoning["enabled"].(bool); ok {
+		reasoningBody["enabled"] = enabled
+	}
+	if len(reasoningBody) > 0 {
+		requestBody["reasoning"] = reasoningBody
+	}
+}
+
+// applyThinkingMode is the legacy (auto) thinking adapter: it only acts when
+// options["thinking"] is true, mapping effort to the right wire position for
+// OpenRouter vs. other endpoints. Kept for the auto path; explicit thinking
+// types are handled by applyReasoningOptions instead.
 func applyThinkingMode(requestBody map[string]interface{}, options map[string]interface{}, apiBase string) {
 	thinkingEnabled, _ := options["thinking"].(bool)
 	if !thinkingEnabled {

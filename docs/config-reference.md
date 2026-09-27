@@ -60,6 +60,13 @@ cannot re-enable it (`"off"` is not a valid per-model `reasoning.effort` value).
 `/think` override is per session and is cleared by `/think default` (falling
 back to the agent level) and by `/clear` / `/new`; the agent-level value stays.
 
+Per-model `providers.<name>.models.<alias>.thinking_type` selects the wire
+dialect used to render that enable/disable (`"auto"`, `"deepseek"`, `"openai"`,
+`"openrouter"`, `"qwen"`, `"none"`). Set it when a model's endpoint uses a
+non-standard think system — e.g. `"deepseek"` for Xiaomi MiMo so `"off"` sends
+`thinking: {"type": "disabled"}`. See
+`docs/agents-models-providers.md#thinking_type`.
+
 See `docs/agents-models-providers.md#thinking-level`.
 
 ## `bindings`

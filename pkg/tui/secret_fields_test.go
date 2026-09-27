@@ -24,7 +24,8 @@ func TestIsSecretInputStep(t *testing.T) {
 		{ModalAddProvider, 2, true, "provider step 2 = API Key"},
 		{ModalAddProvider, 1, false, "provider step 1 = type"},
 		{ModalAddProvider, 3, false, "provider step 3 = api base"},
-		{ModalAddProvider, 9, false, "provider review step"},
+		{ModalAddProvider, 10, false, "provider review step"},
+		{ModalAddProvider, 9, false, "provider think-system step"},
 		{ModalAddSecret, 1, true, "secret step 1 = value"},
 		{ModalAddSecret, 0, false, "secret step 0 = name"},
 		{ModalAddSecret, 2, false, "secret step 2 = description"},
@@ -157,8 +158,8 @@ func TestReviewStepSecretMasked(t *testing.T) {
 	m := newFormTestModel(t)
 	m.modalMode = ModalAddProvider
 	m.providerSavedInFlow = true
-	m.formValues = []string{"openai-test", "openai", "shortkey", "https://api.openai.com/v1", "gpt-4o", "gpt-4o-2024-08-06", "128000", "4096", "no", ""}
-	m.formStepIndex = 9
+	m.formValues = []string{"openai-test", "openai", "shortkey", "https://api.openai.com/v1", "gpt-4o", "gpt-4o-2024-08-06", "128000", "4096", "no", "auto", ""}
+	m.formStepIndex = 10
 
 	out := m.View()
 	if strings.Contains(out, "shortkey") {
@@ -217,7 +218,7 @@ func TestAddSecretValueStepMasked(t *testing.T) {
 func TestEchoResetOnNormalStep(t *testing.T) {
 	m := newFormTestModel(t)
 	m.modalMode = ModalAddProvider
-	m.formValues = make([]string, 10)
+	m.formValues = make([]string, 11)
 	m.formStepIndex = 3 // API Base URL — not a secret
 
 	m.textInput.EchoMode = textinput.EchoPassword // simulate stale password echo

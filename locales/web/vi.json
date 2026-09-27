@@ -539,6 +539,7 @@
       "modelTemperature": "Nhiệt độ",
       "modelVision": "Thị giác",
       "modelThinking": "Suy nghĩ",
+      "modelThinkingType": "Hệ thống suy nghĩ",
       "agentId": "Agent ID",
       "agentName": "Tên",
       "agentDescription": "Mô tả",

@@ -1169,3 +1169,234 @@ func TestNewProvider_StreamingClientHasNoTotalTimeout(t *testing.T) {
 		t.Errorf("httpClient.Timeout = %v, want 0 (no total timeout)", p.httpClient.Timeout)
 	}
 }
+
+// --- applyReasoningOptions: per-model thinking_type wire dialects ----------
+
+func TestApplyReasoningOptions_DeepSeekStyle(t *testing.T) {
+	tests := []struct {
+		name     string
+		options  map[string]interface{}
+		wantType string // "" means: no thinking key expected
+	}{
+		{
+			name:     "enable sends thinking enabled",
+			options:  map[string]interface{}{"thinking_type": "deepseek", "reasoning": map[string]interface{}{"effort": "low", "enabled": true}},
+			wantType: "enabled",
+		},
+		{
+			name:     "off sends thinking disabled",
+			options:  map[string]interface{}{"thinking_type": "deepseek", "reasoning": map[string]interface{}{"enabled": false}},
+			wantType: "disabled",
+		},
+		{
+			name:     "legacy thinking bool enables",
+			options:  map[string]interface{}{"thinking_type": "deepseek", "thinking": true},
+			wantType: "enabled",
+		},
+		{
+			name:    "no opinion sends nothing",
+			options: map[string]interface{}{"thinking_type": "deepseek"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			requestBody := map[string]interface{}{"model": "mimo-v2.5-pro"}
+			applyReasoningOptions(requestBody, tc.options, "https://api.xiaomimimo.com/v1")
+
+			thinking, hasThinking := requestBody["thinking"]
+			if tc.wantType == "" {
+				if hasThinking {
+					t.Fatalf("thinking = %#v, want absent", thinking)
+				}
+				return
+			}
+			obj, ok := thinking.(map[string]interface{})
+			if !ok || obj["type"] != tc.wantType {
+				t.Fatalf("thinking = %#v, want {type: %s}", thinking, tc.wantType)
+			}
+			// The thinking object is the whole wire format: the generic
+			// reasoning object and top-level reasoning_effort must not leak.
+			if _, ok := requestBody["reasoning"]; ok {
+				t.Fatalf("reasoning object must not be sent for deepseek style: %#v", requestBody)
+			}
+			if _, ok := requestBody["reasoning_effort"]; ok {
+				t.Fatalf("reasoning_effort must not be sent for deepseek style: %#v", requestBody)
+			}
+		})
+	}
+}
+
+func TestApplyReasoningOptions_QwenStyle(t *testing.T) {
+	enableBody := map[string]interface{}{"model": "qwen3-32b"}
+	applyReasoningOptions(enableBody, map[string]interface{}{
+		"thinking_type": "qwen",
+		"reasoning":     map[string]interface{}{"effort": "low", "enabled": true},
+	}, "https://dashscope.aliyuncs.com/compatible-mode/v1")
+	if enableBody["enable_thinking"] != true {
+		t.Fatalf("enable_thinking = %v, want true", enableBody["enable_thinking"])
+	}
+	if _, ok := enableBody["thinking"]; ok {
+		t.Fatalf("thinking object must not be sent for qwen style: %#v", enableBody)
+	}
+
+	disableBody := map[string]interface{}{"model": "qwen3-32b"}
+	applyReasoningOptions(disableBody, map[string]interface{}{
+		"thinking_type": "qwen",
+		"reasoning":     map[string]interface{}{"enabled": false},
+	}, "https://dashscope.aliyuncs.com/compatible-mode/v1")
+	if disableBody["enable_thinking"] != false {
+		t.Fatalf("enable_thinking = %v, want false", disableBody["enable_thinking"])
+	}
+}
+
+func TestApplyReasoningOptions_OpenAIStyle(t *testing.T) {
+	effortBody := map[string]interface{}{"model": "gpt-5.1"}
+	applyReasoningOptions(effortBody, map[string]interface{}{
+		"thinking_type": "openai",
+		"reasoning":     map[string]interface{}{"effort": "medium", "enabled": true},
+	}, "https://api.openai.com/v1")
+	if effortBody["reasoning_effort"] != "medium" {
+		t.Fatalf("reasoning_effort = %v, want medium", effortBody["reasoning_effort"])
+	}
+	if _, ok := effortBody["thinking"]; ok {
+		t.Fatalf("thinking object must not be sent for openai style: %#v", effortBody)
+	}
+
+	disableBody := map[string]interface{}{"model": "gpt-5.1"}
+	applyReasoningOptions(disableBody, map[string]interface{}{
+		"thinking_type": "openai",
+		"reasoning":     map[string]interface{}{"enabled": false},
+	}, "https://api.openai.com/v1")
+	if disableBody["reasoning_effort"] != "none" {
+		t.Fatalf("reasoning_effort = %v, want none (explicit disable)", disableBody["reasoning_effort"])
+	}
+	// The generic reasoning object is not part of the OpenAI dialect.
+	if _, ok := disableBody["reasoning"]; ok {
+		t.Fatalf("reasoning object must not be sent for openai style: %#v", disableBody)
+	}
+}
+
+func TestApplyReasoningOptions_OpenRouterStyle(t *testing.T) {
+	requestBody := map[string]interface{}{"model": "deepseek/deepseek-v4"}
+	applyReasoningOptions(requestBody, map[string]interface{}{
+		"thinking_type": "openrouter",
+		"reasoning": map[string]interface{}{
+			"effort":     "high",
+			"enabled":    true,
+			"max_tokens": 2048,
+		},
+	}, "https://openrouter.ai/api/v1")
+
+	reasoning, ok := requestBody["reasoning"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("reasoning object missing: %#v", requestBody)
+	}
+	if reasoning["effort"] != "high" || reasoning["enabled"] != true || reasoning["max_tokens"] != 2048 {
+		t.Fatalf("reasoning = %#v, want {effort: high, enabled: true, max_tokens: 2048}", reasoning)
+	}
+	if _, ok := requestBody["reasoning_effort"]; ok {
+		t.Fatalf("top-level reasoning_effort must not be sent for openrouter style: %#v", requestBody)
+	}
+	if _, ok := requestBody["thinking"]; ok {
+		t.Fatalf("thinking object must not be sent for openrouter style: %#v", requestBody)
+	}
+}
+
+func TestApplyReasoningOptions_NoneStyle(t *testing.T) {
+	requestBody := map[string]interface{}{"model": "o1-mini"}
+	applyReasoningOptions(requestBody, map[string]interface{}{
+		"thinking_type": "none",
+		"reasoning":     map[string]interface{}{"enabled": false},
+		"thinking":      true,
+	}, "https://api.openai.com/v1")
+
+	for _, key := range []string{"thinking", "enable_thinking", "reasoning", "reasoning_effort"} {
+		if v, ok := requestBody[key]; ok {
+			t.Fatalf("%s = %v, want absent (thinking_type none sends nothing)", key, v)
+		}
+	}
+}
+
+func TestApplyReasoningOptions_AutoDisablesThinkingObjectModels(t *testing.T) {
+	// Models whose endpoints default thinking ON and only understand
+	// `thinking: {"type": ...}` must receive an explicit disable on "off",
+	// even in auto mode (no thinking_type configured).
+	for _, model := range []string{"mimo-v2.5-pro", "deepseek-chat", "glm-4.6", "z-ai/glm-4.6"} {
+		requestBody := map[string]interface{}{"model": model}
+		applyReasoningOptions(requestBody, map[string]interface{}{
+			"reasoning": map[string]interface{}{"enabled": false},
+		}, "https://api.xiaomimimo.com/v1")
+
+		thinking, ok := requestBody["thinking"].(map[string]interface{})
+		if !ok || thinking["type"] != "disabled" {
+			t.Fatalf("model %q: thinking = %#v, want {type: disabled}", model, requestBody["thinking"])
+		}
+	}
+
+	// Non-thinking-object models keep the legacy behavior: no thinking key.
+	requestBody := map[string]interface{}{"model": "gpt-4o"}
+	applyReasoningOptions(requestBody, map[string]interface{}{
+		"reasoning": map[string]interface{}{"enabled": false},
+	}, "https://api.openai.com/v1")
+	if _, ok := requestBody["thinking"]; ok {
+		t.Fatalf("gpt-4o: thinking must not be sent in auto mode: %#v", requestBody)
+	}
+}
+
+func TestProviderChat_ThinkingTypeDeepSeekWirePayload(t *testing.T) {
+	var got capturedRequest
+
+	server := newReasoningCaptureServer(t, false, &got)
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"mimo-v2.5-pro",
+		map[string]interface{}{
+			"thinking_type": "deepseek",
+			"reasoning":     map[string]interface{}{"enabled": false},
+		},
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	thinking, ok := got.decoded["thinking"].(map[string]interface{})
+	if !ok || thinking["type"] != "disabled" {
+		t.Fatalf("thinking = %#v, want {type: disabled}", got.decoded["thinking"])
+	}
+	// The raw bytes prove the disable really reached the wire.
+	if !strings.Contains(string(got.raw), `"type":"disabled"`) {
+		t.Fatalf("raw request body does not contain the thinking disable: %s", got.raw)
+	}
+	// DeepSeek dialect: the generic reasoning object is suppressed.
+	if _, ok := got.decoded["reasoning"]; ok {
+		t.Fatalf("reasoning object must not be sent for deepseek style: %s", got.raw)
+	}
+}
+
+func TestResolveThinkingStyle(t *testing.T) {
+	tests := []struct {
+		options map[string]interface{}
+		want    string
+	}{
+		{map[string]interface{}{}, thinkingStyleAuto},
+		{map[string]interface{}{"thinking_type": "deepseek"}, thinkingStyleDeepSeek},
+		{map[string]interface{}{"thinking_type": " DeepSeek "}, thinkingStyleDeepSeek},
+		{map[string]interface{}{"thinking_type": "qwen"}, thinkingStyleQwen},
+		{map[string]interface{}{"thinking_type": "none"}, thinkingStyleNone},
+		{map[string]interface{}{"thinking_type": "auto"}, thinkingStyleAuto},
+		{map[string]interface{}{"thinking_type": "banana"}, thinkingStyleAuto},
+		{map[string]interface{}{"thinking_type": 42}, thinkingStyleAuto},
+	}
+
+	for _, tc := range tests {
+		if got := resolveThinkingStyle(tc.options); got != tc.want {
+			t.Errorf("resolveThinkingStyle(%v) = %q, want %q", tc.options, got, tc.want)
+		}
+	}
+}

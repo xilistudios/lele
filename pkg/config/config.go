@@ -732,6 +732,45 @@ type ProviderModelConfig struct {
 	Vision        bool             `json:"vision,omitempty"`
 	Video         bool             `json:"video,omitempty"`
 	Reasoning     *ReasoningConfig `json:"reasoning,omitempty"`
+	// ThinkingType names the wire-level "think system" the model's endpoint
+	// uses to turn reasoning on/off. Optional; empty/"auto" keeps the legacy
+	// heuristics. See NormalizeThinkingType for accepted values.
+	ThinkingType string `json:"thinking_type,omitempty"`
+}
+
+// ThinkingType values accepted in providers.<name>.models.<alias>.thinking_type.
+// Each names the wire dialect a model's endpoint understands for enabling and
+// disabling reasoning:
+//
+//   - "auto"      : legacy behavior, decided by heuristics (endpoint/model name)
+//   - "deepseek"  : thinking: {"type": "enabled"|"disabled"} — DeepSeek V3.2+,
+//     Xiaomi MiMo, Zhipu GLM-4.5+
+//   - "openai"    : top-level reasoning_effort ("none" disables) — OpenAI o-series/gpt-5
+//   - "openrouter": reasoning: {effort, enabled, ...} object — OpenRouter
+//   - "qwen"      : enable_thinking: true|false — Alibaba DashScope / Qwen3
+//   - "none"      : never send thinking parameters (the model has no switch)
+const (
+	ThinkingTypeAuto       = "auto"
+	ThinkingTypeDeepSeek   = "deepseek"
+	ThinkingTypeOpenAI     = "openai"
+	ThinkingTypeOpenRouter = "openrouter"
+	ThinkingTypeQwen       = "qwen"
+	ThinkingTypeNone       = "none"
+)
+
+// NormalizeThinkingType canonicalizes a thinking_type value.
+// Returns ("auto", true) for empty, the lowercase value and true for a valid
+// type, ("", false) for anything else (invalid).
+func NormalizeThinkingType(v string) (string, bool) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	switch v {
+	case "", ThinkingTypeAuto:
+		return ThinkingTypeAuto, true
+	case ThinkingTypeDeepSeek, ThinkingTypeOpenAI, ThinkingTypeOpenRouter, ThinkingTypeQwen, ThinkingTypeNone:
+		return v, true
+	default:
+		return "", false
+	}
 }
 
 // Validate checks if the provider model config is valid.
@@ -740,6 +779,9 @@ func (p *ProviderModelConfig) Validate() error {
 		if err := p.Reasoning.Validate(); err != nil {
 			return fmt.Errorf("model %q: %w", p.Model, err)
 		}
+	}
+	if _, ok := NormalizeThinkingType(p.ThinkingType); !ok {
+		return fmt.Errorf("model %q: invalid thinking_type %q (valid: auto, deepseek, openai, openrouter, qwen, none)", p.Model, p.ThinkingType)
 	}
 	return nil
 }

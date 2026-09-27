@@ -541,6 +541,7 @@
       "modelTemperature": "温度",
       "modelVision": "视觉",
       "modelThinking": "思考",
+      "modelThinkingType": "思考系统",
       "agentId": "智能体 ID",
       "agentName": "名称",
       "agentDescription": "描述",

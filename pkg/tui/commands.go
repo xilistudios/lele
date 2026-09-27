@@ -254,7 +254,7 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 	case "/add-model":
 		m.resetModal(ModalAddModel)
 		m.formStepIndex = 0
-		m.formValues = make([]string, 5) // alias, model_name, context_window, max_tokens, vision
+		m.formValues = make([]string, 6) // alias, model_name, context_window, max_tokens, vision, thinking_type
 		m.formError = ""
 		m.formConfirmMode = false
 		m.textInput.SetValue("")
@@ -366,7 +366,7 @@ func (m *Model) startConnectFlow(preset *providerPreset) {
 	m.providerTypePickerMax = 0
 	m.connectSuccess = false
 	m.providerTypeFromPreset = false
-	m.formValues = make([]string, 10) // 0-3: provider, 4-8: model, 9: review
+	m.formValues = make([]string, 11) // 0-3: provider, 4-8: model, 9: thinking_type, 10: review
 
 	if preset != nil {
 		// Pre-fill from the chosen preset.

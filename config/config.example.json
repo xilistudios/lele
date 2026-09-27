@@ -112,6 +112,7 @@
           "context_window": 200000,
           "max_tokens": 100000,
           "temperature": 1.0,
+          "thinking_type": "openai",
           "reasoning": {
             "effort": "medium",
             "summary": "auto"
@@ -130,6 +131,7 @@
           "model": "qwen3.5-397b-a17b-thinking",
           "context_window": 128000,
           "temperature": 0.8,
+          "thinking_type": "qwen",
           "reasoning": {
             "effort": "high"
           }

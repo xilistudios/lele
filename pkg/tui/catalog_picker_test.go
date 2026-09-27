@@ -130,7 +130,7 @@ func TestCurrentCatalogProviderKeyPrefersConfiguredType(t *testing.T) {
 	// Connect-flow fallback: type in formValues[1].
 	m2 := newCatalogTestModel(t)
 	m2.providerSelectedName = ""
-	m2.formValues = make([]string, 10)
+	m2.formValues = make([]string, 11)
 	m2.formValues[1] = "anthropic"
 	if got := m2.currentCatalogProviderKey(); got != "anthropic" {
 		t.Errorf("connect-flow key = %q, want anthropic", got)
@@ -182,7 +182,7 @@ func TestRefreshCatalogSuggestionsFilters(t *testing.T) {
 	m.modalMode = ModalAddModel
 	m.formStepIndex = 1
 	m.providerSelectedName = "my-openai"
-	m.formValues = make([]string, 5)
+	m.formValues = make([]string, 6)
 
 	m.refreshCatalogSuggestions("")
 	if !m.addModelCatalogActive {
@@ -222,7 +222,7 @@ func TestStartCatalogPickerIfNeededOnlyOnModelNameStep(t *testing.T) {
 	m := newCatalogTestModel(t)
 	m.modalMode = ModalAddModel
 	m.providerSelectedName = "my-openai"
-	m.formValues = make([]string, 5)
+	m.formValues = make([]string, 6)
 
 	// Alias step — picker off.
 	m.formStepIndex = 0
@@ -348,7 +348,11 @@ func TestAddModelFullFlowWithCatalogPrefill(t *testing.T) {
 	if m.formStepIndex != 4 {
 		t.Fatalf("step = %d, want 4; err=%q", m.formStepIndex, m.formError)
 	}
-	m = sendKeys(m, "\r") // save
+	m = sendKeys(m, "\r") // → think system
+	if m.formStepIndex != 5 {
+		t.Fatalf("step = %d, want 5 (think system); err=%q", m.formStepIndex, m.formError)
+	}
+	m = sendKeys(m, "\r") // save (empty think system = auto)
 
 	if m.modalMode != ModalNone {
 		t.Fatalf("modal should close after save; mode=%v err=%q", m.modalMode, m.formError)
@@ -373,6 +377,9 @@ func TestAddModelFullFlowWithCatalogPrefill(t *testing.T) {
 	if mc.MaxTokens <= 0 {
 		t.Errorf("MaxTokens = %d, want >0", mc.MaxTokens)
 	}
+	if mc.ThinkingType != "" {
+		t.Errorf("ThinkingType = %q, want empty (auto leaves field unset)", mc.ThinkingType)
+	}
 }
 
 func TestAddModelToProviderCatalogPrefillZeros(t *testing.T) {
@@ -395,7 +402,7 @@ func TestAddModelToProviderCatalogPrefillZeros(t *testing.T) {
 	}
 
 	// Zero context/max tokens must be filled from catalog.
-	if err := m.addModelToProvider("my-openai", pick.ID, pick.ID, 0, 0, pick.Vision); err != nil {
+	if err := m.addModelToProvider("my-openai", pick.ID, pick.ID, 0, 0, pick.Vision, ""); err != nil {
 		t.Fatalf("addModelToProvider: %v", err)
 	}
 	saved := m.cfg.Providers.Named["my-openai"].Models[strings.ToLower(pick.ID)]
@@ -418,7 +425,7 @@ func TestAddModelToProviderCatalogPrefillZeros(t *testing.T) {
 func TestAddModelToProviderRespectsExplicitValues(t *testing.T) {
 	m := newCatalogTestModel(t)
 
-	if err := m.addModelToProvider("my-openai", "custom-alias", "gpt-4o", 99999, 1234, true); err != nil {
+	if err := m.addModelToProvider("my-openai", "custom-alias", "gpt-4o", 99999, 1234, true, ""); err != nil {
 		t.Fatalf("addModelToProvider: %v", err)
 	}
 	saved := m.cfg.Providers.Named["my-openai"].Models["custom-alias"]
@@ -436,7 +443,7 @@ func TestAddModelToProviderRespectsExplicitValues(t *testing.T) {
 func TestAddModelToProviderUnknownModelNoCatalogFill(t *testing.T) {
 	m := newCatalogTestModel(t)
 
-	if err := m.addModelToProvider("my-openai", "weird", "not-in-catalog-xyz", 0, 0, false); err != nil {
+	if err := m.addModelToProvider("my-openai", "weird", "not-in-catalog-xyz", 0, 0, false, ""); err != nil {
 		t.Fatalf("addModelToProvider: %v", err)
 	}
 	saved := m.cfg.Providers.Named["my-openai"].Models["weird"]
