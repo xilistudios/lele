@@ -52,6 +52,15 @@ class MockWebSocket {
     this.emit('close', new Event('close'))
   }
 
+  /**
+   * Simulates the server dropping the connection: the socket is closed and the
+   * `close` event reaches `LeleSocket`, which starts its reconnect backoff and
+   * eventually builds a NEW MockWebSocket instance.
+   */
+  simulateDisconnect() {
+    this.close()
+  }
+
   emit(type: string, event?: MessageEvent | Event) {
     for (const listener of this.listeners.get(type) ?? []) {
       listener(event)
@@ -1738,5 +1747,410 @@ describe('Session deletion', () => {
     await waitFor(() => {
       expect(document.querySelector('.h-screen')).not.toBeNull()
     })
+  })
+})
+
+/**
+ * Connection-lifecycle tests: the sessions/history recovery work must run on a
+ * REAL reconnection only, never on the first connection (which the bootstrap
+ * already covered).
+ */
+
+/** 250 sessions → two pages at the backend page size (200). */
+const buildPaginatedSessions = (count: number) =>
+  Array.from({ length: count }, (_, index) => ({
+    key: `native:client-1:${index + 1}`,
+    created: '2026-01-01T00:00:00Z',
+    updated: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),
+  }))
+
+/** Slices the page requested in `url` and reports `has_more` correctly. */
+const paginatedSessionsBody = (allSessions: Array<Record<string, unknown>>, url: string) => {
+  const params = new URL(url).searchParams
+  const offset = Number(params.get('offset') ?? '0')
+  const limit = Number(params.get('limit') ?? '200')
+  const page = allSessions.slice(offset, offset + limit)
+  return {
+    sessions: page,
+    total: allSessions.length,
+    has_more: offset + page.length < allSessions.length,
+  }
+}
+
+/**
+ * Bootstrap fetch mock with a PAGINATED metadata endpoint, so a duplicated
+ * refresh pass shows up as duplicated `offset=` requests. Returns the mock so
+ * tests can inspect the requested URLs.
+ *
+ * `metaResponse` optionally takes over the sessions/meta page itself, which is
+ * how a test holds a paginated pass IN FLIGHT (a promise it resolves by hand)
+ * instead of letting it finish. Every other endpoint keeps its normal answer.
+ */
+const createConnectionLifecycleFetchMock = (
+  allSessions: Array<Record<string, unknown>>,
+  metaResponse?: (url: string) => Promise<Response>,
+) =>
+  mock((input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.endsWith('/api/v1/auth/status')) {
+      return Promise.resolve(
+        jsonResponse({
+          valid: true,
+          client_id: 'client-1',
+          device_name: 'Desktop',
+          expires: '2026-01-01T00:00:00Z',
+        }),
+      )
+    }
+    if (url.endsWith('/api/v1/agents')) {
+      return Promise.resolve(
+        jsonResponse({
+          agents: [
+            { id: 'main', name: 'Main Agent', workspace: '~/.lele', model: 'gpt-4', default: true },
+          ],
+        }),
+      )
+    }
+    if (url.endsWith('/api/v1/agents/main')) {
+      return Promise.resolve(
+        jsonResponse({
+          id: 'main',
+          name: 'Main Agent',
+          workspace: '~/.lele',
+          model: 'gpt-4',
+          default: true,
+        }),
+      )
+    }
+    if (url.endsWith('/api/v1/agents/main/status')) {
+      return Promise.resolve(jsonResponse({ id: 'main', status: 'running', active_sessions: 1 }))
+    }
+    if (url.endsWith('/api/v1/status')) {
+      return Promise.resolve(
+        jsonResponse({ status: 'ok', uptime: '1h', agents: [], channels: [], version: 'dev' }),
+      )
+    }
+    if (url.endsWith('/api/v1/channels')) {
+      return Promise.resolve(jsonResponse({ channels: [] }))
+    }
+    if (url.endsWith('/api/v1/tools')) {
+      return Promise.resolve(jsonResponse({ tools: [] }))
+    }
+    if (url.endsWith('/api/v1/config')) {
+      return Promise.resolve(jsonResponse(mockConfigResponse()))
+    }
+    if (url.includes('/api/v1/chat/sessions/') && url.includes('/history')) {
+      return Promise.resolve(
+        jsonResponse({
+          session_key: 'native:client-1:1',
+          messages: [{ role: 'assistant', content: 'mensaje A' }],
+        }),
+      )
+    }
+    if (isSessionsEndpoint(url)) {
+      if (metaResponse) return metaResponse(url)
+      return Promise.resolve(jsonResponse(paginatedSessionsBody(allSessions, url)))
+    }
+    if (url.includes('/api/v1/chat/sessions/')) {
+      // Session detail/agent/model/thinking/folder sub-resources.
+      return Promise.resolve(
+        jsonResponse({
+          session_key: 'native:client-1:1',
+          agent_id: 'main',
+          model: 'gpt-4',
+          models: ['gpt-4'],
+          level: 'default',
+          folder: '',
+        }),
+      )
+    }
+    if (url.includes('/api/v1/models')) {
+      return Promise.resolve(jsonResponse({ agent_id: 'main', model: 'gpt-4', models: ['gpt-4'] }))
+    }
+
+    return Promise.resolve(notFoundResponse(url))
+  })
+
+type ConnectionLifecycleFetchMock = ReturnType<typeof createConnectionLifecycleFetchMock>
+
+/** `offset` values requested from the paginated sessions/meta endpoint, in order. */
+const requestedMetaOffsets = (fetchMock: ConnectionLifecycleFetchMock): string[] =>
+  fetchMock.mock.calls
+    .map(([input]) => String(input))
+    .filter((url) => url.includes('/api/v1/chat/sessions/meta?'))
+    .map((url) => new URL(url).searchParams.get('offset') ?? '')
+
+/** How many chat-history requests were issued. */
+const requestedHistoryCount = (fetchMock: ConnectionLifecycleFetchMock): number =>
+  fetchMock.mock.calls
+    .map(([input]) => String(input))
+    .filter((url) => url.includes('/api/v1/chat/sessions/') && url.includes('/history')).length
+
+/**
+ * Model lookups driven by `useAppLogic`: `loadModels` is only called from the
+ * effect guarded by `wsStatus === 'connected'` (agent-level
+ * `/models?agent_id=…` or, once the history is known, the per-session
+ * `/sessions/<key>/model`). Seeing one is the observable proof that the app
+ * APPLIED the connected transition.
+ */
+const requestedModelLookupCount = (fetchMock: ConnectionLifecycleFetchMock): number =>
+  fetchMock.mock.calls
+    .map(([input]) => String(input))
+    .filter(
+      (url) =>
+        (url.includes('/api/v1/models') && url.includes('agent_id=')) ||
+        (url.includes('/api/v1/chat/sessions/') && url.endsWith('/model')),
+    ).length
+
+/**
+ * Waits until the app has applied `wsStatus === 'connected'` (see
+ * `requestedModelLookupCount`) and returns the single app socket.
+ */
+const waitForConnectionObserved = async (
+  fetchMock: ConnectionLifecycleFetchMock,
+): Promise<MockWebSocket> => {
+  await waitFor(() => expect(MockWebSocket.instances.length).toBe(1), { timeout: 2000 })
+  await waitFor(() => expect(requestedModelLookupCount(fetchMock)).toBeGreaterThan(0), {
+    timeout: 2000,
+  })
+  const socket = MockWebSocket.instances[0]
+  if (!socket) {
+    throw new Error('WebSocket not initialized')
+  }
+  return socket
+}
+
+/** Lets the fetch/effect work triggered by the last transition settle. */
+const settleEffects = async (ms = 150) => {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, ms))
+  })
+}
+
+describe('WebSocket connection lifecycle', () => {
+  beforeEach(() => {
+    queryClient.clear()
+    localStorage.clear()
+    localStorage.setItem('lele.session', JSON.stringify(authSession))
+    localStorage.setItem('lele.currentSessionKey', 'native:client-1:1')
+    MockWebSocket.reset()
+    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    globalThis.WebSocket = originalWebSocket
+  })
+
+  test('the initial connection does not repeat the paginated sessions pass', async () => {
+    const fetchMock = createConnectionLifecycleFetchMock(buildPaginatedSessions(250))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    renderWithProviders(<App />)
+
+    await waitForConnectionObserved(fetchMock)
+    await settleEffects()
+
+    // Exactly ONE paginated pass: one request per page. Before the fix the
+    // "recovery" effect also ran on the first connection, so every page was
+    // requested twice (['0','200','0','200']).
+    expect(requestedMetaOffsets(fetchMock)).toEqual(['0', '200'])
+  })
+
+  test('a bootstrap that failed recovers on the FIRST connection, exactly once', async () => {
+    const allSessions = buildPaginatedSessions(250)
+    let metaRequests = 0
+    // The backend is not ready while the page boots: the bootstrap's very FIRST
+    // page fails (404 → ApiError, thrown without retry, so the pass fails fast
+    // and the sidebar ends up empty) and every later request is answered
+    // normally. Counting requests is what makes the pass boundary observable.
+    const fetchMock = createConnectionLifecycleFetchMock(allSessions, (url) => {
+      metaRequests += 1
+      if (metaRequests === 1) return Promise.resolve(notFoundResponse(url))
+      return Promise.resolve(jsonResponse(paginatedSessionsBody(allSessions, url)))
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    renderWithProviders(<App />)
+
+    // The first connection: `hadWsConnectedRef` only proves this is NOT a
+    // reconnect, so the recovery here can only be driven by the bootstrap
+    // having FAILED.
+    await waitForConnectionObserved(fetchMock)
+    await settleEffects()
+
+    // One extra paginated pass, both pages, exactly once: the failed bootstrap
+    // is retried by the connection that the page was waiting for. Without the
+    // `bootstrapOutcomeRef.current === 'failed'` condition the walk would stop
+    // at the failed request (['0']) and the sidebar would stay empty until a
+    // manual reload; a repeated or per-page recovery would add further offsets.
+    expect(requestedMetaOffsets(fetchMock)).toEqual(['0', '0', '200'])
+  })
+
+  test('a real reconnect still refreshes sessions and revalidates history', async () => {
+    const fetchMock = createConnectionLifecycleFetchMock(buildPaginatedSessions(250))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    renderWithProviders(<App />)
+
+    const socket = await waitForConnectionObserved(fetchMock)
+    await settleEffects()
+
+    expect(requestedMetaOffsets(fetchMock)).toEqual(['0', '200'])
+    expect(requestedHistoryCount(fetchMock)).toBe(1)
+
+    // The server drops the connection; LeleSocket reconnects after its backoff
+    // and builds a SECOND MockWebSocket instance.
+    act(() => {
+      socket.simulateDisconnect()
+    })
+
+    await waitFor(() => expect(MockWebSocket.instances.length).toBe(2), { timeout: 3000 })
+
+    // The recovery work is still wired: sessions re-walked (both pages) and the
+    // history query revalidated (invalidating an active query refetches it).
+    await waitFor(() => expect(requestedHistoryCount(fetchMock)).toBe(2), { timeout: 3000 })
+    await settleEffects()
+
+    expect(requestedMetaOffsets(fetchMock)).toEqual(['0', '200', '0', '200'])
+  })
+})
+
+/**
+ * Simulates a tab switch. jsdom implements `document.visibilityState` as a
+ * getter on `Document.prototype` and never fires `visibilitychange`, so the
+ * getter is shadowed with an own data property and the event is dispatched by
+ * hand — the same trick as `hooks/usePageVisible.test.ts`.
+ */
+const setDocumentVisibility = (state: DocumentVisibilityState) => {
+  Object.defineProperty(document, 'visibilityState', { value: state, configurable: true })
+  document.dispatchEvent(new window.Event('visibilitychange'))
+}
+
+/** Puts the document back in its visible default so nothing leaks to other tests. */
+const restoreDocumentVisibility = () => {
+  Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+}
+
+/**
+ * Tab-visibility revalidation: returning to a hidden tab must re-walk the
+ * paginated sessions/meta endpoint ONCE, because the session-list refresh is
+ * event-driven and throttled — a chat created from another channel while the
+ * tab sat in the background would otherwise stay invisible.
+ */
+describe('Tab visibility: session-list revalidation', () => {
+  beforeEach(() => {
+    queryClient.clear()
+    localStorage.clear()
+    localStorage.setItem('lele.session', JSON.stringify(authSession))
+    localStorage.setItem('lele.currentSessionKey', 'native:client-1:1')
+    MockWebSocket.reset()
+    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    globalThis.WebSocket = originalWebSocket
+    restoreDocumentVisibility()
+  })
+
+  test('revalidates the session list exactly once when the tab becomes visible again', async () => {
+    const fetchMock = createConnectionLifecycleFetchMock(buildPaginatedSessions(250))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    renderWithProviders(<App />)
+
+    await waitForConnectionObserved(fetchMock)
+    await settleEffects()
+
+    // Bootstrap: one pass over the two pages.
+    expect(requestedMetaOffsets(fetchMock)).toEqual(['0', '200'])
+
+    // Going to the background fetches nothing at all...
+    act(() => setDocumentVisibility('hidden'))
+    await settleEffects()
+    expect(requestedMetaOffsets(fetchMock)).toEqual(['0', '200'])
+
+    // ...and coming back re-walks the endpoint EXACTLY once (one request per
+    // page, in order). A missing revalidation, a duplicated one, or a pass per
+    // page all break this single expectation.
+    act(() => setDocumentVisibility('visible'))
+
+    await waitFor(() => expect(requestedMetaOffsets(fetchMock).length).toBe(4), { timeout: 3000 })
+    await settleEffects()
+    expect(requestedMetaOffsets(fetchMock)).toEqual(['0', '200', '0', '200'])
+  })
+})
+
+/**
+ * Logout must drop the session list AND invalidate any paginated pass that is
+ * still in flight (`sessionsHook.reset()` inside `handleLogout`), so a slow
+ * `/sessions/meta` answer can never write another user's chats — nor their
+ * session key — into the post-logout state.
+ *
+ * Note on what is observable here: the cleared `sessions` state itself cannot
+ * be asserted from the DOM, because logging out also unmounts the chat UI (the
+ * app navigates to /pair). What IS observable, and is exactly what `reset()`
+ * buys, is the cancelled pass: the answer that lands after the logout must
+ * neither re-list the chats nor restore the persisted session key.
+ */
+describe('Logout', () => {
+  beforeEach(() => {
+    queryClient.clear()
+    localStorage.clear()
+    localStorage.setItem('lele.session', JSON.stringify(authSession))
+    localStorage.setItem('lele.currentSessionKey', 'native:client-1:1')
+    MockWebSocket.reset()
+    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    globalThis.WebSocket = originalWebSocket
+  })
+
+  test('a session-list pass still in flight cannot revive the state after logout', async () => {
+    const allSessions = buildPaginatedSessions(2)
+    let releaseMetaPass: ((value: Response) => void) | undefined
+    let pendingMetaUrl = ''
+
+    // The bootstrap pass hangs until this test releases it, so it is still in
+    // flight while the user logs out.
+    const fetchMock = createConnectionLifecycleFetchMock(allSessions, (url) => {
+      pendingMetaUrl = url
+      return new Promise<Response>((resolve) => {
+        releaseMetaPass = resolve
+      })
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const view = renderWithProviders(<App />)
+
+    // i18n is pinned to `es` in test/i18n.ts, hence the Spanish label.
+    const logoutButton = await waitFor(() => view.getByLabelText('Cerrar sesión'))
+    await waitFor(() => expect(requestedMetaOffsets(fetchMock)).toEqual(['0']))
+
+    // fireEvent ignores the closed Popover's `pointer-events-none`, so the
+    // button is clickable without opening the device menu first.
+    fireEvent.click(logoutButton)
+
+    // Logged out: the chat UI is gone and both stored keys were cleared.
+    await waitFor(() => expect(view.queryByLabelText('Cerrar sesión')).toBeNull())
+    expect(view.queryByTestId('sidebar-history-section')).toBeNull()
+    expect(localStorage.getItem('lele.session')).toBeNull()
+    expect(localStorage.getItem('lele.currentSessionKey')).toBeNull()
+
+    // The hung pass now lands, AFTER the logout. Its result must be discarded:
+    // without `reset()` (generation bump + coordinator cancel) the pass applies
+    // it and writes the stale session key back, so the next mount would reopen
+    // the previous chat.
+    await act(async () => {
+      releaseMetaPass?.(jsonResponse(paginatedSessionsBody(allSessions, pendingMetaUrl)))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await settleEffects()
+
+    expect(localStorage.getItem('lele.currentSessionKey')).toBeNull()
+    expect(localStorage.getItem('lele.session')).toBeNull()
   })
 })

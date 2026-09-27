@@ -21,6 +21,7 @@ import { useChatSessions } from './useChatSessions'
 import { useMessageQueue } from './useMessageQueue'
 import { useMessages } from './useMessages'
 import { useModels } from './useModels'
+import { useOnPageVisible } from './usePageVisible'
 import type { SocketStatus } from './useSocket'
 
 type DiagnosticsState = {
@@ -102,30 +103,78 @@ export function useAppLogic(
   // This fixes the bug where the frontend thinks it's subscribed but the backend
   // has already cleaned up the client (e.g., after >30s disconnect).
   const prevWsStatusRef = useRef(wsStatus)
+  // Tracks whether the socket has EVER reached `connected` in this mount. It
+  // distinguishes the very first connection (the bootstrap) from a real
+  // reconnection: `prevWsStatusRef` starts as 'disconnected', so the initial
+  // `disconnected|connecting → connected` transition would otherwise look
+  // exactly like a reconnect.
+  const hadWsConnectedRef = useRef(false)
+  // Outcome of the bootstrap (`initSession` below): `pending` until it settles,
+  // then `ok` or `failed`. It exists because the FIRST WebSocket connection is
+  // not a reconnect (see `hadWsConnectedRef`) but it still has to recover when
+  // the bootstrap never produced a session list — the socket retries forever
+  // while nothing retries `initSession`, so without this the sidebar would stay
+  // empty until a manual reload whenever the page loads before the backend is
+  // ready.
+  const bootstrapOutcomeRef = useRef<'pending' | 'ok' | 'failed'>('pending')
   // biome-ignore lint/correctness/useExhaustiveDependencies: the reconnect actions use stable dispatchers/current-session reads that must not re-trigger the transition-guarded effect
   useEffect(() => {
     if (prevWsStatusRef.current !== 'connected' && wsStatus === 'connected') {
       subscribedSessionRef.current = null
-      // Refresh sessions on reconnect to pick up changes made during disconnect
-      sessionsHook.refreshSessions().catch((err) => {
-        console.warn('[useAppLogic] Failed to refresh sessions on reconnect:', err)
-      })
-      // Refetch chat history to recover messages that arrived during the
-      // disconnect window. The WS reconnected event includes in_progress
-      // content, but completed messages are only available via HTTP.
-      chatHistory.invalidateHistory()
-      // Force-finalize any streaming assistant messages for the current session.
-      // Without this, a message that completed while the WS was down (and
-      // processing never observed true→false) would keep its streaming spinner
-      // stuck until a manual session switch or page reload.  If the turn is
-      // actually still running the backend's subscribe.ack / restored
-      // in_progress_messages will re-create the streaming state.
-      messagesHook.setStreamingMessages((prev) =>
-        finalizeStreamingAssistantsForSession(prev, sessionsHook.currentSessionKey),
-      )
+      // A real reconnect = we had been connected before, so there WAS a
+      // disconnect window to recover from. Read BEFORE flipping the flag.
+      const isReconnect = hadWsConnectedRef.current
+      hadWsConnectedRef.current = true
+      // Recovery is needed after a real reconnection, and also on the FIRST
+      // connection when the bootstrap FAILED: the page loaded before the
+      // backend was ready, and while the socket retries forever nothing retries
+      // `initSession`, so this is the only path that can fill the sidebar
+      // without a manual reload.
+      // The `pending` state is deliberately NOT recovered from: the bootstrap
+      // is already walking the paginated `/sessions/meta` endpoint right now,
+      // so a second `refreshSessions()` would merely join it and then the
+      // trailing pass would walk it a second time — and `useChatHistory` is
+      // already loading on mount, so `invalidateHistory()` would only duplicate
+      // a request. The `ok` state has nothing to recover either: there was no
+      // disconnect window.
+      if (isReconnect || bootstrapOutcomeRef.current === 'failed') {
+        // Refresh sessions on reconnect to pick up changes made during disconnect
+        sessionsHook.refreshSessions().catch((err) => {
+          console.warn('[useAppLogic] Failed to refresh sessions on reconnect:', err)
+        })
+        // Refetch chat history to recover messages that arrived during the
+        // disconnect window. The WS reconnected event includes in_progress
+        // content, but completed messages are only available via HTTP.
+        chatHistory.invalidateHistory()
+        // Force-finalize any streaming assistant messages for the current session.
+        // Without this, a message that completed while the WS was down (and
+        // processing never observed true→false) would keep its streaming spinner
+        // stuck until a manual session switch or a page reload. If the turn is
+        // actually still running the backend's subscribe.ack / restored
+        // in_progress_messages will re-create the streaming state.
+        messagesHook.setStreamingMessages((prev) =>
+          finalizeStreamingAssistantsForSession(prev, sessionsHook.currentSessionKey),
+        )
+      }
     }
     prevWsStatusRef.current = wsStatus
   }, [wsStatus, sessionsHook.refreshSessions, chatHistory.invalidateHistory])
+
+  // The session-list refresh is event-driven and throttled (see
+  // SESSION_REFRESH_THROTTLE_MS in useMessages), so a chat created from
+  // another channel (Telegram/WhatsApp/cron) while this tab was in the
+  // background could otherwise stay invisible until the next WS event.
+  // Refreshing once when the tab becomes visible again restores the liveness
+  // the throttle took away, at a cost the user controls: ONE paginated pass
+  // per tab focus, and the single-flight coordinator collapses it if a pass is
+  // already running. This mirrors what `refetchOnWindowFocus: true` already
+  // does for the react-query endpoints (chat history, settings, skills).
+  // Hidden tabs fire nothing, so no background polling is introduced.
+  useOnPageVisible(() => {
+    void sessionsHook.refreshSessions().catch((err) => {
+      console.warn('[useAppLogic] Failed to refresh sessions on tab focus:', err)
+    })
+  })
 
   const agentsRef = useRef(agents)
   useEffect(() => {
@@ -156,6 +205,11 @@ export function useAppLogic(
           return { agents: [] as Agent[] }
         }),
       ])
+
+      // `refreshSessions()` returns null only when it refused to run (no
+      // credentials) or when its pass was invalidated; a successful pass always
+      // resolves with a session key (the list falls back to the default one).
+      bootstrapOutcomeRef.current = sessionKey === null ? 'failed' : 'ok'
 
       const agentsList = agentsResult?.agents ?? []
       setAgents(agentsList)
@@ -295,6 +349,15 @@ export function useAppLogic(
     modelLoadKeyRef.current = null
     wsClose()
     messagesHook.clearAll()
+    // Drop the session list and invalidate any pass still in flight, so a slow
+    // /sessions/meta response can never write another user's chats into the
+    // post-logout UI (the coordinator drops it and the generation guard skips
+    // the state write).
+    sessionsHook.reset()
+    // Back to a clean slate, so a later login's bootstrap is the one that
+    // decides the outcome again (a stale `failed` would otherwise make the next
+    // first connection re-run the history/streaming recovery).
+    bootstrapOutcomeRef.current = 'pending'
     persistSession(null)
     clearCurrentSessionKey()
     setAgents([])
@@ -302,7 +365,7 @@ export function useAppLogic(
     setSessionFolder('')
     setDiagnostics({ status: null, channels: [], tools: [], config: null, agentInfo: null })
     setError(null)
-  }, [api, wsClose, messagesHook.clearAll, persistSession])
+  }, [api, wsClose, messagesHook.clearAll, persistSession, sessionsHook.reset])
 
   const handleSend = useCallback(
     async (content: string, attachments: string[]): Promise<boolean> => {
