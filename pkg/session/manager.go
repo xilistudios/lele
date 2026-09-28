@@ -30,6 +30,12 @@ type SessionManager struct {
 	maxInMemory int                  // max sessions to keep in memory (0 = unlimited). Default: 50.
 	evictionTTL time.Duration        // idle time before a session is eligible for eviction. Default: 30m.
 	accessTimes map[string]time.Time // last access time per session key (for LRU)
+
+	// countsCache memoizes the batched store-side message-count query behind
+	// AllMessageCounts / AllTotalMessageCounts (see storeCountsCache in
+	// listing.go). Guarded by its own mutex because the query deliberately runs
+	// with sm.mu released.
+	countsCache storeCountsCache
 }
 
 func NewSessionManager() *SessionManager {
@@ -106,6 +112,7 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 			*lastMsg = msg
 			session.Updated = time.Now()
 			session.markModified(len(session.Messages) - 1) // in-place update, not a new append
+			session.publishViewLocked()                     // rewrite of the last element
 			sm.syncSessionMetaLocked(session)
 			return
 		}
@@ -115,6 +122,7 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 	session.Updated = time.Now()
 	session.msgsAppended++
 	session.bumpEpoch()
+	session.publishViewLocked()
 	sm.syncSessionMetaLocked(session)
 }
 
@@ -146,22 +154,26 @@ func (sm *SessionManager) GetHistory(key string) []providers.Message {
 	return history
 }
 
-// GetHistoryView returns a defensive copy of the session's message slice.
-// The returned slice is safe to read without holding the session lock and
-// will not be affected by concurrent AppendAssistantChunk/AddFullMessage
-// calls. The caller MUST NOT modify the returned slice or any messages in it.
-// For external use where the caller may modify, use GetHistory instead.
+// GetHistoryView returns a read-only view of the session's message history.
+//
+// The returned slice is an immutable snapshot published by the writer side
+// (copy-on-write, see view.go). It is safe to read without holding the session
+// lock and will not be affected by later AppendAssistantChunk/AddFullMessage/
+// RemoveLastMessage calls. On the hot path the call performs NO allocation and
+// NO copy: it returns the already-published snapshot. The view is rebuilt (and
+// republished) only when the snapshot is missing or stale, i.e. when a writer
+// mutated the session and either published a new snapshot (structural writers)
+// or deliberately left it stale (streaming chunks — the epoch check turns that
+// into one lazy rebuild per read burst instead of one copy per writer call).
+//
+// The caller MUST NOT modify the returned slice or any message in it — the
+// same backing array is shared by every concurrent reader. For external use
+// where the caller may modify, use GetHistory instead.
 func (sm *SessionManager) GetHistoryView(key string) []providers.Message {
 	sm.ensureLoaded()
 
-	// HOT PATH: session already in memory. Copy under the READ lock so the
-	// TUI render loop and concurrent streaming appends do not serialize on
-	// the exclusive write lock. Previously this took sm.mu.Lock() and the
-	// full O(n) copy ran under it, so every render frame queued behind every
-	// in-flight AppendAssistantChunk / stream flush (measured: p95 frame
-	// latency 29ms -> 23ms and max 51ms -> 33ms at 6k messages with a
-	// continuous stream writer). An RWMutex lets readers proceed
-	// concurrently; a writer (append/flush) only briefly excludes them.
+	// HOT PATH: session already in memory. Return the published snapshot when
+	// it is fresh for the current epoch: O(1), zero allocations.
 	//
 	// Reads intentionally do NOT touch the LRU access time: an active session
 	// is kept fresh by its own writes (AppendAssistantChunk/AddFullMessage
@@ -171,9 +183,24 @@ func (sm *SessionManager) GetHistoryView(key string) []providers.Message {
 	// which already read under RLock without touching.
 	sm.mu.RLock()
 	if session, ok := sm.sessions[key]; ok {
-		view := make([]providers.Message, len(session.Messages))
-		copy(view, session.Messages)
+		snap := session.viewSnapshot.Load()
+		if snap != nil && snap.epoch == session.saveEpoch {
+			sm.mu.RUnlock()
+			return snap.view
+		}
+		// Stale (or never published): rebuild the view while still holding the
+		// read lock — Session.Messages cannot change under it, since every
+		// writer needs the write lock. Stamp it with the epoch observed under
+		// the lock so a late CAS can never publish content/epoch that were not
+		// read together.
+		view := cloneMessages(session.Messages)
+		fresh := &messageSnapshot{epoch: session.saveEpoch, view: view}
 		sm.mu.RUnlock()
+		// Best-effort publish so the next reader is O(1). Losing the race
+		// (another reader already published, or a writer stored its own
+		// snapshot meanwhile) simply discards this copy: whoever won published
+		// a snapshot consistent with the epoch it carries.
+		session.viewSnapshot.CompareAndSwap(snap, fresh)
 		return view
 	}
 	sm.mu.RUnlock()
@@ -184,17 +211,26 @@ func (sm *SessionManager) GetHistoryView(key string) []providers.Message {
 	defer sm.mu.Unlock()
 	if session, ok := sm.sessions[key]; ok { // re-check under the write lock
 		sm.touchSession(key)
-		view := make([]providers.Message, len(session.Messages))
-		copy(view, session.Messages)
-		return view
+		return sm.viewLocked(session)
 	}
 	if session, ok := sm.loadSessionFromDisk(key); ok {
 		sm.touchSession(key)
-		view := make([]providers.Message, len(session.Messages))
-		copy(view, session.Messages)
-		return view
+		return sm.viewLocked(session)
 	}
 	return []providers.Message{}
+}
+
+// viewLocked returns the read-only view of a session's Messages, publishing a
+// fresh snapshot when the current one is stale.
+//
+// Caller MUST hold sm.mu (write lock), so the publish cannot race with a
+// concurrent mutation and costs at most one copy — exactly the copy the cold
+// path used to make unconditionally.
+func (sm *SessionManager) viewLocked(session *Session) []providers.Message {
+	if snap := session.viewSnapshot.Load(); snap != nil && snap.epoch == session.saveEpoch {
+		return snap.view
+	}
+	return session.publishViewLocked()
 }
 
 func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
@@ -218,6 +254,7 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 		session.excludedRange = [2]int{}
 		session.excludeBoundary = 0
 		session.bumpEpoch()
+		session.publishViewLocked()
 		sm.touchSession(key)
 		return
 	}
@@ -233,6 +270,7 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 	session.excludedRange = [2]int{}
 	session.excludeBoundary = 0
 	session.bumpEpoch()
+	session.publishViewLocked()
 	sm.touchSession(key)
 }
 
@@ -268,6 +306,7 @@ func (sm *SessionManager) RemoveLastMessage(key string) bool {
 		session.excludeBoundary = 0
 	}
 	session.bumpEpoch()
+	session.publishViewLocked()
 	sm.touchSession(key)
 	return true
 }
@@ -318,6 +357,7 @@ func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 		session.excludeBoundary = 0
 	}
 	session.bumpEpoch()
+	session.publishViewLocked()
 	sm.touchSession(key)
 }
 

@@ -9,8 +9,22 @@ import (
 
 // Tests for hallazgo P5 of the TUI perf audit: the per-message render cache
 // (m.msgRenderCacheLines) was never evicted on compaction and had no upper
-// bound. PR-4 adds (A) invalidation on compactResultMsg and (B) pruning to the
+// bound. PR-4 added (A) invalidation on compactResultMsg and (B) pruning to the
 // render window on every base rebuild in buildRenderedHistoryLines.
+//
+// T14 replaced (A), and R3.2 removed the last piece of it: the compaction
+// handler neither WIPES the cache (that made every /compact re-render the whole
+// window through glamour) nor drops the single entry whose render the
+// fingerprint cannot vouch for — the last message's, whose tool-call rows are
+// suppressed while a tool executes. That entry is not cached at all anymore
+// (buildRenderedHistoryLines skips the store for a suppressed render), so the
+// rebuild that follows the handler re-renders the message in the state that is
+// on screen and there is nothing transient to invalidate. Staleness is now
+// handled by the keys plus (B): a compacted-away message leaves the render
+// window, so the rebuild prunes its entry. The test below pins that contract
+// instead of the old "cache must be nil" one; the reuse half of the contract
+// (0 re-renders for unchanged messages) is pinned by
+// TestCompactResult_ReusesUnchangedMessageRenders.
 
 // fingerprintsOf computes the render-cache keys buildRenderedHistoryLines uses
 // for msgs at the given viewport width, skipping the messages the renderer
@@ -26,10 +40,11 @@ func fingerprintsOf(msgs []providers.Message, width int) map[string]bool {
 	return out
 }
 
-// TestMsgRenderCacheEvictedOnCompact verifies piece A: dispatching
-// compactResultMsg (the real /compact completion path) clears the per-message
-// render cache, and the next rebuild repopulates it with ONLY the fingerprints
-// of the compacted history — pre-compact entries must not survive.
+// TestMsgRenderCacheEvictedOnCompact verifies the post-P5/T14 contract of
+// dispatching compactResultMsg (the real /compact completion path): the handler
+// does NOT drop the cache wholesale (unchanged messages must keep their render),
+// and the rebuild it triggers prunes it to the live render window, so entries of
+// the compacted-away prefix do not survive.
 func TestMsgRenderCacheEvictedOnCompact(t *testing.T) {
 	m := newTestModel(t)
 
@@ -56,15 +71,25 @@ func TestMsgRenderCacheEvictedOnCompact(t *testing.T) {
 		_ = cmd() // drain any trailing command
 	}
 
-	// Piece A: the compact handler must have dropped the whole cache.
-	if m.msgRenderCacheLines != nil {
-		t.Fatalf("render cache should be nil right after compactResultMsg, got %d entries",
-			len(m.msgRenderCacheLines))
+	// T14: the handler must have kept the cache (the survivors' renders are
+	// still exactly what a re-render would produce) …
+	if m.msgRenderCacheLines == nil {
+		t.Fatal("compactResultMsg wiped the whole render cache; unchanged messages must keep their renders (T14)")
 	}
-
-	// The next rebuild must render the new (compacted) history and repopulate
-	// the cache exclusively with its fingerprints. (The reloadSessions inside
-	// the handler already rebuilt the base; force the post-invalidation one.)
+	// … while the rebuild it triggered (reloadSessions) pruned the entries of
+	// the compacted-away prefix: the cache holds no orphans.
+	want := fingerprintsOf(m.sessionMgr.GetHistoryView(key), m.viewport.Width)
+	if got := len(m.msgRenderCacheLines); got != len(want) {
+		t.Fatalf("render cache holds %d entries right after compactResultMsg, want %d (live window only)",
+			got, len(want))
+	}
+	for fp := range m.msgRenderCacheLines {
+		if !want[fp] {
+			t.Errorf("render cache holds fingerprint %s that is not in the compacted history", fp)
+		}
+	}
+	// The survivors must be cached entries that were NOT re-rendered: force a
+	// rebuild that reads the cache and confirm the same entries come back.
 	m.renderedBaseValid = false
 	m.updateViewport()
 
@@ -81,9 +106,9 @@ func TestMsgRenderCacheEvictedOnCompact(t *testing.T) {
 		t.Fatal("render cache should be repopulated after the post-compact rebuild")
 	}
 	if len(after) >= before {
-		t.Fatalf("cache not evicted on compact: %d entries after (was %d)", len(after), before)
+		t.Fatalf("cache not pruned on compact: %d entries after (was %d)", len(after), before)
 	}
-	want := fingerprintsOf(m.sessionMgr.GetHistoryView(key), m.viewport.Width)
+	want = fingerprintsOf(m.sessionMgr.GetHistoryView(key), m.viewport.Width)
 	for fp := range after {
 		if !want[fp] {
 			t.Errorf("render cache holds fingerprint %s that is not in the compacted history", fp)

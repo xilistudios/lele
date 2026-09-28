@@ -1,10 +1,8 @@
 package tui
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -366,22 +364,137 @@ func sortSubagents(subagents []channels.SubagentTaskInfo) {
 	})
 }
 
-// messageFingerprint returns a fast FNV-64a hash of the message content for
-// per-message render caching. The hash covers role, content, reasoning content,
-// tool calls, and the target render width. FNV-1a is designed for hash tables
-// and processes ~1 GB/s, so even 100K-char messages hash in microseconds.
-func messageFingerprint(msg providers.Message, width int) string {
-	h := fnv.New64a()
-	h.Write([]byte(msg.Role))
-	h.Write([]byte(msg.Content))
-	h.Write([]byte(msg.ReasoningContent))
-	for _, tc := range msg.ToolCalls {
-		h.Write([]byte(tc.Name))
-		if tc.Function != nil {
-			h.Write([]byte(tc.Function.Name))
-			h.Write([]byte(tc.Function.Arguments))
-		}
+// FNV-64a constants (see https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function).
+const (
+	fnv64aOffset = 14695981039346656037
+	fnv64aPrime  = 1099511628211
+)
+
+// fnv64aWriteString mixes the bytes of s into the FNV-64a state h by indexing
+// the string directly. Converting to []byte (or going through
+// io.WriteString/hash.Hash) would copy the whole field on every call — the
+// fingerprint runs once per visible message on every viewport rebuild, and tool
+// results can be hundreds of kilobytes — for no benefit, since the FNV loop is
+// byte-oriented anyway.
+//
+// The state is passed and returned by value on purpose: threading it through a
+// *uint64 made every iteration go through a store-to-load round trip and halved
+// the hashing throughput.
+//
+// This is the byte-at-a-time primitive. It now only sees short inputs: 8-byte
+// length prefixes/tags (fnv64aWriteUint64) and the trailing bytes of a field
+// (the tail of fnv64aWriteStringWord).
+func fnv64aWriteString(h uint64, s string) uint64 {
+	for i := 0; i < len(s); i++ {
+		h = (h ^ uint64(s[i])) * fnv64aPrime
 	}
-	_ = binary.Write(h, binary.LittleEndian, uint32(width))
-	return fmt.Sprintf("%016x", h.Sum64())
+	return h
+}
+
+// fnv64aWriteStringWord mixes the bytes of s into h eight at a time, reading
+// each group as a little-endian uint64: the eight index expressions below
+// compile to one 64-bit load, so multi-KB tool results hash at one multiply per
+// 8 bytes instead of one per byte (~7x, measured). That latency is paid once
+// per visible message on every viewport rebuild, which is exactly the
+// long-chat rebuild cost this cache key exists to keep low.
+//
+// It is a word-at-a-time variant of FNV-1a (one group mixes as
+// h = (h ^ group) * prime), not the reference byte stream. Only unambiguity
+// matters here, because the fingerprint is a process-local render-cache key: it
+// is never compared against a fingerprint computed by another build or process,
+// so the concrete mixing order is an implementation detail (see
+// messageFingerprint for what the contract actually is).
+//
+// Alignment is fully deterministic and never straddles a field boundary: each
+// field is mixed as its own 8-byte length prefix and then its own bytes, and
+// the split into groups depends only on len(s) — pinned by that prefix. So a
+// field is cut as floor(len/8) little-endian groups followed by
+// len%8 trailing bytes mixed one by one; a tail is never folded into a group of
+// the next field.
+func fnv64aWriteStringWord(h uint64, s string) uint64 {
+	for len(s) >= 8 {
+		group := uint64(s[0]) | uint64(s[1])<<8 | uint64(s[2])<<16 | uint64(s[3])<<24 |
+			uint64(s[4])<<32 | uint64(s[5])<<40 | uint64(s[6])<<48 | uint64(s[7])<<56
+		h = (h ^ group) * fnv64aPrime
+		s = s[8:]
+	}
+	return fnv64aWriteString(h, s)
+}
+
+// fnv64aWriteUint64 mixes v into the FNV-64a state, least significant byte
+// first, without any intermediate buffer.
+func fnv64aWriteUint64(h uint64, v uint64) uint64 {
+	for shift := uint(0); shift < 64; shift += 8 {
+		h = (h ^ ((v >> shift) & 0xff)) * fnv64aPrime
+	}
+	return h
+}
+
+// fnv64aWriteField mixes a length prefix followed by the bytes of s. The length
+// prefix is what keeps different field partitions from colliding: Content "ab"
+// + ReasoningContent "c" mixes as len=2,"ab",len=1,"c" while Content "a" +
+// ReasoningContent "bc" mixes as len=1,"a",len=2,"bc". Concatenating the raw
+// bytes (as the original implementation did) made those two indistinguishable.
+func fnv64aWriteField(h uint64, s string) uint64 {
+	return fnv64aWriteStringWord(fnv64aWriteUint64(h, uint64(len(s))), s)
+}
+
+const fnv64aHexDigits = "0123456789abcdef"
+
+// fnv64aHex formats sum as 16 lower-case hex digits (equivalent to
+// fmt.Sprintf("%016x", sum)) into a stack buffer.
+func fnv64aHex(sum uint64) string {
+	var buf [16]byte
+	for i := len(buf) - 1; i >= 0; i-- {
+		buf[i] = fnv64aHexDigits[sum&0xf]
+		sum >>= 4
+	}
+	return string(buf[:])
+}
+
+// messageFingerprint returns a fast hash of the message content for per-message
+// render caching. The hash covers role, content, reasoning content, tool calls
+// (name, a per-record payload tag, function name and arguments), and the target
+// render width.
+//
+// Contract: within one process, equal messages produce equal fingerprints and
+// different messages produce different ones with overwhelming probability
+// (64-bit hash). Nothing outside the process depends on the value, so the
+// mixing function may change freely; it is a word-at-a-time FNV-1a variant
+// (~5 GB/s, see fnv64aWriteStringWord) instead of the reference byte stream.
+//
+// What must not change is unambiguity, and it does not: every field is mixed as
+// a fixed 8-byte little-endian length prefix followed by its own bytes
+// (fnv64aWriteField), each tool call mixes a fixed 8-byte payload tag, and the
+// tool-call count and width are mixed as fixed 8-byte values. Field bytes are
+// therefore never adjacency-ambiguous across a partition ("ab"+"c" vs
+// "a"+"bc") nor across a group boundary of the word-at-a-time mixer.
+//
+// It copies nothing: strings are consumed in place (no string → []byte
+// conversion anywhere) and each field's groups are read straight out of the
+// string header. The only allocation left is the 16-byte hex key it returns
+// (~200 of them per viewport rebuild, instead of one []byte copy per field).
+func messageFingerprint(msg providers.Message, width int) string {
+	h := uint64(fnv64aOffset)
+	h = fnv64aWriteField(h, msg.Role)
+	h = fnv64aWriteField(h, msg.Content)
+	h = fnv64aWriteField(h, msg.ReasoningContent)
+	h = fnv64aWriteUint64(h, uint64(len(msg.ToolCalls)))
+	for _, tc := range msg.ToolCalls {
+		h = fnv64aWriteField(h, tc.Name)
+		// Per-record tag: every tool call mixes a fixed 8 bytes, so a call
+		// without a function payload cannot be confused with one whose payload
+		// is empty when the surrounding fields shift between tool calls of the
+		// same list (see TestMessageFingerprint_NoPartitionCollision).
+		if tc.Function == nil {
+			h = fnv64aWriteUint64(h, 0)
+			continue
+		}
+		h = fnv64aWriteUint64(h, 1)
+		h = fnv64aWriteField(h, tc.Function.Name)
+		h = fnv64aWriteField(h, tc.Function.Arguments)
+	}
+	// The render width participates in the cache key (32 bits, as before).
+	h = fnv64aWriteUint64(h, uint64(uint32(width)))
+	return fnv64aHex(h)
 }

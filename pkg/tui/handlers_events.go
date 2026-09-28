@@ -89,7 +89,9 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 			m.processing = true
 			m.startTime = time.Now()
 			m.lastDuration = 0
-			m.invalidateSubagentsCache() // subagent status changed
+			// No cache invalidation here: the listing is TTL-refreshed from
+			// Update() (T6), so a burst of completions costs one lookup per
+			// window instead of one per result.
 			m.updateViewport()
 			cmds = append(cmds, m.tickCmd())
 		case "message.stream":
@@ -154,7 +156,8 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 			m.approvalResult = ""
 			// When a spawn tool completes, clear its subagent progress entry.
 			if msg.msg.Metadata["tool"] == "spawn" {
-				m.invalidateSubagentsCache() // a new subagent task now exists
+				// The new task shows up in the sidebar through the TTL refresh
+				// in Update() (T6); nothing to invalidate per event.
 				if saKey := msg.msg.Metadata["subagent_session_key"]; saKey != "" {
 					// Extract the task ID suffix (e.g. "subagent-1") from the session key
 					if idx := strings.LastIndex(saKey, ":"); idx >= 0 {

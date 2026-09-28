@@ -3,16 +3,17 @@ package tui
 import (
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// TestGetHistoryMessageCount_Cached verifies that getHistoryMessageCount
-// caches its O(n) role scan and only recomputes when the history length
-// changes. This is a hot path: it is called multiple times per frame.
-func TestGetHistoryMessageCount_Cached(t *testing.T) {
+// TestGetHistoryMessageCount_FrameSnapshot verifies that the count is resolved
+// from the render frame's single history snapshot: repeated calls inside one
+// frame reuse it (no extra GetHistoryView), the next frame picks up an appended
+// message, and switching sessions never serves the previous session's count.
+// This is a hot path: it is called multiple times per frame (token cache key,
+// viewport-skip fingerprint).
+func TestGetHistoryMessageCount_FrameSnapshot(t *testing.T) {
 	m := newTestModel(t)
 
 	key := "tui:chat:count-cache-test"
@@ -25,25 +26,36 @@ func TestGetHistoryMessageCount_Cached(t *testing.T) {
 	if got := m.getHistoryMessageCount(); got != 2 {
 		t.Fatalf("getHistoryMessageCount() = %d, want 2", got)
 	}
-	if m.historyCountKey != key || m.historyCountLen != 3 || m.historyCountValue != 2 {
-		t.Fatalf("cache fields not populated: key=%q len=%d value=%d",
-			m.historyCountKey, m.historyCountLen, m.historyCountValue)
+	if m.frameKey != key || m.frameCount != 2 {
+		t.Fatalf("frame snapshot not populated: key=%q count=%d", m.frameKey, m.frameCount)
 	}
 
-	// Poison the cached value: if the cache is hit, the poisoned value is
-	// returned; if the scan ran, it would return 2.
-	m.historyCountValue = 999
-	if got := m.getHistoryMessageCount(); got != 999 {
-		t.Fatalf("expected cached (poisoned) value 999, got %d — cache miss", got)
+	// Inside a frame the snapshot is reused: N calls, exactly one history read.
+	m.beginRenderFrame()
+	reads := 0
+	m.onHistoryRead = func(string) { reads++ }
+	if got := m.getHistoryMessageCount(); got != 2 {
+		t.Fatalf("in-frame getHistoryMessageCount() = %d, want 2", got)
 	}
+	if got := m.getHistoryMessageCount(); got != 2 {
+		t.Fatalf("second in-frame call = %d, want 2", got)
+	}
+	if reads != 1 {
+		t.Fatalf("in-frame history reads = %d, want 1", reads)
+	}
+	m.endRenderFrame()
+	m.onHistoryRead = nil
 
-	// Adding a message changes len(history) and must invalidate the cache.
+	// Adding a message changes the history and must be visible in the next
+	// frame (the snapshot is never carried across frames).
 	m.sessionMgr.AddMessage(key, "user", "second question")
+	m.beginRenderFrame()
 	if got := m.getHistoryMessageCount(); got != 3 {
 		t.Fatalf("after adding message: got %d, want 3", got)
 	}
-	if m.historyCountLen != 4 || m.historyCountValue != 3 {
-		t.Fatalf("cache not refreshed: len=%d value=%d", m.historyCountLen, m.historyCountValue)
+	m.endRenderFrame()
+	if m.frameCount != 3 {
+		t.Fatalf("frame count not refreshed: %d", m.frameCount)
 	}
 
 	// Switching sessions must invalidate the cache.
@@ -53,88 +65,6 @@ func TestGetHistoryMessageCount_Cached(t *testing.T) {
 	m.currentKey = otherKey
 	if got := m.getHistoryMessageCount(); got != 1 {
 		t.Fatalf("after session switch: got %d, want 1", got)
-	}
-}
-
-// TestGetSessionSubagentsCached verifies the TTL cache around the expensive
-// GetSessionSubagents backend call, including explicit invalidation.
-func TestGetSessionSubagentsCached(t *testing.T) {
-	m := newTestModel(t)
-
-	queryKey := "native:tui:chat:subagent-cache-test"
-
-	// Seed the cache with a sentinel value. If the cache is hit, the sentinel
-	// is returned; a backend call would return an empty list instead.
-	sentinel := []channels.SubagentTaskInfo{{TaskID: "subagent-1", Status: "running"}}
-	m.subagentsCacheKey = queryKey
-	m.subagentsCacheTime = time.Now()
-	m.subagentsCacheValue = sentinel
-
-	got := m.getSessionSubagentsCached(queryKey)
-	if len(got) != 1 || got[0].TaskID != "subagent-1" {
-		t.Fatalf("expected cached sentinel, got %v — cache miss", got)
-	}
-
-	// Expired TTL must refresh from the backend (empty list here).
-	m.subagentsCacheTime = time.Now().Add(-2 * subagentsCacheTTL)
-	got = m.getSessionSubagentsCached(queryKey)
-	if len(got) != 0 {
-		t.Fatalf("expected refreshed (empty) result after TTL expiry, got %v", got)
-	}
-	if m.subagentsCacheKey != queryKey {
-		t.Fatalf("cache key not refreshed: %q", m.subagentsCacheKey)
-	}
-
-	// A different query key must bypass the cache.
-	m.subagentsCacheKey = queryKey
-	m.subagentsCacheTime = time.Now()
-	m.subagentsCacheValue = sentinel
-	got = m.getSessionSubagentsCached("native:tui:chat:other")
-	if len(got) != 0 {
-		t.Fatalf("expected backend result for different key, got cached %v", got)
-	}
-
-	// invalidateSubagentsCache must force a backend hit.
-	m.subagentsCacheKey = queryKey
-	m.subagentsCacheTime = time.Now()
-	m.subagentsCacheValue = sentinel
-	m.invalidateSubagentsCache()
-	if m.subagentsCacheKey != "" {
-		t.Fatal("invalidateSubagentsCache did not clear the cache key")
-	}
-	got = m.getSessionSubagentsCached(queryKey)
-	if len(got) != 0 {
-		t.Fatalf("expected backend result after invalidation, got cached %v", got)
-	}
-
-	// Nil/empty guards.
-	if got := m.getSessionSubagentsCached(""); got != nil {
-		t.Fatalf("empty query key should return nil, got %v", got)
-	}
-}
-
-// TestHasRunningSubagents_UsesCache verifies that hasRunningSubagents goes
-// through the cached lookup instead of hitting the backend every frame.
-func TestHasRunningSubagents_UsesCache(t *testing.T) {
-	m := newTestModel(t)
-	m.currentKey = "tui:chat:running-subagents-test"
-
-	queryKey := "native:" + m.currentKey
-
-	// Seed cache with a running subagent — hasRunningSubagents must see it
-	// without a backend call (the backend has no subagents in this test).
-	m.subagentsCacheKey = queryKey
-	m.subagentsCacheTime = time.Now()
-	m.subagentsCacheValue = []channels.SubagentTaskInfo{{TaskID: "subagent-1", Status: "running"}}
-
-	if !m.hasRunningSubagents() {
-		t.Fatal("hasRunningSubagents() = false, want true (cached running subagent)")
-	}
-
-	// Completed-only subagents must report false.
-	m.subagentsCacheValue = []channels.SubagentTaskInfo{{TaskID: "subagent-1", Status: "completed"}}
-	if m.hasRunningSubagents() {
-		t.Fatal("hasRunningSubagents() = true, want false (only completed subagents)")
 	}
 }
 

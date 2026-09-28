@@ -846,8 +846,19 @@ func TestReadVideoTool_CtxCapsVideoCtxWins(t *testing.T) {
 // frames-mode Execute leaves no lele-video-frames-* directory behind in
 // os.TempDir(): the extracted keyframes are base64'd into the message, so
 // nothing has to persist on disk.
+//
+// The delta is taken over a PRIVATE temp dir: frames mode extracts into
+// os.MkdirTemp("", "lele-video-frames-*"), i.e. os.TempDir(), which is global
+// to the machine. Asserting on the shared /tmp made this test flaky whenever
+// another lele test process was running at the same time (a parallel
+// `go test ./...`, another workstream) and created a directory with that same
+// prefix between the two snapshots. TMPDIR is process-wide but no test in this
+// package uses t.Parallel(), so pointing it at t.TempDir() cannot race another
+// test here.
 func TestReadVideoTool_FramesMode_RemovesTempDir(t *testing.T) {
 	requireFFmpeg(t)
+	t.Setenv("TMPDIR", t.TempDir())
+
 	tmpDir := t.TempDir()
 	videoPath, _ := makeTestVideo(t, tmpDir, 4)
 
@@ -863,7 +874,7 @@ func TestReadVideoTool_FramesMode_RemovesTempDir(t *testing.T) {
 	after := listFramesTempDirs(t)
 	for name := range after {
 		if !before[name] {
-			t.Errorf("frames temp dir leaked: %s", name)
+			t.Errorf("frames temp dir leaked: %s (in %s)", name, os.TempDir())
 		}
 	}
 }

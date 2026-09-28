@@ -21,20 +21,43 @@ func (m *Model) handleAsyncResult(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.C
 			// overlay: sanitize so control/bidi chars cannot corrupt frame.
 			m.compactFeedback = sanitizeDisplayText(msg.result)
 			m.forceGotoBottom = true
+			// Minimal invalidation (T14). Compaction rewrites the session's
+			// EXCLUSION state, not its content: it flags the old messages as
+			// ExcludeFromContext and evicts them from the resident slice
+			// (SessionManager.CompactSession → ExcludeOldMessagesFromContext →
+			// EvictExcludedMessages; the folded summary lives in the session
+			// metadata, so it is not even injected as a message here). Every
+			// surviving message therefore keeps the exact content its
+			// messageFingerprint was built from, and its cached glamour output
+			// is still what a re-render would produce — which is why the
+			// per-message cache is NOT dropped here anymore: wiping it made
+			// every compaction re-render the whole ~200-message window
+			// through glamour, for messages nothing had touched.
+			//
+			// What compaction DOES move is already carried by the cache keys,
+			// so no invalidation is needed for any of it:
+			//   - the evicted prefix growing changes archivedTotal, and that is
+			//     part of archivedCacheKey() — folded into both the
+			//     rendered-base condition (renderedBaseArchiveKey) and the
+			//     viewport fingerprint — so the base rebuilds and the refreshed
+			//     archived rows are painted;
+			//   - the resident slice shrinking changes its length and its
+			//     user+assistant count, which the base tracks as
+			//     renderedBaseHistoryLen / renderedBaseMsgCount;
+			//   - the archived-prefix refresh itself is Update-path work:
+			//     reloadSessions (the next statement) loads it through
+			//     refreshArchivedHistory before the skip guard, never from
+			//     View().
+			// The one render the fingerprint could not vouch for — the last
+			// message's tool-call rows, suppressed while a tool executes, which
+			// are also the state /compact runs in (it sets processing +
+			// currentToolAction before the backend call) — used to need a
+			// manual cache drop here. It does not anymore: a suppressed render
+			// is never written to the per-message cache in the first place
+			// (buildRenderedHistoryLines, isExecutingMessage), so there is
+			// nothing transient to invalidate and the rebuild below re-renders
+			// the message in the state that is now on screen.
 			m.reloadSessions()
-			// Compaction rewrites (or excludes) the session history, so every
-			// per-message render-cache entry keyed by a pre-compact fingerprint
-			// is unreachable. The next rebuild prunes the cache to the live
-			// window anyway (see buildRenderedHistoryLines); dropping it here
-			// is an O(1) belt-and-braces so stale entries never survive even
-			// if the rebuild path is skipped. Unconditional: a failed
-			// compaction only costs one re-render (hallazgo P5).
-			m.msgRenderCacheLines = nil
-			// Invalidate the rendered base so the next updateViewport does a
-			// full rebuild incorporating the refreshed archived prefix.
-			m.renderedBaseValid = false
-			m.renderedBaseKey = ""
-			m.renderedBaseMsgCount = -1
 		}
 
 	case skillsScanResultMsg:

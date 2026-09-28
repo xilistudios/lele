@@ -19,7 +19,12 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 	switch parts[0] {
 	case "/sessions":
 		m.resetModal(ModalSessions)
-		allSessions := m.sessionMgr.ListSessions()
+		// T8: the picker exists to list the chats as they are right now, so it
+		// goes through the listing's single refresh point with the window
+		// bypassed (freshSessionListing) instead of calling ListSessions
+		// directly — that keeps "the heavy walk happens in exactly one place"
+		// true and warms the snapshot the frames that follow will read.
+		allSessions := m.freshSessionListing()
 		for _, s := range allSessions {
 			// Exclude subagent sessions from the session list — they have
 			// their own navigation via /subagents and are not top-level chats.
@@ -151,6 +156,12 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		m.resetModal(ModalSubagents)
 		// Subagent tasks store OriginSessionKey as "native:<chatID>", so we
 		// must pass the prefixed key for the lookup to match correctly.
+		//
+		// This deliberate fresh load (instead of the TUI's 3 s listing cache,
+		// T6) is the "load the heavy listing when the user opens the modal" side
+		// of the contract: it runs from an Update()-path command, never from a
+		// frame, and it is what makes the modal show the truth at open time
+		// rather than a snapshot up to subagentsCacheTTL old.
 		subagentQueryKey := m.currentKey
 		if !strings.HasPrefix(subagentQueryKey, "native:") {
 			subagentQueryKey = "native:" + subagentQueryKey
@@ -420,7 +431,10 @@ func isGoalSetCommand(args []string) bool {
 // session. It is rendered in the viewport overlay so the stats remain visible
 // even when the sidebar is hidden.
 func (m *Model) buildStatusReport() string {
-	current, window, cumInput, cumOutput := m.getTokenUsage()
+	// /status runs on an Update() route (outside a render frame), so the count
+	// is hoisted here: one history read for the report, shared by the token
+	// cache key below.
+	current, window, cumInput, cumOutput := m.getTokenUsage(m.getHistoryMessageCount())
 	compactions := m.agentLoop.GetProvidable().GetCompactionCount(m.currentKey)
 
 	var sb strings.Builder

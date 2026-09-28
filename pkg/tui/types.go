@@ -81,6 +81,82 @@ type subagentClickTarget struct {
 	key    string // Session key for this subagent
 }
 
+// subagentsCacheState is the subagent listing the render path serves (T6).
+//
+// GetSessionSubagents is expensive: it walks every manager's task list
+// (deep-copying each task) and every agent's session storage, plus one SQLite
+// stats query per 200 cold keys — 2.0 ms/414 KB at 200 subagents, 6.9 ms/1.2 MB
+// at 500 cold ones (docs/perf/tui-long-chat-baseline.md). It used to be
+// recomputed from View() (the sidebar and the status line both went through it)
+// and invalidated by every subagent lifecycle event, i.e. once per finished
+// subagent during a burst — exactly the many-finished-subagents case that was
+// reported as slow.
+//
+// Since T6 there is exactly one writer (refreshSubagentsCache, called from
+// Update() at most once per subagentsCacheTTL) and the frame only READS this
+// struct: no backend call, no copy, no sort. list is sorted once at refresh
+// time so the render path can never mutate the cached slice, and running is
+// materialized there so the status line can ask "is anything running?" in O(1)
+// instead of building (and scanning) the whole listing.
+//
+// The heavy fields are deliberately NOT split out of the listing: no TUI
+// surface renders Summary or Iterations at all (the sidebar draws status dot +
+// label + status, the /subagents modal draws task ID + status + label), so the
+// store-side stats query they come from has no per-frame consumer to satisfy.
+// It is paid by this refresh — off the frame, ≤ once per subagentsCacheTTL —
+// and by opening /subagents, which by design loads a fresh listing at that
+// moment (an Update()-path command: the user asking "what is there right now"
+// gets the truth, not a 3 s old snapshot).
+type subagentsCacheState struct {
+	key     string                      // query key list was loaded for ("" = never loaded)
+	list    []channels.SubagentTaskInfo // last known listing, sorted by sortSubagents
+	running int                         // entries of list whose Status is "running"
+	at      time.Time                   // when list was loaded: refresh-cadence clock
+}
+
+// sessionsCacheState is the session listing the TUI serves (T8).
+//
+// reloadSessions() is the "the session list may have changed" choke point and it
+// used to rebuild the whole listing on every one of its ~14 call sites: a
+// ListSessions() walk (at 200 sessions: 55 µs / 64 KB / 157 allocs — one shell
+// allocation per cold session, the seen map and the sort) plus
+// AllTotalMessageCounts(), whose cold half is a full scan of session_messages
+// (339 µs / 33 KB / 609 allocs). 444 µs / 179 KB / 815 allocs per event, and the
+// events that trigger it come in bursts — every completed turn of the visible
+// chat (the parent restarts a turn for each finished subagent), every tab/ESC,
+// every sidebar click.
+//
+// Since T8 the listing lives here and refreshSessionsCache is its single writer:
+// a refresh happens at most once per sessionsRefreshTTL, so a burst of
+// completion events collapses into one walk. The listing is read by
+// reloadSessions (and directly by the /sessions picker, which forces an exact
+// one) — never by View(), which reads visibleSessions.
+//
+// all holds the live *session.Session pointers of the resident sessions, so the
+// message content behind a cached entry is never stale: only the SET of entries
+// (a chat created, deleted or renamed within the window) and the cold shells'
+// Name/Updated are up to the window old. Correctness-relevant switches bypass
+// the window (see setCurrentChatKey) and so does anything the user asks for
+// explicitly, so the staleness the user can observe is a chat appearing in the
+// sidebar list up to sessionsRefreshTTL late.
+type sessionsCacheState struct {
+	all    []*session.Session // last ListSessions() result ("" set before the first refresh)
+	at     time.Time          // when the listing was loaded: refresh-cadence clock
+	loaded bool               // a listing has been loaded (false = never refreshed)
+}
+
+// historyCountMemo is the memoized result of countHistoryMessages (T12) for one
+// history slice. head/n are that slice's identity: the address of its first
+// element and its length. A memo whose key does not match the slice passed in is
+// a miss, never a hit — see Model.historyMessageCount for why the identity
+// determines the count.
+type historyCountMemo struct {
+	valid bool               // whether head/n/count describe a counted slice
+	head  *providers.Message // &history[0] of the counted snapshot
+	n     int                // len(history) of the counted snapshot
+	count int                // user+assistant messages in that snapshot
+}
+
 type modalType int
 
 const (
@@ -509,6 +585,12 @@ type Model struct {
 	renderedBaseKey           string // session key the cache belongs to
 	renderedBaseMsgCount      int    // number of history messages when cache was built
 	renderedBaseLastStreaming bool   // whether the last msg was Streaming=true when cache was built
+	// renderedBaseHistoryLen is len(history) when the base was built. The
+	// rendered base includes tool/system rows that renderedBaseMsgCount
+	// deliberately does not count, so an appended tool result (count unchanged)
+	// still changes the base — and the render-path freshness check must see it
+	// too, or a frame would serve the base built before that message arrived.
+	renderedBaseHistoryLen int
 	// renderedBaseArchiveKey fingerprints the display-only archived prefix at
 	// the time the base was built. Kept separate from renderedBaseKey because
 	// that key also gates msgRenderCacheLines, which must survive archive
@@ -516,9 +598,39 @@ type Model struct {
 	// an archived-prefix change.
 	renderedBaseArchiveKey string
 
-	// lastViewportKey is a fingerprint of the last rendered viewport state.
-	// shouldSkipViewportUpdate compares against it to skip redundant re-renders.
+	// lastViewportKey is the fingerprint of the model state the viewport
+	// content currently on screen was materialized from (see
+	// viewportContentKey / noteViewportMaterialized). Both the render path
+	// (syncViewportForFrame) and the Update path (shouldSkipViewportUpdate)
+	// compare the live fingerprint against it: equal means "a rebuild would
+	// produce what is already materialized" and the O(lines) work is skipped.
+	// An explicit "" invalidates it (force a rebuild) — several settings paths
+	// rely on that.
 	lastViewportKey string
+
+	// viewportBuiltWidth/Height are the layout dimensions (viewport.Width,
+	// viewport.Height) the materialized base lines were wrapped for. View()
+	// owns the viewport dimensions — they derive from the rendered heights of
+	// the status line, queue row and input bar — so a frame rendered at other
+	// dimensions is the only case the render path must always rebuild for, and
+	// it is never deferred by the streaming throttle (see
+	// viewportGeometryChanged / syncViewportForFrame).
+	viewportBuiltWidth  int
+	viewportBuiltHeight int
+
+	// viewportBuiltAt is when the viewport content was last materialized. It
+	// bounds the streaming throttle: the render path never serves content older
+	// than streamThrottleInterval, even if the throttle's scheduled tick is
+	// lost (see viewportRebuildDeferred).
+	viewportBuiltAt time.Time
+
+	// onViewportRebuild, when non-nil, is called on every viewport
+	// materialization (updateViewportWithHistory) with whether it ran inside a
+	// View() render frame (frameOpen). Test-only hook: it pins the T3 contract
+	// that View() does not rebuild the viewport — the rebuild belongs to the
+	// Update paths plus the O(1) render-path guards. Production leaves it nil
+	// (the hot path pays one nil check).
+	onViewportRebuild func(inFrame bool)
 
 	// Virtualized rendering: only render messages visible in the viewport
 	// plus a small buffer above/below for smooth scrolling.
@@ -558,22 +670,89 @@ type Model struct {
 	tokenCacheCumInput  int       // cached cumulative input tokens
 	tokenCacheCumOutput int       // cached cumulative output tokens
 
-	// Cached history message count (user+assistant). getHistoryMessageCount
-	// runs an O(n) role scan over the full history and is called multiple
-	// times per frame; the result only changes when the number of messages
-	// changes, so it is cached keyed by (sessionKey, len(history)).
-	historyCountKey   string // session key the count belongs to
-	historyCountLen   int    // len(history) when the count was computed
-	historyCountValue int    // cached user+assistant message count
+	// Per-render-frame history snapshot. View() reads the session history
+	// (GetHistoryView) at most ONCE per frame and every consumer in that frame
+	// — viewport rebuild, token/context readouts, sidebar — reuses this
+	// snapshot instead of reading again. Before this, a single frame performed
+	// three reads and two of them (both getTokenUsage call sites) only ever
+	// needed the message count.
+	//
+	// The snapshot is NEVER reused across frames: the history can be mutated in
+	// place without its length changing (the streaming assistant message is
+	// replaced by its final version), so a slice kept across frames would keep
+	// serving the previous content and freeze the finished turn out of the
+	// transcript. The render entry point opens a frame (beginRenderFrame) and
+	// closes it when View() returns; outside a frame every read is fresh.
+	frameOpen  bool                // a View() render frame is currently open
+	frameValid bool                // frameView/frameCount belong to this frame
+	frameKey   string              // session key the snapshot was read for
+	frameView  []providers.Message // read-only shared snapshot (never mutated)
+	frameCount int                 // user+assistant messages in frameView
+	// frameHistoryLen/frameLastStreaming are the O(1) terms of that same
+	// snapshot that the viewport fingerprint is built from: its total length
+	// (any role) and whether its last message is still streaming. They come
+	// from the frame's single history read, so count/terms always describe the
+	// same snapshot. The length catches an appended tool/result message —
+	// which frameCount deliberately does not count — and frameLastStreaming
+	// catches "the assistant message was finalized in place" (same count,
+	// changed content).
+	frameHistoryLen    int
+	frameLastStreaming bool
 
-	// Cached session subagents. GetSessionSubagents is expensive (iterates all
-	// agents' subagent managers and session storage, taking write locks and
-	// possibly loading sessions from disk) and is called multiple times per
-	// frame for the sidebar + processing-state checks. It is cached for a short
-	// TTL and invalidated on subagent lifecycle events.
-	subagentsCacheKey   string
-	subagentsCacheTime  time.Time
-	subagentsCacheValue []channels.SubagentTaskInfo
+	// countMemo memoizes countHistoryMessages for the message SEQUENCE it was
+	// last computed from (T12), keyed by the identity of the slice the count
+	// belongs to: the address of its first element plus its length.
+	//
+	// The frame's single read (historyView) and the rebuild that consumes it
+	// (updateViewportWithHistory) resolve the SAME snapshot, so the rolescan
+	// runs once per snapshot instead of once per consumer — and a frame over an
+	// unchanged snapshot runs none at all. The key is valid because the count is
+	// a pure function of the roles and the length of the slice, and pkg/session
+	// republishes a fresh copy on every structural mutation (rebuilding one
+	// after an in-place streaming chunk), so a different slice always means a
+	// different key. See Model.historyMessageCount for the full argument.
+	countMemo historyCountMemo
+
+	// onHistoryRead, when non-nil, is called with the session key of every
+	// history read the TUI performs (see historyView). Test-only hook: it lets
+	// a test assert the "one history read per frame" contract with a counter.
+	// Production leaves it nil (the hot path pays one nil check).
+	onHistoryRead func(sessionKey string)
+
+	// onHistoryCountScan, when non-nil, is called every time the memoized
+	// history count (Model.historyMessageCount) has to run the O(n) rolescan
+	// instead of serving the memo. Test-only hook: it lets a test assert the
+	// O(1)-amortized contract — N accesses to one snapshot cost one scan.
+	// Production leaves it nil (a miss pays one nil check).
+	onHistoryCountScan func()
+
+	// onSubagentsRefresh, when non-nil, is called every time the subagent
+	// listing cache is refreshed from the backend (see refreshSubagentsCache).
+	// Test-only hook: it lets a test assert that View() never refreshes the
+	// listing and that a burst of lifecycle events coalesces into a single
+	// lookup. Production leaves it nil (the refresh path pays one nil check).
+	onSubagentsRefresh func()
+
+	// Cached subagent listing served by the render path. Written ONLY by
+	// refreshSubagentsCache (Update() routes, ≤ once per subagentsCacheTTL);
+	// View() reads it as-is and may therefore show data up to that TTL stale —
+	// see subagentsCacheState for the full contract and the measured cost it
+	// takes off the frame.
+	subagentsCache subagentsCacheState
+
+	// onSessionsRefresh, when non-nil, is called every time the session listing
+	// is actually reloaded (see refreshSessionsCache). Test-only hook: it lets a
+	// test assert that a burst of events inside the window collapses into a
+	// single ListSessions/AllTotalMessageCounts pass, and that the call sites
+	// documented as "must be exact" (session switch, /sessions picker) do refresh.
+	// Production leaves it nil (the refresh path pays one nil check).
+	onSessionsRefresh func()
+
+	// Cached session listing. Written ONLY by refreshSessionsCache (Update()
+	// routes, ≤ once per sessionsRefreshTTL); reloadSessions re-derives the
+	// visible list from it, so the O(sessions) walk + the batched store counts
+	// are off the per-event path — see sessionsCacheState for the contract.
+	sessionsCache sessionsCacheState
 
 	// Subagent click targets in sidebar — tracks Y positions for mouse clicks
 	subagentClickTargets []subagentClickTarget

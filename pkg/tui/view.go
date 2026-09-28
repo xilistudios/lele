@@ -26,6 +26,15 @@ func (m *Model) View() string {
 	// transition returned before the Update-side sync could run.
 	m.syncTextInputEcho()
 
+	// Perf: a render frame reads the session history at most once (historyView)
+	// and every consumer inside the frame — viewport rebuild, token/context
+	// readouts, sidebar — reuses that single snapshot. The snapshot is dropped
+	// when the frame ends: history can be mutated in place with an unchanged
+	// length (a finalized streaming assistant message), so reusing it across
+	// frames would render stale content.
+	m.beginRenderFrame()
+	defer m.endRenderFrame()
+
 	if m.showWelcome {
 		return m.renderWelcome()
 	}
@@ -202,6 +211,17 @@ func (m *Model) renderChatLayout() string {
 	}
 	contentHeight := m.height
 
+	// ── History (hoisted: ONE read per frame) ──
+	// Every history-derived value of this frame comes from this single
+	// snapshot: the message count feeds the token/context cache key (used by
+	// both the bottom bar and the sidebar), the resident+archived count is the
+	// viewport fingerprint's count (syncViewportForFrame), and the slice is
+	// handed to the viewport rebuild. Reading it here instead of inside each
+	// consumer is what takes the frame from three GetHistoryView calls down to
+	// one.
+	history := m.historyView()
+	msgCount := m.historyCount() // O(1): resolved from the snapshot above
+
 	agentID := m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey)
 	modelName := m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
 	thinkLevel := m.agentLoop.GetProvidable().GetEffectiveThinkLevel(m.currentKey)
@@ -252,7 +272,7 @@ func (m *Model) renderChatLayout() string {
 	}
 
 	// ── Token usage ──
-	currentTokens, contextWindow, _, _ := m.getTokenUsage()
+	currentTokens, contextWindow, _, _ := m.getTokenUsage(msgCount)
 
 	pct := 0.0
 	if contextWindow > 0 {
@@ -318,13 +338,19 @@ func (m *Model) renderChatLayout() string {
 		lipgloss.Height(inputBar),
 		lipgloss.Height(bottomBar),
 	)
-	m.updateViewport()
+	// The viewport rebuild consumes the frame snapshot hoisted above: it must
+	// not read the history again (passing it is what removes the extra copy the
+	// baseline measured at 6000 messages). T3: View() does NOT rebuild the
+	// viewport unconditionally — syncViewportForFrame runs the render path's
+	// O(1) freshness checks and reaches the rebuild only when the content on
+	// screen is stale for this state/geometry (see the T3 block in viewport.go).
+	m.syncViewportForFrame(history, msgCount)
 
 	// ── Left Column (Chat Contents) ──
 	leftPane := m.renderLeftColumn(leftWidth, contentHeight, statusLineRendered, queueRowRendered, autocompleteView, inputBar, bottomBar)
 
 	// ── Right Column (Sidebar Panel) ──
-	rightPane := m.renderRightColumn(rightWidth, contentWidth(rightWidth), contentHeight)
+	rightPane := m.renderRightColumn(rightWidth, contentWidth(rightWidth), contentHeight, msgCount)
 
 	// ── Final layout ──
 	leftPane = clampPaneLines(leftPane, leftWidth)
@@ -449,7 +475,12 @@ func (m *Model) renderLeftColumn(leftWidth, contentHeight int, statusLineRendere
 
 // renderRightColumn assembles the right sidebar pane with session info,
 // token usage, workspace path, subagent list, and click targets.
-func (m *Model) renderRightColumn(rightWidth, cw, contentHeight int) string {
+//
+// msgCount is the frame's hoisted history message count (see
+// renderChatLayout): it keys the token/context cache, so the sidebar and the
+// bottom bar always show the same value for the same frame without either of
+// them reading the history.
+func (m *Model) renderRightColumn(rightWidth, cw, contentHeight, msgCount int) string {
 	var rightBuilder strings.Builder
 
 	writeSidebarRow := func(row string) {
@@ -461,7 +492,7 @@ func (m *Model) renderRightColumn(rightWidth, cw, contentHeight int) string {
 
 	// Context section
 	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.context")) + "\n")
-	currentTokens, contextWindow, cumInput, cumOutput := m.getTokenUsage()
+	currentTokens, contextWindow, cumInput, cumOutput := m.getTokenUsage(msgCount)
 	writeSidebarRow(SidebarLabelValue(i18n.T("tui.currentContext"), formatNumber(currentTokens)))
 	writeSidebarRow(SidebarLabelValue(i18n.T("tui.contextWindow"), formatNumber(contextWindow)))
 
@@ -527,22 +558,20 @@ func (m *Model) renderSidebarSessionName(cw int) string {
 
 // renderSidebarSubagents appends the subagent list to the sidebar builder
 // and tracks click targets for mouse handling.
+//
+// The rows come from the subagent listing cache (T6): the frame serves the last
+// listing loaded by Update() — O(1), never a backend call — so the sidebar can
+// show data up to subagentsCacheTTL stale. The listing is sorted and its running
+// count materialized at refresh time, so nothing here touches the shared slice
+// beyond reading it. Only three fields are drawn per row (status dot, label,
+// status); Summary/Iterations have no consumer in the TUI at all.
 func (m *Model) renderSidebarSubagents(rightBuilder *strings.Builder, cw, contentHeight int) {
-	subagentQueryKey := m.currentKey
-	if m.parentSessionKey != "" {
-		subagentQueryKey = m.parentSessionKey
-	}
-	if !strings.HasPrefix(subagentQueryKey, "native:") {
-		subagentQueryKey = "native:" + subagentQueryKey
-	}
-	subagents := m.getSessionSubagentsCached(subagentQueryKey)
+	subagents := m.cachedSessionSubagents()
 	m.subagentClickTargets = nil
 
 	if len(subagents) == 0 {
 		return
 	}
-
-	sortSubagents(subagents)
 
 	currentSidebarHeight := lipgloss.Height(lipgloss.NewStyle().Width(cw).Render(rightBuilder.String()))
 	availableLines := contentHeight - currentSidebarHeight - 1

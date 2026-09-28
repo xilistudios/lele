@@ -205,6 +205,7 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 		session.excludedRange = [2]int{rangeStart, hi}
 		session.excludeBoundary = hi
 		session.bumpEpoch()
+		session.publishViewLocked() // ExcludeFromContext flags changed in place
 		return
 	}
 
@@ -248,6 +249,7 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 	session.excludedRange = [2]int{rangeStart, hi}
 	session.excludeBoundary = hi
 	session.bumpEpoch()
+	session.publishViewLocked() // ExcludeFromContext flags changed in place
 }
 
 // CompactSession applies a loop-compaction result to the persisted session:

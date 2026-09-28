@@ -152,6 +152,12 @@ vet:
 test:
 	@$(GO) test ./...
 
+## bench: Run the TUI performance benchmarks (scale harness)
+# Baselines are recorded in docs/perf/tui-long-chat-baseline.md. Keep the
+# filter and the flag list in sync with that doc.
+bench:
+	@$(GO) test -run '^$$' -bench 'History|Scale|Subagents|MouseMotion|Fingerprint' -benchmem ./pkg/tui/ ./pkg/session/
+
 ## fmt: Format Go code
 fmt:
 	@$(GO) fmt ./...

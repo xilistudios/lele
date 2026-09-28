@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/logger"
@@ -283,30 +284,145 @@ func (sm *SessionManager) AllMessageCounts() map[string]int {
 		counts[key] = count
 	}
 
-	// For sessions only in metadata (not in memory), query SQLite in batch
-	if sm.sessionRepo != nil {
-		var needFromStore []string
+	// For sessions only in metadata (not in memory), take the batched SQLite
+	// counts (cached: see storeCountsCache).
+	if sm.sessionRepo != nil && sm.hasColdSessionsLocked() {
+		storeCounts := sm.coldStoreCounts()
 		for key := range sm.sessionMeta {
-			if _, ok := sm.sessions[key]; !ok {
-				needFromStore = append(needFromStore, key)
+			if _, ok := sm.sessions[key]; ok {
+				continue
 			}
-		}
-		if len(needFromStore) > 0 {
-			// Release lock for I/O
-			sm.mu.RUnlock()
-			storeCounts, err := sm.sessionRepo.AllMessageCounts()
-			sm.mu.RLock()
-			if err == nil {
-				for _, key := range needFromStore {
-					if c, ok := storeCounts[key]; ok {
-						counts[key] = c
-					}
-				}
+			if c, ok := storeCounts[key]; ok {
+				counts[key] = c
 			}
 		}
 	}
 
 	return counts
+}
+
+// storeCountsCache memoizes the batched store-side message-count query behind
+// AllMessageCounts / AllTotalMessageCounts.
+//
+// The cached query is `SELECT session_key, COUNT(*) FROM session_messages
+// GROUP BY session_key` — a scan of the whole message table. At 200 sessions it
+// measures 0.34 ms / 33 KB / 609 allocs per call, and the TUI used to run it on
+// every reloadSessions (every completed turn, keystroke and sidebar click).
+//
+// Only the COLD half is cached. Sessions resident in memory are counted from
+// their live slice (`len(Messages) + evictedTotal`), which is O(1) per session
+// and exact, so the count of the chat the user is looking at is never stale —
+// appending a message updates it immediately, with no invalidation hook. The
+// cache only answers for metadata-only keys, and it is invalidated by:
+//
+//   - a change in the cold-key set: loading, evicting or deleting a session
+//     changes which keys the query must answer for (and an evicted session's
+//     stored count is exactly what the query provides). Checked exactly, in
+//     O(cold) map probes, without allocating a fresh key set;
+//   - a short TTL, which bounds how long a count written by ANOTHER process
+//     (the server/WebUI sharing the same SQLite file) can be served.
+//
+// Guarded by its own mutex: the query runs with sm.mu released, so sm.mu cannot
+// guard this state. The mutex is never held while acquiring sm.mu.
+type storeCountsCache struct {
+	mu     sync.Mutex
+	counts map[string]int      // last query result (read-only once published)
+	cold   map[string]struct{} // cold-key set that result describes
+	at     time.Time           // when the query ran
+	valid  bool                // counts/cold/at describe a real query
+}
+
+// storeCountsTTL bounds how long a cached store-side count may be served. The
+// manager's own writes are covered by the cold-set check (any write materializes
+// the session, changing the set), so this only guards against a concurrent
+// writer outside this process.
+const storeCountsTTL = time.Second
+
+// coldStoreCounts returns the store-side message counts for the sessions that
+// are NOT resident in memory, executing the batched query at most once per
+// storeCountsTTL or cold-set change.
+//
+// Caller MUST hold sm.mu for reading. The SQL runs with the lock RELEASED and is
+// re-acquired before returning (the existing pattern: the connection is
+// goroutine-safe and the scan is the slow part), so the caller's critical
+// section is interrupted, never broken. On error the previous (or empty) map is
+// returned: callers treat missing keys as "no stored messages", exactly as they
+// did when the query failed before.
+func (sm *SessionManager) coldStoreCounts() map[string]int {
+	c := &sm.countsCache
+	c.mu.Lock()
+	if c.valid && time.Since(c.at) < storeCountsTTL && sm.coldSetMatchesLocked(c.cold) {
+		counts := c.counts
+		c.mu.Unlock()
+		return counts
+	}
+	c.mu.Unlock()
+
+	// Release lock for I/O
+	sm.mu.RUnlock()
+	storeCounts, err := sm.sessionRepo.AllMessageCounts()
+	sm.mu.RLock()
+	if err != nil {
+		return nil
+	}
+
+	// Stamp the cache with the state the result answers for, recomputed after
+	// the I/O so a concurrent load/eviction cannot be recorded as covered.
+	c.mu.Lock()
+	c.counts = storeCounts
+	c.cold = sm.coldKeySetLocked()
+	c.at = time.Now()
+	c.valid = true
+	c.mu.Unlock()
+	return storeCounts
+}
+
+// coldSetMatchesLocked reports whether the current set of metadata-only keys is
+// exactly the cached one. The number of cold keys is compared too, so a missing
+// or extra key in either direction invalidates the cache.
+//
+// Allocation-free on purpose: rebuilding the key set on every call would
+// reintroduce one O(sessions) allocation per refresh, the cost this cache
+// exists to remove.
+func (sm *SessionManager) coldSetMatchesLocked(cached map[string]struct{}) bool {
+	if cached == nil {
+		return false
+	}
+	cold := 0
+	for key := range sm.sessionMeta {
+		if _, ok := sm.sessions[key]; ok {
+			continue
+		}
+		cold++
+		if _, ok := cached[key]; !ok {
+			return false
+		}
+	}
+	return cold == len(cached)
+}
+
+// coldKeySetLocked is the allocating companion of coldSetMatchesLocked, used
+// once per query (never per refresh) to record what the result covers.
+func (sm *SessionManager) coldKeySetLocked() map[string]struct{} {
+	cold := make(map[string]struct{})
+	for key := range sm.sessionMeta {
+		if _, ok := sm.sessions[key]; ok {
+			continue
+		}
+		cold[key] = struct{}{}
+	}
+	return cold
+}
+
+// hasColdSessionsLocked reports whether any metadata-only session exists, i.e.
+// whether the store-side counts are needed at all.
+func (sm *SessionManager) hasColdSessionsLocked() bool {
+	for key := range sm.sessionMeta {
+		if _, ok := sm.sessions[key]; !ok {
+			return true
+		}
+	}
+	return false
 }
 
 // AllTotalMessageCounts returns a map of session_key → total message count
@@ -328,29 +444,17 @@ func (sm *SessionManager) AllTotalMessageCounts() map[string]int {
 		counts[key] = len(session.Messages) + session.evictedTotal
 	}
 
-	// Cold sessions (metadata only): one batched store query.
-	if sm.sessionRepo != nil {
-		needFromStore := false
+	// Cold sessions (metadata only): one batched store query, cached (see
+	// storeCountsCache) so a burst of refreshes does not re-scan the message
+	// table per event.
+	if sm.sessionRepo != nil && sm.hasColdSessionsLocked() {
+		storeCounts := sm.coldStoreCounts()
 		for key := range sm.sessionMeta {
-			if _, ok := sm.sessions[key]; !ok {
-				needFromStore = true
-				break
+			if _, ok := sm.sessions[key]; ok {
+				continue
 			}
-		}
-		if needFromStore {
-			// Release lock for I/O (same pattern as AllMessageCounts).
-			sm.mu.RUnlock()
-			storeCounts, err := sm.sessionRepo.AllMessageCounts()
-			sm.mu.RLock()
-			if err == nil {
-				for key := range sm.sessionMeta {
-					if _, ok := sm.sessions[key]; ok {
-						continue
-					}
-					if c, ok := storeCounts[key]; ok {
-						counts[key] = c
-					}
-				}
+			if c, ok := storeCounts[key]; ok {
+				counts[key] = c
 			}
 		}
 	}

@@ -246,6 +246,12 @@ func (tc *toolCoordinatorImpl) cancelRemovedSubagents(liveAgentIDs []string) int
 		}
 		if manager != nil {
 			stopped += manager.StopAll()
+			// The manager leaves the process together with its agent: stop its
+			// retention sweeper too, or the goroutine would keep pruning a task
+			// map nothing can reach anymore (its stop is idempotent, waits for
+			// the goroutine to exit and gives up after
+			// tools.DefaultRetentionStopGrace).
+			manager.StopRetentionCleanup()
 		}
 		// A running group that counted this agent among its speakers can never
 		// run as configured again (the registry can no longer resolve it), so
@@ -725,6 +731,22 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	// zero value also meaning "disabled", an undocumented coupling. Passing the
 	// configured value directly makes 0 mean disabled in exactly one place.
 	subagentManager.SetDefaultMaxRetries(cfg.Agents.Defaults.SubagentMaxRetries)
+	// Retention window for terminal subagent tasks: how long a finished task
+	// stays listed — with its session resident — before the periodic sweeper
+	// reaps it. 0 keeps the manager's built-in default (5m) instead of
+	// disabling the sweep, because an accidental zero must never let the task
+	// map (and the native:<parent>:subagent-N sessions) grow without bound.
+	if mins := cfg.Agents.Defaults.SubagentRetentionMinutes; mins > 0 {
+		subagentManager.SetRetentionPeriod(time.Duration(mins) * time.Minute)
+	}
+	// Start the periodic retention sweep. Until this ticker existed,
+	// CleanupTerminalTasks only ran from SpawnWithOptions/ContinueTask, so an
+	// owner that stopped spawning kept every finished task in memory forever
+	// and made each TUI frame more expensive. Idempotent: the config-reload
+	// path re-uses managers (see updateSharedToolsForAgent) and must not stack
+	// goroutines. Stopped by AgentLoop.StopWithin (stopOnce) and, for agents
+	// removed from the config, by toolCoordinatorImpl.cancelRemovedSubagents.
+	subagentManager.StartRetentionCleanup(tools.DefaultSubagentRetentionSweepInterval)
 	subagentManager.SetAgentContextCallback(func(targetAgentID string) tools.AgentContextInfo {
 		if targetAgent, ok := registry.GetAgent(targetAgentID); ok {
 			return tools.AgentContextInfo{

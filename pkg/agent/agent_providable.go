@@ -261,15 +261,57 @@ func (ap *agentProvidableImpl) AddSessionMessage(sessionKey string, msg provider
 	return nil
 }
 
-// GetSessionHistory returns the persisted history for a session.
+// GetSessionHistory returns a defensive COPY of the persisted history for a
+// session. The returned slice is owned by the caller: it may be truncated,
+// reordered or rewritten in place without affecting the session or any other
+// reader, which makes it the safe API to cross a package boundary with.
+//
+// This is exactly what pkg/channels needs: the only out-of-package caller is
+// the WebUI history endpoint (pkg/channels/rest_chat.go), which feeds the slice
+// to the chat-history builder — a request-scoped, non-hot path where one O(n)
+// copy is negligible.
+//
+// Contrast with GetHistoryView, which hands out the session's shared snapshot
+// ("MUST NOT mutate") and exists for the hot in-package paths (TUI rendering,
+// token estimation, message counting). Handing that shared slice to another
+// package would make the immutability contract load-bearing without a
+// mechanical guard: an in-place mutation by an external caller would poison the
+// snapshot served to every later reader, and no saveEpoch bump would ever
+// invalidate it, since only pkg/session writers bump epochs.
+//
+// Only the slice is copied (element fields are copied value-wise, so
+// msg.Content = ... / msg.Role = ... in the returned slice are private).
+// Nested slices reachable from a message (ToolCalls, ContentParts, Media,
+// Attachments) stay shared and MUST still be treated as read-only — cloning
+// them (plus the ToolCall Function/Arguments pointers) is out of proportion for
+// a read-only consumer; this matches SessionManager.GetHistory's contract.
 func (ap *agentProvidableImpl) GetSessionHistory(sessionKey string) []providers.Message {
-	return ap.GetHistoryView(sessionKey)
+	return copyMessageSlice(ap.GetHistoryView(sessionKey))
 }
 
-// GetHistoryView returns the history slice without copying. The caller MUST
-// NOT modify the returned slice or any message in it. Used by hot read paths
-// (TUI viewport rendering, message counting, token estimation) where a full
-// copy per render would allocate tens of MB for long conversations.
+// copyMessageSlice returns a private copy of msgs: a fresh backing array whose
+// element values are independent of the source. The returned slice is never
+// aliased by the source, so it may be handed to a caller that owns it.
+//
+// pkg/session carries an equivalent unexported helper (cloneMessages) for its
+// own copy-on-write publish; it is deliberately not reused here — that would
+// mean exporting a pkg/session internal across packages for a three-line copy.
+func copyMessageSlice(msgs []providers.Message) []providers.Message {
+	out := make([]providers.Message, len(msgs))
+	copy(out, msgs)
+	return out
+}
+
+// GetHistoryView returns the history as an immutable shared snapshot, without
+// copying it. The returned slice is the session's published read-only view: the
+// same backing array is handed to every concurrent caller (the TUI render loop
+// calls this several times per frame), so callers MUST NOT mutate the returned
+// slice or any message in it. Used by hot read paths (TUI viewport rendering,
+// message counting, token estimation) where a full copy per render would
+// allocate tens of MB for long conversations.
+//
+// Cross-package callers (pkg/channels / WebUI) must use GetSessionHistory
+// instead — it returns a private copy for exactly that reason.
 func (ap *agentProvidableImpl) GetHistoryView(sessionKey string) []providers.Message {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 

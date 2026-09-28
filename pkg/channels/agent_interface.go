@@ -38,13 +38,27 @@ type AgentProvidable interface {
 	// el agente no existe. La lista se deriva del ToolRegistry real del agente,
 	// nunca se hardcodea.
 	ListAgentTools(agentID string) ([]AgentToolInfo, bool)
-	// GetSessionHistory devuelve el historial persistido de una sesión
+	// GetSessionHistory devuelve el historial persistido de una sesión como
+	// una COPIA defensiva: el slice pertenece al llamante y puede mutarse
+	// (truncar, reordenar, reescribir un mensaje in-place) sin corromper la
+	// sesión ni lo que ven los demás lectores. Es la API segura para cruzar un
+	// boundary de paquete, y la que usa el endpoint de historial de la WebUI
+	// (pkg/channels/rest_chat.go). Contraparte de GetHistoryView: esa SÍ
+	// devuelve el snapshot compartido inmutable ("MUST NOT mutate") que publica
+	// pkg/session, cuyo contrato está documentado en
+	// agentProvidableImpl.GetHistoryView (pkg/agent/agent_providable.go).
+	// Coste: O(n) y una copia del slice; no la uses en paths calientes.
 	GetSessionHistory(sessionKey string) []providers.Message
-	// GetHistoryView returns the history slice without copying. The caller
-	// MUST NOT modify the returned slice or any message in it. Use this on hot
-	// read paths (TUI rendering, token estimation) to avoid a full copy of the
-	// message slice on every render — copies become expensive (tens of MB) for
-	// long conversations.
+	// GetHistoryView returns the history slice without copying: the session's
+	// shared immutable snapshot (copy-on-write, pkg/session/view.go). The caller
+	// MUST NOT modify the returned slice or any message in it — the same backing
+	// array is handed to every concurrent reader, and an in-place mutation would
+	// poison it for all of them (no saveEpoch bump ever invalidates an external
+	// mutation, so the poisoned content would be served as current forever).
+	// Use this on hot read paths (TUI rendering, token estimation) to avoid a
+	// full copy of the message slice on every render — copies become expensive
+	// (tens of MB) for long conversations. Use GetSessionHistory when the caller
+	// needs to own/mutate the returned slice.
 	GetHistoryView(sessionKey string) []providers.Message
 	// GetEvictedMessageCount returns the number of messages that were evicted
 	// from memory (excluded + persisted in SQLite but not in the in-memory slice).
@@ -54,6 +68,10 @@ type AgentProvidable interface {
 	// Read-only: never loads the session into memory nor touches context.
 	// before/after are exclusive seq cursors (-1/0 = unset). Returns nil when
 	// there is nothing out of memory to serve.
+	//
+	// Unlike GetHistoryView, the returned page (and its Messages/Seqs slices) is
+	// freshly materialized per call and owned by the caller: it never aliases
+	// the session's published snapshot, so mutating it is harmless.
 	LoadEvictedMessagesPage(sessionKey string, before, after, limit int) *session.EvictedMessagesPage
 	// GetTotalMessageCount returns the total persisted message count for a
 	// session: in-memory slice length plus evicted messages.
@@ -174,6 +192,9 @@ type AgentProvidable interface {
 	// HasStreamedContent returns true if the session has an in-progress streaming message with content.
 	HasStreamedContent(sessionKey string) bool
 	// GetInProgressAssistant returns the in-progress assistant message, if any.
+	// It is a value copy of the session's last message (safe to read/mutate),
+	// NOT part of the shared history snapshot; nested slices it may carry are
+	// still shared read-only.
 	GetInProgressAssistant(sessionKey string) *providers.Message
 	// GetInProgressTool returns the tool the session is currently executing, if
 	// any (nil otherwise). The UIs restore their "running tool" row from it

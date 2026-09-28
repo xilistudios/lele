@@ -201,9 +201,7 @@ func TestView_HeightNeverExceedsTerminalHeight(t *testing.T) {
 			SessionKey: fmt.Sprintf("subagent-session-%d", i),
 		})
 	}
-	m.subagentsCacheKey = "native:" + key
-	m.subagentsCacheTime = time.Now()
-	m.subagentsCacheValue = subagents
+	seedSubagentListing(m, key, time.Now(), subagents)
 
 	sizes := []struct {
 		w, h int

@@ -144,9 +144,7 @@ func TestScroll_WithSubagentsAndToolCalls(t *testing.T) {
 			SessionKey: fmt.Sprintf("subagent-key-%d", i),
 		})
 	}
-	m.subagentsCacheKey = "native:" + key
-	m.subagentsCacheTime = time.Now()
-	m.subagentsCacheValue = subagents
+	seedSubagentListing(m, key, time.Now(), subagents)
 
 	m.reloadSessions()
 

@@ -31,6 +31,13 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 	if doc.Agents.Defaults.SubagentMaxRetries == 0 {
 		doc.Agents.Defaults.SubagentMaxRetries = defaults.Agents.Defaults.SubagentMaxRetries
 	}
+	// SubagentRetentionMinutes: like SubagentMaxRetries, an explicit 0 cannot be
+	// told apart from unset here, so it inherits the default (5m). Disabling the
+	// retention sweep is not offered on purpose — an unset knob must never let
+	// the task map grow without bound again.
+	if doc.Agents.Defaults.SubagentRetentionMinutes == 0 {
+		doc.Agents.Defaults.SubagentRetentionMinutes = defaults.Agents.Defaults.SubagentRetentionMinutes
+	}
 	if doc.Agents.Defaults.LLMLoopTimeoutMinutes == 0 {
 		doc.Agents.Defaults.LLMLoopTimeoutMinutes = defaults.Agents.Defaults.LLMLoopTimeoutMinutes
 	}
@@ -145,18 +152,19 @@ func defaultEditableDocument() *EditableDocument {
 	return &EditableDocument{
 		Agents: EditableAgentsConfig{
 			Defaults: EditableAgentDefaults{
-				Workspace:              defaults.Agents.Defaults.Workspace,
-				RestrictToWorkspace:    defaults.Agents.Defaults.RestrictToWorkspace,
-				Provider:               defaults.Agents.Defaults.Provider,
-				Model:                  defaults.Agents.Defaults.Model,
-				MaxTokens:              defaults.Agents.Defaults.MaxTokens,
-				MaxToolIterations:      defaults.Agents.Defaults.MaxToolIterations,
-				MaxReadLines:           defaults.Agents.Defaults.MaxReadLines,
-				SubagentTimeoutMinutes: defaults.Agents.Defaults.SubagentTimeoutMinutes,
-				SubagentMaxConcurrent:  defaults.Agents.Defaults.SubagentMaxConcurrent,
-				SubagentMaxRetries:     defaults.Agents.Defaults.SubagentMaxRetries,
-				LLMLoopTimeoutMinutes:  defaults.Agents.Defaults.LLMLoopTimeoutMinutes,
-				PromptCache:            defaults.Agents.Defaults.PromptCache,
+				Workspace:                defaults.Agents.Defaults.Workspace,
+				RestrictToWorkspace:      defaults.Agents.Defaults.RestrictToWorkspace,
+				Provider:                 defaults.Agents.Defaults.Provider,
+				Model:                    defaults.Agents.Defaults.Model,
+				MaxTokens:                defaults.Agents.Defaults.MaxTokens,
+				MaxToolIterations:        defaults.Agents.Defaults.MaxToolIterations,
+				MaxReadLines:             defaults.Agents.Defaults.MaxReadLines,
+				SubagentTimeoutMinutes:   defaults.Agents.Defaults.SubagentTimeoutMinutes,
+				SubagentMaxConcurrent:    defaults.Agents.Defaults.SubagentMaxConcurrent,
+				SubagentMaxRetries:       defaults.Agents.Defaults.SubagentMaxRetries,
+				SubagentRetentionMinutes: defaults.Agents.Defaults.SubagentRetentionMinutes,
+				LLMLoopTimeoutMinutes:    defaults.Agents.Defaults.LLMLoopTimeoutMinutes,
+				PromptCache:              defaults.Agents.Defaults.PromptCache,
 			},
 			List: []EditableAgentConfig{},
 		},

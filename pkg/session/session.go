@@ -8,6 +8,7 @@ package session
 
 import (
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/providers"
@@ -80,6 +81,15 @@ type Session struct {
 	InputTokens     int `json:"input_tokens,omitempty"`
 	OutputTokens    int `json:"output_tokens,omitempty"`
 	CompactionCount int `json:"compaction_count,omitempty"`
+
+	// viewSnapshot is the published, immutable, read-only view of Messages
+	// (copy-on-write, see view.go). GetHistoryView reads it WITHOUT holding
+	// sm.mu, so it must only ever be written by publishViewLocked under the
+	// write lock. A snapshot whose epoch equals saveEpoch is guaranteed to
+	// reflect the current Messages; any other snapshot is stale and the reader
+	// rebuilds it. Not persisted and not copyable (atomic.Pointer holds a
+	// noCopy marker): Session is always handled by pointer.
+	viewSnapshot atomic.Pointer[messageSnapshot]
 }
 
 // sessionMetadata holds lightweight session info for sessions not yet

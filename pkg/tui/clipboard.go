@@ -19,7 +19,7 @@ func (m *Model) copyLastAssistantMessage() bool {
 		return false
 	}
 
-	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
+	history := m.historyView()
 	var lastAssistantContent string
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role == "assistant" && history[i].Content != "" {

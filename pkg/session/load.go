@@ -196,6 +196,13 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 		}
 	}
 
+	// Deliberately NO publishViewLocked() here. A cold load materializes a
+	// brand-new Session whose viewSnapshot is nil, and GetHistoryView's
+	// epoch-check treats nil as "rebuild me": the first read copies once and
+	// publishes, so readers are O(1) from then on. Publishing eagerly would
+	// instead charge an O(n) history copy to every cold load — including the
+	// ones triggered by write paths (getOrCreateUnlocked → AddFullMessage),
+	// which never read the view.
 	session := &Session{
 		Key:              meta.Key,
 		Name:             meta.Name,
