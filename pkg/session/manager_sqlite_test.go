@@ -2112,6 +2112,9 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 			}
 			out = append(out, r)
 		}
+		if rErr := rowsQ.Err(); rErr != nil {
+			t.Fatalf("raw rows iteration failed: %v", rErr)
+		}
 		return out
 	}
 
