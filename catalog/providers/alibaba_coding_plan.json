@@ -33,20 +33,6 @@
       "tool_call": true
     },
     {
-      "id": "qwen3.6-flash",
-      "name": "Qwen3.6 Flash",
-      "context_window": 1000000,
-      "max_output": 65536,
-      "vision": true,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
       "id": "qwen3.6-plus",
       "name": "Qwen3.6 Plus",
       "context_window": 1000000,
@@ -66,19 +52,6 @@
       "context_window": 1000000,
       "max_output": 64000,
       "vision": true,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "qwen3.7-max",
-      "name": "Qwen3.7 Max",
-      "context_window": 1000000,
-      "max_output": 65536,
       "thinking_levels": [
         "low",
         "medium",

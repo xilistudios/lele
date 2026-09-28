@@ -50,7 +50,7 @@
       "id": "kimi-k3",
       "name": "Kimi K3",
       "context_window": 1048576,
-      "max_output": 131072,
+      "max_output": 1048576,
       "vision": true,
       "thinking_levels": [
         "low",

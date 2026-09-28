@@ -356,6 +356,62 @@
       "tool_call": true
     },
     {
+      "id": "gpt-6-luna",
+      "name": "GPT-6 Luna",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "gpt-6-sol",
+      "name": "GPT-6 Sol",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "gpt-daybreak-blue-latest",
+      "name": "Daybreak Blue",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "gpt-daybreak-red-latest",
+      "name": "Daybreak Red",
+      "context_window": 400000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "gpt-realtime-2.1",
       "name": "GPT-Realtime-2.1",
       "context_window": 128000,

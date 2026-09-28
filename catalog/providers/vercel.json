@@ -8,7 +8,7 @@
       "id": "anthropic/claude-sonnet-4",
       "name": "Claude Sonnet 4",
       "context_window": 1000000,
-      "max_output": 8192,
+      "max_output": 64000,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -372,6 +372,7 @@
       "max_output": 128000,
       "vision": true,
       "thinking_levels": [
+        "low",
         "medium",
         "high"
       ],

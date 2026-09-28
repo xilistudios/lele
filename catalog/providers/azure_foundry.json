@@ -92,7 +92,7 @@
       "id": "gpt-5-pro",
       "name": "GPT-5 Pro",
       "context_window": 400000,
-      "max_output": 272000,
+      "max_output": 128000,
       "vision": true,
       "thinking_levels": [
         "high"

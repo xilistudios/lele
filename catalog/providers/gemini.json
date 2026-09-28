@@ -7,8 +7,8 @@
     {
       "id": "gemini-2.5-computer-use-preview-10-2025",
       "name": "Gemini 2.5 Computer Use Preview 10-2025",
-      "context_window": 131072,
-      "max_output": 65536,
+      "context_window": 128000,
+      "max_output": 64000,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -145,7 +145,7 @@
       "id": "gemini-3.1-flash-lite-image",
       "name": "Nano Banana 2 Lite",
       "context_window": 65536,
-      "max_output": 65536,
+      "max_output": 4096,
       "vision": true,
       "thinking_levels": [
         "high"
@@ -324,7 +324,7 @@
     {
       "id": "gemini-3-pro-image",
       "name": "Nano Banana Pro",
-      "context_window": 131072,
+      "context_window": 65536,
       "max_output": 32768,
       "vision": true,
       "thinking_levels": [
@@ -349,8 +349,8 @@
     {
       "id": "gemini-3.1-flash-image",
       "name": "Nano Banana 2",
-      "context_window": 65536,
-      "max_output": 65536,
+      "context_window": 131072,
+      "max_output": 32768,
       "vision": true,
       "thinking_levels": [
         "high"

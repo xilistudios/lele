@@ -75,7 +75,7 @@
     {
       "id": "MiniMaxAI/MiniMax-M2.7",
       "name": "MiniMax-M2.7",
-      "context_window": 202752,
+      "context_window": 196608,
       "max_output": 131072,
       "thinking_levels": [
         "low",
@@ -176,7 +176,7 @@
     {
       "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
       "name": "DeepSeek V4 Flash 0731",
-      "context_window": 1000000,
+      "context_window": 1048576,
       "max_output": 384000,
       "thinking_levels": [
         "high"
@@ -249,7 +249,7 @@
     {
       "id": "zai-org/GLM-5.2",
       "name": "GLM-5.2",
-      "context_window": 512000,
+      "context_window": 1048575,
       "max_output": 164000,
       "thinking_levels": [
         "high"

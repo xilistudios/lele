@@ -61,6 +61,20 @@
       "tool_call": true
     },
     {
+      "id": "grok-4.7",
+      "name": "Grok 4.7",
+      "context_window": 500000,
+      "max_output": 500000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "grok-4.20-0309-non-reasoning",
       "name": "Grok 4.20 (Non-Reasoning)",
       "context_window": 1000000,
@@ -98,6 +112,12 @@
     {
       "id": "grok-imagine-image",
       "name": "Grok Imagine Image",
+      "context_window": 16000,
+      "vision": true
+    },
+    {
+      "id": "grok-imagine-image-quality",
+      "name": "Grok Imagine Image Quality",
       "context_window": 16000,
       "vision": true
     },
