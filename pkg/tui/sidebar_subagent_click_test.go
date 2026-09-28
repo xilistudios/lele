@@ -36,9 +36,9 @@ func seedSubagentSidebarModel(t *testing.T, n int) *Model {
 			SessionKey: fmt.Sprintf("subagent-key-%d", i),
 		})
 	}
-	m.subagentsCacheKey = "native:" + key
-	m.subagentsCacheTime = time.Now()
-	m.subagentsCacheValue = subagents
+	// All rows are "running", so the seeded listing also carries a running
+	// count — the shape a real refresh would have produced.
+	seedSubagentListing(m, key, time.Now(), subagents)
 
 	return m
 }

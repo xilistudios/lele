@@ -69,6 +69,33 @@ non-standard think system — e.g. `"deepseek"` for Xiaomi MiMo so `"off"` sends
 
 See `docs/agents-models-providers.md#thinking-level`.
 
+### `subagent_retention_minutes`
+
+How long a **finished** subagent task stays tracked in memory (and keeps its
+`native:<parent>:subagent-N` session resident), in `agents.defaults`.
+
+- default: `5` (minutes) — the same 5-minute default the subagent manager
+  carries internally
+- units: minutes
+- env override (defaults only): `LELE_AGENTS_DEFAULTS_SUBAGENT_RETENTION_MINUTES`
+- what it does: a task in a terminal status (`completed`, `failed`,
+  `cancelled`, `not_done`) is reaped once it has been terminal for longer than
+  this window — the task leaves the in-memory task map and its session is
+  evicted from memory. Nothing is deleted: the session rows stay in SQLite and
+  the session is reloaded on demand. A periodic sweeper (once a minute; that is
+  the poll cadence, not the window) does the reaping, so a finished task is
+  reaped even when the chat stops spawning new ones and never lingers more than
+  one extra interval. The same sweep also runs on the next spawn.
+- `0` (and any negative value) does **not** disable the sweep. The value is
+  only applied when it is `> 0`, so `0`/negative keeps the effective default of
+  5 minutes; the same happens through the editable document behind the Web UI,
+  where `0` cannot be told apart from "unset" and is rewritten as the default.
+  Turning the sweep off through configuration is deliberately not offered — an
+  unset knob must never let the task map grow without bound again.
+- Round-trip: the field is carried in `agents.defaults` of the editable config
+  document, so the Web UI settings page reads and writes the same value the file
+  holds (an explicit value survives a Web UI save).
+
 ## `bindings`
 
 Routes a conversation source to a named agent.
@@ -215,6 +242,7 @@ Examples:
 
 - `LELE_AGENTS_DEFAULTS_WORKSPACE`
 - `LELE_AGENTS_DEFAULTS_MODEL`
+- `LELE_AGENTS_DEFAULTS_SUBAGENT_RETENTION_MINUTES`
 - `LELE_CHANNELS_NATIVE_ENABLED`
 - `LELE_CHANNELS_NATIVE_RATE_LIMIT_ENABLED`
 - `LELE_CHANNELS_NATIVE_RATE_LIMIT_PIN_PER_MINUTE`

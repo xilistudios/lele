@@ -7,10 +7,12 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/keyring"
+	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
@@ -35,6 +37,12 @@ type SubagentManager struct {
 	thinkingLevel              string        // manager-default reasoning level (parent's resolved config level); "" = no opinion, see SetThinkingLevel
 	timeout                    time.Duration // 0 means no timeout
 	retentionPeriod            time.Duration // how long to keep terminal tasks before cleanup (0 = no cleanup)
+	retentionMu                sync.Mutex    // guards the sweeper fields below; never sm.mu — the sweeper takes sm.mu itself
+	retentionExited            chan struct{} // closed by the sweeper goroutine when it returns (nil = never started)
+	retentionStopCh            chan struct{} // closed by the stopper to ask the sweeper to return (nil = never started)
+	retentionStopOnce          *sync.Once    // makes closing retentionStopCh idempotent across stopper callers
+	retentionStopFn            func()        // idempotent stop shared by StartRetentionCleanup callers and StopRetentionCleanup
+	retentionDetached          atomic.Bool   // set when a bounded stop gave up on the sweeper (see StopRetentionCleanupWithin)
 	nextID                     int
 	sessionRecorder            SessionRecorder
 	sessionKeyCallback         func(sessionKey, agentID string)                          // called when subagent session key is created
@@ -156,10 +164,177 @@ func (sm *SubagentManager) SetTimeout(timeout time.Duration) {
 
 // SetRetentionPeriod sets how long terminal tasks are kept before cleanup.
 // A value of 0 disables automatic cleanup.
+// It may be called at any time: CleanupTerminalTasks — and therefore the
+// periodic sweeper started by StartRetentionCleanup — re-reads the period on
+// every pass.
 func (sm *SubagentManager) SetRetentionPeriod(period time.Duration) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.retentionPeriod = period
+}
+
+// DefaultSubagentRetentionSweepInterval is how often the periodic retention
+// sweeper (StartRetentionCleanup) calls CleanupTerminalTasks.
+//
+// It is deliberately only a poll cadence: the retention window itself
+// (retentionPeriod — 5m by default, configurable through
+// agents.defaults.subagent_retention_minutes) decides which tasks are
+// eligible, so an expired task lingers at most one extra interval. One minute
+// keeps a manager whose owner stopped spawning tidy at a negligible cost,
+// which is exactly the leak the spawn-triggered cleanup could not cover.
+const DefaultSubagentRetentionSweepInterval = time.Minute
+
+// StartRetentionCleanup launches the periodic retention sweeper: a background
+// goroutine that calls CleanupTerminalTasks every interval, so terminal tasks
+// (and the sessions they pin) are reaped even when nobody spawns again.
+// CleanupTerminalTasks was previously only called from SpawnWithOptions and
+// ContinueTask, so a chat that stopped spawning kept every finished task and
+// its "native:<parent>:subagent-N" session in memory forever.
+//
+// The sweeper only ever reaps tasks CleanupTerminalTasks already considers
+// eligible (terminal status + retention window elapsed) and it fires the same
+// session-evict callback the spawn-triggered sweep fires, so the two paths are
+// interchangeable.
+//
+// Idempotent: the first call starts the goroutine, later calls (e.g. the
+// config-reload path re-using this manager) are no-ops and return the same
+// stop function. interval <= 0 falls back to
+// DefaultSubagentRetentionSweepInterval.
+//
+// The returned stop function is idempotent and safe to call from several
+// goroutines, and it blocks (bounded by DefaultRetentionStopGrace, see
+// StopRetentionCleanupWithin) until the sweeper goroutine has exited: callers
+// (see AgentLoop.StopWithin and StopRetentionCleanup) rely on that to
+// guarantee no sweep touches the task map or evicts sessions after teardown.
+// It must never be called while holding sm.mu — the sweeper may be inside
+// CleanupTerminalTasks, which needs that same lock.
+func (sm *SubagentManager) StartRetentionCleanup(interval time.Duration) func() {
+	sm.retentionMu.Lock()
+	defer sm.retentionMu.Unlock()
+
+	if sm.retentionStopFn != nil {
+		return sm.retentionStopFn
+	}
+	if interval <= 0 {
+		interval = DefaultSubagentRetentionSweepInterval
+	}
+
+	stop := make(chan struct{})
+	exited := make(chan struct{})
+	var stopOnce sync.Once
+
+	sm.retentionExited = exited
+	sm.retentionStopCh = stop
+	sm.retentionStopOnce = &stopOnce
+	sm.retentionStopFn = func() {
+		// The handle is deliberately bounded: a sweeper stuck inside
+		// CleanupTerminalTasks -> sessionEvictCallback (synchronous SQLite per
+		// session) must not be able to hang whoever stops the manager. Giving
+		// up detaches the manager, so the sweeper stops sweeping.
+		_ = sm.StopRetentionCleanupWithin(DefaultRetentionStopGrace)
+	}
+
+	go func() {
+		defer close(exited)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				// A bounded stop that gave up on this goroutine marked the
+				// manager detached; return instead of sweeping, so an
+				// abandoned sweeper never mutates the task map again.
+				if sm.retentionDetached.Load() {
+					return
+				}
+				sm.CleanupTerminalTasks()
+			}
+		}
+	}()
+
+	return sm.retentionStopFn
+}
+
+// DefaultRetentionStopGrace bounds how long StopRetentionCleanup (and the stop
+// function returned by StartRetentionCleanup) waits for the sweeper goroutine
+// to exit before abandoning it. Sized like the turn drain in
+// AgentLoop.StopWithin: long enough for a sweep's session evictions to finish,
+// short enough that a sweeper blocked indefinitely on a callback cannot keep
+// the process alive until systemd's TimeoutStopUSec fires.
+const DefaultRetentionStopGrace = 3 * time.Second
+
+// StopRetentionCleanup stops the sweeper started by StartRetentionCleanup and
+// waits for its goroutine to exit, giving up after DefaultRetentionStopGrace.
+// It is safe to call when the sweeper was never started and safe to call
+// repeatedly.
+//
+// A stopped manager stays stopped: StartRetentionCleanup after a stop returns
+// the (already used) stop function instead of resurrecting the goroutine. A
+// manager lives as long as the agent that owns it, so its teardown is final;
+// restarting it would let the sweeper reap tasks after the session layer it
+// evicts into has gone away.
+func (sm *SubagentManager) StopRetentionCleanup() {
+	_ = sm.StopRetentionCleanupWithin(DefaultRetentionStopGrace)
+}
+
+// StopRetentionCleanupWithin is StopRetentionCleanup with an explicit wait
+// budget. grace <= 0 waits forever (the unbounded form, mirroring
+// AgentLoop.Stop/StopWithin). Otherwise it returns nil as soon as the sweeper
+// goroutine has exited, and an error if it gave up on it after grace.
+//
+// Giving up DETACHES the manager, which is what makes abandonment safe for the
+// caller:
+//
+//   - the sweeper goroutine returns without starting another sweep (it checks
+//     the detach flag on every tick);
+//   - CleanupTerminalTasks refuses to touch the task map or fire a
+//     session-evict callback once detached, and a sweep that is abandoned
+//     half-way through its eviction batch fires no further callbacks.
+//
+// The one thing abandonment cannot undo is the callback the sweeper is blocked
+// inside right now: that call is in progress and will run to completion. So the
+// caller must treat a non-nil error as "a session eviction may still be in
+// flight" and keep whatever the sweeper evicts into alive — AgentLoop.StopWithin
+// reacts by abandoning its own teardown and leaving the store open.
+func (sm *SubagentManager) StopRetentionCleanupWithin(grace time.Duration) error {
+	sm.retentionMu.Lock()
+	exited := sm.retentionExited
+	stopCh := sm.retentionStopCh
+	stopOnce := sm.retentionStopOnce
+	sm.retentionMu.Unlock()
+
+	if exited == nil {
+		return nil // sweeper never started
+	}
+	if sm.retentionDetached.Load() {
+		// A previous bounded stop already gave up on this sweeper: it can no
+		// longer sweep, so there is nothing left to join (and its goroutine may
+		// be the one blocked in a callback that never returns).
+		return nil
+	}
+	// Signal the stop without waiting: stopOnce makes it idempotent, so
+	// concurrent stoppers close the same channel exactly once.
+	if stopOnce != nil {
+		stopOnce.Do(func() { close(stopCh) })
+	}
+
+	if grace <= 0 {
+		<-exited
+		return nil
+	}
+
+	select {
+	case <-exited:
+		return nil
+	case <-time.After(grace):
+	}
+
+	sm.retentionDetached.Store(true)
+	logger.WarnCF("subagent", "Retention sweeper did not exit within the grace; abandoning it (it is detached and will not sweep again)",
+		map[string]interface{}{"grace": grace.String()})
+	return fmt.Errorf("subagent retention sweeper did not exit within %s", grace)
 }
 
 // SetMaxConcurrent sets the maximum number of subagent tasks that can run
@@ -771,9 +946,21 @@ func (sm *SubagentManager) reportTerminalStatus(task *SubagentTask) {
 // CleanupTerminalTasks removes tasks that have been in a terminal state
 // (completed, failed, cancelled, not_done) for longer than the retention
 // period. This prevents the tasks map from growing indefinitely.
+// It is called by SpawnWithOptions and ContinueTask, and periodically by the
+// sweeper started with StartRetentionCleanup.
 // Returns the number of tasks removed.
+//
+// A detached manager (one whose sweeper a bounded stop gave up on, see
+// StopRetentionCleanupWithin) is a no-op: the session layer the evictions go
+// into may already be gone, so no sweep may mutate the task map or fire an
+// evict callback after detachment.
 func (sm *SubagentManager) CleanupTerminalTasks() int {
 	sm.mu.Lock()
+
+	if sm.retentionDetached.Load() {
+		sm.mu.Unlock()
+		return 0
+	}
 
 	if sm.retentionPeriod <= 0 {
 		sm.mu.Unlock()
@@ -826,6 +1013,13 @@ func (sm *SubagentManager) CleanupTerminalTasks() int {
 	// Evict sessions outside the lock.
 	if evictCallback != nil {
 		for _, sessionKey := range toEvict {
+			// A stop that gave up on the sweeper detaches the manager while
+			// this batch is being evicted; the remaining sessions must not be
+			// handed to a session layer the caller may already be tearing
+			// down. The tasks themselves are already out of the map.
+			if sm.retentionDetached.Load() {
+				break
+			}
 			evictCallback(sessionKey)
 		}
 	}

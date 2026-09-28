@@ -1199,6 +1199,34 @@ func (al *AgentLoop) StopWithin(grace time.Duration) error {
 			al.stopSessionCleanup()
 		}
 
+		// Stop the subagent retention sweepers (one per manager, see
+		// SubagentManager.StartRetentionCleanup). No sweep may touch the task
+		// map or evict sessions into the session layer while the loop tears
+		// down the store below, but the join is bounded: a sweeper stuck inside
+		// CleanupTerminalTasks -> sessionEvictCallback (synchronous SQLite per
+		// session) must not hold the teardown open. Managers dropped by a
+		// config reload are stopped in
+		// toolCoordinatorImpl.cancelRemovedSubagents instead.
+		if al.toolCoordinator != nil {
+			for _, sm := range al.toolCoordinator.GetSubagents() {
+				if sm == nil {
+					continue
+				}
+				if err := sm.StopRetentionCleanupWithin(grace); err != nil {
+					// The manager is detached now (no further sweeps), but the
+					// eviction the sweeper was blocked in is still in flight.
+					// Closing the store under it is exactly what this teardown
+					// must not do, so abandon the whole teardown the same way a
+					// stuck turn does: leave the store open and let the process
+					// exit release it.
+					abandoned = true
+					logger.WarnCF("agent", "Subagent retention sweeper did not stop; abandoning teardown",
+						map[string]interface{}{"error": err.Error()})
+					return
+				}
+			}
+		}
+
 		if grace > 0 {
 			// Same bounded-wait shape as Shutdown: the helper goroutine is
 			// safe to leave blocked on wg.Wait() when the grace expires
@@ -1242,7 +1270,10 @@ func (al *AgentLoop) StopWithin(grace time.Duration) error {
 	})
 
 	if abandoned {
-		return fmt.Errorf("agent loop stop timed out after %s with turns in flight", grace)
+		// The teardown stopped short of closing the store: a turn, a group run
+		// or a retention sweep is still in flight and may still write through
+		// it. The process exits right after this, which releases the file.
+		return fmt.Errorf("agent loop stop timed out after %s; teardown abandoned with work in flight", grace)
 	}
 	return nil
 }

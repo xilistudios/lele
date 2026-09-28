@@ -20,6 +20,17 @@ const streamFlushInterval = 200 * time.Millisecond
 // If no in-progress message exists, it creates one with Streaming=true.
 // The session is saved to disk periodically (throttled) so the partial content
 // survives restarts and allows reconnecting clients to recover the stream.
+//
+// COALESCING (do not "fix" this): the write is in-place (msg.Content += chunk)
+// and deliberately does NOT publish the read-only history view. Publishing is
+// an O(n) copy of the whole history (192 B/message: ~1.16 MB per copy at 6000
+// messages) and this method runs once per streamed token — far more often than
+// the view is read — so eager publication here would make streaming slower than
+// the copy-per-read it replaces. Instead the epoch bumped by markModified leaves
+// the published snapshot visibly stale (snapshot.epoch != saveEpoch) and
+// GetHistoryView rebuilds the copy on its next read, which republishes it for
+// every following read in the same burst. Worst case is therefore one copy per
+// read burst (per frame) instead of one copy per chunk and per read.
 func (sm *SessionManager) AppendAssistantChunk(key, chunk string) {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -42,6 +53,9 @@ func (sm *SessionManager) AppendAssistantChunk(key, chunk string) {
 
 // AppendReasoningChunk appends a reasoning/thinking chunk to the in-progress
 // assistant message. Creates the streaming message if it doesn't exist yet.
+//
+// Coalesced exactly like AppendAssistantChunk: the in-place write leaves the
+// published view stale on purpose (see that method for the rationale).
 func (sm *SessionManager) AppendReasoningChunk(key, chunk string) {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -147,6 +161,7 @@ func (sm *SessionManager) AttachFilesToLastAssistant(key string, attachments []p
 
 	session.Updated = time.Now()
 	session.markModified(idx)
+	session.publishViewLocked() // attachments land once per turn
 	sm.touchSession(key)
 	if err := sm.saveUnlocked(key); err != nil {
 		logger.WarnCF("session", "Failed to persist message attachments",
@@ -210,6 +225,11 @@ func (sm *SessionManager) GetInProgressAssistant(key string) *providers.Message 
 
 // getOrCreateStreamingMsg finds or creates the in-progress assistant message.
 // Caller must hold sm.mu.
+//
+// Appending the new streaming message is an un-published mutation on purpose:
+// both callers (AppendAssistantChunk/AppendReasoningChunk) bump the epoch right
+// after through markModified, so the published view is stale and the next
+// GetHistoryView rebuilds it (streaming coalescing, see AppendAssistantChunk).
 func (sm *SessionManager) getOrCreateStreamingMsg(session *Session) *providers.Message {
 	if len(session.Messages) > 0 {
 		lastMsg := &session.Messages[len(session.Messages)-1]

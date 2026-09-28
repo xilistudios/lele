@@ -62,7 +62,13 @@ func (m *Model) archivedHiddenCount() int {
 // chat viewport renders: archived prefix + resident history. O(1) — the
 // archived part is maintained incrementally by prependArchivedPage.
 func (m *Model) displayHistoryMessageCount(history []providers.Message) int {
-	resident := countHistoryMessages(history)
+	return m.displayMessageCountFrom(countHistoryMessages(history))
+}
+
+// displayMessageCountFrom is displayHistoryMessageCount for callers that already
+// counted the resident half (the viewport rebuild counts it once and reuses the
+// number for its materialization fingerprint).
+func (m *Model) displayMessageCountFrom(resident int) int {
 	if m.archivedKey == m.currentKey && m.currentKey != "" {
 		return m.archivedVisibleCount + resident
 	}

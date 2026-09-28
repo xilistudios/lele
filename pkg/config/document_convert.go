@@ -32,7 +32,11 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		// hand-written copy blocks (preexisting bug, same class as the
 		// agents-list Temperature drop); the round-trip test now guards it.
 		SubagentMaxIterations: doc.Agents.Defaults.SubagentMaxIterations,
-		LLMLoopTimeoutMinutes: doc.Agents.Defaults.LLMLoopTimeoutMinutes,
+		// SubagentRetentionMinutes must be carried: dropping it here would
+		// silently revert the retention window to the code default on every
+		// document→Config conversion (WebUI/TUI save).
+		SubagentRetentionMinutes: doc.Agents.Defaults.SubagentRetentionMinutes,
+		LLMLoopTimeoutMinutes:    doc.Agents.Defaults.LLMLoopTimeoutMinutes,
 		// PromptCache must be carried: without it a document→Config conversion
 		// silently reverts prompt-cache settings to the code default (off).
 		PromptCache: doc.Agents.Defaults.PromptCache,
@@ -629,24 +633,25 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 	}
 	doc := defaultEditableDocument()
 	doc.Agents.Defaults = EditableAgentDefaults{
-		Workspace:              cfg.Agents.Defaults.Workspace,
-		RestrictToWorkspace:    cfg.Agents.Defaults.RestrictToWorkspace,
-		Provider:               cfg.Agents.Defaults.Provider,
-		Model:                  cfg.Agents.Defaults.Model,
-		ModelFallbacks:         cfg.Agents.Defaults.ModelFallbacks,
-		ImageModel:             cfg.Agents.Defaults.ImageModel,
-		ImageModelFallbacks:    cfg.Agents.Defaults.ImageModelFallbacks,
-		MaxTokens:              cfg.Agents.Defaults.MaxTokens,
-		Temperature:            cfg.Agents.Defaults.Temperature,
-		ThinkingLevel:          cfg.Agents.Defaults.ThinkingLevel,
-		MaxToolIterations:      cfg.Agents.Defaults.MaxToolIterations,
-		MaxReadLines:           cfg.Agents.Defaults.MaxReadLines,
-		SubagentTimeoutMinutes: cfg.Agents.Defaults.SubagentTimeoutMinutes,
-		SubagentMaxConcurrent:  cfg.Agents.Defaults.SubagentMaxConcurrent,
-		SubagentMaxRetries:     cfg.Agents.Defaults.SubagentMaxRetries,
-		SubagentMaxIterations:  cfg.Agents.Defaults.SubagentMaxIterations, // side-fix: was dropped (see ToConfig)
-		LLMLoopTimeoutMinutes:  cfg.Agents.Defaults.LLMLoopTimeoutMinutes,
-		PromptCache:            cfg.Agents.Defaults.PromptCache, // must be carried to avoid silent drop on save
+		Workspace:                cfg.Agents.Defaults.Workspace,
+		RestrictToWorkspace:      cfg.Agents.Defaults.RestrictToWorkspace,
+		Provider:                 cfg.Agents.Defaults.Provider,
+		Model:                    cfg.Agents.Defaults.Model,
+		ModelFallbacks:           cfg.Agents.Defaults.ModelFallbacks,
+		ImageModel:               cfg.Agents.Defaults.ImageModel,
+		ImageModelFallbacks:      cfg.Agents.Defaults.ImageModelFallbacks,
+		MaxTokens:                cfg.Agents.Defaults.MaxTokens,
+		Temperature:              cfg.Agents.Defaults.Temperature,
+		ThinkingLevel:            cfg.Agents.Defaults.ThinkingLevel,
+		MaxToolIterations:        cfg.Agents.Defaults.MaxToolIterations,
+		MaxReadLines:             cfg.Agents.Defaults.MaxReadLines,
+		SubagentTimeoutMinutes:   cfg.Agents.Defaults.SubagentTimeoutMinutes,
+		SubagentMaxConcurrent:    cfg.Agents.Defaults.SubagentMaxConcurrent,
+		SubagentMaxRetries:       cfg.Agents.Defaults.SubagentMaxRetries,
+		SubagentMaxIterations:    cfg.Agents.Defaults.SubagentMaxIterations,    // side-fix: was dropped (see ToConfig)
+		SubagentRetentionMinutes: cfg.Agents.Defaults.SubagentRetentionMinutes, // must be carried to avoid silent drop on save
+		LLMLoopTimeoutMinutes:    cfg.Agents.Defaults.LLMLoopTimeoutMinutes,
+		PromptCache:              cfg.Agents.Defaults.PromptCache, // must be carried to avoid silent drop on save
 	}
 	doc.Agents.List = make([]EditableAgentConfig, 0, len(cfg.Agents.List))
 	for _, agent := range cfg.Agents.List {

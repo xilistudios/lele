@@ -11,6 +11,103 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
+// beginRenderFrame opens a render frame. Called once at the top of View():
+// the first history read in the frame fills the frame snapshot (historyView)
+// and every other consumer reuses it, so a frame performs at most one
+// GetHistoryView call.
+func (m *Model) beginRenderFrame() {
+	m.frameOpen = true
+	m.frameValid = false
+	m.frameView = nil
+	m.frameKey = ""
+}
+
+// endRenderFrame closes the render frame opened by beginRenderFrame and drops
+// the snapshot. Nothing outside a frame may reuse it: history mutated in place
+// (a finalized streaming assistant message) keeps the same length, so serving
+// a slice from a previous frame would render stale content.
+func (m *Model) endRenderFrame() {
+	m.frameOpen = false
+	m.frameValid = false
+	m.frameView = nil
+	m.frameKey = ""
+}
+
+// historyView returns the session history for the current render frame,
+// performing at most ONE read (GetHistoryView) per frame.
+//
+// The frame count is taken through the memoized accessor
+// (historyMessageCount), so the rebuild that consumes this same snapshot — and
+// any later read of an unchanged one — does not scan it again (T12).
+//
+// The freshness check is O(1) and runs BEFORE the history is touched: inside an
+// open frame a snapshot already taken for the same session is returned as-is.
+// Outside a frame (Update() routes, tests) every call reads fresh — the same
+// behaviour as before the frame snapshot existed.
+//
+// The returned slice is the immutable copy-on-write snapshot published by
+// pkg/session: callers MUST NOT mutate it (nor its messages), and it must not
+// be kept beyond the frame that took it (see endRenderFrame).
+func (m *Model) historyView() []providers.Message {
+	if m.frameOpen && m.frameValid && m.frameKey == m.currentKey {
+		return m.frameView
+	}
+
+	var history []providers.Message
+	if m.currentKey != "" && m.agentLoop != nil {
+		if m.onHistoryRead != nil {
+			m.onHistoryRead(m.currentKey)
+		}
+		history = m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
+	}
+
+	m.frameKey = m.currentKey
+	m.frameView = history
+	m.frameCount = m.historyMessageCount(history)
+	// The fingerprint terms come from the same read as the count: they are what
+	// distinguishes "the assistant message was finalized in place" (count
+	// unchanged, content changed) and "a tool/result message was appended"
+	// (frameCount unchanged, nothing else changed) from a genuinely unchanged
+	// state — see viewportContentKey.
+	m.frameHistoryTerms(history)
+	m.frameValid = true
+	return history
+}
+
+// frameHistoryTerms records the O(1) history terms the viewport fingerprint is
+// built from (see viewportContentKey): the total number of messages of the
+// snapshot and whether its last message is still streaming.
+//
+// Both are recorded together, from one slice, so the fingerprint can never
+// describe a state the materialized content does not reflect. Every producer of
+// the content and of the fingerprint goes through here: the frame's single read
+// (historyView) and each rebuild (updateViewportWithHistory).
+func (m *Model) frameHistoryTerms(history []providers.Message) {
+	m.frameHistoryLen = len(history)
+	m.frameLastStreaming = lastMessageStreaming(history)
+}
+
+// lastMessageStreaming reports whether the last message of a history snapshot
+// is still streaming. It is the only signal that tells "the assistant message
+// was finalized in place" — same message count, changed content — apart from
+// the streaming state, so the viewport rebuild check and the materialization
+// fingerprint both key on it.
+func lastMessageStreaming(history []providers.Message) bool {
+	return len(history) > 0 && history[len(history)-1].Streaming
+}
+
+// historyCount returns the number of user+assistant messages in the current
+// frame's history snapshot. It never reads the history on its own: it resolves
+// through historyView's O(1) frame check, which is what keeps the two
+// getTokenUsage call sites of a frame on the same value.
+func (m *Model) historyCount() int {
+	if m.currentKey == "" {
+		return 0
+	}
+	m.historyView()
+	return m.frameCount
+}
+
 // tokenCacheTTL bounds how often the expensive token/context usage is
 // recomputed for the sidebar. The value is refreshed immediately whenever the
 // history message count changes, so this TTL only throttles recomputation
@@ -33,18 +130,23 @@ const maxHomeExpandIterations = 20
 // when the history message count changes. This keeps View() cheap: previously
 // GetCurrentContextUsage ran on every render, rebuilding the system prompt from
 // disk and estimating tokens over the full history each time.
-func (m *Model) getTokenUsage() (current, window, cumInput, cumOutput int) {
+//
+// msgCount is the caller's hoisted message count for the current frame (the
+// frame's single history read, see historyView). It is a parameter on purpose:
+// the freshness check below must be O(1) and must NOT touch the history, so
+// this function never reads it — it only compares the cheap cache key.
+func (m *Model) getTokenUsage(msgCount int) (current, window, cumInput, cumOutput int) {
 	if m.currentKey == "" {
 		return 0, 0, 0, 0
 	}
 
-	msgCount := m.getHistoryMessageCount()
 	cacheKey := fmt.Sprintf("%s:%d", m.currentKey, msgCount)
 
 	if m.tokenCacheKey == cacheKey && time.Since(m.tokenCacheTime) < tokenCacheTTL {
 		return m.tokenCacheCurrent, m.tokenCacheWindow, m.tokenCacheCumInput, m.tokenCacheCumOutput
 	}
 
+	// Cache miss: only now pay for the expensive backend reads.
 	current, window = m.agentLoop.GetProvidable().GetCurrentContextUsage(m.currentKey)
 	cumInput, cumOutput, _ = m.agentLoop.GetProvidable().GetTokenCounts(m.currentKey)
 
@@ -66,11 +168,39 @@ func isCompactionSummary(msg providers.Message) bool {
 			strings.HasPrefix(msg.Content, "[Context compacted"))
 }
 
+// updateViewport refreshes the viewport from the current frame's history
+// snapshot. Callers on Update() routes (and tests) can call it directly: with
+// no frame open it reads the history once, exactly as before.
+//
+// This is the Update-side rebuild entry point; the render path reaches the
+// rebuild only through syncViewportForFrame (see the T3 block below).
 func (m *Model) updateViewport() {
+	m.updateViewportWithHistory(m.historyView())
+}
+
+// updateViewportWithHistory refreshes the viewport (base + overlay) from an
+// already-read history snapshot. renderChatLayout passes the frame snapshot it
+// hoisted, so a frame reads the history once for everything it draws.
+//
+// Callers from the render path must go through syncViewportForFrame: this
+// function is the O(lines) rebuild itself (see the T3 block below).
+func (m *Model) updateViewportWithHistory(history []providers.Message) {
+	if m.onViewportRebuild != nil {
+		m.onViewportRebuild(m.frameOpen)
+	}
+
+	// The fingerprint recorded at the end of this rebuild describes THIS
+	// snapshot (its length, its streaming flag), so re-derive those terms here:
+	// historyView already recorded them for its own read, but a caller passing a
+	// snapshot directly (tests) must not leave a stale stamp behind — the
+	// fingerprint would then claim a state the content does not reflect.
+	m.frameHistoryTerms(history)
+
 	if m.currentKey == "" {
 		m.viewport.SetContent("")
 		m.renderedBaseValid = false
 		m.renderedBaseKey = ""
+		m.noteViewportMaterialized(0)
 		return
 	}
 
@@ -84,10 +214,14 @@ func (m *Model) updateViewport() {
 	// new chat, freshly created content).
 	wasAtBottom := m.viewport.AtBottom() || m.forceGotoBottom
 
-	// Fetch history ONCE for this entire render cycle. GetHistoryView returns
-	// a read-only reference (no copy), so this is cheap — but calling it once
-	// instead of 4+ times avoids redundant mutex acquisitions.
-	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
+	// history arrives as the render frame's single snapshot. pkg/session
+	// publishes the session history as an immutable copy-on-write snapshot: on
+	// the hot path the read is O(1) with no allocation and no copy while that
+	// snapshot is current, and the caller MUST NOT mutate the slice or any
+	// message in it (the same backing array is shared by every concurrent
+	// reader). The frame hoists the read once (see historyView) so the viewport
+	// rebuild, the token/context readouts and the sidebar all consume the same
+	// slice instead of each reading it back.
 
 	// Reset the lazy-load render window when switching sessions.
 	if m.renderWindowSessionKey != m.currentKey {
@@ -98,10 +232,17 @@ func (m *Model) updateViewport() {
 	// Clear streaming state if the assistant message is fully saved in history
 	m.cleanupStreamingIfCompleteWithHistory(history)
 
-	// Compute message count from the already-fetched history (avoids another
-	// GetHistoryView call inside getHistoryMessageCount). Uses the combined
-	// count (archived prefix + resident) so a prefix change triggers rebuild.
-	historyMsgCount := m.displayHistoryMessageCount(history)
+	// Compute message count from the already-fetched frame snapshot (no
+	// further GetHistoryView call). Uses the combined count (archived prefix +
+	// resident) so a prefix change triggers rebuild. The resident half is
+	// reused for the materialization fingerprint below (same scan, so the
+	// render path's msgCount and this one are always the same number).
+	//
+	// historyMessageCount is the memoized accessor: the frame's read above
+	// (historyView) already counted THIS snapshot, so the rebuild reuses that
+	// result instead of running the rolescan a second time (T12).
+	residentCount := m.historyMessageCount(history)
+	historyMsgCount := m.displayMessageCountFrom(residentCount)
 
 	// Determine if the rendered base cache is still valid.
 	// Invalidated when session key or viewport width changes.
@@ -122,7 +263,8 @@ func (m *Model) updateViewport() {
 	// message transitioned from Streaming=true to Streaming=false (the count
 	// doesn't change but the rendered content does — the streaming message
 	// was skipped during processing and must now be included) OR the archived
-	// prefix moved.
+	// prefix moved OR the history grew in a way the counted total cannot see
+	// (an appended tool result, say).
 	//
 	// The archive needs its own term: widthCacheKey must NOT carry it, because
 	// that key also decides whether msgRenderCacheLines is dropped (wiping it on
@@ -133,15 +275,22 @@ func (m *Model) updateViewport() {
 	// identical while the rendered archived rows and the "↑ N earlier messages"
 	// banner both change. Keyed on the prefix identity, not just its size, so a
 	// reset + reload of the same length still invalidates.
-	lastMsgStreaming := len(history) > 0 && history[len(history)-1].Streaming
+	//
+	// Every term here is mirrored in the viewport fingerprint (viewportContentKey
+	// adds len(history) and the streaming flag): the fingerprint decides whether
+	// the rebuild runs at all, so a term it cannot see is a term that never
+	// reaches this check for a View()-only state change.
+	lastMsgStreaming := lastMessageStreaming(history)
 	archiveKey := m.archivedCacheKey()
 	if !cacheValid || m.renderedBaseMsgCount != historyMsgCount ||
+		m.renderedBaseHistoryLen != len(history) ||
 		m.renderedBaseArchiveKey != archiveKey ||
 		(m.renderedBaseLastStreaming && !lastMsgStreaming) {
 		baseLines := m.buildRenderedHistoryLines(history)
 		m.renderedBaseKey = widthCacheKey
 		m.renderedBaseArchiveKey = archiveKey
 		m.renderedBaseMsgCount = historyMsgCount
+		m.renderedBaseHistoryLen = len(history)
 		m.renderedBaseValid = len(baseLines) > 0
 		m.renderedBaseLastStreaming = lastMsgStreaming
 		// Push the new base lines to the viewport — O(1) pointer swap.
@@ -178,6 +327,7 @@ func (m *Model) updateViewport() {
 			m.forceGotoBottom = false
 			m.viewport.GotoBottom()
 		}
+		m.noteViewportMaterialized(residentCount)
 		return
 	}
 
@@ -327,6 +477,210 @@ func (m *Model) updateViewport() {
 	if wasAtBottom && m.viewport.totalLines() > 0 && m.viewport.Height > 0 {
 		m.viewport.GotoBottom()
 	}
+
+	// Record the state this rebuild materialized so View() can recognise it as
+	// fresh (O(1) fingerprint compare) instead of rebuilding again.
+	m.noteViewportMaterialized(residentCount)
+}
+
+// ---------------------------------------------------------------------------
+// Render-path freshness (T3): View() does not rebuild the viewport.
+//
+// bubbletea calls View() after EVERY Update — every streaming chunk, spinner
+// tick, mouse move and keypress — so rebuilding the viewport there made the
+// streaming throttle pointless (32 ms window defeated on every frame) and put
+// O(history) work on every frame of a long chat.
+//
+// The contract now is:
+//
+//   - the viewport content (base lines + ephemeral overlay) is MATERIALIZED by
+//     the Update-driven paths: updateViewport() from event handlers and
+//     throttledUpdateViewport() for streaming chunks (immediate leading edge,
+//     then at most one rebuild per streamThrottleInterval);
+//   - View() only runs the O(1) freshness checks it owns — "is what is on
+//     screen what this state would produce" (the fingerprint) and "was it
+//     wrapped for the current layout dimensions" (the geometry, visible only
+//     here because View() owns the viewport dimensions) — and rebuilds only
+//     when one of them fails. A failed content check is deferred while the
+//     streaming throttle's pending window is open (that is the throttle); a
+//     failed geometry check never is, and neither is a content check older
+//     than streamThrottleInterval (see viewportRebuildDeferred);
+//   - the O(lines) rebuild lives in updateViewportWithHistory and is reachable
+//     from the render path ONLY through syncViewportForFrame below.
+//
+// Unchanged by this: the archived-history loads (refreshArchivedHistory,
+// loadOlderArchivedPage) still run exclusively from Update routes — never from
+// View(). But nothing here reads the history beyond the frame's single
+// snapshot, so the T2 invariant (one GetHistoryView per frame) still holds.
+// ---------------------------------------------------------------------------
+
+// syncViewportForFrame is the only viewport-materialization entry point
+// reachable from View(). It runs the render path's O(1) checks and delegates to
+// updateViewportWithHistory only when a rebuild is genuinely required.
+//
+// history is the render frame's snapshot (already read by renderChatLayout) and
+// msgCount the resident user+assistant count of that same snapshot, so this
+// call adds no history read.
+func (m *Model) syncViewportForFrame(history []providers.Message, msgCount int) {
+	if m.viewportContentUpToDate(msgCount) {
+		return
+	}
+	// The streaming throttle may be holding a scheduled rebuild (≤ 32 ms away):
+	// serving the content its leading edge materialized is the whole point of
+	// the throttle. Geometry is never deferred — a base wrapped for other
+	// dimensions is visibly wrong, not 32 ms stale.
+	if !m.viewportGeometryChanged() && m.viewportRebuildDeferred() {
+		return
+	}
+	m.updateViewportWithHistory(history)
+}
+
+// viewportContentUpToDate reports whether the materialized viewport content
+// already is what the current model state would produce. O(1): one fingerprint
+// compare plus two field reads — never a scan of the history or of the rendered
+// lines.
+//
+// msgCount must be the resident user+assistant count of the frame's history
+// snapshot (historyCount); viewportContentKey folds in the same value the
+// Update-side skip guard uses, so both agree by construction.
+func (m *Model) viewportContentUpToDate(msgCount int) bool {
+	// "" means "not materialized yet" or "explicitly invalidated" (several
+	// settings paths clear it to force a repaint).
+	if m.lastViewportKey == "" {
+		return false
+	}
+	// renderedBaseValid doubles as the base-invalidation signal: theme
+	// switches (invalidateRenderCache), window resizes, session switches and
+	// compaction clear it, and those paths rely on the render path rebuilding.
+	// A session with nothing to render keeps it false, which only costs a
+	// trivially cheap rebuild (empty base) per frame.
+	if !m.renderedBaseValid {
+		return false
+	}
+	return m.lastViewportKey == m.viewportContentKey(msgCount)
+}
+
+// viewportGeometryChanged reports whether the base lines on screen were
+// materialized for different layout dimensions than the current ones. View()
+// recalculates m.viewport.Width/Height from the rendered bands on every frame
+// (they depend on the status line, queue row and input bar heights), so this is
+// the one stale state only the render path can see.
+func (m *Model) viewportGeometryChanged() bool {
+	return m.viewportBuiltWidth != m.viewport.Width || m.viewportBuiltHeight != m.viewport.Height
+}
+
+// viewportRebuildDeferred reports whether the streaming throttle owns the
+// pending rebuild for this frame, i.e. chunks arrived after the last
+// materialization and the coalesced rebuild is scheduled within
+// streamThrottleInterval (throttledUpdateViewport's leading edge materialized
+// the first chunk of the burst immediately).
+//
+// The window bound is what keeps this safe: if the scheduled tick is ever lost
+// (early-returned handler, dropped command), the render path rebuilds anyway
+// once the interval elapses, so content can never be older than
+// streamThrottleInterval.
+func (m *Model) viewportRebuildDeferred() bool {
+	if !m.streamPendingUpdate || m.streamThrottleInterval <= 0 {
+		return false
+	}
+	return time.Since(m.viewportBuiltAt) < m.streamThrottleInterval
+}
+
+// noteViewportMaterialized records the state the viewport content was just
+// materialized from. It is called at the END of every updateViewportWithHistory
+// exit path — after that function's own state fixes (pending user message
+// cleared, streaming state reconciled, forceGotoBottom consumed) — so the
+// stored fingerprint describes the state as it is now on screen and the next
+// frame can skip the rebuild with a single compare.
+func (m *Model) noteViewportMaterialized(residentCount int) {
+	m.lastViewportKey = m.viewportContentKey(residentCount)
+	m.viewportBuiltWidth = m.viewport.Width
+	m.viewportBuiltHeight = m.viewport.Height
+	m.viewportBuiltAt = time.Now()
+	// Whatever the throttle was waiting to render is on screen now: the stream
+	// state is materialized as one accumulated string, so a pending flag can
+	// never be left pointing at content this rebuild did not already include.
+	m.streamPendingUpdate = false
+}
+
+// viewportContentKey returns the O(1) fingerprint of every piece of model state
+// the viewport content (base lines + ephemeral overlay) depends on. It is the
+// single freshness predicate of the viewport: the render path
+// (syncViewportForFrame) and the Update path (shouldSkipViewportUpdate) compare
+// the live fingerprint against the one recorded by noteViewportMaterialized.
+//
+// msgCount is the caller's hoisted resident count (never derived here: the
+// fingerprint must stay O(1) and must not touch the history).
+func (m *Model) viewportContentKey(msgCount int) string {
+	// Fields the Update-side skip guard has always used (unchanged values, same
+	// order as the original fingerprint).
+	content := fmt.Sprintf("%s|%d|%d|%d|%s|%s|%s|%s|%s|%v|%v|%v|%d|%s",
+		m.currentKey,
+		m.viewport.Width,
+		msgCount,
+		len(m.currentStream)+len(m.currentThinking),
+		m.currentToolAction,
+		m.pendingUserMessage,
+		m.pendingApprovalID,
+		m.approvalResult,
+		m.activeGroupID,
+		m.processing,
+		m.compactFeedback != "",
+		m.statusFeedback != "",
+		m.renderStartIdx,
+		// Full archived fingerprint, not just the prefix length: see
+		// archivedCacheKey. Both cache layers share it so they cannot drift.
+		m.archivedCacheKey(),
+	)
+	// Render-path half (T3): the frame-owned dimensions plus the overlay inputs
+	// whose event handlers always rebuilt directly (so the Update-side guard
+	// never needed them) but whose direct mutation — tests, session restore —
+	// must still be observed by the render path.
+	// frameHistoryLen/frameLastStreaming are the O(1) terms of the same history
+	// snapshot that produced msgCount (see frameHistoryTerms), so they can never
+	// describe a different snapshot: the length catches an appended tool/result
+	// message (invisible to msgCount) and the flag catches the assistant message
+	// being finalized in place.
+	extra := fmt.Sprintf("|%d|%d|%d|%v|%v|%v|%s|%v|%d|%d|%d|%d|%d|%v|%v",
+		m.viewport.Height,
+		m.frameHistoryLen,
+		m.maxRenderedMessages,
+		m.selecting,
+		m.frameLastStreaming,
+		// A pending forced scroll is consumed BY the rebuild (and by nothing
+		// else), so it belongs to the fingerprint: without it the frame could
+		// consider itself up to date and leave the jump-to-bottom waiting for an
+		// unrelated change.
+		m.forceGotoBottom,
+		m.pendingApprovalCmd,
+		m.approvalShowFull,
+		len(m.groupTranscripts[m.activeGroupID]),
+		len(m.groupMeta[m.activeGroupID].synthesis),
+		int(m.modalMode),
+		len(m.subagentProgress),
+		m.subagentProgressDigest(),
+		// Sidebar visibility (isChatSidebarVisible) moves the subagent progress
+		// block in and out of the viewport overlay, so the two flags that can
+		// change it have to be part of the fingerprint as well (modalMode is
+		// already above).
+		m.showWelcome,
+		m.onboardingActive,
+	)
+	return content + extra
+}
+
+// subagentProgressDigest returns an order-independent fingerprint of the
+// subagent progress overlay inputs (task ID + latest action). XOR-folded
+// per-entry FNV-64a hashes: map iteration order is random, so an
+// order-dependent fold would make the fingerprint differ on every frame and
+// defeat the render-path guard. Bounded by subagentProgressCap entries.
+func (m *Model) subagentProgressDigest() uint64 {
+	var digest uint64
+	for id, action := range m.subagentProgress {
+		h := fnv64aWriteField(fnv64aWriteField(fnv64aOffset, id), action)
+		digest ^= h
+	}
+	return digest
 }
 
 // maybeExpandRenderWindow expands the lazy-load render window backwards.
@@ -369,6 +723,7 @@ func (m *Model) maybeExpandRenderWindow() bool {
 	m.renderedBaseValid = false
 	m.renderedBaseKey = ""
 	m.renderedBaseMsgCount = -1
+	m.renderedBaseHistoryLen = -1
 
 	m.updateViewport()
 
@@ -381,9 +736,15 @@ func (m *Model) maybeExpandRenderWindow() bool {
 	return true
 }
 
-// countHistoryMessages counts user+assistant messages in the given history slice.
-// This is the pure-function version of getHistoryMessageCount that accepts the
-// history directly, avoiding a redundant GetHistoryView call.
+// countHistoryMessages counts user+assistant messages in the given history
+// slice. This is the pure-function version of getHistoryMessageCount that
+// accepts the history directly, avoiding a redundant GetHistoryView call; it is
+// what the render frame uses to derive the count from its single snapshot.
+//
+// It is the DEFINITION of what is counted (roles user/assistant, i.e. the
+// resident display messages — tool/system rows are not counted) and stays the
+// fallback of the memoized accessor below. Callers on the hot path go through
+// Model.historyMessageCount so one snapshot is scanned once.
 func countHistoryMessages(history []providers.Message) int {
 	count := 0
 	for _, msg := range history {
@@ -391,6 +752,50 @@ func countHistoryMessages(history []providers.Message) int {
 			count++
 		}
 	}
+	return count
+}
+
+// historyMessageCount returns countHistoryMessages(history), memoized on the
+// IDENTITY of the slice it is asked about (head element address + length).
+//
+// Why that key is sound — the count is a pure function of the roles and the
+// length of the slice, and pkg/session hands out an immutable copy-on-write
+// snapshot (GetHistoryView) whose identity changes whenever the resident message
+// set can change:
+//
+//   - every structural mutation (append, in-place replacement, delete,
+//     truncate, eviction, exclusion) republishes a freshly cloned slice
+//     (publishViewLocked), so the head address and/or len change;
+//   - a streaming chunk mutates msg.Content in place and deliberately leaves the
+//     published snapshot stale, so the next read rebuilds the copy — a new
+//     backing array again (fallback of the epoch check in GetHistoryView).
+//     Chunks never change a role nor the length without a republish (see
+//     pkg/session/streaming.go), and the count depends on nothing else, so the
+//     identity key cannot hide a changed count.
+//
+// The head pointer is stored as a *providers.Message on purpose: keeping the
+// backing array reachable also keeps its address unique, so the GC can never
+// recycle it into a false hit for a different snapshot. Taking the address of
+// history[0] only computes it — it reads nothing, mutates nothing and does not
+// race with the writers that published the snapshot.
+//
+// The scan is therefore O(1) amortized: the frame's read (historyView) and the
+// rebuild that consumes it (updateViewportWithHistory) resolve the same
+// snapshot and share one scan, and a frame over an unchanged snapshot pays none.
+func (m *Model) historyMessageCount(history []providers.Message) int {
+	if len(history) == 0 {
+		// No identity to key on (there is no history[0]) and the count of an
+		// empty history is 0 by definition — no scan, nothing worth memoizing.
+		return 0
+	}
+	if memo := &m.countMemo; memo.valid && memo.n == len(history) && memo.head == &history[0] {
+		return memo.count
+	}
+	if m.onHistoryCountScan != nil {
+		m.onHistoryCountScan()
+	}
+	count := countHistoryMessages(history)
+	m.countMemo = historyCountMemo{valid: true, head: &history[0], n: len(history), count: count}
 	return count
 }
 
@@ -491,6 +896,15 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 			continue
 		}
 
+		// Suppression state of this message, computed here (not inside the
+		// assistant branch) because it also decides whether the render may be
+		// cached below: while the last message is executing, its tool-call rows
+		// are suppressed — the active tool call is already shown in the overlay
+		// (m.currentToolAction via the "tool.executing" event), so painting
+		// msg.ToolCalls here too produces a visible duplicate — and that render
+		// is a transient variant of the very same fingerprint.
+		isExecutingMessage := m.currentToolAction != "" && m.processing && msg.Role == "assistant" && i == totalMsgs-1
+
 		// Compute fingerprint for per-message cache
 		fp := messageFingerprint(msg, m.viewport.Width)
 		if cachedLines, ok := m.msgRenderCacheLines[fp]; ok {
@@ -528,12 +942,10 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 			}
 
 			// Render tool calls from assistant message (compact: tool_name: params).
-			// Suppress them when this is the currently-executing message: the active
-			// tool call is already shown in the overlay (m.currentToolAction via the
-			// "tool.executing" event), so painting msg.ToolCalls here too produces a
-			// visible duplicate. Once the tool completes (tool.result/stream clears
+			// Suppressed when this is the currently-executing message (see
+			// isExecutingMessage above): the call is already in the overlay.
+			// Once the tool completes (tool.result/stream clears
 			// currentToolAction), the committed tool calls render here normally.
-			isExecutingMessage := m.currentToolAction != "" && m.processing && msg.Role == "assistant" && i == totalMsgs-1
 			if !isExecutingMessage {
 				for _, tc := range msg.ToolCalls {
 					toolName := tc.Name
@@ -565,7 +977,19 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 		// slice, paintFrame, reapplyBackground, Place, AppContainer) reads
 		// already-merged lines. See mergeAdjacentSGR.
 		mergeLines(msgLines)
-		liveCache[fp] = msgLines // cache lines for fast assembly
+		// Cache only renders the fingerprint fully describes. While this
+		// message is the executing one, msgLines is a transient variant of the
+		// same fingerprint (its tool-call rows were suppressed above), so
+		// storing it poisons the entry the moment the message stops being the
+		// last one — e.g. a message appended while the tool is still running
+		// (the /compact window does exactly that): the hit path below would
+		// keep serving the tool-row-less render until a width/session/theme
+		// change. Not caching it costs one re-render of that single message
+		// (the frame still shows the suppressed lines, which is the point) and
+		// keeps every cached entry state-independent.
+		if !isExecutingMessage {
+			liveCache[fp] = msgLines // cache lines for fast assembly
+		}
 		result = append(result, msgLines...)
 		lastRole = msg.Role
 	}
@@ -578,9 +1002,10 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 }
 
 // buildRenderedHistory is the legacy entry point that fetches history internally.
-// Kept for callers that don't have the history slice available.
+// Kept for callers that don't have the history slice available: it resolves
+// through the frame snapshot, so it never adds a second read inside a frame.
 func (m *Model) buildRenderedHistory() []string {
-	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
+	history := m.historyView()
 	return m.buildRenderedHistoryLines(history)
 }
 
@@ -678,7 +1103,7 @@ func (m *Model) renderApprovalKeys(inner int) string {
 
 // lastHistoryRole returns the role of the last non-system message in history.
 func (m *Model) lastHistoryRole() string {
-	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
+	history := m.historyView()
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role != "system" {
 			return history[i].Role

@@ -402,10 +402,16 @@ type AgentDefaults struct {
 	// LoadConfig unmarshals over DefaultConfig, so an explicit 0 in the file wins.
 	// Through the editable document (applyDefaults) 0 cannot be told apart from
 	// unset and inherits the default instead.
-	SubagentMaxRetries    int               `json:"subagent_max_retries" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_RETRIES"`
-	SubagentMaxIterations int               `json:"subagent_max_iterations" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_ITERATIONS"`   // max tool iterations for subagent tasks (0 = unlimited)
-	LLMLoopTimeoutMinutes int               `json:"llm_loop_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_LLM_LOOP_TIMEOUT_MINUTES"` // 0 means no timeout
-	PromptCache           PromptCacheConfig `json:"prompt_cache,omitempty"`                                                       // explicit prompt-cache breakpoints for providers that support them
+	SubagentMaxRetries    int `json:"subagent_max_retries" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_RETRIES"`
+	SubagentMaxIterations int `json:"subagent_max_iterations" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_ITERATIONS"` // max tool iterations for subagent tasks (0 = unlimited)
+	// SubagentRetentionMinutes is how long a finished (terminal) subagent task
+	// stays tracked in memory — with its session resident — before the periodic
+	// retention sweeper reaps it. 0 keeps the manager's built-in default (5m);
+	// it does NOT disable the sweep, because an accidental zero must never make
+	// the task map grow forever again.
+	SubagentRetentionMinutes int               `json:"subagent_retention_minutes" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_RETENTION_MINUTES"`
+	LLMLoopTimeoutMinutes    int               `json:"llm_loop_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_LLM_LOOP_TIMEOUT_MINUTES"` // 0 means no timeout
+	PromptCache              PromptCacheConfig `json:"prompt_cache,omitempty"`                                                       // explicit prompt-cache breakpoints for providers that support them
 }
 
 // PromptCacheConfig controls explicit prompt caching (Anthropic-style
@@ -1264,8 +1270,12 @@ func DefaultConfig() *Config {
 				// 2 outer retries is ~3 rounds of full fallback-chain effort (each
 				// attempt already retries internally); SubagentTimeoutMinutes caps
 				// the total wall clock.
-				SubagentMaxRetries:    2,
-				LLMLoopTimeoutMinutes: 0, // default: no LLM loop timeout (0 = disabled; set >0 to opt in)
+				SubagentMaxRetries: 2,
+				// Terminal subagent tasks are reaped by a periodic sweeper
+				// (SubagentManager.StartRetentionCleanup): 5m is the same
+				// window the manager used as its built-in default.
+				SubagentRetentionMinutes: 5,
+				LLMLoopTimeoutMinutes:    0, // default: no LLM loop timeout (0 = disabled; set >0 to opt in)
 			},
 		},
 		Session: SessionConfig{

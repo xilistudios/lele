@@ -75,7 +75,11 @@ type EditableAgentDefaults struct {
 	SubagentMaxConcurrent  int     `json:"subagent_max_concurrent,omitempty"`
 	SubagentMaxRetries     int     `json:"subagent_max_retries,omitempty"`
 	SubagentMaxIterations  int     `json:"subagent_max_iterations,omitempty"`
-	LLMLoopTimeoutMinutes  int     `json:"llm_loop_timeout_minutes,omitempty"`
+	// SubagentRetentionMinutes mirrors AgentDefaults.SubagentRetentionMinutes:
+	// how long a terminal subagent task stays tracked before the periodic
+	// retention sweeper reaps it (0 = manager default, 5m).
+	SubagentRetentionMinutes int `json:"subagent_retention_minutes,omitempty"`
+	LLMLoopTimeoutMinutes    int `json:"llm_loop_timeout_minutes,omitempty"`
 	// PromptCache mirrors AgentDefaults.PromptCache: explicit prompt-cache
 	// breakpoints for providers that support them (Anthropic-style
 	// cache_control). Without this field the WebUI would silently drop the

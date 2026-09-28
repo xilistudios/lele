@@ -15,6 +15,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return model, cmd
 	}
+	// T6: the subagent listing is refreshed HERE — the single choke point every
+	// message funnels through, so no early-returning handler can skip it — and
+	// nowhere else on the frame path. refreshSubagentsCache coalesces to at most
+	// one backend lookup per subagentsCacheTTL, which is what keeps a burst of
+	// subagent.result events (many subagents finishing at once) from turning
+	// into one expensive listing scan per event.
+	mm.refreshSubagentsCache()
 	// Safety net for the client-side queue: every event path — including the
 	// many early returns inside the modal branch — funnels through here, so a
 	// pending backlog can never be left without a live retry chain (e.g. ESC

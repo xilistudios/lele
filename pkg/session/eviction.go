@@ -13,7 +13,41 @@ import (
 
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/store"
 )
+
+// evictionWaterMark is the hysteresis band of the LRU eviction that runs on
+// session insertion (evictIfNeeded).
+//
+// Both places that materialize a session — getOrCreateUnlocked (a new chat or
+// subagent) and loadSessionFromDisk (a cold load) — call evictIfNeeded right
+// before they assign the session to sm.sessions. With a plain "one in, one out"
+// trigger, every single one of those insertions paid a full eviction cascade
+// under the write lock: a sort of every accessTimes entry plus saveForEviction
+// → saveFullUnlocked → ReplaceMessages. A burst of subagent sessions growing
+// the resident set from maxInMemory to 200 fired ~150 cascades, all of them on
+// the TUI's insertion path (and therefore blocking frames with sm.mu held for
+// the collection phase of each save).
+//
+// The water-mark turns that into hysteresis: the LRU pass does not start until
+// the resident set reaches maxInMemory+evictionWaterMark, and then it evicts the
+// whole backlog back down to maxInMemory in ONE batch. Effects:
+//
+//   - cascades: ~evictionWaterMark× fewer (one per band of insertions instead of
+//     one per insertion) — in the burst above, ~9 instead of ~150;
+//   - resident peak: bounded by maxInMemory+evictionWaterMark. The extra
+//     sessions are LRU-eligible (they would be the next ones evicted anyway), so
+//     this is bounded extra memory, never data that is lost;
+//   - evictions themselves: unchanged. Every session dropped from memory is still
+//     saved exactly once on the way out (that is durability, not waste), still
+//     logged one line per session, and still evicted in LRU order.
+//
+// The band is capped at maxInMemory (see evictIfNeeded): a manager configured for
+// a handful of sessions must not overshoot by 16 of them, and maxInMemory=1
+// degenerates to the historical one-in-one-out trigger (band 1). The TTL sweep in
+// evictIfNeeded is deliberately NOT gated by the water-mark: each idle session is
+// evicted at most once, so it cannot repeat and cannot storm.
+const evictionWaterMark = 16
 
 // touchSession updates the last access time for a session.
 // Caller MUST hold sm.mu (write lock). Writing to the accessTimes map
@@ -45,12 +79,23 @@ func (sm *SessionManager) saveForEviction(key string) bool {
 
 // evictIfNeeded evicts idle sessions when the in-memory session count
 // exceeds maxInMemory. Caller must hold sm.mu (write lock).
+//
+// It runs on the insertion path (every new/cold session), so the common case —
+// nothing to do — must stay a couple of comparisons; the LRU pass only starts
+// once the resident set has crossed the high water-mark (see
+// evictionWaterMark).
 func (sm *SessionManager) evictIfNeeded() {
 	if sm.maxInMemory <= 0 {
 		return
 	}
 
-	// First pass: evict sessions that have been idle longer than evictionTTL
+	// First pass: evict sessions that have been idle longer than evictionTTL.
+	// NOT behind the water-mark below: an idle session is evicted once and is
+	// then gone from accessTimes, so this sweep cannot repeat and cannot storm
+	// — the cascade the water-mark amortizes is the LRU one, which ran once per
+	// insertion. Leaving the sweep unconditional keeps today's semantics exact:
+	// an idle session is dropped by the next insertion, no matter how small the
+	// resident set is.
 	if sm.evictionTTL > 0 {
 		cutoff := time.Now().Add(-sm.evictionTTL)
 		for key, lastAccess := range sm.accessTimes {
@@ -72,7 +117,25 @@ func (sm *SessionManager) evictIfNeeded() {
 		}
 	}
 
-	// Second pass: if still over limit, evict least recently used
+	// Second pass (LRU), gated by the hysteresis band. The band is capped at
+	// maxInMemory so a small limit keeps a tight bound (peak <= 2*maxInMemory)
+	// and maxInMemory=1 reproduces the historical trigger — the behaviour
+	// TestSaveAllSkipsEvicted pins.
+	band := evictionWaterMark
+	if band > sm.maxInMemory {
+		band = sm.maxInMemory
+	}
+	// The caller is about to make exactly one more session resident (both call
+	// sites assign sm.sessions[key] right after this call), so the count this
+	// call must budget for is len(sm.sessions)+1. Gating on that count keeps the
+	// resident peak at exactly maxInMemory+band instead of one above it, and it
+	// makes every insertion inside the band an O(1) no-op.
+	if len(sm.sessions)+1 <= sm.maxInMemory+band {
+		return
+	}
+
+	// Over the band: evict the whole backlog in one batch (down to
+	// maxInMemory), not one session per insertion.
 	if len(sm.sessions) <= sm.maxInMemory {
 		return
 	}
@@ -93,6 +156,11 @@ func (sm *SessionManager) evictIfNeeded() {
 	})
 
 	toEvict := len(sm.sessions) - sm.maxInMemory
+	// Eviction is map-only: it drops the resident pointer and never touches
+	// Session.Messages or the Session itself, so the copy-on-write history view
+	// (view.go) and its saveEpoch are untouched by batching the evictions —
+	// a reader already holding the published messageSnapshot keeps reading the
+	// immutable copy, and the next reader for this key takes the cold path.
 	for i := 0; i < toEvict && i < len(accesses); i++ {
 		key := accesses[i].key
 		session, ok := sm.sessions[key]
@@ -215,6 +283,14 @@ func (sm *SessionManager) SetEvictionTTL(ttl time.Duration) {
 // PRECONDITION: the caller must have already persisted the excluded flags
 // (Save returned nil). Eviction itself is memory-only and idempotent.
 //
+// Lock scope: sm.mu covers ONLY the decision and the in-memory mutation. The
+// boundary is persisted by persistEvictionBoundary — a free helper — with the
+// lock RELEASED, and the bookkeeping is reconciled after re-acquiring it,
+// exactly like saveFullUnlocked (persist.go). This is the path every
+// compaction (evict_excluded_from_memory) goes through, and GetHistoryView
+// takes the read lock: with the SQLite round trip under the write lock, every
+// compaction froze the TUI frames for the whole duration of the write.
+//
 // Returns the number of messages evicted.
 func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	sm.ensureLoaded()
@@ -227,6 +303,14 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 		return 0
 	}
 
+	// ---- Phase 1 (sm.mu held): decide, mutate memory, collect ----
+	//
+	// No I/O and no JSON work happens here, and every early return below
+	// happens BEFORE any mutation, so the historical no-op semantics are
+	// preserved: an eviction with nothing to do takes no I/O at all. The
+	// deferred Unlock owns the lock taken here for the whole function — the
+	// phase-2 release/re-acquire below is temporary and always balanced, so
+	// the defer is what leaves the lock in the state the caller expects.
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -324,7 +408,18 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	session.firstInMemorySeq += evictUpTo
 	session.evictedTotal += evictUpTo
 	session.bumpEpoch()
+	// MUST stay under sm.mu, immediately after the slice swap: the published
+	// snapshot is what GetHistoryView reads WITHOUT the lock, and "a snapshot
+	// whose epoch equals saveEpoch reflects the current Messages" is the
+	// invariant the whole copy-on-write scheme rests on (view.go). Publishing
+	// from phase 2 (or after the I/O) would leave the view stale for the
+	// duration of the round trip, even though the epoch was already bumped.
+	session.publishViewLocked() // the slice was replaced by a shorter tail
 	sm.syncSessionMetaLocked(session)
+
+	// Everything phase 2 needs, captured while the lock still guarantees it
+	// cannot change:
+	//
 	// Persist the new eviction boundary to SQLite so a cold restart restores
 	// firstInMemorySeq and does not re-inflate evicted rows into RAM. The
 	// boundary is stored in session metadata (FirstInMemorySeq); subsequent
@@ -337,21 +432,69 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	// instead of the targeted UpdateFirstInMemorySeq. The folded text is
 	// about to leave memory entirely with the evicted region, so a crash
 	// before the next Save would lose it — it must be durable immediately.
+	repo := repoFor(sm)
+	epoch := session.saveEpoch
+	meta := sessionMetaFromSession(session)
+	firstInMemorySeq := session.firstInMemorySeq
+
+	// ---- Phase 2 (lock released): the SQLite round trip ----
+	//
+	// persistEvictionBoundary is a free function: "no I/O under the lock" is
+	// structural, not a convention a later edit can quietly break. unlocked()
+	// re-acquires the lock immediately after it (panic included), so no error
+	// path can return with the lock held, leak it, or leave it unlocked for
+	// this function's deferred Unlock.
 	var metaPersistErr error
-	if sm.sessionRepo != nil {
-		if foldedSummary {
-			metaPersistErr = sm.sessionRepo.UpsertSession(sessionMetaFromSession(session))
-		} else {
-			metaPersistErr = sm.sessionRepo.UpdateFirstInMemorySeq(key, session.firstInMemorySeq)
-		}
-		if metaPersistErr != nil {
-			logger.WarnCF("session", "Failed to persist eviction boundary", map[string]interface{}{
-				"session_key":     key,
-				"first_in_memory": session.firstInMemorySeq,
-				"error":           metaPersistErr.Error(),
-			})
-		}
+	sm.unlocked(func() {
+		metaPersistErr = persistEvictionBoundary(repo, key, foldedSummary, meta, firstInMemorySeq)
+	})
+
+	if metaPersistErr != nil {
+		logger.WarnCF("session", "Failed to persist eviction boundary", map[string]interface{}{
+			"session_key":     key,
+			"first_in_memory": firstInMemorySeq,
+			"error":           metaPersistErr.Error(),
+		})
 	}
+
+	// The eviction itself already happened in phase 1 and is reported here for
+	// every post-mutation path below — including the two guard exits, where
+	// only the bookkeeping is skipped.
+	logger.InfoCF("session", "Evicted excluded messages from memory", map[string]interface{}{
+		"session_key":     key,
+		"evicted":         evictUpTo,
+		"remaining":       len(tail),
+		"evicted_total":   session.evictedTotal,
+		"first_in_memory": session.firstInMemorySeq,
+	})
+
+	// ---- Phase 3 (relock + guards) ----
+	//
+	// Epoch guard + healing, the same contract as saveFullUnlocked: if the
+	// session was mutated while the boundary I/O was in flight, the
+	// bookkeeping below belongs to a state that no longer exists — the
+	// concurrent mutation is the one that must survive. Its dirty flags are
+	// left untouched, and the next Save is forced to rewrite the whole history
+	// from the in-memory source of truth (lastPersistedSeq == -1 is what makes
+	// saveUnlocked pick saveFullUnlocked), healing any ordering damage between
+	// our boundary write and the concurrent save's writes.
+	if session.saveEpoch != epoch {
+		session.lastPersistedSeq = -1
+		return evictUpTo
+	}
+
+	// Residency guard: the epoch check covers concurrent mutations, but a
+	// concurrent eviction (LRU/TTL) can also have dropped this session from
+	// sm.sessions while the I/O was in flight — and the next access may have
+	// reloaded a DIFFERENT Session object for the same key, with its own
+	// bookkeeping rebuilt from disk. The boundary write itself is durable and
+	// stays; only the in-memory bookkeeping is skipped, because it belongs to
+	// the object we collected from, not to the resident one (nothing to keep
+	// hot either, so touchSession is skipped too).
+	if cur, ok := sm.sessions[key]; !ok || cur != session {
+		return evictUpTo
+	}
+
 	// Dirty flags are reset: everything in memory is already persisted; the
 	// next Save must be a no-op (NOT a full rewrite).
 	session.clearDirtyFlags()
@@ -362,15 +505,31 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	}
 	session.lastPersistedSeq = len(session.Messages) - 1
 	sm.touchSession(key)
-
-	logger.InfoCF("session", "Evicted excluded messages from memory", map[string]interface{}{
-		"session_key":     key,
-		"evicted":         evictUpTo,
-		"remaining":       len(tail),
-		"evicted_total":   session.evictedTotal,
-		"first_in_memory": session.firstInMemorySeq,
-	})
 	return evictUpTo
+}
+
+// persistEvictionBoundary makes phase 1's eviction boundary durable in SQLite.
+//
+// It MUST run with sm.mu released (EvictExcludedMessages owns the
+// release/acquire around it): that is the whole point of the T9 split — this
+// write used to run with the write lock held, and because GetHistoryView takes
+// the read lock, every compaction froze the TUI for the duration of the round
+// trip. Being a free function (no access to sm.mu at all) makes the property
+// structural: there is no way to reach it while holding the manager lock.
+//
+// Which statement to use is decided by the caller: UpsertSession rewrites the
+// whole metadata row — Summary included — and is required when the fold
+// rewrote the summary (its text is about to leave memory, see
+// foldEvictedIntoSummary); otherwise the targeted UpdateFirstInMemorySeq
+// avoids rewriting metadata that did not change.
+func persistEvictionBoundary(repo sessionRepo, key string, foldedSummary bool, meta store.SessionMeta, firstInMemorySeq int) error {
+	if repo == nil {
+		return nil
+	}
+	if foldedSummary {
+		return repo.UpsertSession(meta)
+	}
+	return repo.UpdateFirstInMemorySeq(key, firstInMemorySeq)
 }
 
 // foldEvictedIntoSummary prepends the evicted messages' content to the session

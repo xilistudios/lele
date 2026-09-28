@@ -213,7 +213,7 @@ func (m *Model) reloadSessions() {
 	m.renderedBaseKey = ""
 
 	m.visibleSessions = nil
-	all := m.sessionMgr.ListSessions()
+	all := m.cachedSessionListing()
 
 	// The TUI has no session-delete path of its own — a chat can disappear
 	// from the list because it was deleted elsewhere (WebUI, backend). This is
@@ -228,7 +228,11 @@ func (m *Model) reloadSessions() {
 	}
 
 	// Batch-fetch message counts once (single SQLite query for cold sessions)
-	// instead of calling GetTotalMessageCount per session (N+1 queries).
+	// instead of calling GetTotalMessageCount per session (N+1 queries). T8:
+	// the cold half of this lookup is memoized inside pkg/session (see
+	// storeCountsCache) and the resident half is computed from live slices, so
+	// the chat on screen always reports its exact count while a burst of events
+	// no longer re-scans the message table.
 	msgCounts := m.sessionMgr.AllTotalMessageCounts()
 
 	for _, s := range all {
@@ -292,7 +296,7 @@ func (m *Model) reloadSessions() {
 
 	// Clear pending user message if it now appears in the session history
 	if m.pendingUserMessage != "" && m.currentKey != "" {
-		history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
+		history := m.historyView()
 		for _, msg := range history {
 			if msg.Role == "user" && msg.Content == m.pendingUserMessage {
 				m.pendingUserMessage = ""
@@ -324,38 +328,107 @@ func (m *Model) reloadSessions() {
 	m.updateViewport()
 }
 
-// getViewportContentKey returns a compact fingerprint of the state that affects
-// the rendered viewport. It is used to skip redundant updateViewport() calls
-// (and therefore expensive re-renders of the whole history) when nothing
-// user-visible changed. This keeps idle CPU low even for very long sessions.
+// sessionsRefreshTTL is the coalescing window of the session listing (T8).
+//
+// Re-walking the listing costs a ListSessions() pass plus AllTotalMessageCounts
+// (444 µs / 179 KB / 815 allocs at 200 sessions, measured in
+// docs/perf/tui-long-chat-baseline.md; the cold half is a full scan of
+// session_messages). reloadSessions — the choke point that owns it — is called
+// once per completed turn, per tab/ESC, per sidebar click and by /new, /clear,
+// /compact, so during the many-finished-subagents scenario (every finished
+// subagent restarts a turn on the visible chat, i.e. fires completeMsg) the cost
+// multiplied by the event rate.
+//
+// Inside the window the cached listing is served instead: at most 4 walks/s
+// (≈1.8 ms/s ≈ 0.2 % of a core at 200 sessions) rather than one per event. 250 ms
+// is the shortest window that still collapses a burst a user perceives as
+// instantaneous, and the observable staleness is limited to a chat that appeared
+// or was renamed elsewhere (WebUI, cron) showing up in the sidebar at most that
+// late — resident entries hold live *session.Session pointers, so no message
+// content is ever stale. Every TUI action that must be exact bypasses the window
+// instead of waiting for it (refreshSessionsCache(true): a switch onto a chat
+// the snapshot does not know yet, and the /sessions picker).
+const sessionsRefreshTTL = 250 * time.Millisecond
+
+// refreshSessionsCache re-walks the session listing into sessionsCache. It is the
+// ONLY caller of SessionManager.ListSessions on the TUI side — the constructor
+// resolves the session to resume before this model exists, and the /sessions
+// picker goes through freshSessionListing — so every other reader serves the
+// snapshot (View() reads visibleSessions, which reloadSessions derives from it).
+//
+// Coalescing: at most one walk per sessionsRefreshTTL, however many events reach
+// reloadSessions in between. force bypasses the window and is reserved for the
+// two paths where the very next frame must observe the listing exactly (see the
+// doc of sessionsCacheState and the callers).
+func (m *Model) refreshSessionsCache(force bool) {
+	c := &m.sessionsCache
+	if c.loaded && !force && time.Since(c.at) < sessionsRefreshTTL {
+		return
+	}
+	if m.onSessionsRefresh != nil {
+		m.onSessionsRefresh()
+	}
+	c.all = m.sessionMgr.ListSessions()
+	c.at = time.Now()
+	c.loaded = true
+}
+
+// cachedSessionListing returns the session listing, re-walking it at most once
+// per sessionsRefreshTTL. It must never be called from View(): the render path
+// reads the derived visibleSessions instead.
+func (m *Model) cachedSessionListing() []*session.Session {
+	m.refreshSessionsCache(false)
+	return m.sessionsCache.all
+}
+
+// freshSessionListing returns a just-walked listing, bypassing the window. Used
+// by paths where a stale snapshot would be user-visible — currently the
+// /sessions picker, whose whole purpose is to list the chats as they are now.
+func (m *Model) freshSessionListing() []*session.Session {
+	m.refreshSessionsCache(true)
+	return m.sessionsCache.all
+}
+
+// sessionListedInCache reports whether the snapshot already contains key. It is
+// the switch choke point's cheap check (O(sessions) pointer compares, no
+// allocation): a switch between chats the listing already knows is fully
+// represented by the snapshot, while a chat created after it was taken (a brand
+// new chat's first message, /new) is the one case a stale listing cannot render,
+// and forces a walk.
+func (m *Model) sessionListedInCache(key string) bool {
+	if !m.sessionsCache.loaded {
+		return false
+	}
+	for _, s := range m.sessionsCache.all {
+		if s.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// getViewportContentKey returns the fingerprint of the state that affects the
+// rendered viewport, for the Update-side skip guard (shouldSkipViewportUpdate):
+// it lets an event that cannot change the visible output (most outbound events,
+// unrelated reloadSessions) avoid an O(history) rebuild, which is the dominant
+// CPU cost of a long conversation.
+//
+// It is the Update-side spelling of viewportContentKey — the very same function
+// the render path compares and noteViewportMaterialized records — so a rebuild
+// decision can never drift between the two sides. The Update path has no
+// hoisted frame snapshot, so the resident count comes from historyCount:
+// outside a frame that is one read, inside a frame it is the frame's snapshot.
 func (m *Model) getViewportContentKey() string {
-	msgCount := m.getHistoryMessageCount()
-	return fmt.Sprintf("%s|%d|%d|%d|%s|%s|%s|%s|%s|%v|%v|%v|%d|%s",
-		m.currentKey,
-		m.viewport.Width,
-		msgCount,
-		len(m.currentStream)+len(m.currentThinking),
-		m.currentToolAction,
-		m.pendingUserMessage,
-		m.pendingApprovalID,
-		m.approvalResult,
-		m.activeGroupID,
-		m.processing,
-		m.compactFeedback != "",
-		m.statusFeedback != "",
-		m.renderStartIdx,
-		// Full archived fingerprint, not just the prefix length. This guard
-		// runs BEFORE updateViewport, so anything the inner rebuild check
-		// reacts to has to be visible here too — otherwise the frame is judged
-		// "unchanged" and never reaches that check. Both layers share
-		// archivedCacheKey precisely so they cannot drift apart.
-		m.archivedCacheKey(),
-	)
+	return m.viewportContentKey(m.getHistoryMessageCount())
 }
 
 // shouldSkipViewportUpdate reports whether the current model state would
 // produce exactly the same viewport content as the last render. Used to avoid
-// redundant re-renders triggered by events that don't change visible output.
+// redundant re-renders triggered by events that don't change visible output:
+// the fingerprint is the one shared with the render path (getViewportContentKey
+// delegates to viewportContentKey) and only the rebuild records it
+// (noteViewportMaterialized), so "up to date" means the same thing here and in
+// View().
 func (m *Model) shouldSkipViewportUpdate() bool {
 	if m.currentKey == "" || m.showWelcome || m.selecting {
 		return false
@@ -367,12 +440,7 @@ func (m *Model) shouldSkipViewportUpdate() bool {
 	if m.modalMode != ModalNone {
 		return false
 	}
-	key := m.getViewportContentKey()
-	if key == m.lastViewportKey && m.renderedBaseValid {
-		return true
-	}
-	m.lastViewportKey = key
-	return false
+	return m.getViewportContentKey() == m.lastViewportKey && m.renderedBaseValid
 }
 
 func (m *Model) createNewChat() {
@@ -409,7 +477,7 @@ func (m *Model) cleanupStreamingIfComplete() {
 	if (m.currentStream == "" && m.currentThinking == "") || m.currentKey == "" {
 		return
 	}
-	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
+	history := m.historyView()
 	m.cleanupStreamingIfCompleteWithHistory(history)
 }
 
@@ -479,6 +547,24 @@ func (m *Model) setCurrentChatKey(newKey string) {
 	// path because every caller is an Update()-path route — never View().
 	m.resetArchivedHistory()
 	m.refreshArchivedHistory()
+	// T8: the frame that follows reads visibleSessions — derived from the cached
+	// session listing — for the sidebar rows and the selected index, so a switch
+	// is one of the two places where the snapshot must be exact. The window is
+	// only bypassed when the snapshot cannot represent the switch at all (a chat
+	// created after it was taken: /new, the first message of a new chat); a
+	// switch between two chats the listing already knows costs no walk, which is
+	// what keeps a burst of navigation from re-walking the listing each time.
+	if !m.sessionListedInCache(newKey) {
+		m.refreshSessionsCache(true)
+	}
+	// T6: the subagent listing is session-scoped, so the switch is one of the
+	// two places that refresh it eagerly (the other is the Update() tail in
+	// Update): the new key makes the cached entry stale by construction, and
+	// the rows are read by the frames that follow — plus by
+	// clearStreamingState (hasRunningSubagents) a few lines below, which every
+	// caller runs right after this function. Same rule as everything else here:
+	// Update()-path only, never View().
+	m.refreshSubagentsCache()
 	// TUI-H2: the streaming overlay (currentStream/currentThinking) is
 	// session-scoped presentation state. Every other session boundary clears
 	// it (publishUserMessage, /compact, message.complete cleanup), but this
@@ -779,54 +865,126 @@ func (m *Model) renderSubagentProgress() string {
 	return sb.String()
 }
 
-// subagentsCacheTTL bounds how often the expensive GetSessionSubagents lookup
-// runs. It is called multiple times per frame (sidebar + processing checks)
-// and scans all agents' subagent managers and session storage, taking write
-// locks and possibly loading sessions from disk. Subagent lifecycle events
-// (subagent.result, spawn tool.result, subagent progress) invalidate the
-// cache immediately, so the TTL only throttles redundant lookups within a
-// single burst of frames.
-const subagentsCacheTTL = 500 * time.Millisecond
+// subagentsCacheTTL is the refresh cadence of the subagent listing cache (T6).
+//
+// GetSessionSubagents scans every manager's tasks (deep-copying each one) and
+// every agent's session storage (O(total sessions), plus one SQLite stats query
+// per chunk of 200 cold keys): 2.0 ms / 414 KB at 200 subagents and 6.9 ms /
+// 1.2 MB at 500 cold ones (docs/perf/tui-long-chat-baseline.md). The sidebar and
+// the status line both used to call it from View() — i.e. on every frame — and
+// every subagent lifecycle event invalidated the cache, so a burst of finished
+// subagents paid the full lookup again and again.
+//
+// The refresh now happens ONLY from Update() (see refreshSubagentsCache) and at
+// most once per window, so 50 subagent.result events in a second coalesce into
+// a single lookup. The render path serves the last known listing, which may
+// therefore be up to subagentsCacheTTL stale. That bound is deliberate and
+// acceptable: it is a sidebar listing (and the "running" indicator of the
+// status line, which stops within the same bound because the spinner's own tick
+// chain keeps feeding Update until the refreshed count reaches 0).
+const subagentsCacheTTL = 3 * time.Second
 
-// getSessionSubagentsCached returns subagent tasks for the given session key,
-// refreshing the underlying (expensive) backend call at most once per
-// subagentsCacheTTL. Call invalidateSubagentsCache() when a subagent event
-// changes the expected result.
-func (m *Model) getSessionSubagentsCached(queryKey string) []channels.SubagentTaskInfo {
-	if m.agentLoop == nil || queryKey == "" {
-		return nil
-	}
-	if m.subagentsCacheKey == queryKey && time.Since(m.subagentsCacheTime) < subagentsCacheTTL {
-		return m.subagentsCacheValue
-	}
-	subagents := m.agentLoop.GetProvidable().GetSessionSubagents(queryKey)
-	m.subagentsCacheKey = queryKey
-	m.subagentsCacheTime = time.Now()
-	m.subagentsCacheValue = subagents
-	return subagents
-}
+// subagentsCacheRunning is the cached status value of a running subagent task.
+// It is compared literally (as the sidebar rows already do) to stay independent
+// of pkg/tools' constants in this package.
+const subagentsCacheRunning = "running"
 
-// invalidateSubagentsCache forces the next getSessionSubagentsCached call to
-// hit the backend. Called on subagent lifecycle events.
-func (m *Model) invalidateSubagentsCache() {
-	m.subagentsCacheKey = ""
-}
-
-func (m *Model) hasRunningSubagents() bool {
+// subagentQueryKey returns the key GetSessionSubagents must be queried with for
+// the visible chat: a subagent view lists its PARENT's subagents (the sidebar
+// swaps the view, see renderSidebarSubagents), and a task's OriginSessionKey is
+// always "native:<chatID>". Returns "" when there is nothing to query.
+func (m *Model) subagentQueryKey() string {
 	if m.agentLoop == nil || m.currentKey == "" {
+		return ""
+	}
+	key := m.currentKey
+	if m.parentSessionKey != "" {
+		key = m.parentSessionKey
+	}
+	if !strings.HasPrefix(key, "native:") {
+		key = "native:" + key
+	}
+	return key
+}
+
+// refreshSubagentsCache loads the subagent listing for the visible chat into
+// subagentsCache. It is the ONLY writer of the cache and the only subagent
+// listing call reachable from pkg/tui's Update()-path entry points — View()
+// must never call it (TestView_SubagentListingIsCacheOnly pins that).
+//
+// Coalescing: the backend is queried at most once per subagentsCacheTTL, no
+// matter how many lifecycle events (subagent.result, spawn tool.result, ticks,
+// keystrokes, mouse motion) arrive in between. A session switch changes the
+// query key and refreshes immediately, so the new session never serves the
+// previous listing.
+//
+// It runs on the Update() side only, which is where the cost belongs: up to
+// ~7 ms of SQLite-backed work paid once per window instead of inside every
+// frame. Returns true when the backend was actually queried.
+func (m *Model) refreshSubagentsCache() bool {
+	key := m.subagentQueryKey()
+	if key == "" {
 		return false
 	}
-	subagentQueryKey := m.currentKey
-	if !strings.HasPrefix(subagentQueryKey, "native:") {
-		subagentQueryKey = "native:" + subagentQueryKey
+	c := &m.subagentsCache
+	if c.key == key && time.Since(c.at) < subagentsCacheTTL {
+		return false
 	}
-	subagents := m.getSessionSubagentsCached(subagentQueryKey)
-	for _, sa := range subagents {
-		if sa.Status == "running" {
-			return true
+	if m.onSubagentsRefresh != nil {
+		m.onSubagentsRefresh()
+	}
+	list := m.agentLoop.GetProvidable().GetSessionSubagents(key)
+	// Sort here, once: the render path only reads the slice, so it can neither
+	// re-sort a 200-entry listing every frame nor mutate what the cache holds.
+	sortSubagents(list)
+	c.key = key
+	c.list = list
+	c.running = countRunningSubagents(list)
+	c.at = time.Now()
+	return true
+}
+
+// cachedSessionSubagents returns the cached subagent listing of the visible
+// chat. O(1) and allocation-free: the retained slice, never a backend call, a
+// copy or a sort. The result may be up to subagentsCacheTTL stale — the cache
+// is refreshed from Update(), not from here.
+func (m *Model) cachedSessionSubagents() []channels.SubagentTaskInfo {
+	key := m.subagentQueryKey()
+	if key == "" || m.subagentsCache.key != key {
+		return nil
+	}
+	return m.subagentsCache.list
+}
+
+// countRunningSubagents counts the entries of a listing that are running. It is
+// the O(n) half of the cache refresh: hasRunningSubagents then answers in O(1)
+// from the cached count instead of building and scanning the listing.
+func countRunningSubagents(list []channels.SubagentTaskInfo) int {
+	running := 0
+	for i := range list {
+		if list[i].Status == subagentsCacheRunning {
+			running++
 		}
 	}
-	return false
+	return running
+}
+
+// hasRunningSubagents reports whether the visible chat has a running subagent
+// (the status-line spinner and several Update()-side busy gates ask this every
+// frame). O(1) and allocation-free: the count materialized by the last cache
+// refresh — never the listing, never a backend call.
+//
+// "Visible chat" is the same listing the sidebar shows, i.e. the parent chat
+// while a subagent view is on screen. That is intentionally wider than the old
+// per-session query (which looked up the subagent's own sub-subagents): the
+// status line describes the session being viewed, and isSessionProcessing
+// already skips this check for subagent sessions (isSubagentSession).
+func (m *Model) hasRunningSubagents() bool {
+	key := m.subagentQueryKey()
+	if key == "" || m.subagentsCache.key != key {
+		return false
+	}
+	return m.subagentsCache.running > 0
 }
 
 // isSubagentSession returns true if the session key corresponds to a subagent session.
@@ -863,28 +1021,14 @@ func (m *Model) currentSessionKey() string {
 	return m.currentKey
 }
 
+// getHistoryMessageCount returns the number of user+assistant messages in the
+// current session's resident history. It is a thin alias over the render
+// frame's snapshot (historyCount): the history is read at most once per frame,
+// so calling this several times in a frame — as the token cache key and the
+// viewport-skip fingerprint do — costs nothing and always yields the same
+// value. Outside a frame it reads the history once per call, as before.
 func (m *Model) getHistoryMessageCount() int {
-	if m.currentKey == "" {
-		return 0
-	}
-	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
-
-	// Cache the O(n) role scan: the count only changes when len(history)
-	// changes, and this is called multiple times per frame.
-	if m.historyCountKey == m.currentKey && m.historyCountLen == len(history) {
-		return m.historyCountValue
-	}
-
-	count := 0
-	for _, msg := range history {
-		if msg.Role == "user" || msg.Role == "assistant" {
-			count++
-		}
-	}
-	m.historyCountKey = m.currentKey
-	m.historyCountLen = len(history)
-	m.historyCountValue = count
-	return count
+	return m.historyCount()
 }
 
 // ResumeSessionID returns the session ID suitable for resuming the current chat session from the CLI.
