@@ -7,8 +7,8 @@
     {
       "id": "qwen-3.8-27b",
       "name": "Qwen3.8 27B",
-      "context_window": 65536,
-      "max_output": 32768,
+      "context_window": 131072,
+      "max_output": 40960,
       "vision": true,
       "thinking_levels": [
         "low",

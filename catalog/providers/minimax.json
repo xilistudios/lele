@@ -7,7 +7,7 @@
     {
       "id": "MiniMax-M3",
       "name": "MiniMax-M3",
-      "context_window": 1048576,
+      "context_window": 1000000,
       "max_output": 512000,
       "vision": true,
       "thinking_levels": [

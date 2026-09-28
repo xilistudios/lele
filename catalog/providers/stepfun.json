@@ -19,6 +19,20 @@
       "tool_call": true
     },
     {
+      "id": "step-5-preview",
+      "name": "Step 5 Preview",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "step-3.5-flash",
       "name": "Step 3.5 Flash",
       "context_window": 256000,

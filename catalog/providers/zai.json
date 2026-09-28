@@ -19,6 +19,20 @@
       "tool_call": true
     },
     {
+      "id": "glm-4.6v-flash",
+      "name": "GLM-4.6V-Flash",
+      "context_window": 128000,
+      "max_output": 32768,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "glm-4.5v",
       "name": "GLM-4.5V",
       "context_window": 64000,

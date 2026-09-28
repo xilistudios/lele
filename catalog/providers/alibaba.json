@@ -117,6 +117,20 @@
       "tool_call": true
     },
     {
+      "id": "qwen3.5-flash",
+      "name": "Qwen3.5 Flash",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "qwen3.5-plus",
       "name": "Qwen3.5 Plus",
       "context_window": 1000000,
@@ -187,10 +201,24 @@
       "tool_call": true
     },
     {
+      "id": "qwen3.7-flash",
+      "name": "Qwen3.7 Flash",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "qwen3.7-plus",
       "name": "Qwen3.7 Plus",
       "context_window": 1000000,
-      "max_output": 65536,
+      "max_output": 131072,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -216,6 +244,19 @@
     {
       "id": "qwen3.8-max",
       "name": "Qwen3.8 Max",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.8-omni-flash",
+      "name": "Qwen3.8 Omni Flash",
       "context_window": 1000000,
       "max_output": 131072,
       "vision": true,
@@ -302,34 +343,6 @@
         "high"
       ],
       "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "qwen3.7-max",
-      "name": "Qwen3.7 Max",
-      "context_window": 1000000,
-      "max_output": 65536,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "qwen3-omni-flash-realtime",
-      "name": "Qwen3-Omni Flash Realtime",
-      "context_window": 65536,
-      "max_output": 16384,
-      "vision": true,
-      "tool_call": true
-    },
-    {
-      "id": "qwen3-coder-30b-a3b-instruct",
-      "name": "Qwen3-Coder 30B-A3B Instruct",
-      "context_window": 262144,
-      "max_output": 65536,
       "tool_call": true
     }
   ]

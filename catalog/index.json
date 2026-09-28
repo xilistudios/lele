@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-09-21T12:44:21Z",
+  "updated_at": "2026-09-28T13:49:40Z",
   "source": "models.dev",
   "providers": {
     "alibaba": {
@@ -17,7 +17,7 @@
       "type": "openai",
       "api_base": "https://coding-intl.dashscope.aliyuncs.com/v1",
       "file": "providers/alibaba_coding_plan.json",
-      "model_count": 12
+      "model_count": 10
     },
     "alibaba_token_plan": {
       "id": "alibaba_token_plan",
@@ -41,7 +41,7 @@
       "type": "anthropic",
       "api_base": "https://api.anthropic.com/v1",
       "file": "providers/anthropic.json",
-      "model_count": 14
+      "model_count": 15
     },
     "arcee": {
       "id": "arcee",
@@ -89,7 +89,7 @@
       "type": "openai",
       "api_base": "https://api.deepseek.com/v1",
       "file": "providers/deepseek.json",
-      "model_count": 4
+      "model_count": 2
     },
     "fireworks": {
       "id": "fireworks",
@@ -97,7 +97,7 @@
       "type": "openai",
       "api_base": "https://api.fireworks.ai/inference/v1",
       "file": "providers/fireworks.json",
-      "model_count": 23
+      "model_count": 22
     },
     "gemini": {
       "id": "gemini",
@@ -249,7 +249,7 @@
       "type": "openai",
       "api_base": "https://api.openai.com/v1",
       "file": "providers/openai.json",
-      "model_count": 36
+      "model_count": 40
     },
     "opencode": {
       "id": "opencode",
@@ -265,7 +265,7 @@
       "type": "openai",
       "api_base": "https://opencode.ai/zen/go/v1",
       "file": "providers/opencode_go.json",
-      "model_count": 27
+      "model_count": 29
     },
     "openrouter": {
       "id": "openrouter",
@@ -313,7 +313,7 @@
       "type": "openai",
       "api_base": "https://api.stepfun.ai/step_plan/v1",
       "file": "providers/stepfun.json",
-      "model_count": 3
+      "model_count": 4
     },
     "tencent_tokenhub": {
       "id": "tencent_tokenhub",
@@ -353,7 +353,7 @@
       "type": "openai",
       "api_base": "https://api.x.ai/v1",
       "file": "providers/xai.json",
-      "model_count": 10
+      "model_count": 12
     },
     "xiaomi": {
       "id": "xiaomi",
@@ -361,7 +361,7 @@
       "type": "openai",
       "api_base": "https://api.xiaomimimo.com/v1",
       "file": "providers/xiaomi.json",
-      "model_count": 3
+      "model_count": 6
     },
     "zai": {
       "id": "zai",
@@ -369,7 +369,7 @@
       "type": "openai",
       "api_base": "https://api.z.ai/api/paas/v4",
       "file": "providers/zai.json",
-      "model_count": 17
+      "model_count": 18
     },
     "zai_coding_plan": {
       "id": "zai_coding_plan",
@@ -385,7 +385,7 @@
       "type": "openai",
       "api_base": "https://open.bigmodel.cn/api/paas/v4",
       "file": "providers/zhipu.json",
-      "model_count": 16
+      "model_count": 17
     }
   }
 }

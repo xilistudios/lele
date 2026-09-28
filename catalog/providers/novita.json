@@ -238,7 +238,7 @@
       "id": "moonshotai/kimi-k2-thinking",
       "name": "Kimi K2 Thinking",
       "context_window": 262144,
-      "max_output": 262144,
+      "max_output": 98304,
       "thinking_levels": [
         "low",
         "medium",
@@ -396,7 +396,7 @@
       "id": "minimax/minimax-m2.5",
       "name": "MiniMax M2.5",
       "context_window": 204800,
-      "max_output": 131100,
+      "max_output": 131072,
       "thinking_levels": [
         "low",
         "medium",
@@ -409,7 +409,7 @@
       "id": "minimax/minimax-m2.5-highspeed",
       "name": "MiniMax M2.5 Highspeed",
       "context_window": 204800,
-      "max_output": 131100,
+      "max_output": 131072,
       "thinking_levels": [
         "low",
         "medium",
@@ -461,7 +461,7 @@
       "id": "moonshotai/kimi-k2-0905",
       "name": "Kimi K2 0905",
       "context_window": 262144,
-      "max_output": 262144,
+      "max_output": 98304,
       "tool_call": true
     },
     {

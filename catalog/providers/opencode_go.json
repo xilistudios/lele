@@ -33,10 +33,10 @@
       "tool_call": true
     },
     {
-      "id": "kimi-k2.6",
-      "name": "Kimi K2.6",
-      "context_window": 262144,
-      "max_output": 65536,
+      "id": "grok-4.7",
+      "name": "Grok 4.7",
+      "context_window": 500000,
+      "max_output": 500000,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -51,20 +51,6 @@
       "name": "Kimi K2.7 Code",
       "context_window": 262144,
       "max_output": 262144,
-      "vision": true,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "qwen3.6-plus",
-      "name": "Qwen3.6 Plus",
-      "context_window": 1000000,
-      "max_output": 65536,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -110,19 +96,6 @@
       "thinking_levels": [
         "low",
         "medium"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "qwen3.7-max",
-      "name": "Qwen3.7 Max",
-      "context_window": 1000000,
-      "max_output": 65536,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
       ],
       "reasoning": true,
       "tool_call": true
@@ -194,12 +167,40 @@
       "tool_call": true
     },
     {
+      "id": "gpt-6-luna",
+      "name": "GPT-6 Luna",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "kimi-k3",
       "name": "Kimi K3",
       "context_window": 1048576,
       "max_output": 131072,
       "vision": true,
       "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "longcat-2.5-preview-free",
+      "name": "LongCat 2.5 Preview Free",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
         "high"
       ],
       "reasoning": true,
@@ -224,6 +225,34 @@
       "name": "MiMo V2.5 Pro",
       "context_window": 1048576,
       "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "mimo-v2.6-flash",
+      "name": "MiMo-V2.6-Flash",
+      "context_window": 1048576,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "mimo-v2.6-pro",
+      "name": "MiMo-V2.6-Pro",
+      "context_window": 1048576,
+      "max_output": 131072,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -262,6 +291,20 @@
       "tool_call": true
     },
     {
+      "id": "space-bunny-free",
+      "name": "Space Bunny Free",
+      "context_window": 1048576,
+      "max_output": 524288,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "deepseek-v4-flash",
       "name": "DeepSeek V4 Flash",
       "context_window": 1000000,
@@ -279,19 +322,6 @@
       "context_window": 1000000,
       "max_output": 384000,
       "thinking_levels": [
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "glm-5.1",
-      "name": "GLM-5.1",
-      "context_window": 202752,
-      "max_output": 32768,
-      "thinking_levels": [
-        "low",
-        "medium",
         "high"
       ],
       "reasoning": true,
