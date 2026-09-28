@@ -539,6 +539,7 @@
       "modelTemperature": "온도",
       "modelVision": "비전",
       "modelThinking": "사고",
+      "modelThinkingType": "사고 시스템",
       "agentId": "에이전트 ID",
       "agentName": "이름",
       "agentDescription": "설명",

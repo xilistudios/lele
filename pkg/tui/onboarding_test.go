@@ -681,9 +681,9 @@ func TestConnect_PresetModelPrefillAndCompleteToVerify(t *testing.T) {
 		t.Fatalf("model name prefill = %q, want %q", mm.formValues[5], providerPresets[0].defaultModel)
 	}
 
-	// Enter through model steps. Steps 4→5→6→7→8 advance (5 presses), then the
-	// 6th Enter confirms the review step (9) which saves the model.
-	for i := 0; i < 6; i++ {
+	// Enter through model steps. Steps 4→5→6→7→8→9 advance (6 presses), then
+	// the 7th Enter confirms the review step (10) which saves the model.
+	for i := 0; i < 7; i++ {
 		mm = sendKeys(mm, "\r")
 	}
 
@@ -1035,7 +1035,7 @@ func TestOnboard_VerifyToDoneIntegration(t *testing.T) {
 	mm.textInput.SetValue("sk-test-abcdef")
 	mm = sendKeys(mm, "\r")  // API key
 	mm = sendKeys(mm, "\r")  // API base (pre-filled)
-	for i := 0; i < 6; i++ { // model steps + review
+	for i := 0; i < 7; i++ { // model steps + think system + review
 		mm = sendKeys(mm, "\r")
 	}
 
@@ -1166,14 +1166,15 @@ func TestOnboarding_FullHappyPath(t *testing.T) {
 		t.Fatalf("expect connect at API Key step, got %d", m.formStepIndex)
 	}
 
-	// Type an API key, then Enter through API base + model steps + review.
+	// Type an API key, then Enter through API base + model steps + think
+	// system + review.
 	m.textInput.SetValue("sk-test-abcdef")
 	m = sendKeys(m, "\r") // API key
 	if m.formStepIndex != 3 {
 		t.Fatalf("after key step = %d, want 3", m.formStepIndex)
 	}
 	m = sendKeys(m, "\r") // API base (pre-filled)
-	for i := 0; i < 6; i++ {
+	for i := 0; i < 7; i++ {
 		m = sendKeys(m, "\r")
 	}
 

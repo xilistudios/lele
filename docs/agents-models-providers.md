@@ -304,6 +304,56 @@ Supported per-model fields include:
 - `vision`
 - `video`
 - `reasoning`
+- `thinking_type`
+
+### `thinking_type`
+
+Names the wire-level **think system** the model's endpoint uses to turn
+reasoning on and off. Optional; empty or `"auto"` keeps the legacy heuristics.
+
+| value | wire format | used by |
+| --- | --- | --- |
+| `"auto"` (default) | legacy heuristics (endpoint/model name) | anything else |
+| `"deepseek"` | `thinking: {"type": "enabled"\|"disabled"}` | DeepSeek V3.2+, Xiaomi MiMo, Zhipu GLM-4.5+ |
+| `"openai"` | top-level `reasoning_effort` (`"none"` disables) | OpenAI o-series / gpt-5 |
+| `"openrouter"` | `reasoning: {"effort", "enabled", ...}` object | OpenRouter |
+| `"qwen"` | `enable_thinking: true\|false` | Alibaba DashScope / Qwen3 |
+| `"none"` | never sends thinking parameters | models without a thinking switch |
+
+This field is what makes `thinking_level: "off"` (TUI `/think`, Web UI chip)
+actually disable reasoning: several endpoints (MiMo, DeepSeek, GLM) default
+thinking **on** and ignore the generic `reasoning` object, so the disable has
+to be rendered in their own dialect. Example for MiMo, where `off` sends
+`thinking: {"type": "disabled"}`:
+
+```json
+{
+  "providers": {
+    "xiaomi": {
+      "type": "openai",
+      "api_key": "{{ENV_MIMO_API_KEY}}",
+      "models": {
+        "mimo-v2.5-pro": {
+          "model": "mimo-v2.5-pro",
+          "thinking_type": "deepseek"
+        }
+      }
+    }
+  }
+}
+```
+
+With `"auto"` (or unset) Lele already sends the explicit disable for known
+thinking-object model families (names containing `deepseek`, `mimo`, `glm`);
+set `thinking_type` explicitly for anything else — e.g. Qwen3 on DashScope
+needs `"qwen"`. For OpenAI models that reject a disable (`o1`, `o3`), use
+`"none"` so Lele never sends thinking parameters at all.
+
+`thinking_type` can also be set without touching JSON: the TUI asks for a
+"Think system" when adding a provider or model (`/connect`, `/providers`), and
+the Web UI exposes a per-model **Think system** dropdown in the provider
+settings model editor. Leave the field empty (or pick "auto") to keep the
+default heuristics.
 
 `vision: true` enables the `read_image` tool and `read_video`'s frames mode
 (keyframes + audio transcript); `video: true` adds native `video_url`

@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import type { ProviderModelConfig } from '../../../lib/types'
 import { RemoveButton } from '../../atoms/RemoveButton'
-import { BooleanInput, NumberInput, SettingsField } from '../../molecules'
+import { BooleanInput, NumberInput, SelectInput, SettingsField } from '../../molecules'
 import { type AddModelPayload, ModelSearchInput } from './ModelSearchInput'
 
 type ProviderModels = Record<string, ProviderModelConfig>
@@ -37,6 +37,17 @@ export function buildModelConfig(meta: AddModelPayload): ProviderModelConfig {
 export function ProviderModelsEditor({ name, models, onChange, providerType }: Props) {
   const { t } = useTranslation()
   const modelNames = Object.keys(models)
+
+  // Technical wire-dialect names — see config.ThinkingType* in Go. The raw
+  // value doubles as the label: they are identifiers, not prose.
+  const THINKING_TYPES: Array<{ value: string; label: string }> = [
+    { value: 'auto', label: 'auto' },
+    { value: 'deepseek', label: 'deepseek' },
+    { value: 'openai', label: 'openai' },
+    { value: 'openrouter', label: 'openrouter' },
+    { value: 'qwen', label: 'qwen' },
+    { value: 'none', label: 'none' },
+  ]
 
   const addModel = (input: string | AddModelPayload) => {
     const meta: AddModelPayload = typeof input === 'string' ? { id: input } : input
@@ -147,6 +158,27 @@ export function ProviderModelsEditor({ name, models, onChange, providerType }: P
                     onChange({
                       ...models,
                       [key]: { ...m, reasoning: { ...m.reasoning, enable: v } },
+                    })
+                  }
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.modelThinkingType')}
+                path={`providers.${name}.models.${key}.thinking_type`}
+              >
+                <SelectInput
+                  id={`providers.${name}.models.${key}.thinking_type`}
+                  value={m.thinking_type || 'auto'}
+                  options={THINKING_TYPES}
+                  onChange={(v) =>
+                    onChange({
+                      ...models,
+                      // "auto" is the default — keep the config clean by
+                      // omitting the key instead of writing it explicitly.
+                      [key]: {
+                        ...m,
+                        thinking_type: v === 'auto' ? undefined : (v as ProviderModelConfig['thinking_type']),
+                      },
                     })
                   }
                 />

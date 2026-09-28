@@ -285,9 +285,10 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			// API Key (step 2) is optional — local providers (ollama)
 			// and custom endpoints may not require authentication.
-			// The review step (9) has no input — any Enter confirms.
+			// The think-system step (9) is optional (Enter = auto) and the
+			// review step (10) has no input — any Enter confirms.
 			allowEmpty := (m.formStepIndex == 2 && !m.providerSavedInFlow) ||
-				(m.formStepIndex == 9 && m.providerSavedInFlow)
+				(m.formStepIndex >= 9 && m.providerSavedInFlow)
 			if val == "" && !allowEmpty {
 				m.formError = "This field is required"
 				return m, nil
@@ -451,10 +452,10 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						return m, nil
 					}
 					m.formValues[m.formStepIndex] = lower
-					// Advance to review step
+					// Advance to the think-system step
 					m.formStepIndex = 9
 					m.textInput.SetValue("")
-					m.textInput.Placeholder = ""
+					m.textInput.Placeholder = "auto, deepseek, openai, openrouter, qwen or none"
 					m.closeCatalogPicker()
 					return m, nil
 				}
@@ -483,11 +484,26 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			// ── Review step (9) — save model & close ─────────────
+			// ── Think system step (9) ────────────────────────────
+			if m.formStepIndex == 9 {
+				thinkType, err := thinkSystemFieldValue(val)
+				if err != nil {
+					m.formError = err.Error()
+					return m, nil
+				}
+				m.formValues[9] = thinkType
+				// Advance to review step
+				m.formStepIndex = 10
+				m.textInput.SetValue("")
+				m.textInput.Placeholder = ""
+				return m, nil
+			}
+
+			// ── Review step (10) — save model & close ─────────────
 			ctxWin, _ := strconv.Atoi(m.formValues[6])
 			maxTok, _ := strconv.Atoi(m.formValues[7])
 			vision := m.formValues[8] == "yes"
-			if err := m.addModelToProvider(m.providerSelectedName, m.formValues[4], m.formValues[5], ctxWin, maxTok, vision); err != nil {
+			if err := m.addModelToProvider(m.providerSelectedName, m.formValues[4], m.formValues[5], ctxWin, maxTok, vision, m.formValues[9]); err != nil {
 				m.formError = err.Error()
 				return m, nil
 			}
@@ -520,8 +536,9 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				val = m.formValues[m.formStepIndex]
 			}
 			// Context window / max tokens may be omitted — catalog.DefaultsFor
-			// fills them in addModelToProvider when the model is known.
-			allowEmpty := m.formStepIndex == 2 || m.formStepIndex == 3
+			// fills them in addModelToProvider when the model is known. The
+			// think-system step may also be empty (Enter = auto = leave unset).
+			allowEmpty := m.formStepIndex == 2 || m.formStepIndex == 3 || m.formStepIndex == 5
 			if val == "" && !allowEmpty {
 				m.formError = "This field is required"
 				return m, nil
@@ -536,10 +553,15 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-			if m.formStepIndex >= 4 {
+			if m.formStepIndex >= 5 {
 				// Last step — save model. Empty/zero context_window and
 				// max_tokens are filled from the catalog inside
 				// addModelToProvider when the model is known.
+				thinkType, err := thinkSystemFieldValue(m.formValues[5])
+				if err != nil {
+					m.formError = err.Error()
+					return m, nil
+				}
 				ctxWin := 0
 				if s := strings.TrimSpace(m.formValues[2]); s != "" {
 					n, err := strconv.Atoi(s)
@@ -563,7 +585,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					// Edit flow: update in place (Temperature/Reasoning and any
 					// other field not covered by the form survive), then land
 					// back on the provider detail with the row highlighted.
-					if err := m.updateModelInProvider(m.providerSelectedName, m.modelEditAlias, m.formValues[0], m.formValues[1], ctxWin, maxTok, vision); err != nil {
+					if err := m.updateModelInProvider(m.providerSelectedName, m.modelEditAlias, m.formValues[0], m.formValues[1], ctxWin, maxTok, vision, thinkType); err != nil {
 						m.formError = err.Error()
 						return m, nil // stay in the form; typed values are kept
 					}
@@ -573,7 +595,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.syncTextInputEcho()
 					return m, nil
 				}
-				if err := m.addModelToProvider(m.providerSelectedName, m.formValues[0], m.formValues[1], ctxWin, maxTok, vision); err != nil {
+				if err := m.addModelToProvider(m.providerSelectedName, m.formValues[0], m.formValues[1], ctxWin, maxTok, vision, thinkType); err != nil {
 					m.formError = err.Error()
 					return m, nil
 				}
@@ -602,6 +624,9 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.closeCatalogPicker()
 			case 4:
 				m.textInput.Placeholder = "Vision support? (yes/no)"
+				m.closeCatalogPicker()
+			case 5:
+				m.textInput.Placeholder = "auto, deepseek, openai, openrouter, qwen or none"
 				m.closeCatalogPicker()
 			}
 			return m, nil
@@ -767,7 +792,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 							m.clearProviderDeleteConfirm()
 							m.modalMode = ModalAddModel
 							m.formStepIndex = 0
-							m.formValues = make([]string, 5)
+							m.formValues = make([]string, 6)
 							m.formError = ""
 							m.formConfirmMode = false
 							m.textInput.SetValue("")

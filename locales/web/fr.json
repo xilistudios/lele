@@ -539,6 +539,7 @@
       "modelTemperature": "Température",
       "modelVision": "Vision",
       "modelThinking": "Réflexion",
+      "modelThinkingType": "Système de réflexion",
       "agentId": "ID de l'agent",
       "agentName": "Nom",
       "agentDescription": "Description",

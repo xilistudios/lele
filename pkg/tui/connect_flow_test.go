@@ -297,7 +297,13 @@ func TestConnectFlow_FullSaveAndSuccess(t *testing.T) {
 	m.textInput.SetValue("yes")
 	m = sendKeys(m, "\r")
 	if m.formStepIndex != 9 {
-		t.Fatalf("expected review step 9, got %d", m.formStepIndex)
+		t.Fatalf("expected think-system step 9, got %d", m.formStepIndex)
+	}
+
+	// Think system — Enter = auto (ThinkingType left unset).
+	m = sendKeys(m, "\r")
+	if m.formStepIndex != 10 {
+		t.Fatalf("expected review step 10, got %d", m.formStepIndex)
 	}
 
 	// Review — save model
@@ -324,7 +330,7 @@ func TestConnectFlow_FullSaveAndSuccess(t *testing.T) {
 	if len(p.Models) != 1 {
 		t.Fatalf("expected 1 model, got %d", len(p.Models))
 	}
-	if mc, ok := p.Models["gpt-4o"]; !ok || mc.Model != "gpt-4o-2024-08-06" || mc.ContextWindow != 128000 || mc.MaxTokens != 4096 || !mc.Vision {
+	if mc, ok := p.Models["gpt-4o"]; !ok || mc.Model != "gpt-4o-2024-08-06" || mc.ContextWindow != 128000 || mc.MaxTokens != 4096 || !mc.Vision || mc.ThinkingType != "" {
 		t.Fatalf("model config mismatch: %+v", mc)
 	}
 

@@ -103,9 +103,9 @@ func TestProviderDetailEnterOpensEditDoesNotDelete(t *testing.T) {
 	}
 
 	// The form is pre-filled with the stored values.
-	wantValues := []string{"gpt-4o", "stored-gpt-4o-001", "128000", "4096", "no"}
-	if len(m.formValues) != 5 {
-		t.Fatalf("formValues len = %d, want 5: %v", len(m.formValues), m.formValues)
+	wantValues := []string{"gpt-4o", "stored-gpt-4o-001", "128000", "4096", "no", "auto"}
+	if len(m.formValues) != 6 {
+		t.Fatalf("formValues len = %d, want 6: %v", len(m.formValues), m.formValues)
 	}
 	for i, want := range wantValues {
 		if m.formValues[i] != want {
@@ -120,10 +120,11 @@ func TestProviderDetailEnterOpensEditDoesNotDelete(t *testing.T) {
 	}
 }
 
-// TestProviderDetailEditSaveUpdatesInPlace walks the 5 steps (changing the
-// context window along the way) and asserts the model is updated in place:
-// the alias survives, Model/ContextWindow change, Vision stays, and the
-// Temperature/Reasoning fields the form never asks about are preserved.
+// TestProviderDetailEditSaveUpdatesInPlace walks the 6 steps (changing the
+// context window and the think system along the way) and asserts the model is
+// updated in place: the alias survives, Model/ContextWindow/ThinkingType
+// change, Vision stays, and the Temperature/Reasoning fields the form never
+// asks about are preserved.
 func TestProviderDetailEditSaveUpdatesInPlace(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
@@ -155,7 +156,13 @@ func TestProviderDetailEditSaveUpdatesInPlace(t *testing.T) {
 	if m.formStepIndex != 4 {
 		t.Fatalf("step = %d, want 4 after max tokens step", m.formStepIndex)
 	}
-	// Step 4: accept the prefilled vision answer → save.
+	// Step 4: accept the prefilled vision answer.
+	m = sendKeys(m, "\r")
+	if m.formStepIndex != 5 {
+		t.Fatalf("step = %d, want 5 after vision step", m.formStepIndex)
+	}
+	// Step 5: pick a think system → save.
+	m.textInput.SetValue("deepseek")
 	m = sendKeys(m, "\r")
 
 	if m.modalMode != ModalProviderDetail {
@@ -181,6 +188,9 @@ func TestProviderDetailEditSaveUpdatesInPlace(t *testing.T) {
 	}
 	if mc.Reasoning == nil || mc.Reasoning.Effort == nil || *mc.Reasoning.Effort != "high" {
 		t.Errorf("Reasoning = %+v, want effort high (preserved)", mc.Reasoning)
+	}
+	if mc.ThinkingType != "deepseek" {
+		t.Errorf("ThinkingType = %q, want deepseek (edited)", mc.ThinkingType)
 	}
 
 	// The sibling model must be untouched.
@@ -213,8 +223,8 @@ func TestProviderDetailEditRenameMovesAlias(t *testing.T) {
 	// Step 0: rename the alias.
 	m.textInput.SetValue("gpt-4o-latest")
 	m = sendKeys(m, "\r")
-	// Steps 1-4: accept the prefilled values (last Enter saves).
-	for i := 0; i < 4; i++ {
+	// Steps 1-5: accept the prefilled values (last Enter saves).
+	for i := 0; i < 5; i++ {
 		m = sendKeys(m, "\r")
 	}
 
@@ -314,7 +324,9 @@ func TestAddModelFlowStillAdds(t *testing.T) {
 	m.textInput.SetValue("8192")
 	m = sendKeys(m, "\r") // step 3: max tokens
 	m.textInput.SetValue("yes")
-	m = sendKeys(m, "\r") // step 4: vision → save
+	m = sendKeys(m, "\r") // step 4: vision
+	m.textInput.SetValue("deepseek")
+	m = sendKeys(m, "\r") // step 5: think system → save
 
 	if m.modalMode != ModalNone {
 		t.Fatalf("modal = %v, want ModalNone (add flow closes the modal)", m.modalMode)
@@ -330,6 +342,9 @@ func TestAddModelFlowStillAdds(t *testing.T) {
 	}
 	if mc.Model != "brand-new-001" || mc.ContextWindow != 50000 || mc.MaxTokens != 8192 || !mc.Vision {
 		t.Errorf("added entry = %+v, want brand-new-001/50000/8192/vision", mc)
+	}
+	if mc.ThinkingType != "deepseek" {
+		t.Errorf("ThinkingType = %q, want deepseek", mc.ThinkingType)
 	}
 	// Existing models were not edited by the add flow.
 	if got := models["gpt-4o"]; got.Model != "stored-gpt-4o-001" || got.ContextWindow != 128000 {

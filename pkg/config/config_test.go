@@ -1096,3 +1096,81 @@ func TestLoadConfig_SubagentMaxRetriesZeroPinned(t *testing.T) {
 		t.Errorf("SubagentMaxRetries = %d, want 0 (explicit 0 must disable retries)", got)
 	}
 }
+
+func TestNormalizeThinkingType(t *testing.T) {
+	tests := []struct {
+		in     string
+		want   string
+		wantOK bool
+	}{
+		{"", ThinkingTypeAuto, true},
+		{"auto", ThinkingTypeAuto, true},
+		{"AUTO", ThinkingTypeAuto, true},
+		{" deepseek ", ThinkingTypeDeepSeek, true},
+		{"DeepSeek", ThinkingTypeDeepSeek, true},
+		{"openai", ThinkingTypeOpenAI, true},
+		{"openrouter", ThinkingTypeOpenRouter, true},
+		{"qwen", ThinkingTypeQwen, true},
+		{"none", ThinkingTypeNone, true},
+		{"banana", "", false},
+		{"deep-seek", "", false},
+		{"off", "", false},
+	}
+
+	for _, tc := range tests {
+		got, ok := NormalizeThinkingType(tc.in)
+		if ok != tc.wantOK || got != tc.want {
+			t.Errorf("NormalizeThinkingType(%q) = (%q, %v), want (%q, %v)", tc.in, got, ok, tc.want, tc.wantOK)
+		}
+	}
+}
+
+func TestProviderModelConfig_ValidateThinkingType(t *testing.T) {
+	for _, valid := range []string{"", "auto", "deepseek", "openai", "openrouter", "qwen", "none"} {
+		cfg := ProviderModelConfig{Model: "m", ThinkingType: valid}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Validate() with thinking_type %q: %v, want nil", valid, err)
+		}
+	}
+
+	cfg := ProviderModelConfig{Model: "m", ThinkingType: "banana"}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatalf("Validate() with thinking_type %q: nil, want error", "banana")
+	}
+	if !strings.Contains(err.Error(), "thinking_type") {
+		t.Errorf("error %q should mention thinking_type", err)
+	}
+}
+
+func TestProvidersConfig_UnmarshalRejectsInvalidThinkingType(t *testing.T) {
+	var p ProvidersConfig
+	err := json.Unmarshal([]byte(`{
+		"myprov": {
+			"api_base": "https://example.com/v1",
+			"models": {"m1": {"model": "m1", "thinking_type": "banana"}}
+		}
+	}`), &p)
+	if err == nil {
+		t.Fatal("unmarshal with invalid thinking_type: nil, want error")
+	}
+	if !strings.Contains(err.Error(), "thinking_type") {
+		t.Errorf("error %q should mention thinking_type", err)
+	}
+}
+
+func TestProvidersConfig_UnmarshalAcceptsThinkingType(t *testing.T) {
+	var p ProvidersConfig
+	if err := json.Unmarshal([]byte(`{
+		"myprov": {
+			"api_base": "https://example.com/v1",
+			"models": {"m1": {"model": "m1", "thinking_type": "deepseek"}}
+		}
+	}`), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	got := p.Named["myprov"].Models["m1"].ThinkingType
+	if got != ThinkingTypeDeepSeek {
+		t.Errorf("ThinkingType = %q, want %q", got, ThinkingTypeDeepSeek)
+	}
+}

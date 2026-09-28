@@ -539,6 +539,7 @@
       "modelTemperature": "Температура",
       "modelVision": "Зрение",
       "modelThinking": "Мышление",
+      "modelThinkingType": "Система рассуждений",
       "agentId": "ID агента",
       "agentName": "Имя",
       "agentDescription": "Описание",

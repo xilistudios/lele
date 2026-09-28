@@ -376,3 +376,75 @@ describe('ProviderModelsEditor.addModel', () => {
     })
   })
 })
+
+describe('ProviderModelsEditor.thinking_type', () => {
+  function renderEditor(models: Record<string, unknown>) {
+    const onChange = mock((_v: Record<string, unknown>) => {})
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const utils = render(
+      <QueryClientProvider client={queryClient}>
+        <SettingsProvider settingsState={makeSettingsState()} api={makeApi()}>
+          <ProviderModelsEditor
+            name="openai"
+            models={models as never}
+            onChange={onChange as never}
+            providerType="openai"
+          />
+        </SettingsProvider>
+      </QueryClientProvider>,
+    )
+    const select = utils.container.querySelector(
+      'select[id="providers.openai.models.m1.thinking_type"]',
+    ) as HTMLSelectElement
+    return { ...utils, onChange, select }
+  }
+
+  test('renders the select defaulted to auto and writes the picked dialect', () => {
+    const u = renderEditor({ m1: { context_window: 128000 } })
+
+    expect(u.select).toBeTruthy()
+    expect(u.select.value).toBe('auto')
+
+    fireEvent.change(u.select, { target: { value: 'deepseek' } })
+    expect(u.onChange).toHaveBeenCalledTimes(1)
+    const next = u.onChange.mock.calls[0][0] as Record<string, { thinking_type?: string }>
+    expect(next.m1.thinking_type).toBe('deepseek')
+  })
+
+  test('selecting auto omits the key instead of writing it explicitly', () => {
+    const u = renderEditor({ m1: { thinking_type: 'qwen' } })
+
+    expect(u.select.value).toBe('qwen')
+
+    fireEvent.change(u.select, { target: { value: 'auto' } })
+    const next = u.onChange.mock.calls[0][0] as Record<string, { thinking_type?: string }>
+    expect(next.m1.thinking_type).toBeUndefined()
+  })
+
+  test('keeps the other model fields when changing the dialect', () => {
+    const u = renderEditor({
+      m1: { context_window: 64000, max_tokens: 4096, vision: true },
+    })
+
+    fireEvent.change(u.select, { target: { value: 'openrouter' } })
+    const next = u.onChange.mock.calls[0][0] as Record<
+      string,
+      { context_window: number; max_tokens: number; vision: boolean; thinking_type?: string }
+    >
+    expect(next.m1.context_window).toBe(64000)
+    expect(next.m1.max_tokens).toBe(4096)
+    expect(next.m1.vision).toBe(true)
+    expect(next.m1.thinking_type).toBe('openrouter')
+  })
+})
+
+describe('buildModelConfig.thinking_type', () => {
+  test('never sets thinking_type from catalog metadata (auto is the implicit default)', () => {
+    const cfg = buildModelConfig({
+      id: 'gpt-5',
+      thinking_levels: ['low', 'medium', 'high'],
+      reasoning: true,
+    })
+    expect(cfg.thinking_type).toBeUndefined()
+  })
+})

@@ -144,6 +144,20 @@ func getReasoningConfig(cfg *config.Config, model string, provider string) *conf
 	return nil
 }
 
+// getThinkingType returns the configured thinking wire style ("think system")
+// for a model from provider config (providers.<name>.models.<alias>.thinking_type).
+// Returns "" when unset/unknown so callers fall back to legacy heuristics;
+// explicit styles are returned normalized ("deepseek", "openai", "openrouter",
+// "qwen", "none").
+func getThinkingType(cfg *config.Config, model string, defaultProvider string) string {
+	if modelCfg, ok := getProviderModelConfig(cfg, model, defaultProvider); ok {
+		if tt, ok := config.NormalizeThinkingType(modelCfg.ThinkingType); ok && tt != config.ThinkingTypeAuto {
+			return tt
+		}
+	}
+	return ""
+}
+
 func NewAgentInstance(
 	agentCfg *config.AgentConfig,
 	defaults *config.AgentDefaults,

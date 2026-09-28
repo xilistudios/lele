@@ -88,6 +88,16 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 		"temperature": opts.agent.Temperature,
 	}
 
+	// Per-model "think system" wire style (config:
+	// providers.<name>.models.<alias>.thinking_type). Resolved from the model
+	// actually being called (which may be a session override like
+	// "xiaomi:mimo-v2.5-pro"), then passed through to the provider so
+	// enable/disable is rendered in the dialect the endpoint understands
+	// (e.g. MiMo/DeepSeek `thinking: {"type": "disabled"}` for "off").
+	if tt := getThinkingType(lc.al.cfg(), opts.model, lc.al.cfg().Agents.Defaults.Provider); tt != "" {
+		llmOptions["thinking_type"] = tt
+	}
+
 	// Explicit prompt caching (Anthropic-style cache_control breakpoints).
 	// Providers that cache implicitly ignore these keys.
 	if opts.agent.PromptCache.Enabled {

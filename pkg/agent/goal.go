@@ -628,6 +628,14 @@ func (j *SummaryGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText s
 			"enabled": false,
 		},
 	}
+	// Per-model think system (providers.<name>.models.<alias>.thinking_type):
+	// lets the provider render the disable in the dialect the endpoint
+	// understands (e.g. MiMo/DeepSeek `thinking: {"type": "disabled"}`).
+	if j.cfg != nil {
+		if tt := getThinkingType(j.cfg, model, j.cfg.Agents.Defaults.Provider); tt != "" {
+			options["thinking_type"] = tt
+		}
+	}
 
 	// Resolve the correct provider for the session's model, mirroring the
 	// main agent loop (llm_caller.go call()). The model may carry a provider

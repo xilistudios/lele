@@ -133,12 +133,27 @@ func (m *Model) deleteProvider(name string) error {
 	return m.saveConfigToDisk()
 }
 
+// normalizeThinkSystemInput validates and canonicalizes the free-text think
+// system entry of a model form step. Empty and "auto" both mean "leave unset"
+// and return "". Invalid values return an error listing the accepted options.
+func normalizeThinkSystemInput(val string) (string, error) {
+	tt, ok := config.NormalizeThinkingType(strings.TrimSpace(val))
+	if !ok {
+		return "", fmt.Errorf("must be one of: auto, deepseek, openai, openrouter, qwen, none (Enter for auto)")
+	}
+	if tt == config.ThinkingTypeAuto {
+		return "", nil
+	}
+	return tt, nil
+}
+
 // addModelToProvider adds a model alias to a provider's Models map.
 // When the model is known to pkg/catalog and context_window / max_tokens were
 // left empty (zero), the values are filled from catalog.DefaultsFor. Models
 // that advertise thinking levels get a default Reasoning.Effort so reasoning
-// works out of the box.
-func (m *Model) addModelToProvider(providerName, alias, modelName string, contextWindow, maxTokens int, vision bool) error {
+// works out of the box. thinkingType is the wire-level "think system"
+// (see config.ThinkingType*); "" and "auto" leave the field unset.
+func (m *Model) addModelToProvider(providerName, alias, modelName string, contextWindow, maxTokens int, vision bool, thinkingType string) error {
 	if m.cfg == nil || m.cfg.Providers == nil || m.cfg.Providers.Named == nil {
 		return fmt.Errorf("no providers configured")
 	}
@@ -156,6 +171,11 @@ func (m *Model) addModelToProvider(providerName, alias, modelName string, contex
 	aliasKey := strings.ToLower(strings.TrimSpace(alias))
 	if aliasKey == "" {
 		return fmt.Errorf("model alias cannot be empty")
+	}
+
+	normalizedThink, err := normalizeThinkSystemInput(thinkingType)
+	if err != nil {
+		return err
 	}
 
 	var reasoning *config.ReasoningConfig
@@ -180,6 +200,7 @@ func (m *Model) addModelToProvider(providerName, alias, modelName string, contex
 		MaxTokens:     maxTokens,
 		Vision:        vision,
 		Reasoning:     reasoning,
+		ThinkingType:  normalizedThink,
 	}
 	m.cfg.Providers.Named[key] = provider
 
@@ -341,9 +362,11 @@ func (m *Model) providerModelConfig(providerName, alias string) (config.Provider
 // contextWindow / maxTokens keep their current value when passed as 0; a
 // value still zero afterwards is filled from catalog.DefaultsFor when the
 // model is known there. Vision is always set explicitly (the form always
-// answers yes/no). The alias may be renamed: the old key is removed when the
+// answers yes/no). thinkingType is the think-system step answer (see
+// config.ThinkingType*); "" and "auto" clear the field back to the default
+// heuristics. The alias may be renamed: the old key is removed when the
 // (normalized) new alias differs.
-func (m *Model) updateModelInProvider(providerName, origAlias, newAlias, modelName string, contextWindow, maxTokens int, vision bool) error {
+func (m *Model) updateModelInProvider(providerName, origAlias, newAlias, modelName string, contextWindow, maxTokens int, vision bool, thinkingType string) error {
 	if m.cfg == nil || m.cfg.Providers == nil || m.cfg.Providers.Named == nil {
 		return fmt.Errorf("no providers configured")
 	}
@@ -384,6 +407,13 @@ func (m *Model) updateModelInProvider(providerName, origAlias, newAlias, modelNa
 		updated.MaxTokens = maxTokens
 	}
 	updated.Vision = vision
+	// Thinking type IS asked by the form (think-system step), so it is set
+	// explicitly: "" / "auto" clear the field back to the default heuristics.
+	normalizedThink, err := normalizeThinkSystemInput(thinkingType)
+	if err != nil {
+		return err
+	}
+	updated.ThinkingType = normalizedThink
 
 	// Catalog fallback for values still zero after the edit. Deliberately no
 	// Reasoning touch — a user-tuned config must survive the edit.
@@ -549,11 +579,12 @@ func (m *Model) openModelEditFlow(alias string) {
 	// the provider the edit flow operates on.
 	m.providerSelectedName = provider
 	m.formStepIndex = 0
-	m.formValues = make([]string, 5)
+	m.formValues = make([]string, 6)
 	m.formError = ""
 	m.formConfirmMode = false
 
-	// Pre-fill: alias, model name, context window, max tokens, vision.
+	// Pre-fill: alias, model name, context window, max tokens, vision,
+	// think system.
 	m.formValues[0] = alias
 	m.formValues[1] = mc.Model
 	if mc.ContextWindow > 0 {
@@ -566,6 +597,11 @@ func (m *Model) openModelEditFlow(alias string) {
 		m.formValues[4] = "yes"
 	} else {
 		m.formValues[4] = "no"
+	}
+	if mc.ThinkingType != "" {
+		m.formValues[5] = mc.ThinkingType
+	} else {
+		m.formValues[5] = config.ThinkingTypeAuto
 	}
 	m.modelEditAlias = alias
 	m.modelEditOrigModel = mc.Model
