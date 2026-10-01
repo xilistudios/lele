@@ -1024,3 +1024,131 @@ describe('refreshNow', () => {
     expect(server.refreshCount()).toBe(0)
   })
 })
+
+/**
+ * A successful refresh ROTATES the access token and the server stops
+ * validating the previous one immediately -- there is no grace for requests
+ * already in flight that were sent with it (unlike refresh tokens, which got a
+ * 60 s replay window in #354). So a 401 whose `Authorization` header is a
+ * credential we no longer hold must be replayed as-is, never refreshed: the
+ * token it rejected was superseded before the answer came back, and rotating
+ * would spend a second single-use rotation on a credential that was never
+ * dead.
+ */
+describe('a 401 for a superseded credential', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  const json = (payload: unknown, status = 200) =>
+    new Response(JSON.stringify(payload), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+  /**
+   * Protected endpoint answers 401 for any bearer outside `accepted`, 200 for
+   * the ones inside it; `/auth/refresh` answers `refreshBody` and is counted.
+   * `onAttempt` runs inside the handler, i.e. while the request is in flight,
+   * which is how the tests model a rotation landing before the answer is
+   * processed.
+   */
+  function mockServer(opts: {
+    /** Bearer values the protected endpoint accepts. */
+    accepted: string[]
+    refreshBody?: () => unknown
+    onAttempt?: (call: { url: string; auth: string | null }) => void
+  }) {
+    const calls: { url: string; auth: string | null }[] = []
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const auth = (init?.headers as Record<string, string> | undefined)?.Authorization ?? null
+      const call = { url, auth }
+      calls.push(call)
+
+      if (url.endsWith('/auth/refresh')) {
+        return json(opts.refreshBody?.() ?? {})
+      }
+
+      opts.onAttempt?.(call)
+      const bearer = auth?.replace(/^Bearer /, '') ?? ''
+      if (opts.accepted.includes(bearer)) {
+        return json({ agent_id: 'coder', tools: [], skills: [] })
+      }
+      return json({ error: 'unauthorized', code: 'auth_error' }, 401)
+    }) as unknown as typeof fetch
+
+    return {
+      calls,
+      refreshCount: () => calls.filter((c) => c.url.endsWith('/auth/refresh')).length,
+      nonAuth: () => calls.filter((c) => !c.url.endsWith('/auth/refresh')),
+    }
+  }
+
+  test('a 401 for a token a rotation already replaced is replayed without a second refresh', async () => {
+    // The attempt leaves with access-1; while it is in flight a rotation
+    // installs access-2 (proactive renewal on mount or the 24 h interval,
+    // another tab's rotation adopted here, or the refresh of a neighbouring
+    // request). The 401 that comes back therefore speaks about a token that
+    // was already superseded when it was produced -- replaying with what we
+    // hold now is the whole fix, and no /auth/refresh may be spent on it.
+    const api = createApiClient('http://127.0.0.1:18793')
+    api.setToken('access-1', 'refresh-1')
+
+    let rotated = false
+    const server = mockServer({
+      // access-3 models "a refresh would have produced a usable token": it
+      // must never be requested, let alone used.
+      accepted: ['access-2', 'access-3'],
+      refreshBody: () => ({ token: 'access-3', refresh_token: 'refresh-3' }),
+      onAttempt: () => {
+        if (rotated) return
+        rotated = true
+        api.setToken('access-2', 'refresh-2')
+      },
+    })
+
+    const catalog = await api.getAgentCatalog('coder')
+
+    expect(catalog.agent_id).toBe('coder')
+    expect(server.nonAuth().map((c) => c.auth)).toEqual(['Bearer access-1', 'Bearer access-2'])
+    expect(server.refreshCount()).toBe(0)
+    expect(server.calls).toHaveLength(2)
+  })
+
+  test('a superseded replay does not hide a dead credential', async () => {
+    // Same rotation landing mid-flight, but this time access-2 is rejected
+    // too: the replay is not a licence to skip the refresh budget, so exactly
+    // one refresh must still follow it and the request must finish with the
+    // refreshed token. That is the pinned `refreshTried` semantics -- a
+    // superseded replay may never mask a genuinely dead credential.
+    const api = createApiClient('http://127.0.0.1:18793')
+    api.setToken('access-1', 'refresh-1')
+
+    let rotated = false
+    const server = mockServer({
+      accepted: ['access-3'],
+      refreshBody: () => ({ token: 'access-3', refresh_token: 'refresh-3' }),
+      onAttempt: () => {
+        if (rotated) return
+        rotated = true
+        api.setToken('access-2', 'refresh-2')
+      },
+    })
+
+    const catalog = await api.getAgentCatalog('coder')
+
+    expect(catalog.agent_id).toBe('coder')
+    expect(server.refreshCount()).toBe(1)
+    expect(server.nonAuth().map((c) => c.auth)).toEqual([
+      'Bearer access-1',
+      'Bearer access-2',
+      'Bearer access-3',
+    ])
+    // The refresh comes AFTER the replay, not instead of it.
+    const refreshIndex = server.calls.findIndex((c) => c.url.endsWith('/auth/refresh'))
+    const replayIndex = server.calls.findIndex((c) => c.auth === 'Bearer access-2')
+    expect(replayIndex).toBeGreaterThan(-1)
+    expect(refreshIndex).toBeGreaterThan(replayIndex)
+  })
+})
