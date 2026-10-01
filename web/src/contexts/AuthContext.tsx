@@ -79,7 +79,19 @@ export function AuthProvider({
   }, [persistSession])
 
   const api = useMemo(() => {
-    const client = createApiClient(apiUrl)
+    // React flushes CHILD passive effects before PARENT ones, so the effect
+    // below that calls `setToken` runs after every descendant's boot effect
+    // has already fired its requests. Seeding the synchronously-restored
+    // session here closes that window: the first wave leaves authenticated
+    // instead of drawing 401 `auth_missing` and burning a single-use
+    // rotation. Session CHANGES still arrive through the effect below.
+    const current = sessionRef.current
+    const client = createApiClient(
+      apiUrl,
+      current?.token
+        ? { token: current.token, refreshToken: current.refresh_token, clientId: current.client_id }
+        : undefined,
+    )
 
     client.setAuthFailureHandler((mayClearStorage) => {
       // The client only reports that its own credential died. Whether that

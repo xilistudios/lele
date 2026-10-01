@@ -154,6 +154,16 @@ type TokenState = {
   onAuthFailure?: (mayClearStorage: boolean) => void
 }
 
+/**
+ * Credential available synchronously when the client is created, so the very
+ * first request already carries an Authorization header.
+ */
+export type ApiClientCredentials = {
+  token: string
+  refreshToken?: string
+  clientId?: string
+}
+
 type SendMessageStreamOptions = {
   signal?: AbortSignal
   onDone?: () => void
@@ -190,11 +200,23 @@ const parseSSEBlock = (block: string): ClientEvent | null => {
   }
 }
 
-export const createApiClient = (baseUrl: string) => {
+export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials) => {
+  // Seed the credential synchronously instead of waiting for the owner's
+  // mount effect: React flushes CHILD passive effects before PARENT ones, so
+  // any request issued from a descendant's effect would otherwise leave with
+  // no Authorization header and the gateway answers it 401 `auth_missing`
+  // without ever consulting the stored session -- which then spends a
+  // single-use `POST /auth/refresh` on every boot. The fields are assigned
+  // directly (not via `setToken`) so the seed never exercises `setToken`'s
+  // `refreshBlockedUntil = 0` reset: that reset belongs to genuine credential
+  // changes, and the initial cooldown is already 0. An empty refresh token
+  // means "nothing to refresh with" and becomes null, matching `runRefresh`'s
+  // `if (!attempted) return null` guard. The seed is deliberately not
+  // reported through `onTokenRefresh`: persistence remains the owner's job.
   const tokenState: TokenState = {
-    token: null,
-    refreshToken: null,
-    clientId: '',
+    token: initial?.token ?? null,
+    refreshToken: initial?.refreshToken || null,
+    clientId: initial?.clientId ?? '',
     onTokenRefresh: undefined,
   }
 
