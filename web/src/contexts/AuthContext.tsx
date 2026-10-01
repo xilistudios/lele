@@ -78,8 +78,21 @@ export function AuthProvider({
     persistRef.current = persistSession
   }, [persistSession])
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the seed reads this render's session on purpose -- deps stay [apiUrl, detachSession] so the client keeps its identity
   const api = useMemo(() => {
-    const client = createApiClient(apiUrl)
+    // React flushes CHILD passive effects before PARENT ones, so the effect
+    // below that calls `setToken` runs after every descendant's boot effect
+    // has already fired its requests. Seeding THIS RENDER's session closes
+    // that window (the ref still holds the previous commit's session when
+    // `apiUrl` and the session change in one batch), so the first wave
+    // leaves authenticated. Session CHANGES still arrive through the effect below.
+    const current = session
+    const client = createApiClient(
+      apiUrl,
+      current?.token
+        ? { token: current.token, refreshToken: current.refresh_token, clientId: current.client_id }
+        : undefined,
+    )
 
     client.setAuthFailureHandler((mayClearStorage) => {
       // The client only reports that its own credential died. Whether that
@@ -94,7 +107,6 @@ export function AuthProvider({
     })
 
     return client
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiUrl, detachSession])
 
   // Sync token separately so token changes don't recreate the client.

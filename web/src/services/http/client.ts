@@ -154,6 +154,16 @@ type TokenState = {
   onAuthFailure?: (mayClearStorage: boolean) => void
 }
 
+/**
+ * Credential available synchronously when the client is created, so the very
+ * first request already carries an Authorization header.
+ */
+export type ApiClientCredentials = {
+  token: string
+  refreshToken?: string
+  clientId?: string
+}
+
 type SendMessageStreamOptions = {
   signal?: AbortSignal
   onDone?: () => void
@@ -190,11 +200,23 @@ const parseSSEBlock = (block: string): ClientEvent | null => {
   }
 }
 
-export const createApiClient = (baseUrl: string) => {
+export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials) => {
+  // Seed the credential synchronously instead of waiting for the owner's
+  // mount effect: React flushes CHILD passive effects before PARENT ones, so
+  // any request issued from a descendant's effect would otherwise leave with
+  // no Authorization header and the gateway answers it 401 `auth_missing`
+  // without ever consulting the stored session -- which then spends a
+  // single-use `POST /auth/refresh` on every boot. The fields are assigned
+  // directly (not via `setToken`) so the seed never exercises `setToken`'s
+  // `refreshBlockedUntil = 0` reset: that reset belongs to genuine credential
+  // changes, and the initial cooldown is already 0. An empty refresh token
+  // means "nothing to refresh with" and becomes null, matching `runRefresh`'s
+  // `if (!attempted) return null` guard. The seed is deliberately not
+  // reported through `onTokenRefresh`: persistence remains the owner's job.
   const tokenState: TokenState = {
-    token: null,
-    refreshToken: null,
-    clientId: '',
+    token: initial?.token ?? null,
+    refreshToken: initial?.refreshToken || null,
+    clientId: initial?.clientId ?? '',
     onTokenRefresh: undefined,
   }
 
@@ -389,8 +411,16 @@ export const createApiClient = (baseUrl: string) => {
     // a token or failed, replaying the request with whatever we hold now is
     // pointless: a rejected access token stays rejected.
     let refreshTried = false
+    // Set once a 401 has been answered by replaying with the credential that
+    // replaced the one the rejected attempt sent. Bounded to a single use so a
+    // credential that keeps changing cannot spin the loop.
+    let supersededReplayUsed = false
 
     while (retryCount <= maxRetries) {
+      // The credential THIS attempt is about to send. Captured per iteration,
+      // before the headers are built below, so it reflects any rotation that
+      // landed while the previous attempt was in flight.
+      const attemptToken = tokenState.token
       try {
         const headers: Record<string, string> = {
           ...((init.headers as Record<string, string>) ?? {}),
@@ -424,6 +454,32 @@ export const createApiClient = (baseUrl: string) => {
           })
         } finally {
           clearTimeout(timeoutId)
+        }
+
+        // The converse of the `refreshTried` note above: "a rejected access
+        // token stays rejected" is about the token we hold NOW. A rejected
+        // SUPERSEDED token says nothing about it. A rotation can land while a
+        // request is in flight -- the proactive renewal on mount or on the 24 h
+        // interval, another tab's rotation adopted here, or the refresh this
+        // very wave triggered -- and the server kills the previous access
+        // token the instant it rotates, with no grace for requests already
+        // carrying it (refresh tokens got a replay window in #354; access
+        // tokens did not). So the 401 that just came back may well be about a
+        // credential that was already dead by design before we sent it: the
+        // only honest reading is "replay with what we hold now", which is
+        // cheap and correct, while rotating again would spend a second
+        // single-use `POST /auth/refresh` on a credential that was never
+        // dead. This branch deliberately sets neither `refreshTried` nor
+        // `retryCount`: if the replay is rejected too, the refresh below must
+        // still be reachable so a genuinely dead credential is not masked.
+        if (
+          response.status === 401 &&
+          !supersededReplayUsed &&
+          tokenState.token !== null &&
+          tokenState.token !== attemptToken
+        ) {
+          supersededReplayUsed = true
+          continue
         }
 
         if (response.status === 401 && tokenState.refreshToken && retryCount === 0) {
