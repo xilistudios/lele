@@ -107,7 +107,6 @@ export function AuthProvider({
     })
 
     return client
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiUrl, detachSession])
 
   // Sync token separately so token changes don't recreate the client.
