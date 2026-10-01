@@ -529,6 +529,43 @@ describe('F1: the seed is read from the current render', () => {
     // previous gateway's, and not nothing.
     expect(protectedCalls[0]?.auth).toBe(`Bearer ${PAIRED_TOKEN}`)
   })
+
+  // N2: the clean-profile fixture above always trips assertion (i) first, so
+  // (ii) is never the discriminator there. This E3 shape -- a live session for
+  // the PREVIOUS gateway already exists when the user re-pairs against a
+  // changed apiUrl -- seeds the rebuilt client with that old (still valid)
+  // credential: the request DOES carry a header, (i) passes, and only the
+  // `Bearer ${PAIRED_TOKEN}` assertion can catch the stale seed.
+  test('pairing against a changed apiUrl does not present the previous gateway credential', async () => {
+    const { calls } = installGateway({ validTokens: ['access-1'] })
+    // A live session for the PREVIOUS gateway exists before pairing.
+    saveSession(farSession())
+    pairAuth = null
+    mountPairProbe()
+    await settleBoot(calls)
+
+    const before = calls.length
+
+    // `handleAuth` changes `apiUrl` AND the session in one batch, so the memo
+    // rebuilds the client in the very commit that carries the new session.
+    await act(async () => {
+      await pairer().handleAuth({
+        apiUrl: CHANGED_API_URL,
+        pin: '123456',
+        deviceName: 'Test Device',
+      })
+    })
+    await settleBoot(calls)
+
+    // Only the calls made AFTER the pair, minus the public /auth/ ones.
+    const afterPair = calls.slice(before).filter((call) => !call.url.includes('/auth/'))
+    expect(afterPair.length).toBeGreaterThan(0)
+    // Passes even with the bug: the header is there, it is just the WRONG one.
+    expectNoHeaderlessRequests(afterPair)
+    // The discriminator: the rebuilt client must present the credential the
+    // pair just minted, not the previous gateway's still-valid one.
+    expect(afterPair[0]?.auth).toBe(`Bearer ${PAIRED_TOKEN}`)
+  })
 })
 
 describe('the mock enforces auth like the gateway', () => {
