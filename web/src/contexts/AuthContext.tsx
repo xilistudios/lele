@@ -78,14 +78,15 @@ export function AuthProvider({
     persistRef.current = persistSession
   }, [persistSession])
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the seed reads this render's session on purpose -- deps stay [apiUrl, detachSession] so the client keeps its identity
   const api = useMemo(() => {
     // React flushes CHILD passive effects before PARENT ones, so the effect
     // below that calls `setToken` runs after every descendant's boot effect
-    // has already fired its requests. Seeding the synchronously-restored
-    // session here closes that window: the first wave leaves authenticated
-    // instead of drawing 401 `auth_missing` and burning a single-use
-    // rotation. Session CHANGES still arrive through the effect below.
-    const current = sessionRef.current
+    // has already fired its requests. Seeding THIS RENDER's session closes
+    // that window (the ref still holds the previous commit's session when
+    // `apiUrl` and the session change in one batch), so the first wave
+    // leaves authenticated. Session CHANGES still arrive through the effect below.
+    const current = session
     const client = createApiClient(
       apiUrl,
       current?.token
