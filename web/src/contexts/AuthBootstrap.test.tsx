@@ -3,13 +3,13 @@ import '../test/setup'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, render } from '@testing-library/react'
-import { type ReactElement, useEffect } from 'react'
+import { type ReactElement, StrictMode, useEffect } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import '../test/i18n'
 import App from '../App'
 import { saveSession } from '../lib/storage'
 import type { AuthSession } from '../lib/types'
-import { AuthProvider, useAuthContext } from './AuthContext'
+import { type AuthContextValue, AuthProvider, useAuthContext } from './AuthContext'
 import { ThemeProvider } from './ThemeContext'
 
 /**
@@ -49,6 +49,11 @@ import { ThemeProvider } from './ThemeContext'
  */
 
 const API_URL = 'http://127.0.0.1:18793'
+/** A *different* gateway: editing the API URL is what makes the memo rebuild
+ * the client in the very commit that carries the freshly paired session. */
+const CHANGED_API_URL = 'http://127.0.0.1:18794'
+/** Bearer the gateway mints when the device pairs. */
+const PAIRED_TOKEN = 'access-P'
 const DAY_MS = 24 * 60 * 60 * 1000
 
 const originalFetch = globalThis.fetch
@@ -107,6 +112,20 @@ function installGateway({ validTokens }: { validTokens: string[] }) {
         token: 'access-2',
         refresh_token: 'refresh-2',
         expires: new Date(Date.now() + 30 * DAY_MS).toISOString(),
+      })
+    }
+
+    // Public endpoint: pairing mints the credential the new session carries
+    // and the gateway starts holding it, so a client seeded with that
+    // credential is observable (any other bearer is answered auth_invalid_token).
+    if (url.endsWith('/api/v1/auth/pair')) {
+      accepted.add(PAIRED_TOKEN)
+      return jsonResponse({
+        token: PAIRED_TOKEN,
+        refresh_token: 'refresh-P',
+        expires: new Date(Date.now() + 20 * DAY_MS).toISOString(),
+        client_id: 'client-P',
+        device_name: 'Test Device',
       })
     }
 
@@ -451,6 +470,67 @@ describe('focused boot: AuthProvider + child-effect probe', () => {
   })
 })
 
+// --- F1: the seed across an apiUrl change ------------------------------------
+
+/** Exposes the provider to the test, and issues one protected request per
+ * `[api, session]` change, but only while a credential exists: a clean
+ * profile shows the login page, not a boot wave. */
+let pairAuth: AuthContextValue | null = null
+
+function PairProbe() {
+  const value = useAuthContext()
+  pairAuth = value
+  const { api, session } = value
+  useEffect(() => {
+    if (!session) return
+    void api.agents().catch(() => undefined)
+  }, [api, session])
+  return null
+}
+
+const pairer = (): AuthContextValue => {
+  if (!pairAuth) throw new Error('PairProbe did not capture AuthProvider')
+  return pairAuth
+}
+
+const mountPairProbe = () =>
+  render(
+    <AuthProvider defaultApiUrl={API_URL}>
+      <PairProbe />
+    </AuthProvider>,
+  )
+
+describe('F1: the seed is read from the current render', () => {
+  test('pairing against a changed apiUrl rebuilds a client that is already authenticated', async () => {
+    const { calls } = installGateway({ validTokens: [] })
+    pairAuth = null
+    mountPairProbe()
+
+    // Clean profile: no stored session, so nothing leaves before pairing.
+    expect(calls).toHaveLength(0)
+
+    // `handleAuth` changes `apiUrl` AND the session in one batch, so the memo
+    // rebuilds the client in the very commit that carries the new session.
+    await act(async () => {
+      await pairer().handleAuth({
+        apiUrl: CHANGED_API_URL,
+        pin: '123456',
+        deviceName: 'Test Device',
+      })
+    })
+    await settleBoot(calls)
+
+    const protectedCalls = calls.filter((call) => !call.url.includes('/auth/'))
+    expect(protectedCalls.length).toBeGreaterThan(0)
+    // (i) nothing left headerless: the rebuilt client must carry the session
+    // of the render that created it.
+    expectNoHeaderlessRequests(calls)
+    // (ii) and it presents the credential the pair just minted -- not a
+    // previous gateway's, and not nothing.
+    expect(protectedCalls[0]?.auth).toBe(`Bearer ${PAIRED_TOKEN}`)
+  })
+})
+
 describe('the mock enforces auth like the gateway', () => {
   test('I3 control: a headerless request to a protected path really is 401 auth_missing', async () => {
     installGateway({ validTokens: ['access-1'] })
@@ -472,6 +552,23 @@ describe('app-level boot: the real <App/>', () => {
     localStorage.setItem('lele.currentSessionKey', 'native:client-1:1')
 
     renderApp(<App />)
+    await settleBoot(calls)
+
+    expect(calls.length).toBeGreaterThan(0)
+    expectNoHeaderlessRequests(calls)
+    expectNoBootRotation(calls)
+  })
+
+  test('I1+I2 under <StrictMode> (as main.tsx:20 mounts it): the double-invoked wave still carries the header and spends no rotation', async () => {
+    const { calls } = installGateway({ validTokens: ['access-1'] })
+    saveSession(farSession())
+    localStorage.setItem('lele.currentSessionKey', 'native:client-1:1')
+
+    renderApp(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    )
     await settleBoot(calls)
 
     expect(calls.length).toBeGreaterThan(0)
