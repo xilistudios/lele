@@ -87,10 +87,13 @@ func TestHealToolCallPairs_Cases(t *testing.T) {
 			wantContentFor: map[string]string{"c1": "ok"},
 		},
 		{
-			name:          "result interrupted by a user message stays attached",
-			in:            []Message{asst("c1"), user("stop"), result("c1", "late"), assistantText("resumed")},
-			wantRoles:     []string{"assistant", "tool", "user", "assistant"},
-			wantResultFor: []string{"c1"},
+			name: "result interrupted by a user message stays attached",
+			in:   []Message{asst("c1"), user("stop"), result("c1", "late"), assistantText("resumed")},
+			// The real output has to survive: the placeholder would tell the
+			// model to re-run a tool that already ran.
+			wantRoles:      []string{"assistant", "tool", "user", "assistant"},
+			wantResultFor:  []string{"c1"},
+			wantContentFor: map[string]string{"c1": "late"},
 		},
 		{
 			name:          "two sequential groups each close",
@@ -325,5 +328,176 @@ func TestHealToolCallPairs_DoesNotMutateInput(t *testing.T) {
 	}
 	if len(got[0].ToolCalls) != 1 || got[0].ToolCalls[0].ID != "c_keep" {
 		t.Fatalf("output should keep only the answerable call, got %+v", got[0].ToolCalls)
+	}
+}
+
+// syntheticResult is the placeholder the healer writes for a call that stayed
+// unanswered. Its text is pinned by TestMissingResultMessage_CarriesCallID;
+// tests use this helper so they assert pairing and order, not wording.
+func syntheticResult(id string) string { return missingResultMessage(id).Content }
+
+// Issue #337: a human message recorded while a tool call is in flight does not
+// cancel the call - the result is written to the session right after it. The
+// healer must therefore pair that result with its call instead of declaring the
+// call unanswered: the model has to see the real output, not a placeholder
+// inviting it to re-run a tool that already ran (possibly one with side
+// effects). The interleaved message is not lost either; it moves after the
+// result, which is the only place a provider accepts it.
+func TestHealToolCallPairs_InterleavedUserMessageKeepsRealResult(t *testing.T) {
+	in := []Message{
+		user("q0"),
+		{Role: "assistant", Content: "calling tool", ToolCalls: []ToolCall{call("call1")}},
+		user("PIN"),
+		result("call1", "REAL_TOOL_OUTPUT"),
+	}
+
+	got, changed := HealToolCallPairs(in)
+	if !changed {
+		t.Fatal("an interleaved history is not provider-valid, so healing must report a change")
+	}
+
+	wantRoles := []string{"user", "assistant", "tool", "user"}
+	if len(got) != len(wantRoles) {
+		t.Fatalf("got %d messages (%s), want %d", len(got), roles(got), len(wantRoles))
+	}
+	for i, want := range wantRoles {
+		if got[i].Role != want {
+			t.Fatalf("roles[%d] = %q, want %q (full: %s)", i, got[i].Role, want, roles(got))
+		}
+	}
+	if got[2].ToolCallID != "call1" || got[2].Content != "REAL_TOOL_OUTPUT" {
+		t.Fatalf("call1 result = {id %q, content %q}, want {call1, REAL_TOOL_OUTPUT}",
+			got[2].ToolCallID, got[2].Content)
+	}
+	if got[3].Content != "PIN" {
+		t.Fatalf("interleaved message = %q, want PIN", got[3].Content)
+	}
+
+	// Healing must stay a fixed point, or every later turn would keep
+	// rewriting the request it just produced.
+	if again, stillChanged := HealToolCallPairs(got); stillChanged {
+		t.Fatalf("healed history is not stable, second pass rewrote it: %s", roles(again))
+	}
+}
+
+// wantResult describes one tool message of an expected output: the call it
+// answers and its content.
+type wantResult struct{ id, content string }
+
+// checkHealed asserts the exact shape of a healed history: role sequence, every
+// tool result in order (id and content) and the text of every other message in
+// order, so a message that got dropped or moved cannot slip through.
+func checkHealed(t *testing.T, got []Message, wantRoles []string, wantResults []wantResult, wantTexts []string) {
+	t.Helper()
+	if len(got) != len(wantRoles) {
+		t.Fatalf("got %d messages (%s), want %d", len(got), roles(got), len(wantRoles))
+	}
+	var results []wantResult
+	var texts []string
+	for i, m := range got {
+		if m.Role != wantRoles[i] {
+			t.Fatalf("roles[%d] = %q, want %q (full: %s)", i, m.Role, wantRoles[i], roles(got))
+		}
+		if m.Role == "tool" {
+			results = append(results, wantResult{m.ToolCallID, m.Content})
+			continue
+		}
+		texts = append(texts, m.Content)
+	}
+	if len(results) != len(wantResults) {
+		t.Fatalf("got %d tool results (%v), want %d (%v)", len(results), results, len(wantResults), wantResults)
+	}
+	for i, want := range wantResults {
+		if results[i] != want {
+			t.Errorf("tool result[%d] = {%q, %q}, want {%q, %q}",
+				i, results[i].id, results[i].content, want.id, want.content)
+		}
+	}
+	if len(texts) != len(wantTexts) {
+		t.Fatalf("got %d non-tool messages (%v), want %d (%v)", len(texts), texts, len(wantTexts), wantTexts)
+	}
+	for i, want := range wantTexts {
+		if texts[i] != want {
+			t.Errorf("message text[%d] = %q, want %q", i, texts[i], want)
+		}
+	}
+}
+
+// Holding a block open for an interleaved message must not widen what that
+// block may answer: orphans, duplicates and results that belong to an earlier,
+// already closed block are still rejected, and a call whose result never
+// arrives still gets its synthetic one.
+func TestHealToolCallPairs_InterleavedMessageCases(t *testing.T) {
+	tests := []struct {
+		name        string
+		in          []Message
+		wantRoles   []string
+		wantResults []wantResult
+		wantTexts   []string
+	}{
+		{
+			name:        "result arrives after the first of two calls",
+			in:          []Message{asst("c1", "c2"), result("c1", "one"), user("PIN"), result("c2", "two"), assistantText("done")},
+			wantRoles:   []string{"assistant", "tool", "tool", "user", "assistant"},
+			wantResults: []wantResult{{"c1", "one"}, {"c2", "two"}},
+			wantTexts:   []string{"", "PIN", "done"},
+		},
+		{
+			name:        "no result ever arrives",
+			in:          []Message{asst("c1"), user("PIN")},
+			wantRoles:   []string{"assistant", "tool", "user"},
+			wantResults: []wantResult{{"c1", syntheticResult("c1")}},
+			wantTexts:   []string{"", "PIN"},
+		},
+		{
+			name:        "second result never arrives",
+			in:          []Message{asst("c1", "c2"), result("c1", "one"), user("PIN")},
+			wantRoles:   []string{"assistant", "tool", "tool", "user"},
+			wantResults: []wantResult{{"c1", "one"}, {"c2", syntheticResult("c2")}},
+			wantTexts:   []string{"", "PIN"},
+		},
+		{
+			name:        "orphan result after an interleave is still dropped",
+			in:          []Message{asst("c1"), user("PIN"), result("gone", "stale")},
+			wantRoles:   []string{"assistant", "tool", "user"},
+			wantResults: []wantResult{{"c1", syntheticResult("c1")}},
+			wantTexts:   []string{"", "PIN"},
+		},
+		{
+			name:        "duplicate result after the block closed is still dropped",
+			in:          []Message{asst("c1"), result("c1", "first"), user("PIN"), result("c1", "second")},
+			wantRoles:   []string{"assistant", "tool", "user"},
+			wantResults: []wantResult{{"c1", "first"}},
+			wantTexts:   []string{"", "PIN"},
+		},
+		{
+			name: "a later assistant closes the block, so its result is an orphan",
+			in: []Message{
+				asst("c1"), user("PIN"), asst("c2"), result("c1", "late"), result("c2", "two"),
+			},
+			wantRoles:   []string{"assistant", "tool", "user", "assistant", "tool"},
+			wantResults: []wantResult{{"c1", syntheticResult("c1")}, {"c2", "two"}},
+			wantTexts:   []string{"", "PIN", ""},
+		},
+		{
+			name:        "several interleaved messages keep their order",
+			in:          []Message{asst("c1"), user("PIN"), user("PING"), result("c1", "real")},
+			wantRoles:   []string{"assistant", "tool", "user", "user"},
+			wantResults: []wantResult{{"c1", "real"}},
+			wantTexts:   []string{"", "PIN", "PING"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, changed := HealToolCallPairs(tt.in)
+			if !changed {
+				t.Error("broken history must report a change")
+			}
+			checkHealed(t, got, tt.wantRoles, tt.wantResults, tt.wantTexts)
+			if again, stillChanged := HealToolCallPairs(got); stillChanged {
+				t.Errorf("healed history is not stable, second pass rewrote it: %s", roles(again))
+			}
+		})
 	}
 }
