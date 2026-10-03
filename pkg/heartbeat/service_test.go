@@ -157,7 +157,8 @@ func TestHeartbeatService_Disabled(t *testing.T) {
 	}
 
 	err = hs.Start()
-	_ = err // Disabled service returns nil
+	defer hs.Stop() // the loop recreates HEARTBEAT.md on every tick; leaving it alive races t.TempDir() cleanup
+	_ = err         // Disabled service returns nil
 }
 
 func TestExecuteHeartbeat_NilResult(t *testing.T) {
@@ -262,6 +263,7 @@ func TestUpdateConfig_DisableThenReEnable(t *testing.T) {
 
 	hs.SetHandler(makeCountingHandler(t, &beats, &mu, beatCh, &once, firstBeat))
 	hs.Start()
+	defer hs.Stop() // the loop recreates HEARTBEAT.md on every tick; leaving it alive races t.TempDir() cleanup
 
 	// Wait for first beat to confirm the loop is alive.
 	select {
@@ -307,6 +309,7 @@ func TestUpdateConfig_StartDisabledThenEnable(t *testing.T) {
 
 	// Start on a disabled service → no loop.
 	hs.Start()
+	defer hs.Stop() // the loop recreates HEARTBEAT.md on every tick; leaving it alive races t.TempDir() cleanup
 	if hs.IsRunning() {
 		t.Fatal("disabled Start() should not launch the loop")
 	}
@@ -339,6 +342,7 @@ func TestUpdateConfig_DisableStopsLoop(t *testing.T) {
 
 	hs.SetHandler(makeCountingHandler(t, &beats, &mu, beatCh, &once, firstBeat))
 	hs.Start()
+	defer hs.Stop() // the loop recreates HEARTBEAT.md on every tick; leaving it alive races t.TempDir() cleanup
 
 	select {
 	case <-firstBeat:
@@ -398,6 +402,7 @@ func TestUpdateConfig_DoubleEnableDoesNotDuplicateLoop(t *testing.T) {
 
 	hs.SetHandler(makeCountingHandler(t, &beats, &mu, beatCh, &once, firstBeat))
 	hs.Start()
+	defer hs.Stop() // the loop recreates HEARTBEAT.md on every tick; leaving it alive races t.TempDir() cleanup
 
 	select {
 	case <-firstBeat:
@@ -447,6 +452,7 @@ func TestUpdateConfig_IntervalChangeAppliedLive(t *testing.T) {
 
 	hs.SetHandler(makeCountingHandler(t, &beats, &mu, beatCh, &once, firstBeat))
 	hs.Start()
+	defer hs.Stop() // the loop recreates HEARTBEAT.md on every tick; leaving it alive races t.TempDir() cleanup
 
 	select {
 	case <-firstBeat:
@@ -517,5 +523,129 @@ func drainCount(ch chan struct{}) int {
 		case <-ticker.C:
 			// Keep draining; the timeout above is the real deadline.
 		}
+	}
+}
+
+// TestStop_WaitsForLoopSignalledByDisable is the regression test for the
+// unreapable-goroutine race behind the flaky t.TempDir() cleanup (issue #338).
+//
+// The symptom: a heartbeat loop still alive at the end of a test recreates
+// HEARTBEAT.md inside the temp dir while testing is removing it, so the
+// cleanup walk fails with "directory not empty" and the CI job goes red for a
+// reason unrelated to the change under review.
+//
+// The mechanism this pins down: UpdateConfig(_, false) signals the loop to
+// exit but must not block on an in-flight beat, so it cannot wait for the
+// goroutine itself. It used to close stopChan and drop hs.done on the floor,
+// which left the signalled goroutine with no channel anyone could reap: a
+// later Stop() saw stopChan == nil, returned immediately, and the goroutine
+// outlived it still holding a handle on the workspace.
+//
+// Disabling the reaping here makes the test fail: Stop returns while the
+// handler is still blocked, i.e. before the goroutine has exited.
+func TestStop_WaitsForLoopSignalledByDisable(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.WriteFile(filepath.Join(tmpDir, "HEARTBEAT.md"), []byte("check"), 0644)
+
+	hs := NewHeartbeatService(tmpDir, 1, true)
+	hs.interval = 50 * time.Millisecond
+
+	inBeat := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+
+	hs.SetHandler(func(prompt, channel, chatID string) *tools.ToolResult {
+		once.Do(func() { close(inBeat) })
+		<-release // simulate a beat that outlives the disable signal
+		return &tools.ToolResult{ForLLM: "ok", Silent: true}
+	})
+
+	if err := hs.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Get the loop into a beat and block it there.
+	select {
+	case <-inBeat:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("timed out waiting for the loop to enter a beat")
+	}
+
+	// Disable while the beat is in flight. This must not block: it only
+	// signals. The goroutine is still running the handler.
+	hs.UpdateConfig(1, false)
+	if hs.IsRunning() {
+		close(release)
+		t.Fatal("expected IsRunning()==false after disable")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		hs.Stop()
+		close(stopped)
+	}()
+
+	// Stop must not report success while the goroutine it is supposed to
+	// reap is still inside the handler.
+	select {
+	case <-stopped:
+		close(release)
+		t.Fatal("Stop returned before the disabled loop goroutine exited; " +
+			"the goroutine can still write into the workspace after Stop")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// Let the beat finish; now Stop must complete.
+	close(release)
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop never returned after the in-flight beat finished")
+	}
+
+	// Idempotence: a second Stop has nothing left to reap and must not block.
+	secondStop := make(chan struct{})
+	go func() {
+		hs.Stop()
+		close(secondStop)
+	}()
+	select {
+	case <-secondStop:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second Stop() blocked; Stop must be idempotent")
+	}
+}
+
+// TestStop_NoWorkspaceWritesAfterStop asserts the property the CI failure
+// actually violated: once Stop returns, nothing may touch the workspace again.
+// HEARTBEAT.md is removed after Stop and the service is left alone for well
+// over one interval; the file must stay gone.
+func TestStop_NoWorkspaceWritesAfterStop(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "HEARTBEAT.md")
+	os.WriteFile(path, []byte("check"), 0644)
+
+	hs := NewHeartbeatService(tmpDir, 1, true)
+	hs.interval = 50 * time.Millisecond
+	hs.SetHandler(func(prompt, channel, chatID string) *tools.ToolResult {
+		return &tools.ToolResult{ForLLM: "ok", Silent: true}
+	})
+
+	if err := hs.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	// Stop is expected to have reaped the loop, so this returns only once the
+	// goroutine is gone.
+	hs.Stop()
+
+	// Same removal t.TempDir() performs at cleanup, then a wait far longer
+	// than the interval the loop used to beat on.
+	os.RemoveAll(path)
+	time.Sleep(400 * time.Millisecond)
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("HEARTBEAT.md was recreated after Stop returned (err=%v); "+
+			"a loop goroutine outlived Stop", err)
 	}
 }
