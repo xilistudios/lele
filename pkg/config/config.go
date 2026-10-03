@@ -1361,7 +1361,23 @@ func DefaultConfig() *Config {
 				SessionExpiryDays: 30,
 				MaxUploadSizeMB:   50,
 				UploadTTLHours:    24,
-				LeleDir:           getDefaultLeleDir(),
+				// LeleDir is deliberately left empty rather than defaulted to a
+				// path. Unlike every other field here it names a location that
+				// depends on the environment of the process that builds the
+				// default, and defaults ARE persisted: SaveConfig marshals the
+				// whole struct, and lele_dir is only omitempty, so a non-empty
+				// default is written to config.json by `lele auth`/onboarding.
+				// Defaulting it to GetLeleDir() would therefore freeze whatever
+				// LELE_CONFIG_DIR happened to be set in that one run: a single
+				// sandboxed CLI invocation would pin the auth store, uploads,
+				// attachment staging and the skills dirs to a scratch path,
+				// and the next ordinary run would honour it (a value in the
+				// file beats the code default). Empty + omitempty keeps the
+				// field unpersisted, so it is resolved per run by
+				// NewNativeChannel, which is also where the explicit config
+				// value still wins. Same lazy-resolution idiom as
+				// WorkspacePath, LogsPath and KeyringVaultPath.
+				LeleDir: "",
 				RateLimit: NativeRateLimitConfig{
 					Enabled:             false,
 					PinPerMinute:        DefaultNativeRateLimitPinPerMinute,
