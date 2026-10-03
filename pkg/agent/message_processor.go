@@ -48,7 +48,30 @@ func newMessageProcessor(al *AgentLoop) *messageProcessorImpl {
 }
 
 // processMessage is the main entry point for processing inbound messages.
+// It keeps the bus-publish contract: runAgentLoop publishes the final response
+// to the outbound bus and returns "", which is what the gateway and the channel
+// dispatchers rely on (see loop.go Run).
 func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.InboundMessage) (string, error) {
+	return mp.processMessageWith(ctx, msg, true)
+}
+
+// processMessageWith is processMessage with an explicit sendResponse policy.
+// sendResponse=true is the bus-publish contract above; sendResponse=false
+// returns the final assistant text to the caller instead of publishing it,
+// which is what `lele agent` needs: the CLI bus has no outbound subscriber.
+// Same precedent as ProcessHeartbeat.
+//
+// The flag governs THIS turn's final-text delivery only. It does not silence
+// side deliveries that publish unconditionally regardless of sendResponse:
+// the /compact notice (commandHandlerImpl.handleCommand), the tool-approval
+// prompt for non-native channels (toolExecutor.executeWithApproval), the
+// goal-continuation turns (llmRunnerImpl.runGoalContinuation hardcodes
+// SendResponse:true), and the SYSTEM_SPAWN result
+// (messageProcessorImpl.handleSystemSpawn). See ProcessDirect's doc.
+// Side effect of false: toolExecutor's ForUser publish (already gated on
+// sendResponse) is skipped in CLI turns — no visible change, the CLI has no
+// subscriber to see it either way.
+func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.InboundMessage, sendResponse bool) (string, error) {
 	// Route system messages to processSystemMessage
 	if msg.Channel == "system" {
 		return mp.processSystemMessage(ctx, msg)
@@ -180,6 +203,10 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 	// the reset is measured from the original user message (the last real
 	// activity), and the replay can land minutes after the crash — long past
 	// the threshold — while the interrupted turn is exactly what must survive.
+	// NOTE: ContinueTurn below hardcodes SendResponse:true. That is safe only
+	// because this branch needs msg.DedupeID == marker.DedupeID != "", which
+	// ProcessDirect (sendResponse=false) never sets — if a durable CLI path
+	// ever sets DedupeID, thread the flag through ContinueTurn first.
 	if marker, ok := mp.al.getTurnMarker(sessionKey); ok && marker.DedupeID != "" && marker.DedupeID == msg.DedupeID {
 		if !marker.ResumeNoticeSent {
 			// Persist the flag BEFORE publishing: a crash between the two
@@ -240,7 +267,7 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		Attachments:     msg.Attachments,
 		DefaultResponse: "I've completed processing but have no response to give.",
 		EnableSummary:   true,
-		SendResponse:    true,
+		SendResponse:    sendResponse,
 		ReplyTo:         replyTo,
 		MessageID:       messageID,
 		ModelOverride:   turnModelOverride,
@@ -253,7 +280,7 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 			return "", err
 		}
 		// Return a user-facing error message instead of a bare error.
-		// With SendResponse=true, runAgentLoop publishes the final response
+		// With sendResponse=true, runAgentLoop publishes the final response
 		// directly to the bus. When it fails, nothing is published, which
 		// leaves channel-level UI (e.g. Telegram typing indicator + placeholder)
 		// stuck. Returning a non-empty string here lets Run() publish the
@@ -698,9 +725,36 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 	})
 }
 
-// ProcessDirect processes a message directly without going through the message bus.
+// ProcessDirect processes a message directly without going through the
+// inbound message bus. The CLI has no outbound subscriber, so the final
+// response of the turn is RETURNED to the caller rather than published into
+// the void, and it is never also published (no double delivery).
+//
+// Scope note: this covers the turn's final text only. A plain `lele agent`
+// run still cannot see side deliveries that go through the bus regardless of
+// this method — goal-continuation turns, /compact progress, tool-approval
+// prompts and SYSTEM_SPAWN results publish to "cli"/"direct" and the CLI
+// never subscribes (see processMessageWith's doc). That delivery model
+// predates this method and is unchanged by it.
+//
+// The inbound message is shaped like cron's (SenderID "cron") for parity
+// with ProcessDirectWithChannel; "cli"/"direct" are internal coordinates, so
+// the sender only affects session routing, not channel delivery.
 func (mp *messageProcessorImpl) ProcessDirect(ctx context.Context, content, sessionKey string) (string, error) {
-	return mp.ProcessDirectWithChannel(ctx, content, sessionKey, "cli", "direct")
+	// Check for SYSTEM_SPAWN: prefix
+	if strings.HasPrefix(content, "SYSTEM_SPAWN:") {
+		return mp.handleSystemSpawn(ctx, content, sessionKey, "cli", "direct")
+	}
+
+	msg := bus.InboundMessage{
+		Channel:    "cli",
+		SenderID:   "cron",
+		ChatID:     "direct",
+		Content:    content,
+		SessionKey: sessionKey,
+	}
+
+	return mp.processMessageWith(ctx, msg, false)
 }
 
 // ProcessDirectWithChannel processes a message directly with channel information.
