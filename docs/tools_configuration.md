@@ -180,6 +180,41 @@ Cron jobs can be used in several ways:
 
 When `spawn` is present, the scheduled task is delegated to a subagent instead of being executed inline by the main flow.
 
+## MCP Tool Loader
+
+`load_mcp_tools` exposes MCP servers configured in layered `mcp.json` files
+(see `docs/mcp.md`). It has no `config.json` settings of its own and is
+registered automatically **only** while at least one active server is
+configured.
+
+| Tool | Argument | Description |
+| --- | --- | --- |
+| `load_mcp_tools` | `server` (string, required) | Name of an MCP server from the `## MCP Servers` prompt section |
+
+### Behavior
+
+- Before loading, the model sees only server names and descriptions (the
+  prompt section) — never tool schemas.
+- The first call fetches the server's tool specs and registers them under
+  `mcp_<server>_<tool>` names; the result lists every spec with its input
+  schema.
+- Repeated calls are idempotent: the registry count never changes and the
+  listing is repeated.
+- An unknown server fails with a clean error that lists the known servers
+  (`known servers: …`).
+- Loaded tools then run like built-ins: calls are forwarded to the server and
+  a crashed server is reconnected once per call.
+
+### Example
+
+```text
+load_mcp_tools
+{"server": "files"}
+```
+
+Server configuration — `mcp.json` layers, `${VAR}` expansion, transports,
+security notes and limitations — is documented in `docs/mcp.md`.
+
 ## Environment Variables
 
 Tool settings can be overridden with environment variables using the `LELE_TOOLS_*` prefix.
@@ -197,5 +232,6 @@ Examples:
 
 - `docs/agents-models-providers.md`
 - `docs/client-api.md`
+- `docs/mcp.md`
 - `docs/SKILL_SUBAGENTS.md`
 - `docs/SYSTEM_SPAWN_IMPLEMENTATION.md`

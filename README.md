@@ -72,6 +72,7 @@ Same machine, same idle TUI session. Rough multipliers vs lele (~42 MB RSS, ~57 
 
 **Agent runtime**
 - Tool-using agent loop with iteration limits
+- MCP client: connect to stdio/HTTP/SSE MCP servers through layered `mcp.json` — see `docs/mcp.md`
 - Named agents, model fallbacks, per-agent `thinking_level` (override with `/think`)
 - Session persistence (SQLite) and optional ephemeral sessions
 - File attachments in native/web flows

@@ -49,6 +49,13 @@ type toolCoordinator interface {
 	continueSubagentTask(ctx context.Context, sessionKey, taskID, guidance string) (string, error)
 	GetStartupInfo() map[string]interface{}
 	RegisterTool(tool tools.Tool)
+	// syncMCPTools re-evaluates every live agent's MCP server set after
+	// startup or a config reload: manager lifecycle, load_mcp_tools
+	// registration and the "## MCP Servers" prompt section (see mcp.go).
+	syncMCPTools()
+	// closeMCPManagers closes every live MCP manager exactly once
+	// (idempotent, nil-safe): the teardown path for stdio children.
+	closeMCPManagers() error
 	GetSubagents() map[string]*tools.SubagentManager
 	getBackgroundExecs(includeCompleted bool) []BackgroundExecInfo
 	getBackgroundExecOutput(id string, tail int) (output string, status string, elapsed time.Duration, err error)
@@ -61,6 +68,7 @@ type toolCoordinatorImpl struct {
 	al          *AgentLoop
 	subagents   map[string]*tools.SubagentManager          // Owned by coordinator
 	bgManagers  map[string]*tools.BackgroundProcessManager // Keyed by agentID
+	mcpManagers *mcpManagerSet                             // Per-agent MCP managers, keyed by agentID (mcp.go)
 	registry    *AgentRegistry
 	bus         *bus.MessageBus
 	approvalMgr *channels.ApprovalManager
@@ -72,18 +80,27 @@ func newToolCoordinator(al *AgentLoop) *toolCoordinatorImpl {
 		al:          al,
 		subagents:   make(map[string]*tools.SubagentManager),
 		bgManagers:  make(map[string]*tools.BackgroundProcessManager),
+		mcpManagers: newMCPManagerSet(),
 		registry:    al.registry,
 		bus:         al.bus,
 		approvalMgr: al.approvalManager,
 	}
 }
 
-// newToolCoordinatorWithSubagents creates a tool coordinator with existing subagents.
-func newToolCoordinatorWithSubagents(al *AgentLoop, subagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager) *toolCoordinatorImpl {
+// newToolCoordinatorWithSubagents creates a tool coordinator with existing
+// subagents, background-process managers and MCP managers. mcpManagers may be
+// nil (fresh set, cwd captured now); ReloadRegistry passes the previous
+// coordinator's set so live MCP connections survive a reload instead of being
+// orphaned.
+func newToolCoordinatorWithSubagents(al *AgentLoop, subagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager, mcpManagers *mcpManagerSet) *toolCoordinatorImpl {
+	if mcpManagers == nil {
+		mcpManagers = newMCPManagerSet()
+	}
 	return &toolCoordinatorImpl{
 		al:          al,
 		subagents:   subagents,
 		bgManagers:  bgManagers,
+		mcpManagers: mcpManagers,
 		registry:    al.registry,
 		bus:         al.bus,
 		approvalMgr: al.approvalManager,

@@ -185,6 +185,10 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	// Re-register shared tools for new/recreated agents
 	existingSubagents := al.toolCoordinator.GetSubagents()
 	existingBgManagers := al.toolCoordinator.(*toolCoordinatorImpl).bgManagers
+	// MCP managers outlive the coordinator rebuild: they hold live
+	// connections, so the previous coordinator's set travels to the new one
+	// instead of being dropped (they are retired per agent by syncMCPTools).
+	existingMCPManagers := al.toolCoordinator.(*toolCoordinatorImpl).mcpManagers
 	updatedSubagents, updatedBgManagers := updateSharedTools(cfg, al.bus, al.registry, al.approvalManager, existingSubagents, existingBgManagers, al.groupManager, al.keyringService)
 
 	// Wire up session key and cancel callbacks for all subagents
@@ -205,7 +209,13 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	}
 
 	// Update tool coordinator with new subagents
-	al.toolCoordinator = newToolCoordinatorWithSubagents(al, updatedSubagents, updatedBgManagers)
+	al.toolCoordinator = newToolCoordinatorWithSubagents(al, updatedSubagents, updatedBgManagers, existingMCPManagers)
+
+	// Re-evaluate every agent's MCP server set against the new config:
+	// register/unregister load_mcp_tools, refresh the "## MCP Servers" prompt
+	// section and close+drop managers whose servers vanished or whose agent
+	// was removed (mcp.go).
+	al.toolCoordinator.syncMCPTools()
 }
 
 // UpdateConfigSnapshot atomically swaps the config pointer used by the loop.
@@ -699,7 +709,12 @@ func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.
 		})
 	}
 
-	loop.toolCoordinator = newToolCoordinatorWithSubagents(loop, subagents, bgManagers)
+	loop.toolCoordinator = newToolCoordinatorWithSubagents(loop, subagents, bgManagers, nil)
+
+	// Initial MCP wiring: build per-agent managers, register load_mcp_tools
+	// and feed the "## MCP Servers" prompt section (mcp.go). Best-effort by
+	// design — a broken mcp.json must not keep the agent from starting.
+	loop.toolCoordinator.syncMCPTools()
 
 	// Wire up the goal judge. The default is an inline LLM judge that evaluates
 	// progress from the session's conversation summary plus the latest response.
@@ -1142,6 +1157,18 @@ func (al *AgentLoop) Shutdown(ctx context.Context) error {
 	select {
 	case <-drained:
 		logger.InfoC("agent", "Agent loop drained: no turn in flight at shutdown")
+		// MCP teardown belongs here, after the drain: an in-flight turn may be
+		// mid-call on a remote tool, and closing its connection under it would
+		// turn a graceful stop into a failed tool call. When the drain times
+		// out (ctx.Done below) the managers are deliberately left open for the
+		// gateway's "mcp-stop" hook, which runs after agent-drain either way —
+		// so the stdio children are closed exactly once on both paths.
+		// A close failure is logged, not returned: it must not mark the drain
+		// itself as failed.
+		if err := al.CloseMCPManagers(); err != nil {
+			logger.WarnCF("agent", "Failed to close MCP managers during shutdown",
+				map[string]interface{}{"error": err.Error()})
+		}
 		return nil
 	case <-ctx.Done():
 		// The caller's budget (the shutdown coordinator's per-hook timeout) is

@@ -193,6 +193,19 @@ Contains:
 
 See `docs/tools_configuration.md`.
 
+## `mcp.json` (MCP servers)
+
+MCP servers are not part of `config.json`: lele merges up to three optional
+`mcp.json` files instead (project > agent > global):
+
+- project: `<process cwd>/.lele/mcp.json` (cwd captured once at startup, shared by every agent of the process)
+- agent: `<agent workspace>/mcp.json`
+- global: `<lele dir>/mcp.json` (`~/.lele`, or `$LELE_CONFIG_DIR` when set)
+
+Each file uses `{"mcpServers": {"<name>": { … }}}` (stdio `command` **or**
+remote `url`+`type`) and expands `${VAR}` from the environment. See
+`docs/mcp.md`.
+
 ## `heartbeat`
 
 Controls periodic execution of tasks from `HEARTBEAT.md`.
@@ -257,4 +270,5 @@ Examples:
 
 - `docs/agents-models-providers.md`
 - `docs/channel-setup.md`
+- `docs/mcp.md`
 - `docs/tools_configuration.md`

@@ -556,7 +556,10 @@ func gatewayCmd() {
 	//	5. channels-stop   : stop accepting new inbound messages
 	//	6. http-stop       : stop the unified server (API + Web UI)
 	//	7. services-stop   : stop watchers/schedulers that may enqueue work
-	//	8. lock-release    : last, so a restarting child never sees a live holder
+	//	8. mcp-stop        : critical phase (after the budgeted pass) — close
+	//	                     MCP stdio children, after the drain AND after the
+	//	                     config watcher stopped, never skipped by budget
+	//	9. lock-release    : last, so a restarting child never sees a live holder
 	//
 	// Outbound releases before inbound. Both hooks do the same three things
 	// (stop pump, wait for the goroutine, ReleaseClaims) and both directions
@@ -582,6 +585,31 @@ func gatewayCmd() {
 			return lock.Release()
 		})
 	}
+	// Two deliberate choices, both verified against pkg/update/shutdown.go:
+	//
+	//  1. RegisterCritical: critical hooks run in the coordinator's
+	//     guaranteed phase AFTER the whole budgeted pass — a 10 s agent-drain
+	//     that eats the budget can no longer skip this step and orphan the
+	//     stdio children. It still honors its own 5 s timeout.
+	//  2. Registered BEFORE services-stop in source: among critical hooks the
+	//     LIFO order keeps mcp-stop ahead of lock-release (the lock must still
+	//     go away last), and it documents that mcp-stop runs AFTER
+	//     services-stop. Note that stopping the config watcher does NOT join
+	//     its goroutine (pkg/config/watcher.go Stop only closes the stop
+	//     channel), so a reload already in flight can still reach
+	//     syncMCPTools after services-stop; the mcpManagerSet's stopped flag
+	//     guarantees such a late sync cannot install a manager nobody closes
+	//     (sync early-returns, put refuses the entry and closes it). (The
+	//     critical phase already runs after every budgeted hook,
+	//     including services-stop; the position also keeps that ordering if
+	//     the hook is ever demoted back to Register.)
+	//
+	// AgentLoop.Shutdown also closes managers on its drained path; both entry
+	// points funnel into the same idempotent closeAll, so children are
+	// terminated exactly once whether the drain finished or timed out.
+	coord.RegisterCritical("mcp-stop", 5*time.Second, func(context.Context) error {
+		return agentLoop.CloseMCPManagers()
+	})
 	coord.Register("services-stop", 5*time.Second, func(context.Context) error {
 		deviceService.Stop()
 		heartbeatService.Stop()

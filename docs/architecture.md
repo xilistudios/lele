@@ -8,6 +8,7 @@ This document gives a high-level map of Lele's current runtime architecture.
 - agent loop in `pkg/agent`
 - provider and model config in `pkg/config`
 - tools in `pkg/tools`
+- MCP client in `pkg/mcp` (layered `mcp.json` discovery, lazy per-agent managers, namespaced remote tools)
 - channels in `pkg/channels`
 - message bus in `pkg/bus`
 - sessions and state in `pkg/session` and `pkg/state`
@@ -67,3 +68,4 @@ Subagents are created through dedicated managers that reuse provider/tool loop i
 - `docs/SKILL_SUBAGENTS.md`
 - `docs/client-api.md`
 - `docs/deployment.md`
+- `docs/mcp.md`

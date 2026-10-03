@@ -160,9 +160,16 @@ type AgentProvidable interface {
 	// using the configured DM scope and identity links.
 	ResolveRoute(channel, peerKind, peerID string) string
 
-	// ProcessDirect processes a message directly without going through the message bus.
+	// ProcessDirect processes a message directly without going through the
+	// inbound message bus. It RETURNS the turn's final text to the caller and
+	// does not publish it (CLI contract). Side deliveries that always use the
+	// bus (goal continuation, /compact, approvals, SYSTEM_SPAWN) remain
+	// invisible to a caller that never subscribes; see agent.messageProcessorImpl.
 	ProcessDirect(ctx context.Context, content, sessionKey string) (string, error)
-	// ProcessDirectWithChannel processes a message directly with channel information.
+	// ProcessDirectWithChannel processes a message directly with channel
+	// information. It keeps the bus-publish contract: the final text is
+	// delivered as an outbound message on the given channel/chatID and the
+	// return value is "" (cron contract).
 	ProcessDirectWithChannel(ctx context.Context, content, sessionKey, channel, chatID string) (string, error)
 	// ProcessHeartbeat processes a heartbeat request without session history.
 	ProcessHeartbeat(ctx context.Context, content, channel, chatID string) (string, error)

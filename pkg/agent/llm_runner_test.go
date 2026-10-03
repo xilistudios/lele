@@ -320,6 +320,10 @@ func (m *llmRunnerMockToolCoordinator) cancelRemovedSubagents(liveAgentIDs []str
 	return 0
 }
 
+func (m *llmRunnerMockToolCoordinator) syncMCPTools() {}
+
+func (m *llmRunnerMockToolCoordinator) closeMCPManagers() error { return nil }
+
 func (m *llmRunnerMockToolCoordinator) cancelSession(sessionKey string) {}
 
 func (m *llmRunnerMockToolCoordinator) listRunningSubagentTasks() []*tools.SubagentTask { return nil }

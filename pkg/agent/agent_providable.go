@@ -1103,12 +1103,16 @@ func (ap *agentProvidableImpl) ResolveRoute(channel, peerKind, peerID string) st
 	return route.SessionKey
 }
 
-// ProcessDirect processes a message directly without going through the message bus.
+// ProcessDirect processes a message directly without going through the
+// inbound message bus. Returns the turn's final text to the caller without
+// publishing it (CLI contract); see messageProcessorImpl.ProcessDirect.
 func (ap *agentProvidableImpl) ProcessDirect(ctx context.Context, content, sessionKey string) (string, error) {
 	return ap.al.messageProcessor.ProcessDirect(ctx, content, sessionKey)
 }
 
-// ProcessDirectWithChannel processes a message directly with channel information.
+// ProcessDirectWithChannel processes a message directly with channel
+// information. The final text is delivered via the outbound bus on
+// channel/chatID and the return value is "" (cron contract).
 func (ap *agentProvidableImpl) ProcessDirectWithChannel(ctx context.Context, content, sessionKey, channel, chatID string) (string, error) {
 	return ap.al.messageProcessor.ProcessDirectWithChannel(ctx, content, sessionKey, channel, chatID)
 }

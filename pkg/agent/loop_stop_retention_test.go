@@ -35,7 +35,7 @@ func TestAgentLoop_StopWithin_BoundsStuckRetentionSweeper(t *testing.T) {
 
 	sm := tools.NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
 	sm.SetRetentionPeriod(time.Millisecond)
-	al.toolCoordinator = newToolCoordinatorWithSubagents(al, map[string]*tools.SubagentManager{"main": sm}, nil)
+	al.toolCoordinator = newToolCoordinatorWithSubagents(al, map[string]*tools.SubagentManager{"main": sm}, nil, nil)
 
 	// The evict callback signals and then blocks: the sweeper is stuck in the
 	// exact place (session eviction) that made the teardown hang.
