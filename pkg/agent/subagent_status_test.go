@@ -112,7 +112,7 @@ func TestGetSessionSubagents_InMemoryTakesPrecedence(t *testing.T) {
 		Updated:          time.Now().UnixMilli(),
 	}, nil)
 	al.toolCoordinator = newToolCoordinatorWithSubagents(al,
-		map[string]*tools.SubagentManager{"tester": smm}, nil)
+		map[string]*tools.SubagentManager{"tester": smm}, nil, nil)
 
 	ap := &agentProvidableImpl{al: al}
 	infos := ap.GetSessionSubagents(parent)

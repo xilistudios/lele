@@ -113,7 +113,7 @@ func TestSubagentRetentionWiring_StopWithinStopsSweeper(t *testing.T) {
 	sm := tools.NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
 	sm.SetRetentionPeriod(time.Millisecond)
 	t.Cleanup(sm.StartRetentionCleanup(time.Millisecond))
-	al.toolCoordinator = newToolCoordinatorWithSubagents(al, map[string]*tools.SubagentManager{"main": sm}, nil)
+	al.toolCoordinator = newToolCoordinatorWithSubagents(al, map[string]*tools.SubagentManager{"main": sm}, nil, nil)
 
 	// Red: the live sweeper reaps a terminal task on its own (no spawn).
 	addOldTerminalTaskForTest(sm, time.Hour)
@@ -153,7 +153,7 @@ func TestSubagentRetentionWiring_RemovedAgentStopsSweeper(t *testing.T) {
 	sm := tools.NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
 	sm.SetRetentionPeriod(time.Millisecond)
 	t.Cleanup(sm.StartRetentionCleanup(time.Millisecond))
-	al.toolCoordinator = newToolCoordinatorWithSubagents(al, map[string]*tools.SubagentManager{"gone": sm}, nil)
+	al.toolCoordinator = newToolCoordinatorWithSubagents(al, map[string]*tools.SubagentManager{"gone": sm}, nil, nil)
 
 	// Red: the live sweeper reaps a terminal task on its own.
 	addOldTerminalTaskForTest(sm, time.Hour)

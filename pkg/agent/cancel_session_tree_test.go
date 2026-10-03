@@ -29,7 +29,7 @@ func newCancelTestAgentLoop(t *testing.T) *AgentLoop {
 // with the given subagent/background managers.
 func newCancelTestCoordinator(t *testing.T, subagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager) *toolCoordinatorImpl {
 	t.Helper()
-	return newToolCoordinatorWithSubagents(newCancelTestAgentLoop(t), subagents, bgManagers)
+	return newToolCoordinatorWithSubagents(newCancelTestAgentLoop(t), subagents, bgManagers, nil)
 }
 
 // addRunningSubagent registers a fake running subagent task with the given
@@ -155,7 +155,7 @@ func TestStopSessionSubagents_AliasResolution(t *testing.T) {
 
 	al := newCancelTestAgentLoop(t)
 	al.sessionAliases.Store("base-uuid", "agent:main:native:active-uuid")
-	tc := newToolCoordinatorWithSubagents(al, map[string]*tools.SubagentManager{"main": sm}, nil)
+	tc := newToolCoordinatorWithSubagents(al, map[string]*tools.SubagentManager{"main": sm}, nil, nil)
 
 	// Stopping via the base (alias) key resolves to the active key.
 	if stopped := tc.stopSessionSubagents("base-uuid"); stopped != 1 {

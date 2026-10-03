@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 
@@ -33,6 +34,13 @@ type ContextBuilder struct {
 	memory             *MemoryStore
 	tools              *tools.ToolRegistry
 	availableSubagents []subagentInfo
+
+	// mcpServers lists the MCP servers configured for this agent, rendered as
+	// the "## MCP Servers" prompt section (name + description only — never
+	// tool schemas). Guarded by initialMu: the setter writes it under the
+	// same lock that clears the cached initial context, which keeps readers
+	// in GetInitialContext race-free.
+	mcpServers []tools.MCPServerInfo
 
 	// harnessContext caches the harness module context (working directory
 	// listing + AGENTS.md + skills directories). It depends only on the
@@ -149,6 +157,51 @@ func (cb *ContextBuilder) SetAvailableSubagents(subagents []subagentInfo) {
 	cb.initialMu.Unlock()
 }
 
+// SetMCPServers sets the MCP server summaries rendered in the "## MCP
+// Servers" section of the system prompt (fed by the tool coordinator after
+// every sync pass). The cached initial context is dropped ONLY when the
+// name+description+layer set actually changed: sync passes run on every
+// config reload, and clearing the cache unconditionally would force a
+// needless prompt rebuild (identity + bootstrap + skills) for a no-op.
+func (cb *ContextBuilder) SetMCPServers(servers []tools.MCPServerInfo) {
+	cb.initialMu.Lock()
+	defer cb.initialMu.Unlock()
+	if mcpServersEqual(cb.mcpServers, servers) {
+		return
+	}
+	cb.mcpServers = servers
+	// Partial invalidation: MCP summaries live in the static prompt only, so
+	// the cached initial context is all that needs dropping (the harness
+	// context knows nothing about MCP).
+	cb.initialContext = ""
+}
+
+// mcpServersEqual reports whether two server lists carry the same
+// name+description+layer tuples. Order-insensitive (the coordinator feeds a
+// sorted list, but a cheap set comparison here keeps the setter robust);
+// disabled servers never appear in either list (the coordinator feeds the
+// list built by Manager.Servers(), which already excludes them).
+func mcpServersEqual(a, b []tools.MCPServerInfo) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	key := func(s tools.MCPServerInfo) string {
+		return s.Name + "\x00" + s.Description + "\x00" + s.Layer
+	}
+	seen := make(map[string]int, len(a))
+	for _, s := range a {
+		seen[key(s)]++
+	}
+	for _, s := range b {
+		k := key(s)
+		if seen[k] == 0 {
+			return false
+		}
+		seen[k]--
+	}
+	return true
+}
+
 // SetSkillsFilter sets the per-agent allowlist of skill names rendered in the
 // <skills> block of the system prompt (sourced from AgentConfig.Skills).
 // nil or empty means "all enabled skills", which is the historical behaviour.
@@ -249,6 +302,27 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 				sb.WriteString(fmt.Sprintf("- **%s** — %s\n", sa.ID, sa.Description))
 			} else {
 				sb.WriteString(fmt.Sprintf("- **%s**\n", sa.ID))
+			}
+		}
+		parts = append(parts, sb.String())
+	}
+
+	// MCP servers section — name + description only, never tool schemas
+	// (they are huge and the model loads them lazily via load_mcp_tools).
+	// cb.mcpServers is read here while the write lock is held, which pairs
+	// with SetMCPServers writing it under the same lock.
+	if len(cb.mcpServers) > 0 {
+		servers := make([]tools.MCPServerInfo, len(cb.mcpServers))
+		copy(servers, cb.mcpServers)
+		sort.Slice(servers, func(i, j int) bool { return servers[i].Name < servers[j].Name })
+		var sb strings.Builder
+		sb.WriteString("## MCP Servers\n\n")
+		sb.WriteString("Use `load_mcp_tools` with a server name to load its tools.\n\n")
+		for _, s := range servers {
+			if s.Description != "" {
+				sb.WriteString(fmt.Sprintf("- **%s** — %s\n", s.Name, s.Description))
+			} else {
+				sb.WriteString(fmt.Sprintf("- **%s**\n", s.Name))
 			}
 		}
 		parts = append(parts, sb.String())

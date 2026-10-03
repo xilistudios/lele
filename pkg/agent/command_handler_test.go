@@ -1095,6 +1095,10 @@ func (m *commandHandlerSubagentCoordinatorStub) cancelRemovedSubagents(liveAgent
 	return 0
 }
 
+func (m *commandHandlerSubagentCoordinatorStub) syncMCPTools() {}
+
+func (m *commandHandlerSubagentCoordinatorStub) closeMCPManagers() error { return nil }
+
 func (m *commandHandlerSubagentCoordinatorStub) cancelSession(sessionKey string) {}
 
 func (m *commandHandlerSubagentCoordinatorStub) markSessionSubagentsDelivered(sessionKey string) {}
