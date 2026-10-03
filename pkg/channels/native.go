@@ -203,10 +203,23 @@ func IsLoopbackHost(host string) bool {
 func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable, approvalManager *ApprovalManager) (*NativeChannel, error) {
 	nativeCfg := cfg.Channels.Native
 
-	leleDir := nativeCfg.LeleDir
-	if leleDir == "" {
-		leleDir = config.GetLeleDir()
+	// Resolve the data directory once, into this copy of the config: n.cfg
+	// points at nativeCfg, not at the shared *config.Config, so the write
+	// stays local and never leaks into the struct that gets saved.
+	//
+	// The default is empty (see DefaultConfig) and the field is resolved
+	// here rather than baked in, so LELE_CONFIG_DIR is honoured per run
+	// without being frozen into config.json. An explicit lele_dir in the
+	// file still wins, because it reaches this function non-empty.
+	//
+	// Resolving into nativeCfg — and not just into the local leleDir below —
+	// matters: uploads (upload.go), attachment staging and the skills dirs
+	// read n.cfg.LeleDir directly. Leaving it empty would build relative
+	// paths like "tmp/uploads" against the process cwd.
+	if nativeCfg.LeleDir == "" {
+		nativeCfg.LeleDir = config.GetLeleDir()
 	}
+	leleDir := nativeCfg.LeleDir
 
 	auth, err := NewAuthManager(&nativeCfg, leleDir)
 	if err != nil {
