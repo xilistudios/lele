@@ -240,6 +240,19 @@ func gatewayCmd() {
 		}
 		// Wire SQLite store into native channel for client persistence.
 		channelManager.SetNativeClientStore(s.NativeClients())
+	} else if storeErr != nil && !errors.Is(storeErr, store.ErrUnsupportedPlatform) {
+		// Degraded gateway (#330): a SQLite-capable binary could not open the
+		// shared store, and the warning above is the only trace of it. Without
+		// this the native channel answers a plain 400 "invalid PIN" forever for
+		// PINs a healthy CLI did write to that database — the error points at
+		// the user's credential instead of at this process's storage. Marking
+		// the manager makes pairing answer 503 store_unavailable and shows up
+		// in GET /api/v1/system/status.
+		//
+		// ErrUnsupportedPlatform is excluded on purpose: there JSON is the real
+		// shared backend, PINs minted here ARE redeemable, and pairing must
+		// keep working exactly as before.
+		channelManager.SetNativeStoreUnavailable(storeErr)
 	}
 
 	// Durable inbound spool (feature-flagged). Built here, after the channel

@@ -8,11 +8,21 @@ import (
 	"time"
 )
 
+// errorCodeStoreUnavailable is the API error code answered by the pairing
+// endpoints while the gateway runs degraded (SQLite-capable binary, store not
+// open). It is a distinct code from pair_error/pin_error on purpose: those mean
+// "this credential was rejected", this one means "the gateway cannot check it".
+const errorCodeStoreUnavailable = "store_unavailable"
+
 func (n *NativeChannel) handleGetPIN(w http.ResponseWriter, r *http.Request) {
 	deviceName := getQueryParam(r, "device_name")
 
 	pending, err := n.auth.GeneratePIN(deviceName)
 	if err != nil {
+		if errors.Is(err, ErrPairingUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, err.Error(), errorCodeStoreUnavailable)
+			return
+		}
 		writeError(w, http.StatusBadRequest, err.Error(), "pin_error")
 		return
 	}
@@ -32,6 +42,14 @@ func (n *NativeChannel) handlePair(w http.ResponseWriter, r *http.Request) {
 
 	client, token, refreshToken, err := n.auth.PairWithPIN(req.PIN, req.DeviceName)
 	if err != nil {
+		// A degraded gateway is a SERVER-side fault, not a bad credential:
+		// 503 + an explicit code so the client (and whoever reads its error
+		// message) learns the store is down instead of retrying PINs that are
+		// valid in a database this process cannot open (#330).
+		if errors.Is(err, ErrPairingUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, err.Error(), errorCodeStoreUnavailable)
+			return
+		}
 		writeError(w, http.StatusBadRequest, err.Error(), "pair_error")
 		return
 	}

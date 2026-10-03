@@ -334,7 +334,21 @@ func (n *NativeChannel) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Agents:   agents,
 		Channels: channels,
 		Version:  "1.0.0",
+		Storage:  n.storageStatus(),
 	})
+}
+
+// storageStatus reports the backend that holds this gateway's client and
+// pairing state, flagging the degraded case (SQLite-capable binary whose store
+// failed to open) so a JSON-mode gateway is diagnosable from the outside
+// instead of answering "invalid PIN" for PINs it simply cannot read (#330).
+func (n *NativeChannel) storageStatus() *StorageStatus {
+	st := &StorageStatus{Backend: n.auth.StorageBackend()}
+	if reason, degraded := n.auth.StoreUnavailable(); degraded {
+		st.Degraded = true
+		st.Error = reason
+	}
+	return st
 }
 
 func (n *NativeChannel) handleChannels(w http.ResponseWriter, r *http.Request) {
