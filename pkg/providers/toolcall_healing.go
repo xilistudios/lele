@@ -34,7 +34,8 @@ import (
 //     without inventing the call that produced it;
 //   - real results are emitted directly after their assistant block, keeping
 //     the assistant/tool sequence contiguous even when an unrelated message
-//     was recorded in between.
+//     was recorded in between; that message is held and emitted after the
+//     results, because no provider accepts one between a call and its reply.
 //
 // Nothing is edited or invented except the synthetic results, so the model
 // still sees the conversation it actually had. A history that is already valid
@@ -51,10 +52,16 @@ func HealToolCallPairs(messages []Message) ([]Message, bool) {
 		open       bool      // an assistant tool-call block awaits results
 		unanswered []string  // ids of that block still without a result
 		pending    []Message // its real results, held until the block closes
+		// messages of any other role recorded while the block stayed open. They
+		// are only ever buffered while open is true, so closeBlock always drains
+		// them and none can be left behind.
+		interleaved []Message
 	)
 
 	// closeBlock emits the block's results: the real ones first (they carry
-	// actual tool output), then synthetic ones for whatever stayed unanswered.
+	// actual tool output), then synthetic ones for whatever stayed unanswered,
+	// and last the messages recorded in between, which have to wait for the
+	// assistant/tool sequence to be complete.
 	closeBlock := func() {
 		healed = append(healed, pending...)
 		pending = nil
@@ -62,6 +69,8 @@ func HealToolCallPairs(messages []Message) ([]Message, bool) {
 			healed = append(healed, missingResultMessage(id))
 		}
 		unanswered = nil
+		healed = append(healed, interleaved...)
+		interleaved = nil
 		open = false
 	}
 
@@ -107,8 +116,15 @@ func HealToolCallPairs(messages []Message) ([]Message, bool) {
 			}
 
 		default:
+			// A message of any other role - a human typing while the call is in
+			// flight, a system note - neither answers the block nor invalidates
+			// it: the result may still be recorded further down. Closing here
+			// would synthesise a "no recorded result" for a call that does have
+			// one and then drop that real result as an orphan, so the message is
+			// held until the block closes on its own.
 			if open {
-				closeBlock()
+				interleaved = append(interleaved, m)
+				continue
 			}
 			healed = append(healed, m)
 		}
@@ -116,6 +132,7 @@ func HealToolCallPairs(messages []Message) ([]Message, bool) {
 	if open {
 		closeBlock()
 	}
+	healed = append(healed, interleaved...)
 
 	// A valid history comes back identical, element for element: same length,
 	// same order, same content. Anything else means something was dropped,
