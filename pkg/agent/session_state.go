@@ -98,6 +98,26 @@ func (al *AgentLoop) persistSubagentSessionAgent(ownerAgentID, sessionKey, execu
 	agent.Sessions.SetSubagentAgentID(sessionKey, executorAgentID)
 }
 
+// subagentSessionPin returns the agent recorded at spawn time for a subagent
+// session, or "" when there is no such record. It is the fallback for session
+// rows persisted before agent_id existed: the pin is durable (sess:agent: KV,
+// rehydrated by loadDurableSessionState), so an upgrade still names the real
+// executor of historical subagents instead of the storage owner.
+//
+// It reads subagentSessionAgent directly rather than going through
+// sessionAgentOverride: a subagent key is never an alias base and its pin never
+// lands in sessionAgents (see setSubagentSessionAgent), so the other two
+// lookups can only miss — and this runs once per persisted row on a listing the
+// WebUI polls.
+func (al *AgentLoop) subagentSessionPin(sessionKey string) string {
+	if v, ok := al.subagentSessionAgent.Load(sessionKey); ok {
+		if agentID, isString := v.(string); isString {
+			return agentID
+		}
+	}
+	return ""
+}
+
 // kvSet writes through to the durable KV store. A write failure is logged and
 // swallowed: the in-memory map is already correct, so the session keeps working
 // for this process — it only loses durability until the next write.

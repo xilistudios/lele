@@ -141,3 +141,122 @@ func TestSubagentSpawn_PersistsExecutorAgent(t *testing.T) {
 		t.Errorf("FindSubagentSessions after restart reported agent %q, want %q", got, "coder")
 	}
 }
+
+// restartSessionsOverStore swaps the agent's SessionManager for a brand-new one
+// over the same SQLite store: nothing is resident and no in-memory spawn state
+// survives, which is the situation of a gateway right after a restart.
+func restartSessionsOverStore(t *testing.T, al *AgentLoop, inst *AgentInstance) *session.SessionManager {
+	t.Helper()
+	if al.dbStore == nil {
+		t.Fatal("test agent loop has no SQLite store; cannot exercise the persisted path")
+	}
+	fresh := session.NewSessionManager()
+	fresh.SetSessionRepo(al.dbStore.Sessions())
+	inst.Sessions = fresh
+	return fresh
+}
+
+// TestGetSessionSubagents_PersistedExecutorWins is the read half of the fix:
+// a historical subagent must be reported with the agent that ran it, read back
+// from disk with no in-memory state. Before the fix this returned the first
+// agent of the registry ("main" here), because the persisted branch reported
+// the owner of the session storage instead of the executor.
+func TestGetSessionSubagents_PersistedExecutorWins(t *testing.T) {
+	al, _ := createLLMRunnerTestAgentLoop(t)
+	inst := getTestAgentWithSessions(t, al)
+	sm := inst.Sessions
+
+	parent := "native:client-60"
+	key := parent + ":subagent-4"
+	sm.AddMessage(key, "user", "task")
+	sm.AddMessage(key, "assistant", "done")
+	// An executor that is not in the registry at all: nothing but the persisted
+	// column can produce this value.
+	sm.SetSubagentAgentID(key, "researcher")
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	ap := &agentProvidableImpl{al: al}
+
+	// Resident path.
+	infos := ap.GetSessionSubagents(parent)
+	if len(infos) != 1 {
+		t.Fatalf("resident: expected 1 subagent info, got %d (%+v)", len(infos), infos)
+	}
+	if infos[0].AgentID != "researcher" {
+		t.Errorf("resident AgentID = %q, want %q", infos[0].AgentID, "researcher")
+	}
+
+	// Restart path: evicted from memory and re-discovered from the store only.
+	restartSessionsOverStore(t, al, inst)
+	infos = ap.GetSessionSubagents(parent)
+	if len(infos) != 1 {
+		t.Fatalf("after restart: expected 1 subagent info, got %d (%+v)", len(infos), infos)
+	}
+	if infos[0].AgentID != "researcher" {
+		t.Errorf("after restart AgentID = %q, want %q", infos[0].AgentID, "researcher")
+	}
+	if infos[0].TaskID != "subagent-4" || infos[0].SessionKey != key {
+		t.Errorf("after restart identity = (%q, %q), want (%q, %q)",
+			infos[0].TaskID, infos[0].SessionKey, "subagent-4", key)
+	}
+}
+
+// TestGetSessionSubagents_LegacyRowFallsBackToStorageOwner pins the backward
+// compatibility of the read path: a session persisted before agent_id existed
+// (and with no routing pin) keeps the historical value instead of reporting an
+// empty agent, which the WebUI header would render as a blank name.
+func TestGetSessionSubagents_LegacyRowFallsBackToStorageOwner(t *testing.T) {
+	al, _ := createLLMRunnerTestAgentLoop(t)
+	inst := getTestAgentWithSessions(t, al)
+	sm := inst.Sessions
+
+	parent := "native:client-61"
+	key := parent + ":subagent-8"
+	sm.AddMessage(key, "user", "task")
+	sm.AddMessage(key, "assistant", "done")
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	restartSessionsOverStore(t, al, inst)
+
+	ap := &agentProvidableImpl{al: al}
+	infos := ap.GetSessionSubagents(parent)
+	if len(infos) != 1 {
+		t.Fatalf("expected 1 subagent info, got %d (%+v)", len(infos), infos)
+	}
+	if infos[0].AgentID != inst.ID {
+		t.Errorf("legacy AgentID = %q, want the storage owner %q", infos[0].AgentID, inst.ID)
+	}
+}
+
+// TestGetSessionSubagents_LegacyRowUsesDurablePin covers the rows written
+// before the column existed but after the spawn mapping became durable: the
+// routing pin still names the right executor, so upgrading does not leave every
+// historical subagent mislabeled until it is re-run.
+func TestGetSessionSubagents_LegacyRowUsesDurablePin(t *testing.T) {
+	al, _ := createLLMRunnerTestAgentLoop(t)
+	inst := getTestAgentWithSessions(t, al)
+	sm := inst.Sessions
+
+	parent := "native:client-62"
+	key := parent + ":subagent-2"
+	sm.AddMessage(key, "user", "task")
+	sm.AddMessage(key, "assistant", "done")
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	// What a pre-v8 spawn left behind: the durable pin, no column.
+	al.setSubagentSessionAgent(key, "coder")
+	restartSessionsOverStore(t, al, inst)
+
+	ap := &agentProvidableImpl{al: al}
+	infos := ap.GetSessionSubagents(parent)
+	if len(infos) != 1 {
+		t.Fatalf("expected 1 subagent info, got %d (%+v)", len(infos), infos)
+	}
+	if infos[0].AgentID != "coder" {
+		t.Errorf("AgentID = %q, want the pinned executor %q", infos[0].AgentID, "coder")
+	}
+}
