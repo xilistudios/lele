@@ -74,6 +74,30 @@ func (al *AgentLoop) setSubagentSessionAgent(sessionKey, agentID string) {
 	al.kvSet(sessAgentKeyPrefix+sessionKey, agentID)
 }
 
+// persistSubagentSessionAgent writes the executor of a subagent onto the
+// session row that holds its history, which is what the session listing (and
+// therefore the WebUI header and subagents panel) can read back after a
+// restart. setSubagentSessionAgent above is not enough for that consumer: it
+// is routing state, kept in a best-effort KV namespace that the listing never
+// consults, so historical subagents used to be named after whichever agent's
+// storage the scan happened to sweep first.
+//
+// ownerAgentID is the agent whose SessionManager records this subagent's
+// history (the recorder wired at tool-registration time). In production that is
+// the shared manager, so the row lands where every reader looks for it.
+// Best-effort: a missing agent or a store failure leaves the in-memory mapping
+// as the only record, which is exactly the pre-fix behavior.
+func (al *AgentLoop) persistSubagentSessionAgent(ownerAgentID, sessionKey, executorAgentID string) {
+	if al.registry == nil || sessionKey == "" || executorAgentID == "" {
+		return
+	}
+	agent, ok := al.registry.GetAgent(ownerAgentID)
+	if !ok || agent == nil || agent.Sessions == nil {
+		return
+	}
+	agent.Sessions.SetSubagentAgentID(sessionKey, executorAgentID)
+}
+
 // kvSet writes through to the durable KV store. A write failure is logged and
 // swallowed: the in-memory map is already correct, so the session keeps working
 // for this process — it only loses durability until the next write.
