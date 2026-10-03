@@ -52,6 +52,14 @@ type Manager struct {
 	nativeClientRepo *store.NativeClientRepo
 	inboundSpooler   InboundSpooler
 
+	// nativeStoreUnavailable is the mirror seam of nativeClientRepo for the
+	// degraded case: the gateway could not open the shared SQLite store on a
+	// binary that supports SQLite, so the native channel must refuse pairing
+	// with a diagnosable error instead of answering "invalid PIN" from an
+	// empty JSON file. Retained here for the same reason - ReloadConfig builds
+	// a fresh AuthManager that knows nothing about the failed open (#330).
+	nativeStoreUnavailable error
+
 	mu sync.RWMutex
 }
 
@@ -317,6 +325,13 @@ func (m *Manager) ReloadConfig(cfg *config.Config) error {
 		if ch, ok := m.channels["native"]; ok {
 			if nc, ok := ch.(*NativeChannel); ok {
 				nc.auth.SetStore(m.nativeClientRepo)
+			}
+		}
+	}
+	if m.nativeStoreUnavailable != nil {
+		if ch, ok := m.channels["native"]; ok {
+			if nc, ok := ch.(*NativeChannel); ok {
+				nc.auth.SetStoreUnavailable(m.nativeStoreUnavailable)
 			}
 		}
 	}
@@ -731,6 +746,28 @@ func (m *Manager) SetNativeClientStore(repo *store.NativeClientRepo) {
 	if ch, ok := m.channels["native"]; ok {
 		if nc, ok := ch.(*NativeChannel); ok {
 			nc.auth.SetStore(repo)
+		}
+	}
+}
+
+// SetNativeStoreUnavailable records that the shared SQLite store could not be
+// opened even though this binary supports SQLite, and propagates it to the
+// native channel's auth manager so pairing answers 503 store_unavailable
+// instead of a misleading 400 "invalid PIN" (#330). The value is retained so
+// ReloadConfig can re-apply it to the channels it rebuilds.
+//
+// Pass nil to clear. Callers must NOT call this for
+// store.ErrUnsupportedPlatform: there JSON is the real shared backend and
+// pairing keeps working.
+func (m *Manager) SetNativeStoreUnavailable(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.nativeStoreUnavailable = err
+
+	if ch, ok := m.channels["native"]; ok {
+		if nc, ok := ch.(*NativeChannel); ok {
+			nc.auth.SetStoreUnavailable(err)
 		}
 	}
 }

@@ -34,7 +34,29 @@ type AuthManager struct {
 	// miss is always allowed to adopt clients another process persisted.
 	// Only allowSlowReloadLocked reads/writes it.
 	lastSlowReload time.Time
+
+	// storeUnavailable records WHY the shared SQLite store could not be
+	// opened by a binary that DOES support SQLite (locked file, permissions,
+	// full disk, corrupted DB). Empty means "not degraded".
+	//
+	// It is deliberately separate from repo == nil: a nil repo is also the
+	// legitimate steady state on platforms without SQLite, where JSON is the
+	// real backend and the PINs minted here ARE redeemable. When this field
+	// is set the pending PINs live in a database this process cannot read, so
+	// GeneratePIN/PairWithPIN refuse with ErrPairingUnavailable instead of
+	// answering "invalid PIN" for a PIN that is perfectly valid on the CLI
+	// that minted it (#330). Guarded by am.mu.
+	storeUnavailable string
 }
+
+// ErrPairingUnavailable is returned by GeneratePIN and PairWithPIN when this
+// process runs DEGRADED: the binary supports SQLite but the shared store could
+// not be opened, so the pending PINs (which live in the database) can neither
+// be minted nor redeemed here. The REST layer maps it to 503 +
+// "store_unavailable"; before #330 the same situation answered 400 "invalid
+// PIN" forever, which pointed at the user's PIN instead of at the gateway's
+// storage.
+var ErrPairingUnavailable = errors.New("pairing unavailable")
 
 // DesktopClientID is the fixed client ID for the built-in trusted client used
 // by the desktop app when running in desktop mode. It is exempt from the
@@ -73,6 +95,10 @@ func (am *AuthManager) SetStore(repo *store.NativeClientRepo) {
 		return
 	}
 
+	// A usable store supersedes any degradation recorded before it (the
+	// gateway can be re-wired after a config reload).
+	am.storeUnavailable = ""
+
 	// Migration-on-first-set: if the in-memory store was loaded from JSON,
 	// persist it to SQLite so subsequent loads come from the DB.
 	if am.store != nil && len(am.store.Clients) > 0 {
@@ -97,6 +123,60 @@ func (am *AuthManager) SetStore(repo *store.NativeClientRepo) {
 			"error": err.Error(),
 		})
 	}
+}
+
+// SetStoreUnavailable marks this manager as DEGRADED: the binary supports
+// SQLite but the shared store could not be opened, so the pending PINs other
+// processes write to the database are unreachable from here. Passing nil
+// clears the condition; SetStore with a non-nil repo clears it implicitly.
+//
+// Callers must NOT use this for store.ErrUnsupportedPlatform: on a platform
+// without SQLite the JSON file IS the shared backend, PINs minted here are
+// redeemable, and pairing must keep working exactly as before (#330).
+func (am *AuthManager) SetStoreUnavailable(err error) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	if err == nil {
+		am.storeUnavailable = ""
+		return
+	}
+
+	am.storeUnavailable = err.Error()
+	logger.ErrorCF("native", "Pairing degraded: shared SQLite store is not open, PINs stored in it can neither be minted nor redeemed", map[string]interface{}{
+		"error":  am.storeUnavailable,
+		"effect": "POST /api/v1/auth/pair and GET /api/v1/auth/pin answer 503 store_unavailable",
+	})
+}
+
+// StoreUnavailable reports whether this manager is degraded and the reason
+// recorded by SetStoreUnavailable. It is what the status endpoints surface so
+// a JSON-mode gateway is visible from the outside instead of only in its log.
+func (am *AuthManager) StoreUnavailable() (reason string, degraded bool) {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	return am.storeUnavailable, am.storeUnavailable != ""
+}
+
+// StorageBackend reports which backend currently holds this manager's clients
+// and pending PINs: "sqlite" when a store repo is wired, "json" otherwise. A
+// "json" answer is either a no-SQLite platform (legitimate) or a degraded
+// gateway - StoreUnavailable tells the two apart (#330).
+func (am *AuthManager) StorageBackend() string {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	if am.repo != nil {
+		return "sqlite"
+	}
+	return "json"
+}
+
+// pairingUnavailableErrLocked builds the diagnosable error returned in place of
+// "invalid PIN" while degraded. am.mu must be held.
+func (am *AuthManager) pairingUnavailableErrLocked() error {
+	return fmt.Errorf("%w: this gateway could not open its SQLite store (%s) — pairing PINs live in that database, so none can be minted or redeemed here until the store is reachable again", ErrPairingUnavailable, am.storeUnavailable)
 }
 
 func generateSecret() string {
@@ -395,6 +475,13 @@ func (am *AuthManager) GeneratePIN(deviceName string) (*PendingPIN, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
+	// Degraded gateway: a PIN minted into the JSON file while the rest of the
+	// system uses SQLite is a dead PIN (it disappears as soon as the store
+	// opens again). Refuse with a diagnosable error instead (#330).
+	if am.storeUnavailable != "" {
+		return nil, am.pairingUnavailableErrLocked()
+	}
+
 	expiryMinutes := am.cfg.PinExpiryMinutes
 	if expiryMinutes <= 0 {
 		expiryMinutes = 5
@@ -553,6 +640,14 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 	defer am.mu.Unlock()
 
 	pin = strings.TrimSpace(pin)
+
+	// Degraded gateway: the PIN was written to the shared SQLite store by a
+	// healthy CLI, and this process cannot read that store. Looking it up in
+	// the JSON file answers "invalid PIN" for a perfectly valid PIN, forever,
+	// so refuse with the real reason instead (#330).
+	if am.storeUnavailable != "" {
+		return nil, "", "", am.pairingUnavailableErrLocked()
+	}
 
 	if am.repo != nil {
 		// SQLite path — validate-then-atomic-take (D4).

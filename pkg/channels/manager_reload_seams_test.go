@@ -7,6 +7,7 @@
 package channels
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -239,5 +240,42 @@ func TestSetInboundSpooler_PersistsReference(t *testing.T) {
 
 	if m.inboundSpooler != InboundSpooler(spooler) {
 		t.Fatal("SetInboundSpooler did not persist the spooler on Manager.inboundSpooler")
+	}
+}
+
+// TestReloadConfig_PreservesNativeStoreUnavailable is the #330 mirror of
+// TestReloadConfig_PreservesNativeClientRepo: the degraded mark (SQLite-capable
+// binary whose store failed to open) is also a post-construction seam, so
+// ReloadConfig must re-apply it. Without that, a config reload would silently
+// turn a gateway that refuses pairing with a diagnosable 503 back into one that
+// answers 400 "invalid PIN" for PINs it cannot read.
+func TestReloadConfig_PreservesNativeStoreUnavailable(t *testing.T) {
+	m := newTestManagerForReload(t)
+	storeErr := realStoreOpenError(t)
+
+	m.SetNativeStoreUnavailable(storeErr)
+
+	auth := getNativeAuth(t, m)
+	if reason, degraded := auth.StoreUnavailable(); !degraded || reason != storeErr.Error() {
+		t.Fatalf("SetNativeStoreUnavailable: current native channel degraded=%v reason=%q, want the store error", degraded, reason)
+	}
+	if m.nativeStoreUnavailable == nil {
+		t.Fatal("SetNativeStoreUnavailable did not persist the error on the Manager")
+	}
+
+	newCfg := &config.Config{}
+	newCfg.Channels.Native.Enabled = true
+	newCfg.Channels.Native.LeleDir = t.TempDir()
+
+	if err := m.ReloadConfig(newCfg); err != nil {
+		t.Fatalf("ReloadConfig() error = %v", err)
+	}
+
+	newAuth := getNativeAuth(t, m)
+	if reason, degraded := newAuth.StoreUnavailable(); !degraded || reason != storeErr.Error() {
+		t.Fatalf("degraded mark lost after ReloadConfig: degraded=%v reason=%q", degraded, reason)
+	}
+	if _, _, _, err := newAuth.PairWithPIN("123456", "some-device"); !errors.Is(err, ErrPairingUnavailable) {
+		t.Fatalf("post-reload PairWithPIN err = %v, want ErrPairingUnavailable", err)
 	}
 }

@@ -611,6 +611,22 @@ type SystemStatusResponse struct {
 	Agents   []map[string]interface{} `json:"agents"`
 	Channels []map[string]interface{} `json:"channels"`
 	Version  string                   `json:"version"`
+	// Storage tells the caller which backend holds the gateway's client and
+	// pairing state. It exists so a gateway that silently fell back to JSON is
+	// visible from the outside instead of only in its own log (#330).
+	Storage *StorageStatus `json:"storage,omitempty"`
+}
+
+// StorageStatus is the storage block of SystemStatusResponse.
+//
+// Degraded is true ONLY for the broken case: a SQLite-capable binary whose
+// shared store could not be opened (lock, permissions, full disk, corrupted
+// file). A no-SQLite platform legitimately runs Backend "json" with
+// Degraded false, because there JSON is the backend every process shares.
+type StorageStatus struct {
+	Backend  string `json:"backend"` // "sqlite" | "json"
+	Degraded bool   `json:"degraded"`
+	Error    string `json:"error,omitempty"`
 }
 
 type ChannelsResponse struct {
