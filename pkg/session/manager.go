@@ -377,6 +377,7 @@ func (sm *SessionManager) syncSessionMetaLocked(session *Session) {
 		meta.Name = session.Name
 		meta.Mode = session.Mode
 		meta.Folder = session.Folder
+		meta.AgentID = session.AgentID
 		meta.SubagentStatus = session.SubagentStatus
 		meta.Created = session.Created
 		meta.Updated = session.Updated
@@ -387,6 +388,7 @@ func (sm *SessionManager) syncSessionMetaLocked(session *Session) {
 		Name:           session.Name,
 		Mode:           session.Mode,
 		Folder:         session.Folder,
+		AgentID:        session.AgentID,
 		SubagentStatus: session.SubagentStatus,
 		Created:        session.Created,
 		Updated:        session.Updated,

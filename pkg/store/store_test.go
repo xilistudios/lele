@@ -195,6 +195,9 @@ func TestMigrations_UpgradeV6ToV7_PreservesClients(t *testing.T) {
 	}
 
 	// Simulate v6: drop native_pending_pins and downgrade schema version.
+	// Everything later migrations add must go too — the reopen replays every
+	// migration above the recorded version, so a column added by v8 would
+	// otherwise collide with the one this fresh store already created.
 	db, err := openRawDB(path)
 	if err != nil {
 		t.Fatalf("openRawDB(%q) failed: %v", path, err)
@@ -202,6 +205,10 @@ func TestMigrations_UpgradeV6ToV7_PreservesClients(t *testing.T) {
 	if _, err := db.Exec(`DROP TABLE IF EXISTS native_pending_pins`); err != nil {
 		db.Close()
 		t.Fatalf("DROP native_pending_pins: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE sessions DROP COLUMN agent_id`); err != nil {
+		db.Close()
+		t.Fatalf("DROP sessions.agent_id: %v", err)
 	}
 	if _, err := db.Exec(
 		`UPDATE schema_meta SET value = '6' WHERE key = 'schema_version'`,
@@ -229,8 +236,10 @@ func TestMigrations_UpgradeV6ToV7_PreservesClients(t *testing.T) {
 	).Scan(&version); err != nil {
 		t.Fatalf("read schema_version: %v", err)
 	}
-	if version != "7" {
-		t.Errorf("schema_version = %q, want %q", version, "7")
+	// The reopen replays every migration above the recorded version, so the
+	// store ends up at the build's latest, not necessarily at 7.
+	if want := strconv.Itoa(SchemaVersion); version != want {
+		t.Errorf("schema_version = %q, want %q", version, want)
 	}
 
 	// Verify native_pending_pins table exists.

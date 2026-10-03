@@ -99,6 +99,48 @@ func (sm *SessionManager) SetSubagentStatus(key string, status string) {
 	}
 }
 
+// SetSubagentAgentID records the agent that executes a subagent session and
+// persists it immediately. The WebUI needs it for HISTORICAL subagents: the
+// in-memory spawn-time mapping (AgentLoop.subagentSessionAgent) is lost on
+// restart, and every agent shares one SessionManager, so without a persisted
+// executor the listing can only report the agent that owns the storage.
+//
+// Unlike SetSubagentStatus this CREATES the session when the key is unknown:
+// it runs at spawn time, before the subagent's first message materializes the
+// child session, and a row that does not exist yet is a row the executor can
+// never be written to (nothing re-records it after a restart). The session
+// starts message-less and the recorder fills it in moments later; listing
+// endpoints already filter message-less sessions out via HasMessages, so
+// nothing new becomes visible. An empty agentID is ignored — callers fall back
+// to the owner agent before calling, and "" must not overwrite a real value.
+//
+// Best-effort like SetSubagentStatus: routing for the running task keeps
+// working through the in-memory map regardless of this call's result.
+func (sm *SessionManager) SetSubagentAgentID(key string, agentID string) {
+	if key == "" || agentID == "" {
+		return
+	}
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session := sm.getOrCreateUnlocked(key)
+	if session.AgentID == agentID {
+		return // already recorded (a retried spawn re-runs the callback)
+	}
+
+	session.AgentID = agentID
+	session.metaDirty = true
+	session.bumpEpoch()
+	sm.syncSessionMetaLocked(session)
+
+	// Best-effort persistence: ignore errors, the in-memory map holds the
+	// authoritative executor for the running task regardless.
+	if sm.sessionRepo != nil {
+		_ = sm.saveMetaOnlyUnlocked(key)
+	}
+}
+
 func (sm *SessionManager) SetName(key string, name string) error {
 	sm.ensureLoaded()
 	sm.mu.Lock()

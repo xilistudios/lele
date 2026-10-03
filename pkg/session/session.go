@@ -33,6 +33,12 @@ type Session struct {
 	// into the session's system prompt by ContextBuilder's folder resolver.
 	// Empty means "no folder selected".
 	Folder string `json:"folder,omitempty"`
+	// AgentID is the agent that executes this session. For a subagent session
+	// it is the spawn's target agent, which is not necessarily the agent whose
+	// SessionManager stores the history (in production every agent shares one
+	// manager). Persisted so the WebUI can name the right agent for historical
+	// subagents. Empty for non-subagent sessions and rows predating it.
+	AgentID string `json:"agent_id,omitempty"`
 	// SubagentStatus is the terminal status of a subagent session
 	// ("completed", "failed", "not_done", "cancelled", "needs_context"),
 	// persisted so the WebUI can show the real outcome after eviction or
@@ -100,6 +106,7 @@ type sessionMetadata struct {
 	Name           string    `json:"name"`
 	Mode           string    `json:"mode,omitempty"`
 	Folder         string    `json:"folder,omitempty"`
+	AgentID        string    `json:"agent_id,omitempty"`
 	SubagentStatus string    `json:"subagent_status,omitempty"`
 	Created        time.Time `json:"created"`
 	Updated        time.Time `json:"updated"`

@@ -471,6 +471,11 @@ type SubagentSessionInfo struct {
 	Iterations int    // number of assistant messages
 	Summary    string // session summary if available
 	Name       string // session name if available
+	// AgentID is the agent that executed the subagent, as persisted on its
+	// session. Empty means unknown (the session predates agent_id
+	// persistence); readers fall back to the agent whose session storage
+	// reported the row.
+	AgentID string
 	// Status is the persisted terminal status of the subagent task
 	// ("completed", "failed", ...). Empty means unknown (the session predates
 	// subagent_status persistence); readers fall back to "completed", the
@@ -537,6 +542,7 @@ func subagentInfoFromSession(key, parentPrefix string, session *Session) Subagen
 		Iterations: iterations,
 		Summary:    subagentSummary(session.Summary, lastAssistantContent),
 		Name:       session.Name,
+		AgentID:    session.AgentID,
 		Status:     session.SubagentStatus,
 	}
 }
@@ -598,6 +604,7 @@ func (sm *SessionManager) FindSubagentSessions(parentPrefix string) []SubagentSe
 			Created: meta.Created,
 			Updated: meta.Updated,
 			Name:    meta.Name,
+			AgentID: meta.AgentID,
 			Status:  meta.SubagentStatus,
 		})
 		coldKeys = append(coldKeys, key)
