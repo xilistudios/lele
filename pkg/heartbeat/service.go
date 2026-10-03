@@ -41,7 +41,8 @@ type HeartbeatService struct {
 	enabled   bool
 	mu        sync.RWMutex
 	stopChan  chan struct{}
-	done      chan struct{} // closed when the runLoop goroutine exits
+	done      chan struct{}   // closed when the runLoop goroutine exits
+	stopping  []chan struct{} // done channels of loops already signalled but not yet reaped by Stop
 }
 
 // NewHeartbeatService creates a new heartbeat service
@@ -107,25 +108,54 @@ func (hs *HeartbeatService) Start() error {
 	return nil
 }
 
-// Stop gracefully stops the heartbeat service and waits for the loop
-// goroutine to exit, ensuring no log writes occur after Stop returns.
-func (hs *HeartbeatService) Stop() {
-	hs.mu.Lock()
-
+// stopLocked signals the running loop to exit and parks its done channel so a
+// later Stop can wait for the goroutine. It never blocks on the goroutine, so
+// it is safe to call from the config-reload path. Caller MUST hold hs.mu.
+func (hs *HeartbeatService) stopLocked() {
 	if hs.stopChan == nil {
-		hs.mu.Unlock()
 		return
 	}
 
 	close(hs.stopChan)
-	done := hs.done
+	// done is nil only when a test primes stopChan by hand; parking a nil
+	// channel would make Stop block forever.
+	if hs.done != nil {
+		hs.stopping = append(hs.stopping, hs.done)
+	}
 	hs.stopChan = nil
 	hs.done = nil
+}
+
+// takeDoneLocked signals the running loop (if any) and returns every channel
+// that is closed once a signalled loop goroutine has finished, clearing the
+// pending set. Caller MUST hold hs.mu.
+func (hs *HeartbeatService) takeDoneLocked() []chan struct{} {
+	hs.stopLocked()
+	if len(hs.stopping) == 0 {
+		return nil
+	}
+	done := hs.stopping
+	hs.stopping = nil
+	return done
+}
+
+// Stop gracefully stops the heartbeat service and waits for the loop
+// goroutine to exit, ensuring no log writes occur after Stop returns.
+//
+// It also reaps loops that UpdateConfig already signalled when disabling: that
+// path cannot block on an in-flight beat, so without this a goroutine could
+// outlive Stop and keep writing into the workspace (HEARTBEAT.md,
+// heartbeat.log). Stop is idempotent.
+func (hs *HeartbeatService) Stop() {
+	hs.mu.Lock()
+	done := hs.takeDoneLocked()
 	hs.mu.Unlock()
 
 	// Wait outside the lock so the goroutine can finish (it may be in
 	// executeHeartbeat which takes RLock).
-	<-done
+	for _, ch := range done {
+		<-ch
+	}
 }
 
 func (hs *HeartbeatService) UpdateConfig(intervalMinutes int, enabled bool) {
@@ -144,10 +174,14 @@ func (hs *HeartbeatService) UpdateConfig(intervalMinutes int, enabled bool) {
 		hs.startLocked()
 	}
 	// Stop the loop if we just became disabled and it's running.
-	if hs.stopChan != nil && !enabled {
-		close(hs.stopChan)
-		hs.stopChan = nil
-		hs.done = nil
+	// stopLocked (rather than closing by hand) parks the goroutine's done
+	// channel in hs.stopping so a later Stop still reaps it: dropping hs.done
+	// here instead left the signalled loop unreapable, and it could keep
+	// recreating HEARTBEAT.md after the service was considered stopped.
+	// UpdateConfig must not block on an in-flight beat, hence parking rather
+	// than waiting.
+	if !enabled {
+		hs.stopLocked()
 	}
 }
 
