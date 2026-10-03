@@ -1051,6 +1051,84 @@ func (am *AuthManager) allowSlowReloadLocked(now time.Time) bool {
 	return true
 }
 
+// authReconcileInterval bounds how long a client revoked by ANOTHER process
+// keeps authenticating inside this one. See reconcileClientsWithStore.
+const authReconcileInterval = 15 * time.Second
+
+// reconcileClientsWithStore drops from this process's in-memory map every
+// client that no longer exists in the shared SQLite store, and returns the
+// auth client IDs it removed.
+//
+// It closes the other half of #327. The snapshot-sync bug is fixed (mutators
+// write single rows, so a gateway write can no longer resurrect a client the
+// CLI deleted), but that only stops the row from coming BACK: the gateway's
+// map still holds the ClientInfo it loaded at startup, and ValidateToken's hot
+// path answers a map HIT without ever consulting the DB. A token revoked with
+// `lele client remove` therefore kept authenticating until this process
+// restarted — exactly the impact the issue reports.
+//
+// Why a poll and not a hot-path check: the miss case already reloads lazily
+// (see slowReloadMinInterval), but a hit has nothing to tell it that its own
+// entry is stale, and verifying every hit against the DB would put a query
+// plus an exclusive-lock window in front of every authenticated request to
+// answer a question that changes a few times a day. One SELECT over a table of
+// a handful of rows per interval bounds revocation at authReconcileInterval
+// instead of at the lifetime of the process.
+//
+// Deletions only, deliberately: this must never ADD or overwrite entries.
+// Adoption (a client another process paired) is already covered by the
+// reload-on-miss, and copying DB rows into the map here would revert an
+// in-memory rotation whose persist failed and was logged-and-swallowed.
+// Removing entries cannot resurrect anything, which is the failure mode this
+// whole area is careful about.
+//
+// Consequence worth stating: a client whose directed write FAILED (a
+// persistClientLocked error is logged and swallowed by design, e.g. SQLITE_BUSY
+// or a full disk) lives only in this map, so this drops it after
+// authReconcileInterval. That is the intended reading of "the DB is
+// authoritative in SQLite mode" and is no worse than today — the very first
+// cache-miss already runs loadStore(), which replaces the map with the table
+// and erases such a client. Making a lost persist survivable would require the
+// mutators to fail the request instead of logging, which is a separate call.
+//
+// The JSON backend (am.repo == nil) is a single-writer document owned by this
+// process, so there is nothing to reconcile and the call is a no-op.
+func (am *AuthManager) reconcileClientsWithStore() ([]string, error) {
+	am.mu.RLock()
+	repo := am.repo
+	am.mu.RUnlock()
+
+	if repo == nil {
+		return nil, nil
+	}
+
+	// Read outside am.mu: the only thing the caller's authenticated traffic
+	// can ever wait on here is the short map edit below, not the query.
+	rows, err := repo.ListClients()
+	if err != nil {
+		return nil, fmt.Errorf("list clients for reconciliation: %w", err)
+	}
+
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	var dropped []string
+	for id, client := range am.store.Clients {
+		if _, ok := rows[id]; ok {
+			continue
+		}
+		delete(am.store.Clients, id)
+		dropped = append(dropped, client.ClientID)
+	}
+	if len(dropped) > 0 {
+		logger.WarnCF("native", "auth: dropped clients revoked by another process", map[string]interface{}{
+			"count":      len(dropped),
+			"client_ids": dropped,
+		})
+	}
+	return dropped, nil
+}
+
 // rotationGrace is how long the refresh token a client was rotated AWAY from
 // is still accepted once, issuing a fresh pair.
 //

@@ -361,6 +361,7 @@ func (n *NativeChannel) Start(ctx context.Context) error {
 
 	n.startTime = time.Now()
 	go n.runUploadCleanup(ctx)
+	go n.runAuthRevocationReconcile(ctx)
 	startCatalogPrefetch()
 
 	n.running = true
@@ -457,6 +458,90 @@ func (n *NativeChannel) runUploadCleanup(ctx context.Context) {
 		case <-ticker.C:
 			utils.CleanupOldUploads(uploadDir, maxAge)
 			utils.CleanupOldUploads(stagingDir, maxAge)
+		}
+	}
+}
+
+// runAuthRevocationReconcile periodically drops clients that no longer exist
+// in the shared SQLite store, so a `lele client remove` performed by the CLI
+// (or any other process sharing the DB) stops authenticating here within
+// authReconcileInterval instead of surviving until the gateway restarts, and
+// tears down the WebSocket sessions those clients already hold.
+//
+// Bound to the ctx passed to Start, the same lifecycle as runUploadCleanup:
+// cancelling it ends the loop, and Stop does not need to track it.
+//
+// A failed reconcile is logged and skipped, never fatal: the next tick retries,
+// and the store being briefly unreadable must not take the channel down.
+func (n *NativeChannel) runAuthRevocationReconcile(ctx context.Context) {
+	if n.auth == nil {
+		// Defensive: a channel built without NewNativeChannel (hand-made test
+		// fixtures) has no auth manager to reconcile.
+		return
+	}
+
+	// The JSON backend has nothing to reconcile and reports no error, so this
+	// loop simply idles there; the tick is cheap enough not to be worth a
+	// special case in Start.
+	ticker := time.NewTicker(authReconcileInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			dropped, err := n.auth.reconcileClientsWithStore()
+			if err != nil {
+				logger.WarnCF("native", "auth: client reconciliation failed", map[string]interface{}{
+					"error": err.Error(),
+				})
+				continue
+			}
+			if len(dropped) > 0 {
+				n.dropWSClientsForAuth(dropped)
+			}
+		}
+	}
+}
+
+// dropWSClientsForAuth tears down every live WebSocket whose authenticated
+// client was revoked out from under this process.
+//
+// Without this, dropping the client from the auth map only stops FUTURE
+// requests: an already-upgraded connection keeps streaming events for its
+// remaining lifetime, because the token was validated once at handshake. That
+// would leave the revoked device in full possession of the session #327 is
+// about ending.
+//
+// n.wsClients is keyed by a per-connection uuid (see handleWebSocket), not by
+// the auth client ID, so this has to scan; the map holds one entry per live
+// connection, which is a handful of items. Teardown goes through
+// abandonWSClientLocked, the same path used for an explicitly removed client.
+func (n *NativeChannel) dropWSClientsForAuth(authClientIDs []string) {
+	revoked := make(map[string]struct{}, len(authClientIDs))
+	for _, id := range authClientIDs {
+		if id != "" {
+			revoked[id] = struct{}{}
+		}
+	}
+	if len(revoked) == 0 {
+		return
+	}
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	for _, client := range n.wsClients {
+		if client.ClientInfo == nil {
+			continue
+		}
+		if _, ok := revoked[client.ClientInfo.ClientID]; ok {
+			logger.InfoCF("native", "dropping WebSocket of client revoked by another process", map[string]interface{}{
+				"auth_client_id": client.ClientInfo.ClientID,
+				"conn_id":        client.ID,
+			})
+			n.abandonWSClientLocked(client)
 		}
 	}
 }
