@@ -380,6 +380,37 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 		}
 	}
 
+	// Nothing left to evict once the caps above have had their say, which
+	// happens on a real and recurring shape: the last in-context message is
+	// index 0 (measured: 61 of 957 swept layouts), typically right after the
+	// anti-split guard of ExcludeOldMessagesFromContext pushed its boundary to
+	// the end of a session whose tail is a tool-result group (#343).
+	//
+	// Short-circuiting here skips two things and only two:
+	//
+	//   * the SQLite round trip — UpdateFirstInMemorySeq(key, firstInMemorySeq)
+	//     with firstInMemorySeq unchanged by construction (evictUpTo is 0, and a
+	//     cold load rebuilds it FROM the row, so memory and row cannot diverge
+	//     on this path); and
+	//   * an "Evicted excluded messages from memory {evicted=0}" log line that
+	//     reads like an eviction happened when nothing did.
+	//
+	// The tail rebuild, the epoch bump and the view republish that follow would
+	// all be no-ops too (same content, new slice) — skipping them also avoids
+	// invalidating the copy-on-write snapshot every GetHistoryView reader holds
+	// for no reason.
+	//
+	// The phase-3 bookkeeping is deliberately replicated here, NOT skipped: it
+	// is what makes the next Save a no-op instead of a full rewrite of the
+	// history, and dropping it would turn this cleanup into a regression on the
+	// durability path.
+	if evictUpTo <= 0 {
+		session.clearDirtyFlags()
+		session.lastPersistedSeq = len(session.Messages) - 1
+		sm.touchSession(key)
+		return 0
+	}
+
 	// Collect non-excluded messages in [0, evictUpTo) — these are preserved
 	// holes (index 0, recent human turns) that sit inside the eviction region.
 	// Their content is folded into the summary so nothing is lost.
