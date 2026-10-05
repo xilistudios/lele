@@ -900,11 +900,27 @@ func (ap *agentProvidableImpl) GetSessionSubagents(sessionKey string) []channels
 				status = tools.SubagentStatusCompleted
 			}
 
+			// Executor of the task, which is NOT necessarily the agent whose
+			// storage is being swept: in production every agent shares one
+			// SessionManager, so FindSubagentSessions returns the same rows for
+			// each agentID and the first one in the registry wins the seen[]
+			// dedupe. The session row carries the real executor (migration v8);
+			// rows written before that fall back to the durable routing pin
+			// recorded at spawn time, and only then to the storage owner — the
+			// historical, arbitrary value — when neither exists.
+			executor := past.AgentID
+			if executor == "" {
+				executor = ap.al.subagentSessionPin(past.Key)
+			}
+			if executor == "" {
+				executor = agentID
+			}
+
 			result = append(result, channels.SubagentTaskInfo{
 				TaskID:     past.TaskID,
 				SessionKey: past.Key,
 				Label:      past.Name, // session Name doubles as label fallback
-				AgentID:    agentID,   // owning agent of the session storage
+				AgentID:    executor,
 				Status:     status,
 				Summary:    summary,
 				Created:    past.Created.UnixMilli(),

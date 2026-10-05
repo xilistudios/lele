@@ -202,6 +202,10 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 				targetAgentID = id
 			}
 			al.setSubagentSessionAgent(sessionKey, targetAgentID)
+			// The mapping above is routing state; the WebUI header reads the
+			// session listing instead, so the executor has to live on the
+			// session row too (#332).
+			al.persistSubagentSessionAgent(id, sessionKey, targetAgentID)
 		})
 		sm.SetRegisterSessionCancelCallback(func(sessionKey string, cancel context.CancelFunc) func() {
 			return al.sessionManager.RegisterSessionCancel(sessionKey, cancel)
@@ -703,6 +707,10 @@ func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.
 				targetAgentID = id
 			}
 			loop.setSubagentSessionAgent(sessionKey, targetAgentID)
+			// The mapping above is routing state; the WebUI header reads the
+			// session listing instead, so the executor has to live on the
+			// session row too (#332).
+			loop.persistSubagentSessionAgent(id, sessionKey, targetAgentID)
 		})
 		sm.SetRegisterSessionCancelCallback(func(sessionKey string, cancel context.CancelFunc) func() {
 			return loop.sessionManager.RegisterSessionCancel(sessionKey, cancel)

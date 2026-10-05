@@ -27,6 +27,12 @@ type SessionMeta struct {
 	Model         string
 	ThinkingLevel string
 	Folder        string
+	// AgentID is the agent that executes the session. For a subagent session it
+	// is the spawn's target agent (tools.SubagentTask.AgentID), which is NOT
+	// necessarily the agent whose SessionManager holds the history: in
+	// production every agent shares one manager. Empty for non-subagent
+	// sessions and rows created before migration v8.
+	AgentID string
 	// SubagentStatus persists the terminal status of subagent sessions
 	// ("completed", "failed", ...). Empty for non-subagent sessions and
 	// rows created before migration v6.
@@ -43,9 +49,9 @@ type SessionMeta struct {
 func (r *SessionRepo) UpsertSession(meta SessionMeta) error {
 	if _, err := r.db.Exec(
 		`INSERT INTO sessions(key, name, mode, summary, verbose_level, model,
-		 thinking_level, folder, subagent_status, input_tokens, output_tokens, compaction_count,
+		 thinking_level, folder, agent_id, subagent_status, input_tokens, output_tokens, compaction_count,
 		 first_in_memory_seq, created_at, updated_at)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET
 		   name = excluded.name,
 		   mode = excluded.mode,
@@ -54,6 +60,7 @@ func (r *SessionRepo) UpsertSession(meta SessionMeta) error {
 		   model = excluded.model,
 		   thinking_level = excluded.thinking_level,
 		   folder = excluded.folder,
+		   agent_id = excluded.agent_id,
 		   subagent_status = excluded.subagent_status,
 		   input_tokens = excluded.input_tokens,
 		   output_tokens = excluded.output_tokens,
@@ -68,6 +75,7 @@ func (r *SessionRepo) UpsertSession(meta SessionMeta) error {
 		meta.Model,
 		meta.ThinkingLevel,
 		meta.Folder,
+		meta.AgentID,
 		meta.SubagentStatus,
 		meta.InputTokens,
 		meta.OutputTokens,
@@ -87,12 +95,12 @@ func (r *SessionRepo) GetSessionMeta(key string) (*SessionMeta, error) {
 	var createdAt, updatedAt string
 	err := r.db.QueryRow(
 		`SELECT key, name, mode, summary, verbose_level, model,
-		 thinking_level, folder, subagent_status, input_tokens, output_tokens, compaction_count,
+		 thinking_level, folder, agent_id, subagent_status, input_tokens, output_tokens, compaction_count,
 		 first_in_memory_seq, created_at, updated_at
 		 FROM sessions WHERE key = ?`, key,
 	).Scan(
 		&meta.Key, &meta.Name, &meta.Mode, &meta.Summary,
-		&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel, &meta.Folder,
+		&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel, &meta.Folder, &meta.AgentID,
 		&meta.SubagentStatus,
 		&meta.InputTokens, &meta.OutputTokens, &meta.CompactionCount,
 		&meta.FirstInMemorySeq,
@@ -113,7 +121,7 @@ func (r *SessionRepo) GetSessionMeta(key string) (*SessionMeta, error) {
 func (r *SessionRepo) ListSessionMeta() ([]SessionMeta, error) {
 	rows, err := r.db.Query(
 		`SELECT key, name, mode, summary, verbose_level, model,
-		 thinking_level, folder, subagent_status, input_tokens, output_tokens, compaction_count,
+		 thinking_level, folder, agent_id, subagent_status, input_tokens, output_tokens, compaction_count,
 		 first_in_memory_seq, created_at, updated_at
 		 FROM sessions ORDER BY updated_at DESC`,
 	)
@@ -128,7 +136,7 @@ func (r *SessionRepo) ListSessionMeta() ([]SessionMeta, error) {
 		var createdAt, updatedAt string
 		if err := rows.Scan(
 			&meta.Key, &meta.Name, &meta.Mode, &meta.Summary,
-			&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel, &meta.Folder,
+			&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel, &meta.Folder, &meta.AgentID,
 			&meta.SubagentStatus,
 			&meta.InputTokens, &meta.OutputTokens, &meta.CompactionCount,
 			&meta.FirstInMemorySeq,
@@ -157,7 +165,7 @@ func (r *SessionRepo) ListSessionMetaByMode(mode string) ([]SessionMeta, error) 
 
 	rows, err := r.db.Query(
 		`SELECT key, name, mode, summary, verbose_level, model,
-		 thinking_level, folder, subagent_status, input_tokens, output_tokens, compaction_count,
+		 thinking_level, folder, agent_id, subagent_status, input_tokens, output_tokens, compaction_count,
 		 first_in_memory_seq, created_at, updated_at
 		 FROM sessions WHERE mode = ? ORDER BY updated_at DESC`, queryMode,
 	)
@@ -172,7 +180,7 @@ func (r *SessionRepo) ListSessionMetaByMode(mode string) ([]SessionMeta, error) 
 		var createdAt, updatedAt string
 		if err := rows.Scan(
 			&meta.Key, &meta.Name, &meta.Mode, &meta.Summary,
-			&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel, &meta.Folder,
+			&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel, &meta.Folder, &meta.AgentID,
 			&meta.SubagentStatus,
 			&meta.InputTokens, &meta.OutputTokens, &meta.CompactionCount,
 			&meta.FirstInMemorySeq,

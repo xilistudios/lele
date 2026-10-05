@@ -8,7 +8,7 @@ import (
 )
 
 // SchemaVersion is the latest schema version known to this build.
-const SchemaVersion = 7
+const SchemaVersion = 8
 
 // migrations lists schema migrations in version order. Each entry is
 // applied atomically inside a single transaction by migrate.
@@ -196,6 +196,22 @@ CREATE TABLE native_pending_pins (
 );
 CREATE INDEX idx_pending_pins_expires ON native_pending_pins(expires_at);
 CREATE INDEX idx_pending_pins_created ON native_pending_pins(created_at);
+`,
+	},
+	{
+		Version: 8,
+		DDL: `
+-- Persist the agent that EXECUTED a subagent session. The WebUI header and
+-- subagent panel used to show an arbitrary agent for historical subagents:
+-- every agent shares one SessionManager, so the persisted scan in
+-- GetSessionSubagents saw the same rows for each registry agent and reported
+-- the first one (the storage owner) instead of the executor.
+-- Empty string means "not recorded" (a non-subagent session, or a row that
+-- predates this column): the reader falls back to the storage-owning agent,
+-- which is the historical behavior for old data.
+-- No index: nothing filters sessions by agent_id, and the column is written
+-- on every session upsert.
+ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT '';
 `,
 	},
 }

@@ -74,6 +74,50 @@ func (al *AgentLoop) setSubagentSessionAgent(sessionKey, agentID string) {
 	al.kvSet(sessAgentKeyPrefix+sessionKey, agentID)
 }
 
+// persistSubagentSessionAgent writes the executor of a subagent onto the
+// session row that holds its history, which is what the session listing (and
+// therefore the WebUI header and subagents panel) can read back after a
+// restart. setSubagentSessionAgent above is not enough for that consumer: it
+// is routing state, kept in a best-effort KV namespace that the listing never
+// consults, so historical subagents used to be named after whichever agent's
+// storage the scan happened to sweep first.
+//
+// ownerAgentID is the agent whose SessionManager records this subagent's
+// history (the recorder wired at tool-registration time). In production that is
+// the shared manager, so the row lands where every reader looks for it.
+// Best-effort: a missing agent or a store failure leaves the in-memory mapping
+// as the only record, which is exactly the pre-fix behavior.
+func (al *AgentLoop) persistSubagentSessionAgent(ownerAgentID, sessionKey, executorAgentID string) {
+	if al.registry == nil || sessionKey == "" || executorAgentID == "" {
+		return
+	}
+	agent, ok := al.registry.GetAgent(ownerAgentID)
+	if !ok || agent == nil || agent.Sessions == nil {
+		return
+	}
+	agent.Sessions.SetSubagentAgentID(sessionKey, executorAgentID)
+}
+
+// subagentSessionPin returns the agent recorded at spawn time for a subagent
+// session, or "" when there is no such record. It is the fallback for session
+// rows persisted before agent_id existed: the pin is durable (sess:agent: KV,
+// rehydrated by loadDurableSessionState), so an upgrade still names the real
+// executor of historical subagents instead of the storage owner.
+//
+// It reads subagentSessionAgent directly rather than going through
+// sessionAgentOverride: a subagent key is never an alias base and its pin never
+// lands in sessionAgents (see setSubagentSessionAgent), so the other two
+// lookups can only miss — and this runs once per persisted row on a listing the
+// WebUI polls.
+func (al *AgentLoop) subagentSessionPin(sessionKey string) string {
+	if v, ok := al.subagentSessionAgent.Load(sessionKey); ok {
+		if agentID, isString := v.(string); isString {
+			return agentID
+		}
+	}
+	return ""
+}
+
 // kvSet writes through to the durable KV store. A write failure is logged and
 // swallowed: the in-memory map is already correct, so the session keeps working
 // for this process — it only loses durability until the next write.
