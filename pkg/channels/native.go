@@ -46,12 +46,30 @@ type NativeChannel struct {
 	running         bool
 	wsClients       map[string]*WSClient
 	restStreams     map[string]*restStreamSubscriber
-	leleDir         string
-	configPath      string // path to config file, defaults to DefaultConfigPath() if empty
-	mu              sync.RWMutex
-	startTime       time.Time
-	pinLimiter      *rateLimiter
-	pairLimiter     *rateLimiter
+
+	// loopCtx scopes the background loops Start launches (upload cleanup, auth
+	// revocation reconciliation) to a single run of this channel. It must NOT be
+	// the ctx handed to Start: Manager.ReloadConfig stops the old channel and
+	// starts a freshly built one with the same long-lived process context, so
+	// loops bound to it would outlive the channel they belong to — each reload
+	// leaking another ticker polling SQLite forever, and keeping the whole
+	// retired NativeChannel reachable. Stop cancels it. loopCancel is nil once
+	// Stop has run, so a Start/Stop/Start cycle always gets a fresh context.
+	loopCtx    context.Context
+	loopCancel context.CancelFunc
+	// activeLoops counts the running loops so Stop can wait for them to exit
+	// instead of returning with goroutines still in flight.
+	activeLoops atomic.Int64
+	// authReconcileEvery overrides authReconcileInterval for tests. Zero means
+	// the production interval, which keeps hand-built &NativeChannel{} fixtures
+	// working without going through NewNativeChannel.
+	authReconcileEvery time.Duration
+	leleDir            string
+	configPath         string // path to config file, defaults to DefaultConfigPath() if empty
+	mu                 sync.RWMutex
+	startTime          time.Time
+	pinLimiter         *rateLimiter
+	pairLimiter        *rateLimiter
 	// refreshLimiter guards token renewal on its own bucket. Sharing the pairing
 	// bucket meant an ordinary signed-in browser competing for the same 5 req/min
 	// as every pairing attempt, and the pairing endpoint is the one that can
@@ -360,14 +378,61 @@ func (n *NativeChannel) Start(ctx context.Context) error {
 	}
 
 	n.startTime = time.Now()
-	go n.runUploadCleanup(ctx)
-	go n.runAuthRevocationReconcile(ctx)
+	// A context of its own, cancelled by Stop — see loopCtx.
+	n.loopCtx, n.loopCancel = context.WithCancel(ctx)
+	n.startLoop(n.loopCtx, n.runUploadCleanup)
+	n.startLoop(n.loopCtx, n.runAuthRevocationReconcile)
 	startCatalogPrefetch()
 
 	n.running = true
 	n.base.setRunning(true)
 
 	return nil
+}
+
+// startLoop runs one of the channel's periodic background loops under the
+// channel's own lifecycle context and counts it in activeLoops, so Stop can
+// join it. The ctx is passed in rather than read from n.loopCtx so the goroutine
+// never touches a field another Start could rewrite.
+func (n *NativeChannel) startLoop(ctx context.Context, run func(context.Context)) {
+	n.activeLoops.Add(1)
+	go func() {
+		defer n.activeLoops.Add(-1)
+		run(ctx)
+	}()
+}
+
+// loopJoinTimeout bounds how long Stop waits for its loops to finish the tick in
+// flight. It is a safety valve, not a normal path: both loops return on ctx
+// cancellation, and the only work between ticks is a directory sweep or one
+// SELECT over a handful of rows. If it ever does expire, leaking one goroutine is
+// strictly better than hanging a config reload.
+const loopJoinTimeout = 2 * time.Second
+
+// waitForLoops cancels the loop context and waits (bounded) for the loops to
+// exit. Callers must NOT hold n.mu: dropWSClientsForAuth takes it, so waiting
+// under the lock would deadlock a Stop that lands during a reconciliation tick.
+func (n *NativeChannel) waitForLoops() {
+	n.mu.Lock()
+	cancel := n.loopCancel
+	n.loopCancel = nil
+	n.mu.Unlock()
+
+	if cancel == nil {
+		return
+	}
+	cancel()
+
+	deadline := time.Now().Add(loopJoinTimeout)
+	for n.activeLoops.Load() > 0 {
+		if time.Now().After(deadline) {
+			logger.WarnCF("native", "stop: background loops did not exit in time", map[string]interface{}{
+				"active": n.activeLoops.Load(),
+			})
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // catalogPrefetchOnce guards process-wide catalog warm-up so a channel
@@ -394,6 +459,10 @@ func startCatalogPrefetch() {
 }
 
 func (n *NativeChannel) Stop(ctx context.Context) error {
+	// Registered before the unlock so LIFO runs it AFTER the lock is released:
+	// the loops it waits on take n.mu to kick revoked WebSockets.
+	defer n.waitForLoops()
+
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -448,6 +517,9 @@ func (n *NativeChannel) runUploadCleanup(ctx context.Context) {
 	utils.CleanupOldUploads(uploadDir, maxAge)
 	utils.CleanupOldUploads(stagingDir, maxAge)
 
+	// Hourly, and under loopCtx since #369: bound to the Start context it would
+	// survive every config reload, which is how the leak went unnoticed for so
+	// long (one idle ticker per reload is cheap; a 15s store poll is not).
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
@@ -462,14 +534,26 @@ func (n *NativeChannel) runUploadCleanup(ctx context.Context) {
 	}
 }
 
+// reconcileInterval is the polling period, or authReconcileInterval when the
+// channel did not set a shorter one. A non-positive override would panic in
+// time.NewTicker, so it is clamped rather than trusted.
+func (n *NativeChannel) reconcileInterval() time.Duration {
+	if n.authReconcileEvery > 0 {
+		return n.authReconcileEvery
+	}
+	return authReconcileInterval
+}
+
 // runAuthRevocationReconcile periodically drops clients that no longer exist
 // in the shared SQLite store, so a `lele client remove` performed by the CLI
 // (or any other process sharing the DB) stops authenticating here within
 // authReconcileInterval instead of surviving until the gateway restarts, and
 // tears down the WebSocket sessions those clients already hold.
 //
-// Bound to the ctx passed to Start, the same lifecycle as runUploadCleanup:
-// cancelling it ends the loop, and Stop does not need to track it.
+// Runs under the channel's lifecycle context (loopCtx), so Stop ends it: a
+// reload that left this ticking would keep polling the store from a retired
+// channel forever, and #327's whole point is that this process's map is not the
+// only authority.
 //
 // A failed reconcile is logged and skipped, never fatal: the next tick retries,
 // and the store being briefly unreadable must not take the channel down.
@@ -483,7 +567,7 @@ func (n *NativeChannel) runAuthRevocationReconcile(ctx context.Context) {
 	// The JSON backend has nothing to reconcile and reports no error, so this
 	// loop simply idles there; the tick is cheap enough not to be worth a
 	// special case in Start.
-	ticker := time.NewTicker(authReconcileInterval)
+	ticker := time.NewTicker(n.reconcileInterval())
 	defer ticker.Stop()
 
 	for {
