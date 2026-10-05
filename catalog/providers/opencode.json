@@ -409,7 +409,7 @@
     },
     {
       "id": "grok-4.7",
-      "name": "Grok 4.7 (30% Off)",
+      "name": "Grok 4.7",
       "context_window": 500000,
       "max_output": 500000,
       "vision": true,

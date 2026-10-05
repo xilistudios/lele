@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-09-28T13:49:40Z",
+  "updated_at": "2026-10-05T14:32:12Z",
   "source": "models.dev",
   "providers": {
     "alibaba": {
@@ -41,7 +41,7 @@
       "type": "anthropic",
       "api_base": "https://api.anthropic.com/v1",
       "file": "providers/anthropic.json",
-      "model_count": 15
+      "model_count": 16
     },
     "arcee": {
       "id": "arcee",
@@ -121,7 +121,7 @@
       "type": "openai",
       "api_base": "https://api.gmi-serving.com/v1",
       "file": "providers/gmi.json",
-      "model_count": 15
+      "model_count": 17
     },
     "groq": {
       "id": "groq",
@@ -249,7 +249,7 @@
       "type": "openai",
       "api_base": "https://api.openai.com/v1",
       "file": "providers/openai.json",
-      "model_count": 40
+      "model_count": 41
     },
     "opencode": {
       "id": "opencode",
@@ -329,7 +329,7 @@
       "type": "openai",
       "api_base": "https://api.together.xyz/v1",
       "file": "providers/together.json",
-      "model_count": 27
+      "model_count": 18
     },
     "vercel": {
       "id": "vercel",
@@ -353,7 +353,7 @@
       "type": "openai",
       "api_base": "https://api.x.ai/v1",
       "file": "providers/xai.json",
-      "model_count": 12
+      "model_count": 13
     },
     "xiaomi": {
       "id": "xiaomi",

@@ -75,6 +75,34 @@
       "tool_call": true
     },
     {
+      "id": "Qwen/Qwen3.8-Flash",
+      "name": "Qwen3.8 Flash",
+      "context_window": 1048575,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "Qwen/Qwen3.8-Max",
+      "name": "Qwen3.8 Max",
+      "context_window": 262144,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "moonshotai/Kimi-K2.6",
       "name": "Kimi K2.6",
       "context_window": 65536,
