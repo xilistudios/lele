@@ -85,6 +85,11 @@ type NativeChannel struct {
 	skillInstaller *skills.SkillInstaller
 	workspacePath  string
 	reloadConfig   func() error // called after config save to reload runtime config
+	// reloadMCP re-runs the MCP wiring pass after an out-of-band mcp.json
+	// edit (AgentLoop.SyncMCPServers). NOT called anywhere yet (T4 wires the
+	// handlers); handlers must guard it nil-safely:
+	// if n.reloadMCP != nil { n.reloadMCP() }.
+	reloadMCP      func()
 	cronService    CronProvidable
 	keyringService *keyring.Service
 	updateService  *update.Updater
@@ -137,6 +142,19 @@ func (n *NativeChannel) SetReloadConfig(fn func() error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.reloadConfig = fn
+}
+
+// SetReloadMCP sets a callback that re-runs the MCP wiring pass (tool
+// registry + "## MCP Servers" prompt section) after an out-of-band mcp.json
+// edit. Unlike reloadConfig it does NOT re-read config.json: an mcp.json
+// write must not inherit the config reload's blast radius (ContextBuilder
+// recreation, subagent cancellation, failing the landed write because
+// config.json is broken — see AgentLoop.SyncMCPServers).
+// Handlers call it nil-safe: if n.reloadMCP != nil { n.reloadMCP() }.
+func (n *NativeChannel) SetReloadMCP(fn func()) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.reloadMCP = fn
 }
 
 // RegisterDesktopClient registers the built-in desktop client with the
