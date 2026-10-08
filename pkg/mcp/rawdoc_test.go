@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -279,5 +280,137 @@ func TestRawDocDuplicateMembersLastWins(t *testing.T) {
 	}
 	if len(doc.servers.members) != 2 {
 		t.Errorf("captured members = %d, want both duplicates preserved for byte-faithful re-emission", len(doc.servers.members))
+	}
+}
+
+// runtimeEnvelope decodes data exactly the way ParseFile's decode step does
+// — json.Unmarshal into File — and returns each name's winning copy (its
+// Command) or the decode error. It is the ORACLE the raw reader is compared
+// against: whatever this returns, parseRawDoc's name set and winner must
+// match for the same bytes.
+func runtimeEnvelope(data string) (map[string]string, error) {
+	var f File
+	if err := json.Unmarshal([]byte(data), &f); err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(f.MCPServers))
+	for name, srv := range f.MCPServers {
+		out[name] = srv.Command
+	}
+	return out, nil
+}
+
+// rawEnvelope is parseRawDoc's verdict for the same bytes: name → winning
+// copy's Command (via Summary, i.e. the fold's last-in-file-order winner),
+// or the parse error. It also asserts byte-faithfulness of every captured
+// fold span while it walks the members.
+func rawEnvelope(t *testing.T, data string) (map[string]string, error) {
+	t.Helper()
+	doc, err := parseRawDoc([]byte(data))
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string)
+	if doc.servers == nil {
+		return out, nil
+	}
+	for i, m := range doc.servers.members {
+		if doc.servers.index[m.key] != i {
+			continue // not the winning copy of this name
+		}
+		if m.start < 0 || m.end > len(data) || !bytes.Equal([]byte(data[m.start:m.end]), m.raw) {
+			t.Errorf("entry %q span [%d,%d] does not match document bytes", m.key, m.start, m.end)
+		}
+		s, ok := doc.Summary(m.key)
+		if !ok {
+			t.Errorf("Summary(%q) ok = false for a fold member", m.key)
+			continue
+		}
+		out[m.key] = s.Command
+	}
+	return out, nil
+}
+
+// TestRawDocEnvelopeMatchesRuntime pins the raw reader's NAME SET (and the
+// winning copy per name) to the runtime decoder's for the same bytes, over
+// the document classes encoding/json accepts and honours but a naive reader
+// diverges on: duplicate envelope members (union vs replace), null first /
+// null second (clear semantics), case-variant envelope keys (case-insensitive
+// struct-field matching) and a case-variant duplicate. Error verdicts are
+// compared too: a document ParseFile rejects, parseRawDoc must reject.
+func TestRawDocEnvelopeMatchesRuntime(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{
+			name: "duplicate envelope with disjoint names unions",
+			data: `{"mcpServers":{"a":{"command":"x"}},"mcpServers":{"b":{"command":"y"}}}`,
+		},
+		{
+			name: "duplicate envelope with overlapping names last wins",
+			data: `{"mcpServers":{"a":{"command":"first"}},"mcpServers":{"a":{"command":"second"}}}`,
+		},
+		{
+			name: "null first",
+			data: `{"mcpServers":null,"mcpServers":{"a":{"command":"x"}}}`,
+		},
+		{
+			name: "null second clears",
+			data: `{"mcpServers":{"a":{"command":"x"}},"mcpServers":null}`,
+		},
+		{
+			name: "case variant MCPServers",
+			data: `{"MCPServers":{"c":{"command":"x"}}}`,
+		},
+		{
+			name: "case variant mcpservers",
+			data: `{"mcpservers":{"c":{"command":"x"}}}`,
+		},
+		{
+			name: "case-variant duplicate unions disjoint names",
+			data: `{"mcpServers":{"a":{"command":"x"}},"MCPServers":{"b":{"command":"y"}}}`,
+		},
+		{
+			name: "case-variant duplicate overlapping names last wins",
+			data: `{"mcpServers":{"a":{"command":"1"}},"MCPServers":{"a":{"command":"2"}}}`,
+		},
+		{
+			name: "case-variant null clears",
+			data: `{"mcpServers":{"a":{"command":"x"}},"MCPServers":null}`,
+		},
+		{
+			name: "null then case variant",
+			data: `{"mcpServers":null,"MCPServers":{"a":{"command":"x"}}}`,
+		},
+		{
+			name: "empty object after object does not clear",
+			data: `{"mcpServers":{"a":{"command":"x"}},"mcpServers":{}}`,
+		},
+		{
+			name: "mistyped case-variant occurrence fails the document",
+			data: `{"MCPServers":{"a":5}}`,
+		},
+		{
+			name: "mistyped exact occurrence fails the document",
+			data: `{"mcpServers":{"a":{"command":"x"}},"mcpServers":"str"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			want, wantErr := runtimeEnvelope(tt.data)
+			got, gotErr := rawEnvelope(t, tt.data)
+
+			if (wantErr != nil) != (gotErr != nil) {
+				t.Errorf("runtime err = %v, parseRawDoc err = %v; both verdicts must agree", wantErr, gotErr)
+				return
+			}
+			if wantErr != nil {
+				return
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("parseRawDoc names/winners = %v, runtime (json.Unmarshal into File) = %v", got, want)
+			}
+		})
 	}
 }

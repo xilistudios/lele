@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 )
 
 // This file is the expansion-free twin of config.go: it decodes the same
@@ -17,9 +18,12 @@ import (
 // user's formatting, member order or unknown keys.
 //
 // The envelope rules mirror ParseFile exactly: a document is accepted iff
-// json.Unmarshal into File would accept it (top-level object or null,
-// "mcpServers" an object, absent or null, every entry decodable into
-// ServerConfig). A document ParseFile rejects, parseRawDoc rejects, so a
+// json.Unmarshal into File would accept it (top-level object or null, an
+// "mcpServers"-keyed object in ANY letter case, absent or null, every entry
+// decodable into ServerConfig), and its name set is json.Unmarshal's own:
+// duplicate envelope occurrences union with per-name last-in-file-order
+// precedence and a null occurrence clears what came before it (measured).
+// A document ParseFile rejects, parseRawDoc rejects, so a
 // layer Discover skips is a layer ReadInventory never enumerates. Per-entry
 // VALIDATION is deliberately not done here: it runs in (*rawDoc).Summary
 // via the existing (*ServerConfig).validate — one rule, zero duplication.
@@ -35,8 +39,9 @@ type rawMember struct {
 
 // rawObject is a JSON object decoded in file order without re-encoding.
 // Lookups are last-wins, matching encoding/json's map semantics for duplicate
-// member names, while members keeps every occurrence for byte-faithful
-// re-emission.
+// member names — including when the object is parseRawDoc's fold and a name
+// is repeated across envelope occurrences — while members keeps every
+// occurrence with its exact span for byte-faithful re-emission.
 type rawObject struct {
 	members []rawMember    // file order
 	index   map[string]int // key → position of the LAST occurrence
@@ -65,8 +70,12 @@ func (o *rawObject) get(key string) (rawMember, bool) {
 }
 
 // rawDoc is one parsed mcp.json file: the document bytes, the top-level
-// members in file order, and the "mcpServers" object (nil when the member is
-// absent or null, mirroring json null clearing a map).
+// members in file order, and the folded "mcpServers" view — every entry
+// member of every envelope occurrence (exact absolute spans, file order),
+// with last-in-file-order precedence per name, exactly the set of names
+// json.Unmarshal leaves in File.MCPServers. It is nil when no envelope
+// object survives the fold, mirroring json null setting the map field to
+// nil (measured: null CLEARS an earlier occurrence; see parseRawDoc).
 type rawDoc struct {
 	data    []byte
 	members []rawMember // top-level, file order
@@ -75,12 +84,13 @@ type rawDoc struct {
 
 // parseRawDoc decodes the raw bytes of one mcp.json without expansion.
 //
-// Accepts a JSON object or null at the top level, "mcpServers" an object,
-// absent or null, and every entry decodable into ServerConfig — the exact
-// set of documents ParseFile accepts. Anything else is an error, so callers
-// that skip a failed parse reproduce Discover's "broken layer is skipped"
-// behaviour. Trailing data after the top-level value is rejected the way
-// json.Unmarshal rejects it.
+// Accepts a JSON object or null at the top level, an "mcpServers"-keyed
+// object in any letter case, absent or null (repeated occurrences folded as
+// json.Unmarshal folds them — see the loop below), and every entry
+// decodable into ServerConfig — the exact set of documents ParseFile
+// accepts. Anything else is an error, so callers that skip a failed parse
+// reproduce Discover's "broken layer is skipped" behaviour. Trailing data
+// after the top-level value is rejected the way json.Unmarshal rejects it.
 func parseRawDoc(data []byte) (*rawDoc, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	first, err := dec.Token()
@@ -112,11 +122,21 @@ func parseRawDoc(data []byte) (*rawDoc, error) {
 	if err := expectEOF(dec); err != nil {
 		return nil, fmt.Errorf("parse raw mcp config: %w", err)
 	}
-	// Decode every "mcpServers" occurrence: json.Unmarshal errors if ANY of
-	// them is mistyped, and the last occurrence wins (duplicate-key map
-	// semantics, including "null" clearing what an earlier one set).
+	// Envelope selection mirrors encoding/json's struct-field matching:
+	// json.Unmarshal maps an object member to a field by exact name first,
+	// then case-insensitively (the fold is strings.EqualFold), so ANY case
+	// variant of the key — "MCPServers", "mcpservers", … — decodes into
+	// File.MCPServers. An exact != here made parseRawDoc blind to
+	// documents the runtime loads and honours.
+	//
+	// The fold mirrors how json.Unmarshal then decodes those occurrences:
+	// EVERY occurrence decodes into the SAME map (encoding/json allocates
+	// it only when nil), so occurrences UNION with per-name
+	// last-in-file-order precedence — assigning doc.servers per
+	// occurrence made each one REPLACE the previous, hiding names that
+	// are live at runtime.
 	for _, m := range doc.members {
-		if m.key != "mcpServers" {
+		if !strings.EqualFold(m.key, "mcpServers") {
 			continue
 		}
 		servers, err := parseObjectAt(data, m.start, m.raw)
@@ -126,7 +146,23 @@ func parseRawDoc(data []byte) (*rawDoc, error) {
 		if err := gateEntries(servers); err != nil {
 			return nil, err
 		}
-		doc.servers = servers
+		if servers == nil {
+			// MEASURED (json.Unmarshal into File): null sets the map field
+			// to nil, so it CLEARS what an earlier occurrence set, and a
+			// later object occurrence then fills a fresh map — the fold
+			// resets here for exactly the same reason.
+			doc.servers = nil
+			continue
+		}
+		if doc.servers == nil {
+			doc.servers = &rawObject{}
+		}
+		for _, em := range servers.members {
+			// add() points the name's index at this copy: the winner of a
+			// name repeated across occurrences is the LAST one in file
+			// order, which is the copy the runtime map ends up holding.
+			doc.servers.add(em)
+		}
 	}
 	return doc, nil
 }

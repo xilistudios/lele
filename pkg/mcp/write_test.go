@@ -3,6 +3,7 @@ package mcp
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -526,5 +527,226 @@ func assertNoTmp(t *testing.T, dir string) {
 	}
 	if len(leaked) != 0 {
 		t.Fatalf("temp files leaked: %v", leaked)
+	}
+}
+
+// T11: differential — the writer must never change the document's RUNTIME
+// name set. For each document, SetDisabled runs the planned edit on disk,
+// then the RESULT is loaded with ParseFile (the runtime's own loader, i.e.
+// json.Unmarshal into File) and three invariants are asserted:
+//   - resulting name set == input name set ∪ {created} \ {deleted}, with
+//     created/deleted taken from ToggleResult (Removed/Created);
+//   - every NON-targeted name keeps its exact effective value;
+//   - the targeted name ends in the requested state (absent iff Removed).
+//
+// Golden bytes additionally pin that no envelope occurrence collapses into
+// another: deleteMemberSpan used to be fed the cross-occurrence fold, so its
+// neighbour lookup could splice across TWO duplicate envelopes and merge
+// them (or fail outright) — the name set alone does not see a collapse.
+func TestWriteEditDifferentialNameSetAndValues(t *testing.T) {
+	tests := []struct {
+		name        string
+		in          string
+		target      string
+		disable     bool
+		wantRemoved bool
+		wantCreated bool
+		golden      string // exact expected bytes on disk ("" = skip)
+	}{
+		{
+			// THE corner: the winning "a" lives in the exact envelope,
+			// "b" in the case-variant one. Deleting the stub used to splice
+			// from a's key to b's key ACROSS the envelope boundary,
+			// relocating b under "mcpServers" and destroying the
+			// "MCPServers" envelope.
+			name:        "corner: stub enable across case-variant duplicate envelopes",
+			in:          `{"mcpServers":{"a":{"disabled":true}},"MCPServers":{"b":{"command":"y"}}}`,
+			target:      "a",
+			wantRemoved: true,
+			golden:      `{"mcpServers":{},"MCPServers":{"b":{"command":"y"}}}`,
+		},
+		{
+			name:        "stub enable when a later exact envelope is empty",
+			in:          `{"mcpServers":{"a":{"disabled":true}},"mcpServers":{}}`,
+			target:      "a",
+			wantRemoved: true,
+			golden:      `{"mcpServers":{},"mcpServers":{}}`,
+		},
+		{
+			name:        "create inside a case-variant-only envelope",
+			in:          `{"MCPServers":{"c":{"command":"x"}}}`,
+			target:      "d",
+			disable:     true,
+			wantCreated: true,
+			golden:      `{"MCPServers":{"c":{"command":"x"}, "d": {"disabled":true}}}`,
+		},
+		{
+			name:    "disable existing in a case-variant-only envelope",
+			in:      `{"MCPServers":{"c":{"command":"x"}}}`,
+			target:  "c",
+			disable: true,
+			golden:  `{"MCPServers":{"c":{"command":"x", "disabled": true}}}`,
+		},
+		{
+			name:    "disable existing in the first of duplicate envelopes",
+			in:      `{"mcpServers":{"a":{"command":"x"}},"mcpServers":{"b":{"command":"y"}}}`,
+			target:  "a",
+			disable: true,
+			golden:  `{"mcpServers":{"a":{"command":"x", "disabled": true}},"mcpServers":{"b":{"command":"y"}}}`,
+		},
+		{
+			name:        "create across duplicate envelopes",
+			in:          `{"mcpServers":{"a":{"command":"x"}},"mcpServers":{"b":{"command":"y"}}}`,
+			target:      "c",
+			disable:     true,
+			wantCreated: true,
+			golden:      `{"mcpServers":{"a":{"command":"x"}},"mcpServers":{"b":{"command":"y"}, "c": {"disabled":true}}}`,
+		},
+		{
+			name:        "materialise a case-variant null envelope in place",
+			in:          `{"MCPServers":null}`,
+			target:      "c",
+			disable:     true,
+			wantCreated: true,
+			golden:      `{"MCPServers":{"c":{"disabled":true}}}`,
+		},
+		{
+			name:        "stub enable when a later case-variant envelope is empty",
+			in:          `{"mcpServers":{"a":{"disabled":true}},"MCPServers":{}}`,
+			target:      "a",
+			wantRemoved: true,
+			golden:      `{"mcpServers":{},"MCPServers":{}}`,
+		},
+		{
+			name:   "enable real entry winning in a later case-variant envelope",
+			in:     `{"mcpServers":{"a":{"command":"x"}},"MCPServers":{"a":{"command":"z","disabled":true}}}`,
+			target: "a",
+			golden: `{"mcpServers":{"a":{"command":"x"}},"MCPServers":{"a":{"command":"z"}}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "mcp.json")
+			writeRawFixture(t, path, tt.in)
+
+			inFile, err := ParseFile(path) // the runtime's view of the INPUT
+			if err != nil {
+				t.Fatalf("ParseFile(input) error = %v", err)
+			}
+
+			res, err := SetDisabled(path, tt.target, tt.disable)
+			if err != nil {
+				t.Fatalf("SetDisabled(%q, disable=%v) error = %v", tt.target, tt.disable, err)
+			}
+			if res.Removed != tt.wantRemoved || res.Created != tt.wantCreated {
+				t.Fatalf("result = %+v, want Removed=%v Created=%v", res, tt.wantRemoved, tt.wantCreated)
+			}
+
+			if got := readRawFixture(t, path); tt.golden != "" && got != tt.golden {
+				t.Errorf("bytes after the edit:\n got: %s\nwant: %s", got, tt.golden)
+			}
+
+			outFile, err := ParseFile(path) // the runtime's view of the RESULT
+			if err != nil {
+				t.Fatalf("ParseFile(result) error = %v (the writer must never emit a document the runtime refuses)", err)
+			}
+
+			// Name set: input ∪ {created} \ {deleted}.
+			wantNames := make(map[string]bool, len(inFile.MCPServers)+1)
+			for n := range inFile.MCPServers {
+				wantNames[n] = true
+			}
+			if res.Removed {
+				delete(wantNames, tt.target)
+			}
+			if res.Created {
+				wantNames[tt.target] = true
+			}
+			for n := range outFile.MCPServers {
+				if !wantNames[n] {
+					t.Errorf("name %q appeared in the result; want name set %v", n, wantNames)
+				}
+			}
+			for n := range wantNames {
+				if _, ok := outFile.MCPServers[n]; !ok {
+					t.Errorf("name %q lost from the result; want name set %v", n, wantNames)
+				}
+			}
+
+			// Per-name effective values: only the target may change.
+			for n, srv := range outFile.MCPServers {
+				if n == tt.target {
+					continue
+				}
+				before, ok := inFile.MCPServers[n]
+				if !ok {
+					continue // reported by the name-set checks above
+				}
+				if !reflect.DeepEqual(before, srv) {
+					t.Errorf("non-target %q changed: before %+v, after %+v", n, before, srv)
+				}
+			}
+
+			// Target state: present with the requested flag, or absent iff
+			// the entry was deleted (Removed).
+			after, present := outFile.MCPServers[tt.target]
+			switch {
+			case res.Removed && present:
+				t.Errorf("target %q reported Removed but is still in the result", tt.target)
+			case !res.Removed && !present:
+				t.Errorf("target %q missing from the result without Removed", tt.target)
+			case present && after.Disabled != tt.disable:
+				t.Errorf("target %q: Disabled = %v, want %v", tt.target, after.Disabled, tt.disable)
+			}
+		})
+	}
+}
+
+// T12: accept/reject parity between the raw-editor gate and the runtime.
+// ValidateRawJSON is what PUT /api/v1/mcp/{layer}/raw runs BEFORE writing a
+// user payload; ParseFile is what Discover runs when loading the file. The
+// two must agree on EVERY document: ValidateRawJSON errors iff ParseFile
+// errors. Otherwise the endpoint answers 200 and persists bytes the runtime
+// refuses to load (or rejects bytes it would happily run). Per-entry
+// VALIDATION is deliberately out of scope: ParseFile never fails on it and
+// ValidateRawJSON reports it as warnings.
+func TestValidateRawJSONParityWithParseFile(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{name: "case-variant envelope with mistyped entry", in: `{"MCPServers":{"x":{"command":123}}}`},
+		{name: "exact envelope with mistyped entry", in: `{"mcpServers":{"x":{"command":123}}}`},
+		{name: "case-variant entry not decodable", in: `{"MCPServers":{"x":5}}`},
+		{name: "duplicate envelope later occurrence mistyped", in: `{"mcpServers":{"a":{"command":"x"}},"mcpServers":"str"}`},
+		{name: "case-variant duplicate later occurrence mistyped", in: `{"mcpServers":{"a":{"command":"x"}},"MCPServers":{"b":"str"}}`},
+		{name: "entry not decodable", in: `{"mcpServers":{"s":true}}`},
+		{name: "servers not an object", in: `{"mcpServers":[]}`},
+		{name: "top-level array", in: `[]`},
+		{name: "incomplete envelope", in: `{`},
+		{name: "trailing data", in: `{"mcpServers":{}}garbage`},
+		{name: "duplicate envelope disjoint names", in: `{"mcpServers":{"a":{"command":"x"}},"mcpServers":{"b":{"command":"y"}}}`},
+		{name: "null first", in: `{"mcpServers":null,"mcpServers":{"a":{"command":"x"}}}`},
+		{name: "null second", in: `{"mcpServers":{"a":{"command":"x"}},"mcpServers":null}`},
+		{name: "case-variant MCPServers", in: `{"MCPServers":{"c":{"command":"x"}}}`},
+		{name: "case-variant mcpservers", in: `{"mcpservers":{"c":{"command":"x"}}}`},
+		{name: "case-variant null", in: `{"mcpServers":{"a":{"command":"x"}},"MCPServers":null}`},
+		{name: "null envelope document", in: `null`},
+		{name: "empty envelope", in: `{"mcpServers":{}}`},
+		{name: "null entry decodes as zero config", in: `{"mcpServers":{"a":null}}`},
+		{name: "invalid entry warns but loads", in: `{"mcpServers":{"bad":{}}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, verr := ValidateRawJSON([]byte(tt.in))
+
+			path := filepath.Join(t.TempDir(), "mcp.json")
+			writeRawFixture(t, path, tt.in)
+			_, perr := ParseFile(path) // the runtime's own accept/reject
+
+			if (verr != nil) != (perr != nil) {
+				t.Errorf("verdict mismatch: ValidateRawJSON err = %v, ParseFile err = %v", verr, perr)
+			}
+		})
 	}
 }

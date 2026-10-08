@@ -227,10 +227,30 @@ func mustJSONKey(name string) string {
 
 // lastMember returns the LAST top-level occurrence of key (map semantics:
 // the last duplicate wins) so a mutation never targets a shadowed copy.
+// Case-insensitive via strings.EqualFold for the SAME reason parseRawDoc is:
+// encoding/json matches an object member to a struct field by exact name
+// first, then case-insensitively (its fold is EqualFold), so "MCPServers"
+// populates File.MCPServers exactly like "mcpServers" — an exact == here
+// made the writer blind to envelopes the runtime honours.
 func lastMember(members []rawMember, key string) (rawMember, bool) {
 	for i := len(members) - 1; i >= 0; i-- {
-		if members[i].key == key {
+		if strings.EqualFold(members[i].key, key) {
 			return members[i], true
+		}
+	}
+	return rawMember{}, false
+}
+
+// envelopeContaining returns the top-level "mcpServers" occurrence (any
+// letter case — encoding/json matches struct fields case-insensitively)
+// whose value span holds valueStart. The writer MUST splice against this
+// envelope's own members: doc.servers.members is the cross-occurrence fold,
+// so its neighbours can live in a DIFFERENT duplicate envelope and feeding
+// them to deleteMemberSpan merged two envelopes into one (data loss).
+func envelopeContaining(doc *rawDoc, valueStart int) (rawMember, bool) {
+	for _, m := range doc.members {
+		if strings.EqualFold(m.key, "mcpServers") && valueStart >= m.start && valueStart < m.end {
+			return m, true
 		}
 	}
 	return rawMember{}, false
@@ -331,7 +351,6 @@ func planEnable(doc *rawDoc, name string) ([]edit, bool, error) {
 	if doc.servers == nil {
 		return nil, false, nil
 	}
-	sm, _ := lastMember(doc.members, "mcpServers")
 	m, ok := doc.servers.get(name)
 	if !ok || m.raw[0] != '{' {
 		// Missing entry, or a null entry: no "disabled" key to delete.
@@ -385,11 +404,21 @@ func planEnable(doc *rawDoc, name string) ([]edit, bool, error) {
 		return nil, false, fmt.Errorf("entry %q after removing \"disabled\": %w", name, err) // unreachable
 	}
 	if sc.Command == "" && sc.URL == "" {
-		closePos := sm.end - 1
-		if closePos < sm.start || doc.data[closePos] != '}' {
-			return nil, false, errors.New("captured mcpServers object does not end with '}'")
+		// Delete the whole ENTRY from the envelope occurrence that CONTAINS
+		// the winning copy. deleteMemberSpan walks members[idx±1] to find
+		// the neighbouring key, so it must receive THIS envelope's member
+		// slice: the cross-occurrence fold (doc.servers.members) can hold
+		// the neighbour in another duplicate envelope, and the span then
+		// swallowed that envelope's key and dropped its names (data loss).
+		env, ok := envelopeContaining(doc, m.start)
+		if !ok {
+			return nil, false, errors.New("winning entry is outside every mcpServers envelope") // unreachable: fold members come from envelopes
 		}
-		span, err := deleteMemberSpan(doc.data, doc.servers.members, indexOfMember(doc.servers.members, m), sm.start+1, closePos)
+		envObj, err := parseObjectAt(doc.data, env.start, env.raw)
+		if err != nil {
+			return nil, false, err // unreachable: parseRawDoc gated this envelope
+		}
+		span, err := deleteMemberSpan(doc.data, envObj.members, indexOfMember(envObj.members, m), env.start+1, env.end-1)
 		if err != nil {
 			return nil, false, err
 		}
