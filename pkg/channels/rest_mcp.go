@@ -468,7 +468,23 @@ func (n *NativeChannel) handleMCPToggle(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 6. auto resolves to the owning (winning) layer.
+	// 6. an INVALID entry is not toggleable in EITHER direction (the rule
+	//    both clients already enforce; the API is the enforcer). A write
+	//    would mask the invalid verdict behind a legit-looking
+	//    enabled/disabled state (the verdict derivation prefers Disabled
+	//    over Invalid), and the only repair is the raw editor. Checked
+	//    against the EFFECTIVE verdict — the same map the response row
+	//    uses — for the resolved target AND the winner alike, before auto
+	//    resolution, the shadow/force logic and any write.
+	if inv.Effective[name] == "invalid" {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("mcp server %q has verdict %q and cannot be toggled; repair it in the raw editor (GET/PUT /api/v1/mcp/{layer}/raw)",
+				name, inv.Effective[name]),
+			"mcp_entry_invalid")
+		return
+	}
+
+	// 7. auto resolves to the owning (winning) layer.
 	if layer == mcpLayerAuto {
 		layer = inv.Winner[name]
 		if layer == "" {
@@ -480,7 +496,7 @@ func (n *NativeChannel) handleMCPToggle(w http.ResponseWriter, r *http.Request) 
 
 	_, inLayer := mcpCopyInLayer(copies, layer)
 
-	// 7. overwriting a LOSING copy in the addressed layer needs ?force=true;
+	// 8. overwriting a LOSING copy in the addressed layer needs ?force=true;
 	//    writing where the name is absent is an allowed cross-layer create.
 	force := r.URL.Query().Get("force") == "true"
 	if layer != inv.Winner[name] && !force && inLayer {
@@ -500,16 +516,20 @@ func (n *NativeChannel) handleMCPToggle(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 8. a DISABLE into global when global does not hold the name would
-	//    create a stub that can never shadow anything — refuse it.
-	if !req.Enabled && layer == mcp.LayerGlobal && !inLayer {
+	// 9. a DISABLE creating a stub BELOW the winning layer is inert — the
+	//    winner keeps serving — whatever the layer (the old global-only guard
+	//    was exactly this rule spelled for the lowest layer). Ranks come from
+	//    mcp.Layers() (low → high); the refusal message names the winning
+	//    layer. Winner is always set for a name that reached step 5.
+	if !req.Enabled && !inLayer && mcpLayerRank(layer) < mcpLayerRank(inv.Winner[name]) {
 		writeError(w, http.StatusBadRequest,
-			fmt.Sprintf("cannot create a global stub for %q: disable it in the layer that owns it", name),
+			fmt.Sprintf("cannot create a stub for %q in layer %q: it sits below the winning layer %q; disable it in the layer that owns it",
+				name, layer, inv.Winner[name]),
 			"mcp_stub_layer_not_allowed")
 		return
 	}
 
-	// 9. resolve the physical file for the layer.
+	// 10. resolve the physical file for the layer.
 	file := mcp.LayerFile(paths, layer)
 	if file == "" {
 		writeError(w, http.StatusBadRequest,
@@ -517,15 +537,13 @@ func (n *NativeChannel) handleMCPToggle(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 10. path guard — checked BEFORE any write.
-	if filepath.Base(file) != "mcp.json" || !isAllowedWorkspacePath(filepath.Dir(file)) {
-		writeError(w, http.StatusForbidden,
-			fmt.Sprintf("layer file %q is outside the allowed workspace roots", file),
-			"mcp_path_not_allowed")
+	// 11. path guard — checked BEFORE any write (shared with the raw
+	//    endpoints so read and write verdicts always agree).
+	if !mcpGuardLayerFile(w, file) {
 		return
 	}
 
-	// 11. write. The file stores "disabled", the API speaks "enabled".
+	// 12. write. The file stores "disabled", the API speaks "enabled".
 	res, err := mcp.SetDisabled(file, name, !req.Enabled)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError,
@@ -533,10 +551,10 @@ func (n *NativeChannel) handleMCPToggle(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 12. reload, exactly once, only after a successful write.
+	// 13. reload, exactly once, only after a successful write.
 	n.fireReloadMCP()
 
-	// 13. fresh inventory: effective state AFTER the write + reload.
+	// 14. fresh inventory: effective state AFTER the write + reload.
 	inv2 := mcp.ReadInventory(paths)
 	writeJSON(w, http.StatusOK, MCPToggleResponse{
 		Name:           name,
@@ -580,6 +598,12 @@ type MCPRawPutRequest struct {
 // error → 500. Per-entry problems are warnings carried in the response —
 // never a hard error, because fixing a broken entry is exactly what this
 // editor is for.
+//
+// After a successful SaveRawFile there is NO failure path: the response
+// echoes req.Content (the bytes the atomic temp+rename just persisted)
+// instead of re-reading the file, so a landed, reloaded write can never be
+// reported as 500 and a second writer winning the race after our rename can
+// never have its bytes echoed as this client's save result.
 func (n *NativeChannel) handleMCPRawPut(w http.ResponseWriter, r *http.Request) {
 	// 1. layer ∈ global|agent|project (auto refused).
 	layer := r.PathValue("layer")
@@ -607,11 +631,9 @@ func (n *NativeChannel) handleMCPRawPut(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// 4. path guard — checked BEFORE anything is decoded or written, so a
-	//    rejected path never sees the payload (nothing written).
-	if filepath.Base(file) != "mcp.json" || !isAllowedWorkspacePath(filepath.Dir(file)) {
-		writeError(w, http.StatusForbidden,
-			fmt.Sprintf("layer file %q is outside the allowed workspace roots", file),
-			"mcp_path_not_allowed")
+	//    rejected path never sees the payload (nothing written). Shared with
+	//    the read endpoint: same file, same verdict.
+	if !mcpGuardLayerFile(w, file) {
 		return
 	}
 
@@ -657,21 +679,19 @@ func (n *NativeChannel) handleMCPRawPut(w http.ResponseWriter, r *http.Request) 
 	// 9. reload, exactly once, only after a successful write.
 	n.fireReloadMCP()
 
-	// 10. re-read the file so Content is what is actually on disk, and keep
-	//     the same aliased_with computation as handleMCPRawFile.
-	resp := MCPRawFileResponse{Layer: layer, Path: file, Exists: true}
+	// 10. respond with the bytes we JUST wrote — no read-back. SaveRawFile is
+	//     atomic (temp+rename), so at this point the file holds exactly
+	//     req.Content. Re-reading could only lie: it can fail after a landed,
+	//     reloaded write (turning a success into a 500) or lose a race with a
+	//     second writer and echo bytes this client never sent. On-disk state
+	//     that is legitimately observable (aliased roots) is still computed
+	//     from the path resolution.
+	resp := MCPRawFileResponse{Layer: layer, Path: file, Exists: true, Content: req.Content}
 	for _, other := range mcp.Layers() {
 		if other != layer && mcp.LayerFile(paths, other) == file {
 			resp.AliasedWith = append(resp.AliasedWith, other)
 		}
 	}
-	data, err := os.ReadFile(file)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError,
-			fmt.Sprintf("failed to read back %s: %v", file, err), "mcp_read_failed")
-		return
-	}
-	resp.Content = string(data)
 	for _, warn := range warnings {
 		resp.Warnings = append(resp.Warnings, warn.Error())
 	}

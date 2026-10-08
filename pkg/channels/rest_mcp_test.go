@@ -732,7 +732,7 @@ func TestMCPToggle_StubDeletion(t *testing.T) {
 //
 // (b) the same call with layer=global on the post-(a) state: the global copy
 //
-//	is present but shadowed by the agent stub, so the shadow guard (step 7
+//	is present but shadowed by the agent stub, so the shadow guard (step 8
 //	— checked BEFORE the global-stub rule per the handler's ORDER) refuses
 //	with 409 mcp_entry_shadowed and no reload;
 //
@@ -897,6 +897,276 @@ func TestMCPToggle_ShadowGuardErrors(t *testing.T) {
 	}
 }
 
+// TestMCPToggle_StubBelowWinnerRefused (MENOR-2): a DISABLE that would
+// create a stub BELOW the winning layer is inert — the winner keeps serving
+// — so it is refused for EVERY layer below the winner, not only global (the
+// old guard was exactly this rule spelled for the lowest layer only). Same
+// error code; the refusal message names the winning layer. Writes AT or
+// ABOVE the winner stay allowed.
+func TestMCPToggle_StubBelowWinnerRefused(t *testing.T) {
+	// projectOnly builds a fixture where "solo" is defined ONLY in the
+	// project layer (global file present but empty).
+	projectOnly := func(t *testing.T) *mcpFixture {
+		t.Helper()
+		f := newMCPSoloFixture(t, `{"mcpServers": {}}`)
+		writeMCPJSON(t, filepath.Join(f.projectDir, ".lele", "mcp.json"),
+			`{"mcpServers": {"solo": {"command": "solo-cmd"}}}`)
+		return f
+	}
+
+	t.Run("project winner + agent disable is refused", func(t *testing.T) {
+		f := projectOnly(t)
+		reloads := mcpCountReloads(t, f)
+		projectFile := filepath.Join(f.projectDir, ".lele", "mcp.json")
+		projectBefore := mcpReadFile(t, projectFile)
+
+		status, body := mcpPut(t, f.ts,
+			f.ts.server.URL+"/api/v1/mcp/agent/servers/solo/toggle?agent_id=agent1", `{"enabled":false}`)
+		if status != http.StatusBadRequest || !strings.Contains(string(body), "mcp_stub_layer_not_allowed") {
+			t.Fatalf("status = %d body = %s, want 400 mcp_stub_layer_not_allowed (an inert write must not land)",
+				status, body)
+		}
+		if !strings.Contains(string(body), "project") {
+			t.Fatalf("refusal must name the winning layer (project): %s", body)
+		}
+		if _, err := os.Stat(filepath.Join(f.agentDir, "mcp.json")); !os.IsNotExist(err) {
+			t.Fatalf("stub written below the winner (err=%v)", err)
+		}
+		if !bytes.Equal(mcpReadFile(t, projectFile), projectBefore) {
+			t.Fatal("winner file changed by a refused write")
+		}
+		if reloads() != 0 {
+			t.Fatalf("reload count = %d, want 0", reloads())
+		}
+	})
+
+	t.Run("agent winner + agent disable is allowed", func(t *testing.T) {
+		f := newMCPSoloFixture(t, `{"mcpServers": {}}`)
+		writeMCPJSON(t, filepath.Join(f.agentDir, "mcp.json"),
+			`{"mcpServers": {"solo": {"command": "solo-cmd"}}}`)
+		reloads := mcpCountReloads(t, f)
+
+		status, resp, body := mcpToggle(t, f,
+			f.ts.server.URL+"/api/v1/mcp/agent/servers/solo/toggle?agent_id=agent1", `{"enabled":false}`)
+		if status != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", status, body)
+		}
+		if !resp.Changed || resp.Created || resp.Effective != "disabled" || resp.EffectiveLayer != "agent" {
+			t.Fatalf("changed/created/effective/effective_layer = %v/%v/%q/%q, want true/false/disabled/agent",
+				resp.Changed, resp.Created, resp.Effective, resp.EffectiveLayer)
+		}
+		if reloads() != 1 {
+			t.Fatalf("reload count = %d, want 1", reloads())
+		}
+	})
+
+	t.Run("global winner + agent disable is allowed", func(t *testing.T) {
+		f := newMCPSoloFixture(t, `{"mcpServers": {"solo": {"command": "solo-cmd"}}}`)
+		reloads := mcpCountReloads(t, f)
+
+		status, resp, body := mcpToggle(t, f,
+			f.ts.server.URL+"/api/v1/mcp/agent/servers/solo/toggle?agent_id=agent1", `{"enabled":false}`)
+		if status != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", status, body)
+		}
+		if !resp.Created || !resp.Changed || resp.Effective != "disabled" || resp.EffectiveLayer != "agent" {
+			t.Fatalf("created/changed/effective/effective_layer = %v/%v/%q/%q, want true/true/disabled/agent",
+				resp.Created, resp.Changed, resp.Effective, resp.EffectiveLayer)
+		}
+		if reloads() != 1 {
+			t.Fatalf("reload count = %d, want 1", reloads())
+		}
+	})
+
+	t.Run("global disable below a project winner is still refused", func(t *testing.T) {
+		f := projectOnly(t)
+		reloads := mcpCountReloads(t, f)
+		globalFile := filepath.Join(f.globalDir, "mcp.json")
+		projectFile := filepath.Join(f.projectDir, ".lele", "mcp.json")
+		globalBefore := mcpReadFile(t, globalFile)
+		projectBefore := mcpReadFile(t, projectFile)
+
+		status, body := mcpPut(t, f.ts,
+			f.ts.server.URL+"/api/v1/mcp/global/servers/solo/toggle?agent_id=agent1", `{"enabled":false}`)
+		if status != http.StatusBadRequest || !strings.Contains(string(body), "mcp_stub_layer_not_allowed") {
+			t.Fatalf("status = %d body = %s, want 400 mcp_stub_layer_not_allowed", status, body)
+		}
+		if !strings.Contains(string(body), "project") {
+			t.Fatalf("refusal must name the winning layer (project): %s", body)
+		}
+		if !bytes.Equal(mcpReadFile(t, globalFile), globalBefore) ||
+			!bytes.Equal(mcpReadFile(t, projectFile), projectBefore) {
+			t.Fatal("a refused stub write must not touch any file")
+		}
+		if reloads() != 0 {
+			t.Fatalf("reload count = %d, want 0", reloads())
+		}
+	})
+}
+
+// TestMCPToggle_InvalidEntryRefused (MENOR-N1): a name whose EFFECTIVE
+// verdict is invalid is not toggleable in either direction, on ANY layer —
+// the rule both clients already enforce, now invariant at the API. A write
+// into an invalid entry would mask the invalid verdict behind a
+// legit-looking enabled/disabled state (the verdict derivation prefers
+// Disabled over Invalid), and the only repair is the raw editor. The guard
+// keys off inv.Effective[name] — the same map the response row uses — and
+// fires before auto resolution, the shadow/force logic and any write, so
+// file bytes and the reload counter never move.
+func TestMCPToggle_InvalidEntryRefused(t *testing.T) {
+	// invalidSolo: "broken" has neither command nor url nor a disabled
+	// flag — Discover refuses it, so the derived effective verdict is
+	// invalid (the reviewer's N1 repro fixture).
+	const invalidSolo = `{"mcpServers": {"broken": {"description": "no transport configured"}}}`
+	invalidFixture := func(t *testing.T) (*mcpFixture, string) {
+		t.Helper()
+		f := newMCPSoloFixture(t, invalidSolo)
+		return f, filepath.Join(f.globalDir, "mcp.json")
+	}
+	// assertRefused pins the whole refusal contract: 400 mcp_entry_invalid
+	// naming the server, its verdict and the raw endpoint; file bytes
+	// untouched; zero reloads.
+	assertRefused := func(t *testing.T, f *mcpFixture, globalFile string, reloads func() int, raw []byte) {
+		t.Helper()
+		if !bytes.Equal(mcpReadFile(t, globalFile), []byte(invalidSolo)) {
+			t.Fatalf("file changed by a refused toggle: %s", mcpReadFile(t, globalFile))
+		}
+		if !strings.Contains(string(raw), "mcp_entry_invalid") {
+			t.Fatalf("body lacks mcp_entry_invalid: %s", raw)
+		}
+		if !strings.Contains(string(raw), "broken") ||
+			!strings.Contains(string(raw), "invalid") ||
+			!strings.Contains(string(raw), "/raw") {
+			t.Fatalf("refusal must name the server, its verdict and the raw endpoint: %s", raw)
+		}
+		if got := reloads(); got != 0 {
+			t.Fatalf("reload count = %d, want 0 (a refused toggle must not reload)", got)
+		}
+	}
+
+	t.Run("auto_disable_is_refused", func(t *testing.T) {
+		f, globalFile := invalidFixture(t)
+		reloads := mcpCountReloads(t, f)
+
+		status, raw := mcpPut(t, f.ts,
+			f.ts.server.URL+"/api/v1/mcp/auto/servers/broken/toggle?agent_id=agent1", `{"enabled":false}`)
+		if status != http.StatusBadRequest {
+			t.Fatalf("status = %d body = %s, want 400", status, raw)
+		}
+		assertRefused(t, f, globalFile, reloads, raw)
+	})
+
+	// The direction the clients never send: enable is refused too, so the
+	// masking hazard is closed in BOTH directions by the API alone.
+	t.Run("auto_enable_is_refused", func(t *testing.T) {
+		f, globalFile := invalidFixture(t)
+		reloads := mcpCountReloads(t, f)
+
+		status, raw := mcpPut(t, f.ts,
+			f.ts.server.URL+"/api/v1/mcp/auto/servers/broken/toggle?agent_id=agent1", `{"enabled":true}`)
+		if status != http.StatusBadRequest {
+			t.Fatalf("status = %d body = %s, want 400", status, raw)
+		}
+		assertRefused(t, f, globalFile, reloads, raw)
+	})
+
+	t.Run("concrete_layer_is_refused", func(t *testing.T) {
+		f, globalFile := invalidFixture(t)
+		reloads := mcpCountReloads(t, f)
+
+		status, raw := mcpPut(t, f.ts,
+			f.ts.server.URL+"/api/v1/mcp/global/servers/broken/toggle?agent_id=agent1", `{"enabled":false}`)
+		if status != http.StatusBadRequest {
+			t.Fatalf("status = %d body = %s, want 400", status, raw)
+		}
+		assertRefused(t, f, globalFile, reloads, raw)
+	})
+
+	// The guard fires BEFORE the stub guard: a lower layer addressing an
+	// invalid winner would get mcp_stub_layer_not_allowed from the stub
+	// rule — the invalid verdict must win the ordering.
+	t.Run("guard_fires_before_the_stub_guard", func(t *testing.T) {
+		f := newMCPSoloFixture(t, `{"mcpServers": {}}`)
+		writeMCPJSON(t, filepath.Join(f.projectDir, ".lele", "mcp.json"), invalidSolo)
+		reloads := mcpCountReloads(t, f)
+		globalBefore := mcpReadFile(t, filepath.Join(f.globalDir, "mcp.json"))
+		projectFile := filepath.Join(f.projectDir, ".lele", "mcp.json")
+		projectBefore := mcpReadFile(t, projectFile)
+
+		status, raw := mcpPut(t, f.ts,
+			f.ts.server.URL+"/api/v1/mcp/global/servers/broken/toggle?agent_id=agent1", `{"enabled":false}`)
+		if status != http.StatusBadRequest || !strings.Contains(string(raw), "mcp_entry_invalid") {
+			t.Fatalf("status = %d body = %s, want 400 mcp_entry_invalid (before the stub guard)", status, raw)
+		}
+		if strings.Contains(string(raw), "mcp_stub_layer_not_allowed") {
+			t.Fatalf("stub guard fired before the invalid guard: %s", raw)
+		}
+		if !bytes.Equal(mcpReadFile(t, projectFile), projectBefore) ||
+			!bytes.Equal(mcpReadFile(t, filepath.Join(f.globalDir, "mcp.json")), globalBefore) {
+			t.Fatal("a refused toggle must not touch any file")
+		}
+		if reloads() != 0 {
+			t.Fatalf("reload count = %d, want 0", reloads())
+		}
+	})
+
+	// The guard keys off the EFFECTIVE verdict, not off a per-layer
+	// Defines entry: the agent layer defines nothing for "broken", so
+	// pre-guard this was a legal cross-layer create (a stub ABOVE the
+	// invalid global winner) that would have masked the invalid verdict.
+	t.Run("stub_over_invalid_via_higher_layer_is_refused", func(t *testing.T) {
+		f, globalFile := invalidFixture(t)
+		reloads := mcpCountReloads(t, f)
+
+		status, raw := mcpPut(t, f.ts,
+			f.ts.server.URL+"/api/v1/mcp/agent/servers/broken/toggle?agent_id=agent1", `{"enabled":false}`)
+		if status != http.StatusBadRequest {
+			t.Fatalf("status = %d body = %s, want 400", status, raw)
+		}
+		assertRefused(t, f, globalFile, reloads, raw)
+		if _, err := os.Stat(filepath.Join(f.agentDir, "mcp.json")); !os.IsNotExist(err) {
+			t.Fatalf("stub written over an invalid entry (err=%v)", err)
+		}
+	})
+
+	// CONTROL: a valid enabled row still disables with 200 changed:true —
+	// the guard is not a blanket refusal.
+	t.Run("control_valid_enabled_row_still_disables", func(t *testing.T) {
+		f := newMCPSoloFixture(t, `{"mcpServers": {"ok": {"command": "ok-cmd"}}}`)
+		reloads := mcpCountReloads(t, f)
+
+		status, resp, raw := mcpToggle(t, f,
+			f.ts.server.URL+"/api/v1/mcp/auto/servers/ok/toggle?agent_id=agent1", `{"enabled":false}`)
+		if status != http.StatusOK {
+			t.Fatalf("status = %d body = %s, want 200", status, raw)
+		}
+		if !resp.Changed || resp.Effective != "disabled" {
+			t.Fatalf("changed/effective = %v/%q, want true/disabled", resp.Changed, resp.Effective)
+		}
+		if reloads() != 1 {
+			t.Fatalf("reload count = %d, want 1", reloads())
+		}
+	})
+
+	// CONTROL: a valid disabled row still enables with 200.
+	t.Run("control_valid_disabled_row_still_enables", func(t *testing.T) {
+		f := newMCPSoloFixture(t, `{"mcpServers": {"ok": {"command": "ok-cmd", "disabled": true}}}`)
+		reloads := mcpCountReloads(t, f)
+
+		status, resp, raw := mcpToggle(t, f,
+			f.ts.server.URL+"/api/v1/mcp/auto/servers/ok/toggle?agent_id=agent1", `{"enabled":true}`)
+		if status != http.StatusOK {
+			t.Fatalf("status = %d body = %s, want 200", status, raw)
+		}
+		if !resp.Changed || resp.Effective != "enabled" {
+			t.Fatalf("changed/effective = %v/%q, want true/enabled", resp.Changed, resp.Effective)
+		}
+		if reloads() != 1 {
+			t.Fatalf("reload count = %d, want 1", reloads())
+		}
+	})
+}
+
 // --- raw PUT (PUT .../raw) + validate (POST .../validate) ------------------
 
 // mcpPost issues an authenticated POST with a JSON body (mcpPut's twin for
@@ -939,7 +1209,7 @@ func mcpValidate(t *testing.T, f *mcpFixture, body string) (int, MCPValidateResp
 // TestMCPRawPut_WritesVerbatimBytes: the save must NOT reformat — a valid
 // but oddly formatted document (extra spaces, duplicate entry name, duplicate
 // field) lands on disk BYTE-IDENTICAL to the payload, and the response
-// content (re-read from disk) equals the payload. Reload fires exactly once.
+// content echoes the request bytes byte-for-byte. Reload fires exactly once.
 func TestMCPRawPut_WritesVerbatimBytes(t *testing.T) {
 	f := newMCPSoloFixture(t, `{"mcpServers": {"seed": {"command": "seed-cmd"}}}`)
 	reloads := mcpCountReloads(t, f)
@@ -1131,6 +1401,84 @@ func TestMCPRawPut_GuardsAndLimits(t *testing.T) {
 	if reloads() != 1 {
 		t.Fatalf("boundary: reload count = %d, want 1", reloads())
 	}
+}
+
+// TestMCPRawPut_ResponseIsRequestAfterSuccessfulSave (MAYOR-1): once
+// SaveRawFile has succeeded the response is 200 echoing EXACTLY the bytes
+// the client sent — byte-for-byte, whitespace included. No post-write read
+// may turn a landed, reloaded write into a 500, and a second writer winning
+// the race must not have its bytes echoed as the result of THIS save. The
+// race window is driven through the only seam that fires between the atomic
+// rename and where the old read-back used to run: the reload hook plays the
+// concurrent writer (an editor, the TUI, another WebUI tab).
+func TestMCPRawPut_ResponseIsRequestAfterSuccessfulSave(t *testing.T) {
+	// Whitespace/formatting proves byte-for-byte echoing, not re-serialization.
+	payload := "{\n  \"mcpServers\": {\"odd\": {\"command\": \"run-1\"}}\n}\n"
+
+	put := func(t *testing.T, f *mcpFixture) (int, MCPRawFileResponse, []byte) {
+		t.Helper()
+		status, raw := mcpPut(t, f.ts,
+			f.ts.server.URL+"/api/v1/mcp/global/raw?agent_id=agent1",
+			`{"content":`+strconv.Quote(payload)+`}`)
+		var resp MCPRawFileResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("Decode() error = %v body=%s", err, raw)
+		}
+		return status, resp, raw
+	}
+
+	t.Run("read-back fails after a landed write", func(t *testing.T) {
+		f := newMCPSoloFixture(t, `{"mcpServers": {"seed": {"command": "seed-cmd"}}}`)
+		globalFile := filepath.Join(f.globalDir, "mcp.json")
+		reloads := 0
+		f.ts.channel.SetReloadMCP(func() {
+			reloads++
+			// A concurrent deleter unlinks the file inside the race window.
+			_ = os.Remove(globalFile)
+		})
+
+		status, resp, raw := put(t, f)
+		if status != http.StatusOK {
+			t.Fatalf("status = %d, want 200: a successful SaveRawFile must never answer non-2xx; body=%s",
+				status, raw)
+		}
+		if strings.Contains(string(raw), "mcp_read_failed") || strings.Contains(string(raw), "mcp_write_failed") {
+			t.Fatalf("landed write reported as a failure: %s", raw)
+		}
+		if !resp.Exists {
+			t.Fatal("exists = false, want true (the write just landed)")
+		}
+		if resp.Content != payload {
+			t.Fatalf("content = %q, want the request bytes %q", resp.Content, payload)
+		}
+		if reloads != 1 {
+			t.Fatalf("reload count = %d, want 1", reloads)
+		}
+	})
+
+	t.Run("second writer wins the rename/read race", func(t *testing.T) {
+		f := newMCPSoloFixture(t, `{"mcpServers": {"seed": {"command": "seed-cmd"}}}`)
+		globalFile := filepath.Join(f.globalDir, "mcp.json")
+		other := `{"mcpServers": {"other-writer": {"command": "other"}}}`
+		reloads := 0
+		f.ts.channel.SetReloadMCP(func() {
+			reloads++
+			// A second writer replaces the file inside the race window.
+			_ = os.WriteFile(globalFile, []byte(other), 0o644)
+		})
+
+		status, resp, raw := put(t, f)
+		if status != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", status, raw)
+		}
+		if resp.Content != payload {
+			t.Fatalf("content = %q, want the bytes THIS client sent (%q) — never another writer's bytes",
+				resp.Content, payload)
+		}
+		if reloads != 1 {
+			t.Fatalf("reload count = %d, want 1", reloads)
+		}
+	})
 }
 
 // TestMCPValidate_ValidAndFatal: validate is a dry run — valid doc ⇒ 200
