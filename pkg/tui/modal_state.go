@@ -31,6 +31,9 @@ func (m *Model) resetModal(mode modalType) {
 	m.commandsEditScope = ""
 	m.commandsDeleteKey = ""
 	m.commandsDeleteArmed = time.Time{}
+	m.mcpModalKeys = nil
+	m.mcpFilter = mcpFilterAll
+	m.mcpFeedback = ""
 	m.formStepIndex = 0
 	m.formValues = nil
 	m.formError = ""
@@ -94,6 +97,8 @@ func isListModal(mode modalType) bool {
 	case ModalNone, ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret, ModalSkillInstall:
 		return false
 	case ModalSettings, ModalSettingsAgents, ModalSettingsAgentEdit, ModalSettingsSystem, ModalSettingsSystemEdit, ModalSettingsTUI:
+		return true
+	case ModalMCP, ModalMCPDetail:
 		return true
 	default:
 		return true

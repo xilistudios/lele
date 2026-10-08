@@ -189,6 +189,8 @@ const (
 	ModalSettingsSystem     // system settings list
 	ModalSettingsSystemEdit // form for a system setting group
 	ModalSettingsTUI        // TUI settings list (toggles/values)
+	ModalMCP                // list of MCP servers (space/t toggle, f filter)
+	ModalMCPDetail          // detail view of one MCP server (rendering lands in a later task)
 )
 
 type formStep int
@@ -223,6 +225,7 @@ var allCommands = []commandInfo{
 	{name: "/connect", description: "Connect a new provider"},
 	{name: "/secrets", description: "Manage secrets (keyring)"},
 	{name: "/skills", description: "Manage agent skills"},
+	{name: "/mcp", description: "Manage MCP servers"},
 	{name: "/commands", description: "Manage custom slash commands"},
 	{name: "/settings", description: "Open settings"},
 	{name: "/compact", description: "Compact conversation history"},
@@ -360,6 +363,14 @@ type Model struct {
 	skillsScanRepo    string                  // repo being scanned
 	skillsSelectedMap map[int]bool            // multi-select state for skill picker
 	skillsFeedback    string                  // brief feedback after install/remove/toggle
+
+	// MCP server management state (/mcp): mcpModalKeys maps modal items to
+	// server names ("" for the empty-state row), mcpFilter is the source
+	// filter index (mcpFilterAll…mcpFilterProject) cycled by "f", and
+	// mcpFeedback is the line rendered under the list.
+	mcpModalKeys []string
+	mcpFilter    int
+	mcpFeedback  string
 
 	// Custom (harness) slash-command administration state. commandsModalKeys
 	// maps modal items to composite "source:name" keys ("" for separators and

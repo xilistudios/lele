@@ -217,6 +217,11 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		m.loadSkillsList()
 		return nil
 
+	case "/mcp":
+		m.resetModal(ModalMCP)
+		m.loadMCPList()
+		return nil
+
 	case "/commands":
 		m.resetModal(ModalCommands)
 		m.commandsModalKeys = nil

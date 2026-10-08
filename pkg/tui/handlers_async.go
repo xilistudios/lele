@@ -72,6 +72,9 @@ func (m *Model) handleAsyncResult(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.C
 	case skillDeleteResultMsg:
 		return m, m.handleSkillDeleteResult(msg)
 
+	case mcpToggleResultMsg:
+		return m, m.handleMCPToggleResult(msg)
+
 	case obVerifyResultMsg:
 		m.obVerifying = false
 		if !msg.success {

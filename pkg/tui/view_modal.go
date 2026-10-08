@@ -50,6 +50,10 @@ func (m *Model) modalTitleFor(mode modalType) string {
 		return i18n.T("tui.selectSkills")
 	case ModalCommands:
 		return i18n.T("tui.commands")
+	case ModalMCP:
+		return i18n.T("tui.mcp")
+	case ModalMCPDetail:
+		return i18n.T("tui.mcpDetail")
 	case ModalCommandDetail:
 		return i18n.T("tui.commands.detail")
 	case ModalAddCommand:
@@ -245,6 +249,15 @@ func (m *Model) renderModal(modalTitle string) string {
 			modalSb.WriteString("\n" + SuccessStyle.Render("  "+m.commandsFeedback) + "\n")
 		}
 		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.commands.listHints")) + "\n")
+	}
+
+	// MCP server list: feedback line (toggle results) + filter + hints.
+	if m.modalMode == ModalMCP {
+		if m.mcpFeedback != "" {
+			modalSb.WriteString("\n" + SuccessStyle.Render("  "+m.mcpFeedback) + "\n")
+		}
+		modalSb.WriteString("\n" + HelpStyle.Render("  "+m.mcpFilterHint()) + "\n")
+		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.mcpListHints")) + "\n")
 	}
 
 	// Provider detail: feedback line (double-press delete confirm / result)
