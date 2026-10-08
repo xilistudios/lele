@@ -114,6 +114,10 @@ func (m *Model) renderActiveModal() string {
 		return m.renderSkillPicker(title)
 	case ModalCommandDetail:
 		return m.renderCommandDetail()
+	case ModalMCPDetail:
+		// Rendered from the inventory snapshot the list was built from;
+		// falls back to the list when the snapshot is gone.
+		return m.renderMCPDetail()
 	case ModalAddCommand:
 		// The template step is multi-line and needs a textarea, which the
 		// generic single-line form renderer cannot offer.

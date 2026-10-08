@@ -24,7 +24,15 @@ import (
 // catalog, and a rule enforced by one but not the other would let the user
 // store a command the backend then refuses to load. The helpers below are
 // deliberately small copies (name grammar, size cap, atomic write) instead of
-// exported REST internals: pkg/channels must not become a TUI dependency.
+// exported REST internals: pkg/channels must not become a TUI dependency for
+// rules the TUI can state on its own.
+//
+// The exception is a predicate whose WHOLE point is to have exactly one
+// implementation shared with the HTTP front door — path policy. pkg/mcp cannot
+// own it (it must not import pkg/config or read the global roots), so
+// channels.IsAllowedWorkspacePath is the single home and pkg/tui/mcp.go calls
+// it (see the comment there); a copy there would let the two front doors drift
+// on the one rule where drift means writing outside the allowed roots.
 
 // commandNamePattern is the command-name grammar, byte-identical to
 // agentCommandNamePattern in pkg/channels (lowercase start; letters, digits,

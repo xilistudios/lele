@@ -10,6 +10,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/locales"
+	"github.com/xilistudios/lele/pkg/mcp"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/tui/theme"
@@ -190,7 +191,7 @@ const (
 	ModalSettingsSystemEdit // form for a system setting group
 	ModalSettingsTUI        // TUI settings list (toggles/values)
 	ModalMCP                // list of MCP servers (space/t toggle, f filter)
-	ModalMCPDetail          // detail view of one MCP server (rendering lands in a later task)
+	ModalMCPDetail          // detail view of one MCP server (rendered from the stored inventory)
 )
 
 type formStep int
@@ -371,6 +372,14 @@ type Model struct {
 	mcpModalKeys []string
 	mcpFilter    int
 	mcpFeedback  string
+	// mcpInventory is the EXACT inventory the visible list rows were built
+	// from (set by loadMCPListWith, cleared by resetModal), mcpInventoryValid
+	// guards it and mcpDetailName is the row ModalMCPDetail is open on. The
+	// detail renders only from this snapshot — it never re-reads the disk, so
+	// it can never describe a different winner than the row the user selected.
+	mcpInventory      mcp.Inventory
+	mcpInventoryValid bool
+	mcpDetailName     string
 
 	// Custom (harness) slash-command administration state. commandsModalKeys
 	// maps modal items to composite "source:name" keys ("" for separators and
