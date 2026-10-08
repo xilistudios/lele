@@ -801,6 +801,12 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/skills/install-batch", withAuth(applyBodyLimit(n.handleSkillInstallBatch)))
 	mux.HandleFunc("PUT /api/v1/skills/{name}/toggle", withAuth(applyBodyLimit(n.handleSkillToggle)))
 	mux.HandleFunc("GET /api/v1/skills/workspace-config", withAuth(n.handleSkillWorkspaceConfig))
+
+	// MCP servers (management view: merged inventory + raw layer file, plus
+	// the per-layer enable/disable toggle)
+	mux.HandleFunc("GET /api/v1/mcp", withAuth(n.handleMCPInventory))
+	mux.HandleFunc("GET /api/v1/mcp/{layer}/raw", withAuth(n.handleMCPRawFile))
+	mux.HandleFunc("PUT /api/v1/mcp/{layer}/servers/{name}/toggle", withAuth(applyBodyLimit(n.handleMCPToggle)))
 	mux.HandleFunc("GET /api/v1/status", withAuth(n.handleStatus))
 	mux.HandleFunc("GET /api/v1/channels", withAuth(n.handleChannels))
 	mux.HandleFunc("GET /api/v1/logs", withAuth(n.handleLogs))
