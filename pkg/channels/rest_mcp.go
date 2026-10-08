@@ -1,14 +1,17 @@
-// READ-only MCP management endpoints.
+// MCP management endpoints (inventory, raw view, toggle, raw edit, validate).
 //
 // Why this file exists: the MCP management UI needs, per agent, a merged view
 // of its mcp.json layers (which copy wins, what is shadowed, what is
 // invalid/disabled) plus the literal bytes of one layer file for inspection,
-// and a surgical per-layer enable/disable toggle. The inventory/summary side
+// a surgical per-layer enable/disable toggle, a whole-file editor save and a
+// dry-run validator. The inventory/summary side
 // is derived data — it must never trigger a reload, a write, or a parse that
-// expands ${VAR} into secret values. The only mutation is the toggle
-// endpoint, which writes ONE layer file through mcp.SetDisabled (byte
-// splice, ${VAR} never expanded) and fires the reload seam exactly once,
-// only after a successful write.
+// expands ${VAR} into secret values. There are exactly TWO mutations: the
+// toggle endpoint (writes ONE layer file through mcp.SetDisabled, byte
+// splice, ${VAR} never expanded) and the raw PUT (replaces one layer file
+// verbatim through mcp.SaveRawFile, after mcp.ValidateRawJSON has accepted
+// the envelope). Each fires the reload seam exactly once, only after a
+// successful write. The validate endpoint never writes and never reloads.
 //
 // Two rules shape this file:
 //
@@ -21,19 +24,26 @@
 //     reasoning as agentSkillsSource in rest_agent_skills.go: declaring it
 //     there would break every channel fake).
 //
-// Endpoints (all behind withAuth; the toggle is the only mutation here):
+// Endpoints (all behind withAuth; the toggle and the raw PUT are the only
+// mutations):
 //
 //	GET  /api/v1/mcp?agent_id=                        merged inventory, one row per NAME
 //	GET  /api/v1/mcp/{layer}/raw?agent_id=            literal bytes of one layer's file
+//	PUT  /api/v1/mcp/{layer}/raw?agent_id=            replace that file verbatim (body {"content":string})
 //	PUT  /api/v1/mcp/{layer}/servers/{name}/toggle    enable/disable one server in one layer
 //	                                                (?agent_id=[&force=true], body {"enabled":bool})
+//	POST /api/v1/mcp/validate?agent_id=               dry-run validate (never writes/reloads;
+//	                                                body {"layer":string,"content":string})
 //
 // layer ∈ global|agent|project on the raw endpoint, where "auto" is refused
 // (invalid_layer): the raw endpoint answers "which physical file backs this
 // layer", and auto-aliasing would make that answer depend on hidden
 // precedence — callers pick a layer explicitly and see aliasing via
-// AliasedWith instead. The toggle endpoint ADDS "auto" (resolve to the layer
-// owning the winning copy) and never mutates outside one resolved layer file.
+// AliasedWith instead. The raw PUT refuses auto for the same reason (it
+// writes ONE physical file). The toggle endpoint ADDS "auto" (resolve to the
+// layer owning the winning copy) and never mutates outside one resolved
+// layer file. The validate endpoint accepts auto but does not resolve it
+// (layer is checked for symmetry, see handleMCPValidate).
 
 package channels
 
@@ -311,7 +321,7 @@ func (n *NativeChannel) handleMCPRawFile(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// --- toggle (the only mutating endpoint in this file) -----------------------
+// --- toggle (PUT .../servers/{name}/toggle) -------------------------------
 
 // MCPToggleRequest is the body of
 // PUT /api/v1/mcp/{layer}/servers/{name}/toggle?agent_id=[&force=true].
@@ -496,4 +506,202 @@ func (n *NativeChannel) handleMCPToggle(w http.ResponseWriter, r *http.Request) 
 		Effective:      inv2.Effective[name],
 		EffectiveLayer: inv2.Winner[name],
 	})
+}
+
+// --- raw PUT (whole-file editor save) --------------------------------------
+
+// MCPRawPutRequest is the body of PUT /api/v1/mcp/{layer}/raw?agent_id=.
+// Content is the literal file to write — no ${VAR} expansion, no reformat.
+type MCPRawPutRequest struct {
+	Content string `json:"content"`
+}
+
+// handleMCPRawPut serves PUT /api/v1/mcp/{layer}/raw?agent_id= with body
+// {"content":string} — the MCP editor's save path: it replaces ONE layer
+// file with the given bytes, byte for byte.
+//
+// layer ∈ global|agent|project (auto refused, same rule as GET raw: the
+// editor saves a PHYSICAL file and auto-aliasing would make the target
+// depend on hidden precedence — see file header).
+//
+// Validation order (each failure returns immediately; the reload fires
+// exactly once, only after a successful write):
+// invalid_layer → mcpPathsFor → mcp_layer_unavailable → mcp_path_not_allowed
+// → body_invalid → mcp_file_too_large → config_invalid → mcp_write_failed.
+//
+// 422 config_invalid vs 500 mcp_write_failed: pkg/mcp's SaveRawFile writes
+// bytes atomically but does NOT validate, so the envelope verdict is taken
+// HERE — mcp.ValidateRawJSON runs BEFORE the write and a fatal envelope
+// result (not JSON / no mcpServers object / wrong type) is 422 with nothing
+// written; every SaveRawFile failure is therefore by construction an I/O
+// error → 500. Per-entry problems are warnings carried in the response —
+// never a hard error, because fixing a broken entry is exactly what this
+// editor is for.
+func (n *NativeChannel) handleMCPRawPut(w http.ResponseWriter, r *http.Request) {
+	// 1. layer ∈ global|agent|project (auto refused).
+	layer := r.PathValue("layer")
+	switch layer {
+	case mcp.LayerGlobal, mcp.LayerAgent, mcp.LayerProject:
+	default:
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("invalid layer %q: use global, agent or project", layer), "invalid_layer")
+		return
+	}
+
+	// 2. agent_id → paths (writes its own error responses).
+	agentID := r.URL.Query().Get("agent_id")
+	paths, ok := n.mcpPathsFor(w, agentID)
+	if !ok {
+		return
+	}
+
+	// 3. resolve the physical file for the layer.
+	file := mcp.LayerFile(paths, layer)
+	if file == "" {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("layer %q has no root for this agent", layer), "mcp_layer_unavailable")
+		return
+	}
+
+	// 4. path guard — checked BEFORE anything is decoded or written, so a
+	//    rejected path never sees the payload (nothing written).
+	if filepath.Base(file) != "mcp.json" || !isAllowedWorkspacePath(filepath.Dir(file)) {
+		writeError(w, http.StatusForbidden,
+			fmt.Sprintf("layer file %q is outside the allowed workspace roots", file),
+			"mcp_path_not_allowed")
+		return
+	}
+
+	// 5. decode the body.
+	var req MCPRawPutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("invalid body: %v", err), "body_invalid")
+		return
+	}
+
+	// 6. size cap (mcp.json is a config file; beyond 1 MiB this UI is the
+	//    wrong tool). The route IS body-limited: applyBodyLimit (1 MiB
+	//    http.MaxBytesReader) wraps it, so an over-limit request fails at
+	//    decode above with 400 body_invalid and never gets here. This check
+	//    stays as the FIELD-level guard — a body just under 1 MiB can still
+	//    carry a `content` string just under 1 MiB (plus envelope), so only
+	//    len(content) proves the file itself is within the cap. Defence in
+	//    depth if the route limit is ever raised: unreachable today.
+	if len(req.Content) > mcpRawFileMaxBytes {
+		writeError(w, http.StatusRequestEntityTooLarge,
+			"content exceeds 1 MiB", "mcp_file_too_large")
+		return
+	}
+
+	// 7. envelope validation BEFORE the write: a fatal result is 422
+	//    config_invalid and the file is untouched. Warnings (per-entry
+	//    problems) do NOT block the save — they ride along in the response.
+	warnings, verr := mcp.ValidateRawJSON([]byte(req.Content))
+	if verr != nil {
+		writeError(w, http.StatusUnprocessableEntity,
+			fmt.Sprintf("invalid mcp.json: %v", verr), "config_invalid")
+		return
+	}
+
+	// 8. write the bytes verbatim (atomic temp+rename in mcp.SaveRawFile).
+	if err := mcp.SaveRawFile(file, []byte(req.Content)); err != nil {
+		writeError(w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to write %s: %v", file, err), "mcp_write_failed")
+		return
+	}
+
+	// 9. reload, exactly once, only after a successful write.
+	n.fireReloadMCP()
+
+	// 10. re-read the file so Content is what is actually on disk, and keep
+	//     the same aliased_with computation as handleMCPRawFile.
+	resp := MCPRawFileResponse{Layer: layer, Path: file, Exists: true}
+	for _, other := range mcp.Layers() {
+		if other != layer && mcp.LayerFile(paths, other) == file {
+			resp.AliasedWith = append(resp.AliasedWith, other)
+		}
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to read back %s: %v", file, err), "mcp_read_failed")
+		return
+	}
+	resp.Content = string(data)
+	for _, warn := range warnings {
+		resp.Warnings = append(resp.Warnings, warn.Error())
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// --- validate (POST .../validate, dry run) ---------------------------------
+
+// MCPValidateRequest is the body of POST /api/v1/mcp/validate?agent_id=.
+type MCPValidateRequest struct {
+	Layer   string `json:"layer"`
+	Content string `json:"content"`
+}
+
+// MCPValidateResponse is the validate endpoint's verdict. Valid reflects
+// the FATAL envelope result only; Warnings carry the per-entry problems
+// (never fatal by design — see ValidateRawJSON); Error is set iff Valid is
+// false. The response is always 200.
+type MCPValidateResponse struct {
+	Valid    bool     `json:"valid"`
+	Warnings []string `json:"warnings,omitempty"`
+	Error    string   `json:"error,omitempty"`
+}
+
+// handleMCPValidate serves POST /api/v1/mcp/validate?agent_id= with body
+// {"layer":string,"content":string} — a DRY RUN for the editor. It never
+// writes, never creates a file and never calls fireReloadMCP; paths are
+// resolved only to pin the agent (agent_id / availability errors), not to
+// touch disk.
+//
+// layer ∈ global|agent|project|auto is accepted for symmetry with the raw
+// endpoints; beyond validating the string its value is UNUSED here (auto is
+// deliberately NOT resolved — there is nothing to address until a write is
+// requested), reserved for future cross-checks against the addressed file.
+//
+// Always 200: Valid = (mcp.ValidateRawJSON returned no fatal error), Error
+// carries that fatal error, Warnings carry the per-entry problems — which
+// must NOT fail the request, because an invalid entry is fixable only
+// through this editor.
+func (n *NativeChannel) handleMCPValidate(w http.ResponseWriter, r *http.Request) {
+	// 1. agent_id → paths (writes its own error responses; no file access).
+	agentID := r.URL.Query().Get("agent_id")
+	if _, ok := n.mcpPathsFor(w, agentID); !ok {
+		return
+	}
+
+	// 2. decode the body.
+	var req MCPValidateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("invalid body: %v", err), "body_invalid")
+		return
+	}
+
+	// 3. layer ∈ global|agent|project|auto (string check only — see comment).
+	switch req.Layer {
+	case mcp.LayerGlobal, mcp.LayerAgent, mcp.LayerProject, mcpLayerAuto:
+	default:
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("invalid layer %q: use global, agent, project or auto", req.Layer), "invalid_layer")
+		return
+	}
+
+	// 4. verdict — ALWAYS 200 from here on.
+	resp := MCPValidateResponse{}
+	warnings, err := mcp.ValidateRawJSON([]byte(req.Content))
+	for _, warn := range warnings {
+		resp.Warnings = append(resp.Warnings, warn.Error())
+	}
+	if err != nil {
+		resp.Error = err.Error()
+	} else {
+		resp.Valid = true
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

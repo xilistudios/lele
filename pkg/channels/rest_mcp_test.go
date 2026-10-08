@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -856,5 +857,332 @@ func TestMCPToggle_ShadowGuardErrors(t *testing.T) {
 	globalAfter := mcpReadFile(t, globalFile)
 	if !bytes.Equal(globalAfter, globalBefore) {
 		t.Fatalf("global file changed:\nbefore: %s\nafter:  %s", globalBefore, globalAfter)
+	}
+}
+
+// --- raw PUT (PUT .../raw) + validate (POST .../validate) ------------------
+
+// mcpPost issues an authenticated POST with a JSON body (mcpPut's twin for
+// the validate endpoint).
+func mcpPost(t *testing.T, ts *nativeTestServer, url, body string) (int, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest(%s): %v", url, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do(%s): %v", url, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(%s): %v", url, err)
+	}
+	return resp.StatusCode, data
+}
+
+// mcpValidate wraps mcpPost against /api/v1/mcp/validate and decodes the
+// always-200 body into MCPValidateResponse.
+func mcpValidate(t *testing.T, f *mcpFixture, body string) (int, MCPValidateResponse, []byte) {
+	t.Helper()
+	status, raw := mcpPost(t, f.ts,
+		f.ts.server.URL+"/api/v1/mcp/validate?agent_id=agent1", body)
+	var out MCPValidateResponse
+	if status == http.StatusOK {
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("Decode() error = %v body=%s", err, raw)
+		}
+	}
+	return status, out, raw
+}
+
+// TestMCPRawPut_WritesVerbatimBytes: the save must NOT reformat — a valid
+// but oddly formatted document (extra spaces, duplicate entry name, duplicate
+// field) lands on disk BYTE-IDENTICAL to the payload, and the response
+// content (re-read from disk) equals the payload. Reload fires exactly once.
+func TestMCPRawPut_WritesVerbatimBytes(t *testing.T) {
+	f := newMCPSoloFixture(t, `{"mcpServers": {"seed": {"command": "seed-cmd"}}}`)
+	reloads := mcpCountReloads(t, f)
+	globalFile := filepath.Join(f.globalDir, "mcp.json")
+
+	payload := `{"mcpServers":{   "odd"  :  {"command":"run-1"} ,   "odd" : {"command":"run-1-final", "command":"run-1-final"}   }}`
+	status, raw := mcpPut(t, f.ts,
+		f.ts.server.URL+"/api/v1/mcp/global/raw?agent_id=agent1",
+		`{"content":`+strconv.Quote(payload)+`}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", status, raw)
+	}
+	var resp MCPRawFileResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("Decode() error = %v body=%s", err, raw)
+	}
+	if !resp.Exists || resp.Content != payload {
+		t.Fatalf("exists/content = %v/%q, want true/payload", resp.Exists, resp.Content)
+	}
+	if onDisk := mcpReadFile(t, globalFile); string(onDisk) != payload {
+		t.Fatalf("on-disk bytes differ from payload:\non disk: %s\npayload: %s", onDisk, payload)
+	}
+	if reloads() != 1 {
+		t.Fatalf("reload count = %d, want 1", reloads())
+	}
+}
+
+// TestMCPRawPut_MalformedIs422AndLeavesFileUntouched: an envelope failure
+// ({...: 5} — mcpServers not an object) is 422 config_invalid BEFORE the
+// write: the pre-existing file keeps its exact bytes and nothing reloads.
+func TestMCPRawPut_MalformedIs422AndLeavesFileUntouched(t *testing.T) {
+	valid := `{"mcpServers": {"seed": {"command": "seed-cmd"}}}`
+	f := newMCPSoloFixture(t, valid)
+	reloads := mcpCountReloads(t, f)
+	globalFile := filepath.Join(f.globalDir, "mcp.json")
+	before := mcpReadFile(t, globalFile)
+
+	status, raw := mcpPut(t, f.ts,
+		f.ts.server.URL+"/api/v1/mcp/global/raw?agent_id=agent1",
+		`{"content":"{\"mcpServers\": 5}"}`)
+	if status != http.StatusUnprocessableEntity || !strings.Contains(string(raw), "config_invalid") {
+		t.Fatalf("status = %d, want 422 config_invalid; body=%s", status, raw)
+	}
+	if after := mcpReadFile(t, globalFile); string(after) != string(before) {
+		t.Fatalf("file must be untouched:\nbefore: %s\nafter:  %s", before, after)
+	}
+	if reloads() != 0 {
+		t.Fatalf("reload count = %d, want 0", reloads())
+	}
+}
+
+// TestMCPRawPut_InvalidEntryIsAcceptedWithWarnings: the escape hatch — an
+// entry lacking BOTH command and url is a warning, not a hard error, so the
+// editor can save a file it is trying to FIX. 200, warnings non-empty,
+// on-disk bytes equal the payload, reload 1.
+func TestMCPRawPut_InvalidEntryIsAcceptedWithWarnings(t *testing.T) {
+	f := newMCPSoloFixture(t, `{"mcpServers": {"seed": {"command": "seed-cmd"}}}`)
+	reloads := mcpCountReloads(t, f)
+	globalFile := filepath.Join(f.globalDir, "mcp.json")
+
+	payload := `{"mcpServers": {"orphan": {}}}`
+	status, raw := mcpPut(t, f.ts,
+		f.ts.server.URL+"/api/v1/mcp/global/raw?agent_id=agent1",
+		`{"content":`+strconv.Quote(payload)+`}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", status, raw)
+	}
+	var resp MCPRawFileResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("Decode() error = %v body=%s", err, raw)
+	}
+	if len(resp.Warnings) == 0 {
+		t.Fatalf("warnings empty, want non-empty; body=%s", raw)
+	}
+	if onDisk := mcpReadFile(t, globalFile); string(onDisk) != payload {
+		t.Fatalf("on-disk bytes differ from payload:\non disk: %s\npayload: %s", onDisk, payload)
+	}
+	if reloads() != 1 {
+		t.Fatalf("reload count = %d, want 1", reloads())
+	}
+}
+
+// TestMCPRawPut_GuardsAndLimits: every guard refuses BEFORE any write and
+// reload stays 0 throughout — auto layer (400 invalid_layer), a Paths root
+// outside the allowed workspace roots (403 mcp_path_not_allowed, NO file
+// created), a body > 1 MiB (400 body_invalid: applyBodyLimit's
+// MaxBytesReader trips inside the decode — verified by running the test),
+// an empty root (400 mcp_layer_unavailable), a non-JSON body (400
+// body_invalid). THEN the reachable boundary: a `content` just under the
+// 1 MiB body cap is accepted (200) and written byte-identically (reload 1).
+func TestMCPRawPut_GuardsAndLimits(t *testing.T) {
+	seed := `{"mcpServers": {"seed": {"command": "seed-cmd"}}}`
+	f := newMCPSoloFixture(t, seed)
+	reloads := mcpCountReloads(t, f)
+	globalFile := filepath.Join(f.globalDir, "mcp.json")
+	base := f.ts.server.URL + "/api/v1/mcp"
+
+	// 1. auto is refused: the raw PUT writes a PHYSICAL file.
+	status, raw := mcpPut(t, f.ts, base+"/auto/raw?agent_id=agent1", `{"content":"{}"}`)
+	if status != http.StatusBadRequest || !strings.Contains(string(raw), "invalid_layer") {
+		t.Fatalf("auto: status = %d, want 400 invalid_layer; body=%s", status, raw)
+	}
+
+	// 2. a root outside the allowed workspace roots → 403, NOTHING created.
+	//    /etc is under none of home, /tmp, /var/folders or the cwd.
+	f.loop.paths["agent-outside"] = mcp.Paths{
+		LeleDir: "/etc/lele-mcp-rawput-test", AgentWorkspace: "", Cwd: "",
+	}
+	status, raw = mcpPut(t, f.ts, base+"/global/raw?agent_id=agent-outside",
+		`{"content":"{\"mcpServers\":{}}"}`)
+	if status != http.StatusForbidden || !strings.Contains(string(raw), "mcp_path_not_allowed") {
+		t.Fatalf("outside root: status = %d, want 403 mcp_path_not_allowed; body=%s", status, raw)
+	}
+	if _, err := os.Stat("/etc/lele-mcp-rawput-test/mcp.json"); !os.IsNotExist(err) {
+		t.Fatalf("outside root: file must not exist, stat err = %v", err)
+	}
+
+	// 3. a body > 1 MiB → the route's applyBodyLimit (http.MaxBytesReader,
+	//    1 MiB) trips inside the decode → 400 body_invalid, message
+	//    "http: request body too large". Verified by running the test.
+	//    (The handler's own 413 mcp_file_too_large is NOT reachable
+	//    through this route: any body carrying content > mcpRawFileMaxBytes
+	//    is itself > 1 MiB and dies here first.)
+	huge := strings.Repeat("a", mcpRawFileMaxBytes+1)
+	status, raw = mcpPut(t, f.ts, base+"/global/raw?agent_id=agent1",
+		`{"content":"`+huge+`"}`)
+	if status != http.StatusBadRequest || !strings.Contains(string(raw), "body_invalid") {
+		t.Fatalf("oversize: status = %d, want 400 body_invalid; body=%s", status, raw)
+	}
+
+	// 4. an empty layer root resolves to "" → 400 mcp_layer_unavailable.
+	f.loop.paths["agent-empty"] = mcp.Paths{
+		LeleDir: f.globalDir, AgentWorkspace: "", Cwd: f.projectDir,
+	}
+	status, raw = mcpPut(t, f.ts, base+"/agent/raw?agent_id=agent-empty", `{"content":"{}"}`)
+	if status != http.StatusBadRequest || !strings.Contains(string(raw), "mcp_layer_unavailable") {
+		t.Fatalf("empty root: status = %d, want 400 mcp_layer_unavailable; body=%s", status, raw)
+	}
+
+	// 5. a non-JSON body → 400 body_invalid.
+	status, raw = mcpPut(t, f.ts, base+"/global/raw?agent_id=agent1", `{not json`)
+	if status != http.StatusBadRequest || !strings.Contains(string(raw), "body_invalid") {
+		t.Fatalf("bad body: status = %d, want 400 body_invalid; body=%s", status, raw)
+	}
+
+	// None of the guard paths wrote or reloaded; the seed file is intact.
+	if onDisk := mcpReadFile(t, globalFile); string(onDisk) != seed {
+		t.Fatalf("seed file mutated: %s", onDisk)
+	}
+	if reloads() != 0 {
+		t.Fatalf("reload count = %d, want 0", reloads())
+	}
+
+	// 6. field-level boundary (the case that IS reachable): the largest
+	//    `content` that still fits under the 1 MiB body cap is accepted
+	//    (200) and written to disk byte-identically. The envelope is
+	//    {"content":<json-string>} = 12 wrapper bytes + the quoted string,
+	//    so pad the content until the whole body sits strictly below
+	//    mcpRawFileMaxBytes.
+	makeContent := func(pad int) string {
+		return `{"mcpServers":{"big":{"command":"x","env":{"PAD":"` +
+			strings.Repeat("x", pad) + `"}}}}`
+	}
+	quoted0, err := json.Marshal(makeContent(0))
+	if err != nil {
+		t.Fatalf("Marshal(content): %v", err)
+	}
+	pad := mcpRawFileMaxBytes - 12 - len(quoted0) - 1 // 1 byte of headroom
+	if pad < 0 {
+		t.Fatalf("pad = %d: fixture already exceeds the body cap", pad)
+	}
+	bigContent := makeContent(pad)
+	quoted, err := json.Marshal(bigContent)
+	if err != nil {
+		t.Fatalf("Marshal(content): %v", err)
+	}
+	envelope := `{"content":` + string(quoted) + `}`
+	if len(envelope) >= mcpRawFileMaxBytes {
+		t.Fatalf("envelope = %d bytes, want < %d", len(envelope), mcpRawFileMaxBytes)
+	}
+	status, raw = mcpPut(t, f.ts, base+"/global/raw?agent_id=agent1", envelope)
+	if status != http.StatusOK {
+		t.Fatalf("boundary: status = %d, want 200; body=%s", status, raw)
+	}
+	if onDisk := mcpReadFile(t, globalFile); string(onDisk) != bigContent {
+		t.Fatalf("boundary: on-disk bytes differ from content (disk=%d bytes, want %d)",
+			len(onDisk), len(bigContent))
+	}
+	if reloads() != 1 {
+		t.Fatalf("boundary: reload count = %d, want 1", reloads())
+	}
+}
+
+// TestMCPValidate_ValidAndFatal: validate is a dry run — valid doc ⇒ 200
+// valid:true with no error; envelope garbage ⇒ 200 valid:false + error text.
+// In BOTH cases the addressed file's bytes are unchanged and reload is 0.
+// (The fatal case addresses layer auto, proving auto is accepted here.)
+func TestMCPValidate_ValidAndFatal(t *testing.T) {
+	seed := `{"mcpServers": {"seed": {"command": "seed-cmd"}}}`
+	f := newMCPSoloFixture(t, seed)
+	reloads := mcpCountReloads(t, f)
+	globalFile := filepath.Join(f.globalDir, "mcp.json")
+
+	status, resp, raw := mcpValidate(t, f,
+		`{"layer":"global","content":"{\"mcpServers\":{\"ok\":{\"command\":\"c\"}}}"}`)
+	if status != http.StatusOK || !resp.Valid || resp.Error != "" {
+		t.Fatalf("valid doc: status = %d valid = %v error = %q; body=%s",
+			status, resp.Valid, resp.Error, raw)
+	}
+
+	status, resp, raw = mcpValidate(t, f,
+		`{"layer":"auto","content":"{\"mcpServers\": 5}"}`)
+	if status != http.StatusOK || resp.Valid {
+		t.Fatalf("garbage: status = %d valid = %v, want 200/false; body=%s", status, resp.Valid, raw)
+	}
+	if resp.Error == "" {
+		t.Fatalf("garbage: error empty, want the fatal message; body=%s", raw)
+	}
+
+	if onDisk := mcpReadFile(t, globalFile); string(onDisk) != seed {
+		t.Fatalf("file must be untouched: %s", onDisk)
+	}
+	if reloads() != 0 {
+		t.Fatalf("reload count = %d, want 0", reloads())
+	}
+}
+
+// TestMCPValidate_WarningsAreNotErrors: a doc with one invalid entry (no
+// command, no url) is still valid:true with non-empty warnings — per-entry
+// problems NEVER fail the validate request. No write, no reload.
+func TestMCPValidate_WarningsAreNotErrors(t *testing.T) {
+	seed := `{"mcpServers": {"seed": {"command": "seed-cmd"}}}`
+	f := newMCPSoloFixture(t, seed)
+	reloads := mcpCountReloads(t, f)
+	globalFile := filepath.Join(f.globalDir, "mcp.json")
+
+	status, resp, raw := mcpValidate(t, f,
+		`{"layer":"project","content":"{\"mcpServers\":{\"orphan\":{}}}"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", status, raw)
+	}
+	if !resp.Valid {
+		t.Fatalf("valid = false, want true (per-entry problems are warnings); body=%s", raw)
+	}
+	if len(resp.Warnings) == 0 {
+		t.Fatalf("warnings empty, want non-empty; body=%s", raw)
+	}
+	if onDisk := mcpReadFile(t, globalFile); string(onDisk) != seed {
+		t.Fatalf("file must be untouched: %s", onDisk)
+	}
+	if reloads() != 0 {
+		t.Fatalf("reload count = %d, want 0", reloads())
+	}
+}
+
+// TestMCPValidate_BodyLimit: POST .../validate is registered behind
+// applyBodyLimit (http.MaxBytesReader, 1 MiB — the same cap as the raw
+// PUT), so a body > 1 MiB trips INSIDE the decode: 400 body_invalid with
+// "request body too large" (never 413 — the handler's own checks are
+// unreachable past the reader) and nothing reaches disk: the addressed
+// file keeps its exact bytes and reload stays 0.
+func TestMCPValidate_BodyLimit(t *testing.T) {
+	seed := `{"mcpServers": {"seed": {"command": "seed-cmd"}}}`
+	f := newMCPSoloFixture(t, seed)
+	reloads := mcpCountReloads(t, f)
+	globalFile := filepath.Join(f.globalDir, "mcp.json")
+
+	huge := strings.Repeat("a", mcpRawFileMaxBytes+1)
+	status, _, raw := mcpValidate(t, f,
+		`{"layer":"global","content":"`+huge+`"}`)
+	if status != http.StatusBadRequest ||
+		!strings.Contains(string(raw), "body_invalid") ||
+		!strings.Contains(string(raw), "request body too large") {
+		t.Fatalf("oversize: status = %d, want 400 body_invalid (request body too large); body=%s",
+			status, raw)
+	}
+	if onDisk := mcpReadFile(t, globalFile); string(onDisk) != seed {
+		t.Fatalf("file must be untouched: %s", onDisk)
+	}
+	if reloads() != 0 {
+		t.Fatalf("reload count = %d, want 0", reloads())
 	}
 }
