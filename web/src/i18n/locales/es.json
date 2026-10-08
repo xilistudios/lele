@@ -172,6 +172,56 @@
     "deleteSessionFailed": "No se pudo eliminar la sesión",
     "network": "No se puede conectar con el backend de Lele. Comprueba que esté en marcha e inténtalo de nuevo."
   },
+  "mcp": {
+    "loading": "Cargando servidores MCP…",
+    "loadError": "No se pudo cargar el inventario MCP.",
+    "retry": "Reintentar",
+    "empty": {
+      "title": "No hay servidores MCP configurados",
+      "desc": "Los servidores se declaran en mcp.json: global, por agente o por proyecto."
+    },
+    "warnings": {
+      "title": "Advertencias",
+      "dismiss": "Descartar advertencia"
+    },
+    "filter": {
+      "all": "Todos",
+      "label": "Filtrar servidores por capa"
+    },
+    "layer": {
+      "global": "Global",
+      "agent": "Agente",
+      "project": "Proyecto"
+    },
+    "layers": {
+      "title": "Capas",
+      "exists": "El archivo existe",
+      "missing": "Archivo no encontrado",
+      "aliasedWith": "Alias de {{layers}}",
+      "disabled": "Capa deshabilitada / sin raíz — no se lee ni se escribe."
+    },
+    "state": {
+      "enabled": "Habilitado",
+      "disabled": "Deshabilitado",
+      "invalid": "Inválido"
+    },
+    "row": {
+      "args": "{{n}} argumentos",
+      "envKeys": "env",
+      "headerKeys": "cabeceras",
+      "shadowed": "sombreado"
+    },
+    "toggle": {
+      "enable": "Habilitar",
+      "disable": "Deshabilitar",
+      "enableAria": "Habilitar {{name}}",
+      "disableAria": "Deshabilitar {{name}}"
+    },
+    "force": {
+      "label": "Escribir de todos modos (force)"
+    },
+    "noMatches": "Ningún servidor coincide con este filtro."
+  },
   "settings": {
     "agentPage": {
       "title": "Agentes",
@@ -201,6 +251,7 @@
         "general": "General",
         "model": "Modelo y razonamiento",
         "skills": "Skills",
+        "mcp": "MCP",
         "commands": "Comandos",
         "tools": "Herramientas",
         "subagents": "Subagentes",

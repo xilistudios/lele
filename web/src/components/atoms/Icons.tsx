@@ -773,3 +773,32 @@ export function HomeIcon({
     </svg>
   )
 }
+
+/**
+ * MCP tab icon — a plug: mcp.json servers are the agent's external sockets
+ * (Model Context Protocol). Distinct per tab per §4.1 "Diferencia 1".
+ */
+export function McpIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M12 22v-5" />
+      <path d="M9 8V2" />
+      <path d="M15 8V2" />
+      <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" />
+    </svg>
+  )
+}

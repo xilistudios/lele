@@ -303,6 +303,97 @@ describe('per-agent command endpoints', () => {
 })
 
 /**
+ * Per-agent MCP routes (T5 UI wire contract).
+ *
+ * Same rationale as the skill/command blocks above: the hooks stub this layer
+ * (useAgentMCP calls `api.mcpX`), so WHICH path/verb/body each MCP call hits
+ * has to be pinned here — including that `force` only appends `&force=true`
+ * and that the raw PUT carries the literal `content` bytes.
+ */
+describe('per-agent MCP endpoints', () => {
+  /** Captures the last request as {url, method, body}. */
+  function captureFetch(payload: unknown = { ok: true }) {
+    const seen: { url: string; method?: string; body?: BodyInit | null }[] = []
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({ url: String(input), method: init?.method, body: init?.body })
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }) as unknown as typeof fetch
+    return seen
+  }
+
+  const api = () => createApiClient('http://127.0.0.1:18793')
+
+  test('mcpInventory GETs the merged inventory', async () => {
+    const seen = captureFetch({ agent_id: 'main' })
+    await api().mcpInventory('main')
+    expect(seen[0]?.url).toBe('http://127.0.0.1:18793/api/v1/mcp?agent_id=main')
+    expect(seen[0]?.method).toBe('GET')
+  })
+
+  test('mcpRaw GETs the per-layer raw file', async () => {
+    const seen = captureFetch({ layer: 'agent', exists: false, content: '' })
+    await api().mcpRaw('main', 'agent')
+    expect(seen[0]?.url).toBe('http://127.0.0.1:18793/api/v1/mcp/agent/raw?agent_id=main')
+    expect(seen[0]?.method).toBe('GET')
+  })
+
+  test('mcpPutRaw PUTs {content} to the raw route', async () => {
+    const seen = captureFetch({ layer: 'agent', exists: true, content: '{}' })
+    await api().mcpPutRaw('main', 'agent', { content: '{"mcpServers":{}}' })
+    expect(seen[0]?.url).toBe('http://127.0.0.1:18793/api/v1/mcp/agent/raw?agent_id=main')
+    expect(seen[0]?.method).toBe('PUT')
+    expect(JSON.parse(String(seen[0]?.body))).toEqual({ content: '{"mcpServers":{}}' })
+  })
+
+  test('mcpToggle PUTs {enabled} to the toggle route', async () => {
+    const seen = captureFetch({ name: 'srv/ice', enabled: false })
+    await api().mcpToggle('main', 'agent', 'srv/ice', false)
+    expect(seen[0]?.url).toBe(
+      'http://127.0.0.1:18793/api/v1/mcp/agent/servers/srv%2Fice/toggle?agent_id=main',
+    )
+    expect(seen[0]?.method).toBe('PUT')
+    expect(JSON.parse(String(seen[0]?.body))).toEqual({ enabled: false })
+  })
+
+  test('mcpToggle with force appends force=true', async () => {
+    const seen = captureFetch({ name: 'srv', enabled: false })
+    await api().mcpToggle('a b', 'auto', 'srv', false, true)
+    expect(seen[0]?.url).toBe(
+      'http://127.0.0.1:18793/api/v1/mcp/auto/servers/srv/toggle?agent_id=a%20b&force=true',
+    )
+  })
+
+  test('mcpValidate POSTs {layer, content}', async () => {
+    const seen = captureFetch({ valid: true })
+    await api().mcpValidate('main', { layer: 'project', content: '{}' })
+    expect(seen[0]?.url).toBe('http://127.0.0.1:18793/api/v1/mcp/validate?agent_id=main')
+    expect(seen[0]?.method).toBe('POST')
+    expect(JSON.parse(String(seen[0]?.body))).toEqual({ layer: 'project', content: '{}' })
+  })
+
+  test('a rejected MCP write surfaces the server error code', async () => {
+    // 409 mcp_entry_shadowed must survive this layer: conflict handling
+    // branches on the code via mcpErrorCode.
+    globalThis.fetch = mock(
+      async () =>
+        new Response(
+          JSON.stringify({ error: 'shadowed by layer "project"', code: 'mcp_entry_shadowed' }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } },
+        ),
+    ) as unknown as typeof fetch
+
+    await expect(api().mcpToggle('main', 'agent', 'srv', false)).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 409,
+      code: 'mcp_entry_shadowed',
+    })
+  })
+})
+
+/**
  * Session survival on refresh failure.
  *
  * The refresh token is single-use and the endpoint is rate limited, so the

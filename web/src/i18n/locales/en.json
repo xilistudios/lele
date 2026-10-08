@@ -172,6 +172,56 @@
     "deleteSessionFailed": "Could not delete session",
     "network": "Can't reach the Lele backend. Check that it's running, then try again."
   },
+  "mcp": {
+    "loading": "Loading MCP servers…",
+    "loadError": "Could not load the MCP inventory.",
+    "retry": "Retry",
+    "empty": {
+      "title": "No MCP servers configured",
+      "desc": "Servers are declared in mcp.json: global, per-agent or per-project."
+    },
+    "warnings": {
+      "title": "Warnings",
+      "dismiss": "Dismiss warning"
+    },
+    "filter": {
+      "all": "All",
+      "label": "Filter servers by layer"
+    },
+    "layer": {
+      "global": "Global",
+      "agent": "Agent",
+      "project": "Project"
+    },
+    "layers": {
+      "title": "Layers",
+      "exists": "File exists",
+      "missing": "File not found",
+      "aliasedWith": "Aliased with {{layers}}",
+      "disabled": "Layer disabled / no root — not read or written."
+    },
+    "state": {
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "invalid": "Invalid"
+    },
+    "row": {
+      "args": "{{n}} args",
+      "envKeys": "env",
+      "headerKeys": "headers",
+      "shadowed": "shadowed"
+    },
+    "toggle": {
+      "enable": "Enable",
+      "disable": "Disable",
+      "enableAria": "Enable {{name}}",
+      "disableAria": "Disable {{name}}"
+    },
+    "force": {
+      "label": "Write anyway (force)"
+    },
+    "noMatches": "No servers match this filter."
+  },
   "settings": {
     "agentPage": {
       "title": "Agents",
@@ -201,6 +251,7 @@
         "general": "General",
         "model": "Model & Reasoning",
         "skills": "Skills",
+        "mcp": "MCP",
         "commands": "Commands",
         "tools": "Tools",
         "subagents": "Subagents",

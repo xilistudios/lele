@@ -9,6 +9,7 @@ import { AgentsIcon } from '../atoms/Icons'
 import { AgentCommandsSection } from '../organisms/agents/AgentCommandsSection'
 import { AgentFilesSection } from '../organisms/agents/AgentFilesSection'
 import { AgentGeneralSection } from '../organisms/agents/AgentGeneralSection'
+import { AgentMCPSection } from '../organisms/agents/AgentMCPSection'
 import { AgentModelSection } from '../organisms/agents/AgentModelSection'
 import { AgentPageHeader } from '../organisms/agents/AgentPageHeader'
 import {
@@ -35,12 +36,18 @@ import { AgentToolsSection } from '../organisms/agents/AgentToolsSection'
  *    initial config load has finished — while loading, the id legitimately is
  *    not in the list yet, so the skeleton is shown instead. It never redirects
  *    automatically: the user must be able to read which URL failed.
- * 3. **Tab → section**: a plain switch. Skills and tools run full width; every
- *    other section is capped at 820px so long text fields stay readable.
+ * 3. **Tab → section**: a plain switch. Skills, MCP, commands and tools run
+ *    full width; every other section is capped at 820px so long text fields
+ *    stay readable.
  */
 
-/** Sections capped at 820px (§4.1); skills/commands/tools need the whole panel. */
-const FULL_WIDTH_TABS: ReadonlySet<AgentTab> = new Set<AgentTab>(['skills', 'commands', 'tools'])
+/** Sections capped at 820px (§4.1); skills/mcp/commands/tools need the whole panel. */
+const FULL_WIDTH_TABS: ReadonlySet<AgentTab> = new Set<AgentTab>([
+  'skills',
+  'mcp',
+  'commands',
+  'tools',
+])
 
 /** §5.1 "Detalle": header (48px box + two bars) + four label/input pairs. */
 function DetailSkeleton() {
@@ -142,6 +149,10 @@ export function AgentConfigPage() {
         return (
           <AgentSkillsSection key={agent.id} agent={agent} index={agentIndex} agentId={agent.id} />
         )
+      case 'mcp':
+        // File-backed tab (SECTION_PATHS.mcp = []): no draft agent/index — the
+        // panel reads the mcp.json stack through the MCP hooks by id only.
+        return <AgentMCPSection key={agent.id} agentId={agent.id} />
       case 'commands':
         return <AgentCommandsSection key={agent.id} agent={agent} agentId={agent.id} />
       case 'tools':

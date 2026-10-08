@@ -1,3 +1,5 @@
+import type { MCPLayerName, MCPQueryLayer } from '../../lib/mcpTypes'
+
 export const endpoints = {
   auth: {
     pin: '/api/v1/auth/pin',
@@ -30,6 +32,27 @@ export const endpoints = {
       install: (agentId: string) => `/api/v1/agents/${encodeURIComponent(agentId)}/skills/install`,
       installBatch: (agentId: string) =>
         `/api/v1/agents/${encodeURIComponent(agentId)}/skills/install-batch`,
+    },
+    /**
+     * MCP (mcp.json) management: merged inventory, per-layer raw file view and
+     * the surgical toggle. `layer` is a string union, never free text: the raw
+     * routes speak the three stored layers and the server refuses `auto`
+     * (invalid_layer); the toggle also accepts `auto` (the server resolves the
+     * layer owning the winning copy). Every dynamic segment and `agent_id` is
+     * percent-encoded.
+     */
+    mcp: {
+      inventory: (agentId: string) => `/api/v1/mcp?agent_id=${encodeURIComponent(agentId)}`,
+      raw: (agentId: string, layer: MCPLayerName) =>
+        `/api/v1/mcp/${encodeURIComponent(layer)}/raw?agent_id=${encodeURIComponent(agentId)}`,
+      // Same URL as raw — the HTTP verb (PUT) lives at the call site.
+      putRaw: (agentId: string, layer: MCPLayerName) =>
+        `/api/v1/mcp/${encodeURIComponent(layer)}/raw?agent_id=${encodeURIComponent(agentId)}`,
+      toggle: (agentId: string, layer: MCPQueryLayer, name: string, force?: boolean) => {
+        const base = `/api/v1/mcp/${encodeURIComponent(layer)}/servers/${encodeURIComponent(name)}/toggle?agent_id=${encodeURIComponent(agentId)}`
+        return force ? `${base}&force=true` : base
+      },
+      validate: (agentId: string) => `/api/v1/mcp/validate?agent_id=${encodeURIComponent(agentId)}`,
     },
     /**
      * Slash commands of THIS agent (brief §6). `list` flattens the four

@@ -97,7 +97,7 @@ describe('AgentSettingsTabs', () => {
     cleanup()
   })
 
-  test('renders the seven tabs in spec order (§1.3)', () => {
+  test('renders the tabs in spec order (§1.3)', () => {
     const { tabs } = setup()
     expect(AGENT_TAB_ORDER).toEqual([...AGENT_TABS])
     expect(tabs.map((tab) => tab.id)).toEqual(AGENT_TABS.map((tab) => `agent-tab-${tab}`))
@@ -111,11 +111,12 @@ describe('AgentSettingsTabs', () => {
     // Length sync: the strip renders exactly one button per declared tab.
     expect(tabs).toHaveLength(AGENT_TABS.length)
     expect(AGENT_TAB_ORDER).toHaveLength(AGENT_TABS.length)
-    // commands sits between skills and tools (plan §4.1 final order).
+    // mcp sits right after skills; commands sits between mcp and tools (plan §4.1 final order).
     expect(AGENT_TAB_ORDER).toEqual([
       'general',
       'model',
       'skills',
+      'mcp',
       'commands',
       'tools',
       'subagents',
@@ -155,8 +156,8 @@ describe('AgentSettingsTabs', () => {
 
   test("clicking a tab reports its id (navigation is the parent's job)", () => {
     const { tabs, calls } = setup()
-    fireEvent.click(tabs[3])
-    fireEvent.click(tabs[5])
+    fireEvent.click(tabs[4])
+    fireEvent.click(tabs[6])
     expect(calls).toEqual(['commands', 'subagents'])
   })
 
@@ -177,7 +178,7 @@ describe('AgentSettingsTabs', () => {
 
     test('wraps around at both ends', () => {
       const { tabs, calls } = setup({ activeTab: 'files' })
-      fireEvent.keyDown(tabs[6], { key: 'ArrowDown' })
+      fireEvent.keyDown(tabs[7], { key: 'ArrowDown' })
       expect(calls).toEqual(['general'])
       fireEvent.keyDown(tabs[0], { key: 'ArrowUp' })
       expect(calls).toEqual(['general', 'files'])

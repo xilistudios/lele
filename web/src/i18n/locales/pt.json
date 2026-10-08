@@ -172,6 +172,56 @@
     "deleteSessionFailed": "Não foi possível excluir a sessão",
     "network": "Não foi possível alcançar o backend do Lele. Verifique se está em execução e tente novamente."
   },
+  "mcp": {
+    "loading": "Carregando servidores MCP…",
+    "loadError": "Não foi possível carregar o inventário MCP.",
+    "retry": "Tentar novamente",
+    "empty": {
+      "title": "Nenhum servidor MCP configurado",
+      "desc": "Os servidores são declarados no mcp.json: global, por agente ou por projeto."
+    },
+    "warnings": {
+      "title": "Avisos",
+      "dismiss": "Dispensar aviso"
+    },
+    "filter": {
+      "all": "Todos",
+      "label": "Filtrar servidores por camada"
+    },
+    "layer": {
+      "global": "Global",
+      "agent": "Agente",
+      "project": "Projeto"
+    },
+    "layers": {
+      "title": "Camadas",
+      "exists": "O arquivo existe",
+      "missing": "Arquivo não encontrado",
+      "aliasedWith": "Alias de {{layers}}",
+      "disabled": "Camada desativada / sem raiz — não é lida nem gravada."
+    },
+    "state": {
+      "enabled": "Ativado",
+      "disabled": "Desativado",
+      "invalid": "Inválido"
+    },
+    "row": {
+      "args": "{{n}} argumentos",
+      "envKeys": "env",
+      "headerKeys": "cabeçalhos",
+      "shadowed": "sombreado"
+    },
+    "toggle": {
+      "enable": "Ativar",
+      "disable": "Desativar",
+      "enableAria": "Ativar {{name}}",
+      "disableAria": "Desativar {{name}}"
+    },
+    "force": {
+      "label": "Gravar mesmo assim (force)"
+    },
+    "noMatches": "Nenhum servidor corresponde a este filtro."
+  },
   "settings": {
     "agentPage": {
       "title": "Agentes",
@@ -201,6 +251,7 @@
         "general": "Geral",
         "model": "Modelo e raciocínio",
         "skills": "Skills",
+        "mcp": "MCP",
         "commands": "Comandos",
         "tools": "Ferramentas",
         "subagents": "Subagentes",
