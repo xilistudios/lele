@@ -443,6 +443,43 @@ func TestMCPRawFile_EmptyRootUnavailable(t *testing.T) {
 	}
 }
 
+// TestMCPRawFile_PathGuardMatchesWrite (MENOR-3): for the SAME layer file
+// the read endpoint and the write endpoints must apply the SAME path guard —
+// a root outside the allowed workspace roots answers 403
+// mcp_path_not_allowed on GET raw, PUT raw and PUT toggle alike, with
+// nothing read, decoded or written under the disallowed root. The guard
+// order is preserved: before any read (GET) and before decode/write (PUTs).
+func TestMCPRawFile_PathGuardMatchesWrite(t *testing.T) {
+	f := newMCPFixture(t)
+	trap := "/not-allowed-root"
+	f.loop.paths["trap"] = mcp.Paths{LeleDir: f.globalDir, AgentWorkspace: trap, Cwd: f.projectDir}
+	base := f.ts.server.URL + "/api/v1/mcp/agent"
+
+	// Read path: GET .../agent/raw must refuse exactly like the writes do.
+	status, body := mcpGet(t, f.ts, base+"/raw?agent_id=trap", true)
+	if status != http.StatusForbidden || !strings.Contains(string(body), "mcp_path_not_allowed") {
+		t.Fatalf("GET raw: status = %d body = %s, want 403 mcp_path_not_allowed (read/write guards must agree)",
+			status, body)
+	}
+
+	// Write path 1: PUT .../agent/raw — same verdict (guard before decode).
+	status, body = mcpPut(t, f.ts, base+"/raw?agent_id=trap", `{"content":"{\"mcpServers\":{}}"}`)
+	if status != http.StatusForbidden || !strings.Contains(string(body), "mcp_path_not_allowed") {
+		t.Fatalf("PUT raw: status = %d body = %s, want 403 mcp_path_not_allowed", status, body)
+	}
+
+	// Write path 2: PUT .../toggle — same verdict (guard before write).
+	status, body = mcpPut(t, f.ts, base+"/servers/only-global/toggle?agent_id=trap", `{"enabled":false}`)
+	if status != http.StatusForbidden || !strings.Contains(string(body), "mcp_path_not_allowed") {
+		t.Fatalf("toggle: status = %d body = %s, want 403 mcp_path_not_allowed", status, body)
+	}
+
+	// Nothing may have been created under the disallowed root.
+	if _, err := os.Stat(filepath.Join(trap, "mcp.json")); !os.IsNotExist(err) {
+		t.Fatalf("file created under %s (err=%v)", trap, err)
+	}
+}
+
 // --- validation --------------------------------------------------------------
 
 // TestMCPValidation_InvalidLayerAndUnknownAgent: layer ∉ global|agent|project

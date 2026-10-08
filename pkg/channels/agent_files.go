@@ -48,6 +48,17 @@ func isAllowedWorkspacePath(absPath string) bool {
 	return false
 }
 
+// IsAllowedWorkspacePath reports whether absPath lies inside an allowed
+// workspace tree (user home, /tmp, /var/folders, or the current working
+// directory). It is the exported face of the very predicate the REST
+// handlers gate every path-bearing request on (403 mcp_path_not_allowed
+// and friends), so other front-ends — the TUI's MCP toggles, for one —
+// apply ONE rule instead of a copy that can drift. It does not change the
+// predicate, its tests, or any call site's behaviour.
+func IsAllowedWorkspacePath(absPath string) bool {
+	return isAllowedWorkspacePath(absPath)
+}
+
 func expandHomePath(path string) string {
 	if path == "" {
 		return path

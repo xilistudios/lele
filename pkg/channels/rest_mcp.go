@@ -276,6 +276,13 @@ func (n *NativeChannel) handleMCPRawFile(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// path guard — the SAME rule the write handlers apply to the same layer
+	// file, checked BEFORE anything is read (read/write guard agreement):
+	// a path the writes refuse must not be served by this read.
+	if !mcpGuardLayerFile(w, file) {
+		return
+	}
+
 	resp := MCPRawFileResponse{Layer: layer, Path: file}
 	// Other layers resolving to the same file (aliased roots), low → high.
 	for _, other := range mcp.Layers() {
@@ -367,22 +374,58 @@ func mcpCopyInLayer(copies []mcp.EntryState, layer string) (mcp.EntryState, bool
 	return mcp.EntryState{}, false
 }
 
+// mcpLayerRank returns the position of layer in mcp.Layers() — the canonical
+// low → high merge order the inventory already defines — so the stub guard
+// below can compare layers without a second index table in pkg/channels.
+// Unknown layers rank -1; unreachable at the call site (step 1 validates the
+// layer and step 7 resolves auto before this runs).
+func mcpLayerRank(layer string) int {
+	for i, l := range mcp.Layers() {
+		if l == layer {
+			return i
+		}
+	}
+	return -1
+}
+
+// mcpGuardLayerFile writes 403 mcp_path_not_allowed and returns false when
+// the resolved layer file is not an mcp.json under an allowed workspace
+// root. Shared by EVERY handler that touches one layer file — the raw GET
+// (before any read), the raw PUT (before decode) and the toggle (before the
+// write) — so a path refused to one client is refused to all of them with
+// the same code (read/write guard agreement).
+func mcpGuardLayerFile(w http.ResponseWriter, file string) bool {
+	if filepath.Base(file) != "mcp.json" || !isAllowedWorkspacePath(filepath.Dir(file)) {
+		writeError(w, http.StatusForbidden,
+			fmt.Sprintf("layer file %q is outside the allowed workspace roots", file),
+			"mcp_path_not_allowed")
+		return false
+	}
+	return true
+}
+
 // handleMCPToggle serves
 // PUT /api/v1/mcp/{layer}/servers/{name}/toggle?agent_id=[&force=true]
 // with body {"enabled":bool} — enables/disables one server in ONE layer.
 //
 // layer ∈ global|agent|project|auto (auto = the layer that currently owns
 // the winning copy). Writing a name into a layer that does not hold it is an
-// allowed cross-layer create, EXCEPT a disable into global (a global stub
-// can never shadow anything — refused as mcp_stub_layer_not_allowed), and
-// except when a losing copy in the addressed layer would be overwritten
-// without ?force=true → 409 mcp_entry_shadowed.
+// allowed cross-layer create, EXCEPT a disable that would create a stub
+// BELOW the winning layer (the winner keeps serving, so the write is inert —
+// refused as mcp_stub_layer_not_allowed), and except when a losing copy in
+// the addressed layer would be overwritten without ?force=true → 409
+// mcp_entry_shadowed. A name whose EFFECTIVE verdict is invalid is not
+// toggleable in EITHER direction (400 mcp_entry_invalid): a write would
+// mask the invalid verdict behind a legit-looking enabled/disabled state
+// (the verdict derivation prefers Disabled over Invalid), and the only
+// repair is the raw editor — the same rule the TUI and WebUI clients
+// enforce; the API is the invariant's single enforcer.
 //
 // Validation order (each failure returns immediately, reload fires exactly
 // once and only after a successful write): invalid_layer → mcpPathsFor →
-// invalid_request → body_invalid → mcp_server_not_found → mcp_layer_required
-// → mcp_entry_shadowed → mcp_stub_layer_not_allowed → mcp_layer_unavailable
-// → mcp_path_not_allowed → mcp_write_failed.
+// invalid_request → body_invalid → mcp_server_not_found → mcp_entry_invalid
+// → mcp_layer_required → mcp_entry_shadowed → mcp_stub_layer_not_allowed →
+// mcp_layer_unavailable → mcp_path_not_allowed → mcp_write_failed.
 func (n *NativeChannel) handleMCPToggle(w http.ResponseWriter, r *http.Request) {
 	// 1. layer ∈ global|agent|project|auto.
 	layer := r.PathValue("layer")
