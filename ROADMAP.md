@@ -235,18 +235,18 @@
 **Goal**: Integrate MCP protocol to allow external tools to connect to Lele.
 
 ### 5.1 Research & Design
-- [ ] Research MCP protocol (current specification)
-- [ ] Architecture design for MCP integration
+- [x] Research MCP protocol (current specification)
+- [x] Architecture design for MCP integration
 - [ ] Define priority use cases
 - [ ] Compatibility analysis with existing skills system
 
 ### 5.2 Implementation
-- [ ] Implement MCP client in `pkg/mcp/`
-- [ ] Support for external MCP servers
+- [x] Implement MCP client in `pkg/mcp/`
+- [x] Support for external MCP servers
 - [ ] Support for running Lele as MCP server
-- [ ] Integration with existing tools system
-- [ ] MCP server configuration from WebUI
-- [ ] Integration testing with popular MCP servers
+- [x] Integration with existing tools system
+- [x] MCP server configuration from WebUI
+- [x] Integration testing with popular MCP servers
 
 ### 5.3 Use Cases
 - [ ] Filesystem integration via MCP
@@ -255,11 +255,11 @@
 - [ ] Development tools integration via MCP
 
 ### 5.4 Phase 5 Success Criteria
-- [ ] Functional MCP client
+- [x] Functional MCP client
 - [ ] At least 3 MCP servers tested and working
-- [ ] Complete MCP integration documentation
-- [ ] E2E tests for MCP flows
-- [ ] Configuration from WebUI
+- [x] Complete MCP integration documentation
+- [x] E2E tests for MCP flows
+- [x] Configuration from WebUI
 
 ---
 

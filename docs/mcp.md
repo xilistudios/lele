@@ -127,6 +127,72 @@ Merge rules:
 - Server names are sorted everywhere they are listed (prompt section, error
   messages), so output is deterministic.
 
+## Managing servers (UI, TUI, API)
+
+Three surfaces edit the same layered stack: the **WebUI agent-config tab**,
+the **TUI `/mcp`** modal and the **REST API** (`/api/v1/mcp`, routes and
+error codes in `docs/client-api.md`). The merge rules above decide which
+copy wins at read time; the rules below decide where an edit lands.
+
+| Surface | Offers | Scope |
+| --- | --- | --- |
+| WebUI agent-config tab | List, toggle and a per-layer raw JSON editor. | The selected agent (workspace filter). |
+| TUI `/mcp` | List and toggle; no editor. | The layers of the running agent. |
+| REST API | 5 routes — 2 reads (`GET /api/v1/mcp`, `GET …/{layer}/raw`), 2 writes (`PUT …/{layer}/servers/{name}/toggle`, `PUT …/{layer}/raw`) and 1 dry run (`POST /api/v1/mcp/validate`); `layer` ∈ `global`\|`agent`\|`project`\|`auto`. | One `agent_id` per call. |
+
+`auto` is a write-side alias only: it resolves to the layer that owns the
+winning entry, while stored-layer operations name `global`, `agent` or
+`project`. The raw endpoints refuse `auto` in both directions — a save must
+name its physical target, and a read answers "which file backs this layer".
+
+Client reporting: invalid rows show no working toggle in either client and
+point at the raw file instead; a toggle that answers `changed: false` is
+reported as "no change", not as success.
+
+Write rules:
+
+- **Path guard:** the three routes that touch a layer file — the raw GET, the
+  raw PUT and the toggle — resolve it against the agent's roots and refuse
+  anything outside the allowed trees — the user's home directory, `/tmp`,
+  `/var/folders`, or the process's current directory — with
+  `403 mcp_path_not_allowed`, checked BEFORE anything is decoded, read or
+  written (one shared predicate, `channels.IsAllowedWorkspacePath`, so a path the
+  writes refuse can never be served by the read, and the TUI applies the same
+  rule instead of a copy). The inventory GET and the dry run need no guard:
+  neither opens a file.
+  The config loader may accept a path from elsewhere; the management API does
+  not.
+- **Write rule:** every management surface writes the layer that OWNS the
+  winning entry, never a shadowed copy. The REST API can override that with
+  `?force=true`, writing the layer named in the request instead; without it the
+  answer is `409 mcp_entry_shadowed` and names the owner layer and path.
+- **Stub-deletion rule:** re-enabling a server whose addressed-layer entry is a
+  pure `{"disabled": true}` stub DELETES that entry — it does not write
+  `"disabled": false` — because a leftover stub would keep shadowing the
+  lower layer that actually defines the server.
+- **Cross-layer rule:** disabling a server writes a `{"disabled": true}`
+  stub into the layer you address rather than into the owner — addressing
+  a layer above the winner is how you switch off a lower server for one
+  agent only. A disable that would create a stub in a layer ranked BELOW
+  the winning layer is refused with `400 mcp_stub_layer_not_allowed`, for
+  any layer pair — rank is the index in `mcp.Layers()` (low → high:
+  `global` < `agent` < `project`) — and the refusal message names both the
+  addressed layer and the winning layer.
+- **Invalid entries:** an entry whose EFFECTIVE verdict is `invalid` is not
+  toggleable in EITHER direction — the toggle answers
+  `400 mcp_entry_invalid` — because a write would mask the invalid verdict
+  behind a legit-looking enabled/disabled state (the verdict derivation
+  prefers Disabled over Invalid), and the only repair is the raw editor.
+  The API and both clients (TUI `/mcp`, WebUI agent-config MCP panel)
+  enforce this rule.
+- **Secrecy:** no surface returns env/header VALUES or expanded `${VAR}`
+  values; listings read the raw file bytes and expose key NAMES only.
+- **Liveness:** edits through any surface take effect without a restart —
+  the manager re-reads the winning entry by fingerprint (see `Lifecycle`)
+  and the API triggers a wiring pass after every successful write. `changed`
+  gates the response only, never the reload; a failed reload is logged, not
+  surfaced as an error, because the file on disk is already right.
+
 ## `${VAR}` expansion
 
 `mcp.json` values are expanded against the **process environment** every time

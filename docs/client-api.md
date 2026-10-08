@@ -492,6 +492,235 @@ Notes:
 - `/api/v1/skills` currently returns an empty list in the native channel implementation
 - `/api/v1/status` reports runtime status, uptime, agents, channels, and version
 
+### MCP Servers
+
+Management view of the layered `mcp.json` stack (rules in `docs/mcp.md`): two
+read endpoints (merged inventory, layer file contents), three write endpoints
+(toggle one server, save one layer file, validate a draft — the last is a dry
+run). All of them take `agent_id` and resolve that agent's own layer files;
+none ever expands `${VAR}`, and none touches a file outside the allowed roots
+below.
+
+#### Get Merged Inventory
+
+```http
+GET /api/v1/mcp?agent_id=main
+```
+
+Response (200 OK): the layer list (low → high, aliased roots folded) plus
+one row per server NAME — the winning copy only, with inert copies below it
+listed under `shadowed`:
+
+```json
+{
+  "agent_id": "main",
+  "layers": [
+    { "layer": "global", "path": "/home/user/.lele/mcp.json", "exists": true },
+    { "layer": "agent", "path": "/home/user/.lele/workspace/mcp.json", "exists": false }
+  ],
+  "servers": [
+    {
+      "name": "filesystem",
+      "layer": "global",
+      "path": "/home/user/.lele/mcp.json",
+      "effective": "enabled",
+      "defines": true,
+      "server": {
+        "kind": "stdio",
+        "command": "npx",
+        "description": "Read and write files under ~/notes",
+        "args": 3,
+        "env_keys": ["LOG_LEVEL"]
+      }
+    }
+  ]
+}
+```
+
+`effective` is `enabled`, `disabled` or `invalid`; `shadowed[].reason`
+names the winning layer (`"shadowed by <layer>"`). `server` carries raw,
+unexpanded strings and env/header key **names** (`env_keys`/`header_keys`)
+only — values never cross the wire.
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://127.0.0.1:18793/api/v1/mcp?agent_id=main"
+```
+
+Errors:
+
+- `400 agent_id_missing` — `agent_id` was not supplied
+- `404 agent_not_found` — the agent is not in the live registry
+- `500 mcp_unavailable` — the loop cannot expose this agent's `mcp.json` roots
+
+#### Get Layer File Contents
+
+```http
+GET /api/v1/mcp/{layer}/raw?agent_id=main
+```
+
+`layer` ∈ `global` | `agent` | `project`. `auto` is refused here (the
+endpoint answers "which physical file backs this layer", so callers pick one
+explicitly and see aliasing via `aliased_with`).
+
+Response (200 OK): the literal file bytes in `content`, `${VAR}` never
+expanded. A missing file is not an error (`exists: false`, `content: ""`).
+
+```json
+{
+  "layer": "agent",
+  "path": "/home/user/.lele/workspace/mcp.json",
+  "exists": true,
+  "content": "{\n  \"mcpServers\": {\n    \"filesystem\": { ... }\n  }\n}\n",
+  "aliased_with": ["project"]
+}
+```
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://127.0.0.1:18793/api/v1/mcp/agent/raw?agent_id=main"
+```
+
+Errors:
+
+- `400 invalid_layer` — `layer` is not `global`, `agent` or `project` (checked before any path resolution)
+- `400 agent_id_missing` — `agent_id` was not supplied
+- `400 mcp_layer_unavailable` — the layer has no root for this agent (empty root); nothing is read or created
+- `403 mcp_path_not_allowed` — the layer file resolves outside the allowed trees
+  (the user's home directory, `/tmp`, `/var/folders`, or the process's current
+  working directory). The SAME guard runs on the raw PUT (before the body is
+  decoded) and on the toggle (before the write), so all three routes answer this
+  403 with this code; the inventory GET and the dry run need no guard because
+  neither opens a file.
+- `404 agent_not_found` — the agent is not in the live registry
+- `413 mcp_file_too_large` — the layer file exceeds 1 MiB
+- `500 mcp_read_failed` — stat or read of the layer file failed
+- `500 mcp_unavailable` — the loop cannot expose this agent's `mcp.json` roots
+
+#### Enable or Disable One Server
+
+```http
+PUT /api/v1/mcp/{layer}/servers/{name}/toggle?agent_id=main[&force=true]
+```
+
+Body: `{"enabled": bool}` (strict — any other body is a `400`). The API speaks
+`enabled`; `mcp.json` stores `disabled`, so the two are spellings of one state.
+`layer` ∈ `global|agent|project|auto`; `auto` resolves to the layer that owns
+the winning copy.
+
+Response (200 OK): the post-write view. `effective`/`effective_layer` are
+re-read AFTER the write, so they show the new state; `changed` is false for a
+no-op re-application (the write still happened):
+
+```json
+{
+  "name": "filesystem",
+  "enabled": false,
+  "changed": true,
+  "removed": true,
+  "created": false,
+  "layer": "global",
+  "path": "/home/user/.lele/mcp.json",
+  "effective": "disabled",
+  "effective_layer": "global"
+}
+```
+
+Re-enabling a server whose addressed-layer entry is a pure
+`{"disabled": true}` stub DELETES that entry instead of writing
+`"disabled": false` (`removed: true`) — a leftover stub would keep shadowing
+the lower layer that actually defines the server.
+
+Errors, in the order the handler checks them:
+
+- `400 invalid_layer` — `layer` is not `global`, `agent`, `project` or `auto`
+- `400 agent_id_missing` / `404 agent_not_found` / `500 mcp_unavailable` — as above
+- `400 invalid_request` — `name` is empty or not a legal server name
+- `400 body_invalid` — the body is not `{"enabled":bool}`
+- `404 mcp_server_not_found` — `name` is not declared in that layer (`auto`: in none of them)
+- `400 mcp_entry_invalid` — the name's EFFECTIVE verdict is `invalid`: an entry
+  that is not an object with a usable transport cannot carry a `disabled` flag,
+  and toggling it would mask the invalid verdict behind a legit-looking
+  enabled/disabled state. The rule holds in BOTH directions; the message points
+  at the raw editor, the only way to repair the entry.
+- `400 mcp_layer_required` — `auto` could not resolve an owning layer
+- `409 mcp_entry_shadowed` — writing `name` into a layer that does not hold the
+  winner would overwrite a losing copy; retry with `?force=true`. `details`
+  carries `owner_layer` and `owner_path`.
+- `400 mcp_stub_layer_not_allowed` — a DISABLE that would create a stub in a
+  layer ranked BELOW the winning layer is inert (the winner keeps serving), so
+  it is refused; the message names the winning layer.
+- `400 mcp_layer_unavailable` — the resolved layer has no root for this agent
+- `403 mcp_path_not_allowed` — shared path guard (see GET raw)
+- `500 mcp_write_failed` — the write failed. It is also the answer when the
+  layer file's top-level value is not an object (array/string/number): there is
+  no safe place for the flag, the writer refuses to touch the bytes, and the raw
+  editor is the way out (`null` is the one exception — the writer treats it as an
+  empty document and creates the stub). The same content sent to `PUT …/raw`
+  answers `422 config_invalid` instead, because that route validates before
+  writing.
+
+#### Save a Layer File
+
+```http
+PUT /api/v1/mcp/{layer}/raw?agent_id=main
+```
+
+Body: `{"content": string}` — the complete replacement for ONE layer file,
+written byte for byte (what the editor shows is what lands on disk, an atomic
+temp+rename). `layer` ∈ `global|agent|project` (`auto` refused: a save must name
+its physical target). A file that does not exist yet is created (parents
+included) when `content` is a valid MCP document; invalid content is never
+written.
+
+Response (200 OK): the same shape as GET raw, echoing the bytes just written
+(no read-back) plus the per-entry `warnings` the content carries:
+
+```json
+{ "layer": "agent", "path": "/home/user/.lele/workspace/mcp.json", "exists": true, "content": "{ … }", "aliased_with": ["project"], "warnings": ["mcpServers.git: unknown field \"timeout\""] }
+```
+
+Errors, in the order the handler checks them:
+
+- `400 invalid_layer` — `layer` is not `global`, `agent` or `project`
+- `400 agent_id_missing` / `404 agent_not_found` / `500 mcp_unavailable` — as above
+- `400 mcp_layer_unavailable` — the layer has no root for this agent
+- `403 mcp_path_not_allowed` — shared path guard, checked BEFORE the body is decoded
+- `400 body_invalid` — the body is not `{"content":string}` (the route also caps
+  the request at 1 MiB, so an oversized body fails here, never reaching the write)
+- `413 mcp_file_too_large` — `content` exceeds 1 MiB (defence in depth; the route
+  limit makes it unreachable today)
+- `422 config_invalid` — the content is not a valid MCP document (not JSON, no
+  `mcpServers` object, wrong root type). Nothing is written. Per-entry problems
+  are NOT fatal here: they ride along as `warnings` on a 200, because fixing a
+  broken entry is exactly what this editor is for.
+- `500 mcp_write_failed` — the write failed (parent or file)
+
+#### Validate Content (Dry Run)
+
+```http
+POST /api/v1/mcp/validate?agent_id=main
+```
+
+Body: `{"layer": string, "content": string}`. `layer` accepts
+`global|agent|project|auto`; it is validated as a string only — the dry run
+never addresses or touches a file. The endpoint NEVER writes, creates a file,
+or reloads.
+
+Response: always **200** once the request itself is well formed, even for
+invalid content — the client renders the verdict instead of parsing HTTP codes:
+
+```json
+{ "valid": false, "warnings": ["mcpServers.filesystem: unknown field \"timeout\""], "error": "mcpServers.git: missing transport (command or url)" }
+```
+
+`valid` reflects FATAL envelope problems only (root not an object, no
+`mcpServers` object, an entry not an object, no usable transport, `disabled`
+not a boolean, duplicate names once aliased roots fold together). Everything
+else — unknown fields, bad enums, empty names, non-string env/header values —
+is a warning. Errors: `400 agent_id_missing` / `404 agent_not_found` /
+`500 mcp_unavailable` / `400 body_invalid` / `400 invalid_layer`.
+
 ## WebSocket API
 
 Connect with bearer auth:
