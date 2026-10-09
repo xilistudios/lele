@@ -474,3 +474,62 @@ func (al *AgentLoop) CloseMCPManagers() error {
 	}
 	return al.toolCoordinator.closeMCPManagers()
 }
+
+// SyncMCPServers re-runs the MCP wiring pass for EVERY live agent: each
+// agent's mcp.json layers are re-read and the outcome mirrored into that
+// agent's tool registry (load_mcp_tools) and its "## MCP Servers" prompt
+// section.
+//
+// Why this exists: mcp.json is NOT watched by the config watcher (only
+// config.json is), and while the data plane re-reads the mcp.json layers
+// lazily on every remote call, the tool/prompt SURFACE — load_mcp_tools
+// registration and the "## MCP Servers" prompt section — only updates on
+// this pass or on ReloadRegistry. Without this call an out-of-band mcp.json
+// edit (WebUI MCP page, raw editor, TUI toggle) stays invisible until the
+// next config reload.
+//
+// Do NOT "simplify" this into a config reload (reloadConfig →
+// ReloadRegistry): the blast radius is different in kind — ReloadRegistry
+// recreates ContextBuilders, cancels subagents of removed agents and swaps
+// the whole tool registry, and it would fail the caller's already-landed
+// mcp.json write whenever an unrelated config.json happens to be broken.
+// The two concerns have no causal link; this pass is the whole scope.
+//
+// Contract: it re-runs toolCoordinator.syncMCPTools() — the same pass
+// ReloadRegistry ends with — so it is nil-safe on a bare &AgentLoop{} (the
+// read-and-nil-check shape of CloseMCPManagers above), concurrency-safe by
+// reusing mcpManagers.syncMu and the existing `stopped` no-op (no new
+// mutex, no re-implemented guard), and it returns nothing: a wiring problem
+// is logged, never reported, because the caller's write already succeeded
+// (the channel callback is func() for exactly that reason).
+func (al *AgentLoop) SyncMCPServers() {
+	if al.toolCoordinator == nil {
+		return
+	}
+	al.toolCoordinator.syncMCPTools()
+}
+
+// MCPPathsFor returns the three mcp.json roots one agent reads — exactly what
+// that agent's MCP manager resolved: mcpManagerSet.pathsFor(agent), i.e.
+// LeleDir=config.GetLeleDir(), AgentWorkspace=agent.Workspace and Cwd=the
+// startup cwd captured by the set. It must NOT re-derive the roots from
+// config.json or from pkg/channels' agentWorkspaceDir: the two resolvers
+// disagreeing is the bug this seam prevents (plan EVIDENCE B2).
+//
+// ok=false means the agent is not in the live registry (or the loop is bare
+// or its coordinator is not the concrete impl); the zero Paths must not be
+// used in that case.
+func (al *AgentLoop) MCPPathsFor(agentID string) (mcp.Paths, bool) {
+	if al.toolCoordinator == nil || al.registry == nil {
+		return mcp.Paths{}, false
+	}
+	tc, ok := al.toolCoordinator.(*toolCoordinatorImpl)
+	if !ok || tc.mcpManagers == nil {
+		return mcp.Paths{}, false
+	}
+	agent, ok := al.registry.GetAgent(agentID)
+	if !ok || agent == nil {
+		return mcp.Paths{}, false
+	}
+	return tc.mcpManagers.pathsFor(agent), true
+}

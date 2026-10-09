@@ -1,3 +1,11 @@
+import type {
+  MCPInventoryResponse,
+  MCPLayerName,
+  MCPQueryLayer,
+  MCPRawFileResponse,
+  MCPToggleResponse,
+  MCPValidateResponse,
+} from '../../lib/mcpTypes'
 import { loadSession } from '../../lib/storage'
 import type {
   AgentCatalogResponse,
@@ -778,6 +786,40 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
     agentCommandRemove: (agentId: string, name: string) =>
       request<AgentCommandDeleteResponse>(endpoints.agents.commands.remove(agentId, name), {
         method: 'DELETE',
+      }),
+    /**
+     * MCP (mcp.json) management (T5 UI): merged inventory, per-layer raw file,
+     * surgical toggle, raw save and validation. Agent-scoped via the
+     * `agent_id` query param (see endpoints.agents.mcp). Same wire contract as
+     * the skill/command routes above: built on request(), so the 401 →
+     * single-flight refresh → replay machinery applies, and failures arrive as
+     * the repo-standard {error, code} parsed into ApiError (mcpErrorCode reads
+     * the code off it).
+     */
+    mcpInventory: (agentId: string) =>
+      request<MCPInventoryResponse>(endpoints.agents.mcp.inventory(agentId), { method: 'GET' }),
+    mcpRaw: (agentId: string, layer: MCPLayerName) =>
+      request<MCPRawFileResponse>(endpoints.agents.mcp.raw(agentId, layer), { method: 'GET' }),
+    mcpPutRaw: (agentId: string, layer: MCPLayerName, body: { content: string }) =>
+      request<MCPRawFileResponse>(endpoints.agents.mcp.putRaw(agentId, layer), {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    mcpToggle: (
+      agentId: string,
+      layer: MCPQueryLayer,
+      name: string,
+      enabled: boolean,
+      force?: boolean,
+    ) =>
+      request<MCPToggleResponse>(endpoints.agents.mcp.toggle(agentId, layer, name, force), {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      }),
+    mcpValidate: (agentId: string, body: { layer: MCPLayerName; content: string }) =>
+      request<MCPValidateResponse>(endpoints.agents.mcp.validate(agentId), {
+        method: 'POST',
+        body: JSON.stringify(body),
       }),
     history: (sessionKey: string, parentSessionKey?: string, beforeId?: string, limit?: number) => {
       const params = new URLSearchParams()

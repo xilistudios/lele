@@ -172,6 +172,84 @@
     "deleteSessionFailed": "Could not delete session",
     "network": "Can't reach the Lele backend. Check that it's running, then try again."
   },
+  "mcp": {
+    "loading": "Loading MCP servers…",
+    "loadError": "Could not load the MCP inventory.",
+    "retry": "Retry",
+    "empty": {
+      "title": "No MCP servers configured",
+      "desc": "Servers are declared in mcp.json: global, per-agent or per-project."
+    },
+    "warnings": {
+      "title": "Warnings",
+      "dismiss": "Dismiss warning"
+    },
+    "filter": {
+      "all": "All",
+      "label": "Filter servers by layer"
+    },
+    "layer": {
+      "global": "Global",
+      "agent": "Agent",
+      "project": "Project"
+    },
+    "layers": {
+      "title": "Layers",
+      "exists": "File exists",
+      "missing": "File not found",
+      "aliasedWith": "Aliased with {{layers}}",
+      "disabled": "Layer disabled / no root — not read or written."
+    },
+    "state": {
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "invalid": "Invalid"
+    },
+    "row": {
+      "args": "{{n}} args",
+      "envKeys": "env",
+      "headerKeys": "headers",
+      "shadowed": "shadowed"
+    },
+    "toggle": {
+      "enable": "Enable",
+      "disable": "Disable",
+      "enableAria": "Enable {{name}}",
+      "disableAria": "Disable {{name}}",
+      "invalidLabel": "Needs repair",
+      "invalidHint": "This entry's definition is broken, so it can't be enabled or disabled here. Fix it in this layer's mcp.json.",
+      "noChange": "No change: the entry already matched this state, so nothing was written."
+    },
+    "force": {
+      "label": "Write anyway (force)"
+    },
+    "noMatches": "No servers match this filter.",
+    "editor": {
+      "edit": "Edit",
+      "editAria": "Edit the {{layer}} layer file",
+      "noPath": "This layer has no path — nothing to edit.",
+      "title": "Edit {{layer}} mcp.json",
+      "loading": "Loading the file…",
+      "loadError": "Could not load the file.",
+      "pathLabel": "File",
+      "createHint": "This file does not exist yet — saving creates it.",
+      "aliased": "This file is also the {{layers}} layer. Editing it changes those layers as well.",
+      "validate": "Validate",
+      "valid": "No problems found.",
+      "errorLabel": "Error",
+      "warningsLabel": "Warnings",
+      "save": "Save",
+      "saved": "Saved.",
+      "close": "Close",
+      "unsavedTitle": "Unsaved changes",
+      "unsavedClose": "You have unsaved changes in this file. Closing discards them — nothing is saved automatically.",
+      "unsavedSwitch": "You have unsaved changes in this file. Switching layers discards them — nothing is saved automatically.",
+      "discardClose": "Discard and close",
+      "discardSwitch": "Discard and switch",
+      "keepEditing": "Keep editing",
+      "stay": "Stay here"
+    }
+  },
   "settings": {
     "agentPage": {
       "title": "Agents",
@@ -201,6 +279,7 @@
         "general": "General",
         "model": "Model & Reasoning",
         "skills": "Skills",
+        "mcp": "MCP",
         "commands": "Commands",
         "tools": "Tools",
         "subagents": "Subagents",

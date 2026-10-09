@@ -411,6 +411,7 @@ func gatewayCmd() {
 				heartbeatService.UpdateConfig(updated.Heartbeat.Interval, updated.Heartbeat.Enabled)
 				return nil
 			})
+			nc.SetReloadMCP(agentLoop.SyncMCPServers)
 			// In desktop mode the Tauri shell authenticates with a fixed
 			// trusted client. Register it so desktop auto-auth works.
 			if desktop {

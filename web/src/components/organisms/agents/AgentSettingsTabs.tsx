@@ -11,6 +11,7 @@ import type { ConfigError } from '../../../lib/types'
 import {
   CodeIcon,
   FolderIcon,
+  McpIcon,
   ServerIcon,
   SettingsIcon,
   SkillsIcon,
@@ -46,6 +47,7 @@ const TAB_META: Record<AgentTab, { labelKey: string; Icon: typeof SettingsIcon }
   general: { labelKey: 'settings.agentPage.tab.general', Icon: SettingsIcon },
   model: { labelKey: 'settings.agentPage.tab.model', Icon: ServerIcon },
   skills: { labelKey: 'settings.agentPage.tab.skills', Icon: SkillsIcon },
+  mcp: { labelKey: 'settings.agentPage.tab.mcp', Icon: McpIcon },
   commands: { labelKey: 'settings.agentPage.tab.commands', Icon: TerminalIcon },
   tools: { labelKey: 'settings.agentPage.tab.tools', Icon: CodeIcon },
   subagents: { labelKey: 'settings.agentPage.tab.subagents', Icon: SubagentsIcon },
@@ -57,6 +59,7 @@ export const AGENT_TAB_ORDER: AgentTab[] = [
   'general',
   'model',
   'skills',
+  'mcp',
   'commands',
   'tools',
   'subagents',

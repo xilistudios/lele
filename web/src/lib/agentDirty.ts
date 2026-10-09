@@ -15,6 +15,7 @@ export const AGENT_TABS = [
   'general',
   'model',
   'skills',
+  'mcp',
   'commands',
   'tools',
   'subagents',
@@ -37,13 +38,14 @@ export function agentPathPrefix(index: number): string {
 
 /**
  * Tab -> path suffixes that belong to it, relative to `agents.list.{index}`.
- * Table §5.3. `files` and `commands` have none: those tabs never write
- * config — they write files (workspace markdown), not draft fields.
+ * Table §5.3. `files`, `commands` and `mcp` have none: those tabs never write
+ * config — they write files (workspace markdown / mcp.json), not draft fields.
  */
 export const SECTION_PATHS: Record<AgentTab, string[]> = {
   general: ['name', 'description', 'default', 'workspace'],
   model: ['model', 'temperature', 'thinking_level'],
   skills: ['skills'],
+  mcp: [],
   commands: [],
   tools: ['tools'],
   subagents: ['subagents'],

@@ -835,9 +835,9 @@ describe('Routing', () => {
       },
       { timeout: 3000 },
     )
-    // Seven section tabs; the one the URL names is the selected one and the
+    // Eight section tabs; the one the URL names is the selected one and the
     // panel points back at it (§6).
-    expect(view.container.querySelectorAll('[role="tab"]')).toHaveLength(7)
+    expect(view.container.querySelectorAll('[role="tab"]')).toHaveLength(8)
     const selected = view.container.querySelector('[role="tab"][aria-selected="true"]')
     expect(selected?.id).toBe('agent-tab-tools')
     expect(view.container.querySelector('[role="tabpanel"]')?.getAttribute('aria-labelledby')).toBe(

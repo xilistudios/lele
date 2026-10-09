@@ -169,6 +169,12 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+	// /mcp list: toggle (space/t), source filter (f), no-op enter and close
+	// (esc/q) are owned by handleMCPKey; navigation and the remaining keys
+	// fall through to the generic switch below.
+	if cmd, handled := m.handleMCPKey(msg); handled {
+		return m, cmd
+	}
 	switch msg.String() {
 	case "up", "k":
 		if isListModal(m.modalMode) && m.modalSelectedIdx > 0 {

@@ -172,6 +172,84 @@
     "deleteSessionFailed": "Não foi possível excluir a sessão",
     "network": "Não foi possível alcançar o backend do Lele. Verifique se está em execução e tente novamente."
   },
+  "mcp": {
+    "loading": "Carregando servidores MCP…",
+    "loadError": "Não foi possível carregar o inventário MCP.",
+    "retry": "Tentar novamente",
+    "empty": {
+      "title": "Nenhum servidor MCP configurado",
+      "desc": "Os servidores são declarados no mcp.json: global, por agente ou por projeto."
+    },
+    "warnings": {
+      "title": "Avisos",
+      "dismiss": "Dispensar aviso"
+    },
+    "filter": {
+      "all": "Todos",
+      "label": "Filtrar servidores por camada"
+    },
+    "layer": {
+      "global": "Global",
+      "agent": "Agente",
+      "project": "Projeto"
+    },
+    "layers": {
+      "title": "Camadas",
+      "exists": "O arquivo existe",
+      "missing": "Arquivo não encontrado",
+      "aliasedWith": "Alias de {{layers}}",
+      "disabled": "Camada desativada / sem raiz — não é lida nem gravada."
+    },
+    "state": {
+      "enabled": "Ativado",
+      "disabled": "Desativado",
+      "invalid": "Inválido"
+    },
+    "row": {
+      "args": "{{n}} argumentos",
+      "envKeys": "env",
+      "headerKeys": "cabeçalhos",
+      "shadowed": "sombreado"
+    },
+    "toggle": {
+      "enable": "Ativar",
+      "disable": "Desativar",
+      "enableAria": "Ativar {{name}}",
+      "disableAria": "Desativar {{name}}",
+      "invalidLabel": "Precisa de reparação",
+      "invalidHint": "A definição desta entrada está corrompida, por isso não pode ser ativada nem desativada aqui. Repare-a no mcp.json desta camada.",
+      "noChange": "Sem alterações: a entrada já correspondia a este estado, por isso nada foi escrito."
+    },
+    "force": {
+      "label": "Gravar mesmo assim (force)"
+    },
+    "noMatches": "Nenhum servidor corresponde a este filtro.",
+    "editor": {
+      "edit": "Editar",
+      "editAria": "Editar o arquivo da camada {{layer}}",
+      "noPath": "Esta camada não tem caminho — nada a editar.",
+      "title": "Editar mcp.json de {{layer}}",
+      "loading": "Carregando o arquivo…",
+      "loadError": "Não foi possível carregar o arquivo.",
+      "pathLabel": "Arquivo",
+      "createHint": "Este arquivo ainda não existe — salvá-lo o cria.",
+      "aliased": "Este arquivo também é a camada {{layers}}. Editá-lo altera essas camadas também.",
+      "validate": "Validar",
+      "valid": "Nenhum problema encontrado.",
+      "errorLabel": "Erro",
+      "warningsLabel": "Avisos",
+      "save": "Salvar",
+      "saved": "Salvo.",
+      "close": "Fechar",
+      "unsavedTitle": "Alterações não salvas",
+      "unsavedClose": "Você tem alterações não salvas neste arquivo. Fechar as descarta — nada é salvo automaticamente.",
+      "unsavedSwitch": "Você tem alterações não salvas neste arquivo. Mudar de camada as descarta — nada é salvo automaticamente.",
+      "discardClose": "Descartar e fechar",
+      "discardSwitch": "Descartar e mudar",
+      "keepEditing": "Continuar editando",
+      "stay": "Permanecer aqui"
+    }
+  },
   "settings": {
     "agentPage": {
       "title": "Agentes",
@@ -201,6 +279,7 @@
         "general": "Geral",
         "model": "Modelo e raciocínio",
         "skills": "Skills",
+        "mcp": "MCP",
         "commands": "Comandos",
         "tools": "Ferramentas",
         "subagents": "Subagentes",

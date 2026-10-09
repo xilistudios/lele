@@ -2757,3 +2757,39 @@ func TestChatHistory_DuplicateContentGetsDistinctIDs(t *testing.T) {
 		t.Fatalf("before_id=ids[1] messages[0].Content = %q, want %q", payload3.Messages[0].Content, "same question")
 	}
 }
+
+// TestSetReloadMCP_NilSafe pins T3's channel-side contract: the setter is a
+// plain field write and the handler calling convention
+// (if n.reloadMCP != nil { n.reloadMCP() }) is safe with nothing wired —
+// no callback, a wired callback, and after un-wiring again. This lives in
+// the channels package because the field (and therefore the convention) is
+// unexported; T4 wires the real handler call sites on top of this.
+func TestSetReloadMCP_NilSafe(t *testing.T) {
+	n := &NativeChannel{}
+
+	// Nil from the start: the convention must be a no-op, not a panic.
+	n.SetReloadMCP(nil)
+	if n.reloadMCP != nil {
+		n.reloadMCP()
+	}
+
+	// A wired callback is invoked by the same convention.
+	calls := 0
+	n.SetReloadMCP(func() { calls++ })
+	if n.reloadMCP != nil {
+		n.reloadMCP()
+	}
+	if calls != 1 {
+		t.Fatalf("wired reloadMCP invoked %d times, want 1", calls)
+	}
+
+	// Un-wiring (SetReloadMCP(nil)) leaves the same convention callable
+	// without panic and without invoking the previous callback.
+	n.SetReloadMCP(nil)
+	if n.reloadMCP != nil {
+		n.reloadMCP()
+	}
+	if calls != 1 {
+		t.Errorf("reloadMCP still invoked %d times after SetReloadMCP(nil), want 1", calls)
+	}
+}

@@ -1,6 +1,10 @@
 package tui
 
-import "time"
+import (
+	"time"
+
+	"github.com/xilistudios/lele/pkg/mcp"
+)
 
 // Modal lifecycle helpers: state reset and modal-kind classification.
 func (m *Model) resetModal(mode modalType) {
@@ -31,6 +35,14 @@ func (m *Model) resetModal(mode modalType) {
 	m.commandsEditScope = ""
 	m.commandsDeleteKey = ""
 	m.commandsDeleteArmed = time.Time{}
+	m.mcpModalKeys = nil
+	m.mcpFilter = mcpFilterAll
+	m.mcpFeedback = ""
+	// Drop the inventory snapshot the previous list was built from: a stale
+	// detail must never render after the modal is reopened (/mcp → resetModal).
+	m.mcpInventory = mcp.Inventory{}
+	m.mcpInventoryValid = false
+	m.mcpDetailName = ""
 	m.formStepIndex = 0
 	m.formValues = nil
 	m.formError = ""
@@ -94,6 +106,8 @@ func isListModal(mode modalType) bool {
 	case ModalNone, ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret, ModalSkillInstall:
 		return false
 	case ModalSettings, ModalSettingsAgents, ModalSettingsAgentEdit, ModalSettingsSystem, ModalSettingsSystemEdit, ModalSettingsTUI:
+		return true
+	case ModalMCP, ModalMCPDetail:
 		return true
 	default:
 		return true
