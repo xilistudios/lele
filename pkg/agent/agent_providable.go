@@ -17,6 +17,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/mcp"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
@@ -242,6 +243,19 @@ func (ap *agentProvidableImpl) AgentSkills(agentID string) (loader *skills.Skill
 	}
 	cb := agent.ContextBuilder
 	return cb.SkillsLoader(), cb.InvalidatePromptCache, true
+}
+
+// MCPPathsFor returns the mcp.json paths one agent reads. The native channel's
+// MCP inventory routes resolve this through a runtime type assertion
+// (channels.mcpPathsSource), so it has to be reachable through the facade:
+// without it, a gateway built here answers 500 mcp_unavailable for every
+// agent, because gateway.go hands NewManager GetProvidable() — this facade —
+// and not the *AgentLoop itself.
+func (ap *agentProvidableImpl) MCPPathsFor(agentID string) (mcp.Paths, bool) {
+	if ap.al == nil {
+		return mcp.Paths{}, false
+	}
+	return ap.al.MCPPathsFor(agentID)
 }
 
 // ============================================================================
