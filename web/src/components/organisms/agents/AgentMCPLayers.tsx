@@ -40,15 +40,15 @@ export function AgentMCPLayers({ layers, layerLabel, onEdit }: Props) {
   return (
     <div
       data-testid="mcp-layers"
-      className="mb-4 rounded-lg border border-border bg-background-secondary p-3.5"
+      className="mb-4 max-w-[820px] rounded-lg border border-border bg-background-secondary p-3.5"
     >
-      <p className="mb-2 text-xs font-medium text-text-tertiary">{t('mcp.layers.title')}</p>
+      <p className="mb-3 text-xs font-medium text-text-tertiary">{t('mcp.layers.title')}</p>
       <ul className="space-y-2">
         {layers.map((layer) => (
           <li
             key={layer.layer}
             data-testid={`mcp-layer-${layer.layer}`}
-            className="flex flex-wrap items-center gap-2 text-xs"
+            className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs"
           >
             <span className="font-medium text-text-primary">{layerLabel(layer.layer)}</span>
             {layer.path ? (
@@ -84,7 +84,7 @@ export function AgentMCPLayers({ layers, layerLabel, onEdit }: Props) {
             {/* Raw editor affordance: one per layer row. A layer without
                 path is disabled (never read/written); an unknown layer the
                 raw routes would refuse (invalid_layer) is disabled too. */}
-            <span className="ml-auto flex-none">
+            <span className="ml-auto flex-none pl-2">
               <Button
                 variant="secondary"
                 size="sm"
