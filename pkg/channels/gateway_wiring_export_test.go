@@ -59,11 +59,48 @@ func NewGatewayWiringFixture(t *testing.T, cfg *config.Config, msgBus *bus.Messa
 		t.Fatalf("GetChannel(%q) = %T, want *NativeChannel", ChannelName, ch)
 	}
 
-	// The seam rest_mcp.go resolves per request (n.agentLoop.(mcpPathsSource)).
-	if _, ok := channel.agentLoop.(mcpPathsSource); !ok {
-		t.Fatal("the gateway hands NewManager the AgentProvidable facade; if the facade " +
-			"stops forwarding MCPPathsFor, every MCP route 500s with mcp_unavailable " +
-			"(facade no longer satisfies mcpPathsSource)")
+	// The seams pkg/channels resolves per request with runtime assertions on
+	// the value the gateway handed NewManager (the facade, not the loop). Each
+	// entry names the assertion site and what silently breaks in the real
+	// binary if the facade stops forwarding that capability — asserting all
+	// four here means the fixture fails naming the facade instead of leaving
+	// the failure to be discovered as an unexplained 500 or a stale registry.
+	for _, seam := range []struct {
+		name   string
+		site   string
+		checks func(AgentProvidable) bool
+		breaks string
+	}{
+		{
+			name:   "mcpPathsSource",
+			site:   "rest_mcp.go:91",
+			checks: func(p AgentProvidable) bool { _, ok := p.(mcpPathsSource); return ok },
+			breaks: "every MCP route 500s with mcp_unavailable for every agent",
+		},
+		{
+			name:   "agentSkillsSource",
+			site:   "rest_agent_skills.go:82",
+			checks: func(p AgentProvidable) bool { _, ok := p.(agentSkillsSource); return ok },
+			breaks: "per-agent skills endpoints silently fall back to the channel default loader",
+		},
+		{
+			name:   "customCommandProvider",
+			site:   "rest_commands.go:105",
+			checks: func(p AgentProvidable) bool { _, ok := p.(customCommandProvider); return ok },
+			breaks: "the slash-command palette silently loses every harness custom command",
+		},
+		{
+			name:   "harnessCommandInvalidator",
+			site:   "rest_agent_commands.go:868",
+			checks: func(p AgentProvidable) bool { _, ok := p.(harnessCommandInvalidator); return ok },
+			breaks: "REST command writes silently skip invalidation and the dispatcher serves a stale registry for up to harnessRefreshTTL (30s)",
+		},
+	} {
+		if !seam.checks(channel.agentLoop) {
+			t.Fatalf("the gateway hands NewManager the AgentProvidable facade; if the facade "+
+				"stops forwarding %s (asserted at %s), %s (facade no longer satisfies that seam)",
+				seam.name, seam.site, seam.breaks)
+		}
 	}
 
 	mux := http.NewServeMux()

@@ -96,4 +96,27 @@ func TestGatewayWiring_MCPInventoryLive(t *testing.T) {
 			t.Errorf("GET /api/v1/mcp servers = %v, want %q present (fixture mcp.json layers not read through the facade)", got, want)
 		}
 	}
+
+	// The ok/argument contract across the SAME seam: an agent that does not
+	// exist must be 404 agent_not_found (rest_mcp.go:96-99), not 200 and not
+	// 500. Two review mutants survived without this check: M2 (forward
+	// MCPPathsFor but hardcode "main", ignoring agentID) and M5 (swallow ok and
+	// always return true) both answer 200 here, so this subtest is what makes
+	// an ignored agentID or a swallowed ok fail.
+	t.Run("unknown agent is 404 agent_not_found", func(t *testing.T) {
+		status, body := fixture.Get(t, "/api/v1/mcp?agent_id=ghost")
+		if status != http.StatusNotFound {
+			t.Fatalf("GET /api/v1/mcp?agent_id=ghost = %d %s, want 404 — the facade must pass "+
+				"agentID through to MCPPathsFor and forward ok unchanged; an ignored agentID or a "+
+				"swallowed ok answers 200 for an agent that does not exist", status, body)
+		}
+		var apiErr channels.APIError
+		if err := json.Unmarshal(body, &apiErr); err != nil {
+			t.Fatalf("Unmarshal(%s) error = %v", body, err)
+		}
+		if apiErr.Code != "agent_not_found" {
+			t.Errorf("GET /api/v1/mcp?agent_id=ghost code = %q, want %q (body %s)",
+				apiErr.Code, "agent_not_found", body)
+		}
+	})
 }
