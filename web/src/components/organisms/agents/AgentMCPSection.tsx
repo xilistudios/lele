@@ -256,31 +256,33 @@ export function AgentMCPSection({ agentId }: Props) {
       {warnings.length > 0 && dismissed.size < warnings.length && (
         <div
           data-testid="mcp-warnings"
-          className="mb-4 rounded-lg border border-state-warning/40 bg-state-warning/10 px-3 py-2 text-xs"
+          className="mb-4 flex max-w-[820px] items-start gap-2.5 rounded-lg border border-state-warning/40 bg-state-warning/10 p-3.5 text-xs"
         >
-          <p className="mb-1 font-medium text-state-warning">{t('mcp.warnings.title')}</p>
-          <ul className="space-y-1">
-            {warnings.map((warning, index) =>
-              dismissed.has(index) ? null : (
-                <li
-                  key={`${index}:${warning}`}
-                  data-testid={`mcp-warning-${index}`}
-                  className="flex items-center gap-2"
-                >
-                  <span className="min-w-0 flex-1 text-text-secondary">{warning}</span>
-                  <button
-                    type="button"
-                    data-testid={`mcp-warning-dismiss-${index}`}
-                    aria-label={t('mcp.warnings.dismiss')}
-                    onClick={() => setDismissed((prev) => new Set(prev).add(index))}
-                    className="flex-none text-text-tertiary transition-colors hover:text-text-primary"
+          <div className="min-w-0 flex-1">
+            <p className="mb-1 font-medium text-state-warning">{t('mcp.warnings.title')}</p>
+            <ul className="space-y-1">
+              {warnings.map((warning, index) =>
+                dismissed.has(index) ? null : (
+                  <li
+                    key={`${index}:${warning}`}
+                    data-testid={`mcp-warning-${index}`}
+                    className="flex items-center gap-2"
                   >
-                    <CloseIcon size={12} />
-                  </button>
-                </li>
-              ),
-            )}
-          </ul>
+                    <span className="min-w-0 flex-1 text-text-secondary">{warning}</span>
+                    <button
+                      type="button"
+                      data-testid={`mcp-warning-dismiss-${index}`}
+                      aria-label={t('mcp.warnings.dismiss')}
+                      onClick={() => setDismissed((prev) => new Set(prev).add(index))}
+                      className="flex-none text-text-tertiary transition-colors hover:text-text-primary"
+                    >
+                      <CloseIcon size={12} />
+                    </button>
+                  </li>
+                ),
+              )}
+            </ul>
+          </div>
         </div>
       )}
 
@@ -345,17 +347,20 @@ export function AgentMCPSection({ agentId }: Props) {
       {servers.length === 0 ? (
         <div
           data-testid="mcp-empty"
-          className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border px-4 py-8 text-center"
+          className="max-w-[820px] flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border px-4 py-8 text-center"
         >
           <p className="text-sm text-text-secondary">{t('mcp.empty.title')}</p>
           <p className="text-xs text-text-tertiary">{t('mcp.empty.desc')}</p>
         </div>
       ) : visibleServers.length === 0 ? (
-        <p data-testid="mcp-no-matches" className="py-6 text-center text-xs text-text-tertiary">
+        <p
+          data-testid="mcp-no-matches"
+          className="max-w-[820px] py-6 text-center text-xs text-text-tertiary"
+        >
           {t('mcp.noMatches')}
         </p>
       ) : (
-        <ul data-testid="mcp-rows" className="space-y-2">
+        <ul data-testid="mcp-rows" className="max-w-[820px] space-y-2.5">
           {visibleServers.map((row) => (
             <AgentMCPServerRow
               key={row.name}

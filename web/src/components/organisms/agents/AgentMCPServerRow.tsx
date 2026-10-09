@@ -83,211 +83,218 @@ export function AgentMCPServerRow({
   return (
     <li
       data-testid={`mcp-row-${row.name}`}
-      className="rounded-lg border border-border bg-background-primary p-3.5"
+      className="flex gap-2.5 rounded-lg border border-border bg-background-primary p-3.5"
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <span
-          data-testid={`mcp-state-${row.name}`}
-          aria-hidden="true"
-          className={`text-sm leading-none ${STATE_CLASS[row.effective]}`}
-        >
-          {STATE_GLYPH[row.effective]}
-        </span>
-        {/* Never glyph-only (§10.5). */}
-        <span className="sr-only">{t(`mcp.state.${row.effective}`)}</span>
+      {/* Column 1: state glyph — fixed, non-shrinking. */}
+      <span
+        data-testid={`mcp-state-${row.name}`}
+        aria-hidden="true"
+        className={`mt-0.5 flex h-5 w-5 flex-none items-center justify-center text-sm leading-none ${STATE_CLASS[row.effective]}`}
+      >
+        {STATE_GLYPH[row.effective]}
+      </span>
+      {/* Never glyph-only (§10.5). */}
+      <span className="sr-only">{t(`mcp.state.${row.effective}`)}</span>
 
-        <span
-          data-testid={`mcp-name-${row.name}`}
-          className="font-mono text-sm font-medium text-text-primary"
-        >
-          {row.name}
-        </span>
-
-        {/* Winning layer tag — also the layer every write uses. */}
-        <span data-testid={`mcp-layer-tag-${row.name}`} className={CHIP_CLS}>
-          {layerLabel(row.layer)}
-        </span>
-
-        {/* RAW strings: `${VAR}` must show literally — no interpolation, ever. */}
-        {row.server.command !== undefined && (
-          <code
-            data-testid={`mcp-command-${row.name}`}
-            className="min-w-0 break-all font-mono text-xs text-text-secondary"
+      {/* Column 2: one left edge for the name line AND every meta line. */}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            data-testid={`mcp-name-${row.name}`}
+            className="font-mono text-sm font-medium text-text-primary"
           >
-            {row.server.command}
-          </code>
-        )}
-        {row.server.url !== undefined && (
-          <code
-            data-testid={`mcp-url-${row.name}`}
-            className="min-w-0 break-all font-mono text-xs text-text-secondary"
-          >
-            {row.server.url}
-          </code>
-        )}
-
-        {row.server.args !== undefined && row.server.args > 0 && (
-          <span data-testid={`mcp-args-${row.name}`} className={CHIP_CLS}>
-            {t('mcp.row.args', { n: row.server.args })}
+            {row.name}
           </span>
-        )}
 
-        <span className="ml-auto flex-none flex items-center gap-2">
-          {row.effective === 'invalid' ? (
-            // INVALID: no working toggle. `enabled` is a SET, not a FLIP —
-            // planEnable here answers 200 `changed:false` (a silent no-op)
-            // and a `disabled:true` write would hide the verdict. The row is
-            // wired to the SAME Edit affordance as the layers block
-            // (mcp-edit-<layer> uses this same onEdit): one click from the
-            // file that repairs it.
-            <>
+          {/* Winning layer tag — also the layer every write uses. */}
+          <span data-testid={`mcp-layer-tag-${row.name}`} className={CHIP_CLS}>
+            {layerLabel(row.layer)}
+          </span>
+
+          {/* RAW strings: `${VAR}` must show literally — no interpolation, ever. */}
+          {row.server.command !== undefined && (
+            <code
+              data-testid={`mcp-command-${row.name}`}
+              className="min-w-0 break-all font-mono text-xs text-text-secondary"
+            >
+              {row.server.command}
+            </code>
+          )}
+          {row.server.url !== undefined && (
+            <code
+              data-testid={`mcp-url-${row.name}`}
+              className="min-w-0 break-all font-mono text-xs text-text-secondary"
+            >
+              {row.server.url}
+            </code>
+          )}
+
+          {row.server.args !== undefined && row.server.args > 0 && (
+            <span data-testid={`mcp-args-${row.name}`} className={CHIP_CLS}>
+              {t('mcp.row.args', { n: row.server.args })}
+            </span>
+          )}
+
+          <span className="ml-auto flex-none flex items-center gap-2">
+            {row.effective === 'invalid' ? (
+              // INVALID: no working toggle. `enabled` is a SET, not a FLIP —
+              // planEnable here answers 200 `changed:false` (a silent no-op)
+              // and a `disabled:true` write would hide the verdict. The row is
+              // wired to the SAME Edit affordance as the layers block
+              // (mcp-edit-<layer> uses this same onEdit): one click from the
+              // file that repairs it.
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  data-testid={`mcp-toggle-${row.name}`}
+                  disabled
+                  title={t('mcp.toggle.invalidHint')}
+                >
+                  {t('mcp.toggle.invalidLabel')}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  data-testid={`mcp-repair-${row.name}`}
+                  disabled={repairBlocked}
+                  title={repairBlocked ? t('mcp.editor.noPath') : undefined}
+                  aria-label={t('mcp.editor.editAria', { layer: layerLabel(row.layer) })}
+                  onClick={() => onEdit(row.layer as MCPLayerName)}
+                >
+                  {t('mcp.editor.edit')}
+                </Button>
+              </>
+            ) : (
               <Button
                 variant="secondary"
                 size="sm"
                 data-testid={`mcp-toggle-${row.name}`}
-                disabled
-                title={t('mcp.toggle.invalidHint')}
+                disabled={pending}
+                aria-label={
+                  row.effective === 'enabled'
+                    ? t('mcp.toggle.disableAria', { name: row.name })
+                    : t('mcp.toggle.enableAria', { name: row.name })
+                }
+                onClick={() => onToggle(row)}
               >
-                {t('mcp.toggle.invalidLabel')}
+                {row.effective === 'enabled' ? t('mcp.toggle.disable') : t('mcp.toggle.enable')}
               </Button>
+            )}
+          </span>
+        </div>
+
+        {/* Key NAMES only — the API never sends values and none is ever fetched. */}
+        {row.server.env_keys && row.server.env_keys.length > 0 && (
+          <div
+            data-testid={`mcp-envkeys-${row.name}`}
+            className="mt-2 flex flex-wrap items-center gap-1.5"
+          >
+            <span className="text-2xs uppercase tracking-wide text-text-tertiary">
+              {t('mcp.row.envKeys')}
+            </span>
+            {row.server.env_keys.map((key) => (
+              <span key={key} data-testid={`mcp-envkey-${row.name}-${key}`} className={CHIP_CLS}>
+                {key}
+              </span>
+            ))}
+          </div>
+        )}
+        {row.server.header_keys && row.server.header_keys.length > 0 && (
+          <div
+            data-testid={`mcp-headerkeys-${row.name}`}
+            className="mt-2 flex flex-wrap items-center gap-1.5"
+          >
+            <span className="text-2xs uppercase tracking-wide text-text-tertiary">
+              {t('mcp.row.headerKeys')}
+            </span>
+            {row.server.header_keys.map((key) => (
+              <span key={key} data-testid={`mcp-headerkey-${row.name}-${key}`} className={CHIP_CLS}>
+                {key}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {row.server.invalid && (
+          <p data-testid={`mcp-invalid-${row.name}`} className="mt-2 text-xs text-state-warning">
+            {row.server.invalid}
+          </p>
+        )}
+
+        {/* Why there is no toggle here + where to fix it: visible text, not
+          just the button tooltip (§10.5). */}
+        {row.effective === 'invalid' && (
+          <p
+            data-testid={`mcp-repair-hint-${row.name}`}
+            className="mt-2 text-xs text-text-secondary"
+          >
+            {t('mcp.toggle.invalidHint')}
+          </p>
+        )}
+
+        {/* Inert copies below the winner, each with the server's reason. */}
+        {row.shadowed && row.shadowed.length > 0 && (
+          <div
+            data-testid={`mcp-shadowed-${row.name}`}
+            className="mt-2 flex flex-wrap items-center gap-1.5"
+          >
+            <span className="text-2xs uppercase tracking-wide text-text-tertiary">
+              {t('mcp.row.shadowed')}
+            </span>
+            {row.shadowed.map((shadow) => (
+              <span
+                key={`${shadow.layer}:${shadow.path ?? ''}`}
+                data-testid={`mcp-shadow-${row.name}-${shadow.layer}`}
+                title={shadow.reason}
+                className={CHIP_CLS}
+              >
+                {layerLabel(shadow.layer)}: {shadow.reason}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* A failed write has nowhere else to surface (same as Skills). */}
+        {error !== null && (
+          <div
+            role="alert"
+            data-testid={`mcp-row-error-${row.name}`}
+            className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-state-error/40 bg-state-error/10 px-3 py-2 text-xs text-state-error"
+          >
+            <span className="min-w-0 flex-1">{error}</span>
+            {forceOffered && (
               <Button
                 variant="secondary"
                 size="sm"
-                data-testid={`mcp-repair-${row.name}`}
-                disabled={repairBlocked}
-                title={repairBlocked ? t('mcp.editor.noPath') : undefined}
-                aria-label={t('mcp.editor.editAria', { layer: layerLabel(row.layer) })}
-                onClick={() => onEdit(row.layer as MCPLayerName)}
+                data-testid={`mcp-force-${row.name}`}
+                disabled={busy}
+                onClick={onForceRetry}
               >
-                {t('mcp.editor.edit')}
+                {t('mcp.force.label')}
               </Button>
-            </>
-          ) : (
-            <Button
-              variant="secondary"
-              size="sm"
-              data-testid={`mcp-toggle-${row.name}`}
-              disabled={pending}
-              aria-label={
-                row.effective === 'enabled'
-                  ? t('mcp.toggle.disableAria', { name: row.name })
-                  : t('mcp.toggle.enableAria', { name: row.name })
-              }
-              onClick={() => onToggle(row)}
-            >
-              {row.effective === 'enabled' ? t('mcp.toggle.disable') : t('mcp.toggle.enable')}
-            </Button>
-          )}
-        </span>
-      </div>
+            )}
+          </div>
+        )}
 
-      {/* Key NAMES only — the API never sends values and none is ever fetched. */}
-      {row.server.env_keys && row.server.env_keys.length > 0 && (
-        <div
-          data-testid={`mcp-envkeys-${row.name}`}
-          className="mt-2 flex flex-wrap items-center gap-1.5"
-        >
-          <span className="text-2xs uppercase tracking-wide text-text-tertiary">
-            {t('mcp.row.envKeys')}
-          </span>
-          {row.server.env_keys.map((key) => (
-            <span key={key} data-testid={`mcp-envkey-${row.name}-${key}`} className={CHIP_CLS}>
-              {key}
-            </span>
-          ))}
-        </div>
-      )}
-      {row.server.header_keys && row.server.header_keys.length > 0 && (
-        <div
-          data-testid={`mcp-headerkeys-${row.name}`}
-          className="mt-2 flex flex-wrap items-center gap-1.5"
-        >
-          <span className="text-2xs uppercase tracking-wide text-text-tertiary">
-            {t('mcp.row.headerKeys')}
-          </span>
-          {row.server.header_keys.map((key) => (
-            <span key={key} data-testid={`mcp-headerkey-${row.name}-${key}`} className={CHIP_CLS}>
-              {key}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {row.server.invalid && (
-        <p data-testid={`mcp-invalid-${row.name}`} className="mt-2 text-xs text-state-warning">
-          {row.server.invalid}
-        </p>
-      )}
-
-      {/* Why there is no toggle here + where to fix it: visible text, not
-          just the button tooltip (§10.5). */}
-      {row.effective === 'invalid' && (
-        <p data-testid={`mcp-repair-hint-${row.name}`} className="mt-2 text-xs text-text-secondary">
-          {t('mcp.toggle.invalidHint')}
-        </p>
-      )}
-
-      {/* Inert copies below the winner, each with the server's reason. */}
-      {row.shadowed && row.shadowed.length > 0 && (
-        <div
-          data-testid={`mcp-shadowed-${row.name}`}
-          className="mt-2 flex flex-wrap items-center gap-1.5"
-        >
-          <span className="text-2xs uppercase tracking-wide text-text-tertiary">
-            {t('mcp.row.shadowed')}
-          </span>
-          {row.shadowed.map((shadow) => (
-            <span
-              key={`${shadow.layer}:${shadow.path ?? ''}`}
-              data-testid={`mcp-shadow-${row.name}-${shadow.layer}`}
-              title={shadow.reason}
-              className={CHIP_CLS}
-            >
-              {layerLabel(shadow.layer)}: {shadow.reason}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* A failed write has nowhere else to surface (same as Skills). */}
-      {error !== null && (
-        <div
-          role="alert"
-          data-testid={`mcp-row-error-${row.name}`}
-          className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-state-error/40 bg-state-error/10 px-3 py-2 text-xs text-state-error"
-        >
-          <span className="min-w-0 flex-1">{error}</span>
-          {forceOffered && (
-            <Button
-              variant="secondary"
-              size="sm"
-              data-testid={`mcp-force-${row.name}`}
-              disabled={busy}
-              onClick={onForceRetry}
-            >
-              {t('mcp.force.label')}
-            </Button>
-          )}
-        </div>
-      )}
-
-      {/* A 200 that wrote NOTHING (`changed:false`): honest inline report
+        {/* A 200 that wrote NOTHING (`changed:false`): honest inline report
           (message + machine code chip, house idiom — never a toast) instead
           of letting the inventory refetch look like the row moved. */}
-      {noChange && (
-        <output
-          data-testid={`mcp-row-nochange-${row.name}`}
-          className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background-secondary px-3 py-2 text-xs text-text-secondary"
-        >
-          <span className="min-w-0 flex-1">{t('mcp.toggle.noChange')}</span>
-          <span
-            data-testid={`mcp-row-nochange-${row.name}-code`}
-            className="font-mono text-2xs text-text-tertiary"
+        {noChange && (
+          <output
+            data-testid={`mcp-row-nochange-${row.name}`}
+            className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background-secondary px-3 py-2 text-xs text-text-secondary"
           >
-            changed:false
-          </span>
-        </output>
-      )}
+            <span className="min-w-0 flex-1">{t('mcp.toggle.noChange')}</span>
+            <span
+              data-testid={`mcp-row-nochange-${row.name}-code`}
+              className="font-mono text-2xs text-text-tertiary"
+            >
+              changed:false
+            </span>
+          </output>
+        )}
+      </div>
     </li>
   )
 }
