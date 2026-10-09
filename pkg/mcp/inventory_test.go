@@ -302,7 +302,7 @@ func TestReadInventoryCanarySecret(t *testing.T) {
 
 	// Requirement: the canary's VALUE appears nowhere.
 	// (json.Marshal must also succeed: Inventory is marshal-safe, errors and all.)
-	marshaled, err := json.Marshal(inv)
+	marshaled, err := json.Marshal(inv) //nolint:musttag // Inventory is deliberately UNTAGGED: it is an internal view, not a wire type — the REST layer builds its own MCP*Response shapes (pkg/channels/rest_mcp.go) and adding json tags here would advertise a contract nobody serves while inviting callers to marshal a struct that carries absolute layer paths and unmangled Discover errors. This marshal IS the check that doing so would leak nothing; the tag warning is the linter asking for the contract we are refusing.
 	if err != nil {
 		t.Fatalf("json.Marshal(Inventory) error = %v (must be marshal-safe)", err)
 	}
