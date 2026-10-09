@@ -384,6 +384,20 @@
       "tool_call": true
     },
     {
+      "id": "gpt-6.1-sol",
+      "name": "GPT-6.1 Sol",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "gpt-daybreak-blue-latest",
       "name": "Daybreak Blue",
       "context_window": 1050000,

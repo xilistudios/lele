@@ -5,6 +5,33 @@
   "api_base": "https://integrate.api.nvidia.com/v1",
   "models": [
     {
+      "id": "deepseek-ai/deepseek-v4.1-flash",
+      "name": "DeepSeek V4.1 Flash",
+      "context_window": 1000000,
+      "max_output": 384000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "google/diffusiongemma-26b-a4b-it",
+      "name": "DiffusionGemma 26B A4B IT",
+      "context_window": 250000,
+      "max_output": 32768,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "google/gemma-4-31b-it",
       "name": "Gemma-4-31B-IT",
       "context_window": 256000,
@@ -224,32 +251,24 @@
       "tool_call": true
     },
     {
-      "id": "mistralai/mistral-nemotron",
-      "name": "mistral-nemotron",
-      "context_window": 128000,
-      "max_output": 8192,
-      "tool_call": true
-    },
-    {
-      "id": "mistralai/mixtral-8x22b-instruct",
-      "name": "Mistral: Mixtral 8x22B Instruct",
-      "context_window": 65536,
-      "max_output": 13108,
-      "tool_call": true
-    },
-    {
-      "id": "mistralai/mixtral-8x7b-instruct",
-      "name": "Mistral: Mixtral 8x7B Instruct",
-      "context_window": 32768,
-      "max_output": 16384,
-      "tool_call": true
-    },
-    {
       "id": "nvidia/llama-3.1-nemotron-70b-instruct",
       "name": "Llama 3.1 Nemotron 70B Instruct",
       "context_window": 128000,
       "max_output": 8192,
       "tool_call": true
+    },
+    {
+      "id": "nvidia/nemotron-3.5-content-safety",
+      "name": "Nemotron 3.5 Content Safety",
+      "context_window": 128000,
+      "max_output": 8192,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true
     },
     {
       "id": "black-forest-labs/flux_1-kontext-dev",
