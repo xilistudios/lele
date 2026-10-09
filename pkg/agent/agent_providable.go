@@ -258,6 +258,18 @@ func (ap *agentProvidableImpl) MCPPathsFor(agentID string) (mcp.Paths, bool) {
 	return ap.al.MCPPathsFor(agentID)
 }
 
+// InvalidateHarnessWorkspace forwards the seam the REST command writes use: the
+// gateway hands channels.NewManager this facade, not the real loop, so without
+// this the !ok branch of harnessCommandInvalidator (rest_agent_commands.go:868)
+// silently swallows every invalidation and the dispatcher serves a stale
+// registry for up to harnessRefreshTTL.
+func (ap *agentProvidableImpl) InvalidateHarnessWorkspace(workspace string) {
+	if ap.al == nil {
+		return
+	}
+	ap.al.InvalidateHarnessWorkspace(workspace)
+}
+
 // ============================================================================
 // AgentProvidable Interface - Session History
 // ============================================================================
