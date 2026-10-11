@@ -104,14 +104,67 @@ func SetLogsPath(basePath string) {
 	logger.basePath = basePath
 }
 
+// logFilePrefixes maps the public API level strings to the canonical log file
+// prefixes. The error log uses the historical "errors-" (plural) spelling so
+// existing files on disk stay valid.
+var logFilePrefixes = map[string]string{
+	"info":  "info-",
+	"error": "errors-",
+}
+
+// LogFileName returns the canonical log file name for the given API level
+// ("info" or "error") and date (YYYY-MM-DD). It is the single source of truth
+// for the log filename contract shared by the writer and log readers (REST
+// API / WebUI).
+func LogFileName(level string, date string) (string, error) {
+	prefix, ok := logFilePrefixes[level]
+	if !ok {
+		return "", fmt.Errorf("unknown log level %q: must be \"info\" or \"error\"", level)
+	}
+	return prefix + date + ".log", nil
+}
+
+// LogPathFor returns the full path of the log file for the given API level and
+// date under the configured logs directory (see GetLogsPath).
+func LogPathFor(level string, date string) (string, error) {
+	name, err := LogFileName(level, date)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(GetLogsPath(), name), nil
+}
+
+// logDateFromFileName returns the date encoded in a canonical log file name
+// (e.g. "info-2026-10-10.log"), or ok=false if name isn't one.
+func logDateFromFileName(name string) (string, bool) {
+	if !strings.HasSuffix(name, ".log") {
+		return "", false
+	}
+	for _, level := range []string{"info", "error"} {
+		fname, err := LogFileName(level, "")
+		if err != nil {
+			continue
+		}
+		prefix := strings.TrimSuffix(fname, ".log")
+		if strings.HasPrefix(name, prefix) {
+			return strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".log"), true
+		}
+	}
+	return "", false
+}
+
 // InitDefaultLogging initializes logging with default path (~/.lele/logs)
 func InitDefaultLogging() error {
 	return EnableMultiFileLogging(getDefaultLogsPath())
 }
 
-// EnableMultiFileLogging configures dual-file logging with daily rotation
-// INFO logs go to info-{date}.log
-// WARN, ERROR, FATAL logs go to errors-{date}.log
+// EnableMultiFileLogging configures multi-file logging with daily rotation.
+// Routing is strictly by level, with no duplication:
+//   - INFO logs go to info-{date}.log only
+//   - WARN, ERROR, FATAL logs go to errors-{date}.log only
+//
+// The filename contract lives in LogFileName/LogPathFor, shared with log
+// readers (REST API / WebUI).
 func EnableMultiFileLogging(basePath string) error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -124,12 +177,15 @@ func EnableMultiFileLogging(basePath string) error {
 		return fmt.Errorf("failed to create logs directory: %w", err)
 	}
 
-	// Close existing files
+	// Close existing files and clear the handles so the struct never keeps
+	// stale (closed) fds around.
 	if logger.infoFile != nil {
 		logger.infoFile.Close()
+		logger.infoFile = nil
 	}
 	if logger.errorFile != nil {
 		logger.errorFile.Close()
+		logger.errorFile = nil
 	}
 
 	// Get current date
@@ -137,15 +193,18 @@ func EnableMultiFileLogging(basePath string) error {
 	logger.logDate = currentDate
 
 	// Open info log file (INFO level)
-	infoPath := filepath.Join(basePath, fmt.Sprintf("info-%s.log", currentDate))
+	infoName, _ := LogFileName("info", currentDate)
+	infoPath := filepath.Join(basePath, infoName)
 	infoFile, err := os.OpenFile(infoPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		log.Printf("Warning: could not open info log file: %v\n", err)
 		return fmt.Errorf("failed to open info log file: %w", err)
 	}
 
-	// Open error log file (WARN, ERROR, FATAL levels)
-	errorPath := filepath.Join(basePath, fmt.Sprintf("errors-%s.log", currentDate))
+	// Open error log file (WARN, ERROR, FATAL levels). On failure, drop the
+	// freshly opened info handle too so we don't leak an fd.
+	errorName, _ := LogFileName("error", currentDate)
+	errorPath := filepath.Join(basePath, errorName)
 	errorFile, err := os.OpenFile(errorPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		infoFile.Close()
@@ -191,12 +250,16 @@ func checkDateRotation() {
 	// Day has changed, rotate files
 	logger.logDate = currentDate
 
-	// Close existing files
+	// Close existing files and clear the handles; a failed reopen below must
+	// not leave closed fds behind (writeToFile would then error on every
+	// entry). A nil handle is retried on the next rotation.
 	if logger.infoFile != nil {
 		logger.infoFile.Close()
+		logger.infoFile = nil
 	}
 	if logger.errorFile != nil {
 		logger.errorFile.Close()
+		logger.errorFile = nil
 	}
 
 	// Open new files with current date
@@ -206,22 +269,35 @@ func checkDateRotation() {
 			log.Printf("Error: could not create logs directory: %v\n", err)
 		}
 
-		infoPath := filepath.Join(logger.basePath, fmt.Sprintf("info-%s.log", currentDate))
-		if infoFile, err := os.OpenFile(infoPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-			logger.infoFile = infoFile
+		if name, err := LogFileName("info", currentDate); err == nil {
+			infoPath := filepath.Join(logger.basePath, name)
+			if infoFile, err := os.OpenFile(infoPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+				logger.infoFile = infoFile
+			} else {
+				log.Printf("Error: could not open info log file %s: %v (retrying on next rotation)\n", infoPath, err)
+			}
 		}
 
-		errorPath := filepath.Join(logger.basePath, fmt.Sprintf("errors-%s.log", currentDate))
-		if errorFile, err := os.OpenFile(errorPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-			logger.errorFile = errorFile
+		if name, err := LogFileName("error", currentDate); err == nil {
+			errorPath := filepath.Join(logger.basePath, name)
+			if errorFile, err := os.OpenFile(errorPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+				logger.errorFile = errorFile
+			} else {
+				log.Printf("Error: could not open error log file %s: %v (retrying on next rotation)\n", errorPath, err)
+			}
 		}
 	}
 }
 
-// writeToFile writes the log entry to appropriate file based on level
+// writeToFile writes the log entry to the appropriate file based on level:
+// INFO goes to the info file only; WARN/ERROR/FATAL go to the errors file
+// only (no duplication). If a write fails (e.g. a stale handle), it attempts
+// ONE best-effort reopen via the canonical filename helper before dropping
+// the entry.
 func writeToFile(level LogLevel, entry LogEntry, jsonData []byte) {
-	mu.RLock()
-	defer mu.RUnlock()
+	// Full lock (not RLock): a failed write may reopen handles in place.
+	mu.Lock()
+	defer mu.Unlock()
 
 	data := string(jsonData) + "\n"
 
@@ -229,21 +305,38 @@ func writeToFile(level LogLevel, entry LogEntry, jsonData []byte) {
 	switch level {
 	case INFO:
 		if logger.infoFile != nil {
-			if _, err := logger.infoFile.WriteString(data); err != nil {
-				log.Printf("Error: failed to write to info log file: %v\n", err)
-			}
+			writeWithReopen(&logger.infoFile, "info", data)
 		}
 	case WARN, ERROR, FATAL:
-		// Write to both files for errors (errors are important)
 		if logger.errorFile != nil {
-			if _, err := logger.errorFile.WriteString(data); err != nil {
-				log.Printf("Error: failed to write to error log file: %v\n", err)
-			}
+			writeWithReopen(&logger.errorFile, "error", data)
 		}
-		if logger.infoFile != nil {
-			if _, err := logger.infoFile.WriteString(data); err != nil {
-				log.Printf("Error: failed to write to info log file: %v\n", err)
-			}
+	}
+}
+
+// writeWithReopen writes data to *f. On write failure it closes and nils the
+// handle, then tries ONE reopen (using the canonical filename contract) and a
+// single retry. Failures are logged to stderr; entries may be dropped but the
+// logger never panics and never keeps a closed fd around.
+func writeWithReopen(f **os.File, apiLevel, data string) {
+	if _, err := (*f).WriteString(data); err != nil {
+		log.Printf("Error: failed to write to %s log file: %v\n", apiLevel, err)
+		(*f).Close()
+		*f = nil
+
+		name, ferr := LogFileName(apiLevel, logger.logDate)
+		if ferr != nil {
+			return
+		}
+		path := filepath.Join(logger.basePath, name)
+		nf, oerr := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if oerr != nil {
+			log.Printf("Error: could not reopen %s log file %s: %v\n", apiLevel, path, oerr)
+			return
+		}
+		*f = nf
+		if _, werr := nf.WriteString(data); werr != nil {
+			log.Printf("Error: failed to write to %s log file after reopen: %v\n", apiLevel, werr)
 		}
 	}
 }
@@ -347,19 +440,11 @@ func CleanupOldLogs(maxDays int) error {
 		}
 
 		name := entry.Name()
-		// Check if it's a log file
-		if !(strings.HasPrefix(name, "info-") || strings.HasPrefix(name, "errors-")) {
+		// Check if it's a canonical log file (info-{date}.log / errors-{date}.log)
+		dateStr, ok := logDateFromFileName(name)
+		if !ok {
 			continue
 		}
-
-		// Parse date from filename
-		dateStr := ""
-		if strings.HasPrefix(name, "info-") {
-			dateStr = strings.TrimPrefix(name, "info-")
-		} else {
-			dateStr = strings.TrimPrefix(name, "errors-")
-		}
-		dateStr = strings.TrimSuffix(dateStr, ".log")
 
 		fileDate, err := time.Parse("2006-01-02", dateStr)
 		if err != nil {

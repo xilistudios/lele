@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/tui"
 )
 
@@ -755,14 +756,14 @@ func onboard() {
 		fmt.Println(styleWarning.Render(fmt.Sprintf("Warning: could not create logs directory: %v", err)))
 	} else {
 		currentDate := time.Now().Format("2006-01-02")
-		infoLog := filepath.Join(logsPath, fmt.Sprintf("info-%s.log", currentDate))
-		errorsLog := filepath.Join(logsPath, fmt.Sprintf("errors-%s.log", currentDate))
-
-		if _, err := os.Create(infoLog); err != nil {
-			fmt.Println(styleWarning.Render(fmt.Sprintf("Warning: could not create info log file: %v", err)))
-		}
-		if _, err := os.Create(errorsLog); err != nil {
-			fmt.Println(styleWarning.Render(fmt.Sprintf("Warning: could not create errors log file: %v", err)))
+		for _, level := range []string{"info", "error"} {
+			name, err := logger.LogFileName(level, currentDate)
+			if err != nil {
+				continue
+			}
+			if _, err := os.Create(filepath.Join(logsPath, name)); err != nil {
+				fmt.Println(styleWarning.Render(fmt.Sprintf("Warning: could not create %s log file: %v", name, err)))
+			}
 		}
 	}
 

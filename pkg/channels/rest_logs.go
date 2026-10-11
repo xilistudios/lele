@@ -67,9 +67,14 @@ func (n *NativeChannel) handleLogs(w http.ResponseWriter, r *http.Request) {
 		maxLines = n
 	}
 
-	// Build file path.
-	fileName := level + "-" + date + ".log"
-	logPath := filepath.Join(logger.GetLogsPath(), fileName)
+	// Build file path using the canonical filename contract shared with the
+	// logger writer (logger.LogPathFor maps "error" → errors-{date}.log).
+	logPath, err := logger.LogPathFor(level, date)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), "invalid_level")
+		return
+	}
+	fileName := filepath.Base(logPath)
 
 	// Read the file. If it doesn't exist, return an empty response.
 	allLines, err := readAllLines(logPath)
@@ -143,14 +148,11 @@ func (n *NativeChannel) handleLogsDates(w http.ResponseWriter, r *http.Request) 
 		if entry.IsDir() {
 			continue
 		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, "info-") || !strings.HasSuffix(name, ".log") {
-			continue
-		}
-		// Extract date: "info-YYYY-MM-DD.log" → "YYYY-MM-DD"
-		date := strings.TrimPrefix(name, "info-")
-		date = strings.TrimSuffix(date, ".log")
-		if validDateRe.MatchString(date) {
+		// Accept canonical log files from either level (info-YYYY-MM-DD.log
+		// and errors-YYYY-MM-DD.log): a date with only error entries must be
+		// listed too.
+		date, ok := logDateFromName(entry.Name())
+		if ok {
 			seen[date] = true
 		}
 	}
@@ -162,6 +164,28 @@ func (n *NativeChannel) handleLogsDates(w http.ResponseWriter, r *http.Request) 
 	sort.Sort(sort.Reverse(sort.StringSlice(dates)))
 
 	writeJSON(w, http.StatusOK, LogsDatesResponse{Dates: dates})
+}
+
+// logDateFromName extracts the date from a canonical log file name produced by
+// logger.LogFileName (info-YYYY-MM-DD.log / errors-YYYY-MM-DD.log).
+func logDateFromName(name string) (string, bool) {
+	if !strings.HasSuffix(name, ".log") {
+		return "", false
+	}
+	for _, level := range []string{"info", "error"} {
+		fname, err := logger.LogFileName(level, "")
+		if err != nil {
+			continue
+		}
+		prefix := strings.TrimSuffix(fname, ".log")
+		if strings.HasPrefix(name, prefix) {
+			date := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".log")
+			if validDateRe.MatchString(date) {
+				return date, true
+			}
+		}
+	}
+	return "", false
 }
 
 // readAllLines reads every line from a file and returns them as a slice.

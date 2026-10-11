@@ -399,42 +399,156 @@ func TestDebugOnlyConsole(t *testing.T) {
 	DisableFileLogging()
 }
 
-func TestErrorInBothFiles(t *testing.T) {
-	// Create temporary directory
-	tempDir, err := os.MkdirTemp("", "logger-error-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+// TestLogRoutingByLevel is the regression test for the bug where WARN/ERROR
+// entries were dual-written to both the info and the errors log: INFO must
+// land ONLY in info-{date}.log and WARN/ERROR ONLY in errors-{date}.log.
+func TestLogRoutingByLevel(t *testing.T) {
+	tempDir := t.TempDir()
 
-	// Set up logging
 	DisableFileLogging()
-	err = EnableMultiFileLogging(tempDir)
-	if err != nil {
+	defer DisableFileLogging()
+	if err := EnableMultiFileLogging(tempDir); err != nil {
 		t.Fatalf("EnableMultiFileLogging failed: %v", err)
 	}
 
-	// Write error message (should be in both files)
-	Error("This error should be in both files")
+	SetLevel(INFO)
+	Info("routing info marker")
+	Warn("routing warn marker")
+	Error("routing error marker")
 
-	time.Sleep(100 * time.Millisecond)
-
-	// Check info log
 	currentDate := time.Now().Format("2006-01-02")
 	infoPath := filepath.Join(tempDir, fmt.Sprintf("info-%s.log", currentDate))
-	infoContent, _ := os.ReadFile(infoPath)
-
-	// Check error log
 	errorPath := filepath.Join(tempDir, fmt.Sprintf("errors-%s.log", currentDate))
-	errorContent, _ := os.ReadFile(errorPath)
 
-	if !strings.Contains(string(infoContent), "This error should be in both files") {
-		t.Errorf("ERROR message should be in info log")
+	infoContent, err := os.ReadFile(infoPath)
+	if err != nil {
+		t.Fatalf("Failed to read info log: %v", err)
+	}
+	errorContent, err := os.ReadFile(errorPath)
+	if err != nil {
+		t.Fatalf("Failed to read errors log: %v", err)
 	}
 
-	if !strings.Contains(string(errorContent), "This error should be in both files") {
-		t.Errorf("ERROR message should be in error log")
+	if !strings.Contains(string(infoContent), "routing info marker") {
+		t.Errorf("INFO entry missing from info log")
 	}
+	if strings.Contains(string(infoContent), "routing warn marker") {
+		t.Errorf("WARN entry must NOT be written to the info log")
+	}
+	if strings.Contains(string(infoContent), "routing error marker") {
+		t.Errorf("ERROR entry must NOT be written to the info log")
+	}
+	if strings.Contains(string(errorContent), "routing info marker") {
+		t.Errorf("INFO entry must NOT be written to the errors log")
+	}
+	if !strings.Contains(string(errorContent), "routing warn marker") {
+		t.Errorf("WARN entry missing from errors log")
+	}
+	if !strings.Contains(string(errorContent), "routing error marker") {
+		t.Errorf("ERROR entry missing from errors log")
+	}
+}
+
+func TestLogFileName(t *testing.T) {
+	tests := []struct {
+		level   string
+		date    string
+		want    string
+		wantErr bool
+	}{
+		{"info", "2026-10-10", "info-2026-10-10.log", false},
+		{"error", "2026-10-10", "errors-2026-10-10.log", false},
+		{"warn", "2026-10-10", "", true},
+		{"", "2026-10-10", "", true},
+	}
+
+	for _, tt := range tests {
+		got, err := LogFileName(tt.level, tt.date)
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("LogFileName(%q, %q): expected error, got %q", tt.level, tt.date, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("LogFileName(%q, %q): unexpected error: %v", tt.level, tt.date, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("LogFileName(%q, %q) = %q, want %q", tt.level, tt.date, got, tt.want)
+		}
+	}
+}
+
+func TestLogPathFor(t *testing.T) {
+	initialPath := GetLogsPath()
+	base := t.TempDir()
+	SetLogsPath(base)
+	defer SetLogsPath(initialPath)
+
+	got, err := LogPathFor("error", "2026-10-10")
+	if err != nil {
+		t.Fatalf("LogPathFor(error): unexpected error: %v", err)
+	}
+	want := filepath.Join(base, "errors-2026-10-10.log")
+	if got != want {
+		t.Errorf("LogPathFor(error) = %q, want %q", got, want)
+	}
+
+	got, err = LogPathFor("info", "2026-10-10")
+	if err != nil {
+		t.Fatalf("LogPathFor(info): unexpected error: %v", err)
+	}
+	want = filepath.Join(base, "info-2026-10-10.log")
+	if got != want {
+		t.Errorf("LogPathFor(info) = %q, want %q", got, want)
+	}
+
+	if _, err := LogPathFor("bogus", "2026-10-10"); err == nil {
+		t.Errorf("LogPathFor(bogus): expected an error for an unknown level")
+	}
+}
+
+// TestEnableMultiFileLoggingTwice ensures a second init closes the previous
+// handles (no stale fds kept) and that subsequent writes land only in the
+// newly configured files.
+func TestEnableMultiFileLoggingTwice(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
 
 	DisableFileLogging()
+	defer DisableFileLogging()
+
+	if err := EnableMultiFileLogging(dirA); err != nil {
+		t.Fatalf("First EnableMultiFileLogging failed: %v", err)
+	}
+	Info("before re-init marker")
+
+	if err := EnableMultiFileLogging(dirB); err != nil {
+		t.Fatalf("Second EnableMultiFileLogging failed: %v", err)
+	}
+	Info("after re-init marker")
+
+	currentDate := time.Now().Format("2006-01-02")
+	infoA := filepath.Join(dirA, fmt.Sprintf("info-%s.log", currentDate))
+	infoB := filepath.Join(dirB, fmt.Sprintf("info-%s.log", currentDate))
+
+	contentA, err := os.ReadFile(infoA)
+	if err != nil {
+		t.Fatalf("Failed to read old info log: %v", err)
+	}
+	contentB, err := os.ReadFile(infoB)
+	if err != nil {
+		t.Fatalf("Failed to read new info log: %v", err)
+	}
+
+	if !strings.Contains(string(contentA), "before re-init marker") {
+		t.Errorf("Entry written before re-init missing from old file")
+	}
+	if strings.Contains(string(contentA), "after re-init marker") {
+		t.Errorf("Stale handle: entry written after re-init landed in the old file")
+	}
+	if !strings.Contains(string(contentB), "after re-init marker") {
+		t.Errorf("Entry written after re-init missing from the new file")
+	}
 }

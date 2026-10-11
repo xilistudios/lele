@@ -603,7 +603,7 @@ type LogsConfig struct {
 	Enabled  bool   `json:"enabled" env:"LELE_LOGS_ENABLED"`             // Enable/disable file logging
 	Path     string `json:"path,omitempty" env:"LELE_LOGS_PATH"`         // Custom path (default: ~/.lele/logs)
 	MaxDays  int    `json:"max_days,omitempty" env:"LELE_LOGS_MAX_DAYS"` // Max days to keep logs (default: 7)
-	Rotation string `json:"rotation,omitempty" env:"LELE_LOGS_ROTATION"` // "daily" or "weekly" (default: daily)
+	Rotation string `json:"rotation,omitempty" env:"LELE_LOGS_ROTATION"` // "daily" or "weekly" (default: daily). NOTE: currently ignored by the logger; rotation is always daily.
 }
 
 // KeyringConfig holds configuration for the encrypted secret store.
