@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -374,6 +375,9 @@ func TestDebugOnlyConsole(t *testing.T) {
 		t.Fatalf("EnableMultiFileLogging failed: %v", err)
 	}
 
+	// Capture the date before writing anything (readLogContent contract).
+	date := time.Now().Format("2006-01-02")
+
 	// Write debug message (should NOT go to file)
 	Debug("This debug message should not be in file")
 	DebugC("test", "This debug with component should not be in file")
@@ -384,57 +388,454 @@ func TestDebugOnlyConsole(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Check info log
-	currentDate := time.Now().Format("2006-01-02")
-	infoPath := filepath.Join(tempDir, fmt.Sprintf("info-%s.log", currentDate))
-	content, _ := os.ReadFile(infoPath)
+	content := readLogContent(t, tempDir, "info", date)
 
-	if strings.Contains(string(content), "debug message") {
+	if strings.Contains(content, "debug message") {
 		t.Errorf("DEBUG message should not be in log file")
 	}
 
-	if !strings.Contains(string(content), "info message") {
+	if !strings.Contains(content, "info message") {
 		t.Errorf("INFO message should be in log file")
 	}
 
 	DisableFileLogging()
 }
 
-func TestErrorInBothFiles(t *testing.T) {
-	// Create temporary directory
-	tempDir, err := os.MkdirTemp("", "logger-error-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
+// readLogContent returns the content of the log file for level. date must be
+// captured BEFORE the writes it validates: if the calendar date changed while
+// the test ran (midnight race), every matching file is read via globbing
+// instead of the hardcoded name, so a run crossing midnight does not flake.
+func readLogContent(t *testing.T, dir, level, date string) string {
+	t.Helper()
+	if time.Now().Format("2006-01-02") == date {
+		name, err := LogFileName(level, date)
+		if err != nil {
+			t.Fatalf("LogFileName(%q, %q): %v", level, date, err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("Failed to read %s log: %v", level, err)
+		}
+		return string(data)
 	}
-	defer os.RemoveAll(tempDir)
-
-	// Set up logging
-	DisableFileLogging()
-	err = EnableMultiFileLogging(tempDir)
+	// The date rolled over during the test: collect every matching file.
+	pattern, err := LogFileName(level, "*")
 	if err != nil {
+		t.Fatalf("LogFileName(%q, \"*\"): %v", level, err)
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, pattern))
+	if err != nil || len(matches) == 0 {
+		t.Fatalf("Date changed during test and no file matched %s (glob error: %v)", pattern, err)
+	}
+	var sb strings.Builder
+	for _, m := range matches {
+		data, err := os.ReadFile(m)
+		if err != nil {
+			t.Fatalf("Failed to read %s: %v", m, err)
+		}
+		sb.Write(data)
+	}
+	return sb.String()
+}
+
+// TestLogRoutingByLevel is the regression test for the bug where WARN/ERROR
+// entries were dual-written to both the info and the errors log: INFO must
+// land ONLY in info-{date}.log and WARN/ERROR ONLY in errors-{date}.log.
+func TestLogRoutingByLevel(t *testing.T) {
+	tempDir := t.TempDir()
+
+	origPath := GetLogsPath()
+	defer SetLogsPath(origPath)
+	DisableFileLogging()
+	defer DisableFileLogging()
+	if err := EnableMultiFileLogging(tempDir); err != nil {
 		t.Fatalf("EnableMultiFileLogging failed: %v", err)
 	}
 
-	// Write error message (should be in both files)
-	Error("This error should be in both files")
+	// Capture the date before writing anything: expected filenames derive
+	// from it (and fall back to globbing if midnight passes mid-test).
+	date := time.Now().Format("2006-01-02")
 
-	time.Sleep(100 * time.Millisecond)
+	SetLevel(INFO)
+	Info("routing info marker")
+	Warn("routing warn marker")
+	Error("routing error marker")
 
-	// Check info log
-	currentDate := time.Now().Format("2006-01-02")
-	infoPath := filepath.Join(tempDir, fmt.Sprintf("info-%s.log", currentDate))
-	infoContent, _ := os.ReadFile(infoPath)
+	infoContent := readLogContent(t, tempDir, "info", date)
+	errorContent := readLogContent(t, tempDir, "error", date)
 
-	// Check error log
-	errorPath := filepath.Join(tempDir, fmt.Sprintf("errors-%s.log", currentDate))
-	errorContent, _ := os.ReadFile(errorPath)
+	if !strings.Contains(infoContent, "routing info marker") {
+		t.Errorf("INFO entry missing from info log")
+	}
+	if strings.Contains(infoContent, "routing warn marker") {
+		t.Errorf("WARN entry must NOT be written to the info log")
+	}
+	if strings.Contains(infoContent, "routing error marker") {
+		t.Errorf("ERROR entry must NOT be written to the info log")
+	}
+	if strings.Contains(errorContent, "routing info marker") {
+		t.Errorf("INFO entry must NOT be written to the errors log")
+	}
+	if !strings.Contains(errorContent, "routing warn marker") {
+		t.Errorf("WARN entry missing from errors log")
+	}
+	if !strings.Contains(errorContent, "routing error marker") {
+		t.Errorf("ERROR entry missing from errors log")
+	}
+}
 
-	if !strings.Contains(string(infoContent), "This error should be in both files") {
-		t.Errorf("ERROR message should be in info log")
+func TestLogFileName(t *testing.T) {
+	tests := []struct {
+		level   string
+		date    string
+		want    string
+		wantErr bool
+	}{
+		{"info", "2026-10-10", "info-2026-10-10.log", false},
+		{"error", "2026-10-10", "errors-2026-10-10.log", false},
+		{"warn", "2026-10-10", "", true},
+		{"", "2026-10-10", "", true},
 	}
 
-	if !strings.Contains(string(errorContent), "This error should be in both files") {
-		t.Errorf("ERROR message should be in error log")
+	for _, tt := range tests {
+		got, err := LogFileName(tt.level, tt.date)
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("LogFileName(%q, %q): expected error, got %q", tt.level, tt.date, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("LogFileName(%q, %q): unexpected error: %v", tt.level, tt.date, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("LogFileName(%q, %q) = %q, want %q", tt.level, tt.date, got, tt.want)
+		}
+	}
+}
+
+func TestLogPathFor(t *testing.T) {
+	initialPath := GetLogsPath()
+	base := t.TempDir()
+	SetLogsPath(base)
+	defer SetLogsPath(initialPath)
+
+	got, err := LogPathFor("error", "2026-10-10")
+	if err != nil {
+		t.Fatalf("LogPathFor(error): unexpected error: %v", err)
+	}
+	want := filepath.Join(base, "errors-2026-10-10.log")
+	if got != want {
+		t.Errorf("LogPathFor(error) = %q, want %q", got, want)
+	}
+
+	got, err = LogPathFor("info", "2026-10-10")
+	if err != nil {
+		t.Fatalf("LogPathFor(info): unexpected error: %v", err)
+	}
+	want = filepath.Join(base, "info-2026-10-10.log")
+	if got != want {
+		t.Errorf("LogPathFor(info) = %q, want %q", got, want)
+	}
+
+	if _, err := LogPathFor("bogus", "2026-10-10"); err == nil {
+		t.Errorf("LogPathFor(bogus): expected an error for an unknown level")
+	}
+}
+
+// TestEnableMultiFileLoggingTwice ensures a second init closes the previous
+// handles (no stale fds kept), swaps in brand-new handles (the close/nil/
+// reassign block) and that subsequent writes land only in the newly configured
+// files. The handle assertions are what discriminate the fix: they fail if the
+// close/nil/reassign logic is removed, which routing alone would not catch.
+func TestEnableMultiFileLoggingTwice(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	// Capture the date before any write so expected filenames cannot race
+	// midnight (falls back to globbing if the date changes mid-test).
+	date := time.Now().Format("2006-01-02")
+
+	origPath := GetLogsPath()
+	defer SetLogsPath(origPath)
+	DisableFileLogging()
+	defer DisableFileLogging()
+
+	if err := EnableMultiFileLogging(dirA); err != nil {
+		t.Fatalf("First EnableMultiFileLogging failed: %v", err)
+	}
+	Info("before re-init marker")
+
+	// Snapshot the live handles: the second init must close them and assign
+	// brand-new ones (a removed close/nil/reassign block keeps these very
+	// pointers and leaves them writable).
+	mu.Lock()
+	oldInfo, oldError := logger.infoFile, logger.errorFile
+	mu.Unlock()
+	if oldInfo == nil || oldError == nil {
+		t.Fatalf("Expected open handles after first init, got info=%v error=%v", oldInfo, oldError)
+	}
+
+	if err := EnableMultiFileLogging(dirB); err != nil {
+		t.Fatalf("Second EnableMultiFileLogging failed: %v", err)
+	}
+
+	mu.Lock()
+	newInfo, newError := logger.infoFile, logger.errorFile
+	mu.Unlock()
+	if newInfo == nil || newError == nil {
+		t.Fatalf("Handles must be non-nil after re-init, got info=%v error=%v", newInfo, newError)
+	}
+	if newInfo == oldInfo {
+		t.Errorf("Info handle was not replaced by the second init (stale handle kept)")
+	}
+	if newError == oldError {
+		t.Errorf("Error handle was not replaced by the second init (stale handle kept)")
+	}
+	// The previous handles must really be closed: an unclosed handle leaks
+	// its fd and keeps writing to the old files.
+	if _, err := oldInfo.WriteString("stale"); !errors.Is(err, os.ErrClosed) {
+		t.Errorf("Old info handle write error = %v, want os.ErrClosed (fd leak)", err)
+	}
+	if _, err := oldError.WriteString("stale"); !errors.Is(err, os.ErrClosed) {
+		t.Errorf("Old error handle write error = %v, want os.ErrClosed (fd leak)", err)
+	}
+
+	Info("after re-init marker")
+
+	infoA := readLogContent(t, dirA, "info", date)
+	infoB := readLogContent(t, dirB, "info", date)
+
+	if !strings.Contains(infoA, "before re-init marker") {
+		t.Errorf("Entry written before re-init missing from old file")
+	}
+	if strings.Contains(infoA, "after re-init marker") {
+		t.Errorf("Stale handle: entry written after re-init landed in the old file")
+	}
+	if !strings.Contains(infoB, "after re-init marker") {
+		t.Errorf("Entry written after re-init missing from the new file")
+	}
+}
+
+// TestLogDateFromFileName pins the exported reverse of the filename contract:
+// the single date-from-filename helper shared with pkg/channels (see M2 — the
+// old copy-pasted twins drifted in validation policy).
+func TestLogDateFromFileName(t *testing.T) {
+	tests := []struct {
+		name   string
+		want   string
+		wantOK bool
+	}{
+		{"info-2026-10-10.log", "2026-10-10", true},
+		{"errors-2026-10-10.log", "2026-10-10", true},
+		{"info-2026-13-45.log", "", false},  // impossible date rejected
+		{"info-2026-1-02.log", "", false},   // not zero-padded
+		{"error-2026-10-10.log", "", false}, // singular prefix is not canonical
+		{"info-.log", "", false},            // missing date
+		{"other-2026-10-10.log", "", false}, // unknown prefix
+		{"info-2026-10-10.txt", "", false},  // not a .log file
+		{"2026-10-10.log", "", false},       // no level prefix
+		{"", "", false},
+	}
+
+	for _, tt := range tests {
+		got, ok := LogDateFromFileName(tt.name)
+		if ok != tt.wantOK || got != tt.want {
+			t.Errorf("LogDateFromFileName(%q) = (%q, %v), want (%q, %v)", tt.name, got, ok, tt.want, tt.wantOK)
+		}
+	}
+}
+
+// TestWriteToFileReopensAfterWriteFailure proves the reopen-on-failed-write
+// path (deep-review probe E / M1): a stale handle — closed behind the
+// logger's back but still non-nil — must be reopened once and the entry must
+// land in the errors file.
+func TestWriteToFileReopensAfterWriteFailure(t *testing.T) {
+	tempDir := t.TempDir()
+
+	origPath := GetLogsPath()
+	defer SetLogsPath(origPath)
+	DisableFileLogging()
+	defer DisableFileLogging()
+	if err := EnableMultiFileLogging(tempDir); err != nil {
+		t.Fatalf("EnableMultiFileLogging failed: %v", err)
+	}
+	date := time.Now().Format("2006-01-02")
+
+	Error("reopen entry one")
+
+	// Close the underlying file while keeping the field non-nil: the next
+	// write fails and must trigger exactly one reopen.
+	mu.Lock()
+	stale := logger.errorFile
+	mu.Unlock()
+	if stale == nil {
+		t.Fatal("Expected an open errors handle after EnableMultiFileLogging")
+	}
+	if err := stale.Close(); err != nil {
+		t.Fatalf("Closing errors handle: %v", err)
+	}
+
+	Error("reopen entry two")
+
+	content := readLogContent(t, tempDir, "error", date)
+	if !strings.Contains(content, "reopen entry one") {
+		t.Errorf("First entry missing from errors log; content: %s", content)
+	}
+	if !strings.Contains(content, "reopen entry two") {
+		t.Errorf("Entry written to a stale handle was not recovered by the reopen path; content: %s", content)
+	}
+}
+
+// TestWriteToFileLazilyOpensNilHandle covers the H1 fix: a handle left nil by
+// a failed open (failed startup open or failed rotation) must be lazily
+// reopened by the next write, not only by the next date change.
+func TestWriteToFileLazilyOpensNilHandle(t *testing.T) {
+	tempDir := t.TempDir()
+
+	origPath := GetLogsPath()
+	defer SetLogsPath(origPath)
+	DisableFileLogging()
+	defer DisableFileLogging()
+	if err := EnableMultiFileLogging(tempDir); err != nil {
+		t.Fatalf("EnableMultiFileLogging failed: %v", err)
+	}
+	date := time.Now().Format("2006-01-02")
+
+	// Simulate what a failed open leaves behind: handle nil while basePath
+	// and logDate stay pinned (so no rotation will ever retry it).
+	mu.Lock()
+	if logger.errorFile != nil {
+		logger.errorFile.Close()
+	}
+	logger.errorFile = nil
+	mu.Unlock()
+
+	Error("lazy open entry")
+
+	content := readLogContent(t, tempDir, "error", date)
+	if !strings.Contains(content, "lazy open entry") {
+		t.Errorf("Entry after a nil handle was not lazily opened and written; content: %s", content)
+	}
+
+	mu.Lock()
+	reopened := logger.errorFile != nil
+	mu.Unlock()
+	if !reopened {
+		t.Errorf("Error handle must be open again after the lazy retry")
+	}
+}
+
+// TestWriteToFileRetriesLazyOpenOnNextWrite covers the other half of H1: if
+// the lazy open itself fails, the entry is dropped for that write, the handle
+// stays nil, and the NEXT write retries — succeeding once the path is
+// writable again.
+func TestWriteToFileRetriesLazyOpenOnNextWrite(t *testing.T) {
+	tempDir := t.TempDir()
+
+	origPath := GetLogsPath()
+	defer SetLogsPath(origPath)
+	DisableFileLogging()
+	defer DisableFileLogging()
+	if err := EnableMultiFileLogging(tempDir); err != nil {
+		t.Fatalf("EnableMultiFileLogging failed: %v", err)
+	}
+	date := time.Now().Format("2006-01-02")
+
+	// Make the base path unopenable: a regular file where a directory is
+	// required makes the open fail deterministically.
+	blocked := filepath.Join(tempDir, "blocked")
+	if err := os.WriteFile(blocked, []byte("not a directory"), 0644); err != nil {
+		t.Fatalf("Failed to create blocking file: %v", err)
+	}
+	mu.Lock()
+	logger.basePath = blocked
+	logger.errorFile = nil
+	mu.Unlock()
+
+	Error("dropped while blocked")
+
+	mu.Lock()
+	nilWhileBlocked := logger.errorFile == nil
+	logger.basePath = tempDir
+	mu.Unlock()
+	if !nilWhileBlocked {
+		t.Errorf("Handle must stay nil after a failed lazy open so the next write retries")
+	}
+
+	Error("recovered after unblock")
+
+	content := readLogContent(t, tempDir, "error", date)
+	if !strings.Contains(content, "recovered after unblock") {
+		t.Errorf("Entry after the path became writable again was not written; content: %s", content)
+	}
+	if strings.Contains(content, "dropped while blocked") {
+		t.Errorf("Entry of the failed open must have been dropped; content: %s", content)
+	}
+}
+
+// TestDisableFileLoggingStopsWriting is the regression test for the re-review
+// finding on 0c22ba8: DisableFileLogging closed/nil'd the handles but left
+// basePath/logDate set, so the new lazy open in writeToFile recreated the log
+// files on the next write — Disable no longer disabled. After Disable, no
+// write may create a file or append to an existing one, while basePath must be
+// preserved (LogPathFor/GetLogsPath are the read-side contract for the REST
+// API / WebUI and must keep resolving).
+func TestDisableFileLoggingStopsWriting(t *testing.T) {
+	tempDir := t.TempDir()
+
+	origPath := GetLogsPath()
+	defer SetLogsPath(origPath)
+	DisableFileLogging()
+	defer DisableFileLogging()
+
+	if err := EnableMultiFileLogging(tempDir); err != nil {
+		t.Fatalf("EnableMultiFileLogging failed: %v", err)
+	}
+	// Sanity: Enable creates both canonical files (empty until first write).
+	infoPath, err := LogPathFor("info", time.Now().Format("2006-01-02"))
+	if err != nil {
+		t.Fatalf("LogPathFor(info): %v", err)
+	}
+	errorPath, err := LogPathFor("error", time.Now().Format("2006-01-02"))
+	if err != nil {
+		t.Fatalf("LogPathFor(error): %v", err)
 	}
 
 	DisableFileLogging()
+
+	SetLevel(INFO)
+	Info("after disable info marker")
+	Warn("after disable warn marker")
+	Error("after disable error marker")
+
+	// basePath must survive Disable: it is the read-side contract.
+	if got := GetLogsPath(); got != tempDir {
+		t.Errorf("GetLogsPath() = %q, want %q (basePath must be kept after Disable)", got, tempDir)
+	}
+
+	// No entry may have reached the files (they were created empty by
+	// Enable; the lazy open must not have appended anything after Disable).
+	for _, p := range []string{infoPath, errorPath} {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("Failed to read %s: %v", p, err)
+		}
+		if len(data) != 0 {
+			t.Errorf("File %s received %d bytes after DisableFileLogging; content: %s", p, len(data), data)
+		}
+	}
+
+	// And no NEW file may have appeared in the directory.
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", tempDir, err)
+	}
+	if len(entries) != 2 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("Expected exactly the 2 files created by Enable after Disable, found %v", names)
+	}
 }

@@ -18,9 +18,16 @@ Typical files:
 
 ## Log Behavior
 
-- INFO logs go to the info log
-- WARN/ERROR/FATAL also go to the error log
-- files rotate by date
+Routing is strictly by level, with no duplication:
+
+- `info-YYYY-MM-DD.log` — INFO entries only
+- `errors-YYYY-MM-DD.log` — WARN, ERROR and FATAL entries
+
+The WebUI Logs viewer and the REST API use the same files: `level=info` reads
+`info-<date>.log`, `level=error` reads `errors-<date>.log`.
+
+Files rotate daily (the `logs.rotation` config value is currently ignored;
+rotation is always daily).
 
 ## Config
 

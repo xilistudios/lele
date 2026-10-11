@@ -67,9 +67,14 @@ func (n *NativeChannel) handleLogs(w http.ResponseWriter, r *http.Request) {
 		maxLines = n
 	}
 
-	// Build file path.
-	fileName := level + "-" + date + ".log"
-	logPath := filepath.Join(logger.GetLogsPath(), fileName)
+	// Build file path using the canonical filename contract shared with the
+	// logger writer (logger.LogPathFor maps "error" → errors-{date}.log).
+	logPath, err := logger.LogPathFor(level, date)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), "invalid_level")
+		return
+	}
+	fileName := filepath.Base(logPath)
 
 	// Read the file. If it doesn't exist, return an empty response.
 	allLines, err := readAllLines(logPath)
@@ -143,14 +148,13 @@ func (n *NativeChannel) handleLogsDates(w http.ResponseWriter, r *http.Request) 
 		if entry.IsDir() {
 			continue
 		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, "info-") || !strings.HasSuffix(name, ".log") {
-			continue
-		}
-		// Extract date: "info-YYYY-MM-DD.log" → "YYYY-MM-DD"
-		date := strings.TrimPrefix(name, "info-")
-		date = strings.TrimSuffix(date, ".log")
-		if validDateRe.MatchString(date) {
+		// Accept canonical log files from either level (info-YYYY-MM-DD.log
+		// and errors-YYYY-MM-DD.log): a date with only error entries must be
+		// listed too. The reverse of the filename contract lives in
+		// logger.LogDateFromFileName (single implementation, single
+		// validation policy shared with the writer).
+		date, ok := logger.LogDateFromFileName(entry.Name())
+		if ok {
 			seen[date] = true
 		}
 	}
