@@ -150,8 +150,10 @@ func (n *NativeChannel) handleLogsDates(w http.ResponseWriter, r *http.Request) 
 		}
 		// Accept canonical log files from either level (info-YYYY-MM-DD.log
 		// and errors-YYYY-MM-DD.log): a date with only error entries must be
-		// listed too.
-		date, ok := logDateFromName(entry.Name())
+		// listed too. The reverse of the filename contract lives in
+		// logger.LogDateFromFileName (single implementation, single
+		// validation policy shared with the writer).
+		date, ok := logger.LogDateFromFileName(entry.Name())
 		if ok {
 			seen[date] = true
 		}
@@ -164,28 +166,6 @@ func (n *NativeChannel) handleLogsDates(w http.ResponseWriter, r *http.Request) 
 	sort.Sort(sort.Reverse(sort.StringSlice(dates)))
 
 	writeJSON(w, http.StatusOK, LogsDatesResponse{Dates: dates})
-}
-
-// logDateFromName extracts the date from a canonical log file name produced by
-// logger.LogFileName (info-YYYY-MM-DD.log / errors-YYYY-MM-DD.log).
-func logDateFromName(name string) (string, bool) {
-	if !strings.HasSuffix(name, ".log") {
-		return "", false
-	}
-	for _, level := range []string{"info", "error"} {
-		fname, err := logger.LogFileName(level, "")
-		if err != nil {
-			continue
-		}
-		prefix := strings.TrimSuffix(fname, ".log")
-		if strings.HasPrefix(name, prefix) {
-			date := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".log")
-			if validDateRe.MatchString(date) {
-				return date, true
-			}
-		}
-	}
-	return "", false
 }
 
 // readAllLines reads every line from a file and returns them as a slice.
