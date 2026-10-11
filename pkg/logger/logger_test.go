@@ -375,6 +375,9 @@ func TestDebugOnlyConsole(t *testing.T) {
 		t.Fatalf("EnableMultiFileLogging failed: %v", err)
 	}
 
+	// Capture the date before writing anything (readLogContent contract).
+	date := time.Now().Format("2006-01-02")
+
 	// Write debug message (should NOT go to file)
 	Debug("This debug message should not be in file")
 	DebugC("test", "This debug with component should not be in file")
@@ -385,15 +388,13 @@ func TestDebugOnlyConsole(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Check info log
-	currentDate := time.Now().Format("2006-01-02")
-	infoPath := filepath.Join(tempDir, fmt.Sprintf("info-%s.log", currentDate))
-	content, _ := os.ReadFile(infoPath)
+	content := readLogContent(t, tempDir, "info", date)
 
-	if strings.Contains(string(content), "debug message") {
+	if strings.Contains(content, "debug message") {
 		t.Errorf("DEBUG message should not be in log file")
 	}
 
-	if !strings.Contains(string(content), "info message") {
+	if !strings.Contains(content, "info message") {
 		t.Errorf("INFO message should be in log file")
 	}
 
@@ -770,5 +771,71 @@ func TestWriteToFileRetriesLazyOpenOnNextWrite(t *testing.T) {
 	}
 	if strings.Contains(content, "dropped while blocked") {
 		t.Errorf("Entry of the failed open must have been dropped; content: %s", content)
+	}
+}
+
+// TestDisableFileLoggingStopsWriting is the regression test for the re-review
+// finding on 0c22ba8: DisableFileLogging closed/nil'd the handles but left
+// basePath/logDate set, so the new lazy open in writeToFile recreated the log
+// files on the next write — Disable no longer disabled. After Disable, no
+// write may create a file or append to an existing one, while basePath must be
+// preserved (LogPathFor/GetLogsPath are the read-side contract for the REST
+// API / WebUI and must keep resolving).
+func TestDisableFileLoggingStopsWriting(t *testing.T) {
+	tempDir := t.TempDir()
+
+	origPath := GetLogsPath()
+	defer SetLogsPath(origPath)
+	DisableFileLogging()
+	defer DisableFileLogging()
+
+	if err := EnableMultiFileLogging(tempDir); err != nil {
+		t.Fatalf("EnableMultiFileLogging failed: %v", err)
+	}
+	// Sanity: Enable creates both canonical files (empty until first write).
+	infoPath, err := LogPathFor("info", time.Now().Format("2006-01-02"))
+	if err != nil {
+		t.Fatalf("LogPathFor(info): %v", err)
+	}
+	errorPath, err := LogPathFor("error", time.Now().Format("2006-01-02"))
+	if err != nil {
+		t.Fatalf("LogPathFor(error): %v", err)
+	}
+
+	DisableFileLogging()
+
+	SetLevel(INFO)
+	Info("after disable info marker")
+	Warn("after disable warn marker")
+	Error("after disable error marker")
+
+	// basePath must survive Disable: it is the read-side contract.
+	if got := GetLogsPath(); got != tempDir {
+		t.Errorf("GetLogsPath() = %q, want %q (basePath must be kept after Disable)", got, tempDir)
+	}
+
+	// No entry may have reached the files (they were created empty by
+	// Enable; the lazy open must not have appended anything after Disable).
+	for _, p := range []string{infoPath, errorPath} {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("Failed to read %s: %v", p, err)
+		}
+		if len(data) != 0 {
+			t.Errorf("File %s received %d bytes after DisableFileLogging; content: %s", p, len(data), data)
+		}
+	}
+
+	// And no NEW file may have appeared in the directory.
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", tempDir, err)
+	}
+	if len(entries) != 2 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("Expected exactly the 2 files created by Enable after Disable, found %v", names)
 	}
 }

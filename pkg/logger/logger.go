@@ -45,6 +45,7 @@ type Logger struct {
 	logDate   string // Current date for rotation (format: "2006-01-02")
 	basePath  string // Base path for logs directory
 	quiet     bool   // Suppress stdout/stderr messages (for TUI mode)
+	enabled   bool   // File logging enabled: gates lazy opens and writes (see DisableFileLogging)
 }
 
 type LogEntry struct {
@@ -223,6 +224,12 @@ func EnableMultiFileLogging(basePath string) error {
 		return fmt.Errorf("failed to create logs directory: %w", err)
 	}
 
+	// File logging is now on: this must be set before (and even when) the
+	// opens below fail, because a failed open is retried lazily by the next
+	// write (H1 fix), and that lazy open is gated on enabled. All of this
+	// runs under mu, so no write can observe a half-enabled state.
+	logger.enabled = true
+
 	// Close existing files and clear the handles so the struct never keeps
 	// stale (closed) fds around.
 	if logger.infoFile != nil {
@@ -265,10 +272,20 @@ func EnableMultiFileLogging(basePath string) error {
 	return nil
 }
 
-// DisableFileLogging disables file logging
+// DisableFileLogging disables file logging.
+//
+// It closes the handles and flips the enabled flag, but deliberately keeps
+// basePath (and logDate) set: basePath is the read-side contract used by
+// LogPathFor/GetLogsPath (REST API / WebUI log readers) and must keep
+// resolving after a Disable. The enabled flag is what stops the lazy open in
+// the write path from recreating the log files on the next write.
 func DisableFileLogging() {
 	mu.Lock()
 	defer mu.Unlock()
+
+	// Flip the flag first, under the same lock as the write path: no write
+	// can slip through between closing the handles and disabling logging.
+	logger.enabled = false
 
 	if logger.infoFile != nil {
 		logger.infoFile.Close()
@@ -285,6 +302,12 @@ func DisableFileLogging() {
 func checkDateRotation() {
 	mu.Lock()
 	defer mu.Unlock()
+
+	// When file logging is disabled, rotation must be a no-op: reopening
+	// files here would resurrect the very files DisableFileLogging closed.
+	if !logger.enabled {
+		return
+	}
 
 	currentDate := time.Now().Format("2006-01-02")
 	if currentDate == logger.logDate {
@@ -342,6 +365,11 @@ func writeToFile(level LogLevel, entry LogEntry, jsonData []byte) {
 	mu.Lock()
 	defer mu.Unlock()
 
+	// File logging disabled: drop the entry, create no file, write nothing.
+	if !logger.enabled {
+		return
+	}
+
 	data := string(jsonData) + "\n"
 
 	// Only write to file for INFO and above (DEBUG only goes to console)
@@ -358,6 +386,10 @@ func writeToFile(level LogLevel, entry LogEntry, jsonData []byte) {
 // nil so the next write retries. On a write failure it delegates the single
 // reopen to writeWithReopen. Callers must hold mu.
 func writeToLogFile(f **os.File, apiLevel, data string) {
+	// Disabled logger: no lazy open, no write — Disable must stay disabled.
+	if !logger.enabled {
+		return
+	}
 	if *f == nil {
 		nf, err := openLogFile(logger.basePath, apiLevel, logger.logDate)
 		if err != nil {
@@ -375,6 +407,12 @@ func writeToLogFile(f **os.File, apiLevel, data string) {
 // dropped but the logger never panics and never keeps a closed fd around.
 // Callers must hold mu.
 func writeWithReopen(f **os.File, apiLevel, data string) {
+	// Belt and braces: a reopen while disabled would recreate the files
+	// DisableFileLogging closed (normally unreachable — writeToFile and
+	// writeToLogFile are already gated on enabled).
+	if !logger.enabled {
+		return
+	}
 	if _, err := (*f).WriteString(data); err != nil {
 		log.Printf("Error: failed to write to %s log file: %v\n", apiLevel, err)
 		(*f).Close()
