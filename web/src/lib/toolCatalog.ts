@@ -43,6 +43,7 @@ export const TOOL_CATEGORIES: Record<ToolCategory, string[]> = {
     'list_dir',
     'read_image',
     'send_file',
+    'update_memory',
   ],
   system: [
     'exec',

@@ -23,6 +23,7 @@ func newAgentsTestModel(t *testing.T) *Model {
 				MaxTokens:         4096,
 				MaxToolIterations: 25,
 				MaxReadLines:      500,
+				MemoryMaxLines:    500,
 			},
 			List: []config.AgentConfig{
 				{ID: "coder", Name: "Coder", Default: true, Workspace: "/tmp/cw", Temperature: &temp0},
@@ -285,9 +286,9 @@ func TestFindAgent(t *testing.T) {
 func TestLoadAgentDetailDefaults(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.loadAgentDetail("")
-	// Defaults view has 10 rows (9 fields + thinking level)
-	if len(m.modalItems) != 10 {
-		t.Fatalf("expected 10 defaults rows, got %d", len(m.modalItems))
+	// Defaults view has 11 rows (10 fields + thinking level)
+	if len(m.modalItems) != 11 {
+		t.Fatalf("expected 11 defaults rows, got %d", len(m.modalItems))
 	}
 	if !strings.Contains(m.modalItems[1], "test-model") {
 		t.Errorf("model row should show value: %q", m.modalItems[1])
@@ -318,6 +319,40 @@ func TestHandleDefaultsFieldEdit(t *testing.T) {
 	}
 	if m.settingsEditField != "" {
 		t.Fatalf("expected edit field cleared, got %q", m.settingsEditField)
+	}
+}
+
+// TestHandleDefaultsMemoryMaxLines covers the MemoryMaxLines row end-to-end:
+// Enter preloads the current value, a valid number is stored, and invalid
+// input errors without clobbering the previous value (mirrors MaxReadLines).
+func TestHandleDefaultsMemoryMaxLines(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.settingsAgentID = ""
+	m.loadAgentDetail("")
+
+	m.modalSelectedIdx = defaultsFieldMemoryMaxLines
+	m.handleDefaultsEditEnter()
+	if m.settingsEditField != "defaultMemoryMaxLines" {
+		t.Fatalf("expected defaultMemoryMaxLines edit field, got %q", m.settingsEditField)
+	}
+	if got := m.textInput.Value(); got != "500" {
+		t.Fatalf("expected 500 in input, got %q", got)
+	}
+
+	// Valid value lands in the config.
+	m.handleAgentSettingsInput("120")
+	if m.cfg.Agents.Defaults.MemoryMaxLines != 120 {
+		t.Fatalf("expected MemoryMaxLines 120, got %d", m.cfg.Agents.Defaults.MemoryMaxLines)
+	}
+
+	// Invalid value errors and preserves the previous value.
+	m.settingsEditField = "defaultMemoryMaxLines"
+	m.handleAgentSettingsInput("abc")
+	if m.formError == "" {
+		t.Fatal("expected invalid-number error")
+	}
+	if m.cfg.Agents.Defaults.MemoryMaxLines != 120 {
+		t.Fatalf("invalid input must leave the value unchanged, got %d", m.cfg.Agents.Defaults.MemoryMaxLines)
 	}
 }
 
@@ -644,6 +679,7 @@ func TestDefaultsDetailRowIndexAlignment(t *testing.T) {
 		defaultsFieldThinkingLevel:         "Thinking:",
 		defaultsFieldMaxToolIterations:     "MaxToolIterations:",
 		defaultsFieldMaxReadLines:          "MaxReadLines:",
+		defaultsFieldMemoryMaxLines:        "MemoryMaxLines:",
 		defaultsFieldSubagentTimeout:       "SubagentTimeout:",
 		defaultsFieldSubagentMaxConcurrent: "SubagentMaxConcurrent:",
 		defaultsFieldLLMLoopTimeout:        "LLMLoopTimeout:",

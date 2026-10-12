@@ -67,7 +67,11 @@ Identity information about the assistant or installation.
 
 ### `MEMORY.md`
 
-Bootstrap memory included in the initial context.
+Bootstrap memory included in the initial context. The agent updates it with
+the `update_memory` tool (`append` adds a fragment, `replace` rewrites the
+whole file) instead of writing the file path directly. Every write is capped
+at `agents.defaults.memory_max_lines` lines (default `500`): an over-cap write
+is rejected and the agent must compact with `replace`.
 
 ### `HEARTBEAT.md`
 

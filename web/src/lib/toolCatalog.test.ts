@@ -17,6 +17,7 @@ describe('categorize', () => {
 
   test('maps the real registered names', () => {
     expect(categorize('read_file')).toBe('files')
+    expect(categorize('update_memory')).toBe('files')
     expect(categorize('exec')).toBe('system')
     expect(categorize('web_fetch')).toBe('web')
     expect(categorize('spawn')).toBe('agents')
@@ -36,7 +37,7 @@ describe('TOOL_CATEGORIES', () => {
   })
 
   test('spec table sizes (§7.5)', () => {
-    expect(TOOL_CATEGORIES.files).toHaveLength(10)
+    expect(TOOL_CATEGORIES.files).toHaveLength(11)
     expect(TOOL_CATEGORIES.system).toHaveLength(5)
     expect(TOOL_CATEGORIES.agents).toHaveLength(8)
     expect(TOOL_CATEGORIES.hardware).toEqual(['i2c', 'spi'])
