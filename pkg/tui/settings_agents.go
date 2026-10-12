@@ -42,6 +42,7 @@ const (
 	defaultsFieldThinkingLevel        // 4: Thinking level (selector)
 	defaultsFieldMaxToolIterations
 	defaultsFieldMaxReadLines
+	defaultsFieldMemoryMaxLines
 	defaultsFieldSubagentTimeout
 	defaultsFieldSubagentMaxConcurrent
 	defaultsFieldLLMLoopTimeout
@@ -105,6 +106,7 @@ func (m *Model) loadAgentDetail(agentID string) {
 			fmt.Sprintf("Thinking: %s", thinkingLevelStr(d.ThinkingLevel)),
 			fmt.Sprintf("MaxToolIterations: %d", d.MaxToolIterations),
 			fmt.Sprintf("MaxReadLines: %d", d.MaxReadLines),
+			fmt.Sprintf("MemoryMaxLines: %d", d.MemoryMaxLines),
 			fmt.Sprintf("SubagentTimeout: %dm", d.SubagentTimeoutMinutes),
 			fmt.Sprintf("SubagentMaxConcurrent: %d", d.SubagentMaxConcurrent),
 			fmt.Sprintf("LLMLoopTimeout: %dm", d.LLMLoopTimeoutMinutes),
@@ -325,6 +327,10 @@ func (m *Model) handleDefaultsEditEnter() tea.Cmd {
 		m.settingsEditField = "defaultMaxReadLines"
 		m.textInput.SetValue(strconv.Itoa(d.MaxReadLines))
 		m.textInput.Focus()
+	case defaultsFieldMemoryMaxLines: // MemoryMaxLines
+		m.settingsEditField = "defaultMemoryMaxLines"
+		m.textInput.SetValue(strconv.Itoa(d.MemoryMaxLines))
+		m.textInput.Focus()
 	case defaultsFieldSubagentTimeout: // SubagentTimeout
 		m.settingsEditField = "defaultSubagentTimeout"
 		m.textInput.SetValue(strconv.Itoa(d.SubagentTimeoutMinutes))
@@ -519,6 +525,13 @@ func (m *Model) handleDefaultsFieldEdit(value string) {
 			return
 		}
 		d.MaxReadLines = v
+	case "defaultMemoryMaxLines":
+		v, err := strconv.Atoi(value)
+		if err != nil || v < 0 {
+			m.formError = i18n.T("tui.settings.invalidNumber")
+			return
+		}
+		d.MemoryMaxLines = v
 	case "defaultSubagentTimeout":
 		v, err := strconv.Atoi(value)
 		if err != nil || v < 0 {

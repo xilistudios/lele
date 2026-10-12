@@ -205,6 +205,10 @@ func NewAgentInstance(
 	if maxReadLines <= 0 {
 		maxReadLines = 500
 	}
+	memoryMaxLines := defaults.MemoryMaxLines
+	if memoryMaxLines <= 0 {
+		memoryMaxLines = 500
+	}
 	toolsRegistry := tools.NewToolRegistry()
 	sendFileTool := tools.NewSendFileTool()
 	sendFileTool.SetWorkspaceRestrictions(workspace, restrict)
@@ -215,6 +219,7 @@ func NewAgentInstance(
 	toolsRegistry.Register(tools.NewExecToolWithConfig(workspace, restrict, cfg))
 	toolsRegistry.Register(tools.NewEditFileTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict))
+	toolsRegistry.Register(tools.NewUpdateMemoryTool(workspace, memoryMaxLines, restrict))
 
 	// Advanced editing tools. The legacy FMOD preview/apply workflow is deprecated.
 	toolsRegistry.Register(tools.NewSmartEditTool(workspace, restrict))

@@ -260,3 +260,96 @@ func TestNewAgentInstance_ToolsAllowlistNoIntersectionKeepsAll(t *testing.T) {
 			agent.Tools.Count(), base.Tools.Count())
 	}
 }
+
+// --- update_memory wiring ---------------------------------------------------
+
+// memoryLines returns content of exactly n lines (the trailing newline is a
+// terminator, not a line), for behavioural update_memory probes.
+func memoryLines(n int) string {
+	return strings.Repeat("line\n", n)
+}
+
+func TestNewAgentInstance_RegistersUpdateMemoryTool(t *testing.T) {
+	cfg := newAgentInstanceTestConfig(t)
+
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
+	tool, ok := agent.Tools.Get("update_memory")
+	if !ok {
+		t.Fatalf("update_memory not registered, have %v", agent.Tools.List())
+	}
+	// The default config resolves to the 500-line cap, which the description
+	// must surface so the model knows its budget.
+	if !strings.Contains(tool.Description(), "500 lines") {
+		t.Errorf("update_memory description does not mention the 500-line cap: %q", tool.Description())
+	}
+}
+
+// TestNewAgentInstance_MemoryMaxLinesFallback probes the registered tool
+// behaviourally (maxLines is unexported): a non-positive config value must be
+// resolved to the 500-line default, and a configured cap must be honoured.
+func TestNewAgentInstance_MemoryMaxLinesFallback(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("zero falls back to 500", func(t *testing.T) {
+		cfg := newAgentInstanceTestConfig(t)
+		cfg.Agents.Defaults.MemoryMaxLines = 0
+		agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
+
+		// 501 rejected AND 500 accepted pins the resolved cap to exactly 500.
+		over := agent.Tools.Execute(ctx, "update_memory", map[string]interface{}{
+			"content": memoryLines(501), "mode": "replace",
+		})
+		if !over.IsError {
+			t.Fatalf("501-line write accepted, want rejection (ForLLM: %s)", over.ForLLM)
+		}
+		fit := agent.Tools.Execute(ctx, "update_memory", map[string]interface{}{
+			"content": memoryLines(500), "mode": "replace",
+		})
+		if fit.IsError {
+			t.Fatalf("500-line write rejected, want success (ForLLM: %s)", fit.ForLLM)
+		}
+	})
+
+	t.Run("configured cap is honoured", func(t *testing.T) {
+		cfg := newAgentInstanceTestConfig(t)
+		cfg.Agents.Defaults.MemoryMaxLines = 10
+		agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
+
+		over := agent.Tools.Execute(ctx, "update_memory", map[string]interface{}{
+			"content": memoryLines(11), "mode": "replace",
+		})
+		if !over.IsError {
+			t.Fatalf("11-line write accepted with a 10-line cap, want rejection (ForLLM: %s)", over.ForLLM)
+		}
+		fit := agent.Tools.Execute(ctx, "update_memory", map[string]interface{}{
+			"content": memoryLines(10), "mode": "replace",
+		})
+		if fit.IsError {
+			t.Fatalf("10-line write rejected with a 10-line cap, want success (ForLLM: %s)", fit.ForLLM)
+		}
+	})
+}
+
+// TestNewAgentInstance_MemoryToolRespectsAllowlist: the allowlist pass runs
+// after all default registrations, so update_memory is subject to the same
+// per-agent `tools:` filter as every other core tool — a read-only agent can
+// be denied it by name, and naming it alone is a valid allowlist.
+func TestNewAgentInstance_MemoryToolRespectsAllowlist(t *testing.T) {
+	cfg := newAgentInstanceTestConfig(t)
+
+	denied := NewAgentInstance(&config.AgentConfig{
+		ID:    "denied",
+		Tools: []string{"read_file"},
+	}, &cfg.Agents.Defaults, cfg)
+	if _, ok := denied.Tools.Get("update_memory"); ok {
+		t.Error("update_memory must be removed for an allowlist that does not name it")
+	}
+
+	allowed := NewAgentInstance(&config.AgentConfig{
+		ID:    "allowed",
+		Tools: []string{"update_memory"},
+	}, &cfg.Agents.Defaults, cfg)
+	if _, ok := allowed.Tools.Get("update_memory"); !ok {
+		t.Error("update_memory missing for an allowlist that names it")
+	}
+}

@@ -225,6 +225,20 @@ export function GeneralSettings() {
             max={5000}
           />
         </SettingsField>
+        <SettingsField
+          label={t('settings.fields.memoryMaxLines')}
+          path="agents.defaults.memory_max_lines"
+          isDirty={isDirtyPath(dirtyPaths, 'agents.defaults.memory_max_lines')}
+          description={t('settings.descriptions.memoryMaxLines')}
+        >
+          <NumberInput
+            id="agents.defaults.memory_max_lines"
+            value={config.agents.defaults.memory_max_lines}
+            onChange={(v) => updateField('agents.defaults.memory_max_lines', v)}
+            min={1}
+            max={5000}
+          />
+        </SettingsField>
       </SettingsSection>
 
       <SettingsSection title={t('settings.sections.display')}>

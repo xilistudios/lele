@@ -96,6 +96,34 @@ How long a **finished** subagent task stays tracked in memory (and keeps its
   document, so the Web UI settings page reads and writes the same value the file
   holds (an explicit value survives a Web UI save).
 
+### `memory_max_lines`
+
+Cap on the number of lines of the workspace `MEMORY.md` written by the
+`update_memory` tool, in `agents.defaults`.
+
+- default: `500` (lines)
+- units: lines
+- env override (defaults only): `LELE_AGENTS_DEFAULTS_MEMORY_MAX_LINES`
+- what it does: `update_memory` appends to (default) or replaces `MEMORY.md`
+  and counts the lines of the *resulting* file before writing. If the write
+  would exceed this cap it is rejected and nothing is written; the error tells
+  the agent to compact by rewriting the whole file with `mode: "replace"` in
+  `memory_max_lines` lines or fewer. Successful writes report the used/cap
+  budget (`n/cap`) back to the model.
+- `<= 0` (`0` or negative) resolves to the 500-line default when the agent
+  instance is built — the same rule `max_read_lines` uses. Through the
+  editable document behind the Web UI/TUI, `0` cannot be told apart from
+  "unset" and is rewritten as the default.
+- byte ceiling: independent of this line cap, `update_memory` enforces a
+  hard, non-configurable 512 KiB (524288 bytes) ceiling on the resulting
+  `MEMORY.md`. A write that would exceed it is rejected with nothing
+  written — even when the line cap would pass it, because a single
+  arbitrarily long line counts as one line and `MEMORY.md` is inlined into
+  every system prompt.
+- Round-trip: the field is carried in `agents.defaults` of the editable config
+  document, so the Web UI and TUI settings pages read and write the same value
+  the file holds (an explicit value survives a save).
+
 ## `bindings`
 
 Routes a conversation source to a named agent.
@@ -256,6 +284,7 @@ Examples:
 - `LELE_AGENTS_DEFAULTS_WORKSPACE`
 - `LELE_AGENTS_DEFAULTS_MODEL`
 - `LELE_AGENTS_DEFAULTS_SUBAGENT_RETENTION_MINUTES`
+- `LELE_AGENTS_DEFAULTS_MEMORY_MAX_LINES`
 - `LELE_CHANNELS_NATIVE_ENABLED`
 - `LELE_CHANNELS_NATIVE_RATE_LIMIT_ENABLED`
 - `LELE_CHANNELS_NATIVE_RATE_LIMIT_PIN_PER_MINUTE`

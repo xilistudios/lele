@@ -252,6 +252,7 @@ export type EditableAgentDefaults = {
   thinking_level?: string
   max_tool_iterations: number
   max_read_lines: number
+  memory_max_lines: number
 }
 
 export type AgentModelConfig = {

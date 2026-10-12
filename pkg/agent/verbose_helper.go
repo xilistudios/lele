@@ -30,6 +30,8 @@ func formatBasicToolMessage(toolName string, args map[string]interface{}) string
 		return formatBasicFileOp("edit", args)
 	case "append", "append_file":
 		return formatBasicFileOp("append", args)
+	case "update_memory":
+		return formatBasicUpdateMemory(args)
 	case "patch", "sequential_replace":
 		return formatBasicFileOp("patch", args)
 	case "web_search":
@@ -126,6 +128,33 @@ func formatBasicFileOp(action string, args map[string]interface{}) string {
 		return result
 	}
 	return fmt.Sprintf("🛠️ %s: [no path]", cases.Title(language.English).String(action))
+}
+
+// formatBasicUpdateMemory renders update_memory: the mode plus a sanitized
+// one-line preview of the content (the tool has no "path" arg, so the generic
+// formatBasicFileOp cannot be used).
+func formatBasicUpdateMemory(args map[string]interface{}) string {
+	mode := "append"
+	if raw, ok := args["mode"].(string); ok && strings.TrimSpace(raw) != "" {
+		mode = strings.ToLower(strings.TrimSpace(raw))
+	}
+
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("🛠️ Memory: %s", mode))
+	if content, ok := args["content"].(string); ok && content != "" {
+		preview := strings.ReplaceAll(content, "\n", " ")
+		if len(preview) > 50 {
+			preview = preview[:47] + "..."
+		}
+		builder.WriteString(fmt.Sprintf(" %q", preview))
+	}
+
+	result := builder.String()
+	// Ensure total message doesn't exceed limit
+	if len(result) > MaxBasicMessageSize {
+		return result[:MaxBasicMessageSize-3] + "..."
+	}
+	return result
 }
 
 func formatBasicWebSearch(args map[string]interface{}) string {

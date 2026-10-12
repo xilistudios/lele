@@ -22,6 +22,13 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 	if doc.Agents.Defaults.MaxReadLines == 0 {
 		doc.Agents.Defaults.MaxReadLines = defaults.Agents.Defaults.MaxReadLines
 	}
+	// MemoryMaxLines: like SubagentRetentionMinutes below, an explicit 0 cannot
+	// be told apart from unset in a document, so it inherits the default (500)
+	// instead of disabling the cap — a zero that disabled the limit would let
+	// MEMORY.md grow without bound.
+	if doc.Agents.Defaults.MemoryMaxLines == 0 {
+		doc.Agents.Defaults.MemoryMaxLines = defaults.Agents.Defaults.MemoryMaxLines
+	}
 	if doc.Agents.Defaults.SubagentTimeoutMinutes == 0 {
 		doc.Agents.Defaults.SubagentTimeoutMinutes = defaults.Agents.Defaults.SubagentTimeoutMinutes
 	}
@@ -159,6 +166,7 @@ func defaultEditableDocument() *EditableDocument {
 				MaxTokens:                defaults.Agents.Defaults.MaxTokens,
 				MaxToolIterations:        defaults.Agents.Defaults.MaxToolIterations,
 				MaxReadLines:             defaults.Agents.Defaults.MaxReadLines,
+				MemoryMaxLines:           defaults.Agents.Defaults.MemoryMaxLines,
 				SubagentTimeoutMinutes:   defaults.Agents.Defaults.SubagentTimeoutMinutes,
 				SubagentMaxConcurrent:    defaults.Agents.Defaults.SubagentMaxConcurrent,
 				SubagentMaxRetries:       defaults.Agents.Defaults.SubagentMaxRetries,

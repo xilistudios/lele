@@ -392,11 +392,16 @@ type AgentDefaults struct {
 	// "medium", "high"). nil/absent = inherit the provider-model
 	// ReasoningConfig; per-agent AgentConfig.ThinkingLevel overrides it.
 	// See NormalizeThinkingLevel.
-	ThinkingLevel          *string `json:"thinking_level,omitempty" env:"LELE_AGENTS_DEFAULTS_THINKING_LEVEL"`
-	MaxToolIterations      int     `json:"max_tool_iterations" env:"LELE_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
-	MaxReadLines           int     `json:"max_read_lines" env:"LELE_AGENTS_DEFAULTS_MAX_READ_LINES"`
-	SubagentTimeoutMinutes int     `json:"subagent_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_TIMEOUT_MINUTES"` // 0 means no timeout
-	SubagentMaxConcurrent  int     `json:"subagent_max_concurrent" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_CONCURRENT"`   // max concurrent subagent tasks (0 = unlimited)
+	ThinkingLevel     *string `json:"thinking_level,omitempty" env:"LELE_AGENTS_DEFAULTS_THINKING_LEVEL"`
+	MaxToolIterations int     `json:"max_tool_iterations" env:"LELE_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
+	MaxReadLines      int     `json:"max_read_lines" env:"LELE_AGENTS_DEFAULTS_MAX_READ_LINES"`
+	// MemoryMaxLines caps the lines of the workspace MEMORY.md written by the
+	// update_memory tool; <= 0 is resolved to the 500-line default by
+	// NewAgentInstance. 0/absent in the file inherits DefaultConfig (through
+	// the editable document, applyDefaults applies the same inherit rule).
+	MemoryMaxLines         int `json:"memory_max_lines" env:"LELE_AGENTS_DEFAULTS_MEMORY_MAX_LINES"`
+	SubagentTimeoutMinutes int `json:"subagent_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_TIMEOUT_MINUTES"` // 0 means no timeout
+	SubagentMaxConcurrent  int `json:"subagent_max_concurrent" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_CONCURRENT"`   // max concurrent subagent tasks (0 = unlimited)
 	// SubagentMaxRetries bounds re-runs of a subagent whose LLM call failed
 	// transiently. 0 disables retries, but only when reached through config.json:
 	// LoadConfig unmarshals over DefaultConfig, so an explicit 0 in the file wins.
@@ -1260,6 +1265,7 @@ func DefaultConfig() *Config {
 				MaxTokens:              0, // 0 = use provider/model fallback (instance resolves to 8192 when unset)
 				MaxToolIterations:      0, // 0 = unlimited (timeout is the real safety guard)
 				MaxReadLines:           500,
+				MemoryMaxLines:         500,
 				SubagentTimeoutMinutes: 30, // default 30 minutes for subagent tasks
 				SubagentMaxIterations:  0,  // default unlimited for subagent tasks
 				// SubagentMaxRetries bounds how many times a subagent whose LLM

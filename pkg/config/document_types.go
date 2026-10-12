@@ -71,6 +71,7 @@ type EditableAgentDefaults struct {
 	ThinkingLevel          *string `json:"thinking_level,omitempty"`
 	MaxToolIterations      int     `json:"max_tool_iterations"`
 	MaxReadLines           int     `json:"max_read_lines"`
+	MemoryMaxLines         int     `json:"memory_max_lines"`
 	SubagentTimeoutMinutes int     `json:"subagent_timeout_minutes,omitempty"`
 	SubagentMaxConcurrent  int     `json:"subagent_max_concurrent,omitempty"`
 	SubagentMaxRetries     int     `json:"subagent_max_retries,omitempty"`
