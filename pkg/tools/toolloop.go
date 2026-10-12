@@ -760,17 +760,28 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			}
 		}
 
-		// 8. Context compaction — if context window is configured and we exceed
-		// the configured threshold percent, summarize old messages to prevent
-		// hitting the model's token limit.
-		if config.ContextWindow > 0 {
+		// 8. Image/byte budget (unconditional) + context compaction — the byte
+		// budget is enforced even without a configured context window (an
+		// oversized payload would be rejected by the transport before the model
+		// ever sees it); when we exceed the byte budget or the configured
+		// threshold percent, summarize old messages to prevent hitting the
+		// model's token limit.
+		if reduced, evicted := EnforceImageBudget(messages); evicted > 0 {
+			messages = reduced
+			logger.InfoCF("toolloop", "Request image budget enforced", map[string]any{
+				"evicted_parts": evicted,
+				"request_bytes": providers.EstimateRequestBytes(messages),
+				"budget_bytes":  leleconfig.DefaultMaxRequestBytes,
+			})
+		}
+		if config.ContextWindow > 0 || RequestOverBudget(messages) {
 			tokens := EstimateLoopTokens(messages)
 			percent := config.CompactionThresholdPercent
 			if percent <= 0 || percent > 100 {
 				percent = leleconfig.DefaultCompactionThresholdPercent
 			}
 			threshold := config.ContextWindow * percent / 100
-			if tokens > threshold {
+			if tokens > threshold || RequestOverBudget(messages) {
 				logger.InfoCF("toolloop", "Context compaction triggered", map[string]any{
 					"tokens":            tokens,
 					"threshold":         threshold,

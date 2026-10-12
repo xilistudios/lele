@@ -369,6 +369,12 @@ const DefaultEphemeralThresholdSeconds = 560
 // context window at which session history is summarized/compacted.
 const DefaultCompactionThresholdPercent = 75
 
+// DefaultMaxRequestBytes is the outbound request-size budget that keeps the payload
+// under the transport layer's body cap (the configured router rejects bodies over
+// 10 MiB with HTTP 400). 8 MiB leaves margin for the JSON envelope, the system
+// prompt and the tool definitions.
+const DefaultMaxRequestBytes = 8 << 20 // 8 MiB
+
 // SessionEphemeralFileDefault is the value used when a config file omits
 // session.ephemeral. It intentionally differs from DefaultConfig()'s
 // Ephemeral=true (the no-file first-run privacy default) so that a missing

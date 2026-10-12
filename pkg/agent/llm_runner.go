@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/constants"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
@@ -1082,11 +1083,27 @@ func stripImageContentParts(messages []providers.Message) []providers.Message {
 // takes the current messages slice and returns the (possibly compacted)
 // slice.
 func (lr *llmRunnerImpl) maybeCompactLoopContext(ctx context.Context, agent *AgentInstance, messages []providers.Message, model string, opts processOptions, iteration int) []providers.Message {
-	if contextWindow := lr.al.getSessionContextWindow(opts.SessionKey); contextWindow > 0 {
+	// Image/byte budget is unconditional: it must also run for sessions without a
+	// configured context window, otherwise an oversized payload (base64 images)
+	// reaches the transport and is rejected with HTTP 400.
+	if reduced, evicted := tools.EnforceImageBudget(messages); evicted > 0 {
+		messages = reduced
+		logger.InfoCF("agent", "Request image budget enforced", map[string]interface{}{
+			"agent_id":      agent.ID,
+			"session_key":   opts.SessionKey,
+			"iteration":     iteration,
+			"evicted_parts": evicted,
+			"request_bytes": providers.EstimateRequestBytes(messages),
+			"budget_bytes":  config.DefaultMaxRequestBytes,
+		})
+	}
+
+	contextWindow := lr.al.getSessionContextWindow(opts.SessionKey)
+	if contextWindow > 0 || tools.RequestOverBudget(messages) {
 		tokens := tools.EstimateLoopTokens(messages)
 		thresholdPercent := lr.al.cfg().SessionCompactionThresholdPercent()
 		threshold := contextWindow * thresholdPercent / 100
-		if tokens > threshold {
+		if tokens > threshold || tools.RequestOverBudget(messages) {
 			logger.InfoCF("agent", "Intra-loop context compaction triggered", map[string]interface{}{
 				"agent_id":       agent.ID,
 				"session_key":    opts.SessionKey,

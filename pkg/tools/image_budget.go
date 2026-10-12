@@ -17,6 +17,9 @@ import (
 	"image/jpeg"
 	"image/png"
 	"strings"
+
+	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/providers"
 )
 
 const (
@@ -269,4 +272,35 @@ func encodeJPEGPayload(img image.Image, quality int) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// MaxLiveImages is the hard ceiling on how many live (non-evicted) image/video
+// parts may travel in one request. Older ones are replaced by a text placeholder.
+const MaxLiveImages = 4
+
+// RequestOverBudget reports whether the estimated serialized payload of messages
+// exceeds the outbound request-size budget (config.DefaultMaxRequestBytes).
+func RequestOverBudget(messages []providers.Message) bool {
+	return providers.EstimateRequestBytes(messages) > config.DefaultMaxRequestBytes
+}
+
+// EnforceImageBudget reduces the live image/video content of messages so the request
+// fits the transport budget: at most MaxLiveImages live parts, and, when the byte
+// estimate still exceeds the budget, progressively fewer (the oldest first, down to
+// zero). It returns the (possibly copied) slice and the number of parts evicted.
+// With no heavy part it returns the input slice unchanged and 0 (no allocation).
+func EnforceImageBudget(messages []providers.Message) ([]providers.Message, int) {
+	if count, _ := providers.LiveMultimodalParts(messages); count == 0 {
+		return messages, 0
+	}
+	reduced, evicted := providers.ReduceImageParts(messages, MaxLiveImages)
+	for keep := MaxLiveImages - 1; keep >= 0 && RequestOverBudget(reduced); keep-- {
+		var n int
+		reduced, n = providers.ReduceImageParts(reduced, keep)
+		evicted += n
+	}
+	if evicted == 0 {
+		return messages, 0
+	}
+	return reduced, evicted
 }

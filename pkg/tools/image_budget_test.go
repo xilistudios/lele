@@ -12,8 +12,12 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/providers"
 )
 
 // ---------------------------------------------------------------------------
@@ -233,5 +237,139 @@ func TestBoundImagePayload_PixelBombRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "too large to process safely") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T4: request image/byte budget (EnforceImageBudget / RequestOverBudget).
+// ---------------------------------------------------------------------------
+
+// makeHeavyImageMessages builds count user messages, each carrying a text part
+// and one data: image part whose URL is payloadBytes long (filler from the
+// base64 alphabet — no real image is allocated). Content is left empty so
+// eviction replaces the heavy part with the text placeholder instead of
+// deleting it.
+func makeHeavyImageMessages(count, payloadBytes int) []providers.Message {
+	payload := strings.Repeat("A", payloadBytes)
+	msgs := make([]providers.Message, 0, count)
+	for i := 0; i < count; i++ {
+		msgs = append(msgs, providers.Message{
+			Role: "user",
+			ContentParts: []providers.ContentPart{
+				{Type: "text", Text: "describe this"},
+				{Type: "image_url", ImageURL: &providers.ImageURL{URL: "data:image/jpeg;base64," + payload}},
+			},
+		})
+	}
+	return msgs
+}
+
+func TestEnforceImageBudget_DropsOldestFirst(t *testing.T) {
+	// Just under 2 MiB per part: 4 survivors plus their JSON overhead stay
+	// under the 8 MiB budget, so the count cap alone decides and the four
+	// newest parts must survive byte-identical. Exactly 2 MiB (2,097,152)
+	// per part would make 4 survivors exceed the budget by themselves and
+	// trigger the byte-driven pass (covered by
+	// TestEnforceImageBudget_ByteDrivenBeyondCount).
+	const partBytes = 2_000_000
+	in := makeHeavyImageMessages(6, partBytes)
+
+	out, evicted := EnforceImageBudget(in)
+
+	live, _ := providers.LiveMultimodalParts(out)
+	if live > MaxLiveImages {
+		t.Fatalf("live heavy parts = %d, want <= %d", live, MaxLiveImages)
+	}
+	if live != 4 {
+		t.Fatalf("live heavy parts = %d, want 4 (count cap only)", live)
+	}
+	// The eviction count must equal the number of replaced parts.
+	if placeholders := 6 - live; evicted != placeholders {
+		t.Fatalf("evicted = %d, want %d (the number of replaced parts)", evicted, placeholders)
+	}
+	// The four newest parts are byte-identical to the input ones.
+	for i := 2; i < 6; i++ {
+		got, want := out[i].ContentParts[1].ImageURL, in[i].ContentParts[1].ImageURL
+		if got == nil || want == nil || got.URL != want.URL {
+			t.Fatalf("message %d: newest image part must survive byte-identical", i)
+		}
+	}
+	// The two oldest carry the text placeholder and no heavy part.
+	for i := 0; i < 2; i++ {
+		if out[i].ContentParts[1].ImageURL != nil {
+			t.Fatalf("message %d: expected the image part to be replaced", i)
+		}
+		if !strings.Contains(out[i].ContentParts[1].Text, "omitted") {
+			t.Fatalf("message %d: expected the text placeholder, got %q", i, out[i].ContentParts[1].Text)
+		}
+	}
+	if est := providers.EstimateRequestBytes(out); est > config.DefaultMaxRequestBytes {
+		t.Fatalf("estimate %d exceeds budget %d", est, config.DefaultMaxRequestBytes)
+	}
+}
+
+func TestEnforceImageBudget_ByteDrivenBeyondCount(t *testing.T) {
+	// 4 parts x 2.5 MiB ~ 10 MiB: the count cap alone (MaxLiveImages=4) would
+	// keep them all, but the byte estimate busts the 8 MiB budget, so the
+	// byte-driven pass must evict more (oldest first).
+	const partBytes = 2_621_440 // 2.5 MiB
+	in := makeHeavyImageMessages(4, partBytes)
+
+	out, evicted := EnforceImageBudget(in)
+
+	live, _ := providers.LiveMultimodalParts(out)
+	if live >= MaxLiveImages {
+		t.Fatalf("live heavy parts = %d, want < %d (byte budget must evict beyond the count cap)", live, MaxLiveImages)
+	}
+	if live != 3 {
+		t.Fatalf("live heavy parts = %d, want 3", live)
+	}
+	if evicted != 1 {
+		t.Fatalf("evicted = %d, want 1", evicted)
+	}
+	if est := providers.EstimateRequestBytes(out); est > config.DefaultMaxRequestBytes {
+		t.Fatalf("estimate %d exceeds budget %d", est, config.DefaultMaxRequestBytes)
+	}
+	// The newest part survives; the oldest was replaced.
+	if out[3].ContentParts[1].ImageURL == nil {
+		t.Fatal("newest image part should survive")
+	}
+	if out[0].ContentParts[1].ImageURL != nil {
+		t.Fatal("oldest image part should be evicted")
+	}
+}
+
+func TestEnforceImageBudget_NoImagesIsNoop(t *testing.T) {
+	in := []providers.Message{
+		{Role: "system", Content: "System prompt"},
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "hi"},
+	}
+
+	out, evicted := EnforceImageBudget(in)
+
+	if evicted != 0 {
+		t.Fatalf("evicted = %d, want 0", evicted)
+	}
+	if &out[0] != &in[0] {
+		t.Fatal("expected the input slice back (identity), got a copy")
+	}
+	if !reflect.DeepEqual(out, in) {
+		t.Fatal("expected output DeepEqual with the input")
+	}
+}
+
+func TestRequestOverBudget(t *testing.T) {
+	over := []providers.Message{
+		{Role: "user", Content: strings.Repeat("X", 9<<20)}, // 9 MiB text body
+	}
+	if !RequestOverBudget(over) {
+		t.Fatal("a message above config.DefaultMaxRequestBytes must be reported over budget")
+	}
+	under := []providers.Message{
+		{Role: "user", Content: "small"},
+	}
+	if RequestOverBudget(under) {
+		t.Fatal("a small message must not be reported over budget")
 	}
 }
