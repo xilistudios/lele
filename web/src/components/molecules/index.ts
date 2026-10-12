@@ -1,4 +1,5 @@
 export { AddItemInput } from './AddItemInput'
+export { AgentChipMultiSelect } from './AgentChipMultiSelect'
 export { AuthedImage } from './AuthedImage'
 export { BooleanInput } from './BooleanInput'
 export { CanvasBlock } from './CanvasBlock'
