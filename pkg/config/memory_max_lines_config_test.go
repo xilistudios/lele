@@ -123,3 +123,22 @@ func TestMemoryMaxLinesEnvOverride(t *testing.T) {
 		t.Errorf("LoadConfig memory_max_lines = %d despite env override, want 7", got)
 	}
 }
+
+// TestMemoryMaxLinesToConfigDirect exercises ToConfig() on a directly
+// constructed document (MemoryMaxLines: 120) and asserts the resulting cfg
+// value. Unlike the round-trip above — which builds the document from a
+// config — this pins the doc -> cfg conversion itself (review finding L2: the
+// hand-written field copy in ToConfig and the rebuild from toSerializable both
+// claim to carry the knob; this asserts the observable outcome of ToConfig).
+func TestMemoryMaxLinesToConfigDirect(t *testing.T) {
+	doc := defaultEditableDocument()
+	doc.Agents.Defaults.MemoryMaxLines = 120
+
+	cfg, err := doc.ToConfig()
+	if err != nil {
+		t.Fatalf("ToConfig failed: %v", err)
+	}
+	if got := cfg.Agents.Defaults.MemoryMaxLines; got != 120 {
+		t.Errorf("ToConfig dropped/corrupted memory_max_lines: got %d, want 120", got)
+	}
+}

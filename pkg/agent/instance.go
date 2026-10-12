@@ -219,7 +219,7 @@ func NewAgentInstance(
 	toolsRegistry.Register(tools.NewExecToolWithConfig(workspace, restrict, cfg))
 	toolsRegistry.Register(tools.NewEditFileTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict))
-	toolsRegistry.Register(tools.NewUpdateMemoryTool(workspace, memoryMaxLines))
+	toolsRegistry.Register(tools.NewUpdateMemoryTool(workspace, memoryMaxLines, restrict))
 
 	// Advanced editing tools. The legacy FMOD preview/apply workflow is deprecated.
 	toolsRegistry.Register(tools.NewSmartEditTool(workspace, restrict))

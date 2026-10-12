@@ -70,8 +70,11 @@ Identity information about the assistant or installation.
 Bootstrap memory included in the initial context. The agent updates it with
 the `update_memory` tool (`append` adds a fragment, `replace` rewrites the
 whole file) instead of writing the file path directly. Every write is capped
-at `agents.defaults.memory_max_lines` lines (default `500`): an over-cap write
-is rejected and the agent must compact with `replace`.
+at `agents.defaults.memory_max_lines` lines (default `500`) and at a hard
+512 KiB byte ceiling independent of the line cap (a single arbitrarily long
+line counts as one line, and `MEMORY.md` is inlined into every system
+prompt): an over-cap write — line or byte — is rejected and nothing is
+written; the agent must compact with `replace`.
 
 ### `HEARTBEAT.md`
 

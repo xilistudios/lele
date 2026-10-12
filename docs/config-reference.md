@@ -114,6 +114,12 @@ Cap on the number of lines of the workspace `MEMORY.md` written by the
   instance is built — the same rule `max_read_lines` uses. Through the
   editable document behind the Web UI/TUI, `0` cannot be told apart from
   "unset" and is rewritten as the default.
+- byte ceiling: independent of this line cap, `update_memory` enforces a
+  hard, non-configurable 512 KiB (524288 bytes) ceiling on the resulting
+  `MEMORY.md`. A write that would exceed it is rejected with nothing
+  written — even when the line cap would pass it, because a single
+  arbitrarily long line counts as one line and `MEMORY.md` is inlined into
+  every system prompt.
 - Round-trip: the field is carried in `agents.defaults` of the editable config
   document, so the Web UI and TUI settings pages read and write the same value
   the file holds (an explicit value survives a save).
