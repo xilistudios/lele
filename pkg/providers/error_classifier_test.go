@@ -842,6 +842,82 @@ func TestClassifyError_Structured_UnmappedStatusFallsBackToBodyPatterns(t *testi
 	}
 }
 
+// The configured gateway caps request bodies at 10 MiB and answers 400 with
+// this exact body. The 400 keeps mapping to FailoverFormat (terminal), while
+// IsContextOverflowError must ALSO match it, so llm_caller.executeWithRetry
+// takes its shrink-and-retry branch instead of aborting the turn and leaving
+// the session poisoned.
+func TestClassifyError_RequestBodyTooLargeIsFormatAndRecoverable(t *testing.T) {
+	err := &stubAPIError{status: 400, body: `{"error":{"message":"failed to read request body: http: request body too large","type":"invalid_request_error"}}`}
+	result := ClassifyError(err, "openai", "gpt-4o")
+	if result == nil {
+		t.Fatal("expected non-nil")
+	}
+	if result.Reason != FailoverFormat {
+		t.Errorf("reason = %q, want %q", result.Reason, FailoverFormat)
+	}
+	if !result.IsTerminal() {
+		t.Error("400 must stay terminal")
+	}
+	if !IsContextOverflowError(err) {
+		t.Error("gateway body-too-large must be detected as overflow so shrink-and-retry runs")
+	}
+	if !IsRequestSizeError(err) {
+		t.Error("gateway body-too-large must be a request-size error")
+	}
+}
+
+// Deliberate behaviour change: a bare 413 used to be unmapped and fell
+// through to FailoverUnknown (transient), which made the fallback chain
+// re-send the same oversized payload to every candidate. It is now
+// FailoverFormat like 400, regardless of the body prose.
+func TestClassifyError_Status413IsFormat(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"413 payload too large body", "payload too large"},
+		{"413 unrelated body", "teapot"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ClassifyError(&stubAPIError{status: 413, body: tt.body}, "openai", "gpt-4o")
+			if result == nil {
+				t.Fatal("expected non-nil")
+			}
+			if result.Reason != FailoverFormat {
+				t.Errorf("reason = %q, want %q (413 is a request-shape rejection)", result.Reason, FailoverFormat)
+			}
+			if result.Status != 413 {
+				t.Errorf("Status = %d, want 413", result.Status)
+			}
+			if !result.IsTerminal() {
+				t.Error("413 must be terminal: the identical payload fails everywhere")
+			}
+		})
+	}
+}
+
+// An image rejected for its dimensions is a request-shape failure: terminal
+// (format) AND detectably recoverable via the overflow path, so image-shrinking
+// retry logic can engage instead of the turn being aborted.
+func TestClassifyError_ImageRejectionIsRecoverable(t *testing.T) {
+	err := &stubAPIError{status: 400, body: "image dimensions exceed max allowed size"}
+	result := ClassifyError(err, "openai", "gpt-4o")
+	if result == nil {
+		t.Fatal("expected non-nil")
+	}
+	if result.Reason != FailoverFormat {
+		t.Errorf("reason = %q, want %q", result.Reason, FailoverFormat)
+	}
+	if !result.IsTerminal() {
+		t.Error("image dimension rejection must be terminal")
+	}
+	if !IsContextOverflowError(err) {
+		t.Error("image dimension rejection must be detected as recoverable overflow")
+	}
+}
+
 // Real callers wrap the provider error (fmt.Errorf("...: %w")), so the
 // structured path must be reached through errors.As, not through a type
 // assertion on the top-level error.
