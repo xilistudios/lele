@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useSecrets } from '../../hooks/useSecrets'
-import type { SecretAuditRecord, SecretInput, SecretMeta } from '../../lib/types'
+import type { Agent, SecretAuditRecord, SecretInput, SecretMeta } from '../../lib/types'
 import { Button, ErrorBanner, Modal } from '../atoms'
+import { AgentChipMultiSelect } from '../molecules'
 import { Sidebar } from '../organisms/Sidebar'
 
 // ---------------------------------------------------------------------------
@@ -210,12 +211,15 @@ function SecretCard({
 // Add / edit form modal
 // ---------------------------------------------------------------------------
 
-function SecretFormModal({
+export function SecretFormModal({
   busy,
+  agents,
   onClose,
   onSubmit,
 }: {
   busy: boolean
+  /** Roster the scope selector grants access to (from the app's agent list). */
+  agents: Agent[]
   onClose: () => void
   onSubmit: (input: SecretInput) => Promise<void>
 }) {
@@ -228,7 +232,6 @@ function SecretFormModal({
     scope: [],
   })
   const [tagsText, setTagsText] = useState('')
-  const [scopeText, setScopeText] = useState('')
   const [showValue, setShowValue] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -250,10 +253,8 @@ function SecretFormModal({
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean),
-      scope: scopeText
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
+      // Scope is chosen from the agent roster (chips), not parsed from text.
+      scope: form.scope ?? [],
     }
     try {
       await onSubmit(input)
@@ -261,7 +262,7 @@ function SecretFormModal({
     } catch (err) {
       setError((err as Error).message)
     }
-  }, [form, tagsText, scopeText, onSubmit, onClose, t])
+  }, [form, tagsText, onSubmit, onClose, t])
 
   const labelCls = 'mb-1 block text-xs font-medium text-text-secondary'
   const inputCls =
@@ -319,31 +320,33 @@ function SecretFormModal({
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={labelCls} htmlFor="secret-tags">
-              {t('secrets.tags', 'Tags')}
-            </label>
-            <input
-              id="secret-tags"
-              className={inputCls}
-              value={tagsText}
-              onChange={(e) => setTagsText(e.target.value)}
-              placeholder={t('secrets.tagsPlaceholder', 'Comma-separated tags')}
-            />
-          </div>
-          <div>
-            <label className={labelCls} htmlFor="secret-scope">
-              {t('secrets.scope', 'Scope')}
-            </label>
-            <input
-              id="secret-scope"
-              className={inputCls}
-              value={scopeText}
-              onChange={(e) => setScopeText(e.target.value)}
-              placeholder={t('secrets.scopePlaceholder', 'Agent IDs (empty = all agents)')}
-            />
-          </div>
+        <div>
+          <label className={labelCls} htmlFor="secret-tags">
+            {t('secrets.tags', 'Tags')}
+          </label>
+          <input
+            id="secret-tags"
+            className={inputCls}
+            value={tagsText}
+            onChange={(e) => setTagsText(e.target.value)}
+            placeholder={t('secrets.tagsPlaceholder', 'Comma-separated tags')}
+          />
+        </div>
+
+        <div>
+          <span className={labelCls}>{t('secrets.scope', 'Scope')}</span>
+          <p className="mb-2 text-xs text-text-tertiary">
+            {t('secrets.scopeHelp', 'Empty = every agent can read this secret')}
+          </p>
+          <AgentChipMultiSelect
+            id="secret-scope"
+            agents={agents}
+            value={form.scope ?? []}
+            onChange={(value) => setForm((f) => ({ ...f, scope: value }))}
+            disabled={busy}
+            empty={t('secrets.noAgents', 'No agents configured')}
+            ariaLabel={t('secrets.scope', 'Scope')}
+          />
         </div>
 
         {error && (
@@ -424,7 +427,7 @@ function AuditLog({ records }: { records: SecretAuditRecord[] }) {
 
 export function SecretsPage() {
   const { t } = useTranslation()
-  const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar } =
+  const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar, agents } =
     useAppLogicContext()
   const {
     secrets,
@@ -640,6 +643,7 @@ export function SecretsPage() {
       {formOpen && (
         <SecretFormModal
           busy={formBusy}
+          agents={agents}
           onClose={() => setFormOpen(false)}
           onSubmit={handleCreate}
         />

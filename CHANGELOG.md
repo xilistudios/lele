@@ -46,6 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Native
 - Rate limiting on native routes is now opt-in — disabled by default, configurable via `channels.native.rate_limit` (config file, WebUI, and `LELE_CHANNELS_NATIVE_RATE_LIMIT_*` env vars).  Set `enabled: true` to restore the legacy per-source-IP budgets (10 PINs/min, 5 pairings/min, 20 token refreshes/min, 120 API requests/min, 120 WebSocket messages/min); individual fields can be overridden and `0` or omitted means the built-in default.  The change was motivated by a browser with several tabs continuously refreshing tokens and signing itself out when the limits were hard-coded.  A stock install binds all interfaces (`0.0.0.0`), so the unauthenticated `POST /api/v1/auth/pair` endpoint (6-digit PIN, 5-minute expiry) loses its only brute-force control when the feature is off; a non-loopback bind with rate limiting disabled now logs a startup warning suggesting `channels.native.rate_limit.enabled=true`.  Enable it on any network-reachable install.
 
+#### WebUI
+- **The secret scope is now picked from the agent roster instead of typed** — creating a secret (`/secrets` → *New*) asked for its scope as a free-text, comma-separated list of agent IDs, so a typo silently scoped a secret to an agent that does not exist. The field is now a chip multi-select — one chip per configured agent, built from the app's live agent list (`GET /api/v1/agents`, the same source the sidebar uses) and reusing the `AgentChipMultiSelect` the per-agent *Subagents* tab already ships. No selection still means "all agents" (`scope: []`), an empty roster shows an explicit empty state instead of a bare input, and the value is carried as `string[]` end to end (the old `scopeText`/`.split(',')` parsing is gone). Each chip is a keyboard-toggleable `role="checkbox"` and the group carries the field's accessible name, so the control does not depend on a pointer.
+
 ### Fixed
 
 #### Session
