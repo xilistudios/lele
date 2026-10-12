@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"os"
@@ -83,5 +84,52 @@ func TestReadImageTool_Execute_UnsupportedType(t *testing.T) {
 	}
 	if !strings.Contains(result.ForLLM, "unsupported image type") {
 		t.Fatalf("unexpected error: %s", result.ForLLM)
+	}
+}
+
+func TestReadImageTool_Execute_SmallImageUnchanged(t *testing.T) {
+	tmpDir := t.TempDir()
+	imagePath := writeTinyPNG(t, tmpDir)
+	fileBytes, err := os.ReadFile(imagePath)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+
+	tool := NewReadImageTool(tmpDir, true)
+	result := tool.Execute(context.Background(), map[string]interface{}{
+		"path":   imagePath,
+		"prompt": "Describe this image",
+		"detail": "high",
+	})
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", result.ForLLM)
+	}
+
+	msg := result.ContextMessages[0]
+	url := msg.ContentParts[1].ImageURL.URL
+	const prefix = "data:image/png;base64,"
+	if !strings.HasPrefix(url, prefix) {
+		t.Fatalf("unexpected data url prefix: %q", url[:40])
+	}
+	payload, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(url, prefix))
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if !bytes.Equal(payload, fileBytes) {
+		t.Fatalf("small image payload was altered: in=%d bytes out=%d bytes", len(fileBytes), len(payload))
+	}
+
+	// Detail and part ordering must be untouched by the bound.
+	if len(msg.ContentParts) != 2 {
+		t.Fatalf("ContentParts len = %d, want 2", len(msg.ContentParts))
+	}
+	if msg.ContentParts[0].Text != "Describe this image" {
+		t.Fatalf("text part = %q", msg.ContentParts[0].Text)
+	}
+	if msg.ContentParts[1].ImageURL.Detail != "high" {
+		t.Fatalf("detail = %q, want high", msg.ContentParts[1].ImageURL.Detail)
+	}
+	if strings.Contains(result.ForLLM, "resized") {
+		t.Fatalf("ForLLM should not mention resize for a small image: %s", result.ForLLM)
 	}
 }
