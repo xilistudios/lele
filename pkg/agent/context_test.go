@@ -196,6 +196,54 @@ func TestGetIdentity_WithTools(t *testing.T) {
 	}
 }
 
+// TestGetIdentity_NoMemoryPath tests that the identity prompt points at the
+// update_memory tool instead of exposing the MEMORY.md path, and that no
+// fmt verb leaks (%!s(MISSING)/%!(EXTRA)) from a Sprintf arg-count mismatch.
+func TestGetIdentity_NoMemoryPath(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	identity := cb.getIdentity()
+
+	// No memory path anywhere in the prompt
+	if strings.Contains(identity, "MEMORY.md") {
+		t.Error("Expected identity not to contain 'MEMORY.md'")
+	}
+	if strings.Contains(identity, "/MEMORY") {
+		t.Error("Expected identity not to contain '/MEMORY'")
+	}
+
+	// The memory rule must reference the tool (with markdown inline-code
+	// backticks, as the plan's rule-3 text specifies)...
+	if !strings.Contains(identity, "update_memory") {
+		t.Error("Expected identity to contain 'update_memory'")
+	}
+	if !strings.Contains(identity, "`update_memory`") {
+		t.Error("Expected identity to contain '`update_memory`' (inline-code markup rendered)")
+	}
+	// ...and no fmt verb leakage (Sprintf placeholder/arg mismatch)
+	if strings.Contains(identity, "%!") {
+		t.Error("Expected identity not to contain fmt error markers ('%!')")
+	}
+
+	// The remaining workspacePath args must still render the workspace and
+	// skills lines correctly (they consume two of the four Sprintf args).
+	absPath, _ := filepath.Abs(tmpDir)
+	if !strings.Contains(identity, "Your workspace is at: "+absPath) {
+		t.Errorf("Expected identity to contain workspace line with '%s'", absPath)
+	}
+	if !strings.Contains(identity, "- Skills: "+absPath+"/skills/{skill-name}/SKILL.md") {
+		t.Errorf("Expected identity to contain skills line with '%s'", absPath)
+	}
+	if !strings.Contains(identity, "## Workspace") {
+		t.Error("Expected identity to contain '## Workspace' section")
+	}
+}
+
 // TestBuildToolsSection_WithTools tests buildToolsSection with registered tools
 func TestBuildToolsSection_WithTools(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
