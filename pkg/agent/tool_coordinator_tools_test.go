@@ -258,6 +258,24 @@ func TestSharedTools_RegistersEverySharedTool(t *testing.T) {
 	mustHave(t, agent.Tools, "unrestricted main", sharedToolNames...)
 }
 
+// TestSharedTools_SubagentsInheritUpdateMemoryTool locks the F1 property: the
+// subagent tool set is cloned via CloneWithout(...) at tool_coordinator.go, and
+// update_memory must NOT be in that exclusion list. Subagents share the parent
+// instance's tool set and workspace, so they may update the same MEMORY.md
+// (accepted explicitly: the per-write line cap bounds the damage).
+func TestSharedTools_SubagentsInheritUpdateMemoryTool(t *testing.T) {
+	cfg := sharedToolsTestConfig(t, config.AgentConfig{ID: "main", Default: true})
+
+	agent, sm := registerSharedForTest(t, cfg, "main")
+	mustHave(t, agent.Tools, "parent", "update_memory")
+
+	sub := sm.GetToolRegistry()
+	if sub == nil {
+		t.Fatal("subagent manager has no tool registry")
+	}
+	mustHave(t, sub, "subagent", "update_memory")
+}
+
 // --- agentConfigForID / allowlistKeeps unit tests ---------------------------
 
 func TestAgentConfigForID(t *testing.T) {
