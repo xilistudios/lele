@@ -128,6 +128,20 @@
       "tool_call": true
     },
     {
+      "id": "claude-haiku-5-5",
+      "name": "Claude Haiku 5.5",
+      "context_window": 1000000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "deepseek-v4-flash-vision-exp",
       "name": "DeepSeek V4 Flash Vision Exp",
       "context_window": 1000000,
@@ -291,10 +305,24 @@
       "tool_call": true
     },
     {
-      "id": "space-bunny-free",
-      "name": "Space Bunny Free",
+      "id": "space-bunny",
+      "name": "Space Bunny",
       "context_window": 1048576,
       "max_output": 524288,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "step-5-preview-free",
+      "name": "Step 5 Preview Free",
+      "context_window": 1000000,
+      "max_output": 65536,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -368,19 +396,6 @@
       "context_window": 1024000,
       "max_output": 64000,
       "thinking_levels": [
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "longcat-2.0",
-      "name": "LongCat-2.0",
-      "context_window": 1000000,
-      "max_output": 131072,
-      "thinking_levels": [
-        "low",
-        "medium",
         "high"
       ],
       "reasoning": true,

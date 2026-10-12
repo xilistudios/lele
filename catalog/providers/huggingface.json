@@ -364,6 +364,14 @@
       "tool_call": true
     },
     {
+      "id": "Qwen/Qwen3-VL-30B-A3B-Instruct",
+      "name": "Qwen3 VL 30B A3B Instruct",
+      "context_window": 131072,
+      "max_output": 32768,
+      "vision": true,
+      "tool_call": true
+    },
+    {
       "id": "deepseek-ai/DeepSeek-V3",
       "name": "DeepSeek-V3",
       "context_window": 64000,
@@ -395,6 +403,19 @@
       "name": "GLM-4.5-Air",
       "context_window": 131072,
       "max_output": 98304,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "MiniMaxAI/MiniMax-M1-80k",
+      "name": "MiniMax M1 80K",
+      "context_window": 1000000,
+      "max_output": 80000,
       "thinking_levels": [
         "low",
         "medium",
@@ -472,20 +493,6 @@
     {
       "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
       "name": "Qwen3-Coder-480B-A35B-Instruct",
-      "context_window": 262144,
-      "max_output": 66536,
-      "tool_call": true
-    },
-    {
-      "id": "Qwen/Qwen3-Coder-Next",
-      "name": "Qwen3-Coder-Next",
-      "context_window": 262144,
-      "max_output": 65536,
-      "tool_call": true
-    },
-    {
-      "id": "Qwen/Qwen3-Next-80B-A3B-Instruct",
-      "name": "Qwen3-Next-80B-A3B-Instruct",
       "context_window": 262144,
       "max_output": 66536,
       "tool_call": true

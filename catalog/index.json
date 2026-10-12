@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-10-05T14:32:12Z",
+  "updated_at": "2026-10-12T15:18:09Z",
   "source": "models.dev",
   "providers": {
     "alibaba": {
@@ -41,7 +41,7 @@
       "type": "anthropic",
       "api_base": "https://api.anthropic.com/v1",
       "file": "providers/anthropic.json",
-      "model_count": 16
+      "model_count": 17
     },
     "arcee": {
       "id": "arcee",
@@ -177,7 +177,7 @@
       "type": "openai",
       "api_base": "https://api.mistral.ai/v1",
       "file": "providers/mistral.json",
-      "model_count": 25
+      "model_count": 20
     },
     "modelark": {
       "id": "modelark",
@@ -213,7 +213,7 @@
     },
     "novita": {
       "id": "novita",
-      "name": "NovitaAI",
+      "name": "Novita AI",
       "type": "openai",
       "api_base": "https://api.novita.ai/openai",
       "file": "providers/novita.json",
@@ -241,7 +241,7 @@
       "type": "openai",
       "api_base": "https://ollama.com/v1",
       "file": "providers/ollama_cloud.json",
-      "model_count": 24
+      "model_count": 25
     },
     "openai": {
       "id": "openai",
@@ -253,7 +253,7 @@
     },
     "opencode": {
       "id": "opencode",
-      "name": "OpenCode Zen",
+      "name": "OpenCode",
       "type": "openai",
       "api_base": "https://opencode.ai/zen/v1",
       "file": "providers/opencode.json",
@@ -265,7 +265,7 @@
       "type": "openai",
       "api_base": "https://opencode.ai/zen/go/v1",
       "file": "providers/opencode_go.json",
-      "model_count": 29
+      "model_count": 30
     },
     "openrouter": {
       "id": "openrouter",

@@ -61,6 +61,18 @@
       "tool_call": true
     },
     {
+      "id": "mistral-large-4",
+      "name": "Mistral Large 4",
+      "context_window": 1048576,
+      "max_output": 262144,
+      "vision": true,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "minimax-m3",
       "name": "minimax-m3",
       "context_window": 512000,
