@@ -110,7 +110,9 @@ func defaultTransportFactory() transportFactory {
 // the caller's context (or the dial timeout) after a successful dial would
 // kill a healthy connection. Connection lifetime is owned by ClientConn.Close.
 // Initialize is bounded by the dial timeout, which still honors caller
-// cancellation.
+// cancellation. The server identity carried by the initialize result is kept
+// on the returned connection for out-of-band diagnostics (ProbeServer); the
+// manager path never reads it.
 //
 // Never log srv.Env or srv.Headers values anywhere on this path: they hold
 // API keys (TestNoSecretsLogged guards this).
@@ -124,15 +126,29 @@ func (d *mcpDialer) Dial(ctx context.Context, srv ServerConfig) (ClientConn, err
 		_ = cli.Close()
 		return nil, fmt.Errorf("mcp dial: start %s transport: %w", transportKind(srv), err)
 	}
+	conn := &clientConn{cli: cli}
 	if !d.preInit {
 		initCtx, cancel := context.WithTimeout(ctx, d.dialTimeout())
 		defer cancel()
-		if _, err := cli.Initialize(initCtx, initializeRequest()); err != nil {
+		res, err := cli.Initialize(initCtx, initializeRequest())
+		if err != nil {
 			_ = cli.Close()
 			return nil, fmt.Errorf("mcp dial: initialize %s transport: %w", transportKind(srv), err)
 		}
+		// Kept for out-of-band diagnostics only (ProbeServer); the manager
+		// never reads it. A server may legitimately omit its identity.
+		conn.handshake = serverInfoOf(res)
 	}
-	return &clientConn{cli: cli}, nil
+	return conn, nil
+}
+
+// serverInfoOf extracts the identity of an initialize result; a nil result or
+// an omitted implementation yields the zero ServerInfo.
+func serverInfoOf(res *mcp.InitializeResult) ServerInfo {
+	if res == nil {
+		return ServerInfo{}
+	}
+	return ServerInfo{Name: res.ServerInfo.Name, Version: res.ServerInfo.Version}
 }
 
 // dialTimeout returns the configured timeout, falling back to the default.
@@ -226,9 +242,18 @@ func initializeRequest() mcp.InitializeRequest {
 // clientConn adapts *client.Client to ClientConn.
 type clientConn struct {
 	cli mcpClient
+	// handshake is the server identity captured from the initialize result
+	// (zero when the handshake was skipped or reported none). It is consumed
+	// only by ProbeServer, through handshakeInfo.
+	handshake ServerInfo
 }
 
 var _ ClientConn = (*clientConn)(nil)
+
+// handshakeInfo reports the identity the server returned in the initialize
+// handshake. It implements the optional interface ProbeServer looks for;
+// connections built without a handshake simply do not implement it.
+func (c *clientConn) handshakeInfo() ServerInfo { return c.handshake }
 
 // ListTools returns the server's tools (uncached here; the manager caches).
 func (c *clientConn) ListTools(ctx context.Context) ([]mcp.Tool, error) {
