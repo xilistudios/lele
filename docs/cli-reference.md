@@ -16,6 +16,7 @@ This page summarizes the current top-level CLI commands and their main subcomman
 | `lele migrate` | Migrate from OpenClaw |
 | `lele skills` | Manage skills |
 | `lele client` | Manage native channel clients |
+| `lele mcp` | Manage MCP servers (see `docs/mcp.md`) |
 | `lele version` | Show version information |
 
 ## `lele agent`
@@ -123,6 +124,32 @@ lele client remove <client_id>
 lele client status
 ```
 
+## `lele mcp`
+
+Manage the layered `mcp.json` files (list, show, add, remove, edit, test).
+
+Subcommands:
+
+- `list`
+- `show`
+- `add`
+- `remove`
+- `edit`
+- `test`
+
+Examples:
+
+```bash
+lele mcp list
+lele mcp show filesystem
+lele mcp add filesystem --command npx --arg -y --arg @modelcontextprotocol/server-filesystem --arg /tmp
+lele mcp remove filesystem --all
+lele mcp edit api
+lele mcp test api
+```
+
+Full reference: `docs/mcp.md` ("Managing servers from the CLI").
+
 ## `lele update`
 
 Self-update from GitHub Releases (stable channel only).
@@ -177,5 +204,6 @@ lele migrate --force
 
 ## Related Docs
 
+- `docs/mcp.md`
 - `docs/installation-and-onboarding.md`
 - `docs/channel-setup.md`
