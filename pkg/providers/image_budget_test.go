@@ -18,6 +18,9 @@ func deepCopyMessages(in []Message) []Message {
 	out := make([]Message, len(in))
 	for i, m := range in {
 		out[i] = m
+		if m.Media != nil {
+			out[i].Media = append([]string(nil), m.Media...)
+		}
 		if m.ContentParts != nil {
 			out[i].ContentParts = append([]ContentPart(nil), m.ContentParts...)
 			for j := range out[i].ContentParts {
@@ -375,5 +378,196 @@ func TestLiveMultimodalParts_IgnoresRemoteURLs(t *testing.T) {
 	}
 	if bytes != len(dataURL) {
 		t.Errorf("bytes = %d, want %d (only the data: URL)", bytes, len(dataURL))
+	}
+}
+
+// TestIsHeavyMediaEntry pins the Media-entry counterpart of
+// IsHeavyMultimodalPart: only "data:" URLs embed payload; file paths and
+// remote URLs are tiny and are never heavy.
+func TestIsHeavyMediaEntry(t *testing.T) {
+	cases := []struct {
+		name  string
+		media string
+		want  bool
+	}{
+		{"image data URL", "data:image/png;base64,AAAA", true},
+		{"video data URL", "data:video/mp4;base64,AAAA", true},
+		{"file path", "/tmp/photo.jpg", false},
+		{"remote URL", "https://x/y.png", false},
+		{"empty", "", false},
+	}
+	for _, tc := range cases {
+		if got := IsHeavyMediaEntry(tc.media); got != tc.want {
+			t.Errorf("%s (%q): IsHeavyMediaEntry = %v, want %v", tc.name, tc.media, got, tc.want)
+		}
+	}
+}
+
+// TestReduceImageParts_EvictsHeavyMediaDataURLs: a "data:" Media entry is
+// payload the estimator already charges, so the evictor must remove it under
+// the same keepLastImages budget as heavy parts - while leaving the textual
+// Content and the caller's Media backing array untouched (copy-on-write).
+func TestReduceImageParts_EvictsHeavyMediaDataURLs(t *testing.T) {
+	heavyMedia := "data:image/png;base64," + strings.Repeat("A", 200)
+	msgs := []Message{{
+		Role:    "user",
+		Content: "hi",
+		Media:   []string{heavyMedia, "/tmp/photo.jpg"},
+	}}
+	snapshot := deepCopyMessages(msgs)
+
+	got, evicted := ReduceImageParts(msgs, 0)
+	if evicted != 1 {
+		t.Fatalf("evicted = %d, want 1", evicted)
+	}
+	if len(got[0].Media) != 1 || got[0].Media[0] != "/tmp/photo.jpg" {
+		t.Fatalf("Media = %+v, want only the path entry", got[0].Media)
+	}
+	if got[0].Content != "hi" {
+		t.Fatalf("Content = %q, want %q untouched", got[0].Content, "hi")
+	}
+	// Copy-on-write proof: the input message's Media slice must be unchanged.
+	if len(msgs[0].Media) != 2 {
+		t.Fatalf("len(input Media) = %d, want 2 (copy-on-write violated)", len(msgs[0].Media))
+	}
+	if msgs[0].Media[0] != heavyMedia || msgs[0].Media[1] != "/tmp/photo.jpg" {
+		t.Fatalf("input Media = %+v, want the original entries", msgs[0].Media)
+	}
+	if !reflect.DeepEqual(msgs, snapshot) {
+		t.Fatalf("input messages were mutated:\ngot:  %+v\nwant: %+v", msgs, snapshot)
+	}
+}
+
+// TestReduceImageParts_MediaOnlyMessageStaysValid: evicting the only payload
+// of a media-only message (no ContentParts, empty Content) must leave the
+// message valid for the adapters by appending exactly one text placeholder
+// part - never zero parts AND empty content.
+func TestReduceImageParts_MediaOnlyMessageStaysValid(t *testing.T) {
+	msgs := []Message{{
+		Role:    "user",
+		Content: "",
+		Media:   []string{"data:image/png;base64," + strings.Repeat("B", 128)},
+	}}
+	got, evicted := ReduceImageParts(msgs, 0)
+	if evicted != 1 {
+		t.Fatalf("evicted = %d, want 1", evicted)
+	}
+	m := got[0]
+	if len(m.Media) != 0 {
+		t.Fatalf("Media = %+v, want empty after eviction", m.Media)
+	}
+	if len(m.ContentParts) != 1 || m.ContentParts[0].Type != "text" || m.ContentParts[0].Text != omittedPartPlaceholder {
+		t.Fatalf("ContentParts = %+v, want exactly one %q text placeholder part", m.ContentParts, omittedPartPlaceholder)
+	}
+	if m.Content != "" {
+		t.Fatalf("Content = %q, want %q untouched", m.Content, "")
+	}
+	// The validity invariant, asserted explicitly.
+	if len(m.ContentParts) == 0 && m.Content == "" {
+		t.Fatalf("message ended with zero parts and empty content (invalid for adapters)")
+	}
+}
+
+// TestLiveMultimodalParts_CountsMediaDataURLs pins the accounting across both
+// carriers: a ContentParts-only control (existing behaviour), plus one heavy
+// part + one heavy Media entry + one path + one remote URL in the same
+// message: only the two heavy payloads count.
+func TestLiveMultimodalParts_CountsMediaDataURLs(t *testing.T) {
+	// Control: ContentParts-only accounting is unchanged.
+	partURL := "data:image/png;base64," + strings.Repeat("C", 64)
+	control := []Message{{Role: "user", ContentParts: []ContentPart{
+		{Type: "image_url", ImageURL: &ImageURL{URL: partURL}},
+	}}}
+	count, bytes := LiveMultimodalParts(control)
+	if count != 1 || bytes != len(partURL) {
+		t.Fatalf("control: count, bytes = %d, %d; want 1, %d", count, bytes, len(partURL))
+	}
+
+	mediaURL := "data:video/mp4;base64," + strings.Repeat("D", 128)
+	msgs := []Message{{
+		Role: "user",
+		ContentParts: []ContentPart{
+			{Type: "image_url", ImageURL: &ImageURL{URL: partURL}},
+		},
+		Media: []string{mediaURL, "/tmp/photo.jpg", "https://example.com/x.png"},
+	}}
+	count, bytes = LiveMultimodalParts(msgs)
+	if count != 2 {
+		t.Errorf("count = %d, want 2 (1 heavy part + 1 heavy media)", count)
+	}
+	if want := len(partURL) + len(mediaURL); bytes != want {
+		t.Errorf("bytes = %d, want %d", bytes, want)
+	}
+}
+
+// TestReduceImageParts_MediaKeepLastOrdering pins the shared keep budget and
+// its ordering: across messages the newest media entry survives; within one
+// message a heavy media entry outranks a heavy part because it is added later
+// on the wire (common.SerializeMessages emits parts -> text -> media).
+func TestReduceImageParts_MediaKeepLastOrdering(t *testing.T) {
+	mediaA := "data:image/png;base64," + strings.Repeat("A", 64)
+	mediaB := "data:image/png;base64," + strings.Repeat("B", 64)
+
+	// Across messages: keepLast=1 keeps only the LAST message's media entry.
+	msgs := []Message{
+		{Role: "user", Content: "a", Media: []string{mediaA}},
+		{Role: "user", Content: "b", Media: []string{mediaB}},
+	}
+	got, evicted := ReduceImageParts(msgs, 1)
+	if evicted != 1 {
+		t.Fatalf("across messages: evicted = %d, want 1", evicted)
+	}
+	if len(got[0].Media) != 0 {
+		t.Errorf("message 0 Media = %+v, want empty (older entry evicted)", got[0].Media)
+	}
+	if len(got[1].Media) != 1 || got[1].Media[0] != mediaB {
+		t.Errorf("message 1 Media = %+v, want [%s] (newest entry kept)", got[1].Media, mediaB)
+	}
+
+	// Within one message: heavy part + heavy media, keepLast=1 -> the media
+	// entry (later on the wire) survives and the part is evicted.
+	partURL := "data:image/png;base64," + strings.Repeat("P", 96)
+	mixed := []Message{{
+		Role:    "user",
+		Content: "",
+		ContentParts: []ContentPart{
+			{Type: "text", Text: "prompt"},
+			{Type: "image_url", ImageURL: &ImageURL{URL: partURL}},
+		},
+		Media: []string{mediaA},
+	}}
+	got, evicted = ReduceImageParts(mixed, 1)
+	if evicted != 1 {
+		t.Fatalf("within message: evicted = %d, want 1", evicted)
+	}
+	if len(got[0].Media) != 1 || got[0].Media[0] != mediaA {
+		t.Errorf("Media = %+v, want [%s] (later on the wire, kept)", got[0].Media, mediaA)
+	}
+	for _, p := range got[0].ContentParts {
+		if IsHeavyMultimodalPart(p) {
+			t.Errorf("heavy part should have been evicted in favor of the media entry: %+v", p)
+		}
+	}
+	if got[0].ContentParts[0].Text != "prompt" {
+		t.Errorf("text part changed: %+v", got[0].ContentParts[0])
+	}
+}
+
+// TestReduceImageParts_PlainMediaIsNoop: a message carrying only path/remote
+// Media entries is never heavy; keepLast=0 must evict nothing and return the
+// very same input slice (cheap no-op contract).
+func TestReduceImageParts_PlainMediaIsNoop(t *testing.T) {
+	msgs := []Message{
+		{Role: "user", Content: "hi", Media: []string{"/tmp/photo.jpg", "https://example.com/x.png"}},
+	}
+	got, evicted := ReduceImageParts(msgs, 0)
+	if evicted != 0 {
+		t.Fatalf("evicted = %d, want 0", evicted)
+	}
+	if len(got) != len(msgs) || &got[0] != &msgs[0] {
+		t.Fatalf("no-op must return the input slice as-is (got &got[0]=%p, &msgs[0]=%p)", &got[0], &msgs[0])
+	}
+	if !reflect.DeepEqual(got, msgs) {
+		t.Fatalf("no-op changed the messages:\ngot:  %+v\nwant: %+v", got, msgs)
 	}
 }

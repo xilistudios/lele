@@ -302,10 +302,21 @@ func IsHeavyMultimodalPart(part ContentPart) bool {
 	return false
 }
 
-// LiveMultimodalParts counts the heavy multimodal parts (see
-// IsHeavyMultimodalPart) across the message list and sums the byte length of
-// their URLs, i.e. the actual base64 payload weight that must stay below the
-// transport body cap.
+// IsHeavyMediaEntry reports whether a Message.Media entry embeds a base64
+// payload ("data:" URL). Channels normally store file paths here, which are
+// tiny; a data: entry is what the OpenAI-compatible serializer (and the legacy
+// Bedrock fallback) turns into a real image/video part, so it is payload
+// weight the estimator already charges and the evictor must be able to
+// remove.
+func IsHeavyMediaEntry(media string) bool {
+	return strings.HasPrefix(media, "data:")
+}
+
+// LiveMultimodalParts counts the heavy multimodal payloads across both
+// carriers they travel in - ContentParts image/video parts (see
+// IsHeavyMultimodalPart) and Message.Media "data:" entries (see
+// IsHeavyMediaEntry) - and sums the byte length of their URLs, i.e. the
+// actual base64 payload weight that must stay below the transport body cap.
 func LiveMultimodalParts(messages []Message) (count int, bytes int) {
 	for _, m := range messages {
 		for _, part := range m.ContentParts {
@@ -320,27 +331,78 @@ func LiveMultimodalParts(messages []Message) (count int, bytes int) {
 				bytes += len(part.VideoURL.URL)
 			}
 		}
+		for _, entry := range m.Media {
+			if !IsHeavyMediaEntry(entry) {
+				continue
+			}
+			count++
+			bytes += len(entry)
+		}
 	}
 	return count, bytes
 }
 
+// evictHeavyMediaEntries shrinks one message's Media list under a shared keep
+// budget: it walks the entries from the end (most recently added first), lets
+// up to *budget heavy "data:" entries stay alive (decrementing
+// *budget for each) and marks the rest for eviction. Plain file paths and
+// remote URLs are tiny and never consume the budget. It returns a fresh slice
+// holding the kept entries in their original order - so the caller's backing
+// array is never written to - and the number of evicted entries. kept == media
+// (the very same slice) when nothing was evicted.
+func evictHeavyMediaEntries(media []string, budget *int) (kept []string, evicted int) {
+	var evict []bool
+	for j := len(media) - 1; j >= 0; j-- {
+		if !IsHeavyMediaEntry(media[j]) {
+			continue
+		}
+		if *budget > 0 {
+			*budget--
+			continue
+		}
+		if evict == nil {
+			evict = make([]bool, len(media))
+		}
+		evict[j] = true
+	}
+	if evict == nil {
+		return media, 0
+	}
+	kept = make([]string, 0, len(media))
+	for j, entry := range media {
+		if evict[j] {
+			evicted++
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return kept, evicted
+}
+
 // ReduceImageParts deterministically shrinks multimodal payloads without an
-// LLM: it keeps the keepLastImages most recent heavy parts alive and replaces
-// every other heavy part with a text placeholder or deletes it. "Most recent"
-// is defined by walking messages from the end and, within a message, the parts
-// from the end.
+// LLM: it keeps the keepLastImages most recent heavy payloads alive - across
+// BOTH carriers, ContentParts image/video parts and Message.Media "data:"
+// entries - and replaces every other heavy part with a text placeholder or
+// deletes it (media entries are always deleted; they are payload-only carriers
+// with no textual slot). "Most recent" is defined by walking messages from the
+// end and, within a message, from the end of Media first and then of
+// ContentParts: on the wire the order is parts -> text -> media
+// (common.SerializeMessages), so a Media entry is the payload most recently
+// added to the message and consumes the shared keep budget before the parts do.
 //
 // Eviction per message keeps the result valid for the OpenAI/Anthropic/Bedrock
 // adapters (a message may never end up with zero parts *and* empty content):
 // when Content != "" the part is deleted (the rehydrated message already
 // carries its textual marker), otherwise it is replaced in place with a text
-// placeholder part.
+// placeholder part. The invariant spans both carriers: if after the rewrite a
+// message with empty Content has neither ContentParts nor Media left, one text
+// placeholder part is appended.
 //
 // It returns a copy - the input slice, its Message values and their
-// ContentParts backing arrays are never mutated - and the number of parts
-// evicted. When nothing is evicted it returns the input slice unchanged (0), so
-// callers can detect a no-op cheaply. keepLastImages <= 0 evicts all heavy
-// parts.
+// ContentParts *and* Media backing arrays are never mutated - and the number
+// of payloads evicted. When nothing is evicted it returns the input slice
+// unchanged (0), so callers can detect a no-op cheaply. keepLastImages <= 0
+// evicts all heavy payloads.
 func ReduceImageParts(messages []Message, keepLastImages int) ([]Message, int) {
 	if keepLastImages < 0 {
 		keepLastImages = 0
@@ -349,6 +411,8 @@ func ReduceImageParts(messages []Message, keepLastImages int) ([]Message, int) {
 	var reduced []Message // lazily allocated: only when the first edit lands
 	for i := len(messages) - 1; i >= 0; i-- {
 		m := messages[i]
+		// Media pass first: see the budget-order note in the doc comment above.
+		newMedia, mediaEvicted := evictHeavyMediaEntries(m.Media, &keepLastImages)
 		// Decide, from the end of the message, which heavy parts stay alive.
 		var evict []bool
 		changed := false
@@ -366,21 +430,24 @@ func ReduceImageParts(messages []Message, keepLastImages int) ([]Message, int) {
 			evict[j] = true
 			changed = true
 		}
-		if !changed {
+		if !changed && mediaEvicted == 0 {
 			continue
 		}
 		// Copy-on-write of the parts list: evicted parts are either deleted or
 		// replaced by the placeholder.
-		keepPlaceholder := m.Content == ""
-		newParts := make([]ContentPart, 0, len(m.ContentParts))
-		for j, part := range m.ContentParts {
-			if !evict[j] {
-				newParts = append(newParts, part)
-				continue
-			}
-			evicted++
-			if keepPlaceholder {
-				newParts = append(newParts, ContentPart{Type: "text", Text: omittedPartPlaceholder})
+		newParts := m.ContentParts
+		if changed {
+			keepPlaceholder := m.Content == ""
+			newParts = make([]ContentPart, 0, len(m.ContentParts))
+			for j, part := range m.ContentParts {
+				if !evict[j] {
+					newParts = append(newParts, part)
+					continue
+				}
+				evicted++
+				if keepPlaceholder {
+					newParts = append(newParts, ContentPart{Type: "text", Text: omittedPartPlaceholder})
+				}
 			}
 		}
 		if reduced == nil {
@@ -389,6 +456,16 @@ func ReduceImageParts(messages []Message, keepLastImages int) ([]Message, int) {
 		}
 		reduced[i] = m
 		reduced[i].ContentParts = newParts
+		// newMedia already is a freshly allocated slice when (and only when)
+		// an entry was evicted (see evictHeavyMediaEntries), so assigning it
+		// here never touches the caller's Media backing array.
+		reduced[i].Media = newMedia
+		evicted += mediaEvicted
+		// Combined validity invariant across both carriers: a message with
+		// empty Content may never end up with neither parts nor media left.
+		if m.Content == "" && len(reduced[i].ContentParts) == 0 && len(reduced[i].Media) == 0 {
+			reduced[i].ContentParts = []ContentPart{{Type: "text", Text: omittedPartPlaceholder}}
+		}
 	}
 	if evicted == 0 {
 		return messages, 0
