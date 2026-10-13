@@ -19,7 +19,6 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/mcp"
 	"github.com/xilistudios/lele/pkg/routing"
-	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // The `lele mcp` family is a thin, human-facing front-end over pkg/mcp's data
@@ -61,25 +60,14 @@ var mcpUsage = map[string]string{
 	"test":   "lele mcp test <name> [--agent <id>] [--timeout 30s]",
 }
 
-// mcpLoadServer loads one server's tool specs through the production MCP
-// manager. It is a package variable — the ONLY seam this file carves — so
-// tests can exercise the happy/error branches of `lele mcp test` without
-// spawning a child process or hitting the network. Production code never
-// replaces it: mcp.NewManager(paths, nil) uses the real dialer.
-var mcpLoadServer = func(ctx context.Context, paths mcp.Paths, name string) ([]tools.LoadedMCPTool, error) {
-	mgr := mcp.NewManager(paths, nil)
-	defer mgr.Close()
-	return mgr.LoadServer(ctx, name)
-}
-
 // mcpCmd is the os.Args dispatcher. It mirrors modelsCmd's shape (bare
 // `lele mcp` prints help and exits 0; an unknown subcommand prints help and
 // exits 1) while delegating all real work to the testable runMCP* functions.
 //
-// Console logs are suppressed: resolving the agent layer instantiates the
-// agent registry, which logs a provider warning when a config has no API key
-// yet — noise that would otherwise bury the command's own output. The command
-// communicates exclusively through fmt.Fprintf.
+// Console logs are suppressed: loading the config (and the config-layer
+// warnings a bare or half-configured install produces) would otherwise bury
+// the command's own output. The command communicates exclusively through
+// fmt.Fprintf.
 func mcpCmd() {
 	logger.SetQuiet(true)
 	if code := runMCP(os.Stdout, os.Args[2:]); code != 0 {
@@ -136,6 +124,7 @@ Usage:
 
 Common flags:
   --agent <id>            Agent whose workspace provides the agent layer (default: main)
+  --                      end of flags (for a server name starting with '-')
 
 Layers (low → high precedence; highest wins, whole-entry replace):
   global                  <config-dir>/mcp.json
@@ -168,6 +157,9 @@ untouched on an invalid entry, so it is also the repair path for a broken server
 
 Note: ${VAR} references are stored verbatim and expanded only when a server is
 loaded; env/header VALUES are never printed.
+
+Writes are guarded: a layer file outside the home directory, /tmp, /var/folders
+or the current directory is refused before anything is written.
 `)
 }
 
@@ -184,12 +176,19 @@ type mcpParseSpec struct {
 }
 
 // parseMCPFlags walks args in order, accepting flags anywhere before or after
-// positionals. Both "--flag value" and "--flag=value" are understood. The
-// returned slice holds the positional arguments in order.
+// positionals. Both "--flag value" and "--flag=value" are understood. A bare
+// "--" ends flag parsing: everything after it is positional (and the marker
+// itself is dropped), which is how a server named "-dash" stays addressable —
+// validEntryName accepts a leading dash, so the CLI must be able to name it.
+// The returned slice holds the positional arguments in order.
 func parseMCPFlags(args []string, spec mcpParseSpec) ([]string, error) {
 	var pos []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if arg == "--" {
+			pos = append(pos, args[i+1:]...)
+			break
+		}
 		if !strings.HasPrefix(arg, "-") || arg == "-" {
 			pos = append(pos, arg)
 			continue
@@ -289,6 +288,11 @@ func mcpLayerRank(layer string) int {
 
 // mcpPairs turns repeated KEY=VALUE flags into a map. A pair without '=' or
 // with an empty KEY is rejected; an empty value ("KEY=") is allowed.
+//
+// Error messages echo the KEY only — never the text after '=' — because that
+// half holds the value and values may be secrets (the same rule `list` and
+// `show` follow). A pair with no '=' at all is not echoed either: the whole
+// token is then a malformed value whose key cannot be identified.
 func mcpPairs(pairs []string) (map[string]string, error) {
 	if len(pairs) == 0 {
 		return nil, nil
@@ -297,10 +301,10 @@ func mcpPairs(pairs []string) (map[string]string, error) {
 	for _, p := range pairs {
 		eq := strings.IndexByte(p, '=')
 		if eq < 0 {
-			return nil, fmt.Errorf("malformed %q: want KEY=VALUE", p)
+			return nil, errors.New("malformed pair: want KEY=VALUE")
 		}
 		if p[:eq] == "" {
-			return nil, fmt.Errorf("malformed %q: KEY must not be empty", p)
+			return nil, fmt.Errorf("malformed %q: KEY must not be empty", p[:eq])
 		}
 		out[p[:eq]] = p[eq+1:]
 	}
@@ -535,20 +539,24 @@ func parseMCPTestArgs(args []string) (mcpTestArgs, error) {
 
 // mcpPathsFor resolves the three mcp.json roots for one agent ID exactly as
 // the running gateway does (pkg/agent's resolveAgentWorkspace, reached through
-// the same registry the runtime builds): the agent layer is the agent's own
-// workspace, resolved from an explicit workspace, else the shared default.
-// Instantiating the registry also initializes the agent workspace on disk,
-// which is the runtime's own behaviour on first start.
+// agent.AgentWorkspacePath): the agent layer is the agent's own workspace,
+// resolved from an explicit workspace, else the shared default.
+//
+// The resolution is PURE — the registry is deliberately NOT built here. A
+// registry instantiation initializes every agent workspace on disk
+// (NewAgentInstance → InitializeWorkspace), so using it made even `lele mcp
+// list` create <cwd>/memory; agent.AgentWorkspacePath reuses the very same
+// resolveAgentWorkspace rule without touching the filesystem. The unknown-agent
+// error is unchanged: an ID no configured agent normalizes to is refused and
+// the known IDs are listed.
 func mcpPathsFor(agentID string) (mcp.Paths, error) {
 	cfg, err := loadConfig()
 	if err != nil {
 		return mcp.Paths{}, fmt.Errorf("loading config: %w", err)
 	}
-	registry := agent.NewAgentRegistry(cfg)
-	inst, ok := registry.GetAgent(agentID)
+	workspace, ok := agent.AgentWorkspacePath(cfg, agentID)
 	if !ok {
-		ids := registry.ListAgentIDs()
-		sort.Strings(ids)
+		ids := agent.AgentIDs(cfg)
 		known := "none"
 		if len(ids) > 0 {
 			known = strings.Join(ids, ", ")
@@ -561,7 +569,7 @@ func mcpPathsFor(agentID string) (mcp.Paths, error) {
 	}
 	return mcp.Paths{
 		LeleDir:        getLeleDir(),
-		AgentWorkspace: inst.Workspace,
+		AgentWorkspace: workspace,
 		Cwd:            cwd,
 	}, nil
 }
@@ -610,6 +618,23 @@ func mcpStateGlyph(state string) string {
 	default:
 		return mcpGlyphInvalid
 	}
+}
+
+// mcpDerivedInvalidReason explains an entry the runtime rejected WITHOUT a raw
+// verdict: ReadInventory derives "invalid" for a winning entry Discover
+// refused, and Discover's verdict is computed on the EXPANDED config, so the
+// raw file can look perfectly fine (an unexpanded ${VAR} URL that becomes
+// empty). Printing an empty reason ("invalid ()") is never acceptable, so
+// every "invalid" surface uses this text when the raw verdict is empty.
+const mcpDerivedInvalidReason = "the runtime rejects it — its ${VAR} references may expand to empty"
+
+// mcpInvalidReason renders why a copy fails: the raw verdict when the reader
+// produced one, else the derived-invalid explanation above.
+func mcpInvalidReason(row mcp.EntryState) string {
+	if row.Invalid != "" {
+		return row.Invalid
+	}
+	return mcpDerivedInvalidReason
 }
 
 // mcpTruncate clips s to max runes (ellipsis included) and collapses newlines
@@ -852,9 +877,13 @@ func runMCPShow(w io.Writer, args []string) int {
 	s := winner.Summary
 
 	fmt.Fprintf(w, "MCP server %q\n", a.name)
-	if state == "invalid" {
-		fmt.Fprintf(w, "  state:       invalid (%s)\n", winner.Invalid)
-	} else {
+	// ONE verdict source: the STATE line follows Effective (the runtime's
+	// verdict, computed after ${VAR} expansion) and never the raw per-file
+	// verdict. The raw text is still visible, labelled, in the breakdown.
+	switch state {
+	case "invalid":
+		fmt.Fprintf(w, "  state:       invalid (%s)\n", mcpInvalidReason(winner))
+	default:
 		fmt.Fprintf(w, "  state:       %s\n", state)
 	}
 	fmt.Fprintf(w, "  layer:       %s\n", winnerLayer)
@@ -897,7 +926,11 @@ func runMCPShow(w io.Writer, args []string) int {
 		line := fmt.Sprintf("  %-8s present=%s defines=%s disabled=%s", layer,
 			mcpYesNo(row.Present), mcpYesNo(row.Defines), mcpYesNo(row.Disabled))
 		if row.Invalid != "" {
-			line += fmt.Sprintf(" invalid=%q", row.Invalid)
+			// This copy's own verdict, read from the file's RAW bytes (no
+			// ${VAR} expansion). Informational only: the STATE above is the
+			// runtime's, and the two legitimately disagree when expansion is
+			// what makes an entry valid or not.
+			line += fmt.Sprintf("  raw verdict: %q", row.Invalid)
 		}
 		if row.Path != "" {
 			line += "  " + row.Path
@@ -1004,17 +1037,11 @@ func runMCPRemove(w io.Writer, args []string) int {
 
 	switch {
 	case a.all:
-		deleted := 0
 		for _, row := range rows {
 			if err := mcpDeleteRow(w, a.name, row); err != nil {
 				fmt.Fprintf(w, "✗ %v\n", err)
 				return 1
 			}
-			deleted++
-		}
-		if deleted == 0 {
-			fmt.Fprintf(w, "✗ %q is not defined in any layer\n", a.name)
-			return 1
 		}
 		return 0
 	case a.layer != "":
@@ -1029,12 +1056,33 @@ func runMCPRemove(w io.Writer, args []string) int {
 		}
 		return 0
 	default:
-		winner := rows[len(rows)-1]
+		// ByName rows are low → high and ReadInventory always derives Winner
+		// from the last row, so looking it up by name IS rows[len(rows)-1] —
+		// one spelling of "the winner" across show/edit/remove/test.
+		winnerLayer := inv.Winner[a.name]
+		winner, found := mcpFindRow(rows, winnerLayer)
+		if !found {
+			// Unreachable guard: ReadInventory sets Winner for every name it
+			// enumerates, and rows is non-empty here.
+			fmt.Fprintf(w, "✗ %q has no copy in the %s layer\n", a.name, winnerLayer)
+			return 1
+		}
 		if err := mcpDeleteRow(w, a.name, winner); err != nil {
 			fmt.Fprintf(w, "✗ %v\n", err)
 			return 1
 		}
-		remaining := rows[:len(rows)-1]
+		remaining := make([]mcp.EntryState, 0, len(rows)-1)
+		for _, row := range rows {
+			if row.Layer != winnerLayer {
+				remaining = append(remaining, row)
+			}
+		}
+		// Removing a copy that kept the server OFF (a disable stub, or a
+		// disabled definition) can switch a lower layer's definition ON: the
+		// merge loads the highest copy that is a real definition.
+		if reenabled, ok := mcpReenabledBy(winner, remaining); ok {
+			fmt.Fprintf(w, "⚠ this re-enables %q from %s (%s)\n", a.name, reenabled.Layer, reenabled.Path)
+		}
 		for _, row := range remaining {
 			fmt.Fprintf(w, "⊘ note: %q is still defined in %s (%s)\n", a.name, row.Layer, row.Path)
 		}
@@ -1045,11 +1093,38 @@ func runMCPRemove(w io.Writer, args []string) int {
 	}
 }
 
+// mcpReenabledBy reports the copy that takes over once deleted is removed from
+// the merge, when that means the server comes back ON: deleted must have been
+// the reason it was off (a disable stub, i.e. a copy that defines nothing, or a
+// definition carrying "disabled": true) and some lower copy must define it.
+// The highest such definition is the one that would run.
+func mcpReenabledBy(deleted mcp.EntryState, remaining []mcp.EntryState) (mcp.EntryState, bool) {
+	if deleted.Defines && !deleted.Disabled {
+		return mcp.EntryState{}, false // the deleted copy was the live one
+	}
+	var candidate mcp.EntryState
+	found := false
+	for _, row := range remaining { // low → high: the last definition wins
+		if !row.Defines {
+			continue
+		}
+		candidate, found = row, true
+	}
+	return candidate, found
+}
+
 // mcpDeleteRow removes one copy through the byte-splice writer and reports it.
 // A no-op result (nothing found) is an error: the caller only ever deletes
 // rows the inventory proved present, so a no-op means the file changed under
 // us.
+//
+// The path guard runs BEFORE the write, exactly as in `add` and `edit` (and as
+// the REST/TUI surfaces do): all three subcommands must agree on which layer
+// files may be written.
 func mcpDeleteRow(w io.Writer, name string, row mcp.EntryState) error {
+	if err := mcpGuardedLayerFile(row.Path); err != nil {
+		return err
+	}
 	res, err := mcp.DeleteEntry(row.Path, name)
 	if err != nil {
 		return err
@@ -1098,15 +1173,12 @@ func parseMCPEditArgs(args []string) (mcpEditArgs, error) {
 
 // mcpEditTarget resolves which layer's copy an edit must open.
 //
-// The default targets the copy that WINS the merge (Inventory.Winner), i.e.
-// the one a reader actually loads. Invalid entries need no special case: they
-// are excluded from Discover's verdicts but ReadInventory still enumerates
-// them in ByName, and it derives Winner from the winning copy — so the
-// offender a user must repair is already the target. The defining-layer
-// fallback covers the corner where a name survives in ByName with no derived
-// winner at all: editing must work precisely for entries nobody can use, so
-// the highest-rank DEFINING copy is picked (and, failing that, the
-// highest-rank copy — a disable stub is editable too).
+// The default targets the copy that WINS the merge (Inventory.Winner, i.e. the
+// one a reader actually loads — even when that copy is a bare
+// {"disabled":true} stub). Invalid entries need no special case: they are
+// excluded from Discover's verdicts but ReadInventory still enumerates them in
+// ByName, and it derives Winner from the winning copy — so the offender a user
+// must repair is already the target.
 //
 // An explicit layer targets THAT layer's copy (mirroring `remove --layer`),
 // even when a higher layer shadows it.
@@ -1119,6 +1191,10 @@ func mcpEditTarget(inv mcp.Inventory, name, layer string) (mcp.EntryState, bool)
 		row, found := mcpFindRow(rows, layer)
 		return row, found
 	}
+	// ByName rows are low → high and ReadInventory sets Winner for every name
+	// in ByName, so this branch always resolves and the fallback below is
+	// unreachable in practice (defensive guard, kept for a bare Inventory
+	// built by hand in a future caller).
 	if winner, ok := inv.Winner[name]; ok {
 		if row, found := mcpFindRow(rows, winner); found {
 			return row, true
@@ -1158,13 +1234,6 @@ func mcpRunEditor(editor, path string) error {
 	cmd := exec.Command("sh", "-c", editor+` "$1"`, "sh", path)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()
-}
-
-// mcpEntryValid reports whether the layer's copy of name passes validation in
-// a fresh inventory read.
-func mcpEntryValid(inv mcp.Inventory, name, layer string) bool {
-	row, ok := mcpFindRow(inv.ByName[name], layer)
-	return ok && row.Invalid == ""
 }
 
 // runMCPEdit implements `lele mcp edit <name> [--layer L]`: it opens the
@@ -1217,7 +1286,11 @@ func runMCPEdit(w io.Writer, args []string) int {
 		fmt.Fprintf(w, "✗ %q is not defined in %s (%s)\n", a.name, target.Layer, target.Path)
 		return 1
 	}
-	wasInvalid := target.Invalid != ""
+	// The confirmation below is keyed to the EFFECTIVE verdict, not to the
+	// raw one: an entry can be invalid purely because its ${VAR} expanded to
+	// nothing (the raw text looks fine), and those repairs must be announced
+	// too.
+	wasInvalid := inv.Effective[a.name] == "invalid"
 
 	tmp, err := os.CreateTemp("", "lele-mcp-edit-*.json")
 	if err != nil {
@@ -1294,9 +1367,10 @@ func runMCPEdit(w io.Writer, args []string) int {
 	}
 	fmt.Fprintf(w, "✓ updated %q (%s %s)\n", a.name, target.Layer, target.Path)
 	if wasInvalid {
-		// The edited copy validates now — report it only when the fresh read
-		// agrees, so a shadowing layer can never make the claim untrue.
-		if after := mcp.ReadInventory(paths); mcpEntryValid(after, a.name, target.Layer) {
+		// The entry validates now — report it only when the fresh read's
+		// verdict agrees (Effective != "invalid"), so a shadowing layer can
+		// never make the claim untrue.
+		if after := mcp.ReadInventory(paths); after.Effective[a.name] != "invalid" {
 			fmt.Fprintf(w, "✓ %q is now valid\n", a.name)
 		}
 	}
@@ -1316,6 +1390,17 @@ func runMCPEdit(w io.Writer, args []string) int {
 // test
 // ---------------------------------------------------------------------------
 
+// runMCPTest implements `lele mcp test <name> [--timeout d]`.
+//
+// It dials the server's winning DEFINITION through mcp.ProbeServer — the
+// production dial path (transport selection, stdio spawn or HTTP/SSE, the
+// initialize handshake, tools/list) — and never through Manager.LoadServer:
+// the manager deliberately refuses a disabled entry, which is exactly the
+// entry `test` is asked about ("does it answer if I switch it on?").
+//
+// Verdicts follow Inventory.Effective, never the raw per-file text: an entry
+// whose raw bytes look fine can still be rejected by the runtime once ${VAR}
+// references have been expanded, and vice versa.
 func runMCPTest(w io.Writer, args []string) int {
 	a, err := parseMCPTestArgs(args)
 	if err != nil {
@@ -1328,8 +1413,8 @@ func runMCPTest(w io.Writer, args []string) int {
 		return 1
 	}
 	inv := mcp.ReadInventory(paths)
-	state, ok := inv.Effective[a.name]
 	rows := inv.ByName[a.name]
+	state, ok := inv.Effective[a.name]
 	if !ok || len(rows) == 0 {
 		fmt.Fprintf(w, "✗ unknown MCP server %q\n", a.name)
 		if sug := mcpSuggestions(a.name, mcpServerNames(inv)); len(sug) > 0 {
@@ -1337,49 +1422,126 @@ func runMCPTest(w io.Writer, args []string) int {
 		}
 		return 1
 	}
-	winner := rows[len(rows)-1]
-	if winner.Invalid != "" {
-		fmt.Fprintf(w, "✗ %q is invalid: %s (fix with: lele mcp edit %s)\n", a.name, winner.Invalid, a.name)
+	// ByName rows are low → high and ReadInventory always sets Winner (the
+	// last row) — the same spelling of "the winner" as show/edit/remove.
+	winnerLayer := inv.Winner[a.name]
+	winner, found := mcpFindRow(rows, winnerLayer)
+	if !found {
+		// Unreachable guard: Winner always names one of the enumerated rows.
+		fmt.Fprintf(w, "✗ %q has no copy in the %s layer\n", a.name, winnerLayer)
+		return 1
+	}
+	if state == "invalid" {
+		// The runtime's verdict, with the reason the reader has (or the
+		// derived-invalid explanation when the raw text carries none).
+		fmt.Fprintf(w, "✗ %q is invalid: %s (fix with: lele mcp edit %s)\n",
+			a.name, mcpInvalidReason(winner), a.name)
 		return 1
 	}
 	if state == "disabled" {
-		fmt.Fprintf(w, "⊘ %q is disabled (runtime will not load it); testing anyway...\n", a.name)
+		fmt.Fprintf(w, "⊘ %q is disabled in the %s layer — probing it directly (the runtime will not load it)\n",
+			a.name, winnerLayer)
+	}
+
+	// The config is resolved OUTSIDE ProbeServer on purpose: ProbeServer takes
+	// the config as given (it never expands - see its doc comment), so this
+	// side must hand it the EXPANDED entry, exactly the object the runtime's
+	// dialer would receive.
+	cfg, _, err := mcpProbeConfig(rows, a.name)
+	if err != nil {
+		fmt.Fprintf(w, "✗ %v\n", err)
+		return 1
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), a.timeout)
 	defer cancel()
 
-	specs, err := mcpLoadServer(ctx, paths, a.name)
+	res, err := mcp.ProbeServer(ctx, cfg)
 	if err != nil {
 		fmt.Fprintf(w, "✗ %q failed: %v\n", a.name, err)
 		return 1
 	}
-	fmt.Fprintf(w, "✓ %q connected — %d tools", a.name, len(specs))
-	if names := mcpToolNames(specs); len(names) > 0 {
+	fmt.Fprintf(w, "✓ %q connected — %d tools", a.name, len(res.Tools))
+	if names := mcpToolNames(res.Tools); len(names) > 0 {
 		fmt.Fprintf(w, ": %s", strings.Join(names, ", "))
+	}
+	// The handshake identity is diagnostic: only a server that reported a
+	// name is announced (a substituted dialer reports none).
+	if res.Server.Name != "" {
+		fmt.Fprintf(w, " (server: %s)", strings.TrimSpace(res.Server.Name+" "+res.Server.Version))
 	}
 	fmt.Fprintln(w)
 	return 0
+}
+
+// mcpProbeConfig resolves the ServerConfig `lele mcp test` must dial for name:
+// the highest copy whose raw entry is a real DEFINITION. Pure
+// {"disabled":true} stubs are skipped on the way down, because layers replace
+// whole entries — if the stub were deleted (or switched on) the runtime would
+// load the definition underneath it, so that is the config the user is asking
+// about. For an enabled server the first candidate is the winner itself.
+//
+// The returned config is EXPANDED (ParseFile, exactly as Discover expands it
+// for the runtime); ProbeServer never expands. The rows must be low → high.
+//
+// The error case is "every copy is a disable stub": there is nothing to dial.
+func mcpProbeConfig(rows []mcp.EntryState, name string) (mcp.ServerConfig, mcp.EntryState, error) {
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		// EntryRaw reads the copy's raw JSON object without expansion (only
+		// the writer's own accessor knows both the file and the name) — the
+		// clean way to tell a stub from a definition.
+		raw, found, err := mcp.EntryRaw(row.Path, name)
+		if err != nil {
+			return mcp.ServerConfig{}, row, err
+		}
+		if !found {
+			continue // an inventory row whose bytes vanished: nothing to dial
+		}
+		var shape struct {
+			Command string `json:"command"`
+			URL     string `json:"url"`
+		}
+		if err := json.Unmarshal(raw, &shape); err != nil {
+			return mcp.ServerConfig{}, row, fmt.Errorf("%q in %s (%s) is not a JSON object: %w",
+				name, row.Layer, row.Path, err)
+		}
+		if shape.Command == "" && shape.URL == "" {
+			continue // a pure disable stub shadows, it does not define
+		}
+		file, err := mcp.ParseFile(row.Path)
+		if err != nil {
+			return mcp.ServerConfig{}, row, err
+		}
+		cfg, ok := file.MCPServers[name]
+		if !ok {
+			continue
+		}
+		return cfg, row, nil
+	}
+	last := rows[len(rows)-1]
+	return mcp.ServerConfig{}, last, fmt.Errorf("%q is only a disable stub (%s %s) — no definition to probe",
+		name, last.Layer, last.Path)
 }
 
 // mcpToolListLimit caps how many tool names a successful probe prints.
 const mcpToolListLimit = 10
 
 // mcpToolNames renders the probe's tool names, truncating the tail with
-// "+N more" so a chatty server cannot flood the terminal.
-func mcpToolNames(specs []tools.LoadedMCPTool) []string {
-	if len(specs) == 0 {
+// "+N more" so a chatty server cannot flood the terminal. The names are the
+// server's own (ProbeServer deliberately does not namespace them the way the
+// runtime's loaded tools are).
+func mcpToolNames(reported []string) []string {
+	if len(reported) == 0 {
 		return nil
 	}
-	shown := specs
+	shown := reported
 	if len(shown) > mcpToolListLimit {
 		shown = shown[:mcpToolListLimit]
 	}
 	names := make([]string, 0, len(shown)+1)
-	for _, s := range shown {
-		names = append(names, s.Name)
-	}
-	if extra := len(specs) - len(shown); extra > 0 {
+	names = append(names, shown...)
+	if extra := len(reported) - len(shown); extra > 0 {
 		names = append(names, fmt.Sprintf("+%d more", extra))
 	}
 	return names

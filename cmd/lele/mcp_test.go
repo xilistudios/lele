@@ -5,13 +5,18 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	mcpgo "github.com/mark3labs/mcp-go/mcp"
+	mcpserver "github.com/mark3labs/mcp-go/server"
+
 	"github.com/xilistudios/lele/pkg/mcp"
-	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // ---------------------------------------------------------------------------
@@ -102,18 +107,47 @@ func runMCPSub(t *testing.T, fn func(io.Writer, []string) int, args ...string) (
 	return buf.String(), code
 }
 
-// stubMCPLoadServer replaces the probe seam for the duration of one test and
-// records the name it was asked to load.
-func stubMCPLoadServer(t *testing.T, specs []tools.LoadedMCPTool, err error) *string {
+// startMCPHTTPServer starts a REAL MCP server behind an httptest HTTP server
+// and returns the url to put in mcp.json. The streamable HTTP transport is the
+// one ProbeServer builds for a url entry, so `lele mcp test` performs a real
+// dial over TCP, a real initialize handshake and a real tools/list — nothing
+// about the probe is mocked.
+func startMCPHTTPServer(t *testing.T, toolNames ...string) string {
 	t.Helper()
-	var got string
-	old := mcpLoadServer
-	mcpLoadServer = func(_ context.Context, _ mcp.Paths, name string) ([]tools.LoadedMCPTool, error) {
-		got = name
-		return specs, err
+	srv := mcpserver.NewMCPServer("lele-cli-test", "9.9.9", mcpserver.WithToolCapabilities(false))
+	for _, name := range toolNames {
+		srv.AddTool(mcpgo.NewTool(name), func(context.Context, mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+			return mcpgo.NewToolResultText(name), nil
+		})
 	}
-	t.Cleanup(func() { mcpLoadServer = old })
-	return &got
+	ts := httptest.NewServer(mcpserver.NewStreamableHTTPServer(srv))
+	t.Cleanup(ts.Close)
+	return ts.URL + "/mcp"
+}
+
+// startCountingHTTPServer serves a plain handler that only counts requests. It
+// exists to prove a NEGATIVE: a subcommand that must not dial (an invalid entry)
+// leaves the counter at zero, which a mocked probe could never show.
+func startCountingHTTPServer(t *testing.T) (string, *atomic.Int64) {
+	t.Helper()
+	var hits atomic.Int64
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	t.Cleanup(ts.Close)
+	return ts.URL + "/mcp", &hits
+}
+
+// closedMCPURL returns a url nothing listens on: an httptest server is started
+// to reserve the port, then closed, which is how the dial-failure test gets a
+// real "connection refused" from the production dialer.
+func closedMCPURL(t *testing.T) string {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := ts.URL + "/mcp"
+	ts.Close()
+	return url
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +347,90 @@ func TestParseMCPFlags_MixedOrder(t *testing.T) {
 	}
 }
 
+// TestParseMCPFlags_EndOfFlags pins the "--" marker: everything after it is
+// positional and the marker itself disappears, so a server whose name starts
+// with a dash (validEntryName accepts it, the runtime honours it) is
+// addressable.
+func TestParseMCPFlags_EndOfFlags(t *testing.T) {
+	pos, err := parseMCPFlags([]string{"plain", "--", "--not-a-flag", "-x"}, mcpParseSpec{})
+	if err != nil {
+		t.Fatalf("parseMCPFlags after --: %v", err)
+	}
+	if got := strings.Join(pos, "|"); got != "plain|--not-a-flag|-x" {
+		t.Fatalf("positionals after -- = %q, want %q", got, "plain|--not-a-flag|-x")
+	}
+
+	a, err := parseMCPShowArgs([]string{"--", "-dash"})
+	if err != nil {
+		t.Fatalf("show -- -dash: %v", err)
+	}
+	if a.name != "-dash" {
+		t.Fatalf("show name = %q, want -dash", a.name)
+	}
+
+	add, err := parseMCPAddArgs([]string{"--command", "/bin/echo", "--", "-dash"})
+	if err != nil {
+		t.Fatalf("add --command c -- -dash: %v", err)
+	}
+	if add.name != "-dash" || add.command != "/bin/echo" {
+		t.Fatalf("add after -- = %+v, want name -dash and command /bin/echo", add)
+	}
+
+	// Addressable end to end: `show -- -dash` finds the server named "-dash".
+	e := newMCPTestEnv(t)
+	writeMCPTestFile(t, e.globalFile(), `{"mcpServers":{"-dash":{"command":"/bin/echo"}}}`)
+	out, code := runMCPSub(t, runMCPShow, "--", "-dash")
+	if code != 0 || !strings.Contains(out, `MCP server "-dash"`) {
+		t.Fatalf("show -- -dash exit=%d out=%s", code, out)
+	}
+}
+
+// TestMCPPairs_NeverEchoesValues pins the secrecy rule for malformed pairs: the
+// KEY may be echoed, the text after '=' never is (it is the value), and a pair
+// with no '=' is not echoed at all — its whole token could be a value
+// ("--header 'Authorization Bearer hunter2'").
+func TestMCPPairs_NeverEchoesValues(t *testing.T) {
+	const secret = "hunter2"
+	for _, pair := range []string{"=" + secret, secret, "Bearer " + secret} {
+		_, err := mcpPairs([]string{pair})
+		if err == nil {
+			t.Fatalf("mcpPairs(%q) accepted, want an error", pair)
+		}
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("mcpPairs(%q) error echoes the value: %v", pair, err)
+		}
+	}
+	// The key of a malformed pair may still be named (it is not a secret).
+	_, err := mcpPairs([]string{"KEY=" + secret + "=x"}) // valid: value is everything after the first '='
+	if err != nil {
+		t.Fatalf("mcpPairs with an '=' in the value: %v", err)
+	}
+
+	// Same rule through the command surface, which wraps the error.
+	newMCPTestEnv(t)
+	out, code := runMCPSub(t, runMCPAdd, "leaky", "--command", "/bin/echo", "--env", "="+secret)
+	if code != 1 {
+		t.Fatalf("add with an empty env key exit = %d, want 1:\n%s", code, out)
+	}
+	if strings.Contains(out, secret) {
+		t.Errorf("add echoed the env value:\n%s", out)
+	}
+	if !strings.Contains(out, "KEY must not be empty") {
+		t.Errorf("missing the malformed-pair error:\n%s", out)
+	}
+
+	out, code = runMCPSub(t, runMCPAdd, "leaky", "--command", "/bin/echo", "--header", "Authorization Bearer "+secret)
+	if code != 1 {
+		t.Fatalf("add with a malformed header exit = %d, want 1:\n%s", code, out)
+	}
+	if strings.Contains(out, secret) {
+		t.Errorf("add echoed the header value:\n%s", out)
+	}
+	if !strings.Contains(out, "want KEY=VALUE") {
+		t.Errorf("missing the malformed-pair error:\n%s", out)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // list
 // ---------------------------------------------------------------------------
@@ -378,6 +496,70 @@ func TestMCPList_ThreeLayerFixture(t *testing.T) {
 	}
 }
 
+// TestMCPList_NoWorkspaceSideEffect is the LOW-4 regression: the CLI must not
+// initialize an agent workspace just to answer a read-only question. With no
+// agents.defaults.workspace configured the workspace resolves to "" and the
+// registry's InitializeWorkspace used to create <cwd>/memory (and the context
+// files) for a mere `lele mcp list`.
+func TestMCPList_NoWorkspaceSideEffect(t *testing.T) {
+	root := t.TempDir()
+	leleDir := filepath.Join(root, "lele")
+	cwd := filepath.Join(root, "proj")
+	for _, d := range []string{leleDir, cwd} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("LELE_CONFIG_DIR", leleDir)
+	t.Chdir(cwd)
+	// No workspace anywhere: the agent layer root is unconfigured.
+	writeMCPTestFile(t, filepath.Join(leleDir, "config.json"), `{"agents":{"defaults":{}}}`)
+	writeMCPTestFile(t, filepath.Join(leleDir, "mcp.json"),
+		`{"mcpServers":{"filesystem":{"command":"npx","description":"d"}}}`)
+
+	out, code := runMCPSub(t, runMCPList)
+	if code != 0 {
+		t.Fatalf("list exit = %d, want 0:\n%s", code, out)
+	}
+	if !strings.Contains(out, "●  filesystem") {
+		t.Errorf("list did not report the global server:\n%s", out)
+	}
+	if !strings.Contains(out, "(not configured)") {
+		t.Errorf("the unconfigured agent layer should be reported as such:\n%s", out)
+	}
+	entries, err := os.ReadDir(cwd)
+	if err != nil {
+		t.Fatalf("read cwd: %v", err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("a read-only list created %v in the cwd", names)
+	}
+}
+
+// TestMCPList_DisabledStubKind covers the documented kind column for a copy
+// that defines nothing: a disable stub prints "unknown" (it has neither
+// command nor url).
+func TestMCPList_DisabledStubKind(t *testing.T) {
+	e := newMCPTestEnv(t)
+	writeMCPTestFile(t, e.globalFile(), `{"mcpServers":{"filesystem":{"command":"npx","disabled":true}}}`)
+	writeMCPTestFile(t, e.agentFile(), `{"mcpServers":{"filesystem":{"disabled":true}}}`)
+
+	out, code := runMCPSub(t, runMCPList)
+	if code != 0 {
+		t.Fatalf("list exit = %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, "○  filesystem") || !strings.Contains(out, "unknown") {
+		t.Errorf("a disable stub must print state ○ and kind unknown:\n%s", out)
+	}
+	if !strings.Contains(out, "1 server(s): 0 enabled, 1 disabled, 0 invalid") {
+		t.Errorf("stub count wrong:\n%s", out)
+	}
+}
+
 func TestMCPList_EmptyAndLayerFilter(t *testing.T) {
 	e := newMCPTestEnv(t)
 
@@ -424,6 +606,7 @@ func TestMCPShow_WinnerShadowAndArgs(t *testing.T) {
 		"state:       enabled",
 		"layer:       agent",
 		"file:        " + e.agentFile(),
+		"kind:        stdio",
 		"command:     agent-alpha",
 		`args:        ["-y", "x"]`,
 		"Per-layer breakdown",
@@ -437,6 +620,52 @@ func TestMCPShow_WinnerShadowAndArgs(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("show output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// TestMCPShow_OneVerdictSource pins the MED-3 rule: the STATE line follows the
+// runtime's verdict (Effective, computed after ${VAR} expansion) while the
+// per-layer breakdown still shows each copy's RAW verdict — clearly labelled,
+// so an entry that is valid to the runtime is never announced as invalid (and
+// vice versa).
+func TestMCPShow_OneVerdictSource(t *testing.T) {
+	e := newMCPTestEnv(t)
+	t.Setenv("MCP_CLI_TEST_UNSET_URL", "") // expands to "", i.e. no url at all
+	writeMCPTestFile(t, e.globalFile(),
+		`{"mcpServers":{`+
+			`"bothcmd":{"command":"/bin/echo","url":"${MCP_CLI_TEST_UNSET_URL}","description":"command plus an unset-var url"},`+
+			`"urlonly":{"url":"${MCP_CLI_TEST_UNSET_URL}","description":"url built from an unset var"}}}`)
+
+	// The raw text says "mixes stdio and remote fields", the runtime sees a
+	// plain stdio entry: the state must follow the runtime.
+	out, code := runMCPSub(t, runMCPShow, "bothcmd")
+	if code != 0 {
+		t.Fatalf("show bothcmd exit = %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, "state:       enabled") {
+		t.Errorf("bothcmd state must follow Effective (enabled):\n%s", out)
+	}
+	if strings.Contains(out, "state:       invalid") {
+		t.Errorf("bothcmd must not be reported invalid:\n%s", out)
+	}
+	if !strings.Contains(out, `raw verdict: "mixes stdio and remote fields`) {
+		t.Errorf("the raw per-layer verdict must be labelled as such:\n%s", out)
+	}
+
+	// urlonly is the derived-invalid case: the raw bytes carry NO verdict, so
+	// the reason must be the explicit fallback — never "invalid ()".
+	out, code = runMCPSub(t, runMCPShow, "urlonly")
+	if code != 0 {
+		t.Fatalf("show urlonly exit = %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, "state:       invalid ("+mcpDerivedInvalidReason+")") {
+		t.Errorf("urlonly needs the derived-invalid reason:\n%s", out)
+	}
+	if strings.Contains(out, "invalid ()") {
+		t.Errorf("an empty invalid reason leaked into show:\n%s", out)
+	}
+	if strings.Contains(out, `raw verdict:`) {
+		t.Errorf("urlonly has no raw verdict to show:\n%s", out)
 	}
 }
 
@@ -715,74 +944,295 @@ func TestMCPRemove_LayerAndUnknown(t *testing.T) {
 	}
 }
 
+// TestMCPRemove_ReenableWarning pins the MED side effect of the default remove:
+// deleting the copy that kept a server OFF (a disable stub, or a disabled
+// definition) hands the merge to a lower layer's definition, i.e. the server
+// comes back ON — the user must be told.
+func TestMCPRemove_ReenableWarning(t *testing.T) {
+	tests := []struct {
+		name  string
+		agent string
+	}{
+		{name: "disable stub", agent: `{"mcpServers":{"filesystem":{"disabled":true}}}`},
+		{name: "disabled definition", agent: `{"mcpServers":{"filesystem":{"command":"agent-npx","disabled":true}}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newMCPTestEnv(t)
+			global := `{"mcpServers":{"filesystem":{"command":"npx","args":["-y"]}}}`
+			writeMCPTestFile(t, e.globalFile(), global)
+			writeMCPTestFile(t, e.agentFile(), tt.agent)
+
+			// Fixture premise: the server is off and the agent copy is the
+			// reason.
+			if inv := mcp.ReadInventory(e.paths()); inv.Effective["filesystem"] != "disabled" ||
+				inv.Winner["filesystem"] != "agent" {
+				t.Fatalf("fixture premise broken: effective=%q winner=%q",
+					inv.Effective["filesystem"], inv.Winner["filesystem"])
+			}
+
+			out, code := runMCPSub(t, runMCPRemove, "filesystem")
+			if code != 0 {
+				t.Fatalf("remove exit = %d, want 0:\n%s", code, out)
+			}
+			want := fmt.Sprintf("⚠ this re-enables %q from global (%s)", "filesystem", e.globalFile())
+			if !strings.Contains(out, want) {
+				t.Errorf("missing re-enable warning %q:\n%s", want, out)
+			}
+			// The existing note and hint stay.
+			if !strings.Contains(out, fmt.Sprintf("⊘ note: %q is still defined in global", "filesystem")) {
+				t.Errorf("missing shadow note:\n%s", out)
+			}
+			if !strings.Contains(out, "lele mcp remove filesystem --all") {
+				t.Errorf("missing --all hint:\n%s", out)
+			}
+			if got := readMCPTestFile(t, e.globalFile()); got != global {
+				t.Errorf("the lower definition must not be touched:\n got: %s\nwant: %s", got, global)
+			}
+			if inv := mcp.ReadInventory(e.paths()); inv.Effective["filesystem"] != "enabled" {
+				t.Errorf("after the removal the server should be enabled, got %q", inv.Effective["filesystem"])
+			}
+		})
+	}
+
+	// The warning must NOT fire when the deleted copy was the live definition
+	// (nothing is switched on by its removal), nor when every lower copy is a
+	// stub too.
+	t.Run("no warning without a lower definition", func(t *testing.T) {
+		e := newMCPTestEnv(t)
+		writeMCPTestFile(t, e.globalFile(), `{"mcpServers":{"bravo":{"command":"b","disabled":true}}}`)
+
+		out, code := runMCPSub(t, runMCPRemove, "bravo")
+		if code != 0 {
+			t.Fatalf("remove exit = %d, want 0:\n%s", code, out)
+		}
+		if strings.Contains(out, "re-enables") {
+			t.Errorf("removing the only copy must not warn about re-enabling:\n%s", out)
+		}
+	})
+
+	t.Run("no warning for a live winner", func(t *testing.T) {
+		e := newMCPTestEnv(t)
+		writeMCPTestFile(t, e.globalFile(), `{"mcpServers":{"bravo":{"command":"b"}}}`)
+		writeMCPTestFile(t, e.agentFile(), `{"mcpServers":{"bravo":{"command":"a"}}}`)
+
+		out, code := runMCPSub(t, runMCPRemove, "bravo")
+		if code != 0 {
+			t.Fatalf("remove exit = %d, want 0:\n%s", code, out)
+		}
+		if strings.Contains(out, "re-enables") {
+			t.Errorf("removing an enabled winner must not warn about re-enabling:\n%s", out)
+		}
+	})
+}
+
+// TestMCPRemove_PathGuardRefuses mirrors TestMCPAdd_PathGuardRefuses: the same
+// predicate `add` and `edit` enforce (and the REST/TUI surfaces answer with 403
+// mcp_path_not_allowed) must gate `remove` too, per row and including --all.
+//
+// The fixture root lives under /var/tmp: writable, but outside home, /tmp and
+// the process cwd — exactly the shape the guard exists for.
+func TestMCPRemove_PathGuardRefuses(t *testing.T) {
+	root, err := os.MkdirTemp("/var/tmp", "lele-mcp-remove-guard-")
+	if err != nil {
+		t.Skipf("cannot create a workspace outside the allowed roots: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+
+	leleDir := filepath.Join(root, "lele")
+	agentWS := filepath.Join(root, "ws") // not under home, /tmp or cwd
+	cwd := filepath.Join(root, "proj")
+	for _, d := range []string{leleDir, agentWS, cwd} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("LELE_CONFIG_DIR", leleDir)
+	t.Chdir(cwd)
+	writeMCPConfigFile(t, leleDir, agentWS)
+	agentFile := filepath.Join(agentWS, "mcp.json")
+	content := `{"mcpServers":{"victim":{"command":"v"}}}`
+	writeMCPTestFile(t, agentFile, content)
+
+	for _, args := range [][]string{
+		{"victim"},
+		{"victim", "--layer", "agent"},
+		{"victim", "--all"},
+	} {
+		out, code := runMCPSub(t, runMCPRemove, args...)
+		if code != 1 {
+			t.Fatalf("guarded %v exit = %d, want 1:\n%s", args, code, out)
+		}
+		if !strings.Contains(out, "refusing to write") {
+			t.Errorf("guarded %v missing the guard message:\n%s", args, out)
+		}
+		if got := readMCPTestFile(t, agentFile); got != content {
+			t.Errorf("guarded %v changed the file:\n got: %s\nwant: %s", args, got, content)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // test
 // ---------------------------------------------------------------------------
 
+// The probe is exercised at the REAL seam: `lele mcp test` resolves the entry's
+// expanded config and dials it through mcp.ProbeServer, so these tests point a
+// url entry at a real in-process MCP server (streamable HTTP). No probe seam
+// exists any more: the only thing tests may mock is the world, never the code
+// under test.
+
 func TestMCPTest_HappyPath(t *testing.T) {
 	e := newMCPTestEnv(t)
-	e.seedThreeLayers(t)
-	stubMCPLoadServer(t, []tools.LoadedMCPTool{
-		{Name: "mcp_alpha_one"}, {Name: "mcp_alpha_two"}, {Name: "mcp_alpha_three"},
-	}, nil)
+	url := startMCPHTTPServer(t, "mcp_alpha_one", "mcp_alpha_two", "mcp_alpha_three")
+	writeMCPTestFile(t, e.globalFile(),
+		fmt.Sprintf(`{"mcpServers":{"alpha":{"url":%q,"type":"http","description":"d"}}}`, url))
 
 	out, code := runMCPSub(t, runMCPTest, "alpha")
 	if code != 0 {
 		t.Fatalf("test exit = %d, want 0:\n%s", code, out)
 	}
-	if !strings.Contains(out, `✓ "alpha" connected — 3 tools: mcp_alpha_one, mcp_alpha_two, mcp_alpha_three`) {
-		t.Errorf("unexpected probe output:\n%s", out)
+	// Tool names keep the SERVER's order (ProbeServer never sorts them), so
+	// the assertion is on the shape plus the set.
+	line := firstLineWith(out, "connected")
+	if !strings.Contains(line, `✓ "alpha" connected — 3 tools: `) {
+		t.Fatalf("unexpected probe output: %q", line)
 	}
+	for _, name := range []string{"mcp_alpha_one", "mcp_alpha_two", "mcp_alpha_three"} {
+		if !strings.Contains(line, name) {
+			t.Errorf("probe output misses %q: %q", name, line)
+		}
+	}
+	// The handshake identity is reported when the server sent one.
+	if !strings.Contains(line, "(server: lele-cli-test 9.9.9)") {
+		t.Errorf("missing the server identity from the handshake: %q", line)
+	}
+}
+
+// firstLineWith returns the first line of out containing want ("" when there
+// is none), so output assertions cannot be broken by unrelated lines.
+func firstLineWith(out, want string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, want) {
+			return line
+		}
+	}
+	return ""
 }
 
 func TestMCPTest_TruncatesToolList(t *testing.T) {
 	e := newMCPTestEnv(t)
-	writeMCPTestFile(t, e.globalFile(), `{"mcpServers":{"many":{"command":"x"}}}`)
-	specs := make([]tools.LoadedMCPTool, 12)
-	for i := range specs {
-		specs[i] = tools.LoadedMCPTool{Name: fmt.Sprintf("tool%02d", i)}
+	names := make([]string, 12)
+	for i := range names {
+		names[i] = fmt.Sprintf("tool%02d", i)
 	}
-	stubMCPLoadServer(t, specs, nil)
+	url := startMCPHTTPServer(t, names...)
+	writeMCPTestFile(t, e.globalFile(), fmt.Sprintf(`{"mcpServers":{"many":{"url":%q,"type":"http"}}}`, url))
 
 	out, code := runMCPSub(t, runMCPTest, "many")
 	if code != 0 {
 		t.Fatalf("test exit = %d:\n%s", code, out)
 	}
-	if !strings.Contains(out, "12 tools") || !strings.Contains(out, "+2 more") {
-		t.Errorf("tool list not truncated with a +N more tail:\n%s", out)
+	line := firstLineWith(out, "connected")
+	if !strings.Contains(line, "12 tools: ") {
+		t.Fatalf("unexpected probe output: %q", line)
 	}
-	if strings.Contains(out, "tool11") {
-		t.Errorf("11th tool should have been truncated:\n%s", out)
+	list := line[strings.Index(line, "12 tools: ")+len("12 tools: "):]
+	list = strings.TrimSuffix(list, " (server: lele-cli-test 9.9.9)")
+	parts := strings.Split(list, ", ")
+	if len(parts) != mcpToolListLimit+1 { // 10 names + the tail
+		t.Fatalf("printed %d entries (%v), want %d names plus the +N more tail",
+			len(parts), parts, mcpToolListLimit)
+	}
+	if parts[len(parts)-1] != "+2 more" {
+		t.Errorf("tail = %q, want %q", parts[len(parts)-1], "+2 more")
+	}
+	for i, name := range parts[:mcpToolListLimit] {
+		if !mcpContains(names, name) {
+			t.Errorf("entry %d = %q, not a reported tool name", i, name)
+		}
 	}
 }
 
-func TestMCPTest_DisabledStillProbes(t *testing.T) {
+// TestMCPTest_DisabledProbesDefinition is THE regression test for HIGH-1: the
+// note must be followed by a REAL probe, and the probed config is the highest
+// copy that is a real definition — a {"disabled": true} stub in a higher layer
+// shadows the merge but defines nothing, so the server that would run if the
+// stub were removed is the global one. Before the fix the command sent this to
+// Manager.LoadServer, which refuses disabled servers: the note lied and the
+// probe could never succeed.
+func TestMCPTest_DisabledProbesDefinition(t *testing.T) {
 	e := newMCPTestEnv(t)
-	e.seedThreeLayers(t)
-	got := stubMCPLoadServer(t, nil, nil)
+	url := startMCPHTTPServer(t, "echo")
+	writeMCPTestFile(t, e.globalFile(),
+		fmt.Sprintf(`{"mcpServers":{"off":{"url":%q,"type":"http","description":"d"}}}`, url))
+	writeMCPTestFile(t, e.agentFile(), `{"mcpServers":{"off":{"disabled":true}}}`)
 
-	out, code := runMCPSub(t, runMCPTest, "bravo")
+	inv := mcp.ReadInventory(e.paths())
+	if inv.Effective["off"] != "disabled" || inv.Winner["off"] != "agent" {
+		t.Fatalf("fixture premise broken: effective=%q winner=%q",
+			inv.Effective["off"], inv.Winner["off"])
+	}
+
+	out, code := runMCPSub(t, runMCPTest, "off")
 	if code != 0 {
 		t.Fatalf("disabled test exit = %d, want 0:\n%s", code, out)
 	}
-	if !strings.Contains(out, `⊘ "bravo" is disabled (runtime will not load it); testing anyway...`) {
-		t.Errorf("missing disabled warning:\n%s", out)
+	want := fmt.Sprintf("⊘ %q is disabled in the %s layer — probing it directly (the runtime will not load it)",
+		"off", "agent")
+	if !strings.Contains(out, want) {
+		t.Errorf("missing disabled note %q:\n%s", want, out)
 	}
-	if *got != "bravo" {
-		t.Errorf("probe called with %q, want bravo", *got)
+	if !strings.Contains(out, `✓ "off" connected — 1 tools: echo`) {
+		t.Errorf("the disabled server was not actually probed:\n%s", out)
 	}
 }
 
+// TestMCPTest_DisabledWinnerDefines: the disabled copy is itself the definition
+// (nothing is shadowed) — the probe must still happen.
+func TestMCPTest_DisabledWinnerDefines(t *testing.T) {
+	e := newMCPTestEnv(t)
+	url := startMCPHTTPServer(t, "echo")
+	writeMCPTestFile(t, e.globalFile(),
+		fmt.Sprintf(`{"mcpServers":{"off":{"url":%q,"type":"http","disabled":true}}}`, url))
+
+	out, code := runMCPSub(t, runMCPTest, "off")
+	if code != 0 {
+		t.Fatalf("disabled test exit = %d, want 0:\n%s", code, out)
+	}
+	if !strings.Contains(out, `⊘ "off" is disabled in the global layer`) {
+		t.Errorf("missing disabled note:\n%s", out)
+	}
+	if !strings.Contains(out, `✓ "off" connected — 1 tools: echo`) {
+		t.Errorf("the disabled server was not actually probed:\n%s", out)
+	}
+}
+
+// TestMCPTest_OnlyDisableStub: every copy is a stub, so there is no definition
+// to dial — the command must say exactly that instead of pretending to probe.
+func TestMCPTest_OnlyDisableStub(t *testing.T) {
+	e := newMCPTestEnv(t)
+	writeMCPTestFile(t, e.agentFile(), `{"mcpServers":{"stub":{"disabled":true}}}`)
+
+	out, code := runMCPSub(t, runMCPTest, "stub")
+	if code != 1 {
+		t.Fatalf("stub-only test exit = %d, want 1:\n%s", code, out)
+	}
+	want := fmt.Sprintf(`✗ "stub" is only a disable stub (agent %s) — no definition to probe`, e.agentFile())
+	if !strings.Contains(out, want) {
+		t.Errorf("missing stub-only refusal %q:\n%s", want, out)
+	}
+}
+
+// TestMCPTest_InvalidRefusedWithoutDialing: the refusal is the runtime's
+// verdict (Effective), the reason is never empty, and nothing is dialed — the
+// counting HTTP server behind the entry proves the negative.
 func TestMCPTest_InvalidRefusedWithoutDialing(t *testing.T) {
 	e := newMCPTestEnv(t)
 	e.seedThreeLayers(t)
-	called := false
-	old := mcpLoadServer
-	mcpLoadServer = func(_ context.Context, _ mcp.Paths, _ string) ([]tools.LoadedMCPTool, error) {
-		called = true
-		return nil, nil
-	}
-	t.Cleanup(func() { mcpLoadServer = old })
+	url, hits := startCountingHTTPServer(t)
+	writeMCPTestFile(t, e.projectFile(),
+		fmt.Sprintf(`{"mcpServers":{"charlie":{"command":"charlie","url":%q,"description":"see: invalid"}}}`, url))
 
 	out, code := runMCPSub(t, runMCPTest, "charlie")
 	if code != 1 {
@@ -791,26 +1241,49 @@ func TestMCPTest_InvalidRefusedWithoutDialing(t *testing.T) {
 	if !strings.Contains(out, `✗ "charlie" is invalid:`) || !strings.Contains(out, "lele mcp edit charlie") {
 		t.Errorf("missing invalid refusal / edit hint:\n%s", out)
 	}
-	if called {
-		t.Errorf("invalid entry must not be dialed")
+	if got := hits.Load(); got != 0 {
+		t.Errorf("the invalid entry was dialed %d time(s), want 0", got)
+	}
+}
+
+// TestMCPTest_DerivedInvalidReason: an entry that is invalid only because its
+// ${VAR} URL expanded to nothing has no raw verdict, so the refusal must carry
+// the fallback reason — never an empty "invalid ()".
+func TestMCPTest_DerivedInvalidReason(t *testing.T) {
+	e := newMCPTestEnv(t)
+	t.Setenv("MCP_CLI_TEST_UNSET_URL", "")
+	writeMCPTestFile(t, e.globalFile(),
+		`{"mcpServers":{"urlonly":{"url":"${MCP_CLI_TEST_UNSET_URL}","description":"d"}}}`)
+
+	out, code := runMCPSub(t, runMCPTest, "urlonly")
+	if code != 1 {
+		t.Fatalf("derived-invalid test exit = %d, want 1:\n%s", code, out)
+	}
+	if !strings.Contains(out, "is invalid: "+mcpDerivedInvalidReason) {
+		t.Errorf("missing the derived-invalid reason:\n%s", out)
+	}
+	if strings.Contains(out, "invalid ()") {
+		t.Errorf("an empty invalid reason leaked into test:\n%s", out)
 	}
 }
 
 func TestMCPTest_UnknownAndProbeFailure(t *testing.T) {
 	e := newMCPTestEnv(t)
-	writeMCPTestFile(t, e.globalFile(), `{"mcpServers":{"alpha":{"command":"x"}}}`)
 
 	out, code := runMCPSub(t, runMCPTest, "nosuch")
 	if code != 1 || !strings.Contains(out, `✗ unknown MCP server "nosuch"`) {
 		t.Fatalf("unknown test exit=%d out=%s", code, out)
 	}
 
-	stubMCPLoadServer(t, nil, fmt.Errorf("dial tcp: connection refused"))
+	// A real dial failure: the production dialer gets a connection refused
+	// from a port nothing listens on.
+	url := closedMCPURL(t)
+	writeMCPTestFile(t, e.globalFile(), fmt.Sprintf(`{"mcpServers":{"alpha":{"url":%q,"type":"http"}}}`, url))
 	out, code = runMCPSub(t, runMCPTest, "alpha")
 	if code != 1 {
-		t.Fatalf("probe failure exit = %d, want 1", code)
+		t.Fatalf("probe failure exit = %d, want 1:\n%s", code, out)
 	}
-	if !strings.Contains(out, `✗ "alpha" failed: dial tcp: connection refused`) {
+	if !strings.Contains(out, `✗ "alpha" failed: mcp probe:`) {
 		t.Errorf("missing failure message:\n%s", out)
 	}
 }
@@ -833,11 +1306,13 @@ func TestMCPTest_TimeoutParseError(t *testing.T) {
 
 func TestMCPToolNames(t *testing.T) {
 	if got := mcpToolNames(nil); got != nil {
-		t.Errorf("empty specs = %v, want nil", got)
+		t.Errorf("empty tools = %v, want nil", got)
 	}
-	specs := []tools.LoadedMCPTool{{Name: "a"}, {Name: "b"}}
-	if got := strings.Join(mcpToolNames(specs), ","); got != "a,b" {
+	if got := strings.Join(mcpToolNames([]string{"a", "b"}), ","); got != "a,b" {
 		t.Errorf("names = %q", got)
+	}
+	if got := mcpToolNames([]string{"a", "b", "c", "d"})[3]; got != "d" {
+		t.Errorf("short lists must not be truncated: %q", got)
 	}
 }
 
@@ -1077,6 +1552,77 @@ func mcpProjectRow(inv mcp.Inventory, name string) (mcp.EntryState, bool) {
 	return mcp.EntryState{}, false
 }
 
+// TestMCPEdit_TargetsWinningStubCopy pins the default edit target against
+// mutation M8 (drop the Winner preference): with a {"disabled": true} stub in
+// the agent layer shadowing a real global definition, the WINNER is the stub —
+// edit must hand the stub's raw bytes to the editor and report the agent layer,
+// NOT fall back to the "highest defining copy".
+func TestMCPEdit_TargetsWinningStubCopy(t *testing.T) {
+	e := newMCPTestEnv(t)
+	writeMCPTestFile(t, e.globalFile(), `{"mcpServers":{"alpha":{"command":"global-alpha"}}}`)
+	writeMCPTestFile(t, e.agentFile(), `{"mcpServers":{"alpha":{"disabled":true}}}`)
+
+	inv := mcp.ReadInventory(e.paths())
+	if inv.Winner["alpha"] != "agent" {
+		t.Fatalf("fixture premise broken: Winner[alpha] = %q, want agent", inv.Winner["alpha"])
+	}
+
+	dir := t.TempDir()
+	captured := filepath.Join(dir, "captured.json")
+	setMCPEditor(t, writeMCPEditorScript(t, dir, `cp "$target" '`+captured+`'`))
+
+	out, code := runMCPSub(t, runMCPEdit, "alpha")
+	if code != 0 {
+		t.Fatalf("edit exit = %d, want 0:\n%s", code, out)
+	}
+	want := fmt.Sprintf("Editing %q (agent %s)", "alpha", e.agentFile())
+	if !strings.Contains(out, want) {
+		t.Errorf("edit must report the winning (agent) copy %q:\n%s", want, out)
+	}
+	if !strings.Contains(out, "✓ no changes") {
+		t.Errorf("an untouched stub must report no changes:\n%s", out)
+	}
+	// The object handed to the editor is the STUB, byte for byte.
+	if got := readMCPTestFile(t, captured); got != `{"disabled":true}` {
+		t.Errorf("editor received %q, want the stub's raw bytes", got)
+	}
+	if got := readMCPTestFile(t, e.globalFile()); !strings.Contains(got, `"command":"global-alpha"`) {
+		t.Errorf("the shadowed global copy must not be touched:\n%s", got)
+	}
+}
+
+// TestMCPEdit_RepairsDerivedInvalidEntry is the LOW-1 regression: an entry that
+// is invalid only because its ${VAR} expanded to nothing has NO raw verdict, so
+// the repair confirmation must key on the EFFECTIVE state (before and after)
+// instead of the raw text.
+func TestMCPEdit_RepairsDerivedInvalidEntry(t *testing.T) {
+	e := newMCPTestEnv(t)
+	t.Setenv("MCP_CLI_TEST_UNSET_URL", "")
+	writeMCPTestFile(t, e.globalFile(),
+		`{"mcpServers":{"urlonly":{"url":"${MCP_CLI_TEST_UNSET_URL}","description":"d"}}}`)
+
+	before := mcp.ReadInventory(e.paths())
+	if got := before.Effective["urlonly"]; got != "invalid" {
+		t.Fatalf("fixture premise broken: Effective[urlonly] = %q, want invalid", got)
+	}
+	if row, ok := mcpFindRow(before.ByName["urlonly"], before.Winner["urlonly"]); !ok || row.Invalid != "" {
+		t.Fatalf("fixture premise broken: the raw verdict must be empty (row=%+v ok=%v)", row, ok)
+	}
+
+	setMCPEditor(t, writeMCPEditorFixture(t, t.TempDir(), `{"command":"urlonly-fixed"}`))
+
+	out, code := runMCPSub(t, runMCPEdit, "urlonly")
+	if code != 0 {
+		t.Fatalf("repair exit = %d, want 0:\n%s", code, out)
+	}
+	if !strings.Contains(out, `✓ "urlonly" is now valid`) {
+		t.Errorf("a derived-invalid repair must be reported:\n%s", out)
+	}
+	if after := mcp.ReadInventory(e.paths()); after.Effective["urlonly"] == "invalid" {
+		t.Errorf("Effective[urlonly] = %q after the repair, want a valid state", after.Effective["urlonly"])
+	}
+}
+
 // TestMCPEdit_UnknownName: an unknown name lists suggestions and never
 // invokes the editor.
 func TestMCPEdit_UnknownName(t *testing.T) {
@@ -1285,5 +1831,70 @@ func TestMCPEdit_PathGuardRefusesBeforeEditor(t *testing.T) {
 	}
 	if !strings.Contains(readMCPTestFile(t, filepath.Join(agentWS, "mcp.json")), `"command":"x"`) {
 		t.Error("the guarded file was modified")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// docs guard
+// ---------------------------------------------------------------------------
+
+// TestMCPDocs_UsageCoverage is the guard the review found missing (N1/LOW-5):
+// nothing tied the documentation to the command surface, so `edit` was missing
+// from the parent help and the samples were hand-written. It checks coverage,
+// not formatting: every subcommand the dispatcher knows must be shown as
+// `lele mcp <sub>` in docs/mcp.md and named in both the CLI help and the
+// parent help, and no line of the docs may advertise an unknown subcommand.
+func TestMCPDocs_UsageCoverage(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "mcp.md"))
+	if err != nil {
+		t.Fatalf("read docs/mcp.md: %v", err)
+	}
+
+	documented := map[string]bool{}
+	for _, line := range strings.Split(string(doc), "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "lele mcp ")
+		if !ok {
+			continue
+		}
+		sub, _, _ := strings.Cut(rest, " ")
+		documented[sub] = true
+	}
+	for sub := range mcpUsage {
+		if !documented[sub] {
+			t.Errorf("docs/mcp.md never shows `lele mcp %s`", sub)
+		}
+	}
+	for sub := range documented {
+		if _, ok := mcpUsage[sub]; !ok {
+			t.Errorf("docs/mcp.md advertises `lele mcp %s`, which the dispatcher does not know", sub)
+		}
+	}
+
+	help, _ := runMCPSub(t, func(w io.Writer, _ []string) int { writeMCPHelp(w); return 0 })
+	for sub := range mcpUsage {
+		if !strings.Contains(help, "lele mcp "+sub+" ") {
+			t.Errorf("writeMCPHelp does not document `lele mcp %s`", sub)
+		}
+	}
+	if !strings.Contains(help, "lele mcp test <name>") {
+		t.Errorf("writeMCPHelp must show the test usage line:\n%s", help)
+	}
+
+	// The parent `lele help` line must name every subcommand (LOW-5: it used to
+	// omit `edit`).
+	parent := captureOutput(printHelp)
+	line := ""
+	for _, l := range strings.Split(parent, "\n") {
+		if strings.Contains(l, "Manage MCP servers") {
+			line = l
+		}
+	}
+	if line == "" {
+		t.Fatalf("printHelp has no MCP line:\n%s", parent)
+	}
+	for sub := range mcpUsage {
+		if !strings.Contains(line, sub) {
+			t.Errorf("the parent help line omits %q: %q", sub, line)
+		}
 	}
 }

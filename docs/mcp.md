@@ -202,6 +202,31 @@ never re-implements discovery, precedence or validation. Bare `lele mcp` (or
 `lele mcp --help`) prints the help and exits 0; an unknown subcommand prints
 the help and exits 1.
 
+Resolving which files to read is **read-only**: unlike the runtime, the CLI
+never initializes an agent workspace, so `lele mcp list` (and every other
+subcommand, including one that fails) creates no directory and writes nothing
+outside the layer file it was asked to change.
+
+The **path guard** above is enforced here too, by the same predicate the
+REST/TUI surfaces use: `add`, `edit` and `remove` refuse to touch a layer file
+outside the allowed trees — the user's home directory, `/tmp`, `/var/folders`
+or the process's current directory — printing
+`✗ refusing to write "<path>": outside the allowed workspace roots` before any
+write happens. A workspace legitimately living under `/srv` or `/opt` is
+therefore not editable from the CLI; move the workspace under one of the
+allowed roots (or arrange for the file to be reached through one).
+
+One escaping rule applies to every subcommand: a bare `--` ends flag parsing,
+so a server whose name begins with a dash stays addressable —
+`lele mcp show -- -dash`.
+
+Unlike the toggle surfaces (which write the layer that **owns** the winning
+entry — see the write rules above), `add` writes exactly the layer named by
+`--layer` (default `global`) and merely **warns** when the new entry is
+shadowed; `edit` and `remove` default to the winning copy, i.e. they behave
+like the toggle surfaces. `add` is the CLI's counterpart of the REST raw
+`PUT`, not of the toggle.
+
 ```text
 lele mcp list [--agent <id>] [--layer global|agent|project]
 lele mcp show <name> [--agent <id>]
@@ -219,9 +244,12 @@ precedence, as above); an unknown layer is a usage error. Both the
 
 ### `lele mcp list`
 
-Lists the effective (winner) servers, one per line — state glyph, name, kind
-(`stdio` or `remote`), winning layer and the entry's description (truncated to
-60 characters). Glyphs:
+Lists the effective (winner) servers, one per line — state glyph, name, kind,
+winning layer and the entry's description (truncated to 60 characters). The
+kind column is `stdio` (the entry carries a `command`), `remote` (it carries a
+`url`) — an entry carrying both is reported as `stdio` and flagged invalid —
+or `unknown` for a copy that defines neither, i.e. a pure `{"disabled": true}`
+stub. Glyphs:
 
 | Glyph | State |
 | --- | --- |
@@ -236,17 +264,22 @@ printed as `⊘ warning: …`. With no servers, the command prints
 
 ```console
 $ lele mcp list
-●  filesystem         stdio   global   Read and write files under ~/notes
-○  old-server         stdio   global   Temporarily switched off
-!  broken             remote  project  Issue tracker tools
+!  broken             stdio   project  Issue tracker tools
+●  filesystem         stdio   global  Read and write files under ~/notes
+○  old-server         unknown agent
 
 3 server(s): 1 enabled, 1 disabled, 1 invalid
 
 Layers (low → high):
   global           /home/alfredo/.lele/mcp.json                (exists)
-  agent            /home/alfredo/.lele/workspace-main/mcp.json (missing)
-  project          /home/alfredo/proj/.lele/mcp.json           (missing)
+  agent            /home/alfredo/.lele/workspace-main/mcp.json (exists)
+  project          /home/alfredo/proj/.lele/mcp.json           (exists)
+⊘ warning: mcp config /home/alfredo/.lele/workspace-main/mcp.json: mcp server "old-server": invalid entry: needs command (stdio) or url (remote)
 ```
+
+(Real output, not a mock-up: `broken` carries both a `command` and a `url`
+under `project`, and `agent` holds `{"old-server": {"disabled": true}}` — the
+stub that switches the `global` definition off, hence `unknown`.)
 
 ### `lele mcp show`
 
@@ -256,6 +289,15 @@ Prints the winning entry and a per-layer breakdown marking which layer wins
 [Secret safety](#secret-safety-and-liveness)). `command`, `args` and `url` are
 shown verbatim, so a `${VAR}` there stays literal. An unknown name exits 1 and
 suggests close matches (`did you mean: …?`).
+
+`state:` is always the **runtime's** verdict — computed after `${VAR}`
+expansion, exactly like `pkg/mcp`'s discovery. A copy's own verdict, read from
+the file's raw bytes without expansion, is shown separately in the breakdown as
+`raw verdict: "…"`; the two legitimately disagree when expansion is what makes
+an entry valid or not (e.g. an unset `${VAR}` in a `url`). When the runtime
+rejects an entry for which the raw read found no problem, the state line still
+carries a reason instead of an empty parenthesis —
+`invalid (the runtime rejects it — its ${VAR} references may expand to empty)`.
 
 ```console
 $ lele mcp show filesystem
@@ -310,7 +352,8 @@ higher layer shadows the name, the write still succeeds and prints
 `⊘ note: … shadows this entry …`. If the name already exists in the target
 layer, the command refuses (`✗ server "…" already exists in …`) until `--force`
 is given; with `--force`, an entry whose bytes already match reports
-`✓ … unchanged`.
+`✓ … unchanged`. Like every write here, the target file must pass the
+[path guard](#managing-servers-from-the-cli-lele-mcp).
 
 ```console
 $ lele mcp add filesystem --command npx \
@@ -334,20 +377,30 @@ Removes one or more copies of a server:
 - `--all` removes every copy in every layer.
 
 `--layer` and `--all` are mutually exclusive, and a name defined nowhere exits 1.
+All three forms run the path guard before writing.
+
+Because layers replace whole entries, removing a copy that kept the server OFF
+(a pure `{"disabled": true}` stub, or a definition carrying `"disabled": true`)
+can switch the lower definition **ON**. The command says so explicitly instead
+of silently re-enabling a server:
 
 ```console
-$ lele mcp remove filesystem
-✓ removed "filesystem" from agent (/home/alfredo/.lele/workspace-main/mcp.json)
-⊘ note: "filesystem" is still defined in global (/home/alfredo/.lele/mcp.json)
-  run: lele mcp remove filesystem --all
+$ lele mcp remove old-server
+✓ removed "old-server" from agent (/home/alfredo/.lele/workspace-main/mcp.json)
+⚠ this re-enables "old-server" from global (/home/alfredo/.lele/mcp.json)
+⊘ note: "old-server" is still defined in global (/home/alfredo/.lele/mcp.json)
+  run: lele mcp remove old-server --all
 ```
+
+The warning appears only when the removal actually changes the verdict (the
+deleted copy was the reason the server was off **and** a lower copy defines it).
 
 ### `lele mcp edit`
 
 Opens one entry in your editor. By default it targets the copy that **wins**
-the merge; an entry whose winner is invalid is resolved to its defining copy,
-so `edit` is the **repair path** for a broken server (the one `test` points at).
-`--layer L` targets that layer's copy instead.
+the merge — even when that copy is a bare `{"disabled": true}` stub — so `edit`
+is the **repair path** for a broken server (the one `test` points at): it edits
+exactly the copy a reader loads. `--layer L` targets that layer's copy instead.
 
 - Editor selection: `$VISUAL`, else `$EDITOR`, else `vi`.
 - The editor string is run through `sh -c`, so an editor with arguments works:
@@ -368,25 +421,45 @@ Editing "issues" (global /home/alfredo/.lele/mcp.json) — JSON object for this 
 ✓ updated "issues" (global /home/alfredo/.lele/mcp.json)
 ```
 
-Repairing a broken entry adds `✓ "…" is now valid` once the fresh read agrees.
+Repairing a broken entry adds `✓ "…" is now valid` once the fresh read agrees —
+the check is on the **effective** verdict, so an entry that was invalid only
+because a `${VAR}` expanded to nothing is announced too. `edit` never *creates*
+an entry; a name defined nowhere is a usage error.
 
 ### `lele mcp test`
 
-Probes a server the way the runtime does: it dials the winning entry, runs the
-initialize handshake and lists the server's tools through the production
-manager. `--timeout` is a Go duration (default `30s`, must be positive).
+Probes a server out of band: it dials it directly through the production dial
+path (transport selection, stdio spawn or HTTP/SSE, the initialize handshake and
+`tools/list`), so the probe exercises the same code the runtime dials with —
+without going through the manager, which refuses a disabled entry by design.
+The entry is resolved the same way a reader would load it: the winning copy,
+skipping pure `{"disabled": true}` stubs on the way down (a layer replaces whole
+entries, so deleting the stub would expose the definition underneath — that is
+the config the question is about). `--timeout` is a Go duration (default `30s`,
+must be positive).
 
-- A **disabled** server is still tested, after a
-  `⊘ "…" is disabled (runtime will not load it); testing anyway...` note.
+- A **disabled** server is probed anyway, after a note naming the layer whose
+  copy is disabled: `⊘ "…" is disabled in the agent layer — probing it directly
+  (the runtime will not load it)`. A name whose every copy is a bare stub has
+  nothing to dial and exits 1 (`… is only a disable stub …`).
 - An **invalid** entry is refused before any dial
   (`✗ "…" is invalid: … (fix with: lele mcp edit …)`), so `edit` is the repair
-  path.
-- On success it prints the tool names (first 10, then `+N more`); a failed
-  probe exits 1.
+  path. The verdict is the effective one (post-`${VAR}` expansion); an entry
+  the runtime rejects with no raw problem still gets a reason, never an empty
+  one.
+- On success it prints the tool names (first 10, then `+N more`) and, when the
+  server reported one, its handshake identity; a failed probe exits 1.
 
 ```console
-$ lele mcp test filesystem
-✓ "filesystem" connected — 2 tools: mcp_filesystem_read_file, mcp_filesystem_write_file
+$ lele mcp test smoke
+✓ "smoke" connected — 1 tools: echo (server: lele-smoketest 0.1.0)
+
+$ lele mcp test smoke        # the agent layer holds {"smoke": {"disabled": true}}
+⊘ "smoke" is disabled in the agent layer — probing it directly (the runtime will not load it)
+✓ "smoke" connected — 1 tools: echo (server: lele-smoketest 0.1.0)
+
+$ lele mcp test broken
+✗ "broken" is invalid: mixes stdio and remote fields: set either command or url, not both (fix with: lele mcp edit broken)
 ```
 
 ### Secret safety and liveness
