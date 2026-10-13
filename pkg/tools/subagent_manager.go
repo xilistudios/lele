@@ -877,9 +877,11 @@ func (sm *SubagentManager) ContinueTask(ctx context.Context, taskID, guidance st
 	}
 	task.mu.Lock()
 	task.doneCh = make(chan struct{})
-	// Reset delivered so the resumed run's result is not suppressed by the
-	// Delivered() check in the parent agent's message processor.
-	task.delivered = false
+	// Reset the delivery bookkeeping so the resumed run's result is injectable
+	// again: the previous needs_context outcome was already claimed, and a
+	// stale waiter count must not make the injector skip the new result.
+	task.resultClaimed = false
+	task.resultWaiters = 0
 	task.mu.Unlock()
 	// Use context.Background() to decouple from parent agent's context
 	taskCtx, cancel := context.WithCancel(context.Background())
@@ -903,25 +905,167 @@ func (sm *SubagentManager) GetTask(taskID string) (*SubagentTask, bool) {
 	return task.Snapshot(), true
 }
 
-// MarkDelivered atomically marks a task's result as delivered.
-// Returns true if the task was already delivered (i.e., this call lost the race).
-// Returns false if this is the first delivery.
-func (sm *SubagentManager) MarkDelivered(taskID string) bool {
-	sm.mu.Lock()
+// ClaimResult atomically marks a task's result as consumed by
+// wait_for_subagent. Returns true if the result was ALREADY claimed (i.e., this
+// call lost the race), false if this call made the claim.
+//
+// The return value is advisory: all callers ignore it, because the model asked
+// a direct question and must get an answer even when another party already read
+// the result (the injector, or an earlier wait). What the claim guarantees is
+// that the injector in pkg/agent will NOT also publish the same result as a
+// system inbound message.
+//
+// Locking: sm.mu is taken only to look the task up and released before task.mu
+// is taken — the two locks are never held together.
+func (sm *SubagentManager) ClaimResult(taskID string) bool {
+	sm.mu.RLock()
 	task, ok := sm.tasks[taskID]
-	sm.mu.Unlock()
+	sm.mu.RUnlock()
 	if !ok || task == nil {
-		return false // Task not found, allow delivery (edge case)
+		return false // Task not found: nothing to claim (edge case)
 	}
 	if task.mu != nil {
 		task.mu.Lock()
 		defer task.mu.Unlock()
 	}
-	if task.delivered {
-		return true // Already delivered
+	if task.resultClaimed {
+		return true // Already claimed
 	}
-	task.delivered = true
-	return false // First delivery
+	task.resultClaimed = true
+	return false // First claim
+}
+
+// MarkDelivered is a deprecated alias for ClaimResult, kept so this package
+// lands on its own commit. It is removed in the following commit, together with
+// its callers in pkg/agent.
+//
+// Deprecated: use ClaimResult.
+func (sm *SubagentManager) MarkDelivered(taskID string) bool {
+	return sm.ClaimResult(taskID)
+}
+
+// ClaimResultForInjection is the injector's single atomic decision point. It
+// returns false when a wait_for_subagent waiter is registered (the parent will
+// read the result in-turn, so injecting would double-report) or when the result
+// is already claimed; otherwise it claims the result and returns true.
+//
+// An unknown task ID returns false: with no task there is no dedup, so
+// injecting would be unguarded.
+func (sm *SubagentManager) ClaimResultForInjection(taskID string) bool {
+	sm.mu.RLock()
+	task, ok := sm.tasks[taskID]
+	sm.mu.RUnlock()
+	if !ok || task == nil {
+		return false
+	}
+	if task.mu != nil {
+		task.mu.Lock()
+		defer task.mu.Unlock()
+	}
+	if task.resultClaimed || task.resultWaiters > 0 {
+		return false
+	}
+	task.resultClaimed = true
+	return true
+}
+
+// AddResultWaiter registers a wait_for_subagent call as interested in this
+// task's result. It MUST be called before the waiter blocks on the task's done
+// channel: the injector decides whether to publish by looking at this count,
+// and SignalDone fires after the completion callback, so a waiter that
+// registered late could complete the task's injection first and then also
+// return the result in-turn (the double report this counter exists to stop).
+func (sm *SubagentManager) AddResultWaiter(taskID string) {
+	sm.mu.RLock()
+	task, ok := sm.tasks[taskID]
+	sm.mu.RUnlock()
+	if !ok || task == nil {
+		return
+	}
+	if task.mu != nil {
+		task.mu.Lock()
+		defer task.mu.Unlock()
+	}
+	task.resultWaiters++
+}
+
+// ReleaseResultWaiter unregisters a wait_for_subagent call. The count is
+// clamped at zero so a double release cannot go negative. After the last waiter
+// leaves on a still-running task, a later completion is injected normally.
+func (sm *SubagentManager) ReleaseResultWaiter(taskID string) {
+	sm.mu.RLock()
+	task, ok := sm.tasks[taskID]
+	sm.mu.RUnlock()
+	if !ok || task == nil {
+		return
+	}
+	if task.mu != nil {
+		task.mu.Lock()
+		defer task.mu.Unlock()
+	}
+	if task.resultWaiters > 0 {
+		task.resultWaiters--
+	}
+}
+
+// ReleaseResultWaiterAndClaim is the release path wait_for_subagent actually
+// uses: it unregisters the waiter and, when the last waiter leaves without
+// having claimed a result that is now terminal, claims it and returns the task
+// so the caller can still hand the answer back to the model.
+//
+// This is the fix for the timeout-vs-completion loss window. The injector
+// refuses to publish while a waiter is registered, so a waiter that gives up
+// (timeout) must not simply drop its registration: if the task turned terminal
+// in the meantime and nobody claimed it, nobody ever would. Deciding
+// "terminal?" and "release" while holding the same lock (task.mu) removes the
+// window between the two that a separate check-then-release would leave open.
+//
+// Returns nil when there is nothing to hand back: not the last waiter, already
+// claimed, unknown task, or the task is not terminal yet.
+func (sm *SubagentManager) ReleaseResultWaiterAndClaim(taskID string) *SubagentTask {
+	sm.mu.RLock()
+	task, ok := sm.tasks[taskID]
+	sm.mu.RUnlock()
+	if !ok || task == nil {
+		return nil
+	}
+	if task.mu != nil {
+		task.mu.Lock()
+		defer task.mu.Unlock()
+	}
+	if task.resultWaiters > 0 {
+		task.resultWaiters--
+	}
+	if task.resultWaiters > 0 || task.resultClaimed {
+		return nil
+	}
+	if !isSubagentTerminal(task.Status) {
+		return nil
+	}
+	task.resultClaimed = true
+	return task.Snapshot()
+}
+
+// SealResult claims a task's result unconditionally, ignoring registered
+// waiters. It is used by the /stop path: a cancelled task's completion callback
+// still fires ("Task cancelled during execution"), and letting it start a fresh
+// parent turn would resurrect the session the user just stopped.
+//
+// It is deliberately NOT ClaimResultForInjection: honouring waiters here would
+// let a concurrent wait_for_subagent block the seal and let the cancellation
+// turn through.
+func (sm *SubagentManager) SealResult(taskID string) {
+	sm.mu.RLock()
+	task, ok := sm.tasks[taskID]
+	sm.mu.RUnlock()
+	if !ok || task == nil {
+		return
+	}
+	if task.mu != nil {
+		task.mu.Lock()
+		defer task.mu.Unlock()
+	}
+	task.resultClaimed = true
 }
 
 // reportTerminalStatus persists a task's terminal status on its session via

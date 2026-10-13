@@ -46,7 +46,19 @@ type SubagentTask struct {
 	Dependencies      []string      // task IDs that must complete before this task starts
 	MaxRetries        int           // maximum number of automatic retry attempts for transient failures
 	RetryCount        int           // current number of retry attempts made
-	delivered         bool          // tracks whether result was already consumed via wait_for_subagent
+	// resultClaimed records that this task's terminal outcome has been handed
+	// to the parent's LLM context exactly once — either because
+	// wait_for_subagent returned it inside a turn, or because the async
+	// injector published it as a system inbound message. Reset by ContinueTask
+	// so a resumed run can be delivered again. Memory-only: never JSON-tagged,
+	// never persisted.
+	resultClaimed bool
+	// resultWaiters counts wait_for_subagent calls currently blocked on (or
+	// about to block on) this task. A waiter registers BEFORE it selects on
+	// doneCh, so the injector can tell "the parent is about to read this
+	// in-turn" from "nobody is listening" without racing the wake-up
+	// (SignalDone fires AFTER the completion callback).
+	resultWaiters int
 	// lastErr is the raw error from the most recent run of this task, kept so
 	// the retry decision can ask the provider layer's classifier instead of
 	// pattern-matching the rendered Result string. Invariant: it is set ONLY by
@@ -57,7 +69,8 @@ type SubagentTask struct {
 	// success. Unexported and never JSON-marshalled; Snapshot's value copy
 	// carries it, which is fine for a read-only error reference.
 	lastErr error
-	mu      *sync.Mutex // protects doneCh and delivered from concurrent access
+	// mu protects doneCh, resultClaimed and resultWaiters from concurrent access
+	mu *sync.Mutex
 }
 
 // DoneChannel returns the done channel for this task.
@@ -76,6 +89,10 @@ func (task *SubagentTask) DoneChannel() <-chan struct{} {
 // backing arrays so the snapshot cannot alias the live task's storage.
 // The doneCh channel reference is preserved — the snapshot shares the same
 // channel the runner will close, so event-driven waiting keeps working.
+// The result-claim bookkeeping (resultClaimed, resultWaiters) and the mutex
+// pointer are copied by value; that is fine for read-only inspection (a
+// snapshot reads ResultClaimed() against the copied value, never the live
+// task's lock).
 func (task *SubagentTask) Snapshot() *SubagentTask {
 	cp := *task // shallow copy (values + channel ref)
 	if task.Guidance != nil {

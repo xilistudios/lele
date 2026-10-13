@@ -50,7 +50,7 @@ func (t *WaitForSubagentTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
+func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]interface{}) (result *ToolResult) {
 	taskID, _ := args["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
 		return ErrorResult("task_id is required")
@@ -77,9 +77,30 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 		return ErrorResult(fmt.Sprintf("Subagent task not found: %s", taskID))
 	}
 
+	// Register interest BEFORE the terminal fast path and before blocking on
+	// the done channel. The injector decides whether to publish the result as a
+	// system message by looking at this count, so the registration must be
+	// visible before the task can complete (SignalDone fires after the
+	// completion callback).
+	t.manager.AddResultWaiter(taskID)
+
+	// The release is also the atomic final check of the timeout-vs-completion
+	// window: the injector refuses to publish while this waiter is registered,
+	// so if we give up (timeout) on a task that turned terminal in the
+	// meantime, the release claims the result and hands it back here. Returning
+	// a timeout error to a model that asked a direct question while the answer
+	// is sitting in the task would be the loss this prevents.
+	defer func() {
+		if raced := t.manager.ReleaseResultWaiterAndClaim(taskID); raced != nil {
+			if result == nil || result.IsError {
+				result = SilentResult(formatSubagentTaskResult(raced))
+			}
+		}
+	}()
+
 	// If already in a terminal/paused state, return immediately.
 	if isSubagentTerminal(task.Status) {
-		t.manager.MarkDelivered(taskID)
+		t.manager.ClaimResult(taskID)
 		return SilentResult(formatSubagentTaskResult(task))
 	}
 
@@ -96,18 +117,13 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 			case <-ctx.Done():
 				return ErrorResult(fmt.Sprintf("Wait for subagent %s interrupted", taskID))
 			case <-timer.C:
-				// Final check in case the task completed between signals.
-				task, ok := t.manager.GetTask(taskID)
-				if !ok {
-					return ErrorResult(fmt.Sprintf("Subagent task disappeared: %s", taskID))
-				}
-				if isSubagentTerminal(task.Status) {
-					t.manager.MarkDelivered(taskID)
-					return SilentResult(formatSubagentTaskResult(task))
-				}
+				// No final check here: the deferred release above performs the
+				// atomic terminal check + claim, so there is no window between
+				// deciding "still running" and dropping the registration. The
+				// status is read only to keep the message informative.
 				return ErrorResult(fmt.Sprintf(
 					"Timed out waiting for subagent %s after %d seconds (current status: %s)",
-					taskID, timeoutSeconds, task.Status,
+					taskID, timeoutSeconds, currentSubagentStatus(t.manager, taskID),
 				))
 			case <-doneCh:
 				// Task reached terminal state, fetch final state
@@ -115,7 +131,7 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 				if !ok {
 					return ErrorResult(fmt.Sprintf("Subagent task disappeared: %s", taskID))
 				}
-				t.manager.MarkDelivered(taskID)
+				t.manager.ClaimResult(taskID)
 				return SilentResult(formatSubagentTaskResult(task))
 			}
 		}
@@ -130,18 +146,11 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 		case <-ctx.Done():
 			return ErrorResult(fmt.Sprintf("Wait for subagent %s interrupted", taskID))
 		case <-timer.C:
-			// Final check in case the task completed between ticks.
-			task, ok := t.manager.GetTask(taskID)
-			if !ok {
-				return ErrorResult(fmt.Sprintf("Subagent task disappeared: %s", taskID))
-			}
-			if isSubagentTerminal(task.Status) {
-				t.manager.MarkDelivered(taskID)
-				return SilentResult(formatSubagentTaskResult(task))
-			}
+			// See the event-driven branch: the deferred release claims a result
+			// that landed while we were registered.
 			return ErrorResult(fmt.Sprintf(
 				"Timed out waiting for subagent %s after %d seconds (current status: %s)",
-				taskID, timeoutSeconds, task.Status,
+				taskID, timeoutSeconds, currentSubagentStatus(t.manager, taskID),
 			))
 		case <-ticker.C:
 			task, ok := t.manager.GetTask(taskID)
@@ -149,11 +158,21 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 				return ErrorResult(fmt.Sprintf("Subagent task disappeared: %s", taskID))
 			}
 			if isSubagentTerminal(task.Status) {
-				t.manager.MarkDelivered(taskID)
+				t.manager.ClaimResult(taskID)
 				return SilentResult(formatSubagentTaskResult(task))
 			}
 		}
 	}
+}
+
+// currentSubagentStatus reads a task's status for an error message. It is
+// purely informational: the authoritative terminal check happens inside
+// ReleaseResultWaiterAndClaim, under the task's lock.
+func currentSubagentStatus(manager *SubagentManager, taskID string) string {
+	if task, ok := manager.GetTask(taskID); ok && task != nil {
+		return task.Status
+	}
+	return "unknown"
 }
 
 // isSubagentTerminal returns true for all statuses where the subagent is no

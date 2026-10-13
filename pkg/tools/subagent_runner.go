@@ -608,21 +608,28 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		// immediately, turning every transient failure into "cancelled".
 		// When a retry IS pending, leave the cancel func in sm.cancels so
 		// StopAll/StopTask can still cancel the task during the backoff.
-		if !retryPendingLocked(task) {
-			var cancel context.CancelFunc
+		//
+		// The retry decision is captured here, under the lock, because the
+		// callback gate below makes the same decision and retryPendingLocked
+		// requires sm.mu to be held.
+		retryPending := retryPendingLocked(task)
+		var cancel context.CancelFunc
+		if !retryPending {
 			if c, ok := sm.cancels[task.ID]; ok {
 				cancel = c
 				delete(sm.cancels, task.ID)
 			}
-			sm.mu.Unlock()
-			if cancel != nil {
-				cancel()
-			}
-		} else {
-			sm.mu.Unlock()
 		}
-		// Call callback if provided and result is set
-		if callback != nil && result != nil {
+		sm.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		// A transient failure that is about to be retried is NOT the task's
+		// outcome. Publishing it would resume the parent on
+		// "Subagent execution failed [rate_limit]" and the claim would then
+		// suppress the successful retry: the callback fires once per attempt
+		// (runTask loops), so only the final attempt may deliver.
+		if callback != nil && result != nil && !retryPending {
 			callback(ctx, result)
 		}
 	}()

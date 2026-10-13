@@ -14,13 +14,24 @@ func (task *SubagentTask) displayLabel() string {
 	return task.Label
 }
 
-// Delivered returns whether this task's result has been marked as delivered.
-func (task *SubagentTask) Delivered() bool {
+// ResultClaimed reports whether this task's result has already been claimed
+// (consumed by wait_for_subagent or injected as a system message). The claim is
+// the single arbiter of "exactly one delivery" (see SubagentManager.ClaimResult).
+func (task *SubagentTask) ResultClaimed() bool {
 	if task.mu != nil {
 		task.mu.Lock()
 		defer task.mu.Unlock()
 	}
-	return task.delivered
+	return task.resultClaimed
+}
+
+// Delivered is a deprecated alias for ResultClaimed, kept so this package lands
+// on its own commit. It is removed in the following commit, together with its
+// last caller (pkg/agent).
+//
+// Deprecated: use ResultClaimed.
+func (task *SubagentTask) Delivered() bool {
+	return task.ResultClaimed()
 }
 
 func (task *SubagentTask) buildMessages(systemPrompt string) []providers.Message {
