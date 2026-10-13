@@ -303,20 +303,33 @@ func IsHeavyMultimodalPart(part ContentPart) bool {
 }
 
 // IsHeavyMediaEntry reports whether a Message.Media entry embeds a base64
-// payload ("data:" URL). Channels normally store file paths here, which are
-// tiny; a data: entry is what the OpenAI-compatible serializer (and the legacy
-// Bedrock fallback) turns into a real image/video part, so it is payload
-// weight the estimator already charges and the evictor must be able to
-// remove.
+// payload ("data:" URL). URI schemes are case-insensitive (RFC 3986), so the
+// prefix test is case-folded; the check is length-guarded and allocation-free
+// because entries can be megabytes long (never build a lowercased copy).
+// Channels normally store file paths here, which are tiny.
+//
+// A "data:" entry of a media type the serializers recognise (data:image/,
+// data:video/ and data:audio/ - pkg/providers/common/common.go - and the
+// legacy Bedrock fallback) is what they turn into a real image/video/audio
+// part. Entries they drop (an unknown media type, or a scheme whose case
+// their own case-sensitive prefix check does not match) are still payload
+// EstimateRequestBytes charges, so the evictor removes them too - the
+// direction that keeps the estimate shrinkable ("everything the estimator
+// charges, the evictor can remove"). Note that the entry is charged by
+// EstimateRequestBytes regardless of what the wire does with it, so eviction
+// here can remove something the transport would have dropped; that is the
+// safe direction and it is deliberate.
 func IsHeavyMediaEntry(media string) bool {
-	return strings.HasPrefix(media, "data:")
+	return len(media) >= len("data:") && strings.EqualFold(media[:len("data:")], "data:")
 }
 
 // LiveMultimodalParts counts the heavy multimodal payloads across both
 // carriers they travel in - ContentParts image/video parts (see
 // IsHeavyMultimodalPart) and Message.Media "data:" entries (see
-// IsHeavyMediaEntry) - and sums the byte length of their URLs, i.e. the
-// actual base64 payload weight that must stay below the transport body cap.
+// IsHeavyMediaEntry) - and sums the byte length of their URLs: the payload
+// weight the estimator charges and the evictor can remove, i.e. the
+// conservative upper bound of what travels, not an exact wire measurement
+// (the serializers drop some entries this sum still counts).
 func LiveMultimodalParts(messages []Message) (count int, bytes int) {
 	for _, m := range messages {
 		for _, part := range m.ContentParts {
@@ -396,7 +409,10 @@ func evictHeavyMediaEntries(media []string, budget *int) (kept []string, evicted
 // carries its textual marker), otherwise it is replaced in place with a text
 // placeholder part. The invariant spans both carriers: if after the rewrite a
 // message with empty Content has neither ContentParts nor Media left, one text
-// placeholder part is appended.
+// placeholder part is appended. A surviving Media entry is enough to skip that
+// placeholder: entries the serializers drop (unknown media type, or a scheme
+// their own case-sensitive prefix check does not match) are still counted for
+// this purpose, matching what the estimator charges.
 //
 // It returns a copy - the input slice, its Message values and their
 // ContentParts *and* Media backing arrays are never mutated - and the number

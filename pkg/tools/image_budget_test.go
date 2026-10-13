@@ -299,10 +299,26 @@ func TestBoundImagePayload_OverCeilingPngKeepsTargetDimensionsAsJpeg(t *testing.
 // the fix for review H1.2 for alpha sources: the transparent PNG cannot fit,
 // so it is flattened onto white and re-encoded as a full-size JPEG — same
 // target dimensions, no canvas shrink. Transparency is traded away only when
-// the PNG itself did not fit.
+// the PNG itself did not fit. The white corner (review N5) pins the trade
+// itself, not just the prose: flattenOnWhite composites every translucent
+// pixel with the exact alpha-over-white formula (c*a + 255*(255-a) + 127)/255,
+// which yields exactly 255 on every channel when a == 0 and forces a = 255 —
+// a full opaque white target pixel. jpeg.Encode then reads that pixel through
+// the premultiplied color.NRGBA.RGBA() path, so white survives encoding; had
+// the flatten been skipped (reviewer mutation T3), a == 0 would premultiply
+// R = G = B = 0 and this corner would come back near-black instead.
 func TestBoundImagePayload_OverCeilingPngWithAlphaFlattensToJpegAtTarget(t *testing.T) {
 	limits := imageLimits{longSide: 256, longSideLow: 128, encodedBytes: 1024, encodedCeiling: 64 << 10, decodePixels: 1_000_000}
-	src := makeNoisyPNG(t, 256, 256, true) // ~257 KB with alpha vs ~39 KB flattened JPEG q80
+	img := makeNoisyNRGBA(t, 256, 256, true) // ~257 KB with alpha vs ~39 KB flattened JPEG q80
+	// Deterministically force pixel (0,0) fully transparent: makeNoisyNRGBA's
+	// random alpha (rng.Intn(256)) may or may not already yield 0 here, so set
+	// it explicitly — the white-corner assertion below depends on it.
+	img.Pix[img.PixOffset(0, 0)+3] = 0
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode fixture png: %v", err)
+	}
+	src := buf.Bytes()
 	if len(src) <= limits.encodedCeiling {
 		t.Fatalf("fixture precondition: len(src)=%d must exceed the ceiling %d", len(src), limits.encodedCeiling)
 	}
@@ -325,6 +341,22 @@ func TestBoundImagePayload_OverCeilingPngWithAlphaFlattensToJpegAtTarget(t *test
 	}
 	if _, format, err := image.DecodeConfig(bytes.NewReader(data)); err != nil || format != "jpeg" {
 		t.Fatalf("output does not decode as JPEG: format=%q err=%v", format, err)
+	}
+
+	// N5: the "flattened onto white" claim must be an assertion, not prose.
+	// Lossy JPEG coding will not reproduce the exact 255 (DCT rounding and
+	// 4:2:0 chroma subsampling), so allow a tolerance: every channel >= 200
+	// still proves the transparent corner was composited onto white rather
+	// than premultiplied to black.
+	out, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode output jpeg: %v", err)
+	}
+	r, g, b, _ := out.At(0, 0).RGBA()
+	t.Logf("corner (0,0) after flatten = (%d,%d,%d)", r>>8, g>>8, b>>8)
+	if r>>8 < 200 || g>>8 < 200 || b>>8 < 200 {
+		t.Errorf("corner (0,0) = (%d,%d,%d), want each channel >= 200: the fully transparent pixel "+
+			"was not flattened onto white", r>>8, g>>8, b>>8)
 	}
 }
 

@@ -383,7 +383,9 @@ func TestLiveMultimodalParts_IgnoresRemoteURLs(t *testing.T) {
 
 // TestIsHeavyMediaEntry pins the Media-entry counterpart of
 // IsHeavyMultimodalPart: only "data:" URLs embed payload; file paths and
-// remote URLs are tiny and are never heavy.
+// remote URLs are tiny and are never heavy. URI schemes are case-insensitive
+// (RFC 3986), so uppercase/mixed-case schemes must be heavy too (N4: the
+// estimator charges every entry, so the evictor must see every entry).
 func TestIsHeavyMediaEntry(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -392,6 +394,10 @@ func TestIsHeavyMediaEntry(t *testing.T) {
 	}{
 		{"image data URL", "data:image/png;base64,AAAA", true},
 		{"video data URL", "data:video/mp4;base64,AAAA", true},
+		{"image data URL, uppercase scheme", "DATA:image/png;base64,AAAA", true},
+		{"image data URL, mixed-case scheme", "Data:image/png;base64,AAAA", true},
+		{"video data URL, uppercase scheme", "DATA:VIDEO/mp4;base64,AAAA", true},
+		{"uppercase scheme but not data", "FILE:///tmp/x", false},
 		{"file path", "/tmp/photo.jpg", false},
 		{"remote URL", "https://x/y.png", false},
 		{"empty", "", false},
@@ -465,6 +471,61 @@ func TestReduceImageParts_MediaOnlyMessageStaysValid(t *testing.T) {
 	// The validity invariant, asserted explicitly.
 	if len(m.ContentParts) == 0 && m.Content == "" {
 		t.Fatalf("message ended with zero parts and empty content (invalid for adapters)")
+	}
+}
+
+// TestReduceImageParts_SurvivingPathMediaNeedsNoPlaceholder pins the NEGATIVE
+// direction of the combined validity invariant (review mutation P2): after
+// the heavy data: entry is evicted, the surviving path-only Media entry still
+// counts as content for the invariant, so no placeholder part may be added -
+// even though the serializers drop path entries on the wire (pre-existing
+// shape, out of scope). A placeholder there would claim an image was omitted
+// when the message still carries its attachment path.
+func TestReduceImageParts_SurvivingPathMediaNeedsNoPlaceholder(t *testing.T) {
+	msgs := []Message{{
+		Role:    "user",
+		Content: "",
+		Media:   []string{"data:image/png;base64," + strings.Repeat("E", 128), "/tmp/keep.jpg"},
+	}}
+	got, evicted := ReduceImageParts(msgs, 0)
+	if evicted != 1 {
+		t.Fatalf("evicted = %d, want 1 (only the data: entry)", evicted)
+	}
+	m := got[0]
+	if len(m.Media) != 1 || m.Media[0] != "/tmp/keep.jpg" {
+		t.Fatalf("Media = %+v, want only the surviving path entry", m.Media)
+	}
+	if len(m.ContentParts) != 0 {
+		t.Fatalf("ContentParts = %+v, want empty: decision - a surviving Media entry counts as "+
+			"content for the validity invariant, so the placeholder must be skipped", m.ContentParts)
+	}
+	if m.Content != "" {
+		t.Fatalf("Content = %q, want %q untouched", m.Content, "")
+	}
+}
+
+// TestReduceImageParts_EvictsUppercaseSchemeMedia pins the N4 invariant in
+// the direction that can bite: EstimateRequestBytes charges every Media entry
+// regardless of the scheme's case (URI schemes are case-insensitive, RFC
+// 3986), so a DATA: entry must be evictable too - otherwise the pre-request
+// guard believes it is over budget forever and pays for a summarisation call
+// that cannot remove a payload the transport never sees.
+func TestReduceImageParts_EvictsUppercaseSchemeMedia(t *testing.T) {
+	heavy := "DATA:image/png;base64," + strings.Repeat("U", 128)
+	msgs := []Message{{
+		Role:    "user",
+		Content: "caption",
+		Media:   []string{heavy, "/tmp/keep.jpg"},
+	}}
+	got, evicted := ReduceImageParts(msgs, 0)
+	if evicted != 1 {
+		t.Fatalf("evicted = %d, want 1 (charged => evictable, scheme case included)", evicted)
+	}
+	if len(got[0].Media) != 1 || got[0].Media[0] != "/tmp/keep.jpg" {
+		t.Fatalf("Media = %+v, want only the path entry", got[0].Media)
+	}
+	if got[0].Content != "caption" {
+		t.Fatalf("Content = %q, want %q untouched", got[0].Content, "caption")
 	}
 }
 
