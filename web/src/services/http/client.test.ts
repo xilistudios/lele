@@ -206,6 +206,44 @@ describe('per-agent skill mutations', () => {
       message: 'global skill is shared',
     })
   })
+
+  // The page-level global skill endpoints; same wire contract, pinned here
+  // because the modal/component tests stub this layer.
+  test('installSkill POSTs url + scope', async () => {
+    const seen = captureFetch({ skill_id: 'tmux', message: 'ok' })
+    const response = await api().installSkill('sipeed/lele-skills/tmux', 'global')
+
+    expect(seen[0]?.url).toBe('http://127.0.0.1:18793/api/v1/skills')
+    expect(seen[0]?.method).toBe('POST')
+    expect(JSON.parse(String(seen[0]?.body))).toEqual({
+      url: 'sipeed/lele-skills/tmux',
+      scope: 'global',
+    })
+    expect(response.skill_id).toBe('tmux')
+  })
+
+  test('installSkill without a scope omits the key exactly', async () => {
+    // Regression guard for every existing caller (useSkills, InstallSkillModal):
+    // `undefined` must be dropped by JSON.stringify so the body is unchanged.
+    const seen = captureFetch()
+    await api().installSkill('owner/repo/skill')
+
+    expect(JSON.parse(String(seen[0]?.body))).toEqual({ url: 'owner/repo/skill' })
+  })
+
+  test('installSkillsBatch POSTs repo + skills + scope', async () => {
+    const seen = captureFetch({ installed: ['a'], count: 1, message: 'ok' })
+    const response = await api().installSkillsBatch('owner/repo', ['a', 'b'], 'global')
+
+    expect(seen[0]?.url).toBe('http://127.0.0.1:18793/api/v1/skills/install-batch')
+    expect(seen[0]?.method).toBe('POST')
+    expect(JSON.parse(String(seen[0]?.body))).toEqual({
+      repo: 'owner/repo',
+      skills: ['a', 'b'],
+      scope: 'global',
+    })
+    expect(response.count).toBe(1)
+  })
 })
 
 /**

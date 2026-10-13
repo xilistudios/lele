@@ -1004,10 +1004,16 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
     skills: () => request<SkillsResponse>(endpoints.skills.list, { method: 'GET' }),
     availableSkills: () =>
       request<AvailableSkillsResponse>(endpoints.skills.available, { method: 'GET' }),
-    installSkill: (url: string) =>
+    /**
+     * Install one skill into the default workspace. `scope` is optional and
+     * defaults server-side to that workspace; pass 'global' to write to the
+     * shared ~/.lele/skills directory instead. `undefined` is dropped by
+     * `JSON.stringify`, so the no-scope body stays byte-identical to before.
+     */
+    installSkill: (url: string, scope?: SkillInstallScope) =>
       request<SkillInstallResponse>(endpoints.skills.install, {
         method: 'POST',
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, scope }),
       }),
     removeSkill: (name: string) =>
       request<SkillRemoveResponse>(endpoints.skills.remove(name), { method: 'DELETE' }),
@@ -1016,10 +1022,11 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
         method: 'POST',
         body: JSON.stringify({ repo }),
       }),
-    installSkillsBatch: (repo: string, skills: string[]) =>
+    /** Batch form of `installSkill`; same default destination and `scope` values. */
+    installSkillsBatch: (repo: string, skills: string[], scope?: SkillInstallScope) =>
       request<SkillInstallBatchResponse>(endpoints.skills.installBatch, {
         method: 'POST',
-        body: JSON.stringify({ repo, skills }),
+        body: JSON.stringify({ repo, skills, scope }),
       }),
     toggleSkill: (name: string, enabled: boolean) =>
       request<{ name: string; enabled: boolean; message: string }>(endpoints.skills.toggle(name), {
