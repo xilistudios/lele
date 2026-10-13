@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -55,6 +57,7 @@ var mcpUsage = map[string]string{
 	"show":   "lele mcp show <name> [--agent <id>]",
 	"add":    "lele mcp add <name> (--command <bin> | --url <u>) [--arg v]… [--type http|sse] [--env K=V]… [--header K=V]… [--description d] [--layer global|agent|project] [--force]",
 	"remove": "lele mcp remove <name> [--agent <id>] [--layer global|agent|project] [--all]",
+	"edit":   "lele mcp edit <name> [--agent <id>] [--layer global|agent|project]",
 	"test":   "lele mcp test <name> [--agent <id>] [--timeout 30s]",
 }
 
@@ -100,6 +103,8 @@ func runMCP(w io.Writer, args []string) int {
 		return runMCPAdd(w, args[1:])
 	case "remove":
 		return runMCPRemove(w, args[1:])
+	case "edit":
+		return runMCPEdit(w, args[1:])
 	case "test":
 		return runMCPTest(w, args[1:])
 	case "help", "--help", "-h":
@@ -126,6 +131,7 @@ Usage:
   lele mcp show <name> [--agent <id>]
   lele mcp add <name> (--command <bin> | --url <u>) [flags]
   lele mcp remove <name> [--layer global|agent|project] [--all]
+  lele mcp edit <name> [--layer global|agent|project]
   lele mcp test <name> [--timeout 30s]
 
 Common flags:
@@ -153,7 +159,12 @@ Examples:
   lele mcp add filesystem --command npx --arg -y --arg @modelcontextprotocol/server-filesystem --arg /tmp
   lele mcp add api --url https://api.example.com/mcp --type http --header "Authorization=Bearer ${TOKEN}"
   lele mcp remove filesystem --all
+  lele mcp edit api
   lele mcp test api
+
+edit opens one entry's JSON object in $VISUAL/$EDITOR (fallback: vi), validates
+it when the editor exits and writes it back atomically; the file is left
+untouched on an invalid entry, so it is also the repair path for a broken server.
 
 Note: ${VAR} references are stored verbatim and expanded only when a server is
 loaded; env/header VALUES are never printed.
@@ -1048,6 +1059,257 @@ func mcpDeleteRow(w io.Writer, name string, row mcp.EntryState) error {
 	}
 	fmt.Fprintf(w, "✓ removed %q from %s (%s)\n", name, row.Layer, row.Path)
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// edit
+// ---------------------------------------------------------------------------
+
+type mcpEditArgs struct {
+	agent string
+	name  string
+	layer string
+}
+
+func parseMCPEditArgs(args []string) (mcpEditArgs, error) {
+	a := mcpEditArgs{agent: routing.DefaultAgentID}
+	pos, err := parseMCPFlags(args, mcpParseSpec{values: map[string]*string{
+		"--agent": &a.agent,
+		"--layer": &a.layer,
+	}})
+	if err != nil {
+		return a, err
+	}
+	if len(pos) == 0 {
+		return a, errors.New("missing server name")
+	}
+	if len(pos) > 1 {
+		return a, fmt.Errorf("unexpected argument %q", pos[1])
+	}
+	a.name = pos[0]
+	if err := validMCPName(a.name); err != nil {
+		return a, err
+	}
+	if a.layer != "" && !mcpValidLayer(a.layer) {
+		return a, fmt.Errorf("unknown layer %q (want global, agent or project)", a.layer)
+	}
+	return a, nil
+}
+
+// mcpEditTarget resolves which layer's copy an edit must open.
+//
+// The default targets the copy that WINS the merge (Inventory.Winner), i.e.
+// the one a reader actually loads. Invalid entries need no special case: they
+// are excluded from Discover's verdicts but ReadInventory still enumerates
+// them in ByName, and it derives Winner from the winning copy — so the
+// offender a user must repair is already the target. The defining-layer
+// fallback covers the corner where a name survives in ByName with no derived
+// winner at all: editing must work precisely for entries nobody can use, so
+// the highest-rank DEFINING copy is picked (and, failing that, the
+// highest-rank copy — a disable stub is editable too).
+//
+// An explicit layer targets THAT layer's copy (mirroring `remove --layer`),
+// even when a higher layer shadows it.
+func mcpEditTarget(inv mcp.Inventory, name, layer string) (mcp.EntryState, bool) {
+	rows := inv.ByName[name]
+	if len(rows) == 0 {
+		return mcp.EntryState{}, false
+	}
+	if layer != "" {
+		row, found := mcpFindRow(rows, layer)
+		return row, found
+	}
+	if winner, ok := inv.Winner[name]; ok {
+		if row, found := mcpFindRow(rows, winner); found {
+			return row, true
+		}
+	}
+	row := rows[len(rows)-1] // rows are low → high
+	for _, r := range rows {
+		if r.Defines {
+			row = r
+		}
+	}
+	return row, true
+}
+
+// mcpEditorCommand returns the editor to launch, in the conventional order:
+// $VISUAL, then $EDITOR, then vi.
+func mcpEditorCommand() string {
+	if v := os.Getenv("VISUAL"); v != "" {
+		return v
+	}
+	if v := os.Getenv("EDITOR"); v != "" {
+		return v
+	}
+	return "vi"
+}
+
+// mcpRunEditor runs editor on path with stdio attached, so interactive
+// full-screen editors (vi, emacs -nw) work.
+//
+// The editor string may carry arguments ("code -w", "emacs -nw"), so it is
+// run as `sh -c '<editor> "$1"' sh <path>`: sh word-splits the whole string
+// for us (no hand-rolled word splitter) and the temp path travels as a
+// positional parameter, so it never needs quoting. The shell indirection is
+// confined to this helper and targets POSIX shells; the CLI runs on
+// linux/macOS, where sh is always present.
+func mcpRunEditor(editor, path string) error {
+	cmd := exec.Command("sh", "-c", editor+` "$1"`, "sh", path)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
+// mcpEntryValid reports whether the layer's copy of name passes validation in
+// a fresh inventory read.
+func mcpEntryValid(inv mcp.Inventory, name, layer string) bool {
+	row, ok := mcpFindRow(inv.ByName[name], layer)
+	return ok && row.Invalid == ""
+}
+
+// runMCPEdit implements `lele mcp edit <name> [--layer L]`: it opens the
+// entry's raw JSON object in the user's editor, validates what comes back and
+// saves it through the byte-splice writer.
+//
+// It is also the documented REPAIR path (`lele mcp test` prints it for an
+// invalid entry): the object handed to the editor is exactly what is on disk
+// (no ${VAR} expansion) and it is a bare entry object, with no name wrapper
+// and no comment header, so the temp file stays valid JSON.
+func runMCPEdit(w io.Writer, args []string) int {
+	a, err := parseMCPEditArgs(args)
+	if err != nil {
+		mcpUsageError(w, "edit", err)
+		return 1
+	}
+	paths, err := mcpPathsFor(a.agent)
+	if err != nil {
+		fmt.Fprintf(w, "✗ %v\n", err)
+		return 1
+	}
+	inv := mcp.ReadInventory(paths)
+
+	target, ok := mcpEditTarget(inv, a.name, a.layer)
+	if !ok {
+		if len(inv.ByName[a.name]) == 0 {
+			fmt.Fprintf(w, "✗ unknown MCP server %q\n", a.name)
+			if sug := mcpSuggestions(a.name, mcpServerNames(inv)); len(sug) > 0 {
+				fmt.Fprintf(w, "  did you mean: %s?\n", strings.Join(sug, ", "))
+			}
+			return 1
+		}
+		fmt.Fprintf(w, "✗ %q is not defined in %s\n", a.name, a.layer)
+		return 1
+	}
+
+	// The path guard runs BEFORE the editor is launched: a write we already
+	// know we will refuse must not cost the user an editing session.
+	if err := mcpGuardedLayerFile(target.Path); err != nil {
+		fmt.Fprintf(w, "✗ %v\n", err)
+		return 1
+	}
+
+	raw, found, err := mcp.EntryRaw(target.Path, a.name)
+	if err != nil {
+		fmt.Fprintf(w, "✗ %v\n", err)
+		return 1
+	}
+	if !found {
+		fmt.Fprintf(w, "✗ %q is not defined in %s (%s)\n", a.name, target.Layer, target.Path)
+		return 1
+	}
+	wasInvalid := target.Invalid != ""
+
+	tmp, err := os.CreateTemp("", "lele-mcp-edit-*.json")
+	if err != nil {
+		fmt.Fprintf(w, "✗ %v\n", err)
+		return 1
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		fmt.Fprintf(w, "✗ %v\n", err)
+		return 1
+	}
+	// 0600 like SaveRawFile: the object can hold API keys and headers.
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		fmt.Fprintf(w, "✗ %v\n", err)
+		return 1
+	}
+	if err := tmp.Close(); err != nil {
+		fmt.Fprintf(w, "✗ %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(w, "Editing %q (%s %s) — JSON object for this server. Values are stored raw; ${VAR} is expanded at connect time.\n",
+		a.name, target.Layer, target.Path)
+
+	if err := mcpRunEditor(mcpEditorCommand(), tmpPath); err != nil {
+		var exitErr *exec.ExitError
+		switch {
+		case errors.As(err, &exitErr) && exitErr.ExitCode() == 127:
+			// POSIX sh reports "command not found" as 127: the editor
+			// binary itself is missing.
+			fmt.Fprintf(w, "✗ edit aborted (editor not found) — set $EDITOR or $VISUAL\n")
+		case errors.As(err, &exitErr):
+			fmt.Fprintf(w, "✗ edit aborted (editor exited with status %d)\n", exitErr.ExitCode())
+		default:
+			fmt.Fprintf(w, "✗ edit aborted (%v)\n", err)
+		}
+		return 1
+	}
+
+	next, err := os.ReadFile(tmpPath)
+	if err != nil {
+		fmt.Fprintf(w, "✗ %v\n", err)
+		return 1
+	}
+	if bytes.Equal(next, raw) {
+		fmt.Fprintln(w, "✓ no changes")
+		return 0
+	}
+
+	// The editor's bytes are parsed WITHOUT expansion (paths/headers keep
+	// their "${VAR}" text until connect time) and validated by the writer
+	// itself, so there is exactly one validation rule. A refused entry writes
+	// nothing and does not re-prompt: the user re-runs the command.
+	var entry mcp.ServerConfig
+	if err := json.Unmarshal(next, &entry); err != nil {
+		fmt.Fprintf(w, "✗ invalid entry: %v — file left unchanged\n", err)
+		fmt.Fprintf(w, "  hint: re-run: lele mcp edit %s\n", a.name)
+		return 1
+	}
+	res, err := mcp.UpsertEntry(target.Path, a.name, entry)
+	if err != nil {
+		fmt.Fprintf(w, "✗ invalid entry: %v — file left unchanged\n", err)
+		fmt.Fprintf(w, "  hint: re-run: lele mcp edit %s\n", a.name)
+		return 1
+	}
+	if !res.Changed {
+		// A purely cosmetic edit canonicalizes back to the bytes already on
+		// disk (UpsertEntry's own no-op rule): nothing changed.
+		fmt.Fprintln(w, "✓ no changes")
+		return 0
+	}
+	fmt.Fprintf(w, "✓ updated %q (%s %s)\n", a.name, target.Layer, target.Path)
+	if wasInvalid {
+		// The edited copy validates now — report it only when the fresh read
+		// agrees, so a shadowing layer can never make the claim untrue.
+		if after := mcp.ReadInventory(paths); mcpEntryValid(after, a.name, target.Layer) {
+			fmt.Fprintf(w, "✓ %q is now valid\n", a.name)
+		}
+	}
+	// Same shadow warning as `add`: a higher layer's copy makes this one inert.
+	for _, row := range inv.ByName[a.name] {
+		if row.Layer == target.Layer {
+			continue
+		}
+		if mcpLayerRank(row.Layer) > mcpLayerRank(target.Layer) {
+			fmt.Fprintf(w, "⊘ note: %q in %s shadows this entry (defined in %s)\n", a.name, row.Layer, row.Path)
+		}
+	}
+	return 0
 }
 
 // ---------------------------------------------------------------------------

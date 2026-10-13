@@ -1169,3 +1169,197 @@ func TestDeleteEntry_TD5_Differential(t *testing.T) {
 		})
 	}
 }
+
+// T-E1: EntryRaw hands back the entry's value bytes EXACTLY as stored — odd
+// whitespace/escaping survive (it is the editor's payload), and ${VAR}/$$ are
+// literal, never expanded: an environment variable that the reference names
+// must not leak into the returned bytes.
+func TestEntryRaw_TE1_ExactStoredBytes(t *testing.T) {
+	const canary = "CANARY-t-e1-value"
+	t.Setenv("T", canary)
+
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	entry := `{"command": "cmd",  "env":{"T":"${T}","E":"$$"},"flush":"a\tb"}`
+	in := "{\n" +
+		"\t\"version\": \"1\",\n" +
+		"\t\"mcpServers\": {\n" +
+		"\t\t\"keep\": {\"command\":\"k\"},\n" +
+		"\t\t\"s\": " + entry + "\n" +
+		"\t}\n" +
+		"}\n"
+	writeRawFixture(t, path, in)
+
+	raw, found, err := EntryRaw(path, "s")
+	if err != nil {
+		t.Fatalf("EntryRaw() error = %v", err)
+	}
+	if !found {
+		t.Fatal("EntryRaw() found = false, want true")
+	}
+	if got := string(raw); got != entry {
+		t.Fatalf("raw bytes:\n got: %s\nwant: %s", got, entry)
+	}
+	// A raw read is expansion-free: the canary's VALUE must not appear.
+	if strings.Contains(string(raw), canary) {
+		t.Fatalf("expansion ran in EntryRaw: %s", raw)
+	}
+	// It is the entry object only — no name wrapper.
+	if !strings.HasPrefix(string(raw), "{") || strings.Contains(string(raw), `"s"`) {
+		t.Fatalf("raw must be the bare entry object, got: %s", raw)
+	}
+	// The bytes are a copy: mutating them must not affect a second read.
+	raw[0] = 'X'
+	again, _, err := EntryRaw(path, "s")
+	if err != nil {
+		t.Fatalf("second EntryRaw() error = %v", err)
+	}
+	if string(again) != entry {
+		t.Fatalf("EntryRaw returned aliased/unsafe bytes:\n got: %s\nwant: %s", again, entry)
+	}
+}
+
+// T-E2: when a name is duplicated, EntryRaw reports the WINNING occurrence —
+// the last one in file order, the copy UpsertEntry would replace. The pairing
+// is pinned by editing that same writer afterwards: the first copy must stay
+// verbatim, proving both operations agree on which copy is "the entry".
+func TestEntryRaw_TE2_DuplicateNameWinner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	in := `{"mcpServers":{"s":{"command":"first"},"s":{"command":"last"}}}`
+	writeRawFixture(t, path, in)
+
+	raw, found, err := EntryRaw(path, "s")
+	if err != nil {
+		t.Fatalf("EntryRaw() error = %v", err)
+	}
+	if !found {
+		t.Fatal("EntryRaw() found = false, want true")
+	}
+	if got, want := string(raw), `{"command":"last"}`; got != want {
+		t.Fatalf("raw = %s, want the winning (last) copy %s", got, want)
+	}
+
+	// UpsertEntry must replace the same occurrence EntryRaw reported.
+	if _, err := UpsertEntry(path, "s", ServerConfig{Command: "third"}); err != nil {
+		t.Fatalf("UpsertEntry() error = %v", err)
+	}
+	got := readRawFixture(t, path)
+	if want := `{"mcpServers":{"s":{"command":"first"},"s":{"command":"third"}}}`; got != want {
+		t.Fatalf("writer and reader disagree on the winner:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// T-E3: the envelope rules EntryRaw must inherit from parseRawDoc — a
+// case-variant "mcpServers" and repeated occurrences folded with
+// last-in-file-order precedence (the name set json.Unmarshal produces).
+func TestEntryRaw_TE3_EnvelopeVariants(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want map[string]string // name → expected raw bytes ("" ⇒ not found)
+	}{
+		{
+			name: "case-variant envelope",
+			in:   `{"MCPServers":{"c":{"command":"c"}}}`,
+			want: map[string]string{"c": `{"command":"c"}`},
+		},
+		{
+			name: "duplicate envelopes fold, later occurrence wins",
+			in:   `{"mcpServers":{"a":{"command":"one"}},"mcpServers":{"a":{"command":"two"},"b":{"command":"bee"}}}`,
+			want: map[string]string{"a": `{"command":"two"}`, "b": `{"command":"bee"}`},
+		},
+		{
+			name: "names from both envelopes stay reachable",
+			in:   `{"mcpServers":{"a":{"command":"one"}},"mcpServers":{"b":{"command":"two"}}}`,
+			want: map[string]string{"a": `{"command":"one"}`, "b": `{"command":"two"}`},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "mcp.json")
+			writeRawFixture(t, path, tt.in)
+			for name, want := range tt.want {
+				raw, found, err := EntryRaw(path, name)
+				if err != nil {
+					t.Fatalf("EntryRaw(%q) error = %v", name, err)
+				}
+				if !found {
+					t.Fatalf("EntryRaw(%q) found = false, want true", name)
+				}
+				if got := string(raw); got != want {
+					t.Fatalf("EntryRaw(%q) = %s, want %s", name, got, want)
+				}
+			}
+		})
+	}
+}
+
+// T-E4: the negative battery. A missing file, a missing entry, a document
+// whose null envelope cleared an earlier object, and a malformed document —
+// each must be classified the way the rest of the entry layer classifies it
+// (nil-error "not found" vs. an error naming the path).
+func TestEntryRaw_TE4_NotFoundAndErrors(t *testing.T) {
+	t.Run("missing file", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "absent", "mcp.json")
+		raw, found, err := EntryRaw(path, "s")
+		if err != nil {
+			t.Fatalf("EntryRaw() error = %v, want nil", err)
+		}
+		if found || raw != nil {
+			t.Fatalf("found = %v raw = %q, want false/nil", found, raw)
+		}
+	})
+
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{name: "missing entry", in: `{"mcpServers":{"other":{"command":"o"}}}`},
+		{name: "absent envelope", in: `{"version":"1"}`},
+		{name: "empty envelope", in: `{"mcpServers":{}}`},
+		{name: "null envelope", in: `{"mcpServers":null}`},
+		{name: "null envelope clearing an earlier object", in: `{"mcpServers":{"s":{"command":"x"}},"mcpServers":null}`},
+		{name: "top-level null", in: `null`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "mcp.json")
+			writeRawFixture(t, path, tt.in)
+			raw, found, err := EntryRaw(path, "s")
+			if err != nil {
+				t.Fatalf("EntryRaw() error = %v, want nil", err)
+			}
+			if found || raw != nil {
+				t.Fatalf("found = %v raw = %q, want false/nil", found, raw)
+			}
+		})
+	}
+
+	malformed := []struct {
+		name string
+		in   string
+	}{
+		{name: "not json", in: `not json at all`},
+		{name: "truncated", in: `{"mcpServers": {"s": `},
+		{name: "envelope is an array", in: `{"mcpServers":[1,2]}`},
+		{name: "trailing data", in: `{"mcpServers":{"s":{"command":"x"}}} extra`},
+	}
+	for _, tt := range malformed {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "mcp.json")
+			writeRawFixture(t, path, tt.in)
+			raw, found, err := EntryRaw(path, "s")
+			if err == nil {
+				t.Fatalf("EntryRaw() error = nil, want a parse failure")
+			}
+			if !strings.Contains(err.Error(), path) {
+				t.Fatalf("error = %q, want it to name the path %s", err, path)
+			}
+			if strings.Contains(err.Error(), "read") {
+				t.Fatalf("error = %q, want a parse failure, not a read failure", err)
+			}
+			if found || raw != nil {
+				t.Fatalf("found = %v raw = %q, want false/nil on error", found, raw)
+			}
+		})
+	}
+}

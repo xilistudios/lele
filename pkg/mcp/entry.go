@@ -213,6 +213,45 @@ func DeleteEntry(path, name string) (DeleteEntryResult, error) {
 	return res, nil
 }
 
+// EntryRaw returns the raw JSON bytes of the server entry `name` as stored in
+// the "mcpServers" object of the file at path (the winning occurrence when the
+// name is duplicated, matching UpsertEntry/DeleteEntry/SetDisabled semantics:
+// the last copy in file order). Values are returned exactly as stored — NO
+// ${VAR} expansion is ever applied — which is what `lele mcp edit` needs: it
+// hands the user the object that is on disk, not a decoded/expanded one.
+//
+// found=false with a nil error when the file or the entry does not exist
+// (missing file, absent "mcpServers" object, or a name the folded envelope
+// never mentions), or when the envelope is a null occurrence that cleared an
+// earlier one. A malformed document is an error, in the same shape the other
+// entry operations return, so a caller can distinguish "nothing to edit" from
+// "cannot read this file".
+//
+// The returned bytes are a fresh slice: the value spans captured by
+// parseRawDoc are decoded copies, never aliases of the file contents, so a
+// caller may keep or mutate them freely.
+func EntryRaw(path, name string) (raw []byte, found bool, err error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return nil, false, fmt.Errorf("mcp: read %s: %w", path, err)
+		}
+		return nil, false, nil
+	}
+	doc, err := parseRawDoc(data)
+	if err != nil {
+		return nil, false, fmt.Errorf("mcp: parse %s: %w", path, err)
+	}
+	if doc.servers == nil {
+		return nil, false, nil
+	}
+	m, ok := doc.servers.get(name) // last occurrence: json map semantics
+	if !ok {
+		return nil, false, nil
+	}
+	return m.raw, true, nil
+}
+
 // planUpsertEntry computes the splice(s) that insert or replace one entry,
 // returning the edits plus whether the ENTRY was created and whether an
 // existing entry was overwritten. nil edits mean "the file already holds

@@ -145,14 +145,10 @@ func TestRunMCP_UnknownSubcommand(t *testing.T) {
 
 func TestMCPHelp_ContainsCommands(t *testing.T) {
 	out := captureOutput(mcpHelp)
-	for _, sub := range []string{"list", "show", "add", "remove", "test"} {
+	for _, sub := range []string{"list", "show", "add", "remove", "edit", "test"} {
 		if !strings.Contains(out, "lele mcp "+sub) {
 			t.Errorf("mcpHelp should document %q:\n%s", sub, out)
 		}
-	}
-	// edit is a later task: it must NOT be advertised as a working command.
-	if strings.Contains(out, "lele mcp edit") {
-		t.Errorf("mcpHelp must not advertise the unimplemented edit command:\n%s", out)
 	}
 }
 
@@ -842,5 +838,452 @@ func TestMCPToolNames(t *testing.T) {
 	specs := []tools.LoadedMCPTool{{Name: "a"}, {Name: "b"}}
 	if got := strings.Join(mcpToolNames(specs), ","); got != "a,b" {
 		t.Errorf("names = %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// edit
+// ---------------------------------------------------------------------------
+
+// setMCPEditor points the editor lookup at cmd for one test. $VISUAL is
+// cleared because it takes precedence over $EDITOR in mcpEditorCommand.
+func setMCPEditor(t *testing.T, cmd string) {
+	t.Helper()
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", cmd)
+}
+
+// writeMCPEditorScript writes a fake editor to dir and returns its path. The
+// file to edit is the script's LAST argument (mirroring a real editor such as
+// `EDITOR="code -w"`, whose own flags come first); body sees it as "$target".
+func writeMCPEditorScript(t *testing.T, dir, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, "fake-editor.sh")
+	script := "#!/bin/sh\n" +
+		"target=\"\"\n" +
+		"for a in \"$@\"; do target=\"$a\"; done\n" +
+		body + "\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake editor: %v", err)
+	}
+	return path
+}
+
+// writeMCPEditorFixture stores the bytes a fake editor should install and
+// returns a script that copies them over the file it was handed.
+func writeMCPEditorFixture(t *testing.T, dir, content string) string {
+	t.Helper()
+	fixture := filepath.Join(dir, "edited.json")
+	if err := os.WriteFile(fixture, []byte(content), 0o600); err != nil {
+		t.Fatalf("write edited fixture: %v", err)
+	}
+	return writeMCPEditorScript(t, dir, "cp '"+fixture+"' \"$target\"")
+}
+
+// mcpTestPaths returns the layer roots the test env wired, without going
+// through the config/registry machinery runMCPEdit uses.
+func (e *mcpTestEnv) paths() mcp.Paths {
+	return mcp.Paths{LeleDir: e.leleDir, AgentWorkspace: e.agentWS, Cwd: e.cwd}
+}
+
+func TestParseMCPEditArgs(t *testing.T) {
+	a, err := parseMCPEditArgs([]string{"name"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.name != "name" || a.agent != "main" || a.layer != "" {
+		t.Fatalf("defaults wrong: %+v", a)
+	}
+	a, err = parseMCPEditArgs([]string{"--layer", "project", "--agent", "worker", "name"})
+	if err != nil || a.layer != "project" || a.agent != "worker" {
+		t.Fatalf("parse: %+v %v", a, err)
+	}
+	if _, err := parseMCPEditArgs(nil); err == nil || !strings.Contains(err.Error(), "missing server name") {
+		t.Fatalf("missing name err = %v", err)
+	}
+	if _, err := parseMCPEditArgs([]string{"a", "b"}); err == nil {
+		t.Fatal("extra positional accepted")
+	}
+	if _, err := parseMCPEditArgs([]string{"--layer", "nope", "a"}); err == nil {
+		t.Fatal("bad layer accepted")
+	}
+	if _, err := parseMCPEditArgs([]string{"a/b"}); err == nil {
+		t.Fatal("slash name accepted")
+	}
+	if _, err := parseMCPEditArgs([]string{"--bogus", "a"}); err == nil {
+		t.Fatal("unknown flag accepted")
+	}
+}
+
+// TestMCPEdit_NoChanges pins the "editor touched nothing" path: the note is
+// printed, the exit code is 0, and not one byte of the layer file moves.
+func TestMCPEdit_NoChanges(t *testing.T) {
+	e := newMCPTestEnv(t)
+	writeMCPTestFile(t, e.globalFile(), `{"mcpServers":{"alpha":{"command":"global-alpha"}}}`)
+	before := readMCPTestFile(t, e.globalFile())
+
+	setMCPEditor(t, writeMCPEditorScript(t, t.TempDir(), "exit 0"))
+
+	out, code := runMCPSub(t, runMCPEdit, "alpha")
+	if code != 0 {
+		t.Fatalf("edit exit = %d, want 0:\n%s", code, out)
+	}
+	if !strings.Contains(out, "✓ no changes") {
+		t.Errorf("missing no-changes line:\n%s", out)
+	}
+	want := fmt.Sprintf("Editing %q (global %s)", "alpha", e.globalFile())
+	if !strings.Contains(out, want) {
+		t.Errorf("missing pre-edit note %q:\n%s", want, out)
+	}
+	if !strings.Contains(out, "JSON object for this server") || !strings.Contains(out, "${VAR} is expanded at connect time") {
+		t.Errorf("pre-edit note must explain the object shape and raw values:\n%s", out)
+	}
+	if got := readMCPTestFile(t, e.globalFile()); got != before {
+		t.Errorf("file changed by a no-op edit:\n got: %s\nwant: %s", got, before)
+	}
+}
+
+// TestMCPEdit_SavesCanonicalizedEntry pins the happy path: the edited object
+// is stored through UpsertEntry's canonical form, only that member's value
+// span changes, and the report names the layer and file.
+func TestMCPEdit_SavesCanonicalizedEntry(t *testing.T) {
+	e := newMCPTestEnv(t)
+	in := "{\"mcpServers\":{\n  \"alpha\": {\"command\":\"old\",\"description\":\"d\"}\n}}"
+	writeMCPTestFile(t, e.globalFile(), in)
+
+	dir := t.TempDir()
+	setMCPEditor(t, writeMCPEditorFixture(t, dir, `{"command":"new-bin","args":["-x"]}`))
+
+	out, code := runMCPSub(t, runMCPEdit, "alpha")
+	if code != 0 {
+		t.Fatalf("edit exit = %d, want 0:\n%s", code, out)
+	}
+	want := fmt.Sprintf("✓ updated %q (global %s)", "alpha", e.globalFile())
+	if !strings.Contains(out, want) {
+		t.Errorf("missing update line %q:\n%s", want, out)
+	}
+	// Only the entry's value bytes are rewritten (the odd whitespace around
+	// them survives: the splice writer's contract).
+	wantFile := strings.Replace(in, `{"command":"old","description":"d"}`, `{"command":"new-bin","args":["-x"]}`, 1)
+	if got := readMCPTestFile(t, e.globalFile()); got != wantFile {
+		t.Errorf("file bytes:\n got: %s\nwant: %s", got, wantFile)
+	}
+	f, err := mcp.ParseFile(e.globalFile())
+	if err != nil {
+		t.Fatalf("ParseFile(result) error = %v", err)
+	}
+	if got := f.MCPServers["alpha"].Command; got != "new-bin" {
+		t.Errorf("saved command = %q, want new-bin", got)
+	}
+}
+
+// TestMCPEdit_InvalidEditLeavesFileUntouched: a rejected edit must print a
+// repair hint and not move a byte.
+func TestMCPEdit_InvalidEditLeavesFileUntouched(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		wantErr string
+	}{
+		{
+			name:    "command and url",
+			content: `{"command":"x","url":"http://y"}`,
+			wantErr: "mixes stdio and remote",
+		},
+		{
+			name:    "neither command nor url",
+			content: `{"description":"d"}`,
+			wantErr: "needs command",
+		},
+		{
+			name:    "not a JSON object",
+			content: `"nope"`,
+			wantErr: "cannot unmarshal",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newMCPTestEnv(t)
+			base := `{"mcpServers":{"alpha":{"command":"global-alpha"}}}`
+			writeMCPTestFile(t, e.globalFile(), base)
+
+			setMCPEditor(t, writeMCPEditorFixture(t, t.TempDir(), tt.content))
+
+			out, code := runMCPSub(t, runMCPEdit, "alpha")
+			if code != 1 {
+				t.Fatalf("invalid edit exit = %d, want 1:\n%s", code, out)
+			}
+			if !strings.Contains(out, "✗ invalid entry:") || !strings.Contains(out, tt.wantErr) {
+				t.Errorf("error text = %q, want it to mention %q", out, tt.wantErr)
+			}
+			if !strings.Contains(out, "file left unchanged") {
+				t.Errorf("missing 'file left unchanged':\n%s", out)
+			}
+			if !strings.Contains(out, "re-run: lele mcp edit alpha") {
+				t.Errorf("missing re-run hint:\n%s", out)
+			}
+			if got := readMCPTestFile(t, e.globalFile()); got != base {
+				t.Errorf("a rejected edit touched the file:\n got: %s\nwant: %s", got, base)
+			}
+		})
+	}
+}
+
+// TestMCPEdit_RepairsInvalidEntry is the documented flow: `lele mcp test`
+// sends the user here, the invalid copy is the edit target, and a valid
+// replacement flips the entry back to enabled.
+func TestMCPEdit_RepairsInvalidEntry(t *testing.T) {
+	e := newMCPTestEnv(t)
+	writeMCPTestFile(t, e.projectFile(), `{"mcpServers":{"charlie":{"command":"charlie","url":"http://charlie"}}}`)
+
+	before := mcp.ReadInventory(e.paths())
+	if got := before.Effective["charlie"]; got != "invalid" {
+		t.Fatalf("fixture premise broken: Effective[charlie] = %q, want invalid", got)
+	}
+	if got := before.Winner["charlie"]; got != "project" {
+		t.Fatalf("fixture premise broken: Winner[charlie] = %q, want project", got)
+	}
+
+	setMCPEditor(t, writeMCPEditorFixture(t, t.TempDir(), `{"command":"charlie-fixed"}`))
+
+	out, code := runMCPSub(t, runMCPEdit, "charlie")
+	if code != 0 {
+		t.Fatalf("repair exit = %d, want 0:\n%s", code, out)
+	}
+	for _, want := range []string{
+		fmt.Sprintf("✓ updated %q (project %s)", "charlie", e.projectFile()),
+		`✓ "charlie" is now valid`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("repair output missing %q:\n%s", want, out)
+		}
+	}
+	after := mcp.ReadInventory(e.paths())
+	if got := after.Effective["charlie"]; got != "enabled" {
+		t.Errorf("Effective[charlie] = %q, want enabled", got)
+	}
+	if row, ok := mcpProjectRow(after, "charlie"); !ok || row.Invalid != "" {
+		t.Errorf("project row after repair = %+v (ok=%v), want a valid copy", row, ok)
+	}
+}
+
+// mcpProjectRow returns the project layer's copy of name from an inventory.
+func mcpProjectRow(inv mcp.Inventory, name string) (mcp.EntryState, bool) {
+	for _, row := range inv.ByName[name] {
+		if row.Layer == "project" {
+			return row, true
+		}
+	}
+	return mcp.EntryState{}, false
+}
+
+// TestMCPEdit_UnknownName: an unknown name lists suggestions and never
+// invokes the editor.
+func TestMCPEdit_UnknownName(t *testing.T) {
+	e := newMCPTestEnv(t)
+	e.seedThreeLayers(t)
+
+	marker := filepath.Join(t.TempDir(), "editor-ran")
+	setMCPEditor(t, writeMCPEditorScript(t, t.TempDir(), "touch '"+marker+"'"))
+
+	out, code := runMCPSub(t, runMCPEdit, "alp")
+	if code != 1 {
+		t.Fatalf("unknown edit exit = %d, want 1:\n%s", code, out)
+	}
+	if !strings.Contains(out, `✗ unknown MCP server "alp"`) {
+		t.Errorf("missing unknown line:\n%s", out)
+	}
+	if !strings.Contains(out, "did you mean: alpha?") {
+		t.Errorf("missing suggestion:\n%s", out)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the editor ran for an unknown server")
+	}
+}
+
+// TestMCPEdit_LayerTargetsShadowedCopy: --layer edits THAT file, leaving the
+// winner alone, and the shadow note warns why the edit is inert.
+func TestMCPEdit_LayerTargetsShadowedCopy(t *testing.T) {
+	e := newMCPTestEnv(t)
+	writeMCPTestFile(t, e.globalFile(), `{"mcpServers":{"alpha":{"command":"global-alpha"}}}`)
+	writeMCPTestFile(t, e.agentFile(), `{"mcpServers":{"alpha":{"command":"agent-alpha"}}}`)
+	agentBefore := readMCPTestFile(t, e.agentFile())
+
+	setMCPEditor(t, writeMCPEditorFixture(t, t.TempDir(), `{"command":"global-edited"}`))
+
+	out, code := runMCPSub(t, runMCPEdit, "alpha", "--layer", "global")
+	if code != 0 {
+		t.Fatalf("edit --layer exit = %d, want 0:\n%s", code, out)
+	}
+	if !strings.Contains(out, fmt.Sprintf("✓ updated %q (global %s)", "alpha", e.globalFile())) {
+		t.Errorf("edit --layer did not report the global file:\n%s", out)
+	}
+	if !strings.Contains(out, fmt.Sprintf("⊘ note: %q in agent shadows this entry", "alpha")) {
+		t.Errorf("missing shadow note:\n%s", out)
+	}
+	if !strings.Contains(readMCPTestFile(t, e.globalFile()), `"command":"global-edited"`) {
+		t.Errorf("global copy not edited:\n%s", readMCPTestFile(t, e.globalFile()))
+	}
+	if got := readMCPTestFile(t, e.agentFile()); got != agentBefore {
+		t.Errorf("the winner (agent) must not be touched by --layer global:\n got: %s\nwant: %s", got, agentBefore)
+	}
+
+	// A layer that does not hold a copy is refused before the editor runs.
+	out, code = runMCPSub(t, runMCPEdit, "alpha", "--layer", "project")
+	if code != 1 || !strings.Contains(out, `✗ "alpha" is not defined in project`) {
+		t.Fatalf("--layer project exit=%d out=%s", code, out)
+	}
+}
+
+// TestMCPEdit_EditorFailureAborts: a non-zero editor (or a missing binary)
+// aborts the edit and leaves the file untouched.
+func TestMCPEdit_EditorFailureAborts(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  func(t *testing.T) string
+		want string
+	}{
+		{
+			name: "non-zero exit",
+			cmd:  func(t *testing.T) string { return writeMCPEditorScript(t, t.TempDir(), "exit 3") },
+			want: "✗ edit aborted (editor exited with status 3)",
+		},
+		{
+			name: "missing binary",
+			cmd:  func(t *testing.T) string { return "lele-no-such-editor-2f9c" },
+			want: "✗ edit aborted (editor not found)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newMCPTestEnv(t)
+			base := `{"mcpServers":{"alpha":{"command":"global-alpha"}}}`
+			writeMCPTestFile(t, e.globalFile(), base)
+			setMCPEditor(t, tt.cmd(t))
+
+			out, code := runMCPSub(t, runMCPEdit, "alpha")
+			if code != 1 {
+				t.Fatalf("aborted edit exit = %d, want 1:\n%s", code, out)
+			}
+			if !strings.Contains(out, tt.want) {
+				t.Errorf("want %q in:\n%s", tt.want, out)
+			}
+			if got := readMCPTestFile(t, e.globalFile()); got != base {
+				t.Errorf("an aborted edit touched the file:\n got: %s\nwant: %s", got, base)
+			}
+		})
+	}
+}
+
+// TestMCPEdit_DisabledRoundTrips pins that ServerConfig.Disabled survives (or
+// not) exactly as the editor wrote it: keep it → the copy stays off; drop it
+// → the copy comes back on.
+func TestMCPEdit_DisabledRoundTrips(t *testing.T) {
+	tests := []struct {
+		name      string
+		edited    string
+		wantRaw   string
+		wantState string
+	}{
+		{
+			name:      "kept disabled",
+			edited:    `{"command":"y","disabled":true}`,
+			wantRaw:   `{"command":"y","disabled":true}`,
+			wantState: "disabled",
+		},
+		{
+			name:      "dropped disabled re-enables",
+			edited:    `{"command":"y"}`,
+			wantRaw:   `{"command":"y"}`,
+			wantState: "enabled",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newMCPTestEnv(t)
+			writeMCPTestFile(t, e.globalFile(), `{"mcpServers":{"alpha":{"command":"x","disabled":true}}}`)
+
+			setMCPEditor(t, writeMCPEditorFixture(t, t.TempDir(), tt.edited))
+
+			out, code := runMCPSub(t, runMCPEdit, "alpha")
+			if code != 0 {
+				t.Fatalf("edit exit = %d, want 0:\n%s", code, out)
+			}
+			got := readMCPTestFile(t, e.globalFile())
+			want := `{"mcpServers":{"alpha":` + tt.wantRaw + `}}`
+			if got != want {
+				t.Errorf("file bytes:\n got: %s\nwant: %s", got, want)
+			}
+			if inv := mcp.ReadInventory(e.paths()); inv.Effective["alpha"] != tt.wantState {
+				t.Errorf("Effective[alpha] = %q, want %q", inv.Effective["alpha"], tt.wantState)
+			}
+			// A disabled copy is valid: the repair line must not appear.
+			if strings.Contains(out, "is now valid") {
+				t.Errorf("a disabled entry must not be reported as repaired:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestMCPEdit_EditorWithArgs pins the sh -c indirection: an editor command
+// carrying its own flags ("code -w"-style) still receives the temp file.
+func TestMCPEdit_EditorWithArgs(t *testing.T) {
+	e := newMCPTestEnv(t)
+	writeMCPTestFile(t, e.globalFile(), `{"mcpServers":{"alpha":{"command":"global-alpha"}}}`)
+
+	dir := t.TempDir()
+	script := writeMCPEditorFixture(t, dir, `{"command":"from-args-editor"}`)
+	setMCPEditor(t, script+" -w")
+
+	out, code := runMCPSub(t, runMCPEdit, "alpha")
+	if code != 0 {
+		t.Fatalf("edit with editor args exit = %d, want 0:\n%s", code, out)
+	}
+	if !strings.Contains(readMCPTestFile(t, e.globalFile()), `"command":"from-args-editor"`) {
+		t.Errorf("editor with flags did not edit the file:\n%s", readMCPTestFile(t, e.globalFile()))
+	}
+}
+
+// TestMCPEdit_PathGuardRefusesBeforeEditor pins requirement 7: a layer file
+// outside the allowed workspace roots is refused BEFORE the editor is
+// launched — the fake editor never gets a chance to run.
+//
+// The fixture root lives under /var/tmp (writable, but outside home, /tmp and
+// the process cwd), which is exactly the shape the guard exists for.
+func TestMCPEdit_PathGuardRefusesBeforeEditor(t *testing.T) {
+	root, err := os.MkdirTemp("/var/tmp", "lele-mcp-edit-guard-")
+	if err != nil {
+		t.Skipf("cannot create a workspace outside the allowed roots: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+
+	leleDir := filepath.Join(root, "lele")
+	agentWS := filepath.Join(root, "ws") // not under home, /tmp or cwd
+	cwd := filepath.Join(root, "proj")
+	for _, d := range []string{leleDir, agentWS, cwd} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("LELE_CONFIG_DIR", leleDir)
+	t.Chdir(cwd)
+	writeMCPConfigFile(t, leleDir, agentWS)
+	writeMCPTestFile(t, filepath.Join(agentWS, "mcp.json"), `{"mcpServers":{"alpha":{"command":"x"}}}`)
+
+	marker := filepath.Join(root, "editor-ran")
+	setMCPEditor(t, writeMCPEditorScript(t, root, "touch '"+marker+"'"))
+
+	out, code := runMCPSub(t, runMCPEdit, "alpha")
+	if code != 1 {
+		t.Fatalf("guarded edit exit = %d, want 1:\n%s", code, out)
+	}
+	if !strings.Contains(out, "refusing to write") {
+		t.Errorf("missing guard message:\n%s", out)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the editor ran despite the path guard")
+	}
+	if !strings.Contains(readMCPTestFile(t, filepath.Join(agentWS, "mcp.json")), `"command":"x"`) {
+		t.Error("the guarded file was modified")
 	}
 }
