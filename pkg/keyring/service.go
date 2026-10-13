@@ -146,7 +146,17 @@ func (s *Service) GetRaw(name string) (string, error) {
 
 // SetFromUI stores or updates a secret from a UI source ("tui" or "webui").
 func (s *Service) SetFromUI(name, value, description string, tags, scope []string, source string) error {
-	return s.set(name, value, description, tags, scope, source)
+	return s.set(name, value, description, tags, scope, source, false)
+}
+
+// UpdateFromUI edits an existing secret from a UI source ("tui" or "webui").
+// Unlike SetFromUI it never creates one: a name that is not stored returns
+// ErrNotFound. An empty value keeps the stored plaintext, so the UI can edit
+// the metadata (description, tags, scope) without a round trip of the secret
+// value through the browser, and the original creator is preserved because
+// editing is not creating.
+func (s *Service) UpdateFromUI(name, value, description string, tags, scope []string, source string) error {
+	return s.set(name, value, description, tags, scope, source, true)
 }
 
 // SetFromAgent stores a secret on behalf of an agent. It is gated by the
@@ -156,7 +166,7 @@ func (s *Service) SetFromAgent(name, value, description string, tags, scope []st
 		s.record(name, agentID, sessionKey, "set", false)
 		return ErrAgentWriteOff
 	}
-	if err := s.set(name, value, description, tags, scope, "agent:"+agentID); err != nil {
+	if err := s.set(name, value, description, tags, scope, "agent:"+agentID, false); err != nil {
 		s.record(name, agentID, sessionKey, "set", false)
 		return err
 	}
@@ -164,7 +174,12 @@ func (s *Service) SetFromAgent(name, value, description string, tags, scope []st
 	return nil
 }
 
-func (s *Service) set(name, value, description string, tags, scope []string, source string) error {
+// set writes a secret under the service lock. When mustExist is true the call
+// is an edit: the secret has to be stored already, an empty value means "keep
+// the stored one", and the original CreatedAt/CreatedBy survive. When it is
+// false the call is a store-or-update, which is what creating a secret from the
+// UIs and from an agent does.
+func (s *Service) set(name, value, description string, tags, scope []string, source string, mustExist bool) error {
 	if err := s.EnsureOpen(); err != nil {
 		return err
 	}
@@ -178,6 +193,9 @@ func (s *Service) set(name, value, description string, tags, scope []string, sou
 
 	now := time.Now()
 	existing, ok := s.store.Get(name)
+	if mustExist && (!ok || existing == nil) {
+		return ErrNotFound
+	}
 
 	sec := &Secret{
 		Name:        name,
@@ -192,6 +210,14 @@ func (s *Service) set(name, value, description string, tags, scope []string, sou
 		sec.CreatedAt = existing.CreatedAt
 		if sec.CreatedBy == "" {
 			sec.CreatedBy = existing.CreatedBy
+		}
+		if mustExist {
+			// Editing: the creator is immutable and an empty value means the
+			// editor did not touch the plaintext.
+			sec.CreatedBy = existing.CreatedBy
+			if sec.Value == "" {
+				sec.Value = existing.Value
+			}
 		}
 	} else {
 		sec.CreatedAt = now

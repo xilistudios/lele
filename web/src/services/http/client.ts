@@ -1097,6 +1097,11 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
           method: 'POST',
           body: JSON.stringify(input),
         }),
+      update: (name: string, input: Omit<SecretInput, 'name'>) =>
+        request<{ secret: SecretMeta }>(endpoints.secrets.update(name), {
+          method: 'PUT',
+          body: JSON.stringify(input),
+        }),
       remove: (name: string) =>
         request<{ deleted: string }>(endpoints.secrets.remove(name), { method: 'DELETE' }),
       status: () =>
