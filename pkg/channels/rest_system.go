@@ -16,6 +16,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/skills"
 )
 
 func (n *NativeChannel) handleTools(w http.ResponseWriter, r *http.Request) {
@@ -101,18 +102,32 @@ func (n *NativeChannel) handleSkillInstall(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if n.skillsLoader == nil {
+		writeError(w, http.StatusInternalServerError, "skills not available", "skills_unavailable")
+		return
+	}
+	installer, scope, badRequest := installTarget(n.skillsLoader, req.Scope)
+	if badRequest != "" {
+		writeError(w, http.StatusBadRequest, badRequest, "invalid_scope")
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	if err := n.skillInstaller.InstallFromGitHub(ctx, req.URL); err != nil {
+	if err := installer.InstallFromGitHub(ctx, req.URL); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to install skill: %v", err), "install_failed")
 		return
+	}
+	// A global install changes what every agent's loader reports.
+	if scope == globalSkillScope {
+		n.invalidateAllAgentPrompts()
 	}
 
 	skillName := filepath.Base(req.URL)
 	writeJSON(w, http.StatusCreated, SkillInstallResponse{
 		SkillID: skillName,
-		Message: fmt.Sprintf("Skill '%s' installed successfully", skillName),
+		Message: fmt.Sprintf("Skill '%s' installed (%s)", skillName, scope),
 	})
 }
 
@@ -157,14 +172,75 @@ func (n *NativeChannel) handleSkillRemove(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := n.skillInstaller.Uninstall(skillName); err != nil {
+	if n.skillsLoader == nil {
+		writeError(w, http.StatusInternalServerError, "skills not available", "skills_unavailable")
+		return
+	}
+
+	// Resolve the name through the loader's own view and dispatch on its
+	// source: a global skill lives in <leleDir>/skills, not in the default
+	// workspace, and built-ins are shared, shipped with lele.
+	var found *skills.SkillInfo
+	loaded := n.skillsLoader.ListSkills()
+	for i := range loaded {
+		if loaded[i].Name == skillName {
+			found = &loaded[i]
+			break
+		}
+	}
+
+	switch {
+	case found == nil:
+		writeError(w, http.StatusNotFound, fmt.Sprintf("skill '%s' is not installed", skillName), "not_found")
+		return
+	case found.Source == "builtin":
+		writeError(w, http.StatusForbidden,
+			fmt.Sprintf("skill '%s' is a built-in skill shipped with lele and cannot be removed", skillName),
+			"builtin_skill")
+		return
+	}
+
+	isGlobal := found.Source == "global"
+	var installer *skills.SkillInstaller
+	if isGlobal {
+		globalDir := n.skillsLoader.GlobalSkillsDir()
+		if globalDir == "" {
+			writeError(w, http.StatusBadRequest, "global skills directory not configured", "invalid_scope")
+			return
+		}
+		// The installer appends "skills" itself, so hand it the parent directory.
+		installer = skills.NewSkillInstaller(filepath.Dir(globalDir))
+	} else {
+		installer = skills.NewSkillInstaller(n.skillsLoader.WorkspaceDir())
+	}
+
+	// Uninstall keeps its own path-traversal guard; do not re-implement it here.
+	if err := installer.Uninstall(skillName); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to remove skill: %v", err), "remove_failed")
 		return
+	}
+	if isGlobal {
+		n.invalidateAllAgentPrompts()
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message": fmt.Sprintf("Skill '%s' removed successfully", skillName),
 	})
+}
+
+// invalidateAllAgentPrompts drops the cached system prompt of every agent after
+// a change to a skill state every agent reads (the shared <leleDir>/skills
+// directory). Workspace-scoped writes affect a single agent and are handled by
+// their own endpoint, so they do not need this fan-out.
+func (n *NativeChannel) invalidateAllAgentPrompts() {
+	if n.agentLoop == nil {
+		return
+	}
+	for _, id := range n.agentLoop.ListAvailableAgentIDs() {
+		if _, invalidate, ok := n.skillLoaderFor(id); ok {
+			invalidate()
+		}
+	}
 }
 
 // handleSkillScan scans a GitHub repo for skills.
@@ -210,10 +286,7 @@ func (n *NativeChannel) handleSkillScan(w http.ResponseWriter, r *http.Request) 
 
 // handleSkillInstallBatch installs multiple skills from a scanned repo.
 func (n *NativeChannel) handleSkillInstallBatch(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Repo   string   `json:"repo"`
-		Skills []string `json:"skills"`
-	}
+	var req SkillInstallBatchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_request")
 		return
@@ -229,16 +302,31 @@ func (n *NativeChannel) handleSkillInstallBatch(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	if n.skillsLoader == nil {
+		writeError(w, http.StatusInternalServerError, "skills not available", "skills_unavailable")
+		return
+	}
+	installer, scope, badRequest := installTarget(n.skillsLoader, req.Scope)
+	if badRequest != "" {
+		writeError(w, http.StatusBadRequest, badRequest, "invalid_scope")
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	installed, err := n.skillInstaller.InstallMultiple(ctx, req.Repo, req.Skills)
+	installed, err := installer.InstallMultiple(ctx, req.Repo, req.Skills)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to install skills: %v", err), "install_failed")
 		return
 	}
+	// A global install changes what every agent's loader reports.
+	if scope == globalSkillScope {
+		n.invalidateAllAgentPrompts()
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"scope":     scope,
 		"installed": installed,
 		"count":     len(installed),
 		"message":   fmt.Sprintf("Installed %d skills successfully", len(installed)),
