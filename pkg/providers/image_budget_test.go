@@ -535,8 +535,15 @@ func TestReduceImageParts_EvictsUppercaseSchemeMedia(t *testing.T) {
 
 // TestLiveMultimodalParts_CountsMediaDataURLs pins the accounting across both
 // carriers: a ContentParts-only control (existing behaviour), plus one heavy
-// part + one heavy Media entry + one path + one remote URL in the same
-// message: only the two heavy payloads count.
+// part + two heavy Media entries (one of them with an uppercase scheme) + one
+// path + one remote URL in the same message: only the heavy payloads count.
+//
+// The uppercase entry is not decoration (N10): LiveMultimodalParts is the gate
+// EnforceImageBudget consults before it evicts anything, and each of its arms
+// calls a predicate independently - so a case-sensitive regression in the
+// *Media* arm would count 0 for a DATA: entry, make the guard early-return,
+// and resurrect on Media exactly the charged-but-un-evictable hole the
+// scheme fold closes, while no other test in the four packages notices.
 func TestLiveMultimodalParts_CountsMediaDataURLs(t *testing.T) {
 	// Control: ContentParts-only accounting is unchanged.
 	partURL := "data:image/png;base64," + strings.Repeat("C", 64)
@@ -549,18 +556,20 @@ func TestLiveMultimodalParts_CountsMediaDataURLs(t *testing.T) {
 	}
 
 	mediaURL := "data:video/mp4;base64," + strings.Repeat("D", 128)
+	mediaUpperURL := "DATA:image/png;base64," + strings.Repeat("U", 32)
 	msgs := []Message{{
 		Role: "user",
 		ContentParts: []ContentPart{
 			{Type: "image_url", ImageURL: &ImageURL{URL: partURL}},
 		},
-		Media: []string{mediaURL, "/tmp/photo.jpg", "https://example.com/x.png"},
+		Media: []string{mediaURL, mediaUpperURL, "/tmp/photo.jpg", "https://example.com/x.png"},
 	}}
 	count, bytes = LiveMultimodalParts(msgs)
-	if count != 2 {
-		t.Errorf("count = %d, want 2 (1 heavy part + 1 heavy media)", count)
+	if count != 3 {
+		t.Errorf("count = %d, want 3 (1 heavy part + 2 heavy media, including the uppercase-scheme entry: "+
+			"a case-sensitive Media arm counts 2 and the eviction guard early-returns)", count)
 	}
-	if want := len(partURL) + len(mediaURL); bytes != want {
+	if want := len(partURL) + len(mediaURL) + len(mediaUpperURL); bytes != want {
 		t.Errorf("bytes = %d, want %d", bytes, want)
 	}
 }
