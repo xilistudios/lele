@@ -203,13 +203,16 @@ func (n *NativeChannel) handleSkillRemove(w http.ResponseWriter, r *http.Request
 	isGlobal := found.Source == "global"
 	var installer *skills.SkillInstaller
 	if isGlobal {
-		globalDir := n.skillsLoader.GlobalSkillsDir()
-		if globalDir == "" {
-			writeError(w, http.StatusBadRequest, "global skills directory not configured", "invalid_scope")
+		// One single source of truth for scope -> directory resolution: reuse the
+		// same helper the install endpoints use instead of hand-rolling
+		// `filepath.Dir(GlobalSkillsDir())` here (the guard it would need is
+		// unreachable: a "global" source proves the loader read a non-empty dir).
+		var badRequest string
+		installer, _, badRequest = installTarget(n.skillsLoader, globalSkillScope)
+		if badRequest != "" {
+			writeError(w, http.StatusBadRequest, badRequest, "invalid_scope")
 			return
 		}
-		// The installer appends "skills" itself, so hand it the parent directory.
-		installer = skills.NewSkillInstaller(filepath.Dir(globalDir))
 	} else {
 		installer = skills.NewSkillInstaller(n.skillsLoader.WorkspaceDir())
 	}

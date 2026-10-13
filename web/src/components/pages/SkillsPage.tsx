@@ -340,6 +340,17 @@ export function SkillsPage() {
             {t('skills.installedCount', { count: visibleSkills.length })}
           </p>
 
+          {/* D6/M1: the Global view hides the enable/disable toggle (it is
+              per-agent state), so say why instead of dropping it silently. */}
+          {view === 'global' && (
+            <p data-testid="skills-global-toggle-hint" className="mt-1 text-xs text-text-tertiary">
+              {t(
+                'skills.globalToggleHint',
+                'Enable/disable is per agent — open the Global skill under an agent to change it.',
+              )}
+            </p>
+          )}
+
           {view === 'agent' && agents.length === 0 ? (
             /* No agent to manage: installing has no target, so the button above
                is disabled and this explains why (D11). */

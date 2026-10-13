@@ -86,7 +86,9 @@ const SKILLS: SkillInfo[] = [
   },
 ]
 
-/** One `deletable: true` (chrome) and two `deletable: false` entries. */
+/** One `deletable: true` (chrome) and three `deletable: false` entries.
+ *  `pinned` is the D9 witness: `source: 'workspace'` but `deletable: false`, so
+ *  the remove control must follow `deletable`, NOT `source`. */
 const CATALOGS: Record<string, AgentCatalogResponse> = {
   coder: {
     agent_id: 'coder',
@@ -108,6 +110,13 @@ const CATALOGS: Record<string, AgentCatalogResponse> = {
         deletable: false,
       },
       { name: 'memory', description: 'notes', source: 'builtin', enabled: true, deletable: false },
+      {
+        name: 'pinned',
+        description: 'shared',
+        source: 'workspace',
+        enabled: true,
+        deletable: false,
+      },
     ],
   },
   planner: {
@@ -379,6 +388,26 @@ describe('SkillsPage — views', () => {
     await waitFor(() => expect(cardNames(container)).toEqual(['roadmap', 'weather']))
     expect(getsTo(requests, '/api/v1/agents/planner/catalog')).toHaveLength(1)
   })
+
+  test('3c. the Global view explains the hidden enable/disable toggle; All and By agent do not (M1)', async () => {
+    const { container } = renderPage({ initialEntries: ['/skills?view=global'] })
+    await waitFor(() => expect(cardNames(container)).toEqual(['global-a', 'global-b']))
+
+    // D6: the per-agent toggle is hidden in Global, so the note must say why.
+    expect(byTestId(container, 'skills-global-toggle-hint').textContent).toBe(
+      tr('skills.globalToggleHint'),
+    )
+
+    fireEvent.click(buttonWithText(container, tr('skills.view.all')))
+    await waitFor(() => expect(cardNames(container)).toHaveLength(4))
+    expect(container.querySelector('[data-testid="skills-global-toggle-hint"]')).toBeNull()
+
+    fireEvent.click(buttonWithText(container, tr('skills.view.agent')))
+    await waitFor(() =>
+      expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory', 'pinned']),
+    )
+    expect(container.querySelector('[data-testid="skills-global-toggle-hint"]')).toBeNull()
+  })
 })
 
 // ===========================================================================
@@ -393,7 +422,9 @@ describe('SkillsPage — by agent', () => {
     fireEvent.click(buttonWithText(container, tr('skills.view.agent')))
 
     await waitFor(() => expect(locationOf(container)).toBe('/skills?view=agent&agent=coder'))
-    await waitFor(() => expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory']))
+    await waitFor(() =>
+      expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory', 'pinned']),
+    )
     expect(getsTo(requests, '/api/v1/agents/coder/catalog')).toHaveLength(1)
   })
 
@@ -401,7 +432,9 @@ describe('SkillsPage — by agent', () => {
     const { container, requests } = renderPage({
       initialEntries: ['/skills?view=agent&agent=coder'],
     })
-    await waitFor(() => expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory']))
+    await waitFor(() =>
+      expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory', 'pinned']),
+    )
 
     fireEvent.change(container.querySelector('select#skills-agent') as HTMLSelectElement, {
       target: { value: 'planner' },
@@ -419,7 +452,9 @@ describe('SkillsPage — by agent', () => {
 
     await waitFor(() => expect(locationOf(container)).toBe('/skills?view=agent&agent=coder'))
     expect(locationOf(container)).not.toContain('ghost')
-    await waitFor(() => expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory']))
+    await waitFor(() =>
+      expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory', 'pinned']),
+    )
   })
 })
 
@@ -465,7 +500,9 @@ describe('SkillsPage — install destination', () => {
     const { container, requests } = renderPage({
       initialEntries: ['/skills?view=agent&agent=coder'],
     })
-    await waitFor(() => expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory']))
+    await waitFor(() =>
+      expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory', 'pinned']),
+    )
 
     await openInstallModal(container)
     // The By-agent view keeps the INTERACTIVE picker, defaulting to workspace.
@@ -530,18 +567,25 @@ describe('SkillsPage — install destination', () => {
 // ===========================================================================
 
 describe('SkillsPage — capabilities', () => {
-  test('11. By agent: only a deletable card offers remove, and it confirms inline', async () => {
+  test('11. By agent: only a deletable card offers remove (D9), and it confirms inline', async () => {
     const { container, requests } = renderPage({
       initialEntries: ['/skills?view=agent&agent=coder'],
     })
-    await waitFor(() => expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory']))
+    await waitFor(() =>
+      expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory', 'pinned']),
+    )
 
+    // D9: the remove control follows the server's `deletable`, never `source`.
+    // `pinned` is the discriminator: it has `source: 'workspace'` with
+    // `deletable: false`, so a `source === 'workspace'` predicate would wrongly
+    // offer Remove on it — this assertion is what kills that mutation (§M2).
     const removeTitle = tr('skills.removeSkill')
     expect(
       cardFor(container, 'chrome').querySelector(`button[title="${removeTitle}"]`),
     ).toBeTruthy()
     expect(cardFor(container, 'weather').querySelector(`button[title="${removeTitle}"]`)).toBeNull()
     expect(cardFor(container, 'memory').querySelector(`button[title="${removeTitle}"]`)).toBeNull()
+    expect(cardFor(container, 'pinned').querySelector(`button[title="${removeTitle}"]`)).toBeNull()
 
     fireEvent.click(
       cardFor(container, 'chrome').querySelector(`button[title="${removeTitle}"]`) as HTMLElement,
@@ -561,7 +605,9 @@ describe('SkillsPage — capabilities', () => {
     const { container, requests } = renderPage({
       initialEntries: ['/skills?view=agent&agent=coder'],
     })
-    await waitFor(() => expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory']))
+    await waitFor(() =>
+      expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory', 'pinned']),
+    )
 
     fireEvent.click(
       cardFor(container, 'chrome').querySelector(
@@ -619,7 +665,9 @@ describe('SkillsPage — data coherence and edge cases', () => {
     const { container, requests } = renderPage({
       initialEntries: ['/skills?view=agent&agent=coder'],
     })
-    await waitFor(() => expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory']))
+    await waitFor(() =>
+      expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory', 'pinned']),
+    )
     expect(getsTo(requests, '/api/v1/skills')).toHaveLength(1)
     expect(getsTo(requests, '/api/v1/agents/coder/catalog')).toHaveLength(1)
 
@@ -675,6 +723,6 @@ describe('SkillsPage — data coherence and edge cases', () => {
     await waitFor(() => expect(count().textContent).toBe(tr('skills.installedCount', { count: 2 })))
 
     fireEvent.click(buttonWithText(container, tr('skills.view.agent')))
-    await waitFor(() => expect(count().textContent).toBe(tr('skills.installedCount', { count: 3 })))
+    await waitFor(() => expect(count().textContent).toBe(tr('skills.installedCount', { count: 4 })))
   })
 })
