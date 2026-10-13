@@ -13,7 +13,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/constants"
@@ -465,48 +464,42 @@ func truncateUTF8Safe(s string, maxBytes int) string {
 // clip duration client-side cheaply, so a fixed estimate far above the image
 // one (2500) is used: compaction must trigger before the provider rejects an
 // over-length request. Remote URLs get the same fixed estimate.
-const videoPartEstimateChars = 20000
+//
+// The value is aliased to providers.VideoPartCharCost — the canonical
+// constant in pkg/providers/image_budget.go — so the two estimators cannot
+// drift. The symbol is kept (rather than deleted) because existing tests
+// reference it by name; production code now goes through MessageCharCost,
+// which reads providers.VideoPartCharCost directly.
+const videoPartEstimateChars = providers.VideoPartCharCost
 
-// EstimateTokens estimates the number of tokens in a message list.
-// Uses a safe heuristic of 2.5 characters per token to account for CJK and other
-// overheads better than the previous 3 chars/token.
-// Counts Content, ReasoningContent, ToolCall function names and arguments,
-// and a fixed per-message structural overhead (10 chars ≈ 4 tokens).
-// Messages marked with ExcludeFromContext are skipped.
+// EstimateTokens estimates the number of tokens in a message list using the
+// 2.5 chars/token heuristic, sharing the accounting rule with the tool loop's
+// tools.EstimateLoopTokens: both sum providers.MessageCharCost
+// (pkg/providers/image_budget.go) over Content, ReasoningContent, tool-call
+// names/arguments, Media entries, content parts (images and videos charged a
+// FIXED char cost — providers.ImagePartCharCost/MediaPartCharCost/
+// VideoPartCharCost — never their base64 length; real bytes are budgeted
+// separately) plus a per-message structural overhead.
+//
+// The only intentional difference from EstimateLoopTokens: messages marked
+// ExcludeFromContext are skipped here (the loop counts them because its
+// messages are the live ones). Consequence: for any message list without
+// ExcludeFromContext entries, tools.EstimateLoopTokens(msgs) ==
+// EstimateTokens(msgs), exactly.
+//
+// The former `if m.Content == ""` gate around content parts is gone:
+// MessageCharCost counts text parts only when Content == "" (because
+// Message.UnmarshalJSON repopulates Content from them on session reload,
+// which would double-count) but ALWAYS counts image/video parts — the gate
+// wrongly billed zero images for a reloaded session, since textFromParts
+// renders them as "[image]" markers.
 func (sm *sessionManagerImpl) EstimateTokens(messages []providers.Message) int {
 	totalChars := 0
 	for _, m := range messages {
 		if m.ExcludeFromContext {
 			continue
 		}
-		totalChars += utf8.RuneCountInString(m.Content)
-		totalChars += utf8.RuneCountInString(m.ReasoningContent)
-		for _, tc := range m.ToolCalls {
-			if tc.Function != nil {
-				totalChars += utf8.RuneCountInString(tc.Function.Name)
-				totalChars += utf8.RuneCountInString(tc.Function.Arguments)
-			}
-		}
-		// Count media attachments (images). Each image costs ~1000 tokens
-		// regardless of content, so estimate 2500 chars at 2.5 chars/token.
-		totalChars += len(m.Media) * 2500
-		// Count multimodal content parts if Content is empty (avoid double-counting
-		// since UnmarshalJSON populates Content from text parts).
-		if m.Content == "" {
-			for _, part := range m.ContentParts {
-				if part.Text != "" {
-					totalChars += utf8.RuneCountInString(part.Text)
-				}
-				if part.ImageURL != nil {
-					totalChars += 2500
-				}
-				if part.VideoURL != nil {
-					totalChars += videoPartEstimateChars
-				}
-			}
-		}
-		// Per-message structural overhead (~4 tokens via 2.5 chars/token heuristic)
-		totalChars += 10
+		totalChars += providers.MessageCharCost(m)
 	}
 	// 2.5 chars per token = totalChars * 2 / 5
 	return totalChars * 2 / 5

@@ -264,9 +264,11 @@ type httpStatusError interface {
 // (bedrock, claude_cli, codex, antigravity, github_copilot, ...).
 //
 // A status that maps to a known reason wins outright. An unmapped status
-// (404, 409, 413, ...) still consults the body patterns, and if nothing
+// (404, 409, ...) still consults the body patterns, and if nothing
 // matches it becomes FailoverUnknown - transient - because an unrecognised
-// status says nothing about the request being wrong.
+// status says nothing about the request being wrong. (413 is mapped:
+// an over-size request fails identically at every candidate, so it is
+// format/terminal - see classifyByStatus.)
 func classifyStructured(err error, provider, model string) (fe *FailoverError, ok bool) {
 	var hs httpStatusError
 	if !errors.As(err, &hs) {
@@ -343,6 +345,12 @@ func classifyByStatus(status int) FailoverReason {
 	case status == 429:
 		return FailoverRateLimit
 	case status == 400:
+		return FailoverFormat
+	// A 413 is a request-shape rejection: the payload is over a size limit
+	// (e.g. a gateway body cap) and fails identically at every candidate.
+	// Mapping it to a transient reason would make the fallback chain burn its
+	// budget re-sending the same oversized request instead of surfacing it.
+	case status == 413:
 		return FailoverFormat
 	case transientStatusCodes[status]:
 		return FailoverTimeout

@@ -15,6 +15,7 @@ import (
 	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // maxGroupToolIterations is the maximum number of tool-call iterations
@@ -158,6 +159,17 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 	for iteration := 1; iteration <= maxGroupToolIterations; iteration++ {
 		if err := ctx.Err(); err != nil {
 			return "", totalTokens, err
+		}
+
+		// Keep the payload under the request-size budget: a participant's read_image
+		// merges base64 parts into these messages, and an oversized request is
+		// rejected by the transport before the model ever sees it.
+		if reduced, evicted := tools.EnforceImageBudget(messages); evicted > 0 {
+			messages = reduced
+			logger.InfoCF("agent", "Group turn request image budget enforced", map[string]interface{}{
+				"group_id": req.GroupID, "speaker": req.Speaker, "iteration": iteration,
+				"evicted_parts": evicted,
+			})
 		}
 
 		callOpts := llmCallOptions{
@@ -336,6 +348,16 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 		candidates: agent.Candidates,
 		sessionKey: sessionKey,
 		iteration:  maxGroupToolIterations + 1,
+	}
+	// Keep the payload under the request-size budget: a participant's read_image
+	// merges base64 parts into these messages, and an oversized request is
+	// rejected by the transport before the model ever sees it.
+	if reduced, evicted := tools.EnforceImageBudget(messages); evicted > 0 {
+		messages = reduced
+		logger.InfoCF("agent", "Group turn request image budget enforced", map[string]interface{}{
+			"group_id": req.GroupID, "speaker": req.Speaker, "iteration": maxGroupToolIterations + 1,
+			"evicted_parts": evicted,
+		})
 	}
 	response, _, err := caller.executeWithRetry(callOpts, messages)
 	if err != nil {

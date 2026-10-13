@@ -3003,3 +3003,139 @@ func TestStripImageContentParts_Wrapper(t *testing.T) {
 		t.Errorf("part types = %v, want %v", types, want)
 	}
 }
+
+// ============================================================================
+// T4: request image/byte budget in maybeCompactLoopContext.
+// ============================================================================
+
+// TestMaybeCompactLoopContext_NoContextWindowStillBudgetsImages verifies the
+// image/byte budget prelude. Note there is no such thing as "no context
+// window configured": getContextWindow always resolves to at least the hard
+// 128000 default. What this test pins is that the budget prelude runs and
+// the eviction alone brings a ~12 MB payload (6 base64 images) under the
+// transport budget WITHOUT charging a summarization call: the token estimate
+// stays far below the 75% compaction threshold because image parts are
+// charged a fixed 2500 chars each after T3, so only the byte-eviction prelude
+// can act. Before T4 the oversized input was shipped to the transport
+// untouched.
+func TestMaybeCompactLoopContext_NoContextWindowStillBudgetsImages(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+
+	runner := newLLMRunner(al)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+
+	summaryCalls := 0
+	agent.Provider = &llmRunnerMockLLMProvider{
+		onChatCalled: func(ctx context.Context, messages []providers.Message, toolDefs []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
+			summaryCalls++
+			return &providers.LLMResponse{Content: "Summary of prior tool interactions"}, nil
+		},
+	}
+
+	in := []providers.Message{{Role: "system", Content: "System prompt"}}
+	payload := strings.Repeat("A", 2_000_000)
+	for i := 0; i < 6; i++ {
+		in = append(in, providers.Message{
+			Role: "user",
+			ContentParts: []providers.ContentPart{
+				{Type: "image_url", ImageURL: &providers.ImageURL{URL: "data:image/jpeg;base64," + payload}},
+			},
+		})
+	}
+
+	opts := processOptions{SessionKey: "no-context-window-session", Channel: "test", ChatID: "test-chat"}
+	out := runner.maybeCompactLoopContext(context.Background(), agent, in, "test-model", opts, 1)
+
+	if est := providers.EstimateRequestBytes(out); est > config.DefaultMaxRequestBytes {
+		t.Fatalf("request estimate %d exceeds budget %d", est, config.DefaultMaxRequestBytes)
+	}
+	if summaryCalls != 0 {
+		t.Fatalf("summarizer called %d times, want 0 (eviction alone must not charge an LLM call)", summaryCalls)
+	}
+}
+
+// TestMaybeCompactLoopContext_ByteThresholdTriggersCompaction verifies the
+// escalation path: the payload is over the byte budget even after image
+// eviction (a ~9 MiB text body; the token threshold is unreachable because
+// the context window is huge), so the guard must fall back to LLM compaction
+// exactly once and return the compacted slice.
+func TestMaybeCompactLoopContext_ByteThresholdTriggersCompaction(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+
+	// Huge configured context window, set where getSessionContextWindow
+	// actually looks: it resolves getContextWindow(cfg, model, provider) FIRST
+	// and only falls back to the agent's ContextWindow field when that yields
+	// 0 — but getContextWindow hard-defaults to 128000 for unknown models, so
+	// the agent field is unreachable here. Configure the model in the provider
+	// config instead (GetNamed returns a value copy → mutate the map entry).
+	// The window must make the 75% token threshold unreachable: the ~9 MiB
+	// text body estimates ≈3.78M tokens (chars×2/5), so W×0.75 must exceed
+	// that → W ≥ ~5.04M. 10M leaves the token branch provably inert while the
+	// byte estimate (9.44 MiB) still exceeds the 8 MiB budget.
+	cfg := al.cfg()
+	if cfg.Providers == nil {
+		cfg.Providers = &config.ProvidersConfig{}
+	}
+	if cfg.Providers.Named == nil {
+		cfg.Providers.Named = map[string]config.NamedProviderConfig{}
+	}
+	prov := cfg.Providers.Named["test-provider"] // GetNamed lowercases the name
+	prov.Models = map[string]config.ProviderModelConfig{
+		"test-model": {ContextWindow: 10_000_000},
+	}
+	cfg.Providers.Named["test-provider"] = prov
+
+	// Anti-hollowness guard: assert the lever really took effect in the exact
+	// resolution path the SUT uses, so this test can never go silently hollow
+	// again (it previously mutated the agent's ContextWindow field, which
+	// getContextWindow never consults).
+	if w := al.getSessionContextWindow("byte-threshold-session"); w < 8_000_000 {
+		t.Fatalf("test setup: effective context window = %d, the byte trigger cannot be isolated", w)
+	}
+
+	runner := newLLMRunner(al)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+
+	summaryCalls := 0
+	agent.Provider = &llmRunnerMockLLMProvider{
+		onChatCalled: func(ctx context.Context, messages []providers.Message, toolDefs []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
+			if len(messages) == 1 && messages[0].Role == "user" &&
+				strings.Contains(messages[0].Content, "summarizing the conversation history of an AI agent") {
+				summaryCalls++
+				return &providers.LLMResponse{Content: "Summary of prior tool interactions"}, nil
+			}
+			t.Fatalf("unexpected LLM call in compaction-only test (messages=%d)", len(messages))
+			return nil, nil
+		},
+	}
+
+	// > keepLast+2 messages (so CompactLoopMessages can act), one small image
+	// part that fits the count/size caps, and a ~9 MiB text body: eviction
+	// cannot bring the total under budget, only compaction can.
+	in := []providers.Message{{Role: "system", Content: "System prompt"}}
+	for i := 0; i < 6; i++ {
+		in = append(in, providers.Message{Role: "user", Content: fmt.Sprintf("filler %d", i)})
+	}
+	in = append(in, providers.Message{
+		Role: "user",
+		ContentParts: []providers.ContentPart{
+			{Type: "image_url", ImageURL: &providers.ImageURL{URL: "data:image/jpeg;base64," + strings.Repeat("A", 100_000)}},
+		},
+	})
+	in = append(in, providers.Message{Role: "user", Content: strings.Repeat("X", 9<<20)})
+
+	opts := processOptions{SessionKey: "byte-threshold-session", Channel: "test", ChatID: "test-chat"}
+	out := runner.maybeCompactLoopContext(context.Background(), agent, in, "test-model", opts, 1)
+
+	if summaryCalls != 1 {
+		t.Fatalf("summarizer called %d times, want exactly 1", summaryCalls)
+	}
+	if &out[0] == &in[0] {
+		t.Fatal("expected the compacted slice, got the input back (identity)")
+	}
+	if len(out) < 3 || !strings.HasPrefix(out[1].Content, "[Context compacted") {
+		t.Fatalf("returned slice is not the compacted one (len=%d)", len(out))
+	}
+}

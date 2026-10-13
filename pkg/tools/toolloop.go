@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	leleconfig "github.com/xilistudios/lele/pkg/config"
@@ -155,18 +154,24 @@ type ToolLoopResult struct {
 	Iterations int
 }
 
-// EstimateLoopTokens estimates the number of tokens in a message list.
-// Uses 2.5 chars per token heuristic (same as session manager).
+// EstimateLoopTokens estimates the number of tokens in a message list using
+// the 2.5 chars/token heuristic. It shares the accounting rule with the
+// session manager's EstimateTokens: both sum providers.MessageCharCost
+// (pkg/providers/image_budget.go), the single per-message rule covering
+// Content, ReasoningContent, tool-call names/arguments, Media entries,
+// content parts and a per-message structural overhead. Image/video content
+// parts are charged a fixed char cost (providers.ImagePartCharCost /
+// VideoPartCharCost), NOT their real byte length: bytes are budgeted
+// separately by providers.EstimateRequestBytes, and billing base64 bytes as
+// tokens would trip intra-loop compaction on every image read. Unlike
+// EstimateTokens (pkg/agent/session_manager.go) this estimator does NOT skip
+// ExcludeFromContext messages — the loop's messages are the live ones. The
+// shared rule lives in pkg/providers because pkg/tools must not import
+// pkg/agent (that would be an import cycle).
 func EstimateLoopTokens(messages []providers.Message) int {
 	totalChars := 0
 	for _, m := range messages {
-		totalChars += utf8.RuneCountInString(m.Content)
-		totalChars += utf8.RuneCountInString(m.ReasoningContent)
-		for _, tc := range m.ToolCalls {
-			if tc.Function != nil {
-				totalChars += utf8.RuneCountInString(tc.Function.Arguments)
-			}
-		}
+		totalChars += providers.MessageCharCost(m)
 	}
 	return totalChars * 2 / 5
 }
@@ -755,17 +760,28 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			}
 		}
 
-		// 8. Context compaction — if context window is configured and we exceed
-		// the configured threshold percent, summarize old messages to prevent
-		// hitting the model's token limit.
-		if config.ContextWindow > 0 {
+		// 8. Image/byte budget (unconditional) + context compaction — the byte
+		// budget is enforced even without a configured context window (an
+		// oversized payload would be rejected by the transport before the model
+		// ever sees it); when we exceed the byte budget or the configured
+		// threshold percent, summarize old messages to prevent hitting the
+		// model's token limit.
+		if reduced, evicted := EnforceImageBudget(messages); evicted > 0 {
+			messages = reduced
+			logger.InfoCF("toolloop", "Request image budget enforced", map[string]any{
+				"evicted_parts": evicted,
+				"request_bytes": providers.EstimateRequestBytes(messages),
+				"budget_bytes":  leleconfig.DefaultMaxRequestBytes,
+			})
+		}
+		if config.ContextWindow > 0 || RequestOverBudget(messages) {
 			tokens := EstimateLoopTokens(messages)
 			percent := config.CompactionThresholdPercent
 			if percent <= 0 || percent > 100 {
 				percent = leleconfig.DefaultCompactionThresholdPercent
 			}
 			threshold := config.ContextWindow * percent / 100
-			if tokens > threshold {
+			if tokens > threshold || RequestOverBudget(messages) {
 				logger.InfoCF("toolloop", "Context compaction triggered", map[string]any{
 					"tokens":            tokens,
 					"threshold":         threshold,

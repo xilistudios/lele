@@ -252,6 +252,75 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 	session.publishViewLocked() // ExcludeFromContext flags changed in place
 }
 
+// EvictImageContent replaces the image_url/video_url content parts of every
+// image-bearing message older than the keepLast most recent ones with a text
+// placeholder, persists the rewrite and returns how many parts were evicted.
+//
+// It is the durable counterpart of providers.ReduceImageParts and exists so a
+// session that was rejected for its request size stays clean: the next turn
+// rebuilds its messages from storage, so an in-memory-only reduction would
+// resend the same payload forever.
+//
+// A call that would evict nothing is a true no-op: no message is marked
+// modified, no epoch is bumped and nothing is saved (file dirtiness drives
+// incremental saves and view rebuilds, so a cleanup that changed nothing must
+// not dirty the session). session.Updated, metaDirty and excludedRange are
+// never touched either: this is maintenance, not user activity, and bumping
+// Updated would move the session out of the idle-eviction window
+// (ShouldStartFreshSession reads it).
+//
+// When sm.sessionRepo is nil (store-less manager, as in many tests) the
+// in-memory rewrite still happens and Save is a no-op — that is the correct
+// behaviour.
+func (sm *SessionManager) EvictImageContent(key string, keepLast int) (int, error) {
+	evicted := sm.reduceImageContentUnlocked(key, keepLast)
+	if evicted == 0 {
+		// True no-op: nothing was evicted, so nothing was marked modified and
+		// there is nothing to persist.
+		return 0, nil
+	}
+	// The lock was released by the helper above; Save takes sm.mu itself. A
+	// persistence error must still report the parts evicted in memory.
+	return evicted, sm.Save(key)
+}
+
+// reduceImageContentUnlocked applies providers.ReduceImageParts to the stored
+// session under the write lock and returns how many parts were evicted
+// (0 = nothing to evict, session untouched). Callers persist separately, after
+// the lock has been released.
+func (sm *SessionManager) reduceImageContentUnlocked(key string, keepLast int) int {
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return 0
+		}
+	}
+
+	reduced, evicted := providers.ReduceImageParts(session.Messages, keepLast)
+	if evicted == 0 {
+		return 0
+	}
+
+	// Mark exactly the indices whose message changed so the incremental save
+	// rewrites only stale rows (markModified keeps the lowest index and drives
+	// saveIncrementalUnlocked).
+	for i := range session.Messages {
+		before, _ := providers.LiveMultimodalParts(session.Messages[i : i+1])
+		after, _ := providers.LiveMultimodalParts(reduced[i : i+1])
+		if before != after {
+			session.markModified(i)
+		}
+	}
+	session.Messages = reduced
+	session.publishViewLocked()
+	return evicted
+}
+
 // CompactSession applies a loop-compaction result to the persisted session:
 // it stores the summary produced by the tool-loop compactor, marks all but
 // the last keepCount messages as excluded from context, persists the change,

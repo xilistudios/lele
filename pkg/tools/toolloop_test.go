@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/providers"
 )
@@ -562,4 +563,133 @@ func TestRunToolLoop_FiltersReadVideoWithoutVideo(t *testing.T) {
 			t.Fatalf("read_video should be filtered out by default (zero value), got tools: %v", names)
 		}
 	})
+}
+
+// TestEstimateLoopTokens_CountsImageParts pins the fix for oversized image
+// requests: a read_image message carrying a large base64 payload in
+// ContentParts (with Content == "") must raise the intra-loop estimate to at
+// least ImagePartCharCost, otherwise maybeCompactLoopContext bills it as ~10
+// tokens and the compaction guard never fires. The image is charged at a
+// FIXED char cost, far below the payload's real byte length: counting base64
+// bytes as tokens would fire compaction on every image read.
+func TestEstimateLoopTokens_CountsImageParts(t *testing.T) {
+	base64URL := "data:image/png;base64," + strings.Repeat("A", 200_000)
+	msgs := []providers.Message{
+		{
+			Role:    "user",
+			Content: "",
+			ContentParts: []providers.ContentPart{
+				{Type: "text", Text: "look"},
+				{Type: "image_url", ImageURL: &providers.ImageURL{URL: base64URL}},
+			},
+		},
+	}
+
+	got := EstimateLoopTokens(msgs)
+	if min := providers.ImagePartCharCost * 2 / 5; got < min {
+		t.Fatalf("EstimateLoopTokens = %d, want >= %d (image part must be charged at its fixed cost)", got, min)
+	}
+	// The whole point of the fixed cost: len(base64URL)*2/5 would be ~160k
+	// tokens, which would trip compaction on every image read.
+	if limit := 20_000; got >= limit {
+		t.Fatalf("EstimateLoopTokens = %d, want < %d (fixed image cost, not base64 byte length)", got, limit)
+	}
+}
+
+// TestEstimateLoopTokens_CountsMedia pins that Media (file path) entries are
+// charged their fixed char cost: two media entries must raise the estimate by
+// at least 2*MediaPartCharCost chars (converted with the *2/5 heuristic).
+func TestEstimateLoopTokens_CountsMedia(t *testing.T) {
+	base := providers.Message{Role: "user", Content: "Please look at these files."}
+	withMedia := base
+	withMedia.Media = []string{"/a.png", "/b.png"}
+
+	delta := EstimateLoopTokens([]providers.Message{withMedia}) -
+		EstimateLoopTokens([]providers.Message{base})
+	// The delta in chars is exactly 2*MediaPartCharCost (5000), and 5000*2/5
+	// is integral, so the floor of the division cannot erode it.
+	if min := 2 * providers.MediaPartCharCost * 2 / 5; delta < min {
+		t.Fatalf("Media raised estimate by %d tokens, want >= %d", delta, min)
+	}
+}
+
+// TestEstimateLoopTokens_CountsVideoParts pins the video part accounting: a
+// video_url content part raises the estimate by exactly
+// VideoPartCharCost*2/5 tokens (video parts are always counted, even when the
+// message carries textual ContentParts).
+func TestEstimateLoopTokens_CountsVideoParts(t *testing.T) {
+	textMsg := providers.Message{
+		Role: "user",
+		ContentParts: []providers.ContentPart{
+			{Type: "text", Text: "Describe this clip."},
+		},
+	}
+	videoMsg := providers.Message{
+		Role: "user",
+		ContentParts: []providers.ContentPart{
+			{Type: "text", Text: "Describe this clip."},
+			{Type: "video_url", VideoURL: &providers.VideoURL{URL: "https://example.com/clip.mp4"}},
+		},
+	}
+
+	delta := EstimateLoopTokens([]providers.Message{videoMsg}) -
+		EstimateLoopTokens([]providers.Message{textMsg})
+	if want := providers.VideoPartCharCost * 2 / 5; delta != want {
+		t.Fatalf("video part raised estimate by %d tokens, want exactly %d", delta, want)
+	}
+}
+
+// TestEstimateLoopTokens_TextOnlyUnchanged documents the exact delta of the
+// estimator rewrite for text-only lists: the new rule adds (a) tool-call
+// function NAME lengths (the old loop estimator skipped them) and (b) the
+// 10-char per-message structural overhead (the old loop estimator skipped it
+// too). Everything else — content, reasoning, tool-call arguments — is
+// byte-identical, so a text-only list without tool calls is unchanged.
+func TestEstimateLoopTokens_TextOnlyUnchanged(t *testing.T) {
+	msgs := []providers.Message{
+		{Role: "system", Content: "You are a helpful assistant."},
+		{Role: "user", Content: "Inspect the widget."},
+		{
+			Role:    "assistant",
+			Content: "Reading the file now.",
+			ToolCalls: []providers.ToolCall{{
+				ID:       "call_1",
+				Function: &providers.FunctionCall{Name: "read_file", Arguments: `{"path":"/tmp/a.txt"}`},
+			}},
+		},
+		{Role: "tool", Content: "hello world", ToolCallID: "call_1"},
+	}
+
+	// Old rule (pre-fix): content + reasoning + tool-call arguments only.
+	oldChars := 0
+	for _, m := range msgs {
+		oldChars += utf8.RuneCountInString(m.Content)
+		oldChars += utf8.RuneCountInString(m.ReasoningContent)
+		for _, tc := range m.ToolCalls {
+			if tc.Function != nil {
+				oldChars += utf8.RuneCountInString(tc.Function.Arguments)
+			}
+		}
+	}
+	// Documented delta: tool-call names + 10 structural chars per message.
+	nameChars := 0
+	for _, m := range msgs {
+		for _, tc := range m.ToolCalls {
+			if tc.Function != nil {
+				nameChars += utf8.RuneCountInString(tc.Function.Name)
+			}
+		}
+	}
+	structChars := 10 * len(msgs)
+	wantChars := oldChars + nameChars + structChars
+
+	got := EstimateLoopTokens(msgs)
+	if want := wantChars * 2 / 5; got != want {
+		t.Errorf("EstimateLoopTokens = %d, want %d (old rule %d + tool-call names %d + structural %d chars)",
+			got, want, oldChars, nameChars, structChars)
+	}
+	// Sanity: the delta is exactly the two additions, nothing else changed.
+	if want := (wantChars - oldChars) * 2 / 5; want == 0 {
+		t.Fatalf("test fixture too small: expected a nonzero documented delta, got 0")
+	}
 }

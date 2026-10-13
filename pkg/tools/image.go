@@ -99,6 +99,14 @@ func (t *ReadImageTool) Execute(ctx context.Context, args map[string]interface{}
 		return ErrorResult("detail must be one of: auto, low, high")
 	}
 
+	// Origin-side payload bound: downscale/re-encode so a single read_image
+	// can never exceed the request byte budget by itself.
+	bounded, outMIME, boundW, boundH, resized, err := boundImagePayload(data, mimeType, detail, defaultImageLimits)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
+	data, mimeType = bounded, outMIME
+
 	encoded := base64.StdEncoding.EncodeToString(data)
 	imageURL := fmt.Sprintf("data:%s;base64,%s", mimeType, encoded)
 
@@ -110,8 +118,13 @@ func (t *ReadImageTool) Execute(ctx context.Context, args map[string]interface{}
 		},
 	}
 
+	summary := fmt.Sprintf("Image loaded into context from %s (%s, %d bytes)", path, mimeType, len(data))
+	if resized {
+		summary += fmt.Sprintf("; resized to %dx%d, %d bytes", boundW, boundH, len(data))
+	}
+
 	return &ToolResult{
-		ForLLM: fmt.Sprintf("Image loaded into context from %s (%s, %d bytes)", path, mimeType, len(data)),
+		ForLLM: summary,
 		Silent: true,
 		ContextMessages: []providers.Message{
 			contextMsg,

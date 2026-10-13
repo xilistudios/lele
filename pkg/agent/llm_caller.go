@@ -401,6 +401,43 @@ func (lc *llmCaller) executeWithRetry(
 		}
 
 		if isContextError && retry < MaxLLMRetries {
+			// Recovery order matters. A context error is often not about the text
+			// at all: read_image injects base64 image parts, they are persisted with
+			// the session and the estimators only now account for them. Summarizing
+			// the history cannot remove those bytes (the compactor keeps the recent
+			// messages, which is exactly where a freshly read image lives), so the
+			// cheapest guaranteed reduction comes first: drop the media parts and
+			// retry immediately, without paying for a summarization call.
+			//
+			// Only on the first attempt: if the reduced payload is rejected again,
+			// the remaining problem is textual and the summarization path below is
+			// the right one. When there is nothing to evict (a text-only overflow)
+			// ReduceImageParts returns 0 and we fall through unchanged.
+			if retry == 0 {
+				if reduced, evicted := providers.ReduceImageParts(currentMessages, 0); evicted > 0 {
+					logger.WarnCF("agent", "Request rejected, media evicted and retrying", map[string]interface{}{
+						"error":         err.Error(),
+						"retry":         retry,
+						"session_key":   opts.sessionKey,
+						"size_error":    providers.IsRequestSizeError(err),
+						"evicted_parts": evicted,
+						"request_bytes": providers.EstimateRequestBytes(reduced),
+					})
+					// De-poison the stored session as well: the reduction above only
+					// fixes this request, while the next turn rebuilds the messages
+					// from the session and would resend the same blobs.
+					if opts.agent != nil && opts.agent.Sessions != nil && opts.sessionKey != "" {
+						if _, pErr := opts.agent.Sessions.EvictImageContent(opts.sessionKey, 0); pErr != nil {
+							logger.WarnCF("agent", "Failed to persist media eviction", map[string]interface{}{
+								"session_key": opts.sessionKey,
+								"error":       pErr.Error(),
+							})
+						}
+					}
+					currentMessages = reduced
+					continue
+				}
+			}
 			logger.WarnCF("agent", "Context window error detected, attempting summarization", map[string]interface{}{
 				"error": err.Error(),
 				"retry": retry,

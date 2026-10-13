@@ -7,6 +7,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // TestSummarizeSessionWithError_InsufficientMessages tests error handling for insufficient messages
@@ -509,5 +511,130 @@ func TestEstimateTokens_VideoPartCounts(t *testing.T) {
 	if delta := videoTokens - textTokens; delta < minDelta {
 		t.Fatalf("video part raised estimate by %d tokens, want >= %d (text=%d, video=%d)",
 			delta, minDelta, textTokens, videoTokens)
+	}
+}
+
+// TestEstimateTokens_CountsImagesAfterRehydration pins the fix for the
+// reloaded-session blind spot: EstimateTokens used to gate content-part
+// counting behind `m.Content == ""`, but Message.UnmarshalJSON repopulates
+// Content from the parts (rendering the image as "[image]"), so a session
+// reload billed a message carrying a huge base64 image as ~0 tokens. With the
+// shared providers.MessageCharCost rule image parts are ALWAYS counted.
+func TestEstimateTokens_CountsImagesAfterRehydration(t *testing.T) {
+	sm := &sessionManagerImpl{}
+	msgs := []providers.Message{
+		{
+			Role:    "user",
+			Content: "",
+			ContentParts: []providers.ContentPart{
+				{Type: "image_url", ImageURL: &providers.ImageURL{
+					URL: "data:image/png;base64," + strings.Repeat("A", 200_000),
+				}},
+			},
+		},
+	}
+
+	before := sm.EstimateTokens(msgs)
+	if before < 1000 {
+		t.Fatalf("live message: EstimateTokens = %d, want >= 1000", before)
+	}
+
+	// Round trip through JSON: this is what a session reload does.
+	raw, err := json.Marshal(msgs)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var reloaded []providers.Message
+	if err := json.Unmarshal(raw, &reloaded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(reloaded) != 1 {
+		t.Fatalf("rehydrated %d messages, want 1", len(reloaded))
+	}
+
+	after := sm.EstimateTokens(reloaded)
+	if after < 1000 {
+		t.Fatalf("rehydrated message: EstimateTokens = %d, want >= 1000 (old gate billed ~0)", after)
+	}
+}
+
+// TestEstimatorsAgree guarantees the parity invariant between the two token
+// estimators: for any message list without ExcludeFromContext entries,
+// tools.EstimateLoopTokens(msgs) == sm.EstimateTokens(msgs) exactly (both
+// sum providers.MessageCharCost). The second case pins the ONE intentional
+// difference: an ExcludeFromContext message is skipped only by EstimateTokens,
+// lowering it by exactly that message's MessageCharCost*2/5.
+func TestEstimatorsAgree(t *testing.T) {
+	sm := &sessionManagerImpl{}
+
+	// Fixture: plain text, tool calls, a live image message (Content == ""),
+	// a rehydrated (JSON round-tripped) image message and a message with Media.
+	textMsg := providers.Message{Role: "system", Content: "You are helpful."}
+	toolMsg := providers.Message{
+		Role:    "assistant",
+		Content: "Reading the file.",
+		ToolCalls: []providers.ToolCall{{
+			ID:       "call_1",
+			Function: &providers.FunctionCall{Name: "read_file", Arguments: `{"path":"/tmp/a.txt"}`},
+		}},
+	}
+	liveImg := providers.Message{
+		Role:    "user",
+		Content: "",
+		ContentParts: []providers.ContentPart{
+			{Type: "text", Text: "look at this"},
+			{Type: "image_url", ImageURL: &providers.ImageURL{
+				URL: "data:image/png;base64," + strings.Repeat("A", 100_000),
+			}},
+		},
+	}
+	rehydratedSrc := providers.Message{
+		Role:    "user",
+		Content: "",
+		ContentParts: []providers.ContentPart{
+			{Type: "image_url", ImageURL: &providers.ImageURL{
+				URL: "data:image/png;base64," + strings.Repeat("B", 50_000),
+			}},
+		},
+	}
+	raw, err := json.Marshal([]providers.Message{rehydratedSrc})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var rehydrated []providers.Message
+	if err := json.Unmarshal(raw, &rehydrated); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	mediaMsg := providers.Message{Role: "user", Content: "See attached.", Media: []string{"/a.png", "/b.png"}}
+
+	msgs := append(
+		[]providers.Message{textMsg, toolMsg, liveImg},
+		append(rehydrated, mediaMsg)...,
+	)
+	if loopTokens, smTokens := tools.EstimateLoopTokens(msgs), sm.EstimateTokens(msgs); loopTokens != smTokens {
+		t.Errorf("estimators disagree on no-exclusion list: EstimateLoopTokens = %d, EstimateTokens = %d", loopTokens, smTokens)
+	}
+
+	// Second case: an ExcludeFromContext message is counted only by the loop
+	// estimator, and the gap equals exactly its MessageCharCost*2/5.
+	// Content length is chosen so MessageCharCost (len + 10 structural) is a
+	// multiple of 5: then 2*cost/5 is integral and the floor of the total
+	// division cannot erode or inflate the delta.
+	excluded := providers.Message{
+		Role:               "user",
+		Content:            "payload removed", // 15 + 10 structural = 25 chars
+		ExcludeFromContext: true,
+	}
+	withExcluded := append(append([]providers.Message{}, msgs...), excluded)
+
+	loopTokens := tools.EstimateLoopTokens(withExcluded)
+	smTokens := sm.EstimateTokens(withExcluded)
+	wantDelta := providers.MessageCharCost(excluded) * 2 / 5
+	if delta := loopTokens - smTokens; delta != wantDelta {
+		t.Errorf("gap with excluded message = %d tokens, want exactly %d (loop=%d, sm=%d)",
+			delta, wantDelta, loopTokens, smTokens)
+	}
+	if smTokens >= loopTokens {
+		t.Errorf("EstimateTokens (%d) must be strictly lower than EstimateLoopTokens (%d) when a message is excluded", smTokens, loopTokens)
 	}
 }

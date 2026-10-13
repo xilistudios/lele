@@ -6,7 +6,10 @@
 
 package providers
 
-import "strings"
+import (
+	"errors"
+	"strings"
+)
 
 // overflowPatternGroup defines a named group of lowercase substrings used to
 // detect context-window overflow errors reported by different LLM providers.
@@ -52,6 +55,19 @@ var contextOverflowPatterns = []overflowPatternGroup{
 	{name: "mistral_too_long_tokens", patterns: []string{"too long", "tokens"}, requireAll: true},
 	{name: "mistral_too_long_context", patterns: []string{"too long", "context"}, requireAll: true},
 
+	// Byte/size rejections from the transport layer (HTTP 413-style body caps,
+	// e.g. a gateway refusing to read a request over its limit) or from
+	// providers' image handling. They describe the SIZE of the outbound
+	// request on the wire, not its token count, but they are terminal in the
+	// same way: the identical payload fails everywhere, so the fallback chain
+	// must not burn its budget re-sending it. Note "request body too large"
+	// and the Anthropic "request too large" are NOT substrings of each other,
+	// so each needs its own group; ordering still decides when both could
+	// match a message (first match wins).
+	{name: "request_body_too_large", patterns: []string{"request body too large"}},
+	{name: "payload_too_large", patterns: []string{"payload too large", "request entity too large", "entity too large"}},
+	{name: "image_too_large", patterns: []string{"image dimensions exceed max", "image exceeds"}},
+
 	// Generic fallbacks (keep last: they are the least specific).
 	{name: "generic_context_window", patterns: []string{"context window"}},
 	{name: "generic_context_length", patterns: []string{"context length"}},
@@ -66,8 +82,53 @@ var contextOverflowPatterns = []overflowPatternGroup{
 // It intentionally does NOT match the bare substring "length", which appears
 // in unrelated errors such as "invalid length", and it explicitly rejects
 // timeout messages ("deadline", "timed out") that merely mention "context".
+//
+// It is intentionally a SUPERSET of IsRequestSizeError: it covers both
+// token/context overflows and byte-size rejections of the outbound request.
+// Callers that must distinguish "too many tokens" from "too many bytes" (e.g.
+// a shrink-and-retry loop that trims images rather than text) use
+// IsRequestSizeError.
 func IsContextOverflowError(err error) bool {
 	return ContextOverflowSummary(err) != ""
+}
+
+// IsRequestSizeError reports whether err is a rejection caused by the SIZE of
+// the outbound request (as opposed to its token count): an HTTP 413, or a
+// transport/provider message matching the byte-cap pattern groups
+// (request_body_too_large, payload_too_large).
+//
+// IsContextOverflowError is a superset of this predicate: it also covers
+// token-count overflows ("prompt is too long", "context_length_exceeded",
+// ...), which are NOT size errors.
+func IsRequestSizeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// A structured 413 is a size rejection regardless of the body prose.
+	var hs httpStatusError
+	if errors.As(err, &hs) && hs.HTTPStatus() == 413 {
+		return true
+	}
+	return matchesOverflowGroups(err, "request_body_too_large", "payload_too_large")
+}
+
+// matchesOverflowGroups reports whether err's lowercased message matches any
+// of the named contextOverflowPatterns groups, using the same first-match
+// semantics as ContextOverflowSummary but restricted to a subset of groups
+// (so the pattern lists are never duplicated).
+func matchesOverflowGroups(err error, names ...string) bool {
+	msg := strings.ToLower(err.Error())
+	for _, group := range contextOverflowPatterns {
+		if !group.matches(msg) {
+			continue
+		}
+		for _, name := range names {
+			if group.name == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ContextOverflowSummary returns a short lowercase identifier of the first

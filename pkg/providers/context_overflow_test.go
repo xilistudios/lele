@@ -9,6 +9,7 @@ package providers
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -41,6 +42,14 @@ func TestIsContextOverflowError_Matches(t *testing.T) {
 		// Mistral (requireAll: "too long" + "tokens"/"context").
 		{"mistral too long + tokens", errors.New("Conversation is too long: 40000 tokens"), true},
 		{"mistral too long + context", errors.New("Request is too long for the model context"), true},
+
+		// Byte/size rejections (transport cap / image handling).
+		{"gateway body request too large", errors.New("API request failed:\n  Status: 400\n  Body:   {\"error\":{\"message\":\"failed to read request body: http: request body too large\",\"type\":\"invalid_request_error\"}}"), true},
+		{"go maxbytes body too large", errors.New("http: request body too large"), true},
+		{"payload too large", errors.New("payload too large"), true},
+		{"413 request entity too large", errors.New("413 Request Entity Too Large"), true},
+		{"image dimensions exceed max", errors.New("image dimensions exceed max allowed size"), true},
+		{"image exceeds mb", errors.New("image exceeds 5 MB"), true},
 
 		// Generic.
 		{"generic context window", errors.New("Prompt exceeds the model's context window"), true},
@@ -80,6 +89,13 @@ func TestContextOverflowSummary_Groups(t *testing.T) {
 		{"bedrock invalidparameter message tokens", errors.New("InvalidParameter: Total tokens exceed max message tokens"), "bedrock_invalidparameter_total_tokens"},
 		{"mistral tokens", errors.New("too long: 50000 tokens"), "mistral_too_long_tokens"},
 		{"mistral context", errors.New("too long for the context"), "mistral_too_long_context"},
+		// Byte/size rejections (transport cap / image handling).
+		{"gateway body request too large", errors.New("API request failed:\n  Status: 400\n  Body:   {\"error\":{\"message\":\"failed to read request body: http: request body too large\",\"type\":\"invalid_request_error\"}}"), "request_body_too_large"},
+		{"go maxbytes body too large", errors.New("http: request body too large"), "request_body_too_large"},
+		{"payload too large", errors.New("payload too large"), "payload_too_large"},
+		{"413 request entity too large", errors.New("413 Request Entity Too Large"), "payload_too_large"},
+		{"image dimensions exceed max", errors.New("image dimensions exceed max allowed size"), "image_too_large"},
+		{"image exceeds mb", errors.New("image exceeds 5 MB"), "image_too_large"},
 		{"generic window", errors.New("context window exceeded"), "generic_context_window"},
 		{"generic length", errors.New("context length exceeded"), "generic_context_length"},
 		{"generic many", errors.New("too many tokens"), "generic_too_many_tokens"},
@@ -164,5 +180,76 @@ func TestIsContextOverflowError_WrappedErrors(t *testing.T) {
 	}
 	if got := ContextOverflowSummary(wrapped); got != "anthropic_prompt_too_long" {
 		t.Errorf("ContextOverflowSummary(wrapped) = %q, want %q", got, "anthropic_prompt_too_long")
+	}
+}
+
+// TestContextOverflowSummary_NeighbourPatternsUnchanged pins the boundary
+// between the byte-cap groups (request_body_too_large, payload_too_large) and
+// the pre-existing token-count groups: "request body too large" and the
+// Anthropic "request too large" are similar but neither is a substring of the
+// other, so each matches its own group and the original groups keep matching
+// their original messages.
+func TestContextOverflowSummary_NeighbourPatternsUnchanged(t *testing.T) {
+	// Mutual non-substring guarantee, asserted rather than assumed.
+	if strings.Contains("request body too large", "request too large") {
+		t.Fatal(`"request body too large" must not contain the Anthropic pattern "request too large"`)
+	}
+	if strings.Contains("request too large", "request body too large") {
+		t.Fatal(`"request too large" must not contain the byte-cap pattern "request body too large"`)
+	}
+
+	tests := []struct {
+		name string
+		msg  string
+		want string
+	}{
+		{"anthropic request too large", "request too large", "anthropic_request_too_large"},
+		{"anthropic prompt is too long", "prompt is too long", "anthropic_prompt_too_long"},
+		{"bedrock invalidparameter total tokens", "InvalidParameter: Total tokens of image and text exceed max message tokens", "bedrock_invalidparameter_total_tokens"},
+		// And the new patterns still win for their own messages.
+		{"body too large is byte-cap", "http: request body too large", "request_body_too_large"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ContextOverflowSummary(errors.New(tt.msg)); got != tt.want {
+				t.Errorf("ContextOverflowSummary(%q) = %q, want %q", tt.msg, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsRequestSizeError covers the size-vs-tokens distinction: a structured
+// 413 and byte-cap messages are size errors; token-count overflows are not,
+// even though IsContextOverflowError (a deliberate superset) matches both.
+func TestIsRequestSizeError(t *testing.T) {
+	gatewayBody := `{"error":{"message":"failed to read request body: http: request body too large","type":"invalid_request_error"}}`
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"413 via stub api error", &stubAPIError{status: 413, body: "too big"}, true},
+		{"gateway body via 400 stub", &stubAPIError{status: 400, body: gatewayBody}, true},
+		{"plain payload too large", errors.New("payload too large"), true},
+		{"plain request entity too large", errors.New("request entity too large"), true},
+		{"nil", nil, false},
+		{"prompt is too long (tokens)", errors.New("prompt is too long: 250000 tokens > 200000 maximum"), false},
+		{"context_length_exceeded (tokens)", errors.New("context_length_exceeded"), false},
+		{"400 invalid request format", &stubAPIError{status: 400, body: "invalid request format"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsRequestSizeError(tt.err); got != tt.want {
+				t.Errorf("IsRequestSizeError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+			// Superset contract: every token-count overflow stays an overflow
+			// for IsContextOverflowError while NOT being a size error.
+			if !tt.want && tt.err != nil &&
+				(ContextOverflowSummary(tt.err) == "anthropic_prompt_too_long" ||
+					ContextOverflowSummary(tt.err) == "openai_context_length_exceeded") &&
+				!IsContextOverflowError(tt.err) {
+				t.Errorf("IsContextOverflowError(%v) must stay true (superset)", tt.err)
+			}
+		})
 	}
 }
