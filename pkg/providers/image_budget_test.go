@@ -385,7 +385,9 @@ func TestLiveMultimodalParts_IgnoresRemoteURLs(t *testing.T) {
 // IsHeavyMultimodalPart: only "data:" URLs embed payload; file paths and
 // remote URLs are tiny and are never heavy. URI schemes are case-insensitive
 // (RFC 3986), so uppercase/mixed-case schemes must be heavy too (N4: the
-// estimator charges every entry, so the evictor must see every entry).
+// estimator charges every entry, so the evictor must see every entry). The
+// 4-byte/5-byte boundary pair pins the length guard (N8: dropping it makes
+// "data" panic instead of returning false).
 func TestIsHeavyMediaEntry(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -401,6 +403,8 @@ func TestIsHeavyMediaEntry(t *testing.T) {
 		{"file path", "/tmp/photo.jpg", false},
 		{"remote URL", "https://x/y.png", false},
 		{"empty", "", false},
+		{"bare scheme word, 4 bytes", "data", false},
+		{"scheme only, no payload, 5 bytes", "data:", true},
 	}
 	for _, tc := range cases {
 		if got := IsHeavyMediaEntry(tc.media); got != tc.want {
@@ -630,5 +634,138 @@ func TestReduceImageParts_PlainMediaIsNoop(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, msgs) {
 		t.Fatalf("no-op changed the messages:\ngot:  %+v\nwant: %+v", got, msgs)
+	}
+}
+
+// TestIsHeavyMultimodalPart pins the ContentPart carrier of the scheme fold
+// (N7): EstimateRequestBytes charges a DATA: payload its full byte length, so
+// the evictor's predicate must see it too - URI schemes are case-insensitive
+// (RFC 3986), exactly as for IsHeavyMediaEntry, and the two predicates share
+// hasDataScheme so they can never diverge again. Every row runs as BOTH an
+// image part and a video part: heaviness follows the URL field that is set,
+// never the MIME or the part's Type string.
+func TestIsHeavyMultimodalPart(t *testing.T) {
+	cases := []struct {
+		name      string
+		url       string
+		wantImage bool
+		wantVideo bool
+	}{
+		{"image data URL", "data:image/png;base64,AA", true, true},
+		{"image data URL, uppercase scheme", "DATA:image/png;base64,AA", true, true},
+		{"image data URL, mixed-case scheme", "DaTa:image/png;base64,AA", true, true},
+		// The video row, checked field by field: the VideoURL field carries
+		// it (heavy), and the ImageURL field must be heavy too, because
+		// contentPartWireUpperBound charges an ImageURL of ANY MIME at its
+		// full length - a false here would recreate the charged-but-
+		// un-evictable N7 hole for a part the wire does emit.
+		{"video data URL, uppercase scheme", "DATA:video/mp4;base64,AA", true, true},
+		// Controls: the fold must not over-match beyond ASCII case.
+		{"file URL", "file:///tmp/a.png", false, false},
+		{"file URL, uppercase scheme", "FILE:///tmp/a.png", false, false},
+		{"remote URL", "https://example.com/a.png", false, false},
+		{"absolute path", "/tmp/a.png", false, false},
+		{"empty", "", false, false},
+		{"bare scheme word, 4 bytes", "data", false, false},
+		{"scheme only, no payload, 5 bytes", "data:", true, true},
+	}
+	for _, tc := range cases {
+		img := ContentPart{Type: "image_url", ImageURL: &ImageURL{URL: tc.url}}
+		vid := ContentPart{Type: "video_url", VideoURL: &VideoURL{URL: tc.url}}
+		if got := IsHeavyMultimodalPart(img); got != tc.wantImage {
+			t.Errorf("image part %s (%q): IsHeavyMultimodalPart = %v, want %v", tc.name, tc.url, got, tc.wantImage)
+		}
+		if got := IsHeavyMultimodalPart(vid); got != tc.wantVideo {
+			t.Errorf("video part %s (%q): IsHeavyMultimodalPart = %v, want %v", tc.name, tc.url, got, tc.wantVideo)
+		}
+	}
+	// "Check the field, not the string": the predicates inspect the ImageURL/
+	// VideoURL fields only. A part whose Type or Text merely MENTIONS a DATA:
+	// URL while both URL fields are nil is not heavy.
+	mention := ContentPart{Type: "image_url", Text: "DATA:video/mp4;base64,AA"}
+	if IsHeavyMultimodalPart(mention) {
+		t.Errorf("image part mentioning a DATA: URL only in Text = heavy, want false (field, not string)")
+	}
+	mentionVideo := ContentPart{Type: "video_url", Text: "DATA:video/mp4;base64,AA"}
+	if IsHeavyMultimodalPart(mentionVideo) {
+		t.Errorf("video part mentioning a DATA: URL only in Text = heavy, want false (field, not string)")
+	}
+}
+
+// TestReduceImageParts_EvictsUppercaseSchemeContentPart is the end-to-end N7
+// symptom: a DATA: URL inside a ContentPart must be counted by
+// LiveMultimodalParts, evicted by ReduceImageParts and shrink
+// EstimateRequestBytes - all three on the same tree. A case-sensitive
+// predicate leaves all three at their pre-fix values (heavy=0, evicted=0,
+// estimate unchanged - the review measured estimate=9437307 with count=0 and
+// evicted=0, i.e. a guard that believes it is over budget forever and pays
+// for a summarisation call that cannot remove the payload).
+func TestReduceImageParts_EvictsUppercaseSchemeContentPart(t *testing.T) {
+	payload := "DATA:image/png;base64," + strings.Repeat("U", 32*1024)
+	msgs := []Message{{
+		Role:    "user",
+		Content: "",
+		ContentParts: []ContentPart{
+			{Type: "text", Text: "look at this"},
+			{Type: "image_url", ImageURL: &ImageURL{URL: payload}},
+		},
+	}}
+	snapshot := deepCopyMessages(msgs)
+
+	// Symptom 1: the estimator's counter must see the payload.
+	count, bytes := LiveMultimodalParts(msgs)
+	if count != 1 || bytes != len(payload) {
+		t.Fatalf("LiveMultimodalParts = (%d, %d), want (1, %d): a case-sensitive predicate leaves the "+
+			"pre-fix values heavy=0, bytes=0 (review measurement: estimate=9437307, count=0, evicted=0)",
+			count, bytes, len(payload))
+	}
+
+	// Symptom 2 + 3: the evictor removes it and the estimate drops accordingly.
+	before := EstimateRequestBytes(msgs)
+	got, evicted := ReduceImageParts(msgs, 0)
+	if evicted != 1 {
+		t.Fatalf("evicted = %d, want 1: a case-sensitive predicate leaves the pre-fix value evicted=0 "+
+			"(review measurement: estimate=9437307, count=0, evicted=0)", evicted)
+	}
+	m := got[0]
+	if len(m.ContentParts) != 2 ||
+		m.ContentParts[0].Text != "look at this" ||
+		m.ContentParts[1].Type != "text" || m.ContentParts[1].Text != omittedPartPlaceholder {
+		t.Fatalf("ContentParts = %+v, want the original text part plus the DATA: part replaced by %q",
+			m.ContentParts, omittedPartPlaceholder)
+	}
+	after := EstimateRequestBytes(got)
+	if drop := before - after; drop < len(payload)-64 {
+		t.Fatalf("estimate dropped only %d bytes (%d -> %d), want >= %d: the %d-byte payload is still "+
+			"charged - a case-sensitive predicate leaves the estimate unchanged (heavy=0, evicted=0)", drop, before, after, len(payload)-64, len(payload))
+	}
+	// Copy-on-write: the input must be untouched.
+	if !reflect.DeepEqual(msgs, snapshot) {
+		t.Fatalf("input messages were mutated:\ngot:  %+v\nwant: %+v", msgs, snapshot)
+	}
+}
+
+// schemePredicateSink gives the allocation measurement below a home for its
+// results, so the compiler cannot optimize the predicate calls away.
+var schemePredicateSink bool
+
+// TestSchemeFoldIsAllocationFree pins the N9 doc claim on hasDataScheme: the
+// scheme test runs on payload-sized strings (a 1 MiB entry here), so it must
+// stay length-guarded and allocation-free - a whole-string ToLower fold would
+// allocate a megabyte copy per predicate pass and turn this red.
+func TestSchemeFoldIsAllocationFree(t *testing.T) {
+	payload := "data:image/png;base64," + strings.Repeat("U", 1<<20) // 1 MiB+
+	img := ContentPart{Type: "image_url", ImageURL: &ImageURL{URL: payload}}
+	vid := ContentPart{Type: "video_url", VideoURL: &VideoURL{URL: payload}}
+	allocs := testing.AllocsPerRun(200, func() {
+		schemePredicateSink = hasDataScheme(payload)
+		schemePredicateSink = IsHeavyMediaEntry(payload)
+		schemePredicateSink = IsHeavyMultimodalPart(img)
+		schemePredicateSink = IsHeavyMultimodalPart(vid)
+	})
+	if allocs != 0 {
+		t.Errorf("allocs per run = %v, want 0 for hasDataScheme, IsHeavyMediaEntry and "+
+			"IsHeavyMultimodalPart on a 1 MiB entry: a whole-string fold allocates a megabyte copy "+
+			"per estimator/evictor pass", allocs)
 	}
 }

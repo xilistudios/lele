@@ -290,13 +290,27 @@ func commandWireUpperBound(c CommandApplied) int {
 	return n
 }
 
+// hasDataScheme reports whether s begins with the "data:" URI scheme, folded
+// per RFC 3986 (a scheme is case-insensitive). Length-guarded and
+// allocation-free: these strings are payload-sized (megabytes), so never build
+// a lowercased copy to test a 5-byte prefix.
+func hasDataScheme(s string) bool {
+	return len(s) >= len("data:") && strings.EqualFold(s[:len("data:")], "data:")
+}
+
 // IsHeavyMultimodalPart reports whether the part embeds a base64 payload
-// ("data:" URL). Remote http(s) URLs are tiny and are never heavy.
+// ("data:" URL). Remote http(s) URLs are tiny and are never heavy. The scheme
+// test is case-insensitive (URI schemes are case-insensitive, RFC 3986) for
+// the same reason IsHeavyMediaEntry folds its prefix test: the estimator
+// charges a DATA: payload its full byte length, so the evictor must see it
+// too. Both predicates go through hasDataScheme so they stay in sync - they
+// must never diverge again: "everything the estimator charges, the evictor
+// can remove" holds per carrier, not just per file.
 func IsHeavyMultimodalPart(part ContentPart) bool {
-	if part.ImageURL != nil && strings.HasPrefix(part.ImageURL.URL, "data:") {
+	if part.ImageURL != nil && hasDataScheme(part.ImageURL.URL) {
 		return true
 	}
-	if part.VideoURL != nil && strings.HasPrefix(part.VideoURL.URL, "data:") {
+	if part.VideoURL != nil && hasDataScheme(part.VideoURL.URL) {
 		return true
 	}
 	return false
@@ -320,7 +334,7 @@ func IsHeavyMultimodalPart(part ContentPart) bool {
 // here can remove something the transport would have dropped; that is the
 // safe direction and it is deliberate.
 func IsHeavyMediaEntry(media string) bool {
-	return len(media) >= len("data:") && strings.EqualFold(media[:len("data:")], "data:")
+	return hasDataScheme(media)
 }
 
 // LiveMultimodalParts counts the heavy multimodal payloads across both
