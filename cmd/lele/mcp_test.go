@@ -1024,6 +1024,45 @@ func TestMCPRemove_ReenableWarning(t *testing.T) {
 			t.Errorf("removing an enabled winner must not warn about re-enabling:\n%s", out)
 		}
 	})
+
+	// The merge is whole-entry replace: a surviving COPY ABOVE the definition
+	// (a disable stub or a disabled definition) keeps the server OFF even after
+	// the winner is removed, so warning "this re-enables" would be a lie.
+	t.Run("no warning when the takeover copy keeps it off", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			agent string
+		}{
+			{name: "disable stub shadows the definition", agent: `{"mcpServers":{"sierra":{"disabled":true}}}`},
+			{name: "disabled definition shadows the definition", agent: `{"mcpServers":{"sierra":{"command":"agent-sierra","disabled":true}}}`},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				e := newMCPTestEnv(t)
+				writeMCPTestFile(t, e.globalFile(), `{"mcpServers":{"sierra":{"command":"npx","args":["-y"]}}}`)
+				writeMCPTestFile(t, e.agentFile(), tt.agent)
+				writeMCPTestFile(t, e.projectFile(), `{"mcpServers":{"sierra":{"disabled":true}}}`)
+
+				// Fixture premise: the project stub wins and keeps it OFF.
+				if inv := mcp.ReadInventory(e.paths()); inv.Effective["sierra"] != "disabled" ||
+					inv.Winner["sierra"] != "project" {
+					t.Fatalf("fixture premise broken: effective=%q winner=%q",
+						inv.Effective["sierra"], inv.Winner["sierra"])
+				}
+
+				out, code := runMCPSub(t, runMCPRemove, "sierra")
+				if code != 0 {
+					t.Fatalf("remove exit = %d, want 0:\n%s", code, out)
+				}
+				if strings.Contains(out, "re-enables") {
+					t.Errorf("the agent copy still keeps the server OFF — no re-enable warning:\n%s", out)
+				}
+				if inv := mcp.ReadInventory(e.paths()); inv.Effective["sierra"] != "disabled" {
+					t.Errorf("after the removal the server must stay disabled, got %q", inv.Effective["sierra"])
+				}
+			})
+		}
+	})
 }
 
 // TestMCPRemove_PathGuardRefuses mirrors TestMCPAdd_PathGuardRefuses: the same

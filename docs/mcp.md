@@ -392,8 +392,11 @@ $ lele mcp remove old-server
   run: lele mcp remove old-server --all
 ```
 
-The warning appears only when the removal actually changes the verdict (the
-deleted copy was the reason the server was off **and** a lower copy defines it).
+The warning appears only when the removal actually changes the verdict: the
+deleted copy was the reason the server was off **and** the copy that takes over
+is an enabled definition. A surviving copy above the definition (a disable stub
+or a disabled definition) still wins the merge and keeps the server off — no
+warning in that case.
 
 ### `lele mcp edit`
 

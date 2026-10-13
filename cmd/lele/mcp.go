@@ -1078,8 +1078,10 @@ func runMCPRemove(w io.Writer, args []string) int {
 			}
 		}
 		// Removing a copy that kept the server OFF (a disable stub, or a
-		// disabled definition) can switch a lower layer's definition ON: the
-		// merge loads the highest copy that is a real definition.
+		// disabled definition) can switch a lower layer's definition ON — but
+		// only when the copy that takes over is itself an enabled definition:
+		// the merge is whole-entry replace, so a surviving stub higher up keeps
+		// the server OFF.
 		if reenabled, ok := mcpReenabledBy(winner, remaining); ok {
 			fmt.Fprintf(w, "⚠ this re-enables %q from %s (%s)\n", a.name, reenabled.Layer, reenabled.Path)
 		}
@@ -1094,23 +1096,26 @@ func runMCPRemove(w io.Writer, args []string) int {
 }
 
 // mcpReenabledBy reports the copy that takes over once deleted is removed from
-// the merge, when that means the server comes back ON: deleted must have been
+// the merge, when that means the server comes back ON. deleted must have been
 // the reason it was off (a disable stub, i.e. a copy that defines nothing, or a
-// definition carrying "disabled": true) and some lower copy must define it.
-// The highest such definition is the one that would run.
+// definition carrying "disabled": true). The takeover copy is the HIGHEST
+// remaining one — layers replace whole entries, so even a disable stub shadows
+// everything below it — and the server only comes back ON when that winner is
+// an enabled definition (it defines command/url and is not disabled).
 func mcpReenabledBy(deleted mcp.EntryState, remaining []mcp.EntryState) (mcp.EntryState, bool) {
 	if deleted.Defines && !deleted.Disabled {
 		return mcp.EntryState{}, false // the deleted copy was the live one
 	}
-	var candidate mcp.EntryState
-	found := false
-	for _, row := range remaining { // low → high: the last definition wins
-		if !row.Defines {
-			continue
-		}
-		candidate, found = row, true
+	if len(remaining) == 0 {
+		return mcp.EntryState{}, false // nothing takes over
 	}
-	return candidate, found
+	// remaining keeps ReadInventory's low → high order, so the last row is the
+	// new winner of the merge.
+	takeover := remaining[len(remaining)-1]
+	if !takeover.Defines || takeover.Disabled {
+		return mcp.EntryState{}, false // a stub or disabled copy keeps it OFF
+	}
+	return takeover, true
 }
 
 // mcpDeleteRow removes one copy through the byte-splice writer and reports it.
