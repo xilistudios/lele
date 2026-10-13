@@ -510,18 +510,25 @@ type Model struct {
 	queueFeedback         string // transient notice shown in the queue strip (e.g. "queue full")
 	currentMessageID      string
 	currentAssistantMsgID string
-	// A subagent result is queued as a follow-up message for the parent. Keep
-	// the parent turn active across its completion and the continuation turn.
-	pendingSubagentCompletions int
-	parentCompletionObserved   bool
-	currentStream              string
-	currentThinking            string
-	currentToolAction          string // active tool call shown during streaming ("tool: args")
-	startTime                  time.Time
-	elapsedTime                time.Duration
-	lastDuration               time.Duration
-	animationTick              int
-	tickPending                bool // prevents multiple tick chains from accumulating
+	// subagentContinuationPending records that a subagent.result arrived and a
+	// continuation turn is therefore owed on this session. It exists because a
+	// backend-initiated turn carries no m.currentMessageID (that uuid is minted
+	// only on a local submit — helpers.go:123, :329), so the idMatches test in
+	// the stream-finished branch cannot recognise its final message. Set only
+	// when a continuation is genuinely owed: publishSubagentAsyncResult claims
+	// the result BEFORE publishing the event and stamps metadata["resumed"], so
+	// a result consumed in-turn by wait_for_subagent arrives with resumed=false
+	// and must not arm a turn. Cleared by handleCompleteMsg and by
+	// clearStreamingState (session switch).
+	subagentContinuationPending bool
+	currentStream               string
+	currentThinking             string
+	currentToolAction           string // active tool call shown during streaming ("tool: args")
+	startTime                   time.Time
+	elapsedTime                 time.Duration
+	lastDuration                time.Duration
+	animationTick               int
+	tickPending                 bool // prevents multiple tick chains from accumulating
 
 	// Double-ESC cancel tracking
 	escPressCount int

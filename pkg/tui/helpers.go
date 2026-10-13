@@ -121,8 +121,7 @@ func (m *Model) publishUserMessage(content string) tea.Cmd {
 	m.startTime = time.Now()
 	m.elapsedTime = 0
 	m.currentMessageID = uuid.New().String()
-	m.pendingSubagentCompletions = 0
-	m.parentCompletionObserved = false
+	m.subagentContinuationPending = false
 	m.currentStream = ""
 	m.currentThinking = ""
 	m.currentToolAction = ""
@@ -327,8 +326,7 @@ func (m *Model) submitGroupStart(profileID, task string) tea.Cmd {
 	m.startTime = time.Now()
 	m.elapsedTime = 0
 	m.currentMessageID = uuid.New().String()
-	m.pendingSubagentCompletions = 0
-	m.parentCompletionObserved = false
+	m.subagentContinuationPending = false
 	m.currentStream = ""
 	m.currentThinking = ""
 	m.currentToolAction = ""

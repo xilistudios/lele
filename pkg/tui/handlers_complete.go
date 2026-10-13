@@ -6,26 +6,23 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// handleCompleteMsg finalises a turn for the visible session: clears loading
-// state, records duration and reconciles queued subagent completions.
+// handleCompleteMsg finalises a turn for the visible session: it clears the
+// loading state, records the turn duration and reconciles the subagent
+// continuation flag. It is intentionally unconditional and idempotent — a
+// backend-initiated continuation turn carries no m.currentMessageID, so the
+// client cannot tell it apart from the parent turn by identity, and any rule
+// that tried to would deadlock (the backend still holds the session semaphore
+// when the stream-end is published). Clearing already-clear state is harmless,
+// and the sessionKey guard keeps a completion for another session from
+// touching this one.
 func (m *Model) handleCompleteMsg(msg completeMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	if msg.sessionKey == m.currentKey {
-		if m.pendingSubagentCompletions > 0 {
-			if !m.parentCompletionObserved {
-				// This is the completion of the original parent turn. The
-				// queued subagent result will start another parent turn.
-				m.parentCompletionObserved = true
-				m.reloadSessions()
-				return m.finishUpdate(msg, cmds) // parent turn done, subagent continuation queued
-			}
-			m.pendingSubagentCompletions--
-			if m.pendingSubagentCompletions > 0 {
-				m.reloadSessions()
-				return m.finishUpdate(msg, cmds) // more subagent results queued
-			}
+		// The turn this completion belongs to is over, so no continuation is
+		// owed any more — whether it was the parent turn or the continuation.
+		m.subagentContinuationPending = false
+		if !m.startTime.IsZero() {
+			m.lastDuration = time.Since(m.startTime)
 		}
-		m.parentCompletionObserved = true
-		m.lastDuration = time.Since(m.startTime)
 		m.clearStreamingState()
 		// clearStreamingState preserves an active backend session when
 		// navigating between chats. This completion belongs to the current

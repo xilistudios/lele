@@ -75,25 +75,28 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 		case "subagent.result":
 			// The task is finished: drop its real-time progress line so the
 			// overlay does not keep showing stale activity for a completed
-			// subagent (TUI-M4). The result itself is queued as a system
-			// message for the parent.
+			// subagent (TUI-M4). This happens for EVERY terminal outcome — the
+			// backend publishes the event unconditionally and reports in
+			// metadata["resumed"] whether a continuation turn is owed.
 			if taskID := msg.msg.Metadata["task_id"]; taskID != "" {
 				delete(m.subagentProgress, taskID)
 			}
-			// Keep loading active while that continuation waits for the session
-			// lock, even if the original turn has already completed.
-			if !m.processing {
-				m.parentCompletionObserved = true
+			// Only a claimed result (resumed=true) resumes the parent, so only
+			// then must the TUI hold the loading state across the continuation
+			// turn. A result consumed in-turn by wait_for_subagent arrives with
+			// resumed=false: it must not arm a turn (there is none to wait for)
+			// and must not touch a turn that is currently running.
+			if msg.msg.Metadata["resumed"] == "true" {
+				m.subagentContinuationPending = true
+				m.processing = true
+				m.startTime = time.Now()
+				m.lastDuration = 0
+				cmds = append(cmds, m.tickCmd())
 			}
-			m.pendingSubagentCompletions++
-			m.processing = true
-			m.startTime = time.Now()
-			m.lastDuration = 0
 			// No cache invalidation here: the listing is TTL-refreshed from
 			// Update() (T6), so a burst of completions costs one lookup per
 			// window instead of one per result.
 			m.updateViewport()
-			cmds = append(cmds, m.tickCmd())
 		case "message.stream":
 			// Clear pending user message on first stream chunk — by the time
 			// the LLM starts streaming, the user message is already in history.
@@ -253,7 +256,7 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 				msg.msg.ReplyTo == m.currentMessageID ||
 				(m.currentMessageID != "" && strings.HasPrefix(msg.msg.MessageID, m.currentMessageID+"-"))
 
-			if m.processing && (m.pendingSubagentCompletions > 0 || idMatches) {
+			if m.processing || m.subagentContinuationPending || idMatches {
 				cmds = append(cmds, m.completeCmd())
 			}
 		}

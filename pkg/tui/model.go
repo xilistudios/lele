@@ -643,8 +643,7 @@ func (m *Model) clearStreamingState() {
 	}
 	m.currentMessageID = ""
 	m.currentAssistantMsgID = ""
-	m.pendingSubagentCompletions = 0
-	m.parentCompletionObserved = false
+	m.subagentContinuationPending = false
 	m.pendingUserMessage = ""
 	m.escHint = false
 	m.escPressCount = 0
