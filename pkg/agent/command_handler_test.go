@@ -1101,8 +1101,6 @@ func (m *commandHandlerSubagentCoordinatorStub) closeMCPManagers() error { retur
 
 func (m *commandHandlerSubagentCoordinatorStub) cancelSession(sessionKey string) {}
 
-func (m *commandHandlerSubagentCoordinatorStub) markSessionSubagentsDelivered(sessionKey string) {}
-
 func (m *commandHandlerSubagentCoordinatorStub) listRunningSubagentTasks() []*tools.SubagentTask {
 	return nil
 }
@@ -1134,7 +1132,7 @@ func (m *commandHandlerSubagentCoordinatorStub) GetSubagents() map[string]*tools
 	return nil
 }
 
-func (m *commandHandlerSubagentCoordinatorStub) markSubagentDelivered(taskID string) bool {
+func (m *commandHandlerSubagentCoordinatorStub) claimSubagentResultForInjection(taskID string) bool {
 	return false
 }
 

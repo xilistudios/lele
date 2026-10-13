@@ -163,10 +163,10 @@ func TestStopSessionSubagents_AliasResolution(t *testing.T) {
 	}
 }
 
-// TestMarkSessionSubagentsDelivered_MatchesStop uses the same matcher as the
-// stop path: a finished task stoppable under a bare uuid must also be marked
-// delivered under it.
-func TestMarkSessionSubagentsDelivered_MatchesStop(t *testing.T) {
+// TestStopSessionSubagents_SealsResults_MatchesStop uses the same matcher as
+// the stop path: a finished task stoppable under a bare uuid must also be
+// sealed under it, so its completion callback can never resume the parent.
+func TestStopSessionSubagents_SealsResults_MatchesStop(t *testing.T) {
 	sm := tools.NewSubagentManager(nil, "test-model", t.TempDir(), nil, 5)
 	addRunningSubagent(t, sm, "subagent-1", "", "native:deadbeef")
 
@@ -175,12 +175,92 @@ func TestMarkSessionSubagentsDelivered_MatchesStop(t *testing.T) {
 		t.Fatalf("stopSessionSubagents = %d, want 1", stopped)
 	}
 
-	tc.markSessionSubagentsDelivered("deadbeef")
-
-	// Second delivery report must say "already delivered".
-	if !tc.markSubagentDelivered("subagent-1") {
-		t.Error("markSubagentDelivered after markSessionSubagentsDelivered = false, want true (already delivered)")
+	// The stop path must seal the result: a subsequent injection claim loses.
+	task := taskOrFatal(t, sm, "subagent-1")
+	if !task.ResultClaimed() {
+		t.Error("ResultClaimed() = false after stopSessionSubagents, want true (the stop path must seal every owned task)")
 	}
+	if sm.ClaimResultForInjection("subagent-1") {
+		t.Error("ClaimResultForInjection = true after the seal, want false (a stopped task must not resume the parent)")
+	}
+}
+
+// TestStopSessionSubagents_SealsTasksStopTaskCannotStop covers the task set the
+// stop count does not see. `stopSessionSubagents` only counts the tasks
+// StopTask actually stopped, but the seal must NOT be conditional on that:
+//
+//   - a task already terminal whose completion callback has not fired yet
+//     (Status == completed, StopTask returns false) still owes the parent a
+//     continuation turn, and injecting it after /stop would resurrect the
+//     session;
+//   - a task still `pending` (StopTask does stop it) must be sealed too.
+//
+// Gating SealResult on StopTask's return value leaves the first case injectable.
+func TestStopSessionSubagents_SealsTasksStopTaskCannotStop(t *testing.T) {
+	cases := []struct {
+		name        string
+		taskID      string
+		status      string
+		wantStopped int
+	}{
+		{name: "terminal_awaiting_callback", taskID: "subagent-completed", status: tools.SubagentStatusCompleted, wantStopped: 0},
+		{name: "pending_not_started", taskID: "subagent-pending", status: tools.SubagentStatusPending, wantStopped: 1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := tools.NewSubagentManager(nil, "test-model", t.TempDir(), nil, 5)
+			sm.AddTaskForTest(&tools.SubagentTask{
+				ID:                tc.taskID,
+				Task:              "fake task",
+				Status:            tc.status,
+				SpawnerSessionKey: "agent:main:telegram:123",
+				OriginSessionKey:  "telegram:123",
+				Created:           time.Now().UnixMilli(),
+				Updated:           time.Now().UnixMilli(),
+			}, nil)
+
+			coord := newCancelTestCoordinator(t, map[string]*tools.SubagentManager{"main": sm}, nil)
+
+			if stopped := coord.stopSessionSubagents("telegram:123"); stopped != tc.wantStopped {
+				t.Fatalf("stopSessionSubagents = %d, want %d for a %s task", stopped, tc.wantStopped, tc.status)
+			}
+			if !taskOrFatal(t, sm, tc.taskID).ResultClaimed() {
+				t.Errorf("ResultClaimed() = false for an owned %s task, want true (the stop path must seal it)", tc.status)
+			}
+			if sm.ClaimResultForInjection(tc.taskID) {
+				t.Errorf("ClaimResultForInjection = true for a %s task after /stop, want false", tc.status)
+			}
+		})
+	}
+}
+
+// TestStopSessionSubagents_LeavesForeignTasksUnsealed is the negative control:
+// sealing must use the same ownership matcher as stopping, so a foreign
+// session's result stays injectable.
+func TestStopSessionSubagents_LeavesForeignTasksUnsealed(t *testing.T) {
+	sm := tools.NewSubagentManager(nil, "test-model", t.TempDir(), nil, 5)
+	addRunningSubagent(t, sm, "subagent-1", "", "native:deadbeef")
+	addRunningSubagent(t, sm, "subagent-2", "", "native:cafebabe")
+
+	tc := newCancelTestCoordinator(t, map[string]*tools.SubagentManager{"main": sm}, nil)
+	if stopped := tc.stopSessionSubagents("deadbeef"); stopped != 1 {
+		t.Fatalf("stopSessionSubagents = %d, want 1", stopped)
+	}
+
+	foreign := taskOrFatal(t, sm, "subagent-2")
+	if foreign.ResultClaimed() {
+		t.Error("ResultClaimed() = true for a foreign task, want false (only owned tasks are sealed)")
+	}
+}
+
+func taskOrFatal(t *testing.T, sm *tools.SubagentManager, id string) *tools.SubagentTask {
+	t.Helper()
+	task, ok := sm.GetTask(id)
+	if !ok || task == nil {
+		t.Fatalf("task %s not found", id)
+	}
+	return task
 }
 
 // TestCancelSessionTree_StopsBackgroundProcesses verifies the bg cascade:

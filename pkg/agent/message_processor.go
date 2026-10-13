@@ -695,22 +695,8 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 
 	}
 
-	// Check if subagent result was already consumed via wait_for_subagent.
+	// `isSubagent` marks content produced by a subagent rather than by the user.
 	isSubagent := msg.SenderID == "subagent"
-	if isSubagent {
-		if msg.Metadata != nil {
-			if taskID := msg.Metadata["task_id"]; taskID != "" {
-				if task, ok := mp.al.toolCoordinator.getSubagentTask(taskID); ok && task != nil && task.Delivered() {
-					logger.DebugCF("agent", "Skipping subagent system message - already delivered via wait_for_subagent",
-						map[string]interface{}{
-							"task_id":     taskID,
-							"session_key": sessionKey,
-						})
-					return "", nil
-				}
-			}
-		}
-	}
 
 	return mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
 		SessionKey:      sessionKey,

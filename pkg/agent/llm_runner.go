@@ -256,9 +256,6 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 
 	// 4. Run LLM iteration loop
 	finalContent, iteration, err := lr.runLLMIteration(runCtx, agent, messages, opts)
-	if lr.al.toolCoordinator != nil {
-		lr.al.toolCoordinator.markSessionSubagentsDelivered(opts.SessionKey)
-	}
 	if err != nil {
 		// Surface a clear error when the LLM loop timed out.
 		if agent.LLMLoopTimeoutMinutes > 0 && errors.Is(err, context.DeadlineExceeded) {

@@ -935,15 +935,6 @@ func (sm *SubagentManager) ClaimResult(taskID string) bool {
 	return false // First claim
 }
 
-// MarkDelivered is a deprecated alias for ClaimResult, kept so this package
-// lands on its own commit. It is removed in the following commit, together with
-// its callers in pkg/agent.
-//
-// Deprecated: use ClaimResult.
-func (sm *SubagentManager) MarkDelivered(taskID string) bool {
-	return sm.ClaimResult(taskID)
-}
-
 // ClaimResultForInjection is the injector's single atomic decision point. It
 // returns false when a wait_for_subagent waiter is registered (the parent will
 // read the result in-turn, so injecting would double-report) or when the result

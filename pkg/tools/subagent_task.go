@@ -25,15 +25,6 @@ func (task *SubagentTask) ResultClaimed() bool {
 	return task.resultClaimed
 }
 
-// Delivered is a deprecated alias for ResultClaimed, kept so this package lands
-// on its own commit. It is removed in the following commit, together with its
-// last caller (pkg/agent).
-//
-// Deprecated: use ResultClaimed.
-func (task *SubagentTask) Delivered() bool {
-	return task.ResultClaimed()
-}
-
 func (task *SubagentTask) buildMessages(systemPrompt string) []providers.Message {
 	messages := []providers.Message{
 		{
