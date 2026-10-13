@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { AvailableSkill, ScannedSkill, SkillInfo } from '../lib/types'
+import type { AvailableSkill, ScannedSkill, SkillInfo, SkillInstallScope } from '../lib/types'
 import type { ApiClient } from '../services/http/client'
 
 type SkillsState = {
@@ -62,10 +62,10 @@ export function useSkills(api: ApiClient) {
   }, [api])
 
   const installSkill = useCallback(
-    async (url: string) => {
+    async (url: string, scope?: SkillInstallScope) => {
       setState((prev) => ({ ...prev, isInstalling: true, error: null }))
       try {
-        await api.installSkill(url)
+        await api.installSkill(url, scope)
         await fetchSkills()
         setState((prev) => ({ ...prev, isInstalling: false }))
       } catch (err) {
@@ -128,10 +128,10 @@ export function useSkills(api: ApiClient) {
   )
 
   const installBatch = useCallback(
-    async (repo: string, skills: string[]) => {
+    async (repo: string, skills: string[], scope?: SkillInstallScope) => {
       setState((prev) => ({ ...prev, isInstalling: true, error: null }))
       try {
-        await api.installSkillsBatch(repo, skills)
+        await api.installSkillsBatch(repo, skills, scope)
         await fetchSkills()
         setState((prev) => ({ ...prev, isInstalling: false, scanResults: null, scanRepo: null }))
       } catch (err) {

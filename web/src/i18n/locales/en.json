@@ -1092,7 +1092,26 @@
     "scopeWorkspace": "This agent's workspace",
     "scopeWorkspaceNoPath": "the agent's own skills folder",
     "scopeGlobal": "Global (all agents)",
-    "scopeGlobalHint": "shared ~/.lele/skills directory"
+    "scopeGlobalHint": "shared ~/.lele/skills directory",
+    "scopeLabel": "Filter skills",
+    "view": {
+      "all": "All",
+      "global": "Global",
+      "agent": "By agent"
+    },
+    "viewAllHint": "Everything the default workspace, the shared global directory and lele's built-ins provide.",
+    "viewGlobalHint": "Shared by every agent — installed in ~/.lele/skills.",
+    "viewAgentHint": "What {{agent}} can use: its own workspace plus the shared skills. Enable/disable applies to this agent only.",
+    "selectAgent": "Agent",
+    "noAgents": "No agents configured",
+    "noAgentsDesc": "Create an agent to manage its skills.",
+    "noGlobalSkills": "No global skills yet",
+    "noGlobalSkillsDesc": "Choose this tab before installing to share a skill with every agent.",
+    "noAgentSkills": "This agent has no skills",
+    "catalogLoadError": "Could not load the skills for this agent.",
+    "installIntoTarget": "Install into: {{target}}",
+    "targetDefaultWorkspace": "Default workspace",
+    "globalToggleHint": "Enable/disable is per agent — open the Global skill under an agent to change it."
   },
   "mode": {
     "chat": "Chat",

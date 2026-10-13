@@ -489,8 +489,52 @@ GET /api/v1/channels
 Notes:
 
 - `/api/v1/tools` currently returns a compact static tool list for client UX
-- `/api/v1/skills` currently returns an empty list in the native channel implementation
 - `/api/v1/status` reports runtime status, uptime, agents, channels, and version
+
+#### Skills
+
+`GET /api/v1/skills` lists the skills the default workspace sees: its own
+`<workspace>/skills` directory plus the shared `<leleDir>/skills` directory and
+lele's built-ins, deduplicated by name (workspace wins over global, global over
+built-in). Each entry carries `source` (`workspace` | `global` | `builtin`) and
+`enabled`.
+
+Install and remove are destination-aware through an optional `scope`.
+
+```http
+POST /api/v1/skills
+Content-Type: application/json
+
+{ "url": "owner/repo", "scope": "global" }
+```
+
+- `scope` is optional and defaults to `"workspace"`.
+  - `"workspace"` writes to `<default workspace>/skills/<name>`.
+  - `"global"` writes to `<leleDir>/skills/<name>`, the directory shared by
+    every agent, and invalidates the cached system prompt of every agent.
+- 201 returns `{"skill_id": "<name>", "message": "Skill '<name>' installed (<scope>)"}`.
+- Any other `scope` value is rejected with 400 `invalid_scope`, whose message
+  names both valid values; nothing is written.
+
+```http
+POST /api/v1/skills/install-batch
+Content-Type: application/json
+
+{ "repo": "owner/repo", "skills": ["weather"], "scope": "global" }
+```
+
+The batch route takes the same `scope` values with the same default and the
+same 400. 200 returns `{"scope": "<resolved scope>", "installed": [...],
+"count": <n>, "message": ...}`; skills already installed are skipped.
+
+```http
+DELETE /api/v1/skills/{name}
+```
+
+Removal resolves the name against the loader's view and dispatches to the
+directory that actually holds it: 200 for a `workspace` or `global` skill, 403
+`builtin_skill` for one shipped with lele (shared, not removable), 404
+`not_found` when no installed skill has that name.
 
 ### MCP Servers
 

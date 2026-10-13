@@ -566,8 +566,14 @@ type SkillInfo struct {
 	Source      string `json:"source,omitempty"`
 }
 
+// SkillInstallRequest is the body of POST /api/v1/skills.
 type SkillInstallRequest struct {
 	URL string `json:"url"`
+	// Scope selects the install destination, resolved by installTarget:
+	// "workspace" (the default) installs into the default workspace skills dir,
+	// "global" into <leleDir>/skills, the directory shared by every agent.
+	// Anything else is rejected with 400 invalid_scope.
+	Scope string `json:"scope,omitempty"`
 }
 
 type SkillInstallResponse struct {
@@ -598,6 +604,8 @@ type SkillScanRequest struct {
 type SkillInstallBatchRequest struct {
 	Repo   string   `json:"repo"`
 	Skills []string `json:"skills"`
+	// Scope is the install destination; see SkillInstallRequest.Scope.
+	Scope string `json:"scope,omitempty"`
 }
 
 // SkillToggleRequest is the request body for toggling a skill.

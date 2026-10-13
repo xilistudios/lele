@@ -24,6 +24,14 @@ type Props = {
    */
   scope?: SkillInstallScope
   onScopeChange?: (scope: SkillInstallScope) => void
+  /**
+   * Where the install writes, when the caller has already decided. Rendered as
+   * a read-only caption where the `ScopePicker` would sit — mutually exclusive
+   * with the interactive picker (the picker wins if both are passed). The All
+   * and Global views use this: there is nothing to choose there, only a place
+   * to state.
+   */
+  destinationLabel?: string
   /** Workspace directory shown next to the "workspace" option, so the choice
    * is concrete instead of abstract. */
   workspacePath?: string
@@ -102,6 +110,26 @@ function ScopePicker({
   )
 }
 
+/**
+ * DestinationCaption — read-only twin of the ScopePicker.
+ *
+ * Used when the caller fixes the destination (the Skills page's All and Global
+ * views): the box keeps the picker's classes so the two states read as one
+ * component, but there is no control to press. It deliberately does NOT carry
+ * `data-testid="install-scope"` — that id means "the interactive picker is
+ * here" and a regression guard pins its absence for scope-less callers.
+ */
+function DestinationCaption({ label }: { label: string }) {
+  return (
+    <div
+      data-testid="install-destination"
+      className="rounded-lg border border-border bg-background-secondary/60 p-3"
+    >
+      <p className="text-xs text-text-secondary">{label}</p>
+    </div>
+  )
+}
+
 export function InstallSkillModal({
   isOpen,
   onClose,
@@ -116,6 +144,7 @@ export function InstallSkillModal({
   onClearScan,
   scope,
   onScopeChange,
+  destinationLabel,
   workspacePath,
 }: Props) {
   const { t } = useTranslation()
@@ -184,6 +213,15 @@ export function InstallSkillModal({
     onClose()
   }
 
+  // One render rule, shared by both view branches: an interactive picker when
+  // the caller wires one, otherwise a read-only caption, otherwise nothing.
+  const destinationControl =
+    scope && onScopeChange ? (
+      <ScopePicker scope={scope} onScopeChange={onScopeChange} workspacePath={workspacePath} />
+    ) : destinationLabel ? (
+      <DestinationCaption label={destinationLabel} />
+    ) : null
+
   // If scan results are available, show the picker
   if (scanResults && scanResults.length > 0) {
     return (
@@ -194,13 +232,7 @@ export function InstallSkillModal({
         size="lg"
       >
         <div className="flex flex-col gap-4 p-6">
-          {scope && onScopeChange && (
-            <ScopePicker
-              scope={scope}
-              onScopeChange={onScopeChange}
-              workspacePath={workspacePath}
-            />
-          )}
+          {destinationControl}
           <p className="text-sm text-text-secondary">
             {t('skills.foundSkills', 'Found {{count}} skills in', { count: scanResults.length })}{' '}
             <span className="font-medium text-text-primary">{scannedRepo}</span>
@@ -298,15 +330,7 @@ export function InstallSkillModal({
         </div>
 
         {/* Install destination — shared by both tabs. */}
-        {scope && onScopeChange && (
-          <div className="px-6 pt-4">
-            <ScopePicker
-              scope={scope}
-              onScopeChange={onScopeChange}
-              workspacePath={workspacePath}
-            />
-          </div>
-        )}
+        {destinationControl && <div className="px-6 pt-4">{destinationControl}</div>}
 
         {/* Browse tab */}
         {activeTab === 'browse' && (

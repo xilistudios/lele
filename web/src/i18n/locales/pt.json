@@ -1092,7 +1092,26 @@
     "scopeWorkspace": "Workspace deste agente",
     "scopeWorkspaceNoPath": "a pasta de skills do agente",
     "scopeGlobal": "Global (todos os agentes)",
-    "scopeGlobalHint": "diretório compartilhado ~/.lele/skills"
+    "scopeGlobalHint": "diretório compartilhado ~/.lele/skills",
+    "scopeLabel": "Filtrar habilidades",
+    "view": {
+      "all": "Todas",
+      "global": "Globais",
+      "agent": "Por agente"
+    },
+    "viewAllHint": "Tudo o que o workspace padrão, o diretório global compartilhado e as integradas do lele oferecem.",
+    "viewGlobalHint": "Compartilhadas por todos os agentes — instaladas em ~/.lele/skills.",
+    "viewAgentHint": "O que {{agent}} pode usar: seu próprio workspace mais as compartilhadas. Ativar/desativar afeta apenas este agente.",
+    "selectAgent": "Agente",
+    "noAgents": "Nenhum agente configurado",
+    "noAgentsDesc": "Crie um agente para gerenciar suas habilidades.",
+    "noGlobalSkills": "Ainda não há habilidades globais",
+    "noGlobalSkillsDesc": "Escolha esta aba antes de instalar para compartilhar uma habilidade com todos os agentes.",
+    "noAgentSkills": "Este agente não tem habilidades",
+    "catalogLoadError": "Não foi possível carregar as habilidades deste agente.",
+    "installIntoTarget": "Instalar em: {{target}}",
+    "targetDefaultWorkspace": "Workspace padrão",
+    "globalToggleHint": "Ativar/desativar é por agente — abra a habilidade global em um agente para alterar."
   },
   "mode": {
     "chat": "Chat",

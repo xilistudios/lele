@@ -12,15 +12,45 @@ type Props = {
   isRemoving: string | null
   onRemove: (name: string) => void
   onToggle?: (name: string, enabled: boolean) => void
+  /**
+   * Whether a card offers a control. Both default to today's rule
+   * (`source !== 'builtin'`), so a caller that passes neither gets exactly the
+   * same list as before. The scope tabs override them per view: the Global
+   * view hides every Remove, the By-agent view decides per skill.
+   */
+  canRemove?: (skill: SkillInfo) => boolean
+  canToggle?: (skill: SkillInfo) => boolean
+  /** Empty-state copy. Omitted = the original `skills.noSkills*` strings. */
+  emptyTitle?: string
+  emptyDescription?: string
 }
 
-export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }: Props) {
+export function SkillsList({
+  skills,
+  isLoading,
+  isRemoving,
+  onRemove,
+  onToggle,
+  canRemove,
+  canToggle,
+  emptyTitle,
+  emptyDescription,
+}: Props) {
   const { t } = useTranslation()
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
 
-  const handleRemoveClick = (name: string, source?: string) => {
-    if (source === 'builtin') return // Built-in skills cannot be removed
-    setConfirmRemove(name)
+  // Today's rule, kept visible (and overridable) here instead of inline:
+  // built-ins are shared with every agent and this list does not own them.
+  const allowRemove = canRemove ?? ((skill: SkillInfo) => skill.source !== 'builtin')
+  const allowToggle = canToggle ?? ((skill: SkillInfo) => skill.source !== 'builtin')
+
+  // `name` alone can repeat across sources (a workspace `memory` shadowing a
+  // built-in one), so the confirmation and the React key use the composite.
+  const cardKey = (skill: SkillInfo) => `${skill.source ?? 'unknown'}:${skill.name}`
+
+  const handleRemoveClick = (skill: SkillInfo) => {
+    if (skill.source === 'builtin') return // Built-in skills cannot be removed
+    setConfirmRemove(cardKey(skill))
   }
 
   const handleConfirmRemove = (name: string) => {
@@ -56,10 +86,11 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }
           </svg>
         </div>
         <h3 className="text-sm font-medium text-text-primary">
-          {t('skills.noSkills', 'No skills installed')}
+          {emptyTitle ?? t('skills.noSkills', 'No skills installed')}
         </h3>
         <p className="mt-1 text-xs text-text-secondary max-w-sm">
-          {t('skills.noSkillsDesc', "Install skills to extend your agent's capabilities")}
+          {emptyDescription ??
+            t('skills.noSkillsDesc', "Install skills to extend your agent's capabilities")}
         </p>
       </div>
     )
@@ -69,7 +100,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }
     <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
       {skills.map((skill) => (
         <div
-          key={skill.name}
+          key={cardKey(skill)}
           className="group flex flex-col rounded-xl border border-border bg-background-secondary/50 p-4 hover:border-brand-rosa/30 transition-all duration-fast"
         >
           <div className="flex items-start justify-between">
@@ -96,7 +127,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }
 
             <div className="flex-shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
               {/* Enable/disable toggle */}
-              {onToggle && skill.source !== 'builtin' && (
+              {onToggle && allowToggle(skill) && (
                 <button
                   type="button"
                   onClick={() => onToggle(skill.name, !skill.enabled)}
@@ -114,8 +145,8 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }
               )}
 
               {/* Remove button */}
-              {skill.source !== 'builtin' &&
-                (confirmRemove === skill.name ? (
+              {allowRemove(skill) &&
+                (confirmRemove === cardKey(skill) ? (
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
@@ -139,7 +170,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }
                   </div>
                 ) : (
                   <IconButton
-                    onClick={() => handleRemoveClick(skill.name, skill.source)}
+                    onClick={() => handleRemoveClick(skill)}
                     disabled={isRemoving === skill.name}
                     variant="danger"
                     title={t('skills.removeSkill', 'Remove')}

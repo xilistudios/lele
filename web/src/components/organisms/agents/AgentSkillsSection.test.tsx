@@ -348,9 +348,11 @@ describe('AgentSkillsSection — loading / empty / error', () => {
   test('empty catalog → dashed block + link to /skills', async () => {
     const utils = setup({ agent: { id: 'coder' }, catalog: EMPTY_CATALOG })
     await waitFor(() => {
-      expect(utils.container.querySelector('a[href="/skills"]')).toBeTruthy()
+      expect(utils.container.querySelector('a[href="/skills?view=agent&agent=coder"]')).toBeTruthy()
     })
-    const link = utils.container.querySelector('a[href="/skills"]') as HTMLAnchorElement
+    const link = utils.container.querySelector(
+      'a[href="/skills?view=agent&agent=coder"]',
+    ) as HTMLAnchorElement
     expect(link.textContent).toContain(tr('settings.agentPage.goToSkills'))
     expect(utils.container.textContent).toContain(tr('settings.agentPage.skillsNoneInstalled'))
   })

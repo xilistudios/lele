@@ -397,7 +397,10 @@ export function AgentSkillsSection({ agent, index, agentId }: Props) {
               <PlusIcon size={14} />
               {t('settings.agentPage.skillsAdd', { defaultValue: 'Add skill' })}
             </Button>
-            <Link to="/skills" className="text-sm text-focus hover:underline">
+            <Link
+              to={`/skills?view=agent&agent=${agentId}`}
+              className="text-sm text-focus hover:underline"
+            >
               {t('settings.agentPage.goToSkills', { defaultValue: 'Go to Skills' })}
             </Link>
           </div>
