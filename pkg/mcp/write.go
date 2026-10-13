@@ -214,7 +214,106 @@ func validEntryName(name string) error {
 // stubDocument is the exact bytes written for a fresh disable-only file:
 // {"mcpServers":{"<name>":{"disabled":true}}}.
 func stubDocument(name string) []byte {
-	return []byte(`{"mcpServers":{` + mustJSONKey(name) + `:{"disabled":true}}}`)
+	return singleEntryDocument(name, []byte(disabledStubJSON))
+}
+
+// disabledStubJSON is the serialized entry SetDisabled creates for a name
+// that is absent from the file (the "disable only in this workspace"
+// primitive).
+const disabledStubJSON = `{"disabled":true}`
+
+// singleEntryDocument is the exact bytes of a fresh one-entry file:
+// {"mcpServers":{"<name>":<entry>}}. It is shared by SetDisabled's stub and
+// by UpsertEntry so a created file has ONE envelope shape everywhere.
+func singleEntryDocument(name string, entry []byte) []byte {
+	return []byte(`{"mcpServers":{` + mustJSONKey(name) + `:` + string(entry) + `}}`)
+}
+
+// planEnvelope returns the edit(s) that CREATE the "mcpServers" envelope
+// holding the single entry `name` whose serialized object is `entry`, for a
+// document whose fold holds no envelope object at all (member absent, null,
+// or a null occurrence that cleared an earlier object). The three shapes
+// mirror what SetDisabled has always done, so the disable primitive and the
+// entry writer create identical envelopes:
+//   - a "mcpServers" member exists (null): materialise the object in place,
+//     every other top-level member keeps its bytes;
+//   - other top-level members exist: append after the last one, order
+//     preserved, no existing byte touched;
+//   - otherwise: an empty object "{}" gets the member inserted before its
+//     closing brace and a top-level "null" document (accepted by ParseFile
+//     as an empty file) is replaced wholesale — it has nothing to preserve.
+//
+// NOTE for a winning null envelope: materialising it in place makes any name
+// an EARLIER object occurrence contributed visible again (the null used to
+// clear the fold). That is SetDisabled's behaviour and the reason callers
+// should treat a null occurrence as "empty file" — never as data to keep.
+func planEnvelope(doc *rawDoc, name string, entry []byte) ([]edit, error) {
+	sm, hasServers := lastMember(doc.members, "mcpServers")
+	body := `{` + mustJSONKey(name) + `:` + string(entry) + `}`
+	switch {
+	case hasServers:
+		return []edit{{sm.start, sm.end, []byte(body)}}, nil
+	case len(doc.members) > 0:
+		pos := doc.members[len(doc.members)-1].end
+		return []edit{{pos, pos, []byte(", \"mcpServers\": " + body)}}, nil
+	default:
+		trimmed := bytes.TrimLeft(doc.data, " \t\r\n")
+		if len(trimmed) > 0 && trimmed[0] == '{' {
+			j := len(doc.data) - len(trimmed) + 1
+			for j < len(doc.data) && isSpaceJSON(doc.data[j]) {
+				j++
+			}
+			// Members are absent, so the closing brace follows the
+			// opening one (nothing nested can intervene).
+			if j >= len(doc.data) || doc.data[j] != '}' {
+				return nil, errors.New("empty top-level object does not close after '{'")
+			}
+			return []edit{{j, j, []byte(`"mcpServers": ` + body)}}, nil
+		}
+		return []edit{{0, len(doc.data), singleEntryDocument(name, entry)}}, nil
+	}
+}
+
+// planAppendEntry returns the edit that appends the entry `name` (serialized
+// as `entry`) as a NEW member of the existing "mcpServers" object sm,
+// mirroring planDisable's stub creation: after the fold's last member when
+// the object has one — so the file's own separator style is reused and no
+// existing byte moves — or before the closing brace when it is empty.
+// sm must be the LAST top-level "mcpServers" occurrence, which parseRawDoc
+// guarantees to be an object whenever doc.servers is non-nil.
+func planAppendEntry(doc *rawDoc, sm rawMember, name string, entry []byte) (edit, error) {
+	closePos := sm.end - 1
+	if closePos < sm.start || doc.data[closePos] != '}' {
+		return edit{}, errors.New("captured mcpServers object does not end with '}'")
+	}
+	member := mustJSONKey(name) + `: ` + string(entry)
+	if n := len(doc.servers.members); n > 0 {
+		pos := doc.servers.members[n-1].end
+		return edit{pos, pos, []byte(`, ` + member)}, nil
+	}
+	return edit{closePos, closePos, []byte(member)}, nil
+}
+
+// planDeleteEntry returns the edit that removes the winning entry m from the
+// "mcpServers" object, comma cleanup included (see deleteMemberSpan). It is
+// shared by planEnable (which drops a pure stub so the lower layer wins
+// again) and by DeleteEntry, so both delete exactly the same bytes.
+//
+// m must belong to the envelope occurrence that CONTAINS it: deleteMemberSpan
+// walks members[idx±1] to find the neighbouring key, so it must receive THIS
+// envelope's member slice — the cross-occurrence fold (doc.servers.members)
+// can hold the neighbour in another duplicate envelope and the span then
+// swallowed that envelope's key and dropped its names (data loss).
+func planDeleteEntry(doc *rawDoc, m rawMember) (edit, error) {
+	env, ok := envelopeContaining(doc, m.start)
+	if !ok {
+		return edit{}, errors.New("winning entry is outside every mcpServers envelope") // unreachable: fold members come from envelopes
+	}
+	envObj, err := parseObjectAt(doc.data, env.start, env.raw)
+	if err != nil {
+		return edit{}, err // unreachable: parseRawDoc gated this envelope
+	}
+	return deleteMemberSpan(doc.data, envObj.members, indexOfMember(envObj.members, m), env.start+1, env.end-1)
 }
 
 // mustJSONKey JSON-encodes an object member name. json.Marshal cannot fail
@@ -259,66 +358,32 @@ func envelopeContaining(doc *rawDoc, valueStart int) (rawMember, bool) {
 // planDisable computes the splice(s) that disable one entry, returning the
 // edits and whether the ENTRY was created (name absent from mcpServers).
 // nil edits mean "already disabled" — the file must not be rewritten.
+// Envelope and entry creation are delegated to planEnvelope/planAppendEntry
+// so the entry writer (entry.go) creates byte-identical envelopes.
 func planDisable(doc *rawDoc, name string) ([]edit, bool, error) {
-	sm, hasServers := lastMember(doc.members, "mcpServers")
-
 	if doc.servers == nil {
-		key := mustJSONKey(name)
-		body := `{` + key + `:{"disabled":true}}`
-		switch {
-		case hasServers:
-			// "mcpServers": null → materialise the object in place; the
-			// other top-level members stay byte-identical.
-			return []edit{{sm.start, sm.end, []byte(body)}}, true, nil
-		case len(doc.members) > 0:
-			// Append after the last top-level member: order preserved, no
-			// existing byte touched.
-			pos := doc.members[len(doc.members)-1].end
-			repl := []byte(", \"mcpServers\": " + body)
-			return []edit{{pos, pos, repl}}, true, nil
-		default:
-			// No top-level members: an empty object "{}" gets the member
-			// inserted before its closing brace; a top-level "null"
-			// document (accepted by ParseFile as an empty file) is
-			// replaced wholesale - it has nothing to preserve.
-			trimmed := bytes.TrimLeft(doc.data, " \t\r\n")
-			if len(trimmed) > 0 && trimmed[0] == '{' {
-				j := len(doc.data) - len(trimmed) + 1
-				for j < len(doc.data) && isSpaceJSON(doc.data[j]) {
-					j++
-				}
-				// Members are absent, so the closing brace follows the
-				// opening one (nothing nested can intervene).
-				if j >= len(doc.data) || doc.data[j] != '}' {
-					return nil, false, errors.New("empty top-level object does not close after '{'")
-				}
-				repl := []byte(`"mcpServers": ` + body)
-				return []edit{{j, j, repl}}, true, nil
-			}
-			return []edit{{0, len(doc.data), stubDocument(name)}}, true, nil
-		}
+		edits, err := planEnvelope(doc, name, []byte(disabledStubJSON))
+		return edits, err == nil, err
+	}
+	sm, hasServers := lastMember(doc.members, "mcpServers")
+	if !hasServers {
+		return nil, false, errors.New("mcpServers object is not present at the top level") // unreachable: a non-nil fold comes from an envelope
 	}
 
 	m, ok := doc.servers.get(name) // last occurrence: json map semantics
 	if !ok {
 		// Create the entry inside the existing mcpServers object.
-		closePos := sm.end - 1
-		if closePos < sm.start || doc.data[closePos] != '}' {
-			return nil, false, errors.New("captured mcpServers object does not end with '}'")
+		e, err := planAppendEntry(doc, sm, name, []byte(disabledStubJSON))
+		if err != nil {
+			return nil, false, err
 		}
-		key := mustJSONKey(name)
-		body := key + `: {"disabled":true}`
-		if n := len(doc.servers.members); n > 0 {
-			pos := doc.servers.members[n-1].end
-			return []edit{{pos, pos, []byte(`, ` + body)}}, true, nil
-		}
-		return []edit{{closePos, closePos, []byte(body)}}, true, nil
+		return []edit{e}, true, nil
 	}
 
 	if m.raw[0] != '{' {
 		// A null entry parses as a zero ServerConfig (json semantics): it
 		// can hold no flag, so materialise it as a stub.
-		return []edit{{m.start, m.end, []byte(`{"disabled":true}`)}}, false, nil
+		return []edit{{m.start, m.end, []byte(disabledStubJSON)}}, false, nil
 	}
 	entryObj, err := parseObjectAt(m.raw, 0, m.raw)
 	if err != nil {
@@ -405,20 +470,9 @@ func planEnable(doc *rawDoc, name string) ([]edit, bool, error) {
 	}
 	if sc.Command == "" && sc.URL == "" {
 		// Delete the whole ENTRY from the envelope occurrence that CONTAINS
-		// the winning copy. deleteMemberSpan walks members[idx±1] to find
-		// the neighbouring key, so it must receive THIS envelope's member
-		// slice: the cross-occurrence fold (doc.servers.members) can hold
-		// the neighbour in another duplicate envelope, and the span then
-		// swallowed that envelope's key and dropped its names (data loss).
-		env, ok := envelopeContaining(doc, m.start)
-		if !ok {
-			return nil, false, errors.New("winning entry is outside every mcpServers envelope") // unreachable: fold members come from envelopes
-		}
-		envObj, err := parseObjectAt(doc.data, env.start, env.raw)
-		if err != nil {
-			return nil, false, err // unreachable: parseRawDoc gated this envelope
-		}
-		span, err := deleteMemberSpan(doc.data, envObj.members, indexOfMember(envObj.members, m), env.start+1, env.end-1)
+		// the winning copy (planDeleteEntry documents why the envelope's own
+		// member slice, not the cross-occurrence fold, must be spliced).
+		span, err := planDeleteEntry(doc, m)
 		if err != nil {
 			return nil, false, err
 		}

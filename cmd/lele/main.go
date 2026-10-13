@@ -107,6 +107,8 @@ func main() {
 		clientCmd()
 	case "models":
 		modelsCmd()
+	case "mcp":
+		mcpCmd()
 	case "update":
 		updateCmd()
 	case "tui":

@@ -193,6 +193,293 @@ Write rules:
   gates the response only, never the reload; a failed reload is logged, not
   surfaced as an error, because the file on disk is already right.
 
+## Managing servers from the CLI (`lele mcp`)
+
+A fourth surface, the **CLI** (`lele mcp`), edits the same layered files
+without a running gateway. It is a thin front-end over the inventory and the
+byte-splice writers: it reads the merged view and mutates the layer files, and
+never re-implements discovery, precedence or validation. Bare `lele mcp` (or
+`lele mcp --help`) prints the help and exits 0; an unknown subcommand prints
+the help and exits 1.
+
+Resolving which files to read is **read-only**: unlike the runtime, the CLI
+never initializes an agent workspace, so `lele mcp list` (and every other
+subcommand, including one that fails) creates no directory and writes nothing
+outside the layer file it was asked to change.
+
+The **path guard** above is enforced here too, by the same predicate the
+REST/TUI surfaces use: `add`, `edit` and `remove` refuse to touch a layer file
+outside the allowed trees — the user's home directory, `/tmp`, `/var/folders`
+or the process's current directory — printing
+`✗ refusing to write "<path>": outside the allowed workspace roots` before any
+write happens. A workspace legitimately living under `/srv` or `/opt` is
+therefore not editable from the CLI; move the workspace under one of the
+allowed roots (or arrange for the file to be reached through one).
+
+One escaping rule applies to every subcommand: a bare `--` ends flag parsing,
+so a server whose name begins with a dash stays addressable —
+`lele mcp show -- -dash`.
+
+Unlike the toggle surfaces (which write the layer that **owns** the winning
+entry — see the write rules above), `add` writes exactly the layer named by
+`--layer` (default `global`) and merely **warns** when the new entry is
+shadowed; `edit` and `remove` default to the winning copy, i.e. they behave
+like the toggle surfaces. `add` is the CLI's counterpart of the REST raw
+`PUT`, not of the toggle.
+
+```text
+lele mcp list [--agent <id>] [--layer global|agent|project]
+lele mcp show <name> [--agent <id>]
+lele mcp add <name> (--command <bin> | --url <u>) [flags]
+lele mcp remove <name> [--agent <id>] [--layer global|agent|project] [--all]
+lele mcp edit <name> [--agent <id>] [--layer global|agent|project]
+lele mcp test <name> [--agent <id>] [--timeout 30s]
+```
+
+Every subcommand accepts `--agent <id>`: the agent whose workspace provides the
+**agent** layer (default `main`). An unknown id fails and lists the known
+agents. `--layer` names one of `global`, `agent` or `project` (low → high
+precedence, as above); an unknown layer is a usage error. Both the
+`--flag value` and `--flag=value` forms are understood.
+
+### `lele mcp list`
+
+Lists the effective (winner) servers, one per line — state glyph, name, kind,
+winning layer and the entry's description (truncated to 60 characters). The
+kind column is `stdio` (the entry carries a `command`), `remote` (it carries a
+`url`) — an entry carrying both is reported as `stdio` and flagged invalid —
+or `unknown` for a copy that defines neither, i.e. a pure `{"disabled": true}`
+stub. Glyphs:
+
+| Glyph | State |
+| --- | --- |
+| `●` | enabled |
+| `○` | disabled |
+| `!` | invalid |
+
+`--layer L` keeps only the servers whose **winner** is layer `L`. A summary
+line and the per-layer file table follow the rows; discovery warnings are
+printed as `⊘ warning: …`. With no servers, the command prints
+`No MCP servers configured.`, a `lele mcp add …` hint and the global file path.
+
+```console
+$ lele mcp list
+!  broken             stdio   project  Issue tracker tools
+●  filesystem         stdio   global  Read and write files under ~/notes
+○  old-server         unknown agent
+
+3 server(s): 1 enabled, 1 disabled, 1 invalid
+
+Layers (low → high):
+  global           /home/alfredo/.lele/mcp.json                (exists)
+  agent            /home/alfredo/.lele/workspace-main/mcp.json (exists)
+  project          /home/alfredo/proj/.lele/mcp.json           (exists)
+⊘ warning: mcp config /home/alfredo/.lele/workspace-main/mcp.json: mcp server "old-server": invalid entry: needs command (stdio) or url (remote)
+```
+
+(Real output, not a mock-up: `broken` carries both a `command` and a `url`
+under `project`, and `agent` holds `{"old-server": {"disabled": true}}` — the
+stub that switches the `global` definition off, hence `unknown`.)
+
+### `lele mcp show`
+
+Prints the winning entry and a per-layer breakdown marking which layer wins
+(`← winner`) and which lower copies are inert (`(shadowed)`). `env keys:` and
+`header keys:` list **key names only** — a value is never printed (see
+[Secret safety](#secret-safety-and-liveness)). `command`, `args` and `url` are
+shown verbatim, so a `${VAR}` there stays literal. An unknown name exits 1 and
+suggests close matches (`did you mean: …?`).
+
+`state:` is always the **runtime's** verdict — computed after `${VAR}`
+expansion, exactly like `pkg/mcp`'s discovery. A copy's own verdict, read from
+the file's raw bytes without expansion, is shown separately in the breakdown as
+`raw verdict: "…"`; the two legitimately disagree when expansion is what makes
+an entry valid or not (e.g. an unset `${VAR}` in a `url`). When the runtime
+rejects an entry for which the raw read found no problem, the state line still
+carries a reason instead of an empty parenthesis —
+`invalid (the runtime rejects it — its ${VAR} references may expand to empty)`.
+
+```console
+$ lele mcp show filesystem
+MCP server "filesystem"
+  state:       enabled
+  layer:       global
+  file:        /home/alfredo/.lele/mcp.json
+  kind:        stdio
+  command:     npx
+  args:        ["-y", "@modelcontextprotocol/server-filesystem", "/home/alfredo/notes"]
+  description: Read and write files under ~/notes
+  env keys:    LOG_LEVEL
+  header keys: (none)
+
+Per-layer breakdown (low → high):
+  global   present=yes defines=yes disabled=no  /home/alfredo/.lele/mcp.json  ← winner
+  agent    present=no  /home/alfredo/.lele/workspace-main/mcp.json
+  project  present=no  /home/alfredo/proj/.lele/mcp.json
+```
+
+### `lele mcp add`
+
+Creates one entry in a layer. Flags:
+
+| Flag | Notes |
+| --- | --- |
+| `--command <bin>` | stdio launcher. Mutually exclusive with `--url`. |
+| `--arg <v>` | stdio argument; repeatable, order preserved. |
+| `--url <u>` | remote endpoint. Mutually exclusive with `--command`. |
+| `--type http\|sse` | remote transport; only valid with `--url`. |
+| `--description <d>` | what the LLM sees before the server is loaded. |
+| `--env KEY=VALUE` | child environment variable; repeatable. |
+| `--header KEY=VALUE` | remote HTTP header; repeatable. |
+| `--layer <l>` | target layer (default `global`). |
+| `--force` | replace an existing entry in the target layer. |
+
+Exactly one of `--command` / `--url` is required. `--type` must be `http` or
+`sse` and only accompanies `--url`. An `--env`/`--header` pair without `=` or
+with an empty key is a usage error; an empty value (`KEY=`) is allowed.
+
+Values are stored **raw**: `${VAR}` is written verbatim and only expanded when
+the file is read (see [`${VAR}` expansion](#var-expansion)), so `add` never
+needs the secret to be present in the environment. The entry is serialized as
+one canonical, compact, single-line object:
+
+```json
+{"mcpServers":{"filesystem":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/home/alfredo/notes"],"env":{"LOG_LEVEL":"info"},"description":"Read and write files under ~/notes"}}}
+```
+
+The target defaults to `global`, and `add` writes exactly that layer. If a
+higher layer shadows the name, the write still succeeds and prints
+`⊘ note: … shadows this entry …`. If the name already exists in the target
+layer, the command refuses (`✗ server "…" already exists in …`) until `--force`
+is given; with `--force`, an entry whose bytes already match reports
+`✓ … unchanged`. Like every write here, the target file must pass the
+[path guard](#managing-servers-from-the-cli-lele-mcp).
+
+```console
+$ lele mcp add filesystem --command npx \
+    --arg -y --arg @modelcontextprotocol/server-filesystem --arg /home/alfredo/notes \
+    --env LOG_LEVEL=info --description "Read and write files under ~/notes"
+✓ added "filesystem" to global (/home/alfredo/.lele/mcp.json)
+
+$ lele mcp add issues --url https://mcp.example.com/mcp --type http \
+    --header "Authorization=Bearer ${ISSUE_TRACKER_TOKEN}" --description "Issue tracker tools"
+✓ added "issues" to global (/home/alfredo/.lele/mcp.json)
+```
+
+### `lele mcp remove`
+
+Removes one or more copies of a server:
+
+- **Default** removes only the copy that **wins** the merge, then prints a
+  `⊘ note:` for every remaining (lower) copy and suggests `--all`.
+- `--layer L` removes **that layer's** copy — how you delete a specific
+  (possibly shadowed) copy.
+- `--all` removes every copy in every layer.
+
+`--layer` and `--all` are mutually exclusive, and a name defined nowhere exits 1.
+All three forms run the path guard before writing.
+
+Because layers replace whole entries, removing a copy that kept the server OFF
+(a pure `{"disabled": true}` stub, or a definition carrying `"disabled": true`)
+can switch the lower definition **ON**. The command says so explicitly instead
+of silently re-enabling a server:
+
+```console
+$ lele mcp remove old-server
+✓ removed "old-server" from agent (/home/alfredo/.lele/workspace-main/mcp.json)
+⚠ this re-enables "old-server" from global (/home/alfredo/.lele/mcp.json)
+⊘ note: "old-server" is still defined in global (/home/alfredo/.lele/mcp.json)
+  run: lele mcp remove old-server --all
+```
+
+The warning appears only when the removal actually changes the verdict: the
+deleted copy was the reason the server was off **and** the copy that takes over
+is an enabled definition. A surviving copy above the definition (a disable stub
+or a disabled definition) still wins the merge and keeps the server off — no
+warning in that case.
+
+### `lele mcp edit`
+
+Opens one entry in your editor. By default it targets the copy that **wins**
+the merge — even when that copy is a bare `{"disabled": true}` stub — so `edit`
+is the **repair path** for a broken server (the one `test` points at): it edits
+exactly the copy a reader loads. `--layer L` targets that layer's copy instead.
+
+- Editor selection: `$VISUAL`, else `$EDITOR`, else `vi`.
+- The editor string is run through `sh -c`, so an editor with arguments works:
+  `EDITOR="code -w" lele mcp edit api`.
+- The temp file holds the entry's **raw JSON object** — no `mcpServers`/name
+  wrapper and no `${VAR}` expansion — so it stays valid while you edit.
+- On exit the bytes are parsed without expansion and validated; a refused edit
+  prints `✗ invalid entry: … — file left unchanged` and writes nothing
+  (re-run the command to retry).
+- A successful save is canonicalized: compact single-line object, fields in a
+  fixed order (`command`, `args`, `env`, `url`, `type`, `headers`,
+  `description`), map keys sorted, and `disabled` written only when `true`. If
+  the canonical form equals what was on disk, the command prints `✓ no changes`.
+
+```console
+$ EDITOR="code -w" lele mcp edit issues
+Editing "issues" (global /home/alfredo/.lele/mcp.json) — JSON object for this server. Values are stored raw; ${VAR} is expanded at connect time.
+✓ updated "issues" (global /home/alfredo/.lele/mcp.json)
+```
+
+Repairing a broken entry adds `✓ "…" is now valid` once the fresh read agrees —
+the check is on the **effective** verdict, so an entry that was invalid only
+because a `${VAR}` expanded to nothing is announced too. `edit` never *creates*
+an entry; a name defined nowhere is a usage error.
+
+### `lele mcp test`
+
+Probes a server out of band: it dials it directly through the production dial
+path (transport selection, stdio spawn or HTTP/SSE, the initialize handshake and
+`tools/list`), so the probe exercises the same code the runtime dials with —
+without going through the manager, which refuses a disabled entry by design.
+The entry is resolved the same way a reader would load it: the winning copy,
+skipping pure `{"disabled": true}` stubs on the way down (a layer replaces whole
+entries, so deleting the stub would expose the definition underneath — that is
+the config the question is about). `--timeout` is a Go duration (default `30s`,
+must be positive).
+
+- A **disabled** server is probed anyway, after a note naming the layer whose
+  copy is disabled: `⊘ "…" is disabled in the agent layer — probing it directly
+  (the runtime will not load it)`. A name whose every copy is a bare stub has
+  nothing to dial and exits 1 (`… is only a disable stub …`).
+- An **invalid** entry is refused before any dial
+  (`✗ "…" is invalid: … (fix with: lele mcp edit …)`), so `edit` is the repair
+  path. The verdict is the effective one (post-`${VAR}` expansion); an entry
+  the runtime rejects with no raw problem still gets a reason, never an empty
+  one.
+- On success it prints the tool names (first 10, then `+N more`) and, when the
+  server reported one, its handshake identity; a failed probe exits 1.
+
+```console
+$ lele mcp test smoke
+✓ "smoke" connected — 1 tools: echo (server: lele-smoketest 0.1.0)
+
+$ lele mcp test smoke        # the agent layer holds {"smoke": {"disabled": true}}
+⊘ "smoke" is disabled in the agent layer — probing it directly (the runtime will not load it)
+✓ "smoke" connected — 1 tools: echo (server: lele-smoketest 0.1.0)
+
+$ lele mcp test broken
+✗ "broken" is invalid: mixes stdio and remote fields: set either command or url, not both (fix with: lele mcp edit broken)
+```
+
+### Secret safety and liveness
+
+- `list` and `show` print env/header **key names only** — never their values,
+  and never an expanded `${VAR}`. Same invariant as the management UI. The
+  `command`, `args` and `url` fields are shown verbatim, so `${VAR}` there stays
+  literal.
+- `lele mcp` writes the layer files directly and never talks to a running
+  process. `mcp.json` is **not** watched by the config watcher (only
+  `config.json` is), so a CLI edit made while a gateway is running is
+  out-of-band: unlike the REST API it triggers no wiring pass, and the change
+  is picked up lazily — the data plane re-reads the winning entry on next use
+  (fingerprint, see [`Lifecycle`](#lifecycle)) and the tool/prompt surface
+  catches up on the next config reload. No restart is required, but the change
+  is not instantaneous either.
+
 ## `${VAR}` expansion
 
 `mcp.json` values are expanded against the **process environment** every time
