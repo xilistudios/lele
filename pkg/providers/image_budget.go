@@ -28,9 +28,9 @@ const (
 	// MediaPartCharCost is the fixed char cost charged for one Media (file path) entry.
 	MediaPartCharCost = 2500
 	// VideoPartCharCost is the fixed char cost charged for one video_url content part.
-	// It MIRRORS the existing constant in pkg/agent/session_manager.go
-	// (videoPartEstimateChars = 20000) so the two estimators cannot drift; T3 replaces
-	// that local constant with a reference to this one.
+	// It is the canonical value: pkg/agent/session_manager.go defines its local
+	// videoPartEstimateChars as a reference to this constant, so the two
+	// estimators cannot drift.
 	VideoPartCharCost = 20000
 )
 

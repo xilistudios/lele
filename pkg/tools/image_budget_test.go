@@ -25,23 +25,51 @@ import (
 // Another task appends unrelated tests below this marker.
 // ---------------------------------------------------------------------------
 
+// makeNoisyNRGBA builds a deterministic pseudo-random NRGBA image. Random
+// noise makes PNG/JPEG poorly compressible, which is what forces the budget
+// paths; with alpha set, every pixel gets a translucent random alpha.
+func makeNoisyNRGBA(t *testing.T, width, height int, alpha bool) *image.NRGBA {
+	t.Helper()
+
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+	rng := rand.New(rand.NewSource(1))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			i := img.PixOffset(x, y)
+			img.Pix[i] = byte(rng.Intn(256))
+			img.Pix[i+1] = byte(rng.Intn(256))
+			img.Pix[i+2] = byte(rng.Intn(256))
+			if alpha {
+				img.Pix[i+3] = byte(rng.Intn(256))
+			} else {
+				img.Pix[i+3] = 255
+			}
+		}
+	}
+	return img
+}
+
 // makeNoisyJPEG builds a deterministic pseudo-random RGB JPEG. Random noise
 // makes the JPEG poorly compressible, which is what forces the budget path.
 func makeNoisyJPEG(t *testing.T, width, height, quality int) []byte {
 	t.Helper()
 
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
-	rng := rand.New(rand.NewSource(1))
-	for i := 0; i < len(img.Pix); i += 4 {
-		img.Pix[i] = byte(rng.Intn(256))
-		img.Pix[i+1] = byte(rng.Intn(256))
-		img.Pix[i+2] = byte(rng.Intn(256))
-		img.Pix[i+3] = 255
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, makeNoisyNRGBA(t, width, height, false), &jpeg.Options{Quality: quality}); err != nil {
+		t.Fatalf("encode noisy jpeg: %v", err)
 	}
+	return buf.Bytes()
+}
+
+// makeNoisyPNG builds a deterministic pseudo-random RGB PNG (alpha=false) or
+// RGBA PNG (alpha=true). Noise makes it poorly compressible, which is what
+// puts a small fixture into the encoded-size bands the tests inject.
+func makeNoisyPNG(t *testing.T, width, height int, alpha bool) []byte {
+	t.Helper()
 
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality}); err != nil {
-		t.Fatalf("encode noisy jpeg: %v", err)
+	if err := png.Encode(&buf, makeNoisyNRGBA(t, width, height, alpha)); err != nil {
+		t.Fatalf("encode noisy png: %v", err)
 	}
 	return buf.Bytes()
 }
@@ -150,6 +178,13 @@ func TestBoundImagePayload_LowDetailSmallerTarget(t *testing.T) {
 }
 
 func TestBoundImagePayload_PngWithAlphaStaysPng(t *testing.T) {
+	// Injected limits drive the fixture through the encoder: 64x64 is over
+	// the injected 32 px target, so the fast path cannot take it, and the
+	// re-encoded 32x32 PNG (~256 bytes) fits under the 512-byte ceiling.
+	// Alpha must survive as PNG — never a JPEG fallback. (The old fixture
+	// was 64x64 with default limits, i.e. under the fast path, so it never
+	// reached the encoder at all — proven vacuous by mutation.)
+	limits := imageLimits{longSide: 32, longSideLow: 16, encodedBytes: 8, encodedCeiling: 512, decodePixels: 1_000_000}
 	img := image.NewNRGBA(image.Rect(0, 0, 64, 64))
 	for i := 0; i < len(img.Pix); i += 4 {
 		img.Pix[i] = byte(i)
@@ -163,15 +198,163 @@ func TestBoundImagePayload_PngWithAlphaStaysPng(t *testing.T) {
 	}
 	src := buf.Bytes()
 
-	data, outMIME, _, _, _, err := boundImagePayload(src, "image/png", "auto", defaultImageLimits)
+	data, outMIME, w, h, resized, err := boundImagePayload(src, "image/png", "auto", limits)
 	if err != nil {
 		t.Fatalf("boundImagePayload: %v", err)
+	}
+	if !resized {
+		t.Fatal("expected resized=true — the encoder must run, not the fast path")
 	}
 	if outMIME != "image/png" {
 		t.Fatalf("outMIME = %q, want image/png (alpha must stay PNG)", outMIME)
 	}
+	if w != 32 || h != 32 {
+		t.Fatalf("dims = %dx%d, want 32x32 (downscaled to the injected target)", w, h)
+	}
 	if _, format, err := image.DecodeConfig(bytes.NewReader(data)); err != nil || format != "png" {
 		t.Fatalf("output does not decode as PNG: format=%q err=%v", format, err)
+	}
+	// Transparency must survive the re-encode (no white flatten).
+	out, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	b := out.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if _, _, _, a := out.At(x, y).RGBA(); a < 0xffff {
+				return // translucent pixel found: alpha preserved
+			}
+		}
+	}
+	t.Fatal("alpha channel was flattened away")
+}
+
+// TestBoundImagePayload_InBandPngPassesThroughByteIdentical pins the fix for
+// review H1.1: a PNG between encodedBytes and encodedCeiling whose pixels are
+// within the target already satisfies every stated bound, so it must not be
+// decoded or re-encoded at all — byte-identical output, resized=false. Before
+// the fix the fast path was gated on encodedBytes, so this image was decoded
+// (up to 30 MP) and re-encoded for byte-identical output with resized=true,
+// which made read_image claim "resized to ..." when nothing happened.
+func TestBoundImagePayload_InBandPngPassesThroughByteIdentical(t *testing.T) {
+	limits := imageLimits{longSide: 1568, longSideLow: 768, encodedBytes: 64 << 10, encodedCeiling: 512 << 10, decodePixels: 30_000_000}
+	src := makeNoisyPNG(t, 300, 300, false) // ~270 KB: inside the injected band
+	if len(src) <= limits.encodedBytes || len(src) > limits.encodedCeiling {
+		t.Fatalf("fixture precondition: len(src)=%d not in (%d, %d]", len(src), limits.encodedBytes, limits.encodedCeiling)
+	}
+
+	data, outMIME, w, h, resized, err := boundImagePayload(src, "image/png", "auto", limits)
+	if err != nil {
+		t.Fatalf("boundImagePayload: %v", err)
+	}
+	if resized {
+		t.Fatal("expected resized=false: the in-band PNG already satisfies every bound and must pass through untouched")
+	}
+	if !bytes.Equal(data, src) {
+		t.Fatalf("payload not byte-identical to input (in=%d out=%d)", len(src), len(data))
+	}
+	if outMIME != "image/png" {
+		t.Fatalf("outMIME = %q, want image/png", outMIME)
+	}
+	if w != 300 || h != 300 {
+		t.Fatalf("dims = %dx%d, want the untouched 300x300", w, h)
+	}
+}
+
+// TestBoundImagePayload_OverCeilingPngKeepsTargetDimensionsAsJpeg pins the
+// fix for review H1.2 (order): a PNG over the ceiling WITHOUT alpha falls
+// back to a full-size JPEG before any canvas shrink, so the pixel count the
+// vision model sees is the target, not 3/4 of it per ladder pass. Before the
+// fix the canvas ladder ran first and this input came back at 144x144 PNG.
+func TestBoundImagePayload_OverCeilingPngKeepsTargetDimensionsAsJpeg(t *testing.T) {
+	limits := imageLimits{longSide: 256, longSideLow: 128, encodedBytes: 1024, encodedCeiling: 64 << 10, decodePixels: 1_000_000}
+	src := makeNoisyPNG(t, 256, 256, false) // ~193 KB PNG vs ~43 KB full-size JPEG q80
+	if len(src) <= limits.encodedCeiling {
+		t.Fatalf("fixture precondition: len(src)=%d must exceed the ceiling %d", len(src), limits.encodedCeiling)
+	}
+
+	data, outMIME, w, h, resized, err := boundImagePayload(src, "image/png", "auto", limits)
+	if err != nil {
+		t.Fatalf("boundImagePayload: %v", err)
+	}
+	if outMIME != "image/jpeg" {
+		t.Fatalf("outMIME = %q, want image/jpeg (over-ceiling PNG falls back to JPEG)", outMIME)
+	}
+	if w != 256 || h != 256 {
+		t.Fatalf("dims = %dx%d, want the target dimensions 256x256 preserved, not canvas-shrunk", w, h)
+	}
+	if !resized {
+		t.Fatal("expected resized=true (the payload was re-encoded)")
+	}
+	if len(data) > limits.encodedCeiling {
+		t.Fatalf("payload %d bytes exceeds ceiling %d", len(data), limits.encodedCeiling)
+	}
+	if _, format, err := image.DecodeConfig(bytes.NewReader(data)); err != nil || format != "jpeg" {
+		t.Fatalf("output does not decode as JPEG: format=%q err=%v", format, err)
+	}
+}
+
+// TestBoundImagePayload_OverCeilingPngWithAlphaFlattensToJpegAtTarget pins
+// the fix for review H1.2 for alpha sources: the transparent PNG cannot fit,
+// so it is flattened onto white and re-encoded as a full-size JPEG — same
+// target dimensions, no canvas shrink. Transparency is traded away only when
+// the PNG itself did not fit.
+func TestBoundImagePayload_OverCeilingPngWithAlphaFlattensToJpegAtTarget(t *testing.T) {
+	limits := imageLimits{longSide: 256, longSideLow: 128, encodedBytes: 1024, encodedCeiling: 64 << 10, decodePixels: 1_000_000}
+	src := makeNoisyPNG(t, 256, 256, true) // ~257 KB with alpha vs ~39 KB flattened JPEG q80
+	if len(src) <= limits.encodedCeiling {
+		t.Fatalf("fixture precondition: len(src)=%d must exceed the ceiling %d", len(src), limits.encodedCeiling)
+	}
+
+	data, outMIME, w, h, resized, err := boundImagePayload(src, "image/png", "auto", limits)
+	if err != nil {
+		t.Fatalf("boundImagePayload: %v", err)
+	}
+	if outMIME != "image/jpeg" {
+		t.Fatalf("outMIME = %q, want image/jpeg (over-ceiling alpha PNG is flattened to JPEG)", outMIME)
+	}
+	if w != 256 || h != 256 {
+		t.Fatalf("dims = %dx%d, want the target dimensions 256x256 preserved, not canvas-shrunk", w, h)
+	}
+	if !resized {
+		t.Fatal("expected resized=true (the payload was re-encoded)")
+	}
+	if len(data) > limits.encodedCeiling {
+		t.Fatalf("payload %d bytes exceeds ceiling %d", len(data), limits.encodedCeiling)
+	}
+	if _, format, err := image.DecodeConfig(bytes.NewReader(data)); err != nil || format != "jpeg" {
+		t.Fatalf("output does not decode as JPEG: format=%q err=%v", format, err)
+	}
+}
+
+// TestBoundImagePayload_FullSizeJpegOverCeilingShrinksCanvas pins the last
+// resort of review H1.2: when not even a full-size JPEG fits the ceiling
+// (tiny injected limits), the 3/4-per-pass canvas ladder still runs and its
+// final flatten-to-JPEG step keeps the payload under the ceiling at reduced
+// dimensions (72x72 here, below the 128 px target).
+func TestBoundImagePayload_FullSizeJpegOverCeilingShrinksCanvas(t *testing.T) {
+	limits := imageLimits{longSide: 128, longSideLow: 64, encodedBytes: 512, encodedCeiling: 6_000, decodePixels: 1_000_000}
+	src := makeNoisyPNG(t, 128, 128, false) // ~48 KB; even the q50 full-size JPEG (~7.1 KB) exceeds the ceiling
+
+	data, outMIME, w, h, resized, err := boundImagePayload(src, "image/png", "auto", limits)
+	if err != nil {
+		t.Fatalf("boundImagePayload: %v", err)
+	}
+	if outMIME != "image/jpeg" {
+		t.Fatalf("outMIME = %q, want image/jpeg (last-resort flatten)", outMIME)
+	}
+	if max(w, h) >= limits.longSide {
+		t.Fatalf("dims = %dx%d, want the canvas ladder to shrink below the %d px target", w, h, limits.longSide)
+	}
+	if !resized {
+		t.Fatal("expected resized=true")
+	}
+	if len(data) > limits.encodedCeiling {
+		t.Fatalf("payload %d bytes exceeds ceiling %d", len(data), limits.encodedCeiling)
+	}
+	if _, format, err := image.DecodeConfig(bytes.NewReader(data)); err != nil || format != "jpeg" {
+		t.Fatalf("output does not decode as JPEG: format=%q err=%v", format, err)
 	}
 }
 

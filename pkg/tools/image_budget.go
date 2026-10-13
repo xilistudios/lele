@@ -5,8 +5,10 @@ package tools
 // single read_image call can never blow the request byte budget by itself.
 // Small images take a fast path and are passed through unchanged.
 //
-// A later change appends request-budget helpers (eviction/budget enforcement)
-// to this file; those are owned by a different task.
+// The request-budget helpers (MaxLiveImages, RequestOverBudget,
+// EnforceImageBudget) also live in this file, below: the origin-side bound
+// keeps a single read small, the budget keeps a whole turn within the
+// transport cap.
 
 import (
 	"bytes"
@@ -82,9 +84,10 @@ func boundImagePayload(src []byte, mimeType, detail string, limits imageLimits) 
 		if int64(cfg.Width)*int64(cfg.Height) > int64(limits.decodePixels) {
 			return nil, "", 0, 0, false, fmt.Errorf("image is too large to process safely (%dx%d pixels); resize it before reading", cfg.Width, cfg.Height)
 		}
-		if len(src) <= limits.encodedBytes && max(cfg.Width, cfg.Height) <= target {
-			// Fast path: small image already within target — zero behaviour
-			// change, bytes passed through untouched.
+		if len(src) <= limits.encodedCeiling && max(cfg.Width, cfg.Height) <= target {
+			// Fast path: already within every stated bound — the ceiling is
+			// the hard bound this function exists to enforce, so nothing is
+			// decoded or re-encoded and the bytes pass through untouched.
 			return src, mimeType, cfg.Width, cfg.Height, false, nil
 		}
 	}
@@ -124,7 +127,8 @@ func boundImagePayload(src []byte, mimeType, detail string, limits imageLimits) 
 
 	// Step 6: PNG when the source was PNG or any pixel is translucent;
 	// otherwise JPEG.
-	usePNG := strings.EqualFold(mimeType, "image/png") || detectAlpha(nrgba)
+	hasAlpha := detectAlpha(nrgba)
+	usePNG := strings.EqualFold(mimeType, "image/png") || hasAlpha
 
 	// Step 7: byte ladder until the payload fits the ceiling.
 	var encoded []byte
@@ -132,11 +136,35 @@ func boundImagePayload(src []byte, mimeType, detail string, limits imageLimits) 
 	if usePNG {
 		outMIME = "image/png"
 		encoded, err = encodePNGPayload(nrgba)
-		// PNG has no quality knob: shrink the canvas by 3/4 per pass (at most
-		// two extra passes) and re-encode.
-		for pass := 0; err == nil && len(encoded) > limits.encodedCeiling && pass < 2; pass++ {
-			nrgba = downscaleNRGBA(nrgba, max(1, nrgba.Rect.Dx()*3/4), max(1, nrgba.Rect.Dy()*3/4))
-			encoded, err = encodePNGPayload(nrgba)
+		if err == nil && len(encoded) > limits.encodedCeiling {
+			// Before cutting resolution, try a full-size JPEG at this very
+			// size: for a vision model the pixel count is what matters, so a
+			// full-resolution lossy JPEG beats a lossless PNG at 3/4 the
+			// resolution — the ceiling is a hard bound, the
+			// transparent-background fidelity is not (alpha is flattened
+			// onto white only here, when the PNG itself did not fit).
+			jpg := nrgba
+			if hasAlpha {
+				jpg = flattenOnWhite(nrgba)
+			}
+			for _, quality := range []int{jpegQualityHigh, jpegQualityMid, jpegQualityLow} {
+				encoded, err = encodeJPEGPayload(jpg, quality)
+				if err != nil || len(encoded) <= limits.encodedCeiling {
+					break
+				}
+			}
+			if err == nil && len(encoded) <= limits.encodedCeiling {
+				outMIME = "image/jpeg"
+			}
+		}
+		if err == nil && len(encoded) > limits.encodedCeiling {
+			// Not even a full-size JPEG fits: PNG has no quality knob, so
+			// shrink the canvas by 3/4 per pass (at most two extra passes)
+			// and re-encode.
+			for pass := 0; err == nil && len(encoded) > limits.encodedCeiling && pass < 2; pass++ {
+				nrgba = downscaleNRGBA(nrgba, max(1, nrgba.Rect.Dx()*3/4), max(1, nrgba.Rect.Dy()*3/4))
+				encoded, err = encodePNGPayload(nrgba)
+			}
 		}
 		if err == nil && len(encoded) > limits.encodedCeiling {
 			// Explicit size-over-transparency trade-off: alpha can cost
