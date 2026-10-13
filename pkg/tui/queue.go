@@ -173,8 +173,9 @@ func (m *Model) maybeFlushQueue() tea.Cmd {
 		return m.queueRetryCmd()
 	}
 	// Re-checking busy state here makes every call site safe by construction.
-	// isSessionProcessing() already covers m.processing (startup grace + stale
-	// reset), running subagents and the backend's own busy flag.
+	// isSessionProcessing() covers m.processing (startup grace + stale reset)
+	// and the backend's own busy flag; running subagents are deliberately NOT
+	// part of it, so background work cannot hold the queue closed.
 	if m.isSessionProcessing() {
 		return m.tickCmd()
 	}

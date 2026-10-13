@@ -969,15 +969,21 @@ func countRunningSubagents(list []channels.SubagentTaskInfo) int {
 }
 
 // hasRunningSubagents reports whether the visible chat has a running subagent
-// (the status-line spinner and several Update()-side busy gates ask this every
-// frame). O(1) and allocation-free: the count materialized by the last cache
-// refresh — never the listing, never a backend call.
+// (the status-line "subagents running" branch and the ESC cancel gate ask this
+// every frame). O(1) and allocation-free: the count materialized by the last
+// cache refresh — never the listing, never a backend call.
 //
 // "Visible chat" is the same listing the sidebar shows, i.e. the parent chat
 // while a subagent view is on screen. That is intentionally wider than the old
 // per-session query (which looked up the subagent's own sub-subagents): the
-// status line describes the session being viewed, and isSessionProcessing
-// already skips this check for subagent sessions (isSubagentSession).
+// status line describes the session being viewed.
+//
+// This is an INDICATOR ONLY. It deliberately does NOT feed
+// isSessionProcessing() any more: running subagents are background work and
+// must not gate input or the queue. The aggregate predicates that must answer
+// "is the main agent busy?" use isSessionProcessing(), and the one place that
+// still needs the subagent state is the ESC cancel gate (handlers_keys.go),
+// which asks hasRunningSubagents() directly.
 func (m *Model) hasRunningSubagents() bool {
 	key := m.subagentQueryKey()
 	if key == "" || m.subagentsCache.key != key {
@@ -999,10 +1005,15 @@ func (m *Model) isSessionProcessing() bool {
 		return true
 	}
 
-	// For parent sessions, if there are running subagents, we are also processing.
-	if !m.isSubagentSession(m.currentKey) && m.hasRunningSubagents() {
-		return true
-	}
+	// Running subagents are deliberately NOT part of this predicate. They are
+	// background work: the parent turn is done (or never started), the composer
+	// is free and the queue may flush. Folding them in here used to gate Enter,
+	// the queue flush and the spinner on a state the user cannot act on, so a
+	// long subagent left the chat looking "stuck loading" for up to a cache TTL
+	// after it finished. The "subagents still working" signal now lives in the
+	// status line (renderStatusLine) and the per-task progress overlay; ESC
+	// keeps its own explicit hasRunningSubagents() clause so the cancel
+	// affordance survives.
 
 	// Otherwise, check if we are in the brief startup phase after sending a message.
 	if m.processing && !m.startTime.IsZero() && time.Since(m.startTime) < 3*time.Second {

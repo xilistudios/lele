@@ -40,6 +40,7 @@
   "tui.noSubagents": "No hay subagentes para esta sesión",
   "tui.pressEscAgain": "Presiona ESC de nuevo para cancelar",
   "tui.processing": "Procesando... (ESC para cancelar)",
+  "tui.subagentsRunning": "%d subagente(s) en segundo plano — puedes seguir escribiendo",
   "tui.doneIn": "● Completado en %.1fs",
   "tui.ready": "● Listo",
   "tui.context": "Contexto",

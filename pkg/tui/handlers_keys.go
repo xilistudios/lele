@@ -21,7 +21,11 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 	}
 	switch msg.String() {
 	case "esc":
-		if m.isSessionProcessing() || m.processing {
+		// The subagent clause is explicit here because isSessionProcessing()
+		// deliberately ignores background work now: ESC is the only keyboard
+		// path to StopAgent while subagents run, so it must still fire when the
+		// parent turn is idle and only subagents are working.
+		if m.isSessionProcessing() || m.processing || m.hasRunningSubagents() {
 			now := time.Now()
 			if now.Sub(m.escLastPress) < escHintTimeout {
 				// Double press detected - cancel the agent
@@ -211,7 +215,11 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 		// and plain messages fall through to the queue instead of starting
 		// a concurrent second turn. Slash commands stay exempt — they run
 		// locally in the TUI (see below).
-		busy := m.processing || m.hasRunningSubagents()
+		//
+		// isSessionProcessing() is the shared predicate the queue flush and
+		// the spinner also use, so the three cannot drift. It intentionally
+		// excludes running subagents: background work must not block input.
+		busy := m.isSessionProcessing()
 
 		// Group mode: wrap non-command input as /group start <profileID> <task>
 		if m.currentMode == ModeGroup && !strings.HasPrefix(inputVal, "/") &&

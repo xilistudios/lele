@@ -409,6 +409,12 @@ func (m *Model) renderStatusLine(leftWidth int) string {
 		} else {
 			statusLine = fmt.Sprintf("%s %s", m.getBouncingDots(), i18n.T("tui.processing"))
 		}
+	} else if !m.isSubagentSession(m.currentKey) && m.hasRunningSubagents() {
+		// Background work: subagents are still running but the parent is idle
+		// and the composer is NOT blocked. Deliberately no spinner and no ESC
+		// hint — this line must not read as "busy". Placed after the
+		// isProcessing branches so a real turn always wins.
+		statusLine = fmt.Sprintf(i18n.T("tui.subagentsRunning"), m.subagentsCache.running)
 	} else if m.lastDuration > 0 {
 		statusLine = fmt.Sprintf(i18n.T("tui.doneIn"), m.lastDuration.Seconds())
 	} else {

@@ -231,6 +231,7 @@ func TestAllKeysExist(t *testing.T) {
 		"tui.providerDetailHints",
 		"tui.modelDeleteConfirm",
 		"tui.modelDeleteNoRow",
+		"tui.subagentsRunning",
 	}
 
 	Init()
