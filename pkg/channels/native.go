@@ -834,6 +834,7 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	// Secrets (keyring)
 	mux.HandleFunc("GET /api/v1/secrets", withAuth(n.handleSecretsList))
 	mux.HandleFunc("POST /api/v1/secrets", withAuth(applyBodyLimit(n.handleSecretCreate)))
+	mux.HandleFunc("PUT /api/v1/secrets/{name}", withAuth(applyBodyLimit(n.handleSecretUpdate)))
 	mux.HandleFunc("GET /api/v1/secrets/status", withAuth(n.handleSecretsStatus))
 	mux.HandleFunc("GET /api/v1/secrets/audit", withAuth(n.handleSecretsAudit))
 	mux.HandleFunc("GET /api/v1/secrets/{name}", withAuth(n.handleSecretGet))

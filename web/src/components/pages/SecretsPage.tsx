@@ -40,11 +40,13 @@ function BackendBadge({ backend }: { backend?: string }) {
 function SecretCard({
   secret,
   onReveal,
+  onEdit,
   onDelete,
   busy,
 }: {
   secret: SecretMeta
   onReveal: (name: string) => Promise<string>
+  onEdit: (secret: SecretMeta) => void
   onDelete: (name: string) => Promise<void>
   busy: boolean
 }) {
@@ -162,6 +164,14 @@ function SecretCard({
         <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
+            onClick={() => onEdit(secret)}
+            disabled={busy}
+            className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+          >
+            {t('common.edit', 'Edit')}
+          </button>
+          <button
+            type="button"
             onClick={handleReveal}
             disabled={revealing || busy}
             className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
@@ -214,24 +224,32 @@ function SecretCard({
 export function SecretFormModal({
   busy,
   agents,
+  initial,
   onClose,
   onSubmit,
 }: {
   busy: boolean
   /** Roster the scope selector grants access to (from the app's agent list). */
   agents: Agent[]
+  /**
+   * Secret being edited. When set the modal opens in edit mode: the name is
+   * fixed (it is the keyring key, not a label), an empty value keeps the stored
+   * plaintext, and the submit button says Save.
+   */
+  initial?: SecretMeta | null
   onClose: () => void
   onSubmit: (input: SecretInput) => Promise<void>
 }) {
   const { t } = useTranslation()
-  const [form, setForm] = useState<SecretInput>({
-    name: '',
+  const isEdit = initial != null
+  const [form, setForm] = useState<SecretInput>(() => ({
+    name: initial?.name ?? '',
     value: '',
-    description: '',
-    tags: [],
-    scope: [],
-  })
-  const [tagsText, setTagsText] = useState('')
+    description: initial?.description ?? '',
+    tags: initial?.tags ?? [],
+    scope: initial?.scope ?? [],
+  }))
+  const [tagsText, setTagsText] = useState(() => (initial?.tags ?? []).join(', '))
   const [showValue, setShowValue] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -240,14 +258,18 @@ export function SecretFormModal({
       setError(t('secrets.errorName', 'Name is required'))
       return
     }
-    if (!form.value.trim()) {
+    // Editing without a value means "keep the stored secret", so only creating
+    // requires one.
+    if (!isEdit && !form.value.trim()) {
       setError(t('secrets.errorValue', 'Value is required'))
       return
     }
     setError(null)
     const input: SecretInput = {
       name: form.name.trim(),
-      value: form.value,
+      // Whitespace-only counts as blank on edit: the contract is "leave it
+      // alone", not "store spaces".
+      value: isEdit && !form.value.trim() ? '' : form.value,
       description: form.description?.trim() || undefined,
       tags: tagsText
         .split(',')
@@ -262,14 +284,18 @@ export function SecretFormModal({
     } catch (err) {
       setError((err as Error).message)
     }
-  }, [form, tagsText, onSubmit, onClose, t])
+  }, [form, tagsText, isEdit, onSubmit, onClose, t])
 
   const labelCls = 'mb-1 block text-xs font-medium text-text-secondary'
   const inputCls =
     'w-full rounded-lg border border-border bg-background-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:border-focus focus:outline-none'
 
   return (
-    <Modal isOpen onClose={onClose} title={t('secrets.newSecret', 'New Secret')}>
+    <Modal
+      isOpen
+      onClose={onClose}
+      title={isEdit ? t('secrets.editSecret', 'Edit Secret') : t('secrets.newSecret', 'New Secret')}
+    >
       <div className="space-y-4 p-6">
         <div>
           <label className={labelCls} htmlFor="secret-name">
@@ -277,11 +303,17 @@ export function SecretFormModal({
           </label>
           <input
             id="secret-name"
-            className={`${inputCls} font-mono`}
+            className={`${inputCls} font-mono disabled:cursor-not-allowed disabled:opacity-60`}
             value={form.name}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             placeholder={t('secrets.namePlaceholder', 'e.g. openai.api_key')}
+            disabled={isEdit}
           />
+          {isEdit && (
+            <p className="mt-1 text-xs text-text-tertiary">
+              {t('secrets.nameImmutable', "The name is the secret's key and cannot be changed")}
+            </p>
+          )}
         </div>
 
         <div>
@@ -295,7 +327,11 @@ export function SecretFormModal({
               className={`${inputCls} pr-16`}
               value={form.value}
               onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))}
-              placeholder={t('secrets.valuePlaceholder', 'Secret value (stored encrypted)')}
+              placeholder={
+                isEdit
+                  ? t('secrets.valueKeepPlaceholder', 'Leave blank to keep the current value')
+                  : t('secrets.valuePlaceholder', 'Secret value (stored encrypted)')
+              }
             />
             <button
               type="button"
@@ -365,7 +401,7 @@ export function SecretFormModal({
           {t('common.cancel', 'Cancel')}
         </button>
         <Button type="button" variant="primary" onClick={handleSubmit} disabled={busy}>
-          {t('common.create', 'Create')}
+          {isEdit ? t('common.save', 'Save') : t('common.create', 'Create')}
         </Button>
       </div>
     </Modal>
@@ -439,25 +475,43 @@ export function SecretsPage() {
     refreshAudit,
     reveal,
     createSecret,
+    updateSecret,
     removeSecret,
   } = useSecrets()
-  const [formOpen, setFormOpen] = useState(false)
+  // `null` = closed, `{ mode: 'create' }` = new secret, `{ mode: 'edit' }` = the
+  // card that was opened. One state, so the two modes cannot be open at once.
+  const [form, setForm] = useState<
+    { mode: 'create' } | { mode: 'edit'; secret: SecretMeta } | null
+  >(null)
   const [formBusy, setFormBusy] = useState(false)
   const [busyName, setBusyName] = useState<string | null>(null)
   const [tab, setTab] = useState<'secrets' | 'audit'>('secrets')
 
-  const openCreate = useCallback(() => setFormOpen(true), [])
+  const openCreate = useCallback(() => setForm({ mode: 'create' }), [])
+  const openEdit = useCallback((secret: SecretMeta) => setForm({ mode: 'edit', secret }), [])
+  const closeForm = useCallback(() => setForm(null), [])
 
-  const handleCreate = useCallback(
+  const handleFormSubmit = useCallback(
     async (input: SecretInput) => {
       setFormBusy(true)
       try {
-        await createSecret(input)
+        if (form?.mode === 'edit') {
+          // The name travels in the path: editing edits the keyring entry, it
+          // never renames or duplicates it.
+          await updateSecret(form.secret.name, {
+            value: input.value,
+            description: input.description,
+            tags: input.tags,
+            scope: input.scope,
+          })
+        } else {
+          await createSecret(input)
+        }
       } finally {
         setFormBusy(false)
       }
     },
-    [createSecret],
+    [form, createSecret, updateSecret],
   )
 
   const handleDelete = useCallback(
@@ -629,6 +683,7 @@ export function SecretsPage() {
                       key={secret.name}
                       secret={secret}
                       onReveal={reveal}
+                      onEdit={openEdit}
                       onDelete={handleDelete}
                       busy={busyName === secret.name}
                     />
@@ -640,12 +695,13 @@ export function SecretsPage() {
         </div>
       </main>
 
-      {formOpen && (
+      {form && (
         <SecretFormModal
           busy={formBusy}
           agents={agents}
-          onClose={() => setFormOpen(false)}
-          onSubmit={handleCreate}
+          initial={form.mode === 'edit' ? form.secret : null}
+          onClose={closeForm}
+          onSubmit={handleFormSubmit}
         />
       )}
     </div>

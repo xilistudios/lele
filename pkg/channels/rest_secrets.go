@@ -2,7 +2,9 @@ package channels
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/xilistudios/lele/pkg/keyring"
 )
@@ -96,6 +98,36 @@ func (n *NativeChannel) handleSecretCreate(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusCreated, map[string]interface{}{"secret": meta})
 }
 
+// handleSecretUpdate edits an existing secret. The name in the path is the
+// secret's key (it cannot be renamed) and an empty value keeps the stored one,
+// so metadata can be edited without re-sending the plaintext.
+// PUT /api/v1/secrets/{name}
+func (n *NativeChannel) handleSecretUpdate(w http.ResponseWriter, r *http.Request) {
+	if !n.keyringAvailable(w) {
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required", "missing_name")
+		return
+	}
+	var input secretInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_body")
+		return
+	}
+	if err := n.keyringService.UpdateFromUI(name, input.Value, input.Description, input.Tags, input.Scope, "webui"); err != nil {
+		if errors.Is(err, keyring.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "secret not found", "secret_not_found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error(), "keyring_update_failed")
+		return
+	}
+	meta, _ := n.findSecretMeta(name)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"secret": meta})
+}
+
 // handleSecretDelete removes a secret.
 // DELETE /api/v1/secrets/{name}
 func (n *NativeChannel) handleSecretDelete(w http.ResponseWriter, r *http.Request) {
@@ -104,7 +136,7 @@ func (n *NativeChannel) handleSecretDelete(w http.ResponseWriter, r *http.Reques
 	}
 	name := r.PathValue("name")
 	if err := n.keyringService.DeleteFromUI(name, "webui"); err != nil {
-		if err == keyring.ErrNotFound {
+		if errors.Is(err, keyring.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "secret not found", "secret_not_found")
 			return
 		}

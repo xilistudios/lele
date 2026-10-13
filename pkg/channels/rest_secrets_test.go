@@ -181,3 +181,134 @@ func TestSecretsAPI_CreateValidation(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+
+// PUT /api/v1/secrets/{name} edits an existing secret: the value is optional
+// (blank keeps the stored plaintext) and the name in the path is the key, so an
+// edit can never create a second secret.
+func TestSecretsAPI_Update(t *testing.T) {
+	ts := newSecretsTestServer(t)
+
+	resp := doSecretsRequest(t, ts, http.MethodPost, "/api/v1/secrets", secretInput{
+		Name:        "openai.api_key",
+		Value:       "sk-original",
+		Description: "OpenAI key",
+		Tags:        []string{"provider"},
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", resp.StatusCode, http.StatusCreated)
+	}
+	resp.Body.Close()
+
+	// Metadata-only edit: no value in the body.
+	resp = doSecretsRequest(t, ts, http.MethodPut, "/api/v1/secrets/openai.api_key", secretInput{
+		Description: "OpenAI key (prod)",
+		Tags:        []string{"provider", "prod"},
+		Scope:       []string{"coder"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	var updatePayload struct {
+		Secret keyring.SecretMeta `json:"secret"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&updatePayload); err != nil {
+		t.Fatalf("decode update: %v", err)
+	}
+	resp.Body.Close()
+	if updatePayload.Secret.Description != "OpenAI key (prod)" {
+		t.Errorf("description = %q, want %q", updatePayload.Secret.Description, "OpenAI key (prod)")
+	}
+	if len(updatePayload.Secret.Scope) != 1 || updatePayload.Secret.Scope[0] != "coder" {
+		t.Errorf("scope = %v, want [coder]", updatePayload.Secret.Scope)
+	}
+
+	// The plaintext is untouched...
+	resp = doSecretsRequest(t, ts, http.MethodGet, "/api/v1/secrets/openai.api_key", nil)
+	var getPayload struct {
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&getPayload); err != nil {
+		t.Fatalf("decode get: %v", err)
+	}
+	resp.Body.Close()
+	if getPayload.Value != "sk-original" {
+		t.Errorf("value after metadata edit = %q, want sk-original", getPayload.Value)
+	}
+
+	// ...and no second secret was created.
+	resp = doSecretsRequest(t, ts, http.MethodGet, "/api/v1/secrets", nil)
+	var listPayload struct {
+		Secrets []keyring.SecretMeta `json:"secrets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	resp.Body.Close()
+	if len(listPayload.Secrets) != 1 {
+		t.Fatalf("secret count after edit = %d, want 1", len(listPayload.Secrets))
+	}
+
+	// An explicit value replaces the stored one.
+	resp = doSecretsRequest(t, ts, http.MethodPut, "/api/v1/secrets/openai.api_key", secretInput{
+		Value: "sk-rotated",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update-with-value status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	resp.Body.Close()
+
+	resp = doSecretsRequest(t, ts, http.MethodGet, "/api/v1/secrets/openai.api_key", nil)
+	if err := json.NewDecoder(resp.Body).Decode(&getPayload); err != nil {
+		t.Fatalf("decode get: %v", err)
+	}
+	resp.Body.Close()
+	if getPayload.Value != "sk-rotated" {
+		t.Errorf("value after rotation = %q, want sk-rotated", getPayload.Value)
+	}
+}
+
+// Editing a secret that does not exist is a 404 — the endpoint must not behave
+// as an upsert, or a stale WebUI card could recreate a deleted secret.
+func TestSecretsAPI_UpdateMissing(t *testing.T) {
+	ts := newSecretsTestServer(t)
+
+	resp := doSecretsRequest(t, ts, http.MethodPut, "/api/v1/secrets/ghost", secretInput{
+		Value: "v",
+	})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("update-missing status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+	resp.Body.Close()
+
+	resp = doSecretsRequest(t, ts, http.MethodGet, "/api/v1/secrets", nil)
+	var listPayload struct {
+		Secrets []keyring.SecretMeta `json:"secrets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	resp.Body.Close()
+	if len(listPayload.Secrets) != 0 {
+		t.Fatalf("a failed update created %d secret(s), want 0", len(listPayload.Secrets))
+	}
+}
+
+// The update route is authenticated like the rest of the secrets API.
+func TestSecretsAPI_UpdateRequiresAuth(t *testing.T) {
+	ts := newSecretsTestServer(t)
+
+	req, err := http.NewRequest(http.MethodPut, ts.server.URL+"/api/v1/secrets/openai.api_key",
+		bytes.NewReader([]byte(`{"description":"x"}`)))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated update status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+	}
+}

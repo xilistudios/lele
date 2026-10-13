@@ -187,6 +187,7 @@ export const endpoints = {
   secrets: {
     list: '/api/v1/secrets',
     create: '/api/v1/secrets',
+    update: (name: string) => `/api/v1/secrets/${encodeURIComponent(name)}`,
     get: (name: string) => `/api/v1/secrets/${encodeURIComponent(name)}`,
     remove: (name: string) => `/api/v1/secrets/${encodeURIComponent(name)}`,
     status: '/api/v1/secrets/status',
