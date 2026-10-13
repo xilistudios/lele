@@ -298,3 +298,126 @@ func TestEvictImageContent_MissingSessionIsNoop(t *testing.T) {
 		t.Fatalf("missing session: got (%d, %v), want (0, nil)", n, err)
 	}
 }
+
+// TestEvictImageContent_PersistsMediaOnlyEviction pins the DURABLE half of the
+// Message.Media carrier (the asymmetry commit 5388100 removed): a session
+// whose only heavy payloads are Media "data:" entries — no ContentParts at
+// all — must lose the blobs on disk, not just in memory.
+//
+// Why this test exists: the media-only durability chain (the before/after
+// LiveMultimodalParts diff over BOTH carriers in reduceImageContentUnlocked →
+// markModified → incremental Save → row bytes) was proven in the round-2
+// re-review only by a throw-away probe. Every shipped fixture in this file is
+// ContentParts-only (evictImg builds ContentParts), so mutation S1 —
+// markModified made blind to a message with no ContentParts
+// (pkg/session/context.go, `if before != after`) — left every test green while
+// a media-only eviction silently stopped being persisted. That is exactly the
+// regression 5388100 exists to prevent, one carrier over.
+func TestEvictImageContent_PersistsMediaOnlyEviction(t *testing.T) {
+	st := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetSessionRepo(st.Sessions())
+
+	key := "native:evict-media-only"
+	const placeholder = "[image omitted from context]"
+	blobM := strings.Repeat("M", 1024)
+	blobN := strings.Repeat("N", 1024)
+	mediaM := "data:image/png;base64," + blobM
+	mediaN := "data:image/png;base64," + blobN
+
+	msgs := []providers.Message{
+		// 0: the media-only message case: empty Content, NO ContentParts at
+		// all, a single heavy Media entry → after eviction the placeholder
+		// part must be injected (a message may never end up with empty
+		// Content, zero parts and zero media).
+		{Role: "user", Content: "", Media: []string{mediaM}},
+		// 1: a heavy entry plus a surviving path-only entry: the path is tiny
+		// and never evicted, and its survival keeps the message valid, so NO
+		// placeholder may be written here (the deliberate semantics pinned by
+		// the providers-side test TestReduceImageParts_MediaOnlyMessageStaysValid).
+		{Role: "user", Content: "", Media: []string{mediaN, "/tmp/keep.jpg"}},
+		// 2: text-only tail, must never change.
+		{Role: "user", Content: "text-only tail"},
+	}
+	for _, m := range msgs {
+		sm.AddFullMessage(key, m)
+	}
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+
+	// Pin the durable pre-state: both blobs (and the surviving path) are on
+	// disk before the eviction runs.
+	rowsBefore := evictRowJSONs(t, st.Sessions(), key)
+	if len(rowsBefore) != len(msgs) {
+		t.Fatalf("seeded rows = %d, want %d", len(rowsBefore), len(msgs))
+	}
+	evictAssertRowState(t, rowsBefore, 0, []string{mediaM}, nil)
+	evictAssertRowState(t, rowsBefore, 1, []string{mediaN, `"/tmp/keep.jpg"]}`}, nil)
+	evictAssertRowState(t, rowsBefore, 2, []string{"text-only tail"}, nil)
+	// Fixture shape for the PR body (visible with -v only).
+	t.Logf("fixture row 0: %s", rowsBefore[0])
+	t.Logf("fixture row 1: %s", rowsBefore[1])
+
+	n, err := sm.EvictImageContent(key, 0)
+	if err != nil {
+		t.Fatalf("EvictImageContent: %v", err)
+	}
+	// keepLast=0 evicts every heavy payload: one Media entry in message 0 and
+	// one in message 1 (the path-only entry is not heavy and is kept).
+	if n != 2 {
+		t.Fatalf("evicted = %d, want 2 (one heavy Media entry per message: row 0, row 1)", n)
+	}
+
+	// Durable post-state, read straight from the store (row bytes, not a
+	// reload: content_parts and media both fail the round-trip through
+	// Message.MarshalJSON/UnmarshalJSON on this base, see evictRowJSONs).
+	rowsAfter := evictRowJSONs(t, st.Sessions(), key)
+	if len(rowsAfter) != len(msgs) {
+		t.Fatalf("persisted rows = %d, want %d", len(rowsAfter), len(msgs))
+	}
+	// Row 0: blob gone, the carrier itself empty, the placeholder on disk.
+	evictAssertRowState(t, rowsAfter, 0,
+		[]string{placeholder},
+		[]string{blobM, `"media"`})
+	// Row 1: blob gone, the path entry survived IN the Media carrier, and no
+	// placeholder was written.
+	evictAssertRowState(t, rowsAfter, 1,
+		[]string{`media":["/tmp/keep.jpg"`},
+		[]string{blobN, placeholder})
+	// Row 2: byte-identical — a rewrite must not touch uninvolved rows beyond
+	// re-serialising them exactly.
+	if rowsAfter[2] != rowsBefore[2] {
+		t.Errorf("row 2 (text-only tail) was not byte-identical:\n before=%s\n after =%s",
+			rowsBefore[2], rowsAfter[2])
+	}
+	t.Logf("evicted row 0: %s", rowsAfter[0])
+	t.Logf("evicted row 1: %s", rowsAfter[1])
+
+	// In-memory state on the live manager, right after the rewrite.
+	hist := sm.GetHistory(key)
+	if len(hist) != len(msgs) {
+		t.Fatalf("history len = %d, want %d (eviction must not delete messages)", len(hist), len(msgs))
+	}
+	if count, _ := providers.LiveMultimodalParts(hist); count != 0 {
+		t.Errorf("live heavy payloads = %d, want 0", count)
+	}
+	if !reflect.DeepEqual(hist[1].Media, []string{"/tmp/keep.jpg"}) {
+		t.Errorf("message 1 Media = %v, want [/tmp/keep.jpg]", hist[1].Media)
+	}
+	if len(hist[0].Media) != 0 {
+		t.Errorf("message 0 Media = %v, want empty", hist[0].Media)
+	}
+	if got := hist[0].ContentParts; len(got) != 1 || got[0].Type != "text" || got[0].Text != placeholder {
+		t.Errorf("message 0 parts = %+v, want single placeholder text part", got)
+	}
+	if hist[0].Content != "" {
+		t.Errorf("message 0 Content = %q, want empty", hist[0].Content)
+	}
+	if got := hist[1].ContentParts; len(got) != 0 {
+		t.Errorf("message 1 parts = %+v, want none (the surviving path entry keeps the message valid)", got)
+	}
+	if hist[2].Content != msgs[2].Content || hist[2].Role != msgs[2].Role {
+		t.Errorf("message 2 = %+v, want unchanged %+v", hist[2], msgs[2])
+	}
+}

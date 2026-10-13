@@ -371,3 +371,208 @@ func TestExecuteWithRetry_TextOverflowStillSummarizesUnchanged(t *testing.T) {
 		}
 	}
 }
+
+// mediaRecoveryHasEntry reports whether any message in msgs carries the exact
+// Media entry (raw string scan, carrier by carrier — deliberately not via
+// LiveMultimodalParts, which would also count ContentParts).
+func mediaRecoveryHasEntry(msgs []providers.Message, entry string) bool {
+	for _, m := range msgs {
+		for _, e := range m.Media {
+			if e == entry {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestExecuteWithRetry_SizeRejectionEvictsMediaCarriedImage pins the reactive
+// escalation for the SECOND carrier: the oversized request's heavy payload
+// travels in Message.Media (a "data:image/…" entry), not in ContentParts —
+// the exact shape commit 5388100 exists for, and the only shape the shipped
+// tests used to cover from pkg/providers alone (round-2 review, N2).
+//
+// Three properties are pinned together, across the boundary:
+//  1. the rejected request really carried the Media payload (anti-vacuity);
+//  2. the retried request carries no heavy payload in EITHER carrier and the
+//     user text survives;
+//  3. the recovery costs zero summarization calls (a media eviction must
+//     never pay for an LLM call);
+//  4. the rewrite is durable: the stored row bytes lose the base64 blob
+//     (row bytes, not a reload — Message.MarshalJSON/UnmarshalJSON drop the
+//     media/content_parts round-trip on this base, see pkg/session tests) and
+//     the live session holds no heavy payload anymore.
+//
+// Vision/strip check: this fixture's model is NOT resolved as vision-capable
+// (ProviderModelConfig.Vision is unset for test-provider:test-model, so
+// getSupportsImages → false), but that cannot make the test vacuous:
+// stripContentParts only drops image_url/video_url ContentParts and never
+// reads Message.Media, and it runs in runLLMIteration (before executeWithRetry)
+// and per fallback candidate — neither of which this test enters, since it
+// calls executeWithRetry directly with no fallback candidates. The guard in
+// assertion 1 proves it empirically: the raw data: URL reached the provider.
+func TestExecuteWithRetry_SizeRejectionEvictsMediaCarriedImage(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+	st, err := store.Open(filepath.Join(t.TempDir(), "sessions.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	sm := session.NewSessionManager()
+	sm.SetSessionRepo(st.Sessions())
+	agent.Sessions = sm
+
+	sessionKey := "test-session-media-carried"
+	blob := strings.Repeat("B", 300*1024)
+	imageURL := "data:image/png;base64," + blob
+	messages := []providers.Message{
+		{Role: "user", Content: "here is the screenshot"},
+		// The media-only message case: no Content, no ContentParts, the whole
+		// payload in Message.Media.
+		{Role: "user", Media: []string{imageURL}},
+	}
+	for _, m := range messages {
+		sm.AddFullMessage(sessionKey, m)
+	}
+	// Persist the seeded rows first: only then does the escalation's Save take
+	// the incremental (markModified-driven UPDATE) path — a never-persisted
+	// session would be full-rewritten by any Save and would not prove that
+	// markModified reached SQLite.
+	if err := sm.Save(sessionKey); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+	// Durable pre-state: the blob really is on disk before the recovery.
+	rowsBefore, rErr := st.Sessions().LoadMessagesFromSeq(sessionKey, 0)
+	if rErr != nil {
+		t.Fatalf("LoadMessagesFromSeq (pre-state): %v", rErr)
+	}
+	if len(rowsBefore) != len(messages) {
+		t.Fatalf("seeded rows = %d, want %d", len(rowsBefore), len(messages))
+	}
+	if !strings.Contains(rowsBefore[1], blob) {
+		t.Fatalf("harness: seeded row 1 does not carry the blob: %.120s...", rowsBefore[1])
+	}
+	// Fixture shape for the PR body (visible with -v only; blob truncated).
+	t.Logf("fixture row 1: %.100s...", rowsBefore[1])
+
+	rejection := mediaRecoverySizeRejection()
+	var received [][]providers.Message
+	agent.Provider = mediaRecoveryScriptedProvider(rejection, &received)
+	summarizer := &mediaRecoveryMockSessionManager{}
+	al.sessionManager = summarizer
+
+	caller := newLLMCaller(al)
+	_, outMsgs, err := caller.executeWithRetry(llmCallOptions{
+		ctx:        context.Background(),
+		agent:      agent,
+		toolDefs:   []providers.ToolDefinition{},
+		model:      "test-model",
+		sessionKey: sessionKey,
+		channel:    "test-channel",
+		chatID:     "test-chat",
+	}, messages)
+	if err != nil {
+		t.Fatalf("executeWithRetry: %v", err)
+	}
+	if len(received) != 2 {
+		t.Fatalf("provider calls = %d, want exactly 2 (evict, then retry)", len(received))
+	}
+
+	// 1. Anti-vacuity: the rejected request DID carry the Media payload,
+	//    counted by the same predicate the evictor and estimator use, and
+	//    present verbatim in the messages the provider received.
+	if count, size := providers.LiveMultimodalParts(received[0]); count != 1 || size != len(imageURL) {
+		t.Fatalf("first request heavy payloads = (%d, %d), want (1, %d): the Media fixture never reached the provider",
+			count, size, len(imageURL))
+	}
+	if !mediaRecoveryHasEntry(received[0], imageURL) {
+		t.Fatalf("first request does not carry the raw data: URL in Message.Media: %+v", received[0])
+	}
+
+	// 2. The retried request carries no heavy payload in EITHER carrier ...
+	if count, size := providers.LiveMultimodalParts(received[1]); count != 0 || size != 0 {
+		t.Errorf("retried request heavy payloads = (%d, %d), want (0, 0)", count, size)
+	}
+	if count, size := providers.LiveMultimodalParts(outMsgs); count != 0 || size != 0 {
+		t.Errorf("returned messages heavy payloads = (%d, %d), want (0, 0)", count, size)
+	}
+	// ... a raw scan confirms no data: entry survived in either carrier ...
+	for i, m := range received[1] {
+		for _, e := range m.Media {
+			if strings.HasPrefix(e, "data:") {
+				t.Errorf("retried request message %d still carries heavy Media entry %.60q...", i, e)
+			}
+		}
+		for _, part := range m.ContentParts {
+			if part.ImageURL != nil && strings.HasPrefix(part.ImageURL.URL, "data:") {
+				t.Errorf("retried request message %d still carries a heavy image_url part", i)
+			}
+			if part.VideoURL != nil && strings.HasPrefix(part.VideoURL.URL, "data:") {
+				t.Errorf("retried request message %d still carries a heavy video_url part", i)
+			}
+		}
+	}
+	// ... the media-only message got the placeholder (it may not end up with
+	// empty Content, no parts and no media), and the user text is intact.
+	placeholderFound := false
+	textFound := false
+	for _, m := range received[1] {
+		if strings.Contains(m.Content, "here is the screenshot") {
+			textFound = true
+		}
+		for _, part := range m.ContentParts {
+			if part.Type == "text" && part.Text == mediaRecoveryPlaceholder {
+				placeholderFound = true
+			}
+		}
+	}
+	if !placeholderFound {
+		t.Errorf("retried request carries no %q placeholder for the media-only message", mediaRecoveryPlaceholder)
+	}
+	if !textFound {
+		t.Errorf("retried request lost the user text %q", "here is the screenshot")
+	}
+
+	// 3. The escalation must never pay for a summarization call when media
+	//    can be evicted — that is the whole point of the reactive path.
+	if summarizer.summarizeCalls != 0 {
+		t.Errorf("summarizer calls = %d, want 0 (media eviction must never cost an LLM call)", summarizer.summarizeCalls)
+	}
+
+	// 4. Durable half: the live session and the stored rows both lost the
+	//    blob. (In-memory checks are not proof on their own — ReduceImageParts
+	//    works on a copy — so the row bytes below are what pins the
+	//    de-poisoning of the next turn.)
+	hist := sm.GetHistory(sessionKey)
+	if len(hist) != len(messages) {
+		t.Fatalf("history len = %d, want %d (eviction must not delete messages)", len(hist), len(messages))
+	}
+	if count, _ := providers.LiveMultimodalParts(hist); count != 0 {
+		t.Errorf("live session history heavy payloads = %d, want 0", count)
+	}
+	if len(hist[1].Media) != 0 {
+		t.Errorf("live session message Media = %v, want empty", hist[1].Media)
+	}
+	rows, rErr := st.Sessions().LoadMessagesFromSeq(sessionKey, 0)
+	if rErr != nil {
+		t.Fatalf("LoadMessagesFromSeq: %v", rErr)
+	}
+	if len(rows) != len(messages) {
+		t.Fatalf("persisted rows = %d, want %d", len(rows), len(messages))
+	}
+	for i, row := range rows {
+		if strings.Contains(row, blob) {
+			t.Errorf("row %d still carries the base64 blob after media recovery", i)
+		}
+	}
+	if strings.Contains(rows[1], `"media"`) {
+		t.Errorf("row 1 still carries a media field after recovery: %.120s...", rows[1])
+	}
+	if !strings.Contains(rows[1], mediaRecoveryPlaceholder) {
+		t.Errorf("row 1 does not carry the %q placeholder: %.120s...", mediaRecoveryPlaceholder, rows[1])
+	}
+	t.Logf("recovered row 1: %s", rows[1])
+}
