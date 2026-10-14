@@ -1200,9 +1200,18 @@ func TestMCPAuthParseInput_MatchesTheEngineGrammar(t *testing.T) {
 		{name: "two tokens, one invalid", paste: "abc! xyz", wantErr: mcp.ErrAuthPasteUnrecognized},
 		{name: "parameter-shaped garbage", paste: "foo=bar", wantErr: mcp.ErrAuthPasteUnrecognized},
 		{name: "malformed query", paste: "code=%zz", wantErr: mcp.ErrAuthPasteUnrecognized},
+		// A malformed percent-escape makes the engine refuse the CHOSEN
+		// substring outright (authPasteBytesRefused) before it ever asks
+		// whether a code is present: `…?code=%zz` is "a query the client will
+		// not decode at all", not "a query that carries no code". The malformed
+		// escape is a property of the whole query, so it stays unrecognized even
+		// inside a redirect URL. NB this row and the no-code rows below BOTH
+		// render as tui.mcpAuthBadInput, so only the sentinel (this field)
+		// distinguishes them — the rendered sentence alone would leave this row
+		// "right for the wrong reason".
+		{name: "malformed query in a redirect", paste: "http://127.0.0.1:8080/callback?code=%zz", wantErr: mcp.ErrAuthPasteUnrecognized},
 		{name: "paste over the input bound", paste: strings.Repeat("a", 8200), wantErr: mcp.ErrAuthPasteUnrecognized},
 		// ── refused: a response arrived, but carries no code ──
-		{name: "malformed query in a redirect", paste: "http://127.0.0.1:8080/callback?code=%zz", wantErr: mcp.ErrAuthPasteNoCode},
 		{name: "redirect without a code", paste: "http://127.0.0.1:8080/callback?state=only", wantErr: mcp.ErrAuthPasteNoCode},
 		{name: "empty code parameter", paste: "http://127.0.0.1:8080/callback?code=", wantErr: mcp.ErrAuthPasteNoCode},
 		{name: "state-only parameter", paste: "state=xyz", wantErr: mcp.ErrAuthPasteNoCode},

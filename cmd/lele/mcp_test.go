@@ -189,6 +189,19 @@ func TestMCPHelp_ContainsCommands(t *testing.T) {
 			t.Errorf("mcpHelp should document %q:\n%s", sub, out)
 		}
 	}
+	// The OAuth surface a headless operator reads first: the two markers the
+	// list row speaks, the one paste rule (the shared engine helper, not a
+	// private copy) and the escape hatch of a prompt that keeps asking.
+	for _, want := range []string{
+		mcpAuthMarkerRequired,
+		mcpAuthMarkerAuthenticated,
+		"pkg/mcp.ParseAuthPaste",
+		`:q"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("mcpHelp should mention %q:\n%s", want, out)
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -827,6 +840,112 @@ func TestMCPShow_AuthBlockVerdict(t *testing.T) {
 	}
 	if strings.Contains(after, "stored-token") {
 		t.Fatalf("the stored token reached the show output:\n%s", after)
+	}
+}
+
+// TestMCPAuthVerdict_StoredCredentialBeatsNoRequirement pins the ONE render
+// rule at BOTH CLI sites — the `list` marker and the `show` verdict — against
+// the rule the TUI's suffix and the WebUI's chip apply:
+//
+//	authenticated ⇒ show authenticated; else required ⇒ show needs-auth;
+//	else nothing
+//
+// Authenticated is tested FIRST because that is what mcp.CheckAuth means by it
+// ("a usable credential exists, no sign-in is needed") and because the two
+// flags are ORTHOGONAL: pkg/mcp documents a stored credential on an entry whose
+// AuthRequired is false, and both other surfaces render that verdict as
+// authenticated. Keying on `!Required` first rendered NOTHING in `list` and
+// `auth state: (none)` in `show` for a server whose credential the store
+// really holds — the CLI answering a different question than the other two
+// surfaces for the very same DTO.
+func TestMCPAuthVerdict_StoredCredentialBeatsNoRequirement(t *testing.T) {
+	e := newMCPTestEnv(t)
+	url := "https://mcp.example.com/mcp"
+	// A header-carried entry with no auth block and no recorded 401: the store
+	// is the ONLY auth fact, so CheckAuth answers Required:false with a token
+	// present (Method "headers").
+	writeMCPTestFile(t, e.globalFile(), fmt.Sprintf(
+		`{"mcpServers":{"alpha":{"url":%q,"type":"http","headers":{"Accept":"application/json"}}}}`, url))
+
+	store := mcp.NewAuthStore(e.leleDir)
+	if err := store.TokenStore("alpha", url).SaveToken(context.Background(),
+		&transport.Token{AccessToken: "stored-token", TokenType: "Bearer"}); err != nil {
+		t.Fatalf("seed token: %v", err)
+	}
+
+	// The fixture must actually be the disputed shape, or the test would prove
+	// nothing: ask CheckAuth, the one source both sites read.
+	disc, err := mcp.Discover(e.paths())
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	srv, ok := disc.Servers["alpha"]
+	if !ok {
+		t.Fatalf("alpha is not discoverable: %+v", disc.Servers)
+	}
+	st := mcp.CheckAuth(store, "alpha", srv)
+	if st.Required || !st.Authenticated {
+		t.Fatalf("fixture verdict = %+v, want {Required:false Authenticated:true}", st)
+	}
+
+	// The rule itself, both helpers, all three branches.
+	rule := []struct {
+		name string
+		st   mcp.AuthStatus
+		mark string
+		show string
+	}{
+		{"stored credential, no requirement", mcp.AuthStatus{Authenticated: true, Method: "headers"}, mcpAuthMarkerAuthenticated, mcpAuthMarkerAuthenticated},
+		{"login owed", mcp.AuthStatus{Required: true, Method: "oauth"}, mcpAuthMarkerRequired, mcpAuthMarkerRequired},
+		{"nothing to say", mcp.AuthStatus{Method: "headers"}, "", "(none)"},
+	}
+	for _, tc := range rule {
+		if got := mcpAuthMarker(tc.st); got != tc.mark {
+			t.Errorf("mcpAuthMarker(%s) = %q, want %q", tc.name, got, tc.mark)
+		}
+		if got := mcpAuthStateLabel(tc.st); got != tc.show {
+			t.Errorf("mcpAuthStateLabel(%s) = %q, want %q", tc.name, got, tc.show)
+		}
+	}
+
+	// `list`: the row must carry the trailing marker, exactly like the TUI and
+	// the WebUI do for this DTO.
+	out, code := runMCPSub(t, runMCPList)
+	if code != 0 {
+		t.Fatalf("list exit = %d:\n%s", code, out)
+	}
+	var row string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(strings.TrimLeft(l, "●○!⊘ "), "alpha ") {
+			row = l
+		}
+	}
+	if row == "" {
+		t.Fatalf("no `list` row for alpha:\n%s", out)
+	}
+	if !strings.HasSuffix(row, " "+mcpAuthMarkerAuthenticated) {
+		t.Errorf("a stored credential must render %s even with no declared requirement: %q", mcpAuthMarkerAuthenticated, row)
+	}
+	if strings.Contains(row, mcpAuthMarkerRequired) {
+		t.Errorf("a signed-in row still advertises %s: %q", mcpAuthMarkerRequired, row)
+	}
+
+	// `show`: the verdict line must say the same thing, not (none).
+	page, code := runMCPSub(t, runMCPShow, "alpha")
+	if code != 0 {
+		t.Fatalf("show exit = %d:\n%s", code, page)
+	}
+	if !strings.Contains(page, "auth state:  "+mcpAuthMarkerAuthenticated) {
+		t.Errorf("`show` must report the stored credential as signed in:\n%s", page)
+	}
+	if strings.Contains(page, "auth state:  (none)") {
+		t.Errorf("`show` reports (none) for a server whose credential is stored:\n%s", page)
+	}
+	if !strings.Contains(page, "auth method: headers") {
+		t.Errorf("the method line must name the carrier:\n%s", page)
+	}
+	if strings.Contains(page, "stored-token") {
+		t.Fatalf("the stored token reached the show output:\n%s", page)
 	}
 }
 
@@ -2843,8 +2962,15 @@ func TestMCPAuth_ManualQuitTerminates(t *testing.T) {
 	if code != mcpAuthExitFailure {
 		t.Fatalf("quit exit = %d, want %d:\n%s", code, mcpAuthExitFailure, out)
 	}
-	if !strings.Contains(out, "authorization canceled") {
-		t.Errorf("a quit must be reported as a cancellation:\n%s", out)
+	// The exact sentence, not just the word: the flow is released by the
+	// deferred Cancel (asserted below), so the message must NOT claim it was
+	// left open, and it must name the command that starts a new flow.
+	want := "✗ authorization canceled — nothing was submitted; the flow is abandoned, and 'lele mcp auth api' starts a new one"
+	if !strings.Contains(out, want) {
+		t.Errorf("the quit line must read %q:\n%s", want, out)
+	}
+	if strings.Contains(out, "left open") {
+		t.Errorf("a quit releases the flow (Cancel ran), so it must not claim it was left open:\n%s", out)
 	}
 	if len(flow.submitted) != 0 {
 		t.Errorf("a quit input was submitted: %v", flow.submitted)
@@ -2938,7 +3064,6 @@ func TestMCPAuth_ManualMatchesEnginePasteGrammar(t *testing.T) {
 		"http://127.0.0.1:37401/cb?error=access_denied&code=abc",
 	}
 	for i, in := range inputs {
-		in := in
 		t.Run(fmt.Sprintf("case_%02d", i), func(t *testing.T) {
 			wantCode, wantState, wantErr := mcp.ParseAuthPaste(in)
 
@@ -2961,6 +3086,190 @@ func TestMCPAuth_ManualMatchesEnginePasteGrammar(t *testing.T) {
 			}
 			if len(flow.submitted) != 1 || flow.submitted[0] != [2]string{wantCode, wantState} {
 				t.Fatalf("engine says (%q, %q) for %q, CLI submitted %v", wantCode, wantState, in, flow.submitted)
+			}
+		})
+	}
+}
+
+// TestMCPAuth_ManualPasteGrammarLiteralRows is the INDEPENDENT half of the
+// paste-grammar pair kept in this file. Its sibling,
+// TestMCPAuth_ManualMatchesEnginePasteGrammar, derives its expectations from
+// mcp.ParseAuthPaste itself, so it proves the CLI submits and refuses exactly
+// what the engine answered — but it stays GREEN through a regression INSIDE the
+// engine's paste rules, because both sides of that assertion move together. A
+// reviewer's mutation test proved the gap: narrowing the engine's query
+// pre-check to "the chosen substring only" fails the pkg/mcp and pkg/tui tables
+// and left this package green.
+//
+// This test closes it. Every row below carries a HARD-CODED verdict taken from
+// the frozen grammar (.lele/tasks/mcp-oauth-paste-grammar.md) — the expected
+// pair is never computed by calling mcp.ParseAuthPaste — so a mutation anywhere
+// on the path (a rule inside ParseAuthPaste, or the CLI's mapping of an outcome
+// to a sentence) turns it red.
+//
+// It goes through the SAME path as the sibling and as the neighbouring manual
+// tests: --manual over the fake flow (fakeMCPAuthFlow), through the substituted
+// startMCPAuthFlow seam, with a strings.Reader for stdin. No network, no
+// terminal (the fake flow never dials anything).
+//
+// The sentences are the CLI's own, and two of them are REUSED rather than
+// retyped: errMCPAuthBadInput is the ONE sentence the CLI prints for both
+// engine outcomes that carry no usable code (`unrecognized` and `no-code` share
+// it on purpose — see mcpAuthPasteError), and the success line is shared with
+// the loopback path.
+func TestMCPAuth_ManualPasteGrammarLiteralRows(t *testing.T) {
+	// The verdicts a row may carry: submitted, or one of the two engine
+	// refusals the CLI maps to its single "no usable code" sentence.
+	const (
+		pasteSubmitted    = "submitted"    // ok(code, state) ⇒ Submit
+		pasteUnrecognized = "unrecognized" // ErrAuthPasteUnrecognized ⇒ refused
+		pasteNoCode       = "no-code"      // ErrAuthPasteNoCode ⇒ refused
+	)
+	// The engine's input bound is 8192 bytes (authPasteMaxInputLen, unexported):
+	// exactly 8192 is still a paste, 8193 is refused. It is a BYTE bound.
+	const inputBound = 8192
+	longCode := strings.Repeat("a", inputBound)
+
+	tests := []struct {
+		name string
+		in   string
+		kind string
+		// want is the (code, state) pair Submit must receive. It is the zero
+		// value on every refusal, because the engine answers ("", "") with every
+		// error and nothing may be submitted.
+		want [2]string
+	}{
+		{
+			name: "01 query string",
+			in:   "?code=abc&state=xyz",
+			kind: pasteSubmitted,
+			want: [2]string{"abc", "xyz"},
+		},
+		{
+			// The query carries no code/error, so the FRAGMENT is the chosen
+			// substring: the answer is code=abc and NO state — the query's own
+			// `state=xyz` is consulted only to decide the fallback, and is then
+			// discarded with the rest of the unused query.
+			name: "02 fragment chosen, state comes from the fragment only",
+			in:   "http://127.0.0.1:37401/cb?state=xyz#code=abc",
+			kind: pasteSubmitted,
+			want: [2]string{"abc", ""},
+		},
+		{
+			// THE regression row: the query is scanned ALWAYS, even though the
+			// fragment is what ends up being used. A malformed escape in the
+			// unused query is still a refusal — deciding otherwise would be a
+			// different answer per decoder language.
+			name: "03 malformed escape in the query, fragment would be chosen",
+			in:   "http://127.0.0.1:37401/cb?state=%zz#code=abc",
+			kind: pasteUnrecognized,
+		},
+		{
+			name: "04 trailing percent in the query",
+			in:   "http://127.0.0.1:37401/cb?code=abc%#code=xyz",
+			kind: pasteUnrecognized,
+		},
+		{
+			// The CHOSEN fragment is scanned too.
+			name: "05 malformed escape in the chosen fragment",
+			in:   "http://127.0.0.1:37401/cb?state=x#code=%zz",
+			kind: pasteUnrecognized,
+		},
+		{
+			name: "06 percent-decoded code",
+			in:   "http://127.0.0.1:37401/cb?code=a%2Bb",
+			kind: pasteSubmitted,
+			want: [2]string{"a+b", ""},
+		},
+		{
+			name: "07 plus decodes to a space",
+			in:   "http://127.0.0.1:37401/cb?code=a+b",
+			kind: pasteSubmitted,
+			want: [2]string{"a b", ""},
+		},
+		{
+			// A URL that ARRIVED without a code: the engine's `no-code`, which
+			// the CLI deliberately words exactly like `unrecognized`.
+			name: "08 empty code parameter",
+			in:   "http://127.0.0.1:37401/cb?code=",
+			kind: pasteNoCode,
+		},
+		{
+			name: "09 bound: exactly 8192 bytes is still a paste",
+			in:   longCode,
+			kind: pasteSubmitted,
+			want: [2]string{longCode, ""},
+		},
+		{
+			name: "10 bound: one byte over is refused",
+			in:   strings.Repeat("a", inputBound+1),
+			kind: pasteUnrecognized,
+		},
+		{
+			// The CHOSEN fragment is scanned for malformed escapes — the same
+			// rule row 05 states, pinned here in a form a mutation can see. The
+			// fragment below carries a VALID code, so an engine that dropped its
+			// fragment pre-check would not refuse it: Go's ParseQuery drops only
+			// the bad `state` pair and keeps `code=abc`, and the paste would be
+			// ACCEPTED and submitted. Row 05 cannot see that regression — its
+			// fragment carries no usable code either way, so the engine answers
+			// `unrecognized` (with the check) or the CLI-equivalent `no-code`
+			// (without it), and this CLI renders and exits identically for both.
+			// Here the difference is visible: refused (unrecognized) versus
+			// submitted `abc`.
+			name: "11 malformed escape in the chosen fragment, valid code",
+			in:   "http://127.0.0.1:37401/cb?state=x#code=abc&state=%zz",
+			kind: pasteUnrecognized,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newMCPTestEnv(t)
+			seedMCPRemoteAuthServer(t, e, "api", "https://mcp.example.com/mcp")
+			withMCPAuthInput(t, tt.in)
+			flow := &fakeMCPAuthFlow{url: "https://as.example/authorize?state=st-1"}
+			installMCPAuthSeam(t, flow, nil)
+
+			out, code := runMCPSub(t, runMCPAuth, "api", "--manual")
+
+			// Every --manual exit path releases the flow (the deferred Cancel),
+			// refusals included: the loop re-prompts after a refusal and then
+			// hits EOF, which is still an exit through the same defer.
+			if flow.cancels != 1 {
+				t.Errorf("Cancel calls = %d, want 1 (no path may leak a flow):\n%s", flow.cancels, out)
+			}
+
+			if tt.kind == pasteSubmitted {
+				if code != 0 {
+					t.Fatalf("exit = %d, want 0 for %q:\n%s", code, tt.in, out)
+				}
+				if len(flow.submitted) != 1 {
+					t.Fatalf("Submit called %d time(s), want 1 (%v)", len(flow.submitted), flow.submitted)
+				}
+				if flow.submitted[0] != tt.want {
+					t.Errorf("Submit got %v, want %v for %q", flow.submitted[0], tt.want, tt.in)
+				}
+				if !strings.Contains(out, `✓ "api" authenticated; the gateway picks it up on the next reload`) {
+					t.Errorf("missing the success line:\n%s", out)
+				}
+				return
+			}
+
+			// A refused row submits NOTHING and says so with the CLI's shared
+			// sentence: `unrecognized` and `no-code` are distinct outcomes in
+			// the engine but one sentence here, by design.
+			if code != mcpAuthExitFailure {
+				t.Fatalf("refusal exit = %d, want %d for %q:\n%s", code, mcpAuthExitFailure, tt.in, out)
+			}
+			if len(flow.submitted) != 0 {
+				t.Fatalf("the CLI submitted %v for %q, want nothing (verdict %s)", flow.submitted, tt.in, tt.kind)
+			}
+			if !strings.Contains(out, errMCPAuthBadInput.Error()) {
+				t.Errorf("want the shared refusal sentence %q in:\n%s", errMCPAuthBadInput.Error(), out)
+			}
+			if strings.Contains(out, "✓") {
+				t.Errorf("a refusal reported success:\n%s", out)
 			}
 		})
 	}
@@ -3438,6 +3747,10 @@ func TestMCPDocs_AuthSurface(t *testing.T) {
 		mcpAuthMarkerAuthenticated,
 		"auth state:",
 		"auth method:",
+		// The ONE render rule's precedence (V4), stated at BOTH doc sites: a
+		// stored credential is reported as authenticated even when the entry
+		// declares no requirement, whose verdict is what the store holds.
+		"even when the entry declares no requirement",
 		// The declared auth block, keys-side only.
 		"auth:",
 		"scopes:",
@@ -3447,15 +3760,31 @@ func TestMCPDocs_AuthSurface(t *testing.T) {
 		"bare authorization code",
 		"two whitespace-separated tokens",
 		"#fragment",
+		// The discovery path the probe documents (C2's mitigation).
+		"authentication required",
 		// The --manual loop's exit paths.
 		":q",
 		"no input on stdin",
 		"too many refused pastes",
 		"same PKCE verifier",
+		// ... and the loop SHAPE (V8): one line PER ATTEMPT, the prompt that
+		// is repeated for every attempt (pinned by value, so it stays
+		// byte-identical to what the CLI prints), and the attempt bound.
+		"read **one pasted line per attempt** from stdin",
+		mcpAuthManualPrompt,
+		"bound of 10 attempts",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("docs/mcp.md no longer documents %q", want)
 		}
+	}
+
+	// The precedence must be stated at BOTH sites the rule governs — the
+	// `list` marker paragraph and the `show` verdict one — so neither reader
+	// can come away with the retired `!Required`-first order.
+	const precedence = "even when the entry declares no requirement"
+	if got := strings.Count(text, precedence); got < 2 {
+		t.Errorf("docs/mcp.md states %q %d time(s), want 2: the `list` paragraph and the `show` paragraph must both carry the rule", precedence, got)
 	}
 }
 

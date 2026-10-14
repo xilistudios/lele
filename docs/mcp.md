@@ -338,15 +338,17 @@ line and the per-layer file table follow the rows; discovery warnings are
 printed as `⊘ warning: …`. With no servers, the command prints
 `No MCP servers configured.`, a `lele mcp add …` hint and the global file path.
 
-A row ends with an **auth marker** when the server's OAuth 2.1 state requires
-action — `[needs auth]` until a credential is stored for that server,
-`[authenticated]` once it is (the TUI's `mcpAuthRequired` / `mcpAuthOK` and the
-WebUI's `auth.required` / `auth.authenticated` render the same two words, so all
-three surfaces speak one vocabulary). The marker is **appended** after the
-description, so the rest of the row keeps its shape; a server that needs no
-login, and any entry discovery does not report (disabled, invalid), carries no
-marker at all. With no lele directory there is no store to ask, so no server is
-ever reported as needing a login.
+A row ends with an **auth marker** whenever the server has an OAuth 2.1 answer
+to give — `[authenticated]` as soon as a credential is stored for that server,
+even when the entry declares no requirement, because that verdict is what the
+store holds — `[needs auth]` while a login is owed and none is stored, and no
+marker at all when there is neither. The TUI's
+`mcpAuthRequired` / `mcpAuthOK` and the WebUI's `auth.required` /
+`auth.authenticated` render the same two words under the same precedence, so all
+three surfaces speak one vocabulary. The marker is **appended** after the
+description, so the rest of the row keeps its shape; an entry discovery does not
+report (disabled, invalid) carries no marker at all. With no lele directory
+there is no store to ask, so no server is ever reported as needing a login.
 
 ```console
 $ lele mcp list
@@ -433,12 +435,15 @@ MCP server "issues"
   auth method: oauth
 ```
 
-`auth state:` uses the same two bracket words as `list` (`[needs auth]`,
-`[authenticated]`, or `(none)` when no login is required), and `auth method:`
-names the carrier the engine reports (`oauth`, `headers`, or `(none)`). It is
-shown for any auth-relevant entry — a declared block, a recorded 401, or a
-stored credential — and only when discovery reports the entry, so a disabled or
-invalid copy prints the declared block but no verdict.
+`auth state:` uses the same two bracket words — and therefore the same
+precedence — as the `list` marker: `[authenticated]` once a credential is
+stored (that verdict wins even when the entry declares no requirement),
+`[needs auth]` while a login is owed and none is stored, and `(none)` when
+there is neither. `auth method:` names the carrier the engine reports (`oauth`,
+`headers`, or `(none)`). It is shown for any auth-relevant entry — a declared
+block, a recorded 401, or a stored credential — and only when discovery reports
+the entry, so a disabled or invalid copy prints the declared block but no
+verdict.
 
 ### `lele mcp add`
 
@@ -588,6 +593,11 @@ must be positive).
   one.
 - On success it prints the tool names (first 10, then `+N more`) and, when the
   server reported one, its handshake identity; a failed probe exits 1.
+- A remote server that answers the RFC 9728 challenge is reported as
+  `✗ "…" authentication required — run 'lele mcp auth …'`, which is the probe's
+  way of saying "this one needs a login". That is also the shortest way to
+  discover it for a single server; `lele mcp list` shows the same verdict for
+  every server at once as a trailing `[needs auth]` / `[authenticated]` marker.
 
 ```console
 $ lele mcp test smoke
@@ -612,7 +622,7 @@ loopback listener.
 | Flag | Notes |
 | --- | --- |
 | `--no-browser` | never launch a browser. The URL is still printed — the flag only suppresses the launch. |
-| `--manual` | after printing the URL, read **one line** from stdin and submit the pasted authorization result (see below). A refused paste re-prompts on the **same** flow instead of starting over. |
+| `--manual` | after printing the URL, read **one pasted line per attempt** from stdin and submit the authorization result it carries (see below). A refused paste is reported and asked again on the **same** flow (same URL, same PKCE verifier) instead of starting over; `:q`/`:quit` gives up, end of input ends it, and a bound of 10 attempts caps a piped stdin. |
 | `--timeout <dur>` | how long to wait for the login (Go duration, default `5m`, must be positive). The engine owns the budget and reports its expiry as `authorization timed out`. |
 | `--port <n>` | pin the loopback callback port (default `0` = an ephemeral free port), so a redirect URI registered by hand can be predicted. |
 
@@ -643,8 +653,8 @@ The accepted forms are:
 3. a **bare authorization code** — `SplxlOBeZQQYbYS6WxSbIA`;
 4. **two whitespace-separated tokens** — `<code> <state>`, a terminal
    convenience for authorization servers that print the code and the state on
-   separate lines. The CLI reads one line, so both tokens must be on that one
-   line.
+   separate lines. Each attempt reads **one line**, so both tokens must be on
+   that same line.
 
 A URL whose query carries no `code` falls back to its `#fragment`, so a
 `response_mode=fragment` redirect still works. Anything else is refused with
@@ -660,12 +670,18 @@ terminal. The state is optional: a bare code leaves it empty and the engine take
 the callback's word for it.
 
 A **failed** token exchange does not end the flow — the engine keeps it open and
-retryable — so `--manual` prints the value-free failure and prompts again,
-submitting the next paste on the **same** flow (same authorization URL, same PKCE verifier): mistyping a code costs a retry, not a new login. The loop ends
-when the flow completes, when `:q` or `:quit` is entered (reported as
-`authorization canceled`, nothing submitted), at end of input (`no input on stdin`),
-or after 10 refused pastes (`too many refused pastes`) so a piped stdin with no
-EOF cannot spin. Every failure exits 1.
+retryable — so `--manual` prints the value-free failure and asks again,
+submitting the next paste on the **same** flow (same authorization URL,
+same PKCE verifier): mistyping a code costs a retry, not a new login. Every
+attempt prints the prompt
+(`Paste the authorization code or the full redirect URL, then press ENTER:`) and
+reads **one line**, so the box stays visibly armed while the flow is live. The
+loop ends when the flow completes, when `:q` or `:quit` is entered (reported as
+`authorization canceled`, nothing submitted), at end of input
+(`no input on stdin`), or when the bound of 10 attempts is reached (reported as
+`too many refused pastes`) so a piped stdin without an EOF cannot spin. Quitting
+or reaching the bound abandons the flow — its loopback listener is released —
+and `lele mcp auth <name>` is what starts a new one. Every failure exits 1.
 
 ```console
 $ lele mcp auth issues
@@ -676,6 +692,7 @@ https://as.example.com/authorize?client_id=lele&state=…&code_challenge=…
 $ lele mcp auth issues --manual --no-browser   # paste the code the browser landed on
 Authorization URL — open it in any browser (printed here for headless hosts):
 https://as.example.com/authorize?client_id=lele&state=…&code_challenge=…
+Paste the authorization code or the full redirect URL, then press ENTER:
 http://127.0.0.1:8080/callback?code=SplxlOBeZQQYbYS6WxSbIA&state=…
 ✓ "issues" authenticated; the gateway picks it up on the next reload
 ```

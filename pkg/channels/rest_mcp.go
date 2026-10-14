@@ -198,9 +198,11 @@ type MCPServerSummary struct {
 // evidence: MCP headers are routinely non-credential (Accept, User-Agent,
 // X-Client-Version), so they only report that a CARRIER exists to name — hence
 // Method "headers" with Required still false until a challenge is recorded.
-// Authenticated is true only for OAuth with a usable stored token, and Method
-// is "oauth", "headers" or "".
-// A header-carrying row therefore reports method:"headers" with
+// Authenticated is the STORE's answer — a usable credential recorded for this
+// (name, url) — whatever the carrier, because mcp.CheckAuth is method-agnostic:
+// a "headers" row backed by a stored token reports authenticated:true too.
+// Method is "oauth", "headers" or "".
+// A header-carrying row with NO stored credential reports method:"headers" with
 // authenticated:false (and required:false until a 401 is recorded): the values
 // exist in mcp.json but are never read here, so no surface may claim they are
 // valid.

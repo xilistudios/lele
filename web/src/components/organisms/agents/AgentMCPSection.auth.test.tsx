@@ -119,9 +119,11 @@ const START_RETRY: MCPAuthStart = {
 
 /**
  * Inventory with every shape the auth controls must tell apart:
- * an authenticated oauth server, one that needs a sign-in, one whose ONLY
- * signal is a recorded 401 (method ''), a stdio server (the backend omits
- * `auth` entirely) and a remote server that needs nothing.
+ * an authenticated oauth server, one that stores a token WITHOUT declaring a
+ * requirement (`required: false`, yet a credential is on disk), one that needs
+ * a sign-in, one whose ONLY signal is a recorded 401 (method ''), a stdio
+ * server (the backend omits `auth` entirely) and a remote server that needs
+ * nothing.
  */
 const INVENTORY: MCPInventoryResponse = {
   agent_id: 'coder',
@@ -135,6 +137,19 @@ const INVENTORY: MCPInventoryResponse = {
       server: {
         url: 'https://a.example.com/sse',
         auth: { required: true, authenticated: true, method: 'oauth' },
+      },
+    },
+    {
+      // Stores a token without declaring a requirement: `required` is false
+      // while a credential exists, so the ONLY signal to go on is
+      // `authenticated` (the rule CLI and TUI already pin).
+      name: 'token-stored',
+      layer: 'global',
+      effective: 'enabled',
+      defines: true,
+      server: {
+        url: 'https://e.example.com/sse',
+        auth: { required: false, authenticated: true, method: 'oauth' },
       },
     },
     {
@@ -383,6 +398,22 @@ describe('AgentMCPSection — auth row controls', () => {
     )
     expect(logout.textContent).toBe(tr('mcp.auth.logout'))
     expect(u.byTestId('mcp-auth-start-oauth-done')).toBeNull()
+  })
+
+  test('an authenticated server declaring NO requirement still shows the chip and Sign out', async () => {
+    // `authenticated` wins over `required`: a stored token is offered a way
+    // out even when the entry declares no requirement, and no sign-in is
+    // offered (there is nothing left to sign in to). Keyed on `required`
+    // instead, this row would render no chip and no control at all.
+    const u = await ready(setup())
+    const name = 'token-stored'
+    expect(u.need(`mcp-auth-chip-${name}`).textContent).toBe(tr('mcp.auth.statusAuthenticated'))
+    const logout = u.need(`mcp-auth-logout-${name}`)
+    expect(logout.getAttribute('aria-label')).toBe(tr('mcp.auth.logoutAria', { name }))
+    expect(logout.textContent).toBe(tr('mcp.auth.logout'))
+    // The sign-in is NOT offered for this server (every control is name-scoped
+    // by test id, so this cannot be another row's button).
+    expect(u.byTestId(`mcp-auth-start-${name}`)).toBeNull()
   })
 
   test('a required server offers Authenticate — with or without a declared method', async () => {

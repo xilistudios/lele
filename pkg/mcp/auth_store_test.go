@@ -824,6 +824,130 @@ func TestAuthStoreConcurrentSaveAndRecord(t *testing.T) {
 	}
 }
 
+// TestAuthTokenStoreSaveTokenStoresACopyOfTheCallersToken is the finding-F4 fix
+// guard: SaveToken must persist a COPY of the token it is handed, so that the
+// object the caller keeps mutating afterwards can neither rewrite what was
+// stored nor race the record/revision logic. Every observation below goes
+// through the public surface — this process's AuthStore (Record/Revision), the
+// transport-facing TokenStore (GetToken), a SECOND AuthStore built on the same
+// directory (the other lele process: the TUI and the gateway share a lele dir)
+// and the bytes on disk.
+//
+// Scope note, so nobody mistakes this for a stronger guarantee than it is: with
+// SaveToken storing an alias the test would still pass today, because Save puts
+// the record into a temporary map, marshals it SYNCHRONOUSLY under the mutex
+// and then invalidates the cache — the caller's pointer never reaches the
+// cache, so no reader can observe it (the same negative probe is recorded in
+// TestAuthTokenStoreSaveTokenDoesNotAliasTheCallersToken). What this test pins
+// is the CONTRACT: the moment the store retains a written record (the obvious
+// optimisation: assigning s.servers = servers instead of invalidating) the
+// alias becomes observable, and the copy added in SaveToken is what keeps this
+// test green. It also pins that a nil token clears the stored token instead of
+// panicking on the copy.
+func TestAuthTokenStoreSaveTokenStoresACopyOfTheCallersToken(t *testing.T) {
+	store, path := newAuthTestStore(t)
+	ctx := context.Background()
+
+	// A registration half (everything transport.Token cannot carry) that must
+	// survive the token write.
+	if err := store.Save("srv", AuthRecord{
+		ClientID:            "client-id",
+		ClientSecret:        "client-secret",
+		ResourceMetadataURL: "https://mcp.example.com/.well-known/oauth-protected-resource",
+		RedirectURI:         "http://127.0.0.1:8123/callback",
+		AuthRequired:        true,
+	}); err != nil {
+		t.Fatalf("Save registration: %v", err)
+	}
+
+	saved := transport.Token{
+		AccessToken:  "access-token",
+		TokenType:    "Bearer",
+		RefreshToken: "refresh-token",
+		ExpiresIn:    3600,
+		Scope:        "mcp.read",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}
+	tok := saved // the caller's own object, handed to the store below
+	ts := store.TokenStore("srv", authTestURL)
+	if err := ts.SaveToken(ctx, &tok); err != nil {
+		t.Fatalf("SaveToken: %v", err)
+	}
+	afterSave := store.Revision("srv")
+
+	// The caller mutates the object it handed over (mcp-go does not do this
+	// today; a future version, or any other caller, may).
+	tok.AccessToken = "mutated-access-token"
+	tok.RefreshToken = "mutated-refresh-token"
+	tok.TokenType = "MAC"
+	tok.Scope = "mutated.scope"
+	tok.ExpiresIn = 0
+	tok.ExpiresAt = time.Time{}
+
+	// 1. This process's AuthStore: the record must be what was SAVED.
+	rec, ok := store.Record("srv")
+	if !ok {
+		t.Fatal("Record after SaveToken: ok = false, want true")
+	}
+	assertAuthTestToken(t, rec.Token, &saved)
+	// ... with the URL forced onto the adapter's binding and the registration
+	// half intact, i.e. the read-modify-write still behaves as documented.
+	if rec.URL != authTestURL {
+		t.Fatalf("record URL = %q after SaveToken, want %q", rec.URL, authTestURL)
+	}
+	if rec.ClientID != "client-id" || rec.ClientSecret != "client-secret" || !rec.AuthRequired {
+		t.Fatalf("SaveToken dropped the registration half: %s", redactedRecord(rec))
+	}
+
+	// 2. The transport-facing reader.
+	got, err := ts.GetToken(ctx)
+	if err != nil {
+		t.Fatalf("GetToken: %v", err)
+	}
+	assertAuthTestToken(t, got, &saved)
+
+	// 3. A second AuthStore on the same directory (the other lele process).
+	other := NewAuthStore(filepath.Dir(path))
+	otherTok, err := other.TokenStore("srv", authTestURL).GetToken(ctx)
+	if err != nil {
+		t.Fatalf("GetToken from a second store: %v", err)
+	}
+	assertAuthTestToken(t, otherTok, &saved)
+	if !other.Authenticated("srv", authTestURL) {
+		t.Fatal("Authenticated from a second store = false, want true")
+	}
+
+	// 4. The bytes on disk, and the revision that hashes them: the mutation
+	// must not have reached either.
+	if data, err := os.ReadFile(path); err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	} else if strings.Contains(string(data), "mutated") {
+		t.Fatalf("the caller's mutation reached the file: %s", data)
+	}
+	if after := store.Revision("srv"); after != afterSave {
+		t.Fatalf("Revision changed after the caller mutated its token (%d → %d)", afterSave, after)
+	}
+
+	// A nil token still CLEARS the stored one (the pre-existing behaviour the
+	// copy must not turn into a panic), and the registration survives it.
+	if err := ts.SaveToken(ctx, nil); err != nil {
+		t.Fatalf("SaveToken(nil): %v", err)
+	}
+	rec, ok = store.Record("srv")
+	if !ok {
+		t.Fatal("Record after SaveToken(nil): ok = false, want true (the registration is still stored)")
+	}
+	if rec.Token != nil {
+		t.Fatalf("Record token = %s after SaveToken(nil), want it cleared", redactedToken(rec.Token))
+	}
+	if rec.ClientID != "client-id" || rec.URL != authTestURL {
+		t.Fatalf("SaveToken(nil) damaged the record: %s", redactedRecord(rec))
+	}
+	if _, err := ts.GetToken(ctx); !errors.Is(err, transport.ErrNoToken) {
+		t.Fatalf("GetToken after SaveToken(nil) = %v, want transport.ErrNoToken", err)
+	}
+}
+
 // TestAuthTokenStoreSaveTokenDoesNotAliasTheCallersToken probes the finding-F4
 // claim that SaveToken stores the CALLER's *transport.Token (auth_store.go:
 // `rec.Token = tok`) and that mutating it afterwards rewrites the store.

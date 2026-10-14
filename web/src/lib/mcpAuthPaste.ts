@@ -55,9 +55,13 @@
  * browser's own decoder decides what a parameter is — including the `+` → space
  * decoding of `application/x-www-form-urlencoded` values, which is exactly what
  * Go's `url.ParseQuery` does with the same bytes, so client and server agree on
- * the code. The query is sliced out by the grammar's own rule (everything after
- * the first `?`, truncated at the first `#`) rather than by `new URL`, because
- * the paste is just as often a bare query with no scheme for `URL` to accept.
+ * the code. That agreement, though, holds only over ASCII escapes: for a
+ * malformed or high-bit escape the two decoders RECOVER DIFFERENTLY, so the
+ * grammar refuses those pastes up front (`hasUnsafeFormEncoding`) instead of
+ * trusting them to converge. The query is sliced out by the grammar's own rule
+ * (everything after the first `?`, truncated at the first `#`) rather than by
+ * `new URL`, because the paste is just as often a bare query with no scheme for
+ * `URL` to accept.
  *
  * Nothing here reads or returns a secret: an authorization `code` is a
  * single-use, already-spent-by-the-time-it-matters token the USER pasted, and
@@ -124,11 +128,12 @@ const RESPONSE_KEYS = ['code', 'error'] as const
 const PARAMETER_KEYS = ['code', 'state', 'error'] as const
 
 /**
- * The sanitizer — the ONLY thing from a server that may ever be echoed, and
- * the mirror of the server-side rule (`pkg/mcp` `sanitizeOAuthToken`, copied as
- * `mcpAuthOAuthToken` in the CLI and `mcpAuthEchoableToken` in the TUI, both of
- * which document the duplication). The frozen grammar exports the same rule to
- * every surface so they stop re-implementing it.
+ * The sanitizer — the ONLY thing from a server that may ever be echoed. It is
+ * the WebUI's mirror of the SHARED rule, `SanitizeOAuthCode` in `pkg/mcp` (the
+ * engine's exported spelling of its `sanitizeOAuthToken`, which is where the
+ * rule itself lives); all three surfaces call that one implementation, which is
+ * precisely why the CLI-local and TUI-local copies this comment used to name
+ * (`mcpAuthOAuthToken`, `mcpAuthEchoableToken`) no longer exist.
  *
  * Returns the value iff it is non-empty, at most 64 characters long and made
  * ENTIRELY of `A-Za-z0-9_.-`; otherwise `''`, meaning "nothing safe to echo".
@@ -142,6 +147,42 @@ const ECHOABLE_CODE_RE = /^[A-Za-z0-9_.-]{1,64}$/
 /** The sanitized form of a server-provided OAuth code (see above). */
 export function sanitizeOAuthCode(value: string): string {
   return ECHOABLE_CODE_RE.test(value) ? value : ''
+}
+
+/**
+ * The scan of a parameter substring (the query always, and the fragment when
+ * the fragment is the chosen one), run BEFORE a decoder sees it. A
+ * substring matching ANY of these makes the whole paste `invalid` — the frozen
+ * `unrecognized` — for one reason: Go's `url.ParseQuery` and the browser's
+ * `URLSearchParams` RECOVER DIFFERENTLY from these bytes, so the same paste
+ * would be refused by one surface and submitted by another, or submitted as a
+ * DIFFERENT code. Each alternative:
+ *
+ *  - `%(?![0-9A-Fa-f]{2})` — a `%` not followed by two hexadecimal digits (`%zz`,
+ *    `%8` and a trailing `%`). Go refuses the pair where the browser submits the
+ *    literal `%zz`, so `?code=%zz` is a refusal on one surface and a submitted
+ *    code on the other.
+ *  - `%[89A-Fa-f][0-9A-Fa-f]` — an escape whose byte has the high bit set
+ *    (`%80`–`%FF`, case-insensitively). Go yields that RAW BYTE (possibly
+ *    invalid UTF-8) where the browser substitutes U+FFFD, so `?code=%C3%A9`
+ *    would be two different codes on the two surfaces. No authorization server
+ *    puts non-ASCII in `code`, `state` or `error`, so refusing costs nothing and
+ *    removes every Unicode decoding question in one rule.
+ *  - `;` — a semicolon, wherever it sits. Go rejects a `;` separator outright,
+ *    the browser's decoder treats it as an ordinary character: two answers about
+ *    the SAME paste, and a real server never emits one.
+ *
+ * What survives is a substring whose escapes can only produce ASCII — exactly
+ * the region where the two decoders are byte-for-byte identical — which is what
+ * makes delegating the decoding to `URLSearchParams` sound (see
+ * `responseParams`). Nothing here is hand-rolled decoding: the rule BOUNDS the
+ * input, it does not replace the decoder.
+ */
+const UNSAFE_FORM_ENCODING_RE = /%(?![0-9A-Fa-f]{2})|%[89A-Fa-f][0-9A-Fa-f]|;/
+
+/** Does a chosen parameter substring carry an escape the two decoders split on? */
+function hasUnsafeFormEncoding(parameterSubstring: string): boolean {
+  return UNSAFE_FORM_ENCODING_RE.test(parameterSubstring)
 }
 
 /**
@@ -159,22 +200,45 @@ function isCodeShape(token: string): boolean {
  * query carries neither `code` nor `error`, the FRAGMENT (everything after the
  * first `#`).
  *
+ * The escape scan runs on the QUERY ALWAYS — even when the fragment is what
+ * ends up being used — and on the FRAGMENT when it is the chosen substring
+ * (i.e. when the query carries neither `code` nor `error`, so the fragment is
+ * the one about to be decoded). The query always counts because its KEYS are
+ * what decide whether the fragment is used at all, and a malformed query is
+ * exactly where the two decoders cannot agree on those keys:
+ * `?state=%zz#code=abc` is refused rather than "rescued" by the fragment,
+ * because deciding the question either way would be a different answer per
+ * language. A hit answers `null` — the caller's `invalid` — so no decoder is
+ * ever asked to recover from a malformed or high-bit escape.
+ *
  * The fragment fallback is deliberate and was tested here before the grammar
  * existed: an authorization server answering with `response_mode=fragment`
  * leaves `…/callback#code=…&state=…` in the address bar, the browser sends a
  * fragment nowhere, so the paste is the only place that response exists — it
  * can only ever rescue a user.
+ *
+ * The presence test uses the decoded query, so `…?code=#frag` still counts as
+ * "the query carries a code" and never consults the fragment.
  */
-function responseParams(value: string): URLSearchParams {
+function responseParams(value: string): URLSearchParams | null {
   const question = value.indexOf('?')
   let query = question === -1 ? value : value.slice(question + 1)
   const hashInQuery = query.indexOf('#')
   if (hashInQuery !== -1) query = query.slice(0, hashInQuery)
 
-  const params = new URLSearchParams(query)
-  if (RESPONSE_KEYS.some((key) => params.has(key))) return params
+  // The QUERY is scanned UNCONDITIONALLY, before the decoder turns it into the
+  // keys that decide whether the fragment is used at all (see the doc comment).
+  if (hasUnsafeFormEncoding(query)) return null
+
+  const queryParams = new URLSearchParams(query)
   const hash = value.indexOf('#')
-  return hash === -1 ? params : new URLSearchParams(value.slice(hash + 1))
+  if (hash === -1 || RESPONSE_KEYS.some((key) => queryParams.has(key))) {
+    return queryParams
+  }
+
+  // The fragment is scanned only when it is the CHOSEN substring.
+  const fragment = value.slice(hash + 1)
+  return hasUnsafeFormEncoding(fragment) ? null : new URLSearchParams(fragment)
 }
 
 /**
@@ -185,6 +249,10 @@ function responseParams(value: string): URLSearchParams {
 function resolveParameters(params: URLSearchParams): MCPAuthPaste {
   // `error_description` and every other parameter are deliberately ignored:
   // they are attacker-controlled prose, and only the error CODE is echoable.
+  // The TRIM is the frozen rule, not a local nicety: `error=%20` (a space) is
+  // NOT a refusal, and one surface reading it as a refusal while another fell
+  // through to `code` is the worst kind of divergence — a refusal URL becoming
+  // a submitted code. The Go engine trims for the same reason.
   const error = (params.get('error') ?? '').trim()
   if (error !== '') {
     const safe = sanitizeOAuthCode(error)
@@ -237,13 +305,21 @@ export function parseMCPAuthPaste(raw: string): MCPAuthPaste {
   }
 
   // 2a. `?` ⇒ parameter form (a full URL, or the query pasted on its own).
-  if (value.includes('?')) return resolveParameters(responseParams(value))
+  //     `responseParams` answers `null` when a scanned parameter substring —
+  //     the query ALWAYS, the fragment when it is chosen — carries an escape
+  //     the two surfaces' decoders disagree on (malformed, high-bit, or a `;`):
+  //     the frozen `unrecognized`, refused BEFORE anything is decoded.
+  if (value.includes('?')) {
+    const params = responseParams(value)
+    return params === null ? { kind: 'invalid' } : resolveParameters(params)
+  }
 
   // 2b. `=` ⇒ also the parameter form: this is what makes `foo=bar` a
   //     rejection instead of a submitted code. A value whose parameters name
   //     none of code/state/error is the frozen `unrecognized` outcome.
   if (value.includes('=')) {
     const params = responseParams(value)
+    if (params === null) return { kind: 'invalid' }
     if (!PARAMETER_KEYS.some((key) => params.has(key))) return { kind: 'invalid' }
     return resolveParameters(params)
   }

@@ -303,14 +303,34 @@ func (t *authTokenStore) GetToken(ctx context.Context) (*transport.Token, error)
 // every refresh — hence the read-modify-write. Only what transport.Token
 // carries is taken from tok; URL is forced to the url this adapter is bound
 // to, which is what makes a later URL edit invalidate the record.
+//
+// OWNERSHIP: what is persisted is a COPY of *tok, never the caller's pointer
+// (finding F4: `rec.Token = tok` was the one aliasing write in this file, while
+// Record and GetToken already hand out copies). mcp-go does not mutate a token
+// after handing it over today, so the aliasing was latent rather than live —
+// but a future mutation of the caller's object would rewrite what the store
+// believes it persisted and race the record/revision logic, and the store has
+// no way to see it coming. transport.Token is strings, one int64 and a
+// time.Time, so the struct copy IS a deep copy. A nil tok still clears the
+// stored token exactly as before, without dereferencing it.
 func (t *authTokenStore) SaveToken(ctx context.Context, tok *transport.Token) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	rec, _ := t.store.Record(t.name) // raw accessor: the URL may be stale, it is overwritten below
 	rec.URL = t.url
-	rec.Token = tok
+	rec.Token = authTokenCopy(tok)
 	return t.store.Save(t.name, rec)
+}
+
+// authTokenCopy returns an independent copy of tok, or nil when tok is nil, so
+// no caller-owned pointer is ever stored (see SaveToken's OWNERSHIP note).
+func authTokenCopy(tok *transport.Token) *transport.Token {
+	if tok == nil {
+		return nil
+	}
+	cp := *tok
+	return &cp
 }
 
 // recordFor returns name's record only when it is bound to url. Every
@@ -401,12 +421,10 @@ func readAuthFile(path string) map[string]AuthRecord {
 	return env.Servers
 }
 
-// copyRecord deep-copies the parts of a record a caller could mutate.
+// copyRecord deep-copies the parts of a record a caller could mutate, i.e. the
+// token (see authTokenCopy: the store's single token-copy rule).
 func copyRecord(rec AuthRecord) AuthRecord {
-	if rec.Token != nil {
-		tok := *rec.Token
-		rec.Token = &tok
-	}
+	rec.Token = authTokenCopy(rec.Token)
 	return rec
 }
 

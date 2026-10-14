@@ -17,7 +17,9 @@ import { type MCPAuthPaste, parseMCPAuthPaste, sanitizeOAuthCode } from './mcpAu
  * submitted VERBATIM as the code (`code=abc` reaching the token endpoint as
  * the literal `"code=abc"`), garbage reaching the endpoint at all (which the
  * server answers with `invalid_request` while the user believes they submitted
- * something valid), and a server-chosen byte string echoed into the UI.
+ * something valid), a paste the two languages' form decoders recover from
+ * differently (a malformed or high-bit escape, a `;` — refused up front, see the
+ * scan suite), and a server-chosen byte string echoed into the UI.
  */
 
 /** Narrow a result to the `code` arm, failing loudly (not on a cast) otherwise. */
@@ -93,6 +95,65 @@ const GRAMMAR_TABLE: Array<[string, MCPAuthPaste, string]> = [
     'denied (unsafe code dropped)',
   ],
   ['foo=bar', invalid, 'unrecognized (`=` with none of code/state/error)'],
+  // -- the parameter-substring scan: escapes the two decoders recover from
+  //    DIFFERENTLY are refused before anything is decoded (see the grammar's
+  //    "Parameter form" decoding rules).
+  [
+    'http://127.0.0.1:37401/cb?code=%zz',
+    invalid,
+    'unrecognized (malformed escape: Go refuses it, the browser submits "%zz")',
+  ],
+  [
+    'http://127.0.0.1:37401/cb?code=abc&state=%zz',
+    invalid,
+    'unrecognized (a malformed escape is refused wherever it sits: the surfaces would submit different states)',
+  ],
+  [
+    'http://127.0.0.1:37401/cb?code=%zz#error=access_denied',
+    invalid,
+    'unrecognized (the query is decoded first, so its bad escape decides)',
+  ],
+  // -- the query is scanned ALWAYS, even when the fragment is the substring
+  //    that ends up being used (its keys decide the fallback, and a malformed
+  //    query is where the two decoders cannot agree on those keys).
+  [
+    'http://127.0.0.1:37401/cb?state=%zz#code=abc',
+    invalid,
+    'unrecognized (the query is scanned ALWAYS, even when the fragment is the substring used)',
+  ],
+  [
+    'http://127.0.0.1:37401/cb?state=%80#code=abc',
+    invalid,
+    'unrecognized (a high-bit escape in the always-scanned query)',
+  ],
+  [
+    'http://127.0.0.1:37401/cb?state=a;b#code=abc',
+    invalid,
+    'unrecognized (a `;` in the always-scanned query)',
+  ],
+  // -- while the fragment is scanned only when it is the CHOSEN substring.
+  [
+    'http://127.0.0.1:37401/cb?state=x#code=%zz',
+    invalid,
+    'unrecognized (the fragment is scanned when it is the chosen substring)',
+  ],
+  [
+    'http://127.0.0.1:37401/cb?state=x#code=abc',
+    ok('abc'),
+    'ok (fragment fallback: the query carries no code/error)',
+  ],
+  [
+    'http://127.0.0.1:37401/cb?code=%C3%A9',
+    invalid,
+    'unrecognized (a high-bit escape: a raw byte in Go, U+FFFD in the browser)',
+  ],
+  ['http://127.0.0.1:37401/cb?code=a;b', invalid, 'unrecognized (a `;` separator)'],
+  [
+    'http://127.0.0.1:37401/cb?error=%20&code=abc',
+    ok('abc'),
+    'ok (a blank `error` is not a refusal)',
+  ],
+  ['http://127.0.0.1:37401/cb?error=%20', invalid, 'no-code'],
   ['code=abc def', invalid, 'unrecognized (two tokens, one carrying `=`)'],
   [
     'http://127.0.0.1:37401/cb#code=abc&state=s',
@@ -109,6 +170,11 @@ const GRAMMAR_TABLE: Array<[string, MCPAuthPaste, string]> = [
     { kind: 'denied', error: 'access_denied' },
     'denied (`error` wins over `code`)',
   ],
+  // -- the whitespace SET (`\s`, per ECMAScript): U+0085 is deliberately NOT a
+  //    separator, while a BOM and a NBSP are trimmed like any other space.
+  ['abc\u0085xyz', invalid, 'unrecognized (U+0085 is not whitespace here)'],
+  ['\uFEFFabc123', ok('abc123'), 'ok (a leading BOM is trimmed)'],
+  ['abc123\u00A0', ok('abc123'), 'ok (a trailing NBSP is trimmed)'],
 ]
 
 describe('parseMCPAuthPaste — the frozen shared example table', () => {
@@ -120,7 +186,7 @@ describe('parseMCPAuthPaste — the frozen shared example table', () => {
 
   test('the table is the whole grammar: every row is exercised', () => {
     // Guards against a future edit that drops rows instead of fixing them.
-    expect(GRAMMAR_TABLE).toHaveLength(31)
+    expect(GRAMMAR_TABLE).toHaveLength(46)
   })
 })
 
@@ -271,6 +337,97 @@ describe('parseMCPAuthPaste — refusals and garbage never submit', () => {
     expect(parseMCPAuthPaste('code=abc def')).toEqual(invalid)
     expect(parseMCPAuthPaste('?code=abc state')).toEqual(invalid)
     expect(parseMCPAuthPaste('a b c')).toEqual(invalid)
+  })
+})
+
+describe('parseMCPAuthPaste — the parameter-substring scan', () => {
+  // BEFORE a parameter substring is decoded it is scanned and the paste is
+  // refused when it carries an escape the two decoders — Go's url.ParseQuery
+  // and the browser's URLSearchParams — do NOT recover from IDENTICALLY. The
+  // query is scanned ALWAYS, the fragment when it is the chosen substring (the
+  // query carries neither code nor error). The shared table above carries one
+  // row per grammar row, and
+  // this suite pins the scan's own boundaries. Every refusal is `invalid`, which
+  // is exactly what the caller uses to keep Submit disabled: none of these
+  // pastes may reach the token endpoint.
+
+  test('a short escape ("%8") is a malformed escape, not a byte', () => {
+    // Go refuses the pair (`invalid URL escape`), the browser would hand the
+    // literal "%8" through as part of the code.
+    expect(parseMCPAuthPaste('http://127.0.0.1:1/cb?code=%8')).toEqual(invalid)
+    expect(parseMCPAuthPaste('http://127.0.0.1:1/cb?code=abc%8')).toEqual(invalid)
+    expect(parseMCPAuthPaste('?state=%8')).toEqual(invalid)
+  })
+
+  test('a trailing `%` is a malformed escape', () => {
+    expect(parseMCPAuthPaste('http://127.0.0.1:1/cb?code=abc%')).toEqual(invalid)
+    // the same rule governs the query pasted on its own (the `=` form)
+    expect(parseMCPAuthPaste('code=abc%')).toEqual(invalid)
+  })
+
+  test('`%FF` and `%ff` are refused alike (the high-bit rule is case-insensitive)', () => {
+    expect(parseMCPAuthPaste('?code=%FF')).toEqual(invalid)
+    expect(parseMCPAuthPaste('?code=%ff')).toEqual(invalid)
+    expect(parseMCPAuthPaste('?state=%Ff')).toEqual(invalid)
+    // every byte of a multi-byte escape: `%F0` is itself high-bit
+    expect(parseMCPAuthPaste('?code=%F0%9F%A6%9E')).toEqual(invalid)
+  })
+
+  test('the high-bit boundary is the BYTE: `%80` is refused, `%7F` is not', () => {
+    // 0x80 is the first byte whose high bit is set, i.e. the first byte the two
+    // decoders read differently (raw invalid UTF-8 vs U+FFFD). Below it they
+    // agree byte for byte, so a parameter code — opaque, RFC 6749 §A.11, never
+    // shape-checked — may hold one.
+    expect(parseMCPAuthPaste('?code=%80')).toEqual(invalid)
+    expect(asCode(parseMCPAuthPaste('?code=%7F')).code).toBe('\u007f')
+    expect(asCode(parseMCPAuthPaste('?code=%7e')).code).toBe('~')
+  })
+
+  test('ASCII escapes still decode, so `+` ⇒ space keeps working', () => {
+    expect(asCode(parseMCPAuthPaste('?code=a%2Bb%20c')).code).toBe('a+b c')
+    expect(parseMCPAuthPaste('?code=a+b')).toEqual({ kind: 'code', code: 'a b' })
+  })
+
+  test('`;` is the only separator refused: other punctuation is still a code', () => {
+    // Go treats `;` as a parameter separator and the browser's decoder does
+    // not, so the SAME paste would read as two different parameter sets — the
+    // one character that cannot be delegated. `:` and `,` mean the same thing
+    // to both decoders, so an opaque parameter code may hold them.
+    expect(parseMCPAuthPaste('?code=a;b')).toEqual(invalid)
+    expect(parseMCPAuthPaste('?code=a;b&state=s')).toEqual(invalid)
+    expect(parseMCPAuthPaste('?state=s;code=abc')).toEqual(invalid)
+    expect(parseMCPAuthPaste('?code=a:b')).toEqual({ kind: 'code', code: 'a:b' })
+    expect(parseMCPAuthPaste('?code=a,b')).toEqual({ kind: 'code', code: 'a,b' })
+    expect(parseMCPAuthPaste('?code=a|b')).toEqual({ kind: 'code', code: 'a|b' })
+  })
+
+  test('the scan runs on the RAW substring, before decoding', () => {
+    // What is refused is the separator itself, not a character it decodes to:
+    // `%3B` is an ASCII escape both decoders read identically, so it survives
+    // the scan and becomes part of the code.
+    expect(parseMCPAuthPaste('?code=a%3Bb')).toEqual({ kind: 'code', code: 'a;b' })
+  })
+
+  test('the QUERY is scanned ALWAYS, the fragment when it is chosen', () => {
+    // The query's KEYS are what decide whether the fragment is used at all, so
+    // a bad escape in the query is a refusal EVEN THOUGH the fragment answers:
+    // the two decoders cannot agree on which keys `%zz` may or may not name.
+    // (This USED to be `ok('abc')` under "only the CHOSEN substring is scanned";
+    // the frozen grammar settled it the other way — see its "Parameter form".)
+    expect(parseMCPAuthPaste('http://127.0.0.1:1/cb?state=%zz#code=abc')).toEqual(invalid)
+    // The fragment is scanned too, once it is the chosen substring...
+    expect(parseMCPAuthPaste('http://127.0.0.1:1/cb?state=x#code=%zz')).toEqual(invalid)
+    expect(parseMCPAuthPaste('http://127.0.0.1:1/cb#code=%zz')).toEqual(invalid)
+    expect(parseMCPAuthPaste('http://127.0.0.1:1/cb#code=a;b')).toEqual(invalid)
+    // ...and a clean query plus a clean chosen fragment still resolves.
+    expect(parseMCPAuthPaste('http://127.0.0.1:1/cb?state=x#code=abc')).toEqual(ok('abc'))
+  })
+
+  test('a refusal is never an echo: nothing of the paste survives the scan', () => {
+    const canary = 'CANARY-bad-escape'
+    const result = parseMCPAuthPaste(`http://127.0.0.1:1/cb?code=%zz&x=${canary}`)
+    expect(result).toEqual(invalid)
+    expect(JSON.stringify(result)).not.toContain(canary)
   })
 })
 

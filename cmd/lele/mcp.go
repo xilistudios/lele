@@ -208,6 +208,13 @@ untouched on an invalid entry, so it is also the repair path for a broken server
 test reports a remote server you are not signed in to as "authentication
 required — run 'lele mcp auth <name>'"; once authenticated it probes normally.
 
+list appends a trailing [needs auth] to a server that owes a login and
+[authenticated] once one is stored; show prints the entry's auth block and the
+same verdict as "auth state:". --manual takes one line per attempt: the full
+redirect URL, the bare query string, a bare code, or "<code> <state>" — the same
+rule the TUI uses (pkg/mcp.ParseAuthPaste). A refused paste is reported and asked
+again on the same flow; ":q" gives up.
+
 auth starts the OAuth 2.1 flow of a REMOTE server: it ALWAYS prints the
 authorization URL first (the only way to finish on a headless host) and then
 waits for the browser login — or, with --manual, reads the pasted
@@ -802,35 +809,41 @@ func mcpAuthVerdicts(paths mcp.Paths, inv mcp.Inventory) map[string]mcp.AuthStat
 }
 
 // mcpAuthMarker is the marker appended to a `list` row, "" when there is
-// nothing to say. Pure, and the SAME rule as the TUI's mcpAuthSuffix: a server
-// that needs no auth renders no marker, and a discoverable server that answered
-// 401 renders [needs auth] until a credential is stored, then [authenticated].
+// nothing to say. Pure, and the SAME rule as the TUI's mcpAuthSuffix and the
+// WebUI's chip:
+//
+//	authenticated ⇒ [authenticated]; else required ⇒ [needs auth];
+//	else nothing
+//
+// Authenticated is tested FIRST because that is what CheckAuth means by it ("a
+// usable credential exists, no sign-in is needed") and because it is
+// ORTHOGONAL to Required — pkg/mcp documents a stored credential on an entry
+// whose AuthRequired is false, and both other surfaces render that verdict as
+// authenticated. Keying on Required first made the CLI the odd one out: this
+// row said nothing while the TUI and the WebUI said "authenticated" for the
+// very same DTO.
 func mcpAuthMarker(st mcp.AuthStatus) string {
 	switch {
-	case !st.Required:
-		return ""
 	case st.Authenticated:
 		return mcpAuthMarkerAuthenticated
-	default:
+	case st.Required:
 		return mcpAuthMarkerRequired
+	default:
+		return ""
 	}
 }
 
-// mcpAuthStateLabel renders the live verdict with the SAME vocabulary as the
-// list marker: [needs auth] when a login is owed and none is stored,
-// [authenticated] when one is stored, (none) when no login is required at all.
-// It is the `show` counterpart of mcpAuthMarker, and it deliberately keys on
-// Required exactly like the TUI (a stored credential with no requirement is not
-// an action to take).
+// mcpAuthStateLabel renders the `show` verdict through the SAME rule and the
+// SAME vocabulary as the list marker (mcpAuthMarker): [authenticated] for a
+// stored credential, [needs auth] for a login owed and none stored, and
+// (none) only when neither is true — nothing stored and nothing owed. Sharing
+// the marker helper is deliberate: it makes the two sites structurally
+// incapable of drifting apart.
 func mcpAuthStateLabel(st mcp.AuthStatus) string {
-	switch {
-	case !st.Required:
-		return "(none)"
-	case st.Authenticated:
-		return mcpAuthMarkerAuthenticated
-	default:
-		return mcpAuthMarkerRequired
+	if marker := mcpAuthMarker(st); marker != "" {
+		return marker
 	}
+	return "(none)"
 }
 
 // mcpAuthMethodLabel names the live carrier CheckAuth reports ("oauth",
@@ -1058,9 +1071,10 @@ func runMCPList(w io.Writer, args []string) int {
 		}
 		// The auth marker goes LAST so nothing before it shifts: the row stays
 		// a stable, machine-readable shape (glyph, name, kind, layer,
-		// description) with the verdict appended. It is empty for a server that
-		// needs no action, and for a row Discover does not report (disabled,
-		// invalid) — see mcpAuthVerdicts.
+		// description) with the verdict appended. It is empty when the verdict
+		// has nothing to say (no credential stored and none owed), and for a
+		// row Discover does not report (disabled, invalid) — see
+		// mcpAuthMarker and mcpAuthVerdicts.
 		if marker := mcpAuthMarker(verdicts[name]); marker != "" {
 			line += " " + marker
 		}
@@ -1747,9 +1761,10 @@ var startMCPAuthFlow = func(ctx context.Context, name string, srv mcp.ServerConf
 	return mcp.StartAuth(ctx, name, srv, store, opts)
 }
 
-// mcpAuthInput is where --manual reads its ONE line of pasted input from. It is
+// mcpAuthInput is where --manual reads its pasted input from. It is
 // a package-level var (not os.Stdin inline) so a test can drive the paste
-// without touching the process's own stdin.
+// without touching the process's own stdin: one line per attempt, on the single
+// scanner mcpAuthManual owns.
 var mcpAuthInput io.Reader = os.Stdin
 
 // mcpTestDisabledNote and mcpAuthDisabledNote word the shared DISABLED line for
@@ -2191,7 +2206,10 @@ func mcpAuthManual(w io.Writer, name string, flow mcpAuthFlow) int {
 			return mcpAuthExitFailure
 		}
 		if mcpAuthQuitInputs[strings.TrimSpace(line)] {
-			fmt.Fprintln(w, "✗ authorization canceled — the flow was left open, nothing was submitted")
+			// The deferred flow.Cancel() releases the loopback listener on
+			// every exit path, so the flow is NOT left open by a quit: say what
+			// actually happens, and name the command that starts a new one.
+			fmt.Fprintf(w, "✗ authorization canceled — nothing was submitted; the flow is abandoned, and 'lele mcp auth %s' starts a new one\n", name)
 			return mcpAuthExitFailure
 		}
 		code, state, perr := mcp.ParseAuthPaste(line)
