@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -11,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -18,6 +20,17 @@ import (
 	"time"
 )
 
+// OAuthProviderConfig describes every knob of a provider's OAuth 2.0 flow.
+//
+// The first group of fields (Issuer … Port) is the original, minimal shape: all
+// endpoints and flows were derived from it, partly by sniffing URL substrings.
+// The second group makes that derivation explicit so new providers can be added
+// without heuristics. Every field in the second group has a zero value that
+// reproduces the pre-existing behavior, so a preset that leaves them unset keeps
+// behaving exactly as before.
+//
+// Adding ExtraAuthParams (a map) makes OAuthProviderConfig non-comparable: do
+// not use it with ==, as a map key, or in a switch.
 type OAuthProviderConfig struct {
 	Issuer       string
 	ClientID     string
@@ -26,7 +39,48 @@ type OAuthProviderConfig struct {
 	Scopes       string
 	Originator   string
 	Port         int
+
+	Name                 string            // provider identity key, e.g. "openai", "google-antigravity"
+	AuthorizeURL         string            // full authorize endpoint; empty => derive from Issuer (legacy)
+	DeviceCodeURL        string            // RFC 8628 device_authorization endpoint
+	DeviceTokenURL       string            // RFC 8628 token poll endpoint
+	LegacyDeviceCodeURL  string            // OpenAI-proprietary usercode endpoint
+	LegacyDeviceTokenURL string            // OpenAI-proprietary poll endpoint
+	DeviceVerifyURL      string            // device flow display URL
+	CallbackPath         string            // loopback callback path; empty => "/auth/callback"
+	RedirectURI          string            // full redirect override; empty => http://localhost:{Port}{CallbackPath}
+	ExtraAuthParams      map[string]string // extra authorize query params; the OpenAI `originator` param is NOT part of this map (it is derived from Originator)
+	RefreshScopes        string            // refresh-request scope; empty => Scopes (the originally granted set); if both are empty the scope parameter is omitted; OmitRefreshScope takes precedence
+
+	// OmitRefreshScope, when true, omits the scope parameter from refresh_token
+	// requests entirely. Per RFC 6749 section 6 the server then applies the scope
+	// originally granted. It takes precedence over RefreshScopes and Scopes.
+	// Zero value (false) preserves the historical behaviour.
+	OmitRefreshScope  bool
+	TokenRequestStyle TokenRequestStyle // form (zero value) | json
+	AuthHeaderStyle   TokenAuthStyle    // body (zero value) | basic
+	HTTPClient        *http.Client      // optional; nil => http.DefaultClient
 }
+
+// TokenRequestStyle selects how token-endpoint requests are encoded.
+type TokenRequestStyle int
+
+const (
+	// TokenRequestFormURLEncoded sends application/x-www-form-urlencoded (default).
+	TokenRequestFormURLEncoded TokenRequestStyle = iota
+	// TokenRequestJSON sends an application/json body.
+	TokenRequestJSON
+)
+
+// TokenAuthStyle selects how client credentials are presented to the token endpoint.
+type TokenAuthStyle int
+
+const (
+	// TokenAuthBody sends client_id/client_secret in the request body (default).
+	TokenAuthBody TokenAuthStyle = iota
+	// TokenAuthBasic sends HTTP Basic auth and omits client_secret from the body.
+	TokenAuthBasic
+)
 
 func OpenAIOAuthConfig() OAuthProviderConfig {
 	return OAuthProviderConfig{
@@ -35,6 +89,22 @@ func OpenAIOAuthConfig() OAuthProviderConfig {
 		Scopes:     "openid profile email offline_access",
 		Originator: "codex_cli_rs",
 		Port:       1455,
+
+		Name:                 "openai",
+		AuthorizeURL:         "https://auth.openai.com/oauth/authorize",
+		DeviceCodeURL:        "https://auth.openai.com/api/accounts/deviceauth/usercode",
+		DeviceTokenURL:       "https://auth.openai.com/api/accounts/deviceauth/token",
+		DeviceVerifyURL:      "https://auth.openai.com/codex/device",
+		LegacyDeviceCodeURL:  "https://auth.openai.com/api/accounts/deviceauth/usercode",
+		LegacyDeviceTokenURL: "https://auth.openai.com/api/accounts/deviceauth/token",
+		CallbackPath:         "/auth/callback",
+		ExtraAuthParams: map[string]string{
+			"id_token_add_organizations": "true",
+			"codex_cli_simplified_flow":  "true",
+		},
+		RefreshScopes:     "openid profile email",
+		TokenRequestStyle: TokenRequestFormURLEncoded,
+		AuthHeaderStyle:   TokenAuthBody,
 	}
 }
 
@@ -53,6 +123,22 @@ func GoogleAntigravityOAuthConfig() OAuthProviderConfig {
 		ClientSecret: clientSecret,
 		Scopes:       "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs",
 		Port:         51121,
+
+		Name:         "google-antigravity",
+		AuthorizeURL: "https://accounts.google.com/o/oauth2/v2/auth",
+		CallbackPath: "/auth/callback",
+		ExtraAuthParams: map[string]string{
+			"access_type": "offline",
+			"prompt":      "consent",
+		},
+		// Google refreshes with no scope parameter: RFC 6749 §6 says the server
+		// then applies the scope originally granted, and jcode (the porting
+		// reference) omits `scope` on Google refresh too
+		// (crates/jcode-base/src/auth/google_oauth.rs). RefreshScopes stays empty;
+		// OmitRefreshScope makes the omission explicit instead of falling back to
+		// the long Scopes list.
+		OmitRefreshScope:  true,
+		TokenRequestStyle: TokenRequestFormURLEncoded,
 	}
 }
 
@@ -72,6 +158,28 @@ func generateState() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
+// oauthCallbackPath returns the loopback callback path for the browser flow.
+// An explicit cfg.CallbackPath wins; otherwise the historical "/auth/callback"
+// is used. It is a pure function so the derivation can be unit-tested without
+// starting a listener.
+func oauthCallbackPath(cfg OAuthProviderConfig) string {
+	if cfg.CallbackPath != "" {
+		return cfg.CallbackPath
+	}
+	return "/auth/callback"
+}
+
+// oauthRedirectURI returns the redirect_uri sent to the authorize endpoint.
+// An explicit cfg.RedirectURI wins; otherwise it is derived from the loopback
+// listener (http://localhost:{Port}{CallbackPath}). It is a pure function so
+// the derivation can be unit-tested without starting a listener.
+func oauthRedirectURI(cfg OAuthProviderConfig) string {
+	if cfg.RedirectURI != "" {
+		return cfg.RedirectURI
+	}
+	return fmt.Sprintf("http://localhost:%d%s", cfg.Port, oauthCallbackPath(cfg))
+}
+
 func LoginBrowser(cfg OAuthProviderConfig) (*AuthCredential, error) {
 	pkce, err := GeneratePKCE()
 	if err != nil {
@@ -83,14 +191,14 @@ func LoginBrowser(cfg OAuthProviderConfig) (*AuthCredential, error) {
 		return nil, fmt.Errorf("generating state: %w", err)
 	}
 
-	redirectURI := fmt.Sprintf("http://localhost:%d/auth/callback", cfg.Port)
+	redirectURI := oauthRedirectURI(cfg)
 
 	authURL := buildAuthorizeURL(cfg, pkce, state, redirectURI)
 
 	resultCh := make(chan callbackResult, 1)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth/callback", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(oauthCallbackPath(cfg), func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("state") != state {
 			resultCh <- callbackResult{err: fmt.Errorf("state mismatch")}
 			http.Error(w, "State mismatch", http.StatusBadRequest)
@@ -205,16 +313,61 @@ func parseFlexibleInt(raw json.RawMessage) (int, error) {
 	return 0, fmt.Errorf("invalid integer value: %s", string(raw))
 }
 
+// loginDeviceCodeOut is the writer the OpenAI-proprietary device flow prints
+// its user instructions to. It is a package-level test seam: production always
+// uses os.Stdout, but a test can swap it for a bytes.Buffer (and restore it with
+// t.Cleanup) to assert the exact text shown to the user.
+var loginDeviceCodeOut io.Writer = os.Stdout
+
+// legacyDeviceEndpoints resolves the three endpoints of the OpenAI-proprietary
+// device flow (the one used by `lele auth login --device-code` for the openai
+// provider). Every explicit field wins; when it is empty the historical
+// derivation from cfg.Issuer is used, so hand-built configs that predate the
+// explicit fields keep sending requests to exactly the same URLs as before.
+//
+// The returned verifyURL is the URL printed for the user to open in a browser.
+// The redirect sent on the code exchange that follows a successful poll is
+// cfg.Issuer + "/deviceauth/callback" — an OpenAI server-side callback rather
+// than a loopback redirect — so it is intentionally NOT part of this
+// resolution.
+func legacyDeviceEndpoints(cfg OAuthProviderConfig) (deviceCodeURL, deviceTokenURL, verifyURL string) {
+	deviceCodeURL = cfg.LegacyDeviceCodeURL
+	if deviceCodeURL == "" {
+		deviceCodeURL = cfg.Issuer + "/api/accounts/deviceauth/usercode"
+	}
+
+	deviceTokenURL = cfg.LegacyDeviceTokenURL
+	if deviceTokenURL == "" {
+		deviceTokenURL = cfg.Issuer + "/api/accounts/deviceauth/token"
+	}
+
+	verifyURL = cfg.DeviceVerifyURL
+	if verifyURL == "" {
+		verifyURL = cfg.Issuer + "/codex/device"
+	}
+
+	return deviceCodeURL, deviceTokenURL, verifyURL
+}
+
 func LoginDeviceCode(cfg OAuthProviderConfig) (*AuthCredential, error) {
+	deviceCodeURL, _, verifyURL := legacyDeviceEndpoints(cfg)
+
 	reqBody, _ := json.Marshal(map[string]string{
 		"client_id": cfg.ClientID,
 	})
 
-	resp, err := http.Post(
-		cfg.Issuer+"/api/accounts/deviceauth/usercode",
-		"application/json",
-		strings.NewReader(string(reqBody)),
-	)
+	// This proprietary API speaks JSON with client_id in the body: it uses
+	// neither TokenRequestStyle nor AuthHeaderStyle, so the request is built by
+	// hand instead of going through doTokenRequest. The client is still
+	// cfg.HTTPClient (via oauthHTTPClient) so the flow is testable and
+	// consistent with the RFC 8628 flow.
+	req, err := http.NewRequest(http.MethodPost, deviceCodeURL, strings.NewReader(string(reqBody)))
+	if err != nil {
+		return nil, fmt.Errorf("creating device code request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := oauthHTTPClient(cfg).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("requesting device code: %w", err)
 	}
@@ -237,8 +390,8 @@ func LoginDeviceCode(cfg OAuthProviderConfig) (*AuthCredential, error) {
 		deviceResp.Interval = 5
 	}
 
-	fmt.Printf("\nTo authenticate, open this URL in your browser:\n\n  %s/codex/device\n\nThen enter this code: %s\n\nWaiting for authentication...\n",
-		cfg.Issuer, deviceResp.UserCode)
+	fmt.Fprintf(loginDeviceCodeOut, "\nTo authenticate, open this URL in your browser:\n\n  %s\n\nThen enter this code: %s\n\nWaiting for authentication...\n",
+		verifyURL, deviceResp.UserCode)
 
 	deadline := time.After(15 * time.Minute)
 	ticker := time.NewTicker(time.Duration(deviceResp.Interval) * time.Second)
@@ -261,16 +414,20 @@ func LoginDeviceCode(cfg OAuthProviderConfig) (*AuthCredential, error) {
 }
 
 func pollDeviceCode(cfg OAuthProviderConfig, deviceAuthID, userCode string) (*AuthCredential, error) {
+	_, deviceTokenURL, _ := legacyDeviceEndpoints(cfg)
+
 	reqBody, _ := json.Marshal(map[string]string{
 		"device_auth_id": deviceAuthID,
 		"user_code":      userCode,
 	})
 
-	resp, err := http.Post(
-		cfg.Issuer+"/api/accounts/deviceauth/token",
-		"application/json",
-		strings.NewReader(string(reqBody)),
-	)
+	req, err := http.NewRequest(http.MethodPost, deviceTokenURL, strings.NewReader(string(reqBody)))
+	if err != nil {
+		return nil, fmt.Errorf("creating device token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := oauthHTTPClient(cfg).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -298,19 +455,40 @@ func pollDeviceCode(cfg OAuthProviderConfig, deviceAuthID, userCode string) (*Au
 	return exchangeCodeForTokens(cfg, tokenResp.AuthorizationCode, tokenResp.CodeVerifier, redirectURI)
 }
 
+// refreshScope returns the scope string sent on a refresh_token request, or ""
+// to omit the scope parameter entirely. cfg.OmitRefreshScope wins and means
+// "omit the parameter" (RFC 6749 §6: the server then applies the scope
+// originally granted). Otherwise an explicit cfg.RefreshScopes is used, falling
+// back to cfg.Scopes (the scopes the credential was originally granted with).
+// An empty result means "omit the scope parameter".
+func refreshScope(cfg OAuthProviderConfig) string {
+	if cfg.OmitRefreshScope {
+		return ""
+	}
+	if cfg.RefreshScopes != "" {
+		return cfg.RefreshScopes
+	}
+	return cfg.Scopes
+}
+
 func RefreshAccessToken(cred *AuthCredential, cfg OAuthProviderConfig) (*AuthCredential, error) {
 	if cred.RefreshToken == "" {
 		return nil, fmt.Errorf("no refresh token available")
 	}
 
+	// The scope is resolved from the config instead of being hardcoded: providers
+	// such as Google reject a refresh whose scope differs from the one the
+	// credential was originally granted with (invalid_scope).
 	data := url.Values{
 		"client_id":     {cfg.ClientID},
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {cred.RefreshToken},
-		"scope":         {"openid profile email"},
 	}
 	if cfg.ClientSecret != "" {
 		data.Set("client_secret", cfg.ClientSecret)
+	}
+	if scope := refreshScope(cfg); scope != "" {
+		data.Set("scope", scope)
 	}
 
 	tokenURL := cfg.Issuer + "/oauth/token"
@@ -318,7 +496,7 @@ func RefreshAccessToken(cred *AuthCredential, cfg OAuthProviderConfig) (*AuthCre
 		tokenURL = cfg.TokenURL
 	}
 
-	resp, err := http.PostForm(tokenURL, data)
+	resp, err := doTokenRequest(cfg, tokenURL, data)
 	if err != nil {
 		return nil, fmt.Errorf("refreshing token: %w", err)
 	}
@@ -366,28 +544,107 @@ func buildAuthorizeURL(cfg OAuthProviderConfig, pkce PKCECodes, state, redirectU
 		"state":                 {state},
 	}
 
-	isGoogle := strings.Contains(strings.ToLower(cfg.Issuer), "accounts.google.com")
-	if isGoogle {
-		// Google OAuth requires these for refresh token support
-		params.Set("access_type", "offline")
-		params.Set("prompt", "consent")
-	} else {
-		// OpenAI-specific parameters
-		params.Set("id_token_add_organizations", "true")
-		params.Set("codex_cli_simplified_flow", "true")
-		if strings.Contains(strings.ToLower(cfg.Issuer), "auth.openai.com") {
-			params.Set("originator", "lele")
-		}
-		if cfg.Originator != "" {
-			params.Set("originator", cfg.Originator)
-		}
+	// Provider-specific authorize parameters are declared explicitly by the
+	// config instead of being sniffed from the issuer. The OpenAI `originator`
+	// param is intentionally not part of ExtraAuthParams: it stays derived from
+	// the dedicated Originator field.
+	for k, v := range cfg.ExtraAuthParams {
+		params.Set(k, v)
+	}
+	if cfg.Originator != "" {
+		params.Set("originator", cfg.Originator)
 	}
 
-	// Google uses /auth path, OpenAI uses /oauth/authorize
-	if isGoogle {
-		return cfg.Issuer + "/auth?" + params.Encode()
+	// Prefer the explicit authorize endpoint; fall back to deriving it from the
+	// issuer for legacy, hand-built configs that leave AuthorizeURL unset
+	// (Google uses /auth, OpenAI uses /oauth/authorize).
+	endpoint := cfg.AuthorizeURL
+	if endpoint == "" {
+		if strings.Contains(strings.ToLower(cfg.Issuer), "accounts.google.com") {
+			endpoint = cfg.Issuer + "/auth"
+		} else {
+			endpoint = cfg.Issuer + "/oauth/authorize"
+		}
 	}
-	return cfg.Issuer + "/oauth/authorize?" + params.Encode()
+	return endpoint + "?" + params.Encode()
+}
+
+// oauthHTTPClient returns the HTTP client used for token-endpoint calls:
+// cfg.HTTPClient when set, otherwise http.DefaultClient.
+func oauthHTTPClient(cfg OAuthProviderConfig) *http.Client {
+	if cfg.HTTPClient != nil {
+		return cfg.HTTPClient
+	}
+	return http.DefaultClient
+}
+
+// tokenRequest encodes a token-endpoint POST body for the configured styles.
+// It does NOT mutate the params passed in. When cfg.AuthHeaderStyle is
+// TokenAuthBasic, client_secret is removed from the body (it travels in the
+// Authorization header instead) and the returned header value is
+// "Basic " + base64(client_id + ":" + client_secret); otherwise the returned
+// header value is "".
+//
+// TokenAuthBasic is applied even when cfg.ClientSecret is empty: the header is
+// still "Basic " + base64(client_id + ":") (a Basic credential with an empty
+// password) and client_secret is still stripped from the body. There is no
+// silent fall-back to body auth; that would change the wire format behind the
+// caller's back.
+//
+// Body encoding follows cfg.TokenRequestStyle:
+//   - TokenRequestFormURLEncoded (zero value): params.Encode(), Content-Type
+//     application/x-www-form-urlencoded
+//   - TokenRequestJSON: JSON object with one string per key (the FIRST value of
+//     each url.Values entry), Content-Type application/json
+func tokenRequest(cfg OAuthProviderConfig, params url.Values) (body io.Reader, contentType string, authorization string) {
+	// url.Values is a map: clone it before touching it so the caller's params
+	// (reused after this call, e.g. by tests or retries) stay intact.
+	cloned := make(url.Values, len(params))
+	for k, vs := range params {
+		cloned[k] = append([]string(nil), vs...)
+	}
+
+	if cfg.AuthHeaderStyle == TokenAuthBasic {
+		// Basic credentials ride in the Authorization header; drop client_secret
+		// from the body so it is not sent twice.
+		cloned.Del("client_secret")
+		credentials := base64.StdEncoding.EncodeToString([]byte(cfg.ClientID + ":" + cfg.ClientSecret))
+		authorization = "Basic " + credentials
+	}
+
+	switch cfg.TokenRequestStyle {
+	case TokenRequestJSON:
+		// The JSON encoding is a flat object, so a key with several values keeps
+		// only its first one.
+		fields := make(map[string]string, len(cloned))
+		for k, vs := range cloned {
+			if len(vs) == 0 {
+				continue
+			}
+			fields[k] = vs[0]
+		}
+		encoded, _ := json.Marshal(fields) // map[string]string cannot fail to marshal
+		return bytes.NewReader(encoded), "application/json", authorization
+	default: // TokenRequestFormURLEncoded
+		// strings.NewReader lets http.NewRequest set ContentLength, so the request
+		// is byte-for-byte the one http.PostForm used to send.
+		return strings.NewReader(cloned.Encode()), "application/x-www-form-urlencoded", authorization
+	}
+}
+
+// doTokenRequest POSTs params to endpoint using the configured request style,
+// auth header style and HTTP client.
+func doTokenRequest(cfg OAuthProviderConfig, endpoint string, params url.Values) (*http.Response, error) {
+	body, contentType, authorization := tokenRequest(cfg, params)
+	req, err := http.NewRequest(http.MethodPost, endpoint, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+	if authorization != "" {
+		req.Header.Set("Authorization", authorization)
+	}
+	return oauthHTTPClient(cfg).Do(req)
 }
 
 func exchangeCodeForTokens(cfg OAuthProviderConfig, code, codeVerifier, redirectURI string) (*AuthCredential, error) {
@@ -408,12 +665,12 @@ func exchangeCodeForTokens(cfg OAuthProviderConfig, code, codeVerifier, redirect
 	}
 
 	// Determine provider name from config
-	provider := "openai"
-	if cfg.TokenURL != "" && strings.Contains(cfg.TokenURL, "googleapis.com") {
-		provider = "google-antigravity"
+	provider := cfg.Name
+	if provider == "" {
+		provider = "openai" // legacy default for hand-built configs
 	}
 
-	resp, err := http.PostForm(tokenURL, data)
+	resp, err := doTokenRequest(cfg, tokenURL, data)
 	if err != nil {
 		return nil, fmt.Errorf("exchanging code for tokens: %w", err)
 	}

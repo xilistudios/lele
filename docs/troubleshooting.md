@@ -72,6 +72,7 @@ Re-authenticate if needed:
 ```bash
 lele auth login --provider openai
 lele auth login --provider anthropic
+lele auth login --provider google-antigravity
 ```
 
 ## `read_video is not available: the current model supports neither video nor vision`

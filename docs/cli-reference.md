@@ -46,6 +46,16 @@ lele auth logout --provider openai
 lele auth status
 ```
 
+Providers accepted by `login` (`codex` is an alias of `openai`, `antigravity` of
+`google-antigravity`):
+
+- `openai` — browser flow; `--device-code` uses the headless device flow.
+- `google-antigravity` — browser flow (Google Cloud Code Assist).
+- `anthropic` — paste-token flow.
+
+`--device-code` is only available for `openai`; any other provider rejects it.
+Names are case-insensitive and surrounding whitespace is ignored.
+
 ## `lele gateway`
 
 Starts the main runtime:
