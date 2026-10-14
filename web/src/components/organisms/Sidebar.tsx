@@ -5,10 +5,12 @@ import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { getModeTheme } from '../../lib/modeTheme'
+import { loadSystemNavOpen, saveSystemNavOpen } from '../../lib/storage'
 import { IconButton } from '../atoms/IconButton'
 import {
   AgentsIcon,
   ChatBubbleIcon,
+  ChevronLeftIcon,
   ClockIcon,
   HistoryIcon,
   LockIcon,
@@ -16,6 +18,7 @@ import {
   PlusCircleIcon,
   ProvidersIcon,
   SearchIcon,
+  ServerIcon,
   SettingsIcon,
   SidebarToggleIcon,
   SkillsIcon,
@@ -29,6 +32,12 @@ import { SessionItem } from '../molecules/SessionItem'
 import { QuickChatPanel } from './QuickChatPanel'
 
 const MAX_VISIBLE_SESSIONS = 5
+
+/** `aria-controls` target for the collapsible "System" subnav group. */
+const SYSTEM_NAV_LIST_ID = 'sidebar-system-nav'
+
+/** Shape of a sidebar destination (label + route + icon). */
+type NavRowItem = { path: string; label: string; icon: typeof ChatBubbleIcon }
 
 type SidebarProps = {
   collapsed: boolean
@@ -89,6 +98,9 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
   const [panelOpen, setPanelOpen] = useState(false)
   const [panelFocusSearch, setPanelFocusSearch] = useState(false)
   const [recentExpanded, setRecentExpanded] = useState(false)
+  // Expanded/collapsed state of the "System" subnav group, persisted across
+  // reloads (default open).
+  const [systemNavOpen, setSystemNavOpen] = useState(() => loadSystemNavOpen())
 
   const openPanel = (focusSearch = false) => {
     setPanelFocusSearch(focusSearch)
@@ -115,7 +127,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
   // keeps the match segment-aligned, so sibling paths that merely share a
   // textual prefix cannot light up: '/chats' does NOT match '/chat/…'
   // (startsWith('/chats/') is false) and '/background-exec' does not match
-  // a hypothetical '/background-exec-foo'. Verified against every navItems
+  // a hypothetical '/background-exec-foo'. Verified against every navigation
   // path: /chats /agents /providers /skills /background-exec /cron /secrets.
   const isActiveRoute = (path: string) =>
     location.pathname === path || location.pathname.startsWith(`${path}/`)
@@ -126,6 +138,12 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
       label: t('sidebar.chats'),
       icon: ChatBubbleIcon,
     },
+  ]
+
+  // The six destinations that are not the chat list live under a collapsible
+  // "System" subnav group. "Chats" stays the only top-level row. Routes are
+  // unchanged: this is purely a grouping of the sidebar entries.
+  const systemNavItems = [
     {
       path: '/agents',
       label: t('sidebar.agents'),
@@ -157,6 +175,70 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
       icon: LockIcon,
     },
   ]
+
+  // The group renders expanded whenever one of its children is the active
+  // route, even if the persisted preference says collapsed: the user must
+  // still see where they are. That auto-expansion does NOT touch the stored
+  // preference — only an explicit toggle writes it. This mirrors the
+  // classNames used by the collapsed rail so the icon can light up too.
+  const isSystemChildActive = systemNavItems.some((item) => isActiveRoute(item.path))
+  const systemExpanded = systemNavOpen || isSystemChildActive
+
+  const toggleSystemNav = () => {
+    const next = !systemExpanded
+    setSystemNavOpen(next)
+    saveSystemNavOpen(next)
+  }
+
+  // Full-width labelled row (expanded sidebar). The active child keeps the
+  // exact same classes it had as a flat entry; `aria-current="page"` marks it
+  // for assistive tech without the `role="button"` attribute that the shared
+  // App.test.tsx selectors rely on NOT being present.
+  const renderExpandedRow = (item: NavRowItem) => (
+    <button
+      key={item.path}
+      type="button"
+      onClick={() => {
+        navigate(item.path)
+        if (isMobile) onClose()
+      }}
+      aria-label={item.label}
+      aria-current={isActiveRoute(item.path) ? 'page' : undefined}
+      className={`flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm transition-colors hover:bg-surface-hover ${
+        isActiveRoute(item.path)
+          ? 'bg-surface-selected text-accent-text border border-brand-rosa/30'
+          : 'text-text-secondary hover:text-text-primary'
+      }`}
+    >
+      <div className="h-10 w-10 flex items-center justify-center">
+        <item.icon size={16} />
+      </div>
+      <span>{item.label}</span>
+    </button>
+  )
+
+  // Icon-only rail row (collapsed sidebar) with a hover tooltip.
+  const renderRailRow = (item: NavRowItem) => (
+    <div key={item.path} className="group relative flex items-center justify-center">
+      <IconButton
+        onClick={() => {
+          navigate(item.path)
+          if (isMobile) onClose()
+        }}
+        title={item.label}
+        ariaLabel={item.label}
+        variant="nav"
+        className={`flex items-center justify-center h-10 w-10 ${
+          isActiveRoute(item.path) ? 'text-accent-text bg-surface-selected' : ''
+        }`}
+      >
+        <item.icon size={16} />
+      </IconButton>
+      <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+        {item.label}
+      </span>
+    </div>
+  )
 
   return (
     <>
@@ -455,51 +537,85 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
         >
           {collapsed ? (
             <>
-              {navItems.map((item) => (
-                <div key={item.path} className="group relative flex items-center justify-center">
+              {navItems.map(renderRailRow)}
+              {/* The six system destinations behind one icon button. The
+                  Popover atom already owns the tooltip + outside-click
+                  behaviour; clicking a row navigates and (on mobile) closes
+                  the drawer, exactly like the old flat rail entries. */}
+              <Popover
+                block
+                tooltip={t('sidebar.system')}
+                trigger={
                   <IconButton
-                    onClick={() => {
-                      navigate(item.path)
-                      if (isMobile) onClose()
-                    }}
-                    title={item.label}
-                    ariaLabel={item.label}
+                    title={t('sidebar.system')}
+                    ariaLabel={t('sidebar.system')}
                     variant="nav"
                     className={`flex items-center justify-center h-10 w-10 ${
-                      isActiveRoute(item.path) ? 'text-accent-text bg-surface-selected' : ''
+                      isSystemChildActive ? 'text-accent-text bg-surface-selected' : ''
                     }`}
                   >
-                    <item.icon size={16} />
+                    <ServerIcon size={16} />
                   </IconButton>
-                  <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
-                    {item.label}
-                  </span>
+                }
+                popoverWidth={200}
+                popoverHeight={260}
+              >
+                <div className="flex flex-col gap-1">
+                  {systemNavItems.map((item) => (
+                    <button
+                      key={item.path}
+                      type="button"
+                      onClick={() => {
+                        navigate(item.path)
+                        if (isMobile) onClose()
+                      }}
+                      aria-label={item.label}
+                      aria-current={isActiveRoute(item.path) ? 'page' : undefined}
+                      className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm transition-colors hover:bg-surface-hover ${
+                        isActiveRoute(item.path)
+                          ? 'bg-surface-selected text-accent-text'
+                          : 'text-text-secondary hover:text-text-primary'
+                      }`}
+                    >
+                      <item.icon size={16} />
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
                 </div>
-              ))}
+              </Popover>
             </>
           ) : (
             <>
-              {navItems.map((item) => (
-                <button
-                  key={item.path}
-                  type="button"
-                  onClick={() => {
-                    navigate(item.path)
-                    if (isMobile) onClose()
-                  }}
-                  aria-label={item.label}
-                  className={`flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm transition-colors hover:bg-surface-hover ${
-                    isActiveRoute(item.path)
-                      ? 'bg-surface-selected text-accent-text border border-brand-rosa/30'
-                      : 'text-text-secondary hover:text-text-primary'
+              {navItems.map(renderExpandedRow)}
+              <button
+                type="button"
+                data-testid="sidebar-system-toggle"
+                aria-expanded={systemExpanded}
+                aria-controls={SYSTEM_NAV_LIST_ID}
+                aria-label={t('sidebar.system')}
+                onClick={toggleSystemNav}
+                className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm transition-colors hover:bg-surface-hover text-text-secondary hover:text-text-primary"
+              >
+                <div className="h-10 w-10 flex items-center justify-center">
+                  <ServerIcon size={16} />
+                </div>
+                <span>{t('sidebar.system')}</span>
+                <ChevronLeftIcon
+                  size={14}
+                  className={`ml-auto transition-transform duration-fast ${
+                    systemExpanded ? '-rotate-90' : 'rotate-90'
                   }`}
+                />
+              </button>
+              {systemExpanded && (
+                <div
+                  id={SYSTEM_NAV_LIST_ID}
+                  data-testid="sidebar-system-nav"
+                  className="ml-3 flex flex-col gap-1"
                 >
-                  <div className="h-10 w-10 flex items-center justify-center">
-                    <item.icon size={16} />
-                  </div>
-                  <span>{item.label}</span>
-                </button>
-              ))}
+                  {systemNavItems.map(renderExpandedRow)}
+                </div>
+              )}
             </>
           )}
         </nav>

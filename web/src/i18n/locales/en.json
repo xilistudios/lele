@@ -1031,7 +1031,8 @@
     "collapse": "Minimize",
     "expand": "Expand",
     "cron": "Scheduled Jobs",
-    "secrets": "Secrets"
+    "secrets": "Secrets",
+    "system": "System"
   },
   "backgroundExecs": {
     "title": "Background Processes",

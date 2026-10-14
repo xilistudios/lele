@@ -5,9 +5,13 @@ import {
   loadApiUrl,
   loadCurrentSessionKey,
   loadSession,
+  loadSidebarOpen,
+  loadSystemNavOpen,
   saveApiUrl,
   saveCurrentSessionKey,
   saveSession,
+  saveSidebarOpen,
+  saveSystemNavOpen,
 } from './storage'
 
 describe('storage', () => {
@@ -78,5 +82,32 @@ describe('storage', () => {
     clearCurrentSessionKey()
     saveCurrentSessionKey('native:client:1')
     expect(loadCurrentSessionKey()).toBe('native:client:1')
+  })
+
+  test('loadSidebarOpen defaults to true and round-trips the saved value', () => {
+    localStorage.clear()
+    expect(loadSidebarOpen()).toBe(true)
+
+    saveSidebarOpen(false)
+    expect(localStorage.getItem('lele.sidebarOpen')).toBe('false')
+    expect(loadSidebarOpen()).toBe(false)
+
+    saveSidebarOpen(true)
+    expect(loadSidebarOpen()).toBe(true)
+  })
+
+  test('loadSystemNavOpen defaults to true when nothing is stored', () => {
+    localStorage.clear()
+    expect(loadSystemNavOpen()).toBe(true)
+  })
+
+  test('saveSystemNavOpen persists under lele.systemNavOpen and round-trips', () => {
+    saveSystemNavOpen(false)
+    expect(localStorage.getItem('lele.systemNavOpen')).toBe('false')
+    expect(loadSystemNavOpen()).toBe(false)
+
+    saveSystemNavOpen(true)
+    expect(localStorage.getItem('lele.systemNavOpen')).toBe('true')
+    expect(loadSystemNavOpen()).toBe(true)
   })
 })
