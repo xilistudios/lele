@@ -93,6 +93,7 @@ describe('Sidebar — System subnav (expanded)', () => {
     // The group header is present and expanded by default.
     const toggle = view.getByTestId('sidebar-system-toggle')
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(toggle.getAttribute('aria-controls')).toBe('sidebar-system-nav')
     expect(toggle.textContent).toContain(SYSTEM_HEADER)
 
     // All six destinations render inside the group, and Chats does NOT.
@@ -111,11 +112,15 @@ describe('Sidebar — System subnav (expanded)', () => {
 
     fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    // The `aria-controls` target is unmounted while collapsed, so the
+    // attribute must not dangle at a missing id.
+    expect(toggle.getAttribute('aria-controls')).toBeNull()
     expect(view.queryByTestId('sidebar-system-nav')).toBeNull()
     expect(view.queryByLabelText('Habilidades')).toBeNull()
 
     fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(toggle.getAttribute('aria-controls')).toBe('sidebar-system-nav')
     expect(view.getByTestId('sidebar-system-nav')).not.toBeNull()
   })
 
@@ -142,6 +147,7 @@ describe('Sidebar — System subnav persistence', () => {
 
     const toggle = view.getByTestId('sidebar-system-toggle')
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(toggle.getAttribute('aria-controls')).toBeNull()
     expect(view.queryByTestId('sidebar-system-nav')).toBeNull()
   })
 
@@ -176,34 +182,113 @@ describe('Sidebar — active route auto-opens the System group', () => {
     const view = renderSidebar({ path: '/chats' })
     expect(view.getByLabelText('Agentes').getAttribute('aria-current')).toBeNull()
   })
+
+  test('the header toggle is a visual no-op while a child route forces the group open', () => {
+    // A stored-collapsed group is still forced open by the active child: a
+    // click must neither collapse it nor persist a close the user never saw.
+    localStorage.setItem('lele.systemNavOpen', 'false')
+    const view = renderSidebar({ path: '/skills' })
+
+    const toggle = view.getByTestId('sidebar-system-toggle')
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+
+    fireEvent.click(toggle)
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(view.getByTestId('sidebar-system-nav')).not.toBeNull()
+    expect(localStorage.getItem('lele.systemNavOpen')).toBe('false')
+  })
 })
 
+/**
+ * The collapsed-rail System popover lives behind one icon button.
+ *
+ * `Popover` always mounts its children (hiding them with `opacity-0
+ * pointer-events-none`), so merely finding the six labels does NOT prove the
+ * popover is open. These tests pin the real contract by asserting the
+ * visibility classes on the panel, both transitions (open then close) and the
+ * close-after-select behaviour.
+ */
+function systemPopover(view: ReturnType<typeof renderSidebar>) {
+  const trigger = view.getByLabelText(SYSTEM_HEADER)
+  // The Popover root is the trigger's parent; the panel is its last child
+  // (after the trigger and, when present, the hover tooltip).
+  const root = trigger.parentElement as HTMLElement
+  const panel = root.lastElementChild as HTMLElement
+  return { trigger, root, panel }
+}
+
 describe('Sidebar — System popover (collapsed rail)', () => {
-  test('exposes a System icon button and opens a popover listing the six entries', () => {
+  test('stays hidden until the trigger is clicked, then toggles closed again', () => {
     const view = renderSidebar({ collapsed: true })
 
     // The collapsible header belongs to the expanded sidebar only.
     expect(view.queryByTestId('sidebar-system-toggle')).toBeNull()
 
-    const systemButton = view.getByLabelText(SYSTEM_HEADER)
-    // Popover root carries the `group` class while closed (hover tooltip).
-    const popoverRoot = systemButton.parentElement as HTMLElement
-    expect(popoverRoot.className).toContain('group')
+    const { trigger, root, panel } = systemPopover(view)
 
-    fireEvent.click(systemButton)
-    expect(popoverRoot.className).not.toContain('group')
+    // Closed: the panel is mounted but hidden, and the root carries `group`
+    // (hover tooltip).
+    expect(root.className).toContain('group')
+    expect(panel.className).toContain('opacity-0')
+    expect(panel.className).toContain('pointer-events-none')
+
+    fireEvent.click(trigger)
+
+    // Open: the panel is visible and interactive.
+    expect(root.className).not.toContain('group')
+    expect(panel.className).toContain('opacity-100')
+    expect(panel.className).toContain('scale-100')
+    expect(panel.className).not.toContain('pointer-events-none')
 
     for (const label of SYSTEM_LABELS) {
       expect(view.getByLabelText(label)).toBeDefined()
     }
+
+    // A second click on the trigger closes it again.
+    fireEvent.click(trigger)
+    expect(root.className).toContain('group')
+    expect(panel.className).toContain('opacity-0')
+    expect(panel.className).toContain('pointer-events-none')
   })
 
-  test('clicking a popover entry navigates', () => {
+  test('selecting an entry navigates and closes the popover', () => {
     const view = renderSidebar({ collapsed: true })
+    const { trigger, root, panel } = systemPopover(view)
 
-    fireEvent.click(view.getByLabelText(SYSTEM_HEADER))
+    fireEvent.click(trigger)
+    expect(panel.className).toContain('opacity-100')
+
     fireEvent.click(view.getByLabelText('Proveedores'))
 
     expect(view.getByTestId('location').textContent).toBe('/providers')
+    // The popover must close after navigating, not stay open over the page.
+    expect(root.className).toContain('group')
+    expect(panel.className).toContain('opacity-0')
+    expect(panel.className).toContain('pointer-events-none')
+  })
+
+  test('the collapsed nav is not a scroll container, so the popover is not clipped', () => {
+    const view = renderSidebar({ collapsed: true })
+    const nav = view.getByTestId('sidebar-nav-section')
+    // Any `overflow` utility here forces the computed `overflow-x` to `auto`
+    // as well, clipping the absolutely positioned System popover and the Chats
+    // tooltip at the 59px rail edge (jsdom has no layout engine, so this pins
+    // the class contract that prevents it).
+    for (const c of (nav.getAttribute('class') ?? '').split(/\s+/)) {
+      expect(c).not.toMatch(/overflow/)
+    }
+  })
+
+  test('closes on Escape', () => {
+    const view = renderSidebar({ collapsed: true })
+    const { trigger, panel } = systemPopover(view)
+
+    fireEvent.click(trigger)
+    expect(panel.className).toContain('opacity-100')
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(panel.className).toContain('opacity-0')
+    expect(panel.className).toContain('pointer-events-none')
   })
 })

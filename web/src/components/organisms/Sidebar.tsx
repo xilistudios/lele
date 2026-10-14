@@ -101,6 +101,10 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
   // Expanded/collapsed state of the "System" subnav group, persisted across
   // reloads (default open).
   const [systemNavOpen, setSystemNavOpen] = useState(() => loadSystemNavOpen())
+  // Open state of the System popover in the collapsed rail. The Popover atom
+  // can own it, but the group's rows must be able to close it right after
+  // navigating, so the sidebar controls it explicitly.
+  const [systemPopoverOpen, setSystemPopoverOpen] = useState(false)
 
   const openPanel = (focusSearch = false) => {
     setPanelFocusSearch(focusSearch)
@@ -185,7 +189,13 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
   const systemExpanded = systemNavOpen || isSystemChildActive
 
   const toggleSystemNav = () => {
-    const next = !systemExpanded
+    // While a child route is active the group is force-expanded, so a toggle
+    // would render no change yet silently persist a "closed" preference the
+    // user never saw (and the group would collapse as soon as they left the
+    // child route). Keep it a visual no-op instead of writing that unseen
+    // state.
+    if (isSystemChildActive) return
+    const next = !systemNavOpen
     setSystemNavOpen(next)
     saveSystemNavOpen(next)
   }
@@ -526,12 +536,17 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
             itself now scrolls (see <aside>), which keeps every entry reachable
             with a single gesture. Deliberately no `overflow-y-auto` here: a
             short inner scroller would capture the touch gesture and the drawer
-            could no longer be scrolled past the menu. */}
+            could no longer be scrolled past the menu.
+            The rail variant keeps the same rule: no overflow on this nav. An
+            `overflow-y-auto` here forces the computed `overflow-x` to `auto`
+            too, which clips the absolutely positioned popover/tooltip children
+            (the System popover and the Chats tooltip) at the 59px rail edge.
+            The rail holds two rows, so it never needs to scroll anyway. */}
         <nav
           data-testid="sidebar-nav-section"
           className={
             collapsed
-              ? 'flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2'
+              ? 'flex min-h-0 flex-1 flex-col gap-1 px-2'
               : 'flex shrink-0 flex-col gap-1 px-2 pt-1'
           }
         >
@@ -540,11 +555,15 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
               {navItems.map(renderRailRow)}
               {/* The six system destinations behind one icon button. The
                   Popover atom already owns the tooltip + outside-click
-                  behaviour; clicking a row navigates and (on mobile) closes
-                  the drawer, exactly like the old flat rail entries. */}
+                  behaviour; clicking a row navigates, closes the popover and
+                  (on mobile) closes the drawer, exactly like the old flat rail
+                  entries. The open state is controlled here so a row can close
+                  it after navigating. */}
               <Popover
                 block
                 tooltip={t('sidebar.system')}
+                open={systemPopoverOpen}
+                onOpenChange={setSystemPopoverOpen}
                 trigger={
                   <IconButton
                     title={t('sidebar.system')}
@@ -567,6 +586,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
                       type="button"
                       onClick={() => {
                         navigate(item.path)
+                        setSystemPopoverOpen(false)
                         if (isMobile) onClose()
                       }}
                       aria-label={item.label}
@@ -591,7 +611,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
                 type="button"
                 data-testid="sidebar-system-toggle"
                 aria-expanded={systemExpanded}
-                aria-controls={SYSTEM_NAV_LIST_ID}
+                aria-controls={systemExpanded ? SYSTEM_NAV_LIST_ID : undefined}
                 aria-label={t('sidebar.system')}
                 onClick={toggleSystemNav}
                 className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm transition-colors hover:bg-surface-hover text-text-secondary hover:text-text-primary"
