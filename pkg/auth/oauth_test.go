@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -128,6 +129,59 @@ func TestParseTokenResponse(t *testing.T) {
 	}
 	if cred.ExpiresAt.IsZero() {
 		t.Error("ExpiresAt should not be zero")
+	}
+}
+
+func TestParseOAuthScopes(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"empty", "", nil},
+		{"only separators", "  ", nil},
+		{"single", "a", []string{"a"}},
+		{"mixed whitespace", "a  b\tc", []string{"a", "b", "c"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseOAuthScopes(tt.in)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("parseOAuthScopes(%q) = %#v, want %#v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseTokenResponseParsesScope(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{
+			name: "scope present",
+			body: `{"access_token":"at","expires_in":3600,"scope":"user:profile user:inference"}`,
+			want: []string{"user:profile", "user:inference"},
+		},
+		{
+			name: "scope absent",
+			body: `{"access_token":"at","expires_in":3600}`,
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cred, err := parseTokenResponse([]byte(tt.body), "anthropic")
+			if err != nil {
+				t.Fatalf("parseTokenResponse() error: %v", err)
+			}
+			if !reflect.DeepEqual(cred.Scopes, tt.want) {
+				t.Errorf("Scopes = %#v, want %#v", cred.Scopes, tt.want)
+			}
+		})
 	}
 }
 
@@ -384,10 +438,15 @@ func TestParseDeviceCodeResponseInvalidInterval(t *testing.T) {
 	}
 }
 
-// TestPresetExplicitFields pins the newly-added explicit metadata of both
+// TestPresetExplicitFields pins the newly-added explicit metadata of all
 // presets. Each expected value is the literal equivalent of what the legacy
 // code derived from Issuer or hardcoded outright, so any change here is a
 // change in the wire behavior of a live flow and must be intentional.
+//
+// The per-case fields that used to be hardcoded for the two original presets
+// (CallbackPath, TokenRequestStyle, HTTPClient) keep their historical defaults
+// when left zero-valued, so the legacy cases stay assertions-identical while
+// the Claude preset can declare its genuine differences.
 func TestPresetExplicitFields(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -401,6 +460,15 @@ func TestPresetExplicitFields(t *testing.T) {
 		wantLegacyToken string
 		wantExtra       map[string]string
 		wantRefresh     string
+		// wantTokenURL/wantClientID/wantScopes are checked only when non-empty.
+		wantTokenURL  string
+		wantClientID  string
+		wantScopes    string
+		wantCallback  string // "" => "/auth/callback"
+		wantStyle     TokenRequestStyle
+		wantHasClient bool
+		// wantRequireRefreshToken is the V7 opt-in gate: only Claude sets it.
+		wantRequireRefreshToken bool
 	}{
 		{
 			name:            "openai",
@@ -432,6 +500,26 @@ func TestPresetExplicitFields(t *testing.T) {
 			// cfg.Scopes (the scopes it was originally granted with).
 			wantRefresh: "",
 		},
+		{
+			name:          "anthropic",
+			cfg:           ClaudeOAuthConfig(),
+			wantName:      "anthropic",
+			wantAuthorize: "https://claude.com/cai/oauth/authorize",
+			wantTokenURL:  "https://platform.claude.com/v1/oauth/token",
+			wantClientID:  "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+			wantScopes:    "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
+			// Claude has no device flow either.
+			wantExtra: map[string]string{
+				"code": "true",
+			},
+			wantRefresh:   "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
+			wantCallback:  "/callback",
+			wantStyle:     TokenRequestJSON,
+			wantHasClient: true,
+			// V7: the complete-credential gate is opt-in and Claude is the only
+			// preset that opts in (openai/google-antigravity keep their behavior).
+			wantRequireRefreshToken: true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -457,8 +545,8 @@ func TestPresetExplicitFields(t *testing.T) {
 			if tc.cfg.LegacyDeviceTokenURL != tc.wantLegacyToken {
 				t.Errorf("LegacyDeviceTokenURL = %q, want %q", tc.cfg.LegacyDeviceTokenURL, tc.wantLegacyToken)
 			}
-			if tc.cfg.CallbackPath != "/auth/callback" {
-				t.Errorf("CallbackPath = %q, want %q", tc.cfg.CallbackPath, "/auth/callback")
+			if tc.cfg.CallbackPath != wantCallbackPath(tc.wantCallback) {
+				t.Errorf("CallbackPath = %q, want %q", tc.cfg.CallbackPath, wantCallbackPath(tc.wantCallback))
 			}
 			if !reflect.DeepEqual(tc.cfg.ExtraAuthParams, tc.wantExtra) {
 				t.Errorf("ExtraAuthParams = %v, want %v", tc.cfg.ExtraAuthParams, tc.wantExtra)
@@ -466,23 +554,47 @@ func TestPresetExplicitFields(t *testing.T) {
 			if tc.cfg.RefreshScopes != tc.wantRefresh {
 				t.Errorf("RefreshScopes = %q, want %q", tc.cfg.RefreshScopes, tc.wantRefresh)
 			}
-			if tc.cfg.TokenRequestStyle != TokenRequestFormURLEncoded {
-				t.Errorf("TokenRequestStyle = %d, want %d", tc.cfg.TokenRequestStyle, TokenRequestFormURLEncoded)
+			if tc.cfg.TokenRequestStyle != tc.wantStyle {
+				t.Errorf("TokenRequestStyle = %d, want %d", tc.cfg.TokenRequestStyle, tc.wantStyle)
 			}
 			if tc.cfg.AuthHeaderStyle != TokenAuthBody {
 				t.Errorf("AuthHeaderStyle = %d, want %d", tc.cfg.AuthHeaderStyle, TokenAuthBody)
 			}
 			// Fields with no preset value yet must stay at their zero value so the
 			// consumers' documented fallbacks (RedirectURI from Port+CallbackPath,
-			// nil HTTPClient => http.DefaultClient) remain in charge.
+			// nil HTTPClient => http.DefaultClient) remain in charge. Claude is the
+			// first preset to set them, and it says so explicitly above.
 			if tc.cfg.RedirectURI != "" {
 				t.Errorf("RedirectURI = %q, want empty", tc.cfg.RedirectURI)
 			}
-			if tc.cfg.HTTPClient != nil {
-				t.Errorf("HTTPClient = %p, want nil", tc.cfg.HTTPClient)
+			if (tc.cfg.HTTPClient != nil) != tc.wantHasClient {
+				t.Errorf("HTTPClient = %p, want nil=%v", tc.cfg.HTTPClient, !tc.wantHasClient)
+			}
+			if tc.wantTokenURL != "" && tc.cfg.TokenURL != tc.wantTokenURL {
+				t.Errorf("TokenURL = %q, want %q", tc.cfg.TokenURL, tc.wantTokenURL)
+			}
+			if tc.wantClientID != "" && tc.cfg.ClientID != tc.wantClientID {
+				t.Errorf("ClientID = %q, want %q", tc.cfg.ClientID, tc.wantClientID)
+			}
+			if tc.wantScopes != "" && tc.cfg.Scopes != tc.wantScopes {
+				t.Errorf("Scopes = %q, want %q", tc.cfg.Scopes, tc.wantScopes)
+			}
+			// V7 opt-in gate: must be false for openai/google-antigravity (their
+			// exchanges and goldens stay untouched) and true only for Claude.
+			if tc.cfg.RequireRefreshToken != tc.wantRequireRefreshToken {
+				t.Errorf("RequireRefreshToken = %v, want %v", tc.cfg.RequireRefreshToken, tc.wantRequireRefreshToken)
 			}
 		})
 	}
+}
+
+// wantCallbackPath resolves the per-case CallbackPath expectation: the shared
+// "/auth/callback" default for every preset that does not declare its own.
+func wantCallbackPath(perCase string) string {
+	if perCase == "" {
+		return "/auth/callback"
+	}
+	return perCase
 }
 
 // TestPresetLegacyFieldsPreserved guards the pre-existing fields of both presets:
@@ -988,6 +1100,231 @@ func TestRefreshAccessTokenScopeOnWire(t *testing.T) {
 	}
 }
 
+// TestRefreshAccessTokenRetriesWithoutScopeOnInvalidScope is the wire-level guard
+// for the invalid_scope retry (mandatory mutation #2). A scoped refresh rejected
+// with invalid_scope is retried exactly once with the `scope` field deleted, and
+// the successful retry's ROTATED refresh token is what the caller receives.
+func TestRefreshAccessTokenRetriesWithoutScopeOnInvalidScope(t *testing.T) {
+	var hits int
+	var wireBodies []string
+	var parsedBodies []map[string]string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("reading request body: %v", err)
+		}
+		wireBodies = append(wireBodies, string(raw))
+
+		var fields map[string]string
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Errorf("decoding request body %q: %v", string(raw), err)
+		}
+		parsedBodies = append(parsedBodies, fields)
+
+		if _, ok := fields["scope"]; ok {
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{"error":"invalid_scope","error_description":"requested scope is invalid"}`)
+			return
+		}
+		io.WriteString(w, `{"access_token":"fresh","refresh_token":"rot","expires_in":3600}`)
+	}))
+	defer server.Close()
+
+	// Built by hand on purpose: this test drives the retry wire without the
+	// complete-credential gate (ClaudeOAuthConfig() sets RequireRefreshToken).
+	cfg := OAuthProviderConfig{
+		Name:              "anthropic",
+		ClientID:          "cid",
+		Scopes:            "user:profile user:inference",
+		TokenRequestStyle: TokenRequestJSON,
+		TokenURL:          server.URL,
+		HTTPClient:        server.Client(),
+	}
+	cred := &AuthCredential{
+		AccessToken:  "old",
+		RefreshToken: "old-refresh",
+		Provider:     "anthropic",
+		AuthMethod:   "oauth",
+	}
+
+	refreshed, err := RefreshAccessToken(cred, cfg)
+	if err != nil {
+		t.Fatalf("RefreshAccessToken() error: %v", err)
+	}
+
+	if hits != 2 {
+		t.Fatalf("token endpoint hits = %d, want exactly 2 (one scoped attempt + one retry)", hits)
+	}
+	t.Logf("request 1 wire body: %s", wireBodies[0])
+	t.Logf("request 2 wire body: %s", wireBodies[1])
+
+	if _, ok := parsedBodies[0]["scope"]; !ok {
+		t.Errorf("request 1 body = %s, want it to carry the scope", wireBodies[0])
+	} else if got := parsedBodies[0]["scope"]; got != "user:profile user:inference" {
+		t.Errorf("request 1 scope = %q, want %q", got, "user:profile user:inference")
+	}
+	if _, ok := parsedBodies[1]["scope"]; ok {
+		t.Errorf("request 2 body = %s, want the scope field deleted", wireBodies[1])
+	}
+
+	if refreshed.AccessToken != "fresh" {
+		t.Errorf("AccessToken = %q, want %q", refreshed.AccessToken, "fresh")
+	}
+	if refreshed.RefreshToken != "rot" {
+		t.Errorf("RefreshToken = %q, want the ROTATED %q (not the old one)", refreshed.RefreshToken, "rot")
+	}
+}
+
+// TestRefreshAccessTokenRetryFailureKeepsBothDiagnostics is the jcode-parity
+// guard for FIX 3: when the scoped refresh is rejected as invalid_scope AND the
+// unscoped fallback fails too, the returned error must keep BOTH response bodies
+// (jcode: "fallback without scope failed: …; scoped refresh error: …").
+// Reporting only the retry body hides the reason the scope was rejected, which
+// is the diagnostic the user actually needs.
+func TestRefreshAccessTokenRetryFailureKeepsBothDiagnostics(t *testing.T) {
+	const (
+		scopedBody   = `{"error":"invalid_scope","error_description":"scoped attempt rejected"}`
+		fallbackBody = `{"error":"invalid_request","error_description":"fallback attempt rejected"}`
+	)
+
+	var hits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		var fields map[string]string
+		raw, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Errorf("decoding request body %q: %v", string(raw), err)
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		if _, ok := fields["scope"]; ok {
+			io.WriteString(w, scopedBody)
+			return
+		}
+		io.WriteString(w, fallbackBody)
+	}))
+	defer server.Close()
+
+	cfg := OAuthProviderConfig{
+		Name:              "anthropic",
+		ClientID:          "cid",
+		Scopes:            "user:profile user:inference",
+		TokenRequestStyle: TokenRequestJSON,
+		TokenURL:          server.URL,
+		HTTPClient:        server.Client(),
+	}
+	cred := &AuthCredential{RefreshToken: "old-refresh", Provider: "anthropic", AuthMethod: "oauth"}
+
+	refreshed, err := RefreshAccessToken(cred, cfg)
+	if err == nil {
+		t.Fatal("RefreshAccessToken() error = nil, want the double-failure error")
+	}
+	if refreshed != nil {
+		t.Errorf("credential = %#v, want nil when both attempts failed", refreshed)
+	}
+	if hits != 2 {
+		t.Errorf("token endpoint hits = %d, want exactly 2 (scoped attempt + unscoped fallback)", hits)
+	}
+
+	for _, want := range []string{
+		"token refresh failed",
+		"fallback without scope failed",
+		"scoped refresh error",
+		"scoped attempt rejected",
+		"fallback attempt rejected",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
+		}
+	}
+}
+
+// TestRefreshAccessTokenNonInvalidScopeErrorDoesNotRetry pins that the retry is
+// gated on the invalid_scope markers: any other 400 (e.g. invalid_grant) is
+// surfaced after a single attempt.
+func TestRefreshAccessTokenNonInvalidScopeErrorDoesNotRetry(t *testing.T) {
+	var hits int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		var fields map[string]string
+		raw, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Errorf("decoding request body %q: %v", string(raw), err)
+		}
+		if _, ok := fields["scope"]; !ok {
+			t.Errorf("request %d body = %s, want the scope to be present", hits, string(raw))
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, `{"error":"invalid_grant"}`)
+	}))
+	defer server.Close()
+
+	cfg := OAuthProviderConfig{
+		Name:              "anthropic",
+		ClientID:          "cid",
+		Scopes:            "user:profile user:inference",
+		TokenRequestStyle: TokenRequestJSON,
+		TokenURL:          server.URL,
+		HTTPClient:        server.Client(),
+	}
+	cred := &AuthCredential{RefreshToken: "old-refresh", Provider: "anthropic", AuthMethod: "oauth"}
+
+	_, err := RefreshAccessToken(cred, cfg)
+	if err == nil {
+		t.Fatal("RefreshAccessToken() error = nil, want the invalid_grant failure")
+	}
+	if hits != 1 {
+		t.Errorf("token endpoint hits = %d, want exactly 1 (no retry for invalid_grant)", hits)
+	}
+	if !strings.Contains(err.Error(), "token refresh failed") || !strings.Contains(err.Error(), "invalid_grant") {
+		t.Errorf("error = %q, want it to carry the first attempt's body", err)
+	}
+}
+
+// TestRefreshAccessTokenInvalidScopeWithoutScopeSentNoRetry pins that a refresh
+// which sent no scope has nothing to fall back to: the invalid_scope response is
+// returned as-is after a single attempt.
+func TestRefreshAccessTokenInvalidScopeWithoutScopeSentNoRetry(t *testing.T) {
+	var hits int
+	var wireBodies []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		raw, _ := io.ReadAll(r.Body)
+		wireBodies = append(wireBodies, string(raw))
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, `{"error":"invalid_scope","error_description":"requested scope is invalid"}`)
+	}))
+	defer server.Close()
+
+	cfg := OAuthProviderConfig{
+		Name:              "anthropic",
+		ClientID:          "cid",
+		Scopes:            "user:profile user:inference",
+		OmitRefreshScope:  true,
+		TokenRequestStyle: TokenRequestJSON,
+		TokenURL:          server.URL,
+		HTTPClient:        server.Client(),
+	}
+	cred := &AuthCredential{RefreshToken: "old-refresh", Provider: "anthropic", AuthMethod: "oauth"}
+
+	_, err := RefreshAccessToken(cred, cfg)
+	if err == nil {
+		t.Fatal("RefreshAccessToken() error = nil, want the invalid_scope failure")
+	}
+	if hits != 1 {
+		t.Errorf("token endpoint hits = %d, want exactly 1 (no scope was sent, nothing to retry)", hits)
+	}
+	if n := len(wireBodies); n > 0 && strings.Contains(wireBodies[0], "scope") {
+		t.Errorf("request body = %s, want no scope field", wireBodies[0])
+	}
+	if !strings.Contains(err.Error(), "token refresh failed") || !strings.Contains(err.Error(), "invalid_scope") {
+		t.Errorf("error = %q, want the first attempt's invalid_scope body", err)
+	}
+}
+
 // TestTokenRequestEncoding exercises tokenRequest in isolation (no sockets) for
 // the four combinations of TokenRequestStyle × AuthHeaderStyle, and pins that
 // the input params map is never mutated.
@@ -1462,6 +1799,16 @@ func TestPresetsRefreshScopePolicy(t *testing.T) {
 	}
 	if openai.RefreshScopes != "openid profile email" {
 		t.Errorf("OpenAIOAuthConfig().RefreshScopes = %q, want %q", openai.RefreshScopes, "openid profile email")
+	}
+
+	// Claude refreshes with an EXPLICIT scope list that drops the
+	// API-key-minting scope: the refresh endpoint must never be able to mint one.
+	claude := ClaudeOAuthConfig()
+	if claude.OmitRefreshScope {
+		t.Errorf("ClaudeOAuthConfig().OmitRefreshScope = true, want false")
+	}
+	if want := "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"; claude.RefreshScopes != want {
+		t.Errorf("ClaudeOAuthConfig().RefreshScopes = %q, want %q", claude.RefreshScopes, want)
 	}
 }
 
@@ -1989,4 +2336,286 @@ func TestLoginDeviceCodeDeviceCodeResponseParseFailure(t *testing.T) {
 	if got := counter.count(); got != 1 {
 		t.Errorf("cfg.HTTPClient saw %d requests, want 1", got)
 	}
+}
+
+// TestClaudeExchangeSendsStateAndCodeVerifier is the wire contract of the Claude
+// token exchange: the JSON body echoes the PKCE verifier as `state` alongside the
+// regular authorization_code grant. This is mandatory mutation #1 of F1-T02 —
+// deleting the `p.State != ""` branch turns this test red.
+func TestClaudeExchangeSendsStateAndCodeVerifier(t *testing.T) {
+	var mu sync.Mutex
+	var gotContentType string
+	var gotBody map[string]string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "reading body", http.StatusInternalServerError)
+			return
+		}
+		var fields map[string]string
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			http.Error(w, "body is not JSON", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		gotContentType = r.Header.Get("Content-Type")
+		gotBody = fields
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token":  "at",
+			"refresh_token": "rt",
+			"expires_in":    3600,
+		})
+	}))
+	defer server.Close()
+
+	const callbackURL = "https://platform.claude.com/oauth/code/callback"
+	cfg := OAuthProviderConfig{
+		TokenRequestStyle: TokenRequestJSON,
+		TokenURL:          server.URL,
+		HTTPClient:        server.Client(),
+		ClientID:          "cid",
+		Name:              "anthropic",
+	}
+
+	cred, err := exchangeCodeForTokensWithParams(cfg, exchangeParams{
+		Code:         "C",
+		CodeVerifier: "V",
+		RedirectURI:  callbackURL,
+		State:        "V",
+	})
+	if err != nil {
+		t.Fatalf("exchangeCodeForTokensWithParams() error: %v", err)
+	}
+	if cred.AccessToken != "at" {
+		t.Errorf("AccessToken = %q, want %q", cred.AccessToken, "at")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if gotContentType != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", gotContentType)
+	}
+	want := map[string]string{
+		"grant_type":    "authorization_code",
+		"code":          "C",
+		"code_verifier": "V",
+		"redirect_uri":  callbackURL,
+		"client_id":     "cid",
+		"state":         "V",
+	}
+	if !reflect.DeepEqual(gotBody, want) {
+		t.Errorf("json body = %v, want %v", gotBody, want)
+	}
+}
+
+// TestExchangeCodeForTokensOmitsStateByDefault proves the 4-argument wrapper —
+// the only entry point OpenAI/Google use — never puts `state` on the wire, so
+// their exchange stays byte-identical to the pre-Claude implementation.
+func TestExchangeCodeForTokensOmitsStateByDefault(t *testing.T) {
+	var mu sync.Mutex
+	var gotBody string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "reading body", http.StatusInternalServerError)
+			return
+		}
+		mu.Lock()
+		gotBody = string(raw)
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"access_token":"at","expires_in":3600}`))
+	}))
+	defer server.Close()
+
+	cfg := OAuthProviderConfig{
+		TokenURL:   server.URL,
+		HTTPClient: server.Client(),
+		ClientID:   "cid",
+		Name:       "openai",
+	}
+	if _, err := exchangeCodeForTokens(cfg, "C", "V", "http://localhost:1455/auth/callback"); err != nil {
+		t.Fatalf("exchangeCodeForTokens() error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	values, err := url.ParseQuery(gotBody)
+	if err != nil {
+		t.Fatalf("form body is not a valid query: %v", err)
+	}
+	if got := values.Get("state"); got != "" {
+		t.Errorf("state = %q, want it omitted (OpenAI parity)", got)
+	}
+	if strings.Contains(gotBody, "state") {
+		t.Errorf("form body mentions state: %q", gotBody)
+	}
+	want := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {"C"},
+		"redirect_uri":  {"http://localhost:1455/auth/callback"},
+		"client_id":     {"cid"},
+		"code_verifier": {"V"},
+	}.Encode()
+	if gotBody != want {
+		t.Errorf("form body = %q, want %q", gotBody, want)
+	}
+}
+
+// TestBindCallbackListenerEphemeralPort covers Port == 0: the OS assigns the
+// port and the advertised redirect carries the real one.
+func TestBindCallbackListenerEphemeralPort(t *testing.T) {
+	cfg := OAuthProviderConfig{Port: 0, CallbackPath: "/callback"}
+
+	ln, err := bindCallbackListener(cfg)
+	if err != nil {
+		t.Fatalf("bindCallbackListener() error: %v", err)
+	}
+	defer ln.Close()
+
+	tcpAddr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address is %T, want *net.TCPAddr", ln.Addr())
+	}
+	if tcpAddr.Port <= 0 {
+		t.Errorf("bound port = %d, want an OS-assigned port > 0", tcpAddr.Port)
+	}
+	if got := ln.Addr().String(); !strings.HasPrefix(got, "127.0.0.1:") {
+		t.Errorf("bind address = %q, want the 127.0.0.1 loopback prefix", got)
+	}
+	want := fmt.Sprintf("http://localhost:%d/callback", tcpAddr.Port)
+	if got := redirectURIForListener(cfg, ln); got != want {
+		t.Errorf("redirectURIForListener = %q, want %q", got, want)
+	}
+}
+
+// TestRedirectURIForListener proves the bind-then-derive reorder is a no-op for
+// a correctly fixed port (it equals oauthRedirectURI) and that an explicit
+// cfg.RedirectURI keeps winning verbatim. The port is never hardcoded: it comes
+// from the listener the OS just handed us, so the test cannot be flaky.
+func TestRedirectURIForListener(t *testing.T) {
+	cfg := OAuthProviderConfig{Port: 0, CallbackPath: "/callback"}
+
+	ln, err := bindCallbackListener(cfg)
+	if err != nil {
+		t.Fatalf("bindCallbackListener() error: %v", err)
+	}
+	defer ln.Close()
+
+	port := ln.Addr().(*net.TCPAddr).Port
+	// Pretend the config asked for the port the OS assigned: for a fixed port the
+	// bound port and cfg.Port are equal, which is exactly the parity condition.
+	cfg.Port = port
+
+	want := fmt.Sprintf("http://localhost:%d/callback", port)
+	if got := redirectURIForListener(cfg, ln); got != want {
+		t.Errorf("redirectURIForListener = %q, want %q", got, want)
+	}
+	if got := oauthRedirectURI(cfg); got != want {
+		t.Errorf("oauthRedirectURI = %q, want %q (must equal the bound-port derivation)", got, want)
+	}
+
+	cfg.RedirectURI = "http://127.0.0.1:9/x"
+	if got := redirectURIForListener(cfg, ln); got != cfg.RedirectURI {
+		t.Errorf("redirectURIForListener with override = %q, want %q", got, cfg.RedirectURI)
+	}
+	if got := oauthRedirectURI(cfg); got != cfg.RedirectURI {
+		t.Errorf("oauthRedirectURI with override = %q, want %q", got, cfg.RedirectURI)
+	}
+}
+
+func TestLooksLikeCloudflareChallenge(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "cf-hit-challenge marker", body: `<html><body>Error code: CF-HIT-CHALLENGE</body></html>`, want: true},
+		{name: "cf-challenge marker", body: `<html><body>Error 1020: cf-challenge</body></html>`, want: true},
+		{name: "cloudflare mention", body: `<!DOCTYPE html><title>Attention Required! | Cloudflare</title>`, want: true},
+		{name: "just a moment", body: `<html><head><title>Just a moment...</title></head></html>`, want: true},
+		{name: "challenge platform script", body: `<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script>`, want: true},
+		{name: "markers are matched case-insensitively", body: "JUST A MOMENT", want: true},
+		{name: "regular oauth error document", body: `{"error":"invalid_grant","error_description":"bad code"}`, want: false},
+		{name: "empty body", body: "", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := looksLikeCloudflareChallenge(tc.body); got != tc.want {
+				t.Errorf("looksLikeCloudflareChallenge(%q) = %v, want %v", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestExchangeCloudflare403Message covers both sides of the 403 branch: a
+// Cloudflare interstitial gets the actionable message (and, crucially, it is
+// produced BEFORE the generic "token exchange failed" error), while a plain 403
+// with an OAuth error document keeps the historical text.
+func TestExchangeCloudflare403Message(t *testing.T) {
+	challenge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusForbidden)
+		io.WriteString(w, "<html><head><title>Just a moment...</title></head><body>Just a moment...</body></html>")
+	}))
+	defer challenge.Close()
+
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		io.WriteString(w, `{"error":"invalid_grant"}`)
+	}))
+	defer plain.Close()
+
+	newCfg := func(endpoint string) OAuthProviderConfig {
+		return OAuthProviderConfig{
+			TokenURL: endpoint,
+			ClientID: "cid",
+			Name:     "anthropic",
+		}
+	}
+	params := exchangeParams{
+		Code:         "C",
+		CodeVerifier: "V",
+		RedirectURI:  "https://platform.claude.com/oauth/code/callback",
+		State:        "V",
+	}
+
+	t.Run("cloudflare challenge 403", func(t *testing.T) {
+		_, err := exchangeCodeForTokensWithParams(newCfg(challenge.URL), params)
+		if err == nil {
+			t.Fatal("exchangeCodeForTokensWithParams() = nil error, want a Cloudflare error")
+		}
+		if !strings.Contains(err.Error(), "Cloudflare") {
+			t.Errorf("error = %q, want it to mention Cloudflare", err.Error())
+		}
+		if !strings.Contains(err.Error(), "lele auth login --provider claude --paste-code") {
+			t.Errorf("error = %q, want it to mention the paste-code remediation", err.Error())
+		}
+		if strings.Contains(err.Error(), "token exchange failed") {
+			t.Errorf("error = %q, want the Cloudflare branch to win over the generic status error", err.Error())
+		}
+	})
+
+	t.Run("plain 403 keeps the generic message", func(t *testing.T) {
+		_, err := exchangeCodeForTokensWithParams(newCfg(plain.URL), params)
+		if err == nil {
+			t.Fatal("exchangeCodeForTokensWithParams() = nil error, want an error")
+		}
+		if !strings.Contains(err.Error(), "token exchange failed") {
+			t.Errorf("error = %q, want the generic status error", err.Error())
+		}
+		if strings.Contains(err.Error(), "Cloudflare") {
+			t.Errorf("error = %q, want no Cloudflare claim for a plain 403", err.Error())
+		}
+	})
 }

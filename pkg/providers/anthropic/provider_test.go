@@ -321,3 +321,123 @@ func createAnthropicTestClient(baseURL, token string) *anthropic.Client {
 	)
 	return &c
 }
+
+// writeAnthropicTestResponse writes a minimal valid Messages API response.
+func writeAnthropicTestResponse(w http.ResponseWriter, r *http.Request) {
+	var reqBody map[string]interface{}
+	json.NewDecoder(r.Body).Decode(&reqBody)
+
+	resp := map[string]interface{}{
+		"id":          "msg_test",
+		"type":        "message",
+		"role":        "assistant",
+		"model":       reqBody["model"],
+		"stop_reason": "end_turn",
+		"content": []map[string]interface{}{
+			{"type": "text", "text": "ok"},
+		},
+		"usage": map[string]interface{}{
+			"input_tokens":  1,
+			"output_tokens": 1,
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func TestProviderOAuthModeHeadersAndBetaQuery(t *testing.T) {
+	var captured *http.Request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r.Clone(r.Context())
+		writeAnthropicTestResponse(w, r)
+	}))
+	defer server.Close()
+
+	p := NewProviderWithTokenSourceBaseURLAndOAuthMode("t", func() (string, error) { return "tok", nil }, server.URL, true)
+	if !p.OAuthMode() {
+		t.Fatal("OAuthMode() = false, want true")
+	}
+
+	if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hello"}}, nil, "claude-sonnet-4-5-20250929", map[string]interface{}{}); err != nil {
+		t.Fatalf("Chat() error: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("no request captured")
+	}
+
+	if got := captured.URL.Query().Get("beta"); got != "true" {
+		t.Errorf("beta query = %q, want %q", got, "true")
+	}
+	if got := captured.Header.Get("Anthropic-Beta"); got != oauthBetaHeaders {
+		t.Errorf("anthropic-beta header = %q, want %q", got, oauthBetaHeaders)
+	}
+	if got := captured.Header.Get("User-Agent"); got != claudeCLIUserAgent {
+		t.Errorf("User-Agent = %q, want %q", got, claudeCLIUserAgent)
+	}
+}
+
+func TestProviderNonOAuthOmitsBetaMarkers(t *testing.T) {
+	var captured *http.Request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r.Clone(r.Context())
+		writeAnthropicTestResponse(w, r)
+	}))
+	defer server.Close()
+
+	p := NewProviderWithTokenSourceAndBaseURL("t", func() (string, error) { return "tok", nil }, server.URL)
+	if p.OAuthMode() {
+		t.Fatal("OAuthMode() = true, want false")
+	}
+
+	if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hello"}}, nil, "claude-sonnet-4-5-20250929", map[string]interface{}{}); err != nil {
+		t.Fatalf("Chat() error: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("no request captured")
+	}
+
+	if raw, ok := captured.URL.Query()["beta"]; ok {
+		t.Errorf("beta query present = %v, want absent", raw)
+	}
+	if got := captured.Header.Get("Anthropic-Beta"); got != "" {
+		t.Errorf("anthropic-beta header = %q, want empty", got)
+	}
+	ua := captured.Header.Get("User-Agent")
+	if !strings.HasPrefix(ua, "Anthropic/Go") {
+		t.Errorf("User-Agent = %q, want prefix %q", ua, "Anthropic/Go")
+	}
+}
+
+func TestProviderOAuthModePrependsIdentityBlock(t *testing.T) {
+	messages := []Message{
+		{Role: "system", Content: "You are helpful"},
+		{Role: "user", Content: "Hi"},
+	}
+
+	oauth := NewProviderWithTokenSourceBaseURLAndOAuthMode("t", func() (string, error) { return "tok", nil }, "http://example.invalid", true)
+	params, err := oauth.buildParams(messages, nil, "claude-sonnet-4-5-20250929", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("buildParams() error: %v", err)
+	}
+	if len(params.System) != 2 {
+		t.Fatalf("len(System) = %d, want 2", len(params.System))
+	}
+	if params.System[0].Text != claudeIdentityLine {
+		t.Errorf("System[0].Text = %q, want %q", params.System[0].Text, claudeIdentityLine)
+	}
+	if params.System[1].Text != "You are helpful" {
+		t.Errorf("System[1].Text = %q, want %q", params.System[1].Text, "You are helpful")
+	}
+
+	plain := NewProviderWithTokenSourceAndBaseURL("t", func() (string, error) { return "tok", nil }, "http://example.invalid")
+	params, err = plain.buildParams(messages, nil, "claude-sonnet-4-5-20250929", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("buildParams() error: %v", err)
+	}
+	if len(params.System) != 1 {
+		t.Fatalf("len(System) = %d, want 1", len(params.System))
+	}
+	if params.System[0].Text != "You are helpful" {
+		t.Errorf("System[0].Text = %q, want %q", params.System[0].Text, "You are helpful")
+	}
+}

@@ -1174,3 +1174,67 @@ func TestProvidersConfig_UnmarshalAcceptsThinkingType(t *testing.T) {
 		t.Errorf("ThinkingType = %q, want %q", got, ThinkingTypeDeepSeek)
 	}
 }
+
+// TestProvidersConfigMarshalJSONPersistsAuthMethodOnlyProvider pins the fix for
+// a silent config-drop: `lele auth login --provider claude` only writes
+// Providers.Anthropic.AuthMethod = "oauth" (no API key, no models), and
+// MarshalJSON used to skip any provider without an API key or models. The write
+// therefore never reached disk, so the provider selector kept reading
+// AuthMethod == "" and refused to route to the Claude OAuth path. An explicit
+// auth method is itself configuration and must survive serialization.
+func TestProvidersConfigMarshalJSONPersistsAuthMethodOnlyProvider(t *testing.T) {
+	p := &ProvidersConfig{Anthropic: ProviderConfig{AuthMethod: "oauth"}}
+
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(data) == "null" {
+		t.Fatal("marshal = null, want an object containing the auth_method-only provider")
+	}
+	var out map[string]map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal marshalled data %q: %v", data, err)
+	}
+	anthropic, ok := out["anthropic"]
+	if !ok {
+		t.Fatalf("marshalled JSON %q has no %q entry", data, "anthropic")
+	}
+	if got := anthropic["auth_method"]; got != "oauth" {
+		t.Errorf("anthropic.auth_method = %v, want %q", got, "oauth")
+	}
+
+	// The truly-empty case still collapses to null so the parent `omitempty`
+	// keeps working.
+	empty, err := json.Marshal(&ProvidersConfig{})
+	if err != nil {
+		t.Fatalf("marshal empty: %v", err)
+	}
+	if string(empty) != "null" {
+		t.Errorf("marshal empty = %q, want %q", empty, "null")
+	}
+}
+
+// TestProvidersConfigAuthMethodRoundTrip is the end-to-end proof that the CLI's
+// best-effort `Providers.Anthropic.AuthMethod = "oauth"` write now survives
+// SaveConfig -> LoadConfig, which is what the provider selector depends on.
+func TestProvidersConfigAuthMethodRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+
+	cfg := DefaultConfig()
+	cfg.Providers.Anthropic.AuthMethod = "oauth"
+	if err := SaveConfig(path, cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	loaded, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if loaded.Providers == nil {
+		t.Fatal("loaded.Providers = nil, want the saved providers section")
+	}
+	if got := loaded.Providers.Anthropic.AuthMethod; got != "oauth" {
+		t.Errorf("loaded.Providers.Anthropic.AuthMethod = %q, want %q", got, "oauth")
+	}
+}

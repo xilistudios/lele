@@ -509,3 +509,141 @@ func TestEnsureFreshCredentialErrorContextSavingRefreshedToken(t *testing.T) {
 		t.Errorf("token endpoint hits = %d, want 1", got)
 	}
 }
+
+// --- Rotated-token ordering (anti-bug port) -------------------------------
+//
+// The reference implementation (jcode) runs its inference-scope gate BEFORE
+// persisting the rotated refresh token, so a rotation that answers with
+// non-inference scopes consumes the old refresh token and throws the new one
+// away, bricking the account. EnsureFreshCredential must therefore persist the
+// credential carried by the *inferenceScopeError before surfacing it.
+
+// claudeGateCfg builds the Claude-like config used by the two tests below: a
+// hand-built JSON token request that enforces the inference-scope gate against
+// the given fake endpoint.
+func claudeGateCfg(srv *httptest.Server) OAuthProviderConfig {
+	return OAuthProviderConfig{
+		Name:                  "anthropic",
+		ClientID:              "cid",
+		RequireInferenceScope: true,
+		TokenRequestStyle:     TokenRequestJSON,
+		TokenURL:              srv.URL,
+		HTTPClient:            srv.Client(),
+	}
+}
+
+// J1 — the whole point of the task: the endpoint rotates the refresh token and
+// answers with non-inference scopes. The gate fails, but the ROTATED refresh
+// token must already be persisted when the error comes back.
+func TestEnsureFreshCredentialPersistsRotatedTokenOnInferenceGateFailure(t *testing.T) {
+	setupRefreshTestStore(t)
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"rotated","expires_in":3600,"scope":"org:create_api_key user:profile"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := claudeGateCfg(srv)
+
+	if err := SetCredential("anthropic", expiredCred("anthropic", "old-refresh")); err != nil {
+		t.Fatalf("SetCredential() error: %v", err)
+	}
+	before, err := GetCredential("anthropic")
+	if err != nil {
+		t.Fatalf("GetCredential() before error: %v", err)
+	}
+	t.Logf("stored credential before the call: access=%q refresh=%q expires_at=%v provider=%q auth_method=%q",
+		before.AccessToken, before.RefreshToken, before.ExpiresAt, before.Provider, before.AuthMethod)
+
+	cred, err := EnsureFreshCredential("anthropic", cfg, RefreshPolicy{RequireOAuthMethod: true})
+	if err == nil {
+		t.Fatal("EnsureFreshCredential() error = nil, want the inference-scope gate failure")
+	}
+	if !strings.Contains(err.Error(), "user:inference") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "user:inference")
+	}
+	if cred != nil {
+		t.Errorf("EnsureFreshCredential() = %+v, want nil", cred)
+	}
+
+	stored, err := GetCredential("anthropic")
+	if err != nil {
+		t.Fatalf("GetCredential() after error: %v", err)
+	}
+	if stored == nil {
+		t.Fatal("GetCredential() after = nil, want the rotated credential")
+	}
+	t.Logf("stored credential after the call:  access=%q refresh=%q expires_at=%v provider=%q auth_method=%q scopes=%v",
+		stored.AccessToken, stored.RefreshToken, stored.ExpiresAt, stored.Provider, stored.AuthMethod, stored.Scopes)
+
+	// The rotated refresh token must survive the gate failure: the old one is
+	// already consumed, so losing this one bricks the account (the jcode bug).
+	if stored.RefreshToken != "rotated" {
+		t.Errorf("persisted RefreshToken = %q, want %q (rotated token was lost)", stored.RefreshToken, "rotated")
+	}
+	if stored.AccessToken != "new-access" {
+		t.Errorf("persisted AccessToken = %q, want %q", stored.AccessToken, "new-access")
+	}
+	// Same metadata carry-over the success path applies.
+	if stored.Provider != "anthropic" {
+		t.Errorf("persisted Provider = %q, want %q", stored.Provider, "anthropic")
+	}
+	if stored.AuthMethod != "oauth" {
+		t.Errorf("persisted AuthMethod = %q, want %q", stored.AuthMethod, "oauth")
+	}
+
+	if got := hits.Load(); got != 1 {
+		t.Errorf("token endpoint hits = %d, want exactly 1", got)
+	}
+}
+
+// J2 — negative control: a non-gate refresh failure carries no credential and
+// must NOT touch the stored one (the current behavior, unchanged).
+func TestEnsureFreshCredentialKeepsStoredTokenOnNonGateRefreshError(t *testing.T) {
+	setupRefreshTestStore(t)
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := claudeGateCfg(srv)
+
+	if err := SetCredential("anthropic", expiredCred("anthropic", "old-refresh")); err != nil {
+		t.Fatalf("SetCredential() error: %v", err)
+	}
+
+	cred, err := EnsureFreshCredential("anthropic", cfg, RefreshPolicy{RequireOAuthMethod: true})
+	if err == nil {
+		t.Fatal("EnsureFreshCredential() error = nil, want non-nil")
+	}
+	if cred != nil {
+		t.Errorf("EnsureFreshCredential() = %+v, want nil", cred)
+	}
+	if strings.Contains(err.Error(), "user:inference") {
+		t.Errorf("error = %q, want the plain refresh failure (gate not reached)", err.Error())
+	}
+
+	stored, err := GetCredential("anthropic")
+	if err != nil {
+		t.Fatalf("GetCredential() error: %v", err)
+	}
+	if stored == nil {
+		t.Fatal("GetCredential() = nil, want the untouched stored credential")
+	}
+	if stored.RefreshToken != "old-refresh" {
+		t.Errorf("stored RefreshToken = %q, want %q (non-gate failure must not overwrite)", stored.RefreshToken, "old-refresh")
+	}
+	if stored.AccessToken != "old-access" {
+		t.Errorf("stored AccessToken = %q, want %q", stored.AccessToken, "old-access")
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("token endpoint hits = %d, want 1", got)
+	}
+}

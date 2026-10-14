@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -43,6 +44,18 @@ func refreshLockFor(provider string) *sync.Mutex {
 // message), and returns the stored credential untouched (no network) when no
 // refresh is warranted.
 //
+// Refresh failures never lose a rotated refresh token. When the token endpoint
+// succeeds but the response fails the inference-scope gate, RefreshAccessToken
+// returns the freshly issued credential TOGETHER with an *inferenceScopeError:
+// the endpoint has already consumed the old refresh token and handed out the
+// new one, so the coordinator persists that credential (with the same metadata
+// carry-over as the success path) BEFORE returning the error. jcode runs the
+// gate before persisting, which drops the rotated token while the old one is
+// already spent and therefore bricks the account; this ordering deliberately
+// inverts it. The gate error keeps its own text under the usual
+// "refreshing token: <err>" prefix, and a failing save is reported too: both
+// failures are mentioned in the returned message.
+//
 // Returned errors are already contextualized with the same prefixes the
 // providers used to build inline: "loading auth credentials: <err>" when the
 // credential cannot be read, "refreshing token: <err>" when the token endpoint
@@ -84,6 +97,31 @@ func EnsureFreshCredential(provider string, cfg OAuthProviderConfig, policy Refr
 
 	refreshed, err := RefreshAccessToken(stored, cfg)
 	if err != nil {
+		// Anti-bug port: when the endpoint rotated the refresh token but the
+		// response failed the inference-scope gate, the old token is already
+		// consumed. Persist the freshly issued credential (mirroring the
+		// success path's metadata carry-over below, field for field) before
+		// surfacing the failure, or the account would be bricked: the new
+		// refresh token would exist nowhere while the stored one no longer
+		// works. The typed error is detected with errors.As, never by string.
+		var scopeErr *inferenceScopeError
+		if errors.As(err, &scopeErr) && scopeErr.Credential != nil {
+			rotated := scopeErr.Credential
+			if stored.Email != "" {
+				rotated.Email = stored.Email
+			}
+			if rotated.AuthMethod == "" {
+				rotated.AuthMethod = stored.AuthMethod
+			}
+			if rotated.Provider == "" {
+				rotated.Provider = stored.Provider
+			}
+			if saveErr := SetCredential(provider, rotated); saveErr != nil {
+				// Never swallow one failure to report the other: the message
+				// still starts with the gate error and also names the save.
+				return nil, fmt.Errorf("saving rotated token after inference-scope failure: %w (gate error: %v)", saveErr, err)
+			}
+		}
 		// Do not corrupt the stored credential when the refresh fails.
 		return nil, fmt.Errorf("refreshing token: %w", err)
 	}

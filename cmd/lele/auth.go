@@ -25,6 +25,10 @@ const (
 	// loginKindBrowserPreset runs the browser OAuth flow with a preset
 	// resolved from the auth registry (today: google-antigravity).
 	loginKindBrowserPreset
+	// loginKindClaudeOAuth runs the Claude.ai OAuth flow (browser with
+	// paste-code fallback, or --paste-code for headless environments). It is
+	// reached through the `claude` alias of the `anthropic` preset.
+	loginKindClaudeOAuth
 )
 
 // Login-flow seams.
@@ -42,6 +46,12 @@ var (
 	loginBrowser = auth.LoginBrowser
 	// pasteToken is the seam for the manual paste-token flow (reads from stdin).
 	pasteToken = auth.LoginPasteToken
+	// loginClaudePasteCode is the seam for the headless Claude paste-code flow
+	// (--paste-code; reads from stdin).
+	loginClaudePasteCode = auth.LoginPasteCode
+	// loginClaudeBrowser is the seam for the Claude browser flow with graceful
+	// paste-code degradation for headless environments.
+	loginClaudeBrowser = auth.LoginBrowserWithPasteFallback
 	// setCredential is the seam for persisting a credential under its provider key.
 	setCredential = auth.SetCredential
 )
@@ -66,21 +76,34 @@ func parseAuthSubcommand(args []string) string {
 	return args[0]
 }
 
+// loginArgs holds the parsed `auth login` flags.
+type loginArgs struct {
+	// Provider is the raw --provider/-p value (not normalized: 'claude' and
+	// 'anthropic' are different flows and normalization happens later).
+	Provider string
+	// DeviceCode requests the RFC 8628 device code flow (openai only).
+	DeviceCode bool
+	// PasteCode requests the headless Claude paste-code flow (claude only).
+	PasteCode bool
+}
+
 // parseLoginArgs extracts the login argument parsing logic for testability.
-// Returns: provider, useDeviceCode.
-func parseLoginArgs(args []string) (provider string, useDeviceCode bool) {
+func parseLoginArgs(args []string) loginArgs {
+	var parsed loginArgs
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--provider", "-p":
 			if i+1 < len(args) {
-				provider = args[i+1]
+				parsed.Provider = args[i+1]
 				i++
 			}
 		case "--device-code":
-			useDeviceCode = true
+			parsed.DeviceCode = true
+		case "--paste-code":
+			parsed.PasteCode = true
 		}
 	}
-	return provider, useDeviceCode
+	return parsed
 }
 
 // parseLogoutArgs extracts the logout argument parsing logic for testability.
@@ -134,12 +157,17 @@ func authHelp() {
 	fmt.Println()
 	fmt.Println("Login options:")
 	fmt.Printf("  --provider <name>    Provider to login with (%s)\n", supportedProviders())
+	fmt.Println("  --provider claude    Claude OAuth (alias of the anthropic preset; use --provider anthropic to paste a token)")
+	fmt.Println("  --provider codex     OpenAI OAuth (alias of the openai preset; same flow as --provider openai)")
 	fmt.Println("  --device-code        Use device code flow (openai only, for headless environments)")
+	fmt.Println("  --paste-code         Paste the callback code/URL manually (claude only)")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  lele auth login --provider openai")
 	fmt.Println("  lele auth login --provider openai --device-code")
 	fmt.Println("  lele auth login --provider anthropic")
+	fmt.Println("  lele auth login --provider claude")
+	fmt.Println("  lele auth login --provider claude --paste-code")
 	fmt.Println("  lele auth login --provider google-antigravity")
 	fmt.Println("  lele auth login --provider antigravity   (alias of google-antigravity)")
 	fmt.Println("  lele auth logout --provider openai")
@@ -149,17 +177,33 @@ func authHelp() {
 // supportedProviders returns the provider names `auth login` accepts, as a
 // single string ready to be embedded in help/error text.
 //
-// The OAuth names come from the registry (auth.OAuthProviderNames) so they can
-// never drift from the presets that actually exist; "anthropic" is appended by
-// hand because it is not an OAuth preset: it uses the paste-token flow.
+// The names come from the registry (auth.OAuthProviderNames) so they can never
+// drift from the presets that actually exist. `anthropic` is the registry key of
+// the Claude OAuth preset, but the two spellings drive different flows:
+// `--provider anthropic` pastes a token (the intercept in resolveLoginProvider)
+// while `--provider claude` (an alias of the same preset) runs the Claude OAuth
+// flow, so `anthropic` is advertised once and never appended by hand.
 func supportedProviders() string {
-	return strings.Join(auth.OAuthProviderNames(), ", ") + ", anthropic"
+	return strings.Join(auth.OAuthProviderNames(), ", ")
 }
 
 // unsupportedProviderError builds the user-facing error for an unknown
 // --provider value, listing the providers derived from the registry.
 func unsupportedProviderError(provider string) error {
 	return fmt.Errorf("Unsupported provider: %s\nSupported providers: %s", provider, supportedProviders())
+}
+
+// deviceCodeUnavailableError builds the rejection for a provider that does not
+// implement the RFC 8628 device code flow (only `openai` does, and it is
+// dispatched before this error can be reached).
+//
+// It is the single source of that message so the `anthropic` intercept and the
+// registry branch cannot drift apart: `--provider anthropic --device-code` and
+// `--provider claude --device-code` reject the flag with the very same line,
+// because both describe the same preset (provider is always the canonical
+// name, never the spelling the user typed).
+func deviceCodeUnavailableError(provider string) error {
+	return fmt.Errorf("device code flow is not available for %s", provider)
 }
 
 // resolveLoginProvider maps a --provider value to the login implementation that
@@ -170,16 +214,32 @@ func unsupportedProviderError(provider string) error {
 // print (including the supported-provider list derived from
 // auth.OAuthProviderNames), so the caller only needs to print it.
 //
-// `anthropic` does not go through the registry (it is not an OAuth preset) but
-// its name is normalized with normalizeProviderName before being matched, so it
-// accepts the same spellings as the registry-backed providers: `anthropic`,
-// `ANTHROPIC` and `  Anthropic  ` all resolve to the same paste-token flow.
+// The verbatim `anthropic` spelling is intercepted before the registry lookup
+// so it keeps the legacy paste-token flow, even though the registry does own the
+// `anthropic` preset (the Claude OAuth one): only the `claude` alias reaches the
+// registry branch, and that branch maps the preset to the Claude OAuth flow. The
+// intercept still normalizes the name with normalizeProviderName before matching
+// it, so it accepts the same spellings as the registry-backed providers:
+// `anthropic`, `ANTHROPIC` and `  Anthropic  ` all resolve to the same
+// paste-token flow.
 // `--provider anthropic` keeps being exactly what it was before (same flow, same
 // credential key, same message). Every other name is normalized by the registry,
 // so `openai` keeps its exact flow while `OPENAI`/`codex` now resolve to it as
 // well.
+//
+// The registry branch maps the `anthropic` preset (reached through the `claude`
+// alias, since the verbatim `anthropic` spelling is intercepted above) to the
+// Claude OAuth flow rather than the generic browser-preset flow.
 func resolveLoginProvider(name string, useDeviceCode bool) (loginKind, auth.OAuthProviderConfig, error) {
 	if normalizeProviderName(name) == "anthropic" {
+		// The intercept must not swallow --device-code: the flag is openai-only,
+		// and silently ignoring it would look like the CLI had honored it while
+		// it actually prompts for a token. Reject it with the same message the
+		// registry branch below uses so `anthropic` and `claude` (the alias that
+		// reaches it) behave identically — fail closed, never a silent ignore.
+		if useDeviceCode {
+			return loginKindUnsupported, auth.OAuthProviderConfig{}, deviceCodeUnavailableError("anthropic")
+		}
 		return loginKindPasteToken, auth.OAuthProviderConfig{}, nil
 	}
 
@@ -198,15 +258,37 @@ func resolveLoginProvider(name string, useDeviceCode bool) (loginKind, auth.OAut
 	if useDeviceCode {
 		// Silently ignoring the flag would make the CLI look like it honored
 		// --device-code while actually starting an interactive browser flow.
-		return loginKindUnsupported, auth.OAuthProviderConfig{}, fmt.Errorf(
-			"device code flow is not available for %s", cfg.Name)
+		return loginKindUnsupported, auth.OAuthProviderConfig{}, deviceCodeUnavailableError(cfg.Name)
+	}
+
+	if cfg.Name == "anthropic" {
+		// `claude` (and any other alias of the anthropic preset that is not the
+		// verbatim `anthropic` spelling intercepted above) runs the Claude OAuth
+		// flow. Credentials are still stored under cfg.Name ("anthropic").
+		return loginKindClaudeOAuth, cfg, nil
 	}
 
 	return loginKindBrowserPreset, cfg, nil
 }
 
+// canonicalProviderName resolves a user-supplied provider name to the canonical
+// name used as the credential-store key, the config selector and the name echoed
+// back in the CLI's messages.
+//
+// It is normalizeProviderName plus the registry alias resolution, so
+// `claude`/` CLAUDE ` → `anthropic`, `codex` → `openai` and `antigravity` →
+// `google-antigravity`, while an unknown name is returned normalized but
+// otherwise untouched (callers that need to reject it do so separately).
+func canonicalProviderName(name string) string {
+	if cfg, ok := auth.OAuthProviderConfigByName(name); ok {
+		return cfg.Name
+	}
+	return normalizeProviderName(name)
+}
+
 func authLoginCmd() {
-	provider, useDeviceCode := parseLoginArgs(os.Args[3:])
+	args := parseLoginArgs(os.Args[3:])
+	provider := args.Provider
 
 	if provider == "" {
 		fmt.Println("Error: --provider is required")
@@ -215,21 +297,31 @@ func authLoginCmd() {
 		return
 	}
 
-	kind, cfg, err := resolveLoginProvider(provider, useDeviceCode)
+	kind, cfg, err := resolveLoginProvider(provider, args.DeviceCode)
 	if err != nil {
 		fmt.Println(err)
 		loginExit(1)
 		return
 	}
 
+	if args.PasteCode && kind != loginKindClaudeOAuth {
+		// Fail closed rather than silently ignoring the flag: only the Claude
+		// OAuth flow implements the headless paste-code login.
+		fmt.Println("--paste-code is only supported for the Claude OAuth flow; use: lele auth login --provider claude --paste-code")
+		loginExit(1)
+		return
+	}
+
 	switch kind {
 	case loginKindOpenAI:
-		authLoginOpenAI(useDeviceCode)
+		authLoginOpenAI(args.DeviceCode)
 	case loginKindPasteToken:
 		// The normalized name is what the flow receives, and therefore what
 		// becomes the credential key: `--provider " ANTHROPIC "` stores
 		// `anthropic`.
 		authLoginPasteToken(normalizeProviderName(provider))
+	case loginKindClaudeOAuth:
+		authLoginClaudeOAuth(cfg, args.PasteCode)
 	case loginKindBrowserPreset:
 		authLoginBrowserPreset(cfg)
 	default:
@@ -270,6 +362,58 @@ func authLoginOpenAI(useDeviceCode bool) {
 		appCfg.Providers.OpenAI.AuthMethod = "oauth"
 		if err := config.SaveConfig(getConfigPath(), appCfg); err != nil {
 			fmt.Printf("Warning: could not update config: %v\n", err)
+		}
+	}
+
+	fmt.Println("Login successful!")
+	if cred.AccountID != "" {
+		fmt.Printf("Account: %s\n", cred.AccountID)
+	}
+}
+
+// authLoginClaudeOAuth runs the Claude.ai OAuth flow for the `anthropic` preset
+// (reached through the `claude` alias) and stores the credential under the
+// canonical key, cfg.Name ("anthropic").
+//
+// pasteCode selects the headless flow (loginClaudePasteCode, which reads one
+// line from stdin); otherwise the browser flow runs with a graceful paste-code
+// fallback (loginClaudeBrowser). Both are seams so the tests can drive the
+// command without a network or a credential store.
+func authLoginClaudeOAuth(cfg auth.OAuthProviderConfig, pasteCode bool) {
+	var cred *auth.AuthCredential
+	var err error
+
+	if pasteCode {
+		cred, err = loginClaudePasteCode(cfg, os.Stdin)
+	} else {
+		cred, err = loginClaudeBrowser(cfg, os.Stdin)
+	}
+
+	if err != nil {
+		fmt.Printf("Login failed: %v\n", err)
+		loginExit(1)
+		return
+	}
+
+	if err := setCredential(cfg.Name, cred); err != nil {
+		fmt.Printf("Failed to save credentials: %v\n", err)
+		loginExit(1)
+		return
+	}
+
+	// Best effort: the credential is already stored, so a config-write failure
+	// only warns (the same pattern authLoginOpenAI uses).
+	if appCfg, err := loadConfig(); err == nil {
+		appCfg.Providers.Anthropic.AuthMethod = "oauth"
+		if err := config.SaveConfig(getConfigPath(), appCfg); err != nil {
+			fmt.Printf("Warning: could not update config: %v\n", err)
+			// Actionable follow-up for the warning above: without
+			// auth_method = "oauth" in the config, the provider selector in
+			// pkg/providers/factory.go will not pick the Claude OAuth provider
+			// for the stored credential and the next model call fails with a
+			// confusing "no API key configured for model". Name the exact key
+			// and the exact file so the user can fix it by hand.
+			fmt.Printf("Set providers.anthropic.auth_method = \"oauth\" in %s for the Claude OAuth login to be used.\n", getConfigPath())
 		}
 	}
 
@@ -347,6 +491,11 @@ func authLogoutCmd() {
 	provider := parseLogoutArgs(os.Args[3:])
 
 	if provider != "" {
+		// Resolve aliases to the canonical credential key first: `auth logout
+		// --provider claude` must delete the `anthropic` credential, clear
+		// Providers.Anthropic, and echo the name actually logged out from.
+		provider = canonicalProviderName(provider)
+
 		if err := auth.DeleteCredential(provider); err != nil {
 			fmt.Printf("Failed to remove credentials: %v\n", err)
 			os.Exit(1)

@@ -1,9 +1,11 @@
 package auth
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -49,6 +51,33 @@ func TestAuthCredentialNeedsRefresh(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAuthCredentialScopesJSONCompatibility(t *testing.T) {
+	t.Run("nil scopes omit the scopes key", func(t *testing.T) {
+		data, err := json.Marshal(&AuthCredential{
+			AccessToken: "at",
+			Provider:    "openai",
+			AuthMethod:  "oauth",
+		})
+		if err != nil {
+			t.Fatalf("json.Marshal() error: %v", err)
+		}
+		if strings.Contains(string(data), `"scopes"`) {
+			t.Errorf("marshalled credential must not contain a scopes key: %s", data)
+		}
+	})
+
+	t.Run("legacy document without scopes unmarshals to nil", func(t *testing.T) {
+		legacy := `{"access_token":"at","provider":"openai","auth_method":"oauth"}`
+		var cred AuthCredential
+		if err := json.Unmarshal([]byte(legacy), &cred); err != nil {
+			t.Fatalf("json.Unmarshal() error: %v", err)
+		}
+		if cred.Scopes != nil {
+			t.Errorf("Scopes = %#v, want nil", cred.Scopes)
+		}
+	})
 }
 
 func TestStoreRoundtrip(t *testing.T) {

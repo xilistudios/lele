@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -56,7 +57,33 @@ type OAuthProviderConfig struct {
 	// requests entirely. Per RFC 6749 section 6 the server then applies the scope
 	// originally granted. It takes precedence over RefreshScopes and Scopes.
 	// Zero value (false) preserves the historical behaviour.
-	OmitRefreshScope  bool
+	OmitRefreshScope bool
+
+	// ManualRedirectURI is the hosted redirect_uri for the headless paste-code
+	// flow (LoginPasteCode) and the alternate URL advertised when the loopback
+	// listener cannot be used. Empty => the provider has no paste-code flow.
+	// It never affects LoginBrowser's loopback redirect. The paste flow always
+	// uses this value for both the authorize URL and the exchange, so a legacy
+	// console redirect pasted by the user (correction V6) is normalized on input
+	// only and is never transmitted.
+	ManualRedirectURI string
+	// StateIsVerifier makes LoginBrowser use the PKCE code_verifier as the OAuth
+	// `state` (Claude/jcode behavior) and echo it on the token exchange.
+	// Zero value keeps the historical random-state CSRF check.
+	StateIsVerifier bool
+	// RequireInferenceScope enables the jcode Claude gate: a token response
+	// whose non-empty scope list has no inference scope is rejected.
+	RequireInferenceScope bool
+	// RequireRefreshToken, when true, makes a successful token exchange require a
+	// non-empty refresh token AND a non-zero expiry (spec correction V7). A
+	// credential with no refresh token is unusable for a provider whose access
+	// tokens expire: the login would "succeed" and store a credential that can
+	// never be refreshed, and the zero expiry would additionally make
+	// NeedsRefresh() report true forever. The exchange fails instead, with an
+	// actionable error.
+	// Opt-in: only the Claude preset sets it (openai/google-* keep their behavior).
+	RequireRefreshToken bool
+
 	TokenRequestStyle TokenRequestStyle // form (zero value) | json
 	AuthHeaderStyle   TokenAuthStyle    // body (zero value) | basic
 	HTTPClient        *http.Client      // optional; nil => http.DefaultClient
@@ -169,10 +196,15 @@ func oauthCallbackPath(cfg OAuthProviderConfig) string {
 	return "/auth/callback"
 }
 
-// oauthRedirectURI returns the redirect_uri sent to the authorize endpoint.
-// An explicit cfg.RedirectURI wins; otherwise it is derived from the loopback
-// listener (http://localhost:{Port}{CallbackPath}). It is a pure function so
-// the derivation can be unit-tested without starting a listener.
+// oauthRedirectURI returns the listener-free derivation of the redirect_uri:
+// an explicit cfg.RedirectURI wins; otherwise it is derived from the CONFIGURED
+// port (http://localhost:{Port}{CallbackPath}). It stays a pure function so the
+// derivation can be unit-tested without starting a listener.
+//
+// LoginBrowser does NOT use it anymore to build the authorize URL: it binds the
+// loopback listener first and derives the redirect from the port the OS actually
+// assigned (redirectURIForListener), which matters when cfg.Port is 0. For a
+// fixed port both derivations return the same string.
 func oauthRedirectURI(cfg OAuthProviderConfig) string {
 	if cfg.RedirectURI != "" {
 		return cfg.RedirectURI
@@ -180,18 +212,85 @@ func oauthRedirectURI(cfg OAuthProviderConfig) string {
 	return fmt.Sprintf("http://localhost:%d%s", cfg.Port, oauthCallbackPath(cfg))
 }
 
+// bindCallbackListener binds the loopback listener for LoginBrowser. The bind
+// address is always 127.0.0.1 (jcode binds loopback too) and the advertised
+// redirect host stays "localhost"; cfg.Port == 0 asks the OS for an ephemeral
+// port (jcode bind_callback_listener(0)).
+func bindCallbackListener(cfg OAuthProviderConfig) (net.Listener, error) {
+	return net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.Port))
+}
+
+// redirectURIForListener derives the authorize redirect from the listener that
+// was actually bound, so an ephemeral (cfg.Port == 0) flow advertises the real
+// port. An explicit cfg.RedirectURI still wins verbatim, and for a fixed port
+// the result is identical to oauthRedirectURI.
+func redirectURIForListener(cfg OAuthProviderConfig, ln net.Listener) string {
+	if cfg.RedirectURI != "" {
+		return cfg.RedirectURI
+	}
+	tcpAddr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		return oauthRedirectURI(cfg)
+	}
+	return fmt.Sprintf("http://localhost:%d%s", tcpAddr.Port, oauthCallbackPath(cfg))
+}
+
+// LoginBrowser runs the interactive browser (loopback redirect) OAuth flow for a
+// provider that can bind a local callback listener. It never degrades to the
+// paste-code flow: use LoginBrowserWithPasteFallback for providers that can.
 func LoginBrowser(cfg OAuthProviderConfig) (*AuthCredential, error) {
+	return loginBrowser(cfg, false, nil)
+}
+
+// LoginBrowserWithPasteFallback is LoginBrowser with a graceful degradation for
+// headless environments: when the provider advertises a hosted
+// ManualRedirectURI (Claude) and the loopback listener cannot be bound or the
+// callback never arrives within five minutes, it falls back to the manual
+// paste-code flow (LoginPasteCode) instead of failing.
+//
+// Providers without a ManualRedirectURI have no paste-code flow, so they are
+// handled by LoginBrowser unchanged.
+func LoginBrowserWithPasteFallback(cfg OAuthProviderConfig, r io.Reader) (*AuthCredential, error) {
+	if cfg.ManualRedirectURI == "" {
+		return LoginBrowser(cfg)
+	}
+	return loginBrowser(cfg, true, r)
+}
+
+// loginBrowser is the shared implementation behind LoginBrowser and
+// LoginBrowserWithPasteFallback. fallbackToPaste enables the manual paste-code
+// degradation; r is only read in that path (LoginBrowser passes nil).
+func loginBrowser(cfg OAuthProviderConfig, fallbackToPaste bool, r io.Reader) (*AuthCredential, error) {
 	pkce, err := GeneratePKCE()
 	if err != nil {
 		return nil, fmt.Errorf("generating PKCE: %w", err)
 	}
 
-	state, err := generateState()
-	if err != nil {
-		return nil, fmt.Errorf("generating state: %w", err)
+	// Claude/jcode binds the OAuth `state` to the PKCE verifier (cfg.StateIsVerifier);
+	// every other provider keeps the historical random-state CSRF check.
+	var state string
+	if cfg.StateIsVerifier {
+		state = pkce.CodeVerifier
+	} else {
+		state, err = generateState()
+		if err != nil {
+			return nil, fmt.Errorf("generating state: %w", err)
+		}
 	}
 
-	redirectURI := oauthRedirectURI(cfg)
+	// Bind before building the authorize URL so the redirect_uri carries the real
+	// bound port (cfg.Port may be 0, i.e. an OS-assigned ephemeral port).
+	listener, err := bindCallbackListener(cfg)
+	if err != nil {
+		bindErr := fmt.Errorf("starting callback server on port %d: %w", cfg.Port, err)
+		if fallbackToPaste {
+			fmt.Printf("Automatic browser login failed (%v). Falling back to manual code paste.\n", bindErr)
+			return LoginPasteCode(cfg, r)
+		}
+		return nil, bindErr
+	}
+
+	redirectURI := redirectURIForListener(cfg, listener)
 
 	authURL := buildAuthorizeURL(cfg, pkce, state, redirectURI)
 
@@ -218,11 +317,6 @@ func LoginBrowser(cfg OAuthProviderConfig) (*AuthCredential, error) {
 		resultCh <- callbackResult{code: code}
 	})
 
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.Port))
-	if err != nil {
-		return nil, fmt.Errorf("starting callback server on port %d: %w", cfg.Port, err)
-	}
-
 	server := &http.Server{Handler: mux}
 	go func() {
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
@@ -243,7 +337,16 @@ func LoginBrowser(cfg OAuthProviderConfig) (*AuthCredential, error) {
 		fmt.Printf("Could not open browser automatically.\nPlease open this URL manually:\n\n%s\n\n", authURL)
 	}
 
-	fmt.Println("If you're running in a headless environment, use: lele auth login --provider openai --device-code")
+	// The headless hint is provider-specific: openai keeps its historical
+	// --device-code line, a provider with a hosted paste redirect (Claude) points
+	// at --paste-code, and any other provider prints nothing (this drops the
+	// misleading openai hint from the google-antigravity flow).
+	switch {
+	case cfg.Name == "openai":
+		fmt.Println("If you're running in a headless environment, use: lele auth login --provider openai --device-code")
+	case cfg.ManualRedirectURI != "":
+		fmt.Println("If you're running in a headless environment, use: lele auth login --provider claude --paste-code")
+	}
 	fmt.Println("Waiting for authentication in browser...")
 
 	select {
@@ -251,9 +354,24 @@ func LoginBrowser(cfg OAuthProviderConfig) (*AuthCredential, error) {
 		if result.err != nil {
 			return nil, result.err
 		}
-		return exchangeCodeForTokens(cfg, result.code, pkce.CodeVerifier, redirectURI)
+		ex := exchangeParams{
+			Code:         result.code,
+			CodeVerifier: pkce.CodeVerifier,
+			RedirectURI:  redirectURI,
+		}
+		// Only Claude echoes the state on the exchange; for every other provider
+		// the field is omitted from the wire (historical OpenAI behavior).
+		if cfg.StateIsVerifier {
+			ex.State = state
+		}
+		return exchangeCodeForTokensWithParams(cfg, ex)
 	case <-time.After(5 * time.Minute):
-		return nil, fmt.Errorf("authentication timed out after 5 minutes")
+		timeoutErr := fmt.Errorf("authentication timed out after 5 minutes")
+		if fallbackToPaste {
+			fmt.Printf("Automatic browser login failed (%v). Falling back to manual code paste.\n", timeoutErr)
+			return LoginPasteCode(cfg, r)
+		}
+		return nil, timeoutErr
 	}
 }
 
@@ -471,6 +589,25 @@ func refreshScope(cfg OAuthProviderConfig) string {
 	return cfg.Scopes
 }
 
+// refreshErrorIsInvalidScope reports whether a failed refresh response body
+// carries one of the invalid_scope markers jcode matches
+// (claude_refresh_error_is_invalid_scope). The body is matched
+// case-insensitively because the casing of the OAuth error document is not
+// stable across providers/proxies.
+func refreshErrorIsInvalidScope(body []byte) bool {
+	lower := strings.ToLower(string(body))
+	for _, marker := range []string{
+		"invalid_scope",
+		"requested scope is invalid",
+		"scope is invalid",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func RefreshAccessToken(cred *AuthCredential, cfg OAuthProviderConfig) (*AuthCredential, error) {
 	if cred.RefreshToken == "" {
 		return nil, fmt.Errorf("no refresh token available")
@@ -487,8 +624,9 @@ func RefreshAccessToken(cred *AuthCredential, cfg OAuthProviderConfig) (*AuthCre
 	if cfg.ClientSecret != "" {
 		data.Set("client_secret", cfg.ClientSecret)
 	}
-	if scope := refreshScope(cfg); scope != "" {
-		data.Set("scope", scope)
+	scopeSent := refreshScope(cfg)
+	if scopeSent != "" {
+		data.Set("scope", scopeSent)
 	}
 
 	tokenURL := cfg.Issuer + "/oauth/token"
@@ -496,18 +634,57 @@ func RefreshAccessToken(cred *AuthCredential, cfg OAuthProviderConfig) (*AuthCre
 		tokenURL = cfg.TokenURL
 	}
 
-	resp, err := doTokenRequest(cfg, tokenURL, data)
-	if err != nil {
-		return nil, fmt.Errorf("refreshing token: %w", err)
-	}
-	defer resp.Body.Close()
+	// performRefresh sends the refresh POST once and reads its response body.
+	// It is invoked at most twice: the retry reuses it with the `scope` field
+	// deleted. doTokenRequest/tokenRequest never mutate the params they are
+	// given, so `data` can be reused for both attempts.
+	performRefresh := func(params url.Values) (int, []byte, error) {
+		resp, err := doTokenRequest(cfg, tokenURL, params)
+		if err != nil {
+			return 0, nil, fmt.Errorf("refreshing token: %w", err)
+		}
+		defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response body: %w", err)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return 0, nil, fmt.Errorf("reading response body: %w", err)
+		}
+		return resp.StatusCode, body, nil
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token refresh failed: %s", string(body))
+
+	status, body, err := performRefresh(data)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		// Retry exactly once without `scope` when a scope was actually sent and
+		// the server rejected it as invalid_scope: the credential may have been
+		// granted a narrower scope than the config asks for, and RFC 6749 §6
+		// lets the request omit `scope` so the server applies the originally
+		// granted one. Any other failure (or a refresh that sent no scope) is
+		// surfaced unchanged.
+		if scopeSent == "" || !refreshErrorIsInvalidScope(body) {
+			return nil, fmt.Errorf("token refresh failed: %s", string(body))
+		}
+
+		retryData := make(url.Values, len(data))
+		for k, vs := range data {
+			retryData[k] = vs
+		}
+		retryData.Del("scope")
+
+		retryStatus, retryBody, err := performRefresh(retryData)
+		if err != nil {
+			return nil, err
+		}
+		if retryStatus != http.StatusOK {
+			// Both attempts failed: keep BOTH diagnostics (jcode parity —
+			// "fallback without scope failed: …; scoped refresh error: …").
+			// Dropping the first body hides why the scope was rejected in the
+			// first place, which is the diagnostic a user actually needs.
+			return nil, fmt.Errorf("token refresh failed: fallback without scope failed: %s; scoped refresh error: %s", string(retryBody), string(body))
+		}
+		body = retryBody
 	}
 
 	refreshed, err := parseTokenResponse(body, cred.Provider)
@@ -525,6 +702,18 @@ func RefreshAccessToken(cred *AuthCredential, cfg OAuthProviderConfig) (*AuthCre
 	}
 	if cred.ProjectID != "" && refreshed.ProjectID == "" {
 		refreshed.ProjectID = cred.ProjectID
+	}
+	// The refreshed credential is returned TOGETHER with the gate failure: the
+	// token endpoint may have rotated the refresh token, and the old one is
+	// already consumed. The refresh coordinator uses errors.As to recover the
+	// credential and persist the rotated refresh token before surfacing the
+	// error, which is what prevents the account from being bricked (jcode's
+	// ordering bug, not copied here). The error text is identical to the one
+	// ensureClaudeInferenceScope produces.
+	if cfg.RequireInferenceScope {
+		if err := ensureClaudeInferenceScopeForCredential(refreshed, "token refresh"); err != nil {
+			return refreshed, err
+		}
 	}
 	return refreshed, nil
 }
@@ -647,13 +836,52 @@ func doTokenRequest(cfg OAuthProviderConfig, endpoint string, params url.Values)
 	return oauthHTTPClient(cfg).Do(req)
 }
 
+// exchangeParams are the values the token exchange echoes back to the authorize
+// request. State == "" omits the `state` field (OpenAI/Antigravity behavior);
+// Claude passes the PKCE verifier (jcode sends `state` on the exchange).
+type exchangeParams struct {
+	Code         string
+	CodeVerifier string
+	RedirectURI  string
+	State        string
+}
+
+// exchangeCodeForTokens is the historical 4-argument entry point. It never sends
+// a `state` on the wire, which keeps the OpenAI/Google exchange byte-identical
+// to the pre-Claude implementation.
 func exchangeCodeForTokens(cfg OAuthProviderConfig, code, codeVerifier, redirectURI string) (*AuthCredential, error) {
+	return exchangeCodeForTokensWithParams(cfg, exchangeParams{
+		Code:         code,
+		CodeVerifier: codeVerifier,
+		RedirectURI:  redirectURI,
+	})
+}
+
+// requireRefreshTokenAndExpiry enforces the complete-credential contract of a
+// successful token exchange for providers whose access tokens expire (spec
+// correction V7). It returns nil for a credential that carries both a refresh
+// token and an expiry, and an actionable error otherwise. Both failures name
+// the missing piece and the command that recovers from it.
+func requireRefreshTokenAndExpiry(cred *AuthCredential) error {
+	if cred.RefreshToken == "" {
+		return errors.New("Claude OAuth token exchange returned no refresh token; the credential could not be refreshed. Re-run: lele auth login --provider claude")
+	}
+	if cred.ExpiresAt.IsZero() {
+		return errors.New("Claude OAuth token exchange returned no expires_in; a credential without an expiry would refresh on every use. Re-run: lele auth login --provider claude")
+	}
+	return nil
+}
+
+func exchangeCodeForTokensWithParams(cfg OAuthProviderConfig, p exchangeParams) (*AuthCredential, error) {
 	data := url.Values{
 		"grant_type":    {"authorization_code"},
-		"code":          {code},
-		"redirect_uri":  {redirectURI},
+		"code":          {p.Code},
+		"redirect_uri":  {p.RedirectURI},
 		"client_id":     {cfg.ClientID},
-		"code_verifier": {codeVerifier},
+		"code_verifier": {p.CodeVerifier},
+	}
+	if p.State != "" {
+		data.Set("state", p.State)
 	}
 	if cfg.ClientSecret != "" {
 		data.Set("client_secret", cfg.ClientSecret)
@@ -680,11 +908,62 @@ func exchangeCodeForTokens(cfg OAuthProviderConfig, code, codeVerifier, redirect
 	if err != nil {
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
+	// A Cloudflare interstitial answers 403 with an HTML challenge instead of the
+	// OAuth error document; surface the actionable fix instead of dumping HTML.
+	if resp.StatusCode == http.StatusForbidden && looksLikeCloudflareChallenge(string(body)) {
+		return nil, fmt.Errorf("token exchange was blocked by Cloudflare before Anthropic returned OAuth tokens. Switch VPN exit IP or network, then retry with `lele auth login --provider claude --paste-code` and paste the callback URL")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("token exchange failed: %s", string(body))
 	}
 
-	return parseTokenResponse(body, provider)
+	cred, err := parseTokenResponse(body, provider)
+	if err != nil {
+		return nil, err
+	}
+	// Spec correction V7: inside the Claude flow a refresh token and a non-zero
+	// expiry are mandatory, because a credential without them is unusable (it can
+	// never be refreshed, and a zero expiry keeps NeedsRefresh() true forever).
+	// Nothing has been issued to persist here, so the exchange simply fails.
+	// Opt-in via the config flag: openai and google-antigravity never set it.
+	if cfg.RequireRefreshToken {
+		if err := requireRefreshTokenAndExpiry(cred); err != nil {
+			return nil, err
+		}
+	}
+	// A Claude token that grants no inference scope is useless for the Messages
+	// API, so fail the login instead of storing a credential that can only 401.
+	// Nothing has been issued to persist here (the flow is interactive), hence
+	// the plain message error. Opt-in via the config flag: openai and
+	// google-antigravity never set it.
+	if cfg.RequireInferenceScope {
+		if err := ensureClaudeInferenceScope(cred.Scopes, "token exchange"); err != nil {
+			return nil, err
+		}
+	}
+	return cred, nil
+}
+
+// looksLikeCloudflareChallenge reports whether body is a Cloudflare blocking
+// interstitial (jcode's looks_like_cloudflare_challenge port). The markers are
+// matched case-insensitively because the HTML casing is not stable.
+func looksLikeCloudflareChallenge(body string) bool {
+	lower := strings.ToLower(body)
+	for _, marker := range []string{
+		// Both spellings are matched: jcode's reference detector matches
+		// "cf-challenge", while the real Anthropic interstitial reports
+		// "cf-hit-challenge" (which does NOT contain "cf-challenge").
+		"cf-hit-challenge",
+		"cf-challenge",
+		"cloudflare",
+		"just a moment",
+		"/cdn-cgi/challenge-platform",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseTokenResponse(body []byte, provider string) (*AuthCredential, error) {
@@ -693,6 +972,7 @@ func parseTokenResponse(body []byte, provider string) (*AuthCredential, error) {
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int    `json:"expires_in"`
 		IDToken      string `json:"id_token"`
+		Scope        string `json:"scope"`
 	}
 	if err := json.Unmarshal(body, &tokenResp); err != nil {
 		return nil, fmt.Errorf("parsing token response: %w", err)
@@ -714,6 +994,7 @@ func parseTokenResponse(body []byte, provider string) (*AuthCredential, error) {
 		Provider:     provider,
 		AuthMethod:   "oauth",
 	}
+	cred.Scopes = parseOAuthScopes(tokenResp.Scope)
 
 	if accountID := extractAccountID(tokenResp.IDToken); accountID != "" {
 		cred.AccountID = accountID
@@ -722,6 +1003,18 @@ func parseTokenResponse(body []byte, provider string) (*AuthCredential, error) {
 	}
 
 	return cred, nil
+}
+
+// parseOAuthScopes splits a space-delimited OAuth `scope` value into its
+// individual scope strings, mirroring RFC 6749 section 3.3. It returns nil
+// when the input carries no scopes so that the `omitempty` JSON tag drops the
+// field entirely.
+func parseOAuthScopes(s string) []string {
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
 }
 
 func extractAccountID(token string) string {

@@ -42,18 +42,29 @@ Examples:
 lele auth login --provider openai
 lele auth login --provider openai --device-code
 lele auth login --provider anthropic
+lele auth login --provider claude
+lele auth login --provider claude --paste-code
 lele auth logout --provider openai
 lele auth status
 ```
 
-Providers accepted by `login` (`codex` is an alias of `openai`, `antigravity` of
-`google-antigravity`):
+Providers accepted by `login` (`claude` is an alias of `anthropic`, `codex` of
+`openai`, `antigravity` of `google-antigravity`):
 
 - `openai` — browser flow; `--device-code` uses the headless device flow.
 - `google-antigravity` — browser flow (Google Cloud Code Assist).
-- `anthropic` — paste-token flow.
+- `anthropic` — paste-token flow (unchanged).
+- `claude` — Claude.ai OAuth browser flow, with a paste-code fallback when the
+  loopback callback cannot run; stores the credential under the canonical key
+  `anthropic` and sets `providers.anthropic.auth_method = "oauth"`.
 
 `--device-code` is only available for `openai`; any other provider rejects it.
+`--paste-code` runs the headless Claude flow (reads the callback code/URL from
+stdin, the equivalent of jcode's `JCODE_CLAUDE_AUTH_CODE`) and is only available
+for `--provider claude`; any other provider rejects it with
+`--paste-code is only supported for the Claude OAuth flow; use: lele auth login
+--provider claude --paste-code`. Both `--provider anthropic` (paste-token) and
+`--provider claude` (OAuth) act on the same `anthropic` credential slot.
 Names are case-insensitive and surrounding whitespace is ignored.
 
 ## `lele gateway`

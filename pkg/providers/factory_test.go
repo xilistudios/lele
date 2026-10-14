@@ -252,6 +252,7 @@ func TestCreateProviderReturnsClaudeProviderForAnthropicOAuth(t *testing.T) {
 		}
 		return &auth.AuthCredential{
 			AccessToken: "anthropic-token",
+			AuthMethod:  "oauth",
 		}, nil
 	}
 
@@ -271,6 +272,45 @@ func TestCreateProviderReturnsClaudeProviderForAnthropicOAuth(t *testing.T) {
 	}
 	if got := claudeProvider.delegate.BaseURL(); got != "https://proxy.example.com" {
 		t.Fatalf("anthropic baseURL = %q, want %q", got, "https://proxy.example.com")
+	}
+	if !claudeProvider.delegate.OAuthMode() {
+		t.Error("delegate.OAuthMode() = false, want true for an oauth credential")
+	}
+}
+
+// TestCreateProviderClaudeProviderTokenAuthMethodIsNotOAuth is the sibling of
+// TestCreateProviderReturnsClaudeProviderForAnthropicOAuth: it takes the same
+// claude-auth selection path but a credential whose AuthMethod is "token"
+// (paste-token), so the delegate must not enable OAuth mode.
+func TestCreateProviderClaudeProviderTokenAuthMethodIsNotOAuth(t *testing.T) {
+	originalGetCredential := getCredential
+	t.Cleanup(func() { getCredential = originalGetCredential })
+
+	getCredential = func(provider string) (*auth.AuthCredential, error) {
+		if provider != "anthropic" {
+			t.Fatalf("provider = %q, want anthropic", provider)
+		}
+		return &auth.AuthCredential{
+			AccessToken: "anthropic-token",
+			AuthMethod:  "token",
+		}, nil
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Provider = "anthropic"
+	cfg.Providers.Anthropic.AuthMethod = "token"
+
+	provider, err := CreateProvider(cfg)
+	if err != nil {
+		t.Fatalf("CreateProvider() error = %v", err)
+	}
+
+	claudeProvider, ok := provider.(*ClaudeProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want *ClaudeProvider", provider)
+	}
+	if claudeProvider.delegate.OAuthMode() {
+		t.Error("delegate.OAuthMode() = true, want false for a token credential")
 	}
 }
 

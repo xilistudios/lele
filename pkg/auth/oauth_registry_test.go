@@ -10,7 +10,7 @@ import (
 // user-visible regression.
 func TestOAuthProviderNamesSortedAndComplete(t *testing.T) {
 	got := OAuthProviderNames()
-	want := []string{"google-antigravity", "openai"}
+	want := []string{"anthropic", "google-antigravity", "openai"}
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("OAuthProviderNames() = %v, want %v", got, want)
@@ -36,8 +36,8 @@ func TestOAuthProviderNamesFreshSlicePerCall(t *testing.T) {
 	first[0] = "pwned"
 
 	second := OAuthProviderNames()
-	if !reflect.DeepEqual(second, []string{"google-antigravity", "openai"}) {
-		t.Errorf("OAuthProviderNames() after a caller mutation = %v, want the canonical list [google-antigravity openai]", second)
+	if !reflect.DeepEqual(second, []string{"anthropic", "google-antigravity", "openai"}) {
+		t.Errorf("OAuthProviderNames() after a caller mutation = %v, want the canonical list [anthropic google-antigravity openai]", second)
 	}
 	if second[0] != canonical {
 		t.Errorf("OAuthProviderNames() slices share state: second call [0] = %q, want %q", second[0], canonical)
@@ -66,11 +66,11 @@ func TestOAuthProviderConfigByName(t *testing.T) {
 		{name: "surrounding whitespace", input: "  google-antigravity\t", wantOK: true, wantCfgName: "google-antigravity"},
 		{name: "whitespace around alias", input: " antigravity ", wantOK: true, wantCfgName: "google-antigravity"},
 		{name: "unknown provider", input: "grok", wantOK: false},
-		{name: "unknown provider with whitespace", input: " claude ", wantOK: false},
+		{name: "alias claude -> anthropic", input: " claude ", wantOK: true, wantCfgName: "anthropic"},
 		{name: "empty", input: "", wantOK: false},
 		{name: "whitespace only", input: "   ", wantOK: false},
 		{name: "partial name is not a prefix match", input: "open", wantOK: false},
-		{name: "anthropic is not an OAuth preset", input: "anthropic", wantOK: false},
+		{name: "canonical anthropic", input: "anthropic", wantOK: true, wantCfgName: "anthropic"},
 	}
 
 	for _, tc := range tests {
@@ -92,6 +92,24 @@ func TestOAuthProviderConfigByName(t *testing.T) {
 				t.Errorf("OAuthProviderConfigByName(%q).Name = %q, want %q", tc.input, cfg.Name, tc.wantCfgName)
 			}
 		})
+	}
+}
+
+// TestClaudeAliasResolvesToAnthropicPreset pins the `claude` alias contract:
+// the alias selects the Claude OAuth flow, but the canonical registry and
+// credential-store key stays `anthropic`. It must therefore resolve to the
+// verbatim ClaudeOAuthConfig() preset (Name == "anthropic", not "claude"), which
+// is what pkg/providers and the credential store look up.
+func TestClaudeAliasResolvesToAnthropicPreset(t *testing.T) {
+	cfg, ok := OAuthProviderConfigByName("claude")
+	if !ok {
+		t.Fatal("OAuthProviderConfigByName(\"claude\") ok = false, want true")
+	}
+	if cfg.Name != "anthropic" {
+		t.Errorf("OAuthProviderConfigByName(\"claude\").Name = %q, want %q", cfg.Name, "anthropic")
+	}
+	if want := ClaudeOAuthConfig(); !reflect.DeepEqual(cfg, want) {
+		t.Errorf("OAuthProviderConfigByName(\"claude\") = %+v, want the ClaudeOAuthConfig() preset %+v", cfg, want)
 	}
 }
 
@@ -137,6 +155,8 @@ func TestOAuthProviderConfigByNameClonesExtraAuthParams(t *testing.T) {
 			// The alias path must observe the same (intact) preset.
 			alias := name
 			switch name {
+			case "anthropic":
+				alias = "claude"
 			case "openai":
 				alias = "codex"
 			case "google-antigravity":
@@ -170,6 +190,7 @@ func TestOAuthProviderConfigByNameClonesExtraAuthParams(t *testing.T) {
 // its configuration.
 func TestOAuthProviderConfigByNameMatchesConstructor(t *testing.T) {
 	presets := map[string]OAuthProviderConfig{
+		"anthropic":          ClaudeOAuthConfig(),
 		"openai":             OpenAIOAuthConfig(),
 		"google-antigravity": GoogleAntigravityOAuthConfig(),
 	}

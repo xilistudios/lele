@@ -32,11 +32,12 @@ import (
 // field of the corresponding preset and the keys written by the CLI.
 //
 // The presets are built once at package initialization from their constructors
-// (OpenAIOAuthConfig / GoogleAntigravityOAuthConfig) and stored as values: that
-// is what makes them a *shared* preset, and therefore what makes the
-// ExtraAuthParams clone in OAuthProviderConfigByName load-bearing. The map is
-// never mutated after init.
+// (OpenAIOAuthConfig / GoogleAntigravityOAuthConfig / ClaudeOAuthConfig) and
+// stored as values: that is what makes them a *shared* preset, and therefore
+// what makes the ExtraAuthParams clone in OAuthProviderConfigByName
+// load-bearing. The map is never mutated after init.
 var oauthProviderPresets = map[string]OAuthProviderConfig{
+	"anthropic":          ClaudeOAuthConfig(),
 	"openai":             OpenAIOAuthConfig(),
 	"google-antigravity": GoogleAntigravityOAuthConfig(),
 }
@@ -46,6 +47,12 @@ var oauthProviderPresets = map[string]OAuthProviderConfig{
 // OAuthProviderNames, so the CLI keeps advertising exactly one spelling per
 // provider.
 var oauthProviderAliases = map[string]string{
+	// `claude` selects the Claude.ai OAuth flow (LoginBrowserWithPasteFallback /
+	// LoginPasteCode). The canonical registry and credential-store key stays
+	// `anthropic` — the name the preset advertises in Name, the key credentials
+	// are stored under and the name pkg/providers already looks up — so both
+	// spellings must resolve to the same preset.
+	"claude": "anthropic",
 	// `codex` is the name of the OpenAI OAuth flow in lele/jcode: the Codex CLI
 	// shares this preset's client ID and authorize endpoint, so users coming from
 	// that tool type `--provider codex` and mean this preset.
@@ -74,9 +81,10 @@ func OAuthProviderNames() []string {
 // preset.
 //
 // The lookup is case- and whitespace-insensitive (strings.ToLower +
-// strings.TrimSpace) and accepts the documented aliases (`codex` → `openai`,
-// `antigravity` → `google-antigravity`). An unknown name returns the zero config
-// and ok=false; it never falls back to a default provider.
+// strings.TrimSpace) and accepts the documented aliases (`claude` → `anthropic`,
+// `codex` → `openai`, `antigravity` → `google-antigravity`). An unknown name
+// returns the zero config and ok=false; it never falls back to a default
+// provider.
 //
 // The returned config is safe to modify: it is a copy of the stored preset whose
 // ExtraAuthParams map has been cloned, so writes to it cannot corrupt the

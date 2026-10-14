@@ -186,7 +186,8 @@ func createClaudeAuthProvider(apiBase string) (LLMProvider, error) {
 	if cred == nil {
 		return nil, fmt.Errorf("no credentials for anthropic. Run: lele auth login --provider anthropic")
 	}
-	return NewClaudeProviderWithTokenSourceAndBaseURL(cred.AccessToken, createClaudeTokenSource(), apiBase), nil
+	oauth := cred.AuthMethod == "oauth"
+	return NewClaudeProviderWithTokenSourceBaseURLAndOAuthMode(cred.AccessToken, createClaudeTokenSource(), apiBase, oauth), nil
 }
 
 func createCodexAuthProvider(enableWebSearch bool) (LLMProvider, error) {

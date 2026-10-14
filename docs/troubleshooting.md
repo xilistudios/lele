@@ -72,8 +72,31 @@ Re-authenticate if needed:
 ```bash
 lele auth login --provider openai
 lele auth login --provider anthropic
+lele auth login --provider claude
 lele auth login --provider google-antigravity
 ```
+
+### Claude OAuth login (`--provider claude`)
+
+`lele auth login --provider claude` runs the interactive Claude.ai OAuth browser
+flow; if the loopback callback cannot be used it falls back to a manual paste.
+In a headless environment, run the paste-code flow directly:
+
+```bash
+lele auth login --provider claude --paste-code
+```
+
+It prints the authorize URL and then reads the authorization code (or the full
+callback URL) from stdin. On success the credential is stored under the
+canonical key `anthropic` and the config is updated with
+`providers.anthropic.auth_method = "oauth"`.
+
+If a session reports that there is no API key or no `anthropic` credential
+after an OAuth login, check:
+
+- `lele auth status` — it lists the stored provider (`anthropic`) and its method.
+- `providers.anthropic.auth_method` in config — it must be `oauth` for a Claude
+  OAuth login (`token` is the paste-token flow).
 
 ## `read_video is not available: the current model supports neither video nor vision`
 
