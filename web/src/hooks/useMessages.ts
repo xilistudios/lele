@@ -14,6 +14,7 @@ import { useApprovals } from './useApprovals'
 import { buildChatHistoryQueryKey } from './useChatHistory'
 import { useGroupState } from './useGroupState'
 import { useProcessingSessions } from './useProcessingSessions'
+import { useStreamMetrics } from './useStreamMetrics'
 import { useStreamQueues } from './useStreamQueues'
 
 export { parseAttachmentsFromContent, parseSubagentSessionKey, toChatMessages }
@@ -93,6 +94,7 @@ export function useMessages(
   // ── Sub-hooks ────────────────────────────────────────────────────────────
 
   const streamQueues = useStreamQueues(setStreamingMessages)
+  const streamMetrics = useStreamMetrics()
   const approvals = useApprovals()
   const processing = useProcessingSessions()
 
@@ -228,6 +230,8 @@ export function useMessages(
     enqueueChunk: streamQueues.enqueueChunk,
     clearQueue: streamQueues.clearQueue,
     clearAllQueues: streamQueues.clearAllQueues,
+    setStreamMetrics: streamMetrics.reportMetrics,
+    clearStreamMetrics: streamMetrics.clearMetrics,
     ensureAssistantPlaceholder: streamQueues.ensureAssistantPlaceholder,
     addProcessingSession: processing.addSession,
     removeProcessingSession: processing.removeSession,
@@ -273,6 +277,9 @@ export function useMessages(
 
       setStreamingMessages((current) => [...current, userMessage])
       setPendingAttachments([])
+      // A new turn starts with no metrics: drop the previous (possibly final)
+      // figure so the chip only shows the incoming stream's rate.
+      streamMetrics.clearMetrics()
 
       wsSend('message', {
         content: normalizedContent,
@@ -281,7 +288,7 @@ export function useMessages(
         attachments: attachments.length > 0 ? attachments : undefined,
       })
     },
-    [wsSend, getHistorySendAnchor],
+    [wsSend, getHistorySendAnchor, streamMetrics.clearMetrics],
   )
 
   // ── Retry failed message ──────────────────────────────────────────────
@@ -312,11 +319,14 @@ export function useMessages(
     setPendingAttachments([])
     groupState.clearGroups()
     processing.processingSessionKeyRef.current = null
+    // Session switch: the chip must not carry a figure from the chat we left.
+    streamMetrics.clearMetrics()
   }, [
     streamQueues.clearAllQueues,
     approvals,
     processing.processingSessionKeyRef,
     groupState.clearGroups,
+    streamMetrics.clearMetrics,
   ])
 
   const clearAll = useCallback(() => {
@@ -327,7 +337,14 @@ export function useMessages(
     setPendingAttachments([])
     groupState.clearGroups()
     processing.clearAll()
-  }, [streamQueues.clearAllQueues, approvals, processing, groupState.clearGroups])
+    streamMetrics.clearMetrics()
+  }, [
+    streamQueues.clearAllQueues,
+    approvals,
+    processing,
+    groupState.clearGroups,
+    streamMetrics.clearMetrics,
+  ])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -377,5 +394,6 @@ export function useMessages(
     clearAll,
     typingIndicator,
     sendTyping,
+    streamMetrics: streamMetrics.metrics,
   }
 }

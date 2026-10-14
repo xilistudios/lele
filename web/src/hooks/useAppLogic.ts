@@ -954,5 +954,6 @@ export function useAppLogic(
     isHistoryLoading: chatHistory.isLoading,
     typingIndicator: messagesHook.typingIndicator,
     sendTyping: messagesHook.sendTyping,
+    streamMetrics: messagesHook.streamMetrics,
   }
 }

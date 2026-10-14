@@ -23,7 +23,14 @@ func (m *Model) handleCompleteMsg(msg completeMsg, cmds []tea.Cmd) (tea.Model, t
 		if !m.startTime.IsZero() {
 			m.lastDuration = time.Since(m.startTime)
 		}
+		// Capture the finishing segment's throughput before clearing the
+		// streaming state: clearStreamingState (via resetStreamState) drops the
+		// live metrics, but the status line must keep showing the final rate
+		// next to "Done in Xs". A turn with no visible stream leaves this at 0,
+		// so the fragment stays hidden for error/tool-only replies.
+		finalTokPerSec := m.streamTokPerSec
 		m.clearStreamingState()
+		m.lastTokPerSec = finalTokPerSec
 		// clearStreamingState preserves an active backend session when
 		// navigating between chats. This completion belongs to the current
 		// turn, so its local loading state must be cleared explicitly.

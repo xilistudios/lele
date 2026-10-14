@@ -17,6 +17,7 @@ import type { SlashCommandInfo } from '../../lib/types'
 import { endpoints } from '../../services/http/endpoints'
 import { IconButton } from '../atoms/IconButton'
 import { CloseIcon, FolderIcon, PlusIcon } from '../atoms/Icons'
+import { StreamMetricsChip } from '../atoms/StreamMetricsChip'
 import { FolderPickerModal } from '../organisms/FolderPickerModal'
 import { AttachmentInput } from './AttachmentInput'
 import { QueuedMessages } from './QueuedMessages'
@@ -435,6 +436,11 @@ export function ChatComposer() {
               value={selectedAgentId}
             />
           )}
+          {/* Token-speed chip: sits just before the send button (ml-auto pins
+              it right; the button keeps its own ml-auto so it stays right when
+              the chip is hidden). Hidden entirely when there is no valid
+              rate, so it never displaces the controls or renders "0.0 tok/s". */}
+          <StreamMetricsChip className="ml-auto" />
           <button
             type={canCancel ? 'button' : 'submit'}
             disabled={false}

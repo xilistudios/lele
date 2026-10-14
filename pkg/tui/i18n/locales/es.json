@@ -42,6 +42,7 @@
   "tui.processing": "Procesando... (ESC para cancelar)",
   "tui.subagentsRunning": "%d subagente(s) en segundo plano — puedes seguir escribiendo",
   "tui.doneIn": "● Completado en %.1fs",
+  "tui.tokensPerSecond": "%.1f tok/s",
   "tui.ready": "● Listo",
   "tui.context": "Contexto",
   "tui.currentContext": "Contexto actual",

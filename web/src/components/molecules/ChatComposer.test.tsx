@@ -2,8 +2,13 @@ import '../../test/setup'
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test'
 import '../../test/i18n'
 import { fireEvent, render, waitFor } from '@testing-library/react'
-import { AppLogicContext, type AppLogicContextValue } from '../../contexts/AppLogicContext'
+import {
+  AppLogicContext,
+  type AppLogicContextValue,
+  StreamMetricsContext,
+} from '../../contexts/AppLogicContext'
 import { AuthContext, type AuthContextValue } from '../../contexts/AuthContext'
+import type { StreamMetrics } from '../../hooks/useStreamMetrics'
 
 // Mutable mock returns — tests swap these before each render.
 type MockCtx = Record<string, unknown>
@@ -105,15 +110,22 @@ function baseChatPageCtx(): MockCtx {
 }
 
 /** Wrap ChatComposer in real context Providers so we avoid mock.module for
- *  AppLogicContext and AuthContext (which are also imported by other test files). */
-function renderComposer() {
-  return render(
+ *  AppLogicContext and AuthContext (which are also imported by other test files).
+ *  `metrics` seeds the StreamMetricsContext (default null → chip hidden). */
+function composerTree(metrics: StreamMetrics | null = null) {
+  return (
     <AuthContext.Provider value={mockAuthCtxReturn as unknown as AuthContextValue}>
       <AppLogicContext.Provider value={mockAppCtxReturn as unknown as AppLogicContextValue}>
-        <ChatComposer />
+        <StreamMetricsContext.Provider value={metrics}>
+          <ChatComposer />
+        </StreamMetricsContext.Provider>
       </AppLogicContext.Provider>
-    </AuthContext.Provider>,
+    </AuthContext.Provider>
   )
+}
+
+function renderComposer(metrics: StreamMetrics | null = null) {
+  return render(composerTree(metrics))
 }
 
 describe('ChatComposer — double-submit guard', () => {
@@ -243,5 +255,66 @@ describe('ChatComposer — double-submit guard', () => {
     fireEvent.change(textarea, { target: { value: 'hi' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(callCount).toBe(1)
+  })
+})
+
+describe('ChatComposer — token speed chip', () => {
+  beforeEach(() => {
+    mockAuthCtxReturn = baseAuthCtx()
+    mockChatPageCtxReturn = baseChatPageCtx()
+    mockSlashCommandsReturn = { commands: [], loading: false, error: null }
+    mockAppCtxReturn = baseAppCtx(mock(() => Promise.resolve(true)))
+  })
+
+  const liveMetrics: StreamMetrics = {
+    tokens: 100,
+    elapsedMs: 2000,
+    tokPerSec: 50.0,
+    estimated: false,
+  }
+
+  test('shows the rate with one decimal when metrics are seeded', () => {
+    const { getByText, getByLabelText } = renderComposer(liveMetrics)
+
+    expect(getByText('50.0 tok/s')).not.toBeNull()
+    expect(getByLabelText('Velocidad de generación del modelo')).not.toBeNull()
+  })
+
+  test('is absent with no metrics, and the send button stays accessible', () => {
+    const { queryByText, container } = renderComposer()
+
+    expect(queryByText(/tok\/s/)).toBeNull()
+    expect(container.querySelector('button[type="submit"]')).not.toBeNull()
+  })
+
+  test('never renders 0.0 tok/s (zero-rate metrics stay hidden)', () => {
+    const { queryByText, container } = renderComposer({
+      tokens: 0,
+      elapsedMs: 0,
+      tokPerSec: 0,
+      estimated: false,
+    })
+
+    expect(queryByText(/tok\/s/)).toBeNull()
+    expect(container.querySelector('button[type="submit"]')).not.toBeNull()
+  })
+
+  test('keeps the final figure after the stream ends and clears on a new turn/session', () => {
+    const view = render(composerTree())
+
+    // Before any stream: hidden.
+    expect(view.queryByText(/tok\/s/)).toBeNull()
+
+    // Streaming: the live rate appears.
+    view.rerender(composerTree(liveMetrics))
+    expect(view.getByText('50.0 tok/s')).not.toBeNull()
+
+    // Segment done: the same (retained) figure is still shown.
+    view.rerender(composerTree(liveMetrics))
+    expect(view.getByText('50.0 tok/s')).not.toBeNull()
+
+    // A new send / session switch clears it.
+    view.rerender(composerTree(null))
+    expect(view.queryByText(/tok\/s/)).toBeNull()
   })
 })

@@ -1022,12 +1022,8 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 				n.agentLoop.FinalizeAssistantMessage(sessionKey)
 			}
 		}
-		n.emitNativeEvent(sessionKey, "message.stream", WSStreamPayload{
-			MessageID:  msg.MessageID,
-			SessionKey: sessionKey,
-			Chunk:      msg.Content,
-			Done:       done,
-		}, msg.MessageID)
+		n.emitNativeEvent(sessionKey, "message.stream",
+			newWSStreamPayload(msg.MessageID, sessionKey, msg.Content, done, msg.Metadata), msg.MessageID)
 		return
 	case "message.thinking":
 		if n.agentLoop != nil {
@@ -1209,12 +1205,8 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	}
 
 	if msg.Content != "" {
-		n.emitNativeEvent(sessionKey, "message.stream", WSStreamPayload{
-			MessageID:  messageID,
-			SessionKey: sessionKey,
-			Chunk:      msg.Content,
-			Done:       true,
-		}, messageID)
+		n.emitNativeEvent(sessionKey, "message.stream",
+			newWSStreamPayload(messageID, sessionKey, msg.Content, true, msg.Metadata), messageID)
 	}
 
 	if msg.Content == "" && len(msg.Attachments) == 0 {

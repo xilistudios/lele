@@ -55,6 +55,8 @@ function makeCtx(initialStreaming: ChatMessage[] = []) {
     enqueueChunk: noop,
     clearQueue: noop,
     clearAllQueues: noop,
+    setStreamMetrics: noop,
+    clearStreamMetrics: noop,
     ensureAssistantPlaceholder: noop,
     addProcessingSession: noop,
     removeProcessingSession: noop,

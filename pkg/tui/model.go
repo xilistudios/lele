@@ -513,6 +513,15 @@ func (m *Model) resetStreamState() {
 	m.thinkingRenderedLines = nil
 	m.streamRenderedJoined = ""
 	m.thinkingRenderedJoined = ""
+	// Throughput metrics belong to the segment that just ended: drop the live
+	// counters and the retained final figure so no stale "tok/s" can survive
+	// into the next message or session. handleCompleteMsg re-publishes the
+	// finishing segment's rate after this reset when a turn truly completed.
+	m.streamTokens = 0
+	m.streamElapsedMs = 0
+	m.streamTokPerSec = 0
+	m.streamMetricsEstimated = false
+	m.lastTokPerSec = 0
 }
 
 // setCurrentChatKey switches the visible session. It is the single choke point

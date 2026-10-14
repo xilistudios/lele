@@ -111,6 +111,19 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 				m.resetStreamState()
 			}
 			m.currentStream += msg.msg.Content
+			// Throughput metrics of the segment: tolerant parse of the
+			// (string-encoded on the wire) counters. "done" marks the final
+			// chunk of the segment, whose rate becomes the figure retained for
+			// the "Done in" line.
+			if md := msg.msg.Metadata; md != nil {
+				m.streamTokens = metadataInt(md["tokens"])
+				m.streamElapsedMs = metadataInt64(md["elapsed_ms"])
+				m.streamTokPerSec = metadataFloat(md["tok_per_sec"])
+				m.streamMetricsEstimated = metadataBool(md["estimated"])
+				if metadataBool(md["done"]) {
+					m.lastTokPerSec = m.streamTokPerSec
+				}
+			}
 			if cmd := m.throttledUpdateViewport(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -252,6 +265,13 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 			// Stream finished — flush any pending throttled viewport update
 			// so the final content is visible immediately.
 			m.flushStreamUpdate()
+			// Retain the finishing segment's throughput for the "Done in" line.
+			// handleCompleteMsg also carries it across clearStreamingState, but
+			// this branch covers the cases where the stream end is the last
+			// event the client sees (no completion follows).
+			if m.streamTokPerSec > 0 {
+				m.lastTokPerSec = m.streamTokPerSec
+			}
 			idMatches := msg.msg.MessageID == m.currentMessageID ||
 				msg.msg.ReplyTo == m.currentMessageID ||
 				(m.currentMessageID != "" && strings.HasPrefix(msg.msg.MessageID, m.currentMessageID+"-"))
