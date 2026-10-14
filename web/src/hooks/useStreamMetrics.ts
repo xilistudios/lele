@@ -1,7 +1,9 @@
 /**
  * Stream metrics (token generation speed) for the chat UI.
  *
- * The backend emits per-chunk metrics on every `message.stream` event:
+ * The backend emits per-chunk metrics on every `message.stream` event (the
+ * answer surface) AND on every `message.thinking` event (the reasoning surface,
+ * metered separately so the rate is already live while the model thinks):
  * `tokens`, `elapsed_ms`, `tok_per_sec` and `estimated`. They describe the
  * CURRENT segment: a turn that uses tool-calls produces SEVERAL segments, each
  * with its own `message_id`, and the chip always reflects the segment that is
@@ -36,7 +38,8 @@ export type StreamMetrics = {
 }
 
 /**
- * Extract the metrics fields from a `message.stream` payload.
+ * Extract the metrics fields from a `message.stream` or `message.thinking`
+ * payload.
  *
  * Tolerant by design: a missing/non-numeric field falls back to `0` and a
  * missing `estimated` to `false`, so a legacy backend (or any event without

@@ -115,14 +115,9 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 			// (string-encoded on the wire) counters. "done" marks the final
 			// chunk of the segment, whose rate becomes the figure retained for
 			// the "Done in" line.
-			if md := msg.msg.Metadata; md != nil {
-				m.streamTokens = metadataInt(md["tokens"])
-				m.streamElapsedMs = metadataInt64(md["elapsed_ms"])
-				m.streamTokPerSec = metadataFloat(md["tok_per_sec"])
-				m.streamMetricsEstimated = metadataBool(md["estimated"])
-				if metadataBool(md["done"]) {
-					m.lastTokPerSec = m.streamTokPerSec
-				}
+			m.applyStreamMetrics(msg.msg.Metadata)
+			if metadataBool(msg.msg.Metadata["done"]) {
+				m.lastTokPerSec = m.streamTokPerSec
 			}
 			if cmd := m.throttledUpdateViewport(); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -134,6 +129,12 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 				m.resetStreamState()
 			}
 			m.currentThinking += msg.msg.Content
+			// Reasoning chunks carry the same throughput metrics as the answer
+			// (see agent/llm_stream.go), metered on the reasoning surface. Feeding
+			// them into the live counters is what keeps "42.5 tok/s" on the status
+			// line from the first thinking token, instead of only once the answer
+			// starts streaming.
+			m.applyStreamMetrics(msg.msg.Metadata)
 			if cmd := m.throttledUpdateViewport(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}

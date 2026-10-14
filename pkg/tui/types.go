@@ -528,11 +528,13 @@ type Model struct {
 	elapsedTime                 time.Duration
 	lastDuration                time.Duration
 	// Stream throughput metrics of the segment currently streaming, parsed from
-	// message.stream metadata (see stream_metrics.go). streamTokPerSec drives
-	// the live "tok/s" readout next to the spinner; lastTokPerSec preserves the
-	// final segment's rate so the status line can keep showing it next to
-	// "Done in Xs" after the turn ends. A turn with no visible stream leaves
-	// these at zero, which is what hides the readout for error/tool-only turns.
+	// message.stream AND message.thinking metadata (see stream_metrics.go). Both
+	// surfaces feed the same live counters, so streamTokPerSec drives the "tok/s"
+	// readout next to the spinner from the first reasoning token onward;
+	// lastTokPerSec preserves the final segment's rate so the status line can
+	// keep showing it next to "Done in Xs" after the turn ends. A turn with no
+	// visible stream leaves these at zero, which is what hides the readout for
+	// error/tool-only turns.
 	streamTokens           int
 	streamElapsedMs        int64
 	streamTokPerSec        float64

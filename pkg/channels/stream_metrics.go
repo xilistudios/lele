@@ -9,8 +9,9 @@ import (
 
 // Streaming throughput metrics (tokens, elapsed time, tok/s).
 //
-// The agent's stream handler publishes them on every "message.stream" event
-// inside bus.OutboundMessage.Metadata, which is a map[string]string: the
+// The agent's stream handler publishes them on every "message.stream" (answer
+// surface) and "message.thinking" (reasoning surface) event inside
+// bus.OutboundMessage.Metadata, which is a map[string]string: the
 // producer pre-formats the numbers with strconv, and "done"/"estimated" travel
 // as the strings "true"/"false". The coercion helpers below accept BOTH that
 // string encoding (what travels on the bus today) and the native numeric/bool
@@ -36,11 +37,11 @@ const (
 )
 
 // newWSStreamPayload builds the payload of a message.stream event. It is the
-// single place where the agent's throughput metrics are mirrored onto the wire,
-// shared by the streaming case and by the legacy full-message path so both emit
-// an identically shaped payload. The legacy path carries no metrics in
-// Metadata, so they serialise as zeros - the shape stays deterministic, which
-// is what the frontend contract relies on.
+// single place where the agent's throughput metrics are mirrored onto the wire
+// for the ANSWER surface, shared by the streaming case and by the legacy
+// full-message path so both emit an identically shaped payload. The legacy path
+// carries no metrics in Metadata, so they serialise as zeros - the shape stays
+// deterministic, which is what the frontend contract relies on.
 func newWSStreamPayload(messageID, sessionKey, chunk string, done bool, meta map[string]string) WSStreamPayload {
 	p := WSStreamPayload{
 		MessageID:  messageID,
@@ -52,15 +53,44 @@ func newWSStreamPayload(messageID, sessionKey, chunk string, done bool, meta map
 	return p
 }
 
+// newWSThinkingPayload builds the payload of a message.thinking event. It is the
+// reasoning-surface counterpart of newWSStreamPayload: same metric keys, same
+// zero-defaulting contract, so the web UI can render a live token rate while the
+// model is still thinking.
+func newWSThinkingPayload(messageID, sessionKey, chunk string, meta map[string]string) WSThinkingPayload {
+	p := WSThinkingPayload{
+		MessageID:  messageID,
+		SessionKey: sessionKey,
+		Chunk:      chunk,
+	}
+	p.applyStreamMetrics(meta)
+	return p
+}
+
 // applyStreamMetrics fills the throughput fields of the payload from the
 // outbound Metadata of a message.stream event. It is a no-op (zero values) when
 // the map is nil or the keys are absent, which is exactly what the frontend
 // contract expects for events that carry no metrics.
 func (p *WSStreamPayload) applyStreamMetrics(meta map[string]string) {
-	p.Tokens = metadataInt(meta, metaKeyTokens)
-	p.ElapsedMS = metadataInt64(meta, metaKeyElapsedMS)
-	p.TokPerSec = metadataFloat64(meta, metaKeyTokPerSec)
-	p.Estimated = metadataBool(meta, metaKeyEstimated)
+	p.Tokens, p.ElapsedMS, p.TokPerSec, p.Estimated = metricsFromMeta(meta)
+}
+
+// applyStreamMetrics fills the throughput fields of a message.thinking payload
+// from the same Metadata keys as the stream payload: the reasoning surface is
+// mirrored with an identical shape, only sourced from a different event.
+func (p *WSThinkingPayload) applyStreamMetrics(meta map[string]string) {
+	p.Tokens, p.ElapsedMS, p.TokPerSec, p.Estimated = metricsFromMeta(meta)
+}
+
+// metricsFromMeta reads the four throughput metrics out of a Metadata map. It is
+// shared by the message.stream and message.thinking payload builders so the two
+// surfaces can never diverge on the wire (a missing key defaults to the zero
+// value in every case).
+func metricsFromMeta(meta map[string]string) (tokens int, elapsedMS int64, tokPerSec float64, estimated bool) {
+	return metadataInt(meta, metaKeyTokens),
+		metadataInt64(meta, metaKeyElapsedMS),
+		metadataFloat64(meta, metaKeyTokPerSec),
+		metadataBool(meta, metaKeyEstimated)
 }
 
 // metadataInt reads key from the metadata map and coerces it to int (0 when

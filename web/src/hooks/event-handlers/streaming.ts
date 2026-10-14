@@ -153,6 +153,13 @@ export function handleMessageThinking(ctx: MessageEventContext, data: Record<str
   // Re-tag aliased events with the current key (see effectiveSessionKey).
   const sessionKey = effectiveSessionKey(ctx, eventSessionKey)
 
+  // Reasoning chunks carry the same throughput metrics as the answer (see
+  // agent/llm_stream.go), metered on the reasoning surface. Forwarding them here
+  // is what keeps the chip live from the first thinking token, instead of only
+  // once the answer starts streaming; a non-positive rate is ignored by the
+  // retention policy downstream, so the previous figure is not blanked.
+  ctx.setStreamMetrics(parseStreamMetrics(data))
+
   // Migrate any restore- placeholder to the real message id (see stream handler).
   ctx.setStreamingMessages((current) => migrateRestoreId(current, msgId, sessionKey))
 

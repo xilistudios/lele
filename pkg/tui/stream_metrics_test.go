@@ -304,6 +304,89 @@ func TestHandleOutboundMsg_ParsesStreamMetrics(t *testing.T) {
 	}
 }
 
+// TestHandleOutboundMsg_ParsesThinkingMetrics verifies reasoning chunks feed the
+// SAME live counters as the answer: the tok/s readout is up from the first
+// thinking token, and a rate-less answer chunk does not blank it at the
+// thinking → answer hand-off.
+func TestHandleOutboundMsg_ParsesThinkingMetrics(t *testing.T) {
+	m := newTestModel(t)
+	i18n.InitWithLanguage("en") // after NewModel, which resets to the config default
+
+	key := "tui:chat:tok-per-sec-thinking"
+	m.sessionMgr.GetOrCreate(key)
+	m.currentKey = key
+	m.showWelcome = false
+	m.width, m.height = 200, 40
+	m.processing = true
+	m.startTime = time.Now()
+
+	// First reasoning chunk: metrics present → the readout turns on while the
+	// model is still thinking.
+	updated, _ := m.Update(outboundMsg{msg: bus.OutboundMessage{
+		ChatID:    key,
+		Event:     "message.thinking",
+		MessageID: "m1",
+		Content:   "let me think",
+		Metadata: map[string]string{
+			"tokens":      "80",
+			"elapsed_ms":  "2000",
+			"tok_per_sec": "40",
+			"estimated":   "true",
+		},
+	}})
+	m = updated.(*Model)
+
+	if m.streamTokPerSec != 40 {
+		t.Fatalf("streamTokPerSec = %v, want 40 from the thinking chunk", m.streamTokPerSec)
+	}
+	if m.currentThinking != "let me think" {
+		t.Fatalf("currentThinking = %q, want the reasoning chunk appended", m.currentThinking)
+	}
+	if status := m.renderStatusLine(int(float64(m.width) * leftColumnRatio)); !strings.Contains(status, "40.0 tok/s") {
+		t.Fatalf("status line %q should show tok/s while thinking", status)
+	}
+
+	// The answer's first chunk reports no rate (no elapsed window yet): the
+	// previous figure must be kept, not blanked.
+	updated, _ = m.Update(outboundMsg{msg: bus.OutboundMessage{
+		ChatID:    key,
+		Event:     "message.stream",
+		MessageID: "m1",
+		Content:   "Answer",
+		Metadata: map[string]string{
+			"tokens":      "2",
+			"elapsed_ms":  "0",
+			"tok_per_sec": "0",
+			"estimated":   "true",
+			"done":        "false",
+		},
+	}})
+	m = updated.(*Model)
+
+	if m.streamTokPerSec != 40 {
+		t.Fatalf("streamTokPerSec = %v, want 40 retained across the thinking→answer hand-off", m.streamTokPerSec)
+	}
+
+	// A later answer chunk with a real rate takes over.
+	updated, _ = m.Update(outboundMsg{msg: bus.OutboundMessage{
+		ChatID:    key,
+		Event:     "message.stream",
+		MessageID: "m1",
+		Content:   " more",
+		Metadata: map[string]string{
+			"tokens":      "10",
+			"elapsed_ms":  "500",
+			"tok_per_sec": "20",
+			"estimated":   "true",
+			"done":        "false",
+		},
+	}})
+	m = updated.(*Model)
+	if m.streamTokPerSec != 20 {
+		t.Fatalf("streamTokPerSec = %v, want 20 from the answer chunk", m.streamTokPerSec)
+	}
+}
+
 // TestResetStreamState_ClearsThroughputMetrics ensures no stale figure can
 // survive a reset (new segment / session switch).
 func TestResetStreamState_ClearsThroughputMetrics(t *testing.T) {
