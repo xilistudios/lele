@@ -1031,7 +1031,8 @@
     "collapse": "Minimizar",
     "expand": "Expandir",
     "cron": "Tarefas agendadas",
-    "secrets": "Segredos"
+    "secrets": "Segredos",
+    "system": "Sistema"
   },
   "backgroundExecs": {
     "title": "Processos em Segundo Plano",

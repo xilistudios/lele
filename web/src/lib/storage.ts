@@ -4,6 +4,7 @@ const KEY = 'lele.session'
 const API_URL_KEY = 'lele.apiUrl'
 const SESSION_KEY = 'lele.currentSessionKey'
 const SIDEBAR_OPEN_KEY = 'lele.sidebarOpen'
+const SYSTEM_NAV_OPEN_KEY = 'lele.systemNavOpen'
 
 const isSubagentSessionKey = (sessionKey: string) => sessionKey.startsWith('subagent:')
 
@@ -77,4 +78,19 @@ export const loadSidebarOpen = (): boolean => {
 
 export const saveSidebarOpen = (open: boolean) => {
   localStorage.setItem(SIDEBAR_OPEN_KEY, String(open))
+}
+
+export const loadSystemNavOpen = (): boolean => {
+  if (typeof localStorage === 'undefined') {
+    return true
+  }
+  const raw = localStorage.getItem(SYSTEM_NAV_OPEN_KEY)
+  if (raw === null) {
+    return true // default: open
+  }
+  return raw === 'true'
+}
+
+export const saveSystemNavOpen = (open: boolean) => {
+  localStorage.setItem(SYSTEM_NAV_OPEN_KEY, String(open))
 }

@@ -2,6 +2,7 @@ import {
   type ReactNode,
   cloneElement,
   isValidElement,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useState,
@@ -15,6 +16,14 @@ type Props = {
   popoverHeight?: number
   block?: boolean
   tooltip?: ReactNode
+  /**
+   * Controlled open state. Leave it undefined to keep the popover
+   * self-managed (the default): the existing callers pass none of these props
+   * and behave exactly as before.
+   */
+  open?: boolean
+  /** Notified whenever the popover wants to change its open state. */
+  onOpenChange?: (open: boolean) => void
 }
 
 const DEFAULT_POPOVER_WIDTH = 180
@@ -37,8 +46,21 @@ export function Popover({
   popoverHeight = DEFAULT_POPOVER_HEIGHT,
   block = false,
   tooltip,
+  open,
+  onOpenChange,
 }: Props) {
-  const [isOpen, setIsOpen] = useState(false)
+  // `open === undefined` keeps the popover uncontrolled, so callers that do not
+  // care about the open state keep the original behaviour untouched.
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
+  const isControlled = open !== undefined
+  const isOpen = isControlled ? open : uncontrolledOpen
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (!isControlled) setUncontrolledOpen(next)
+      onOpenChange?.(next)
+    },
+    [isControlled, onOpenChange],
+  )
   const [tooltipPosition, setTooltipPosition] = useState<TooltipPosition>('right')
   const { position, ref } = usePopoverPosition({
     isOpen,
@@ -71,13 +93,23 @@ export function Popover({
 
     const onClickOutside = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
-        setIsOpen(false)
+        setOpen(false)
+      }
+    }
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false)
       }
     }
 
     document.addEventListener('mousedown', onClickOutside)
-    return () => document.removeEventListener('mousedown', onClickOutside)
-  }, [isOpen, ref])
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onClickOutside)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [isOpen, ref, setOpen])
 
   const origin = ORIGIN_MAP[position.vertical][position.horizontal]
   const verticalClass = position.vertical === 'below' ? 'top-full mt-1' : 'bottom-full mb-1'
@@ -90,10 +122,10 @@ export function Popover({
           onKeyDown?: (e: React.KeyboardEvent) => void
         }>,
         {
-          onClick: () => setIsOpen((prev) => !prev),
+          onClick: () => setOpen(!isOpen),
           onKeyDown: (e: React.KeyboardEvent) => {
             if (e.key === 'Enter' || e.key === ' ') {
-              setIsOpen((prev) => !prev)
+              setOpen(!isOpen)
             }
           },
         },

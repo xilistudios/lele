@@ -117,7 +117,11 @@ describe('Sidebar — desktop rail keeps working', () => {
     expect(cls).toContain(RAIL_WIDTH)
     expect(cls).not.toContain(FULL_WIDTH)
     // The rail contract: tooltip-backed icon buttons and no mode selector.
-    expect(view.container.querySelectorAll('button[title="Agentes"]').length).toBe(1)
+    // The six system destinations live behind the System button's popover, so
+    // the rail itself exposes only the "Chats" and "System" icon buttons.
+    expect(view.container.querySelectorAll('button[title="Chats"]').length).toBe(1)
+    expect(view.container.querySelectorAll('button[title="Sistema"]').length).toBe(1)
+    expect(view.container.querySelectorAll('button[title="Agentes"]').length).toBe(0)
     expect(view.queryByText('Agente')).toBeNull()
   })
 
