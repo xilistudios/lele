@@ -63,6 +63,28 @@ func recvStream(t *testing.T, msgBus *bus.MessageBus, sh *streamHandler) bus.Out
 	return msg
 }
 
+// recvThinking pulls the next outbound message and asserts it is a reasoning
+// event for our handler carrying the four throughput metric keys.
+func recvThinking(t *testing.T, msgBus *bus.MessageBus, sh *streamHandler) bus.OutboundMessage {
+	t.Helper()
+	msg, ok := recvOutbound(t, msgBus, 5*time.Second)
+	if !ok {
+		t.Fatal("no message.thinking event published (bus closed or timeout)")
+	}
+	if msg.Event != "message.thinking" {
+		t.Fatalf("event = %q, want message.thinking", msg.Event)
+	}
+	if msg.Channel != sh.channel || msg.MessageID != sh.messageID {
+		t.Fatalf("routing changed: channel=%q messageID=%q", msg.Channel, msg.MessageID)
+	}
+	for _, key := range []string{"tokens", "elapsed_ms", "tok_per_sec", "estimated"} {
+		if _, ok := msg.Metadata[key]; !ok {
+			t.Fatalf("thinking metadata is missing %q key: %v", key, msg.Metadata)
+		}
+	}
+	return msg
+}
+
 func metadataInt(t *testing.T, msg bus.OutboundMessage, key string) int {
 	t.Helper()
 	raw, ok := msg.Metadata[key]
@@ -226,8 +248,8 @@ func TestStreamHandlerEmptySegment(t *testing.T) {
 		t.Fatalf("estimated = %q, want \"true\"", msg.Metadata["estimated"])
 	}
 	// The clock must not have been started by an empty chunk.
-	if !sh.streamStart.IsZero() {
-		t.Fatalf("streamStart = %v, want zero for a content-free segment", sh.streamStart)
+	if !sh.content.start.IsZero() {
+		t.Fatalf("content start = %v, want zero for a content-free segment", sh.content.start)
 	}
 }
 
@@ -272,36 +294,70 @@ func TestStreamHandlerSegmentsAreIndependent(t *testing.T) {
 	}
 }
 
-// TestStreamHandlerReasoningNotCounted documents the decision to keep reasoning
-// out of the answer-segment metrics.
-func TestStreamHandlerReasoningNotCounted(t *testing.T) {
+// TestStreamHandlerReasoningMetricsAreSeparate pins the two-surface contract:
+// message.thinking carries its OWN throughput metrics (so the TUI and the web UI
+// can show a live tok/s while the model is still thinking) and reasoning tokens
+// never leak into the answer surface's counters.
+func TestStreamHandlerReasoningMetricsAreSeparate(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	clock := newFakeClock()
 	sh := newMetricsStreamer(t, msgBus, clock)
 
-	sh.onReasoning(strings.Repeat("think ", 100))
-	thinking, ok := recvOutbound(t, msgBus, 5*time.Second)
-	if !ok {
-		t.Fatal("expected message.thinking event")
+	firstChunk := strings.Repeat("think ", 100)
+	sh.onReasoning(firstChunk)
+
+	// First reasoning chunk: no elapsed window yet, so the token count is
+	// already visible but the rate is a safe 0 (never NaN/+Inf) — the frontend
+	// keeps its previous figure rather than blanking.
+	first := recvThinking(t, msgBus, sh)
+	if first.Content != firstChunk {
+		t.Fatalf("thinking content = %q, want the reasoning chunk", first.Content)
 	}
-	if thinking.Event != "message.thinking" {
-		t.Fatalf("event = %q, want message.thinking", thinking.Event)
+	wantFirstTokens := providers.EstimateTokensFromText(firstChunk)
+	if got := metadataInt(t, first, "tokens"); got != wantFirstTokens {
+		t.Fatalf("first thinking tokens = %d, want %d", got, wantFirstTokens)
 	}
-	if thinking.Metadata != nil {
-		t.Fatalf("message.thinking metadata = %v, want nil (unchanged)", thinking.Metadata)
+	if got := metadataInt(t, first, "elapsed_ms"); got != 0 {
+		t.Fatalf("first thinking elapsed_ms = %d, want 0", got)
 	}
-	if !sh.streamStart.IsZero() || sh.streamTokens != 0 {
-		t.Fatalf("reasoning leaked into stream metrics: start=%v tokens=%d", sh.streamStart, sh.streamTokens)
+	if got := metadataFloat(t, first, "tok_per_sec"); got != 0 {
+		t.Fatalf("first thinking tok_per_sec = %v, want 0", got)
+	}
+	if got := first.Metadata["estimated"]; got != "true" {
+		t.Fatalf("first thinking estimated = %q, want \"true\"", got)
 	}
 
-	// The answer segment afterwards starts its own window from scratch.
+	// Second reasoning chunk: the reasoning surface has its own elapsed window
+	// and cumulative token count.
+	secondChunk := strings.Repeat("more ", 100)
+	clock.advance(2 * time.Second)
+	sh.onReasoning(secondChunk)
+
+	wantTokens := wantFirstTokens + providers.EstimateTokensFromText(secondChunk)
+	second := recvThinking(t, msgBus, sh)
+	if got := metadataInt(t, second, "tokens"); got != wantTokens {
+		t.Fatalf("second thinking tokens = %d, want %d", got, wantTokens)
+	}
+	if got := metadataInt(t, second, "elapsed_ms"); got != 2000 {
+		t.Fatalf("second thinking elapsed_ms = %d, want 2000", got)
+	}
+	if wantRate := float64(wantTokens) / 2.0; math.Abs(metadataFloat(t, second, "tok_per_sec")-wantRate) > 1e-9 {
+		t.Fatalf("second thinking tok_per_sec = %v, want %v", metadataFloat(t, second, "tok_per_sec"), wantRate)
+	}
+
+	// Reasoning must NOT have touched the answer surface: it still starts its
+	// own window from scratch on the first content chunk.
+	if !sh.content.start.IsZero() || sh.content.tokens != 0 {
+		t.Fatalf("reasoning leaked into the answer metrics: start=%v tokens=%d", sh.content.start, sh.content.tokens)
+	}
+
 	clock.advance(3 * time.Second)
 	sh.onChunk(strings.Repeat("a", 25), false) // 10 tokens
 	msg := recvStream(t, msgBus, sh)
 	if got := metadataInt(t, msg, "tokens"); got != 10 {
-		t.Fatalf("tokens = %d, want 10 (reasoning excluded)", got)
+		t.Fatalf("answer tokens = %d, want 10 (reasoning excluded)", got)
 	}
 	if got := metadataInt(t, msg, "elapsed_ms"); got != 0 {
-		t.Fatalf("elapsed_ms = %d, want 0 (segment starts at first content chunk)", got)
+		t.Fatalf("answer elapsed_ms = %d, want 0 (segment starts at first content chunk)", got)
 	}
 }

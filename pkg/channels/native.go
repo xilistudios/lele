@@ -1029,11 +1029,8 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		if n.agentLoop != nil {
 			n.agentLoop.AppendReasoningChunk(sessionKey, msg.Content)
 		}
-		n.emitNativeEvent(sessionKey, "message.thinking", WSThinkingPayload{
-			MessageID:  msg.MessageID,
-			SessionKey: sessionKey,
-			Chunk:      msg.Content,
-		}, msg.MessageID)
+		n.emitNativeEvent(sessionKey, "message.thinking",
+			newWSThinkingPayload(msg.MessageID, sessionKey, msg.Content, msg.Metadata), msg.MessageID)
 		return
 	case "tool.executing":
 		var toolArgs map[string]interface{}

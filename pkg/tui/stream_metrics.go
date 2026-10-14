@@ -122,6 +122,27 @@ func finiteFloat(f float64) float64 {
 	return f
 }
 
+// applyStreamMetrics folds one chunk's throughput metadata into the live
+// counters. BOTH surfaces feed it: message.stream (answer) and message.thinking
+// (reasoning), which the backend meters separately, so the readout is already
+// live while the model is still thinking.
+//
+// A non-positive rate is not a usable reading — it is exactly what the first
+// chunk of a surface reports when no time has elapsed yet — so the previous
+// figure is kept instead. That is what stops the readout from blinking off at
+// the thinking → answer hand-off (the answer's first chunk carries no rate).
+func (m *Model) applyStreamMetrics(md map[string]string) {
+	if md == nil {
+		return
+	}
+	m.streamTokens = metadataInt(md["tokens"])
+	m.streamElapsedMs = metadataInt64(md["elapsed_ms"])
+	m.streamMetricsEstimated = metadataBool(md["estimated"])
+	if rate := metadataFloat(md["tok_per_sec"]); rate > 0 {
+		m.streamTokPerSec = rate
+	}
+}
+
 // formatTokPerSec renders the tok/s fragment shown in the status line, e.g.
 // "42.5 tok/s". It returns "" for a non-positive rate so callers can omit the
 // fragment cleanly: a stream-less turn (error reply, tool call with no visible

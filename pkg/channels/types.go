@@ -115,6 +115,16 @@ type WSThinkingPayload struct {
 	MessageID  string `json:"message_id"`
 	SessionKey string `json:"session_key,omitempty"`
 	Chunk      string `json:"chunk"`
+
+	// Streaming throughput metrics of the current reasoning segment, mirrored
+	// from the agent's message.thinking Metadata (see stream_metrics.go). Same
+	// contract as WSStreamPayload: they describe the REASONING surface, not the
+	// answer, and are DELIBERATELY not omitempty so a missing key always means
+	// "producer did not send it", never "value happens to be zero".
+	Tokens    int     `json:"tokens"`
+	ElapsedMS int64   `json:"elapsed_ms"`
+	TokPerSec float64 `json:"tok_per_sec"`
+	Estimated bool    `json:"estimated"`
 }
 
 type WSMessageCompletePayload struct {

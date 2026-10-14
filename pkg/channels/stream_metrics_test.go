@@ -1,8 +1,9 @@
 package channels
 
 // Tests for the streaming throughput metrics (tokens / elapsed_ms / tok_per_sec
-// / estimated) mirrored from the agent's message.stream Metadata onto the
-// WebSocket and SSE payloads.
+// / estimated) mirrored from the agent's message.stream (answer surface) and
+// message.thinking (reasoning surface) Metadata onto the WebSocket and SSE
+// payloads.
 //
 // The agent's stream handler (pkg/agent/llm_stream.go) publishes them inside
 // bus.OutboundMessage.Metadata, which is a map[string]string, so the numbers
@@ -35,6 +36,18 @@ func fullStreamMetrics() map[string]string {
 	}
 }
 
+// fullThinkingMetrics is the metadata shape a real message.thinking event
+// carries, exactly as the agent formats it (strconv outputs). It has no "done"
+// key: reasoning has no terminal chunk.
+func fullThinkingMetrics() map[string]string {
+	return map[string]string{
+		"tokens":      "96",
+		"elapsed_ms":  "2400",
+		"tok_per_sec": "40",
+		"estimated":   "true",
+	}
+}
+
 // streamEventPayload reads the single message.stream frame queued on a fake
 // client and returns its decoded payload plus the raw JSON body.
 func streamEventPayload(t *testing.T, client *WSClient) (WSStreamPayload, string) {
@@ -48,6 +61,21 @@ func streamEventPayload(t *testing.T, client *WSClient) (WSStreamPayload, string
 	var payload WSStreamPayload
 	decodeWSData(t, stream.Data, &payload)
 	return payload, string(stream.Data)
+}
+
+// thinkingEventPayload reads the single message.thinking frame queued on a fake
+// client and returns its decoded payload plus the raw JSON body.
+func thinkingEventPayload(t *testing.T, client *WSClient) (WSThinkingPayload, string) {
+	t.Helper()
+
+	events := drainWSEvents(t, client)
+	thinking := findWSEvent(events, "message.thinking")
+	if thinking == nil {
+		t.Fatalf("message.thinking not emitted; got events: %v", eventNames(events))
+	}
+	var payload WSThinkingPayload
+	decodeWSData(t, thinking.Data, &payload)
+	return payload, string(thinking.Data)
 }
 
 // TestDispatchOutboundStreamCarriesThroughputMetrics is the core contract test:
@@ -469,5 +497,185 @@ func TestStreamMetricsOnFullMessagePath(t *testing.T) {
 		if !strings.Contains(raw, want) {
 			t.Errorf("serialized payload missing %s:\n%s", want, raw)
 		}
+	}
+}
+
+// TestDispatchOutboundThinkingCarriesThroughputMetrics is the reasoning-surface
+// counterpart of the stream contract test: a message.thinking with full Metadata
+// must reach the WebSocket payload with every metric populated (so the UI can
+// show a live tok/s while the model is still thinking) and the exact snake_case
+// keys the frontend reads.
+func TestDispatchOutboundThinkingCarriesThroughputMetrics(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	sessionKey := "native:" + ts.clientID + "-thinking"
+	client := registerFakeWSClient(t, ts, sessionKey)
+
+	ts.channel.dispatchOutboundMessage(bus.OutboundMessage{
+		Channel:   ChannelName,
+		ChatID:    sessionKey,
+		Event:     "message.thinking",
+		Content:   "let me think",
+		MessageID: "msg-thinking-1",
+		Metadata:  fullThinkingMetrics(),
+	})
+
+	payload, raw := thinkingEventPayload(t, client)
+
+	if payload.MessageID != "msg-thinking-1" || payload.SessionKey != sessionKey || payload.Chunk != "let me think" {
+		t.Errorf("identity fields = %+v, want msg-thinking-1/%s/let me think", payload, sessionKey)
+	}
+	if payload.Tokens != 96 {
+		t.Errorf("tokens = %d, want 96", payload.Tokens)
+	}
+	if payload.ElapsedMS != 2400 {
+		t.Errorf("elapsed_ms = %d, want 2400", payload.ElapsedMS)
+	}
+	if payload.TokPerSec != 40 {
+		t.Errorf("tok_per_sec = %v, want 40", payload.TokPerSec)
+	}
+	if !payload.Estimated {
+		t.Error("estimated = false, want true")
+	}
+
+	for _, want := range []string{
+		`"tokens":96`,
+		`"elapsed_ms":2400`,
+		`"tok_per_sec":40`,
+		`"estimated":true`,
+	} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("serialized thinking payload missing %s:\n%s", want, raw)
+		}
+	}
+}
+
+// TestDispatchOutboundThinkingWithoutMetricsDefaultsToZero pins the
+// absent-metadata path for reasoning: no panic, metrics at their zero values,
+// and the four keys STILL present in the JSON (no omitempty) so the frontend
+// shape never changes.
+func TestDispatchOutboundThinkingWithoutMetricsDefaultsToZero(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	sessionKey := "native:" + ts.clientID + "-thinking-nometrics"
+	client := registerFakeWSClient(t, ts, sessionKey)
+
+	ts.channel.dispatchOutboundMessage(bus.OutboundMessage{
+		Channel:   ChannelName,
+		ChatID:    sessionKey,
+		Event:     "message.thinking",
+		Content:   "chunk",
+		MessageID: "msg-thinking-nometrics",
+	})
+
+	payload, raw := thinkingEventPayload(t, client)
+
+	if payload.Tokens != 0 || payload.ElapsedMS != 0 || payload.TokPerSec != 0 || payload.Estimated {
+		t.Errorf("metrics = (%d, %d, %v, %v), want all zero/false",
+			payload.Tokens, payload.ElapsedMS, payload.TokPerSec, payload.Estimated)
+	}
+	for _, want := range []string{
+		`"tokens":0`,
+		`"elapsed_ms":0`,
+		`"tok_per_sec":0`,
+		`"estimated":false`,
+	} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("serialized thinking payload missing %s:\n%s", want, raw)
+		}
+	}
+}
+
+// TestWSThinkingPayloadJSONShapeIsDeterministic freezes the reasoning wire
+// shape: the same four metric keys as the stream payload, always present, with
+// no omitempty and no extra "done" field.
+func TestWSThinkingPayloadJSONShapeIsDeterministic(t *testing.T) {
+	payload := WSThinkingPayload{
+		MessageID:  "m1",
+		SessionKey: "s1",
+		Chunk:      "hmm",
+		Tokens:     12,
+		ElapsedMS:  1500,
+		TokPerSec:  8,
+		Estimated:  true,
+	}
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	want := `{"message_id":"m1","session_key":"s1","chunk":"hmm",` +
+		`"tokens":12,"elapsed_ms":1500,"tok_per_sec":8,"estimated":true}`
+	if string(raw) != want {
+		t.Errorf("payload JSON = %s\nwant            %s", raw, want)
+	}
+
+	zero, err := json.Marshal(WSThinkingPayload{MessageID: "m2", Chunk: ""})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if !strings.Contains(string(zero), `"tokens":0`) ||
+		!strings.Contains(string(zero), `"estimated":false`) {
+		t.Errorf("metric keys must be present even at their zero value: %s", zero)
+	}
+}
+
+// TestNonFiniteThinkingMetricsKeepPayloadMarshalable mirrors the stream test:
+// the shared coercion guards make the reasoning payload always marshalable, with
+// the offending metric at 0.
+func TestNonFiniteThinkingMetricsKeepPayloadMarshalable(t *testing.T) {
+	meta := map[string]string{
+		"tokens":      "NaN",
+		"elapsed_ms":  "Inf",
+		"tok_per_sec": "-Inf",
+		"estimated":   "NaN",
+	}
+
+	payload := newWSThinkingPayload("m1", "s1", "chunk", meta)
+
+	if payload.Tokens != 0 || payload.ElapsedMS != 0 || payload.TokPerSec != 0 || payload.Estimated {
+		t.Errorf("metrics = (%d, %d, %v, %v), want all zero/false",
+			payload.Tokens, payload.ElapsedMS, payload.TokPerSec, payload.Estimated)
+	}
+
+	if _, err := json.Marshal(payload); err != nil {
+		t.Fatalf("Marshal() error = %v, payload must stay encodable: %+v", err, payload)
+	}
+}
+
+// TestThinkingMetricsFanoutToRESTSubscriber proves the reasoning payload rides
+// the same REST/SSE fan-out as the answer one: the SSE writer serializes this
+// exact value, so the stream contract covers both surfaces.
+func TestThinkingMetricsFanoutToRESTSubscriber(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	sessionKey := "native:" + ts.clientID + "-thinking-fanout"
+	sub := ts.channel.registerRESTStreamSubscriber(sessionKey, "msg-thinking-fanout")
+	defer ts.channel.unregisterRESTStreamSubscriber(sub.id)
+
+	ts.channel.dispatchOutboundMessage(bus.OutboundMessage{
+		Channel:   ChannelName,
+		ChatID:    sessionKey,
+		Event:     "message.thinking",
+		Content:   "chunk",
+		MessageID: "msg-thinking-fanout",
+		Metadata:  fullThinkingMetrics(),
+	})
+
+	select {
+	case evt := <-sub.ch:
+		if evt.event != "message.thinking" {
+			t.Fatalf("fanned-out event = %q, want message.thinking", evt.event)
+		}
+		payload, ok := evt.data.(WSThinkingPayload)
+		if !ok {
+			t.Fatalf("fanned-out data type = %T, want WSThinkingPayload", evt.data)
+		}
+		if payload.Tokens != 96 || payload.TokPerSec != 40 || !payload.Estimated {
+			t.Errorf("fanned-out payload = %+v, want the thinking metrics", payload)
+		}
+	default:
+		t.Fatal("no event fanned out to the REST stream subscriber")
 	}
 }

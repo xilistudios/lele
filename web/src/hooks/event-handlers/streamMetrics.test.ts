@@ -9,7 +9,7 @@
  */
 import { describe, expect, mock, test } from 'bun:test'
 import type { StreamMetrics } from '../useStreamMetrics'
-import { handleMessageStream, handleWelcome } from './streaming'
+import { handleMessageStream, handleMessageThinking, handleWelcome } from './streaming'
 import type { MessageEventContext } from './types'
 
 function makeCtx(currentSessionKey: string | null = 'native:A') {
@@ -118,6 +118,62 @@ describe('handleMessageStream — token metrics', () => {
     const { ctx, setStreamMetrics } = makeCtx('native:A')
 
     handleMessageStream(ctx, {
+      message_id: 'm1',
+      session_key: 'native:B',
+      chunk: 'elsewhere',
+      tokens: 10,
+      elapsed_ms: 100,
+      tok_per_sec: 100,
+    })
+
+    expect(setStreamMetrics.mock.calls.length).toBe(0)
+  })
+})
+
+describe('handleMessageThinking — token metrics', () => {
+  test('propagates the four fields so the chip is live while thinking', () => {
+    const { ctx, setStreamMetrics } = makeCtx()
+
+    handleMessageThinking(ctx, {
+      message_id: 'm1',
+      session_key: 'native:A',
+      chunk: 'let me think',
+      tokens: 96,
+      elapsed_ms: 2400,
+      tok_per_sec: 40,
+      estimated: true,
+    })
+
+    expect(setStreamMetrics.mock.calls.length).toBe(1)
+    expect(setStreamMetrics.mock.calls[0][0]).toEqual({
+      tokens: 96,
+      elapsedMs: 2400,
+      tokPerSec: 40,
+      estimated: true,
+    })
+  })
+
+  test('legacy reasoning payload without the fields → safe zeros', () => {
+    const { ctx, setStreamMetrics } = makeCtx()
+
+    handleMessageThinking(ctx, {
+      message_id: 'm1',
+      session_key: 'native:A',
+      chunk: 'hmm',
+    })
+
+    expect(setStreamMetrics.mock.calls[0][0]).toEqual({
+      tokens: 0,
+      elapsedMs: 0,
+      tokPerSec: 0,
+      estimated: false,
+    })
+  })
+
+  test('foreign-session reasoning chunk is dropped before any metrics side effect', () => {
+    const { ctx, setStreamMetrics } = makeCtx('native:A')
+
+    handleMessageThinking(ctx, {
       message_id: 'm1',
       session_key: 'native:B',
       chunk: 'elsewhere',
