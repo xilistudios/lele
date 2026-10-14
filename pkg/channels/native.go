@@ -107,6 +107,13 @@ type NativeChannel struct {
 	// with a lazy fallback for bare &NativeChannel{} literals in tests.
 	subagentsCacheMu sync.Mutex
 	subagentsCached  *subagentsCache
+
+	// mcpAuthFlows is the registry of LIVE REST-started MCP OAuth flows (see
+	// mcp_auth_flows.go), created on first use by mcpAuthFlowRegistry(). It
+	// owns the one-live-flow-per-(agent, server) rule, the flow ids the API
+	// hands out, and the "this flow already reloaded the manager" claim.
+	mcpAuthFlows     *mcpAuthFlows
+	mcpAuthFlowsOnce sync.Once
 }
 
 // CronProvidable is the interface for managing cron jobs via the API.
@@ -805,11 +812,32 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	// MCP servers (management view: merged inventory + raw layer file, plus
 	// the per-layer enable/disable toggle, the raw editor save and the
 	// dry-run validator)
+	//
+	// NOTE on "GET /api/v1/mcp/{layer}/{doc}": the raw-file read is registered
+	// through the doc wildcard + shim (handleMCPRawDoc accepts only "raw")
+	// because Go's ServeMux refuses to register "GET /api/v1/mcp/{layer}/raw"
+	// next to the OAuth status route "GET /api/v1/mcp/auth/{flow_id}": both
+	// match GET /api/v1/mcp/auth/raw and neither is more specific, so the
+	// ServeMux PANICS at registration ("conflicts with pattern"). The shim
+	// keeps the raw endpoint's URL, status codes and response byte-identical
+	// (a /{doc}/ that is not "raw" is a plain 404) while letting the literal
+	// "auth" segment win, which is what route 3 of the frozen contract needs.
 	mux.HandleFunc("GET /api/v1/mcp", withAuth(n.handleMCPInventory))
-	mux.HandleFunc("GET /api/v1/mcp/{layer}/raw", withAuth(n.handleMCPRawFile))
+	mux.HandleFunc("GET /api/v1/mcp/{layer}/{doc}", withAuth(n.handleMCPRawDoc))
 	mux.HandleFunc("PUT /api/v1/mcp/{layer}/raw", withAuth(applyBodyLimit(n.handleMCPRawPut)))
 	mux.HandleFunc("PUT /api/v1/mcp/{layer}/servers/{name}/toggle", withAuth(applyBodyLimit(n.handleMCPToggle)))
 	mux.HandleFunc("POST /api/v1/mcp/validate", withAuth(applyBodyLimit(n.handleMCPValidate)))
+
+	// MCP OAuth flow (routes 2-6 of .lele/tasks/mcp-oauth-rest-contract.md;
+	// see pkg/channels/mcp_auth_flows.go and the OAuth section of rest_mcp.go).
+	// "servers/{name}/auth" and the {layer} routes collide on no method+path,
+	// and the literal "auth" segment outranks {layer} in the mux, so these five
+	// coexist with the five above without another shim.
+	mux.HandleFunc("POST /api/v1/mcp/servers/{name}/auth", withAuth(applyBodyLimit(n.handleMCPAuthStart)))
+	mux.HandleFunc("DELETE /api/v1/mcp/servers/{name}/auth", withAuth(n.handleMCPAuthLogout))
+	mux.HandleFunc("GET /api/v1/mcp/auth/{flow_id}", withAuth(n.handleMCPAuthStatus))
+	mux.HandleFunc("POST /api/v1/mcp/auth/{flow_id}/complete", withAuth(applyBodyLimit(n.handleMCPAuthComplete)))
+	mux.HandleFunc("DELETE /api/v1/mcp/auth/{flow_id}", withAuth(n.handleMCPAuthCancel))
 	mux.HandleFunc("GET /api/v1/status", withAuth(n.handleStatus))
 	mux.HandleFunc("GET /api/v1/channels", withAuth(n.handleChannels))
 	mux.HandleFunc("GET /api/v1/logs", withAuth(n.handleLogs))

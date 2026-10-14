@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -362,6 +363,286 @@ func TestDiscoverActiveFiltering(t *testing.T) {
 	}
 	if _, broken := res.Servers["broken"]; broken {
 		t.Error("invalid entry must not reach Servers")
+	}
+}
+
+// TestParseFileAuthBlock: the optional "auth" block of a remote entry decodes
+// into ServerConfig.Auth and, when absent, stays nil so every existing entry
+// keeps its current behaviour untouched.
+func TestParseFileAuthBlock(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+		want *AuthSpec
+	}{
+		{
+			name: "oauth block with every field decodes",
+			json: `{"mcpServers": {"x": {"url": "https://x/mcp", "auth": {
+				"type": "oauth",
+				"scopes": ["read", "write"],
+				"client_id": "cid",
+				"client_secret": "sec",
+				"redirect_uri": "http://127.0.0.1:9/cb",
+				"auth_server_metadata_url": "https://as/meta",
+				"protected_resource_metadata_url": "https://pr/meta"
+			}}}}`,
+			want: &AuthSpec{
+				Type:                         "oauth",
+				Scopes:                       []string{"read", "write"},
+				ClientID:                     "cid",
+				ClientSecret:                 "sec",
+				RedirectURI:                  "http://127.0.0.1:9/cb",
+				AuthServerMetadataURL:        "https://as/meta",
+				ProtectedResourceMetadataURL: "https://pr/meta",
+			},
+		},
+		{
+			name: "type only, discovery fills the rest",
+			json: `{"mcpServers": {"x": {"url": "https://x/mcp", "auth": {"type": "oauth"}}}}`,
+			want: &AuthSpec{Type: "oauth"},
+		},
+		{
+			name: "empty auth object is a declared but unset block",
+			json: `{"mcpServers": {"x": {"url": "https://x/mcp", "auth": {}}}}`,
+			want: &AuthSpec{},
+		},
+		{
+			name: "absent auth leaves Auth nil",
+			json: `{"mcpServers": {"x": {"url": "https://x/mcp"}}}`,
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, tt.json)
+			f, err := parseFile(path, staticExpand(nil))
+			if err != nil {
+				t.Fatalf("parseFile error: %v", err)
+			}
+			if len(f.EntryErrors) != 0 {
+				t.Fatalf("unexpected entry errors: %v", f.EntryErrors)
+			}
+			got := f.MCPServers["x"].Auth
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Auth = %#v, want %#v", got, tt.want)
+			}
+			if tt.want == nil && got != nil {
+				t.Error("absent auth block must leave Auth nil, not a zero value")
+			}
+		})
+	}
+}
+
+// TestAuthTypeValidation: the auth mode is a closed set — anything unknown
+// (a typo like "bearer" would silently disable lele's OAuth flow) is reported
+// per entry and never kills the file.
+func TestAuthTypeValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		authType    string
+		errContains string
+	}{
+		{name: "empty type is accepted", authType: ""},
+		{name: "none is accepted", authType: "none"},
+		{name: "oauth is accepted", authType: "oauth"},
+		{name: "bearer is rejected", authType: "bearer", errContains: `unknown auth type "bearer": must be "none" or "oauth"`},
+		{name: "case matters", authType: "OAuth", errContains: "unknown auth type"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := ServerConfig{URL: "https://x/mcp", Auth: &AuthSpec{Type: tt.authType}}
+			err := srv.validate()
+			if tt.errContains == "" {
+				if err != nil {
+					t.Fatalf("validate() = %v, want nil for auth type %q", err, tt.authType)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("validate() = nil, want an error for auth type %q", tt.authType)
+			}
+			if !strings.Contains(err.Error(), tt.errContains) {
+				t.Errorf("error %q does not contain %q", err, tt.errContains)
+			}
+		})
+	}
+}
+
+// TestParseFileAuthInvalidEntries: remote-only and client_id/secret coupling
+// are enforced through the production path, with the failing entry kept in
+// MCPServers for inspection like every other validation failure.
+func TestParseFileAuthInvalidEntries(t *testing.T) {
+	tests := []struct {
+		name        string
+		json        string
+		badServer   string
+		errContains string
+	}{
+		{
+			name:        "auth block on a stdio entry is rejected",
+			json:        `{"mcpServers": {"fs": {"command": "npx", "auth": {"type": "oauth"}}}}`,
+			badServer:   "fs",
+			errContains: "auth block requires a url (remote entry)",
+		},
+		{
+			name:        "client_secret without client_id is rejected",
+			json:        `{"mcpServers": {"api": {"url": "https://x/mcp", "auth": {"client_secret": "sec"}}}}`,
+			badServer:   "api",
+			errContains: "auth client_secret requires client_id",
+		},
+		{
+			name:        "client_id with client_secret is accepted",
+			json:        `{"mcpServers": {"api": {"url": "https://x/mcp", "auth": {"client_id": "cid", "client_secret": "sec"}}}}`,
+			badServer:   "",
+			errContains: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, tt.json)
+			f, err := ParseFile(path)
+			if err != nil {
+				t.Fatalf("ParseFile returned file-level error: %v", err)
+			}
+			if tt.badServer == "" {
+				if len(f.EntryErrors) != 0 {
+					t.Fatalf("unexpected entry errors: %v", f.EntryErrors)
+				}
+				return
+			}
+			raw, ok := f.EntryErrors[tt.badServer]
+			if !ok {
+				t.Fatalf("EntryErrors = %v, want an error for %q", keysOfErrors(f.EntryErrors), tt.badServer)
+			}
+			if !strings.Contains(raw.Error(), tt.errContains) {
+				t.Errorf("error %q does not contain %q", raw, tt.errContains)
+			}
+			if _, stillParsed := f.MCPServers[tt.badServer]; !stillParsed {
+				t.Errorf("invalid entry %q was dropped from MCPServers", tt.badServer)
+			}
+		})
+	}
+}
+
+// TestParseFileAuthExpansion: the auth string fields are ${VAR}-expanded on
+// READ (a token in client_secret is the normal case), while Auth.Type is not
+// — it is a literal selector, so an unexpanded "${X}" there must be rejected
+// by validate instead of quietly becoming a valid mode.
+func TestParseFileAuthExpansion(t *testing.T) {
+	expand := staticExpand(map[string]string{
+		"MY_TOKEN": "s3cr3t",
+		"REDIR":    "http://127.0.0.1:8765/cb",
+		"S":        "scope-value",
+		"CAID":     "expanded-id",
+		"ASM":      "https://as/meta",
+		"PRM":      "https://pr/meta",
+		"X":        "oauth",
+	})
+	content := `{"mcpServers": {"remote": {"url": "https://x/mcp", "auth": {
+		"type": "${X}",
+		"scopes": ["read", "${S}"],
+		"client_id": "${CAID}",
+		"client_secret": "${MY_TOKEN}",
+		"redirect_uri": "${REDIR}",
+		"auth_server_metadata_url": "${ASM}",
+		"protected_resource_metadata_url": "${PRM}"
+	}}}}`
+	path := writeConfig(t, content)
+	f, err := parseFile(path, expand)
+	if err != nil {
+		t.Fatalf("parseFile error: %v", err)
+	}
+	auth := f.MCPServers["remote"].Auth
+	if auth == nil {
+		t.Fatal("Auth = nil, want the declared auth block")
+	}
+	if auth.Type != "${X}" {
+		t.Errorf("Auth.Type = %q, want the literal %q (type is never expanded)", auth.Type, "${X}")
+	}
+	if want := []string{"read", "scope-value"}; !reflect.DeepEqual(auth.Scopes, want) {
+		t.Errorf("Auth.Scopes = %#v, want %#v", auth.Scopes, want)
+	}
+	if auth.ClientID != "expanded-id" {
+		t.Errorf("Auth.ClientID = %q, want expanded ${CAID}", auth.ClientID)
+	}
+	if auth.ClientSecret != "s3cr3t" {
+		t.Errorf("Auth.ClientSecret = %q, want expanded ${MY_TOKEN}", auth.ClientSecret)
+	}
+	if auth.RedirectURI != "http://127.0.0.1:8765/cb" {
+		t.Errorf("Auth.RedirectURI = %q, want expanded ${REDIR}", auth.RedirectURI)
+	}
+	if auth.AuthServerMetadataURL != "https://as/meta" {
+		t.Errorf("Auth.AuthServerMetadataURL = %q, want expanded ${ASM}", auth.AuthServerMetadataURL)
+	}
+	if auth.ProtectedResourceMetadataURL != "https://pr/meta" {
+		t.Errorf("Auth.ProtectedResourceMetadataURL = %q, want expanded ${PRM}", auth.ProtectedResourceMetadataURL)
+	}
+	// Proof that the literal type reached validation: had ${X} been expanded,
+	// the entry would have been valid ("oauth" is a known mode).
+	if _, bad := f.EntryErrors["remote"]; !bad {
+		t.Errorf("EntryErrors = %v, want an unknown auth type error for the literal ${X}", f.EntryErrors)
+	}
+}
+
+// TestParseFileAuthExpansionNilSafe: expanding an entry without an auth block
+// must not panic and must leave every other field's behaviour intact.
+func TestParseFileAuthExpansionNilSafe(t *testing.T) {
+	path := writeConfig(t, `{"mcpServers": {"x": {"url": "${URL}"}}}`)
+	f, err := parseFile(path, staticExpand(map[string]string{"URL": "https://x/mcp"}))
+	if err != nil {
+		t.Fatalf("parseFile error: %v", err)
+	}
+	srv := f.MCPServers["x"]
+	if srv.URL != "https://x/mcp" {
+		t.Errorf("URL = %q, want the expanded value", srv.URL)
+	}
+	if srv.Auth != nil {
+		t.Errorf("Auth = %#v, want nil", srv.Auth)
+	}
+}
+
+// TestServerConfigAuthJSONRoundTrip guards the json tags of AuthSpec: a
+// marshalled entry must decode back into the same value, and a nil Auth must
+// stay absent from the document (writers keep the file as the user wrote it).
+func TestServerConfigAuthJSONRoundTrip(t *testing.T) {
+	in := ServerConfig{
+		URL:  "https://x/mcp",
+		Type: "http",
+		Auth: &AuthSpec{
+			Type:                         "oauth",
+			Scopes:                       []string{"read", "write"},
+			ClientID:                     "cid",
+			ClientSecret:                 "sec",
+			RedirectURI:                  "http://127.0.0.1:9/cb",
+			AuthServerMetadataURL:        "https://as/meta",
+			ProtectedResourceMetadataURL: "https://pr/meta",
+		},
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("json.Marshal error: %v", err)
+	}
+	for _, key := range []string{"auth", "client_id", "client_secret", "redirect_uri", "scopes", "auth_server_metadata_url", "protected_resource_metadata_url"} {
+		if !strings.Contains(string(data), `"`+key+`"`) {
+			t.Errorf("marshalled entry %s lacks key %q", data, key)
+		}
+	}
+	var out ServerConfig
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("json.Unmarshal(%s) error: %v", data, err)
+	}
+	if !reflect.DeepEqual(out, in) {
+		t.Errorf("round trip = %#v, want %#v", out, in)
+	}
+
+	// A nil Auth must not appear at all: omitempty keeps the document clean
+	// and ParseFile then reports Auth == nil for it.
+	plain, err := json.Marshal(ServerConfig{URL: "https://x/mcp"})
+	if err != nil {
+		t.Fatalf("json.Marshal error: %v", err)
+	}
+	if strings.Contains(string(plain), "auth") {
+		t.Errorf("marshalled entry %s contains an auth key for a nil Auth", plain)
 	}
 }
 

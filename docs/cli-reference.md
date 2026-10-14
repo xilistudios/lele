@@ -126,7 +126,8 @@ lele client status
 
 ## `lele mcp`
 
-Manage the layered `mcp.json` files (list, show, add, remove, edit, test).
+Manage the layered `mcp.json` files (list, show, add, remove, auth, logout,
+edit, test).
 
 Subcommands:
 
@@ -136,6 +137,8 @@ Subcommands:
 - `remove`
 - `edit`
 - `test`
+- `auth` — run the OAuth 2.1 login of one remote server
+- `logout` — forget one server's token and dynamic registration
 
 Examples:
 
@@ -143,12 +146,15 @@ Examples:
 lele mcp list
 lele mcp show filesystem
 lele mcp add filesystem --command npx --arg -y --arg @modelcontextprotocol/server-filesystem --arg /tmp
+lele mcp add issues --url https://mcp.example.com/mcp --auth oauth --scope read
 lele mcp remove filesystem --all
 lele mcp edit api
 lele mcp test api
+lele mcp auth issues --no-browser
+lele mcp logout issues
 ```
 
-Full reference: `docs/mcp.md` ("Managing servers from the CLI").
+Full reference: `docs/mcp.md` ("Managing servers from the CLI", "OAuth 2.1").
 
 ## `lele update`
 

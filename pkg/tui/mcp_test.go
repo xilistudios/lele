@@ -55,7 +55,9 @@ func TestFormatMCPItem(t *testing.T) {
 		{"srv", mcp.LayerProject, "invalid", "! srv" + pad + " — [project]"},
 	}
 	for _, tc := range cases {
-		got := formatMCPItem(tc.name, tc.layer, tc.effective)
+		// No auth verdict: the marker is empty and the row keeps EXACTLY the
+		// shape it had before the auth suffix existed.
+		got := formatMCPItem(tc.name, tc.layer, tc.effective, "")
 		if got != tc.want {
 			t.Errorf("formatMCPItem(%q,%q,%q) = %q, want %q",
 				tc.name, tc.layer, tc.effective, got, tc.want)
@@ -369,11 +371,11 @@ func TestMCPDetail_EnterOpensDetailAndKeepsCursor(t *testing.T) {
 	}
 
 	// Any other key inside the detail must be swallowed: no crash, no mode
-	// change, no movement of the hidden list cursor.
+	// change, no movement of the hidden list cursor. ("d" is NOT one of them
+	// anymore — it is the sign-out, covered by its own tests.)
 	for _, msg := range []tea.KeyMsg{
 		{Type: tea.KeyUp}, {Type: tea.KeyDown}, {Type: tea.KeyEnter},
-		mcpKeyRunes(' '), mcpKeyRunes('t'), mcpKeyRunes('f'),
-		mcpKeyRunes('d'), mcpKeyRunes('x'),
+		mcpKeyRunes(' '), mcpKeyRunes('t'), mcpKeyRunes('f'), mcpKeyRunes('x'),
 	} {
 		cmd, handled := m.handleMCPKey(msg)
 		if !handled || cmd != nil {
@@ -383,6 +385,18 @@ func TestMCPDetail_EnterOpensDetailAndKeepsCursor(t *testing.T) {
 			t.Fatalf("key %q in detail changed state: mode=%v idx=%d",
 				msg.String(), m.modalMode, m.modalSelectedIdx)
 		}
+	}
+
+	// "d" is the sign-out: handled, and the detail stays on screen (the user
+	// must see the refreshed auth state, not be bounced back to the list).
+	if cmd, handled := m.handleMCPKey(mcpKeyRunes('d')); !handled || cmd == nil {
+		t.Fatalf("d in detail: handled=%v cmd=%v, want handled with the sign-out command", handled, cmd)
+	}
+	if m.modalMode != ModalMCPDetail {
+		t.Errorf("the sign-out left the detail: mode = %v, want ModalMCPDetail", m.modalMode)
+	}
+	if m.modalSelectedIdx != 1 {
+		t.Errorf("the sign-out moved the hidden list cursor: idx = %d, want 1", m.modalSelectedIdx)
 	}
 
 	// esc returns to the list with the cursor and the rows untouched.

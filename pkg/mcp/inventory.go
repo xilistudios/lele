@@ -41,7 +41,10 @@ const (
 
 // ServerSummary is the display-safe description of one server entry. It is
 // built from the RAW file bytes (no ${VAR} expansion) and exposes env and
-// header key NAMES only — never their values, which can hold secrets.
+// header key NAMES only — never their values, which can hold secrets. The
+// optional auth block follows the same rule: its mode, its scope COUNT and
+// whether a client id is set may be shown, the client_id / client_secret
+// VALUES never may.
 type ServerSummary struct {
 	Name        string
 	Kind        string // "stdio" | "remote" | "unknown"
@@ -54,6 +57,14 @@ type ServerSummary struct {
 	Disabled    bool
 	EnvKeys     []string // KEYS only, sorted; nil when the entry has none
 	HeaderKeys  []string // KEYS only, sorted; nil when the entry has none
+
+	// AuthType / AuthScopes / AuthClientIDSet project the optional "auth"
+	// block WITHOUT any value: the mode string, the number of scopes and
+	// whether a client id is present. client_id and client_secret VALUES
+	// never leave the package (same rule as EnvKeys/HeaderKeys).
+	AuthType        string // "" | "none" | "oauth"
+	AuthScopes      int
+	AuthClientIDSet bool
 }
 
 // EntryState is one layer's copy of one server name inside Inventory.ByName.

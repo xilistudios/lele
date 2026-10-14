@@ -412,6 +412,95 @@ describe('per-agent MCP endpoints', () => {
     expect(JSON.parse(String(seen[0]?.body))).toEqual({ layer: 'project', content: '{}' })
   })
 
+  /**
+   * Captures the last request and answers 204 with no body — the shape of the
+   * two DELETE routes of the OAuth contract.
+   */
+  function captureFetch204() {
+    const seen: { url: string; method?: string; body?: BodyInit | null }[] = []
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({ url: String(input), method: init?.method, body: init?.body })
+      return new Response(null, { status: 204 })
+    }) as unknown as typeof fetch
+    return seen
+  }
+
+  test('mcpAuthStart POSTs with NO body to the server auth route', async () => {
+    const seen = captureFetch({
+      flow_id: 'abc',
+      auth_url: 'https://idp.example/authorize?x=1',
+      redirect_uri: 'http://127.0.0.1:18794/callback',
+      expires_at: '2026-01-01T00:05:00Z',
+    })
+    const start = await api().mcpAuthStart('a b', 'srv/ice')
+
+    // Both the agent id and the server name are encoded; the route starts the
+    // flow, so nothing is carried in the body (start is applyBodyLimit'd
+    // server-side for symmetry only).
+    expect(seen[0]?.url).toBe(
+      'http://127.0.0.1:18793/api/v1/mcp/servers/srv%2Fice/auth?agent_id=a%20b',
+    )
+    expect(seen[0]?.method).toBe('POST')
+    expect(seen[0]?.body ?? null).toBeNull()
+    expect(start.flow_id).toBe('abc')
+    expect(start.auth_url).toBe('https://idp.example/authorize?x=1')
+  })
+
+  test('mcpAuthStatus GETs the flow route', async () => {
+    const seen = captureFetch({
+      flow_id: 'f/1',
+      server: 'srv',
+      state: 'pending',
+      authenticated: false,
+    })
+    const status = await api().mcpAuthStatus('main', 'f/1')
+
+    expect(seen[0]?.url).toBe('http://127.0.0.1:18793/api/v1/mcp/auth/f%2F1?agent_id=main')
+    expect(seen[0]?.method).toBe('GET')
+    expect(status.state).toBe('pending')
+  })
+
+  test('mcpAuthComplete POSTs {code, state} to the complete route', async () => {
+    const seen = captureFetch({ flow_id: 'f1', server: 'srv', state: 'done', authenticated: true })
+    const status = await api().mcpAuthComplete('main', 'f1', { code: 'c0de', state: 'st4te' })
+
+    expect(seen[0]?.url).toBe('http://127.0.0.1:18793/api/v1/mcp/auth/f1/complete?agent_id=main')
+    expect(seen[0]?.method).toBe('POST')
+    expect(JSON.parse(String(seen[0]?.body))).toEqual({ code: 'c0de', state: 'st4te' })
+    expect(status.authenticated).toBe(true)
+  })
+
+  test('mcpAuthComplete without a state sends it undefined (server default)', async () => {
+    // `state` is optional in the contract: omitting the key must reach the
+    // server as absent, not as the string "undefined".
+    const seen = captureFetch({ flow_id: 'f1', server: 'srv', state: 'done', authenticated: true })
+    await api().mcpAuthComplete('main', 'f1', { code: 'c0de' })
+
+    expect(JSON.parse(String(seen[0]?.body))).toEqual({ code: 'c0de' })
+  })
+
+  test('mcpAuthCancel DELETEs the flow route and resolves undefined on 204', async () => {
+    const seen = captureFetch204()
+    const result = await api().mcpAuthCancel('main', 'f1')
+
+    expect(seen[0]?.url).toBe('http://127.0.0.1:18793/api/v1/mcp/auth/f1?agent_id=main')
+    expect(seen[0]?.method).toBe('DELETE')
+    // 204 → undefined, like every other 204 path of the client (callers treat
+    // "resolved" as success and never read a body).
+    expect(result).toBeUndefined()
+  })
+
+  test('mcpLogout DELETEs the server auth route and resolves undefined on 204', async () => {
+    const seen = captureFetch204()
+    const result = await api().mcpLogout('a b', 'srv/ice')
+
+    expect(seen[0]?.url).toBe(
+      'http://127.0.0.1:18793/api/v1/mcp/servers/srv%2Fice/auth?agent_id=a%20b',
+    )
+    expect(seen[0]?.method).toBe('DELETE')
+    expect(result).toBeUndefined()
+  })
+
   test('a rejected MCP write surfaces the server error code', async () => {
     // 409 mcp_entry_shadowed must survive this layer: conflict handling
     // branches on the code via mcpErrorCode.

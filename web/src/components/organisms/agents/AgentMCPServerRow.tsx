@@ -21,6 +21,15 @@
  *    the file that repairs it), and a `changed:false` write is reported
  *    inline (message + machine code chip, house idiom) instead of pretending
  *    the row moved.
+ *
+ * The AUTH controls (`server.auth`, the secret-free report the backend omits
+ * for stdio servers) follow the same shape: a status chip whose text — never
+ * its colour alone — names the state, plus Authenticate / Sign out, disabled
+ * while an auth action for this row is in flight. Which of the two shows is
+ * decided by the report ONLY: a `required && !authenticated` row is offered a
+ * sign-in even when it declares no method (a recorded 401 is exactly that
+ * case), and a row with no report gets nothing — it never had a way to
+ * authenticate.
  */
 import { useTranslation } from 'react-i18next'
 import type { MCPEffective, MCPLayer, MCPLayerName, MCPServerRow } from '../../../lib/mcpTypes'
@@ -39,6 +48,16 @@ const STATE_CLASS: Record<MCPEffective, string> = {
 const CHIP_CLS =
   'inline-flex items-center rounded-md border border-border bg-background-secondary px-1.5 py-0.5 font-mono text-2xs text-text-secondary'
 
+/**
+ * Auth status chip: same box as the other chips, tinted by state. The tint is
+ * redundant on purpose — the TEXT is the verdict (§10.5: nothing is ever
+ * colour-only).
+ */
+const AUTH_CHIP_CLS: Record<'authenticated' | 'required', string> = {
+  authenticated: `${CHIP_CLS} text-state-success`,
+  required: `${CHIP_CLS} text-state-warning`,
+}
+
 type Props = {
   row: MCPServerRow
   /** Inventory layers — repair mirrors mcp-edit-<layer> (needs the path). */
@@ -54,11 +73,24 @@ type Props = {
   onToggle: (row: MCPServerRow) => void
   /** Failed-write message for this row (already paired), or null. */
   error: string | null
+  /** Machine code of that failure (chip inside the alert), or null/absent. */
+  errorCode?: string | null
   /** The failure is 409 `mcp_entry_shadowed` → offer the force retry. */
   forceOffered: boolean
   onForceRetry: () => void
   /** The last successful toggle for this row answered `changed:false`. */
   noChange: boolean
+  /**
+   * An auth action FOR THIS ROW is in flight — its sign-in flow is open (the
+   * POST is already on the wire) or its logout is running. Disables both auth
+   * controls: a second click could only start a flow that CANCELS the one on
+   * screen, or stack a second logout.
+   */
+  authBusy: boolean
+  /** Open the sign-in modal of this row (section-owned, like onEdit). */
+  onAuthenticate: (row: MCPServerRow) => void
+  /** Forget this row's stored credential (section-owned mutation). */
+  onLogout: (row: MCPServerRow) => void
 }
 
 export function AgentMCPServerRow({
@@ -70,15 +102,37 @@ export function AgentMCPServerRow({
   busy,
   onToggle,
   error,
+  errorCode,
   forceOffered,
   onForceRetry,
   noChange,
+  authBusy,
+  onAuthenticate,
+  onLogout,
 }: Props) {
   const { t } = useTranslation()
   // Repair wiring mirrors the layers block: no path (or an unknown layer)
   // ⇒ nothing to edit, exactly like mcp-edit-<layer>.
   const rowLayer = layers.find((layer) => layer.layer === row.layer)
   const repairBlocked = !isStoredLayer(row.layer) || !rowLayer?.path
+
+  const auth = row.server.auth
+  // AUTH is decided by the server's own secret-free report — ABSENT for every
+  // stdio server (no url, no headers, no auth state), which is what keeps
+  // those rows free of any control here. Exactly ONE of three verdicts is
+  // possible, and it drives both the chip and the controls:
+  //   'authenticated' → chip + Sign out
+  //   'required'      → chip + Authenticate (even with no declared method: a
+  //                     recorded 401 declares none)
+  //   null            → nothing at all (no report, or a report with nothing to
+  //                     say: nothing to authenticate and nothing to sign out of)
+  const authStatus: 'authenticated' | 'required' | null = auth?.authenticated
+    ? 'authenticated'
+    : auth?.required
+      ? 'required'
+      : null
+  const authenticated = authStatus === 'authenticated'
+  const authRequired = authStatus === 'required'
 
   return (
     <li
@@ -110,6 +164,14 @@ export function AgentMCPServerRow({
           <span data-testid={`mcp-layer-tag-${row.name}`} className={CHIP_CLS}>
             {layerLabel(row.layer)}
           </span>
+
+          {/* Auth state: only two states have something to say, and the chip's
+              TEXT says it (authenticated / sign-in required). */}
+          {authStatus !== null && (
+            <span data-testid={`mcp-auth-chip-${row.name}`} className={AUTH_CHIP_CLS[authStatus]}>
+              {t(authenticated ? 'mcp.auth.statusAuthenticated' : 'mcp.auth.statusRequired')}
+            </span>
+          )}
 
           {/* RAW strings: `${VAR}` must show literally — no interpolation, ever. */}
           {row.server.command !== undefined && (
@@ -179,6 +241,36 @@ export function AgentMCPServerRow({
                 onClick={() => onToggle(row)}
               >
                 {row.effective === 'enabled' ? t('mcp.toggle.disable') : t('mcp.toggle.enable')}
+              </Button>
+            )}
+
+            {/* Auth controls. Offered from the report alone: `required &&
+                !authenticated` gets Authenticate even with no declared method
+                (a recorded 401 declares none), `authenticated` gets Sign out,
+                and a row without a report gets NEITHER (it has no way to
+                authenticate, so offering one would be a dead end). */}
+            {authRequired && (
+              <Button
+                variant="secondary"
+                size="sm"
+                data-testid={`mcp-auth-start-${row.name}`}
+                disabled={authBusy}
+                aria-label={t('mcp.auth.buttonAria', { name: row.name })}
+                onClick={() => onAuthenticate(row)}
+              >
+                {t('mcp.auth.button')}
+              </Button>
+            )}
+            {authenticated && (
+              <Button
+                variant="secondary"
+                size="sm"
+                data-testid={`mcp-auth-logout-${row.name}`}
+                disabled={authBusy}
+                aria-label={t('mcp.auth.logoutAria', { name: row.name })}
+                onClick={() => onLogout(row)}
+              >
+                {t('mcp.auth.logout')}
               </Button>
             )}
           </span>
@@ -255,7 +347,9 @@ export function AgentMCPServerRow({
           </div>
         )}
 
-        {/* A failed write has nowhere else to surface (same as Skills). */}
+        {/* A failed write has nowhere else to surface (same as Skills). The
+            machine code rides along as a chip (house idiom): the message alone
+            cannot tell `mcp_entry_shadowed` from a timeout. */}
         {error !== null && (
           <div
             role="alert"
@@ -263,6 +357,11 @@ export function AgentMCPServerRow({
             className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-state-error/40 bg-state-error/10 px-3 py-2 text-xs text-state-error"
           >
             <span className="min-w-0 flex-1">{error}</span>
+            {errorCode !== null && errorCode !== undefined && (
+              <span data-testid={`mcp-row-error-${row.name}-code`} className="font-mono text-2xs">
+                {errorCode}
+              </span>
+            )}
             {forceOffered && (
               <Button
                 variant="secondary"

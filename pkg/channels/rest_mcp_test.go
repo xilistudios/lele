@@ -19,7 +19,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/xilistudios/lele/pkg/mcp"
 )
 
@@ -346,6 +348,563 @@ func TestMCPInventory_ErrorCodes(t *testing.T) {
 			t.Fatalf("status = %d body = %s, want 500 mcp_unavailable", status, body)
 		}
 	})
+}
+
+// --- inventory: auth report --------------------------------------------------
+
+// mcpAuthFixtureRaw is the auth matrix every report test starts from, written
+// in the ONE global layer (= LeleDir, so <LeleDir>/mcp-auth.json shares the
+// root): a remote entry opted into OAuth, a remote entry carrying header
+// credentials only (with a ${VAR} value, which must stay unexpanded AND
+// unread) and a plain stdio entry with no auth story at all.
+const mcpAuthFixtureRaw = `{
+  "mcpServers": {
+    "oauth-srv": {"url": "https://oauth.example/mcp", "auth": {"type": "oauth"}, "description": "oauth"},
+    "headers-srv": {"url": "https://headers.example/mcp", "headers": {"Authorization": "Bearer ${HEADER_CANARY}"}},
+    "stdio-srv": {"command": "run-stdio"}
+  }
+}`
+
+// newMCPAuthFixture wires one agent ("auth1") over three temp roots whose
+// global layer holds mcpAuthFixtureRaw. LeleDir is that global root, so the
+// auth store file (<LeleDir>/mcp-auth.json) lives next to the layer file the
+// writer and the handler both read.
+func newMCPAuthFixture(t *testing.T) *mcpFixture {
+	t.Helper()
+	return newMCPAuthFixtureWith(t, mcpAuthFixtureRaw)
+}
+
+// newMCPAuthFixtureWith is newMCPAuthFixture for a caller with its own global
+// mcp.json (same layout, same single agent id, same LeleDir = global root rule).
+func newMCPAuthFixtureWith(t *testing.T, raw string) *mcpFixture {
+	t.Helper()
+
+	globalDir := t.TempDir()
+	writeMCPJSON(t, filepath.Join(globalDir, "mcp.json"), raw)
+
+	paths := mcp.Paths{LeleDir: globalDir, AgentWorkspace: t.TempDir(), Cwd: t.TempDir()}
+	ts := newNativeTestServer(t)
+	loop := &mcpTestLoop{
+		nativeTestAgentLoop: ts.loop,
+		paths:               map[string]mcp.Paths{"auth1": paths},
+	}
+	ts.channel.agentLoop = loop
+
+	return &mcpFixture{
+		ts:        ts,
+		loop:      loop,
+		globalDir: globalDir,
+		paths:     paths,
+		globalRaw: raw,
+	}
+}
+
+// mcpAuthStoreOf opens the SAME store file the handler opens, from a writer
+// that is not the handler (a different AuthStore instance — the cross-process
+// case the per-request store exists for).
+func mcpAuthStoreOf(t *testing.T, f *mcpFixture) *mcp.AuthStore {
+	t.Helper()
+	return mcp.NewAuthStore(f.paths.LeleDir)
+}
+
+// TestMCPInventory_AuthOAuthServer pins the opted-in row: an enabled remote
+// entry with "auth": {"type": "oauth"} and no stored record reports
+// required/method oauth and NOT authenticated.
+func TestMCPInventory_AuthOAuthServer(t *testing.T) {
+	f := newMCPAuthFixture(t)
+
+	status, inv, body := mcpInventory(t, f, "auth1")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", status, body)
+	}
+
+	row := mcpRow(t, inv, "oauth-srv")
+	if row.Effective != "enabled" {
+		t.Fatalf("oauth-srv effective = %q, want enabled", row.Effective)
+	}
+	auth := row.Server.Auth
+	if auth == nil {
+		t.Fatalf("oauth-srv has no auth report: %+v", row)
+	}
+	if !auth.Required || auth.Authenticated || auth.Method != "oauth" {
+		t.Fatalf("oauth-srv auth = %+v, want required=true authenticated=false method=oauth", auth)
+	}
+
+	// Wire shape: the auth member always carries all three keys — `method` is
+	// not omitempty, so it is "" rather than absent when there is no method.
+	var wire struct {
+		Required      *bool   `json:"required"`
+		Authenticated *bool   `json:"authenticated"`
+		Method        *string `json:"method"`
+	}
+	raw := mcpRawJSON(t, body, "oauth-srv", "auth")
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatalf("auth member is not an object: %v (%s)", err, raw)
+	}
+	if wire.Required == nil || wire.Authenticated == nil || wire.Method == nil {
+		t.Fatalf("auth member is missing one of required/authenticated/method: %s", raw)
+	}
+	if *wire.Method != "oauth" || !*wire.Required || *wire.Authenticated {
+		t.Fatalf("auth wire = %s, want required=true authenticated=false method=oauth", raw)
+	}
+}
+
+// mcpRawJSON extracts servers[i].server[field] verbatim so a test can assert
+// the wire shape, not the decoded struct.
+func mcpRawJSON(t *testing.T, body []byte, serverName, field string) json.RawMessage {
+	t.Helper()
+	var doc struct {
+		Servers []struct {
+			Name   string                     `json:"name"`
+			Server map[string]json.RawMessage `json:"server"`
+		} `json:"servers"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("unmarshal inventory body: %v\nbody=%s", err, body)
+	}
+	for _, row := range doc.Servers {
+		if row.Name == serverName {
+			return row.Server[field]
+		}
+	}
+	t.Fatalf("server %q missing from body=%s", serverName, body)
+	return nil
+}
+
+// TestMCPInventory_AuthAbsentForStdio pins the omitempty rule: a stdio entry
+// (no url, no headers, no stored state) must not carry an "auth" member at
+// all — the response struct and the raw JSON agree on that.
+func TestMCPInventory_AuthAbsentForStdio(t *testing.T) {
+	f := newMCPAuthFixture(t)
+
+	status, _, body := mcpInventory(t, f, "auth1")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", status, body)
+	}
+
+	if raw := mcpRawJSON(t, body, "stdio-srv", "auth"); raw != nil {
+		t.Fatalf("stdio-srv carries an auth member: %s", raw)
+	}
+	// Non-vacuous: the OAuth row DOES carry one in the same body.
+	if raw := mcpRawJSON(t, body, "oauth-srv", "auth"); raw == nil {
+		t.Fatalf("oauth-srv lost its auth member (the absence check above proves nothing): %s", body)
+	}
+}
+
+// TestMCPInventory_AuthHeadersMethod pins the header-carrying row. The row is
+// described by mcp.CheckAuth, whose rule this test borrows instead of guessing:
+// header keys make the CARRIER "headers", and `required` follows the RECORDED
+// challenge — headers are frequently non-credential (Accept, User-Agent) and
+// their values are never read, so presence alone proves nothing and
+// `authenticated` stays false either way.
+//
+// Both halves are asserted, in the order the client experiences them: a fresh
+// entry with no challenge reports method=headers required=false (the engine's
+// own case "headers only, no challenge", pkg/mcp/auth_test.go), and the same
+// row flips to required=true once a 401 has been recorded — without which the
+// first assertion would also pass on an implementation that hardcoded false.
+func TestMCPInventory_AuthHeadersMethod(t *testing.T) {
+	f := newMCPAuthFixture(t)
+
+	status, inv, body := mcpInventory(t, f, "auth1")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", status, body)
+	}
+
+	auth := mcpRow(t, inv, "headers-srv").Server.Auth
+	if auth == nil {
+		t.Fatalf("headers-srv has no auth report: %+v", mcpRow(t, inv, "headers-srv"))
+	}
+	if auth.Method != "headers" || auth.Required || auth.Authenticated {
+		t.Fatalf("headers-srv auth = %+v, want method=headers required=false authenticated=false", auth)
+	}
+
+	// A real 401 recorded by another process (the TUI, a probe) is what makes
+	// the same row required.
+	if err := mcpAuthStoreOf(t, f).Save("headers-srv", mcp.AuthRecord{
+		URL:          "https://headers.example/mcp",
+		AuthRequired: true,
+	}); err != nil {
+		t.Fatalf("Save(): %v", err)
+	}
+
+	status, inv, body = mcpInventory(t, f, "auth1")
+	if status != http.StatusOK {
+		t.Fatalf("second status = %d, want 200; body=%s", status, body)
+	}
+	auth = mcpRow(t, inv, "headers-srv").Server.Auth
+	if auth == nil {
+		t.Fatalf("headers-srv lost its auth report after the challenge: %s", body)
+	}
+	if auth.Method != "headers" || !auth.Required || auth.Authenticated {
+		t.Fatalf("headers-srv after the recorded 401 = %+v, want method=headers required=true authenticated=false", auth)
+	}
+}
+
+// mcpAuthUnresolvedRaw is the fixture of the branch-agreement test: every
+// declared shape exists TWICE, once enabled (the copy mcp.Discover RESOLVES)
+// and once disabled or invalid (a copy the merge excludes, so the auth report
+// used to take the store-only fallback). Same shape, one variable.
+//
+// Two url shapes are covered on purpose: a literal one, and a ${VAR}-shaped one
+// — the auth store binds a record to the EXPANDED url, so the fallback could
+// only see a stored token or a recorded 401 by expanding what it looks up.
+const mcpAuthUnresolvedRaw = `{
+  "mcpServers": {
+    "plain-headers":   {"url": "https://plain.example/mcp", "headers": {"Authorization": "Bearer ${HEADER_CANARY}"}},
+    "plain-headers-off": {"url": "https://plain.example/mcp", "headers": {"Authorization": "Bearer ${HEADER_CANARY}"}, "disabled": true},
+    "var-bare":        {"url": "${UNRESOLVED_URL}"},
+    "var-bare-off":    {"url": "${UNRESOLVED_URL}", "disabled": true},
+    "var-oauth":       {"url": "${UNRESOLVED_URL}", "auth": {"type": "oauth"}},
+    "var-oauth-off":   {"url": "${UNRESOLVED_URL}", "auth": {"type": "oauth"}, "disabled": true},
+    "var-invalid":     {"url": "${UNRESOLVED_URL}", "command": "run"}
+  }
+}`
+
+// TestMCPInventory_AuthUnresolvedRowMatchesResolved is the branch-agreement
+// guard: a row whose winner the merge did NOT resolve (disabled entry, invalid
+// entry) must report the SAME auth block as the resolved row it is a copy of —
+// the report is mcp.CheckAuth's answer in both cases, never a second rule.
+//
+// Three properties are pinned, each of which the store-only fallback failed:
+//
+//  1. the method precedence does not depend on resolution: a declared OAuth
+//     block is "oauth", a header carrier is "headers" (and WINS over a bare
+//     recorded 401, which names no carrier and stays ""), in both branches;
+//  2. the store lookup uses the ${VAR}-EXPANDED url — a record written for the
+//     expanded resource must be seen by the unresolved copy too;
+//  3. Required is driven by the DECLARATION or the RECORDED challenge, never by
+//     the presence of header keys (the rule of AuthStatus.Required).
+//
+// Every pair also has its expected block spelled out, so the equality can never
+// be satisfied by two nils.
+func TestMCPInventory_AuthUnresolvedRowMatchesResolved(t *testing.T) {
+	t.Setenv("UNRESOLVED_URL", "https://unresolved.example/mcp")
+	t.Setenv("HEADER_CANARY", "HEADER-VALUE-CANARY")
+
+	f := newMCPAuthFixtureWith(t, mcpAuthUnresolvedRaw)
+
+	// The 401 of each pair is recorded for the url the row RESOLVES to — the
+	// expanded one for the ${VAR} rows, since that is the url a token would be
+	// bound to and the only one the store can match. Writing the raw
+	// "${UNRESOLVED_URL}" text would be the bug this test is about.
+	writer := mcpAuthStoreOf(t, f)
+	for name, url := range map[string]string{
+		"plain-headers":     "https://plain.example/mcp",
+		"plain-headers-off": "https://plain.example/mcp",
+		"var-bare":          "https://unresolved.example/mcp",
+		"var-bare-off":      "https://unresolved.example/mcp",
+		"var-oauth":         "https://unresolved.example/mcp",
+		"var-oauth-off":     "https://unresolved.example/mcp",
+		"var-invalid":       "https://unresolved.example/mcp",
+	} {
+		if err := writer.Save(name, mcp.AuthRecord{URL: url, AuthRequired: true}); err != nil {
+			t.Fatalf("Save(%q): %v", name, err)
+		}
+	}
+
+	status, inv, body := mcpInventory(t, f, "auth1")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", status, body)
+	}
+
+	// (resolved copy, unresolved copy) pairs, each with the block BOTH must
+	// report. The unresolved half is what the fallback used to get wrong.
+	pairs := []struct {
+		resolved, unresolved, why string
+		want                      MCPServerAuth
+	}{
+		{
+			resolved: "plain-headers", unresolved: "plain-headers-off",
+			why:  "a header carrier wins over the recorded 401 (the fallback said oauth)",
+			want: MCPServerAuth{Required: true, Authenticated: false, Method: "headers"},
+		},
+		{
+			resolved: "var-bare", unresolved: "var-bare-off",
+			why:  "a bare recorded 401 names no carrier: method stays empty (the fallback said oauth)",
+			want: MCPServerAuth{Required: true, Authenticated: false, Method: ""},
+		},
+		{
+			resolved: "var-oauth", unresolved: "var-oauth-off",
+			why:  "a declared OAuth block is required with or without a resolution, and without a record",
+			want: MCPServerAuth{Required: true, Authenticated: false, Method: "oauth"},
+		},
+		{
+			resolved: "var-bare", unresolved: "var-invalid",
+			why:  "an INVALID winner takes the same branch as a disabled one",
+			want: MCPServerAuth{Required: true, Authenticated: false, Method: ""},
+		},
+	}
+	for _, tc := range pairs {
+		want := mcpRow(t, inv, tc.resolved).Server.Auth
+		if want == nil || *want != tc.want {
+			t.Fatalf("%s auth = %+v, want %+v (the resolved side of the pair)", tc.resolved, want, tc.want)
+		}
+		got := mcpRow(t, inv, tc.unresolved).Server.Auth
+		if got == nil {
+			t.Fatalf("%s has no auth report; %s — want %+v, the same block as %s",
+				tc.unresolved, tc.why, tc.want, tc.resolved)
+		}
+		if *got != tc.want {
+			t.Fatalf("%s auth = %+v, want %+v (%s)", tc.unresolved, got, tc.want, tc.why)
+		}
+		if *got != *want {
+			t.Fatalf("%s auth = %+v, want the resolved copy's block %+v", tc.unresolved, got, want)
+		}
+	}
+
+	// Non-vacuity of the ${VAR} half: the pair really is unresolved (so it went
+	// through the fallback at all) and really carries the raw url.
+	if eff := mcpRow(t, inv, "var-bare-off").Effective; eff != "disabled" {
+		t.Fatalf("var-bare-off effective = %q, want disabled (the pair would not exercise the fallback)", eff)
+	}
+	if eff := mcpRow(t, inv, "var-invalid").Effective; eff != "invalid" {
+		t.Fatalf("var-invalid effective = %q, want invalid", eff)
+	}
+	// The url and the header VALUE stay literal/absent: expanding them is an
+	// internal step of the lookup, never something the API echoes.
+	if !strings.Contains(string(body), "${UNRESOLVED_URL}") {
+		t.Fatalf("the raw ${VAR} url disappeared from the body: %s", body)
+	}
+	for _, secret := range []string{"https://unresolved.example/mcp", "HEADER-VALUE-CANARY"} {
+		if strings.Contains(string(body), secret) {
+			t.Fatalf("the expanded value %q leaked into the inventory body: %s", secret, body)
+		}
+	}
+}
+
+// TestMCPInventory_AuthSeesTokenStoredElsewhere is the freshness guarantee:
+// the handler builds its store PER REQUEST, and the store re-validates
+// mcp-auth.json on every read, so a token written by another process (here a
+// different AuthStore instance pointed at the same lele dir) is visible to the
+// very next request without a restart.
+func TestMCPInventory_AuthSeesTokenStoredElsewhere(t *testing.T) {
+	f := newMCPAuthFixture(t)
+
+	status, inv, body := mcpInventory(t, f, "auth1")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", status, body)
+	}
+	if auth := mcpRow(t, inv, "oauth-srv").Server.Auth; auth == nil || auth.Authenticated {
+		t.Fatalf("oauth-srv before the write = %+v, want authenticated=false", auth)
+	}
+
+	// A DIFFERENT store instance writes, exactly like the TUI process would.
+	writer := mcpAuthStoreOf(t, f)
+	if err := writer.Save("oauth-srv", mcp.AuthRecord{
+		URL:          "https://oauth.example/mcp",
+		AuthRequired: true,
+		Token: &transport.Token{
+			AccessToken:  "access-token-value",
+			RefreshToken: "refresh-token-value",
+			TokenType:    "Bearer",
+			ExpiresAt:    time.Now().Add(time.Hour),
+		},
+	}); err != nil {
+		t.Fatalf("Save(): %v", err)
+	}
+
+	status, inv, body = mcpInventory(t, f, "auth1")
+	if status != http.StatusOK {
+		t.Fatalf("second status = %d, want 200; body=%s", status, body)
+	}
+	auth := mcpRow(t, inv, "oauth-srv").Server.Auth
+	if auth == nil {
+		t.Fatalf("oauth-srv lost its auth report after the write: %s", body)
+	}
+	if !auth.Authenticated || !auth.Required || auth.Method != "oauth" {
+		t.Fatalf("oauth-srv after the write = %+v, want required=true authenticated=true method=oauth", auth)
+	}
+	// The token VALUE must still be nowhere in the body.
+	for _, secret := range []string{"access-token-value", "refresh-token-value"} {
+		if strings.Contains(string(body), secret) {
+			t.Fatalf("token value %q leaked into the inventory body: %s", secret, body)
+		}
+	}
+}
+
+// TestMCPInventory_AuthNeverLeaksSecrets is the canary of this feature: a
+// record whose every value is canary-shaped (client_id, client_secret, token,
+// redirect_uri) plus a header VALUE expanded from ${VAR} must never appear in
+// the encoded body — the report is booleans and a fixed method string only.
+func TestMCPInventory_AuthNeverLeaksSecrets(t *testing.T) {
+	f := newMCPAuthFixture(t)
+	t.Setenv("HEADER_CANARY", "HEADER-VALUE-CANARY")
+
+	const canary = "SUPER-SECRET-CANARY"
+	writer := mcpAuthStoreOf(t, f)
+	if err := writer.Save("oauth-srv", mcp.AuthRecord{
+		URL:          "https://oauth.example/mcp",
+		ClientID:     canary + "-client-id",
+		ClientSecret: canary + "-client-secret",
+		RedirectURI:  "http://127.0.0.1:9/callback",
+		AuthRequired: true,
+		Token: &transport.Token{
+			AccessToken:  canary + "-access",
+			RefreshToken: canary + "-refresh",
+			TokenType:    "Bearer",
+			ExpiresAt:    time.Now().Add(time.Hour),
+		},
+	}); err != nil {
+		t.Fatalf("Save(): %v", err)
+	}
+
+	status, inv, body := mcpInventory(t, f, "auth1")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", status, body)
+	}
+	// Non-vacuous: the record WAS read (the row reports authenticated), so the
+	// assertions below are about a store that really produced an answer.
+	if auth := mcpRow(t, inv, "oauth-srv").Server.Auth; auth == nil || !auth.Authenticated {
+		t.Fatalf("oauth-srv = %+v, want authenticated=true (the store was not read)", auth)
+	}
+	if strings.Contains(string(body), canary) {
+		t.Fatalf("canary %q leaked into the inventory body: %s", canary, body)
+	}
+	if strings.Contains(string(body), "HEADER-VALUE-CANARY") {
+		t.Fatalf("expanded header value leaked into the inventory body: %s", body)
+	}
+	// The key NAMES stay visible (the UI shows which headers a server sends).
+	if !strings.Contains(string(body), "Authorization") {
+		t.Fatalf("expected header key Authorization to stay visible: %s", body)
+	}
+}
+
+// TestMCPAuthRoute_NotShadowedByRawFileHandler is the route-collision guard
+// for GET /api/v1/mcp/auth/{flow_id} (contract route 3): the path must never be
+// served by the raw-file READ, where "auth" would be read as a layer name.
+//
+// Once this task registered the flow routes, the naive patterns overlapped:
+// "GET /api/v1/mcp/{layer}/raw" and "GET /api/v1/mcp/auth/{flow_id}" both match
+// GET /api/v1/mcp/auth/raw and neither is more specific, so ServeMux PANICS at
+// registration time ("conflicts with pattern"). The raw read is therefore
+// registered as "GET /api/v1/mcp/{layer}/{doc}" behind handleMCPRawDoc (which
+// serves only doc="raw"), and this test is the guard on BOTH halves of that
+// decision: the raw route still works, and the two overlapping paths answer
+// with the auth handler.
+//
+// Non-vacuity: the raw handler IS reachable for a real layer in the same
+// function, and both auth answers are asserted by the auth layer's own error
+// codes (never by "it did not 200").
+func TestMCPAuthRoute_NotShadowedByRawFileHandler(t *testing.T) {
+	f := newMCPFixture(t)
+	// A WELL-FORMED flow id (32 hex chars): the shape check passes, so the
+	// answer proves the lookup path, not the validator.
+	const unknownFlowID = "abababababababababababababababab"
+
+	// Baseline: the raw read still works through the {doc} shim.
+	status, body := mcpGet(t, f.ts, f.ts.server.URL+"/api/v1/mcp/global/raw?agent_id=agent1", true)
+	if status != http.StatusOK || !strings.Contains(string(body), `"content"`) {
+		t.Fatalf("GET .../global/raw: status = %d body = %s, want the raw file body (the shim must not disable the route)", status, body)
+	}
+
+	// The literal-segment overlap: "/mcp/auth/raw" matches both patterns; the
+	// literal "auth" must win, so the answer is the auth route refusing a bad
+	// flow id shape (400 invalid_request) — never invalid_layer (the raw handler
+	// reading "auth" as a layer) and never a file body.
+	status, body = mcpGet(t, f.ts, f.ts.server.URL+"/api/v1/mcp/auth/raw?agent_id=agent1", true)
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "invalid_request") {
+		t.Fatalf("GET /api/v1/mcp/auth/raw: status = %d body = %s, want 400 invalid_request from the auth status route", status, body)
+	}
+	if strings.Contains(string(body), "invalid_layer") || strings.Contains(string(body), `"content"`) {
+		t.Fatalf("the raw-file handler answered the auth path: %s", body)
+	}
+
+	// A well-formed but unknown flow id: still the auth route (404
+	// mcp_auth_flow_not_found), which is the response the WebUI's poll sees.
+	status, body = mcpGet(t, f.ts, f.ts.server.URL+"/api/v1/mcp/auth/"+unknownFlowID+"?agent_id=agent1", true)
+	if status != http.StatusNotFound || !strings.Contains(string(body), "mcp_auth_flow_not_found") {
+		t.Fatalf("GET /api/v1/mcp/auth/%s: status = %d body = %s, want 404 mcp_auth_flow_not_found", unknownFlowID, status, body)
+	}
+	if strings.Contains(string(body), "invalid_layer") || strings.Contains(string(body), `"content"`) {
+		t.Fatalf("the raw-file handler answered the auth path: %s", body)
+	}
+}
+
+// TestMCPRawDoc_RejectsAnyDocOtherThanRaw is the GATE test for the {doc} shim
+// (finding 2 of the adversarial review). Widening the raw-file READ from the
+// literal "GET /api/v1/mcp/{layer}/raw" to "GET /api/v1/mcp/{layer}/{doc}" (see
+// handleMCPRawDoc in rest_mcp.go) means the ONLY thing standing between that
+// wildcard and handleMCPRawFile — which serves a layer's mcp.json BYTES, header
+// and env values included, to any authenticated caller — is the
+// `PathValue("doc") != "raw"` check. Deleting that check leaves the rest of the
+// MCP suite green AND turns GET /api/v1/mcp/global/<anything> into a 200 file
+// read, so this test observes the observable consequence.
+//
+// Contract routes pinned: the raw-file READ (route `GET /api/v1/mcp/{layer}/raw`)
+// must keep answering for doc == "raw", and every other doc value must keep
+// answering the 404 the ServeMux would produce for an unregistered path.
+//
+// Non-vacuity: the REAL doc segment is served in the same function, so a 404
+// below cannot be the shim having disabled the route altogether.
+func TestMCPRawDoc_RejectsAnyDocOtherThanRaw(t *testing.T) {
+	f := newMCPFixture(t)
+
+	// Baseline: doc == "raw" IS the route; the file still comes back.
+	status, body := mcpGet(t, f.ts, f.ts.server.URL+"/api/v1/mcp/global/raw?agent_id=agent1", true)
+	if status != http.StatusOK || !strings.Contains(string(body), `"content"`) {
+		t.Fatalf("GET .../global/raw: status = %d body = %s, want 200 carrying the file (the gate must not disable the route)", status, body)
+	}
+
+	// Every other doc value is a plain 404 — never a file read. "r%2Faw" is the
+	// escaping caller's shape: Go's mux DECODES the segment before the handler
+	// sees it, so PathValue("doc") is the literal "r/aw" there and the gate has
+	// to refuse it on value, not on spelling (verified against a standalone
+	// ServeMux).
+	for _, doc := range []string{"nonsense", "r%2Faw", "%2Fraw", "raw%20", "raw2"} {
+		t.Run(doc, func(t *testing.T) {
+			status, body := mcpGet(t, f.ts,
+				f.ts.server.URL+"/api/v1/mcp/global/"+doc+"?agent_id=agent1", true)
+			if status != http.StatusNotFound {
+				t.Fatalf("GET .../global/%s: status = %d, want 404 (removing the doc gate in handleMCPRawDoc serves the file here); body=%s",
+					doc, status, body)
+			}
+			// The layer file was not read, let alone echoed: no content member
+			// and none of the file's bytes.
+			if strings.Contains(string(body), `"content"`) || bytes.Contains(body, []byte(f.globalRaw)) {
+				t.Fatalf("GET .../global/%s served the layer file through the {doc} wildcard: %s", doc, body)
+			}
+		})
+	}
+}
+
+// TestMCPAuthRoutes_AgentIDMissingOnEveryRoute pins the contract rule that
+// `agent_id` is a REQUIRED query param on EVERY route: routes 3, 4, 5 and 6
+// here (route 2 has its own cell in the error matrix of
+// rest_mcp_auth_test.go) plus the AUTH-CARRYING inventory of route 1, whose
+// rows make room for the auth report.
+//
+// Both other refusals are made unreachable on purpose, so a 400 can only be the
+// agent_id one: the flow id is SHAPE-VALID (32 lowercase hex), the server name
+// exists and route 4 carries a well-formed body — which is also what pins the
+// validation ORDER behind finding F7 (agent_id is checked BEFORE the flow id,
+// the body and the lookup).
+//
+// It lives here rather than next to the other route tests because it needs only
+// the auth fixture of the inventory tests and the shared mcpAuthDo helper.
+func TestMCPAuthRoutes_AgentIDMissingOnEveryRoute(t *testing.T) {
+	f := newMCPAuthFixture(t)
+	flowID := strings.Repeat("a", mcpAuthFlowIDLen)
+
+	requests := []struct {
+		method string
+		path   string
+		body   any
+	}{
+		{http.MethodGet, "/api/v1/mcp", nil},
+		{http.MethodGet, "/api/v1/mcp/auth/" + flowID, nil},
+		{http.MethodPost, "/api/v1/mcp/auth/" + flowID + "/complete",
+			MCPAuthCompleteRequest{Code: "a-code", State: "a-state"}},
+		{http.MethodDelete, "/api/v1/mcp/auth/" + flowID, nil},
+		{http.MethodDelete, "/api/v1/mcp/servers/oauth-srv/auth", nil},
+	}
+	for _, r := range requests {
+		status, body := mcpAuthDo(t, f.ts, r.method, f.ts.server.URL+r.path, r.body, true)
+		if status != http.StatusBadRequest || !strings.Contains(string(body), "agent_id_missing") {
+			t.Fatalf("%s %s without agent_id: status = %d body = %s, want 400 agent_id_missing",
+				r.method, r.path, status, body)
+		}
+	}
 }
 
 // --- raw file ----------------------------------------------------------------

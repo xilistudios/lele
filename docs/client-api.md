@@ -541,9 +541,10 @@ directory that actually holds it: 200 for a `workspace` or `global` skill, 403
 Management view of the layered `mcp.json` stack (rules in `docs/mcp.md`): two
 read endpoints (merged inventory, layer file contents), three write endpoints
 (toggle one server, save one layer file, validate a draft — the last is a dry
-run). All of them take `agent_id` and resolve that agent's own layer files;
-none ever expands `${VAR}`, and none touches a file outside the allowed roots
-below.
+run), plus five OAuth login endpoints (start, poll, complete, cancel and log
+out — see [OAuth Login Routes](#start-an-oauth-login)). All of them take
+`agent_id` and resolve that agent's own layer files; the file routes never
+expand `${VAR}`, and none touches a file outside the allowed roots below.
 
 #### Get Merged Inventory
 
@@ -585,6 +586,16 @@ listed under `shadowed`:
 names the winning layer (`"shadowed by <layer>"`). `server` carries raw,
 unexpanded strings and env/header key **names** (`env_keys`/`header_keys`)
 only — values never cross the wire.
+
+Each row may also carry a secret-free `auth` member, omitted when the row has
+no auth story to tell (no `url`, no header carrier and no stored state):
+`"auth": { "required": true, "authenticated": false, "method": "oauth" }`.
+`required` is true when the entry declares `auth.type: "oauth"` or a `401` was
+recorded for that name+URL; `method` is `"oauth"`, `"headers"` or `""`; and
+`authenticated` is true only when a usable credential already exists in
+`<lele dir>/mcp-auth.json` — i.e. when no login is needed. Booleans and one
+fixed word: no token, `client_id` or header value is ever reported, and having
+header keys alone does **not** make a server `required`.
 
 ```bash
 curl -H "Authorization: Bearer <token>" \
@@ -640,6 +651,17 @@ Errors:
 - `413 mcp_file_too_large` — the layer file exceeds 1 MiB
 - `500 mcp_read_failed` — stat or read of the layer file failed
 - `500 mcp_unavailable` — the loop cannot expose this agent's `mcp.json` roots
+
+*Server-side routing note:* from a client's point of view this route is still
+`GET /api/v1/mcp/{layer}/raw`, with the same handler, file and status codes — but
+it is *registered* as `GET /api/v1/mcp/{layer}/{doc}` behind a shim that serves
+only `doc == "raw"` (any other `{doc}` is a plain `404`), because `ServeMux`
+cannot register that literal path next to the OAuth poll route
+`GET /api/v1/mcp/auth/{flow_id}`. The one collapse the widened pattern causes:
+`GET /api/v1/mcp/auth/raw` is now answered by that poll route (`400
+invalid_request`, a malformed flow id) instead of by this read (`400
+invalid_layer`) — the literal `auth` segment must win for the poll route to
+exist at all.
 
 #### Enable or Disable One Server
 
@@ -764,6 +786,242 @@ not a boolean, duplicate names once aliased roots fold together). Everything
 else — unknown fields, bad enums, empty names, non-string env/header values —
 is a warning. Errors: `400 agent_id_missing` / `404 agent_not_found` /
 `500 mcp_unavailable` / `400 body_invalid` / `400 invalid_layer`.
+
+#### Start an OAuth Login
+
+```http
+POST /api/v1/mcp/servers/{name}/auth?agent_id=main
+```
+
+No request body (a body, if sent, is ignored — the route is body-limited for
+symmetry with the other write routes). `{name}` is resolved from the **winning**
+copy of the layered stack (the same merge the inventory reports), so the login
+authorizes exactly the entry that would be dialed.
+
+Response (200 OK): the flow handle, plus the URL the **client** must show. The
+gateway never opens a browser (`OpenURL` stays nil for REST): it may be headless
+or on another machine, so showing `auth_url` is the caller's job.
+
+```json
+{
+  "flow_id": "9f2c1b7a4e5d4c3b8a1907f6e5d4c3b2",
+  "auth_url": "https://as.example.com/authorize?client_id=lele&state=…&code_challenge=…",
+  "redirect_uri": "http://127.0.0.1:49152/callback",
+  "expires_at": "2026-02-11T15:09:12.345678901Z"
+}
+```
+
+`auth_url` is the authorization URL (it carries the *public* client id, the CSRF
+`state` and the PKCE challenge — never a secret). `redirect_uri` is the loopback
+redirect the flow really bound (the ephemeral port resolved), which is the URI
+the browser must come back to; on a gateway that cannot receive that callback,
+use the [manual paste](#complete-an-oauth-login-manual-paste) route instead.
+`expires_at` is the **route's** own deadline (`start + 5m`, matching the login
+engine's budget): after it the `flow_id` stops resolving and the loopback
+listener is released.
+
+Starting a second flow for the same `agent_id` + `{name}` **replaces** the
+first: the old flow is cancelled (its listener freed, so the new flow can bind
+the same pinned port) and its id stops resolving. When it succeeds the response
+is always a working `auth_url`, so a retry is safe; if the replacement then
+fails, the answer is the error below and the pair is left with **no** live flow
+(the released one cannot be re-started with the same `auth_url`).
+
+```bash
+curl -X POST -H "Authorization: Bearer <token>" \
+  "http://127.0.0.1:18793/api/v1/mcp/servers/issues/auth?agent_id=main"
+```
+
+Errors, in the order the handler checks them:
+
+- `400 invalid_request` — `name` is empty
+- `400 agent_id_missing` / `404 agent_not_found` / `500 mcp_unavailable` — as above
+- `404 mcp_server_not_found` — `{name}` is declared in no layer, or is known but
+  has no resolved configuration (disabled or invalid; the message names the
+  verdict and points at the raw editor)
+- `501 mcp_auth_not_supported` — the entry is local (stdio, no `url`), or the
+  remote server advertises no dynamic client registration endpoint and the entry
+  configures no `client_id`
+- `503 mcp_auth_disabled` — there is no usable auth store for this agent to
+  persist a login in (no lele directory to store `mcp-auth.json` under)
+- `409 mcp_auth_not_required` — the server completed the plain handshake without
+  asking for credentials, so there is nothing to authorize
+- `502 mcp_auth_failed` — any other flow failure (probe, discovery, registration,
+  authorization URL)
+
+#### Poll an OAuth Login
+
+```http
+GET /api/v1/mcp/auth/{flow_id}?agent_id=main
+```
+
+Response (200 OK) — the same shape is returned by a successful
+[complete](#complete-an-oauth-login-manual-paste):
+
+```json
+{
+  "flow_id": "9f2c1b7a4e5d4c3b8a1907f6e5d4c3b2",
+  "server": "issues",
+  "state": "pending",
+  "authenticated": false
+}
+```
+
+`state` ∈ `pending` | `done` | `error`. `error` is omitted unless there is one
+(`omitempty`), and it is a value-free rendered message: it may name an OAuth
+error code (`invalid_grant`) or one of the engine's fixed sentinels, never a
+token, an authorization code, a PKCE verifier or a secret. A cancelled flow
+reports the literal `"canceled"`. `authenticated` is rebuilt at poll time from
+the same resolved config the flow was started with, and is true only once a
+usable stored credential exists — so it answers "can this gateway use the server
+now?", not "is there a record on disk?".
+
+`error` is deliberately **ambiguous** and must not be read as terminal:
+
+- A **retryable** attempt failure (a failed token exchange, or a `state` that
+  does not match the flow's CSRF state) reports `state: "error"` while leaving
+  the flow **open**: the browser can be re-driven, or a corrected redirect
+  URL/code pasted with [complete](#complete-an-oauth-login-manual-paste), and a
+  later success moves the flow to `done`. A client must keep its paste box
+  available whenever `state == "error"`. The REST shape carries no extra flag
+  for this — the terminal cases are the ones that name their cause.
+- **Terminal** outcomes are cancel and timeout (and a one-shot loopback callback
+  exchange that can no longer be retried); a cancelled flow reports `"canceled"`,
+  a timeout reports its own message, and once the registry reaps the flow (at
+  `expires_at`) the id no longer resolves at all.
+
+Observing the `pending` → `done` transition is what makes the gateway **reload
+its MCP connections**, exactly once per flow: the credential only becomes
+visible to the connection manager when it re-fingerprints the config, so without
+that reload the cached connection would stay unauthenticated for the life of the
+process. The claim is shared by the poll and by a successful
+[complete](#complete-an-oauth-login-manual-paste) (they write the same status),
+so concurrent polls of the same completed flow reload once, not N times, and no
+other outcome reloads through either route — a start, a failed exchange and a
+cancel all leave the manager alone (the
+[logout](#forget-a-stored-credential-logout) route fires its own single reload
+after a successful forget).
+
+Errors: `400 agent_id_missing` / `404 agent_not_found` / `500 mcp_unavailable`;
+`400 invalid_request` — `{flow_id}` is not 32 lowercase hex characters;
+`404 mcp_auth_flow_not_found` — unknown, expired/reaped, cancelled-and-reaped, or
+created by **another** `agent_id` (the three are indistinguishable by design).
+
+#### Complete an OAuth Login (Manual Paste)
+
+```http
+POST /api/v1/mcp/auth/{flow_id}/complete?agent_id=main
+Content-Type: application/json
+
+{ "code": "<code from the redirect URL>", "state": "<state from the redirect URL>" }
+```
+
+The manual half of the flow: the client shows `auth_url`, the user logs in, the
+authorization server redirects to a URI this gateway does not serve (a gateway
+on another machine cannot receive the loopback callback), and the code is pasted
+back here. `state` is optional but should be sent: the engine refuses a
+non-empty `state` that does not match the flow's own CSRF state **before**
+attempting the exchange, and that refusal leaves the flow open and retryable.
+
+Response (200 OK): the same status shape a poll returns, already terminal, so
+the client needs no second request:
+
+```json
+{
+  "flow_id": "9f2c1b7a4e5d4c3b8a1907f6e5d4c3b2",
+  "server": "issues",
+  "state": "done",
+  "authenticated": true
+}
+```
+
+Errors: those of the [poll](#poll-an-oauth-login), plus `400 body_invalid` (the
+body is not `{"code":…,"state":…}`) and `400 invalid_request` (blank `code`),
+plus `502 mcp_auth_failed` for a failed exchange — which leaves the flow
+**open**: retry this same route on the **same** `flow_id` with a fresh code. The
+exchange runs under the request's context, so a client that abandons the request
+abandons that attempt (which is safe precisely because the flow stays retryable).
+
+#### Cancel an OAuth Login
+
+```http
+DELETE /api/v1/mcp/auth/{flow_id}?agent_id=main
+```
+
+Response: `204` with an empty body. Cancelling stops the flow and releases its
+loopback listener **immediately** — a client that abandons a login should call
+this rather than wait for the TTL — and the flow then reports `state: "error"`
+with `error: "canceled"` if it is polled again. It is best-effort **idempotent**:
+`204` for a flow that is already terminal but still in the registry, and `404
+mcp_auth_flow_not_found` only once the id no longer resolves (unknown, expired,
+reaped, or another agent's). Cancelling never reloads.
+
+Errors: as the [poll](#poll-an-oauth-login) — including the `400
+invalid_request` for a malformed `{flow_id}` and the `404` for one that does not
+resolve.
+
+#### Forget a Stored Credential (Logout)
+
+```http
+DELETE /api/v1/mcp/servers/{name}/auth?agent_id=main
+```
+
+Response: `204` with an empty body. Forgets **everything** stored about
+`{name}` — the token *and* the dynamic client registration — through the same
+primitive `lele mcp logout` and the TUI/WebUI **Sign out** action use. Any live
+flow for that `agent_id` + `{name}` is cancelled first, so a login that completes
+after the logout cannot re-store the credential that was just removed, and the
+gateway reloads its connections exactly once on success.
+
+Idempotent: a known server with nothing stored is a successful `204` no-op,
+while a `{name}` that is in no layer **and** has no stored record is `404
+mcp_server_not_found` — a typo must be visible. A stored record that outlives its
+`mcp.json` entry (the user edited the file after logging in) is exactly what this
+route exists to clear.
+
+Errors: `400 invalid_request` (empty `name`); the shared `400 agent_id_missing` /
+`404 agent_not_found` / `500 mcp_unavailable`; `404 mcp_server_not_found` (see
+above); `503 mcp_auth_disabled` when this agent has no usable auth store at all,
+and `502 mcp_auth_failed` when the store refuses to clear the record.
+
+#### OAuth Login Routes: One Handle, No Secrets
+
+- **Nothing value-shaped crosses these routes.** No field on any of the five
+  ever carries a token, an authorization code, a PKCE verifier, a `client_id` or
+  a `client_secret`. The responses carry a flow id, the authorization URL the
+  user's browser must visit (where a *public* client id legitimately appears),
+  the redirect URI, a deadline, three state words, a rendered error message and
+  one boolean. The stored credential lives only in `<lele dir>/mcp-auth.json`
+  (mode `0600`) on the gateway.
+- **The flow id is the only handle.** It is 128-bit `crypto/rand` hex — 32
+  lowercase hex characters — never a counter and never derived from the server
+  name.
+- **It is bound to the `agent_id` that created it.** A flow id presented with a
+  different `agent_id` is `404 mcp_auth_flow_not_found`, the same answer as an
+  unknown or expired one, so the route leaks nothing about other agents' flows.
+- A **malformed** flow id (wrong length, uppercase, non-hex) is `400
+  invalid_request`, not a missing resource: the shape is validated before any
+  lookup. Only a well-shaped id that nobody holds is `404`.
+- Flows are **not storage**: an id that is never polled and never cancelled stops
+  resolving at `expires_at` (`start + 5m`) and its loopback listener is released
+  by the next lookup that sweeps it. There is no reaper goroutine and no
+  background process to wait for.
+- All five routes are bearer-guarded (`withAuth`) and take `agent_id` as a
+  **required** query param, exactly like the five routes above.
+
+#### OAuth Route Error Codes
+
+| Code | Status | When |
+| --- | --- | --- |
+| `invalid_request` | 400 | malformed `{flow_id}` (not 32 lowercase hex), blank `code` in the complete body, or an empty `{name}` |
+| `mcp_auth_flow_not_found` | 404 | unknown, expired/reaped, cancelled-and-reaped flow id, or one created by another `agent_id` |
+| `mcp_auth_not_required` | 409 | the server needs no credentials (it served the plain handshake) — start only |
+| `mcp_auth_not_supported` | 501 | the entry is local (stdio, no `url`), or the remote server advertises no registration endpoint and no `client_id` is set — start only |
+| `mcp_auth_disabled` | 503 | no usable auth store for this agent — start (nothing to persist a login in) and logout (nothing to clear) |
+| `mcp_auth_failed` | 502 | any other flow failure: probe, discovery, registration, token exchange, or logout store failure |
+| `mcp_server_not_found` | 404 | start: `{name}` has no resolved configuration; logout: `{name}` is in no layer **and** has no stored record |
+| `body_invalid` | 400 | the complete body is not `{"code":…,"state":…}` |
+| `agent_id_missing` (400) / `agent_not_found` (404) / `mcp_unavailable` (500) | — | the shared `agent_id` → paths resolution, identical on all five routes |
 
 ## WebSocket API
 

@@ -81,9 +81,10 @@ type DeleteEntryResult struct {
 //
 // The entry is serialized as a canonical COMPACT single-line object
 // containing only non-zero fields, in this order: command, args, env, url,
-// type, headers, description, and disabled only when it is true (a written
-// entry is enabled unless the caller asks otherwise). That is the shape
-// planDisable's inserted stub uses, so both writers produce the same style.
+// type, headers, auth, description, and disabled only when it is true (a
+// written entry is enabled unless the caller asks otherwise). That is the
+// shape planDisable's inserted stub uses, so both writers produce the same
+// style.
 // env/header keys are sorted for deterministic output; their values, like
 // every other string, are emitted as JSON string literals with HTML escaping
 // turned off, i.e. raw '&', '<', '>' and (crucially) literal "${VAR}" and
@@ -291,10 +292,11 @@ func planUpsertEntry(doc *rawDoc, name string, entry []byte) (edits []edit, crea
 }
 
 // marshalEntry renders one ServerConfig as the canonical compact object
-// described in UpsertEntry's doc comment: non-zero fields only, fixed order,
-// sorted map keys, no HTML escaping, no expansion whatsoever. The field
-// order is the order of the code below — the object is assembled by hand
-// because encoding/json gives no such guarantee.
+// described in UpsertEntry's doc comment: non-zero fields only, in the fixed
+// order command, args, env, url, type, headers, auth, description, disabled;
+// sorted map keys, no HTML escaping, no expansion whatsoever. The field order
+// is the order of the code below — the object is assembled by hand because
+// encoding/json gives no such guarantee.
 func marshalEntry(e ServerConfig) []byte {
 	parts := make([]string, 0, 8)
 	add := func(key, value string) {
@@ -325,6 +327,12 @@ func marshalEntry(e ServerConfig) []byte {
 	if len(e.Headers) > 0 {
 		add("headers", quoteStringMap(e.Headers))
 	}
+	if e.Auth != nil {
+		// Emitted whenever the block is declared, even empty: dropping it
+		// would make an upsert silently lose a field the caller asked for
+		// (same rule as `type` above).
+		add("auth", marshalAuthSpec(e.Auth))
+	}
 	if e.Description != "" {
 		add("description", quoteJSONString(e.Description))
 	}
@@ -332,6 +340,47 @@ func marshalEntry(e ServerConfig) []byte {
 		add("disabled", "true") // "disabled": false is never written
 	}
 	return []byte("{" + strings.Join(parts, ",") + "}")
+}
+
+// marshalAuthSpec renders an AuthSpec as a canonical compact object: only
+// non-zero fields, fixed key order (type, scopes, client_id, client_secret,
+// redirect_uri, auth_server_metadata_url, protected_resource_metadata_url),
+// JSON string literals emitted without HTML escaping so a literal "${VAR}"
+// survives byte-for-byte (the writer NEVER expands).
+func marshalAuthSpec(a *AuthSpec) string {
+	parts := make([]string, 0, 7)
+	add := func(key, value string) {
+		parts = append(parts, quoteJSONString(key)+":"+value)
+	}
+	if a.Type != "" {
+		add("type", quoteJSONString(a.Type))
+	}
+	if len(a.Scopes) > 0 {
+		scopes := make([]string, len(a.Scopes))
+		for i, s := range a.Scopes {
+			scopes[i] = quoteJSONString(s)
+		}
+		add("scopes", "["+strings.Join(scopes, ",")+"]")
+	}
+	if a.ClientID != "" {
+		add("client_id", quoteJSONString(a.ClientID))
+	}
+	if a.ClientSecret != "" {
+		add("client_secret", quoteJSONString(a.ClientSecret))
+	}
+	if a.RedirectURI != "" {
+		add("redirect_uri", quoteJSONString(a.RedirectURI))
+	}
+	if a.AuthServerMetadataURL != "" {
+		add("auth_server_metadata_url", quoteJSONString(a.AuthServerMetadataURL))
+	}
+	if a.ProtectedResourceMetadataURL != "" {
+		add("protected_resource_metadata_url", quoteJSONString(a.ProtectedResourceMetadataURL))
+	}
+	// An all-empty spec still renders "{}": the block was declared, and the
+	// reader distinguishes "declared but unconfigured" from "nil" (see
+	// UpsertEntry's doc comment).
+	return "{" + strings.Join(parts, ",") + "}"
 }
 
 // quoteStringMap renders a string map as a JSON object with SORTED keys, so

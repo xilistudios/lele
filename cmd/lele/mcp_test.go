@@ -3,19 +3,24 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/mark3labs/mcp-go/client/transport"
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
+	"github.com/xilistudios/lele/pkg/auth"
 	"github.com/xilistudios/lele/pkg/mcp"
 )
 
@@ -589,6 +594,65 @@ func TestMCPList_EmptyAndLayerFilter(t *testing.T) {
 	}
 }
 
+// TestMCPList_AuthMarkers pins the C2 (CLI half) rule for `list`: a row's auth
+// verdict is a TRAILING marker in the SAME bracket vocabulary as the TUI, and
+// it flips from [needs auth] to [authenticated] exactly when a credential is
+// stored for (name, url). A server that needs no login gets no marker at all,
+// so a plain row's shape is unchanged by this feature.
+func TestMCPList_AuthMarkers(t *testing.T) {
+	e := newMCPTestEnv(t)
+	url := "https://mcp.example.com/mcp"
+	writeMCPTestFile(t, e.globalFile(), fmt.Sprintf(
+		`{"mcpServers":{`+
+			`"alpha":{"url":%q,"type":"http","auth":{"type":"oauth"}},`+
+			`"plain":{"command":"/bin/echo"}}}`, url))
+
+	// rowOf returns the ONE `list` row for a server, so the assertions are on
+	// the row and not on the whole page (a marker anywhere else would be a bug
+	// this must catch).
+	rowOf := func(out, name string) string {
+		t.Helper()
+		for _, l := range strings.Split(out, "\n") {
+			if strings.HasPrefix(strings.TrimLeft(l, "●○!⊘ "), name+" ") {
+				return l
+			}
+		}
+		t.Fatalf("no `list` row for %q:\n%s", name, out)
+		return ""
+	}
+
+	out, code := runMCPSub(t, runMCPList)
+	if code != 0 {
+		t.Fatalf("list exit = %d:\n%s", code, out)
+	}
+	before := rowOf(out, "alpha")
+	if !strings.HasSuffix(before, " "+mcpAuthMarkerRequired) {
+		t.Errorf("an unauthenticated OAuth server must carry a TRAILING %s marker: %q", mcpAuthMarkerRequired, before)
+	}
+	if plain := rowOf(out, "plain"); strings.Contains(plain, "[") {
+		t.Errorf("a server that needs no auth must carry no marker: %q", plain)
+	}
+
+	// Log in on this lele directory: the marker must flip, and NOTHING else
+	// about the row may move (the marker is appended, never inserted).
+	store := mcp.NewAuthStore(e.leleDir)
+	if err := store.TokenStore("alpha", url).SaveToken(context.Background(),
+		&transport.Token{AccessToken: "stored-token", TokenType: "Bearer"}); err != nil {
+		t.Fatalf("seed token: %v", err)
+	}
+	out, code = runMCPSub(t, runMCPList)
+	if code != 0 {
+		t.Fatalf("list exit = %d:\n%s", code, out)
+	}
+	after := rowOf(out, "alpha")
+	if !strings.HasSuffix(after, " "+mcpAuthMarkerAuthenticated) {
+		t.Errorf("a stored credential must flip the marker to %s: %q", mcpAuthMarkerAuthenticated, after)
+	}
+	if want := strings.TrimSuffix(before, " "+mcpAuthMarkerRequired) + " " + mcpAuthMarkerAuthenticated; after != want {
+		t.Errorf("logging in changed more than the marker:\n  before %q\n  want   %q\n  after  %q", before, want, after)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // show
 // ---------------------------------------------------------------------------
@@ -694,6 +758,75 @@ func TestMCPShow_SecretCanary(t *testing.T) {
 	// The command is raw config: ${CANARY} stays literal, unexpanded.
 	if !strings.Contains(out, "cmd ${CANARY}") {
 		t.Errorf("command must be shown verbatim (unexpanded):\n%s", out)
+	}
+}
+
+// TestMCPShow_AuthBlockVerdict pins the C2 (CLI half) rule for `show`: the
+// DECLARED auth block is printed the way the other fields are (labels, keys
+// side only, verbatim), the LIVE verdict follows it in the same bracket
+// vocabulary as `list`, and no credential — client secret, client id value,
+// token — ever reaches the page.
+func TestMCPShow_AuthBlockVerdict(t *testing.T) {
+	e := newMCPTestEnv(t)
+	const secretCanary = "SHOW-AUTH-SECRET-CANARY-77b2"
+	url := "https://mcp.example.com/mcp"
+	writeMCPTestFile(t, e.globalFile(), fmt.Sprintf(
+		`{"mcpServers":{"alpha":{"url":%q,"type":"http","auth":{`+
+			`"type":"oauth","scopes":["read","write"],"client_id":"cid-123",`+
+			`"client_secret":%q,"redirect_uri":"http://127.0.0.1:9000/callback",`+
+			`"auth_server_metadata_url":"https://as.example/.well-known/oauth-authorization-server",`+
+			`"protected_resource_metadata_url":"https://mcp.example.com/.well-known/oauth-protected-resource"}}}}`,
+		url, secretCanary))
+
+	out, code := runMCPSub(t, runMCPShow, "alpha")
+	if code != 0 {
+		t.Fatalf("show exit = %d, want 0:\n%s", code, out)
+	}
+	// The labels are padded to 12 cells by mcpShowField, so the expected
+	// spacing below is the rendered one.
+	for _, want := range []string{
+		"auth:        oauth",
+		"scopes:      read, write",
+		"client id:   (set)",
+		"redirect:    http://127.0.0.1:9000/callback",
+		"as metadata: https://as.example/.well-known/oauth-authorization-server",
+		"pr metadata: https://mcp.example.com/.well-known/oauth-protected-resource",
+		"auth state:  " + mcpAuthMarkerRequired,
+		"auth method: oauth",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("show output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, secretCanary) || strings.Contains(out, "client_secret") {
+		t.Fatalf("the client secret reached the show output:\n%s", out)
+	}
+	if strings.Contains(out, "cid-123") {
+		t.Errorf("the client id VALUE must never be printed (set/not set only):\n%s", out)
+	}
+
+	// Log in on this lele directory: the LIVE verdict flips, the declared block
+	// above is untouched.
+	store := mcp.NewAuthStore(e.leleDir)
+	if err := store.TokenStore("alpha", url).SaveToken(context.Background(),
+		&transport.Token{AccessToken: "stored-token", TokenType: "Bearer"}); err != nil {
+		t.Fatalf("seed token: %v", err)
+	}
+	after, code := runMCPSub(t, runMCPShow, "alpha")
+	if code != 0 {
+		t.Fatalf("show exit = %d:\n%s", code, after)
+	}
+	if !strings.Contains(after, "auth state:  "+mcpAuthMarkerAuthenticated) {
+		t.Errorf("a stored credential must flip the show verdict to %s:\n%s", mcpAuthMarkerAuthenticated, after)
+	}
+	if strings.Contains(after, mcpAuthMarkerRequired) {
+		t.Errorf("a logged-in server still shows %s:\n%s", mcpAuthMarkerRequired, after)
+	}
+	if !strings.Contains(after, "auth:        oauth") || !strings.Contains(after, "scopes:      read, write") {
+		t.Errorf("the declared auth block must survive a login:\n%s", after)
+	}
+	if strings.Contains(after, "stored-token") {
+		t.Fatalf("the stored token reached the show output:\n%s", after)
 	}
 }
 
@@ -1115,11 +1248,17 @@ func TestMCPRemove_PathGuardRefuses(t *testing.T) {
 // test
 // ---------------------------------------------------------------------------
 
-// The probe is exercised at the REAL seam: `lele mcp test` resolves the entry's
-// expanded config and dials it through mcp.ProbeServer, so these tests point a
-// url entry at a real in-process MCP server (streamable HTTP). No probe seam
-// exists any more: the only thing tests may mock is the world, never the code
-// under test.
+// The happy paths are exercised at the REAL seam: `lele mcp test` resolves the
+// entry's expanded config and dials it through mcp.ProbeServer, so these tests
+// point a url entry at a real in-process MCP server (streamable HTTP) — the
+// world is mocked, never the code under test.
+//
+// The auth branches are the ONE exception, and they need it: a real server
+// cannot be made to answer "authentication required" on demand. probeServerForCLI
+// lets a test hand runMCPTest that OUTCOME, while everything up to the dial
+// (config resolution, OAuth attachment) still runs for real — and the
+// assertions are on the config the CLI built, so the wiring under test is
+// verified rather than bypassed.
 
 func TestMCPTest_HappyPath(t *testing.T) {
 	e := newMCPTestEnv(t)
@@ -1325,6 +1464,244 @@ func TestMCPTest_UnknownAndProbeFailure(t *testing.T) {
 	if !strings.Contains(out, `✗ "alpha" failed: mcp probe:`) {
 		t.Errorf("missing failure message:\n%s", out)
 	}
+}
+
+// withProbeSeam swaps the CLI's probe for the duration of one test. The seam
+// exists for OUTCOME branches (see probeServerForCLI): the substituted probe
+// still receives the config runMCPTest resolved and attached.
+func withProbeSeam(t *testing.T, probe func(context.Context, mcp.ServerConfig) (mcp.ProbeResult, error)) {
+	t.Helper()
+	restore := probeServerForCLI
+	probeServerForCLI = probe
+	t.Cleanup(func() { probeServerForCLI = restore })
+}
+
+// requireProductionProbe fails when a seam substitution leaked out of another
+// test: a test that means to exercise the REAL dial is meaningless if it
+// inherits a fake probe.
+func requireProductionProbe(t *testing.T) {
+	t.Helper()
+	if reflect.ValueOf(probeServerForCLI).Pointer() != reflect.ValueOf(mcp.ProbeServer).Pointer() {
+		t.Fatal("probeServerForCLI is substituted: this test must run against the production probe")
+	}
+}
+
+// TestMCPTest_AuthRequiredSentinelBranch: an authorization challenge is not
+// "the transport broke". The probe's failure carries mcp.ErrAuthRequired
+// (wrapped exactly as ProbeServer wraps it) and the command must say what to
+// do about it instead of collapsing it into the generic ✗ failed line — while
+// keeping the exit code of every other failure (1).
+func TestMCPTest_AuthRequiredSentinelBranch(t *testing.T) {
+	e := newMCPTestEnv(t)
+	url := closedMCPURL(t)
+	writeMCPTestFile(t, e.globalFile(),
+		fmt.Sprintf(`{"mcpServers":{"alpha":{"url":%q,"type":"http"}}}`, url))
+
+	var gotCfg mcp.ServerConfig
+	withProbeSeam(t, func(_ context.Context, cfg mcp.ServerConfig) (mcp.ProbeResult, error) {
+		gotCfg = cfg
+		// The production shape, twice wrapped: ProbeServer wraps the dial
+		// error, which wraps the sentinel.
+		return mcp.ProbeResult{}, fmt.Errorf("mcp probe: %w",
+			fmt.Errorf("mcp dial: http transport: %w", mcp.ErrAuthRequired))
+	})
+
+	out, code := runMCPSub(t, runMCPTest, "alpha")
+	if code != 1 {
+		t.Fatalf("auth-required test exit = %d, want 1:\n%s", code, out)
+	}
+	if want := `✗ "alpha" authentication required — run 'lele mcp auth alpha'`; !strings.Contains(out, want) {
+		t.Errorf("missing the auth-required instruction %q:\n%s", want, out)
+	}
+	// The entry is remote, so the instruction is repeated for a headless user.
+	if want := `you must sign in first: run 'lele mcp auth alpha' where lele runs`; !strings.Contains(out, want) {
+		t.Errorf("missing the headless instruction %q:\n%s", want, out)
+	}
+	if strings.Contains(out, "failed:") {
+		t.Errorf("the auth challenge took the generic failure branch:\n%s", out)
+	}
+	// The probe really was called with the resolved config: the branch must
+	// not have been reached some other way.
+	if gotCfg.URL != url {
+		t.Errorf("probe received url %q, want %q", gotCfg.URL, url)
+	}
+}
+
+// TestMCPTest_OAuthEntryWithoutTokenIsAuthRequired drives the SAME branch with
+// the PRODUCTION probe and no token stored: an entry that declares
+// auth.type == "oauth" is attached by the CLI, and mcp-go's attached handler
+// refuses to send anything ("no valid token available, authorization
+// required") before the transport is dialed at all.
+//
+// The url is one nothing listens on, so this is also the attach regression: a
+// CLI that probed the BARE config would get a plain "connection refused" and
+// print the generic ✗ failed line instead.
+func TestMCPTest_OAuthEntryWithoutTokenIsAuthRequired(t *testing.T) {
+	requireProductionProbe(t)
+	e := newMCPTestEnv(t)
+	url := closedMCPURL(t)
+	writeMCPTestFile(t, e.globalFile(),
+		fmt.Sprintf(`{"mcpServers":{"alpha":{"url":%q,"type":"http","auth":{"type":"oauth"}}}}`, url))
+
+	// Premise: nothing is stored for this server.
+	if st := mcp.CheckAuth(mcp.NewAuthStore(e.leleDir), "alpha", mustParseServer(t, e.globalFile(), "alpha")); st.Required && st.Authenticated {
+		t.Fatalf("fixture premise broken: store already holds a usable token (%+v)", st)
+	}
+
+	out, code := runMCPSub(t, runMCPTest, "alpha")
+	if code != 1 {
+		t.Fatalf("auth-required test exit = %d, want 1:\n%s", code, out)
+	}
+	if want := `✗ "alpha" authentication required — run 'lele mcp auth alpha'`; !strings.Contains(out, want) {
+		t.Errorf("missing the auth-required instruction %q:\n%s", want, out)
+	}
+	if strings.Contains(out, "failed:") {
+		t.Errorf("the OAuth challenge took the generic failure branch:\n%s", out)
+	}
+}
+
+// startBearerGatedMCPHTTPServer serves the same in-process MCP server as
+// startMCPHTTPServer but answers 401 (the RFC 9728 challenge) unless the
+// request carries bearerToken. It is the WORLD's half of "this server needs a
+// login": an OAuth-attached client with no token gets the challenge, one that
+// presents the stored token gets the real handshake.
+func startBearerGatedMCPHTTPServer(t *testing.T, bearerToken string, toolNames ...string) string {
+	t.Helper()
+	srv := mcpserver.NewMCPServer("lele-cli-test", "9.9.9", mcpserver.WithToolCapabilities(false))
+	for _, name := range toolNames {
+		srv.AddTool(mcpgo.NewTool(name), func(context.Context, mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+			return mcpgo.NewToolResultText(name), nil
+		})
+	}
+	inner := mcpserver.NewStreamableHTTPServer(srv)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+bearerToken {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		inner.ServeHTTP(w, r)
+	}))
+	t.Cleanup(ts.Close)
+	return ts.URL + "/mcp"
+}
+
+// TestMCPTest_AuthenticatedServerIsProbedForReal is part 2 proven on the wire,
+// with nothing substituted: a REAL in-process MCP server that demands a bearer
+// token, a token stored in a temp-dir store, and the production probe. It can
+// only succeed if the CLI both attached the OAuth runtime AND handed it the
+// token from this lele directory — probing the bare config leaves the request
+// unauthenticated, the server answers 401 and the run fails with
+// "authentication required".
+func TestMCPTest_AuthenticatedServerIsProbedForReal(t *testing.T) {
+	requireProductionProbe(t)
+	e := newMCPTestEnv(t)
+	url := startBearerGatedMCPHTTPServer(t, "stored-token", "echo")
+	writeMCPTestFile(t, e.globalFile(),
+		fmt.Sprintf(`{"mcpServers":{"alpha":{"url":%q,"type":"http","auth":{"type":"oauth"}}}}`, url))
+
+	store := mcp.NewAuthStore(e.leleDir)
+	if err := store.TokenStore("alpha", url).SaveToken(context.Background(),
+		&transport.Token{AccessToken: "stored-token", TokenType: "Bearer"}); err != nil {
+		t.Fatalf("seed token: %v", err)
+	}
+
+	out, code := runMCPSub(t, runMCPTest, "alpha")
+	if code != 0 {
+		t.Fatalf("test exit = %d, want 0 (the server accepts the stored token):\n%s", code, out)
+	}
+	if strings.Contains(out, "authentication required") {
+		t.Errorf("a logged-in server was reported as needing a login:\n%s", out)
+	}
+	if !strings.Contains(out, `✓ "alpha" connected — 1 tools: echo`) {
+		t.Errorf("unexpected probe output:\n%s", out)
+	}
+}
+
+// TestMCPTest_ProbeConfigCarriesAuthRuntime is THE regression test for the
+// whole task: a server this lele directory IS logged into must not be reported
+// as "authentication required". The token lives in a temp-dir store and the
+// probe seam records the config it was handed, so the assertion is on what the
+// CLI built.
+//
+// The load-bearing assertion is `reflect.DeepEqual(got, bare) == false`.
+// pkg/mcp keeps the OAuth runtime in an unexported, unserialized field, so
+// AttachAuthRuntime's ONLY effect on the value is to set that field: equal
+// configs therefore mean the CLI probed the bare `ServerConfig` — the exact
+// bug this test exists for. It fails on the pre-fix code, and the sibling
+// assertions (Required/Authenticated from a freshly opened store) pin that the
+// store the CLI used is this lele directory and not, say, the agent workspace.
+func TestMCPTest_ProbeConfigCarriesAuthRuntime(t *testing.T) {
+	e := newMCPTestEnv(t)
+	url := "https://mcp.example.com/mcp" // never dialed: the seam probe replaces the dial
+	writeMCPTestFile(t, e.globalFile(),
+		fmt.Sprintf(`{"mcpServers":{"alpha":{"url":%q,"type":"http","auth":{"type":"oauth"}}}}`, url))
+
+	// A login already performed on this machine.
+	store := mcp.NewAuthStore(e.leleDir)
+	if err := store.TokenStore("alpha", url).SaveToken(context.Background(),
+		&transport.Token{AccessToken: "test-token", TokenType: "Bearer"}); err != nil {
+		t.Fatalf("seed token: %v", err)
+	}
+
+	bare := mustParseServer(t, e.globalFile(), "alpha")
+	fresh := mcp.NewAuthStore(e.leleDir)
+	if st := mcp.CheckAuth(fresh, "alpha", bare); !st.Required || !st.Authenticated {
+		t.Fatalf("fixture premise broken: CheckAuth(store, alpha, bare) = %+v, want required+authenticated", st)
+	}
+
+	var got mcp.ServerConfig
+	withProbeSeam(t, func(_ context.Context, cfg mcp.ServerConfig) (mcp.ProbeResult, error) {
+		got = cfg
+		return mcp.ProbeResult{Tools: []string{"echo"}}, nil
+	})
+
+	out, code := runMCPSub(t, runMCPTest, "alpha")
+	if code != 0 {
+		t.Fatalf("authenticated test exit = %d, want 0:\n%s", code, out)
+	}
+	if !strings.Contains(out, `✓ "alpha" connected — 1 tools: echo`) {
+		t.Errorf("unexpected probe output:\n%s", out)
+	}
+	if reflect.DeepEqual(got, bare) {
+		t.Error("the probe received the BARE ServerConfig: the OAuth runtime was not attached, " +
+			"so a server this lele directory is logged into would be reported as 'authentication required'")
+	}
+	if st := mcp.CheckAuth(mcp.NewAuthStore(e.leleDir), "alpha", got); !st.Required || !st.Authenticated {
+		t.Errorf("CheckAuth(store, alpha, probed config) = %+v, want required+authenticated", st)
+	}
+}
+
+// TestMCPAuthSeam_DefaultsToTheEngine pins the seam the `lele mcp auth`
+// subcommand drives: it must START as the real engine call, so a test can only
+// ever substitute it explicitly (a nil seam would make the argv tests pass
+// against nothing). The check goes past a nil comparison and ACTUALLY calls the
+// default: mcp.StartAuth refuses a disabled store as its very first act, so
+// this can only return the engine's own sentinel — and it needs no network.
+func TestMCPAuthSeam_DefaultsToTheEngine(t *testing.T) {
+	if startMCPAuthFlow == nil {
+		t.Fatal("startMCPAuthFlow must default to mcp.StartAuth")
+	}
+	_, err := startMCPAuthFlow(context.Background(), "api",
+		mcp.ServerConfig{URL: "https://mcp.example.com/mcp"}, mcp.NewAuthStore(""), mcp.AuthOptions{})
+	if !errors.Is(err, mcp.ErrAuthStoreDisabled) {
+		t.Fatalf("the default seam returned %v, want mcp.ErrAuthStoreDisabled from the real engine", err)
+	}
+}
+
+// mustParseServer returns the UNEXPANDED entry as written in file — the bare
+// config, i.e. exactly what mcpProbeConfig would return without the OAuth
+// runtime attached.
+func mustParseServer(t *testing.T, file, name string) mcp.ServerConfig {
+	t.Helper()
+	f, err := mcp.ParseFile(file)
+	if err != nil {
+		t.Fatalf("parse %s: %v", file, err)
+	}
+	cfg, ok := f.MCPServers[name]
+	if !ok {
+		t.Fatalf("%s has no server %q", file, name)
+	}
+	return cfg
 }
 
 func TestMCPTest_TimeoutParseError(t *testing.T) {
@@ -1874,6 +2251,1159 @@ func TestMCPEdit_PathGuardRefusesBeforeEditor(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// auth / logout
+// ---------------------------------------------------------------------------
+
+// The whole `auth` argv surface is driven at its seams: startMCPAuthFlow is
+// substituted (the engine would dial, register and listen for real) and
+// mcpAuthInput feeds the --manual paste. Nothing else is faked — the entry is
+// resolved by the production path, so the tests assert on the config and the
+// options the CLI actually built.
+
+// seedMCPRemoteAuthServer writes the remote, OAuth-opted-in entry into the
+// global layer — the shape `lele mcp add --url … --auth oauth` produces.
+func seedMCPRemoteAuthServer(t *testing.T, e *mcpTestEnv, name, url string) {
+	t.Helper()
+	writeMCPTestFile(t, e.globalFile(),
+		fmt.Sprintf(`{"mcpServers":{%q:{"url":%q,"type":"http","auth":{"type":"oauth"}}}}`, name, url))
+}
+
+// fakeMCPAuthFlow stands in for the engine's *mcp.AuthFlow. The interface seam
+// exists for exactly this reason: the engine's flow carries unexported fields,
+// so nothing outside pkg/mcp can build one, and this test must never touch the
+// network.
+//
+// It models the engine's retryable-failure contract: a Submit that FAILS does
+// not make the flow Done() (so the --manual loop re-prompts the same flow), a
+// Submit that SUCCEEDS does, and Cancel is terminal. submitErrs, when non-empty,
+// answers one error per Submit call (index 0 for the first call, then the last
+// entry repeats); submitErr is the shorthand for "every Submit fails".
+type fakeMCPAuthFlow struct {
+	url        string
+	waitErr    error
+	submitErr  error
+	submitErrs []error
+	done       bool
+
+	submitted [][2]string // every (code, state) pair handed to Submit
+	cancels   int
+}
+
+func (f *fakeMCPAuthFlow) URL() string                { return f.url }
+func (f *fakeMCPAuthFlow) Wait(context.Context) error { return f.waitErr }
+func (f *fakeMCPAuthFlow) Done() bool                 { return f.done }
+func (f *fakeMCPAuthFlow) Cancel() error {
+	f.cancels++
+	f.done = true
+	return nil
+}
+
+func (f *fakeMCPAuthFlow) Submit(_ context.Context, code, state string) error {
+	f.submitted = append(f.submitted, [2]string{code, state})
+	err := f.submitErr
+	if i := len(f.submitted) - 1; i < len(f.submitErrs) {
+		err = f.submitErrs[i]
+	}
+	if err != nil {
+		// A failed exchange leaves the flow OPEN and retryable, like the
+		// engine's.
+		return err
+	}
+	f.done = true
+	return nil
+}
+
+// mcpAuthSeamCall records one startMCPAuthFlow call, so a test can assert the
+// entry, the store and the options the CLI resolved.
+type mcpAuthSeamCall struct {
+	name  string
+	srv   mcp.ServerConfig
+	store *mcp.AuthStore
+	opts  mcp.AuthOptions
+}
+
+// mcpAuthSeam is a substituted startMCPAuthFlow plus the calls it saw.
+type mcpAuthSeam struct {
+	flow  mcpAuthFlow
+	err   error
+	calls []mcpAuthSeamCall
+}
+
+func (s *mcpAuthSeam) start(_ context.Context, name string, srv mcp.ServerConfig, store *mcp.AuthStore, opts mcp.AuthOptions) (mcpAuthFlow, error) {
+	s.calls = append(s.calls, mcpAuthSeamCall{name: name, srv: srv, store: store, opts: opts})
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.flow, nil
+}
+
+// installMCPAuthSeam substitutes startMCPAuthFlow for one test (and restores it
+// afterwards, so a substituted seam can never leak into a sibling test).
+func installMCPAuthSeam(t *testing.T, flow mcpAuthFlow, err error) *mcpAuthSeam {
+	t.Helper()
+	s := &mcpAuthSeam{flow: flow, err: err}
+	restore := startMCPAuthFlow
+	startMCPAuthFlow = s.start
+	t.Cleanup(func() { startMCPAuthFlow = restore })
+	return s
+}
+
+// withMCPAuthInput replaces the --manual stdin reader for one test.
+func withMCPAuthInput(t *testing.T, in string) {
+	t.Helper()
+	restore := mcpAuthInput
+	mcpAuthInput = strings.NewReader(in)
+	t.Cleanup(func() { mcpAuthInput = restore })
+}
+
+// requireMCPOwnLine asserts want appears as a WHOLE line of out — the contract
+// for the authorization URL, which must be printable/copyable on a headless
+// host with no decoration around it.
+func requireMCPOwnLine(t *testing.T, out, want string) {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if line == want {
+			return
+		}
+	}
+	t.Errorf("output has no line exactly %q:\n%s", want, out)
+}
+
+// TestMCPAuth_PrintsURLAndSucceeds is the happy path: the URL goes out (on its
+// own line) before the CLI blocks, the flow is waited for, and the seam
+// received the resolved remote entry, this lele directory's store and the
+// default options.
+func TestMCPAuth_PrintsURLAndSucceeds(t *testing.T) {
+	e := newMCPTestEnv(t)
+	const srvURL = "https://mcp.example.com/mcp"
+	seedMCPRemoteAuthServer(t, e, "api", srvURL)
+	// No --manual: stdin must not be read — a reader that fails loudly proves it.
+	withMCPAuthInput(t, "")
+
+	flow := &fakeMCPAuthFlow{url: "https://as.example.com/authorize?client_id=lele&state=st-1&code_challenge=xyz"}
+	seam := installMCPAuthSeam(t, flow, nil)
+
+	out, code := runMCPSub(t, runMCPAuth, "api")
+	if code != 0 {
+		t.Fatalf("auth exit = %d, want 0:\n%s", code, out)
+	}
+	requireMCPOwnLine(t, out, flow.url)
+	if !strings.Contains(out, "Authorization URL") {
+		t.Errorf("the printed URL is not labelled:\n%s", out)
+	}
+	if !strings.Contains(out, `✓ "api" authenticated; the gateway picks it up on the next reload`) {
+		t.Errorf("missing the success line:\n%s", out)
+	}
+	if len(flow.submitted) != 0 {
+		t.Errorf("nothing was pasted, yet Submit saw %v", flow.submitted)
+	}
+
+	if len(seam.calls) != 1 {
+		t.Fatalf("start seam called %d times, want 1", len(seam.calls))
+	}
+	call := seam.calls[0]
+	if call.name != "api" || call.srv.URL != srvURL {
+		t.Errorf("seam got name=%q url=%q, want the resolved entry", call.name, call.srv.URL)
+	}
+	if call.srv.Auth == nil || call.srv.Auth.Type != "oauth" {
+		t.Errorf("the resolved config lost its auth block: %+v", call.srv.Auth)
+	}
+	if call.opts.Timeout != mcpAuthDefaultTimeout {
+		t.Errorf("default timeout = %v, want %v (the engine's 5m)", call.opts.Timeout, mcpAuthDefaultTimeout)
+	}
+	if call.opts.Port != 0 {
+		t.Errorf("default port = %d, want 0 (ephemeral)", call.opts.Port)
+	}
+	if call.opts.OpenURL == nil {
+		t.Error("without --no-browser the engine must be given a browser opener")
+	}
+	// The store is THIS lele directory's: a token written through the store the
+	// seam received is visible to a freshly opened store on e.leleDir.
+	if err := call.store.TokenStore("api", srvURL).SaveToken(context.Background(),
+		&transport.Token{AccessToken: "t", TokenType: "Bearer"}); err != nil {
+		t.Fatalf("save through the flow's store: %v", err)
+	}
+	if !mcp.NewAuthStore(e.leleDir).Authenticated("api", srvURL) {
+		t.Error("the flow's store is not this lele directory's mcp-auth.json")
+	}
+}
+
+// TestMCPAuth_BrowserOpenerWiring pins the two halves of the browser contract:
+// without --no-browser the engine is handed pkg/auth's OpenBrowser (the one
+// platform switch), with it the option is nil — and the URL is printed either
+// way, because --no-browser only suppresses the launch, never the URL.
+func TestMCPAuth_BrowserOpenerWiring(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantOpener bool
+	}{
+		{name: "default opens a browser", args: []string{"api"}, wantOpener: true},
+		{name: "--no-browser suppresses it", args: []string{"api", "--no-browser"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newMCPTestEnv(t)
+			seedMCPRemoteAuthServer(t, e, "api", "https://mcp.example.com/mcp")
+			withMCPAuthInput(t, "")
+			flow := &fakeMCPAuthFlow{url: "https://as.example.com/authorize?state=st-1"}
+			seam := installMCPAuthSeam(t, flow, nil)
+
+			out, code := runMCPSub(t, runMCPAuth, tt.args...)
+			if code != 0 {
+				t.Fatalf("auth exit = %d, want 0:\n%s", code, out)
+			}
+			requireMCPOwnLine(t, out, flow.url)
+
+			got := seam.calls[0].opts.OpenURL
+			if !tt.wantOpener {
+				if got != nil {
+					t.Error("--no-browser must pass a nil OpenURL: the engine then never launches a browser")
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("the engine was not given a browser opener")
+			}
+			if reflect.ValueOf(got).Pointer() != reflect.ValueOf(auth.OpenBrowser).Pointer() {
+				t.Error("the opener must be pkg/auth's OpenBrowser (the shared platform switch)")
+			}
+		})
+	}
+}
+
+// TestMCPAuth_StdioServerNotSupported: a local (stdio) entry has no url to
+// authorize against. The refusal names the shape and the engine is never called
+// — a stdio server must not even start a flow.
+func TestMCPAuth_StdioServerNotSupported(t *testing.T) {
+	e := newMCPTestEnv(t)
+	writeMCPTestFile(t, e.globalFile(), `{"mcpServers":{"fs":{"command":"npx","args":["-y","fs"]}}}`)
+	withMCPAuthInput(t, "")
+	seam := installMCPAuthSeam(t, &fakeMCPAuthFlow{url: "https://as.example/authorize"}, nil)
+
+	out, code := runMCPSub(t, runMCPAuth, "fs")
+	if code != mcpAuthExitFailure {
+		t.Fatalf("stdio auth exit = %d, want %d:\n%s", code, mcpAuthExitFailure, out)
+	}
+	if !strings.Contains(out, `✗ "fs" is a local (stdio) server`) || !strings.Contains(out, "not supported") {
+		t.Errorf("missing the stdio refusal:\n%s", out)
+	}
+	if len(seam.calls) != 0 {
+		t.Errorf("a local server reached the engine %d time(s)", len(seam.calls))
+	}
+}
+
+// TestMCPAuth_StartFailureSentinels is the sentinel table: every failure the
+// engine can report when STARTING a flow gets its own sentence and the family's
+// exit code, and none of them is collapsed into another. The transport sentinel
+// in particular must never read as "does not require authentication".
+func TestMCPAuth_StartFailureSentinels(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		want    string
+		notWant string
+	}{
+		{
+			name: "not required",
+			err:  mcp.ErrAuthNotRequired,
+			want: `✗ "api" does not require authentication`,
+		},
+		{
+			name: "not required, wrapped",
+			err:  fmt.Errorf("mcp auth %q: %w", "api", mcp.ErrAuthNotRequired),
+			want: `✗ "api" does not require authentication`,
+		},
+		{
+			name: "not supported",
+			err:  mcp.ErrAuthNotSupported,
+			want: `✗ "api" authentication is not supported`,
+		},
+		{
+			name:    "probe failed is a transport failure",
+			err:     mcp.ErrAuthProbeFailed,
+			want:    `✗ "api" transport failure`,
+			notWant: "does not require authentication",
+		},
+		{
+			name:    "probe failed, engine wrapping",
+			err:     fmt.Errorf("mcp auth %q: probe: %w", "api", mcp.ErrAuthProbeFailed),
+			want:    `✗ "api" transport failure`,
+			notWant: "does not require authentication",
+		},
+		{
+			name: "store disabled",
+			err:  mcp.ErrAuthStoreDisabled,
+			want: "the authorization store is disabled",
+		},
+		{
+			name: "canceled",
+			err:  mcp.ErrAuthCanceled,
+			want: "authorization canceled",
+		},
+		{
+			name: "timed out",
+			err:  mcp.ErrAuthTimedOut,
+			want: "authorization timed out",
+		},
+		{
+			name: "engine detail",
+			err:  errors.New("mcp auth \"api\": authorization was rejected by the authorization server"),
+			want: `✗ "api" authorization failed: mcp auth "api": authorization was rejected`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newMCPTestEnv(t)
+			seedMCPRemoteAuthServer(t, e, "api", "https://mcp.example.com/mcp")
+			withMCPAuthInput(t, "")
+			seam := installMCPAuthSeam(t, &fakeMCPAuthFlow{url: "https://as.example/authorize"}, tt.err)
+
+			out, code := runMCPSub(t, runMCPAuth, "api")
+			if code != mcpAuthExitFailure {
+				t.Fatalf("start failure exit = %d, want %d (the family's convention):\n%s", code, mcpAuthExitFailure, out)
+			}
+			if !strings.Contains(out, tt.want) {
+				t.Errorf("want %q in:\n%s", tt.want, out)
+			}
+			if tt.notWant != "" && strings.Contains(out, tt.notWant) {
+				t.Errorf("output must not contain %q:\n%s", tt.notWant, out)
+			}
+			if strings.Contains(out, "Authorization URL") {
+				t.Errorf("no URL exists when the flow failed to start:\n%s", out)
+			}
+			if strings.Contains(out, "✓") {
+				t.Errorf("a failed start reported success:\n%s", out)
+			}
+			if len(seam.calls) != 1 {
+				t.Errorf("start seam called %d times, want 1", len(seam.calls))
+			}
+		})
+	}
+}
+
+// TestMCPAuth_WaitFailureSentinels: the flow started (so the URL WAS printed,
+// on its own line, before the wait) but never completed. Cancellation and the
+// timeout keep their own sentences and the family's exit code.
+func TestMCPAuth_WaitFailureSentinels(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "canceled", err: mcp.ErrAuthCanceled, want: "authorization canceled"},
+		{name: "timed out", err: mcp.ErrAuthTimedOut, want: "authorization timed out"},
+		{name: "engine detail", err: errors.New("authorization failed: invalid_grant"), want: "authorization failed: invalid_grant"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newMCPTestEnv(t)
+			seedMCPRemoteAuthServer(t, e, "api", "https://mcp.example.com/mcp")
+			withMCPAuthInput(t, "")
+			flow := &fakeMCPAuthFlow{url: "https://as.example/authorize?state=st-1", waitErr: tt.err}
+			installMCPAuthSeam(t, flow, nil)
+
+			out, code := runMCPSub(t, runMCPAuth, "api")
+			if code != mcpAuthExitFailure {
+				t.Fatalf("wait failure exit = %d, want %d:\n%s", code, mcpAuthExitFailure, out)
+			}
+			// The URL is the headless path's only way to finish: it must be out
+			// even when the flow then fails.
+			requireMCPOwnLine(t, out, flow.url)
+			if !strings.Contains(out, tt.want) {
+				t.Errorf("want %q in:\n%s", tt.want, out)
+			}
+			if strings.Contains(out, "✓") {
+				t.Errorf("a failed wait reported success:\n%s", out)
+			}
+			if flow.cancels != 1 {
+				t.Errorf("Cancel calls = %d, want 1 (the listener must be released on every exit path)", flow.cancels)
+			}
+		})
+	}
+}
+
+// TestMCPAuth_ManualSubmitsPastedInput drives --manual with every paste shape a
+// real redirect produces, and pins the (code, state) pair Submit receives.
+func TestMCPAuth_ManualSubmitsPastedInput(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want [2]string
+	}{
+		{name: "full redirect URL", in: "http://127.0.0.1:8080/callback?code=abc123&state=st-9", want: [2]string{"abc123", "st-9"}},
+		{name: "full redirect URL, URL-encoded", in: "https://as.example/cb?iss=https%3A%2F%2Fas.example&code=a-b.c_d~e&state=st-9", want: [2]string{"a-b.c_d~e", "st-9"}},
+		{name: "bare query string", in: "code=abc123&state=st-9", want: [2]string{"abc123", "st-9"}},
+		{name: "bare code", in: "SplxlOBeZQQYbYS6WxSbIA", want: [2]string{"SplxlOBeZQQYbYS6WxSbIA", ""}},
+		{name: "two tokens on one line", in: "abc123 st-9", want: [2]string{"abc123", "st-9"}},
+		{name: "URL without state", in: "http://127.0.0.1:8080/callback?code=abc123", want: [2]string{"abc123", ""}},
+		{name: "surrounding whitespace", in: "  abc123\r\n", want: [2]string{"abc123", ""}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newMCPTestEnv(t)
+			seedMCPRemoteAuthServer(t, e, "api", "https://mcp.example.com/mcp")
+			withMCPAuthInput(t, tt.in)
+			flow := &fakeMCPAuthFlow{url: "https://as.example/authorize?state=st-9"}
+			installMCPAuthSeam(t, flow, nil)
+
+			out, code := runMCPSub(t, runMCPAuth, "api", "--manual")
+			if code != 0 {
+				t.Fatalf("manual auth exit = %d, want 0:\n%s", code, out)
+			}
+			requireMCPOwnLine(t, out, flow.url)
+			if len(flow.submitted) != 1 {
+				t.Fatalf("Submit called %d times, want 1 (%v)", len(flow.submitted), flow.submitted)
+			}
+			if flow.submitted[0] != tt.want {
+				t.Errorf("Submit got %v, want %v", flow.submitted[0], tt.want)
+			}
+			if !strings.Contains(out, `✓ "api" authenticated; the gateway picks it up on the next reload`) {
+				t.Errorf("missing the success line:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestMCPAuth_ManualRefusedRedirectFails: a redirect carrying error= is the
+// authorization server REFUSING the request. It must be reported as a failure
+// and never submitted as if it were a code.
+func TestMCPAuth_ManualRefusedRedirectFails(t *testing.T) {
+	for _, in := range []string{
+		"http://127.0.0.1:8080/callback?error=access_denied&state=st-1",
+		"error=access_denied&state=st-1",
+	} {
+		t.Run(in, func(t *testing.T) {
+			e := newMCPTestEnv(t)
+			seedMCPRemoteAuthServer(t, e, "api", "https://mcp.example.com/mcp")
+			withMCPAuthInput(t, in)
+			flow := &fakeMCPAuthFlow{url: "https://as.example/authorize?state=st-1"}
+			installMCPAuthSeam(t, flow, nil)
+
+			out, code := runMCPSub(t, runMCPAuth, "api", "--manual")
+			if code != mcpAuthExitFailure {
+				t.Fatalf("refused redirect exit = %d, want %d:\n%s", code, mcpAuthExitFailure, out)
+			}
+			if !strings.Contains(out, "the authorization server refused the authorization (access_denied)") {
+				t.Errorf("missing the refusal, with the server's own error code:\n%s", out)
+			}
+			if len(flow.submitted) != 0 {
+				t.Errorf("a refusal must not be submitted: %v", flow.submitted)
+			}
+			if strings.Contains(out, "✓") {
+				t.Errorf("a refusal reported success:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestMCPAuth_ManualGarbageIsRejected: input the frozen grammar refuses never
+// reaches Submit. The wording is the CLI's own; the RULE is the engine's
+// (mcp.ParseAuthPaste), so the expectations follow the engine's sentinels:
+// `unrecognized` (nothing matched an accepted form) and `no-code` (a URL/query
+// without a code) share the CLI's one "unrecognized input" sentence — the
+// grammar explicitly allows it and the TUI renders them the same way.
+func TestMCPAuth_ManualGarbageIsRejected(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "empty stdin", in: "", want: "no input on stdin"},
+		{name: "blank line", in: "\n", want: "empty input"},
+		{name: "several tokens", in: "not an authorization code", want: "unrecognized input"},
+		{name: "punctuation", in: "abc!def", want: "unrecognized input"},
+		{name: "spaced code in a query", in: "code=abc def", want: "unrecognized input"},
+		{name: "unrelated parameters", in: "foo=bar", want: "unrecognized input"},
+		{name: "query without a code", in: "state=st-1&scope=read", want: "unrecognized input"},
+		{name: "URL without a code", in: "http://127.0.0.1:8080/callback?state=st-1", want: "unrecognized input"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newMCPTestEnv(t)
+			seedMCPRemoteAuthServer(t, e, "api", "https://mcp.example.com/mcp")
+			withMCPAuthInput(t, tt.in)
+			flow := &fakeMCPAuthFlow{url: "https://as.example/authorize?state=st-1"}
+			installMCPAuthSeam(t, flow, nil)
+
+			out, code := runMCPSub(t, runMCPAuth, "api", "--manual")
+			if code != mcpAuthExitFailure {
+				t.Fatalf("garbage exit = %d, want %d:\n%s", code, mcpAuthExitFailure, out)
+			}
+			if !strings.Contains(out, tt.want) {
+				t.Errorf("want %q in:\n%s", tt.want, out)
+			}
+			if len(flow.submitted) != 0 {
+				t.Errorf("garbage was submitted: %v", flow.submitted)
+			}
+		})
+	}
+}
+
+// TestMCPAuth_ManualSubmitFailure: the engine rejects the code (bad state, a
+// failed exchange) — the failure is reported with the engine's own value-free
+// reason, and the URL stays printed.
+func TestMCPAuth_ManualSubmitFailure(t *testing.T) {
+	e := newMCPTestEnv(t)
+	seedMCPRemoteAuthServer(t, e, "api", "https://mcp.example.com/mcp")
+	withMCPAuthInput(t, "abc123")
+	flow := &fakeMCPAuthFlow{
+		url:       "https://as.example/authorize?state=st-1",
+		submitErr: errors.New("authorization failed: invalid_grant"),
+	}
+	installMCPAuthSeam(t, flow, nil)
+
+	out, code := runMCPSub(t, runMCPAuth, "api", "--manual")
+	if code != mcpAuthExitFailure {
+		t.Fatalf("submit failure exit = %d, want %d:\n%s", code, mcpAuthExitFailure, out)
+	}
+	requireMCPOwnLine(t, out, flow.url)
+	if !strings.Contains(out, `✗ "api" authorization failed: authorization failed: invalid_grant`) {
+		t.Errorf("missing the engine's value-free reason:\n%s", out)
+	}
+}
+
+// TestMCPAuth_ManualRetriesAfterFailure pins the C9 fix: a FAILED token
+// exchange leaves the engine's flow OPEN and retryable, so the CLI must not
+// burn it — the failure is printed, the prompt is shown AGAIN and the next
+// paste is submitted on the SAME flow (same URL, same PKCE state).
+func TestMCPAuth_ManualRetriesAfterFailure(t *testing.T) {
+	e := newMCPTestEnv(t)
+	seedMCPRemoteAuthServer(t, e, "api", "https://mcp.example.com/mcp")
+	withMCPAuthInput(t, "first-bad\nsecond-good\n")
+	flow := &fakeMCPAuthFlow{
+		url:        "https://as.example/authorize?state=st-1",
+		submitErrs: []error{errors.New("authorization failed: invalid_grant"), nil},
+	}
+	installMCPAuthSeam(t, flow, nil)
+
+	out, code := runMCPSub(t, runMCPAuth, "api", "--manual")
+	if code != 0 {
+		t.Fatalf("manual retry exit = %d, want 0:\n%s", code, out)
+	}
+	if got := strings.Count(out, mcpAuthManualPrompt); got != 2 {
+		t.Errorf("the prompt was printed %d time(s), want 2 (the box stays live after a refused paste):\n%s", got, out)
+	}
+	want := [][2]string{{"first-bad", ""}, {"second-good", ""}}
+	if !reflect.DeepEqual(flow.submitted, want) {
+		t.Errorf("Submit saw %v, want %v (both pastes on the SAME flow)", flow.submitted, want)
+	}
+	if !strings.Contains(out, "invalid_grant") {
+		t.Errorf("the value-free failure of the first attempt is not reported:\n%s", out)
+	}
+	if !strings.Contains(out, `✓ "api" authenticated; the gateway picks it up on the next reload`) {
+		t.Errorf("the retry's success is not reported:\n%s", out)
+	}
+	if flow.cancels != 1 {
+		t.Errorf("Cancel calls = %d, want 1 (no path may leak a flow)", flow.cancels)
+	}
+}
+
+// TestMCPAuth_ManualEOFTerminates: the loop is bounded by stdin, too. One
+// refused paste then EOF ends it with the family's exit code and releases the
+// flow — EOF is not an empty code and never a third attempt.
+func TestMCPAuth_ManualEOFTerminates(t *testing.T) {
+	e := newMCPTestEnv(t)
+	seedMCPRemoteAuthServer(t, e, "api", "https://mcp.example.com/mcp")
+	withMCPAuthInput(t, "abc123\n") // one line, then EOF
+	flow := &fakeMCPAuthFlow{
+		url:       "https://as.example/authorize?state=st-1",
+		submitErr: errors.New("authorization failed: invalid_grant"),
+	}
+	installMCPAuthSeam(t, flow, nil)
+
+	out, code := runMCPSub(t, runMCPAuth, "api", "--manual")
+	if code != mcpAuthExitFailure {
+		t.Fatalf("EOF exit = %d, want %d:\n%s", code, mcpAuthExitFailure, out)
+	}
+	if !strings.Contains(out, "no input on stdin") {
+		t.Errorf("EOF must be reported as such, not as an empty code:\n%s", out)
+	}
+	if len(flow.submitted) != 1 {
+		t.Errorf("Submit called %d time(s), want 1 (the paste was consumed once):\n%s", len(flow.submitted), out)
+	}
+	if flow.cancels != 1 {
+		t.Errorf("Cancel calls = %d, want 1 (no path may leak a flow)", flow.cancels)
+	}
+	if strings.Contains(out, "✓") {
+		t.Errorf("a run that never authenticated reported success:\n%s", out)
+	}
+}
+
+// TestMCPAuth_ManualQuitTerminates: an explicit quit input ends the loop
+// without submitting anything, and still releases the flow.
+func TestMCPAuth_ManualQuitTerminates(t *testing.T) {
+	e := newMCPTestEnv(t)
+	seedMCPRemoteAuthServer(t, e, "api", "https://mcp.example.com/mcp")
+	withMCPAuthInput(t, ":q\n")
+	flow := &fakeMCPAuthFlow{url: "https://as.example/authorize?state=st-1"}
+	installMCPAuthSeam(t, flow, nil)
+
+	out, code := runMCPSub(t, runMCPAuth, "api", "--manual")
+	if code != mcpAuthExitFailure {
+		t.Fatalf("quit exit = %d, want %d:\n%s", code, mcpAuthExitFailure, out)
+	}
+	if !strings.Contains(out, "authorization canceled") {
+		t.Errorf("a quit must be reported as a cancellation:\n%s", out)
+	}
+	if len(flow.submitted) != 0 {
+		t.Errorf("a quit input was submitted: %v", flow.submitted)
+	}
+	if flow.cancels != 1 {
+		t.Errorf("Cancel calls = %d, want 1 (no path may leak a flow)", flow.cancels)
+	}
+}
+
+// TestMCPAuth_ManualQuitTokensAreNotPastes proves the quit inputs can never
+// shadow a real paste: each is a value the frozen grammar itself REFUSES, so a
+// quit never changes how an otherwise-valid paste would be handled.
+func TestMCPAuth_ManualQuitTokensAreNotPastes(t *testing.T) {
+	if len(mcpAuthQuitInputs) == 0 {
+		t.Fatal("there are no quit inputs")
+	}
+	for tok := range mcpAuthQuitInputs {
+		if _, _, err := mcp.ParseAuthPaste(tok); !errors.Is(err, mcp.ErrAuthPasteUnrecognized) {
+			t.Errorf("quit token %q is a paste form (%v): it would shadow a code and diverge from the TUI/WebUI", tok, err)
+		}
+	}
+}
+
+// TestMCPAuth_ManualIsBounded: stdin can be a pipe with no EOF. The loop must
+// stop after a fixed number of refused pastes instead of spinning forever.
+func TestMCPAuth_ManualIsBounded(t *testing.T) {
+	e := newMCPTestEnv(t)
+	seedMCPRemoteAuthServer(t, e, "api", "https://mcp.example.com/mcp")
+	withMCPAuthInput(t, strings.Repeat("!!!\n", mcpAuthManualMaxAttempts+5))
+	flow := &fakeMCPAuthFlow{url: "https://as.example/authorize?state=st-1"}
+	installMCPAuthSeam(t, flow, nil)
+
+	out, code := runMCPSub(t, runMCPAuth, "api", "--manual")
+	if code != mcpAuthExitFailure {
+		t.Fatalf("bounded exit = %d, want %d:\n%s", code, mcpAuthExitFailure, out)
+	}
+	if !strings.Contains(out, "too many refused pastes") {
+		t.Errorf("the bound is not reported:\n%s", out)
+	}
+	if got := strings.Count(out, mcpAuthManualPrompt); got != mcpAuthManualMaxAttempts {
+		t.Errorf("prompt printed %d time(s), want exactly %d attempts:\n%s", got, mcpAuthManualMaxAttempts, out)
+	}
+	if len(flow.submitted) != 0 {
+		t.Errorf("garbage was submitted: %v", flow.submitted)
+	}
+	if flow.cancels != 1 {
+		t.Errorf("Cancel calls = %d, want 1", flow.cancels)
+	}
+}
+
+// TestMCPAuth_ManualMatchesEnginePasteGrammar is the C1 re-point: the CLI no
+// longer owns a copy of the paste rule, so for every input of the frozen
+// example table (.lele/tasks/mcp-oauth-paste-grammar.md) the pair the CLI
+// submits — or its refusal — must be EXACTLY what mcp.ParseAuthPaste answers.
+// It fails the moment a private parser (or a divergent mapping) reappears.
+func TestMCPAuth_ManualMatchesEnginePasteGrammar(t *testing.T) {
+	const canary = "GRAMMAR-CANARY-33f1"
+	// The engine's input bound is 8192 bytes (authPasteMaxInputLen, unexported);
+	// one byte over must be refused, on every surface.
+	const inputBound = 8192
+	inputs := []string{
+		"",
+		"   ",
+		"abc123",
+		"abc-12_3.x~y",
+		strings.Repeat("a", 300), // a long, opaque real code
+		strings.Repeat("a", inputBound+1),
+		"  abc123  ",
+		"!!!",
+		"abc!def",
+		"a b c",
+		"abc xyz",
+		"abc   xyz",
+		"abc! xyz",
+		"code=abc",
+		"code=abc&state=xyz",
+		"?code=abc&state=xyz",
+		"http://127.0.0.1:37401/cb?code=abc&state=xyz",
+		"http://127.0.0.1:37401/cb?state=xyz&code=abc",
+		"http://127.0.0.1:37401/cb?code=a%2Bb&state=s",
+		"http://127.0.0.1:37401/cb?code=abc#frag",
+		"http://127.0.0.1:37401/cb?code=",
+		"http://127.0.0.1:37401/cb?state=xyz",
+		"http://127.0.0.1:37401/cb?error=access_denied",
+		"http://127.0.0.1:37401/cb?error=access_denied&error_description=" + canary,
+		"http://127.0.0.1:37401/cb?error=%1B%5B31mhax",
+		"foo=bar",
+		"code=abc def",
+		"http://127.0.0.1:37401/cb#code=abc&state=s",
+		"http://127.0.0.1:37401/cb?state=xyz#code=abc",
+		"http://127.0.0.1:37401/cb?error=access_denied&code=abc",
+	}
+	for i, in := range inputs {
+		in := in
+		t.Run(fmt.Sprintf("case_%02d", i), func(t *testing.T) {
+			wantCode, wantState, wantErr := mcp.ParseAuthPaste(in)
+
+			e := newMCPTestEnv(t)
+			seedMCPRemoteAuthServer(t, e, "api", "https://mcp.example.com/mcp")
+			withMCPAuthInput(t, in)
+			flow := &fakeMCPAuthFlow{url: "https://as.example/authorize?state=st-1"}
+			installMCPAuthSeam(t, flow, nil)
+
+			out, _ := runMCPSub(t, runMCPAuth, "api", "--manual")
+
+			if strings.Contains(out, canary) {
+				t.Fatalf("a canary from the paste reached the CLI output:\n%s", out)
+			}
+			if wantErr != nil {
+				if len(flow.submitted) != 0 {
+					t.Fatalf("the engine refuses %q (%v) but the CLI submitted %v", in, wantErr, flow.submitted)
+				}
+				return
+			}
+			if len(flow.submitted) != 1 || flow.submitted[0] != [2]string{wantCode, wantState} {
+				t.Fatalf("engine says (%q, %q) for %q, CLI submitted %v", wantCode, wantState, in, flow.submitted)
+			}
+		})
+	}
+}
+
+// TestParseMCPAuthArgs covers the flag surface: defaults, both value flags, both
+// booleans, and every rejection.
+func TestParseMCPAuthArgs(t *testing.T) {
+	a, err := parseMCPAuthArgs([]string{"api"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.name != "api" || a.agent != "main" || a.noBrowser || a.manual || a.port != 0 {
+		t.Fatalf("defaults wrong: %+v", a)
+	}
+	if a.timeout != mcpAuthDefaultTimeout {
+		t.Fatalf("default timeout = %v, want %v", a.timeout, mcpAuthDefaultTimeout)
+	}
+
+	a, err = parseMCPAuthArgs([]string{"--manual", "--no-browser", "--agent", "worker", "--timeout", "90s", "--port", "8080", "api"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !a.manual || !a.noBrowser || a.agent != "worker" || a.port != 8080 || a.timeout != 90*time.Second {
+		t.Fatalf("parse: %+v", a)
+	}
+
+	if a, err := parseMCPAuthArgs([]string{"api", "--port", "0"}); err != nil || a.port != 0 {
+		t.Fatalf("--port 0 (ephemeral) rejected: %+v %v", a, err)
+	}
+
+	for _, tt := range []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{name: "missing name", args: nil, wantErr: "missing server name"},
+		{name: "extra positional", args: []string{"a", "b"}, wantErr: "unexpected argument"},
+		{name: "slash name", args: []string{"a/b"}, wantErr: "must not contain '/'"},
+		{name: "unknown flag", args: []string{"api", "--bogus"}, wantErr: "unknown flag --bogus"},
+		{name: "no-browser with a value", args: []string{"api", "--no-browser=yes"}, wantErr: "does not take a value"},
+		{name: "bad timeout", args: []string{"api", "--timeout", "bogus"}, wantErr: "invalid --timeout"},
+		{name: "zero timeout", args: []string{"api", "--timeout", "0s"}, wantErr: "must be positive"},
+		{name: "negative timeout", args: []string{"api", "--timeout", "-5s"}, wantErr: "must be positive"},
+		{name: "bad port", args: []string{"api", "--port", "http"}, wantErr: "invalid --port"},
+		{name: "port too large", args: []string{"api", "--port", "70000"}, wantErr: "between 0 and 65535"},
+		{name: "negative port", args: []string{"api", "--port", "-1"}, wantErr: "between 0 and 65535"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseMCPAuthArgs(tt.args)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestMCPAuth_UsageErrorPrintsTheUsageLine pins the parse-error surface: the
+// auth usage line is printed with the failure (it lives in mcpAuthUsage, since
+// mcpUsage is the table the docs guard ties to docs/mcp.md).
+func TestMCPAuth_UsageErrorPrintsTheUsageLine(t *testing.T) {
+	newMCPTestEnv(t)
+	out, code := runMCPSub(t, runMCPAuth, "api", "--bogus")
+	if code != 1 {
+		t.Fatalf("usage error exit = %d, want 1:\n%s", code, out)
+	}
+	if !strings.Contains(out, "Usage: "+mcpAuthUsage["auth"]) {
+		t.Errorf("missing the auth usage line:\n%s", out)
+	}
+}
+
+// TestMCPAuth_UsesTheSharedResolution: `auth` must refuse exactly what `test`
+// refuses (unknown name, invalid entry, disable stub) with the same messages,
+// and must resolve the DEFINITION underneath a disable stub — the shared
+// mcpResolveTarget exists for that.
+func TestMCPAuth_UsesTheSharedResolution(t *testing.T) {
+	e := newMCPTestEnv(t)
+	e.seedThreeLayers(t)
+	withMCPAuthInput(t, "")
+	seam := installMCPAuthSeam(t, &fakeMCPAuthFlow{url: "https://as.example/authorize"}, nil)
+
+	out, code := runMCPSub(t, runMCPAuth, "nosuch")
+	if code != mcpAuthExitFailure || !strings.Contains(out, `✗ unknown MCP server "nosuch"`) {
+		t.Fatalf("unknown auth exit=%d out=%s", code, out)
+	}
+
+	out, code = runMCPSub(t, runMCPAuth, "charlie")
+	if code != mcpAuthExitFailure {
+		t.Fatalf("invalid auth exit = %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, `✗ "charlie" is invalid:`) || !strings.Contains(out, "fix with: lele mcp edit charlie") {
+		t.Errorf("auth must explain an invalid entry the way test does:\n%s", out)
+	}
+
+	writeMCPTestFile(t, e.agentFile(), `{"mcpServers":{"stub":{"disabled":true}}}`)
+	out, code = runMCPSub(t, runMCPAuth, "stub")
+	if code != mcpAuthExitFailure || !strings.Contains(out, `"stub" is only a disable stub`) {
+		t.Fatalf("stub auth exit=%d out=%s", code, out)
+	}
+	if len(seam.calls) != 0 {
+		t.Errorf("a refused entry reached the engine %d time(s)", len(seam.calls))
+	}
+
+	// A disabled server with a real definition under it: the note is printed for
+	// auth's own verb and the DEFINITION is what gets authorized.
+	seedMCPRemoteAuthServer(t, e, "off", "https://mcp.example.com/mcp")
+	writeMCPTestFile(t, e.agentFile(), `{"mcpServers":{"off":{"disabled":true}}}`)
+	out, code = runMCPSub(t, runMCPAuth, "off")
+	if code != 0 {
+		t.Fatalf("disabled auth exit = %d, want 0:\n%s", code, out)
+	}
+	if !strings.Contains(out, `⊘ "off" is disabled in the agent layer — authorizing it directly (the runtime will not load it)`) {
+		t.Errorf("missing the disabled note:\n%s", out)
+	}
+	if len(seam.calls) != 1 || seam.calls[0].srv.URL != "https://mcp.example.com/mcp" {
+		t.Errorf("the definition under the stub must be authorized: %+v", seam.calls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// logout
+// ---------------------------------------------------------------------------
+
+func TestParseMCPLogoutArgs(t *testing.T) {
+	a, err := parseMCPLogoutArgs([]string{"api"})
+	if err != nil || a.name != "api" || a.agent != "main" {
+		t.Fatalf("parse: %+v %v", a, err)
+	}
+	if a, err := parseMCPLogoutArgs([]string{"--agent", "worker", "api"}); err != nil || a.agent != "worker" {
+		t.Fatalf("--agent parse: %+v %v", a, err)
+	}
+	for _, tt := range []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{name: "missing name", args: nil, wantErr: "missing server name"},
+		{name: "extra positional", args: []string{"a", "b"}, wantErr: "unexpected argument"},
+		{name: "slash name", args: []string{"a/b"}, wantErr: "must not contain '/'"},
+		{name: "unknown flag", args: []string{"api", "--layer", "global"}, wantErr: "unknown flag --layer"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseMCPLogoutArgs(tt.args)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestMCPLogout_ClearsTheStore: the login is gone, the file with it (mcp-auth
+// removes the file once it is empty), and the report names the server.
+func TestMCPLogout_ClearsTheStore(t *testing.T) {
+	e := newMCPTestEnv(t)
+	const srvURL = "https://mcp.example.com/mcp"
+	seedMCPRemoteAuthServer(t, e, "api", srvURL)
+	store := mcp.NewAuthStore(e.leleDir)
+	if err := store.TokenStore("api", srvURL).SaveToken(context.Background(),
+		&transport.Token{AccessToken: "secret-token", TokenType: "Bearer", RefreshToken: "r"}); err != nil {
+		t.Fatalf("seed token: %v", err)
+	}
+
+	out, code := runMCPSub(t, runMCPLogout, "api")
+	if code != 0 {
+		t.Fatalf("logout exit = %d, want 0:\n%s", code, out)
+	}
+	if !strings.Contains(out, `✓ forgot the stored credentials and registration for "api"`) {
+		t.Errorf("missing the forgotten-credentials line:\n%s", out)
+	}
+	if _, ok := mcp.NewAuthStore(e.leleDir).Record("api"); ok {
+		t.Error("the record survived logout")
+	}
+	if strings.Contains(out, "secret-token") || strings.Contains(out, "Bearer") {
+		t.Errorf("logout printed a secret:\n%s", out)
+	}
+}
+
+// TestMCPLogout_EmptyStoreIsSuccess: nothing was stored, so the requested state
+// already holds — exit 0, and the message says so (the choice is deliberate).
+func TestMCPLogout_EmptyStoreIsSuccess(t *testing.T) {
+	e := newMCPTestEnv(t)
+	seedMCPRemoteAuthServer(t, e, "api", "https://mcp.example.com/mcp")
+
+	out, code := runMCPSub(t, runMCPLogout, "api")
+	if code != 0 {
+		t.Fatalf("empty logout exit = %d, want 0:\n%s", code, out)
+	}
+	if !strings.Contains(out, `✓ nothing was stored for "api" — nothing to forget`) {
+		t.Errorf("the no-op must be stated explicitly:\n%s", out)
+	}
+	if !strings.Contains(out, "still a success") {
+		t.Errorf("the no-op must state the exit-code choice:\n%s", out)
+	}
+
+	// Idempotent: a second logout reports the same thing, still exit 0.
+	out2, code2 := runMCPSub(t, runMCPLogout, "api")
+	if code2 != 0 || !strings.Contains(out2, "nothing was stored") {
+		t.Fatalf("second logout exit=%d out=%s", code2, out2)
+	}
+}
+
+// TestMCPLogout_UnknownServerIsStillLogoutable: the store is keyed by NAME, so
+// a server already removed from mcp.json must still be forgettable.
+func TestMCPLogout_UnknownServerIsStillLogoutable(t *testing.T) {
+	e := newMCPTestEnv(t)
+	store := mcp.NewAuthStore(e.leleDir)
+	if err := store.TokenStore("gone", "https://mcp.example.com/mcp").SaveToken(context.Background(),
+		&transport.Token{AccessToken: "t", TokenType: "Bearer"}); err != nil {
+		t.Fatalf("seed token: %v", err)
+	}
+
+	out, code := runMCPSub(t, runMCPLogout, "gone")
+	if code != 0 || !strings.Contains(out, "forgot the stored credentials") {
+		t.Fatalf("logout of a removed server exit=%d out=%s", code, out)
+	}
+	if _, ok := mcp.NewAuthStore(e.leleDir).Record("gone"); ok {
+		t.Error("the record survived logout")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// add: the auth flags
+// ---------------------------------------------------------------------------
+
+// TestParseMCPAddArgs_AuthFlags: the flag matrix of the auth block, including
+// every validation failure pkg/mcp's own (*ServerConfig).validate would raise —
+// refused here, with a clear message, instead of surfacing later as a parse
+// error on a file that was already written.
+func TestParseMCPAddArgs_AuthFlags(t *testing.T) {
+	a, err := parseMCPAddArgs([]string{"api", "--url", "https://x/mcp", "--auth", "oauth",
+		"--scope", "read", "--scope", "write", "--client-id", "cid", "--client-secret", "${MY_TOKEN}",
+		"--redirect-uri", "http://127.0.0.1:9000/cb", "--auth-server-metadata-url", "https://as.example/.well-known/oauth-authorization-server",
+		"--protected-resource-metadata-url", "https://mcp.example.com/.well-known/oauth-protected-resource"})
+	if err != nil {
+		t.Fatalf("valid oauth block rejected: %v", err)
+	}
+	spec := a.authSpec()
+	if spec == nil {
+		t.Fatal("authSpec() = nil for a full auth block")
+	}
+	if spec.Type != "oauth" || spec.ClientID != "cid" || spec.ClientSecret != "${MY_TOKEN}" ||
+		spec.RedirectURI != "http://127.0.0.1:9000/cb" ||
+		spec.AuthServerMetadataURL != "https://as.example/.well-known/oauth-authorization-server" ||
+		spec.ProtectedResourceMetadataURL != "https://mcp.example.com/.well-known/oauth-protected-resource" {
+		t.Fatalf("auth spec = %+v", spec)
+	}
+	if strings.Join(spec.Scopes, ",") != "read,write" {
+		t.Fatalf("scopes = %v, want read,write (order preserved)", spec.Scopes)
+	}
+
+	// No auth flag at all ⇒ no block, which is what keeps plain entries
+	// byte-identical to what they were before this feature.
+	plain, err := parseMCPAddArgs([]string{"fs", "--command", "npx"})
+	if err != nil {
+		t.Fatalf("plain entry rejected: %v", err)
+	}
+	if plain.authSpec() != nil {
+		t.Errorf("authSpec() = %+v for an entry with no auth flag, want nil", plain.authSpec())
+	}
+
+	// An explicitly declared `none` IS a block: the reader distinguishes
+	// "declared but unconfigured" from "nil".
+	none, err := parseMCPAddArgs([]string{"api", "--url", "https://x/mcp", "--auth", "none"})
+	if err != nil {
+		t.Fatalf("--auth none rejected: %v", err)
+	}
+	if spec := none.authSpec(); spec == nil || spec.Type != "none" {
+		t.Fatalf("--auth none spec = %+v, want a declared block with type none", spec)
+	}
+
+	for _, tt := range []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "unknown auth type",
+			args:    []string{"api", "--url", "https://x/mcp", "--auth", "basic"},
+			wantErr: `unknown --auth "basic"`,
+		},
+		{
+			name:    "oauth without a url",
+			args:    []string{"fs", "--command", "npx", "--auth", "oauth"},
+			wantErr: "auth flags require --url",
+		},
+		{
+			name:    "scopes without a url",
+			args:    []string{"fs", "--command", "npx", "--scope", "read"},
+			wantErr: "auth flags require --url",
+		},
+		{
+			name:    "client id without a url",
+			args:    []string{"fs", "--command", "npx", "--client-id", "cid"},
+			wantErr: "auth flags require --url",
+		},
+		{
+			name:    "secret without an id",
+			args:    []string{"api", "--url", "https://x/mcp", "--auth", "oauth", "--client-secret", "s"},
+			wantErr: "--client-secret requires --client-id",
+		},
+		{
+			name:    "secret alone",
+			args:    []string{"api", "--url", "https://x/mcp", "--client-secret", "s"},
+			wantErr: "--client-secret requires --client-id",
+		},
+		{
+			name:    "flag without a value",
+			args:    []string{"api", "--url", "https://x/mcp", "--client-id"},
+			wantErr: "flag --client-id requires a value",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseMCPAddArgs(tt.args)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestMCPAdd_AuthFlagsCoverTheSpec is the drift guard for the flag surface:
+// every field mcp.AuthSpec can carry must be reachable from `lele mcp add`
+// (through the real parser AND into the spec), so a field added to the spec
+// cannot quietly be unsettable from the CLI. The mapping is written out field
+// by field — `scopes` is the repeatable `--scope`, and `client_secret` needs
+// the `--client-id` it belongs to — because it is the whole surface, not a
+// sample of it.
+func TestMCPAdd_AuthFlagsCoverTheSpec(t *testing.T) {
+	tests := []struct {
+		field  string // mcp.AuthSpec json tag
+		flag   string
+		value  string
+		extras []string // flags the entry needs for validate() to accept it
+		check  func(*mcp.AuthSpec) bool
+	}{
+		{"type", "--auth", "oauth", nil, func(s *mcp.AuthSpec) bool { return s.Type == "oauth" }},
+		{"scopes", "--scope", "read", nil, func(s *mcp.AuthSpec) bool { return reflect.DeepEqual(s.Scopes, []string{"read"}) }},
+		{"client_id", "--client-id", "cid", nil, func(s *mcp.AuthSpec) bool { return s.ClientID == "cid" }},
+		{"client_secret", "--client-secret", "sec", []string{"--client-id", "cid"}, func(s *mcp.AuthSpec) bool { return s.ClientSecret == "sec" }},
+		{"redirect_uri", "--redirect-uri", "http://127.0.0.1:1/cb", nil, func(s *mcp.AuthSpec) bool { return s.RedirectURI == "http://127.0.0.1:1/cb" }},
+		{"auth_server_metadata_url", "--auth-server-metadata-url", "https://as.example/meta", nil, func(s *mcp.AuthSpec) bool { return s.AuthServerMetadataURL == "https://as.example/meta" }},
+		{"protected_resource_metadata_url", "--protected-resource-metadata-url", "https://pr.example/meta", nil, func(s *mcp.AuthSpec) bool { return s.ProtectedResourceMetadataURL == "https://pr.example/meta" }},
+	}
+	if len(tests) != 7 {
+		t.Fatalf("the AuthSpec surface has 7 fields, the table covers %d", len(tests))
+	}
+	for _, tt := range tests {
+		t.Run(tt.field, func(t *testing.T) {
+			if !strings.Contains(mcpUsage["add"], tt.flag) {
+				t.Errorf("the add usage line omits %s", tt.flag)
+			}
+			for _, form := range [][]string{{tt.flag, tt.value}, {tt.flag + "=" + tt.value}} {
+				args := append([]string{"api", "--url", "https://x/mcp"}, tt.extras...)
+				args = append(args, form...)
+				a, err := parseMCPAddArgs(args)
+				if err != nil {
+					t.Fatalf("parseMCPAddArgs(%v): %v", args, err)
+				}
+				spec := a.authSpec()
+				if spec == nil || !tt.check(spec) {
+					t.Errorf("parseMCPAddArgs(%v) produced %+v, which does not carry the flag's value", args, spec)
+				}
+			}
+		})
+	}
+}
+
+// TestMCPAdd_WritesTheAuthBlock pins the effective JSON the writer produces:
+// canonical field order, only non-zero fields, and the entry still validates
+// when the reader parses it back (the writer runs the reader's own validate).
+func TestMCPAdd_WritesTheAuthBlock(t *testing.T) {
+	e := newMCPTestEnv(t)
+	out, code := runMCPSub(t, runMCPAdd, "api", "--url", "https://mcp.example.com/mcp",
+		"--auth", "oauth", "--scope", "read", "--scope", "write",
+		"--client-id", "cid", "--redirect-uri", "http://127.0.0.1:9000/cb")
+	if code != 0 {
+		t.Fatalf("add exit = %d, want 0:\n%s", code, out)
+	}
+	// A fresh file: the writer emits no trailing newline of its own, and with
+	// no previous bytes to preserve there is none.
+	want := `{"mcpServers":{"api":{"url":"https://mcp.example.com/mcp","auth":{` +
+		`"type":"oauth","scopes":["read","write"],"client_id":"cid","redirect_uri":"http://127.0.0.1:9000/cb"}}}}`
+	if got := readMCPTestFile(t, e.globalFile()); got != want {
+		t.Errorf("written bytes:\n got: %s\nwant: %s", got, want)
+	}
+	f, err := mcp.ParseFile(e.globalFile())
+	if err != nil {
+		t.Fatalf("ParseFile(result): %v", err)
+	}
+	if err := f.EntryErrors["api"]; err != nil {
+		t.Errorf("the written entry does not validate: %v", err)
+	}
+}
+
+// TestMCPAdd_ClientSecretStaysVerbatim is the CLI half of the writer's
+// no-expansion contract: a literal "${VAR}" in a flag value must be written
+// BYTE-FOR-BYTE, never resolved from the environment — even when the variable
+// is set in this process.
+func TestMCPAdd_ClientSecretStaysVerbatim(t *testing.T) {
+	e := newMCPTestEnv(t)
+	t.Setenv("MY_TOKEN", "resolved-secret-value")
+
+	out, code := runMCPSub(t, runMCPAdd, "api", "--url", "https://mcp.example.com/mcp",
+		"--auth", "oauth", "--client-id", "cid", "--client-secret", "${MY_TOKEN}")
+	if code != 0 {
+		t.Fatalf("add exit = %d, want 0:\n%s", code, out)
+	}
+	got := readMCPTestFile(t, e.globalFile())
+	if !strings.Contains(got, `"client_secret":"${MY_TOKEN}"`) {
+		t.Errorf("the literal ${MY_TOKEN} was not written verbatim:\n%s", got)
+	}
+	if strings.Contains(got, "resolved-secret-value") {
+		t.Errorf("the flag value was EXPANDED before it reached the disk:\n%s", got)
+	}
+	// The reader still expands it at load time — the reference is live config,
+	// not dead text.
+	f, err := mcp.ParseFile(e.globalFile())
+	if err != nil {
+		t.Fatalf("ParseFile(result): %v", err)
+	}
+	if spec := f.MCPServers["api"].Auth; spec == nil || spec.ClientSecret != "resolved-secret-value" {
+		t.Errorf("ParseFile did not expand the reference: %+v", spec)
+	}
+}
+
+// TestMCPAdd_StdioRefusesOAuthAuth pins the CLI-side refusal for the shape the
+// reader would reject anyway ("auth block requires a url"): the command must
+// say so before writing anything at all.
+func TestMCPAdd_StdioRefusesOAuthAuth(t *testing.T) {
+	e := newMCPTestEnv(t)
+	out, code := runMCPSub(t, runMCPAdd, "fs", "--command", "npx", "--auth", "oauth")
+	if code != 1 {
+		t.Fatalf("stdio+oauth exit = %d, want 1:\n%s", code, out)
+	}
+	if !strings.Contains(out, "auth flags require --url") || !strings.Contains(out, "Usage:") {
+		t.Errorf("missing the refusal / usage:\n%s", out)
+	}
+	if _, err := os.Stat(e.globalFile()); err == nil {
+		t.Errorf("a refused add wrote the file:\n%s", readMCPTestFile(t, e.globalFile()))
+	}
+}
+
+// ---------------------------------------------------------------------------
 // docs guard
 // ---------------------------------------------------------------------------
 
@@ -1883,10 +3413,65 @@ func TestMCPEdit_PathGuardRefusesBeforeEditor(t *testing.T) {
 // not formatting: every subcommand the dispatcher knows must be shown as
 // `lele mcp <sub>` in docs/mcp.md and named in both the CLI help and the
 // parent help, and no line of the docs may advertise an unknown subcommand.
+//
+// The auth family (mcpAuthUsage) is covered by the SAME guard: it is a second
+// table only because its documentation is owned by the docs surface, not
+// because it is a lesser part of the surface. Its help lines are asserted
+// against mcpUsageLine, the one lookup both tables go through.
+// TestMCPDocs_AuthSurface pins the C1/C2/C9 doc half: docs/mcp.md must describe
+// the ONE paste grammar the CLI now delegates to (the shared engine helper, not
+// a private copy), the retry/quit/bound behaviour of --manual, and the two
+// bracket markers the `list` row and the `show` verdict speak — the same words
+// the TUI and the WebUI render. A doc that drifts here would send an operator
+// (or a future re-implementation) back to a per-surface rule.
+func TestMCPDocs_AuthSurface(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "mcp.md"))
+	if err != nil {
+		t.Fatalf("read docs/mcp.md: %v", err)
+	}
+	text := string(doc)
+	for _, want := range []string{
+		// The shared rule, named.
+		"pkg/mcp.ParseAuthPaste",
+		// The markers/list vocabulary, byte-identical to the code.
+		mcpAuthMarkerRequired,
+		mcpAuthMarkerAuthenticated,
+		"auth state:",
+		"auth method:",
+		// The declared auth block, keys-side only.
+		"auth:",
+		"scopes:",
+		"client id:",
+		"never printed",
+		// The four accepted paste forms, including the two-token convenience.
+		"bare authorization code",
+		"two whitespace-separated tokens",
+		"#fragment",
+		// The --manual loop's exit paths.
+		":q",
+		"no input on stdin",
+		"too many refused pastes",
+		"same PKCE verifier",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("docs/mcp.md no longer documents %q", want)
+		}
+	}
+}
+
 func TestMCPDocs_UsageCoverage(t *testing.T) {
 	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "mcp.md"))
 	if err != nil {
 		t.Fatalf("read docs/mcp.md: %v", err)
+	}
+
+	// Every subcommand the dispatcher knows, from both usage tables.
+	subs := map[string]bool{}
+	for sub := range mcpUsage {
+		subs[sub] = true
+	}
+	for sub := range mcpAuthUsage {
+		subs[sub] = true
 	}
 
 	documented := map[string]bool{}
@@ -1898,25 +3483,48 @@ func TestMCPDocs_UsageCoverage(t *testing.T) {
 		sub, _, _ := strings.Cut(rest, " ")
 		documented[sub] = true
 	}
-	for sub := range mcpUsage {
+	for sub := range subs {
 		if !documented[sub] {
 			t.Errorf("docs/mcp.md never shows `lele mcp %s`", sub)
 		}
 	}
 	for sub := range documented {
-		if _, ok := mcpUsage[sub]; !ok {
+		if !subs[sub] {
 			t.Errorf("docs/mcp.md advertises `lele mcp %s`, which the dispatcher does not know", sub)
 		}
 	}
 
 	help, _ := runMCPSub(t, func(w io.Writer, _ []string) int { writeMCPHelp(w); return 0 })
-	for sub := range mcpUsage {
+	for sub := range subs {
 		if !strings.Contains(help, "lele mcp "+sub+" ") {
 			t.Errorf("writeMCPHelp does not document `lele mcp %s`", sub)
+		}
+		// The usage line is what a parse error prints; the help itself may
+		// abbreviate. mcpUsageLine is the ONE lookup both tables go through, so
+		// asserting on it covers the auth family and the original table alike.
+		line := mcpUsageLine(sub)
+		if line == "" {
+			t.Errorf("mcpUsageLine(%q) is empty", sub)
+			continue
+		}
+		var buf bytes.Buffer
+		mcpUsageError(&buf, sub, errors.New("boom"))
+		if !strings.Contains(buf.String(), "Usage: "+line) {
+			t.Errorf("a %s usage error does not print the usage line %q:\n%s", sub, line, buf.String())
 		}
 	}
 	if !strings.Contains(help, "lele mcp test <name>") {
 		t.Errorf("writeMCPHelp must show the test usage line:\n%s", help)
+	}
+	// The auth usage line is the one that must survive a copy/paste into a
+	// headless shell: assert the flags the command actually parses are on it.
+	for _, flag := range []string{"--no-browser", "--manual", "--timeout", "--port"} {
+		if !strings.Contains(mcpAuthUsage["auth"], flag) {
+			t.Errorf("the auth usage line dropped %s: %q", flag, mcpAuthUsage["auth"])
+		}
+		if !strings.Contains(help, flag) {
+			t.Errorf("writeMCPHelp does not mention the auth flag %s", flag)
+		}
 	}
 
 	// The parent `lele help` line must name every subcommand (LOW-5: it used to
@@ -1931,7 +3539,7 @@ func TestMCPDocs_UsageCoverage(t *testing.T) {
 	if line == "" {
 		t.Fatalf("printHelp has no MCP line:\n%s", parent)
 	}
-	for sub := range mcpUsage {
+	for sub := range subs {
 		if !strings.Contains(line, sub) {
 			t.Errorf("the parent help line omits %q: %q", sub, line)
 		}

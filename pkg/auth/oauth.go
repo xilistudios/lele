@@ -544,3 +544,8 @@ func openBrowser(url string) error {
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
 }
+
+// OpenBrowser launches url in the user's default browser. It is exported so
+// callers that must NOT import this package's OAuth machinery (pkg/mcp injects
+// its browser opener as a function) can reuse the one platform switch.
+func OpenBrowser(url string) error { return openBrowser(url) }

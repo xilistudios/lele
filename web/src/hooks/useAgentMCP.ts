@@ -1,11 +1,14 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 import { useAuthContext } from '../contexts/AuthContext'
 import type { MCPLayerName, MCPQueryLayer } from '../lib/mcpTypes'
 import { ApiError } from '../services/http/errors'
+import { usePageVisible } from './usePageVisible'
 
 /**
  * MCP management hooks (T5 UI): merged inventory, per-layer raw file,
- * surgical toggle, raw save and validation.
+ * surgical toggle, raw save, validation, and the OAuth flow of one server
+ * (start → poll → manual complete / cancel / logout).
  *
  * Same shape the Commands/Skills tabs settled on (useAgentSkills /
  * useAgentCommands): reads go through react-query with an exported query key,
@@ -31,6 +34,21 @@ export const agentMCPInventoryQueryKey = (agentId: string) =>
  */
 export const mcpRawFileQueryKey = (agentId: string, layer: MCPQueryLayer | null) =>
   ['agentMCPRawFile', agentId, layer ?? ''] as const
+
+/**
+ * Query key of ONE pending/terminal OAuth flow. `flowId` null (no flow
+ * started, or the modal is closed) maps to '' so the disabled query still has
+ * a stable key.
+ */
+export const mcpAuthStatusQueryKey = (agentId: string, flowId: string | null) =>
+  ['agentMCPAuthStatus', agentId, flowId ?? ''] as const
+
+/**
+ * How often a PENDING flow is polled. Only three outcomes exist
+ * (`pending`/`done`/`error`) and the backend starts a 5 min deadline, so a
+ * 1.5 s cadence is responsive without hammering the gateway.
+ */
+export const MCP_AUTH_POLL_INTERVAL_MS = 1500
 
 /** Invalidate the inventory of one agent after a mutation. */
 export function invalidateAgentMCPInventory(queryClient: QueryClient, agentId: string) {
@@ -140,5 +158,127 @@ export function useMCPValidate(agentId: string) {
   return useMutation({
     mutationFn: ({ layer, content }: MCPValidateVars) =>
       api.mcpValidate(agentId, { layer, content }),
+  })
+}
+
+/**
+ * Start an OAuth flow for ONE server (POST, no body). Returns the flow id plus
+ * the `auth_url` the user must open.
+ *
+ * Invalidates NOTHING on success: starting a flow only registers a loopback
+ * listener server-side — the inventory row (and its `auth` report) is
+ * unchanged until a poll observes `done`, which is where the inventory gets
+ * invalidated.
+ */
+export function useMCPAuthStart(agentId: string) {
+  const { api } = useAuthContext()
+  return useMutation({
+    mutationFn: (name: string) => api.mcpAuthStart(agentId, name),
+  })
+}
+
+/**
+ * Status of ONE flow, polled until it reaches a terminal state.
+ *
+ * Poll-until-terminal: `refetchInterval` returns the cadence while the flow is
+ * `pending` and `false` on `done`/`error` — React Query then CLEARS the timer
+ * instead of leaving it armed. While the tab is hidden the callback returns
+ * `false` too (same `pageVisible` gate as `useChatHistory`), so a backgrounded
+ * modal runs no timer at all.
+ *
+ * An absent `data` is deliberately NOT treated as pending: the first fetch of
+ * an enabled query is unconditional, and a poll that keeps failing (expired
+ * flow swept by the backend, gateway down) must not busy-loop every 1.5 s.
+ *
+ * The `done` observation invalidates the MCP inventory EXACTLY ONCE per flow
+ * id. Rationale: the backend reloads the MCP manager when the flow completes
+ * (the credential only becomes visible to it at fingerprint time), so the
+ * cached inventory still reports the pre-auth state and the list has to be
+ * re-read to show it. The `useRef` latch is keyed by `flowId` because the
+ * effect can legitimately re-run for the same flow (a re-observation of
+ * `done`, e.g. React re-invoking effects) and each invalidation refetches the
+ * whole inventory; a STRICT-mode double effect must not cost a second read.
+ * Keying on the flow id also keeps the door open for a later flow: a new id
+ * invalidates again, which is what we want.
+ */
+export function useMCPAuthFlow(agentId: string, flowId: string | null) {
+  const { api } = useAuthContext()
+  const queryClient = useQueryClient()
+  const pageVisible = usePageVisible()
+  // Last flow id whose `done` already invalidated the inventory.
+  const invalidatedFlowRef = useRef<string | null>(null)
+
+  const query = useQuery({
+    queryKey: mcpAuthStatusQueryKey(agentId, flowId),
+    // `enabled` gates the request; queryFn never runs with a null flow id.
+    queryFn: () => api.mcpAuthStatus(agentId, flowId as string),
+    enabled: flowId !== null,
+    // No retry: a 404 (flow swept/expired) or 501 (no OAuth support) is the
+    // answer, not a transient glitch.
+    retry: false,
+    refetchInterval: (query) => {
+      if (!pageVisible) return false
+      return query.state.data?.state === 'pending' ? MCP_AUTH_POLL_INTERVAL_MS : false
+    },
+  })
+
+  useEffect(() => {
+    if (flowId === null || query.data?.state !== 'done') return
+    if (invalidatedFlowRef.current === flowId) return
+    invalidatedFlowRef.current = flowId
+    invalidateAgentMCPInventory(queryClient, agentId)
+  }, [query.data?.state, flowId, agentId, queryClient])
+
+  return query
+}
+
+/**
+ * Manual completion of ONE flow (POST `{code, state?}`): the user pasted the
+ * redirect URL instead of letting the gateway's loopback callback receive it.
+ * Invalidates the flow status key so the hook re-reads the authoritative state
+ * (the server owns the flow and may already have resolved it).
+ */
+export function useMCPAuthComplete(agentId: string, flowId: string) {
+  const queryClient = useQueryClient()
+  const { api } = useAuthContext()
+  return useMutation({
+    mutationFn: (body: { code: string; state?: string }) =>
+      api.mcpAuthComplete(agentId, flowId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: mcpAuthStatusQueryKey(agentId, flowId) })
+    },
+  })
+}
+
+/**
+ * Cancel ONE flow (DELETE → 204). Also invalidates the flow status key: the
+ * authoritative state changes to a terminal one server-side (or the flow is
+ * gone), and the poller must be told to stop from fresh data rather than from
+ * a local guess.
+ */
+export function useMCPAuthCancel(agentId: string, flowId: string) {
+  const queryClient = useQueryClient()
+  const { api } = useAuthContext()
+  return useMutation({
+    mutationFn: () => api.mcpAuthCancel(agentId, flowId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: mcpAuthStatusQueryKey(agentId, flowId) })
+    },
+  })
+}
+
+/**
+ * Forget the stored credential of ONE server (DELETE → 204). Invalidates the
+ * inventory: the row's `auth` report flips back to "required", and the server
+ * reloads the MCP manager for the row to actually lose its session.
+ */
+export function useMCPLogout(agentId: string) {
+  const queryClient = useQueryClient()
+  const { api } = useAuthContext()
+  return useMutation({
+    mutationFn: (name: string) => api.mcpLogout(agentId, name),
+    onSuccess: () => {
+      invalidateAgentMCPInventory(queryClient, agentId)
+    },
   })
 }
