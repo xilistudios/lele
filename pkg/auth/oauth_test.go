@@ -620,24 +620,25 @@ func TestBuildAuthorizeURLUsesExplicitAuthorizeURL(t *testing.T) {
 
 // TestBuildAuthorizeURLLegacyFallback covers hand-built configs that leave
 // AuthorizeURL empty: the endpoint must be derived from the issuer exactly like
-// the pre-refactor code (Google => /auth, everything else => /oauth/authorize).
+// the pre-refactor code (Google => /auth, everything else => /oauth/authorize),
+// with the base parameter set intact and no extra parameters injected.
 func TestBuildAuthorizeURLLegacyFallback(t *testing.T) {
 	pkce := PKCECodes{CodeChallenge: "CHALLENGE"}
 
 	tests := []struct {
-		name   string
-		issuer string
-		prefix string
+		name     string
+		issuer   string
+		endpoint string
 	}{
 		{
-			name:   "google",
-			issuer: "https://accounts.google.com/o/oauth2/v2",
-			prefix: "https://accounts.google.com/o/oauth2/v2/auth?",
+			name:     "google",
+			issuer:   "https://accounts.google.com/o/oauth2/v2",
+			endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
 		},
 		{
-			name:   "openai",
-			issuer: "https://auth.openai.com",
-			prefix: "https://auth.openai.com/oauth/authorize?",
+			name:     "openai",
+			issuer:   "https://auth.openai.com",
+			endpoint: "https://auth.openai.com/oauth/authorize",
 		},
 	}
 
@@ -645,8 +646,34 @@ func TestBuildAuthorizeURLLegacyFallback(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := OAuthProviderConfig{Issuer: tc.issuer, ClientID: "cid", Scopes: "s"}
 			got := buildAuthorizeURL(cfg, pkce, "STATE", "http://localhost:1/auth/callback")
-			if !strings.HasPrefix(got, tc.prefix) {
-				t.Errorf("buildAuthorizeURL = %q, want prefix %q", got, tc.prefix)
+
+			parsed, err := url.Parse(got)
+			if err != nil {
+				t.Fatalf("parsing authorize URL %q: %v", got, err)
+			}
+			if base := parsed.Scheme + "://" + parsed.Host + parsed.Path; base != tc.endpoint {
+				t.Errorf("derived endpoint = %q, want %q", base, tc.endpoint)
+			}
+
+			want := map[string]string{
+				"client_id":             "cid",
+				"code_challenge":        "CHALLENGE",
+				"code_challenge_method": "S256",
+				"redirect_uri":          "http://localhost:1/auth/callback",
+				"response_type":         "code",
+				"scope":                 "s",
+				"state":                 "STATE",
+			}
+			q := parsed.Query()
+			for k, v := range want {
+				if q.Get(k) != v {
+					t.Errorf("query param %q = %q, want %q", k, q.Get(k), v)
+				}
+			}
+			for k := range q {
+				if _, ok := want[k]; !ok {
+					t.Errorf("unexpected query param %q = %q", k, q.Get(k))
+				}
 			}
 		})
 	}
