@@ -181,6 +181,8 @@ function makeCtx(
     enqueueChunk: calls.enqueueChunk,
     clearQueue: calls.clearQueue,
     clearAllQueues: () => {},
+    setStreamMetrics: () => {},
+    clearStreamMetrics: () => {},
     ensureAssistantPlaceholder: calls.ensureAssistantPlaceholder,
     addProcessingSession: calls.addProcessingSession,
     removeProcessingSession: calls.removeProcessingSession,

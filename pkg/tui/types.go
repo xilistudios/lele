@@ -527,8 +527,19 @@ type Model struct {
 	startTime                   time.Time
 	elapsedTime                 time.Duration
 	lastDuration                time.Duration
-	animationTick               int
-	tickPending                 bool // prevents multiple tick chains from accumulating
+	// Stream throughput metrics of the segment currently streaming, parsed from
+	// message.stream metadata (see stream_metrics.go). streamTokPerSec drives
+	// the live "tok/s" readout next to the spinner; lastTokPerSec preserves the
+	// final segment's rate so the status line can keep showing it next to
+	// "Done in Xs" after the turn ends. A turn with no visible stream leaves
+	// these at zero, which is what hides the readout for error/tool-only turns.
+	streamTokens           int
+	streamElapsedMs        int64
+	streamTokPerSec        float64
+	streamMetricsEstimated bool
+	lastTokPerSec          float64
+	animationTick          int
+	tickPending            bool // prevents multiple tick chains from accumulating
 
 	// Double-ESC cancel tracking
 	escPressCount int

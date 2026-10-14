@@ -56,6 +56,8 @@ function createMockContext(
     enqueueChunk: () => {},
     clearQueue: () => {},
     clearAllQueues: () => {},
+    setStreamMetrics: () => {},
+    clearStreamMetrics: () => {},
     ensureAssistantPlaceholder: () => {},
     addProcessingSession: (key: string) => state.processingSessions.add(key),
     removeProcessingSession: (key: string) => state.processingSessions.delete(key),

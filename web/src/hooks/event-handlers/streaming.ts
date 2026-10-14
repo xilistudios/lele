@@ -28,6 +28,7 @@ import {
   chatHistoryQueryKey,
   updateChatHistoryFromRaw,
 } from '../useChatHistory'
+import { parseStreamMetrics } from '../useStreamMetrics'
 import {
   effectiveSessionKey,
   getSessionKey,
@@ -46,6 +47,11 @@ export function handleWelcome(ctx: MessageEventContext, data: Record<string, unk
   if (processing && sessionKey) {
     ctx.addProcessingSession(sessionKey)
   }
+
+  // welcome/reconnected: the backend does NOT re-emit stream metrics for a
+  // restored in-progress turn, so any figure still on screen belongs to a past
+  // stream. Drop it — the chip hides cleanly instead of showing a stale rate.
+  ctx.clearStreamMetrics()
 
   // Capture groups feature flag
   const groupsEnabled = data.groups_enabled as boolean | undefined
@@ -109,6 +115,12 @@ export function handleMessageStream(ctx: MessageEventContext, data: Record<strin
   const sessionKey = effectiveSessionKey(ctx, eventSessionKey)
   const chunk = (data.chunk as string) ?? ''
   const done = (data.done as boolean) ?? false
+
+  // Token-speed metrics for the current segment. Propagated on EVERY chunk
+  // (including the terminal one) so the chip keeps the final figure after the
+  // segment ends; a payload without the fields parses to zeros and is ignored
+  // by the retention policy downstream.
+  ctx.setStreamMetrics(parseStreamMetrics(data))
 
   wsDebug('[WS] message.stream received', {
     messageId: data.message_id,

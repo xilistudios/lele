@@ -98,6 +98,17 @@ type WSStreamPayload struct {
 	SessionKey string `json:"session_key,omitempty"`
 	Chunk      string `json:"chunk"`
 	Done       bool   `json:"done"`
+
+	// Streaming throughput metrics of the current stream segment, mirrored
+	// from the agent's message.stream Metadata (see stream_metrics.go). They
+	// are DELIBERATELY not omitempty: the frontend parses a deterministic
+	// shape and decides on its own whether to hide the indicator (it does
+	// when every metric is 0 and Estimated is false), so a missing key must
+	// mean "producer did not send it", never "value happens to be zero".
+	Tokens    int     `json:"tokens"`
+	ElapsedMS int64   `json:"elapsed_ms"`
+	TokPerSec float64 `json:"tok_per_sec"`
+	Estimated bool    `json:"estimated"`
 }
 
 type WSThinkingPayload struct {

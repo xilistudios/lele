@@ -409,6 +409,12 @@ func (m *Model) renderStatusLine(leftWidth int) string {
 		} else {
 			statusLine = fmt.Sprintf("%s %s", m.getBouncingDots(), i18n.T("tui.processing"))
 		}
+		// Live throughput next to the spinner, e.g. "Processing... · 42.5 tok/s".
+		// Omitted entirely while no valid rate is known (start of the turn, or a
+		// stream-less turn) so the line never reads "0.0 tok/s".
+		if tok := formatTokPerSec(m.streamTokPerSec); tok != "" {
+			statusLine = fmt.Sprintf("%s · %s", statusLine, tok)
+		}
 	} else if !m.isSubagentSession(m.currentKey) && m.hasRunningSubagents() {
 		// Background work: subagents are still running but the parent is idle
 		// and the composer is NOT blocked. Deliberately no spinner and no ESC
@@ -417,6 +423,11 @@ func (m *Model) renderStatusLine(leftWidth int) string {
 		statusLine = fmt.Sprintf(i18n.T("tui.subagentsRunning"), m.subagentsCache.running)
 	} else if m.lastDuration > 0 {
 		statusLine = fmt.Sprintf(i18n.T("tui.doneIn"), m.lastDuration.Seconds())
+		// Final throughput of the last segment, e.g. "● Done in 3.2s · 42.5 tok/s".
+		// Hidden when the finished turn produced no visible stream.
+		if tok := formatTokPerSec(m.lastTokPerSec); tok != "" {
+			statusLine = fmt.Sprintf("%s · %s", statusLine, tok)
+		}
 	} else {
 		statusLine = i18n.T("tui.ready")
 	}

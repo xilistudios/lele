@@ -8,6 +8,7 @@ import {
 } from 'react'
 import { useAppLogic as useAppLogicHook } from '../hooks/useAppLogic'
 import { type SocketStatus, useSocket } from '../hooks/useSocket'
+import type { StreamMetrics } from '../hooks/useStreamMetrics'
 import type { AuthSession, ChatMode, ClientEvent } from '../lib/types'
 import type { ClientCommand } from '../services/ws/events'
 import { useAuthContext } from './AuthContext'
@@ -115,6 +116,25 @@ export const AppLogicContext = createContext<AppLogicContextValue | null>(null)
 // Same reason as above: exported so tests can mount a consumer (or a fake hot
 // value) without the full provider tree.
 export const AppStreamingContext = createContext<AppStreamingContextValue | null>(null)
+
+/**
+ * METRICS context — token-generation speed (tok/s) for the session on screen.
+ *
+ * It lives in its own provider for two reasons:
+ *  1. it changes per STREAM CHUNK, so it must not enter the memoized cold
+ *     `value` (that would re-render every cold consumer on each chunk);
+ *  2. isolating it lets ONLY the tiny `StreamMetricsChip` re-render when the
+ *     rate updates — the composer and the rest of the toolbar stay put.
+ *
+ * The default is `null` (no metrics → chip hidden), so a consumer mounted
+ * without a provider (isolated component tests) renders the empty state instead
+ * of throwing.
+ */
+export const StreamMetricsContext = createContext<StreamMetrics | null>(null)
+
+export function useStreamMetricsContext(): StreamMetrics | null {
+  return useContext(StreamMetricsContext)
+}
 
 export function AppLogicProvider({ children }: { children: ReactNode }) {
   const { api, apiUrl, session, persistSession } = useAuthContext()
@@ -290,7 +310,11 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppLogicContext.Provider value={value}>
-      <AppStreamingContext.Provider value={streamingValue}>{children}</AppStreamingContext.Provider>
+      <AppStreamingContext.Provider value={streamingValue}>
+        <StreamMetricsContext.Provider value={app.streamMetrics}>
+          {children}
+        </StreamMetricsContext.Provider>
+      </AppStreamingContext.Provider>
     </AppLogicContext.Provider>
   )
 }

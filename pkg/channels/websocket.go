@@ -921,12 +921,11 @@ func marshalWithID(event string, data interface{}, id string) json.RawMessage {
 }
 
 func (n *NativeChannel) StreamMessage(sessionKey, messageID, chunk string, done bool) {
-	n.emitNativeEvent(sessionKey, "message.stream", WSStreamPayload{
-		MessageID:  messageID,
-		SessionKey: sessionKey,
-		Chunk:      chunk,
-		Done:       done,
-	}, messageID)
+	// This legacy path carries no throughput metrics, so pass nil: the shared
+	// constructor then serialises the metrics as zeros, exactly like the
+	// hand-built literal it replaces.
+	n.emitNativeEvent(sessionKey, "message.stream",
+		newWSStreamPayload(messageID, sessionKey, chunk, done, nil), messageID)
 }
 
 func (n *NativeChannel) SendToolExecuting(sessionKey, tool, action string) {

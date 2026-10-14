@@ -51,6 +51,8 @@
     "messagePlaceholder": "Mensagem...",
     "sendMessage": "Enviar mensagem",
     "send": "Enviar",
+    "tokensPerSecond": "{{rate}} tok/s",
+    "tokensPerSecondTitle": "Velocidade de geração do modelo",
     "startConversation": "Envie uma mensagem para começar",
     "emptyState": "Inicie uma conversa",
     "scrollUpForMore": "Role para cima para ver mais",
