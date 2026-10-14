@@ -355,6 +355,86 @@ func TestParseAuthPasteSharedTable(t *testing.T) {
 			want: pasteOK,
 			code: "abc",
 		},
+		// -- the `#?` carrier family: a `#` followed by an optional leading `?`
+		//    is a legitimate carrier (an SPA or a gateway redirect writes
+		//    `…#?code=…` in the address bar). `URLSearchParams` silently drops
+		//    ONE leading `?`, so the Go side strips exactly one too; before this
+		//    rule the fragment kept the `?` as part of the FIRST KEY (`?code`),
+		//    which made Go refuse (`no-code`) exactly these pastes while the
+		//    WebUI submitted them. The rows below are the measured divergence,
+		//    row for row.
+		{
+			// The shape that already agreed — because the paste's FIRST `?` sits
+			// inside the fragment, so the query slice is `code=abc` and the
+			// fragment is never consulted. Kept so the agreement stays pinned.
+			name: "hash carrier, single question mark",
+			in:   "http://127.0.0.1:37401/cb#?code=abc",
+			want: pasteOK,
+			code: "abc",
+		},
+		{
+			name: "hash carrier after an unrelated query",
+			in:   "http://127.0.0.1:37401/cb?state=1#?code=abc",
+			want: pasteOK,
+			code: "abc",
+		},
+		{
+			name: "bare query then a hash carrier",
+			in:   "?a=1#?code=abc",
+			want: pasteOK,
+			code: "abc",
+		},
+		{
+			name:  "hash carrier carrying a state",
+			in:    "http://127.0.0.1:37401/cb?a=1#?code=abc&state=s",
+			want:  pasteOK,
+			code:  "abc",
+			state: "s",
+		},
+		{
+			name:       "hash carrier with a refusal",
+			in:         "http://127.0.0.1:37401/cb?a=1#?error=access_denied",
+			want:       pasteDenied,
+			deniedCode: "access_denied",
+		},
+		{
+			// Exactly ONE `?` is stripped, never all of them: the fragment's
+			// first key is then the literal `?code`, not `code`, which is the
+			// same key `URLSearchParams` reports for the same bytes — so both
+			// surfaces refuse this paste.
+			name: "hash carrier, two question marks",
+			in:   "?a=1#??code=abc",
+			want: pasteNoCode,
+		},
+		{
+			// The `?`-prefix family, one level up from the fragment fix: the
+			// QUERY slice for `??code=abc` is `?code=abc`, and exactly ONE
+			// leading `?` is stripped from the chosen substring (query or
+			// fragment), so the first key is `code` — as URLSearchParams/WebUI
+			// reports for the same bytes. Before this rule Go kept `?code` as
+			// the first key and refused the paste with no-code.
+			name: "bare query, two question marks",
+			in:   "??code=abc",
+			want: pasteOK,
+			code: "abc",
+		},
+		{
+			// The same rule reached through the fragment slice (`??code=abc`):
+			// the query slice stumbles on its own `?code`, the fragment strips
+			// its one `?` and answers. Both surfaces agree.
+			name: "hash carrier, two question marks inside the carrier",
+			in:   "http://127.0.0.1:37401/cb#??code=abc",
+			want: pasteOK,
+			code: "abc",
+		},
+		{
+			// Non-vacuity control: only ONE `?` is stripped, never a loop.
+			// After the strip the first key is the literal `?code`, exactly
+			// what URLSearchParams reports — so both surfaces refuse.
+			name: "bare query, three question marks",
+			in:   "???code=abc",
+			want: pasteNoCode,
+		},
 		{
 			name:       "error wins over code",
 			in:         "http://127.0.0.1:37401/cb?error=access_denied&code=abc",
@@ -452,6 +532,18 @@ func TestParseAuthPasteEscapePreCheck(t *testing.T) {
 		{"high-bit escape, mixed case", "?code=abc%8a", pasteUnrecognized, "", ""},
 		{"high-bit escape in the state", "?code=abc&state=%C3%A9", pasteUnrecognized, "", ""},
 		{"high-bit escape in the CHOSEN fragment", "?state=xyz#code=%C3%A9", pasteUnrecognized, "", ""},
+		{
+			// A `#?` carrier is CHOSEN as the fragment (the query carries
+			// neither code nor error), so the pre-check scans it there and
+			// refuses the high-bit escape. NOTE: this row does NOT pin the
+			// one-leading-`?` strip — a leading `?` adds no refused byte, so the
+			// outcome is identical with the strip reverted. The strip itself is
+			// pinned, discriminatingly, by the `?`-prefix rows in
+			// TestParseAuthPasteSharedTable.
+			name: "high-bit escape in the CHOSEN hash carrier",
+			in:   "?state=xyz#?code=%C3%A9",
+			want: pasteUnrecognized,
+		},
 		// A literal `;` anywhere in the chosen substring.
 		{"semicolon in the code value", "?code=a;b", pasteUnrecognized, "", ""},
 		{"semicolon as a separator", "?code=abc;state=xyz", pasteUnrecognized, "", ""},

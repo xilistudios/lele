@@ -165,6 +165,57 @@ const GRAMMAR_TABLE: Array<[string, MCPAuthPaste, string]> = [
     ok('abc'),
     'ok (query has no code/error, so the fragment answers)',
   ],
+  // -- the `#?` carrier family: a `#` followed by an optional leading `?` is a
+  //    legitimate carrier (an SPA or a gateway redirect writes `…#?code=…` in
+  //    the address bar). `URLSearchParams` silently drops ONE leading `?`, and
+  //    the Go side strips exactly one too, so `…#?code=abc` is accepted by both
+  //    surfaces. Before that rule Go kept the `?` as part of the FIRST KEY
+  //    (`?code`) and refused exactly these pastes. The rows below are that
+  //    measured divergence, row for row, in the Go table's order.
+  [
+    'http://127.0.0.1:37401/cb#?code=abc',
+    ok('abc'),
+    'ok (the already-agreeing hash carrier: the query slice is already `code=abc`)',
+  ],
+  [
+    'http://127.0.0.1:37401/cb?state=1#?code=abc',
+    ok('abc'),
+    'ok (hash carrier after an unrelated query)',
+  ],
+  ['?a=1#?code=abc', ok('abc'), 'ok (bare query then a hash carrier)'],
+  [
+    'http://127.0.0.1:37401/cb?a=1#?code=abc&state=s',
+    okState('abc', 's'),
+    'ok (hash carrier carrying a state)',
+  ],
+  [
+    'http://127.0.0.1:37401/cb?a=1#?error=access_denied',
+    { kind: 'denied', error: 'access_denied' },
+    'denied (hash carrier with a refusal)',
+  ],
+  [
+    '?a=1#??code=abc',
+    invalid,
+    'no-code (exactly ONE `?` is stripped, never all of them: the first key is the literal `?code`)',
+  ],
+  // -- the `?`-prefix family at the QUERY level, one step up from the `#?`
+  //    carrier above: `??code=abc` leaves the query slice `?code=abc`, and
+  //    `URLSearchParams` strips ONE leading `?` itself, so the first key is
+  //    `code` and both surfaces submit `abc`. The Go side was taught the same
+  //    strip; `???code=abc` is the non-vacuity control (only ONE `?` is
+  //    stripped, never a loop, so the first key stays the literal `?code` and
+  //    both refuse). Same rows as the Go table, same order.
+  ['??code=abc', ok('abc'), 'ok (one leading `?` is stripped by both surfaces)'],
+  [
+    'http://127.0.0.1:37401/cb#??code=abc',
+    ok('abc'),
+    'ok (the same strip, reached through the fragment carrier)',
+  ],
+  [
+    '???code=abc',
+    invalid,
+    'no-code (exactly ONE `?` is stripped: the first key is the literal `?code`)',
+  ],
   [
     'http://127.0.0.1:37401/cb?error=access_denied&code=abc',
     { kind: 'denied', error: 'access_denied' },
@@ -186,7 +237,7 @@ describe('parseMCPAuthPaste — the frozen shared example table', () => {
 
   test('the table is the whole grammar: every row is exercised', () => {
     // Guards against a future edit that drops rows instead of fixing them.
-    expect(GRAMMAR_TABLE).toHaveLength(46)
+    expect(GRAMMAR_TABLE).toHaveLength(55)
   })
 })
 
@@ -419,6 +470,10 @@ describe('parseMCPAuthPaste — the parameter-substring scan', () => {
     expect(parseMCPAuthPaste('http://127.0.0.1:1/cb?state=x#code=%zz')).toEqual(invalid)
     expect(parseMCPAuthPaste('http://127.0.0.1:1/cb#code=%zz')).toEqual(invalid)
     expect(parseMCPAuthPaste('http://127.0.0.1:1/cb#code=a;b')).toEqual(invalid)
+    // the `#?` carrier is scanned as the chosen fragment too, after the one
+    // leading `?` is stripped (the pre-check runs on the substring about to be
+    // decoded, in both surfaces).
+    expect(parseMCPAuthPaste('http://127.0.0.1:1/cb?state=x#?code=%zz')).toEqual(invalid)
     // ...and a clean query plus a clean chosen fragment still resolves.
     expect(parseMCPAuthPaste('http://127.0.0.1:1/cb?state=x#code=abc')).toEqual(ok('abc'))
   })

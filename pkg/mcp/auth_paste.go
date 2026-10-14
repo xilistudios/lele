@@ -335,6 +335,10 @@ func authPasteParams(s string) (url.Values, bool) {
 	if i := strings.IndexByte(query, '#'); i >= 0 {
 		query = query[:i]
 	}
+	// Exactly ONE leading `?` is stripped from the CHOSEN substring — query or
+	// fragment — as URLSearchParams/WebUI does, so both surfaces agree for the
+	// whole `?`-prefix family; `???…` still refuses because only one is stripped.
+	query = strings.TrimPrefix(query, "?")
 	if authPasteBytesRefused(query) {
 		return nil, false
 	}
@@ -348,7 +352,9 @@ func authPasteParams(s string) (url.Values, bool) {
 	// only checked when it is about to be USED — the pre-check is a property of
 	// the chosen substring, and an unused fragment is never decoded.
 	if i := strings.IndexByte(s, '#'); i >= 0 && i+1 < len(s) {
-		fragment := s[i+1:]
+		// Same rule as the query above: strip exactly ONE leading `?` from the
+		// chosen substring (URLSearchParams/WebUI does too).
+		fragment := strings.TrimPrefix(s[i+1:], "?")
 		if authPasteBytesRefused(fragment) {
 			return nil, false
 		}

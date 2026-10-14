@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -351,6 +353,77 @@ func TestStartAuthKeepsTheCredentialOfAnAbandonedFlow(t *testing.T) {
 	}
 	if got := f.store.Revision("srv"); got != before {
 		t.Fatalf("an abandoned flow changed the revision (%d → %d)", before, got)
+	}
+}
+
+// TestStartAuthDoesNotCarryCredentialAcrossResourceURL pins the URL-mismatch
+// branch of the credential carry-over in StartAuth. The registration write
+// carries the existing token over only when the stored record belongs to the
+// SAME resource URL (`current.URL == srv.URL`); a record bound to another URL is
+// a different server's credential and is not ours to keep.
+//
+// Before this test existed, a reviewer proved that DELETING the
+// `&& current.URL == srv.URL` clause left every ./pkg/mcp/... and
+// ./pkg/channels/... suite green: the branch was correct but unpinned. THIS test
+// is that pin — it fails as soon as the clause goes, which is why the old
+// "every suite green" claim no longer holds. It seeds an AUTHENTICATED record
+// for (name, urlA) and starts a flow for the SAME name at urlB: the flow's
+// by-name registration write must NOT drag urlA's token onto urlB.
+func TestStartAuthDoesNotCarryCredentialAcrossResourceURL(t *testing.T) {
+	f := newAuthFixture(t)
+	ctx := context.Background()
+
+	// An independent authorization server + resource, so urlB is a real,
+	// auth-required URL the flow can dial (a different PATH on f's server would
+	// not be the protected resource).
+	asB := authtest.New()
+	asrvB := httptest.NewServer(asB.Handler())
+	t.Cleanup(asrvB.Close)
+	asB.SetIssuer(asrvB.URL)
+	urlA := f.mcpURL
+	urlB := asrvB.URL + authtest.DefaultResourcePath
+	if urlA == urlB {
+		t.Fatal("the two resource URLs must differ for this test to mean anything")
+	}
+
+	if err := f.store.Save("srv", AuthRecord{
+		URL:          urlA,
+		ClientID:     "client-for-a",
+		RedirectURI:  "http://127.0.0.1:1/callback",
+		AuthRequired: true,
+		Token: &transport.Token{
+			AccessToken: "token-bound-to-a",
+			TokenType:   "Bearer",
+			ExpiresAt:   time.Now().Add(time.Hour),
+		},
+	}); err != nil {
+		t.Fatalf("seed store: %v", err)
+	}
+	if !f.store.Authenticated("srv", urlA) {
+		t.Fatal("seed token for urlA is not usable")
+	}
+
+	flow, err := StartAuth(ctx, "srv", ServerConfig{URL: urlB, Type: typeHTTP, Auth: &AuthSpec{Type: typeAuthOAuth}}, f.store, AuthOptions{})
+	if err != nil {
+		t.Fatalf("StartAuth for urlB: %v", err)
+	}
+	defer flow.Cancel()
+
+	// The record now belongs to urlB (the flow rewrites it by name) and must NOT
+	// have inherited urlA's token. Authenticated(name, urlB) is exactly the
+	// predicate that flips when the URL clause is removed.
+	if f.store.Authenticated("srv", urlB) {
+		t.Fatal("StartAuth carried a token bound to another resource URL over to urlB")
+	}
+	rec, ok := f.store.Record("srv")
+	if !ok {
+		t.Fatal("no record for srv after StartAuth")
+	}
+	if rec.URL != urlB {
+		t.Fatalf("record URL = %q, want the flow's %q", rec.URL, urlB)
+	}
+	if rec.Token != nil {
+		t.Fatalf("StartAuth stored another resource's token: %s", redactedRecord(rec))
 	}
 }
 
@@ -785,10 +858,13 @@ func TestNoSecretsInFlowErrors(t *testing.T) {
 	collect(flowB.Wait(wctx))
 
 	// Flow C: a HOSTILE authorization server redirects the browser with a
-	// canaried error_description. The loopback parses the callback's error
-	// code but must never read, keep or surface the description (mutation M11 —
-	// the loopback echoing error_description — leaves the suite green as long
-	// as nothing ever drives a description through the callback).
+	// canaried error_description. What a flow-level canary CAN prove is the
+	// reduction step: valueFreeError replaces the canaried AS body/code before
+	// the error reaches the caller, so the description cannot survive into a
+	// collected error. It does NOT pin the loopback itself: run() launders
+	// whatever the callback returned, so a loopback that echoed
+	// error_description (mutation M11) leaves THIS test green — that property
+	// is pinned at the loopback by TestLoopbackNeverSurfacesErrorDescription.
 	flowC, err := StartAuth(ctx, "srv-c", ServerConfig{URL: mcpURL, Auth: &AuthSpec{Type: typeAuthOAuth}}, store, AuthOptions{})
 	if err != nil {
 		t.Fatalf("StartAuth C: %v", err)
@@ -1050,6 +1126,14 @@ func TestStartAuthRejectsRelativeRedirectURI(t *testing.T) {
 		"https:///cb",
 		"://nope",
 		"urn:ietf:wg:oauth:2.0:oob",
+		// The two dangerous shapes: a script-scheme URI the AS must never be
+		// handed, and a scheme-relative URL (no scheme) that would resolve
+		// against the AS's own host.
+		"javascript:alert(1)",
+		"//evil.example/cb",
+		// No host: a scheme with nothing to redirect to, and a bare fragment.
+		"http://",
+		"https://#frag",
 	} {
 		_, err := StartAuth(ctx, "srv", f.serverConfig(), f.store, AuthOptions{RedirectURI: bad})
 		if !errors.Is(err, errAuthBadRedirectURI) {
@@ -1136,6 +1220,120 @@ func TestLoopbackServesOnlyGetAndPostOnTheCallbackPath(t *testing.T) {
 	if _, _, err := lb.Await(context.Background()); !errors.Is(err, errAuthNoCallbackCode) {
 		t.Fatalf("Await after a code-less callback = %v, want %v", err, errAuthNoCallbackCode)
 	}
+}
+
+// TestLoopbackAcceptsFormPostCallbackBody pins the form_post half of the same
+// contract the test above covers for GET: the handler's doc says GET (the
+// ordinary redirect) and POST (response_mode=form_post) are accepted, and a
+// POSTing authorization server puts code/state in the urlencoded BODY, not the
+// query string. Reading only r.URL.Query() would answer 400 "authorization
+// callback carried no code" and the login could never complete — so this test
+// drives a real PostForm and demands the exact code and state back through
+// Await. It is the falsifier for the r.Form-vs-r.URL.Query() read.
+func TestLoopbackAcceptsFormPostCallbackBody(t *testing.T) {
+	lb, err := startLoopback("http://127.0.0.1:0/callback", nil)
+	if err != nil {
+		t.Fatalf("startLoopback: %v", err)
+	}
+	defer lb.Close()
+
+	const (
+		code  = "form-post-code"
+		state = "form-post-state"
+	)
+	// PostForm sends Content-Type: application/x-www-form-urlencoded and puts
+	// code/state in the BODY, i.e. nowhere the query string can see.
+	resp, err := http.PostForm(lb.RedirectURI(), url.Values{"code": {code}, "state": {state}})
+	if err != nil {
+		t.Fatalf("POST callback: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST callback status = %d, want 200", resp.StatusCode)
+	}
+	gotCode, gotState, aerr := lb.Await(context.Background())
+	if aerr != nil {
+		t.Fatalf("Await after the form_post callback = %v, want no error", aerr)
+	}
+	if gotCode != code || gotState != state {
+		t.Fatalf("Await = (%q, %q), want (%q, %q)", gotCode, gotState, code, state)
+	}
+}
+
+// TestLoopbackBoundsTheCallbackBody pins the 64 KiB cap the form_post path puts
+// on a callback body. The handler reads r.Form, and ParseForm's own default
+// would let a single unauthenticated localhost POST allocate up to 10 MiB
+// before any code was looked at. An oversized body must therefore NOT be
+// honoured: the exchange still refuses with a value-free 'no code', exactly as
+// before the cap existed. A body comfortably under the cap must still complete,
+// so the bound is proved to be a bound and not a blanket refusal.
+func TestLoopbackBoundsTheCallbackBody(t *testing.T) {
+	// The request body is written by a big reader; the server can answer (and
+	// close) before it is drained, so a transport error is tolerated here — it
+	// is the DELIVERED result, not the HTTP status, that decides the test.
+	post := func(t *testing.T, lb *loopbackServer, body string) *http.Response {
+		t.Helper()
+		resp, err := http.Post(lb.RedirectURI(), "application/x-www-form-urlencoded", strings.NewReader(body))
+		if err != nil {
+			return nil
+		}
+		return resp
+	}
+
+	t.Run("oversized body is refused", func(t *testing.T) {
+		lb, err := startLoopback("http://127.0.0.1:0/callback", nil)
+		if err != nil {
+			t.Fatalf("startLoopback: %v", err)
+		}
+		defer lb.Close()
+
+		// 1 MiB of urlencoded form data carrying a VALID code: the cap has to
+		// win over the code, which is the whole point. Well under ParseForm's
+		// old 10 MiB default, so only the new cap can refuse it.
+		body := "code=oversized-code&state=s&padding=" + strings.Repeat("x", 1<<20)
+		if resp := post(t, lb, body); resp != nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("oversized callback status = %d, want 400", resp.StatusCode)
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		code, _, aerr := lb.Await(ctx)
+		if aerr == nil || code != "" {
+			t.Fatalf("oversized callback = (%q, %v), want no code and a refusal", code, aerr)
+		}
+	})
+
+	t.Run("body just under the cap still works", func(t *testing.T) {
+		lb, err := startLoopback("http://127.0.0.1:0/callback", nil)
+		if err != nil {
+			t.Fatalf("startLoopback: %v", err)
+		}
+		defer lb.Close()
+
+		const code = "under-cap-code"
+		body := "code=" + code + "&state=s&padding=" + strings.Repeat("x", 60000)
+		if len(body) >= 64<<10 {
+			t.Fatalf("test body is %d bytes, want it under the %d-byte cap", len(body), 64<<10)
+		}
+		resp := post(t, lb, body)
+		if resp == nil {
+			t.Fatal("under-cap callback: transport error although the body fits the cap")
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("under-cap callback status = %d, want 200", resp.StatusCode)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		gotCode, gotState, aerr := lb.Await(ctx)
+		if aerr != nil || gotCode != code || gotState != "s" {
+			t.Fatalf("under-cap callback = (%q, %q, %v), want (%q, %q, nil)", gotCode, gotState, aerr, code, "s")
+		}
+	})
 }
 
 // TestLoopbackNeverSurfacesErrorDescription is the finding-F7/F8 guard at the
@@ -1256,21 +1454,144 @@ func TestPackageDoesNotImportAuth(t *testing.T) {
 // helpers
 // ---------------------------------------------------------------------------
 
-// redactTokenRequests renders token observations for a failure message with the
-// two credential-bearing fields replaced: a code verifier and a client secret
-// are secrets, and a failing test must not print them into CI logs.
+// tokenCredentialKeys is the denylist of token-endpoint parameter names whose
+// VALUES are credentials, so a failure message may name the key but must never
+// print what it carried: code_verifier is the PKCE secret, client_secret the
+// confidential-client secret, code and refresh_token are single-use bearer
+// material, and assertion/client_assertion are signed client assertions.
+//
+// `code` IS redacted, and that is the policy shared with the fake's own
+// redaction helpers (pkg/mcp/authtest's secretFormKeys): an authorization code
+// is single-use bearer material — while it lives it can be exchanged for a
+// token, exactly like the refresh token beside it — and a name is enough to
+// make a failure message useful. The two denylists must not disagree about it.
+var tokenCredentialKeys = map[string]bool{
+	"code_verifier":    true,
+	"client_secret":    true,
+	"code":             true,
+	"refresh_token":    true,
+	"assertion":        true,
+	"client_assertion": true,
+}
+
+// redactTokenRequests renders token observations for a failure message with
+// every credential replaced by "[redacted]".
+//
+// Blanking the credential FIELDS alone is not enough: authtest.TokenRequest
+// also mirrors the parsed form into Raw, which holds the SAME secrets under
+// their wire keys (code_verifier, client_secret, code, ...), so a helper that
+// only touched the fields still printed a live PKCE verifier and client secret
+// into CI logs. Both are covered here; the Raw map is copied, never mutated,
+// and a nil Raw is fine. Non-credential keys (grant_type, scope, redirect_uri,
+// ...) stay readable, which is what keeps the message useful for debugging.
 func redactTokenRequests(reqs []authtest.TokenRequest) string {
 	out := make([]authtest.TokenRequest, len(reqs))
 	for i, r := range reqs {
+		if r.Code != "" {
+			r.Code = "[redacted]"
+		}
 		if r.CodeVerifier != "" {
 			r.CodeVerifier = "[redacted]"
 		}
 		if r.ClientSecret != "" {
 			r.ClientSecret = "[redacted]"
 		}
+		if r.RefreshToken != "" {
+			r.RefreshToken = "[redacted]"
+		}
+		if r.Raw != nil {
+			raw := make(url.Values, len(r.Raw))
+			for k, v := range r.Raw {
+				if tokenCredentialKeys[k] {
+					raw[k] = []string{"[redacted]"}
+					continue
+				}
+				raw[k] = v
+			}
+			r.Raw = raw
+		}
 		out[i] = r
 	}
 	return fmt.Sprintf("%+v", out)
+}
+
+// TestRedactTokenRequestsHidesCredentials guards redactTokenRequests against a
+// regression it already had: blanking the observed FIELDS is not enough because
+// authtest.TokenRequest also mirrors the parsed form into Raw, where the very
+// same secrets sit under their wire keys (code_verifier, client_secret, ...).
+//
+// The verifier and the client secret asserted on below are the values the REAL
+// flow produced against the fake AS (the client secret comes from dynamic
+// client registration), not hand-made strings, so a helper that leaks anything
+// the engine really sent fails here. A non-secret key (grant_type) must stay
+// legible: the redaction has to keep the message useful for debugging.
+//
+// NO LIVE CREDENTIAL IS EVER PRINTED BY THIS TEST, on success or on failure:
+// the verifier and the secret appear only as lengths, a short hash and a
+// yes/no, and the failure messages name the field, never its value. That is the
+// whole point — a redaction test that logs the very secret it protects would
+// leak it into CI logs exactly when it is -v or failing.
+func TestRedactTokenRequestsHidesCredentials(t *testing.T) {
+	const clientSecret = "real-client-secret-from-dcr"
+	f := newAuthFixture(t)
+	f.as.SetClientSecretSecret(clientSecret)
+	ctx := context.Background()
+
+	flow, err := StartAuth(ctx, "srv", f.serverConfig(), f.store, AuthOptions{})
+	if err != nil {
+		t.Fatalf("StartAuth: %v", err)
+	}
+	defer flow.Cancel()
+	completeLoopback(t, f.noRedirect, flow)
+	if err := flow.Wait(ctx); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+
+	tokens := f.as.TokenRequests()
+	if len(tokens) == 0 {
+		t.Fatal("no token requests observed, the test would be vacuous")
+	}
+	verifier := tokens[0].CodeVerifier
+	if verifier == "" {
+		t.Fatal("token request carried no code_verifier")
+	}
+	if got := tokens[0].ClientSecret; got != clientSecret {
+		// Lengths only: the mismatch is diagnosable without echoing either
+		// secret into the log.
+		t.Fatalf("token request client_secret mismatch (len got %d, want %d)", len(got), len(clientSecret))
+	}
+	// The secrets are ALSO in Raw under their wire keys: that is the map the
+	// helper used to print verbatim.
+	for key, want := range map[string]string{"code_verifier": verifier, "client_secret": clientSecret} {
+		if got := tokens[0].Raw.Get(key); got != want {
+			t.Fatalf("Raw[%s] does not carry the field value (len got %d, want %d)", key, len(got), len(want))
+		}
+	}
+
+	got := redactTokenRequests(tokens)
+	// Non-secret evidence only: lengths plus a short hash, so the assertion
+	// below stays identifiable without the value ever reaching the log. `got`
+	// itself is deliberately NOT logged or echoed in a failure message: when the
+	// helper regresses it is exactly where the live credentials reappear, so
+	// printing it would leak them at the very moment the test is failing.
+	t.Logf("real credentials: code_verifier(len=%d sha256=%s) client_secret(len=%d sha256=%s)",
+		len(verifier), shortHash(verifier), len(clientSecret), shortHash(clientSecret))
+	for name, secret := range map[string]string{"code_verifier": verifier, "client_secret": clientSecret} {
+		if strings.Contains(got, secret) {
+			// Name the field, never the value it carried, and never `got`.
+			t.Errorf("redacted output still contains the real %s", name)
+		}
+	}
+	if !strings.Contains(got, "grant_type") || !strings.Contains(got, "authorization_code") {
+		t.Errorf("redacted output dropped the diagnostic grant_type")
+	}
+}
+
+// shortHash is a short, non-reversible fingerprint of a value, so a test can
+// keep a failure log identifiable WITHOUT ever printing the value itself.
+func shortHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:4])
 }
 
 // redactedRecord renders a stored record for a failure message without any

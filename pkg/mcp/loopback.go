@@ -125,6 +125,8 @@ func startLoopback(redirectURI string, listen listenFunc) (*loopbackServer, erro
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
+		// Bound the idle keep-alive a stuck browser could otherwise hold open.
+		IdleTimeout: 30 * time.Second,
 	}
 	go func() { _ = l.srv.Serve(ln) }()
 	return l, nil
@@ -146,7 +148,22 @@ func (l *loopbackServer) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	q := r.URL.Query()
+	// `r.Form` (not `r.URL.Query()`) is what makes the advertised form_post
+	// work: ParseForm merges the URL query with an urlencoded request body, so
+	// a callback the authorization server sends as a POST body
+	// (response_mode=form_post) exposes code/state/error exactly like the
+	// ordinary GET redirect. For a GET only the query exists, so this changes
+	// nothing there.
+	//
+	// The body is capped at 64 KiB first because ParseForm's own 10 MiB default
+	// would let one unauthenticated localhost POST allocate tens of MiB, and a
+	// callback body is a mere few hundred bytes. The ParseForm error stays
+	// ignored on purpose: a GET whose query keeps failing must fall through to
+	// the same value-free "no code" refusal as today, not hang the flow with an
+	// early return.
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	_ = r.ParseForm()
+	q := r.Form
 	// `error_description` is intentionally NOT read. It is attacker-controlled
 	// prose (the authorization server may echo back whatever it was sent) and
 	// the flow has no use for it: only the code in `error` is ever reported,
