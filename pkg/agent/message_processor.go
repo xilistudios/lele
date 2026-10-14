@@ -695,23 +695,13 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 
 	}
 
-	// Check if subagent result was already consumed via wait_for_subagent.
-	isSubagent := msg.SenderID == "subagent"
-	if isSubagent {
-		if msg.Metadata != nil {
-			if taskID := msg.Metadata["task_id"]; taskID != "" {
-				if task, ok := mp.al.toolCoordinator.getSubagentTask(taskID); ok && task != nil && task.Delivered() {
-					logger.DebugCF("agent", "Skipping subagent system message - already delivered via wait_for_subagent",
-						map[string]interface{}{
-							"task_id":     taskID,
-							"session_key": sessionKey,
-						})
-					return "", nil
-				}
-			}
-		}
-	}
-
+	// A subagent result is a normal turn as far as the transcript is concerned:
+	// it is persisted as a user message ("[System: subagent] …"), so the NEXT
+	// turn's request still carries it and compaction/eviction can see it. Role
+	// "system" is deliberately not used — mid-history system messages are only
+	// special-cased by the CLI-style providers and are not a supported shape for
+	// the wire providers. SkipUserMessage used to be set here for subagent
+	// senders, which made the resume invisible one turn later.
 	return mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
 		SessionKey:      sessionKey,
 		Channel:         originChannel,
@@ -721,7 +711,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		EnableSummary:   true,
 		SendResponse:    true,
 		MessageID:       msg.Metadata["message_id"],
-		SkipUserMessage: isSubagent,
+		SkipUserMessage: false,
 	})
 }
 

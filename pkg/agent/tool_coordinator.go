@@ -38,13 +38,16 @@ type toolCoordinator interface {
 	// the old blanket cancelAll, which killed every subagent in the process.
 	cancelRemovedSubagents(liveAgentIDs []string) int
 	cancelSession(sessionKey string)
-	markSessionSubagentsDelivered(sessionKey string)
 	listRunningSubagentTasks() []*tools.SubagentTask
 	// snapshotRunningSubagents filters listRunningSubagentTasks down to the
 	// tasks owned by a session (alias-aware), for the resume checkpoint.
 	snapshotRunningSubagents(sessionKey string) []*tools.SubagentTask
 	getSubagentTask(taskID string) (*tools.SubagentTask, bool)
-	markSubagentDelivered(taskID string) bool
+	// claimSubagentResultForInjection is the injector's single atomic decision
+	// point: it claims the task's result for the parent's LLM context, or
+	// reports that another party (a wait_for_subagent waiter, or an earlier
+	// claim) owns it.
+	claimSubagentResultForInjection(taskID string) bool
 	stopSubagentTask(taskID string) bool
 	continueSubagentTask(ctx context.Context, sessionKey, taskID, guidance string) (string, error)
 	GetStartupInfo() map[string]interface{}
@@ -172,7 +175,8 @@ func (tc *toolCoordinatorImpl) sessionCancellationKeys(sessionKey string) []stri
 	return keys
 }
 
-// stopSessionSubagents stops running subagents for a specific session.
+// stopSessionSubagents stops running subagents for a specific session and
+// seals every task it owns so none of them can resume the parent.
 // A task belongs to the session when its spawn-time runtime key, its
 // routing-derived origin key, or its child session key is related to any of
 // the session's identities (see tools.TaskBelongsToSession). This replaces
@@ -189,6 +193,21 @@ func (tc *toolCoordinatorImpl) stopSessionSubagents(sessionKey string) int {
 					if manager.StopTask(task.ID) {
 						totalStopped++
 					}
+					// A stopped task must never resume the parent: its
+					// completion callback still fires with "Task cancelled
+					// during execution" (subagent_runner.go), and injecting
+					// that would resurrect the session the user just stopped.
+					// Seal EVERY owned task, not only the ones StopTask
+					// actually stopped — a task still in `pending` (waiting on
+					// dependencies), one that already finished but whose
+					// completion callback has not run yet, or one whose
+					// StopTask lost a race must not inject either.
+					//
+					// This lives here, in the shared leaf all three stop entry
+					// points funnel through (the /stop command, /stop as an
+					// inbound message, and StopAgent from the TUI's ESC key /
+					// the REST stop endpoint), so they cannot disagree.
+					manager.SealResult(task.ID)
 				}
 			}
 		}
@@ -290,26 +309,6 @@ func (tc *toolCoordinatorImpl) cancelSession(sessionKey string) {
 	tc.al.cancelSession(sessionKey)
 }
 
-// markSessionSubagentsDelivered marks all finished/terminal subagents for a specific session as delivered.
-// It uses the same ownership matcher as stopSessionSubagents so that a task
-// is never left "undelivered" under one key form while being stopped under
-// another (issue #230).
-func (tc *toolCoordinatorImpl) markSessionSubagentsDelivered(sessionKey string) {
-	keys := tc.sessionCancellationKeys(sessionKey)
-	for _, manager := range tc.subagents {
-		if manager != nil {
-			for _, task := range manager.ListTasks() {
-				if tools.TaskBelongsToSession(task, keys) {
-					// Check if task status is terminal/finished (not running)
-					if task.Status != tools.SubagentStatusRunning {
-						manager.MarkDelivered(task.ID)
-					}
-				}
-			}
-		}
-	}
-}
-
 // listRunningSubagentTasks lists all running subagent tasks.
 func (tc *toolCoordinatorImpl) listRunningSubagentTasks() []*tools.SubagentTask {
 	tasks := make([]*tools.SubagentTask, 0)
@@ -333,12 +332,17 @@ func (tc *toolCoordinatorImpl) getSubagentTask(taskID string) (*tools.SubagentTa
 	return nil, false
 }
 
-// markSubagentDelivered marks a task as delivered in the manager that owns it.
-// Returns true if the task was already delivered (race lost), false if first delivery.
-func (tc *toolCoordinatorImpl) markSubagentDelivered(taskID string) bool {
+// claimSubagentResultForInjection claims a task's terminal result for the
+// parent's LLM context so it can be injected as a system inbound message.
+//
+// Returns false when another party already owns the result: a wait_for_subagent
+// waiter is registered (the parent will read the result in-turn, so injecting
+// would double-report it), the result was already claimed, or no manager knows
+// the task (with no task there is no dedup, so injecting would be unguarded).
+func (tc *toolCoordinatorImpl) claimSubagentResultForInjection(taskID string) bool {
 	for _, manager := range tc.subagents {
 		if _, ok := manager.GetTask(taskID); ok {
-			return manager.MarkDelivered(taskID)
+			return manager.ClaimResultForInjection(taskID)
 		}
 	}
 	return false // Task not found in any manager

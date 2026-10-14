@@ -314,9 +314,24 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		if guardMsg != "" {
 			// Si está en modo aprobación y el comando es bloqueable (requiere aprobación)
 			if t.approvalMode && isBlockable {
-				// Retornar resultado especial indicando que se necesita aprobación
+				// Retornar resultado especial indicando que se necesita aprobación.
+				//
+				// The ForLLM wording is deliberately terminal and actionable:
+				// the interactive parent path intercepts on ApprovalRequired
+				// BEFORE reading ForLLM (pkg/agent/tool_executor.go), but a
+				// subagent executes through RunToolLoop, which ignores
+				// ApprovalRequired and feeds ForLLM straight to the model.
+				// A "requires user approval" phrasing reads like a transient
+				// state there, so the model retries until the task times out.
 				return &ToolResult{
-					ForLLM:  fmt.Sprintf("Command '%s' requires user approval. Reason: %s", command, guardMsg),
+					ForLLM: fmt.Sprintf(
+						"Command '%s' was NOT executed: it is blocked by an approval guard (%s) "+
+							"and this session has no interactive approver. Do not retry it or "+
+							"rephrase it — the guard is not a transient state. Either accomplish "+
+							"the goal without this command, or finish with STATUS: not_done and "+
+							"explain in DETAILS that the task needs a command the operator must "+
+							"run manually.",
+						command, guardMsg),
 					ForUser: "",
 					IsError: false,
 					ApprovalRequired: &ApprovalInfo{

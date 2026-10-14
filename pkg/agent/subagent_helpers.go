@@ -47,29 +47,43 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID, task
 	if result.Metadata != nil {
 		metadata["subagent_session_key"] = result.Metadata["subagent_session_key"]
 	}
-	// Mark the task as delivered before queueing the inbound message. This
-	// ensures that when the parent agent processes the inbound message, the
-	// existing Delivered() check in processSystemMessage will skip it,
-	// preventing the double-report of subagent results.
-	if al.toolCoordinator != nil {
-		al.toolCoordinator.markSubagentDelivered(taskID)
+
+	// The claim decides exactly one thing: whether this result is injected as a
+	// system inbound message, which is what resumes the parent's turn. It is
+	// taken BEFORE the publish so "claim" and "inject" are a single
+	// winner-takes-all step — claiming after would let a duplicate callback for
+	// the same task publish twice before either claimed.
+	//
+	// It does NOT gate the subagent.result event below. That event is what
+	// tells the clients the task is over (the TUI deletes its progress row on
+	// it, the WebUI patches its spawn card and invalidates the subagents cache),
+	// so suppressing it — as the previous `if !isSessionProcessing(sessionKey)`
+	// gate did — leaves both showing a finished task as still running.
+	resumed := al.toolCoordinator != nil &&
+		al.toolCoordinator.claimSubagentResultForInjection(taskID)
+	if resumed {
+		metadata["resumed"] = "true"
+	} else {
+		metadata["resumed"] = "false"
 	}
 
-	// Notify interactive clients before queueing the system message that will
-	// make the parent agent process the result. The parent may finish its
-	// current turn before that queued continuation acquires the session lock.
-	//
-	// Only send the subagent.result event if the parent is NOT currently
-	// processing the session. If the parent is processing, wait_for_subagent
-	// will handle the result and the subagent.result event would cause a
-	// double notification.
-	if !al.isSessionProcessing(sessionKey) {
-		al.bus.PublishOutbound(bus.OutboundMessage{
-			Channel:  channel,
-			ChatID:   sessionKey,
-			Event:    "subagent.result",
-			Metadata: metadata,
-		})
+	// Notify interactive clients. Unconditional — exactly once per terminal
+	// outcome (pkg/tools only invokes the callback for the final attempt of the
+	// retry chain) and independent of whether the parent is mid-turn.
+	// "resumed" tells the client whether a continuation turn is owed.
+	al.bus.PublishOutbound(bus.OutboundMessage{
+		Channel:  channel,
+		ChatID:   sessionKey,
+		Event:    "subagent.result",
+		Metadata: metadata,
+	})
+
+	if !resumed {
+		// Another party owns this result (a wait_for_subagent read it in-turn,
+		// or a duplicate callback lost the claim) or the task is unknown to
+		// every manager — with no task there is no dedup, so injecting would be
+		// unguarded. The UI was still told; the parent must not run a turn.
+		return
 	}
 
 	al.bus.PublishInbound(bus.InboundMessage{
