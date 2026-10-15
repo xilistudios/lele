@@ -381,27 +381,12 @@ func parseCodexResponse(resp *responses.Response) *LLMResponse {
 
 func createCodexTokenSource() func() (string, string, error) {
 	return func() (string, string, error) {
-		cred, err := auth.GetCredential("openai")
+		cred, err := auth.EnsureFreshCredential("openai", auth.OpenAIOAuthConfig(), auth.RefreshPolicy{RequireOAuthMethod: true})
 		if err != nil {
-			return "", "", fmt.Errorf("loading auth credentials: %w", err)
+			return "", "", err
 		}
 		if cred == nil {
 			return "", "", fmt.Errorf("no credentials for openai. Run: lele auth login --provider openai")
-		}
-
-		if cred.AuthMethod == "oauth" && cred.NeedsRefresh() && cred.RefreshToken != "" {
-			oauthCfg := auth.OpenAIOAuthConfig()
-			refreshed, err := auth.RefreshAccessToken(cred, oauthCfg)
-			if err != nil {
-				return "", "", fmt.Errorf("refreshing token: %w", err)
-			}
-			if refreshed.AccountID == "" {
-				refreshed.AccountID = cred.AccountID
-			}
-			if err := auth.SetCredential("openai", refreshed); err != nil {
-				return "", "", fmt.Errorf("saving refreshed token: %w", err)
-			}
-			return refreshed.AccessToken, refreshed.AccountID, nil
 		}
 
 		return cred.AccessToken, cred.AccountID, nil

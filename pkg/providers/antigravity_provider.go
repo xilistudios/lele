@@ -561,36 +561,17 @@ func sanitizeSchemaForGemini(schema map[string]any) map[string]any {
 
 func createAntigravityTokenSource() func() (string, string, error) {
 	return func() (string, string, error) {
-		cred, err := auth.GetCredential("google-antigravity")
+		cred, err := auth.EnsureFreshCredential("google-antigravity", auth.GoogleAntigravityOAuthConfig(), auth.RefreshPolicy{})
 		if err != nil {
-			return "", "", fmt.Errorf("loading auth credentials: %w", err)
+			return "", "", err
 		}
 		if cred == nil {
-			return "", "", fmt.Errorf(
-				"no credentials for google-antigravity. Run: picoclaw auth login --provider google-antigravity",
-			)
-		}
-
-		// Refresh if needed
-		if cred.NeedsRefresh() && cred.RefreshToken != "" {
-			oauthCfg := auth.GoogleAntigravityOAuthConfig()
-			refreshed, err := auth.RefreshAccessToken(cred, oauthCfg)
-			if err != nil {
-				return "", "", fmt.Errorf("refreshing token: %w", err)
-			}
-			refreshed.Email = cred.Email
-			if refreshed.ProjectID == "" {
-				refreshed.ProjectID = cred.ProjectID
-			}
-			if err := auth.SetCredential("google-antigravity", refreshed); err != nil {
-				return "", "", fmt.Errorf("saving refreshed token: %w", err)
-			}
-			cred = refreshed
+			return "", "", fmt.Errorf("no credentials for google-antigravity. Run: lele auth login --provider google-antigravity")
 		}
 
 		if cred.IsExpired() {
 			return "", "", fmt.Errorf(
-				"antigravity credentials expired. Run: picoclaw auth login --provider google-antigravity",
+				"antigravity credentials expired. Run: lele auth login --provider google-antigravity",
 			)
 		}
 

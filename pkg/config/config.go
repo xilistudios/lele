@@ -864,8 +864,8 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 		if v.Type == "" {
 			v.Type = key
 		}
-		// Only include if has APIKey or models
-		if v.APIKey != "" || len(v.Models) > 0 {
+		// Only include if has APIKey, models or an explicit auth method
+		if v.APIKey != "" || len(v.Models) > 0 || v.AuthMethod != "" {
 			out[key] = v
 			hasData = true
 		}
@@ -876,8 +876,8 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 		if _, exists := out[key]; exists {
 			return
 		}
-		// Only include if has APIKey or models
-		if cfg.APIKey == "" && len(cfg.Models) == 0 {
+		// Only include if has APIKey, models or an explicit auth method
+		if cfg.APIKey == "" && len(cfg.Models) == 0 && cfg.AuthMethod == "" {
 			return
 		}
 		if cfg.Type == "" {

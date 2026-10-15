@@ -72,7 +72,70 @@ Re-authenticate if needed:
 ```bash
 lele auth login --provider openai
 lele auth login --provider anthropic
+lele auth login --provider claude
+lele auth login --provider gemini
+lele auth login --provider google-antigravity
 ```
+
+### Claude OAuth login (`--provider claude`)
+
+`lele auth login --provider claude` runs the interactive Claude.ai OAuth browser
+flow; if the loopback callback cannot be used it falls back to a manual paste.
+In a headless environment, run the paste-code flow directly:
+
+```bash
+lele auth login --provider claude --paste-code
+```
+
+It prints the authorize URL and then reads the authorization code (or the full
+callback URL) from stdin. On success the credential is stored under the
+canonical key `anthropic` and the config is updated with
+`providers.anthropic.auth_method = "oauth"`.
+
+If a session reports that there is no API key or no `anthropic` credential
+after an OAuth login, check:
+
+- `lele auth status` — it lists the stored provider (`anthropic`) and its method.
+- `providers.anthropic.auth_method` in config — it must be `oauth` for a Claude
+  OAuth login (`token` is the paste-token flow).
+
+### Gemini / Code Assist OAuth login (`--provider gemini`)
+
+`lele auth login --provider gemini` runs the Google Code Assist OAuth browser
+flow — the flow of the official `@google/gemini-cli`; if the loopback callback
+cannot be used it falls back to a manual paste. In a headless environment, run
+the paste-code flow directly:
+
+```bash
+lele auth login --provider gemini --paste-code
+```
+
+It prints the authorize URL and then reads the authorization code (or the full
+callback URL) from stdin; Google's hosted redirect for this flow is
+`https://codeassist.google.com/authcode`. On success the credential is stored
+under the canonical key `gemini` (`gemini-cli` is an accepted alias and
+normalizes to it) and the config is updated with
+`providers.gemini.auth_method = "oauth"`.
+
+`--device-code` is not available for gemini: it is rejected with
+`device code flow is not available for gemini`. `lele auth logout --provider
+gemini` (or `--provider gemini-cli`) removes the credential and clears
+`providers.gemini.auth_method`.
+
+If a session reports that there is no API key or no `gemini` credential after
+an OAuth login, check:
+
+- `lele auth status` — it lists the stored provider (`gemini`) and its method.
+- `providers.gemini.auth_method` in config — it must be `oauth` for the Code
+  Assist flow. Otherwise (or when `providers.gemini.api_key` is set) lele keeps
+  using the Gemini developer API-key path, so the two configurations coexist
+  under the same provider key.
+
+While `providers.gemini.auth_method = "oauth"`, the Code Assist transport talks
+to the Code Assist endpoint (`cloudcode-pa.googleapis.com`), so
+`providers.gemini.api_base` is ignored, and per-request generation settings such
+as `max_tokens` and `temperature` are not forwarded. Set an `api_key` (or remove
+`auth_method`) to go back to the developer API-key path, where both apply.
 
 ## `read_video is not available: the current model supports neither video nor vision`
 

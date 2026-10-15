@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/xilistudios/lele/pkg/auth"
+	"github.com/xilistudios/lele/pkg/config"
 )
 
 func statusCmd() {
@@ -40,13 +41,18 @@ func statusCmd() {
 	if _, err := os.Stat(configPath); err == nil {
 		fmt.Printf("Model: %s\n", cfg.Agents.Defaults.Model)
 
-		hasOpenRouter := cfg.Providers.OpenRouter.APIKey != ""
-		hasAnthropic := cfg.Providers.Anthropic.APIKey != ""
-		hasOpenAI := cfg.Providers.OpenAI.APIKey != ""
-		hasGemini := cfg.Providers.Gemini.APIKey != ""
-		hasZhipu := cfg.Providers.Zhipu.APIKey != ""
-		hasGroq := cfg.Providers.Groq.APIKey != ""
-		hasVLLM := cfg.Providers.VLLM.APIBase != ""
+		// Every provider read below must go through this one non-nil value:
+		// the section is absent (nil) on a fresh machine, see
+		// providersForDisplay.
+		providers := providersForDisplay(cfg)
+
+		hasOpenRouter := providers.OpenRouter.APIKey != ""
+		hasAnthropic := providers.Anthropic.APIKey != ""
+		hasOpenAI := providers.OpenAI.APIKey != ""
+		hasGemini := providers.Gemini.APIKey != ""
+		hasZhipu := providers.Zhipu.APIKey != ""
+		hasGroq := providers.Groq.APIKey != ""
+		hasVLLM := providers.VLLM.APIBase != ""
 
 		status := func(enabled bool) string {
 			if enabled {
@@ -61,7 +67,7 @@ func statusCmd() {
 		fmt.Println("Zhipu API:", status(hasZhipu))
 		fmt.Println("Groq API:", status(hasGroq))
 		if hasVLLM {
-			fmt.Printf("vLLM/Local: ✓ %s\n", cfg.Providers.VLLM.APIBase)
+			fmt.Printf("vLLM/Local: ✓ %s\n", providers.VLLM.APIBase)
 		} else {
 			fmt.Println("vLLM/Local: not set")
 		}
@@ -80,4 +86,25 @@ func statusCmd() {
 			}
 		}
 	}
+}
+
+// providersForDisplay returns the providers section to read for the status
+// report, substituting an empty section when it is nil.
+//
+// A nil section is a normal CLI-produced state, not corruption:
+// config.LoadConfig sets cfg.Providers = nil when config.json carries no usable
+// "providers" section, and ProvidersConfig.MarshalJSON writes a data-less
+// section as "null" — which loads back as nil. `lele auth logout` on a fresh
+// machine therefore writes "providers": null, and the `lele status` run right
+// after it used to SIGSEGV on the first provider dereference.
+//
+// Unlike providersForWrite in auth.go, this is deliberately read-only: it never
+// allocates into cfg.Providers and never mutates the config, because `status`
+// only prints and a config it holds is not a config it is about to save. The
+// fallback value is a fresh local, never a shared package-level pointer.
+func providersForDisplay(cfg *config.Config) *config.ProvidersConfig {
+	if cfg.Providers == nil {
+		return &config.ProvidersConfig{}
+	}
+	return cfg.Providers
 }

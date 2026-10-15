@@ -22,6 +22,10 @@ type AuthCredential struct {
 	ExpiresAt    time.Time `json:"expires_at,omitempty"`
 	Provider     string    `json:"provider"`
 	AuthMethod   string    `json:"auth_method"`
+	// Scopes holds the OAuth `scope` values granted by the token endpoint,
+	// split into individual scope strings. It is additive JSON: legacy
+	// credentials that lack the field simply unmarshal to nil.
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 type AuthStore struct {
