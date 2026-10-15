@@ -246,14 +246,23 @@ func TestCompaction_SecondRoundEvictsExcludedFromMemory(t *testing.T) {
 // TestCompaction_TailToolResultsDoesNotEmptyContext exercises the production
 // path (summarizeSessionWithError) in 2 rounds where round 2 ends with a
 // tool-result tail (assistant with 2 tool_calls + 2 tool results, no
-// ContextMessages). The anti-split guard in ExcludeOldMessagesFromContext
-// pushes excludeUpTo to len, setting excludeBoundary == len. The structural
-// invariant in EvictExcludedMessages must prevent the entire context from
-// being wiped.
+// ContextMessages).
 //
-// Without FIX A (structural invariant), the clamp is inert when
-// boundary == len, and round 2 produces in_context=0 (the model gets no
-// conversation message at all).
+// It anchors the #343 retention policy: the guard moves the boundary BACK to
+// the assistant that owns the tool-result tail (located by ToolCallID), so the
+// whole tool group stays in the kept tail. Under the previous forward-push this
+// degenerate shape walked excludeUpTo to len(Messages): the #340 no-emptying
+// invariant then capped eviction at the last in-context message, a no-op that
+// left 3 excluded rows resident in RAM (cost #1 of #343) and reached the model
+// with a single message. Option A removes both — excluded_resident == 0 and the
+// whole kept tail (the tool group included) reaches the model.
+//
+// The token price of keeping the group live was measured before adopting the
+// policy (#343 T1): at most 2412 tokens = 1.88% of the 128k context window.
+//
+// The structural no-emptying invariant (boundary == len) is no longer reached
+// through this shape; it is covered directly in pkg/session
+// (TestEvictExcluded_BoundaryEqualToLenKeepsContext).
 func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "tail-tools-e2e-*")
 	if err != nil {
@@ -373,8 +382,9 @@ func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 
 	// --- Add messages for round 2, ending with a tool-result tail ---
 	// The tail is assistant with 2 tool_calls + 2 tool results, no
-	// ContextMessages. This triggers the anti-split guard in
-	// ExcludeOldMessagesFromContext which pushes excludeUpTo to len.
+	// ContextMessages. The move-back guard in ExcludeOldMessagesFromContext
+	// resolves the owner of the first kept tool result (by ToolCallID) and
+	// keeps the whole group in the kept tail.
 	agent.Sessions.AddMessage(sessionKey, "user", "search for DHT implementations and grep for test files") // human
 	agent.Sessions.AddFullMessage(sessionKey, providers.Message{                                            // assistant + 2 tool_calls
 		Role:    "assistant",
@@ -436,5 +446,24 @@ func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 	// --- (b) History must not be empty ---
 	if len(hist2) == 0 {
 		t.Errorf("(b) history is empty after round 2 — eviction wiped all resident context")
+	}
+
+	// --- (c) #343 lock-in: pin the Option A retention policy through the
+	// production path. The guard keeps the whole tool group in the kept tail,
+	// so no excluded row is left resident and the entire kept tail — the tool
+	// group included — reaches the model. Under the previous forward-push the
+	// same layout produced excluded_resident=3 / in_context=1 / len(hist)=4
+	// (measured, #343 T1), so both assertions fail if the policy is reverted.
+	//
+	// These are structural invariants, not literals: in_context == len(hist)
+	// holds for any kept tail that carries no excluded row (excluded_resident
+	// == 0 is exactly that). For this seeded layout both are 5 — the round-2
+	// kept tail is the summary message, the pinned human turn and the whole
+	// 3-message tool group (owner assistant + both results).
+	if excludedResident != 0 {
+		t.Errorf("(c) #343: excluded_resident = %d, want 0 — Option A keeps the whole tool group, so no excluded row may stay resident", excludedResident)
+	}
+	if len(ctx2) != len(hist2) {
+		t.Errorf("(c) #343: in_context = %d, want len(hist) = %d — the whole kept tail (tool group included) must reach the model", len(ctx2), len(hist2))
 	}
 }
