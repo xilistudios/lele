@@ -130,10 +130,11 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 	// (located by ToolCallID) so the whole group stays in the kept tail. The
 	// previous forward-push walked the boundary to the end of the history on
 	// the degenerate shape (assistant with N tool_calls + N results, small
-	// keepCount), leaving zero messages in the kept tail: the #340
-	// no-emptying invariant then reduced eviction to a no-op that kept
-	// excluded rows resident in RAM, and the cold-load fallback could leave an
-	// orphaned tool_result at resident[0].
+	// keepCount), leaving the requested keepCount tail empty — only index 0
+	// and the pinned human turns still survived (#340): the no-emptying
+	// invariant then reduced eviction to a no-op that kept excluded rows
+	// resident in RAM, and the cold-load fallback could leave an orphaned
+	// tool_result at resident[0].
 	if excludeUpTo < len(session.Messages) && isToolResultMessage(session.Messages[excludeUpTo]) {
 		msgs := session.Messages
 
@@ -171,8 +172,12 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 			}
 		}
 
-		// 3. Owner found → keep the whole group. Otherwise keep the run and
-		// let providers.HealToolCallPairs drop any orphan at request time.
+		// 3. Owner found → keep the whole group. Otherwise (no owner anywhere
+		// before the run, or an owner further back than ownerScanWindow) keep
+		// the run and let providers.HealToolCallPairs drop any orphan at
+		// request time: the owner can still be excluded while its result stays
+		// in context, so the fallback branch deliberately leaves an orphan for
+		// the runtime to heal rather than splitting the group.
 		if owner >= 0 {
 			excludeUpTo = owner
 		} else {

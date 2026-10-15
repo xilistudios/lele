@@ -1094,6 +1094,100 @@ func TestExcludeOldMessages_MoveBack_OrphanRunFromIndex0_NoOp(t *testing.T) {
 	}
 }
 
+// TestExcludeOldMessages_MoveBack_FallbackBeyondWindowKeepsRunAsOrphans pins
+// the documented cost of the bounded owner search (review finding F2, #343).
+//
+// The move-back locates the tool-group owner within ownerScanWindow (K=8)
+// messages before the result run. When the owner EXISTS but lies beyond that
+// window the guard falls back to the start of the run: the run is kept while
+// the owner stays excluded, so the in-context slice carries an orphan tool
+// result. That is safe — providers.HealToolCallPairs drops the orphan at
+// request time, so nothing orphaned reaches the provider — but it is not the
+// "no orphan is produced" contract, so the exact behaviour is pinned here
+// instead of being left to the docs.
+//
+// Layout (13 messages; the owner sits nine messages before the boundary, one
+// past the K=8 window):
+//
+//	 0: user       "ORIGINAL GOAL"       (pinned human turn → kept)
+//	 1: assistant  tool_use "call_x"     ← owner, beyond the window → EXCLUDED
+//	 2.. 9: assistant "chatter N"        (8 turns that push the owner out of the window)
+//	10: tool       result for "call_x"   ← boundary lands here → kept (fallback)
+//	11: user       "carry on"            (kept)
+//	12: assistant  "all done"            (kept)
+//
+// keepCount=3 → excludeUpTo=10, landing on the result. The window is [2,10),
+// which misses the owner at index 1, so the fallback keeps the run instead of
+// moving the boundary back to it.
+func TestExcludeOldMessages_MoveBack_FallbackBeyondWindowKeepsRunAsOrphans(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:move-back-fallback-beyond-window"
+
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "ORIGINAL GOAL"}) // 0
+	sm.AddFullMessage(key, providers.Message{                                         // 1
+		Role:      "assistant",
+		Content:   "searching",
+		ToolCalls: []providers.ToolCall{{ID: "call_x", Function: &providers.FunctionCall{Name: "web_search"}}},
+	})
+	for i := 2; i <= 9; i++ { // 2..9: eight chatter turns push the owner past the window
+		sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: fmt.Sprintf("chatter %d", i)})
+	}
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "found it", ToolCallID: "call_x"}) // 10
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "carry on"})                       // 11
+	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "all done"})                  // 12
+
+	sm.ExcludeOldMessagesFromContext(key, 3)
+
+	session := sm.GetOrCreate(key)
+
+	// Fallback: the result run is kept even though no owner was found in the
+	// window...
+	if session.Messages[10].ExcludeFromContext {
+		t.Error("index 10 (tool-result run) should NOT be excluded — the fallback keeps the run")
+	}
+	// ...and the owner, sitting one past the K=8 window, stays excluded.
+	if !session.Messages[1].ExcludeFromContext {
+		t.Error("index 1 (owner beyond the K=8 window) should stay excluded")
+	}
+	assertExcluded(t, session.Messages, []int{1, 2, 3, 4, 5, 6, 7, 8, 9})
+
+	// The price: the filtered context (what reaches the model before healing)
+	// carries the orphan result.
+	ctx := make([]providers.Message, 0, len(session.Messages))
+	for _, m := range session.Messages {
+		if !m.ExcludeFromContext {
+			ctx = append(ctx, m)
+		}
+	}
+	if len(ctx) != 4 {
+		t.Errorf("in-context messages = %d, want 4 (pin + orphan result + user + assistant)", len(ctx))
+	}
+	orphanInContext := false
+	for _, m := range ctx {
+		if m.Role == "tool" && m.ToolCallID == "call_x" {
+			orphanInContext = true
+		}
+	}
+	if !orphanInContext {
+		t.Error("expected the orphan tool result (call_x) to remain in the filtered context before healing")
+	}
+
+	// HealToolCallPairs drops it at request time: this is the safety net the
+	// fallback branch relies on, so pin that the orphan really is removed.
+	healed, changed := providers.HealToolCallPairs(ctx)
+	if !changed {
+		t.Error("HealToolCallPairs should report a change: the orphan tool result was dropped")
+	}
+	if len(healed) != len(ctx)-1 {
+		t.Errorf("HealToolCallPairs: len %d -> %d, want exactly one message dropped", len(ctx), len(healed))
+	}
+	for _, m := range healed {
+		if m.Role == "tool" && m.ToolCallID == "call_x" {
+			t.Error("HealToolCallPairs left the orphan tool result in the history")
+		}
+	}
+}
+
 // TestExcludeOldMessages_MoveBack_MultiResultGroup covers a group with more
 // results than the plain two-call case: one assistant turn with three parallel
 // tool calls followed by their three results. A small keepCount lands the

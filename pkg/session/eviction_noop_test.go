@@ -102,7 +102,7 @@ func seedCapToZeroSession(t *testing.T, sm *SessionManager, key string) {
 	}
 }
 
-// TestEvictExcluded_CapToZeroDoesNoIOfOrRepublish verifies INFO-1: when the cap
+// TestEvictExcluded_CapToZeroIsFreeOfIOAndRepublish verifies INFO-1: when the cap
 // reduces eviction to nothing, the call must not write an unchanged boundary to
 // SQLite, must not republish the copy-on-write snapshot, and must not report
 // having evicted anything.
