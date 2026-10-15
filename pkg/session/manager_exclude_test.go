@@ -37,6 +37,73 @@ func assertExcluded(t *testing.T, msgs []providers.Message, excluded []int) {
 	}
 }
 
+// assertNoOrphanToolPairs filters out the excluded messages (the slice the
+// model actually receives) and asserts, in both directions, that no tool pair
+// was split: every tool result in context has its owning assistant in context,
+// and every assistant tool_call has at least one of its results in context.
+//
+// This is the invariant the #343 retention policy exists to protect, so the
+// move-back tests share one implementation.
+func assertNoOrphanToolPairs(t *testing.T, msgs []providers.Message) {
+	t.Helper()
+
+	var ctx []providers.Message
+	for _, m := range msgs {
+		if !m.ExcludeFromContext {
+			ctx = append(ctx, m)
+		}
+	}
+
+	// Direction 1 (reverse): a tool result in context whose owner is not.
+	for i, m := range ctx {
+		if !isToolResultMessage(m) {
+			continue
+		}
+		found := false
+		for j := i - 1; j >= 0; j-- {
+			if ctx[j].Role != "assistant" {
+				continue
+			}
+			for _, tc := range ctx[j].ToolCalls {
+				if tc.ID == m.ToolCallID {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			t.Errorf("orphan tool result in context at index %d: ToolCallID=%q content=%q — no owning assistant kept",
+				i, m.ToolCallID, m.Content)
+		}
+	}
+
+	// Direction 2 (forward): an assistant tool_call in context with no result.
+	for i, m := range ctx {
+		if m.Role != "assistant" || len(m.ToolCalls) == 0 {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			if tc.ID == "" {
+				continue
+			}
+			found := false
+			for j := i + 1; j < len(ctx); j++ {
+				if ctx[j].ToolCallID == tc.ID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("orphan assistant tool_call in context at index %d: call ID=%q content=%q — no matching result kept",
+					i, tc.ID, m.Content)
+			}
+		}
+	}
+}
+
 // Test 1: Normal exclusion with no tool messages — now preserves last 2 human turns
 func TestExcludeOldMessages_NormalExclusion(t *testing.T) {
 	sm := NewSessionManager()
@@ -62,11 +129,26 @@ func TestExcludeOldMessages_NormalExclusion(t *testing.T) {
 	}
 }
 
-// Test 2: Boundary that would split a tool_use/tool_result pair
-// moves forward to include the tool_results in the excluded set
-func TestExcludeOldMessages_BoundarySplitsToolPair_Forward(t *testing.T) {
+// TestExcludeOldMessages_BoundarySplitsToolPair_MoveBackKeepsToolGroup pins the
+// #343 retention policy for a boundary that would split a tool_use/tool_result
+// pair: the boundary moves BACK to the owning assistant (matched by
+// ToolCallID) so the whole tool group stays in the kept tail — it no longer
+// pushes forward to exclude the tool results.
+//
+// Layout:
+//
+//	0: user       "hello"
+//	1: assistant  tool_use (call1)
+//	2: tool       result for call1
+//	3: user       "thanks"
+//
+// keepCount=2 → excludeUpTo=2, which lands on the tool result at index 2. The
+// move-back walks to its owner at index 1, so [1,3) is not excluded and the
+// whole group {1,2} is kept. Under the old forward-push the result at index 2
+// was excluded, so this test fails on that policy.
+func TestExcludeOldMessages_BoundarySplitsToolPair_MoveBackKeepsToolGroup(t *testing.T) {
 	sm := NewSessionManager()
-	key := "test:split-forward"
+	key := "test:split-move-back"
 
 	// Messages:
 	// 0: user       "hello"
@@ -82,17 +164,18 @@ func TestExcludeOldMessages_BoundarySplitsToolPair_Forward(t *testing.T) {
 	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "result", ToolCallID: "call1"})
 	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "thanks"})
 
-	// keepCount=1 means excludeUpTo=3 → boundary would be after index 2
-	// But index 2 is a tool_result whose tool_use (index 1) is excluded.
-	// Boundary should move forward to also exclude index 2.
-	sm.ExcludeOldMessagesFromContext(key, 1)
+	// keepCount=2 means excludeUpTo=2, landing on the tool result whose owner
+	// (index 1) would otherwise be excluded. The boundary moves back to the
+	// owner and the whole group is kept, so nothing is excluded here.
+	sm.ExcludeOldMessagesFromContext(key, 2)
 
 	session := sm.GetOrCreate(key)
-	// First message (index 0) is always preserved. Exclude indices 1,2. Message 3 kept.
-	assertExcluded(t, session.Messages, []int{1, 2})
-	if countExcluded(session.Messages) != 2 {
-		t.Errorf("expected 2 excluded, got %d", countExcluded(session.Messages))
+	// First message (index 0) is always preserved; the whole group {1,2} is kept.
+	assertExcluded(t, session.Messages, []int{})
+	if countExcluded(session.Messages) != 0 {
+		t.Errorf("expected 0 excluded, got %d", countExcluded(session.Messages))
 	}
+	assertNoOrphanToolPairs(t, session.Messages)
 }
 
 // Test 3: Assistant with tool_use at the boundary with no following tool_results
@@ -168,8 +251,23 @@ func TestExcludeOldMessages_KeepCountLargerThanMessages(t *testing.T) {
 	}
 }
 
-// Test 6: Multiple tool calls in a single assistant message
-func TestExcludeOldMessages_MultipleToolResults(t *testing.T) {
+// TestExcludeOldMessages_MultipleToolResults_KeepsWholeGroup pins the move-back
+// policy for an assistant turn with several parallel tool calls: when the
+// boundary lands inside the run of results, the whole group is moved back into
+// the kept tail together.
+//
+// Layout:
+//
+//	0: user       "do two things"
+//	1: assistant  tool_use calls "call1" and "call2"
+//	2: tool       tool_result for call1
+//	3: tool       tool_result for call2
+//	4: user       "thanks"
+//
+// keepCount=2 → excludeUpTo=3, landing on the result for call2. The move-back
+// resolves the owner by ToolCallID (index 1) and keeps the whole group
+// {1,2,3}; nothing is excluded. Under the forward-push the group was excluded.
+func TestExcludeOldMessages_MultipleToolResults_KeepsWholeGroup(t *testing.T) {
 	sm := NewSessionManager()
 	key := "test:multi-tool"
 
@@ -192,17 +290,18 @@ func TestExcludeOldMessages_MultipleToolResults(t *testing.T) {
 	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "result2", ToolCallID: "call2"})
 	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "thanks"})
 
-	// keepCount=1 means excludeUpTo=4 → boundary after index 3
-	// Index 3 is a tool_result → move forward
-	// Index 4 is user (not tool_result) → stop
-	sm.ExcludeOldMessagesFromContext(key, 1)
+	// keepCount=2 means excludeUpTo=3, landing inside the two-result run.
+	// The boundary moves back to the owner at index 1: the whole group
+	// {1,2,3} is kept, only index 0 (pinned) aside.
+	sm.ExcludeOldMessagesFromContext(key, 2)
 
 	session := sm.GetOrCreate(key)
-	// First message (index 0) is always preserved. Exclude indices 1,2,3. Only message 4 kept.
-	assertExcluded(t, session.Messages, []int{1, 2, 3})
-	if countExcluded(session.Messages) != 3 {
-		t.Errorf("expected 3 excluded, got %d", countExcluded(session.Messages))
+	// First message (index 0) is always preserved; the group {1,2,3} is kept whole.
+	assertExcluded(t, session.Messages, []int{})
+	if countExcluded(session.Messages) != 0 {
+		t.Errorf("expected 0 excluded, got %d", countExcluded(session.Messages))
 	}
+	assertNoOrphanToolPairs(t, session.Messages)
 }
 
 // Test 7: Non-existent session key should not panic
@@ -769,9 +868,9 @@ func TestExcludeOldMessages_PinIsNotSplitByToolPairFixup(t *testing.T) {
 	}
 }
 
-// TestExcludeOldMessages_PinIsNotSplitByToolPairFixup_ForwardAdjacentPin
-// exercises the forward boundary fixup when a preserved human turn is
-// adjacent to the tool result that the fixup must advance past.
+// TestExcludeOldMessages_PinIsNotSplitByToolPairFixup_MoveBackKeepsGroupAdjacentPin
+// exercises the move-back policy when a preserved human turn sits immediately
+// before the tool group whose boundary is being adjusted.
 //
 // Layout (8 messages):
 //
@@ -780,17 +879,18 @@ func TestExcludeOldMessages_PinIsNotSplitByToolPairFixup(t *testing.T) {
 //	2: tool   result for call_x
 //	3: assistant "intermediate answer"
 //	4: user   "pin-me: human question"  ← preserved pin
-//	5: assistant tool_use (call_y)       ← boundary: assistant with tool_use
-//	6: tool   result for call_y          ← excludeUpTo lands here → fixup advances
+//	5: assistant tool_use (call_y)       ← owner of the boundary group
+//	6: tool   result for call_y          ← excludeUpTo lands here → move-back to 5
 //	7: user   "pin-me: final question"   ← preserved pin (in kept tail)
 //
-// keepCount=2: excludeUpTo=6 (tool result) → fixup advances to 7.
+// keepCount=2: excludeUpTo=6 (tool result) → move back to its owner at index 5.
 // Human turns: 0, 4, 7. Last 2 human: 4, 7. preserved = {0, 4, 7}.
-// Range [1, 7). Excluded: {1, 2, 3, 5, 6}.
-// The pin at index 4 stays un-excluded; no orphans in filtered context.
-func TestExcludeOldMessages_PinIsNotSplitByToolPairFixup_ForwardAdjacentPin(t *testing.T) {
+// Range [1, 5). Excluded: {1, 2, 3}. The group {5, 6} stays in the kept tail,
+// so index 5 is NOT excluded, and the pin at index 4 is not split from it.
+// No orphans in the filtered context.
+func TestExcludeOldMessages_PinIsNotSplitByToolPairFixup_MoveBackKeepsGroupAdjacentPin(t *testing.T) {
 	sm := NewSessionManager()
-	key := "test:pin-forward-fixup"
+	key := "test:pin-move-back-fixup"
 
 	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "initial request"}) // 0
 	sm.AddFullMessage(key, providers.Message{                                           // 1
@@ -809,9 +909,10 @@ func TestExcludeOldMessages_PinIsNotSplitByToolPairFixup_ForwardAdjacentPin(t *t
 	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "results_y", ToolCallID: "call_y"}) // 6
 	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "pin-me: final question"})          // 7
 
-	// keepCount=2: excludeUpTo=6. Index 6 is a tool result → forward fixup → 7.
+	// keepCount=2: excludeUpTo=6. Index 6 is a tool result whose owner (index 5)
+	// would be excluded → boundary moves back to 5 and the whole group is kept.
 	// Human turns: 0, 4, 7. Last 2 human: 4, 7. preserved = {0, 4, 7}.
-	// Fixed-up range: [1, 7). Index 4 is a pin inside range.
+	// Range [1, 5). Index 4 is a pin inside range.
 	sm.ExcludeOldMessagesFromContext(key, 2)
 
 	session := sm.GetOrCreate(key)
@@ -824,71 +925,311 @@ func TestExcludeOldMessages_PinIsNotSplitByToolPairFixup_ForwardAdjacentPin(t *t
 	if session.Messages[0].ExcludeFromContext {
 		t.Error("index 0 should never be excluded")
 	}
-	// Index 7 (in kept tail) preserved.
-	if session.Messages[7].ExcludeFromContext {
-		t.Error("index 7 should not be excluded")
+	// The tool group owner (index 5) and its result (index 6) are kept whole.
+	for _, idx := range []int{5, 6, 7} {
+		if session.Messages[idx].ExcludeFromContext {
+			t.Errorf("index %d should NOT be excluded (the group {5,6} is kept whole)", idx)
+		}
 	}
 
-	// Indices 1, 2, 3, 5 should be excluded.
-	for _, idx := range []int{1, 2, 3, 5} {
+	// Only the prefix before the pin is excluded.
+	for _, idx := range []int{1, 2, 3} {
 		if !session.Messages[idx].ExcludeFromContext {
 			t.Errorf("index %d should be excluded", idx)
 		}
 	}
+	assertExcluded(t, session.Messages, []int{1, 2, 3})
 
 	// (b) No orphaned tool pairs in the filtered context.
-	var ctx []providers.Message
-	for _, m := range session.Messages {
-		if !m.ExcludeFromContext {
-			ctx = append(ctx, m)
-		}
-	}
+	assertNoOrphanToolPairs(t, session.Messages)
+}
 
-	// Forward direction: assistant with ToolCalls in context must have
-	// matching tool results in context.
-	for i, m := range ctx {
-		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
-			for _, tc := range m.ToolCalls {
-				if tc.ID == "" {
-					continue
-				}
-				found := false
-				for j := i + 1; j < len(ctx); j++ {
-					if ctx[j].ToolCallID == tc.ID {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("orphaned assistant tool_call in context at index %d: call ID=%q — no matching tool result", i, tc.ID)
-				}
-			}
-		}
-	}
+// TestExcludeOldMessages_MoveBack_KeepsWholeToolGroup is the degenerate layout
+// from issue #343: an assistant turn with several parallel tool calls and their
+// results at the tail, compacted with a small keepCount. The move-back keeps
+// the whole group in context, so the kept tail is never emptied.
+//
+// Layout:
+//
+//	0: user       "do the thing"
+//	1: assistant  tool_use calls "call1" and "call2"
+//	2: tool       result for call1
+//	3: tool       result for call2
+//
+// keepCount=2 → excludeUpTo=2, landing on the first result. The move-back
+// resolves the owner (index 1) and excludes nothing. Under the old forward-push
+// the boundary walked to len and the whole tail was excluded.
+func TestExcludeOldMessages_MoveBack_KeepsWholeToolGroup(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:move-back-whole-group"
 
-	// Reverse direction: tool result in context must have matching
-	// assistant in context.
-	for i, m := range ctx {
-		if isToolResultMessage(m) {
-			found := false
-			for j := i - 1; j >= 0; j-- {
-				if ctx[j].Role == "assistant" {
-					for _, tc := range ctx[j].ToolCalls {
-						if tc.ID == m.ToolCallID {
-							found = true
-							break
-						}
-					}
-					if found {
-						break
-					}
-				}
-			}
-			if !found {
-				t.Errorf("orphaned tool result in context at index %d: ToolCallID=%q — no matching assistant", i, m.ToolCallID)
-			}
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "do the thing"}) // 0
+	sm.AddFullMessage(key, providers.Message{                                        // 1
+		Role:    "assistant",
+		Content: "running both",
+		ToolCalls: []providers.ToolCall{
+			{ID: "call1", Function: &providers.FunctionCall{Name: "exec"}},
+			{ID: "call2", Function: &providers.FunctionCall{Name: "exec"}},
+		},
+	})
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "result1", ToolCallID: "call1"}) // 2
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "result2", ToolCallID: "call2"}) // 3
+
+	sm.ExcludeOldMessagesFromContext(key, 2)
+
+	session := sm.GetOrCreate(key)
+	// The whole group {1,2,3} is kept; nothing is excluded.
+	assertExcluded(t, session.Messages, []int{})
+	if countExcluded(session.Messages) != 0 {
+		t.Errorf("expected 0 excluded, got %d", countExcluded(session.Messages))
+	}
+	assertNoOrphanToolPairs(t, session.Messages)
+}
+
+// TestExcludeOldMessages_MoveBack_FindsOwnerByToolCallID_Interleaved pins the
+// D2/C4 decision: the owner is located by ToolCallID, NOT by adjacency.
+//
+// The layout interleaves a plain assistant (index 5) between the human turn and
+// the tool-result run, so the message immediately before the run is NOT the
+// owner. Adjacency would retreat to index 5, keep the results {6,7} and exclude
+// their real owner (index 3) — orphaning the results. Matching by ToolCallID
+// retreats to index 3 and keeps the whole group.
+//
+// Layout:
+//
+//	0: user       "initial request"
+//	1: assistant  "thinking"
+//	2: user       "carry on"
+//	3: assistant  tool_use calls "call_search" and "call_grep"  ← the owner
+//	4: user       "great"
+//	5: assistant  "here are the results"                        ← adjacent, NOT the owner
+//	6: tool       result for call_search
+//	7: tool       result for call_grep
+func TestExcludeOldMessages_MoveBack_FindsOwnerByToolCallID_Interleaved(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:move-back-interleaved"
+
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "initial request"}) // 0
+	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "thinking"})   // 1
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "carry on"})        // 2
+	sm.AddFullMessage(key, providers.Message{                                           // 3
+		Role:    "assistant",
+		Content: "searching and grepping",
+		ToolCalls: []providers.ToolCall{
+			{ID: "call_search", Function: &providers.FunctionCall{Name: "web_search"}},
+			{ID: "call_grep", Function: &providers.FunctionCall{Name: "exec"}},
+		},
+	})
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "great"})                                    // 4
+	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "here are the results"})                // 5
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "Found 5 repos", ToolCallID: "call_search"}) // 6
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "Found 3 files", ToolCallID: "call_grep"})   // 7
+
+	// keepCount=2: excludeUpTo=6, landing on the first result. The owner is at
+	// index 3 (matched by ToolCallID), not the adjacent assistant at index 5.
+	sm.ExcludeOldMessagesFromContext(key, 2)
+
+	session := sm.GetOrCreate(key)
+
+	// The owner is kept: it is found by ToolCallID, not by proximity.
+	if session.Messages[3].ExcludeFromContext {
+		t.Error("index 3 (owner of the kept tool group) should NOT be excluded")
+	}
+	// The whole group {3,6,7} plus the interleaved {4,5} stays in context.
+	for _, idx := range []int{3, 4, 5, 6, 7} {
+		if session.Messages[idx].ExcludeFromContext {
+			t.Errorf("index %d should NOT be excluded", idx)
 		}
 	}
+	// Only the prefix before the group is excluded.
+	assertExcluded(t, session.Messages, []int{1})
+
+	// The interleaved layout is exactly where adjacency would create orphans.
+	assertNoOrphanToolPairs(t, session.Messages)
+}
+
+// TestExcludeOldMessages_MoveBack_OrphanRunFromIndex0_NoOp covers a tool-result
+// run that reaches index 0 with no owning assistant anywhere before it (e.g. a
+// history truncated or cold-loaded after the owner was dropped). The move-back
+// finds no owner and falls back to the start of the run (index 0), which lands
+// in the early-exit branch: nothing is excluded and HealToolCallPairs is the
+// runtime safety net for the (still present) orphan.
+//
+// The run spans three results so the fallback is observable: without it the
+// boundary would stay at index 2 and exclude the first result, so the test
+// fails when the `excludeUpTo = start` fallback goes missing.
+//
+// Layout:
+//
+//	0: tool   result for "call1"  (orphan: no assistant precedes it)
+//	1: tool   result for "call2"  (orphan)
+//	2: tool   result for "call3"  (orphan, boundary lands here)
+//	3: user   "what did you find?"
+//	4: assistant "here you go"
+//	5: user   "thanks"
+func TestExcludeOldMessages_MoveBack_OrphanRunFromIndex0_NoOp(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:move-back-orphan-run"
+
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "orphan result 1", ToolCallID: "call1"}) // 0
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "orphan result 2", ToolCallID: "call2"}) // 1
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "orphan result 3", ToolCallID: "call3"}) // 2
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "what did you find?"})                   // 3
+	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "here you go"})                     // 4
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "thanks"})                               // 5
+
+	// keepCount=4: excludeUpTo=2, landing on the orphan run. No owner is found
+	// in the window → the fallback walks back to start=0 → early-exit, nothing
+	// excluded.
+	sm.ExcludeOldMessagesFromContext(key, 4)
+
+	session := sm.GetOrCreate(key)
+	assertExcluded(t, session.Messages, []int{})
+	if countExcluded(session.Messages) != 0 {
+		t.Errorf("expected 0 excluded, got %d", countExcluded(session.Messages))
+	}
+	if session.excludeBoundary != 0 {
+		t.Errorf("excludeBoundary = %d, want 0 (a no-op must not record a boundary)", session.excludeBoundary)
+	}
+}
+
+// TestExcludeOldMessages_MoveBack_MultiResultGroup covers a group with more
+// results than the plain two-call case: one assistant turn with three parallel
+// tool calls followed by their three results. A small keepCount lands the
+// boundary inside the run and the move-back keeps the whole group.
+func TestExcludeOldMessages_MoveBack_MultiResultGroup(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:move-back-multi-result"
+
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "do three things"}) // 0
+	sm.AddFullMessage(key, providers.Message{                                           // 1
+		Role:    "assistant",
+		Content: "running all three",
+		ToolCalls: []providers.ToolCall{
+			{ID: "c1", Function: &providers.FunctionCall{Name: "exec"}},
+			{ID: "c2", Function: &providers.FunctionCall{Name: "exec"}},
+			{ID: "c3", Function: &providers.FunctionCall{Name: "exec"}},
+		},
+	})
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "r1", ToolCallID: "c1"}) // 2
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "r2", ToolCallID: "c2"}) // 3
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "r3", ToolCallID: "c3"}) // 4
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "thanks"})               // 5
+
+	// keepCount=2: excludeUpTo=4, landing on the last result. The move-back
+	// resolves the owner at index 1 and keeps the whole group {1,2,3,4}.
+	sm.ExcludeOldMessagesFromContext(key, 2)
+
+	session := sm.GetOrCreate(key)
+	assertExcluded(t, session.Messages, []int{})
+	if countExcluded(session.Messages) != 0 {
+		t.Errorf("expected 0 excluded, got %d", countExcluded(session.Messages))
+	}
+	assertNoOrphanToolPairs(t, session.Messages)
+}
+
+// TestExcludeOldMessages_MoveBack_SecondGuardNoCascade pins R4: after the
+// move-back lands the boundary on the tool-group owner, the second guard
+// (the orphaned-tool_use fixup) may retreat at most ONE step — it is an `if`,
+// not a loop, so consecutive tool_use-only assistant turns do not cascade the
+// boundary further back.
+//
+// Layout (three consecutive assistant turns carrying tool_calls; the first two
+// never received results — a malformed/rare shape):
+//
+//	0: user       "go"
+//	1: assistant  tool_use "call_a"  (orphan tool_use)
+//	2: assistant  tool_use "call_b"  (orphan tool_use)
+//	3: assistant  tool_use "call_c"  ← owner of the kept group
+//	4: tool       result for call_c
+//	5: user       "thanks"
+//
+// keepCount=2: excludeUpTo=4 → tool result → move back to the owner (index 3).
+// The second guard then retreats exactly one step (3→2) because index 3 is an
+// assistant, not a tool result. It must NOT keep retreating (no cascade to 1).
+// Excluded = {1}.
+func TestExcludeOldMessages_MoveBack_SecondGuardNoCascade(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:move-back-no-cascade"
+
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "go"}) // 0
+	for i, id := range []string{"call_a", "call_b", "call_c"} {            // 1, 2, 3
+		sm.AddFullMessage(key, providers.Message{
+			Role:      "assistant",
+			Content:   fmt.Sprintf("assistant turn %d", i),
+			ToolCalls: []providers.ToolCall{{ID: id, Function: &providers.FunctionCall{Name: "exec"}}},
+		})
+	}
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "result for call_c", ToolCallID: "call_c"}) // 4
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "thanks"})                                  // 5
+
+	sm.ExcludeOldMessagesFromContext(key, 2)
+
+	session := sm.GetOrCreate(key)
+	// One step back only: index 1 is excluded, index 2 (and 3) are kept.
+	// A cascading guard would have excluded nothing (boundary → 1 → early-exit).
+	assertExcluded(t, session.Messages, []int{1})
+	if countExcluded(session.Messages) != 1 {
+		t.Errorf("expected exactly 1 excluded (single-step retreat), got %d", countExcluded(session.Messages))
+	}
+}
+
+// TestExcludeOldMessages_MoveBack_ForceCompressionKeepCount pins D3: the policy
+// applies uniformly to every keepCount, including the intermediate
+// `len(history) - mid` that forceCompression uses (pkg/agent/session_manager.go).
+// The boundary lands on a tool result inside the history and the move-back
+// keeps the whole group, exactly as with the small keepCount of summarize.
+func TestExcludeOldMessages_MoveBack_ForceCompressionKeepCount(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:move-back-force-compression"
+
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "start"}) // 0
+	sm.AddFullMessage(key, providers.Message{                                 // 1
+		Role:      "assistant",
+		Content:   "searching",
+		ToolCalls: []providers.ToolCall{{ID: "call_a", Function: &providers.FunctionCall{Name: "search"}}},
+	})
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "result_a", ToolCallID: "call_a"}) // 2
+	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "answer a"})                  // 3
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "more"})                           // 4
+	sm.AddFullMessage(key, providers.Message{                                                          // 5
+		Role:      "assistant",
+		Content:   "grepping",
+		ToolCalls: []providers.ToolCall{{ID: "call_b", Function: &providers.FunctionCall{Name: "exec"}}},
+	})
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "result_b", ToolCallID: "call_b"}) // 6 ← boundary
+	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "answer b"})                  // 7
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "even more"})                      // 8
+	sm.AddFullMessage(key, providers.Message{                                                          // 9
+		Role:      "assistant",
+		Content:   "reading",
+		ToolCalls: []providers.ToolCall{{ID: "call_c", Function: &providers.FunctionCall{Name: "read_file"}}},
+	})
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "result_c", ToolCallID: "call_c"}) // 10
+	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "answer c"})                  // 11
+	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "done"})                      // 12
+
+	// Mirror forceCompression: mid = len(conversation)/2 with
+	// conversation = history[:len-1]; keepCount = len(history) - mid.
+	historyLen := len(sm.GetOrCreate(key).Messages)
+	mid := (historyLen - 1) / 2
+	keepCount := historyLen - mid
+
+	// excludeUpTo = mid = 6, landing on the result for "call_b". The move-back
+	// resolves the owner at index 5 and keeps the whole group {5,6}.
+	sm.ExcludeOldMessagesFromContext(key, keepCount)
+
+	session := sm.GetOrCreate(key)
+	// Human turns: 0, 4, 8. Last 2: {4, 8}. preserved = {0, 4, 8}.
+	// Range [1, 5): excluded = {1, 2, 3}; the group {5,6} and everything after
+	// the (moved-back) boundary is kept.
+	assertExcluded(t, session.Messages, []int{1, 2, 3})
+	for _, idx := range []int{5, 6} {
+		if session.Messages[idx].ExcludeFromContext {
+			t.Errorf("index %d should NOT be excluded (whole tool group kept)", idx)
+		}
+	}
+	assertNoOrphanToolPairs(t, session.Messages)
 }
 
 // TestEvictExcluded_FoldsPreservedHoles verifies that EvictExcludedMessages
@@ -1309,15 +1650,21 @@ func TestTruncateHistory_ClearsExclusionState(t *testing.T) {
 }
 
 // TestRemoveLastMessage_BoundaryGuardPreventsWipe pins the contract of the
-// length guard in RemoveLastMessage (manager.go:265-269): a stale
-// excludeBoundary larger than the new slice length must not survive, because
-// the eviction clamp (evictUpTo = min(lastExcluded+1, excludeBoundary)) is
-// inert above len(Messages) and would evict the whole slice.
+// length guard in RemoveLastMessage (manager.go): a stale excludeBoundary
+// larger than the new slice length must not survive, because the eviction clamp
+// (evictUpTo = min(lastExcluded+1, excludeBoundary)) is inert above
+// len(Messages) and would evict the whole slice.
 //
-// Layout: 8 messages whose last two are tool results. The anti-split guard in
-// ExcludeOldMessagesFromContext walks excludeUpTo from 6 to 8 (indices 6 and 7
-// are tool results), so excludeBoundary == len == 8. RemoveLastMessage trims
-// the last message (len 8→7) and the guard must reset the boundary to 0.
+// The setup is decoupled from the compaction policy: it used to lean on the
+// anti-splice forward-push to walk excludeUpTo to len on a tool-result tail,
+// but the Option A move-back policy (#343) no longer does. The post-compaction
+// state (boundary == len with the whole prefix excluded) is constructed
+// directly instead — the guard under test is oblivious to how that state
+// arose.
+//
+// Layout: 8 messages. Setup pins excludeBoundary == len == 8 and excludes
+// everything from index 1 on (a full-prefix compaction). RemoveLastMessage
+// trims the last message (len 8→7) and the guard must reset the boundary to 0.
 //
 // Note for future mutations: before the structural invariant landed in
 // EvictExcludedMessages, removing this guard also wiped the resident context
@@ -1370,14 +1717,25 @@ func TestRemoveLastMessage_BoundaryGuardPreventsWipe(t *testing.T) {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// Exclude with keepCount=2: excludeUpTo = 8 - 2 = 6.
-	// Index 6 is a tool result → anti-split guard pushes excludeUpTo to 7.
-	// Index 7 is also a tool result → pushed to 8.
-	// excludeBoundary = 8 = len(Messages).
-	sm.ExcludeOldMessagesFromContext(key, 2)
+	// Construct the post-compaction state directly: boundary pinned at len and
+	// the whole prefix excluded (a full-prefix compaction). This is the state
+	// the old forward-push produced on a tool-result tail, and it is what the
+	// guard in RemoveLastMessage must keep within bounds.
+	sm.mu.Lock()
+	session, ok := sm.sessions[key]
+	if !ok {
+		sm.mu.Unlock()
+		t.Fatalf("session %q not resident", key)
+	}
+	session.excludeBoundary = len(session.Messages)
+	for i := 1; i < len(session.Messages); i++ {
+		session.Messages[i].ExcludeFromContext = true
+	}
+	session.excludedRange = [2]int{1, len(session.Messages)}
+	sm.mu.Unlock()
 
-	session := sm.GetOrCreate(key)
-	t.Logf("after Exclude: len=%d boundary=%d", len(session.Messages), session.excludeBoundary)
+	session = sm.GetOrCreate(key)
+	t.Logf("after setup: len=%d boundary=%d", len(session.Messages), session.excludeBoundary)
 	if session.excludeBoundary != 8 {
 		t.Fatalf("precondition failed: excludeBoundary = %d, want 8 (= len)", session.excludeBoundary)
 	}

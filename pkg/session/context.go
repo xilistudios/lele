@@ -124,12 +124,60 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 	excludeUpTo := len(session.Messages) - keepCount
 
 	// Adjust boundary to avoid splitting tool_use/tool_result groups.
-	// If the first kept message (at excludeUpTo) is a tool result whose
-	// corresponding assistant tool_use is in the excluded range, move the
-	// boundary forward to exclude the tool_result too. Repeat for any
-	// consecutive tool results in the same group.
-	for excludeUpTo < len(session.Messages) && isToolResultMessage(session.Messages[excludeUpTo]) {
-		excludeUpTo++
+	//
+	// #343: when the first kept message (at excludeUpTo) is a tool result,
+	// move the boundary BACK to the assistant that owns the tool group
+	// (located by ToolCallID) so the whole group stays in the kept tail. The
+	// previous forward-push walked the boundary to the end of the history on
+	// the degenerate shape (assistant with N tool_calls + N results, small
+	// keepCount), leaving zero messages in the kept tail: the #340
+	// no-emptying invariant then reduced eviction to a no-op that kept
+	// excluded rows resident in RAM, and the cold-load fallback could leave an
+	// orphaned tool_result at resident[0].
+	if excludeUpTo < len(session.Messages) && isToolResultMessage(session.Messages[excludeUpTo]) {
+		msgs := session.Messages
+
+		// 1. Walk back over the contiguous run of tool results to its start.
+		start := excludeUpTo
+		for start > 0 && isToolResultMessage(msgs[start-1]) {
+			start--
+		}
+
+		// 2. Locate the owner by ToolCallID in the bounded window
+		// [max(0, start-ownerScanWindow), start). In realistic layouts the
+		// owner is the message immediately before the run, so this is O(1);
+		// the bound avoids an O(len) scan when the owner is absent (perf
+		// hygiene). Matching by ToolCallID — not adjacency — is what keeps
+		// interleaved layouts free of orphans.
+		const ownerScanWindow = 8
+		tid := msgs[excludeUpTo].ToolCallID
+		owner := -1
+		lo := start - ownerScanWindow
+		if lo < 0 {
+			lo = 0
+		}
+		for j := start - 1; j >= lo; j-- {
+			if msgs[j].Role != "assistant" {
+				continue
+			}
+			for _, tc := range msgs[j].ToolCalls {
+				if tc.ID == tid {
+					owner = j
+					break
+				}
+			}
+			if owner >= 0 {
+				break
+			}
+		}
+
+		// 3. Owner found → keep the whole group. Otherwise keep the run and
+		// let providers.HealToolCallPairs drop any orphan at request time.
+		if owner >= 0 {
+			excludeUpTo = owner
+		} else {
+			excludeUpTo = start
+		}
 	}
 
 	// Also check: if the last excluded message is an assistant with tool_use

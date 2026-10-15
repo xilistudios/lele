@@ -223,15 +223,18 @@ func msgContent(i int) string {
 }
 
 // TestEvictExcluded_BoundaryEqualToLenKeepsContext verifies the structural
-// invariant that EvictExcludedMessages never empties the entire resident
-// slice when excludeBoundary == len(Messages). The anti-split guard in
-// ExcludeOldMessagesFromContext pushes excludeUpTo to the end when the
-// session tail is a tool-result group (an assistant with ≥2 tool_calls
-// followed by their results). With the boundary preserved through SetHistory
-// (the production path in summarizeSessionCore), the clamp would be inert
-// and evictUpTo would reach len, wiping all context. The structural
+// invariant that EvictExcludedMessages never empties the entire resident slice
+// when excludeBoundary == len(Messages). With the boundary preserved through
+// SetHistory (the production path in summarizeSessionCore), the clamp would be
+// inert and evictUpTo would reach len, wiping all context. The structural
 // invariant caps evictUpTo at the last non-excluded message so at least one
 // message survives.
+//
+// The boundary == len state used to come from the anti-splice forward-push on a
+// tool-result tail; the Option A move-back policy (#343) no longer produces it,
+// so the state is constructed directly here. The invariant is policy-agnostic
+// and must keep covering the cold-load / stale-boundary / pin-widening routes
+// that still reach it.
 func TestEvictExcluded_BoundaryEqualToLenKeepsContext(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -269,14 +272,24 @@ func TestEvictExcluded_BoundaryEqualToLenKeepsContext(t *testing.T) {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// Exclude with keepCount=2: excludeUpTo = 6 - 2 = 4.
-	// Index 4 is a tool result → anti-split guard pushes to 5.
-	// Index 5 is a tool result → pushed to 6 = len.
-	// excludeBoundary = 6.
-	sm.ExcludeOldMessagesFromContext(key, 2)
+	// Construct the boundary == len state directly: the old anti-splice
+	// forward-push produced it on a tool-result tail, but the Option A
+	// move-back policy (#343) no longer does. The invariant under test does
+	// not depend on how the state arose.
+	sm.mu.Lock()
+	session, ok := sm.sessions[key]
+	if !ok {
+		sm.mu.Unlock()
+		t.Fatalf("session %q not resident", key)
+	}
+	session.excludeBoundary = len(session.Messages)
+	for i := 1; i < len(session.Messages); i++ {
+		session.Messages[i].ExcludeFromContext = true
+	}
+	sm.mu.Unlock()
 
-	session := sm.GetOrCreate(key)
-	t.Logf("after Exclude: len=%d boundary=%d", len(session.Messages), session.excludeBoundary)
+	session = sm.GetOrCreate(key)
+	t.Logf("after setup: len=%d boundary=%d", len(session.Messages), session.excludeBoundary)
 	if session.excludeBoundary != 6 {
 		t.Fatalf("precondition failed: excludeBoundary = %d, want 6 (= len)", session.excludeBoundary)
 	}
