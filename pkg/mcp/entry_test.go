@@ -1363,3 +1363,321 @@ func TestEntryRaw_TE4_NotFoundAndErrors(t *testing.T) {
 		})
 	}
 }
+
+// T-U10: the optional "auth" block is serialized canonically — a compact
+// object holding only non-zero fields, in the fixed key order — and it lands
+// exactly between "headers" (or "type" when there are no headers) and
+// "description".
+func TestUpsertEntry_TU10_AuthCanonicalBytes(t *testing.T) {
+	full := &AuthSpec{
+		Type:                         "oauth",
+		Scopes:                       []string{"read", "write"},
+		ClientID:                     "client-1",
+		ClientSecret:                 "secret-1",
+		RedirectURI:                  "http://127.0.0.1:8080/cb",
+		AuthServerMetadataURL:        "https://auth.example/.well-known/oauth-authorization-server",
+		ProtectedResourceMetadataURL: "https://mcp.example/.well-known/oauth-protected-resource",
+	}
+	const fullAuth = `{"type":"oauth","scopes":["read","write"],"client_id":"client-1","client_secret":"secret-1","redirect_uri":"http://127.0.0.1:8080/cb","auth_server_metadata_url":"https://auth.example/.well-known/oauth-authorization-server","protected_resource_metadata_url":"https://mcp.example/.well-known/oauth-protected-resource"}`
+
+	tests := []struct {
+		name   string
+		entry  ServerConfig
+		want   string
+		before string // the key that must immediately precede "auth"
+	}{
+		{
+			name: "after headers, before description",
+			entry: ServerConfig{
+				URL:         "https://mcp.example/mcp",
+				Type:        "http",
+				Headers:     map[string]string{"Authorization": "Bearer ${KEY}"},
+				Auth:        full,
+				Description: "remote",
+			},
+			want:   `{"mcpServers":{"s":{"url":"https://mcp.example/mcp","type":"http","headers":{"Authorization":"Bearer ${KEY}"},"auth":` + fullAuth + `,"description":"remote"}}}`,
+			before: `"headers":`,
+		},
+		{
+			name: "no headers: after type, before description",
+			entry: ServerConfig{
+				URL:         "https://x",
+				Type:        "sse",
+				Auth:        &AuthSpec{Type: "oauth", Scopes: []string{"read"}},
+				Description: "d",
+			},
+			want:   `{"mcpServers":{"s":{"url":"https://x","type":"sse","auth":{"type":"oauth","scopes":["read"]},"description":"d"}}}`,
+			before: `"type":`,
+		},
+		{
+			name: "remote entry without an explicit type",
+			entry: ServerConfig{
+				URL:         "https://x",
+				Auth:        full,
+				Description: "d",
+			},
+			want:   `{"mcpServers":{"s":{"url":"https://x","auth":` + fullAuth + `,"description":"d"}}}`,
+			before: `"url":`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "mcp.json")
+			res, err := UpsertEntry(path, "s", tt.entry)
+			if err != nil {
+				t.Fatalf("UpsertEntry() error = %v", err)
+			}
+			if !res.Created || !res.Changed || res.Replaced {
+				t.Fatalf("result = %+v, want Created+Changed", res)
+			}
+			got := readRawFixture(t, path)
+			if got != tt.want {
+				t.Fatalf("canonical bytes:\n got: %s\nwant: %s", got, tt.want)
+			}
+			// Positional proof of the fixed order: "auth" sits after its
+			// predecessor key and before "description".
+			ai := strings.Index(got, `"auth":`)
+			bi := strings.Index(got, tt.before)
+			di := strings.Index(got, `"description":`)
+			if ai < 0 || bi < 0 || di < 0 {
+				t.Fatalf("expected key missing (auth=%d, %s=%d, description=%d): %s", ai, tt.before, bi, di, got)
+			}
+			if bi >= ai || ai >= di {
+				t.Fatalf(`"auth" at %d is not strictly between %s at %d and "description" at %d: %s`, ai, tt.before, bi, di, got)
+			}
+		})
+	}
+}
+
+// T-U11: an entry carrying an auth block is idempotent — the second identical
+// upsert leaves the file byte-identical and reports a pure no-op (auth
+// included, so the block never drifts between two runs).
+func TestUpsertEntry_TU11_AuthIdempotent(t *testing.T) {
+	entry := ServerConfig{
+		URL:  "https://mcp.example/mcp",
+		Type: "http",
+		// Map iteration order is random: the sorted keys must still make the
+		// serialization stable.
+		Headers: map[string]string{"X-B": "2", "X-A": "1"},
+		Auth: &AuthSpec{
+			Type:        "oauth",
+			Scopes:      []string{"a", "b"},
+			ClientID:    "id",
+			RedirectURI: "http://localhost:1234/cb",
+		},
+		Description: "d",
+	}
+	path := filepath.Join(t.TempDir(), "mcp.json")
+
+	first, err := UpsertEntry(path, "s", entry)
+	if err != nil {
+		t.Fatalf("UpsertEntry() error = %v", err)
+	}
+	if !first.Created || !first.Changed || first.Replaced {
+		t.Fatalf("first result = %+v, want Created+Changed", first)
+	}
+	after := readRawFixture(t, path)
+	if !strings.Contains(after, `"auth":{"type":"oauth","scopes":["a","b"],"client_id":"id","redirect_uri":"http://localhost:1234/cb"}`) {
+		t.Fatalf("auth block not canonical on disk: %s", after)
+	}
+
+	second, err := UpsertEntry(path, "s", entry)
+	if err != nil {
+		t.Fatalf("second UpsertEntry() error = %v", err)
+	}
+	if second.Created || second.Replaced || second.Changed {
+		t.Fatalf("second result = %+v, want a pure no-op", second)
+	}
+	if got := readRawFixture(t, path); got != after {
+		t.Fatalf("bytes rewritten by a no-op:\n got: %s\nwant: %s", got, after)
+	}
+}
+
+// T-U12: auth values are RAW. "${MY_SECRET}" is written byte-for-byte (never
+// expanded: the referenced value must not leak into the file) and "$$" is
+// written verbatim too (it only collapses at READ time), with no HTML
+// escaping either.
+func TestUpsertEntry_TU12_AuthValuesWrittenVerbatim(t *testing.T) {
+	const canary = "LEAKME-t-u12-auth"
+	t.Setenv("MY_SECRET", canary)
+
+	entry := ServerConfig{
+		URL: "https://x",
+		Auth: &AuthSpec{
+			Type:         "oauth",
+			Scopes:       []string{"$${LITERAL}", "${SCOPE}"},
+			ClientID:     "${CLIENT_ID}",
+			ClientSecret: "${MY_SECRET}",
+			RedirectURI:  "http://127.0.0.1:0/cb?a=1&b=2",
+		},
+	}
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	if _, err := UpsertEntry(path, "s", entry); err != nil {
+		t.Fatalf("UpsertEntry() error = %v", err)
+	}
+	got := readRawFixture(t, path)
+	for _, ref := range []string{
+		`"client_secret":"${MY_SECRET}"`,
+		`"client_id":"${CLIENT_ID}"`,
+		`"scopes":["$${LITERAL}","${SCOPE}"]`,
+		`"redirect_uri":"http://127.0.0.1:0/cb?a=1&b=2"`,
+	} {
+		if !strings.Contains(got, ref) {
+			t.Fatalf("file does not contain %s:\n%s", ref, got)
+		}
+	}
+	if strings.Contains(got, canary) {
+		t.Fatalf("expansion ran at write time:\n%s", got)
+	}
+	if strings.Contains(got, `\u0026`) || strings.Contains(got, `\$`) {
+		t.Fatalf("escaping rewrote user bytes:\n%s", got)
+	}
+
+	// The raw view returns the same literal bytes: still unexpanded.
+	raw, found, err := EntryRaw(path, "s")
+	if err != nil {
+		t.Fatalf("EntryRaw() error = %v", err)
+	}
+	if !found {
+		t.Fatal("EntryRaw() found = false, want true")
+	}
+	if strings.Contains(string(raw), canary) {
+		t.Fatalf("expansion ran in EntryRaw: %s", raw)
+	}
+	var sc ServerConfig
+	if err := json.Unmarshal(raw, &sc); err != nil {
+		t.Fatalf("unmarshal raw member: %v", err)
+	}
+	if sc.Auth == nil {
+		t.Fatal("auth block lost in the raw view")
+	}
+	if sc.Auth.ClientSecret != "${MY_SECRET}" {
+		t.Fatalf("ClientSecret = %q, want the literal ${MY_SECRET}", sc.Auth.ClientSecret)
+	}
+	if sc.Auth.Scopes[0] != "$${LITERAL}" {
+		t.Fatalf("Scopes[0] = %q, want the literal $${LITERAL}", sc.Auth.Scopes[0])
+	}
+}
+
+// T-U13: a declared-but-empty auth block is NOT dropped: it is written as
+// "{}", the raw view hands it back and the reader sees a non-nil Auth (which
+// is how "declared, discovery will fill it" is spelled).
+func TestUpsertEntry_TU13_AuthEmptyObjectRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	if _, err := UpsertEntry(path, "s", ServerConfig{URL: "https://x", Auth: &AuthSpec{}}); err != nil {
+		t.Fatalf("UpsertEntry() error = %v", err)
+	}
+	want := `{"mcpServers":{"s":{"url":"https://x","auth":{}}}}`
+	if got := readRawFixture(t, path); got != want {
+		t.Fatalf("canonical bytes:\n got: %s\nwant: %s", got, want)
+	}
+
+	raw, found, err := EntryRaw(path, "s")
+	if err != nil {
+		t.Fatalf("EntryRaw() error = %v", err)
+	}
+	if !found {
+		t.Fatal("EntryRaw() found = false, want true")
+	}
+	if !strings.Contains(string(raw), `"auth":{}`) {
+		t.Fatalf(`raw = %s, want it to contain "auth":{}`, raw)
+	}
+	var sc ServerConfig
+	if err := json.Unmarshal(raw, &sc); err != nil {
+		t.Fatalf("unmarshal raw member: %v", err)
+	}
+	if sc.Auth == nil {
+		t.Fatal("Auth = nil, want the declared empty block back")
+	}
+	if !reflect.DeepEqual(sc.Auth, &AuthSpec{}) {
+		t.Fatalf("Auth = %+v, want &AuthSpec{}", sc.Auth)
+	}
+}
+
+// T-U14: Auth == nil means "the caller declared no auth block" — no "auth"
+// key appears anywhere in the file, and the reader reports a nil Auth.
+func TestUpsertEntry_TU14_AuthOmittedWhenNil(t *testing.T) {
+	entry := ServerConfig{
+		URL:         "https://x",
+		Type:        "http",
+		Headers:     map[string]string{"H": "v"},
+		Description: "d",
+	}
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	if _, err := UpsertEntry(path, "s", entry); err != nil {
+		t.Fatalf("UpsertEntry() error = %v", err)
+	}
+	got := readRawFixture(t, path)
+	if strings.Contains(got, `"auth"`) {
+		t.Fatalf("a nil Auth emitted a block:\n%s", got)
+	}
+	want := `{"mcpServers":{"s":{"url":"https://x","type":"http","headers":{"H":"v"},"description":"d"}}}`
+	if got != want {
+		t.Fatalf("canonical bytes:\n got: %s\nwant: %s", got, want)
+	}
+
+	raw, found, err := EntryRaw(path, "s")
+	if err != nil {
+		t.Fatalf("EntryRaw() error = %v", err)
+	}
+	if !found {
+		t.Fatal("EntryRaw() found = false, want true")
+	}
+	var sc ServerConfig
+	if err := json.Unmarshal(raw, &sc); err != nil {
+		t.Fatalf("unmarshal raw member: %v", err)
+	}
+	if sc.Auth != nil {
+		t.Fatalf("Auth = %+v, want nil", sc.Auth)
+	}
+}
+
+// T-U15: the full round-trip an `mcp edit` needs. UpsertEntry → EntryRaw →
+// json.Unmarshal must hand back an Auth deep-equal to the one that went in,
+// for every spec shape (values are raw, so no expansion intervenes).
+func TestUpsertEntry_TU15_AuthRoundTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		auth *AuthSpec
+	}{
+		{
+			name: "full spec",
+			auth: &AuthSpec{
+				Type:                         "oauth",
+				Scopes:                       []string{"read", "write", "admin"},
+				ClientID:                     "client-1",
+				ClientSecret:                 "s3cret",
+				RedirectURI:                  "http://127.0.0.1:9/cb",
+				AuthServerMetadataURL:        "https://auth.example/as",
+				ProtectedResourceMetadataURL: "https://mcp.example/pr",
+			},
+		},
+		{name: "type only", auth: &AuthSpec{Type: "none"}},
+		{name: "client id only", auth: &AuthSpec{ClientID: "just-an-id"}},
+		{name: "scopes only", auth: &AuthSpec{Scopes: []string{"a"}}},
+		{name: "declared but empty", auth: &AuthSpec{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := ServerConfig{URL: "https://x", Type: "http", Auth: tt.auth}
+			path := filepath.Join(t.TempDir(), "mcp.json")
+			if _, err := UpsertEntry(path, "s", entry); err != nil {
+				t.Fatalf("UpsertEntry() error = %v", err)
+			}
+			raw, found, err := EntryRaw(path, "s")
+			if err != nil {
+				t.Fatalf("EntryRaw() error = %v", err)
+			}
+			if !found {
+				t.Fatal("EntryRaw() found = false, want true")
+			}
+			var got ServerConfig
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatalf("unmarshal raw member: %v", err)
+			}
+			if !reflect.DeepEqual(got.Auth, tt.auth) {
+				t.Fatalf("round-trip Auth = %+v, want %+v", got.Auth, tt.auth)
+			}
+		})
+	}
+}

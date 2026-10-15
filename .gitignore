@@ -32,6 +32,9 @@ config/config.json
 # Test
 coverage.txt
 coverage.html
+# upload fixtures a test run roots in the process cwd; the intended location is
+# <LeleDir>/tmp/uploads (pkg/channels/native_lele_dir_test.go)
+pkg/channels/tmp/
 
 # OS
 .DS_Store

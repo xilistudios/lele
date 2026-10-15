@@ -39,6 +39,12 @@ export interface MCPServerSummary {
   disabled?: boolean
   env_keys?: string[]
   header_keys?: string[]
+  /**
+   * Secret-free auth report of this row. Omitted (`omitempty`) when the server
+   * has no url, no headers and no auth state — i.e. when there is nothing to
+   * authenticate with and nothing to report.
+   */
+  auth?: MCPServerAuth
 }
 
 /** One INERT copy of a name below the winner (a name appears exactly once). */
@@ -117,4 +123,35 @@ export interface MCPValidateResponse {
   valid: boolean
   warnings?: string[]
   error?: string
+}
+/**
+ * MCP OAuth DTOs (pkg/channels/rest_mcp.go): starting a flow, polling it and
+ * the secret-free auth report carried by each inventory row. Same rule as the
+ * rest of the file — booleans, counts and fixed strings, never a value: no
+ * field here may ever carry a token, client id/secret, code or PKCE verifier.
+ */
+/** Secret-free auth report of one MCP server: booleans and a fixed method only. */
+export interface MCPServerAuth {
+  required: boolean
+  authenticated: boolean
+  /** '' | 'oauth' | 'headers' */
+  method: string
+}
+
+/** Response to starting an OAuth flow. */
+export interface MCPAuthStart {
+  flow_id: string
+  auth_url: string
+  redirect_uri: string
+  expires_at: string // RFC 3339
+}
+
+/** Poll/manual-completion response of a pending OAuth flow. */
+export interface MCPAuthStatus {
+  flow_id: string
+  server: string
+  /** 'pending' | 'done' | 'error' */
+  state: string
+  error?: string
+  authenticated: boolean
 }

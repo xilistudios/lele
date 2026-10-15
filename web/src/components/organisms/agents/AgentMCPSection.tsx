@@ -20,6 +20,12 @@
  *    where the user is looking; a 409 `mcp_entry_shadowed` surfaces the
  *    server's message plus an explicit "write anyway (force)" retry.
  *
+ * AUTH (OAuth) is split the same way the editor is: the SECTION owns which
+ * row's flow is open, the logout mutation and the per-row failure pairing
+ * (a logout failure lands on its row, like a toggle failure), while the flow
+ * itself — start-once, poll, manual completion, cancel — lives inside
+ * MCPAuthModal, which needs nothing but the agent and the server name.
+ *
  * Like the Skills tab's workspace side, toggles write immediately (no Save);
  * unlike anything else on this page, the tab writes NO config at all
  * (`SECTION_PATHS.mcp = []`), so there is no dirty dot and no draft dependency
@@ -34,6 +40,7 @@ import {
   mcpErrorCode,
   useAgentMCPInventory,
   useMCPDriveToggle,
+  useMCPLogout,
   useMCPRawFile,
 } from '../../../hooks/useAgentMCP'
 import type { MCPLayerName, MCPQueryLayer, MCPServerRow } from '../../../lib/mcpTypes'
@@ -42,6 +49,7 @@ import { CloseIcon } from '../../atoms/Icons'
 import { AgentMCPLayers, isStoredLayer } from './AgentMCPLayers'
 import { AgentMCPRawEditor, type MCPRawNav } from './AgentMCPRawEditor'
 import { AgentMCPServerRow } from './AgentMCPServerRow'
+import { MCPAuthModal } from './MCPAuthModal'
 
 type Props = {
   /** Agent id passed by AgentConfigPage — every MCP request is keyed with it. */
@@ -80,6 +88,17 @@ export function AgentMCPSection({ agentId }: Props) {
   >({})
   /** Navigation held back while the open draft is dirty (inline warning). */
   const [nav, setNav] = useState<MCPRawNav | null>(null)
+
+  // ---------- per-row auth (sign-in flow of one server / sign-out) ----------
+  /**
+   * Server NAME whose sign-in modal is open; null ⇔ closed. Only ONE flow can
+   * be watched at a time (the modal owns its hooks), and the section needs to
+   * know which row it belongs to for the in-flight and error pairing below.
+   */
+  const [authServer, setAuthServer] = useState<string | null>(null)
+  /** Name of the last logout attempt — pairs the mutation error with its row. */
+  const [logoutName, setLogoutName] = useState<string | null>(null)
+  const logout = useMCPLogout(agentId)
 
   // Lazy fetch: null layer keeps the query disabled while closed (and for
   // every layer the user is NOT editing).
@@ -201,6 +220,34 @@ export function AgentMCPSection({ agentId }: Props) {
       : String(toggle.error)
     : ''
   const forceOffered = toggle.isError && mcpErrorCode(toggle.error) === 'mcp_entry_shadowed'
+
+  /** Forget one server's stored credential. The hook invalidates the inventory. */
+  const runLogout = (row: MCPServerRow) => {
+    setLogoutName(row.name)
+    logout.mutate(row.name)
+  }
+
+  /**
+   * The failure to show on a row, if any: a toggle write and a logout are the
+   * two row-scoped actions, and each carries its own machine code. Only ONE of
+   * them can be paired with the row at a time — a refetch keeps `attempt` and
+   * `logoutName` pointing at the row they belong to.
+   */
+  const rowFailure = (
+    name: string,
+  ): { message: string; code: string | undefined; force: boolean } | null => {
+    if (attempt?.name === name && toggle.isError) {
+      return { message: toggleError, code: mcpErrorCode(toggle.error), force: forceOffered }
+    }
+    if (logoutName === name && logout.isError) {
+      return {
+        message: logout.error instanceof Error ? logout.error.message : String(logout.error),
+        code: mcpErrorCode(logout.error),
+        force: false,
+      }
+    }
+    return null
+  }
 
   /**
    * The last successful toggle answered `changed:false`: the server wrote
@@ -361,23 +408,45 @@ export function AgentMCPSection({ agentId }: Props) {
         </p>
       ) : (
         <ul data-testid="mcp-rows" className="max-w-[820px] space-y-2.5">
-          {visibleServers.map((row) => (
-            <AgentMCPServerRow
-              key={row.name}
-              row={row}
-              layers={layers}
-              layerLabel={layerLabel}
-              onEdit={openEditor}
-              pending={toggle.isPending && attempt?.name === row.name}
-              busy={toggle.isPending}
-              onToggle={runToggle}
-              error={attempt?.name === row.name && toggle.isError ? toggleError : null}
-              forceOffered={forceOffered}
-              onForceRetry={forceRetry}
-              noChange={noChangeName === row.name}
-            />
-          ))}
+          {visibleServers.map((row) => {
+            const failure = rowFailure(row.name)
+            return (
+              <AgentMCPServerRow
+                key={row.name}
+                row={row}
+                layers={layers}
+                layerLabel={layerLabel}
+                onEdit={openEditor}
+                pending={toggle.isPending && attempt?.name === row.name}
+                busy={toggle.isPending}
+                onToggle={runToggle}
+                error={failure?.message ?? null}
+                errorCode={failure?.code ?? null}
+                forceOffered={failure?.force ?? false}
+                onForceRetry={forceRetry}
+                noChange={noChangeName === row.name}
+                // The open modal owns its flow: while it is up (and while its
+                // start POST is on the wire) this row's sign-in is disabled.
+                authBusy={authServer === row.name || (logout.isPending && logoutName === row.name)}
+                onAuthenticate={(target) => setAuthServer(target.name)}
+                onLogout={runLogout}
+              />
+            )
+          })}
         </ul>
+      )}
+
+      {/* ---------- sign-in of ONE server. Keyed by name so every open starts a
+          FRESH flow (and a fresh start-once guard) instead of inheriting the
+          previous server's flow id. ---------- */}
+      {authServer !== null && (
+        <MCPAuthModal
+          key={authServer}
+          agentId={agentId}
+          serverName={authServer}
+          open
+          onClose={() => setAuthServer(null)}
+        />
       )}
     </div>
   )

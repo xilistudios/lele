@@ -7,8 +7,11 @@ wrapper live in `pkg/mcp`; the registry-side loader (`load_mcp_tools`) lives in
 `pkg/agent`.
 
 **v1 scope: tools only.** MCP *resources*, *prompts*, *sampling*, *elicitation*
-and *roots* are not supported, and there is no OAuth — remote servers are
-reached with the headers you configure.
+and *roots* are not supported. A remote server that answers `401` with an
+**OAuth 2.1** challenge is supported through an `auth` block plus an
+interactive login (`lele mcp auth`, `/mcp auth` in the TUI, the agent panel in
+the WebUI — see [OAuth 2.1](#oauth-21-remote-servers)); a server that only needs
+a static token is still reached with the `headers` you configure.
 
 ## Configuration (`mcp.json`)
 
@@ -31,6 +34,7 @@ layer's file uses the same shape:
 | `url` | string | remote | Endpoint. Mutually exclusive with `command`. |
 | `type` | `"http"` \| `"sse"` | remote | Transport; defaults to `http` when omitted. Ignored for stdio. |
 | `headers` | object | remote | Extra HTTP headers. Values expand `${VAR}`. |
+| `auth` | object | remote | OAuth 2.1 settings for this server. See [OAuth 2.1](#oauth-21-remote-servers). |
 | `description` | string | both | What the LLM sees in the `## MCP Servers` prompt section before loading. |
 | `disabled` | bool | both | Parsed but never activated. A higher layer can switch off a server enabled below. |
 
@@ -98,6 +102,76 @@ A temporarily disabled server (parsed, never dialed):
 }
 ```
 
+## OAuth 2.1 (remote servers)
+
+A remote server that wants credentials answers `401` with a `WWW-Authenticate`
+challenge instead of serving tools. Add an `auth` block to tell lele the server
+is expected to need a login, then run it once interactively:
+
+```json
+{
+  "mcpServers": {
+    "issues": {
+      "url": "https://mcp.example.com/mcp",
+      "type": "http",
+      "auth": { "type": "oauth", "scopes": ["read", "write"] },
+      "description": "Issue tracker tools"
+    }
+  }
+}
+```
+
+| Auth field | Type | Description |
+| --- | --- | --- |
+| `type` | `"oauth"` \| `"none"` | `oauth` opts the entry into the flow. `none` (or an empty block) declares that no login is expected — the challenge is then reported as a plain failure instead of starting a flow. Omit the block entirely for a server that carries its own token in `headers`. |
+| `scopes` | string[] | Scopes to request. Empty means "whatever the server's metadata advertises". |
+| `client_id` | string | A pre-registered client id. Empty means *dynamic client registration*: lele registers itself with the authorization server and persists the result. |
+| `client_secret` | string | Secret of a pre-registered client. Requires `client_id` (`auth client_secret requires client_id`). |
+| `redirect_uri` | string | Registered redirect URI of a pre-registered client (default: an ephemeral loopback `http://127.0.0.1:<port>/callback`). |
+| `auth_server_metadata_url` | string | Override authorization-server metadata discovery. |
+| `protected_resource_metadata_url` | string | Override protected-resource metadata discovery (RFC 9728). |
+
+`client_id`, `client_secret`, `redirect_uri` and both metadata URLs expand
+`${VAR}` at read time, exactly like `env`/`headers`; `type` and `scopes` are
+literal-ish (scopes expand too, but are never a secret).
+
+The attach rule is deliberately **narrow**: OAuth is attached to a dial when
+the entry declares `auth.type: "oauth"` **or** when a `401` has actually been
+observed for that server. Attaching it to a healthy server would break it (an
+OAuth transport refuses to send anything without a usable token), so a bare
+`client_id` left over from a cancelled attempt never opts a server in.
+
+### Logging in
+
+The login is interactive and per server; the credential is stored in
+`<lele dir>/mcp-auth.json` (mode `0600`), never in `mcp.json`:
+
+- **CLI:** `lele mcp auth issues` (see [`lele mcp auth`](#lele-mcp-auth)).
+- **TUI:** `/mcp`, open the entry with `ENTER`, then press `a` (the key is owned
+  by the detail view — in the list it does nothing).
+- **WebUI:** the agent's MCP panel → **Authenticate**.
+
+The flow is OAuth 2.1 with PKCE and a loopback redirect: lele probes the server
+without credentials, reads its metadata (RFC 9728 / RFC 8414), registers a
+client if the entry has no `client_id`, opens the authorization URL and waits
+for the browser to come back. A server that advertises no registration endpoint
+is refused (`authentication is not supported … add a pre-registered client with
+--client-id/--client-secret`), and a server that completes the plain handshake
+is refused too (`does not require authentication`) — the two mean different
+things and neither starts a flow.
+
+`mcp-auth.json` is machine-local and per-lele-directory: it holds tokens a
+*specific* machine obtained from a *specific* authorization server, so it is not
+a file to sync or commit. It sits next to `mcp.json` because it is that file's
+other half — `mcp.json` says what to connect to, `mcp-auth.json` remembers what
+the server asked us to prove.
+
+Once stored, the token is used on every dial (the transport refreshes it when
+it expires) and the gateway picks it up on the next reload — no restart. To
+forget a server's token *and* its dynamic registration, use `lele mcp logout`
+(or `D: sign out` in the TUI's `/mcp` list and detail, **Sign out** in the
+WebUI panel).
+
 ## Layered files and precedence
 
 Up to three optional files are merged (lowest to highest):
@@ -138,7 +212,7 @@ copy wins at read time; the rules below decide where an edit lands.
 | --- | --- | --- |
 | WebUI agent-config tab | List, toggle and a per-layer raw JSON editor. | The selected agent (workspace filter). |
 | TUI `/mcp` | List and toggle; no editor. | The layers of the running agent. |
-| REST API | 5 routes — 2 reads (`GET /api/v1/mcp`, `GET …/{layer}/raw`), 2 writes (`PUT …/{layer}/servers/{name}/toggle`, `PUT …/{layer}/raw`) and 1 dry run (`POST /api/v1/mcp/validate`); `layer` ∈ `global`\|`agent`\|`project`\|`auto`. | One `agent_id` per call. |
+| REST API | 10 routes — 2 reads (`GET /api/v1/mcp`, `GET …/{layer}/raw`), 2 writes (`PUT …/{layer}/servers/{name}/toggle`, `PUT …/{layer}/raw`), 1 dry run (`POST /api/v1/mcp/validate`) and 5 OAuth routes — start, poll, complete and cancel a login, plus logout (routes and error codes in `docs/client-api.md`); `layer` ∈ `global`\|`agent`\|`project`\|`auto`. | One `agent_id` per call. |
 
 `auto` is a write-side alias only: it resolves to the layer that owns the
 winning entry, while stored-layer operations name `global`, `agent` or
@@ -234,6 +308,8 @@ lele mcp add <name> (--command <bin> | --url <u>) [flags]
 lele mcp remove <name> [--agent <id>] [--layer global|agent|project] [--all]
 lele mcp edit <name> [--agent <id>] [--layer global|agent|project]
 lele mcp test <name> [--agent <id>] [--timeout 30s]
+lele mcp auth <name> [--agent <id>] [--no-browser] [--manual] [--timeout 5m] [--port <n>]
+lele mcp logout <name> [--agent <id>]
 ```
 
 Every subcommand accepts `--agent <id>`: the agent whose workspace provides the
@@ -262,13 +338,26 @@ line and the per-layer file table follow the rows; discovery warnings are
 printed as `⊘ warning: …`. With no servers, the command prints
 `No MCP servers configured.`, a `lele mcp add …` hint and the global file path.
 
+A row ends with an **auth marker** whenever the server has an OAuth 2.1 answer
+to give — `[authenticated]` as soon as a credential is stored for that server,
+even when the entry declares no requirement, because that verdict is what the
+store holds — `[needs auth]` while a login is owed and none is stored, and no
+marker at all when there is neither. The TUI's
+`mcpAuthRequired` / `mcpAuthOK` and the WebUI's `auth.required` /
+`auth.authenticated` render the same two words under the same precedence, so all
+three surfaces speak one vocabulary. The marker is **appended** after the
+description, so the rest of the row keeps its shape; an entry discovery does not
+report (disabled, invalid) carries no marker at all. With no lele directory
+there is no store to ask, so no server is ever reported as needing a login.
+
 ```console
 $ lele mcp list
 !  broken             stdio   project  Issue tracker tools
 ●  filesystem         stdio   global  Read and write files under ~/notes
 ○  old-server         unknown agent
+●  issues             remote  global  GitHub issues [needs auth]
 
-3 server(s): 1 enabled, 1 disabled, 1 invalid
+4 server(s): 2 enabled, 1 disabled, 1 invalid
 
 Layers (low → high):
   global           /home/alfredo/.lele/mcp.json                (exists)
@@ -318,6 +407,44 @@ Per-layer breakdown (low → high):
   project  present=no  /home/alfredo/proj/.lele/mcp.json
 ```
 
+An entry that declares an `auth` block also prints that block — verbatim (a
+`${VAR}` stays literal) and **keys-side only**, like the other fields: `auth:`
+is the declared type, `scopes:` the requested scopes, `client id:` reports
+`(set)` / `(none)` and never the value, and `redirect:`, `as metadata:` and
+`pr metadata:` are printed only when set. A `client_secret` is never printed at
+all, under any flag. The block is followed by the **live** verdict, resolved
+through `mcp.CheckAuth` exactly like the `list` marker, so the two cannot
+disagree:
+
+```console
+$ lele mcp show issues
+MCP server "issues"
+  state:       enabled
+  layer:       global
+  file:        /home/alfredo/.lele/mcp.json
+  kind:        remote
+  url:         https://mcp.example.com/mcp
+  type:        http
+  env keys:    (none)
+  header keys: (none)
+  auth:        oauth
+  scopes:      read, write
+  client id:   (set)
+  redirect:    http://127.0.0.1:9000/callback
+  auth state:  [needs auth]
+  auth method: oauth
+```
+
+`auth state:` uses the same two bracket words — and therefore the same
+precedence — as the `list` marker: `[authenticated]` once a credential is
+stored (that verdict wins even when the entry declares no requirement),
+`[needs auth]` while a login is owed and none is stored, and `(none)` when
+there is neither. `auth method:` names the carrier the engine reports (`oauth`,
+`headers`, or `(none)`). It is shown for any auth-relevant entry — a declared
+block, a recorded 401, or a stored credential — and only when discovery reports
+the entry, so a disabled or invalid copy prints the declared block but no
+verdict.
+
 ### `lele mcp add`
 
 Creates one entry in a layer. Flags:
@@ -333,10 +460,24 @@ Creates one entry in a layer. Flags:
 | `--header KEY=VALUE` | remote HTTP header; repeatable. |
 | `--layer <l>` | target layer (default `global`). |
 | `--force` | replace an existing entry in the target layer. |
+| `--auth oauth\|none` | opt a remote entry into the OAuth 2.1 flow (`oauth`) or declare no login (`none`). |
+| `--scope <s>` | OAuth scope to request; repeatable, order preserved. |
+| `--client-id <id>` | pre-registered client id (dynamic registration fills it when empty). |
+| `--client-secret <s>` | pre-registered client secret; requires `--client-id`. |
+| `--redirect-uri <uri>` | registered redirect URI of a pre-registered client. |
+| `--auth-server-metadata-url <u>` | override authorization-server metadata discovery. |
+| `--protected-resource-metadata-url <u>` | override protected-resource metadata discovery (RFC 9728). |
 
 Exactly one of `--command` / `--url` is required. `--type` must be `http` or
 `sse` and only accompanies `--url`. An `--env`/`--header` pair without `=` or
 with an empty key is a usage error; an empty value (`KEY=`) is allowed.
+
+The auth flags are **remote-only**: any of them on a stdio entry is refused
+(`the auth flags require --url (an auth block is remote-only)`) before the file
+is touched, and a `--client-secret` without a `--client-id` is refused with the
+same rule the reader applies (`--client-secret requires --client-id`). No auth
+flag at all writes no `auth` block, so an entry that never needed OAuth stays
+byte-identical to what it was.
 
 Values are stored **raw**: `${VAR}` is written verbatim and only expanded when
 the file is read (see [`${VAR}` expansion](#var-expansion)), so `add` never
@@ -452,6 +593,11 @@ must be positive).
   one.
 - On success it prints the tool names (first 10, then `+N more`) and, when the
   server reported one, its handshake identity; a failed probe exits 1.
+- A remote server that answers the RFC 9728 challenge is reported as
+  `✗ "…" authentication required — run 'lele mcp auth …'`, which is the probe's
+  way of saying "this one needs a login". That is also the shortest way to
+  discover it for a single server; `lele mcp list` shows the same verdict for
+  every server at once as a trailing `[needs auth]` / `[authenticated]` marker.
 
 ```console
 $ lele mcp test smoke
@@ -464,6 +610,113 @@ $ lele mcp test smoke        # the agent layer holds {"smoke": {"disabled": true
 $ lele mcp test broken
 ✗ "broken" is invalid: mixes stdio and remote fields: set either command or url, not both (fix with: lele mcp edit broken)
 ```
+
+### `lele mcp auth`
+
+Runs the OAuth 2.1 flow of **one remote** server and stores the credential. The
+authorization URL is printed **before anything blocks**, alone on its own line:
+on a headless host that URL is the only way to finish, and the CLI *is* the
+headless path. The command then waits for the browser login to come back to the
+loopback listener.
+
+| Flag | Notes |
+| --- | --- |
+| `--no-browser` | never launch a browser. The URL is still printed — the flag only suppresses the launch. |
+| `--manual` | after printing the URL, read **one pasted line per attempt** from stdin and submit the authorization result it carries (see below). A refused paste is reported and asked again on the **same** flow (same URL, same PKCE verifier) instead of starting over; `:q`/`:quit` gives up, end of input ends it, and a bound of 10 attempts caps a piped stdin. |
+| `--timeout <dur>` | how long to wait for the login (Go duration, default `5m`, must be positive). The engine owns the budget and reports its expiry as `authorization timed out`. |
+| `--port <n>` | pin the loopback callback port (default `0` = an ephemeral free port), so a redirect URI registered by hand can be predicted. |
+
+The entry is resolved exactly as `test` resolves it — the winning copy, skipping
+pure `{"disabled": true}` stubs — so an **invalid** entry is refused before any
+dial (`✗ … is invalid: … (fix with: lele mcp edit …)`) and a **disabled**
+server is authorized after a note
+(`⊘ "…" is disabled in the agent layer — authorizing it directly …`). A local
+(`command`) entry has no `url` to talk to and is refused
+(`… is a local (stdio) server — authentication is not supported …`).
+
+Failures are distinguished, never collapsed: a server that needs no login
+(`does not require authentication`), one that advertises no registration
+endpoint (`authentication is not supported …`), a transport failure
+(`transport failure — the server did not complete the handshake`), a cancelled
+login, a timed-out login and a store that is unavailable each get their own
+line, and every failure exits 1. No token, authorization code, verifier, client
+id or client secret is ever printed.
+
+`--manual` submits whatever the pasted line carries, using the **frozen paste
+grammar** that the TUI and the WebUI implement — the CLI does not own a copy of
+the rule, it calls the shared engine helper `pkg/mcp.ParseAuthPaste`, so the
+same paste is accepted, refused or decoded identically on all three surfaces.
+The accepted forms are:
+
+1. a **full redirect URL** — `http://127.0.0.1:8080/callback?code=…&state=…`;
+2. a **query string** — `?code=…&state=…` or `code=…&state=…`;
+3. a **bare authorization code** — `SplxlOBeZQQYbYS6WxSbIA`;
+4. **two whitespace-separated tokens** — `<code> <state>`, a terminal
+   convenience for authorization servers that print the code and the state on
+   separate lines. Each attempt reads **one line**, so both tokens must be on
+   that same line.
+
+A URL whose query carries no `code` falls back to its `#fragment`, so a
+`response_mode=fragment` redirect still works. Anything else is refused with
+`✗ unrecognized input — paste the authorization code or the full redirect URL`
+(the same sentence covers a paste that is not an accepted form and a URL/query
+that arrived without a code: in both cases there is no code to submit). A paste
+longer than 8 KiB is refused whatever its shape. A redirect carrying `error=` is
+the authorization server **refusing** the request and is reported as such
+(`the authorization server refused the authorization (access_denied)`) instead
+of being submitted as a code; the error code is echoed only when it survives the
+engine's sanitizer, so a hostile redirect cannot push arbitrary bytes onto the
+terminal. The state is optional: a bare code leaves it empty and the engine takes
+the callback's word for it.
+
+A **failed** token exchange does not end the flow — the engine keeps it open and
+retryable — so `--manual` prints the value-free failure and asks again,
+submitting the next paste on the **same** flow (same authorization URL,
+same PKCE verifier): mistyping a code costs a retry, not a new login. Every
+attempt prints the prompt
+(`Paste the authorization code or the full redirect URL, then press ENTER:`) and
+reads **one line**, so the box stays visibly armed while the flow is live. The
+loop ends when the flow completes, when `:q` or `:quit` is entered (reported as
+`authorization canceled`, nothing submitted), at end of input
+(`no input on stdin`), or when the bound of 10 attempts is reached (reported as
+`too many refused pastes`) so a piped stdin without an EOF cannot spin. Quitting
+or reaching the bound abandons the flow — its loopback listener is released —
+and `lele mcp auth <name>` is what starts a new one. Every failure exits 1.
+
+```console
+$ lele mcp auth issues
+Authorization URL — open it in any browser (printed here for headless hosts):
+https://as.example.com/authorize?client_id=lele&state=…&code_challenge=…
+✓ "issues" authenticated; the gateway picks it up on the next reload
+
+$ lele mcp auth issues --manual --no-browser   # paste the code the browser landed on
+Authorization URL — open it in any browser (printed here for headless hosts):
+https://as.example.com/authorize?client_id=lele&state=…&code_challenge=…
+Paste the authorization code or the full redirect URL, then press ENTER:
+http://127.0.0.1:8080/callback?code=SplxlOBeZQQYbYS6WxSbIA&state=…
+✓ "issues" authenticated; the gateway picks it up on the next reload
+```
+
+### `lele mcp logout`
+
+Forgets everything the lele directory stores about one server: the token **and**
+the dynamic registration, so the next dial starts from scratch. It reports
+whether anything was actually forgotten but never *what* it was — the store's
+only exported questions are yes/no, and a token is never printed.
+
+```console
+$ lele mcp logout issues
+✓ forgot the stored credentials and registration for "issues" (the gateway drops the session on the next reload)
+
+$ lele mcp logout issues
+✓ nothing was stored for "issues" — nothing to forget (a logout that finds nothing is still a success)
+```
+
+The name does **not** have to exist in `mcp.json`: the store is keyed by server
+name, so a server you already removed can (and should) still be forgotten here.
+An empty store is exit 0 — "logout" names a desired state, that state already
+holds, and pretending otherwise would make a scripted cleanup fail on its second
+run. Only a real store failure is non-zero.
 
 ### Secret safety and liveness
 
@@ -640,8 +893,12 @@ Rules of the bridge:
   plus the `env` entries of their own config. Prefer referencing secrets via
   `${VAR}` instead of writing values into the file, and keep the file
   user-readable only.
-- **Remote servers:** no OAuth in v1 — pass the bearer token you would use
-  manually via `headers` (values expand too).
+- **Remote servers:** a static token still goes in `headers` (values expand,
+  so `${ISSUE_TRACKER_TOKEN}` keeps the secret out of the file). A server that
+  *demands* a login is handled with the `auth` block, whose credential lands in
+  `mcp-auth.json` (`0600`, machine-local, next to `mcp.json`) — never in
+  `mcp.json`, and never in a log. `mcp-auth.json` is a secret file: do not commit
+  or sync it.
 
 ## Limitations (v1)
 

@@ -61,6 +61,11 @@ type transportFactory struct {
 	stdio func(command string, env []string, args ...string) transport.Interface
 	http  func(serverURL string, headers map[string]string) (transport.Interface, error)
 	sse   func(serverURL string, headers map[string]string) (transport.Interface, error)
+	// httpOAuth / sseOAuth build the remote transports WITH OAuth attached.
+	// They are separate fields rather than an extra parameter on http/sse so
+	// every existing recording fake keeps its signature. nil ⇒ default.
+	httpOAuth func(serverURL string, headers map[string]string, cfg transport.OAuthConfig) (transport.Interface, error)
+	sseOAuth  func(serverURL string, headers map[string]string, cfg transport.OAuthConfig) (transport.Interface, error)
 }
 
 // mcpDialer is the production Dialer.
@@ -97,6 +102,12 @@ func defaultTransportFactory() transportFactory {
 		sse: func(serverURL string, headers map[string]string) (transport.Interface, error) {
 			return transport.NewSSE(serverURL, transport.WithHeaders(headers))
 		},
+		httpOAuth: func(serverURL string, headers map[string]string, c transport.OAuthConfig) (transport.Interface, error) {
+			return transport.NewStreamableHTTP(serverURL, transport.WithHTTPHeaders(headers), transport.WithHTTPOAuth(c))
+		},
+		sseOAuth: func(serverURL string, headers map[string]string, c transport.OAuthConfig) (transport.Interface, error) {
+			return transport.NewSSE(serverURL, transport.WithHeaders(headers), transport.WithOAuth(c))
+		},
 	}
 }
 
@@ -124,6 +135,9 @@ func (d *mcpDialer) Dial(ctx context.Context, srv ServerConfig) (ClientConn, err
 	cli := d.newClient(tr)
 	if err := cli.Start(context.WithoutCancel(ctx)); err != nil {
 		_ = cli.Close()
+		if authRequiredError(err) {
+			return nil, fmt.Errorf("mcp dial: %s transport: %w", transportKind(srv), ErrAuthRequired)
+		}
 		return nil, fmt.Errorf("mcp dial: start %s transport: %w", transportKind(srv), err)
 	}
 	conn := &clientConn{cli: cli}
@@ -133,6 +147,9 @@ func (d *mcpDialer) Dial(ctx context.Context, srv ServerConfig) (ClientConn, err
 		res, err := cli.Initialize(initCtx, initializeRequest())
 		if err != nil {
 			_ = cli.Close()
+			if authRequiredError(err) {
+				return nil, fmt.Errorf("mcp dial: %s transport: %w", transportKind(srv), ErrAuthRequired)
+			}
 			return nil, fmt.Errorf("mcp dial: initialize %s transport: %w", transportKind(srv), err)
 		}
 		// Kept for out-of-band diagnostics only (ProbeServer); the manager
@@ -163,9 +180,16 @@ func (d *mcpDialer) dialTimeout() time.Duration {
 // command ⇒ stdio, url + type "sse" ⇒ SSE, url + type ""/"http" ⇒ streamable
 // HTTP. Header values are passed to the transport (required for auth) and
 // never logged.
+//
+// When srv.authRuntime is set (the manager resolved this dial as opted into
+// OAuth), the remote transport is built through httpOAuth/sseOAuth so mcp-go
+// attaches its oauthHandler. When it is nil the plain constructors are used,
+// byte-for-byte as before: attaching OAuth to a server that does not need it
+// would make SendRequest fail with OAuthAuthorizationRequiredError before
+// sending anything. stdio never gets OAuth.
 func (d *mcpDialer) buildTransport(srv ServerConfig) (transport.Interface, error) {
 	f := d.factory
-	if f.stdio == nil || f.http == nil || f.sse == nil {
+	if f.stdio == nil || f.http == nil || f.sse == nil || f.httpOAuth == nil || f.sseOAuth == nil {
 		def := defaultTransportFactory()
 		if f.stdio == nil {
 			f.stdio = def.stdio
@@ -176,6 +200,12 @@ func (d *mcpDialer) buildTransport(srv ServerConfig) (transport.Interface, error
 		if f.sse == nil {
 			f.sse = def.sse
 		}
+		if f.httpOAuth == nil {
+			f.httpOAuth = def.httpOAuth
+		}
+		if f.sseOAuth == nil {
+			f.sseOAuth = def.sseOAuth
+		}
 	}
 	switch {
 	case srv.Command != "":
@@ -185,10 +215,21 @@ func (d *mcpDialer) buildTransport(srv ServerConfig) (transport.Interface, error
 		// before ours).
 		return f.stdio(srv.Command, stdioEnv(srv.Env), srv.Args...), nil
 	case srv.URL != "":
+		var oauth *transport.OAuthConfig
+		if srv.authRuntime != nil {
+			c := srv.authRuntime.oauthConfig()
+			oauth = &c
+		}
 		switch srv.Type {
 		case typeSSE:
+			if oauth != nil {
+				return f.sseOAuth(srv.URL, srv.Headers, *oauth)
+			}
 			return f.sse(srv.URL, srv.Headers)
 		case "", typeHTTP:
+			if oauth != nil {
+				return f.httpOAuth(srv.URL, srv.Headers, *oauth)
+			}
 			return f.http(srv.URL, srv.Headers)
 		default:
 			return nil, fmt.Errorf("unsupported transport type %q", srv.Type)
@@ -227,6 +268,34 @@ func transportKind(srv ServerConfig) string {
 		return "sse"
 	}
 	return "http"
+}
+
+// ErrAuthRequired marks a dial that reached a server demanding (OAuth)
+// authorization. It is a sentinel so callers can answer "run the auth flow"
+// instead of "the transport broke".
+var ErrAuthRequired = errors.New("authentication required")
+
+// authRequiredError reports whether err is mcp-go's authorization challenge.
+//
+// Both the pointer types and the two sentinels are checked: mcp-go returns the
+// OAuth-flavoured error when an oauthHandler is attached and the bare one when
+// it is not, and either can arrive directly or wrapped. Using errors.As/Is (not
+// a string match) keeps the test exact and future-proof against mcp-go adding
+// context to the message.
+func authRequiredError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var oauthErr *transport.OAuthAuthorizationRequiredError
+	if errors.As(err, &oauthErr) {
+		return true
+	}
+	var authErr *transport.AuthorizationRequiredError
+	if errors.As(err, &authErr) {
+		return true
+	}
+	return errors.Is(err, transport.ErrAuthorizationRequired) ||
+		errors.Is(err, transport.ErrOAuthAuthorizationRequired)
 }
 
 // initializeRequest builds the MCP initialize request: latest protocol

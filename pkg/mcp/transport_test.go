@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -505,5 +506,350 @@ func TestNoSecretsLogged(t *testing.T) {
 	}
 	if s := buf.String(); strings.Contains(s, envSecret) || strings.Contains(s, hdrSecret) {
 		t.Fatalf("discovery warning leaks a secret: %s", s)
+	}
+}
+
+// --- T5: OAuth opt-in at the transport seam --------------------------------
+
+// oauthRecord captures one httpOAuth/sseOAuth constructor call.
+type oauthRecord struct {
+	kind    string // "httpOAuth" | "sseOAuth"
+	url     string
+	headers map[string]string
+	cfg     transport.OAuthConfig
+}
+
+// oauthRecordingFactory records plain and OAuth constructor calls separately,
+// so a test can prove WHICH constructor a config routed to.
+func oauthRecordingFactory(plain *[]transportRecord, oauth *[]oauthRecord) transportFactory {
+	return transportFactory{
+		stdio: func(command string, env []string, args ...string) transport.Interface {
+			*plain = append(*plain, transportRecord{kind: "stdio", command: command, env: env, args: args})
+			return fakeTransport{}
+		},
+		http: func(serverURL string, headers map[string]string) (transport.Interface, error) {
+			*plain = append(*plain, transportRecord{kind: "http", url: serverURL, headers: headers})
+			return fakeTransport{}, nil
+		},
+		sse: func(serverURL string, headers map[string]string) (transport.Interface, error) {
+			*plain = append(*plain, transportRecord{kind: "sse", url: serverURL, headers: headers})
+			return fakeTransport{}, nil
+		},
+		httpOAuth: func(serverURL string, headers map[string]string, cfg transport.OAuthConfig) (transport.Interface, error) {
+			*oauth = append(*oauth, oauthRecord{kind: "httpOAuth", url: serverURL, headers: headers, cfg: cfg})
+			return fakeTransport{}, nil
+		},
+		sseOAuth: func(serverURL string, headers map[string]string, cfg transport.OAuthConfig) (transport.Interface, error) {
+			*oauth = append(*oauth, oauthRecord{kind: "sseOAuth", url: serverURL, headers: headers, cfg: cfg})
+			return fakeTransport{}, nil
+		},
+	}
+}
+
+// TestBuildTransportOAuthOptIn is the falsifiable guard of the narrow attach
+// rule: OAuth is attached ONLY when the entry opts in explicitly (auth.type ==
+// "oauth") or the store records a real 401. Every other shape must take the
+// PLAIN constructor (attaching OAuth would break a healthy server, since
+// mcp-go's SendRequest returns OAuthAuthorizationRequiredError before sending
+// anything when the token store is empty).
+func TestBuildTransportOAuthOptIn(t *testing.T) {
+	const name = "srv"
+	const url = "https://srv.example/mcp"
+	const sseURL = "https://srv.example/sse"
+
+	tests := []struct {
+		name             string
+		cfg              ServerConfig
+		seed             func(t *testing.T, store *AuthStore)
+		wantKind         string // constructor the dialer must use
+		wantClientID     string // OAuth case: ClientID handed to mcp-go
+		wantClientSecret string // OAuth case: ClientSecret handed to mcp-go
+		wantRedirectURI  string // OAuth case: RedirectURI handed to mcp-go
+		wantScopes       []string
+		wantPRMURL       string
+	}{
+		{
+			name:     "no auth block and no record => plain http",
+			cfg:      ServerConfig{URL: url, Type: typeHTTP},
+			wantKind: "http",
+		},
+		{
+			name: "explicit oauth block => httpOAuth with PKCE and scopes",
+			cfg: ServerConfig{URL: url, Type: typeHTTP, Auth: &AuthSpec{
+				Type: typeAuthOAuth, ClientID: "cid", Scopes: []string{"read", "write"},
+			}},
+			wantKind:     "httpOAuth",
+			wantClientID: "cid",
+			wantScopes:   []string{"read", "write"},
+		},
+		{
+			// Falsifiability M-guard: a persisted ClientID alone (residue of a
+			// cancelled/failed attempt) must NOT attach OAuth.
+			name: "stored client id but not required => plain http",
+			cfg:  ServerConfig{URL: url, Type: typeHTTP},
+			seed: func(t *testing.T, store *AuthStore) {
+				saveRecord(t, store, name, AuthRecord{URL: url, ClientID: "cid"})
+			},
+			wantKind: "http",
+		},
+		{
+			name: "store records a real 401 => httpOAuth",
+			cfg:  ServerConfig{URL: url, Type: typeHTTP},
+			seed: func(t *testing.T, store *AuthStore) {
+				saveRecord(t, store, name, AuthRecord{URL: url, AuthRequired: true, ClientID: "stored"})
+			},
+			wantKind:     "httpOAuth",
+			wantClientID: "stored",
+		},
+		{
+			name:         "sse with auth => sseOAuth",
+			cfg:          ServerConfig{URL: sseURL, Type: typeSSE, Auth: &AuthSpec{Type: typeAuthOAuth, ClientID: "sse-cid"}},
+			wantKind:     "sseOAuth",
+			wantClientID: "sse-cid",
+		},
+		{
+			name:     "stdio never gets oauth even with an oauth block",
+			cfg:      ServerConfig{Command: "/bin/lele-mcp"},
+			wantKind: "stdio",
+		},
+		{
+			// The cfg.Command != "" clause of buildAuthRuntime, pinned on its
+			// own: a stdio entry carrying an Auth block (constructed directly,
+			// bypassing validate) AND an AuthRequired record must still take
+			// the stdio path. OAuth is a remote-transport concern — stdio has
+			// no HTTP challenge to answer, so attaching it would break a
+			// perfectly healthy stdio server.
+			name: "stdio with an auth block and an auth-required record stays stdio",
+			cfg: ServerConfig{Command: "/bin/lele-mcp", Auth: &AuthSpec{
+				Type: typeAuthOAuth, ClientID: "cid",
+			}},
+			seed: func(t *testing.T, store *AuthStore) {
+				saveRecord(t, store, name, AuthRecord{URL: "", AuthRequired: true, ClientID: "stored"})
+			},
+			wantKind: "stdio",
+		},
+		{
+			// An explicit config value always wins over the stored one.
+			name: "explicit client id wins over stored",
+			cfg: ServerConfig{URL: url, Type: typeHTTP, Auth: &AuthSpec{
+				Type: typeAuthOAuth, ClientID: "explicit",
+			}},
+			seed: func(t *testing.T, store *AuthStore) {
+				saveRecord(t, store, name, AuthRecord{URL: url, ClientID: "stored"})
+			},
+			wantKind:     "httpOAuth",
+			wantClientID: "explicit",
+		},
+		{
+			// An EMPTY field is filled from the persisted record — secret and
+			// redirect URI included: they are part of the registration
+			// (client_secret / redirect_uris), and a regression that dropped
+			// either would have passed while only clientID/PRMURL were pinned.
+			name: "empty field filled from stored record",
+			cfg: ServerConfig{URL: url, Type: typeHTTP, Auth: &AuthSpec{
+				Type: typeAuthOAuth,
+			}},
+			seed: func(t *testing.T, store *AuthStore) {
+				saveRecord(t, store, name, AuthRecord{
+					URL:                 url,
+					ClientID:            "stored",
+					ClientSecret:        "stored-secret",
+					RedirectURI:         "http://127.0.0.1:9999/cb",
+					ResourceMetadataURL: "https://srv.example/.well-known/oauth-protected-resource",
+				})
+			},
+			wantKind:         "httpOAuth",
+			wantClientID:     "stored",
+			wantClientSecret: "stored-secret",
+			wantRedirectURI:  "http://127.0.0.1:9999/cb",
+			wantPRMURL:       "https://srv.example/.well-known/oauth-protected-resource",
+		},
+		{
+			// An explicit config value always wins over the stored one — for
+			// the secret and the redirect URI too, not just the client id.
+			name: "explicit secret and redirect uri win over the stored record",
+			cfg: ServerConfig{URL: url, Type: typeHTTP, Auth: &AuthSpec{
+				Type:         typeAuthOAuth,
+				ClientSecret: "explicit-secret",
+				RedirectURI:  "http://127.0.0.1:7777/cb",
+			}},
+			seed: func(t *testing.T, store *AuthStore) {
+				saveRecord(t, store, name, AuthRecord{
+					URL:          url,
+					ClientSecret: "stored-secret",
+					RedirectURI:  "http://127.0.0.1:9999/cb",
+				})
+			},
+			wantKind:         "httpOAuth",
+			wantClientSecret: "explicit-secret",
+			wantRedirectURI:  "http://127.0.0.1:7777/cb",
+		},
+		{
+			// A record bound to a different URL must not fill the config.
+			name: "record bound to another url is ignored",
+			cfg: ServerConfig{URL: url, Type: typeHTTP, Auth: &AuthSpec{
+				Type: typeAuthOAuth,
+			}},
+			seed: func(t *testing.T, store *AuthStore) {
+				saveRecord(t, store, name, AuthRecord{URL: "https://other.example/mcp", ClientID: "stale"})
+			},
+			wantKind:     "httpOAuth",
+			wantClientID: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewAuthStore(t.TempDir())
+			if tc.seed != nil {
+				tc.seed(t, store)
+			}
+			cfg := tc.cfg
+			cfg.authRuntime = buildAuthRuntime(store, name, cfg)
+
+			var plain []transportRecord
+			var oauth []oauthRecord
+			cli := &recordingClient{}
+			d := &mcpDialer{
+				factory:   oauthRecordingFactory(&plain, &oauth),
+				newClient: func(transport.Interface) mcpClient { return cli },
+			}
+
+			conn, err := d.Dial(context.Background(), cfg)
+			if err != nil {
+				t.Fatalf("Dial: %v", err)
+			}
+			if conn == nil {
+				t.Fatal("conn is nil")
+			}
+			t.Cleanup(func() { _ = conn.Close() })
+
+			var gotKind string
+			switch {
+			case len(plain) == 1 && len(oauth) == 0:
+				gotKind = plain[0].kind
+			case len(oauth) == 1 && len(plain) == 0:
+				gotKind = oauth[0].kind
+			default:
+				t.Fatalf("want exactly one constructor call, plain=%+v oauth=%+v", plain, oauth)
+			}
+			if gotKind != tc.wantKind {
+				t.Fatalf("transport kind = %q, want %q", gotKind, tc.wantKind)
+			}
+
+			if len(oauth) == 0 {
+				return // plain path: nothing more to assert
+			}
+			oc := oauth[0]
+			if !oc.cfg.PKCEEnabled {
+				t.Error("PKCEEnabled = false, want true")
+			}
+			if oc.cfg.TokenStore == nil {
+				t.Error("TokenStore must be non-nil on an OAuth transport")
+			}
+			if oc.cfg.ClientID != tc.wantClientID {
+				t.Errorf("ClientID = %q, want %q", oc.cfg.ClientID, tc.wantClientID)
+			}
+			if oc.cfg.ClientSecret != tc.wantClientSecret {
+				t.Errorf("ClientSecret = %q, want %q", oc.cfg.ClientSecret, tc.wantClientSecret)
+			}
+			if oc.cfg.RedirectURI != tc.wantRedirectURI {
+				t.Errorf("RedirectURI = %q, want %q", oc.cfg.RedirectURI, tc.wantRedirectURI)
+			}
+			if len(tc.wantScopes) > 0 {
+				if !slices.Equal(oc.cfg.Scopes, tc.wantScopes) {
+					t.Errorf("Scopes = %v, want %v", oc.cfg.Scopes, tc.wantScopes)
+				}
+			}
+			if tc.wantPRMURL != "" && oc.cfg.ProtectedResourceMetadataURL != tc.wantPRMURL {
+				t.Errorf("ProtectedResourceMetadataURL = %q, want %q", oc.cfg.ProtectedResourceMetadataURL, tc.wantPRMURL)
+			}
+			if oc.url != cfg.URL {
+				t.Errorf("url = %q, want %q", oc.url, cfg.URL)
+			}
+		})
+	}
+}
+
+// saveRecord writes a record through the store, failing the test on error.
+func saveRecord(t *testing.T, store *AuthStore, name string, rec AuthRecord) {
+	t.Helper()
+	if err := store.Save(name, rec); err != nil {
+		t.Fatalf("Save(%q): %v", name, err)
+	}
+}
+
+// TestDialMapsAuthorizationChallengeToErrAuthRequired proves an authorization
+// challenge from Start or Initialize is reported as ErrAuthRequired (so the
+// caller runs the auth flow) and that the message carries no URL or token.
+func TestDialMapsAuthorizationChallengeToErrAuthRequired(t *testing.T) {
+	cases := []struct {
+		name string
+		cli  *recordingClient
+	}{
+		{
+			name: "initialize: oauth authorization required",
+			cli:  &recordingClient{initErr: &transport.OAuthAuthorizationRequiredError{}},
+		},
+		{
+			name: "initialize: authorization required",
+			cli:  &recordingClient{initErr: &transport.AuthorizationRequiredError{}},
+		},
+		{
+			name: "start: oauth authorization required",
+			cli:  &recordingClient{startErr: &transport.OAuthAuthorizationRequiredError{}},
+		},
+		{
+			name: "start: authorization required",
+			cli:  &recordingClient{startErr: &transport.AuthorizationRequiredError{}},
+		},
+		{
+			// The PRODUCTION wrapping shape: mcp-go's sendRequest wraps every
+			// send failure in transport.NewError, so this is what Dial actually
+			// sees for a challenge on the wire.
+			name: "initialize: transport.NewError(oauth authorization required)",
+			cli:  &recordingClient{initErr: transport.NewError(&transport.OAuthAuthorizationRequiredError{})},
+		},
+		{
+			name: "initialize: transport.NewError(authorization required)",
+			cli:  &recordingClient{initErr: transport.NewError(&transport.AuthorizationRequiredError{})},
+		},
+		{
+			name: "start: transport.NewError(oauth authorization required)",
+			cli:  &recordingClient{startErr: transport.NewError(&transport.OAuthAuthorizationRequiredError{})},
+		},
+		{
+			name: "start: transport.NewError(authorization required)",
+			cli:  &recordingClient{startErr: transport.NewError(&transport.AuthorizationRequiredError{})},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var recs []transportRecord
+			d := newTestDialer(&recs, tc.cli)
+
+			conn, err := d.Dial(context.Background(), ServerConfig{URL: "https://srv.example/mcp", Type: typeHTTP})
+			if err == nil {
+				if conn != nil {
+					_ = conn.Close()
+				}
+				t.Fatal("expected an authorization error")
+			}
+			if conn != nil {
+				t.Error("conn must be nil on error")
+			}
+			if !errors.Is(err, ErrAuthRequired) {
+				t.Fatalf("errors.Is(err, ErrAuthRequired) = false; err = %v", err)
+			}
+			if strings.Contains(err.Error(), "https://") {
+				t.Errorf("error must not carry a URL: %v", err)
+			}
+			if strings.Contains(err.Error(), "Bearer") {
+				t.Errorf("error must not carry a token: %v", err)
+			}
+			if tc.cli.closes != 1 {
+				t.Errorf("closes = %d, want 1 (a failed dial must not leak the client)", tc.cli.closes)
+			}
+		})
 	}
 }

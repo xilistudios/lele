@@ -192,6 +192,7 @@ const (
 	ModalSettingsTUI        // TUI settings list (toggles/values)
 	ModalMCP                // list of MCP servers (space/t toggle, f filter)
 	ModalMCPDetail          // detail view of one MCP server (rendered from the stored inventory)
+	ModalMCPAuth            // interactive OAuth authorization of one MCP server (a from the detail)
 )
 
 type formStep int
@@ -380,6 +381,34 @@ type Model struct {
 	mcpInventory      mcp.Inventory
 	mcpInventoryValid bool
 	mcpDetailName     string
+	// mcpAuth maps each listed server name to its auth verdict (pkg/mcp's
+	// CheckAuth, read through the same in-process store the authorization
+	// flow uses). It is resolved together with mcpInventory so the row marker,
+	// the detail block and the sign-out action all describe exactly the rows
+	// that were shown; a name with no entry (a stdio server, or one Discover
+	// excludes) renders no auth state at all. Rebuilt by loadMCPListWith,
+	// dropped wherever the inventory snapshot is dropped.
+	mcpAuth map[string]mcp.AuthStatus
+	// MCP OAuth authorization state (ModalMCPAuth, "a" in the detail):
+	// mcpAuthFlow is the live engine flow (nil when none — it also owns the
+	// loopback listener, which is why mcpAuthCancel exists), mcpAuthState is
+	// the modal's own state machine (mcpAuthIdle…mcpAuthFailed), mcpAuthURL
+	// is the authorization URL to display/copy, mcpAuthName is the server
+	// being authorized, and the two feedback fields are the inline lines the
+	// detail screen and the auth modal share: mcpAuthFeedback carries the
+	// informational/success text and mcpAuthError the error text (including
+	// the "auth does not apply to a stdio entry" refusal hint). mcpAuthSeq is
+	// a generation counter: every message the start/poll/submit commands
+	// produce carries the sequence it was created under, so a message of a
+	// flow that is gone is dropped instead of being applied to a new one (and
+	// a late flow is cancelled, never orphaned).
+	mcpAuthFlow     mcpAuthFlow
+	mcpAuthState    int
+	mcpAuthURL      string
+	mcpAuthName     string
+	mcpAuthFeedback string
+	mcpAuthError    string
+	mcpAuthSeq      int
 
 	// Custom (harness) slash-command administration state. commandsModalKeys
 	// maps modal items to composite "source:name" keys ("" for separators and

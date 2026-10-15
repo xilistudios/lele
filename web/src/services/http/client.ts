@@ -1,4 +1,6 @@
 import type {
+  MCPAuthStart,
+  MCPAuthStatus,
   MCPInventoryResponse,
   MCPLayerName,
   MCPQueryLayer,
@@ -821,6 +823,28 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
         method: 'POST',
         body: JSON.stringify(body),
       }),
+    /**
+     * MCP OAuth of one server — a 1:1 mirror of pkg/channels/rest_mcp.go.
+     * Same seam as the routes above; the shapes carry no secret VALUE: only a
+     * flow id, the authorization URL the user has to open, and booleans/fixed
+     * states. `start` and `complete` are registered with `applyBodyLimit`
+     * server-side (start for symmetry — it has no body).
+     */
+    mcpAuthStart: (agentId: string, name: string) =>
+      // POST with NO body: the flow's client registration is server-side.
+      request<MCPAuthStart>(endpoints.agents.mcp.auth.start(agentId, name), { method: 'POST' }),
+    mcpAuthStatus: (agentId: string, flowId: string) =>
+      request<MCPAuthStatus>(endpoints.agents.mcp.auth.status(agentId, flowId), { method: 'GET' }),
+    mcpAuthComplete: (agentId: string, flowId: string, body: { code: string; state?: string }) =>
+      request<MCPAuthStatus>(endpoints.agents.mcp.auth.complete(agentId, flowId), {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    // Both DELETEs answer 204; `request` resolves those as undefined.
+    mcpAuthCancel: (agentId: string, flowId: string) =>
+      request<void>(endpoints.agents.mcp.auth.cancel(agentId, flowId), { method: 'DELETE' }),
+    mcpLogout: (agentId: string, name: string) =>
+      request<void>(endpoints.agents.mcp.auth.logout(agentId, name), { method: 'DELETE' }),
     history: (sessionKey: string, parentSessionKey?: string, beforeId?: string, limit?: number) => {
       const params = new URLSearchParams()
       if (beforeId !== undefined && beforeId !== null) params.set('before_id', beforeId)

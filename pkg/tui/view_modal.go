@@ -54,6 +54,8 @@ func (m *Model) modalTitleFor(mode modalType) string {
 		return i18n.T("tui.mcp")
 	case ModalMCPDetail:
 		return i18n.T("tui.mcpDetail")
+	case ModalMCPAuth:
+		return i18n.T("tui.mcpAuth")
 	case ModalCommandDetail:
 		return i18n.T("tui.commands.detail")
 	case ModalAddCommand:
@@ -118,6 +120,10 @@ func (m *Model) renderActiveModal() string {
 		// Rendered from the inventory snapshot the list was built from;
 		// falls back to the list when the snapshot is gone.
 		return m.renderMCPDetail()
+	case ModalMCPAuth:
+		// Interactive OAuth: the engine's flow is driven from here and the
+		// box is height-clamped by the renderer itself (see mcpAuthBox).
+		return m.renderMCPAuth()
 	case ModalAddCommand:
 		// The template step is multi-line and needs a textarea, which the
 		// generic single-line form renderer cannot offer.

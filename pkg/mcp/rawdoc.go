@@ -276,6 +276,10 @@ func expectEOF(dec *json.Decoder) error {
 // existing (*ServerConfig).validate, so the verdict is exactly ParseFile's
 // while ${VAR} references stay literal. Env and header VALUES never leave
 // this package: only their key names are exposed, never the values.
+//
+// The optional auth block follows the same rule: the summary carries its
+// TYPE, the scope COUNT and whether a client id is present — never the
+// client_id / client_secret values, the redirect_uri or the metadata URLs.
 func (d *rawDoc) Summary(name string) (ServerSummary, bool) {
 	if d == nil || d.servers == nil {
 		return ServerSummary{}, false
@@ -306,6 +310,14 @@ func (d *rawDoc) Summary(name string) (ServerSummary, bool) {
 		Disabled:    sc.Disabled,
 		EnvKeys:     keyNames(sc.Env),     // KEYS only, never values
 		HeaderKeys:  keyNames(sc.Headers), // KEYS only, never values
+	}
+	if sc.Auth != nil {
+		// Projection, never a copy: type, scope COUNT and the presence of a
+		// client id. The secrets (client_id, client_secret), the redirect_uri
+		// and the metadata URLs are deliberately left behind.
+		s.AuthType = sc.Auth.Type
+		s.AuthScopes = len(sc.Auth.Scopes)
+		s.AuthClientIDSet = sc.Auth.ClientID != ""
 	}
 	switch {
 	case sc.Command != "":

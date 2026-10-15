@@ -53,6 +53,27 @@ export const endpoints = {
         return force ? `${base}&force=true` : base
       },
       validate: (agentId: string) => `/api/v1/mcp/validate?agent_id=${encodeURIComponent(agentId)}`,
+      /**
+       * OAuth flows of one server — a 1:1 mirror of pkg/channels/rest_mcp.go.
+       * `agent_id` is required on every route and every dynamic segment
+       * (`name`, `flow_id`) is percent-encoded: a server name comes from
+       * mcp.json and must not escape its route. Only `start` and `logout` address
+       * the server by name; the other three address the flow the server gave out.
+       */
+      auth: {
+        start: (agentId: string, name: string) =>
+          `/api/v1/mcp/servers/${encodeURIComponent(name)}/auth?agent_id=${encodeURIComponent(agentId)}`,
+        status: (agentId: string, flowId: string) =>
+          `/api/v1/mcp/auth/${encodeURIComponent(flowId)}?agent_id=${encodeURIComponent(agentId)}`,
+        complete: (agentId: string, flowId: string) =>
+          `/api/v1/mcp/auth/${encodeURIComponent(flowId)}/complete?agent_id=${encodeURIComponent(agentId)}`,
+        // Same URL as status — the HTTP verb (DELETE) lives at the call site.
+        cancel: (agentId: string, flowId: string) =>
+          `/api/v1/mcp/auth/${encodeURIComponent(flowId)}?agent_id=${encodeURIComponent(agentId)}`,
+        // Same URL as start — the HTTP verb (DELETE) lives at the call site.
+        logout: (agentId: string, name: string) =>
+          `/api/v1/mcp/servers/${encodeURIComponent(name)}/auth?agent_id=${encodeURIComponent(agentId)}`,
+      },
     },
     /**
      * Slash commands of THIS agent (brief §6). `list` flattens the four

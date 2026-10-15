@@ -43,6 +43,15 @@ func (m *Model) resetModal(mode modalType) {
 	m.mcpInventory = mcp.Inventory{}
 	m.mcpInventoryValid = false
 	m.mcpDetailName = ""
+	// The auth verdicts are part of that same snapshot and go with it.
+	m.mcpAuth = nil
+	// Release a live OAuth flow too. /mcp (and every other command that
+	// opens a modal) funnels through here, and the flow owns a loopback
+	// listener until it is cancelled: without this, reopening /mcp while an
+	// authorization is pending would pin that port for the flow's whole
+	// five-minute budget (the old flow's messages are invalidated by the
+	// generation bump, so nothing can adopt it later).
+	m.mcpAuthCancel()
 	m.formStepIndex = 0
 	m.formValues = nil
 	m.formError = ""
@@ -92,6 +101,13 @@ func isFormModal(mode modalType, editingField bool) bool {
 	switch mode {
 	case ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret, ModalSkillInstall, ModalAddCommand:
 		return true
+	// ModalMCPAuth collects a pasted authorization code in the shared text
+	// input: it must be a "form modal" for the tail of handleModalKey to
+	// forward printable keys to the widget (handleMCPAuthKey owns only
+	// ENTER/CTRL+Y/ESC and passes the rest through on purpose — "q" included,
+	// it is a regular character in a pasted code).
+	case ModalMCPAuth:
+		return true
 	case ModalSettingsAgents, ModalSettingsAgentEdit, ModalSettingsSystemEdit, ModalSettingsTUI:
 		return editingField
 	default:
@@ -101,9 +117,17 @@ func isFormModal(mode modalType, editingField bool) bool {
 
 // isListModal returns true if the modal type is a list-selection modal
 // (navigable with up/down keys), as opposed to form-based modals.
+//
+// It is the gate the GENERIC modal switch uses for up/k/down/j (see
+// handleModalKey), which is what actually keeps a modal out of list
+// navigation — handleMCPKey only owns the keys of its own modals and forwards
+// the rest. ModalMCPAuth is deliberately NOT a list modal: it has no rows, and
+// with no top-level modal registered above it the default arm would let
+// up/down move the invisible list cursor behind the modal while the user is
+// only moving inside the code input.
 func isListModal(mode modalType) bool {
 	switch mode {
-	case ModalNone, ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret, ModalSkillInstall:
+	case ModalNone, ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret, ModalSkillInstall, ModalMCPAuth:
 		return false
 	case ModalSettings, ModalSettingsAgents, ModalSettingsAgentEdit, ModalSettingsSystem, ModalSettingsSystemEdit, ModalSettingsTUI:
 		return true

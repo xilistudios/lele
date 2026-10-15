@@ -75,6 +75,15 @@ func (m *Model) handleAsyncResult(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.C
 	case mcpToggleResultMsg:
 		return m, m.handleMCPToggleResult(msg)
 
+	case mcpAuthStartMsg:
+		return m, m.handleMCPAuthStart(msg)
+
+	case mcpAuthPollMsg:
+		return m, m.handleMCPAuthPoll(msg)
+
+	case mcpAuthSubmitMsg:
+		return m, m.handleMCPAuthSubmit(msg)
+
 	case obVerifyResultMsg:
 		m.obVerifying = false
 		if !msg.success {

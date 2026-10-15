@@ -24,6 +24,10 @@ import (
 type Manager struct {
 	paths  Paths
 	dialer Dialer
+	// auth is the per-lele-directory OAuth store. Built by NewManager from
+	// paths.LeleDir; nil is tolerated (buildAuthRuntime/fingerprint are
+	// nil-safe) so a Manager built without one keeps working unauthenticated.
+	auth *AuthStore
 
 	mu sync.Mutex
 	// conns caches open connections, keyed by server name (nil until first use).
@@ -64,6 +68,7 @@ func NewManager(paths Paths, dialer Dialer) *Manager {
 	return &Manager{
 		paths:    paths,
 		dialer:   dialer,
+		auth:     NewAuthStore(paths.LeleDir),
 		conns:    make(map[string]ClientConn),
 		loaded:   make(map[string][]tools.LoadedMCPTool),
 		inflight: make(map[string]*loadFlight),
@@ -129,6 +134,14 @@ func (m *Manager) Servers() []tools.MCPServerInfo {
 func (m *Manager) resolve(name string) (ServerConfig, error) {
 	res := m.discover()
 	if cfg, ok := res.Servers[name]; ok {
+		// Resolve the OAuth state of THIS dial before fingerprinting: the
+		// runtime is what buildTransport reads to decide whether the remote
+		// transport is built with OAuth attached. It is unexported and
+		// json:"-", so it never affects the fingerprint. AttachAuthRuntime
+		// is the single attach seam — the CLI's ProbeServer resolves the
+		// same runtime through the same function, since a probe without it
+		// would report "authentication required" for a logged-in server.
+		cfg = AttachAuthRuntime(name, cfg, m.auth)
 		m.applyConfigChange(name, cfg)
 		return cfg, nil
 	}
@@ -150,7 +163,7 @@ func (m *Manager) resolve(name string) (ServerConfig, error) {
 // it entered with. Because fps already advanced here, that re-resolve never
 // retires the freshly redialed connection.
 func (m *Manager) applyConfigChange(name string, cfg ServerConfig) {
-	fp := configFingerprint(cfg)
+	fp := m.fingerprint(name, cfg)
 	m.mu.Lock()
 	prev, seen := m.fps[name]
 	m.fps[name] = fp
@@ -180,6 +193,21 @@ func configFingerprint(cfg ServerConfig) string {
 	return fmt.Sprintf("%016x", h.Sum64())
 }
 
+// fingerprint is the config fingerprint PLUS the auth store revision of the
+// server: the revision is what makes a token write retire the cached
+// connection of a server whose mcp.json entry did not change.
+//
+// The revision is appended even when it is 0, so the formatting is uniform and
+// a server with no stored token still has a stable fingerprint. When there is
+// no store at all (m.auth == nil) the base fingerprint is returned unchanged.
+func (m *Manager) fingerprint(name string, cfg ServerConfig) string {
+	fp := configFingerprint(cfg)
+	if m.auth != nil {
+		fp += ":" + fmt.Sprintf("%016x", m.auth.Revision(name))
+	}
+	return fp
+}
+
 // LoadServer returns the tool specs of one server, dialing lazily on the
 // first call. It is idempotent (cached specs are returned without dialing)
 // and deduped per server: N concurrent calls result in exactly one dial, the
@@ -197,7 +225,14 @@ func (m *Manager) LoadServer(ctx context.Context, name string) ([]tools.LoadedMC
 	// re-poison the cache it is about to overwrite (N1). The specs are still
 	// returned to THIS caller: it asked while v1 was current, and the next
 	// call will re-dial with v2.
-	fp := configFingerprint(cfg)
+	//
+	// Note the fingerprint window: resolve read AuthStore.Revision for
+	// m.fps[name] and this second read of the same revision each hit the
+	// store independently, so a token write landing between them makes the
+	// m.fps[name] == fp guard below refuse to cache the specs this flight
+	// fetched. The direction is safe — cached specs are never stale — and the
+	// only cost is one extra dial on the next call.
+	fp := m.fingerprint(name, cfg)
 
 	m.mu.Lock()
 	if specs, ok := m.loaded[name]; ok {
@@ -254,7 +289,22 @@ func (m *Manager) fetchTools(ctx context.Context, name string, cfg ServerConfig)
 		return nil, fmt.Errorf("mcp load %q: %w", name, err)
 	}
 	list, err := conn.ListTools(ctx)
-	if err == nil || ctx.Err() != nil || !isTransportFailure(err) {
+	if err == nil || ctx.Err() != nil {
+		return list, wrapLoad(name, err)
+	}
+	// The authorization challenge is tested BEFORE isTransportFailure, and
+	// the order is load-bearing. mcp-go's client.Client.sendRequest wraps
+	// EVERY SendRequest error in transport.NewError (client/client.go), so a
+	// challenge observed on an already-cached connection arrives here as
+	// *transport.Error wrapping the OAuth error — exactly the shape
+	// isTransportFailure reports as a transport failure. Redialing cannot fix
+	// a missing credential (the fresh dial fails identically), so a challenge
+	// must neither drop the healthy connection nor retry: it is reported as
+	// ErrAuthRequired so the caller runs the auth flow instead.
+	if authRequiredError(err) {
+		return nil, fmt.Errorf("mcp load %q: %w", name, ErrAuthRequired)
+	}
+	if !isTransportFailure(err) {
 		return list, wrapLoad(name, err)
 	}
 	// The conn that failed is the one being retired: pass it explicitly so a
@@ -328,7 +378,19 @@ func (m *Manager) CallRemote(ctx context.Context, server, remoteTool string, arg
 	if err == nil {
 		return res, nil
 	}
-	if ctx.Err() != nil || !isTransportFailure(err) {
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("mcp call %s.%s: %w", server, remoteTool, err)
+	}
+	// Same ordering rule as fetchTools, for the same reason: sendRequest
+	// wraps every send failure in transport.NewError (client/client.go), so a
+	// challenge would otherwise look like a transport failure and be retried
+	// after a pointless redial — a missing credential is not fixed by
+	// redialing. The connection is left intact and ErrAuthRequired is
+	// reported under the same message prefix as the other failures.
+	if authRequiredError(err) {
+		return nil, fmt.Errorf("mcp call %s.%s: %w", server, remoteTool, ErrAuthRequired)
+	}
+	if !isTransportFailure(err) {
 		return nil, fmt.Errorf("mcp call %s.%s: %w", server, remoteTool, err)
 	}
 	// Same rule as fetchTools: retire exactly the conn that failed, then

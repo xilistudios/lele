@@ -414,3 +414,121 @@ func TestRawDocEnvelopeMatchesRuntime(t *testing.T) {
 		})
 	}
 }
+
+// TestRawDocSummaryAuthProjection pins the auth projection rule: the summary
+// carries the auth TYPE, the scope COUNT and whether a client id is present,
+// and never a value. client_id / client_secret are secrets that sit in the
+// same class as env and header values, so they must not survive the trip into
+// the management UI payload — rawbytes only keep them in literal ${VAR} form.
+func TestRawDocSummaryAuthProjection(t *testing.T) {
+	data := []byte(`{"mcpServers":{` +
+		`"full":{"url":"https://h/mcp","auth":{"type":"oauth","scopes":["a","b"],` +
+		`"client_id":"CID","client_secret":"CANARY-SECRET","redirect_uri":"http://127.0.0.1:9/cb"}},` +
+		`"noauth":{"url":"https://h/mcp"},` +
+		`"bare":{"url":"https://h/mcp","auth":{"type":"oauth"}},` +
+		`"none":{"url":"https://h/mcp","auth":{"type":"none"}}` +
+		`}}`)
+	doc, err := parseRawDoc(data)
+	if err != nil {
+		t.Fatalf("parseRawDoc() error = %v", err)
+	}
+
+	tests := []struct {
+		name            string
+		wantType        string
+		wantScopes      int
+		wantClientIDSet bool
+	}{
+		{name: "full", wantType: typeAuthOAuth, wantScopes: 2, wantClientIDSet: true},
+		{name: "noauth", wantType: "", wantScopes: 0, wantClientIDSet: false},
+		{name: "bare", wantType: typeAuthOAuth, wantScopes: 0, wantClientIDSet: false},
+		{name: "none", wantType: typeAuthNone, wantScopes: 0, wantClientIDSet: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, ok := doc.Summary(tt.name)
+			if !ok {
+				t.Fatalf("Summary(%q) ok = false, want true", tt.name)
+			}
+			if s.Invalid != "" {
+				t.Fatalf("Invalid = %q, want a valid entry", s.Invalid)
+			}
+			if s.AuthType != tt.wantType {
+				t.Errorf("AuthType = %q, want %q", s.AuthType, tt.wantType)
+			}
+			if s.AuthScopes != tt.wantScopes {
+				t.Errorf("AuthScopes = %d, want %d", s.AuthScopes, tt.wantScopes)
+			}
+			if s.AuthClientIDSet != tt.wantClientIDSet {
+				t.Errorf("AuthClientIDSet = %v, want %v", s.AuthClientIDSet, tt.wantClientIDSet)
+			}
+		})
+	}
+
+	// CANARY: neither the client id nor the client secret may appear anywhere
+	// in the summary — not in the formatted struct, not in any string field.
+	full, _ := doc.Summary("full")
+	for _, canary := range []string{"CID", "CANARY-SECRET", "http://127.0.0.1:9/cb"} {
+		if formatted := fmt.Sprintf("%+v", full); strings.Contains(formatted, canary) {
+			t.Errorf("summary leaked %q: %s", canary, formatted)
+		}
+		for _, field := range summaryStringFields(full) {
+			if strings.Contains(field, canary) {
+				t.Errorf("summary string field leaked %q: %q", canary, field)
+			}
+		}
+	}
+}
+
+// TestRawDocSummaryAuthSecretNotExpanded: a ${VAR} client_secret stays
+// literal — never expanded, never surfaced in the summary — matching the
+// env/header rule that this package expands nothing when listing.
+func TestRawDocSummaryAuthSecretNotExpanded(t *testing.T) {
+	t.Setenv("MY_SECRET", "auth-canary-value")
+	data := []byte(`{"mcpServers":{"svc":{"url":"https://h/mcp",` +
+		`"auth":{"type":"oauth","client_id":"${MY_ID}","client_secret":"${MY_SECRET}"}}}}`)
+	doc, err := parseRawDoc(data)
+	if err != nil {
+		t.Fatalf("parseRawDoc() error = %v", err)
+	}
+	s, ok := doc.Summary("svc")
+	if !ok {
+		t.Fatal("Summary(\"svc\") ok = false, want true")
+	}
+	// A literal placeholder still counts as "present": the field is set.
+	if !s.AuthClientIDSet {
+		t.Errorf("AuthClientIDSet = %v, want true for the literal placeholder", s.AuthClientIDSet)
+	}
+	formatted := fmt.Sprintf("%+v", s)
+	for _, secret := range []string{"auth-canary-value", "${MY_SECRET}", "${MY_ID}"} {
+		if strings.Contains(formatted, secret) {
+			t.Errorf("summary leaked %q: %s", secret, formatted)
+		}
+		for _, field := range summaryStringFields(s) {
+			if strings.Contains(field, secret) {
+				t.Errorf("summary string field leaked %q: %q", secret, field)
+			}
+		}
+	}
+}
+
+// summaryStringFields returns every string-valued field of a ServerSummary
+// (including slice elements), so the canary assertions above cover the whole
+// payload instead of the handful of fields a test happens to know about.
+func summaryStringFields(s ServerSummary) []string {
+	var out []string
+	v := reflect.ValueOf(s)
+	for i := 0; i < v.NumField(); i++ {
+		switch f := v.Field(i); f.Kind() {
+		case reflect.String:
+			out = append(out, f.String())
+		case reflect.Slice:
+			for j := 0; j < f.Len(); j++ {
+				if el := f.Index(j); el.Kind() == reflect.String {
+					out = append(out, el.String())
+				}
+			}
+		}
+	}
+	return out
+}

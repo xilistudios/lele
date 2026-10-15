@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/xilistudios/lele/pkg/agent"
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/mcp"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
@@ -16,13 +17,22 @@ import (
 
 // ── Message types for async MCP operations ─────────────────────────────
 
-// mcpToggleResultMsg is the result of one toggle write (mcpToggleCmdFor).
+// mcpToggleResultMsg is the result of one MCP state mutation: the enable
+// toggle (mcpToggleCmdFor) or the sign-out (mcpAuthLogoutCmdFor). The two
+// share the message because it is the ONLY MCP mutation result wired into
+// update()'s dispatch, and both end with the same tail (feedback line, list
+// reload, tick) instead of each growing its own routing path. `logout` tells
+// them apart; enabled/changed/path are toggle-only.
 type mcpToggleResultMsg struct {
 	name    string
 	enabled bool   // state AFTER the toggle
 	changed bool   // bytes on disk changed
 	path    string // toggle target (only set when the target is refused)
 	err     error
+	// logout marks a result produced by the sign-out action: only name and
+	// err are meaningful then (a sign-out writes no layer file, so it has no
+	// enabled/changed/path to report).
+	logout bool
 }
 
 // Sentinel errors carried by mcpToggleResultMsg. The result handler maps
@@ -120,6 +130,7 @@ func (m *Model) loadMCPList() {
 		// an enter here (or a stale detail) can never render outdated data.
 		m.mcpInventory = mcp.Inventory{}
 		m.mcpInventoryValid = false
+		m.mcpAuth = nil
 		m.clampModalCursor()
 		return
 	}
@@ -132,7 +143,8 @@ func (m *Model) loadMCPList() {
 // the rows are built from is kept on the Model (m.mcpInventory) so the
 // detail screen describes exactly what this list showed without re-reading
 // the disk — a fresh read could show a different winner than the selected
-// row if a file changed in between.
+// row if a file changed in between. m.mcpAuth (the per-name auth verdict)
+// is resolved in the same pass and for the same reason.
 func (m *Model) loadMCPListWith(paths mcp.Paths) {
 	m.modalItems = nil
 	m.mcpModalKeys = nil
@@ -140,6 +152,10 @@ func (m *Model) loadMCPListWith(paths mcp.Paths) {
 	inv := mcp.ReadInventory(paths)
 	m.mcpInventory = inv
 	m.mcpInventoryValid = true
+	// The auth verdict is resolved WITH the list, from the same three layers
+	// Discover reads, so the row marker, the detail block and the sign-out
+	// action all describe exactly the rows this list shows.
+	m.mcpAuth = mcpAuthVerdicts(paths, inv)
 	filterLayer := mcpFilterLayer(m.mcpFilter)
 	names := make([]string, 0, len(inv.Winner))
 	for name := range inv.Winner {
@@ -162,7 +178,8 @@ func (m *Model) loadMCPListWith(paths mcp.Paths) {
 		return strings.ToLower(names[i]) < strings.ToLower(names[j])
 	})
 	for _, name := range names {
-		m.modalItems = append(m.modalItems, formatMCPItem(name, inv.Winner[name], inv.Effective[name]))
+		m.modalItems = append(m.modalItems, formatMCPItem(
+			name, inv.Winner[name], inv.Effective[name], mcpAuthSuffix(m.mcpAuth[name])))
 		m.mcpModalKeys = append(m.mcpModalKeys, name)
 	}
 	m.clampModalCursor()
@@ -170,25 +187,45 @@ func (m *Model) loadMCPListWith(paths mcp.Paths) {
 
 // ── handleMCPKey owns the keys of the /mcp list and detail modals ──────
 //
-// List: space/t toggle the selected server, f cycles the source filter,
-// enter opens ModalMCPDetail for the row under the cursor, esc/q close.
-// Detail: read-only — esc/q return to the list (the cursor and the rows
-// are untouched) and every other key is swallowed so no list action or
-// navigation can fire while the detail is on screen. Navigation (up/down)
-// and the remaining keys of the list fall through to the generic modal
-// switch. Returns handled=false so the caller forwards un-owned keys.
+// List: space/t toggle the selected server, d signs it out, f cycles the
+// source filter, enter opens ModalMCPDetail for the row under the cursor,
+// esc/q close. Detail: esc/q return to the list (the cursor and the rows are
+// untouched), "a" starts the interactive OAuth flow of the server being shown
+// when it is a remote entry (ModalMCPAuth), "d" signs it out and every other
+// key is swallowed so no list action or navigation can fire while the detail
+// is on screen. Auth: ENTER/CTRL+Y/ESC are owned by handleMCPAuthKey
+// (ModalMCPAuth). Navigation (up/down) and the remaining keys of the list fall
+// through to the generic modal switch. Returns handled=false so the caller
+// forwards un-owned keys.
 func (m *Model) handleMCPKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	if m.modalMode == ModalMCPDetail {
-		// Detail is read-only (no toggle from here by design: it would have
-		// to re-derive the owning layer against a possibly changed disk).
-		// esc/q go back to the list; m.mcpModalKeys/modalSelectedIdx are
-		// left untouched, so the cursor is preserved. Any other key is
-		// swallowed — it must not reach the generic list switch, where it
-		// could move the hidden cursor or act on the row behind the detail.
+		// The detail is read-only for the ENTRY — no toggle from here by
+		// design: it would have to re-derive the owning layer against a
+		// possibly changed disk. A SIGN-OUT is allowed here because it does
+		// not touch any layer file: it deletes a credential keyed by NAME, the
+		// same in-process Logout the CLI runs. esc/q go back to the list;
+		// m.mcpModalKeys/modalSelectedIdx are left untouched, so the cursor is
+		// preserved. "a" delegates to the authorization entry point (remote
+		// entries only — a stdio entry gets an inline hint and no flow), "d"
+		// to the sign-out, and the detail stays on screen afterwards so the
+		// user sees the refreshed auth state. Any other key is swallowed — it
+		// must not reach the generic list switch, where it could move the
+		// hidden cursor or act on the row behind the detail.
 		if s := msg.String(); s == "esc" || s == "q" {
 			m.modalMode = ModalMCP
+		} else if s == "a" {
+			return m.mcpAuthStartFromDetail(), true
+		} else if s == "d" {
+			return m.mcpAuthLogoutCmd(m.mcpDetailName), true
 		}
 		return nil, true
+	}
+	if m.modalMode == ModalMCPAuth {
+		// ModalMCPAuth owns ENTER/CTRL+Y/ESC and passes every other key —
+		// "q" included, it is a regular character in the paste box — through,
+		// so a pasted code is typed into the shared text input (see
+		// isFormModal / isListModal in modal_state.go).
+		return m.handleMCPAuthKey(msg)
 	}
 	if m.modalMode != ModalMCP {
 		return nil, false
@@ -203,6 +240,19 @@ func (m *Model) handleMCPKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 			return nil, true // empty-state row
 		}
 		return m.mcpToggleCmd(name), true
+	case "d":
+		// Sign out of the row under the cursor. The empty-state and "MCP
+		// unavailable" rows carry the "" key and are a silent no-op (nothing
+		// to sign out of); a REAL row without a stored credential is not
+		// silent — the result line says so (mcpAuthLogoutCmdFor).
+		if m.modalSelectedIdx < 0 || m.modalSelectedIdx >= len(m.mcpModalKeys) {
+			return nil, true
+		}
+		name := m.mcpModalKeys[m.modalSelectedIdx]
+		if name == "" {
+			return nil, true
+		}
+		return m.mcpAuthLogoutCmd(name), true
 	case "f":
 		m.mcpFilter = (m.mcpFilter + 1) % mcpFilterCount
 		m.loadMCPList()
@@ -225,6 +275,19 @@ func (m *Model) handleMCPKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 	return nil, false
+}
+
+// syncMCPServersFor triggers the agent loop's MCP re-wiring pass. mcp.json is
+// not config-watched, so this pass is what makes a write (a toggle, a stored
+// OAuth credential) visible to the tool/prompt surface. It is a package-level
+// var — the obVerifyHTTPClient precedent — so tests can count the calls with a
+// bare Model, and it is nil-safe on a bare &AgentLoop{} (the loop's own
+// contract), which is why it is the single seam every MCP surface calls
+// instead of each one re-checking the loop itself.
+var syncMCPServersFor = func(al *agent.AgentLoop) {
+	if al != nil {
+		al.SyncMCPServers()
+	}
 }
 
 // ── mcpToggleCmd returns the command that flips one server ─────────────
@@ -293,6 +356,11 @@ func mcpToggleCmdFor(paths mcp.Paths, name string) tea.Cmd {
 // pass is what makes the write visible to the tool/prompt surface) and
 // reloads the list.
 func (m *Model) handleMCPToggleResult(msg mcpToggleResultMsg) tea.Cmd {
+	if msg.logout {
+		// The other mutation that travels on this message: the sign-out has
+		// its own (auth-file) handler, and no enabled/changed/path to report.
+		return m.handleMCPAuthLogoutResult(msg.name, msg.err)
+	}
 	switch {
 	case msg.err == nil:
 		if msg.changed {
@@ -306,12 +374,10 @@ func (m *Model) handleMCPToggleResult(msg mcpToggleResultMsg) tea.Cmd {
 			// change" instead of claiming a flip that never happened.
 			m.mcpFeedback = fmt.Sprintf(i18n.T("tui.mcpToggleNoChange"), msg.name)
 		}
-		if m.agentLoop != nil {
-			// Idempotent pass; fires for a no-op result too, like the
-			// server's fireReloadMCP — the loop can only end up matching
-			// the disk it already matched.
-			m.agentLoop.SyncMCPServers()
-		}
+		// Idempotent pass; fires for a no-op result too, like the
+		// server's fireReloadMCP — the loop can only end up matching
+		// the disk it already matched.
+		syncMCPServersFor(m.agentLoop)
 	case errors.Is(msg.err, errMCPUnavailable):
 		m.mcpFeedback = i18n.T("tui.mcpUnavailable")
 	case errors.Is(msg.err, errMCPOwnerNoPath):
@@ -332,9 +398,13 @@ func (m *Model) handleMCPToggleResult(msg mcpToggleResultMsg) tea.Cmd {
 // ── Formatting helpers ─────────────────────────────────────────────────
 
 // formatMCPItem renders one row: status glyph (● enabled / ○ disabled /
-// ! invalid), the name padded with formatSkillItem's %-15s rule, then the
-// owning-layer tag.
-func formatMCPItem(name, layer, effective string) string {
+// ! invalid), the name padded with formatSkillItem's %-15s rule, the
+// owning-layer tag, then the auth marker (authSuffix) verbatim AFTER the
+// closing bracket. The glyph/padding/tag shape stays byte-stable — the
+// ANSI-stability and formatting tests depend on it — and the localized text
+// is the caller's business, which keeps this formatter pure and
+// table-testable. authSuffix is "" for a server with no auth verdict.
+func formatMCPItem(name, layer, effective, authSuffix string) string {
 	status := "●"
 	switch effective {
 	case "disabled":
@@ -342,7 +412,7 @@ func formatMCPItem(name, layer, effective string) string {
 	case "invalid":
 		status = "!"
 	}
-	return fmt.Sprintf("%s %-15s — [%s]", status, name, layer)
+	return fmt.Sprintf("%s %-15s — [%s]%s", status, name, layer, authSuffix)
 }
 
 // ── renderMCPDetail renders the detail screen of one MCP server ────────
@@ -365,17 +435,15 @@ func (m *Model) renderMCPDetail() string {
 	}
 
 	// Rows are low → high; the layer the verdict reports as owner holds the
-	// winning copy. Every other row is a shadowed copy of the same name.
-	winnerIdx := -1
-	for i := range rows {
-		if rows[i].Layer == inv.Winner[name] {
-			winnerIdx = i // last match wins (rows are low → high)
-		}
+	// winning copy. Every other row is a shadowed copy of the same name. The
+	// winner (and its index, which is what tells the shadowed rows apart) is
+	// resolved by the shared helper so the authorization entry point can read
+	// the SAME copy this screen describes.
+	w, winnerIdx, ok := m.mcpWinnerRow(name)
+	if !ok {
+		m.modalMode = ModalMCP
+		return m.renderModal(m.modalTitleFor(ModalMCP))
 	}
-	if winnerIdx < 0 {
-		winnerIdx = len(rows) - 1
-	}
-	w := rows[winnerIdx]
 	s := w.Summary
 
 	verdict, verdictLabel := inv.Effective[name], inv.Effective[name]
@@ -440,6 +508,38 @@ func (m *Model) renderMCPDetail() string {
 	addField(i18n.T("tui.mcpDetailEnvKeys"), mcpDetailKeyList(s.EnvKeys))
 	addField(i18n.T("tui.mcpDetailHeaderKeys"), mcpDetailKeyList(s.HeaderKeys))
 
+	// Auth verdict of the WINNING copy: in which carrier the credential would
+	// travel, and whether the sign-in the entry needs has been done (or one is
+	// stored). Shown only for an auth-bearing entry — a stdio server, or a
+	// remote one pkg/mcp does not report as auth-bearing, renders neither line
+	// (no empty "Auth:" row). The values come from CheckAuth, which answers
+	// booleans and names a carrier: no token, and no other field of the stored
+	// record, is ever reachable from here.
+	//
+	// THE ONE RENDER RULE, the same one mcpAuthSuffix applies to the list row
+	// and the WebUI's chip applies to its own row:
+	//
+	//	authenticated ⇒ show authenticated; else required ⇒ show needs-auth;
+	//	else nothing
+	//
+	// Authenticated is tested FIRST because that is what CheckAuth's
+	// Authenticated MEANS ("a usable credential exists, no sign-in is needed"),
+	// and the two flags are ORTHOGONAL — pkg/mcp documents that Authenticated
+	// is not derived from Required and anticipates a stored credential on an
+	// entry whose AuthRequired is false. Keying the block on Required rendered
+	// NOTHING for such a verdict here while the WebUI painted its
+	// "Authenticated" chip for the very same DTO.
+	auth, authKnown := m.mcpAuth[name]
+	authShown := authKnown && (auth.Authenticated || auth.Required)
+	if authShown {
+		addField(i18n.T("tui.mcpDetailAuth"), mcpAuthMethodLabel(auth.Method))
+		state := i18n.T("tui.mcpAuthRequired")
+		if auth.Authenticated {
+			state = i18n.T("tui.mcpAuthOK")
+		}
+		addField(i18n.T("tui.mcpDetailAuthState"), state)
+	}
+
 	// One line per shadowed copy: the whole stack stays visible, so the user
 	// can see what the winner is shadowing (layer, file, defines, the copy's
 	// own disabled flag and its raw command/url).
@@ -470,10 +570,57 @@ func (m *Model) renderMCPDetail() string {
 		// (same rule as the WebUI) and must be repaired in the file.
 		sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.mcpInvalidHint")) + "\n")
 	}
-	sb.WriteString(CommentColorStyle.Render("  " + i18n.T("tui.mcpDetailHints")))
+	// The auth line, shared with ModalMCPAuth: the inline "auth does not apply
+	// to a stdio server" hint of a refused "a", the copy confirmation, the
+	// outcome of the flow the user just came back from, or the result of a
+	// sign-out.
+	if line := m.mcpAuthFeedbackLine(); line != "" {
+		sb.WriteString(line + "\n")
+	}
+	// The sign-out hint only appears for an auth-bearing entry: that is
+	// exactly when "d" has something to do, so advertising it elsewhere would
+	// promise an action that can only refuse. A stored credential counts as
+	// auth-bearing too (authShown), because "d" is precisely what takes it
+	// back.
+	hints := i18n.T("tui.mcpDetailHints")
+	if authShown {
+		hints += " | " + i18n.T("tui.mcpLogoutHint")
+	}
+	sb.WriteString(CommentColorStyle.Render("  " + hints))
 
 	box := ModalContainer.Width(m.width - 10).Render(sb.String())
 	return m.paintFrame(box)
+}
+
+// mcpWinnerRow returns the winning copy of name out of the stored inventory
+// snapshot (the layer mcpInventory.Winner names), its index inside
+// ByName[name] — every other row is a shadowed copy — and whether a snapshot
+// was there to read at all.
+//
+// It is the single resolver behind both the detail screen and the
+// authorization entry point: reading the winner from anywhere else could
+// describe a different copy than the one on screen. Rows are low → high and
+// the highest copy wins when the winner layer names no row (which
+// ReadInventory does not produce; the fallback mirrors the detail renderer).
+func (m *Model) mcpWinnerRow(name string) (mcp.EntryState, int, bool) {
+	inv := m.mcpInventory
+	if !m.mcpInventoryValid || name == "" {
+		return mcp.EntryState{}, 0, false
+	}
+	rows := inv.ByName[name]
+	if len(rows) == 0 {
+		return mcp.EntryState{}, 0, false
+	}
+	winnerIdx := -1
+	for i := range rows {
+		if rows[i].Layer == inv.Winner[name] {
+			winnerIdx = i // last match wins (rows are low → high)
+		}
+	}
+	if winnerIdx < 0 {
+		winnerIdx = len(rows) - 1
+	}
+	return rows[winnerIdx], winnerIdx, true
 }
 
 // mcpDetailKeyList joins the sorted key NAMES of an env/header map; an

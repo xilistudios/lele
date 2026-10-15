@@ -246,3 +246,147 @@ func TestAllKeysExist(t *testing.T) {
 		}
 	}
 }
+
+// TestMCPAuthKeysExistInAllBuiltinLanguages covers the /mcp auth surface: the
+// OAuth modal (ModalMCPAuth, "a" in the server detail), the visibility markers
+// and sign-out lines of the list/detail, and the paste-refusal messages.
+// TestAllKeysExist only checks its own hardcoded list, so it would NOT catch a
+// key added to one locale and forgotten in the other two — which is exactly
+// the mistake this table of new keys is here to catch. Every key must be
+// present VERBATIM in each builtin locale's JSON (T() alone cannot prove that:
+// a missing key silently falls back to the default locale), and the format
+// verbs must be identical across locales (a %v dropped in one translation
+// would render a raw argument, or a %s added would consume a missing one).
+func TestMCPAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
+	keys := []string{
+		"tui.mcpAuth",
+		"tui.mcpAuthStarting",
+		"tui.mcpAuthURLLabel",
+		"tui.mcpAuthInstructions",
+		"tui.mcpAuthPlaceholder",
+		"tui.mcpAuthHintEnter",
+		"tui.mcpAuthHintCopy",
+		"tui.mcpAuthHintClose",
+		// The close hint is split by state: the cancel wording while the flow
+		// is live, the mere-close wording once it is over.
+		"tui.mcpAuthHintClosed",
+		"tui.mcpAuthCopied",
+		"tui.mcpAuthCopyFailed",
+		"tui.mcpAuthEmptyCode",
+		"tui.mcpAuthBadInput",
+		"tui.mcpAuthSuccess",
+		"tui.mcpAuthFailed",
+		"tui.mcpAuthStartFailed",
+		"tui.mcpAuthSubmitFailed",
+		"tui.mcpAuthServerUnknown",
+		"tui.mcpAuthNotApplicable",
+		"tui.mcpAuthErrNotSupported",
+		"tui.mcpAuthErrNotRequired",
+		"tui.mcpAuthErrStoreDisabled",
+		"tui.mcpAuthErrCanceled",
+		"tui.mcpAuthErrTimedOut",
+		// The transport/probe sentinel: an unreachable server. Its engine text
+		// is English, so it MUST have its own key or es/pt would show it.
+		"tui.mcpAuthErrProbeFailed",
+		// The paste parser refuses a denial redirect and an unreadable query
+		// with messages of its own; the outcomes themselves come from the
+		// engine (mcp.ParseAuthPaste), not from a TUI copy of the rule.
+		"tui.mcpAuthRefused",
+		"tui.mcpAuthRefusedUnknown",
+		// Auth visibility in the list and the detail, and the sign out.
+		"tui.mcpAuthRequired",
+		"tui.mcpAuthOK",
+		"tui.mcpAuthLogoutDone",
+		"tui.mcpAuthLogoutNone",
+		"tui.mcpAuthLogoutFailed",
+		"tui.mcpAuthUnavailable",
+		"tui.mcpDetailAuth",
+		"tui.mcpDetailAuthState",
+		"tui.mcpDetailNone",
+		// The detail hint was extended to advertise the new key, and so was
+		// the LIST hint ("D: sign out" between the toggle and the filter), so
+		// both footers must carry it in every locale.
+		"tui.mcpDetailHints",
+		"tui.mcpListHints",
+		"tui.mcpLogoutHint",
+	}
+
+	Init()
+	langs := BuiltinLanguages()
+	if len(langs) == 0 {
+		t.Fatal("BuiltinLanguages() is empty")
+	}
+	// The three builtins must really be there, or this test would pass on an
+	// empty iteration.
+	for _, want := range []string{"en", "es", "pt"} {
+		found := false
+		for _, l := range langs {
+			if l == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("BuiltinLanguages() = %v, want %q included", langs, want)
+		}
+	}
+
+	prev := GetLanguage()
+	t.Cleanup(func() { SetLanguage(prev) })
+
+	// The raw per-locale maps: a key deleted from exactly one builtin file
+	// would still resolve through the default-locale fallback, so presence is
+	// asserted against the file itself, not against T().
+	rawByLang := map[string]localeMap{}
+	for _, lang := range []string{"en", "es", "pt"} {
+		tag, err := language.Parse(lang)
+		if err != nil {
+			t.Fatalf("language.Parse(%q): %v", lang, err)
+		}
+		m, err := loadLocale(localeFiles[tag])
+		if err != nil {
+			t.Fatalf("loadLocale(%s): %v", lang, err)
+		}
+		rawByLang[lang] = m
+	}
+
+	verbs := func(s string) string {
+		var out []rune
+		for i := 0; i < len(s); i++ {
+			if s[i] == '%' && i+1 < len(s) {
+				out = append(out, rune(s[i+1]))
+				i++
+			}
+		}
+		return string(out)
+	}
+
+	reference := map[string]string{}
+	SetLanguage("en")
+	for _, key := range keys {
+		if v := T(key); v != key {
+			reference[key] = verbs(v)
+		}
+	}
+	for _, lang := range langs {
+		SetLanguage(lang)
+		for _, key := range keys {
+			if m, ok := rawByLang[lang]; ok {
+				if _, exists := m[key]; !exists {
+					t.Errorf("key %s missing from %s.json (T() would mask it via the default-locale fallback)", key, lang)
+				}
+			}
+			got := T(key)
+			if got == key {
+				t.Errorf("key %s missing in language %s", key, lang)
+				continue
+			}
+			if got == "" {
+				t.Errorf("key %s is empty in language %s", key, lang)
+			}
+			if ref, ok := reference[key]; ok && verbs(got) != ref {
+				t.Errorf("key %s: format verbs %q in %s, want %q (the en source)",
+					key, verbs(got), lang, ref)
+			}
+		}
+	}
+}

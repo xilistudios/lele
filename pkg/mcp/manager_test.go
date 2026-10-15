@@ -1212,3 +1212,300 @@ func TestToolFactoryPrefersSpecServerOverLoadedCache(t *testing.T) {
 		t.Errorf("bound server = %q, want srv — spec.Server must win over the loaded cache", tool.server)
 	}
 }
+
+// --- T5: auth revision invalidates the cached connection --------------------
+
+// TestManagerDropsConnectionWhenAuthRevisionChanges is the key falsifiable
+// test of the T5 invalidation rule: a token write (which does not touch
+// mcp.json) must retire the cached connection of that server, so the next
+// LoadServer re-dials with the fresh auth state. A LoadServer with NO store
+// change, by contrast, must reuse the cached connection (no spurious redial).
+func TestManagerDropsConnectionWhenAuthRevisionChanges(t *testing.T) {
+	const url = "https://srv.example/mcp"
+	paths := mcpFixture(t, `{"mcpServers": {"srv": {"url": "`+url+`", "description": "d"}}}`)
+	d := &fakeDialer{setup: func(_ int, conn *fakeConn) {
+		conn.listTools = []mcp.Tool{remoteTool("ping")}
+	}}
+	mgr := NewManager(paths, d)
+	ctx := context.Background()
+
+	if _, err := mgr.LoadServer(ctx, "srv"); err != nil {
+		t.Fatalf("first LoadServer: %v", err)
+	}
+	if d.dialCount() != 1 {
+		t.Fatalf("dials = %d, want 1", d.dialCount())
+	}
+
+	// A token write advances the store revision without editing mcp.json.
+	tok := &transport.Token{AccessToken: "access-token", TokenType: "Bearer"}
+	if err := mgr.auth.TokenStore("srv", url).SaveToken(ctx, tok); err != nil {
+		t.Fatalf("SaveToken: %v", err)
+	}
+
+	if _, err := mgr.LoadServer(ctx, "srv"); err != nil {
+		t.Fatalf("LoadServer after the token write: %v", err)
+	}
+	if d.dialCount() != 2 {
+		t.Fatalf("dials = %d, want 2 (the token write must retire the cached connection)", d.dialCount())
+	}
+	if _, _, closes := d.connAt(0).stats(); closes != 1 {
+		t.Errorf("first conn closes = %d, want 1 (retired by the revision change)", closes)
+	}
+
+	// No store change: the freshly dialed connection is reused, no third dial.
+	if _, err := mgr.LoadServer(ctx, "srv"); err != nil {
+		t.Fatalf("LoadServer with no store change: %v", err)
+	}
+	if d.dialCount() != 2 {
+		t.Errorf("dials = %d, want 2 (a stable revision must reuse the connection)", d.dialCount())
+	}
+}
+
+// TestManagerFingerprintIncludesAuthRevision pins the fingerprint contract:
+// stable when nothing changes, changed by a record write, and equal to the
+// base config fingerprint when there is no store at all.
+func TestManagerFingerprintIncludesAuthRevision(t *testing.T) {
+	paths := mcpFixture(t, `{"mcpServers": {"srv": {"url": "https://srv.example/mcp"}}}`)
+	mgr := NewManager(paths, &fakeDialer{})
+	cfg := ServerConfig{URL: "https://srv.example/mcp"}
+
+	first := mgr.fingerprint("srv", cfg)
+	if again := mgr.fingerprint("srv", cfg); again != first {
+		t.Errorf("fingerprint changed without a store change: %q vs %q", first, again)
+	}
+
+	if err := mgr.auth.Save("srv", AuthRecord{URL: cfg.URL, ClientID: "c1"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	withRecord := mgr.fingerprint("srv", cfg)
+	if withRecord == first {
+		t.Errorf("fingerprint did not change after a record write: %q", withRecord)
+	}
+	if again := mgr.fingerprint("srv", cfg); again != withRecord {
+		t.Errorf("fingerprint not stable after a record write: %q vs %q", again, withRecord)
+	}
+	if mgr.auth.Revision("srv") == 0 {
+		t.Fatal("probe expects a non-zero revision after the record write")
+	}
+
+	// With no store there is no revision component: the base fingerprint.
+	mgr.auth = nil
+	if got, want := mgr.fingerprint("srv", cfg), configFingerprint(cfg); got != want {
+		t.Errorf("nil-store fingerprint = %q, want base %q", got, want)
+	}
+}
+
+// TestFingerprintNilStore proves a Manager whose auth store is nil (a Manager
+// built without NewManager, or one explicitly disabled) never panics: the
+// fingerprint falls back to the base and the OAuth runtime stays unset.
+func TestFingerprintNilStore(t *testing.T) {
+	d := &fakeDialer{setup: func(_ int, conn *fakeConn) {
+		conn.listTools = []mcp.Tool{remoteTool("ping")}
+	}}
+	mgr := NewManager(basicFixture(t), d)
+	mgr.auth = nil
+
+	cfg := ServerConfig{URL: "https://srv.example/mcp"}
+	if got, want := mgr.fingerprint("srv", cfg), configFingerprint(cfg); got != want {
+		t.Errorf("fingerprint = %q, want base %q", got, want)
+	}
+	if rt := buildAuthRuntime(nil, "srv", cfg); rt != nil {
+		t.Errorf("buildAuthRuntime(nil, …) = %+v, want nil", rt)
+	}
+
+	// The full resolve + dial path must not panic either.
+	if _, err := mgr.LoadServer(context.Background(), "srv"); err != nil {
+		t.Fatalf("LoadServer with a nil store: %v", err)
+	}
+	if d.dialCount() != 1 {
+		t.Errorf("dials = %d, want 1", d.dialCount())
+	}
+}
+
+// --- T5 review H1/H4: challenge handling and the attach seam ---------------
+
+// TestAuthChallengeOnCachedConnectionIsNotRetried is the falsifiable guard of
+// H1. mcp-go's client.Client.sendRequest wraps EVERY SendRequest error in
+// transport.NewError (client/client.go), so a challenge observed by ListTools
+// arrives as *transport.Error wrapping the OAuth error — the exact shape
+// isTransportFailure reports as a transport failure. Before the fix the
+// manager dropped the connection and redialed (2 dials) for a missing
+// credential no redial can fix; now the challenge is reported as
+// ErrAuthRequired and the healthy connection is left alone (1 dial, 0 closes).
+//
+// The second LoadServer is the proof the connection survived: the scripted
+// error is consumed, so the SAME cached connection lists successfully without
+// a second dial. The CallRemote assertion covers the same ordering rule on
+// the tool-call path of that server.
+func TestAuthChallengeOnCachedConnectionIsNotRetried(t *testing.T) {
+	const url = "https://srv.example/mcp"
+	challenge := transport.NewError(&transport.OAuthAuthorizationRequiredError{})
+	paths := mcpFixture(t, `{"mcpServers": {"srv": {"url": "`+url+`"}}}`)
+	d := &fakeDialer{setup: func(_ int, conn *fakeConn) {
+		conn.listErrs = []error{challenge}
+		conn.callErrs = []error{challenge}
+	}}
+	mgr := NewManager(paths, d)
+
+	specs, err := mgr.LoadServer(context.Background(), "srv")
+	if err == nil {
+		t.Fatalf("LoadServer = %+v, nil; want an authentication error", specs)
+	}
+	if !errors.Is(err, ErrAuthRequired) {
+		t.Fatalf("errors.Is(err, ErrAuthRequired) = false; err = %v", err)
+	}
+	if d.dialCount() != 1 {
+		t.Errorf("dials = %d, want 1 (a challenge is not a transport failure)", d.dialCount())
+	}
+	if _, _, closes := d.connAt(0).stats(); closes != 0 {
+		t.Errorf("conn closes = %d, want 0 (the connection must not be dropped)", closes)
+	}
+
+	// Same rule on the tool-call path of the SAME server: the challenge is
+	// reported as ErrAuthRequired under the existing call prefix, still over
+	// the cached connection (no redial, no drop).
+	_, err = mgr.CallRemote(context.Background(), "srv", "ping", nil)
+	if err == nil {
+		t.Fatal("CallRemote succeeded; want an authentication error")
+	}
+	if !errors.Is(err, ErrAuthRequired) {
+		t.Fatalf("errors.Is(CallRemote err, ErrAuthRequired) = false; err = %v", err)
+	}
+	if !strings.HasPrefix(err.Error(), "mcp call srv.ping: ") {
+		t.Errorf("error = %q, want the %q prefix", err.Error(), "mcp call srv.ping: ")
+	}
+	if d.dialCount() != 1 {
+		t.Errorf("dials = %d, want 1 after the challenge on the tool call", d.dialCount())
+	}
+	if _, _, closes := d.connAt(0).stats(); closes != 0 {
+		t.Errorf("conn closes = %d, want 0 (the connection must not be dropped)", closes)
+	}
+
+	// The cached connection is still there and still works: no redial.
+	if specs, err := mgr.LoadServer(context.Background(), "srv"); err != nil {
+		t.Fatalf("second LoadServer on the cached conn: %v", err)
+	} else if len(specs) != 0 {
+		t.Errorf("specs = %+v, want none (the fake lists no tools)", specs)
+	}
+	if d.dialCount() != 1 {
+		t.Errorf("dials = %d, want 1 after a successful list on the cached conn", d.dialCount())
+	}
+}
+
+// TestAuthChallengeOnToolCallIsNotRetried is the CallRemote half of H1: a
+// challenge observed by CallTool is reported as ErrAuthRequired under the
+// existing "mcp call server.tool" prefix, with no redial and no drop.
+func TestAuthChallengeOnToolCallIsNotRetried(t *testing.T) {
+	const url = "https://srv.example/mcp"
+	challenge := transport.NewError(&transport.AuthorizationRequiredError{})
+	paths := mcpFixture(t, `{"mcpServers": {"srv": {"url": "`+url+`"}}}`)
+	d := &fakeDialer{setup: func(_ int, conn *fakeConn) {
+		conn.callErrs = []error{challenge}
+	}}
+	mgr := NewManager(paths, d)
+
+	_, err := mgr.CallRemote(context.Background(), "srv", "ping", nil)
+	if err == nil {
+		t.Fatal("CallRemote succeeded; want an authentication error")
+	}
+	if !errors.Is(err, ErrAuthRequired) {
+		t.Fatalf("errors.Is(err, ErrAuthRequired) = false; err = %v", err)
+	}
+	if !strings.HasPrefix(err.Error(), "mcp call srv.ping: ") {
+		t.Errorf("error = %q, want the %q prefix", err.Error(), "mcp call srv.ping: ")
+	}
+	if d.dialCount() != 1 {
+		t.Errorf("dials = %d, want 1 (a challenge is not a transport failure)", d.dialCount())
+	}
+	if _, _, closes := d.connAt(0).stats(); closes != 0 {
+		t.Errorf("conn closes = %d, want 0 (the connection must not be dropped)", closes)
+	}
+}
+
+// TestResolveUsesAttachAuthRuntime pins H4 behaviourally: Manager.resolve must
+// attach the OAuth runtime through the exported AttachAuthRuntime seam — the
+// one the CLI uses when it probes a server without a Manager. A server the
+// store records as 401 gets a runtime, a server that did not opt in does not,
+// and the runtime actually reaches the dial path (buildTransport is what turns
+// it into an OAuth transport).
+func TestResolveUsesAttachAuthRuntime(t *testing.T) {
+	const url = "https://srv.example/mcp"
+	paths := mcpFixture(t, `{
+  "mcpServers": {
+    "authed": {"url": "`+url+`"},
+    "open":   {"url": "https://open.example/mcp"}
+  }
+}`)
+	d := &fakeDialer{setup: func(_ int, conn *fakeConn) {
+		conn.listTools = []mcp.Tool{remoteTool("ping")}
+	}}
+	mgr := NewManager(paths, d)
+	if err := mgr.auth.Save("authed", AuthRecord{URL: url, AuthRequired: true, ClientID: "stored"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	cfg, err := mgr.resolve("authed")
+	if err != nil {
+		t.Fatalf("resolve(authed): %v", err)
+	}
+	if cfg.authRuntime == nil {
+		t.Fatal("resolve must attach an OAuth runtime for a store-opted-in server")
+	}
+	// The very same resolution the CLI performs without a Manager.
+	want := AttachAuthRuntime("authed", ServerConfig{URL: url}, mgr.auth)
+	if want.authRuntime == nil {
+		t.Fatal("AttachAuthRuntime returned no runtime for a store-opted-in server")
+	}
+	if cfg.authRuntime.clientID != want.authRuntime.clientID || cfg.authRuntime.clientID != "stored" {
+		t.Errorf("clientID = %q, want %q (resolve must use AttachAuthRuntime)",
+			cfg.authRuntime.clientID, want.authRuntime.clientID)
+	}
+
+	// Negative: a server that did not opt in carries no runtime.
+	if open, err := mgr.resolve("open"); err != nil {
+		t.Fatalf("resolve(open): %v", err)
+	} else if open.authRuntime != nil {
+		t.Errorf("resolve(open).authRuntime = %+v, want nil", open.authRuntime)
+	}
+
+	// The runtime reaches the dialer: this is what selects the OAuth
+	// transport in buildTransport.
+	if _, err := mgr.LoadServer(context.Background(), "authed"); err != nil {
+		t.Fatalf("LoadServer(authed): %v", err)
+	}
+	if d.cfgAt(0).authRuntime == nil {
+		t.Error("the dial path must receive the resolved OAuth runtime")
+	}
+
+	// And it reaches the actual CONSTRUCTOR: driving a real mcpDialer over
+	// the recording factory (transport_test.go) proves the routing end to
+	// end. The server whose ONLY opt-in is the stored 401 record must be
+	// dialled through httpOAuth; the record-less one must stay on the plain
+	// http constructor (attaching OAuth there would break a healthy server).
+	var plain []transportRecord
+	var oauth []oauthRecord
+	probe := NewManager(paths, &mcpDialer{
+		factory:   oauthRecordingFactory(&plain, &oauth),
+		newClient: func(transport.Interface) mcpClient { return &recordingClient{} },
+	})
+	defer func() { _ = probe.Close() }()
+
+	if _, err := probe.LoadServer(context.Background(), "open"); err != nil {
+		t.Fatalf("LoadServer(open): %v", err)
+	}
+	if _, err := probe.LoadServer(context.Background(), "authed"); err != nil {
+		t.Fatalf("LoadServer(authed): %v", err)
+	}
+	if len(plain) != 1 || plain[0].kind != "http" {
+		t.Errorf("plain constructors = %+v, want exactly one http for the record-less server", plain)
+	}
+	if len(oauth) != 1 || oauth[0].kind != "httpOAuth" {
+		t.Fatalf("oauth constructors = %+v, want exactly one httpOAuth for the stored-401 server", oauth)
+	}
+	if oauth[0].cfg.ClientID != "stored" {
+		t.Errorf("OAuth ClientID = %q, want the stored record's client id", oauth[0].cfg.ClientID)
+	}
+	if oauth[0].cfg.TokenStore == nil {
+		t.Error("OAuth TokenStore must be non-nil")
+	}
+}

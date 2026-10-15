@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,10 +12,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/agent"
+	"github.com/xilistudios/lele/pkg/auth"
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/mcp"
@@ -51,13 +54,36 @@ const mcpDescriptionMax = 60
 
 // mcpUsage documents each subcommand's positional shape; it is printed on a
 // parse error so the user is never left guessing.
+//
+// `test` is the only line that names a SECOND command: a probe can end in
+// "authentication required" rather than in a transport fault, and the fix is
+// always the auth flow (`lele mcp auth <name>`).
 var mcpUsage = map[string]string{
 	"list":   "lele mcp list [--agent <id>] [--layer global|agent|project]",
 	"show":   "lele mcp show <name> [--agent <id>]",
-	"add":    "lele mcp add <name> (--command <bin> | --url <u>) [--arg v]… [--type http|sse] [--env K=V]… [--header K=V]… [--description d] [--layer global|agent|project] [--force]",
+	"add":    "lele mcp add <name> (--command <bin> | --url <u>) [--arg v]… [--type http|sse] [--env K=V]… [--header K=V]… [--description d] [--layer global|agent|project] [--force] [--auth oauth|none] [--scope s]… [--client-id id] [--client-secret secret] [--redirect-uri uri] [--auth-server-metadata-url url] [--protected-resource-metadata-url url]",
 	"remove": "lele mcp remove <name> [--agent <id>] [--layer global|agent|project] [--all]",
 	"edit":   "lele mcp edit <name> [--agent <id>] [--layer global|agent|project]",
-	"test":   "lele mcp test <name> [--agent <id>] [--timeout 30s]",
+	"test":   "lele mcp test <name> [--agent <id>] [--timeout 30s]  (an OAuth server may need 'lele mcp auth <name>' first)",
+}
+
+// mcpAuthUsage holds the usage lines of the subcommands that drive the OAuth
+// flow itself. They live in a SEPARATE table on purpose: mcpUsage's keys are
+// the surface TestMCPDocs_UsageCoverage ties to docs/mcp.md AND to the
+// `lele help` line, and the auth family's documentation is owned by the docs
+// surface rather than by this file. Look both tables up through mcpUsageLine.
+var mcpAuthUsage = map[string]string{
+	"auth":   "lele mcp auth <name> [--agent <id>] [--no-browser] [--manual] [--timeout 5m] [--port <n>]",
+	"logout": "lele mcp logout <name> [--agent <id>]",
+}
+
+// mcpUsageLine returns the usage line of sub, from either table ("" when the
+// subcommand has none — only reachable from a programmer error).
+func mcpUsageLine(sub string) string {
+	if line, ok := mcpUsage[sub]; ok {
+		return line
+	}
+	return mcpAuthUsage[sub]
 }
 
 // mcpCmd is the os.Args dispatcher. It mirrors modelsCmd's shape (bare
@@ -95,6 +121,10 @@ func runMCP(w io.Writer, args []string) int {
 		return runMCPEdit(w, args[1:])
 	case "test":
 		return runMCPTest(w, args[1:])
+	case "auth":
+		return runMCPAuth(w, args[1:])
+	case "logout":
+		return runMCPLogout(w, args[1:])
 	case "help", "--help", "-h":
 		writeMCPHelp(w)
 		return 0
@@ -121,6 +151,8 @@ Usage:
   lele mcp remove <name> [--layer global|agent|project] [--all]
   lele mcp edit <name> [--layer global|agent|project]
   lele mcp test <name> [--timeout 30s]
+  lele mcp auth <name> [--agent <id>] [--no-browser] [--manual] [--timeout 5m] [--port <n>]
+  lele mcp logout <name> [--agent <id>]
 
 Common flags:
   --agent <id>            Agent whose workspace provides the agent layer (default: main)
@@ -141,19 +173,59 @@ add flags:
   --header KEY=VALUE      remote HTTP header (repeatable)
   --layer <l>             target layer (default: global)
   --force                 replace an existing entry in the target layer
+  --auth oauth|none       opt a remote entry into the OAuth 2.1 flow
+  --scope <s>             OAuth scope to request (repeatable)
+  --auth-server-metadata-url <u>
+                          override authorization-server metadata discovery
+  --protected-resource-metadata-url <u>
+                          override protected-resource metadata discovery
+  --client-id <id>        pre-registered client id (DCR fills it when empty)
+  --client-secret <s>     pre-registered client secret (requires --client-id)
+  --redirect-uri <uri>    registered redirect uri (pre-registered clients)
+
+auth flags:
+  --no-browser            never launch a browser; the URL is printed instead
+  --manual                paste the code/redirect URL on stdin (retry on a refused paste)
+  --timeout <dur>         how long to wait for the login (default: 5m)
+  --port <n>              pin the loopback callback port (0 = ephemeral)
 
 Examples:
   lele mcp list
   lele mcp show filesystem
   lele mcp add filesystem --command npx --arg -y --arg @modelcontextprotocol/server-filesystem --arg /tmp
   lele mcp add api --url https://api.example.com/mcp --type http --header "Authorization=Bearer ${TOKEN}"
+  lele mcp add api --url https://api.example.com/mcp --auth oauth
   lele mcp remove filesystem --all
   lele mcp edit api
   lele mcp test api
+  lele mcp auth api --no-browser
+  lele mcp logout api
 
 edit opens one entry's JSON object in $VISUAL/$EDITOR (fallback: vi), validates
 it when the editor exits and writes it back atomically; the file is left
 untouched on an invalid entry, so it is also the repair path for a broken server.
+
+test reports a remote server you are not signed in to as "authentication
+required — run 'lele mcp auth <name>'"; once authenticated it probes normally.
+
+list appends a trailing [needs auth] to a server that owes a login and
+[authenticated] once one is stored; show prints the entry's auth block and the
+same verdict as "auth state:". --manual takes one line per attempt: the full
+redirect URL, the bare query string, a bare code, or "<code> <state>" — the same
+rule the TUI uses (pkg/mcp.ParseAuthPaste). A refused paste is reported and asked
+again on the same flow; ":q" gives up.
+
+auth starts the OAuth 2.1 flow of a REMOTE server: it ALWAYS prints the
+authorization URL first (the only way to finish on a headless host) and then
+waits for the browser login — or, with --manual, reads the pasted
+authorization code or full redirect URL from stdin. A refused paste leaves the
+flow open: the prompt is shown again on the same flow, until it completes, the
+input ends or ':q' is typed. The token is stored in the lele directory; the
+gateway picks it up on the next reload.
+logout forgets that server's token AND its dynamic registration.
+
+No token, authorization code, verifier, client id or client secret is ever
+printed.
 
 Note: ${VAR} references are stored verbatim and expanded only when a server is
 loaded; env/header VALUES are never printed.
@@ -249,7 +321,7 @@ func nextMCPValue(args []string, i int, inline string, hasInline bool) (value st
 // mcpUsageError prints a parse failure plus the offending subcommand's usage.
 func mcpUsageError(w io.Writer, sub string, err error) {
 	fmt.Fprintf(w, "✗ %v\n", err)
-	fmt.Fprintf(w, "Usage: %s\n", mcpUsage[sub])
+	fmt.Fprintf(w, "Usage: %s\n", mcpUsageLine(sub))
 	fmt.Fprintln(w, "Run 'lele mcp --help' for details.")
 }
 
@@ -373,6 +445,42 @@ type mcpAddArgs struct {
 	headers     []string
 	layer       string
 	force       bool
+
+	// Auth block of a REMOTE entry: ONE field per mcp.AuthSpec field, kept
+	// exactly as the user spelled them, so the flag surface and the stored
+	// block cannot drift apart (a field added to AuthSpec has an obvious home
+	// here). authSpec() turns them into the mcp.AuthSpec the writer stores, or
+	// nil when NO auth flag was given — which is what keeps today's entries
+	// byte-identical (an absent block is omitted from the object; a declared
+	// one is written even when it is empty).
+	authType                     string
+	scopes                       []string
+	authServerMetadataURL        string
+	protectedResourceMetadataURL string
+	clientID                     string
+	clientSecret                 string
+	redirectURI                  string
+}
+
+// authSpec builds the entry's auth block from the flags, or nil when none of
+// them was given. A value is never expanded or defaulted here: what the user
+// typed ("${MY_TOKEN}") travels to the disk verbatim, exactly like env and
+// header values.
+func (a mcpAddArgs) authSpec() *mcp.AuthSpec {
+	if a.authType == "" && len(a.scopes) == 0 && a.authServerMetadataURL == "" &&
+		a.protectedResourceMetadataURL == "" && a.clientID == "" &&
+		a.clientSecret == "" && a.redirectURI == "" {
+		return nil
+	}
+	return &mcp.AuthSpec{
+		Type:                         a.authType,
+		Scopes:                       a.scopes,
+		ClientID:                     a.clientID,
+		ClientSecret:                 a.clientSecret,
+		RedirectURI:                  a.redirectURI,
+		AuthServerMetadataURL:        a.authServerMetadataURL,
+		ProtectedResourceMetadataURL: a.protectedResourceMetadataURL,
+	}
 }
 
 // entry builds the ServerConfig exactly as the flags spell it: no expansion,
@@ -393,6 +501,7 @@ func (a mcpAddArgs) entry() (mcp.ServerConfig, error) {
 		URL:         a.url,
 		Type:        a.typ,
 		Headers:     headers,
+		Auth:        a.authSpec(),
 		Description: a.description,
 	}, nil
 }
@@ -401,17 +510,24 @@ func parseMCPAddArgs(args []string) (mcpAddArgs, error) {
 	a := mcpAddArgs{agent: routing.DefaultAgentID, layer: mcp.LayerGlobal}
 	pos, err := parseMCPFlags(args, mcpParseSpec{
 		values: map[string]*string{
-			"--agent":       &a.agent,
-			"--command":     &a.command,
-			"--url":         &a.url,
-			"--type":        &a.typ,
-			"--description": &a.description,
-			"--layer":       &a.layer,
+			"--agent":                           &a.agent,
+			"--command":                         &a.command,
+			"--url":                             &a.url,
+			"--type":                            &a.typ,
+			"--description":                     &a.description,
+			"--layer":                           &a.layer,
+			"--auth":                            &a.authType,
+			"--auth-server-metadata-url":        &a.authServerMetadataURL,
+			"--protected-resource-metadata-url": &a.protectedResourceMetadataURL,
+			"--client-id":                       &a.clientID,
+			"--client-secret":                   &a.clientSecret,
+			"--redirect-uri":                    &a.redirectURI,
 		},
 		repeats: map[string]*[]string{
 			"--arg":    &a.args,
 			"--env":    &a.env,
 			"--header": &a.headers,
+			"--scope":  &a.scopes,
 		},
 		bools: map[string]*bool{"--force": &a.force},
 	})
@@ -428,6 +544,12 @@ func parseMCPAddArgs(args []string) (mcpAddArgs, error) {
 	return a, a.validate()
 }
 
+// validate mirrors (*mcp.ServerConfig).validate — the rule mcp.UpsertEntry runs
+// before it writes anything — so a mistake is reported as a usable usage error
+// here instead of being discovered later as a parse failure on a file that was
+// already written. The auth block is REMOTE-ONLY and every one of its rules is
+// checked: the whole block requires a url, --auth takes oauth|none, and a
+// secret needs the id it belongs to.
 func (a mcpAddArgs) validate() error {
 	if err := validMCPName(a.name); err != nil {
 		return err
@@ -448,6 +570,17 @@ func (a mcpAddArgs) validate() error {
 		if a.typ != "http" && a.typ != "sse" {
 			return fmt.Errorf("unknown type %q (want http or sse)", a.typ)
 		}
+	}
+	switch a.authType {
+	case "", "oauth", "none":
+	default:
+		return fmt.Errorf("unknown --auth %q (want oauth or none)", a.authType)
+	}
+	if a.authSpec() != nil && a.url == "" {
+		return errors.New("the auth flags require --url (an auth block is remote-only)")
+	}
+	if a.clientSecret != "" && a.clientID == "" {
+		return errors.New("--client-secret requires --client-id")
 	}
 	if _, err := mcpPairs(a.env); err != nil {
 		return fmt.Errorf("--env: %w", err)
@@ -620,6 +753,126 @@ func mcpStateGlyph(state string) string {
 	}
 }
 
+// ── Auth verdict ──────────────────────────────────────────────────────
+//
+// The CLI must be able to answer the two questions the TUI and the WebUI
+// already answer — "does this server need a login?" and "am I signed in?" — with
+// the same vocabulary, and without ever touching a credential. Both answers come
+// from pkg/mcp's own verbs (CheckAuth), read through the SAME in-process store
+// the flow uses (mcp.NewAuthStore(paths.LeleDir)): no REST round-trip, no second
+// way of finding the lele directory, and never a token or any other record field
+// in a rendered line.
+
+// The two auth markers, byte-identical to the TUI's localized
+// tui.mcpAuthRequired / tui.mcpAuthOK (pkg/tui/i18n/locales/en.json): the
+// surfaces must speak the same vocabulary. The CLI is deliberately NOT
+// localized, so these are English literals rather than i18n lookups.
+const (
+	mcpAuthMarkerRequired      = "[needs auth]"
+	mcpAuthMarkerAuthenticated = "[authenticated]"
+)
+
+// mcpAuthVerdicts resolves the auth verdict of every name of an inventory.
+//
+// This mirrors the TUI's helper of the same name (pkg/tui/mcp_auth.go): the
+// config comes from Discover — the same layer precedence and ${VAR} expansion
+// the manager dials, and the only view whose entries carry the auth block — and
+// NOT from the inventory row (EntryState.Summary is a display slice that never
+// carries it). Disabled and invalid names are excluded by Discover and therefore
+// get no verdict at all: an inert row must not advertise an auth state.
+//
+// A store that is not Enabled() (an empty LeleDir) yields an EMPTY map: there
+// is no credential to report and no place to record one, so no surface may
+// claim a server "needs auth" on its behalf ("no store ⇒ Required false").
+func mcpAuthVerdicts(paths mcp.Paths, inv mcp.Inventory) map[string]mcp.AuthStatus {
+	verdicts := make(map[string]mcp.AuthStatus)
+	if len(inv.Winner) == 0 {
+		return verdicts
+	}
+	store := mcp.NewAuthStore(paths.LeleDir)
+	if !store.Enabled() {
+		return verdicts
+	}
+	// Discover's warning error is ignored here, exactly like the TUI ignores
+	// it: warnings belong to the loaders and the logs, never to a listing — its
+	// RESULT is what is needed, and every entry it could read still gets a
+	// verdict.
+	disc, _ := mcp.Discover(paths)
+	for name := range inv.Winner {
+		srv, ok := disc.Servers[name]
+		if !ok {
+			continue
+		}
+		verdicts[name] = mcp.CheckAuth(store, name, srv)
+	}
+	return verdicts
+}
+
+// mcpAuthMarker is the marker appended to a `list` row, "" when there is
+// nothing to say. Pure, and the SAME rule as the TUI's mcpAuthSuffix and the
+// WebUI's chip:
+//
+//	authenticated ⇒ [authenticated]; else required ⇒ [needs auth];
+//	else nothing
+//
+// Authenticated is tested FIRST because that is what CheckAuth means by it ("a
+// usable credential exists, no sign-in is needed") and because it is
+// ORTHOGONAL to Required — pkg/mcp documents a stored credential on an entry
+// whose AuthRequired is false, and both other surfaces render that verdict as
+// authenticated. Keying on Required first made the CLI the odd one out: this
+// row said nothing while the TUI and the WebUI said "authenticated" for the
+// very same DTO.
+func mcpAuthMarker(st mcp.AuthStatus) string {
+	switch {
+	case st.Authenticated:
+		return mcpAuthMarkerAuthenticated
+	case st.Required:
+		return mcpAuthMarkerRequired
+	default:
+		return ""
+	}
+}
+
+// mcpAuthStateLabel renders the `show` verdict through the SAME rule and the
+// SAME vocabulary as the list marker (mcpAuthMarker): [authenticated] for a
+// stored credential, [needs auth] for a login owed and none stored, and
+// (none) only when neither is true — nothing stored and nothing owed. Sharing
+// the marker helper is deliberate: it makes the two sites structurally
+// incapable of drifting apart.
+func mcpAuthStateLabel(st mcp.AuthStatus) string {
+	if marker := mcpAuthMarker(st); marker != "" {
+		return marker
+	}
+	return "(none)"
+}
+
+// mcpAuthMethodLabel names the live carrier CheckAuth reports ("oauth",
+// "headers"), or (none) when there is no carrier — the same spelling the TUI
+// uses for its "Auth" line.
+func mcpAuthMethodLabel(method string) string {
+	if method == "" {
+		return "(none)"
+	}
+	return method
+}
+
+// mcpAuthTypeLabel renders the DECLARED auth block's type. An empty type inside
+// a present block (e.g. `"auth": {}`) is shown as unset rather than as an empty
+// value.
+func mcpAuthTypeLabel(t string) string {
+	if t == "" {
+		return "(unset)"
+	}
+	return t
+}
+
+// mcpShowField prints one labelled field of `lele mcp show`. The label is
+// padded to a fixed width (12 cells) so the value always starts at the same
+// column, matching the hard-coded field lines elsewhere in this command.
+func mcpShowField(w io.Writer, label, value string) {
+	fmt.Fprintf(w, "  %-12s %s\n", label, value)
+}
+
 // mcpDerivedInvalidReason explains an entry the runtime rejected WITHOUT a raw
 // verdict: ReadInventory derives "invalid" for a winning entry Discover
 // refused, and Discover's verdict is computed on the EXPANDED config, so the
@@ -678,6 +931,16 @@ func mcpYesNo(v bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// mcpSetLabel reports whether a config value is set WITHOUT printing it, for
+// fields that must never be rendered (a client id). It matches the "(none)"
+// spelling the key-list helpers use for an empty value.
+func mcpSetLabel(set bool) string {
+	if set {
+		return "(set)"
+	}
+	return "(none)"
 }
 
 // mcpFindRow returns the inventory row owned by the given layer.
@@ -793,6 +1056,10 @@ func runMCPList(w io.Writer, args []string) int {
 		return 0
 	}
 
+	// Resolve every row's auth verdict once, from the same inventory the rows
+	// come from, so a row's marker and the `show` verdict cannot disagree.
+	verdicts := mcpAuthVerdicts(paths, inv)
+
 	for _, name := range names {
 		state := inv.Effective[name]
 		row, _ := mcpFindRow(inv.ByName[name], inv.Winner[name])
@@ -801,6 +1068,15 @@ func runMCPList(w io.Writer, args []string) int {
 		line = strings.TrimRight(line, " ")
 		if desc != "" {
 			line += "  " + desc
+		}
+		// The auth marker goes LAST so nothing before it shifts: the row stays
+		// a stable, machine-readable shape (glyph, name, kind, layer,
+		// description) with the verdict appended. It is empty when the verdict
+		// has nothing to say (no credential stored and none owed), and for a
+		// row Discover does not report (disabled, invalid) — see
+		// mcpAuthMarker and mcpAuthVerdicts.
+		if marker := mcpAuthMarker(verdicts[name]); marker != "" {
+			line += " " + marker
 		}
 		fmt.Fprintln(w, line)
 	}
@@ -826,13 +1102,15 @@ func runMCPList(w io.Writer, args []string) int {
 // show
 // ---------------------------------------------------------------------------
 
-// mcpRawEntryArgs re-reads one layer file to recover an entry's args slice
-// VERBATIM. The inventory deliberately exposes only the arg COUNT
-// (ServerSummary.Args is an int), and mcp.ParseFile would expand ${VAR} —
-// neither is what `show` needs. This is a read-only, no-expansion decode of
-// the file the inventory already named as the winner; it never re-implements
-// discovery or validation. A missing/unreadable/unparseable file yields nil.
-func mcpRawEntryArgs(path, name string) []string {
+// mcpRawEntry re-reads one layer file to recover an entry VERBATIM — the
+// source of `show`'s args and auth block. The inventory deliberately exposes
+// neither the args values (only their count) nor the auth block's own fields
+// (only a display-safe projection), and mcp.ParseFile would expand ${VAR};
+// neither is what `show` needs. This is a read-only, no-expansion decode of the
+// file the inventory already named as the winner; it never re-implements
+// discovery or validation. A missing/unreadable/unparseable file, or an absent
+// entry, yields nil.
+func mcpRawEntry(path, name string) *mcp.ServerConfig {
 	if path == "" {
 		return nil
 	}
@@ -846,7 +1124,11 @@ func mcpRawEntryArgs(path, name string) []string {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return nil
 	}
-	return doc.MCPServers[name].Args
+	entry, ok := doc.MCPServers[name]
+	if !ok {
+		return nil
+	}
+	return &entry
 }
 
 func runMCPShow(w io.Writer, args []string) int {
@@ -875,6 +1157,13 @@ func runMCPShow(w io.Writer, args []string) int {
 	winnerLayer := inv.Winner[a.name]
 	winner, _ := mcpFindRow(rows, winnerLayer)
 	s := winner.Summary
+	// The raw (unexpanded) entry: the source of the args and the auth block.
+	raw := mcpRawEntry(winner.Path, a.name)
+	// The live verdict, resolved through the SAME path the list uses. A row
+	// Discover does not report (disabled, invalid) has no verdict here; that is
+	// deliberate, so an inert copy never advertises an auth state.
+	verdicts := mcpAuthVerdicts(paths, inv)
+	st, hasVerdict := verdicts[a.name]
 
 	fmt.Fprintf(w, "MCP server %q\n", a.name)
 	// ONE verdict source: the STATE line follows Effective (the runtime's
@@ -894,8 +1183,8 @@ func runMCPShow(w io.Writer, args []string) int {
 	if s.Command != "" {
 		fmt.Fprintf(w, "  command:     %s\n", s.Command)
 	}
-	if rawArgs := mcpRawEntryArgs(winner.Path, a.name); len(rawArgs) > 0 {
-		fmt.Fprintf(w, "  args:        %s\n", mcpQuoteArgs(rawArgs))
+	if raw != nil && len(raw.Args) > 0 {
+		fmt.Fprintf(w, "  args:        %s\n", mcpQuoteArgs(raw.Args))
 	} else if s.Args > 0 {
 		fmt.Fprintf(w, "  args:        (%d args)\n", s.Args)
 	}
@@ -910,6 +1199,38 @@ func runMCPShow(w io.Writer, args []string) int {
 	}
 	fmt.Fprintf(w, "  env keys:    %s\n", mcpFormatKeys(s.EnvKeys))
 	fmt.Fprintf(w, "  header keys: %s\n", mcpFormatKeys(s.HeaderKeys))
+
+	// The declared auth block of the winning entry, printed the way the other
+	// fields are: VERBATIM (a ${VAR} stays literal, never expanded) and
+	// KEYS-side only. A client id is reported as set/not set and a client
+	// SECRET is never printed at all — the same "no value leaves the config
+	// reader" rule pkg/mcp's ServerSummary documents. An absent block prints
+	// nothing, so a plain entry's output is unchanged by this feature.
+	if raw != nil && raw.Auth != nil {
+		mcpShowField(w, "auth:", mcpAuthTypeLabel(raw.Auth.Type))
+		if len(raw.Auth.Scopes) > 0 {
+			mcpShowField(w, "scopes:", strings.Join(raw.Auth.Scopes, ", "))
+		}
+		mcpShowField(w, "client id:", mcpSetLabel(raw.Auth.ClientID != ""))
+		if raw.Auth.RedirectURI != "" {
+			mcpShowField(w, "redirect:", raw.Auth.RedirectURI)
+		}
+		if raw.Auth.AuthServerMetadataURL != "" {
+			mcpShowField(w, "as metadata:", raw.Auth.AuthServerMetadataURL)
+		}
+		if raw.Auth.ProtectedResourceMetadataURL != "" {
+			mcpShowField(w, "pr metadata:", raw.Auth.ProtectedResourceMetadataURL)
+		}
+	}
+	// The LIVE verdict (mcp.CheckAuth), a boolean report: required yes/no is
+	// the bracket vocabulary, the method names the carrier. It is shown for any
+	// auth-relevant entry — a declared block, a recorded 401, or a stored
+	// credential — and ONLY when Discover reports the entry, so a disabled or
+	// invalid copy gets the block above but no verdict.
+	if hasVerdict && (raw != nil && raw.Auth != nil || st.Required || st.Authenticated) {
+		mcpShowField(w, "auth state:", mcpAuthStateLabel(st))
+		mcpShowField(w, "auth method:", mcpAuthMethodLabel(st.Method))
+	}
 
 	fmt.Fprintln(w, "\nPer-layer breakdown (low → high):")
 	for _, layer := range mcp.Layers() {
@@ -1395,6 +1716,120 @@ func runMCPEdit(w io.Writer, args []string) int {
 // test
 // ---------------------------------------------------------------------------
 
+// probeServerForCLI is the probe `lele mcp test` dials through. It is a
+// package-level var (not a direct call) so a test can drive the command's
+// OUTCOME branches — a probe that fails with mcp.ErrAuthRequired, above all —
+// without standing up a server: mcp.ProbeServer is not injectable from here,
+// and those branches are about how this file RENDERS a probe's outcome.
+//
+// The dial itself is never faked to hide a wiring bug: everything the config
+// resolution does (expansion, OAuth attachment) is still exercised, and the
+// tests that must prove the real dial happens keep the default.
+var probeServerForCLI = mcp.ProbeServer
+
+// mcpAuthFlow is the subset of *mcp.AuthFlow `lele mcp auth` drives. It is an
+// interface (rather than the concrete type) for the same reason the TUI's twin
+// is: *mcp.AuthFlow has unexported fields, so only the engine can build one and
+// an argv test could never drive the command without a network. *mcp.AuthFlow
+// satisfies it as-is — no adapter.
+//
+// RedirectURI() is deliberately NOT part of it: the redirect URI the flow
+// registered is the engine's business, and the URL it prints is URL().
+type mcpAuthFlow interface {
+	// URL is the authorization URL the user must visit (public client id,
+	// CSRF state and PKCE challenge — never a secret).
+	URL() string
+	// Wait blocks until the flow reaches a terminal outcome.
+	Wait(ctx context.Context) error
+	// Submit completes the flow with a code obtained out of band.
+	Submit(ctx context.Context, code, state string) error
+	// Done reports whether the flow reached a TERMINAL outcome. A failed token
+	// exchange is explicitly NOT terminal: the engine leaves the flow OPEN and
+	// retryable (Submit stays valid while !Done()), which is the distinction
+	// the --manual loop below is built on.
+	Done() bool
+	// Cancel releases the flow (a no-op once it finished).
+	Cancel() error
+}
+
+// startMCPAuthFlow is the seam the `lele mcp auth` subcommand drives, so its
+// argv surface is testable without a network (the engine probes and registers
+// against the real server before it returns). It lives next to
+// probeServerForCLI because it is the same kind of seam, and it defaults to the
+// real engine call — mcp.StartAuth — wrapped in the interface above.
+var startMCPAuthFlow = func(ctx context.Context, name string, srv mcp.ServerConfig, store *mcp.AuthStore, opts mcp.AuthOptions) (mcpAuthFlow, error) {
+	return mcp.StartAuth(ctx, name, srv, store, opts)
+}
+
+// mcpAuthInput is where --manual reads its pasted input from. It is
+// a package-level var (not os.Stdin inline) so a test can drive the paste
+// without touching the process's own stdin: one line per attempt, on the single
+// scanner mcpAuthManual owns.
+var mcpAuthInput io.Reader = os.Stdin
+
+// mcpTestDisabledNote and mcpAuthDisabledNote word the shared DISABLED line for
+// each caller's verb: `test` probes such a server directly, `auth` authorizes
+// the definition underneath a disable stub. Both explain the same thing — the
+// runtime will not load the entry, the command acts on it anyway.
+const (
+	mcpTestDisabledNote = "probing it directly (the runtime will not load it)"
+	mcpAuthDisabledNote = "authorizing it directly (the runtime will not load it)"
+)
+
+// mcpResolveTarget resolves the server config a probing or authorizing command
+// must act on and prints the refusals BOTH commands share: an unknown name
+// (with suggestions), an entry the runtime rejects, and a name that exists only
+// as a disable stub.
+//
+// It exists so `lele mcp test` and `lele mcp auth` can never disagree about
+// WHICH entry they are talking about: one inventory read, one winner lookup,
+// one definition resolution (mcpProbeConfig owns the disable-stub descent) and
+// one set of messages. The shared helper must never re-implement discovery.
+//
+// disabledNote is the clause the informational DISABLED line ends with, so each
+// caller can word it for its own verb ("" suppresses the line). ok=false means
+// the refusal has already been printed: the caller returns its failure code.
+func mcpResolveTarget(w io.Writer, inv mcp.Inventory, name, disabledNote string) (mcp.ServerConfig, mcp.EntryState, bool) {
+	rows := inv.ByName[name]
+	state, known := inv.Effective[name]
+	if !known || len(rows) == 0 {
+		fmt.Fprintf(w, "✗ unknown MCP server %q\n", name)
+		if sug := mcpSuggestions(name, mcpServerNames(inv)); len(sug) > 0 {
+			fmt.Fprintf(w, "  did you mean: %s?\n", strings.Join(sug, ", "))
+		}
+		return mcp.ServerConfig{}, mcp.EntryState{}, false
+	}
+	// ByName rows are low → high and ReadInventory always sets Winner (the
+	// last row) — the same spelling of "the winner" as show/edit/remove.
+	winnerLayer := inv.Winner[name]
+	winner, found := mcpFindRow(rows, winnerLayer)
+	if !found {
+		// Unreachable guard: Winner always names one of the enumerated rows.
+		fmt.Fprintf(w, "✗ %q has no copy in the %s layer\n", name, winnerLayer)
+		return mcp.ServerConfig{}, mcp.EntryState{}, false
+	}
+	if state == "invalid" {
+		// The runtime's verdict, with the reason the reader has (or the
+		// derived-invalid explanation when the raw text carries none).
+		fmt.Fprintf(w, "✗ %q is invalid: %s (fix with: lele mcp edit %s)\n",
+			name, mcpInvalidReason(winner), name)
+		return mcp.ServerConfig{}, winner, false
+	}
+	if state == "disabled" && disabledNote != "" {
+		fmt.Fprintf(w, "⊘ %q is disabled in the %s layer — %s\n", name, winnerLayer, disabledNote)
+	}
+	// The config is resolved OUTSIDE the seam on purpose: ProbeServer (and
+	// StartAuth) take the config as given and never expand it — see
+	// mcp.ProbeServer's contract — so this side must hand over the EXPANDED
+	// entry, exactly the object the runtime's dialer would receive.
+	cfg, row, err := mcpProbeConfig(rows, name)
+	if err != nil {
+		fmt.Fprintf(w, "✗ %v\n", err)
+		return mcp.ServerConfig{}, row, false
+	}
+	return cfg, row, true
+}
+
 // runMCPTest implements `lele mcp test <name> [--timeout d]`.
 //
 // It dials the server's winning DEFINITION through mcp.ProbeServer — the
@@ -1402,6 +1837,16 @@ func runMCPEdit(w io.Writer, args []string) int {
 // initialize handshake, tools/list) — and never through Manager.LoadServer:
 // the manager deliberately refuses a disabled entry, which is exactly the
 // entry `test` is asked about ("does it answer if I switch it on?").
+//
+// The entry resolution (unknown / invalid / disable-stub / disabled note) is
+// SHARED with `lele mcp auth` through mcpResolveTarget, so the two commands can
+// never act on different copies of the same name.
+//
+// The config is handed over WITH its OAuth runtime attached (mcp.
+// AttachAuthRuntime, built from this CLI's own lele directory): pkg/mcp keeps
+// the runtime private and ProbeServer dials the config it is given, so a bare
+// config would report "authentication required" for a server this lele
+// directory already holds a token for.
 //
 // Verdicts follow Inventory.Effective, never the raw per-file text: an entry
 // whose raw bytes look fine can still be rejected by the runtime once ${VAR}
@@ -1418,51 +1863,37 @@ func runMCPTest(w io.Writer, args []string) int {
 		return 1
 	}
 	inv := mcp.ReadInventory(paths)
-	rows := inv.ByName[a.name]
-	state, ok := inv.Effective[a.name]
-	if !ok || len(rows) == 0 {
-		fmt.Fprintf(w, "✗ unknown MCP server %q\n", a.name)
-		if sug := mcpSuggestions(a.name, mcpServerNames(inv)); len(sug) > 0 {
-			fmt.Fprintf(w, "  did you mean: %s?\n", strings.Join(sug, ", "))
-		}
+	cfg, _, ok := mcpResolveTarget(w, inv, a.name, mcpTestDisabledNote)
+	if !ok {
 		return 1
-	}
-	// ByName rows are low → high and ReadInventory always sets Winner (the
-	// last row) — the same spelling of "the winner" as show/edit/remove.
-	winnerLayer := inv.Winner[a.name]
-	winner, found := mcpFindRow(rows, winnerLayer)
-	if !found {
-		// Unreachable guard: Winner always names one of the enumerated rows.
-		fmt.Fprintf(w, "✗ %q has no copy in the %s layer\n", a.name, winnerLayer)
-		return 1
-	}
-	if state == "invalid" {
-		// The runtime's verdict, with the reason the reader has (or the
-		// derived-invalid explanation when the raw text carries none).
-		fmt.Fprintf(w, "✗ %q is invalid: %s (fix with: lele mcp edit %s)\n",
-			a.name, mcpInvalidReason(winner), a.name)
-		return 1
-	}
-	if state == "disabled" {
-		fmt.Fprintf(w, "⊘ %q is disabled in the %s layer — probing it directly (the runtime will not load it)\n",
-			a.name, winnerLayer)
 	}
 
-	// The config is resolved OUTSIDE ProbeServer on purpose: ProbeServer takes
-	// the config as given (it never expands - see its doc comment), so this
-	// side must hand it the EXPANDED entry, exactly the object the runtime's
-	// dialer would receive.
-	cfg, _, err := mcpProbeConfig(rows, a.name)
-	if err != nil {
-		fmt.Fprintf(w, "✗ %v\n", err)
-		return 1
-	}
+	// The OAuth runtime is PRIVATE to pkg/mcp and ProbeServer dials the config
+	// it receives, so this side must attach it — exactly as the manager
+	// resolves it before a dial (pkg/mcp/manager.go). The store is the CLI's
+	// own lele directory (mcpPathsFor), the same file the gateway and the TUI
+	// read, so a login performed anywhere is visible here.
+	store := mcp.NewAuthStore(paths.LeleDir)
+	cfg = mcp.AttachAuthRuntime(a.name, cfg, store)
 
 	ctx, cancel := context.WithTimeout(context.Background(), a.timeout)
 	defer cancel()
 
-	res, err := mcp.ProbeServer(ctx, cfg)
+	res, err := probeServerForCLI(ctx, cfg)
 	if err != nil {
+		// Keyed on the SENTINEL, never on the message: a transport failure
+		// whose text happens to mention authentication must still take the
+		// generic branch below.
+		if errors.Is(err, mcp.ErrAuthRequired) {
+			fmt.Fprintf(w, "✗ %q authentication required — run 'lele mcp auth %s'\n", a.name, a.name)
+			if cfg.URL != "" {
+				// A remote entry is the one case where the browser may live on
+				// another machine, so the instruction is repeated for a user on
+				// a headless host (the auth flow prints the URL to open).
+				fmt.Fprintf(w, "  you must sign in first: run 'lele mcp auth %s' where lele runs — it prints the authorization URL for any browser\n", a.name)
+			}
+			return 1
+		}
 		fmt.Fprintf(w, "✗ %q failed: %v\n", a.name, err)
 		return 1
 	}
@@ -1550,4 +1981,441 @@ func mcpToolNames(reported []string) []string {
 		names = append(names, fmt.Sprintf("+%d more", extra))
 	}
 	return names
+}
+
+// ---------------------------------------------------------------------------
+// auth
+// ---------------------------------------------------------------------------
+
+// mcpAuthDefaultTimeout is the flow budget when --timeout is not given. It
+// mirrors the engine's own default (pkg/mcp's unexported defaultAuthTimeout):
+// long enough for a browser login, short enough that a forgotten flow does not
+// pin the loopback listener forever.
+const mcpAuthDefaultTimeout = 5 * time.Minute
+
+// mcpAuthExitFailure is the exit code of EVERY `lele mcp auth` failure — the
+// family's convention (`lele mcp test` exits 1 for each of its own failure
+// kinds, including the "authentication required" branch). It is named once so
+// the sentinel table and the tests cannot drift apart.
+const mcpAuthExitFailure = 1
+
+type mcpAuthArgs struct {
+	agent     string
+	name      string
+	noBrowser bool
+	manual    bool
+	timeout   time.Duration
+	port      int
+}
+
+func parseMCPAuthArgs(args []string) (mcpAuthArgs, error) {
+	a := mcpAuthArgs{agent: routing.DefaultAgentID}
+	timeout := "5m"
+	port := ""
+	pos, err := parseMCPFlags(args, mcpParseSpec{
+		values: map[string]*string{
+			"--agent":   &a.agent,
+			"--timeout": &timeout,
+			"--port":    &port,
+		},
+		bools: map[string]*bool{
+			"--no-browser": &a.noBrowser,
+			"--manual":     &a.manual,
+		},
+	})
+	if err != nil {
+		return a, err
+	}
+	if len(pos) == 0 {
+		return a, errors.New("missing server name")
+	}
+	if len(pos) > 1 {
+		return a, fmt.Errorf("unexpected argument %q", pos[1])
+	}
+	a.name = pos[0]
+	if err := validMCPName(a.name); err != nil {
+		return a, err
+	}
+	d, err := time.ParseDuration(timeout)
+	if err != nil {
+		return a, fmt.Errorf("invalid --timeout %q: %w", timeout, err)
+	}
+	if d <= 0 {
+		return a, fmt.Errorf("invalid --timeout %q: must be positive", timeout)
+	}
+	a.timeout = d
+	if port != "" {
+		// 0 means "an ephemeral loopback port", which is the engine's own
+		// default (AuthOptions.Port) — everything outside a TCP port range is
+		// refused here rather than by the engine's private redirect-URI
+		// sentinel.
+		n, err := strconv.Atoi(port)
+		if err != nil {
+			return a, fmt.Errorf("invalid --port %q: want a number", port)
+		}
+		if n < 0 || n > 65535 {
+			return a, fmt.Errorf("invalid --port %q: must be between 0 and 65535", port)
+		}
+		a.port = n
+	}
+	return a, nil
+}
+
+// runMCPAuth implements `lele mcp auth <name> [flags]`: it starts the engine's
+// OAuth 2.1 flow for a REMOTE server and drives it to completion.
+//
+// The entry is resolved through mcpResolveTarget, the very helper `lele mcp
+// test` uses, so the two commands can never disagree about WHICH copy of the
+// name they are acting on; the store is the CLI's own lele directory, the same
+// file the gateway and the TUI read.
+//
+// The authorization URL is printed BEFORE anything blocks, unconditionally: on
+// a headless host the URL is the only way to finish, and the CLI is the
+// headless path. Nothing that is a secret is ever printed — not the URL's
+// parts beyond what the engine put there (public client id, state, PKCE
+// challenge), and never a token, a code, a verifier, a client id or a client
+// secret.
+func runMCPAuth(w io.Writer, args []string) int {
+	a, err := parseMCPAuthArgs(args)
+	if err != nil {
+		mcpUsageError(w, "auth", err)
+		return 1
+	}
+	paths, err := mcpPathsFor(a.agent)
+	if err != nil {
+		fmt.Fprintf(w, "✗ %v\n", err)
+		return 1
+	}
+	inv := mcp.ReadInventory(paths)
+	cfg, _, ok := mcpResolveTarget(w, inv, a.name, mcpAuthDisabledNote)
+	if !ok {
+		return 1
+	}
+	if cfg.URL == "" {
+		// A local (stdio) entry: OAuth needs a url to talk to. The engine
+		// refuses this shape too, but it keeps that sentinel private, so the
+		// CLI reports what it can see. The wording matches the engine's
+		// "not supported" branch below: to the user both mean "there is no
+		// flow to run here".
+		fmt.Fprintf(w, "✗ %q is a local (stdio) server — authentication is not supported; only a remote (url) server can run the OAuth flow\n", a.name)
+		return mcpAuthExitFailure
+	}
+	// Everything that is a value stays in the engine: this side only decides
+	// WHERE the flow may persist (this lele directory) and whether a browser
+	// may be launched.
+	store := mcp.NewAuthStore(paths.LeleDir)
+	opts := mcp.AuthOptions{Timeout: a.timeout, Port: a.port}
+	if !a.noBrowser {
+		// The engine never spawns a browser itself — the opener is injected
+		// (AuthOptions.OpenURL) — which is exactly what makes --no-browser a
+		// single nil here, with the URL still printed above.
+		opts.OpenURL = auth.OpenBrowser
+	}
+	// No CLI-side deadline: the ENGINE owns the flow budget (AuthOptions.
+	// Timeout) and reports its expiry as mcp.ErrAuthTimedOut. A second,
+	// identical deadline here would race it and turn that sentinel into a
+	// bare context.DeadlineExceeded, losing the distinction the user needs.
+	flow, err := startMCPAuthFlow(context.Background(), a.name, cfg, store, opts)
+	if err != nil {
+		return mcpAuthFail(w, a.name, err)
+	}
+	// Release the loopback listener on every exit path (a no-op once the flow
+	// reached a terminal outcome), so an abandoned --manual prompt does not
+	// leave the port bound until the budget runs out.
+	defer func() { _ = flow.Cancel() }()
+
+	fmt.Fprintf(w, "Authorization URL — open it in any browser (printed here for headless hosts):\n%s\n", flow.URL())
+
+	if a.manual {
+		return mcpAuthManual(w, a.name, flow)
+	}
+	if err := flow.Wait(context.Background()); err != nil {
+		return mcpAuthFail(w, a.name, err)
+	}
+	mcpAuthSuccess(w, a.name)
+	return 0
+}
+
+// mcpAuthManualMaxAttempts bounds the --manual read/submit loop. The engine
+// deliberately keeps a FAILED token exchange OPEN and retryable, so a user who
+// mistyped — or whose authorization server answered an error — can paste again
+// WITHOUT starting a whole new flow (a new URL, a new PKCE verifier). The loop
+// therefore re-prompts instead of exiting on the first failure, exactly like the
+// TUI's and the WebUI's still-armed paste box.
+//
+// The bound exists because stdin can be a pipe with no EOF: `yes "" | lele mcp
+// auth <name> --manual` would otherwise spin forever printing the same
+// rejection. Ten attempts is far above the two or three a human needs and keeps
+// the worst case finite; on reaching it the loop leaves the flow (the deferred
+// Cancel releases the listener) and tells the user to start over.
+const mcpAuthManualMaxAttempts = 10
+
+// mcpAuthManualPrompt is printed before every read, and REPEATED after a
+// failure so the user can see the box is still live: the same flow (same
+// authorization URL, same state and verifier) is still accepting a paste.
+const mcpAuthManualPrompt = "Paste the authorization code or the full redirect URL, then press ENTER:"
+
+// mcpAuthQuitInputs are the explicit "give up" inputs. They are deliberately
+// values the FROZEN paste grammar itself REJECTS — `:` is outside the
+// authorization-code alphabet — so a quit token can never shadow a real paste:
+// if one could parse as a code, quitting here would refuse or submit it
+// differently from the TUI and the WebUI. They are matched on the trimmed
+// paste, before mcp.ParseAuthPaste.
+var mcpAuthQuitInputs = map[string]bool{":q": true, ":quit": true}
+
+// mcpAuthManual completes the flow out of band: it reads pasted authorization
+// results from mcpAuthInput and submits the (code, state) pair each carries,
+// until the flow completes or the user gives up.
+//
+// The loop honours the engine's design (see mcpAuthFlow.Done): a failed token
+// exchange leaves the flow open and retryable, so the value-free failure is
+// printed and the prompt shown again — the SAME flow (same URL, same PKCE
+// state and verifier) keeps accepting a code. It stops on success, when the
+// flow becomes Done() on its own (the loopback callback landed while the user
+// was at the prompt, or the budget expired), on EOF, on an explicit quit input,
+// and after mcpAuthManualMaxAttempts attempts.
+//
+// The loopback callback stays available throughout — the engine owns that
+// decision — but nothing here waits for it: a headless host has no browser to
+// deliver one, and whichever half arrives first wins (the engine's Submit is
+// idempotent per flow).
+func mcpAuthManual(w io.Writer, name string, flow mcpAuthFlow) int {
+	// ONE scanner for the whole loop: a fresh bufio.Scanner per read would
+	// buffer ahead and swallow every paste after the first.
+	sc := bufio.NewScanner(mcpAuthInput)
+	for attempt := 1; ; attempt++ {
+		// A flow that reached a terminal outcome on its own — the loopback
+		// callback landed while we were at the prompt, or the budget expired —
+		// ends the loop: Wait then returns immediately with that outcome.
+		if flow.Done() {
+			if err := flow.Wait(context.Background()); err != nil {
+				return mcpAuthFail(w, name, err)
+			}
+			mcpAuthSuccess(w, name)
+			return 0
+		}
+		if attempt > mcpAuthManualMaxAttempts {
+			fmt.Fprintf(w, "✗ too many refused pastes (%d) — leaving the flow; run 'lele mcp auth %s' to start over\n",
+				mcpAuthManualMaxAttempts, name)
+			return mcpAuthExitFailure
+		}
+		fmt.Fprintln(w, mcpAuthManualPrompt)
+		line, err := mcpAuthReadLine(sc)
+		if err != nil {
+			fmt.Fprintf(w, "✗ %v\n", err)
+			return mcpAuthExitFailure
+		}
+		if mcpAuthQuitInputs[strings.TrimSpace(line)] {
+			// The deferred flow.Cancel() releases the loopback listener on
+			// every exit path, so the flow is NOT left open by a quit: say what
+			// actually happens, and name the command that starts a new one.
+			fmt.Fprintf(w, "✗ authorization canceled — nothing was submitted; the flow is abandoned, and 'lele mcp auth %s' starts a new one\n", name)
+			return mcpAuthExitFailure
+		}
+		code, state, perr := mcp.ParseAuthPaste(line)
+		if perr != nil {
+			// Nothing was submitted (the engine answers ("", "") with every
+			// error), so the box stays armed: print the outcome and re-prompt.
+			fmt.Fprintf(w, "✗ %v\n", mcpAuthPasteError(perr))
+			continue
+		}
+		if serr := flow.Submit(context.Background(), code, state); serr != nil {
+			// NOT terminal by itself: the engine keeps the flow open after a
+			// failed exchange, so this is a retry, not the end of the flow.
+			fmt.Fprintf(w, "✗ %s\n", mcpAuthReason(name, serr))
+			if flow.Done() {
+				return mcpAuthExitFailure
+			}
+			continue
+		}
+		mcpAuthSuccess(w, name)
+		return 0
+	}
+}
+
+// mcpAuthReadLine reads ONE line of pasted input for the --manual loop. The
+// caller passes the SINGLE scanner the loop owns: a scanner created per call
+// would read ahead into the pipe and throw away every paste after the first.
+//
+// A reader that hits EOF without a line (a closed stdin, a piped input that ran
+// out) is an error, not an empty code: there is nothing to submit, and EOF is
+// the loop's terminator.
+func mcpAuthReadLine(sc *bufio.Scanner) (string, error) {
+	if !sc.Scan() {
+		if err := sc.Err(); err != nil {
+			return "", fmt.Errorf("reading the pasted input: %w", err)
+		}
+		return "", errors.New("no input on stdin — paste the authorization code or the full redirect URL")
+	}
+	return sc.Text(), nil
+}
+
+// mcpAuthPasteError renders a mcp.ParseAuthPaste outcome with the CLI's own
+// sentences. The WORDING is the only thing this side owns: the rule itself is
+// the engine's — pkg/mcp.ParseAuthPaste is the ONE canonical implementation of
+// the frozen grammar (.lele/tasks/mcp-oauth-paste-grammar.md), and the CLI no
+// longer keeps a private copy (a review proved three hand-written copies
+// DISAGREED: the same paste was submitted, refused, or submitted as a different
+// code depending on the surface).
+//
+// `unrecognized` and `no-code` share ONE sentence on purpose: the grammar
+// explicitly allows it, the TUI renders them the same way, and both mean "there
+// is no authorization code in what you pasted".
+func mcpAuthPasteError(err error) error {
+	switch {
+	case errors.Is(err, mcp.ErrAuthPasteEmpty):
+		return errMCPAuthEmptyInput
+	case errors.Is(err, mcp.ErrAuthPasteUnrecognized), errors.Is(err, mcp.ErrAuthPasteNoCode):
+		return errMCPAuthBadInput
+	}
+	var denied *mcp.AuthPasteDeniedError
+	if errors.As(err, &denied) {
+		return mcpAuthRefusal(denied.Code)
+	}
+	return errMCPAuthBadInput
+}
+
+// errMCPAuthEmptyInput is the fixed sentence for a paste with nothing in it
+// (mcp.ErrAuthPasteEmpty). Nothing was submitted and nothing is wrong.
+var errMCPAuthEmptyInput = errors.New("empty input — paste the authorization code or the full redirect URL")
+
+// errMCPAuthBadInput is the fixed sentence for a paste that carries no usable
+// authorization code: a value none of the accepted forms matches
+// (mcp.ErrAuthPasteUnrecognized) or a URL/query that arrived without one
+// (mcp.ErrAuthPasteNoCode).
+var errMCPAuthBadInput = errors.New("unrecognized input — paste the authorization code or the full redirect URL")
+
+// mcpAuthRefusal renders the authorization server's own refusal (the `error`
+// parameter of a redirect it sent back). The code is echoed ONLY when the
+// engine's sanitizer keeps it; anything else becomes a fixed message, so a
+// hostile redirect cannot push arbitrary bytes onto the terminal.
+//
+// The policy is pkg/mcp.SanitizeOAuthCode — the engine's ONE implementation of
+// the rule, which delegates to the engine's own sanitizeOAuthToken. This file
+// used to carry a private copy of that rule (mcpAuthOAuthToken); the point of
+// the finding is that no surface keeps one. The engine has already sanitized
+// the code it hands over, and the sanitizer is idempotent, so applying it again
+// here is a belt-and-braces re-check, never a second rule.
+func mcpAuthRefusal(code string) error {
+	safe := mcp.SanitizeOAuthCode(code)
+	if safe == "" {
+		return errors.New("the authorization server refused the authorization (error=…); nothing was submitted")
+	}
+	return fmt.Errorf("the authorization server refused the authorization (%s); nothing was submitted", safe)
+}
+
+// mcpAuthFail renders one failure of the auth flow and returns the family's
+// failure exit code.
+//
+// It maps the engine's SENTINELS, never its message text: "this server needs no
+// login", "this server is local", "the store is off", "the transport is
+// broken", "you cancelled" and "the login timed out" are different problems
+// with different fixes, and collapsing them into one line is exactly what the
+// sentinels exist to prevent. In particular a probe/transport failure
+// (ErrAuthProbeFailed) must NOT be reported as "does not require
+// authentication" — that would send the operator looking in the wrong place.
+//
+// The generic fallback prints the engine's own string, which pkg/mcp guarantees
+// is value-free: no token, code, verifier, client secret or URL ever reaches
+// this line.
+func mcpAuthFail(w io.Writer, name string, err error) int {
+	fmt.Fprintf(w, "✗ %s\n", mcpAuthReason(name, err))
+	return mcpAuthExitFailure
+}
+
+// mcpAuthReason is the sentinel→message table behind mcpAuthFail.
+func mcpAuthReason(name string, err error) string {
+	switch {
+	case errors.Is(err, mcp.ErrAuthNotRequired):
+		return fmt.Sprintf("%q does not require authentication — the plain handshake succeeded, so there is nothing to authorize", name)
+	case errors.Is(err, mcp.ErrAuthNotSupported):
+		return fmt.Sprintf("%q authentication is not supported: the server advertises no dynamic client registration endpoint (add a pre-registered client with --client-id/--client-secret)", name)
+	case errors.Is(err, mcp.ErrAuthProbeFailed):
+		// The transport/probe sentinel: the server never completed a
+		// handshake, so it is dead, unreachable or misaddressed — NOT a server
+		// that needs no login.
+		return fmt.Sprintf("%q transport failure — the server did not complete the handshake, so this is not an authorization challenge (run 'lele mcp test %s' to inspect the connection)", name, name)
+	case errors.Is(err, mcp.ErrAuthStoreDisabled):
+		return "the authorization store is disabled — there is no lele directory to persist the login in"
+	case errors.Is(err, mcp.ErrAuthCanceled):
+		return "authorization canceled"
+	case errors.Is(err, mcp.ErrAuthTimedOut):
+		return fmt.Sprintf("authorization timed out — run 'lele mcp auth %s' to try again", name)
+	}
+	return fmt.Sprintf("%q authorization failed: %v", name, err)
+}
+
+// mcpAuthSuccess is the ONE success line, shared by the loopback and the
+// --manual completion paths so both report the same outcome.
+func mcpAuthSuccess(w io.Writer, name string) {
+	fmt.Fprintf(w, "✓ %q authenticated; the gateway picks it up on the next reload\n", name)
+}
+
+// ---------------------------------------------------------------------------
+// logout
+// ---------------------------------------------------------------------------
+
+type mcpLogoutArgs struct {
+	agent string
+	name  string
+}
+
+func parseMCPLogoutArgs(args []string) (mcpLogoutArgs, error) {
+	a := mcpLogoutArgs{agent: routing.DefaultAgentID}
+	pos, err := parseMCPFlags(args, mcpParseSpec{values: map[string]*string{
+		"--agent": &a.agent,
+	}})
+	if err != nil {
+		return a, err
+	}
+	if len(pos) == 0 {
+		return a, errors.New("missing server name")
+	}
+	if len(pos) > 1 {
+		return a, fmt.Errorf("unexpected argument %q", pos[1])
+	}
+	a.name = pos[0]
+	return a, validMCPName(a.name)
+}
+
+// runMCPLogout implements `lele mcp logout <name>`: it forgets everything the
+// lele directory stores about one server — the token AND the dynamic client
+// registration — through mcp.Logout, the same primitive the other surfaces use.
+//
+// It reports WHETHER anything was forgotten but never what it was: the store's
+// only exported questions are yes/no, and nothing here ever touches a token.
+//
+// The server does not have to exist in the inventory. The name is the only key
+// the store has, so a server already removed from mcp.json can (and should)
+// still be forgotten here.
+//
+// An empty store is a SUCCESS: "logout" names a desired state, and that state
+// ("nothing is stored for this server") already holds — the user's intent is
+// satisfied, so the exit code says so instead of pretending a failure. Only a
+// real store failure is non-zero.
+func runMCPLogout(w io.Writer, args []string) int {
+	a, err := parseMCPLogoutArgs(args)
+	if err != nil {
+		mcpUsageError(w, "logout", err)
+		return 1
+	}
+	paths, err := mcpPathsFor(a.agent)
+	if err != nil {
+		fmt.Fprintf(w, "✗ %v\n", err)
+		return 1
+	}
+	store := mcp.NewAuthStore(paths.LeleDir)
+	// The verdict is read BEFORE the clear: Clear removes the record, so
+	// afterwards there is no way to tell "forgotten" from "never stored".
+	_, had := store.Record(a.name)
+	if err := mcp.Logout(store, a.name); err != nil {
+		fmt.Fprintf(w, "✗ %v\n", err)
+		return 1
+	}
+	if had {
+		fmt.Fprintf(w, "✓ forgot the stored credentials and registration for %q (the gateway drops the session on the next reload)\n", a.name)
+		return 0
+	}
+	fmt.Fprintf(w, "✓ nothing was stored for %q — nothing to forget (a logout that finds nothing is still a success)\n", a.name)
+	return 0
 }
