@@ -131,6 +131,12 @@ an OAuth login, check:
   using the Gemini developer API-key path, so the two configurations coexist
   under the same provider key.
 
+While `providers.gemini.auth_method = "oauth"`, the Code Assist transport talks
+to the Code Assist endpoint (`cloudcode-pa.googleapis.com`), so
+`providers.gemini.api_base` is ignored, and per-request generation settings such
+as `max_tokens` and `temperature` are not forwarded. Set an `api_key` (or remove
+`auth_method`) to go back to the developer API-key path, where both apply.
+
 ## `read_video is not available: the current model supports neither video nor vision`
 
 `read_video` is hidden (and blocked at execution time) unless the session

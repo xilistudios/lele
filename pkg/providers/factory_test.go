@@ -1,6 +1,9 @@
 package providers
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -149,6 +152,44 @@ func TestResolveProviderSelection(t *testing.T) {
 			wantType:    providerTypeHTTPCompat,
 			wantAPIBase: "https://api.moonshot.cn/v1",
 			wantProxy:   "http://127.0.0.1:7890",
+		},
+		{
+			name: "gemini oauth routes to gemini code assist",
+			setup: func(cfg *config.Config) {
+				// The provider spelling matters here only because
+				// resolveProviderSelection reads it: "gemini" is the canonical
+				// config name for the provider whose API-key path the sibling
+				// test below pins.
+				cfg.Agents.Defaults.Provider = "gemini"
+				cfg.Providers.Gemini.AuthMethod = "oauth"
+			},
+			wantType: providerTypeGeminiAuth,
+		},
+		{
+			name: "google spelling selects code assist from the same gemini config",
+			setup: func(cfg *config.Config) {
+				cfg.Agents.Defaults.Provider = "google"
+				cfg.Providers.Gemini.AuthMethod = "oauth"
+			},
+			wantType: providerTypeGeminiAuth,
+		},
+		{
+			name: "gemini oauth with an api key keeps the api key path",
+			setup: func(cfg *config.Config) {
+				cfg.Agents.Defaults.Provider = "gemini"
+				cfg.Providers.Gemini.AuthMethod = "oauth"
+				cfg.Providers.Gemini.APIKey = "gemini-key"
+			},
+			wantType:    providerTypeHTTPCompat,
+			wantAPIBase: "https://generativelanguage.googleapis.com/v1beta",
+		},
+		{
+			name: "gemini auth_method token without an api key is not code assist",
+			setup: func(cfg *config.Config) {
+				cfg.Agents.Defaults.Provider = "gemini"
+				cfg.Providers.Gemini.AuthMethod = "token"
+			},
+			wantErrSubstr: "no API key configured for provider",
 		},
 		{
 			name: "missing keys returns model config error",
@@ -311,6 +352,244 @@ func TestCreateProviderClaudeProviderTokenAuthMethodIsNotOAuth(t *testing.T) {
 	}
 	if claudeProvider.delegate.OAuthMode() {
 		t.Error("delegate.OAuthMode() = true, want false for a token credential")
+	}
+}
+
+// TestCreateProviderReturnsGeminiCodeAssistForGeminiOAuth pins the
+// providers.gemini.auth_method == "oauth" + no-API-key selection: the factory
+// must build a Code Assist provider seeded with the stored credential's access
+// token and wired to createGeminiTokenSource(), without any network access at
+// construction time.
+func TestCreateProviderReturnsGeminiCodeAssistForGeminiOAuth(t *testing.T) {
+	originalGetCredential := getCredential
+	t.Cleanup(func() { getCredential = originalGetCredential })
+
+	getCredential = func(provider string) (*auth.AuthCredential, error) {
+		if provider != "gemini" {
+			t.Fatalf("provider = %q, want gemini", provider)
+		}
+		return &auth.AuthCredential{
+			AccessToken: "gemini-token",
+			AuthMethod:  "oauth",
+		}, nil
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Provider = "gemini"
+	cfg.Providers.Gemini.AuthMethod = "oauth"
+
+	provider, err := CreateProvider(cfg)
+	if err != nil {
+		t.Fatalf("CreateProvider() error = %v", err)
+	}
+
+	codeAssist, ok := provider.(*GeminiCodeAssistProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want *GeminiCodeAssistProvider", provider)
+	}
+	if codeAssist.token != "gemini-token" {
+		t.Fatalf("token = %q, want %q", codeAssist.token, "gemini-token")
+	}
+	if codeAssist.tokenSource == nil {
+		t.Fatal("tokenSource = nil, want createGeminiTokenSource()")
+	}
+}
+
+// TestCreateProviderForCandidateRawGoogleSpellingUsesCodeAssist covers the
+// un-normalized entry point: CreateProviderForCandidate does not normalize its
+// argument, so the raw "google" spelling (a fallback candidate built from a
+// "google/model" prefix) must select Code Assist from the same Providers.Gemini
+// config the "gemini" spelling uses.
+func TestCreateProviderForCandidateRawGoogleSpellingUsesCodeAssist(t *testing.T) {
+	originalGetCredential := getCredential
+	t.Cleanup(func() { getCredential = originalGetCredential })
+
+	getCredential = func(provider string) (*auth.AuthCredential, error) {
+		if provider != "gemini" {
+			t.Fatalf("provider = %q, want gemini", provider)
+		}
+		return &auth.AuthCredential{
+			AccessToken: "gemini-token",
+			AuthMethod:  "oauth",
+		}, nil
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Providers.Gemini.AuthMethod = "oauth"
+
+	provider, err := CreateProviderForCandidate(cfg, "google")
+	if err != nil {
+		t.Fatalf("CreateProviderForCandidate() error = %v", err)
+	}
+	if _, ok := provider.(*GeminiCodeAssistProvider); !ok {
+		t.Fatalf("provider type = %T, want *GeminiCodeAssistProvider", provider)
+	}
+}
+
+// TestCreateGeminiAuthProviderReportsMissingCredentials pins the wording of the
+// OAuth-credential error. It must name gemini (not claude, whose provider
+// createGeminiAuthProvider mirrors) and the exact login command to run.
+func TestCreateGeminiAuthProviderReportsMissingCredentials(t *testing.T) {
+	originalGetCredential := getCredential
+	t.Cleanup(func() { getCredential = originalGetCredential })
+
+	getCredential = func(provider string) (*auth.AuthCredential, error) {
+		if provider != "gemini" {
+			t.Fatalf("provider = %q, want gemini", provider)
+		}
+		return nil, nil
+	}
+
+	_, err := createGeminiAuthProvider("")
+	if err == nil {
+		t.Fatal("createGeminiAuthProvider() error = nil, want a missing-credentials error")
+	}
+	want := "no credentials for gemini. Run: lele auth login --provider gemini"
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+// TestResolveProviderSelectionGeminiAPIKeyUnchanged is the regression guard for
+// the other half of F2-T08: with no auth_method the gemini provider config still
+// selects the plain API-key (HTTP-compat) transport against the public
+// Generative Language base.
+func TestResolveProviderSelectionGeminiAPIKeyUnchanged(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Provider = "gemini"
+	cfg.Providers.Gemini.APIKey = "k"
+
+	got, err := resolveProviderSelection(cfg)
+	if err != nil {
+		t.Fatalf("resolveProviderSelection() error = %v", err)
+	}
+	if got.providerType != providerTypeHTTPCompat {
+		t.Fatalf("providerType = %v, want providerTypeHTTPCompat", got.providerType)
+	}
+	if want := "https://generativelanguage.googleapis.com/v1beta"; got.apiBase != want {
+		t.Fatalf("apiBase = %q, want %q", got.apiBase, want)
+	}
+	if got.apiKey != "k" {
+		t.Fatalf("apiKey = %q, want %q", got.apiKey, "k")
+	}
+}
+
+// geminiNamedOnlyConfig builds a hand-assembled "Named-only caller" shape:
+// Providers.Named["gemini"] carries the decision data while the typed
+// Providers.Gemini field is deliberately left zero-valued.
+//
+// That shape is not what EditableDocument.ToConfig() produces, and no current
+// production caller is it (see the note in selectionFromNamedProvider): every
+// production config also fills the typed field. ToConfig() cannot hand back a
+// Config whose Providers.Named["gemini"] is populated AND whose typed
+// Providers.Gemini is not, because ToConfig returns its json round-tripped
+// `validated` Config and ProvidersConfig.UnmarshalJSON fills the typed field
+// from the same flat "providers.<name>" object (empirically verified for
+// F2-T12: with providers.gemini.auth_method == "oauth", ToConfig() returns
+// Providers.Gemini.AuthMethod == "oauth"). The helper therefore keeps only the
+// half a Named-only caller sees, exactly like the reviewer's overlay test.
+//
+// Pinning it is still worth it: it is the only shape that exercises the new
+// `case "gemini"` in selectionFromNamedProvider, which is defence-in-depth for
+// exactly such a caller.
+//
+// The Named entry itself is produced through the public pkg/config API
+// (LoadEditableDocument -> EditableDocument.ToConfig), the same route the
+// finding used, so the decision data under test is parsed by the real
+// provider-config path rather than by a hand-written literal.
+func geminiNamedOnlyConfig(t *testing.T, providerEntryJSON string) (*config.Config, config.NamedProviderConfig) {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	body := fmt.Sprintf(`{
+  "agents": {"defaults": {"provider": "gemini", "model": "gemini-2.5-pro"}},
+  "providers": {"gemini": %s}
+}`, providerEntryJSON)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+
+	doc, _, err := config.LoadEditableDocument(path)
+	if err != nil {
+		t.Fatalf("LoadEditableDocument() error = %v", err)
+	}
+	fromDoc, err := doc.ToConfig()
+	if err != nil {
+		t.Fatalf("ToConfig() error = %v", err)
+	}
+	named, ok := fromDoc.Providers.Named["gemini"]
+	if !ok {
+		t.Fatalf("Providers.Named has no %q entry after ToConfig(); got %v", "gemini", fromDoc.Providers.Named)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Provider = "gemini"
+	cfg.Agents.Defaults.Model = "gemini-2.5-pro"
+	cfg.Providers = &config.ProvidersConfig{
+		Named: map[string]config.NamedProviderConfig{"gemini": named},
+	}
+	if cfg.Providers.Gemini != (config.ProviderConfig{}) {
+		t.Fatalf("typed Providers.Gemini = %+v, want the zero value: the test must exercise the Named-only path", cfg.Providers.Gemini)
+	}
+	return cfg, named
+}
+
+// TestResolveProviderSelectionGeminiOAuthFromNamedEntryOnly pins F2-T12: the
+// Code Assist transport must be selected when the decision data lives in
+// Providers.Named["gemini"] (auth_method "oauth", no api key) even though the
+// typed Providers.Gemini field is zero. That is the hand-assembled Named-only
+// caller shape described on geminiNamedOnlyConfig and, since every production
+// config also fills the typed field, the only shape that reaches the new
+// `case "gemini"`. Before it was added only the typed field was consulted (the
+// pre-check), so this shape fell through selectionFromNamedProvider's generic
+// tail and failed with "no API key configured for provider".
+func TestResolveProviderSelectionGeminiOAuthFromNamedEntryOnly(t *testing.T) {
+	cfg, named := geminiNamedOnlyConfig(t, `{"type": "gemini", "auth_method": "oauth"}`)
+	if named.AuthMethod != "oauth" {
+		t.Fatalf("named.AuthMethod = %q, want %q", named.AuthMethod, "oauth")
+	}
+	if named.APIKey != "" {
+		t.Fatalf("named.APIKey = %q, want empty", named.APIKey)
+	}
+
+	got, err := resolveProviderSelection(cfg)
+	if err != nil {
+		t.Fatalf("resolveProviderSelection() error = %v", err)
+	}
+	if got.providerType != providerTypeGeminiAuth {
+		t.Fatalf("providerType = %v, want providerTypeGeminiAuth", got.providerType)
+	}
+	if got.apiKey != "" {
+		t.Fatalf("apiKey = %q, want empty (the Code Assist transport carries no API key)", got.apiKey)
+	}
+}
+
+// TestResolveProviderSelectionGeminiNamedEntryWithAPIKeyStaysAPIKey pins the
+// other half of the "gemini" case added to selectionFromNamedProvider: an entry
+// with auth_method "oauth" AND an api_key must keep the developer API-key path
+// (providerTypeHTTPCompat against the Generative Language base), i.e. the new
+// case must not hijack a keyed config.
+func TestResolveProviderSelectionGeminiNamedEntryWithAPIKeyStaysAPIKey(t *testing.T) {
+	cfg, named := geminiNamedOnlyConfig(t, `{"type": "gemini", "auth_method": "oauth", "api_key": "named-gemini-key"}`)
+	if named.APIKey != "named-gemini-key" {
+		t.Fatalf("named.APIKey = %q, want %q", named.APIKey, "named-gemini-key")
+	}
+	if named.AuthMethod != "oauth" {
+		t.Fatalf("named.AuthMethod = %q, want %q", named.AuthMethod, "oauth")
+	}
+
+	got, err := resolveProviderSelection(cfg)
+	if err != nil {
+		t.Fatalf("resolveProviderSelection() error = %v", err)
+	}
+	if got.providerType != providerTypeHTTPCompat {
+		t.Fatalf("providerType = %v, want providerTypeHTTPCompat (an api_key keeps the API-key path)", got.providerType)
+	}
+	if want := "https://generativelanguage.googleapis.com/v1beta"; got.apiBase != want {
+		t.Fatalf("apiBase = %q, want %q", got.apiBase, want)
+	}
+	if got.apiKey != "named-gemini-key" {
+		t.Fatalf("apiKey = %q, want %q", got.apiKey, "named-gemini-key")
 	}
 }
 

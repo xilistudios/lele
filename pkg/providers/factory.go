@@ -25,6 +25,12 @@ const (
 	providerTypeCodexCLI
 	providerTypeGitHubCopilot
 	providerTypeAnthropic
+	// providerTypeGeminiAuth is the Google Code Assist OAuth transport (the
+	// "Gemini CLI" free-tier flow). Like providerTypeClaudeAuth it carries no
+	// API key, but it speaks the Cloud Code Assist API
+	// (cloudcode-pa.googleapis.com) instead of an OpenAI/Anthropic-compatible
+	// endpoint. Appended at the end so no existing constant value shifts.
+	providerTypeGeminiAuth
 )
 
 type providerSelection struct {
@@ -123,6 +129,55 @@ func selectionFromNamedProvider(cfg *config.Config, providerName, model string, 
 			sel.providerType = providerTypeAnthropic
 			return sel, nil
 		}
+	case "gemini":
+		// Gemini / Google Code Assist OAuth, decided from the Named entry for
+		// belt-and-braces symmetry with the anthropic case above, which also
+		// reads named.AuthMethod: a caller whose decision data lives only in
+		// Providers.Named["gemini"] gets the Code Assist transport here, just as
+		// the cfg.Providers.Gemini pre-check in resolveProviderSelectionByName
+		// gives it to a caller whose data lives in the typed field.
+		//
+		// No known or shipped production caller produces that shape, so this
+		// case is defence-in-depth for a future Named-only caller rather than a
+		// live fix: every Config an ordinary production path hands to the
+		// selector carries the typed Providers.Gemini field too.
+		// config.LoadConfig unmarshals the flat "providers.gemini" object and
+		// ProvidersConfig.UnmarshalJSON fills the typed field next to
+		// Providers.Named (pkg/config/config.go); EditableDocument.ToConfig()
+		// round-trips through that same UnmarshalJSON, so its output is already
+		// served by the pre-check; and the auth login/logout writer in cmd/lele
+		// writes the typed field and mirrors auth_method into both copies via
+		// setNamedAuthMethod. The Named-entry-only shape is what this case
+		// covers.
+		//
+		// Nothing here *guarantees* the typed field is filled, which is why the
+		// case is kept: a hand-edited config carrying two case-variant keys for
+		// one provider ("Gemini" and "gemini") decodes through the alias merge
+		// in ProvidersConfig.UnmarshalJSON and can leave Named["gemini"] holding
+		// auth_method while the typed field is emptied. For that config this
+		// case is what still selects the Code Assist transport.
+		//
+		// Condition mirrors the documented contract: the Code Assist transport
+		// is selected only when auth_method == "oauth" AND no API key is
+		// configured. An api_key, an unset auth_method, or "token" keeps the
+		// developer API-key path byte-identical — the case deliberately does NOT
+		// return in that case, it falls through to the generic tail below, which
+		// resolves defaultAPIBaseByType("gemini") exactly as before.
+		//
+		// Only "gemini" is matched: NormalizeProvider maps the "google" spelling
+		// to "gemini" before the selection starts (model_ref.go), and the raw
+		// un-normalized "google" spelling (CreateProviderForCandidate with a
+		// "google/<model>" prefix) finds no built-in GetNamed("google") entry
+		// (ok=false), so it never arrives here spelled "google" — it is handled
+		// by the pre-check in resolveProviderSelectionByName instead. The two
+		// selection sites are therefore intentionally not redundant: the
+		// pre-check owns the typed field (and the raw "google" spelling, which
+		// GetNamed cannot resolve), while this case is its Named-entry
+		// counterpart.
+		if named.AuthMethod == "oauth" && sel.apiKey == "" {
+			sel.providerType = providerTypeGeminiAuth
+			return sel, nil
+		}
 	case "claude-cli", "claude-code", "claudecode":
 		workspace := cfg.WorkspacePath()
 		if workspace == "" {
@@ -190,6 +245,31 @@ func createClaudeAuthProvider(apiBase string) (LLMProvider, error) {
 	return NewClaudeProviderWithTokenSourceBaseURLAndOAuthMode(cred.AccessToken, createClaudeTokenSource(), apiBase, oauth), nil
 }
 
+// createGeminiAuthProvider builds the Gemini Code Assist provider selected when
+// providers.gemini.auth_method is "oauth" and no API key is set. It is the
+// Gemini sibling of createClaudeAuthProvider: the credential is read from the
+// store under the canonical key "gemini" (the key `lele auth login --provider
+// gemini` writes, also reachable through the "gemini-cli" alias) and every
+// request resolves its bearer token through createGeminiTokenSource(), so
+// concurrent turns collapse into at most one refresh.
+//
+// apiBase is accepted for signature symmetry with createClaudeAuthProvider —
+// createProviderFromSelection hands both builders sel.apiBase — but Code Assist
+// is not an OpenAI-compatible endpoint a user can repoint: every request is
+// built from the provider's fixed geminiCodeAssistBaseURL
+// (cloudcode-pa.googleapis.com), so a configured providers.gemini.api_base has
+// no effect on this path.
+func createGeminiAuthProvider(apiBase string) (LLMProvider, error) {
+	cred, err := getCredential("gemini")
+	if err != nil {
+		return nil, fmt.Errorf("loading auth credentials: %w", err)
+	}
+	if cred == nil {
+		return nil, fmt.Errorf("no credentials for gemini. Run: lele auth login --provider gemini")
+	}
+	return NewGeminiCodeAssistProvider(cred.AccessToken, createGeminiTokenSource()), nil
+}
+
 func createCodexAuthProvider(enableWebSearch bool) (LLMProvider, error) {
 	cred, err := getCredential("openai")
 	if err != nil {
@@ -253,6 +333,32 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 
 	// First, prefer explicit provider configuration.
 	if providerName != "" {
+		// Gemini / Google Code Assist OAuth. Providers.Gemini is the single
+		// config behind BOTH spellings of this provider: NormalizeProvider maps
+		// "google" to "gemini" before the selection starts, and an un-normalized
+		// "google" (CreateProviderForCandidate, e.g. the raw "google/model"
+		// prefix used by a fallback candidate) reaches the `case "gemini",
+		// "google"` switch below — both read cfg.Providers.Gemini, so testing the
+		// two spellings here keeps them interchangeable rather than giving each
+		// one its own transport.
+		//
+		// Mirroring the anthropic OAuth branch: only auth_method "oauth" WITHOUT
+		// an API key switches to the Code Assist transport, so an unset
+		// auth_method, "token", or a configured API key keeps the API-key path
+		// byte-identical.
+		//
+		// The check deliberately lives here and not inside `case "gemini",
+		// "google"`: GetNamed always resolves a built-in provider name
+		// (ensureNamedDefaults seeds "gemini" from Providers.Gemini), so
+		// providerName == "gemini" returns through selectionFromNamedProvider
+		// before that switch is ever reached. A check placed there would leave
+		// the main flow picking the API-key transport and failing with "no API
+		// key configured for provider".
+		if (providerName == "gemini" || providerName == "google") &&
+			cfg.Providers.Gemini.AuthMethod == "oauth" && cfg.Providers.Gemini.APIKey == "" {
+			sel.providerType = providerTypeGeminiAuth
+			return sel, nil
+		}
 		if named, ok := cfg.Providers.GetNamed(providerName); ok {
 			return selectionFromNamedProvider(cfg, providerName, model, named)
 		}
@@ -349,6 +455,11 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 				}
 			}
 		case "gemini", "google":
+			// The Code Assist OAuth selection happens above, at the top of the
+			// `providerName != ""` branch (see the gemini pre-check): the
+			// normalized spellings never reach this case, and the raw "google"
+			// that does is routed through that same pre-check. What is left here
+			// is the unchanged API-key path.
 			if cfg.Providers.Gemini.APIKey != "" {
 				sel.apiKey = cfg.Providers.Gemini.APIKey
 				sel.apiBase = cfg.Providers.Gemini.APIBase
@@ -596,6 +707,8 @@ func createProviderFromSelection(sel *providerSelection) (LLMProvider, error) {
 	switch sel.providerType {
 	case providerTypeClaudeAuth:
 		return createClaudeAuthProvider(sel.apiBase)
+	case providerTypeGeminiAuth:
+		return createGeminiAuthProvider(sel.apiBase)
 	case providerTypeCodexAuth:
 		return createCodexAuthProvider(sel.enableWebSearch)
 	case providerTypeCodexCLIToken:
