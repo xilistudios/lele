@@ -74,6 +74,19 @@ func (sm *SessionManager) AddMessage(sessionKey, role, content string) {
 // This is used to save the full conversation flow including tool calls and tool results.
 // If the last message is a streaming assistant message (added by AppendAssistantChunk),
 // it updates that message in-place instead of appending a duplicate.
+//
+// Invariant (enforced at this funnel): through AddFullMessage/AddMessage, a
+// message flagged Streaming=true is only ever the LAST message of the history.
+// (SetHistory can still install a legacy history that violates it.) Before any
+// non-assistant message is appended, the streaming tail is resolved by
+// resolveStreamingTailLocked — finalized in place when it already carries
+// content, or replaced when it is an empty placeholder. Without this, a
+// guidance/tool message appended right after a streamed assistant (the
+// loop-detector path in pkg/agent/llm_runner.go) left the streaming flag set
+// forever: it was persisted, survived restarts, and the WebUI then treated that
+// message as a live stream on every later turn. The normal paths are untouched:
+// an assistant message takes the in-place branch below, and a non-assistant
+// append after a finalized or non-assistant tail is a no-op in the helper.
 func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Message) {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -116,6 +129,14 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 			sm.syncSessionMetaLocked(session)
 			return
 		}
+	}
+
+	// Restore the streaming-tail invariant before appending a non-assistant
+	// message (see resolveStreamingTailLocked). Returns true only when the
+	// empty streaming placeholder took the incoming message in its slot, in
+	// which case there is nothing left to append.
+	if msg.Role != "assistant" && sm.resolveStreamingTailLocked(session, msg) {
+		return
 	}
 
 	session.Messages = append(session.Messages, msg)

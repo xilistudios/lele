@@ -77,9 +77,11 @@ func (sm *SessionManager) AppendReasoningChunk(key, chunk string) {
 
 // FinalizeAssistantMessage marks the in-progress assistant message as complete
 // by persisting the session to disk immediately. The Streaming flag is NOT
-// cleared here — it stays until AddFullMessage replaces the streaming message
-// with the final version. This allows HasStreamedContent to detect that content
-// was already delivered via streaming chunks for deduplication.
+// cleared here — it is cleared later, either by AddFullMessage's in-place branch
+// (which replaces the streaming message with the final version) or, when a
+// non-assistant message is appended after it, by resolveStreamingTailLocked.
+// Keeping the flag set until then is what lets HasStreamedContent detect that
+// content was already delivered via streaming chunks for deduplication.
 func (sm *SessionManager) FinalizeAssistantMessage(key string) {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -245,6 +247,64 @@ func (sm *SessionManager) getOrCreateStreamingMsg(session *Session) *providers.M
 	})
 	session.msgsAppended++
 	return &session.Messages[len(session.Messages)-1]
+}
+
+// resolveStreamingTailLocked restores the invariant "a Streaming assistant is
+// only ever the last message" before a non-assistant message is appended.
+// Returns true when msg was written into the tail slot (the tail was an empty
+// streaming placeholder) and must NOT be appended again.
+// Caller must hold sm.mu.
+//
+// Why this exists: the only production writer that clears Streaming=false was
+// AddFullMessage's in-place branch, which requires the incoming message to be
+// role "assistant" AND the tail to still be a streaming assistant. Every other
+// route that follows a streamed assistant — the loop-detector guidance
+// (AddMessage "user", llm_runner.go), the malformed-tool-call guidance, tool
+// results, and the early returns that end a turn mid-stream — appends a
+// NON-assistant message, so the streaming flag was never cleared. The orphan
+// then sat in the middle of the history with Streaming=true: persisted to disk,
+// surviving restarts, and replayed to the LLM on every later request.
+//
+// The resolution is deliberately local (no reordering, no deletion, the live
+// in-memory message list in the runner is untouched):
+//
+//   - a tail that already carries content is finalized IN PLACE — same slice
+//     position, same content, only the flag flips. An orphan left by a crash is
+//     still visible to the crash-recovery path of pkg/channels/rest_chat.go,
+//     which only hides a streaming message while the session is processing.
+//   - an empty placeholder (created before the first chunk arrived) has nothing
+//     to preserve, so the incoming message takes its slot. That reuses the
+//     position instead of RemoveLastMessage, whose deleteFromSeq watermark
+//     (persist.go) composes badly with the msgsAppended++ of the very same
+//     call. RemoveLastMessage also re-takes sm.mu (the mutex is not
+//     reentrant), so it is never called from here.
+//
+// When the tail is not a streaming assistant this is a strict no-op and the
+// caller appends exactly as it did before.
+func (sm *SessionManager) resolveStreamingTailLocked(session *Session, msg providers.Message) (slotReused bool) {
+	if session == nil || len(session.Messages) == 0 {
+		return false
+	}
+
+	tail := &session.Messages[len(session.Messages)-1]
+	if tail.Role != "assistant" || !tail.Streaming {
+		return false
+	}
+
+	if tail.Content != "" || tail.ReasoningContent != "" {
+		// Content was already delivered: finalize the message in place.
+		tail.Streaming = false
+	} else {
+		// Empty placeholder: reuse the tail slot for the incoming message.
+		*tail = msg
+		slotReused = true
+	}
+
+	session.Updated = time.Now()
+	session.markModified(len(session.Messages) - 1)
+	session.publishViewLocked()
+	sm.syncSessionMetaLocked(session)
+	return slotReused
 }
 
 // maybeFlushStream saves the session to disk if enough time has passed since
