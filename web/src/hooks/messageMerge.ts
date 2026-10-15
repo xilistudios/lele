@@ -19,6 +19,7 @@
  * production. The rules are covered by messageOrdering.test.ts — keep that
  * suite green when changing anything here.
  */
+import { assistantIdentityText } from '../lib/messageIdentity'
 import type { ChatMessage } from '../lib/types'
 
 // ── Indexes over the two input lists ────────────────────────────────────────
@@ -141,6 +142,35 @@ function contentConfirmed(content: string, candidate: string): boolean {
 }
 
 /**
+ * Identity of an assistant message for content-based matching — the rule itself
+ * lives in lib/messageIdentity.ts so it cannot drift from the one
+ * `isConfirmedInCache` and `toChatMessages` use.
+ *
+ * WHY it matters here: a thinking step, or the tool-call iteration of a model
+ * that emits no text, is persisted as an assistant message with
+ * `content === ''` and its payload in `reasoningContent` (see
+ * `shouldAddAssistant` in lib/chatMessageBuilder.ts). Keying those on `content`
+ * alone made them unmatchable: `contentConfirmed('', …)` is false by
+ * construction, and `pairCompatible` then takes the positional branch. With the
+ * base window SATURATED (the 50-message sliding window of
+ * pkg/channels/rest_chat.go, where the non-optimistic user count stops growing)
+ * `computeBaseHasCurrentTurn` stays false, so pairing falls back to content
+ * confirmation — which could never pair the base copy with its live twin, and
+ * the twin was appended at the END of the list while its base copy was rendered
+ * in place: a duplicated "Thinking…" block below newer turns, healed only by a
+ * page reload.
+ */
+/** Whether the persisted assistant `candidate` already represents `msg`. */
+function assistantAlreadyPersisted(msg: ChatMessage, candidate: ChatMessage): boolean {
+  const identity = assistantIdentityText(msg.content, msg.reasoningContent)
+  if (identity.trim() === '') return false
+  return contentConfirmed(
+    identity,
+    assistantIdentityText(candidate.content, candidate.reasoningContent),
+  )
+}
+
+/**
  * Whether a completed streaming assistant and a base assistant are the same
  * logical message, for the purpose of transferring the streaming React key.
  *
@@ -227,8 +257,10 @@ function buildFilteredBase(
         // its user message. But a completed streaming assistant whose content
         // is ALREADY present in base is provably the same message — leaving it
         // unmatched rendered it TWICE (once here, once appended as a leftover).
+        // Matching goes through the shared identity rule so a thinking / tool-call
+        // iteration (content === '') is recognised by its reasoning text.
         entry = index.assistants.find(
-          (e) => !e.used && !e.isStreaming && contentConfirmed(e.msg.content, msg.content),
+          (e) => !e.used && !e.isStreaming && assistantAlreadyPersisted(e.msg, msg),
         )
       }
       if (entry) {
@@ -292,9 +324,13 @@ function buildFilteredBase(
   // steal an unrelated recent base assistant's React key.
   for (const e of index.assistants) {
     if (e.used || e.isStreaming) continue
-    if (e.msg.content.trim() === '') continue
+    // Same identity rule as the pairing above (lib/messageIdentity.ts): a
+    // thinking / tool-call iteration
+    // has no text but IS persisted, so it must be swept by its reasoning text
+    // too — otherwise it is appended as a duplicate of the base copy.
+    if (assistantIdentityText(e.msg.content, e.msg.reasoningContent).trim() === '') continue
     const alreadyRendered = baseMessages.some(
-      (bm) => bm.role === 'assistant' && contentConfirmed(e.msg.content, bm.content),
+      (bm) => bm.role === 'assistant' && assistantAlreadyPersisted(e.msg, bm),
     )
     if (alreadyRendered) e.used = true
   }

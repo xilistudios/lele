@@ -57,4 +57,34 @@ const saturatedWindow: Scenario = {
   ],
 }
 
-export const scenarios: Scenario[] = [saturatedWindow]
+/**
+ * Gate scenario R8/R9 and the end-to-end pin in chatPipelineOrdering.test.ts.
+ *
+ * A thinking step (or the tool-call iteration of a model that emits no text) is
+ * persisted as its own assistant message with `content === ''` and its payload
+ * in `reasoning_content` (pkg/agent/llm_runner.go `iterationMsgID`), so an
+ * assistant bubble CAN legitimately be text-less. The confirmation match used a
+ * content-prefix test and an empty prefix can never match, so such a live copy
+ * was never stripped from streaming state; once the sliding window slid past its
+ * twin, `mergeMessages` appended it at the END — a block of old "Thinking…"
+ * widgets below the newest answer, until a page reload cleared streaming state.
+ */
+const reasoningIteration: Scenario = {
+  name: 'reasoning-iteration',
+  base: [
+    ...saturatedBase(1, 24),
+    msg('b_q25', 'user', 'question number 25'),
+    { ...msg('b_i25', 'assistant', ''), reasoningContent: 'thinking about the tool call' },
+    msg('b_a25', 'assistant', 'answer number 25'),
+  ],
+  streaming: [
+    // A stale live copy whose own twin slid out of the window, plus the live
+    // copies of the current turn (identical reasoning text, one base copy).
+    { ...msg('s_stale', 'assistant', ''), reasoningContent: 'thinking about the tool call' },
+    { ...msg('s_i25', 'assistant', ''), reasoningContent: 'thinking about the tool call' },
+    doneA(25),
+    optQ(26, 'b_q25'),
+  ],
+}
+
+export const scenarios: Scenario[] = [saturatedWindow, reasoningIteration]

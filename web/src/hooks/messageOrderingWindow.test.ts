@@ -431,4 +431,75 @@ describe('Message ordering window regression (saturated 50-message sliding windo
     expect(merged.filter((m) => m.content === 'a1').length).toBe(1)
     expectSaneOrder(merged)
   })
+
+  /**
+   * R8/R9 pin the *reasoning-only* half of the same bug: the backend persists
+   * every LLM iteration as its own assistant message (pkg/agent/llm_runner.go
+   * `iterationMsgID`), so a thinking / tool turn is stored as an assistant with
+   * `content === ''` whose payload is `reasoningContent` (kept by
+   * `shouldAddAssistant` in lib/chatMessageBuilder.ts). Streamed live, those
+   * copies carry `content === ''` too, so every content-based match in the
+   * merge (`contentConfirmed('', …)` is false BY CONSTRUCTION) failed to pair
+   * them: the live copy was appended at the END, below newer turns — the block
+   * of old "Thinking…" bubbles the user reported, healed only by a reload.
+   */
+  test('R8: a reasoning-only iteration is not duplicated once its twin is persisted', () => {
+    // Saturated window whose last turn is a thinking step: q25, the iteration
+    // (no text), then the answer.
+    const base = [
+      ...makeSaturatedBase(1, 24),
+      u('question number 25', { id: 'b_q25' }),
+      assistant('', { id: 'b_i25', reasoningContent: 'thinking' }),
+      assistant('answer number 25', { id: 'b_a25' }),
+    ]
+    // Streaming state that still holds TWO copies of that iteration: a stale one
+    // whose own twin slid out of the window, plus the live one of the current
+    // turn. Both are identical text, and only ONE base copy exists.
+    const streaming = [
+      completedAssistant('', { id: 's_stale', reasoningContent: 'thinking' }),
+      completedAssistant('', { id: 's_live', reasoningContent: 'thinking' }),
+      optimisticUser('question number 26', { id: 'u_pending', optimisticBaseCount: 25 }),
+    ]
+
+    const merged = mergeMessages(base, streaming)
+    dbg('R8', merged)
+
+    // Exactly one "Thinking…" block, and it must not sit after the answer.
+    const thinking = merged.filter((m) => m.reasoningContent === 'thinking')
+    expect(thinking.length).toBe(1)
+    expect(merged.indexOf(thinking[0])).toBeLessThan(
+      merged.findIndex((m) => m.content === 'answer number 25'),
+    )
+    expectSaneOrder(merged)
+  })
+
+  test('R9: the persisted copy of a reasoning-only iteration reuses the live React key', () => {
+    const base = [
+      ...makeSaturatedBase(1, 24),
+      u('question number 25', { id: 'b_q25' }),
+      assistant('', { id: 'b_i25', reasoningContent: 'thinking about 25' }),
+      assistant('answer number 25', { id: 'b_a25' }),
+    ]
+    // The live iteration bubble, already completed. The pending send keeps base
+    // from being "caught up", which is the regime where matching is done by
+    // content identity rather than by position.
+    const streaming = [
+      completedAssistant('', {
+        id: 's_i25',
+        stableId: 's_i25',
+        reasoningContent: 'thinking about 25',
+      }),
+      optimisticUser('question number 26', { id: 'u_pending', optimisticBaseCount: 25 }),
+    ]
+
+    const merged = mergeMessages(base, streaming)
+    dbg('R9', merged)
+
+    const iters = merged.filter((m) => m.reasoningContent === 'thinking about 25')
+    expect(iters.length).toBe(1)
+    // Rendered under the key the live bubble already used: no unmount/remount
+    // (and no collapse/re-animate of the thinking block) as history catches up.
+    expect(renderKey(iters[0])).toBe('s_i25')
+    expectSaneOrder(merged)
+  })
 })

@@ -11,6 +11,7 @@
  * orchestrating side effects (queues, cache, processing state).
  */
 import { wsDebug } from '../../lib/debug'
+import { assistantIdentityText } from '../../lib/messageIdentity'
 import type { ChatMessage, GroupSnapshot, HistoryToolCall } from '../../lib/types'
 import { registerStableId } from '../stableIdRegistry'
 import {
@@ -242,11 +243,24 @@ export function handleMessageComplete(ctx: MessageEventContext, data: Record<str
 }
 
 /**
+ * Identity of a message for confirmation matching: delegates to
+ * lib/messageIdentity.ts, the rule shared with `mergeMessages` and
+ * `toChatMessages` (an assistant iteration with no text is identified by its
+ * reasoning) and keeps the role dispatch local to this module.
+ */
+function confirmationIdentity(msg: ChatMessage): string {
+  return msg.role === 'assistant'
+    ? assistantIdentityText(msg.content, msg.reasoningContent)
+    : msg.content
+}
+
+/**
  * Whether a streaming message already has a confirmed (non-optimistic) copy in
- * the HTTP cache, matched by a 200-char content prefix. The prefix comparison
- * tolerates minor server-side normalization (trailing newlines, unicode). An
- * empty prefix never matches, so empty messages are kept and reconciled by the
- * 4s HTTP polling safety net instead.
+ * the HTTP cache, matched by a 200-char identity prefix (see
+ * `confirmationIdentity`). The prefix comparison tolerates minor server-side
+ * normalization (trailing newlines, unicode). An empty prefix never matches, so
+ * empty messages are kept and reconciled by the 4s HTTP polling safety net
+ * instead.
  */
 function isConfirmedInCache(
   msg: ChatMessage,
@@ -259,7 +273,7 @@ function isConfirmedInCache(
     )
   }
 
-  const prefix = msg.content.slice(0, 200)
+  const prefix = confirmationIdentity(msg).slice(0, 200)
   if (prefix.length === 0) return false
   return (
     cached?.messages?.some((bm) => {
@@ -267,7 +281,7 @@ function isConfirmedInCache(
         return bm.role === 'user' && !bm.optimistic && bm.content.startsWith(prefix)
       }
       if (msg.role === 'assistant') {
-        return bm.role === 'assistant' && bm.content.startsWith(prefix)
+        return bm.role === 'assistant' && confirmationIdentity(bm).startsWith(prefix)
       }
       if (msg.role === 'tool') {
         return bm.role === 'tool' && bm.content.startsWith(prefix)
@@ -320,7 +334,10 @@ export function handleHistoryUpdated(ctx: MessageEventContext, data: Record<stri
         registerStableId('user', m.content, m.id)
       }
       if (m.role === 'assistant' && !m.streaming && isConfirmedInCache(m, cached)) {
-        registerStableId('assistant', m.content, m.id)
+        // Keyed on the SAME identity the confirmation used (content, or the
+        // reasoning text for a thinking / tool-call iteration with no text), so
+        // toChatMessages can re-attach it to the base copy it confirmed.
+        registerStableId('assistant', confirmationIdentity(m), m.id)
       }
       if (m.role === 'tool' && m.toolStatus !== 'executing' && isConfirmedInCache(m, cached)) {
         // Tools key on tool_call_id (content may be empty) and fall back to
@@ -332,7 +349,17 @@ export function handleHistoryUpdated(ctx: MessageEventContext, data: Record<stri
     return current.filter((m) => {
       if (m.sessionKey !== historySessionKey) return true
       if (m.role === 'user' && m.optimistic) return !isConfirmedInCache(m, cached)
-      if (m.role === 'assistant' && !m.streaming) return !isConfirmedInCache(m, cached)
+      if (m.role === 'assistant' && !m.streaming) {
+        // A COMPLETED iteration that produced neither text nor reasoning renders
+        // nothing: `filterStreamingLeftovers` in messageMerge.ts drops exactly
+        // this shape. Keeping it here leaks one entry per tool iteration for the
+        // life of the session (it can never match `isConfirmedInCache`, whose
+        // identity is empty), which is the same accumulation the rest of this
+        // filter exists to prevent. An in-flight placeholder (`streaming: true`)
+        // is the visible bubble and is never dropped.
+        if (m.content.trim() === '' && !m.reasoningContent) return false
+        return !isConfirmedInCache(m, cached)
+      }
       // Completed tools confirmed in HTTP history are dropped here so merge
       // does not have to reconcile two copies (and so the base id wins).
       if (m.role === 'tool' && m.toolStatus !== 'executing') {
