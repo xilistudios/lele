@@ -771,7 +771,8 @@ func TestExcludeOldMessages_PinIsNotSplitByToolPairFixup(t *testing.T) {
 	// Human turns: 0, 3, 5. Last 2 human = {3, 5}. preserved = {0, 3, 5}.
 	// Index 3 is in range and preserved. Index 5 is in range and preserved.
 	// Indices 1, 2, 4 excluded.
-	// Boundary fixup: session.Messages[6] = assistant (not tool result) → no forward fixup.
+	// Boundary fixup: session.Messages[6] = assistant (not tool result) → the
+	// tool-group guard does not fire.
 	// session.Messages[5] = user (not assistant with tool calls) → no backward fixup.
 	sm.ExcludeOldMessagesFromContext(key, 1)
 

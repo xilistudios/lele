@@ -358,13 +358,15 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	}
 
 	// Structural invariant: never evict the entire slice. excludeBoundary can
-	// legitimately be == len(Messages) (the anti-split guard in
-	// ExcludeOldMessagesFromContext pushes excludeUpTo to the end when the tail
-	// is a tool-result group), and the clamp above is then inert: evicting to
-	// len would leave the resident context empty and fold the in-flight turn
-	// and the pinned human turns into the lossy summary (the model would get
-	// no conversation message at all). Cap at the last in-context message so
-	// at least one message survives in RAM when any exists.
+	// legitimately be == len(Messages) — reached by a whole-prefix compaction
+	// (keepCount=0), a cold load, a stale/large boundary that outlives a slice
+	// shrink, and pin widening; the pre-#343 forward-push also reached it on a
+	// tool-result tail, but the Option A move-back guard no longer does. The
+	// clamp above is then inert: evicting to len would leave the resident
+	// context empty and fold the in-flight turn and the pinned human turns into
+	// the lossy summary (the model would get no conversation message at all).
+	// Cap at the last in-context message so at least one message survives in
+	// RAM when any exists.
 	if evictUpTo >= len(session.Messages) {
 		for i := len(session.Messages) - 1; i >= 0; i-- {
 			if !session.Messages[i].ExcludeFromContext {
@@ -382,9 +384,12 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 
 	// Nothing left to evict once the caps above have had their say, which
 	// happens on a real and recurring shape: the last in-context message is
-	// index 0 (measured: 61 of 957 swept layouts), typically right after the
-	// anti-split guard of ExcludeOldMessagesFromContext pushed its boundary to
-	// the end of a session whose tail is a tool-result group (#343).
+	// index 0 (measured: 61 of 957 swept layouts). The pre-#343 forward-push
+	// typically led here by walking its boundary to the end of a session whose
+	// tail is a tool-result group; the Option A move-back guard (#343) no
+	// longer does, but the shape stays reachable — a whole-prefix compaction
+	// (keepCount=0) reaches it directly, as do the cold-load / stale-boundary /
+	// pin-widening routes.
 	//
 	// Short-circuiting here skips two things and only two:
 	//

@@ -243,9 +243,10 @@ func TestEvictExcluded_BoundaryEqualToLenKeepsContext(t *testing.T) {
 	key := "test:boundary-eq-len"
 
 	// Build 6 messages: human turns at 0, 2. Assistant with 2 tool_calls at
-	// index 3, tool results at indices 4 and 5. The anti-split guard in
-	// ExcludeOldMessagesFromContext will push excludeUpTo past both tool
-	// results to len=6, setting excludeBoundary=6.
+	// index 3, tool results at indices 4 and 5 — the tool-result tail on which
+	// the pre-#343 forward-push used to walk the boundary to len=6. The Option
+	// A move-back guard no longer produces that state, so it is constructed
+	// directly below.
 	sm.AddMessage(key, "user", "initial request")           // 0
 	sm.AddMessage(key, "assistant", "I'll look into that.") // 1
 	sm.AddMessage(key, "user", "check both tools")          // 2

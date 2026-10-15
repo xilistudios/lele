@@ -14,12 +14,13 @@
 // (a tool result without its owning assistant in context).
 //
 // It asserts ONLY invariants that hold under BOTH retention policies
-// (forward-push today, move-back under Option A): in_context > 0, orphans == 0
-// and resident > 0. Token numbers are LOGGED, never asserted: they are exactly
-// what differs between the two policies. The harness is run twice — once on the
-// baseline (forward-push) and once with the temporary Option A patch applied to
-// pkg/session/context.go — and the two tables are compared to decide the
-// retention policy. See issue #343 and the PLAN §4 T1.
+// (the pre-#343 forward-push baseline and the shipped Option A move-back):
+// in_context > 0, orphans == 0 and resident > 0. Token numbers are LOGGED,
+// never asserted: they are exactly what differs between the two policies. To
+// make the #343 decision the harness was run twice — once on the baseline
+// (forward-push) and once with the temporary Option A patch applied to
+// pkg/session/context.go — and the two tables were compared; Option A is now
+// the shipped policy. See issue #343 and the PLAN §4 T1.
 
 package agent
 
@@ -240,8 +241,9 @@ func appendRoundBlock343(agent *AgentInstance, spec layout343Spec, round int) in
 	}
 
 	if spec.results <= 0 {
-		// Control: no tool tail at all, so neither retention policy can fire
-		// the anti-splice guard. Both tables must be identical.
+		// Control: no tool tail at all, so the anti-splice guard never fires —
+		// the T1 measurement's two policy tables were identical here, which is
+		// exactly what made it a control.
 		agent.Sessions.AddMessage(key, "assistant", fmt.Sprintf("Round %d plain answer one.", round))
 		agent.Sessions.AddMessage(key, "assistant", fmt.Sprintf("Round %d plain answer two.", round))
 		return 2
