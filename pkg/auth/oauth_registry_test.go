@@ -10,7 +10,7 @@ import (
 // user-visible regression.
 func TestOAuthProviderNamesSortedAndComplete(t *testing.T) {
 	got := OAuthProviderNames()
-	want := []string{"anthropic", "google-antigravity", "openai"}
+	want := []string{"anthropic", "gemini", "google-antigravity", "openai"}
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("OAuthProviderNames() = %v, want %v", got, want)
@@ -36,8 +36,8 @@ func TestOAuthProviderNamesFreshSlicePerCall(t *testing.T) {
 	first[0] = "pwned"
 
 	second := OAuthProviderNames()
-	if !reflect.DeepEqual(second, []string{"anthropic", "google-antigravity", "openai"}) {
-		t.Errorf("OAuthProviderNames() after a caller mutation = %v, want the canonical list [anthropic google-antigravity openai]", second)
+	if !reflect.DeepEqual(second, []string{"anthropic", "gemini", "google-antigravity", "openai"}) {
+		t.Errorf("OAuthProviderNames() after a caller mutation = %v, want the canonical list [anthropic gemini google-antigravity openai]", second)
 	}
 	if second[0] != canonical {
 		t.Errorf("OAuthProviderNames() slices share state: second call [0] = %q, want %q", second[0], canonical)
@@ -71,6 +71,8 @@ func TestOAuthProviderConfigByName(t *testing.T) {
 		{name: "whitespace only", input: "   ", wantOK: false},
 		{name: "partial name is not a prefix match", input: "open", wantOK: false},
 		{name: "canonical anthropic", input: "anthropic", wantOK: true, wantCfgName: "anthropic"},
+		{name: "canonical gemini", input: "gemini", wantOK: true, wantCfgName: "gemini"},
+		{name: "alias gemini-cli -> gemini", input: " gemini-cli ", wantOK: true, wantCfgName: "gemini"},
 	}
 
 	for _, tc := range tests {
@@ -191,6 +193,7 @@ func TestOAuthProviderConfigByNameClonesExtraAuthParams(t *testing.T) {
 func TestOAuthProviderConfigByNameMatchesConstructor(t *testing.T) {
 	presets := map[string]OAuthProviderConfig{
 		"anthropic":          ClaudeOAuthConfig(),
+		"gemini":             GeminiOAuthConfig(),
 		"openai":             OpenAIOAuthConfig(),
 		"google-antigravity": GoogleAntigravityOAuthConfig(),
 	}
@@ -221,6 +224,91 @@ func TestOAuthProviderConfigByNameMatchesConstructor(t *testing.T) {
 			}
 			if cfg.ClientID != want.ClientID {
 				t.Errorf("ClientID = %q, want %q", cfg.ClientID, want.ClientID)
+			}
+		})
+	}
+}
+
+// TestGeminiAliasResolvesToGeminiPreset pins the `gemini-cli` alias contract:
+// the alias selects the Google Code Assist OAuth flow, but the canonical
+// registry and credential-store key stays `gemini` (the name the preset
+// advertises in Name and the key pkg/providers looks up), so both spellings must
+// resolve to the verbatim GeminiOAuthConfig() preset. Because the alias is an
+// input-only spelling, the advertised list must keep exactly one entry per
+// provider: `gemini` once, `gemini-cli` never.
+func TestGeminiAliasResolvesToGeminiPreset(t *testing.T) {
+	cfg, ok := OAuthProviderConfigByName("gemini-cli")
+	if !ok {
+		t.Fatal("OAuthProviderConfigByName(\"gemini-cli\") ok = false, want true")
+	}
+	if cfg.Name != "gemini" {
+		t.Errorf("OAuthProviderConfigByName(\"gemini-cli\").Name = %q, want %q", cfg.Name, "gemini")
+	}
+	if want := GeminiOAuthConfig(); !reflect.DeepEqual(cfg, want) {
+		t.Errorf("OAuthProviderConfigByName(\"gemini-cli\") = %+v, want the GeminiOAuthConfig() preset %+v", cfg, want)
+	}
+
+	names := OAuthProviderNames()
+	var canonical, aliased int
+	for _, name := range names {
+		switch name {
+		case "gemini":
+			canonical++
+		case "gemini-cli":
+			aliased++
+		}
+	}
+	if canonical != 1 {
+		t.Errorf("OAuthProviderNames() = %v lists \"gemini\" %d times, want exactly once", names, canonical)
+	}
+	if aliased != 0 {
+		t.Errorf("OAuthProviderNames() = %v advertises the input-only alias \"gemini-cli\" %d times, want 0", names, aliased)
+	}
+}
+
+// TestGeminiPresetClonesExtraAuthParams is the Gemini arm of the map-leak canary
+// (TestOAuthProviderConfigByNameClonesExtraAuthParams covers every preset; this
+// one also walks the `gemini-cli` alias path). The Code Assist preset's
+// ExtraAuthParams (access_type=offline + prompt=consent) are what make Google
+// return a refresh_token, so a caller mutating the returned map must not be able
+// to strip them for the next caller — through the canonical name or the alias.
+func TestGeminiPresetClonesExtraAuthParams(t *testing.T) {
+	want := map[string]string{
+		"access_type": "offline",
+		"prompt":      "consent",
+	}
+
+	for _, name := range []string{"gemini", "gemini-cli"} {
+		t.Run(name, func(t *testing.T) {
+			cfg, ok := OAuthProviderConfigByName(name)
+			if !ok {
+				t.Fatalf("OAuthProviderConfigByName(%q) ok = false, want true", name)
+			}
+			if !reflect.DeepEqual(cfg.ExtraAuthParams, want) {
+				t.Fatalf("OAuthProviderConfigByName(%q).ExtraAuthParams = %v, want %v", name, cfg.ExtraAuthParams, want)
+			}
+
+			// Corrupt the returned copy on purpose: add an unknown key and wipe
+			// the declared ones.
+			cfg.ExtraAuthParams["pwned"] = "1"
+			for key := range want {
+				delete(cfg.ExtraAuthParams, key)
+			}
+
+			again, ok := OAuthProviderConfigByName(name)
+			if !ok {
+				t.Fatalf("second OAuthProviderConfigByName(%q) ok = false, want true", name)
+			}
+			if leaked, found := again.ExtraAuthParams["pwned"]; found {
+				t.Errorf("ExtraAuthParams leaked into the shared gemini preset via %q: a second lookup returns pwned=%q; the accessor must clone the map per call", name, leaked)
+			}
+			if !reflect.DeepEqual(again.ExtraAuthParams, want) {
+				t.Errorf("stored ExtraAuthParams seen through %q changed: got %v, want %v; the accessor must clone the map per call", name, again.ExtraAuthParams, want)
+			}
+
+			// The constructor itself is stateless too.
+			if got := GeminiOAuthConfig().ExtraAuthParams; !reflect.DeepEqual(got, want) {
+				t.Errorf("GeminiOAuthConfig().ExtraAuthParams = %v, want the declared map %v", got, want)
 			}
 		})
 	}

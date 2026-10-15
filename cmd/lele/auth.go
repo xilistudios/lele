@@ -29,6 +29,11 @@ const (
 	// paste-code fallback, or --paste-code for headless environments). It is
 	// reached through the `claude` alias of the `anthropic` preset.
 	loginKindClaudeOAuth
+	// loginKindGeminiOAuth runs the Gemini / Google Code Assist OAuth flow
+	// (browser with paste-code fallback, or --paste-code for headless
+	// environments). It is reached through the `gemini` preset and its
+	// `gemini-cli` alias.
+	loginKindGeminiOAuth
 )
 
 // Login-flow seams.
@@ -52,6 +57,12 @@ var (
 	// loginClaudeBrowser is the seam for the Claude browser flow with graceful
 	// paste-code degradation for headless environments.
 	loginClaudeBrowser = auth.LoginBrowserWithPasteFallback
+	// loginGeminiPasteCode is the seam for the headless Gemini paste-code flow
+	// (--paste-code; reads from stdin).
+	loginGeminiPasteCode = auth.LoginPasteCode
+	// loginGeminiBrowser is the seam for the Gemini browser flow with graceful
+	// paste-code degradation for headless environments.
+	loginGeminiBrowser = auth.LoginBrowserWithPasteFallback
 	// setCredential is the seam for persisting a credential under its provider key.
 	setCredential = auth.SetCredential
 )
@@ -83,7 +94,7 @@ type loginArgs struct {
 	Provider string
 	// DeviceCode requests the RFC 8628 device code flow (openai only).
 	DeviceCode bool
-	// PasteCode requests the headless Claude paste-code flow (claude only).
+	// PasteCode requests the headless paste-code flow (claude and gemini only).
 	PasteCode bool
 }
 
@@ -160,7 +171,7 @@ func authHelp() {
 	fmt.Println("  --provider claude    Claude OAuth (alias of the anthropic preset; use --provider anthropic to paste a token)")
 	fmt.Println("  --provider codex     OpenAI OAuth (alias of the openai preset; same flow as --provider openai)")
 	fmt.Println("  --device-code        Use device code flow (openai only, for headless environments)")
-	fmt.Println("  --paste-code         Paste the callback code/URL manually (claude only)")
+	fmt.Println("  --paste-code         Paste the callback code/URL manually (claude and gemini)")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  lele auth login --provider openai")
@@ -168,6 +179,9 @@ func authHelp() {
 	fmt.Println("  lele auth login --provider anthropic")
 	fmt.Println("  lele auth login --provider claude")
 	fmt.Println("  lele auth login --provider claude --paste-code")
+	fmt.Println("  lele auth login --provider gemini")
+	fmt.Println("  lele auth login --provider gemini --paste-code")
+	fmt.Println("  lele auth login --provider gemini-cli   (alias of gemini)")
 	fmt.Println("  lele auth login --provider google-antigravity")
 	fmt.Println("  lele auth login --provider antigravity   (alias of google-antigravity)")
 	fmt.Println("  lele auth logout --provider openai")
@@ -268,6 +282,16 @@ func resolveLoginProvider(name string, useDeviceCode bool) (loginKind, auth.OAut
 		return loginKindClaudeOAuth, cfg, nil
 	}
 
+	if cfg.Name == "gemini" {
+		// The Gemini / Google Code Assist flow is reached through the `gemini`
+		// preset and its `gemini-cli` alias. Like Claude it owns its preset
+		// instead of falling into the generic browser-preset branch: that branch
+		// stores the credential but writes nothing to the config, so the flow
+		// would work while pkg/providers could never select the Gemini OAuth
+		// wire contract. Credentials are still stored under cfg.Name ("gemini").
+		return loginKindGeminiOAuth, cfg, nil
+	}
+
 	return loginKindBrowserPreset, cfg, nil
 }
 
@@ -304,10 +328,10 @@ func authLoginCmd() {
 		return
 	}
 
-	if args.PasteCode && kind != loginKindClaudeOAuth {
-		// Fail closed rather than silently ignoring the flag: only the Claude
-		// OAuth flow implements the headless paste-code login.
-		fmt.Println("--paste-code is only supported for the Claude OAuth flow; use: lele auth login --provider claude --paste-code")
+	if args.PasteCode && kind != loginKindClaudeOAuth && kind != loginKindGeminiOAuth {
+		// Fail closed rather than silently ignoring the flag: only the Claude and
+		// Gemini OAuth flows implement the headless paste-code login.
+		fmt.Println("--paste-code is only supported for the Claude and Gemini OAuth flows; use: lele auth login --provider claude --paste-code")
 		loginExit(1)
 		return
 	}
@@ -322,6 +346,8 @@ func authLoginCmd() {
 		authLoginPasteToken(normalizeProviderName(provider))
 	case loginKindClaudeOAuth:
 		authLoginClaudeOAuth(cfg, args.PasteCode)
+	case loginKindGeminiOAuth:
+		authLoginGeminiOAuth(cfg, args.PasteCode)
 	case loginKindBrowserPreset:
 		authLoginBrowserPreset(cfg)
 	default:
@@ -405,6 +431,16 @@ func authLoginClaudeOAuth(cfg auth.OAuthProviderConfig, pasteCode bool) {
 	// only warns (the same pattern authLoginOpenAI uses).
 	if appCfg, err := loadConfig(); err == nil {
 		appCfg.Providers.Anthropic.AuthMethod = "oauth"
+		// The persisted file is written from the *named* copy as soon as the
+		// config already has an anthropic entry (an api key, models or an auth
+		// method), because MarshalJSON then early-returns for the typed field set
+		// above — so without this sync the "oauth" write would be silently lost
+		// for exactly the users who already configured anthropic, and the next
+		// gateway start would not pick the Claude OAuth transport
+		// (pkg/providers/factory.go selects it from named.AuthMethod). A latent
+		// defect of the F1 commit that introduced this flow (898bfdbc, unmerged
+		// and unpushed when it was fixed): it is in scope here.
+		setNamedAuthMethod(appCfg.Providers, "anthropic", "oauth")
 		if err := config.SaveConfig(getConfigPath(), appCfg); err != nil {
 			fmt.Printf("Warning: could not update config: %v\n", err)
 			// Actionable follow-up for the warning above: without
@@ -414,6 +450,71 @@ func authLoginClaudeOAuth(cfg auth.OAuthProviderConfig, pasteCode bool) {
 			// confusing "no API key configured for model". Name the exact key
 			// and the exact file so the user can fix it by hand.
 			fmt.Printf("Set providers.anthropic.auth_method = \"oauth\" in %s for the Claude OAuth login to be used.\n", getConfigPath())
+		}
+	}
+
+	fmt.Println("Login successful!")
+	if cred.AccountID != "" {
+		fmt.Printf("Account: %s\n", cred.AccountID)
+	}
+}
+
+// authLoginGeminiOAuth runs the Gemini / Google Code Assist OAuth flow for the
+// `gemini` preset (reached directly or through the `gemini-cli` alias) and
+// stores the credential under the canonical key, cfg.Name ("gemini").
+//
+// pasteCode selects the headless flow (loginGeminiPasteCode, which reads one
+// line from stdin); otherwise the browser flow runs with a graceful paste-code
+// fallback (loginGeminiBrowser). Both are seams so the tests can drive the
+// command without a network or a credential store. The flow itself is the same
+// generic one Claude uses — only the preset and the config key differ, which is
+// why this is a sibling of authLoginClaudeOAuth rather than a shared helper:
+// the two write different Providers fields, and keeping them separate keeps
+// each provider's message byte-identical to what its tests pin.
+func authLoginGeminiOAuth(cfg auth.OAuthProviderConfig, pasteCode bool) {
+	var cred *auth.AuthCredential
+	var err error
+
+	if pasteCode {
+		cred, err = loginGeminiPasteCode(cfg, os.Stdin)
+	} else {
+		cred, err = loginGeminiBrowser(cfg, os.Stdin)
+	}
+
+	if err != nil {
+		fmt.Printf("Login failed: %v\n", err)
+		loginExit(1)
+		return
+	}
+
+	if err := setCredential(cfg.Name, cred); err != nil {
+		fmt.Printf("Failed to save credentials: %v\n", err)
+		loginExit(1)
+		return
+	}
+
+	// Best effort: the credential is already stored, so a config-write failure
+	// only warns (the same pattern authLoginOpenAI uses).
+	if appCfg, err := loadConfig(); err == nil {
+		appCfg.Providers.Gemini.AuthMethod = "oauth"
+		// The persisted file is written from the *named* copy as soon as the
+		// config already has a gemini entry (an api key, models or an auth
+		// method), because MarshalJSON then early-returns for the typed field set
+		// above — so without this sync the "oauth" write would be silently lost
+		// for exactly the users who already configured gemini (SaveConfig still
+		// succeeds, so the warning below would never fire) and the provider
+		// selector would not pick the Gemini Code Assist transport after a
+		// restart. See setNamedAuthMethod.
+		setNamedAuthMethod(appCfg.Providers, "gemini", "oauth")
+		if err := config.SaveConfig(getConfigPath(), appCfg); err != nil {
+			fmt.Printf("Warning: could not update config: %v\n", err)
+			// Actionable follow-up for the warning above: without
+			// auth_method = "oauth" in the config, the provider selector in
+			// pkg/providers will not pick the Gemini Code Assist provider for
+			// the stored credential and the next model call fails with a
+			// confusing "no API key configured for model". Name the exact key
+			// and the exact file so the user can fix it by hand.
+			fmt.Printf("Set providers.gemini.auth_method = \"oauth\" in %s for the Gemini OAuth login to be used.\n", getConfigPath())
 		}
 	}
 
@@ -487,6 +588,52 @@ func authLoginPasteToken(provider string) {
 	fmt.Printf("Token saved for %s!\n", provider)
 }
 
+// setNamedAuthMethod sets the auth_method of the *named* copy of a provider in
+// a ProvidersConfig, creating that copy when the config does not carry one yet.
+//
+// ProvidersConfig holds every built-in provider twice: in its typed field
+// (Providers.Gemini) and in Providers.Named["gemini"], which UnmarshalJSON fills
+// from the same JSON keys (`pkg/config/config.go`, UnmarshalJSON). MarshalJSON
+// writes the Named copy as soon as it carries data (an API key, models or an
+// explicit auth method) and then early-returns for the typed field of the same
+// name, so writing the typed field alone never reaches the file for a provider
+// that is already in the config — which is exactly the state the auth login and
+// logout paths run in (the login wrote the entry a moment earlier, or the user's
+// config already has an api key or models). Every auth_method write — setting or
+// blanking it — must therefore be mirrored into Named to be persisted, and to be
+// visible to the readers that select the wire contract: pkg/providers reads the
+// typed field for gemini and named.AuthMethod for anthropic.
+//
+// Only auth_method is ever touched: an API key, API base, proxy, connect mode,
+// models or web_search stored on the same entry belong to the user's
+// configuration and survive both a login and a logout.
+//
+// name is matched case-insensitively and trimmed, exactly like the config
+// helpers do; a blank name or a nil providers section is a no-op.
+func setNamedAuthMethod(providers *config.ProvidersConfig, name, method string) {
+	if providers == nil {
+		return
+	}
+	key := strings.ToLower(strings.TrimSpace(name))
+	if key == "" {
+		return
+	}
+	// GetNamed seeds the named copy from the provider's typed field (through
+	// ensureNamedDefaults) when the config does not carry one yet, so creating a
+	// missing entry can never drop an api_key/api_base/proxy/connect_mode the
+	// typed field holds. An entry that already exists is returned verbatim, which
+	// preserves its models and web_search as well.
+	named, ok := providers.GetNamed(key)
+	if !ok {
+		// Not a built-in provider: there is no typed field to seed from, so a
+		// bare entry is created — auth_method alone is enough for MarshalJSON to
+		// keep it.
+		named = config.NamedProviderConfig{Type: key}
+	}
+	named.AuthMethod = method
+	providers.Named[key] = named
+}
+
 func authLogoutCmd() {
 	provider := parseLogoutArgs(os.Args[3:])
 
@@ -508,6 +655,22 @@ func authLogoutCmd() {
 				appCfg.Providers.OpenAI.AuthMethod = ""
 			case "anthropic":
 				appCfg.Providers.Anthropic.AuthMethod = ""
+				// ProvidersConfig serializes the named copy of the provider
+				// whenever it holds data, so blanking the typed field alone is
+				// invisible in the file — see setNamedAuthMethod. Without this,
+				// `auth logout --provider claude` would leave
+				// providers.anthropic.auth_method = "oauth" behind and the next
+				// gateway start would still pick the Claude OAuth wire with a
+				// deleted credential (pkg/providers/factory.go reads
+				// named.AuthMethod for anthropic).
+				setNamedAuthMethod(appCfg.Providers, "anthropic", "")
+			case "gemini":
+				appCfg.Providers.Gemini.AuthMethod = ""
+				// Same mechanism as above: without this,
+				// `auth logout --provider gemini` would leave
+				// providers.gemini.auth_method = "oauth" behind and the next
+				// gateway start would still pick the OAuth wire contract.
+				setNamedAuthMethod(appCfg.Providers, "gemini", "")
 			}
 			config.SaveConfig(getConfigPath(), appCfg)
 		}
@@ -523,6 +686,16 @@ func authLogoutCmd() {
 		if err == nil {
 			appCfg.Providers.OpenAI.AuthMethod = ""
 			appCfg.Providers.Anthropic.AuthMethod = ""
+			appCfg.Providers.Gemini.AuthMethod = ""
+			// Every credential was just deleted, so no provider may keep an
+			// auth_method that selects an OAuth transport: the typed writes above
+			// would not reach the file for an entry that already carries data, so
+			// the named copies are synced too (see setNamedAuthMethod). openai
+			// keeps its historical typed-field-only clear on purpose — its
+			// shadowing is pre-existing (commit 8e54a9db) and out of this task's
+			// scope.
+			setNamedAuthMethod(appCfg.Providers, "anthropic", "")
+			setNamedAuthMethod(appCfg.Providers, "gemini", "")
 			config.SaveConfig(getConfigPath(), appCfg)
 		}
 

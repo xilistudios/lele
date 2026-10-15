@@ -129,7 +129,11 @@ func ensureClaudeInferenceScopeForCredential(cred *AuthCredential, action string
 // added by the Anthropic provider in OAuth mode (F1-T09), not by this preset.
 func ClaudeOAuthConfig() OAuthProviderConfig {
 	return OAuthProviderConfig{
-		Name:         "anthropic",
+		Name: "anthropic",
+		// DisplayName is the label used by user-facing gate messages (e.g. the
+		// incomplete-credential contract in requireRefreshTokenAndExpiry), whose
+		// historical wording is pinned by oauth_claude_test.go.
+		DisplayName:  "Claude",
 		ClientID:     "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
 		ClientSecret: "",
 		// Issuer stays empty on purpose: every endpoint below is explicit, so no
@@ -232,16 +236,28 @@ func parseAuthorizeCodeInput(raw string) (code, state string, err error) {
 	return rawCode, state, nil
 }
 
-// LoginPasteCode runs the headless Claude paste-code login: it mints a fresh
-// PKCE pair, prints the authorize URL built with the provider's hosted
+// LoginPasteCode runs the headless paste-code login: it mints a fresh PKCE
+// pair, prints the authorize URL built with the provider's hosted
 // ManualRedirectURI, reads ONE line of user input (the authorization code, the
-// full callback URL or a `code#state` paste) and exchanges it for tokens.
+// full callback URL, a bare query string or a `code#state` paste) and exchanges
+// it for tokens.
 //
-// It is the flow behind `lele auth login --provider claude --paste-code` and
-// the fallback used when the loopback browser flow cannot run
-// (LoginBrowserWithPasteFallback). A provider without a ManualRedirectURI has
-// no hosted paste redirect, so the flow is unavailable and an error is returned
-// instead of building a loopback redirect the token endpoint would reject.
+// It is the flow behind `lele auth login --provider claude --paste-code`, the
+// fallback used when the loopback browser flow cannot run
+// (LoginBrowserWithPasteFallback), and the headless flow of any other preset
+// with a hosted redirect — it is NOT Claude-only. Which paste formats are
+// accepted, and how the OAuth `state` is validated, follows cfg.StateIsVerifier
+// exactly like the browser flow does:
+//
+//   - StateIsVerifier (Claude/jcode): the PKCE verifier is the state, so a
+//     pasted state that differs from it is rejected;
+//   - otherwise (Gemini): the state is a random CSRF token that the pasted
+//     callback URL/query must carry back, while a bare code is used verbatim
+//     (jcode's resolve_callback_or_manual_code, spec §4).
+//
+// A provider without a ManualRedirectURI has no hosted paste redirect, so the
+// flow is unavailable and an error is returned instead of building a loopback
+// redirect the token endpoint would reject.
 func LoginPasteCode(cfg OAuthProviderConfig, r io.Reader) (*AuthCredential, error) {
 	if cfg.ManualRedirectURI == "" {
 		return nil, fmt.Errorf("oauth: provider %q has no ManualRedirectURI configured for the paste-code flow", cfg.Name)
@@ -255,20 +271,59 @@ func LoginPasteCode(cfg OAuthProviderConfig, r io.Reader) (*AuthCredential, erro
 	return loginPasteCodeWithPKCE(cfg, pkce, r)
 }
 
+// pasteFlowState returns the OAuth `state` used by the paste-code flow: the PKCE
+// verifier for providers that bind state to the verifier (Claude/jcode), and a
+// fresh random state for everyone else (jcode's Gemini flow, where the state is
+// a CSRF token and NOT the verifier).
+//
+// The split mirrors loginBrowser's own state selection, so the browser flow and
+// the headless flow of the same preset can never disagree on state semantics.
+func pasteFlowState(cfg OAuthProviderConfig, pkce PKCECodes) (string, error) {
+	if cfg.StateIsVerifier {
+		return pkce.CodeVerifier, nil
+	}
+	return generateState()
+}
+
 // loginPasteCodeWithPKCE is the deterministic core of LoginPasteCode: the PKCE
 // pair is injected so the flow can be exercised offline with a known verifier
 // and so the authorize URL and the exchange share the exact same values.
 //
-// The PKCE verifier doubles as the OAuth `state` (Claude/jcode behavior), so a
-// non-empty pasted state must equal it; otherwise the input belongs to an older
-// login attempt and no request is issued.
+// It only resolves the OAuth `state` (pasteFlowState) and delegates to
+// loginPasteCodeWithPKCEAndState, which owns the per-provider paste rules.
 //
 // The prompts go straight to stdout with fmt.Printf/fmt.Print, following the
 // package convention set by LoginPasteToken: only the reader is injected, never
 // an io.Writer.
 func loginPasteCodeWithPKCE(cfg OAuthProviderConfig, pkce PKCECodes, r io.Reader) (*AuthCredential, error) {
+	state, err := pasteFlowState(cfg, pkce)
+	if err != nil {
+		return nil, fmt.Errorf("generating state: %w", err)
+	}
+
+	return loginPasteCodeWithPKCEAndState(cfg, pkce, state, r)
+}
+
+// loginPasteCodeWithPKCEAndState is the deterministic core of the paste-code
+// flow with the OAuth `state` injected, so tests can pin the state-verification
+// rules without predicting a random token (the production entry point resolves
+// it with pasteFlowState).
+//
+// The behaviour branches on cfg.StateIsVerifier, mirroring loginBrowser:
+//
+//   - StateIsVerifier == true (Claude): the PKCE verifier IS the state. Any
+//     accepted paste format (bare code, callback URL, bare query string,
+//     `code#state`) goes through parseAuthorizeCodeInput, a non-empty pasted
+//     state must equal the verifier, and the verifier is echoed as `state` on
+//     the exchange. This branch is byte-identical to the historical Claude flow.
+//   - StateIsVerifier == false (Gemini): the state is a random CSRF token, so a
+//     pasted callback URL/query must carry it back and it must match the token
+//     this flow generated. A line that does not look like a callback is taken
+//     verbatim as the authorization code (jcode's
+//     `resolve_callback_or_manual_code`, spec §4). The exchange sends NO state
+//     field: Google's token endpoint must not receive one (spec §2).
+func loginPasteCodeWithPKCEAndState(cfg OAuthProviderConfig, pkce PKCECodes, state string, r io.Reader) (*AuthCredential, error) {
 	redirectURI := cfg.ManualRedirectURI
-	state := pkce.CodeVerifier
 
 	authURL := buildAuthorizeURL(cfg, pkce, state, redirectURI)
 
@@ -288,24 +343,106 @@ func loginPasteCodeWithPKCE(cfg OAuthProviderConfig, pkce PKCECodes, r io.Reader
 		return nil, errors.New("no authorization code entered")
 	}
 
-	code, pastedState, err := parseAuthorizeCodeInput(line)
-	if err != nil {
-		return nil, err
-	}
-	// A pasted state that differs from the verifier this flow generated belongs
-	// to a different (older) login attempt; exchanging it would fail server-side
-	// with a confusing error, so fail fast and ask for a fresh code.
-	if pastedState != "" && pastedState != pkce.CodeVerifier {
-		return nil, errors.New("OAuth state mismatch. Start login again and use the latest callback/code.")
+	if cfg.StateIsVerifier {
+		code, pastedState, err := parseAuthorizeCodeInput(line)
+		if err != nil {
+			return nil, err
+		}
+		// A pasted state that differs from the verifier this flow generated
+		// belongs to a different (older) login attempt; exchanging it would fail
+		// server-side with a confusing error, so fail fast and ask for a fresh
+		// code.
+		if pastedState != "" && pastedState != pkce.CodeVerifier {
+			return nil, errors.New("OAuth state mismatch. Start login again and use the latest callback/code.")
+		}
+
+		return exchangeCodeForTokensWithParams(cfg, exchangeParams{
+			Code:         code,
+			CodeVerifier: pkce.CodeVerifier,
+			RedirectURI:  redirectURI,
+			// Claude echoes the PKCE verifier as `state` on the exchange (jcode
+			// behavior); an absent pasted state is thus substituted by the verifier
+			// here (correction V8).
+			State: pkce.CodeVerifier,
+		})
 	}
 
+	// Random-state provider (Gemini): port of jcode's
+	// `resolve_callback_or_manual_code` (gemini.rs:472-487, spec §4).
+	code := line
+	if looksLikeCallbackInput(line) {
+		parsedCode, pastedState, err := parseCallbackInputWithState(line)
+		if err != nil {
+			return nil, err
+		}
+		if pastedState != state {
+			return nil, errors.New("OAuth state mismatch. Start login again and use the latest callback URL.")
+		}
+		code = parsedCode
+	}
+	// jcode quirk, deliberately preserved: a `CODE#STATE` paste is NOT split into
+	// code+state on this branch. jcode's parser (parse_claude_code_input) would
+	// split the hash, but it is only reached when `looks_like_callback_input`
+	// returned true, and that is false for `CODE#STATE` (no scheme, no leading
+	// "?", no "code="/"state=" substring). The line is therefore used verbatim as
+	// the code, exactly like jcode does. The behaviour is pinned by
+	// TestLoginPasteCodeGeminiTreatsCodeHashStateAsBareCode; inventing a different
+	// rule here would silently diverge from the reference implementation.
 	return exchangeCodeForTokensWithParams(cfg, exchangeParams{
 		Code:         code,
 		CodeVerifier: pkce.CodeVerifier,
 		RedirectURI:  redirectURI,
-		// Claude echoes the PKCE verifier as `state` on the exchange (jcode
-		// behavior); an absent pasted state is thus substituted by the verifier
-		// here (correction V8).
-		State: pkce.CodeVerifier,
+		// No State on purpose: the exchange must not carry a `state` field for
+		// these providers (spec §2: Google's token endpoint receives none —
+		// jcode's Gemini exchange form has no state either). Pinned by
+		// TestLoginPasteCodeGeminiVerifiesRandomState.
 	})
+}
+
+// looksLikeCallbackInput reports whether a pasted line is a callback URL/query
+// rather than a bare authorization code. Port of jcode's
+// `looks_like_callback_input` (gemini.rs:489-496, spec §4): the trimmed input is
+// callback-looking when it starts with an http(s) scheme or "?", or when it
+// contains "code=" / "state=" anywhere.
+func looksLikeCallbackInput(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	return strings.HasPrefix(trimmed, "http://") ||
+		strings.HasPrefix(trimmed, "https://") ||
+		strings.HasPrefix(trimmed, "?") ||
+		strings.Contains(trimmed, "code=") ||
+		strings.Contains(trimmed, "state=")
+}
+
+// parseCallbackInputWithState parses a pasted callback URL/query and REQUIRES
+// the OAuth state, which is what makes the random-state paste flow safe against
+// a stale paste. Port of jcode's `parse_callback_input_with_state`
+// (oauth.rs:628-639).
+//
+// The URL/query/`code#state` parsing is delegated to parseAuthorizeCodeInput —
+// jcode's `parse_claude_code_input`, the very function jcode's version wraps —
+// rather than re-implemented, so the two parsers cannot drift apart. A blank or
+// missing state is the actionable "paste the full callback URL" error, which
+// points at the full URL because a bare code cannot carry the state at all.
+//
+// One deliberate recovery on top of the port: a bare "?code=…&state=…" query is
+// callback-shaped (looksLikeCallbackInput accepts a leading "?"), but the shared
+// parser's schemeless fallback prepends "https://example.com?" to the raw input,
+// so the "?" is doubled and the code is lost ("no authorization code found in
+// the URL"). jcode's `Url::parse` fallback has the same defect. When the shared
+// parser fails on such an input it is retried once without the marker, which
+// keeps every other input byte-identical to the shared parser's result.
+func parseCallbackInputWithState(raw string) (code, state string, err error) {
+	trimmed := strings.TrimSpace(raw)
+
+	code, state, err = parseAuthorizeCodeInput(trimmed)
+	if err != nil && strings.HasPrefix(trimmed, "?") {
+		code, state, err = parseAuthorizeCodeInput(strings.TrimPrefix(trimmed, "?"))
+	}
+	if err != nil {
+		return "", "", err
+	}
+	if strings.TrimSpace(state) == "" {
+		return "", "", errors.New("Please paste the full callback URL or query string so lele can verify the login state.")
+	}
+	return code, state, nil
 }

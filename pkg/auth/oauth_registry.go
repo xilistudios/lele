@@ -32,12 +32,13 @@ import (
 // field of the corresponding preset and the keys written by the CLI.
 //
 // The presets are built once at package initialization from their constructors
-// (OpenAIOAuthConfig / GoogleAntigravityOAuthConfig / ClaudeOAuthConfig) and
-// stored as values: that is what makes them a *shared* preset, and therefore
-// what makes the ExtraAuthParams clone in OAuthProviderConfigByName
-// load-bearing. The map is never mutated after init.
+// (OpenAIOAuthConfig / GoogleAntigravityOAuthConfig / ClaudeOAuthConfig /
+// GeminiOAuthConfig) and stored as values: that is what makes them a *shared*
+// preset, and therefore what makes the ExtraAuthParams clone in
+// OAuthProviderConfigByName load-bearing. The map is never mutated after init.
 var oauthProviderPresets = map[string]OAuthProviderConfig{
 	"anthropic":          ClaudeOAuthConfig(),
+	"gemini":             GeminiOAuthConfig(),
 	"openai":             OpenAIOAuthConfig(),
 	"google-antigravity": GoogleAntigravityOAuthConfig(),
 }
@@ -61,6 +62,20 @@ var oauthProviderAliases = map[string]string{
 	// (it accepts the model ids "antigravity", "antigravity/…" and
 	// "google-antigravity"), so both spellings must resolve to the same preset.
 	"antigravity": "google-antigravity",
+	// `gemini-cli` is the spelling the official @google/gemini-cli tool (and
+	// jcode's accepted auth-map keys: "google-gemini-cli" | "gemini-cli" |
+	// "gemini") uses, so users arriving from it type `--provider gemini-cli` and
+	// mean the Google Code Assist flow. The canonical key stays `gemini` — the
+	// name the preset advertises in Name, the key the credential is stored under
+	// and the selector pkg/providers looks up — so the alias is a spelling, never
+	// a second provider.
+	//
+	// There is deliberately NO `google` alias: `google` already means something
+	// else in lele, because pkg/config normalizes it to the *config* provider
+	// name `gemini` (config.NormalizeProvider). Accepting it here as an alias
+	// would turn a config provider name into a silent switch to this OAuth flow,
+	// i.e. change behaviour just because of how a user spelled the provider.
+	"gemini-cli": "gemini",
 }
 
 // OAuthProviderNames returns the canonical names of every registered OAuth
@@ -82,9 +97,9 @@ func OAuthProviderNames() []string {
 //
 // The lookup is case- and whitespace-insensitive (strings.ToLower +
 // strings.TrimSpace) and accepts the documented aliases (`claude` → `anthropic`,
-// `codex` → `openai`, `antigravity` → `google-antigravity`). An unknown name
-// returns the zero config and ok=false; it never falls back to a default
-// provider.
+// `codex` → `openai`, `antigravity` → `google-antigravity` and `gemini-cli` →
+// `gemini`). An unknown name returns the zero config and ok=false; it never
+// falls back to a default provider.
 //
 // The returned config is safe to modify: it is a copy of the stored preset whose
 // ExtraAuthParams map has been cloned, so writes to it cannot corrupt the

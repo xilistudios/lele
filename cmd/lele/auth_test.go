@@ -320,6 +320,20 @@ func TestResolveLoginProvider(t *testing.T) {
 			wantCfgName: "anthropic",
 		},
 		{
+			name:        "gemini -> gemini oauth",
+			provider:    "gemini",
+			wantKind:    loginKindGeminiOAuth,
+			wantCfgName: "gemini",
+		},
+		{
+			// `gemini-cli` is the spelling the official @google/gemini-cli tool
+			// uses; it must reach the very same Gemini OAuth flow.
+			name:        "gemini-cli alias normalizes",
+			provider:    "  GEMINI-CLI ",
+			wantKind:    loginKindGeminiOAuth,
+			wantCfgName: "gemini",
+		},
+		{
 			name:        "google-antigravity uses the browser flow with its preset",
 			provider:    "google-antigravity",
 			wantKind:    loginKindBrowserPreset,
@@ -410,6 +424,10 @@ func TestResolveLoginProviderDeviceCodeUnavailable(t *testing.T) {
 		// the paste-token flow.
 		{"anthropic", "device code flow is not available for anthropic"},
 		{"  ANTHROPIC ", "device code flow is not available for anthropic"},
+		// Gemini has no RFC 8628 device flow either; the rejection names the
+		// canonical preset, so the `gemini-cli` alias reports `gemini`.
+		{"gemini", "device code flow is not available for gemini"},
+		{"gemini-cli", "device code flow is not available for gemini"},
 	}
 
 	for _, tc := range tests {
@@ -445,6 +463,7 @@ func TestCanonicalProviderName(t *testing.T) {
 		{"claude alias is normalized", " CLAUDE ", "anthropic"},
 		{"codex alias resolves to openai", "codex", "openai"},
 		{"antigravity alias resolves to google-antigravity", "antigravity", "google-antigravity"},
+		{"gemini-cli alias resolves to gemini", "gemini-cli", "gemini"},
 		{"openai stays openai", "openai", "openai"},
 		{"unknown name is normalized but unresolved", "grok", "grok"},
 	}
@@ -540,6 +559,9 @@ func TestAuthHelpDocumentsEveryRegistryProvider(t *testing.T) {
 		"--paste-code",
 		"lele auth login --provider claude",
 		"lele auth login --provider claude --paste-code",
+		"lele auth login --provider gemini",
+		"lele auth login --provider gemini --paste-code",
+		"gemini-cli   (alias of gemini)",
 		"  --provider claude    Claude OAuth (alias of the anthropic preset; use --provider anthropic to paste a token)",
 		"  --provider codex     OpenAI OAuth (alias of the openai preset; same flow as --provider openai)",
 	} {
@@ -1012,7 +1034,8 @@ func TestAuthLoginClaudeOAuthConfigWriteFailureIsActionable(t *testing.T) {
 }
 
 // TestAuthLoginCmdPasteCodeRejectedForNonClaude runs the real command and checks
-// the exact user-facing line for `--paste-code` on a non-Claude provider.
+// the exact user-facing line for `--paste-code` on a provider that has no
+// paste-code flow (antigravity; the flag is accepted for claude and gemini).
 //
 // loginBrowser is stubbed (with a failing flow) on purpose: if the guard
 // regressed, the command would start the browser flow instead of failing, and
@@ -1029,9 +1052,619 @@ func TestAuthLoginCmdPasteCodeRejectedForNonClaude(t *testing.T) {
 
 	out := captureOutput(authLoginCmd)
 
-	want := "--paste-code is only supported for the Claude OAuth flow; use: lele auth login --provider claude --paste-code\n"
+	want := "--paste-code is only supported for the Claude and Gemini OAuth flows; use: lele auth login --provider claude --paste-code\n"
 	if out != want {
 		t.Errorf("authLoginCmd() output = %q, want %q", out, want)
 	}
 	assertExitCodes(t, []int{1}, *codes)
+}
+
+// TestAuthLoginGeminiOAuthStoresCanonicalKeyAndWritesAuthMethod pins the
+// end-to-end contract of `lele auth login --provider gemini` (and of its
+// `gemini-cli` alias): the credential is stored under the canonical registry key
+// ("gemini", never the typed alias) and Providers.Gemini.AuthMethod is flipped
+// to "oauth" (that is what makes the provider pick the Gemini Code Assist wire
+// contract on the next run).
+//
+// Unlike the Claude sibling this drives the real authLoginCmd: the kind returned
+// by resolveLoginProvider is therefore observable here, and a `gemini` that fell
+// back to the generic browser-preset flow would call the failing loginBrowser
+// stub below instead of silently starting a real browser flow — so the missing
+// auth_method is reported as a plain assertion failure rather than a hang.
+//
+// LELE_CONFIG_DIR is redirected to a temp dir so the best-effort config write
+// lands there and never touches the developer's real ~/.lele/config.json.
+func TestAuthLoginGeminiOAuthStoresCanonicalKeyAndWritesAuthMethod(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+	}{
+		{name: "canonical spelling", provider: "gemini"},
+		{name: "gemini-cli alias", provider: "gemini-cli"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+
+			codes := stubLoginExit(t)
+			withLoginArgs(t, "--provider", tc.provider)
+
+			cfg, ok := auth.OAuthProviderConfigByName(tc.provider)
+			if !ok {
+				t.Fatalf("auth.OAuthProviderConfigByName(%q) not found", tc.provider)
+			}
+			if cfg.Name != "gemini" {
+				t.Fatalf("registry cfg.Name = %q, want %q", cfg.Name, "gemini")
+			}
+
+			originalGeminiBrowser, originalLoginBrowser, originalSetCredential := loginGeminiBrowser, loginBrowser, setCredential
+			t.Cleanup(func() {
+				loginGeminiBrowser, loginBrowser, setCredential = originalGeminiBrowser, originalLoginBrowser, originalSetCredential
+			})
+
+			var gotCfg auth.OAuthProviderConfig
+			cred := &auth.AuthCredential{AccessToken: "tok", Provider: cfg.Name, AccountID: "acct-gemini"}
+			loginGeminiBrowser = func(c auth.OAuthProviderConfig, _ io.Reader) (*auth.AuthCredential, error) {
+				gotCfg = c
+				return cred, nil
+			}
+			// Must never run: the generic browser-preset flow stores the
+			// credential but writes no auth_method (and would hit the network in
+			// production).
+			loginBrowser = func(auth.OAuthProviderConfig) (*auth.AuthCredential, error) {
+				return nil, errors.New("unexpected generic browser-preset flow")
+			}
+
+			var gotKey string
+			var gotCred *auth.AuthCredential
+			setCredential = func(name string, c *auth.AuthCredential) error {
+				gotKey, gotCred = name, c
+				return nil
+			}
+
+			out := captureOutput(authLoginCmd)
+
+			if gotCfg.Name != cfg.Name {
+				t.Errorf("loginGeminiBrowser received cfg.Name = %q, want %q", gotCfg.Name, cfg.Name)
+			}
+			if gotKey != "gemini" {
+				t.Errorf("setCredential key = %q, want %q", gotKey, "gemini")
+			}
+			if gotCred != cred {
+				t.Errorf("setCredential credential = %p, want %p", gotCred, cred)
+			}
+			for _, want := range []string{"Login successful!", "Account: acct-gemini"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("authLoginCmd() output = %q, want it to contain %q", out, want)
+				}
+			}
+			if strings.Contains(out, "Warning: could not update config:") {
+				t.Errorf("authLoginCmd() output = %q, want no config-write warning", out)
+			}
+			if len(*codes) != 0 {
+				t.Errorf("loginExit called with %v, want no exit on the success path", *codes)
+			}
+
+			// The best-effort Providers.Gemini.AuthMethod = "oauth" write must
+			// have run and must have persisted: in the isolated LELE_CONFIG_DIR
+			// (fresh, so loadConfig returns the default) SaveConfig creates
+			// config.json and, because an explicit auth method counts as provider
+			// configuration, MarshalJSON keeps the gemini entry despite there
+			// being no API key or models — no pkg/config change is needed.
+			// Reloading the file is therefore a real end-to-end assertion.
+			if _, err := os.Stat(getConfigPath()); err != nil {
+				t.Errorf("stat(%q) = %v, want the config file to have been written", getConfigPath(), err)
+			}
+			persisted, err := config.LoadConfig(getConfigPath())
+			if err != nil {
+				t.Fatalf("LoadConfig(%q) = %v, want the persisted config", getConfigPath(), err)
+			}
+			if persisted.Providers == nil {
+				t.Fatal("persisted.Providers = nil, want the providers section with auth_method")
+			}
+			if got := persisted.Providers.Gemini.AuthMethod; got != "oauth" {
+				t.Errorf("persisted Providers.Gemini.AuthMethod = %q, want %q", got, "oauth")
+			}
+		})
+	}
+}
+
+// TestAuthLoginGeminiOAuthPasteCode verifies that `--paste-code` on the Gemini
+// preset is accepted — the shared guard must allow it, exactly as it does for
+// Claude — and routes to the headless paste-code seam, never to the browser
+// flow. It runs the real command on purpose: the guard lives in authLoginCmd,
+// so driving authLoginGeminiOAuth directly would not exercise it.
+func TestAuthLoginGeminiOAuthPasteCode(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+
+	codes := stubLoginExit(t)
+	withLoginArgs(t, "--provider", "gemini", "--paste-code")
+
+	cfg, ok := auth.OAuthProviderConfigByName("gemini")
+	if !ok {
+		t.Fatal("auth.OAuthProviderConfigByName(\"gemini\") not found")
+	}
+
+	originalPasteCode, originalGeminiBrowser, originalLoginBrowser, originalSetCredential := loginGeminiPasteCode, loginGeminiBrowser, loginBrowser, setCredential
+	t.Cleanup(func() {
+		loginGeminiPasteCode, loginGeminiBrowser, loginBrowser, setCredential = originalPasteCode, originalGeminiBrowser, originalLoginBrowser, originalSetCredential
+	})
+
+	var gotCfgName string
+	pasteCodeCalled := false
+	loginGeminiPasteCode = func(c auth.OAuthProviderConfig, _ io.Reader) (*auth.AuthCredential, error) {
+		pasteCodeCalled = true
+		gotCfgName = c.Name
+		return &auth.AuthCredential{AccessToken: "tok", Provider: c.Name}, nil
+	}
+	loginGeminiBrowser = func(auth.OAuthProviderConfig, io.Reader) (*auth.AuthCredential, error) {
+		return nil, errors.New("browser flow must not run with --paste-code")
+	}
+	loginBrowser = func(auth.OAuthProviderConfig) (*auth.AuthCredential, error) {
+		return nil, errors.New("generic browser-preset flow must not run with --paste-code")
+	}
+	setCredential = func(string, *auth.AuthCredential) error { return nil }
+
+	out := captureOutput(authLoginCmd)
+
+	if !pasteCodeCalled {
+		t.Error("authLoginCmd() with --paste-code did not route to loginGeminiPasteCode")
+	}
+	if gotCfgName != cfg.Name {
+		t.Errorf("loginGeminiPasteCode received cfg.Name = %q, want %q", gotCfgName, cfg.Name)
+	}
+	if !strings.Contains(out, "Login successful!") {
+		t.Errorf("authLoginCmd() output = %q, want it to contain %q", out, "Login successful!")
+	}
+	if len(*codes) != 0 {
+		t.Errorf("loginExit called with %v, want no exit on the success path", *codes)
+	}
+}
+
+// TestAuthLogoutGeminiClearsAuthMethod pins the logout side of the Gemini
+// wiring: the canonical name resolves through the registry alias and the
+// best-effort switch blanks Providers.Gemini.AuthMethod — and, because
+// ProvidersConfig serializes the named copy of the provider whenever it holds
+// data, the named copy too, so the clearing actually reaches the file (see
+// setNamedAuthMethod). The API key on the same entry must survive: logout
+// clears the auth *method*, it does not delete the user's provider config.
+//
+// LELE_CONFIG_DIR is redirected to a temp dir, which also isolates the legacy
+// auth.json credential store (authFilePath() lives under GetLeleDir(), and no
+// cmd/lele test installs a SQLite store), so the seeded credential is deleted
+// from the temp dir and the developer's real store is never touched — there is
+// no cmd/lele seam for auth.DeleteCredential to stub.
+func TestAuthLogoutGeminiClearsAuthMethod(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+
+	if got := canonicalProviderName("gemini-cli"); got != "gemini" {
+		t.Fatalf("canonicalProviderName(%q) = %q, want %q", "gemini-cli", got, "gemini")
+	}
+
+	// Seed the state logout must clear: a stored credential and the config key
+	// authLoginGeminiOAuth writes (next to an API key that must not be touched).
+	if err := auth.SetCredential("gemini", &auth.AuthCredential{AccessToken: "tok", Provider: "gemini"}); err != nil {
+		t.Fatalf("auth.SetCredential(%q, …) error = %v", "gemini", err)
+	}
+	before, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if before.Providers == nil {
+		t.Fatal("loadConfig().Providers = nil, want the providers section")
+	}
+	before.Providers.Gemini.APIKey = "keep-me"
+	before.Providers.Gemini.AuthMethod = "oauth"
+	if err := config.SaveConfig(getConfigPath(), before); err != nil {
+		t.Fatalf("SaveConfig(%q) error = %v", getConfigPath(), err)
+	}
+	// Precondition: the seeded file really carries the auth method, otherwise
+	// the assertion below would pass vacuously.
+	seeded, err := config.LoadConfig(getConfigPath())
+	if err != nil {
+		t.Fatalf("LoadConfig(%q) = %v, want the seeded config", getConfigPath(), err)
+	}
+	if got := seeded.Providers.Gemini.AuthMethod; got != "oauth" {
+		t.Fatalf("seeded Providers.Gemini.AuthMethod = %q, want %q", got, "oauth")
+	}
+
+	originalArgs := os.Args
+	os.Args = []string{"lele", "auth", "logout", "--provider", "gemini-cli"}
+	t.Cleanup(func() { os.Args = originalArgs })
+
+	out := captureOutput(authLogoutCmd)
+
+	// The alias is resolved before deletion and before the message, so the
+	// canonical key is both what was deleted and what the user is told.
+	if want := "Logged out from gemini\n"; out != want {
+		t.Errorf("authLogoutCmd() output = %q, want %q", out, want)
+	}
+	if cred, err := auth.GetCredential("gemini"); err != nil || cred != nil {
+		t.Errorf("auth.GetCredential(%q) = (%v, %v), want (nil, nil) after logout", "gemini", cred, err)
+	}
+
+	persisted, err := config.LoadConfig(getConfigPath())
+	if err != nil {
+		t.Fatalf("LoadConfig(%q) = %v, want the persisted config", getConfigPath(), err)
+	}
+	if persisted.Providers == nil {
+		t.Fatal("persisted.Providers = nil, want the providers section")
+	}
+	if got := persisted.Providers.Gemini.AuthMethod; got != "" {
+		t.Errorf("persisted Providers.Gemini.AuthMethod = %q, want it blanked by logout", got)
+	}
+	if got := persisted.Providers.Gemini.APIKey; got != "keep-me" {
+		t.Errorf("persisted Providers.Gemini.APIKey = %q, want %q (logout must not drop the provider config)", got, "keep-me")
+	}
+}
+
+// seedConfigOnDisk loads the config exactly like production does (loadConfig),
+// applies mutate and writes the result back with the real config.SaveConfig.
+//
+// It exists so a test can start from a config file that ALREADY carries data
+// for a provider: that is the state in which ProvidersConfig.MarshalJSON
+// serializes the *named* copy of the provider and early-returns before it ever
+// looks at the typed field, which is precisely the state the auth login/logout
+// writes must survive. A fresh t.TempDir() cannot catch a regression here: with
+// no provider entry on disk the typed field is written to the file anyway.
+func seedConfigOnDisk(t *testing.T, mutate func(*config.Config)) {
+	t.Helper()
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if cfg.Providers == nil {
+		t.Fatal("loadConfig().Providers = nil, want the providers section")
+	}
+	mutate(cfg)
+	if err := config.SaveConfig(getConfigPath(), cfg); err != nil {
+		t.Fatalf("SaveConfig(%q) error = %v", getConfigPath(), err)
+	}
+}
+
+// reloadConfigFromDisk re-reads the config file written by the command under
+// test and fails when the file is unreadable or lost its providers section (the
+// latter is what LoadConfig does when the file has no "providers" key at all,
+// so it also guards against a command that dropped the section).
+func reloadConfigFromDisk(t *testing.T) *config.Config {
+	t.Helper()
+	cfg, err := config.LoadConfig(getConfigPath())
+	if err != nil {
+		t.Fatalf("LoadConfig(%q) = %v, want the persisted config", getConfigPath(), err)
+	}
+	if cfg.Providers == nil {
+		t.Fatal("persisted.Providers = nil, want the providers section")
+	}
+	return cfg
+}
+
+// TestAuthLoginGeminiOAuthPersistsAuthMethodOverExistingNamedEntry is the
+// regression test for the shadowing defect the fresh-config tests cannot see:
+// when providers.gemini already exists on disk with data (here an api_key),
+// MarshalJSON serializes the named copy Providers.Named["gemini"] and then
+// early-returns for the typed field Providers.Gemini, so a login that writes
+// ONLY the typed field silently loses auth_method = "oauth" on disk — and after
+// a restart the provider selector does not pick the Gemini Code Assist wire
+// contract, without any warning being printed (SaveConfig succeeded).
+//
+// It drives the real authLoginCmd so the provider dispatch is exercised too.
+func TestAuthLoginGeminiOAuthPersistsAuthMethodOverExistingNamedEntry(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+
+	codes := stubLoginExit(t)
+	withLoginArgs(t, "--provider", "gemini")
+
+	cfg, ok := auth.OAuthProviderConfigByName("gemini")
+	if !ok {
+		t.Fatal("auth.OAuthProviderConfigByName(\"gemini\") not found")
+	}
+	if cfg.Name != "gemini" {
+		t.Fatalf("registry cfg.Name = %q, want %q", cfg.Name, "gemini")
+	}
+
+	originalGeminiBrowser, originalLoginBrowser, originalSetCredential := loginGeminiBrowser, loginBrowser, setCredential
+	t.Cleanup(func() {
+		loginGeminiBrowser, loginBrowser, setCredential = originalGeminiBrowser, originalLoginBrowser, originalSetCredential
+	})
+
+	loginGeminiBrowser = func(c auth.OAuthProviderConfig, _ io.Reader) (*auth.AuthCredential, error) {
+		return &auth.AuthCredential{AccessToken: "tok", Provider: c.Name}, nil
+	}
+	loginBrowser = func(auth.OAuthProviderConfig) (*auth.AuthCredential, error) {
+		return nil, errors.New("unexpected generic browser-preset flow")
+	}
+
+	var gotKey string
+	setCredential = func(name string, _ *auth.AuthCredential) error {
+		gotKey = name
+		return nil
+	}
+
+	// The pre-existing gemini entry: an api_key alone is enough for MarshalJSON
+	// to keep the *named* copy (and therefore to drop the typed write), and it
+	// must survive the login untouched.
+	seedConfigOnDisk(t, func(c *config.Config) { c.Providers.Gemini.APIKey = "keep-me" })
+
+	// Precondition: the seeded file really carries the entry, otherwise the
+	// assertion below would pass vacuously.
+	if got := reloadConfigFromDisk(t).Providers.Gemini.APIKey; got != "keep-me" {
+		t.Fatalf("seeded Providers.Gemini.APIKey = %q, want %q", got, "keep-me")
+	}
+
+	out := captureOutput(authLoginCmd)
+
+	if gotKey != "gemini" {
+		t.Errorf("setCredential key = %q, want %q", gotKey, "gemini")
+	}
+	if !strings.Contains(out, "Login successful!") {
+		t.Errorf("authLoginCmd() output = %q, want it to contain %q", out, "Login successful!")
+	}
+	if strings.Contains(out, "Warning: could not update config:") {
+		t.Errorf("authLoginCmd() output = %q, want no config-write warning", out)
+	}
+	if len(*codes) != 0 {
+		t.Errorf("loginExit called with %v, want no exit on the success path", *codes)
+	}
+
+	persisted := reloadConfigFromDisk(t)
+	if got := persisted.Providers.Gemini.AuthMethod; got != "oauth" {
+		t.Errorf("persisted Providers.Gemini.AuthMethod = %q, want %q (the write must reach the file even when a gemini entry already exists)", got, "oauth")
+	}
+	if got := persisted.Providers.Gemini.APIKey; got != "keep-me" {
+		t.Errorf("persisted Providers.Gemini.APIKey = %q, want %q (login must not drop the provider config)", got, "keep-me")
+	}
+}
+
+// TestAuthLoginClaudeOAuthPersistsAuthMethodOverExistingNamedEntry pins the very
+// same contract for the Claude OAuth flow: with a providers.anthropic entry
+// already on disk, writing only Providers.Anthropic.AuthMethod is lost, because
+// MarshalJSON serializes Providers.Named["anthropic"] and early-returns for the
+// typed field. pkg/providers/factory.go selects the Claude OAuth transport from
+// named.AuthMethod (selectionFromNamedProvider), so the lost write means the
+// next run keeps failing with "no API key configured for model".
+//
+// This is a latent defect of the F1 commit that introduced the flow
+// (898bfdbc, unmerged and unpushed when this test was written), fixed here.
+func TestAuthLoginClaudeOAuthPersistsAuthMethodOverExistingNamedEntry(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+
+	cfg, ok := auth.OAuthProviderConfigByName("claude")
+	if !ok {
+		t.Fatal("auth.OAuthProviderConfigByName(\"claude\") not found")
+	}
+	if cfg.Name != "anthropic" {
+		t.Fatalf("registry cfg.Name = %q, want %q", cfg.Name, "anthropic")
+	}
+
+	originalLoginClaudeBrowser, originalSetCredential := loginClaudeBrowser, setCredential
+	t.Cleanup(func() {
+		loginClaudeBrowser, setCredential = originalLoginClaudeBrowser, originalSetCredential
+	})
+
+	loginClaudeBrowser = func(c auth.OAuthProviderConfig, _ io.Reader) (*auth.AuthCredential, error) {
+		return &auth.AuthCredential{AccessToken: "tok", Provider: c.Name}, nil
+	}
+
+	var gotKey string
+	setCredential = func(name string, _ *auth.AuthCredential) error {
+		gotKey = name
+		return nil
+	}
+
+	// Pre-existing anthropic entry carrying data but no auth method: MarshalJSON
+	// keeps the named copy (api_key) and drops the typed-only write.
+	seedConfigOnDisk(t, func(c *config.Config) { c.Providers.Anthropic.APIKey = "keep-me" })
+
+	if got := reloadConfigFromDisk(t).Providers.Anthropic.APIKey; got != "keep-me" {
+		t.Fatalf("seeded Providers.Anthropic.APIKey = %q, want %q", got, "keep-me")
+	}
+
+	out := captureOutput(func() { authLoginClaudeOAuth(cfg, false) })
+
+	if gotKey != "anthropic" {
+		t.Errorf("setCredential key = %q, want %q", gotKey, "anthropic")
+	}
+	if !strings.Contains(out, "Login successful!") {
+		t.Errorf("authLoginClaudeOAuth() output = %q, want it to contain %q", out, "Login successful!")
+	}
+
+	persisted := reloadConfigFromDisk(t)
+	if got := persisted.Providers.Anthropic.AuthMethod; got != "oauth" {
+		t.Errorf("persisted Providers.Anthropic.AuthMethod = %q, want %q (the write must reach the file even when an anthropic entry already exists)", got, "oauth")
+	}
+	if got := persisted.Providers.Anthropic.APIKey; got != "keep-me" {
+		t.Errorf("persisted Providers.Anthropic.APIKey = %q, want %q (login must not drop the provider config)", got, "keep-me")
+	}
+}
+
+// TestAuthLogoutAnthropicClearsPersistedAuthMethod pins the logout side for
+// anthropic: with providers.anthropic.auth_method = "oauth" already on disk
+// (next to an api_key that must survive), `auth logout --provider claude`
+// (alias -> anthropic) must blank the value ON DISK. Blanking only the typed
+// field would leave it behind, because MarshalJSON serializes the named copy and
+// early-returns — and the next gateway start would still pick the Claude OAuth
+// wire with a deleted credential.
+func TestAuthLogoutAnthropicClearsPersistedAuthMethod(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+
+	if got := canonicalProviderName("claude"); got != "anthropic" {
+		t.Fatalf("canonicalProviderName(%q) = %q, want %q", "claude", got, "anthropic")
+	}
+
+	// Seed the state logout must clear: a stored credential plus the config key
+	// the Claude login writes (next to an API key that must not be touched).
+	if err := auth.SetCredential("anthropic", &auth.AuthCredential{AccessToken: "tok", Provider: "anthropic"}); err != nil {
+		t.Fatalf("auth.SetCredential(%q, …) error = %v", "anthropic", err)
+	}
+	seedConfigOnDisk(t, func(c *config.Config) {
+		c.Providers.Anthropic.APIKey = "keep-me"
+		c.Providers.Anthropic.AuthMethod = "oauth"
+	})
+	// Precondition: the seeded file really carries the auth method, otherwise
+	// the assertion below would pass vacuously.
+	if got := reloadConfigFromDisk(t).Providers.Anthropic.AuthMethod; got != "oauth" {
+		t.Fatalf("seeded Providers.Anthropic.AuthMethod = %q, want %q", got, "oauth")
+	}
+
+	originalArgs := os.Args
+	os.Args = []string{"lele", "auth", "logout", "--provider", "claude"}
+	t.Cleanup(func() { os.Args = originalArgs })
+
+	out := captureOutput(authLogoutCmd)
+
+	if want := "Logged out from anthropic\n"; out != want {
+		t.Errorf("authLogoutCmd() output = %q, want %q", out, want)
+	}
+	if cred, err := auth.GetCredential("anthropic"); err != nil || cred != nil {
+		t.Errorf("auth.GetCredential(%q) = (%v, %v), want (nil, nil) after logout", "anthropic", cred, err)
+	}
+
+	persisted := reloadConfigFromDisk(t)
+	if got := persisted.Providers.Anthropic.AuthMethod; got != "" {
+		t.Errorf("persisted Providers.Anthropic.AuthMethod = %q, want it blanked by logout", got)
+	}
+	if got := persisted.Providers.Anthropic.APIKey; got != "keep-me" {
+		t.Errorf("persisted Providers.Anthropic.APIKey = %q, want %q (logout must not drop the provider config)", got, "keep-me")
+	}
+}
+
+// TestAuthLogoutAllClearsPersistedGeminiAndAnthropicAuthMethod pins the
+// provider-less `auth logout`: it deletes every credential, so it must not leave
+// providers.gemini.auth_method = "oauth" or providers.anthropic.auth_method =
+// "oauth" behind on disk (both entries already carry data, so only the named
+// copy reaches the file — see setNamedAuthMethod). Otherwise the next gateway
+// start still selects an OAuth transport whose credential was just deleted.
+func TestAuthLogoutAllClearsPersistedGeminiAndAnthropicAuthMethod(t *testing.T) {
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+
+	for _, provider := range []string{"gemini", "anthropic"} {
+		if err := auth.SetCredential(provider, &auth.AuthCredential{AccessToken: "tok", Provider: provider}); err != nil {
+			t.Fatalf("auth.SetCredential(%q, …) error = %v", provider, err)
+		}
+	}
+	seedConfigOnDisk(t, func(c *config.Config) {
+		c.Providers.Gemini.APIKey = "keep-gemini"
+		c.Providers.Gemini.AuthMethod = "oauth"
+		c.Providers.Anthropic.APIKey = "keep-anthropic"
+		c.Providers.Anthropic.AuthMethod = "oauth"
+	})
+	// Precondition: the seeded file really carries both auth methods, otherwise
+	// the assertions below would pass vacuously.
+	seeded := reloadConfigFromDisk(t)
+	if got := seeded.Providers.Gemini.AuthMethod; got != "oauth" {
+		t.Fatalf("seeded Providers.Gemini.AuthMethod = %q, want %q", got, "oauth")
+	}
+	if got := seeded.Providers.Anthropic.AuthMethod; got != "oauth" {
+		t.Fatalf("seeded Providers.Anthropic.AuthMethod = %q, want %q", got, "oauth")
+	}
+
+	originalArgs := os.Args
+	os.Args = []string{"lele", "auth", "logout"}
+	t.Cleanup(func() { os.Args = originalArgs })
+
+	out := captureOutput(authLogoutCmd)
+
+	if want := "Logged out from all providers\n"; out != want {
+		t.Errorf("authLogoutCmd() output = %q, want %q", out, want)
+	}
+	for _, provider := range []string{"gemini", "anthropic"} {
+		if cred, err := auth.GetCredential(provider); err != nil || cred != nil {
+			t.Errorf("auth.GetCredential(%q) = (%v, %v), want (nil, nil) after logout", provider, cred, err)
+		}
+	}
+
+	persisted := reloadConfigFromDisk(t)
+	if got := persisted.Providers.Gemini.AuthMethod; got != "" {
+		t.Errorf("persisted Providers.Gemini.AuthMethod = %q, want it blanked by logout (a deleted credential must not keep selecting the OAuth wire)", got)
+	}
+	if got := persisted.Providers.Anthropic.AuthMethod; got != "" {
+		t.Errorf("persisted Providers.Anthropic.AuthMethod = %q, want it blanked by logout", got)
+	}
+	if got := persisted.Providers.Gemini.APIKey; got != "keep-gemini" {
+		t.Errorf("persisted Providers.Gemini.APIKey = %q, want %q (logout must not drop the provider config)", got, "keep-gemini")
+	}
+	if got := persisted.Providers.Anthropic.APIKey; got != "keep-anthropic" {
+		t.Errorf("persisted Providers.Anthropic.APIKey = %q, want %q (logout must not drop the provider config)", got, "keep-anthropic")
+	}
+}
+
+// TestSetNamedAuthMethod covers the helper's edge cases directly: a nil
+// ProvidersConfig and a blank name must be no-ops (never a panic), an existing
+// entry must keep every field but auth_method, a missing entry for a known
+// provider must be seeded from the typed field, and an unknown provider must
+// still get its auth_method written.
+func TestSetNamedAuthMethod(t *testing.T) {
+	t.Run("nil providers is a no-op", func(t *testing.T) {
+		setNamedAuthMethod(nil, "gemini", "oauth")
+	})
+
+	t.Run("blank name is a no-op", func(t *testing.T) {
+		providers := &config.ProvidersConfig{}
+		setNamedAuthMethod(providers, "   ", "oauth")
+		if len(providers.Named) != 0 {
+			t.Errorf("Named = %v, want it untouched for a blank name", providers.Named)
+		}
+	})
+
+	t.Run("existing entry keeps every other field", func(t *testing.T) {
+		ws := true
+		providers := &config.ProvidersConfig{
+			Named: map[string]config.NamedProviderConfig{
+				"gemini": {
+					Type: "gemini",
+					ProviderConfig: config.ProviderConfig{
+						APIKey:      "keep-me",
+						APIBase:     "https://base",
+						Proxy:       "http://proxy",
+						AuthMethod:  "token",
+						ConnectMode: "stdio",
+					},
+					WebSearch: &ws,
+					Models:    map[string]config.ProviderModelConfig{"m": {Model: "m"}},
+				},
+			},
+		}
+		setNamedAuthMethod(providers, " GEMINI ", "oauth")
+		got := providers.Named["gemini"]
+		if got.AuthMethod != "oauth" {
+			t.Errorf("AuthMethod = %q, want %q", got.AuthMethod, "oauth")
+		}
+		if got.APIKey != "keep-me" || got.APIBase != "https://base" || got.Proxy != "http://proxy" || got.ConnectMode != "stdio" {
+			t.Errorf("provider fields = %+v, want api_key/api_base/proxy/connect_mode preserved", got.ProviderConfig)
+		}
+		if got.Type != "gemini" {
+			t.Errorf("Type = %q, want %q", got.Type, "gemini")
+		}
+		if got.WebSearch == nil || !*got.WebSearch {
+			t.Errorf("WebSearch = %v, want it preserved", got.WebSearch)
+		}
+		if len(got.Models) != 1 {
+			t.Errorf("Models = %v, want the model map preserved", got.Models)
+		}
+	})
+
+	t.Run("missing entry is seeded from the typed field", func(t *testing.T) {
+		providers := &config.ProvidersConfig{Gemini: config.ProviderConfig{APIKey: "typed-key"}}
+		setNamedAuthMethod(providers, "gemini", "oauth")
+		got := providers.Named["gemini"]
+		if got.AuthMethod != "oauth" {
+			t.Errorf("AuthMethod = %q, want %q", got.AuthMethod, "oauth")
+		}
+		if got.APIKey != "typed-key" {
+			t.Errorf("APIKey = %q, want %q (the typed field must not be shadowed away)", got.APIKey, "typed-key")
+		}
+		if got.Type != "gemini" {
+			t.Errorf("Type = %q, want %q", got.Type, "gemini")
+		}
+	})
+
+	t.Run("unknown provider still gets the method written", func(t *testing.T) {
+		providers := &config.ProvidersConfig{}
+		setNamedAuthMethod(providers, "acme", "oauth")
+		got := providers.Named["acme"]
+		if got.AuthMethod != "oauth" || got.Type != "acme" {
+			t.Errorf("Named[\"acme\"] = %+v, want type and auth_method set", got)
+		}
+	})
 }

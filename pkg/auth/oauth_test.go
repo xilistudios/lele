@@ -2619,3 +2619,136 @@ func TestExchangeCloudflare403Message(t *testing.T) {
 		}
 	})
 }
+
+// cloudflareChallengeServer is the 403 + Cloudflare-interstitial endpoint used
+// by the provider-aware wording tests below. It reuses the exact response shape
+// of TestExchangeCloudflare403Message so the 403 branch is driven for real
+// through exchangeCodeForTokensWithParams instead of a hand-rolled harness.
+func cloudflareChallengeServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusForbidden)
+		io.WriteString(w, "<html><head><title>Just a moment...</title></head><body>Just a moment...</body></html>")
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestExchangeCloudflare403MessageUsesDisplayName pins the provider-aware
+// wording of the pre-flight error: the 403 branch belongs to a now
+// provider-generic exchange (Claude and Gemini Code Assist share it), so the
+// sentence must name the provider carried by the config instead of hardcoding
+// Anthropic/claude. The message body and the recovery command both follow
+// DisplayName; the mandatory mutation for this test is to hardcode the
+// historical `--provider claude` sentence again.
+func TestExchangeCloudflare403MessageUsesDisplayName(t *testing.T) {
+	cfg := OAuthProviderConfig{
+		Name:        "gemini",
+		DisplayName: "Gemini",
+		ClientID:    "cid",
+		TokenURL:    cloudflareChallengeServer(t).URL,
+	}
+
+	cred, err := exchangeCodeForTokensWithParams(cfg, exchangeParams{
+		Code:         "C",
+		CodeVerifier: "V",
+		RedirectURI:  "https://codeassist.google.com/authcode",
+		State:        "V",
+	})
+	if err == nil {
+		t.Fatal("exchangeCodeForTokensWithParams() = nil error, want a Cloudflare error")
+	}
+	if cred != nil {
+		t.Errorf("credential = %#v, want nil when the exchange is blocked", cred)
+	}
+
+	msg := err.Error()
+	if !strings.Contains(msg, "Gemini") {
+		t.Errorf("error = %q, want it to name the provider from DisplayName %q", msg, cfg.DisplayName)
+	}
+	if !strings.Contains(msg, "`lele auth login --provider gemini --paste-code`") {
+		t.Errorf("error = %q, want the recovery command derived from the lower-case label", msg)
+	}
+	if strings.Contains(msg, "--provider claude") {
+		t.Errorf("error = %q, must not keep the hardcoded Claude flag", msg)
+	}
+	if strings.Contains(msg, "claude") {
+		t.Errorf("error = %q, must not mention claude for a Gemini config", msg)
+	}
+	if strings.Contains(msg, "Anthropic") {
+		t.Errorf("error = %q, must not mention Anthropic for a Gemini config", msg)
+	}
+}
+
+// TestExchangeCloudflare403MessageDefaultWordingUnchanged is the byte-for-byte
+// compatibility guard for the same branch: a config that does not set
+// DisplayName (every hand-built config predating the field) must still produce
+// the historical sentence, including the "Anthropic" product word next to the
+// --provider claude flag. The full string is pinned on purpose — a substring
+// check would not catch the prose slipping from "Anthropic" to "Claude".
+func TestExchangeCloudflare403MessageDefaultWordingUnchanged(t *testing.T) {
+	want := "token exchange was blocked by Cloudflare before Anthropic returned OAuth tokens. Switch VPN exit IP or network, then retry with `lele auth login --provider claude --paste-code` and paste the callback URL"
+
+	cfg := OAuthProviderConfig{
+		Name:     "anthropic",
+		ClientID: "cid",
+		TokenURL: cloudflareChallengeServer(t).URL,
+	}
+
+	cred, err := exchangeCodeForTokensWithParams(cfg, exchangeParams{
+		Code:         "C",
+		CodeVerifier: "V",
+		RedirectURI:  "https://platform.claude.com/oauth/code/callback",
+		State:        "V",
+	})
+	if err == nil {
+		t.Fatal("exchangeCodeForTokensWithParams() = nil error, want a Cloudflare error")
+	}
+	if cred != nil {
+		t.Errorf("credential = %#v, want nil when the exchange is blocked", cred)
+	}
+	if err.Error() != want {
+		t.Errorf("error = %q,\nwant %q", err.Error(), want)
+	}
+}
+
+// TestOAuthProviderConfigDisplayName pins the accessor that centralises the
+// label rules, so the fallbacks cannot drift per call site. displayName is the
+// gate-message label ("Claude" historically); displayNameOr carries the
+// historical word of one specific message.
+func TestOAuthProviderConfigDisplayName(t *testing.T) {
+	tests := []struct {
+		name         string
+		displayName  string
+		wantDisplay  string
+		wantFallback string
+	}{
+		{name: "empty keeps the historical Claude wording", displayName: "", wantDisplay: "Claude", wantFallback: "Claude"},
+		{name: "claude preset", displayName: "Claude", wantDisplay: "Claude", wantFallback: "Claude"},
+		{name: "gemini preset", displayName: "Gemini", wantDisplay: "Gemini", wantFallback: "Gemini"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := OAuthProviderConfig{DisplayName: tt.displayName}
+			if got := cfg.displayName(); got != tt.wantDisplay {
+				t.Errorf("displayName() = %q, want %q", got, tt.wantDisplay)
+			}
+			if got := cfg.displayNameOr("Claude"); got != tt.wantFallback {
+				t.Errorf("displayNameOr(%q) = %q, want %q", "Claude", got, tt.wantFallback)
+			}
+			// The CLI flag is always the lower-case label, whatever the fallback.
+			if got := strings.ToLower(cfg.displayName()); got != strings.ToLower(tt.wantDisplay) {
+				t.Errorf("lower-case label = %q, want %q", got, strings.ToLower(tt.wantDisplay))
+			}
+		})
+	}
+
+	// The pre-flight message falls back to the "Anthropic" product word, which
+	// is deliberately NOT the gate label: DisplayName == "" is only a stand-in
+	// for the historical Claude config, whose sentence mixes both spellings.
+	if got := (OAuthProviderConfig{}).displayNameOr("Anthropic"); got != "Anthropic" {
+		t.Errorf("displayNameOr(%q) = %q, want the historical product word", "Anthropic", got)
+	}
+}

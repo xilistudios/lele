@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -83,6 +82,15 @@ type OAuthProviderConfig struct {
 	// actionable error.
 	// Opt-in: only the Claude preset sets it (openai/google-* keep their behavior).
 	RequireRefreshToken bool
+	// DisplayName is the provider name used in user-facing gate messages (e.g.
+	// "Claude", "Gemini"). Its lower-cased form is also used as the --provider
+	// value in the recovery commands those messages suggest, so it must be a
+	// spelling the registry accepts ("Claude" -> claude, "Gemini" -> gemini);
+	// use Name for any other labelling. Empty keeps the historical wording, so a
+	// preset that predates the field is unaffected: "Claude" in the gate
+	// messages, "Anthropic" in the Cloudflare pre-flight prose (see
+	// displayNameOr).
+	DisplayName string
 
 	TokenRequestStyle TokenRequestStyle // form (zero value) | json
 	AuthHeaderStyle   TokenAuthStyle    // body (zero value) | basic
@@ -257,6 +265,31 @@ func LoginBrowserWithPasteFallback(cfg OAuthProviderConfig, r io.Reader) (*AuthC
 	return loginBrowser(cfg, true, r)
 }
 
+// printHeadlessHint prints the provider-specific "run this instead" line shown
+// by loginBrowser, i.e. the headless fallback available to that provider.
+//
+// The selection is by cfg.Name ON PURPOSE (D9). The previous implementation
+// keyed off `cfg.ManualRedirectURI != ""`, which meant any future preset with a
+// hosted redirect would advertise `--provider claude`: the hint named the wrong
+// provider and pointed at a CLI flow that may not exist for it.
+//
+// The three cases below (plus the silent default) are the complete set of
+// providers that have a headless alternative: openai has the device-code flow,
+// anthropic and gemini have a hosted paste redirect (--paste-code). Everything
+// else — google-antigravity in particular — must stay silent, so the misleading
+// openai hint it used to print is gone. The openai and anthropic lines are
+// byte-identical to the historical output; a test pins all four cases.
+func printHeadlessHint(cfg OAuthProviderConfig) {
+	switch cfg.Name {
+	case "openai":
+		fmt.Println("If you're running in a headless environment, use: lele auth login --provider openai --device-code")
+	case "anthropic":
+		fmt.Println("If you're running in a headless environment, use: lele auth login --provider claude --paste-code")
+	case "gemini":
+		fmt.Println("If you're running in a headless environment, use: lele auth login --provider gemini --paste-code")
+	}
+}
+
 // loginBrowser is the shared implementation behind LoginBrowser and
 // LoginBrowserWithPasteFallback. fallbackToPaste enables the manual paste-code
 // degradation; r is only read in that path (LoginBrowser passes nil).
@@ -337,16 +370,7 @@ func loginBrowser(cfg OAuthProviderConfig, fallbackToPaste bool, r io.Reader) (*
 		fmt.Printf("Could not open browser automatically.\nPlease open this URL manually:\n\n%s\n\n", authURL)
 	}
 
-	// The headless hint is provider-specific: openai keeps its historical
-	// --device-code line, a provider with a hosted paste redirect (Claude) points
-	// at --paste-code, and any other provider prints nothing (this drops the
-	// misleading openai hint from the google-antigravity flow).
-	switch {
-	case cfg.Name == "openai":
-		fmt.Println("If you're running in a headless environment, use: lele auth login --provider openai --device-code")
-	case cfg.ManualRedirectURI != "":
-		fmt.Println("If you're running in a headless environment, use: lele auth login --provider claude --paste-code")
-	}
+	printHeadlessHint(cfg)
 	fmt.Println("Waiting for authentication in browser...")
 
 	select {
@@ -857,17 +881,41 @@ func exchangeCodeForTokens(cfg OAuthProviderConfig, code, codeVerifier, redirect
 	})
 }
 
+// displayNameOr returns DisplayName, or fallback when it is unset. It is the
+// single place implementing the "unset keeps the historical wording" rule:
+// DisplayName is only absent on a hand-built config that predates the field (or
+// on a preset that does not opt in), and such a config must keep producing the
+// exact sentence it produced before the field existed. Each call site passes
+// its own historical word, because they are not all the same: the gate messages
+// say "Claude", while the pre-flight error names the "Anthropic" product.
+func (c OAuthProviderConfig) displayNameOr(fallback string) string {
+	if c.DisplayName != "" {
+		return c.DisplayName
+	}
+	return fallback
+}
+
+// displayName returns the provider label used in user-facing messages, falling
+// back to the historical "Claude" wording when unset. The CLI flag is its
+// lower-case form, which matches each preset's accepted --provider value
+// ("Claude" -> claude, "Gemini" -> gemini).
+func (c OAuthProviderConfig) displayName() string { return c.displayNameOr("Claude") }
+
 // requireRefreshTokenAndExpiry enforces the complete-credential contract of a
 // successful token exchange for providers whose access tokens expire (spec
 // correction V7). It returns nil for a credential that carries both a refresh
 // token and an expiry, and an actionable error otherwise. Both failures name
 // the missing piece and the command that recovers from it.
-func requireRefreshTokenAndExpiry(cred *AuthCredential) error {
+//
+// label labels the provider in those messages and is expected to be non-empty:
+// callers pass OAuthProviderConfig.displayName(), which owns the historical
+// "Claude" default, so that wording lives in exactly one place.
+func requireRefreshTokenAndExpiry(cred *AuthCredential, label string) error {
 	if cred.RefreshToken == "" {
-		return errors.New("Claude OAuth token exchange returned no refresh token; the credential could not be refreshed. Re-run: lele auth login --provider claude")
+		return fmt.Errorf("%s OAuth token exchange returned no refresh token; the credential could not be refreshed. Re-run: lele auth login --provider %s", label, strings.ToLower(label))
 	}
 	if cred.ExpiresAt.IsZero() {
-		return errors.New("Claude OAuth token exchange returned no expires_in; a credential without an expiry would refresh on every use. Re-run: lele auth login --provider claude")
+		return fmt.Errorf("%s OAuth token exchange returned no expires_in; a credential without an expiry would refresh on every use. Re-run: lele auth login --provider %s", label, strings.ToLower(label))
 	}
 	return nil
 }
@@ -911,7 +959,14 @@ func exchangeCodeForTokensWithParams(cfg OAuthProviderConfig, p exchangeParams) 
 	// A Cloudflare interstitial answers 403 with an HTML challenge instead of the
 	// OAuth error document; surface the actionable fix instead of dumping HTML.
 	if resp.StatusCode == http.StatusForbidden && looksLikeCloudflareChallenge(string(body)) {
-		return nil, fmt.Errorf("token exchange was blocked by Cloudflare before Anthropic returned OAuth tokens. Switch VPN exit IP or network, then retry with `lele auth login --provider claude --paste-code` and paste the callback URL")
+		// This pre-flight is shared by the Claude and Gemini Code Assist flows, so
+		// both the prose and the recovery command follow the provider label; they
+		// must stay in sync with cfg.DisplayName. The historical sentence mixes
+		// the two spellings ("Anthropic" in the prose, --provider claude in the
+		// command), so each keeps its own fallback: an unset DisplayName still
+		// yields that exact sentence, byte-for-byte.
+		name := cfg.displayNameOr("Anthropic")
+		return nil, fmt.Errorf("token exchange was blocked by Cloudflare before %s returned OAuth tokens. Switch VPN exit IP or network, then retry with `lele auth login --provider %s --paste-code` and paste the callback URL", name, strings.ToLower(cfg.displayName()))
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("token exchange failed: %s", string(body))
@@ -927,7 +982,7 @@ func exchangeCodeForTokensWithParams(cfg OAuthProviderConfig, p exchangeParams) 
 	// Nothing has been issued to persist here, so the exchange simply fails.
 	// Opt-in via the config flag: openai and google-antigravity never set it.
 	if cfg.RequireRefreshToken {
-		if err := requireRefreshTokenAndExpiry(cred); err != nil {
+		if err := requireRefreshTokenAndExpiry(cred, cfg.displayName()); err != nil {
 			return nil, err
 		}
 	}

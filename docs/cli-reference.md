@@ -44,12 +44,14 @@ lele auth login --provider openai --device-code
 lele auth login --provider anthropic
 lele auth login --provider claude
 lele auth login --provider claude --paste-code
+lele auth login --provider gemini
+lele auth login --provider gemini --paste-code
 lele auth logout --provider openai
 lele auth status
 ```
 
 Providers accepted by `login` (`claude` is an alias of `anthropic`, `codex` of
-`openai`, `antigravity` of `google-antigravity`):
+`openai`, `gemini-cli` of `gemini`, `antigravity` of `google-antigravity`):
 
 - `openai` — browser flow; `--device-code` uses the headless device flow.
 - `google-antigravity` — browser flow (Google Cloud Code Assist).
@@ -57,14 +59,29 @@ Providers accepted by `login` (`claude` is an alias of `anthropic`, `codex` of
 - `claude` — Claude.ai OAuth browser flow, with a paste-code fallback when the
   loopback callback cannot run; stores the credential under the canonical key
   `anthropic` and sets `providers.anthropic.auth_method = "oauth"`.
+- `gemini` — Google Code Assist OAuth browser flow (the flow of the official
+  `@google/gemini-cli`), with a paste-code fallback when the loopback callback
+  cannot run; stores the credential under the canonical key `gemini` and sets
+  `providers.gemini.auth_method = "oauth"`. `gemini-cli` is an alias of
+  `gemini` and normalizes to it; there is no `google` alias for this flow.
 
 `--device-code` is only available for `openai`; any other provider rejects it.
-`--paste-code` runs the headless Claude flow (reads the callback code/URL from
-stdin, the equivalent of jcode's `JCODE_CLAUDE_AUTH_CODE`) and is only available
-for `--provider claude`; any other provider rejects it with
-`--paste-code is only supported for the Claude OAuth flow; use: lele auth login
---provider claude --paste-code`. Both `--provider anthropic` (paste-token) and
-`--provider claude` (OAuth) act on the same `anthropic` credential slot.
+`--paste-code` runs the headless Claude or Gemini flow (reads the callback
+code/URL from stdin — the equivalent of jcode's `JCODE_CLAUDE_AUTH_CODE` for
+Claude, the hosted `https://codeassist.google.com/authcode` redirect for
+Gemini) and is only available for the Claude and Gemini OAuth flows
+(`--provider claude`, `--provider gemini`, or the `gemini-cli` alias); any other
+provider rejects it with
+`--paste-code is only supported for the Claude and Gemini OAuth flows; use: lele
+auth login --provider claude --paste-code`. Both `--provider anthropic`
+(paste-token) and `--provider claude` (OAuth) act on the same `anthropic`
+credential slot. The `gemini` OAuth login and a Gemini developer API-key setup
+coexist under the same provider key: the Code Assist transport is selected only
+when `providers.gemini.auth_method` is `oauth` and no API key is configured, so
+an existing API-key configuration keeps working unchanged. `lele auth logout
+--provider gemini` (or `--provider gemini-cli`) removes the credential and
+clears `providers.gemini.auth_method`, leaving an API key or models on that
+entry intact.
 Names are case-insensitive and surrounding whitespace is ignored.
 
 ## `lele gateway`

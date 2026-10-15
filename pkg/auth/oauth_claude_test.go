@@ -223,6 +223,51 @@ func TestClaudeExchangeRequiresRefreshTokenAndExpiry(t *testing.T) {
 	}
 }
 
+// TestRequireRefreshTokenMessageUsesDisplayName pins the D6 provider-aware
+// wording: reusing the RequireRefreshToken gate for a second provider (Gemini)
+// must name that provider in both the message body and the recovery command,
+// instead of hardcoding "Claude". The label is OAuthProviderConfig.DisplayName;
+// an empty value still falls back to "Claude", so the historical message
+// (asserted byte-for-byte by TestClaudeExchangeRequiresRefreshTokenAndExpiry)
+// is preserved. The mandatory mutation for this test is to hardcode
+// label := "Claude" inside requireRefreshTokenAndExpiry.
+func TestRequireRefreshTokenMessageUsesDisplayName(t *testing.T) {
+	// 200 with an access token but no refresh_token (and a valid expires_in, so
+	// the refresh-token branch is the only reason to fail).
+	srv := claudeScopedTokenServer(t, `{"access_token":"a","expires_in":3600,"token_type":"Bearer"}`)
+
+	// Hand-built on purpose: this task adds no GeminiOAuthConfig(), and the point
+	// is that the message follows whatever DisplayName the config carries.
+	cfg := OAuthProviderConfig{
+		Name:                "gemini",
+		DisplayName:         "Gemini",
+		RequireRefreshToken: true,
+		TokenURL:            srv.URL,
+		HTTPClient:          srv.Client(),
+		TokenRequestStyle:   TokenRequestFormURLEncoded,
+	}
+
+	cred, err := exchangeCodeForTokensWithParams(cfg, exchangeParams{
+		Code:         "code",
+		CodeVerifier: "verifier",
+		RedirectURI:  "https://codeassist.google.com/authcode",
+	})
+	if err == nil {
+		t.Fatal("exchangeCodeForTokensWithParams() = nil error, want the incomplete-credential error")
+	}
+	msg := err.Error()
+	want := "Gemini OAuth token exchange returned no refresh token"
+	if !strings.Contains(msg, want) {
+		t.Errorf("error = %q, want it to contain %q", msg, want)
+	}
+	if strings.Contains(msg, "Claude") {
+		t.Errorf("error = %q, must not name Claude for a config whose DisplayName is %q", msg, cfg.DisplayName)
+	}
+	if cred != nil {
+		t.Errorf("credential = %#v, want nil when the exchange is rejected", cred)
+	}
+}
+
 // TestClaudeRefreshRejectsMissingInferenceScope is the V2 guard: when the gate
 // rejects a refreshed token, RefreshAccessToken must still hand the caller the
 // credential the endpoint just issued, so the ROTATED refresh token can be
@@ -806,5 +851,53 @@ func TestLoginBrowserWithoutFallbackKeepsBindError(t *testing.T) {
 	}
 	if want := fmt.Sprintf("starting callback server on port %d", port); !strings.Contains(err.Error(), want) {
 		t.Errorf("error = %q, want it to contain %q", err.Error(), want)
+	}
+}
+
+// TestLoginBrowserHeadlessHintIsProviderSpecific pins D9: the hint printed by
+// loginBrowser must name the provider that actually owns the alternative flow.
+// The previous `case cfg.ManualRedirectURI != ""` arm advertised
+// `--provider claude --paste-code` for ANY preset with a hosted redirect, so the
+// Gemini preset would have been told to run the Claude command.
+//
+// All four providers that can reach this switch are covered: openai (device
+// code), anthropic and gemini (hosted paste redirect), and google-antigravity,
+// whose silence is a free regression canary — it has no ManualRedirectURI and no
+// alternative flow, and used to print a misleading openai line.
+func TestLoginBrowserHeadlessHintIsProviderSpecific(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  OAuthProviderConfig
+		want string
+	}{
+		{
+			name: "openai keeps the device-code line",
+			cfg:  OpenAIOAuthConfig(),
+			want: "If you're running in a headless environment, use: lele auth login --provider openai --device-code\n",
+		},
+		{
+			name: "claude keeps the paste-code line byte-identical",
+			cfg:  ClaudeOAuthConfig(),
+			want: "If you're running in a headless environment, use: lele auth login --provider claude --paste-code\n",
+		},
+		{
+			name: "gemini names itself, not claude",
+			cfg:  GeminiOAuthConfig(),
+			want: "If you're running in a headless environment, use: lele auth login --provider gemini --paste-code\n",
+		},
+		{
+			name: "google-antigravity stays silent",
+			cfg:  GoogleAntigravityOAuthConfig(),
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := captureStdout(t, func() { printHeadlessHint(tt.cfg) })
+			if out != tt.want {
+				t.Errorf("headless hint for %q = %q, want %q", tt.cfg.Name, out, tt.want)
+			}
+		})
 	}
 }
