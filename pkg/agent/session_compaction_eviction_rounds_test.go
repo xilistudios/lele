@@ -246,14 +246,23 @@ func TestCompaction_SecondRoundEvictsExcludedFromMemory(t *testing.T) {
 // TestCompaction_TailToolResultsDoesNotEmptyContext exercises the production
 // path (summarizeSessionWithError) in 2 rounds where round 2 ends with a
 // tool-result tail (assistant with 2 tool_calls + 2 tool results, no
-// ContextMessages). The anti-split guard in ExcludeOldMessagesFromContext
-// pushes excludeUpTo to len, setting excludeBoundary == len. The structural
-// invariant in EvictExcludedMessages must prevent the entire context from
-// being wiped.
+// ContextMessages).
 //
-// Without FIX A (structural invariant), the clamp is inert when
-// boundary == len, and round 2 produces in_context=0 (the model gets no
-// conversation message at all).
+// It anchors the #343 retention policy: the guard moves the boundary BACK to
+// the assistant that owns the tool-result tail (located by ToolCallID), so the
+// whole tool group stays in the kept tail. Under the previous forward-push this
+// degenerate shape walked excludeUpTo to len(Messages): the #340 no-emptying
+// invariant then capped eviction at the last in-context message, a no-op that
+// left 3 excluded rows resident in RAM (cost #1 of #343) and reached the model
+// with a single message. Option A removes both — excluded_resident == 0 and the
+// whole kept tail (the tool group included) reaches the model.
+//
+// The token price of keeping the group live was measured before adopting the
+// policy (#343 T1): at most 2412 tokens = 1.88% of the 128k context window.
+//
+// The structural no-emptying invariant (boundary == len) is no longer reached
+// through this shape; it is covered directly in pkg/session
+// (TestEvictExcluded_BoundaryEqualToLenKeepsContext).
 func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "tail-tools-e2e-*")
 	if err != nil {
@@ -373,8 +382,9 @@ func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 
 	// --- Add messages for round 2, ending with a tool-result tail ---
 	// The tail is assistant with 2 tool_calls + 2 tool results, no
-	// ContextMessages. This triggers the anti-split guard in
-	// ExcludeOldMessagesFromContext which pushes excludeUpTo to len.
+	// ContextMessages. The move-back guard in ExcludeOldMessagesFromContext
+	// resolves the owner of the first kept tool result (by ToolCallID) and
+	// keeps the whole group in the kept tail.
 	agent.Sessions.AddMessage(sessionKey, "user", "search for DHT implementations and grep for test files") // human
 	agent.Sessions.AddFullMessage(sessionKey, providers.Message{                                            // assistant + 2 tool_calls
 		Role:    "assistant",
@@ -436,5 +446,64 @@ func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 	// --- (b) History must not be empty ---
 	if len(hist2) == 0 {
 		t.Errorf("(b) history is empty after round 2 — eviction wiped all resident context")
+	}
+
+	// --- (c) #343 lock-in: pin the Option A retention policy through the
+	// production path. The guard keeps the whole tool group in the kept tail,
+	// so no excluded row is left resident. Under the previous forward-push the
+	// same layout produced excluded_resident=3 / in_context=1 / len(hist)=4
+	// (measured, #343 T1), so this assertion fails if the policy is reverted.
+	if excludedResident != 0 {
+		t.Errorf("(c) #343: excluded_resident = %d, want 0 — Option A keeps the whole tool group, so no excluded row may stay resident", excludedResident)
+	}
+
+	// --- (d) #343 lock-in: what reaches the model must be the tool group
+	// itself, not merely "as many messages as the history". The pair
+	// (excluded_resident == 0, len(ctx2) == len(hist2)) is one predicate
+	// written twice — filterContextMessages drops exactly the rows marked
+	// ExcludeFromContext — and a regression that kept only one message in
+	// context would still satisfy both. So locate the seeded round-2 tool
+	// group — the owner assistant carrying its two tool_calls and both
+	// results — in the resident history by ToolCallID and require every one
+	// of its messages to be present in the filtered context. Matching by
+	// ToolCallID (the same key the retention policy uses) keeps this
+	// structural rather than literal, so it survives layout edits.
+	groupCallIDs := []string{"call_search2", "call_grep2"}
+
+	ownerInContext := false
+	for _, m := range ctx2 {
+		if m.Role != "assistant" {
+			continue
+		}
+		calls := make(map[string]bool, len(m.ToolCalls))
+		for _, tc := range m.ToolCalls {
+			calls[tc.ID] = true
+		}
+		complete := true
+		for _, id := range groupCallIDs {
+			if !calls[id] {
+				complete = false
+				break
+			}
+		}
+		if complete {
+			ownerInContext = true
+			break
+		}
+	}
+	if !ownerInContext {
+		t.Errorf("(d) #343: the tool group's owning assistant (tool_calls %v) is missing from the filtered context — the tool group itself must reach the model", groupCallIDs)
+	}
+	for _, id := range groupCallIDs {
+		found := false
+		for _, m := range ctx2 {
+			if m.Role == "tool" && m.ToolCallID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("(d) #343: tool result %q of the kept tool group is missing from the filtered context — the tool group itself must reach the model", id)
+		}
 	}
 }

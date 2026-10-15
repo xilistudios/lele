@@ -3,14 +3,18 @@ package session
 // Eviction tests for #343: the shape where the structural invariant of #340
 // reduces EvictExcludedMessages to a NO-OP.
 //
-// ExcludeOldMessagesFromContext's anti-splice guard pushes its boundary
-// forward over a tail of tool results, so it can legitimately land on
-// len(Messages) (see TestEvictExcluded_BoundaryEqualToLenKeepsContext). The
-// #340 invariant then caps evictUpTo at the LAST in-context message, and when
-// that message is index 0 — the only case is a session whose whole history
-// except the pinned first human turn is excluded — the cap yields
-// evictUpTo == 0: nothing is evicted at all (measured: 61 of 957 swept
-// layouts, INFO-1 of #343).
+// ExcludeOldMessagesFromContext can legitimately pin its boundary at
+// len(Messages) — a whole-prefix compaction does (see seedCapToZeroSession),
+// as do the cold-load / stale-boundary / pin-widening routes. The #340
+// invariant then caps evictUpTo at the LAST in-context message, and when that
+// message is index 0 — a session whose whole history except the pinned first
+// human turn is excluded — the cap yields evictUpTo == 0: nothing is evicted
+// at all (measured: 61 of 957 swept layouts, INFO-1 of #343).
+//
+// Under the Option A retention policy of #343 the anti-splice guard no longer
+// walks the boundary forward over a tool-result tail, so that particular route
+// to boundary == len is gone; the cap-to-zero shape itself is unchanged and
+// still reachable.
 //
 // A no-op is the right outcome (the alternative is emptying the resident
 // context), but until now it was an expensive and misleading one: a SQLite
@@ -37,37 +41,35 @@ func isZeroish(v interface{}) bool {
 	return reflect.ValueOf(v).IsZero()
 }
 
-// seedCapToZeroSession builds the #343 shape through the real compaction entry
-// point: one pinned human turn, then an assistant turn with two parallel tool
-// calls and their results. With keepCount=2 the anti-splice guard walks past
-// both results onto len, and every message but index 0 ends up excluded — so
-// the #340 cap has nothing left to evict.
+// seedCapToZeroSession builds a session whose whole history except the pinned
+// first human turn is excluded, so the #340 cap reduces eviction to nothing.
+//
+// Before the Option A retention policy (#343) this shape was produced by the
+// anti-splice guard walking its boundary past a tool-result tail; that route is
+// gone. It is reached instead through a policy-independent boundary case: a
+// whole-prefix compaction (keepCount=0) pins excludeBoundary at len(Messages)
+// and leaves index 0 as the only in-context message.
 //
 // Going through ExcludeOldMessagesFromContext rather than setting the flags by
-// hand is deliberate: if the guard ever stops producing a boundary == len for
-// this layout, the precondition below fails and these tests say so instead of
+// hand is deliberate: if this ever stops yielding boundary == total with a
+// single in-context message, the preconditions below fail loudly instead of
 // quietly testing something else.
 func seedCapToZeroSession(t *testing.T, sm *SessionManager, key string) {
 	t.Helper()
 
-	sm.AddMessage(key, "user", "cuéntame qué repos tengo") // 0: pinned human turn
-	sm.AddFullMessage(key, providers.Message{              // 1: assistant, 2 parallel calls
-		Role:    "assistant",
-		Content: "Los busco.",
-		ToolCalls: []providers.ToolCall{
-			{ID: "call_a", Function: &providers.FunctionCall{Name: "exec"}},
-			{ID: "call_b", Function: &providers.FunctionCall{Name: "exec"}},
-		},
-	})
-	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "repo-a", ToolCallID: "call_a"}) // 2
-	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "repo-b", ToolCallID: "call_b"}) // 3
+	sm.AddMessage(key, "user", "cuéntame qué repos tengo") // 0: the only human turn (pinned)
+	sm.AddMessage(key, "assistant", "Los busco.")          // 1
+	sm.AddMessage(key, "assistant", "Aquí están.")         // 2
+	sm.AddMessage(key, "assistant", "¿Algo más?")          // 3
 
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("initial Save: %v", err)
 	}
 
-	// excludeUpTo = 4-2 = 2 → tool result → 3 → tool result → 4 = len.
-	sm.ExcludeOldMessagesFromContext(key, 2)
+	// keepCount=0 → excludeUpTo = len: everything from index 1 on is excluded
+	// and the boundary is pinned at len. With no human turn after index 0,
+	// index 0 is the only message left in context.
+	sm.ExcludeOldMessagesFromContext(key, 0)
 
 	sm.mu.Lock()
 	session, ok := sm.sessions[key]
@@ -87,7 +89,7 @@ func seedCapToZeroSession(t *testing.T, sm *SessionManager, key string) {
 	sm.mu.Unlock()
 
 	if boundary != total {
-		t.Fatalf("precondition: excludeBoundary = %d, want %d (the anti-splice guard must push the boundary past the tool-result tail)", boundary, total)
+		t.Fatalf("precondition: excludeBoundary = %d, want %d (a whole-prefix compaction pins the boundary at len)", boundary, total)
 	}
 	if inContext != 1 || lastInContext != 0 {
 		t.Fatalf("precondition: %d in-context message(s) at index %d, want exactly 1 at index 0 — "+
@@ -100,7 +102,7 @@ func seedCapToZeroSession(t *testing.T, sm *SessionManager, key string) {
 	}
 }
 
-// TestEvictExcluded_CapToZeroDoesNoIOfOrRepublish verifies INFO-1: when the cap
+// TestEvictExcluded_CapToZeroIsFreeOfIOAndRepublish verifies INFO-1: when the cap
 // reduces eviction to nothing, the call must not write an unchanged boundary to
 // SQLite, must not republish the copy-on-write snapshot, and must not report
 // having evicted anything.
@@ -248,32 +250,32 @@ func persistedFirstInMemorySeq(t *testing.T, s *store.Store, key string) int {
 	return meta.FirstInMemorySeq
 }
 
-// TestEvictExcluded_ToolResultTailLeavesExcludedRowsResident pins the cost
-// #343 documents as ACCEPTED, so that changing the retention policy later is a
-// deliberate edit to this test rather than an accident found in a profile.
+// TestEvictExcluded_ToolResultTailKeepsWholeGroupInContext anchors the #343
+// retention policy at the session level: when the kept tail would start with a
+// tool result whose owning assistant is about to be excluded, the boundary
+// moves BACK to that owner and the whole tool group stays in context.
 //
 // The layout is the one in the issue: an assistant turn with two parallel tool
-// calls followed by their two results, compacted with keepCount=2. The
-// anti-splice guard walks the boundary past both results, so eviction may only
-// go as far as the last in-context message — and everything after it stays
-// resident *while being excluded from the model's context*. filterContextMessages
-// drops those rows before the request, so the cost is RAM and a longer resident
-// slice, not tokens.
+// calls followed by their two results, compacted with keepCount=2. The group
+// {3,4,5} is kept whole, so no excluded row is left resident — the RAM cost the
+// old forward-push accepted (the assistant and both results held in memory
+// while filterContextMessages dropped them from the request) is gone. The token
+// price of keeping the group live was measured before adopting the policy
+// (#343 T1: at most 1.88% of the 128k context window).
 //
-// The other option on the table (move the boundary BACK and keep the whole tool
-// group in context) would remove this cost but changes what the model sees, and
-// #343 asks for a token measurement before choosing it. This test is the
-// measurement-free half: it says exactly what today's policy keeps in memory.
-func TestEvictExcluded_ToolResultTailLeavesExcludedRowsResident(t *testing.T) {
+// This is the deliberate rewrite the old version of this test asked for: the
+// change of retention policy is exactly the situation it was designed to
+// detect.
+func TestEvictExcluded_ToolResultTailKeepsWholeGroupInContext(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
-	key := "test:evict-tool-tail-cost"
+	key := "test:evict-tool-tail-whole-group"
 
 	sm.AddMessage(key, "user", "primera petición") // 0: pinned human turn
 	sm.AddMessage(key, "assistant", "respuesta")   // 1
 	sm.AddMessage(key, "user", "y ahora los dos")  // 2: recent human turn, preserved
-	sm.AddFullMessage(key, providers.Message{      // 3: 2 parallel tool calls
+	sm.AddFullMessage(key, providers.Message{      // 3: 2 parallel tool calls (group owner)
 		Role:    "assistant",
 		Content: "Los lanzo.",
 		ToolCalls: []providers.ToolCall{
@@ -296,34 +298,27 @@ func TestEvictExcluded_ToolResultTailLeavesExcludedRowsResident(t *testing.T) {
 
 	_, resident, _, _ := liveSnapshot(t, sm, key)
 	if evicted != 2 {
-		t.Errorf("evicted %d, want 2: only [0,2) may go, the boundary cap stops at the last in-context message", evicted)
+		t.Errorf("evicted %d, want 2: only [0,2) may go; the boundary moved back to the group owner so the group is kept", evicted)
 	}
 	if len(resident) != 4 {
-		t.Fatalf("resident = %d messages, want 4: %+v", len(resident), contentsOf(resident))
+		t.Fatalf("resident = %d messages, want 4 (the user turn plus the whole group {3,4,5}): %+v", len(resident), contentsOf(resident))
 	}
 
-	// The cost itself: rows that are excluded from the model's context but still
-	// held in memory because the cap will not evict past the last in-context one.
+	// The whole group is in context, and no excluded row lingers in RAM: this is
+	// the cost the old policy accepted and the new policy removes.
 	excludedResident := 0
+	inContext := 0
 	for _, m := range resident {
 		if m.ExcludeFromContext {
 			excludedResident++
-		}
-	}
-	if excludedResident != 3 {
-		t.Errorf("%d excluded rows resident, want 3 (assistant + both tool results): the accepted cost of the anti-splice guard changed — if the policy moved the boundary BACK instead, this test is the thing to update, on purpose",
-			excludedResident)
-	}
-	// And the model must not see them: only the non-excluded rows reach the
-	// request (filterContextMessages is what the agent layer runs over this
-	// slice before building it).
-	inContext := 0
-	for _, m := range resident {
-		if !m.ExcludeFromContext {
+		} else {
 			inContext++
 		}
 	}
-	if inContext != 1 {
-		t.Errorf("%d resident messages reach the model, want 1: the rest of the tail is excluded, it is held in RAM but never sent", inContext)
+	if excludedResident != 0 {
+		t.Errorf("%d excluded rows resident, want 0: the boundary moves back to the group owner, so nothing excluded is left in memory", excludedResident)
+	}
+	if inContext != 4 {
+		t.Errorf("%d resident messages reach the model, want 4 (index 2 plus the whole group {3,4,5}): the whole tool group is kept", inContext)
 	}
 }
