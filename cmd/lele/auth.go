@@ -385,7 +385,7 @@ func authLoginOpenAI(useDeviceCode bool) {
 
 	appCfg, err := loadConfig()
 	if err == nil {
-		appCfg.Providers.OpenAI.AuthMethod = "oauth"
+		providersForWrite(appCfg).OpenAI.AuthMethod = "oauth"
 		if err := config.SaveConfig(getConfigPath(), appCfg); err != nil {
 			fmt.Printf("Warning: could not update config: %v\n", err)
 		}
@@ -430,7 +430,8 @@ func authLoginClaudeOAuth(cfg auth.OAuthProviderConfig, pasteCode bool) {
 	// Best effort: the credential is already stored, so a config-write failure
 	// only warns (the same pattern authLoginOpenAI uses).
 	if appCfg, err := loadConfig(); err == nil {
-		appCfg.Providers.Anthropic.AuthMethod = "oauth"
+		providers := providersForWrite(appCfg)
+		providers.Anthropic.AuthMethod = "oauth"
 		// The persisted file is written from the *named* copy as soon as the
 		// config already has an anthropic entry (an api key, models or an auth
 		// method), because MarshalJSON then early-returns for the typed field set
@@ -440,7 +441,7 @@ func authLoginClaudeOAuth(cfg auth.OAuthProviderConfig, pasteCode bool) {
 		// (pkg/providers/factory.go selects it from named.AuthMethod). A latent
 		// defect of the F1 commit that introduced this flow (898bfdbc, unmerged
 		// and unpushed when it was fixed): it is in scope here.
-		setNamedAuthMethod(appCfg.Providers, "anthropic", "oauth")
+		setNamedAuthMethod(providers, "anthropic", "oauth")
 		if err := config.SaveConfig(getConfigPath(), appCfg); err != nil {
 			fmt.Printf("Warning: could not update config: %v\n", err)
 			// Actionable follow-up for the warning above: without
@@ -496,7 +497,8 @@ func authLoginGeminiOAuth(cfg auth.OAuthProviderConfig, pasteCode bool) {
 	// Best effort: the credential is already stored, so a config-write failure
 	// only warns (the same pattern authLoginOpenAI uses).
 	if appCfg, err := loadConfig(); err == nil {
-		appCfg.Providers.Gemini.AuthMethod = "oauth"
+		providers := providersForWrite(appCfg)
+		providers.Gemini.AuthMethod = "oauth"
 		// The persisted file is written from the *named* copy as soon as the
 		// config already has a gemini entry (an api key, models or an auth
 		// method), because MarshalJSON then early-returns for the typed field set
@@ -505,7 +507,7 @@ func authLoginGeminiOAuth(cfg auth.OAuthProviderConfig, pasteCode bool) {
 		// succeeds, so the warning below would never fire) and the provider
 		// selector would not pick the Gemini Code Assist transport after a
 		// restart. See setNamedAuthMethod.
-		setNamedAuthMethod(appCfg.Providers, "gemini", "oauth")
+		setNamedAuthMethod(providers, "gemini", "oauth")
 		if err := config.SaveConfig(getConfigPath(), appCfg); err != nil {
 			fmt.Printf("Warning: could not update config: %v\n", err)
 			// Actionable follow-up for the warning above: without
@@ -576,9 +578,9 @@ func authLoginPasteToken(provider string) {
 	if err == nil {
 		switch provider {
 		case "anthropic":
-			appCfg.Providers.Anthropic.AuthMethod = "token"
+			providersForWrite(appCfg).Anthropic.AuthMethod = "token"
 		case "openai":
-			appCfg.Providers.OpenAI.AuthMethod = "token"
+			providersForWrite(appCfg).OpenAI.AuthMethod = "token"
 		}
 		if err := config.SaveConfig(getConfigPath(), appCfg); err != nil {
 			fmt.Printf("Warning: could not update config: %v\n", err)
@@ -586,6 +588,29 @@ func authLoginPasteToken(provider string) {
 	}
 
 	fmt.Printf("Token saved for %s!\n", provider)
+}
+
+// providersForWrite returns the config's providers section, allocating an empty
+// one on demand, so an auth write path can always mutate it safely.
+//
+// Config.Providers is a *ProvidersConfig and the loader deliberately nil-s out
+// the section when the JSON file carries no `providers` key (see
+// pkg/config/config.go, LoadConfig: "If providers were not in the JSON, set to
+// nil so it gets omitted on save"). ProvidersConfig.MarshalJSON also writes
+// "null" for a section that holds no data, so a nil section is a normal state
+// produced by this very CLI and not a corrupt file. Every auth write
+// (login/logout setting auth_method) must therefore go through this helper
+// instead of dereferencing appCfg.Providers directly.
+//
+// Allocating an empty section invents nothing: an empty ProvidersConfig still
+// serializes as "null" (MarshalJSON's hasData stays false because no entry has
+// an api_key, models or an auth_method), so no provider entry with fabricated
+// values can reach the file — the section is simply written back as null.
+func providersForWrite(cfg *config.Config) *config.ProvidersConfig {
+	if cfg.Providers == nil {
+		cfg.Providers = &config.ProvidersConfig{}
+	}
+	return cfg.Providers
 }
 
 // setNamedAuthMethod sets the auth_method of the *named* copy of a provider in
@@ -652,9 +677,10 @@ func authLogoutCmd() {
 		if err == nil {
 			switch provider {
 			case "openai":
-				appCfg.Providers.OpenAI.AuthMethod = ""
+				providersForWrite(appCfg).OpenAI.AuthMethod = ""
 			case "anthropic":
-				appCfg.Providers.Anthropic.AuthMethod = ""
+				providers := providersForWrite(appCfg)
+				providers.Anthropic.AuthMethod = ""
 				// ProvidersConfig serializes the named copy of the provider
 				// whenever it holds data, so blanking the typed field alone is
 				// invisible in the file — see setNamedAuthMethod. Without this,
@@ -663,14 +689,15 @@ func authLogoutCmd() {
 				// gateway start would still pick the Claude OAuth wire with a
 				// deleted credential (pkg/providers/factory.go reads
 				// named.AuthMethod for anthropic).
-				setNamedAuthMethod(appCfg.Providers, "anthropic", "")
+				setNamedAuthMethod(providers, "anthropic", "")
 			case "gemini":
-				appCfg.Providers.Gemini.AuthMethod = ""
+				providers := providersForWrite(appCfg)
+				providers.Gemini.AuthMethod = ""
 				// Same mechanism as above: without this,
 				// `auth logout --provider gemini` would leave
 				// providers.gemini.auth_method = "oauth" behind and the next
 				// gateway start would still pick the OAuth wire contract.
-				setNamedAuthMethod(appCfg.Providers, "gemini", "")
+				setNamedAuthMethod(providers, "gemini", "")
 			}
 			config.SaveConfig(getConfigPath(), appCfg)
 		}
@@ -684,9 +711,10 @@ func authLogoutCmd() {
 
 		appCfg, err := loadConfig()
 		if err == nil {
-			appCfg.Providers.OpenAI.AuthMethod = ""
-			appCfg.Providers.Anthropic.AuthMethod = ""
-			appCfg.Providers.Gemini.AuthMethod = ""
+			providers := providersForWrite(appCfg)
+			providers.OpenAI.AuthMethod = ""
+			providers.Anthropic.AuthMethod = ""
+			providers.Gemini.AuthMethod = ""
 			// Every credential was just deleted, so no provider may keep an
 			// auth_method that selects an OAuth transport: the typed writes above
 			// would not reach the file for an entry that already carries data, so
@@ -694,8 +722,8 @@ func authLogoutCmd() {
 			// keeps its historical typed-field-only clear on purpose — its
 			// shadowing is pre-existing (commit 8e54a9db) and out of this task's
 			// scope.
-			setNamedAuthMethod(appCfg.Providers, "anthropic", "")
-			setNamedAuthMethod(appCfg.Providers, "gemini", "")
+			setNamedAuthMethod(providers, "anthropic", "")
+			setNamedAuthMethod(providers, "gemini", "")
 			config.SaveConfig(getConfigPath(), appCfg)
 		}
 

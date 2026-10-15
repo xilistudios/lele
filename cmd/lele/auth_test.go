@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -1665,6 +1666,364 @@ func TestSetNamedAuthMethod(t *testing.T) {
 		got := providers.Named["acme"]
 		if got.AuthMethod != "oauth" || got.Type != "acme" {
 			t.Errorf("Named[\"acme\"] = %+v, want type and auth_method set", got)
+		}
+	})
+}
+
+// nilProvidersShapes are the two on-disk configs that make LoadConfig leave
+// Config.Providers nil.
+//
+// Both are normal states, not corrupted files: the loader nils the section when
+// the JSON has no `providers` key ("If providers were not in the JSON, set to
+// nil so it gets omitted on save"), and ProvidersConfig.MarshalJSON writes
+// `"providers": null` for a section without data — so lele itself produces the
+// second shape. Every auth write path must survive both (see providersForWrite).
+var nilProvidersShapes = []struct {
+	name string
+	body string
+}{
+	{name: "providers key absent", body: "{}"},
+	{name: "providers explicit null", body: `{"providers":null}`},
+}
+
+// writeRawConfig writes a literal config.json into the isolated
+// LELE_CONFIG_DIR under test.
+//
+// It is needed because the real config writer cannot produce a nil providers
+// section from scratch: a fresh t.TempDir() gets default providers, and the
+// shapes under test here only exist on disk (they are what the loader reads
+// back as nil). Writing the file by hand mirrors how the SIGSEGV was
+// reproduced from the CLI.
+func writeRawConfig(t *testing.T, body string) {
+	t.Helper()
+	if err := os.WriteFile(getConfigPath(), []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", getConfigPath(), err)
+	}
+}
+
+// assertNilProvidersPrecondition fails unless the config just written really
+// loads with a nil providers section. Without it the nil-safety assertions
+// below could pass vacuously (e.g. if a future loader stopped nil-ing the
+// section, the tests would silently stop covering the panic).
+func assertNilProvidersPrecondition(t *testing.T, body string) {
+	t.Helper()
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if cfg.Providers != nil {
+		t.Fatalf("precondition: loadConfig().Providers = %+v, want nil for config %s", cfg.Providers, body)
+	}
+}
+
+// providersSectionOf returns the raw `providers` value of the persisted config,
+// or nil when the key is absent or literally null.
+func providersSectionOf(t *testing.T) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(getConfigPath())
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", getConfigPath(), err)
+	}
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("persisted config is not valid JSON: %v\n%s", err, raw)
+	}
+	return parsed["providers"]
+}
+
+// assertProvidersStillAbsentOrNull pins the serialization contract of a write
+// against a nil providers section: the persisted file must keep the section
+// absent or null (the two forms the loader/saver produce today) and must never
+// grow an empty providers object with fabricated entries.
+func assertProvidersStillAbsentOrNull(t *testing.T) {
+	t.Helper()
+	section := providersSectionOf(t)
+	if len(section) == 0 || string(section) == "null" {
+		return
+	}
+	t.Errorf("persisted providers = %s, want it absent or null: a write to a nil section must not fabricate an empty providers object", section)
+}
+
+// assertSoleProviderEntry fails unless the persisted providers section holds
+// exactly one entry — provider — carrying the expected auth_method.
+//
+// It is the positive counterpart of assertProvidersStillAbsentOrNull: for the
+// login flows, which do write real data, it proves the nil-safe write wrote
+// that entry and invented no other.
+func assertSoleProviderEntry(t *testing.T, provider, method string) {
+	t.Helper()
+	section := providersSectionOf(t)
+	if len(section) == 0 || string(section) == "null" {
+		t.Fatalf("persisted providers = %s, want the %s entry written by the login", section, provider)
+	}
+	var entries map[string]struct {
+		AuthMethod string `json:"auth_method"`
+	}
+	if err := json.Unmarshal(section, &entries); err != nil {
+		t.Fatalf("persisted providers %s is not a JSON object: %v", section, err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("persisted providers = %s, want exactly one entry (%s); a nil-safe write must not fabricate others", section, provider)
+	}
+	if got := entries[provider].AuthMethod; got != method {
+		t.Errorf("persisted providers.%s.auth_method = %q, want %q", provider, got, method)
+	}
+}
+
+// stubSetCredential swaps the setCredential seam for a fake that records the
+// provider key instead of touching the credential store.
+func stubSetCredential(t *testing.T) *string {
+	t.Helper()
+	original := setCredential
+	key := ""
+	setCredential = func(name string, _ *auth.AuthCredential) error {
+		key = name
+		return nil
+	}
+	t.Cleanup(func() { setCredential = original })
+	return &key
+}
+
+// withLogoutArgs points os.Args at an `auth logout` invocation for the duration
+// of the test, so authLogoutCmd() reads the flags under test.
+func withLogoutArgs(t *testing.T, args ...string) {
+	t.Helper()
+	original := os.Args
+	os.Args = append([]string{"lele", "auth", "logout"}, args...)
+	t.Cleanup(func() { os.Args = original })
+}
+
+// TestAuthLogoutNilProvidersSectionDoesNotPanic is the regression test for the
+// SIGSEGV `lele auth logout --provider <p>` used to raise on a config that has
+// no providers section (`{}` or `{"providers":null}`):
+//
+//	panic: runtime error: invalid memory address or nil pointer dereference
+//	[signal SIGSEGV: segmentation violation ...]
+//	main.authLogoutCmd() cmd/lele/auth.go:655
+//
+// Config.Providers is a pointer the loader deliberately nils out, and every
+// logout branch used to dereference it unconditionally. The four --provider
+// spellings below are the ones the alias resolution reaches an
+// auth_method-clearing branch through (`claude` being the alias of the
+// `anthropic` preset), and each is exercised against both shapes of the
+// section.
+//
+// The CLI output and exit path must stay exactly as they are for a config that
+// does have a section: one line naming the canonical provider, exit 0.
+func TestAuthLogoutNilProvidersSectionDoesNotPanic(t *testing.T) {
+	providers := []struct{ flag, canonical string }{
+		{flag: "openai", canonical: "openai"},
+		{flag: "anthropic", canonical: "anthropic"},
+		{flag: "gemini", canonical: "gemini"},
+		{flag: "claude", canonical: "anthropic"},
+	}
+
+	for _, shape := range nilProvidersShapes {
+		for _, provider := range providers {
+			t.Run(shape.name+"/"+provider.flag, func(t *testing.T) {
+				t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+				writeRawConfig(t, shape.body)
+				assertNilProvidersPrecondition(t, shape.body)
+
+				withLogoutArgs(t, "--provider", provider.flag)
+
+				// The panic used to happen inside this call, before any output.
+				out := captureOutput(authLogoutCmd)
+
+				if want := "Logged out from " + provider.canonical + "\n"; out != want {
+					t.Errorf("authLogoutCmd() output = %q, want %q", out, want)
+				}
+				assertProvidersStillAbsentOrNull(t)
+			})
+		}
+	}
+}
+
+// TestAuthLogoutAllNilProvidersSectionDoesNotPanic covers the provider-less
+// `auth logout`, which writes all three typed fields (auth.go,
+// authLogoutCmd's else branch) and therefore panicked on a nil section too.
+func TestAuthLogoutAllNilProvidersSectionDoesNotPanic(t *testing.T) {
+	for _, shape := range nilProvidersShapes {
+		t.Run(shape.name, func(t *testing.T) {
+			t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+			writeRawConfig(t, shape.body)
+			assertNilProvidersPrecondition(t, shape.body)
+
+			withLogoutArgs(t)
+
+			out := captureOutput(authLogoutCmd)
+
+			if want := "Logged out from all providers\n"; out != want {
+				t.Errorf("authLogoutCmd() output = %q, want %q", out, want)
+			}
+			assertProvidersStillAbsentOrNull(t)
+		})
+	}
+}
+
+// TestAuthLoginNilProvidersSectionDoesNotPanic covers the login-side writes on a
+// config with no providers section — the state a fresh install starts in, and
+// the one the Gemini/Claude OAuth happy path introduced on this branch ends in
+// (authLoginGeminiOAuth / authLoginClaudeOAuth write an auth_method right after
+// storing the credential).
+//
+// No network is involved: every flow is driven through its seam, exactly like
+// the pre-existing login tests, and the credential store is stubbed. Each
+// subtest asserts the real write reached the file and that nothing else was
+// invented.
+func TestAuthLoginNilProvidersSectionDoesNotPanic(t *testing.T) {
+	t.Run("openai oauth", func(t *testing.T) {
+		t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+		writeRawConfig(t, "{}")
+		assertNilProvidersPrecondition(t, "{}")
+
+		codes := stubLoginExit(t)
+		withLoginArgs(t, "--provider", "openai")
+		key := stubSetCredential(t)
+
+		originalBrowser := loginBrowser
+		loginBrowser = func(auth.OAuthProviderConfig) (*auth.AuthCredential, error) {
+			return &auth.AuthCredential{AccessToken: "tok", Provider: "openai"}, nil
+		}
+		t.Cleanup(func() { loginBrowser = originalBrowser })
+
+		out := captureOutput(authLoginCmd)
+
+		if *key != "openai" {
+			t.Errorf("setCredential key = %q, want %q", *key, "openai")
+		}
+		if !strings.Contains(out, "Login successful!") {
+			t.Errorf("authLoginCmd() output = %q, want it to contain %q", out, "Login successful!")
+		}
+		if len(*codes) != 0 {
+			t.Errorf("loginExit called with %v, want no exit on the success path", *codes)
+		}
+		assertSoleProviderEntry(t, "openai", "oauth")
+	})
+
+	t.Run("claude oauth", func(t *testing.T) {
+		t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+		writeRawConfig(t, "{}")
+		assertNilProvidersPrecondition(t, "{}")
+
+		codes := stubLoginExit(t)
+		withLoginArgs(t, "--provider", "claude")
+		key := stubSetCredential(t)
+
+		originalClaudeBrowser := loginClaudeBrowser
+		loginClaudeBrowser = func(c auth.OAuthProviderConfig, _ io.Reader) (*auth.AuthCredential, error) {
+			return &auth.AuthCredential{AccessToken: "tok", Provider: c.Name}, nil
+		}
+		t.Cleanup(func() { loginClaudeBrowser = originalClaudeBrowser })
+
+		out := captureOutput(authLoginCmd)
+
+		// The credential key is the canonical preset name, not the alias.
+		if *key != "anthropic" {
+			t.Errorf("setCredential key = %q, want %q", *key, "anthropic")
+		}
+		if !strings.Contains(out, "Login successful!") {
+			t.Errorf("authLoginCmd() output = %q, want it to contain %q", out, "Login successful!")
+		}
+		if strings.Contains(out, "Warning: could not update config:") {
+			t.Errorf("authLoginCmd() output = %q, want no config-write warning", out)
+		}
+		if len(*codes) != 0 {
+			t.Errorf("loginExit called with %v, want no exit on the success path", *codes)
+		}
+		assertSoleProviderEntry(t, "anthropic", "oauth")
+	})
+
+	t.Run("gemini oauth", func(t *testing.T) {
+		t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+		writeRawConfig(t, `{"providers":null}`)
+		assertNilProvidersPrecondition(t, `{"providers":null}`)
+
+		codes := stubLoginExit(t)
+		withLoginArgs(t, "--provider", "gemini")
+		key := stubSetCredential(t)
+
+		originalGeminiBrowser := loginGeminiBrowser
+		loginGeminiBrowser = func(c auth.OAuthProviderConfig, _ io.Reader) (*auth.AuthCredential, error) {
+			return &auth.AuthCredential{AccessToken: "tok", Provider: c.Name}, nil
+		}
+		t.Cleanup(func() { loginGeminiBrowser = originalGeminiBrowser })
+
+		out := captureOutput(authLoginCmd)
+
+		if *key != "gemini" {
+			t.Errorf("setCredential key = %q, want %q", *key, "gemini")
+		}
+		if !strings.Contains(out, "Login successful!") {
+			t.Errorf("authLoginCmd() output = %q, want it to contain %q", out, "Login successful!")
+		}
+		if strings.Contains(out, "Warning: could not update config:") {
+			t.Errorf("authLoginCmd() output = %q, want no config-write warning", out)
+		}
+		if len(*codes) != 0 {
+			t.Errorf("loginExit called with %v, want no exit on the success path", *codes)
+		}
+		assertSoleProviderEntry(t, "gemini", "oauth")
+	})
+
+	t.Run("anthropic paste token", func(t *testing.T) {
+		t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+		writeRawConfig(t, `{"providers":null}`)
+		assertNilProvidersPrecondition(t, `{"providers":null}`)
+
+		codes := stubLoginExit(t)
+		withLoginArgs(t, "--provider", "anthropic")
+		key := stubSetCredential(t)
+
+		originalPasteToken := pasteToken
+		pasteToken = func(provider string, _ io.Reader) (*auth.AuthCredential, error) {
+			return &auth.AuthCredential{AccessToken: "tok", Provider: provider}, nil
+		}
+		t.Cleanup(func() { pasteToken = originalPasteToken })
+
+		out := captureOutput(authLoginCmd)
+
+		if *key != "anthropic" {
+			t.Errorf("setCredential key = %q, want %q", *key, "anthropic")
+		}
+		if want := "Token saved for anthropic!\n"; out != want {
+			t.Errorf("authLoginCmd() output = %q, want %q", out, want)
+		}
+		if len(*codes) != 0 {
+			t.Errorf("loginExit called with %v, want no exit on the success path", *codes)
+		}
+		assertSoleProviderEntry(t, "anthropic", "token")
+	})
+}
+
+// TestProvidersForWriteAllocatesOnDemand pins the helper itself: it must never
+// return nil, must return the existing section untouched when there is one, and
+// must allocate a section that still serializes as "null" (so allocating cannot
+// invent provider entries).
+func TestProvidersForWriteAllocatesOnDemand(t *testing.T) {
+	t.Run("nil section is allocated", func(t *testing.T) {
+		cfg := &config.Config{}
+		providers := providersForWrite(cfg)
+		if providers == nil {
+			t.Fatal("providersForWrite() = nil, want a non-nil section")
+		}
+		if cfg.Providers != providers {
+			t.Errorf("cfg.Providers = %p, want the returned section %p", cfg.Providers, providers)
+		}
+		data, err := json.Marshal(providers)
+		if err != nil {
+			t.Fatalf("json.Marshal(providers) error = %v", err)
+		}
+		if string(data) != "null" {
+			t.Errorf("json.Marshal(empty providers) = %s, want %s (allocating must not invent entries)", data, "null")
+		}
+	})
+
+	t.Run("existing section is returned as is", func(t *testing.T) {
+		existing := &config.ProvidersConfig{Gemini: config.ProviderConfig{APIKey: "keep-me"}}
+		cfg := &config.Config{Providers: existing}
+		if got := providersForWrite(cfg); got != existing {
+			t.Errorf("providersForWrite() = %p, want the existing section %p", got, existing)
 		}
 	})
 }
