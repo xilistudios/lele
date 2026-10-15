@@ -17,6 +17,7 @@ package session
 // mutated IN PLACE, not only appended —
 //   - msg.Content += chunk            (streaming.go AppendAssistantChunk),
 //   - *lastMsg = msg                  (manager.go AddFullMessage),
+//   - tail.Streaming = false          (streaming.go resolveStreamingTailLocked),
 //   - ExcludeFromContext flags        (context.go ExcludeOldMessagesFromContext),
 // so a reader that already dropped the lock would observe torn/rewritten
 // content if it aliased the session's array. Only a copy is safe.
