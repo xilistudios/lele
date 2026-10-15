@@ -177,3 +177,105 @@ describe('handleHistoryUpdated stableId registry (durable flicker fix)', () => {
     expect(built[0].stableId).toBeUndefined()
   })
 })
+
+/**
+ * A thinking step, or the tool-call iteration of any model that emits no text,
+ * is persisted as its OWN assistant message with `content === ''` and its
+ * payload in `reasoning_content` (pkg/agent/llm_runner.go `iterationMsgID`).
+ * The confirmation match used a content-prefix test, and an empty prefix can
+ * never match, so such a copy was NEVER stripped from streaming state: one
+ * immortal leftover per iteration. Once the 50-message sliding history window
+ * slid past its twin, `mergeMessages` could no longer pair it and appended it
+ * at the END of the list — the "messages lose their order until I refresh"
+ * report (see chatPipelineOrdering.test.ts for the end-to-end pin).
+ */
+describe('handleHistoryUpdated — reasoning-only assistant iterations', () => {
+  test('strips the live iteration once the cache holds its persisted twin', () => {
+    const live = msg('ack-uuid-thinking', 'assistant', '', {
+      reasoningContent: 'thinking about the tool call',
+    })
+    const persisted = msg('hash-thinking', 'assistant', '', {
+      reasoningContent: 'thinking about the tool call',
+    })
+    const { ctx, getStreaming } = makeCtx([live], [persisted])
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(getStreaming().some((m) => m.id === 'ack-uuid-thinking')).toBe(false)
+  })
+
+  test('registers the iteration under its reasoning text so the key survives', async () => {
+    const { lookupStableId, clearStableIdRegistry } = await import('./stableIdRegistry')
+    clearStableIdRegistry()
+
+    const live = msg('ack-uuid-thinking', 'assistant', '', {
+      reasoningContent: 'thinking about the tool call',
+    })
+    const persisted = msg('hash-thinking', 'assistant', '', {
+      reasoningContent: 'thinking about the tool call',
+    })
+    const { ctx } = makeCtx([live], [persisted])
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(lookupStableId('assistant', 'thinking about the tool call')).toBe('ack-uuid-thinking')
+  })
+
+  test('toChatMessages re-attaches it from reasoning_content (content is empty)', async () => {
+    const { registerStableId, clearStableIdRegistry } = await import('./stableIdRegistry')
+    clearStableIdRegistry()
+    registerStableId('assistant', 'thinking about the tool call', 'ack-uuid-thinking')
+
+    const built = toChatMessages(
+      [
+        {
+          id: 'hash-thinking',
+          role: 'assistant',
+          content: '',
+          reasoning_content: 'thinking about the tool call',
+        },
+      ],
+      's1',
+    )
+
+    expect(built[0].content).toBe('')
+    expect(built[0].stableId).toBe('ack-uuid-thinking')
+  })
+
+  test('keeps the live iteration while the cache has no twin yet (no over-strip)', () => {
+    const live = msg('ack-uuid-thinking', 'assistant', '', {
+      reasoningContent: 'thinking about the tool call',
+    })
+    // A DIFFERENT turn's thinking step: same role, different reasoning text.
+    const other = msg('hash-other', 'assistant', '', {
+      reasoningContent: 'thinking about something else',
+    })
+    const { ctx, getStreaming } = makeCtx([live], [other])
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(getStreaming().some((m) => m.id === 'ack-uuid-thinking')).toBe(true)
+  })
+
+  test('drops a COMPLETED iteration with neither text nor reasoning (renders nothing)', () => {
+    // The common shape of a tool-call iteration on a model without thinking:
+    // `content === ''`, no reasoning payload. It can never be "confirmed" (its
+    // identity is empty) and mergeMessages drops it from the output, so keeping
+    // it in state leaked one entry per tool iteration for the whole session.
+    const done = msg('ack-uuid-empty-done', 'assistant', '', { streaming: false })
+    const { ctx, getStreaming } = makeCtx([done], [])
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(getStreaming().some((m) => m.id === 'ack-uuid-empty-done')).toBe(false)
+  })
+
+  test('still keeps the IN-FLIGHT empty placeholder (the visible streaming bubble)', () => {
+    const inFlight = msg('ack-uuid-inflight', 'assistant', '', { streaming: true })
+    const { ctx, getStreaming } = makeCtx([inFlight], [])
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(getStreaming().some((m) => m.id === 'ack-uuid-inflight')).toBe(true)
+  })
+})

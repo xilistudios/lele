@@ -39,7 +39,7 @@ test('saturated-window: real mergeMessages renders the 50-message window in orde
 
   // The harness actually booted (not a silently-blank page).
   const scenarioNames = await page.evaluate(() => window.__leleOrdering?.scenarios)
-  expect(scenarioNames).toEqual(['saturated-window'])
+  expect(scenarioNames).toEqual(['saturated-window', 'reasoning-iteration'])
 
   const scenario = page.locator('[data-testid="scenario"][data-scenario="saturated-window"]')
   await expect(scenario).toHaveCount(1)
@@ -79,4 +79,57 @@ test('saturated-window: real mergeMessages renders the 50-message window in orde
 
   // 6) No text appears twice.
   expect(new Set(texts).size).toBe(texts.length)
+})
+/**
+ * Same bug, thinking-step shape: an assistant iteration that emitted no text
+ * (`content === ''`, payload in `reasoningContent`) used to accumulate in
+ * streaming state and, once the sliding window had slid past its twin, be
+ * appended at the END — the user's "messages lose their order after a while"
+ * report in the form of old "Thinking…" widgets below the newest answer.
+ *
+ * Unit-level gates: R8/R9 in web/src/hooks/messageOrderingWindow.test.ts and
+ * chatPipelineOrdering.test.ts (real WS/HTTP handlers over 20 turns); this spec
+ * pins that the merged result reaches the rendered DOM in order.
+ */
+test('reasoning-iteration: a text-less thinking step is not stranded after newer answers', async ({
+  page,
+}) => {
+  await page.goto(`file://${harnessHtml}`)
+
+  const scenario = page.locator('[data-testid="scenario"][data-scenario="reasoning-iteration"]')
+  await expect(scenario).toHaveCount(1)
+
+  const bubbles = scenario.getByTestId('message')
+
+  // 1) 51 base messages + the still-pending question 26. The stale duplicate
+  //    thinking copy is gone (51+1, not 52+1).
+  await expect(bubbles).toHaveCount(52)
+
+  // 2) Exactly ONE thinking block: the persisted iteration. On the unfixed code
+  //    a second one (the stale live copy) was appended after the newest answer.
+  const thinking = scenario.locator('[data-testid="message"][data-has-thinking="true"]')
+  await expect(thinking).toHaveCount(1)
+
+  // 3) …and it sits in its chronological slot: immediately before its answer.
+  const tail = await scenario
+    .getByTestId('message')
+    .evaluateAll((els) =>
+      els.slice(-4).map((el) => `${el.getAttribute('data-has-thinking')}:${el.textContent}`),
+    )
+  expect(tail).toEqual([
+    'false:question number 25',
+    'true:',
+    'false:answer number 25',
+    'false:question number 26',
+  ])
+
+  // 4) The last bubble is the pending user send, not a stranded old thinking step.
+  const lastRole = await bubbles.last().getAttribute('data-role')
+  expect(lastRole).toBe('user')
+
+  // 5) React key contract: all render keys distinct.
+  const ids = await bubbles.evaluateAll((els) =>
+    els.map((el) => el.getAttribute('data-message-id')),
+  )
+  expect(new Set(ids).size).toBe(52)
 })

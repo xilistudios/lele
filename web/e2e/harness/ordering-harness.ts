@@ -38,6 +38,10 @@ function renderScenario(scenario: Scenario): HTMLElement {
     bubble.setAttribute('data-role', message.role)
     // Same expression as MessageBubble/MessageList — the real React key contract.
     bubble.setAttribute('data-message-id', message.stableId ?? message.id)
+    // MessageBubble renders the collapsible thinking block iff `hasThinking =
+    // !!message.reasoningContent` — mirrored so the spec can count/place the
+    // text-less thinking iterations.
+    bubble.setAttribute('data-has-thinking', message.reasoningContent ? 'true' : 'false')
 
     const text = document.createElement('span')
     text.setAttribute('data-testid', 'message-text')

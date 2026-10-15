@@ -1,4 +1,5 @@
 import { lookupStableId, stableIdKey } from '../hooks/stableIdRegistry'
+import { assistantIdentityText } from './messageIdentity'
 import type {
   Attachment,
   ChatMessage,
@@ -365,7 +366,14 @@ export function toChatMessages(history: RawHistoryMessage[], sessionKey: string)
     // registered — the text the user typed, which for command-driven turns is
     // display_content, not the expanded content.
     // Tools additionally look up by tool_call_id (their content may be empty).
-    const stableContent = message.display_content || messageContent
+    // An assistant iteration with no text (thinking / tool-call step) registers
+    // under its reasoning text — the same identity `isConfirmedInCache` uses
+    // (see event-handlers/streaming.ts) — since its content is empty.
+    const stableContent =
+      message.display_content ||
+      (message.role === 'assistant'
+        ? assistantIdentityText(messageContent, message.reasoning_content)
+        : messageContent)
     const stableKey = stableIdKey(message.role, stableContent)
     const stableOccurrence = stableOccurrences.get(stableKey) ?? 0
     stableOccurrences.set(stableKey, stableOccurrence + 1)
