@@ -126,6 +126,11 @@ const TOOL_ICONS: Record<string, IconConfig> = {
     icon: 'M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z M12 6v6l4 2',
     color: 'text-accent-primary',
   },
+  // Synthetic system notice ([System: <sender>] …) rendered as a tool card.
+  system_notice: {
+    icon: 'M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z M12 7v6 M12 16h.01',
+    color: 'text-state-info',
+  },
 }
 
 const GENERIC_ICON =
@@ -176,6 +181,7 @@ function getToolLabel(toolName: string | undefined, t: (key: string) => string):
     send_file: t('toolCalls.sendFile'),
     command: t('toolCalls.commandApplied'),
     goal: t('toolCalls.goal'),
+    system_notice: t('toolCalls.systemNotice'),
   }
 
   const key = toolName.toLowerCase()

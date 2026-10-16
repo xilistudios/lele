@@ -188,3 +188,55 @@ describe('MessageBubble — authenticated attachment preview', () => {
     })
   })
 })
+
+describe('MessageBubble — system notice', () => {
+  test('renderiza una card tipo tool, no la burbuja de texto plano', async () => {
+    const { value: ctx } = makeAuthCtx()
+
+    const message = makeUserMessage({
+      content: '[System: subagent] Subagent status update.\nTask ID: t1',
+      systemNotice: { sender: 'subagent', body: 'Subagent status update.\nTask ID: t1' },
+    })
+
+    const { container } = renderBubble(message, ctx)
+
+    expect(container.querySelector('[data-system-notice="true"]')).toBeTruthy()
+    // The raw "[System: subagent]" prefix must NOT leak as plain user text.
+    expect(container.textContent).not.toContain('[System: subagent]')
+    // The body starts collapsed.
+    expect(container.textContent).not.toContain('Task ID: t1')
+
+    const btn = container.querySelector('button[aria-expanded]')
+    expect(btn).toBeTruthy()
+
+    // (a) The collapsed card HEADER must show the notice SENDER, not the body.
+    // MessageBubble wires `toolArgs={systemNotice.sender}` (header summary) and
+    // `toolResult={systemNotice.body}` (expandable payload). Asserted before
+    // expanding on purpose: this pins the sender→header wiring, so passing
+    // `toolArgs={systemNotice.body}` (header showing the raw body) would now
+    // fail instead of slipping through the suite.
+    expect(btn?.textContent ?? '').toContain('subagent')
+
+    if (btn) fireEvent.click(btn)
+
+    await waitFor(() => expect(container.textContent).toContain('Task ID: t1'))
+
+    // (b) What expands must be the PARSED body — never the raw "[System: …]"
+    // content. `not.toContain('[System:')` runs with the card ALREADY expanded,
+    // so wiring `toolResult={message.content}` (which would re-leak the raw
+    // prefix inside the expanded <pre>) turns this red.
+    expect(container.textContent).toContain('Subagent status update.')
+    expect(container.textContent).not.toContain('[System:')
+  })
+
+  test('un mensaje de usuario normal sigue siendo burbuja plana', () => {
+    const { value: ctx } = makeAuthCtx()
+
+    const message = makeUserMessage({ content: 'hola mundo' })
+
+    const { container } = renderBubble(message, ctx)
+
+    expect(container.querySelector('[data-system-notice="true"]')).toBeNull()
+    expect(container.textContent).toContain('hola mundo')
+  })
+})

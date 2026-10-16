@@ -1053,6 +1053,7 @@
     "sendFile": "Enviando arquivo",
     "commandApplied": "Comando aplicado",
     "goal": "Revisão de objetivo",
+    "systemNotice": "Aviso do sistema",
     "genericAction": "Ação"
   },
   "sidebar": {
