@@ -962,6 +962,19 @@ export type ChatMessage = {
   toolStatus?: ToolMessageStatus
   toolCallId?: string
   subagentSessionKey?: string
+  /**
+   * Present when this message is a synthetic system notice persisted by the
+   * backend with role 'user' — always shaped `[System: <sender>] <body>` (the
+   * catch-all of processSystemMessage, pkg/agent/message_processor.go:709;
+   * sender is 'subagent' or 'cron'). The chat renders it as a tool-style card
+   * instead of a user bubble.
+   *
+   * `role` deliberately stays 'user' and `content` is deliberately left
+   * byte-identical: the backend counts this message as a user turn, and the
+   * merge/ordering math (hooks/messageMerge.ts, computeBaseHasCurrentTurn +
+   * collectConfirmCandidates) depends on that count and on content prefixes.
+   */
+  systemNotice?: { sender: string; body: string }
   error?: string
   excludeFromContext?: boolean
   /**

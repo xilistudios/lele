@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthContext } from '../../contexts/AuthContext'
+import { SYSTEM_NOTICE_TOOL_NAME } from '../../lib/chatMessageBuilder'
 import { downloadFileViaApi } from '../../lib/fileDownload'
 import {
   isDiffStatLine,
@@ -175,6 +176,31 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
   }
 
   if (isUser) {
+    if (message.systemNotice) {
+      // Synthetic system notice persisted with role 'user' (see
+      // lib/chatMessageBuilder.ts parseSystemNotice). Render it as a tool-style
+      // card — role stays 'user' on purpose so the merge/ordering math counts it
+      // exactly like the backend does.
+      return (
+        <div
+          data-message-id={message.stableId ?? message.id}
+          data-testid="message"
+          data-role={message.role}
+          data-system-notice="true"
+          className={`py-1.5 ${animate ? 'animate-message-enter' : ''}`}
+        >
+          <ToolCallDisplay
+            toolName={SYSTEM_NOTICE_TOOL_NAME}
+            toolArgs={message.systemNotice.sender}
+            toolResult={message.systemNotice.body}
+            toolStatus="completed"
+            expanded={expanded}
+            onToggleExpand={() => setExpanded(!expanded)}
+          />
+        </div>
+      )
+    }
+
     const imageAttachments = message.attachments?.filter(isImageAttachment) ?? []
     const nonImageAttachments = message.attachments?.filter((a) => !isImageAttachment(a)) ?? []
 
