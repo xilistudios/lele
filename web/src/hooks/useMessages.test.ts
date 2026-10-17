@@ -42,6 +42,18 @@ function createMockContext(
         state.streamingMessages = updater
       }
     },
+    // Read-only view handed to handlers that must know what is on screen before
+    // building their update (the server refusal retracts a bubble and returns its
+    // paths to the composer). Wired to the SAME state the setters above mutate,
+    // so the mock stays honest under `handleServerError`.
+    streamingMessagesRef: {
+      get current() {
+        return state.streamingMessages
+      },
+      set current(next: ChatMessage[]) {
+        state.streamingMessages = next
+      },
+    },
     setToolStatus: (updater) => {
       state.toolStatus = typeof updater === 'function' ? updater(state.toolStatus) : updater
     },

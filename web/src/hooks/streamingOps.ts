@@ -12,6 +12,7 @@
 import { createAssistantMessage } from '../lib/chatMessageBuilder'
 import type { ChatMessage } from '../lib/types'
 import { computeAssistantInsertIndex } from './messageInsertion'
+import { isAttachmentsOnly } from './messageMerge'
 
 const RESTORE_PREFIX = 'restore-'
 
@@ -205,6 +206,48 @@ export function markOptimisticUserFailed(
       ? { ...m, failed: true, streaming: false }
       : m,
   )
+}
+
+/**
+ * Retract the OLDEST unconfirmed attachments-only optimistic bubble and report
+ * which paths the composer should carry again.
+ *
+ * WHY this transition exists: a turn with no text is confirmed through the
+ * attachments identity (see `isAttachmentsOnly` in messageMerge), and a bubble
+ * the SERVER refuses (`attachments_rejected`) never gets a persisted copy to be
+ * confirmed by — it would stay on screen forever, while the chips burned on
+ * local acceptance (`useMessages.sendMessage` clears them before the server
+ * answers) would be gone. Retracting the bubble hands the turn back in the only
+ * shape the user can act on.
+ *
+ * Pairing rule: the OLDEST match, because the refusal carries no client message
+ * id (pkg/channels/websocket.go `sendError` builds an envelope with no ID) and
+ * `attachments_rejected` is produced by the POST-processing guard, which only
+ * fires for a text-less turn. Two simultaneous text-less sends are therefore an
+ * accepted limitation of the envelope, not of this rule.
+ *
+ * Returns `null` when there is nothing to retract (a late/duplicate refusal, or
+ * the bubble was already confirmed and left the list), so the caller degrades to
+ * a plain banner update.
+ */
+export function retractAttachmentsOnlyBubble(
+  current: ChatMessage[],
+  sessionKey: string | null,
+): { messages: ChatMessage[]; restoredPaths: string[] } | null {
+  const index = current.findIndex(
+    (m) =>
+      m.role === 'user' &&
+      m.optimistic === true &&
+      (sessionKey === null || m.sessionKey === sessionKey) &&
+      isAttachmentsOnly(m),
+  )
+  if (index < 0) return null
+
+  const restoredPaths = (current[index].attachments ?? [])
+    .map((attachment) => attachment.path)
+    .filter((path): path is string => Boolean(path))
+
+  return { messages: current.filter((_, i) => i !== index), restoredPaths }
 }
 
 /** Mark all actively-streaming assistants for a session as errored. */

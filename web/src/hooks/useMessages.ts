@@ -226,6 +226,7 @@ export function useMessages(
     setStreamingMessages,
     setToolStatus,
     setPendingAttachments,
+    streamingMessagesRef: streamingRef,
     // Server-side send refusals (the `error` event) and socket-level failures
     // both end up in the chat error banner; a missing callback (bare hooks in
     // tests) must not break the dispatch table.

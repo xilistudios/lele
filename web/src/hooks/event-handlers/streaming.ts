@@ -24,6 +24,7 @@ import {
   migrateRestoreId,
   removeRestorePlaceholders,
   restoreInProgressAssistant,
+  retractAttachmentsOnlyBubble,
 } from '../streamingOps'
 import {
   type HistoryMessage,
@@ -549,5 +550,28 @@ export function handleServerError(
   const payload = data ?? {}
   const code = typeof payload.code === 'string' ? payload.code : ''
   const message = typeof payload.message === 'string' ? payload.message : ''
+
+  // `attachments_rejected` is the ONE refusal that answers a turn already
+  // accepted locally: the POST-processing guard produces it only for a send
+  // with no text whose every attachment was dropped, and such a turn never
+  // reaches the history, so the optimistic bubble has no copy to be confirmed
+  // by (see `isAttachmentsOnly` in messageMerge) while the chips were burned on
+  // local acceptance. Retract the oldest one and hand the paths back to the
+  // composer. Two simultaneous text-less sends are an accepted limitation of
+  // this heuristic: the server envelope carries no client message id
+  // (`sendError` in pkg/channels/websocket.go). No bubble → the banner alone.
+  if (code === 'attachments_rejected') {
+    const retracted = retractAttachmentsOnlyBubble(
+      ctx.streamingMessagesRef.current,
+      ctx.currentSessionKeyRef.current,
+    )
+    if (retracted) {
+      ctx.setStreamingMessages(retracted.messages)
+      if (retracted.restoredPaths.length > 0) {
+        ctx.setPendingAttachments((pending) => [...pending, ...retracted.restoredPaths])
+      }
+    }
+  }
+
   ctx.setError(sendErrorMessage(code, message))
 }

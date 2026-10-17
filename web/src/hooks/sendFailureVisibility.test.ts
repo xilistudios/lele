@@ -98,3 +98,94 @@ describe('useAppLogic — a refused send is shown to the user', () => {
     expect(sessionKey.length).toBeGreaterThan(0)
   })
 })
+
+// ── MENOR-1: a refusal of an attachments-only send gives the turn back ───────
+
+const SESSION_KEY = 'native:attach-refused'
+/** Client-side staging path of a pending upload (the server persists another). */
+const STAGING = '/lele/tmp/uploads/ab12cd34_photo.jpg'
+
+/**
+ * `attachments_rejected` is produced by the POST-processing guard, which only
+ * fires for a turn with NO text whose every attachment was dropped
+ * (pkg/channels/websocket.go). So the pair of side effects below belongs to
+ * exactly that turn: the optimistic bubble would otherwise live forever (no
+ * persisted copy will ever confirm it — see `isAttachmentsOnlyBase`) and the
+ * chips cleared on local acceptance would be lost for good.
+ */
+describe('useAppLogic — the server refuses an attachments-only send', () => {
+  test('MENOR-1: the bubble is retracted and the chips carry the paths again', async () => {
+    const { result, waitUntilReady } = renderAppLogic({ sessionKey: SESSION_KEY })
+    await waitUntilReady()
+
+    await act(async () => {
+      result.current.onAttachmentsChange([STAGING])
+    })
+    let accepted: boolean | undefined
+    await act(async () => {
+      accepted = await result.current.onSend('', [STAGING])
+    })
+
+    // Accepted LOCALLY (what the returned boolean means): the chips are burned
+    // and the turn is on screen, with the staging path the client will show.
+    expect(accepted).toBe(true)
+    expect(result.current.pendingAttachments).toEqual([])
+    const userTurns = () => result.current.messages.filter((m) => m.role === 'user')
+    expect(userTurns().length).toBe(1)
+    expect(userTurns()[0].optimistic).toBe(true)
+    expect(userTurns()[0].attachments?.map((a) => a.path)).toEqual([STAGING])
+
+    await act(async () => {
+      result.current.handleEvent({
+        event: 'error',
+        data: {
+          code: 'attachments_rejected',
+          message: 'attachments could not be read; add text or re-upload',
+        },
+      })
+    })
+
+    // The banner (T4) AND the turn handed back to the composer: no immortal
+    // bubble, no re-uploading the same file to retry.
+    expect(result.current.error).toBe(i18n.t('chat.errorAttachmentsRejected') as string)
+    expect(userTurns()).toEqual([])
+    expect(result.current.pendingAttachments).toEqual([STAGING])
+  })
+
+  test('MENOR-1: no matching bubble is the banner alone — nothing retracted, no crash', async () => {
+    const { result, waitUntilReady } = renderAppLogic({ sessionKey: SESSION_KEY })
+    await waitUntilReady()
+
+    // A turn WITH text has its content identity: it is never an
+    // attachments-only bubble, so a late/duplicate refusal must leave it alone.
+    let accepted: boolean | undefined
+    await act(async () => {
+      accepted = await result.current.onSend('hello', [])
+    })
+    expect(accepted).toBe(true)
+
+    const refuse = () =>
+      act(async () => {
+        result.current.handleEvent({
+          event: 'error',
+          data: {
+            code: 'attachments_rejected',
+            message: 'attachments could not be read; add text or re-upload',
+          },
+        })
+      })
+
+    await refuse()
+    expect(result.current.error).toBe(i18n.t('chat.errorAttachmentsRejected') as string)
+    // Untouched: nothing to hand back, and no text turn was mistaken for one.
+    const userTurns = () => result.current.messages.filter((m) => m.role === 'user')
+    expect(userTurns().map((m) => m.content)).toEqual(['hello'])
+    expect(result.current.pendingAttachments).toEqual([])
+
+    // A second copy of the same refusal (or an error that arrived after the turn
+    // was already confirmed) has nothing left to retract either.
+    await refuse()
+    expect(userTurns().map((m) => m.content)).toEqual(['hello'])
+    expect(result.current.pendingAttachments).toEqual([])
+  })
+})

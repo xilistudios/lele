@@ -16,6 +16,16 @@ export type MessageEventContext = {
   queryClient: QueryClient
   debouncedSessionRefresh: () => void
   setStreamingMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>
+  /**
+   * Read-only view of the streaming list as of the last render.
+   *
+   * WHY a ref: an event handler sometimes has to know WHAT is on screen before
+   * it can build its update — `handleServerError` retracts an attachments-only
+   * bubble and returns its paths to the composer, and that second side effect
+   * cannot be produced inside a `setState` updater (updaters must stay pure).
+   * A ref, not state: a handler would otherwise close over a stale render.
+   */
+  streamingMessagesRef: React.MutableRefObject<ChatMessage[]>
   setToolStatus: React.Dispatch<React.SetStateAction<ToolStatus | null>>
   setPendingAttachments: React.Dispatch<React.SetStateAction<string[]>>
   /**

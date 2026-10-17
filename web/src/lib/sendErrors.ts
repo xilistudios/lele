@@ -18,16 +18,33 @@
 import i18n from '../i18n'
 
 /**
- * i18n key per backend error code. `content_missing` is the pre-processing
- * guard (no text AND no attachments), `attachments_rejected` is the
- * post-processing one (the turn carried attachments, and every single one was
- * dropped, so an empty turn is not worth publishing).
+ * i18n key per backend error code, for the codes the WebSocket `error` event can
+ * actually carry — every remote refusal a send can meet:
+ *
+ *  - `content_missing`: the pre-processing guard (no text AND no attachments);
+ *  - `attachments_rejected`: the post-processing guard (the turn carried
+ *    attachments and every single one was dropped, so an empty turn is not worth
+ *    publishing);
+ *  - `forbidden`: "access denied to this session", the code of BOTH the
+ *    `message` and the `subscribe` paths in pkg/channels/websocket.go, and the
+ *    code the reviewer found missing here while two HTTP-only codes were mapped.
+ *
+ * Deliberately NOT listed: `access_denied` and `file_too_large`. Both are
+ * emitted over HTTP only (`pkg/channels/upload.go`: the upload's 413 and the
+ * `/api/v1/files/view` viewer), and the only consumer of this table is the WS
+ * `error` handler, so as rows they were unreachable by construction — the
+ * "mapped key that nobody renders" trap of the original PR. `forbidden` reuses
+ * their translation (`chat.errorAccessDenied`); `chat.errorFileTooLarge` stays
+ * in the locales, unused, for a REST caller of `sendErrorMessage`.
+ *
+ * The producer side is pinned by a test in event-handlers/serverError.test.ts
+ * (`sendError(...)` call sites, parsed out of pkg/channels/websocket.go), so a
+ * code added here must be one the transport really sends.
  */
 export const SEND_ERROR_I18N_KEYS: Record<string, string> = {
   content_missing: 'chat.errorContentMissing',
   attachments_rejected: 'chat.errorAttachmentsRejected',
-  access_denied: 'chat.errorAccessDenied',
-  file_too_large: 'chat.errorFileTooLarge',
+  forbidden: 'chat.errorAccessDenied',
 }
 
 /**
