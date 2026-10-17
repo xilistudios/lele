@@ -1628,7 +1628,6 @@ func (n *NativeChannel) broadcastAll(event string, data interface{}) {
 
 func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []bus.FileAttachment {
 	uploadDir := filepath.Join(n.cfg.LeleDir, "tmp", "uploads")
-	absUploadDir, _ := filepath.Abs(uploadDir)
 
 	attachments := make([]bus.FileAttachment, 0, len(paths))
 	for _, path := range paths {
@@ -1639,14 +1638,28 @@ func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []
 
 		absPath, err = filepath.EvalSymlinks(absPath)
 		if err != nil {
-			continue
-		}
-
-		if absUploadDir != "" && !strings.HasPrefix(absPath, absUploadDir) {
-			logger.WarnCF("native", "Attachment path outside upload directory rejected",
+			// Used to be a silent continue: this branch dropped every
+			// attachment (missing file included) without leaving any trace.
+			logger.WarnCF("native", "Attachment path cannot be resolved",
 				map[string]interface{}{
 					"session_key": sessionKey,
 					"path":        path,
+					"error":       err.Error(),
+				})
+			continue
+		}
+
+		// The path above is resolved (EvalSymlinks) so the allowed directory
+		// must be canonical too — comparing against filepath.Abs(uploadDir)
+		// rejected every attachment as soon as LeleDir traversed a symlink.
+		// isContainedIn canonicalizes both sides and is Rel-based, so the
+		// sibling directory "uploads-evil" no longer matches either.
+		if !isContainedIn(absPath, uploadDir) {
+			logger.WarnCF("native", "Attachment path outside upload directory rejected",
+				map[string]interface{}{
+					"session_key":   sessionKey,
+					"path":          path,
+					"resolved_path": absPath,
 				})
 			continue
 		}
@@ -1673,12 +1686,15 @@ func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []
 
 		mimeType := detectMimeType(absPath)
 
+		// Temporary shares the predicate of the containment guard above:
+		// keeping the two in sync is what makes persistAttachment move the
+		// staged file instead of copying it (and leaking the staging copy).
 		attachments = append(attachments, bus.FileAttachment{
 			Path:      absPath,
 			Name:      filepath.Base(absPath),
 			MIMEType:  mimeType,
 			Kind:      "file",
-			Temporary: strings.HasPrefix(absPath, absUploadDir),
+			Temporary: isContainedIn(absPath, uploadDir),
 		})
 	}
 	return attachments
