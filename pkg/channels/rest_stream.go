@@ -132,8 +132,8 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if req.Content == "" {
-		writeError(w, http.StatusBadRequest, "content is required", "content_missing")
+	if !hasSendablePayload(req.Content, req.Attachments) {
+		writeError(w, http.StatusBadRequest, "message content or an attachment is required", "content_missing")
 		return
 	}
 
@@ -177,6 +177,14 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 	defer n.unregisterRESTStreamSubscriber(sub.id)
 
 	attachments := n.processAttachments(req.Attachments, sessionKey)
+
+	// Guard placed after the subscriber's defer is registered and before
+	// WriteHeader: returning here unregisters the subscriber and still lets the
+	// client read the 400 instead of an empty SSE stream (see sendpayload.go).
+	if !hasSendablePayload(req.Content, attachments) {
+		writeError(w, http.StatusBadRequest, "attachments could not be read; add text or re-upload", "attachments_rejected")
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

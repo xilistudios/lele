@@ -27,6 +27,7 @@ export {
   handleMessagesCatchup,
   handleAttachments,
   handleMessageError,
+  handleServerError,
   handleStreamError,
   handleTypingIndicator,
 } from './streaming'
@@ -78,6 +79,7 @@ import {
   handleMessageStream,
   handleMessageThinking,
   handleMessagesCatchup,
+  handleServerError,
   handleStreamError,
   handleTypingIndicator,
   handleWelcome,
@@ -107,6 +109,11 @@ const HANDLERS: Record<string, (ctx: MessageEventContext, event: ClientEvent) =>
   'subscribe.ack': (ctx, e) => handleSubscribeAck(ctx, e.data as Record<string, unknown>),
   'message.error': (ctx, e) => handleMessageError(ctx, e.data as Record<string, unknown>),
   'stream.error': (ctx, e) => handleStreamError(ctx, e.data as Record<string, unknown>),
+  // Server send refusal. The SOCKET-level failure is a different channel
+  // (`services/ws/client.ts` emits `'error'` on the client object for the DOM
+  // event); only parsed `{event:'error', data:{code,message}}` envelopes land
+  // here — see handleServerError.
+  error: (ctx, e) => handleServerError(ctx, e.data as Record<string, unknown>),
   'group.status': (ctx, e) => handleGroupStatus(ctx, e.data as Record<string, unknown>),
   'group.turn': (ctx, e) => handleGroupTurn(ctx, e.data as Record<string, unknown>),
   'group.tool': (ctx, e) => handleGroupTool(ctx, e.data as Record<string, unknown>),

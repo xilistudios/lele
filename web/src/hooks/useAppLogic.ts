@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import i18n from '../i18n'
 import type { ApiClient } from '../lib/api'
 import { wsDebug } from '../lib/debug'
 import { clearCurrentSessionKey, loadSidebarOpen, saveSidebarOpen } from '../lib/storage'
@@ -78,6 +79,9 @@ export function useAppLogic(
     sessionsHook.currentSessionKeyRef,
     sessionsHook.refreshSessions,
     parentSessionKey,
+    // Server-side send refusals are surfaced in the chat error banner instead
+    // of being dropped (see handleServerError / lib/sendErrors.ts).
+    setError,
   )
   const chatHistory = useChatHistory(
     api,
@@ -383,7 +387,18 @@ export function useAppLogic(
         return false
       }
 
-      await messagesHook.sendMessage(content, attachments, sessionKey, currentAgentId)
+      const accepted = await messagesHook.sendMessage(
+        content,
+        attachments,
+        sessionKey,
+        currentAgentId,
+      )
+      if (!accepted) {
+        // Nothing was sent (empty message, or the turn could not be accepted):
+        // keep the draft AND the attachment chips so the user can act, and do
+        // not touch the session activity/title for a turn that never happened.
+        return false
+      }
       messagesHook.setPendingAttachments([])
       // Optimistic update: bump updated timestamp immediately so the sidebar
       // shows the session activity instead of "New Chat"
@@ -611,7 +626,13 @@ export function useAppLogic(
 
   const handleUploadAttachments = useCallback(
     async (files: File[]): Promise<string[]> => {
-      if (!token) return []
+      if (!token) {
+        // No token, no upload — and NO silence either: the composer clears the
+        // chips on success only, so the user would otherwise watch the file
+        // disappear with no explanation (AttachmentInput's [] is a failure).
+        setError(i18n.t('chat.notAuthenticated'))
+        return []
+      }
       try {
         const result = await api.uploadFiles(files)
         return result.files.map((f) => f.path)

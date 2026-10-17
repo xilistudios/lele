@@ -179,10 +179,12 @@ func publicStagingDirs(leleDir string) []string {
 
 // isUnderAnyPublicStagingDir reports whether absPath is inside any of the
 // public staging directories. Both the exact directory match and child
-// containment are accepted.
+// containment are accepted. Containment (canonical forms on both sides,
+// Rel-based, fail-closed) lives in isContainedIn (pathcontainment.go) and is
+// used here and by every other caller — there is only one implementation.
 func isUnderAnyPublicStagingDir(absPath string, leleDir string) bool {
 	for _, dir := range publicStagingDirs(leleDir) {
-		if isUnderDir(absPath, dir) {
+		if isContainedIn(absPath, dir) {
 			return true
 		}
 	}
@@ -200,22 +202,6 @@ func attachmentStagingDir(leleDir string) string {
 // attachment file names unique.
 func randomHex() string {
 	return uuid.New().String()[:8]
-}
-
-// isUnderDir reports whether absPath is dir itself or lives inside it. Both
-// arguments must be absolute, cleaned paths.
-func isUnderDir(absPath, dir string) bool {
-	if dir == "" || absPath == "" {
-		return false
-	}
-	if absPath == dir {
-		return true
-	}
-	sep := string(filepath.Separator)
-	if !strings.HasSuffix(dir, sep) {
-		dir += sep
-	}
-	return strings.HasPrefix(absPath, dir)
 }
 
 // stageAttachment makes an outbound attachment servable by /api/v1/files/view.
@@ -273,8 +259,11 @@ func stageAttachment(a *bus.FileAttachment, leleDir string) error {
 	// place.  The cost is extra disk (one copy per send_file that references
 	// a workspace path), but the security surface is cleaner — there are
 	// exactly two directories that are publicly accessible.
+	// isContainedIn canonicalizes both sides, so "already in staging" holds
+	// even when leleDir traverses a symlink (with the old prefix test against
+	// an unresolved staging dir the file was copied again on every call).
 	stagingAbs := attachmentStagingDir(leleDirAbs)
-	if isUnderDir(realPath, stagingAbs) {
+	if isContainedIn(realPath, stagingAbs) {
 		return nil
 	}
 
@@ -506,11 +495,13 @@ func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Public endpoint: only serve files under the public staging directories.
-	leleDirAbs, _ := filepath.Abs(n.cfg.LeleDir)
-	if leleDirAbs == "" || !isUnderAnyPublicStagingDir(absPath, leleDirAbs) {
+	// The root is canonical so a client path that traverses a symlinked
+	// LeleDir (exactly how /upload returned it) is served instead of denied.
+	leleRoot := canonicalContainmentRoot(n.cfg.LeleDir)
+	if leleRoot == "" || !isUnderAnyPublicStagingDir(absPath, leleRoot) {
 		// Log attempted access to a non-staging path under leleDir so we
 		// can detect legitimate consumers we may have broken.
-		if leleDirAbs != "" && isUnderDir(absPath, leleDirAbs) {
+		if leleRoot != "" && isContainedIn(absPath, leleRoot) {
 			log.Printf("WARNING: public files/view denied non-staging path under leleDir: %s", absPath)
 		}
 		writeError(w, http.StatusForbidden, "access denied", "access_denied")
@@ -522,7 +513,7 @@ func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
 	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
 		realPath = resolved
 	}
-	if !isUnderAnyPublicStagingDir(realPath, leleDirAbs) {
+	if !isUnderAnyPublicStagingDir(realPath, leleRoot) {
 		writeError(w, http.StatusForbidden, "access denied", "access_denied")
 		return
 	}
@@ -557,8 +548,10 @@ func (n *NativeChannel) handleFileViewSecure(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	leleDirAbs, _ := filepath.Abs(n.cfg.LeleDir)
-	if leleDirAbs == "" || !isUnderDir(absPath, leleDirAbs) {
+	// Same canonical root as the public endpoint: the path may be spelled
+	// through a symlinked LeleDir and must still be served.
+	leleRoot := canonicalContainmentRoot(n.cfg.LeleDir)
+	if leleRoot == "" || !isContainedIn(absPath, leleRoot) {
 		writeError(w, http.StatusForbidden, "access denied", "access_denied")
 		return
 	}
@@ -568,7 +561,7 @@ func (n *NativeChannel) handleFileViewSecure(w http.ResponseWriter, r *http.Requ
 	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
 		realPath = resolved
 	}
-	if !isUnderDir(realPath, leleDirAbs) {
+	if !isContainedIn(realPath, leleRoot) {
 		writeError(w, http.StatusForbidden, "access denied", "access_denied")
 		return
 	}

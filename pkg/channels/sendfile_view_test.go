@@ -407,7 +407,7 @@ func TestStageAttachment_SymlinkUnderLeleDirIsCopied(t *testing.T) {
 	if a.Path == link {
 		t.Fatalf("symlink escape was not staged: path = %q", a.Path)
 	}
-	if !isUnderDir(a.Path, leleDir) {
+	if !isContainedIn(a.Path, leleDir) {
 		t.Errorf("staged path %q escaped leleDir %q", a.Path, leleDir)
 	}
 	if a.Name != "via-link.bin" {

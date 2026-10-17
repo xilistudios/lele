@@ -6,10 +6,13 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/bus"
 )
 
 func TestHandleFileUpload_Success(t *testing.T) {
@@ -309,5 +312,125 @@ func TestHandleFileUpload_JustUnderLimitSucceeds(t *testing.T) {
 	// Verify the file exists on disk.
 	if _, err := os.Stat(payload.Files[0].Path); os.IsNotExist(err) {
 		t.Errorf("uploaded file not found at %s", payload.Files[0].Path)
+	}
+}
+
+// --- T1: symlinked LeleDir (incident 2026-10-17) ---
+//
+// Reproduction contract for the view endpoints and for staging: the client
+// always sends the path /upload returned, i.e. the UNRESOLVED spelling through
+// the configured LeleDir. When that directory traverses a symlink, comparing
+// the resolved file path against the unresolved root denied every preview (403)
+// and made staging copy the file again on every call.
+
+// newSymlinkedStagingTestServer returns a native test server whose LeleDir is a
+// symlink (<tmp>/lele -> <tmp>/real) plus the real directory behind it. Both
+// live under t.TempDir().
+func newSymlinkedStagingTestServer(t *testing.T) (ts *nativeTestServer, real string) {
+	t.Helper()
+	real = t.TempDir()
+	link := filepath.Join(t.TempDir(), "lele")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	ts = newNativeTestServer(t)
+	ts.channel.cfg.LeleDir = link
+	return ts, real
+}
+
+// Mutation M8 (handleFileView without a canonical root) turns this test red.
+func TestFileView_SymlinkedLeleDirServesUpload(t *testing.T) {
+	ts, real := newSymlinkedStagingTestServer(t)
+	dir := filepath.Join(real, "tmp", "uploads")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	const name = "abcd1234_image.txt"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Path spelled through the symlinked LeleDir, exactly as the upload
+	// endpoint returned it (unresolved).
+	p := filepath.Join(ts.channel.cfg.LeleDir, "tmp", "uploads", name)
+	resp, body := getView(t, ts, url.Values{"path": {p}})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (symlinked LeleDir must be served): %s", resp.StatusCode, body)
+	}
+	if body != "hello" {
+		t.Errorf("body = %q, want hello", body)
+	}
+}
+
+func TestFileView_SymlinkedLeleDirRejectsOutsidePath(t *testing.T) {
+	ts, _ := newSymlinkedStagingTestServer(t)
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("s"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, _ := getView(t, ts, url.Values{"path": {outside}})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for a path outside the symlinked LeleDir", resp.StatusCode)
+	}
+}
+
+func TestFileViewSecure_SymlinkedLeleDirServesNonStagingPath(t *testing.T) {
+	ts, real := newSymlinkedStagingTestServer(t)
+	dir := filepath.Join(real, "workspace")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "doc.txt"), []byte("content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := filepath.Join(ts.channel.cfg.LeleDir, "workspace", "doc.txt")
+	resp, body := getSecureView(t, ts, url.Values{"path": {p}})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (symlinked LeleDir must be served): %s", resp.StatusCode, body)
+	}
+	if body != "content" {
+		t.Errorf("body = %q, want content", body)
+	}
+}
+
+// Mutation M9 (stageAttachment without a canonical staging dir) turns this
+// test red: the second call copies the file again.
+func TestStageAttachment_IdempotentUnderSymlinkedLeleDir(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "lele")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	staging := filepath.Join(real, "tmp", "attachments")
+	if err := os.MkdirAll(staging, 0755); err != nil {
+		t.Fatal(err)
+	}
+	const name = "abcd1234_already_staged.txt"
+	if err := os.WriteFile(filepath.Join(staging, name), []byte("payload"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Spelled through the symlinked LeleDir, as an outbound attachment would be.
+	staged := filepath.Join(link, "tmp", "attachments", name)
+	a := bus.FileAttachment{Name: name, Path: staged, Kind: "file"}
+
+	if err := stageAttachment(&a, link); err != nil {
+		t.Fatalf("stageAttachment: %v", err)
+	}
+	if err := stageAttachment(&a, link); err != nil {
+		t.Fatalf("stageAttachment (second call): %v", err)
+	}
+
+	if a.Path != staged {
+		t.Errorf("Path = %q, want %q: a file already in staging must be left alone", a.Path, staged)
+	}
+	entries, err := os.ReadDir(staging)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("staging holds %d entries, want 1: staging must be idempotent", len(entries))
 	}
 }

@@ -338,13 +338,65 @@ function buildFilteredBase(
   return { filteredBase, consumedToolIds }
 }
 
+// ── Attachments-only identity ───────────────────────────────────────────────
+
+/**
+ * Header the backend writes for a turn that carries attachments but no text:
+ * `RenderUserMessage("") -> utils.BuildAttachmentContext` produces
+ * "## Attachments\n- <path>" (pkg/agent/context.go, pkg/utils/attachments.go),
+ * and that RENDERED text is what the session history stores.
+ *
+ * WHY the marker and not the path: the persisted path is chosen by the server —
+ * `PersistAttachmentsToWorkspace` moves the upload to
+ * `<workspace>/attachments/<YYYYMMDD>/` under a fresh `<uuid8>_<name>` — so the
+ * client can never predict it. The marker is the only stable part of the
+ * persisted copy.
+ */
+export const ATTACHMENTS_ONLY_MARKER = '## Attachments'
+
+/**
+ * Whether `msg` is an attachments-only user turn: no text at all, but at least
+ * one attachment. That is a valid send (the composer and the backend both accept
+ * it), and its confirmation identity cannot be its content — an empty prefix
+ * matches nothing.
+ */
+export function isAttachmentsOnly(msg: ChatMessage): boolean {
+  return msg.role === 'user' && msg.content.trim() === '' && (msg.attachments?.length ?? 0) > 0
+}
+
+/**
+ * Whether a CONFIRMED (non-optimistic) base user can vouch for an
+ * attachments-only optimistic bubble.
+ *
+ * Two shapes of the SAME persisted turn reach this function:
+ *   - raw history entries, whose content still carries the backend marker;
+ *   - entries already passed through `toChatMessages`, where
+ *     `parseAttachmentsFromContent` MOVED the marker into `attachments` and left
+ *     `content` empty. This is the shape the app really sees: `useChatHistory`
+ *     caches `toChatMessages(history.messages)` as `baseMessages`, and
+ *     `isConfirmedInCache` reads that same cache.
+ * Both are recognised, and neither depends on the persisted path.
+ */
+export function isAttachmentsOnlyBase(bm: ChatMessage): boolean {
+  if (bm.role !== 'user' || bm.optimistic) return false
+  if ((bm.attachments?.length ?? 0) > 0) return bm.content.trim() === ''
+  return bm.content.startsWith(ATTACHMENTS_ONLY_MARKER)
+}
+
 // ── Optimistic user confirmation ────────────────────────────────────────────
 
 /**
  * Indexes of the confirmed base users that can vouch for optimistic user
  * `msg`: content matches for its 200-char prefix that no EARLIER optimistic
- * message has claimed yet. Empty content yields no candidates (an empty
- * placeholder is not a copy).
+ * message has claimed yet.
+ *
+ * An attachments-only turn has an empty prefix, and this used to yield no
+ * candidates at all ("an empty placeholder is not a copy"). That made the bubble
+ * IMMORTAL the moment the composer and the backend started accepting
+ * attachments-only sends: it was never confirmed, and once the history copy
+ * landed the image rendered TWICE (staging path + persisted path). Its identity
+ * is therefore the marker, not the content. An empty bubble with no attachment
+ * is still not a copy and still matches nothing.
  */
 function collectConfirmCandidates(
   msg: ChatMessage,
@@ -352,8 +404,14 @@ function collectConfirmCandidates(
   claimed: Set<number>,
 ): number[] {
   const prefix = msg.content.slice(0, 200)
-  if (prefix.length === 0) return []
   const candidates: number[] = []
+  if (prefix.length === 0) {
+    if (!isAttachmentsOnly(msg)) return []
+    for (let i = 0; i < baseMessages.length; i++) {
+      if (isAttachmentsOnlyBase(baseMessages[i]) && !claimed.has(i)) candidates.push(i)
+    }
+    return candidates
+  }
   for (let i = 0; i < baseMessages.length; i++) {
     const bm = baseMessages[i]
     if (bm.role === 'user' && !bm.optimistic && bm.content.startsWith(prefix) && !claimed.has(i)) {
@@ -385,7 +443,8 @@ export function findConfirmingBaseUserIndex(
   baseUserCount: number,
   claimed: Set<number>,
 ): number {
-  // Rule 1: content match on the 200-char prefix (empty content → no match).
+  // Rule 1: content match on the 200-char prefix, or the marker identity for an
+  // attachments-only turn (empty content → no content match, never no copy).
   const candidates = collectConfirmCandidates(msg, baseMessages, claimed)
   if (candidates.length === 0) return -1
 

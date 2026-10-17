@@ -26,8 +26,8 @@ func (n *NativeChannel) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Content == "" {
-		writeError(w, http.StatusBadRequest, "content is required", "content_missing")
+	if !hasSendablePayload(req.Content, req.Attachments) {
+		writeError(w, http.StatusBadRequest, "message content or an attachment is required", "content_missing")
 		return
 	}
 
@@ -52,6 +52,13 @@ func (n *NativeChannel) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	messageID := uuid.New().String()
 
 	attachments := n.processAttachments(req.Attachments, sessionKey)
+
+	// Every carried attachment was dropped and there is no text: reject with the
+	// dedicated code instead of publishing an empty turn (see sendpayload.go).
+	if !hasSendablePayload(req.Content, attachments) {
+		writeError(w, http.StatusBadRequest, "attachments could not be read; add text or re-upload", "attachments_rejected")
+		return
+	}
 
 	msg := bus.InboundMessage{
 		Channel:     ChannelName,

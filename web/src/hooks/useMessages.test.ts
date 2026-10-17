@@ -16,6 +16,7 @@ function createMockContext(
     streamingMessages: [],
     toolStatus: null,
     pendingAttachments: [],
+    errors: [] as string[],
     processingSessions: new Set<string>(),
     processingSessionKey: null as string | null,
     groups: new Map<string, GroupInfo>(),
@@ -41,6 +42,18 @@ function createMockContext(
         state.streamingMessages = updater
       }
     },
+    // Read-only view handed to handlers that must know what is on screen before
+    // building their update (the server refusal retracts a bubble and returns its
+    // paths to the composer). Wired to the SAME state the setters above mutate,
+    // so the mock stays honest under `handleServerError`.
+    streamingMessagesRef: {
+      get current() {
+        return state.streamingMessages
+      },
+      set current(next: ChatMessage[]) {
+        state.streamingMessages = next
+      },
+    },
     setToolStatus: (updater) => {
       state.toolStatus = typeof updater === 'function' ? updater(state.toolStatus) : updater
     },
@@ -50,6 +63,11 @@ function createMockContext(
       } else {
         state.pendingAttachments = updater
       }
+    },
+    // The chat error banner (server-side send refusals). Recorded so the tests
+    // can assert that a refusal is never swallowed.
+    setError: (message: string) => {
+      state.errors.push(message)
     },
     setApprovalRequest: () => {},
     showApprovalResult: () => {},
@@ -111,6 +129,8 @@ type MockState = {
   streamingMessages: ChatMessage[]
   toolStatus: ToolStatus | null
   pendingAttachments: string[]
+  /** Messages pushed to the chat error banner (server-side send refusals). */
+  errors: string[]
   processingSessions: Set<string>
   processingSessionKey: string | null
   groups: Map<string, GroupInfo>

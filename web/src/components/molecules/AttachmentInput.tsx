@@ -23,7 +23,15 @@ export function AttachmentInput({ onUpload, onAttach }: Props) {
       if (paths.length === 0) {
         setError(t('chat.uploadFailed'))
       } else {
-        setError(null)
+        // A PARTIAL failure is not silent either: the upload endpoint skips the
+        // files it cannot store (`continue` in upload.go) and answers with
+        // fewer paths than were sent, so N-1 chips would appear with no
+        // explanation. Keep the paths that DID upload and say how many failed.
+        setError(
+          paths.length < files.length
+            ? t('chat.uploadPartial', { failed: files.length - paths.length, total: files.length })
+            : null,
+        )
         onAttach(paths)
       }
     } catch (err) {

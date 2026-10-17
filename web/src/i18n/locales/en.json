@@ -141,7 +141,13 @@
     "failedToSend": "Failed to send",
     "retry": "Retry",
     "archivedFromContext": "Archived from context",
-    "download": "Download"
+    "download": "Download",
+    "errorContentMissing": "Type a message or attach a file",
+    "errorAttachmentsRejected": "Your attachments could not be read. Add some text or upload them again",
+    "errorAccessDenied": "You are not allowed to send to this session",
+    "errorFileTooLarge": "The file is too large to upload",
+    "notAuthenticated": "You are not signed in: cannot upload attachments",
+    "uploadPartial": "{{failed}} of {{total}} attachments failed to upload"
   },
   "connection": {
     "connected": "Connected",
