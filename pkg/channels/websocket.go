@@ -365,8 +365,8 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 		return
 	}
 
-	if payload.Content == "" {
-		n.sendError(client, "content_missing", "message content is required")
+	if !hasSendablePayload(payload.Content, payload.Attachments) {
+		n.sendError(client, "content_missing", "message content or an attachment is required")
 		return
 	}
 
@@ -398,6 +398,14 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 	messageID := uuid.New().String()
 
 	attachments := n.processAttachments(payload.Attachments, sessionKey)
+
+	// Attachments were carried but none survived processing: forwarding this
+	// would hand the agent an empty turn while the user sees their image. Fail
+	// loudly instead (the client maps this code to a user-facing message).
+	if !hasSendablePayload(payload.Content, attachments) {
+		n.sendError(client, "attachments_rejected", "attachments could not be read; add text or re-upload")
+		return
+	}
 
 	msg := bus.InboundMessage{
 		Channel:     ChannelName,
