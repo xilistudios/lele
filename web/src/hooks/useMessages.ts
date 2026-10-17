@@ -48,6 +48,7 @@ export function useMessages(
   currentSessionKeyRef: React.MutableRefObject<string | null>,
   onSessionUpdated?: () => void,
   parentSessionKey?: string | null,
+  onError?: (message: string) => void,
 ) {
   const [streamingMessages, setStreamingMessages] = useState<ChatMessage[]>([])
   const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null)
@@ -225,6 +226,10 @@ export function useMessages(
     setStreamingMessages,
     setToolStatus,
     setPendingAttachments,
+    // Server-side send refusals (the `error` event) and socket-level failures
+    // both end up in the chat error banner; a missing callback (bare hooks in
+    // tests) must not break the dispatch table.
+    setError: (message: string) => onError?.(message),
     setApprovalRequest: approvals.setApprovalRequest as (req: unknown) => void,
     showApprovalResult: approvals.showResult,
     enqueueChunk: streamQueues.enqueueChunk,

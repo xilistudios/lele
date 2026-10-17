@@ -18,6 +18,12 @@ export type MessageEventContext = {
   setStreamingMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>
   setToolStatus: React.Dispatch<React.SetStateAction<ToolStatus | null>>
   setPendingAttachments: React.Dispatch<React.SetStateAction<string[]>>
+  /**
+   * Surface a user-visible failure in the chat's error banner
+   * (`useAppLogic.error` -> `ChatPage.tsx` `ErrorBanner`). Used by the handler
+   * for the server's `error` event, so a refused send is never silent.
+   */
+  setError: (message: string) => void
   setApprovalRequest: (req: unknown) => void
   showApprovalResult: (requestId: string, approved: boolean, command: string) => void
   enqueueChunk: (messageId: string, sessionKey: string, chunk: string, done: boolean) => void

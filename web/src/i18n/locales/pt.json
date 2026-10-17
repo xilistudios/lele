@@ -141,7 +141,13 @@
     "failedToSend": "Falha ao enviar",
     "retry": "Tentar novamente",
     "archivedFromContext": "Arquivado do contexto",
-    "download": "Baixar"
+    "download": "Baixar",
+    "errorContentMissing": "Escreva uma mensagem ou anexe um arquivo",
+    "errorAttachmentsRejected": "Não foi possível ler seus anexos. Escreva um texto ou envie novamente",
+    "errorAccessDenied": "Você não tem permissão para enviar a esta sessão",
+    "errorFileTooLarge": "O arquivo é grande demais para enviar",
+    "notAuthenticated": "Você não está conectado: não é possível anexar arquivos",
+    "uploadPartial": "{{failed}} de {{total}} anexos falharam ao enviar"
   },
   "connection": {
     "connected": "Conectado",

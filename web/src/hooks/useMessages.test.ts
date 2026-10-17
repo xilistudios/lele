@@ -16,6 +16,7 @@ function createMockContext(
     streamingMessages: [],
     toolStatus: null,
     pendingAttachments: [],
+    errors: [] as string[],
     processingSessions: new Set<string>(),
     processingSessionKey: null as string | null,
     groups: new Map<string, GroupInfo>(),
@@ -50,6 +51,11 @@ function createMockContext(
       } else {
         state.pendingAttachments = updater
       }
+    },
+    // The chat error banner (server-side send refusals). Recorded so the tests
+    // can assert that a refusal is never swallowed.
+    setError: (message: string) => {
+      state.errors.push(message)
     },
     setApprovalRequest: () => {},
     showApprovalResult: () => {},
@@ -111,6 +117,8 @@ type MockState = {
   streamingMessages: ChatMessage[]
   toolStatus: ToolStatus | null
   pendingAttachments: string[]
+  /** Messages pushed to the chat error banner (server-side send refusals). */
+  errors: string[]
   processingSessions: Set<string>
   processingSessionKey: string | null
   groups: Map<string, GroupInfo>
