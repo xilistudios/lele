@@ -251,11 +251,21 @@ export function useMessages(
   // ── Send message ─────────────────────────────────────────────────────────
 
   const sendMessage = useCallback(
-    async (content: string, attachments: string[], sessionKey: string, agentId: string | null) => {
-      if (!sessionKey) return
+    async (
+      content: string,
+      attachments: string[],
+      sessionKey: string,
+      agentId: string | null,
+    ): Promise<boolean> => {
+      if (!sessionKey) return false
 
       const normalizedContent = content.trim()
-      if (normalizedContent.length === 0) return
+      // Attachments-only turns are valid: the composer allows them and the
+      // backend accepts them (pkg/channels/sendpayload.go — content OR an
+      // attachment). Only a message with neither is dropped, and the caller
+      // learns about it through the returned boolean instead of losing the
+      // draft and the chips silently.
+      if (normalizedContent.length === 0 && attachments.length === 0) return false
 
       // Snapshot BOTH confirmation signals once, before the optimistic bubble
       // enters streaming state (the snapshot must not see its own message).
@@ -287,6 +297,7 @@ export function useMessages(
         agent_id: agentId ?? undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
       })
+      return true
     },
     [wsSend, getHistorySendAnchor, streamMetrics.clearMetrics],
   )
@@ -300,11 +311,15 @@ export function useMessages(
 
       // Remove the failed message from streaming state
       setStreamingMessages((current) => current.filter((m) => m.id !== failedMessage.id))
-      // Re-send
+      // Re-send the same payload, attachments included (a retried
+      // attachments-only turn must stay attachments-only).
       const attachmentPaths = (failedMessage.attachments ?? [])
         .map((a) => a.path ?? '')
         .filter(Boolean)
-      sendMessage(failedMessage.content, attachmentPaths, sessionKey, null)
+      // The removed bubble is restored by sendMessage's optimistic insert; a
+      // `false` (nothing left to send) simply leaves it removed instead of
+      // re-adding a bubble the server would never confirm.
+      void sendMessage(failedMessage.content, attachmentPaths, sessionKey, null)
     },
     [sendMessage],
   )

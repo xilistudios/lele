@@ -383,7 +383,18 @@ export function useAppLogic(
         return false
       }
 
-      await messagesHook.sendMessage(content, attachments, sessionKey, currentAgentId)
+      const accepted = await messagesHook.sendMessage(
+        content,
+        attachments,
+        sessionKey,
+        currentAgentId,
+      )
+      if (!accepted) {
+        // Nothing was sent (empty message, or the turn could not be accepted):
+        // keep the draft AND the attachment chips so the user can act, and do
+        // not touch the session activity/title for a turn that never happened.
+        return false
+      }
       messagesHook.setPendingAttachments([])
       // Optimistic update: bump updated timestamp immediately so the sidebar
       // shows the session activity instead of "New Chat"

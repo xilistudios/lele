@@ -279,3 +279,72 @@ describe('handleHistoryUpdated — reasoning-only assistant iterations', () => {
     expect(getStreaming().some((m) => m.id === 'ack-uuid-inflight')).toBe(true)
   })
 })
+
+/**
+ * Attachments-only sends (text `''` + attachments) are the OTHER shape whose
+ * confirmation identity cannot be its content: `confirmationIdentity` returns
+ * '' and an empty prefix matches no cached copy, so the bubble was immortal here
+ * too — this is the `message.complete` / `history.updated` half of the fix in
+ * `messageMerge.collectConfirmCandidates` (see
+ * hooks/attachmentsOnlySend.test.ts for the merge half). The image therefore
+ * rendered twice: once from the staging path, once from the persisted one.
+ */
+describe('handleHistoryUpdated — attachments-only optimistic users', () => {
+  const STAGING = '/lele/tmp/uploads/ab12cd34_photo.jpg'
+  const PERSISTED = '/data/lele/attachments/20261017/ff99aa11_photo.jpg'
+
+  const attachmentsOnlyOptimistic = () =>
+    msg('temp-user-attach', 'user', '', {
+      optimistic: true,
+      optimisticBaseCount: 0,
+      attachments: [{ path: STAGING, name: 'photo.jpg', kind: 'image' }],
+    })
+
+  test('strips the bubble once the cache holds the parsed persisted copy', () => {
+    const base = toChatMessages(
+      [{ id: 'h1', role: 'user', content: `## Attachments\n- ${PERSISTED}` }],
+      's1',
+    )
+    // The parsed copy has NO content (`parseAttachmentsFromContent` moved the
+    // marker into `attachments`) — exactly what the history cache stores.
+    expect(base[0].content).toBe('')
+    expect(base[0].attachments?.length).toBe(1)
+
+    const { ctx, getStreaming } = makeCtx([attachmentsOnlyOptimistic()], base)
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(getStreaming().some((m) => m.optimistic)).toBe(false)
+  })
+
+  test('strips it for the raw history shape too (marker still in content)', () => {
+    const raw = msg('h1', 'user', `## Attachments\n- ${PERSISTED}`)
+    const { ctx, getStreaming } = makeCtx([attachmentsOnlyOptimistic()], [raw])
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(getStreaming().some((m) => m.optimistic)).toBe(false)
+  })
+
+  test('keeps it while the cache has no twin yet (no over-strip / no flicker)', () => {
+    const other = msg('h1', 'user', 'a completely different question')
+    const { ctx, getStreaming } = makeCtx([attachmentsOnlyOptimistic()], [other])
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(getStreaming().some((m) => m.optimistic)).toBe(true)
+  })
+
+  test('keeps it when the cached user carries BOTH text and attachments', () => {
+    // Same attachment, but the cached turn has text → its identity is that text,
+    // not the marker, so it cannot vouch for an attachments-only send.
+    const withText = msg('h1', 'user', 'look at this', {
+      attachments: [{ path: PERSISTED, name: 'photo.jpg', kind: 'image' }],
+    })
+    const { ctx, getStreaming } = makeCtx([attachmentsOnlyOptimistic()], [withText])
+
+    handleHistoryUpdated(ctx, { session_key: 's1' })
+
+    expect(getStreaming().some((m) => m.optimistic)).toBe(true)
+  })
+})

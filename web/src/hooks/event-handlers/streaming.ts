@@ -13,6 +13,7 @@
 import { wsDebug } from '../../lib/debug'
 import { assistantIdentityText } from '../../lib/messageIdentity'
 import type { ChatMessage, GroupSnapshot, HistoryToolCall } from '../../lib/types'
+import { isAttachmentsOnly, isAttachmentsOnlyBase } from '../messageMerge'
 import { registerStableId } from '../stableIdRegistry'
 import {
   applyMessageComplete,
@@ -265,9 +266,18 @@ function confirmationIdentity(msg: ChatMessage): string {
  * Whether a streaming message already has a confirmed (non-optimistic) copy in
  * the HTTP cache, matched by a 200-char identity prefix (see
  * `confirmationIdentity`). The prefix comparison tolerates minor server-side
- * normalization (trailing newlines, unicode). An empty prefix never matches, so
- * empty messages are kept and reconciled by the 4s HTTP polling safety net
- * instead.
+ * normalization (trailing newlines, unicode).
+ *
+ * An empty prefix matches no content, and for a LONG time that was harmless
+ * because such a message could not be sent. It is not harmless for an
+ * attachments-only turn (valid since the composer and the backend accept it):
+ * the bubble would never be confirmed here. The old comment claimed a "4s HTTP
+ * polling safety net" reconciled it, but that net is this very function — the
+ * poll refetches the history and `handleHistoryUpdated`/`mergeMessages` ask the
+ * same question again — so the bubble stayed forever and the image rendered
+ * twice once the history copy landed. Such a turn is therefore confirmed
+ * through the marker identity shared with `mergeMessages` (see
+ * `isAttachmentsOnly` / `isAttachmentsOnlyBase`).
  */
 function isConfirmedInCache(
   msg: ChatMessage,
@@ -281,7 +291,10 @@ function isConfirmedInCache(
   }
 
   const prefix = confirmationIdentity(msg).slice(0, 200)
-  if (prefix.length === 0) return false
+  if (prefix.length === 0) {
+    if (!isAttachmentsOnly(msg)) return false
+    return cached?.messages?.some((bm) => isAttachmentsOnlyBase(bm)) ?? false
+  }
   return (
     cached?.messages?.some((bm) => {
       if (msg.role === 'user') {
