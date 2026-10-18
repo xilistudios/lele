@@ -1059,6 +1059,7 @@
     "sendFile": "Sending file",
     "commandApplied": "Command applied",
     "goal": "Goal review",
+    "systemNotice": "System notice",
     "genericAction": "Action"
   },
   "sidebar": {

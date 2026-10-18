@@ -147,6 +147,37 @@ export function formatToolCallArgs(toolCall: HistoryToolCall): string {
 }
 
 // ---------------------------------------------------------------------------
+// System notices
+// ---------------------------------------------------------------------------
+
+/**
+ * Synthetic tool name used to render a system notice (`[System: <sender>] …`)
+ * through ToolCallDisplay. Deliberately NOT a real backend tool name (no tool in
+ * pkg/tools is called `system_notice`), so it can never collide with a live card.
+ */
+export const SYSTEM_NOTICE_TOOL_NAME = 'system_notice'
+
+/**
+ * Parses a synthetic system notice persisted by the backend. Returns undefined
+ * for anything that is not exactly `[System: <sender>] <body>` at the START of
+ * the content (a user may legitimately type "[System: …" mid-sentence).
+ * An empty body is allowed; an empty sender is not.
+ *
+ * Known false positive: a real user message that literally starts with
+ * "[System: …" is classified here too. Accepted on purpose — the backend uses
+ * "[System:" as the canonical synthetic marker (pkg/session/context.go:49,
+ * isHumanUserMessage), so the frontend mirrors backend semantics instead of
+ * inventing a second rule.
+ */
+export function parseSystemNotice(content: string): { sender: string; body: string } | undefined {
+  const match = /^\[System:\s*([^\]]+)\]\s*([\s\S]*)$/.exec(content ?? '')
+  if (!match) return undefined
+  const sender = match[1].trim()
+  if (sender === '') return undefined
+  return { sender, body: match[2].trim() }
+}
+
+// ---------------------------------------------------------------------------
 // Harness command chip
 // ---------------------------------------------------------------------------
 
@@ -252,6 +283,7 @@ interface UserMessageProps extends BaseMessageProps {
   optimistic?: boolean
   optimisticBaseCount?: number
   optimisticAnchorId?: string
+  systemNotice?: { sender: string; body: string }
 }
 
 interface AssistantMessageProps extends BaseMessageProps {
@@ -281,6 +313,7 @@ export function createUserMessage(props: UserMessageProps): ChatMessage {
     optimistic: props.optimistic,
     optimisticBaseCount: props.optimisticBaseCount,
     optimisticAnchorId: props.optimisticAnchorId,
+    systemNotice: props.systemNotice,
     excludeFromContext: props.excludeFromContext,
     stableId: props.stableId,
   }
@@ -403,6 +436,7 @@ export function toChatMessages(history: RawHistoryMessage[], sessionKey: string)
       // the model receives on replay); the UI shows the original "/name args"
       // the user typed when the backend carried it.
       const userContent = message.display_content || messageContent
+      const systemNotice = parseSystemNotice(userContent)
 
       // Signature-based duplicate detection above compares `message.content`
       // (the canonical text), so display changes cannot break dedup.
@@ -413,6 +447,7 @@ export function toChatMessages(history: RawHistoryMessage[], sessionKey: string)
         attachments: parsedAttachments,
         excludeFromContext: message.exclude_from_context,
         stableId,
+        systemNotice,
       })
 
       // Command-driven turn: re-render the chip from history (the live WS card

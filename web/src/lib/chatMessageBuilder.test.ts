@@ -14,6 +14,7 @@ import {
   normalizeCommandArgs,
   parseAttachmentsFromContent,
   parseSubagentSessionKey,
+  parseSystemNotice,
   toChatMessages,
 } from './chatMessageBuilder'
 import type { HistoryToolCall, RawHistoryMessage } from './types'
@@ -603,4 +604,107 @@ describe('command chip (harness commands in history)', () => {
     expect(result).toHaveLength(1)
     expect(result[0].role).toBe('user')
   })
+})
+describe('parseSystemNotice', () => {
+  interface Row {
+    name: string
+    input: string
+    want: { sender: string; body: string } | undefined
+  }
+
+  const rows: Row[] = [
+    {
+      name: 'subagent notice keeps its multiline body',
+      input: '[System: subagent] Subagent status update.\nTask ID: t1',
+      want: { sender: 'subagent', body: 'Subagent status update.\nTask ID: t1' },
+    },
+    {
+      name: 'cron notice',
+      input: '[System: cron] Daily digest ready',
+      want: { sender: 'cron', body: 'Daily digest ready' },
+    },
+    {
+      name: 'no space after the colon',
+      input: '[System:subagent]no space',
+      want: { sender: 'subagent', body: 'no space' },
+    },
+    {
+      name: 'empty body is allowed',
+      input: '[System: subagent]',
+      want: { sender: 'subagent', body: '' },
+    },
+    {
+      name: 'mid-sentence marker is not a notice (not anchored at start)',
+      input: 'hello [System: subagent] mid-sentence',
+      want: undefined,
+    },
+    {
+      name: 'missing colon is not a notice',
+      input: '[System] no colon',
+      want: undefined,
+    },
+    {
+      name: 'empty sender is not a notice',
+      input: '[System: ] empty sender',
+      want: undefined,
+    },
+    {
+      name: 'empty string is not a notice',
+      input: '',
+      want: undefined,
+    },
+    {
+      name: 'plain user text is not a notice',
+      input: 'plain user text',
+      want: undefined,
+    },
+    {
+      name: 'sender is bounded by the first `]`',
+      // The sender group is `[^\]]+`: the FIRST `]` closes it, so "b]c" is body.
+      // A greedy `(.+)` would swallow "b]c" into the sender and break this row.
+      input: '[System: a]b]c',
+      want: { sender: 'a', body: 'b]c' },
+    },
+    {
+      name: 'body is trimmed',
+      // The backend emits the synthetic content with a trailing newline; the
+      // parser `.trim()`s the body. Removing that `.trim()` breaks this row.
+      input: '[System: cron] x \n',
+      want: { sender: 'cron', body: 'x' },
+    },
+  ]
+
+  for (const row of rows) {
+    test(row.name, () => {
+      expect(parseSystemNotice(row.input)).toEqual(row.want)
+    })
+  }
+})
+
+test("toChatMessages: un aviso de sistema mantiene role 'user' y content intacto y se marca con systemNotice", () => {
+  const content = '[System: subagent] Subagent status update.\nTask ID: t1'
+  const history: RawHistoryMessage[] = [{ id: 'h1', role: 'user', content }]
+
+  const result = toChatMessages(history, 'session:1')
+
+  expect(result).toHaveLength(1)
+  // NO debe convertirse a 'tool': el merge cuenta usuarios base (messageMerge
+  // compara conteos de role 'user') y rompería la aritmética de orden.
+  expect(result[0].role).toBe('user')
+  expect(result[0].content).toBe(content)
+  expect(result[0].systemNotice).toEqual({
+    sender: 'subagent',
+    body: 'Subagent status update.\nTask ID: t1',
+  })
+})
+
+test('toChatMessages: plain user text is not marked with systemNotice', () => {
+  const history: RawHistoryMessage[] = [{ id: 'h2', role: 'user', content: 'hola' }]
+
+  const result = toChatMessages(history, 'session:1')
+
+  expect(result).toHaveLength(1)
+  expect(result[0].role).toBe('user')
+  expect(result[0].content).toBe('hola')
+  expect(result[0].systemNotice).toBeUndefined()
 })
