@@ -438,6 +438,19 @@
       "tool_call": true
     },
     {
+      "id": "deepseek/deepseek-v4.1-flash-1017",
+      "name": "DeepSeek V4.1 Flash 1017",
+      "context_window": 1048576,
+      "max_output": 393216,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "google/gemma-4-26b-a4b-it",
       "name": "Gemma 4 26B A4B IT",
       "context_window": 262144,
@@ -487,20 +500,6 @@
       "vision": true,
       "thinking_levels": [
         "low",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "stepfun/step-3.7-flash",
-      "name": "Step 3.7 Flash",
-      "context_window": 262144,
-      "max_output": 256000,
-      "vision": true,
-      "thinking_levels": [
-        "low",
-        "medium",
         "high"
       ],
       "reasoning": true,
