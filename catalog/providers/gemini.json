@@ -266,6 +266,20 @@
       "tool_call": true
     },
     {
+      "id": "gemini-4-argon",
+      "name": "Gemini 4 Argon",
+      "context_window": 1048576,
+      "max_output": 32768,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "gemini-flash-latest",
       "name": "Gemini Flash Latest",
       "context_window": 1048576,

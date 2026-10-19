@@ -57,6 +57,19 @@
       "tool_call": true
     },
     {
+      "id": "accounts/fireworks/models/deepseek-v4p1-flash-1017",
+      "name": "DeepSeek V4.1 Flash 1017",
+      "context_window": 1000000,
+      "max_output": 384000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "accounts/fireworks/models/ember-1",
       "name": "Ember-1",
       "context_window": 1048576,
@@ -100,6 +113,20 @@
     {
       "id": "accounts/fireworks/models/kimi-k3",
       "name": "Kimi K3",
+      "context_window": 1048576,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "accounts/fireworks/models/muse-spark-open",
+      "name": "Muse Spark Open",
       "context_window": 1048576,
       "max_output": 131072,
       "vision": true,
@@ -275,19 +302,6 @@
       "max_output": 262144,
       "thinking_levels": [
         "low",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "accounts/fireworks/routers/minimax-latest",
-      "name": "MiniMax Latest",
-      "context_window": 512000,
-      "max_output": 512000,
-      "thinking_levels": [
-        "low",
-        "medium",
         "high"
       ],
       "reasoning": true,
