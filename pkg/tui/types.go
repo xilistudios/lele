@@ -75,11 +75,13 @@ type groupMeta struct {
 	synthesis    string // final synthesis content from group.complete
 }
 
-// subagentClickTarget tracks the position of a subagent item in the sidebar for mouse click handling
+// subagentClickTarget tracks a clickable row for mouse click handling: a
+// subagent item in the sidebar, or the status line's "back to parent chat"
+// affordance while a subagent session is on screen.
 type subagentClickTarget struct {
-	yStart int    // Starting Y position in the sidebar (0-indexed from top of content area)
-	yEnd   int    // Ending Y position in the sidebar
-	key    string // Session key for this subagent
+	yStart int    // Starting Y position in the frame (0-indexed from top of content area)
+	yEnd   int    // Ending Y position in the frame
+	key    string // Session key for this target
 }
 
 // subagentsCacheState is the subagent listing the render path serves (T6).
@@ -825,6 +827,14 @@ type Model struct {
 
 	// Subagent click targets in sidebar — tracks Y positions for mouse clicks
 	subagentClickTargets []subagentClickTarget
+
+	// backToParentClick is the status-line row carrying the "back to parent
+	// chat" affordance while a subagent session is on screen. renderLeftColumn
+	// recomputes it on every chat frame; View() clears the flag first, so
+	// hasBackToParentClick is only true while the row it describes is actually
+	// on screen (never on welcome/modals-over-welcome frames).
+	backToParentClick    subagentClickTarget
+	hasBackToParentClick bool
 
 	// mouseEnabled tracks whether mouse capture is active (default: true).
 	// When enabled, scroll-wheel and sidebar clicks work; users hold Shift
