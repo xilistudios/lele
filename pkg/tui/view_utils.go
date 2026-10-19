@@ -1,5 +1,26 @@
 package tui
 
+import (
+	"strings"
+
+	"github.com/charmbracelet/x/ansi"
+)
+
+// leadingBlankRows counts the blank rows a rendered block opens with. It exists
+// for click-target math: styles own their margins (StatusLineStyle renders
+// MarginTop(1) as a blank row above the text), so a target that must point at
+// the visible text has to skip those rows.
+func leadingBlankRows(s string) int {
+	rows := 0
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(ansi.Strip(line)) != "" {
+			return rows
+		}
+		rows++
+	}
+	return rows
+}
+
 // calculateViewportHeight reserves every line rendered below the viewport.
 // Keeping this budget exact prevents the input and bottom bar from spilling
 // past the terminal height and being painted twice by the TUI renderer.

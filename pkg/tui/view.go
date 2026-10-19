@@ -35,6 +35,12 @@ func (m *Model) View() string {
 	m.beginRenderFrame()
 	defer m.endRenderFrame()
 
+	// The "back to parent" click target points at a row of the chat layout's
+	// status line. Clear it here — before the screen branch — so screens that
+	// do not draw that line (welcome, onboarding) can never leave a stale row
+	// behind for the mouse handler to hit.
+	m.hasBackToParentClick = false
+
 	if m.showWelcome {
 		return m.renderWelcome()
 	}
@@ -479,6 +485,17 @@ func (m *Model) renderLeftColumn(leftWidth, contentHeight int, statusLineRendere
 	// that is running right now. Reading order then matches chronology.
 	if queueRow != "" {
 		leftBuilder.WriteString(queueRow + "\n")
+	}
+	// While a subagent session is on screen, the status line carries the
+	// "◄ back to parent chat" affordance. Track its row so a mouse click on it
+	// returns to the parent chat (the same route as ctrl+b). The target is
+	// measured from the rows written so far — the same convention
+	// renderSidebarSubagents uses for the sidebar targets — plus the blank
+	// rows the status line's own top margin renders above the text.
+	if m.parentSessionKey != "" {
+		y := lipgloss.Height(leftBuilder.String()) - 1 + leadingBlankRows(statusLineRendered)
+		m.backToParentClick = subagentClickTarget{yStart: y, yEnd: y + 1, key: m.parentSessionKey}
+		m.hasBackToParentClick = true
 	}
 	leftBuilder.WriteString(statusLineRendered + "\n")
 	if autocompleteView != "" {

@@ -46,10 +46,30 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg, cmds []tea.Cmd) (tea.Model, tea
 		}
 	}
 
-	// Handle mouse clicks on subagent items in the sidebar (only if no modal is active)
+	// Handle mouse clicks on the status line's "back to parent chat" row and
+	// on subagent items in the sidebar (only if no modal is active)
 	if m.modalMode == ModalNone && msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-		// Check if click is in the right sidebar area
 		leftWidth := int(float64(m.width) * leftColumnRatio)
+
+		// "◄ Back to parent chat" row in the subagent view: clicking the
+		// affordance returns to the parent chat — exactly the ctrl+b route.
+		// The row is tracked by renderLeftColumn (see backToParentClick).
+		if m.hasBackToParentClick && m.parentSessionKey != "" &&
+			msg.X < leftWidth-1 &&
+			msg.Y >= m.backToParentClick.yStart && msg.Y < m.backToParentClick.yEnd {
+			m.setCurrentChatKey(m.parentSessionKey)
+			m.parentSessionKey = ""
+			m.clearStreamingState()
+			m.reloadSessions()
+			m.hasBackToParentClick = false
+			// Restart tick animation if the parent session is actively processing.
+			if m.isSessionProcessing() {
+				return m, m.tickCmd()
+			}
+			return m, nil
+		}
+
+		// Check if click is in the right sidebar area
 		rightWidth := m.width - leftWidth - chatSidebarGutter - 3
 		if rightWidth < 1 {
 			rightWidth = 1
