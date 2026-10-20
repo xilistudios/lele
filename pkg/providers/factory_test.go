@@ -1,7 +1,10 @@
 package providers
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -753,5 +756,159 @@ func TestSelectionFromNamedProvider_NonAnthropicStaysHTTPCompat(t *testing.T) {
 	}
 	if sel.apiBase != "https://api.x.ai/v1" {
 		t.Fatalf("apiBase = %q, want https://api.x.ai/v1", sel.apiBase)
+	}
+}
+
+func TestOpenCodeGoSessionHeader(t *testing.T) {
+	tests := []struct {
+		name         string
+		providerName string
+		typ          string
+		apiBase      string
+		want         string
+	}{
+		{
+			name:         "canonical name and type",
+			providerName: "opencode_go",
+			typ:          "opencode_go",
+			apiBase:      "https://opencode.ai/zen/go/v1",
+			want:         openCodeGoSessionHeaderName,
+		},
+		{
+			name:         "detected by type",
+			providerName: "my-oc",
+			typ:          "opencode_go",
+			apiBase:      "https://proxy.internal/v1",
+			want:         openCodeGoSessionHeaderName,
+		},
+		{
+			name:         "detected by type, dash spelling",
+			providerName: "my-oc",
+			typ:          "opencode-go",
+			apiBase:      "https://proxy.internal/v1",
+			want:         openCodeGoSessionHeaderName,
+		},
+		{
+			name:         "detected by api base",
+			providerName: "oc-alias",
+			typ:          "openai",
+			apiBase:      "https://opencode.ai/inference/go/openai/v1",
+			want:         openCodeGoSessionHeaderName,
+		},
+		{
+			name:         "openai untouched",
+			providerName: "openai",
+			typ:          "openai",
+			apiBase:      "https://api.openai.com/v1",
+			want:         "",
+		},
+		{
+			name:         "local proxy untouched",
+			providerName: "myproxy",
+			typ:          "openai",
+			apiBase:      "http://127.0.0.1:8080/v1",
+			want:         "",
+		},
+		{
+			// Documented over-match: Zen shares the opencode.ai host; the
+			// extra header is inert for Zen.
+			name:         "opencode zen shares host over-matches",
+			providerName: "opencode",
+			typ:          "opencode",
+			apiBase:      "https://opencode.ai/zen/v1",
+			want:         openCodeGoSessionHeaderName,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sel := &providerSelection{
+				providerName:     tt.providerName,
+				providerTypeName: tt.typ,
+				apiBase:          tt.apiBase,
+			}
+			if got := openCodeGoSessionHeader(sel); got != tt.want {
+				t.Fatalf("openCodeGoSessionHeader() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// startFactoryHeaderServer starts a server that records the session header of
+// the first inference request and answers with a minimal valid completion.
+// Returns the server URL and a getter for the captured header value.
+func startFactoryHeaderServer(t *testing.T) (string, func() string) {
+	t.Helper()
+	var captured string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r.Header.Get("X-Opencode-Session")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message":       map[string]interface{}{"content": "ok"},
+					"finish_reason": "stop",
+				},
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+	return server.URL, func() string { return captured }
+}
+
+func TestCreateProviderForCandidate_OpenCodeGoSendsSessionHeader(t *testing.T) {
+	apiBase, sessionHeader := startFactoryHeaderServer(t)
+
+	cfg := config.DefaultConfig()
+	if cfg.Providers.Named == nil {
+		cfg.Providers.Named = map[string]config.NamedProviderConfig{}
+	}
+	cfg.Providers.Named["opencode_go"] = config.NamedProviderConfig{
+		Type: "opencode_go",
+		ProviderConfig: config.ProviderConfig{
+			APIKey:  "oc-key",
+			APIBase: apiBase,
+		},
+	}
+
+	p, err := CreateProviderForCandidate(cfg, "opencode_go")
+	if err != nil {
+		t.Fatalf("CreateProviderForCandidate() error = %v", err)
+	}
+	options := map[string]interface{}{OptWireSessionID: "abc"}
+	if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, "gpt-5.6-luna", options); err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	if got := sessionHeader(); got != "abc" {
+		t.Fatalf("x-opencode-session = %q, want %q", got, "abc")
+	}
+}
+
+func TestCreateProviderForCandidate_NonOpenCodeDoesNotSendSessionHeader(t *testing.T) {
+	apiBase, sessionHeader := startFactoryHeaderServer(t)
+
+	cfg := config.DefaultConfig()
+	if cfg.Providers.Named == nil {
+		cfg.Providers.Named = map[string]config.NamedProviderConfig{}
+	}
+	cfg.Providers.Named["openai"] = config.NamedProviderConfig{
+		Type: "openai",
+		ProviderConfig: config.ProviderConfig{
+			APIKey:  "sk-test",
+			APIBase: apiBase,
+		},
+	}
+
+	p, err := CreateProviderForCandidate(cfg, "openai")
+	if err != nil {
+		t.Fatalf("CreateProviderForCandidate() error = %v", err)
+	}
+	options := map[string]interface{}{OptWireSessionID: "abc"}
+	if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, "gpt-4o", options); err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	if got := sessionHeader(); got != "" {
+		t.Fatalf("x-opencode-session = %q, want absent", got)
 	}
 }

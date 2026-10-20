@@ -19,8 +19,14 @@ type HTTPProvider struct {
 var _ StreamingLLMProvider = (*HTTPProvider)(nil)
 
 func NewHTTPProvider(apiKey, apiBase, proxy string) *HTTPProvider {
+	return NewHTTPProviderWithOptions(apiKey, apiBase, proxy, openai_compat.Options{})
+}
+
+// NewHTTPProviderWithOptions creates an HTTPProvider with static transport
+// extras (e.g. the OpenCode Go session header).
+func NewHTTPProviderWithOptions(apiKey, apiBase, proxy string, opts openai_compat.Options) *HTTPProvider {
 	return &HTTPProvider{
-		delegate: openai_compat.NewProvider(apiKey, apiBase, proxy),
+		delegate: openai_compat.NewProviderWithOptions(apiKey, apiBase, proxy, opts),
 	}
 }
 

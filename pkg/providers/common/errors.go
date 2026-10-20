@@ -4,12 +4,19 @@
 package common
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// ErrMissingWireSession reports that a transport configured to send a session
+// header received no session id from the caller: a call site is missing
+// providers.WithWireSessionID. Failing here (instead of letting the upstream
+// answer 400) names the missing option and the fix.
+var ErrMissingWireSession = errors.New("wire session id missing")
 
 // MaxRetryAfter caps how long we are willing to wait because a server asked
 // for it. Providers are not trusted to be sane: a typo'd or hostile

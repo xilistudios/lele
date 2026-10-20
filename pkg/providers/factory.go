@@ -8,6 +8,7 @@ import (
 	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/config"
 	anthropicmessages "github.com/xilistudios/lele/pkg/providers/anthropic_messages"
+	"github.com/xilistudios/lele/pkg/providers/openai_compat"
 )
 
 const defaultAnthropicAPIBase = "https://api.anthropic.com/v1"
@@ -42,6 +43,13 @@ type providerSelection struct {
 	workspace       string
 	connectMode     string
 	enableWebSearch bool
+	// providerName is the configured provider key (the Named entry name, or the
+	// provider key when no Named entry exists). Detection only — never used to
+	// select a transport.
+	providerName string
+	// providerTypeName is the configured `type` string (Named.Type, else the
+	// provider key). Detection only.
+	providerTypeName string
 }
 
 // defaultAPIBaseByType returns the default API base URL for a provider type.
@@ -64,18 +72,47 @@ func defaultAPIBaseByType(providerType string) string {
 	return ""
 }
 
+// openCodeGoSessionHeaderName is the header the OpenCode Go gateway requires on
+// inference calls; without it every request fails with 400 MissingSessionID
+// (validated before auth).
+const openCodeGoSessionHeaderName = "x-opencode-session"
+
+// openCodeGoSessionHeader returns the session header name for this selection,
+// or "" for every other target.
+//
+// Detection mirrors the existing "/anthropic" api_base sniff: the provider may
+// be named anything, so api_base is the durable signal; the canonical name and
+// type spellings cover the "same host behind a proxy" case. A substring match
+// is intentionally as loose as the /anthropic precedent (it also matches e.g.
+// "not-opencode.ai") — erring toward sending the header is harmless, erring
+// toward omitting it is a hard failure.
+func openCodeGoSessionHeader(sel *providerSelection) string {
+	for _, s := range []string{sel.providerName, sel.providerTypeName} {
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "opencode_go", "opencode-go":
+			return openCodeGoSessionHeaderName
+		}
+	}
+	if strings.Contains(strings.ToLower(sel.apiBase), "opencode.ai") {
+		return openCodeGoSessionHeaderName
+	}
+	return ""
+}
+
 func selectionFromNamedProvider(cfg *config.Config, providerName, model string, named config.NamedProviderConfig) (providerSelection, error) {
 	typ := named.Type
 	if typ == "" {
 		typ = providerName
 	}
 	sel := providerSelection{
-		providerType: providerTypeHTTPCompat,
-		apiKey:       named.APIKey,
-		apiBase:      named.APIBase,
-		proxy:        named.Proxy,
-		model:        model,
-		connectMode:  named.ConnectMode,
+		providerType:     providerTypeHTTPCompat,
+		apiKey:           named.APIKey,
+		apiBase:          named.APIBase,
+		proxy:            named.Proxy,
+		model:            model,
+		connectMode:      named.ConnectMode,
+		providerName:     providerName,
+		providerTypeName: typ,
 	}
 
 	if mc, ok := named.Models[model]; ok {
@@ -327,8 +364,10 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 	lowerModel := strings.ToLower(model)
 
 	sel := providerSelection{
-		providerType: providerTypeHTTPCompat,
-		model:        model,
+		providerType:     providerTypeHTTPCompat,
+		model:            model,
+		providerName:     providerName,
+		providerTypeName: providerName,
 	}
 
 	// First, prefer explicit provider configuration.
@@ -704,6 +743,7 @@ func CreateProviderForCandidate(cfg *config.Config, providerName string) (LLMPro
 }
 
 func createProviderFromSelection(sel *providerSelection) (LLMProvider, error) {
+	sessionHeader := openCodeGoSessionHeader(sel)
 	switch sel.providerType {
 	case providerTypeClaudeAuth:
 		return createClaudeAuthProvider(sel.apiBase)
@@ -722,8 +762,8 @@ func createProviderFromSelection(sel *providerSelection) (LLMProvider, error) {
 	case providerTypeGitHubCopilot:
 		return NewGitHubCopilotProvider(sel.apiBase, sel.connectMode, sel.model)
 	case providerTypeAnthropic:
-		return anthropicmessages.NewProvider(sel.apiKey, sel.apiBase), nil
+		return anthropicmessages.NewProviderWithOptions(sel.apiKey, sel.apiBase, anthropicmessages.Options{SessionHeader: sessionHeader}), nil
 	default:
-		return NewHTTPProvider(sel.apiKey, sel.apiBase, sel.proxy), nil
+		return NewHTTPProviderWithOptions(sel.apiKey, sel.apiBase, sel.proxy, openai_compat.Options{SessionHeader: sessionHeader}), nil
 	}
 }
