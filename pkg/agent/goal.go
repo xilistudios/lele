@@ -628,6 +628,9 @@ func (j *SummaryGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText s
 			"enabled": false,
 		},
 	}
+	// Same conversation-scoped wire identity as the main loop (see
+	// pkg/agent/llm_caller.go buildLLMOptions).
+	options = providers.WithWireSessionID(options, sessionKey)
 	// Per-model think system (providers.<name>.models.<alias>.thinking_type):
 	// lets the provider render the disable in the dialect the endpoint
 	// understands (e.g. MiMo/DeepSeek `thinking: {"type": "disabled"}`).

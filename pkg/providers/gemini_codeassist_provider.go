@@ -202,6 +202,9 @@ const codeAssistFunctionCallingModeAuto = "AUTO"
 //     session. jcode always sends `resume_session_id` or the session cached in
 //     its runtime state. lele has no equivalent runtime-state cache, so the
 //     field stays caller-supplied and is normally omitted.
+//     `wire_session_id` (pkg/providers/protocoltypes) is a different contract:
+//     it is stamped by the agent loop for transports that need a routing
+//     header, and is never read here.
 //   - The response parser does not map `promptFeedback`/`blockReason`/
 //     `finishMessage`: a safety-blocked response therefore surfaces as the
 //     generic "no candidates" error, and a SAFETY/RECITATION finish reason is

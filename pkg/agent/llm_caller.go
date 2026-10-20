@@ -222,6 +222,17 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 		}
 	}
 
+	// Conversation-scoped wire identity (e.g. OpenCode Go's x-opencode-session).
+	// The value is conversation-scoped and providers are rebuilt for every call
+	// (factory.go createProviderFromSelection), so it cannot live on the provider
+	// instance: it travels through the per-call options map.
+	//
+	// Stamped here because buildLLMOptions is the single place every main-loop
+	// egress takes its options from: the direct call (:320), both fallback paths
+	// (:347, :355) and the streaming path (:292) all share this map — group turns
+	// (group_turn.go:182,285,349) and retries included.
+	llmOptions = providers.WithWireSessionID(llmOptions, opts.sessionKey)
+
 	return llmOptions
 }
 

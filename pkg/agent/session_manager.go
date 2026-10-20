@@ -719,6 +719,10 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 		summarizeOpts["temperature"] = 0.3
 	}
 
+	// Same conversation-scoped wire identity as the main loop; the summarizer is
+	// an inference call like any other.
+	summarizeOpts = providers.WithWireSessionID(summarizeOpts, sessionKey)
+
 	resp, err := providers.ChatIdle(ctx, summarizeProvider, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, summarizeOpts)
 
 	// Retry without temperature if the model rejects it (safety net for
