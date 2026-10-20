@@ -9,10 +9,12 @@
 // RunToolLoop is stamped from the fallback chain SessionKey → OwnerSessionKey
 // (C7/D8): an async subagent sets SessionKey (subagent_runner.go), the
 // synchronous in-context subagent sets only OwnerSessionKey (subagent_tool.go),
-// and neither key means "no session" — the option is then ABSENT, never "".
-// The tests below cover both real chains, the exported CompactLoopMessages
-// helper (whose session key is a compile-enforced parameter, C6), the exact
-// value, and the non-mutation of the caller-owned LLMOptions map.
+// and when neither key is set the stamp falls back to the shared unkeyed
+// bucket (providers.WireSessionID("")) — it is never skipped, so unkeyed
+// egresses still satisfy required providers (FIX-C). The tests below cover both
+// real chains, the exported CompactLoopMessages helper (whose session key is a
+// compile-enforced parameter, C6), the exact value, and the non-mutation of
+// the caller-owned LLMOptions map.
 
 package tools
 
@@ -61,8 +63,9 @@ func (p *optionsCaptureProvider) lastOptions(t *testing.T) map[string]interface{
 	return p.options[len(p.options)-1]
 }
 
-// stampedSessionID extracts the wire_session_id option; ok=false when the key
-// is absent (the required shape when there is no session).
+// stampedSessionID extracts the wire_session_id option; ok=false only when the
+// key was never stamped at all (WithWireSessionID always stamps, so production
+// call sites produce ok=true even for the unkeyed bucket).
 func stampedSessionID(opts map[string]interface{}) (string, bool) {
 	v, ok := opts[providers.OptWireSessionID]
 	if !ok {
@@ -204,12 +207,15 @@ func TestRunToolLoopFallsBackToOwnerSessionKey(t *testing.T) {
 	}
 }
 
-// TestRunToolLoopNoSessionNoHeader: neither SessionKey nor OwnerSessionKey ⇒
-// the option is ABSENT (never ""), and the negative control shows the same
-// machinery through a plain openai provider sends no header at all — so the
-// positive test cannot pass on "the handler sees everything".
-func TestRunToolLoopNoSessionNoHeader(t *testing.T) {
-	t.Run("no keys leaves the option unstamped", func(t *testing.T) {
+// TestRunToolLoopNoSessionStampsUnkeyedBucket: FIX-C — neither SessionKey
+// nor OwnerSessionKey ⇒ the stamp is the shared unkeyed bucket
+// (providers.WireSessionID("")), never absent, and the REAL OpenCode Go
+// transport accepts the call (this was the cron/unkeyed abort path before the
+// fix). The negative control shows the same machinery through a plain openai
+// provider sends no header at all — so the positive tests cannot pass on "the
+// handler sees everything".
+func TestRunToolLoopNoSessionStampsUnkeyedBucket(t *testing.T) {
+	t.Run("no keys stamps the shared unkeyed bucket", func(t *testing.T) {
 		provider := &optionsCaptureProvider{}
 		if _, err := RunToolLoop(context.Background(), ToolLoopConfig{
 			Provider:      provider,
@@ -218,8 +224,35 @@ func TestRunToolLoopNoSessionNoHeader(t *testing.T) {
 		}, []providers.Message{{Role: "user", Content: "hi"}}, "cli", "direct"); err != nil {
 			t.Fatalf("RunToolLoop: %v", err)
 		}
-		if stamped, ok := stampedSessionID(provider.lastOptions(t)); ok {
-			t.Fatalf("wire_session_id = %q, want the option absent without a session", stamped)
+		stamped, ok := stampedSessionID(provider.lastOptions(t))
+		if !ok {
+			t.Fatal("wire_session_id absent without a session: WithWireSessionID must always stamp")
+		}
+		if want := providers.WireSessionID(""); stamped != want {
+			t.Fatalf("wire_session_id = %q, want the unkeyed bucket %q", stamped, want)
+		}
+	})
+
+	t.Run("real opencode go transport accepts the unkeyed call", func(t *testing.T) {
+		rec, baseURL := newOCGOToolsServer(t)
+		cfg := leleconfig.DefaultConfig()
+		registerToolsNamedProvider(cfg, "opencode_go", "opencode_go", baseURL+"/v1")
+		provider, err := providers.CreateProviderForCandidate(cfg, "opencode_go")
+		if err != nil {
+			t.Fatalf("CreateProviderForCandidate: %v", err)
+		}
+		if _, err := RunToolLoop(context.Background(), ToolLoopConfig{
+			Provider:      provider,
+			Model:         "test-model",
+			MaxIterations: 2,
+		}, []providers.Message{{Role: "user", Content: "hi"}}, "cli", "direct"); err != nil {
+			t.Fatalf("RunToolLoop without session keys failed: %v (unkeyed egress must work against OpenCode Go)", err)
+		}
+		if rec.count() == 0 {
+			t.Fatal("recorder saw no request: the test proves nothing")
+		}
+		if h := rec.lastSessionHeader(t); h != providers.WireSessionID("") {
+			t.Fatalf("x-opencode-session = %q, want the unkeyed bucket %q", h, providers.WireSessionID(""))
 		}
 	})
 
@@ -276,13 +309,17 @@ func TestCompactLoopMessagesSendsSessionHeader(t *testing.T) {
 		}
 	})
 
-	t.Run("empty session key leaves the option absent", func(t *testing.T) {
+	t.Run("empty session key stamps the unkeyed bucket", func(t *testing.T) {
 		provider := &optionsCaptureProvider{}
 		if _, ok := CompactLoopMessages(context.Background(), provider, "test-model", messages, 2, ""); !ok {
 			t.Fatal("expected compaction to run")
 		}
-		if stamped, present := stampedSessionID(provider.lastOptions(t)); present {
-			t.Fatalf("wire_session_id = %q, want the option absent for an unknown session", stamped)
+		stamped, present := stampedSessionID(provider.lastOptions(t))
+		if !present {
+			t.Fatal("wire_session_id absent from the compaction call: the stamp is unconditional (FIX-C)")
+		}
+		if want := providers.WireSessionID(""); stamped != want {
+			t.Fatalf("wire_session_id = %q, want the unkeyed bucket %q", stamped, want)
 		}
 	})
 }

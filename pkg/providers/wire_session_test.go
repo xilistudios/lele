@@ -25,15 +25,26 @@ func TestWireSessionID(t *testing.T) {
 	if got := WireSessionID("native:951a0f6e:chat:4"); got == id {
 		t.Fatal("WireSessionID() same value for different session keys")
 	}
-	if got := WireSessionID(""); got != "" {
-		t.Fatalf("WireSessionID(%q) = %q, want %q", "", got, "")
+	// FIX-C: empty/blank keys are NOT "no id" — they map to the shared
+	// unkeyed bucket hex(sha256("")), so unkeyed egresses (cron, standalone
+	// tool loops) still satisfy required providers instead of aborting.
+	const unkeyedBucket = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	if got := WireSessionID(""); got != unkeyedBucket {
+		t.Fatalf("WireSessionID(%q) = %q, want the unkeyed bucket %q", "", got, unkeyedBucket)
 	}
-	if got := WireSessionID("   "); got != "" {
-		t.Fatalf("WireSessionID(%q) = %q, want %q", "   ", got, "")
+	if got := WireSessionID("   "); got != unkeyedBucket {
+		t.Fatalf("WireSessionID(%q) = %q, want the unkeyed bucket %q", "   ", got, unkeyedBucket)
 	}
-	// Known vector: sha256("abc").
+	if !hex64.MatchString(unkeyedBucket) {
+		t.Fatal("test setup: the unkeyed bucket must have the same 64-hex shape")
+	}
+	// Known vectors: sha256("abc") and sha256("") — the second one pins the
+	// unkeyed bucket itself so a change of the empty-key scheme fails here.
 	if got := WireSessionID("abc"); got != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" {
 		t.Fatalf("WireSessionID(%q) = %q, want known sha256 vector", "abc", got)
+	}
+	if got := WireSessionID(""); got != unkeyedBucket {
+		t.Fatalf("WireSessionID(%q) = %q, want known sha256-of-empty vector", "", got)
 	}
 }
 
@@ -45,28 +56,44 @@ func TestWithWireSessionID(t *testing.T) {
 			t.Fatal("WithWireSessionID mutated the input map")
 		}
 		if got := out[protocoltypes.OptWireSessionID]; got != WireSessionID("session-key") {
-			t.Fatalf("out[OptWireSessionID] = %v, want %q", got, WireSessionID("session-key"))
+			t.Fatalf("out[OptWireSessionID] = %v, want %q", out[protocoltypes.OptWireSessionID], WireSessionID("session-key"))
 		}
 		if got := out["max_tokens"]; got != 1234 {
 			t.Fatalf("out[max_tokens] = %v, want 1234", got)
 		}
 	})
 
-	t.Run("empty key returns identical map", func(t *testing.T) {
+	t.Run("empty key still stamps the unkeyed bucket", func(t *testing.T) {
+		// FIX-C: presence of the option = "this egress remembered to stamp";
+		// there is no skip-on-empty path anymore.
 		in := map[string]interface{}{"max_tokens": 1234}
 		out := WithWireSessionID(in, "")
-		if _, ok := out[protocoltypes.OptWireSessionID]; ok {
-			t.Fatal("empty session key must not add the option")
+		got, ok := out[protocoltypes.OptWireSessionID]
+		if !ok {
+			t.Fatal("WithWireSessionID skipped the stamp on an empty key")
 		}
-		if len(out) != len(in) {
-			t.Fatalf("len(out) = %d, want %d", len(out), len(in))
+		if want := WireSessionID(""); got != want {
+			t.Fatalf("out[OptWireSessionID] = %v, want the unkeyed bucket %q", got, want)
+		}
+		if len(out) != len(in)+1 {
+			t.Fatalf("len(out) = %d, want %d", len(out), len(in)+1)
+		}
+		if _, ok := in[protocoltypes.OptWireSessionID]; ok {
+			t.Fatal("WithWireSessionID mutated the input map")
 		}
 	})
 
-	t.Run("empty key on nil map stays nil", func(t *testing.T) {
+	t.Run("empty key on nil map returns a stamped copy", func(t *testing.T) {
 		out := WithWireSessionID(nil, "")
-		if out != nil {
-			t.Fatalf("out = %v, want nil", out)
+		if out == nil {
+			t.Fatal(`WithWireSessionID(nil, "") returned nil: the stamp must always be added`)
+		}
+		got, ok := out[protocoltypes.OptWireSessionID]
+		if !ok {
+			t.Fatal(`WithWireSessionID(nil, "") did not stamp the unkeyed bucket`)
+		}
+		if want := WireSessionID(""); got != want {
+			t.Fatalf("out[OptWireSessionID] = %v, want %q", got, want)
 		}
 	})
 

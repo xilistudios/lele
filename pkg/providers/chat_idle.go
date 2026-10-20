@@ -5,6 +5,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers/common"
@@ -67,6 +68,15 @@ func ChatIdle(
 	}
 	// Partial output already received: retrying would duplicate work and cost.
 	if started {
+		return resp, err
+	}
+	// A missing wire session id fails while the request is being BUILT, before
+	// any transport touches the wire: the non-streaming safety net below would
+	// reproduce the identical local error (and log it twice). ClassifyError
+	// already calls it terminal (FailoverFormat); FailoverFormat itself must
+	// stay retryable here because a server 400 that rejects SSE is exactly
+	// what the safety net exists for — so guard the sentinel explicitly.
+	if errors.Is(err, common.ErrMissingWireSession) {
 		return resp, err
 	}
 	// Decide whether a non-streaming retry can plausibly succeed. Note this is

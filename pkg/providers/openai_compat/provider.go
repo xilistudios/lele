@@ -40,6 +40,12 @@ type Provider struct {
 	// per-call wire session id (e.g. "x-opencode-session" for OpenCode Go).
 	// Empty means: never send it.
 	sessionHeader string
+	// sessionHeaderRequired decides what a missing session id means: true =
+	// fail the call fast with common.ErrMissingWireSession (the target was
+	// configured by explicit name/type), false = send the header only when a
+	// session id is present and silently omit it otherwise (the target was
+	// merely sniffed from api_base, review MAYOR-1).
+	sessionHeaderRequired bool
 }
 
 // Options are the static, per-instance transport extras. Conversation-scoped
@@ -49,6 +55,11 @@ type Options struct {
 	// SessionHeader is the header that carries the per-call wire session id,
 	// e.g. "x-opencode-session". Empty means: never send it.
 	SessionHeader string
+	// SessionHeaderRequired controls the reaction to a missing session id:
+	// true fails the call fast with common.ErrMissingWireSession (explicit
+	// name/type detection), false omits the header silently (opportunistic
+	// URL-sniff detection). Ignored when SessionHeader is empty.
+	SessionHeaderRequired bool
 }
 
 func NewProvider(apiKey, apiBase, proxy string) *Provider {
@@ -60,10 +71,11 @@ func NewProviderWithOptions(apiKey, apiBase, proxy string, opts Options) *Provid
 	client := common.NewStreamingHTTPClient(proxy)
 
 	return &Provider{
-		apiKey:        apiKey,
-		apiBase:       strings.TrimRight(apiBase, "/"),
-		httpClient:    client,
-		sessionHeader: opts.SessionHeader,
+		apiKey:                apiKey,
+		apiBase:               strings.TrimRight(apiBase, "/"),
+		httpClient:            client,
+		sessionHeader:         opts.SessionHeader,
+		sessionHeaderRequired: opts.SessionHeaderRequired,
 	}
 }
 
@@ -81,6 +93,12 @@ func (p *Provider) setRequestHeaders(req *http.Request, options map[string]inter
 	}
 	sessionID := protocoltypes.WireSessionFromOptions(options)
 	if sessionID == "" {
+		if !p.sessionHeaderRequired {
+			// Opportunistic header (URL-sniff detection): without a session id
+			// we omit it and let the upstream answer its own descriptive 400
+			// if it cares — a lookalike or unkeyed egress must not fail here.
+			return nil
+		}
 		return fmt.Errorf("%w: this provider requires %q and the call carried no %q option (a call site is missing providers.WithWireSessionID)",
 			common.ErrMissingWireSession, p.sessionHeader, protocoltypes.OptWireSessionID)
 	}

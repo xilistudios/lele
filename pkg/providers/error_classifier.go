@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/xilistudios/lele/pkg/providers/common"
 )
 
 // errorPattern defines a single pattern (string or regex) for error classification.
@@ -161,6 +163,22 @@ func ClassifyError(err error, provider, model string) *FailoverError {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return &FailoverError{
 			Reason:   FailoverTimeout,
+			Provider: provider,
+			Model:    model,
+			Wrapped:  err,
+		}
+	}
+
+	// Missing wire session id: a call site forgot providers.WithWireSessionID.
+	// The failure happens locally while building the request — no server, no
+	// transport and no fallback candidate can change the outcome — so retrying
+	// the identical call is useless by definition. FailoverFormat-style
+	// terminal keeps the retry layers (ChatWithRetry's 3×5s backoff, the
+	// subagent retry budget, the fallback chain's cooldown) from burning their
+	// whole budget on a deterministic programming error (review MENOR-1).
+	if errors.Is(err, common.ErrMissingWireSession) {
+		return &FailoverError{
+			Reason:   FailoverFormat,
 			Provider: provider,
 			Model:    model,
 			Wrapped:  err,

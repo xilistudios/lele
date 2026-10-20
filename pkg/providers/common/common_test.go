@@ -870,7 +870,4 @@ func TestUserAgent_IsLeleVersioned(t *testing.T) {
 	if got := UserAgent(); got != want {
 		t.Fatalf("UserAgent() = %q, want %q", got, want)
 	}
-	if got := UserAgent(); !strings.HasPrefix(got, "lele/") {
-		t.Fatalf("UserAgent() = %q, want prefix %q", got, "lele/")
-	}
 }

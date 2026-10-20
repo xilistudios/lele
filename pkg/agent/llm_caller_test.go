@@ -694,10 +694,12 @@ func TestBuildLLMOptions_StampsWireSessionID(t *testing.T) {
 	}
 }
 
-// TestBuildLLMOptions_NoWireSessionIDWithoutSessionKey: with no session key
-// the option must be ABSENT, not "" — "no session" stays distinguishable from
-// "empty session" and no transport ever sends an empty header value.
-func TestBuildLLMOptions_NoWireSessionIDWithoutSessionKey(t *testing.T) {
+// TestBuildLLMOptions_StampsUnkeyedBucketWithoutSessionKey: FIX-C — the
+// stamp is unconditional. With no session key the option is present with the
+// shared unkeyed bucket (providers.WireSessionID("")) — never absent — so
+// unkeyed egresses (cron jobs, standalone loops) satisfy providers that
+// require the session header instead of failing locally.
+func TestBuildLLMOptions_StampsUnkeyedBucketWithoutSessionKey(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
@@ -708,7 +710,11 @@ func TestBuildLLMOptions_NoWireSessionIDWithoutSessionKey(t *testing.T) {
 		model:      "test-model",
 		sessionKey: "",
 	})
-	if v, ok := got[providers.OptWireSessionID]; ok {
-		t.Fatalf("%s present without a session key: %#v (%T)", providers.OptWireSessionID, v, v)
+	v, ok := got[providers.OptWireSessionID]
+	if !ok {
+		t.Fatalf("%s absent with no session key: buildLLMOptions must always stamp (%#v)", providers.OptWireSessionID, got)
+	}
+	if want := providers.WireSessionID(""); v != want {
+		t.Fatalf("%s = %v (%T), want the unkeyed bucket %q", providers.OptWireSessionID, v, v, want)
 	}
 }

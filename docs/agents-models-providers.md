@@ -319,19 +319,33 @@ onboarding validation degrade to the offline catalog. The `/zen/go/v1` base
 serves both inference and `GET /models`.
 
 lele detects an OpenCode Go target automatically — by provider name or type
-(`opencode_go` / `opencode-go`) or by an `api_base` containing `opencode.ai` —
-and then sends two extra headers on inference calls. There is nothing to
+(`opencode_go` / `opencode-go`), or by an `api_base` whose path is one of the
+OpenCode Go routes (`opencode.ai/zen/go`, `opencode.ai/inference/go`;
+case-insensitive). The path matters: the first-class Zen base
+`https://opencode.ai/zen/v1` shares the host but is *not* detected as Go. Once
+detected, lele sends two extra headers on inference calls. There is nothing to
 configure:
 
-- `User-Agent: lele/<version>` — actually sent for every provider (lele
-  identifies itself instead of appearing as a generic HTTP client).
+- `User-Agent: lele/<version>` — sent by the OpenAI-compatible and Anthropic
+  Messages transports (lele identifies itself instead of appearing as a generic
+  HTTP client). The OAuth/CLI provider families deliberately keep their own
+  User-Agents because those endpoints require impersonating the official
+  clients — Claude OAuth (`claude-cli/…`), Gemini Code Assist
+  (`GeminiCLI-tui/…`) and Antigravity (`antigravity/…`); a `lele/…` value
+  there would be rejected, so the impersonation is a requirement, not an
+  oversight.
 - `x-opencode-session: <64 hex chars>` — the gateway rejects requests without
   it (`400 MissingSessionID`, validated before authentication). The value is
   the SHA-256 hash of lele's internal conversation session key: stable across
   turns and restarts, changed by `/new`, and opaque — no channel, chat id or
-  path leaves the machine. If the session id is missing on a call that needs
-  it, lele fails locally with a clear error instead of forwarding a request
-  the gateway would reject.
+  path leaves the machine. Calls with no session key (cron jobs, standalone
+  tool loops) share one stable "unkeyed" bucket — the hash of the empty key —
+  so they keep working instead of failing. If the target was configured by
+  explicit name/type and a call still carries no session id, lele fails the
+  call locally with a clear error instead of forwarding a request the gateway
+  would reject; when detection came only from `api_base`, the header is
+  opportunistic — sent when a session id is present, silently omitted when it
+  is not.
 
 The OpenCode endpoint routes every model family server-side (grok, gpt, luna,
 kimi, glm, claude, gemini, qwen, deepseek, minimax, …) through a single

@@ -116,6 +116,11 @@ describe('normalizeProviderType / isOpenAICompatible', () => {
     expect(normalizeProviderType('ollama-cloud')).toBe('ollama_cloud')
     expect(normalizeProviderType('mimo')).toBe('xiaomi')
     expect(normalizeProviderType('kimi_for_coding')).toBe('kimi_for_coding')
+    // Fourth alias map: the dashed OpenCode Go spelling normalizes like the
+    // other three (config, model_ref, catalog).
+    expect(normalizeProviderType('opencode-go')).toBe('opencode_go')
+    expect(normalizeProviderType('OpenCode-Go')).toBe('opencode_go')
+    expect(normalizeProviderType('opencode-zen')).toBe('opencode')
   })
 
   test('includes the new hermes providers as openai-compatible', () => {
