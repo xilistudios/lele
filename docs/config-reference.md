@@ -211,6 +211,22 @@ Contains built-in and custom provider entries.
 
 See `docs/agents-models-providers.md`.
 
+Provider support is mostly behavior, not extra fields. Two examples that need
+no configuration:
+
+- lele sends `User-Agent: lele/<version>` on every inference call made by its
+  built-in transports.
+- Entries that resolve to **OpenCode Go** (name or `type` `opencode_go` /
+  `opencode-go`, or an `api_base` containing `opencode.ai`) additionally get an
+  `x-opencode-session` header on inference calls: a SHA-256 hash of the
+  conversation session key, stable per conversation and changed by `/new`. The
+  gateway requires it (`400 MissingSessionID` without it, checked before
+  authentication), so lele fails the call locally with a clear error instead of
+  sending a request the gateway would reject. The credentials and base live in
+  the ordinary named-provider entry, exactly like `opencode`; there is no
+  dedicated field. See the OpenCode Go section of
+  `docs/agents-models-providers.md`.
+
 ## `tools`
 
 Contains:
