@@ -7,9 +7,40 @@ import (
 // TestProviderRegistry verifies the provider registry count
 func TestProviderRegistry(t *testing.T) {
 	registry := providerRegistry()
-	// 15 original + 23 optional catalog-backed providers + custom
-	if len(registry) != 39 {
-		t.Errorf("Expected 39 providers, got %d", len(registry))
+	// 15 original + 24 optional catalog-backed providers + custom
+	if len(registry) != 40 {
+		t.Errorf("Expected 40 providers, got %d", len(registry))
+	}
+}
+
+// TestProviderRegistry_OpenCodeGo verifies the OpenCode Go entry.
+func TestProviderRegistry_OpenCodeGo(t *testing.T) {
+	registry := providerRegistry()
+
+	found := false
+	for _, p := range registry {
+		if p.name == "opencode_go" {
+			found = true
+			if p.displayName != "OpenCode Go" {
+				t.Errorf("displayName = %q, want %q", p.displayName, "OpenCode Go")
+			}
+			if p.typeKey != "opencode_go" {
+				t.Errorf("typeKey = %q, want %q", p.typeKey, "opencode_go")
+			}
+			if p.apiBase != "https://opencode.ai/zen/go/v1" {
+				t.Errorf("apiBase = %q, want %q", p.apiBase, "https://opencode.ai/zen/go/v1")
+			}
+			if p.authHeader != "Bearer" {
+				t.Errorf("authHeader = %q, want %q", p.authHeader, "Bearer")
+			}
+			if p.local {
+				t.Error("opencode_go should not be marked as local")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("opencode_go provider not found in registry")
 	}
 }
 

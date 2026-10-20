@@ -226,3 +226,39 @@ func TestSetCacheDir_OverrideAndReset(t *testing.T) {
 		t.Fatalf("CacheDir() after ResetCacheDir = %q, want %q (original)", got, original)
 	}
 }
+
+// TestNormalizeType_OpenCodeGo verifies the opencode-go alias maps to the
+// canonical opencode_go type (aliases kept in sync with config.normalizeProviderKey
+// and providers.NormalizeProvider).
+func TestNormalizeType_OpenCodeGo(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"opencode-go", "opencode_go"},
+		{"OpenCode-Go", "opencode_go"},
+		{"opencode_go", "opencode_go"},
+		// Existing aliases must keep working (no regression).
+		{"zen", "opencode"},
+		{"opencode-zen", "opencode"},
+	}
+
+	for _, tt := range tests {
+		if got := normalizeType(tt.input); got != tt.want {
+			t.Errorf("normalizeType(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+// TestProviderCachePath_OpenCodeGoSpellings verifies both spellings of the
+// OpenCode Go provider resolve to the same cache file.
+func TestProviderCachePath_OpenCodeGoSpellings(t *testing.T) {
+	dashed := ProviderCachePath("opencode-go")
+	snake := ProviderCachePath("opencode_go")
+	if dashed != snake {
+		t.Errorf("ProviderCachePath(%q) = %q, want %q", "opencode-go", dashed, snake)
+	}
+	if filepath.Base(snake) != "opencode_go.json" {
+		t.Errorf("cache file base = %q, want %q", filepath.Base(snake), "opencode_go.json")
+	}
+}
