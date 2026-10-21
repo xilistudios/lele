@@ -5,6 +5,7 @@ import { toChatMessages } from '../lib/chatMessageBuilder'
 import type { ChatMessage, GroupInfo, GroupSnapshot, RawHistoryMessage } from '../lib/types'
 import { sessionKeysLooselyMatch } from './event-handlers/helpers'
 import { snapshotToGroupInfo } from './messageEventHandlers'
+import { noteHistorySnapshot, observeMergedOrder } from '../lib/orderingMonitor'
 import { useOnPageVisible, usePageVisible } from './usePageVisible'
 
 const DEFAULT_LIMIT = 50
@@ -187,6 +188,10 @@ export function useChatHistory(
       const groups = historyGroupsToInfos(history)
 
       const newMessages = toChatMessages(history.messages, history.session_key)
+      // Opt-in instrumentation: the ids of the newest page are what the merge
+      // treats as canonical, so keeping one snapshot per poll is what proves an
+      // id changed between two polls (see lib/orderingMonitor.ts).
+      noteHistorySnapshot(history.session_key ?? sessionKey, newMessages)
 
       // Merge with previously loaded older messages (from loadMore) so polling
       // doesn't wipe out paginated history. Without this, a polling refetch
@@ -406,7 +411,12 @@ export function useChatHistory(
   )
 
   const messages = useMemo(
-    () => mergeMessages(baseMessages, sessionStreamingMessages),
+    () =>
+      observeMergedOrder(
+        mergeMessages(baseMessages, sessionStreamingMessages),
+        baseMessages,
+        sessionStreamingMessages,
+      ),
     [baseMessages, sessionStreamingMessages],
   )
 
