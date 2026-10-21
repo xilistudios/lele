@@ -696,7 +696,7 @@ func TestBuildLLMOptions_StampsWireSessionID(t *testing.T) {
 
 // TestBuildLLMOptions_StampsUnkeyedBucketWithoutSessionKey: FIX-C — the
 // stamp is unconditional. With no session key the option is present with the
-// shared unkeyed bucket (providers.WireSessionID("")) — never absent — so
+// shared unkeyed bucket (providers.UnkeyedSessionBucket) — never absent — so
 // unkeyed egresses (cron jobs, standalone loops) satisfy providers that
 // require the session header instead of failing locally.
 func TestBuildLLMOptions_StampsUnkeyedBucketWithoutSessionKey(t *testing.T) {
@@ -714,7 +714,7 @@ func TestBuildLLMOptions_StampsUnkeyedBucketWithoutSessionKey(t *testing.T) {
 	if !ok {
 		t.Fatalf("%s absent with no session key: buildLLMOptions must always stamp (%#v)", providers.OptWireSessionID, got)
 	}
-	if want := providers.WireSessionID(""); v != want {
+	if want := providers.UnkeyedSessionBucket; v != want {
 		t.Fatalf("%s = %v (%T), want the unkeyed bucket %q", providers.OptWireSessionID, v, v, want)
 	}
 }

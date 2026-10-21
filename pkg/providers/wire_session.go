@@ -16,22 +16,48 @@ import (
 // OptWireSessionID is the per-call option key (see protocoltypes).
 const OptWireSessionID = protocoltypes.OptWireSessionID
 
+// UnkeyedSessionBucket is the session id carried by egresses that have no
+// session key: WireSessionID("") — hex(sha256("")), the well-known
+// empty-input digest. It is a named symbol (review NIT-3) so a reader who
+// sees e3b0c442…b855 in a gateway log has something to grep back to this
+// definition.
+//
+// Egresses that genuinely have no session key (cron jobs, standalone tool
+// loops, compaction of an unknown session) all land in that one stable
+// bucket, so they still satisfy providers that require the header instead of
+// aborting locally. The value is identical across installations by design —
+// there is no per-install salt (review INFO-1: unkeyed egresses are
+// indistinguishable between installs).
+var UnkeyedSessionBucket = hashSessionKey("")
+
+// hashSessionKey is the whole session-id scheme: SHA-256 the key and hex-encode
+// it (callers pre-trim; the empty key is handled by WireSessionID via
+// UnkeyedSessionBucket).
+func hashSessionKey(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
+}
+
 // WireSessionID derives the opaque, fixed-length, stable-per-conversation value
 // a session header carries. Hashing keeps internal identifiers (channel, chat
 // id, agent routing) out of a third party's logs while staying stable across
 // turns and restarts — which is what the provider needs for routing and prompt
 // caching.
 //
-// The empty key (or a blank one) is NOT a special "no id" case: it hashes to
-// hex(sha256("")) — the shared UNKEYED BUCKET. Egresses that genuinely have no
-// session key (cron jobs, standalone tool loops, compaction of an unknown
-// session) all land in that one stable bucket, so they still satisfy providers
-// that require the header instead of aborting locally. The scheme is the
-// simplest deterministic one: trim, then SHA-256 the key — a blank key is
-// simply the well-known empty-input digest below.
+// The empty key (or a blank one) is NOT a special "no id" case: it maps to
+// UnkeyedSessionBucket — the shared UNKEYED BUCKET, hex(sha256("")). Egresses
+// that genuinely have no session key (cron jobs, standalone tool loops,
+// compaction of an unknown session) all land in that one stable bucket, so
+// they still satisfy providers that require the header instead of aborting
+// locally. The scheme is the simplest deterministic one: trim, then SHA-256
+// the key — a blank key is simply the well-known empty-input digest named
+// above.
 func WireSessionID(sessionKey string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(sessionKey)))
-	return hex.EncodeToString(sum[:])
+	key := strings.TrimSpace(sessionKey)
+	if key == "" {
+		return UnkeyedSessionBucket
+	}
+	return hashSessionKey(key)
 }
 
 // WithWireSessionID returns opts with the conversation-scoped wire session id

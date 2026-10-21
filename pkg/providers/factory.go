@@ -2,6 +2,7 @@ package providers
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/auth"
@@ -90,7 +91,9 @@ const openCodeGoSessionHeaderName = "x-opencode-session"
 // required=false for detection from api_base (URL sniff): the URL only says
 // "this might be the gateway", so the header is opportunistic — sent when the
 // call carries a session id, silently omitted when it does not. That keeps the
-// sniff inert for lookalikes and unkeyed egresses alike (review MAYOR-1).
+// sniff inert for unkeyed egresses (a lookalike host no longer matches at all
+// — see isOpenCodeGoAPIBase), and FIX-B keeps it from ever failing the call
+// (review MAYOR-1).
 func openCodeGoSessionHeader(sel *providerSelection) (name string, required bool) {
 	for _, s := range []string{sel.providerName, sel.providerTypeName} {
 		switch strings.ToLower(strings.TrimSpace(s)) {
@@ -106,33 +109,43 @@ func openCodeGoSessionHeader(sel *providerSelection) (name string, required bool
 
 // isOpenCodeGoAPIBase reports whether apiBase points at an OpenCode Go route.
 //
-// Path-aware: only the Go paths identify the gateway — /zen/go/... (the
-// canonical documented base) and /inference/go/... (the OpenAI alias) — so the
-// first-class Zen base https://opencode.ai/zen/v1 does NOT match. Matching is
-// case-insensitive and boundary-checked ("/zen/gopher" is not "/zen/go"),
-// mirroring the existing "/anthropic" api_base sniff in
-// selectionFromNamedProvider but scoped to the path segment that matters.
+// Parsed, not a substring: the apiBase is parsed with net/url and BOTH halves
+// must match.
 //
-// The match is a plain substring, so a lookalike host such as
-// https://proxy.example.com/opencode.ai/zen/go also matches. That residual is
-// accepted on purpose: a URL match only ever yields an *opportunistic* header
-// (openCodeGoSessionHeader returns required=false), and FIX-B makes an
-// opportunistic header inert — it is sent when a session id exists and omitted
-// when it does not, never failing the call. Under-matching would be the
-// dangerous direction (a real gateway behind a path-prefix proxy would answer
-// 400 MissingSessionID); over-matching costs one extra header. See
-// TestOpenCodeGoSessionHeader's "lookalike host" row.
+// Host: exactly "opencode.ai" or one of its subdomains, any port (so an
+// explicit ":443" in api_base matches — review NIT-2, where the old literal
+// substring missed "https://opencode.ai:443/zen/go/v1" and the header was
+// silently omitted, producing an upstream 400 MissingSessionID).
+//
+// Path: one of the Go routes that identify the gateway — /zen/go/... (the
+// canonical documented base) and /inference/go/... (the OpenAI alias) — with
+// a segment boundary ("/zen/gopher" and "/zen/go-v2" are not "/zen/go"), and
+// case-insensitively, so the first-class Zen base
+// https://opencode.ai/zen/v1 does NOT match. Query and fragment are split off
+// by the parser, so "/zen/go?x=1" still matches exactly like before.
+//
+// Two deliberate consequences of the real host check, both pinned in
+// TestOpenCodeGoSessionHeader:
+//   - a lookalike host carrying the Go path
+//     (https://proxy.example.com/opencode.ai/zen/go) NO LONGER matches at
+//     all — strictly better than the old substring residual, which matched
+//     but only ever yielded an inert opportunistic header;
+//   - an apiBase net/url cannot parse falls back to no-match (no header)
+//     instead of matching by accident.
 func isOpenCodeGoAPIBase(apiBase string) bool {
-	lower := strings.ToLower(apiBase)
-	for _, route := range []string{"opencode.ai/zen/go", "opencode.ai/inference/go"} {
-		idx := strings.Index(lower, route)
-		if idx < 0 {
-			continue
-		}
-		// Path-segment boundary: the route must end there, not continue into
-		// a longer segment (e.g. "/zen/gopher").
-		rest := lower[idx+len(route):]
-		if rest == "" || strings.HasPrefix(rest, "/") || strings.HasPrefix(rest, "?") || strings.HasPrefix(rest, "#") {
+	u, err := url.Parse(strings.TrimSpace(apiBase))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host != "opencode.ai" && !strings.HasSuffix(host, ".opencode.ai") {
+		return false
+	}
+	path := strings.ToLower(u.Path)
+	for _, route := range []string{"/zen/go", "/inference/go"} {
+		// Path-segment boundary: the exact route or a subpath of it, never a
+		// longer segment (e.g. "/zen/gopher" is not "/zen/go").
+		if path == route || strings.HasPrefix(path, route+"/") {
 			return true
 		}
 	}

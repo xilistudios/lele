@@ -26,16 +26,22 @@ func TestWireSessionID(t *testing.T) {
 		t.Fatal("WireSessionID() same value for different session keys")
 	}
 	// FIX-C: empty/blank keys are NOT "no id" — they map to the shared
-	// unkeyed bucket hex(sha256("")), so unkeyed egresses (cron, standalone
-	// tool loops) still satisfy required providers instead of aborting.
+	// unkeyed bucket (now the named symbol UnkeyedSessionBucket, NIT-3: a
+	// reader who sees e3b0c442… in a log can grep it), so unkeyed egresses
+	// (cron, standalone tool loops) still satisfy required providers instead
+	// of aborting. The literal below pins the symbol itself: a change of the
+	// empty-key scheme fails here.
 	const unkeyedBucket = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-	if got := WireSessionID(""); got != unkeyedBucket {
-		t.Fatalf("WireSessionID(%q) = %q, want the unkeyed bucket %q", "", got, unkeyedBucket)
+	if UnkeyedSessionBucket != unkeyedBucket {
+		t.Fatalf("UnkeyedSessionBucket = %q, want the sha256-of-empty literal %q", UnkeyedSessionBucket, unkeyedBucket)
 	}
-	if got := WireSessionID("   "); got != unkeyedBucket {
-		t.Fatalf("WireSessionID(%q) = %q, want the unkeyed bucket %q", "   ", got, unkeyedBucket)
+	if got := WireSessionID(""); got != UnkeyedSessionBucket {
+		t.Fatalf("WireSessionID(%q) = %q, want the unkeyed bucket %q", "", got, UnkeyedSessionBucket)
 	}
-	if !hex64.MatchString(unkeyedBucket) {
+	if got := WireSessionID("   "); got != UnkeyedSessionBucket {
+		t.Fatalf("WireSessionID(%q) = %q, want the unkeyed bucket %q", "   ", got, UnkeyedSessionBucket)
+	}
+	if !hex64.MatchString(UnkeyedSessionBucket) {
 		t.Fatal("test setup: the unkeyed bucket must have the same 64-hex shape")
 	}
 	// Known vectors: sha256("abc") and sha256("") — the second one pins the
@@ -72,7 +78,7 @@ func TestWithWireSessionID(t *testing.T) {
 		if !ok {
 			t.Fatal("WithWireSessionID skipped the stamp on an empty key")
 		}
-		if want := WireSessionID(""); got != want {
+		if want := UnkeyedSessionBucket; got != want {
 			t.Fatalf("out[OptWireSessionID] = %v, want the unkeyed bucket %q", got, want)
 		}
 		if len(out) != len(in)+1 {
@@ -92,8 +98,8 @@ func TestWithWireSessionID(t *testing.T) {
 		if !ok {
 			t.Fatal(`WithWireSessionID(nil, "") did not stamp the unkeyed bucket`)
 		}
-		if want := WireSessionID(""); got != want {
-			t.Fatalf("out[OptWireSessionID] = %v, want %q", got, want)
+		if want := UnkeyedSessionBucket; got != want {
+			t.Fatalf("out[OptWireSessionID] = %v, want the unkeyed bucket %q", got, want)
 		}
 	})
 

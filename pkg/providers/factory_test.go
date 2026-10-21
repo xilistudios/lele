@@ -853,17 +853,50 @@ func TestOpenCodeGoSessionHeader(t *testing.T) {
 			wantRequired: false,
 		},
 		{
-			// Documented residual over-match: the substring match is
-			// host-agnostic, so a lookalike host carrying the Go path DOES
-			// match. Accepted only because a URL match is opportunistic
-			// (wantRequired=false): the extra header is sent when a session id
-			// exists and omitted otherwise — it can never fail the call
-			// (review MAYOR-1, FIX-B).
-			name:         "lookalike host with go path matches by substring but only opportunistically",
+			// NIT-2 flip (deliberate): with the parsed-host matcher
+			// (isOpenCodeGoAPIBase uses net/url) a lookalike host carrying
+			// the Go path NO LONGER matches at all. The old substring match
+			// matched here but only ever yielded an inert opportunistic
+			// header ("matched but inert"); no match is strictly better —
+			// the sniff cannot claim a foreign host anymore.
+			name:         "lookalike host with go path no longer matches",
 			providerName: "corp-proxy",
 			typ:          "openai",
 			apiBase:      "https://proxy.example.com/opencode.ai/zen/go",
+			want:         "",
+			wantRequired: false,
+		},
+		{
+			// NIT-2: an explicit port on the real host must not break the
+			// check — the literal substring matcher missed
+			// "opencode.ai:443/zen/go" and the header was silently omitted
+			// (upstream 400 MissingSessionID). Hostname() strips any port.
+			name:         "explicit port on the opencode.ai host still matches",
+			providerName: "oc-alias",
+			typ:          "openai",
+			apiBase:      "https://opencode.ai:443/zen/go/v1",
 			want:         openCodeGoSessionHeaderName,
+			wantRequired: false,
+		},
+		{
+			// NIT-2 pinned decision: subdomains of opencode.ai count (host is
+			// "opencode.ai or a subdomain of it").
+			name:         "subdomain of opencode.ai matches",
+			providerName: "oc-alias",
+			typ:          "openai",
+			apiBase:      "https://chat.opencode.ai/zen/go/v1",
+			want:         openCodeGoSessionHeaderName,
+			wantRequired: false,
+		},
+		{
+			// NIT-2 pinned consequence: an apiBase that net/url cannot parse
+			// falls back to no-match (no header) instead of matching by
+			// accident. "http://[::1/zen/go" has an unclosed IPv6 bracket.
+			name:         "unparseable api base falls back to no match",
+			providerName: "oc-alias",
+			typ:          "openai",
+			apiBase:      "http://[::1/zen/go",
+			want:         "",
 			wantRequired: false,
 		},
 		{
@@ -1030,8 +1063,16 @@ func TestCreateProviderForCandidate_OpenCodeGoNameTypeRequiresSessionHeader(t *t
 // OPPORTUNISTIC branch (FIX-B): detection from api_base alone must never fail
 // the call locally. Without a session id the header is silently omitted (the
 // upstream answers its own descriptive 400 if it cares); with one it is sent.
+//
+// NIT-2 changed how the api_base is matched (parsed host, not substring), so
+// a local httptest URL can no longer be spoofed by appending
+// "/opencode.ai/zen/go" to its path — that lookalike pattern now correctly
+// does NOT match. To keep this end-to-end with the REAL host, the api_base is
+// http://opencode.ai/zen/go/v1 and the httptest server plays HTTP proxy: for
+// plain-http targets Go's transport sends the absolute-form request to the
+// configured proxy, so no DNS lookup of opencode.ai ever happens.
 func TestCreateProviderForCandidate_OpenCodeGoURLSniffIsOpportunistic(t *testing.T) {
-	apiBase, sessionHeader := startFactoryHeaderServer(t)
+	proxy, sessionHeader := startFactoryHeaderServer(t)
 
 	cfg := config.DefaultConfig()
 	if cfg.Providers.Named == nil {
@@ -1041,7 +1082,8 @@ func TestCreateProviderForCandidate_OpenCodeGoURLSniffIsOpportunistic(t *testing
 		Type: "openai",
 		ProviderConfig: config.ProviderConfig{
 			APIKey:  "sk-test",
-			APIBase: apiBase + "/opencode.ai/zen/go/v1",
+			APIBase: "http://opencode.ai/zen/go/v1",
+			Proxy:   proxy,
 		},
 	}
 
@@ -1073,8 +1115,12 @@ func TestCreateProviderForCandidate_OpenCodeGoURLSniffIsOpportunistic(t *testing
 // the opencode.ai host but not the Go path, so it must NOT be detected as
 // OpenCode Go — even a stamped call must keep the header off the wire (before
 // the fix, Zen was falsely detected and unkeyed egresses failed locally).
+//
+// NIT-2: same local-proxy setup as the opportunistic test above — the parsed
+// host check means the real opencode.ai host is required for the path
+// comparison to be exercised at all.
 func TestCreateProviderForCandidate_OpenCodeZenNotDetectedAsGo(t *testing.T) {
-	apiBase, sessionHeader := startFactoryHeaderServer(t)
+	proxy, sessionHeader := startFactoryHeaderServer(t)
 
 	cfg := config.DefaultConfig()
 	if cfg.Providers.Named == nil {
@@ -1084,7 +1130,8 @@ func TestCreateProviderForCandidate_OpenCodeZenNotDetectedAsGo(t *testing.T) {
 		Type: "openai",
 		ProviderConfig: config.ProviderConfig{
 			APIKey:  "zen-key",
-			APIBase: apiBase + "/opencode.ai/zen/v1",
+			APIBase: "http://opencode.ai/zen/v1",
+			Proxy:   proxy,
 		},
 	}
 

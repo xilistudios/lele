@@ -10,7 +10,7 @@
 // (C7/D8): an async subagent sets SessionKey (subagent_runner.go), the
 // synchronous in-context subagent sets only OwnerSessionKey (subagent_tool.go),
 // and when neither key is set the stamp falls back to the shared unkeyed
-// bucket (providers.WireSessionID("")) — it is never skipped, so unkeyed
+// bucket (providers.UnkeyedSessionBucket) — it is never skipped, so unkeyed
 // egresses still satisfy required providers (FIX-C). The tests below cover both
 // real chains, the exported CompactLoopMessages helper (whose session key is a
 // compile-enforced parameter, C6), the exact value, and the non-mutation of
@@ -209,7 +209,7 @@ func TestRunToolLoopFallsBackToOwnerSessionKey(t *testing.T) {
 
 // TestRunToolLoopNoSessionStampsUnkeyedBucket: FIX-C — neither SessionKey
 // nor OwnerSessionKey ⇒ the stamp is the shared unkeyed bucket
-// (providers.WireSessionID("")), never absent, and the REAL OpenCode Go
+// (providers.UnkeyedSessionBucket), never absent, and the REAL OpenCode Go
 // transport accepts the call (this was the cron/unkeyed abort path before the
 // fix). The negative control shows the same machinery through a plain openai
 // provider sends no header at all — so the positive tests cannot pass on "the
@@ -228,7 +228,7 @@ func TestRunToolLoopNoSessionStampsUnkeyedBucket(t *testing.T) {
 		if !ok {
 			t.Fatal("wire_session_id absent without a session: WithWireSessionID must always stamp")
 		}
-		if want := providers.WireSessionID(""); stamped != want {
+		if want := providers.UnkeyedSessionBucket; stamped != want {
 			t.Fatalf("wire_session_id = %q, want the unkeyed bucket %q", stamped, want)
 		}
 	})
@@ -251,8 +251,8 @@ func TestRunToolLoopNoSessionStampsUnkeyedBucket(t *testing.T) {
 		if rec.count() == 0 {
 			t.Fatal("recorder saw no request: the test proves nothing")
 		}
-		if h := rec.lastSessionHeader(t); h != providers.WireSessionID("") {
-			t.Fatalf("x-opencode-session = %q, want the unkeyed bucket %q", h, providers.WireSessionID(""))
+		if h := rec.lastSessionHeader(t); h != providers.UnkeyedSessionBucket {
+			t.Fatalf("x-opencode-session = %q, want the unkeyed bucket %q", h, providers.UnkeyedSessionBucket)
 		}
 	})
 
@@ -318,7 +318,7 @@ func TestCompactLoopMessagesSendsSessionHeader(t *testing.T) {
 		if !present {
 			t.Fatal("wire_session_id absent from the compaction call: the stamp is unconditional (FIX-C)")
 		}
-		if want := providers.WireSessionID(""); stamped != want {
+		if want := providers.UnkeyedSessionBucket; stamped != want {
 			t.Fatalf("wire_session_id = %q, want the unkeyed bucket %q", stamped, want)
 		}
 	})
