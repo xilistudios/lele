@@ -41,7 +41,7 @@
   "tui.systemNotice": "Aviso del sistema",
   "tui.pressEscAgain": "Presiona ESC de nuevo para cancelar",
   "tui.processing": "Procesando... (ESC para cancelar)",
-  "tui.subagentsRunning": "%d subagente(s) en segundo plano — puedes seguir escribiendo",
+  "tui.subagentsRunning": "%d subagente(s) en segundo plano",
   "tui.doneIn": "● Completado en %.1fs",
   "tui.tokensPerSecond": "%.1f tok/s",
   "tui.ready": "● Listo",
