@@ -971,7 +971,7 @@ export type ChatMessage = {
    *
    * `role` deliberately stays 'user' and `content` is deliberately left
    * byte-identical: the backend counts this message as a user turn, and the
-   * merge/ordering math (hooks/messageMerge.ts, computeBaseHasCurrentTurn +
+   * merge/ordering math (hooks/messageMerge.ts, findStreamingTwin +
    * collectConfirmCandidates) depends on that count and on content prefixes.
    */
   systemNotice?: { sender: string; body: string }

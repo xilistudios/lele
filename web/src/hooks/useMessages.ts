@@ -8,6 +8,7 @@ import {
   toChatMessages,
 } from '../lib/chatMessageBuilder'
 import type { ChatMessage, ToolStatus } from '../lib/types'
+import { installOrderingMonitorGlobals, noteWsEvent } from '../lib/orderingMonitor'
 import type { ClientCommand } from '../services/ws/events'
 import { type MessageEventContext, dispatchMessageEvent } from './messageEventHandlers'
 import { useApprovals } from './useApprovals'
@@ -251,6 +252,9 @@ export function useMessages(
   }
 
   const handleEvent = useCallback((event: ClientEvent) => {
+    // Opt-in instrumentation (lib/orderingMonitor.ts): recorded BEFORE the
+    // handlers run so the trace is the exact input sequence they saw.
+    noteWsEvent(event.event, event.data)
     dispatchMessageEvent(eventContextRef.current, event)
   }, [])
 
@@ -371,6 +375,12 @@ export function useMessages(
   useEffect(() => {
     return () => streamQueues.clearAllQueues()
   }, [streamQueues.clearAllQueues])
+
+  // Opt-in console entry points for the ordering instrumentation
+  // (`window.__leleOrderingReport()`); a no-op install when the flag is off.
+  useEffect(() => {
+    installOrderingMonitorGlobals()
+  }, [])
 
   // Cleanup timers on unmount: neither the typing indicator nor a trailing
   // session refresh may fire after the hook is gone (and no setTimeout is left

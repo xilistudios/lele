@@ -9,15 +9,22 @@
  *      (chunks, tool calls, acks). Message IDs are ephemeral UUIDs.
  *
  * Because the two sources use DIFFERENT id schemes for the same logical
- * message, we cannot match them by id. Instead we match ASSISTANTS by
- * POSITION: the Nth streaming assistant corresponds to the Nth-from-the-end
- * assistant in base (the most recent turn). `mergeMessages` reconciles the
- * two lists into a single render-ready array with no duplicates and correct
- * chronological order.
+ * message, we cannot match them by id. Assistants are therefore matched by
+ * CONTENT IDENTITY (lib/messageIdentity.ts): the persisted copy and its live
+ * twin are the same text. `mergeMessages` reconciles the two lists into a
+ * single render-ready array with no duplicates and correct chronological order.
+ *
+ * Positional matching ("the Nth-from-the-end live assistant is the Nth-from-the-end
+ * base assistant") used to be the rule here. It was removed because its count
+ * invariant cannot hold in the real event stream — see `findStreamingTwin` for
+ * the two conditions that break it and for the re-ordering it caused in
+ * production. Never reintroduce it: a merge must not depend on how many live
+ * copies happen to still be around.
  *
  * Every rule below protects against a specific bug that was hit in
- * production. The rules are covered by messageOrdering.test.ts — keep that
- * suite green when changing anything here.
+ * production. The rules are covered by messageOrdering.test.ts,
+ * messageOrderingWindow.test.ts and messagePairing.test.ts — keep those suites
+ * green when changing anything here.
  */
 import { assistantIdentityText } from '../lib/messageIdentity'
 import type { ChatMessage } from '../lib/types'
@@ -50,11 +57,11 @@ function indexStreaming(streamingMessages: ChatMessage[]): StreamingIndex {
 
   for (const msg of streamingMessages) {
     if (msg.role === 'assistant') {
-      // Empty completed placeholders (no content, no reasoning) are NOT
-      // position-matchable: toChatMessages skips the content-less tool-call
-      // iteration in HTTP history, so a placeholder would shift the index and
-      // pair the wrong streaming assistant with a base assistant, producing a
-      // duplicate. They are dropped separately in filterStreamingLeftovers.
+      // Empty completed placeholders (no content, no reasoning) are not
+      // matchable at all: they have no identity to pair on. toChatMessages also
+      // skips the content-less tool-call iteration when building history, so
+      // such an entry has no persisted twin and would only ever be appended as
+      // a junk bubble. Real (unfinished) iterations keep `streaming: true`.
       const isEmptyPlaceholder =
         msg.streaming !== true && msg.content.trim() === '' && !msg.reasoningContent
       if (isEmptyPlaceholder) continue
@@ -72,63 +79,6 @@ function indexStreaming(streamingMessages: ChatMessage[]): StreamingIndex {
   return { assistants, toolCallIds, toolByCallId, optimisticUsers }
 }
 
-// ── Turn detection ──────────────────────────────────────────────────────────
-
-/**
- * Whether the HTTP base already contains the FULL current turn — i.e. both
- * the user message AND the assistant response.
- *
- * Guarded by `baseAssistantCount >= baseUserCountNonOptimistic`: without it,
- * the flag flipped true as soon as the optimistic user message landed in the
- * query cache (before the assistant existed in base), which made the matcher
- * pair the new streaming assistant with an OLD base assistant and render the
- * response ABOVE the user message.
- */
-function computeBaseHasCurrentTurn(
-  baseMessages: ChatMessage[],
-  streamingMessages: ChatMessage[],
-): boolean {
-  const baseUserCountNonOptimistic = baseMessages.filter(
-    (m) => m.role === 'user' && !m.optimistic,
-  ).length
-  const baseAssistantCount = baseMessages.filter((m) => m.role === 'assistant').length
-  // Multiple optimistic users can be in flight (rapid sends). Use the *smallest*
-  // snapshot so matching only starts once base has grown past every pending send —
-  // using the first one alone let a later confirm pair the wrong assistant.
-  const optimisticCounts = streamingMessages
-    .filter((m) => m.role === 'user' && m.optimistic)
-    .map((m) => m.optimisticBaseCount ?? 0)
-  const minOptimisticBaseCount = optimisticCounts.length > 0 ? Math.min(...optimisticCounts) : 0
-
-  return (
-    baseUserCountNonOptimistic > minOptimisticBaseCount &&
-    baseAssistantCount >= baseUserCountNonOptimistic
-  )
-}
-
-/**
- * Offset into the base assistant list where position-matching begins.
- *
- * Streaming assistants always correspond to the LAST N assistants in base
- * (the most recent turn). When the base hasn't caught up with the current
- * turn (`baseHasCurrentTurn` is false), the offset equals the total number
- * of base assistants (nothing will be reached) — in that regime,
- * `buildFilteredBase` falls back to content-confirmed matching instead.
- *
- * This offset is ONLY consulted when `baseHasCurrentTurn` is true; when
- * false, the pairing decision is made entirely inside `buildFilteredBase`
- * via `contentConfirmed`.
- */
-function computeMatchOffset(
-  baseAssistantCount: number,
-  streamingAssistantCount: number,
-  baseHasCurrentTurn: boolean,
-): number {
-  return baseHasCurrentTurn
-    ? Math.max(0, baseAssistantCount - streamingAssistantCount)
-    : baseAssistantCount
-}
-
 /**
  * Whether the persisted copy `candidate` already represents `content`.
  *
@@ -142,55 +92,81 @@ function contentConfirmed(content: string, candidate: string): boolean {
 }
 
 /**
- * Identity of an assistant message for content-based matching — the rule itself
- * lives in lib/messageIdentity.ts so it cannot drift from the one
- * `isConfirmedInCache` and `toChatMessages` use.
- *
- * WHY it matters here: a thinking step, or the tool-call iteration of a model
- * that emits no text, is persisted as an assistant message with
- * `content === ''` and its payload in `reasoningContent` (see
- * `shouldAddAssistant` in lib/chatMessageBuilder.ts). Keying those on `content`
- * alone made them unmatchable: `contentConfirmed('', …)` is false by
- * construction, and `pairCompatible` then takes the positional branch. With the
- * base window SATURATED (the 50-message sliding window of
- * pkg/channels/rest_chat.go, where the non-optimistic user count stops growing)
- * `computeBaseHasCurrentTurn` stays false, so pairing falls back to content
- * confirmation — which could never pair the base copy with its live twin, and
- * the twin was appended at the END of the list while its base copy was rendered
- * in place: a duplicated "Thinking…" block below newer turns, healed only by a
- * page reload.
+ * Identity of a streaming/base assistant pair, per the ONE rule in
+ * lib/messageIdentity.ts (text, or the reasoning text when there is no text).
+ * Empty string means "not identifiable" — see `findStreamingTwin`.
  */
-/** Whether the persisted assistant `candidate` already represents `msg`. */
-function assistantAlreadyPersisted(msg: ChatMessage, candidate: ChatMessage): boolean {
-  const identity = assistantIdentityText(msg.content, msg.reasoningContent)
-  if (identity.trim() === '') return false
-  return contentConfirmed(
-    identity,
-    assistantIdentityText(candidate.content, candidate.reasoningContent),
-  )
+const assistantIdentity = (m: ChatMessage): string =>
+  assistantIdentityText(m.content, m.reasoningContent).trim()
+
+/**
+ * The streaming entry that IS the base assistant `msg`, or `undefined`.
+ *
+ * Matching is by CONTENT IDENTITY, never by position. Positional pairing ("the
+ * Nth-from-the-end streaming assistant is the Nth-from-the-end base assistant")
+ * is unfixable in the real event stream, because two independent conditions
+ * break its count invariant and each one shifts the pairing by a slot:
+ *
+ *  1. `handleHistoryUpdated` strips live copies only once the async refetch
+ *     lands, so a snapshot can still hold the PREVIOUS turn's live copies while
+ *     base already contains them;
+ *  2. the backend persists every LLM iteration as its own assistant message, so
+ *     a running tool turn whose first iteration already finished (`streaming:
+ *     false`) contributes a COMPLETED streaming assistant that base does not
+ *     have yet.
+ *
+ * With one extra completed copy, `a1` was paired with `t2`, `t2` with `a2` and
+ * `a2` with the new `t3`, transferring each one's `stableId`: the bubbles swapped
+ * React keys and the list re-ordered itself mid-session (production repro with
+ * lib/orderingMonitor.ts reported `stable-order` from turn 3 on).
+ *
+ * Two tiers, both confined to COMPLETED (`streaming !== true`) unused entries —
+ * an actively-streaming assistant is a new message with no base counterpart yet,
+ * so pairing it here would displace its own base copy:
+ *
+ *   - exact: byte-identical identity. Unambiguous and order-independent, so it
+ *     is tried for every base assistant first; this is what pairs the persisted
+ *     copy with its live twin in the normal (already-persisted) case.
+ *   - prefix: the live copy is a PREFIX of the persisted one (a turn can end
+ *     between two renders, and the persisted text kept growing). Only accepted
+ *     when the live identity is NOT already rendered from some other base
+ *     assistant: that shape is a stale leftover of that other message, and
+ *     letting it donate its React key is precisely the key-stealing defect.
+ */
+function findStreamingTwin(
+  msg: ChatMessage,
+  index: StreamingIndex,
+  baseIdentities: Set<string>,
+): AssistantEntry | undefined {
+  const identity = assistantIdentity(msg)
+  if (identity === '') return undefined
+  const candidates = index.assistants.filter((e) => !e.used && !e.isStreaming)
+
+  const exact = candidates.find((e) => assistantIdentity(e.msg) === identity)
+  if (exact) return exact
+
+  return candidates.find((e) => {
+    const liveIdentity = assistantIdentity(e.msg)
+    if (liveIdentity === '' || baseIdentities.has(liveIdentity)) return false
+    return contentConfirmed(liveIdentity, identity)
+  })
 }
 
 /**
- * Whether a completed streaming assistant and a base assistant are the same
- * logical message, for the purpose of transferring the streaming React key.
+ * Whether the persisted assistant `candidate` already represents `msg`, i.e.
+ * the streaming copy is a prefix of (or identical to) the persisted text.
  *
- * Position alone is not enough (defect D3): it let a stale leftover from an
- * old turn pair with an unrelated recent base assistant and STEAL its
- * `stableId`, so the recent answer rendered under the wrong React key.
- * Content must agree too, with the same 200-char prefix tolerance the
- * confirmation checks use, in either direction (the persisted copy can have
- * gained a suffix; the streaming copy can still be a prefix of it).
- *
- * Empty content on either side falls back to position-only: reasoning-only
- * iterations legitimately carry `content === ''` on both sides with their
- * payload in `reasoningContent`, so demanding a content match there would
- * break the tool-turn shape pinned by gate R6.
+ * Goes through the shared identity rule (lib/messageIdentity.ts) so a thinking
+ * step or the tool-call iteration of a model that emits no text
+ * (`content === ''`, payload in `reasoningContent`) is recognised: keying those
+ * on `content` alone made them unmatchable, and with the 50-message sliding
+ * history window of pkg/channels/rest_chat.go they accumulated as duplicates at
+ * the end of the list until a page reload cleared the streaming state.
  */
-function pairCompatible(streamContent: string, baseContent: string): boolean {
-  const s = streamContent.trim()
-  const b = baseContent.trim()
-  if (s === '' || b === '') return true
-  return contentConfirmed(s, b) || contentConfirmed(b, s)
+function assistantAlreadyPersisted(msg: ChatMessage, candidate: ChatMessage): boolean {
+  const identity = assistantIdentity(msg)
+  if (identity === '') return false
+  return contentConfirmed(identity, assistantIdentity(candidate))
 }
 
 // ── Base pass ───────────────────────────────────────────────────────────────
@@ -211,65 +187,28 @@ type BasePassResult = {
  * new messages that don't exist in base yet, so replacing an older base
  * assistant in-place would break chronological order. They are appended later.
  */
-function buildFilteredBase(
-  baseMessages: ChatMessage[],
-  index: StreamingIndex,
-  matchOffset: number,
-  baseHasCurrentTurn: boolean,
-): BasePassResult {
+function buildFilteredBase(baseMessages: ChatMessage[], index: StreamingIndex): BasePassResult {
   const consumedToolIds = new Set<string>()
   const filteredBase: ChatMessage[] = []
-  let baseAssistantIdx = 0
-  let streamAsstIdx = 0
   let optimisticUserIdx = 0
+  // Identities already present in base. `findStreamingTwin` needs the whole set
+  // up front (not just the messages walked so far) to tell a stale duplicate of
+  // a LATER base message from a fresh live copy.
+  const baseIdentities = new Set(
+    baseMessages.filter((m) => m.role === 'assistant').map(assistantIdentity),
+  )
 
   for (const msg of baseMessages) {
     if (msg.role === 'assistant') {
-      let stableId: string | undefined
-      let confirmedAlready = false
-      let entry: AssistantEntry | undefined
-      if (baseHasCurrentTurn) {
-        // Positional matching: the Nth-from-the-end streaming assistant is the
-        // Nth-from-the-end base assistant.
-        // Actively-streaming candidates are new messages with no base counterpart
-        // yet; they are appended later as leftovers. Parking streamAsstIdx on one
-        // used to block positional matching for EVERY later base assistant
-        // (defect D2), turning each later completed answer into a duplicate at the
-        // bottom of the list.
-        while (
-          streamAsstIdx < index.assistants.length &&
-          index.assistants[streamAsstIdx].isStreaming
-        ) {
-          streamAsstIdx++
-        }
-        if (baseAssistantIdx >= matchOffset && streamAsstIdx < index.assistants.length) {
-          const candidate = index.assistants[streamAsstIdx]
-          if (pairCompatible(candidate.msg.content, msg.content)) {
-            entry = candidate
-            streamAsstIdx++
-          }
-        }
-      } else {
-        // Base has NOT caught up with the newest turn (several sends in
-        // flight), so positional matching is unsafe: a completed streaming
-        // assistant may be a NEW answer with no base counterpart yet, and
-        // pairing it with an older base assistant rendered the response ABOVE
-        // its user message. But a completed streaming assistant whose content
-        // is ALREADY present in base is provably the same message — leaving it
-        // unmatched rendered it TWICE (once here, once appended as a leftover).
-        // Matching goes through the shared identity rule so a thinking / tool-call
-        // iteration (content === '') is recognised by its reasoning text.
-        entry = index.assistants.find(
-          (e) => !e.used && !e.isStreaming && assistantAlreadyPersisted(e.msg, msg),
-        )
+      // Only the React key is transferred, never the content: the persisted copy
+      // stays authoritative and keeps its slot in the server order.
+      const entry = findStreamingTwin(msg, index, baseIdentities)
+      if (!entry) {
+        filteredBase.push(msg)
+        continue
       }
-      if (entry) {
-        entry.used = true
-        stableId = entry.msg.stableId ?? entry.msg.id
-        confirmedAlready = true
-      }
-      baseAssistantIdx++
-      filteredBase.push(confirmedAlready && stableId ? { ...msg, stableId } : msg)
+      entry.used = true
+      filteredBase.push({ ...msg, stableId: entry.msg.stableId ?? entry.msg.id })
       continue
     }
 
@@ -316,12 +255,12 @@ function buildFilteredBase(
     filteredBase.push(msg)
   }
 
-  // Defect D3 sweep: a COMPLETED streaming assistant that positional matching
-  // refused (content-incompatible with the base assistant at its slot) but whose
-  // content is already rendered from base is a stale leftover from an earlier
-  // turn. Mark it used so filterStreamingLeftovers drops it instead of appending
-  // a second copy — WITHOUT transferring its stableId, which is what let it
-  // steal an unrelated recent base assistant's React key.
+  // Duplicate sweep: a COMPLETED streaming assistant that `findStreamingTwin`
+  // could not pair (its base twin was already claimed by an earlier copy) but
+  // whose content IS already rendered from base is a stale leftover of an
+  // earlier turn. Mark it used so filterStreamingLeftovers drops it instead of
+  // appending a second copy — WITHOUT transferring its stableId, which is what
+  // let it steal an unrelated recent base assistant's React key.
   for (const e of index.assistants) {
     if (e.used || e.isStreaming) continue
     // Same identity rule as the pairing above (lib/messageIdentity.ts): a
@@ -483,9 +422,9 @@ export function findConfirmingBaseUserIndex(
  * iteration as a SEPARATE message (it does not merge a multi-iteration tool
  * turn into a single assistant in HTTP history). We must keep it — otherwise
  * the final answer of a tool turn vanishes when it finishes a moment before
- * the HTTP poll lands, because `computeBaseHasCurrentTurn` is already true
- * (only the user + first assistant are in base) and the old code dropped the
- * unmatched final assistant as a "leftover from a previous turn".
+ * the HTTP poll lands, because base already holds that turn's first iteration
+ * and the old positional matcher consumed the final assistant as if it were an
+ * old leftover.
  */
 function filterStreamingLeftovers(
   streamingMessages: ChatMessage[],
@@ -621,25 +560,7 @@ export function mergeMessages(
   streamingMessages: ChatMessage[],
 ): ChatMessage[] {
   const index = indexStreaming(streamingMessages)
-  const baseHasCurrentTurn = computeBaseHasCurrentTurn(baseMessages, streamingMessages)
-  const baseAssistantCount = baseMessages.filter((m) => m.role === 'assistant').length
-  // Only COMPLETED streaming assistants are position-pairable: an actively
-  // streaming one is a new message with no base counterpart yet, and counting
-  // it shifted the offset so a completed answer paired with the WRONG (older)
-  // base assistant.
-  const matchableAssistantCount = index.assistants.filter((e) => !e.isStreaming).length
-  const matchOffset = computeMatchOffset(
-    baseAssistantCount,
-    matchableAssistantCount,
-    baseHasCurrentTurn,
-  )
-
-  const { filteredBase, consumedToolIds } = buildFilteredBase(
-    baseMessages,
-    index,
-    matchOffset,
-    baseHasCurrentTurn,
-  )
+  const { filteredBase, consumedToolIds } = buildFilteredBase(baseMessages, index)
 
   const filteredStreaming = filterStreamingLeftovers(
     streamingMessages,

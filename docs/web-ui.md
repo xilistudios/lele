@@ -61,6 +61,51 @@ Generate a PIN:
 lele client pin --device "Browser"
 ```
 
+## Message Ordering (maintainer notes)
+
+The chat list is a merge of two sources with different id schemes:
+
+- canonical history over HTTP (react-query cache, content-hash ids), and
+- live WebSocket state (ephemeral UUIDs).
+
+`web/src/hooks/messageMerge.ts` reconciles them. Assistants are matched by
+**content identity** (`web/src/lib/messageIdentity.ts`), never by position: the
+number of live copies still around depends on timing (the previous turn's live
+copies are only stripped once the `history.updated` refetch lands, and a running
+tool turn contributes a *completed* assistant per finished iteration), so any
+position-based rule eventually pairs a live copy with the wrong base message and
+transfers its React key — the bubbles swap places and the list re-orders itself
+mid-session.
+
+If you touch that file, keep these suites green (they pin the real production
+shapes, not simplifications):
+
+```bash
+cd web
+bun test src/hooks/messageOrdering.test.ts \
+         src/hooks/messageOrderingWindow.test.ts \
+         src/hooks/messagePairing.test.ts
+```
+
+### Reproducing an ordering bug in a browser
+
+An opt-in monitor (`web/src/lib/orderingMonitor.ts`) records every WS event,
+every history snapshot and every merge, and reports the invariants whose
+violation *is* the bug (`stable-order`, `duplicate-key`, `base-order`,
+`stranded-copy`):
+
+```js
+// in the browser console, before reproducing
+localStorage.setItem('lele.orderingDebug', '1')
+// …reload, reproduce…
+window.__leleOrderingReport().print()   // human-readable
+window.__leleOrderingReport()           // { violations, trace, mergeCount }
+```
+
+The last report is also stored in `localStorage` under `lele.orderingReport`, so
+a reload does not lose the evidence. When the flag is off the monitor is a
+single boolean check per merge.
+
 ## Operational Notes
 
 - the web server serves embedded assets from the built binary
