@@ -141,8 +141,16 @@ func mcpHelp() {
 	writeMCPHelp(os.Stdout)
 }
 
+// writeMCPHelp prints the family help. The --agent line names the effective
+// default (the configured default agent, not the literal "main") so the help
+// cannot advertise an ID the config does not have. The default is resolved once
+// per call and only the resolved ID is interpolated — the rest of the text is a
+// constant, and the format string holds no other verbs.
 func writeMCPHelp(w io.Writer) {
-	fmt.Fprint(w, `lele mcp — MCP servers
+	fmt.Fprintf(w, mcpHelpText, defaultMCPAgentID())
+}
+
+const mcpHelpText = `lele mcp — MCP servers
 
 Usage:
   lele mcp list [--agent <id>] [--layer global|agent|project]
@@ -155,7 +163,7 @@ Usage:
   lele mcp logout <name> [--agent <id>]
 
 Common flags:
-  --agent <id>            Agent whose workspace provides the agent layer (default: main)
+  --agent <id>            Agent whose workspace provides the agent layer (default: %s)
   --                      end of flags (for a server name starting with '-')
 
 Layers (low → high precedence; highest wins, whole-entry replace):
@@ -232,8 +240,7 @@ loaded; env/header VALUES are never printed.
 
 Writes are guarded: a layer file outside the home directory, /tmp, /var/folders
 or the current directory is refused before anything is written.
-`)
-}
+`
 
 // ---------------------------------------------------------------------------
 // Manual flag parsing
@@ -393,7 +400,7 @@ type mcpListArgs struct {
 }
 
 func parseMCPListArgs(args []string) (mcpListArgs, error) {
-	a := mcpListArgs{agent: routing.DefaultAgentID}
+	a := mcpListArgs{agent: defaultMCPAgentID()}
 	pos, err := parseMCPFlags(args, mcpParseSpec{values: map[string]*string{
 		"--agent": &a.agent,
 		"--layer": &a.layer,
@@ -416,7 +423,7 @@ type mcpShowArgs struct {
 }
 
 func parseMCPShowArgs(args []string) (mcpShowArgs, error) {
-	a := mcpShowArgs{agent: routing.DefaultAgentID}
+	a := mcpShowArgs{agent: defaultMCPAgentID()}
 	pos, err := parseMCPFlags(args, mcpParseSpec{values: map[string]*string{
 		"--agent": &a.agent,
 	}})
@@ -507,7 +514,7 @@ func (a mcpAddArgs) entry() (mcp.ServerConfig, error) {
 }
 
 func parseMCPAddArgs(args []string) (mcpAddArgs, error) {
-	a := mcpAddArgs{agent: routing.DefaultAgentID, layer: mcp.LayerGlobal}
+	a := mcpAddArgs{agent: defaultMCPAgentID(), layer: mcp.LayerGlobal}
 	pos, err := parseMCPFlags(args, mcpParseSpec{
 		values: map[string]*string{
 			"--agent":                           &a.agent,
@@ -599,7 +606,7 @@ type mcpRemoveArgs struct {
 }
 
 func parseMCPRemoveArgs(args []string) (mcpRemoveArgs, error) {
-	a := mcpRemoveArgs{agent: routing.DefaultAgentID}
+	a := mcpRemoveArgs{agent: defaultMCPAgentID()}
 	pos, err := parseMCPFlags(args, mcpParseSpec{
 		values: map[string]*string{
 			"--agent": &a.agent,
@@ -636,7 +643,7 @@ type mcpTestArgs struct {
 }
 
 func parseMCPTestArgs(args []string) (mcpTestArgs, error) {
-	a := mcpTestArgs{agent: routing.DefaultAgentID}
+	a := mcpTestArgs{agent: defaultMCPAgentID()}
 	timeout := "30s"
 	pos, err := parseMCPFlags(args, mcpParseSpec{values: map[string]*string{
 		"--agent":   &a.agent,
@@ -670,6 +677,29 @@ func parseMCPTestArgs(args []string) (mcpTestArgs, error) {
 // Runtime resolution (config + layer roots)
 // ---------------------------------------------------------------------------
 
+// defaultMCPAgentID returns the agent ID an unscoped `lele mcp …` command acts
+// on: the configured default agent (agents.list entry with default: true, else
+// the first entry), or "main" for a single-agent install.
+//
+// Every subcommand's --agent flag starts from this value. Using the literal
+// routing.DefaultAgentID ("main") instead broke the CLI on any multi-agent
+// config — the asking user's case — with `✗ unknown agent "main" (known
+// agents: coder, explorer, …)`, because "main" only exists as an implicit agent
+// when agents.list is empty. The rule itself lives in
+// routing.ConfiguredDefaultAgentID, which the runtime route resolver uses too,
+// so the CLI can never disagree with the agent a plain message would reach.
+//
+// A config that cannot be loaded is not fatal here: the flag keeps its
+// fallback and the subcommand reports the load failure with its own context,
+// exactly as before this helper existed.
+func defaultMCPAgentID() string {
+	cfg, err := loadConfig()
+	if err != nil || cfg == nil {
+		return routing.DefaultAgentID
+	}
+	return routing.ConfiguredDefaultAgentID(cfg)
+}
+
 // mcpPathsFor resolves the three mcp.json roots for one agent ID exactly as
 // the running gateway does (pkg/agent's resolveAgentWorkspace, reached through
 // agent.AgentWorkspacePath): the agent layer is the agent's own workspace,
@@ -694,7 +724,11 @@ func mcpPathsFor(agentID string) (mcp.Paths, error) {
 		if len(ids) > 0 {
 			known = strings.Join(ids, ", ")
 		}
-		return mcp.Paths{}, fmt.Errorf("unknown agent %q (known agents: %s)", agentID, known)
+		// Name the agent the command would have used on its own: the most
+		// common cause is an explicit --agent (or a stale default) whose ID is
+		// not in agents.list, and the suggestion makes the fix obvious.
+		return mcp.Paths{}, fmt.Errorf("unknown agent %q (known agents: %s; default: %s)",
+			agentID, known, routing.ConfiguredDefaultAgentID(cfg))
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -1473,7 +1507,7 @@ type mcpEditArgs struct {
 }
 
 func parseMCPEditArgs(args []string) (mcpEditArgs, error) {
-	a := mcpEditArgs{agent: routing.DefaultAgentID}
+	a := mcpEditArgs{agent: defaultMCPAgentID()}
 	pos, err := parseMCPFlags(args, mcpParseSpec{values: map[string]*string{
 		"--agent": &a.agent,
 		"--layer": &a.layer,
@@ -2009,7 +2043,7 @@ type mcpAuthArgs struct {
 }
 
 func parseMCPAuthArgs(args []string) (mcpAuthArgs, error) {
-	a := mcpAuthArgs{agent: routing.DefaultAgentID}
+	a := mcpAuthArgs{agent: defaultMCPAgentID()}
 	timeout := "5m"
 	port := ""
 	pos, err := parseMCPFlags(args, mcpParseSpec{
@@ -2361,7 +2395,7 @@ type mcpLogoutArgs struct {
 }
 
 func parseMCPLogoutArgs(args []string) (mcpLogoutArgs, error) {
-	a := mcpLogoutArgs{agent: routing.DefaultAgentID}
+	a := mcpLogoutArgs{agent: defaultMCPAgentID()}
 	pos, err := parseMCPFlags(args, mcpParseSpec{values: map[string]*string{
 		"--agent": &a.agent,
 	}})
