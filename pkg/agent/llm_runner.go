@@ -1135,7 +1135,7 @@ func (lr *llmRunnerImpl) maybeCompactLoopContext(ctx context.Context, agent *Age
 					}
 				}
 			}
-			if compacted, ok := tools.CompactLoopMessages(ctx, compactProvider, compactModel, messages, 6); ok {
+			if compacted, ok := tools.CompactLoopMessages(ctx, compactProvider, compactModel, messages, 6, opts.SessionKey); ok {
 				messages = compacted
 				if opts.Channel == "native" {
 					lr.al.publishToolLifecycle(bus.OutboundMessage{

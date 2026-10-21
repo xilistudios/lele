@@ -632,3 +632,89 @@ func TestBuildLLMOptions_Reasoning(t *testing.T) {
 		})
 	}
 }
+
+// ============================================================================
+// Conversation-scoped wire session id (OpenCode Go routing header)
+// ============================================================================
+
+// TestBuildLLMOptions_StampsWireSessionID pins the stamp on buildLLMOptions —
+// the single source of options every main-loop egress takes from (direct call,
+// both fallback paths, streaming, group turns, retries): the returned map
+// carries wire_session_id with the exact value providers.WireSessionID(key)
+// derives. The value must be deterministic for the same key (two consecutive
+// turns of one conversation are indistinguishable to the gateway) and change
+// when the key rotates (/new), or the gateway would keep routing both
+// conversations together.
+func TestBuildLLMOptions_StampsWireSessionID(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+	lc := newLLMCaller(al)
+
+	base := "native:951a0f6e-8f6e-4f2e"
+	sessionKey := base + ":chat:3"
+	opts := llmCallOptions{
+		agent:      agent,
+		model:      "test-model",
+		sessionKey: sessionKey,
+	}
+
+	want := providers.WireSessionID(sessionKey)
+	if want == "" {
+		t.Fatal("test setup: WireSessionID must derive a value for a non-empty key")
+	}
+
+	got := lc.buildLLMOptions(opts)
+	stamped, ok := got[providers.OptWireSessionID]
+	if !ok {
+		t.Fatalf("buildLLMOptions did not stamp %s (options: %#v)", providers.OptWireSessionID, got)
+	}
+	if stamped != want {
+		t.Fatalf("%s = %v (%T), want %q", providers.OptWireSessionID, stamped, stamped, want)
+	}
+
+	// Determinism: a later turn of the same conversation derives the same id.
+	again := lc.buildLLMOptions(opts)
+	if again[providers.OptWireSessionID] != want {
+		t.Fatalf("second turn stamped %v, want the same %q", again[providers.OptWireSessionID], want)
+	}
+
+	// Rotation: a different session key must produce a different id.
+	rotated := al.nextConversationSessionKey(base)
+	if rotated == sessionKey {
+		t.Fatal("test setup: rotation must yield a different session key")
+	}
+	opts.sessionKey = rotated
+	gotRotated := lc.buildLLMOptions(opts)
+	if gotRotated[providers.OptWireSessionID] == want {
+		t.Fatalf("rotated session key %q still stamped %q; the gateway could not tell the conversations apart", rotated, want)
+	}
+	if gotRotated[providers.OptWireSessionID] != providers.WireSessionID(rotated) {
+		t.Fatalf("rotated stamp = %v, want %q", gotRotated[providers.OptWireSessionID], providers.WireSessionID(rotated))
+	}
+}
+
+// TestBuildLLMOptions_StampsUnkeyedBucketWithoutSessionKey: FIX-C — the
+// stamp is unconditional. With no session key the option is present with the
+// shared unkeyed bucket (providers.UnkeyedSessionBucket) — never absent — so
+// unkeyed egresses (cron jobs, standalone loops) satisfy providers that
+// require the session header instead of failing locally.
+func TestBuildLLMOptions_StampsUnkeyedBucketWithoutSessionKey(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+	lc := newLLMCaller(al)
+
+	got := lc.buildLLMOptions(llmCallOptions{
+		agent:      agent,
+		model:      "test-model",
+		sessionKey: "",
+	})
+	v, ok := got[providers.OptWireSessionID]
+	if !ok {
+		t.Fatalf("%s absent with no session key: buildLLMOptions must always stamp (%#v)", providers.OptWireSessionID, got)
+	}
+	if want := providers.UnkeyedSessionBucket; v != want {
+		t.Fatalf("%s = %v (%T), want the unkeyed bucket %q", providers.OptWireSessionID, v, v, want)
+	}
+}

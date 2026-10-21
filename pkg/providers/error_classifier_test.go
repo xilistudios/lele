@@ -472,6 +472,42 @@ func TestClassifyError_WrappedDeadlineExceeded(t *testing.T) {
 	}
 }
 
+// MENOR-1: a missing wire session id is a LOCAL call-site error (a call site
+// forgot providers.WithWireSessionID) — no server, transport or fallback
+// candidate can change the outcome. It must classify terminal (FailoverFormat)
+// so no retry layer burns its budget (up to 8 requests + ~35s of backoff) on a
+// deterministic failure.
+func TestClassifyError_MissingWireSessionIsTerminal(t *testing.T) {
+	cases := []error{
+		common.ErrMissingWireSession,
+		fmt.Errorf("setting request headers: %w", common.ErrMissingWireSession),
+	}
+	for _, err := range cases {
+		if IsRetriableError(err) {
+			t.Errorf("IsRetriableError(%v) = true, want false", err)
+		}
+		result := ClassifyError(err, "opencode_go", "grok-4.7")
+		if result == nil {
+			t.Fatalf("ClassifyError(%v) = nil, want a classification", err)
+		}
+		if result.Reason != FailoverFormat {
+			t.Errorf("ClassifyError(%v) reason = %q, want format", err, result.Reason)
+		}
+		if !result.IsTerminal() {
+			t.Errorf("ClassifyError(%v) must be terminal", err)
+		}
+		if result.IsRetriable() {
+			t.Errorf("ClassifyError(%v) must not be retriable", err)
+		}
+		if result.ShouldBackoff() {
+			t.Errorf("ClassifyError(%v) must not back off", err)
+		}
+		if !errors.Is(result.Wrapped, common.ErrMissingWireSession) {
+			t.Errorf("ClassifyError(%v).Wrapped = %v, must wrap the sentinel", err, result.Wrapped)
+		}
+	}
+}
+
 // Pattern-priority regressions: the network group sits after the provider-facing
 // groups and before auth/format, so ambiguous messages keep their old verdict.
 func TestClassifyError_PatternPriority(t *testing.T) {

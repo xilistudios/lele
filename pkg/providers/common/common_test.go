@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
+	"github.com/xilistudios/lele/pkg/version"
 )
 
 // --- NewHTTPClient tests ---
@@ -861,5 +862,12 @@ func TestTimeoutPolicy_IdleWindowWithinLifetimeCap(t *testing.T) {
 	// single request.
 	if MaxRequestLifetime < 10*time.Minute {
 		t.Errorf("MaxRequestLifetime = %v, expected a generous safety net (>= 10m)", MaxRequestLifetime)
+	}
+}
+
+func TestUserAgent_IsLeleVersioned(t *testing.T) {
+	want := "lele/" + version.Get()
+	if got := UserAgent(); got != want {
+		t.Fatalf("UserAgent() = %q, want %q", got, want)
 	}
 }

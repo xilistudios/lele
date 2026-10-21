@@ -1,14 +1,20 @@
 package providers
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/xilistudios/lele/pkg/auth"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/providers/common"
 )
 
 func TestResolveProviderSelection(t *testing.T) {
@@ -753,5 +759,392 @@ func TestSelectionFromNamedProvider_NonAnthropicStaysHTTPCompat(t *testing.T) {
 	}
 	if sel.apiBase != "https://api.x.ai/v1" {
 		t.Fatalf("apiBase = %q, want https://api.x.ai/v1", sel.apiBase)
+	}
+}
+
+func TestOpenCodeGoSessionHeader(t *testing.T) {
+	tests := []struct {
+		name         string
+		providerName string
+		typ          string
+		apiBase      string
+		want         string
+		// wantRequired: true ⇒ a missing session id fails the call fast
+		// (ErrMissingWireSession), false ⇒ the header is opportunistic (sent
+		// when present, silently omitted when not).
+		wantRequired bool
+	}{
+		{
+			// Explicit name/type configuration: required regardless of base.
+			name:         "canonical name and type",
+			providerName: "opencode_go",
+			typ:          "opencode_go",
+			apiBase:      "https://opencode.ai/zen/go/v1",
+			want:         openCodeGoSessionHeaderName,
+			wantRequired: true,
+		},
+		{
+			name:         "detected by type",
+			providerName: "my-oc",
+			typ:          "opencode_go",
+			apiBase:      "https://proxy.internal/v1",
+			want:         openCodeGoSessionHeaderName,
+			wantRequired: true,
+		},
+		{
+			name:         "detected by type, dash spelling",
+			providerName: "my-oc",
+			typ:          "opencode-go",
+			apiBase:      "https://proxy.internal/v1",
+			want:         openCodeGoSessionHeaderName,
+			wantRequired: true,
+		},
+		{
+			name:         "explicit name wins over a non-go base",
+			providerName: "opencode_go",
+			typ:          "openai",
+			apiBase:      "https://example.test/v1",
+			want:         openCodeGoSessionHeaderName,
+			wantRequired: true,
+		},
+		{
+			// URL sniff ⇒ opportunistic, never fail-fast (FIX-B).
+			name:         "detected by api base, inference go path",
+			providerName: "oc-alias",
+			typ:          "openai",
+			apiBase:      "https://opencode.ai/inference/go/openai/v1",
+			want:         openCodeGoSessionHeaderName,
+			wantRequired: false,
+		},
+		{
+			name:         "detected by api base, zen go path",
+			providerName: "oc-alias",
+			typ:          "openai",
+			apiBase:      "https://opencode.ai/zen/go/v1",
+			want:         openCodeGoSessionHeaderName,
+			wantRequired: false,
+		},
+		{
+			name:         "api base match is case-insensitive",
+			providerName: "oc-alias",
+			typ:          "openai",
+			apiBase:      "https://OpenCode.AI/Zen/Go/V1",
+			want:         openCodeGoSessionHeaderName,
+			wantRequired: false,
+		},
+		{
+			// FIX-A: the first-class Zen base shares the host but not the Go
+			// path. It used to over-match and, with the fail-fast, would have
+			// turned "works" into a local error on unkeyed egresses.
+			name:         "opencode zen base is not detected as go",
+			providerName: "opencode",
+			typ:          "opencode",
+			apiBase:      "https://opencode.ai/zen/v1",
+			want:         "",
+			wantRequired: false,
+		},
+		{
+			// Path-segment boundary: "/zen/gopher" is not "/zen/go".
+			name:         "longer path segment is not detected as go",
+			providerName: "oc-alias",
+			typ:          "openai",
+			apiBase:      "https://opencode.ai/zen/gopher/v1",
+			want:         "",
+			wantRequired: false,
+		},
+		{
+			// NIT-2 flip (deliberate): with the parsed-host matcher
+			// (isOpenCodeGoAPIBase uses net/url) a lookalike host carrying
+			// the Go path NO LONGER matches at all. The old substring match
+			// matched here but only ever yielded an inert opportunistic
+			// header ("matched but inert"); no match is strictly better —
+			// the sniff cannot claim a foreign host anymore.
+			name:         "lookalike host with go path no longer matches",
+			providerName: "corp-proxy",
+			typ:          "openai",
+			apiBase:      "https://proxy.example.com/opencode.ai/zen/go",
+			want:         "",
+			wantRequired: false,
+		},
+		{
+			// NIT-2: an explicit port on the real host must not break the
+			// check — the literal substring matcher missed
+			// "opencode.ai:443/zen/go" and the header was silently omitted
+			// (upstream 400 MissingSessionID). Hostname() strips any port.
+			name:         "explicit port on the opencode.ai host still matches",
+			providerName: "oc-alias",
+			typ:          "openai",
+			apiBase:      "https://opencode.ai:443/zen/go/v1",
+			want:         openCodeGoSessionHeaderName,
+			wantRequired: false,
+		},
+		{
+			// NIT-2 pinned decision: subdomains of opencode.ai count (host is
+			// "opencode.ai or a subdomain of it").
+			name:         "subdomain of opencode.ai matches",
+			providerName: "oc-alias",
+			typ:          "openai",
+			apiBase:      "https://chat.opencode.ai/zen/go/v1",
+			want:         openCodeGoSessionHeaderName,
+			wantRequired: false,
+		},
+		{
+			// NIT-2 pinned consequence: an apiBase that net/url cannot parse
+			// falls back to no-match (no header) instead of matching by
+			// accident. "http://[::1/zen/go" has an unclosed IPv6 bracket.
+			name:         "unparseable api base falls back to no match",
+			providerName: "oc-alias",
+			typ:          "openai",
+			apiBase:      "http://[::1/zen/go",
+			want:         "",
+			wantRequired: false,
+		},
+		{
+			name:         "openai untouched",
+			providerName: "openai",
+			typ:          "openai",
+			apiBase:      "https://api.openai.com/v1",
+			want:         "",
+			wantRequired: false,
+		},
+		{
+			name:         "local proxy untouched",
+			providerName: "myproxy",
+			typ:          "openai",
+			apiBase:      "http://127.0.0.1:8080/v1",
+			want:         "",
+			wantRequired: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sel := &providerSelection{
+				providerName:     tt.providerName,
+				providerTypeName: tt.typ,
+				apiBase:          tt.apiBase,
+			}
+			got, required := openCodeGoSessionHeader(sel)
+			if got != tt.want {
+				t.Fatalf("openCodeGoSessionHeader() = %q, want %q", got, tt.want)
+			}
+			if required != tt.wantRequired {
+				t.Fatalf("openCodeGoSessionHeader() required = %v, want %v", required, tt.wantRequired)
+			}
+		})
+	}
+}
+
+// startFactoryHeaderServer starts a server that records the session header of
+// the first inference request and answers with a minimal valid completion.
+// Returns the server URL and a getter for the captured header value. The
+// capture is mutex-guarded and copied inside the handler (the plan's rule:
+// reading request state after the handler returns races).
+func startFactoryHeaderServer(t *testing.T) (string, func() string) {
+	t.Helper()
+	var (
+		mu       sync.Mutex
+		captured string
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		captured = r.Header.Get("X-Opencode-Session")
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message":       map[string]interface{}{"content": "ok"},
+					"finish_reason": "stop",
+				},
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+	return server.URL, func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return captured
+	}
+}
+
+func TestCreateProviderForCandidate_OpenCodeGoSendsSessionHeader(t *testing.T) {
+	apiBase, sessionHeader := startFactoryHeaderServer(t)
+
+	cfg := config.DefaultConfig()
+	if cfg.Providers.Named == nil {
+		cfg.Providers.Named = map[string]config.NamedProviderConfig{}
+	}
+	cfg.Providers.Named["opencode_go"] = config.NamedProviderConfig{
+		Type: "opencode_go",
+		ProviderConfig: config.ProviderConfig{
+			APIKey:  "oc-key",
+			APIBase: apiBase,
+		},
+	}
+
+	p, err := CreateProviderForCandidate(cfg, "opencode_go")
+	if err != nil {
+		t.Fatalf("CreateProviderForCandidate() error = %v", err)
+	}
+	options := map[string]interface{}{OptWireSessionID: "abc"}
+	if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, "gpt-5.6-luna", options); err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	if got := sessionHeader(); got != "abc" {
+		t.Fatalf("x-opencode-session = %q, want %q", got, "abc")
+	}
+}
+
+func TestCreateProviderForCandidate_NonOpenCodeDoesNotSendSessionHeader(t *testing.T) {
+	apiBase, sessionHeader := startFactoryHeaderServer(t)
+
+	cfg := config.DefaultConfig()
+	if cfg.Providers.Named == nil {
+		cfg.Providers.Named = map[string]config.NamedProviderConfig{}
+	}
+	cfg.Providers.Named["openai"] = config.NamedProviderConfig{
+		Type: "openai",
+		ProviderConfig: config.ProviderConfig{
+			APIKey:  "sk-test",
+			APIBase: apiBase,
+		},
+	}
+
+	p, err := CreateProviderForCandidate(cfg, "openai")
+	if err != nil {
+		t.Fatalf("CreateProviderForCandidate() error = %v", err)
+	}
+	options := map[string]interface{}{OptWireSessionID: "abc"}
+	if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, "gpt-4o", options); err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	if got := sessionHeader(); got != "" {
+		t.Fatalf("x-opencode-session = %q, want absent", got)
+	}
+}
+
+// TestCreateProviderForCandidate_OpenCodeGoNameTypeRequiresSessionHeader pins
+// the REQUIRED branch (FIX-B): detection from explicit name/type config means
+// the user asked for OpenCode Go, so an unstamped call (no wire_session_id
+// option) must fail locally with ErrMissingWireSession and never reach the
+// server — the error is the honest signal that a call site forgot
+// providers.WithWireSessionID.
+func TestCreateProviderForCandidate_OpenCodeGoNameTypeRequiresSessionHeader(t *testing.T) {
+	apiBase, sessionHeader := startFactoryHeaderServer(t)
+
+	cfg := config.DefaultConfig()
+	if cfg.Providers.Named == nil {
+		cfg.Providers.Named = map[string]config.NamedProviderConfig{}
+	}
+	cfg.Providers.Named["opencode_go"] = config.NamedProviderConfig{
+		Type: "opencode_go",
+		ProviderConfig: config.ProviderConfig{
+			APIKey:  "oc-key",
+			APIBase: apiBase,
+		},
+	}
+
+	p, err := CreateProviderForCandidate(cfg, "opencode_go")
+	if err != nil {
+		t.Fatalf("CreateProviderForCandidate() error = %v", err)
+	}
+	_, err = p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, "gpt-5.6-luna", nil)
+	if !errors.Is(err, common.ErrMissingWireSession) {
+		t.Fatalf("Chat() error = %v, want errors.Is(err, common.ErrMissingWireSession)", err)
+	}
+	if got := sessionHeader(); got != "" {
+		t.Fatalf("x-opencode-session = %q, want the server never reached", got)
+	}
+}
+
+// TestCreateProviderForCandidate_OpenCodeGoURLSniffIsOpportunistic pins the
+// OPPORTUNISTIC branch (FIX-B): detection from api_base alone must never fail
+// the call locally. Without a session id the header is silently omitted (the
+// upstream answers its own descriptive 400 if it cares); with one it is sent.
+//
+// NIT-2 changed how the api_base is matched (parsed host, not substring), so
+// a local httptest URL can no longer be spoofed by appending
+// "/opencode.ai/zen/go" to its path — that lookalike pattern now correctly
+// does NOT match. To keep this end-to-end with the REAL host, the api_base is
+// http://opencode.ai/zen/go/v1 and the httptest server plays HTTP proxy: for
+// plain-http targets Go's transport sends the absolute-form request to the
+// configured proxy, so no DNS lookup of opencode.ai ever happens.
+func TestCreateProviderForCandidate_OpenCodeGoURLSniffIsOpportunistic(t *testing.T) {
+	proxy, sessionHeader := startFactoryHeaderServer(t)
+
+	cfg := config.DefaultConfig()
+	if cfg.Providers.Named == nil {
+		cfg.Providers.Named = map[string]config.NamedProviderConfig{}
+	}
+	cfg.Providers.Named["oc-proxy"] = config.NamedProviderConfig{
+		Type: "openai",
+		ProviderConfig: config.ProviderConfig{
+			APIKey:  "sk-test",
+			APIBase: "http://opencode.ai/zen/go/v1",
+			Proxy:   proxy,
+		},
+	}
+
+	p, err := CreateProviderForCandidate(cfg, "oc-proxy")
+	if err != nil {
+		t.Fatalf("CreateProviderForCandidate() error = %v", err)
+	}
+
+	// No session id: the call proceeds and the header stays off the wire.
+	if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, "gpt-4o", nil); err != nil {
+		t.Fatalf("Chat() without session id error = %v, want success (opportunistic header)", err)
+	}
+	if got := sessionHeader(); got != "" {
+		t.Fatalf("x-opencode-session = %q, want omitted when the call carries no session id", got)
+	}
+
+	// With a session id: the opportunistic header is sent.
+	options := map[string]interface{}{OptWireSessionID: "abc"}
+	if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, "gpt-4o", options); err != nil {
+		t.Fatalf("Chat() with session id error = %v", err)
+	}
+	if got := sessionHeader(); got != "abc" {
+		t.Fatalf("x-opencode-session = %q, want %q", got, "abc")
+	}
+}
+
+// TestCreateProviderForCandidate_OpenCodeZenNotDetectedAsGo pins FIX-A at the
+// factory level: the first-class Zen base (https://opencode.ai/zen/v1) shares
+// the opencode.ai host but not the Go path, so it must NOT be detected as
+// OpenCode Go — even a stamped call must keep the header off the wire (before
+// the fix, Zen was falsely detected and unkeyed egresses failed locally).
+//
+// NIT-2: same local-proxy setup as the opportunistic test above — the parsed
+// host check means the real opencode.ai host is required for the path
+// comparison to be exercised at all.
+func TestCreateProviderForCandidate_OpenCodeZenNotDetectedAsGo(t *testing.T) {
+	proxy, sessionHeader := startFactoryHeaderServer(t)
+
+	cfg := config.DefaultConfig()
+	if cfg.Providers.Named == nil {
+		cfg.Providers.Named = map[string]config.NamedProviderConfig{}
+	}
+	cfg.Providers.Named["opencode"] = config.NamedProviderConfig{
+		Type: "openai",
+		ProviderConfig: config.ProviderConfig{
+			APIKey:  "zen-key",
+			APIBase: "http://opencode.ai/zen/v1",
+			Proxy:   proxy,
+		},
+	}
+
+	p, err := CreateProviderForCandidate(cfg, "opencode")
+	if err != nil {
+		t.Fatalf("CreateProviderForCandidate() error = %v", err)
+	}
+	options := map[string]interface{}{OptWireSessionID: "abc"}
+	if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, "grok-4.7", options); err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	if got := sessionHeader(); got != "" {
+		t.Fatalf("x-opencode-session = %q, want absent: /zen/v1 is Zen, not OpenCode Go", got)
 	}
 }

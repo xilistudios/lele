@@ -70,6 +70,7 @@ func providerRegistry() []providerInfo {
 		{name: "minimax", displayName: "MiniMax", typeKey: "minimax", apiBase: catalogBase("minimax"), authHeader: "Bearer"},
 		{name: "vercel", displayName: "Vercel AI Gateway", typeKey: "vercel", apiBase: catalogBase("vercel"), authHeader: "Bearer"},
 		{name: "opencode", displayName: "OpenCode Zen", typeKey: "opencode", apiBase: catalogBase("opencode"), authHeader: "Bearer"},
+		{name: "opencode_go", displayName: "OpenCode Go", typeKey: "opencode_go", apiBase: catalogBase("opencode_go"), authHeader: "Bearer"},
 		{name: "huggingface", displayName: "Hugging Face", typeKey: "huggingface", apiBase: catalogBase("huggingface"), authHeader: "Bearer"},
 		{name: "novita", displayName: "NovitaAI", typeKey: "novita", apiBase: catalogBase("novita"), authHeader: "Bearer"},
 		{name: "xiaomi", displayName: "Xiaomi MiMo", typeKey: "xiaomi", apiBase: catalogBase("xiaomi"), authHeader: "Bearer"},

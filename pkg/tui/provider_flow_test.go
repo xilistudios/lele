@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/catalog"
 )
 
 func TestProviderPresetByType(t *testing.T) {
@@ -75,5 +77,30 @@ func TestProviderPresetLabels(t *testing.T) {
 		if p.label == "" {
 			t.Fatalf("preset %q has empty label", p.typ)
 		}
+	}
+}
+
+// TestProviderPreset_OpenCodeGo verifies the OpenCode Go preset exists in the
+// /connect picker with a catalog-backed base URL and a default model.
+func TestProviderPreset_OpenCodeGo(t *testing.T) {
+	p := providerPresetByType("opencode_go")
+	if p == nil {
+		t.Fatal("opencode_go preset not found in providerPresets")
+	}
+
+	if p.label != "OpenCode Go" {
+		t.Errorf("label = %q, want %q", p.label, "OpenCode Go")
+	}
+
+	wantBase := catalog.DefaultAPIBaseByType("opencode_go")
+	if p.apiBase != wantBase {
+		t.Errorf("apiBase = %q, want catalog default %q", p.apiBase, wantBase)
+	}
+
+	if p.defaultModel == "" {
+		t.Error("defaultModel is empty")
+	}
+	if p.defaultModelAlias == "" {
+		t.Error("defaultModelAlias is empty")
 	}
 }

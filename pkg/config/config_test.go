@@ -1238,3 +1238,26 @@ func TestProvidersConfigAuthMethodRoundTrip(t *testing.T) {
 		t.Errorf("loaded.Providers.Anthropic.AuthMethod = %q, want %q", got, "oauth")
 	}
 }
+
+// TestNormalizeProviderKey_OpenCodeGo verifies the opencode-go alias maps to
+// the canonical opencode_go key (aliases kept in sync with providers.NormalizeProvider
+// and catalog.normalizeType).
+func TestNormalizeProviderKey_OpenCodeGo(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"opencode-go", "opencode_go"},
+		{"OpenCode-Go", "opencode_go"},
+		{"opencode_go", "opencode_go"},
+		// Existing aliases must keep working (no regression).
+		{"opencode-zen", "opencode"},
+		{"zen", "opencode"},
+	}
+
+	for _, tt := range tests {
+		if got := normalizeProviderKey(tt.input); got != tt.want {
+			t.Errorf("normalizeProviderKey(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

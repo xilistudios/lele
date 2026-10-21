@@ -211,6 +211,31 @@ Contains built-in and custom provider entries.
 
 See `docs/agents-models-providers.md`.
 
+Provider support is mostly behavior, not extra fields. Two examples that need
+no configuration:
+
+- The OpenAI-compatible and Anthropic Messages transports send
+  `User-Agent: lele/<version>` on every inference call. The OAuth/CLI provider
+  families deliberately do **not**: Claude OAuth (`claude-cli/…`), Gemini
+  Code Assist (`GeminiCLI-tui/…`) and Antigravity (`antigravity/…`) send their
+  official client's User-Agent because those endpoints require impersonation —
+  do not "unify" them, a `lele/…` value there would be rejected.
+- Entries that resolve to **OpenCode Go** — by explicit name or `type`
+  (`opencode_go` / `opencode-go`) or by an `api_base` whose path is an OpenCode
+  Go route (`opencode.ai/zen/go` or `opencode.ai/inference/go`; the plain
+  `https://opencode.ai/zen/v1` Zen base does not match) — additionally get an
+  `x-opencode-session` header on inference calls: a SHA-256 hash of the
+  conversation session key, stable per conversation and changed by `/new`
+  (calls with no session key share one stable unkeyed bucket, the hash of the
+  empty key). The gateway requires it (`400 MissingSessionID` without it,
+  checked before authentication): when detection came from the explicit
+  name/type, lele fails the call locally with a clear error instead of sending
+  a request the gateway would reject; when detection came only from
+  `api_base`, the header is opportunistic — sent when a session id is present,
+  silently omitted otherwise. The credentials and base live in the ordinary
+  named-provider entry, exactly like `opencode`; there is no dedicated field.
+  See the OpenCode Go section of `docs/agents-models-providers.md`.
+
 ## `tools`
 
 Contains:

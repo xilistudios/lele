@@ -36,16 +36,74 @@ type Provider struct {
 	apiKey     string
 	apiBase    string
 	httpClient *http.Client
+	// sessionHeader is the static, per-instance header that carries the
+	// per-call wire session id (e.g. "x-opencode-session" for OpenCode Go).
+	// Empty means: never send it.
+	sessionHeader string
+	// sessionHeaderRequired decides what a missing session id means: true =
+	// fail the call fast with common.ErrMissingWireSession (the target was
+	// configured by explicit name/type), false = send the header only when a
+	// session id is present and silently omit it otherwise (the target was
+	// merely sniffed from api_base, review MAYOR-1).
+	sessionHeaderRequired bool
+}
+
+// Options are the static, per-instance transport extras. Conversation-scoped
+// values (the session id itself) never live here: they are read per call from
+// the options map via protocoltypes.OptWireSessionID.
+type Options struct {
+	// SessionHeader is the header that carries the per-call wire session id,
+	// e.g. "x-opencode-session". Empty means: never send it.
+	SessionHeader string
+	// SessionHeaderRequired controls the reaction to a missing session id:
+	// true fails the call fast with common.ErrMissingWireSession (explicit
+	// name/type detection), false omits the header silently (opportunistic
+	// URL-sniff detection). Ignored when SessionHeader is empty.
+	SessionHeaderRequired bool
 }
 
 func NewProvider(apiKey, apiBase, proxy string) *Provider {
+	return NewProviderWithOptions(apiKey, apiBase, proxy, Options{})
+}
+
+// NewProviderWithOptions creates a provider with static transport extras.
+func NewProviderWithOptions(apiKey, apiBase, proxy string, opts Options) *Provider {
 	client := common.NewStreamingHTTPClient(proxy)
 
 	return &Provider{
-		apiKey:     apiKey,
-		apiBase:    strings.TrimRight(apiBase, "/"),
-		httpClient: client,
+		apiKey:                apiKey,
+		apiBase:               strings.TrimRight(apiBase, "/"),
+		httpClient:            client,
+		sessionHeader:         opts.SessionHeader,
+		sessionHeaderRequired: opts.SessionHeaderRequired,
 	}
+}
+
+// setRequestHeaders applies every header an inference request carries. Both
+// Chat and ChatStream must go through it: they are separate code paths, and a
+// header added to only one of them is a silent, partial behaviour.
+func (p *Provider) setRequestHeaders(req *http.Request, options map[string]interface{}) error {
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", common.UserAgent())
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	if p.sessionHeader == "" {
+		return nil
+	}
+	sessionID := protocoltypes.WireSessionFromOptions(options)
+	if sessionID == "" {
+		if !p.sessionHeaderRequired {
+			// Opportunistic header (URL-sniff detection): without a session id
+			// we omit it and let the upstream answer its own descriptive 400
+			// if it cares — a lookalike or unkeyed egress must not fail here.
+			return nil
+		}
+		return fmt.Errorf("%w: this provider requires %q and the call carried no %q option (a call site is missing providers.WithWireSessionID)",
+			common.ErrMissingWireSession, p.sessionHeader, protocoltypes.OptWireSessionID)
+	}
+	req.Header.Set(p.sessionHeader, sessionID)
+	return nil
 }
 
 func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDefinition, model string, options map[string]interface{}) (*LLMResponse, error) {
@@ -102,9 +160,8 @@ func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDef
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	if p.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	if err := p.setRequestHeaders(req, options); err != nil {
+		return nil, fmt.Errorf("setting request headers: %w", err)
 	}
 
 	resp, err := p.httpClient.Do(req)
@@ -181,9 +238,8 @@ func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []T
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	if p.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	if err := p.setRequestHeaders(req, options); err != nil {
+		return nil, fmt.Errorf("setting request headers: %w", err)
 	}
 
 	resp, err := p.httpClient.Do(req)

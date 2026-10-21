@@ -99,6 +99,7 @@ const PROVIDER_TYPE_ALIASES: Record<string, string> = {
   'vercel-ai-gateway': 'vercel',
   zen: 'opencode',
   'opencode-zen': 'opencode',
+  'opencode-go': 'opencode_go',
   hf: 'huggingface',
   'hugging-face': 'huggingface',
   'novita-ai': 'novita',

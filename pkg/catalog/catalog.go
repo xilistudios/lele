@@ -295,6 +295,8 @@ func normalizeType(t string) string {
 		return "vercel"
 	case "zen", "opencode-zen":
 		return "opencode"
+	case "opencode-go":
+		return "opencode_go"
 	case "hf", "hugging-face":
 		return "huggingface"
 	case "novita-ai", "novitaai":

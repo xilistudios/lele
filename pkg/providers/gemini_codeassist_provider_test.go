@@ -1401,3 +1401,55 @@ func TestGeminiSessionIDFromOptions(t *testing.T) {
 		})
 	}
 }
+
+// TestCodeAssistRequest_IgnoresWireSessionID is the T2.0 regression guard for
+// the locked D3 ruling: wire_session_id (pkg/providers/protocoltypes) is the
+// agent loop's routing contract for OpenCode Go and is now stamped on EVERY
+// LLM egress — this provider's calls included. The Code Assist transport keeps
+// reading only options["session_id"] (its own BODY field, honoured when
+// explicitly passed — see TestGeminiChatWire), so the stamped wire session id
+// must never change this provider's wire format: no session_id in the body,
+// and the wire option itself must not leak into it either.
+func TestCodeAssistRequest_IgnoresWireSessionID(t *testing.T) {
+	setupGeminiTestEnv(t)
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "env-proj")
+	stub := newGeminiCodeAssistStub(t, func(req capturedCodeAssistRequest) (int, string) {
+		switch req.path {
+		case "/v1internal:loadCodeAssist":
+			return http.StatusOK, `{"currentTier":{"id":"free-tier"}}`
+		case "/v1internal:generateContent":
+			return http.StatusOK, `{"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}]}}`
+		default:
+			t.Errorf("unexpected request to %q", req.path)
+			return http.StatusInternalServerError, `{}`
+		}
+	})
+
+	p := newGeminiTestProvider(t, stub.Server, "tok")
+	// The exact options shape the agent loop sends for this provider: the
+	// wire session id stamped for transports that need a routing header, and
+	// no Gemini session_id (no production caller sets that option).
+	options := map[string]any{OptWireSessionID: WireSessionID("native:e2e-gemini:chat:3")}
+	if _, err := p.Chat(context.Background(), []Message{{Role: "user", Content: "Hi"}}, nil, "gemini-2.5-pro", options); err != nil {
+		t.Fatalf("Chat() error: %v", err)
+	}
+
+	requests := stub.requestsFor("/v1internal:generateContent")
+	if len(requests) != 1 {
+		t.Fatalf("generateContent requests = %d, want 1", len(requests))
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(requests[0].body, &envelope); err != nil {
+		t.Fatalf("generateContent body is not JSON: %v (%s)", err, requests[0].body)
+	}
+	request, ok := envelope["request"].(map[string]any)
+	if !ok {
+		t.Fatalf("body has no request object: %s", requests[0].body)
+	}
+	if got, present := request["session_id"]; present {
+		t.Errorf("request.session_id = %v, want the field absent when only %s was passed", got, OptWireSessionID)
+	}
+	if got, present := request[OptWireSessionID]; present {
+		t.Errorf("request carries %s = %v; the routing option must never reach the body", OptWireSessionID, got)
+	}
+}

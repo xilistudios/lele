@@ -179,7 +179,11 @@ func EstimateLoopTokens(messages []providers.Message) int {
 // CompactLoopMessages reduces context size by summarizing old tool interactions.
 // Keeps the system prompt (first message) and the last keepLast messages.
 // Everything in between is summarized via LLM and replaced with a single message.
-func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, model string, messages []providers.Message, keepLast int) ([]providers.Message, bool) {
+// sessionKey is stamped as the conversation-scoped wire session id (see
+// providers.WithWireSessionID); pass "" when unknown — the stamp then lands in
+// the shared unkeyed bucket (providers.WireSessionID("")) rather than being
+// skipped.
+func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, model string, messages []providers.Message, keepLast int, sessionKey string) ([]providers.Message, bool) {
 	if len(messages) <= keepLast+2 {
 		return messages, false
 	}
@@ -250,10 +254,13 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 		summaryInput
 
 	apiModel := providers.StripProviderPrefix(model)
-	resp, err := providers.ChatIdle(ctx, provider, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, map[string]interface{}{
+	// The summarizer is an inference call: same conversation-scoped wire identity
+	// as the loop it is compacting for.
+	compactOpts := providers.WithWireSessionID(map[string]interface{}{
 		"max_tokens":  1024,
 		"temperature": 0.3,
-	})
+	}, sessionKey)
+	resp, err := providers.ChatIdle(ctx, provider, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, compactOpts)
 
 	if err != nil || resp == nil || resp.Content == "" {
 		logger.WarnCF("toolloop", "Context compaction summarization failed, skipping", map[string]any{
@@ -375,6 +382,23 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		ctx = WithAgentToolContext(ctx, config.OwnerAgentID, config.OwnerSessionKey)
 	}
 
+	// Conversation-scoped wire identity, same rule as the main loop
+	// (pkg/agent/llm_caller.go buildLLMOptions). A subagent has its own session
+	// key; the synchronous in-context subagent (subagent_tool.go:152-169)
+	// deliberately passes none — it sets only OwnerSessionKey (`:168`) — so fall
+	// back to the owner's session: those turns belong to the parent conversation
+	// and must still be routable. Empty everywhere ⇒ the stamp falls back to
+	// the shared unkeyed bucket (providers.WireSessionID("")) so unkeyed
+	// egresses (cron jobs, standalone loops) still satisfy required providers
+	// instead of aborting locally. Hoisted out of the loop so the reactive
+	// compaction calls below share the exact same value. Computed AFTER the
+	// owner inheritance above so a loop that inherits its owner from ctx gets
+	// the same fallback.
+	wireSessionKey := config.SessionKey
+	if wireSessionKey == "" {
+		wireSessionKey = config.OwnerSessionKey
+	}
+
 	if config.SessionRecorder != nil && config.SessionKey != "" {
 		for _, m := range messages {
 			if m.Role == "user" {
@@ -423,6 +447,7 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		if llmOpts == nil {
 			llmOpts = map[string]any{}
 		}
+		llmOpts = providers.WithWireSessionID(llmOpts, wireSessionKey)
 		// 3. Call LLM
 		// Strip provider prefix from model for API calls.
 		// The provider prefix (e.g., "openrouter:") is for internal routing only
@@ -477,7 +502,7 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				if config.CompactionModel != "" {
 					compactModel = config.CompactionModel
 				}
-				if compacted, ok := CompactLoopMessages(ctx, config.Provider, compactModel, messages, 6); ok {
+				if compacted, ok := CompactLoopMessages(ctx, config.Provider, compactModel, messages, 6, wireSessionKey); ok {
 					messages = compacted
 					if config.MessageBus != nil {
 						config.MessageBus.PublishOutbound(bus.OutboundMessage{
@@ -794,7 +819,7 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				if config.CompactionModel != "" {
 					compactModel = config.CompactionModel
 				}
-				if compacted, ok := CompactLoopMessages(ctx, config.Provider, compactModel, messages, 6); ok {
+				if compacted, ok := CompactLoopMessages(ctx, config.Provider, compactModel, messages, 6, wireSessionKey); ok {
 					messages = compacted
 					if config.MessageBus != nil {
 						config.MessageBus.PublishOutbound(bus.OutboundMessage{

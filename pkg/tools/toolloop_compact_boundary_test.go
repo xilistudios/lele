@@ -90,7 +90,7 @@ func TestCompactLoopMessages_TrimsOrphanedToolResults(t *testing.T) {
 		msg("assistant", "recent answer"),
 	}
 
-	compacted, ok := CompactLoopMessages(context.Background(), &okProvider{}, "test-model", messages, 4)
+	compacted, ok := CompactLoopMessages(context.Background(), &okProvider{}, "test-model", messages, 4, "")
 	if !ok {
 		t.Fatalf("expected compaction to succeed")
 	}
@@ -125,7 +125,7 @@ func TestCompactLoopMessages_KeepsCompleteToolGroup(t *testing.T) {
 	// Tail = [assistant+calls, result-a, result-b, user, assistant] (keepLast=5).
 	// Index 0 is a safe boundary because the assistant's tool results are
 	// present, so the whole group is kept.
-	compacted, ok := CompactLoopMessages(context.Background(), &okProvider{}, "test-model", messages, 5)
+	compacted, ok := CompactLoopMessages(context.Background(), &okProvider{}, "test-model", messages, 5, "")
 	if !ok {
 		t.Fatalf("expected compaction to succeed")
 	}
@@ -154,7 +154,7 @@ func TestCompactLoopMessages_NoSafeBoundary(t *testing.T) {
 	}
 
 	// keepLast=4 → tail is all tool results with no user/assistant boundary.
-	compacted, ok := CompactLoopMessages(context.Background(), &okProvider{}, "test-model", messages, 4)
+	compacted, ok := CompactLoopMessages(context.Background(), &okProvider{}, "test-model", messages, 4, "")
 	if ok {
 		t.Fatalf("expected compaction to be skipped, got compacted: %+v", compacted)
 	}

@@ -2,12 +2,14 @@ package providers
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/auth"
 	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/config"
 	anthropicmessages "github.com/xilistudios/lele/pkg/providers/anthropic_messages"
+	"github.com/xilistudios/lele/pkg/providers/openai_compat"
 )
 
 const defaultAnthropicAPIBase = "https://api.anthropic.com/v1"
@@ -42,6 +44,13 @@ type providerSelection struct {
 	workspace       string
 	connectMode     string
 	enableWebSearch bool
+	// providerName is the configured provider key (the Named entry name, or the
+	// provider key when no Named entry exists). Detection only — never used to
+	// select a transport.
+	providerName string
+	// providerTypeName is the configured `type` string (Named.Type, else the
+	// provider key). Detection only.
+	providerTypeName string
 }
 
 // defaultAPIBaseByType returns the default API base URL for a provider type.
@@ -64,18 +73,99 @@ func defaultAPIBaseByType(providerType string) string {
 	return ""
 }
 
+// openCodeGoSessionHeaderName is the header the OpenCode Go gateway requires on
+// inference calls; without it every request fails with 400 MissingSessionID
+// (validated before auth).
+const openCodeGoSessionHeaderName = "x-opencode-session"
+
+// openCodeGoSessionHeader returns the session header name for this selection
+// (or "" for every other target) and whether a missing session id must fail
+// the call fast or be skipped silently.
+//
+// required=true only for detection from name/type: configuring a provider as
+// `opencode_go` / `opencode-go` is explicit user intent to talk to the OpenCode
+// Go gateway, so a call site that forgot providers.WithWireSessionID is a local
+// programming error and must surface as common.ErrMissingWireSession instead of
+// an opaque upstream 400.
+//
+// required=false for detection from api_base (URL sniff): the URL only says
+// "this might be the gateway", so the header is opportunistic — sent when the
+// call carries a session id, silently omitted when it does not. That keeps the
+// sniff inert for unkeyed egresses (a lookalike host no longer matches at all
+// — see isOpenCodeGoAPIBase), and FIX-B keeps it from ever failing the call
+// (review MAYOR-1).
+func openCodeGoSessionHeader(sel *providerSelection) (name string, required bool) {
+	for _, s := range []string{sel.providerName, sel.providerTypeName} {
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "opencode_go", "opencode-go":
+			return openCodeGoSessionHeaderName, true
+		}
+	}
+	if isOpenCodeGoAPIBase(sel.apiBase) {
+		return openCodeGoSessionHeaderName, false
+	}
+	return "", false
+}
+
+// isOpenCodeGoAPIBase reports whether apiBase points at an OpenCode Go route.
+//
+// Parsed, not a substring: the apiBase is parsed with net/url and BOTH halves
+// must match.
+//
+// Host: exactly "opencode.ai" or one of its subdomains, any port (so an
+// explicit ":443" in api_base matches — review NIT-2, where the old literal
+// substring missed "https://opencode.ai:443/zen/go/v1" and the header was
+// silently omitted, producing an upstream 400 MissingSessionID).
+//
+// Path: one of the Go routes that identify the gateway — /zen/go/... (the
+// canonical documented base) and /inference/go/... (the OpenAI alias) — with
+// a segment boundary ("/zen/gopher" and "/zen/go-v2" are not "/zen/go"), and
+// case-insensitively, so the first-class Zen base
+// https://opencode.ai/zen/v1 does NOT match. Query and fragment are split off
+// by the parser, so "/zen/go?x=1" still matches exactly like before.
+//
+// Two deliberate consequences of the real host check, both pinned in
+// TestOpenCodeGoSessionHeader:
+//   - a lookalike host carrying the Go path
+//     (https://proxy.example.com/opencode.ai/zen/go) NO LONGER matches at
+//     all — strictly better than the old substring residual, which matched
+//     but only ever yielded an inert opportunistic header;
+//   - an apiBase net/url cannot parse falls back to no-match (no header)
+//     instead of matching by accident.
+func isOpenCodeGoAPIBase(apiBase string) bool {
+	u, err := url.Parse(strings.TrimSpace(apiBase))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host != "opencode.ai" && !strings.HasSuffix(host, ".opencode.ai") {
+		return false
+	}
+	path := strings.ToLower(u.Path)
+	for _, route := range []string{"/zen/go", "/inference/go"} {
+		// Path-segment boundary: the exact route or a subpath of it, never a
+		// longer segment (e.g. "/zen/gopher" is not "/zen/go").
+		if path == route || strings.HasPrefix(path, route+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 func selectionFromNamedProvider(cfg *config.Config, providerName, model string, named config.NamedProviderConfig) (providerSelection, error) {
 	typ := named.Type
 	if typ == "" {
 		typ = providerName
 	}
 	sel := providerSelection{
-		providerType: providerTypeHTTPCompat,
-		apiKey:       named.APIKey,
-		apiBase:      named.APIBase,
-		proxy:        named.Proxy,
-		model:        model,
-		connectMode:  named.ConnectMode,
+		providerType:     providerTypeHTTPCompat,
+		apiKey:           named.APIKey,
+		apiBase:          named.APIBase,
+		proxy:            named.Proxy,
+		model:            model,
+		connectMode:      named.ConnectMode,
+		providerName:     providerName,
+		providerTypeName: typ,
 	}
 
 	if mc, ok := named.Models[model]; ok {
@@ -327,8 +417,10 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 	lowerModel := strings.ToLower(model)
 
 	sel := providerSelection{
-		providerType: providerTypeHTTPCompat,
-		model:        model,
+		providerType:     providerTypeHTTPCompat,
+		model:            model,
+		providerName:     providerName,
+		providerTypeName: providerName,
 	}
 
 	// First, prefer explicit provider configuration.
@@ -704,6 +796,7 @@ func CreateProviderForCandidate(cfg *config.Config, providerName string) (LLMPro
 }
 
 func createProviderFromSelection(sel *providerSelection) (LLMProvider, error) {
+	sessionHeader, sessionHeaderRequired := openCodeGoSessionHeader(sel)
 	switch sel.providerType {
 	case providerTypeClaudeAuth:
 		return createClaudeAuthProvider(sel.apiBase)
@@ -722,8 +815,8 @@ func createProviderFromSelection(sel *providerSelection) (LLMProvider, error) {
 	case providerTypeGitHubCopilot:
 		return NewGitHubCopilotProvider(sel.apiBase, sel.connectMode, sel.model)
 	case providerTypeAnthropic:
-		return anthropicmessages.NewProvider(sel.apiKey, sel.apiBase), nil
+		return anthropicmessages.NewProviderWithOptions(sel.apiKey, sel.apiBase, anthropicmessages.Options{SessionHeader: sessionHeader, SessionHeaderRequired: sessionHeaderRequired}), nil
 	default:
-		return NewHTTPProvider(sel.apiKey, sel.apiBase, sel.proxy), nil
+		return NewHTTPProviderWithOptions(sel.apiKey, sel.apiBase, sel.proxy, openai_compat.Options{SessionHeader: sessionHeader, SessionHeaderRequired: sessionHeaderRequired}), nil
 	}
 }

@@ -53,6 +53,30 @@ type Provider struct {
 	apiBase        string
 	httpClient     *http.Client
 	requestTimeout time.Duration
+	// sessionHeader is the static, per-instance header that carries the
+	// per-call wire session id (e.g. "x-opencode-session" for OpenCode Go).
+	// Empty means: never send it.
+	sessionHeader string
+	// sessionHeaderRequired decides what a missing session id means: true =
+	// fail the call fast with common.ErrMissingWireSession (the target was
+	// configured by explicit name/type), false = send the header only when a
+	// session id is present and silently omit it otherwise (the target was
+	// merely sniffed from api_base, review MAYOR-1).
+	sessionHeaderRequired bool
+}
+
+// Options are the static, per-instance transport extras. Conversation-scoped
+// values (the session id itself) never live here: they are read per call from
+// the options map via protocoltypes.OptWireSessionID.
+type Options struct {
+	// SessionHeader is the header that carries the per-call wire session id,
+	// e.g. "x-opencode-session". Empty means: never send it.
+	SessionHeader string
+	// SessionHeaderRequired controls the reaction to a missing session id:
+	// true fails the call fast with common.ErrMissingWireSession (explicit
+	// name/type detection), false omits the header silently (opportunistic
+	// URL-sniff detection). Ignored when SessionHeader is empty.
+	SessionHeaderRequired bool
 }
 
 // NewProvider creates a new Anthropic Messages API provider.
@@ -62,6 +86,15 @@ func NewProvider(apiKey, apiBase string) *Provider {
 
 // NewProviderWithTimeout creates a provider with custom request timeout.
 func NewProviderWithTimeout(apiKey, apiBase string, timeoutSeconds int) *Provider {
+	return newProvider(apiKey, apiBase, timeoutSeconds, Options{})
+}
+
+// NewProviderWithOptions creates a provider with static transport extras.
+func NewProviderWithOptions(apiKey, apiBase string, opts Options) *Provider {
+	return newProvider(apiKey, apiBase, 0, opts)
+}
+
+func newProvider(apiKey, apiBase string, timeoutSeconds int, opts Options) *Provider {
 	baseURL := normalizeBaseURL(apiBase)
 	timeout := defaultRequestTimeout
 	if timeoutSeconds > 0 {
@@ -69,11 +102,39 @@ func NewProviderWithTimeout(apiKey, apiBase string, timeoutSeconds int) *Provide
 	}
 
 	return &Provider{
-		apiKey:         apiKey,
-		apiBase:        baseURL,
-		httpClient:     common.NewStreamingHTTPClient(""),
-		requestTimeout: timeout,
+		apiKey:                apiKey,
+		apiBase:               baseURL,
+		httpClient:            common.NewStreamingHTTPClient(""),
+		requestTimeout:        timeout,
+		sessionHeader:         opts.SessionHeader,
+		sessionHeaderRequired: opts.SessionHeaderRequired,
 	}
+}
+
+// setRequestHeaders applies every header an inference request carries. Both
+// Chat and ChatStream must go through it: they are separate code paths, and a
+// header added to only one of them is a silent, partial behaviour.
+func (p *Provider) setRequestHeaders(req *http.Request, options map[string]any) error {
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", common.UserAgent())
+	req.Header.Set("X-Api-Key", p.apiKey)
+	req.Header.Set("Anthropic-Version", defaultAPIVersion)
+	if p.sessionHeader == "" {
+		return nil
+	}
+	sessionID := protocoltypes.WireSessionFromOptions(options)
+	if sessionID == "" {
+		if !p.sessionHeaderRequired {
+			// Opportunistic header (URL-sniff detection): without a session id
+			// we omit it and let the upstream answer its own descriptive 400
+			// if it cares — a lookalike or unkeyed egress must not fail here.
+			return nil
+		}
+		return fmt.Errorf("%w: this provider requires %q and the call carried no %q option (a call site is missing providers.WithWireSessionID)",
+			common.ErrMissingWireSession, p.sessionHeader, protocoltypes.OptWireSessionID)
+	}
+	req.Header.Set(p.sessionHeader, sessionID)
+	return nil
 }
 
 // Chat sends messages to the Anthropic Messages API and returns the response.
@@ -124,9 +185,9 @@ func (p *Provider) Chat(
 	}
 
 	// Set headers
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Api-Key", p.apiKey)
-	req.Header.Set("Anthropic-Version", defaultAPIVersion)
+	if err := p.setRequestHeaders(req, options); err != nil {
+		return nil, fmt.Errorf("setting request headers: %w", err)
+	}
 
 	// Execute request
 	resp, err := p.httpClient.Do(req)
@@ -210,9 +271,9 @@ func (p *Provider) ChatStream(
 		return nil, fmt.Errorf("creating HTTP request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Api-Key", p.apiKey)
-	req.Header.Set("Anthropic-Version", defaultAPIVersion)
+	if err := p.setRequestHeaders(req, options); err != nil {
+		return nil, fmt.Errorf("setting request headers: %w", err)
+	}
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {

@@ -249,7 +249,7 @@ This is useful when different channels, accounts, guilds, or peers should use di
 
 Lele treats provider configuration as a named map under `providers`.
 
-Built-in providers such as `openai`, `anthropic`, `openrouter`, `groq`, `zhipu`, `gemini`, `vllm`, `ollama`, `moonshot`, `deepseek`, and `github_copilot` are all represented there, along with catalog-backed providers ported from hermes-agent: `xai`, `nous`, `lmstudio`, `stepfun`, `minimax`, `vercel`, `opencode`, `huggingface`, `novita`, `xiaomi`, `tencent_tokenhub`, `arcee`, `gmi`, `cerebras`, `together`, `fireworks`, `mistral`, `siliconflow`, `perplexity`, `ollama_cloud`, and `kimi_for_coding`.
+Built-in providers such as `openai`, `anthropic`, `openrouter`, `groq`, `zhipu`, `gemini`, `vllm`, `ollama`, `moonshot`, `deepseek`, and `github_copilot` are all represented there, along with catalog-backed providers ported from hermes-agent: `xai`, `nous`, `lmstudio`, `stepfun`, `minimax`, `vercel`, `opencode`, `opencode_go`, `huggingface`, `novita`, `xiaomi`, `tencent_tokenhub`, `arcee`, `gmi`, `cerebras`, `together`, `fireworks`, `mistral`, `siliconflow`, `perplexity`, `ollama_cloud`, and `kimi_for_coding`.
 
 The runtime also supports additional named provider entries beyond the built-ins.
 
@@ -290,6 +290,71 @@ Most provider entries support:
 - `connect_mode`
 
 The `openai` provider family also supports `web_search`.
+
+### OpenCode Go
+
+`opencode_go` is OpenCode's subscription LLM service
+([official docs](https://opencode.ai/v2/docs/console/go/)). Get an API key
+from the [OpenCode Console](https://opencode.ai/console); the key is a plain
+bearer token (Go / Go Plus subscription — see the official docs for current
+plans and limits).
+
+```json
+{
+  "providers": {
+    "opencode_go": {
+      "type": "opencode_go",
+      "api_key": "…",
+      "api_base": "https://opencode.ai/zen/go/v1"
+    }
+  },
+  "agents": { "defaults": { "provider": "opencode_go", "model": "grok-4.7" } }
+}
+```
+
+`api_base` must be the `/zen/go/v1` base. Do not use the
+`https://opencode.ai/inference/go/openai/v1` alias as `api_base`: it accepts
+inference calls but answers `404` to `GET /models`, so live model listing and
+onboarding validation degrade to the offline catalog. The `/zen/go/v1` base
+serves both inference and `GET /models`.
+
+lele detects an OpenCode Go target automatically — by provider name or type
+(`opencode_go` / `opencode-go`), or by an `api_base` whose path is one of the
+OpenCode Go routes (`opencode.ai/zen/go`, `opencode.ai/inference/go`;
+case-insensitive). The path matters: the first-class Zen base
+`https://opencode.ai/zen/v1` shares the host but is *not* detected as Go. Once
+detected, lele sends two extra headers on inference calls. There is nothing to
+configure:
+
+- `User-Agent: lele/<version>` — sent by the OpenAI-compatible and Anthropic
+  Messages transports (lele identifies itself instead of appearing as a generic
+  HTTP client). The OAuth/CLI provider families deliberately keep their own
+  User-Agents because those endpoints require impersonating the official
+  clients — Claude OAuth (`claude-cli/…`), Gemini Code Assist
+  (`GeminiCLI-tui/…`) and Antigravity (`antigravity/…`); a `lele/…` value
+  there would be rejected, so the impersonation is a requirement, not an
+  oversight.
+- `x-opencode-session: <64 hex chars>` — the gateway rejects requests without
+  it (`400 MissingSessionID`, validated before authentication). The value is
+  the SHA-256 hash of lele's internal conversation session key: stable across
+  turns and restarts, changed by `/new`, and opaque — no channel, chat id or
+  path leaves the machine. Calls with no session key (cron jobs, standalone
+  tool loops) share one stable "unkeyed" bucket — the hash of the empty key —
+  so they keep working instead of failing. If the target was configured by
+  explicit name/type and a call still carries no session id, lele fails the
+  call locally with a clear error instead of forwarding a request the gateway
+  would reject; when detection came only from `api_base`, the header is
+  opportunistic — sent when a session id is present, silently omitted when it
+  is not.
+
+The OpenCode endpoint routes every model family server-side (grok, gpt, luna,
+kimi, glm, claude, gemini, qwen, deepseek, minimax, …) through a single
+OpenAI-compatible `chat/completions` API, so no per-model dialect has to be
+configured.
+
+Configuring it as an `anthropic`-typed provider is not supported: the
+Anthropic Messages transport authenticates with `x-api-key`, while OpenCode Go
+expects `Authorization: Bearer`.
 
 ## Named Provider Models
 
@@ -473,6 +538,7 @@ Exposure and gating:
 | MiMo (Xiaomi, OpenAI-compatible endpoint) | Yes — URL or base64 data URL | `video_url` with mp4/webm/avi/mkv/mov, ≤100 MB / ≤1000 s per call. The v2.5 docs state the audio track is not processed; `mimo-v2.6-pro`/`mimo-v2.6-flash` were verified to transcribe speech from the video's audio track. `fps` is accepted but undocumented (treated as ignored). |
 | Moonshot Kimi | No (for lele v1) | Video via Files API `ms://` file ids is **not supported** by lele v1. |
 | Gemini direct (`generativelanguage` OpenAI-compat path used by lele) | Unverified | `video_url` support on this path is **unverified**; for Gemini video understanding, configure the model through OpenRouter. Native `inline_data`/File API support is future work. |
+| OpenCode Go (`opencode_go`) | Unverified | All models route through one OpenAI-compatible `chat/completions` endpoint; `video_url` support is **unverified**. Treat it like any OpenAI-compatible backend: don't rely on native video here. |
 | OpenAI / Anthropic | No | No native video — do not set `video: true`. With `vision: true` they now get `read_video` via frames mode, no video flag needed: keyframes as `image_url` parts plus the audio transcript as text. Audio reaches them only as transcript text, and visual motion/temporal detail is limited to the N keyframes. |
 
 #### Tokens and limits
@@ -540,6 +606,7 @@ Examples:
 - `openrouter:auto`
 - `my-openai-compatible:fast`
 - `anthropic:claude-sonnet`
+- `opencode_go:grok-4.7`
 
 ## Fallback Models
 
