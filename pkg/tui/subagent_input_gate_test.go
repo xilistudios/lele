@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -98,12 +99,43 @@ func TestStatusLine_ShowsSubagentsRunningWithoutSpinner(t *testing.T) {
 
 	line := m.renderStatusLine(100)
 
-	if !strings.Contains(line, "2 subagent(s) running in background") {
-		t.Fatalf("status line = %q, want the subagents-running text", line)
+	want := fmt.Sprintf(i18n.T("tui.subagentsRunning"), 2)
+	if strings.TrimSpace(line) != want {
+		t.Fatalf("status line = %q, want exactly %q", line, want)
 	}
 	if strings.Contains(line, m.getBouncingDots()) {
 		t.Fatalf("status line = %q must not render the busy spinner", line)
 	}
+}
+
+// TestSubagentsRunningText_ReportsOnlyBackgroundWork pins the shape of the idle
+// status line shown while subagents run in the background: it reports the
+// background work and nothing else. Earlier revisions appended a hint about the
+// composer ("input is free"), which read as extra chrome on every idle frame;
+// the composer is already usable, so the line must not editorialize about it.
+func TestSubagentsRunningText_ReportsOnlyBackgroundWork(t *testing.T) {
+	// Locale hints that only make sense for a composer-availability suffix.
+	composerHints := []string{"input", "free", "escrib", "escrev", "writing", "digitar", "escribir"}
+
+	for _, lang := range i18n.AvailableLanguages() {
+		i18n.SetLanguage(lang)
+		text := fmt.Sprintf(i18n.T("tui.subagentsRunning"), 3)
+		if !strings.HasPrefix(text, "3 ") {
+			t.Fatalf("%s: tui.subagentsRunning = %q, expected it to open with the subagent count", lang, text)
+		}
+		if strings.ContainsAny(text, "—-→") {
+			t.Errorf("%s: tui.subagentsRunning = %q must not carry a trailing hint after a separator", lang, text)
+		}
+		lower := strings.ToLower(text)
+		for _, hint := range composerHints {
+			if strings.Contains(lower, hint) {
+				t.Errorf("%s: tui.subagentsRunning = %q must only report background work, found composer hint %q", lang, text, hint)
+			}
+		}
+	}
+
+	// Leave the package's locale in a known state for the other tests.
+	i18n.InitWithLanguage("en")
 }
 
 func TestQueueFlushesImmediatelyWhenSubagentsRun(t *testing.T) {

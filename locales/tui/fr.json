@@ -47,6 +47,7 @@
   "tui.languages.remoteHint": "Sélectionnez une langue à télécharger depuis le dépôt GitHub lele",
   "tui.selectSubagent": "Sélectionner un sous-agent",
   "tui.noSubagents": "Aucun sous-agent pour cette session",
+  "tui.systemNotice": "Avis système",
   "tui.pressEscAgain": "Appuyez à nouveau sur ÉCHAP pour annuler",
   "tui.processing": "Traitement... (ÉCHAP pour annuler)",
   "tui.doneIn": "● Terminé en %.1fs",

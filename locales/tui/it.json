@@ -38,6 +38,7 @@
   "tui.selectLanguage": "Seleziona una lingua",
   "tui.selectSubagent": "Seleziona un sottoagente",
   "tui.noSubagents": "Nessun sottoagente per questa sessione",
+  "tui.systemNotice": "Avviso di sistema",
   "tui.pressEscAgain": "Premi ESC di nuovo per annullare",
   "tui.processing": "Elaborazione... (ESC per annullare)",
   "tui.doneIn": "● Completato in %.1f s",
