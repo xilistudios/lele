@@ -290,7 +290,11 @@ func TestParseMCPRemoveArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if a.name != "x" || a.all || a.layer != "" || a.agent != "main" {
+	// --agent defaults to the CONFIGURED default agent (multi-agent configs
+	// have no "main"); the parser itself must not decide, so compare with the
+	// resolver rather than a literal. TestParseMCPDefaults_ConfiguredDefault
+	// pins the value on a multi-agent fixture.
+	if a.name != "x" || a.all || a.layer != "" || a.agent != defaultMCPAgentID() {
 		t.Fatalf("defaults wrong: %+v", a)
 	}
 	if _, err := parseMCPRemoveArgs([]string{"x", "--all"}); err != nil {
@@ -1901,7 +1905,7 @@ func TestParseMCPEditArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if a.name != "name" || a.agent != "main" || a.layer != "" {
+	if a.name != "name" || a.agent != defaultMCPAgentID() || a.layer != "" {
 		t.Fatalf("defaults wrong: %+v", a)
 	}
 	a, err = parseMCPEditArgs([]string{"--layer", "project", "--agent", "worker", "name"})
@@ -3282,7 +3286,7 @@ func TestParseMCPAuthArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if a.name != "api" || a.agent != "main" || a.noBrowser || a.manual || a.port != 0 {
+	if a.name != "api" || a.agent != defaultMCPAgentID() || a.noBrowser || a.manual || a.port != 0 {
 		t.Fatalf("defaults wrong: %+v", a)
 	}
 	if a.timeout != mcpAuthDefaultTimeout {
@@ -3395,7 +3399,7 @@ func TestMCPAuth_UsesTheSharedResolution(t *testing.T) {
 
 func TestParseMCPLogoutArgs(t *testing.T) {
 	a, err := parseMCPLogoutArgs([]string{"api"})
-	if err != nil || a.name != "api" || a.agent != "main" {
+	if err != nil || a.name != "api" || a.agent != defaultMCPAgentID() {
 		t.Fatalf("parse: %+v %v", a, err)
 	}
 	if a, err := parseMCPLogoutArgs([]string{"--agent", "worker", "api"}); err != nil || a.agent != "worker" {
