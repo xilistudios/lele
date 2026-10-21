@@ -917,8 +917,16 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 		// Cache miss — render the message and store in cache
 		var msgSb strings.Builder
 		if msg.Role == "user" {
-			msgSb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
-			msgSb.WriteString(UserMessageStyle.Render(wrapText(sanitizeDisplayText(msg.Content), m.viewport.Width-4)) + "\n\n")
+			// Synthetic notices ([System: <sender>] …) are persisted with role
+			// "user" but were never typed by the human: render them as a
+			// tool-style card instead of a "You" bubble. Role stays "user" so
+			// the message counting/ordering math is unchanged.
+			if sender, body, isNotice := parseSystemNotice(msg.Content); isNotice {
+				msgSb.WriteString(renderSystemNotice(sender, body, m.viewport.Width) + "\n\n")
+			} else {
+				msgSb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
+				msgSb.WriteString(UserMessageStyle.Render(wrapText(sanitizeDisplayText(msg.Content), m.viewport.Width-4)) + "\n\n")
+			}
 		} else if msg.Role == "assistant" {
 			// Only show agent name when coming from user (start of a turn)
 			if lastRole == "" || lastRole == "user" || lastRole == "system" {

@@ -47,6 +47,7 @@
   "tui.languages.remoteHint": "Wählen Sie eine Sprache zum Herunterladen aus dem lele-GitHub-Repository",
   "tui.selectSubagent": "Subagent auswählen",
   "tui.noSubagents": "Keine Subagents für diese Sitzung",
+  "tui.systemNotice": "Systemhinweis",
   "tui.pressEscAgain": "Drücken Sie ESC erneut zum Abbrechen",
   "tui.processing": "Verarbeitung... (ESC zum Abbrechen)",
   "tui.doneIn": "● Fertig in %.1fs",

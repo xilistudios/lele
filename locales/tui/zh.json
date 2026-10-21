@@ -38,6 +38,7 @@
   "tui.selectLanguage": "选择语言",
   "tui.selectSubagent": "选择子智能体",
   "tui.noSubagents": "此会话没有子智能体",
+  "tui.systemNotice": "系统通知",
   "tui.pressEscAgain": "再次按 ESC 取消",
   "tui.processing": "处理中...（ESC 取消）",
   "tui.doneIn": "● %.1fs 完成",

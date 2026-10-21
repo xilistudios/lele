@@ -38,6 +38,7 @@
   "tui.selectLanguage": "Select a Language",
   "tui.selectSubagent": "Select a Subagent",
   "tui.noSubagents": "No subagents for this session",
+  "tui.systemNotice": "System notice",
   "tui.pressEscAgain": "Press ESC again to cancel",
   "tui.processing": "Processing... (ESC to cancel)",
   "tui.subagentsRunning": "%d subagent(s) running in background — input is free",
