@@ -934,3 +934,67 @@ func TestRunWorkspaceOnly(t *testing.T) {
 		t.Errorf("SOUL.md content = %q", string(soulData))
 	}
 }
+
+// TestMergeConfigKeySurvivesAKeylessNamedEntry pins the two-copies hazard: a
+// config that already carries a KEYLESS named provider (api_base/proxy only,
+// e.g. a local endpoint or an OAuth setup) plus an imported key for the same
+// provider. MarshalJSON persists the named copy and put() then skips the typed
+// one, so a merge that only touched Providers.Anthropic would be silently
+// dropped on save — the user would run `lele migrate` and still have no key.
+// Mutant it kills: dropping the syncNamedFromTyped call after the typed merge.
+func TestMergeConfigKeySurvivesAKeylessNamedEntry(t *testing.T) {
+	existing := config.DefaultConfig()
+	// Keyless named entry, typed copy empty: the shape /connect leaves behind.
+	existing.Providers.Named = map[string]config.NamedProviderConfig{
+		"anthropic": {
+			Type: "anthropic",
+			ProviderConfig: config.ProviderConfig{
+				Proxy: "http://proxy.lan:3128",
+			},
+			Models: map[string]config.ProviderModelConfig{
+				"claude": {Model: "claude-3-5-sonnet"},
+			},
+		},
+	}
+
+	incoming := config.DefaultConfig()
+	incoming.Providers.Anthropic.APIKey = "sk-ant-migrated"
+
+	merged := MergeConfig(existing, incoming)
+	if got := merged.Providers.Anthropic.APIKey; got != "sk-ant-migrated" {
+		t.Fatalf("typed Anthropic.APIKey = %q, want the migrated key", got)
+	}
+
+	// The real contract is what lands on disk.
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := config.SaveConfig(path, merged); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	var file struct {
+		Providers map[string]struct {
+			APIKey string         `json:"api_key"`
+			Proxy  string         `json:"proxy"`
+			Models map[string]any `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatalf("unmarshal saved config: %v", err)
+	}
+	anthropic, ok := file.Providers["anthropic"]
+	if !ok {
+		t.Fatal("saved config has no anthropic provider")
+	}
+	if anthropic.APIKey != "sk-ant-migrated" {
+		t.Errorf("saved anthropic.api_key = %q, want the migrated key", anthropic.APIKey)
+	}
+	if anthropic.Proxy != "http://proxy.lan:3128" {
+		t.Errorf("saved anthropic.proxy = %q, want the pre-existing proxy kept", anthropic.Proxy)
+	}
+	if len(anthropic.Models) != 1 {
+		t.Errorf("saved anthropic.models = %v, want the existing model list kept", anthropic.Models)
+	}
+}

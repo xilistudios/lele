@@ -369,7 +369,14 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 // non-nil it pre-fills the provider name, type and API base URL, skipping the
 // name and type steps so the user lands directly on the API Key (or, for local
 // providers like ollama with no key, on the API Base which is already
-// pre-filled). When preset is nil the flow starts from step 0 (provider name).
+// pre-filled). That path is UNCHANGED (onboarding still drives it).
+//
+// When preset is nil the flow is ROW-FIRST: the provider picker is shown on
+// the very first frame and the selected connectRow decides which steps are
+// skipped (the two custom rows ask for a name and run the full flow, known
+// providers ask only for the API key, the trailing free-type row reproduces
+// the legacy name → type → key → base flow). Step NUMBERS are never changed:
+// the picker only routes between them.
 func (m *Model) startConnectFlow(preset *providerPreset) {
 	m.resetModal(ModalAddProvider)
 	m.providerEditMode = false
@@ -382,6 +389,15 @@ func (m *Model) startConnectFlow(preset *providerPreset) {
 	m.providerTypePickerMax = 0
 	m.connectSuccess = false
 	m.providerTypeFromPreset = false
+	// Which picker (if any) is open is declared explicitly: connectRowPicker
+	// is set below only by the row-first /connect entry frame, and the legacy
+	// provider-TYPE picker clears it. connectRowIdx therefore keeps its
+	// honest meaning — -1 = nothing picked yet — instead of doubling as a
+	// "row-driven" flag (see types.go).
+	m.connectRowPicker = false
+	m.connectRowIdx = -1
+	m.connectSkipAPIBase = false
+	m.connectAlreadyUsable = false
 	m.formValues = make([]string, 11) // 0-3: provider, 4-8: model, 9: thinking_type, 10: review
 
 	if preset != nil {
@@ -407,9 +423,21 @@ func (m *Model) startConnectFlow(preset *providerPreset) {
 			m.textInput.Placeholder = "API Base URL (default for this provider)"
 		}
 	} else {
+		// Row-first: the picker is the first frame. providerTypePickerMax is
+		// the number of ROWS (len(connectRows())), which includes the
+		// trailing free-type row — so the two legacy "+1" off-by-ones are
+		// gone by construction.
 		m.formStepIndex = 0
+		m.providerTypePicker = true
+		m.connectRowPicker = true // ROW-FIRST frame: the list is connectRows()
+		m.providerTypePickerIdx = 0
+		m.modalScrollOffset = 0
+		m.providerTypePickerMax = len(connectRows())
+		// The text input is not the interaction on the picker frame: keep
+		// both value AND placeholder empty so nothing stale renders behind
+		// the row list.
 		m.textInput.SetValue("")
-		m.textInput.Placeholder = "Provider name (e.g. openai)"
+		m.textInput.Placeholder = ""
 	}
 	// Audit M2: the preset path lands directly on the API-key step (2), so
 	// sync the echo mode before the first frame renders the widget.

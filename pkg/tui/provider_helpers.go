@@ -118,6 +118,90 @@ func (m *Model) updateProvider(name, apiKey, apiBase string) error {
 	return m.saveConfigToDisk()
 }
 
+// ensureProvider creates or updates the named provider for a row-driven
+// /connect flow. It reports whether the provider was already usable (it had
+// at least one model), so the caller can skip the model wizard.
+//
+// Rules:
+//   - absent → create it (Type/APIKey/APIBase) and persist;
+//   - present as an EMPTY PLACEHOLDER (see config.NamedProviderConfig.IsEmpty: no key, no
+//     base, no proxy, no models, no auth method) → overwrite it wholesale (no
+//     "already exists" error). A keyless entry that carries an endpoint
+//     (APIBase/Proxy) is NOT a placeholder: /connect updates it in place.
+//   - present with data → update the credentials IN PLACE (Models, Proxy,
+//     WebSearch, ConnectMode and a custom APIBase are kept) and report
+//     alreadyUsable=len(Models)>0, so re-running /connect for an
+//     already-configured provider just refreshes the key and lands on the
+//     success screen.
+//
+// baseIsPreset marks apiBase as the row's preset default rather than a value
+// the user typed: the API-key rows skip the API-base step, so for them
+// formValues[3] is the preset and a deliberate custom endpoint (a keyless
+// local provider on another host, a proxied setup) must win. The custom rows
+// do show the base step, so there the typed value is authoritative.
+//
+// The named entry is mirrored into its typed field (openai, anthropic, …)
+// BEFORE saving because transport selection is TYPE-FIRST: pkg/providers
+// reads Providers.<Name> before it consults Providers.Named (factory.go: the
+// Gemini Code Assist pre-check, then the anthropic/gemini cases that gate on
+// auth_method == "oauth"), so a credential that only reached the named copy
+// would be persisted but invisible to the selector that has to use it.
+// MarshalJSON is the mirror image — it writes the named copy and skips the
+// typed one — which is why both copies are kept in sync rather than one of
+// them being derived on read.
+func (m *Model) ensureProvider(name, providerType, apiKey, apiBase string, baseIsPreset bool) (alreadyUsable bool, err error) {
+	if m.cfg == nil {
+		return false, fmt.Errorf("config is nil")
+	}
+	if m.cfg.Providers == nil {
+		m.cfg.Providers = &config.ProvidersConfig{}
+	}
+	if m.cfg.Providers.Named == nil {
+		m.cfg.Providers.Named = make(map[string]config.NamedProviderConfig)
+	}
+
+	key := strings.ToLower(strings.TrimSpace(name))
+	if key == "" {
+		return false, fmt.Errorf("provider name cannot be empty")
+	}
+
+	existing, exists := m.cfg.Providers.Named[key]
+	if !exists || existing.IsEmpty() {
+		m.cfg.Providers.Named[key] = config.NamedProviderConfig{
+			Type: providerType,
+			ProviderConfig: config.ProviderConfig{
+				APIKey:  apiKey,
+				APIBase: apiBase,
+			},
+		}
+		syncProviderToTypedField(m.cfg.Providers, key, m.cfg.Providers.Named[key])
+		return false, m.saveConfigToDisk()
+	}
+
+	// In-place update. Never rebuild the entry here: a provider with Models is
+	// configured, and replacing it would drop them (the user would lose the
+	// model list by re-entering a key).
+	alreadyUsable = len(existing.Models) > 0
+	providerConfig := existing.ProviderConfig
+	if k := strings.TrimSpace(apiKey); k != "" {
+		providerConfig.APIKey = k
+	}
+	if b := strings.TrimSpace(apiBase); b != "" {
+		// A preset base only seeds an empty endpoint; anything else would
+		// silently move the provider off the host the user configured.
+		if !baseIsPreset || strings.TrimSpace(providerConfig.APIBase) == "" {
+			providerConfig.APIBase = b
+		}
+	}
+	existing.ProviderConfig = providerConfig
+	if strings.TrimSpace(existing.Type) == "" {
+		existing.Type = providerType
+	}
+	m.cfg.Providers.Named[key] = existing
+	syncProviderToTypedField(m.cfg.Providers, key, existing)
+	return alreadyUsable, m.saveConfigToDisk()
+}
+
 // deleteProvider removes a provider from the config and persists to disk.
 func (m *Model) deleteProvider(name string) error {
 	if m.cfg == nil || m.cfg.Providers == nil || m.cfg.Providers.Named == nil {

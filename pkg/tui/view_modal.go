@@ -58,6 +58,8 @@ func (m *Model) modalTitleFor(mode modalType) string {
 		return i18n.T("tui.mcpAuth")
 	case ModalMCPAdd:
 		return i18n.T("tui.mcpAdd")
+	case ModalConnectOAuth:
+		return i18n.T("tui.connectOAuthTitle")
 	case ModalCommandDetail:
 		return i18n.T("tui.commands.detail")
 	case ModalAddCommand:
@@ -131,6 +133,11 @@ func (m *Model) renderActiveModal() string {
 		// stdio-only, type/headers remote-only), so renderFormModal's
 		// steps[i] ↔ formValues[i] alignment does not hold.
 		return m.renderMCPAddModal()
+	case ModalConnectOAuth:
+		// Native provider OAuth login for a /connect OAuth row: mirrors the
+		// MCP auth surface (authorization URL, paste box, cancel) and is
+		// height-clamped by its own renderer (see connectOAuthBox).
+		return m.renderConnectOAuth()
 	case ModalAddCommand:
 		// The template step is multi-line and needs a textarea, which the
 		// generic single-line form renderer cannot offer.

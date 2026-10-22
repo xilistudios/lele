@@ -87,6 +87,15 @@ func (m *Model) handleAsyncResult(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.C
 	case mcpAuthSubmitMsg:
 		return m, m.handleMCPAuthSubmit(msg)
 
+	case connectOAuthStartMsg:
+		return m, m.handleConnectOAuthStart(msg)
+
+	case connectOAuthPollMsg:
+		return m, m.handleConnectOAuthPoll(msg)
+
+	case connectOAuthSubmitMsg:
+		return m, m.handleConnectOAuthSubmit(msg)
+
 	case obVerifyResultMsg:
 		m.obVerifying = false
 		if !msg.success {

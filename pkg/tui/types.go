@@ -196,6 +196,7 @@ const (
 	ModalMCPDetail          // detail view of one MCP server (rendered from the stored inventory)
 	ModalMCPAuth            // interactive OAuth authorization of one MCP server (a from the detail)
 	ModalMCPAdd             // step-by-step wizard to add an MCP server ("n" in the /mcp list); a form modal with a kind-dependent (dynamic) step set, rendered by its own renderer (renderMCPAddModal) rather than renderFormModal
+	ModalConnectOAuth       // interactive OAuth login for one native /connect OAuth row
 )
 
 type formStep int
@@ -463,6 +464,29 @@ type Model struct {
 	providerEditMode     bool     // true when editing an existing provider
 	providerSavedInFlow  bool     // true after /connect saves provider (enables model config steps)
 
+	// Native /connect OAuth login state (ModalConnectOAuth). This mirrors
+	// the mcpAuth* block above, and the same three invariants apply (see
+	// connect_oauth.go): the flow owns a loopback listener until cancelled,
+	// Update never blocks on it, and no credential-shaped input survives in
+	// a reused widget. connectOAuthFlow is the live engine flow (nil when
+	// none — it also owns the loopback listener, which is why
+	// connectOAuthCancel exists), connectOAuthState is this modal's own state
+	// machine (connectOAuthIdle…connectOAuthFailed), connectOAuthURL is the
+	// authorization URL to display/copy, connectOAuthName is the provider
+	// being signed in, and the two feedback fields are the inline lines the
+	// modal renders. connectOAuthSeq is a generation counter: every message
+	// the start/poll/submit commands produce carries the sequence it was
+	// created under, so a message of a flow that is gone is dropped instead
+	// of being applied to a new one (and a late flow is cancelled, never
+	// orphaned).
+	connectOAuthFlow     connectOAuthFlow
+	connectOAuthState    int
+	connectOAuthURL      string
+	connectOAuthName     string
+	connectOAuthFeedback string
+	connectOAuthError    string
+	connectOAuthSeq      int
+
 	// Model edit flow state (ModalEditModel) + provider-detail row map.
 	modelEditAlias     string         // alias of the model being edited (original map key)
 	modelEditOrigModel string         // stored model name when the edit flow was opened
@@ -501,7 +525,25 @@ type Model struct {
 	// input; up/down + enter pick a preset, "custom" allows a free-form type.
 	providerTypePicker    bool // true while picking a provider type from the preset list
 	providerTypePickerIdx int  // currently highlighted preset index
-	providerTypePickerMax int  // number of presets shown (including "custom" entry)
+	providerTypePickerMax int  // number of rows shown (len(providerPresets)+1 on the free-text path, len(connectRows()) on the row-driven path)
+
+	// Row-first /connect picker state. /connect (startConnectFlow(nil)) now
+	// opens the picker on the FIRST frame and the picked connectRow decides
+	// which form steps are SKIPPED — never renumbered: API key is still step
+	// 2, API base step 3 and the model steps still start at 4, so the
+	// hardcoded masking/autocomplete/review indices keep working unchanged.
+	// connectRowPicker is true ONLY while the ROW-FIRST picker (the /connect
+	// entry frame) is open. providerTypePicker alone cannot distinguish the
+	// two pickers: the legacy provider-TYPE picker (free-text name path and
+	// onboarding's "Other/custom") uses the same widget but a different list
+	// (providerPresets + trailing custom) and a different dispatch
+	// (applyLegacyTypePreset). Keeping the distinction explicit means
+	// connectRowIdx never has to double as a flag, so "-1 = nothing picked"
+	// stays true on the row-first frame.
+	connectRowPicker     bool
+	connectRowIdx        int  // index into connectRows() of the picked row (-1 = nothing picked / not row-driven)
+	connectSkipAPIBase   bool // true for API-key-only rows: save right after the key (step 2) and jump to the model steps
+	connectAlreadyUsable bool // set by connectSaveProvider: the provider already had models, so routing skips the model wizard
 
 	// Success screen shown after the /connect flow completes. When true, the
 	// form modal renders a confirmation with the provider/model that was saved

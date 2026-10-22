@@ -1261,3 +1261,117 @@ func TestNormalizeProviderKey_OpenCodeGo(t *testing.T) {
 		}
 	}
 }
+
+// TestProvidersConfigMarshalJSONPersistsKeylessConfiguredProvider pins the
+// serialization contract for providers that intentionally have no API key:
+// local endpoints (APIBase/Proxy) and OAuth-completed sessions (ConnectMode)
+// must survive SaveConfig -> LoadConfig.
+func TestProvidersConfigMarshalJSONPersistsKeylessConfiguredProvider(t *testing.T) {
+	p := &ProvidersConfig{
+		Named: map[string]NamedProviderConfig{
+			"ollama": {
+				Type:           "ollama",
+				ProviderConfig: ProviderConfig{APIBase: "http://localhost:11434/v1"},
+			},
+			"openai": {
+				Type:           "openai",
+				ProviderConfig: ProviderConfig{ConnectMode: "oauth"},
+				WebSearch:      boolPtr(false),
+			},
+		},
+	}
+
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out map[string]map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal marshalled data %q: %v", data, err)
+	}
+
+	ollama, ok := out["ollama"]
+	if !ok {
+		t.Fatalf("marshalled JSON %q has no keyless APIBase provider", data)
+	}
+	if got := ollama["api_base"]; got != "http://localhost:11434/v1" {
+		t.Errorf("ollama.api_base = %v, want local endpoint", got)
+	}
+	if got := ollama["type"]; got != "ollama" {
+		t.Errorf("ollama.type = %v, want %q", got, "ollama")
+	}
+
+	openai, ok := out["openai"]
+	if !ok {
+		t.Fatalf("marshalled JSON %q has no OAuth-completed provider", data)
+	}
+	if got := openai["connect_mode"]; got != "oauth" {
+		t.Errorf("openai.connect_mode = %v, want %q", got, "oauth")
+	}
+}
+
+// TestProvidersConfigRoundTripsKeylessConfiguredProvider proves that a
+// keyless provider created by /connect remains configured after a complete
+// save/load cycle instead of reverting to the ensureNamedDefaults placeholder.
+func TestProvidersConfigRoundTripsKeylessConfiguredProvider(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := DefaultConfig()
+	cfg.Providers.Ollama.APIBase = "http://192.168.1.50:11434/v1"
+	cfg.Providers.Ollama.Proxy = "http://proxy.lan:3128"
+
+	if err := SaveConfig(path, cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	loaded, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if loaded.Providers == nil {
+		t.Fatal("loaded.Providers = nil")
+	}
+	if loaded.Providers.Ollama.APIBase != cfg.Providers.Ollama.APIBase {
+		t.Errorf("ollama.api_base = %q, want %q", loaded.Providers.Ollama.APIBase, cfg.Providers.Ollama.APIBase)
+	}
+	if loaded.Providers.Ollama.Proxy != cfg.Providers.Ollama.Proxy {
+		t.Errorf("ollama.proxy = %q, want %q", loaded.Providers.Ollama.Proxy, cfg.Providers.Ollama.Proxy)
+	}
+}
+
+// TestDefaultConfigMarshalsNoProviders pins the other half of the same
+// contract: a PRISTINE config must serialize to "null" (the parent field is
+// `omitempty`, and the loader nils the section back out when the JSON is
+// null). Widening isEmpty() to count APIBase/Proxy/ConnectMode made this
+// reachable in the wrong direction — DefaultConfig() used to seed
+// AlibabaCodingPlan.APIBase with the built-in endpoint, which is NOT user
+// configuration (pkg/catalog and pkg/providers/factory.go both supply that
+// default at runtime), so counting it wrote a phantom
+// providers.alibaba_coding_plan entry into every user's config.json on the
+// next save. The zero-value ProvidersConfig case above cannot catch this
+// because it never goes through DefaultConfig().
+func TestDefaultConfigMarshalsNoProviders(t *testing.T) {
+	data, err := json.Marshal(DefaultConfig().Providers)
+	if err != nil {
+		t.Fatalf("marshal DefaultConfig().Providers: %v", err)
+	}
+	if string(data) != "null" {
+		t.Fatalf("a pristine config must persist no provider, got %s", data)
+	}
+
+	// Same assertion through the real save path, because SaveConfig writes the
+	// whole AppConfig and the field only disappears when the section is null.
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := SaveConfig(path, DefaultConfig()); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	var file map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatalf("unmarshal saved config: %v", err)
+	}
+	if got := string(file["providers"]); got != "null" {
+		t.Fatalf("saved config persists providers %s, want null", got)
+	}
+}

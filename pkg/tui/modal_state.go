@@ -52,6 +52,12 @@ func (m *Model) resetModal(mode modalType) {
 	// five-minute budget (the old flow's messages are invalidated by the
 	// generation bump, so nothing can adopt it later).
 	m.mcpAuthCancel()
+	// Release a live native-OAuth /connect flow too: it owns a loopback
+	// listener until cancelled, so reopening any modal (/connect, /models,
+	// …) must cancel it rather than pin the port for the flow's full budget.
+	// The generation bump in connectOAuthCancel also invalidates any in-flight
+	// message, so a late start/poll result can never adopt a fresh modal.
+	m.connectOAuthCancel()
 	m.formStepIndex = 0
 	m.formValues = nil
 	m.formError = ""
@@ -70,6 +76,10 @@ func (m *Model) resetModal(mode modalType) {
 	m.providerTypePicker = false
 	m.providerTypePickerIdx = 0
 	m.providerTypePickerMax = 0
+	m.connectRowPicker = false
+	m.connectRowIdx = -1
+	m.connectSkipAPIBase = false
+	m.connectAlreadyUsable = false
 	m.connectSuccess = false
 	m.providerTypeFromPreset = false
 	m.settingsSection = ""
@@ -114,6 +124,11 @@ func isFormModal(mode modalType, editingField bool) bool {
 	// it is a regular character in a pasted code).
 	case ModalMCPAuth:
 		return true
+	// ModalConnectOAuth collects a pasted OAuth callback/code/redirect URL
+	// in the same shared text input, on the same "q is a regular character"
+	// rule as ModalMCPAuth.
+	case ModalConnectOAuth:
+		return true
 	case ModalSettingsAgents, ModalSettingsAgentEdit, ModalSettingsSystemEdit, ModalSettingsTUI:
 		return editingField
 	default:
@@ -133,7 +148,7 @@ func isFormModal(mode modalType, editingField bool) bool {
 // only moving inside the code input.
 func isListModal(mode modalType) bool {
 	switch mode {
-	case ModalNone, ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret, ModalSkillInstall, ModalMCPAuth, ModalMCPAdd:
+	case ModalNone, ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret, ModalSkillInstall, ModalMCPAuth, ModalMCPAdd, ModalConnectOAuth:
 		return false
 	case ModalSettings, ModalSettingsAgents, ModalSettingsAgentEdit, ModalSettingsSystem, ModalSettingsSystemEdit, ModalSettingsTUI:
 		return true

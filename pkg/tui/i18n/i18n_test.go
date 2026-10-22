@@ -349,22 +349,11 @@ func TestMCPAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 		rawByLang[lang] = m
 	}
 
-	verbs := func(s string) string {
-		var out []rune
-		for i := 0; i < len(s); i++ {
-			if s[i] == '%' && i+1 < len(s) {
-				out = append(out, rune(s[i+1]))
-				i++
-			}
-		}
-		return string(out)
-	}
-
 	reference := map[string]string{}
 	SetLanguage("en")
 	for _, key := range keys {
 		if v := T(key); v != key {
-			reference[key] = verbs(v)
+			reference[key] = formatVerbs(v)
 		}
 	}
 	for _, lang := range langs {
@@ -383,9 +372,185 @@ func TestMCPAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 			if got == "" {
 				t.Errorf("key %s is empty in language %s", key, lang)
 			}
-			if ref, ok := reference[key]; ok && verbs(got) != ref {
+			if ref, ok := reference[key]; ok && formatVerbs(got) != ref {
 				t.Errorf("key %s: format verbs %q in %s, want %q (the en source)",
-					key, verbs(got), lang, ref)
+					key, formatVerbs(got), lang, ref)
+			}
+		}
+	}
+}
+
+// TestConnectPickerKeysExistInAllBuiltinLanguages covers the row-first
+// /connect picker surface: the picker title, the two custom (bring-your-own
+// endpoint) rows and the provider-name placeholder. Modelled on
+// TestMCPAuthKeysExistInAllBuiltinLanguages — TestAllKeysExist only checks
+// its own hardcoded list and would miss a key added to one locale and
+// formatVerbs extracts the printf verbs of a translated string ("%s", "%v",
+// …) in order, ignoring the literal text around them. Two locales agree for a
+// key when their verb sequences match: a translation that reorders or drops a
+// verb would panic (or print %!v(MISSING)) at render time.
+func formatVerbs(s string) string {
+	var out []rune
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+1 < len(s) {
+			out = append(out, rune(s[i+1]))
+			i++
+		}
+	}
+	return string(out)
+}
+
+// forgotten in the other two.
+func TestConnectPickerKeysExistInAllBuiltinLanguages(t *testing.T) {
+	keys := []string{
+		"tui.connectPickProvider",
+		"tui.connectRowCustomOpenAI",
+		"tui.connectRowCustomAnthropic",
+		"tui.connectProviderNamePlaceholder",
+	}
+
+	Init()
+	langs := BuiltinLanguages()
+	if len(langs) == 0 {
+		t.Fatal("BuiltinLanguages() is empty")
+	}
+
+	prev := GetLanguage()
+	t.Cleanup(func() { SetLanguage(prev) })
+
+	rawByLang := map[string]localeMap{}
+	for _, lang := range []string{"en", "es", "pt"} {
+		tag, err := language.Parse(lang)
+		if err != nil {
+			t.Fatalf("language.Parse(%q): %v", lang, err)
+		}
+		m, err := loadLocale(localeFiles[tag])
+		if err != nil {
+			t.Fatalf("loadLocale(%s): %v", lang, err)
+		}
+		rawByLang[lang] = m
+	}
+
+	reference := map[string]string{}
+	SetLanguage("en")
+	for _, key := range keys {
+		if v := T(key); v != key {
+			reference[key] = formatVerbs(v)
+		}
+	}
+	for _, lang := range langs {
+		SetLanguage(lang)
+		for _, key := range keys {
+			if m, ok := rawByLang[lang]; ok {
+				if _, exists := m[key]; !exists {
+					t.Errorf("key %s missing from %s.json (T() would mask it via the default-locale fallback)", key, lang)
+				}
+			}
+			got := T(key)
+			if got == key {
+				t.Errorf("key %s missing in language %s", key, lang)
+				continue
+			}
+			if got == "" {
+				t.Errorf("key %s is empty in language %s", key, lang)
+			}
+			if ref, ok := reference[key]; ok && formatVerbs(got) != ref {
+				t.Errorf("key %s: format verbs %q in %s, want %q (the en source)",
+					key, formatVerbs(got), lang, ref)
+			}
+		}
+	}
+}
+
+// TestConnectOAuthKeysExistInAllBuiltinLanguages covers the native /connect
+// OAuth login surface (ModalConnectOAuth, rendered by connect_oauth.go): the
+// three OAuth row labels and every inline/modal string the flow can render,
+// from the authorization-URL instructions through each terminal sentinel
+// error. Modelled on TestConnectPickerKeysExistInAllBuiltinLanguages so a key
+// added to one locale and forgotten in the other two is caught here.
+func TestConnectOAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
+	keys := []string{
+		"tui.connectRowOAuthOpenAI",
+		"tui.connectRowOAuthAnthropic",
+		"tui.connectRowOAuthGemini",
+		"tui.connectOAuthTitle",
+		"tui.connectOAuthStarting",
+		"tui.connectOAuthURLLabel",
+		"tui.connectOAuthURLTruncated",
+		"tui.connectOAuthInstructions",
+		"tui.connectOAuthPlaceholder",
+		"tui.connectOAuthHintEnter",
+		"tui.connectOAuthHintCopy",
+		"tui.connectOAuthHintClose",
+		"tui.connectOAuthHintClosed",
+		"tui.connectOAuthCopied",
+		"tui.connectOAuthCopyFailed",
+		"tui.connectOAuthEmptyInput",
+		"tui.connectOAuthSuccess",
+		"tui.connectOAuthFailed",
+		"tui.connectOAuthSaveFailed",
+		"tui.connectOAuthStartFailed",
+		"tui.connectOAuthSubmitFailed",
+		"tui.connectOAuthErrCanceled",
+		"tui.connectOAuthErrTimedOut",
+		"tui.connectOAuthErrClosed",
+		"tui.connectOAuthErrNoManualRedirect",
+		"tui.connectOAuthErrStateMismatch",
+		// Reasons substituted into the tui.connectOAuthStartFailed template
+		// when a picked row cannot be started at all (catalog/registry drift).
+		"tui.connectOAuthErrUnknownProvider",
+		"tui.connectOAuthErrUnregisteredProvider",
+		"tui.connectOAuthErrInconsistentRow",
+	}
+
+	Init()
+	langs := BuiltinLanguages()
+	if len(langs) == 0 {
+		t.Fatal("BuiltinLanguages() is empty")
+	}
+
+	prev := GetLanguage()
+	t.Cleanup(func() { SetLanguage(prev) })
+
+	rawByLang := map[string]localeMap{}
+	for _, lang := range []string{"en", "es", "pt"} {
+		tag, err := language.Parse(lang)
+		if err != nil {
+			t.Fatalf("language.Parse(%q): %v", lang, err)
+		}
+		m, err := loadLocale(localeFiles[tag])
+		if err != nil {
+			t.Fatalf("loadLocale(%s): %v", lang, err)
+		}
+		rawByLang[lang] = m
+	}
+
+	reference := map[string]string{}
+	SetLanguage("en")
+	for _, key := range keys {
+		if v := T(key); v != key {
+			reference[key] = formatVerbs(v)
+		}
+	}
+	for _, lang := range langs {
+		SetLanguage(lang)
+		for _, key := range keys {
+			if m, ok := rawByLang[lang]; ok {
+				if _, exists := m[key]; !exists {
+					t.Errorf("key %s missing from %s.json (T() would mask it via the default-locale fallback)", key, lang)
+				}
+			}
+			got := T(key)
+			if got == key {
+				t.Errorf("key %s missing in language %s", key, lang)
+				continue
+			}
+			if got == "" {
+				t.Errorf("key %s is empty in language %s", key, lang)
+			}
+			if ref, ok := reference[key]; ok && formatVerbs(got) != ref {
+				t.Errorf("key %s: format verbs %q in %s, want %q (the en source)",
+					key, formatVerbs(got), lang, ref)
 			}
 		}
 	}

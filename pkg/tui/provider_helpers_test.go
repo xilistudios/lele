@@ -433,3 +433,177 @@ func TestUpdateModelInProviderEmptyModelName(t *testing.T) {
 		t.Errorf("alpha entry changed: %+v", got)
 	}
 }
+
+// ── NamedProviderConfig.IsEmpty / ensureProvider: keyless-endpoint preservation ──
+
+// TestEnsureProviderKeepsKeylessEndpoint is the regression test for the
+// "/connect silently wipes a keyless provider's endpoint" bug: an ollama
+// entry with a custom APIBase + Proxy (and no key/models/auth method — the
+// supported "API key is optional for local providers" shape) must NOT be
+// classified as a disposable ensureNamedDefaults() placeholder. The row-driven
+// /connect path goes through ensureProvider, which must update the key/base in
+// place and KEEP the endpoint/proxy, not replace the entry wholesale.
+func TestEnsureProviderKeepsKeylessEndpoint(t *testing.T) {
+	m := newProviderHelpersTestModel(t)
+	m.cfg.Providers.Named["ollama"] = config.NamedProviderConfig{
+		Type: "ollama",
+		ProviderConfig: config.ProviderConfig{
+			APIBase: "http://192.168.1.50:11434/v1",
+			Proxy:   "http://proxy.lan:3128",
+		},
+	}
+
+	// The API-key row skips the base step, so the row's preset base arrives
+	// here as a preset (baseIsPreset=true) and must not move the provider off
+	// the host the user configured.
+	alreadyUsable, err := m.ensureProvider("ollama", "ollama", "", "http://localhost:11434/v1", true)
+	if err != nil {
+		t.Fatalf("ensureProvider: %v", err)
+	}
+	if alreadyUsable {
+		t.Error("alreadyUsable = true, want false (no models were configured)")
+	}
+
+	p, ok := m.cfg.Providers.Named["ollama"]
+	if !ok {
+		t.Fatal("named provider entry disappeared")
+	}
+	// The endpoint and proxy are user data and MUST survive.
+	if p.APIBase != "http://192.168.1.50:11434/v1" {
+		t.Errorf("APIBase = %q, want the pre-configured endpoint kept", p.APIBase)
+	}
+	if p.Proxy != "http://proxy.lan:3128" {
+		t.Errorf("Proxy = %q, want the pre-configured proxy kept", p.Proxy)
+	}
+	// It was treated as an in-place update, not a replacement: no key was
+	// asked for here, so the entry still has none and no models.
+	if p.APIKey != "" {
+		t.Errorf("APIKey = %q, want empty (none was supplied)", p.APIKey)
+	}
+	if len(p.Models) != 0 {
+		t.Errorf("Models = %v, want empty", p.Models)
+	}
+}
+
+// TestEnsureProviderStillReplacesTrulyEmptyPlaceholder is the control case for
+// the predicate change: a genuine ensureNamedDefaults()-shaped placeholder
+// (no key, no base, no proxy, no auth method, no models) is still REPLACED
+// wholesale, exactly as before — the "already exists" error must not return.
+func TestEnsureProviderStillReplacesTrulyEmptyPlaceholder(t *testing.T) {
+	m := newProviderHelpersTestModel(t)
+	// The ollama placeholder as ensureNamedDefaults() creates it (Type set,
+	// everything else empty).
+	m.cfg.Providers.Named["ollama"] = config.NamedProviderConfig{Type: "ollama"}
+
+	alreadyUsable, err := m.ensureProvider("ollama", "ollama", "sk-new", "http://localhost:11434/v1", true)
+	if err != nil {
+		t.Fatalf("ensureProvider: %v", err)
+	}
+	if alreadyUsable {
+		t.Error("alreadyUsable = true, want false")
+	}
+
+	p := m.cfg.Providers.Named["ollama"]
+	if p.APIKey != "sk-new" {
+		t.Errorf("APIKey = %q, want sk-new (placeholder replaced)", p.APIKey)
+	}
+	if p.APIBase != "http://localhost:11434/v1" {
+		t.Errorf("APIBase = %q, want the new base", p.APIBase)
+	}
+	if p.Proxy != "" {
+		t.Errorf("Proxy = %q, want empty", p.Proxy)
+	}
+}
+
+// TestNamedProviderConfigIsEmptyFieldMatrix pins the predicate itself against every
+// field that represents real user data, plus the two fields that must stay
+// out of it (Type and WebSearch — see the config.NamedProviderConfig.IsEmpty doc).
+func TestNamedProviderConfigIsEmptyFieldMatrix(t *testing.T) {
+	base := config.NamedProviderConfig{Type: "ollama"}
+	if !base.IsEmpty() {
+		t.Fatal("a bare Type-only entry must still be a placeholder")
+	}
+
+	cases := []struct {
+		name  string
+		entry config.NamedProviderConfig
+		want  bool
+	}{
+		{"api_key", withProviderConfig(base, config.ProviderConfig{APIKey: "sk-x"}), false},
+		{"api_base", withProviderConfig(base, config.ProviderConfig{APIBase: "http://x"}), false},
+		{"proxy", withProviderConfig(base, config.ProviderConfig{Proxy: "http://p"}), false},
+		{"connect_mode", withProviderConfig(base, config.ProviderConfig{ConnectMode: "stdio"}), false},
+		{"auth_method", withProviderConfig(base, config.ProviderConfig{AuthMethod: "oauth"}), false},
+		{"models", withModels(base), false},
+		// Type and WebSearch must NOT make an entry non-empty.
+		{"type_only", base, true},
+		{"web_search_only", withWebSearch(base), true},
+	}
+	for _, tc := range cases {
+		if got := tc.entry.IsEmpty(); got != tc.want {
+			t.Errorf("%s: IsEmpty() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func withProviderConfig(p config.NamedProviderConfig, pc config.ProviderConfig) config.NamedProviderConfig {
+	p.ProviderConfig = pc
+	return p
+}
+
+func withModels(p config.NamedProviderConfig) config.NamedProviderConfig {
+	p.Models = map[string]config.ProviderModelConfig{"m": {Model: "m"}}
+	return p
+}
+
+func withWebSearch(p config.NamedProviderConfig) config.NamedProviderConfig {
+	ws := true
+	p.WebSearch = &ws
+	return p
+}
+
+// TestEnsureProviderMirrorsToTypedField pins the typed-field mirror in the
+// in-place update path. ProvidersConfig.MarshalJSON persists the NAMED copy,
+// but ensureNamedDefaults() re-creates it from the typed field on the next
+// load, so a save that only touched Named would be silently reverted (the
+// freshly entered key would disappear after a restart). Mutant it kills:
+// dropping the syncProviderToTypedField call in the update branch.
+func TestEnsureProviderMirrorsToTypedField(t *testing.T) {
+	m := newProviderHelpersTestModel(t)
+	m.cfg.Providers.OpenAI.ProviderConfig = config.ProviderConfig{
+		APIKey:  "sk-old-key",
+		APIBase: "https://api.openai.com/v1",
+	}
+	m.cfg.Providers.Named["openai"] = config.NamedProviderConfig{
+		Type: "openai",
+		ProviderConfig: config.ProviderConfig{
+			APIKey:  "sk-old-key",
+			APIBase: "https://api.openai.com/v1",
+		},
+		Models: map[string]config.ProviderModelConfig{
+			"gpt-4o": {Model: "gpt-4o"},
+		},
+	}
+
+	alreadyUsable, err := m.ensureProvider("openai", "openai", "sk-new-key",
+		"https://api.openai.com/v1", true)
+	if err != nil {
+		t.Fatalf("ensureProvider: %v", err)
+	}
+	if !alreadyUsable {
+		t.Error("alreadyUsable = false, want true (the provider already had a model)")
+	}
+
+	named := m.cfg.Providers.Named["openai"]
+	if named.APIKey != "sk-new-key" {
+		t.Errorf("named api_key = %q, want the freshly entered key", named.APIKey)
+	}
+	if len(named.Models) != 1 {
+		t.Errorf("named models = %v, want the existing model list kept", named.Models)
+	}
+	// The mirror is what survives a reload (ensureNamedDefaults rebuilds the
+	// named entry from the typed field).
+	if got := m.cfg.Providers.OpenAI.APIKey; got != "sk-new-key" {
+		t.Errorf("typed Providers.OpenAI.APIKey = %q, want %q (mirror missing)", got, "sk-new-key")
+	}
+}
