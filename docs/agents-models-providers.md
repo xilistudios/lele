@@ -308,7 +308,7 @@ plans and limits).
       "api_base": "https://opencode.ai/zen/go/v1"
     }
   },
-  "agents": { "defaults": { "provider": "opencode_go", "model": "grok-4.7" } }
+  "agents": { "defaults": { "provider": "opencode_go", "model": "deepseek-v4.1-flash" } }
 }
 ```
 
@@ -347,14 +347,69 @@ configure:
   opportunistic — sent when a session id is present, silently omitted when it
   is not.
 
-The OpenCode endpoint routes every model family server-side (grok, gpt, luna,
-kimi, glm, claude, gemini, qwen, deepseek, minimax, …) through a single
-OpenAI-compatible `chat/completions` API, so no per-model dialect has to be
-configured.
+The gateway exposes a single OpenAI-compatible `chat/completions` API, so no
+per-model dialect has to be configured — but only for the model families that
+speak that protocol (kimi, glm, qwen, deepseek, minimax, mimo, …); several
+others are served over a different wire protocol and reject it (see **Model
+coverage** below).
 
 Configuring it as an `anthropic`-typed provider is not supported: the
 Anthropic Messages transport authenticates with `x-api-key`, while OpenCode Go
 expects `Authorization: Bearer`.
+
+#### Model coverage on the shared chat/completions endpoint
+
+The gateway exposes one OpenAI-compatible `chat/completions` endpoint, but not
+every model listed by `GET /models` is served over that protocol. The lists
+below were measured against `/zen/go/v1` on 2026-10-22 (one minimal message
+per model; same result for streaming and non-streaming) and will drift as the
+service changes.
+
+- Answer `chat/completions` (HTTP 200) — 25 ids:
+  - DeepSeek: `deepseek-v4-pro`, `deepseek-v4.1-flash`
+  - Kimi: `kimi-k2.6`, `kimi-k2.7-code`, `kimi-k3`
+  - GLM: `glm-5.1`, `glm-5.2`, `glm-5.3`, `glm-5.3-flash`
+  - Qwen: `qwen3.6-plus`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.8-flash`,
+    `qwen3.8-max`
+  - MiMo: `mimo-v2.5`, `mimo-v2.6-flash`, `mimo-v2.6-pro`
+  - MiniMax (all but `m2.7`): `minimax-m2.5`, `minimax-m3`, `minimax-m3.1-flash`
+  - Hermes: `hy3`, `hy4-preview`
+  - Step: `step-5-preview`
+  - Others: `beam-free`, `omen-alpha`
+- Answer `400 ModelProtocolUnsupported` (`Model does not support this
+  protocol.`) — 9 ids: `claude-haiku-5-5`, `gemini-4-argon-contributor`,
+  `gpt-5.6-luna`, `gpt-6-luna`, `grok-4.6`, `grok-4.7`, `minimax-m2.7`,
+  `muse-spark-1.2-contributor`, `muse-spark-1.3-contributor`. These are served
+  over a different wire protocol (not `chat/completions`), so lele's
+  OpenAI-compatible transport cannot drive them; they need provider-specific
+  clients and are not usable through `opencode_go` today. Practical rule: if
+  you see `ModelProtocolUnsupported`, switch to another model id from the
+  working list.
+- Advertised by `GET /models` but failing upstream on OpenCode's side:
+  `mimo-v2.5-pro` answers `Upstream request failed: [400] Unsupported model
+  mimo-v2.5-pro` (plain, streaming, and tools+reasoning alike), and
+  `longcat-2.0` answers `402 Upstream request failed: Endpoint is
+  unavailable.` Both are upstream conditions on OpenCode's side, not lele's,
+  and can change without notice — prefer `mimo-v2.5` or `mimo-v2.6-pro` until
+  the first one is fixed.
+
+`GET /models` is authoritative for *names*, not for protocol compatibility;
+smoke-test a model with one message before making it the default in
+`agents.defaults`.
+
+#### Requirements / troubleshooting
+
+- Some Go models are gated on the workspace region. When the workspace is not
+  on it, the gateway answers `400 "This Go model requires Global regions.
+  Select Global in your workspace's Privacy settings to use it."` → select
+  **Global** under the OpenCode Console workspace's Privacy settings. This
+  400 comes from the workspace setting, not from lele; the gate is not
+  uniform across models (a DeepSeek model returned it once and answered
+  normally later), so retry once before assuming a misconfiguration.
+- The `x-opencode-session` header is added by **lele's own outbound
+  requests**. If OpenCode Go is reached through another gateway/proxy (e.g.
+  llmproxy), that gateway must send the header itself; otherwise the request
+  fails with `400 MissingSessionID`.
 
 ## Named Provider Models
 
@@ -538,7 +593,7 @@ Exposure and gating:
 | MiMo (Xiaomi, OpenAI-compatible endpoint) | Yes — URL or base64 data URL | `video_url` with mp4/webm/avi/mkv/mov, ≤100 MB / ≤1000 s per call. The v2.5 docs state the audio track is not processed; `mimo-v2.6-pro`/`mimo-v2.6-flash` were verified to transcribe speech from the video's audio track. `fps` is accepted but undocumented (treated as ignored). |
 | Moonshot Kimi | No (for lele v1) | Video via Files API `ms://` file ids is **not supported** by lele v1. |
 | Gemini direct (`generativelanguage` OpenAI-compat path used by lele) | Unverified | `video_url` support on this path is **unverified**; for Gemini video understanding, configure the model through OpenRouter. Native `inline_data`/File API support is future work. |
-| OpenCode Go (`opencode_go`) | Unverified | All models route through one OpenAI-compatible `chat/completions` endpoint; `video_url` support is **unverified**. Treat it like any OpenAI-compatible backend: don't rely on native video here. |
+| OpenCode Go (`opencode_go`) | Unverified | The OpenAI-compatible model families share one `chat/completions` endpoint, while several families (GPT, Grok, Claude, Gemini, Muse) reject that protocol with `ModelProtocolUnsupported` (see the Model coverage subsection of **OpenCode Go** above). `video_url` support is **unverified** — treat it like any OpenAI-compatible backend and do not rely on native video. |
 | OpenAI / Anthropic | No | No native video — do not set `video: true`. With `vision: true` they now get `read_video` via frames mode, no video flag needed: keyframes as `image_url` parts plus the audio transcript as text. Audio reaches them only as transcript text, and visual motion/temporal detail is limited to the N keyframes. |
 
 #### Tokens and limits
@@ -606,7 +661,7 @@ Examples:
 - `openrouter:auto`
 - `my-openai-compatible:fast`
 - `anthropic:claude-sonnet`
-- `opencode_go:grok-4.7`
+- `opencode_go:deepseek-v4.1-flash`
 
 ## Fallback Models
 
