@@ -50,30 +50,46 @@ describe('AddProviderModal OpenCode entries', () => {
     expect(DEFAULT_API_BASE.opencode_go).toBe('https://opencode.ai/zen/go/v1')
   })
 
-  test('renders both options and pre-fills step 3 for OpenCode Go', () => {
+  test('renders both options without duplicates', () => {
     const utils = renderModal()
 
     const select = utils.container.querySelector('select') as HTMLSelectElement
     const options = Array.from(select.querySelectorAll('option')).map((o) => o.value)
     expect(options).toContain('opencode')
     expect(options).toContain('opencode_go')
-
-    // Select OpenCode Go, walk to step 3, and check the api_base pre-fill.
-    // Buttons live in the footer div; the last one is Next ("Siguiente" under
-    // the test i18n locale) — locate it structurally to stay locale-proof.
-    // Step 2 requires a provider name before Next enables.
-    const nextButton = () =>
-      utils.container.querySelector('div.mt-6 button:last-child') as HTMLButtonElement
-    fireEvent.change(select, { target: { value: 'opencode_go' } })
-    fireEvent.click(nextButton())
-
-    const nameInput = utils.container.querySelector('input[type="text"]') as HTMLInputElement
-    fireEvent.change(nameInput, { target: { value: 'my-opencode' } })
-    fireEvent.click(nextButton())
-
-    const apiBase = utils.container.querySelector(
-      'input[id="new-provider-api-base"]',
-    ) as HTMLInputElement
-    expect(apiBase.value).toBe('https://opencode.ai/zen/go/v1')
+    expect(new Set(options).size).toBe(options.length)
   })
+
+  // Walk the wizard to step 3 for each new entry and check the api_base
+  // pre-fill. Buttons live in the footer div; the last one is Next
+  // ("Siguiente" under the test i18n locale) — locate it structurally to
+  // stay locale-proof. Step 2 requires a provider name before Next enables.
+  const newEntries = [
+    { value: 'opencode', base: 'https://opencode.ai/zen/v1' },
+    { value: 'opencode_go', base: 'https://opencode.ai/zen/go/v1' },
+  ]
+
+  for (const { value, base } of newEntries) {
+    test(`walks select → name → Next and pre-fills step 3 for ${value}`, () => {
+      const utils = renderModal()
+
+      const select = utils.container.querySelector('select') as HTMLSelectElement
+      const nextButton = () =>
+        utils.container.querySelector('div.mt-6 button:last-child') as HTMLButtonElement
+
+      fireEvent.change(select, { target: { value } })
+      fireEvent.click(nextButton())
+
+      const nameInput = utils.container.querySelector(
+        'input[id="new-provider-name"]',
+      ) as HTMLInputElement
+      fireEvent.change(nameInput, { target: { value: `my-${value}` } })
+      fireEvent.click(nextButton())
+
+      const apiBase = utils.container.querySelector(
+        'input[id="new-provider-api-base"]',
+      ) as HTMLInputElement
+      expect(apiBase.value).toBe(base)
+    })
+  }
 })

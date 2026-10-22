@@ -189,6 +189,7 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
           <div className="space-y-4 animate-step-enter">
             <p className="text-xs text-text-secondary">{t('settings.addProviderModal.stepName')}</p>
             <input
+              id="new-provider-name"
               type="text"
               value={providerName}
               onChange={(e) => setProviderName(e.target.value)}
