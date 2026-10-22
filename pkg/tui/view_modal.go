@@ -56,6 +56,8 @@ func (m *Model) modalTitleFor(mode modalType) string {
 		return i18n.T("tui.mcpDetail")
 	case ModalMCPAuth:
 		return i18n.T("tui.mcpAuth")
+	case ModalMCPAdd:
+		return i18n.T("tui.mcpAdd")
 	case ModalCommandDetail:
 		return i18n.T("tui.commands.detail")
 	case ModalAddCommand:
@@ -124,6 +126,11 @@ func (m *Model) renderActiveModal() string {
 		// Interactive OAuth: the engine's flow is driven from here and the
 		// box is height-clamped by the renderer itself (see mcpAuthBox).
 		return m.renderMCPAuth()
+	case ModalMCPAdd:
+		// Bespoke renderer: the step set is kind-dependent (args is
+		// stdio-only, type/headers remote-only), so renderFormModal's
+		// steps[i] ↔ formValues[i] alignment does not hold.
+		return m.renderMCPAddModal()
 	case ModalAddCommand:
 		// The template step is multi-line and needs a textarea, which the
 		// generic single-line form renderer cannot offer.

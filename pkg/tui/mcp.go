@@ -185,11 +185,13 @@ func (m *Model) loadMCPListWith(paths mcp.Paths) {
 	m.clampModalCursor()
 }
 
-// ── handleMCPKey owns the keys of the /mcp list and detail modals ──────
+// ── handleMCPKey owns the keys of the /mcp list, detail and add modals ──
 //
-// List: space/t toggle the selected server, d signs it out, f cycles the
-// source filter, enter opens ModalMCPDetail for the row under the cursor,
-// esc/q close. Detail: esc/q return to the list (the cursor and the rows are
+// List: space/t toggle the selected server, d signs it out, n opens the add
+// wizard (ModalMCPAdd), f cycles the source filter, enter opens
+// ModalMCPDetail for the row under the cursor, esc/q close. Add wizard:
+// ENTER advances/confirm, ESC cancels; every other key is forwarded so the
+// isFormModal registration types it (handleMCPAddKey). Detail: esc/q return to the list (the cursor and the rows are
 // untouched), "a" starts the interactive OAuth flow of the server being shown
 // when it is a remote entry (ModalMCPAuth), "d" signs it out and every other
 // key is swallowed so no list action or navigation can fire while the detail
@@ -227,10 +229,19 @@ func (m *Model) handleMCPKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		// isFormModal / isListModal in modal_state.go).
 		return m.handleMCPAuthKey(msg)
 	}
+	if m.modalMode == ModalMCPAdd {
+		// The add wizard owns ENTER (advance/confirm) and ESC (cancel); every
+		// other key is forwarded so the isFormModal registration types it into
+		// the shared text input.
+		return m.handleMCPAddKey(msg)
+	}
 	if m.modalMode != ModalMCP {
 		return nil, false
 	}
 	switch msg.String() {
+	case "n":
+		// Open the add wizard (the /commands "n" precedent, handlers_modal.go:1258).
+		return m.startMCPAdd(), true
 	case " ", "t":
 		if m.modalSelectedIdx < 0 || m.modalSelectedIdx >= len(m.mcpModalKeys) {
 			return nil, true

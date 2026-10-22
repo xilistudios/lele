@@ -195,6 +195,7 @@ const (
 	ModalMCP                // list of MCP servers (space/t toggle, f filter)
 	ModalMCPDetail          // detail view of one MCP server (rendered from the stored inventory)
 	ModalMCPAuth            // interactive OAuth authorization of one MCP server (a from the detail)
+	ModalMCPAdd             // step-by-step wizard to add an MCP server ("n" in the /mcp list); a form modal with a kind-dependent (dynamic) step set, rendered by its own renderer (renderMCPAddModal) rather than renderFormModal
 )
 
 type formStep int

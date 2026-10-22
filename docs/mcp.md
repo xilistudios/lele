@@ -211,7 +211,7 @@ copy wins at read time; the rules below decide where an edit lands.
 | Surface | Offers | Scope |
 | --- | --- | --- |
 | WebUI agent-config tab | List, toggle and a per-layer raw JSON editor. | The selected agent (workspace filter). |
-| TUI `/mcp` | List and toggle; no editor. | The layers of the running agent. |
+| TUI `/mcp` | List, toggle, sign out, and add a server through a step-by-step wizard (`N`); no raw editor. | The layers of the running agent. |
 | REST API | 10 routes — 2 reads (`GET /api/v1/mcp`, `GET …/{layer}/raw`), 2 writes (`PUT …/{layer}/servers/{name}/toggle`, `PUT …/{layer}/raw`), 1 dry run (`POST /api/v1/mcp/validate`) and 5 OAuth routes — start, poll, complete and cancel a login, plus logout (routes and error codes in `docs/client-api.md`); `layer` ∈ `global`\|`agent`\|`project`\|`auto`. | One `agent_id` per call. |
 
 `auto` is a write-side alias only: it resolves to the layer that owns the
@@ -260,12 +260,66 @@ Write rules:
   The API and both clients (TUI `/mcp`, WebUI agent-config MCP panel)
   enforce this rule.
 - **Secrecy:** no surface returns env/header VALUES or expanded `${VAR}`
-  values; listings read the raw file bytes and expose key NAMES only.
+  values; listings read the raw file bytes and expose key NAMES only. The
+  TUI add wizard masks env/header values **everywhere** they could render:
+  the step line above the input (`▶ Env: [KEY=•••••]`), the completed-step
+  summary and the review block all show key names with the values as
+  bullets (`KEY=•••••`); the input bar itself is fully masked (password
+  echo on those steps) — never the value itself.
 - **Liveness:** edits through any surface take effect without a restart —
   the manager re-reads the winning entry by fingerprint (see `Lifecycle`)
   and the API triggers a wiring pass after every successful write. `changed`
   gates the response only, never the reload; a failed reload is logged, not
   surfaced as an error, because the file on disk is already right.
+
+### Adding a server from the TUI (`/mcp` → `N`)
+
+The `/mcp` modal has a step-by-step add wizard: press `N` on the server list
+to open it. It writes through the same `mcp.UpsertEntry` seam as the CLI and
+REST API, so the same layering, validation and `${VAR}`-expansion rules
+apply — nothing is special-cased for the TUI.
+
+The wizard asks one question per step, and the step set depends on the
+transport you choose. You pick the transport (`stdio` or `remote`) right
+after the name, and the wizard then walks exactly the steps that apply to
+that transport:
+
+| Transport | Step order |
+| --- | --- |
+| `stdio` | Name → Transport → Command → Args → Env → Description → Layer → Review |
+| `remote` | Name → Transport → URL → Type → Env → Headers → Description → Layer → Review |
+
+- **`args` is stdio-only; `type` and `headers` are remote-only.** A step
+  that does not apply to the chosen transport is never shown, so a
+  half-valid entry cannot be assembled by accident.
+- **Exactly one of `command` / `url` is stored.** The wizard has a single
+  endpoint slot whose label and meaning follow the transport, so the
+  command/url XOR is structurally impossible to violate from the UI; the
+  entry is still re-validated by `ServerConfig.validate` inside
+  `UpsertEntry` as the last line of defence.
+- **`type` is omitted unless you type it.** An empty type is left empty in
+  the written object; the reader defaults it to `http`, so an untouched
+  type never bloats the file.
+- **`${VAR}` is never expanded.** Everything you type — command, args, env
+  values, headers — is stored verbatim, exactly as typed; the reader
+  expands `${VAR}` at connect time. (This is why an env value can name a
+  variable that only exists on the machine that runs the server.)
+- **Layer defaults to `global`** when left empty. You can type `agent` or
+  `project` (or the localized `/mcp` filter labels). Choosing a layer whose
+  root is disabled (no configured path) or that sits outside the allowed
+  workspace roots is refused **before** the review screen — the same path
+  guard (`channels.IsAllowedWorkspacePath`) the write command applies
+  authoritatively — so you learn early rather than after the write.
+- **A duplicate name is not an error at the name step.** The review screen
+  warns — *replacing it*, *shadowed by a higher layer*, or *this entry
+  shadows a lower copy* — and the typed `yes` at the review step is the
+  wizard's equivalent of the CLI's `--force`: confirming replaces the
+  existing entry. `no` (or `ESC`) cancels without writing.
+- **OAuth is out of scope** for the wizard. To authorize a remote server,
+  use `lele mcp add --auth oauth` or the `a` key in the `/mcp` detail view.
+- **The write takes effect with no restart**: on success the wizard fires
+  the same `SyncMCPServers` wiring pass the toggle uses, reloads the list
+  and puts the cursor on the new row.
 
 ## Managing servers from the CLI (`lele mcp`)
 

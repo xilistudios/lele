@@ -101,6 +101,12 @@ func isFormModal(mode modalType, editingField bool) bool {
 	switch mode {
 	case ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret, ModalSkillInstall, ModalAddCommand:
 		return true
+	// The MCP-add wizard (ModalMCPAdd) collects one single-line value per
+	// step in the shared text input, like every other form modal: typing
+	// must reach the widget (a "q" is a regular character mid-word) and the
+	// generic modal switch must not treat this modal as a navigable list.
+	case ModalMCPAdd:
+		return true
 	// ModalMCPAuth collects a pasted authorization code in the shared text
 	// input: it must be a "form modal" for the tail of handleModalKey to
 	// forward printable keys to the widget (handleMCPAuthKey owns only
@@ -127,7 +133,7 @@ func isFormModal(mode modalType, editingField bool) bool {
 // only moving inside the code input.
 func isListModal(mode modalType) bool {
 	switch mode {
-	case ModalNone, ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret, ModalSkillInstall, ModalMCPAuth:
+	case ModalNone, ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret, ModalSkillInstall, ModalMCPAuth, ModalMCPAdd:
 		return false
 	case ModalSettings, ModalSettingsAgents, ModalSettingsAgentEdit, ModalSettingsSystem, ModalSettingsSystemEdit, ModalSettingsTUI:
 		return true
