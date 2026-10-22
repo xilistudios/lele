@@ -359,11 +359,10 @@ expects `Authorization: Bearer`.
 
 #### Model coverage on the shared chat/completions endpoint
 
-The gateway exposes one OpenAI-compatible `chat/completions` endpoint, but not
-every model listed by `GET /models` is served over that protocol. The lists
-below were measured against `/zen/go/v1` on 2026-10-22 (one minimal message
-per model; same result for streaming and non-streaming) and will drift as the
-service changes.
+Not every model listed by `GET /models` is served over that protocol. The
+lists below were measured against `/zen/go/v1` on 2026-10-22 (one minimal
+message per model; same result for streaming and non-streaming) and will
+drift as the service changes.
 
 - Answer `chat/completions` (HTTP 200) — 25 ids:
   - DeepSeek: `deepseek-v4-pro`, `deepseek-v4.1-flash`
@@ -372,7 +371,8 @@ service changes.
   - Qwen: `qwen3.6-plus`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.8-flash`,
     `qwen3.8-max`
   - MiMo: `mimo-v2.5`, `mimo-v2.6-flash`, `mimo-v2.6-pro`
-  - MiniMax (all but `m2.7`): `minimax-m2.5`, `minimax-m3`, `minimax-m3.1-flash`
+  - MiniMax: `minimax-m2.5`, `minimax-m3`, `minimax-m3.1-flash`
+    (`minimax-m2.7` rejects — see below)
   - Hermes: `hy3`, `hy4-preview`
   - Step: `step-5-preview`
   - Others: `beam-free`, `omen-alpha`
@@ -385,13 +385,21 @@ service changes.
   clients and are not usable through `opencode_go` today. Practical rule: if
   you see `ModelProtocolUnsupported`, switch to another model id from the
   working list.
-- Advertised by `GET /models` but failing upstream on OpenCode's side:
-  `mimo-v2.5-pro` answers `Upstream request failed: [400] Unsupported model
-  mimo-v2.5-pro` (plain, streaming, and tools+reasoning alike), and
+- Advertised by `GET /models` but failing upstream on OpenCode's side — 2
+  ids: `mimo-v2.5-pro` answers `Upstream request failed: [400] Unsupported
+  model mimo-v2.5-pro` (plain, streaming, and tools+reasoning alike), and
   `longcat-2.0` answers `402 Upstream request failed: Endpoint is
   unavailable.` Both are upstream conditions on OpenCode's side, not lele's,
   and can change without notice — prefer `mimo-v2.5` or `mimo-v2.6-pro` until
   the first one is fixed.
+- Advertised by the bundled catalog but deprecated upstream — 2 ids
+  (measured 2026-10-22): `minimax-m3.1-flash-free` answers `400
+  ModelDeprecated` ("Model minimax-m3.1-flash-free has been deprecated.")
+  and `longcat-2.5-preview-free` answers `402 Upstream request failed:
+  Endpoint is unavailable.` Both ids still ship in
+  `catalog/providers/opencode_go.json`, so the model picker can offer them —
+  use `minimax-m3.1-flash` instead and expect the next catalog refresh to
+  drop the deprecated ones.
 
 `GET /models` is authoritative for *names*, not for protocol compatibility;
 smoke-test a model with one message before making it the default in
@@ -410,6 +418,44 @@ smoke-test a model with one message before making it the default in
   requests**. If OpenCode Go is reached through another gateway/proxy (e.g.
   llmproxy), that gateway must send the header itself; otherwise the request
   fails with `400 MissingSessionID`.
+
+### OpenCode Zen
+
+`opencode` is OpenCode's pay-as-you-go model gateway
+([OpenCode Console](https://opencode.ai/console)) — the metered sibling of
+the Go subscription (`opencode_go` above). Get an API key from the console;
+it is a plain bearer token sent as `Authorization: Bearer`.
+
+```json
+{
+  "providers": {
+    "opencode": {
+      "type": "opencode",
+      "api_key": "…",
+      "api_base": "https://opencode.ai/zen/v1"
+    }
+  },
+  "agents": { "defaults": { "provider": "opencode", "model": "kimi-k2.5" } }
+}
+```
+
+`api_base` must be the `/zen/v1` base. Zen has its own wallet, separate
+from the Go subscription: a Go-subscription key is accepted by
+`GET /models` (HTTP 200) but inference fails with `500
+{"error":{"type":"server_error","message":"Upstream request failed:
+Insufficient account funds"}}` — a Go subscription does not fund Zen
+calls. Configure this provider only with a key that carries Zen credits.
+
+lele does **not** add the `x-opencode-session` header to Zen calls: the Go
+detection deliberately excludes the `/zen/v1` base (see **OpenCode Go**
+above), so requests go out as plain OpenAI-compatible calls. If the endpoint
+ever starts requiring the header, adding it is a separate change.
+
+The model list is catalog-backed (`catalog/providers/opencode.json`, 40
+ids), but per-model protocol coverage on `/zen/v1` is unverified — the
+coverage split documented for Go was measured on `/zen/go/v1` only. Smoke
+test a model with one message before making it the default in
+`agents.defaults`.
 
 ## Named Provider Models
 
@@ -593,7 +639,7 @@ Exposure and gating:
 | MiMo (Xiaomi, OpenAI-compatible endpoint) | Yes — URL or base64 data URL | `video_url` with mp4/webm/avi/mkv/mov, ≤100 MB / ≤1000 s per call. The v2.5 docs state the audio track is not processed; `mimo-v2.6-pro`/`mimo-v2.6-flash` were verified to transcribe speech from the video's audio track. `fps` is accepted but undocumented (treated as ignored). |
 | Moonshot Kimi | No (for lele v1) | Video via Files API `ms://` file ids is **not supported** by lele v1. |
 | Gemini direct (`generativelanguage` OpenAI-compat path used by lele) | Unverified | `video_url` support on this path is **unverified**; for Gemini video understanding, configure the model through OpenRouter. Native `inline_data`/File API support is future work. |
-| OpenCode Go (`opencode_go`) | Unverified | The OpenAI-compatible model families share one `chat/completions` endpoint, while several families (GPT, Grok, Claude, Gemini, Muse) reject that protocol with `ModelProtocolUnsupported` (see the Model coverage subsection of **OpenCode Go** above). `video_url` support is **unverified** — treat it like any OpenAI-compatible backend and do not rely on native video. |
+| OpenCode Go (`opencode_go`) | Unverified | The OpenAI-compatible model families share one `chat/completions` endpoint, while several families (GPT, Grok, Claude, Gemini, Muse, and `minimax-m2.7`) reject that protocol with `ModelProtocolUnsupported` (see the Model coverage subsection of **OpenCode Go** above). `video_url` support is **unverified** — treat it like any OpenAI-compatible backend and do not rely on native video. |
 | OpenAI / Anthropic | No | No native video — do not set `video: true`. With `vision: true` they now get `read_video` via frames mode, no video flag needed: keyframes as `image_url` parts plus the audio transcript as text. Audio reaches them only as transcript text, and visual motion/temporal detail is limited to the N keyframes. |
 
 #### Tokens and limits
