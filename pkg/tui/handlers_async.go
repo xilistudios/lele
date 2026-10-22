@@ -75,6 +75,9 @@ func (m *Model) handleAsyncResult(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.C
 	case mcpToggleResultMsg:
 		return m, m.handleMCPToggleResult(msg)
 
+	case mcpAddResultMsg:
+		return m, m.handleMCPAddResult(msg)
+
 	case mcpAuthStartMsg:
 		return m, m.handleMCPAuthStart(msg)
 

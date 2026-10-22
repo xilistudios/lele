@@ -256,8 +256,9 @@ MCP servers are not part of `config.json`: lele merges up to three optional
 - global: `<lele dir>/mcp.json` (`~/.lele`, or `$LELE_CONFIG_DIR` when set)
 
 Each file uses `{"mcpServers": {"<name>": { … }}}` (stdio `command` **or**
-remote `url`+`type`) and expands `${VAR}` from the environment. See
-`docs/mcp.md`.
+remote `url`+`type`) and expands `${VAR}` from the environment. The three
+write surfaces are `lele mcp add`, the TUI's `/mcp` → `N` wizard and the
+WebUI's per-layer raw editor; see `docs/mcp.md`.
 
 ## `heartbeat`
 

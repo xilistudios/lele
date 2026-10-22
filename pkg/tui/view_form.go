@@ -319,6 +319,11 @@ func (m *Model) formStepNames() []string {
 			i18n.T("tui.secretTags"),
 			i18n.T("tui.secretScope"),
 		}
+	case ModalMCPAdd:
+		// The wizard's renderer is bespoke (renderMCPAddModal), but the
+		// labels still come from ONE place — mcpAddStepNames — so the two
+		// surfaces cannot drift.
+		return m.mcpAddStepNames()
 	default:
 		return nil
 	}

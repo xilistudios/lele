@@ -171,7 +171,10 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	// /mcp list: toggle (space/t), source filter (f), no-op enter and close
 	// (esc/q) are owned by handleMCPKey; navigation and the remaining keys
-	// fall through to the generic switch below.
+	// fall through to the generic switch below. The MCP-add wizard
+	// (ModalMCPAdd) is handled by the same dispatch: handleMCPAddKey owns
+	// enter/esc, and the isFormModal registration forwards the rest to the
+	// shared text input at the bottom of this handler.
 	if cmd, handled := m.handleMCPKey(msg); handled {
 		return m, cmd
 	}

@@ -390,3 +390,153 @@ func TestMCPAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 		}
 	}
 }
+
+// TestMCPAddKeysExistInAllBuiltinLanguages covers the /mcp add wizard's
+// surface: the wizard title, the per-slot labels and placeholders, the
+// per-slot validation errors, the review warnings and hints, and the
+// result-handler feedback lines. TestAllKeysExist only checks its own
+// hardcoded list, so it would NOT catch a key added to one locale and
+// forgotten in the other two — which is exactly the mistake this table of
+// new keys is here to catch. Every key must be present VERBATIM in each
+// builtin locale's JSON (T() alone cannot prove that: a missing key
+// silently falls back to the default locale), and the format verbs must be
+// identical across locales (a %s dropped in one translation would render a
+// raw argument, or a %v added would consume a missing one). The two
+// MODIFIED keys (mcpListHints, mcpNoServers) are listed too so a fragment
+// dropped from one translation is caught per-file.
+func TestMCPAddKeysExistInAllBuiltinLanguages(t *testing.T) {
+	keys := []string{
+		"tui.mcpAdd",
+		"tui.mcpAddHint",
+		// Slot labels.
+		"tui.mcpAddStepName",
+		"tui.mcpAddStepKind",
+		"tui.mcpAddStepCommand",
+		"tui.mcpAddStepURL",
+		"tui.mcpAddStepArgs",
+		"tui.mcpAddStepType",
+		"tui.mcpAddStepEnv",
+		"tui.mcpAddStepHeaders",
+		"tui.mcpAddStepDescription",
+		"tui.mcpAddStepLayer",
+		"tui.mcpAddStepReview",
+		// Placeholders.
+		"tui.mcpAddNamePlaceholder",
+		"tui.mcpAddKindPlaceholder",
+		"tui.mcpAddCommandPlaceholder",
+		"tui.mcpAddURLPlaceholder",
+		"tui.mcpAddArgsPlaceholder",
+		"tui.mcpAddTypePlaceholder",
+		"tui.mcpAddEnvPlaceholder",
+		"tui.mcpAddHeadersPlaceholder",
+		"tui.mcpAddDescriptionPlaceholder",
+		"tui.mcpAddLayerPlaceholder",
+		"tui.mcpAddConfirmPlaceholder",
+		// Per-slot validation errors.
+		"tui.mcpAddErrNameRequired",
+		"tui.mcpAddErrNameSlash",
+		"tui.mcpAddErrKind",
+		"tui.mcpAddErrCommand",
+		"tui.mcpAddErrURL",
+		"tui.mcpAddErrType",
+		"tui.mcpAddErrPairNoEquals",
+		"tui.mcpAddErrPairNoKey",
+		"tui.mcpAddErrLayer",
+		"tui.mcpAddErrLayerNoPath",
+		"tui.mcpAddErrPathNotAllowed",
+		"tui.mcpAddErrConfirm",
+		// Review warnings and hints.
+		"tui.mcpAddReviewWarnReplace",
+		"tui.mcpAddReviewWarnShadowed",
+		"tui.mcpAddReviewNoteShadows",
+		"tui.mcpAddReviewAuthHint",
+		"tui.mcpAddHints",
+		"tui.mcpAddReviewHints",
+		// Result-handler feedback lines.
+		"tui.mcpAddSuccess",
+		"tui.mcpAddReplaced",
+		"tui.mcpAddNoChange",
+		"tui.mcpAddShadowSuffix",
+		"tui.mcpAddFailed",
+		"tui.mcpAddLayerNoPath",
+		"tui.mcpAddPathNotAllowed",
+		// The two MODIFIED keys: the "N" fragment and the empty-state row
+		// advertise the wizard, so both must carry it in every locale.
+		"tui.mcpListHints",
+		"tui.mcpNoServers",
+	}
+
+	Init()
+	langs := BuiltinLanguages()
+	if len(langs) == 0 {
+		t.Fatal("BuiltinLanguages() is empty")
+	}
+	for _, want := range []string{"en", "es", "pt"} {
+		found := false
+		for _, l := range langs {
+			if l == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("BuiltinLanguages() = %v, want %q included", langs, want)
+		}
+	}
+
+	prev := GetLanguage()
+	t.Cleanup(func() { SetLanguage(prev) })
+
+	rawByLang := map[string]localeMap{}
+	for _, lang := range []string{"en", "es", "pt"} {
+		tag, err := language.Parse(lang)
+		if err != nil {
+			t.Fatalf("language.Parse(%q): %v", lang, err)
+		}
+		m, err := loadLocale(localeFiles[tag])
+		if err != nil {
+			t.Fatalf("loadLocale(%s): %v", lang, err)
+		}
+		rawByLang[lang] = m
+	}
+
+	verbs := func(s string) string {
+		var out []rune
+		for i := 0; i < len(s); i++ {
+			if s[i] == '%' && i+1 < len(s) {
+				out = append(out, rune(s[i+1]))
+				i++
+			}
+		}
+		return string(out)
+	}
+
+	reference := map[string]string{}
+	SetLanguage("en")
+	for _, key := range keys {
+		if v := T(key); v != key {
+			reference[key] = verbs(v)
+		}
+	}
+	for _, lang := range langs {
+		SetLanguage(lang)
+		for _, key := range keys {
+			if m, ok := rawByLang[lang]; ok {
+				if _, exists := m[key]; !exists {
+					t.Errorf("key %s missing from %s.json (T() would mask it via the default-locale fallback)", key, lang)
+				}
+			}
+			got := T(key)
+			if got == key {
+				t.Errorf("key %s missing in language %s", key, lang)
+				continue
+			}
+			if got == "" {
+				t.Errorf("key %s is empty in language %s", key, lang)
+			}
+			if ref, ok := reference[key]; ok && verbs(got) != ref {
+				t.Errorf("key %s: format verbs %q in %s, want %q (the en source)",
+					key, verbs(got), lang, ref)
+			}
+		}
+	}
+}

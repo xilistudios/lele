@@ -1638,25 +1638,32 @@ func TestMCPDetailRendersAuthBlock(t *testing.T) {
 	}
 }
 
-// TestMCPListHintsAdvertiseSignOut: the LIST footer must advertise the
+// TestMCPListHintsAdvertiseSignOutAndAdd: the LIST footer must advertise the
 // sign-out key like every other action — "d" is wired in the list branch too,
 // so a user scanning the list has to be able to discover it — and it must be
-// the same action label the detail shows, in every builtin locale.
-func TestMCPListHintsAdvertiseSignOut(t *testing.T) {
+// the same action label the detail shows, in every builtin locale. The add
+// wizard ("N") gets the same treatment: present in every locale and rendered
+// by the footer, in the sibling fragments' capitalised style and order
+// (sign-out after the toggle and before the filter; add after the sign-out
+// and before the filter). The footer render is asserted too, so a fragment
+// wired only into the string but not the footer fails here.
+func TestMCPListHintsAdvertiseSignOutAndAdd(t *testing.T) {
 	m := mcpAuthListModel(t, mcpAuthVisibilityDoc)
 
-	// (1) EVERY builtin locale must carry the fragment, in the sibling
-	// fragments' capitalised style and order: after the toggle, before the
-	// filter. Checking all three (not just the active one) is deliberate —
-	// T() falls back to the default locale, so a fragment dropped from one
-	// file would otherwise stay invisible.
+	// (1) EVERY builtin locale must carry both fragments, in order:
+	// toggle < sign-out < add < filter. Checking all three (not just the
+	// active one) is deliberate — T() falls back to the default locale, so
+	// a fragment dropped from one file would otherwise stay invisible.
 	prev := i18n.GetLanguage()
 	t.Cleanup(func() { i18n.SetLanguage(prev) })
 	for _, lang := range []string{"en", "es", "pt"} {
 		i18n.SetLanguage(lang)
-		hints, logout := i18n.T("tui.mcpListHints"), i18n.T("tui.mcpLogoutHint")
+		hints, logout, add := i18n.T("tui.mcpListHints"), i18n.T("tui.mcpLogoutHint"), i18n.T("tui.mcpAddHint")
 		if !strings.Contains(hints, logout) {
 			t.Errorf("[%s] mcpListHints = %q, does not advertise the sign-out %q", lang, hints, logout)
+		}
+		if !strings.Contains(hints, add) {
+			t.Errorf("[%s] mcpListHints = %q, does not advertise the add wizard %q", lang, hints, add)
 		}
 		filter, toggle := strings.Index(hints, "F:"), strings.Index(hints, "T:")
 		if i := strings.Index(hints, logout); i >= 0 {
@@ -1667,16 +1674,27 @@ func TestMCPListHintsAdvertiseSignOut(t *testing.T) {
 				t.Errorf("[%s] mcpListHints = %q, want the sign-out after the toggle (index %d)", lang, hints, toggle)
 			}
 		}
+		if i := strings.Index(hints, add); i >= 0 {
+			if filter < 0 || i > filter {
+				t.Errorf("[%s] mcpListHints = %q, want the add hint before the filter (index %d)", lang, hints, filter)
+			}
+			if logoutIdx := strings.Index(hints, logout); logoutIdx < 0 || i < logoutIdx {
+				t.Errorf("[%s] mcpListHints = %q, want the add hint after the sign-out (index %d)", lang, hints, logoutIdx)
+			}
+		}
 	}
 	i18n.SetLanguage(prev)
 
 	// (2) The footer the user actually sees is built by renderModal; assert on
 	// it too, so a fragment wired only into the string but not the footer —
 	// or a footer that stopped reading the key — fails here.
-	logout := i18n.T("tui.mcpLogoutHint")
+	logout, add := i18n.T("tui.mcpLogoutHint"), i18n.T("tui.mcpAddHint")
 	out := ansi.Strip(m.renderModal(m.modalTitleFor(ModalMCP)))
 	if !strings.Contains(out, logout) {
 		t.Errorf("the MCP list footer does not advertise the sign-out (%q):\n%s", logout, out)
+	}
+	if !strings.Contains(out, add) {
+		t.Errorf("the MCP list footer does not advertise the add wizard (%q):\n%s", add, out)
 	}
 	if !strings.Contains(out, i18n.T("tui.mcpListHints")) {
 		t.Errorf("the MCP list footer lost its hints line:\n%s", out)

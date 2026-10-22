@@ -18,12 +18,24 @@ import (
 // ModalAddSecret step 1 is "Secret value"; the onboarding connect flow
 // (onboardingStep==obConnect) reuses ModalAddProvider with identical step
 // numbering, so it is covered by the same rule.
+//
+// The MCP-add wizard (ModalMCPAdd) masks the env/headers steps too: those
+// lines hold `KEY=VALUE` pairs (a bearer token, an API key) and docs/mcp.md
+// promises the values are masked as they are typed. plan D9 flagged the
+// opposite choice (keep the echo) as the single judgement call and offered
+// this exact one-liner; masking wins because the promise is in the shipped
+// docs and the completed/review lines already mask, so an unmasked live line
+// would be the only surface showing the value. The KEY the user is typing
+// still reads back in the step list's `▶ label: [KEY=•••••]` line via
+// mcpMaskPairs (the input bar itself shows bullets only).
 func (m *Model) isSecretInputStep() bool {
 	switch m.modalMode {
 	case ModalAddProvider:
 		return m.formStepIndex == 2
 	case ModalAddSecret:
 		return m.formStepIndex == 1
+	case ModalMCPAdd:
+		return m.formStepIndex == mcpAddStepEnv || m.formStepIndex == mcpAddStepHeaders
 	}
 	return false
 }
