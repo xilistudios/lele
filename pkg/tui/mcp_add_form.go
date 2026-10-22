@@ -18,6 +18,7 @@
 // (mcpAddReviewWarnings reads m.mcpInventory, the snapshot the visible rows
 // were built from), no ${VAR} expansion, no type defaulting (the mcp.json
 // READER defaults type to http; the writer keeps the object minimal).
+
 package tui
 
 import (
