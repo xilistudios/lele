@@ -206,6 +206,12 @@ type TUIConfig struct {
 	MouseEnabled        bool `json:"mouse_enabled"`
 	MaxRenderedMessages int  `json:"max_rendered_messages"`
 	StreamThrottleMS    int  `json:"stream_throttle_ms"`
+	// KeepAwake asks the TUI to inhibit host sleep while it runs. Opt-in (the
+	// zero value is off) and only an intent: on a platform with no working
+	// mechanism it stays true while the inhibition is off. It is deliberately
+	// the only bool with `omitempty` in this struct: "off" is written as an
+	// ABSENT key, not as `false`.
+	KeepAwake           bool `json:"keep_awake,omitempty"`
 	OnboardingCompleted bool `json:"onboarding_completed,omitempty"` // true once the user has completed or skipped the onboarding wizard
 }
 

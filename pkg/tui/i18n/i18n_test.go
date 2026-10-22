@@ -232,6 +232,7 @@ func TestAllKeysExist(t *testing.T) {
 		"tui.modelDeleteConfirm",
 		"tui.modelDeleteNoRow",
 		"tui.subagentsRunning",
+		"tui.settings.keepAwake",
 	}
 
 	Init()
@@ -386,6 +387,46 @@ func TestMCPAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 			if ref, ok := reference[key]; ok && verbs(got) != ref {
 				t.Errorf("key %s: format verbs %q in %s, want %q (the en source)",
 					key, verbs(got), lang, ref)
+			}
+		}
+	}
+}
+
+// TestKeepAwakeKeysExistInAllBuiltinLanguages guards the Interface settings
+// keep-awake surface: the row LABEL and the new "d" cancel HINT (both added by
+// the keep-awake feature). TestAllKeysExist only checks its own hardcoded
+// list, and T() would mask a key deleted from a single locale via the
+// default-locale fallback, so presence is asserted against the raw map of
+// each builtin locale file — the same protection TestMCPAuthKeys... gives the
+// MCP keys.
+func TestKeepAwakeKeysExistInAllBuiltinLanguages(t *testing.T) {
+	keys := []string{
+		"tui.settings.keepAwake",
+		"tui.settings.keepAwakeCancelHint",
+	}
+
+	Init()
+	langs := []string{"en", "es", "pt"}
+	prev := GetLanguage()
+	t.Cleanup(func() { SetLanguage(prev) })
+
+	for _, lang := range langs {
+		tag, err := language.Parse(lang)
+		if err != nil {
+			t.Fatalf("language.Parse(%q): %v", lang, err)
+		}
+		raw, err := loadLocale(localeFiles[tag])
+		if err != nil {
+			t.Fatalf("loadLocale(%s): %v", lang, err)
+		}
+		for _, key := range keys {
+			value, exists := raw[key]
+			if !exists {
+				t.Errorf("key %s missing from %s.json (T() would mask it via the default-locale fallback)", key, lang)
+				continue
+			}
+			if value == "" {
+				t.Errorf("key %s is empty in %s.json", key, lang)
 			}
 		}
 	}

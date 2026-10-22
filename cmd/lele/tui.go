@@ -61,6 +61,15 @@ func tuiCmd(sessionID string) {
 	// goroutines read through the loop's atomic pointer, so it must own a
 	// private deep copy — passing `cfg` here reintroduces the data race.
 	tuiModel := tui.NewModel(cfg.Snapshot(), agentLoop, sessionMgr, sessionID)
+	// The inhibition is bound to the model, not to a screen: it must be
+	// released however the program returns (ctrl+c, /quit, render error).
+	defer tuiModel.Close()
+	if err := tuiModel.StartKeepAwakeIfEnabled(); err != nil {
+		// No "keep-awake: " prefix here: pkg/keepawake's starter already
+		// prefixes its messages (see keepawake.go), so adding one logs a
+		// doubled "keep-awake: keep-awake: …".
+		logger.WarnC("tui", err.Error())
+	}
 
 	// Run bubbletea program in AltScreen mode.
 	// Mouse capture starts ON for scroll-wheel and sidebar click support.
@@ -71,6 +80,11 @@ func tuiCmd(sessionID string) {
 	finalModel, err := p.Run()
 	if err != nil {
 		fmt.Printf("Error running TUI: %v\n", err)
+		// os.Exit skips every defer, including the keep-awake release above:
+		// release explicitly here so a render error really fulfils the
+		// "ctrl+c, /quit or render error" promise. Close is idempotent, so
+		// calling it here and again through the deferred path is harmless.
+		tuiModel.Close()
 		os.Exit(1)
 	}
 
