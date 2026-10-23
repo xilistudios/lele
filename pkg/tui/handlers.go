@@ -112,6 +112,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case compactResultMsg, skillsScanResultMsg, skillsInstallResultMsg,
 		skillToggleResultMsg, skillDeleteResultMsg, obVerifyResultMsg,
 		mcpToggleResultMsg, mcpAddResultMsg, mcpAuthStartMsg, mcpAuthPollMsg, mcpAuthSubmitMsg,
+		connectOAuthStartMsg, connectOAuthPollMsg, connectOAuthSubmitMsg,
 		streamThrottleMsg, langCatalogMsg, langInstallResultMsg:
 		return m.handleAsyncResult(msg, cmds)
 
@@ -188,7 +189,7 @@ func (m *Model) finishUpdate(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 		// Custom TUI messages (outboundMsg, tickMsg, completeMsg, streamThrottleMsg, tea.MouseMsg) must be
 		// excluded to prevent garbage characters in the input field.
 		switch msg := msg.(type) {
-		case outboundMsg, completeMsg, tickMsg, streamThrottleMsg, tea.MouseMsg, compactResultMsg, skillsScanResultMsg, skillsInstallResultMsg, skillToggleResultMsg, skillDeleteResultMsg, mcpToggleResultMsg, mcpAddResultMsg, mcpAuthStartMsg, mcpAuthPollMsg, mcpAuthSubmitMsg:
+		case outboundMsg, completeMsg, tickMsg, streamThrottleMsg, tea.MouseMsg, compactResultMsg, skillsScanResultMsg, skillsInstallResultMsg, skillToggleResultMsg, skillDeleteResultMsg, mcpToggleResultMsg, mcpAddResultMsg, mcpAuthStartMsg, mcpAuthPollMsg, mcpAuthSubmitMsg, connectOAuthStartMsg, connectOAuthPollMsg, connectOAuthSubmitMsg:
 			// skip — not relevant to textarea
 		case tea.KeyMsg:
 			if m.isEscapeSequenceFragment(msg) {

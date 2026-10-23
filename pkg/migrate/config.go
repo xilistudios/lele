@@ -234,27 +234,73 @@ func ConvertConfig(data map[string]interface{}) (*config.Config, []string, error
 	return cfg, warnings, nil
 }
 
+// syncNamedFromTyped fills the NAMED copy of a provider from its typed copy
+// after a merge. Both copies exist (Providers.Anthropic vs
+// Providers.Named["anthropic"]) and ProvidersConfig.MarshalJSON persists the
+// NAMED one whenever it carries any data — put() then SKIPS the typed copy for
+// a key that already exists. A merged key written only into the typed field
+// would therefore never reach config.json as soon as the on-disk config has a
+// keyless named entry for that provider (api_base/proxy/connect_mode only,
+// which is exactly what a keyless local or OAuth setup looks like), losing the
+// migrated credential.
+//
+// Only EMPTY named fields are filled: Models, AuthMethod and ConnectMode live
+// in the named copy and must survive the merge, and an existing named value
+// always wins over the typed one (the same precedence MarshalJSON applies).
+func syncNamedFromTyped(p *config.ProvidersConfig, name string, pc config.ProviderConfig) {
+	if p == nil || (pc.APIKey == "" && pc.APIBase == "" && pc.Proxy == "") {
+		return
+	}
+	if p.Named == nil {
+		p.Named = make(map[string]config.NamedProviderConfig)
+	}
+	named, ok := p.Named[name]
+	if !ok {
+		named = config.NamedProviderConfig{Type: name}
+	}
+	if named.Type == "" {
+		named.Type = name
+	}
+	if named.APIKey == "" {
+		named.APIKey = pc.APIKey
+	}
+	if named.APIBase == "" {
+		named.APIBase = pc.APIBase
+	}
+	if named.Proxy == "" {
+		named.Proxy = pc.Proxy
+	}
+	p.Named[name] = named
+}
+
 func MergeConfig(existing, incoming *config.Config) *config.Config {
 	if existing.Providers.Anthropic.APIKey == "" {
 		existing.Providers.Anthropic = incoming.Providers.Anthropic
+		syncNamedFromTyped(existing.Providers, "anthropic", existing.Providers.Anthropic)
 	}
 	if existing.Providers.OpenAI.APIKey == "" {
 		existing.Providers.OpenAI = incoming.Providers.OpenAI
+		syncNamedFromTyped(existing.Providers, "openai", existing.Providers.OpenAI.ProviderConfig)
 	}
 	if existing.Providers.OpenRouter.APIKey == "" {
 		existing.Providers.OpenRouter = incoming.Providers.OpenRouter
+		syncNamedFromTyped(existing.Providers, "openrouter", existing.Providers.OpenRouter)
 	}
 	if existing.Providers.Groq.APIKey == "" {
 		existing.Providers.Groq = incoming.Providers.Groq
+		syncNamedFromTyped(existing.Providers, "groq", existing.Providers.Groq)
 	}
 	if existing.Providers.Zhipu.APIKey == "" {
 		existing.Providers.Zhipu = incoming.Providers.Zhipu
+		syncNamedFromTyped(existing.Providers, "zhipu", existing.Providers.Zhipu)
 	}
 	if existing.Providers.VLLM.APIKey == "" && existing.Providers.VLLM.APIBase == "" {
 		existing.Providers.VLLM = incoming.Providers.VLLM
+		syncNamedFromTyped(existing.Providers, "vllm", existing.Providers.VLLM)
 	}
 	if existing.Providers.Gemini.APIKey == "" {
 		existing.Providers.Gemini = incoming.Providers.Gemini
+		syncNamedFromTyped(existing.Providers, "gemini", existing.Providers.Gemini)
 	}
 
 	if !existing.Channels.Telegram.Enabled && incoming.Channels.Telegram.Enabled {

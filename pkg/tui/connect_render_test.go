@@ -9,16 +9,15 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// TestRenderConnectPicker verifies the type picker renders the preset list
-// and the custom entry.
+// TestRenderConnectPicker verifies the row catalogue renders the custom rows,
+// a known provider row with its API base, and the trailing free-type row.
 func TestRenderConnectPicker(t *testing.T) {
 	m := newTestModel(t)
 	m.width = 80
 	m.height = 40
 
+	// /connect opens the picker on the first frame — no name step first.
 	m.executeCommand("/connect")
-	m.textInput.SetValue("my-provider")
-	m = sendKeys(m, "\r")
 	if !m.providerTypePicker {
 		t.Fatal("expected picker active")
 	}
@@ -35,8 +34,8 @@ func TestRenderConnectPicker(t *testing.T) {
 		t.Fatalf("picker missing openai api base:\n%s", out)
 	}
 
-	// Jump to the last entry (custom) so it scrolls into view.
-	m.providerTypePickerIdx = len(providerPresets)
+	// Jump to the last entry (free-type row) so it scrolls into view.
+	m.providerTypePickerIdx = len(connectRows()) - 1
 	out = m.renderFormModal("Add Provider", m.formStepNames())
 	if !strings.Contains(out, "Custom") && !strings.Contains(out, "Personalizado") {
 		t.Fatalf("picker missing custom entry:\n%s", out)
@@ -51,35 +50,40 @@ func TestRenderConnectPickerScroll(t *testing.T) {
 	m.width = 120
 	m.height = 30 // matches a typical compact TUI frame
 
+	// The picker is open on the first frame.
 	m.executeCommand("/connect")
-	m.textInput.SetValue("my-provider")
-	m = sendKeys(m, "\r")
 	if !m.providerTypePicker {
 		t.Fatal("expected picker active")
 	}
 
-	// At the top, OpenAI is visible and the last preset is not.
+	// At the top, the custom OpenAI row (the first row) is visible and the
+	// last row is not. The last ROW's label is what must stay off-screen at
+	// the top.
+	rows := connectRows()
 	out := m.renderFormModal("Add Provider", m.formStepNames())
-	if !strings.Contains(out, "OpenAI") {
-		t.Fatalf("expected OpenAI at top:\n%s", out)
+	if !strings.Contains(out, rows[0].label) {
+		t.Fatalf("expected first row %q at top:\n%s", rows[0].label, out)
 	}
-	lastPreset := providerPresets[len(providerPresets)-1].label
-	if strings.Contains(out, lastPreset) {
-		t.Fatalf("last preset %q should be off-screen at top:\n%s", lastPreset, out)
+	lastRow := rows[len(rows)-1]
+	if strings.Contains(out, lastRow.label) {
+		t.Fatalf("last row %q should be off-screen at top:\n%s", lastRow.label, out)
 	}
 	if !strings.Contains(out, i18n.T("tui.moreBelow")) {
 		t.Fatalf("expected scroll-down indicator:\n%s", out)
 	}
 
-	// Move selection to the last preset — it must scroll into view and
-	// OpenAI should scroll away.
-	m.providerTypePickerIdx = len(providerPresets) - 1
+	// Move selection to the last row — it must scroll into view and the top
+	// of the catalogue should scroll away. The check must look at the rows
+	// in the WINDOW (not a raw substring): the free-type row's label also
+	// contains "OpenAI" ("OpenAI compatible (custom)"), so a plain
+	// strings.Contains would match it while the window is at the end.
+	m.providerTypePickerIdx = len(rows) - 1
 	out = m.renderFormModal("Add Provider", m.formStepNames())
-	if !strings.Contains(out, lastPreset) {
-		t.Fatalf("expected last preset %q after scroll:\n%s", lastPreset, out)
+	if !strings.Contains(out, lastRow.label) {
+		t.Fatalf("expected last row %q after scroll:\n%s", lastRow.label, out)
 	}
-	if strings.Contains(out, "OpenAI") {
-		t.Fatalf("OpenAI should be off-screen after scrolling to end:\n%s", out)
+	if strings.Contains(out, "> "+rows[0].label) || strings.Contains(out, "   "+rows[0].label) {
+		t.Fatalf("first row %q should be off-screen after scrolling to end:\n%s", rows[0].label, out)
 	}
 	if !strings.Contains(out, i18n.T("tui.moreAbove")) {
 		t.Fatalf("expected scroll-up indicator:\n%s", out)
@@ -98,10 +102,10 @@ func TestRenderConnectPickerScroll(t *testing.T) {
 	if m.modalScrollOffset <= 0 {
 		t.Fatalf("expected positive scroll offset after moving past fold, got %d", m.modalScrollOffset)
 	}
-	// The selected preset must be in the rendered window.
-	selLabel := providerPresets[m.providerTypePickerIdx].label
+	// The selected row must be in the rendered window.
+	selLabel := rows[m.providerTypePickerIdx].label
 	if !strings.Contains(out, selLabel) {
-		t.Fatalf("selected preset %q not visible:\n%s", selLabel, out)
+		t.Fatalf("selected row %q not visible:\n%s", selLabel, out)
 	}
 }
 
@@ -112,14 +116,13 @@ func TestRenderConnectSuccess(t *testing.T) {
 	m.width = 80
 	m.height = 40
 
+	// The row catalogue is open on the first frame: pick the OpenAI API-key
+	// row, then the flow asks only for the key (base is pre-filled and the
+	// base step is skipped).
 	m.executeCommand("/connect")
-	m.textInput.SetValue("openai-test")
-	m = sendKeys(m, "\r")
-	m.providerTypePickerIdx = 0
-	m = sendKeys(m, "\r")
+	m = pickConnectRow(t, m, connectAPIKeyRowIdx(t, "openai"))
 	m.textInput.SetValue("sk-test-key")
 	m = sendKeys(m, "\r")
-	m = sendKeys(m, "\r") // api base pre-filled
 	m.textInput.SetValue("gpt-4o")
 	m = sendKeys(m, "\r")
 	m.textInput.SetValue("gpt-4o-2024-08-06")
@@ -141,7 +144,7 @@ func TestRenderConnectSuccess(t *testing.T) {
 	if !strings.Contains(out, "configured successfully") && !strings.Contains(out, "configurados") && !strings.Contains(out, "configurado") {
 		t.Fatalf("success screen missing confirmation:\n%s", out)
 	}
-	if !strings.Contains(out, "openai-test") {
+	if !strings.Contains(out, "openai") {
 		t.Fatalf("success screen missing provider name:\n%s", out)
 	}
 	if !strings.Contains(out, "gpt-4o") {
@@ -154,13 +157,11 @@ func TestRenderConnectSuccess(t *testing.T) {
 func TestConnectFlow_SuccessScreenCloses(t *testing.T) {
 	m := newTestModel(t)
 
+	// /connect opens the picker; pick the OpenAI API-key row: key → (base
+	// skipped) → model steps.
 	m.executeCommand("/connect")
-	m.textInput.SetValue("openai-test")
-	m = sendKeys(m, "\r")
-	m.providerTypePickerIdx = 0
-	m = sendKeys(m, "\r")
+	m = pickConnectRow(t, m, connectAPIKeyRowIdx(t, "openai"))
 	m.textInput.SetValue("sk-test-key")
-	m = sendKeys(m, "\r")
 	m = sendKeys(m, "\r")
 	m.textInput.SetValue("gpt-4o")
 	m = sendKeys(m, "\r")

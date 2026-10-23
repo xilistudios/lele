@@ -864,8 +864,10 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 		if v.Type == "" {
 			v.Type = key
 		}
-		// Only include if has APIKey, models or an explicit auth method
-		if v.APIKey != "" || len(v.Models) > 0 || v.AuthMethod != "" {
+		// Any user-defined named entry is persisted. Checking only API key,
+		// models, or auth method silently discarded keyless local endpoints
+		// (APIBase/Proxy) and OAuth-completed entries (ConnectMode).
+		if !v.IsEmpty() {
 			out[key] = v
 			hasData = true
 		}
@@ -876,8 +878,8 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 		if _, exists := out[key]; exists {
 			return
 		}
-		// Only include if has APIKey, models or an explicit auth method
-		if cfg.APIKey == "" && len(cfg.Models) == 0 && cfg.AuthMethod == "" {
+		// Typed fields are optional and only persisted once configured.
+		if cfg.IsEmpty() {
 			return
 		}
 		if cfg.Type == "" {
@@ -914,6 +916,38 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 	}
 
 	return json.Marshal(out)
+}
+
+// IsEmpty reports whether a provider carries NO user configuration: it is
+// either the empty placeholder ensureNamedDefaults() pre-creates for every
+// known provider, or an entry with nothing worth persisting.
+//
+// It gates two coupled decisions, which is why it is exported and shared
+// rather than duplicated: what gets written to config.json (MarshalJSON skips
+// empty entries) and what /connect may overwrite wholesale (pkg/tui treats an
+// empty entry as disposable instead of reporting "already exists").
+//
+// "No user data" means every field that can only come from a user edit is
+// empty — including APIBase and Proxy, because a keyless local provider (the
+// supported "API key is optional for local providers" case) and an
+// OAuth-completed session (AuthMethod/ConnectMode) carry their configuration
+// exactly there.
+//
+// Two fields must STAY out of the predicate even though they look like
+// configuration:
+//
+//   - Type: ensureNamedDefaults() assigns it to every known provider, so
+//     counting it would persist every empty placeholder.
+//   - WebSearch (the OpenAIProviderConfig field, not part of this struct's
+//     JSON): ensureNamedDefaults() puts a non-nil copy for "openai", so
+//     counting it would make the openai placeholder look configured.
+func (p NamedProviderConfig) IsEmpty() bool {
+	return p.APIKey == "" &&
+		p.APIBase == "" &&
+		p.Proxy == "" &&
+		p.AuthMethod == "" &&
+		p.ConnectMode == "" &&
+		len(p.Models) == 0
 }
 
 func (p *ProvidersConfig) ensureNamedDefaults() {
@@ -1420,7 +1454,7 @@ func DefaultConfig() *Config {
 			NanogPT:           ProviderConfig{},
 			DeepSeek:          ProviderConfig{},
 			GitHubCopilot:     ProviderConfig{},
-			AlibabaCodingPlan: ProviderConfig{APIBase: "https://coding-intl.dashscope.aliyuncs.com/v1"},
+			AlibabaCodingPlan: ProviderConfig{},
 		},
 		Gateway: GatewayConfig{
 			Host: "0.0.0.0",

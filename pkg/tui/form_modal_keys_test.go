@@ -8,12 +8,18 @@ import (
 )
 
 // TestQKeyTypesIntoFormModal verifies that "q" is inserted into the text input
-// of form-based modals instead of closing them, while ESC still closes.
+// of form-based modals instead of closing them, while ESC still closes. The
+// /connect flow opens on the provider picker now, so the test picks the free-
+// type row to reach a text-input step (the name step) first.
 func TestQKeyTypesIntoFormModal(t *testing.T) {
 	m := newTestModel(t)
 	m.executeCommand("/connect")
 	if m.modalMode != ModalAddProvider {
 		t.Fatalf("expected ModalAddProvider, got %v", m.modalMode)
+	}
+	m = pickFreeTypeRow(t, m)
+	if m.formStepIndex != 0 {
+		t.Fatalf("expected the name step, got %d", m.formStepIndex)
 	}
 
 	// Typing "q" must go into the text input, not close the modal.
@@ -117,5 +123,33 @@ func TestWrapText_ASCIIUnchanged(t *testing.T) {
 	}
 	if got := wrapText("short", 10); got != "short" {
 		t.Fatalf("short line modified: %q", got)
+	}
+}
+
+// TestQKeyTypesIntoConnectOAuthModal pins the paste box of the native
+// /connect OAuth login: "q" is a regular character in a pasted code or
+// redirect URL, so it must reach the shared input instead of falling through
+// to the modal-close path (which is what happens the moment
+// ModalConnectOAuth stops being a form modal — see isFormModal). Mutants it
+// kills: removing ModalConnectOAuth from isFormModal, or letting "q" hit the
+// close handler while the flow is pending.
+func TestQKeyTypesIntoConnectOAuthModal(t *testing.T) {
+	m, _ := connectOAuthEnterPending(t, "anthropic")
+	if m.modalMode != ModalConnectOAuth {
+		t.Fatalf("modal = %v, want ModalConnectOAuth", m.modalMode)
+	}
+	if m.connectOAuthState != connectOAuthPending {
+		t.Fatalf("state = %d, want connectOAuthPending", m.connectOAuthState)
+	}
+
+	m = sendKeys(m, "q")
+	if m.modalMode != ModalConnectOAuth {
+		t.Fatalf("'q' closed the OAuth modal; modal = %v", m.modalMode)
+	}
+	if m.connectOAuthFlow == nil {
+		t.Error("'q' dropped the live flow (the listener would leak)")
+	}
+	if got := m.textInput.Value(); got != "q" {
+		t.Fatalf("'q' not inserted into the paste box, got %q", got)
 	}
 }

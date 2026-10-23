@@ -105,14 +105,12 @@ func TestFormModalHidesSecretTyping(t *testing.T) {
 	m := newFormTestModel(t)
 
 	m.executeCommand("/connect")
-	if m.modalMode != ModalAddProvider || m.formStepIndex != 0 {
-		t.Fatalf("expected /connect at step 0, got mode=%v step=%d", m.modalMode, m.formStepIndex)
+	// The picker is open on the first frame: pick the OpenAI API-key row so
+	// the flow lands directly on the API-key step (2).
+	if m.modalMode != ModalAddProvider || !m.providerTypePicker {
+		t.Fatalf("expected /connect with the picker open, got mode=%v picker=%v", m.modalMode, m.providerTypePicker)
 	}
-	// Provider name → type picker.
-	m.textInput.SetValue("openai-test")
-	m = sendKeys(m, "\r")
-	m.providerTypePickerIdx = 0 // openai preset → lands on step 2 (API Key)
-	m = sendKeys(m, "\r")
+	m = pickConnectRow(t, m, connectAPIKeyRowIdx(t, "openai"))
 	if m.formStepIndex != 2 {
 		t.Fatalf("expected API-key step 2, got %d", m.formStepIndex)
 	}
@@ -276,10 +274,9 @@ func TestConnectFlowPresetSecretStep(t *testing.T) {
 func TestEchoResetAfterFormClosed(t *testing.T) {
 	m := newFormTestModel(t)
 	m.executeCommand("/connect")
-	m.textInput.SetValue("prov")
-	m = sendKeys(m, "\r")       // name → type picker (step 1)
-	m.providerTypePickerIdx = 0 // openai preset → step 2 (API Key)
-	m = sendKeys(m, "\r")
+	// The picker is open on the first frame: the OpenAI API-key row lands
+	// directly on the secret step (2).
+	m = pickConnectRow(t, m, connectAPIKeyRowIdx(t, "openai"))
 	// bubbletea always runs View() after Update(); View() is the universal
 	// render-side echo sync, so assert state after a full turn.
 	m.View()

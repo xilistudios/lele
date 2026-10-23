@@ -96,7 +96,10 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// form enter path below (after applyCatalogSelectionOnEnter), and
 		// printable keys reach textInput at the bottom of this handler.
 	}
-	// Provider-type picker navigation (up/down within the preset list).
+	// Provider-type picker navigation (up/down within the row list). The
+	// bounds are providerTypePickerMax in BOTH modes: the row-driven flow
+	// sets it to len(connectRows()), the free-text-name path (step 0 → type
+	// picker) still sets len(providerPresets)+1.
 	if m.modalMode == ModalAddProvider && m.providerTypePicker {
 		max := m.providerTypePickerMax
 		if max <= 0 {
@@ -137,12 +140,28 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.providerTypePickerIdx = max - 1
 			return m, nil
 		case "esc":
-			// Cancel back to free-form type entry.
-			m.providerTypePicker = false
+			// Cancel the picker. The ROW-DRIVEN /connect flow starts ON the
+			// picker (there is no previous form step to return to), so ESC
+			// closes the modal. The legacy free-text-name path (and
+			// onboarding's "Other/custom", which reuses it) opened the
+			// picker from a form step: ESC there falls through to the free-
+			// form TYPE entry (step 1) instead of closing.
 			m.modalScrollOffset = 0
-			m.formStepIndex = 1
-			m.textInput.SetValue("")
-			m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
+			if !m.connectRowPicker {
+				// Legacy picker: back to the type step, keep the modal.
+				m.providerTypePicker = false
+				m.formStepIndex = 1
+				m.textInput.SetValue("")
+				m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
+				return m, nil
+			}
+			m.providerTypePicker = false
+			m.connectSuccess = false
+			m.providerSavedInFlow = false
+			m.formValues = nil
+			m.formStepIndex = 0
+			m.modalMode = ModalNone
+			m.syncTextInputEcho() // audit M2: clear stale echo on close
 			return m, nil
 		case "q":
 			// "q" must NOT cancel the picker — only ESC does.
@@ -177,6 +196,17 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// shared text input at the bottom of this handler.
 	if cmd, handled := m.handleMCPKey(msg); handled {
 		return m, cmd
+	}
+	// ModalConnectOAuth (native /connect provider login): owns its own
+	// ENTER/CTRL+Y/ESC and passes every other key through so the shared
+	// input can receive a pasted code/redirect URL (see isFormModal /
+	// isListModal in modal_state.go). It has no rows, so it must be handled
+	// before the generic list/form switch, which would otherwise try to move
+	// an invisible list cursor or treat "q" as a close key.
+	if m.modalMode == ModalConnectOAuth {
+		if cmd, handled := m.handleConnectOAuthKey(msg); handled {
+			return m, cmd
+		}
 	}
 	switch msg.String() {
 	case "up", "k":
@@ -246,40 +276,49 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.reloadSessions()
 				return m, nil
 			}
-			// ── Provider-type picker (step 1, typePicker active) ──
+			// ── Provider picker (row-driven; also reused by the
+			// free-text name step 0 and onboarding's custom path) ──
 			if m.providerTypePicker {
 				sel := m.providerTypePickerIdx
 				max := m.providerTypePickerMax
 				if max <= 0 {
-					max = len(providerPresets)
+					max = len(connectRows())
 				}
 				if sel >= 0 && sel < max {
-					if sel < len(providerPresets) {
-						p := providerPresets[sel]
-						m.formValues[1] = p.typ
-						m.providerTypeFromPreset = true
-						// Pre-fill the API base from the preset.
-						m.formValues[3] = p.apiBase
-						m.formStepIndex = 2 // next: API Key
-						m.textInput.SetValue("")
-						m.textInput.Placeholder = "API Key"
-						if p.keyHint != "" {
-							m.textInput.Placeholder = "API Key (" + p.keyHint + ")"
+					// Resolve the row BEFORE closing the picker. A stale index
+					// (providerTypePickerMax larger than a catalogue that has
+					// since shrunk) used to fall through the `ok == false` arm
+					// and close the modal with nothing selected: no provider,
+					// no error, silently. Report it instead and keep the
+					// picker open so the user can pick again.
+					//
+					// connectRowPicker tells the two index spaces apart: the
+					// row-first list dispatches through applyConnectRow, the
+					// legacy providerPresets+custom list through
+					// applyLegacyTypePreset.
+					rowFirst := m.connectRowPicker
+					var row connectRow
+					if rowFirst {
+						var ok bool
+						if row, ok = connectRowByIndex(sel); !ok {
+							m.formError = i18n.T("tui.connectPickType")
+							return m, nil
 						}
-					} else {
-						// "custom" entry — free-form type
-						m.formValues[1] = ""
-						m.providerTypeFromPreset = false
-						m.formStepIndex = 1 // stay on type step for free text
-						m.textInput.SetValue("")
-						m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
 					}
 					m.providerTypePicker = false
 					m.modalScrollOffset = 0
 					m.formError = ""
+					m.connectRowPicker = false
+					if !rowFirst {
+						m.applyLegacyTypePreset(sel)
+					} else if cmd := m.applyConnectRow(sel, row); cmd != nil {
+						// An OAuth row hands off to an async engine flow and
+						// returns a command; every other row is synchronous.
+						return m, cmd
+					}
 					return m, nil
 				}
-				m.formError = "Select a provider type"
+				m.formError = i18n.T("tui.connectPickType")
 				return m, nil
 			}
 
@@ -309,19 +348,49 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if !m.providerSavedInFlow {
 				if m.formStepIndex == 0 {
 					// Provider name — validate duplicates early and
-					// offer the type picker on the next step.
+					// offer the type picker on the next step. The
+					// duplicate check only applies to a name the user
+					// TYPED (the API-key-only rows pre-fill the name
+					// from the preset and never land here).
 					key := strings.ToLower(strings.TrimSpace(val))
 					if m.cfg != nil && m.cfg.Providers != nil && m.cfg.Providers.Named != nil {
-						if _, exists := m.cfg.Providers.Named[key]; exists {
+						if p, exists := m.cfg.Providers.Named[key]; exists && !p.IsEmpty() {
 							m.formError = fmt.Sprintf("Provider %q already exists", key)
 							return m, nil
 						}
 					}
+					// Row-driven flows: a custom row (OpenAI/Anthropic
+					// compatible) already knows the provider type, so the
+					// type step is SKIPPED and the user goes straight to
+					// the API-key step (numbers unchanged: key is 2, base
+					// is 3). The free-type row keeps the legacy path:
+					// open the type picker with the legacy index space
+					// (providerPresets + custom) AND the legacy dispatch
+					// (connectRowIdx = -1), so selecting an entry there
+					// routes through applyLegacyTypePreset — not through
+					// applyConnectRow, whose index space is connectRows().
+					if row := connectRowAt(m.connectRowIdx); row != nil {
+						switch row.kind {
+						case connectRowCustomOpenAI, connectRowCustomAnthropic:
+							m.providerTypeFromPreset = true
+							m.formStepIndex = 2
+							m.textInput.SetValue("")
+							m.textInput.Placeholder = "API Key"
+							if p := providerPresetByType(row.typ); p != nil && p.keyHint != "" {
+								m.textInput.Placeholder = "API Key (" + p.keyHint + ")"
+							}
+							m.syncTextInputEcho()
+							return m, nil
+						}
+					}
 					m.formStepIndex = 1
+					m.connectRowIdx = -1 // legacy picker index space from here on
+					m.connectRowPicker = false
 					m.providerTypePicker = true
 					m.providerTypePickerIdx = 0
 					m.modalScrollOffset = 0
-					// providerPresets + a trailing "custom" entry.
+					// providerPresets + a trailing "custom" entry (the
+					// legacy index space of the free-text path).
 					m.providerTypePickerMax = len(providerPresets) + 1
 					m.textInput.SetValue("")
 					m.textInput.Placeholder = ""
@@ -354,6 +423,20 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						return m, nil
 					}
 					m.formValues[2] = val
+					// API-key-only rows (known providers picked from the
+					// row-driven picker) have no API-base step to answer:
+					// the base came from the preset, so save NOW and jump
+					// straight to the model steps (4). Everything else falls
+					// through to the API-base step (3) exactly as before.
+					if m.connectSkipAPIBase {
+						if !m.connectSaveProvider() {
+							return m, nil
+						}
+						if !m.connectRouteAfterProviderSave() {
+							return m, nil
+						}
+						return m, nil
+					}
 					m.formStepIndex = 3
 					m.textInput.SetValue("")
 					if m.providerTypeFromPreset {
@@ -372,56 +455,11 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				if m.formStepIndex >= 3 {
 					// Last provider step — save provider
-					name := m.formValues[0]
-					pnameKey := strings.ToLower(strings.TrimSpace(name))
-					// On a first run the in-memory config may already
-					// contain an empty placeholder for every known
-					// provider name (ensureNamedDefaults adds openai,
-					// anthropic, … with no key/model). During
-					// onboarding a preset pre-fills one of those
-					// names, so replace the empty placeholder instead
-					// of failing with "already exists".
-					if m.onboardingActive && m.cfg != nil && m.cfg.Providers != nil && m.cfg.Providers.Named != nil {
-						if existing, ok := m.cfg.Providers.Named[pnameKey]; ok && existing.APIKey == "" && len(existing.Models) == 0 {
-							delete(m.cfg.Providers.Named, pnameKey)
-						}
-					}
-					if err := m.addProvider(m.formValues[0], m.formValues[1], m.formValues[2], m.formValues[3]); err != nil {
-						m.formError = err.Error()
+					if !m.connectSaveProvider() {
 						return m, nil
 					}
-					m.providerSavedInFlow = true
-					m.providerSelectedName = strings.ToLower(strings.TrimSpace(m.formValues[0]))
-					// Transition to model configuration steps
-					m.formStepIndex = 4
-					m.textInput.SetValue("")
-					m.textInput.Placeholder = "Model alias (e.g. gpt-4o)"
-					m.closeCatalogPicker()
-					if p := providerPresetByType(m.formValues[1]); p != nil && p.modelHint != "" {
-						m.textInput.Placeholder = "Model alias (" + p.modelHint + ")"
-					}
-					// Pre-fill model defaults from the preset chosen
-					// during onboarding so the user can just press
-					// Enter through (still editable).
-					if m.onboardingActive && m.obSelectedPreset >= 0 && m.obSelectedPreset < len(providerPresets) {
-						preset := &providerPresets[m.obSelectedPreset]
-						if m.formValues[4] == "" && preset.defaultModelAlias != "" {
-							m.formValues[4] = preset.defaultModelAlias // model alias
-						}
-						if m.formValues[5] == "" && preset.defaultModel != "" {
-							m.formValues[5] = preset.defaultModel // actual model name
-						}
-						// Pre-fill the integer/vision steps too so a
-						// straight Enter run works end to end.
-						if m.formValues[6] == "" {
-							m.formValues[6] = "128000"
-						}
-						if m.formValues[7] == "" {
-							m.formValues[7] = "4096"
-						}
-						if m.formValues[8] == "" {
-							m.formValues[8] = "no"
-						}
+					if !m.connectRouteAfterProviderSave() {
+						return m, nil
 					}
 					return m, nil
 				}
@@ -1175,9 +1213,21 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		// Reset provider-in-flow state when leaving AddProvider modal
 		if m.modalMode == ModalAddProvider {
+			// The ESC branch of the provider picker (above) already left the
+			// picker: it either returned to the free-form type step (legacy
+			// name path / onboarding's "Other/custom") or closed the modal.
+			// Reaching here means the picker was still open when ESC was
+			// pressed (e.g. the row catalogue frame): the flow ends.
+			if m.providerTypePicker {
+				m.providerTypePicker = false
+				m.modalScrollOffset = 0
+				m.formStepIndex = 1
+				m.textInput.SetValue("")
+				m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
+				return m, nil
+			}
 			m.providerSavedInFlow = false
 			m.connectSuccess = false
-			m.providerTypePicker = false
 			m.modalScrollOffset = 0
 			// During onboarding, ESC leaves the connect flow and heads
 			// back to the provider picker (it never exits the wizard).
@@ -1363,4 +1413,223 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 
+}
+
+// ── Row-driven /connect picker helpers ──────────────────────────────────────
+
+// applyConnectRow applies the selected connectRow to the /connect form and
+// routes to the first step that row needs to answer. Step NUMBERS are the
+// legacy ones (0 name, 1 type, 2 API key, 3 API base, 4+ models): a row only
+// decides which of them the user is sent to, so the masking/autocomplete/
+// review rules keyed on absolute indices keep working unchanged.
+//
+// It returns a tea.Cmd only for rows that hand off to an async engine flow
+// (today: the OAuth row); every other row returns nil and continues the
+// ordinary synchronous form.
+func (m *Model) applyConnectRow(idx int, row connectRow) tea.Cmd {
+	m.connectRowIdx = idx
+	m.providerTypeFromPreset = false
+	m.connectSkipAPIBase = false
+	m.formError = ""
+	// Re-assert the mode in case the model was driven directly (tests) —
+	// applyConnectRow is only ever called from the /connect picker dispatch,
+	// so this is a no-op in the app.
+	m.modalMode = ModalAddProvider
+
+	switch row.kind {
+	case connectRowCustomOpenAI, connectRowCustomAnthropic:
+		// Full flow: name → API key → API base → model steps. The provider
+		// type is known, so the free-text type step (1) is skipped later.
+		m.formValues[1] = row.typ
+		m.providerTypeFromPreset = true
+		m.formStepIndex = 0 // ask the name
+		m.textInput.SetValue("")
+		m.textInput.Placeholder = i18n.T("tui.connectProviderNamePlaceholder")
+
+	case connectRowAPIKey:
+		// Known provider: only the API key is asked. The name derives from
+		// the provider type and the base comes from the preset, so both the
+		// type (1) and base (3) steps are skipped.
+		m.formValues[0] = row.name
+		m.formValues[1] = row.typ
+		m.formValues[3] = row.apiBase
+		m.providerTypeFromPreset = true
+		m.connectSkipAPIBase = true
+		m.formStepIndex = 2 // API key
+		m.textInput.SetValue("")
+		m.textInput.Placeholder = "API Key"
+		if row.keyHint != "" {
+			m.textInput.Placeholder = "API Key (" + row.keyHint + ")"
+		}
+
+	case connectRowFreeType:
+		// Legacy flow, exactly as before the row-first restructure: ask for
+		// the name, then open the type picker on the next Enter.
+		m.formValues[1] = ""
+		m.providerTypeFromPreset = false
+		m.connectSkipAPIBase = false
+		m.formStepIndex = 0 // ask the name
+		m.textInput.SetValue("")
+		m.textInput.Placeholder = i18n.T("tui.connectProviderNamePlaceholder")
+
+	case connectRowOAuth:
+		// Native provider OAuth login: hand off to the pkg/auth flow
+		// (startConnectOAuthFlow). The engine resolves the registry config
+		// by row.oauthName, binds the loopback callback, and the returned
+		// tea.Cmd drives the rest of the state machine (start → poll →
+		// success) without any further interaction on this form. There is
+		// nothing to pre-fill into formValues: the credential is not typed
+		// into this form, it is produced by the flow itself.
+		//
+		// The dispatch already ran connectRowPicker = false and reset
+		// providerTypePicker (see the enter branch above); we only flip the
+		// modal to ModalConnectOAuth so the render/key paths know which
+		// surface owns the screen from here on.
+		m.connectOAuthCancel() // release any previous flow's listener/fields
+		return m.connectOAuthStartFromRow(row)
+	}
+	// Audit M2: the API-key step is a secret step; sync the echo before the
+	// first frame renders the widget.
+	m.syncTextInputEcho()
+	return nil
+}
+
+// connectSaveProvider persists the provider part of the /connect form. It is
+// the single save point for the row-driven flow (right after the API key of
+// an API-key-only row) AND for the legacy last-provider-step path. It returns
+// false when it set m.formError (the caller keeps the user on the form so the
+// message is visible).
+func (m *Model) connectSaveProvider() bool {
+	// On a first run the in-memory config may already contain an empty
+	// placeholder for every known provider name (ensureNamedDefaults adds
+	// openai, anthropic, … with no key/model). During onboarding a preset
+	// pre-fills one of those names, so replace the empty placeholder instead
+	// of failing with "already exists".
+	if m.onboardingActive && m.cfg != nil && m.cfg.Providers != nil && m.cfg.Providers.Named != nil {
+		pnameKey := strings.ToLower(strings.TrimSpace(m.formValues[0]))
+		if existing, ok := m.cfg.Providers.Named[pnameKey]; ok && existing.IsEmpty() {
+			delete(m.cfg.Providers.Named, pnameKey)
+		}
+	}
+	if m.connectRowIdx >= 0 {
+		// Row-driven flow: ensureProvider also replaces empty placeholders
+		// and updates the key/base of an existing provider in place, so
+		// re-running /connect for a configured provider is not an error.
+		alreadyUsable, err := m.ensureProvider(m.formValues[0], m.formValues[1], m.formValues[2], m.formValues[3], m.connectSkipAPIBase)
+		if err != nil {
+			m.formError = err.Error()
+			return false
+		}
+		m.connectAlreadyUsable = alreadyUsable
+		return true
+	}
+	if err := m.addProvider(m.formValues[0], m.formValues[1], m.formValues[2], m.formValues[3]); err != nil {
+		m.formError = err.Error()
+		return false
+	}
+	return true
+}
+
+// connectRouteAfterProviderSave routes the flow right after the provider was
+// saved: an already-usable provider (it already had models) goes straight to
+// the success screen — re-running /connect just refreshed the key — while any
+// other save enters the model-configuration steps (4+) with the prefill.
+// It returns false when it closed/redirected the flow (nothing left to do),
+// true when the caller may continue with the model steps.
+func (m *Model) connectRouteAfterProviderSave() bool {
+	if m.connectRowIdx >= 0 && m.connectAlreadyUsable {
+		// Success screen: the provider keeps its models and only the
+		// credentials changed.
+		m.connectSuccess = true
+		m.providerSavedInFlow = false
+		m.formStepIndex = 10
+		m.syncTextInputEcho()
+		return false
+	}
+	m.providerSavedInFlow = true
+	m.providerSelectedName = strings.ToLower(strings.TrimSpace(m.formValues[0]))
+	// Transition to model configuration steps
+	m.formStepIndex = 4
+	m.textInput.SetValue("")
+	m.textInput.Placeholder = "Model alias (e.g. gpt-4o)"
+	m.closeCatalogPicker()
+	if p := providerPresetByType(m.formValues[1]); p != nil && p.modelHint != "" {
+		m.textInput.Placeholder = "Model alias (" + p.modelHint + ")"
+	}
+	// Pre-fill model defaults from the preset chosen during onboarding so
+	// the user can just press Enter through (still editable).
+	if m.onboardingActive && m.obSelectedPreset >= 0 && m.obSelectedPreset < len(providerPresets) {
+		preset := &providerPresets[m.obSelectedPreset]
+		if m.formValues[4] == "" && preset.defaultModelAlias != "" {
+			m.formValues[4] = preset.defaultModelAlias // model alias
+		}
+		if m.formValues[5] == "" && preset.defaultModel != "" {
+			m.formValues[5] = preset.defaultModel // actual model name
+		}
+		// Pre-fill the integer/vision steps too so a
+		// straight Enter run works end to end.
+		if m.formValues[6] == "" {
+			m.formValues[6] = "128000"
+		}
+		if m.formValues[7] == "" {
+			m.formValues[7] = "4096"
+		}
+		if m.formValues[8] == "" {
+			m.formValues[8] = "no"
+		}
+	}
+	// Row-driven prefill: the picked row carries the catalog default model
+	// for that provider, so Enter-through works there too. The onboarding
+	// prefill above is untouched (it wins when both are active).
+	if m.connectRowIdx >= 0 {
+		if row, ok := connectRowByIndex(m.connectRowIdx); ok {
+			if m.formValues[4] == "" && row.defaultModelAlias != "" {
+				m.formValues[4] = row.defaultModelAlias
+			}
+			if m.formValues[5] == "" && row.defaultModel != "" {
+				m.formValues[5] = row.defaultModel
+			}
+			if m.formValues[6] == "" {
+				m.formValues[6] = "128000"
+			}
+			if m.formValues[7] == "" {
+				m.formValues[7] = "4096"
+			}
+			if m.formValues[8] == "" {
+				m.formValues[8] = "no"
+			}
+		}
+	}
+	return true
+}
+
+// applyLegacyTypePreset keeps the pre-row-first behaviour of the picker when
+// it is opened by the free-text NAME step (step 0): the index space is the
+// legacy providerPresets list plus a trailing "custom" entry (see the
+// providerTypePickerMax assignment in the step-0 handler). Presets pre-fill
+// the type + API base and jump straight to the API-key step (2); the trailing
+// "custom" entry falls through to the free-form TYPE step (1). It is also
+// what onboarding's "Other / custom" path uses when the user presses Enter
+// without typing anything on step 0.
+func (m *Model) applyLegacyTypePreset(sel int) {
+	if sel < len(providerPresets) {
+		p := providerPresets[sel]
+		m.formValues[1] = p.typ
+		m.providerTypeFromPreset = true
+		// Pre-fill the API base from the preset.
+		m.formValues[3] = p.apiBase
+		m.formStepIndex = 2 // next: API Key
+		m.textInput.SetValue("")
+		m.textInput.Placeholder = "API Key"
+		if p.keyHint != "" {
+			m.textInput.Placeholder = "API Key (" + p.keyHint + ")"
+		}
+		return
+	}
+	// "custom" entry — free-form type
+	m.formValues[1] = ""
+	m.providerTypeFromPreset = false
+	m.formStepIndex = 1 // stay on type step for free text
+	m.textInput.SetValue("")
+	m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
 }

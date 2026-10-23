@@ -29,7 +29,9 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 		return ModalContainer.Render(sb.String())
 	}
 
-	// ── Provider-type picker: list of known presets ──
+	// Provider picker: the row catalogue (connectRows) of the row-driven
+	// /connect flow, or the legacy providerPresets list on the free-text
+	// name path.
 	if m.modalMode == ModalAddProvider && m.providerTypePicker {
 		sb.WriteString(m.renderProviderTypePicker())
 		return ModalContainer.Render(sb.String())
@@ -44,6 +46,14 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 	// Error display
 	if m.formError != "" {
 		sb.WriteString(lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n\n")
+	}
+
+	// OAuth success confirmation: after a native provider login hands off to
+	// this wizard, the "signed in as X" line from connectOAuthFinishDone is
+	// surfaced here (it lives on connectOAuthFeedback, which the form's own
+	// error slot does not show).
+	if m.connectOAuthFeedback != "" {
+		sb.WriteString(SuccessStyle.Render("  ✓ "+m.connectOAuthFeedback) + "\n\n")
 	}
 
 	// Text input field (hidden on review step)
@@ -96,15 +106,18 @@ func (m *Model) renderFormSuccess() string {
 	return sb.String()
 }
 
-// renderProviderTypePicker renders the provider type selection list within
-// the add-provider form modal.
+// renderProviderTypePicker renders the /connect provider picker: the row
+// catalogue built by connectRows() (custom OpenAI/Anthropic first, one row
+// per known provider, free-type last). On the free-text-name path the same
+// widget renders the legacy providerPresets + "custom" list, which the
+// providerTypePickerMax / connectRowIdx-free branch below keeps intact.
 func (m *Model) renderProviderTypePicker() string {
 	var sb strings.Builder
-	sb.WriteString(ModalItemInactive.Render("  "+i18n.T("tui.connectPickType")) + "\n\n")
+	sb.WriteString(ModalItemInactive.Render("  "+i18n.T("tui.connectPickProvider")) + "\n\n")
 
 	max := m.providerTypePickerMax
 	if max <= 0 {
-		max = len(providerPresets) + 1
+		max = len(connectRows())
 	}
 
 	maxVisible := m.height - 14
@@ -140,16 +153,42 @@ func (m *Model) renderProviderTypePicker() string {
 	if endIdx > max {
 		endIdx = max
 	}
+	// Resolve the row catalogue ONCE per frame. connectRowByIndex() rebuilds
+	// the whole catalogue on every call, so calling it from inside this loop
+	// made the picker frame quadratic: measured 185.6 µs/frame at 40 rows
+	// against 56.8 µs for the flat renderer it replaced. The rows are pure
+	// (built from i18n strings and static presets), so one snapshot is also
+	// the correct semantics for a single frame.
+	var rowRows []connectRow
+	if m.connectRowPicker {
+		rowRows = connectRows()
+	}
 	for i := m.modalScrollOffset; i < endIdx; i++ {
 		var label string
-		if i < len(providerPresets) {
-			p := providerPresets[i]
-			label = p.label
-			if p.apiBase != "" {
-				label += "  ·  " + p.apiBase
+		if !m.connectRowPicker {
+			// Free-text-name path: legacy providerPresets + "custom" list.
+			if i < len(providerPresets) {
+				p := providerPresets[i]
+				label = p.label
+				if p.apiBase != "" {
+					label += "  ·  " + p.apiBase
+				}
+			} else {
+				label = i18n.T("tui.connectCustomType")
+			}
+		} else if i >= 0 && i < len(rowRows) {
+			// Row-driven path: one row per (provider, auth method). The
+			// API base is only shown when the row actually carries one —
+			// the free-type row deliberately renders bare.
+			row := rowRows[i]
+			label = row.label
+			if row.apiBase != "" {
+				label += "  ·  " + row.apiBase
 			}
 		} else {
-			label = i18n.T("tui.connectCustomType")
+			// Defensive: an index past the catalogue (providerTypePickerMax
+			// stale after the catalogue shrank) must not render a blank row.
+			continue
 		}
 		if i == m.providerTypePickerIdx {
 			sb.WriteString(ModalItemActive.Render("  > "+label) + "\n")
