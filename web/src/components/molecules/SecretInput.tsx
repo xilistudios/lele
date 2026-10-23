@@ -8,9 +8,22 @@ type Props = {
   onChange: (value: SecretValue) => void
   placeholder?: string
   disabled?: boolean
+  /**
+   * Focus the literal input on mount. The input only exists in `literal` mode
+   * (`empty` renders a description, `env` renders a different field), so a
+   * parent that switches mode needs this to move focus to the key after the switch.
+   */
+  autoFocus?: boolean
 }
 
-export function SecretInput({ id, value, onChange, placeholder, disabled }: Props) {
+export function SecretInput({
+  id,
+  value,
+  onChange,
+  placeholder,
+  disabled,
+  autoFocus = false,
+}: Props) {
   const { t } = useTranslation()
   const [showValue, setShowValue] = useState(false)
   const titleText = showValue ? t('settings.hideSecret') : t('settings.showSecret')
@@ -106,6 +119,8 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
             onChange={(e) => handleLiteralChange(e.target.value)}
             disabled={disabled}
             placeholder={placeholder}
+            // biome-ignore lint/a11y/noAutofocus: opt-in (default false) so a parent can move the caret here right after switching to literal mode — the only mode where this input exists
+            autoFocus={autoFocus}
             className="w-full rounded border border-border bg-background-primary px-3 py-2 pr-10 text-xs text-text-primary placeholder:text-text-tertiary focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2 focus:ring-offset-background-primary"
           />
           <button

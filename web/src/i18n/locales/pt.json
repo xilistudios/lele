@@ -809,15 +809,17 @@
     "noOtherAgents": "Nenhum outro agente disponível",
     "addProviderModal": {
       "title": "Adicionar provedor",
-      "stepType": "Passo 1: Selecionar tipo de provedor",
-      "stepName": "Passo 2: Inserir nome do provedor",
-      "stepConfig": "Passo 3: Configurar provedor",
-      "selectType": "Selecione um tipo de provedor...",
+      "searchPlaceholder": "Buscar provedores...",
+      "noResults": "Nenhum provedor corresponde à sua busca",
+      "customTypeLabel": "Tipo de provedor personalizado",
       "customTypePlaceholder": "tipo-personalizado",
+      "apiKeyHint": "Cole sua chave e nós escolhemos o provedor para você. Deixe vazio para provedores locais ou de CLI.",
+      "advanced": "Avançado",
+      "nameLabel": "Nome do provedor",
       "namePlaceholder": "meu-provedor",
       "nameHint": "Este será o identificador usado para referenciar este provedor.",
-      "back": "Voltar",
-      "next": "Próximo",
+      "modelsCount_one": "{{count}} modelo",
+      "modelsCount_other": "{{count}} modelos",
       "add": "Adicionar"
     },
     "addAgentModal": {

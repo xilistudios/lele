@@ -809,15 +809,17 @@
     "noOtherAgents": "No other agents available",
     "addProviderModal": {
       "title": "Add Provider",
-      "stepType": "Step 1: Select provider type",
-      "stepName": "Step 2: Enter provider name",
-      "stepConfig": "Step 3: Configure provider",
-      "selectType": "Select a provider type...",
+      "searchPlaceholder": "Search providers...",
+      "noResults": "No providers match your search",
+      "customTypeLabel": "Custom provider type",
       "customTypePlaceholder": "custom-type",
+      "apiKeyHint": "Paste your key and we pick the provider for you. Leave it empty for local or CLI providers.",
+      "advanced": "Advanced",
+      "nameLabel": "Provider name",
       "namePlaceholder": "my-provider",
       "nameHint": "This will be the identifier used to reference this provider.",
-      "back": "Back",
-      "next": "Next",
+      "modelsCount_one": "{{count}} model",
+      "modelsCount_other": "{{count}} models",
       "add": "Add"
     },
     "addAgentModal": {
