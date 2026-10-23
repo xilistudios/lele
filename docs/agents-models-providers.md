@@ -288,8 +288,89 @@ Most provider entries support:
 - `proxy`
 - `auth_method`
 - `connect_mode`
+- `headers`
 
 The `openai` provider family also supports `web_search`.
+
+`headers` is optional: extra HTTP headers sent on that provider's inference calls — see **Custom headers** below.
+
+### Custom headers
+
+`providers.<name>.headers` is an optional string→string map of extra HTTP
+headers that lele adds to that provider's inference calls. It exists because a
+unified proxy in front of several upstreams can need request headers lele has no
+way to know about — the case that drove it: OpenCode Go rejects any inference
+call that arrives without `x-opencode-session` (`400 MissingSessionID`,
+validated before authentication; see **OpenCode Go** below), and a provider
+pointed at a router is not detected as Go.
+
+Scope: both transports — OpenAI-compatible `chat/completions` and Anthropic
+Messages `messages` — streaming and non-streaming, applied on every call. It is
+**not** applied to model listing (`GET /models` — neither the live listing fetch
+behind `GET /api/v1/providers/{name}/models` nor the onboarding check) or to
+catalog prefetches; those build their own requests and carry only the API key,
+so a header set here never authenticates a listing.
+
+```json
+{
+  "providers": {
+    "llmproxy": {
+      "type": "openai",
+      "api_base": "https://router.example.com/v1",
+      "api_key": "…",
+      "headers": { "x-opencode-session": "{{session}}" }
+    }
+  }
+}
+```
+
+`{{session}}` is the only placeholder. It expands per call to the same 64-hex
+value lele already sends natively as `x-opencode-session`: the SHA-256 of the
+conversation session key, so it is stable across turns and restarts and changes
+with `/new`. A call with no session key (cron jobs, standalone tool loops)
+expands to the shared unkeyed bucket — the hash of the empty key — never to an
+empty value, because an empty header is dropped on the wire and the upstream
+would then reject the call without naming the reason. Any other `{{…}}` token,
+and an unterminated `{{`, is a config error.
+
+Precedence: custom headers are applied **last** — after the transport defaults
+(`Content-Type`, `User-Agent`, and `Authorization` or `X-Api-Key` plus
+`Anthropic-Version`) and after the auto-detected session header — so an explicit
+entry wins. That is deliberate: a gateway whose scheme is not `Bearer` needs
+`Authorization` overridable, and `x-opencode-session` can be forced onto a
+target lele did not detect.
+
+Validation runs when the provider JSON is decoded into the runtime config —
+`config.json` load and every reload of it — and a rejected map aborts that load
+naming both the provider and the header (a failed reload leaves the running
+config untouched):
+
+```
+provider "llmproxy": custom header "bad name": invalid name: must be an RFC 7230 token
+```
+
+Names must be RFC 7230 tokens. Values must contain no CR, LF, NUL or other
+control character. Transport-owned headers are rejected outright, because
+overriding them would desynchronise the request from what Go actually writes on
+the wire: `Host`, `Content-Type`, `Content-Length`, `Transfer-Encoding`,
+`Connection`, `Keep-Alive`, `Proxy-Connection`, `Upgrade`, `TE`, `Trailer`.
+Everything else is allowed on purpose, including `Authorization`,
+`User-Agent`, `X-Api-Key`, `Anthropic-Version`, `Accept` and
+`x-opencode-session` itself.
+
+There is no editor for the map yet — it is a `config.json`/API field, with no
+control in either UI. Both UIs keep it intact when they write other provider
+fields: the TUI mutates the loaded entry and saves the runtime config, which
+carries the map, and the WebUI settings document models the field and
+round-trips it, so a save from the browser — even one that only edits an
+unrelated section — rewrites the providers block **with** `headers`.
+
+Resolution: the map comes from the provider entry the request resolved to — the
+Named entry, or the typed `providers.<builtin>` section, which
+`ensureNamedDefaults` seeds into `Providers.Named` (so a map written under
+`providers.anthropic` also reaches its aliases). A selection inferred purely
+from the model name, with no configured provider name, carries no custom
+headers.
 
 ### OpenCode Go
 
@@ -417,7 +498,38 @@ smoke-test a model with one message before making it the default in
 - The `x-opencode-session` header is added by **lele's own outbound
   requests**. If OpenCode Go is reached through another gateway/proxy (e.g.
   llmproxy), that gateway must send the header itself; otherwise the request
-  fails with `400 MissingSessionID`.
+  fails with `400 MissingSessionID`. A transparent router can also be handed
+  the same value by lele — see **Through a unified proxy** below.
+
+#### Through a unified proxy
+
+Both routes are supported: the native `opencode_go` provider (direct) and an
+OpenAI-compatible provider pointed at a router that fronts the Go gateway. The
+proxy route is what keeps ONE provider and ONE key for every upstream, but the
+router must forward — or inject — `x-opencode-session`, and it must not drop
+unknown headers: the gateway answers `400 MissingSessionID` before it looks at
+the key, whatever client is behind it.
+
+When the router is transparent, hand it the id lele would have sent natively
+with the `{{session}}` template (see **Custom headers** above):
+
+```json
+{
+  "providers": {
+    "llmproxy": {
+      "type": "openai",
+      "api_base": "https://router.example.com/v1",
+      "api_key": "…",
+      "headers": { "x-opencode-session": "{{session}}" }
+    }
+  }
+}
+```
+
+Nothing else changes. Go detection does not fire for the router's own
+`api_base`, so the header comes from this map instead of from the transport, and
+the value is the same per-conversation hash — the router sees the affinity a
+direct client would produce, per turn and across restarts.
 
 ### OpenCode Zen
 

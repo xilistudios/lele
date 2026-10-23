@@ -212,7 +212,7 @@ Contains built-in and custom provider entries.
 See `docs/agents-models-providers.md`.
 
 Provider support is mostly behavior, not extra fields. Two examples that need
-no configuration:
+no configuration, and one field that is opt-in:
 
 - The OpenAI-compatible and Anthropic Messages transports send
   `User-Agent: lele/<version>` on every inference call. The OAuth/CLI provider
@@ -235,6 +235,15 @@ no configuration:
   silently omitted otherwise. The credentials and base live in the ordinary
   named-provider entry, exactly like `opencode`; there is no dedicated field.
   See the OpenCode Go section of `docs/agents-models-providers.md`.
+- `headers` is the one opt-in field: an optional per-provider map of extra
+  request headers on that provider's inference calls (both transports, streaming
+  and not; never `GET /models`). `{{session}}` is the only placeholder — the
+  same 64-hex id lele sends natively as `x-opencode-session`. Applied last, so
+  a custom entry wins over transport defaults; validated when the provider JSON
+  is decoded (token names, no CR/LF/NUL, transport-owned headers rejected). No
+  editor yet — `config.json`/API only, but the WebUI settings document carries
+  the map, so saving any other field preserves it. See **Custom headers** in
+  `docs/agents-models-providers.md` (`#custom-headers`).
 
 ## `tools`
 
