@@ -7,6 +7,7 @@ package protocoltypes
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -26,6 +27,28 @@ const (
 // sessionPlaceholderName is the one token the expansion understands: the text
 // between the braces of SessionHeaderPlaceholder.
 const sessionPlaceholderName = "session"
+
+// envVarTokenRegex matches the inner text of an environment placeholder —
+// {{ENV_NAME}} or {{ENV_NAME:default}} — the other legal token in a header
+// value. It MIRRORS pkg/config's envVarRegex
+// (`\{\{ENV_([A-Za-z_][A-Za-z0-9_]*)(?::([^}]*))?\}\}` in config.go, used by
+// expandEnvVars), minus the braces because checkPlaceholders has already
+// stripped them: name = [A-Za-z_][A-Za-z0-9_]*, default = anything but "}" and
+// it may be empty, so {{ENV_NAME:}} is legal here exactly as it is there.
+//
+// Keep the two grammars in sync — a token accepted here is one expandEnvVars
+// substitutes when the file is loaded, and one rejected here must never reach a
+// transport as literal text. The validator does NOT expand anything: it only
+// recognises the shape, because the editable settings document deliberately
+// carries the RAW value (an env placeholder is how a user keeps a secret out of
+// config.json, so GET /api/v1/config must echo it back and PUT must accept it).
+var envVarTokenRegex = regexp.MustCompile(`^ENV_[A-Za-z_][A-Za-z0-9_]*(:[^}]*)?$`)
+
+// isEnvPlaceholderName reports whether the inner text of a {{…}} token is an
+// env placeholder expandEnvVars will substitute at load.
+func isEnvPlaceholderName(inner string) bool {
+	return envVarTokenRegex.MatchString(inner)
+}
 
 // ExpandHeaderValue substitutes every occurrence of SessionHeaderPlaceholder in
 // a custom header value with sessionID.
@@ -67,7 +90,9 @@ var forbiddenHeaderNames = map[string]bool{
 // Rules: a name must be a non-empty RFC 7230 token; a value must not contain a
 // control character — checked on the raw value, because the transports send it
 // untrimmed (an empty value is allowed); transport-owned headers cannot be
-// overridden; and the only template token is SessionHeaderPlaceholder.
+// overridden; and a {{…}} token must be either SessionHeaderPlaceholder or an
+// env placeholder ({{ENV_NAME}} / {{ENV_NAME:default}}, see envVarTokenRegex),
+// which is accepted as a token and expanded later, at load.
 func ValidateCustomHeaders(headers map[string]string) error {
 	// Sorted so that a map with several problems always reports the same one:
 	// Go's map iteration order is random, and this error is asserted verbatim
@@ -82,14 +107,15 @@ func ValidateCustomHeaders(headers map[string]string) error {
 		if !isHeaderName(name) {
 			return fmt.Errorf("custom header %q: invalid name: must be an RFC 7230 token", name)
 		}
-		if forbiddenHeaderNames[strings.ToLower(strings.TrimSpace(name))] {
+		// No TrimSpace here: a name containing a space already failed
+		// isHeaderName above, so the lookup sees the name exactly as typed.
+		if forbiddenHeaderNames[strings.ToLower(name)] {
 			return fmt.Errorf("custom header %q: is set by the transport and cannot be overridden", name)
 		}
-		value := strings.TrimSpace(headers[name])
 		if hasControlChar(headers[name]) {
-			return fmt.Errorf("custom header %q: value contains a control character (CR/LF/NUL)", name)
+			return fmt.Errorf("custom header %q: value contains a control character (e.g. CR/LF/NUL)", name)
 		}
-		if err := checkPlaceholders(name, value); err != nil {
+		if err := checkPlaceholders(name, headers[name]); err != nil {
 			return err
 		}
 	}
@@ -138,9 +164,14 @@ func hasControlChar(value string) bool {
 	return false
 }
 
-// checkPlaceholders verifies that every {{…}} token in a value is
-// SessionHeaderPlaceholder. A single brace is literal text and skipped, so only
-// an unterminated "{{" or an unknown token name is an error.
+// checkPlaceholders verifies that every {{…}} token in a value is either
+// SessionHeaderPlaceholder or an env placeholder (envVarTokenRegex). A single
+// brace is literal text and skipped, so only an unterminated "{{" or an unknown
+// token name is an error.
+//
+// It runs on the RAW value: the transports expand exactly what config holds, so
+// validation and the wire must share one definition of "the value" (and
+// trimming could not change whether a "{{" is closed anyway).
 func checkPlaceholders(name, value string) error {
 	for i := 0; i < len(value); {
 		if value[i] != '{' || i+1 >= len(value) || value[i+1] != '{' {
@@ -155,8 +186,8 @@ func checkPlaceholders(name, value string) error {
 		}
 		start := i + len(placeholderOpen)
 		inner := value[start : start+rel]
-		if inner != sessionPlaceholderName {
-			return fmt.Errorf("custom header %q: unknown placeholder %q (only %s is supported)",
+		if inner != sessionPlaceholderName && !isEnvPlaceholderName(inner) {
+			return fmt.Errorf("custom header %q: unknown placeholder %q (supported: %s, {{ENV_NAME}}, {{ENV_NAME:default}})",
 				name, placeholderOpen+inner+placeholderClose, SessionHeaderPlaceholder)
 		}
 		i = start + rel + len(placeholderClose)

@@ -2,7 +2,10 @@ package config
 
 import (
 	"fmt"
+	"sort"
 	"strings"
+
+	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
 
 // detectRestartRequiredSections determines which sections require a restart.
@@ -179,6 +182,34 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 			})
 		}
 		providerNames[lowerName] = true
+	}
+
+	// Validate per-provider custom headers, field by field like every other
+	// provider check here. ProvidersConfig.UnmarshalJSON keeps its own check as
+	// the load-time backstop (it is the single choke point shared by config load
+	// and both PUT/validate handlers), but it reports a global error: the
+	// handlers would answer {path:"config", code:"config_invalid"} and the WebUI
+	// could not highlight the culprit — or even tell the user which provider to
+	// fix. Here the Path carries "providers.<name>.headers" and the Message is
+	// the validator's own text, which names the offending header.
+	//
+	// Sorted because doc.Providers is a map and the error list is shown to
+	// users: iteration order would otherwise decide which provider is reported
+	// first (and break the assertions below).
+	sortedProviderNames := make([]string, 0, len(doc.Providers))
+	for name := range doc.Providers {
+		sortedProviderNames = append(sortedProviderNames, name)
+	}
+	sort.Strings(sortedProviderNames)
+	for _, name := range sortedProviderNames {
+		provider := doc.Providers[name]
+		if err := protocoltypes.ValidateCustomHeaders(provider.Headers); err != nil {
+			errors = append(errors, ValidationError{
+				Path:    fmt.Sprintf("providers.%s.headers", name),
+				Message: err.Error(),
+				Code:    "invalid_header",
+			})
+		}
 	}
 
 	// Validate duplicate agent IDs.

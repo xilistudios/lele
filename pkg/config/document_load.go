@@ -54,7 +54,9 @@ func overlaySecretsFromRaw(doc *EditableDocument, data []byte, secretsByPath map
 		overlayChannelsWithPlaceholders(&doc.Channels, channelsRaw, "channels", secretsByPath)
 	}
 	if providersRaw, ok := raw["providers"]; ok {
-		overlayProvidersWithPlaceholders(doc.Providers, providersRaw, "providers", secretsByPath)
+		if err := overlayProvidersWithPlaceholders(doc.Providers, providersRaw, "providers", secretsByPath); err != nil {
+			return err
+		}
 	}
 	if toolsRaw, ok := raw["tools"]; ok {
 		overlayToolsWithPlaceholders(&doc.Tools, toolsRaw, "tools", secretsByPath)

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -127,45 +128,138 @@ func TestFactoryCustomHeadersReachTheWire(t *testing.T) {
 	}
 }
 
-// TestFactoryCustomHeadersFromTypedProviderField pins the single-copy decision
-// in resolveProviderSelectionByName.
+// TestFactoryCustomHeadersFromTypedProviderField pins the header path of every
+// legacy typed-field arm the MINOR-1 audit touches, on each spelling a caller
+// can hand it.
 //
 // A config written as "providers": {"anthropic": {"headers": {…}}} lives in the
 // typed Providers.Anthropic field. The canonical spelling reaches it through
-// the Named entry ensureNamedDefaults seeds from that field, but the alias
-// spelling ("claude") does not: GetNamed("claude") misses, so the legacy switch
-// hand-builds the selection from the typed fields — and without the one copy at
-// the top of that switch, the map is silently dropped for every alias.
+// the Named entry ensureNamedDefaults seeds from that field, but an alias does
+// not whenever GetNamed misses: the legacy switch then hand-builds the
+// selection from the typed fields, and unless the headers are carried there the
+// map is silently dropped. Two shapes exist and both are covered here:
+//
+//   - aliases NormalizeProvider collapses onto the seeded key ("claude" →
+//     "anthropic", "gpt" → "openai"): the single copy above the switch fixes
+//     them, so pinning one of them proves the copy works;
+//   - aliases NormalizeProvider leaves alone ("zai" vs the seeded
+//     "zai_coding_plan", "modelark" vs "modelark_coding_plan"): the copy cannot
+//     see them, so the arms themselves must set sel.headers — the MINOR-1 bug.
+//
+// Every case runs end-to-end against an httptest server: the assertion is on
+// the header that reaches the wire, not on an internal field.
 func TestFactoryCustomHeadersFromTypedProviderField(t *testing.T) {
 	const sessionKey = "conv-1"
 
-	for _, spelling := range []string{"anthropic", "claude"} {
-		t.Run(spelling, func(t *testing.T) {
+	tests := []struct {
+		name     string
+		spelling string
+		// typed puts the fixture into the legacy field the arm reads. Nothing
+		// else is configured: ensureNamedDefaults derives the Named copy.
+		typed func(p *config.ProvidersConfig, cfg config.ProviderConfig)
+		// anthropicWire selects the Messages transport (which needs
+		// max_tokens) instead of the OpenAI-compatible one.
+		anthropicWire bool
+		model         string
+	}{
+		{
+			name:     "anthropic canonical (Named entry seeded from the typed field)",
+			spelling: "anthropic",
+			typed:    func(p *config.ProvidersConfig, c config.ProviderConfig) { p.Anthropic = c },
+			model:    "claude-sonnet-4.6", anthropicWire: true,
+		},
+		{
+			name:     "claude alias (NormalizeProvider collapses to anthropic)",
+			spelling: "claude",
+			typed:    func(p *config.ProvidersConfig, c config.ProviderConfig) { p.Anthropic = c },
+			model:    "claude-sonnet-4.6", anthropicWire: true,
+		},
+		{
+			name:     "zai_coding_plan canonical (Named entry seeded from the typed field)",
+			spelling: "zai_coding_plan",
+			typed:    func(p *config.ProvidersConfig, c config.ProviderConfig) { p.ZAICodingPlan = c },
+			model:    "glm-4.6",
+		},
+		{
+			name:     "zai alias (MINOR-1: NormalizeProvider does not collapse it)",
+			spelling: "zai",
+			typed:    func(p *config.ProvidersConfig, c config.ProviderConfig) { p.ZAICodingPlan = c },
+			model:    "glm-4.6",
+		},
+		{
+			name:     "modelark_coding_plan canonical (Named entry seeded from the typed field)",
+			spelling: "modelark_coding_plan",
+			typed:    func(p *config.ProvidersConfig, c config.ProviderConfig) { p.ModelArkCodingPlan = c },
+			model:    "ark-code-latest",
+		},
+		{
+			name:     "modelark alias (MINOR-1: NormalizeProvider does not collapse it)",
+			spelling: "modelark",
+			typed:    func(p *config.ProvidersConfig, c config.ProviderConfig) { p.ModelArkCodingPlan = c },
+			model:    "ark-code-latest",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			apiBase, header := startCustomHeaderServer(t)
 
 			cfg := config.DefaultConfig()
-			// Typed field only: no Named entry for this provider is created by
-			// the test (ensureNamedDefaults derives it from the typed field).
-			cfg.Providers = &config.ProvidersConfig{
-				Anthropic: config.ProviderConfig{
-					APIKey:  "k",
-					APIBase: apiBase,
-					Headers: map[string]string{"x-opencode-session": "{{session}}"},
-				},
+			fixture := config.ProviderConfig{
+				APIKey:  "k",
+				APIBase: apiBase,
+				Headers: map[string]string{"x-opencode-session": "{{session}}"},
 			}
+			cfg.Providers = &config.ProvidersConfig{}
+			tt.typed(cfg.Providers, fixture)
 
-			p, err := CreateProviderForCandidate(cfg, spelling)
+			p, err := CreateProviderForCandidate(cfg, tt.spelling)
 			if err != nil {
-				t.Fatalf("CreateProviderForCandidate(%q) error = %v", spelling, err)
+				t.Fatalf("CreateProviderForCandidate(%q) error = %v", tt.spelling, err)
 			}
 
-			options := WithWireSessionID(map[string]interface{}{"max_tokens": 128}, sessionKey)
-			if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, "claude-sonnet-4.6", options); err != nil {
+			options := map[string]interface{}{}
+			if tt.anthropicWire {
+				options["max_tokens"] = 128
+			}
+			options = WithWireSessionID(options, sessionKey)
+			if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, tt.model, options); err != nil {
 				t.Fatalf("Chat() error = %v", err)
 			}
 
 			if got, want := header("X-Opencode-Session"), WireSessionID(sessionKey); got != want {
 				t.Fatalf("x-opencode-session = %q, want WireSessionID(%q) = %q: the typed-field path dropped the headers map", got, sessionKey, want)
+			}
+		})
+	}
+}
+
+// TestFactoryCustomHeadersCopilotAliasSelection pins the third MINOR-1 arm,
+// "copilot" (the seeded Named key is "github_copilot", which NormalizeProvider
+// does not produce). It is asserted on the selection rather than on the wire:
+// that arm returns providerTypeGitHubCopilot, whose transport talks to the
+// copilot SDK over gRPC/stdio and reads no HTTP headers, so no httptest server
+// can observe the map either way. The copy exists so the selection states what
+// config says — the same answer the canonical spelling gives — and so the map
+// is already in place if that transport ever becomes header-aware.
+func TestFactoryCustomHeadersCopilotAliasSelection(t *testing.T) {
+	want := map[string]string{"x-tenant": "acme"}
+
+	for _, spelling := range []string{"github_copilot", "copilot"} {
+		t.Run(spelling, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.Providers = &config.ProvidersConfig{
+				GitHubCopilot: config.ProviderConfig{
+					APIBase: "localhost:4321",
+					Headers: want,
+				},
+			}
+
+			sel, err := resolveProviderSelectionForProvider(cfg, spelling)
+			if err != nil {
+				t.Fatalf("resolveProviderSelectionForProvider(%q) error = %v", spelling, err)
+			}
+			if !reflect.DeepEqual(sel.headers, want) {
+				t.Fatalf("sel.headers = %v, want %v: the %q arm dropped the typed field's map", sel.headers, want, spelling)
 			}
 		})
 	}

@@ -18,8 +18,9 @@ const OptWireSessionID = protocoltypes.OptWireSessionID
 // tool loops, compaction of an unknown session).
 //
 // The definition lives in protocoltypes — the stdlib-only leaf both transports
-// can import — so the session scheme has a single source of truth; this alias
-// keeps the providers API stable.
+// can import — so the session scheme has a single source of truth. This var is
+// a COPY of the canonical value (Go has no value aliases), not an alias: it
+// exists so the providers API keeps a stable name.
 var UnkeyedSessionBucket = protocoltypes.UnkeyedSessionBucket
 
 // WireSessionID derives the opaque, fixed-length, stable-per-conversation value

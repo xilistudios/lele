@@ -2,6 +2,8 @@ package config
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -198,6 +200,112 @@ func TestProvidersConfig_UnmarshalEmptyOrAbsentHeaders(t *testing.T) {
 			cfg := DefaultConfig()
 			if err := json.Unmarshal([]byte(tt.json), cfg); err != nil {
 				t.Fatalf("unmarshal %s: %v, want no error", tt.json, err)
+			}
+		})
+	}
+}
+
+// TestProvidersConfig_EnvPlaceholderHeadersLoad pins the load half of the
+// MAJOR-1 fix: {{ENV_NAME}} / {{ENV_NAME:default}} is the documented way to
+// keep a secret out of config.json (pkg/config expandEnvVars), so it must be a
+// legal token in a header value.
+//
+// Both paths are asserted because they differ in what the validator sees:
+//   - LoadConfig expands the placeholder BEFORE parsing, so the runtime config
+//     holds the secret and the validator never sees the token;
+//   - the editable document keeps the RAW token (GET /api/v1/config must echo
+//     it back, or the secret leaks to the browser), and every save feeds that
+//     raw value through this parser via EditableDocument.ToConfig. That second
+//     door is the one that 422'd: rejecting the token there made even an
+//     unrelated edit (agents.defaults.model) impossible to save.
+func TestProvidersConfig_EnvPlaceholderHeadersLoad(t *testing.T) {
+	t.Setenv("LELE_TEST_GW_TOKEN", "s3cr3t")
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	onDisk := `{"providers":{"llmproxy":{"type":"openai","api_key":"k",` +
+		`"api_base":"https://proxy.example/v1","headers":{` +
+		`"x-gw-token":"{{ENV_LELE_TEST_GW_TOKEN}}",` +
+		`"x-gw-team":"{{ENV_LELE_TEST_UNSET_VAR:platform}}"}}}}`
+	if err := os.WriteFile(path, []byte(onDisk), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig rejected an env placeholder header: %v", err)
+	}
+	named, ok := cfg.Providers.GetNamed("llmproxy")
+	if !ok {
+		t.Fatal("runtime config lost named provider llmproxy")
+	}
+	if got := named.Headers["x-gw-token"]; got != "s3cr3t" {
+		t.Fatalf("x-gw-token = %q, want the expanded env value", got)
+	}
+	if got := named.Headers["x-gw-team"]; got != "platform" {
+		t.Fatalf("x-gw-team = %q, want the default of an unset env var", got)
+	}
+
+	// The RAW token through this parser — exactly what a document save does.
+	// It must be accepted AND left unexpanded: substitution is LoadConfig's
+	// job, and the document round-trip has to preserve what the user wrote.
+	raw := DefaultConfig()
+	data := `{"providers":{"llmproxy":{"api_key":"k","headers":{` +
+		`"x-gw-token":"{{ENV_LELE_TEST_GW_TOKEN}}",` +
+		`"x-gw-empty-default":"{{ENV_LELE_TEST_GW_TOKEN:}}",` +
+		`"x-gw-session":"Bearer {{ENV_LELE_TEST_GW_TOKEN}}/{{session}}"}}}}`
+	if err := json.Unmarshal([]byte(data), raw); err != nil {
+		t.Fatalf("unmarshal the raw document value: %v", err)
+	}
+	again, ok := raw.Providers.GetNamed("llmproxy")
+	if !ok {
+		t.Fatal("raw unmarshal lost named provider llmproxy")
+	}
+	for header, want := range map[string]string{
+		"x-gw-token":         "{{ENV_LELE_TEST_GW_TOKEN}}",
+		"x-gw-empty-default": "{{ENV_LELE_TEST_GW_TOKEN:}}",
+		"x-gw-session":       "Bearer {{ENV_LELE_TEST_GW_TOKEN}}/{{session}}",
+	} {
+		if got := again.Headers[header]; got != want {
+			t.Fatalf("%s = %q, want the raw token preserved (no expansion here)", header, got)
+		}
+	}
+}
+
+// The env grammar is a whitelist, not a wildcard: anything shaped like a token
+// but outside {{session}} / {{ENV_NAME}} / {{ENV_NAME:default}} stays rejected,
+// so a typo cannot ride all the way to the wire as literal text.
+func TestProvidersConfig_UnmarshalRejectsMalformedEnvPlaceholder(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{"empty name", "{{ENV_}}"},
+		{"not the ENV_ prefix", "{{ENV-1}}"},
+		{"leading digit in the name", "{{ENV_1FOO}}"},
+		{"missing braces", "ENV_FOO"}, // legal literal, see below
+	}
+	for _, tt := range tests {
+		if tt.name == "missing braces" {
+			// A single brace pair is literal text: it must LOAD.
+			cfg := DefaultConfig()
+			data := `{"providers":{"llmproxy":{"api_key":"k","headers":{"x-a":"` + tt.value + `"}}}}`
+			if err := json.Unmarshal([]byte(data), cfg); err != nil {
+				t.Fatalf("unmarshal %q = %v, want it accepted as a literal value", tt.value, err)
+			}
+			if got := cfg.Providers.Named["llmproxy"].Headers["x-a"]; got != tt.value {
+				t.Fatalf("x-a = %q, want %q", got, tt.value)
+			}
+			continue
+		}
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			data := `{"providers":{"llmproxy":{"api_key":"k","headers":{"x-a":"` + tt.value + `"}}}}`
+			err := json.Unmarshal([]byte(data), cfg)
+			if err == nil {
+				t.Fatalf("unmarshal %q = nil error, want rejection", tt.value)
+			}
+			if !strings.Contains(err.Error(), "unknown placeholder") {
+				t.Fatalf("error = %q, want it to mention unknown placeholder", err)
 			}
 		})
 	}

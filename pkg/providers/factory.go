@@ -474,9 +474,16 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 		// Those arms hand-build the selection from the typed Providers.<Name>
 		// fields, which is exactly where `headers` lives for a config written as
 		// "providers": {"anthropic": {…}}, so without this copy the map would be
-		// silently dropped there. Resolving through NormalizeProvider is what
-		// turns ~20 case arms into one: it maps the alias to the canonical key
-		// that ensureNamedDefaults seeded from the same typed field.
+		// silently dropped there.
+		//
+		// This copy is exact only where NormalizeProvider(alias) equals the seeded
+		// Named key derived from the SAME typed field the arm reads ("gpt" →
+		// "openai", "claude" → "anthropic", "glm" → "zhipu", "google" → "gemini").
+		// It is NOT a general collapse of the ~20 case arms: three spellings
+		// normalize to themselves while the seeded key is longer
+		// ("zai" vs "zai_coding_plan", "modelark" vs "modelark_coding_plan",
+		// "copilot" vs "github_copilot"), so those arms are fixed explicitly below
+		// (see the MINOR-1 audit in the accompanying report).
 		if named, ok := cfg.Providers.GetNamed(NormalizeProvider(providerName)); ok {
 			sel.headers = named.Headers
 		}
@@ -639,6 +646,16 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 				}
 			}
 		case "github_copilot", "copilot":
+			// MINOR-1 audit: "copilot" is reachable here (GetNamed has no
+			// "copilot" key) and NormalizeProvider does NOT collapse it to the
+			// seeded "github_copilot", so the single copy above leaves
+			// sel.headers empty while this arm reads the typed field. Carried
+			// for uniformity: the copilot transport speaks gRPC/stdio through
+			// the copilot SDK and reads no HTTP headers today, so this copy
+			// changes nothing on the wire — it keeps the selection faithful to
+			// config so a future header-aware copilot transport cannot inherit
+			// the drop by accident.
+			sel.headers = cfg.Providers.GitHubCopilot.Headers
 			sel.providerType = providerTypeGitHubCopilot
 			if cfg.Providers.GitHubCopilot.APIBase != "" {
 				sel.apiBase = cfg.Providers.GitHubCopilot.APIBase
@@ -648,6 +665,11 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 			sel.connectMode = cfg.Providers.GitHubCopilot.ConnectMode
 			return sel, nil
 		case "zai_coding_plan", "zai":
+			// MINOR-1 audit: NormalizeProvider("zai") == "zai" while
+			// ensureNamedDefaults seeds the key "zai_coding_plan", so the single
+			// copy above misses this arm and the alias silently dropped the
+			// typed field's headers. Copy it explicitly.
+			sel.headers = cfg.Providers.ZAICodingPlan.Headers
 			if cfg.Providers.ZAICodingPlan.APIKey != "" {
 				sel.apiKey = cfg.Providers.ZAICodingPlan.APIKey
 				sel.apiBase = cfg.Providers.ZAICodingPlan.APIBase
@@ -657,6 +679,11 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 				}
 			}
 		case "modelark_coding_plan", "modelark":
+			// MINOR-1 audit: same shape as "zai" above —
+			// NormalizeProvider("modelark") == "modelark" but the seeded Named
+			// key is "modelark_coding_plan", so the single copy misses this arm
+			// and the alias silently dropped the typed field's headers.
+			sel.headers = cfg.Providers.ModelArkCodingPlan.Headers
 			if cfg.Providers.ModelArkCodingPlan.APIKey != "" {
 				sel.apiKey = cfg.Providers.ModelArkCodingPlan.APIKey
 				sel.apiBase = cfg.Providers.ModelArkCodingPlan.APIBase

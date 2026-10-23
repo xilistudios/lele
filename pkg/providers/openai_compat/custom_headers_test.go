@@ -112,9 +112,10 @@ func TestCustomHeaders_SessionPlaceholderExpands(t *testing.T) {
 }
 
 func TestCustomHeaders_SessionPlaceholderWithoutSessionIDUsesUnkeyedBucket(t *testing.T) {
-	// An unstamped call must never produce an empty header (an empty value drops
-	// the header on the wire and the gateway then answers its own opaque 400):
-	// it lands in the same shared bucket WireSessionID("") yields.
+	// An unstamped call must never produce an empty session header: Go does
+	// send a header with an empty value, and an empty x-opencode-session
+	// defeats the gateway's session routing (it then answers its own opaque
+	// 400). The value lands in the shared bucket WireSessionID("") yields.
 	server, captured := newOpenAICompletionServer(t, "application/json")
 
 	p := NewProviderWithOptions("key", server, "", Options{
@@ -161,8 +162,10 @@ func TestCustomHeaders_NilHeadersSendsNothingExtra(t *testing.T) {
 		t.Fatalf("Chat() error = %v", err)
 	}
 
-	if got := captured.get("X-Routing-Tag"); got != "" {
-		t.Fatalf("x-routing-tag = %q, want absent", got)
+	// has(), not get(): get returns "" for both "absent" and "present but
+	// empty", and the claim here is ABSENCE.
+	if captured.has("X-Routing-Tag") {
+		t.Fatalf("x-routing-tag is present on the wire (value %q), want absent", captured.get("X-Routing-Tag"))
 	}
 	if got := captured.get("Authorization"); got != "Bearer the-api-key" {
 		t.Fatalf("Authorization = %q, want the transport default", got)

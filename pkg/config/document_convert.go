@@ -163,7 +163,11 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 	// document->Config conversion silently reverts it to the code default.
 	cfg.Channels.Web.Enabled = doc.Channels.Web.Enabled
 
-	// Copiar providers
+	// Copiar providers — dead by construction: cfg is discarded, ToConfig
+	// returns `validated` rebuilt from doc.toSerializable() below, and that
+	// serializer is the carrier of providers.<name>.headers. The two must stay
+	// in sync: a field toSerializable stops emitting disappears from
+	// config.json on the next save, however carefully cfg is filled here.
 	cfg.Providers.Named = make(map[string]NamedProviderConfig)
 	for name, provider := range doc.Providers {
 		cfg.Providers.Named[name] = NamedProviderConfig{
@@ -174,12 +178,6 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 				Proxy:       provider.Proxy,
 				AuthMethod:  provider.AuthMethod,
 				ConnectMode: provider.ConnectMode,
-				// Headers must be carried in lockstep with the struct: this block
-				// is currently shadowed by the toSerializable rebuild below,
-				// but a field dropped here becomes a silent data loss the
-				// moment the block is revived (same class as the documented
-				// Temperature/SubagentMaxIterations side-fixes above).
-				Headers: provider.Headers,
 			},
 			WebSearch: provider.WebSearch,
 			Models:    provider.Models,

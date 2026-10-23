@@ -128,9 +128,10 @@ func (p *Provider) setRequestHeaders(req *http.Request, options map[string]inter
 	}
 
 	// Stage 3: custom headers. WireSessionForHeaders never returns "", so a
-	// {{session}} template always expands to a sendable value — a header with
-	// an empty value would be dropped by the wire format and the upstream
-	// would reject the call with an error that names nothing.
+	// {{session}} template always expands to a non-empty value — which matters
+	// because Go does send a header with an empty value, and an empty
+	// x-opencode-session defeats the gateway's session routing, after which it
+	// answers its own opaque 400.
 	//
 	// Map order is random, so two entries that canonicalize to the same wire
 	// name ("x-foo" and "X-Foo") have no defined winner; validation does not

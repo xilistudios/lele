@@ -101,17 +101,17 @@ func TestValidateCustomHeaders(t *testing.T) {
 		{
 			name:    "CRLF injection in the value",
 			headers: map[string]string{"x-a": "a\r\nX-Evil: 1"},
-			wantErr: `custom header "x-a": value contains a control character (CR/LF/NUL)`,
+			wantErr: `custom header "x-a": value contains a control character (e.g. CR/LF/NUL)`,
 		},
 		{
 			name:    "NUL in the value",
 			headers: map[string]string{"x-a": "a\x00b"},
-			wantErr: `custom header "x-a": value contains a control character (CR/LF/NUL)`,
+			wantErr: `custom header "x-a": value contains a control character (e.g. CR/LF/NUL)`,
 		},
 		{
 			name:    "DEL in the value",
 			headers: map[string]string{"x-a": "a\x7fb"},
-			wantErr: `custom header "x-a": value contains a control character (CR/LF/NUL)`,
+			wantErr: `custom header "x-a": value contains a control character (e.g. CR/LF/NUL)`,
 		},
 		{
 			// The control-char check runs on the RAW value: transports expand
@@ -119,12 +119,12 @@ func TestValidateCustomHeaders(t *testing.T) {
 			// the header named, not later inside http.Client.
 			name:    "trailing CR in the raw value",
 			headers: map[string]string{"x-a": "v\r"},
-			wantErr: `custom header "x-a": value contains a control character (CR/LF/NUL)`,
+			wantErr: `custom header "x-a": value contains a control character (e.g. CR/LF/NUL)`,
 		},
 		{
 			name:    "trailing LF in the raw value",
 			headers: map[string]string{"x-a": "v\n"},
-			wantErr: `custom header "x-a": value contains a control character (CR/LF/NUL)`,
+			wantErr: `custom header "x-a": value contains a control character (e.g. CR/LF/NUL)`,
 		},
 		{
 			name:    "surrounding spaces are legal and stay valid",
@@ -154,7 +154,69 @@ func TestValidateCustomHeaders(t *testing.T) {
 		{
 			name:    "unknown placeholder",
 			headers: map[string]string{"x-a": "{{sesssion}}"},
-			wantErr: `custom header "x-a": unknown placeholder "{{sesssion}}" (only {{session}} is supported)`,
+			wantErr: `custom header "x-a": unknown placeholder "{{sesssion}}" (supported: {{session}}, {{ENV_NAME}}, {{ENV_NAME:default}})`,
+		},
+		// The env placeholder is the documented way to keep a secret out of
+		// config.json (pkg/config expandEnvVars substitutes it at load), and
+		// the editable document carries the RAW value — so the validator must
+		// accept the token, not expand it. Rejecting it made every WebUI save
+		// fail with 422, even a save that only touched agents.defaults.model.
+		{
+			name:    "env placeholder without a default",
+			headers: map[string]string{"x-a": "{{ENV_FOO}}"},
+			wantErr: "",
+		},
+		{
+			name:    "env placeholder with a default",
+			headers: map[string]string{"x-a": "{{ENV_FOO:bar}}"},
+			wantErr: "",
+		},
+		{
+			name:    "env placeholder with an empty default",
+			headers: map[string]string{"x-a": "{{ENV_FOO:}}"},
+			wantErr: "",
+		},
+		{
+			name:    "env placeholder mixed with the session token and literals",
+			headers: map[string]string{"x-a": "Bearer {{ENV_TOKEN}}/{{session}}"},
+			wantErr: "",
+		},
+		{
+			name:    "env placeholder with a leading digit in the name",
+			headers: map[string]string{"x-a": "{{ENV_1FOO}}"},
+			wantErr: `custom header "x-a": unknown placeholder "{{ENV_1FOO}}" (supported: {{session}}, {{ENV_NAME}}, {{ENV_NAME:default}})`,
+		},
+		{
+			name:    "env placeholder with an empty name",
+			headers: map[string]string{"x-a": "{{ENV_}}"},
+			wantErr: `custom header "x-a": unknown placeholder "{{ENV_}}" (supported: {{session}}, {{ENV_NAME}}, {{ENV_NAME:default}})`,
+		},
+		{
+			name:    "env prefix that is not the ENV_ marker",
+			headers: map[string]string{"x-a": "{{ENV-1}}"},
+			wantErr: `custom header "x-a": unknown placeholder "{{ENV-1}}" (supported: {{session}}, {{ENV_NAME}}, {{ENV_NAME:default}})`,
+		},
+		{
+			name:    "env placeholder without braces is literal text",
+			headers: map[string]string{"x-a": "ENV_FOO"},
+			wantErr: "",
+		},
+		{
+			name:    "unterminated env placeholder",
+			headers: map[string]string{"x-a": "{{ENV_FOO"},
+			wantErr: `custom header "x-a": unterminated placeholder "{{ENV_FOO"`,
+		},
+		{
+			name:    "unknown placeholder with a default is still unknown",
+			headers: map[string]string{"x-a": "{{user:drop}}"},
+			wantErr: `custom header "x-a": unknown placeholder "{{user:drop}}" (supported: {{session}}, {{ENV_NAME}}, {{ENV_NAME:default}})`,
+		},
+		{
+			// NIT-3: the scan runs on the RAW value, exactly what the
+			// transports expand, so surrounding spaces cannot hide a token.
+			name:    "unknown placeholder padded with spaces",
+			headers: map[string]string{"x-a": "  {{user}}  "},
+			wantErr: `custom header "x-a": unknown placeholder "{{user}}" (supported: {{session}}, {{ENV_NAME}}, {{ENV_NAME:default}})`,
 		},
 		{
 			name:    "unterminated placeholder",
