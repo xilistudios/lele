@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -534,7 +535,9 @@ func geminiNamedOnlyConfig(t *testing.T, providerEntryJSON string) (*config.Conf
 	cfg.Providers = &config.ProvidersConfig{
 		Named: map[string]config.NamedProviderConfig{"gemini": named},
 	}
-	if cfg.Providers.Gemini != (config.ProviderConfig{}) {
+	// DeepEqual, not ==: ProviderConfig gained Headers (a map), which makes the
+	// struct non-comparable; the intent — typed field must be zero — is unchanged.
+	if !reflect.DeepEqual(cfg.Providers.Gemini, config.ProviderConfig{}) {
 		t.Fatalf("typed Providers.Gemini = %+v, want the zero value: the test must exercise the Named-only path", cfg.Providers.Gemini)
 	}
 	return cfg, named

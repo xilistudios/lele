@@ -51,6 +51,11 @@ type providerSelection struct {
 	// providerTypeName is the configured `type` string (Named.Type, else the
 	// provider key). Detection only.
 	providerTypeName string
+	// headers are the provider's static custom request headers (config
+	// `headers`), applied last by the transports so an explicit entry wins
+	// over transport defaults. Values may contain
+	// protocoltypes.SessionHeaderPlaceholder, expanded per call.
+	headers map[string]string
 }
 
 // defaultAPIBaseByType returns the default API base URL for a provider type.
@@ -166,6 +171,7 @@ func selectionFromNamedProvider(cfg *config.Config, providerName, model string, 
 		connectMode:      named.ConnectMode,
 		providerName:     providerName,
 		providerTypeName: typ,
+		headers:          named.Headers,
 	}
 
 	if mc, ok := named.Models[model]; ok {
@@ -453,6 +459,26 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 		}
 		if named, ok := cfg.Providers.GetNamed(providerName); ok {
 			return selectionFromNamedProvider(cfg, providerName, model, named)
+		}
+		// Custom headers: ONE copy for every legacy arm below.
+		//
+		// Built-in providers are always seeded into Providers.Named by
+		// ensureNamedDefaults (GetNamed calls it), and the seeded copy carries the
+		// typed field's `headers` — so the GetNamed return above already delivers
+		// the map for a canonical name, and selectionFromNamedProvider is the only
+		// selection constructor that needs it.
+		//
+		// The switch below is therefore reachable only for spellings GetNamed
+		// cannot resolve: the aliases it accepts itself ("claude", "gpt", "glm",
+		// "google", …) — CreateProviderForCandidate does not normalize its input.
+		// Those arms hand-build the selection from the typed Providers.<Name>
+		// fields, which is exactly where `headers` lives for a config written as
+		// "providers": {"anthropic": {…}}, so without this copy the map would be
+		// silently dropped there. Resolving through NormalizeProvider is what
+		// turns ~20 case arms into one: it maps the alias to the canonical key
+		// that ensureNamedDefaults seeded from the same typed field.
+		if named, ok := cfg.Providers.GetNamed(NormalizeProvider(providerName)); ok {
+			sel.headers = named.Headers
 		}
 		switch providerName {
 		case "groq":
@@ -815,8 +841,8 @@ func createProviderFromSelection(sel *providerSelection) (LLMProvider, error) {
 	case providerTypeGitHubCopilot:
 		return NewGitHubCopilotProvider(sel.apiBase, sel.connectMode, sel.model)
 	case providerTypeAnthropic:
-		return anthropicmessages.NewProviderWithOptions(sel.apiKey, sel.apiBase, anthropicmessages.Options{SessionHeader: sessionHeader, SessionHeaderRequired: sessionHeaderRequired}), nil
+		return anthropicmessages.NewProviderWithOptions(sel.apiKey, sel.apiBase, anthropicmessages.Options{SessionHeader: sessionHeader, SessionHeaderRequired: sessionHeaderRequired, Headers: sel.headers}), nil
 	default:
-		return NewHTTPProviderWithOptions(sel.apiKey, sel.apiBase, sel.proxy, openai_compat.Options{SessionHeader: sessionHeader, SessionHeaderRequired: sessionHeaderRequired}), nil
+		return NewHTTPProviderWithOptions(sel.apiKey, sel.apiBase, sel.proxy, openai_compat.Options{SessionHeader: sessionHeader, SessionHeaderRequired: sessionHeaderRequired, Headers: sel.headers}), nil
 	}
 }
