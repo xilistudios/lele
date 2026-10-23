@@ -324,14 +324,35 @@ so a header set here never authenticates a listing.
 }
 ```
 
-`{{session}}` is the only placeholder. It expands per call to the same 64-hex
-value lele already sends natively as `x-opencode-session`: the SHA-256 of the
-conversation session key, so it is stable across turns and restarts and changes
-with `/new`. A call with no session key (cron jobs, standalone tool loops)
-expands to the shared unkeyed bucket — the hash of the empty key — never to an
-empty value, because an empty header is dropped on the wire and the upstream
-would then reject the call without naming the reason. Any other `{{…}}` token,
-and an unterminated `{{`, is a config error.
+Two token forms are legal in a value; anything else — an unknown name, an
+unterminated `{{` — is a config error.
+
+`{{session}}` expands per call to the same 64-hex value lele already sends
+natively as `x-opencode-session`: the SHA-256 of the conversation session key,
+so it is stable across turns and restarts and changes with `/new`. A call with
+no session key (cron jobs, standalone tool loops) expands to the shared unkeyed
+bucket — the hash of the empty key — so the token never resolves to `""`. That
+is on purpose: Go sends a header with an empty value happily enough, and it is
+the gateway that does not, because an empty `x-opencode-session` defeats its
+session routing and it then answers its own opaque 400.
+
+`{{ENV_NAME}}` and `{{ENV_NAME:default}}` are the second form — the same env
+placeholder `config.json` supports everywhere else (`pkg/config`'s
+`expandEnvVars` runs over the whole file at load) — so a gateway token never has
+to sit in the file. The validator only recognises the shape and expands nothing:
+substitution happens when the config is loaded, and a missing variable with no
+default becomes empty, like every other `{{ENV_*}}` in the file. This is why the
+editable settings document echoes the *raw* token and a WebUI save accepts it
+back unchanged — expanding on the way out would put the secret in the browser. A
+save path that writes the runtime config instead (the TUI) stores the expanded
+value, exactly like an `api_key` written the same way.
+
+`headers` is honoured by the two API-key HTTP transports described above. The
+families that build their own clients — Claude and Codex OAuth, the
+`claude-cli`/`codex-cli` transports, Gemini Code Assist, GitHub Copilot — never
+read the map, so switching one of those provider entries to OAuth
+(`auth_method: oauth`/`token`) silently stops sending the headers. Configure the
+map on the provider whose transport can carry it.
 
 Precedence: custom headers are applied **last** — after the transport defaults
 (`Content-Type`, `User-Agent`, and `Authorization` or `X-Api-Key` plus
@@ -347,7 +368,17 @@ config untouched):
 
 ```
 provider "llmproxy": custom header "bad name": invalid name: must be an RFC 7230 token
+provider "llmproxy": custom header "x-a": unknown placeholder "{{foo}}" (supported: {{session}}, {{ENV_NAME}}, {{ENV_NAME:default}})
 ```
+
+The editable settings document is a second door, and it is checked field by
+field like every other provider setting: `ValidateEditableDocument` reports the
+failure as `providers.<name>.headers` with code `invalid_header`, so
+`POST /api/v1/config/validate` and a rejected `PUT /api/v1/config` point at the
+culprit provider instead of answering a global config error the WebUI cannot
+place. The decode-time check is not replaced by it — it is the single choke
+point shared by `config.json` load and both handlers, and it stays as the
+backstop behind them.
 
 Names must be RFC 7230 tokens. Values must contain no CR, LF, NUL or other
 control character. Transport-owned headers are rejected outright, because

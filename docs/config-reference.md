@@ -236,14 +236,15 @@ no configuration, and one field that is opt-in:
   named-provider entry, exactly like `opencode`; there is no dedicated field.
   See the OpenCode Go section of `docs/agents-models-providers.md`.
 - `headers` is the one opt-in field: an optional per-provider map of extra
-  request headers on that provider's inference calls (both transports, streaming
-  and not; never `GET /models`). `{{session}}` is the only placeholder — the
-  same 64-hex id lele sends natively as `x-opencode-session`. Applied last, so
-  a custom entry wins over transport defaults; validated when the provider JSON
-  is decoded (token names, no CR/LF/NUL, transport-owned headers rejected). No
-  editor yet — `config.json`/API only, but the WebUI settings document carries
-  the map, so saving any other field preserves it. See **Custom headers** in
-  `docs/agents-models-providers.md` (`#custom-headers`).
+  request headers on that provider's inference calls (both API-key transports,
+  streaming and not; never `GET /models`, and never read by the OAuth/CLI
+  families, which build their own clients). Two placeholders are legal:
+  `{{session}}` (the same 64-hex id lele sends natively as `x-opencode-session`)
+  and `{{ENV_NAME[:default]}}`, expanded at load. Applied last, so a custom
+  entry wins over transport defaults; validated at provider-JSON decode
+  and, per field (`invalid_header`), on the editable document. No editor
+  yet — `config.json`/API only, but the WebUI document round-trips the map. See
+  **Custom headers** in `docs/agents-models-providers.md` (`#custom-headers`).
 
 ## `tools`
 
