@@ -1330,6 +1330,18 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.providerFeedback = i18n.T("tui.modelDeleteNoRow") // cursor not on a model row
 			return m, nil
 		}
+		// Interface settings ⚠ row: "d" cancels the keep-awake REQUEST
+		// (deliberate "stop asking for this" — ENTER only retries). The
+		// guards mirror the other modal keys: while an inline edit field is
+		// active or the theme picker is open, "d" is a regular character and
+		// must fall through to the text input; and outside the ⚠ state the
+		// key is not consumed either (no cancel to perform).
+		if m.modalMode == ModalSettingsTUI &&
+			m.settingsEditField == "" && !m.themePickerActive &&
+			m.keepAwakeRequestedButFailed() {
+			m.cancelKeepAwake()
+			return m, nil
+		}
 		// Delete a cron job
 		if m.modalMode == ModalCron && m.cronService != nil {
 			jobID := m.selectedCronJobID()

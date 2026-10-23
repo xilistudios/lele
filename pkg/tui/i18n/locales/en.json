@@ -377,6 +377,8 @@
   "tui.settings.mouse": "Mouse support",
   "tui.settings.maxMessages": "Max rendered messages",
   "tui.settings.streamThrottle": "Stream throttle (ms)",
+  "tui.settings.keepAwake": "Keep device awake",
+  "tui.settings.keepAwakeCancelHint": "D: stop requesting",
   "tui.settings.theme": "Theme",
   "tui.settings.themePickerTitle": "Select Theme",
   "tui.settings.themePickerHint": "↑/↓ navigate · ENTER select · ESC back",

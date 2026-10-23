@@ -9,6 +9,7 @@ import (
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
+	"github.com/xilistudios/lele/pkg/keepawake"
 	"github.com/xilistudios/lele/pkg/locales"
 	"github.com/xilistudios/lele/pkg/mcp"
 	"github.com/xilistudios/lele/pkg/providers"
@@ -883,6 +884,13 @@ type Model struct {
 	// When enabled, scroll-wheel and sidebar clicks work; users hold Shift
 	// to bypass capture for native text selection. ctrl+t toggles as fallback.
 	mouseEnabled bool
+	// keepAwakeEnabled mirrors the persisted tui.keep_awake INTENT (what the
+	// user asked for). The effective state is keepAwake.Active(): a platform
+	// with no mechanism, or a failed Start, keeps the intent set while the
+	// inhibition stays off, and keepAwakeErr explains why.
+	keepAwakeEnabled bool
+	keepAwake        *keepawake.Inhibitor
+	keepAwakeErr     string
 
 	// forceGotoBottom forces the viewport to scroll to bottom on the next
 	// render. Set when switching sessions or creating a new chat.

@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
@@ -291,6 +292,37 @@ func (m *Model) renderModal(modalTitle string) string {
 			modalSb.WriteString("\n" + SuccessStyle.Render("  "+m.providerFeedback) + "\n")
 		}
 		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.providerDetailHints")) + "\n")
+	}
+
+	// Interface settings: acquiring keep-awake can fail before any form is
+	// opened (at startup, or on a platform with no mechanism), and formError is
+	// only drawn by form views, so the reason rides the list renderer.
+	// The reason is a raw Go error (100+ cells in the real case): left raw it
+	// makes this row exactly m.width wide, so lipgloss.Place stops padding it
+	// and the right border "│" disappears (and the actionable part of the
+	// message is cut). Sanitize + truncate to a budget that is DELIBERATELY
+	// stricter than the item loop's (m.modalTextBudget shrinks the width-8
+	// item budget by the line's own indent/glyph, so this row can never be the
+	// widest in the box); the 2-cell mismatch against that loop is
+	// preexisting and out of scope here — see modalTextBudget.
+	// ⚠ (not ✗) marks a failed REQUEST so it cannot be confused with the
+	// row's ✗ "off", and Yellow (not HelpStyle) reads as a warning instead of
+	// dim commentary.
+	//
+	// Hidden while the theme picker is open: the picker replaces this list and
+	// its "d" is inert (see the cancel guard in handleModalKey), so printing
+	// "d: stop requesting" there would advertise a key that does nothing.
+	if m.modalMode == ModalSettingsTUI && m.keepAwakeErr != "" && !m.themePickerActive {
+		budget := m.modalTextBudget(4) // "  " indent + "⚠ " glyph
+		errLine := "  ⚠ " + truncateRightCells(sanitizeDisplayText(m.keepAwakeErr), budget)
+		modalSb.WriteString("\n" + lipgloss.NewStyle().Foreground(YellowColor).Render(errLine) + "\n")
+		// Only the ⚠ (requested-but-failed) state gets the "how do I stop
+		// asking for this" hint: in the ✓/✗ states "d" does nothing and must
+		// not be advertised.
+		if m.keepAwakeRequestedButFailed() {
+			hint := truncateRightCells(sanitizeDisplayText(i18n.T("tui.settings.keepAwakeCancelHint")), m.modalTextBudget(2))
+			modalSb.WriteString(HelpStyle.Render("  "+hint) + "\n")
+		}
 	}
 
 	modalView := ModalContainer.Render(modalSb.String())

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/xilistudios/lele/pkg/keepawake"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 	"github.com/xilistudios/lele/pkg/tui/theme"
 )
@@ -18,11 +19,38 @@ const (
 	tuiSettingRowMouse
 	tuiSettingRowMaxMessages
 	tuiSettingRowStreamThrottle
+	tuiSettingRowKeepAwake
 )
 
+// modalTextBudget returns the display-cell budget for the TEXT of a line
+// rendered INSIDE the modal box, given the fixed prefix (indent + glyph) it
+// will be prefixed with. The rendered line must never exceed the box's inner
+// width, or the right border "│" stops painting (lipgloss.Place stops padding
+// once a row reaches m.width).
+//
+// Deliberately MORE STRICT than renderModal's item loop: that loop budgets
+// the full row (prefix included) at max(width-8, 20), while this helper
+// budgets only the text at that same number MINUS indentCells, i.e. 2 cells
+// less for the "  ⚠ " line. The 2-cell mismatch in the item loop is
+// preexisting (it affects every row of every modal, not just this one) and is
+// out of scope here — this helper stays the conservative one so a keep-awake
+// line can never be the row that breaks the border. The floor keeps a readable
+// prefix on very narrow terminals.
+func (m *Model) modalTextBudget(indentCells int) int {
+	budget := m.width - 8
+	if budget < 20 {
+		budget = 20
+	}
+	budget -= indentCells
+	if budget < 8 {
+		budget = 8
+	}
+	return budget
+}
+
 // loadTUISettings populates the modal items for the TUI/Interface settings
-// sub-menu. The rows are: theme picker, mouse toggle, max rendered messages
-// and stream throttle interval (ms).
+// sub-menu. The five rows are: theme picker, mouse toggle, max rendered
+// messages, stream throttle interval (ms) and keep device awake.
 func (m *Model) loadTUISettings() {
 	mouseStatus := "✓"
 	if !m.mouseEnabled {
@@ -33,6 +61,7 @@ func (m *Model) loadTUISettings() {
 		fmt.Sprintf("%s: %s", i18n.T("tui.settings.mouse"), mouseStatus),
 		fmt.Sprintf("%s: %d", i18n.T("tui.settings.maxMessages"), m.maxRenderedMessages),
 		fmt.Sprintf("%s: %dms", i18n.T("tui.settings.streamThrottle"), int(m.streamThrottleInterval.Milliseconds())),
+		fmt.Sprintf("%s: %s", i18n.T("tui.settings.keepAwake"), m.keepAwakeStatus()),
 	}
 }
 
@@ -46,6 +75,7 @@ func (m *Model) persistTUISettings() {
 	m.cfg.TUI.MouseEnabled = m.mouseEnabled
 	m.cfg.TUI.MaxRenderedMessages = m.maxRenderedMessages
 	m.cfg.TUI.StreamThrottleMS = int(m.streamThrottleInterval.Milliseconds())
+	m.cfg.TUI.KeepAwake = m.keepAwakeEnabled
 	if err := m.saveConfigToDisk(); err != nil {
 		m.formError = err.Error()
 	}
@@ -89,6 +119,8 @@ func (m *Model) handleTUISettingsEnter() tea.Cmd {
 		m.settingsEditField = "streamThrottle"
 		m.textInput.SetValue(strconv.Itoa(int(m.streamThrottleInterval.Milliseconds())))
 		m.textInput.Focus()
+	case tuiSettingRowKeepAwake: // Keep device awake — toggle the sleep inhibition
+		m.toggleKeepAwake()
 	}
 	return nil
 }
@@ -245,4 +277,138 @@ func (m *Model) handleTUISettingsInput(value string) {
 	m.persistTUISettings()
 	m.settingsEditField = ""
 	m.loadTUISettings()
+}
+
+// keepAwakeStatus returns the row glyph for the keep-awake state:
+//
+//	✗ not requested (!m.keepAwakeEnabled)
+//	✓ requested AND actually held (m.keepAwake != nil && Active())
+//	⚠ requested but NOT active — Start failed; see the error line below the list
+//
+// The intent alone never paints ✓, so a machine with no working mechanism
+// cannot pretend to be awake; and a failed request never degrades to ✗, which
+// would be indistinguishable from "off" and make ENTER look like a plain
+// toggle (it would silently drop the request).
+//
+// Known, deliberate limitation (inherited from pkg/keepawake.Active): ✓ means
+// "Start succeeded and nothing has Stop()ed it yet", NOT "the mechanism is
+// alive right now". If the mechanism dies AFTER a successful Start — e.g.
+// logind restarting and dropping the inhibitor, or caffeinate being killed by
+// an external signal — Active() keeps reporting true, so the row keeps its ✓
+// until the next toggle (which runs Stop+Start and would re-probe). The
+// package deliberately does not liveness-probe the OS per frame: it would be
+// far too expensive for a TUI status row, and the mechanisms are
+// self-releasing (the child exits on its own when the session goes away), so
+// the exposure is rare by construction. This is documented, not fixed, on
+// purpose.
+func (m *Model) keepAwakeStatus() string {
+	if !m.keepAwakeEnabled {
+		return "✗"
+	}
+	if m.keepAwake != nil && m.keepAwake.Active() {
+		return "✓"
+	}
+	return "⚠"
+}
+
+// keepAwakeRequestedButFailed reports the ⚠ state: the user asked for the
+// inhibition, the platform did not deliver it (keepAwakeErr carries the
+// reason) and the row offers a retry instead of an off-toggle.
+func (m *Model) keepAwakeRequestedButFailed() bool {
+	return m.keepAwakeEnabled && (m.keepAwake == nil || !m.keepAwake.Active())
+}
+
+// startKeepAwake realises the keep-awake intent: it acquires the inhibition
+// (creating the Inhibitor when nil), records the reason in keepAwakeErr on
+// failure and clears it on success, and returns the Start error so callers can
+// log it. It never touches the intent itself — that is the caller's decision.
+func (m *Model) startKeepAwake() error {
+	if m.keepAwake == nil {
+		m.keepAwake = keepawake.New()
+	}
+	err := m.keepAwake.Start()
+	if err != nil {
+		m.keepAwakeErr = err.Error()
+	} else {
+		m.keepAwakeErr = ""
+	}
+	return err
+}
+
+// toggleKeepAwake is the ENTER action of the Interface keep-awake row. The
+// row has three states and ENTER does a different thing in each:
+//
+//	✗ (off):            request the inhibition — keepAwakeEnabled = true and
+//	                    attempt to start it (StartKeepAwakeIfEnabled-style:
+//	                    a failure keeps the intent, see startKeepAwake)
+//	✓ (active):         release it — keepAwakeEnabled = false, Stop() and
+//	                    clear the error line
+//	⚠ (requested, failed): RETRY the start ONLY — the request on disk is not
+//	                    touched, so a transient failure never loses the
+//	                    user's intent; leaving the failed state is a
+//	                    deliberate act and needs the "d" key (cancelKeepAwake)
+//
+// Either way the new state is persisted (persistTUISettings) and the row
+// rebuilt (loadTUISettings).
+func (m *Model) toggleKeepAwake() {
+	switch {
+	case m.keepAwakeRequestedButFailed():
+		// Retry: intent (memory and disk) stays true, only Start is retried.
+		_ = m.startKeepAwake()
+	case m.keepAwakeEnabled:
+		m.keepAwakeEnabled = false
+		if m.keepAwake != nil {
+			// Stop() can block ~2 s if a child ignores SIGTERM; it runs on the
+			// update loop, which is acceptable: the real children
+			// (systemd-inhibit/caffeinate) die on SIGTERM immediately and the
+			// bound lives in pkg/keepawake. Not worth a tea.Cmd round-trip.
+			m.keepAwake.Stop()
+		}
+		m.keepAwakeErr = ""
+	default:
+		m.keepAwakeEnabled = true
+		_ = m.startKeepAwake()
+	}
+	m.persistTUISettings()
+	m.loadTUISettings()
+}
+
+// cancelKeepAwake is the "d" action of the ⚠ state: the deliberate way to
+// stop requesting the inhibition when Start keeps failing. It clears the
+// intent (and thus the error line), releases any half-held inhibition and
+// persists — the row then reads ✗ and the error line disappears. Outside the
+// ⚠ state it must not be reachable (see the handler's guard): it would
+// silently turn a working inhibition off.
+func (m *Model) cancelKeepAwake() {
+	if !m.keepAwakeRequestedButFailed() {
+		return
+	}
+	m.keepAwakeEnabled = false
+	m.keepAwakeErr = ""
+	if m.keepAwake != nil {
+		// See toggleKeepAwake: blocking Stop() on the update loop is a
+		// deliberate, bounded (pkg/keepawake) choice.
+		m.keepAwake.Stop()
+	}
+	m.persistTUISettings()
+	m.loadTUISettings()
+}
+
+// StartKeepAwakeIfEnabled acquires the inhibition when the config asked for
+// it. Called once by the CLI right before running the program. A failure is
+// not fatal and never clears the intent: it is recorded in keepAwakeErr so the
+// Interface settings row can explain itself.
+func (m *Model) StartKeepAwakeIfEnabled() error {
+	if !m.keepAwakeEnabled || m.keepAwake == nil {
+		return nil
+	}
+	return m.startKeepAwake()
+}
+
+// Close releases state that outlives a frame. Today that is only the keep-awake
+// inhibition; it is idempotent and safe when keep-awake was never enabled.
+func (m *Model) Close() {
+	if m.keepAwake != nil {
+		m.keepAwake.Stop()
+	}
 }

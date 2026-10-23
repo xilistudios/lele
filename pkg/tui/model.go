@@ -16,6 +16,7 @@ import (
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
+	"github.com/xilistudios/lele/pkg/keepawake"
 	"github.com/xilistudios/lele/pkg/locales"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/session"
@@ -116,6 +117,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		subagentProgress:       make(map[string]string),
 		streamThrottleInterval: 32 * time.Millisecond,
 		mouseEnabled:           true,
+		keepAwake:              keepawake.New(),
 		maxRenderedMessages:    200, // render at most 200 messages to bound memory usage
 		renderStartIdx:         -1,  // uninitialized — compute default on first render
 	}
@@ -151,6 +153,10 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		if cfg.TUI.StreamThrottleMS > 0 {
 			m.streamThrottleInterval = time.Duration(cfg.TUI.StreamThrottleMS) * time.Millisecond
 		}
+		// Unlike mouse/max-messages, keep_awake is read unconditionally: it is
+		// a plain opt-in bool, so a hand-written `{"tui":{"keep_awake":true}}`
+		// (no other TUI key set) must still be honoured.
+		m.keepAwakeEnabled = cfg.TUI.KeepAwake
 	}
 
 	// Initialize a read/manage-only cron service backed by the same store the
