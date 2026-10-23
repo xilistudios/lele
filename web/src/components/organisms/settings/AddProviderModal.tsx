@@ -4,7 +4,9 @@ import type { EditableNamedProviderConfig, SecretValue } from '../../../lib/type
 import { Modal } from '../../atoms'
 import { BooleanInput, SecretInput, TextInput } from '../../molecules'
 
-const PROVIDER_TYPES = [
+// Source of truth for the Add-provider wizard: the selectable types and the
+// api_base pre-filled in step 3. Exported for tests.
+export const PROVIDER_TYPES = [
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'openrouter', label: 'OpenRouter' },
@@ -24,12 +26,14 @@ const PROVIDER_TYPES = [
   { value: 'zai_coding_plan', label: 'zAI Coding Plan' },
   { value: 'modelark_coding_plan', label: 'ModelArk Coding Plan' },
   { value: 'github_copilot', label: 'GitHub Copilot' },
+  { value: 'opencode', label: 'OpenCode Zen' },
+  { value: 'opencode_go', label: 'OpenCode Go' },
   { value: 'claude-code', label: 'Claude Code (CLI)' },
   { value: 'codex-cli', label: 'Codex CLI' },
   { value: 'custom', label: 'OpenAI Compatible' },
 ]
 
-const DEFAULT_API_BASE: Record<string, string> = {
+export const DEFAULT_API_BASE: Record<string, string> = {
   anthropic: 'https://api.anthropic.com/v1',
   openai: 'https://api.openai.com/v1',
   openrouter: 'https://openrouter.ai/api/v1',
@@ -49,6 +53,8 @@ const DEFAULT_API_BASE: Record<string, string> = {
   zai_coding_plan: 'https://api.z.ai/api/paas/v4',
   modelark_coding_plan: 'https://ark.ap-southeast.bytepluses.com/api/coding/v3',
   github_copilot: 'localhost:4321',
+  opencode: 'https://opencode.ai/zen/v1',
+  opencode_go: 'https://opencode.ai/zen/go/v1',
   'claude-code': '',
   'codex-cli': '',
   custom: '',
@@ -183,6 +189,7 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
           <div className="space-y-4 animate-step-enter">
             <p className="text-xs text-text-secondary">{t('settings.addProviderModal.stepName')}</p>
             <input
+              id="new-provider-name"
               type="text"
               value={providerName}
               onChange={(e) => setProviderName(e.target.value)}

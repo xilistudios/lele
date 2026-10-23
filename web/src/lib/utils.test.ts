@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { formatSessionTitle } from './utils'
+import { formatSessionTitle, getProviderDisplayName } from './utils'
 
 describe('formatSessionTitle', () => {
   test('usa el nombre de sesión si existe', () => {
@@ -25,5 +25,15 @@ describe('formatSessionTitle', () => {
   test('trimea espacios en blanco en sessionName', () => {
     const title = formatSessionTitle('native:client:1', '  Hola')
     expect(title).toBe('  Hola')
+  })
+})
+
+describe('getProviderDisplayName', () => {
+  test('devuelve "OpenCode Zen" para el proveedor opencode', () => {
+    expect(getProviderDisplayName('opencode')).toBe('OpenCode Zen')
+  })
+
+  test('devuelve "OpenCode Go" para el proveedor opencode_go', () => {
+    expect(getProviderDisplayName('opencode_go')).toBe('OpenCode Go')
   })
 })

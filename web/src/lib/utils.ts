@@ -23,6 +23,8 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   nvidia: 'NVIDIA',
   ollama: 'Ollama',
   openai: 'OpenAI',
+  opencode: 'OpenCode Zen',
+  opencode_go: 'OpenCode Go',
   openrouter: 'OpenRouter',
   shengsuanyun: 'ShengSuan Yun',
   vllm: 'vLLM',

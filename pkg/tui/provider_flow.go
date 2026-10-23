@@ -58,7 +58,7 @@ var providerPresets = []providerPreset{
 	catalogPreset("minimax", "MiniMax", "API key", "MiniMax-M3..."),
 	catalogPreset("vercel", "Vercel AI Gateway", "vck_...", "openai/gpt-4o, anthropic/claude..."),
 	catalogPreset("opencode", "OpenCode Zen", "API key", "kimi-k2.5..."),
-	catalogPreset("opencode_go", "OpenCode Go", "API key", "grok-4.7, gpt-5.6-luna, kimi-k2.7-code..."),
+	catalogPreset("opencode_go", "OpenCode Go", "API key", "deepseek-v4.1-flash, kimi-k2.7-code, glm-5.3..."),
 	catalogPreset("huggingface", "Hugging Face", "hf_...", "moonshotai/Kimi-K2.5..."),
 	catalogPreset("novita", "NovitaAI", "API key", "moonshotai/kimi-k2.5..."),
 	catalogPreset("xiaomi", "Xiaomi MiMo", "API key", "mimo-v2.5..."),

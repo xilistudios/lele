@@ -104,3 +104,30 @@ func TestProviderPreset_OpenCodeGo(t *testing.T) {
 		t.Error("defaultModelAlias is empty")
 	}
 }
+
+// TestProviderPreset_OpenCodeGoModelHint guards the /connect model hint
+// against advertising ids the gateway rejects: the ids below answer
+// `400 ModelProtocolUnsupported` on chat/completions (measured 2026-10-22),
+// so leading with them would steer users straight into dead ends.
+func TestProviderPreset_OpenCodeGoModelHint(t *testing.T) {
+	p := providerPresetByType("opencode_go")
+	if p == nil {
+		t.Fatal("opencode_go preset not found in providerPresets")
+	}
+
+	for _, id := range []string{
+		"grok-4.7",
+		"gpt-5.6-luna",
+		"grok-4.6",
+		"gpt-6-luna",
+		"claude-haiku-5-5",
+	} {
+		if strings.Contains(p.modelHint, id) {
+			t.Errorf("modelHint %q mentions %q, which fails with ModelProtocolUnsupported", p.modelHint, id)
+		}
+	}
+
+	if !strings.Contains(p.modelHint, "deepseek-v4.1-flash") {
+		t.Errorf("modelHint %q does not mention working model %q", p.modelHint, "deepseek-v4.1-flash")
+	}
+}
