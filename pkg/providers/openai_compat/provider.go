@@ -46,6 +46,16 @@ type Provider struct {
 	// session id is present and silently omit it otherwise (the target was
 	// merely sniffed from api_base, review MAYOR-1).
 	sessionHeaderRequired bool
+	// customHeaders are the provider's static custom request headers (config
+	// `headers`), applied last so an explicit entry wins over the defaults
+	// above. Values may contain protocoltypes.SessionHeaderPlaceholder, which
+	// is expanded per call — the map itself never changes.
+	//
+	// It is the Options map assigned as-is, never copied: nothing here writes
+	// into it (setRequestHeaders only reads it) and the config layer hands out
+	// a fresh map per decode, so a defensive copy would only hide the aliasing
+	// rather than prevent it.
+	customHeaders map[string]string
 }
 
 // Options are the static, per-instance transport extras. Conversation-scoped
@@ -60,6 +70,11 @@ type Options struct {
 	// name/type detection), false omits the header silently (opportunistic
 	// URL-sniff detection). Ignored when SessionHeader is empty.
 	SessionHeaderRequired bool
+	// Headers are the provider's static custom request headers (config
+	// `headers`). Applied AFTER the transport defaults and after the session
+	// header, so an explicit entry wins. Values may contain
+	// protocoltypes.SessionHeaderPlaceholder, expanded per call.
+	Headers map[string]string
 }
 
 func NewProvider(apiKey, apiBase, proxy string) *Provider {
@@ -76,33 +91,58 @@ func NewProviderWithOptions(apiKey, apiBase, proxy string, opts Options) *Provid
 		httpClient:            client,
 		sessionHeader:         opts.SessionHeader,
 		sessionHeaderRequired: opts.SessionHeaderRequired,
+		customHeaders:         opts.Headers,
 	}
 }
 
 // setRequestHeaders applies every header an inference request carries. Both
 // Chat and ChatStream must go through it: they are separate code paths, and a
 // header added to only one of them is a silent, partial behaviour.
+//
+// Three sequential stages, never an early return that skips a later one:
+// (1) the transport defaults, (2) the detected session header, (3) the
+// provider's custom headers — stage 3 last so an explicit config entry wins
+// over what the transport would have sent, including over stage 2.
 func (p *Provider) setRequestHeaders(req *http.Request, options map[string]interface{}) error {
+	// Stage 1: defaults.
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", common.UserAgent())
 	if p.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
-	if p.sessionHeader == "" {
-		return nil
-	}
-	sessionID := protocoltypes.WireSessionFromOptions(options)
-	if sessionID == "" {
-		if !p.sessionHeaderRequired {
+
+	// Stage 2: the session header the factory detected for this target.
+	if p.sessionHeader != "" {
+		sessionID := protocoltypes.WireSessionFromOptions(options)
+		switch {
+		case sessionID != "":
+			req.Header.Set(p.sessionHeader, sessionID)
+		case p.sessionHeaderRequired:
+			return fmt.Errorf("%w: this provider requires %q and the call carried no %q option (a call site is missing providers.WithWireSessionID)",
+				common.ErrMissingWireSession, p.sessionHeader, protocoltypes.OptWireSessionID)
+		default:
 			// Opportunistic header (URL-sniff detection): without a session id
 			// we omit it and let the upstream answer its own descriptive 400
 			// if it cares — a lookalike or unkeyed egress must not fail here.
-			return nil
 		}
-		return fmt.Errorf("%w: this provider requires %q and the call carried no %q option (a call site is missing providers.WithWireSessionID)",
-			common.ErrMissingWireSession, p.sessionHeader, protocoltypes.OptWireSessionID)
 	}
-	req.Header.Set(p.sessionHeader, sessionID)
+
+	// Stage 3: custom headers. WireSessionForHeaders never returns "", so a
+	// {{session}} template always expands to a non-empty value — which matters
+	// because Go does send a header with an empty value, and an empty
+	// x-opencode-session defeats the gateway's session routing, after which it
+	// answers its own opaque 400.
+	//
+	// Map order is random, so two entries that canonicalize to the same wire
+	// name ("x-foo" and "X-Foo") have no defined winner; validation does not
+	// dedupe them because the request would carry one of the two either way.
+	if len(p.customHeaders) == 0 {
+		return nil
+	}
+	sessionID := protocoltypes.WireSessionForHeaders(options)
+	for name, value := range p.customHeaders {
+		req.Header.Set(name, protocoltypes.ExpandHeaderValue(value, sessionID))
+	}
 	return nil
 }
 

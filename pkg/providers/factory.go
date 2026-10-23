@@ -51,6 +51,11 @@ type providerSelection struct {
 	// providerTypeName is the configured `type` string (Named.Type, else the
 	// provider key). Detection only.
 	providerTypeName string
+	// headers are the provider's static custom request headers (config
+	// `headers`), applied last by the transports so an explicit entry wins
+	// over transport defaults. Values may contain
+	// protocoltypes.SessionHeaderPlaceholder, expanded per call.
+	headers map[string]string
 }
 
 // defaultAPIBaseByType returns the default API base URL for a provider type.
@@ -166,6 +171,7 @@ func selectionFromNamedProvider(cfg *config.Config, providerName, model string, 
 		connectMode:      named.ConnectMode,
 		providerName:     providerName,
 		providerTypeName: typ,
+		headers:          named.Headers,
 	}
 
 	if mc, ok := named.Models[model]; ok {
@@ -454,6 +460,33 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 		if named, ok := cfg.Providers.GetNamed(providerName); ok {
 			return selectionFromNamedProvider(cfg, providerName, model, named)
 		}
+		// Custom headers: ONE copy for every legacy arm below.
+		//
+		// Built-in providers are always seeded into Providers.Named by
+		// ensureNamedDefaults (GetNamed calls it), and the seeded copy carries the
+		// typed field's `headers` — so the GetNamed return above already delivers
+		// the map for a canonical name, and selectionFromNamedProvider is the only
+		// selection constructor that needs it.
+		//
+		// The switch below is therefore reachable only for spellings GetNamed
+		// cannot resolve: the aliases it accepts itself ("claude", "gpt", "glm",
+		// "google", …) — CreateProviderForCandidate does not normalize its input.
+		// Those arms hand-build the selection from the typed Providers.<Name>
+		// fields, which is exactly where `headers` lives for a config written as
+		// "providers": {"anthropic": {…}}, so without this copy the map would be
+		// silently dropped there.
+		//
+		// This copy is exact only where NormalizeProvider(alias) equals the seeded
+		// Named key derived from the SAME typed field the arm reads ("gpt" →
+		// "openai", "claude" → "anthropic", "glm" → "zhipu", "google" → "gemini").
+		// It is NOT a general collapse of the ~20 case arms: three spellings
+		// normalize to themselves while the seeded key is longer
+		// ("zai" vs "zai_coding_plan", "modelark" vs "modelark_coding_plan",
+		// "copilot" vs "github_copilot"), so those arms are fixed explicitly below
+		// (see the MINOR-1 audit in the accompanying report).
+		if named, ok := cfg.Providers.GetNamed(NormalizeProvider(providerName)); ok {
+			sel.headers = named.Headers
+		}
 		switch providerName {
 		case "groq":
 			if cfg.Providers.Groq.APIKey != "" {
@@ -613,6 +646,16 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 				}
 			}
 		case "github_copilot", "copilot":
+			// MINOR-1 audit: "copilot" is reachable here (GetNamed has no
+			// "copilot" key) and NormalizeProvider does NOT collapse it to the
+			// seeded "github_copilot", so the single copy above leaves
+			// sel.headers empty while this arm reads the typed field. Carried
+			// for uniformity: the copilot transport speaks gRPC/stdio through
+			// the copilot SDK and reads no HTTP headers today, so this copy
+			// changes nothing on the wire — it keeps the selection faithful to
+			// config so a future header-aware copilot transport cannot inherit
+			// the drop by accident.
+			sel.headers = cfg.Providers.GitHubCopilot.Headers
 			sel.providerType = providerTypeGitHubCopilot
 			if cfg.Providers.GitHubCopilot.APIBase != "" {
 				sel.apiBase = cfg.Providers.GitHubCopilot.APIBase
@@ -622,6 +665,11 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 			sel.connectMode = cfg.Providers.GitHubCopilot.ConnectMode
 			return sel, nil
 		case "zai_coding_plan", "zai":
+			// MINOR-1 audit: NormalizeProvider("zai") == "zai" while
+			// ensureNamedDefaults seeds the key "zai_coding_plan", so the single
+			// copy above misses this arm and the alias silently dropped the
+			// typed field's headers. Copy it explicitly.
+			sel.headers = cfg.Providers.ZAICodingPlan.Headers
 			if cfg.Providers.ZAICodingPlan.APIKey != "" {
 				sel.apiKey = cfg.Providers.ZAICodingPlan.APIKey
 				sel.apiBase = cfg.Providers.ZAICodingPlan.APIBase
@@ -631,6 +679,11 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 				}
 			}
 		case "modelark_coding_plan", "modelark":
+			// MINOR-1 audit: same shape as "zai" above —
+			// NormalizeProvider("modelark") == "modelark" but the seeded Named
+			// key is "modelark_coding_plan", so the single copy misses this arm
+			// and the alias silently dropped the typed field's headers.
+			sel.headers = cfg.Providers.ModelArkCodingPlan.Headers
 			if cfg.Providers.ModelArkCodingPlan.APIKey != "" {
 				sel.apiKey = cfg.Providers.ModelArkCodingPlan.APIKey
 				sel.apiBase = cfg.Providers.ModelArkCodingPlan.APIBase
@@ -815,8 +868,8 @@ func createProviderFromSelection(sel *providerSelection) (LLMProvider, error) {
 	case providerTypeGitHubCopilot:
 		return NewGitHubCopilotProvider(sel.apiBase, sel.connectMode, sel.model)
 	case providerTypeAnthropic:
-		return anthropicmessages.NewProviderWithOptions(sel.apiKey, sel.apiBase, anthropicmessages.Options{SessionHeader: sessionHeader, SessionHeaderRequired: sessionHeaderRequired}), nil
+		return anthropicmessages.NewProviderWithOptions(sel.apiKey, sel.apiBase, anthropicmessages.Options{SessionHeader: sessionHeader, SessionHeaderRequired: sessionHeaderRequired, Headers: sel.headers}), nil
 	default:
-		return NewHTTPProviderWithOptions(sel.apiKey, sel.apiBase, sel.proxy, openai_compat.Options{SessionHeader: sessionHeader, SessionHeaderRequired: sessionHeaderRequired}), nil
+		return NewHTTPProviderWithOptions(sel.apiKey, sel.apiBase, sel.proxy, openai_compat.Options{SessionHeader: sessionHeader, SessionHeaderRequired: sessionHeaderRequired, Headers: sel.headers}), nil
 	}
 }

@@ -51,6 +51,16 @@ func (c *headerCapture) get(name string) string {
 	return c.header.Get(name)
 }
 
+// has reports whether the header was on the request at all. get cannot
+// distinguish "absent" from "present with an empty value" — both return "" —
+// and the byte-identical guarantee of the nil-headers test is about ABSENCE,
+// so it needs this stronger predicate.
+func (c *headerCapture) has(name string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.header.Values(name)) > 0
+}
+
 // newAnthropicCompletionServer starts a server that records the request
 // headers and answers with a minimal valid Anthropic response (completion for
 // "application/json", SSE for "text/event-stream"). Returns the server URL and

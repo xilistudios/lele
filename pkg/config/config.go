@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/caarlos0/env/v11"
+	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
@@ -679,6 +680,19 @@ type ProviderConfig struct {
 	Proxy       string `json:"proxy,omitempty" env:"LELE_PROVIDERS_{{.Name}}_PROXY"`
 	AuthMethod  string `json:"auth_method,omitempty" env:"LELE_PROVIDERS_{{.Name}}_AUTH_METHOD"`
 	ConnectMode string `json:"connect_mode,omitempty" env:"LELE_PROVIDERS_{{.Name}}_CONNECT_MODE"` //only for Github Copilot, `stdio` or `grpc`
+	// Headers are extra HTTP headers sent on this provider's inference requests
+	// (both transports, OpenAI-compatible chat/completions and Anthropic
+	// messages, streaming and non-streaming). The only template token is
+	// {{session}} (protocoltypes.SessionHeaderPlaceholder), expanded per
+	// conversation to the same 64-hex wire session id lele already sends as
+	// x-opencode-session, so a transparent proxy/gateway keeps per-conversation
+	// affinity — the rationale: a unified proxy in front of upstreams that
+	// require custom headers (e.g. OpenCode Go's x-opencode-session). Custom
+	// headers are applied last, so they win over transport defaults (explicit
+	// user intent may override Authorization, e.g. a gateway with a non-Bearer
+	// scheme); transport-owned headers (Host, Content-Type, Content-Length,
+	// Transfer-Encoding, Connection, …) are rejected by validation.
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 type OpenAIProviderConfig struct {
@@ -849,6 +863,14 @@ func (p *ProvidersConfig) UnmarshalJSON(data []byte) error {
 				return fmt.Errorf("provider %q, model %q: %w", name, modelName, err)
 			}
 		}
+		// Custom headers are validated here because this UnmarshalJSON is the
+		// single choke point shared by config load, PUT /api/v1/config and
+		// POST /api/v1/config/validate: all three unmarshal into this type, so
+		// one check guards every entry door. (name, not key: it matches the
+		// provider errors above and is the id the rest of the code uses.)
+		if err := protocoltypes.ValidateCustomHeaders(named.Headers); err != nil {
+			return fmt.Errorf("provider %q: %w", name, err)
+		}
 		p.Named[name] = named
 	}
 
@@ -937,7 +959,9 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 // empty — including APIBase and Proxy, because a keyless local provider (the
 // supported "API key is optional for local providers" case) and an
 // OAuth-completed session (AuthMethod/ConnectMode) carry their configuration
-// exactly there.
+// exactly there; and including Headers, because a provider pointed at a
+// gateway that only needs extra request headers (api_key set elsewhere, e.g.
+// OAuth) would otherwise be silently dropped at save time.
 //
 // Two fields must STAY out of the predicate even though they look like
 // configuration:
@@ -953,6 +977,7 @@ func (p NamedProviderConfig) IsEmpty() bool {
 		p.Proxy == "" &&
 		p.AuthMethod == "" &&
 		p.ConnectMode == "" &&
+		len(p.Headers) == 0 &&
 		len(p.Models) == 0
 }
 

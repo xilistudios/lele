@@ -163,7 +163,11 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 	// document->Config conversion silently reverts it to the code default.
 	cfg.Channels.Web.Enabled = doc.Channels.Web.Enabled
 
-	// Copiar providers
+	// Copiar providers — dead by construction: cfg is discarded, ToConfig
+	// returns `validated` rebuilt from doc.toSerializable() below, and that
+	// serializer is the carrier of providers.<name>.headers. The two must stay
+	// in sync: a field toSerializable stops emitting disappears from
+	// config.json on the next save, however carefully cfg is filled here.
 	cfg.Providers.Named = make(map[string]NamedProviderConfig)
 	for name, provider := range doc.Providers {
 		cfg.Providers.Named[name] = NamedProviderConfig{
@@ -519,6 +523,14 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		if len(provider.Models) > 0 {
 			prov["models"] = provider.Models
 		}
+		// headers rides the document or a WebUI save deletes it from
+		// config.json (this block re-emits the provider field by field). The
+		// len check is the prune-on-empty style of the neighbours: no map
+		// means no key, never "headers": null, so existing documents serialize
+		// byte-identically.
+		if len(provider.Headers) > 0 {
+			prov["headers"] = provider.Headers
+		}
 		writeSecret(prov, "api_key", provider.APIKey)
 		providers[name] = prov
 	}
@@ -682,8 +694,11 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 	}
 	doc.Providers = EditableProvidersConfig{}
 	for name, provider := range cfg.Providers.ListNamed() {
-		// Only include providers that have actual data
-		if provider.APIKey == "" && len(provider.Models) == 0 {
+		// Only include providers that have actual data. Headers count as data
+		// (same reasoning as NamedProviderConfig.IsEmpty): a headers-only
+		// provider must reach the document, or the entry — and with it the map
+		// — disappears on the next save.
+		if provider.APIKey == "" && len(provider.Models) == 0 && len(provider.Headers) == 0 {
 			continue
 		}
 		doc.Providers[name] = EditableNamedProviderConfig{
@@ -693,8 +708,12 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 			Proxy:       provider.Proxy,
 			AuthMethod:  provider.AuthMethod,
 			ConnectMode: provider.ConnectMode,
-			WebSearch:   provider.WebSearch,
-			Models:      provider.Models,
+			// Shallow like Models: the document and the runtime config are
+			// rebuilt together, so a defensive clone is not this codebase's
+			// convention for provider maps.
+			WebSearch: provider.WebSearch,
+			Models:    provider.Models,
+			Headers:   provider.Headers,
 		}
 	}
 	doc.Gateway = cfg.Gateway
