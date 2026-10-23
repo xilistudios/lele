@@ -147,6 +147,12 @@ func mergeNamedProvider(base, overlay EditableNamedProviderConfig) EditableNamed
 	if overlay.Models != nil {
 		base.Models = overlay.Models
 	}
+	// Same nil-means-absent rule as Models: a file that does not mention
+	// headers leaves the copy carried into the document untouched, so a
+	// headers-only provider survives the secret overlay.
+	if overlay.Headers != nil {
+		base.Headers = overlay.Headers
+	}
 	if overlay.APIKey.Mode != "" {
 		base.APIKey = overlay.APIKey
 	}

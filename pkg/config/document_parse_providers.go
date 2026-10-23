@@ -49,6 +49,12 @@ func parseNamedProviderWithPlaceholders(raw json.RawMessage, basePath string, se
 	if models, ok := rawMap["models"]; ok {
 		json.Unmarshal(models, &cfg.Models)
 	}
+	// headers is read straight from the file, not from the runtime config:
+	// LoadConfig expands ENV placeholders before parsing, so the document has
+	// to take the raw value to stay faithful to what the user wrote.
+	if headers, ok := rawMap["headers"]; ok {
+		json.Unmarshal(headers, &cfg.Headers)
+	}
 	if apiKey, ok := rawMap["api_key"]; ok {
 		cfg.APIKey = parseSecretValue(apiKey, basePath+".api_key", secretsByPath)
 	}

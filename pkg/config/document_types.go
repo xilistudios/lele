@@ -268,14 +268,22 @@ type EditableProvidersConfig map[string]EditableNamedProviderConfig
 
 // EditableNamedProviderConfig for named providers.
 type EditableNamedProviderConfig struct {
-	Type        string                         `json:"type,omitempty"`
-	APIKey      SecretValue                    `json:"api_key"`
-	APIBase     string                         `json:"api_base"`
-	Proxy       string                         `json:"proxy,omitempty"`
-	AuthMethod  string                         `json:"auth_method,omitempty"`
-	ConnectMode string                         `json:"connect_mode,omitempty"`
-	WebSearch   *bool                          `json:"web_search,omitempty"`
-	Models      map[string]ProviderModelConfig `json:"models,omitempty"`
+	Type        string      `json:"type,omitempty"`
+	APIKey      SecretValue `json:"api_key"`
+	APIBase     string      `json:"api_base"`
+	Proxy       string      `json:"proxy,omitempty"`
+	AuthMethod  string      `json:"auth_method,omitempty"`
+	ConnectMode string      `json:"connect_mode,omitempty"`
+	// Headers mirrors config.ProviderConfig.Headers. There is no UI control
+	// for it yet, but it MUST ride the document: toSerializable re-emits the
+	// providers block field by field, so any field the document does not
+	// model is deleted from config.json by a WebUI save — even a partial edit
+	// that only touches agents, because the browser PUTs the whole document.
+	// omitempty is mandatory: a document without a map then serializes
+	// byte-identically to the documents of existing installs.
+	Headers   map[string]string              `json:"headers,omitempty"`
+	WebSearch *bool                          `json:"web_search,omitempty"`
+	Models    map[string]ProviderModelConfig `json:"models,omitempty"`
 }
 
 // EditableToolsConfig for tools.
