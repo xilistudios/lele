@@ -10,6 +10,20 @@ import { BooleanInput, SecretInput } from '../../molecules'
 // Source of truth for the Add-provider screen: the selectable types (curated,
 // in muscle-memory order) and the api_base pre-filled when a tile is picked.
 // Both are exported for tests.
+//
+// This list is NOT the full set of selectable providers: the grid is
+// `PROVIDER_TYPES ∪ catalog`, so every provider the backend knows
+// (`GET /api/v1/catalog/providers`, which serves `catalog.hardcodedProviderIDs`
+// offline) is selectable even when it is missing here (issue #404). The entries
+// below only earn their place by carrying something the catalog cannot:
+//
+//   - a curated label (the catalog says `OpenCode`/`Google` where the product
+//     says `OpenCode Zen`/`Gemini`),
+//   - a deliberate api_base override (see DEFAULT_API_BASE), or
+//   - no catalog id at all (`custom`, `claude-code`, `codex-cli`).
+//
+// Adding a provider type in Go therefore cannot hide it from this screen; see
+// TestCatalogProvidersEndpointServesEveryKnownType in pkg/channels.
 export const PROVIDER_TYPES = [
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
@@ -37,6 +51,13 @@ export const PROVIDER_TYPES = [
   { value: 'custom', label: 'OpenAI Compatible' },
 ]
 
+// Curated api_base overrides. A non-empty value here WINS over the catalog
+// (see the merge below); an empty or missing entry falls through to
+// `CatalogProvider.api_base`, which the backend fills from
+// `catalog.DefaultAPIBaseByType` for every known provider. Keeping only the
+// overrides here is what stops this table from drifting into a second copy of
+// the Go one (issue #404): a provider added in Go reaches the UI with its
+// endpoint, no matter what this map says.
 export const DEFAULT_API_BASE: Record<string, string> = {
   anthropic: 'https://api.anthropic.com/v1',
   openai: 'https://api.openai.com/v1',
@@ -244,6 +265,11 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
     // the provider makes it unable to start. Labels drift the same way (the
     // catalog says `OpenCode`/`Google` where the curated list says
     // `OpenCode Zen`/`Gemini`).
+    //
+    // The catalog api_base is what makes a provider added in Go selectable AND
+    // completable here without touching this file (issue #404): the backend
+    // fills it from `catalog.DefaultAPIBaseByType` for every known id, so a
+    // catalog-only tile pre-fills its endpoint instead of an empty field.
     for (const provider of catalog) {
       // A blank id would make a tile with an empty `data-provider-type`, and an
       // empty tile type matches the unselected `selectedType === ''` — the tile

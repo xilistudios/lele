@@ -846,4 +846,99 @@ describe('AddProviderModal', () => {
     expect(hintArea.querySelector('[data-detected-provider]')).toBeNull()
     expect(hintArea.textContent).not.toContain('Anthropic')
   })
+  // 32-34. Issue #404: the wizard's type list is driven by the catalog, not by
+  // PROVIDER_TYPES. A provider the backend knows must be selectable here even
+  // when nobody added it to the curated array, and it must arrive with the
+  // endpoint the backend pre-fills.
+  test('a provider the backend knows but the curated list omits is selectable', async () => {
+    // `mistral` is in catalog.hardcodedProviderIDs and NOT in PROVIDER_TYPES:
+    // the exact shape of the bug in #404 (the backend supports it, the UI
+    // cannot select it).
+    expect(PROVIDER_TYPES.map((pt) => pt.value)).not.toContain('mistral')
+
+    const MISTRAL: CatalogProvider = {
+      id: 'mistral',
+      name: 'Mistral',
+      type: 'openai',
+      api_base: 'https://api.mistral.ai/v1',
+      model_count: 9,
+    }
+    const modal = renderModal({ api: catalogApi([MISTRAL]) })
+    const { container } = modal
+
+    await waitFor(() => {
+      expect(tileByType(container, 'mistral')).not.toBeNull()
+    })
+
+    fireEvent.click(tile(container, 'mistral'))
+    expect(pressedTypes(container)).toEqual(['mistral'])
+    expect(addButton(container).disabled).toBe(false)
+
+    fireEvent.click(addButton(container))
+    // The api_base comes from the catalog: the curated table has no entry, so
+    // a missing catalog base would write '' and force the user to type it.
+    expect(written(modal).mistral.type).toBe('mistral')
+    expect(written(modal).mistral.api_base).toBe('https://api.mistral.ai/v1')
+  })
+
+  test('the catalog api_base pre-fills the Advanced field for a catalog-only tile', async () => {
+    const { container } = renderModal({ api: catalogApi([XAI_CATALOG]) })
+    await waitFor(() => {
+      expect(tileByType(container, 'xai')).not.toBeNull()
+    })
+
+    fireEvent.click(tile(container, 'xai'))
+    fireEvent.click(advancedToggle(container))
+
+    const apiBase = one<HTMLInputElement>(container, '#new-provider-api-base')
+    expect(apiBase.value).toBe('https://api.x.ai/v1')
+  })
+
+  test('a non-empty curated base still wins over the catalog', async () => {
+    // `github_copilot` is the documented override: the curated value is the
+    // gRPC CLI bridge, the catalog one an HTTP endpoint the provider cannot
+    // start with. The catalog must not be able to break it.
+    const COPILOT: CatalogProvider = {
+      id: 'github_copilot',
+      name: 'GitHub Copilot',
+      type: 'openai',
+      api_base: 'https://api.githubcopilot.com/v1',
+      model_count: 5,
+    }
+    const modal = renderModal({ api: catalogApi([COPILOT]) })
+    const { container } = modal
+
+    await waitFor(() => {
+      expect(tile(container, 'github_copilot').textContent).toContain(
+        `github_copilot · ${tr('settings.addProviderModal.modelsCount', { count: 5 })}`,
+      )
+    })
+
+    fireEvent.click(tile(container, 'github_copilot'))
+    fireEvent.click(addButton(container))
+    // The written config key is the slug of the type, not the type itself.
+    expect(written(modal)['github-copilot'].api_base).toBe(DEFAULT_API_BASE.github_copilot)
+  })
+
+  test('base_less marks the providers whose endpoint cannot be derived', async () => {
+    // The backend tells "no endpoint known" apart from "endpoint deliberately
+    // empty"; the wizard must keep the field empty for the latter instead of
+    // inventing one.
+    const BEDROCK: CatalogProvider = {
+      id: 'bedrock',
+      name: 'AWS Bedrock',
+      type: 'openai',
+      base_less: true,
+    }
+    const modal = renderModal({ api: catalogApi([BEDROCK]) })
+    const { container } = modal
+
+    await waitFor(() => {
+      expect(tileByType(container, 'bedrock')).not.toBeNull()
+    })
+
+    fireEvent.click(tile(container, 'bedrock'))
+    fireEvent.click(addButton(container))
+    expect(written(modal).bedrock.api_base).toBe('')
+  })
 })
