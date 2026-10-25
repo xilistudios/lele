@@ -537,3 +537,130 @@ func TestCatalogEndpointsRequireAuth(t *testing.T) {
 		t.Fatalf("POST prefetch status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
 	}
 }
+
+// TestCatalogProvidersEndpointServesEveryKnownType is the endpoint half of the
+// issue #404 drift guard: the WebUI builds its provider picker from this
+// response, so every known id must arrive with the api_base the wizard
+// pre-fills. A provider that only exists in the hardcoded offline set must be
+// there too — that is the case that used to be missing from the UI.
+func TestCatalogProvidersEndpointServesEveryKnownType(t *testing.T) {
+	// Empty cache dir + offline: the hardcoded set is the only source.
+	t.Setenv("LELE_CATALOG_OFFLINE", "1")
+	catalog.SetCacheDir(t.TempDir())
+	t.Cleanup(catalog.ResetCacheDir)
+	catalog.ResetLive()
+
+	ts := newNativeTestServer(t)
+	resp, dec := catalogAuthedGet(t, ts, "/api/v1/catalog/providers")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload CatalogProvidersResponse
+	if err := dec.Decode(&payload); err != nil {
+		t.Fatalf("Decode error = %v", err)
+	}
+
+	byID := make(map[string]CatalogProviderSummary, len(payload.Providers))
+	for _, p := range payload.Providers {
+		byID[p.ID] = p
+	}
+
+	for _, id := range catalog.KnownProviderTypes() {
+		p, ok := byID[id]
+		if !ok {
+			t.Errorf("catalog providers response is missing known id %q", id)
+			continue
+		}
+		if catalog.IsBaseLessProviderType(id) {
+			if p.APIBase != "" {
+				t.Errorf("%q api_base = %q, want empty (base-less type)", id, p.APIBase)
+			}
+			continue
+		}
+		if p.APIBase == "" {
+			t.Errorf("%q api_base is empty: the wizard would ship a tile with no endpoint", id)
+		}
+	}
+
+	// The ids the issue lists as unselectable must be present with an endpoint.
+	for _, id := range []string{
+		"vercel", "xai", "lmstudio", "ollama_cloud", "huggingface", "stepfun",
+		"minimax", "mistral", "together", "fireworks", "cerebras", "gmi",
+		"arcee", "novita", "shengsuanyun", "nanogpt", "perplexity",
+		"siliconflow", "chutes", "nous", "vllm", "qwen_portal",
+		"tencent_tokenhub", "xiaomi", "kimi_for_coding", "alibaba",
+		"alibaba_coding_plan", "alibaba_token_plan", "alibaba_token_plan_cn",
+		"bedrock", "azure_foundry",
+	} {
+		p, ok := byID[id]
+		if !ok {
+			t.Errorf("issue #404 id %q missing from the catalog providers response", id)
+			continue
+		}
+		if !catalog.IsBaseLessProviderType(id) && p.APIBase == "" {
+			t.Errorf("issue #404 id %q has no api_base", id)
+		}
+		if p.BaseLess != catalog.IsBaseLessProviderType(id) {
+			t.Errorf("%q base_less = %v, want %v", id, p.BaseLess, catalog.IsBaseLessProviderType(id))
+		}
+	}
+}
+
+// TestProviderModelsForUnconfiguredTypeServesCatalog covers the Add-provider
+// screen asking for the models of a type the user has not saved yet: the
+// wizard offers every catalog provider, so the picker must be populated before
+// the provider exists in config.
+func TestProviderModelsForUnconfiguredTypeServesCatalog(t *testing.T) {
+	ts := newCatalogTestServer(t, nil) // openai seeded, nothing configured
+	if err := catalog.SeedProvider(catalog.Provider{
+		ID: "xai", Name: "xAI", Type: "openai",
+		APIBase: "https://api.x.ai/v1",
+		Models:  []catalog.Model{{ID: "grok-4", Name: "Grok 4"}},
+	}); err != nil {
+		t.Fatalf("seed xai: %v", err)
+	}
+
+	resp, dec := catalogAuthedGet(t, ts, "/api/v1/providers/xai/models")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload ProviderModelsResponse
+	if err := dec.Decode(&payload); err != nil {
+		t.Fatalf("Decode error = %v", err)
+	}
+	if payload.Provider != "xai" {
+		t.Errorf("provider = %q, want xai", payload.Provider)
+	}
+	if payload.Source != "catalog" {
+		t.Errorf("source = %q, want catalog", payload.Source)
+	}
+	if len(payload.Models) != 1 || payload.Models[0].ID != "grok-4" {
+		t.Fatalf("models = %+v, want the seeded grok-4", payload.Models)
+	}
+}
+
+// TestProviderModelsForKnownTypeWithoutModelsStill404 pins the boundary of the
+// unconfigured-type branch: a catalog id with no cached models (offline, never
+// prefetched) has nothing to offer, so it keeps the old 404 instead of an
+// empty 200 the picker would render as "no models found".
+func TestProviderModelsForKnownTypeWithoutModelsStill404(t *testing.T) {
+	ts := newCatalogTestServer(t, nil)
+
+	resp, _ := catalogAuthedGet(t, ts, "/api/v1/providers/vercel/models")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+}
+
+// TestProviderModelsForUnknownNameStill404 pins the boundary: the new
+// unconfigured-type branch must not turn every typo into a 200.
+func TestProviderModelsForUnknownNameStill404(t *testing.T) {
+	ts := newCatalogTestServer(t, nil)
+
+	resp, _ := catalogAuthedGet(t, ts, "/api/v1/providers/definitely-not-a-provider/models")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+}

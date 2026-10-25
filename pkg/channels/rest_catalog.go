@@ -23,6 +23,11 @@ type CatalogProviderSummary struct {
 	Type       string `json:"type,omitempty"`
 	APIBase    string `json:"api_base,omitempty"`
 	ModelCount int    `json:"model_count"`
+	// BaseLess marks the providers whose endpoint cannot be derived (the user
+	// supplies it, or the transport is not HTTP). It lets a client tell "no
+	// endpoint known" apart from "endpoint deliberately empty" and pre-fill
+	// only the former — the wizard's api_base field, issue #404.
+	BaseLess bool `json:"base_less,omitempty"`
 }
 
 // CatalogProvidersResponse is GET /api/v1/catalog/providers.
@@ -73,6 +78,7 @@ func (n *NativeChannel) handleCatalogProviders(w http.ResponseWriter, r *http.Re
 			Type:       p.Type,
 			APIBase:    p.APIBase,
 			ModelCount: modelCount,
+			BaseLess:   catalog.IsBaseLessProviderType(id),
 		})
 	}
 

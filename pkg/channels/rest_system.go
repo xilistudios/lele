@@ -464,6 +464,19 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 	cfg := n.cfgSnapshot()
 	named, ok := cfg.Providers.GetNamed(providerName)
 	if !ok {
+		// Not configured yet: the Add-provider screen asks for the model list of
+		// a type the user has not saved (issue #404 — the wizard offers every
+		// catalog provider). Serve the catalog answer for the type instead of a
+		// 404, so the picker is populated before the provider exists. A name
+		// the catalog does not know is still a 404.
+		if models := lookupCatalogModels([]string{providerName}); len(models) > 0 {
+			writeJSON(w, http.StatusOK, ProviderModelsResponse{
+				Provider: providerName,
+				Source:   "catalog",
+				Models:   catalogModelsToInfos(models),
+			})
+			return
+		}
 		writeError(w, http.StatusNotFound, fmt.Sprintf("provider %q not found", providerName), "provider_not_found")
 		return
 	}
