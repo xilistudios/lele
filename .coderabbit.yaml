@@ -1,0 +1,93 @@
+# CodeRabbit configuration for lele, consumed by the CodeRabbit GitHub App.
+language: "en-US"
+
+reviews:
+  profile: "chill"
+  poem: false
+  high_level_summary: true
+  review_status: true
+  collapse_walkthrough: true
+  estimate_code_review_effort: true
+  suggested_labels: false
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+  path_filters:
+    - "!**/node_modules/**"
+    - "!web/dist/**"
+    - "!cmd/lele/web/dist/**"
+    - "!**/*.lock"
+    - "!**/*.min.js"
+    - "!**/*.snap"
+    # docs/ is deliberately NOT excluded: docs/config-reference.md,
+    # docs/cli-reference.md and docs/security-and-sandbox.md are substantive and the
+    # PR template asks authors to keep them in sync with flag changes. Excluding them
+    # also makes docs-only PRs come back as `review_skipped`.
+  path_instructions:
+    - path: ".github/workflows/**"
+      instructions: >-
+        Treat workflow changes as security-relevant. Third-party `uses:` steps must be
+        pinned to a version tag or a full commit SHA, never to a moving branch. Do not
+        interpolate untrusted `github.event.*` values (PR titles, body, head refs,
+        comments) directly into `run:` scripts — pass them through `env:` and reference
+        the variable instead. Keep `permissions:` least-privilege: declare the minimum
+        scopes the job needs and no more. Any new secret must be read from `secrets.`
+        context via `env:`, never echoed.
+    - path: "desktop/src-tauri/**/*.rs"
+      instructions: >-
+        Rust in the Tauri desktop crate: propagate errors with `?` instead of panicking,
+        and do not add `unwrap()` or `expect()` on runtime paths (I/O, deserialization,
+        locks, env lookups). Never run blocking I/O on the main thread or inside a
+        command handler — spawn it on the blocking/async runtime so the UI stays
+        responsive. Commands exposed to the frontend must validate their inputs.
+    # Test files first: CodeRabbit applies EVERY matching path_instructions entry
+    # (docs.coderabbit.ai/configuration/path-instructions: "If multiple patterns match a
+    # file, all matching instructions are applied"), so the entries below state explicitly
+    # which rules win for tests — the `web/src/**/*.ts(x)` component entries further down
+    # also match these files.
+    - path: "web/src/**/*.test.ts"
+      instructions: >-
+        This is a test file: the testing rules apply here, not the component rules for
+        web/src. Query by role or label rather than test ids, assert on observable
+        behaviour, and keep fixtures small and explicit. Strict TypeScript still applies
+        (no any, no non-null assertions on external data).
+    - path: "web/src/**/*.test.tsx"
+      instructions: >-
+        This is a test file: the testing rules apply here, not the component rules for
+        web/src. Query by role or label rather than test ids, assert on observable
+        behaviour, and keep fixtures small and explicit. Strict TypeScript still applies
+        (no any, no non-null assertions on external data).
+    - path: "pkg/**/*.go"
+      instructions: >-
+        Wrap errors with fmt.Errorf("...: %w", err) and keep passing context.Context
+        down call chains. Exported behaviour must be covered by table-driven tests.
+        Every goroutine needs a clear owner and a cancellation path (no leaks, no
+        unbounded goroutines). Do not introduce new global mutable state; pass
+        dependencies through constructors.
+    - path: "cmd/**/*.go"
+      instructions: >-
+        CLI flags are a public contract: keep existing flag names, defaults and
+        behaviour backwards compatible, and deprecate rather than remove. Any added
+        or changed flag must be documented in the command help and in the README.
+    - path: "web/src/**/*.ts"
+      instructions: >-
+        Preact function components and hooks only, no class components. TypeScript
+        strict mode: no any, no non-null assertions on external data. Tests should
+        query by role or label rather than test ids.
+    - path: "web/src/**/*.tsx"
+      instructions: >-
+        Preact function components and hooks only, no class components. TypeScript
+        strict mode: no any, no non-null assertions on external data. Tests should
+        query by role or label rather than test ids.
+    - path: "**/*_test.go"
+      instructions: >-
+        Assert on observable behaviour, not on implementation details or private
+        helpers. Synchronise with channels, sync primitives or test helpers, never
+        with time.Sleep.
+
+chat:
+  auto_reply: true
