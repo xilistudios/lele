@@ -264,10 +264,10 @@ On gateway start (and on demand) lele loads `~/.lele/cache/catalog/` and, if mis
 
 HTTP API:
 
-- `GET /api/v1/catalog/providers`
+- `GET /api/v1/catalog/providers` — every known provider (disk index, or the hardcoded offline set) with `id`, `name`, `type`, `api_base`, `model_count` and `base_less`. The `api_base` is always filled when the type has a known endpoint (`catalog.DefaultAPIBaseByType`), so a UI can pre-fill it instead of shipping its own table; `base_less: true` marks the providers whose endpoint cannot be derived (`custom`, `claude-code`, `codex-cli`, `bedrock`, `azure_foundry`). The WebUI's Add-provider screen builds its tile grid from this response, which is what keeps a provider added in Go selectable in the UI (issue #404).
 - `GET /api/v1/catalog/models?provider=<id>&q=<query>`
 - `POST /api/v1/catalog/prefetch`
-- `GET /api/v1/providers/{name}/models` — live `/v1/models` when credentials exist, enriched with catalog metadata, with offline catalog fallback
+- `GET /api/v1/providers/{name}/models` — live `/v1/models` when credentials exist, enriched with catalog metadata, with offline catalog fallback. A name that is not configured yet but is a known catalog provider answers with the catalog list (`source: "catalog"`), so the Add-provider screen can populate its model picker before the provider is saved.
 
 CLI:
 
