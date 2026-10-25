@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { SYSTEM_NOTICE_TOOL_NAME } from '../../lib/chatMessageBuilder'
+import { chatRowPadding } from '../../lib/chatRowSpacing'
 import { downloadFileViaApi } from '../../lib/fileDownload'
 import {
   isDiffStatLine,
@@ -145,11 +146,26 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
     if (isUser || isTool) return null
     // Don't parse blocks while streaming — partial content causes false positives
     // (e.g., an unclosed ``` triggers code-block mode for all subsequent text).
-    if (message.streaming) return null
+    // Nothing to extract from content with no visible text either; skipping it
+    // keeps inert whitespace from doing block work on every render.
+    if (message.streaming || !message.content.trim()) return null
     return parseBlocks(message.content)
   }, [isUser, isTool, message.content, message.streaming])
 
-  const hasThinking = !!message.reasoningContent
+  // Visibility source of truth. Raw `message.content` / `reasoningContent`
+  // truthiness is NOT enough: " ", "\n" and "\n\n\n" are truthy yet nothing in
+  // the row is visible, while the row still lays out — row padding, and any
+  // inert markdown block the whitespace produced. Measured in a live turn: up
+  // to 84px of dead space between two tool cards, gone after a reload.
+  const trimmedContent = message.content.trim()
+  const trimmedReasoning = (message.reasoningContent ?? '').trim()
+  const hasThinking = trimmedReasoning !== ''
+  const hasContent = trimmedContent !== ''
+  const hasAttachments = (message.attachments?.length ?? 0) > 0
+  // "Nothing typed yet" is measured on VISIBLE content: while streaming, a
+  // whitespace-only payload shows the typing dots instead of the blank markdown
+  // lines the old code used to render (the 84px ghost row).
+  const showsTypingDots = !!message.streaming && !hasContent && !hasThinking
 
   if (isTool) {
     const subagentSessionKey = message.subagentSessionKey
@@ -159,7 +175,7 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
         data-message-id={message.stableId ?? message.id}
         data-testid="message"
         data-role={message.role}
-        className={`py-1.5 ${animate ? 'animate-message-enter' : ''}`}
+        className={`${chatRowPadding(message)} ${animate ? 'animate-message-enter' : ''}`}
       >
         <ToolCallDisplay
           toolName={message.toolName}
@@ -187,7 +203,7 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
           data-testid="message"
           data-role={message.role}
           data-system-notice="true"
-          className={`py-1.5 ${animate ? 'animate-message-enter' : ''}`}
+          className={`${chatRowPadding(message)} ${animate ? 'animate-message-enter' : ''}`}
         >
           <ToolCallDisplay
             toolName={SYSTEM_NOTICE_TOOL_NAME}
@@ -209,7 +225,7 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
         data-message-id={message.stableId ?? message.id}
         data-testid="message"
         data-role={message.role}
-        className={`flex justify-end py-1 ${animate ? 'animate-message-enter' : ''}`}
+        className={`flex justify-end ${chatRowPadding(message)} ${animate ? 'animate-message-enter' : ''}`}
       >
         <div className="max-w-[70%] space-y-2 rounded-2xl bg-background-tertiary shadow-card px-4 py-2.5 text-sm text-text-primary whitespace-pre-wrap">
           {message.content ? <div>{message.content}</div> : null}
@@ -257,12 +273,27 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
     )
   }
 
+  // Never render an assistant row with nothing visible: empty or whitespace-only
+  // content/reasoning would still lay the row out and show up as dead space
+  // between two visible rows (tool cards in practice).
+  // An errored turn (`message.error`, set by markStreamingAssistantsErrored) is
+  // deliberately not exempt: nothing renders it, so it would be an empty row.
+  if (
+    !hasContent &&
+    !hasThinking &&
+    !hasAttachments &&
+    !message.excludeFromContext &&
+    !showsTypingDots
+  ) {
+    return null
+  }
+
   return (
     <div
       data-message-id={message.stableId ?? message.id}
       data-testid="message"
       data-role={message.role}
-      className={`py-3 ${animate ? 'animate-message-enter' : ''}`}
+      className={`${chatRowPadding(message)} ${animate ? 'animate-message-enter' : ''}`}
     >
       {message.excludeFromContext && (
         <div className="mb-1 flex items-center gap-1.5 text-2xs text-text-tertiary opacity-60">
@@ -317,7 +348,7 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
             )}
           </div>
         ) : null}
-        {message.streaming && message.content === '' && !hasThinking ? (
+        {showsTypingDots ? (
           <div className="flex items-center gap-2 text-text-tertiary text-sm">
             <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse" />
             <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse [animation-delay:0.2s]" />
@@ -443,7 +474,7 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
               </div>
             )
           })
-        ) : message.content ? (
+        ) : hasContent ? (
           <MarkdownText content={message.content} />
         ) : null}
 
@@ -505,7 +536,7 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
           </div>
         ) : null}
 
-        {isLast && message.streaming && message.content !== '' && (
+        {isLast && message.streaming && hasContent && (
           <span className="inline-block h-4 w-0.5 bg-text-secondary animate-pulse ml-0.5" />
         )}
       </div>
