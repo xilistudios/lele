@@ -19,20 +19,6 @@
       "tool_call": true
     },
     {
-      "id": "qwen3-vl-235b-a22b",
-      "name": "Qwen3-VL 235B-A22B",
-      "context_window": 131072,
-      "max_output": 32768,
-      "vision": true,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
       "id": "qwen3-vl-30b-a3b",
       "name": "Qwen3-VL 30B-A3B",
       "context_window": 131072,
@@ -268,10 +254,10 @@
       "tool_call": true
     },
     {
-      "id": "qwen3-14b",
-      "name": "Qwen3 14B",
-      "context_window": 131072,
-      "max_output": 8192,
+      "id": "qwen3.7-max",
+      "name": "Qwen3.7 Max",
+      "context_window": 1000000,
+      "max_output": 131072,
       "thinking_levels": [
         "low",
         "medium",
@@ -281,62 +267,60 @@
       "tool_call": true
     },
     {
-      "id": "qwen3-235b-a22b",
-      "name": "Qwen3 235B-A22B",
-      "context_window": 131072,
-      "max_output": 16384,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "qwen3-32b",
-      "name": "Qwen3 32B",
-      "context_window": 131072,
-      "max_output": 16384,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "qwen3-8b",
-      "name": "Qwen3 8B",
-      "context_window": 131072,
-      "max_output": 8192,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "qwen3-next-80b-a3b-thinking",
-      "name": "Qwen3-Next 80B-A3B (Thinking)",
-      "context_window": 131072,
-      "max_output": 32768,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "qwen3.6-max-preview",
-      "name": "Qwen3.6 Max Preview",
-      "context_window": 262144,
+      "id": "qwen3-coder-flash",
+      "name": "Qwen3 Coder Flash",
+      "context_window": 1000000,
       "max_output": 65536,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3-asr-flash",
+      "name": "Qwen3-ASR Flash",
+      "context_window": 53248,
+      "max_output": 4096,
+      "vision": true
+    },
+    {
+      "id": "kimi-k3",
+      "name": "Kimi K3",
+      "context_window": 1048576,
+      "max_output": 1048576,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek-v4-flash-0731",
+      "name": "DeepSeek V4 Flash 0731",
+      "context_window": 1000000,
+      "max_output": 384000,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "glm-5.2",
+      "name": "GLM-5.2",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen-flash",
+      "name": "Qwen Flash",
+      "context_window": 1000000,
+      "max_output": 32768,
       "thinking_levels": [
         "low",
         "medium",

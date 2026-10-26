@@ -18,54 +18,6 @@
       "tool_call": true
     },
     {
-      "id": "glm-4.7",
-      "name": "GLM-4.7",
-      "context_window": 204800,
-      "max_output": 131072,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "glm-5-turbo",
-      "name": "GLM-5-Turbo",
-      "context_window": 200000,
-      "max_output": 131072,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "glm-5.2",
-      "name": "GLM-5.2",
-      "context_window": 1000000,
-      "max_output": 131072,
-      "thinking_levels": [
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "glm-5.2-highspeed",
-      "name": "GLM-5.2 Highspeed",
-      "context_window": 1000000,
-      "max_output": 131072,
-      "thinking_levels": [
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
       "id": "glm-5.3",
       "name": "GLM-5.3",
       "context_window": 1000000,

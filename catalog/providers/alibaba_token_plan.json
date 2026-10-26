@@ -115,19 +115,6 @@
       "tool_call": true
     },
     {
-      "id": "deepseek-v3.2",
-      "name": "DeepSeek V3.2",
-      "context_window": 131072,
-      "max_output": 65536,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
       "id": "qwen3.7-max",
       "name": "Qwen3.7 Max",
       "context_window": 1000000,
@@ -167,11 +154,13 @@
       "tool_call": true
     },
     {
-      "id": "deepseek-v4-flash",
-      "name": "DeepSeek V4 Flash",
+      "id": "deepseek-v4.1-flash-1017",
+      "name": "DeepSeek V4.1 Flash 1017",
       "context_window": 1000000,
       "max_output": 384000,
+      "vision": true,
       "thinking_levels": [
+        "low",
         "high"
       ],
       "reasoning": true,

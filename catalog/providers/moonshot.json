@@ -58,6 +58,32 @@
       ],
       "reasoning": true,
       "tool_call": true
+    },
+    {
+      "id": "kimi-k3.1-pro",
+      "name": "Kimi K3.1 Pro",
+      "context_window": 1048576,
+      "max_output": 1048576,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "kimi-k3.1-pro-highspeed",
+      "name": "Kimi K3.1 Pro Highspeed",
+      "context_window": 1048576,
+      "max_output": 1048576,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
     }
   ]
 }

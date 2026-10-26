@@ -22,34 +22,7 @@
       "id": "Qwen/Qwen3.6-Plus",
       "name": "Qwen3.6 Plus",
       "context_window": 1000000,
-      "max_output": 500000,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "MiniMaxAI/MiniMax-M3",
-      "name": "MiniMax-M3",
-      "context_window": 524288,
-      "max_output": 250000,
-      "vision": true,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "MiniMaxAI/MiniMax-M2.7",
-      "name": "MiniMax-M2.7",
-      "context_window": 196608,
-      "max_output": 131072,
+      "max_output": 65536,
       "thinking_levels": [
         "low",
         "medium",
@@ -62,21 +35,27 @@
       "id": "Qwen/Qwen3.7-Max",
       "name": "Qwen3.7 Max",
       "context_window": 1000000,
-      "max_output": 500000,
-      "tool_call": true
-    },
-    {
-      "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-      "name": "Llama 3.3 70B",
-      "context_window": 131072,
       "max_output": 131072,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
       "tool_call": true
     },
     {
-      "id": "Qwen/Qwen2.5-7B-Instruct-Turbo",
-      "name": "Qwen 2.5 7B Instruct Turbo",
-      "context_window": 32768,
-      "max_output": 32768,
+      "id": "MiniMaxAI/MiniMax-M3",
+      "name": "MiniMax-M3",
+      "context_window": 524288,
+      "max_output": 524288,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
       "tool_call": true
     },
     {
@@ -140,9 +119,9 @@
       "max_output": 131072,
       "vision": true,
       "thinking_levels": [
-        "high",
+        "low",
         "medium",
-        "low"
+        "high"
       ],
       "reasoning": true,
       "tool_call": true
@@ -161,36 +140,11 @@
       "tool_call": true
     },
     {
-      "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
-      "name": "DeepSeek V4 Flash 0731",
-      "context_window": 1048576,
-      "max_output": 384000,
-      "thinking_levels": [
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
       "id": "deepseek-ai/DeepSeek-V4-Pro-0813",
       "name": "DeepSeek V4 Pro 0813",
       "context_window": 1048576,
       "max_output": 384000,
       "thinking_levels": [
-        "low",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "nvidia/nemotron-3-ultra-550b-a55b",
-      "name": "Nemotron 3 Ultra 550B A55B",
-      "context_window": 512300,
-      "max_output": 512300,
-      "thinking_levels": [
-        "low",
-        "medium",
         "high"
       ],
       "reasoning": true,
@@ -236,7 +190,7 @@
     {
       "id": "zai-org/GLM-5.3",
       "name": "GLM-5.3",
-      "context_window": 1048576,
+      "context_window": 1048575,
       "max_output": 262144,
       "thinking_levels": [
         "low",
@@ -244,12 +198,6 @@
       ],
       "reasoning": true,
       "tool_call": true
-    },
-    {
-      "id": "LiquidAI/LFM2-24B-A2B",
-      "name": "LFM2-24B-A2B",
-      "context_window": 32768,
-      "max_output": 32768
     }
   ]
 }

@@ -202,7 +202,7 @@
       "id": "deepseek-ai/DeepSeek-R1-0528",
       "name": "DeepSeek-R1-0528",
       "context_window": 163840,
-      "max_output": 163840,
+      "max_output": 32768,
       "thinking_levels": [
         "low",
         "medium",
@@ -268,7 +268,7 @@
       "id": "Qwen/Qwen3-235B-A22B-Thinking-2507",
       "name": "Qwen3-235B-A22B-Thinking-2507",
       "context_window": 262144,
-      "max_output": 131072,
+      "max_output": 81920,
       "thinking_levels": [
         "low",
         "medium",
@@ -295,6 +295,19 @@
       "name": "Qwen3 32B",
       "context_window": 131072,
       "max_output": 16384,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "Qwen/Qwen3-8B",
+      "name": "Qwen3 8B",
+      "context_window": 40960,
+      "max_output": 32768,
       "thinking_levels": [
         "low",
         "medium",
@@ -383,19 +396,6 @@
       "name": "DeepSeek V3 0324",
       "context_window": 163840,
       "max_output": 163840,
-      "tool_call": true
-    },
-    {
-      "id": "zai-org/GLM-4.5",
-      "name": "GLM-4.5",
-      "context_window": 131072,
-      "max_output": 98304,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
       "tool_call": true
     },
     {
@@ -494,7 +494,7 @@
       "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
       "name": "Qwen3-Coder-480B-A35B-Instruct",
       "context_window": 262144,
-      "max_output": 66536,
+      "max_output": 65536,
       "tool_call": true
     }
   ]

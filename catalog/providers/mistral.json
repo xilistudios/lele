@@ -37,6 +37,7 @@
       "name": "Codestral 25.08",
       "context_window": 256000,
       "max_output": 8192,
+      "vision": true,
       "tool_call": true
     },
     {
@@ -44,6 +45,7 @@
       "name": "Codestral (latest)",
       "context_window": 256000,
       "max_output": 4096,
+      "vision": true,
       "tool_call": true
     },
     {
@@ -89,6 +91,19 @@
       "max_output": 256000,
       "vision": true,
       "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "zai-glm-5-3-flash",
+      "name": "GLM-5.3-Flash",
+      "context_window": 1048576,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
         "high"
       ],
       "reasoning": true,
@@ -170,7 +185,8 @@
     },
     {
       "id": "voxtral-mini-latest",
-      "name": "Voxtral Mini (latest)"
+      "name": "Voxtral Mini (latest)",
+      "vision": true
     },
     {
       "id": "voxtral-mini-tts-latest",

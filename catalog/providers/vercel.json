@@ -7,7 +7,7 @@
     {
       "id": "anthropic/claude-sonnet-4.5",
       "name": "Claude Sonnet 4.5",
-      "context_window": 200000,
+      "context_window": 1000000,
       "max_output": 64000,
       "vision": true,
       "thinking_levels": [
