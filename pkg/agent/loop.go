@@ -1201,9 +1201,11 @@ func (al *AgentLoop) Shutdown(ctx context.Context) error {
 	}
 }
 
-// Stop stops the agent loop and waits for in-flight message goroutines to
-// finish. It is the unbounded form of StopWithin and is meant for callers
-// (the TUI) that own the process exit and can wait as long as the work needs.
+// Stop stops the agent loop and waits, unbounded, for in-flight message
+// goroutines to finish. It is the unbounded form of StopWithin, kept for tests
+// and for callers that genuinely want to drain without a budget; production
+// exit paths (the gateway and the TUI) use StopWithin so a turn that ignores
+// cancellation cannot hold the process open.
 func (al *AgentLoop) Stop() {
 	_ = al.StopWithin(0)
 }
@@ -1212,8 +1214,9 @@ func (al *AgentLoop) Stop() {
 // them after grace. grace <= 0 waits forever, which is what Stop does.
 //
 // The bounded form exists because a turn that outlived the drain can only be
-// released by cancelling the root context it runs on, and the gateway does
-// exactly that right before calling this. If a turn still refuses to exit - a
+// released by cancelling the root context it runs on, and both exit paths —
+// the gateway's runGracefulShutdown and the TUI's shutdownTUI — do exactly that
+// right before calling this. If a turn still refuses to exit - a
 // tool that does not observe cancellation, a subagent with its own context -
 // the join must not be what keeps the process alive: systemd's
 // TimeoutStopUSec would fire, SIGKILL would land on every turn, and a
