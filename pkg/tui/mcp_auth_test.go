@@ -121,17 +121,33 @@ func (f *fakeMCPAuthFlow) Cancel() error {
 
 // mcpAuthStartCapture substitutes the startMCPAuthFlow seam for one test and records
 // what the TUI asked the engine for.
+//
+// It ALSO stubs the browser opener (mcpAuthOpenURL): the real seam launches
+// xdg-open/open/cmd, which a test must never do. Like the engine, install's
+// fake start calls the injected opener when the caller provided one (and
+// ignores its error), so the whole open path — seam → AuthOptions.OpenURL →
+// the modal's feedback line — is exercised without a process.
 type mcpAuthStartCapture struct {
-	names []string
-	srvs  []mcp.ServerConfig
-	opts  []mcp.AuthOptions
-	flow  mcpAuthFlow
-	err   error
+	names     []string
+	srvs      []mcp.ServerConfig
+	opts      []mcp.AuthOptions
+	flow      mcpAuthFlow
+	err       error
+	openErr   error     // what the stubbed opener reports
+	openedRef *[]string // URLs the stubbed opener was asked to launch
+}
+
+// opened returns every URL the stubbed browser opener received.
+func (c *mcpAuthStartCapture) opened() []string {
+	if c.openedRef == nil {
+		return nil
+	}
+	return *c.openedRef
 }
 
 func (c *mcpAuthStartCapture) install(t *testing.T) {
 	t.Helper()
-	prev := startMCPAuthFlow
+	prevStart := startMCPAuthFlow
 	startMCPAuthFlow = func(_ context.Context, name string, srv mcp.ServerConfig, _ *mcp.AuthStore, opts mcp.AuthOptions) (mcpAuthFlow, error) {
 		c.names = append(c.names, name)
 		c.srvs = append(c.srvs, srv)
@@ -139,9 +155,31 @@ func (c *mcpAuthStartCapture) install(t *testing.T) {
 		if c.err != nil {
 			return nil, c.err
 		}
+		// The engine launches the browser during its pre-flow phase and never
+		// treats the failure as fatal (pkg/mcp: `_ = opts.OpenURL(authURL)`).
+		if opts.OpenURL != nil && c.flow != nil {
+			_ = opts.OpenURL(c.flow.URL())
+		}
 		return c.flow, nil
 	}
-	t.Cleanup(func() { startMCPAuthFlow = prev })
+	c.openedRef = stubMCPAuthOpenURL(t, c.openErr)
+	t.Cleanup(func() { startMCPAuthFlow = prevStart })
+}
+
+// stubMCPAuthOpenURL replaces the browser-opener seam for one test and returns
+// the URLs it was asked to launch. Every test that drives a start must install
+// it (directly or through mcpAuthStartCapture): the real seam spawns the
+// platform browser (xdg-open / open / cmd start), which a test must never do.
+func stubMCPAuthOpenURL(t *testing.T, err error) *[]string {
+	t.Helper()
+	prev := mcpAuthOpenURL
+	opened := new([]string)
+	mcpAuthOpenURL = func(u string) error {
+		*opened = append(*opened, u)
+		return err
+	}
+	t.Cleanup(func() { mcpAuthOpenURL = prev })
+	return opened
 }
 
 // countMCPSyncs substitutes the SyncMCPServers seam and returns the counter.
@@ -231,10 +269,27 @@ func TestMCPAuthKey_AOpensFlowOnRemoteEntryAndRefusesStdio(t *testing.T) {
 		if got := capture.srvs[0].URL; got != "https://mcp.example.test/mcp" {
 			t.Errorf("ServerConfig.URL = %q, want the winning remote url", got)
 		}
-		// The TUI must NOT hand the engine a browser opener: it displays the
-		// URL and offers CTRL+Y instead (a remote terminal has no browser).
-		if capture.opts[0].OpenURL != nil {
-			t.Error("AuthOptions.OpenURL is set; the TUI must display, not launch")
+		// The browser launch is the engine's contract: the TUI INJECTS the opener
+		// (AuthOptions.OpenURL) instead of spawning anything itself, and the URL
+		// stays on screen with CTRL+Y as the manual fallback.
+		if capture.opts[0].OpenURL == nil {
+			t.Error("AuthOptions.OpenURL is nil; the TUI must hand the engine a browser opener")
+		}
+		if len(capture.opened()) != 1 || capture.opened()[0] != flow.url {
+			t.Errorf("browser opener asked for %v, want exactly [%s]", capture.opened(), flow.url)
+		}
+		if m.mcpAuthFeedback != i18n.T("tui.mcpAuthBrowserOpened") {
+			t.Errorf("feedback = %q, want the browser-opened line %q",
+				m.mcpAuthFeedback, i18n.T("tui.mcpAuthBrowserOpened"))
+		}
+		// The copy affordance must survive the automatic launch: the URL is
+		// rendered and the hint still advertises CTRL+Y.
+		out := ansi.Strip(m.renderMCPAuth())
+		if !strings.Contains(out, flow.url) {
+			t.Errorf("pending modal lost the authorization URL:\n%s", out)
+		}
+		if !strings.Contains(out, i18n.T("tui.mcpAuthHintCopy")) {
+			t.Errorf("pending modal lost the copy hint:\n%s", out)
 		}
 		if m.mcpAuthURL != flow.url {
 			t.Errorf("mcpAuthURL = %q, want the flow's URL %q", m.mcpAuthURL, flow.url)
@@ -832,6 +887,83 @@ func TestMCPAuthKey_CtrlYWithNoURLReportsFailure(t *testing.T) {
 	}
 	if m.mcpAuthError != i18n.T("tui.mcpAuthCopyFailed") {
 		t.Errorf("error = %q, want %q", m.mcpAuthError, i18n.T("tui.mcpAuthCopyFailed"))
+	}
+}
+
+// ── 4b. the automatic browser launch ──────────────────────────────────
+
+// TestMCPAuthOpenURL_BrowserLaunchedWithTheFlowURL is the happy half of the
+// automatic launch: the URL the modal displays is the one the opener receives,
+// exactly once per flow, and the modal reports it without stealing the copy
+// path (the URL and the CTRL+Y hint stay on screen).
+func TestMCPAuthOpenURL_BrowserLaunchedWithTheFlowURL(t *testing.T) {
+	capture := &mcpAuthStartCapture{}
+	flow := &fakeMCPAuthFlow{
+		url:    "https://auth.example.test/authorize?client_id=abc&state=s",
+		status: mcpAuthStatusPending,
+	}
+	m := mcpAuthEnterFlow(t, capture, flow)
+
+	if got := capture.opened(); len(got) != 1 || got[0] != flow.url {
+		t.Fatalf("browser launches = %v, want exactly [%s]", got, flow.url)
+	}
+	if m.mcpAuthError != "" {
+		t.Errorf("a successful launch left an error line: %q", m.mcpAuthError)
+	}
+	out := ansi.Strip(m.renderMCPAuth())
+	for _, want := range []string{
+		i18n.T("tui.mcpAuthBrowserOpened"),
+		flow.url,
+		i18n.T("tui.mcpAuthHintCopy"),
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("pending modal does not render %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestMCPAuthOpenURL_LaunchFailureKeepsTheCopyPath covers the headless case (an
+// SSH session, a machine with no browser): a failed launch is NOT an
+// authorization failure — the modal stays pending, says why no browser
+// appeared, keeps the URL on screen and CTRL+Y still copies it.
+func TestMCPAuthOpenURL_LaunchFailureKeepsTheCopyPath(t *testing.T) {
+	launchErr := errors.New("xdg-open: no display")
+	capture := &mcpAuthStartCapture{openErr: launchErr}
+	flow := &fakeMCPAuthFlow{
+		url:    "https://auth.example.test/authorize?state=s",
+		status: mcpAuthStatusPending,
+	}
+	m := mcpAuthEnterFlow(t, capture, flow)
+
+	if m.mcpAuthState != mcpAuthPending {
+		t.Fatalf("state = %d, want to stay mcpAuthPending (a launch failure is not terminal)", m.mcpAuthState)
+	}
+	if m.mcpAuthFeedback != "" {
+		t.Errorf("feedback = %q, want it empty when the launch failed", m.mcpAuthFeedback)
+	}
+	if m.mcpAuthError != i18n.T("tui.mcpAuthBrowserFailed") {
+		t.Errorf("error line = %q, want %q", m.mcpAuthError, i18n.T("tui.mcpAuthBrowserFailed"))
+	}
+	out := ansi.Strip(m.renderMCPAuth())
+	for _, want := range []string{
+		i18n.T("tui.mcpAuthBrowserFailed"),
+		flow.url,
+		i18n.T("tui.mcpAuthHintCopy"),
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("pending modal does not render %q:\n%s", want, out)
+		}
+	}
+	// The manual path still works: CTRL+Y copies the URL and clears the
+	// launch-failure line.
+	if _, handled := m.handleMCPKey(tea.KeyMsg{Type: tea.KeyCtrlY}); !handled {
+		t.Fatal("ctrl+y was not handled after a failed launch")
+	}
+	if m.mcpAuthFeedback != i18n.T("tui.mcpAuthCopied") {
+		t.Errorf("feedback after ctrl+y = %q, want %q", m.mcpAuthFeedback, i18n.T("tui.mcpAuthCopied"))
+	}
+	if m.mcpAuthError != "" {
+		t.Errorf("copy did not clear the launch-failure line: %q", m.mcpAuthError)
 	}
 }
 
