@@ -84,10 +84,12 @@ type mcpAuthStartMsg struct {
 	flow mcpAuthFlow
 	err  error
 	// openErr is what the browser opener reported for the authorization URL
-	// (nil when no opener ran or it launched fine). It is NOT a flow failure:
-	// the URL stays on screen and CTRL+Y still copies it, so the modal only
-	// uses it to explain WHY no browser appeared.
-	openErr error
+	// (nil when it launched fine), and openTried records whether an opener ran
+	// at all (a model built without NewModel has none). A launch failure is NOT
+	// a flow failure: the URL stays on screen and CTRL+Y still copies it, so
+	// the modal only uses this to explain WHY no browser appeared.
+	openTried bool
+	openErr   error
 }
 
 // mcpAuthPollMsg is one poll tick of a live flow. seq identifies the flow it
@@ -145,18 +147,21 @@ var startMCPAuthFlow = func(ctx context.Context, name string, srv mcp.ServerConf
 	return mcp.StartAuth(ctx, name, srv, store, opts)
 }
 
-// mcpAuthOpenURL launches the authorization URL in the user's browser. The
-// engine never spawns a process itself: it takes an opener (AuthOptions.OpenURL)
-// so the CALLER decides, which is exactly what makes this substitutable in
-// tests and what the CLI already does (cmd/lele/mcp.go, with --no-browser as a
-// single nil).
+// mcpAuthBrowserOpener is the browser launcher NewModel installs on the model
+// (mcpAuthOpener). The engine never spawns a process itself: it takes an opener
+// (AuthOptions.OpenURL) so the CALLER decides — which is what the CLI does too
+// (cmd/lele/mcp.go, with --no-browser as a single nil).
 //
-// The TUI used to hand the engine a nil opener on the grounds that a remote
-// terminal has no browser — but that made the common case (a local terminal)
-// needlessly manual. The browser is now launched automatically AND the URL is
-// still displayed and copyable (CTRL+Y), so a headless or SSH session loses
-// nothing: the launch simply fails, the modal says so, and the copy path stays.
-var mcpAuthOpenURL = auth.OpenBrowser
+// OpenBrowserConfirming rather than OpenBrowser: a launcher that STARTS is not a
+// browser that opened. `xdg-open` on a headless host (a container, an SSH
+// session without DISPLAY) starts fine and then exits non-zero, and reporting
+// that as success would be the one lie this modal must not tell (its whole point
+// is to say "open it yourself with CTRL+Y" when the launch did not work).
+// OpenBrowserConfirming spends at most DefaultBrowserConfirmWait watching the
+// launcher, which is why the URL appears that much later at worst.
+func mcpAuthBrowserOpener(u string) error {
+	return auth.OpenBrowserConfirming(u, auth.DefaultBrowserConfirmWait)
+}
 
 // ── Entry point: "a" in ModalMCPDetail ─────────────────────────────────
 
@@ -202,13 +207,15 @@ func (m *Model) mcpAuthStartFromDetail() tea.Cmd {
 
 // mcpAuthStartCmd builds the command that resolves the server's winning
 // ServerConfig and starts its flow. Discover reads the three mcp.json layers,
-// so it runs in the command goroutine; the paths are resolved HERE (in Update)
-// and captured by value, because m.mcpPaths() reads Model fields and a command
-// goroutine runs concurrently with Update — reading them there would be a data
-// race (and every Model field the closure needs is captured, never read).
+// so it runs in the command goroutine; the paths and the browser opener are
+// resolved HERE (in Update) and captured by value, because m.mcpPaths() and
+// m.mcpAuthOpener read Model fields and a command goroutine runs concurrently
+// with Update — reading them there would be a data race.
 func (m *Model) mcpAuthStartCmd(name string) tea.Cmd {
 	paths, ok := m.mcpPaths()
 	seq := m.mcpAuthSeq
+	// Captured here, used in the goroutine: the model is not read there.
+	opener := m.mcpAuthOpener
 	if !ok {
 		return func() tea.Msg {
 			return mcpAuthStartMsg{seq: seq, name: name, err: errMCPUnavailable}
@@ -226,18 +233,28 @@ func (m *Model) mcpAuthStartCmd(name string) tea.Cmd {
 		// The opener is INJECTED by the engine's contract (StartAuth never
 		// spawns a process itself). It runs inside the engine's pre-flow phase
 		// — synchronously, on THIS goroutine — so recording its outcome in a
-		// local costs no lock and no race: openErr is written by the opener
-		// and read below, after StartAuth returned.
+		// local costs no lock and no race: openErr is written by the opener and
+		// read below, after StartAuth returned. A nil opener (a model built
+		// without NewModel) hands the engine nothing: no launch, no claim.
 		var openErr error
-		opener := func(u string) error {
-			openErr = mcpAuthOpenURL(u)
-			return openErr
+		opts := mcp.AuthOptions{}
+		if opener != nil {
+			opts.OpenURL = func(u string) error {
+				openErr = opener(u)
+				return openErr
+			}
 		}
-		flow, err := startMCPAuthFlow(context.Background(), name, srv, store, mcp.AuthOptions{OpenURL: opener})
+		flow, err := startMCPAuthFlow(context.Background(), name, srv, store, opts)
 		if err != nil {
 			return mcpAuthStartMsg{seq: seq, name: name, err: err}
 		}
-		return mcpAuthStartMsg{seq: seq, name: name, flow: flow, openErr: openErr}
+		return mcpAuthStartMsg{
+			seq:       seq,
+			name:      name,
+			flow:      flow,
+			openTried: opener != nil,
+			openErr:   openErr,
+		}
 	}
 }
 
@@ -380,9 +397,12 @@ func (m *Model) handleMCPAuthStart(msg mcpAuthStartMsg) tea.Cmd {
 	// outcome without making it fatal. A failed launch is NOT an authorization
 	// failure — the URL is on screen and CTRL+Y copies it — so it lands on the
 	// inline (non-terminal) line, while the copy hint stays advertised below.
-	if msg.openErr != nil {
+	switch {
+	case !msg.openTried:
+		// No opener on this model: nothing was attempted, so nothing is claimed.
+	case msg.openErr != nil:
 		m.mcpAuthError = i18n.T("tui.mcpAuthBrowserFailed")
-	} else {
+	default:
 		m.mcpAuthFeedback = i18n.T("tui.mcpAuthBrowserOpened")
 	}
 	return m.mcpAuthPollCmd()

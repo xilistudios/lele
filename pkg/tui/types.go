@@ -414,6 +414,13 @@ type Model struct {
 	mcpAuthFeedback string
 	mcpAuthError    string
 	mcpAuthSeq      int
+	// mcpAuthOpener launches the authorization URL for the user. NewModel
+	// installs the platform browser launcher; it is a FIELD (not a package
+	// variable) so the dependency is supplied at construction and a nil value
+	// simply means "this model never opens a browser" — the modal still shows
+	// the URL and CTRL+Y still copies it. It is read in Update (before the
+	// start command is built) and never from a command goroutine.
+	mcpAuthOpener func(string) error
 
 	// Custom (harness) slash-command administration state. commandsModalKeys
 	// maps modal items to composite "source:name" keys ("" for separators and

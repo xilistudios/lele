@@ -112,12 +112,11 @@ func mcpAuthPollUntilSettled(t *testing.T, m *Model) {
 func TestMCPAuthEngine_LoopbackFlowCompletesThroughTheTUI(t *testing.T) {
 	doc, resourceURL := mcpAuthE2EServer(t)
 	syncs := countMCPSyncs(t)
-	// This test drives the REAL StartAuth, so the opener it injects is the
-	// real one unless it is stubbed here: the stub also proves the engine
+	// This test drives the REAL StartAuth, so the opener it injects is the real
+	// launcher unless it is replaced here: the recorder also proves the engine
 	// received the authorization URL it must launch.
-	opened := stubMCPAuthOpenURL(t, nil)
-
 	m := mcpAuthListModel(t, doc)
+	opened := mcpAuthRecordingOpener(m, nil)
 	mcpAuthOpenDetail(t, m, "remote-srv")
 
 	cmd, handled := m.handleMCPKey(mcpKeyRunes('a'))
@@ -182,9 +181,9 @@ func TestMCPAuthEngine_LoopbackFlowCompletesThroughTheTUI(t *testing.T) {
 // switched modal state would leave the port pinned for the flow's budget.
 func TestMCPAuthEngine_CancelReleasesTheLoopbackListener(t *testing.T) {
 	doc, _ := mcpAuthE2EServer(t)
-	stubMCPAuthOpenURL(t, nil)
 
 	m := mcpAuthListModel(t, doc)
+	mcpAuthRecordingOpener(m, nil) // never spawn the real browser
 	mcpAuthOpenDetail(t, m, "remote-srv")
 	cmd, _ := m.handleMCPKey(mcpKeyRunes('a'))
 	runCmd(t, m, cmd)
