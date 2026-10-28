@@ -120,6 +120,9 @@ func TestSyncMCPServers_AfterCloseInstallsNothing(t *testing.T) {
 	}
 
 	agent := mcpTestAgent(t, al)
+	if got := tc.sessionTools(agent, "chat-a"); got != agent.Tools {
+		t.Error("a sync after closeMCPManagers must NOT build a session layer")
+	}
 	if _, ok := agent.Tools.Get(tools.LoadMCPToolsName); ok {
 		t.Error("load_mcp_tools must NOT be registered by a sync after closeMCPManagers")
 	}
@@ -141,10 +144,17 @@ func TestSyncMCPServers_ReflectsMCPJSONToggle(t *testing.T) {
 	tc := mcpTestCoordinator(t, al)
 	agent := mcpTestAgent(t, al)
 
+	// The session view is where load_mcp_tools is offered (MCP tools are
+	// session-scoped: the agent-wide registry never carries them).
+	sessionLoader := func() bool {
+		_, ok := tc.sessionTools(agent, "chat-a").Get(tools.LoadMCPToolsName)
+		return ok
+	}
+
 	// Sync #1 — baseline: no mcp.json anywhere → empty surface.
 	al.SyncMCPServers()
-	if _, ok := agent.Tools.Get(tools.LoadMCPToolsName); ok {
-		t.Fatal("load_mcp_tools registered before any server exists")
+	if sessionLoader() {
+		t.Fatal("load_mcp_tools offered before any server exists")
 	}
 	if sec := mcpSectionOf(agent.ContextBuilder.BuildSystemPrompt()); sec != "" {
 		t.Fatalf("baseline prompt already has an MCP section: %q", sec)
@@ -154,8 +164,8 @@ func TestSyncMCPServers_ReflectsMCPJSONToggle(t *testing.T) {
 	writeAgentMCPJSON(t, workspace,
 		`{"mcpServers": {"s": {"command": "true", "description": "Server s"}}}`)
 	al.SyncMCPServers()
-	if _, ok := agent.Tools.Get(tools.LoadMCPToolsName); !ok {
-		t.Fatalf("sync after mcp.json gained a server did not register load_mcp_tools, have %v",
+	if !sessionLoader() {
+		t.Fatalf("sync after mcp.json gained a server did not offer load_mcp_tools, have %v",
 			agent.Tools.List())
 	}
 	if sec := mcpSectionOf(agent.ContextBuilder.BuildSystemPrompt()); !strings.Contains(sec, "- **s**") {
@@ -169,8 +179,11 @@ func TestSyncMCPServers_ReflectsMCPJSONToggle(t *testing.T) {
 	writeAgentMCPJSON(t, workspace,
 		`{"mcpServers": {"s": {"command": "true", "description": "Server s", "disabled": true}}}`)
 	al.SyncMCPServers()
-	if _, ok := agent.Tools.Get(tools.LoadMCPToolsName); ok {
-		t.Error("load_mcp_tools must be unregistered after the server was disabled")
+	if sessionLoader() {
+		t.Error("load_mcp_tools must stop being offered after the server was disabled")
+	}
+	if got := tc.sessionTools(agent, "chat-a"); got != agent.Tools {
+		t.Error("disabling the last server must drop the session layer")
 	}
 	if sec := mcpSectionOf(agent.ContextBuilder.BuildSystemPrompt()); sec != "" {
 		t.Errorf("prompt section must be empty after the disable, got %q", sec)

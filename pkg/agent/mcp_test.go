@@ -161,6 +161,19 @@ func mcpTestCoordinator(t *testing.T, al *AgentLoop) *toolCoordinatorImpl {
 	return tc
 }
 
+// mcpSessionLoader returns the load_mcp_tools tool a session sees, failing the
+// test when the session is not offered one. MCP tools live in a per-session
+// layer (tools.NewScopedRegistry over agent.Tools), never in agent.Tools, so
+// every test that executes a load has to go through sessionTools.
+func mcpSessionLoader(t *testing.T, tc *toolCoordinatorImpl, agent *AgentInstance, sessionKey string) tools.Tool {
+	t.Helper()
+	loader, ok := tc.sessionTools(agent, sessionKey).Get(tools.LoadMCPToolsName)
+	if !ok {
+		t.Fatalf("session %q is not offered load_mcp_tools (base tools: %v)", sessionKey, agent.Tools.List())
+	}
+	return loader
+}
+
 // mcpSectionOf extracts the "## MCP Servers" section of a prompt (up to the
 // next "---" separator). Returns "" when the section is absent. The heading
 // is matched as its own line (leading \n) because the load_mcp_tools tool
@@ -200,8 +213,22 @@ func TestMCPSync_RegistersLoaderWhenServersConfigured(t *testing.T) {
 	tc.syncMCPTools()
 
 	agent := mcpTestAgent(t, al)
-	if _, ok := agent.Tools.Get(tools.LoadMCPToolsName); !ok {
-		t.Errorf("load_mcp_tools not registered, have %v", agent.Tools.List())
+	// The base registry is shared by every chat of the agent: the loader must
+	// NOT be there (that is what leaked MCP tools into other sessions).
+	if _, ok := agent.Tools.Get(tools.LoadMCPToolsName); ok {
+		t.Errorf("load_mcp_tools must not be registered in the agent-wide registry, have %v", agent.Tools.List())
+	}
+	// It is offered per session, from a scoped layer over the base registry.
+	layer := tc.sessionTools(agent, "chat-a")
+	if !layer.IsScoped() {
+		t.Fatal("the session view must be a scoped layer while MCP servers are configured")
+	}
+	if _, ok := layer.Get(tools.LoadMCPToolsName); !ok {
+		t.Errorf("load_mcp_tools not offered to the session, have %v", layer.List())
+	}
+	// Built-in tools stay reachable through the layer.
+	if _, ok := layer.Get("read_file"); !ok {
+		t.Errorf("the session view must fall back to the agent registry, have %v", layer.List())
 	}
 
 	entry, ok := tc.mcpManagers.get("main")
@@ -245,6 +272,11 @@ func TestMCPSync_NoServersLeavesLoaderUnregistered(t *testing.T) {
 	if _, ok := agent.Tools.Get(tools.LoadMCPToolsName); ok {
 		t.Errorf("load_mcp_tools must not be registered, have %v", agent.Tools.List())
 	}
+	// Without servers there is nothing to scope: the session view IS the base
+	// registry (no layer is allocated).
+	if got := tc.sessionTools(agent, "chat-a"); got != agent.Tools {
+		t.Error("with no MCP servers configured the session view must be the base registry")
+	}
 	if _, ok := tc.mcpManagers.get("main"); ok {
 		t.Error("a manager must not be stored when no server is configured")
 	}
@@ -275,8 +307,9 @@ func TestMCPSync_RemovingServersClosesManagerAndUnregistersLoader(t *testing.T) 
 	tc.syncMCPTools()
 
 	agent := mcpTestAgent(t, al)
-	if _, ok := agent.Tools.Get(tools.LoadMCPToolsName); !ok {
-		t.Fatalf("load_mcp_tools not registered after first sync, have %v", agent.Tools.List())
+	layer := tc.sessionTools(agent, "chat-a")
+	if _, ok := layer.Get(tools.LoadMCPToolsName); !ok {
+		t.Fatalf("load_mcp_tools not offered after first sync, have %v", layer.List())
 	}
 	// Build once so the cache holds the section; the reload must drop it.
 	if mcpSectionOf(agent.ContextBuilder.BuildSystemPrompt()) == "" {
@@ -290,8 +323,13 @@ func TestMCPSync_RemovingServersClosesManagerAndUnregistersLoader(t *testing.T) 
 	writeAgentMCPJSON(t, workspace, "")
 	tc.syncMCPTools()
 
+	// The retired manager takes every session layer with it: the loader is
+	// gone and the session falls back to the (clean) base registry.
+	if got := tc.sessionTools(agent, "chat-a"); got != agent.Tools {
+		t.Error("the session layer must be dropped when its manager is retired")
+	}
 	if _, ok := agent.Tools.Get(tools.LoadMCPToolsName); ok {
-		t.Errorf("load_mcp_tools must be unregistered after the servers vanished, have %v", agent.Tools.List())
+		t.Errorf("load_mcp_tools must not be registered in the base registry, have %v", agent.Tools.List())
 	}
 	if got := spies[0].closeCount(); got != 1 {
 		t.Errorf("manager closed %d times, want exactly 1", got)
@@ -499,6 +537,9 @@ func TestMCPSync_SyncAfterCloseMCPManagersInstallsNothing(t *testing.T) {
 		t.Error("sync after closeAll must not install a manager (stopped set)")
 	}
 	agent := mcpTestAgent(t, al)
+	if got := tc.sessionTools(agent, "chat-a"); got != agent.Tools {
+		t.Error("a late sync must not build a session layer after teardown")
+	}
 	if _, ok := agent.Tools.Get(tools.LoadMCPToolsName); ok {
 		t.Error("load_mcp_tools must not be (re)registered after teardown")
 	}
@@ -508,7 +549,7 @@ func TestMCPSync_SyncAfterCloseMCPManagersInstallsNothing(t *testing.T) {
 
 	// Belt: put() also refuses after teardown and closes the incoming manager.
 	spy := &mcpSpy{}
-	tc.mcpManagers.put("late", mcpManagerEntry{mgr: spy, registered: newNameSet()})
+	tc.mcpManagers.put("late", mcpManagerEntry{mgr: spy})
 	if _, ok := tc.mcpManagers.get("late"); ok {
 		t.Error("put after closeAll must refuse the entry")
 	}

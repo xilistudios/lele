@@ -826,6 +826,23 @@ load_mcp_tools
 {"server": "files"}
 ```
 
+**The load is session-scoped.** Every chat gets its own tool layer over the
+agent's registry (`tools.NewScopedRegistry`): the remote tools `load_mcp_tools`
+registers land there, so they are offered to — and callable from — **that
+session only**. Other sessions served by the same agent keep seeing just their
+own tools: nothing appears in their context, and an accidental call to a tool
+they did not load fails with `tool "…" not found`. The agent-wide registry is
+never modified, which is what makes the isolation total (tool definitions,
+execution, the WebUI's per-agent catalog and subagents all keep their own
+view — subagents get a flattened clone of the agent's base registry, so they
+never inherit a tool their parent session loaded). The layer is stable for the
+session's lifetime, so a load survives every later turn, and it is dropped when
+the session is cleared (`/clear`, `/new`) or when the agent's MCP manager is
+retired (last server removed, workspace moved, allowlist tightened, shutdown) —
+at which point the session is back to the base registry and has to load again.
+At most 256 layers are kept per agent (LRU), so a long-lived gateway cannot
+accumulate them forever.
+
 The first load registers every tool under its namespaced registry name and
 returns the full listing (name, description, input schema):
 
@@ -881,15 +898,16 @@ Rules of the bridge:
 - **Sync points:** the server set is re-evaluated at startup and on every
   config reload (the same cadence as the other feature tools). A manager
   exists only while at least one active server is configured; losing the last
-  server unregisters `load_mcp_tools`, **unregisters the `mcp_*` tools that
-  were already loaded through it** (they would otherwise be offered to the
-  model with no server behind them), drops the prompt section and closes the
-  connections. Moving the workspace retires the stale manager — closed **and
-  dropped**, so coming back builds a fresh, working one. An allowlist that
-  excludes `load_mcp_tools` on a reload takes the loader **and its loaded
-  `mcp_*` tools** with it; the prompt keeps listing the servers either way
-  (they are configuration, not tools). Agents removed from the config need
-  none of this: their whole tool registry dies with the instance.
+  server drops the manager **and every session layer built on it** (so no
+  session keeps offering `mcp_*` tools with no server behind them), drops the
+  prompt section and closes the connections. Moving the workspace retires the
+  stale manager — closed **and dropped**, so coming back builds a fresh,
+  working one. An allowlist that excludes `load_mcp_tools` on a reload drops
+  the session layers too (the loader is the only sanctioned way to create those
+  tools); the prompt keeps listing the servers either way (they are
+  configuration, not tools). Agents removed from the config need none of this:
+  their whole tool registry dies with the instance, and their session layers
+  die with their manager.
 - **Config changes are picked up lazily, without a restart:** the prompt-facing
   `Servers()` re-reads the three layers on every call, so a new name or an
   edited `description`/`url` shows up on the next sync or prompt build. In

@@ -135,6 +135,19 @@ const maxReactiveCompactions = 3
 // hang the subagent until the LLM loop timeout kills it.
 const maxConsecutiveEmptyResponses = 5
 
+// toolLoopMaxIterationsContent is the synthetic final message the tool loop
+// emits when the iteration budget ran out while the model was still calling
+// tools. The parent receives this text as the subagent result, so it declares
+// its own status: parseSubagentOutcome must keep reading it as not_done no
+// matter how the outcome heuristics change.
+const toolLoopMaxIterationsContent = "STATUS: not_done\nSUMMARY: Maximum iterations reached without completing the task\nDETAILS:\nThe subagent ran out of iterations while still using tools. The task may require more steps to complete."
+
+// toolLoopEmptyResponseContent is the synthetic final message the tool loop
+// emits when the provider kept returning blank content. The parent receives
+// this text as the subagent result, so -- like the max-iterations guard -- it
+// is a status declaration rather than prose.
+const toolLoopEmptyResponseContent = "STATUS: not_done\nSUMMARY: The model returned empty responses repeatedly\nDETAILS:\nThe provider kept returning blank content (likely a thinking model exhausting its token budget on reasoning). The run was stopped to avoid an infinite retry loop."
+
 // toolLoopEmptyRetryBackoff returns the wait duration before the given
 // empty-response retry attempt (1s, 2s, 3s, capped at 3s). Empty responses
 // are retried up to maxConsecutiveEmptyResponses times, bounded by context
@@ -566,7 +579,7 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 					// End with an explicit not_done instead of looping or
 					// persisting blanks. The parent receives this as the
 					// subagent result.
-					finalContent = "STATUS: not_done\nSUMMARY: The model returned empty responses repeatedly\nDETAILS:\nThe provider kept returning blank content (likely a thinking model exhausting its token budget on reasoning). The run was stopped to avoid an infinite retry loop."
+					finalContent = toolLoopEmptyResponseContent
 					if config.SessionRecorder != nil && config.SessionKey != "" {
 						config.SessionRecorder.AddFullMessage(config.SessionKey, providers.Message{
 							Role:    "assistant",
@@ -840,7 +853,7 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 
 	// Handle case where max iterations was reached without a final response
 	if finalContent == "" {
-		finalContent = "STATUS: not_done\nSUMMARY: Maximum iterations reached without completing the task\nDETAILS:\nThe subagent ran out of iterations while still using tools. The task may require more steps to complete."
+		finalContent = toolLoopMaxIterationsContent
 		logger.WarnCF("toolloop", "Max iterations reached without final response",
 			map[string]any{
 				"iterations": iteration,

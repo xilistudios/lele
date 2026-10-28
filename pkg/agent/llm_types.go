@@ -9,6 +9,8 @@ package agent
 import (
 	"sort"
 	"strings"
+
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // messageSignature tracks repeated LLM responses to detect loops
@@ -55,21 +57,30 @@ func isDeepSeekModel(model string) bool {
 	return false
 }
 
-// knownToolNames returns a sorted list of registered tool names for an agent.
-func knownToolNames(agent *AgentInstance) []string {
-	names := agent.Tools.List()
+// knownToolNames returns a sorted list of the tool names visible to one
+// session: it takes the session's registry (see toolCoordinator.sessionTools)
+// rather than an agent, because MCP tools live in a per-session layer and must
+// be reported only to the session that loaded them.
+func knownToolNames(registry *tools.ToolRegistry) []string {
+	if registry == nil {
+		return nil
+	}
+	names := registry.List()
 	sort.Strings(names)
 	return names
 }
 
 // containsPlainToolCall checks if the response content contains plain-text tool
 // invocations like `read_file{"path":"..."}` instead of proper function calling.
-func containsPlainToolCall(content string, agent *AgentInstance) bool {
+func containsPlainToolCall(content string, registry *tools.ToolRegistry) bool {
 	if len(strings.TrimSpace(content)) == 0 {
 		return false
 	}
+	if registry == nil {
+		return false
+	}
 
-	toolNames := agent.Tools.List()
+	toolNames := registry.List()
 	for _, name := range toolNames {
 		pattern := name + "{"
 		if strings.Contains(content, pattern) {

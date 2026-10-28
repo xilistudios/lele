@@ -22,14 +22,32 @@ import (
 
 // toolExecOptions aggregates all options for tool execution
 type toolExecOptions struct {
-	ctx          context.Context
-	agent        *AgentInstance
+	ctx   context.Context
+	agent *AgentInstance
+	// registry is the SESSION's tool view (see toolCoordinator.sessionTools):
+	// the agent's base registry plus that session's scoped layer, where MCP
+	// tools loaded with load_mcp_tools live. Nil falls back to agent.Tools for
+	// callers that have no session (tests, direct invocations).
+	registry     *tools.ToolRegistry
 	tc           providers.ToolCall
 	channel      string
 	chatID       string
 	sessionKey   string
 	iteration    int
 	sendResponse bool
+}
+
+// tools returns the registry this call must run against. The session view wins
+// because MCP tools are registered only there; agent.Tools is the fallback so a
+// caller that never resolved a session still behaves as before.
+func (o toolExecOptions) tools() *tools.ToolRegistry {
+	if o.registry != nil {
+		return o.registry
+	}
+	if o.agent == nil {
+		return nil
+	}
+	return o.agent.Tools
 }
 
 // toolExecutor handles the execution of tool calls and result publishing
@@ -166,7 +184,11 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 	if opts.tc.Name == "exec" && te.al.approvalManager != nil {
 		toolResult = te.executeWithApproval(opts, asyncCallback)
 	} else {
-		toolResult = opts.agent.Tools.ExecuteWithContext(opts.ctx, opts.tc.Name, opts.tc.Arguments, opts.channel, opts.chatID, asyncCallback)
+		registry := opts.tools()
+		if registry == nil {
+			return nil, fmt.Errorf("tool %s: no tool registry available", opts.tc.Name)
+		}
+		toolResult = registry.ExecuteWithContext(opts.ctx, opts.tc.Name, opts.tc.Arguments, opts.channel, opts.chatID, asyncCallback)
 	}
 
 	// Handle nil result
@@ -185,7 +207,11 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 
 // executeWithApproval handles exec tool with approval workflow
 func (te *toolExecutor) executeWithApproval(opts toolExecOptions, asyncCallback tools.AsyncCallback) *tools.ToolResult {
-	toolResult := opts.agent.Tools.ExecuteWithContext(opts.ctx, opts.tc.Name, opts.tc.Arguments, opts.channel, opts.chatID, asyncCallback)
+	registry := opts.tools()
+	if registry == nil {
+		return tools.ErrorResult(fmt.Sprintf("tool %s: no tool registry available", opts.tc.Name))
+	}
+	toolResult := registry.ExecuteWithContext(opts.ctx, opts.tc.Name, opts.tc.Arguments, opts.channel, opts.chatID, asyncCallback)
 
 	// Check if approval is required
 	if toolResult.ApprovalRequired == nil {
@@ -252,7 +278,7 @@ func (te *toolExecutor) executeWithApproval(opts toolExecOptions, asyncCallback 
 		// and are never affected.
 		approvedCmd := toolResult.ApprovalRequired.Command
 		bypassCtx := tools.WithBypassGuard(opts.ctx, approvedCmd)
-		if execTool, ok := opts.agent.Tools.Get("exec"); ok {
+		if execTool, ok := registry.Get("exec"); ok {
 			if et, ok := execTool.(*tools.ExecTool); ok {
 				toolResult = et.Execute(bypassCtx, opts.tc.Arguments)
 			}

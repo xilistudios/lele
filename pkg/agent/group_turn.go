@@ -130,8 +130,15 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 	var providerToolDefs []providers.ToolDefinition
 	modelHasVision := getSupportsImages(lr.al.cfg(), agent.Model, extractProviderFromModel(agent.Model, lr.al.cfg().Agents.Defaults.Provider))
 	modelHasVideo := getSupportsVideo(lr.al.cfg(), agent.Model, extractProviderFromModel(agent.Model, lr.al.cfg().Agents.Defaults.Provider))
+	// The session's tool view (see toolCoordinator.sessionTools): a group turn
+	// gets the agent's base registry plus only the MCP tools ITS session
+	// loaded, never the ones another chat loaded.
+	registry := lr.al.toolCoordinator.sessionTools(agent, sessionKey)
+	if registry == nil {
+		registry = agent.Tools
+	}
 	if req.EnableTools {
-		providerToolDefs = agent.Tools.ToProviderDefs()
+		providerToolDefs = registry.ToProviderDefs()
 
 		// Drop tools the model must not be offered during a group turn:
 		// read_image when the primary model has no vision (it could not
@@ -272,11 +279,12 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 			}
 
 			toolResult, err := executor.Execute(toolExecOptions{
-				ctx:     ctx,
-				agent:   agent,
-				tc:      tc,
-				channel: req.OriginChannel,
-				chatID:  req.OriginChatID,
+				ctx:      ctx,
+				agent:    agent,
+				registry: registry,
+				tc:       tc,
+				channel:  req.OriginChannel,
+				chatID:   req.OriginChatID,
 				// Use the group turn session key so tool execution is attributed
 				// to the group turn session (group:<groupID>:<speaker>), not the
 				// origin chat. This prevents cross-contamination of session state
