@@ -1227,10 +1227,41 @@ func (al *AgentLoop) Stop() {
 // under a live turn would pull persistence out from underneath it, and
 // SQLite recovers the WAL on the next open anyway. The returned error tells
 // the caller the join was abandoned, never that the teardown failed.
+//
+// grace bounds the WHOLE teardown, not each stage of it. The teardown is a
+// sequence of bounded waits - the retention sweepers, the turn join and the
+// group-run drain - and giving each of them the full grace would let a slow
+// but healthy stage spend the budget of the one after it, so the caller's
+// promised bound (tuiExitJoinGrace for the TUI, finalTurnJoinGrace for the
+// gateway) could stretch to a multiple of itself. One deadline is taken at the
+// top instead, every stage gets only what is left of it, and a stage that
+// finds the budget already spent is abandoned exactly like one that ran out
+// mid-wait: the store stays open and the process exits.
 func (al *AgentLoop) StopWithin(grace time.Duration) error {
 	al.running.Store(false)
 
 	abandoned := false
+	// A zero deadline means "no budget" (grace <= 0 waits forever). Every
+	// stage below asks for what is left of it instead of using grace directly.
+	var deadline time.Time
+	if grace > 0 {
+		deadline = time.Now().Add(grace)
+	}
+	// remaining reports the budget left for the next stage. false means it is
+	// already spent, so the stage must not start waiting at all: passing 0 down
+	// would mean "wait forever", the opposite of what the caller asked for.
+	remaining := func() (time.Duration, bool) {
+		if deadline.IsZero() {
+			return 0, true
+		}
+		left := time.Until(deadline)
+		return left, left > 0
+	}
+	abandon := func(stage string) {
+		abandoned = true
+		logger.WarnCF("agent", "Teardown budget spent; abandoning teardown",
+			map[string]interface{}{"stage": stage, "grace": grace.String()})
+	}
 	al.stopOnce.Do(func() {
 		if al.goalStopCancel != nil {
 			al.goalStopCancel()
@@ -1256,7 +1287,12 @@ func (al *AgentLoop) StopWithin(grace time.Duration) error {
 				if sm == nil {
 					continue
 				}
-				if err := sm.StopRetentionCleanupWithin(grace); err != nil {
+				left, ok := remaining()
+				if !ok {
+					abandon("retention sweepers")
+					return
+				}
+				if err := sm.StopRetentionCleanupWithin(left); err != nil {
 					// The manager is detached now (no further sweeps), but the
 					// eviction the sweeper was blocked in is still in flight.
 					// Closing the store under it is exactly what this teardown
@@ -1280,9 +1316,14 @@ func (al *AgentLoop) StopWithin(grace time.Duration) error {
 				al.wg.Wait()
 				close(done)
 			}()
+			left, ok := remaining()
+			if !ok {
+				abandon("in-flight turns")
+				return
+			}
 			select {
 			case <-done:
-			case <-time.After(grace):
+			case <-time.After(left):
 				abandoned = true
 				logger.WarnCF("agent", "Agent loop stop timed out; abandoning in-flight turns",
 					map[string]interface{}{"grace": grace.String()})
@@ -1295,9 +1336,15 @@ func (al *AgentLoop) StopWithin(grace time.Duration) error {
 		// Drain group run goroutines before closing the store (CORE-04).
 		// Without this, runGroup's deferred saveStateBestEffort executes
 		// against a closed DB and the terminal group state is silently lost.
-		// Reuses the same grace budget as the turn drain above.
+		// Reuses the deadline taken at the top, so it cannot spend budget the
+		// turn drain above already consumed.
 		if al.groupManager != nil {
-			drained := al.groupManager.DrainAllRunGoroutines(grace)
+			left, ok := remaining()
+			if !ok {
+				abandon("group run drain")
+				return
+			}
+			drained := al.groupManager.DrainAllRunGoroutines(left)
 			if !drained {
 				abandoned = true
 				logger.WarnCF("agent", "Group run drain timed out; abandoning in-flight group runs — terminal state may be lost",
