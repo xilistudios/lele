@@ -44,30 +44,16 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 		}
 
 	case "tab":
-		// Cycle mode: agent -> chat -> [group ->] agent.
+		// Cycle agents: each press binds the next configured agent to the
+		// session on screen (or to the pending selection on the welcome
+		// screen), wrapping around at the end of the list.
+		// Mode switching lives in /mode now — it is a rarer, more deliberate
+		// choice than "talk to a different agent".
 		// Only when no autocomplete and no modal is active.
 		if m.showAutocomplete || m.modalMode != ModalNone {
 			return m, nil, true
 		}
-		if m.cfg.Groups.Enabled {
-			switch m.currentMode {
-			case ModeAgent:
-				m.currentMode = ModeChat
-			case ModeChat:
-				m.currentMode = ModeGroup
-			case ModeGroup:
-				m.currentMode = ModeAgent
-			}
-		} else {
-			// Groups disabled: toggle between agent and chat only
-			switch m.currentMode {
-			case ModeAgent:
-				m.currentMode = ModeChat
-			default:
-				m.currentMode = ModeAgent
-			}
-		}
-		m.reloadSessions()
+		m.cycleAgent()
 		return m, nil, true
 
 	case "ctrl+c":

@@ -105,6 +105,8 @@ lele tui -s <id>      # resume session
 
 Streaming chat, tool visualization, markdown, session sidebar, context stats. Themes: `dracula` (default), `nord`, `catppuccin`, `gruvbox`, `tokyo-night`, `solarized-light` — switch in **Settings → Interface**, stored in `~/.lele/tui.json`. Language via `LELE_LANG` or `/lang`.
 
+**TAB** cycles your configured agents in place; `/mode [agent|chat|group]` switches the session filter (bare `/mode` advances to the next one).
+
 ### Web UI
 
 ![Lele Web UI chat interface](assets/webui.png)
