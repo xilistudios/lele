@@ -185,7 +185,11 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		}
 	}
 
-	llmContent := fmt.Sprintf("Subagent task completed:\nLabel: %s\nAgent: %s\nIterations: %d\nStatus: %s\nSummary: %s\nDetails:\n%s",
+	// The headline must match the outcome: a not_done/needs_context/cancelled
+	// run may not read as a success in the parent's context, otherwise the
+	// status line further down is the only thing contradicting it.
+	llmContent := fmt.Sprintf("%s\nLabel: %s\nAgent: %s\nIterations: %d\nStatus: %s\nSummary: %s\nDetails:\n%s",
+		subagentInlineResultHeadline(outcome.Status),
 		labelStr, agentID, loopResult.Iterations, outcome.Status, outcome.Summary, outcome.Details)
 
 	return &ToolResult{
@@ -193,5 +197,26 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		Silent:  true,
 		IsError: false,
 		Async:   false,
+	}
+}
+
+// subagentInlineResultHeadline maps a subagent outcome status to the first
+// line of the inline `subagent` tool result. Kept as an unexported helper so
+// the mapping is directly testable. Unknown or unexpected statuses fall back to
+// a neutral headline that neither claims success nor failure.
+func subagentInlineResultHeadline(status string) string {
+	switch status {
+	case SubagentStatusCompleted:
+		return "Subagent task completed:"
+	case SubagentStatusNotDone:
+		return "Subagent task finished but did NOT complete:"
+	case SubagentStatusNeedsContext:
+		return "Subagent paused and needs context:"
+	case SubagentStatusCancelled:
+		return "Subagent task was cancelled:"
+	case SubagentStatusFailed:
+		return "Subagent task failed:"
+	default:
+		return "Subagent task finished:"
 	}
 }

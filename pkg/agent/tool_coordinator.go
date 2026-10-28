@@ -59,6 +59,14 @@ type toolCoordinator interface {
 	// closeMCPManagers closes every live MCP manager exactly once
 	// (idempotent, nil-safe): the teardown path for stdio children.
 	closeMCPManagers() error
+	// sessionTools returns the tool registry a session must use to build tool
+	// definitions and execute calls: the agent's base registry, or a
+	// session-scoped layer over it while MCP servers are configured (so tools
+	// loaded with load_mcp_tools never leak into other sessions).
+	sessionTools(agent *AgentInstance, sessionKey string) *tools.ToolRegistry
+	// dropSessionTools forgets a session's scoped layer (its history was
+	// cleared, so the MCP tools it had loaded go too).
+	dropSessionTools(sessionKey string)
 	GetSubagents() map[string]*tools.SubagentManager
 	getBackgroundExecs(includeCompleted bool) []BackgroundExecInfo
 	getBackgroundExecOutput(id string, tail int) (output string, status string, elapsed time.Duration, err error)
@@ -112,9 +120,17 @@ func newToolCoordinatorWithSubagents(al *AgentLoop, subagents map[string]*tools.
 
 // updateToolContexts updates the context for all tools that implement ContextualTool.
 // It iterates over all registered tools instead of hardcoding tool names.
+//
+// It walks the SESSION's view (see sessionTools), so tools the session loaded
+// through load_mcp_tools get their context too — and a tool loaded by another
+// session is never touched from here.
 func (tc *toolCoordinatorImpl) updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string) {
-	for _, name := range agent.Tools.List() {
-		tool, ok := agent.Tools.Get(name)
+	registry := tc.sessionTools(agent, sessionKey)
+	if registry == nil {
+		return
+	}
+	for _, name := range registry.List() {
+		tool, ok := registry.Get(name)
 		if !ok {
 			continue
 		}

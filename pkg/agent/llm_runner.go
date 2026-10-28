@@ -554,6 +554,18 @@ func (lr *llmRunnerImpl) modelForTurn(agent *AgentInstance, opts processOptions)
 
 // runLLMIteration executes the LLM call loop with tool handling.
 func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstance, messages []providers.Message, opts processOptions) (string, int, error) {
+	// The session's tool view. MCP tools loaded with load_mcp_tools land in a
+	// session-scoped layer over agent.Tools (never in agent.Tools itself), so
+	// one chat's load is invisible to the other chats served by this agent.
+	// Tool definitions AND executions go through this same instance: it must be
+	// the object the loader registered into, or the loop would not see what it
+	// just loaded. Resolved per iteration — a load in the previous iteration is
+	// visible on the next one without re-reading anything.
+	toolRegistry := lr.al.toolCoordinator.sessionTools(agent, opts.SessionKey)
+	if toolRegistry == nil {
+		toolRegistry = agent.Tools
+	}
+
 	iteration := 0
 	var finalContent string
 	emptyRetries := 0
@@ -599,8 +611,10 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				"max":       agent.MaxIterations,
 			})
 
-		// Build tool definitions
-		providerToolDefs := agent.Tools.ToProviderDefs()
+		// Build tool definitions from the session's view (re-read every
+		// iteration: a load_mcp_tools call in the previous iteration added its
+		// remote tools to this same layer).
+		providerToolDefs := toolRegistry.ToProviderDefs()
 
 		// Determine whether the current (primary) model supports vision and
 		// native video. The read_image/read_video tools are exposed based on
@@ -815,7 +829,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			// Check if the response contains plain-text tool invocations (e.g., `read_file{"path":"..."}`)
 			// instead of proper function calls. Some models (like DeepSeek) sometimes output tool call
 			// syntax as plain text, which would break the loop and send raw tool invocation text to the user.
-			if containsPlainToolCall(finalContent, agent) {
+			if containsPlainToolCall(finalContent, toolRegistry) {
 				logger.WarnCF("agent", "LLM response contains plain-text tool calls instead of function calls, injecting guidance",
 					map[string]interface{}{
 						"agent_id":  agent.ID,
@@ -825,7 +839,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				messages = messages[:len(messages)-1]
 				agent.Sessions.RemoveLastMessage(opts.SessionKey)
 				// Get available tool names for guidance
-				toolNames := knownToolNames(agent)
+				toolNames := knownToolNames(toolRegistry)
 				guidanceMsg := fmt.Sprintf(
 					"⚠️ You wrote tool invocations as plain text (e.g., `read_file{...}`) instead of using the proper function calling mechanism.\n\n"+
 						"You MUST use the native tool/function calls available to invoke tools. Do NOT write tool names with JSON arguments as plain text.\n\n"+
@@ -945,6 +959,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			toolResult, err := executor.Execute(toolExecOptions{
 				ctx:          ctx,
 				agent:        agent,
+				registry:     toolRegistry,
 				tc:           tc,
 				channel:      opts.Channel,
 				chatID:       opts.ChatID,

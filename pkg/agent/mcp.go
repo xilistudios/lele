@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 	"sync"
 
 	"github.com/xilistudios/lele/pkg/config"
@@ -25,11 +24,12 @@ import (
 // production implementation is *mcp.Manager; the interface exists so tests
 // can inject close spies without touching pkg/mcp.
 //
-// Deliberately NOT part of the interface: LoadedNames(). Which mcp_* names
-// belong to an agent's registry is bookkept by the ENTRY (see
-// mcpManagerEntry.registered) — the manager's loaded cache is mutable state
-// that a mid-flight config change clears, so it cannot be the source of
-// truth for unregistration.
+// Deliberately NOT part of the interface: LoadedNames(). The mcp_* tools of a
+// session live in that session's own scoped registry layer (see
+// sessionToolSet), which is dropped as a whole when the manager is retired —
+// so nothing has to enumerate names for unregistration, and the manager's
+// loaded cache (mutable, cleared by a mid-flight config change) is never
+// consulted for it.
 type mcpManager interface {
 	// Servers re-reads the mcp.json layers and returns the active servers
 	// sorted by name (excludes disabled/invalid entries).
@@ -44,68 +44,17 @@ type mcpManager interface {
 	Close() error
 }
 
-// nameSet is a mutex-guarded set of registry names: the mcp_* tool names a
-// single mcpManagerEntry registered into its agent's ToolRegistry. It is the
-// bookkeeping source for retirement (unregisterLoadedMCPTools), which must
-// remove EXACTLY what this entry registered — never derived from the
-// manager's loaded cache (a config edit clears that cache and would cause
-// under-unregistration). Methods are nil-safe: entries injected directly by
-// tests may carry no set.
-type nameSet struct {
-	mu    sync.Mutex
-	names map[string]struct{}
-}
-
-// newNameSet builds an empty, ready-to-use set.
-func newNameSet() *nameSet {
-	return &nameSet{names: make(map[string]struct{})}
-}
-
-// add records one registered name.
-func (s *nameSet) add(name string) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	s.names[name] = struct{}{}
-	s.mu.Unlock()
-}
-
-// snapshot returns the recorded names sorted (deterministic unregistration).
-func (s *nameSet) snapshot() []string {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.names))
-	for name := range s.names {
-		out = append(out, name)
-	}
-	slices.Sort(out)
-	return out
-}
-
-// clear empties the set (after its names were unregistered).
-func (s *nameSet) clear() {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	s.names = make(map[string]struct{})
-	s.mu.Unlock()
-}
-
 // mcpManagerEntry pairs a live manager with the layer paths it was built for.
 // paths is kept so a reload that moved the agent's workspace (or the global
 // config dir) retires the manager instead of letting it watch stale layers.
-// registered holds the names THIS entry's loader actually put into the
-// agent's registry; every entry starts with an empty set (a replaced/rebuilt
-// manager re-records from scratch).
+//
+// The entry does NOT bookkeep the mcp_* names its loader registered: those live
+// in per-session layers (see sessionToolSet), so retiring the manager drops
+// every session's loaded tools at once — no per-name unregistration to get
+// wrong.
 type mcpManagerEntry struct {
-	mgr        mcpManager
-	paths      mcp.Paths
-	registered *nameSet
+	mgr   mcpManager
+	paths mcp.Paths
 }
 
 // mcpManagerSet owns every per-agent MCP manager, keyed by agent ID (the
@@ -135,6 +84,11 @@ type mcpManagerSet struct {
 	// result in a close spy. Read under syncMu (sync passes) — never written
 	// after the wiring step.
 	newManager func(mcp.Paths) mcpManager
+	// layers owns the per-session scoped registries (session × agent) where
+	// load_mcp_tools registers remote tools. They are created on demand and
+	// dropped with their agent's manager: a layer's loader closes over that
+	// manager, so it must not outlive it.
+	layers *sessionToolSet
 }
 
 // newMCPManagerSet captures the process working directory at startup and the
@@ -147,6 +101,7 @@ func newMCPManagerSet() *mcpManagerSet {
 	}
 	return &mcpManagerSet{
 		entries: make(map[string]mcpManagerEntry),
+		layers:  newSessionToolSet(),
 		cwd:     cwd,
 		newManager: func(paths mcp.Paths) mcpManager {
 			return mcp.NewManager(paths, nil)
@@ -190,29 +145,73 @@ func (s *mcpManagerSet) put(agentID string, entry mcpManagerEntry) {
 	s.entries[agentID] = entry
 	s.mu.Unlock()
 	if had && previous.mgr != entry.mgr {
+		// A genuine replace: the layers built on the old manager must go with
+		// it (their loader and remote tools are bound to it).
+		s.layers.dropAgent(agentID)
 		closeManagerQuietly(agentID, previous.mgr)
 	}
 }
 
-// closeAndDrop closes agentID's manager and removes it from the set. It is a
-// no-op when the agent has no manager. The close happens outside the lock:
-// terminating a stdio child can block.
+// closeAndDrop closes agentID's manager and removes it from the set, together
+// with every session layer built on it (those layers hold tools bound to this
+// manager, so they go with it). It is a no-op when the agent has no manager.
+// The close happens outside the lock: terminating a stdio child can block.
 func (s *mcpManagerSet) closeAndDrop(agentID string) error {
 	s.mu.Lock()
 	entry, ok := s.entries[agentID]
 	delete(s.entries, agentID)
 	s.mu.Unlock()
+	s.layers.dropAgent(agentID)
 	if !ok {
 		return nil
 	}
 	return entry.mgr.Close()
 }
 
+// dropSessionLayers removes every session layer of one agent: the sessions keep
+// their manager (the servers are still configured) but lose the loader and the
+// remote tools they had loaded through it. Used when the allowlist stops
+// allowing load_mcp_tools — the loader is the only sanctioned way to create
+// those tools, so keeping them would outlive the policy.
+func (s *mcpManagerSet) dropSessionLayers(agentID string) {
+	s.layers.dropAgent(agentID)
+}
+
+// sessionTools returns the tool registry a session must use: the agent's base
+// registry, or — while the agent has a live manager — a session-scoped layer
+// over it where load_mcp_tools registers the remote tools it loads.
+//
+// This is THE isolation point for MCP: the base registry is shared by every
+// chat of the agent, so a load that reached it appeared in all of them. With a
+// per-session layer a load is visible to exactly the session that asked for it,
+// and the layer dies with the session (reset) or with the manager (retirement).
+func (s *mcpManagerSet) sessionTools(agent *AgentInstance, sessionKey string) *tools.ToolRegistry {
+	if agent == nil || agent.Tools == nil {
+		return nil
+	}
+	// No session identity (startup probes, direct callers): the base registry
+	// is the only meaningful answer — there is no layer to attribute a load to.
+	if sessionKey == "" {
+		return agent.Tools
+	}
+	entry, ok := s.get(agent.ID)
+	if !ok || entry.mgr == nil {
+		return agent.Tools
+	}
+	return s.layers.getOrCreate(agent.ID, sessionKey, func() *tools.ToolRegistry {
+		layer := tools.NewScopedRegistry(agent.Tools)
+		factory := entry.mgr.ToolFactory()
+		layer.Register(tools.NewLoadMCPToolsTool(entry.mgr, layer, factory))
+		return layer
+	})
+}
+
 // closeExcept closes and drops every manager whose agent is not in
-// liveAgentIDs — the reload path's "the agent disappeared" rule. Errors are
-// joined; the set is emptied either way. The agents' loaded mcp_* names need
-// no unregistration here: ReloadAgents deletes the whole AgentInstance from
-// the registry, so its tool registry dies with it.
+// liveAgentIDs — the reload path's "the agent disappeared" rule — and drops the
+// session layers built on those managers. Errors are joined; the set is emptied
+// either way. ReloadAgents deletes the whole AgentInstance from the registry,
+// so its base tool registry dies with it; the layers are dropped here because
+// they are keyed by agent ID and would otherwise outlive their manager.
 func (s *mcpManagerSet) closeExcept(liveAgentIDs []string) error {
 	live := make(map[string]bool, len(liveAgentIDs))
 	for _, id := range liveAgentIDs {
@@ -220,17 +219,18 @@ func (s *mcpManagerSet) closeExcept(liveAgentIDs []string) error {
 	}
 
 	s.mu.Lock()
-	var removed []mcpManagerEntry
+	removed := make(map[string]mcpManagerEntry)
 	for id, entry := range s.entries {
 		if !live[id] {
-			removed = append(removed, entry)
+			removed[id] = entry
 			delete(s.entries, id)
 		}
 	}
 	s.mu.Unlock()
 
 	var errs []error
-	for _, entry := range removed {
+	for id, entry := range removed {
+		s.layers.dropAgent(id)
 		if err := entry.mgr.Close(); err != nil {
 			errs = append(errs, err)
 		}
@@ -252,6 +252,10 @@ func (s *mcpManagerSet) closeAll() error {
 	entries := s.entries
 	s.entries = make(map[string]mcpManagerEntry)
 	s.mu.Unlock()
+
+	// Session layers hold tools bound to the managers being closed: drop them
+	// before (or with) the close so no chat can call a dead server afterwards.
+	s.layers.dropAll()
 
 	var errs []error
 	for id, entry := range entries {
@@ -283,44 +287,23 @@ func closeManagerQuietly(agentID string, mgr mcpManager) {
 	}
 }
 
-// unregisterLoadedMCPTools removes every tool THIS entry registered into the
-// agent's registry: it iterates entry.registered — the names the entry's own
-// wrapped factory recorded (skip-if-present in LoadMCPToolsTool guarantees
-// the factory runs exactly for the names this agent registered) — never the
-// manager's loaded cache, which a mid-flight config change clears (that was
-// the under-unregistration bug: names silently left behind with no manager
-// behind them) and which can hold specs that were never registered at all
-// (over-unregistration on a cross-server name collision). The set is cleared
-// after unregistering, so a reused entry starts clean. Called wherever a
-// manager is retired or the loader is taken away; the agent-removed case
-// (closeExcept) needs no call: the registry deletes the whole AgentInstance,
-// its tools die with it.
-func unregisterLoadedMCPTools(agent *AgentInstance, entry mcpManagerEntry) {
-	if agent == nil || agent.Tools == nil || entry.mgr == nil {
-		return
-	}
-	for _, name := range entry.registered.snapshot() {
-		agent.Tools.Unregister(name)
-	}
-	entry.registered.clear()
-}
-
 // syncMCPTools re-evaluates every live agent's MCP server set and mirrors the
-// outcome into the agent's toolset and system prompt. It runs once at startup
+// outcome into the agent's prompt and session layers. It runs once at startup
 // (NewAgentLoop) and again on every config reload, right after
 // updateSharedTools — the same cadence as the other feature-tool syncs.
 //
 // Per agent it: creates a manager only while at least one active server is
-// configured, registers load_mcp_tools only when that manager has servers
-// (and the allowlist keeps it), unregisters it otherwise (together with the
-// mcp_* tools already loaded through it), feeds the "## MCP Servers" prompt
-// section through ContextBuilder.SetMCPServers, and closes + drops a manager
-// whose server list became empty. Managers of agents removed from the config
-// are closed afterwards.
+// configured, drops the session layers when the allowlist stops allowing
+// load_mcp_tools, feeds the "## MCP Servers" prompt section through
+// ContextBuilder.SetMCPServers, and closes + drops a manager whose server list
+// became empty (which takes its session layers with it). Managers of agents
+// removed from the config are closed afterwards.
 //
-// Design note: load_mcp_tools is registered after the subagent tool clone has
-// been taken (see registerSharedToolsForAgent), so subagents do not inherit
-// it in v1 — loading MCP tools stays a decision of the main agent.
+// Design note: layers are built per session (see mcpManagerSet.sessionTools),
+// and a subagent receives a flattened clone of its parent's BASE registry (see
+// registerSharedToolsForAgent), so subagents do not inherit load_mcp_tools nor
+// anything a session loaded in v1 — loading MCP tools stays a decision of the
+// session itself.
 func (tc *toolCoordinatorImpl) syncMCPTools() {
 	if tc.al == nil || tc.registry == nil || tc.mcpManagers == nil {
 		return
@@ -353,12 +336,17 @@ func (tc *toolCoordinatorImpl) syncMCPTools() {
 }
 
 // syncMCPServersForAgent applies the MCP wiring to one agent: manager
-// lifecycle first, then the prompt section, then the load_mcp_tools tool.
+// lifecycle first, then the prompt section.
+//
+// The sync no longer touches the agent's tool registry: load_mcp_tools lives in
+// each SESSION's scoped layer (see mcpManagerSet.sessionTools), so there is
+// nothing to register here and nothing to unregister when the configuration
+// changes — retiring the manager drops its session layers as a whole.
 //
 // The allowlist check mirrors syncGroupChatTool: on the reload path
 // updateSharedToolsForAgent early-returns for preserved agents (no allowlist
-// pass runs), so the gate has to live in the sync itself or a reload would
-// hand load_mcp_tools back to an agent whose allowlist excludes it.
+// pass runs), so the gate has to live in the sync itself or a reload would let
+// a restricted agent keep loading MCP tools.
 func (tc *toolCoordinatorImpl) syncMCPServersForAgent(cfg *config.Config, agent *AgentInstance, agentID string) {
 	set := tc.mcpManagers
 	if agent == nil || agent.Tools == nil {
@@ -370,14 +358,12 @@ func (tc *toolCoordinatorImpl) syncMCPServersForAgent(cfg *config.Config, agent 
 	if hasMgr && entry.paths != paths {
 		// The workspace (or the global dir) moved: the manager watches stale
 		// mcp.json layers, so retire it — close AND drop it, so a later move
-		// back creates a fresh manager instead of reusing this closed one —
-		// and take its loaded mcp_* tools with it.
-		unregisterLoadedMCPTools(agent, entry)
+		// back creates a fresh manager instead of reusing this closed one.
+		// Its session layers go with it (closeAndDrop drops them).
 		if err := set.closeAndDrop(agentID); err != nil {
 			logger.WarnCF("agent", "Failed to close MCP manager after paths changed",
 				map[string]interface{}{"agent_id": agentID, "error": err.Error()})
 		}
-		agent.Tools.Unregister(tools.LoadMCPToolsName)
 		entry, hasMgr = mcpManagerEntry{}, false
 	}
 
@@ -386,15 +372,12 @@ func (tc *toolCoordinatorImpl) syncMCPServersForAgent(cfg *config.Config, agent 
 		servers = entry.mgr.Servers()
 		if len(servers) == 0 {
 			// Reload removed every server: close the children, drop the
-			// manager and take the loader AND its already-loaded mcp_* tools
-			// away (otherwise stale remote tools would linger in the
-			// registry with no manager to call them through).
-			unregisterLoadedMCPTools(agent, entry)
+			// manager and its session layers (otherwise stale remote tools
+			// would linger in those sessions with no manager behind them).
 			if err := set.closeAndDrop(agentID); err != nil {
 				logger.WarnCF("agent", "Failed to close MCP manager with no servers left",
 					map[string]interface{}{"agent_id": agentID, "error": err.Error()})
 			}
-			agent.Tools.Unregister(tools.LoadMCPToolsName)
 			tc.setMCPServers(agent, nil)
 			return
 		}
@@ -406,12 +389,10 @@ func (tc *toolCoordinatorImpl) syncMCPServersForAgent(cfg *config.Config, agent 
 			// dialed, so this is bookkeeping only) and keep it out of the
 			// set — a manager exists iff it has active servers.
 			closeManagerQuietly(agentID, mgr)
-			agent.Tools.Unregister(tools.LoadMCPToolsName)
 			tc.setMCPServers(agent, nil)
 			return
 		}
-		entry = mcpManagerEntry{mgr: mgr, paths: paths, registered: newNameSet()}
-		set.put(agentID, entry)
+		set.put(agentID, mcpManagerEntry{mgr: mgr, paths: paths})
 	}
 
 	// Servers are configuration, not tools: the prompt section is fed
@@ -420,28 +401,50 @@ func (tc *toolCoordinatorImpl) syncMCPServersForAgent(cfg *config.Config, agent 
 	tc.setMCPServers(agent, servers)
 
 	if !allowlistKeeps(agentConfigForID(cfg, agentID), tools.LoadMCPToolsName) {
-		// The allowlist tightened: the loader goes, and so do the mcp_*
-		// tools it already registered — the loader is the only sanctioned
-		// way to (re)create them, so keeping them would outlive the policy.
-		unregisterLoadedMCPTools(agent, entry)
-		agent.Tools.Unregister(tools.LoadMCPToolsName)
+		// The allowlist tightened: the session layers go (they hold the loader
+		// and the mcp_* tools already loaded through it). The manager stays —
+		// the servers are still configured, they are just not loadable by this
+		// agent any more.
+		set.dropSessionLayers(agentID)
+	}
+}
+
+// sessionTools returns the tool registry a session must use: the agent's base
+// registry, or — while MCP servers are configured for that agent and the
+// allowlist keeps load_mcp_tools — a session-scoped layer over it.
+//
+// This is what keeps MCP loads session-local. Every place that builds tool
+// definitions or executes a tool call for a session must go through it (see
+// llmRunner.runAgentLoop, runGroupTurn and toolExecutor): the loader the model
+// calls writes into the layer, so the remote tools it registers are offered to
+// that session only, never to the other chats served by the same agent.
+func (tc *toolCoordinatorImpl) sessionTools(agent *AgentInstance, sessionKey string) *tools.ToolRegistry {
+	if agent == nil || agent.Tools == nil {
+		return nil
+	}
+	if tc.mcpManagers == nil {
+		return agent.Tools
+	}
+	// Belt for the reload window: a tightened allowlist drops the layers during
+	// the sync, so a layer must never be (re)built for an agent that no longer
+	// allows the loader.
+	var cfg *config.Config
+	if tc.al != nil {
+		cfg = tc.al.cfg()
+	}
+	if !allowlistKeeps(agentConfigForID(cfg, agent.ID), tools.LoadMCPToolsName) {
+		return agent.Tools
+	}
+	return tc.mcpManagers.sessionTools(agent, sessionKey)
+}
+
+// dropSessionTools forgets the scoped tool layers of one session: its loaded
+// MCP tools go with the history it reset. No-op when MCP is not configured.
+func (tc *toolCoordinatorImpl) dropSessionTools(sessionKey string) {
+	if tc.mcpManagers == nil || sessionKey == "" {
 		return
 	}
-	if _, exists := agent.Tools.Get(tools.LoadMCPToolsName); exists {
-		return // already registered against the same manager
-	}
-	// Wrap the manager's factory so every tool that lands in the agent's
-	// registry through this loader is recorded in entry.registered.
-	// LoadMCPToolsTool invokes the factory ONLY for names absent from the
-	// registry (skip-if-present), so the recorded set is exactly the set this
-	// agent registered through this entry — the source of truth used by
-	// unregisterLoadedMCPTools at retirement.
-	factory := entry.mgr.ToolFactory()
-	agent.Tools.Register(tools.NewLoadMCPToolsTool(entry.mgr, agent.Tools,
-		func(spec tools.LoadedMCPTool) tools.Tool {
-			entry.registered.add(spec.Name)
-			return factory(spec)
-		}))
+	tc.mcpManagers.layers.dropSession(sessionKey)
 }
 
 // setMCPServers forwards the resolved server list to the agent's prompt

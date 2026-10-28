@@ -721,7 +721,7 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 			task.Progress = progress
 		}
 
-		logger.InfoCF("subagent", "Subagent task completed",
+		logger.InfoCF("subagent", "Subagent task finished",
 			map[string]interface{}{
 				"task_id":     task.ID,
 				"label":       task.Label,

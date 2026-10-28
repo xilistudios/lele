@@ -385,6 +385,9 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 					al.sessionModels.Store(baseSessionKey, model)
 				}
 				al.sessionThinking.Delete(baseSessionKey)
+				// The conversation was reset in place: the MCP tools it had
+				// loaded must not survive into the fresh one.
+				al.dropSessionTools(baseSessionKey)
 
 				return baseSessionKey
 			}
@@ -403,6 +406,9 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 
 	newSessionKey := al.nextConversationSessionKey(baseSessionKey)
 	al.setSessionAlias(baseSessionKey, newSessionKey)
+	// The abandoned conversation key is never served again: forget the MCP
+	// tools it had loaded instead of waiting for the LRU to retire them.
+	al.dropSessionTools(baseSessionKey)
 
 	if agentID != "" {
 		al.setSessionAgent(newSessionKey, agentID)
@@ -1519,6 +1525,15 @@ func (al *AgentLoop) agentForSession(sessionKey string) *AgentInstance {
 	return agent
 }
 
+// dropSessionTools forgets the MCP tools a session loaded (nil-safe: loops
+// built by tests may have no coordinator yet).
+func (al *AgentLoop) dropSessionTools(sessionKey string) {
+	if al == nil || al.toolCoordinator == nil {
+		return
+	}
+	al.toolCoordinator.dropSessionTools(sessionKey)
+}
+
 // resetAgentSession clears the session history and state for an agent.
 func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) error {
 	previousHistory := agent.Sessions.GetHistory(sessionKey)
@@ -1535,6 +1550,9 @@ func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) 
 	// as "no override".)
 	al.sessionModels.Delete(sessionKey)
 	al.sessionThinking.Delete(sessionKey)
+	// Clearing the history also clears the MCP tools this session had loaded
+	// through load_mcp_tools: they are part of what the user is resetting.
+	al.dropSessionTools(sessionKey)
 	if agent.Sessions != nil {
 		agent.Sessions.SetThinkingLevel(sessionKey, "")
 		agent.Sessions.SetModel(sessionKey, "")

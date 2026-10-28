@@ -62,7 +62,12 @@ const LoadMCPToolsName = "load_mcp_tools"
 // LoadMCPToolsTool lets the LLM load the tool specs of one MCP server on
 // demand. Before loading, the LLM only sees server names + descriptions (in
 // the system prompt); after loading, the server's tools are registered in the
-// ToolRegistry and become ordinary tool calls.
+// tool registry and become ordinary tool calls.
+//
+// The registry is normally the SESSION's scoped layer (NewScopedRegistry over
+// the agent's base registry), never the base itself: a load is then visible to
+// the session that performed it and to nothing else — see
+// agent.toolCoordinator.sessionTools.
 type LoadMCPToolsTool struct {
 	loader   MCPLoader
 	registry *ToolRegistry
@@ -114,7 +119,9 @@ func (t *LoadMCPToolsTool) Parameters() map[string]interface{} {
 
 // Execute loads the requested server and registers any tool that is not in
 // the registry yet. Existing names are never overwritten (a name may belong
-// to a built-in or to an earlier load), which makes repeated calls safe.
+// to a built-in, to a scoped layer's parent or to an earlier load — the
+// lookup goes through the registry, so a base tool always wins), which makes
+// repeated calls safe.
 // The result lists every spec — newly registered or already present — so the
 // LLM knows what it can call now.
 func (t *LoadMCPToolsTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {

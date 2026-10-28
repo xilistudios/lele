@@ -1099,6 +1099,15 @@ func (m *commandHandlerSubagentCoordinatorStub) syncMCPTools() {}
 
 func (m *commandHandlerSubagentCoordinatorStub) closeMCPManagers() error { return nil }
 
+func (m *commandHandlerSubagentCoordinatorStub) sessionTools(agent *AgentInstance, sessionKey string) *tools.ToolRegistry {
+	if agent == nil {
+		return nil
+	}
+	return agent.Tools
+}
+
+func (m *commandHandlerSubagentCoordinatorStub) dropSessionTools(sessionKey string) {}
+
 func (m *commandHandlerSubagentCoordinatorStub) cancelSession(sessionKey string) {}
 
 func (m *commandHandlerSubagentCoordinatorStub) listRunningSubagentTasks() []*tools.SubagentTask {

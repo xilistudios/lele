@@ -183,9 +183,11 @@ When `spawn` is present, the scheduled task is delegated to a subagent instead o
 ## MCP Tool Loader
 
 `load_mcp_tools` exposes MCP servers configured in layered `mcp.json` files
-(see `docs/mcp.md`). It has no `config.json` settings of its own and is
-registered automatically **only** while at least one active server is
-configured.
+(see `docs/mcp.md`). It has no `config.json` settings of its own and is offered
+to a session automatically **only** while at least one active server is
+configured. It is **session-scoped**: the loader and the `mcp_*` tools it
+registers live in a per-session layer over the agent's tool registry, so one
+chat's load never shows up in another chat's context.
 
 | Tool | Argument | Description |
 | --- | --- | --- |
@@ -196,10 +198,14 @@ configured.
 - Before loading, the model sees only server names and descriptions (the
   prompt section) — never tool schemas.
 - The first call fetches the server's tool specs and registers them under
-  `mcp_<server>_<tool>` names; the result lists every spec with its input
-  schema.
+  `mcp_<server>_<tool>` names **in the calling session's layer**; the result
+  lists every spec with its input schema.
 - Repeated calls are idempotent: the registry count never changes and the
   listing is repeated.
+- Another session of the same agent sees none of it: its tool definitions are
+  unchanged and a call to a tool it did not load reports `tool "…" not found`.
+  Clearing the session (`/clear`, `/new`) or retiring the agent's MCP manager
+  drops the layer, and the session has to load again.
 - An unknown server fails with a clean error that lists the known servers
   (`known servers: …`).
 - Loaded tools then run like built-ins: calls are forwarded to the server and

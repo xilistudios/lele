@@ -11,15 +11,47 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
+// ToolRegistry is the tool set an agent exposes to the model.
+//
+// A registry may be SCOPED: NewScopedRegistry builds an empty child layered on
+// top of a base registry. Registrations always land in the child (the layer
+// owns only what it was given) while lookups fall back to the base, so a
+// scoped registry behaves like "base + this session's extras" without copying
+// or freezing the base. That is how MCP tools stay session-local: the base
+// registry (agent-wide, shared by every chat) never learns about them.
 type ToolRegistry struct {
 	tools map[string]Tool
 	mu    sync.RWMutex
+	// parent is the read-only fallback layer of a scoped registry; nil for a
+	// plain (unscoped) registry, which is the common case.
+	parent *ToolRegistry
 }
 
 func NewToolRegistry() *ToolRegistry {
 	return &ToolRegistry{
 		tools: make(map[string]Tool),
 	}
+}
+
+// NewScopedRegistry returns an empty registry layered over base: registrations
+// land in the returned layer (shadowing base names), and every read
+// (Get/List/ToProviderDefs/GetDefinitions/Count/GetSummaries) resolves
+// against the layer first and base second.
+//
+// The base is read live on every call — never snapshotted — so tools added to
+// or removed from the base after the layer was created (a config reload) are
+// seen immediately, and Unregister on the layer never touches the base.
+func NewScopedRegistry(base *ToolRegistry) *ToolRegistry {
+	return &ToolRegistry{
+		tools:  make(map[string]Tool),
+		parent: base,
+	}
+}
+
+// IsScoped reports whether the registry has a parent layer. Exposed for tests
+// and diagnostics; callers never need it to read through the layer.
+func (r *ToolRegistry) IsScoped() bool {
+	return r != nil && r.parent != nil
 }
 
 func (r *ToolRegistry) Register(tool Tool) {
@@ -31,6 +63,10 @@ func (r *ToolRegistry) Register(tool Tool) {
 // Unregister removes the tool with the given name from the registry.
 // It is a no-op if no such tool is registered. Used to keep per-feature
 // tools (e.g. group_chat) in sync with configuration on reload.
+//
+// On a scoped registry it only removes the layer's own entry: a name that
+// lives in the parent layer stays reachable through the fallback (a session
+// layer must never be able to delete an agent-wide tool).
 func (r *ToolRegistry) Unregister(name string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -39,9 +75,46 @@ func (r *ToolRegistry) Unregister(name string) {
 
 func (r *ToolRegistry) Get(name string) (Tool, bool) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	tool, ok := r.tools[name]
-	return tool, ok
+	r.mu.RUnlock()
+	if ok || r.parent == nil {
+		return tool, ok
+	}
+	return r.parent.Get(name)
+}
+
+// collectNames appends the names of this layer and every ancestor, skipping
+// duplicates so a shadowed parent name is reported once. It takes at most one
+// lock at a time (own lock released before recursing) so two registries in a
+// parent chain can never deadlock against each other.
+func (r *ToolRegistry) collectNames(seen map[string]struct{}, out *[]string) {
+	r.mu.RLock()
+	for name := range r.tools {
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		*out = append(*out, name)
+	}
+	r.mu.RUnlock()
+	if r.parent != nil {
+		r.parent.collectNames(seen, out)
+	}
+}
+
+// mergedNames returns every visible name (own layer + ancestors), sorted for
+// deterministic output.
+func (r *ToolRegistry) mergedNames() []string {
+	seen := make(map[string]struct{})
+	// Size hint only; the map itself is read under collectNames' lock (reading
+	// r.tools here would race with a concurrent Register).
+	r.mu.RLock()
+	hint := len(r.tools)
+	r.mu.RUnlock()
+	names := make([]string, 0, hint)
+	r.collectNames(seen, &names)
+	sort.Strings(names)
+	return names
 }
 
 func (r *ToolRegistry) Execute(ctx context.Context, name string, args map[string]interface{}) *ToolResult {
@@ -114,18 +187,15 @@ func (r *ToolRegistry) ExecuteWithContext(ctx context.Context, name string, args
 }
 
 func (r *ToolRegistry) GetDefinitions() []map[string]interface{} {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	names := r.mergedNames()
 
-	names := make([]string, 0, len(r.tools))
-	for name := range r.tools {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	definitions := make([]map[string]interface{}, 0, len(r.tools))
+	definitions := make([]map[string]interface{}, 0, len(names))
 	for _, name := range names {
-		definitions = append(definitions, ToolToSchema(r.tools[name]))
+		tool, ok := r.Get(name)
+		if !ok {
+			continue // unregistered concurrently
+		}
+		definitions = append(definitions, ToolToSchema(tool))
 	}
 	return definitions
 }
@@ -133,18 +203,14 @@ func (r *ToolRegistry) GetDefinitions() []map[string]interface{} {
 // ToProviderDefs converts tool definitions to provider-compatible format.
 // This is the format expected by LLM provider APIs.
 func (r *ToolRegistry) ToProviderDefs() []providers.ToolDefinition {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	names := r.mergedNames()
 
-	names := make([]string, 0, len(r.tools))
-	for name := range r.tools {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	definitions := make([]providers.ToolDefinition, 0, len(r.tools))
+	definitions := make([]providers.ToolDefinition, 0, len(names))
 	for _, name := range names {
-		tool := r.tools[name]
+		tool, ok := r.Get(name)
+		if !ok {
+			continue // unregistered concurrently
+		}
 		schema := ToolToSchema(tool)
 
 		// Safely extract nested values with type checks
@@ -171,25 +237,20 @@ func (r *ToolRegistry) ToProviderDefs() []providers.ToolDefinition {
 
 // List returns a list of all registered tool names.
 func (r *ToolRegistry) List() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	names := make([]string, 0, len(r.tools))
-	for name := range r.tools {
-		names = append(names, name)
-	}
-	return names
+	return r.mergedNames()
 }
 
 // Count returns the number of registered tools.
 func (r *ToolRegistry) Count() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.tools)
+	return len(r.mergedNames())
 }
 
 // CloneWithout returns a shallow clone of the registry excluding the named tools.
 // Tool instances are shared with the original registry.
+//
+// A scoped registry is FLATTENED: the clone is a plain registry holding the
+// merged view (layer + parent), so the copy keeps working even if the original
+// layer is dropped afterwards.
 func (r *ToolRegistry) CloneWithout(excluded ...string) *ToolRegistry {
 	excludedSet := make(map[string]struct{}, len(excluded))
 	for _, name := range excluded {
@@ -198,11 +259,13 @@ func (r *ToolRegistry) CloneWithout(excluded ...string) *ToolRegistry {
 
 	clone := NewToolRegistry()
 
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	for name, tool := range r.tools {
+	for _, name := range r.mergedNames() {
 		if _, skip := excludedSet[name]; skip {
 			continue
+		}
+		tool, ok := r.Get(name)
+		if !ok {
+			continue // unregistered concurrently
 		}
 		clone.tools[name] = tool
 	}
@@ -213,18 +276,14 @@ func (r *ToolRegistry) CloneWithout(excluded ...string) *ToolRegistry {
 // GetSummaries returns human-readable summaries of all registered tools.
 // Returns a slice of "name - description" strings.
 func (r *ToolRegistry) GetSummaries() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	names := r.mergedNames()
 
-	names := make([]string, 0, len(r.tools))
-	for name := range r.tools {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	summaries := make([]string, 0, len(r.tools))
+	summaries := make([]string, 0, len(names))
 	for _, name := range names {
-		tool := r.tools[name]
+		tool, ok := r.Get(name)
+		if !ok {
+			continue // unregistered concurrently
+		}
 		summaries = append(summaries, fmt.Sprintf("- `%s` - %s", tool.Name(), tool.Description()))
 	}
 	return summaries
