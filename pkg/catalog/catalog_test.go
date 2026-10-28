@@ -262,3 +262,109 @@ func TestProviderCachePath_OpenCodeGoSpellings(t *testing.T) {
 		t.Errorf("cache file base = %q, want %q", filepath.Base(snake), "opencode_go.json")
 	}
 }
+
+// TestProvidersCarryAPIBaseForEveryKnownType is the drift guard behind issue
+// #404: the WebUI pre-fills the endpoint of every provider it offers from
+// GET /api/v1/catalog/providers, so a known provider id without an api_base
+// would ship a tile the user cannot complete without typing the URL by hand.
+//
+// The complement is asserted too: a type outside BaseLessProviderTypes MUST
+// resolve, so adding an id to hardcodedProviderIDs without a default endpoint
+// fails here instead of reaching a user.
+func TestProvidersCarryAPIBaseForEveryKnownType(t *testing.T) {
+	ResetLive()
+	providers := Providers()
+
+	baseLess := make(map[string]bool)
+	for _, id := range BaseLessProviderTypes() {
+		baseLess[id] = true
+	}
+
+	for _, id := range KnownProviderTypes() {
+		p, ok := providers[id]
+		if !ok {
+			t.Errorf("Providers() is missing known id %q", id)
+			continue
+		}
+		if baseLess[id] {
+			if p.APIBase != "" {
+				t.Errorf("Providers()[%q].APIBase = %q, want empty (base-less type)", id, p.APIBase)
+			}
+			continue
+		}
+		if p.APIBase == "" {
+			t.Errorf("Providers()[%q].APIBase is empty: add it to DefaultAPIBaseByType or to BaseLessProviderTypes", id)
+		}
+	}
+
+	// The base-less list must not name ids the catalog does not know: that
+	// would silently excuse a typo in a future id.
+	for _, id := range BaseLessProviderTypes() {
+		if _, ok := providers[id]; ok {
+			continue
+		}
+		if _, ok := ProviderByID(id); ok {
+			continue
+		}
+		// custom / claude-code / codex-cli are WebUI-only types, not catalog ids.
+		switch id {
+		case "custom", "claude-code", "codex-cli":
+			continue
+		}
+		t.Errorf("BaseLessProviderTypes() names %q, which is not a known provider id", id)
+	}
+}
+
+// TestBaseLessProviderTypesNormalize pins the alias handling: the UI sends the
+// type it writes to config, and the endpoint answers for its aliases too.
+func TestBaseLessProviderTypesNormalize(t *testing.T) {
+	cases := map[string]bool{
+		"azure":          true,
+		"azure-foundry":  true,
+		"azure_foundry":  true,
+		"aws":            true,
+		"amazon-bedrock": true,
+		"bedrock":        true,
+		"claudecode":     true,
+		"claude-code":    true,
+		"custom":         true,
+		"openai":         false,
+		"xai":            false,
+		"":               false,
+	}
+	for typ, want := range cases {
+		if got := IsBaseLessProviderType(typ); got != want {
+			t.Errorf("IsBaseLessProviderType(%q) = %v, want %v", typ, got, want)
+		}
+	}
+}
+
+// TestProvidersFillsAPIBaseFromHardcodedTableWhenIndexIsSilent covers the disk
+// index path: an index entry that carries no api_base (older catalog builds)
+// must still reach the UI with the hardcoded default.
+func TestProvidersFillsAPIBaseFromHardcodedTableWhenIndexIsSilent(t *testing.T) {
+	ResetLive()
+	SetCacheDir(t.TempDir())
+	t.Cleanup(ResetCacheDir)
+
+	setIndex(&Index{Providers: map[string]IndexEntry{
+		"xai": {ID: "xai", Name: "xAI", Type: "openai"},
+	}})
+
+	providers := Providers()
+	xai, ok := providers["xai"]
+	if !ok {
+		t.Fatal("xai missing from Providers() with a disk index")
+	}
+	if want := "https://api.x.ai/v1"; xai.APIBase != want {
+		t.Errorf("Providers()[xai].APIBase = %q, want %q (hardcoded fallback)", xai.APIBase, want)
+	}
+
+	// An index api_base still wins over the hardcoded table.
+	setIndex(&Index{Providers: map[string]IndexEntry{
+		"xai": {ID: "xai", Name: "xAI", Type: "openai", APIBase: "https://proxy.example/v1"},
+	}})
+	if got := Providers()["xai"].APIBase; got != "https://proxy.example/v1" {
+		t.Errorf("Providers()[xai].APIBase = %q, want the index value", got)
+	}
+}

@@ -675,6 +675,12 @@ export type CatalogProvider = {
   type?: string
   api_base?: string
   model_count?: number
+  /**
+   * The provider has no derivable endpoint (the user supplies it, or the
+   * transport is not HTTP). `api_base` is then legitimately empty and the
+   * wizard must not treat it as a missing pre-fill.
+   */
+  base_less?: boolean
 }
 
 export type CatalogModelsResponse = {

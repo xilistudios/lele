@@ -112,6 +112,43 @@ func DefaultAPIBaseByType(providerType string) string {
 	return ""
 }
 
+// BaseLessProviderTypes returns the known provider ids that deliberately have
+// no built-in endpoint: the user supplies one, or the transport is not HTTP.
+//
+// It exists so the WebUI can pre-fill an api_base for every provider it offers
+// without hardcoding a second copy of the table, and so a test can assert the
+// complement (every other known id resolves to a non-empty
+// DefaultAPIBaseByType) instead of drifting silently.
+//
+//   - custom: the "OpenAI compatible" tile, by definition user-supplied.
+//   - claude-code / codex-cli: local CLI transports, no HTTP endpoint.
+//   - bedrock: the AWS SDK resolves the endpoint from the region.
+//   - azure_foundry: the endpoint embeds the deployment name.
+func BaseLessProviderTypes() []string {
+	return []string{"custom", "claude-code", "codex-cli", "bedrock", "azure_foundry"}
+}
+
+// IsBaseLessProviderType reports whether providerType is one of
+// BaseLessProviderTypes. Matching goes through normalizeType, so aliases
+// ("azure", "aws") are recognised too.
+//
+// "claude-code" is matched before normalizing on purpose: normalizeType maps
+// it to "anthropic" (the catalog id for the API provider), while the WebUI
+// type of that name is the local CLI transport, which has no endpoint.
+func IsBaseLessProviderType(providerType string) bool {
+	raw := strings.ToLower(strings.TrimSpace(providerType))
+	if raw == "claude-code" || raw == "claudecode" {
+		return true
+	}
+	t := normalizeType(raw)
+	for _, id := range BaseLessProviderTypes() {
+		if id == t {
+			return true
+		}
+	}
+	return false
+}
+
 // KnownProviderTypes returns catalog provider IDs sorted for UI pickers.
 // Prefers the disk index; falls back to hardcoded known IDs.
 func KnownProviderTypes() []string {
@@ -142,15 +179,25 @@ func ProviderByID(id string) (Provider, bool) {
 }
 
 // Providers returns provider metadata (models omitted) keyed by normalized ID.
+//
+// The api_base is always populated when the type has a known endpoint: the
+// disk index wins (it is the fresher source), and the hardcoded
+// DefaultAPIBaseByType table fills the gaps. That makes the list directly
+// usable as a UI picker — a client can pre-fill the endpoint of every provider
+// it offers instead of shipping a second copy of the table (issue #404).
 func Providers() map[string]Provider {
 	if idx := loadIndex(); idx != nil {
 		out := make(map[string]Provider, len(idx.Providers))
 		for k, meta := range idx.Providers {
+			base := meta.APIBase
+			if base == "" {
+				base = DefaultAPIBaseByType(k)
+			}
 			out[k] = Provider{
 				ID:      meta.ID,
 				Name:    meta.Name,
 				Type:    meta.Type,
-				APIBase: meta.APIBase,
+				APIBase: base,
 			}
 		}
 		return out
@@ -340,11 +387,15 @@ var hardcodedProviderIDs = []string{
 func providerMeta(key string) (Provider, bool) {
 	if idx := loadIndex(); idx != nil {
 		if meta, ok := idx.Providers[key]; ok {
+			base := meta.APIBase
+			if base == "" {
+				base = DefaultAPIBaseByType(key)
+			}
 			return Provider{
 				ID:      meta.ID,
 				Name:    meta.Name,
 				Type:    meta.Type,
-				APIBase: meta.APIBase,
+				APIBase: base,
 			}, true
 		}
 	}
