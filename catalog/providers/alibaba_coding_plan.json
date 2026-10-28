@@ -74,40 +74,6 @@
       "tool_call": true
     },
     {
-      "id": "qwen3-coder-next",
-      "name": "Qwen3 Coder Next",
-      "context_window": 262144,
-      "max_output": 65536,
-      "tool_call": true
-    },
-    {
-      "id": "qwen3-coder-plus",
-      "name": "Qwen3 Coder Plus",
-      "context_window": 1000000,
-      "max_output": 65536,
-      "tool_call": true
-    },
-    {
-      "id": "qwen3-max-2026-01-23",
-      "name": "Qwen3 Max",
-      "context_window": 262144,
-      "max_output": 32768,
-      "tool_call": true
-    },
-    {
-      "id": "glm-4.7",
-      "name": "GLM-4.7",
-      "context_window": 202752,
-      "max_output": 16384,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
       "id": "glm-5",
       "name": "GLM-5",
       "context_window": 202752,

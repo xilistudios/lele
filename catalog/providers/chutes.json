@@ -167,6 +167,10 @@
       "tool_call": true
     },
     {
+      "id": "Qwen/Qwen3.8-Max-0902",
+      "name": "Qwen3.8 Max 0902"
+    },
+    {
       "id": "Nemotron-3-Nano-Omni-30B-TEE",
       "name": "Nemotron 3 Nano Omni 30B TEE",
       "context_window": 131072
@@ -176,6 +180,10 @@
       "name": "Mistral Nemo Instruct 2407 TEE",
       "context_window": 131072,
       "max_output": 131072
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "name": "DeepSeek V4 Pro 0813"
     }
   ]
 }

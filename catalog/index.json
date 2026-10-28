@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-10-19T13:08:11Z",
+  "updated_at": "2026-10-26T12:56:16Z",
   "source": "models.dev",
   "providers": {
     "alibaba": {
@@ -17,7 +17,7 @@
       "type": "openai",
       "api_base": "https://coding-intl.dashscope.aliyuncs.com/v1",
       "file": "providers/alibaba_coding_plan.json",
-      "model_count": 10
+      "model_count": 6
     },
     "alibaba_token_plan": {
       "id": "alibaba_token_plan",
@@ -25,7 +25,7 @@
       "type": "openai",
       "api_base": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
       "file": "providers/alibaba_token_plan.json",
-      "model_count": 27
+      "model_count": 26
     },
     "alibaba_token_plan_cn": {
       "id": "alibaba_token_plan_cn",
@@ -33,7 +33,7 @@
       "type": "openai",
       "api_base": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
       "file": "providers/alibaba_token_plan_cn.json",
-      "model_count": 28
+      "model_count": 26
     },
     "anthropic": {
       "id": "anthropic",
@@ -49,7 +49,7 @@
       "type": "openai",
       "api_base": "https://api.arcee.ai/api/v1",
       "file": "providers/arcee.json",
-      "model_count": 7
+      "model_count": 9
     },
     "azure_foundry": {
       "id": "azure_foundry",
@@ -81,7 +81,7 @@
       "type": "openai",
       "api_base": "https://llm.chutes.ai/v1",
       "file": "providers/chutes.json",
-      "model_count": 14
+      "model_count": 16
     },
     "deepseek": {
       "id": "deepseek",
@@ -105,7 +105,7 @@
       "type": "openai",
       "api_base": "https://generativelanguage.googleapis.com/v1beta",
       "file": "providers/gemini.json",
-      "model_count": 39
+      "model_count": 37
     },
     "github_copilot": {
       "id": "github_copilot",
@@ -129,7 +129,7 @@
       "type": "openai",
       "api_base": "https://api.groq.com/openai/v1",
       "file": "providers/groq.json",
-      "model_count": 16
+      "model_count": 11
     },
     "huggingface": {
       "id": "huggingface",
@@ -161,7 +161,7 @@
       "type": "anthropic",
       "api_base": "https://api.minimax.io/anthropic/v1",
       "file": "providers/minimax.json",
-      "model_count": 8
+      "model_count": 2
     },
     "minimax_cn": {
       "id": "minimax_cn",
@@ -169,7 +169,7 @@
       "type": "anthropic",
       "api_base": "https://api.minimaxi.com/anthropic/v1",
       "file": "providers/minimax_cn.json",
-      "model_count": 8
+      "model_count": 2
     },
     "mistral": {
       "id": "mistral",
@@ -177,7 +177,7 @@
       "type": "openai",
       "api_base": "https://api.mistral.ai/v1",
       "file": "providers/mistral.json",
-      "model_count": 20
+      "model_count": 21
     },
     "modelark": {
       "id": "modelark",
@@ -193,7 +193,7 @@
       "type": "openai",
       "api_base": "https://api.moonshot.cn/v1",
       "file": "providers/moonshot.json",
-      "model_count": 4
+      "model_count": 6
     },
     "nanogpt": {
       "id": "nanogpt",
@@ -225,7 +225,7 @@
       "type": "openai",
       "api_base": "https://integrate.api.nvidia.com/v1",
       "file": "providers/nvidia.json",
-      "model_count": 40
+      "model_count": 38
     },
     "ollama": {
       "id": "ollama",
@@ -241,7 +241,7 @@
       "type": "openai",
       "api_base": "https://ollama.com/v1",
       "file": "providers/ollama_cloud.json",
-      "model_count": 27
+      "model_count": 23
     },
     "openai": {
       "id": "openai",
@@ -265,7 +265,7 @@
       "type": "openai",
       "api_base": "https://opencode.ai/zen/go/v1",
       "file": "providers/opencode_go.json",
-      "model_count": 29
+      "model_count": 30
     },
     "openrouter": {
       "id": "openrouter",
@@ -281,7 +281,7 @@
       "type": "openai",
       "api_base": "https://api.perplexity.ai/v1",
       "file": "providers/perplexity.json",
-      "model_count": 22
+      "model_count": 36
     },
     "qwen_portal": {
       "id": "qwen_portal",
@@ -329,7 +329,7 @@
       "type": "openai",
       "api_base": "https://api.together.xyz/v1",
       "file": "providers/together.json",
-      "model_count": 21
+      "model_count": 15
     },
     "vercel": {
       "id": "vercel",
@@ -353,7 +353,7 @@
       "type": "openai",
       "api_base": "https://api.x.ai/v1",
       "file": "providers/xai.json",
-      "model_count": 13
+      "model_count": 12
     },
     "xiaomi": {
       "id": "xiaomi",
@@ -377,7 +377,7 @@
       "type": "openai",
       "api_base": "https://api.z.ai/api/coding/paas/v4",
       "file": "providers/zai_coding_plan.json",
-      "model_count": 7
+      "model_count": 3
     },
     "zhipu": {
       "id": "zhipu",

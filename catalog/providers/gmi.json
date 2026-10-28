@@ -103,11 +103,23 @@
       "tool_call": true
     },
     {
+      "id": "Qwen/Qwen3.7-Max",
+      "name": "Qwen3.7 Max",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "moonshotai/Kimi-K2.6",
       "name": "Kimi K2.6",
       "context_window": 65536,
       "max_output": 65536,
-      "vision": true,
       "thinking_levels": [
         "low",
         "medium",
@@ -121,20 +133,6 @@
       "name": "Kimi K2.7 Code Highspeed",
       "context_window": 262144,
       "max_output": 262144,
-      "vision": true,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "Qwen/Qwen3.7-Max",
-      "name": "Qwen3.7 Max",
-      "context_window": 1000000,
-      "max_output": 65536,
       "thinking_levels": [
         "low",
         "medium",

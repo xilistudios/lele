@@ -5,20 +5,6 @@
   "api_base": "https://opencode.ai/zen/v1",
   "models": [
     {
-      "id": "claude-sonnet-4",
-      "name": "Claude Sonnet 4",
-      "context_window": 1000000,
-      "max_output": 64000,
-      "vision": true,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
       "id": "claude-sonnet-4-5",
       "name": "Claude Sonnet 4.5",
       "context_window": 1000000,
@@ -512,8 +498,7 @@
       "vision": true,
       "thinking_levels": [
         "low",
-        "medium",
-        "high"
+        "medium"
       ],
       "reasoning": true,
       "tool_call": true
@@ -545,11 +530,23 @@
       "tool_call": true
     },
     {
-      "id": "minimax-m3.1-flash-free",
-      "name": "MiniMax M3.1 Flash Free",
-      "context_window": 1000000,
-      "max_output": 512000,
-      "vision": true,
+      "id": "minimax-m2.5",
+      "name": "MiniMax-M2.5",
+      "context_window": 204800,
+      "max_output": 131072,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "minimax-m2.7",
+      "name": "MiniMax-M2.7",
+      "context_window": 204800,
+      "max_output": 131072,
       "thinking_levels": [
         "low",
         "medium",
