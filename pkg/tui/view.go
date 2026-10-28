@@ -91,6 +91,9 @@ func (m *Model) renderWelcome() string {
 	}
 
 	contentBuilder.WriteString(WelcomeTip.Render(i18n.T("tui.typeMessage")) + "\n")
+	// Discoverability for the two switching shortcuts: TAB cycles agents and
+	// /mode changes the chat/agent/group filter.
+	contentBuilder.WriteString(WelcomeTip.Render(i18n.T("tui.tabHint")) + "\n")
 
 	// Modal overlay on welcome screen
 	if m.modalMode != ModalNone {

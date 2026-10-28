@@ -746,16 +746,10 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.modalSelectedIdx >= 0 && m.modalSelectedIdx < len(m.modalItems) {
 				selectedVal := m.modalItems[m.modalSelectedIdx]
 				if m.modalMode == ModalAgent {
-					if m.showWelcome {
-						m.pendingAgent = selectedVal
-					}
-					if m.currentKey != "" {
-						m.agentLoop.GetProvidable().SetSessionAgent(m.currentKey, selectedVal)
-					}
-					// Agent name is rendered in the viewport header — force
-					// a re-render even if the content fingerprint is unchanged.
-					m.lastViewportKey = ""
-					m.renderedBaseKey = ""
+					// Shared with the TAB cycle: pins the agent to the current
+					// session (if any), remembers it as the pending selection
+					// and drops the cached frames that render the agent name.
+					m.applyAgentSelection(selectedVal)
 				} else if m.modalMode == ModalModel {
 					if m.showWelcome {
 						m.pendingModel = selectedVal

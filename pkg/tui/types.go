@@ -218,7 +218,8 @@ type commandInfo struct {
 var allCommands = []commandInfo{
 	{name: "/sessions", description: "Switch session"},
 	{name: "/new", description: "New session"},
-	{name: "/agents", description: "Switch agent"},
+	{name: "/agents", description: "Switch agent (TAB cycles)"},
+	{name: "/mode", description: "Switch mode (agent/chat/group)"},
 	{name: "/models", description: "Switch model"},
 	{name: "/clear", description: "Clear session history"},
 	{name: "/clearq", description: "Drop queued messages for this session"},

@@ -71,6 +71,13 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		}
 		return nil
 
+	case "/mode":
+		// TAB cycles agents; the chat/agent/group filter is a command so it
+		// stays out of the keyboard hot path. Bare "/mode" advances to the
+		// next mode, "/mode <name>" switches to that one.
+		m.handleModeCommand(parts[1:])
+		return nil
+
 	case "/models":
 		m.resetModal(ModalModel)
 		cfgSnapshot := m.agentLoop.GetProvidable().GetConfigSnapshot()
