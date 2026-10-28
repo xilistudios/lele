@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -1137,20 +1138,101 @@ func base64URLDecode(s string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(s)
 }
 
-func openBrowser(url string) error {
+// browserCommand builds the platform's "open this URL" command. It is the ONE
+// platform switch of this package: openBrowser starts it and forgets,
+// OpenBrowserConfirming starts it and watches it exit.
+func browserCommand(url string) (*exec.Cmd, error) {
 	switch runtime.GOOS {
 	case "darwin":
-		return exec.Command("open", url).Start()
+		return exec.Command("open", url), nil
 	case "linux":
-		return exec.Command("xdg-open", url).Start()
+		return exec.Command("xdg-open", url), nil
 	case "windows":
-		return exec.Command("cmd", "/c", "start", url).Start()
+		return exec.Command("cmd", "/c", "start", url), nil
 	default:
-		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
+		return nil, fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
 }
+
+func openBrowser(url string) error {
+	cmd, err := browserCommand(url)
+	if err != nil {
+		return err
+	}
+	return cmd.Start()
+}
+
+// DefaultBrowserConfirmWait is the budget OpenBrowserConfirming spends watching
+// the launcher before it assumes the hand-off worked. It is short on purpose:
+// a working launcher exits in well under a second, and a caller that renders UI
+// (the TUI) pays this delay before it can tell the user anything.
+const DefaultBrowserConfirmWait = 750 * time.Millisecond
 
 // OpenBrowser launches url in the user's default browser. It is exported so
 // callers that must NOT import this package's OAuth machinery (pkg/mcp injects
 // its browser opener as a function) can reuse the one platform switch.
 func OpenBrowser(url string) error { return openBrowser(url) }
+
+// OpenBrowserConfirming launches url in the user's default browser and reports
+// whether the LAUNCHER worked, not merely whether it could be started: it waits
+// up to wait for the launcher to exit, so `xdg-open` that starts fine and then
+// dies with "no method available" (a headless host, a container, a session with
+// no DISPLAY) is reported as a failure instead of being mistaken for a browser
+// that opened.
+//
+// Three outcomes:
+//
+//   - the launcher could not be started: its error;
+//   - it exited non-zero within wait: a value-free error naming the status (an
+//     exit error's text includes the command line, i.e. the URL, so it is
+//     deliberately not wrapped verbatim);
+//   - still running when wait elapses: nil. A launcher that hands the URL to a
+//     browser either exits or stays as that browser's parent; in both cases the
+//     hand-off worked. The process is reaped by a goroutine that ends with it.
+func OpenBrowserConfirming(url string, wait time.Duration) error {
+	cmd, err := browserCommand(url)
+	if err != nil {
+		return err
+	}
+	return startAndConfirm(cmd, wait)
+}
+
+// startAndConfirm implements OpenBrowserConfirming for an already-built command
+// (that split is what makes the behaviour testable without a platform switch or
+// a real browser).
+func startAndConfirm(cmd *exec.Cmd, wait time.Duration) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	// The goroutine reaps the launcher whenever it exits, including the
+	// "still running when wait elapsed" case — otherwise a long-lived parent
+	// would stay a zombie for the life of the process.
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	if wait <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return launcherExitError(err)
+	case <-timer.C:
+		return nil
+	}
+}
+
+// launcherExitError converts a launcher's exit into a value-free error: the
+// exit status only, never the command line (which carries the URL) and never
+// the launcher's stderr.
+func launcherExitError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return fmt.Errorf("browser launcher exited with status %d", exit.ExitCode())
+	}
+	return errors.New("browser launcher failed")
+}

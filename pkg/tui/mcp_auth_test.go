@@ -40,6 +40,10 @@ func mcpAuthListModel(t *testing.T, doc string) *Model {
 	// pkg/agent's MCP fixtures use.
 	mcpWriteDoc(t, config.GetLeleDir(), doc)
 	m.width, m.height = 140, 40
+	// NewModel installs the real launcher; a test must never spawn a browser,
+	// so every MCP test model starts with a no-op opener that a test can
+	// replace (attach / mcpAuthRecordingOpener).
+	m.mcpAuthOpener = func(string) error { return nil }
 
 	m.executeCommand("/mcp") // the real entry point: resetModal + loadMCPList
 	if m.modalMode != ModalMCP {
@@ -122,27 +126,19 @@ func (f *fakeMCPAuthFlow) Cancel() error {
 // mcpAuthStartCapture substitutes the startMCPAuthFlow seam for one test and records
 // what the TUI asked the engine for.
 //
-// It ALSO stubs the browser opener (mcpAuthOpenURL): the real seam launches
-// xdg-open/open/cmd, which a test must never do. Like the engine, install's
-// fake start calls the injected opener when the caller provided one (and
-// ignores its error), so the whole open path — seam → AuthOptions.OpenURL →
-// the modal's feedback line — is exercised without a process.
+// It ALSO records the browser launch: attach installs a recording opener on the
+// model (mcpAuthOpener) and, exactly like the engine, the fake start calls the
+// injected opener when the TUI provided one (pkg/mcp ignores its error), so the
+// whole path — model field → AuthOptions.OpenURL → the modal's feedback line —
+// is exercised without a process.
 type mcpAuthStartCapture struct {
-	names     []string
-	srvs      []mcp.ServerConfig
-	opts      []mcp.AuthOptions
-	flow      mcpAuthFlow
-	err       error
-	openErr   error     // what the stubbed opener reports
-	openedRef *[]string // URLs the stubbed opener was asked to launch
-}
-
-// opened returns every URL the stubbed browser opener received.
-func (c *mcpAuthStartCapture) opened() []string {
-	if c.openedRef == nil {
-		return nil
-	}
-	return *c.openedRef
+	names   []string
+	srvs    []mcp.ServerConfig
+	opts    []mcp.AuthOptions
+	flow    mcpAuthFlow
+	err     error
+	openErr error    // what the recording opener reports
+	opened  []string // URLs the recording opener was asked to launch
 }
 
 func (c *mcpAuthStartCapture) install(t *testing.T) {
@@ -162,23 +158,29 @@ func (c *mcpAuthStartCapture) install(t *testing.T) {
 		}
 		return c.flow, nil
 	}
-	c.openedRef = stubMCPAuthOpenURL(t, c.openErr)
 	t.Cleanup(func() { startMCPAuthFlow = prevStart })
 }
 
-// stubMCPAuthOpenURL replaces the browser-opener seam for one test and returns
-// the URLs it was asked to launch. Every test that drives a start must install
-// it (directly or through mcpAuthStartCapture): the real seam spawns the
-// platform browser (xdg-open / open / cmd start), which a test must never do.
-func stubMCPAuthOpenURL(t *testing.T, err error) *[]string {
-	t.Helper()
-	prev := mcpAuthOpenURL
+// attach installs the recording browser opener on m (the dependency now travels
+// as a Model field, not as package state) and returns m for chaining.
+func (c *mcpAuthStartCapture) attach(m *Model) *Model {
+	m.mcpAuthOpener = func(u string) error {
+		c.opened = append(c.opened, u)
+		return c.openErr
+	}
+	return m
+}
+
+// mcpAuthRecordingOpener installs a recording browser opener on m and returns
+// the collector. Models built by mcpAuthListModel already carry a no-op opener
+// (a test must never spawn the platform browser); this replaces it when the test
+// needs to see the URL.
+func mcpAuthRecordingOpener(m *Model, err error) *[]string {
 	opened := new([]string)
-	mcpAuthOpenURL = func(u string) error {
+	m.mcpAuthOpener = func(u string) error {
 		*opened = append(*opened, u)
 		return err
 	}
-	t.Cleanup(func() { mcpAuthOpenURL = prev })
 	return opened
 }
 
@@ -227,7 +229,7 @@ func mcpAuthEnterFlow(t *testing.T, capture *mcpAuthStartCapture, flow *fakeMCPA
 	capture.flow = flow
 	capture.install(t)
 
-	m := mcpAuthListModel(t, mcpAuthFixtureDoc)
+	m := capture.attach(mcpAuthListModel(t, mcpAuthFixtureDoc))
 	mcpAuthOpenDetail(t, m, "remote-srv")
 
 	cmd, handled := m.handleMCPKey(mcpKeyRunes('a'))
@@ -275,8 +277,8 @@ func TestMCPAuthKey_AOpensFlowOnRemoteEntryAndRefusesStdio(t *testing.T) {
 		if capture.opts[0].OpenURL == nil {
 			t.Error("AuthOptions.OpenURL is nil; the TUI must hand the engine a browser opener")
 		}
-		if len(capture.opened()) != 1 || capture.opened()[0] != flow.url {
-			t.Errorf("browser opener asked for %v, want exactly [%s]", capture.opened(), flow.url)
+		if len(capture.opened) != 1 || capture.opened[0] != flow.url {
+			t.Errorf("browser opener asked for %v, want exactly [%s]", capture.opened, flow.url)
 		}
 		if m.mcpAuthFeedback != i18n.T("tui.mcpAuthBrowserOpened") {
 			t.Errorf("feedback = %q, want the browser-opened line %q",
@@ -904,7 +906,7 @@ func TestMCPAuthOpenURL_BrowserLaunchedWithTheFlowURL(t *testing.T) {
 	}
 	m := mcpAuthEnterFlow(t, capture, flow)
 
-	if got := capture.opened(); len(got) != 1 || got[0] != flow.url {
+	if got := capture.opened; len(got) != 1 || got[0] != flow.url {
 		t.Fatalf("browser launches = %v, want exactly [%s]", got, flow.url)
 	}
 	if m.mcpAuthError != "" {
@@ -964,6 +966,41 @@ func TestMCPAuthOpenURL_LaunchFailureKeepsTheCopyPath(t *testing.T) {
 	}
 	if m.mcpAuthError != "" {
 		t.Errorf("copy did not clear the launch-failure line: %q", m.mcpAuthError)
+	}
+}
+
+// TestMCPAuthOpenURL_NoOpenerClaimsNothing covers a model without an opener
+// (built without NewModel): nothing is attempted, so nothing is claimed — no
+// "opened" line, and the engine is handed no opener at all.
+func TestMCPAuthOpenURL_NoOpenerClaimsNothing(t *testing.T) {
+	capture := &mcpAuthStartCapture{}
+	capture.install(t)
+	m := mcpAuthListModel(t, mcpAuthFixtureDoc)
+	m.mcpAuthOpener = nil
+	capture.flow = &fakeMCPAuthFlow{
+		url:    "https://auth.example.test/authorize?state=s",
+		status: mcpAuthStatusPending,
+	}
+	mcpAuthOpenDetail(t, m, "remote-srv")
+
+	cmd, handled := m.handleMCPKey(mcpKeyRunes('a'))
+	if !handled || cmd == nil {
+		t.Fatalf(`"a": handled=%v cmd=%v, want a start command`, handled, cmd)
+	}
+	runCmd(t, m, cmd)
+
+	if m.mcpAuthState != mcpAuthPending {
+		t.Fatalf("state = %d (error %q), want mcpAuthPending", m.mcpAuthState, m.mcpAuthError)
+	}
+	if len(capture.opts) != 1 || capture.opts[0].OpenURL != nil {
+		t.Errorf("the engine was handed an opener by a model that has none: %v", capture.opts)
+	}
+	if m.mcpAuthFeedback != "" || m.mcpAuthError != "" {
+		t.Errorf("feedback/error = (%q, %q), want both empty when nothing was attempted",
+			m.mcpAuthFeedback, m.mcpAuthError)
+	}
+	if out := ansi.Strip(m.renderMCPAuth()); !strings.Contains(out, capture.flow.URL()) {
+		t.Errorf("the authorization URL is not rendered without an opener:\n%s", out)
 	}
 }
 
