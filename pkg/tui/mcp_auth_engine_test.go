@@ -112,6 +112,10 @@ func mcpAuthPollUntilSettled(t *testing.T, m *Model) {
 func TestMCPAuthEngine_LoopbackFlowCompletesThroughTheTUI(t *testing.T) {
 	doc, resourceURL := mcpAuthE2EServer(t)
 	syncs := countMCPSyncs(t)
+	// This test drives the REAL StartAuth, so the opener it injects is the
+	// real one unless it is stubbed here: the stub also proves the engine
+	// received the authorization URL it must launch.
+	opened := stubMCPAuthOpenURL(t, nil)
 
 	m := mcpAuthListModel(t, doc)
 	mcpAuthOpenDetail(t, m, "remote-srv")
@@ -136,6 +140,16 @@ func TestMCPAuthEngine_LoopbackFlowCompletesThroughTheTUI(t *testing.T) {
 	// the URL usable by a browser on the same machine.
 	if !strings.HasPrefix(authURL.Query().Get("redirect_uri"), "http://127.0.0.1:") {
 		t.Errorf("redirect_uri = %q, want a loopback URI", authURL.Query().Get("redirect_uri"))
+	}
+	// The engine launched the browser automatically with the very URL the
+	// modal displays — one launch, not zero (the old display-only behaviour)
+	// and not two.
+	if got := *opened; len(got) != 1 || got[0] != m.mcpAuthURL {
+		t.Errorf("browser launches = %v, want exactly [%s]", got, m.mcpAuthURL)
+	}
+	if m.mcpAuthFeedback != i18n.T("tui.mcpAuthBrowserOpened") {
+		t.Errorf("pending feedback = %q, want the browser-opened line %q",
+			m.mcpAuthFeedback, i18n.T("tui.mcpAuthBrowserOpened"))
 	}
 
 	mcpAuthPlayBrowser(t, m.mcpAuthURL)
@@ -168,6 +182,7 @@ func TestMCPAuthEngine_LoopbackFlowCompletesThroughTheTUI(t *testing.T) {
 // switched modal state would leave the port pinned for the flow's budget.
 func TestMCPAuthEngine_CancelReleasesTheLoopbackListener(t *testing.T) {
 	doc, _ := mcpAuthE2EServer(t)
+	stubMCPAuthOpenURL(t, nil)
 
 	m := mcpAuthListModel(t, doc)
 	mcpAuthOpenDetail(t, m, "remote-srv")

@@ -148,7 +148,11 @@ The login is interactive and per server; the credential is stored in
 
 - **CLI:** `lele mcp auth issues` (see [`lele mcp auth`](#lele-mcp-auth)).
 - **TUI:** `/mcp`, open the entry with `ENTER`, then press `a` (the key is owned
-  by the detail view — in the list it does nothing).
+  by the detail view — in the list it does nothing). The modal launches the
+  authorization URL in the default browser as soon as the flow starts and keeps
+  the URL on screen, so `CTRL+Y` copies it when the launch does not work (a
+  headless host, an SSH session) and the code — or the whole redirect URL — is
+  pasted back with `ENTER`.
 - **WebUI:** the agent's MCP panel → **Authenticate**.
 
 The flow is OAuth 2.1 with PKCE and a loopback redirect: lele probes the server

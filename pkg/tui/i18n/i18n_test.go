@@ -262,6 +262,11 @@ func TestMCPAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 	keys := []string{
 		"tui.mcpAuth",
 		"tui.mcpAuthStarting",
+		// The browser launch is automatic now: the modal reports whether it
+		// fired and why it could not, while the URL stays on screen and
+		// copyable (the instructions sentence is the copy path's fallback).
+		"tui.mcpAuthBrowserOpened",
+		"tui.mcpAuthBrowserFailed",
 		"tui.mcpAuthURLLabel",
 		"tui.mcpAuthInstructions",
 		"tui.mcpAuthPlaceholder",

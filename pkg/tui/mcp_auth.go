@@ -9,15 +9,16 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/xilistudios/lele/pkg/auth"
 	"github.com/xilistudios/lele/pkg/mcp"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
 // This file is the TUI face of pkg/mcp's interactive OAuth 2.1 engine
-// (pkg/mcp/auth.go): ModalMCPAuth starts a flow, shows the authorization URL,
-// polls the flow to completion, accepts a manually pasted code and cancels
-// cleanly. It talks to pkg/mcp DIRECTLY (no REST), like the rest of this file
-// set does.
+// (pkg/mcp/auth.go): ModalMCPAuth starts a flow (and launches the
+// authorization URL in the user's browser), shows that URL, polls the flow to
+// completion, accepts a manually pasted code and cancels cleanly. It talks to
+// pkg/mcp DIRECTLY (no REST), like the rest of this file set does.
 //
 // Three rules shape it:
 //
@@ -82,6 +83,11 @@ type mcpAuthStartMsg struct {
 	name string
 	flow mcpAuthFlow
 	err  error
+	// openErr is what the browser opener reported for the authorization URL
+	// (nil when no opener ran or it launched fine). It is NOT a flow failure:
+	// the URL stays on screen and CTRL+Y still copies it, so the modal only
+	// uses it to explain WHY no browser appeared.
+	openErr error
 }
 
 // mcpAuthPollMsg is one poll tick of a live flow. seq identifies the flow it
@@ -138,6 +144,19 @@ type mcpAuthFlow interface {
 var startMCPAuthFlow = func(ctx context.Context, name string, srv mcp.ServerConfig, store *mcp.AuthStore, opts mcp.AuthOptions) (mcpAuthFlow, error) {
 	return mcp.StartAuth(ctx, name, srv, store, opts)
 }
+
+// mcpAuthOpenURL launches the authorization URL in the user's browser. The
+// engine never spawns a process itself: it takes an opener (AuthOptions.OpenURL)
+// so the CALLER decides, which is exactly what makes this substitutable in
+// tests and what the CLI already does (cmd/lele/mcp.go, with --no-browser as a
+// single nil).
+//
+// The TUI used to hand the engine a nil opener on the grounds that a remote
+// terminal has no browser — but that made the common case (a local terminal)
+// needlessly manual. The browser is now launched automatically AND the URL is
+// still displayed and copyable (CTRL+Y), so a headless or SSH session loses
+// nothing: the launch simply fails, the modal says so, and the copy path stays.
+var mcpAuthOpenURL = auth.OpenBrowser
 
 // ── Entry point: "a" in ModalMCPDetail ─────────────────────────────────
 
@@ -204,16 +223,21 @@ func (m *Model) mcpAuthStartCmd(name string) tea.Cmd {
 			// no active definition this flow could authorize through.
 			return mcpAuthStartMsg{seq: seq, name: name, err: errMCPAuthNoServer}
 		}
-		// OpenURL stays nil ON PURPOSE. The engine INJECTS the opener so the
-		// caller decides, and this caller is a TUI: it may well be attached to
-		// a remote terminal where launching a browser is meaningless (or would
-		// open one on the wrong machine). The modal shows the URL and offers
-		// CTRL+Y to copy it instead, so the user opens it wherever they can.
-		flow, err := startMCPAuthFlow(context.Background(), name, srv, store, mcp.AuthOptions{})
+		// The opener is INJECTED by the engine's contract (StartAuth never
+		// spawns a process itself). It runs inside the engine's pre-flow phase
+		// — synchronously, on THIS goroutine — so recording its outcome in a
+		// local costs no lock and no race: openErr is written by the opener
+		// and read below, after StartAuth returned.
+		var openErr error
+		opener := func(u string) error {
+			openErr = mcpAuthOpenURL(u)
+			return openErr
+		}
+		flow, err := startMCPAuthFlow(context.Background(), name, srv, store, mcp.AuthOptions{OpenURL: opener})
 		if err != nil {
 			return mcpAuthStartMsg{seq: seq, name: name, err: err}
 		}
-		return mcpAuthStartMsg{seq: seq, name: name, flow: flow}
+		return mcpAuthStartMsg{seq: seq, name: name, flow: flow, openErr: openErr}
 	}
 }
 
@@ -352,6 +376,15 @@ func (m *Model) handleMCPAuthStart(msg mcpAuthStartMsg) tea.Cmd {
 	m.mcpAuthState = mcpAuthPending
 	m.mcpAuthFeedback = ""
 	m.mcpAuthError = ""
+	// The browser was launched inside the engine's pre-flow phase: report the
+	// outcome without making it fatal. A failed launch is NOT an authorization
+	// failure — the URL is on screen and CTRL+Y copies it — so it lands on the
+	// inline (non-terminal) line, while the copy hint stays advertised below.
+	if msg.openErr != nil {
+		m.mcpAuthError = i18n.T("tui.mcpAuthBrowserFailed")
+	} else {
+		m.mcpAuthFeedback = i18n.T("tui.mcpAuthBrowserOpened")
+	}
 	return m.mcpAuthPollCmd()
 }
 
