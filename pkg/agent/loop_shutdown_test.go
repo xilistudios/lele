@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // --- Shutdown / Stop -------------------------------------------------------
@@ -269,9 +271,106 @@ func TestAgentLoop_StopWithin_TimeoutAbandonsJoin(t *testing.T) {
 	}
 }
 
+// TestAgentLoop_StopWithin_SharesOneDeadlineAcrossStages pins that grace is a
+// bound on the WHOLE teardown, not a per-stage budget. Two stages here: a
+// retention sweeper that stops late but healthily (inside the budget), then a
+// turn that never stops. With one sharing deadline the second stage gets only
+// what the first left over, so the call returns at ≈grace; with a per-stage
+// budget it would wait the full grace again and return at ≈1.6×grace.
+func TestAgentLoop_StopWithin_SharesOneDeadlineAcrossStages(t *testing.T) {
+	al := newShutdownTestLoop(t)
+
+	// The loop's own managers are replaced below; stop their sweepers first so
+	// the test leaves no ticker running (same as the retention wiring tests).
+	for _, wired := range al.toolCoordinator.GetSubagents() {
+		wired.StopRetentionCleanup()
+	}
+
+	// Stage 1: a real sweeper blocked in the session-evict callback, released
+	// late — but well inside the grace, so this stage reports success and the
+	// budget it spent must be visible to the next stage.
+	sm := tools.NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
+	sm.SetRetentionPeriod(time.Millisecond)
+	addOldTerminalTaskForTest(sm, time.Hour)
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseSweeper := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseSweeper) // never leave the sweeper blocked if the test fails early
+	sm.SetSessionEvictCallback(func(string) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+	})
+	stopSweeper := sm.StartRetentionCleanup(time.Millisecond)
+	t.Cleanup(stopSweeper)
+	al.toolCoordinator = newToolCoordinatorWithSubagents(al, map[string]*tools.SubagentManager{"main": sm}, nil, nil)
+
+	// Wait until the sweeper is provably INSIDE the callback: that is the
+	// state in which the retention stage blocks and spends the budget.
+	waitUntil := time.Now().Add(3 * time.Second)
+	for {
+		select {
+		case <-entered:
+		default:
+			if time.Now().After(waitUntil) {
+				t.Fatal("the sweeper never entered the evict callback")
+			}
+			time.Sleep(time.Millisecond)
+			continue
+		}
+		break
+	}
+
+	// Stage 2: a turn that ignores cancellation entirely (the worst-case tool
+	// the bounded join exists for). Released only by the test cleanup.
+	turnRelease := make(chan struct{})
+	t.Cleanup(func() { close(turnRelease) })
+	al.wg.Add(1)
+	go func() {
+		defer al.wg.Done()
+		<-turnRelease
+	}()
+
+	const grace = 300 * time.Millisecond
+	// Free the sweeper at 2/3 of the budget: it finishes healthily, but only
+	// a third of the grace is left for the turn join.
+	go func() {
+		time.Sleep(grace * 2 / 3)
+		releaseSweeper()
+	}()
+
+	start := time.Now()
+	err := al.StopWithin(grace)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("StopWithin() = nil, want an error: the turn never observes cancellation, so the join must be abandoned")
+	}
+	// 300 ms budget vs ≈500 ms for a per-stage budget. The 100 ms slack is for
+	// a shared CI machine, and still fails loudly if the join waits a second
+	// full grace.
+	if elapsed > grace+100*time.Millisecond {
+		t.Errorf("StopWithin took %s with a %s budget; each stage must consume the shared deadline, not get its own (per-stage budgeting returns at ≈%s)",
+			elapsed, grace, grace+grace*2/3)
+	}
+	t.Logf("teardown returned in %s with a %s budget: %v", elapsed, grace, err)
+
+	// Same abandonment contract as a mid-wait timeout: nothing may be closed
+	// under the turn that is still running.
+	if al.dbStore != nil {
+		if perr := al.dbStore.DB().Ping(); perr != nil {
+			t.Errorf("Store was closed while a turn was still in flight: %v", perr)
+		}
+	}
+}
+
 // TestAgentLoop_StopWithin_Idempotent pins that Stop and StopWithin share one
-// stopOnce: the gateway's bounded join and any later unbounded Stop (defer in
-// the TUI, a second teardown trigger) must not double-close channels or panic.
+// stopOnce: the gateway's bounded join and any later unbounded Stop (the
+// deferred safety net in the TUI, a second teardown trigger) must not
+// double-close channels or panic.
 func TestAgentLoop_StopWithin_Idempotent(t *testing.T) {
 	al := newShutdownTestLoop(t)
 
