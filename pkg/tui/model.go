@@ -305,7 +305,7 @@ func (m *Model) reloadSessions() {
 	if m.pendingUserMessage != "" && m.currentKey != "" {
 		history := m.historyView()
 		for _, msg := range history {
-			if msg.Role == "user" && msg.Content == m.pendingUserMessage {
+			if isPendingUserMessage(msg, m.pendingUserMessage) {
 				m.pendingUserMessage = ""
 				break
 			}

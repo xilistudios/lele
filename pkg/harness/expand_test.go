@@ -50,7 +50,16 @@ func TestExpandArguments(t *testing.T) {
 		{"dollar0 untouched", "$0 $1", "one", "$0 one"},
 		{"dollar10 untouched", "cost $10 and $ARGUMENTS", "x", "cost $10 and x"},
 		{"arguments not eaten by one", "$ARGUMENTS | $1", "full text", "full text | full"},
-		{"no substitutions", "plain text", "ignored", "plain text"},
+		// No argument placeholder in the template: the arguments are appended
+		// instead of dropped (Claude Code's "ARGUMENTS: <value>" rule).
+		{"no placeholder appends args", "plain text", "ignored", "plain text\n\nARGUMENTS: ignored"},
+		{"no placeholder keeps verbatim args", "inicia el pr", "con  dobles  espacios", "inicia el pr\n\nARGUMENTS: con  dobles  espacios"},
+		{"no placeholder keeps newlines", "line", "a\nb", "line\n\nARGUMENTS: a\nb"},
+		{"no placeholder with no args untouched", "plain text", "", "plain text"},
+		{"no placeholder with blank args untouched", "plain text", "  \n\t ", "plain text"},
+		{"placeholder suppresses append", "run $ARGUMENTS", "extra", "run extra"},
+		{"positional suppresses append", "run $1", "extra more", "run extra"},
+		{"placeholder with no args no trailer", "run $1", "", "run "},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

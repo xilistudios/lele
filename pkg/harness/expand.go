@@ -25,6 +25,11 @@ const (
 
 	// shellTimeout bounds a single !`cmd` execution.
 	shellTimeout = 15 * time.Second
+
+	// ArgumentsLabel prefixes the raw arguments that Expand appends when the
+	// template has no argument placeholder to receive them. Exported so UIs and
+	// tests can recognise the trailer instead of hardcoding the string.
+	ArgumentsLabel = "ARGUMENTS:"
 )
 
 // placeholderRe matches, in one pass, every template placeholder:
@@ -65,6 +70,13 @@ type ExpandOptions struct {
 // inlined file content can smuggle a second round of shell execution or
 // further substitutions.
 //
+// Arguments are never lost: when the template contains no argument placeholder
+// ($ARGUMENTS, $1..$9) to receive them, the raw arguments are appended to the
+// result as a trailing "ARGUMENTS: <value>" line — the same rule Claude Code
+// applies to skills. Without it, "/deploy the staging box" on a template that
+// does not mention $ARGUMENTS would silently drop the user's text and the model
+// would run the command with no idea which box was meant.
+//
 // Substitution failures never return an error — they become visible
 // placeholders ("[shell disabled]", "[missing: @p]", "[error: ...]") so the
 // model can tell what happened. The only hard error is a nil command.
@@ -82,20 +94,31 @@ func Expand(cmd *Command, rawArgs string, opts ExpandOptions) (string, error) {
 		opts.WorkDir, _ = os.Getwd()
 	}
 
-	out, err := expandTemplate(cmd.Template, rawArgs, opts)
+	out, argsConsumed, err := expandTemplate(cmd.Template, rawArgs, opts)
 	if err != nil {
 		return "", err
+	}
+	// No placeholder took the arguments: keep them (see Expand's doc comment)
+	// instead of silently dropping what the user typed after the command name.
+	if !argsConsumed && strings.TrimSpace(rawArgs) != "" {
+		out = strings.TrimRight(out, " \t\r\n") + "\n\n" + ArgumentsLabel + " " + rawArgs
 	}
 	return out, nil
 }
 
-// expandTemplate performs the single-pass substitution described on Expand.
-func expandTemplate(tmpl, rawArgs string, opts ExpandOptions) (string, error) {
+// expandTemplate performs the single-pass substitution described on Expand and
+// reports whether the template actually has a placeholder that receives
+// arguments ($ARGUMENTS or $1..$9). "Receives" is decided by the template
+// alone, not by the arguments supplied: a template that mentions $1 counts as
+// consuming args even when the user passed none, exactly like Claude Code's
+// "when no placeholder receives an argument" rule.
+func expandTemplate(tmpl, rawArgs string, opts ExpandOptions) (string, bool, error) {
 	args := tokenizeArgs(rawArgs)
 
 	var b strings.Builder
 	b.Grow(len(tmpl) + 64)
 	last := 0
+	argsConsumed := false
 	for _, m := range placeholderRe.FindAllStringSubmatchIndex(tmpl, -1) {
 		start, end := m[0], m[1]
 		// Guard @ references: skip if glued to a word char, "_" or ":"
@@ -112,6 +135,7 @@ func expandTemplate(tmpl, rawArgs string, opts ExpandOptions) (string, error) {
 		case m[2] >= 0: // !`cmd`
 			b.WriteString(expandShell(tmpl[m[2]:m[3]], opts))
 		case m[4] >= 0: // $ARGUMENTS / $<digits>
+			argsConsumed = true
 			b.WriteString(expandArg(tmpl[m[4]:m[5]], rawArgs, args))
 		default: // @path
 			b.WriteString(readFileRef(tmpl[m[6]:m[7]], opts))
@@ -119,7 +143,7 @@ func expandTemplate(tmpl, rawArgs string, opts ExpandOptions) (string, error) {
 		last = end
 	}
 	b.WriteString(tmpl[last:])
-	return b.String(), nil
+	return b.String(), argsConsumed, nil
 }
 
 // expandShell resolves one !`cmd` snippet: either executed output or, when
