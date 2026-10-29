@@ -168,6 +168,32 @@ func isCompactionSummary(msg providers.Message) bool {
 			strings.HasPrefix(msg.Content, "[Context compacted"))
 }
 
+// userDisplayContent returns the text a user bubble must show.
+//
+// A custom slash command (/deploy …) is expanded by the backend before it
+// reaches the model: Content holds the EXPANDED prompt (that is what must be
+// replayed to the LLM) while DisplayContent holds the original "/name args" the
+// user actually typed. Rendering Content would dump the whole command template
+// into the transcript, so the bubble follows DisplayContent when it is set.
+// See providers.Message.DisplayContent.
+func userDisplayContent(msg providers.Message) string {
+	if msg.DisplayContent != "" {
+		return msg.DisplayContent
+	}
+	return msg.Content
+}
+
+// isPendingUserMessage reports whether msg is the one behind pending, the copy
+// the TUI paints while the turn starts (see publishUserMessage). It builds on
+// userDisplayContent because pending IS the text the user typed: comparing it
+// with an expanded Content never matched a command-driven turn, which left the
+// bubble either duplicated or replaced by the command template. Trailing
+// whitespace is ignored on both sides (pending is TrimSpace'd, DisplayContent
+// is stored verbatim).
+func isPendingUserMessage(msg providers.Message, pending string) bool {
+	return msg.Role == "user" && pending != "" && strings.TrimSpace(userDisplayContent(msg)) == pending
+}
+
 // updateViewport refreshes the viewport from the current frame's history
 // snapshot. Callers on Update() routes (and tests) can call it directly: with
 // no frame open it reads the history once, exactly as before.
@@ -342,7 +368,7 @@ func (m *Model) updateViewportWithHistory(history []providers.Message) {
 		// Search from the end since the message is most likely recent
 		alreadyInHistory := false
 		for i := len(history) - 1; i >= 0; i-- {
-			if history[i].Role == "user" && history[i].Content == m.pendingUserMessage {
+			if isPendingUserMessage(history[i], m.pendingUserMessage) {
 				alreadyInHistory = true
 				break
 			}
@@ -925,7 +951,7 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 				msgSb.WriteString(renderSystemNotice(sender, body, m.viewport.Width) + "\n\n")
 			} else {
 				msgSb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
-				msgSb.WriteString(UserMessageStyle.Render(wrapText(sanitizeDisplayText(msg.Content), m.viewport.Width-4)) + "\n\n")
+				msgSb.WriteString(UserMessageStyle.Render(wrapText(sanitizeDisplayText(userDisplayContent(msg)), m.viewport.Width-4)) + "\n\n")
 			}
 		} else if msg.Role == "assistant" {
 			// Only show agent name when coming from user (start of a turn)

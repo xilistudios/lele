@@ -62,6 +62,96 @@ func consumeCommandApplied(t *testing.T, mb *bus.MessageBus) bus.OutboundMessage
 	}
 }
 
+// TestHarnessCommand_ArgsKeptWithoutPlaceholder covers the "my arguments
+// vanished" report: a command whose template does not mention $ARGUMENTS used
+// to DROP everything the user typed after the command name, so "/pr revisa los
+// tests" reached the model as the bare template. The arguments must survive as
+// a trailing "ARGUMENTS: …" line instead.
+func TestHarnessCommand_ArgsKeptWithoutPlaceholder(t *testing.T) {
+	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
+		"pr": {Description: "inicia el pr", Template: "inicia el pr"},
+	})
+	mp := newMessageProcessor(al)
+
+	msg := bus.InboundMessage{Channel: "native", ChatID: "c", Content: "/pr revisa los tests"}
+	if !mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
+		t.Fatal("expected applyHarnessCommand to handle /pr")
+	}
+
+	want := "inicia el pr\n\n" + harness.ArgumentsLabel + " revisa los tests"
+	if msg.Content != want {
+		t.Errorf("content = %q, want %q", msg.Content, want)
+	}
+	if got := msg.Metadata["harness_args"]; got != "revisa los tests" {
+		t.Errorf("harness_args = %q, want %q", got, "revisa los tests")
+	}
+}
+
+// TestHarnessCommand_ArgsVerbatim pins the two raw-argument rules the UIs rely
+// on: $ARGUMENTS receives exactly what was typed (inner spacing and line breaks
+// included, not re-joined fields), and the trailer appended when the template
+// has no placeholder uses that same verbatim text.
+func TestHarnessCommand_ArgsVerbatim(t *testing.T) {
+	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
+		"echo":   {Template: "[$ARGUMENTS]"},
+		"plain":  {Template: "plain"},
+		"quoted": {Template: "$1"},
+	})
+	mp := newMessageProcessor(al)
+
+	const typed = "line one\n  line two,   spaced   out"
+	msg := bus.InboundMessage{Channel: "native", ChatID: "c", Content: "/echo " + typed}
+	if !mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
+		t.Fatal("expected /echo to apply")
+	}
+	if want := "[" + typed + "]"; msg.Content != want {
+		t.Errorf("$ARGUMENTS content = %q, want %q", msg.Content, want)
+	}
+	if got := msg.Metadata["harness_args"]; got != typed {
+		t.Errorf("harness_args = %q, want %q", got, typed)
+	}
+	consumeCommandApplied(t, al.bus)
+
+	msg = bus.InboundMessage{Channel: "native", ChatID: "c", Content: "/plain " + typed}
+	if !mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
+		t.Fatal("expected /plain to apply")
+	}
+	if want := "plain\n\n" + harness.ArgumentsLabel + " " + typed; msg.Content != want {
+		t.Errorf("appended content = %q, want %q", msg.Content, want)
+	}
+	consumeCommandApplied(t, al.bus)
+
+	// A template WITH a placeholder must not get the trailer, even when the
+	// placeholder only consumes part of the arguments ($1 here).
+	msg = bus.InboundMessage{Channel: "native", ChatID: "c", Content: "/quoted first second"}
+	if !mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
+		t.Fatal("expected /quoted to apply")
+	}
+	if msg.Content != "first" {
+		t.Errorf("placeholder content = %q, want %q", msg.Content, "first")
+	}
+}
+
+// TestHarnessCommand_NoArgsNoTrailer guards the empty-argument case: a bare
+// "/pr" must expand to the template alone, with no empty ARGUMENTS: line.
+func TestHarnessCommand_NoArgsNoTrailer(t *testing.T) {
+	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
+		"pr": {Template: "inicia el pr"},
+	})
+	mp := newMessageProcessor(al)
+
+	msg := bus.InboundMessage{Channel: "native", ChatID: "c", Content: "/pr"}
+	if !mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
+		t.Fatal("expected applyHarnessCommand to handle /pr")
+	}
+	if msg.Content != "inicia el pr" {
+		t.Errorf("content = %q, want the bare template", msg.Content)
+	}
+	if got := msg.Metadata["harness_args"]; got != "" {
+		t.Errorf("harness_args = %q, want empty", got)
+	}
+}
+
 func TestHarnessCommand_AppliesAndPublishes(t *testing.T) {
 	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"review": {Description: "Review code", Template: "check $ARGUMENTS"},

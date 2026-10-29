@@ -290,7 +290,12 @@ func (mp *messageProcessorImpl) applyHarnessCommand(_ context.Context, msg *bus.
 		return false
 	}
 
-	rawArgs := strings.Join(fields[1:], " ")
+	// rawArgs is the text the user typed after the command name, kept VERBATIM
+	// (multi-line prompts included) so $ARGUMENTS expands to exactly what was
+	// written — same contract as the rest of pkg/harness. Only the leading
+	// separator is trimmed; content is already TrimSpace'd, so fields[0] is a
+	// prefix of it.
+	rawArgs := strings.TrimSpace(content[len(fields[0]):])
 	expanded, err := harness.Expand(cmd, rawArgs, harness.ExpandOptions{
 		WorkDir:            workDir,
 		AllowShell:         mgr.AllowShell(cmd),

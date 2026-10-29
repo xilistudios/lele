@@ -478,6 +478,12 @@ func messageFingerprint(msg providers.Message, width int) string {
 	h := uint64(fnv64aOffset)
 	h = fnv64aWriteField(h, msg.Role)
 	h = fnv64aWriteField(h, msg.Content)
+	// DisplayContent drives the user bubble for command-driven turns (the
+	// expanded Content is not rendered), so it must participate in the key: two
+	// snapshots of the same turn — one before the display metadata was
+	// re-attached, one after — would otherwise share a cache entry and keep
+	// showing the expanded prompt.
+	h = fnv64aWriteField(h, msg.DisplayContent)
 	h = fnv64aWriteField(h, msg.ReasoningContent)
 	h = fnv64aWriteUint64(h, uint64(len(msg.ToolCalls)))
 	for _, tc := range msg.ToolCalls {
