@@ -9,6 +9,19 @@ import (
 // recalculates viewport dimensions on every render, so this handler only
 // clears caches.
 func (m *Model) handleWindowSizeMsg(msg tea.WindowSizeMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	// A message carrying the size we already have is not a resize. The model
+	// re-sends its own dimensions to make the renderer drop its per-row cache
+	// (see consumeLayoutRepaint in frame_layout.go), and that is the only thing
+	// such a message has to accomplish: dropping every render cache and
+	// re-materializing the viewport here would be an O(lines) rebuild of
+	// content whose inputs did not change. The geometry the viewport depends on
+	// is re-checked by the render path itself (syncViewportForFrame compares
+	// viewportBuiltWidth/Height against the bands View() just laid out), so a
+	// band that appears or disappears is still noticed.
+	if msg.Width == m.width && msg.Height == m.height && m.width != 0 {
+		return m.finishUpdate(msg, cmds)
+	}
+
 	m.width = msg.Width
 	m.height = msg.Height
 

@@ -230,6 +230,28 @@ Typical causes:
 - external webhook/bridge not reachable
 - provider credentials missing
 
+## TUI shows duplicated status or input rows
+
+Symptom: in the TUI, the status line (`Processing…` / `Done in …`) or the input
+placeholder (`Ask anything…`) appears two or three times, stacked, with the
+real one at the bottom.
+
+Both known causes are fixed in the client, so a recent build should not do it:
+
+- **The frame layout moved.** When the bottom block (status line, queue band,
+  autocomplete popup, input bar, bottom bar) shifts by one or more rows, the
+  renderer's per-row cache has to be dropped or the old rows survive. The model
+  now asks for one full repaint on every layout change (and only then).
+- **A frame line wrapped in the terminal.** A line that the terminal measures
+  one cell wider than the TUI does — East Asian "ambiguous" glyphs such as `●`,
+  `→` or `·` rendered double width — used to wrap and push every row below it
+  down by one. Autowrap is now disabled for the duration of the TUI session and
+  restored on exit.
+
+If it still happens, note the terminal (name and version), the terminal size
+and whether the terminal is configured to draw ambiguous-width characters as
+double width, and open an issue with that information.
+
 ## Logs To Inspect
 
 - `~/.lele/logs/info-YYYY-MM-DD.log`

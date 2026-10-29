@@ -35,6 +35,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if focusCmd := mm.syncChatInputFocus(); focusCmd != nil {
 		cmd = tea.Batch(cmd, focusCmd)
 	}
+	// A frame whose layout changed (the status band appearing or disappearing,
+	// the queue band, the autocomplete list, a resize, welcome <-> chat) moves
+	// the bottom block by one or more rows. Ask the renderer to repaint every
+	// row in that case: its per-row cache only knows the strings it wrote, so
+	// without this the rows that changed meaning can keep the old frame's text
+	// (a duplicated status line or input placeholder above the real one).
+	if repaintCmd := mm.consumeLayoutRepaint(); repaintCmd != nil {
+		cmd = tea.Batch(cmd, repaintCmd)
+	}
 	return mm, cmd
 }
 

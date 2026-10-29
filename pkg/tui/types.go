@@ -904,6 +904,14 @@ type Model struct {
 	// render. Set when switching sessions or creating a new chat.
 	forceGotoBottom bool
 
+	// frameLayout is the vertical structure of the frame being rendered, filled
+	// in by View() (see frame_layout.go). lastPaintedLayout is the value the
+	// renderer was last told to repaint, so a layout change can force one full
+	// repaint without repainting on every frame.
+	frameLayout          frameLayout
+	lastPaintedLayout    frameLayout
+	frameLayoutRepainted bool
+
 	// compactFeedback holds the result of /compact to display in the viewport.
 	// Cleared when the user sends the next message.
 	compactFeedback string
