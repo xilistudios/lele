@@ -135,8 +135,14 @@ func expandTemplate(tmpl, rawArgs string, opts ExpandOptions) (string, bool, err
 		case m[2] >= 0: // !`cmd`
 			b.WriteString(expandShell(tmpl[m[2]:m[3]], opts))
 		case m[4] >= 0: // $ARGUMENTS / $<digits>
-			argsConsumed = true
-			b.WriteString(expandArg(tmpl[m[4]:m[5]], rawArgs, args))
+			token := tmpl[m[4]:m[5]]
+			// $0 and $10+ match the regexp but stay literal (see expandArg),
+			// so they must not suppress the trailer: a template whose only
+			// "$" token is one of those still loses the typed arguments.
+			if takesArguments(token) {
+				argsConsumed = true
+			}
+			b.WriteString(expandArg(token, rawArgs, args))
 		default: // @path
 			b.WriteString(readFileRef(tmpl[m[6]:m[7]], opts))
 		}
@@ -163,7 +169,7 @@ func expandArg(token, rawArgs string, args []string) string {
 	if token == "ARGUMENTS" {
 		return rawArgs
 	}
-	if len(token) != 1 || token[0] < '1' || token[0] > '9' {
+	if !takesArguments(token) {
 		return "$" + token // $0, $10, ... untouched
 	}
 	idx := token[0] - '1'
@@ -171,6 +177,18 @@ func expandArg(token, rawArgs string, args []string) string {
 		return args[idx]
 	}
 	return "" // positional beyond the args provided => empty
+}
+
+// takesArguments reports whether a matched "$..." token actually receives an
+// argument: $ARGUMENTS and the single-digit positionals $1..$9 do, while $0 and
+// $10 and beyond stay literal. It is the single definition of that rule, shared
+// by expandArg (which renders the token) and expandTemplate (which decides
+// whether the template already consumed the arguments).
+func takesArguments(token string) bool {
+	if token == "ARGUMENTS" {
+		return true
+	}
+	return len(token) == 1 && token[0] >= '1' && token[0] <= '9'
 }
 
 // runShell executes one !`cmd` snippet with sh -c in WorkDir and returns the

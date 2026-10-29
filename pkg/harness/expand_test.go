@@ -57,6 +57,11 @@ func TestExpandArguments(t *testing.T) {
 		{"no placeholder keeps newlines", "line", "a\nb", "line\n\nARGUMENTS: a\nb"},
 		{"no placeholder with no args untouched", "plain text", "", "plain text"},
 		{"no placeholder with blank args untouched", "plain text", "  \n\t ", "plain text"},
+		// $0 and $10+ match the placeholder regexp but stay literal, so they
+		// must NOT count as "the template took the arguments".
+		{"dollar10 does not suppress append", "cost $10", "x", "cost $10\n\nARGUMENTS: x"},
+		{"dollar0 does not suppress append", "zero $0", "x", "zero $0\n\nARGUMENTS: x"},
+		{"dollar10 plus positional opts out", "cost $10 and $1", "x", "cost $10 and x"},
 		{"placeholder suppresses append", "run $ARGUMENTS", "extra", "run extra"},
 		{"positional suppresses append", "run $1", "extra more", "run extra"},
 		{"placeholder with no args no trailer", "run $1", "", "run "},
