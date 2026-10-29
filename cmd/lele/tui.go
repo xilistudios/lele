@@ -152,10 +152,13 @@ func tuiCmd(sessionID string) {
 	// a fallback for terminals that don't support Shift bypass.
 	p := tea.NewProgram(tuiModel, tea.WithAltScreen())
 	finalModel, err := p.Run()
+	// Bubbletea has left the alternate screen: give the terminal its autowrap
+	// mode back before anything else is printed. The resume hint below is wider
+	// than a narrow terminal on purpose (it carries a full command line to copy),
+	// and it would be clipped at the right margin while autowrap is off. The
+	// deferred call is kept for the early returns between here and the end.
+	restoreAutowrap()
 	if err != nil {
-		// os.Exit skips the deferred restore: give the terminal its autowrap
-		// mode back before leaving.
-		restoreAutowrap()
 		fmt.Printf("Error running TUI: %v\n", err)
 		// os.Exit skips every defer, including the teardown above: run it
 		// explicitly here so a render error still releases the keep-awake

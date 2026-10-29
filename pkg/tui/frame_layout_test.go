@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -158,5 +159,52 @@ func TestWelcomeSwitchForcesFullRepaint(t *testing.T) {
 	m = updated.(*Model)
 	if _, ok := repaintMsgFrom(cmd); !ok {
 		t.Fatal("switching to the welcome screen did not request a full repaint")
+	}
+}
+
+// A repaint request re-sends the size the model already has, and the only thing
+// such a message has to accomplish is making the renderer drop its per-row
+// cache. It must not be treated as a resize: dropping every render cache and
+// re-materializing the viewport is an O(lines) rebuild of content whose inputs
+// did not change, which would make every band toggle expensive on a long
+// transcript.
+func TestSameSizeWindowMessageDoesNotRebuildTheViewport(t *testing.T) {
+	i18n.InitWithLanguage("en")
+	m := newTestModel(t)
+	key := "tui:chat:repaint-same-size"
+	m.sessionMgr.GetOrCreate(key)
+	m.currentKey = key
+	m.showWelcome = false
+	for i := 0; i < 40; i++ {
+		m.sessionMgr.AddMessage(key, "user", fmt.Sprintf("question %d", i))
+		m.sessionMgr.AddMessage(key, "assistant", fmt.Sprintf("answer %d with enough words to wrap at any width", i))
+	}
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	m = updated.(*Model)
+	m.View() // materializes the viewport
+	if !m.renderedBaseValid {
+		t.Fatal("the first frame did not materialize the viewport")
+	}
+
+	rebuilds := 0
+	m.onViewportRebuild = func(bool) { rebuilds++ }
+
+	// The repaint request: same size, nothing to re-wrap.
+	updated, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	m = updated.(*Model)
+	if rebuilds != 0 {
+		t.Errorf("a same-size message rebuilt the viewport %d times", rebuilds)
+	}
+	if !m.renderedBaseValid {
+		t.Error("a same-size message invalidated the rendered base")
+	}
+
+	// A real resize still rebuilds: content wrapped for 120 columns is wrong at
+	// 100, and that is exactly what the render path must not miss.
+	updated, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = updated.(*Model)
+	if rebuilds == 0 {
+		t.Error("a resize did not rebuild the viewport")
 	}
 }
