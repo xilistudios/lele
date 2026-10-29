@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -135,6 +136,15 @@ func tuiCmd(sessionID string) {
 		logger.WarnC("tui", err.Error())
 	}
 
+	// Turn the terminal's autowrap off while the TUI owns the screen. A frame
+	// line that the terminal measures one cell wider than the TUI does (East
+	// Asian "ambiguous" glyphs such as ● or → drawn double width) would wrap
+	// and shift every row below it, which the incremental renderer cannot see:
+	// it then skips the rows it thinks are unchanged and leaves the previous
+	// frame's status line and input placeholder on screen as ghost rows.
+	restoreAutowrap := tui.DisableAutowrap(tuiTerminalOutput())
+	defer restoreAutowrap()
+
 	// Run bubbletea program in AltScreen mode.
 	// Mouse capture starts ON for scroll-wheel and sidebar click support.
 	// Users can hold Shift while clicking/dragging to bypass mouse capture
@@ -143,6 +153,9 @@ func tuiCmd(sessionID string) {
 	p := tea.NewProgram(tuiModel, tea.WithAltScreen())
 	finalModel, err := p.Run()
 	if err != nil {
+		// os.Exit skips the deferred restore: give the terminal its autowrap
+		// mode back before leaving.
+		restoreAutowrap()
 		fmt.Printf("Error running TUI: %v\n", err)
 		// os.Exit skips every defer, including the teardown above: run it
 		// explicitly here so a render error still releases the keep-awake
@@ -167,4 +180,15 @@ func tuiCmd(sessionID string) {
 	if resumeID != "" {
 		fmt.Printf("Resume with -s (or command below):\nlele --session=%s\n", resumeID)
 	}
+}
+
+// tuiTerminalOutput returns the writer the TUI renders to — only when it is a
+// real terminal. Escape sequences aimed at a redirected file or pipe would
+// corrupt the output, and there is no screen to protect in that case.
+func tuiTerminalOutput() io.Writer {
+	fi, err := os.Stdout.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return nil
+	}
+	return os.Stdout
 }

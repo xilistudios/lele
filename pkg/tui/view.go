@@ -42,6 +42,10 @@ func (m *Model) View() string {
 	m.hasBackToParentClick = false
 
 	if m.showWelcome {
+		// The welcome screen has no viewport band; record its (flat) structure
+		// so returning from it to the chat layout — or opening a modal on top
+		// of it — also counts as a layout change and gets a full repaint.
+		m.noteFrameLayout(m.width, m.height, 0, 0, 0)
 		return m.renderWelcome()
 	}
 	return m.renderChatLayout()
@@ -347,6 +351,11 @@ func (m *Model) renderChatLayout() string {
 		lipgloss.Height(inputBar),
 		lipgloss.Height(bottomBar),
 	)
+	// Record the frame's vertical structure: the message pump turns a change
+	// into one full repaint, so rows that change meaning (a status line that
+	// becomes a blank margin, an input bar that moves up a row) can never keep
+	// the previous frame's text. See frame_layout.go.
+	m.noteFrameLayout(m.width, m.height, m.viewport.Height, queueRowHeight, autocompleteHeight)
 	// The viewport rebuild consumes the frame snapshot hoisted above: it must
 	// not read the history again (passing it is what removes the extra copy the
 	// baseline measured at 6000 messages). T3: View() does NOT rebuild the
