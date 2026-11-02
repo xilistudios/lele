@@ -294,6 +294,9 @@ func (m *Model) filterAutocomplete(val string) {
 		}
 		m.autocompleteItems = append(m.autocompleteItems, cmd)
 	}
+	// Most-used first; ties keep the declared order (built-ins) or the
+	// registry's alphabetical order (customs). Empty history = no reorder.
+	sortCommandsByUsage(m.autocompleteItems, m.cmdUsage)
 	if m.autocompleteIdx < 0 || m.autocompleteIdx >= len(m.autocompleteItems) {
 		m.autocompleteIdx = 0
 	}
