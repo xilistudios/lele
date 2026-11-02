@@ -72,6 +72,28 @@ export function isCompactionSummary(message: {
 }
 
 /**
+ * True if a message exists in the session history but must never appear in the
+ * chat log: the synthetic rows the backend persists with role "user" for its
+ * own bookkeeping (compaction summaries, loop-detector guidance).
+ *
+ * WHY it is a shared predicate and not a local filter: TWO places need the exact
+ * same rule and silently disagreeing is a data-loss bug.
+ *
+ *  - `MessageList` drops these rows before rendering, so the user never sees
+ *    them;
+ *  - `mergeMessages` must therefore never treat one of them as the persisted
+ *    copy of an optimistic user bubble (`findUnclaimedBaseUserForStaleBubble`).
+ *    Claiming an invisible row would DELETE the user's bubble in exchange for a
+ *    row that renders nothing: the message vanishes from the screen with no
+ *    replacement anywhere in the transcript.
+ */
+export function isHiddenFromChat(message: { role: ChatMessage['role']; content: string }): boolean {
+  if (message.content.startsWith('⚠️ GUIDANCE:')) return true
+  if (message.content.startsWith('GUIDANCE:')) return true
+  return isCompactionSummary(message)
+}
+
+/**
  * Parses attachment paths from a message content string that contains
  * "## Attachments\n- /path/file.png" appended by the backend.
  * Returns the cleaned content and extracted attachment info.

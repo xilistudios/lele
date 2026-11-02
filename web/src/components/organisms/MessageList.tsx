@@ -4,9 +4,10 @@ import { useNavigate } from 'react-router-dom'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { useAppLogicContext, useAppStreamingContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
-import { countPrependedItems } from '../../hooks/messageInsertion'
-import { isCompactionSummary } from '../../lib/chatMessageBuilder'
+import { countPrependedItems, nextFirstItemIndex } from '../../hooks/messageInsertion'
+import { isHiddenFromChat } from '../../lib/chatMessageBuilder'
 import { getModeTheme } from '../../lib/modeTheme'
+import { collapseThinkingRuns } from '../../lib/thinkingRows'
 import type { ChatMessage, GroupInfo, GroupToolCall, GroupTurn } from '../../lib/types'
 import { MarkdownText } from '../molecules/MarkdownText'
 import { ToolCallDisplay } from '../molecules/ToolCallDisplay'
@@ -68,16 +69,21 @@ export function MessageList() {
   const [atBottom, setAtBottom] = useState(true)
   const prevSessionKeyRef = useRef(currentSessionKey)
 
-  const visibleMessages = useMemo(
-    () =>
-      messages.filter(
-        (m) =>
-          !m.content.startsWith('⚠️ GUIDANCE:') &&
-          !m.content.startsWith('GUIDANCE:') &&
-          !isCompactionSummary(m),
-      ),
-    [messages],
-  )
+  // Backend bookkeeping rows (compaction summaries, loop-detector guidance) are
+  // persisted with role "user" but must never render. The SAME predicate guards
+  // the merge's optimistic-bubble pairing (see isHiddenFromChat), so the two
+  // can never drift: a row filtered here must never be claimed as the persisted
+  // copy of a user bubble, or the bubble would be deleted in exchange for
+  // something invisible.
+  const visibleMessages = useMemo(() => messages.filter((m) => !isHiddenFromChat(m)), [messages])
+
+  // RENDER-level collapse of adjacent bare thinking cards (lib/thinkingRows.ts).
+  // Only the rows handed to Virtuoso are collapsed: the merge output
+  // (`visibleMessages`) stays the single source of truth for counting, the
+  // prepend bookkeeping below measures the RENDERED items (see the comment
+  // there), and this pass is reversible — dropping it from the memo restores
+  // today's output byte for byte.
+  const displayMessages = useMemo(() => collapseThinkingRuns(visibleMessages), [visibleMessages])
 
   const prevFirstMsgKeyRef = useRef<string | undefined>(
     visibleMessages[0] ? messageKey(visibleMessages[0]) : undefined,
@@ -106,14 +112,26 @@ export function MessageList() {
   // over-shifts, which is the scroll-flicker bug.
   useEffect(() => {
     if (prevSessionKeyRef.current === currentSessionKey) {
-      const nextKeys = visibleMessages.map(messageKey)
+      // Measured on the RENDERED list, not on `visibleMessages`: Virtuoso's
+      // contract is `firstItemIndex + data.length` = the number of items ever
+      // rendered, and `data` is built from `displayMessages`. A prepended page
+      // that happens to hold collapsible thinking rows grows the rendered list
+      // by FEWER items than it grows the merge output, so counting the merge
+      // output would decrement `firstItemIndex` one too many per collapsed run
+      // and break that contract (scroll drift, not content loss).
+      const nextKeys = displayMessages.map(messageKey)
       const prepended = countPrependedItems(prevFirstMsgKeyRef.current, nextKeys)
+      // Only touch state when a shift is actually due — a pointless
+      // `setFirstItemIndex` with the same number still schedules a re-render.
+      // The arithmetic lives in the tested `nextFirstItemIndex`, which reuses
+      // `countPrependedItems` and clamps the result so the index can never go
+      // negative (see its doc comment for the full contract).
       if (prepended > 0) {
-        setFirstItemIndex((prev) => prev - prepended)
+        setFirstItemIndex((prev) => nextFirstItemIndex(prev, prevFirstMsgKeyRef.current, nextKeys))
       }
       prevFirstMsgKeyRef.current = nextKeys[0]
     }
-  }, [visibleMessages, currentSessionKey])
+  }, [displayMessages, currentSessionKey])
 
   // Use refs for the scroll handler so it always reads latest state
   // without needing to reattach the listener on every render.
@@ -186,14 +204,14 @@ export function MessageList() {
   // ── Build a merged timeline of messages and group blocks ──
   const renderItems: RenderItem[] = useMemo(() => {
     const items: RenderItem[] = []
-    for (let i = 0; i < visibleMessages.length; i++) {
-      items.push({ type: 'message', message: visibleMessages[i], index: i })
+    for (let i = 0; i < displayMessages.length; i++) {
+      items.push({ type: 'message', message: displayMessages[i], index: i })
     }
     for (const group of groups.values()) {
       items.push({ type: 'group', group })
     }
     return items
-  }, [visibleMessages, groups])
+  }, [displayMessages, groups])
 
   const renderItem = useCallback(
     (_index: number, item: RenderItem) => {
@@ -202,7 +220,7 @@ export function MessageList() {
           <MessageBubble
             key={messageKey(item.message)}
             message={item.message}
-            isLast={item.index === visibleMessages.length - 1}
+            isLast={item.index === displayMessages.length - 1}
             onNavigateToSession={handleNavigateToSession}
             onRetry={onRetry}
           />
@@ -297,7 +315,7 @@ export function MessageList() {
         </div>
       )
     },
-    [visibleMessages, handleNavigateToSession, onRetry, t],
+    [displayMessages, handleNavigateToSession, onRetry, t],
   )
 
   const computeItemKey = useCallback((index: number, item: RenderItem) => {

@@ -1060,6 +1060,18 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		n.emitNativeEvent(sessionKey, "message.thinking",
 			newWSThinkingPayload(msg.MessageID, sessionKey, msg.Content, msg.Metadata), msg.MessageID)
 		return
+	case "message.discard":
+		// The agent threw away an iteration it had already streamed to this
+		// client: it carries no content and nothing of it survives, so the
+		// session is NOT touched here (no append, no finalize) — the only job
+		// of the event is to carry the streamed message id back to the client
+		// so it can drop the bubble that history will never confirm.
+		n.emitNativeEvent(sessionKey, "message.discard", WSMessageDiscardPayload{
+			MessageID:  msg.MessageID,
+			SessionKey: sessionKey,
+			Reason:     msg.Metadata["reason"],
+		}, msg.MessageID)
+		return
 	case "tool.executing":
 		var toolArgs map[string]interface{}
 		if argsStr := msg.Metadata["arguments"]; argsStr != "" {

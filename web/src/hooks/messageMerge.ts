@@ -26,6 +26,7 @@
  * messageOrderingWindow.test.ts and messagePairing.test.ts — keep those suites
  * green when changing anything here.
  */
+import { isHiddenFromChat, parseSystemNotice } from '../lib/chatMessageBuilder'
 import { assistantIdentityText } from '../lib/messageIdentity'
 import type { ChatMessage } from '../lib/types'
 
@@ -324,6 +325,9 @@ export function isAttachmentsOnlyBase(bm: ChatMessage): boolean {
 
 // ── Optimistic user confirmation ────────────────────────────────────────────
 
+/** No claims yet: used to ask "which rows COULD a content rule pair with". */
+const EMPTY_CLAIMS: ReadonlySet<number> = new Set<number>()
+
 /**
  * Indexes of the confirmed base users that can vouch for optimistic user
  * `msg`: content matches for its 200-char prefix that no EARLIER optimistic
@@ -340,7 +344,7 @@ export function isAttachmentsOnlyBase(bm: ChatMessage): boolean {
 function collectConfirmCandidates(
   msg: ChatMessage,
   baseMessages: ChatMessage[],
-  claimed: Set<number>,
+  claimed: ReadonlySet<number>,
 ): number[] {
   const prefix = msg.content.slice(0, 200)
   const candidates: number[] = []
@@ -380,7 +384,7 @@ export function findConfirmingBaseUserIndex(
   msg: ChatMessage,
   baseMessages: ChatMessage[],
   baseUserCount: number,
-  claimed: Set<number>,
+  claimed: ReadonlySet<number>,
 ): number {
   // Rule 1: content match on the 200-char prefix, or the marker identity for an
   // attachments-only turn (empty content → no content match, never no copy).
@@ -403,6 +407,186 @@ export function findConfirmingBaseUserIndex(
     if (after.length > 0) return after[0]
   }
 
+  return -1
+}
+
+/**
+ * Whether any of the base rows in `rows` POSTDATES the send position of `msg`,
+ * i.e. whether history has provably moved past that bubble's turn.
+ *
+ * WHY this is not just `rows.size > 0`: `rows` are the base indexes that a
+ * LATER optimistic bubble can match BY CONTENT, and a content match ignores
+ * position — sending the same short text twice ("ok", "continue", "sí") makes
+ * the later bubble "reserve" the OLD row that carries that text. Reading that
+ * as "history already moved past me" would drop a bubble that is legitimately
+ * still in flight (it re-appears from base on the next poll, but the user sees
+ * it vanish for up to four seconds). Only a row at/after the send position
+ * proves the turn was answered without ever being persisted — which is the
+ * built-in slash-command case (`/model`, `/status`, `/compact` are executed by
+ * the command handler and only their RESPONSE is delivered).
+ *
+ * The position test is the same one the confirmation ladder uses: the send-time
+ * ordinal when the cache has grown past the snapshot, and the anchor id
+ * otherwise (an anchor that slid out of the window means every row still in
+ * base postdates the send).
+ */
+function hasRowPastSendPosition(
+  msg: ChatMessage,
+  baseMessages: ChatMessage[],
+  rows: ReadonlySet<number>,
+): boolean {
+  if (rows.size === 0) return false
+
+  const snapshot = msg.optimisticBaseCount ?? 0
+  const anchorId = msg.optimisticAnchorId
+  const hasAnchor = typeof anchorId === 'string' && anchorId.length > 0
+  const anchorIdx = hasAnchor ? baseMessages.findIndex((m) => m.id === anchorId) : -1
+  // Anchor gone from the sliding window: everything still in base postdates it.
+  if (hasAnchor && anchorIdx === -1) return true
+
+  let ordinal = 0
+  for (let i = 0; i < baseMessages.length; i++) {
+    const bm = baseMessages[i]
+    if (bm.role !== 'user' || bm.optimistic) continue
+    const thisOrdinal = ordinal++
+    if (!rows.has(i)) continue
+    if (thisOrdinal >= snapshot) return true
+    if (anchorIdx !== -1 && i > anchorIdx) return true
+  }
+  return false
+}
+
+/**
+ * Index of the confirmed base user that a STRANDED optimistic bubble `msg`
+ * should be reconciled against — the POSITIONAL fallback — or -1.
+ *
+ * WHY a positional fallback is legitimate for USER messages only: a send and
+ * its persisted copy are 1:1 and strictly ordered inside the history window.
+ * One sent turn produces exactly one user row (RenderUserMessage,
+ * pkg/agent/context.go), so "the first confirmed user at/after my send
+ * position" is a well-defined pairing. Assistants are NOT like that: the
+ * backend persists ONE MESSAGE PER LLM ITERATION, so a single turn can add N
+ * assistant rows and the Nth-from-the-end live copy is not the Nth-from-the-end
+ * base copy — see `findStreamingTwin`, which forbids positional pairing for
+ * exactly that reason. Never extend this helper to assistant or tool matching.
+ *
+ * WHY it is needed at all: this is only reachable AFTER every content-based
+ * rule of `findConfirmingBaseUserIndex` failed, i.e. `collectConfirmCandidates`
+ * returned `[]`. That happens when the server persisted the turn but under a
+ * DIFFERENT text than the client sent — server-side normalization (trimming,
+ * the rendered attachment context, rewrites, system notices) defeats the
+ * 200-char prefix identity — and, independently, when the client's
+ * content-derived anchor id has already slid out of the sliding history window
+ * (pkg/channels/rest_chat.go caps history at the last `limit` messages). In
+ * both shapes no rule can ever confirm the bubble, and `mergeMessages` appends
+ * unmatched streaming messages after canonical history: it renders BELOW newer
+ * answers forever ("an old user message shows up as the newest") until a page
+ * reload clears the streaming state.
+ *
+ * ACCEPTED TRADE-OFF: with two rapid sends and only ONE persisted copy, the
+ * FIRST bubble claims the persisted slot (render A, pinned by test 5) and the
+ * second is left unmatched — it keeps rendering at the tail until its own copy
+ * lands, exactly as before this fallback existed. Preferring the older bubble is
+ * deliberate: it is the one whose copy the server writes first, and a claim
+ * consumed out of order would strand the newer send instead.
+ *
+ * Both rules hand out only indexes that are unclaimed and NOT optimistic, so a
+ * claim can be consumed exactly once across a whole merge pass.
+ *
+ * TWO further exclusions keep the rule from pairing the WRONG row, and both are
+ * required for correctness, not polish:
+ *
+ *  - `reserved` — every base index that ANY optimistic bubble of this pass can
+ *    still match by CONTENT. A positional claim must never take one of them,
+ *    because claims are handed out in send order: an older bubble the server
+ *    never persisted (a built-in slash command such as `/model` or `/status` is
+ *    executed and answered WITHOUT ever being written to the session, so its
+ *    bubble can never be confirmed) would otherwise claim the row belonging to
+ *    the NEXT send, and that later bubble — whose copy is right there in base —
+ *    would then have nothing left to pair with. It would be appended AFTER the
+ *    canonical history and render below newer answers forever, which is exactly
+ *    the ordering symptom this fallback exists to remove.
+ *  - `isHiddenFromChat` — a row the chat log never renders (compaction summary,
+ *    loop-detector guidance). Pairing with one deletes the user's bubble in
+ *    exchange for nothing visible, so the message would simply vanish.
+ *  - a synthetic `[System: …]` notice — persisted with role "user" but written
+ *    by the BACKEND, so it can never be the copy of a typed message.
+ */
+export function findUnclaimedBaseUserForStaleBubble(
+  msg: ChatMessage,
+  baseMessages: ChatMessage[],
+  baseUserCount: number,
+  claimed: ReadonlySet<number>,
+  reserved?: ReadonlySet<number>,
+): number {
+  // ATTACHMENTS-CARRYING turns are excluded: their identity is the attachment
+  // marker, not their text (the persisted path is chosen by the server —
+  // `PersistAttachmentsToWorkspace` renames the upload — see
+  // ATTACHMENTS_ONLY_MARKER / isAttachmentsOnlyBase). Pairing them by position
+  // would let an unrelated turn absorb the bubble, which
+  // attachmentsOnlySend.test.ts (5, 5b, 5c) pins as forbidden. A text+attachment
+  // turn is already covered by the content rules anyway: the server persists it
+  // as `<text>\n\n<attachment context>` (RenderUserMessage, pkg/agent/context.go),
+  // so the client text stays a prefix of the persisted copy.
+  if ((msg.attachments?.length ?? 0) > 0) return -1
+
+  /** A base row this bubble is allowed to consume as its persisted copy. */
+  const claimable = (i: number): boolean => {
+    if (claimed.has(i)) return false
+    if (reserved?.has(i)) return false
+    const bm = baseMessages[i]
+    if (bm.role !== 'user' || bm.optimistic) return false
+    if (isHiddenFromChat(bm)) return false
+    // A synthetic system notice (`[System: <sender>] …`) is persisted with role
+    // "user" but the BACKEND writes it; it is never the copy of something the
+    // user typed ([System: is the canonical synthetic marker, see
+    // parseSystemNotice). Claiming one would delete the user's bubble and leave
+    // only the notice on screen.
+    if (parseSystemNotice(bm.content)) return false
+    return true
+  }
+
+  const snapshot = msg.optimisticBaseCount ?? 0
+
+  // Rule 1 — send-time ordinal. Covers the FIRST message of a session, where
+  // `optimisticAnchorId` is undefined because the history cache was still
+  // empty at send time: the snapshot is then just a count, and every confirmed
+  // user whose 0-based ordinal among confirmed users is >= that count arrived
+  // AFTER the send. The FIRST such unclaimed index is this bubble's slot.
+  if (baseUserCount > snapshot) {
+    let ordinal = 0
+    for (let i = 0; i < baseMessages.length; i++) {
+      const bm = baseMessages[i]
+      if (bm.role !== 'user' || bm.optimistic) continue
+      const thisOrdinal = ordinal++
+      if (thisOrdinal < snapshot) continue
+      if (claimable(i)) return i
+    }
+  }
+
+  // Rule 2 — anchor id. Base ids are content-derived and position-independent
+  // (residentMessageID, pkg/channels/rest_chat.go), so the anchor survives
+  // history rewrites; only the sliding window can remove it.
+  const anchorId = msg.optimisticAnchorId
+  if (typeof anchorId !== 'string' || anchorId.length === 0) return -1
+
+  const confirmedUsers: number[] = []
+  for (let i = 0; i < baseMessages.length; i++) {
+    const bm = baseMessages[i]
+    if (bm.role === 'user' && !bm.optimistic) confirmedUsers.push(i)
+  }
+  const unclaimed = confirmedUsers.filter(claimable)
+
+  const anchorIdx = baseMessages.findIndex((m) => m.id === anchorId)
+  if (anchorIdx === -1) {
+    // The anchor slid out of the window: every confirmed user still in base
+    // postdates the send, so this bubble's copy is the NEWEST one.
+    return unclaimed.length > 0 ? unclaimed[unclaimed.length - 1] : -1
+  }
+  // Anchor still visible: the copy is the first confirmed user after it.
+  for (const i of unclaimed) {
+    if (i > anchorIdx) return i
+  }
   return -1
 }
 
@@ -435,6 +619,30 @@ function filterStreamingLeftovers(
 ): ChatMessage[] {
   const baseUserCount = baseMessages.filter((m) => m.role === 'user' && !m.optimistic).length
   const usedAssistantIds = new Set(index.assistants.filter((e) => e.used).map((e) => e.msg.id))
+
+  // The optimistic user bubbles, in send order, with the base rows each one can
+  // match BY CONTENT (ignoring claims: this is "which rows can a content rule
+  // ever pair with", not "which claim it takes").
+  const bubbles = streamingMessages
+    .filter((m) => m.role === 'user' && m.optimistic)
+    .map((msg) => ({ msg, candidates: collectConfirmCandidates(msg, baseMessages, EMPTY_CLAIMS) }))
+
+  // Base rows that a CONTENT rule will pair with some optimistic bubble that
+  // comes AFTER this one in send order. Two uses, both required:
+  //
+  //  1. the positional fallback must treat them as off limits (they belong to a
+  //     later, properly-persisted send — see the doc comment above);
+  //  2. if there is one at all, base has already moved PAST this bubble's turn,
+  //     so a copy of this bubble is never going to appear: the caller drops the
+  //     bubble WITHOUT consuming a claim.
+  const suffixReserved: ReadonlySet<number>[] = new Array<ReadonlySet<number>>(bubbles.length)
+  const running: Set<number> = new Set<number>()
+  for (let i = bubbles.length - 1; i >= 0; i--) {
+    suffixReserved[i] = new Set(running)
+    for (const idx of bubbles[i].candidates) running.add(idx)
+  }
+  const bubblePositions = new Map<string, number>()
+  bubbles.forEach((b, i) => bubblePositions.set(b.msg.id, i))
 
   // Base indexes already consumed by an EARLIER optimistic user. Threaded
   // across the WHOLE pass so claims are handed out in streaming (= send)
@@ -472,6 +680,41 @@ function filterStreamingLeftovers(
         claimed.add(confirmIdx)
         return false
       }
+      // A refused/failed send must stay visible AND retryable: it never got a
+      // persisted copy, so no fallback below may swallow it.
+      if (msg.failed) return true
+      // FINAL FALLBACK (positional): the server persisted this turn but under a
+      // different text, or the anchor id slid out of the window — no content
+      // rule can ever confirm the bubble, and keeping it would strand it BELOW
+      // newer answers. See findUnclaimedBaseUserForStaleBubble.
+      const bubblePos = bubblePositions.get(msg.id) ?? -1
+      const futureReserved = bubblePos >= 0 ? suffixReserved[bubblePos] : EMPTY_CLAIMS
+      const staleIdx = findUnclaimedBaseUserForStaleBubble(
+        msg,
+        baseMessages,
+        baseUserCount,
+        claimed,
+        futureReserved,
+      )
+      if (staleIdx !== -1) {
+        claimed.add(staleIdx)
+        return false
+      }
+      // No row to claim, but a LATER send already has one by content: base has
+      // moved past this bubble's turn, so its copy is not coming — the server
+      // answered it without ever writing it to the session (a built-in slash
+      // command: `/model`, `/status`, `/compact`, … are executed by the command
+      // handler and only their RESPONSE is delivered) or its row has slid out of
+      // the sliding window. Drop the bubble WITHOUT consuming a claim, so the
+      // later send still finds the row it owns. This is what stops a command
+      // bubble from being the immortal "old message rendered as the newest".
+      // …but only a row that POSTDATES this bubble's send position proves it.
+      // A later send whose text merely repeats OLDER text also reserves a row
+      // (the content candidates ignore position), and treating that as "my
+      // copy is not coming" would drop a bubble that is legitimately still in
+      // flight — it would vanish for up to one poll and then re-appear from
+      // base. See hasRowPastSendPosition.
+      if (hasRowPastSendPosition(msg, baseMessages, futureReserved)) return false
       return true
     }
 
@@ -554,6 +797,18 @@ export function enforceUniqueRenderKeys(messages: ChatMessage[]): ChatMessage[] 
  * `reasoningContent`. We intentionally do NOT consolidate reasoning across
  * iterations into a single block: each turn keeps its own independent
  * "Thinking..." block so a multi-step turn doesn't grow into one giant one.
+ *
+ * Optimistic USER bubbles are confirmed by content first (prefix identity, or
+ * the attachments-only marker) with the count/anchor novelty rules on top of
+ * it, and then — for a turn the server persisted under a DIFFERENT text, or
+ * whose anchor slid out of the window — by a FINAL POSITIONAL fallback
+ * (`findUnclaimedBaseUserForStaleBubble`), which is sound for user turns only.
+ * Without it such a bubble could never be confirmed and would be appended
+ * below newer answers forever. A bubble that can claim nothing while a LATER
+ * send already matched a row by content is dropped without consuming a claim:
+ * that is the built-in-slash-command case (`/model`, `/status`, … are answered
+ * without ever being persisted), which would otherwise leave one immortal
+ * phantom per command.
  */
 export function mergeMessages(
   baseMessages: ChatMessage[],

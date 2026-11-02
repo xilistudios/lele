@@ -19,9 +19,11 @@ import { registerStableId } from '../stableIdRegistry'
 import {
   applyMessageComplete,
   attachToLastAssistant,
+  markNewestOptimisticUserFailed,
   markOptimisticUserFailed,
   markStreamingAssistantsErrored,
   migrateRestoreId,
+  removeDiscardedMessage,
   removeRestorePlaceholders,
   restoreInProgressAssistant,
   retractAttachmentsOnlyBubble,
@@ -183,6 +185,44 @@ export function handleMessageThinking(ctx: MessageEventContext, data: Record<str
       return m
     }),
   )
+}
+
+/**
+ * `message.discard` — the backend streamed an LLM iteration to this client and
+ * then threw it away (empty-response retry, plain-text tool-call guidance, every
+ * tool call invalid).
+ *
+ * The bubble those chunks built is therefore a ghost: the iteration is never
+ * persisted, so no history copy will ever confirm it and `mergeMessages`
+ * appends it AFTER the canonical history — the stray "Thinking…" card below the
+ * final answer. This event is the only signal that says so; see
+ * `removeDiscardedMessage` for the state transition itself.
+ *
+ * The turn is still RUNNING (discarding an iteration is how the agent retries),
+ * so nothing but that one bubble changes: processing state, tool status, error
+ * banner and history cache are deliberately left alone.
+ */
+export function handleMessageDiscard(ctx: MessageEventContext, data: Record<string, unknown>) {
+  const eventSessionKey = getSessionKey(data)
+  // Same guard as the sibling stream handlers: an event for another
+  // conversation — or an aliased key resolved elsewhere — must not retract a
+  // bubble that belongs to the pane on screen.
+  if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'message.discard'))
+    return
+
+  const msgId = data.message_id as string
+  if (!msgId) return
+
+  // The typewriter queue can still hold chunks for this id (the last stream
+  // frame may have arrived just before the discard); draining it first keeps a
+  // later tick from re-creating the bubble we are about to remove. Same
+  // precaution `handleMessageComplete` takes for a finished stream.
+  ctx.clearQueue(msgId)
+
+  // Re-tag aliased events with the current key (see effectiveSessionKey): the
+  // streaming list is keyed by the session on screen.
+  const sessionKey = effectiveSessionKey(ctx, eventSessionKey)
+  ctx.setStreamingMessages((current) => removeDiscardedMessage(current, msgId, sessionKey))
 }
 
 export function handleMessageAck(ctx: MessageEventContext, data: Record<string, unknown>) {
@@ -571,6 +611,26 @@ export function handleServerError(
         ctx.setPendingAttachments((pending) => [...pending, ...retracted.restoredPaths])
       }
     }
+  } else {
+    // Every OTHER refusal answers a send the client had already accepted
+    // locally, so the optimistic user bubble is on screen and no assistant will
+    // ever answer it. Without this marker the bubble is STRANDED: the only code
+    // that marked one failed was `handleMessageError`, which listens for
+    // `message.error` — an event this backend never emits (no emitters under
+    // pkg/) — and `mergeMessages` appends unmatched streaming messages AFTER
+    // the canonical history, so the refused bubble rendered at the very bottom
+    // of the list, below newer answers, with no retry button
+    // (`MessageBubble` only offers it when `message.failed`).
+    //
+    // Only the NEWEST optimistic bubble is marked: the envelope carries no
+    // client message id (see `sendError` in pkg/channels/websocket.go), and a
+    // refusal is the answer to the LAST send transmitted. See
+    // `markNewestOptimisticUserFailed`.
+    const current = ctx.streamingMessagesRef.current
+    const marked = markNewestOptimisticUserFailed(current, ctx.currentSessionKeyRef.current ?? '')
+    // Identity check: a late/duplicate refusal (or one for a session with no
+    // pending bubble) changes nothing and must not schedule a state update.
+    if (marked !== current) ctx.setStreamingMessages(marked)
   }
 
   ctx.setError(sendErrorMessage(code, message))

@@ -23,6 +23,7 @@ export {
   handleMessageThinking,
   handleMessageAck,
   handleMessageComplete,
+  handleMessageDiscard,
   handleHistoryUpdated,
   handleMessagesCatchup,
   handleAttachments,
@@ -75,6 +76,7 @@ import {
   handleHistoryUpdated,
   handleMessageAck,
   handleMessageComplete,
+  handleMessageDiscard,
   handleMessageError,
   handleMessageStream,
   handleMessageThinking,
@@ -96,6 +98,9 @@ const HANDLERS: Record<string, (ctx: MessageEventContext, event: ClientEvent) =>
   'message.thinking': (ctx, e) => handleMessageThinking(ctx, e.data as Record<string, unknown>),
   'message.ack': (ctx, e) => handleMessageAck(ctx, e.data as Record<string, unknown>),
   'message.complete': (ctx, e) => handleMessageComplete(ctx, e.data as Record<string, unknown>),
+  // An iteration that was streamed and then dropped by the backend: retract its
+  // bubble, which no history copy will ever confirm (see handleMessageDiscard).
+  'message.discard': (ctx, e) => handleMessageDiscard(ctx, e.data as Record<string, unknown>),
   'history.updated': (ctx, e) => handleHistoryUpdated(ctx, e.data as Record<string, unknown>),
   'messages.catchup': (ctx, e) => handleMessagesCatchup(ctx, e.data as Record<string, unknown>),
   attachments: (ctx, e) => handleAttachments(ctx, e),

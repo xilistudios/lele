@@ -1308,6 +1308,21 @@ export type ClientEvent =
       }
     }
   | {
+      /**
+       * An LLM iteration that was streamed to this client and then DISCARDED by
+       * the backend (empty-response retry, plain-text tool-call guidance, every
+       * tool call invalid). It is never persisted, so its bubble must be
+       * retracted on this event — no history copy will ever confirm it and
+       * `mergeMessages` would strand it after the canonical history.
+       */
+      event: 'message.discard'
+      data: {
+        message_id: string
+        session_key?: string
+        reason?: 'empty_response' | 'plain_text_tool_call' | 'invalid_tool_calls'
+      }
+    }
+  | {
       event: 'messages.catchup'
       data: {
         session_key: string

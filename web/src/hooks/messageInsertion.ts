@@ -95,3 +95,44 @@ export function countPrependedItems(prevFirstKey: string | undefined, nextKeys: 
   const idx = nextKeys.indexOf(prevFirstKey)
   return idx > 0 ? idx : 0
 }
+
+/**
+ * Next value of Virtuoso's `firstItemIndex` after a list change — the guarded
+ * form of `firstItemIndex - countPrependedItems(...)`.
+ *
+ * WHY this exists (the contract it protects): Virtuoso's virtual list is a
+ * monotonic counter. `firstItemIndex + data.length` is the number of items
+ * EVER rendered, and to prepend items without the viewport jumping you move
+ * `firstItemIndex` BACKWARD — exactly as far back as the number of items that
+ * were inserted BEFORE the previously-first item, and no further:
+ *
+ *   - Over-shifting (decrementing by more than was prepended) breaks the
+ *     counter: the items ever rendered no longer adds up, so scroll offsets
+ *     drift and rows land in the wrong place after a loadMore.
+ *   - Under-shifting (decrementing by less) leaves the anchor pointing at the
+ *     wrong row, so the viewport visibly jumps once the prepended page paints.
+ *   - Shifting forward (a positive delta) is never allowed: `firstItemIndex`
+ *     may only move into the PAST.
+ *
+ * That is why the shift is measured by `countPrependedItems` on the RENDERED
+ * list (`displayMessages`, i.e. the post-collapse output of
+ * `lib/thinkingRows.ts`) and NOT on the merge output: a prepended page that
+ * holds collapsible thinking rows grows the merge output by MORE items than
+ * the rendered list (a run of 3 bare thinking rows renders as 1), so counting
+ * merge items would over-shift by one per collapsed run.
+ *
+ * Returns `firstItemIndex` unchanged when nothing was prepended (0 delta) —
+ * going through this helper guarantees the index only ever moves backward. When
+ * a shift IS due, a `firstItemIndex` already at (or below) zero is clamped to 0
+ * instead of handing Virtuoso a negative index; that clamp can only trigger on
+ * an input already outside the contract, so it cannot mask a real bug.
+ */
+export function nextFirstItemIndex(
+  firstItemIndex: number,
+  prevFirstKey: string | undefined,
+  nextKeys: string[],
+): number {
+  const prepended = countPrependedItems(prevFirstKey, nextKeys)
+  if (prepended <= 0) return firstItemIndex
+  return Math.max(0, firstItemIndex - prepended)
+}
