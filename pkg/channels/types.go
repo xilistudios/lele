@@ -127,6 +127,23 @@ type WSThinkingPayload struct {
 	Estimated bool    `json:"estimated"`
 }
 
+// WSMessageDiscardPayload is the payload of a message.discard event: it tells
+// the client that the streaming bubble identified by MessageID belongs to an
+// iteration the agent THREW AWAY (empty-response retry, plain-text tool call,
+// all-tool-calls-invalid) and must be removed.
+//
+// It carries no content on purpose — nothing of that iteration survives — and
+// Reason is advisory (logs/debugging): the client only needs MessageID, the one
+// id that ties the event to the bubble it built from message.thinking /
+// message.stream chunks. Deliberately not omitempty, mirroring the stream
+// payloads: a deterministic shape means a missing key always signals a producer
+// bug, never "value happens to be zero".
+type WSMessageDiscardPayload struct {
+	MessageID  string `json:"message_id"`
+	SessionKey string `json:"session_key,omitempty"`
+	Reason     string `json:"reason"`
+}
+
 type WSMessageCompletePayload struct {
 	MessageID   string                   `json:"message_id"`
 	SessionKey  string                   `json:"session_key,omitempty"`

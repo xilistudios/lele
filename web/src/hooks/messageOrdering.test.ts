@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { ChatMessage } from '../lib/types'
 
-import { countPrependedItems } from './messageInsertion'
+import { countPrependedItems, nextFirstItemIndex } from './messageInsertion'
 import { mergeMessages } from './useChatHistory'
 import { computeAssistantInsertIndex } from './useStreamQueues'
 
@@ -1192,6 +1192,82 @@ describe('Message ordering fixes', () => {
       const before = ['stable-a', 'stable-b']
       const after = ['older-1', 'older-2', 'stable-a', 'stable-b']
       expect(countPrependedItems(before[0], after)).toBe(2)
+    })
+
+    // ── nextFirstItemIndex (the guarded shift applied by MessageList) ──────
+    // Contract: `firstItemIndex + data.length` = items ever rendered, so the
+    // index may only move into the PAST, by exactly the number of items
+    // inserted BEFORE the previously-first one.
+
+    test('no shift when the previous first key is still first', () => {
+      const index = 10000
+      expect(nextFirstItemIndex(index, 'a', ['a', 'b', 'c'])).toBe(index)
+      // Fresh session / first ever render: no anchor to measure against.
+      expect(nextFirstItemIndex(index, undefined, ['a', 'b'])).toBe(index)
+    })
+
+    test('shift by N when the previous first key moved to index N', () => {
+      expect(nextFirstItemIndex(10000, 'a', ['x', 'y', 'a', 'b'])).toBe(9998)
+      expect(nextFirstItemIndex(10000, 'a', ['x', 'a'])).toBe(9999)
+    })
+
+    test('no shift when the key is gone (id rewrite / collapse of the first row)', () => {
+      // Previous first key vanished: an id scheme flip is not a prepend, and
+      // shifting by the length delta here was the scroll-jump bug.
+      expect(nextFirstItemIndex(10000, 'temp-uuid', ['hash-1', 'hash-2'])).toBe(10000)
+      // The first row was collapsed INTO the next one (bare thinking card):
+      // its key disappears from the rendered list without any prepend.
+      expect(nextFirstItemIndex(10000, 'thinking-1', ['thinking-2', 'a1'])).toBe(10000)
+    })
+
+    test('shift is measured on the COLLAPSED list, not on the merge output', () => {
+      // loadMore pulled 7 merge items, but 3 adjacent thinking-only rows
+      // collapsed into 1 → the rendered list grew by 5 items BEFORE the old
+      // first row. Decrementing by 7 (merge count) would over-shift by 2 and
+      // break `firstItemIndex + data.length`.
+      const mergeKeysBefore = ['a1', 'a2']
+      const mergeKeysAfter = [
+        't1',
+        't2',
+        't3', // 3 bare thinking rows…
+        'u1',
+        'a0',
+        't4',
+        't5',
+        ...mergeKeysBefore,
+      ]
+      expect(countPrependedItems(mergeKeysBefore[0], mergeKeysAfter)).toBe(7)
+
+      // Post-collapse: t1+t2+t3 → one row keyed by the FIRST row's key.
+      const renderedKeys = ['t1', 'u1', 'a0', 't4', 't5', ...mergeKeysBefore]
+      expect(countPrependedItems(mergeKeysBefore[0], renderedKeys)).toBe(5)
+      expect(nextFirstItemIndex(10000, mergeKeysBefore[0], renderedKeys)).toBe(9995)
+    })
+
+    test('repeated prepends accumulate', () => {
+      let index = 10000
+      let prevFirstKey: string | undefined = 'a1'
+
+      index = nextFirstItemIndex(index, prevFirstKey, ['p1', 'p2', 'a1'])
+      expect(index).toBe(9998)
+      prevFirstKey = 'p1'
+
+      index = nextFirstItemIndex(index, prevFirstKey, ['q1', 'p1', 'p2', 'a1'])
+      expect(index).toBe(9997)
+      prevFirstKey = 'q1'
+
+      index = nextFirstItemIndex(index, prevFirstKey, ['r1', 'r2', 'r3', 'q1', 'p1'])
+      expect(index).toBe(9994)
+    })
+
+    test('never produces a negative index', () => {
+      // Out-of-contract inputs (should not happen with START_INDEX=10000) are
+      // clamped instead of handing Virtuoso a negative index.
+      expect(nextFirstItemIndex(2, 'a', ['x', 'y', 'z', 'a'])).toBe(0)
+      expect(nextFirstItemIndex(0, 'a', ['x', 'a'])).toBe(0)
+      expect(nextFirstItemIndex(-5, 'a', ['x', 'a'])).toBe(0)
+      // No shift due → the value passes through untouched.
+      expect(nextFirstItemIndex(-5, 'a', ['a'])).toBe(-5)
     })
   })
 })

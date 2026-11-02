@@ -11,6 +11,7 @@
  */
 import { createAssistantMessage } from '../lib/chatMessageBuilder'
 import type { ChatMessage } from '../lib/types'
+import { sessionKeysLooselyMatch } from './event-handlers/helpers'
 import { computeAssistantInsertIndex } from './messageInsertion'
 import { isAttachmentsOnly } from './messageMerge'
 
@@ -209,6 +210,49 @@ export function markOptimisticUserFailed(
 }
 
 /**
+ * Mark ONLY the NEWEST optimistic user message of a session as failed, so the
+ * user gets the "failed to send" label and the retry button instead of a bubble
+ * that is stranded at the end of the list.
+ *
+ * WHY the newest and not all (unlike `markOptimisticUserFailed`): a server
+ * refusal answers exactly ONE send — the last one the client transmitted — and
+ * the envelope carries no client message id to say which (see `sendError` in
+ * pkg/channels/websocket.go). Marking EVERY optimistic bubble of the session
+ * would wrongly label earlier, successfully-sent bubbles as failed; that
+ * blanket rule is only acceptable for `message.error`, which reports a per-turn
+ * failure of the whole conversation stream.
+ *
+ * Session matching is LOOSE (`sessionKeysLooselyMatch`, like its sibling
+ * `removeDiscardedMessage` above): the WS handlers re-tag transient messages
+ * with the pane's EFFECTIVE session key (`effectiveSessionKey` in
+ * event-handlers/helpers), and the backend may report the conversation alias
+ * (`base:chat:N`) while the UI pane only knows the bare `base`. A strict `===`
+ * comparison therefore misses the very bubble this helper exists for: one
+ * carrying the alias stays stranded at the end of the list after a server send
+ * refusal, with no "failed" label and no retry affordance.
+ *
+ * Returns the SAME array instance when there is nothing to mark — no optimistic
+ * user for that session, or the newest one is already failed — so a late or
+ * duplicate refusal cannot churn React state.
+ */
+export function markNewestOptimisticUserFailed(
+  current: ChatMessage[],
+  sessionKey: string,
+): ChatMessage[] {
+  for (let i = current.length - 1; i >= 0; i--) {
+    const m = current[i]
+    if (m.role !== 'user' || !m.optimistic || !sessionKeysLooselyMatch(m.sessionKey, sessionKey))
+      continue
+    // Idempotent: a second copy of the same refusal has nothing left to mark.
+    if (m.failed === true) return current
+    const next = [...current]
+    next[i] = { ...m, failed: true, streaming: false }
+    return next
+  }
+  return current
+}
+
+/**
  * Retract the OLDEST unconfirmed attachments-only optimistic bubble and report
  * which paths the composer should carry again.
  *
@@ -248,6 +292,47 @@ export function retractAttachmentsOnlyBubble(
     .filter((path): path is string => Boolean(path))
 
   return { messages: current.filter((_, i) => i !== index), restoredPaths }
+}
+
+/**
+ * Remove the assistant bubble of an iteration the backend streamed and then
+ * THREW AWAY (`message.discard`).
+ *
+ * WHY this transition exists: the backend persists/discards LLM iterations one
+ * by one. Some of them are streamed to the client FIRST — the WebUI builds a
+ * bubble out of their `message.thinking` / `message.stream` chunks — and are
+ * dropped afterwards (empty-response retry, plain-text tool-call guidance,
+ * every tool call invalid). Such an iteration is never persisted, so no twin
+ * will ever arrive to confirm the bubble: `mergeMessages` appends unconfirmed
+ * streaming messages AFTER the canonical history, which is exactly the stray
+ * "Thinking…" card rendered below the final answer (or two thinking cards in a
+ * row). `message.discard` is the ONLY signal that ties a streamed message id to
+ * "this never happened", so it is the only place such a bubble can be retracted.
+ *
+ * WHY removing on this event cannot delete real content: an iteration that WAS
+ * persisted is never discarded by the backend, so its id never appears here. A
+ * late/duplicate event finds nothing and returns the SAME array instance, which
+ * keeps React from re-rendering while the turn — which is still running — keeps
+ * emitting events.
+ *
+ * Only an ASSISTANT message is ever removed: the event names an iteration id,
+ * but a discarded bubble must never take a user bubble or a tool card with it
+ * even if an id collided.
+ */
+export function removeDiscardedMessage(
+  current: ChatMessage[],
+  messageID: string,
+  sessionKey: string,
+): ChatMessage[] {
+  const index = current.findIndex(
+    (m) =>
+      m.id === messageID &&
+      m.role === 'assistant' &&
+      sessionKeysLooselyMatch(m.sessionKey, sessionKey),
+  )
+  // Identity preserved on no-op: see the late/duplicate note above.
+  if (index < 0) return current
+  return current.filter((_, i) => i !== index)
 }
 
 /** Mark all actively-streaming assistants for a session as errored. */

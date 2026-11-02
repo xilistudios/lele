@@ -75,6 +75,75 @@ func (sm *SessionManager) AppendReasoningChunk(key, chunk string) {
 	sm.maybeFlushStream(key)
 }
 
+// DiscardStreamingDraft clears the content and reasoning accumulated in the
+// in-progress (Streaming) tail assistant message, keeping that message as the
+// live tail.
+//
+// WHY THIS EXISTS: chunks accumulate per SESSION while the runner thinks per
+// ITERATION. pkg/channels/native.go forwards every streamed reasoning/content
+// delta to AppendReasoningChunk/AppendAssistantChunk, and both append to
+// whatever the session's tail streaming assistant happens to be — they receive
+// no message or iteration id, so nothing in the session layer can tell which
+// iteration produced a chunk. Nearly every iteration ends by persisting its
+// result through AddFullMessage, whose in-place branch takes the tail over
+// (Streaming=false) and thereby hands the next iteration a fresh slot. But
+// pkg/agent/llm_runner.go has `continue` paths that DISCARD an iteration
+// without persisting anything: the bounded empty-response retry and the
+// all-tool-calls-invalid path when the response has no content. Those
+// iterations only append the blank assistant turn to the runner's in-memory
+// `messages` slice; the session tail is never finalized, so the NEXT
+// iteration's chunks are appended ON TOP of the discarded iteration's chunks.
+// The tail then carries N concatenated copies of the same reasoning (up to
+// maxConsecutiveEmptyResponses+1 when the turn ends through the empty-limit
+// early return, which persists nothing and therefore leaves that tail as the
+// surviving record of the whole turn) and a reload/TUI shows the same thinking
+// paragraph repeated. The runner calls this method at the top of every
+// iteration after the first, so each iteration starts from an empty draft.
+//
+// The guards are what make it safe to call unconditionally:
+//
+//   - the tail must be an assistant message still flagged Streaming, i.e. a
+//     real in-progress draft. A finalized iteration (AddFullMessage cleared
+//     Streaming) is a REAL message and must never lose its content, and a
+//     user/tool/system tail is not a draft at all.
+//   - an already-empty draft is a no-op, so the call does not churn the epoch
+//     (and therefore does not invalidate the published history view) on every
+//     iteration of a turn that streamed nothing.
+//
+// Nothing is deleted or reordered: the message keeps its slot and only the
+// accumulated text is emptied, so index bookkeeping (markModified) and any
+// client-side message ordering stay consistent.
+//
+// Coalesced exactly like the appends: markModified bumps the epoch, which
+// leaves the published view stale on purpose and makes GetHistoryView rebuild
+// it on its next read — so publishViewLocked is deliberately NOT called here
+// (see the coalescing comment on AppendAssistantChunk).
+func (sm *SessionManager) DiscardStreamingDraft(key string) {
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session := sm.getOrCreateUnlocked(key)
+	if session == nil || len(session.Messages) == 0 {
+		return
+	}
+
+	tail := &session.Messages[len(session.Messages)-1]
+	if tail.Role != "assistant" || !tail.Streaming {
+		return
+	}
+	if tail.Content == "" && tail.ReasoningContent == "" {
+		return
+	}
+
+	tail.Content = ""
+	tail.ReasoningContent = ""
+	session.Updated = time.Now()
+	session.markModified(len(session.Messages) - 1)
+
+	sm.maybeFlushStream(key)
+}
+
 // FinalizeAssistantMessage marks the in-progress assistant message as complete
 // by persisting the session to disk immediately. The Streaming flag is NOT
 // cleared here — it is cleared later, either by AddFullMessage's in-place branch

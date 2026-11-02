@@ -4,6 +4,7 @@ import { computeAssistantInsertIndex, computeToolInsertIndex } from './messageIn
 import {
   applyMessageComplete,
   attachToLastAssistant,
+  markNewestOptimisticUserFailed,
   markOptimisticUserFailed,
   markStreamingAssistantsErrored,
   migrateRestoreId,
@@ -235,6 +236,156 @@ describe('markOptimisticUserFailed', () => {
     expect(next[0].failed).toBe(true)
     expect(next[1].failed).toBeUndefined()
     expect(next[2].failed).toBeUndefined()
+  })
+})
+
+describe('markNewestOptimisticUserFailed', () => {
+  test('marks the NEWEST optimistic user of the session and nothing else', () => {
+    const current = [
+      msg('u1', 'user', 'first', { optimistic: true }),
+      msg('u2', 'user', 'second', { optimistic: true, streaming: true }),
+      msg('a1', 'assistant', 'answer'),
+    ]
+    const next = markNewestOptimisticUserFailed(current, 's1')
+
+    expect(next[1].failed).toBe(true)
+    // The flag that keeps the composer's spinner logic honest.
+    expect(next[1].streaming).toBe(false)
+    // The earlier turn was accepted and may still be answered: untouched.
+    expect(next[0].failed).toBeUndefined()
+    expect(next[0].streaming).toBe(false)
+    // Every other message is the very same object (nothing else re-renders).
+    expect(next[2]).toBe(current[2])
+    expect(next[0]).toBe(current[0])
+    // Input is not mutated.
+    expect(current[1].failed).toBeUndefined()
+  })
+
+  test('finds the newest optimistic user even when it is not the last message', () => {
+    const current = [
+      msg('u1', 'user', 'hi', { optimistic: true }),
+      msg('u2', 'user', 'later send', { optimistic: true }),
+      msg('u3', 'user', 'persisted'),
+      msg('a1', 'assistant', 'answer'),
+      msg('t1', 'tool', '', { toolName: 'exec' }),
+    ]
+    const next = markNewestOptimisticUserFailed(current, 's1')
+
+    expect(next[1].failed).toBe(true)
+    expect(next[0].failed).toBeUndefined()
+    expect(next[2].failed).toBeUndefined()
+  })
+
+  test('returns the SAME array when the session has no optimistic user', () => {
+    const current = [
+      msg('u1', 'user', 'persisted'),
+      msg('a1', 'assistant', 'answer', { streaming: true }),
+    ]
+    expect(markNewestOptimisticUserFailed(current, 's1')).toBe(current)
+    // Empty list too (a refusal before any send was accepted locally).
+    const empty: ChatMessage[] = []
+    expect(markNewestOptimisticUserFailed(empty, 's1')).toBe(empty)
+  })
+
+  test('ignores optimistic users of another session', () => {
+    const current = [
+      msg('u1', 'user', 'mine', { optimistic: true, sessionKey: 's1' }),
+      msg('u2', 'user', 'theirs', { optimistic: true, sessionKey: 's2' }),
+    ]
+    const next = markNewestOptimisticUserFailed(current, 's1')
+
+    expect(next[0].failed).toBe(true)
+    // The NEWEST optimistic message overall belongs to s2: it must stay clean.
+    expect(next[1].failed).toBeUndefined()
+
+    // A session with no bubble at all is a no-op (same instance).
+    const foreignOnly = [msg('u2', 'user', 'theirs', { optimistic: true, sessionKey: 's2' })]
+    expect(markNewestOptimisticUserFailed(foreignOnly, 's1')).toBe(foreignOnly)
+  })
+
+  test('is idempotent: an already-failed newest bubble is the SAME array', () => {
+    const current = [
+      msg('u1', 'user', 'first', { optimistic: true }),
+      msg('u2', 'user', 'second', { optimistic: true, failed: true }),
+    ]
+    // A late/duplicate refusal must not schedule a pointless state update.
+    expect(markNewestOptimisticUserFailed(current, 's1')).toBe(current)
+  })
+
+  test('matches a bubble carrying the conversation alias against the bare key', () => {
+    // The WS handlers re-tag transient messages with the pane's effective
+    // session key, which can be the aliased `base:chat:N` built by
+    // pkg/agent/loop.go `nextConversationSessionKey` while the refusal handler
+    // queries with the bare pane key (or vice versa). A strict `===` left the
+    // bubble unmarked — stranded with no retry affordance — which is exactly
+    // what this helper exists to prevent.
+    //
+    // NOTE the alias shape: the suffix is `:chat:<digits>` appended to the
+    // WHOLE base key (`native:client-1` -> `native:client-1:chat:7`), so the
+    // pair is base vs base+suffix. A bare `chat:7` has no `:chat:` prefix and
+    // is therefore a root of its own (see the `chat:8` case below).
+    const aliased = [
+      msg('u1', 'user', 'aliased', {
+        optimistic: true,
+        streaming: true,
+        sessionKey: 'native:client-1:chat:7',
+      }),
+    ]
+    const next = markNewestOptimisticUserFailed(aliased, 'native:client-1')
+
+    expect(next[0].failed).toBe(true)
+    expect(next[0].streaming).toBe(false)
+    // Input is not mutated (the flagged copy is a new object).
+    expect(aliased[0].failed).toBeUndefined()
+
+    // …and the mirror case: bubble on the bare key, queried with the alias.
+    const bare = [
+      msg('u1', 'user', 'bare', {
+        optimistic: true,
+        streaming: true,
+        sessionKey: 'native:client-1',
+      }),
+    ]
+    const mirror = markNewestOptimisticUserFailed(bare, 'native:client-1:chat:7')
+
+    expect(mirror[0].failed).toBe(true)
+    expect(mirror[0].streaming).toBe(false)
+  })
+
+  test('still ignores a bubble of a genuinely different session (chat:8)', () => {
+    // Loosening the match must not widen it to another conversation. `chat:8`
+    // has no `:chat:<digits>` suffix, so its root is itself and it can never
+    // match `native:client-1` (or its alias). Same for another client's pane.
+    //
+    // NOTE (intentional, documented in event-handlers/helpers.ts): two ALIASES
+    // of the SAME base (`native:client-1:chat:7` vs `…:chat:8`) DO loosely
+    // match — one client, one visible conversation per base. That is not what
+    // this test guards; it guards against matching ACROSS roots.
+    const current = [
+      msg('u1', 'user', 'mine', {
+        optimistic: true,
+        streaming: true,
+        sessionKey: 'native:client-1',
+      }),
+      msg('u2', 'user', 'theirs', { optimistic: true, streaming: true, sessionKey: 'chat:8' }),
+      msg('u3', 'user', 'other client', {
+        optimistic: true,
+        streaming: true,
+        sessionKey: 'native:client-2:chat:7',
+      }),
+    ]
+    const next = markNewestOptimisticUserFailed(current, 'native:client-1:chat:7')
+
+    expect(next[0].failed).toBe(true)
+    expect(next[1].failed).toBeUndefined()
+    expect(next[1].streaming).toBe(true)
+    expect(next[2].failed).toBeUndefined()
+    expect(next[2].streaming).toBe(true)
+
+    // A refusal for a session that has no bubble in this list is a no-op
+    // (same instance, no pointless state update).
+    const untouched = markNewestOptimisticUserFailed(current, 'native:client-9')
+    expect(untouched).toBe(current)
   })
 })
 

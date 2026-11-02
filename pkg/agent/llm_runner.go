@@ -604,6 +604,18 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 
 		iteration++
 
+		// A new iteration begins: anything the session still holds as an
+		// in-progress streaming draft belongs to an iteration this loop
+		// DISCARDED (the empty response retry / invalid tool-call paths
+		// `continue` without persisting). Drop it so this iteration's reasoning
+		// does not get concatenated onto it and a reload never shows the same
+		// thinking text repeated. Strict no-op when the previous iteration was
+		// persisted (AddFullMessage clears Streaming) — see
+		// SessionManager.DiscardStreamingDraft.
+		if iteration > 1 {
+			agent.Sessions.DiscardStreamingDraft(opts.SessionKey)
+		}
+
 		logger.DebugCF("agent", "LLM iteration",
 			map[string]interface{}{
 				"agent_id":  agent.ID,
@@ -783,6 +795,11 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 							"retries":   emptyRetries,
 							"max":       maxConsecutiveEmptyResponses,
 						})
+					// The iteration streamed a bubble that will never be
+					// confirmed by history: tell the client to drop it.
+					if streamer.shouldStream(opts.SendResponse) {
+						lr.discardIterationStream(opts, streamer.messageID, discardReasonEmptyResponse)
+					}
 					// Return empty content so runAgentLoop falls back to
 					// DefaultResponse and the session is left clean.
 					return "", iteration, nil
@@ -809,6 +826,11 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					Role:    "user",
 					Content: "Your previous response was empty. Please provide a helpful response to my request.",
 				})
+				// The blank iteration streamed a bubble that is never persisted:
+				// tell the client to drop it before the next one starts.
+				if streamer.shouldStream(opts.SendResponse) {
+					lr.discardIterationStream(opts, streamer.messageID, discardReasonEmptyResponse)
+				}
 				continue
 			}
 			// Non-empty final content: reset the consecutive-empty counter so the
@@ -851,6 +873,12 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					Content: guidanceMsg,
 				})
 				agent.Sessions.AddMessage(opts.SessionKey, "user", guidanceMsg)
+				// The assistant message this iteration streamed was just removed
+				// again (RemoveLastMessage above), so the bubble the client
+				// rendered for it can never be confirmed: drop it.
+				if streamer.shouldStream(opts.SendResponse) {
+					lr.discardIterationStream(opts, streamer.messageID, discardReasonPlainTextToolCall)
+				}
 				continue
 			}
 
@@ -907,6 +935,14 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					Content:          response.Content,
 					ReasoningContent: response.ReasoningContent,
 				})
+				// Content-less response with nothing but rejected tool calls:
+				// this iteration persisted NOTHING, so the bubble it streamed
+				// can never be confirmed by history — drop it. (The branch
+				// above does persist the assistant turn, so its bubble stays
+				// and is confirmed as usual.)
+				if streamer.shouldStream(opts.SendResponse) {
+					lr.discardIterationStream(opts, streamer.messageID, discardReasonInvalidToolCalls)
+				}
 			}
 			guidanceMsg := providers.Message{
 				Role: "user",
@@ -1192,4 +1228,56 @@ func (lr *llmRunnerImpl) maybeCompactLoopContext(ctx context.Context, agent *Age
 	}
 
 	return messages
+}
+
+// Discard reasons carried by message.discard. They are advisory (logs,
+// debugging, future filtering): the client only needs the message id, which is
+// what ties the event to the bubble it must drop.
+const (
+	// discardReasonEmptyResponse — the bounded empty-response retry: the
+	// iteration produced no content and is never persisted.
+	discardReasonEmptyResponse = "empty_response"
+	// discardReasonPlainTextToolCall — the model wrote tool invocations as
+	// plain text, so the assistant message it produced is removed again.
+	discardReasonPlainTextToolCall = "plain_text_tool_call"
+	// discardReasonInvalidToolCalls — every tool call failed
+	// canonicalization, so nothing survivable is left of the iteration.
+	discardReasonInvalidToolCalls = "invalid_tool_calls"
+)
+
+// discardIterationStream tells connected clients to DROP the streaming bubble
+// of an iteration this loop is throwing away.
+//
+// WHY: the client cannot infer that an iteration was discarded on its own. It
+// received message.thinking/message.stream chunks for it and no
+// message.complete — only the LAST iteration of a turn gets one, published from
+// runLLMIteration's tail — so the bubble it built can never be confirmed
+// against history and is rendered below newer answers forever. This event is
+// the only signal that ties a streamed id to "this one never happened".
+//
+// It publishes through the same bus shape as the stream handler (see
+// streamHandler.onChunk) so the native channel forwards it on the same
+// subscription path: Channel/ChatID address the client and MessageID carries the
+// id the client actually built the bubble from — `streamer.messageID`, NOT
+// `iterationMsgID(opts.MessageID, iteration)`.
+//
+// WHY the streamer's id and not the derived one: newStreamHandler substitutes a
+// generated UUID when `opts.MessageID` is empty, and that substitution is real —
+// the client's bubble is keyed by it. Turns that never carry an inbound message
+// id (the goal-continuation loop builds its processOptions without one, cron and
+// API-driven turns likewise) would otherwise emit a discard with an EMPTY
+// message id, which every client drops on the floor: the stray bubble this event
+// exists to remove would survive in exactly those turns.
+func (lr *llmRunnerImpl) discardIterationStream(opts processOptions, msgID, reason string) {
+	if lr == nil || lr.al == nil || lr.al.bus == nil {
+		// No bus: nothing is connected, so no client can hold a phantom bubble.
+		return
+	}
+	lr.al.bus.PublishOutbound(bus.OutboundMessage{
+		Channel:   opts.Channel,
+		ChatID:    opts.ChatID,
+		Event:     "message.discard",
+		MessageID: msgID,
+		Metadata:  map[string]string{"reason": reason},
+	})
 }
