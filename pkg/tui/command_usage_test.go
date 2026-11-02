@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
 // TestCommandUsageStore_RecordPersists pins the whole point of the store: the
@@ -191,23 +193,41 @@ func TestExecuteCommand_RecordsUsage(t *testing.T) {
 // TestExecuteCommand_NormalizesCase pins that a command typed with capitals is
 // counted under its canonical key AND actually dispatched: the token is
 // normalized once at the top of executeCommand, so the ranking and the switch
-// can never disagree about which command ran.
+// can never disagree about which command ran. Both halves are asserted on the
+// rendered frame — the palette order for the ranking, the settings modal for
+// the dispatch — so the test fails if either half regresses.
 func TestExecuteCommand_NormalizesCase(t *testing.T) {
 	m := newTestModel(t)
+	m.width = 160
+	m.height = 40
+	// The welcome screen paints its own smaller palette block; the chat layout
+	// is where the real one lives, so leave the welcome state first.
+	m.showWelcome = false
 
-	m.executeCommand("/Quit")
-	if got := m.cmdUsage.Count("/quit"); got != 1 {
-		t.Errorf(`Count("/quit") after "/Quit" = %d, want 1`, got)
-	}
-
-	// A mixed-case built-in that opens a modal proves the switch saw the
-	// normalized token too (the count alone would pass even if it did not).
 	m.executeCommand("/Settings")
-	if m.modalMode != ModalSettings {
-		t.Errorf("modalMode = %v, want ModalSettings", m.modalMode)
+	if out := m.View(); !strings.Contains(out, i18n.T("tui.settings.title")) {
+		t.Fatalf("mixed-case /Settings did not open the settings modal:\n%s", out)
 	}
-	if got := m.cmdUsage.Count("/settings"); got != 1 {
-		t.Errorf(`Count("/settings") after "/Settings" = %d, want 1`, got)
+	m.modalMode = ModalNone
+
+	// One mixed-case hit must be enough to outrank every command with no
+	// history, which is what proves the count landed on the canonical key.
+	m.executeCommand("/Status")
+	// ctrl+p is the real way the palette is opened, and it is what sets
+	// showAutocomplete — filterAutocomplete alone only fills the items.
+	m.showAutocomplete = true
+	m.filterAutocomplete("/")
+	out := m.View()
+
+	idxStatus := strings.Index(out, "/status")
+	if idxStatus < 0 {
+		t.Fatalf("palette does not render /status:\n%s", out)
+	}
+	for _, other := range []string{"/sessions", "/models", "/clear"} {
+		if idx := strings.Index(out, other); idx >= 0 && idx < idxStatus {
+			t.Errorf("%s renders before /status after a mixed-case /Status: %q precedes %q:\n%s",
+				other, other, "/status", out)
+		}
 	}
 }
 
