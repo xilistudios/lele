@@ -15,6 +15,11 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 	if len(parts) == 0 {
 		return nil
 	}
+	// Normalize the command token once, before anything looks at it: typed
+	// input can preserve casing ("/Models"), and the ranking, the custom-
+	// command lookup and the built-in switch below must all agree on the same
+	// key — otherwise a command could be counted without being dispatched.
+	parts[0] = normalizeCommandKey(parts[0])
 
 	// Rank the autocomplete palette by real usage. Only commands the TUI can
 	// actually run are counted, so a typo never pollutes the ranking.

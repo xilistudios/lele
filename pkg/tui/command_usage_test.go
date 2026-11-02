@@ -188,6 +188,29 @@ func TestExecuteCommand_RecordsUsage(t *testing.T) {
 	}
 }
 
+// TestExecuteCommand_NormalizesCase pins that a command typed with capitals is
+// counted under its canonical key AND actually dispatched: the token is
+// normalized once at the top of executeCommand, so the ranking and the switch
+// can never disagree about which command ran.
+func TestExecuteCommand_NormalizesCase(t *testing.T) {
+	m := newTestModel(t)
+
+	m.executeCommand("/Quit")
+	if got := m.cmdUsage.Count("/quit"); got != 1 {
+		t.Errorf(`Count("/quit") after "/Quit" = %d, want 1`, got)
+	}
+
+	// A mixed-case built-in that opens a modal proves the switch saw the
+	// normalized token too (the count alone would pass even if it did not).
+	m.executeCommand("/Settings")
+	if m.modalMode != ModalSettings {
+		t.Errorf("modalMode = %v, want ModalSettings", m.modalMode)
+	}
+	if got := m.cmdUsage.Count("/settings"); got != 1 {
+		t.Errorf(`Count("/settings") after "/Settings" = %d, want 1`, got)
+	}
+}
+
 // indexOfName returns the position of want in names, or -1.
 func indexOfName(names []string, want string) int {
 	for i, n := range names {
