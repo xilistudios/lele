@@ -11,6 +11,22 @@
       "max_output": 262144,
       "vision": true,
       "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "mistral-large-4-0-8",
+      "name": "Mistral Large 4.0.8",
+      "context_window": 1048576,
+      "max_output": 262144,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
         "high"
       ],
       "reasoning": true,
@@ -102,6 +118,18 @@
       "context_window": 1048576,
       "max_output": 131072,
       "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek-v4-1-flash-1017",
+      "name": "DeepSeek V4.1 Flash 1017",
+      "context_window": 1048576,
+      "max_output": 128000,
       "thinking_levels": [
         "low",
         "high"

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-10-26T12:56:16Z",
+  "updated_at": "2026-11-02T15:44:21Z",
   "source": "models.dev",
   "providers": {
     "alibaba": {
@@ -81,7 +81,7 @@
       "type": "openai",
       "api_base": "https://llm.chutes.ai/v1",
       "file": "providers/chutes.json",
-      "model_count": 16
+      "model_count": 17
     },
     "deepseek": {
       "id": "deepseek",
@@ -105,7 +105,7 @@
       "type": "openai",
       "api_base": "https://generativelanguage.googleapis.com/v1beta",
       "file": "providers/gemini.json",
-      "model_count": 37
+      "model_count": 34
     },
     "github_copilot": {
       "id": "github_copilot",
@@ -177,7 +177,7 @@
       "type": "openai",
       "api_base": "https://api.mistral.ai/v1",
       "file": "providers/mistral.json",
-      "model_count": 21
+      "model_count": 23
     },
     "modelark": {
       "id": "modelark",
@@ -225,7 +225,7 @@
       "type": "openai",
       "api_base": "https://integrate.api.nvidia.com/v1",
       "file": "providers/nvidia.json",
-      "model_count": 38
+      "model_count": 37
     },
     "ollama": {
       "id": "ollama",
@@ -241,7 +241,7 @@
       "type": "openai",
       "api_base": "https://ollama.com/v1",
       "file": "providers/ollama_cloud.json",
-      "model_count": 23
+      "model_count": 25
     },
     "openai": {
       "id": "openai",
@@ -249,7 +249,7 @@
       "type": "openai",
       "api_base": "https://api.openai.com/v1",
       "file": "providers/openai.json",
-      "model_count": 41
+      "model_count": 39
     },
     "opencode": {
       "id": "opencode",

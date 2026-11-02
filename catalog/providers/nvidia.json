@@ -180,18 +180,6 @@
       "tool_call": true
     },
     {
-      "id": "z-ai/glm-5.3",
-      "name": "GLM-5.3",
-      "context_window": 1000000,
-      "max_output": 131072,
-      "thinking_levels": [
-        "low",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
       "id": "meta/llama-3.2-11b-vision-instruct",
       "name": "Llama 3.2 11b Vision Instruct",
       "context_window": 128000,

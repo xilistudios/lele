@@ -61,13 +61,6 @@
       "tool_call": true
     },
     {
-      "id": "gemini-2.5-flash-image",
-      "name": "Nano Banana",
-      "context_window": 32768,
-      "max_output": 32768,
-      "vision": true
-    },
-    {
       "id": "gemini-2.5-flash-preview-tts",
       "name": "Gemini 2.5 Flash Preview TTS",
       "context_window": 8192,
@@ -356,34 +349,10 @@
       "reasoning": true
     },
     {
-      "id": "gemini-3-pro-image-preview",
-      "name": "Nano Banana Pro",
-      "context_window": 131072,
-      "max_output": 32768,
-      "vision": true,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true
-    },
-    {
       "id": "gemini-3.1-flash-image",
       "name": "Nano Banana 2",
       "context_window": 131072,
       "max_output": 32768,
-      "vision": true,
-      "thinking_levels": [
-        "high"
-      ],
-      "reasoning": true
-    },
-    {
-      "id": "gemini-3.1-flash-image-preview",
-      "name": "Nano Banana 2",
-      "context_window": 65536,
-      "max_output": 65536,
       "vision": true,
       "thinking_levels": [
         "high"
