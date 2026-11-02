@@ -221,6 +221,7 @@ var allCommands = []commandInfo{
 	{name: "/agents", description: "Switch agent (TAB cycles)"},
 	{name: "/mode", description: "Switch mode (agent/chat/group)"},
 	{name: "/models", description: "Switch model"},
+	{name: "/add-model", description: "Add a model to a provider"},
 	{name: "/clear", description: "Clear session history"},
 	{name: "/clearq", description: "Drop queued messages for this session"},
 	{name: "/flushq", description: "Send the next queued message now (cancels a busy turn after confirm)"},
@@ -329,6 +330,10 @@ type Model struct {
 	// customCommandsRefreshTTL. Names already include the leading slash.
 	customCmds   []commandInfo
 	customCmdsAt time.Time
+
+	// cmdUsage ranks the slash-command autocomplete by how often each command
+	// has been executed (persisted in ~/.lele/command_usage.json).
+	cmdUsage *commandUsageStore
 
 	// Selection modals
 	modalMode         modalType

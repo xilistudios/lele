@@ -16,6 +16,12 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		return nil
 	}
 
+	// Rank the autocomplete palette by real usage. Only commands the TUI can
+	// actually run are counted, so a typo never pollutes the ranking.
+	if m.isKnownCommand(parts[0]) {
+		m.cmdUsage.Record(parts[0])
+	}
+
 	switch parts[0] {
 	case "/sessions":
 		m.resetModal(ModalSessions)

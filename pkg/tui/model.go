@@ -119,6 +119,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		mouseEnabled:           true,
 		keepAwake:              keepawake.New(),
 		mcpAuthOpener:          mcpAuthBrowserOpener,
+		cmdUsage:               newCommandUsageStore(commandUsagePath()),
 		maxRenderedMessages:    200, // render at most 200 messages to bound memory usage
 		renderStartIdx:         -1,  // uninitialized — compute default on first render
 	}
