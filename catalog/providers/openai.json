@@ -398,6 +398,20 @@
       "tool_call": true
     },
     {
+      "id": "gpt-6.1-terra",
+      "name": "GPT-6.1 Terra",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "gpt-daybreak-blue-latest",
       "name": "Daybreak Blue",
       "context_window": 1050000,
@@ -456,21 +470,6 @@
       "name": "text-embedding-ada-002",
       "context_window": 8192,
       "max_output": 1536
-    },
-    {
-      "id": "chatgpt-image-latest",
-      "name": "chatgpt-image-latest",
-      "vision": true
-    },
-    {
-      "id": "gpt-image-1-mini",
-      "name": "gpt-image-1-mini",
-      "vision": true
-    },
-    {
-      "id": "gpt-image-1.5",
-      "name": "gpt-image-1.5",
-      "vision": true
     },
     {
       "id": "gpt-image-2",

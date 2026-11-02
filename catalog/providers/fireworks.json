@@ -12,8 +12,7 @@
       "vision": true,
       "thinking_levels": [
         "low",
-        "medium",
-        "high"
+        "medium"
       ],
       "reasoning": true,
       "tool_call": true
@@ -254,8 +253,7 @@
       "vision": true,
       "thinking_levels": [
         "low",
-        "medium",
-        "high"
+        "medium"
       ],
       "reasoning": true,
       "tool_call": true

@@ -74,32 +74,6 @@
       "tool_call": true
     },
     {
-      "id": "Qwen/Qwen3-235B-A22B-Thinking-2507-TEE",
-      "name": "Qwen3 235B A22B Thinking 2507 TEE",
-      "context_window": 262144,
-      "max_output": 262144,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "Qwen/Qwen3-32B-TEE",
-      "name": "Qwen3 32B TEE",
-      "context_window": 40960,
-      "max_output": 40960,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
       "id": "google/gemma-4-31B-turbo-TEE",
       "name": "gemma 4 31B turbo TEE",
       "context_window": 131072,
@@ -167,23 +141,32 @@
       "tool_call": true
     },
     {
+      "id": "Qwen/Qwen3.8-2.4T-A95B",
+      "name": "Qwen3.8 2.4T A95B"
+    },
+    {
       "id": "Qwen/Qwen3.8-Max-0902",
       "name": "Qwen3.8 Max 0902"
     },
     {
-      "id": "Nemotron-3-Nano-Omni-30B-TEE",
-      "name": "Nemotron 3 Nano Omni 30B TEE",
-      "context_window": 131072
-    },
-    {
-      "id": "unsloth/Mistral-Nemo-Instruct-2407-TEE",
-      "name": "Mistral Nemo Instruct 2407 TEE",
-      "context_window": 131072,
-      "max_output": 131072
+      "id": "moonshotai/Kimi-K2.7-Code",
+      "name": "Kimi K2.7 Code"
     },
     {
       "id": "deepseek-ai/DeepSeek-V4-Pro-0813",
       "name": "DeepSeek V4 Pro 0813"
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "name": "DeepSeek V4.1 Flash 1017"
+    },
+    {
+      "id": "zai-org/GLM-5.2-Fast",
+      "name": "GLM 5.2 Fast"
+    },
+    {
+      "id": "zai-org/GLM-5.3",
+      "name": "GLM 5.3"
     }
   ]
 }
