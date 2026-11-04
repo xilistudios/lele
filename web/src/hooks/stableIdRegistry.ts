@@ -123,6 +123,13 @@ export function lookupStableId(role: string, content: string, occurrence = 0): s
  * happens in practice (old copies leaving the window) and never binds an id to
  * a copy that is not in the page (an out-of-range `fromEnd` is `undefined`, so
  * the caller falls back to the message's own id).
+ *
+ * The rank is still only as good as the CALLER's knowledge of the page, which
+ * is why `toChatMessages` gates this on two conditions (see `bindStableIds`):
+ * the page must be the TAIL of the session, and every copy of the identity in
+ * it must be confirmed (`countStableIds >= copies in page`). Without that gate
+ * an OLDER page (loadMore) would hand its copies the ids of newer messages
+ * that are still on screen.
  */
 export function lookupStableIdFromEnd(
   role: string,
@@ -133,6 +140,19 @@ export function lookupStableIdFromEnd(
   if (!ids || ids.length === 0) return undefined
   const index = ids.length - 1 - fromEnd
   return index >= 0 ? ids[index] : undefined
+}
+
+/**
+ * How many copies of this identity the registry holds an id for.
+ *
+ * A caller that wants to align a page's copies with the recorded ids needs
+ * this to know whether the alignment can be exact at all: a page may hold
+ * copies that were never confirmed here (older pages, or a refetch that won
+ * the race against the `history.updated` event), and binding those by rank is
+ * what moves a React key onto another message.
+ */
+export function countStableIds(role: string, content: string): number {
+  return registry.get(stableIdKey(role, content))?.length ?? 0
 }
 
 /** Test-only: clear the registry between tests. */

@@ -38,14 +38,17 @@ const renderKey = (m: ChatMessage) => m.stableId ?? m.id
 /** What the bubble visibly is: enough to tell two entries apart. */
 const contentOf = (m: ChatMessage) => m.content.trim() || m.reasoningContent?.trim() || ''
 
+/** The options a refetch of the session tail passes (see ToChatMessagesOptions). */
+const TAIL = { bindStableIds: true }
+
 /** Render keys of a converted page, in document order. */
-function keysOf(history: RawHistoryMessage[]): string[] {
-  return toChatMessages(history, SESSION).map(renderKey)
+function keysOf(history: RawHistoryMessage[], tail = true): string[] {
+  return toChatMessages(history, SESSION, tail ? TAIL : {}).map(renderKey)
 }
 
 /** Render keys and their visible text, in document order. */
-function renderOf(history: RawHistoryMessage[]): Array<[string, string]> {
-  return toChatMessages(history, SESSION).map((m) => [renderKey(m), contentOf(m)])
+function renderOf(history: RawHistoryMessage[], tail = true): Array<[string, string]> {
+  return toChatMessages(history, SESSION, tail ? TAIL : {}).map((m) => [renderKey(m), contentOf(m)])
 }
 
 /**
@@ -73,6 +76,75 @@ function expectStableKeys(pages: RawHistoryMessage[][], seen: Map<string, string
 }
 
 describe('durable stableIds across the sliding history window', () => {
+  test('an OLDER page (loadMore) never binds by rank, even when the counts coincide', () => {
+    clearStableIdRegistry()
+    const ANSWER = 'Done — nothing else to do.'
+    const answer = (n: number): RawHistoryMessage =>
+      ({
+        id: `${SESSION}:old-${n}`,
+        role: 'assistant',
+        content: ANSWER,
+      }) as unknown as RawHistoryMessage
+
+    // Two copies of this identity are confirmed and STILL ON SCREEN in the tail
+    // page, so the registry holds exactly two ids for it.
+    registerStableId('assistant', ANSWER, 'ws-tail-1')
+    registerStableId('assistant', ANSWER, 'ws-tail-2')
+
+    // An older page happens to hold exactly two copies too. Binding by rank
+    // would hand it the ids of the tail messages, and `enforceUniqueRenderKeys`
+    // would then re-key one of the bubbles that is still rendered (a key jump =
+    // the reorder this suite exists to prevent). An older page must not bind.
+    const olderPage = [answer(1), answer(2)]
+    const bound = keysOf(olderPage, false)
+    expect(bound).toEqual([`${SESSION}:old-1`, `${SESSION}:old-2`])
+    for (const key of bound) expect(key).not.toContain('ws-tail')
+    expect(keysOf(olderPage, true)).toEqual(['ws-tail-1', 'ws-tail-2'])
+  })
+
+  test('a refetch that beats the confirmation keeps every copy on its own id', () => {
+    clearStableIdRegistry()
+    const RESULT = 'note content\n'
+    const tool = (n: number): RawHistoryMessage =>
+      ({
+        id: `${SESSION}:tool-${n}`,
+        role: 'tool',
+        content: RESULT,
+        tool_call_id: `call_${n}`,
+        tool_name: 'read_file',
+      }) as unknown as RawHistoryMessage
+
+    // Only call_1 and call_2 were confirmed when the tail page is built, and the
+    // page already holds call_3 (the poll landed before `history.updated`).
+    registerStableId('tool', 'id:call_1', 'ws-call-1')
+    registerStableId('tool', 'id:call_2', 'ws-call-2')
+
+    const page = [tool(1), tool(2), tool(3)]
+    // Tools bind on their exact tool_call_id, which is position-independent, so
+    // they keep their own keys …
+    expect(keysOf(page)).toEqual(['ws-call-1', 'ws-call-2', `${SESSION}:tool-3`])
+
+    // … and for a rank-bound identity the unprovable page binds nothing instead
+    // of shifting one id onto the wrong copy.
+    clearStableIdRegistry()
+    const ANSWER = 'same answer'
+    const answer = (n: number): RawHistoryMessage =>
+      ({
+        id: `${SESSION}:a-${n}`,
+        role: 'assistant',
+        content: ANSWER,
+      }) as unknown as RawHistoryMessage
+    registerStableId('assistant', ANSWER, 'ws-a1')
+    registerStableId('assistant', ANSWER, 'ws-a2')
+    expect(keysOf([answer(1), answer(2)])).toEqual(['ws-a1', 'ws-a2'])
+    // Three copies in the page, two known ids: no rank is provable.
+    expect(keysOf([answer(1), answer(2), answer(3)])).toEqual([
+      `${SESSION}:a-1`,
+      `${SESSION}:a-2`,
+      `${SESSION}:a-3`,
+    ])
+  })
+
   test('lookupStableIdFromEnd addresses the newest registered copies', () => {
     clearStableIdRegistry()
     registerStableId('tool', 'same result', 'ws-1')

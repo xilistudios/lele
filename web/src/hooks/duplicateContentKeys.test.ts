@@ -38,6 +38,12 @@ const rawHistory: RawHistoryMessage[] = [
 /** The key `MessageList` actually uses for React reconciliation. */
 const renderKey = (m: ChatMessage) => m.stableId ?? m.id
 
+/**
+ * These cases model a refetch of the session TAIL, the only page that may
+ * re-attach a durable stableId by rank (see ToChatMessagesOptions).
+ */
+const TAIL = { bindStableIds: true }
+
 describe('duplicate content-hash ids', () => {
   test('toChatMessages keeps every server message (no silent drop)', () => {
     const built = toChatMessages(rawHistory, SESSION)
@@ -62,7 +68,7 @@ describe('duplicate content-hash ids', () => {
     clearStableIdRegistry()
     registerStableId('assistant', ANSWER, 'a1-ws')
     registerStableId('assistant', ANSWER, 'a2-ws')
-    const built = toChatMessages(rawHistory, SESSION)
+    const built = toChatMessages(rawHistory, SESSION, TAIL)
     const keys = built.map(renderKey)
     expect(new Set(keys).size).toBe(keys.length)
     // Occurrence order, counted from the NEWEST copy (see
@@ -76,13 +82,13 @@ describe('duplicate content-hash ids', () => {
     clearStableIdRegistry()
     registerStableId('assistant', ANSWER, 'a2-ws')
     registerStableId('assistant', ANSWER, 'a2-ws')
-    const built = toChatMessages(rawHistory, SESSION)
-    // ONE recorded copy for TWO identical messages: the id goes to the newest
-    // copy (a confirmation always belongs to the most recent turn; the copy
-    // before it is an older message whose live twin is long gone), so a
-    // duplicate registration can never key two bubbles at once.
-    expect(built[3].stableId).toBe('a2-ws')
+    const built = toChatMessages(rawHistory, SESSION, TAIL)
+    // ONE recorded copy for TWO identical messages in the page: the registry
+    // cannot tell which of them was confirmed, and binding by rank would hand
+    // an id to the wrong message, so neither is bound (both keep their own
+    // content-derived id — unique, and stable across refetches).
     expect(built[1].stableId).toBeUndefined()
+    expect(built[3].stableId).toBeUndefined()
     const keys = built.map(renderKey)
     expect(new Set(keys).size).toBe(keys.length)
   })

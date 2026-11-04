@@ -109,8 +109,27 @@ the registry. Tools made that systematic (their identity is the tool RESULT,
 identical across `ls`/`git status`/failing-test calls) and every thinking model
 repeats reasoning verbatim.
 
-`src/hooks/stableIdWindow.test.ts` pins the invariant: a render key may leave the
-page (its message scrolled out) but must never be re-pointed at another message.
+Rank is only as good as the caller's knowledge of the page, so binding is gated
+on two things (`ToChatMessagesOptions.bindStableIds`):
+
+- **Only the tail of the session may bind.** `useChatHistory`'s refetch and the
+  catchup payload pass `bindStableIds: true`; an older page fetched by
+  `loadMore` never does. The registry holds the ids of the newest copies, so an
+  older page would otherwise hand its copies the ids of newer messages that are
+  still rendered, and `enforceUniqueRenderKeys` would re-key a live bubble.
+- **Only when every copy of the identity in the page is known**
+  (`countStableIds(role, content) >= copies in page`). A copy that has not been
+  confirmed yet (a refetch that beat the `history.updated` event) makes the rank
+  unprovable, and an unprovable binding is skipped rather than guessed: those
+  copies keep their own content-derived id, which is unique and stable.
+
+Tool cards are exempt from both gates because their key is the exact
+`tool_call_id` (`id:<tool_call_id>`), which is unique and position-independent —
+the fuzzy result-text identity only covers tools that arrive without one.
+
+`src/hooks/stableIdWindow.test.ts` pins all of it: a render key may leave the
+page (its message scrolled out) but must never be re-pointed at another message,
+and neither a `loadMore` page nor a page holding an unconfirmed copy may bind.
 
 ### Reproducing an ordering bug in a browser
 

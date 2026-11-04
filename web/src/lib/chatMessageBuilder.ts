@@ -1,4 +1,9 @@
-import { lookupStableId, lookupStableIdFromEnd, stableIdKey } from '../hooks/stableIdRegistry'
+import {
+  countStableIds,
+  lookupStableId,
+  lookupStableIdFromEnd,
+  stableIdKey,
+} from '../hooks/stableIdRegistry'
 import { assistantIdentityText } from './messageIdentity'
 import type {
   Attachment,
@@ -415,12 +420,38 @@ function countStableIdentities(history: RawHistoryMessage[]): Map<string, number
 }
 
 /**
+ * How a page relates to the durable stableId registry.
+ *
+ * `bindStableIds: true` may only be passed for a page that is the TAIL of the
+ * session — the newest page a refetch returns, or the catchup payload, which
+ * carries the same window. The registry holds the ids of the newest copies this
+ * page confirmed, so a page that is NOT the tail (an older page fetched by
+ * `loadMore`) must not bind at all: rank would hand its copies the ids of newer
+ * messages that are still rendered, and `enforceUniqueRenderKeys` would then
+ * re-key a live bubble — the very React-key shuffle this registry exists to
+ * prevent.
+ *
+ * Even on the tail the alignment can be impossible (a copy that has not been
+ * confirmed yet, i.e. a refetch that won the race against the
+ * `history.updated` event); see the count gate inside `toChatMessages` — an
+ * unprovable binding is skipped, never guessed.
+ */
+export type ToChatMessagesOptions = {
+  bindStableIds?: boolean
+}
+
+/**
  * Converts raw history messages from the API into ChatMessage objects.
  * Handles attachment parsing, tool call mapping, and approval message formatting.
  */
-export function toChatMessages(history: RawHistoryMessage[], sessionKey: string): ChatMessage[] {
+export function toChatMessages(
+  history: RawHistoryMessage[],
+  sessionKey: string,
+  options: ToChatMessagesOptions = {},
+): ChatMessage[] {
   const toolCallMap = buildToolCallMap(history)
   const seenIds = new Map<string, number>()
+  const bindStableIds = options.bindStableIds === true
 
   // Occurrence index per role+content key: the stableId registry records one
   // ephemeral id per confirmed copy, so every message with a repeated identity
@@ -471,7 +502,17 @@ export function toChatMessages(history: RawHistoryMessage[], sessionKey: string)
     // repeated identity read its predecessor's id once one copy slid out, which
     // re-keyed bubbles onto the wrong message (they swap places in the
     // virtualized list until a reload). See `lookupStableIdFromEnd`.
-    const fromEnd = (stableTotals.get(stableKey) ?? 1) - 1 - stableOccurrence
+    const copiesInPage = stableTotals.get(stableKey) ?? 1
+    const fromEnd = copiesInPage - 1 - stableOccurrence
+    // Rank-based binding is only PROVABLE when every copy of this identity in
+    // the page has a recorded id: then the page holds the newest
+    // `copiesInPage` copies and the alignment above is exact. If the page holds
+    // MORE copies than the registry knows (a refetch that beat the
+    // `history.updated` event, or an older page), the extra copies are
+    // indistinguishable from the registered ones and any rank would bind an id
+    // to the wrong message — so those identities keep their own history id,
+    // which is stable because it is derived from the content.
+    const rankBinding = bindStableIds && countStableIds(message.role, stableContent) >= copiesInPage
     // Tools carry their RESULT in `content`, which repeats across calls
     // (`ls`, `git status`, an identical failing test). Their tool_call_id is
     // exact and position-independent, so it is consulted first and the fuzzy
@@ -480,7 +521,9 @@ export function toChatMessages(history: RawHistoryMessage[], sessionKey: string)
       message.role === 'tool' && message.tool_call_id
         ? lookupStableId('tool', `id:${message.tool_call_id}`)
         : undefined
-    const stableId = toolStableId ?? lookupStableIdFromEnd(message.role, stableContent, fromEnd)
+    const stableId =
+      toolStableId ??
+      (rankBinding ? lookupStableIdFromEnd(message.role, stableContent, fromEnd) : undefined)
 
     if (message.role === 'user') {
       const parsed = parseAttachmentsFromContent(messageContent)

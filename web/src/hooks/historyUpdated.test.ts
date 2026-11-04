@@ -154,9 +154,13 @@ describe('handleHistoryUpdated stableId registry (durable flicker fix)', () => {
     // Simulate a fresh refetch building messages from raw history — the
     // registry must re-apply the ephemeral id as stableId so React keys
     // don't change even though the whole cache was rebuilt.
+    // A refetch of the session tail is the only page that may bind by rank
+    // (see ToChatMessagesOptions).
+    const TAIL = { bindStableIds: true }
     const built = toChatMessages(
       [{ id: 'hash-a-42', role: 'assistant', content: 'Answer that was streamed' }],
       's1',
+      TAIL,
     )
     expect(built[0].id).toBe('hash-a-42')
     expect(built[0].stableId).toBe('ack-uuid-42')
@@ -165,6 +169,7 @@ describe('handleHistoryUpdated stableId registry (durable flicker fix)', () => {
     const rebuilt = toChatMessages(
       [{ id: 'hash-a-42', role: 'assistant', content: 'Answer that was streamed' }],
       's1',
+      TAIL,
     )
     expect(rebuilt[0].stableId).toBe('ack-uuid-42')
   })
@@ -236,6 +241,7 @@ describe('handleHistoryUpdated — reasoning-only assistant iterations', () => {
         },
       ],
       's1',
+      { bindStableIds: true },
     )
 
     expect(built[0].content).toBe('')
