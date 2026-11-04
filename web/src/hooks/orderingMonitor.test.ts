@@ -47,6 +47,18 @@ function assistant(id: string, content: string, reasoning?: string): ChatMessage
   } as ChatMessage
 }
 
+function tool(id: string, toolCallId: string, options: Partial<ChatMessage> = {}): ChatMessage {
+  return {
+    id,
+    role: 'tool',
+    content: '',
+    toolCallId,
+    toolName: 'read_file',
+    sessionKey: 'base:chat:1',
+    ...options,
+  } as ChatMessage
+}
+
 function kinds(): string[] {
   return orderingReport().violations.map((v) => v.kind)
 }
@@ -178,6 +190,44 @@ describe('observeMergedOrder', () => {
     expect(detail).toContain('k1')
     expect(detail).toContain('q1')
     expect(detail).toContain('q2')
+  })
+
+  test('key-identity reports a re-pointed key ONCE, not on every following merge', () => {
+    observeMergedOrder([user('k1', 'q1')], [], [])
+    const moved = [user('k1', 'q2')]
+    observeMergedOrder(moved, [], [])
+    // The same render again must not re-report the transition it already
+    // reported (it would fill the 40-slot buffer and hide later violations).
+    observeMergedOrder(moved, [], [])
+    expect(kinds().filter((k) => k === 'key-identity')).toHaveLength(1)
+  })
+
+  test('key-identity keeps scanning after a mismatch', () => {
+    observeMergedOrder([user('k1', 'q1'), user('k2', 'q2')], [], [])
+    observeMergedOrder([user('k1', 'zz'), user('k2', 'yy')], [], [])
+    // The first mismatch is reported, but k2 was still adopted, so a later
+    // change of k2 alone is reported as well.
+    observeMergedOrder([user('k1', 'zz'), user('k2', 'xx')], [], [])
+    expect(kinds().filter((k) => k === 'key-identity')).toHaveLength(2)
+    expect(orderingReport().violations.at(-1)?.detail).toContain('k2')
+  })
+
+  test('key-identity is NOT tripped when a tool card receives its result', () => {
+    // The card renders while the call executes (`""`) and then shows the output
+    // under the SAME key: content that lands late is not a moved key.
+    const executing = tool('ws-call-1', 'call_1', { toolStatus: 'executing' })
+    observeMergedOrder([executing], [], [executing])
+    const done = { ...executing, toolResult: 'note content', toolStatus: 'completed' as const }
+    observeMergedOrder([done], [], [done])
+    expect(kinds()).toEqual([])
+  })
+
+  test("key-identity still catches one tool card taking ANOTHER call's key", () => {
+    const first = tool('ws-call-1', 'call_1', { toolResult: 'note content' })
+    observeMergedOrder([first], [], [first])
+    const stolen = tool('ws-call-1', 'call_5', { toolResult: 'note content' })
+    observeMergedOrder([stolen], [], [stolen])
+    expect(kinds()).toContain('key-identity')
   })
 
   test('key-identity is NOT tripped by a message re-keyed onto its own id', () => {

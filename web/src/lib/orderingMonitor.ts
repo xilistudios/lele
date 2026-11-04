@@ -301,6 +301,20 @@ function checkStrandedCopies(
 }
 
 /**
+ * Identity a render key must keep denoting, for the `key-identity` invariant.
+ *
+ * Not the same thing as the fingerprint text: a tool card's payload (its RESULT)
+ * arrives when the call finishes, so the card renders `""` and then the output
+ * under the same key — content that lands late is not a key that moved. The call
+ * id is the tool's identity; two different calls still differ, which is what the
+ * invariant has to catch.
+ */
+function stableIdentityText(msg: ChatMessage): string {
+  if (msg.role === 'tool' && msg.toolCallId) return `tool:${msg.toolCallId}`
+  return identityText(msg).trim()
+}
+
+/**
  * Render keys that now denote a different message than before, updating the
  * key → identity map as it goes.
  *
@@ -317,30 +331,33 @@ function checkStrandedCopies(
  * correctly not reported: nothing can move that the user could see.
  */
 function findKeyRepointing(messages: ChatMessage[]): string | undefined {
+  let firstMismatch: string | undefined
   for (const msg of messages) {
     // A message that is still streaming grows between renders: its identity
     // text changing is the typewriter, not a re-pointed key. It joins the map
     // once it settles, with its final text.
     if (msg.streaming === true) continue
     const key = renderKey(msg)
-    const text = identityText(msg).trim()
+    const text = stableIdentityText(msg)
     // An entry with no visible identity renders nothing; it has no message to
     // be confused with.
     if (text === '') continue
     const previous = keyIdentities.get(key)
-    if (previous === undefined) {
-      keyIdentities.set(key, text)
-      if (keyIdentities.size > MAX_KEYS) {
-        const oldest = keyIdentities.keys().next().value
-        if (oldest !== undefined) keyIdentities.delete(oldest)
-      }
-      continue
+    if (previous !== undefined && previous !== text && firstMismatch === undefined) {
+      firstMismatch = `key ${key} used to be "${previous.slice(0, TEXT_PREVIEW)}" and now renders "${text.slice(0, TEXT_PREVIEW)}"`
     }
-    if (previous !== text) {
-      return `key ${key} used to be "${previous.slice(0, TEXT_PREVIEW)}" and now renders "${text.slice(0, TEXT_PREVIEW)}"`
+    // Adopt the identity the key renders NOW, whether or not it matched: the
+    // report is about the TRANSITION. Keeping the old text would report the same
+    // mismatch on every following merge (filling the 40-slot violation buffer
+    // and hiding whatever comes next) and would stop tracking the new message.
+    keyIdentities.delete(key)
+    keyIdentities.set(key, text)
+    if (keyIdentities.size > MAX_KEYS) {
+      const oldest = keyIdentities.keys().next().value
+      if (oldest !== undefined) keyIdentities.delete(oldest)
     }
   }
-  return undefined
+  return firstMismatch
 }
 
 /**
