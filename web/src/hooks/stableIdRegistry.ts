@@ -89,9 +89,50 @@ export function registerStableId(role: string, content: string, ephemeralId: str
  * The default occurrence (0) covers the common case of a single message with
  * unique content. When two messages share identical content, the caller must
  * pass the occurrence index (0 for the first, 1 for the second, etc.).
+ *
+ * Historical consumer: `toChatMessages` used to call this with an occurrence
+ * index counted INSIDE the fetched history page, which is not a stable place
+ * to count from (see `lookupStableIdFromEnd`). Prefer that one for messages
+ * that come out of the sliding history window.
  */
 export function lookupStableId(role: string, content: string, occurrence = 0): string | undefined {
   return registry.get(stableIdKey(role, content))?.[occurrence]
+}
+
+/**
+ * Look up the stable id recorded for the `fromEnd`-th NEWEST message with this
+ * role/content (0 = the most recently registered copy), or undefined.
+ *
+ * WHY the newest end is the only stable end to count from: the backend serves
+ * history as a sliding window of the last `limit` messages
+ * (pkg/channels/rest_chat.go), so the OLDEST messages fall off the page while
+ * the registry keeps one entry per copy ever confirmed by this page. Counting
+ * occurrences from the START of the page (the old `lookupStableId` call) makes
+ * copy #N of an identity point at the N-th registered id — and as soon as one
+ * older copy slides out, EVERY later copy reads its predecessor's id.
+ *
+ * Consequence in the browser (reproduced against a live gateway): the React
+ * key of a bubble moves to a different message. React/Virtuoso then reconcile
+ * the wrong DOM node into the slot (bubbles swap places, an old message shows
+ * up where the newest one belongs) and the transcript looks reordered until a
+ * reload clears the registry. Tools made it systematic: their identity is the
+ * tool RESULT (`content`), which is often identical across calls (`git status`,
+ * `ls`, a failing test), and every thinking model repeats reasoning verbatim.
+ *
+ * Counting from the newest end is stable under exactly the mutation that
+ * happens in practice (old copies leaving the window) and never binds an id to
+ * a copy that is not in the page (an out-of-range `fromEnd` is `undefined`, so
+ * the caller falls back to the message's own id).
+ */
+export function lookupStableIdFromEnd(
+  role: string,
+  content: string,
+  fromEnd = 0,
+): string | undefined {
+  const ids = registry.get(stableIdKey(role, content))
+  if (!ids || ids.length === 0) return undefined
+  const index = ids.length - 1 - fromEnd
+  return index >= 0 ? ids[index] : undefined
 }
 
 /** Test-only: clear the registry between tests. */

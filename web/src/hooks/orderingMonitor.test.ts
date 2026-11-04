@@ -114,6 +114,16 @@ describe('observeMergedOrder', () => {
     expect(kinds()).toEqual(['stranded-copy'])
   })
 
+  test('stranded-copy is NOT tripped by the streaming tail being a prefix of an older copy', () => {
+    // Mid-stream the live answer is "answer 1" and an older answer is literally
+    // "answer 1" (this turn will end as "answer 16"): the live tail is not a
+    // stale leftover, so it must not be counted as one.
+    const base = [user('u1', 'q1'), assistant('h-a1', 'answer 1')]
+    const tail = { ...assistant('temp-a16', 'answer 1'), streaming: true }
+    observeMergedOrder([...base, user('u2', 'q2'), tail], base, [tail])
+    expect(kinds()).toEqual([])
+  })
+
   test('stable-order: a message moves above one that preceded it', () => {
     const first = [user('u1', 'q1'), assistant('a1', 'a1'), user('u2', 'q2')]
     observeMergedOrder(first, first, [])
@@ -121,7 +131,11 @@ describe('observeMergedOrder', () => {
     const second = [user('u1', 'q1'), user('u2', 'q2'), assistant('a1', 'a1')]
     observeMergedOrder(second, first, [])
     expect(kinds()).toContain('stable-order')
-    expect(orderingReport().violations.map((v) => v.detail).join(' ')).toContain('is now after')
+    expect(
+      orderingReport()
+        .violations.map((v) => v.detail)
+        .join(' '),
+    ).toContain('is now after')
   })
 
   test('stable-order is NOT tripped by confirmation, growth or window sliding', () => {
@@ -150,6 +164,38 @@ describe('observeMergedOrder', () => {
     const slid = [user('u2', 'q2')]
     observeMergedOrder(slid, slid, [])
     expect(kinds()).toEqual([])
+  })
+
+  test('key-identity: a render key that moves to ANOTHER message is reported', () => {
+    // Turn 1 renders under its own keys …
+    observeMergedOrder([user('k1', 'q1'), assistant('k2', 'answer one')], [], [])
+    // … and the next render hands the same keys to different messages, which is
+    // what the stableId registry did when its occurrence index slid out of sync
+    // with the history window (React then moves the wrong bubble).
+    observeMergedOrder([user('k1', 'q2'), assistant('k2', 'answer two')], [], [])
+    expect(kinds()).toEqual(['key-identity'])
+    const detail = orderingReport().violations[0].detail
+    expect(detail).toContain('k1')
+    expect(detail).toContain('q1')
+    expect(detail).toContain('q2')
+  })
+
+  test('key-identity is NOT tripped by a message re-keyed onto its own id', () => {
+    // The live copy is confirmed into history and keeps its text under a NEW
+    // key (its content hash): a new key for a message is fine, a key for
+    // another message is not.
+    observeMergedOrder([user('live-u1', 'q1'), assistant('live-a1', 'a1')], [], [])
+    observeMergedOrder([user('hash-u1', 'q1'), assistant('hash-a1', 'a1')], [], [])
+    expect(kinds()).toEqual([])
+  })
+
+  test('key-identity is NOT tripped by indistinguishable messages swapping keys', () => {
+    // Two copies of the same visible text: nothing a swap could move on screen.
+    const base = [user('u1', 'yes'), assistant('a1', 'ok'), user('u2', 'yes')]
+    observeMergedOrder(base, base, [])
+    const swapped = [user('u2', 'yes'), assistant('a1', 'ok'), user('u1', 'yes')]
+    observeMergedOrder(swapped, base, [])
+    expect(kinds()).not.toContain('key-identity')
   })
 
   test('legitimate duplicate text inside history is not a stranded copy', () => {

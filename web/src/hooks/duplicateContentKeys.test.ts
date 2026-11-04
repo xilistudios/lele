@@ -65,7 +65,9 @@ describe('duplicate content-hash ids', () => {
     const built = toChatMessages(rawHistory, SESSION)
     const keys = built.map(renderKey)
     expect(new Set(keys).size).toBe(keys.length)
-    // occurrence order: the first copy keeps the first recorded ephemeral id
+    // Occurrence order, counted from the NEWEST copy (see
+    // `lookupStableIdFromEnd`): the last copy of an identity takes the last
+    // recorded ephemeral id, the one before it takes the previous, and so on.
     expect(built[1].stableId).toBe('a1-ws')
     expect(built[3].stableId).toBe('a2-ws')
   })
@@ -75,8 +77,12 @@ describe('duplicate content-hash ids', () => {
     registerStableId('assistant', ANSWER, 'a2-ws')
     registerStableId('assistant', ANSWER, 'a2-ws')
     const built = toChatMessages(rawHistory, SESSION)
-    expect(built[1].stableId).toBe('a2-ws')
-    expect(built[3].stableId).toBeUndefined()
+    // ONE recorded copy for TWO identical messages: the id goes to the newest
+    // copy (a confirmation always belongs to the most recent turn; the copy
+    // before it is an older message whose live twin is long gone), so a
+    // duplicate registration can never key two bubbles at once.
+    expect(built[3].stableId).toBe('a2-ws')
+    expect(built[1].stableId).toBeUndefined()
     const keys = built.map(renderKey)
     expect(new Set(keys).size).toBe(keys.length)
   })

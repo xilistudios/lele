@@ -1,4 +1,4 @@
-import { lookupStableId, stableIdKey } from '../hooks/stableIdRegistry'
+import { lookupStableId, lookupStableIdFromEnd, stableIdKey } from '../hooks/stableIdRegistry'
 import { assistantIdentityText } from './messageIdentity'
 import type {
   Attachment,
@@ -381,6 +381,40 @@ export function createToolMessage(props: ToolMessageProps): ChatMessage {
 // ---------------------------------------------------------------------------
 
 /**
+ * Identity text a persisted message registers (and later looks up) its durable
+ * stableId under. Shared by the pre-pass and the conversion pass so the two
+ * always agree on what counts as "the same identity".
+ *
+ * - `display_content` first: a command-driven turn stores the EXPANDED prompt
+ *   in `content` and the text the user typed in `display_content`, and the
+ *   optimistic copy registered the latter.
+ * - an assistant iteration with no text (a thinking step, or the tool-call step
+ *   of a model that emits no text alongside the call) is identified by its
+ *   reasoning — the same rule `isConfirmedInCache` and `mergeMessages` use
+ *   (lib/messageIdentity.ts).
+ * - everything else (user text, a tool's RESULT — tools carry it in `content`)
+ *   is its content.
+ */
+function historyStableContent(message: RawHistoryMessage): string {
+  return (
+    message.display_content ||
+    (message.role === 'assistant'
+      ? assistantIdentityText(message.content, message.reasoning_content)
+      : message.content)
+  )
+}
+
+/** How many copies of every stable identity this page holds (see above). */
+function countStableIdentities(history: RawHistoryMessage[]): Map<string, number> {
+  const totals = new Map<string, number>()
+  for (const message of history) {
+    const key = stableIdKey(message.role, historyStableContent(message))
+    totals.set(key, (totals.get(key) ?? 0) + 1)
+  }
+  return totals
+}
+
+/**
  * Converts raw history messages from the API into ChatMessage objects.
  * Handles attachment parsing, tool call mapping, and approval message formatting.
  */
@@ -389,10 +423,13 @@ export function toChatMessages(history: RawHistoryMessage[], sessionKey: string)
   const seenIds = new Map<string, number>()
 
   // Occurrence index per role+content key: the stableId registry records one
-  // ephemeral id per confirmed copy, so the Nth message with the same content
-  // must look up the Nth recorded id. Without this two identical messages
+  // ephemeral id per confirmed copy, so every message with a repeated identity
+  // must look up its OWN recorded id. Without this two identical messages
   // shared one stableId and React dropped one of their bubbles.
   const stableOccurrences = new Map<string, number>()
+  // Copies of every identity in THIS page, so the number of occurrences left
+  // until the end of the page can be computed (see `lookupStableIdFromEnd`).
+  const stableTotals = countStableIdentities(history)
 
   return history.flatMap((message, index) => {
     let msgId = message.id || createHistoryMessageId(sessionKey, index, message.role)
@@ -424,19 +461,26 @@ export function toChatMessages(history: RawHistoryMessage[], sessionKey: string)
     // An assistant iteration with no text (thinking / tool-call step) registers
     // under its reasoning text — the same identity `isConfirmedInCache` uses
     // (see event-handlers/streaming.ts) — since its content is empty.
-    const stableContent =
-      message.display_content ||
-      (message.role === 'assistant'
-        ? assistantIdentityText(messageContent, message.reasoning_content)
-        : messageContent)
+    const stableContent = historyStableContent(message)
     const stableKey = stableIdKey(message.role, stableContent)
     const stableOccurrence = stableOccurrences.get(stableKey) ?? 0
     stableOccurrences.set(stableKey, stableOccurrence + 1)
-    const stableId =
-      lookupStableId(message.role, stableContent, stableOccurrence) ??
-      (message.role === 'tool' && message.tool_call_id
+    // Occurrence counted from the NEWEST end of the page (0 = the last copy).
+    // That is the only end that does not move when the sliding history window
+    // drops the oldest messages: counting from the start made every copy of a
+    // repeated identity read its predecessor's id once one copy slid out, which
+    // re-keyed bubbles onto the wrong message (they swap places in the
+    // virtualized list until a reload). See `lookupStableIdFromEnd`.
+    const fromEnd = (stableTotals.get(stableKey) ?? 1) - 1 - stableOccurrence
+    // Tools carry their RESULT in `content`, which repeats across calls
+    // (`ls`, `git status`, an identical failing test). Their tool_call_id is
+    // exact and position-independent, so it is consulted first and the fuzzy
+    // result-text identity only covers tools that arrive without one.
+    const toolStableId =
+      message.role === 'tool' && message.tool_call_id
         ? lookupStableId('tool', `id:${message.tool_call_id}`)
-        : undefined)
+        : undefined
+    const stableId = toolStableId ?? lookupStableIdFromEnd(message.role, stableContent, fromEnd)
 
     if (message.role === 'user') {
       const parsed = parseAttachmentsFromContent(messageContent)

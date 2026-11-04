@@ -84,15 +84,48 @@ shapes, not simplifications):
 cd web
 bun test src/hooks/messageOrdering.test.ts \
          src/hooks/messageOrderingWindow.test.ts \
-         src/hooks/messagePairing.test.ts
+         src/hooks/messagePairing.test.ts \
+         src/hooks/stableIdWindow.test.ts
 ```
+
+### React keys must survive the sliding history window
+
+The render key of a bubble is `stableId ?? id` (`MessageList` /
+`virtuoso.computeItemKey`). `stableId` is the ephemeral WebSocket id that the
+durable registry (`web/src/hooks/stableIdRegistry.ts`) re-attaches to the
+persisted copy, so the bubble is not remounted when history catches up.
+
+That registry is keyed on a **content identity** — role + the first 200 chars of
+the content (or of the reasoning, for a text-only-less assistant iteration) —
+and it holds one entry per copy this page confirmed. The backend serves history
+as a sliding window of the last `limit` messages, so occurrences **must be
+counted from the NEWEST end of the page** (`lookupStableIdFromEnd`), never from
+its start: when the oldest copy of a repeated identity slides out, a start-based
+index makes every remaining copy read its *predecessor's* id, so the React key of
+message N is handed to message N+1. React/Virtuoso then reconcile the wrong DOM
+node into the slot — bubbles swap places, an old message appears where the newest
+one belongs, and thinking blocks pile up as a run of copies until a reload clears
+the registry. Tools made that systematic (their identity is the tool RESULT,
+identical across `ls`/`git status`/failing-test calls) and every thinking model
+repeats reasoning verbatim.
+
+`src/hooks/stableIdWindow.test.ts` pins the invariant: a render key may leave the
+page (its message scrolled out) but must never be re-pointed at another message.
 
 ### Reproducing an ordering bug in a browser
 
 An opt-in monitor (`web/src/lib/orderingMonitor.ts`) records every WS event,
 every history snapshot and every merge, and reports the invariants whose
-violation *is* the bug (`stable-order`, `duplicate-key`, `base-order`,
-`stranded-copy`):
+violation *is* the bug:
+
+- `key-identity` — a render key that already denoted one message now denotes a
+  different one. This is the ROOT CAUSE and the first thing to look at.
+- `stable-order` — the relative order of two messages flipped between renders
+  (the literal user-visible symptom).
+- `duplicate-key` — two entries share one render key.
+- `base-order` — the merge reordered canonical history.
+- `stranded-copy` — a live copy rendered as its own entry while history already
+  holds the same message (the "old block below a newer answer" shape).
 
 ```js
 // in the browser console, before reproducing
@@ -105,6 +138,11 @@ window.__leleOrderingReport()           // { violations, trace, mergeCount }
 The last report is also stored in `localStorage` under `lele.orderingReport`, so
 a reload does not lose the evidence. When the flag is off the monitor is a
 single boolean check per merge.
+
+The evidence arrays (`merged`, `base`, `streaming`) hold one JSON entry per
+message — `["role","renderKey","identity text"]` — so a saved report can be
+checked mechanically for "did a key change meaning?", which the old
+colon-joined form could not (both keys and text contain `:`).
 
 ## Operational Notes
 
