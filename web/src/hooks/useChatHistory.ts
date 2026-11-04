@@ -2,10 +2,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ApiClient } from '../lib/api'
 import { toChatMessages } from '../lib/chatMessageBuilder'
+import { noteHistorySnapshot, observeMergedOrder } from '../lib/orderingMonitor'
 import type { ChatMessage, GroupInfo, GroupSnapshot, RawHistoryMessage } from '../lib/types'
 import { sessionKeysLooselyMatch } from './event-handlers/helpers'
 import { snapshotToGroupInfo } from './messageEventHandlers'
-import { noteHistorySnapshot, observeMergedOrder } from '../lib/orderingMonitor'
 import { useOnPageVisible, usePageVisible } from './usePageVisible'
 
 const DEFAULT_LIMIT = 50
@@ -187,7 +187,11 @@ export function useChatHistory(
       // so hydration now happens in a useEffect on [query.data, sessionKey].
       const groups = historyGroupsToInfos(history)
 
-      const newMessages = toChatMessages(history.messages, history.session_key)
+      // This page is the TAIL of the session, which is the only place a
+      // durable stableId may be re-attached by rank (see ToChatMessagesOptions).
+      const newMessages = toChatMessages(history.messages, history.session_key, {
+        bindStableIds: true,
+      })
       // Opt-in instrumentation: the ids of the newest page are what the merge
       // treats as canonical, so keeping one snapshot per poll is what proves an
       // id changed between two polls (see lib/orderingMonitor.ts).
@@ -338,6 +342,9 @@ export function useChatHistory(
         return
       }
 
+      // An OLDER page: the registry holds the ids of NEWER copies (still on
+      // screen), so binding by rank here would steal them. Every older copy
+      // keeps its content-derived history id, which is stable on its own.
       const olderMessages = toChatMessages(history.messages, history.session_key)
 
       // Drop the re-served window (unresolvable cursor, see
@@ -455,7 +462,8 @@ export function updateChatHistoryFromRaw(
     buildChatHistoryQueryKey(sessionKey, parentSessionKey),
     (old: ChatHistoryData | undefined) => ({
       sessionKey,
-      messages: toChatMessages(rawMessages, sessionKey),
+      // Catchup carries the same newest window as a refetch, so it is a tail.
+      messages: toChatMessages(rawMessages, sessionKey, { bindStableIds: true }),
       rawMessages,
       processing,
       groups: old?.groups,

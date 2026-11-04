@@ -19,6 +19,15 @@
  *                      history already holds the same message (same role +
  *                      identity text). That is the "old block below a newer
  *                      answer" shape.
+ *   E `key-identity`   a render key that already denoted one message is now
+ *                      used by a DIFFERENT one. This is the ROOT CAUSE behind
+ *                      A and B: React/Virtuoso reconcile by key, so a key that
+ *                      jumps to another message moves the wrong DOM node into
+ *                      the slot (bubbles swap, an old message shows up where
+ *                      the newest belongs). It is what the durable stableId
+ *                      registry used to do when its occurrence index was
+ *                      counted from the start of the sliding history window
+ *                      (see `lookupStableIdFromEnd` in stableIdRegistry.ts).
  *
  * It is DISABLED by default and costs one `isOrderingDebugEnabled()` call per
  * merge when off. Enable it with either
@@ -41,10 +50,21 @@ import type { ChatMessage } from './types'
 /** Ring buffer sizes: enough to hold a few turns of chunks without growing. */
 const MAX_TRACE = 600
 const MAX_VIOLATIONS = 40
+/**
+ * Render keys remembered for the `key-identity` invariant. A key is a short
+ * string (a uuid or a content hash), so a few thousand cost ~100 KB; the cap is
+ * there so a very long debug session cannot grow without bound.
+ */
+const MAX_KEYS = 4000
 /** How much message text a trace entry keeps — enough to identify, not to leak. */
 const TEXT_PREVIEW = 80
 
-export type OrderingKind = 'stable-order' | 'duplicate-key' | 'base-order' | 'stranded-copy'
+export type OrderingKind =
+  | 'stable-order'
+  | 'duplicate-key'
+  | 'base-order'
+  | 'stranded-copy'
+  | 'key-identity'
 
 export type OrderingViolation = {
   kind: OrderingKind
@@ -94,6 +114,11 @@ let violations: OrderingViolation[] = []
  * render to compare against" (first merge, monitor reset, session switch).
  */
 let previousOrder: string[] | null = null
+/**
+ * What each render key has denoted so far: key → identity text of the message it
+ * was first seen on. Feeds the `key-identity` invariant.
+ */
+const keyIdentities = new Map<string, string>()
 let mergeCount = 0
 
 /** Reset the whole buffer. Exported for tests and for `window.__leleOrderingReset`. */
@@ -101,6 +126,7 @@ export function resetOrderingMonitor(): void {
   trace = []
   violations = []
   previousOrder = null
+  keyIdentities.clear()
   mergeCount = 0
 }
 
@@ -118,9 +144,19 @@ function identityText(msg: ChatMessage): string {
   return msg.content
 }
 
+/**
+ * Compact one-line description of a message for the evidence payload:
+ * `["role","renderKey","identity text"]`, as JSON.
+ *
+ * JSON and not `role:key:text` because render keys (`ui-b:1a2b`, `ws:call_1`)
+ * and message text both contain `:` — the old colon-joined form could not be
+ * split back apart, so a saved report could not be checked mechanically for the
+ * invariant that actually matters: does a render key still denote the SAME
+ * message? With this shape `JSON.parse` round-trips exactly.
+ */
 function preview(msg: ChatMessage): string {
   const text = identityText(msg).replace(/\s+/g, ' ').trim().slice(0, TEXT_PREVIEW)
-  return `${msg.role}:${renderKey(msg)}:${text}`
+  return JSON.stringify([msg.role, renderKey(msg), text])
 }
 
 function fingerprint(messages: ChatMessage[]): string[] {
@@ -244,6 +280,11 @@ function checkStrandedCopies(
   }
   const mergedCounts = new Map<string, number>()
   for (const msg of merged) {
+    // A message that is still streaming is the LIVE TAIL by definition, never a
+    // stale leftover — and its text is a growing prefix, so a shorter earlier
+    // message ("answer 1" vs the streaming "answer 1" of "answer 16") looked
+    // like a duplicate. Only settled copies are counted.
+    if (msg.streaming === true) continue
     const identity = identityText(msg).trim()
     // Empty identities render nothing; `filterStreamingLeftovers` drops them.
     if (identity === '') continue
@@ -257,6 +298,66 @@ function checkStrandedCopies(
     return `${role} "${identity.slice(0, TEXT_PREVIEW)}" rendered ${mergedCount}x but history holds it ${baseCount}x (a live copy rendered as its own entry while history already has the message)`
   }
   return undefined
+}
+
+/**
+ * Identity a render key must keep denoting, for the `key-identity` invariant.
+ *
+ * Not the same thing as the fingerprint text: a tool card's payload (its RESULT)
+ * arrives when the call finishes, so the card renders `""` and then the output
+ * under the same key — content that lands late is not a key that moved. The call
+ * id is the tool's identity; two different calls still differ, which is what the
+ * invariant has to catch.
+ */
+function stableIdentityText(msg: ChatMessage): string {
+  if (msg.role === 'tool' && msg.toolCallId) return `tool:${msg.toolCallId}`
+  return identityText(msg).trim()
+}
+
+/**
+ * Render keys that now denote a different message than before, updating the
+ * key → identity map as it goes.
+ *
+ * This is the root-cause invariant. `stable-order` (A) and `duplicate-key` (B)
+ * are its symptoms; a key moving to another message is the defect itself. It is
+ * what the durable stableId registry did when it counted occurrences from the
+ * START of the sliding history window: once the oldest copy of a repeated
+ * identity slid out, every remaining copy read its predecessor's id, so the id
+ * of message N was handed to message N+1 — a bubble then renders somebody
+ * else's content, or jumps to another slot, until a reload clears the registry.
+ *
+ * Only the identity TEXT is compared, so two messages that are indistinguishable
+ * on screen (a repeated answer, the same reasoning verbatim) swapping keys is
+ * correctly not reported: nothing can move that the user could see.
+ */
+function findKeyRepointing(messages: ChatMessage[]): string | undefined {
+  let firstMismatch: string | undefined
+  for (const msg of messages) {
+    // A message that is still streaming grows between renders: its identity
+    // text changing is the typewriter, not a re-pointed key. It joins the map
+    // once it settles, with its final text.
+    if (msg.streaming === true) continue
+    const key = renderKey(msg)
+    const text = stableIdentityText(msg)
+    // An entry with no visible identity renders nothing; it has no message to
+    // be confused with.
+    if (text === '') continue
+    const previous = keyIdentities.get(key)
+    if (previous !== undefined && previous !== text && firstMismatch === undefined) {
+      firstMismatch = `key ${key} used to be "${previous.slice(0, TEXT_PREVIEW)}" and now renders "${text.slice(0, TEXT_PREVIEW)}"`
+    }
+    // Adopt the identity the key renders NOW, whether or not it matched: the
+    // report is about the TRANSITION. Keeping the old text would report the same
+    // mismatch on every following merge (filling the 40-slot violation buffer
+    // and hiding whatever comes next) and would stop tracking the new message.
+    keyIdentities.delete(key)
+    keyIdentities.set(key, text)
+    if (keyIdentities.size > MAX_KEYS) {
+      const oldest = keyIdentities.keys().next().value
+      if (oldest !== undefined) keyIdentities.delete(oldest)
+    }
+  }
+  return firstMismatch
 }
 
 /**
@@ -327,6 +428,11 @@ export function observeMergedOrder(
   const duplicates = findDuplicateKeys(merged)
   if (duplicates.length > 0) report('duplicate-key', duplicates.join('; '))
 
+  // Root cause first: a key that moved to another message explains a reorder,
+  // so reporting it before `stable-order` keeps the evidence causal.
+  const repointed = findKeyRepointing(merged)
+  if (repointed) report('key-identity', repointed)
+
   const reordered = checkBaseOrder(baseMessages, merged)
   if (reordered) report('base-order', reordered)
 
@@ -366,11 +472,9 @@ export function orderingReport(): OrderingReport {
     trace: [...trace],
     previousOrder,
     print: () => {
+      const lines = violations.map((v, i) => `  ${i + 1}. ${v.kind}: ${v.detail}`).join('\n')
       // biome-ignore lint/suspicious/noConsole: diagnostic entry point.
-      console.log(
-        `[order] ${violations.length} violation(s) over ${mergeCount} merge(s)\n` +
-          violations.map((v, i) => `  ${i + 1}. ${v.kind}: ${v.detail}`).join('\n'),
-      )
+      console.log(`[order] ${violations.length} violation(s) over ${mergeCount} merge(s)\n${lines}`)
     },
   }
   return report
