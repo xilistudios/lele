@@ -250,43 +250,84 @@ func (m *Model) obFinalizeSetup() {
 // fields on every config load — if the typed field is empty, the user's saved
 // provider gets silently wiped.
 func syncProviderToTypedField(p *config.ProvidersConfig, name string, np config.NamedProviderConfig) {
-	pc := np.ProviderConfig
-	switch strings.ToLower(name) {
-	case "anthropic":
-		p.Anthropic = pc
-	case "openai":
-		p.OpenAI.ProviderConfig = pc
-	case "openrouter":
-		p.OpenRouter = pc
-	case "groq":
-		p.Groq = pc
-	case "zhipu":
-		p.Zhipu = pc
-	case "vllm":
-		p.VLLM = pc
-	case "gemini":
-		p.Gemini = pc
-	case "nvidia":
-		p.Nvidia = pc
-	case "ollama":
-		p.Ollama = pc
-	case "moonshot":
-		p.Moonshot = pc
-	case "shengsuanyun":
-		p.ShengSuanYun = pc
-	case "deepseek":
-		p.DeepSeek = pc
-	case "github_copilot":
-		p.GitHubCopilot = pc
-	case "nanogpt":
-		p.NanogPT = pc
-	case "alibaba_coding_plan":
-		p.AlibabaCodingPlan = pc
-	case "zai_coding_plan":
-		p.ZAICodingPlan = pc
-	case "modelark_coding_plan":
-		p.ModelArkCodingPlan = pc
+	if slot := typedProviderSlot(p, name); slot != nil {
+		*slot = np.ProviderConfig
 	}
+}
+
+// syncEditedProviderCredentials mirrors ONLY the two credentials an in-place
+// provider edit may have written (API key and base URL) into the typed field,
+// instead of copying the whole named ProviderConfig like
+// syncProviderToTypedField does.
+//
+// The typed field can legitimately be the ONLY carrier of a value: an
+// env:"LELE_PROVIDERS_<NAME>_API_KEY" override is applied after the JSON is
+// decoded, and a hand-written config.json that keeps the provider under
+// providers.<name> can decode into the named entry only — so a field the edit
+// left blank must not blank the typed copy. A value the named entry does have
+// is still mirrored in, which is the whole point of the mirror: transport
+// selection is TYPE-FIRST (the Gemini Code Assist pre-check reads
+// Providers.Gemini), so a credential that only reached the named copy would be
+// persisted but invisible to the selector.
+func syncEditedProviderCredentials(p *config.ProvidersConfig, name string, np config.NamedProviderConfig) {
+	slot := typedProviderSlot(p, name)
+	if slot == nil {
+		return
+	}
+	if np.APIKey != "" {
+		slot.APIKey = np.APIKey
+	}
+	if np.APIBase != "" {
+		slot.APIBase = np.APIBase
+	}
+}
+
+// typedProviderSlot returns a pointer to the typed ProviderConfig field that
+// mirrors the named provider `name`, or nil when that name has no typed field.
+// It is the single name→field mapping shared by the two mirror helpers above,
+// so adding a built-in provider cannot teach one of them a name the other does
+// not know.
+func typedProviderSlot(p *config.ProvidersConfig, name string) *config.ProviderConfig {
+	if p == nil {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "anthropic":
+		return &p.Anthropic
+	case "openai":
+		return &p.OpenAI.ProviderConfig
+	case "openrouter":
+		return &p.OpenRouter
+	case "groq":
+		return &p.Groq
+	case "zhipu":
+		return &p.Zhipu
+	case "vllm":
+		return &p.VLLM
+	case "gemini":
+		return &p.Gemini
+	case "nvidia":
+		return &p.Nvidia
+	case "ollama":
+		return &p.Ollama
+	case "moonshot":
+		return &p.Moonshot
+	case "shengsuanyun":
+		return &p.ShengSuanYun
+	case "deepseek":
+		return &p.DeepSeek
+	case "github_copilot":
+		return &p.GitHubCopilot
+	case "nanogpt":
+		return &p.NanogPT
+	case "alibaba_coding_plan":
+		return &p.AlibabaCodingPlan
+	case "zai_coding_plan":
+		return &p.ZAICodingPlan
+	case "modelark_coding_plan":
+		return &p.ModelArkCodingPlan
+	}
+	return nil
 }
 
 // maskAPIKey masks an API key for display, keeping the first and last 4

@@ -115,34 +115,55 @@ func (m *Model) addProvider(name, providerType, apiKey, apiBase string) error {
 // edit, exactly like ensureProvider does for a re-run of /connect (rebuilding
 // the entry would drop the model list).
 //
-// The named entry is mirrored into its typed field for the same reason
-// ensureProvider mirrors it: transport selection is TYPE-FIRST (pkg/providers
-// reads Providers.<Name> before Providers.Named), so a credential that only
-// reached the named copy would be persisted but invisible to the selector.
+// The edited credentials are mirrored into the typed field for the same reason
+// ensureProvider mirrors them (transport selection is TYPE-FIRST), but only the
+// fields this edit owns: see syncEditedProviderCredentials.
+//
+// A failed save rolls BOTH copies back. The form keeps the user on the error so
+// the typed values can be retried, and ESC then returns to the detail without
+// re-reading the file — leaving the rejected edit in memory would let any later
+// save from another flow persist a change this one already reported as failed.
 func (m *Model) updateProvider(name, providerType, apiKey, apiBase string) error {
 	if m.cfg == nil || m.cfg.Providers == nil || m.cfg.Providers.Named == nil {
 		return fmt.Errorf("no providers configured")
 	}
 
 	key := strings.ToLower(strings.TrimSpace(name))
-	provider, ok := m.cfg.Providers.Named[key]
+	previous, ok := m.cfg.Providers.Named[key]
 	if !ok {
 		return fmt.Errorf("provider %q not found", key)
 	}
 
+	updated := previous
 	if typ := strings.ToLower(strings.TrimSpace(providerType)); typ != "" {
-		provider.Type = typ
+		updated.Type = typ
 	}
 	if k := strings.TrimSpace(apiKey); k != "" {
-		provider.APIKey = k
+		updated.APIKey = k
 	}
 	if base := strings.TrimSpace(apiBase); base != "" {
-		provider.APIBase = base
+		updated.APIBase = base
 	}
-	m.cfg.Providers.Named[key] = provider
-	syncProviderToTypedField(m.cfg.Providers, key, provider)
 
-	return m.saveConfigToDisk()
+	// Snapshot the typed mirror so a failed save can put it back verbatim
+	// (re-deriving it from `previous` would clobber an env-provided value).
+	typedSlot := typedProviderSlot(m.cfg.Providers, key)
+	var typedBefore config.ProviderConfig
+	if typedSlot != nil {
+		typedBefore = *typedSlot
+	}
+
+	m.cfg.Providers.Named[key] = updated
+	syncEditedProviderCredentials(m.cfg.Providers, key, updated)
+
+	if err := m.saveConfigToDisk(); err != nil {
+		m.cfg.Providers.Named[key] = previous
+		if typedSlot != nil {
+			*typedSlot = typedBefore
+		}
+		return err
+	}
+	return nil
 }
 
 // ensureProvider creates or updates the named provider for a row-driven

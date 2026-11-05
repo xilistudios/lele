@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -378,4 +381,104 @@ func TestProviderEditHintsIgnoreStaleConnectState(t *testing.T) {
 	if strings.Contains(frame, i18n.T("tui.connectModelStepsHint")) {
 		t.Errorf("edit form frame shows the /connect model-steps hint:\n%s", frame)
 	}
+}
+
+// TestUpdateProviderRollsBackWhenSaveFails covers the failed-save contract: the
+// edit is applied in memory before it is persisted, so a save error has to put
+// BOTH copies (named + typed mirror) back. Otherwise the rejected edit would
+// survive in m.cfg — the error keeps the user in the form, and any later save
+// from another flow would persist a change this one already reported as failed.
+func TestUpdateProviderRollsBackWhenSaveFails(t *testing.T) {
+	m := newProviderHelpersTestModel(t)
+	// A regular file where the config directory should be: MkdirAll fails, so
+	// SaveConfig cannot write and updateProvider must roll back.
+	blocked := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
+		t.Fatalf("preparing the blocked config dir: %v", err)
+	}
+	t.Setenv("LELE_CONFIG_DIR", filepath.Join(blocked, "cfg"))
+
+	before, ok := m.cfg.Providers.Named["myprov"]
+	if !ok {
+		t.Fatal(`provider "myprov" missing from the fixture`)
+	}
+	typedBefore := m.cfg.Providers.OpenAI.ProviderConfig
+
+	err := m.updateProvider("myprov", "anthropic", "sk-brand-new-key", "https://new.example/v1")
+	if err == nil {
+		t.Fatal("updateProvider must fail when the config cannot be saved")
+	}
+
+	after := m.cfg.Providers.Named["myprov"]
+	if !reflect.DeepEqual(after, before) {
+		t.Errorf("named entry not rolled back:\n got %+v\nwant %+v", after, before)
+	}
+	if got := m.cfg.Providers.OpenAI.ProviderConfig; !reflect.DeepEqual(got, typedBefore) {
+		t.Errorf("typed mirror not rolled back: got %+v, want %+v", got, typedBefore)
+	}
+}
+
+// TestUpdateProviderMirrorPreservesTypedCredentials covers the mirror rules: the
+// typed field is a derived copy of the named entry, but it can legitimately be
+// the ONLY carrier of a value (an env override is applied after the JSON is
+// decoded), so a field the edit left blank must not blank it — while a value
+// the named entry does have is still mirrored in for type-first selection.
+func TestUpdateProviderMirrorPreservesTypedCredentials(t *testing.T) {
+	t.Run("blank edit keeps the env-provided typed key", func(t *testing.T) {
+		m := newProviderHelpersTestModel(t)
+		m.cfg.Providers.Named["openai"] = config.NamedProviderConfig{
+			Type:           "openai",
+			ProviderConfig: config.ProviderConfig{APIBase: "https://api.example.com/v1"},
+		}
+		// Simulates LELE_PROVIDERS_OPENAI_API_KEY, applied by env.Parse after
+		// the JSON is decoded.
+		m.cfg.Providers.OpenAI.ProviderConfig = config.ProviderConfig{APIKey: "sk-from-env"}
+
+		if err := m.updateProvider("openai", "openai", "", "https://new.example/v1"); err != nil {
+			t.Fatalf("updateProvider: %v", err)
+		}
+
+		if got, want := m.cfg.Providers.OpenAI.APIKey, "sk-from-env"; got != want {
+			t.Errorf("typed APIKey = %q, want the env value %q preserved", got, want)
+		}
+		if got, want := m.cfg.Providers.OpenAI.APIBase, "https://new.example/v1"; got != want {
+			t.Errorf("typed APIBase = %q, want the edited base %q", got, want)
+		}
+	})
+
+	t.Run("named credentials still reach an empty typed copy", func(t *testing.T) {
+		m := newProviderHelpersTestModel(t)
+		m.cfg.Providers.Named["openai"] = config.NamedProviderConfig{
+			Type: "openai",
+			ProviderConfig: config.ProviderConfig{
+				APIKey:  "sk-only-in-named",
+				APIBase: "https://api.example.com/v1",
+			},
+		}
+
+		if err := m.updateProvider("openai", "openai", "", ""); err != nil {
+			t.Fatalf("updateProvider: %v", err)
+		}
+
+		if got, want := m.cfg.Providers.OpenAI.APIKey, "sk-only-in-named"; got != want {
+			t.Errorf("typed APIKey = %q, want it mirrored from the named entry (%q)", got, want)
+		}
+		if got, want := m.cfg.Providers.OpenAI.APIBase, "https://api.example.com/v1"; got != want {
+			t.Errorf("typed APIBase = %q, want it mirrored from the named entry (%q)", got, want)
+		}
+	})
+
+	t.Run("a typed key replaces the env one", func(t *testing.T) {
+		m := newProviderHelpersTestModel(t)
+		m.cfg.Providers.Named["openai"] = config.NamedProviderConfig{Type: "openai"}
+		m.cfg.Providers.OpenAI.ProviderConfig = config.ProviderConfig{APIKey: "sk-from-env"}
+
+		if err := m.updateProvider("openai", "openai", "sk-typed-by-user", ""); err != nil {
+			t.Fatalf("updateProvider: %v", err)
+		}
+
+		if got, want := m.cfg.Providers.OpenAI.APIKey, "sk-typed-by-user"; got != want {
+			t.Errorf("typed APIKey = %q, want the explicitly typed key %q", got, want)
+		}
+	})
 }
