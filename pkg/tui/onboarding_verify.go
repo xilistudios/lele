@@ -272,17 +272,18 @@ func syncProviderToTypedField(p *config.ProvidersConfig, name string, np config.
 // Providers.Gemini), so a credential that only reached the named copy would be
 // persisted but invisible to the selector.
 //
-// apiKeyEdited / apiBaseEdited report which fields the edit actually wrote;
-// the caller knows, this helper cannot tell "unchanged" from "typed it again".
-func syncEditedProviderCredentials(p *config.ProvidersConfig, name string, np config.NamedProviderConfig, apiKeyEdited, apiBaseEdited bool) {
+// apiKeyChanged / apiBaseChanged report which fields the edit actually CHANGED
+// (blank, or re-submitted with the stored value, both mean "not touched"); the
+// caller knows, this helper cannot tell them apart.
+func syncEditedProviderCredentials(p *config.ProvidersConfig, name string, np config.NamedProviderConfig, apiKeyChanged, apiBaseChanged bool) {
 	slot := typedProviderSlot(p, name)
 	if slot == nil {
 		return
 	}
-	if apiKeyEdited || slot.APIKey == "" {
+	if apiKeyChanged || slot.APIKey == "" {
 		slot.APIKey = np.APIKey
 	}
-	if apiBaseEdited || slot.APIBase == "" {
+	if apiBaseChanged || slot.APIBase == "" {
 		slot.APIBase = np.APIBase
 	}
 }

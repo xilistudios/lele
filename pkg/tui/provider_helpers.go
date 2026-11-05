@@ -115,9 +115,9 @@ func (m *Model) addProvider(name, providerType, apiKey, apiBase string) error {
 // edit, exactly like ensureProvider does for a re-run of /connect (rebuilding
 // the entry would drop the model list).
 //
-// The edited credentials are mirrored into the typed field for the same reason
-// ensureProvider mirrors them (transport selection is TYPE-FIRST), but only the
-// fields this edit owns: see syncEditedProviderCredentials.
+// Only the credentials this edit actually CHANGED are mirrored into the typed
+// field (transport selection is TYPE-FIRST, so ensureProvider mirrors them too):
+// see syncEditedProviderCredentials.
 //
 // A failed save rolls BOTH copies back. The form keeps the user on the error so
 // the typed values can be retried, and ESC then returns to the detail without
@@ -138,16 +138,20 @@ func (m *Model) updateProvider(name, providerType, apiKey, apiBase string) error
 	if typ := strings.ToLower(strings.TrimSpace(providerType)); typ != "" {
 		updated.Type = typ
 	}
-	// Which credentials this edit actually wrote: blank means "keep", and the
-	// mirror needs to tell an edited field from an untouched one (see
-	// syncEditedProviderCredentials).
-	apiKeyEdited := strings.TrimSpace(apiKey) != ""
-	apiBaseEdited := strings.TrimSpace(apiBase) != ""
-	if apiKeyEdited {
-		updated.APIKey = strings.TrimSpace(apiKey)
+	// Which credentials this edit actually CHANGED. Blank means "keep", and a
+	// field submitted with the value already stored (Enter-through over the
+	// pre-filled step) is not a change either — so pressing Enter through the
+	// form cannot overwrite the typed copy, which may be the only carrier of an
+	// env-provided credential (see syncEditedProviderCredentials).
+	k := strings.TrimSpace(apiKey)
+	base := strings.TrimSpace(apiBase)
+	apiKeyChanged := k != "" && k != previous.APIKey
+	apiBaseChanged := base != "" && base != previous.APIBase
+	if apiKeyChanged {
+		updated.APIKey = k
 	}
-	if apiBaseEdited {
-		updated.APIBase = strings.TrimSpace(apiBase)
+	if apiBaseChanged {
+		updated.APIBase = base
 	}
 
 	// Snapshot the typed mirror so a failed save can put it back verbatim
@@ -159,7 +163,7 @@ func (m *Model) updateProvider(name, providerType, apiKey, apiBase string) error
 	}
 
 	m.cfg.Providers.Named[key] = updated
-	syncEditedProviderCredentials(m.cfg.Providers, key, updated, apiKeyEdited, apiBaseEdited)
+	syncEditedProviderCredentials(m.cfg.Providers, key, updated, apiKeyChanged, apiBaseChanged)
 
 	if err := m.saveConfigToDisk(); err != nil {
 		m.cfg.Providers.Named[key] = previous

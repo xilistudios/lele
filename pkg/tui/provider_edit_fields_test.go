@@ -468,6 +468,27 @@ func TestUpdateProviderMirrorPreservesTypedCredentials(t *testing.T) {
 		}
 	})
 
+	t.Run("enter-through over a pre-filled value is not a change", func(t *testing.T) {
+		m := newProviderHelpersTestModel(t)
+		m.cfg.Providers.Named["openai"] = config.NamedProviderConfig{
+			Type:           "openai",
+			ProviderConfig: config.ProviderConfig{APIBase: "https://api.example.com/v1"},
+		}
+		// The env override wins at load time; the named entry keeps the URL the
+		// form shows back to the user.
+		m.cfg.Providers.OpenAI.ProviderConfig = config.ProviderConfig{APIBase: "https://env.example/v1"}
+
+		// Pressing ENTER through the pre-filled base step submits the stored
+		// value — it is not an edit, so the typed copy keeps the env URL.
+		if err := m.updateProvider("openai", "openai", "", "https://api.example.com/v1"); err != nil {
+			t.Fatalf("updateProvider: %v", err)
+		}
+
+		if got, want := m.cfg.Providers.OpenAI.APIBase, "https://env.example/v1"; got != want {
+			t.Errorf("typed APIBase = %q, want the env value %q preserved", got, want)
+		}
+	})
+
 	t.Run("an untouched field keeps a different typed value", func(t *testing.T) {
 		m := newProviderHelpersTestModel(t)
 		m.cfg.Providers.Named["openai"] = config.NamedProviderConfig{
