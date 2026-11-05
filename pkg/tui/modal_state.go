@@ -66,6 +66,7 @@ func (m *Model) resetModal(mode modalType) {
 	m.providerSelectedName = ""
 	m.providerEditMode = false
 	m.providerDetailRows = nil
+	m.providerDetailEditIdx = -1
 	m.providerDetailAddIdx = -1
 	m.providerDetailDelIdx = -1
 	m.providerDeleteKey = ""
@@ -109,7 +110,7 @@ func (m *Model) resetModal(mode modalType) {
 // treated as modal shortcuts.
 func isFormModal(mode modalType, editingField bool) bool {
 	switch mode {
-	case ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret, ModalSkillInstall, ModalAddCommand:
+	case ModalAddProvider, ModalAddModel, ModalEditModel, ModalEditProvider, ModalAddSecret, ModalSkillInstall, ModalAddCommand:
 		return true
 	// The MCP-add wizard (ModalMCPAdd) collects one single-line value per
 	// step in the shared text input, like every other form modal: typing
@@ -148,7 +149,7 @@ func isFormModal(mode modalType, editingField bool) bool {
 // only moving inside the code input.
 func isListModal(mode modalType) bool {
 	switch mode {
-	case ModalNone, ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret, ModalSkillInstall, ModalMCPAuth, ModalMCPAdd, ModalConnectOAuth:
+	case ModalNone, ModalAddProvider, ModalAddModel, ModalEditModel, ModalEditProvider, ModalAddSecret, ModalSkillInstall, ModalMCPAuth, ModalMCPAdd, ModalConnectOAuth:
 		return false
 	case ModalSettings, ModalSettingsAgents, ModalSettingsAgentEdit, ModalSettingsSystem, ModalSettingsSystemEdit, ModalSettingsTUI:
 		return true

@@ -677,6 +677,48 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.closeCatalogPicker()
 			}
 			return m, nil
+		} else if m.modalMode == ModalEditProvider {
+			// Form-based modal: three steps — provider type, API key, API base
+			// URL. Only the type is required: the form cannot show a stored
+			// secret back, so a blank API key / base URL means "keep the stored
+			// value" (see updateProvider).
+			val := strings.TrimSpace(m.textInput.Value())
+			// An empty input still accepts a pre-filled value (the type and the
+			// base URL are seeded from the stored provider).
+			if val == "" && m.formStepIndex < len(m.formValues) && m.formValues[m.formStepIndex] != "" {
+				val = m.formValues[m.formStepIndex]
+			}
+			if m.formStepIndex == 0 && val == "" {
+				m.formError = "Provider type is required"
+				return m, nil
+			}
+			m.formError = ""
+			m.formValues[m.formStepIndex] = val
+			if m.formStepIndex < 2 {
+				// Advance: the next step shows its pre-filled value (empty for
+				// the API key) so it can be edited in place.
+				m.formStepIndex++
+				m.textInput.SetValue(m.formValues[m.formStepIndex])
+				switch m.formStepIndex {
+				case 1:
+					m.textInput.Placeholder = "API Key"
+				case 2:
+					m.textInput.Placeholder = "API Base URL (e.g. https://api.example.com/v1)"
+				}
+				// Audit M2: step 1 collects the key, so the echo mode must be
+				// re-derived BEFORE the next frame paints the widget.
+				m.syncTextInputEcho()
+				return m, nil
+			}
+			// Last step — save in place and land back on the provider detail.
+			if err := m.updateProvider(m.providerSelectedName, m.formValues[0], m.formValues[1], m.formValues[2]); err != nil {
+				m.formError = err.Error()
+				return m, nil // stay in the form; typed values are kept
+			}
+			m.providerFeedback = i18n.T("tui.providerUpdated")
+			m.enterProviderDetail(m.providerSelectedName, "")
+			m.syncTextInputEcho()
+			return m, nil
 		} else if m.modalMode == ModalAddSecret {
 			// Form-based modal: name, value, description, tags, scope
 			val := m.textInput.Value()
@@ -827,7 +869,15 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						// providerDetailList (labels are localized), so info rows
 						// (Type:/API Base:/API Key:) and "---" separators match
 						// neither index and stay inert.
-						if m.modalSelectedIdx == m.providerDetailAddIdx {
+						if m.modalSelectedIdx == m.providerDetailEditIdx {
+							// Provider-level edit: type / API key / API base URL.
+							// The model list is preserved (updateProvider edits the
+							// entry in place), so this is the only path that can fix
+							// a wrong key on a provider that already has models.
+							m.clearProviderDeleteConfirm()
+							m.openProviderEditFlow()
+							return m, nil
+						} else if m.modalSelectedIdx == m.providerDetailAddIdx {
 							// Keep providerSelectedName intact: ModalAddModel's save
 							// path calls addModelToProvider(m.providerSelectedName, ...).
 							m.clearProviderDeleteConfirm()
@@ -1205,6 +1255,15 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncTextInputEcho()
 			return m, nil
 		}
+		if m.modalMode == ModalEditProvider {
+			// Edit-provider form: ESC discards the draft and returns to the
+			// provider detail (the list is rebuilt by enterProviderDetail).
+			provider := m.providerSelectedName
+			m.formError = ""
+			m.enterProviderDetail(provider, "")
+			m.syncTextInputEcho()
+			return m, nil
+		}
 		// Reset provider-in-flow state when leaving AddProvider modal
 		if m.modalMode == ModalAddProvider {
 			// The ESC branch of the provider picker (above) already left the
@@ -1253,6 +1312,14 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "e":
+		// Edit the selected provider's type / API key / API base URL from the
+		// provider detail view. Like the "Edit provider" action row, this keeps
+		// the model list intact (updateProvider edits the entry in place).
+		if m.modalMode == ModalProviderDetail {
+			m.clearProviderDeleteConfirm()
+			m.openProviderEditFlow()
+			return m, m.tickCmd()
+		}
 		// Edit a custom command (list or detail view). Directory-level rows
 		// are refused inside startCommandEdit with a feedback line.
 		if m.modalMode == ModalCommands {

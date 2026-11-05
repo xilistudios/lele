@@ -66,7 +66,8 @@ func newProviderHelpersTestModel(t *testing.T) *Model {
 func TestProviderDetailListRowsAndModelRows(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
-	items, modelRows, addIdx, delIdx := m.providerDetailList("myprov")
+	layout := m.providerDetailList("myprov")
+	items, modelRows, editIdx, addIdx, delIdx := layout.Items, layout.ModelRows, layout.EditIdx, layout.AddIdx, layout.DelIdx
 
 	want := []string{
 		"Type: openai",
@@ -76,6 +77,7 @@ func TestProviderDetailListRowsAndModelRows(t *testing.T) {
 		"  alpha",
 		"  beta",
 		"---",
+		i18n.T("tui.editProviderAction"),
 		i18n.T("tui.addModelAction"),
 		i18n.T("tui.deleteProviderAction"),
 	}
@@ -89,8 +91,11 @@ func TestProviderDetailListRowsAndModelRows(t *testing.T) {
 	}
 
 	// The action-row indices must point at the localized action labels.
-	if addIdx != 7 || delIdx != 8 {
-		t.Errorf("addIdx, delIdx = %d, %d; want 7, 8", addIdx, delIdx)
+	if editIdx != 7 || addIdx != 8 || delIdx != 9 {
+		t.Errorf("editIdx, addIdx, delIdx = %d, %d, %d; want 7, 8, 9", editIdx, addIdx, delIdx)
+	}
+	if editIdx >= 0 && items[editIdx] != i18n.T("tui.editProviderAction") {
+		t.Errorf("items[editIdx] = %q, want %q", items[editIdx], i18n.T("tui.editProviderAction"))
 	}
 	if addIdx >= 0 && items[addIdx] != i18n.T("tui.addModelAction") {
 		t.Errorf("items[addIdx] = %q, want %q", items[addIdx], i18n.T("tui.addModelAction"))
@@ -115,7 +120,7 @@ func TestProviderDetailListRowsAndModelRows(t *testing.T) {
 		}
 	}
 	// Info rows, separators and action rows must NOT be in the map.
-	for _, idx := range []int{0, 1, 2, 3, 6, 7, 8} {
+	for _, idx := range []int{0, 1, 2, 3, 6, 7, 8, 9} {
 		if alias, ok := modelRows[idx]; ok {
 			t.Errorf("modelRows unexpectedly maps index %d (%q) to %q", idx, items[idx], alias)
 		}
@@ -127,9 +132,10 @@ func TestProviderDetailListRowsAndModelRows(t *testing.T) {
 func TestProviderDetailListNoModels(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
-	items, modelRows, addIdx, delIdx := m.providerDetailList("emptyprov")
+	layout := m.providerDetailList("emptyprov")
+	items, modelRows, addIdx, delIdx := layout.Items, layout.ModelRows, layout.AddIdx, layout.DelIdx
 
-	wantTail := []string{"---", "  (no models)", "---", i18n.T("tui.addModelAction"), i18n.T("tui.deleteProviderAction")}
+	wantTail := []string{"---", "  (no models)", "---", i18n.T("tui.editProviderAction"), i18n.T("tui.addModelAction"), i18n.T("tui.deleteProviderAction")}
 	if len(items) != 3+len(wantTail) { // 3 info rows + tail
 		t.Fatalf("items count = %d, want %d: %q", len(items), 3+len(wantTail), items)
 	}
@@ -162,9 +168,10 @@ func TestProviderDetailListNoModels(t *testing.T) {
 func TestProviderDetailListProviderNotFound(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
-	items, modelRows, addIdx, delIdx := m.providerDetailList("missingprov")
+	layout := m.providerDetailList("missingprov")
+	items, modelRows, addIdx, delIdx := layout.Items, layout.ModelRows, layout.AddIdx, layout.DelIdx
 
-	want := []string{"---", "  (no models)", "---", i18n.T("tui.addModelAction"), i18n.T("tui.deleteProviderAction")}
+	want := []string{"---", "  (no models)", "---", i18n.T("tui.editProviderAction"), i18n.T("tui.addModelAction"), i18n.T("tui.deleteProviderAction")}
 	if len(items) != len(want) {
 		t.Fatalf("items count = %d, want %d: %q", len(items), len(want), items)
 	}

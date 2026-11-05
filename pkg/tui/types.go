@@ -178,6 +178,7 @@ const (
 	ModalAddProvider        // form to add a new provider
 	ModalAddModel           // form to add a new model to a provider
 	ModalEditModel          // form to edit an existing model of a provider
+	ModalEditProvider       // form to edit an existing provider (type, API key, API base URL)
 	ModalCron               // list of cron jobs
 	ModalSecrets            // list of keyring secrets
 	ModalAddSecret          // form to add a new secret
@@ -508,8 +509,9 @@ type Model struct {
 	// ModalProviderDetail action-row indices (from providerDetailList) so the
 	// ENTER branch compares indexes instead of localized label strings.
 	// resetModal clears them to -1; enterProviderDetail always sets valid values.
-	providerDetailAddIdx int // item index of the add-model action row (-1 when absent)
-	providerDetailDelIdx int // item index of the delete-provider action row (-1 when absent)
+	providerDetailEditIdx int // item index of the edit-provider action row (-1 when absent)
+	providerDetailAddIdx  int // item index of the add-model action row (-1 when absent)
+	providerDetailDelIdx  int // item index of the delete-provider action row (-1 when absent)
 	// Double-confirm delete state for models: the first "d" arms
 	// providerDeleteKey, the second within providerDeleteConfirmWindow
 	// executes it (mirrors commandsDeleteKey/commandsDeleteArmed).
