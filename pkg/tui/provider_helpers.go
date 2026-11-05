@@ -138,11 +138,16 @@ func (m *Model) updateProvider(name, providerType, apiKey, apiBase string) error
 	if typ := strings.ToLower(strings.TrimSpace(providerType)); typ != "" {
 		updated.Type = typ
 	}
-	if k := strings.TrimSpace(apiKey); k != "" {
-		updated.APIKey = k
+	// Which credentials this edit actually wrote: blank means "keep", and the
+	// mirror needs to tell an edited field from an untouched one (see
+	// syncEditedProviderCredentials).
+	apiKeyEdited := strings.TrimSpace(apiKey) != ""
+	apiBaseEdited := strings.TrimSpace(apiBase) != ""
+	if apiKeyEdited {
+		updated.APIKey = strings.TrimSpace(apiKey)
 	}
-	if base := strings.TrimSpace(apiBase); base != "" {
-		updated.APIBase = base
+	if apiBaseEdited {
+		updated.APIBase = strings.TrimSpace(apiBase)
 	}
 
 	// Snapshot the typed mirror so a failed save can put it back verbatim
@@ -154,7 +159,7 @@ func (m *Model) updateProvider(name, providerType, apiKey, apiBase string) error
 	}
 
 	m.cfg.Providers.Named[key] = updated
-	syncEditedProviderCredentials(m.cfg.Providers, key, updated)
+	syncEditedProviderCredentials(m.cfg.Providers, key, updated, apiKeyEdited, apiBaseEdited)
 
 	if err := m.saveConfigToDisk(); err != nil {
 		m.cfg.Providers.Named[key] = previous

@@ -468,6 +468,32 @@ func TestUpdateProviderMirrorPreservesTypedCredentials(t *testing.T) {
 		}
 	})
 
+	t.Run("an untouched field keeps a different typed value", func(t *testing.T) {
+		m := newProviderHelpersTestModel(t)
+		m.cfg.Providers.Named["openai"] = config.NamedProviderConfig{
+			Type: "openai",
+			ProviderConfig: config.ProviderConfig{
+				APIKey:  "sk-from-json",
+				APIBase: "https://api.example.com/v1",
+			},
+		}
+		// The env override wins at load time; the named entry keeps the older
+		// key from the JSON.
+		m.cfg.Providers.OpenAI.ProviderConfig = config.ProviderConfig{APIKey: "sk-from-env"}
+
+		// Editing ONLY the base URL must not swap the effective key.
+		if err := m.updateProvider("openai", "openai", "", "https://new.example/v1"); err != nil {
+			t.Fatalf("updateProvider: %v", err)
+		}
+
+		if got, want := m.cfg.Providers.OpenAI.APIKey, "sk-from-env"; got != want {
+			t.Errorf("typed APIKey = %q, want the env value %q preserved", got, want)
+		}
+		if got, want := m.cfg.Providers.OpenAI.APIBase, "https://new.example/v1"; got != want {
+			t.Errorf("typed APIBase = %q, want the edited base %q", got, want)
+		}
+	})
+
 	t.Run("a typed key replaces the env one", func(t *testing.T) {
 		m := newProviderHelpersTestModel(t)
 		m.cfg.Providers.Named["openai"] = config.NamedProviderConfig{Type: "openai"}

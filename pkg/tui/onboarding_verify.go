@@ -255,29 +255,34 @@ func syncProviderToTypedField(p *config.ProvidersConfig, name string, np config.
 	}
 }
 
-// syncEditedProviderCredentials mirrors ONLY the two credentials an in-place
-// provider edit may have written (API key and base URL) into the typed field,
-// instead of copying the whole named ProviderConfig like
-// syncProviderToTypedField does.
+// syncEditedProviderCredentials mirrors the credentials an in-place provider
+// edit may have written (API key and base URL) into the typed field, instead of
+// copying the whole named ProviderConfig like syncProviderToTypedField does.
 //
-// The typed field can legitimately be the ONLY carrier of a value: an
-// env:"LELE_PROVIDERS_<NAME>_API_KEY" override is applied after the JSON is
-// decoded, and a hand-written config.json that keeps the provider under
-// providers.<name> can decode into the named entry only — so a field the edit
-// left blank must not blank the typed copy. A value the named entry does have
-// is still mirrored in, which is the whole point of the mirror: transport
+// The typed field can legitimately be the ONLY — or the more authoritative —
+// carrier of a value: an env:"LELE_PROVIDERS_<NAME>_API_KEY" override is applied
+// after the JSON is decoded, and a hand-written config.json that keeps the
+// provider under providers.<name> can decode into the named entry only. So a
+// field the user actually edited wins outright, while an untouched one only
+// FILLS an empty typed copy: an edit that changed the base URL must not swap an
+// env-provided key for the (older) one sitting in the named entry.
+//
+// Filling an empty typed copy is the whole point of the mirror: transport
 // selection is TYPE-FIRST (the Gemini Code Assist pre-check reads
 // Providers.Gemini), so a credential that only reached the named copy would be
 // persisted but invisible to the selector.
-func syncEditedProviderCredentials(p *config.ProvidersConfig, name string, np config.NamedProviderConfig) {
+//
+// apiKeyEdited / apiBaseEdited report which fields the edit actually wrote;
+// the caller knows, this helper cannot tell "unchanged" from "typed it again".
+func syncEditedProviderCredentials(p *config.ProvidersConfig, name string, np config.NamedProviderConfig, apiKeyEdited, apiBaseEdited bool) {
 	slot := typedProviderSlot(p, name)
 	if slot == nil {
 		return
 	}
-	if np.APIKey != "" {
+	if apiKeyEdited || slot.APIKey == "" {
 		slot.APIKey = np.APIKey
 	}
-	if np.APIBase != "" {
+	if apiBaseEdited || slot.APIBase == "" {
 		slot.APIBase = np.APIBase
 	}
 }
