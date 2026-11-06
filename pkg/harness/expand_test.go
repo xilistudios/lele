@@ -43,8 +43,8 @@ func TestExpandArguments(t *testing.T) {
 		{"verbatim", "echo $ARGUMENTS now", "hello   big  world", "echo hello   big  world now"},
 		{"no args", "run $ARGUMENTS", "", "run "},
 		{"positionals", "$1-$2-$3", "a b c", "a-b-c"},
-		{"missing positional empty", "[$1][$3]", "a b", "[a][]"},
-		{"quoted grouping", "[$1][$2]", `'hello world' "x y" plain`, "[hello world][x y]"},
+		{"missing positional empty", "[$1][$3]", "a b", "[a][]\n\nARGUMENTS: a b"},
+		{"quoted grouping", "[$1][$2]", `'hello world' "x y" plain`, "[hello world][x y]\n\nARGUMENTS: 'hello world' \"x y\" plain"},
 		{"escaped double quote", "[$1]", `"say \"hi\""`, "[say \"hi\"]"},
 		{"dollar inside quotes literal", "[$1]", `'$2'`, "[$2]"},
 		{"dollar0 untouched", "$0 $1", "one", "$0 one"},
@@ -63,7 +63,14 @@ func TestExpandArguments(t *testing.T) {
 		{"dollar0 does not suppress append", "zero $0", "x", "zero $0\n\nARGUMENTS: x"},
 		{"dollar10 plus positional opts out", "cost $10 and $1", "x", "cost $10 and x"},
 		{"placeholder suppresses append", "run $ARGUMENTS", "extra", "run extra"},
-		{"positional suppresses append", "run $1", "extra more", "run extra"},
+		// A positional placeholder receives ONE token, so a template that only
+		// references $1 must not swallow the rest of a long free-form argument:
+		// the words it cannot receive are appended (the bug report: "/task
+		// proceed with this error: …" arrived as just "proceed").
+		{"positional without full coverage appends args", "run $1", "extra more", "run extra\n\nARGUMENTS: extra more"},
+		{"all positionals covered suppresses append", "run $1 $2", "a b", "run a b"},
+		{"second positional missing appends args", "run $1 $2", "a b c", "run a b\n\nARGUMENTS: a b c"},
+		{"positional verbatim trailer", "TASK: $1", "proceed with this error: boom", "TASK: proceed\n\nARGUMENTS: proceed with this error: boom"},
 		{"placeholder with no args no trailer", "run $1", "", "run "},
 	}
 	for _, tc := range tests {
