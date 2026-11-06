@@ -258,6 +258,16 @@ func (m *Model) renderFormSteps(steps []string, isReviewStep bool) string {
 
 // renderFormStepHint renders contextual hints for the current form step.
 func (m *Model) renderFormStepHint(isReviewStep bool) string {
+	if m.modalMode == ModalEditProvider {
+		// Both in-place steps are optional: a blank API key / API base URL
+		// keeps the stored value (the key is never pre-filled, see
+		// openProviderEditFlow), so the hint has to say so — otherwise the
+		// blank input reads as "wipe it".
+		if m.formStepIndex == 1 || m.formStepIndex == 2 {
+			return CommentColorStyle.Render("  "+i18n.T("tui.editProviderKeepHint")) + "\n\n"
+		}
+		return ""
+	}
 	if m.modalMode != ModalAddProvider || m.providerSavedInFlow || m.providerTypePicker || m.connectSuccess || isReviewStep {
 		return ""
 	}
@@ -276,6 +286,12 @@ func (m *Model) renderFormStepHint(isReviewStep bool) string {
 
 // renderFormHints renders the bottom hints for the form modal.
 func (m *Model) renderFormHints(isReviewStep bool) string {
+	if m.modalMode == ModalEditProvider {
+		// The edit form is plain next/cancel: it borrows none of the /connect
+		// wording (no model steps to skip, nothing to review), so it must not
+		// inherit a stale providerSavedInFlow from an earlier /connect run.
+		return HelpStyle.Render("  " + i18n.T("tui.formEnter"))
+	}
 	if m.addModelCatalogActive && m.isModelNameFormStep() && !isReviewStep {
 		return HelpStyle.Render("  " + i18n.T("tui.catalogPickerHint"))
 	}
@@ -340,6 +356,11 @@ func (m *Model) formStepNames() []string {
 			nameLabel += " (thinking: " + m.addModelCatalogThink + ")"
 		}
 		return []string{"Model alias", nameLabel, "Context window", "Max tokens", "Vision (yes/no)", "Think system"}
+	case ModalEditProvider:
+		// Only the three identity fields are editable: renaming a provider
+		// would have to re-point every agent model reference, so the name is
+		// shown in the detail view and never rewritten here.
+		return []string{"Provider type", "API Key", "API Base URL"}
 	case ModalAddCommand:
 		return []string{
 			i18n.T("tui.commands.fieldName"),

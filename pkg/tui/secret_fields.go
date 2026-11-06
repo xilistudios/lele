@@ -32,6 +32,9 @@ func (m *Model) isSecretInputStep() bool {
 	switch m.modalMode {
 	case ModalAddProvider:
 		return m.formStepIndex == 2
+	case ModalEditProvider:
+		// Step 1 of the provider edit form rewrites the API key.
+		return m.formStepIndex == 1
 	case ModalAddSecret:
 		return m.formStepIndex == 1
 	case ModalMCPAdd:
@@ -46,6 +49,8 @@ func (m *Model) isSecretFormValue(stepIdx int) bool {
 	switch m.modalMode {
 	case ModalAddProvider:
 		return stepIdx == 2
+	case ModalEditProvider:
+		return stepIdx == 1
 	case ModalAddSecret:
 		return stepIdx == 1
 	}

@@ -2,6 +2,7 @@ package i18n
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"golang.org/x/text/language"
@@ -748,6 +749,53 @@ func TestKeepAwakeKeysExistInAllBuiltinLanguages(t *testing.T) {
 			if value == "" {
 				t.Errorf("key %s is empty in %s.json", key, lang)
 			}
+		}
+	}
+}
+
+// TestProviderEditKeysExistInAllBuiltinLanguages guards the provider edit
+// surface (ModalEditProvider): the form title, the "Edit provider" action row
+// of the detail view, the keep-blank hint + placeholder and the save
+// confirmation. TestAllKeysExist only checks its own hardcoded list, and T()
+// would mask a key deleted from a single locale via the default-locale
+// fallback, so presence is asserted against the raw map of each builtin locale
+// file — the same protection TestKeepAwakeKeys... gives the keep-awake keys.
+func TestProviderEditKeysExistInAllBuiltinLanguages(t *testing.T) {
+	keys := []string{
+		"tui.editProvider",
+		"tui.editProviderAction",
+		"tui.editProviderKeepHint",
+		"tui.providerUpdated",
+		// The detail hint line must advertise the new "e" shortcut.
+		"tui.providerDetailHints",
+	}
+
+	Init()
+	langs := []string{"en", "es", "pt"}
+	prev := GetLanguage()
+	t.Cleanup(func() { SetLanguage(prev) })
+
+	for _, lang := range langs {
+		tag, err := language.Parse(lang)
+		if err != nil {
+			t.Fatalf("language.Parse(%q): %v", lang, err)
+		}
+		raw, err := loadLocale(localeFiles[tag])
+		if err != nil {
+			t.Fatalf("loadLocale(%s): %v", lang, err)
+		}
+		for _, key := range keys {
+			value, exists := raw[key]
+			if !exists {
+				t.Errorf("key %s missing from %s.json (T() would mask it via the default-locale fallback)", key, lang)
+				continue
+			}
+			if value == "" {
+				t.Errorf("key %s is empty in %s.json", key, lang)
+			}
+		}
+		if hints := raw["tui.providerDetailHints"]; !strings.Contains(hints, "E:") {
+			t.Errorf("tui.providerDetailHints in %s does not advertise the edit shortcut: %q", lang, hints)
 		}
 	}
 }

@@ -41,6 +41,8 @@ func (m *Model) modalTitleFor(mode modalType) string {
 		return i18n.T("tui.addModel")
 	case ModalEditModel:
 		return i18n.T("tui.editModel")
+	case ModalEditProvider:
+		return i18n.T("tui.editProvider")
 	case ModalAddSecret:
 		return i18n.T("tui.addSecret")
 	case ModalSkills:
@@ -111,7 +113,7 @@ func (m *Model) renderActiveModal() string {
 	title := m.modalTitleFor(m.modalMode)
 
 	switch m.modalMode {
-	case ModalAddProvider, ModalAddModel, ModalEditModel, ModalAddSecret:
+	case ModalAddProvider, ModalAddModel, ModalEditModel, ModalEditProvider, ModalAddSecret:
 		return m.renderFormModal(title, m.formStepNames())
 	case ModalSecrets:
 		return m.renderSecretsList(title)

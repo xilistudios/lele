@@ -294,6 +294,24 @@ The `openai` provider family also supports `web_search`.
 
 `headers` is optional: extra HTTP headers sent on that provider's inference calls — see **Custom headers** below.
 
+### Editing a provider from the TUI
+
+`/providers` → ENTER on a provider opens its detail view, where **Edit provider**
+(the action row, or the `e` shortcut) rewrites the three identity fields of the
+provider without touching the rest:
+
+- **Provider type** — pre-filled with the stored `type`; required.
+- **API Key** — always starts BLANK (a stored secret is never rendered back into
+  the form, not even masked); leaving it blank keeps the stored key.
+- **API Base URL** — pre-filled with the stored `api_base`; blank keeps it.
+
+The entry is updated in place, so `models`, `proxy`, `headers`, `connect_mode`,
+`auth_method` and every other field survive the edit — editing a provider never
+drops its model list. The provider *name* is not editable there: renaming would
+have to re-point every agent model reference, so do it in `config.json` (or add
+the provider under the new name and delete the old one). ESC discards the draft
+and returns to the detail view.
+
 ### Custom headers
 
 `providers.<name>.headers` is an optional string→string map of extra HTTP

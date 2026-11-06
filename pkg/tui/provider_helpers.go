@@ -99,23 +99,80 @@ func (m *Model) addProvider(name, providerType, apiKey, apiBase string) error {
 	return m.saveConfigToDisk()
 }
 
-// updateProvider updates an existing provider's API key and base URL.
-func (m *Model) updateProvider(name, apiKey, apiBase string) error {
+// updateProvider edits an existing provider — its type, API key and API base
+// URL — and persists to disk. It is the save point of the ModalEditProvider
+// form (opened from the provider detail view with "e" or the "Edit provider"
+// action row).
+//
+// Blank means "keep": the form is a plain text widget, so the stored secret is
+// never rendered back into it (see secret_fields.go). An empty API key or API
+// base URL therefore leaves the stored value untouched instead of wiping it,
+// and an empty type keeps the stored one — a provider can never lose its
+// identity because the user pressed Enter through a step.
+//
+// The entry is updated IN PLACE: Models, Proxy, WebSearch, ConnectMode,
+// Temperature and every other field the form does not ask about survive an
+// edit, exactly like ensureProvider does for a re-run of /connect (rebuilding
+// the entry would drop the model list).
+//
+// Only the credentials this edit actually CHANGED are mirrored into the typed
+// field (transport selection is TYPE-FIRST, so ensureProvider mirrors them too):
+// see syncEditedProviderCredentials.
+//
+// A failed save rolls BOTH copies back. The form keeps the user on the error so
+// the typed values can be retried, and ESC then returns to the detail without
+// re-reading the file — leaving the rejected edit in memory would let any later
+// save from another flow persist a change this one already reported as failed.
+func (m *Model) updateProvider(name, providerType, apiKey, apiBase string) error {
 	if m.cfg == nil || m.cfg.Providers == nil || m.cfg.Providers.Named == nil {
 		return fmt.Errorf("no providers configured")
 	}
 
 	key := strings.ToLower(strings.TrimSpace(name))
-	provider, ok := m.cfg.Providers.Named[key]
+	previous, ok := m.cfg.Providers.Named[key]
 	if !ok {
 		return fmt.Errorf("provider %q not found", key)
 	}
 
-	provider.APIKey = apiKey
-	provider.APIBase = apiBase
-	m.cfg.Providers.Named[key] = provider
+	updated := previous
+	if typ := strings.ToLower(strings.TrimSpace(providerType)); typ != "" {
+		updated.Type = typ
+	}
+	// Which credentials this edit actually CHANGED. Blank means "keep", and a
+	// field submitted with the value already stored (Enter-through over the
+	// pre-filled step) is not a change either — so pressing Enter through the
+	// form cannot overwrite the typed copy, which may be the only carrier of an
+	// env-provided credential (see syncEditedProviderCredentials).
+	k := strings.TrimSpace(apiKey)
+	base := strings.TrimSpace(apiBase)
+	apiKeyChanged := k != "" && k != previous.APIKey
+	apiBaseChanged := base != "" && base != previous.APIBase
+	if apiKeyChanged {
+		updated.APIKey = k
+	}
+	if apiBaseChanged {
+		updated.APIBase = base
+	}
 
-	return m.saveConfigToDisk()
+	// Snapshot the typed mirror so a failed save can put it back verbatim
+	// (re-deriving it from `previous` would clobber an env-provided value).
+	typedSlot := typedProviderSlot(m.cfg.Providers, key)
+	var typedBefore config.ProviderConfig
+	if typedSlot != nil {
+		typedBefore = *typedSlot
+	}
+
+	m.cfg.Providers.Named[key] = updated
+	syncEditedProviderCredentials(m.cfg.Providers, key, updated, apiKeyChanged, apiBaseChanged)
+
+	if err := m.saveConfigToDisk(); err != nil {
+		m.cfg.Providers.Named[key] = previous
+		if typedSlot != nil {
+			*typedSlot = typedBefore
+		}
+		return err
+	}
+	return nil
 }
 
 // ensureProvider creates or updates the named provider for a row-driven
@@ -323,24 +380,42 @@ func (m *Model) deleteModelFromProvider(providerName, alias string) error {
 // the two flows must be able to evolve independently.
 const providerDeleteConfirmWindow = 5 * time.Second
 
+// providerDetailLayout is the rendered provider detail view (ModalProviderDetail)
+// plus the row→action mapping its key handlers need: ModelRows resolves a
+// selected model row back to its alias, and the three indices are the action
+// rows (edit provider / add model / delete provider), -1 when absent. The row
+// labels are localized, so callers must compare INDEXES, never label strings.
+type providerDetailLayout struct {
+	Items     []string
+	ModelRows map[int]string
+	EditIdx   int
+	AddIdx    int
+	DelIdx    int
+}
+
 // providerDetailList builds the item list for the ModalProviderDetail view:
 // three provider info rows when the provider is found ("Type: %s",
 // "API Base: %s", "API Key: <mask or (not set)>"), a "---" separator, one row
 // per model alias prefixed with exactly two spaces (or the "  (no models)"
 // placeholder when the provider has no models), another "---", and the
-// localized tui.addModelAction / tui.deleteProviderAction action rows. The
-// content is byte-identical to the previously inlined blocks in
-// handlers_modal.go, except the two action rows are now localized.
+// localized editProviderAction / addModelAction / deleteProviderAction action
+// rows. The content is byte-identical to the previously inlined blocks in
+// handlers_modal.go, except the action rows are now localized.
 //
-// modelRows maps the item index of every model row to its (trimmed) model
+// ModelRows maps the item index of every model row to its (trimmed) model
 // alias so callers can resolve a selected row back to a model without
 // re-parsing the label; the placeholder, separators and action rows are not
-// part of the map. addIdx / delIdx are the item indices of the two action
-// rows (-1 when absent — they are always appended, so in practice always
-// valid), so callers compare indexes instead of fragile label strings.
-func (m *Model) providerDetailList(providerName string) (items []string, modelRows map[int]string, addIdx, delIdx int) {
-	modelRows = make(map[int]string)
-	addIdx, delIdx = -1, -1
+// part of the map. The Edit/Add/Del indices are the item indices of the three
+// action rows (-1 when absent — they are always appended, so in practice
+// always valid), so callers compare indexes instead of fragile label strings.
+func (m *Model) providerDetailList(providerName string) providerDetailLayout {
+	layout := providerDetailLayout{
+		ModelRows: make(map[int]string),
+		EditIdx:   -1,
+		AddIdx:    -1,
+		DelIdx:    -1,
+	}
+	var items []string
 
 	// Show provider info (skipped when the provider is not found).
 	if cfg := m.configSource(); cfg != nil && cfg.Providers != nil {
@@ -360,7 +435,7 @@ func (m *Model) providerDetailList(providerName string) (items []string, modelRo
 	// List models.
 	models := m.listProviderModels(providerName)
 	for _, alias := range models {
-		modelRows[len(items)] = strings.TrimSpace(alias)
+		layout.ModelRows[len(items)] = strings.TrimSpace(alias)
 		items = append(items, fmt.Sprintf("  %s", alias))
 	}
 	if len(models) == 0 {
@@ -368,11 +443,14 @@ func (m *Model) providerDetailList(providerName string) (items []string, modelRo
 	}
 
 	items = append(items, "---")
-	addIdx = len(items)
+	layout.EditIdx = len(items)
+	items = append(items, i18n.T("tui.editProviderAction"))
+	layout.AddIdx = len(items)
 	items = append(items, i18n.T("tui.addModelAction"))
-	delIdx = len(items)
+	layout.DelIdx = len(items)
 	items = append(items, i18n.T("tui.deleteProviderAction"))
-	return items, modelRows, addIdx, delIdx
+	layout.Items = items
+	return layout
 }
 
 // requestProviderModelDelete arms the double-press confirmation for deleting
@@ -633,9 +711,14 @@ func (m *Model) modelSelectorOptions(currentValue string) (labels, values []stri
 // edit-model save/ESC paths so the user always lands back on the detail with
 // the edited row highlighted, and by any future navigation into the detail.
 func (m *Model) enterProviderDetail(providerName, focusAlias string) {
+	layout := m.providerDetailList(providerName)
 	m.modalMode = ModalProviderDetail
 	m.providerSelectedName = providerName
-	m.modalItems, m.providerDetailRows, m.providerDetailAddIdx, m.providerDetailDelIdx = m.providerDetailList(providerName)
+	m.modalItems = layout.Items
+	m.providerDetailRows = layout.ModelRows
+	m.providerDetailEditIdx = layout.EditIdx
+	m.providerDetailAddIdx = layout.AddIdx
+	m.providerDetailDelIdx = layout.DelIdx
 	m.modalSelectedIdx = 0
 	for idx, alias := range m.providerDetailRows {
 		if alias == focusAlias {
@@ -644,6 +727,49 @@ func (m *Model) enterProviderDetail(providerName, focusAlias string) {
 		}
 	}
 	m.modalScrollOffset = 0
+}
+
+// openProviderEditFlow opens the ModalEditProvider form for the provider
+// currently selected in the detail view (m.providerSelectedName). The form has
+// three steps — type, API key, API base URL — and starts with the STORED type
+// and API base pre-filled so Enter-through keeps them.
+//
+// The API key step is deliberately left BLANK: the form is a plain text widget
+// and the stored secret must never be rendered back into it (see
+// secret_fields.go), so blank means "keep the stored key" — the same rule
+// updateProvider applies. When the provider cannot be resolved the form is NOT
+// opened: a message is staged on providerFeedback (rendered under the detail
+// list) and the caller stays where it is. It reports whether the form opened.
+func (m *Model) openProviderEditFlow() bool {
+	provider := m.providerSelectedName
+	cfg := m.configSource()
+	if cfg == nil || cfg.Providers == nil || strings.TrimSpace(provider) == "" {
+		m.providerFeedback = fmt.Sprintf("provider %q not found", provider)
+		return false
+	}
+	named, ok := cfg.Providers.GetNamed(provider)
+	if !ok {
+		m.providerFeedback = fmt.Sprintf("provider %q not found", strings.ToLower(strings.TrimSpace(provider)))
+		return false
+	}
+
+	m.resetModal(ModalEditProvider)
+	// resetModal clears providerSelectedName (and nils providerDetailRows — the
+	// list is rebuilt on the way back via enterProviderDetail); restore the
+	// provider this edit flow operates on.
+	m.providerSelectedName = provider
+	m.formStepIndex = 0
+	m.formValues = []string{named.Type, "", named.APIBase}
+	m.formError = ""
+	m.formConfirmMode = false
+	// The edit form reuses none of the /connect bookkeeping: clear the flag a
+	// previous connect run may have left behind so the hints stay honest.
+	m.providerSavedInFlow = false
+
+	m.textInput.SetValue(named.Type)
+	m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
+	m.syncTextInputEcho()
+	return true
 }
 
 // openModelEditFlow opens the ModalEditModel form pre-filled with the stored
