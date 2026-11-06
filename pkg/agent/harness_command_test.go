@@ -121,14 +121,55 @@ func TestHarnessCommand_ArgsVerbatim(t *testing.T) {
 	}
 	consumeCommandApplied(t, al.bus)
 
-	// A template WITH a placeholder must not get the trailer, even when the
-	// placeholder only consumes part of the arguments ($1 here).
+	// A template whose positional placeholders cannot receive every typed word
+	// still forwards the rest: dropping "second" here is exactly the bug where
+	// "/task proceed with this error: …" reached the model as "proceed".
 	msg = bus.InboundMessage{Channel: "native", ChatID: "c", Content: "/quoted first second"}
 	if !mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
 		t.Fatal("expected /quoted to apply")
 	}
-	if msg.Content != "first" {
-		t.Errorf("placeholder content = %q, want %q", msg.Content, "first")
+	if want := "first\n\n" + harness.ArgumentsLabel + " first second"; msg.Content != want {
+		t.Errorf("placeholder content = %q, want %q", msg.Content, want)
+	}
+	if got := msg.Metadata["harness_args"]; got != "first second" {
+		t.Errorf("harness_args = %q, want %q", got, "first second")
+	}
+}
+
+// TestHarnessCommand_PositionalKeepsRestOfArguments is the regression pin for
+// the "only the first word is sent" report: a custom command whose template
+// references a positional ($1) used to receive only the FIRST token of a long
+// free-form argument, so "/task proceed with this error: boom" reached the
+// model as "TASK: proceed" and it ignored everything after it. The words the
+// positional cannot receive must come along as the ARGUMENTS: trailer.
+func TestHarnessCommand_PositionalKeepsRestOfArguments(t *testing.T) {
+	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
+		"task": {Description: "task runner", Template: "TASK: $1"},
+	})
+	mp := newMessageProcessor(al)
+
+	const typed = "proceed with this error: boom"
+	msg := bus.InboundMessage{Channel: "native", ChatID: "c", Content: "/task " + typed}
+	if !mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
+		t.Fatal("expected applyHarnessCommand to handle /task")
+	}
+
+	want := "TASK: proceed\n\n" + harness.ArgumentsLabel + " " + typed
+	if msg.Content != want {
+		t.Errorf("content = %q, want %q", msg.Content, want)
+	}
+	if got := msg.Metadata["harness_args"]; got != typed {
+		t.Errorf("harness_args = %q, want %q", got, typed)
+	}
+	// The one-word case must stay byte-identical: no trailer when the
+	// positional already received everything the user typed.
+	consumeCommandApplied(t, al.bus)
+	msg = bus.InboundMessage{Channel: "native", ChatID: "c", Content: "/task short"}
+	if !mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
+		t.Fatal("expected applyHarnessCommand to handle /task")
+	}
+	if msg.Content != "TASK: short" {
+		t.Errorf("single-token content = %q, want %q", msg.Content, "TASK: short")
 	}
 }
 
