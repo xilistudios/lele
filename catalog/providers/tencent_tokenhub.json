@@ -5,6 +5,18 @@
   "api_base": "https://tokenhub.tencentmaas.com/v1",
   "models": [
     {
+      "id": "hy4",
+      "name": "Hy4",
+      "context_window": 1048576,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "hy3",
       "name": "Hy3",
       "context_window": 256000,

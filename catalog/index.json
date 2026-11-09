@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-11-02T15:44:21Z",
+  "updated_at": "2026-11-09T16:11:25Z",
   "source": "models.dev",
   "providers": {
     "alibaba": {
@@ -81,7 +81,7 @@
       "type": "openai",
       "api_base": "https://llm.chutes.ai/v1",
       "file": "providers/chutes.json",
-      "model_count": 17
+      "model_count": 18
     },
     "deepseek": {
       "id": "deepseek",
@@ -241,7 +241,7 @@
       "type": "openai",
       "api_base": "https://ollama.com/v1",
       "file": "providers/ollama_cloud.json",
-      "model_count": 25
+      "model_count": 26
     },
     "openai": {
       "id": "openai",
@@ -321,7 +321,7 @@
       "type": "openai",
       "api_base": "https://tokenhub.tencentmaas.com/v1",
       "file": "providers/tencent_tokenhub.json",
-      "model_count": 3
+      "model_count": 4
     },
     "together": {
       "id": "together",
@@ -329,7 +329,7 @@
       "type": "openai",
       "api_base": "https://api.together.xyz/v1",
       "file": "providers/together.json",
-      "model_count": 15
+      "model_count": 16
     },
     "vercel": {
       "id": "vercel",
