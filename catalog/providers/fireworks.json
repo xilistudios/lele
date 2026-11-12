@@ -124,6 +124,20 @@
       "tool_call": true
     },
     {
+      "id": "accounts/fireworks/models/kimi-k3p1-pro",
+      "name": "Kimi K3.1 Pro",
+      "context_window": 1048576,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "accounts/fireworks/models/muse-spark-open",
       "name": "Muse Spark Open",
       "context_window": 1048576,
@@ -153,6 +167,19 @@
     {
       "id": "accounts/fireworks/routers/deepseek-v4p1-flash-1017-spot",
       "name": "DeepSeek V4.1 Flash 1017 Spot",
+      "context_window": 1000000,
+      "max_output": 384000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "accounts/fireworks/routers/deepseek-v4p1-flash-1017-ultrafast",
+      "name": "DeepSeek V4.1 Flash 1017 Ultra-fast",
       "context_window": 1000000,
       "max_output": 384000,
       "vision": true,
@@ -273,30 +300,6 @@
     {
       "id": "accounts/fireworks/routers/glm-5p3-fast",
       "name": "GLM 5.3 Fast",
-      "context_window": 1048572,
-      "max_output": 262144,
-      "thinking_levels": [
-        "low",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "accounts/fireworks/routers/glm-5p3-spot",
-      "name": "GLM 5.3 Spot",
-      "context_window": 1048573,
-      "max_output": 262144,
-      "thinking_levels": [
-        "low",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "accounts/fireworks/routers/glm-fast-latest",
-      "name": "GLM 5.3 Fast (Latest)",
       "context_window": 1048572,
       "max_output": 262144,
       "thinking_levels": [

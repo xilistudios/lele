@@ -161,6 +161,10 @@
       "name": "DeepSeek V4.1 Flash 1017"
     },
     {
+      "id": "tencent/Hy4",
+      "name": "Hy4"
+    },
+    {
       "id": "zai-org/GLM-5.2-Fast",
       "name": "GLM 5.2 Fast"
     },

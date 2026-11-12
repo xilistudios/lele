@@ -129,6 +129,20 @@
       "tool_call": true
     },
     {
+      "id": "crouton-alpha-free",
+      "name": "Crouton Alpha Free",
+      "context_window": 1048576,
+      "max_output": 270000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "deepseek-v4.1-flash",
       "name": "DeepSeek V4.1 Flash",
       "context_window": 1000000,
@@ -183,6 +197,18 @@
       "tool_call": true
     },
     {
+      "id": "hy4",
+      "name": "Hy4",
+      "context_window": 1048576,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "kimi-k3",
       "name": "Kimi K3",
       "context_window": 1048576,
@@ -202,6 +228,20 @@
       "vision": true,
       "thinking_levels": [
         "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "longcat-2.5-free",
+      "name": "LongCat 2.5 Free",
+      "context_window": 1000000,
+      "max_output": 262144,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
         "high"
       ],
       "reasoning": true,
@@ -306,7 +346,7 @@
     },
     {
       "id": "deepseek-v4-pro",
-      "name": "DeepSeek V4 Pro (New)",
+      "name": "DeepSeek V4 Pro",
       "context_window": 1000000,
       "max_output": 384000,
       "thinking_levels": [
@@ -356,45 +396,6 @@
       "context_window": 1024000,
       "max_output": 64000,
       "thinking_levels": [
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "iceman-contributor-free",
-      "name": "Iceman Contributor Free",
-      "context_window": 262144,
-      "max_output": 131072,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "longcat-2.0",
-      "name": "LongCat-2.0",
-      "context_window": 1000000,
-      "max_output": 131072,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "mimo-v2.5-pro",
-      "name": "MiMo V2.5 Pro",
-      "context_window": 1048576,
-      "max_output": 128000,
-      "thinking_levels": [
-        "low",
-        "medium",
         "high"
       ],
       "reasoning": true,
