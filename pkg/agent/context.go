@@ -83,6 +83,15 @@ type ContextBuilder struct {
 	// after construction and prompt builders read it concurrently.
 	folderResolver func(sessionKey string) string
 	folderMu       sync.RWMutex
+
+	// subagentLedgerResolver maps a session key to the rendered "## Subagent
+	// Tasks" digest for that session. When set, the digest is appended to the
+	// session's system prompt on every turn, which is what makes the subagent
+	// ledger survive context compaction: the system prompt is rebuilt per turn
+	// and is never persisted nor summarized. Guarded by ledgerMu for the same
+	// reason as folderMu — the loop wires it after construction.
+	subagentLedgerResolver func(sessionKey string) string
+	ledgerMu               sync.RWMutex
 }
 
 const summaryMessageHeader = "## Summary of Previous Conversation\n\n"
@@ -436,16 +445,50 @@ func (cb *ContextBuilder) resolveFolder(sessionKey string) string {
 	return resolver(sessionKey)
 }
 
+// SetSubagentLedgerResolver wires a function that maps a session key to the
+// rendered subagent-ledger digest for that session. Passing nil disables the
+// section, which keeps the prompt byte-identical for sessions that never spawn
+// subagents. Mirrors SetFolderResolver.
+func (cb *ContextBuilder) SetSubagentLedgerResolver(fn func(sessionKey string) string) {
+	cb.ledgerMu.Lock()
+	defer cb.ledgerMu.Unlock()
+	cb.subagentLedgerResolver = fn
+}
+
+// resolveSubagentLedger reads the ledger resolver under the guard. Returns ""
+// when no resolver is wired or the session has no subagent tasks.
+func (cb *ContextBuilder) resolveSubagentLedger(sessionKey string) string {
+	cb.ledgerMu.RLock()
+	resolver := cb.subagentLedgerResolver
+	cb.ledgerMu.RUnlock()
+	if resolver == nil {
+		return ""
+	}
+	return resolver(sessionKey)
+}
+
 // BuildSystemPromptForSessionWithFolder returns the session's system prompt
-// with the "## Selected Folder" section appended when the user selected a
-// folder for the session. It extends BuildSystemPromptForSession (harness
-// context included) so the turn prompt and every token estimation agree.
+// with the "## Selected Folder" and "## Subagent Tasks" sections appended when
+// they apply: the folder the user selected for the session, and the digest of
+// the subagent tasks spawned from it. It extends BuildSystemPromptForSession
+// (harness context included) so the turn prompt and every token estimation
+// agree.
+//
+// Both sections are rendered fresh on every call, never cached: the ledger
+// section has to change when the ledger changes, and the folder section has to
+// change when the user picks another folder. They are appended at the END so
+// the static prefix of the prompt stays byte-identical across turns
+// (prompt-cache friendly), and a session with neither gets exactly the prompt
+// BuildSystemPromptForSession returns.
 func (cb *ContextBuilder) BuildSystemPromptForSessionWithFolder(sessionKey, channel string) string {
 	prompt := cb.BuildSystemPromptForSession(sessionKey, channel)
 	if folder := cb.resolveFolder(sessionKey); folder != "" {
 		if folderCtx := lelecontext.BuildFolderContext(folder); folderCtx != "" {
 			prompt = prompt + "\n\n---\n\n" + folderCtx
 		}
+	}
+	if ledger := cb.resolveSubagentLedger(sessionKey); ledger != "" {
+		prompt = prompt + "\n\n---\n\n" + ledger
 	}
 	return prompt
 }

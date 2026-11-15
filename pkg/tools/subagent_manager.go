@@ -17,42 +17,49 @@ import (
 )
 
 type SubagentManager struct {
-	tasks                      map[string]*SubagentTask
-	cancels                    map[string]context.CancelFunc
-	mu                         sync.RWMutex
-	provider                   providers.LLMProvider
-	defaultModel               string
-	bus                        *bus.MessageBus
-	workspace                  string
-	tools                      *ToolRegistry
-	getAgentContext            func(agentID string) AgentContextInfo
-	modelOverrideResolver      func(model string) (providers.LLMProvider, string, int, error) // resolves a per-task model override to (provider, model, contextWindow, error)
-	visionChecker              func(model string) bool                                        // reports whether a model supports vision
-	videoChecker               func(model string) bool                                        // reports whether a model supports native video
-	maxIterations              int
-	maxTokens                  int
-	temperature                float64
-	hasMaxTokens               bool
-	hasTemperature             bool
-	thinkingLevel              string        // manager-default reasoning level (parent's resolved config level); "" = no opinion, see SetThinkingLevel
-	timeout                    time.Duration // 0 means no timeout
-	retentionPeriod            time.Duration // how long to keep terminal tasks before cleanup (0 = no cleanup)
-	retentionMu                sync.Mutex    // guards the sweeper fields below; never sm.mu — the sweeper takes sm.mu itself
-	retentionExited            chan struct{} // closed by the sweeper goroutine when it returns (nil = never started)
-	retentionStopCh            chan struct{} // closed by the stopper to ask the sweeper to return (nil = never started)
-	retentionStopOnce          *sync.Once    // makes closing retentionStopCh idempotent across stopper callers
-	retentionStopFn            func()        // idempotent stop shared by StartRetentionCleanup callers and StopRetentionCleanup
-	retentionDetached          atomic.Bool   // set when a bounded stop gave up on the sweeper (see StopRetentionCleanupWithin)
-	nextID                     int
-	sessionRecorder            SessionRecorder
-	sessionKeyCallback         func(sessionKey, agentID string)                          // called when subagent session key is created
-	registerSessionCancel      func(sessionKey string, cancel context.CancelFunc) func() // registers cancel function on session manager
-	sessionEvictCallback       func(sessionKey string)                                   // called when a terminal task is cleaned up to evict its session from memory
-	sessionStatusCallback      func(sessionKey, status string)                           // called when a task reaches a terminal status, to persist it on the subagent session
-	sessionExists              func(sessionKey string) bool                              // reports whether a session key already exists (memory, metadata, or disk); nil = no check
-	maxConcurrent              int                                                       // max concurrent running tasks (0 = unlimited)
-	defaultMaxRetries          int                                                       // default max retry attempts for transient failures
-	compactionThresholdPercent int                                                       // percentage of context window triggering intra-loop compaction (0 = default)
+	tasks                 map[string]*SubagentTask
+	cancels               map[string]context.CancelFunc
+	mu                    sync.RWMutex
+	provider              providers.LLMProvider
+	defaultModel          string
+	bus                   *bus.MessageBus
+	workspace             string
+	tools                 *ToolRegistry
+	getAgentContext       func(agentID string) AgentContextInfo
+	modelOverrideResolver func(model string) (providers.LLMProvider, string, int, error) // resolves a per-task model override to (provider, model, contextWindow, error)
+	visionChecker         func(model string) bool                                        // reports whether a model supports vision
+	videoChecker          func(model string) bool                                        // reports whether a model supports native video
+	maxIterations         int
+	maxTokens             int
+	temperature           float64
+	hasMaxTokens          bool
+	hasTemperature        bool
+	thinkingLevel         string        // manager-default reasoning level (parent's resolved config level); "" = no opinion, see SetThinkingLevel
+	timeout               time.Duration // 0 means no timeout
+	retentionPeriod       time.Duration // how long to keep terminal tasks before cleanup (0 = no cleanup)
+	retentionMu           sync.Mutex    // guards the sweeper fields below; never sm.mu — the sweeper takes sm.mu itself
+	retentionExited       chan struct{} // closed by the sweeper goroutine when it returns (nil = never started)
+	retentionStopCh       chan struct{} // closed by the stopper to ask the sweeper to return (nil = never started)
+	retentionStopOnce     *sync.Once    // makes closing retentionStopCh idempotent across stopper callers
+	retentionStopFn       func()        // idempotent stop shared by StartRetentionCleanup callers and StopRetentionCleanup
+	retentionDetached     atomic.Bool   // set when a bounded stop gave up on the sweeper (see StopRetentionCleanupWithin)
+	nextID                int
+	sessionRecorder       SessionRecorder
+	sessionKeyCallback    func(sessionKey, agentID string)                          // called when subagent session key is created
+	registerSessionCancel func(sessionKey string, cancel context.CancelFunc) func() // registers cancel function on session manager
+	sessionEvictCallback  func(sessionKey string)                                   // called when a terminal task is cleaned up to evict its session from memory
+	sessionStatusCallback func(sessionKey, status string)                           // called when a task reaches a terminal status, to persist it on the subagent session
+	// sessionExists and persistedLister are installed together by
+	// SetLedgerWiring and are nil together: listing a persisted task ID is only
+	// safe while the probe makes claimTaskID skip an ID whose session exists.
+	// Never set one without the other.
+	sessionExists              func(sessionKey string) bool                           // reports whether a session key already exists (memory, metadata, or disk); nil = no check
+	persistedLister            func(parentPrefixes []string) []PersistedSubagentTask  // disk-side source of the subagent ledger; nil = memory-only (see SetLedgerWiring)
+	persistedDetail            func(keys []string) map[string]PersistedSubagentDetail // windowed summary/iterations source for persisted rows; nil = label only (see SetPersistedTaskDetail)
+	persistedExecutor          func(sessionKey string) string                         // spawn-time executor pin for persisted rows with an empty AgentID; nil = no fallback (see SetPersistedTaskExecutorFallback)
+	maxConcurrent              int                                                    // max concurrent running tasks (0 = unlimited)
+	defaultMaxRetries          int                                                    // default max retry attempts for transient failures
+	compactionThresholdPercent int                                                    // percentage of context window triggering intra-loop compaction (0 = default)
 	// defaultAgentID is the id of the agent that OWNS this manager (the agent
 	// whose toolset contains the spawn tool). Every agent gets its own manager,
 	// so this is unambiguous. It is the last-resort identity for a task whose
@@ -516,18 +523,6 @@ func (sm *SubagentManager) persistTerminalStatus(task *SubagentTask) {
 	if sessionKey != "" && task.Status != "" {
 		sm.sessionStatusCallback(sessionKey, task.Status)
 	}
-}
-
-// SetSessionExistsCallback sets a callback that reports whether a session key
-// already exists (in memory, metadata, or on disk). It is used at spawn time
-// to avoid reusing a task ID whose session already exists — which can happen
-// after a restart, when the in-memory ID counter resets to 1 but persisted
-// session files from previous runs remain. Colliding IDs cause unrelated runs
-// to merge into the same persisted session file.
-func (sm *SubagentManager) SetSessionExistsCallback(callback func(sessionKey string) bool) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	sm.sessionExists = callback
 }
 
 // SetRedactor attaches a redactor used to strip secret values from tool

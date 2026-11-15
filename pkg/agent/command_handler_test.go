@@ -1135,6 +1135,12 @@ func (m *commandHandlerSubagentCoordinatorStub) GetStartupInfo() map[string]inte
 	return map[string]interface{}{}
 }
 
+// renderSubagentLedgerDigest keeps the stub implementing toolCoordinator; the
+// command-handler tests do not exercise the prompt digest.
+func (m *commandHandlerSubagentCoordinatorStub) renderSubagentLedgerDigest(agentID, sessionKey string) string {
+	return ""
+}
+
 func (m *commandHandlerSubagentCoordinatorStub) RegisterTool(tool tools.Tool) {}
 
 func (m *commandHandlerSubagentCoordinatorStub) GetSubagents() map[string]*tools.SubagentManager {

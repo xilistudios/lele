@@ -21,6 +21,7 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
+	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
@@ -50,6 +51,11 @@ type toolCoordinator interface {
 	claimSubagentResultForInjection(taskID string) bool
 	stopSubagentTask(taskID string) bool
 	continueSubagentTask(ctx context.Context, sessionKey, taskID, guidance string) (string, error)
+	// renderSubagentLedgerDigest renders the "## Subagent Tasks" system-prompt
+	// section for one agent's session, or "" when the session has no subagent
+	// tasks. Zero I/O: it runs on every turn and on every context-usage
+	// refresh (C5/C11/D2).
+	renderSubagentLedgerDigest(agentID, sessionKey string) string
 	GetStartupInfo() map[string]interface{}
 	RegisterTool(tool tools.Tool)
 	// syncMCPTools re-evaluates every live agent's MCP server set after
@@ -390,6 +396,198 @@ func (tc *toolCoordinatorImpl) continueSubagentTask(ctx context.Context, session
 	}
 
 	return "", fmt.Errorf("subagent task not found: %s", taskID)
+}
+
+// subagentLedgerDigestRows is the maximum number of rows the digest renders.
+// The section is rebuilt on every turn, so it must stay small and BOUNDED: the
+// worst case is 8 rows of (200-byte label + 200-byte summary + the fixed row
+// scaffolding), which measures 3859 bytes — about 4 KB, not the ~1 KB a typical
+// 8-row section takes. The bound is what matters on the per-turn path; the full
+// history stays reachable through list_active_subagents (plan §11 Q2).
+const subagentLedgerDigestRows = 8
+
+// subagentLedgerDigestFieldBytes bounds the two model-authored fields of a
+// digest row (label and summary). The section is bounded per row by this cap, so
+// one unbounded summary cannot blow the per-turn budget; 200 bytes is the same
+// bound the paginated tool applies to the same fields.
+const subagentLedgerDigestFieldBytes = 200
+
+// subagentLedgerDigestHeader introduces the section. It states the compaction
+// property explicitly, because that is the reason the section exists: a
+// summarizer drops the spawn tool results, and this is what remains.
+const subagentLedgerDigestHeader = "## Subagent Tasks\n\n" +
+	"Subagent tasks spawned from this session (newest first). " +
+	"This ledger survives context compaction: finished tasks stay listed here " +
+	"even when the original tool results are no longer in context."
+
+// subagentLedgerDigestHint is the static trailing line. It is always emitted
+// when the section is rendered: it names the two tools the model needs to act
+// on the ledger, and it never changes, so it cannot perturb the prompt.
+const subagentLedgerDigestHint = "Use `list_active_subagents` (status/limit/offset) to page through the full " +
+	"history, and `wait_for_subagent` for the full result of a task that is still alive."
+
+// renderSubagentLedgerDigest renders the "## Subagent Tasks" system-prompt
+// section for one agent's session, or "" when the session has no subagent tasks.
+//
+// Metadata only: it reads the manager's live tasks and the session metadata
+// mirror, never a message body and never the store, because it runs on every
+// turn and on every TUI/REST context-usage refresh. No elapsed time is
+// rendered: a volatile field would change the prompt every turn and break the
+// byte-identical-prompt invariant BuildMessages documents.
+//
+// scopeKeys covers the runtime key, its alias target and the origin key
+// recorded for the conversation (see subagentLedgerScopeKeys); SubagentScopePrefixes
+// strips the ":chat:N" alias internally, so tasks recorded under the base key
+// are found from an aliased conversation.
+func (tc *toolCoordinatorImpl) renderSubagentLedgerDigest(agentID, sessionKey string) string {
+	if tc == nil || sessionKey == "" {
+		return ""
+	}
+
+	// One manager, the one that owns this agent's tasks (C6/D6): sweeping every
+	// agent would run the same scan once per agent on every turn.
+	sm := tc.subagents[agentID]
+	if sm == nil {
+		return ""
+	}
+
+	entries := sm.LedgerEntries(tc.subagentLedgerScopeKeys(sessionKey))
+	if len(entries) == 0 {
+		return ""
+	}
+
+	rows := entries
+	if len(rows) > subagentLedgerDigestRows {
+		rows = rows[:subagentLedgerDigestRows]
+	}
+
+	var b strings.Builder
+	b.WriteString(subagentLedgerDigestHeader)
+	b.WriteString("\n\n")
+	for _, entry := range rows {
+		b.WriteString(renderSubagentLedgerDigestRow(entry, tc.subagentLedgerExecutor(entry)))
+		b.WriteString("\n")
+	}
+	if overflow := len(entries) - len(rows); overflow > 0 {
+		fmt.Fprintf(&b, "… %d older task(s) not shown.\n", overflow)
+	}
+	b.WriteString("\n")
+	b.WriteString(subagentLedgerDigestHint)
+
+	return b.String()
+}
+
+// subagentLedgerScopeKeys returns the session-key forms the ledger must be
+// scoped by: the runtime key, its alias target, and EVERY origin key recorded
+// for this conversation, deduplicated and in first-seen order. ResolveSessionKey
+// and sessionOriginsFor are pure map lookups, so this stays zero-I/O. A nil loop
+// (tests build coordinators without one) degrades to the raw key.
+//
+// The origin keys are what make reaped and restarted rows visible on routed
+// channels. A live task is reachable through its spawner key (see
+// ledgerScopeMatches), but a persisted row carries no spawner key — its parent
+// is the origin key — and the prefix closure of a routed runtime key
+// ("agent:main:main", or "agent:main:telegram:direct:12345") cannot reach
+// "telegram:12345". Without the origin form the digest loses the history on
+// every routed channel after the first retention reap or restart, which is the
+// exact failure the ledger exists to prevent.
+//
+// It unions the whole recorded set rather than the newest origin alone because
+// the runtime key is many-to-one: with the default dm_scope=main every direct
+// peer of an agent runs on "agent:<agentID>:main", so "telegram:111" and
+// "telegram:222" are two origins of one runtime key. Scoping by one of them
+// would silently hide the other peer's persisted rows. The peers share one
+// conversation, so showing their tasks together is consistent.
+//
+// The order is stable (runtime, resolved, then origins newest first, each
+// deduplicated) because the result feeds the prefix set of a sorted merge: a
+// stable input keeps the rendered prompt byte-identical across turns.
+func (tc *toolCoordinatorImpl) subagentLedgerScopeKeys(sessionKey string) []string {
+	if sessionKey == "" {
+		return nil
+	}
+	keys := make([]string, 0, 3)
+	seen := make(map[string]bool, 3)
+	add := func(key string) {
+		if key == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		keys = append(keys, key)
+	}
+
+	add(sessionKey)
+	if tc.al != nil {
+		add(tc.al.ResolveSessionKey(sessionKey))
+		for _, origin := range tc.al.sessionOriginsFor(sessionKey) {
+			add(origin)
+		}
+	}
+	return keys
+}
+
+// subagentLedgerExecutor resolves the agent that ran a ledger row. A live task
+// carries its own AgentID; a persisted row carries the one stored on the
+// session, which is empty for rows written before agent_id existed. Those fall
+// back to the spawn-time pin (R8/C7), the same 3-step fallback the WebUI
+// listing uses, so a historical subagent is not named after an arbitrary agent.
+func (tc *toolCoordinatorImpl) subagentLedgerExecutor(entry tools.SubagentLedgerEntry) string {
+	if entry.AgentID != "" {
+		return entry.AgentID
+	}
+	if !entry.Persisted || tc.al == nil || entry.SessionKey == "" {
+		return ""
+	}
+	return tc.al.subagentSessionPin(entry.SessionKey)
+}
+
+// renderSubagentLedgerDigestRow renders one digest row:
+//
+//   - <id> [<status>] [(persisted)] [<agentID>] ["<label>"] [: <summary>]
+//
+// The summary is rendered only for a live task: a persisted row's summary
+// lives in the session store, and fetching it would turn a per-turn render into
+// a store query (C5/D2). The label is enough of a pointer; the tool page
+// carries the summary.
+//
+// Label and summary are model-authored (the label can come from a spawn
+// argument, the summary from the subagent's own JSON outcome), and this row is
+// interpolated into the PARENT's system prompt — the one context a subagent must
+// not be able to rewrite. Both therefore go through tools.SanitizeLedgerText,
+// the same rewriter the paginated tool uses, which flattens control runes and
+// line separators to spaces, collapses runs of spaces, strips leading bullet or
+// heading decoration and truncates on a rune boundary. That makes the rendered
+// row a single line for ANY input: a summary like
+// "done\n- subagent-99 [completed] injected\n\n---\n\n## Selected Folder" can no
+// longer fake a row, a section break or an extra heading. The label keeps its
+// %q quoting on top of that, so it stays visually delimited in the row.
+func renderSubagentLedgerDigestRow(entry tools.SubagentLedgerEntry, agentID string) string {
+	var b strings.Builder
+	// An empty status means "we cannot tell" and renders as [unknown], the same
+	// rule ledgerEntryFromPersisted applies to a status-less disk row: an empty
+	// bracket would read as a missing field, and "completed" would be a lie.
+	status := entry.Status
+	if status == "" {
+		status = tools.SubagentStatusUnknown
+	}
+	fmt.Fprintf(&b, "- %s [%s]", entry.ID, status)
+	if entry.Persisted {
+		b.WriteString(" (persisted)")
+	}
+	if agentID != "" {
+		b.WriteString(" ")
+		b.WriteString(agentID)
+	}
+	if label := tools.SanitizeLedgerText(entry.Label, subagentLedgerDigestFieldBytes); label != "" {
+		fmt.Fprintf(&b, " %q", label)
+	}
+	if !entry.Persisted {
+		if summary := tools.SanitizeLedgerText(entry.Summary, subagentLedgerDigestFieldBytes); summary != "" {
+			b.WriteString(": ")
+			b.WriteString(summary)
+		}
+	}
+	return b.String()
 }
 
 // GetStartupInfo returns information about loaded tools and skills for logging.
@@ -909,16 +1107,153 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		agent.Sessions.SetSubagentStatus(sessionKey, status)
 	})
 
-	// Let the subagent manager detect existing session keys at spawn time, so it
-	// never reuses a task ID whose session already exists (e.g. after a restart,
-	// when the in-memory ID counter resets but persisted session files remain).
-	subagentManager.SetSessionExistsCallback(func(sessionKey string) bool {
-		return agent.Sessions.SessionExists(sessionKey)
-	})
+	// Make the subagent ledger disk-backed AND give the manager its task-ID
+	// collision probe, in one call. The two are one invariant: the ledger lists
+	// the tasks whose in-memory row retention reaped (or that a restart
+	// dropped) by reading their persisted sessions, and the probe is what stops
+	// a later spawn from reusing an ID one of those persisted rows still holds
+	// (after a restart the in-memory ID counter resets but the session files
+	// remain). SetLedgerWiring takes both so the half-wired state — disk rows
+	// listed, no probe — cannot be expressed.
+	subagentManager.SetLedgerWiring(
+		newPersistedSubagentLister(agent.Sessions),
+		func(sessionKey string) bool { return agent.Sessions.SessionExists(sessionKey) },
+	)
+	// The detail source is optional and separate: nil only means persisted rows
+	// render their label without a summary, never a mis-wiring.
+	subagentManager.SetPersistedTaskDetail(newPersistedSubagentDetail(agent.Sessions))
+
+	// Resolve the executor of a persisted row whose session row predates
+	// agent_id from the durable spawn-time pin, so list_active_subagents names
+	// the same agent the prompt digest does (the digest resolves the pin
+	// itself in subagentLedgerExecutor).
+	//
+	// The pin is a map read on the caller's side, but it is NOT the loop's
+	// subagentSessionAgent map: this function has no *AgentLoop (it is also
+	// called from the reload path), and that map is memory-only. The durable
+	// copy is the sess:agent: KV entry setSubagentSessionAgent writes, which
+	// loadDurableSessionState rehydrates at startup — exactly the rows this
+	// fallback exists for (written before agent_id existed, i.e. old).
+	subagentManager.SetPersistedTaskExecutorFallback(newPersistedSubagentExecutorPin(agent.Sessions))
+
+	// Report the ledger wiring at startup: this is the observability surface for
+	// LedgerWiringEnabled, which otherwise only a test would read. A manager that
+	// came up memory-only (no SessionManager, or a half-wired setter) loses its
+	// history on the first retention reap, and that is invisible until a user
+	// asks about a finished task — so say it once, at startup, per agent.
+	ledgerFields := map[string]interface{}{
+		"agent":         agent.ID,
+		"ledger_backed": subagentManager.LedgerWiringEnabled(),
+		"detail_source": subagentManager.PersistedTaskDetail() != nil,
+		"executor_pin":  subagentManager.PersistedTaskExecutorFallback() != nil,
+	}
+	if subagentManager.LedgerWiringEnabled() {
+		logger.InfoCF("subagent", "subagent ledger wired: disk-backed with the task-ID collision probe", ledgerFields)
+	} else {
+		logger.WarnCF("subagent", "subagent ledger is memory-only: finished tasks will be lost on retention reap or restart", ledgerFields)
+	}
 
 	agent.ContextBuilder.SetToolsRegistry(agent.Tools)
 
 	return subagentManager
+}
+
+// newPersistedSubagentLister builds the disk-side source for an agent's subagent
+// ledger. It reads the recorder's own SessionManager — the manager
+// SetSessionRecorder was handed above — which in production is the single shared
+// manager (AgentRegistry.SetSharedSessionManager), so no per-agent sweep is
+// needed: sweeping ListAgentIDs would run the same scan once per agent.
+//
+// Metadata only: ListSubagentSessionMeta performs no store I/O and never makes a
+// session resident, so this is safe to call from a tool execution path.
+//
+// SETUP-TIME CAPTURE — this closes over the *SessionManager it is given at
+// setup time, and AgentRegistry.SetSharedSessionManager does NOT re-wire these
+// callbacks: a swap after setup re-points every agent's Sessions but leaves the
+// lister (and its Detail/ExecutorPin siblings) reading the original manager, so
+// rows written through the swap are invisible to the ledger. Production swaps
+// exactly once, inside NewAgentLoop, and only then calls setupSubagentManager,
+// which is why the capture is correct there; any code that swaps later must
+// re-run the subagent-manager setup instead of assuming the callbacks follow.
+func newPersistedSubagentLister(sessions *session.SessionManager) func(parentPrefixes []string) []tools.PersistedSubagentTask {
+	if sessions == nil {
+		return nil
+	}
+	return func(parentPrefixes []string) []tools.PersistedSubagentTask {
+		metas := sessions.ListSubagentSessionMeta(parentPrefixes)
+		if len(metas) == 0 {
+			return nil
+		}
+		rows := make([]tools.PersistedSubagentTask, 0, len(metas))
+		for _, meta := range metas {
+			rows = append(rows, tools.PersistedSubagentTask{
+				TaskID:     meta.TaskID,
+				SessionKey: meta.Key,
+				ParentKey:  meta.ParentKey,
+				Label:      meta.Name,
+				// Status and AgentID are persisted on the session; an empty
+				// value means "we cannot tell" and is left for the reader to
+				// resolve to tools.SubagentStatusUnknown (never "completed":
+				// the row may be a task interrupted by a restart, and claiming
+				// completion would contradict wait_for_subagent). Hard-coding
+				// either here would misreport failed or cancelled tasks.
+				Status:  meta.Status,
+				AgentID: meta.AgentID,
+				Created: meta.Created.UnixMilli(),
+				Updated: meta.Updated.UnixMilli(),
+			})
+		}
+		return rows
+	}
+}
+
+// newPersistedSubagentExecutorPin builds the executor fallback for persisted
+// ledger rows whose AgentID is empty — the rows written before the session row
+// carried agent_id (migration v8). It answers from the durable spawn-time pin
+// (sess:agent:<sessionKey>, written by setSubagentSessionAgent and rehydrated by
+// loadDurableSessionState), which is the same value the prompt digest resolves
+// through subagentSessionPin, so the tool and the digest cannot disagree about
+// who ran a historical task.
+//
+// It is deliberately NOT the loop's in-memory subagentSessionAgent map: that map
+// dies with the process, and the rows this fallback serves are precisely the
+// ones that outlived a restart. The KV read is one indexed lookup per row with
+// an empty AgentID, and only for the page being rendered (fillPageExecutors),
+// never for the whole history.
+//
+// nil (no store) leaves rows with their empty AgentID, which is the behaviour of
+// every standalone manager constructed in tests.
+func newPersistedSubagentExecutorPin(sessions *session.SessionManager) func(sessionKey string) string {
+	if sessions == nil {
+		return nil
+	}
+	return func(sessionKey string) string {
+		return sessions.SubagentAgentPin(sessionKey)
+	}
+}
+
+// newPersistedSubagentDetail builds the windowed detail source for the ledger:
+// summary and iteration count for a bounded page of session keys. Unlike the
+// lister this DOES query the store, so it is only ever called for the rows a
+// page actually returns, never for a whole history.
+func newPersistedSubagentDetail(sessions *session.SessionManager) func(keys []string) map[string]tools.PersistedSubagentDetail {
+	if sessions == nil {
+		return nil
+	}
+	return func(keys []string) map[string]tools.PersistedSubagentDetail {
+		details := sessions.SubagentSessionDetails(keys)
+		if len(details) == 0 {
+			return nil
+		}
+		out := make(map[string]tools.PersistedSubagentDetail, len(details))
+		for key, detail := range details {
+			out[key] = tools.PersistedSubagentDetail{
+				Iterations: detail.Iterations,
+				Summary:    detail.Summary,
+			}
+		}
+		return out
+	}
 }
 
 // syncGroupChatTool is the registration-time enforcement point for the groups

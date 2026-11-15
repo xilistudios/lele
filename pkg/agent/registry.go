@@ -35,6 +35,10 @@ type AgentRegistry struct {
 	// (WebUI "per-session folder context"). Set by AgentLoop after the
 	// registry is created; applied to instances as they are created.
 	folderResolver func(sessionKey string) string
+	// subagentLedgerResolver is propagated to every agent's ContextBuilder so
+	// the per-session subagent ledger reaches the system prompt. It takes the
+	// agent ID because the ledger lives in that agent's SubagentManager.
+	subagentLedgerResolver func(agentID, sessionKey string) string
 }
 
 // NewAgentRegistry creates a registry from config, instantiating all agents.
@@ -163,6 +167,42 @@ func (r *AgentRegistry) applyFolderResolverLocked(instance *AgentInstance) {
 	instance.ContextBuilder.SetFolderResolver(r.folderResolver)
 }
 
+// SetSubagentLedgerResolver stores fn and wires it into every current agent's
+// ContextBuilder, binding each instance's own ID. Agents created later
+// (ReloadAgents) inherit the same resolver, which is how the loop's
+// attachSubagentLedgerResolver reaches builders created inside
+// NewAgentInstance without instance.go seeing the loop. Mirrors
+// SetFolderResolver.
+func (r *AgentRegistry) SetSubagentLedgerResolver(fn func(agentID, sessionKey string) string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.subagentLedgerResolver = fn
+	for _, agent := range r.agents {
+		r.applySubagentLedgerResolverLocked(agent)
+	}
+}
+
+// applySubagentLedgerResolverLocked wires the stored resolver into one instance,
+// binding the instance's ID by VALUE: capturing the instance pointer would pin a
+// stale object across ReloadAgents, which replaces instances while preserving
+// their ContextBuilder. A nil resolver is propagated as well — it means the
+// ledger section is disabled, and clearing must reach already-wired builders.
+// Caller must hold r.mu.
+func (r *AgentRegistry) applySubagentLedgerResolverLocked(instance *AgentInstance) {
+	if instance == nil || instance.ContextBuilder == nil {
+		return
+	}
+	fn := r.subagentLedgerResolver
+	if fn == nil {
+		instance.ContextBuilder.SetSubagentLedgerResolver(nil)
+		return
+	}
+	id := instance.ID // by value, not the pointer
+	instance.ContextBuilder.SetSubagentLedgerResolver(func(sessionKey string) string {
+		return fn(id, sessionKey)
+	})
+}
+
 // SetExecWhitelist applies (or re-applies) the exec command whitelist to every
 // agent's exec tool without rebuilding the registry. Used when the user adds a
 // command to the whitelist from the TUI approval prompt, so the decision takes
@@ -277,6 +317,7 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 			}
 			instance := NewAgentInstance(implicitAgent, &cfg.Agents.Defaults, cfg)
 			r.applyFolderResolverLocked(instance)
+			r.applySubagentLedgerResolverLocked(instance)
 			r.agents["main"] = instance
 			r.rememberToolsAllowlistLocked("main", implicitAgent.Tools)
 		}
@@ -314,8 +355,12 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 			}
 			// Preserved builder already carries the resolver; re-attach so a
 			// builder created before SetFolderResolver also gets it (no-op
-			// otherwise).
+			// otherwise). The ledger resolver is re-attached for the same
+			// reason, and it re-binds the CURRENT instance ID (D7): the builder
+			// outlives the instance, so a closure that captured the old ID would
+			// keep reading the old agent's ledger.
 			r.applyFolderResolverLocked(existing)
+			r.applySubagentLedgerResolverLocked(existing)
 			continue
 		}
 
@@ -348,6 +393,8 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 
 		// Newly created builders must see the loop's folder resolver too.
 		r.applyFolderResolverLocked(instance)
+		// Same for the subagent ledger: a recreated agent has a fresh builder.
+		r.applySubagentLedgerResolverLocked(instance)
 
 		r.agents[id] = instance
 		r.rememberToolsAllowlistLocked(id, ac.Tools)

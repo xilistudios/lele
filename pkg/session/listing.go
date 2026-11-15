@@ -477,9 +477,14 @@ type SubagentSessionInfo struct {
 	// reported the row.
 	AgentID string
 	// Status is the persisted terminal status of the subagent task
-	// ("completed", "failed", ...). Empty means unknown (the session predates
-	// subagent_status persistence); readers fall back to "completed", the
-	// historical hard-coded value.
+	// ("completed", "failed", ...). Empty means unknown (the session row is
+	// created at spawn and subagent_status is written only on a terminal
+	// transition, so the task was interrupted or re-pinned). The two readers
+	// resolve it differently on purpose: the ledger (ledgerEntryFromPersisted)
+	// renders tools.SubagentStatusUnknown because it feeds the system prompt
+	// and must not guess, while the WebUI listing
+	// (agentProvidableImpl.GetSessionSubagents) keeps its historical
+	// "completed" fallback for rows that predate this model.
 	Status string
 }
 
@@ -737,4 +742,275 @@ func (sm *SessionManager) SessionKeysWithMessages() map[string]bool {
 		return nil
 	}
 	return keys
+}
+
+// SubagentSessionMeta is the metadata-only row of a persisted subagent session.
+// Every field is available from the resident session or the sessionMeta
+// mirror, so producing it performs NO store I/O and never makes a session
+// resident. It is the cheap half of the subagent ledger: enough to identify,
+// order and paginate tasks, and to render the per-turn system-prompt digest.
+// Summary and Iterations are deliberately absent — they need the store (see
+// SubagentSessionDetails).
+type SubagentSessionMeta struct {
+	Key       string // full session key, "{parent}:subagent-N"
+	TaskID    string // everything after "{parent}:"
+	ParentKey string // the origin session key the task was spawned from
+	Name      string // session name; doubles as the label fallback
+	Status    string // persisted terminal status; "" = unknown (pre-migration rows)
+	AgentID   string // executor persisted on the session; "" = unknown
+	Created   time.Time
+	Updated   time.Time
+	Resident  bool // true when the row came from sm.sessions, false from sessionMeta
+}
+
+// SubagentSessionDetail carries the two fields that only the store can answer
+// for a non-resident subagent session: the iteration proxy and the summary.
+// Fetched in one batched query for a bounded key set (a page), never for the
+// whole history.
+type SubagentSessionDetail struct {
+	Iterations int    // in-context assistant messages; an undercount after compaction
+	Summary    string // stored summary, else the last assistant text truncated to 200 bytes
+}
+
+// subagentSessionMarker is the separator every persisted subagent session key
+// carries ("{parent}:subagent-{N}"). It is what subagentParentKey cuts at to
+// recover the parent key of a row.
+const subagentSessionMarker = ":subagent-"
+
+// subagentParentKey returns the parent (origin) session key of a subagent
+// session key "parent:subagent-N", or "" when the key does not have that shape.
+//
+// It is the arithmetic FindSubagentSessions does inline (key[len(parent)+1:]).
+// Here the parent is not known up front — the caller passes a prefix set — so
+// it is recovered by cutting at the LAST ":subagent-" separator. Task IDs are
+// always "subagent-<digits>" (claimTaskID), so the last separator is the right
+// one even for a parent key that itself contains ":subagent-" (a subagent that
+// spawned a subagent).
+func subagentParentKey(key string) string {
+	i := strings.LastIndex(key, subagentSessionMarker)
+	if i <= 0 {
+		return ""
+	}
+	return key[:i]
+}
+
+// ListSubagentSessionMeta returns the metadata-only rows of every persisted
+// subagent session whose parent key is one of parentPrefixes, deduplicated by
+// session key. It is the zero-I/O half of the subagent ledger.
+//
+// Lock discipline mirrors FindSubagentSessions: ensureLoaded, then a single
+// sm.mu.RLock() pass over sm.sessions and sm.sessionMeta. The exclusive lock is
+// never taken, no store query runs, and the LRU (sessions/accessTimes) is left
+// untouched — a listing must neither make a session resident nor change
+// eviction order.
+//
+// Unlike FindSubagentSessions this reports metadata-only rows even when no
+// store is configured: their name, status and timestamps are already known, and
+// omitting them would hide retention-reaped tasks in JSON-only deployments.
+// FindSubagentSessions keeps its historical omit-without-store behaviour.
+//
+// Matching is prefix-based ("{parent}:subagent-") because pkg/session cannot
+// import pkg/tools (import cycle); the caller derives the prefix set with
+// tools.SubagentScopePrefixes, which is the closed form of the symmetric
+// SessionKeysRelated relation.
+//
+// Cost: this runs on the per-turn prompt path (2-4 times per turn), so the
+// scan is a plain prefix loop and nothing else. Measured on arm64 with the
+// benchmark below (1050 sessions: 1000 ordinary chats + 50 subagents):
+// 361-396 µs/op and ~26 KB of garbage per call. At 2-4 calls per turn that is
+// ~0.7-1.6 ms of CPU and ~50-100 KB of garbage per turn, and the scan is
+// linear in the TOTAL number of sessions, not in the number of subagents
+// (1.84 ms at 5000 sessions). Acceptable for a loop whose turns are seconds;
+// an index is not needed yet, but the number must be read in µs, not ns.
+//
+// A ":subagent-" substring prefilter was measured and REMOVED: it is a
+// pessimization (+18%: 441-457 µs/op with it, 376-383 µs/op without, 1050
+// sessions), because the prefix loop already rejects an ordinary session after
+// about one byte — the first candidate is the key itself, the longest — while
+// strings.Contains has to scan the whole key. See
+// listing_subagents_scan_bench_test.go; do not re-add it. There is
+// deliberately no TTL cache either: a prompt path must not be
+// time-dependent.
+//
+// Returns nil when parentPrefixes is empty or when no prefix is a subagent
+// prefix at all (a blank prefix is dropped rather than honoured because it
+// would match every subagent of every session). Order is unspecified — the
+// caller sorts.
+func (sm *SessionManager) ListSubagentSessionMeta(parentPrefixes []string) []SubagentSessionMeta {
+	if len(parentPrefixes) == 0 {
+		return nil
+	}
+
+	// A blank prefix would turn into ":subagent-" and match every subagent of
+	// every session, so it is dropped rather than honoured.
+	prefixes := make([]string, 0, len(parentPrefixes))
+	for _, parent := range parentPrefixes {
+		if parent != "" {
+			prefixes = append(prefixes, parent+":subagent-")
+		}
+	}
+	if len(prefixes) == 0 {
+		return nil
+	}
+
+	matches := func(key string) bool {
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(key, prefix) {
+				return true
+			}
+		}
+		return false
+	}
+
+	sm.ensureLoaded()
+
+	results := make([]SubagentSessionMeta, 0, len(prefixes))
+	seen := make(map[string]bool, len(prefixes))
+
+	sm.mu.RLock()
+	// Resident sessions first: they carry the freshest name/status/agent.
+	for key, session := range sm.sessions {
+		if session == nil || !matches(key) {
+			continue
+		}
+		parent := subagentParentKey(key)
+		if parent == "" {
+			continue
+		}
+		seen[key] = true
+		results = append(results, SubagentSessionMeta{
+			Key:       key,
+			TaskID:    key[len(parent)+1:],
+			ParentKey: parent,
+			Name:      session.Name,
+			Status:    session.SubagentStatus,
+			AgentID:   session.AgentID,
+			Created:   session.Created,
+			Updated:   session.Updated,
+			Resident:  true,
+		})
+	}
+	// Metadata-only sessions: sessionMeta is the lightweight listing index
+	// built precisely to avoid loading sessions. Resident keys were already
+	// reported above and win, so they are skipped here.
+	for key, meta := range sm.sessionMeta {
+		if meta == nil || seen[key] || !matches(key) {
+			continue
+		}
+		parent := subagentParentKey(key)
+		if parent == "" {
+			continue
+		}
+		seen[key] = true
+		results = append(results, SubagentSessionMeta{
+			Key:       key,
+			TaskID:    key[len(parent)+1:],
+			ParentKey: parent,
+			Name:      meta.Name,
+			Status:    meta.SubagentStatus,
+			AgentID:   meta.AgentID,
+			Created:   meta.Created,
+			Updated:   meta.Updated,
+			Resident:  false,
+		})
+	}
+	sm.mu.RUnlock()
+
+	return results
+}
+
+// SubagentSessionDetails returns the store-derived fields for the given session
+// keys, in one batched read-only query. Resident sessions are answered from
+// their in-memory slice without I/O. Keys with no row (deleted, or unreadable)
+// are omitted rather than reported with empty fields, matching
+// FindSubagentSessions' policy.
+//
+// The caller MUST bound len(keys) — this is the windowed half of the ledger and
+// is only ever called for a returned page, never for a whole history. The query
+// runs with sm.mu released. Returns an empty map when no store is configured.
+func (sm *SessionManager) SubagentSessionDetails(keys []string) map[string]SubagentSessionDetail {
+	out := make(map[string]SubagentSessionDetail, len(keys))
+	if len(keys) == 0 {
+		return out
+	}
+
+	// Deduplicate and drop blanks: a repeated key would otherwise be counted
+	// twice in the batched query.
+	unique := make([]string, 0, len(keys))
+	seen := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		unique = append(unique, key)
+	}
+	if len(unique) == 0 {
+		return out
+	}
+
+	sm.ensureLoaded()
+
+	// Read the repository through the repoFor seam, like the save paths: it is
+	// the only way a test can observe that this query is windowed.
+	repo := repoFor(sm)
+
+	var coldKeys []string
+	sm.mu.RLock()
+	for _, key := range unique {
+		session, resident := sm.sessions[key]
+		if !resident || session == nil {
+			coldKeys = append(coldKeys, key)
+			continue
+		}
+		// Same counting and summary expression as subagentInfoFromSession, so
+		// the tool and the UI report identical strings for a resident session.
+		iterations := 0
+		lastAssistantContent := ""
+		haveLastAssistant := false
+		for i := len(session.Messages) - 1; i >= 0; i-- {
+			if session.Messages[i].Role != "assistant" {
+				continue
+			}
+			iterations++
+			if !haveLastAssistant {
+				lastAssistantContent = session.Messages[i].Content
+				haveLastAssistant = true
+			}
+		}
+		out[key] = SubagentSessionDetail{
+			Iterations: iterations,
+			Summary:    subagentSummary(session.Summary, lastAssistantContent),
+		}
+	}
+	sm.mu.RUnlock() // store I/O below must not run under the session lock
+
+	if len(coldKeys) == 0 || repo == nil {
+		return out
+	}
+
+	stats, err := repo.SessionListingStats(coldKeys)
+	if err != nil {
+		// Same policy as FindSubagentSessions: a session whose rows cannot be
+		// read is omitted (not reported with empty fields) and the next call
+		// retries.
+		logger.WarnCF("session", "Failed to read subagent session details; omitting metadata-only subagents", map[string]interface{}{
+			"error": err.Error(),
+			"count": len(coldKeys),
+		})
+		return out
+	}
+
+	for _, key := range coldKeys {
+		stat, ok := stats[key]
+		if !ok {
+			continue // sessions row is gone (deleted)
+		}
+		out[key] = SubagentSessionDetail{
+			Iterations: stat.AssistantCount,
+			Summary:    subagentSummary(stat.Summary, decodeLastAssistantContent(stat.LastAssistantJSON)),
+		}
+	}
+
+	return out
 }

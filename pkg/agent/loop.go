@@ -70,10 +70,22 @@ type AgentLoop struct {
 	sessionModels   sync.Map
 	sessionAgents   sync.Map // sessionKey -> agentID for agent switching
 	sessionThinking sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
-	fallback        *providers.FallbackChain
-	channelManager  *channels.Manager
-	verboseManager  *session.VerboseManager
-	sessionKeySeq   atomic.Uint64
+	// sessionOrigins maps a runtime session key to the origin keys its inbound
+	// messages carry (tools.BuildOriginSessionKey(msg.Channel, msg.ChatID)).
+	// The subagent ledger is written under that origin key while the prompt is
+	// built from the runtime key, and on a routed channel the two are not
+	// related by any prefix/suffix rule ("agent:main:main" vs "telegram:12345"),
+	// so the digest cannot reach reaped rows without it. It is a bounded,
+	// newest-first SET per key, not a single value: the default dm_scope=main
+	// gives every direct peer of an agent the same runtime key, so one slot
+	// would let a second peer hide the first peer's persisted rows. Guarded by
+	// sessionOriginsMu. Memory only, on purpose: see setSessionOrigin.
+	sessionOriginsMu sync.Mutex
+	sessionOrigins   map[string][]string
+	fallback         *providers.FallbackChain
+	channelManager   *channels.Manager
+	verboseManager   *session.VerboseManager
+	sessionKeySeq    atomic.Uint64
 
 	// seqSeeds is the per-base high-water mark of the chat:N conversation keys
 	// handed out so far (base session key -> last N used). It is persisted under
@@ -180,6 +192,9 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	// ReloadAgents may have created fresh ContextBuilders; re-attach the
 	// folder resolver so per-session folder context survives config reloads.
 	al.attachFolderResolver()
+	// Same for the subagent ledger: a recreated agent has a fresh builder, and
+	// the digest must keep reaching the prompt after a reload.
+	al.attachSubagentLedgerResolver()
 	al.cfgPtr.Store(cfg)
 
 	// Re-register shared tools for new/recreated agents
@@ -267,6 +282,34 @@ func (al *AgentLoop) attachFolderResolver() {
 			return ""
 		}
 		return agent.Sessions.GetFolder(resolved)
+	})
+}
+
+// attachSubagentLedgerResolver wires the per-session subagent ledger into every
+// agent's ContextBuilder, so the "## Subagent Tasks" digest is part of the
+// system prompt and therefore survives context compaction (the prompt is
+// rebuilt every turn and never persisted nor summarized).
+//
+// The resolver reads the agent's own SubagentManager — the ledger is per-owner —
+// and renders metadata only, so it is safe on the per-turn and per-refresh
+// paths. It is called once in NewAgentLoop (after the registry exists) and again
+// after ReloadRegistry, which may hand back freshly built instances with fresh
+// ContextBuilders. Mirrors attachFolderResolver.
+//
+// The coordinator is read at call time, not captured: ReloadRegistry replaces
+// al.toolCoordinator, and a captured pointer would render the previous
+// coordinator's managers forever. A nil coordinator (tests build loops without
+// one) leaves the resolver unwired rather than panicking.
+func (al *AgentLoop) attachSubagentLedgerResolver() {
+	if al == nil || al.registry == nil || al.toolCoordinator == nil {
+		return
+	}
+	al.registry.SetSubagentLedgerResolver(func(agentID, sessionKey string) string {
+		tc, ok := al.toolCoordinator.(*toolCoordinatorImpl)
+		if !ok || tc == nil {
+			return ""
+		}
+		return tc.renderSubagentLedgerDigest(agentID, sessionKey)
 	})
 }
 
@@ -551,6 +594,10 @@ func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.
 	// Wire SQLite store into session manager for persistent storage.
 	if dbStore != nil {
 		sharedSessionManager.SetSessionRepo(dbStore.Sessions())
+		// The subagent ledger's executor fallback reads the durable spawn-time
+		// pin from the shared KV namespace (sess:agent:<key>), which the loop
+		// writes through setSubagentSessionAgent.
+		sharedSessionManager.SetSessionKV(dbStore.KV())
 	}
 
 	// Warn if a legacy JSON sessions directory exists — it will be ignored.
@@ -724,6 +771,14 @@ func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.
 	}
 
 	loop.toolCoordinator = newToolCoordinatorWithSubagents(loop, subagents, bgManagers, nil)
+
+	// Now that the coordinator (and with it the per-agent SubagentManagers)
+	// exists, wire the subagent ledger digest into every ContextBuilder. It
+	// cannot happen next to attachFolderResolver above: the resolver needs the
+	// coordinator, and attachSubagentLedgerResolver is a no-op without one.
+	// The digest is the only subagent state that compaction cannot erase, so it
+	// is wired for the same reason as the folder resolver.
+	loop.attachSubagentLedgerResolver()
 
 	// Initial MCP wiring: build per-agent managers, register load_mcp_tools
 	// and feed the "## MCP Servers" prompt section (mcp.go). Best-effort by

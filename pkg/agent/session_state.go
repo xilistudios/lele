@@ -98,6 +98,100 @@ func (al *AgentLoop) persistSubagentSessionAgent(ownerAgentID, sessionKey, execu
 	agent.Sessions.SetSubagentAgentID(sessionKey, executorAgentID)
 }
 
+// maxSessionOriginsPerKey bounds the origin set kept for one runtime session
+// key. It is small on purpose: the set only has to cover the participants that
+// can share one runtime key, and the default DM scope (dm_scope=main) collapses
+// every direct peer of an agent onto "agent:<agentID>:main". Four covers the
+// realistic cases (a couple of Telegram/Discord peers plus a WebUI uuid) while
+// keeping the per-turn scope set — and therefore the prefix set of the ledger
+// scan — bounded.
+const maxSessionOriginsPerKey = 4
+
+// setSessionOrigin records the origin key of a conversation: the session key
+// its subagent tasks are written under (tools.BuildOriginSessionKey of the
+// inbound message's channel and chat ID). Empty values are ignored.
+//
+// It records a SET of origins per runtime key, not one. The runtime key is not
+// unique per conversation: with the default dm_scope=main
+// (pkg/routing/session_key.go, pkg/config/config.go) every direct peer of an
+// agent runs on "agent:<agentID>:main", so two Telegram chats share a runtime
+// key while their tasks are written under "telegram:111" and "telegram:222".
+// Keeping one origin let the second peer overwrite the first, and the first
+// peer's persisted rows then vanished from the prompt as soon as retention
+// reaped them — the exact failure the ledger exists to prevent. The
+// participants share one conversation, so unioning their tasks is consistent.
+//
+// Order is NEWEST FIRST and the cap (maxSessionOriginsPerKey) evicts the OLDEST
+// entry: the peer that just wrote is the one whose prompt is about to be built,
+// and an evicted origin only loses its persisted rows (live rows are still
+// reachable through their spawner key), so the eviction degrades instead of
+// breaking. Re-recording an existing origin moves it to the front without
+// duplicating it, so a chatty peer cannot evict the others by repeating itself.
+//
+// Deliberately memory-only, unlike setSessionAgent: the value is re-derived
+// from every inbound message, which is exactly when the system prompt is next
+// built. Consequence: after a restart the full subagent history reappears on
+// the session's next inbound message, while paths that never see a message
+// (e.g. a REST context-usage refresh, the TUI status bar) degrade to live-only
+// ledger rows instead of failing — the digest is then scoped by the runtime
+// key alone, which still matches a live task through its spawner key.
+func (al *AgentLoop) setSessionOrigin(sessionKey, originKey string) {
+	if sessionKey == "" || originKey == "" {
+		return
+	}
+	al.sessionOriginsMu.Lock()
+	defer al.sessionOriginsMu.Unlock()
+	if al.sessionOrigins == nil {
+		al.sessionOrigins = make(map[string][]string)
+	}
+
+	origins := al.sessionOrigins[sessionKey]
+	// Drop an existing entry so the re-record moves it to the front instead of
+	// duplicating it (and so the cap evicts a genuinely older origin).
+	kept := make([]string, 0, len(origins)+1)
+	kept = append(kept, originKey)
+	for _, existing := range origins {
+		if existing != originKey {
+			kept = append(kept, existing)
+		}
+	}
+	if len(kept) > maxSessionOriginsPerKey {
+		kept = kept[:maxSessionOriginsPerKey]
+	}
+	al.sessionOrigins[sessionKey] = kept
+}
+
+// sessionOriginsFor returns the origin keys recorded for a session key, newest
+// first, as a copy the caller may keep. Zero I/O — it is read on the per-turn
+// path by the subagent-ledger digest, which must not touch the store or the
+// session manager.
+func (al *AgentLoop) sessionOriginsFor(sessionKey string) []string {
+	if sessionKey == "" {
+		return nil
+	}
+	al.sessionOriginsMu.Lock()
+	defer al.sessionOriginsMu.Unlock()
+	origins := al.sessionOrigins[sessionKey]
+	if len(origins) == 0 {
+		return nil
+	}
+	out := make([]string, len(origins))
+	copy(out, origins)
+	return out
+}
+
+// sessionOrigin returns the newest origin key recorded for a session key, or ""
+// when none is known. It is the single-origin reader for callers that need one
+// identity (the ledger scope uses sessionOriginsFor: see
+// subagentLedgerScopeKeys).
+func (al *AgentLoop) sessionOrigin(sessionKey string) string {
+	origins := al.sessionOriginsFor(sessionKey)
+	if len(origins) == 0 {
+		return ""
+	}
+	return origins[0]
+}
+
 // subagentSessionPin returns the agent recorded at spawn time for a subagent
 // session, or "" when there is no such record. It is the fallback for session
 // rows persisted before agent_id existed: the pin is durable (sess:agent: KV,

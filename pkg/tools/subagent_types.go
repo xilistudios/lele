@@ -14,6 +14,15 @@ const (
 	SubagentStatusFailed       = "failed"
 	SubagentStatusCancelled    = "cancelled"
 	SubagentStatusPending      = "pending" // task waiting for dependencies to complete
+	// SubagentStatusUnknown is the status of a ledger row recovered from a
+	// persisted subagent session that carries no subagent_status. It is NOT a
+	// terminal outcome: the session row is created at spawn (SetSubagentAgentID)
+	// and subagent_status is written only on a terminal transition, so an empty
+	// value means "we cannot tell" — a task interrupted by a restart, or one
+	// whose live row now lives in another agent's manager after a re-pin.
+	// Reporting it as completed would tell the model the work is finished while
+	// wait_for_subagent still blocks on it.
+	SubagentStatusUnknown = "unknown"
 )
 
 type SubagentTask struct {
