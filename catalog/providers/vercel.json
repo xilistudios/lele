@@ -358,7 +358,6 @@
       "max_output": 128000,
       "vision": true,
       "thinking_levels": [
-        "low",
         "medium",
         "high"
       ],

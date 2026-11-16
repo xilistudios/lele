@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-11-09T16:11:25Z",
+  "updated_at": "2026-11-16T15:39:43Z",
   "source": "models.dev",
   "providers": {
     "alibaba": {
@@ -41,7 +41,7 @@
       "type": "anthropic",
       "api_base": "https://api.anthropic.com/v1",
       "file": "providers/anthropic.json",
-      "model_count": 17
+      "model_count": 16
     },
     "arcee": {
       "id": "arcee",
@@ -81,7 +81,7 @@
       "type": "openai",
       "api_base": "https://llm.chutes.ai/v1",
       "file": "providers/chutes.json",
-      "model_count": 18
+      "model_count": 19
     },
     "deepseek": {
       "id": "deepseek",
@@ -105,7 +105,7 @@
       "type": "openai",
       "api_base": "https://generativelanguage.googleapis.com/v1beta",
       "file": "providers/gemini.json",
-      "model_count": 34
+      "model_count": 36
     },
     "github_copilot": {
       "id": "github_copilot",
@@ -241,7 +241,7 @@
       "type": "openai",
       "api_base": "https://ollama.com/v1",
       "file": "providers/ollama_cloud.json",
-      "model_count": 26
+      "model_count": 27
     },
     "openai": {
       "id": "openai",

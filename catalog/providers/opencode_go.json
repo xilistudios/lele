@@ -129,22 +129,8 @@
       "tool_call": true
     },
     {
-      "id": "crouton-alpha-free",
-      "name": "Crouton Alpha Free",
-      "context_window": 1048576,
-      "max_output": 270000,
-      "vision": true,
-      "thinking_levels": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
       "id": "deepseek-v4.1-flash",
-      "name": "DeepSeek V4.1 Flash",
+      "name": "DeepSeek V4.1 Flash 1017",
       "context_window": 1000000,
       "max_output": 384000,
       "vision": true,
@@ -209,10 +195,22 @@
       "tool_call": true
     },
     {
+      "id": "hy4-flash-free",
+      "name": "Hy4 flash Free",
+      "context_window": 1048576,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "kimi-k3",
       "name": "Kimi K3",
       "context_window": 1048576,
-      "max_output": 131072,
+      "max_output": 1048576,
       "vision": true,
       "thinking_levels": [
         "high"
@@ -224,7 +222,7 @@
       "id": "kimi-k3.1-pro",
       "name": "Kimi K3.1 Pro",
       "context_window": 1048576,
-      "max_output": 131072,
+      "max_output": 1048576,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -318,6 +316,19 @@
       "tool_call": true
     },
     {
+      "id": "qwen4-max",
+      "name": "Qwen4 Max",
+      "context_window": 1000000,
+      "max_output": 262144,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "step-5-preview",
       "name": "Step 5 Preview",
       "context_window": 1000000,
@@ -385,17 +396,6 @@
       "max_output": 128000,
       "thinking_levels": [
         "low",
-        "high"
-      ],
-      "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "hy4-preview",
-      "name": "Hy4 preview",
-      "context_window": 1024000,
-      "max_output": 64000,
-      "thinking_levels": [
         "high"
       ],
       "reasoning": true,

@@ -521,7 +521,7 @@
       "id": "moonshotai/kimi-k2.5",
       "name": "Kimi K2.5",
       "context_window": 262144,
-      "max_output": 65536,
+      "max_output": 235929,
       "vision": true,
       "thinking_levels": [
         "low",
