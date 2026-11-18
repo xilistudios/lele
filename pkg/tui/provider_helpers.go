@@ -136,6 +136,76 @@ const (
 	editProviderStepCount
 )
 
+// Steps of the model forms. ModalAddModel collects one value per model field
+// (alias → think system, see addModelStepCount); ModalEditModel shares those
+// six steps and appends one step per config.ReasoningConfig field (see
+// editModelStepCount) so the stored reasoning override of an existing model can
+// be edited instead of merely being preserved.
+//
+// They are named because openModelEditFlow, formStepNames(), the shared ENTER
+// handler and the tests all key off them: two magic numbers drifting apart
+// would either save too early or read a value that was never collected.
+const (
+	addModelAliasStep = iota
+	addModelModelNameStep
+	addModelContextWindowStep
+	addModelMaxTokensStep
+	addModelVisionStep
+	addModelThinkSystemStep
+	// addModelStepCount is the number of steps of the ADD form: the length of
+	// both formValues and formStepNames() for ModalAddModel, and the index
+	// right after the last step (the think-system step saves).
+	addModelStepCount
+)
+
+const (
+	// The edit-model form continues where the add form stops: one step per
+	// ReasoningConfig field, in struct order.
+	editModelReasoningEnableStep = addModelStepCount + iota
+	editModelReasoningEffortStep
+	editModelReasoningMaxTokensStep
+	editModelReasoningExcludeStep
+	editModelReasoningSummaryStep
+	// editModelStepCount is the number of steps of the EDIT form: the length of
+	// both formValues and formStepNames() for ModalEditModel, and the index
+	// right after the last step (the reasoning-summary step saves).
+	editModelStepCount
+)
+
+// modelFormLastStep returns the index of the step that SAVES the model form:
+// the think-system step for the add form, the reasoning-summary step for the
+// edit form. Everything below it just advances.
+func modelFormLastStep(mode modalType) int {
+	if mode == ModalEditModel {
+		return editModelStepCount - 1
+	}
+	return addModelStepCount - 1
+}
+
+// modelFormAllowsEmptyValue reports whether the given step of the model form
+// may be submitted blank. The context-window and max-tokens steps are filled
+// from the catalog when the model is known, the think-system step defaults to
+// "auto", and the four optional reasoning steps mean "leave this override
+// unset". Every other step carries a required answer (the reasoning-enabled
+// step is always pre-filled with yes/no, so it never needs the escape hatch).
+func modelFormAllowsEmptyValue(mode modalType, step int) bool {
+	switch step {
+	case addModelContextWindowStep, addModelMaxTokensStep, addModelThinkSystemStep:
+		return true
+	}
+	// The reasoning steps exist only in the edit form; a stray index must not
+	// loosen the add form.
+	if mode != ModalEditModel {
+		return false
+	}
+	switch step {
+	case editModelReasoningEffortStep, editModelReasoningMaxTokensStep,
+		editModelReasoningExcludeStep, editModelReasoningSummaryStep:
+		return true
+	}
+	return false
+}
+
 // updateProvider edits an existing provider — every field of its config except
 // the name and the model list — and persists to disk. It is the save point of
 // the ModalEditProvider form (opened from the provider detail view with "e" or
@@ -749,9 +819,17 @@ func (m *Model) providerModelConfig(providerName, alias string) (config.Provider
 
 // updateModelInProvider edits an existing model alias in a provider's Models
 // map and persists to disk. Unlike addModelToProvider it starts from the
-// EXISTING entry, so fields the form does not ask about (Temperature,
-// Reasoning) survive the edit: Reasoning is deliberately NOT re-derived from
-// the catalog here — an existing model may carry user-tuned reasoning.
+// EXISTING entry, so fields the form does not ask about (Temperature, Video)
+// survive the edit.
+//
+// Reasoning IS form-driven (the edit form's five reasoning steps, see
+// reasoningFromFormValues), so it is always set explicitly: a nil value means
+// "no reasoning override" and clears whatever the model carried, while a
+// non-nil value is exactly what the user answered. The value is validated here
+// as well as in the form helper (defense in depth for callers that skip the
+// form), and validation happens before anything is written so a rejected
+// config leaves the stored model untouched.
+//
 // contextWindow / maxTokens keep their current value when passed as 0; a
 // value still zero afterwards is filled from catalog.DefaultsFor when the
 // model is known there. Vision is always set explicitly (the form always
@@ -759,7 +837,7 @@ func (m *Model) providerModelConfig(providerName, alias string) (config.Provider
 // config.ThinkingType*); "" and "auto" clear the field back to the default
 // heuristics. The alias may be renamed: the old key is removed when the
 // (normalized) new alias differs.
-func (m *Model) updateModelInProvider(providerName, origAlias, newAlias, modelName string, contextWindow, maxTokens int, vision bool, thinkingType string) error {
+func (m *Model) updateModelInProvider(providerName, origAlias, newAlias, modelName string, contextWindow, maxTokens int, vision bool, thinkingType string, reasoning *config.ReasoningConfig) error {
 	if m.cfg == nil || m.cfg.Providers == nil || m.cfg.Providers.Named == nil {
 		return fmt.Errorf("no providers configured")
 	}
@@ -807,9 +885,16 @@ func (m *Model) updateModelInProvider(providerName, origAlias, newAlias, modelNa
 		return err
 	}
 	updated.ThinkingType = normalizedThink
+	// Reasoning is form-driven too (the five reasoning steps). Validate before
+	// touching the stored entry so a rejected answer cannot half-save the edit.
+	if err := reasoning.Validate(); err != nil {
+		return err
+	}
+	updated.Reasoning = reasoning
 
-	// Catalog fallback for values still zero after the edit. Deliberately no
-	// Reasoning touch — a user-tuned config must survive the edit.
+	// Catalog fallback for values still zero after the edit. Temperature, Video
+	// and every other field the form does not ask about were copied over from
+	// the existing entry above and keep their stored values.
 	if (contextWindow == 0 && updated.ContextWindow == 0) || (maxTokens == 0 && updated.MaxTokens == 0) {
 		if catKey := m.catalogProviderKey(key); catKey != "" {
 			if d, ok := catalog.DefaultsFor(catKey, modelName); ok {
@@ -1021,8 +1106,10 @@ func (m *Model) openProviderEditFlow() bool {
 }
 
 // openModelEditFlow opens the ModalEditModel form pre-filled with the stored
-// values of the given model alias. When the model cannot be found the form is
-// NOT opened: an error is staged and the caller stays in the detail view.
+// values of the given model alias: the six fields of the add form plus the five
+// reasoning overrides (see editModelStepCount), so Enter-through leaves the
+// model exactly as it was. When the model cannot be found the form is NOT
+// opened: an error is staged and the caller stays in the detail view.
 func (m *Model) openModelEditFlow(alias string) {
 	provider := m.providerSelectedName
 	mc, ok := m.providerModelConfig(provider, alias)
@@ -1037,30 +1124,63 @@ func (m *Model) openModelEditFlow(alias string) {
 	// the provider the edit flow operates on.
 	m.providerSelectedName = provider
 	m.formStepIndex = 0
-	m.formValues = make([]string, 6)
+	m.formValues = make([]string, editModelStepCount)
 	m.formError = ""
 	m.formConfirmMode = false
 
 	// Pre-fill: alias, model name, context window, max tokens, vision,
 	// think system.
-	m.formValues[0] = alias
-	m.formValues[1] = mc.Model
+	m.formValues[addModelAliasStep] = alias
+	m.formValues[addModelModelNameStep] = mc.Model
 	if mc.ContextWindow > 0 {
-		m.formValues[2] = strconv.Itoa(mc.ContextWindow)
+		m.formValues[addModelContextWindowStep] = strconv.Itoa(mc.ContextWindow)
 	}
 	if mc.MaxTokens > 0 {
-		m.formValues[3] = strconv.Itoa(mc.MaxTokens)
+		m.formValues[addModelMaxTokensStep] = strconv.Itoa(mc.MaxTokens)
 	}
 	if mc.Vision {
-		m.formValues[4] = "yes"
+		m.formValues[addModelVisionStep] = "yes"
 	} else {
-		m.formValues[4] = "no"
+		m.formValues[addModelVisionStep] = "no"
 	}
 	if mc.ThinkingType != "" {
-		m.formValues[5] = mc.ThinkingType
+		m.formValues[addModelThinkSystemStep] = mc.ThinkingType
 	} else {
-		m.formValues[5] = config.ThinkingTypeAuto
+		m.formValues[addModelThinkSystemStep] = config.ThinkingTypeAuto
 	}
+
+	// Pre-fill the reasoning override. A model without a ReasoningConfig shows
+	// the neutral answers (disabled + every optional override unset), so
+	// Enter-through round-trips nil back to nil.
+	r := mc.Reasoning
+	if r != nil && r.Enable {
+		m.formValues[editModelReasoningEnableStep] = "yes"
+	} else {
+		m.formValues[editModelReasoningEnableStep] = "no"
+	}
+	if r != nil && r.Effort != nil && strings.TrimSpace(*r.Effort) != "" {
+		m.formValues[editModelReasoningEffortStep] = strings.TrimSpace(*r.Effort)
+	} else {
+		m.formValues[editModelReasoningEffortStep] = reasoningFormDefault
+	}
+	if r != nil && r.MaxTokens != nil && *r.MaxTokens > 0 {
+		m.formValues[editModelReasoningMaxTokensStep] = strconv.Itoa(*r.MaxTokens)
+	}
+	if r != nil && r.Exclude != nil {
+		if *r.Exclude {
+			m.formValues[editModelReasoningExcludeStep] = "yes"
+		} else {
+			m.formValues[editModelReasoningExcludeStep] = "no"
+		}
+	} else {
+		m.formValues[editModelReasoningExcludeStep] = reasoningFormDefault
+	}
+	if r != nil && r.Summary != nil && strings.TrimSpace(*r.Summary) != "" {
+		m.formValues[editModelReasoningSummaryStep] = strings.TrimSpace(*r.Summary)
+	} else {
+		m.formValues[editModelReasoningSummaryStep] = reasoningFormDefault
+	}
+
 	m.modelEditAlias = alias
 	m.modelEditOrigModel = mc.Model
 

@@ -804,3 +804,41 @@ func TestProviderEditKeysExistInAllBuiltinLanguages(t *testing.T) {
 		}
 	}
 }
+
+// TestEditModelReasoningKeysExistInAllBuiltinLanguages guards the reasoning
+// steps of the edit-model form (ModalEditModel): its four optional steps show
+// the "default clears the override" hint and the max-tokens step its own, so a
+// missing translation would silently fall back to English mid-form — a subtler
+// bug than a missing key T() would mask. Presence is asserted against the raw
+// map of each builtin locale file, exactly like the provider-edit keys above.
+func TestEditModelReasoningKeysExistInAllBuiltinLanguages(t *testing.T) {
+	keys := []string{
+		"tui.editModelReasoningDefaultHint",
+		"tui.editModelReasoningTokensHint",
+	}
+
+	Init()
+	prev := GetLanguage()
+	t.Cleanup(func() { SetLanguage(prev) })
+
+	for _, lang := range []string{"en", "es", "pt"} {
+		tag, err := language.Parse(lang)
+		if err != nil {
+			t.Fatalf("language.Parse(%q): %v", lang, err)
+		}
+		raw, err := loadLocale(localeFiles[tag])
+		if err != nil {
+			t.Fatalf("loadLocale(%s): %v", lang, err)
+		}
+		for _, key := range keys {
+			value, exists := raw[key]
+			if !exists {
+				t.Errorf("key %s missing from %s.json (T() would mask it via the default-locale fallback)", key, lang)
+				continue
+			}
+			if value == "" {
+				t.Errorf("key %s is empty in %s.json", key, lang)
+			}
+		}
+	}
+}

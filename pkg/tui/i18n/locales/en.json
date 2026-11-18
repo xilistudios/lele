@@ -187,6 +187,8 @@
   "tui.editProviderWebSearchHint": "yes, no or default (unset). Blank keeps the stored value.",
   "tui.editProviderHeadersHint": "JSON object, e.g. {\"X-Title\":\"lele\"}. Blank keeps; {} clears. Values are masked. {{session}} expands per conversation.",
   "tui.providerUpdated": "Provider updated",
+  "tui.editModelReasoningDefaultHint": "default clears the override; blank keeps the pre-filled answer.",
+  "tui.editModelReasoningTokensHint": "Positive integer. Blank or default leaves it unset.",
   "tui.modelDeleteConfirm": "Press d again to delete model \"%s\"",
   "tui.modelDeleteNoRow": "No model under the cursor",
   "tui.providerDetailHints": "ENTER: edit model | E: edit provider | D: delete model | ESC: back",

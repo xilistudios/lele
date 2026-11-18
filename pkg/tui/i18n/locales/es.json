@@ -187,6 +187,8 @@
   "tui.editProviderWebSearchHint": "yes, no o default (sin definir). Dejar vacío conserva el valor guardado.",
   "tui.editProviderHeadersHint": "Objeto JSON, p. ej. {\"X-Title\":\"lele\"}. Vacío conserva; {} borra. Los valores se enmascaran. {{session}} se expande por conversación.",
   "tui.providerUpdated": "Provider actualizado",
+  "tui.editModelReasoningDefaultHint": "default borra el override; vacío conserva la respuesta precargada.",
+  "tui.editModelReasoningTokensHint": "Entero positivo. Vacío o default lo deja sin definir.",
   "tui.modelDeleteConfirm": "Pulsa d de nuevo para eliminar el modelo \"%s\"",
   "tui.modelDeleteNoRow": "Sin modelo bajo el cursor",
   "tui.providerDetailHints": "ENTER: editar modelo | E: editar provider | D: eliminar modelo | ESC: volver",
