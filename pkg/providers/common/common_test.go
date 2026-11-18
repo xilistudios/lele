@@ -871,3 +871,31 @@ func TestUserAgent_IsLeleVersioned(t *testing.T) {
 		t.Fatalf("UserAgent() = %q, want %q", got, want)
 	}
 }
+
+// TestSerializeMessages_OmitsUIMetadata pins the "UI metadata only" contract of
+// the failure field: ErrorDetail is persisted for the UIs, but the wire payload
+// built for a provider is assembled from explicit fields, so it must never
+// appear in a request. Same guarantee the other UI-only fields rely on
+// (DisplayContent, Attachments, Command).
+func TestSerializeMessages_OmitsUIMetadata(t *testing.T) {
+	messages := []Message{
+		{
+			Role:               "assistant",
+			Content:            "❌ Error processing message: LLM call failed after retries",
+			ErrorDetail:        "LLM call failed after retries: 429 Too Many Requests",
+			DisplayContent:     "/review src",
+			ExcludeFromContext: true,
+		},
+	}
+	result := SerializeMessages(messages)
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"error_detail", "display_content", "harness_command", "exclude_from_context"} {
+		if strings.Contains(string(data), key) {
+			t.Errorf("%s leaked into the provider payload: %s", key, data)
+		}
+	}
+}

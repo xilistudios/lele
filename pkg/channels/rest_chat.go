@@ -540,6 +540,7 @@ func (b *chatHistoryBuilder) message(id string, msg providers.Message) ChatHisto
 		Attachments:        msg.Attachments,
 		DisplayContent:     msg.DisplayContent,
 		Command:            msg.Command,
+		ErrorDetail:        msg.ErrorDetail,
 	}
 	// For tool messages, look up the tool name from the assistant message that initiated the call
 	if msg.Role == "tool" && msg.ToolCallID != "" {

@@ -254,6 +254,10 @@ func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.
 			if len(errMsg) > 4000 {
 				errMsg = errMsg[:3997] + "..."
 			}
+			// Same persistence as the normal path: the failure is stored as an
+			// excluded assistant message so both UIs can show it instead of
+			// losing it between the live event and the history refetch.
+			mp.persistLLMFailure(agent, sessionKey, errMsg, err, &msg)
 			return errMsg, nil
 		}
 		// Same conditional clear as the normal path: only THIS turn's marker
@@ -305,6 +309,7 @@ func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.
 		if len(errMsg) > 4000 {
 			errMsg = errMsg[:3997] + "..."
 		}
+		mp.persistLLMFailure(agent, sessionKey, errMsg, err, &msg)
 		return errMsg, nil
 	}
 	// The turn reached a normal end: its checkpoint is no longer needed.
@@ -330,6 +335,59 @@ func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.
 		return ephemeralNotice, nil
 	}
 	return ephemeralNotice + "\n\n" + response, nil
+}
+
+// llmErrorMetadataKey is the inbound-metadata key that marks a turn as having
+// ended in a provider/tool failure. It rides the InboundMessage map (shared by
+// reference with the copy loop.go holds, see Run) so loop.go can tag the
+// outbound message, which is what lets the WebUI render the live failure as an
+// error box instead of a normal assistant bubble that the history refetch
+// deletes.
+const llmErrorMetadataKey = "llm_error"
+
+// persistLLMFailure records a failed turn in the session history as an
+// assistant message that carries the failure detail in ErrorDetail, a UI-only
+// field, with ExcludeFromContext=true so the text can NEVER reach the model
+// (see filterContextMessages in context.go). Both UIs render it as an error
+// box, which is what keeps the failure on screen after the history refetch.
+// Content keeps the legacy "❌ Error …" text so channels that only render plain
+// text (Telegram, WhatsApp) are unaffected.
+//
+// The streamed draft is sealed first: AddFullMessage replaces a streaming
+// assistant tail IN PLACE, which would overwrite whatever the user already saw
+// with the error text.
+func (mp *messageProcessorImpl) persistLLMFailure(agent *AgentInstance, sessionKey, errMsg string, err error, msg *bus.InboundMessage) {
+	// Tag the inbound message first: the marker does not depend on the
+	// session write succeeding (a nil Sessions / agent must not silence the
+	// live UI), and the map is shared with loop.go's copy when non-nil.
+	if msg != nil && msg.Metadata != nil {
+		msg.Metadata[llmErrorMetadataKey] = "true"
+	}
+	if agent == nil || agent.Sessions == nil {
+		return
+	}
+
+	detail := err.Error()
+	if len(detail) > 4000 {
+		detail = detail[:3997] + "..."
+	}
+
+	agent.Sessions.SealStreamingTail(sessionKey)
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
+		Role:               "assistant",
+		Content:            errMsg,
+		ErrorDetail:        detail,
+		ExcludeFromContext: true,
+	})
+	// Flush immediately: both callers return right after this helper, and the
+	// row is the only copy of the failure. Waking up to a session whose error
+	// box lost its row would reintroduce the disappearing-failure bug.
+	if saveErr := agent.Sessions.Save(sessionKey); saveErr != nil {
+		logger.WarnCF("agent", "Failed to save session after LLM failure", map[string]interface{}{
+			"session_key": sessionKey,
+			"error":       saveErr.Error(),
+		})
+	}
 }
 
 // syncSessionModel keeps the session model in sync with the active or

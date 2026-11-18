@@ -981,6 +981,17 @@ export type ChatMessage = {
    * collectConfirmCandidates) depends on that count and on content prefixes.
    */
   systemNotice?: { sender: string; body: string }
+  /**
+   * Failure text of a turn that could not complete. Rendered as a red error box
+   * (components/organisms/MessageBubble.tsx) instead of the normal bubble.
+   *
+   * Two sources feed it, and both are the same failure:
+   *   - the persisted backend message (`error_detail`, mapped by
+   *     lib/chatMessageBuilder.ts), which is what survives reloads/refetches;
+   *   - a live stream failure (markStreamingAssistantsErrored in
+   *     hooks/streamingOps.ts, and the outbound error marker of the final
+   *     message.complete), which paints the box before the refetch lands.
+   */
   error?: string
   excludeFromContext?: boolean
   /**
@@ -1131,6 +1142,13 @@ export type RawHistoryMessage = {
   display_content?: string
   /** Set when the message was produced by a custom slash command. */
   harness_command?: HistoryCommandInfo
+  /**
+   * Marks this message as a FAILED turn and carries the failure detail. The
+   * backend persists such a message with `exclude_from_context: true` and the
+   * legacy "❌ Error …" text in `content` (plain-text channels read that); both
+   * UIs render it as an error box instead of an assistant bubble.
+   */
+  error_detail?: string
 }
 
 export type HistoryResponse = {

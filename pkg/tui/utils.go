@@ -484,6 +484,10 @@ func messageFingerprint(msg providers.Message, width int) string {
 	// re-attached, one after — would otherwise share a cache entry and keep
 	// showing the expanded prompt.
 	h = fnv64aWriteField(h, msg.DisplayContent)
+	// ErrorDetail turns an assistant row into an error box (error_box.go): the
+	// same Content renders completely differently, so the two must never share
+	// a cache entry.
+	h = fnv64aWriteField(h, msg.ErrorDetail)
 	h = fnv64aWriteField(h, msg.ReasoningContent)
 	h = fnv64aWriteUint64(h, uint64(len(msg.ToolCalls)))
 	for _, tc := range msg.ToolCalls {

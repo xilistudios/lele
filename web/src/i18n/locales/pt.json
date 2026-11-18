@@ -141,6 +141,7 @@
     "failedToSend": "Falha ao enviar",
     "retry": "Tentar novamente",
     "archivedFromContext": "Arquivado do contexto",
+    "llmErrorTitle": "Falha na requisição ao LLM",
     "download": "Baixar",
     "errorContentMissing": "Escreva uma mensagem ou anexe um arquivo",
     "errorAttachmentsRejected": "Não foi possível ler seus anexos. Escreva um texto ou envie novamente",

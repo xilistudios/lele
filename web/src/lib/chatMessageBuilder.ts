@@ -317,6 +317,8 @@ interface AssistantMessageProps extends BaseMessageProps {
   content: string
   reasoningContent?: string
   streaming?: boolean
+  /** Failure text: the message renders as an error box instead of a bubble. */
+  error?: string
 }
 
 interface ToolMessageProps extends BaseMessageProps {
@@ -358,6 +360,7 @@ export function createAssistantMessage(props: AssistantMessageProps): ChatMessag
     attachments: props.attachments,
     excludeFromContext: props.excludeFromContext,
     stableId: props.stableId,
+    error: props.error,
   }
 }
 
@@ -572,7 +575,11 @@ export function toChatMessages(
         message.reasoning_content && message.reasoning_content.trim() !== '',
       )
       const hasContent = Boolean(messageContent && messageContent.trim() !== '')
-      const shouldAddAssistant = hasContent || hasReasoning || !hasToolCalls
+      // error_detail marks a persisted FAILURE (an LLM request that could not
+      // complete the turn): the row renders as an error box, and it must never be
+      // dropped for lacking visible content of its own.
+      const errorDetail = message.error_detail || undefined
+      const shouldAddAssistant = hasContent || hasReasoning || !hasToolCalls || Boolean(errorDetail)
       if (shouldAddAssistant) {
         return [
           createAssistantMessage({
@@ -584,6 +591,7 @@ export function toChatMessages(
             attachments: parsedAttachments,
             excludeFromContext: message.exclude_from_context,
             stableId,
+            error: errorDetail,
           }),
         ]
       }

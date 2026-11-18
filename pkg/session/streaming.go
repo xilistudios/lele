@@ -175,6 +175,54 @@ func (sm *SessionManager) FinalizeAssistantMessage(key string) {
 	}
 }
 
+// SealStreamingTail closes the in-progress assistant draft so the next
+// assistant message APPENDS after it instead of replacing it in place.
+//
+// FinalizeAssistantMessage (above) deliberately keeps the Streaming flag set so
+// AddFullMessage's in-place branch can swap the streamed draft for the final
+// version of the SAME iteration. That is wrong for a writer that persists a
+// DIFFERENT message after a failed turn (see the LLM-failure path in
+// pkg/agent/message_processor.go): the in-place branch would overwrite the text
+// the user already saw with the error. Clearing the flag here makes the failure
+// message a new row while the partial answer stays where it was.
+//
+// No-op for a tail that is not a streaming assistant draft, and for an EMPTY
+// draft: an empty placeholder must stay streaming so AddFullMessage reuses its
+// slot (no orphan blank bubble, no extra row).
+func (sm *SessionManager) SealStreamingTail(key string) {
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok || len(session.Messages) == 0 {
+			return
+		}
+	}
+	if len(session.Messages) == 0 {
+		return
+	}
+
+	tail := &session.Messages[len(session.Messages)-1]
+	if tail.Role != "assistant" || !tail.Streaming {
+		return
+	}
+	if tail.Content == "" && tail.ReasoningContent == "" {
+		return
+	}
+
+	// hadStreamedContent is left alone: the turn really did stream, and
+	// HasStreamedContent must keep reporting it (native channel dedupe).
+	tail.Streaming = false
+	session.Updated = time.Now()
+	session.markModified(len(session.Messages) - 1)
+	session.publishViewLocked()
+	sm.syncSessionMetaLocked(session)
+	sm.flushStreamNow(key)
+}
+
 // AttachFilesToLastAssistant appends file attachments to the last assistant
 // message of a session (even if it is still in streaming state) and persists
 // the session. Attachments already present with the same path are skipped

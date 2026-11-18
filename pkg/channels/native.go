@@ -1211,6 +1211,13 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		messageID = uuid.New().String()
 	}
 
+	// A failed turn is delivered through this legacy full-message path (the
+	// agent published the legacy "❌ Error …" text as a normal final answer).
+	// The outbound Metadata carries the marker set by pkg/agent/loop.go; it is
+	// mirrored onto message.complete so the client can paint the failure as an
+	// error box immediately instead of waiting for the history refetch.
+	isErrorMessage := msg.Metadata["error"] == "true"
+
 	// Skip duplicate message.stream if content was already delivered via
 	// streaming (the provider's ChatStream already sent chunks via onChunk).
 	// This prevents the frontend from receiving two message.stream events
@@ -1232,6 +1239,7 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			SessionKey:  sessionKey,
 			Content:     msg.Content,
 			Attachments: attachmentsToMaps(msg.Attachments),
+			Error:       isErrorMessage,
 		}, messageID)
 
 		n.emitNativeEvent(sessionKey, "history.updated", map[string]interface{}{
@@ -1265,6 +1273,7 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			SessionKey:  sessionKey,
 			Content:     "",
 			Attachments: nil,
+			Error:       isErrorMessage,
 		}, messageID)
 
 		n.emitNativeEvent(sessionKey, "history.updated", map[string]interface{}{
@@ -1279,6 +1288,7 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		SessionKey:  sessionKey,
 		Content:     msg.Content,
 		Attachments: attachmentsToMaps(msg.Attachments),
+		Error:       isErrorMessage,
 	}, messageID)
 
 	// Signal that session data has been persisted and is safe to refetch

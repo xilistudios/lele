@@ -96,6 +96,13 @@ var (
 
 	ToolResultBox lipgloss.Style
 
+	// ErrorTitle and ErrorBox render an LLM request that failed after retries
+	// (see error_box.go). PrimaryColor is the theme's red, the same colour
+	// StatusFailed uses for a failed row.
+	ErrorTitle lipgloss.Style
+
+	ErrorBox lipgloss.Style
+
 	// SubagentProgressLabel displays real-time subagent progress in parent chat.
 	SubagentProgressLabel lipgloss.Style
 
@@ -320,6 +327,17 @@ func rebuildStyles(t theme.Theme) {
 		Padding(0, 1).
 		Border(lipgloss.Border{Left: "│"}, false, false, false, true).
 		BorderForeground(SecondaryColor)
+
+	ErrorTitle = lipgloss.NewStyle().
+		Foreground(PrimaryColor).
+		Bold(true)
+
+	ErrorBox = lipgloss.NewStyle().
+		Foreground(PrimaryColor).
+		Background(InputBgColor).
+		Padding(0, 1).
+		Border(lipgloss.Border{Left: "│"}, false, false, false, true).
+		BorderForeground(PrimaryColor)
 
 	// SubagentProgressLabel displays real-time subagent progress in parent chat.
 	SubagentProgressLabel = lipgloss.NewStyle().

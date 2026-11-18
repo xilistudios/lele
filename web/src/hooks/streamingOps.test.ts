@@ -223,6 +223,35 @@ describe('applyMessageComplete', () => {
     const next = applyMessageComplete(current, 'a1', 's1', 'plain', undefined)
     expect(next.find((m) => m.id === 'a1')?.attachments).toBeUndefined()
   })
+
+  test('marks the completed message as an error when the turn failed', () => {
+    // A failed turn is flagged on the wire (message.complete error === true, see
+    // pkg/channels/native.go): the bubble must render the red error box straight
+    // away instead of waiting for the history refetch that carries error_detail.
+    const current = [msg('u1', 'user', 'hi'), msg('a1', 'assistant', '', { streaming: true })]
+    const next = applyMessageComplete(current, 'a1', 's1', 'ERROR_TEXT', undefined, true)
+
+    const done = next.find((m) => m.id === 'a1')
+    expect(done?.error).toBe('ERROR_TEXT')
+    expect(done?.streaming).toBe(false)
+  })
+
+  test('creates the failed message with the error set when never streamed', () => {
+    const current: ChatMessage[] = []
+    const next = applyMessageComplete(current, 'a1', 's1', 'ERROR_TEXT', undefined, true)
+
+    expect(next).toHaveLength(1)
+    expect(next[0].error).toBe('ERROR_TEXT')
+    expect(next[0].streaming).toBe(false)
+  })
+
+  test('a normal completion never sets the error field', () => {
+    const current = [msg('a1', 'assistant', '', { streaming: true })]
+    const next = applyMessageComplete(current, 'a1', 's1', 'answer', undefined, false)
+
+    expect(next[0].error).toBeUndefined()
+    expect(next[0].content).toBe('answer')
+  })
 })
 
 describe('markOptimisticUserFailed', () => {

@@ -39,6 +39,7 @@
   "tui.selectSubagent": "サブエージェントを選択",
   "tui.noSubagents": "このセッションにはサブエージェントがありません",
   "tui.systemNotice": "システム通知",
+  "tui.llmErrorTitle": "LLMリクエストに失敗しました",
   "tui.pressEscAgain": "もう一度 ESC を押してキャンセル",
   "tui.processing": "処理中...（ESC でキャンセル）",
   "tui.doneIn": "● %.1fs で完了",
