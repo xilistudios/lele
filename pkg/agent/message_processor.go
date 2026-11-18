@@ -115,6 +115,22 @@ func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.
 	}
 	sessionKey = mp.al.ResolveSessionKey(sessionKey)
 
+	// Record the origin key of this conversation: the key its subagent tasks
+	// are written under (tools.BuildOriginSessionKey(msg.Channel, msg.ChatID)).
+	// This is the only place that knows BOTH identities at once — the runtime
+	// session key (routing + alias resolution, above) and the channel/chat ID
+	// the tasks are keyed by — and it runs on every inbound turn, which is
+	// exactly when the system prompt (and therefore the subagent-ledger
+	// digest) is next built. Without it the digest is scoped by a routed key
+	// like "agent:main:main" while the ledger lives under "telegram:12345",
+	// and every reaped task silently disappears from the prompt.
+	//
+	// The system-message and command paths do not need it: neither builds a
+	// prompt (processSystemMessage answers from the loop directly, and
+	// handleCommand returns before runAgentLoop), and a native/TUI key relates
+	// to its own origin form, so those sessions keep working without it.
+	mp.al.setSessionOrigin(sessionKey, tools.BuildOriginSessionKey(msg.Channel, msg.ChatID))
+
 	// Check if a session-specific agent is pinned (e.g. via /agent). Only a real
 	// pin may override the route: getSessionAgent falls back to the default
 	// agent ID, so using it here would make every unpinned session resolve to

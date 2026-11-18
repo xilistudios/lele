@@ -180,6 +180,51 @@ Cron jobs can be used in several ways:
 
 When `spawn` is present, the scheduled task is delegated to a subagent instead of being executed inline by the main flow.
 
+## Subagent Tools
+
+`spawn`, `subagent`, `list_active_subagents`, `wait_for_subagent` and `cancel_subagent` are registered per agent,
+each bound to that agent's own subagent manager. They have no `config.json` settings of their own — the parameters
+below are the tool-call arguments the model sends, listed here because they are the only knobs these tools expose.
+See `docs/SKILL_SUBAGENTS.md` for the lifecycle and the ledger semantics.
+
+### `list_active_subagents`
+
+Lists the session's subagent tasks, newest first, from the durable ledger (live tasks merged with tasks recovered
+from their persisted sessions). It is the only subagent view that includes reaped and pre-restart tasks.
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `status` | string | `active` | Filter applied before pagination. One of `active`, `all`, `running`, `pending`, `needs_context`, `completed`, `failed`, `cancelled`, `not_done`, `unknown`. Any other value is an error |
+| `limit` | int | `20` | Maximum tasks per page. Values above `100` are clamped to `100`; a non-positive value falls back to `20` |
+| `offset` | int | `0` | Number of tasks to skip, for paging |
+| `include_completed` | bool | `false` | Deprecated alias for `status=all`. Ignored when `status` is given |
+
+`active` means `running`, `pending` or `needs_context` — the tasks that can still produce a result. `unknown` is
+a recovered row whose outcome was never recorded: the task was interrupted (a restart), or its live row now lives
+in another agent's manager. Filtering happens before pagination, so `limit`/`offset` page over the filtered set.
+
+### `wait_for_subagent`
+
+Blocks until a task finishes or pauses, then returns its result.
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `task_id` | string | — (required) | Subagent task ID, e.g. `subagent-1` |
+| `timeout_seconds` | int | `120` | Maximum wait. Clamped to `1`–`600` |
+
+Only tasks the manager still tracks in memory can be waited on; a reaped or pre-restart task answers
+`Subagent task not found` even though `list_active_subagents` still lists it.
+
+### `cancel_subagent`
+
+Cancels a task that is `running`, `pending` or `needs_context`.
+
+| Argument | Type | Default | Description |
+| --- | --- | --- | --- |
+| `task_id` | string | — (required) | Subagent task ID, e.g. `subagent-1` |
+
+A task that is already terminal is not cancelled; the call reports its status instead.
+
 ## MCP Tool Loader
 
 `load_mcp_tools` exposes MCP servers configured in layered `mcp.json` files

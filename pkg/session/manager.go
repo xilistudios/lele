@@ -22,6 +22,12 @@ type SessionManager struct {
 	sessionRepo *store.SessionRepo // SQLite sessions repository
 	loadOnce    sync.Once          // ensures loadSessions runs exactly once, on first access
 
+	// sessionKV is the shared key/value store, when one is configured. It is
+	// only read by SubagentAgentPin (the durable spawn-time executor pin, which
+	// pkg/agent writes into this same namespace). Nil is valid: JSON-only
+	// deployments and every hand-built test manager simply have no pin.
+	sessionKV *store.KVRepo
+
 	// Lazy loading: lightweight metadata for sessions not yet loaded into memory.
 	// Populated by loadSessionMetadata() instead of loading full message history.
 	sessionMeta map[string]*sessionMetadata // keyed by session key
@@ -54,6 +60,25 @@ func NewSessionManager() *SessionManager {
 // set, the manager will use SQLite instead of JSON files for session storage.
 func (sm *SessionManager) SetSessionRepo(r *store.SessionRepo) {
 	sm.sessionRepo = r
+}
+
+// HasSessionRepo reports whether a persistence repository is configured. It is
+// the read-only twin of SetSessionRepo, for callers that must distinguish "no
+// rows on disk" from "no disk at all" — a manager without a repo answers every
+// persisted read with an empty result, which is indistinguishable from an empty
+// ledger. Test fixtures use it to fail loudly instead of silently asserting
+// against a memory-only manager.
+func (sm *SessionManager) HasSessionRepo() bool {
+	return sm.sessionRepo != nil
+}
+
+// SetSessionKV wires the shared key/value store used by SubagentAgentPin. It is
+// optional: without it the durable spawn-time executor pin is simply unreadable,
+// which degrades a pre-v8 ledger row to "no executor" instead of failing.
+func (sm *SessionManager) SetSessionKV(kv *store.KVRepo) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.sessionKV = kv
 }
 
 func (sm *SessionManager) GetOrCreate(key string) *Session {

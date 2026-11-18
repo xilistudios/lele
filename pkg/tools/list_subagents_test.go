@@ -268,27 +268,6 @@ func TestListSubagentsTool_SessionScopingViaChatIDFallback(t *testing.T) {
 	<-resultCh
 }
 
-func TestSameSessionKey(t *testing.T) {
-	cases := []struct {
-		origin, session string
-		want            bool
-	}{
-		{"native:abc", "native:abc", true},
-		{"native:abc", "native:abc:subagent-1", true}, // child subagent session
-		{"native:abc", "native:abc:cron-1:subagent-2", true},
-		{"native:abc", "native:abd", false},
-		{"native:abc", "", false},
-		{"", "native:abc", false},
-		{"native:abc:subagent-1", "native:abc", false}, // origin is more specific
-		{"telegram:123", "telegram:123", true},
-	}
-	for _, tc := range cases {
-		if got := sameSessionKey(tc.origin, tc.session); got != tc.want {
-			t.Errorf("sameSessionKey(%q, %q) = %v, want %v", tc.origin, tc.session, got, tc.want)
-		}
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Regression tests: list_active_subagents session-key asymmetry.
 //

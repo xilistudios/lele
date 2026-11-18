@@ -125,6 +125,29 @@ Returned when the subagents provider panics or fails (the cache converts a panic
 
 The endpoint never answers 404: a session with no subagent tasks — including one that does not exist — returns 200 with an empty `subagents` array, not an error.
 
+### Read Path Behind The Subagent Ledger
+
+The endpoint above is the WebUI's view. The agent's own ledger — `list_active_subagents` and the
+`## Subagent Tasks` prompt section — reads the same persisted subagent sessions through a different, cheaper path
+in `pkg/session/listing.go`, and the two must not be confused:
+
+- **`ListSubagentSessionMeta(parentPrefixes)`** is the metadata-only listing. It walks the resident sessions map
+  and the `sessionMeta` index under a single read lock, matching keys with the prefix `{parent}:subagent-`, and
+  returns key, task ID, parent key, name, status, agent ID and timestamps. It performs **no store query**, takes
+  no exclusive lock, and does not touch the LRU, so it neither makes a session resident nor changes eviction
+  order. It also reports metadata rows when no store is configured. This is what makes it safe on the per-turn
+  prompt path, where it runs several times per turn.
+- **`SubagentSessionDetails(keys)`** is the windowed detail query: the iteration count and the summary for a
+  bounded key set. Resident sessions are answered from their in-memory messages; the rest go through one batched
+  read-only `SessionListingStats` query (up to 200 keys per statement) with the session lock released. The caller
+  must bound `len(keys)` — it is only ever called for the page being returned, never for a whole history.
+  Sessions with no row are omitted rather than reported with empty fields.
+
+The executor of a recovered row comes from the session row's `agent_id`, or, for rows written before that column
+existed, from the durable spawn-time pin (`SubagentAgentPin`, a single KV lookup, no store query). A row whose
+status was never persisted reads `unknown` in the ledger; this endpoint keeps its own historical `completed`
+fallback for those rows, so the two surfaces can disagree about a task that was interrupted.
+
 ## Backend Implementation
 
 ### Route Registration (native.go)

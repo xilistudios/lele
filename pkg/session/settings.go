@@ -141,6 +141,44 @@ func (sm *SessionManager) SetSubagentAgentID(key string, agentID string) {
 	}
 }
 
+// sessionStateAgentKeyPrefix is the KV namespace of the durable spawn-time
+// executor pin (sessionKey -> agent ID). It is the same namespace
+// AgentLoop.setSubagentSessionAgent writes and loadDurableSessionState
+// rehydrates; it lives here so SubagentAgentPin can read it without pkg/session
+// importing pkg/agent.
+const sessionStateAgentKeyPrefix = "sess:agent:"
+
+// SubagentAgentPin returns the durable spawn-time executor pin recorded for a
+// subagent session key, or "" when there is none.
+//
+// The pin lives in the shared session-state KV namespace (sess:agent:<key>),
+// written by AgentLoop.setSubagentSessionAgent at spawn time and rehydrated by
+// loadDurableSessionState at startup. It predates the agent_id column on the
+// session row, so it is the only executor record that exists for a task spawned
+// before migration v8 — which is exactly the population the ledger's executor
+// fallback serves.
+//
+// It is a single indexed KV lookup and performs no session-store query, so it is
+// safe on the listing path; callers only ask for rows whose AgentID is empty.
+// Returns "" when no store is configured (JSON-only deployments keep the
+// historical behaviour of an unnamed executor).
+func (sm *SessionManager) SubagentAgentPin(key string) string {
+	if key == "" {
+		return ""
+	}
+	sm.mu.RLock()
+	kv := sm.sessionKV
+	sm.mu.RUnlock()
+	if kv == nil {
+		return ""
+	}
+	value, ok, err := kv.Get(sessionStateAgentKeyPrefix + key)
+	if err != nil || !ok {
+		return ""
+	}
+	return value
+}
+
 func (sm *SessionManager) SetName(key string, name string) error {
 	sm.ensureLoaded()
 	sm.mu.Lock()

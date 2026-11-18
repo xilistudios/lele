@@ -40,6 +40,10 @@ type sessionRepo interface {
 	// change the summary. It is part of the seam so the T9 lock-scope test can
 	// park that write and prove it runs with sm.mu released.
 	UpdateFirstInMemorySeq(sessionKey string, seq int) error
+	// SessionListingStats is the batched read-only listing query. It is part of
+	// the seam so the windowed subagent detail loader (SubagentSessionDetails)
+	// can be proven to query only the keys of a page, not a whole history.
+	SessionListingStats(keys []string) (map[string]store.SessionListingStats, error)
 }
 
 // repoFor resolves the repository the save paths in this file write through.

@@ -24,11 +24,16 @@ func TestClaimTaskID_SkipsExistingSessionKeys(t *testing.T) {
 		"cli:direct:subagent-2": true,
 	}
 	var mu sync.Mutex
-	sm.SetSessionExistsCallback(func(sessionKey string) bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return existing[sessionKey]
-	})
+	// The probe is installed together with the ledger lister (SetLedgerWiring):
+	// this test only exercises the probe, so the lister is a no-op.
+	sm.SetLedgerWiring(
+		func([]string) []PersistedSubagentTask { return nil },
+		func(sessionKey string) bool {
+			mu.Lock()
+			defer mu.Unlock()
+			return existing[sessionKey]
+		},
+	)
 
 	// First claim: nextID starts at 1, but subagent-1 and subagent-2 are
 	// taken, so it must skip to subagent-3.
@@ -67,9 +72,10 @@ func TestSpawnWithOptions_SkipsExistingSessionKeys(t *testing.T) {
 	sm := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 10)
 
 	// subagent-1 already exists on disk (left over from a previous run).
-	sm.SetSessionExistsCallback(func(sessionKey string) bool {
-		return sessionKey == "cli:direct:subagent-1"
-	})
+	sm.SetLedgerWiring(
+		func([]string) []PersistedSubagentTask { return nil },
+		func(sessionKey string) bool { return sessionKey == "cli:direct:subagent-1" },
+	)
 
 	msg, err := sm.SpawnWithOptions(context.Background(), "do a thing", "test", "", "cli", "direct", nil, SpawnOptions{})
 	if err != nil {
