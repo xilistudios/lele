@@ -113,7 +113,7 @@
       "id": "accounts/fireworks/models/kimi-k3",
       "name": "Kimi K3",
       "context_window": 1048576,
-      "max_output": 131072,
+      "max_output": 1048576,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -127,7 +127,7 @@
       "id": "accounts/fireworks/models/kimi-k3p1-pro",
       "name": "Kimi K3.1 Pro",
       "context_window": 1048576,
-      "max_output": 131072,
+      "max_output": 1048576,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -220,7 +220,7 @@
       "id": "accounts/fireworks/routers/kimi-fast-latest",
       "name": "Kimi Fast Latest",
       "context_window": 1048576,
-      "max_output": 131072,
+      "max_output": 1048576,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -234,7 +234,7 @@
       "id": "accounts/fireworks/routers/kimi-k3-fast",
       "name": "Kimi K3 Fast",
       "context_window": 1048576,
-      "max_output": 131072,
+      "max_output": 1048576,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -248,7 +248,7 @@
       "id": "accounts/fireworks/routers/kimi-k3-spot",
       "name": "Kimi K3 Spot",
       "context_window": 1048576,
-      "max_output": 131072,
+      "max_output": 1048576,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -262,7 +262,7 @@
       "id": "accounts/fireworks/routers/kimi-latest",
       "name": "Kimi Latest",
       "context_window": 1048576,
-      "max_output": 131072,
+      "max_output": 1048576,
       "vision": true,
       "thinking_levels": [
         "low",

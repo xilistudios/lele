@@ -147,10 +147,24 @@
       "tool_call": true
     },
     {
+      "id": "inkling-2-small",
+      "name": "Inkling 2 Small",
+      "context_window": 1048576,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "kimi-k3",
       "name": "kimi-k3",
       "context_window": 1048576,
-      "max_output": 131072,
+      "max_output": 1048576,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -163,7 +177,7 @@
       "id": "kimi-k3.1-pro",
       "name": "Kimi K3.1 Pro",
       "context_window": 1048576,
-      "max_output": 131072,
+      "max_output": 1048576,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -232,7 +246,7 @@
       "id": "deepseek-v4-pro",
       "name": "deepseek-v4-pro",
       "context_window": 1048576,
-      "max_output": 1048576,
+      "max_output": 65536,
       "thinking_levels": [
         "low",
         "high"
@@ -244,7 +258,7 @@
       "id": "deepseek-v4-pro:0813",
       "name": "DeepSeek V4 Pro 0813",
       "context_window": 1048576,
-      "max_output": 1048576,
+      "max_output": 65536,
       "thinking_levels": [
         "low",
         "high"
@@ -279,7 +293,7 @@
       "id": "gpt-oss:120b",
       "name": "gpt-oss:120b",
       "context_window": 131072,
-      "max_output": 32768,
+      "max_output": 131072,
       "thinking_levels": [
         "low",
         "medium",
@@ -292,7 +306,7 @@
       "id": "gpt-oss:20b",
       "name": "gpt-oss:20b",
       "context_window": 131072,
-      "max_output": 32768,
+      "max_output": 131072,
       "thinking_levels": [
         "low",
         "medium",

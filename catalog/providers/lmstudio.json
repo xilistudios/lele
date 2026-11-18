@@ -22,7 +22,7 @@
       "id": "openai/gpt-oss-20b",
       "name": "GPT OSS 20B",
       "context_window": 131072,
-      "max_output": 32768,
+      "max_output": 131072,
       "thinking_levels": [
         "low",
         "medium",

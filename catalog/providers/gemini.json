@@ -75,7 +75,7 @@
     {
       "id": "deep-research-max-preview-04-2026",
       "name": "Deep Research Max Preview (Apr-21-2026)",
-      "context_window": 131072,
+      "context_window": 1048576,
       "max_output": 65536,
       "vision": true,
       "thinking_levels": [
@@ -89,7 +89,7 @@
     {
       "id": "deep-research-preview-04-2026",
       "name": "Deep Research Preview (Apr-21-2026)",
-      "context_window": 131072,
+      "context_window": 1048576,
       "max_output": 65536,
       "vision": true,
       "thinking_levels": [
@@ -267,6 +267,34 @@
       "tool_call": true
     },
     {
+      "id": "gemini-4-carbon",
+      "name": "Gemini 4 Carbon",
+      "context_window": 1048576,
+      "max_output": 32768,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "gemini-4-hydrogen",
+      "name": "Gemini 4 Hydrogen",
+      "context_window": 1048576,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "gemini-flash-latest",
       "name": "Gemini Flash Latest",
       "context_window": 1048576,
@@ -388,7 +416,7 @@
       "id": "gemini-3.5-live-translate-preview",
       "name": "Gemini 3.5 Live Translate Preview",
       "context_window": 16384,
-      "max_output": 32768,
+      "max_output": 16384,
       "vision": true
     },
     {
