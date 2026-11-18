@@ -1109,6 +1109,17 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 						outboundMsg.MessageID = m.Metadata["message_id"]
 						outboundMsg.ReplyTo = m.Metadata["message_id"]
 					}
+					// A turn that ended in a provider/tool failure carries the
+					// marker set by messageProcessorImpl.persistLLMFailure (the
+					// map is shared by reference). It travels as Metadata only:
+					// the Event stays "" so every turn-completion consumer —
+					// TUI case "", native dispatch, the turn.end fallthrough —
+					// keeps treating this as a normal final answer. The WebUI
+					// uses it to paint the live failure as an error box instead
+					// of a plain assistant bubble.
+					if m.Metadata != nil && m.Metadata[llmErrorMetadataKey] == "true" {
+						outboundMsg.Metadata = map[string]string{"error": "true"}
+					}
 					al.bus.PublishOutbound(outboundMsg)
 				}
 				// Empty response: nothing was published above, yet the turn is
