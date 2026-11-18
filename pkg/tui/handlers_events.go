@@ -88,9 +88,15 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 			// must leave the turn state alone:
 			//   - resumed=false: wait_for_subagent consumed the result in-turn,
 			//     so there is no turn to wait for.
-			//   - injected=true: the parent turn is still running and its own
-			//     turn end (stream end / completeMsg) clears loading. Arming the
-			//     flag here would wait for a continuation turn that never comes.
+			//   - injected=true: the running turn's queue accepted the result,
+			//     so the running turn's own turn end (stream end / completeMsg)
+			//     clears loading. Note this is ACCEPTANCE, not guaranteed
+			//     mid-turn delivery: if that turn exits before draining (error,
+			//     cancellation, iteration limit), the result is re-published as
+			//     an ordinary inbound and its fallback continuation renders its
+			//     own stream/complete events — handleCompleteMsg clears the
+			//     state unconditionally — so arming the flag here would still be
+			//     wrong (it would wait for a turn that starts on its own).
 			if msg.msg.Metadata["resumed"] == "true" && msg.msg.Metadata["injected"] != "true" {
 				m.subagentContinuationPending = true
 				m.processing = true

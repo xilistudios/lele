@@ -718,8 +718,8 @@ func TestPublishSubagentAsyncResult_MidTurn_InjectsInsteadOfInbound(t *testing.T
 	const sessionKey = "session-midturn-busy"
 	addSubagentTaskForTest(t, al, "subagent-1", sessionKey)
 
-	// The parent turn is running.
-	al.activateMidTurnNotices(sessionKey)
+	// The parent turn is running: it captured the queue at activation.
+	queue := al.activateMidTurnNotices(sessionKey)
 
 	publishSubagentAsyncResult(al, sessionKey, "native", "chat-1", "subagent-1",
 		&tools.ToolResult{ForLLM: "the subagent result"})
@@ -735,7 +735,7 @@ func TestPublishSubagentAsyncResult_MidTurn_InjectsInsteadOfInbound(t *testing.T
 	// The running turn owns delivery: a second turn must not be queued.
 	assertNoInbound(t, msgBus, "mid-turn injection")
 
-	notices := al.drainMidTurnNotices(sessionKey)
+	notices := queue.drain()
 	if len(notices) != 1 {
 		t.Fatalf("queued notices = %d, want 1", len(notices))
 	}
@@ -768,7 +768,7 @@ func TestPublishSubagentAsyncResult_ClaimLost_NeverEnqueues(t *testing.T) {
 	if sm.ClaimResult("subagent-1") {
 		t.Fatal("ClaimResult lost on a fresh task")
 	}
-	al.activateMidTurnNotices(sessionKey)
+	queue := al.activateMidTurnNotices(sessionKey)
 
 	publishSubagentAsyncResult(al, sessionKey, "native", "chat-1", "subagent-1",
 		&tools.ToolResult{ForLLM: "the subagent result"})
@@ -781,7 +781,7 @@ func TestPublishSubagentAsyncResult_ClaimLost_NeverEnqueues(t *testing.T) {
 		t.Errorf("event metadata[injected] = %q, want it absent for a lost claim", got)
 	}
 	assertNoInbound(t, msgBus, "lost claim")
-	if notices := al.drainMidTurnNotices(sessionKey); len(notices) != 0 {
+	if notices := queue.drain(); len(notices) != 0 {
 		t.Fatalf("queued notices = %d after a lost claim, want 0: the waiter owns the result", len(notices))
 	}
 }

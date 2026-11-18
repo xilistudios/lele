@@ -21,6 +21,10 @@ import (
 // the state machine (inactive/active, drain vs. drain-or-deactivate, flush on
 // abnormal exit) that makes delivery exactly-once — see the file-level comment
 // in midturn_notices.go for the invariant being tested.
+//
+// The consumer side of the queue is a POINTER captured by
+// activateMidTurnNotices and never re-resolved: these tests therefore hold on
+// to the returned queue instead of addressing it by session key.
 // ============================================================================
 
 // newMidTurnQueueTestLoop returns a bare loop: the queue methods only need the
@@ -37,11 +41,14 @@ func TestMidTurnNotices_EnqueueRequiresActiveQueue(t *testing.T) {
 	if al.enqueueMidTurnNotice(key, "result", "subagent-1") {
 		t.Fatal("enqueue on an inactive queue returned true; an idle parent must use the inbound path")
 	}
-	if notices := al.drainMidTurnNotices(key); len(notices) != 0 {
-		t.Fatalf("drained %d notices from an inactive queue, want 0", len(notices))
-	}
 
-	al.activateMidTurnNotices(key)
+	queue := al.activateMidTurnNotices(key)
+	if queue == nil {
+		t.Fatal("activateMidTurnNotices returned no queue for a real session key")
+	}
+	if notices := queue.drain(); len(notices) != 0 {
+		t.Fatalf("drained %d notices from an empty queue, want 0", len(notices))
+	}
 	if !al.enqueueMidTurnNotice(key, "result", "subagent-1") {
 		t.Fatal("enqueue on an active queue returned false")
 	}
@@ -50,19 +57,19 @@ func TestMidTurnNotices_EnqueueRequiresActiveQueue(t *testing.T) {
 func TestMidTurnNotices_DrainKeepsQueueActive(t *testing.T) {
 	al := newMidTurnQueueTestLoop()
 	const key = "session-drain"
-	al.activateMidTurnNotices(key)
+	queue := al.activateMidTurnNotices(key)
 
 	if !al.enqueueMidTurnNotice(key, "first", "subagent-1") {
 		t.Fatal("enqueue failed on an active queue")
 	}
-	notices := al.drainMidTurnNotices(key)
+	notices := queue.drain()
 	if len(notices) != 1 {
 		t.Fatalf("drained %d notices, want 1", len(notices))
 	}
 	if notices[0].content != "first" || notices[0].taskID != "subagent-1" {
 		t.Errorf("drained notice = %+v, want {content:first task_id:subagent-1}", notices[0])
 	}
-	if got := al.drainMidTurnNotices(key); len(got) != 0 {
+	if got := queue.drain(); len(got) != 0 {
 		t.Fatalf("second drain returned %d notices, want 0", len(got))
 	}
 
@@ -77,12 +84,12 @@ func TestMidTurnNotices_DrainOrDeactivate(t *testing.T) {
 	t.Run("with items keeps the queue active", func(t *testing.T) {
 		al := newMidTurnQueueTestLoop()
 		const key = "session-drain-items"
-		al.activateMidTurnNotices(key)
+		queue := al.activateMidTurnNotices(key)
 		if !al.enqueueMidTurnNotice(key, "payload", "subagent-1") {
 			t.Fatal("enqueue failed on an active queue")
 		}
 
-		notices := al.drainOrDeactivateMidTurnNotices(key)
+		notices := queue.drainOrDeactivate()
 		if len(notices) != 1 || notices[0].content != "payload" {
 			t.Fatalf("drainOrDeactivate = %+v, want one notice with content payload", notices)
 		}
@@ -94,9 +101,9 @@ func TestMidTurnNotices_DrainOrDeactivate(t *testing.T) {
 	t.Run("empty deactivates", func(t *testing.T) {
 		al := newMidTurnQueueTestLoop()
 		const key = "session-drain-empty"
-		al.activateMidTurnNotices(key)
+		queue := al.activateMidTurnNotices(key)
 
-		if notices := al.drainOrDeactivateMidTurnNotices(key); len(notices) != 0 {
+		if notices := queue.drainOrDeactivate(); len(notices) != 0 {
 			t.Fatalf("drainOrDeactivate returned %d notices, want 0", len(notices))
 		}
 		// This is the atomicity the fallback relies on: once the exit check
@@ -110,40 +117,58 @@ func TestMidTurnNotices_DrainOrDeactivate(t *testing.T) {
 func TestMidTurnNotices_DeactivateFlushesRemaining(t *testing.T) {
 	al := newMidTurnQueueTestLoop()
 	const key = "session-flush"
-	al.activateMidTurnNotices(key)
+	queue := al.activateMidTurnNotices(key)
 
 	if !al.enqueueMidTurnNotice(key, "first", "subagent-1") {
 		t.Fatal("enqueue failed on an active queue")
 	}
 	// A mid-turn drain consumed nothing here on purpose: the turn is exiting
 	// abnormally, so everything still queued must come back to the caller.
-	remaining := al.deactivateMidTurnNotices(key)
+	remaining := queue.deactivate()
 	if len(remaining) != 1 || remaining[0].content != "first" {
-		t.Fatalf("deactivateMidTurnNotices = %+v, want the queued notice", remaining)
+		t.Fatalf("deactivate = %+v, want the queued notice", remaining)
 	}
 	if al.enqueueMidTurnNotice(key, "after", "subagent-2") {
 		t.Fatal("enqueue succeeded after deactivate")
 	}
-	if again := al.deactivateMidTurnNotices(key); len(again) != 0 {
+	if again := queue.deactivate(); len(again) != 0 {
 		t.Fatalf("second deactivate returned %d notices, want 0", len(again))
 	}
-}
-
-// TestMidTurnNotices_ResolvesSessionAlias pins the reason every method resolves
-// the key: a /new alias switch moves the conversation to a new active key, and
-// the activation, the completion callback and the drain must still agree on the
-// same queue.
-func TestMidTurnNotices_ResolvesSessionAlias(t *testing.T) {
+} // TestMidTurnNotices_CapturedQueueSurvivesAliasRemap is the regression test for
+// the split-identity bug: the turn captures its queue at activation, a /new
+// remaps the alias while the turn runs, and the turn must still drain the queue
+// it activated (not the queue the new alias points at). Otherwise a notice the
+// producer accepted into the captured queue — and therefore did NOT publish as
+// an inbound — would be stranded forever.
+func TestMidTurnNotices_CapturedQueueSurvivesAliasRemap(t *testing.T) {
 	al := newMidTurnQueueTestLoop()
-	al.sessionAliases.Store("base-session", "base-session:chat:2")
+	const baseKey = "base-session"
+	al.sessionAliases.Store(baseKey, "base-session:chat:1")
 
-	al.activateMidTurnNotices("base-session")
-	if !al.enqueueMidTurnNotice("base-session:chat:2", "payload", "subagent-1") {
-		t.Fatal("the aliased key did not reach the queue activated through the base key")
+	// The turn starts while the alias points at chat:1.
+	queue := al.activateMidTurnNotices(baseKey)
+	if queue == nil {
+		t.Fatal("activateMidTurnNotices returned no queue")
 	}
-	notices := al.drainMidTurnNotices("base-session")
-	if len(notices) != 1 {
-		t.Fatalf("drained %d notices through the base key, want 1", len(notices))
+
+	// "/new" mid-turn: the alias now points at a different conversation key.
+	al.setSessionAlias(baseKey, "base-session:chat:2")
+
+	// A subagent completing after the remap resolves the NEW alias, whose
+	// queue is inactive -> enqueue must report false so the producer publishes
+	// the inbound fallback instead of stranding the result.
+	if al.enqueueMidTurnNotice(baseKey, "post-remap result", "subagent-2") {
+		t.Fatal("enqueue landed in the post-remap queue, which no running turn drains")
+	}
+
+	// The turn's captured identity still owns the pre-remap queue and drains
+	// it by pointer, no matter what the alias says now.
+	if !al.enqueueMidTurnNotice("base-session:chat:1", "in-flight result", "subagent-1") {
+		t.Fatal("enqueue through the activated key did not reach the captured queue")
+	}
+	notices := queue.drain()
+	if len(notices) != 1 || notices[0].content != "in-flight result" {
+		t.Fatalf("drain through the captured queue = %+v, want the in-flight notice", notices)
 	}
 }
 
@@ -157,11 +182,20 @@ func TestMidTurnNotices_RejectsEmptyInput(t *testing.T) {
 	if al.enqueueMidTurnNotice("session-empty-content", "", "subagent-1") {
 		t.Error("enqueue accepted an empty content")
 	}
-	if notices := al.drainMidTurnNotices(""); len(notices) != 0 {
-		t.Errorf("drain on an empty session key returned %d notices", len(notices))
+	if queue := al.activateMidTurnNotices(""); queue != nil {
+		t.Error("activate returned a queue for an empty session key")
 	}
-	if notices := al.deactivateMidTurnNotices(""); len(notices) != 0 {
-		t.Errorf("deactivate on an empty session key returned %d notices", len(notices))
+	// A turn without a usable key has no queue at all; every consumer
+	// operation must degrade to a no-op instead of panicking.
+	var noQueue *midTurnNoticeQueue
+	if notices := noQueue.drain(); len(notices) != 0 {
+		t.Errorf("drain on a nil queue returned %d notices", len(notices))
+	}
+	if notices := noQueue.drainOrDeactivate(); len(notices) != 0 {
+		t.Errorf("drainOrDeactivate on a nil queue returned %d notices", len(notices))
+	}
+	if notices := noQueue.deactivate(); len(notices) != 0 {
+		t.Errorf("deactivate on a nil queue returned %d notices", len(notices))
 	}
 }
 
@@ -171,17 +205,15 @@ func TestMidTurnNotices_RejectsEmptyInput(t *testing.T) {
 // up byte-identical, which is what this test asserts.
 func TestMidTurnNotice_MessageContent(t *testing.T) {
 	notice := midTurnNotice{content: "the subagent result", taskID: "subagent-1"}
-	if got, want := notice.messageContent(), "[System: subagent] the subagent result"; got != want {
-		t.Errorf("messageContent() = %q, want %q", got, want)
+	if got, want := midTurnNoticePrefix+notice.content, "[System: subagent] the subagent result"; got != want {
+		t.Errorf("rendered notice = %q, want %q", got, want)
 	}
 	// processSystemMessage formats the inbound as "[System: <SenderID>] ...";
 	// the sender the flush uses must be the one in the prefix.
-	if got, want := notice.messageContent(), "[System: "+midTurnNoticeSender+"] "+notice.content; got != want {
-		t.Errorf("messageContent() = %q, want %q", got, want)
+	if got, want := midTurnNoticePrefix, "[System: "+midTurnNoticeSender+"] "; got != want {
+		t.Errorf("prefix = %q, want %q", got, want)
 	}
-}
-
-// TestMidTurnNotices_StressNoNoticeLost hammers enqueue/drain/deactivate from
+} // TestMidTurnNotices_StressNoNoticeLost hammers enqueue/drain/deactivate from
 // several goroutines. The invariant is accounting, not ordering: every enqueue
 // that reported success is later observed by exactly one drain (or by the final
 // flush), so a claimed subagent result can never vanish. Run with -race.
@@ -193,7 +225,7 @@ func TestMidTurnNotices_StressNoNoticeLost(t *testing.T) {
 		perProd   = 50
 	)
 
-	al.activateMidTurnNotices(key)
+	queue := al.activateMidTurnNotices(key)
 
 	var (
 		wg        sync.WaitGroup
@@ -213,13 +245,13 @@ func TestMidTurnNotices_StressNoNoticeLost(t *testing.T) {
 			select {
 			case <-stop:
 				// Final sweep: whatever is left must come out here.
-				remaining := al.deactivateMidTurnNotices(key)
+				remaining := queue.deactivate()
 				mu.Lock()
 				delivered += len(remaining)
 				mu.Unlock()
 				return
 			default:
-				notices := al.drainMidTurnNotices(key)
+				notices := queue.drain()
 				if len(notices) > 0 {
 					mu.Lock()
 					delivered += len(notices)

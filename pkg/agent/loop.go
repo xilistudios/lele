@@ -468,6 +468,16 @@ type processOptions struct {
 	// on the user message so the WebUI can show the original "/name args" and
 	// re-render the command chip from history.
 	AppliedCommand *appliedCommand
+
+	// midTurnQueue is the mid-turn subagent notice queue THIS turn activated,
+	// captured by runAgentLoop right before it calls runLLMIteration. The loop
+	// drains through this pointer instead of re-resolving opts.SessionKey,
+	// because a "/new" mid-turn remaps the session alias and a re-resolved key
+	// could point at a different queue than the one the turn is accepting
+	// notices into. nil when the turn has no usable session key (all queue
+	// methods are nil-safe). It is an internal per-turn field: callers that
+	// build processOptions never set it.
+	midTurnQueue *midTurnNoticeQueue
 }
 
 // appliedCommand is the display metadata of one expanded harness command: the

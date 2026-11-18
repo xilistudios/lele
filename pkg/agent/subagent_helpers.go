@@ -72,6 +72,13 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID, task
 	//     the system inbound below resumes the parent with a new turn.
 	// The queue mutex makes this an atomic either/or (see midturn_notices.go),
 	// so a claimed result is never both injected and resumed, and never lost.
+	//
+	// Note the deliberate asymmetry with the consumer side: this producer
+	// resolves the CURRENT session alias (enqueueMidTurnNotice is by-key), while
+	// the running turn drains the queue pointer it captured at activation. A
+	// "/new" remap during the turn therefore still delivers — either into the
+	// queue that turn owns, or into the fresh (inactive) key's queue, where
+	// enqueue returns false and the inbound below takes over.
 	injected := false
 	if resumed {
 		injected = al.enqueueMidTurnNotice(sessionKey, content, taskID)

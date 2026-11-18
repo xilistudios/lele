@@ -608,11 +608,14 @@ type Model struct {
 	// when a continuation is genuinely owed: publishSubagentAsyncResult claims
 	// the result BEFORE publishing the event and stamps metadata["resumed"], so
 	// a result consumed in-turn by wait_for_subagent arrives with resumed=false
-	// and must not arm a turn. A result injected into a turn that is ALREADY
+	// and must not arm a turn. A result accepted into a turn that is ALREADY
 	// running arrives with resumed=true and injected=true: that turn's own end
-	// clears the loading state, so the event must not arm anything either
-	// (there is no follow-up turn to wait for). Cleared by handleCompleteMsg and
-	// by clearStreamingState (session switch).
+	// clears the loading state, so the event must not arm anything either.
+	// injected=true is queue ACCEPTANCE, not guaranteed mid-turn delivery — if
+	// the running turn exits before draining its queue, the result comes back as
+	// an ordinary inbound and that fallback continuation renders its own
+	// stream/complete events, which clear the state via handleCompleteMsg.
+	// Cleared by handleCompleteMsg and by clearStreamingState (session switch).
 	subagentContinuationPending bool
 	currentStream               string
 	currentThinking             string
