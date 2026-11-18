@@ -183,6 +183,13 @@ type Message struct {
 	// the WebUI can re-render the command chip from history instead of only
 	// from the live command.applied event. UI metadata only.
 	Command *CommandApplied `json:"harness_command,omitempty"`
+	// ErrorDetail carries the failure detail of an LLM request that could not
+	// complete the turn. The message is persisted with ExcludeFromContext=true
+	// so it never reaches the model; UIs render it as an error box instead of
+	// a normal assistant bubble. Content keeps the legacy "❌ Error …" text for
+	// channels that only understand plain text. UI metadata only — never sent
+	// to LLM providers.
+	ErrorDetail string `json:"error_detail,omitempty"`
 }
 
 // CommandApplied describes a user-defined slash command (pkg/harness) that was
@@ -209,6 +216,7 @@ func (m *Message) MarshalJSON() ([]byte, error) {
 		Attachments        []MessageAttachment `json:"attachments,omitempty"`
 		DisplayContent     string              `json:"display_content,omitempty"`
 		Command            *CommandApplied     `json:"harness_command,omitempty"`
+		ErrorDetail        string              `json:"error_detail,omitempty"`
 	}
 
 	content := interface{}(m.Content)
@@ -227,6 +235,7 @@ func (m *Message) MarshalJSON() ([]byte, error) {
 		Attachments:        m.Attachments,
 		DisplayContent:     m.DisplayContent,
 		Command:            m.Command,
+		ErrorDetail:        m.ErrorDetail,
 	})
 }
 
@@ -242,6 +251,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 		Attachments        []MessageAttachment `json:"attachments,omitempty"`
 		DisplayContent     string              `json:"display_content,omitempty"`
 		Command            *CommandApplied     `json:"harness_command,omitempty"`
+		ErrorDetail        string              `json:"error_detail,omitempty"`
 	}
 
 	var raw rawMessage
@@ -258,6 +268,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	m.Attachments = raw.Attachments
 	m.DisplayContent = raw.DisplayContent
 	m.Command = raw.Command
+	m.ErrorDetail = raw.ErrorDetail
 	m.Content = ""
 	m.ContentParts = nil
 

@@ -315,3 +315,46 @@ func TestTextOnlyContent_ContentPartsWithVideo(t *testing.T) {
 		t.Errorf("TextOnlyContent() leaked the video URL: %q", got)
 	}
 }
+
+// TestMessageErrorDetailRoundTrip pins the LLM-failure metadata: the session
+// store must persist ErrorDetail losslessly (both UIs re-render the failure box
+// from history after a refetch or a session switch) and omit the key entirely
+// from messages that did not fail, so stored JSON stays byte-compatible.
+func TestMessageErrorDetailRoundTrip(t *testing.T) {
+	m := Message{
+		Role:               "assistant",
+		Content:            "❌ Error processing message: LLM call failed after retries: 429",
+		ErrorDetail:        "LLM call failed after retries: 429 Too Many Requests",
+		ExcludeFromContext: true,
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"error_detail"`) {
+		t.Fatalf("marshal must persist error_detail for history rendering: %s", data)
+	}
+	if !strings.Contains(string(data), `"exclude_from_context":true`) {
+		t.Fatalf("the failure message must stay out of the LLM context: %s", data)
+	}
+
+	var got Message
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ErrorDetail != m.ErrorDetail {
+		t.Errorf("round-trip lost ErrorDetail: got %q, want %q", got.ErrorDetail, m.ErrorDetail)
+	}
+	if got.Content != m.Content || !got.ExcludeFromContext {
+		t.Errorf("round-trip lost content/exclusion: %+v", got)
+	}
+
+	// A message that did not fail must not grow the key (omitempty contract).
+	plain, err := json.Marshal(Message{Role: "assistant", Content: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(plain), "error_detail") {
+		t.Errorf("plain message must omit error_detail: %s", plain)
+	}
+}
