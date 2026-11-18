@@ -678,40 +678,79 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		} else if m.modalMode == ModalEditProvider {
-			// Form-based modal: three steps — provider type, API key, API base
-			// URL. Only the type is required: the form cannot show a stored
-			// secret back, so a blank API key / base URL means "keep the stored
-			// value" (see updateProvider).
+			// Form-based modal: one step per editable provider config field
+			// (see editProviderStepCount). Only the type is required: the form
+			// cannot show a stored secret back, so a blank API key / base URL /
+			// headers blob means "keep the stored value" (see updateProvider).
 			val := strings.TrimSpace(m.textInput.Value())
-			// An empty input still accepts a pre-filled value (the type and the
-			// base URL are seeded from the stored provider).
+			// An empty input still accepts a pre-filled value (the type, the
+			// base URL and the optional middle fields are seeded from the
+			// stored provider), so Enter-through cannot wipe them.
 			if val == "" && m.formStepIndex < len(m.formValues) && m.formValues[m.formStepIndex] != "" {
 				val = m.formValues[m.formStepIndex]
 			}
-			if m.formStepIndex == 0 && val == "" {
+			if m.formStepIndex == editProviderTypeStep && val == "" {
 				m.formError = "Provider type is required"
 				return m, nil
 			}
+			// Validate the two value-typed steps on advance, so a typo surfaces
+			// on the step that caused it instead of on the final save.
+			switch m.formStepIndex {
+			case editProviderWebSearchStep:
+				token, err := parseWebSearchToken(val)
+				if err != nil {
+					m.formError = err.Error()
+					return m, nil
+				}
+				val = token // canonical lowercase, so the step reads back what was stored
+			case editProviderHeadersStep:
+				if _, _, err := parseHeaderEditValue(nil, val); err != nil {
+					m.formError = err.Error()
+					return m, nil
+				}
+			}
 			m.formError = ""
 			m.formValues[m.formStepIndex] = val
-			if m.formStepIndex < 2 {
+			if m.formStepIndex < len(m.formValues)-1 {
 				// Advance: the next step shows its pre-filled value (empty for
-				// the API key) so it can be edited in place.
+				// the API key and the headers blob) so it can be edited in
+				// place.
 				m.formStepIndex++
 				m.textInput.SetValue(m.formValues[m.formStepIndex])
 				switch m.formStepIndex {
-				case 1:
+				case editProviderAPIKeyStep:
 					m.textInput.Placeholder = "API Key"
-				case 2:
+				case editProviderAPIBaseStep:
 					m.textInput.Placeholder = "API Base URL (e.g. https://api.example.com/v1)"
+				case editProviderProxyStep:
+					m.textInput.Placeholder = "Proxy URL (- to clear)"
+				case editProviderAuthMethodStep:
+					m.textInput.Placeholder = "Auth method, e.g. oauth (- to clear)"
+				case editProviderConnectModeStep:
+					m.textInput.Placeholder = "stdio or grpc — GitHub Copilot only (- to clear)"
+				case editProviderWebSearchStep:
+					m.textInput.Placeholder = "Web search: yes, no or default"
+				case editProviderHeadersStep:
+					m.textInput.Placeholder = `Headers JSON, e.g. {"X-Title":"lele"}`
 				}
-				// Audit M2: step 1 collects the key, so the echo mode must be
-				// re-derived BEFORE the next frame paints the widget.
+				// Audit M2: the API-key and headers steps collect secrets, so
+				// the echo mode must be re-derived BEFORE the next frame paints
+				// the widget.
 				m.syncTextInputEcho()
 				return m, nil
 			}
 			// Last step — save in place and land back on the provider detail.
-			if err := m.updateProvider(m.providerSelectedName, m.formValues[0], m.formValues[1], m.formValues[2]); err != nil {
+			values := providerEditValues{
+				Type:        m.formValues[editProviderTypeStep],
+				APIKey:      m.formValues[editProviderAPIKeyStep],
+				APIBase:     m.formValues[editProviderAPIBaseStep],
+				Proxy:       m.formValues[editProviderProxyStep],
+				AuthMethod:  m.formValues[editProviderAuthMethodStep],
+				ConnectMode: m.formValues[editProviderConnectModeStep],
+				WebSearch:   m.formValues[editProviderWebSearchStep],
+				Headers:     m.formValues[editProviderHeadersStep],
+			}
+			if err := m.updateProvider(m.providerSelectedName, values); err != nil {
 				m.formError = err.Error()
 				return m, nil // stay in the form; typed values are kept
 			}

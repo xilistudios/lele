@@ -255,36 +255,71 @@ func syncProviderToTypedField(p *config.ProvidersConfig, name string, np config.
 	}
 }
 
-// syncEditedProviderCredentials mirrors the credentials an in-place provider
-// edit may have written (API key and base URL) into the typed field, instead of
-// copying the whole named ProviderConfig like syncProviderToTypedField does.
+// providerEditChanges reports which fields of an in-place provider edit
+// actually CHANGED. It is the input the mirror helper needs and cannot derive:
+// the caller knows whether a blank/submitted-unchanged field was "keep" or a
+// deliberate re-submission, the helper only sees the resulting struct.
+type providerEditChanges struct {
+	APIKey      bool
+	APIBase     bool
+	Proxy       bool
+	AuthMethod  bool
+	ConnectMode bool
+	WebSearch   bool
+	Headers     bool
+}
+
+// syncEditedProviderCredentials mirrors the fields an in-place provider edit
+// may have written (API key, base URL, proxy, auth method, connect mode and
+// custom headers) into the typed field, instead of copying the whole named
+// ProviderConfig like syncProviderToTypedField does.
 //
 // The typed field can legitimately be the ONLY — or the more authoritative —
-// carrier of a value: an env:"LELE_PROVIDERS_<NAME>_API_KEY" override is applied
-// after the JSON is decoded, and a hand-written config.json that keeps the
-// provider under providers.<name> can decode into the named entry only. So a
-// field the user actually edited wins outright, while an untouched one only
-// FILLS an empty typed copy: an edit that changed the base URL must not swap an
-// env-provided key for the (older) one sitting in the named entry.
+// carrier of a value: an env:"LELE_PROVIDERS_<NAME>_API_KEY" (or _PROXY,
+// _AUTH_METHOD, …) override is applied after the JSON is decoded, and a
+// hand-written config.json that keeps the provider under providers.<name> can
+// decode into the named entry only. So a field the user actually edited wins
+// outright, while an untouched one only FILLS an empty typed copy: an edit that
+// changed the base URL must not swap an env-provided key for the (older) one
+// sitting in the named entry.
 //
 // Filling an empty typed copy is the whole point of the mirror: transport
 // selection is TYPE-FIRST (the Gemini Code Assist pre-check reads
 // Providers.Gemini), so a credential that only reached the named copy would be
 // persisted but invisible to the selector.
 //
-// apiKeyChanged / apiBaseChanged report which fields the edit actually CHANGED
-// (blank, or re-submitted with the stored value, both mean "not touched"); the
-// caller knows, this helper cannot tell them apart.
-func syncEditedProviderCredentials(p *config.ProvidersConfig, name string, np config.NamedProviderConfig, apiKeyChanged, apiBaseChanged bool) {
+// Headers are a map, so an untouched field fills the typed copy only when that
+// copy has no headers at all, and the map is deep-copied: the two entries are
+// two copies of one provider and must never share (and later mutate) one map.
+//
+// WebSearch is deliberately NOT handled here: the named entry keeps a *bool
+// while the typed OpenAI slot keeps a plain bool, so updateProvider projects it
+// directly (it also has to roll that bool back on a failed save).
+//
+// changed reports which fields the edit actually CHANGED (blank, or
+// re-submitted with the stored value, both mean "not touched").
+func syncEditedProviderCredentials(p *config.ProvidersConfig, name string, np config.NamedProviderConfig, changed providerEditChanges) {
 	slot := typedProviderSlot(p, name)
 	if slot == nil {
 		return
 	}
-	if apiKeyChanged || slot.APIKey == "" {
+	if changed.APIKey || slot.APIKey == "" {
 		slot.APIKey = np.APIKey
 	}
-	if apiBaseChanged || slot.APIBase == "" {
+	if changed.APIBase || slot.APIBase == "" {
 		slot.APIBase = np.APIBase
+	}
+	if changed.Proxy || slot.Proxy == "" {
+		slot.Proxy = np.Proxy
+	}
+	if changed.AuthMethod || slot.AuthMethod == "" {
+		slot.AuthMethod = np.AuthMethod
+	}
+	if changed.ConnectMode || slot.ConnectMode == "" {
+		slot.ConnectMode = np.ConnectMode
+	}
+	if changed.Headers || len(slot.Headers) == 0 {
+		slot.Headers = cloneHeaders(np.Headers)
 	}
 }
 

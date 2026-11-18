@@ -178,7 +178,7 @@ const (
 	ModalAddProvider        // form to add a new provider
 	ModalAddModel           // form to add a new model to a provider
 	ModalEditModel          // form to edit an existing model of a provider
-	ModalEditProvider       // form to edit an existing provider (type, API key, API base URL)
+	ModalEditProvider       // form to edit an existing provider (every field but the name)
 	ModalCron               // list of cron jobs
 	ModalSecrets            // list of keyring secrets
 	ModalAddSecret          // form to add a new secret

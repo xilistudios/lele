@@ -765,6 +765,11 @@ func TestProviderEditKeysExistInAllBuiltinLanguages(t *testing.T) {
 		"tui.editProvider",
 		"tui.editProviderAction",
 		"tui.editProviderKeepHint",
+		// The full-field form (8 steps) adds a hint per value-typed step, so a
+		// missing translation would silently fall back to English mid-form.
+		"tui.editProviderOptionalHint",
+		"tui.editProviderWebSearchHint",
+		"tui.editProviderHeadersHint",
 		"tui.providerUpdated",
 		// The detail hint line must advertise the new "e" shortcut.
 		"tui.providerDetailHints",
