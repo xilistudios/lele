@@ -592,8 +592,10 @@ no auth story to tell (no `url`, no header carrier and no stored state):
 `"auth": { "required": true, "authenticated": false, "method": "oauth" }`.
 `required` is true when the entry declares `auth.type: "oauth"` or a `401` was
 recorded for that name+URL; `method` is `"oauth"`, `"headers"` or `""`; and
-`authenticated` is true only when a usable credential already exists in
-`<lele dir>/mcp-auth.json` — i.e. when no login is needed. Booleans and one
+`authenticated` is true only when a usable credential already exists in the
+agent's MCP auth store (`<lele dir>/mcp-auth.json`, whose token and client
+secret live in the lele keyring when that module is enabled) — i.e. when no
+login is needed. Booleans and one
 fixed word: no token, `client_id` or header value is ever reported, and having
 header keys alone does **not** make a server `required`.
 
@@ -843,7 +845,7 @@ Errors, in the order the handler checks them:
   remote server advertises no dynamic client registration endpoint and the entry
   configures no `client_id`
 - `503 mcp_auth_disabled` — there is no usable auth store for this agent to
-  persist a login in (no lele directory to store `mcp-auth.json` under)
+  persist a login in (no lele directory to store the auth record under)
 - `409 mcp_auth_not_required` — the server completed the plain handshake without
   asking for credentials, so there is nothing to authorize
 - `502 mcp_auth_failed` — any other flow failure (probe, discovery, registration,
@@ -991,8 +993,10 @@ and `502 mcp_auth_failed` when the store refuses to clear the record.
   a `client_secret`. The responses carry a flow id, the authorization URL the
   user's browser must visit (where a *public* client id legitimately appears),
   the redirect URI, a deadline, three state words, a rendered error message and
-  one boolean. The stored credential lives only in `<lele dir>/mcp-auth.json`
-  (mode `0600`) on the gateway.
+  one boolean. The stored credential lives only in the agent's MCP auth store on
+  the gateway: the token and client secret in the lele keyring
+  (`mcp.<server>.auth`) when that module is enabled, and in
+  `<lele dir>/mcp-auth.json` (mode `0600`) when it is not.
 - **The flow id is the only handle.** It is 128-bit `crypto/rand` hex — 32
   lowercase hex characters — never a counter and never derived from the server
   name.

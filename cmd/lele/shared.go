@@ -9,11 +9,13 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/keyring"
+	"github.com/xilistudios/lele/pkg/mcp"
 	"github.com/xilistudios/lele/pkg/store"
 )
 
@@ -70,21 +72,107 @@ func openSharedStore(dbPath string, component string) (s *store.Store, cleanup f
 // registerKeyringResolver installs a config-level resolver that reads secret
 // values from the keyring. The service is created lazily and performs no I/O
 // until a {{SECRET:}} placeholder is actually resolved.
+//
+// The SAME Service also backs the MCP secret vault (registerMCPSecretVault), so
+// one process never ends up with two keyring services over two different vault
+// paths: the {{SECRET:}} resolver and the MCP OAuth store read and write one
+// keyring.
 func registerKeyringResolver(cfg *config.Config) {
-	if cfg == nil || !cfg.Keyring.Enabled {
+	svc := newKeyringService(cfg)
+	if svc == nil {
 		config.RegisterKeyringResolver(nil)
-		return
+	} else {
+		config.RegisterKeyringResolver(func(name string) (string, error) {
+			return svc.GetRaw(name)
+		})
 	}
-	svc := keyring.NewService(keyring.ServiceConfig{
+	registerMCPSecretVault(svc)
+}
+
+// newKeyringService builds the process-wide keyring Service described by cfg,
+// or returns nil when the keyring module is disabled (or there is no config).
+//
+// It is the single place that maps config to ServiceConfig: every caller that
+// needs a Service (the resolver, the MCP vault) goes through here, so they
+// cannot drift into resolving different vault files or different lele
+// directories.
+func newKeyringService(cfg *config.Config) *keyring.Service {
+	if cfg == nil || !cfg.Keyring.Enabled {
+		return nil
+	}
+	return keyring.NewService(keyring.ServiceConfig{
 		Enabled:      cfg.Keyring.Enabled,
 		VaultPath:    cfg.KeyringVaultPath(),
 		Backend:      cfg.Keyring.Backend,
 		AuditLogSize: cfg.Keyring.AuditLogSize,
 		LeleDir:      config.GetLeleDir(),
 	})
-	config.RegisterKeyringResolver(func(name string) (string, error) {
-		return svc.GetRaw(name)
+}
+
+// mcpSecretVaultSource names the MCP subsystem in the secrets UIs: it is
+// recorded as the CreatedBy of every secret the vault writes, so a user who
+// opens the secrets page can tell an MCP OAuth token from their own keys.
+const mcpSecretVaultSource = "mcp"
+
+// registerMCPSecretVault installs the process-wide factory pkg/mcp consults
+// when it opens an AuthStore (mcp.NewAuthStore). With one registered, the OAuth
+// token and client secret of a remote MCP server live in the keyring —
+// encrypted, agent-invisible (scope ["system"]) and shared across the lele
+// processes of one installation — while mcp-auth.json keeps only the non-secret
+// half of the record.
+//
+// svc is the Service built by newKeyringService. A nil (or disabled) svc
+// registers a nil factory, which is pkg/mcp's documented "legacy plaintext
+// mode": mcp-auth.json holds everything, exactly as before the vault existed.
+// That degradation is deliberate — a machine with the keyring module switched
+// off must keep working, not fail every login.
+//
+// The factory answers per DIRECTORY, because pkg/mcp only knows the lele
+// directory it was handed. It returns nil when that directory is not the one
+// svc was built for: a Store resolved for another installation (a test
+// directory, a second -c dir) must never read or write THIS installation's
+// keyring, so the mismatch degrades to plaintext for that store alone.
+func registerMCPSecretVault(svc *keyring.Service) {
+	if !svc.Enabled() {
+		mcp.RegisterSecretVaultFactory(nil)
+		return
+	}
+	mcp.RegisterSecretVaultFactory(func(leleDir string) mcp.SecretVault {
+		if !sameLeleDir(leleDir, svc.LeleDir()) {
+			return nil
+		}
+		return keyring.NewOpaqueVault(svc, mcpSecretVaultSource)
 	})
+}
+
+// sameLeleDir reports whether two spellings name the same lele directory.
+//
+// pkg/mcp resolves its store from a directory STRING (mcp.Paths.LeleDir, which
+// every surface derives from config.GetLeleDir) while the Service records the
+// one it was built with, so the comparison must tolerate the difference between
+// a relative and an absolute spelling of the same path. An empty request never
+// matches: a store with no directory is disabled and gets no vault anyway.
+func sameLeleDir(requested, configured string) bool {
+	req := normalizeLeleDir(requested)
+	if req == "" {
+		return false
+	}
+	return req == normalizeLeleDir(configured)
+}
+
+// normalizeLeleDir canonicalises a lele directory for comparison: absolute,
+// cleaned, "" when the input is empty. Symlinks are NOT resolved on purpose —
+// that is I/O on a constructor path, and every caller of the comparison derives
+// its path from config.GetLeleDir, which does not resolve them either.
+func normalizeLeleDir(dir string) string {
+	if dir = strings.TrimSpace(dir); dir == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return filepath.Clean(dir)
+	}
+	return filepath.Clean(abs)
 }
 
 // newClientAuthManager creates an AuthManager wired to the shared SQLite store

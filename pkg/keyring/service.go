@@ -105,6 +105,27 @@ func (s *Service) Backend() string {
 	return s.keyProv.Backend()
 }
 
+// Enabled reports whether the module is enabled in configuration. A disabled
+// Service answers ErrDisabled from every operation, so a subsystem that adapts
+// it (an internal vault, a resolver) checks this FIRST and degrades to its own
+// unencrypted path instead of failing every write. A nil receiver is not
+// enabled.
+func (s *Service) Enabled() bool {
+	return s != nil && s.cfg.Enabled
+}
+
+// LeleDir returns the lele directory this Service was built for: the directory
+// its vault file and master key default to, and the identity a caller compares
+// against before handing the Service to a subsystem that only knows a directory
+// string. It is NOT the vault path (that one may be configured elsewhere), so a
+// caller never mistakes "this vault" for "this installation".
+func (s *Service) LeleDir() string {
+	if s == nil {
+		return ""
+	}
+	return s.cfg.LeleDir
+}
+
 // GetForAgent retrieves a secret value on behalf of an agent, enforcing scope
 // restrictions and recording an audit entry.
 func (s *Service) GetForAgent(name, agentID, sessionKey string) (string, error) {
@@ -113,10 +134,14 @@ func (s *Service) GetForAgent(name, agentID, sessionKey string) (string, error) 
 	}
 
 	s.mu.RLock()
-	sec, ok := s.store.Get(name)
+	sec, err := s.store.Get(name)
 	s.mu.RUnlock()
+	if err != nil {
+		s.record(name, agentID, sessionKey, "get", false)
+		return "", err
+	}
 
-	if !ok {
+	if sec == nil {
 		s.record(name, agentID, sessionKey, "get", false)
 		return "", ErrNotFound
 	}
@@ -137,8 +162,11 @@ func (s *Service) GetRaw(name string) (string, error) {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	sec, ok := s.store.Get(name)
-	if !ok {
+	sec, err := s.store.Get(name)
+	if err != nil {
+		return "", err
+	}
+	if sec == nil {
 		return "", ErrNotFound
 	}
 	return sec.Value, nil
@@ -192,8 +220,11 @@ func (s *Service) set(name, value, description string, tags, scope []string, sou
 	defer s.mu.Unlock()
 
 	now := time.Now()
-	existing, ok := s.store.Get(name)
-	if mustExist && (!ok || existing == nil) {
+	existing, err := s.store.Get(name)
+	if err != nil {
+		return err
+	}
+	if mustExist && existing == nil {
 		return ErrNotFound
 	}
 
@@ -206,7 +237,7 @@ func (s *Service) set(name, value, description string, tags, scope []string, sou
 		UpdatedAt:   now,
 		CreatedBy:   source,
 	}
-	if ok && existing != nil {
+	if existing != nil {
 		sec.CreatedAt = existing.CreatedAt
 		if sec.CreatedBy == "" {
 			sec.CreatedBy = existing.CreatedBy
@@ -255,7 +286,11 @@ func (s *Service) delete(name string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.store.Delete(name) {
+	deleted, err := s.store.Delete(name)
+	if err != nil {
+		return err
+	}
+	if !deleted {
 		return ErrNotFound
 	}
 	return s.store.Flush()
@@ -268,8 +303,11 @@ func (s *Service) ListForAgent(agentID string) ([]SecretMeta, error) {
 		return nil, err
 	}
 	s.mu.RLock()
-	all := s.store.List()
+	all, err := s.store.List()
 	s.mu.RUnlock()
+	if err != nil {
+		return nil, err
+	}
 
 	out := make([]SecretMeta, 0, len(all))
 	for _, meta := range all {
@@ -295,7 +333,7 @@ func (s *Service) ListAll() ([]SecretMeta, error) {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.store.List(), nil
+	return s.store.List()
 }
 
 // Search finds secrets matching a query across name, tags, and description.
@@ -305,7 +343,7 @@ func (s *Service) Search(query string) ([]SecretMeta, error) {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.store.Search(query), nil
+	return s.store.Search(query)
 }
 
 // AuditLog returns the recorded access records in chronological order.
@@ -320,7 +358,11 @@ func (s *Service) Count() int {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return len(s.store.List())
+	metas, err := s.store.List()
+	if err != nil {
+		return 0
+	}
+	return len(metas)
 }
 
 // Status returns a small summary suitable for UI status bars / API responses.

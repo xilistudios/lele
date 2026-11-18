@@ -2,6 +2,11 @@ package keyring
 
 // Store is the persistence backend for secrets. A store holds the decrypted
 // vault in memory while open and re-encrypts it on flush.
+//
+// Every method that reads or mutates the in-memory vault may return an error:
+// an implementation is expected to reconcile with the on-disk state first (see
+// FileStore.refreshLocked), and that reconciliation can fail when the file is
+// unreadable or was written under a different master key.
 type Store interface {
 	// Open decrypts the vault using the provided 32-byte key. If the vault
 	// file does not exist yet, an empty vault is created in memory.
@@ -10,16 +15,17 @@ type Store interface {
 	Close() error
 	// IsOpen returns true if the vault is decrypted and ready.
 	IsOpen() bool
-	// Set stores or updates a secret.
+	// Set stores or updates a secret in memory; Flush persists it.
 	Set(secret *Secret) error
-	// Get retrieves a secret by name (including its value).
-	Get(name string) (*Secret, bool)
-	// Delete removes a secret by name. It returns false if not found.
-	Delete(name string) bool
+	// Get retrieves a secret by name (including its value). A name that is not
+	// stored returns (nil, nil).
+	Get(name string) (*Secret, error)
+	// Delete removes a secret by name. It reports false if not found.
+	Delete(name string) (bool, error)
 	// List returns metadata for all secrets (no values), sorted by name.
-	List() []SecretMeta
+	List() ([]SecretMeta, error)
 	// Search finds secrets matching a query across name, tags, and description.
-	Search(query string) []SecretMeta
+	Search(query string) ([]SecretMeta, error)
 	// Flush persists changes to disk (re-encrypts the vault).
 	Flush() error
 	// Backend returns a human-readable description of the storage location.

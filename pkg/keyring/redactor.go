@@ -52,8 +52,13 @@ func (r *Redactor) Redact(content string) string {
 
 	// Snapshot the secret metadata under the service read lock.
 	r.svc.mu.RLock()
-	metas := r.svc.store.List()
+	metas, err := r.svc.store.List()
 	r.svc.mu.RUnlock()
+	if err != nil {
+		// The vault could not be reconciled with disk: redacting with a stale
+		// or empty value set could leak a rotated secret, so leave the text alone.
+		return content
+	}
 
 	if fp := fingerprint(metas); fp != r.fingerprint {
 		r.rebuild(metas)
@@ -85,8 +90,8 @@ func (r *Redactor) rebuild(metas []SecretMeta) {
 	r.svc.mu.RLock()
 	vals := make(map[string]string, len(metas))
 	for _, m := range metas {
-		sec, ok := r.svc.store.Get(m.Name)
-		if !ok || sec == nil || len(sec.Value) < MinRedactLength {
+		sec, err := r.svc.store.Get(m.Name)
+		if err != nil || sec == nil || len(sec.Value) < MinRedactLength {
 			continue
 		}
 		vals[m.Name] = sec.Value

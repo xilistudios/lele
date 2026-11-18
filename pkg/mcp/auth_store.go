@@ -26,12 +26,31 @@ import (
 //     the store is built from a directory string, so this package stays
 //     unit-testable with t.TempDir() and no agent machinery at all.
 //
-//  2. SECRECY. Access tokens, refresh tokens, client secrets and the client
-//     ID are values that never leave pkg/mcp: nothing in this file logs any
-//     field of the file, and error strings name the PATH only. Callers ask
-//     yes/no questions (Authenticated, AuthRequired) or get the value handed
-//     straight to the mcp-go transport through TokenStore — never a string
-//     to display, print or JSON-echo to a surface.
+//     The secret VAULT crosses that boundary as an interface only. Callers that
+//     have one (cmd/lele wires a keyring-backed adapter) either register a
+//     factory with RegisterSecretVaultFactory once at startup or inject one
+//     explicitly with WithSecretVault; pkg/mcp then talks to a SecretVault and
+//     never to its implementation. See secret_vault.go.
+//
+//  2. SECRECY. Access tokens, refresh tokens and client secrets are values that
+//     never leave pkg/mcp: nothing in this file logs any field of the file, and
+//     error strings name the PATH (or the server NAME, a mcp.json key) only.
+//     Callers ask yes/no questions (Authenticated, AuthRequired) or get the
+//     value handed straight to the mcp-go transport through TokenStore — never
+//     a string to display, print or JSON-echo to a surface. The client ID is
+//     the one identifier that stays in the file: it is the public half of a
+//     dynamic registration.
+//
+//     With a vault the file holds NO credential at all: client_secret and the
+//     token move to "mcp.<server>.auth" (see authSecretBlob), and every read
+//     overlays them back onto the file-backed record. Writes fail CLOSED — a
+//     vault error is returned, never silently downgraded to plaintext — while
+//     reads DEGRADE TO ABSENT (a vault that cannot be read is a warning plus a
+//     record without secrets, which leads to a re-login and never to a wrong
+//     credential being presented). Reads take the vault as the LIVE source for
+//     secrets: the file's stat stamp only covers non-secret state, because the
+//     other lele process may refresh a token in the vault and never touch this
+//     file. That is also why Revision hashes the MERGED record.
 //
 //  3. SCOPE. mcp-auth.json is per-lele-directory and machine-local: it stores
 //     tokens a specific machine obtained from a specific authorization
@@ -45,6 +64,19 @@ import (
 // os.Stat and reloads when mtime/size changed or when the file appeared or
 // disappeared, so a login performed in one process is visible in the other.
 // One sync.Mutex guards the cache and serialises the writers.
+//
+// With a vault there are TWO freshness sources and they cover different halves:
+// the stat stamp covers the non-secret state in the file, and the vault is read
+// LIVE on every call for the secret half — never cached in the servers map. A
+// token refreshed by another process is therefore visible immediately even
+// though mcp-auth.json was not rewritten (and its mtime did not move).
+//
+// MIGRATION is eager and happens once, in NewAuthStore: when a vault is active,
+// any credentials still in the file are pushed into the vault and the file is
+// rewritten once without them. A record whose SetSecret fails keeps its secrets
+// in the file (no data loss) and, for that record, the FILE WINS over the vault
+// on reads until a later Save moves them — so an interrupted or partially
+// failed migration is always readable rather than half-lost.
 
 // authFileName is the file NewAuthStore owns inside the lele directory.
 const authFileName = "mcp-auth.json"
@@ -77,6 +109,12 @@ type AuthStore struct {
 	mu   sync.Mutex
 	path string // "" = disabled (NewAuthStore("")): reads absent, writes no-ops
 
+	// vault, when non-nil, is where the CREDENTIAL half of every record lives
+	// (client_secret and the token). It is resolved once, in NewAuthStore, and
+	// never replaced afterwards: the pointer is read without the mutex, so it
+	// must not change. nil = legacy mode, the file holds everything.
+	vault SecretVault
+
 	// Cached load, guarded by mu. The stamp is what makes a read cheap: a
 	// stat that reports the same existence, mtime and size as the cached load
 	// means the bytes on disk are the bytes we already hold — including when
@@ -89,6 +127,20 @@ type AuthStore struct {
 	servers map[string]AuthRecord
 }
 
+// AuthStoreOption customises a store built by NewAuthStore. Options exist so
+// the constructor stays backward compatible (every pre-vault call site passes
+// just a directory) while a caller — usually a test — can inject a vault
+// explicitly instead of registering a process-wide factory.
+type AuthStoreOption func(*AuthStore)
+
+// WithSecretVault injects v as the store's vault, overriding whatever the
+// registered factory would return. A nil v means "no vault" and does NOT fall
+// back to the factory: the option is the caller's explicit statement of what
+// this store uses.
+func WithSecretVault(v SecretVault) AuthStoreOption {
+	return func(s *AuthStore) { s.vault = v }
+}
+
 // NewAuthStore returns the store backed by <leleDir>/mcp-auth.json. An empty
 // leleDir yields a DISABLED store: every read reports "absent" and every write
 // is a no-op (never create a process-relative file).
@@ -98,10 +150,41 @@ type AuthStore struct {
 // must still be able to hand a TokenStore to the transport and get a clean
 // "no token" answer instead of a panic or a stray ./mcp-auth.json next to
 // whatever working directory the binary happened to start in.
-func NewAuthStore(leleDir string) *AuthStore {
+//
+// The SECRET VAULT (see secret_vault.go) is resolved here, once:
+//
+//  1. an explicit WithSecretVault option wins;
+//  2. otherwise the factory registered with RegisterSecretVaultFactory is
+//     consulted with leleDir;
+//  3. otherwise there is none.
+//
+// A disabled store never gets a vault. When a vault IS resolved the constructor
+// performs the one-time legacy migration described in this file's header: any
+// client_secret/token still sitting in mcp-auth.json moves into the vault and
+// the file is rewritten without them. Migration is best-effort by design — it
+// cannot fail the constructor — but it never loses a credential: a record it
+// could not store stays in the file, where it keeps being read.
+func NewAuthStore(leleDir string, opts ...AuthStoreOption) *AuthStore {
 	s := &AuthStore{}
 	if leleDir != "" {
 		s.path = filepath.Join(leleDir, authFileName)
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	// Resolve the vault AFTER the options (an explicit injection wins) and
+	// only for an enabled store: a disabled store has nowhere to persist
+	// non-secret state either, so handing it a vault would let it write secrets
+	// for a server it cannot record.
+	if s.path == "" {
+		s.vault = nil
+	} else if s.vault == nil {
+		s.vault = resolveSecretVault(leleDir)
+	}
+	if s.vault != nil {
+		s.migrateLegacySecrets()
 	}
 	return s
 }
@@ -114,24 +197,75 @@ func (s *AuthStore) Enabled() bool {
 	return s != nil && s.path != ""
 }
 
-// Record returns the stored record for name. A record whose URL does not match
-// the one recorded is NOT special-cased here (callers pass the URL they want to
-// match via Authenticated/AuthRequired/TokenStore); Record is the raw accessor.
+// Record returns the stored record for name, with the vault's secrets merged
+// back in when a vault is active. A record whose URL does not match the one
+// recorded is NOT special-cased here (callers pass the URL they want to match
+// via Authenticated/AuthRequired/TokenStore); Record is the raw accessor.
 //
 // The returned record is a copy, token included: a caller may edit what it
 // holds without corrupting the cache that other goroutines read.
 func (s *AuthStore) Record(name string) (AuthRecord, bool) {
-	if s.path == "" {
+	return s.resolveRecord(name)
+}
+
+// resolveRecord is the single read path: refresh the file-backed cache, copy
+// the record, then overlay the LIVE vault secrets on top.
+//
+// The mutex is released before the vault is consulted on purpose. The vault is
+// external I/O (a keyring lookup, a file read), and holding the store lock
+// across it would serialise every reader of every server behind one keyring
+// call. Nothing the vault returns is cached, so no lock is needed to read it.
+func (s *AuthStore) resolveRecord(name string) (AuthRecord, bool) {
+	if s == nil || s.path == "" {
 		return AuthRecord{}, false
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.refreshLocked()
 	rec, ok := s.servers[name]
+	s.mu.Unlock()
 	if !ok {
 		return AuthRecord{}, false
 	}
-	return copyRecord(rec), true
+	return s.mergeSecrets(name, rec), true
+}
+
+// mergeSecrets returns rec (a file-backed record) with the vault's secrets laid
+// on top. rec is copied first, so neither the cached map nor any record another
+// goroutine handed out is ever mutated.
+//
+// PRECEDENCE, and it is the reason the "file carries a secret" branch exists:
+// a file record that still holds client_secret or a token has not been migrated
+// (a failed SetSecret, a hand-edited file, a downgrade to an older lele). For
+// that record the FILE WINS and the vault is not consulted at all — mixing the
+// halves of two different credentials would present a client secret from one
+// registration with a token from another, and the safe reading of "the file
+// still owns this credential" is to keep it whole. The next successful Save
+// moves it into the vault and this branch stops being taken.
+//
+// A vault READ error and a malformed blob are treated identically: warn (value
+// free) and report no secrets. Record cannot return an error, and "no secrets"
+// degrades to a re-login, whereas surfacing a half-read credential could
+// present a token whose client secret we just failed to load.
+func (s *AuthStore) mergeSecrets(name string, rec AuthRecord) AuthRecord {
+	rec = copyRecord(rec)
+	if s.vault == nil {
+		return rec
+	}
+	if rec.ClientSecret != "" || rec.Token != nil {
+		return rec // unmigrated: the file still owns this credential whole
+	}
+	raw, err := s.vault.GetSecret(secretNameFor(name))
+	if err != nil {
+		logWarnValueFree("stored OAuth secret could not be read; treating the server as not authenticated", name, err)
+		return rec
+	}
+	blob, ok := parseAuthSecretBlob(name, raw)
+	if !ok {
+		return rec
+	}
+	rec.ClientSecret = blob.ClientSecret
+	rec.Token = authTokenCopy(blob.Token)
+	return rec
 }
 
 // Authenticated reports whether name holds a USABLE token for url: a token
@@ -172,14 +306,19 @@ func (s *AuthStore) AuthRequired(name, url string) bool {
 // hash of the marshalled record changes when ANY field changes, is stable
 // across repeated reads (marshalling the same bytes twice gives the same
 // hash), and maps every absent record to 0 so "gone" is one constant.
+//
+// The hash covers the MERGED record (file state + live vault overlay), not just
+// the file. That is what keeps the manager honest when a vault is active: a
+// token refreshed by ANOTHER process changes only the vault entry, leaving
+// mcp-auth.json — and therefore its mtime, its size and the stat stamp — exactly
+// as it was. Hashing the file alone would report "nothing changed" and keep
+// dialling a retired token.
+//
+// The cost is one vault read per call, and the manager calls this on every
+// resolve and every load; the vault is the freshness source for secrets, so that
+// read is the price of correctness (a keyring lookup, not a network round trip).
 func (s *AuthStore) Revision(name string) uint64 {
-	if s.path == "" {
-		return 0
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.refreshLocked()
-	rec, ok := s.servers[name]
+	rec, ok := s.resolveRecord(name)
 	if !ok {
 		return 0
 	}
@@ -194,7 +333,17 @@ func (s *AuthStore) Revision(name string) uint64 {
 // authTokenStore does. The write reuses SaveRawFile (temp file in the same
 // directory → fsync → chmod 0600 → rename), so a crash never leaves a
 // truncated or world-readable mcp-auth.json: the 0600 mode is deliberate,
-// because every field this file holds is a secret.
+// because the file holds a client id and resource URLs even when the vault owns
+// the credentials (and holds the credentials themselves when it does not).
+//
+// With a vault the record is SPLIT: client_secret and the token go to
+// "mcp.<server>.auth" (an empty pair DELETES that entry instead of storing an
+// empty object) and the file keeps only the non-secret fields. The vault is
+// written FIRST and its error is returned unchanged: writes fail CLOSED, so a
+// broken vault can never silently downgrade the user to plaintext on disk. A
+// failure of the file write AFTER a successful vault write is also returned,
+// and the state stays consistent anyway — the next read overlays the vault on
+// top of whatever the file says.
 func (s *AuthStore) Save(name string, rec AuthRecord) error {
 	if s.path == "" {
 		return nil
@@ -203,12 +352,51 @@ func (s *AuthStore) Save(name string, rec AuthRecord) error {
 	defer s.mu.Unlock()
 	s.refreshLocked()
 
+	stored := rec
+	if s.vault != nil {
+		if err := s.writeSecretsLocked(name, rec); err != nil {
+			return err
+		}
+		// The file never keeps a credential while a vault is active: it stores
+		// the record with the secret fields zeroed.
+		stored.ClientSecret = ""
+		stored.Token = nil
+	}
+
 	servers := make(map[string]AuthRecord, len(s.servers)+1)
 	for k, v := range s.servers {
 		servers[k] = v
 	}
-	servers[name] = rec
+	servers[name] = stored
 	return s.writeLocked(servers)
+}
+
+// writeSecretsLocked pushes rec's credential half into the vault. Save is the
+// only caller and holds s.mu, so the split happens inside the same locked region
+// as the file write: a save is atomic from the caller's point of view and two
+// concurrent saves cannot interleave their vault and file halves.
+//
+// An empty credential pair is a DELETE, not an empty store: "no secret" and "a
+// secret that happens to be empty" must not be two different states in the
+// vault, or a logout-then-login would leave a stale entry behind. DeleteSecret
+// is idempotent by contract, so the delete of a never-written secret is a
+// no-op rather than an error.
+func (s *AuthStore) writeSecretsLocked(name string, rec AuthRecord) error {
+	blob := authSecretBlob{ClientSecret: rec.ClientSecret, Token: authTokenCopy(rec.Token)}
+	if blob.isEmpty() {
+		if err := s.vault.DeleteSecret(secretNameFor(name)); err != nil {
+			return fmt.Errorf("mcp: remove stored secret for %q: %w", name, err)
+		}
+		return nil
+	}
+	payload, err := encodeAuthSecretBlob(blob)
+	if err != nil {
+		return err
+	}
+	if err := s.vault.SetSecret(secretNameFor(name), payload); err != nil {
+		return fmt.Errorf("mcp: store secret for %q: %w", name, err)
+	}
+	return nil
 }
 
 // Clear deletes name's record (token AND registration AND the auth_required
@@ -219,6 +407,17 @@ func (s *AuthStore) Save(name string, rec AuthRecord) error {
 // removed the entry) and a record left behind by an edited URL must go too.
 // A missing record is a no-op, file untouched: nothing was stored, so the
 // file is not ours to delete.
+//
+// With a vault the credential entry is deleted as well, and the deletion
+// happens even when the FILE has no record for name: a half-finished migration
+// or a Save whose file write failed can leave a blob with no file record, and
+// "forget this server" has to mean the secret is gone. DeleteSecret is
+// idempotent, so the common case (nothing stored) costs one no-op call.
+//
+// Order is vault first, then file, and a vault error is returned: fail closed.
+// The record then stays, the secret stays, and the caller knows the logout did
+// not happen — much better than a surface reporting success while the token is
+// still live.
 func (s *AuthStore) Clear(name string) error {
 	if s.path == "" {
 		return nil
@@ -226,6 +425,12 @@ func (s *AuthStore) Clear(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.refreshLocked()
+
+	if s.vault != nil {
+		if err := s.vault.DeleteSecret(secretNameFor(name)); err != nil {
+			return fmt.Errorf("mcp: remove stored secret for %q: %w", name, err)
+		}
+	}
 
 	if _, ok := s.servers[name]; !ok {
 		return nil
@@ -257,7 +462,9 @@ func (s *AuthStore) Clear(name string) error {
 // nothing else, so a compromised or merely buggy transport cannot enumerate
 // the user's other servers. Every call re-reads through the AuthStore, so a
 // token saved by the OTHER process (or refreshed underneath us) is picked up
-// on the next request without a restart.
+// on the next request without a restart — and with a vault active that read is
+// live, so a token the other process refreshed is seen even when it never
+// rewrote mcp-auth.json.
 func (s *AuthStore) TokenStore(name, url string) transport.TokenStore {
 	return &authTokenStore{store: s, name: name, url: url}
 }
@@ -313,6 +520,10 @@ func (t *authTokenStore) GetToken(ctx context.Context) (*transport.Token, error)
 // no way to see it coming. transport.Token is strings, one int64 and a
 // time.Time, so the struct copy IS a deep copy. A nil tok still clears the
 // stored token exactly as before, without dereferencing it.
+//
+// A vault-active store routes the final Save through the split, so this remains
+// the single write path: the read-modify-write preserves the registration half
+// in mcp-auth.json and the token (plus any client secret) lands in the vault.
 func (t *authTokenStore) SaveToken(ctx context.Context, tok *transport.Token) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -341,6 +552,69 @@ func (s *AuthStore) recordFor(name, url string) (AuthRecord, bool) {
 		return AuthRecord{}, false
 	}
 	return rec, true
+}
+
+// migrateLegacySecrets is the one-time migration performed by NewAuthStore when
+// a vault is active: every credential still sitting in mcp-auth.json is pushed
+// into the vault and then stripped from the file, in ONE rewrite at the end.
+//
+// Design notes, because this is the only destructive step in the file:
+//
+//   - It is BEST EFFORT and cannot fail the constructor. A migration that could
+//     not write a secret leaves that record exactly as it was (secrets and all)
+//     and continues with the others. No credential is ever dropped: the delete
+//     from the file only happens after the vault write succeeded.
+//   - If a blob ALREADY exists in the vault and the file also carries secrets,
+//     the file wins and overwrites the blob. The file is the state the running
+//     binary has been reading until now, so it is the one that is current; the
+//     stale blob is the residue of an interrupted migration.
+//   - The single rewrite at the end is what keeps a crash window tiny: a crash
+//     before it leaves the file untouched (secrets still readable, blob already
+//     written — and the file wins on read), a crash after it leaves a clean
+//     file whose secrets are all in the vault.
+//   - A missing or malformed file is a no-op (readAuthFile reports empty).
+//
+// On a failed rewrite the cache is invalidated rather than left holding the
+// stripped records: the file on disk still carries the secrets, and the
+// file-wins rule in mergeSecrets must apply to them.
+func (s *AuthStore) migrateLegacySecrets() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refreshLocked()
+	if len(s.servers) == 0 {
+		return
+	}
+
+	migrated := 0
+	for name, rec := range s.servers {
+		if rec.ClientSecret == "" && rec.Token == nil {
+			continue
+		}
+		blob := authSecretBlob{ClientSecret: rec.ClientSecret, Token: authTokenCopy(rec.Token)}
+		payload, err := encodeAuthSecretBlob(blob)
+		if err != nil {
+			logWarnValueFree("legacy OAuth secret could not be encoded; leaving it in mcp-auth.json", name, err)
+			continue
+		}
+		if err := s.vault.SetSecret(secretNameFor(name), payload); err != nil {
+			logWarnValueFree("legacy OAuth secret could not be migrated to the vault; leaving it in mcp-auth.json", name, err)
+			continue
+		}
+		rec.ClientSecret = ""
+		rec.Token = nil
+		s.servers[name] = rec
+		migrated++
+	}
+	if migrated == 0 {
+		return
+	}
+	if err := s.writeLocked(s.servers); err != nil {
+		// The vault now holds copies and the file still holds the originals:
+		// readable either way (the file wins), so this is a warning, not a
+		// failure. Drop the cache so the next read sees the file as it is.
+		logWarnValueFree("migrated OAuth secrets to the vault but could not rewrite mcp-auth.json; the file still holds copies", "", err)
+		s.invalidateLocked()
+	}
 }
 
 // refreshLocked reloads the cache when the file on disk is not the one we
