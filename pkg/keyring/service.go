@@ -105,6 +105,27 @@ func (s *Service) Backend() string {
 	return s.keyProv.Backend()
 }
 
+// Enabled reports whether the module is enabled in configuration. A disabled
+// Service answers ErrDisabled from every operation, so a subsystem that adapts
+// it (an internal vault, a resolver) checks this FIRST and degrades to its own
+// unencrypted path instead of failing every write. A nil receiver is not
+// enabled.
+func (s *Service) Enabled() bool {
+	return s != nil && s.cfg.Enabled
+}
+
+// LeleDir returns the lele directory this Service was built for: the directory
+// its vault file and master key default to, and the identity a caller compares
+// against before handing the Service to a subsystem that only knows a directory
+// string. It is NOT the vault path (that one may be configured elsewhere), so a
+// caller never mistakes "this vault" for "this installation".
+func (s *Service) LeleDir() string {
+	if s == nil {
+		return ""
+	}
+	return s.cfg.LeleDir
+}
+
 // GetForAgent retrieves a secret value on behalf of an agent, enforcing scope
 // restrictions and recording an audit entry.
 func (s *Service) GetForAgent(name, agentID, sessionKey string) (string, error) {

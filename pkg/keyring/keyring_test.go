@@ -113,6 +113,25 @@ func TestServiceDisabled(t *testing.T) {
 	assert.ErrorIs(t, err, ErrDisabled)
 }
 
+// TestServiceEnabledAndLeleDir pins the two accessors a subsystem that adapts
+// the Service needs: whether the module is on (so it can degrade to plaintext
+// instead of failing every write) and which lele directory the Service belongs
+// to (so a vault is never handed to a store of another installation).
+func TestServiceEnabledAndLeleDir(t *testing.T) {
+	dir := t.TempDir()
+
+	on := NewService(ServiceConfig{Enabled: true, LeleDir: dir, Backend: BackendFile})
+	assert.True(t, on.Enabled())
+	assert.Equal(t, dir, on.LeleDir())
+
+	off := NewService(ServiceConfig{Enabled: false, LeleDir: dir, Backend: BackendFile})
+	assert.False(t, off.Enabled())
+
+	var nilSvc *Service
+	assert.False(t, nilSvc.Enabled(), "a nil Service is not an enabled one")
+	assert.Equal(t, "", nilSvc.LeleDir())
+}
+
 func TestVaultPersistsAcrossReopen(t *testing.T) {
 	dir := t.TempDir()
 	cfg := ServiceConfig{

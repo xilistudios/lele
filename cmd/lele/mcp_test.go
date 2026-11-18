@@ -62,10 +62,18 @@ func newMCPTestEnv(t *testing.T) *mcpTestEnv {
 // writeMCPConfigFile writes a minimal config.json whose default workspace is
 // agentWS: the registry resolves the implicit "main" agent to it, so the agent
 // layer lands inside the temp tree.
+//
+// The keyring backend is pinned to the FILE provider on purpose. Loading a
+// config also registers the MCP secret vault (cmd/lele's shared setup), so a
+// test that stores an OAuth token now writes into a keyring vault; with the
+// default "auto" backend that vault's master key would come from the developer's
+// real OS keychain (and create an entry there on a machine that has none). The
+// file provider keeps the key and the vault inside the temp directory, so the
+// tests stay hermetic AND exercise the real vault path.
 func writeMCPConfigFile(t *testing.T, leleDir, agentWS string) {
 	t.Helper()
 	writeMCPTestFile(t, filepath.Join(leleDir, "config.json"),
-		fmt.Sprintf(`{"agents":{"defaults":{"workspace":%q}}}`, agentWS))
+		fmt.Sprintf(`{"agents":{"defaults":{"workspace":%q}},"keyring":{"backend":"file"}}`, agentWS))
 }
 
 func writeMCPTestFile(t *testing.T, path, content string) {
