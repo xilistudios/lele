@@ -143,8 +143,9 @@ OAuth transport refuses to send anything without a usable token), so a bare
 
 ### Logging in
 
-The login is interactive and per server; the credential is stored in
-`<lele dir>/mcp-auth.json` (mode `0600`), never in `mcp.json`:
+The login is interactive and per server; the result is persisted under lele's
+own directory (see [Where the credential lives](#where-the-credential-lives)),
+never in `mcp.json`:
 
 - **CLI:** `lele mcp auth issues` (see [`lele mcp auth`](#lele-mcp-auth)).
 - **TUI:** `/mcp`, open the entry with `ENTER`, then press `a` (the key is owned
@@ -164,11 +165,51 @@ is refused (`authentication is not supported … add a pre-registered client wit
 is refused too (`does not require authentication`) — the two mean different
 things and neither starts a flow.
 
-`mcp-auth.json` is machine-local and per-lele-directory: it holds tokens a
+`mcp-auth.json` is machine-local and per-lele-directory: it records the logins a
 *specific* machine obtained from a *specific* authorization server, so it is not
 a file to sync or commit. It sits next to `mcp.json` because it is that file's
 other half — `mcp.json` says what to connect to, `mcp-auth.json` remembers what
 the server asked us to prove.
+
+#### Where the credential lives
+
+The file is the record, not necessarily the secret. With the keyring module
+enabled (`keyring.enabled`, the default) the OAuth **access token, refresh token
+and client secret** are stored encrypted in lele's keyring under the secret name
+`mcp.<server>.auth` — the vault is `<lele dir>/keyring.enc`, AES-256-GCM, with
+the master key in the OS keychain or in `<lele dir>/keyring.key`.
+`mcp-auth.json` then keeps only the non-secret half of the record: the URL, the
+`client_id` (the public half of a dynamic registration), the resource metadata
+URL, the redirect URI and the `auth_required` flag. Both halves are read back as
+ONE record, so nothing above this line changes: the login, the refresh and the
+`logout` behave the same, and no surface ever learns which half a value came
+from.
+
+- **Migration is automatic.** An `mcp-auth.json` written before this split still
+  carries its token and client secret; the first lele process that opens it with
+  the keyring enabled moves those values into the keyring and rewrites the file
+  once without them. An interrupted migration cannot lose a credential: a record
+  whose secret could not be stored stays in the file and keeps being read from
+  there until the next successful write moves it.
+- **The keyring module disabled means plaintext.** With `keyring.enabled: false`
+  nothing sits in the middle: `mcp-auth.json` keeps the whole record in a `0600`
+  file, exactly as before the keyring existed.
+- **Cross-process.** The keyring is re-read on every access, so a token the TUI
+  refreshed is visible to the running gateway (and vice versa) without a restart
+  — the same freshness the file's stat stamp gives the non-secret half.
+- **These secrets are internal.** Keyring entries written by the auth store
+  carry the scope `system`, so the agent-facing `secret` tool neither reads nor
+  lists them, while the secrets page of the WebUI and the TUI still shows them
+  (and can delete one). They are never printed either: no command, API response
+  or log line carries a token or a client secret.
+- **Static auth is unaffected.** An `Authorization` header or API key declared
+  in `headers`/`env` is not OAuth state and never reaches the keyring: it keeps
+  being expanded from `${VAR}` at connect time (see
+  [`${VAR}` expansion](#var-expansion)).
+
+`mcp-auth.json` remains a secret file in keyring mode too — it holds the
+`client_id` and the resource URLs of your servers — so keep it out of version
+control and out of any sync.
 
 Once stored, the token is used on every dial (the transport refreshes it when
 it expires) and the gateway picks it up on the next reload — no restart. To
@@ -758,9 +799,11 @@ http://127.0.0.1:8080/callback?code=SplxlOBeZQQYbYS6WxSbIA&state=…
 ### `lele mcp logout`
 
 Forgets everything the lele directory stores about one server: the token **and**
-the dynamic registration, so the next dial starts from scratch. It reports
-whether anything was actually forgotten but never *what* it was — the store's
-only exported questions are yes/no, and a token is never printed.
+the dynamic registration, so the next dial starts from scratch. With the keyring
+module enabled the token itself is deleted from the keyring (`mcp.<server>.auth`)
+and the non-secret record from `mcp-auth.json`. It reports whether anything was
+actually forgotten but never *what* it was — the store's only exported questions
+are yes/no, and a token is never printed.
 
 ```console
 $ lele mcp logout issues
@@ -971,10 +1014,14 @@ Rules of the bridge:
   user-readable only.
 - **Remote servers:** a static token still goes in `headers` (values expand,
   so `${ISSUE_TRACKER_TOKEN}` keeps the secret out of the file). A server that
-  *demands* a login is handled with the `auth` block, whose credential lands in
-  `mcp-auth.json` (`0600`, machine-local, next to `mcp.json`) — never in
-  `mcp.json`, and never in a log. `mcp-auth.json` is a secret file: do not commit
-  or sync it.
+  *demands* a login is handled with the `auth` block, whose credential never
+  lands in `mcp.json` and never in a log: with the keyring module enabled the
+  token and client secret live encrypted in `<lele dir>/keyring.enc` under
+  `mcp.<server>.auth` — scope `system`, so an agent cannot reach them through
+  the `secret` tool — and the `mcp-auth.json` next to `mcp.json` holds only the
+  non-secret half of the record. With the keyring disabled the whole record
+  stays in `mcp-auth.json` (`0600`, machine-local). Either way `mcp-auth.json`
+  is a secret file: do not commit or sync it.
 
 ## Limitations (v1)
 
