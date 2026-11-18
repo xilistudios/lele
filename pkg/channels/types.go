@@ -149,6 +149,11 @@ type WSMessageCompletePayload struct {
 	SessionKey  string                   `json:"session_key,omitempty"`
 	Content     string                   `json:"content"`
 	Attachments []map[string]interface{} `json:"attachments,omitempty"`
+	// Error marks a completion whose turn ended in a provider/tool failure
+	// (outbound Metadata "error"="true", see pkg/agent/loop.go). The client uses
+	// it to render the live failure as an error box straight away instead of
+	// waiting for the history refetch that carries the persisted error_detail.
+	Error bool `json:"error,omitempty"`
 }
 
 type WSApprovalRequestPayload struct {
@@ -319,6 +324,12 @@ type ChatHistoryMessage struct {
 	// Command is the harness slash command that produced this message, so the
 	// UI can re-render the command chip from history. nil = not command-driven.
 	Command *providers.CommandApplied `json:"harness_command,omitempty"`
+	// ErrorDetail marks this message as a FAILED turn and carries the failure
+	// detail: the UI renders it as an error box instead of a normal assistant
+	// bubble, and skips the "archived from context" label. The message is
+	// persisted with exclude_from_context=true (it is UI-only), so Content keeps
+	// the legacy "❌ Error …" text for plain-text channels.
+	ErrorDetail string `json:"error_detail,omitempty"`
 }
 
 type HistoryToolCall struct {
