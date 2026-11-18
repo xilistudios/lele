@@ -287,7 +287,6 @@ func TestLLMErrorTitlePresentInBuiltinLocales(t *testing.T) {
 	const key = "tui.llmErrorTitle"
 
 	for _, lang := range i18n.BuiltinLanguages() {
-		lang := lang
 		t.Run(lang, func(t *testing.T) {
 			// Path relative to the package dir, which is the test's working
 			// directory; the packs are the same files go:embed compiles in.
