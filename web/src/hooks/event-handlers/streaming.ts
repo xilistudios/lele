@@ -284,6 +284,9 @@ export function handleMessageComplete(ctx: MessageEventContext, data: Record<str
       targetSessionKey,
       data.content as string | undefined,
       data.attachments as ChatMessage['attachments'],
+      // A failed turn is marked on the wire (pkg/channels/native.go): render the
+      // red error box immediately instead of waiting for the history refetch.
+      data.error === true,
     ),
   )
   ctx.setToolStatus(null)

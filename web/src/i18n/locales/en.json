@@ -141,6 +141,7 @@
     "failedToSend": "Failed to send",
     "retry": "Retry",
     "archivedFromContext": "Archived from context",
+    "llmErrorTitle": "LLM request failed",
     "download": "Download",
     "errorContentMissing": "Type a message or attach a file",
     "errorAttachmentsRejected": "Your attachments could not be read. Add some text or upload them again",

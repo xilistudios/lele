@@ -708,3 +708,52 @@ test('toChatMessages: plain user text is not marked with systemNotice', () => {
   expect(result[0].content).toBe('hola')
   expect(result[0].systemNotice).toBeUndefined()
 })
+// ---------------------------------------------------------------------------
+// LLM failures (error_detail → ChatMessage.error)
+// ---------------------------------------------------------------------------
+
+describe('toChatMessages: LLM failure messages', () => {
+  test("maps error_detail onto the message's error field", () => {
+    const history: RawHistoryMessage[] = [
+      { id: 'h1', role: 'user', content: 'hello' },
+      {
+        id: 'h2',
+        role: 'assistant',
+        // The persisted legacy text plain-text channels read.
+        content: '❌ Error processing message: LLM call failed after retries',
+        error_detail: 'LLM call failed after retries: 429 Too Many Requests',
+        exclude_from_context: true,
+      },
+    ]
+
+    const result = toChatMessages(history, 'session:1')
+    const failure = result[1]
+
+    expect(failure.role).toBe('assistant')
+    expect(failure.error).toBe('LLM call failed after retries: 429 Too Many Requests')
+    expect(failure.content).toBe('❌ Error processing message: LLM call failed after retries')
+    expect(failure.excludeFromContext).toBe(true)
+  })
+
+  test('keeps a failure that carries no visible content of its own', () => {
+    // A failure row must never be dropped for lacking content: that is the
+    // disappearing-error bug (the box is the only thing it has to show).
+    const history: RawHistoryMessage[] = [
+      { id: 'h1', role: 'assistant', content: '', error_detail: 'boom' },
+    ]
+
+    const result = toChatMessages(history, 'session:1')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].error).toBe('boom')
+  })
+
+  test('normal assistant messages carry no error', () => {
+    const history: RawHistoryMessage[] = [{ id: 'h1', role: 'assistant', content: 'ok' }]
+
+    const result = toChatMessages(history, 'session:1')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].error).toBeUndefined()
+  })
+})

@@ -152,6 +152,7 @@ export function applyMessageComplete(
   sessionKey: string,
   serverContent: string | undefined,
   serverAttachments?: ChatMessage['attachments'],
+  serverError?: boolean,
 ): ChatMessage[] {
   const hasServerAttachments = !!serverAttachments && serverAttachments.length > 0
 
@@ -167,6 +168,7 @@ export function applyMessageComplete(
       content,
       streaming: false,
       attachments: hasServerAttachments ? serverAttachments : undefined,
+      error: serverError ? content : undefined,
     })
     const arr = [...current]
     arr.splice(computeAssistantInsertIndex(current), 0, newMsg)
@@ -183,6 +185,12 @@ export function applyMessageComplete(
           ...m,
           content,
           streaming: false,
+          // A turn that ended in a provider/tool failure is marked on the wire
+          // (message.complete error, see pkg/channels/native.go): paint the red
+          // error box right away instead of waiting for the history refetch.
+          // The refetch then replaces this LIVE text with the persisted
+          // error_detail, which is the same failure in more detail.
+          ...(serverError ? { error: content } : {}),
           ...(hasServerAttachments ? { attachments: serverAttachments } : {}),
         },
       ]

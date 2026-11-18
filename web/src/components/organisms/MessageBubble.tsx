@@ -276,16 +276,47 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
   // Never render an assistant row with nothing visible: empty or whitespace-only
   // content/reasoning would still lay the row out and show up as dead space
   // between two visible rows (tool cards in practice).
-  // An errored turn (`message.error`, set by markStreamingAssistantsErrored) is
-  // deliberately not exempt: nothing renders it, so it would be an empty row.
+  // An errored turn (`message.error`) is EXEMPT: it renders as the red error box
+  // below, and null-rendering it would make the failure disappear — the very bug
+  // this render path exists to fix.
+  const hasError = Boolean(message.error)
   if (
     !hasContent &&
     !hasThinking &&
     !hasAttachments &&
+    !hasError &&
     !message.excludeFromContext &&
     !showsTypingDots
   ) {
     return null
+  }
+
+  if (hasError) {
+    // A failed turn (persisted `error_detail`, or a live stream failure): the
+    // error box REPLACES the assistant bubble — content, reasoning and tool
+    // rendering are all skipped, and so is the "archived from context" label
+    // (the message is excluded from context precisely because it is an error).
+    return (
+      <div
+        data-message-id={message.stableId ?? message.id}
+        data-testid="message"
+        data-role={message.role}
+        className={`${chatRowPadding(message)} ${animate ? 'animate-message-enter' : ''}`}
+      >
+        <div
+          data-testid="llm-error-box"
+          className="rounded-lg border border-state-error/40 bg-state-error/10 px-3 py-2"
+        >
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-state-error">
+            <span aria-hidden="true">⚠</span>
+            <span>{t('chat.llmErrorTitle')}</span>
+          </div>
+          <div className="mt-1 whitespace-pre-wrap break-words font-mono text-xs text-state-error/90">
+            {message.error}
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
