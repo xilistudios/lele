@@ -242,8 +242,10 @@ no configuration, and one field that is opt-in:
   `{{session}}` (the same 64-hex id lele sends natively as `x-opencode-session`)
   and `{{ENV_NAME[:default]}}`, expanded at load. Applied last, so a custom
   entry wins over transport defaults; validated at provider-JSON decode
-  and, per field (`invalid_header`), on the editable document. No editor
-  yet — `config.json`/API only, but the WebUI document round-trips the map. See
+  and, per field (`invalid_header`), on the editable document. Editable from the
+  TUI (`/providers` → *Edit provider* → **Headers**, a masked JSON object step:
+  blank keeps, `{}` clears, validated on the spot); the Web UI has no headers
+  editor but its document round-trips the map. See
   **Custom headers** in `docs/agents-models-providers.md` (`#custom-headers`).
 
 ## `tools`
