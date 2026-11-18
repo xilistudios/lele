@@ -1123,6 +1123,25 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			ToolCallID:         msg.Metadata["tool_call_id"],
 		}, "")
 		return
+	case "history.updated":
+		// The agent persisted messages outside the stream/complete path — the
+		// mid-turn subagent notices it injects into a running turn. The
+		// payload mirrors the history.updated emits of the normal completion
+		// path below, so clients handle it with the same refetch; reason lets
+		// them tell the two apart.
+		sessionName := ""
+		if n.agentLoop != nil {
+			sessionName = n.agentLoop.GetName(sessionKey)
+		}
+		payload := map[string]interface{}{
+			"session_key": sessionKey,
+			"name":        sessionName,
+		}
+		if reason := msg.Metadata["reason"]; reason != "" {
+			payload["reason"] = reason
+		}
+		n.emitNativeEvent(sessionKey, "history.updated", payload, "")
+		return
 	case "group.status":
 		n.emitNativeEvent(sessionKey, "group.status", WSGroupStatusPayload{
 			SessionKey:   sessionKey,

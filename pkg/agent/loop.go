@@ -91,6 +91,14 @@ type AgentLoop struct {
 	subagentSessionAgent sync.Map                  // subagent session key -> agent ID (O(1) lookup, not O(N))
 	wg                   sync.WaitGroup            // tracks in-flight message goroutines
 
+	// midTurnNotices carries subagent completions that arrive while a turn is
+	// already running on the session (sessionKey -> *midTurnNoticeQueue). The
+	// running turn injects them at iteration boundaries so the parent reacts to
+	// a subagent result inside the same turn instead of after it. When the
+	// session is idle the queue is inactive and the completion takes the
+	// inbound-resume path instead. See midturn_notices.go.
+	midTurnNotices sync.Map
+
 	// inProgressTools mirrors the tool each session is currently executing
 	// (sessionKey -> *session.InProgressTool), fed by publishToolLifecycle and
 	// dropped when the turn ends. It exists so a chat reload (TUI session

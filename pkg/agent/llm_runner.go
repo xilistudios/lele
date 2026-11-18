@@ -115,6 +115,42 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		}
 	}
 
+	// Mid-turn subagent notices. Activating the queue here — right after the
+	// per-session semaphore is held — is what turns "the parent is running"
+	// into a fact a subagent callback can observe: while it is active,
+	// publishSubagentAsyncResult enqueues the result instead of publishing an
+	// inbound (which would block on the semaphore until this turn ended) and
+	// the loop below injects it at the next iteration boundary.
+	//
+	// The flush defer is registered AFTER the semaphore-release defer above,
+	// so LIFO ordering runs it BEFORE the semaphore is released. Anything the
+	// loop never got to inject (LLM error, ctx cancel, empty-response limit,
+	// iteration limit, tool failure) is re-published as the ordinary system
+	// inbound; that inbound then acquires the semaphore immediately after this
+	// function returns and runs as a normal continuation turn. Nothing is
+	// re-claimed here: the result was already claimed by
+	// publishSubagentAsyncResult, so re-publishing cannot duplicate it.
+	if opts.SessionKey != "" {
+		lr.al.activateMidTurnNotices(opts.SessionKey)
+		defer func() {
+			remaining := lr.al.deactivateMidTurnNotices(opts.SessionKey)
+			for _, n := range remaining {
+				// n.content is the RAW result text, exactly what
+				// publishSubagentAsyncResult publishes on the idle path:
+				// processSystemMessage adds the "[System: subagent] " prefix
+				// there, so the persisted message is identical either way.
+				lr.al.bus.PublishInbound(bus.InboundMessage{
+					Channel:    "system",
+					SenderID:   midTurnNoticeSender,
+					ChatID:     fmt.Sprintf("%s:%s", opts.Channel, opts.ChatID),
+					Content:    n.content,
+					SessionKey: opts.SessionKey,
+					Metadata:   map[string]string{"task_id": n.taskID},
+				})
+			}
+		}()
+	}
+
 	// 0. Record last channel for heartbeat notifications (skip internal channels)
 	if opts.Channel != "" && opts.ChatID != "" {
 		// Don't record internal channels (cli, system, subagent)
@@ -616,6 +652,20 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			agent.Sessions.DiscardStreamingDraft(opts.SessionKey)
 		}
 
+		// Mid-turn subagent notices, injected at the iteration boundary: the
+		// previous iteration just closed with tool results (or with an
+		// assistant turn plus guidance), so a user message here keeps the
+		// conversation well-formed. When the previous message IS a user
+		// message (empty-response retry, malformed-tool-call guidance, loop
+		// guidance) appending another one would break the providers' role
+		// alternation, so the notices stay queued: the final-exit check below
+		// guarantees they are delivered regardless.
+		if iteration > 1 && opts.SessionKey != "" && midTurnNoticeBoundaryIsSafe(messages) {
+			if notices := lr.al.drainMidTurnNotices(opts.SessionKey); len(notices) > 0 {
+				messages = lr.injectMidTurnNotices(agent, messages, opts, notices)
+			}
+		}
+
 		logger.DebugCF("agent", "LLM iteration",
 			map[string]interface{}{
 				"agent_id":  agent.ID,
@@ -882,6 +932,22 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				continue
 			}
 
+			// Final-exit check: the model just produced a final answer, but a
+			// subagent may have finished while this turn was running. Loading
+			// the notices here (atomically, together with deactivating the
+			// queue when there is nothing left) keeps them in THIS turn
+			// instead of turning them into a separate continuation turn. The
+			// assistant message above stays persisted and streamed as an
+			// intermediate answer; the loop simply runs one more iteration so
+			// the model can react to what it just learned. Role safety is
+			// guaranteed here: the last message is that assistant message.
+			if opts.SessionKey != "" {
+				if notices := lr.al.drainOrDeactivateMidTurnNotices(opts.SessionKey); len(notices) > 0 {
+					messages = lr.injectMidTurnNotices(agent, messages, opts, notices)
+					continue
+				}
+			}
+
 			break
 		}
 
@@ -1062,6 +1128,57 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 	}
 
 	return finalContent, iteration, nil
+}
+
+// midTurnNoticeBoundaryIsSafe reports whether appending user-role mid-turn
+// notices after messages keeps the conversation well-formed. Providers reject
+// two consecutive messages of the same role, so a boundary whose last message
+// is already a user message (empty-response retry prompt, malformed-tool-call
+// guidance, loop guidance) is not usable: the caller leaves the notices queued
+// for a later boundary or for the final-exit check.
+func midTurnNoticeBoundaryIsSafe(messages []providers.Message) bool {
+	if len(messages) == 0 {
+		return true
+	}
+	return messages[len(messages)-1].Role != "user"
+}
+
+// injectMidTurnNotices appends the drained subagent notices to the live
+// message context AND to the session history, so the running turn reacts to
+// them immediately and every later turn (and compaction) still sees them.
+//
+// One Save for the whole batch, and one live-update event: the clients only
+// need to know that the transcript grew behind their back (they refetch it),
+// which is exactly what "history.updated" means. The event carries
+// reason=subagent_notice so a client can tell it apart from the normal
+// post-completion refresh.
+func (lr *llmRunnerImpl) injectMidTurnNotices(agent *AgentInstance, messages []providers.Message, opts processOptions, notices []midTurnNotice) []providers.Message {
+	if len(notices) == 0 {
+		return messages
+	}
+
+	for _, n := range notices {
+		content := n.messageContent()
+		messages = append(messages, providers.Message{Role: "user", Content: content})
+		agent.Sessions.AddMessage(opts.SessionKey, "user", content)
+	}
+
+	if saveErr := agent.Sessions.Save(opts.SessionKey); saveErr != nil {
+		logger.WarnCF("agent", "Failed to save mid-turn subagent notices", map[string]interface{}{
+			"session_key": opts.SessionKey,
+			"notices":     len(notices),
+			"error":       saveErr.Error(),
+		})
+	}
+
+	lr.al.bus.PublishOutbound(bus.OutboundMessage{
+		Channel:  opts.Channel,
+		ChatID:   opts.SessionKey,
+		Event:    "history.updated",
+		Metadata: map[string]string{"reason": "subagent_notice"},
+	})
+
+	return messages
 }
 
 // iterationMsgID appends the iteration number as a suffix to baseID for

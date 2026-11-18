@@ -77,16 +77,21 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 			// overlay does not keep showing stale activity for a completed
 			// subagent (TUI-M4). This happens for EVERY terminal outcome — the
 			// backend publishes the event unconditionally and reports in
-			// metadata["resumed"] whether a continuation turn is owed.
+			// metadata["resumed"]/["injected"] whether the parent owns the
+			// result and how it receives it.
 			if taskID := msg.msg.Metadata["task_id"]; taskID != "" {
 				delete(m.subagentProgress, taskID)
 			}
-			// Only a claimed result (resumed=true) resumes the parent, so only
-			// then must the TUI hold the loading state across the continuation
-			// turn. A result consumed in-turn by wait_for_subagent arrives with
-			// resumed=false: it must not arm a turn (there is none to wait for)
-			// and must not touch a turn that is currently running.
-			if msg.msg.Metadata["resumed"] == "true" {
+			// Only a claimed result that is delivered by a NEW continuation turn
+			// (resumed=true, injected absent/false) owes a turn, so only then
+			// must the TUI hold the loading state across it. Two other cases
+			// must leave the turn state alone:
+			//   - resumed=false: wait_for_subagent consumed the result in-turn,
+			//     so there is no turn to wait for.
+			//   - injected=true: the parent turn is still running and its own
+			//     turn end (stream end / completeMsg) clears loading. Arming the
+			//     flag here would wait for a continuation turn that never comes.
+			if msg.msg.Metadata["resumed"] == "true" && msg.msg.Metadata["injected"] != "true" {
 				m.subagentContinuationPending = true
 				m.processing = true
 				m.startTime = time.Now()

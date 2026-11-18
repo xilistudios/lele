@@ -370,9 +370,10 @@ func TestSubagentCompletion_WaitInFlight_NoInjection(t *testing.T) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 // TestSubagentCompletion_ParentBusyNotWaiting_InjectsAtTurnEnd pins race (c):
-// the claim is taken immediately, the inbound is queued, and the continuation
-// runs only after the in-flight turn releases the per-session semaphore. The
-// result must reach the provider exactly once across both requests.
+// the claim is taken immediately and the result reaches the in-flight turn,
+// so the parent sees it without waiting for the per-session semaphore to be
+// released. The result must reach the provider exactly once across the turn's
+// requests (a second delivery would mean the inbound fallback fired too).
 func TestSubagentCompletion_ParentBusyNotWaiting_InjectsAtTurnEnd(t *testing.T) {
 	const resultText = "the subagent result"
 	provider := newRequestRecordingProvider("parent answer")
@@ -630,5 +631,157 @@ func TestStopSession_SealsSubagentResults_NoResurrection(t *testing.T) {
 				t.Errorf("provider calls = %d after /stop, want 0 (no resurrection turn)", n)
 			}
 		})
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Mid-turn delivery: the claim's two outcomes
+//
+// publishSubagentAsyncResult has exactly three terminal outcomes and one
+// delivery each:
+//   1. resumed == false  -> nothing is delivered by this publish (a waiter
+//      consumed the result, or the callback lost the claim / the task is
+//      unknown). The UI event still goes out.
+//   2. resumed && a turn is ALREADY running -> the notice is enqueued for that
+//      turn (metadata["injected"] = "true") and NO inbound is published: the
+//      inbound would only block on the per-session semaphore until the turn it
+//      is meant to inform is over.
+//   3. resumed && the parent is IDLE -> the inbound is published, exactly as
+//      before, and resumes the parent with a new turn.
+// ──────────────────────────────────────────────────────────────────────────────
+
+// recvInbound returns the next inbound message published on msgBus, or false
+// when none arrives within the window. These tests run no agent loop, so the
+// inbound channel holds exactly what the publisher enqueued.
+func recvInbound(t *testing.T, msgBus *bus.MessageBus, within time.Duration) (bus.InboundMessage, bool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), within)
+	defer cancel()
+	return msgBus.ConsumeInbound(ctx)
+}
+
+// assertNoInbound fails when an inbound message shows up: the publishing code
+// runs synchronously, so a bounded wait is enough to prove nothing was queued.
+func assertNoInbound(t *testing.T, msgBus *bus.MessageBus, what string) {
+	t.Helper()
+	if msg, ok := recvInbound(t, msgBus, 200*time.Millisecond); ok {
+		t.Fatalf("%s: an inbound was published anyway: %+v", what, msg)
+	}
+}
+
+// TestPublishSubagentAsyncResult_ParentIdle_PublishesInbound pins outcome 3:
+// with no turn running the queue is inactive, so the result takes the familiar
+// inbound path with the RAW text (processSystemMessage adds the
+// "[System: subagent] " prefix) and the event carries no injected stamp.
+func TestPublishSubagentAsyncResult_ParentIdle_PublishesInbound(t *testing.T) {
+	provider := newRequestRecordingProvider("parent answer")
+	al, msgBus := newDurableInboundTestLoop(t, provider)
+	const sessionKey = "session-midturn-idle"
+	addSubagentTaskForTest(t, al, "subagent-1", sessionKey)
+
+	publishSubagentAsyncResult(al, sessionKey, "native", "chat-1", "subagent-1",
+		&tools.ToolResult{ForLLM: "the subagent result"})
+
+	ev := waitForOutboundEvent(t, msgBus, "subagent.result", 5*time.Second)
+	if got := ev.Metadata["resumed"]; got != "true" {
+		t.Errorf("event metadata[resumed] = %q, want %q", got, "true")
+	}
+	if got := ev.Metadata["injected"]; got != "" {
+		t.Errorf("event metadata[injected] = %q, want it absent on the idle path", got)
+	}
+
+	msg, ok := recvInbound(t, msgBus, 2*time.Second)
+	if !ok {
+		t.Fatal("no inbound was published for an idle parent: the parent would never resume")
+	}
+	if msg.Content != "the subagent result" {
+		t.Errorf("inbound content = %q, want the RAW result text", msg.Content)
+	}
+	if msg.Channel != "system" || msg.SenderID != midTurnNoticeSender {
+		t.Errorf("inbound = channel %q sender %q, want system/%s", msg.Channel, msg.SenderID, midTurnNoticeSender)
+	}
+	if msg.SessionKey != sessionKey {
+		t.Errorf("inbound session key = %q, want %q", msg.SessionKey, sessionKey)
+	}
+	if got := msg.Metadata["task_id"]; got != "subagent-1" {
+		t.Errorf("inbound task_id = %q, want %q", got, "subagent-1")
+	}
+}
+
+// TestPublishSubagentAsyncResult_MidTurn_InjectsInsteadOfInbound pins outcome
+// 2: an active queue (the parent is mid-turn) swallows the result into the
+// notice queue and publishes NO inbound, and the UI learns that no continuation
+// turn is coming from metadata["injected"].
+func TestPublishSubagentAsyncResult_MidTurn_InjectsInsteadOfInbound(t *testing.T) {
+	provider := newRequestRecordingProvider("parent answer")
+	al, msgBus := newDurableInboundTestLoop(t, provider)
+	const sessionKey = "session-midturn-busy"
+	addSubagentTaskForTest(t, al, "subagent-1", sessionKey)
+
+	// The parent turn is running.
+	al.activateMidTurnNotices(sessionKey)
+
+	publishSubagentAsyncResult(al, sessionKey, "native", "chat-1", "subagent-1",
+		&tools.ToolResult{ForLLM: "the subagent result"})
+
+	ev := waitForOutboundEvent(t, msgBus, "subagent.result", 5*time.Second)
+	if got := ev.Metadata["resumed"]; got != "true" {
+		t.Errorf("event metadata[resumed] = %q, want %q (the claim was uncontested)", got, "true")
+	}
+	if got := ev.Metadata["injected"]; got != "true" {
+		t.Errorf("event metadata[injected] = %q, want %q", got, "true")
+	}
+
+	// The running turn owns delivery: a second turn must not be queued.
+	assertNoInbound(t, msgBus, "mid-turn injection")
+
+	notices := al.drainMidTurnNotices(sessionKey)
+	if len(notices) != 1 {
+		t.Fatalf("queued notices = %d, want 1", len(notices))
+	}
+	// The queue stores the RAW text; the prefix is added when it is injected
+	// (and by processSystemMessage on the inbound path), so both deliveries
+	// persist the identical message.
+	if notices[0].content != "the subagent result" {
+		t.Errorf("queued content = %q, want the raw result text", notices[0].content)
+	}
+	if got, want := notices[0].messageContent(), "[System: subagent] the subagent result"; got != want {
+		t.Errorf("messageContent() = %q, want %q", got, want)
+	}
+	if notices[0].taskID != "subagent-1" {
+		t.Errorf("queued task id = %q, want %q", notices[0].taskID, "subagent-1")
+	}
+}
+
+// TestPublishSubagentAsyncResult_ClaimLost_NeverEnqueues pins outcome 1, and it
+// deliberately activates the queue first: without that, an enqueue would be
+// refused merely because no turn is running, and the test would pass for the
+// wrong reason. With an active queue the only thing keeping the result out is
+// the claim, which is exactly the invariant under test.
+func TestPublishSubagentAsyncResult_ClaimLost_NeverEnqueues(t *testing.T) {
+	provider := newRequestRecordingProvider("parent answer")
+	al, msgBus := newDurableInboundTestLoop(t, provider)
+	const sessionKey = "session-midturn-consumed"
+	sm := addSubagentTaskForTest(t, al, "subagent-1", sessionKey)
+
+	// A wait_for_subagent consumed the result in-turn.
+	if sm.ClaimResult("subagent-1") {
+		t.Fatal("ClaimResult lost on a fresh task")
+	}
+	al.activateMidTurnNotices(sessionKey)
+
+	publishSubagentAsyncResult(al, sessionKey, "native", "chat-1", "subagent-1",
+		&tools.ToolResult{ForLLM: "the subagent result"})
+
+	ev := waitForOutboundEvent(t, msgBus, "subagent.result", 5*time.Second)
+	if got := ev.Metadata["resumed"]; got != "false" {
+		t.Errorf("event metadata[resumed] = %q, want %q", got, "false")
+	}
+	if got := ev.Metadata["injected"]; got != "" {
+		t.Errorf("event metadata[injected] = %q, want it absent for a lost claim", got)
+	}
+	assertNoInbound(t, msgBus, "lost claim")
+	if notices := al.drainMidTurnNotices(sessionKey); len(notices) != 0 {
+		t.Fatalf("queued notices = %d after a lost claim, want 0: the waiter owns the result", len(notices))
 	}
 }
