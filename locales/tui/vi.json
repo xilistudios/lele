@@ -39,6 +39,7 @@
   "tui.selectSubagent": "Chọn subagent",
   "tui.noSubagents": "Không có subagent nào trong phiên này",
   "tui.systemNotice": "Thông báo hệ thống",
+  "tui.llmErrorTitle": "Yêu cầu LLM thất bại",
   "tui.pressEscAgain": "Nhấn ESC lần nữa để hủy",
   "tui.processing": "Đang xử lý... (ESC để hủy)",
   "tui.doneIn": "● Hoàn tất trong %.1fg",

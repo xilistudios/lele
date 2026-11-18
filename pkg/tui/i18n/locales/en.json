@@ -39,6 +39,7 @@
   "tui.selectSubagent": "Select a Subagent",
   "tui.noSubagents": "No subagents for this session",
   "tui.systemNotice": "System notice",
+  "tui.llmErrorTitle": "LLM request failed",
   "tui.pressEscAgain": "Press ESC again to cancel",
   "tui.processing": "Processing... (ESC to cancel)",
   "tui.subagentsRunning": "%d subagent(s) running in background",

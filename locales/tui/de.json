@@ -48,6 +48,7 @@
   "tui.selectSubagent": "Subagent auswählen",
   "tui.noSubagents": "Keine Subagents für diese Sitzung",
   "tui.systemNotice": "Systemhinweis",
+  "tui.llmErrorTitle": "LLM-Anfrage fehlgeschlagen",
   "tui.pressEscAgain": "Drücken Sie ESC erneut zum Abbrechen",
   "tui.processing": "Verarbeitung... (ESC zum Abbrechen)",
   "tui.doneIn": "● Fertig in %.1fs",

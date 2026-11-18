@@ -954,47 +954,58 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 				msgSb.WriteString(UserMessageStyle.Render(wrapText(sanitizeDisplayText(userDisplayContent(msg)), m.viewport.Width-4)) + "\n\n")
 			}
 		} else if msg.Role == "assistant" {
-			// Only show agent name when coming from user (start of a turn)
-			if lastRole == "" || lastRole == "user" || lastRole == "system" {
-				agentID := m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey)
-				agentInfo, ok := m.agentLoop.GetProvidable().GetAgentInfo(agentID)
-				agentName := agentID
-				if ok && agentInfo.Name != "" {
-					agentName = agentInfo.Name
-				}
-				msgSb.WriteString(AssistantRoleStyle.Render(agentName) + "\n")
-			}
-
-			if msg.ReasoningContent != "" {
-				rendered := m.renderMarkdown(msg.ReasoningContent, m.viewport.Width-8)
-				msgSb.WriteString(ThinkingContentStyle.Render(rendered) + "\n")
-			}
-
-			if msg.Content != "" {
-				rendered := m.renderMarkdown(msg.Content, m.viewport.Width-6)
-				msgSb.WriteString(rendered + "\n")
-			}
-
-			// Render tool calls from assistant message (compact: tool_name: params).
-			// Suppressed when this is the currently-executing message (see
-			// isExecutingMessage above): the call is already in the overlay.
-			// Once the tool completes (tool.result/stream clears
-			// currentToolAction), the committed tool calls render here normally.
-			if !isExecutingMessage {
-				for _, tc := range msg.ToolCalls {
-					toolName := tc.Name
-					if toolName == "" && tc.Function != nil {
-						toolName = tc.Function.Name
+			// A failed LLM request is persisted as an assistant message whose
+			// only real payload is ErrorDetail (Content is the legacy
+			// "❌ Error …" text meant for plain-text channels). Render it as a
+			// red error box INSTEAD of a normal bubble: no agent header, no
+			// reasoning, no content, no tool rows. The message still goes
+			// through the shared tail below, so it is fingerprinted and cached
+			// like any other row.
+			if msg.ErrorDetail != "" {
+				msgSb.WriteString(renderErrorBox(msg.ErrorDetail, m.viewport.Width) + "\n\n")
+			} else {
+				// Only show agent name when coming from user (start of a turn)
+				if lastRole == "" || lastRole == "user" || lastRole == "system" {
+					agentID := m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey)
+					agentInfo, ok := m.agentLoop.GetProvidable().GetAgentInfo(agentID)
+					agentName := agentID
+					if ok && agentInfo.Name != "" {
+						agentName = agentInfo.Name
 					}
-					args := formatToolCallArgsCompact(tc)
-					line := toolName
-					if args != "" {
-						line += ": " + args
-					}
-					msgSb.WriteString(renderToolCallRow(line, m.viewport.Width) + "\n")
+					msgSb.WriteString(AssistantRoleStyle.Render(agentName) + "\n")
 				}
+
+				if msg.ReasoningContent != "" {
+					rendered := m.renderMarkdown(msg.ReasoningContent, m.viewport.Width-8)
+					msgSb.WriteString(ThinkingContentStyle.Render(rendered) + "\n")
+				}
+
+				if msg.Content != "" {
+					rendered := m.renderMarkdown(msg.Content, m.viewport.Width-6)
+					msgSb.WriteString(rendered + "\n")
+				}
+
+				// Render tool calls from assistant message (compact: tool_name: params).
+				// Suppressed when this is the currently-executing message (see
+				// isExecutingMessage above): the call is already in the overlay.
+				// Once the tool completes (tool.result/stream clears
+				// currentToolAction), the committed tool calls render here normally.
+				if !isExecutingMessage {
+					for _, tc := range msg.ToolCalls {
+						toolName := tc.Name
+						if toolName == "" && tc.Function != nil {
+							toolName = tc.Function.Name
+						}
+						args := formatToolCallArgsCompact(tc)
+						line := toolName
+						if args != "" {
+							line += ": " + args
+						}
+						msgSb.WriteString(renderToolCallRow(line, m.viewport.Width) + "\n")
+					}
+				}
+				msgSb.WriteString("\n")
 			}
-			msgSb.WriteString("\n")
 		} else if msg.Role == "tool" {
 			summary := truncateToolResult(msg.Content, 150)
 			msgSb.WriteString(renderToolResultBlock(summary, m.viewport.Width) + "\n")

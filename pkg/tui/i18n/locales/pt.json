@@ -39,6 +39,7 @@
   "tui.selectSubagent": "Selecione um Subagente",
   "tui.noSubagents": "Nenhum subagente para esta sessão",
   "tui.systemNotice": "Aviso do sistema",
+  "tui.llmErrorTitle": "Falha na requisição ao LLM",
   "tui.pressEscAgain": "Pressione ESC novamente para cancelar",
   "tui.processing": "Processando... (ESC para cancelar)",
   "tui.subagentsRunning": "%d subagente(s) em segundo plano",

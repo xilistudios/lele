@@ -39,6 +39,7 @@
   "tui.selectSubagent": "Выберите субагента",
   "tui.noSubagents": "Нет субагентов для этой сессии",
   "tui.systemNotice": "Системное уведомление",
+  "tui.llmErrorTitle": "Ошибка запроса к LLM",
   "tui.pressEscAgain": "Нажмите ESC ещё раз для отмены",
   "tui.processing": "Обработка... (ESC для отмены)",
   "tui.doneIn": "● Готово за %.1f с",

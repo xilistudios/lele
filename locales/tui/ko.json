@@ -39,6 +39,7 @@
   "tui.selectSubagent": "하위 에이전트 선택",
   "tui.noSubagents": "이 세션에는 하위 에이전트가 없습니다",
   "tui.systemNotice": "시스템 알림",
+  "tui.llmErrorTitle": "LLM 요청 실패",
   "tui.pressEscAgain": "취소하려면 ESC를 다시 누르세요",
   "tui.processing": "처리 중... (ESC로 취소)",
   "tui.doneIn": "● %.1f초 만에 완료",
