@@ -9,7 +9,8 @@
  * renders it as the red error box instead of a normal bubble.
  *
  * What MUST hold:
- *   - the box carries the failure text (data-testid="llm-error-box"),
+ *   - the box is an alert (role="alert") carrying the failure text, so it is
+ *     announced to assistive tech and is queryable by its accessible name,
  *   - normal content/reasoning/tool rendering is skipped (the legacy ❌ text is
  *     not repeated, the box replaces the bubble),
  *   - the "archived from context" label is skipped (the message is excluded from
@@ -20,11 +21,11 @@
  * Conventions (imports/mocks/i18n/helpers) mirror MessageBubble.test.tsx.
  */
 import '../../test/setup'
-import '../../test/i18n'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { render } from '@testing-library/react'
 import { AuthContext, type AuthContextValue } from '../../contexts/AuthContext'
 import type { ChatMessage } from '../../lib/types'
+import i18n from '../../test/i18n'
 import { MessageBubble } from './MessageBubble'
 
 const originalCreateObjectURL = URL.createObjectURL
@@ -67,6 +68,10 @@ function makeAssistantMessage(overrides: Partial<ChatMessage> = {}): ChatMessage
 
 const DETAIL = 'LLM call failed after retries: 429 Too Many Requests'
 
+// The box's accessible name is the localized title, so the queries below match
+// what a screen reader announces instead of a wrapper attribute.
+const ERROR_TITLE = i18n.t('chat.llmErrorTitle')
+
 beforeEach(() => {
   // @ts-expect-error removing for test
   globalThis.IntersectionObserver = undefined
@@ -83,7 +88,7 @@ afterEach(() => {
 describe('MessageBubble — LLM error box', () => {
   test('renders the red error box with the failure detail', () => {
     const ctx = makeAuthCtx()
-    const { container, getByTestId } = renderBubble(
+    const { container, getByRole } = renderBubble(
       makeAssistantMessage({
         content:
           '❌ Error processing message: LLM call failed after retries: 429 Too Many Requests',
@@ -93,8 +98,9 @@ describe('MessageBubble — LLM error box', () => {
       ctx,
     )
 
-    const box = getByTestId('llm-error-box')
+    const box = getByRole('alert', { name: ERROR_TITLE })
     expect(box.textContent).toContain(DETAIL)
+    expect(box.textContent).toContain(ERROR_TITLE)
     // The box rides inside the normal message row so ordering/anchors hold.
     expect(box.closest('[data-testid="message"]')).not.toBeNull()
     expect(container.querySelector('[data-role="assistant"]')).not.toBeNull()
@@ -102,7 +108,7 @@ describe('MessageBubble — LLM error box', () => {
 
   test('skips the normal content and the archived label', () => {
     const ctx = makeAuthCtx()
-    const { container, getByTestId } = renderBubble(
+    const { container, getByRole } = renderBubble(
       makeAssistantMessage({
         content: '❌ Error processing message: boom',
         error: DETAIL,
@@ -113,7 +119,7 @@ describe('MessageBubble — LLM error box', () => {
       ctx,
     )
 
-    const box = getByTestId('llm-error-box')
+    const box = getByRole('alert', { name: ERROR_TITLE })
     expect(box.textContent).toContain(DETAIL)
     // The legacy ❌ text is not rendered anywhere in the row.
     expect(container.textContent ?? '').not.toContain('❌ Error processing message')
@@ -125,12 +131,12 @@ describe('MessageBubble — LLM error box', () => {
 
   test('does not null-render an error-only message with empty content', () => {
     const ctx = makeAuthCtx()
-    const { container, getByTestId } = renderBubble(
+    const { container, getByRole } = renderBubble(
       makeAssistantMessage({ content: '', error: DETAIL, excludeFromContext: true }),
       ctx,
     )
 
-    expect(getByTestId('llm-error-box').textContent).toContain(DETAIL)
+    expect(getByRole('alert', { name: ERROR_TITLE }).textContent).toContain(DETAIL)
     // A null render would leave the container empty: that was the disappearing
     // error bug, now impossible.
     expect(container.querySelector('[data-testid="message"]')).not.toBeNull()
@@ -138,9 +144,12 @@ describe('MessageBubble — LLM error box', () => {
 
   test('a message without error keeps the normal assistant render', () => {
     const ctx = makeAuthCtx()
-    const { container } = renderBubble(makeAssistantMessage({ content: 'a normal answer' }), ctx)
+    const { container, queryByRole } = renderBubble(
+      makeAssistantMessage({ content: 'a normal answer' }),
+      ctx,
+    )
 
-    expect(container.querySelector('[data-testid="llm-error-box"]')).toBeNull()
+    expect(queryByRole('alert')).toBeNull()
     expect(container.textContent ?? '').toContain('a normal answer')
   })
 })

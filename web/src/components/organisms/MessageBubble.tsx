@@ -296,6 +296,11 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
     // error box REPLACES the assistant bubble — content, reasoning and tool
     // rendering are all skipped, and so is the "archived from context" label
     // (the message is excluded from context precisely because it is an error).
+    //
+    // role="alert" is what announces the failure to assistive tech (and what
+    // gives the region an accessible name for tests/queries): the box appears
+    // mid-conversation while the user's focus is elsewhere, so a silent
+    // visual-only change would be invisible to a screen reader.
     return (
       <div
         data-message-id={message.stableId ?? message.id}
@@ -304,7 +309,8 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
         className={`${chatRowPadding(message)} ${animate ? 'animate-message-enter' : ''}`}
       >
         <div
-          data-testid="llm-error-box"
+          role="alert"
+          aria-label={t('chat.llmErrorTitle')}
           className="rounded-lg border border-state-error/40 bg-state-error/10 px-3 py-2"
         >
           <div className="flex items-center gap-1.5 text-xs font-semibold text-state-error">

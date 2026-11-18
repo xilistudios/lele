@@ -1068,6 +1068,16 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 					}()
 				}
 
+				// persistLLMFailure marks the turn by writing into m.Metadata
+				// (the map is shared by reference with the processor's copy),
+				// and only does so when the map already exists. Allocate it
+				// here so a message that arrived without metadata still gets
+				// tagged and the outbound check below propagates the marker to
+				// the live UI.
+				if m.Metadata == nil {
+					m.Metadata = make(map[string]string, 1)
+				}
+
 				response, err := al.messageProcessor.processMessage(ctx, m)
 				if err != nil {
 					if errors.Is(err, context.Canceled) {

@@ -363,6 +363,15 @@ func (mp *messageProcessorImpl) persistLLMFailure(agent *AgentInstance, sessionK
 		ErrorDetail:        detail,
 		ExcludeFromContext: true,
 	})
+	// Flush immediately: both callers return right after this helper, and the
+	// row is the only copy of the failure. Waking up to a session whose error
+	// box lost its row would reintroduce the disappearing-failure bug.
+	if saveErr := agent.Sessions.Save(sessionKey); saveErr != nil {
+		logger.WarnCF("agent", "Failed to save session after LLM failure", map[string]interface{}{
+			"session_key": sessionKey,
+			"error":       saveErr.Error(),
+		})
+	}
 }
 
 // syncSessionModel keeps the session model in sync with the active or

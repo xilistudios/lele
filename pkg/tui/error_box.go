@@ -35,7 +35,7 @@ const errorBoxIndent = "  "
 // and the box is the only place the actual failure reason is visible. An empty
 // detail renders the header alone.
 func renderErrorBox(detail string, width int) string {
-	header := errorBoxIndent + ErrorTitle.Render(i18n.T("tui.llmErrorTitle"))
+	header := renderErrorBoxHeader(width)
 
 	// Trim the ends (interior indentation of a stack trace survives): a
 	// whitespace-only detail must render the header alone, not an empty box.
@@ -62,4 +62,31 @@ func renderErrorBox(detail string, width int) string {
 		sb.WriteString(row)
 	}
 	return header + "\n" + sb.String()
+}
+
+// renderErrorBoxHeader wraps the localized title to the pane width BEFORE
+// styling it and indents each resulting row.
+//
+// ErrorTitle has no Width() configured, so lipgloss does not wrap it: without
+// this a translation wider than the pane (es/pt at a narrow terminal) would
+// overflow the row budget and lineViewport's Width() pass would re-wrap the
+// styled row, losing the indent. A title that fits stays a single row.
+func renderErrorBoxHeader(width int) string {
+	budget := width - ansi.StringWidth(errorBoxIndent)
+	if budget < 1 {
+		budget = 1
+	}
+
+	// wrapText already hard-breaks tokens with no break opportunity, so a
+	// locale without spaces cannot overflow either.
+	titleRows := strings.Split(wrapText(i18n.T("tui.llmErrorTitle"), budget), "\n")
+	var sb strings.Builder
+	for i, row := range titleRows {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(errorBoxIndent)
+		sb.WriteString(ErrorTitle.Render(row))
+	}
+	return sb.String()
 }

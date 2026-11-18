@@ -9,6 +9,12 @@ package session
 // opposite: the streamed text stays where it is and the failure is appended.
 // SealStreamingTail is that transition, and its guards are what keep it from
 // destroying real content or leaving orphan placeholders.
+//
+// The matrix below covers every tail shape, because each one takes a different
+// branch of the guard: a text-only draft and a reasoning-only draft both seal
+// (the emptiness check needs BOTH fields empty), a finalized assistant tail and
+// a user tail are left alone (they are not drafts), and an unknown session must
+// not be created as a side effect.
 
 import (
 	"testing"
@@ -16,96 +22,154 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// A draft that already streamed visible text is closed in place: same slot, same
-// content, Streaming cleared, so the next assistant message appends after it.
-func TestSealStreamingTail_ClosesDraftWithContent(t *testing.T) {
-	sm := NewSessionManager()
-	key := "test:seal-content"
+// tailSeed describes the history a session starts with, expressed only through
+// the public append API so the test does not depend on internal fields.
+type tailSeed struct {
+	name string
+	seed func(sm *SessionManager, key string)
+}
 
-	sm.AddMessage(key, "user", "question")
-	sm.AppendAssistantChunk(key, "partial answer")
+// sealCase is one row of the SealStreamingTail matrix. wantStreamingAfterSeal is
+// the Streaming flag of the tail after SealStreamingTail; wantMsgCount is the
+// history length after the follow-up AddFullMessage, which is what makes the
+// slot-reuse behaviour (placeholder reused vs. failure appended) observable.
+type sealCase struct {
+	name                   string
+	seed                   tailSeed
+	wantStreamingAfterSeal bool
+	wantContentAfterSeal   string
+	wantMsgCount           int
+	wantAppendedIndex      int
+}
 
-	sm.SealStreamingTail(key)
+func TestSealStreamingTail(t *testing.T) {
+	cases := []sealCase{
+		{
+			// A draft that already streamed visible text is closed in place:
+			// same slot, same content, Streaming cleared, so the next assistant
+			// message appends after it.
+			name: "text-only draft is sealed and the next message appends",
+			seed: tailSeed{"text draft", func(sm *SessionManager, key string) {
+				sm.AddMessage(key, "user", "question")
+				sm.AppendAssistantChunk(key, "partial answer")
+			}},
+			wantStreamingAfterSeal: false,
+			wantContentAfterSeal:   "partial answer",
+			wantMsgCount:           3,
+			wantAppendedIndex:      2,
+		},
+		{
+			// Reasoning-only drafts are just as visible as content drafts (the
+			// TUI renders the thinking block), so the emptiness guard must
+			// require BOTH fields to be empty before sealing.
+			name: "reasoning-only draft is sealed and the next message appends",
+			seed: tailSeed{"reasoning draft", func(sm *SessionManager, key string) {
+				sm.AddMessage(key, "user", "question")
+				sm.AppendReasoningChunk(key, "thinking out loud")
+			}},
+			wantStreamingAfterSeal: false,
+			wantContentAfterSeal:   "",
+			wantMsgCount:           3,
+			wantAppendedIndex:      2,
+		},
+		{
+			// An EMPTY draft is still a placeholder: sealing it must be a no-op
+			// so the next assistant message reuses its slot instead of leaving
+			// a blank bubble behind.
+			name: "empty draft stays a placeholder and is reused",
+			seed: tailSeed{"empty draft", func(sm *SessionManager, key string) {
+				sm.AddMessage(key, "user", "question")
+				sm.AppendReasoningChunk(key, "")
+			}},
+			wantStreamingAfterSeal: true,
+			wantContentAfterSeal:   "",
+			wantMsgCount:           2,
+			wantAppendedIndex:      1,
+		},
+		{
+			// A finalized assistant tail is a REAL message (AddFullMessage
+			// already cleared Streaming): nothing to seal, and the failure still
+			// appends after it.
+			name: "finalized assistant tail is untouched and the next message appends",
+			seed: tailSeed{"finalized tail", func(sm *SessionManager, key string) {
+				sm.AddMessage(key, "user", "question")
+				sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "answer"})
+			}},
+			wantStreamingAfterSeal: false,
+			wantContentAfterSeal:   "answer",
+			wantMsgCount:           3,
+			wantAppendedIndex:      2,
+		},
+		{
+			// A user tail is not a draft at all; sealing must not touch it and
+			// must not prevent the failure from being appended.
+			name: "user tail is untouched and the next message appends",
+			seed: tailSeed{"user tail", func(sm *SessionManager, key string) {
+				sm.AddMessage(key, "user", "question")
+			}},
+			wantStreamingAfterSeal: false,
+			wantContentAfterSeal:   "question",
+			wantMsgCount:           2,
+			wantAppendedIndex:      1,
+		},
+	}
 
-	h := sm.GetHistory(key)
-	if len(h) != 2 {
-		t.Fatalf("message count changed: got %d, want 2: %+v", len(h), h)
-	}
-	if h[1].Content != "partial answer" {
-		t.Fatalf("content lost: got %q", h[1].Content)
-	}
-	if h[1].Streaming {
-		t.Fatalf("tail must no longer be streaming: %+v", h[1])
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := NewSessionManager()
+			key := "test:seal:" + tc.name
+			tc.seed.seed(sm, key)
 
-	// The following assistant message now appends instead of replacing it.
-	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "❌ Error", ErrorDetail: "boom"})
-	h = sm.GetHistory(key)
-	if len(h) != 3 {
-		t.Fatalf("expected the failure to be appended, got %d messages: %+v", len(h), h)
-	}
-	if h[1].Content != "partial answer" {
-		t.Fatalf("appended message overwrote the streamed tail: %+v", h[1])
-	}
-	if h[2].ErrorDetail != "boom" {
-		t.Fatalf("failure message missing: %+v", h[2])
+			before := sm.GetHistory(key)
+			if len(before) == 0 {
+				t.Fatal("seed produced an empty history")
+			}
+
+			sm.SealStreamingTail(key)
+
+			after := sm.GetHistory(key)
+			if len(after) != len(before) {
+				t.Fatalf("seal changed the message count: got %d, want %d: %+v", len(after), len(before), after)
+			}
+			tail := after[len(after)-1]
+			if tail.Streaming != tc.wantStreamingAfterSeal {
+				t.Errorf("tail Streaming = %v, want %v: %+v", tail.Streaming, tc.wantStreamingAfterSeal, tail)
+			}
+			if tail.Content != tc.wantContentAfterSeal {
+				t.Errorf("tail Content = %q, want %q", tail.Content, tc.wantContentAfterSeal)
+			}
+
+			// The next assistant message is where the two behaviours diverge:
+			// appended after a sealed draft, or stored in the reused placeholder
+			// slot. Judging by history shape keeps the assertion independent of
+			// how many rows the guard touched.
+			sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "❌ Error", ErrorDetail: "boom"})
+
+			final := sm.GetHistory(key)
+			if len(final) != tc.wantMsgCount {
+				t.Fatalf("history has %d messages, want %d: %+v", len(final), tc.wantMsgCount, final)
+			}
+			got := final[tc.wantAppendedIndex]
+			if got.ErrorDetail != "boom" {
+				t.Errorf("message %d ErrorDetail = %q, want %q: %+v", tc.wantAppendedIndex, got.ErrorDetail, "boom", final)
+			}
+			if got.Streaming {
+				t.Errorf("the stored failure must not stay streaming: %+v", got)
+			}
+		})
 	}
 }
 
-// An EMPTY draft is still a placeholder: sealing it must be a no-op so the next
-// assistant message reuses its slot instead of leaving a blank bubble behind.
-func TestSealStreamingTail_EmptyDraftIsNoOp(t *testing.T) {
+// TestSealStreamingTail_UnknownSessionDoesNotCreateMessages pins the missing
+// tail: sealing a session that was never written must not allocate one, so a
+// late failure on an unknown key cannot invent an empty history.
+func TestSealStreamingTail_UnknownSessionDoesNotCreateMessages(t *testing.T) {
 	sm := NewSessionManager()
-	key := "test:seal-empty"
-
-	sm.AddMessage(key, "user", "question")
-	sm.AppendReasoningChunk(key, "")
+	const key = "test:seal:unknown"
 
 	sm.SealStreamingTail(key)
 
-	h := sm.GetHistory(key)
-	if len(h) != 2 {
-		t.Fatalf("expected the untouched placeholder, got %d messages: %+v", len(h), h)
-	}
-	if !h[1].Streaming || h[1].Content != "" {
-		t.Fatalf("empty draft must stay streaming: %+v", h[1])
-	}
-
-	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "❌ Error", ErrorDetail: "boom"})
-	h = sm.GetHistory(key)
-	if len(h) != 2 {
-		t.Fatalf("the failure must take the placeholder slot, got %d messages: %+v", len(h), h)
-	}
-	if h[1].ErrorDetail != "boom" || h[1].Streaming {
-		t.Fatalf("failure not stored in the reused slot: %+v", h[1])
-	}
-}
-
-// No streaming tail at all (user tail, finalized assistant tail, empty session,
-// unknown session): nothing to do, nothing created.
-func TestSealStreamingTail_NoTailIsNoOp(t *testing.T) {
-	sm := NewSessionManager()
-	key := "test:seal-none"
-
-	sm.AddMessage(key, "user", "question")
-
-	// User tail.
-	sm.SealStreamingTail(key)
-	if h := sm.GetHistory(key); len(h) != 1 || h[0].Role != "user" {
-		t.Fatalf("user tail was modified: %+v", h)
-	}
-
-	// Finalized assistant tail.
-	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "answer"})
-	sm.SealStreamingTail(key)
-	h := sm.GetHistory(key)
-	if len(h) != 2 || h[1].Content != "answer" || h[1].Streaming {
-		t.Fatalf("finalized tail was modified: %+v", h)
-	}
-
-	// Unknown session: no messages created.
-	sm.SealStreamingTail("test:seal-unknown")
-	if h := sm.GetHistory("test:seal-unknown"); len(h) != 0 {
+	if h := sm.GetHistory(key); len(h) != 0 {
 		t.Fatalf("seal on an unknown session created messages: %+v", h)
 	}
 }

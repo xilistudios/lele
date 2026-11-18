@@ -321,40 +321,65 @@ func TestTextOnlyContent_ContentPartsWithVideo(t *testing.T) {
 // from history after a refetch or a session switch) and omit the key entirely
 // from messages that did not fail, so stored JSON stays byte-compatible.
 func TestMessageErrorDetailRoundTrip(t *testing.T) {
-	m := Message{
-		Role:               "assistant",
-		Content:            "❌ Error processing message: LLM call failed after retries: 429",
-		ErrorDetail:        "LLM call failed after retries: 429 Too Many Requests",
-		ExcludeFromContext: true,
-	}
-	data, err := json.Marshal(m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"error_detail"`) {
-		t.Fatalf("marshal must persist error_detail for history rendering: %s", data)
-	}
-	if !strings.Contains(string(data), `"exclude_from_context":true`) {
-		t.Fatalf("the failure message must stay out of the LLM context: %s", data)
+	cases := []struct {
+		name string
+		msg  Message
+		// wantErrorDetail is what must survive the round-trip.
+		wantErrorDetail string
+		// wantPersisted says whether "error_detail" must appear in the JSON.
+		// False is the omitempty contract for messages that did not fail.
+		wantPersisted bool
+	}{
+		{
+			name: "failed turn keeps the detail and stays out of context",
+			msg: Message{
+				Role:               "assistant",
+				Content:            "❌ Error processing message: LLM call failed after retries: 429",
+				ErrorDetail:        "LLM call failed after retries: 429 Too Many Requests",
+				ExcludeFromContext: true,
+			},
+			wantErrorDetail: "LLM call failed after retries: 429 Too Many Requests",
+			wantPersisted:   true,
+		},
+		{
+			// Ordinary assistant text must not grow the key, so stored JSON
+			// stays byte-compatible with sessions written before this field.
+			name:            "ordinary message omits the key",
+			msg:             Message{Role: "assistant", Content: "hi"},
+			wantErrorDetail: "",
+			wantPersisted:   false,
+		},
 	}
 
-	var got Message
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.ErrorDetail != m.ErrorDetail {
-		t.Errorf("round-trip lost ErrorDetail: got %q, want %q", got.ErrorDetail, m.ErrorDetail)
-	}
-	if got.Content != m.Content || !got.ExcludeFromContext {
-		t.Errorf("round-trip lost content/exclusion: %+v", got)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := json.Marshal(tc.msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hasKey := strings.Contains(string(data), `"error_detail"`)
+			if hasKey != tc.wantPersisted {
+				t.Fatalf("error_detail present = %v, want %v: %s", hasKey, tc.wantPersisted, data)
+			}
+			if tc.msg.ExcludeFromContext &&
+				!strings.Contains(string(data), `"exclude_from_context":true`) {
+				t.Fatalf("the failure message must stay out of the LLM context: %s", data)
+			}
 
-	// A message that did not fail must not grow the key (omitempty contract).
-	plain, err := json.Marshal(Message{Role: "assistant", Content: "hi"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(plain), "error_detail") {
-		t.Errorf("plain message must omit error_detail: %s", plain)
+			var got Message
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.ErrorDetail != tc.wantErrorDetail {
+				t.Errorf("round-trip lost ErrorDetail: got %q, want %q", got.ErrorDetail, tc.wantErrorDetail)
+			}
+			if got.Role != tc.msg.Role || got.Content != tc.msg.Content {
+				t.Errorf("round-trip lost role/content: %+v", got)
+			}
+			if got.ExcludeFromContext != tc.msg.ExcludeFromContext {
+				t.Errorf("round-trip lost ExcludeFromContext: got %v, want %v",
+					got.ExcludeFromContext, tc.msg.ExcludeFromContext)
+			}
+		})
 	}
 }
