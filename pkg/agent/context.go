@@ -317,16 +317,19 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 	}
 
 	// MCP servers section — name + description only, never tool schemas
-	// (they are huge and the model loads them lazily via load_mcp_tools).
-	// cb.mcpServers is read here while the write lock is held, which pairs
-	// with SetMCPServers writing it under the same lock.
+	// (they are huge and the model discovers them lazily through the
+	// list_mcp_tools/get_mcp_tool pair). cb.mcpServers is read here while the
+	// write lock is held, which pairs with SetMCPServers writing it under the
+	// same lock.
 	if len(cb.mcpServers) > 0 {
 		servers := make([]tools.MCPServerInfo, len(cb.mcpServers))
 		copy(servers, cb.mcpServers)
 		sort.Slice(servers, func(i, j int) bool { return servers[i].Name < servers[j].Name })
 		var sb strings.Builder
 		sb.WriteString("## MCP Servers\n\n")
-		sb.WriteString("Use `load_mcp_tools` with a server name to load its tools.\n\n")
+		sb.WriteString("Use `list_mcp_tools` with a server name to browse its tools (paginated, most-used first), " +
+			"then `get_mcp_tool` with {\"server\": \"<name>\", \"tool\": \"<tool>\"} — or \"tools\": [\"<t1>\", \"<t2>\"] for several — " +
+			"to load full schemas and make them callable.\n\n")
 		for _, s := range servers {
 			if s.Description != "" {
 				sb.WriteString(fmt.Sprintf("- **%s** — %s\n", s.Name, s.Description))

@@ -239,9 +239,9 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	al.toolCoordinator = newToolCoordinatorWithSubagents(al, updatedSubagents, updatedBgManagers, existingMCPManagers)
 
 	// Re-evaluate every agent's MCP server set against the new config:
-	// register/unregister load_mcp_tools, refresh the "## MCP Servers" prompt
-	// section and close+drop managers whose servers vanished or whose agent
-	// was removed (mcp.go).
+	// rebuild/refresh the list_mcp_tools + get_mcp_tool session layers, refresh
+	// the "## MCP Servers" prompt section and close+drop managers whose
+	// servers vanished or whose agent was removed (mcp.go).
 	al.toolCoordinator.syncMCPTools()
 }
 
@@ -798,9 +798,10 @@ func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.
 	// is wired for the same reason as the folder resolver.
 	loop.attachSubagentLedgerResolver()
 
-	// Initial MCP wiring: build per-agent managers, register load_mcp_tools
-	// and feed the "## MCP Servers" prompt section (mcp.go). Best-effort by
-	// design — a broken mcp.json must not keep the agent from starting.
+	// Initial MCP wiring: build per-agent managers, wire the discovery tools
+	// (list_mcp_tools + get_mcp_tool) and feed the "## MCP Servers" prompt
+	// section (mcp.go). Best-effort by design — a broken mcp.json must not keep
+	// the agent from starting.
 	loop.toolCoordinator.syncMCPTools()
 
 	// Wire up the goal judge. The default is an inline LLM judge that evaluates
@@ -1695,7 +1696,7 @@ func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) 
 	al.sessionModels.Delete(sessionKey)
 	al.sessionThinking.Delete(sessionKey)
 	// Clearing the history also clears the MCP tools this session had loaded
-	// through load_mcp_tools: they are part of what the user is resetting.
+	// through get_mcp_tool: they are part of what the user is resetting.
 	al.dropSessionTools(sessionKey)
 	if agent.Sessions != nil {
 		agent.Sessions.SetThinkingLevel(sessionKey, "")

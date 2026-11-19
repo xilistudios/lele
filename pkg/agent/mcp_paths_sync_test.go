@@ -97,8 +97,8 @@ func TestSyncMCPServers_BareLoop(t *testing.T) {
 
 // TestSyncMCPServers_AfterCloseInstallsNothing: after closeMCPManagers() the
 // set is stopped, so SyncMCPServers must install NOTHING — the manager set
-// entry count stays 0 and load_mcp_tools is not registered (the stopped guard
-// is reused inside syncMCPTools, never re-implemented by the seam).
+// entry count stays 0 and no discovery tool is registered (the stopped guard is
+// reused inside syncMCPTools, never re-implemented by the seam).
 func TestSyncMCPServers_AfterCloseInstallsNothing(t *testing.T) {
 	al, workspace := newMCPTestLoop(t)
 	tc := mcpTestCoordinator(t, al)
@@ -123,8 +123,10 @@ func TestSyncMCPServers_AfterCloseInstallsNothing(t *testing.T) {
 	if got := tc.sessionTools(agent, "chat-a"); got != agent.Tools {
 		t.Error("a sync after closeMCPManagers must NOT build a session layer")
 	}
-	if _, ok := agent.Tools.Get(tools.LoadMCPToolsName); ok {
-		t.Error("load_mcp_tools must NOT be registered by a sync after closeMCPManagers")
+	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames...) {
+		if _, ok := agent.Tools.Get(name); ok {
+			t.Errorf("%s must NOT be registered by a sync after closeMCPManagers", name)
+		}
 	}
 	if sec := mcpSectionOf(agent.ContextBuilder.BuildSystemPrompt()); sec != "" {
 		t.Errorf("late sync fed a ## MCP Servers section: %q", sec)
@@ -133,28 +135,33 @@ func TestSyncMCPServers_AfterCloseInstallsNothing(t *testing.T) {
 
 // TestSyncMCPServers_ReflectsMCPJSONToggle is THE behaviour test for the
 // seam: a workspace whose mcp.json GAINS a server between two syncs → the
-// first SyncMCPServers() registers load_mcp_tools and sets the "## MCP
-// Servers" prompt section; then "disabled": true is written into that
-// mcp.json by hand (raw os.WriteFile via writeAgentMCPJSON — no pkg/mcp
-// helper) and a second SyncMCPServers() unregisters the tool and empties the
-// section. This is the end-to-end proof that the T4 endpoint's write path
+// first SyncMCPServers() wires the discovery tools (list_mcp_tools +
+// get_mcp_tool) into the session view and sets the "## MCP Servers" prompt
+// section; then "disabled": true is written into that mcp.json by hand (raw
+// os.WriteFile via writeAgentMCPJSON — no pkg/mcp helper) and a second
+// SyncMCPServers() drops the layer and empties the section. This is the end-to-end proof that the T4 endpoint's write path
 // can refresh the surface without re-reading config.json.
 func TestSyncMCPServers_ReflectsMCPJSONToggle(t *testing.T) {
 	al, workspace := newMCPTestLoop(t)
 	tc := mcpTestCoordinator(t, al)
 	agent := mcpTestAgent(t, al)
 
-	// The session view is where load_mcp_tools is offered (MCP tools are
+	// The session view is where the discovery tools are offered (MCP tools are
 	// session-scoped: the agent-wide registry never carries them).
-	sessionLoader := func() bool {
-		_, ok := tc.sessionTools(agent, "chat-a").Get(tools.LoadMCPToolsName)
-		return ok
+	sessionOffersDiscovery := func() bool {
+		view := tc.sessionTools(agent, "chat-a")
+		for _, name := range mcpDiscoveryToolNames {
+			if _, ok := view.Get(name); !ok {
+				return false
+			}
+		}
+		return true
 	}
 
 	// Sync #1 — baseline: no mcp.json anywhere → empty surface.
 	al.SyncMCPServers()
-	if sessionLoader() {
-		t.Fatal("load_mcp_tools offered before any server exists")
+	if sessionOffersDiscovery() {
+		t.Fatal("discovery tools offered before any server exists")
 	}
 	if sec := mcpSectionOf(agent.ContextBuilder.BuildSystemPrompt()); sec != "" {
 		t.Fatalf("baseline prompt already has an MCP section: %q", sec)
@@ -164,9 +171,9 @@ func TestSyncMCPServers_ReflectsMCPJSONToggle(t *testing.T) {
 	writeAgentMCPJSON(t, workspace,
 		`{"mcpServers": {"s": {"command": "true", "description": "Server s"}}}`)
 	al.SyncMCPServers()
-	if !sessionLoader() {
-		t.Fatalf("sync after mcp.json gained a server did not offer load_mcp_tools, have %v",
-			agent.Tools.List())
+	if !sessionOffersDiscovery() {
+		t.Fatalf("sync after mcp.json gained a server did not offer the discovery tools, have %v",
+			tc.sessionTools(agent, "chat-a").List())
 	}
 	if sec := mcpSectionOf(agent.ContextBuilder.BuildSystemPrompt()); !strings.Contains(sec, "- **s**") {
 		t.Fatalf("prompt section must list the new server, got %q", sec)
@@ -179,8 +186,8 @@ func TestSyncMCPServers_ReflectsMCPJSONToggle(t *testing.T) {
 	writeAgentMCPJSON(t, workspace,
 		`{"mcpServers": {"s": {"command": "true", "description": "Server s", "disabled": true}}}`)
 	al.SyncMCPServers()
-	if sessionLoader() {
-		t.Error("load_mcp_tools must stop being offered after the server was disabled")
+	if sessionOffersDiscovery() {
+		t.Error("the discovery tools must stop being offered after the server was disabled")
 	}
 	if got := tc.sessionTools(agent, "chat-a"); got != agent.Tools {
 		t.Error("disabling the last server must drop the session layer")

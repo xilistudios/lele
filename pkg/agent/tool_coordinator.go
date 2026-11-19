@@ -59,8 +59,9 @@ type toolCoordinator interface {
 	GetStartupInfo() map[string]interface{}
 	RegisterTool(tool tools.Tool)
 	// syncMCPTools re-evaluates every live agent's MCP server set after
-	// startup or a config reload: manager lifecycle, load_mcp_tools
-	// registration and the "## MCP Servers" prompt section (see mcp.go).
+	// startup or a config reload: manager lifecycle, the discovery tools
+	// (list_mcp_tools + get_mcp_tool) and the "## MCP Servers" prompt section
+	// (see mcp.go).
 	syncMCPTools()
 	// closeMCPManagers closes every live MCP manager exactly once
 	// (idempotent, nil-safe): the teardown path for stdio children.
@@ -68,7 +69,7 @@ type toolCoordinator interface {
 	// sessionTools returns the tool registry a session must use to build tool
 	// definitions and execute calls: the agent's base registry, or a
 	// session-scoped layer over it while MCP servers are configured (so tools
-	// loaded with load_mcp_tools never leak into other sessions).
+	// loaded with get_mcp_tool never leak into other sessions).
 	sessionTools(agent *AgentInstance, sessionKey string) *tools.ToolRegistry
 	// dropSessionTools forgets a session's scoped layer (its history was
 	// cleared, so the MCP tools it had loaded go too).
@@ -128,7 +129,7 @@ func newToolCoordinatorWithSubagents(al *AgentLoop, subagents map[string]*tools.
 // It iterates over all registered tools instead of hardcoding tool names.
 //
 // It walks the SESSION's view (see sessionTools), so tools the session loaded
-// through load_mcp_tools get their context too — and a tool loaded by another
+// through get_mcp_tool get their context too — and a tool loaded by another
 // session is never touched from here.
 func (tc *toolCoordinatorImpl) updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string) {
 	registry := tc.sessionTools(agent, sessionKey)

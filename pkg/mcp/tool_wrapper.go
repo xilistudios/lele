@@ -57,8 +57,9 @@ func NewRemoteTool(mgr *Manager, server string, spec tools.LoadedMCPTool) *Remot
 	}
 }
 
-// ToolFactory returns a factory for LoadMCPToolsTool: given a loaded spec it
-// builds the RemoteTool bound to this manager. The server comes from the
+// ToolFactory returns a factory for the pkg/tools MCP tools (GetMCPToolTool
+// calls it for every spec it registers): given a loaded spec it builds the
+// RemoteTool bound to this manager. The server comes from the
 // spec itself (spec.Server, stamped by buildSpecs), so a spec that is NOT in
 // the loaded cache — a mid-flight config change deliberately does not
 // re-store it (N1) — still binds to its live server instead of executing
@@ -111,7 +112,7 @@ func (r *RemoteTool) Execute(ctx context.Context, args map[string]interface{}) *
 	}
 	if r.server == "" {
 		return tools.ErrorResult(fmt.Sprintf("mcp tool %q is not linked to a loaded server; reload it with %s",
-			r.registered, tools.LoadMCPToolsName))
+			r.registered, tools.GetMCPToolName))
 	}
 	res, err := r.mgr.CallRemote(ctx, r.server, r.remote, args)
 	if err != nil {
@@ -131,8 +132,9 @@ func (r *RemoteTool) Execute(ctx context.Context, args map[string]interface{}) *
 //
 // Collision note: the mapping is not injective — server "a" + tool "b_c" and
 // server "a_b" + tool "c" both sanitize to "mcp_a_b_c". The registry never
-// overwrites an existing name (see LoadMCPToolsTool.register), so the worst
-// case is that the second tool reports as "already present".
+// overwrites an existing name (GetMCPToolTool skips a name that is already
+// registered), so the worst case is that the second tool reports as "already
+// registered and callable".
 func NamespacedName(server, tool string) string {
 	full := namePrefix + server + "_" + tool
 	sanitized := sanitizeName(full)

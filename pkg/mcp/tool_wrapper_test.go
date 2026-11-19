@@ -314,7 +314,7 @@ func TestRemoteToolExecuteGuards(t *testing.T) {
 	mgr := mgrWithConn(t, &fakeConn{})
 	rtNoServer := NewRemoteTool(mgr, "", tools.LoadedMCPTool{Name: "mcp_srv_read", RemoteName: "read"})
 	out := rtNoServer.Execute(context.Background(), nil)
-	if !out.IsError || !strings.Contains(out.ForLLM, tools.LoadMCPToolsName) {
+	if !out.IsError || !strings.Contains(out.ForLLM, tools.GetMCPToolName) {
 		t.Errorf("unresolved-server guard should hint to reload: %+v", out)
 	}
 }
@@ -353,7 +353,7 @@ func TestToolFactoryBindsServer(t *testing.T) {
 
 	// Unknown spec: the server cannot be recovered, Execute asks for a reload.
 	unknown := factory(tools.LoadedMCPTool{Name: "mcp_other_ping", RemoteName: "ping"})
-	if out := unknown.Execute(context.Background(), nil); !out.IsError || !strings.Contains(out.ForLLM, tools.LoadMCPToolsName) {
+	if out := unknown.Execute(context.Background(), nil); !out.IsError || !strings.Contains(out.ForLLM, tools.GetMCPToolName) {
 		t.Errorf("unknown-spec guard: %+v", out)
 	}
 }

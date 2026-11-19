@@ -17,7 +17,7 @@ import (
 // pointers), so the cap is about never growing without bound on a long-lived
 // gateway where sessions come and go; the oldest (least recently used) layers
 // are dropped first. Dropping a layer only means its chat has to call
-// load_mcp_tools again — the MCP connections live in the manager, not here.
+// get_mcp_tool again — the MCP connections live in the manager, not here.
 const maxSessionToolLayers = 256
 
 // sessionToolKey identifies one session layer: MCP tools are per agent
@@ -45,7 +45,7 @@ type sessionToolLayer struct {
 //
 // Ownership: the set lives inside mcpManagerSet, so the layers of an agent are
 // dropped together with that agent's MCP manager (retirement, teardown): a
-// layer's load_mcp_tools closes over the manager it was built with and must
+// layer's discovery tools close over the manager it was built with and must
 // never outlive it.
 type sessionToolSet struct {
 	mu      sync.Mutex

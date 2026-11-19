@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"path/filepath"
 	"sync"
 
 	"github.com/mark3labs/mcp-go/client/transport"
@@ -28,6 +29,10 @@ type Manager struct {
 	// paths.LeleDir; nil is tolerated (buildAuthRuntime/fingerprint are
 	// nil-safe) so a Manager built without one keeps working unauthenticated.
 	auth *AuthStore
+	// usage records per-server remote-tool call counts (<LeleDir>/mcp_usage.json,
+	// or memory-only when LeleDir is unknown). nil is tolerated: inc/countsFor
+	// are nil-safe, so usage tracking can never break a remote call.
+	usage *usageStore
 
 	mu sync.Mutex
 	// conns caches open connections, keyed by server name (nil until first use).
@@ -69,11 +74,26 @@ func NewManager(paths Paths, dialer Dialer) *Manager {
 		paths:    paths,
 		dialer:   dialer,
 		auth:     NewAuthStore(paths.LeleDir),
+		usage:    loadUsageStore(usageFilePath(paths.LeleDir)),
 		conns:    make(map[string]ClientConn),
 		loaded:   make(map[string][]tools.LoadedMCPTool),
 		inflight: make(map[string]*loadFlight),
 		fps:      make(map[string]string),
 	}
+}
+
+// usageFilePath returns the usage counter file inside a lele directory:
+//
+//	<LeleDir>/mcp_usage.json
+//
+// i.e. one file next to mcp.json and the auth store. An unknown LeleDir (empty
+// Paths, e.g. a manager a test or a probe built by hand) yields "" — the usage
+// store then stays memory-only instead of guessing a path.
+func usageFilePath(leleDir string) string {
+	if leleDir == "" {
+		return ""
+	}
+	return filepath.Join(leleDir, "mcp_usage.json")
 }
 
 // discover re-reads the three mcp.json layers (at most three small files) and
@@ -212,7 +232,7 @@ func (m *Manager) fingerprint(name string, cfg ServerConfig) string {
 // first call. It is idempotent (cached specs are returned without dialing)
 // and deduped per server: N concurrent calls result in exactly one dial, the
 // others wait and observe the same result. Registration into the ToolRegistry
-// is the caller's job (see tools.LoadMCPToolsTool).
+// is the caller's job (see tools.GetMCPToolTool).
 func (m *Manager) LoadServer(ctx context.Context, name string) ([]tools.LoadedMCPTool, error) {
 	cfg, err := m.resolve(name)
 	if err != nil {
@@ -365,6 +385,12 @@ func buildSpecs(server string, remoteTools []mcp.Tool) []tools.LoadedMCPTool {
 // error is returned). Note: a call that dies mid-flight is retried — the plan
 // accepts the (small) double-execution risk in exchange for transparent
 // recovery from a crashed stdio child.
+//
+// Every call that reaches the server is recorded through the usage store (see
+// ToolUsage), exactly once and only on success: a result carrying
+// IsError=true still counts — the tool WAS used, and a tool that keeps failing
+// is exactly what a usage ranking should surface — while a transport failure,
+// an auth challenge or a cancelled caller counts nothing.
 func (m *Manager) CallRemote(ctx context.Context, server, remoteTool string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	cfg, err := m.resolve(server)
 	if err != nil {
@@ -376,6 +402,7 @@ func (m *Manager) CallRemote(ctx context.Context, server, remoteTool string, arg
 	}
 	res, err := conn.CallTool(ctx, remoteTool, args)
 	if err == nil {
+		m.usage.inc(server, remoteTool)
 		return res, nil
 	}
 	if ctx.Err() != nil {
@@ -410,7 +437,19 @@ func (m *Manager) CallRemote(ctx context.Context, server, remoteTool string, arg
 	if err != nil {
 		return nil, fmt.Errorf("mcp call %s.%s: %w", server, remoteTool, err)
 	}
+	// The retry succeeded: this is the FIRST and only successful attempt of
+	// this call, so it is recorded exactly once (the increment above only runs
+	// when the first attempt succeeded).
+	m.usage.inc(server, remoteTool)
 	return res, nil
+}
+
+// ToolUsage returns the recorded call counts for one server's tools, keyed
+// by REMOTE tool name (the name on the server, not the namespaced registry
+// name). Returns an empty map when nothing was recorded. Safe for concurrent
+// use.
+func (m *Manager) ToolUsage(server string) map[string]uint64 {
+	return m.usage.countsFor(server)
 }
 
 // serverOf reverse-looks-up which server owns a registered tool name in the

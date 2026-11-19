@@ -26,7 +26,7 @@ type toolExecOptions struct {
 	agent *AgentInstance
 	// registry is the SESSION's tool view (see toolCoordinator.sessionTools):
 	// the agent's base registry plus that session's scoped layer, where MCP
-	// tools loaded with load_mcp_tools live. Nil falls back to agent.Tools for
+	// tools loaded with get_mcp_tool live. Nil falls back to agent.Tools for
 	// callers that have no session (tests, direct invocations).
 	registry     *tools.ToolRegistry
 	tc           providers.ToolCall
