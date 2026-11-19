@@ -13,6 +13,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	lelecontext "github.com/xilistudios/lele/pkg/context"
 	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
@@ -229,12 +230,12 @@ func (ch *commandHandlerImpl) handleNewCommand(agent *AgentInstance, sessionKey 
 		agentModel = ch.al.cfg().Agents.Defaults.Model
 	}
 	ch.al.startFreshConversation(sessionKey, agent.ID, agentModel)
-	// Invalidate caches so the fresh conversation re-reads bootstrap files
-	// (AGENT.md, SOUL.md, ...) from disk and rebuilds its system prompt.
+	// Invalidate caches so the fresh conversation re-reads the bootstrap files
+	// from disk and rebuilds its system prompt.
 	if agent.ContextBuilder != nil {
 		agent.ContextBuilder.ResetMemoryContext()
 	}
-	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
+	return lelecontext.ContextRefreshedMessage
 }
 
 func (ch *commandHandlerImpl) handleToggleCommand(args []string) string {

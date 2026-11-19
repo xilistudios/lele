@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	lelecontext "github.com/xilistudios/lele/pkg/context"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
@@ -1095,7 +1096,7 @@ func (mp *messageProcessorImpl) handleNewCommand(agent *AgentInstance, sessionKe
 		agentModel = mp.al.cfg().Agents.Defaults.Model
 	}
 	mp.al.startFreshConversation(sessionKey, agent.ID, agentModel)
-	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
+	return lelecontext.ContextRefreshedMessage
 }
 
 func (mp *messageProcessorImpl) handleToggleCommand(args []string) string {

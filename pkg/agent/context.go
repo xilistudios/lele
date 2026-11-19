@@ -591,8 +591,13 @@ func (cb *ContextBuilder) getHarnessContext() string {
 	return cb.harnessContext
 }
 
+// LoadBootstrapFiles inlines the workspace context files into the system
+// prompt, in lelecontext.BootstrapFiles order. The list still carries the
+// deprecated persona files (SOUL.md, USER.md, IDENTITY.md): they are no longer
+// created, but a workspace that has them keeps their content in the prompt.
+// Files that are absent are skipped, so a fresh workspace costs nothing.
 func (cb *ContextBuilder) LoadBootstrapFiles() string {
-	bootstrapFiles := []string{"AGENT.md", "SOUL.md", "USER.md", "IDENTITY.md", "MEMORY.md"}
+	bootstrapFiles := lelecontext.BootstrapFiles
 
 	var result string
 	for i, filename := range bootstrapFiles {

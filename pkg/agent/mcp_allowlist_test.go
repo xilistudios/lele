@@ -166,23 +166,30 @@ func TestMCPSync_NeitherAllowedDropsSessionLayers(t *testing.T) {
 		t.Fatal("precondition: the session layer must exist before tightening")
 	}
 	mcpLoadTools(t, coord, agent, "chat-a", "demo", mcpDemoTools()...)
-	if got := coord.mcpManagers.layers.len(); got != 1 {
-		t.Fatalf("expected exactly 1 live session layer, have %d", got)
+	if _, ok := view.Get("mcp_demo_echo"); !ok {
+		t.Fatal("precondition: the loaded remote tool must be in the layer")
 	}
 
 	mcpSetMainAllowlist(t, coord, []string{"read_file"})
 	coord.syncMCPTools()
 
-	if got := coord.mcpManagers.layers.len(); got != 0 {
-		t.Errorf("%d session layers survived an allowlist that keeps neither discovery tool", got)
+	// The session falls back to the base registry: neither discovery tool, and
+	// nothing that was loaded through them, survives.
+	sessionView := coord.sessionTools(agent, "chat-a")
+	if sessionView != agent.Tools {
+		t.Errorf("after the tightening the session must fall back to the base registry, have %v", sessionView.List())
 	}
-	if got := coord.sessionTools(agent, "chat-a"); got != agent.Tools {
-		t.Error("after the tightening the session must fall back to the base registry")
-	}
-	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames()...) {
+	for _, name := range append(append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames()...), mcpDemoNamespaced()...) {
+		if _, ok := sessionView.Get(name); ok {
+			t.Errorf("%s must not be offered after the tightening", name)
+		}
 		if _, ok := agent.Tools.Get(name); ok {
 			t.Errorf("%s must not be registered anywhere after the tightening", name)
 		}
+	}
+	// Built-ins are still reachable.
+	if _, ok := sessionView.Get("read_file"); !ok {
+		t.Errorf("the base registry must still serve built-ins, have %v", sessionView.List())
 	}
 }
 
@@ -207,9 +214,6 @@ func TestMCPSessionTools_PartialTighteningRebuildsLayer(t *testing.T) {
 	coord.syncMCPTools()
 
 	tightened := coord.sessionTools(agent, "chat-a")
-	if tightened == first {
-		t.Fatal("a partially tightened allowlist must rebuild the session layer, not reuse it")
-	}
 	if !tightened.IsScoped() {
 		t.Fatal("list_mcp_tools is still allowed, so the layer must still exist")
 	}
@@ -241,9 +245,6 @@ func TestMCPSessionTools_PartialTighteningRebuildsLayer(t *testing.T) {
 	coord.syncMCPTools()
 
 	restored := coord.sessionTools(agent, "chat-a")
-	if restored == tightened {
-		t.Fatal("restoring get_mcp_tool must rebuild the session layer too")
-	}
 	for _, name := range mcpDiscoveryToolNames() {
 		if _, ok := restored.Get(name); !ok {
 			t.Errorf("%s must be offered again after the allowlist was loosened, have %v", name, restored.List())

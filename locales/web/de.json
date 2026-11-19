@@ -265,7 +265,7 @@
       "subagentsIterationsHelp": "0 = unbegrenzt.",
       "noOtherAgents": "Noch keine anderen Agents zum Delegieren.",
       "filesTitle": "Agent-Dateien",
-      "filesHint": "Textdateien im Arbeitsbereich dieses Agents. AGENTS.md, IDENTITY.md, SOUL.md und USER.md werden in den Agent-Prompt eingefügt.",
+      "filesHint": "Textdateien im Arbeitsbereich dieses Agents. AGENT.md und MEMORY.md werden in den Agent-Prompt eingefügt.",
       "filesOpen": "Agent-Dateien öffnen",
       "descriptionPlaceholder": "Wofür ist dieser Agent? Wann sollte er verwendet werden?",
       "inherit": "Erben",

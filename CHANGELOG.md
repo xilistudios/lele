@@ -68,6 +68,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### WebUI
 - **The secret scope is now picked from the agent roster instead of typed** — creating a secret (`/secrets` → *New*) asked for its scope as a free-text, comma-separated list of agent IDs, so a typo silently scoped a secret to an agent that does not exist. The field is now a chip multi-select — one chip per configured agent, built from the app's live agent list (`GET /api/v1/agents`, the same source the sidebar uses) and reusing the `AgentChipMultiSelect` the per-agent *Subagents* tab already ships. No selection still means "all agents" (`scope: []`), an empty roster shows an explicit empty state instead of a bare input, and the value is carried as `string[]` end to end (the old `scopeText`/`.split(',')` parsing is gone). Each chip is a keyboard-toggleable `role="checkbox"` and the group carries the field's accessible name, so the control does not depend on a pointer.
 
+### Deprecated
+
+#### Agent
+- **The persona context files are deprecated** — `SOUL.md`, `USER.md` and `IDENTITY.md` are no longer created for a new workspace, and their default templates were removed. `AGENT.md` (the actual behaviour instructions) is now the only persona-ish file lele seeds, and its default template was reduced to a single line so the agent's behaviour comes from configuration and skills instead of a long shipped prompt. This is a **deprecation, not a removal**: a workspace that already carries the three files keeps them untouched, they are still inlined into the system prompt in the same order (`pkg/context.BootstrapFiles`), they still count as context files so the REST/WebUI editors keep reading and writing them (`pkg/context.AllContextFiles`, `IsContextFile`), and `lele migrate` keeps importing them. What changes for a fresh install is that those files simply do not exist, so the prompt inlines `AGENT.md` + `MEMORY.md` only. The context-file lists were split accordingly — `pkg/context.ContextFiles` (created: `AGENT.md`, `MEMORY.md`, `HEARTBEAT.md`) versus `pkg/context.DeprecatedContextFiles` (read-only legacy: `SOUL.md`, `USER.md`, `IDENTITY.md`) — and the `/new` reply no longer enumerates file names (`pkg/context.ContextRefreshedMessage`), since that list is no longer a stable contract.
+
 ### Fixed
 
 #### TUI

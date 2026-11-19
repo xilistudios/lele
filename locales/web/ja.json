@@ -265,7 +265,7 @@
       "subagentsIterationsHelp": "0 = 無制限。",
       "noOtherAgents": "まだ委任できる他のエージェントはありません。",
       "filesTitle": "エージェントファイル",
-      "filesHint": "このエージェントのワークスペース内のテキストファイル。AGENTS.md、IDENTITY.md、SOUL.md、USER.md はエージェントプロンプトに注入されます。",
+      "filesHint": "このエージェントのワークスペース内のテキストファイル。AGENT.md、MEMORY.md はエージェントプロンプトに注入されます。",
       "filesOpen": "エージェントファイルを開く",
       "descriptionPlaceholder": "このエージェントは何に使いますか？いつ使いますか？",
       "inherit": "継承",

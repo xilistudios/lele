@@ -145,7 +145,7 @@ Principales secciones: `agents.defaults`, `session`, `channels`, `providers`, `t
 
 **Proveedores:** `anthropic`, `openai`, `openrouter`, `groq`, `zhipu`, `gemini`, `vllm`, `nvidia`, `ollama`, `moonshot`, `deepseek`, `github_copilot`, más backends con nombre compatibles con OpenAI (`model`, `context_window`, `vision`, `reasoning`, …).
 
-**Espacio de trabajo** (`~/.lele/workspace/`): `sessions/`, `memory/`, `state/`, `cron/`, `skills/`, `AGENT.md`, `HEARTBEAT.md`, `IDENTITY.md`, `SOUL.md`, `USER.md`.
+**Espacio de trabajo** (`~/.lele/workspace/`): `sessions/`, `memory/`, `state/`, `cron/`, `skills/`, `AGENT.md`, `HEARTBEAT.md`, `MEMORY.md`.
 
 ## CLI
 

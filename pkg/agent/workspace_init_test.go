@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/xilistudios/lele/pkg/context"
@@ -125,10 +126,49 @@ func TestInitializeWorkspaceNoTemplate(t *testing.T) {
 		}
 	}
 
+	// …and the deprecated persona files must NOT be created: lele stopped
+	// seeding SOUL.md/USER.md/IDENTITY.md for new workspaces.
+	for _, filename := range context.DeprecatedContextFiles {
+		dst := filepath.Join(workspace, filename)
+		if _, err := os.Stat(dst); err == nil {
+			t.Errorf("deprecated context file %s must not be created for a new workspace", filename)
+		}
+	}
+
 	// Memory directory should be created
 	memoryDir := filepath.Join(workspace, "memory")
 	if _, err := os.Stat(memoryDir); os.IsNotExist(err) {
 		t.Errorf("Memory directory was not created")
+	}
+}
+
+// TestInitializeWorkspaceKeepsDeprecatedFilesOfAnExistingWorkspace is the other
+// half of the deprecation: an installation that already carries SOUL.md (and
+// friends) keeps them untouched — deprecation must never delete a user's
+// persona — even when the workspace is initialized again.
+func TestInitializeWorkspaceKeepsDeprecatedFilesOfAnExistingWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("LELE_TEMPLATE_WORKSPACE", "")
+
+	const persona = "# SOUL\nmy own persona"
+	if err := os.WriteFile(filepath.Join(workspace, "SOUL.md"), []byte(persona), 0o644); err != nil {
+		t.Fatalf("seed SOUL.md: %v", err)
+	}
+
+	if err := InitializeWorkspace(workspace); err != nil {
+		t.Fatalf("InitializeWorkspace failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(workspace, "SOUL.md"))
+	if err != nil {
+		t.Fatalf("an existing SOUL.md must survive initialization: %v", err)
+	}
+	if string(got) != persona {
+		t.Errorf("SOUL.md content = %q, want it untouched (%q)", got, persona)
+	}
+	// And it is still inlined into the prompt.
+	if prompt := NewContextBuilder(workspace).LoadBootstrapFiles(); !strings.Contains(prompt, "my own persona") {
+		t.Errorf("a deprecated context file must still reach the bootstrap prompt:\n%s", prompt)
 	}
 }
 

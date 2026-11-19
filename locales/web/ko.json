@@ -265,7 +265,7 @@
       "subagentsIterationsHelp": "0 = 제한 없음.",
       "noOtherAgents": "아직 위임할 다른 에이전트가 없습니다.",
       "filesTitle": "에이전트 파일",
-      "filesHint": "이 에이전트 작업 공간의 텍스트 파일입니다. AGENTS.md, IDENTITY.md, SOUL.md, USER.md는 에이전트 프롬프트에 주입됩니다.",
+      "filesHint": "이 에이전트 작업 공간의 텍스트 파일입니다. AGENT.md, MEMORY.md는 에이전트 프롬프트에 주입됩니다.",
       "filesOpen": "에이전트 파일 열기",
       "descriptionPlaceholder": "이 에이전트는 무엇에 사용되나요? 언제 사용해야 하나요?",
       "inherit": "상속",

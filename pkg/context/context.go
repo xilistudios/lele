@@ -21,20 +21,72 @@ var embeddedTemplates embed.FS
 // This is relative to the working directory where lele is run.
 const templateWorkspaceDir = "workspace"
 
-// ContextFiles are the core context files that should be initialized in every agent workspace.
-// This is the single source of truth — both pkg/agent and pkg/channels reference this list.
+// ContextFiles are the core context files every agent workspace is created
+// with. This is the single source of truth — both pkg/agent and pkg/channels
+// reference this list.
+//
+// The persona files (SOUL.md, USER.md, IDENTITY.md) used to be part of this
+// list and are now DEPRECATED: see DeprecatedContextFiles.
 var ContextFiles = []string{
+	"AGENT.md",
+	"MEMORY.md",
+	"HEARTBEAT.md",
+}
+
+// DeprecatedContextFiles are context files lele used to seed into every new
+// workspace and no longer creates.
+//
+// They are deprecated, not removed: a workspace that already has them keeps
+// working unchanged — the files are still inlined into the system prompt
+// (BootstrapFiles) and still recognised as context files, so the REST/WebUI
+// editors can keep reading and writing them — but nothing creates them any
+// more, so a fresh workspace simply does not have them.
+//
+// A deprecation rather than a removal is what keeps the upgrade path honest:
+// deleting a user's SOUL.md/USER.md/IDENTITY.md would silently rewrite the
+// persona of every existing installation.
+var DeprecatedContextFiles = []string{
+	"SOUL.md",
+	"USER.md",
+	"IDENTITY.md",
+}
+
+// BootstrapFiles are the files inlined into the system prompt, in order (see
+// pkg/agent.ContextBuilder.LoadBootstrapFiles). HEARTBEAT.md is deliberately
+// absent: it is read by the heartbeat service, not injected into every prompt.
+//
+// The deprecated persona files stay here on purpose: an existing workspace
+// that carries them must keep their content in the prompt, exactly as before
+// the deprecation. A workspace without them is unaffected — missing files are
+// skipped.
+var BootstrapFiles = []string{
 	"AGENT.md",
 	"SOUL.md",
 	"USER.md",
 	"IDENTITY.md",
 	"MEMORY.md",
-	"HEARTBEAT.md",
 }
 
-// IsContextFile returns true if the given filename is a known context file.
+// ContextRefreshedMessage is the reply to a session reset (/new and the
+// equivalent ephemeral restart). It names no file: the set of context files is
+// not a stable contract any more (see DeprecatedContextFiles), so a message
+// listing them could only go stale.
+const ContextRefreshedMessage = "🔄 New conversation started. Context refreshed from the workspace context files."
+
+// AllContextFiles returns every file name lele treats as a context file: the
+// ones it creates, followed by the deprecated ones an existing workspace may
+// still carry. Use it wherever "is this a context file?" is the question;
+// ContextFiles alone is only "what does a new workspace get?".
+func AllContextFiles() []string {
+	all := make([]string, 0, len(ContextFiles)+len(DeprecatedContextFiles))
+	all = append(all, ContextFiles...)
+	return append(all, DeprecatedContextFiles...)
+}
+
+// IsContextFile returns true if the given filename is a known context file,
+// current or deprecated.
 func IsContextFile(name string) bool {
-	for _, f := range ContextFiles {
+	for _, f := range AllContextFiles() {
 		if f == name {
 			return true
 		}

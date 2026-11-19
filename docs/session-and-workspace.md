@@ -21,11 +21,12 @@ The workspace is created during `lele onboard` from embedded templates.
 ├── skills/
 ├── AGENT.md
 ├── HEARTBEAT.md
-├── IDENTITY.md
-├── MEMORY.md
-├── SOUL.md
-└── USER.md
+└── MEMORY.md
 ```
+
+An older workspace may additionally contain the **deprecated** persona files
+`SOUL.md`, `USER.md` and `IDENTITY.md` — see
+[Deprecated context files](#deprecated-context-files).
 
 ## What Each File Or Directory Does
 
@@ -53,18 +54,6 @@ Contains workspace-local installed skills.
 
 Primary agent behavior and instructions.
 
-### `SOUL.md`
-
-Longer-lived style, values, or personality guidance.
-
-### `USER.md`
-
-User preferences and expectations.
-
-### `IDENTITY.md`
-
-Identity information about the assistant or installation.
-
 ### `MEMORY.md`
 
 Bootstrap memory included in the initial context. The agent updates it with
@@ -80,15 +69,30 @@ written; the agent must compact with `replace`.
 
 Periodic tasks read by the heartbeat service.
 
+### Deprecated context files
+
+`SOUL.md` (style, values, personality), `USER.md` (user preferences) and
+`IDENTITY.md` (identity of the assistant or installation) are **deprecated**.
+
+- lele no longer creates them: a new workspace gets `AGENT.md`, `MEMORY.md` and
+  `HEARTBEAT.md` only, and their default templates were removed.
+- They are **not** removed from an existing workspace. If the files are there,
+  nothing changes: they are still inlined into the system prompt (in the
+  `AGENT.md` → `SOUL.md` → `USER.md` → `IDENTITY.md` → `MEMORY.md` order of
+  `pkg/context.BootstrapFiles`) and they are still recognised as context files,
+  so the REST/WebUI editors keep reading and writing them
+  (`pkg/context.IsContextFile`).
+- Put long-lived behaviour into `AGENT.md` (or per-agent `AGENT.md` files) and
+  durable facts into `MEMORY.md`; both are still first-class.
+
 ## Context Refresh Behavior
 
-Lele rebuilds context from workspace files such as:
+Lele rebuilds context from the workspace context files:
 
 - `AGENT.md`
-- `SOUL.md`
-- `USER.md`
-- `IDENTITY.md`
 - `MEMORY.md`
+- plus `SOUL.md`, `USER.md` and `IDENTITY.md` **when the workspace still has
+  them** (deprecated, see above — absent files are skipped)
 
 This is especially visible when sessions are reset or ephemeral mode starts a fresh conversation.
 

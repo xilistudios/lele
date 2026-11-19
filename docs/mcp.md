@@ -1023,9 +1023,14 @@ The listing ranking comes from counters the client keeps, not from the
   complete file and a crash can never leave a half-written one. No `fsync`:
   losing one increment after a hard crash is harmless, the counts only rank
   tools. Each write is a **read/merge/replace** of the pending increments
-  rather than a dump of one manager's snapshot, so several managers sharing a
-  `LeleDir` (an agent's manager plus a probe, or a second process) keep each
-  other's counts.
+  rather than a dump of one manager's snapshot, and the whole sequence runs
+  under a cross-process lock on a `mcp_usage.json.lock` sidecar (an
+  `O_CREATE|O_EXCL` sentinel, so it behaves the same on every platform), so
+  several managers sharing a `LeleDir` (an agent's manager plus a probe, or a
+  second `lele` process) keep each other's counts — including when they write
+  at the same moment. The lock is best-effort like the rest of the file: a
+  sidecar older than 10 s is reclaimed, and a lock that cannot be taken within
+  100 ms is logged and the write proceeds unlocked.
 - **Best-effort by contract:** usage tracking never breaks a tool call. A
   missing or corrupt file starts from empty counts with a single warning, a
   failed write is a logged warning, and a manager with no known `LeleDir`

@@ -13,12 +13,14 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -280,6 +282,88 @@ func TestUsageStoreConcurrentInc(t *testing.T) {
 	}
 	if got := loadUsageStore(path).countsFor("srv")["echo"]; got != want {
 		t.Errorf("persisted echo = %d, want %d", got, want)
+	}
+}
+
+// TestUsageStoreConcurrentManagersKeepEveryIncrement is the CONCURRENT half of
+// the shared-file contract, the case the sequential manager test cannot reach:
+// several stores over the same path (two managers in one process, or two lele
+// processes) each read the file, merge their own deltas and rename. Without a
+// cross-process lock on the file, two of them can read the same snapshot and
+// the last rename drops the other's increments — so the totals below are the
+// assertion that the lock (see lockUsageFile) is what protects them.
+func TestUsageStoreConcurrentManagersKeepEveryIncrement(t *testing.T) {
+	path := usagePath(t)
+
+	const writers = 6
+	const perWriter = 20
+
+	// One store per writer: separate snapshots and separate mu, exactly like
+	// separate managers/processes sharing the file.
+	stores := make([]*usageStore, writers)
+	for i := range stores {
+		stores[i] = loadUsageStore(path)
+	}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			for j := 0; j < perWriter; j++ {
+				stores[i].inc("srv", fmt.Sprintf("tool%d", i))
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	// Every writer's own tool must have kept EVERY increment, and the file (the
+	// restart view) must agree.
+	persisted := loadUsageStore(path).countsFor("srv")
+	for i := 0; i < writers; i++ {
+		name := fmt.Sprintf("tool%d", i)
+		if got := persisted[name]; got != perWriter {
+			t.Errorf("persisted %s = %d, want %d (a concurrent write was lost)", name, got, perWriter)
+		}
+	}
+	// No writer may have invented counts for another writer's tool.
+	if got := len(persisted); got > writers {
+		t.Errorf("%d distinct tools persisted, want at most %d: %v", got, writers, persisted)
+	}
+	// And the counters file must be gone with its sidecar (no stale lock left).
+	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
+		t.Error("the usage lock sidecar must be released after the last write")
+	}
+}
+
+// TestUsageLockReclaimsStaleSidecar: a sidecar left behind by a process that
+// died while holding the lock must not degrade every later write to unlocked
+// (or block it): an old sidecar is taken over, the counter still lands on disk
+// and the sidecar is released again.
+func TestUsageLockReclaimsStaleSidecar(t *testing.T) {
+	path := usagePath(t)
+	lockPath := path + ".lock"
+
+	// A sidecar with an old mtime == a holder that crashed long ago.
+	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+		t.Fatalf("seed the sidecar: %v", err)
+	}
+	old := time.Now().Add(-2 * usageLockStale)
+	if err := os.Chtimes(lockPath, old, old); err != nil {
+		t.Fatalf("age the sidecar: %v", err)
+	}
+
+	store := loadUsageStore(path)
+	store.inc("srv", "echo")
+
+	if got := loadUsageStore(path).countsFor("srv")["echo"]; got != 1 {
+		t.Errorf("persisted echo = %d, want 1 (the stale lock must not lose the write)", got)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Error("the stale sidecar must be released after the write")
 	}
 }
 
