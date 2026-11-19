@@ -995,7 +995,10 @@ Rules of the bridge:
   so the model can re-read them.
 - **Non-destructive:** an existing registry name is never overwritten — a
   collision with a built-in or an earlier load reports as "already registered
-  and callable". The base registry always wins.
+  and callable". The base registry always wins, and the result renders the
+  **retained** entry's description and schema (never the remote tool's, which
+  would describe something the registry does not run); the retained entry is
+  only attributed to the server when it is in fact that server's tool.
 - **Unknown server:** fails with a clean error listing the known servers
   (`known servers: …`).
 - Calling a loaded tool afterwards works like any built-in: the call is
@@ -1019,7 +1022,10 @@ The listing ranking comes from counters the client keeps, not from the
   the same directory and is renamed over the target, so a reader always sees a
   complete file and a crash can never leave a half-written one. No `fsync`:
   losing one increment after a hard crash is harmless, the counts only rank
-  tools.
+  tools. Each write is a **read/merge/replace** of the pending increments
+  rather than a dump of one manager's snapshot, so several managers sharing a
+  `LeleDir` (an agent's manager plus a probe, or a second process) keep each
+  other's counts.
 - **Best-effort by contract:** usage tracking never breaks a tool call. A
   missing or corrupt file starts from empty counts with a single warning, a
   failed write is a logged warning, and a manager with no known `LeleDir`
@@ -1033,7 +1039,9 @@ the loader. The legacy name **`load_mcp_tools` acts as an alias that enables
 both**, so a config written for the old bulk loader keeps working unchanged — no
 tool registers under that name any more. With neither tool allowed, the session
 layers are dropped (they hold the tools loaded through them) while the prompt
-keeps listing the servers: configuration is not a tool. **Subagents receive
+keeps listing the servers: configuration is not a tool. The prompt's instructions
+name only the tools the allowlist keeps, so an agent allowed just
+`list_mcp_tools` is never told to call `get_mcp_tool`. **Subagents receive
 neither tool** (v1).
 
 ## Lifecycle

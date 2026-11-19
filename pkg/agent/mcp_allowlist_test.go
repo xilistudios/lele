@@ -7,7 +7,10 @@
 // Tests for the PER-TOOL allowlist gating of the lazy MCP discovery pair:
 // mcpDiscoveryAllowed decides whether a session layer carries list_mcp_tools,
 // get_mcp_tool, both or neither, and a reload that tightens only one of them
-// must reach the already cached layers (mcpLayerFlags reconciliation).
+// must reach the already cached layers (permission-generation reconciliation,
+// see mcpManagerSet.observePermissions). Every assertion here is about what a
+// session is OFFERED and what the prompt says — never about the private
+// bookkeeping that produces it.
 //
 // The bulk loader (load_mcp_tools) is not registered anywhere any more; its
 // name survives only as a legacy allowlist alias that keeps BOTH new tools.
@@ -45,74 +48,6 @@ func mcpSetMainAllowlist(t *testing.T, tc *toolCoordinatorImpl, allowlist []stri
 	cfg.Agents.List = kept
 }
 
-// mcpLayerFlagsFor reads the recorded discovery flags of one agent (the map is
-// guarded by mcpManagerSet.mu).
-func mcpLayerFlagsFor(tc *toolCoordinatorImpl, agentID string) (mcpLayerFlags, bool) {
-	tc.mcpManagers.mu.Lock()
-	defer tc.mcpManagers.mu.Unlock()
-	flags, ok := tc.mcpManagers.layerFlags[agentID]
-	return flags, ok
-}
-
-// TestMCPDiscoveryAllowed pins the pure gate: which discovery tools survive an
-// allowlist, with "load_mcp_tools" acting as the legacy alias for both.
-func TestMCPDiscoveryAllowed(t *testing.T) {
-	cases := []struct {
-		name     string
-		cfg      *config.AgentConfig
-		wantList bool
-		wantGet  bool
-	}{
-		{name: "no agent config", cfg: nil, wantList: true, wantGet: true},
-		{name: "no allowlist", cfg: &config.AgentConfig{ID: "main"}, wantList: true, wantGet: true},
-		{
-			name:     "blank-only allowlist is no allowlist",
-			cfg:      &config.AgentConfig{ID: "main", Tools: []string{"", "  "}},
-			wantList: true, wantGet: true,
-		},
-		{
-			name:     "list only",
-			cfg:      &config.AgentConfig{ID: "main", Tools: []string{tools.ListMCPToolsName}},
-			wantList: true, wantGet: false,
-		},
-		{
-			name:     "get only",
-			cfg:      &config.AgentConfig{ID: "main", Tools: []string{tools.GetMCPToolName}},
-			wantList: false, wantGet: true,
-		},
-		{
-			name:     "legacy bulk loader alias enables both",
-			cfg:      &config.AgentConfig{ID: "main", Tools: []string{tools.LoadMCPToolsName}},
-			wantList: true, wantGet: true,
-		},
-		{
-			name:     "both new tools",
-			cfg:      &config.AgentConfig{ID: "main", Tools: mcpDiscoveryToolNames},
-			wantList: true, wantGet: true,
-		},
-		{
-			name:     "unrelated tool only",
-			cfg:      &config.AgentConfig{ID: "main", Tools: []string{"read_file"}},
-			wantList: false, wantGet: false,
-		},
-		{
-			name:     "whitespace around a listed name is ignored",
-			cfg:      &config.AgentConfig{ID: "main", Tools: []string{"  " + tools.ListMCPToolsName + "  "}},
-			wantList: true, wantGet: false,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			list, get := mcpDiscoveryAllowed(tc.cfg)
-			if list != tc.wantList || get != tc.wantGet {
-				t.Errorf("mcpDiscoveryAllowed = (list=%v, get=%v), want (%v, %v)",
-					list, get, tc.wantList, tc.wantGet)
-			}
-		})
-	}
-}
-
 // TestMCPSessionTools_PerToolAllowlist is the registration matrix: every
 // allowlist shape yields a session layer carrying exactly the permitted
 // discovery tools, never the bulk loader, and never anything in the base
@@ -140,6 +75,18 @@ func TestMCPSessionTools_PerToolAllowlist(t *testing.T) {
 			wantList:  true,
 			wantGet:   false,
 		},
+		{
+			name:      "blank-only allowlist is no allowlist",
+			allowlist: []string{"", "  "},
+			wantList:  true,
+			wantGet:   true,
+		},
+		{
+			name:      "whitespace around a listed name is ignored",
+			allowlist: []string{"  " + tools.ListMCPToolsName + "  "},
+			wantList:  true,
+			wantGet:   false,
+		},
 	}
 
 	for _, tc := range cases {
@@ -156,7 +103,7 @@ func TestMCPSessionTools_PerToolAllowlist(t *testing.T) {
 				if view != agent.Tools {
 					t.Fatalf("session view must be the base registry when neither discovery tool is allowed, have %v", view.List())
 				}
-				for _, name := range mcpDiscoveryToolNames {
+				for _, name := range mcpDiscoveryToolNames() {
 					if _, ok := view.Get(name); ok {
 						t.Errorf("%s must not be offered by the base registry", name)
 					}
@@ -199,7 +146,7 @@ func TestMCPSessionTools_PerToolAllowlist(t *testing.T) {
 			if got := agent.Tools.Count(); got != baseCount {
 				t.Errorf("base registry Count() = %d, want %d (untouched)", got, baseCount)
 			}
-			for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames...) {
+			for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames()...) {
 				if _, ok := agent.Tools.Get(name); ok {
 					t.Errorf("%s must never reach the agent-wide registry", name)
 				}
@@ -218,7 +165,7 @@ func TestMCPSync_NeitherAllowedDropsSessionLayers(t *testing.T) {
 	if !view.IsScoped() {
 		t.Fatal("precondition: the session layer must exist before tightening")
 	}
-	mcpLoadTools(t, coord, agent, "chat-a", "demo", mcpDemoTools...)
+	mcpLoadTools(t, coord, agent, "chat-a", "demo", mcpDemoTools()...)
 	if got := coord.mcpManagers.layers.len(); got != 1 {
 		t.Fatalf("expected exactly 1 live session layer, have %d", got)
 	}
@@ -232,10 +179,7 @@ func TestMCPSync_NeitherAllowedDropsSessionLayers(t *testing.T) {
 	if got := coord.sessionTools(agent, "chat-a"); got != agent.Tools {
 		t.Error("after the tightening the session must fall back to the base registry")
 	}
-	if flags, ok := mcpLayerFlagsFor(coord, agent.ID); ok {
-		t.Errorf("retired flags must be forgotten, still recorded %+v", flags)
-	}
-	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames...) {
+	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames()...) {
 		if _, ok := agent.Tools.Get(name); ok {
 			t.Errorf("%s must not be registered anywhere after the tightening", name)
 		}
@@ -253,12 +197,9 @@ func TestMCPSessionTools_PartialTighteningRebuildsLayer(t *testing.T) {
 
 	// Both tools allowed by default; a load leaves a remote tool in the layer.
 	first := coord.sessionTools(agent, "chat-a")
-	mcpLoadTools(t, coord, agent, "chat-a", "demo", mcpDemoTools...)
+	mcpLoadTools(t, coord, agent, "chat-a", "demo", mcpDemoTools()...)
 	if _, ok := first.Get("mcp_demo_echo"); !ok {
 		t.Fatal("precondition: the loaded remote tool must be in the layer")
-	}
-	if flags, ok := mcpLayerFlagsFor(coord, agent.ID); !ok || !flags.list || !flags.get {
-		t.Fatalf("recorded flags = %+v (present=%v), want both enabled", flags, ok)
 	}
 
 	// Tighten: list stays, get goes.
@@ -283,36 +224,30 @@ func TestMCPSessionTools_PartialTighteningRebuildsLayer(t *testing.T) {
 	if _, ok := tightened.Get("mcp_demo_echo"); ok {
 		t.Error("a rebuilt layer must not keep tools loaded through the revoked get_mcp_tool")
 	}
-	if flags, ok := mcpLayerFlagsFor(coord, agent.ID); !ok || !flags.list || flags.get {
-		t.Errorf("recorded flags = %+v (present=%v), want list only", flags, ok)
-	}
 	// list_mcp_tools still works through the rebuilt layer.
 	listTool := mcpSessionTool(t, coord, agent, "chat-a", tools.ListMCPToolsName)
 	res := listTool.Execute(ctx, map[string]interface{}{"server": "demo"})
 	if res.IsError {
 		t.Fatalf("list_mcp_tools after the tightening failed: %s", res.ForLLM)
 	}
-	for _, name := range mcpDemoNamespaced {
+	for _, name := range mcpDemoNamespaced() {
 		if !strings.Contains(res.ForLLM, name) {
 			t.Errorf("listing lacks %s:\n%s", name, res.ForLLM)
 		}
 	}
 
 	// Loosen again: get comes back, list was never removed.
-	mcpSetMainAllowlist(t, coord, mcpDiscoveryToolNames)
+	mcpSetMainAllowlist(t, coord, mcpDiscoveryToolNames())
 	coord.syncMCPTools()
 
 	restored := coord.sessionTools(agent, "chat-a")
 	if restored == tightened {
 		t.Fatal("restoring get_mcp_tool must rebuild the session layer too")
 	}
-	for _, name := range mcpDiscoveryToolNames {
+	for _, name := range mcpDiscoveryToolNames() {
 		if _, ok := restored.Get(name); !ok {
 			t.Errorf("%s must be offered again after the allowlist was loosened, have %v", name, restored.List())
 		}
-	}
-	if flags, ok := mcpLayerFlagsFor(coord, agent.ID); !ok || !flags.list || !flags.get {
-		t.Errorf("recorded flags = %+v (present=%v), want both enabled again", flags, ok)
 	}
 	// And the restored layer is functional end to end.
 	mcpLoadTools(t, coord, agent, "chat-a", "demo", "echo")
@@ -330,6 +265,43 @@ func TestMCPSessionTools_PartialTighteningRebuildsLayer(t *testing.T) {
 	}
 	if _, ok := getOnly.Get(tools.ListMCPToolsName); ok {
 		t.Errorf("list_mcp_tools must be gone after the tightening, have %v", getOnly.List())
+	}
+}
+
+// TestMCPSync_PromptMatchesAllowlist is the prompt half of the gate: the
+// "## MCP Servers" section must document only the discovery tools the agent's
+// allowlist keeps. An agent allowed only list_mcp_tools must not be told to
+// "then call get_mcp_tool" — it would chase a tool it does not have — while the
+// configured server names and descriptions stay visible in every case.
+func TestMCPSync_PromptMatchesAllowlist(t *testing.T) {
+	cases := []struct {
+		name     string
+		allow    []string
+		wantList bool
+		wantGet  bool
+	}{
+		{name: "no allowlist", allow: nil, wantList: true, wantGet: true},
+		{name: "list only", allow: []string{tools.ListMCPToolsName}, wantList: true, wantGet: false},
+		{name: "get only", allow: []string{tools.GetMCPToolName}, wantList: false, wantGet: true},
+		{name: "legacy alias", allow: []string{tools.LoadMCPToolsName}, wantList: true, wantGet: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, coord, agent, _ := e2eMCPWiring(t)
+			mcpSetMainAllowlist(t, coord, tc.allow)
+			coord.syncMCPTools()
+
+			sec := mcpSectionOf(agent.ContextBuilder.BuildSystemPrompt())
+			if !strings.Contains(sec, "- **demo**") {
+				t.Fatalf("the configured server must stay in the section:\n%s", sec)
+			}
+			if got := strings.Contains(sec, "`list_mcp_tools`"); got != tc.wantList {
+				t.Errorf("section mentions list_mcp_tools = %v, want %v:\n%s", got, tc.wantList, sec)
+			}
+			if got := strings.Contains(sec, "`get_mcp_tool`"); got != tc.wantGet {
+				t.Errorf("section mentions get_mcp_tool = %v, want %v:\n%s", got, tc.wantGet, sec)
+			}
+		})
 	}
 }
 
@@ -388,7 +360,7 @@ func TestMCPListTool_RegistersNothing(t *testing.T) {
 		t.Fatalf("list_mcp_tools failed: %s", res.ForLLM)
 	}
 	// The page carries the NAMES (no schemas) and a pointer to get_mcp_tool.
-	for _, name := range mcpDemoNamespaced {
+	for _, name := range mcpDemoNamespaced() {
 		if !strings.Contains(res.ForLLM, name) {
 			t.Errorf("listing lacks %s:\n%s", name, res.ForLLM)
 		}
@@ -406,7 +378,7 @@ func TestMCPListTool_RegistersNothing(t *testing.T) {
 	if got := agent.Tools.Count(); got != baseBefore {
 		t.Errorf("base registry Count() = %d after a listing, want %d", got, baseBefore)
 	}
-	for _, name := range mcpDemoNamespaced {
+	for _, name := range mcpDemoNamespaced() {
 		if _, ok := layer.Get(name); ok {
 			t.Errorf("%s must not be registered by list_mcp_tools", name)
 		}

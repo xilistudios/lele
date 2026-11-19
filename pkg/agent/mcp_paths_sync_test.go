@@ -16,6 +16,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -123,7 +124,7 @@ func TestSyncMCPServers_AfterCloseInstallsNothing(t *testing.T) {
 	if got := tc.sessionTools(agent, "chat-a"); got != agent.Tools {
 		t.Error("a sync after closeMCPManagers must NOT build a session layer")
 	}
-	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames...) {
+	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames()...) {
 		if _, ok := agent.Tools.Get(name); ok {
 			t.Errorf("%s must NOT be registered by a sync after closeMCPManagers", name)
 		}
@@ -148,20 +149,35 @@ func TestSyncMCPServers_ReflectsMCPJSONToggle(t *testing.T) {
 
 	// The session view is where the discovery tools are offered (MCP tools are
 	// session-scoped: the agent-wide registry never carries them).
+	//
+	// Offering and absence are checked PER TOOL: a discovery surface that
+	// carries only one of the pair is still wrong, and a helper that answers
+	// "both or nothing" would accept it.
+	sessionOffers := func(name string) bool {
+		_, ok := tc.sessionTools(agent, "chat-a").Get(name)
+		return ok
+	}
 	sessionOffersDiscovery := func() bool {
-		view := tc.sessionTools(agent, "chat-a")
-		for _, name := range mcpDiscoveryToolNames {
-			if _, ok := view.Get(name); !ok {
+		for _, name := range mcpDiscoveryToolNames() {
+			if !sessionOffers(name) {
 				return false
 			}
 		}
 		return true
 	}
+	sessionOffersNoDiscovery := func() error {
+		for _, name := range mcpDiscoveryToolNames() {
+			if sessionOffers(name) {
+				return fmt.Errorf("%s is still offered by the session", name)
+			}
+		}
+		return nil
+	}
 
 	// Sync #1 — baseline: no mcp.json anywhere → empty surface.
 	al.SyncMCPServers()
-	if sessionOffersDiscovery() {
-		t.Fatal("discovery tools offered before any server exists")
+	if err := sessionOffersNoDiscovery(); err != nil {
+		t.Fatalf("discovery tools offered before any server exists: %v", err)
 	}
 	if sec := mcpSectionOf(agent.ContextBuilder.BuildSystemPrompt()); sec != "" {
 		t.Fatalf("baseline prompt already has an MCP section: %q", sec)
@@ -186,8 +202,8 @@ func TestSyncMCPServers_ReflectsMCPJSONToggle(t *testing.T) {
 	writeAgentMCPJSON(t, workspace,
 		`{"mcpServers": {"s": {"command": "true", "description": "Server s", "disabled": true}}}`)
 	al.SyncMCPServers()
-	if sessionOffersDiscovery() {
-		t.Error("the discovery tools must stop being offered after the server was disabled")
+	if err := sessionOffersNoDiscovery(); err != nil {
+		t.Errorf("the discovery tools must stop being offered after the server was disabled: %v", err)
 	}
 	if got := tc.sessionTools(agent, "chat-a"); got != agent.Tools {
 		t.Error("disabling the last server must drop the session layer")

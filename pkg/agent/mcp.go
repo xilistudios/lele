@@ -63,15 +63,31 @@ type mcpManagerEntry struct {
 }
 
 // mcpLayerFlags is the pair of discovery-tool permissions a session layer was
-// built with (see mcpDiscoveryAllowed). It is stored per agent so a config
-// reload that keeps only ONE of the two tools (a partial tightening) can be
-// detected and applied to the already cached layers — the layers are per
-// agent × session and survive the reload.
+// built with (see mcpDiscoveryAllowed). It is recorded per agent, together with
+// the generation it was published under (mcpLayerPerms), so a config reload
+// that keeps only ONE of the two tools (a partial tightening) reaches the
+// already cached layers — the layers are per agent × session and survive the
+// reload.
 type mcpLayerFlags struct {
 	// list is true when the layer registers list_mcp_tools.
 	list bool
 	// get is true when the layer registers get_mcp_tool.
 	get bool
+}
+
+// mcpLayerPerms is one agent's recorded discovery permissions plus the
+// GENERATION they were published under.
+//
+// The generation is what makes layer reuse safe: every layer is tagged with the
+// generation its build observed (sessionToolSet.getOrCreate), so a layer can
+// only be handed out while that generation is still the current one. Publishing
+// a new permission set bumps the generation, which invalidates every cached
+// layer of the agent at once — no window in which a layer built with a revoked
+// permission is still served (the flag map alone had exactly that window: it
+// was compared, not the layer).
+type mcpLayerPerms struct {
+	flags mcpLayerFlags
+	gen   uint64
 }
 
 // mcpManagerSet owns every per-agent MCP manager, keyed by agent ID (the
@@ -107,16 +123,16 @@ type mcpManagerSet struct {
 	// that manager, so it must not outlive it.
 	layers *sessionToolSet
 	// layerFlags records, per agent ID, the discovery-tool permissions (see
-	// mcpLayerFlags) the agent's session layers were built with. Guarded by mu.
+	// mcpLayerPerms) the agent's session layers were built with, and the
+	// generation they were published under. Guarded by mu.
 	//
-	// INVARIANT: layerFlags is the authority on what a cached layer offers.
-	// sessionTools compares the incoming flags with this record and, on a
-	// mismatch (or a first use), rewrites it and drops the agent's layers so
-	// they are rebuilt with the current permissions. Every path that retires an
-	// agent's layers (closeAndDrop, closeExcept, closeAll, dropSessionLayers,
-	// put-replace) also forgets its record, so a retired agent can never keep
-	// stale flags — and a later re-registration starts from "first use".
-	layerFlags map[string]mcpLayerFlags
+	// INVARIANT: layerFlags is the authority on what a cached layer offers,
+	// and a layer is only reused while its own build generation matches this
+	// record (see sessionTools). Every path that retires an agent's layers
+	// (closeAndDrop, closeExcept, closeAll, dropSessionLayers, put-replace)
+	// also forgets its record, so a retired agent can never keep stale flags —
+	// and a later re-registration starts from "first use".
+	layerFlags map[string]mcpLayerPerms
 }
 
 // newMCPManagerSet captures the process working directory at startup and the
@@ -129,7 +145,7 @@ func newMCPManagerSet() *mcpManagerSet {
 	}
 	return &mcpManagerSet{
 		entries:    make(map[string]mcpManagerEntry),
-		layerFlags: make(map[string]mcpLayerFlags),
+		layerFlags: make(map[string]mcpLayerPerms),
 		layers:     newSessionToolSet(),
 		cwd:        cwd,
 		newManager: func(paths mcp.Paths) mcpManager {
@@ -234,10 +250,10 @@ func (s *mcpManagerSet) dropSessionLayers(agentID string) {
 //
 // allowList/allowGet come from mcpDiscoveryAllowed and decide which of the two
 // tools the layer carries. Layers are cached per agent × session and outlive a
-// config reload, so the flags a layer was built with are recorded per agent
-// (see mcpManagerSet.layerFlags): when they differ from the incoming ones — a
-// partial tightening such as "list stays, get is removed" — the agent's layers
-// are dropped so the next build uses the current permissions.
+// config reload, so each layer is tagged with the permission GENERATION it was
+// built under (see observePermissions): a layer whose tag is no longer current
+// is rebuilt instead of reused, which is what applies a partial tightening such
+// as "list stays, get is removed" to an already cached layer.
 func (s *mcpManagerSet) sessionTools(agent *AgentInstance, sessionKey string, allowList, allowGet bool) *tools.ToolRegistry {
 	if agent == nil || agent.Tools == nil {
 		return nil
@@ -253,9 +269,9 @@ func (s *mcpManagerSet) sessionTools(agent *AgentInstance, sessionKey string, al
 	}
 
 	flags := mcpLayerFlags{list: allowList, get: allowGet}
-	s.reconcileLayerFlags(agent.ID, flags)
+	gen := s.observePermissions(agent.ID, flags)
 
-	registry := s.layers.getOrCreate(agent.ID, sessionKey, func() *tools.ToolRegistry {
+	registry := s.layers.getOrCreate(agent.ID, sessionKey, gen, func() *tools.ToolRegistry {
 		layer := tools.NewScopedRegistry(agent.Tools)
 		if allowList {
 			layer.Register(tools.NewListMCPToolsTool(entry.mgr))
@@ -266,47 +282,52 @@ func (s *mcpManagerSet) sessionTools(agent *AgentInstance, sessionKey string, al
 		return layer
 	})
 
-	// A reload that rewrote the flags while this layer was being built
-	// invalidates what getOrCreate just produced (it may carry a permission
-	// that was revoked in the meantime). Fail closed for this turn: the base
-	// registry offers no discovery tool at all, and the next turn rebuilds
-	// with the current flags.
-	if !s.layerFlagsMatch(agent.ID, flags) {
-		s.layers.dropAgent(agent.ID)
+	// The permissions may have been republished while this layer was being
+	// resolved (a concurrent reload), or the agent may have been retired. Fail
+	// closed for this turn: the base registry offers no discovery tool at all,
+	// and the next turn resolves the layer again — with the current generation,
+	// so a layer built under the stale one is rebuilt rather than reused.
+	if !s.permissionsCurrent(agent.ID, flags, gen) {
 		return agent.Tools
 	}
 	return registry
 }
 
-// reconcileLayerFlags records the discovery flags agentID's layers must be built
-// with and drops the cached layers when they changed (or on first use, when
-// nothing is recorded yet).
+// observePermissions records the discovery flags agentID's layers must be built
+// with and returns the generation they now carry. The generation changes only
+// when the flags do, which is what lets an unchanged permission set keep the
+// cached layers (and everything they loaded).
 //
-// Lock ordering: mu is taken to read and write the record and released BEFORE
-// sessionToolSet is touched, exactly like put/closeAndDrop/closeExcept, so mu
-// and sessionToolSet.mu are never held at the same time by one goroutine.
-func (s *mcpManagerSet) reconcileLayerFlags(agentID string, flags mcpLayerFlags) {
+// Last observation wins, deliberately: the caller re-verifies its snapshot
+// against the live config after the layer is resolved (see
+// toolCoordinatorImpl.sessionTools), so a resolver that read the config before a
+// tightening can never hand that tightening's permissions out — and the next
+// resolve publishes the current flags again.
+//
+// Lock ordering: mu is held only to read and write the record, exactly like
+// put/closeAndDrop/closeExcept, so mu and sessionToolSet.mu are never held at
+// the same time by one goroutine.
+func (s *mcpManagerSet) observePermissions(agentID string, flags mcpLayerFlags) uint64 {
 	s.mu.Lock()
-	stored, known := s.layerFlags[agentID]
-	stale := !known || stored != flags
-	s.layerFlags[agentID] = flags
-	s.mu.Unlock()
-
-	if stale {
-		// Outside mu: dropping layers is a pure bookkeeping loop, but keeping
-		// the two locks apart is what makes the ordering trivial to audit.
-		s.layers.dropAgent(agentID)
+	defer s.mu.Unlock()
+	record, known := s.layerFlags[agentID]
+	if known && record.flags == flags {
+		return record.gen
 	}
+	record = mcpLayerPerms{flags: flags, gen: record.gen + 1}
+	s.layerFlags[agentID] = record
+	return record.gen
 }
 
-// layerFlagsMatch reports whether flags is still the recorded permission set for
-// agentID. A missing record (the agent was retired concurrently) counts as "no
-// match": there is no layer worth keeping behind a retired manager.
-func (s *mcpManagerSet) layerFlagsMatch(agentID string, flags mcpLayerFlags) bool {
+// permissionsCurrent reports whether (flags, gen) is still the recorded
+// permission set of agentID. A missing record (the agent was retired
+// concurrently) counts as "not current": there is no layer worth keeping behind
+// a retired manager.
+func (s *mcpManagerSet) permissionsCurrent(agentID string, flags mcpLayerFlags, gen uint64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current, known := s.layerFlags[agentID]
-	return known && current == flags
+	return known && current.flags == flags && current.gen == gen
 }
 
 // closeExcept closes and drops every manager whose agent is not in
@@ -357,7 +378,7 @@ func (s *mcpManagerSet) closeAll() error {
 	s.stopped = true
 	entries := s.entries
 	s.entries = make(map[string]mcpManagerEntry)
-	s.layerFlags = make(map[string]mcpLayerFlags)
+	s.layerFlags = make(map[string]mcpLayerPerms)
 	s.mu.Unlock()
 
 	// Session layers hold tools bound to the managers being closed: drop them
@@ -462,6 +483,12 @@ func (tc *toolCoordinatorImpl) syncMCPServersForAgent(cfg *config.Config, agent 
 	}
 	paths := set.pathsFor(agent)
 
+	// Discovery permissions are resolved ONCE per pass: they gate the session
+	// layers below and the instructions of the "## MCP Servers" prompt section,
+	// which must never tell the model to call a tool the agent cannot use.
+	allowList, allowGet := mcpDiscoveryAllowed(agentConfigForID(cfg, agentID))
+	tc.setMCPDiscovery(agent, allowList, allowGet)
+
 	entry, hasMgr := set.get(agentID)
 	if hasMgr && entry.paths != paths {
 		// The workspace (or the global dir) moved: the manager watches stale
@@ -508,7 +535,6 @@ func (tc *toolCoordinatorImpl) syncMCPServersForAgent(cfg *config.Config, agent 
 	// configured even when both discovery tools were filtered out.
 	tc.setMCPServers(agent, servers)
 
-	allowList, allowGet := mcpDiscoveryAllowed(agentConfigForID(cfg, agentID))
 	if !allowList && !allowGet {
 		// The allowlist keeps neither discovery tool: the session layers go
 		// (they hold the discovery tools and the mcp_* tools already loaded
@@ -565,7 +591,19 @@ func (tc *toolCoordinatorImpl) sessionTools(agent *AgentInstance, sessionKey str
 	if !allowList && !allowGet {
 		return agent.Tools
 	}
-	return tc.mcpManagers.sessionTools(agent, sessionKey, allowList, allowGet)
+	registry := tc.mcpManagers.sessionTools(agent, sessionKey, allowList, allowGet)
+	// Re-read the permissions from the LIVE config after the layer was
+	// resolved. The flags above come from a snapshot taken before a possibly
+	// slow resolve, and a reload that tightened the allowlist in between would
+	// otherwise hand this turn a tool the config revoked (and record a stale
+	// permission set for later turns). Failing closed is cheap — no discovery
+	// tool at all for one turn — and the next turn resolves the current set.
+	if tc.al != nil {
+		if listNow, getNow := mcpDiscoveryAllowed(agentConfigForID(tc.al.cfg(), agent.ID)); listNow != allowList || getNow != allowGet {
+			return agent.Tools
+		}
+	}
+	return registry
 }
 
 // dropSessionTools forgets the scoped tool layers of one session: its loaded
@@ -585,6 +623,17 @@ func (tc *toolCoordinatorImpl) setMCPServers(agent *AgentInstance, servers []too
 		return
 	}
 	agent.ContextBuilder.SetMCPServers(servers)
+}
+
+// setMCPDiscovery forwards the allowed discovery tools to the agent's prompt
+// builder so the "## MCP Servers" section documents only callable tools. Like
+// setMCPServers it is a no-op when nothing changed, so the cached prompt is not
+// rebuilt on every sync pass.
+func (tc *toolCoordinatorImpl) setMCPDiscovery(agent *AgentInstance, list, get bool) {
+	if agent.ContextBuilder == nil {
+		return
+	}
+	agent.ContextBuilder.SetMCPDiscovery(list, get)
 }
 
 // closeMCPManagers closes every live per-agent MCP manager exactly once

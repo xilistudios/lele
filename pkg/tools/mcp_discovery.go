@@ -213,7 +213,9 @@ func (t *GetMCPToolTool) Parameters() map[string]interface{} {
 // skipped per tool when the name is already registered (a built-in, a parent
 // layer's tool or an earlier load): the existing instance always wins, so
 // repeated calls are safe and a base-registry tool can never be shadowed by a
-// remote one.
+// remote one. When a tool is skipped, the result renders the RETAINED entry's
+// description and schema — the model must see what will actually run (see
+// renderRetainedTool).
 //
 // Names may come from "tool" (one) and/or "tools" (several); the union is
 // deduplicated twice — first on the requested string, then on the resolved
@@ -271,11 +273,15 @@ func (t *GetMCPToolTool) Execute(ctx context.Context, args map[string]interface{
 
 	blocks := make([]string, 0, len(found))
 	for _, spec := range found {
-		_, exists := t.registry.Get(spec.Name)
-		if !exists {
-			t.registry.Register(t.factory(spec))
+		// A name that is already taken is never overwritten (skip-if-present),
+		// so the description and schema this call reports must come from the
+		// entry that will actually run — see renderRetainedTool.
+		if existing, exists := t.registry.Get(spec.Name); exists {
+			blocks = append(blocks, renderRetainedTool(server, spec, existing))
+			continue
 		}
-		blocks = append(blocks, renderToolSpec(server, spec, exists))
+		t.registry.Register(t.factory(spec))
+		blocks = append(blocks, renderToolSpec(server, spec))
 	}
 	return NewToolResult(renderToolSpecs(server, blocks, missing))
 }
@@ -334,9 +340,20 @@ func quoteNames(names []string) string {
 // original remote name ("read"). Matching is exact and case-sensitive: MCP
 // tool names are, and a fuzzy match would register a tool the model did not
 // ask for.
+//
+// Registry names win over remote names, and the two are searched in SEPARATE
+// passes. A server may legitimately expose a tool called "mcp_fs_read" next to
+// "read": comparing both fields in one pass would resolve the listed name
+// "mcp_fs_read" through spec.RemoteName of the OTHER tool, and asking for both
+// listed names would collapse them into a single tool.
 func findToolSpec(specs []LoadedMCPTool, name string) (LoadedMCPTool, bool) {
 	for _, spec := range specs {
-		if spec.Name == name || spec.RemoteName == name {
+		if spec.Name == name {
+			return spec, true
+		}
+	}
+	for _, spec := range specs {
+		if spec.RemoteName == name {
 			return spec, true
 		}
 	}
@@ -377,20 +394,68 @@ func renderToolList(server string, window []LoadedMCPTool, counts map[string]uin
 	return b.String()
 }
 
-// renderToolSpec builds the result of a single-tool load: whether the tool was
-// newly registered or was already callable, its full description and its
-// pretty-printed input schema.
-func renderToolSpec(server string, spec LoadedMCPTool, alreadyRegistered bool) string {
-	var b strings.Builder
-	if alreadyRegistered {
-		fmt.Fprintf(&b, "Tool %s from MCP server %q is already registered and callable.\n", spec.Name, server)
-	} else {
-		fmt.Fprintf(&b, "Tool %s from MCP server %q is now callable.\n", spec.Name, server)
+// renderToolSpec builds the result of a freshly registered tool: it is now
+// callable, and here is its full description and pretty-printed input schema.
+func renderToolSpec(server string, spec LoadedMCPTool) string {
+	return fmt.Sprintf("Tool %s from MCP server %q is now callable.\n", spec.Name, server) +
+		renderSpecBody(spec.Description, spec.InputSchema)
+}
+
+// renderRetainedTool builds the result of a name that was ALREADY registered
+// and therefore not overwritten (skip-if-present — the base registry is never
+// shadowed).
+//
+// The rendered description and schema always come from the retained entry, not
+// from the remote spec: the remote spec describes a tool the registry does not
+// run, so advertising it would make the model call the retained tool with the
+// wrong arguments (a built-in that happens to share the name has its own
+// description and its own schema). The entry is only attributed to the
+// requested server when it IS that server's tool — which is exactly the
+// repeated-load case, where description and schema match the remote spec.
+func renderRetainedTool(server string, spec LoadedMCPTool, existing Tool) string {
+	if sameRemoteTool(spec, existing) {
+		return fmt.Sprintf("Tool %s from MCP server %q is already registered and callable.\n", spec.Name, server) +
+			renderSpecBody(spec.Description, spec.InputSchema)
 	}
-	if desc := strings.TrimSpace(spec.Description); desc != "" {
+	return fmt.Sprintf("Tool %s is already registered and callable; the existing registration wins over MCP server %q.\n",
+		spec.Name, server) +
+		renderSpecBody(existing.Description(), existing.Parameters())
+}
+
+// sameRemoteTool reports whether the retained registry entry is the tool the
+// remote spec describes, i.e. the name belongs to this server's tool and the
+// call is a repeated (idempotent) load. Description and input schema are
+// compared because they are what the model reads: a name match alone says
+// nothing about which tool runs.
+func sameRemoteTool(spec LoadedMCPTool, existing Tool) bool {
+	if existing == nil {
+		return false
+	}
+	if strings.TrimSpace(existing.Description()) != strings.TrimSpace(spec.Description) {
+		return false
+	}
+	return schemasEqual(existing.Parameters(), spec.InputSchema)
+}
+
+// schemasEqual compares two input schemas by their rendered JSON. Absent and
+// empty schemas are equal (pkg/mcp substitutes a default schema for both, and
+// prettySchema renders either as "{}"), and json.Marshal sorts map keys, so the
+// comparison is stable.
+func schemasEqual(a, b map[string]interface{}) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	return prettySchema(a) == prettySchema(b)
+}
+
+// renderSpecBody renders the description (when there is one) plus the
+// pretty-printed input schema, in the shape every load result uses.
+func renderSpecBody(description string, schema map[string]interface{}) string {
+	var b strings.Builder
+	if desc := strings.TrimSpace(description); desc != "" {
 		fmt.Fprintf(&b, "\n%s\n", desc)
 	}
-	fmt.Fprintf(&b, "\ninputSchema:\n```json\n%s\n```\n", prettySchema(spec.InputSchema))
+	fmt.Fprintf(&b, "\ninputSchema:\n```json\n%s\n```\n", prettySchema(schema))
 	return b.String()
 }
 

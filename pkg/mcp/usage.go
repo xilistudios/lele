@@ -35,10 +35,22 @@ import (
 // tool call, so every disk error is logged as a warning and swallowed. A
 // store built with an empty path (or a nil *usageStore) keeps its counters in
 // memory only.
+//
+// Several managers may share one LeleDir (an agent's manager plus a probe or a
+// second process): each keeps its own snapshot in memory, so a save may never
+// write that snapshot verbatim — it would drop the increments another manager
+// recorded since this one last wrote. Writes therefore apply the pending
+// DELTAS on top of the file's current content (read/merge/replace, see
+// saveLocked), which keeps every manager's increments.
 type usageStore struct {
 	mu     sync.Mutex
 	path   string
 	counts map[string]map[string]uint64
+	// pending holds, per server and remote tool, the increments recorded since
+	// the last successful write. Save applies exactly these on top of the file
+	// on disk, so a shared file never loses another manager's counts and a
+	// failed write is simply retried by the next one. Cleared on success only.
+	pending map[string]map[string]uint64
 }
 
 // usageFileIndent is the indentation of the counter file. The file is a
@@ -95,7 +107,7 @@ func warnUsage(message, path string, err error) {
 }
 
 // inc records one call of the remote tool remote on server and, when the store
-// is file-backed, writes the whole counter file back synchronously.
+// is file-backed, merges it into the counter file synchronously.
 //
 // The write happens under mu on purpose: the file is a few hundred bytes and
 // remote calls are infrequent, so serialising here is cheaper than the
@@ -121,6 +133,7 @@ func (s *usageStore) inc(server, remote string) {
 		s.counts[server] = tools
 	}
 	tools[remote]++
+	s.addPendingLocked(server, remote)
 
 	if s.path == "" {
 		return
@@ -130,18 +143,54 @@ func (s *usageStore) inc(server, remote string) {
 	}
 }
 
-// saveLocked writes the whole counter map to s.path atomically: the JSON goes
-// to a temp file in the SAME directory (so the rename cannot cross a
-// filesystem), is chmodded 0600 (the file stays user-private like mcp_auth),
-// closed and then renamed over the target. A reader therefore always sees
-// either the previous complete file or the new complete file, never a partial
-// one. The caller must hold s.mu.
+// addPendingLocked queues one increment for the next write. The pending map
+// holds deltas, never totals: that is what makes a merge into a file another
+// manager also writes idempotent. The caller must hold s.mu.
+func (s *usageStore) addPendingLocked(server, remote string) {
+	if s.pending == nil {
+		s.pending = make(map[string]map[string]uint64)
+	}
+	tools := s.pending[server]
+	if tools == nil {
+		tools = make(map[string]uint64)
+		s.pending[server] = tools
+	}
+	tools[remote]++
+}
+
+// saveLocked writes the counter file atomically: it reads the file's current
+// content, applies this store's pending increments on top of it, and replaces
+// the file (temp file in the SAME directory — so the rename cannot cross a
+// filesystem — chmodded 0600, closed, then renamed). A reader therefore always
+// sees either the previous complete file or the new complete file, never a
+// partial one, and a second manager writing the same file keeps both sets of
+// counts. The caller must hold s.mu.
 //
-// No fsync is issued: a lost increment after a hard crash is harmless (the
-// counts only rank tools), and calling sync on every remote tool call would be
-// a real cost. Temp files are removed on every failure path.
+// Reading first is what makes the shared file safe: writing this store's own
+// snapshot verbatim would drop whatever another manager recorded in between.
+// The read/merge/replace window is not a distributed lock — two managers
+// writing at the exact same moment can still lose one increment — but it turns
+// silent, permanent loss into a rare race on a counter that only ranks tools.
+//
+// On success the merged map becomes this store's snapshot and pending is
+// cleared; on failure both are left alone, so the next inc retries the same
+// deltas. No fsync is issued: a lost increment after a hard crash is harmless
+// (the counts only rank tools), and calling sync on every remote tool call
+// would be a real cost. Temp files are removed on every failure path.
 func (s *usageStore) saveLocked() error {
-	data, err := json.MarshalIndent(s.counts, "", usageFileIndent)
+	merged := s.readSnapshotLocked()
+	for server, tools := range s.pending {
+		counts := merged[server]
+		if counts == nil {
+			counts = make(map[string]uint64)
+			merged[server] = counts
+		}
+		for remote, delta := range tools {
+			counts[remote] += delta
+		}
+	}
+
+	data, err := json.MarshalIndent(merged, "", usageFileIndent)
 	if err != nil {
 		return fmt.Errorf("marshal usage: %w", err)
 	}
@@ -178,7 +227,37 @@ func (s *usageStore) saveLocked() error {
 		return fmt.Errorf("replace %s: %w", s.path, err)
 	}
 	committed = true
+
+	// The file now holds exactly merged: admit it as this store's snapshot and
+	// forget the deltas that were just applied (a delta applied twice would
+	// double-count).
+	s.counts = merged
+	s.pending = nil
 	return nil
+}
+
+// readSnapshotLocked returns the counter map currently on disk, sanitized the
+// way loadUsageStore does it (empty server entries dropped so callers never
+// see a nil map). A missing, unreadable or corrupt file yields an empty map:
+// the same leniency loadUsageStore applies, so a damaged file can never block
+// a save. The caller must hold s.mu.
+func (s *usageStore) readSnapshotLocked() map[string]map[string]uint64 {
+	merged := make(map[string]map[string]uint64)
+	data, err := os.ReadFile(s.path)
+	if err != nil {
+		return merged
+	}
+	var loaded map[string]map[string]uint64
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		return merged
+	}
+	for server, tools := range loaded {
+		if len(tools) == 0 {
+			continue
+		}
+		merged[server] = tools
+	}
+	return merged
 }
 
 // countsFor returns a COPY of one server's call counts, keyed by remote tool

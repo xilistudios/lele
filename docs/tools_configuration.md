@@ -271,7 +271,9 @@ name `load_mcp_tools` is kept as an **alias that enables both**, so a config
 written for the old bulk loader keeps working — no tool registers under that
 name any more. With neither tool allowed the session layers are dropped while
 the `## MCP Servers` prompt section keeps listing the servers (configuration is
-not a tool). Subagents receive neither tool.
+not a tool), and the section's instructions only ever name the tools the
+allowlist keeps — an agent allowed only `list_mcp_tools` is never told to call
+`get_mcp_tool`. Subagents receive neither tool.
 
 ### Example
 

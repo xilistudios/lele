@@ -283,6 +283,36 @@ func TestUsageStoreConcurrentInc(t *testing.T) {
 	}
 }
 
+// TestUsageStoreRetriesFailedWrites pins the delta bookkeeping: a write that
+// fails must keep its increments pending so the next call applies them, instead
+// of silently dropping them (or, worse, re-applying them twice).
+func TestUsageStoreRetriesFailedWrites(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp_usage.json")
+	store := loadUsageStore(path)
+
+	store.inc("srv", "echo") // creates the file with echo=1
+
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod dir read-only: %v", err)
+	}
+	store.inc("srv", "echo") // the write fails; the increment stays in memory
+	if got := store.countsFor("srv")["echo"]; got != 2 {
+		t.Errorf("in-memory echo = %d after a failed write, want 2", got)
+	}
+
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("restore dir permissions: %v", err)
+	}
+	store.inc("srv", "echo") // retried: applies BOTH pending increments
+	if got := loadUsageStore(path).countsFor("srv")["echo"]; got != 3 {
+		t.Errorf("persisted echo = %d, want 3 (the failed increment must be retried exactly once)", got)
+	}
+}
+
 // TestUsageStoreNilReceiver: a Manager built without a store still works.
 func TestUsageStoreNilReceiver(t *testing.T) {
 	var store *usageStore
@@ -316,24 +346,27 @@ func TestUsageStoreFileMode(t *testing.T) {
 	}
 }
 
-// TestUsageFilePath pins the on-disk convention: the counters live next to
-// mcp.json inside the lele directory, and an unknown directory means
-// memory-only.
-func TestUsageFilePath(t *testing.T) {
-	cases := []struct {
-		name    string
-		leleDir string
-		want    string
-	}{
-		{name: "unknown dir is memory only", leleDir: "", want: ""},
-		{name: "lele dir holds the counter file", leleDir: "/home/u/.lele", want: "/home/u/.lele/mcp_usage.json"},
+// TestToolUsageFileLocation pins the on-disk convention through the Manager:
+// the counters live next to mcp.json inside the lele directory, exactly where a
+// restarted process looks for them. (The empty-LeleDir case — memory-only
+// counting, no file at all — is covered end to end by
+// TestToolUsageMemoryOnlyWithoutLeleDir.)
+func TestToolUsageFileLocation(t *testing.T) {
+	paths := basicFixture(t)
+	d := &fakeDialer{setup: func(n int, conn *fakeConn) { conn.callResult = okResult("ok") }}
+	mgr := NewManager(paths, d)
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	if _, err := mgr.CallRemote(context.Background(), "srv", "echo", nil); err != nil {
+		t.Fatalf("CallRemote: %v", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := usageFilePath(tc.leleDir); got != tc.want {
-				t.Errorf("usageFilePath(%q) = %q, want %q", tc.leleDir, got, tc.want)
-			}
-		})
+
+	want := filepath.Join(paths.LeleDir, "mcp_usage.json")
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("the usage file must be created by a Manager call at %s: %v", want, err)
+	}
+	if got := readUsageFile(t, want); !strings.Contains(got, `"srv"`) || !strings.Contains(got, `"echo": 1`) {
+		t.Errorf("usage file %s = %s, want srv.echo counted once", want, got)
 	}
 }
 
@@ -508,6 +541,42 @@ func TestToolUsagePersistsToLeleDir(t *testing.T) {
 	t.Cleanup(func() { _ = restarted.Close() })
 	if got := restarted.ToolUsage("srv")["echo"]; got != 2 {
 		t.Errorf("ToolUsage after restart = %d, want 2", got)
+	}
+}
+
+// TestToolUsageSharedLeleDirKeepsEveryManagerIncrements is THE shared-file
+// test: two managers over the same lele directory (an agent's manager plus a
+// probe, or a second process) both start with an empty snapshot, so writing a
+// per-manager snapshot verbatim would make the second call overwrite the
+// first one's counts. The merged write must keep both.
+func TestToolUsageSharedLeleDirKeepsEveryManagerIncrements(t *testing.T) {
+	paths := basicFixture(t)
+	callOK := func(n int, conn *fakeConn) { conn.callResult = okResult("ok") }
+
+	// Both managers open the directory BEFORE either records usage: neither
+	// has the other's counts in memory.
+	first := NewManager(paths, &fakeDialer{setup: callOK})
+	second := NewManager(paths, &fakeDialer{setup: callOK})
+	t.Cleanup(func() { _ = first.Close(); _ = second.Close() })
+
+	ctx := context.Background()
+	if _, err := first.CallRemote(ctx, "srv", "echo", nil); err != nil {
+		t.Fatalf("first CallRemote: %v", err)
+	}
+	if _, err := second.CallRemote(ctx, "srv", "summary", nil); err != nil {
+		t.Fatalf("second CallRemote: %v", err)
+	}
+
+	want := map[string]uint64{"echo": 1, "summary": 1}
+	// The writing manager adopts the merged file, so its own view keeps both.
+	if got := second.ToolUsage("srv"); !reflect.DeepEqual(got, want) {
+		t.Errorf("ToolUsage(srv) after the merge = %v, want %v", got, want)
+	}
+	// And the merge is what survived on disk (the restart view).
+	restarted := NewManager(paths, &fakeDialer{})
+	t.Cleanup(func() { _ = restarted.Close() })
+	if got := restarted.ToolUsage("srv"); !reflect.DeepEqual(got, want) {
+		t.Errorf("persisted ToolUsage(srv) = %v, want %v (the first manager's count was lost)", got, want)
 	}
 }
 

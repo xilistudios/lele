@@ -28,10 +28,15 @@ type sessionToolKey struct {
 }
 
 // sessionToolLayer is one session's scoped tool registry plus the clock stamp
-// used for LRU retirement.
+// used for LRU retirement and the build generation it was created under.
 type sessionToolLayer struct {
 	registry *tools.ToolRegistry
 	used     uint64
+	// gen is the caller's configuration generation at build time (see
+	// mcpManagerSet.observePermissions). A layer is only reused while it is
+	// still the current generation, so a permission change can never be served
+	// a layer that was built with the permissions it revoked.
+	gen uint64
 }
 
 // sessionToolSet owns the session-scoped tool layers of every agent.
@@ -64,22 +69,33 @@ func newSessionToolSet() *sessionToolSet {
 // same layer or the second one would not see what the first loaded. build only
 // allocates a registry and a closure, so holding the lock across it is cheap
 // and cannot re-enter the set.
-func (s *sessionToolSet) getOrCreate(agentID, sessionKey string, build func() *tools.ToolRegistry) *tools.ToolRegistry {
+//
+// gen is the caller's configuration generation (see
+// mcpManagerSet.observePermissions). A cached layer is reused only while its
+// own gen matches: when the caller's permissions changed, the layer it would
+// have received was built with permissions that no longer apply — a revoked
+// discovery tool would still be callable — so the layer is rebuilt instead.
+// Reuse (and therefore everything the layer had loaded) is untouched while the
+// generation is stable.
+func (s *sessionToolSet) getOrCreate(agentID, sessionKey string, gen uint64, build func() *tools.ToolRegistry) *tools.ToolRegistry {
 	key := sessionToolKey{agentID: agentID, sessionKey: sessionKey}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if layer, ok := s.entries[key]; ok {
-		s.clock++
-		layer.used = s.clock
-		return layer.registry
+		if layer.gen == gen {
+			s.clock++
+			layer.used = s.clock
+			return layer.registry
+		}
+		delete(s.entries, key)
 	}
 	registry := build()
 	if registry == nil {
 		return nil
 	}
 	s.clock++
-	s.entries[key] = &sessionToolLayer{registry: registry, used: s.clock}
+	s.entries[key] = &sessionToolLayer{registry: registry, used: s.clock, gen: gen}
 	s.pruneLocked()
 	return registry
 }

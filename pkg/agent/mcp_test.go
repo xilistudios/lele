@@ -204,10 +204,10 @@ func mcpLoadTools(t *testing.T, tc *toolCoordinatorImpl, agent *AgentInstance, s
 
 // mcpCallableCounts counts the per-tool outcome markers of a get_mcp_tool
 // result: how many tools it reported as newly callable and how many were
-// already registered (idempotency).
+// already registered (idempotency, or a name collision the remote tool lost).
 func mcpCallableCounts(res *tools.ToolResult) (newly, already int) {
-	return strings.Count(res.ForLLM, "is now callable."),
-		strings.Count(res.ForLLM, "is already registered and callable.")
+	return strings.Count(res.ForLLM, "is now callable"),
+		strings.Count(res.ForLLM, "is already registered and callable")
 }
 
 // mcpSessionOffers reports whether a session is offered the named tool.
@@ -216,9 +216,10 @@ func mcpSessionOffers(tc *toolCoordinatorImpl, agent *AgentInstance, sessionKey,
 	return ok
 }
 
-// mcpDiscoveryToolNames is the pair of lazy discovery tools every MCP-enabled
-// session layer must carry.
-var mcpDiscoveryToolNames = []string{tools.ListMCPToolsName, tools.GetMCPToolName}
+// mcpDiscoveryToolNames returns the pair of lazy discovery tools every
+// MCP-enabled session layer must carry. A fresh slice per call: the fixture is
+// read (and sometimes appended to) by many tests, so it must not be shared.
+func mcpDiscoveryToolNames() []string { return []string{tools.ListMCPToolsName, tools.GetMCPToolName} }
 
 // mcpSectionOf extracts the "## MCP Servers" section of a prompt (up to the
 // next "---" separator). Returns "" when the section is absent. The heading
@@ -264,7 +265,7 @@ func TestMCPSync_RegistersDiscoveryToolsWhenServersConfigured(t *testing.T) {
 	// The base registry is shared by every chat of the agent: the discovery
 	// tools must NOT be there (that is what leaked MCP tools into other
 	// sessions) and neither must the retired bulk loader.
-	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames...) {
+	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames()...) {
 		if _, ok := agent.Tools.Get(name); ok {
 			t.Errorf("%s must not be registered in the agent-wide registry, have %v", name, agent.Tools.List())
 		}
@@ -274,7 +275,7 @@ func TestMCPSync_RegistersDiscoveryToolsWhenServersConfigured(t *testing.T) {
 	if !layer.IsScoped() {
 		t.Fatal("the session view must be a scoped layer while MCP servers are configured")
 	}
-	for _, name := range mcpDiscoveryToolNames {
+	for _, name := range mcpDiscoveryToolNames() {
 		if _, ok := layer.Get(name); !ok {
 			t.Errorf("%s not offered to the session, have %v", name, layer.List())
 		}
@@ -282,7 +283,7 @@ func TestMCPSync_RegistersDiscoveryToolsWhenServersConfigured(t *testing.T) {
 	if _, ok := layer.Get(tools.LoadMCPToolsName); ok {
 		t.Errorf("the bulk loader must not be registered anywhere (layer: %v)", layer.List())
 	}
-	if want := baseCount + len(mcpDiscoveryToolNames); layer.Count() != want {
+	if want := baseCount + len(mcpDiscoveryToolNames()); layer.Count() != want {
 		t.Errorf("session layer Count() = %d, want %d (base + the discovery pair)", layer.Count(), want)
 	}
 	// Built-in tools stay reachable through the layer.
@@ -328,7 +329,7 @@ func TestMCPSync_NoServersLeavesDiscoveryToolsUnregistered(t *testing.T) {
 	tc.syncMCPTools()
 
 	agent := mcpTestAgent(t, al)
-	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames...) {
+	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames()...) {
 		if _, ok := agent.Tools.Get(name); ok {
 			t.Errorf("%s must not be registered, have %v", name, agent.Tools.List())
 		}
@@ -369,7 +370,7 @@ func TestMCPSync_RemovingServersClosesManagerAndUnregistersDiscoveryTools(t *tes
 
 	agent := mcpTestAgent(t, al)
 	layer := tc.sessionTools(agent, "chat-a")
-	for _, name := range mcpDiscoveryToolNames {
+	for _, name := range mcpDiscoveryToolNames() {
 		if _, ok := layer.Get(name); !ok {
 			t.Fatalf("%s not offered after first sync, have %v", name, layer.List())
 		}
@@ -391,7 +392,7 @@ func TestMCPSync_RemovingServersClosesManagerAndUnregistersDiscoveryTools(t *tes
 	if got := tc.sessionTools(agent, "chat-a"); got != agent.Tools {
 		t.Error("the session layer must be dropped when its manager is retired")
 	}
-	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames...) {
+	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames()...) {
 		if _, ok := agent.Tools.Get(name); ok {
 			t.Errorf("%s must not be registered in the base registry, have %v", name, agent.Tools.List())
 		}
@@ -429,6 +430,7 @@ func TestMCPServersSection(t *testing.T) {
 	})
 
 	t.Run("non-empty list renders one line per server", func(t *testing.T) {
+		cb.SetMCPDiscovery(true, true)
 		cb.SetMCPServers([]tools.MCPServerInfo{
 			{Name: "git", Description: "Git tools", Layer: "agent"},
 			{Name: "db", Description: "Database access", Layer: "global"},
@@ -464,6 +466,69 @@ func TestMCPServersSection(t *testing.T) {
 			t.Error("section leaked schema text")
 		}
 	})
+}
+
+// TestMCPServersSection_DiscoveryHintsMatchPermissions pins that the section
+// documents ONLY the discovery tools the agent can call: an agent whose
+// allowlist keeps list_mcp_tools alone must not be told to call get_mcp_tool
+// (and vice versa) — it would go looking for a tool that does not exist for it.
+// The server names and descriptions stay in every case: they are configuration,
+// not tools.
+func TestMCPServersSection_DiscoveryHintsMatchPermissions(t *testing.T) {
+	servers := []tools.MCPServerInfo{{Name: "git", Description: "Git tools", Layer: "agent"}}
+
+	cases := []struct {
+		name string
+		list bool
+		get  bool
+	}{
+		{name: "both allowed", list: true, get: true},
+		{name: "list only", list: true, get: false},
+		{name: "get only", list: false, get: true},
+		{name: "neither allowed", list: false, get: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cb := NewContextBuilder(t.TempDir())
+			cb.SetMCPDiscovery(tc.list, tc.get)
+			cb.SetMCPServers(servers)
+
+			sec := mcpSectionOf(cb.BuildSystemPrompt())
+			if !strings.Contains(sec, "- **git** — Git tools") {
+				t.Fatalf("the server list must stay in every case:\n%s", sec)
+			}
+			if got := strings.Contains(sec, "`list_mcp_tools`"); got != tc.list {
+				t.Errorf("section mentions list_mcp_tools = %v, want %v:\n%s", got, tc.list, sec)
+			}
+			if got := strings.Contains(sec, "`get_mcp_tool`"); got != tc.get {
+				t.Errorf("section mentions get_mcp_tool = %v, want %v:\n%s", got, tc.get, sec)
+			}
+		})
+	}
+}
+
+// TestPromptCacheInvalidation_MCPDiscovery pins the invalidation rule of
+// SetMCPDiscovery: the cached prompt is dropped when the permission pair
+// changes and kept when a sync repeats the same pair (reloads are frequent).
+func TestPromptCacheInvalidation_MCPDiscovery(t *testing.T) {
+	cb := NewContextBuilder(t.TempDir())
+	cb.SetMCPServers([]tools.MCPServerInfo{{Name: "git", Description: "Git tools"}})
+	cb.SetMCPDiscovery(true, true)
+
+	both := cb.BuildSystemPrompt()
+	cb.SetMCPDiscovery(true, true)
+	if again := cb.BuildSystemPrompt(); again != both {
+		t.Error("repeating the same permissions must not change the prompt")
+	}
+
+	cb.SetMCPDiscovery(true, false)
+	tightened := cb.BuildSystemPrompt()
+	if strings.Contains(tightened, "`get_mcp_tool`") {
+		t.Error("the cached prompt was not rebuilt after the tightening")
+	}
+	if !strings.Contains(tightened, "`list_mcp_tools`") {
+		t.Error("list_mcp_tools must still be documented")
+	}
 }
 
 // TestPromptCacheInvalidation_MCPServers pins decision (b) from the plan: a
@@ -610,7 +675,7 @@ func TestMCPSync_SyncAfterCloseMCPManagersInstallsNothing(t *testing.T) {
 	if got := tc.sessionTools(agent, "chat-a"); got != agent.Tools {
 		t.Error("a late sync must not build a session layer after teardown")
 	}
-	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames...) {
+	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames()...) {
 		if _, ok := agent.Tools.Get(name); ok {
 			t.Errorf("%s must not be (re)registered after teardown", name)
 		}

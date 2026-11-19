@@ -579,6 +579,118 @@ func TestGetMCPToolBaseRegistryWins(t *testing.T) {
 	}
 }
 
+// TestGetMCPToolRetainedEntrySpec is the collision half of the load contract: a
+// name already owned by ANOTHER tool (a built-in, or a foreign tool under an
+// mcp_ name) keeps its registration, so the load result must advertise THAT
+// entry's description and schema — not the remote tool's, which the registry
+// will never run — and must not attribute it to the requested server.
+func TestGetMCPToolRetainedEntrySpec(t *testing.T) {
+	tool, reg, rec := newGetTool(usageLoader(nil))
+	retained := &fakeTool{
+		name: "mcp_fs_read",
+		desc: "built-in reader",
+		schema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"handle": map[string]interface{}{"type": "integer"},
+			},
+		},
+	}
+	reg.Register(retained)
+
+	out := tool.Execute(context.Background(), map[string]any{"server": "fs", "tool": "mcp_fs_read"})
+	if out.IsError {
+		t.Fatalf("unexpected error: %s", out.ForLLM)
+	}
+	if len(rec.built) != 0 {
+		t.Errorf("factory builds = %v, want none (the retained tool wins)", rec.built)
+	}
+	if !strings.Contains(out.ForLLM, "built-in reader") {
+		t.Errorf("the retained description must be rendered:\n%s", out.ForLLM)
+	}
+	if !strings.Contains(out.ForLLM, `"handle"`) {
+		t.Errorf("the retained schema must be rendered:\n%s", out.ForLLM)
+	}
+	if strings.Contains(out.ForLLM, `"path"`) {
+		t.Errorf("the remote schema describes a tool that will not run:\n%s", out.ForLLM)
+	}
+	if strings.Contains(out.ForLLM, `from MCP server "fs"`) {
+		t.Errorf("the retained entry must not be attributed to the requested server:\n%s", out.ForLLM)
+	}
+	if got, _ := reg.Get("mcp_fs_read"); got != Tool(retained) {
+		t.Error("the retained tool was replaced")
+	}
+}
+
+// TestGetMCPToolRegistryNameWinsOverRemoteName pins name resolution when the
+// two naming forms overlap: a server exposing remote "mcp_fs_read" (registry
+// name mcp_fs_mcp_fs_read) next to remote "read" (registry name mcp_fs_read).
+// The LISTED registry name must resolve to its own spec, never through the
+// other tool's RemoteName, and asking for both listed names must load both.
+func TestGetMCPToolRegistryNameWinsOverRemoteName(t *testing.T) {
+	// The lookalike comes FIRST on purpose: that is the order in which a
+	// single-pass Name-or-RemoteName comparison picks the wrong tool.
+	specs := []LoadedMCPTool{
+		{Name: "mcp_fs_mcp_fs_read", Server: "fs", RemoteName: "mcp_fs_read", Description: "Nested lookalike"},
+		{Name: "mcp_fs_read", Server: "fs", RemoteName: "read", Description: "Read a file"},
+		{Name: "mcp_fs_write", Server: "fs", RemoteName: "write", Description: "Write a file"},
+	}
+	loader := &fakeLoader{
+		servers: []MCPServerInfo{{Name: "fs"}},
+		specs:   map[string][]LoadedMCPTool{"fs": specs},
+	}
+
+	cases := []struct {
+		name    string
+		request []string
+		want    []string
+	}{
+		{name: "listed name resolves to its own spec", request: []string{"mcp_fs_read"}, want: []string{"mcp_fs_read"}},
+		{
+			name:    "both listed names load both tools",
+			request: []string{"mcp_fs_read", "mcp_fs_mcp_fs_read"},
+			want:    []string{"mcp_fs_read", "mcp_fs_mcp_fs_read"},
+		},
+		{name: "ordinary remote name", request: []string{"read"}, want: []string{"mcp_fs_read"}},
+		{name: "remote-only name still resolves", request: []string{"write"}, want: []string{"mcp_fs_write"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tool, _, rec := newGetTool(loader)
+			out := tool.Execute(context.Background(), map[string]any{"server": "fs", "tools": tc.request})
+			if out.IsError {
+				t.Fatalf("unexpected error: %s", out.ForLLM)
+			}
+			if len(rec.built) != len(tc.want) {
+				t.Fatalf("factory built %v, want %v", rec.built, tc.want)
+			}
+			for i, name := range tc.want {
+				if rec.built[i] != name {
+					t.Errorf("factory built %v, want %v", rec.built, tc.want)
+					break
+				}
+			}
+			// A single-tool request must render ITS tool's description: with a
+			// single Name-or-RemoteName pass, "mcp_fs_read" would resolve to the
+			// lookalike that comes first.
+			if len(tc.request) == 1 {
+				desc := map[string]string{
+					"mcp_fs_read":  "Read a file",
+					"read":         "Read a file",
+					"write":        "Write a file",
+					"mcp_fs_write": "Write a file",
+				}[tc.request[0]]
+				if !strings.Contains(out.ForLLM, desc) {
+					t.Errorf("%q must render %q:\n%s", tc.request[0], desc, out.ForLLM)
+				}
+				if strings.Contains(out.ForLLM, "Nested lookalike") {
+					t.Errorf("%q resolved to the nested lookalike:\n%s", tc.request[0], out.ForLLM)
+				}
+			}
+		})
+	}
+}
+
 // TestGetMCPToolUnknownTool: the error points at list_mcp_tools and does NOT
 // dump the server's tool names — dumping them defeats the token saving.
 func TestGetMCPToolUnknownTool(t *testing.T) {
@@ -1077,14 +1189,39 @@ func TestGetMCPToolBatchLoadsServerOnceEvenWithDuplicates(t *testing.T) {
 
 // --- shared helpers ---------------------------------------------------------
 
-// TestKnownServersHelper: sorted names, "(none)" for an empty set.
-func TestKnownServersHelper(t *testing.T) {
-	loader := &fakeLoader{servers: []MCPServerInfo{{Name: "zeta"}, {Name: "alpha"}}}
-	if got := knownServers(loader); got != "alpha, zeta" {
-		t.Errorf("knownServers = %q, want sorted %q", got, "alpha, zeta")
+// TestDiscoveryToolsListKnownServers drives the known-servers hint through both
+// tools' Execute output (never through a private helper): a model that forgets
+// the "server" argument gets the authoritative, sorted list appended, and
+// "(none)" when nothing is configured.
+func TestDiscoveryToolsListKnownServers(t *testing.T) {
+	cases := []struct {
+		name   string
+		loader *fakeLoader
+		want   string
+	}{
+		{
+			name:   "sorted names",
+			loader: &fakeLoader{servers: []MCPServerInfo{{Name: "zeta"}, {Name: "alpha"}}},
+			want:   "known servers: alpha, zeta",
+		},
+		{name: "no server configured", loader: &fakeLoader{}, want: "known servers: (none)"},
 	}
-	if got := knownServers(&fakeLoader{}); got != "(none)" {
-		t.Errorf("knownServers of an empty set = %q, want (none)", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			getTool, _, _ := newGetTool(tc.loader)
+			for name, tool := range map[string]Tool{
+				ListMCPToolsName: NewListMCPToolsTool(tc.loader),
+				GetMCPToolName:   getTool,
+			} {
+				out := tool.Execute(context.Background(), map[string]any{})
+				if !out.IsError {
+					t.Fatalf("%s: a call without the server argument must fail:\n%s", name, out.ForLLM)
+				}
+				if !strings.Contains(out.ForLLM, tc.want) {
+					t.Errorf("%s: output lacks %q:\n%s", name, tc.want, out.ForLLM)
+				}
+			}
+		})
 	}
 }
 
@@ -1133,18 +1270,30 @@ func TestLoadErrorAlwaysAppendsAuthoritativeServers(t *testing.T) {
 	}
 }
 
-// TestUsageSuffix pins the marker wording used by the listing.
-func TestUsageSuffix(t *testing.T) {
-	cases := map[uint64]string{
-		0:  "",
-		1:  " (used 1 time)",
-		2:  " (used 2 times)",
-		17: " (used 17 times)",
+// TestListMCPToolsUsageMarkers pins the marker wording through the listing
+// output: never used ⇒ no marker, one call ⇒ singular, more ⇒ plural.
+func TestListMCPToolsUsageMarkers(t *testing.T) {
+	cases := []struct {
+		name  string
+		count uint64
+		want  string
+	}{
+		{name: "never used", count: 0, want: "- mcp_fs_read — Read a file\n"},
+		{name: "used once", count: 1, want: "- mcp_fs_read — Read a file (used 1 time)\n"},
+		{name: "used twice", count: 2, want: "- mcp_fs_read — Read a file (used 2 times)\n"},
+		{name: "used many times", count: 17, want: "- mcp_fs_read — Read a file (used 17 times)\n"},
 	}
-	for count, want := range cases {
-		if got := usageSuffix(count); got != want {
-			t.Errorf("usageSuffix(%d) = %q, want %q", count, got, want)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := NewListMCPToolsTool(usageLoader(map[string]uint64{"read": tc.count})).
+				Execute(context.Background(), map[string]any{"server": "fs"})
+			if out.IsError {
+				t.Fatalf("unexpected error: %s", out.ForLLM)
+			}
+			if !strings.Contains(out.ForLLM, tc.want) {
+				t.Errorf("listing lacks %q:\n%s", tc.want, out.ForLLM)
+			}
+		})
 	}
 }
 
