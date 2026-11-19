@@ -1,7 +1,7 @@
 // Lele - Ultra-lightweight personal AI agent
 // Regression tests for the SESSION scope of MCP tools: a load performed by one
-// chat must never appear in the context of another chat served by the same
-// agent.
+// chat (through get_mcp_tool) must never appear in the context of another chat
+// served by the same agent.
 // License: MIT
 //
 // Copyright (c) 2026 Lele contributors
@@ -28,9 +28,9 @@ func sessionScopeWiring(t *testing.T) (*toolCoordinatorImpl, *AgentInstance) {
 }
 
 // TestMCPLoad_IsSessionScoped is THE regression for "un MCP cargado por un
-// agente aparece en el contexto de las demás sesiones": session A loads the
-// demo server, and session B — same agent — must neither see the remote tools
-// in its tool definitions nor be able to call them.
+// agente aparece en el contexto de las demás sesiones": session A loads tools of
+// the demo server, and session B — same agent — must neither see the remote
+// tools in its tool definitions nor be able to call them.
 func TestMCPLoad_IsSessionScoped(t *testing.T) {
 	tc, agent := sessionScopeWiring(t)
 	ctx := context.Background()
@@ -38,20 +38,19 @@ func TestMCPLoad_IsSessionScoped(t *testing.T) {
 	layerA := tc.sessionTools(agent, "chat-a")
 	layerB := tc.sessionTools(agent, "chat-b")
 
-	// Before any load, both sessions see the same (base) tool set.
+	// Before any load, both sessions see the same (base) tool set plus the
+	// discovery pair.
 	baseDefs := len(agent.Tools.ToProviderDefs())
-	if got := len(layerA.ToProviderDefs()); got != baseDefs+1 {
-		t.Fatalf("session A defs = %d, want %d (base + load_mcp_tools)", got, baseDefs+1)
+	if got := len(layerA.ToProviderDefs()); got != baseDefs+len(mcpDiscoveryToolNames()) {
+		t.Fatalf("session A defs = %d, want %d (base + list_mcp_tools + get_mcp_tool)",
+			got, baseDefs+len(mcpDiscoveryToolNames()))
 	}
 
-	// Session A loads the server.
-	loader := mcpSessionLoader(t, tc, agent, "chat-a")
-	if res := loader.Execute(ctx, map[string]interface{}{"server": "demo"}); res.IsError {
-		t.Fatalf("load in session A failed: %s", res.ForLLM)
-	}
+	// Session A loads both demo tools.
+	mcpLoadTools(t, tc, agent, "chat-a", "demo", mcpDemoTools()...)
 
 	// A sees the remote tools…
-	for _, name := range []string{"mcp_demo_echo", "mcp_demo_summary"} {
+	for _, name := range mcpDemoNamespaced() {
 		if _, ok := layerA.Get(name); !ok {
 			t.Errorf("session A must see %s after loading it", name)
 		}
@@ -93,13 +92,9 @@ func TestMCPLoad_IsSessionScoped(t *testing.T) {
 // loaded stays available without loading it again.
 func TestMCPLoad_SameSessionKeepsToolsAcrossTurns(t *testing.T) {
 	tc, agent := sessionScopeWiring(t)
-	ctx := context.Background()
 
 	first := tc.sessionTools(agent, "chat-a")
-	loader := mcpSessionLoader(t, tc, agent, "chat-a")
-	if res := loader.Execute(ctx, map[string]interface{}{"server": "demo"}); res.IsError {
-		t.Fatalf("load failed: %s", res.ForLLM)
-	}
+	mcpLoadTools(t, tc, agent, "chat-a", "demo", mcpDemoTools()...)
 
 	// A later turn resolves the session again — same layer, tools still there.
 	second := tc.sessionTools(agent, "chat-a")
@@ -109,14 +104,11 @@ func TestMCPLoad_SameSessionKeepsToolsAcrossTurns(t *testing.T) {
 	if _, ok := second.Get("mcp_demo_echo"); !ok {
 		t.Error("the tools loaded in a previous turn are gone")
 	}
-	// The loader is bound to that same layer: a second load reports everything
-	// as already present (no duplicates, no new layer).
-	res := mcpSessionLoader(t, tc, agent, "chat-a").Execute(ctx, map[string]interface{}{"server": "demo"})
-	if res.IsError {
-		t.Fatalf("reload failed: %s", res.ForLLM)
-	}
-	if !strings.Contains(res.ForLLM, "0 newly registered, 2 already present") {
-		t.Errorf("reload output = %s, want 0 newly registered / 2 already present", res.ForLLM)
+	// get_mcp_tool is bound to that same layer: a second load reports
+	// everything as already registered (no duplicates, no new layer).
+	res := mcpLoadTools(t, tc, agent, "chat-a", "demo", mcpDemoTools()...)
+	if newly, already := mcpCallableCounts(res); newly != 0 || already != 2 {
+		t.Errorf("reload outcome = %d new / %d already, want 0/2:\n%s", newly, already, res.ForLLM)
 	}
 }
 
@@ -124,13 +116,9 @@ func TestMCPLoad_SameSessionKeepsToolsAcrossTurns(t *testing.T) {
 // /clear and /new: dropping one session's layer must not disturb the others.
 func TestMCPLoad_DropSessionLeavesOtherSessionsAlone(t *testing.T) {
 	tc, agent := sessionScopeWiring(t)
-	ctx := context.Background()
 
 	for _, key := range []string{"chat-a", "chat-b"} {
-		loader := mcpSessionLoader(t, tc, agent, key)
-		if res := loader.Execute(ctx, map[string]interface{}{"server": "demo"}); res.IsError {
-			t.Fatalf("load in %s failed: %s", key, res.ForLLM)
-		}
+		mcpLoadTools(t, tc, agent, key, "demo", mcpDemoTools()...)
 	}
 
 	tc.dropSessionTools("chat-a")
@@ -151,10 +139,7 @@ func TestMCPLoad_ToolExecutorUsesSessionRegistry(t *testing.T) {
 	ctx := context.Background()
 
 	layerA := tc.sessionTools(agent, "chat-a")
-	loader := mcpSessionLoader(t, tc, agent, "chat-a")
-	if res := loader.Execute(ctx, map[string]interface{}{"server": "demo"}); res.IsError {
-		t.Fatalf("load failed: %s", res.ForLLM)
-	}
+	mcpLoadTools(t, tc, agent, "chat-a", "demo", mcpDemoTools()...)
 
 	executor := newToolExecutor(tc.al)
 	tc2 := providers.ToolCall{ID: "call-1", Name: "mcp_demo_echo", Arguments: map[string]interface{}{"message": "hola"}}
@@ -202,12 +187,8 @@ func TestMCPLoad_ToolExecutorUsesSessionRegistry(t *testing.T) {
 // them.
 func TestMCPLoad_ManagerCloseDropsEverySessionLayer(t *testing.T) {
 	tc, agent := sessionScopeWiring(t)
-	ctx := context.Background()
 
-	loader := mcpSessionLoader(t, tc, agent, "chat-a")
-	if res := loader.Execute(ctx, map[string]interface{}{"server": "demo"}); res.IsError {
-		t.Fatalf("load failed: %s", res.ForLLM)
-	}
+	mcpLoadTools(t, tc, agent, "chat-a", "demo", mcpDemoTools()...)
 	if tc.mcpManagers.layers.len() == 0 {
 		t.Fatal("expected at least one live session layer")
 	}
@@ -231,7 +212,7 @@ func TestSessionToolSet_LRURetiresTheOldestLayer(t *testing.T) {
 	build := func() *tools.ToolRegistry { return tools.NewScopedRegistry(tools.NewToolRegistry()) }
 
 	for i := 0; i < maxSessionToolLayers; i++ {
-		set.getOrCreate("agent", "sess-"+strconv.Itoa(i), build)
+		set.getOrCreate("agent", "sess-"+strconv.Itoa(i), 1, build)
 	}
 	if got := set.len(); got != maxSessionToolLayers {
 		t.Fatalf("len() = %d, want %d", got, maxSessionToolLayers)
@@ -239,8 +220,8 @@ func TestSessionToolSet_LRURetiresTheOldestLayer(t *testing.T) {
 
 	// Touch the first session so it becomes the most recently used one, then
 	// overflow the cap: a middle/last session must be the one dropped.
-	set.getOrCreate("agent", "sess-0", build)
-	newest := set.getOrCreate("agent", "sess-new", build)
+	set.getOrCreate("agent", "sess-0", 1, build)
+	newest := set.getOrCreate("agent", "sess-new", 1, build)
 	if newest == nil {
 		t.Fatal("getOrCreate returned no registry")
 	}
@@ -266,8 +247,8 @@ func TestSessionToolSet_DropAgentIsScopedToThatAgent(t *testing.T) {
 	set := newSessionToolSet()
 	build := func() *tools.ToolRegistry { return tools.NewScopedRegistry(tools.NewToolRegistry()) }
 
-	set.getOrCreate("main", "chat-a", build)
-	set.getOrCreate("worker", "chat-a", build)
+	set.getOrCreate("main", "chat-a", 1, build)
+	set.getOrCreate("worker", "chat-a", 1, build)
 
 	set.dropAgent("main")
 
@@ -285,7 +266,7 @@ func TestSessionToolSet_DropAgentIsScopedToThatAgent(t *testing.T) {
 // TestMCPLoad_TurnDefinitionsAreSessionScoped is the end-to-end wiring check:
 // it runs REAL turns (the production llmRunner) for two sessions of the same
 // agent and inspects the tool definitions handed to the provider. Only the
-// session that called load_mcp_tools may see the remote tools.
+// session that called get_mcp_tool may see the remote tools.
 func TestMCPLoad_TurnDefinitionsAreSessionScoped(t *testing.T) {
 	_, tc, agent, _ := e2eMCPWiring(t)
 
@@ -338,11 +319,8 @@ func TestMCPLoad_TurnDefinitionsAreSessionScoped(t *testing.T) {
 		t.Fatalf("session A already sees MCP tools before loading: %v", got)
 	}
 
-	// Session A loads the server.
-	loader := mcpSessionLoader(t, tc, agent, "chat-a")
-	if res := loader.Execute(context.Background(), map[string]interface{}{"server": "demo"}); res.IsError {
-		t.Fatalf("load failed: %s", res.ForLLM)
-	}
+	// Session A loads both demo tools.
+	mcpLoadTools(t, tc, agent, "chat-a", "demo", mcpDemoTools()...)
 
 	// Turn 2 — a DIFFERENT session must not see what A loaded.
 	if got := hasMCP(turn("chat-b")); len(got) != 0 {
@@ -351,8 +329,8 @@ func TestMCPLoad_TurnDefinitionsAreSessionScoped(t *testing.T) {
 
 	// Turn 3 — session A still sees them (the layer survives the turn).
 	names := hasMCP(turn("chat-a"))
-	if len(names) != 2 {
-		t.Fatalf("session A sees %v, want the 2 loaded MCP tools", names)
+	if len(names) != len(mcpDemoNamespaced()) {
+		t.Fatalf("session A sees %v, want the %d loaded MCP tools", names, len(mcpDemoNamespaced()))
 	}
 	want := map[string]bool{"mcp_demo_echo": true, "mcp_demo_summary": true}
 	for _, name := range names {

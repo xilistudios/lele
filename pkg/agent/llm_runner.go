@@ -612,11 +612,11 @@ func (lr *llmRunnerImpl) modelForTurn(agent *AgentInstance, opts processOptions)
 
 // runLLMIteration executes the LLM call loop with tool handling.
 func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstance, messages []providers.Message, opts processOptions) (string, int, error) {
-	// The session's tool view. MCP tools loaded with load_mcp_tools land in a
+	// The session's tool view. MCP tools loaded with get_mcp_tool land in a
 	// session-scoped layer over agent.Tools (never in agent.Tools itself), so
 	// one chat's load is invisible to the other chats served by this agent.
 	// Tool definitions AND executions go through this same instance: it must be
-	// the object the loader registered into, or the loop would not see what it
+	// the layer get_mcp_tool registers into, or the loop would not see what it
 	// just loaded. Resolved per iteration — a load in the previous iteration is
 	// visible on the next one without re-reading anything.
 	toolRegistry := lr.al.toolCoordinator.sessionTools(agent, opts.SessionKey)
@@ -696,7 +696,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			})
 
 		// Build tool definitions from the session's view (re-read every
-		// iteration: a load_mcp_tools call in the previous iteration added its
+		// iteration: a get_mcp_tool call in the previous iteration added its
 		// remote tools to this same layer).
 		providerToolDefs := toolRegistry.ToProviderDefs()
 

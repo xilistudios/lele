@@ -28,6 +28,16 @@ type subagentInfo struct {
 	Description string
 }
 
+// mcpDiscoveryPerms mirrors which of the two lazy MCP discovery tools the
+// agent's allowlist keeps. The "## MCP Servers" prompt section must only
+// describe tools the model can actually call: telling an agent that allows
+// only list_mcp_tools to "then call get_mcp_tool" sends it after a tool that
+// does not exist for it.
+type mcpDiscoveryPerms struct {
+	List bool
+	Get  bool
+}
+
 type ContextBuilder struct {
 	workspace          string
 	skillsLoader       *skills.SkillsLoader
@@ -41,6 +51,13 @@ type ContextBuilder struct {
 	// same lock that clears the cached initial context, which keeps readers
 	// in GetInitialContext race-free.
 	mcpServers []tools.MCPServerInfo
+
+	// mcpDiscovery records which of the two lazy discovery tools the agent's
+	// allowlist actually keeps, so the "## MCP Servers" section documents only
+	// tools the model can call. Guarded by initialMu for the same reason as
+	// mcpServers: the setter clears the cached prompt, which is what makes the
+	// read in GetInitialContext race-free.
+	mcpDiscovery mcpDiscoveryPerms
 
 	// harnessContext caches the harness module context (working directory
 	// listing + AGENTS.md + skills directories). It depends only on the
@@ -185,6 +202,52 @@ func (cb *ContextBuilder) SetMCPServers(servers []tools.MCPServerInfo) {
 	cb.initialContext = ""
 }
 
+// SetMCPDiscovery records which discovery tools the agent's allowlist keeps.
+// The "## MCP Servers" section renders instructions for exactly those tools,
+// so a restricted agent is never told to call a tool it does not have.
+//
+// The cached initial context is dropped only when the value changes, for the
+// same reason as SetMCPServers: sync passes run on every config reload.
+func (cb *ContextBuilder) SetMCPDiscovery(list, get bool) {
+	next := mcpDiscoveryPerms{List: list, Get: get}
+	cb.initialMu.Lock()
+	defer cb.initialMu.Unlock()
+	if cb.mcpDiscovery == next {
+		return
+	}
+	cb.mcpDiscovery = next
+	cb.initialContext = ""
+}
+
+// mcpServersSection renders the "## MCP Servers" block: the instruction line
+// matching the permitted discovery tools (none, one, or both) followed by the
+// server names and their descriptions. Server names are always listed — they
+// are configuration, not tools — while the instructions never name a tool the
+// caller cannot use.
+func mcpServersSection(servers []tools.MCPServerInfo, perms mcpDiscoveryPerms) string {
+	var sb strings.Builder
+	sb.WriteString("## MCP Servers\n\n")
+	switch {
+	case perms.List && perms.Get:
+		sb.WriteString("Use `list_mcp_tools` with a server name to browse its tools (paginated, most-used first), " +
+			"then `get_mcp_tool` with {\"server\": \"<name>\", \"tool\": \"<tool>\"} — or \"tools\": [\"<t1>\", \"<t2>\"] for several — " +
+			"to load full schemas and make them callable.\n\n")
+	case perms.List:
+		sb.WriteString("Use `list_mcp_tools` with a server name to browse its tools (paginated, most-used first).\n\n")
+	case perms.Get:
+		sb.WriteString("Use `get_mcp_tool` with {\"server\": \"<name>\", \"tool\": \"<tool>\"} — or \"tools\": [\"<t1>\", \"<t2>\"] for several — " +
+			"to load full schemas and make them callable.\n\n")
+	}
+	for _, s := range servers {
+		if s.Description != "" {
+			sb.WriteString(fmt.Sprintf("- **%s** — %s\n", s.Name, s.Description))
+		} else {
+			sb.WriteString(fmt.Sprintf("- **%s**\n", s.Name))
+		}
+	}
+	return sb.String()
+}
+
 // mcpServersEqual reports whether two server lists carry the same
 // name+description+layer tuples. Order-insensitive (the coordinator feeds a
 // sorted list, but a cheap set comparison here keeps the setter robust);
@@ -317,24 +380,16 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 	}
 
 	// MCP servers section — name + description only, never tool schemas
-	// (they are huge and the model loads them lazily via load_mcp_tools).
-	// cb.mcpServers is read here while the write lock is held, which pairs
-	// with SetMCPServers writing it under the same lock.
+	// (they are huge and the model discovers them lazily through the
+	// list_mcp_tools/get_mcp_tool pair), and instructions for the discovery
+	// tools this agent may actually call. cb.mcpServers and cb.mcpDiscovery
+	// are read here while the write lock is held, which pairs with
+	// SetMCPServers/SetMCPDiscovery writing them under the same lock.
 	if len(cb.mcpServers) > 0 {
 		servers := make([]tools.MCPServerInfo, len(cb.mcpServers))
 		copy(servers, cb.mcpServers)
 		sort.Slice(servers, func(i, j int) bool { return servers[i].Name < servers[j].Name })
-		var sb strings.Builder
-		sb.WriteString("## MCP Servers\n\n")
-		sb.WriteString("Use `load_mcp_tools` with a server name to load its tools.\n\n")
-		for _, s := range servers {
-			if s.Description != "" {
-				sb.WriteString(fmt.Sprintf("- **%s** — %s\n", s.Name, s.Description))
-			} else {
-				sb.WriteString(fmt.Sprintf("- **%s**\n", s.Name))
-			}
-		}
-		parts = append(parts, sb.String())
+		parts = append(parts, mcpServersSection(servers, cb.mcpDiscovery))
 	}
 
 	// Join with "---" separator

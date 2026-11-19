@@ -225,46 +225,69 @@ Cancels a task that is `running`, `pending` or `needs_context`.
 
 A task that is already terminal is not cancelled; the call reports its status instead.
 
-## MCP Tool Loader
+## MCP Tool Discovery
 
-`load_mcp_tools` exposes MCP servers configured in layered `mcp.json` files
-(see `docs/mcp.md`). It has no `config.json` settings of its own and is offered
-to a session automatically **only** while at least one active server is
-configured. It is **session-scoped**: the loader and the `mcp_*` tools it
-registers live in a per-session layer over the agent's tool registry, so one
-chat's load never shows up in another chat's context.
+`list_mcp_tools` and `get_mcp_tool` expose MCP servers configured in layered
+`mcp.json` files (see `docs/mcp.md`). They have no `config.json` settings of
+their own and are offered to a session automatically **only** while at least
+one active server is configured. Both are **session-scoped**: the discovery
+tools and the `mcp_*` tools they register live in a per-session layer over the
+agent's tool registry, so one chat's load never shows up in another chat's
+context.
 
-| Tool | Argument | Description |
+| Tool | Arguments | Description |
 | --- | --- | --- |
-| `load_mcp_tools` | `server` (string, required) | Name of an MCP server from the `## MCP Servers` prompt section |
+| `list_mcp_tools` | `server` (string, required), `page` (integer, default 1), `page_size` (integer, default 20, max 100) | One page of the server's tool names — no schemas — ordered most-used first |
+| `get_mcp_tool` | `server` (string, required), `tool` (string) or `tools` (array of strings) | Loads full descriptions + input schemas and registers exactly those tools |
 
 ### Behavior
 
-- Before loading, the model sees only server names and descriptions (the
+- Before discovery, the model sees only server names and descriptions (the
   prompt section) — never tool schemas.
-- The first call fetches the server's tool specs and registers them under
-  `mcp_<server>_<tool>` names **in the calling session's layer**; the result
-  lists every spec with its input schema.
+- `list_mcp_tools` is schema-free and registers nothing: names, one trimmed
+  line of description and a `(used N times)` marker. Ordering is usage
+  frequency (most used first, ties alphabetical); an out-of-range `page` is
+  clamped to the last page and an oversized `page_size` to 100.
+- `get_mcp_tool` fetches the server's specs and registers **only the requested
+  tools** under `mcp_<server>_<tool>` names **in the calling session's layer**;
+  the result lists each tool with its input schema. Ask for `tool` (one) or
+  `tools` (several, deduplicated); a partial batch is a success with a trailing
+  note naming the tools that were not found.
 - Repeated calls are idempotent: the registry count never changes and the
-  listing is repeated.
+  specs are rendered again.
 - Another session of the same agent sees none of it: its tool definitions are
   unchanged and a call to a tool it did not load reports `tool "…" not found`.
   Clearing the session (`/clear`, `/new`) or retiring the agent's MCP manager
   drops the layer, and the session has to load again.
 - An unknown server fails with a clean error that lists the known servers
-  (`known servers: …`).
+  (`known servers: …`); an unknown tool points back at `list_mcp_tools`.
 - Loaded tools then run like built-ins: calls are forwarded to the server and
   a crashed server is reconnected once per call.
+
+### Allowlist
+
+The two tools are gated individually (`tools` in `config.json`). The legacy
+name `load_mcp_tools` is kept as an **alias that enables both**, so a config
+written for the old bulk loader keeps working — no tool registers under that
+name any more. With neither tool allowed the session layers are dropped while
+the `## MCP Servers` prompt section keeps listing the servers (configuration is
+not a tool), and the section's instructions only ever name the tools the
+allowlist keeps — an agent allowed only `list_mcp_tools` is never told to call
+`get_mcp_tool`. Subagents receive neither tool.
 
 ### Example
 
 ```text
-load_mcp_tools
+list_mcp_tools
 {"server": "files"}
+
+get_mcp_tool
+{"server": "files", "tools": ["read_file", "write_file"]}
 ```
 
 Server configuration — `mcp.json` layers, `${VAR}` expansion, transports,
-security notes and limitations — is documented in `docs/mcp.md`.
+usage counters (`<LeleDir>/mcp_usage.json`), security notes and limitations — is
+documented in `docs/mcp.md`.
 
 ## Environment Variables
 

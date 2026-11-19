@@ -7,17 +7,20 @@
 // T11: end-to-end tests through real in-process MCP servers (mcptest).
 //
 // Everything exercised here is production code — the three mcp.json layers
-// on disk, Discover, the Manager, the RemoteTool adapter, the load_mcp_tools
-// loader and the ToolRegistry. The only substituted piece is the Dialer
-// seam: it hands the manager the already-initialized mcptest client wrapped
-// in the production clientConn, so no process is spawned (Start/Initialize
-// against the real transports are covered by the T4 dialer tests).
+// on disk, Discover, the Manager, the RemoteTool adapter, the
+// list_mcp_tools/get_mcp_tool discovery pair and the ToolRegistry. The only
+// substituted piece is the Dialer seam: it hands the manager the
+// already-initialized mcptest client wrapped in the production clientConn, so
+// no process is spawned (Start/Initialize against the real transports are
+// covered by the T4 dialer tests).
 
 package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -299,14 +302,16 @@ func specNames(specs []tools.LoadedMCPTool) []string {
 	return out
 }
 
-// --- load_mcp_tools against a real registry ---------------------------------
+// --- the discovery pair against a real registry -----------------------------
 
-// TestE2ELoadMCPToolsRegistersAndReloads runs the integration the LLM sees:
-// a real ToolRegistry plus the production loader tool. The first execution
-// registers every namespaced spec, the second is a no-op for the registry
-// while still listing the specs, the registered remote tool round-trips, and
-// an unknown server yields a clean error — all without a second dial.
-func TestE2ELoadMCPToolsRegistersAndReloads(t *testing.T) {
+// TestE2EGetMCPToolRegistersAndReloads runs the integration the LLM sees: a
+// real ToolRegistry plus the production discovery tools. list_mcp_tools names
+// the server's tools (no schema, no registration), get_mcp_tool loads a batch
+// and registers exactly those specs under their namespaced names, a second
+// get_mcp_tool is a no-op for the registry while still rendering the specs,
+// the registered remote tool round-trips, and an unknown server yields a clean
+// error — all without a second dial.
+func TestE2EGetMCPToolRegistersAndReloads(t *testing.T) {
 	paths := e2ePaths(t)
 	writeFileAt(t, filepath.Join(paths.AgentWorkspace, "mcp.json"),
 		`{"mcpServers": {"files": {"command": "files-bin", "description": "Local file operations"}}}`)
@@ -319,10 +324,29 @@ func TestE2ELoadMCPToolsRegistersAndReloads(t *testing.T) {
 
 	ctx := context.Background()
 	registry := tools.NewToolRegistry()
-	loader := tools.NewLoadMCPToolsTool(mgr, registry, mgr.ToolFactory())
+	list := tools.NewListMCPToolsTool(mgr)
+	get := tools.NewGetMCPToolTool(mgr, registry, mgr.ToolFactory())
 
-	// First execution: both specs registered under namespaced names.
-	res := loader.Execute(ctx, map[string]interface{}{"server": "files"})
+	// Discovery step: names only, and nothing reaches the registry.
+	res := list.Execute(ctx, map[string]interface{}{"server": "files"})
+	if res.IsError {
+		t.Fatalf("list failed: %s", res.ForLLM)
+	}
+	for _, name := range []string{"mcp_files_echo", "mcp_files_summary"} {
+		if !strings.Contains(res.ForLLM, name) {
+			t.Errorf("listing lacks %s:\n%s", name, res.ForLLM)
+		}
+	}
+	if strings.Contains(res.ForLLM, "inputSchema") {
+		t.Errorf("listing must stay schema-free:\n%s", res.ForLLM)
+	}
+	if registry.Count() != 0 {
+		t.Errorf("Count() = %d after listing, want 0 (listing registers nothing)", registry.Count())
+	}
+
+	// Load step: both specs registered under namespaced names.
+	batch := map[string]interface{}{"server": "files", "tools": []interface{}{"echo", "summary"}}
+	res = get.Execute(ctx, batch)
 	if res.IsError {
 		t.Fatalf("first load failed: %s", res.ForLLM)
 	}
@@ -334,27 +358,34 @@ func TestE2ELoadMCPToolsRegistersAndReloads(t *testing.T) {
 			t.Errorf("%s not registered, have %v", name, registry.List())
 		}
 	}
-	if want := `Loaded 2 tool(s) from MCP server "files": 2 newly registered, 0 already present.`; !strings.Contains(res.ForLLM, want) {
+	if want := `Loaded 2 tool(s) from MCP server "files".`; !strings.Contains(res.ForLLM, want) {
 		t.Errorf("first load output lacks %q:\n%s", want, res.ForLLM)
 	}
-	if !strings.Contains(res.ForLLM, "## mcp_files_echo") {
-		t.Errorf("first load output lacks the spec listing:\n%s", res.ForLLM)
+	if want := `Tool mcp_files_echo from MCP server "files" is now callable.`; !strings.Contains(res.ForLLM, want) {
+		t.Errorf("first load output lacks %q:\n%s", want, res.ForLLM)
+	}
+	if got := strings.Count(res.ForLLM, "inputSchema:"); got != 2 {
+		t.Errorf("first load rendered %d schemas, want 2:\n%s", got, res.ForLLM)
 	}
 
-	// Second execution: registry count stable, names still unique, listing
-	// still complete (the LLM re-reads the specs after a reload).
-	res = loader.Execute(ctx, map[string]interface{}{"server": "files"})
+	// Second load: registry count stable, every block reports the tool as
+	// already there, and the specs are still rendered (the LLM re-reads the
+	// schema after a reload).
+	res = get.Execute(ctx, batch)
 	if res.IsError {
 		t.Fatalf("second load failed: %s", res.ForLLM)
 	}
 	if registry.Count() != 2 {
 		t.Errorf("Count() = %d after second load, want 2 (no duplicate registration)", registry.Count())
 	}
-	if want := `0 newly registered, 2 already present`; !strings.Contains(res.ForLLM, want) {
-		t.Errorf("second load output lacks %q:\n%s", want, res.ForLLM)
+	if got := strings.Count(res.ForLLM, "already registered and callable"); got != 2 {
+		t.Errorf("%d blocks report an existing tool, want 2:\n%s", got, res.ForLLM)
 	}
-	if !strings.Contains(res.ForLLM, "## mcp_files_summary") {
-		t.Errorf("second load output lost the spec listing:\n%s", res.ForLLM)
+	if strings.Contains(res.ForLLM, "is now callable") {
+		t.Errorf("second load must not claim a fresh registration:\n%s", res.ForLLM)
+	}
+	if got := strings.Count(res.ForLLM, "inputSchema:"); got != 2 {
+		t.Errorf("second load rendered %d schemas, want 2:\n%s", got, res.ForLLM)
 	}
 	defNames := map[string]bool{}
 	for _, def := range registry.GetDefinitions() {
@@ -386,7 +417,7 @@ func TestE2ELoadMCPToolsRegistersAndReloads(t *testing.T) {
 	// known-servers list comes from the loader layer EXACTLY ONCE (N4 — the
 	// manager error itself no longer carries a list, so the wrapped error
 	// cannot duplicate it).
-	res = loader.Execute(ctx, map[string]interface{}{"server": "ghost"})
+	res = get.Execute(ctx, map[string]interface{}{"server": "ghost", "tool": "echo"})
 	if !res.IsError {
 		t.Errorf("unknown server succeeded: %s", res.ForLLM)
 	}
@@ -427,9 +458,15 @@ func TestE2ETwoServersSameRemoteToolName(t *testing.T) {
 
 	ctx := context.Background()
 	registry := tools.NewToolRegistry()
-	loader := tools.NewLoadMCPToolsTool(mgr, registry, mgr.ToolFactory())
+	get := tools.NewGetMCPToolTool(mgr, registry, mgr.ToolFactory())
+	// One batch per server: both of its tools, so every namespaced name has
+	// to coexist in the same registry.
 	for _, name := range []string{"alpha", "beta"} {
-		if res := loader.Execute(ctx, map[string]interface{}{"server": name}); res.IsError {
+		res := get.Execute(ctx, map[string]interface{}{
+			"server": name,
+			"tools":  []interface{}{"echo", "summary"},
+		})
+		if res.IsError {
 			t.Fatalf("load %s: %s", name, res.ForLLM)
 		}
 	}
@@ -629,8 +666,9 @@ func TestE2EDisabledServerExcludedAndNeverDials(t *testing.T) {
 }
 
 // TestE2ENoMCPFilesAnywhere: with the three roots empty the manager reports
-// no servers, never dials and the loader tool says so — no error, no panic.
-// (The agent-level counterpart — load_mcp_tools staying unregistered — is
+// no servers, never dials and both discovery tools say so — no error, no
+// panic.
+// (The agent-level counterpart — no discovery tool staying registered — is
 // TestMCPSync_NoServersLeavesLoaderUnregistered in pkg/agent.)
 func TestE2ENoMCPFilesAnywhere(t *testing.T) {
 	paths := e2ePaths(t)
@@ -659,12 +697,138 @@ func TestE2ENoMCPFilesAnywhere(t *testing.T) {
 	}
 
 	registry := tools.NewToolRegistry()
-	loader := tools.NewLoadMCPToolsTool(mgr, registry, mgr.ToolFactory())
-	out := loader.Execute(context.Background(), map[string]interface{}{"server": "x"})
-	if !out.IsError || !strings.Contains(out.ForLLM, "known servers: (none)") {
-		t.Errorf("loader output = %q (IsError=%v), want a clean unknown-server error", out.ForLLM, out.IsError)
+	// Both discovery tools must answer a completely unconfigured manager with
+	// the same clean "known servers: (none)" shape instead of panicking or
+	// dialing anything.
+	listOut := tools.NewListMCPToolsTool(mgr).Execute(context.Background(), map[string]interface{}{"server": "x"})
+	if !listOut.IsError || !strings.Contains(listOut.ForLLM, "known servers: (none)") {
+		t.Errorf("list output = %q (IsError=%v), want a clean unknown-server error", listOut.ForLLM, listOut.IsError)
+	}
+	getOut := tools.NewGetMCPToolTool(mgr, registry, mgr.ToolFactory()).
+		Execute(context.Background(), map[string]interface{}{"server": "x", "tool": "echo"})
+	if !getOut.IsError || !strings.Contains(getOut.ForLLM, "known servers: (none)") {
+		t.Errorf("get output = %q (IsError=%v), want a clean unknown-server error", getOut.ForLLM, getOut.IsError)
+	}
+	if registry.Count() != 0 {
+		t.Errorf("Count() = %d, want 0 (nothing was registered)", registry.Count())
 	}
 	if n := len(dialer.configs()); n != 0 {
 		t.Errorf("dials = %d, want 0", n)
 	}
+}
+
+// --- usage ordering, end to end ---------------------------------------------
+
+// TestE2EUsageOrderingListGetCallList walks the whole lazy-discovery loop
+// against a real manager and a real on-disk usage store: the first listing is
+// alphabetical (nothing was ever called), get_mcp_tool loads one of the two
+// tools, calling it records one use in <LeleDir>/mcp_usage.json, and the next
+// listing puts the called tool FIRST. A second manager over the same paths (a
+// restart, in effect) still ranks it first, so the ranking is persisted
+// rather than living in one process's memory.
+func TestE2EUsageOrderingListGetCallList(t *testing.T) {
+	paths := e2ePaths(t)
+	// The usage store writes a real file next to mcp.json, so the lele
+	// directory has to exist.
+	if err := os.MkdirAll(paths.LeleDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", paths.LeleDir, err)
+	}
+	writeFileAt(t, filepath.Join(paths.AgentWorkspace, "mcp.json"),
+		`{"mcpServers": {"files": {"command": "files-bin", "description": "Local file operations"}}}`)
+
+	srv, _ := startMCPServer(t, "files")
+	dialer := newE2EDialer()
+	dialer.script("files-bin", dialStep{conn: connFor(t, srv)})
+	mgr := NewManager(paths, dialer)
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	ctx := context.Background()
+	registry := tools.NewToolRegistry()
+	list := tools.NewListMCPToolsTool(mgr)
+	get := tools.NewGetMCPToolTool(mgr, registry, mgr.ToolFactory())
+
+	// Nothing has been used yet: the listing is alphabetical, so summary —
+	// the tool about to be called — is NOT on top.
+	before := list.Execute(ctx, map[string]interface{}{"server": "files"})
+	if before.IsError {
+		t.Fatalf("first list failed: %s", before.ForLLM)
+	}
+	if got := e2eListedNames(before.ForLLM); !slices.Equal(got, []string{"mcp_files_echo", "mcp_files_summary"}) {
+		t.Fatalf("first listing = %v, want alphabetical [mcp_files_echo mcp_files_summary]", got)
+	}
+
+	// Load and call the second name: only a real call can promote it.
+	if res := get.Execute(ctx, map[string]interface{}{"server": "files", "tool": "summary"}); res.IsError {
+		t.Fatalf("get failed: %s", res.ForLLM)
+	}
+	call := registry.Execute(ctx, "mcp_files_summary", map[string]interface{}{"label": "usage"})
+	if call.IsError {
+		t.Fatalf("summary call failed: %s", call.ForLLM)
+	}
+	if !strings.Contains(call.ForLLM, "summary for usage") {
+		t.Errorf("call result = %q, want the server's answer", call.ForLLM)
+	}
+
+	// The counter landed on disk, keyed by REMOTE tool name.
+	usagePath := filepath.Join(paths.LeleDir, "mcp_usage.json")
+	data, err := os.ReadFile(usagePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", usagePath, err)
+	}
+	var counts map[string]map[string]uint64
+	if err := json.Unmarshal(data, &counts); err != nil {
+		t.Fatalf("parse %s: %v", usagePath, err)
+	}
+	if got := counts["files"]["summary"]; got != 1 {
+		t.Errorf(`usage["files"]["summary"] = %d, want 1 (file: %s)`, got, data)
+	}
+
+	// Second listing: the tool that was actually used sorts first and carries
+	// its count.
+	after := list.Execute(ctx, map[string]interface{}{"server": "files"})
+	if after.IsError {
+		t.Fatalf("second list failed: %s", after.ForLLM)
+	}
+	if got := e2eListedNames(after.ForLLM); !slices.Equal(got, []string{"mcp_files_summary", "mcp_files_echo"}) {
+		t.Errorf("second listing = %v, want the used tool first", got)
+	}
+	if !strings.Contains(after.ForLLM, "(used 1 time)") {
+		t.Errorf("the used tool should carry its count:\n%s", after.ForLLM)
+	}
+
+	// A fresh manager over the same paths ranks from the persisted file, so
+	// the ranking survives a restart. It gets its own server instance, which
+	// keeps the test out of shared-client territory.
+	srv2, _ := startMCPServer(t, "files")
+	dialer2 := newE2EDialer()
+	dialer2.script("files-bin", dialStep{conn: connFor(t, srv2)})
+	mgr2 := NewManager(paths, dialer2)
+	t.Cleanup(func() { _ = mgr2.Close() })
+	if got := mgr2.ToolUsage("files")["summary"]; got != 1 {
+		t.Errorf("reloaded manager ToolUsage(summary) = %d, want 1", got)
+	}
+	reloaded := tools.NewListMCPToolsTool(mgr2).Execute(ctx, map[string]interface{}{"server": "files"})
+	if reloaded.IsError {
+		t.Fatalf("reloaded list failed: %s", reloaded.ForLLM)
+	}
+	if got := e2eListedNames(reloaded.ForLLM); !slices.Equal(got, []string{"mcp_files_summary", "mcp_files_echo"}) {
+		t.Errorf("reloaded listing = %v, want the persisted ranking", got)
+	}
+
+	// The first manager's work rode on exactly one connection.
+	if n := dialer.dials("files-bin"); n != 1 {
+		t.Errorf("dials = %d, want 1", n)
+	}
+}
+
+// e2eListedNames extracts the tool names of a listing page, in output order.
+func e2eListedNames(out string) []string {
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		if rest, ok := strings.CutPrefix(line, "- "); ok {
+			name, _, _ := strings.Cut(rest, " ")
+			names = append(names, name)
+		}
+	}
+	return names
 }

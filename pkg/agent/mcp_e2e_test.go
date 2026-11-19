@@ -4,11 +4,11 @@
 //
 // Copyright (c) 2026 Lele contributors
 //
-// T11: agent-level load_mcp_tools integration. Extends the T8 sync tests
-// (which only check registration) with actual executions against a real
-// manager: the loader registers the specs once, a second execution keeps the
-// registry count stable, and the registered remote tool round-trips through
-// the agent's own ToolRegistry. The manager gets an injected fake dialer
+// T11: agent-level get_mcp_tool integration. Extends the T8 sync tests (which
+// only check registration) with actual executions against a real manager:
+// get_mcp_tool registers the requested specs once, a second execution keeps the
+// registry count stable, and the registered remote tool round-trips through the
+// session's own scoped registry. The manager gets an injected fake dialer
 // (the exported mcp.Dialer seam) so no process is spawned.
 
 package agent
@@ -54,6 +54,18 @@ func (e2eFakeConn) CallTool(_ context.Context, name string, _ map[string]interfa
 
 func (e2eFakeConn) Close() error { return nil }
 
+// mcpDemoTools returns the remote tool names e2eFakeConn exposes (as MCP names,
+// i.e. before pkg/mcp namespaces them into mcp_demo_<name>).
+//
+// It returns a FRESH slice on every call: the fixtures are read by many tests,
+// and a package-level slice would expose one shared backing array, letting a
+// test that appends to or rewrites it corrupt another test's expectations.
+func mcpDemoTools() []string { return []string{"echo", "summary"} }
+
+// mcpDemoNamespaced returns what mcpDemoTools are registered as in a session
+// layer (a fresh slice, for the same reason as mcpDemoTools).
+func mcpDemoNamespaced() []string { return []string{"mcp_demo_echo", "mcp_demo_summary"} }
+
 // e2eFakeDialer implements mcp.Dialer with a single reusable connection.
 type e2eFakeDialer struct{}
 
@@ -61,12 +73,12 @@ func (e2eFakeDialer) Dial(_ context.Context, _ mcp.ServerConfig) (mcp.ClientConn
 	return e2eFakeConn{}, nil
 }
 
-// TestMCPSync_LoadMCPToolsIdempotentEndToEnd wires the agent loop's own
-// sync to a real mcp.Manager (fake dialer), then executes load_mcp_tools
-// twice through the agent's registry: first call registers the namespaced
-// specs, second call keeps Count() stable, and the registered remote tool
-// answers like a built-in.
-func TestMCPSync_LoadMCPToolsIdempotentEndToEnd(t *testing.T) {
+// TestMCPSync_GetMCPToolIdempotentEndToEnd wires the agent loop's own sync to
+// a real mcp.Manager (fake dialer), then executes get_mcp_tool twice through the
+// session layer: the first call registers the namespaced specs it was asked
+// for, the second one keeps Count() stable and reports everything as already
+// present, and the registered remote tool answers like a built-in.
+func TestMCPSync_GetMCPToolIdempotentEndToEnd(t *testing.T) {
 	al, workspace := newMCPTestLoop(t)
 	tc := mcpTestCoordinator(t, al)
 	tc.mcpManagers.newManager = func(paths mcp.Paths) mcpManager {
@@ -79,21 +91,20 @@ func TestMCPSync_LoadMCPToolsIdempotentEndToEnd(t *testing.T) {
 
 	agent := mcpTestAgent(t, al)
 	layer := tc.sessionTools(agent, "chat-a")
-	loader := mcpSessionLoader(t, tc, agent, "chat-a")
 
 	ctx := context.Background()
 	baseCount := agent.Tools.Count()
 	before := layer.Count()
 
-	// First execution: the remote specs land in THIS SESSION's layer.
-	res := loader.Execute(ctx, map[string]interface{}{"server": "demo"})
-	if res.IsError {
-		t.Fatalf("first load failed: %s", res.ForLLM)
+	// First execution: the requested remote specs land in THIS SESSION's layer.
+	res := mcpLoadTools(t, tc, agent, "chat-a", "demo", mcpDemoTools()...)
+	if newly, already := mcpCallableCounts(res); newly != 2 || already != 0 {
+		t.Errorf("first load outcome = %d new / %d already, want 2/0:\n%s", newly, already, res.ForLLM)
 	}
 	if want := before + 2; layer.Count() != want {
 		t.Errorf("session Count() = %d after first load, want %d", layer.Count(), want)
 	}
-	for _, name := range []string{"mcp_demo_echo", "mcp_demo_summary"} {
+	for _, name := range mcpDemoNamespaced() {
 		if _, ok := layer.Get(name); !ok {
 			t.Errorf("%s not in the session view, have %v", name, layer.List())
 		}
@@ -103,22 +114,24 @@ func TestMCPSync_LoadMCPToolsIdempotentEndToEnd(t *testing.T) {
 	if got := agent.Tools.Count(); got != baseCount {
 		t.Errorf("agent registry Count() = %d after a session load, want %d (unchanged)", got, baseCount)
 	}
-	for _, name := range []string{"mcp_demo_echo", "mcp_demo_summary"} {
+	for _, name := range mcpDemoNamespaced() {
 		if _, ok := agent.Tools.Get(name); ok {
 			t.Errorf("%s leaked into the agent-wide registry", name)
 		}
 	}
 
-	// Second execution: no duplicate registration, listing still complete.
-	res = loader.Execute(ctx, map[string]interface{}{"server": "demo"})
+	// Second execution: no duplicate registration, both reported as present.
+	getTool := mcpSessionTool(t, tc, agent, "chat-a", tools.GetMCPToolName)
+	res = getTool.Execute(ctx, map[string]interface{}{"server": "demo", "tools": mcpDemoTools()})
 	if res.IsError {
 		t.Fatalf("second load failed: %s", res.ForLLM)
 	}
 	if layer.Count() != before+2 {
 		t.Errorf("Count() = %d after second load, want %d (no duplicates)", layer.Count(), before+2)
 	}
-	if !strings.Contains(res.ForLLM, "0 newly registered, 2 already present") {
-		t.Errorf("second load output lacks the idempotency counts:\n%s", res.ForLLM)
+	if newly, already := mcpCallableCounts(res); newly != 0 || already != 2 {
+		t.Errorf("second load outcome = %d new / %d already, want 0/2 (idempotent):\n%s",
+			newly, already, res.ForLLM)
 	}
 
 	// The registered remote tool executes through the session's view.
@@ -131,7 +144,7 @@ func TestMCPSync_LoadMCPToolsIdempotentEndToEnd(t *testing.T) {
 	}
 
 	// Unknown server stays a clean error at this level too.
-	out = loader.Execute(ctx, map[string]interface{}{"server": "ghost"})
+	out = getTool.Execute(ctx, map[string]interface{}{"server": "ghost", "tool": "echo"})
 	if !out.IsError || !strings.Contains(out.ForLLM, "known servers: demo") {
 		t.Errorf("unknown server output = %q (IsError=%v), want the known-servers list", out.ForLLM, out.IsError)
 	}
@@ -167,19 +180,15 @@ func e2eMCPWiring(t *testing.T) (*AgentLoop, *toolCoordinatorImpl, *AgentInstanc
 }
 
 // TestMCPSync_RemovedServerUnregistersLoadedTools is the M3 regression: once
-// load_mcp_tools has registered mcp_* names, deleting the server and syncing
-// must remove them from the registry AND from GetDefinitions() — otherwise
-// stale remote tools would be offered to the model with no manager behind
-// them.
+// get_mcp_tool has registered mcp_* names, deleting the server and syncing must
+// remove them from the registry AND from GetDefinitions() — otherwise stale
+// remote tools would be offered to the model with no manager behind them.
 func TestMCPSync_RemovedServerUnregistersLoadedTools(t *testing.T) {
 	_, tc, agent, workspace := e2eMCPWiring(t)
 
 	layer := tc.sessionTools(agent, "chat-a")
-	loader := mcpSessionLoader(t, tc, agent, "chat-a")
-	if res := loader.Execute(context.Background(), map[string]interface{}{"server": "demo"}); res.IsError {
-		t.Fatalf("load failed: %s", res.ForLLM)
-	}
-	loaded := []string{"mcp_demo_echo", "mcp_demo_summary"}
+	mcpLoadTools(t, tc, agent, "chat-a", "demo", mcpDemoTools()...)
+	loaded := mcpDemoNamespaced()
 	for _, name := range loaded {
 		if _, ok := layer.Get(name); !ok {
 			t.Fatalf("%s not in the session view after load, have %v", name, layer.List())
@@ -216,22 +225,19 @@ func TestMCPSync_RemovedServerUnregistersLoadedTools(t *testing.T) {
 }
 
 // TestMCPSync_AllowlistTightenedUnregistersLoadedTools is the second M3
-// regression: excluding load_mcp_tools from the agent's allowlist on a
-// reload must unregister the loader AND the mcp_* tools it already
-// registered (while the prompt keeps listing the servers — they are
-// configuration, not tools).
+// regression: an allowlist that keeps NEITHER discovery tool must drop the
+// session layers on the next sync, taking the discovery tools AND the mcp_*
+// tools they already registered (while the prompt keeps listing the servers —
+// they are configuration, not tools).
 func TestMCPSync_AllowlistTightenedUnregistersLoadedTools(t *testing.T) {
 	_, tc, agent, _ := e2eMCPWiring(t)
 
-	loader := mcpSessionLoader(t, tc, agent, "chat-a")
-	if res := loader.Execute(context.Background(), map[string]interface{}{"server": "demo"}); res.IsError {
-		t.Fatalf("load failed: %s", res.ForLLM)
-	}
+	mcpLoadTools(t, tc, agent, "chat-a", "demo", mcpDemoTools()...)
 	if _, ok := tc.sessionTools(agent, "chat-a").Get("mcp_demo_echo"); !ok {
 		t.Fatal("mcp_demo_echo not in the session view after load")
 	}
 
-	// Tighten the allowlist for "main": load_mcp_tools no longer survives.
+	// Tighten the allowlist for "main": nothing MCP-related survives.
 	cfg := tc.al.cfg()
 	cfg.Agents.List = append(cfg.Agents.List, config.AgentConfig{
 		ID:    "main",
@@ -240,15 +246,17 @@ func TestMCPSync_AllowlistTightenedUnregistersLoadedTools(t *testing.T) {
 	tc.syncMCPTools()
 
 	// The layer is dropped: the session falls back to the base registry, where
-	// neither the loader nor the remote tools ever existed.
+	// neither the discovery tools nor the remote tools ever existed.
 	sessionView := tc.sessionTools(agent, "chat-a")
 	if sessionView != agent.Tools {
-		t.Error("the session layer must be dropped when the allowlist excludes the loader")
+		t.Error("the session layer must be dropped when the allowlist keeps neither discovery tool")
 	}
-	if _, ok := sessionView.Get(tools.LoadMCPToolsName); ok {
-		t.Error("load_mcp_tools must not be offered once the allowlist excludes it")
+	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames()...) {
+		if _, ok := sessionView.Get(name); ok {
+			t.Errorf("%s must not be offered once the allowlist excludes the discovery tools", name)
+		}
 	}
-	for _, name := range []string{"mcp_demo_echo", "mcp_demo_summary"} {
+	for _, name := range mcpDemoNamespaced() {
 		if _, ok := sessionView.Get(name); ok {
 			t.Errorf("%s must leave the session view with its loader (allowlist tightened)", name)
 		}
@@ -272,10 +280,7 @@ func TestMCPSync_WorkspaceRoundTripRestoresWorkingManager(t *testing.T) {
 	_, tc, agent, workspaceA := e2eMCPWiring(t)
 
 	// The manager works while we are in workspace A.
-	loader := mcpSessionLoader(t, tc, agent, "chat-a")
-	if res := loader.Execute(context.Background(), map[string]interface{}{"server": "demo"}); res.IsError {
-		t.Fatalf("load in A failed: %s", res.ForLLM)
-	}
+	mcpLoadTools(t, tc, agent, "chat-a", "demo", mcpDemoTools()...)
 
 	// Move to a workspace with no MCP servers anywhere: manager retired.
 	workspaceB := t.TempDir()
@@ -289,13 +294,10 @@ func TestMCPSync_WorkspaceRoundTripRestoresWorkingManager(t *testing.T) {
 		t.Error("the session layer must be dropped while the workspace has no servers")
 	}
 
-	// Back to A: a FRESH manager must serve the loader end-to-end again.
+	// Back to A: a FRESH manager must serve the discovery tools end-to-end again.
 	agent.Workspace = workspaceA
 	tc.syncMCPTools()
-	loader = mcpSessionLoader(t, tc, agent, "chat-a")
-	if res := loader.Execute(context.Background(), map[string]interface{}{"server": "demo"}); res.IsError {
-		t.Fatalf("loader after the workspace round-trip failed: %s", res.ForLLM)
-	}
+	mcpLoadTools(t, tc, agent, "chat-a", "demo", mcpDemoTools()...)
 	if _, ok := tc.mcpManagers.get("main"); !ok {
 		t.Error("workspace A must have a live manager again")
 	}
@@ -336,11 +338,8 @@ func TestMCPSync_ConfigChangeThenRemovalUnregistersAllLoadedTools(t *testing.T) 
 	ctx := context.Background()
 
 	layer := tc.sessionTools(agent, "chat-a")
-	loader := mcpSessionLoader(t, tc, agent, "chat-a")
-	if res := loader.Execute(ctx, map[string]interface{}{"server": "demo"}); res.IsError {
-		t.Fatalf("first load failed: %s", res.ForLLM)
-	}
-	loaded := []string{"mcp_demo_echo", "mcp_demo_summary"}
+	mcpLoadTools(t, tc, agent, "chat-a", "demo", mcpDemoTools()...)
+	loaded := mcpDemoNamespaced()
 	for _, name := range loaded {
 		if _, ok := layer.Get(name); !ok {
 			t.Fatalf("%s not in the session view after load, have %v", name, layer.List())
@@ -363,12 +362,9 @@ func TestMCPSync_ConfigChangeThenRemovalUnregistersAllLoadedTools(t *testing.T) 
 
 	// Re-loading after the change does NOT re-register (skip-if-present): the
 	// stale tool object stays bound to the same manager and remote name.
-	res := loader.Execute(ctx, map[string]interface{}{"server": "demo"})
-	if res.IsError {
-		t.Fatalf("re-load after config edit failed: %s", res.ForLLM)
-	}
-	if !strings.Contains(res.ForLLM, "0 newly registered, 2 already present") {
-		t.Errorf("re-load should report everything as already present:\n%s", res.ForLLM)
+	res := mcpLoadTools(t, tc, agent, "chat-a", "demo", mcpDemoTools()...)
+	if newly, already := mcpCallableCounts(res); newly != 0 || already != 2 {
+		t.Errorf("re-load outcome = %d new / %d already, want 0/2:\n%s", newly, already, res.ForLLM)
 	}
 	out = layer.Execute(ctx, "mcp_demo_echo", map[string]interface{}{"message": "hola again"})
 	if out.IsError || out.ForLLM != "fake:echo" {
@@ -410,10 +406,10 @@ func TestMCPSync_ConfigChangeThenRemovalUnregistersAllLoadedTools(t *testing.T) 
 // (cross-server name collision) under the session-scoped model: two servers
 // expose the SAME remote tool name ("echo") under distinct namespaces, and
 // mcp_beta_echo already exists in the AGENT registry as a foreign tool (it was
-// not created by the loader). The loader must report it as "already present" —
-// the session layer resolves through to the base registry, so the foreign
-// instance wins — and retirement must leave it untouched: only the layer's own
-// names can ever disappear, and they disappear with the layer.
+// not created by get_mcp_tool). get_mcp_tool must report it as "already
+// registered" — the session layer resolves through to the base registry, so the
+// foreign instance wins — and retirement must leave it untouched: only the
+// layer's own names can ever disappear, and they disappear with the layer.
 func TestMCPSync_RetirementLeavesForeignMCPNamedToolAlone(t *testing.T) {
 	al, workspace := newMCPTestLoop(t)
 	tc := mcpTestCoordinator(t, al)
@@ -421,7 +417,6 @@ func TestMCPSync_RetirementLeavesForeignMCPNamedToolAlone(t *testing.T) {
 		return mcp.NewManager(paths, e2eFakeDialer{})
 	}
 	agent := mcpTestAgent(t, al)
-	ctx := context.Background()
 
 	// The foreign same-named tool: present BEFORE any MCP load happened.
 	foreign := &foreignTool{name: "mcp_beta_echo"}
@@ -435,23 +430,16 @@ func TestMCPSync_RetirementLeavesForeignMCPNamedToolAlone(t *testing.T) {
 	tc.syncMCPTools()
 
 	layer := tc.sessionTools(agent, "chat-a")
-	loader := mcpSessionLoader(t, tc, agent, "chat-a")
 	// Load alpha: both of its tools are new and get registered in the layer.
-	res := loader.Execute(ctx, map[string]interface{}{"server": "alpha"})
-	if res.IsError {
-		t.Fatalf("load alpha: %s", res.ForLLM)
-	}
-	if !strings.Contains(res.ForLLM, "2 newly registered, 0 already present") {
-		t.Errorf("alpha load output = %s, want 2 newly registered", res.ForLLM)
+	res := mcpLoadTools(t, tc, agent, "chat-a", "alpha", mcpDemoTools()...)
+	if newly, already := mcpCallableCounts(res); newly != 2 || already != 0 {
+		t.Errorf("alpha load outcome = %d new / %d already, want 2/0:\n%s", newly, already, res.ForLLM)
 	}
 	// Load beta: its echo resolves to the foreign base tool (already present,
 	// NOT registered by us), only summary is new.
-	res = loader.Execute(ctx, map[string]interface{}{"server": "beta"})
-	if res.IsError {
-		t.Fatalf("load beta: %s", res.ForLLM)
-	}
-	if !strings.Contains(res.ForLLM, "1 newly registered, 1 already present") {
-		t.Errorf("beta load output = %s, want 1 newly registered + 1 already present", res.ForLLM)
+	res = mcpLoadTools(t, tc, agent, "chat-a", "beta", mcpDemoTools()...)
+	if newly, already := mcpCallableCounts(res); newly != 1 || already != 1 {
+		t.Errorf("beta load outcome = %d new / %d already, want 1/1:\n%s", newly, already, res.ForLLM)
 	}
 	if _, ok := layer.Get("mcp_alpha_echo"); !ok {
 		t.Fatalf("mcp_alpha_echo not in the session view, have %v", layer.List())

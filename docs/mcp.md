@@ -2,9 +2,9 @@
 
 Lele speaks MCP as a **client**: it connects to external MCP servers and exposes
 their **tools** to the agent. Discovery, connection management and the tool
-wrapper live in `pkg/mcp`; the registry-side loader (`load_mcp_tools`) lives in
-`pkg/tools` and the per-agent wiring (prompt section, manager lifecycle) in
-`pkg/agent`.
+wrapper live in `pkg/mcp`; the registry-side discovery tools (`list_mcp_tools`
+and `get_mcp_tool`) live in `pkg/tools` and the per-agent wiring (prompt
+section, manager lifecycle) in `pkg/agent`.
 
 **v1 scope: tools only.** MCP *resources*, *prompts*, *sampling*, *elicitation*
 and *roots* are not supported. A remote server that answers `401` with an
@@ -851,7 +851,7 @@ discovery/reload, without editing the file):
 - Expansion is a single pass: a value that itself contains `${OTHER}` stays
   literal.
 
-## Using servers: `load_mcp_tools`
+## Using servers: `list_mcp_tools` and `get_mcp_tool`
 
 While at least one active server is configured, the system prompt gains a
 section listing **names and descriptions only** (never tool schemas):
@@ -859,22 +859,101 @@ section listing **names and descriptions only** (never tool schemas):
 ```text
 ## MCP Servers
 
-Use `load_mcp_tools` with a server name to load its tools.
+Use `list_mcp_tools` with a server name to browse its tools (paginated, most-used first), then `get_mcp_tool` with {"server": "<name>", "tool": "<tool>"} — or "tools": ["<t1>", "<t2>"] for several — to load full schemas and make them callable.
 
 - **files** — Read and write files under ~/notes
 
 ---
 ```
 
-The LLM loads a server when it needs it:
+Discovery takes two steps **on purpose**: a server exposing 60 tools would
+otherwise burn tens of thousands of tokens of JSON schemas to expose the single
+capability the model actually wants. Listing stays schema-free (cheap enough to
+call repeatedly) and only the tools the model picks pay for their schema.
+
+### `list_mcp_tools` — which tools does this server have?
 
 ```text
-load_mcp_tools
+list_mcp_tools
 {"server": "files"}
 ```
 
+One page of names — never a schema:
+
+````text
+MCP server "files": 2 tool(s), page 1/1 (page size 20). Ordered by usage frequency.
+
+- mcp_files_read_file — Read a file from disk. (used 12 times)
+- mcp_files_write_file — Write a file to disk.
+
+Call get_mcp_tool with {"server": "files", "tool": "<name>"} to load a tool's full schema and make it callable.
+````
+
+- **Ordering:** most-used first, ties (including every never-used tool)
+  alphabetical by namespaced name, so repeated calls are byte-identical and
+  the tools a user actually works with land on page 1.
+- **Schema-free:** the namespaced name, one trimmed line of the description
+  (at most 120 characters; the full text comes with `get_mcp_tool`) and a
+  `(used N times)` marker when the tool has been called.
+- **Pagination:** `page` (1-based, default 1) and `page_size` (default 20,
+  maximum 100). An out-of-range `page` is clamped to the last page and an
+  oversized `page_size` to 100 — a model that guesses "page 5" of a two-page
+  server wants the tail, not an error.
+- **Registers nothing.** Browsing a server — or paging through it twice —
+  costs nothing but text.
+
+### `get_mcp_tool` — load full schemas and make tools callable
+
+```text
+get_mcp_tool
+{"server": "files", "tool": "read_file"}
+```
+
+Several tools in one call — one tool call instead of N:
+
+```text
+get_mcp_tool
+{"server": "files", "tools": ["read_file", "write_file"]}
+```
+
+The result carries the full description and the pretty-printed input schema of
+every tool it loaded:
+
+````text
+Loaded 2 tool(s) from MCP server "files".
+
+Tool mcp_files_read_file from MCP server "files" is now callable.
+Read a file from disk.
+
+inputSchema:
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": { "type": "string", "description": "File path" }
+  },
+  "required": ["path"]
+}
+```
+
+Tool mcp_files_write_file from MCP server "files" is now callable.
+Write a file to disk.
+
+inputSchema:
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": { "type": "string", "description": "File path" },
+    "content": { "type": "string", "description": "File content" }
+  },
+  "required": ["path", "content"]
+}
+```
+````
+
 **The load is session-scoped.** Every chat gets its own tool layer over the
-agent's registry (`tools.NewScopedRegistry`): the remote tools `load_mcp_tools`
+agent's registry (`tools.NewScopedRegistry`): the remote tools `get_mcp_tool`
 registers land there, so they are offered to — and callable from — **that
 session only**. Other sessions served by the same agent keep seeing just their
 own tools: nothing appears in their context, and an accidental call to a tool
@@ -890,55 +969,80 @@ at which point the session is back to the base registry and has to load again.
 At most 256 layers are kept per agent (LRU), so a long-lived gateway cannot
 accumulate them forever.
 
-The first load registers every tool under its namespaced registry name and
-returns the full listing (name, description, input schema):
-
-````text
-Loaded 2 tool(s) from MCP server "files": 2 newly registered, 0 already present.
-
-## mcp_files_read_file
-Read a file from disk.
-inputSchema:
-```json
-{
-  "type": "object",
-  "properties": {
-    "path": { "type": "string", "description": "File path" }
-  },
-  "required": ["path"]
-}
-```
-
-## mcp_files_write_file
-Write a file to disk.
-inputSchema:
-```json
-{
-  "type": "object",
-  "properties": {
-    "path": { "type": "string", "description": "File path" },
-    "content": { "type": "string", "description": "File content" }
-  },
-  "required": ["path", "content"]
-}
-```
-````
-
 Rules of the bridge:
 
 - **Namespacing:** remote tools are registered as `mcp_<server>_<tool>`,
   sanitized to `[A-Za-z0-9_-]`. A name longer than 64 characters is truncated
   and suffixed with a 6-hex-char FNV-1a hash, so distinct long names stay
   distinct. A server can never shadow a built-in lele tool.
-- **Idempotent:** repeated `load_mcp_tools` calls never duplicate
-  registrations (the count in the output stays stable) and always repeat the
-  listing, so the model can re-read the specs.
+- **Names accepted:** both the namespaced name from the listing
+  (`mcp_files_read_file`) and the original remote name (`read_file`). Matching
+  is exact and case-sensitive — MCP tool names are, and a fuzzy match would
+  register a tool the model did not ask for.
+- **Batch semantics:** `tool` and `tools` are merged in that order and
+  deduplicated twice — on the raw requested name, then on the resolved
+  registry name — so asking for both `read_file` and `mcp_files_read_file`
+  loads and renders it once. A batch resolves against a single `LoadServer`
+  call and registers nothing unless at least one name resolved.
+- **Partial success is a success:** the tools that were found are registered
+  and rendered, and a trailing note names the ones that were not
+  (`Not found on MCP server "files": "remove". Call list_mcp_tools …`). A call
+  where *nothing* resolves is an error that points at `list_mcp_tools` rather
+  than dumping the server's name list — dumping it would re-spend the very
+  context the listing step exists to save.
+- **Idempotent:** repeated `get_mcp_tool` calls never duplicate registrations
+  (the count stays stable), never rebuild a tool, and always repeat the specs,
+  so the model can re-read them.
 - **Non-destructive:** an existing registry name is never overwritten — a
-  collision with a built-in or an earlier load reports as "already present".
+  collision with a built-in or an earlier load reports as "already registered
+  and callable". The base registry always wins, and the result renders the
+  **retained** entry's description and schema (never the remote tool's, which
+  would describe something the registry does not run); the retained entry is
+  only attributed to the server when it is in fact that server's tool.
 - **Unknown server:** fails with a clean error listing the known servers
   (`known servers: …`).
 - Calling a loaded tool afterwards works like any built-in: the call is
   forwarded to the server under its original MCP name.
+
+### Usage counters
+
+The listing ranking comes from counters the client keeps, not from the
+(tiny, per-session) loaded set:
+
+- **Where:** `<LeleDir>/mcp_usage.json` — next to `mcp.json` and the auth
+  store — as a nested object `{"<server>": {"<remoteTool>": <call count>}}`
+  keyed by the **remote** tool name (the name on the server, not the
+  namespaced registry name).
+- **When:** every call that actually reaches the server increments its
+  counter **once**, in `Manager.CallRemote`. A result carrying `isError` still
+  counts (the tool *was* used, and a tool that keeps failing is exactly what a
+  ranking should surface); a transport failure, an auth challenge or a
+  cancelled caller counts nothing.
+- **How it is written:** `0600`, atomically — the JSON goes to a temp file in
+  the same directory and is renamed over the target, so a reader always sees a
+  complete file and a crash can never leave a half-written one. No `fsync`:
+  losing one increment after a hard crash is harmless, the counts only rank
+  tools. Each write is a **read/merge/replace** of the pending increments
+  rather than a dump of one manager's snapshot, so several managers sharing a
+  `LeleDir` (an agent's manager plus a probe, or a second process) keep each
+  other's counts.
+- **Best-effort by contract:** usage tracking never breaks a tool call. A
+  missing or corrupt file starts from empty counts with a single warning, a
+  failed write is a logged warning, and a manager with no known `LeleDir`
+  keeps its counters in memory only.
+
+### Allowlist
+
+The two tools are gated individually (`tools` in `config.json`): allowing
+`list_mcp_tools` keeps only the listing tool, allowing `get_mcp_tool` keeps only
+the loader. The legacy name **`load_mcp_tools` acts as an alias that enables
+both**, so a config written for the old bulk loader keeps working unchanged — no
+tool registers under that name any more. With neither tool allowed, the session
+layers are dropped (they hold the tools loaded through them) while the prompt
+keeps listing the servers: configuration is not a tool. The prompt's instructions
+name only the tools the allowlist keeps, so an agent allowed just
+`list_mcp_tools` is never told to call `get_mcp_tool`. **Subagents receive
+neither tool** (v1).
 
 ## Lifecycle
 
@@ -949,10 +1053,10 @@ Rules of the bridge:
   session keeps offering `mcp_*` tools with no server behind them), drops the
   prompt section and closes the connections. Moving the workspace retires the
   stale manager — closed **and dropped**, so coming back builds a fresh,
-  working one. An allowlist that excludes `load_mcp_tools` on a reload drops
-  the session layers too (the loader is the only sanctioned way to create those
-  tools); the prompt keeps listing the servers either way (they are
-  configuration, not tools). Agents removed from the config need none of this:
+  working one. An allowlist that keeps neither `list_mcp_tools` nor
+  `get_mcp_tool` on a reload drops the session layers too (they are the only
+  sanctioned way to create those tools); the prompt keeps listing the servers
+  either way (they are configuration, not tools). Agents removed from the config need none of this:
   their whole tool registry dies with the instance, and their session layers
   die with their manager.
 - **Config changes are picked up lazily, without a restart:** the prompt-facing
@@ -971,8 +1075,8 @@ Rules of the bridge:
 - **Lazy connect:** no connection is opened until a server's tools are first
   loaded — configuring a server costs nothing at startup.
 - **Idempotent loads:** after the first successful load, specs are cached;
-  further `load_mcp_tools` calls for the same server return them without
-  dialing (a dead context gets its context error back instead).
+  further `list_mcp_tools`/`get_mcp_tool` calls for the same server return them
+  without dialing (a dead context gets its context error back instead).
 - **Reconnect once:** a transport-level failure (crashed stdio child, dropped
   socket) drops **that connection** — never a newer one installed by a
   concurrent redial — re-resolves the server's config, redials once with it
@@ -1033,8 +1137,8 @@ Rules of the bridge:
 - **Windows:** `command` is spawned directly, without a shell, so `.cmd`
   shims such as `npx` may fail to start. Use the underlying program instead
   (e.g. `node …\server.js`, `python -m …`) or a wrapper script.
-- **Subagents do not receive `load_mcp_tools`** (v1): loading MCP tools
-  stays a decision of the main agent.
+- **Subagents receive neither discovery tool** (v1): listing and loading MCP
+  tools stay a decision of the main agent.
 - **The project layer is process-wide:** one cwd per lele process feeds every
   agent's project layer.
 
@@ -1070,9 +1174,9 @@ suite. The repo ships a ready-made harness under `pkg/mcp/testdata/`:
 
 3. Start `lele agent` (or `lele tui`) — a global-layer file applies from any
    working directory — and confirm the `## MCP Servers` section lists `smoke`.
-4. Ask the agent to `load_mcp_tools` `smoke`, then call one of
-   `mcp_smoke_<tool>` — the round trip proves discovery → manager → wrapper →
-   registry → live stdio child.
+4. Ask the agent to `list_mcp_tools` `smoke`, then `get_mcp_tool` one of the
+   listed names and call it as `mcp_smoke_<tool>` — the round trip proves
+   discovery → manager → wrapper → registry → live stdio child.
 5. Kill the child mid-session and repeat the call: the first attempt fails
   (or recovers) through the reconnect-once path with a clean error.
 
@@ -1081,6 +1185,6 @@ The automated equivalent — the same code path against in-process servers — i
 
 ## Related Docs
 
-- `docs/tools_configuration.md` — the `load_mcp_tools` tool reference
+- `docs/tools_configuration.md` — the `list_mcp_tools`/`get_mcp_tool` reference
 - `docs/config-reference.md` — where lele's own config lives
 - `docs/architecture.md` — runtime map
