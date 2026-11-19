@@ -182,7 +182,7 @@ func TestRefreshCatalogSuggestionsFilters(t *testing.T) {
 	m.modalMode = ModalAddModel
 	m.formStepIndex = 1
 	m.providerSelectedName = "my-openai"
-	m.formValues = make([]string, 6)
+	m.formValues = make([]string, addModelStepCount)
 
 	m.refreshCatalogSuggestions("")
 	if !m.addModelCatalogActive {
@@ -222,7 +222,7 @@ func TestStartCatalogPickerIfNeededOnlyOnModelNameStep(t *testing.T) {
 	m := newCatalogTestModel(t)
 	m.modalMode = ModalAddModel
 	m.providerSelectedName = "my-openai"
-	m.formValues = make([]string, 6)
+	m.formValues = make([]string, addModelStepCount)
 
 	// Alias step — picker off.
 	m.formStepIndex = 0

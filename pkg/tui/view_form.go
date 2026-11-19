@@ -262,9 +262,32 @@ func (m *Model) renderFormStepHint(isReviewStep bool) string {
 		// Both in-place steps are optional: a blank API key / API base URL
 		// keeps the stored value (the key is never pre-filled, see
 		// openProviderEditFlow), so the hint has to say so — otherwise the
-		// blank input reads as "wipe it".
-		if m.formStepIndex == 1 || m.formStepIndex == 2 {
+		// blank input reads as "wipe it". The middle steps say the same AND
+		// teach the "-" escape hatch, and the last two spell out the accepted
+		// answer of a value-typed step.
+		switch m.formStepIndex {
+		case editProviderAPIKeyStep, editProviderAPIBaseStep:
 			return CommentColorStyle.Render("  "+i18n.T("tui.editProviderKeepHint")) + "\n\n"
+		case editProviderProxyStep, editProviderAuthMethodStep, editProviderConnectModeStep:
+			return CommentColorStyle.Render("  "+i18n.T("tui.editProviderOptionalHint")) + "\n\n"
+		case editProviderWebSearchStep:
+			return CommentColorStyle.Render("  "+i18n.T("tui.editProviderWebSearchHint")) + "\n\n"
+		case editProviderHeadersStep:
+			return CommentColorStyle.Render("  "+i18n.T("tui.editProviderHeadersHint")) + "\n\n"
+		}
+		return ""
+	}
+	if m.modalMode == ModalEditModel {
+		// The reasoning steps accept a fixed set of answers, and the optional
+		// ones need the "default" escape hatch spelled out: blank accepts the
+		// pre-filled answer, so it cannot mean "unset" (see
+		// reasoningFromFormValues). The enabled step is plain yes/no and needs
+		// no hint.
+		switch m.formStepIndex {
+		case editModelReasoningEffortStep, editModelReasoningExcludeStep, editModelReasoningSummaryStep:
+			return CommentColorStyle.Render("  "+i18n.T("tui.editModelReasoningDefaultHint")) + "\n\n"
+		case editModelReasoningMaxTokensStep:
+			return CommentColorStyle.Render("  "+i18n.T("tui.editModelReasoningTokensHint")) + "\n\n"
 		}
 		return ""
 	}
@@ -337,6 +360,38 @@ func renderCatalogSuggestions(labels []string, idx, maxVisible int) string {
 	return sb.String()
 }
 
+// modelFormStepNames returns the labels of the model form (ModalAddModel /
+// ModalEditModel) in step order. Both modes share the first six labels — the
+// model-name label carries the catalog "(thinking: low/medium/high)" decoration
+// in both — and the edit form appends one label per reasoning override (see
+// addModelStepCount / editModelStepCount). Built from one prefix slice so the
+// shared steps can never drift between the two modes.
+func (m *Model) modelFormStepNames() []string {
+	nameLabel := "Model name"
+	if m.addModelCatalogThink != "" {
+		nameLabel += " (thinking: " + m.addModelCatalogThink + ")"
+	}
+	steps := []string{
+		"Model alias",
+		nameLabel,
+		"Context window",
+		"Max tokens",
+		"Vision (yes/no)",
+		"Think system",
+	}
+	if m.modalMode != ModalEditModel {
+		return steps
+	}
+	// Reasoning overrides, in ReasoningConfig field order.
+	return append(steps,
+		"Reasoning (yes/no)",
+		"Reasoning effort",
+		"Reasoning max tokens",
+		"Reasoning exclude (yes/no/default)",
+		"Reasoning summary",
+	)
+}
+
 // formStepNames returns the step names for the current form modal mode.
 func (m *Model) formStepNames() []string {
 	switch m.modalMode {
@@ -351,16 +406,24 @@ func (m *Model) formStepNames() []string {
 		}
 		return steps
 	case ModalAddModel, ModalEditModel:
-		nameLabel := "Model name"
-		if m.addModelCatalogThink != "" {
-			nameLabel += " (thinking: " + m.addModelCatalogThink + ")"
-		}
-		return []string{"Model alias", nameLabel, "Context window", "Max tokens", "Vision (yes/no)", "Think system"}
+		return m.modelFormStepNames()
 	case ModalEditProvider:
-		// Only the three identity fields are editable: renaming a provider
-		// would have to re-point every agent model reference, so the name is
-		// shown in the detail view and never rewritten here.
-		return []string{"Provider type", "API Key", "API Base URL"}
+		// One step per editable provider config field, in editProvider*Step
+		// order (the same constants the ENTER handler and the masking
+		// predicates use). The provider NAME is deliberately absent: renaming a
+		// provider would have to re-point every agent model reference, so the
+		// name is shown in the detail view and never rewritten here. The model
+		// list keeps its own flows.
+		return []string{
+			"Provider type",
+			"API Key",
+			"API Base URL",
+			"Proxy",
+			"Auth method",
+			"Connect mode",
+			"Web search (yes/no/default)",
+			"Headers (JSON)",
+		}
 	case ModalAddCommand:
 		return []string{
 			i18n.T("tui.commands.fieldName"),

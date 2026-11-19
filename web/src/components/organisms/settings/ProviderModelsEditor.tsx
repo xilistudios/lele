@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import type { ProviderModelConfig } from '../../../lib/types'
+import type { ProviderModelConfig, ReasoningConfig } from '../../../lib/types'
 import { RemoveButton } from '../../atoms/RemoveButton'
 import { BooleanInput, NumberInput, SelectInput, SettingsField } from '../../molecules'
 import { type AddModelPayload, ModelSearchInput } from './ModelSearchInput'
@@ -48,6 +48,40 @@ export function ProviderModelsEditor({ name, models, onChange, providerType }: P
     { value: 'qwen', label: 'qwen' },
     { value: 'none', label: 'none' },
   ]
+
+  // Reasoning overrides (config.ReasoningConfig in Go). "" is the "unset"
+  // sentinel of every reasoning select: an absent key lets the provider/model
+  // decide, which is what the user sees as the default option.
+  const REASONING_EFFORTS: Array<{ value: string; label: string }> = [
+    { value: '', label: t('settings.options.reasoningDefault') },
+    { value: 'low', label: t('settings.options.thinkingLow') },
+    { value: 'medium', label: t('settings.options.thinkingMedium') },
+    { value: 'high', label: t('settings.options.thinkingHigh') },
+  ]
+
+  // OpenAI o-series reasoning summary levels — wire identifiers, same
+  // reasoning as THINKING_TYPES: they are API values, not prose.
+  const REASONING_SUMMARIES: Array<{ value: string; label: string }> = [
+    { value: '', label: t('settings.options.reasoningDefault') },
+    { value: 'auto', label: 'auto' },
+    { value: 'detailed', label: 'detailed' },
+    { value: 'concise', label: 'concise' },
+  ]
+
+  // Tri-state: a BooleanInput cannot express "unset" (undefined = let the
+  // provider decide), so exclude goes through a select.
+  const REASONING_EXCLUDE: Array<{ value: string; label: string }> = [
+    { value: '', label: t('settings.options.reasoningDefault') },
+    { value: 'yes', label: t('common.yes') },
+    { value: 'no', label: t('common.no') },
+  ]
+
+  // Merge a reasoning patch into a model, creating the ReasoningConfig when
+  // the model has none yet (spreading undefined yields an empty object).
+  const withReasoning = (m: ProviderModelConfig, patch: ReasoningConfig): ProviderModelConfig => ({
+    ...m,
+    reasoning: { ...m.reasoning, ...patch },
+  })
 
   const addModel = (input: string | AddModelPayload) => {
     const meta: AddModelPayload = typeof input === 'string' ? { id: input } : input
@@ -157,7 +191,85 @@ export function ProviderModelsEditor({ name, models, onChange, providerType }: P
                   onChange={(v) =>
                     onChange({
                       ...models,
-                      [key]: { ...m, reasoning: { ...m.reasoning, enable: v } },
+                      [key]: withReasoning(m, { enable: v }),
+                    })
+                  }
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.modelReasoningEffort')}
+                path={`providers.${name}.models.${key}.reasoning.effort`}
+                description={t('settings.descriptions.modelReasoningEffort')}
+              >
+                <SelectInput
+                  id={`providers.${name}.models.${key}.reasoning.effort`}
+                  value={m.reasoning?.effort ?? ''}
+                  options={REASONING_EFFORTS}
+                  onChange={(v) =>
+                    onChange({
+                      ...models,
+                      // "" is the default — omit the key instead of writing it.
+                      [key]: withReasoning(m, {
+                        effort: v === '' ? undefined : (v as ReasoningConfig['effort']),
+                      }),
+                    })
+                  }
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.modelReasoningSummary')}
+                path={`providers.${name}.models.${key}.reasoning.summary`}
+                description={t('settings.descriptions.modelReasoningSummary')}
+              >
+                <SelectInput
+                  id={`providers.${name}.models.${key}.reasoning.summary`}
+                  value={m.reasoning?.summary ?? ''}
+                  options={REASONING_SUMMARIES}
+                  onChange={(v) =>
+                    onChange({
+                      ...models,
+                      [key]: withReasoning(m, {
+                        summary: v === '' ? undefined : (v as ReasoningConfig['summary']),
+                      }),
+                    })
+                  }
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.modelReasoningMaxTokens')}
+                path={`providers.${name}.models.${key}.reasoning.max_tokens`}
+                description={t('settings.descriptions.modelReasoningMaxTokens')}
+              >
+                <NumberInput
+                  id={`providers.${name}.models.${key}.reasoning.max_tokens`}
+                  value={m.reasoning?.max_tokens || 0}
+                  onChange={(v) =>
+                    onChange({
+                      ...models,
+                      // 0 means "no cap" — drop the key so the config stays clean.
+                      [key]: withReasoning(m, { max_tokens: v || undefined }),
+                    })
+                  }
+                  min={0}
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.modelReasoningExclude')}
+                path={`providers.${name}.models.${key}.reasoning.exclude`}
+                description={t('settings.descriptions.modelReasoningExclude')}
+              >
+                <SelectInput
+                  id={`providers.${name}.models.${key}.reasoning.exclude`}
+                  value={
+                    m.reasoning?.exclude === undefined ? '' : m.reasoning.exclude ? 'yes' : 'no'
+                  }
+                  options={REASONING_EXCLUDE}
+                  onChange={(v) =>
+                    onChange({
+                      ...models,
+                      [key]: withReasoning(m, {
+                        exclude: v === '' ? undefined : v === 'yes',
+                      }),
                     })
                   }
                 />
@@ -177,7 +289,8 @@ export function ProviderModelsEditor({ name, models, onChange, providerType }: P
                       // omitting the key instead of writing it explicitly.
                       [key]: {
                         ...m,
-                        thinking_type: v === 'auto' ? undefined : (v as ProviderModelConfig['thinking_type']),
+                        thinking_type:
+                          v === 'auto' ? undefined : (v as ProviderModelConfig['thinking_type']),
                       },
                     })
                   }

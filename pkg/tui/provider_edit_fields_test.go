@@ -12,9 +12,9 @@ import (
 )
 
 // Tests for the "edit provider" flow (ModalEditProvider): a provider's type,
-// API key and API base URL can be changed from the provider detail view —
-// without losing its models, proxy or any other field the form does not ask
-// about. The flow is reachable both from the "Edit provider" action row and
+// API key, API base URL, proxy, auth method, connect mode, web search and custom
+// headers can be changed from the provider detail view — without losing its
+// models or any field the form does not ask about. The flow is reachable both from the "Edit provider" action row and
 // from the "e" shortcut, it is masked on the API-key step, and ESC must leave
 // the stored config untouched.
 
@@ -95,7 +95,11 @@ func TestProviderEditFormPreFillsTypeAndBaseButNotKey(t *testing.T) {
 	if m.providerSelectedName != providerEditTestName {
 		t.Errorf("providerSelectedName = %q, want %q", m.providerSelectedName, providerEditTestName)
 	}
-	wantValues := []string{"openai", "", "https://api.example.com/v1"}
+	// One entry per step, in editProvider*Step order: the stored type, base
+	// URL and proxy are seeded, the API key and the headers blob stay blank
+	// (secrets are never rendered back), and an unset web_search shows as
+	// "default".
+	wantValues := []string{"openai", "", "https://api.example.com/v1", "http://proxy.internal:8080", "", "", "default", ""}
 	if len(m.formValues) != len(wantValues) {
 		t.Fatalf("formValues = %q, want %d entries", m.formValues, len(wantValues))
 	}
@@ -148,13 +152,16 @@ func TestProviderEditSavesInPlaceKeepingUntouchedFields(t *testing.T) {
 	if strings.TrimSpace(m.textInput.Value()) != "" {
 		t.Fatalf("API-key step started with %q, want blank", m.textInput.Value())
 	}
-	m = sendKeys(m, "\r")
-	// Step 2 — API base: replace it, then ENTER saves.
+	m = sendKeys(m, "\r") // keep the key → base step
+	// Step 2 — API base: replace it.
 	if got, want := m.textInput.Value(), "https://api.example.com/v1"; got != want {
 		t.Fatalf("API-base step started with %q, want the stored base %q", got, want)
 	}
-	m.textInput.SetValue("https://new.example.com/v1")
-	m = sendKeys(m, "\r")
+	// Walk the remaining steps (base, proxy, auth, connect, web search,
+	// headers) with ENTER; the last one saves.
+	m = walkProviderEditForm(t, m, map[int]string{
+		editProviderAPIBaseStep: "https://new.example.com/v1",
+	})
 
 	if m.modalMode != ModalProviderDetail {
 		t.Fatalf("modal = %v, want ModalProviderDetail after saving", m.modalMode)
@@ -213,8 +220,9 @@ func TestProviderEditNewKeyReplacesStoredKey(t *testing.T) {
 
 	m = sendKeys(m, "\r") // keep the type
 	m.textInput.SetValue("sk-brand-new-key")
-	m = sendKeys(m, "\r") // save the key, move to the base step
-	m = sendKeys(m, "\r") // keep the base
+	// Enter through the remaining steps (key + base + the optional ones); a
+	// blank key step would keep the stored key.
+	m = walkProviderEditForm(t, m, nil)
 
 	if m.modalMode != ModalProviderDetail {
 		t.Fatalf("modal = %v, want ModalProviderDetail after saving", m.modalMode)
@@ -310,12 +318,12 @@ func TestOpenProviderEditFlowUnknownProvider(t *testing.T) {
 // TestUpdateProviderErrors covers the guard clauses of the single save point.
 func TestUpdateProviderErrors(t *testing.T) {
 	m := &Model{cfg: &config.Config{}}
-	if err := m.updateProvider("x", "openai", "k", "b"); err == nil {
+	if err := m.updateProvider("x", providerEditValues{Type: "openai", APIKey: "k", APIBase: "b"}); err == nil {
 		t.Error("updateProvider with no providers config must fail")
 	}
 
 	m = newProviderEditTestModel(t)
-	if err := m.updateProvider("ghost", "openai", "k", "b"); err == nil {
+	if err := m.updateProvider("ghost", providerEditValues{Type: "openai", APIKey: "k", APIBase: "b"}); err == nil {
 		t.Error("updateProvider on a missing provider must fail")
 	}
 	if got := m.cfg.Providers.Named[providerEditTestName].APIKey; got != providerEditTestKey {
@@ -324,7 +332,7 @@ func TestUpdateProviderErrors(t *testing.T) {
 }
 
 // TestProviderEditFormRenders covers the painted surface: the modal title, the
-// three steps and the keep-blank hint must reach the frame, so a user can see
+// eight steps and the keep-blank hint must reach the frame, so a user can see
 // that a blank API key keeps the stored one.
 func TestProviderEditFormRenders(t *testing.T) {
 	m := newProviderEditTestModel(t)
@@ -338,6 +346,11 @@ func TestProviderEditFormRenders(t *testing.T) {
 		"Provider type",
 		"API Key",
 		"API Base URL",
+		"Proxy",
+		"Auth method",
+		"Connect mode",
+		"Web search (yes/no/default)",
+		"Headers (JSON)",
 		i18n.T("tui.editProviderKeepHint"),
 	} {
 		if !strings.Contains(frame, want) {
@@ -404,7 +417,11 @@ func TestUpdateProviderRollsBackWhenSaveFails(t *testing.T) {
 	}
 	typedBefore := m.cfg.Providers.OpenAI.ProviderConfig
 
-	err := m.updateProvider("myprov", "anthropic", "sk-brand-new-key", "https://new.example/v1")
+	err := m.updateProvider("myprov", providerEditValues{
+		Type:    "anthropic",
+		APIKey:  "sk-brand-new-key",
+		APIBase: "https://new.example/v1",
+	})
 	if err == nil {
 		t.Fatal("updateProvider must fail when the config cannot be saved")
 	}
@@ -434,7 +451,7 @@ func TestUpdateProviderMirrorPreservesTypedCredentials(t *testing.T) {
 		// the JSON is decoded.
 		m.cfg.Providers.OpenAI.ProviderConfig = config.ProviderConfig{APIKey: "sk-from-env"}
 
-		if err := m.updateProvider("openai", "openai", "", "https://new.example/v1"); err != nil {
+		if err := m.updateProvider("openai", providerEditValues{Type: "openai", APIBase: "https://new.example/v1"}); err != nil {
 			t.Fatalf("updateProvider: %v", err)
 		}
 
@@ -456,7 +473,7 @@ func TestUpdateProviderMirrorPreservesTypedCredentials(t *testing.T) {
 			},
 		}
 
-		if err := m.updateProvider("openai", "openai", "", ""); err != nil {
+		if err := m.updateProvider("openai", providerEditValues{Type: "openai"}); err != nil {
 			t.Fatalf("updateProvider: %v", err)
 		}
 
@@ -480,7 +497,7 @@ func TestUpdateProviderMirrorPreservesTypedCredentials(t *testing.T) {
 
 		// Pressing ENTER through the pre-filled base step submits the stored
 		// value — it is not an edit, so the typed copy keeps the env URL.
-		if err := m.updateProvider("openai", "openai", "", "https://api.example.com/v1"); err != nil {
+		if err := m.updateProvider("openai", providerEditValues{Type: "openai", APIBase: "https://api.example.com/v1"}); err != nil {
 			t.Fatalf("updateProvider: %v", err)
 		}
 
@@ -503,7 +520,7 @@ func TestUpdateProviderMirrorPreservesTypedCredentials(t *testing.T) {
 		m.cfg.Providers.OpenAI.ProviderConfig = config.ProviderConfig{APIKey: "sk-from-env"}
 
 		// Editing ONLY the base URL must not swap the effective key.
-		if err := m.updateProvider("openai", "openai", "", "https://new.example/v1"); err != nil {
+		if err := m.updateProvider("openai", providerEditValues{Type: "openai", APIBase: "https://new.example/v1"}); err != nil {
 			t.Fatalf("updateProvider: %v", err)
 		}
 
@@ -520,7 +537,7 @@ func TestUpdateProviderMirrorPreservesTypedCredentials(t *testing.T) {
 		m.cfg.Providers.Named["openai"] = config.NamedProviderConfig{Type: "openai"}
 		m.cfg.Providers.OpenAI.ProviderConfig = config.ProviderConfig{APIKey: "sk-from-env"}
 
-		if err := m.updateProvider("openai", "openai", "sk-typed-by-user", ""); err != nil {
+		if err := m.updateProvider("openai", providerEditValues{Type: "openai", APIKey: "sk-typed-by-user"}); err != nil {
 			t.Fatalf("updateProvider: %v", err)
 		}
 

@@ -288,7 +288,9 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 	case "/add-model":
 		m.resetModal(ModalAddModel)
 		m.formStepIndex = 0
-		m.formValues = make([]string, 6) // alias, model_name, context_window, max_tokens, vision, thinking_type
+		// alias, model_name, context_window, max_tokens, vision, thinking_type
+		// (see addModelStepCount — the add form has no reasoning steps).
+		m.formValues = make([]string, addModelStepCount)
 		m.formError = ""
 		m.formConfirmMode = false
 		m.textInput.SetValue("")

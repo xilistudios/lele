@@ -10,23 +10,23 @@ import (
 // Tests for the "edit model" flow (ModalEditModel): pressing ENTER on a model
 // row in the provider detail must OPEN a pre-filled edit form — never delete
 // the model —, the form must save in place via updateModelInProvider (keeping
-// fields the form does not ask about), ESC must return to the detail view, and
-// the shared ENTER branch must not regress the add-model flow.
+// the fields it does not ask about and storing the reasoning answers), ESC must
+// return to the detail view from any step, and the shared ENTER branch must not
+// regress the add-model flow.
 //
 // The stored Model names are deliberately NOT in the embedded catalog so the
 // catalog picker cannot prefill/clobber form values while walking the steps.
 
 // newEditModelTestModel builds a Model whose "test-provider" provider holds
-// two models; "gpt-4o" carries Temperature/Reasoning so edit-survival of
-// fields outside the form can be asserted.
+// two models; "gpt-4o" carries Temperature and a FULLY-LOADED Reasoning config
+// (every optional override set) so edit-survival of fields outside the form and
+// the round-trip of the five reasoning steps can both be asserted.
 func newEditModelTestModel(t *testing.T) *Model {
 	t.Helper()
 	m := newTestModel(t)
 	if m.cfg.Providers == nil {
 		m.cfg.Providers = &config.ProvidersConfig{}
 	}
-	temp := 0.7
-	effort := "high"
 	m.cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"test-provider": {
 			Type: "openai",
@@ -40,8 +40,9 @@ func newEditModelTestModel(t *testing.T) *Model {
 					ContextWindow: 128000,
 					MaxTokens:     4096,
 					Vision:        false,
-					Temperature:   &temp,
-					Reasoning:     &config.ReasoningConfig{Effort: &effort},
+					Video:         true,
+					Temperature:   ptrFloat(0.7),
+					Reasoning:     fullyLoadedReasoning(),
 				},
 				"gpt-4o-mini": {
 					Model:         "stored-mini-001",
@@ -53,6 +54,50 @@ func newEditModelTestModel(t *testing.T) *Model {
 		},
 	}
 	return m
+}
+
+// fullyLoadedReasoning is the "every reasoning option set" config the edit form
+// must round-trip unchanged: enabled, effort high, 2048 max reasoning tokens,
+// tokens excluded from the response and a detailed summary.
+func fullyLoadedReasoning() *config.ReasoningConfig {
+	effort := "high"
+	maxTokens := 2048
+	exclude := true
+	summary := "detailed"
+	return &config.ReasoningConfig{
+		Enable:    true,
+		Effort:    &effort,
+		MaxTokens: &maxTokens,
+		Exclude:   &exclude,
+		Summary:   &summary,
+	}
+}
+
+// ptrFloat returns a pointer to v (Temperature is a *float64).
+func ptrFloat(v float64) *float64 { return &v }
+
+// assertFullyLoadedReasoning fails unless rc is exactly the config built by
+// fullyLoadedReasoning (all five fields, values AND presence).
+func assertFullyLoadedReasoning(t *testing.T, rc *config.ReasoningConfig) {
+	t.Helper()
+	if rc == nil {
+		t.Fatal("Reasoning = nil, want the fully-loaded config")
+	}
+	if !rc.Enable {
+		t.Error("Reasoning.Enable = false, want true")
+	}
+	if rc.Effort == nil || *rc.Effort != "high" {
+		t.Errorf("Reasoning.Effort = %v, want high", rc.Effort)
+	}
+	if rc.MaxTokens == nil || *rc.MaxTokens != 2048 {
+		t.Errorf("Reasoning.MaxTokens = %v, want 2048", rc.MaxTokens)
+	}
+	if rc.Exclude == nil || *rc.Exclude != true {
+		t.Errorf("Reasoning.Exclude = %v, want true", rc.Exclude)
+	}
+	if rc.Summary == nil || *rc.Summary != "detailed" {
+		t.Errorf("Reasoning.Summary = %v, want detailed", rc.Summary)
+	}
 }
 
 // openProviderDetail runs /providers and presses ENTER to land on the detail.
@@ -102,10 +147,14 @@ func TestProviderDetailEnterOpensEditDoesNotDelete(t *testing.T) {
 		t.Fatal(`model "gpt-4o-mini" was deleted by ENTER`)
 	}
 
-	// The form is pre-filled with the stored values.
-	wantValues := []string{"gpt-4o", "stored-gpt-4o-001", "128000", "4096", "no", "auto"}
-	if len(m.formValues) != 6 {
-		t.Fatalf("formValues len = %d, want 6: %v", len(m.formValues), m.formValues)
+	// The form is pre-filled with the stored values, reasoning steps included
+	// (a fully-loaded config reads back as yes/high/2048/yes/detailed).
+	wantValues := []string{
+		"gpt-4o", "stored-gpt-4o-001", "128000", "4096", "no", "auto",
+		"yes", "high", "2048", "yes", "detailed",
+	}
+	if len(m.formValues) != editModelStepCount {
+		t.Fatalf("formValues len = %d, want %d: %v", len(m.formValues), editModelStepCount, m.formValues)
 	}
 	for i, want := range wantValues {
 		if m.formValues[i] != want {
@@ -120,11 +169,12 @@ func TestProviderDetailEnterOpensEditDoesNotDelete(t *testing.T) {
 	}
 }
 
-// TestProviderDetailEditSaveUpdatesInPlace walks the 6 steps (changing the
+// TestProviderDetailEditSaveUpdatesInPlace walks all 11 steps (changing the
 // context window and the think system along the way) and asserts the model is
 // updated in place: the alias survives, Model/ContextWindow/ThinkingType
-// change, Vision stays, and the Temperature/Reasoning fields the form never
-// asks about are preserved.
+// change, Vision stays, the Temperature field the form never asks about is
+// preserved, and the reasoning config is round-tripped EXACTLY (the form now
+// asks about every reasoning option, and Enter-through answers what was stored).
 func TestProviderDetailEditSaveUpdatesInPlace(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
@@ -161,12 +211,22 @@ func TestProviderDetailEditSaveUpdatesInPlace(t *testing.T) {
 	if m.formStepIndex != 5 {
 		t.Fatalf("step = %d, want 5 after vision step", m.formStepIndex)
 	}
-	// Step 5: pick a think system → save.
+	// Step 5: pick a think system → advance into the reasoning steps.
 	m.textInput.SetValue("deepseek")
 	m = sendKeys(m, "\r")
+	if m.formStepIndex != editModelReasoningEnableStep {
+		t.Fatalf("step = %d, want the reasoning-enabled step (%d)", m.formStepIndex, editModelReasoningEnableStep)
+	}
+	// Steps 6-10: accept every prefilled reasoning answer (the last Enter saves).
+	for step := editModelReasoningEnableStep; step < editModelStepCount; step++ {
+		if m.formStepIndex != step {
+			t.Fatalf("step = %d, want %d (formError = %q)", m.formStepIndex, step, m.formError)
+		}
+		m = sendKeys(m, "\r")
+	}
 
 	if m.modalMode != ModalProviderDetail {
-		t.Fatalf("modal = %v, want ModalProviderDetail after save", m.modalMode)
+		t.Fatalf("modal = %v, want ModalProviderDetail after save (formError = %q)", m.modalMode, m.formError)
 	}
 
 	models := m.cfg.Providers.Named["test-provider"].Models
@@ -186,9 +246,7 @@ func TestProviderDetailEditSaveUpdatesInPlace(t *testing.T) {
 	if mc.Temperature == nil || *mc.Temperature != 0.7 {
 		t.Errorf("Temperature = %v, want 0.7 (preserved)", mc.Temperature)
 	}
-	if mc.Reasoning == nil || mc.Reasoning.Effort == nil || *mc.Reasoning.Effort != "high" {
-		t.Errorf("Reasoning = %+v, want effort high (preserved)", mc.Reasoning)
-	}
+	assertFullyLoadedReasoning(t, mc.Reasoning)
 	if mc.ThinkingType != "deepseek" {
 		t.Errorf("ThinkingType = %q, want deepseek (edited)", mc.ThinkingType)
 	}
@@ -209,8 +267,9 @@ func TestProviderDetailEditSaveUpdatesInPlace(t *testing.T) {
 }
 
 // TestProviderDetailEditRenameMovesAlias renames the alias on step 0 and
-// verifies the old key is gone, the new key carries the updated values, and
-// the detail view re-shows the renamed model.
+// verifies the old key is gone, the new key carries the updated values (the
+// reasoning config included — it must survive the alias change), and the detail
+// view re-shows the renamed model.
 func TestProviderDetailEditRenameMovesAlias(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
@@ -223,8 +282,11 @@ func TestProviderDetailEditRenameMovesAlias(t *testing.T) {
 	// Step 0: rename the alias.
 	m.textInput.SetValue("gpt-4o-latest")
 	m = sendKeys(m, "\r")
-	// Steps 1-5: accept the prefilled values (last Enter saves).
-	for i := 0; i < 5; i++ {
+	// Steps 1-10: accept the prefilled values (last Enter saves).
+	for step := addModelModelNameStep; step < editModelStepCount; step++ {
+		if m.formStepIndex != step {
+			t.Fatalf("step = %d, want %d (formError = %q)", m.formStepIndex, step, m.formError)
+		}
 		m = sendKeys(m, "\r")
 	}
 
@@ -243,6 +305,7 @@ func TestProviderDetailEditRenameMovesAlias(t *testing.T) {
 	if mc.Model != "stored-gpt-4o-001" || mc.ContextWindow != 128000 || mc.MaxTokens != 4096 || mc.Vision {
 		t.Errorf("renamed entry = %+v, want stored values carried over", mc)
 	}
+	assertFullyLoadedReasoning(t, mc.Reasoning)
 	if len(models) != 2 {
 		t.Errorf("models count = %d, want 2 (rename, not add/delete)", len(models))
 	}

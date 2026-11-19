@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
@@ -99,31 +102,144 @@ func (m *Model) addProvider(name, providerType, apiKey, apiBase string) error {
 	return m.saveConfigToDisk()
 }
 
-// updateProvider edits an existing provider — its type, API key and API base
-// URL — and persists to disk. It is the save point of the ModalEditProvider
-// form (opened from the provider detail view with "e" or the "Edit provider"
-// action row).
+// providerEditValues carries the submitted values of the ModalEditProvider
+// form — one field per step, in formValues order (see formStepNames). It is a
+// struct rather than a positional string slice so a new step cannot silently
+// shift an existing value into the wrong config field.
+type providerEditValues struct {
+	Type        string // provider type (required)
+	APIKey      string // "" keeps the stored key
+	APIBase     string // "" keeps the stored base URL
+	Proxy       string // "" keeps, "-" clears
+	AuthMethod  string // "" keeps, "-" clears
+	ConnectMode string // "" keeps, "-" clears
+	WebSearch   string // "" keeps, "yes"/"no" set, "default" unsets
+	Headers     string // "" keeps, "{}" clears, else JSON object
+}
+
+// Steps of the ModalEditProvider form: indexes into formValues and
+// formStepNames(). They are named because the secret-masking predicates
+// (secret_fields.go) and the ENTER handler both key off them, and two magic
+// numbers drifting apart would either unmask the headers step or mask a
+// harmless one.
+const (
+	editProviderTypeStep = iota
+	editProviderAPIKeyStep
+	editProviderAPIBaseStep
+	editProviderProxyStep
+	editProviderAuthMethodStep
+	editProviderConnectModeStep
+	editProviderWebSearchStep
+	editProviderHeadersStep
+	// editProviderStepCount is the number of steps of the form: it is the
+	// length of both formValues and formStepNames().
+	editProviderStepCount
+)
+
+// Steps of the model forms. ModalAddModel collects one value per model field
+// (alias → think system, see addModelStepCount); ModalEditModel shares those
+// six steps and appends one step per config.ReasoningConfig field (see
+// editModelStepCount) so the stored reasoning override of an existing model can
+// be edited instead of merely being preserved.
+//
+// They are named because openModelEditFlow, formStepNames(), the shared ENTER
+// handler and the tests all key off them: two magic numbers drifting apart
+// would either save too early or read a value that was never collected.
+const (
+	addModelAliasStep = iota
+	addModelModelNameStep
+	addModelContextWindowStep
+	addModelMaxTokensStep
+	addModelVisionStep
+	addModelThinkSystemStep
+	// addModelStepCount is the number of steps of the ADD form: the length of
+	// both formValues and formStepNames() for ModalAddModel, and the index
+	// right after the last step (the think-system step saves).
+	addModelStepCount
+)
+
+const (
+	// The edit-model form continues where the add form stops: one step per
+	// ReasoningConfig field, in struct order.
+	editModelReasoningEnableStep = addModelStepCount + iota
+	editModelReasoningEffortStep
+	editModelReasoningMaxTokensStep
+	editModelReasoningExcludeStep
+	editModelReasoningSummaryStep
+	// editModelStepCount is the number of steps of the EDIT form: the length of
+	// both formValues and formStepNames() for ModalEditModel, and the index
+	// right after the last step (the reasoning-summary step saves).
+	editModelStepCount
+)
+
+// modelFormLastStep returns the index of the step that SAVES the model form:
+// the think-system step for the add form, the reasoning-summary step for the
+// edit form. Everything below it just advances.
+func modelFormLastStep(mode modalType) int {
+	if mode == ModalEditModel {
+		return editModelStepCount - 1
+	}
+	return addModelStepCount - 1
+}
+
+// modelFormAllowsEmptyValue reports whether the given step of the model form
+// may be submitted blank. The context-window and max-tokens steps are filled
+// from the catalog when the model is known, the think-system step defaults to
+// "auto", and the four optional reasoning steps mean "leave this override
+// unset". Every other step carries a required answer (the reasoning-enabled
+// step is always pre-filled with yes/no, so it never needs the escape hatch).
+func modelFormAllowsEmptyValue(mode modalType, step int) bool {
+	switch step {
+	case addModelContextWindowStep, addModelMaxTokensStep, addModelThinkSystemStep:
+		return true
+	}
+	// The reasoning steps exist only in the edit form; a stray index must not
+	// loosen the add form.
+	if mode != ModalEditModel {
+		return false
+	}
+	switch step {
+	case editModelReasoningEffortStep, editModelReasoningMaxTokensStep,
+		editModelReasoningExcludeStep, editModelReasoningSummaryStep:
+		return true
+	}
+	return false
+}
+
+// updateProvider edits an existing provider — every field of its config except
+// the name and the model list — and persists to disk. It is the save point of
+// the ModalEditProvider form (opened from the provider detail view with "e" or
+// the "Edit provider" action row).
 //
 // Blank means "keep": the form is a plain text widget, so the stored secret is
-// never rendered back into it (see secret_fields.go). An empty API key or API
-// base URL therefore leaves the stored value untouched instead of wiping it,
-// and an empty type keeps the stored one — a provider can never lose its
-// identity because the user pressed Enter through a step.
+// never rendered back into it (see secret_fields.go). An empty API key, API
+// base URL, proxy, auth method, connect mode, web-search answer or header blob
+// therefore leaves the stored value untouched instead of wiping it, and an
+// empty type keeps the stored one — a provider can never lose its identity
+// because the user pressed Enter through a step.
 //
-// The entry is updated IN PLACE: Models, Proxy, WebSearch, ConnectMode,
-// Temperature and every other field the form does not ask about survive an
-// edit, exactly like ensureProvider does for a re-run of /connect (rebuilding
-// the entry would drop the model list).
+// The three optional middle fields (proxy, auth method, connect mode) take a
+// lone "-" as "clear it", so an env-provided value the form cannot show can
+// still be removed from the file; WebSearch takes "default" to go back to
+// unset (nil), and Headers takes "{}" to remove every custom header.
 //
-// Only the credentials this edit actually CHANGED are mirrored into the typed
-// field (transport selection is TYPE-FIRST, so ensureProvider mirrors them too):
-// see syncEditedProviderCredentials.
+// The entry is updated IN PLACE: Models, and every field the form does not ask
+// about (or that this edit did not change), survive an edit exactly like
+// ensureProvider does for a re-run of /connect — rebuilding the entry would
+// drop the model list.
 //
-// A failed save rolls BOTH copies back. The form keeps the user on the error so
+// Only the fields this edit actually CHANGED are mirrored into the typed field
+// (transport selection is TYPE-FIRST, so ensureProvider mirrors them too): see
+// syncEditedProviderCredentials. The one exception is the typed OpenAI
+// web_search bool, which is not a ProviderConfig field and is projected
+// explicitly below.
+//
+// A failed save rolls EVERY copy back (named entry, typed ProviderConfig and
+// the typed OpenAI web_search bool). The form keeps the user on the error so
 // the typed values can be retried, and ESC then returns to the detail without
 // re-reading the file — leaving the rejected edit in memory would let any later
 // save from another flow persist a change this one already reported as failed.
-func (m *Model) updateProvider(name, providerType, apiKey, apiBase string) error {
+func (m *Model) updateProvider(name string, v providerEditValues) error {
 	if m.cfg == nil || m.cfg.Providers == nil || m.cfg.Providers.Named == nil {
 		return fmt.Errorf("no providers configured")
 	}
@@ -135,7 +251,7 @@ func (m *Model) updateProvider(name, providerType, apiKey, apiBase string) error
 	}
 
 	updated := previous
-	if typ := strings.ToLower(strings.TrimSpace(providerType)); typ != "" {
+	if typ := strings.ToLower(strings.TrimSpace(v.Type)); typ != "" {
 		updated.Type = typ
 	}
 	// Which credentials this edit actually CHANGED. Blank means "keep", and a
@@ -143,36 +259,190 @@ func (m *Model) updateProvider(name, providerType, apiKey, apiBase string) error
 	// pre-filled step) is not a change either — so pressing Enter through the
 	// form cannot overwrite the typed copy, which may be the only carrier of an
 	// env-provided credential (see syncEditedProviderCredentials).
-	k := strings.TrimSpace(apiKey)
-	base := strings.TrimSpace(apiBase)
-	apiKeyChanged := k != "" && k != previous.APIKey
-	apiBaseChanged := base != "" && base != previous.APIBase
-	if apiKeyChanged {
+	k := strings.TrimSpace(v.APIKey)
+	base := strings.TrimSpace(v.APIBase)
+	changes := providerEditChanges{
+		APIKey:  k != "" && k != previous.APIKey,
+		APIBase: base != "" && base != previous.APIBase,
+	}
+	if changes.APIKey {
 		updated.APIKey = k
 	}
-	if apiBaseChanged {
+	if changes.APIBase {
 		updated.APIBase = base
 	}
 
-	// Snapshot the typed mirror so a failed save can put it back verbatim
-	// (re-deriving it from `previous` would clobber an env-provided value).
+	updated.Proxy, changes.Proxy = resolveOptionalEditField(previous.Proxy, v.Proxy)
+	updated.AuthMethod, changes.AuthMethod = resolveOptionalEditField(previous.AuthMethod, v.AuthMethod)
+	updated.ConnectMode, changes.ConnectMode = resolveOptionalEditField(previous.ConnectMode, v.ConnectMode)
+
+	webSearchToken, err := parseWebSearchToken(v.WebSearch)
+	if err != nil {
+		return err
+	}
+	updated.WebSearch, changes.WebSearch = resolveWebSearchEdit(previous.WebSearch, webSearchToken)
+
+	// Headers are validated here as well as in the handler: updateProvider is
+	// also called from tests and from any future caller that skips the form.
+	storedHeaders, headersChanged, err := parseHeaderEditValue(previous.Headers, v.Headers)
+	if err != nil {
+		return err
+	}
+	updated.Headers = storedHeaders
+	changes.Headers = headersChanged
+
+	// Snapshot the typed mirrors so a failed save can put them back verbatim
+	// (re-deriving them from `previous` would clobber an env-provided value).
 	typedSlot := typedProviderSlot(m.cfg.Providers, key)
 	var typedBefore config.ProviderConfig
 	if typedSlot != nil {
 		typedBefore = *typedSlot
 	}
+	// The typed OpenAI web_search bool lives outside ProviderConfig, so it needs
+	// its own snapshot. Harmless for every other provider: nothing touches it.
+	typedWebSearchBefore := m.cfg.Providers.OpenAI.WebSearch
 
 	m.cfg.Providers.Named[key] = updated
-	syncEditedProviderCredentials(m.cfg.Providers, key, updated, apiKeyChanged, apiBaseChanged)
+	syncEditedProviderCredentials(m.cfg.Providers, key, updated, changes)
+	// WebSearch is a *bool on the named entry but a plain bool on the typed
+	// OpenAI slot, which is the copy the transports read (factory.go). Project
+	// it only when this edit touched it, so the env/first-load default is not
+	// silently overwritten by an untouched step.
+	if key == "openai" && changes.WebSearch {
+		m.cfg.Providers.OpenAI.WebSearch = updated.WebSearch != nil && *updated.WebSearch
+	}
 
 	if err := m.saveConfigToDisk(); err != nil {
 		m.cfg.Providers.Named[key] = previous
 		if typedSlot != nil {
 			*typedSlot = typedBefore
 		}
+		m.cfg.Providers.OpenAI.WebSearch = typedWebSearchBefore
 		return err
 	}
 	return nil
+}
+
+// resolveOptionalEditField resolves one of the "blank keeps / - clears" text
+// fields of the edit form (proxy, auth method, connect mode). It returns the
+// value to store and whether the edit changed it — a value re-submitted
+// unchanged (Enter over the pre-filled step) is not a change, so it cannot
+// overwrite a typed copy that carries an env-provided value.
+func resolveOptionalEditField(previous, input string) (value string, changed bool) {
+	trimmed := strings.TrimSpace(input)
+	switch trimmed {
+	case "":
+		return previous, false
+	case "-":
+		// Blank means "keep", so "-" is the only way to ask for the value to be
+		// removed from the file.
+		return "", previous != ""
+	default:
+		return trimmed, trimmed != previous
+	}
+}
+
+// parseWebSearchToken canonicalizes the web-search answer of the edit form.
+// "" (keep), "yes", "no" and "default" are the accepted tokens; everything else
+// is an error so the handler can keep the user on the step instead of saving a
+// token the loader would ignore.
+func parseWebSearchToken(input string) (string, error) {
+	switch token := strings.ToLower(strings.TrimSpace(input)); token {
+	case "", "yes", "no", "default":
+		return token, nil
+	default:
+		return "", fmt.Errorf("invalid web search value %q: use yes, no or default", strings.TrimSpace(input))
+	}
+}
+
+// resolveWebSearchEdit maps a canonical web-search token (see
+// parseWebSearchToken) onto the *bool the config stores, returning the value to
+// store and whether it differs from the previous one. nil means "unset": the
+// transports then fall back to their own default.
+func resolveWebSearchEdit(previous *bool, token string) (value *bool, changed bool) {
+	switch token {
+	case "":
+		return previous, false
+	case "default":
+		return nil, previous != nil
+	case "yes":
+		on := true
+		return &on, previous == nil || !*previous
+	default: // "no" — parseWebSearchToken rejects anything else
+		off := false
+		return &off, previous == nil || *previous
+	}
+}
+
+// parseHeaderEditValue resolves the Headers step of the edit form. "" keeps the
+// stored headers, "{}" (and "null") clears them, and anything else must be a
+// JSON object of string→string that passes
+// protocoltypes.ValidateCustomHeaders — the same validation config load runs,
+// so a value the loader would reject can never be saved from the TUI.
+//
+// The returned map is the freshly decoded one (never the previous map), so the
+// caller can store it without cloning; a kept map is returned as-is.
+func parseHeaderEditValue(previous map[string]string, input string) (map[string]string, bool, error) {
+	trimmed := strings.TrimSpace(input)
+	switch trimmed {
+	case "":
+		return previous, false, nil
+	case "{}", "null":
+		return nil, len(previous) > 0, nil
+	}
+
+	var parsed map[string]string
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+		return nil, false, fmt.Errorf("headers must be a JSON object of string values, e.g. {\"X-Title\":\"lele\"}: %v", err)
+	}
+	if len(parsed) == 0 {
+		return nil, len(previous) > 0, nil
+	}
+	if err := protocoltypes.ValidateCustomHeaders(parsed); err != nil {
+		return nil, false, fmt.Errorf("invalid headers: %v", err)
+	}
+	return parsed, !maps.Equal(previous, parsed), nil
+}
+
+// cloneHeaders deep-copies a header map. The named entry and its typed mirror
+// are two copies of one provider, so they must never share the same map:
+// mutating one later (an OAuth flow adding a header, for instance) would
+// silently mutate the other.
+func cloneHeaders(headers map[string]string) map[string]string {
+	if headers == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(headers))
+	for name, value := range headers {
+		cloned[name] = value
+	}
+	return cloned
+}
+
+// headerNames returns the names of a header map, sorted, for display. Only the
+// names: values can carry credentials (an Authorization override, a gateway
+// token), so the detail view must never print them.
+func headerNames(headers map[string]string) []string {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// webSearchFormValue renders the stored *bool web_search as the edit form's
+// token, so the step can be re-submitted unchanged: nil is "default" (unset),
+// true is "yes", false is "no".
+func webSearchFormValue(v *bool) string {
+	switch {
+	case v == nil:
+		return "default"
+	case *v:
+		return "yes"
+	default:
+		return "no"
+	}
 }
 
 // ensureProvider creates or updates the named provider for a row-driven
@@ -394,13 +664,23 @@ type providerDetailLayout struct {
 }
 
 // providerDetailList builds the item list for the ModalProviderDetail view:
-// three provider info rows when the provider is found ("Type: %s",
-// "API Base: %s", "API Key: <mask or (not set)>"), a "---" separator, one row
-// per model alias prefixed with exactly two spaces (or the "  (no models)"
-// placeholder when the provider has no models), another "---", and the
-// localized editProviderAction / addModelAction / deleteProviderAction action
-// rows. The content is byte-identical to the previously inlined blocks in
-// handlers_modal.go, except the action rows are now localized.
+// the provider info rows when the provider is found ("Type: %s",
+// "API Base: %s", "API Key: <mask or (not set)>", plus one row per optional
+// field that is actually set — proxy, auth method, connect mode, web search
+// and the custom header NAMES), a "---" separator, one row per model alias
+// prefixed with exactly two spaces (or the "  (no models)" placeholder when the
+// provider has no models), another "---", and the localized
+// editProviderAction / addModelAction / deleteProviderAction action rows.
+//
+// The optional rows are conditional on purpose: a three-row block that always
+// listed five extra empty fields would bury the model list, and this is a
+// scrolling picker. Their labels are hardcoded English like "Type: %s" — this
+// block predates the localized action rows and stays one style.
+//
+// The header row lists the header NAMES only, sorted and joined with ", ":
+// header values can carry credentials (an Authorization override, a gateway
+// token), so they must never reach a screen that is not masked — and the row
+// would be one unreadable line anyway.
 //
 // ModelRows maps the item index of every model row to its (trimmed) model
 // alias so callers can resolve a selected row back to a model without
@@ -408,6 +688,8 @@ type providerDetailLayout struct {
 // part of the map. The Edit/Add/Del indices are the item indices of the three
 // action rows (-1 when absent — they are always appended, so in practice
 // always valid), so callers compare indexes instead of fragile label strings.
+// All of them are computed from the item count as it grows, which is what keeps
+// them correct when the optional info rows appear or disappear.
 func (m *Model) providerDetailList(providerName string) providerDetailLayout {
 	layout := providerDetailLayout{
 		ModelRows: make(map[int]string),
@@ -428,6 +710,25 @@ func (m *Model) providerDetailList(providerName string) providerDetailLayout {
 				keyDisplay = "(not set)"
 			}
 			items = append(items, fmt.Sprintf("API Key: %s", keyDisplay))
+			if proxy := strings.TrimSpace(p.Proxy); proxy != "" {
+				items = append(items, fmt.Sprintf("Proxy: %s", proxy))
+			}
+			if authMethod := strings.TrimSpace(p.AuthMethod); authMethod != "" {
+				items = append(items, fmt.Sprintf("Auth method: %s", authMethod))
+			}
+			if connectMode := strings.TrimSpace(p.ConnectMode); connectMode != "" {
+				items = append(items, fmt.Sprintf("Connect mode: %s", connectMode))
+			}
+			if p.WebSearch != nil {
+				answer := "no"
+				if *p.WebSearch {
+					answer = "yes"
+				}
+				items = append(items, fmt.Sprintf("Web search: %s", answer))
+			}
+			if len(p.Headers) > 0 {
+				items = append(items, fmt.Sprintf("Headers: %s", strings.Join(headerNames(p.Headers), ", ")))
+			}
 		}
 	}
 	items = append(items, "---")
@@ -518,9 +819,17 @@ func (m *Model) providerModelConfig(providerName, alias string) (config.Provider
 
 // updateModelInProvider edits an existing model alias in a provider's Models
 // map and persists to disk. Unlike addModelToProvider it starts from the
-// EXISTING entry, so fields the form does not ask about (Temperature,
-// Reasoning) survive the edit: Reasoning is deliberately NOT re-derived from
-// the catalog here — an existing model may carry user-tuned reasoning.
+// EXISTING entry, so fields the form does not ask about (Temperature, Video)
+// survive the edit.
+//
+// Reasoning IS form-driven (the edit form's five reasoning steps, see
+// reasoningFromFormValues), so it is always set explicitly: a nil value means
+// "no reasoning override" and clears whatever the model carried, while a
+// non-nil value is exactly what the user answered. The value is validated here
+// as well as in the form helper (defense in depth for callers that skip the
+// form), and validation happens before anything is written so a rejected
+// config leaves the stored model untouched.
+//
 // contextWindow / maxTokens keep their current value when passed as 0; a
 // value still zero afterwards is filled from catalog.DefaultsFor when the
 // model is known there. Vision is always set explicitly (the form always
@@ -528,7 +837,7 @@ func (m *Model) providerModelConfig(providerName, alias string) (config.Provider
 // config.ThinkingType*); "" and "auto" clear the field back to the default
 // heuristics. The alias may be renamed: the old key is removed when the
 // (normalized) new alias differs.
-func (m *Model) updateModelInProvider(providerName, origAlias, newAlias, modelName string, contextWindow, maxTokens int, vision bool, thinkingType string) error {
+func (m *Model) updateModelInProvider(providerName, origAlias, newAlias, modelName string, contextWindow, maxTokens int, vision bool, thinkingType string, reasoning *config.ReasoningConfig) error {
 	if m.cfg == nil || m.cfg.Providers == nil || m.cfg.Providers.Named == nil {
 		return fmt.Errorf("no providers configured")
 	}
@@ -576,9 +885,16 @@ func (m *Model) updateModelInProvider(providerName, origAlias, newAlias, modelNa
 		return err
 	}
 	updated.ThinkingType = normalizedThink
+	// Reasoning is form-driven too (the five reasoning steps). Validate before
+	// touching the stored entry so a rejected answer cannot half-save the edit.
+	if err := reasoning.Validate(); err != nil {
+		return err
+	}
+	updated.Reasoning = reasoning
 
-	// Catalog fallback for values still zero after the edit. Deliberately no
-	// Reasoning touch — a user-tuned config must survive the edit.
+	// Catalog fallback for values still zero after the edit. Temperature, Video
+	// and every other field the form does not ask about were copied over from
+	// the existing entry above and keep their stored values.
 	if (contextWindow == 0 && updated.ContextWindow == 0) || (maxTokens == 0 && updated.MaxTokens == 0) {
 		if catKey := m.catalogProviderKey(key); catKey != "" {
 			if d, ok := catalog.DefaultsFor(catKey, modelName); ok {
@@ -731,15 +1047,20 @@ func (m *Model) enterProviderDetail(providerName, focusAlias string) {
 
 // openProviderEditFlow opens the ModalEditProvider form for the provider
 // currently selected in the detail view (m.providerSelectedName). The form has
-// three steps — type, API key, API base URL — and starts with the STORED type
-// and API base pre-filled so Enter-through keeps them.
+// one step per editable provider config field — type, API key, API base URL,
+// proxy, auth method, connect mode, web search and headers (see
+// editProviderStepCount) — and starts with every stored value pre-filled so
+// Enter-through keeps them. The provider NAME is deliberately not editable: an
+// agent's model reference ("provider:model") would have to be re-pointed, so the
+// name is shown in the detail view and models keep their own flows.
 //
-// The API key step is deliberately left BLANK: the form is a plain text widget
-// and the stored secret must never be rendered back into it (see
-// secret_fields.go), so blank means "keep the stored key" — the same rule
-// updateProvider applies. When the provider cannot be resolved the form is NOT
-// opened: a message is staged on providerFeedback (rendered under the detail
-// list) and the caller stays where it is. It reports whether the form opened.
+// Two steps are deliberately left BLANK: the API key and the headers blob. The
+// form is a plain text widget and a stored secret must never be rendered back
+// into it (see secret_fields.go), so blank means "keep the stored value" — the
+// same rule updateProvider applies. When the provider cannot be resolved the
+// form is NOT opened: a message is staged on providerFeedback (rendered under
+// the detail list) and the caller stays where it is. It reports whether the
+// form opened.
 func (m *Model) openProviderEditFlow() bool {
 	provider := m.providerSelectedName
 	cfg := m.configSource()
@@ -759,7 +1080,19 @@ func (m *Model) openProviderEditFlow() bool {
 	// provider this edit flow operates on.
 	m.providerSelectedName = provider
 	m.formStepIndex = 0
-	m.formValues = []string{named.Type, "", named.APIBase}
+	// One entry per step, in editProvider*Step order. The API key and the
+	// headers blob stay empty on purpose: they may carry secrets, and a stored
+	// secret is never rendered back into the form.
+	m.formValues = []string{
+		named.Type,
+		"", // API key
+		named.APIBase,
+		named.Proxy,
+		named.AuthMethod,
+		named.ConnectMode,
+		webSearchFormValue(named.WebSearch),
+		"", // headers
+	}
 	m.formError = ""
 	m.formConfirmMode = false
 	// The edit form reuses none of the /connect bookkeeping: clear the flag a
@@ -773,8 +1106,10 @@ func (m *Model) openProviderEditFlow() bool {
 }
 
 // openModelEditFlow opens the ModalEditModel form pre-filled with the stored
-// values of the given model alias. When the model cannot be found the form is
-// NOT opened: an error is staged and the caller stays in the detail view.
+// values of the given model alias: the six fields of the add form plus the five
+// reasoning overrides (see editModelStepCount), so Enter-through leaves the
+// model exactly as it was. When the model cannot be found the form is NOT
+// opened: an error is staged and the caller stays in the detail view.
 func (m *Model) openModelEditFlow(alias string) {
 	provider := m.providerSelectedName
 	mc, ok := m.providerModelConfig(provider, alias)
@@ -789,30 +1124,63 @@ func (m *Model) openModelEditFlow(alias string) {
 	// the provider the edit flow operates on.
 	m.providerSelectedName = provider
 	m.formStepIndex = 0
-	m.formValues = make([]string, 6)
+	m.formValues = make([]string, editModelStepCount)
 	m.formError = ""
 	m.formConfirmMode = false
 
 	// Pre-fill: alias, model name, context window, max tokens, vision,
 	// think system.
-	m.formValues[0] = alias
-	m.formValues[1] = mc.Model
+	m.formValues[addModelAliasStep] = alias
+	m.formValues[addModelModelNameStep] = mc.Model
 	if mc.ContextWindow > 0 {
-		m.formValues[2] = strconv.Itoa(mc.ContextWindow)
+		m.formValues[addModelContextWindowStep] = strconv.Itoa(mc.ContextWindow)
 	}
 	if mc.MaxTokens > 0 {
-		m.formValues[3] = strconv.Itoa(mc.MaxTokens)
+		m.formValues[addModelMaxTokensStep] = strconv.Itoa(mc.MaxTokens)
 	}
 	if mc.Vision {
-		m.formValues[4] = "yes"
+		m.formValues[addModelVisionStep] = "yes"
 	} else {
-		m.formValues[4] = "no"
+		m.formValues[addModelVisionStep] = "no"
 	}
 	if mc.ThinkingType != "" {
-		m.formValues[5] = mc.ThinkingType
+		m.formValues[addModelThinkSystemStep] = mc.ThinkingType
 	} else {
-		m.formValues[5] = config.ThinkingTypeAuto
+		m.formValues[addModelThinkSystemStep] = config.ThinkingTypeAuto
 	}
+
+	// Pre-fill the reasoning override. A model without a ReasoningConfig shows
+	// the neutral answers (disabled + every optional override unset), so
+	// Enter-through round-trips nil back to nil.
+	r := mc.Reasoning
+	if r != nil && r.Enable {
+		m.formValues[editModelReasoningEnableStep] = "yes"
+	} else {
+		m.formValues[editModelReasoningEnableStep] = "no"
+	}
+	if r != nil && r.Effort != nil && strings.TrimSpace(*r.Effort) != "" {
+		m.formValues[editModelReasoningEffortStep] = strings.TrimSpace(*r.Effort)
+	} else {
+		m.formValues[editModelReasoningEffortStep] = reasoningFormDefault
+	}
+	if r != nil && r.MaxTokens != nil && *r.MaxTokens > 0 {
+		m.formValues[editModelReasoningMaxTokensStep] = strconv.Itoa(*r.MaxTokens)
+	}
+	if r != nil && r.Exclude != nil {
+		if *r.Exclude {
+			m.formValues[editModelReasoningExcludeStep] = "yes"
+		} else {
+			m.formValues[editModelReasoningExcludeStep] = "no"
+		}
+	} else {
+		m.formValues[editModelReasoningExcludeStep] = reasoningFormDefault
+	}
+	if r != nil && r.Summary != nil && strings.TrimSpace(*r.Summary) != "" {
+		m.formValues[editModelReasoningSummaryStep] = strings.TrimSpace(*r.Summary)
+	} else {
+		m.formValues[editModelReasoningSummaryStep] = reasoningFormDefault
+	}
+
 	m.modelEditAlias = alias
 	m.modelEditOrigModel = mc.Model
 

@@ -575,7 +575,11 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.formStepIndex = 10
 			return m, nil
 		} else if m.modalMode == ModalAddModel || m.modalMode == ModalEditModel {
-			// Form-based modal: validate and advance steps
+			// Form-based modal: validate and advance steps. The two modes share
+			// their first six steps; the edit form appends the five reasoning
+			// steps (see addModelStepCount / editModelStepCount), so the last
+			// step — the one that saves — is mode-dependent.
+			lastStep := modelFormLastStep(m.modalMode)
 			val := strings.TrimSpace(m.textInput.Value())
 			// Accept a pre-filled form value when the input is empty (catalog
 			// prefill after selecting a model, matching ModalAddProvider).
@@ -584,65 +588,111 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			// Context window / max tokens may be omitted — catalog.DefaultsFor
 			// fills them in addModelToProvider when the model is known. The
-			// think-system step may also be empty (Enter = auto = leave unset).
-			allowEmpty := m.formStepIndex == 2 || m.formStepIndex == 3 || m.formStepIndex == 5
-			if val == "" && !allowEmpty {
+			// think-system step may also be empty (Enter = auto = leave unset),
+			// and so may the four optional reasoning overrides of the edit form
+			// (blank = keep the override unset).
+			if val == "" && !modelFormAllowsEmptyValue(m.modalMode, m.formStepIndex) {
 				m.formError = "This field is required"
 				return m, nil
 			}
 			m.formError = ""
-			m.formValues[m.formStepIndex] = val
-			if m.formStepIndex == 2 || m.formStepIndex == 3 {
+			// Validate the value-typed steps on advance, so a typo surfaces on
+			// the step that caused it instead of on the final save (the same
+			// rule the provider edit form follows). The answers that are
+			// keywords (yes/no + the effort/summary enums) are canonicalized
+			// to lowercase BEFORE they are stored, so the completed-step list
+			// reads back exactly what will be saved. A rejected answer is not
+			// stored: formValues only ever holds validated answers.
+			switch m.formStepIndex {
+			case addModelContextWindowStep, addModelMaxTokensStep:
 				if val != "" {
 					if _, err := strconv.Atoi(val); err != nil {
 						m.formError = fmt.Sprintf("Invalid number: %s", val)
 						return m, nil
 					}
 				}
+			case editModelReasoningEnableStep:
+				if _, err := normalizeReasoningEnable(val); err != nil {
+					m.formError = err.Error()
+					return m, nil
+				}
+				val = strings.ToLower(val)
+			case editModelReasoningEffortStep:
+				if _, err := normalizeReasoningEffort(val); err != nil {
+					m.formError = err.Error()
+					return m, nil
+				}
+				val = strings.ToLower(val)
+			case editModelReasoningMaxTokensStep:
+				if _, err := normalizeReasoningMaxTokens(val); err != nil {
+					m.formError = err.Error()
+					return m, nil
+				}
+			case editModelReasoningExcludeStep:
+				if _, err := normalizeReasoningExclude(val); err != nil {
+					m.formError = err.Error()
+					return m, nil
+				}
+				val = strings.ToLower(val)
+			case editModelReasoningSummaryStep:
+				if _, err := normalizeReasoningSummary(val); err != nil {
+					m.formError = err.Error()
+					return m, nil
+				}
+				val = strings.ToLower(val)
 			}
-			if m.formStepIndex >= 5 {
+			m.formValues[m.formStepIndex] = val
+			if m.formStepIndex >= lastStep {
 				// Last step — save model. Empty/zero context_window and
 				// max_tokens are filled from the catalog inside
 				// addModelToProvider when the model is known.
-				thinkType, err := thinkSystemFieldValue(m.formValues[5])
+				thinkType, err := thinkSystemFieldValue(m.formValues[addModelThinkSystemStep])
 				if err != nil {
 					m.formError = err.Error()
 					return m, nil
 				}
 				ctxWin := 0
-				if s := strings.TrimSpace(m.formValues[2]); s != "" {
+				if s := strings.TrimSpace(m.formValues[addModelContextWindowStep]); s != "" {
 					n, err := strconv.Atoi(s)
 					if err != nil {
-						m.formError = fmt.Sprintf("Invalid context window: %s", m.formValues[2])
+						m.formError = fmt.Sprintf("Invalid context window: %s", m.formValues[addModelContextWindowStep])
 						return m, nil
 					}
 					ctxWin = n
 				}
 				maxTok := 0
-				if s := strings.TrimSpace(m.formValues[3]); s != "" {
+				if s := strings.TrimSpace(m.formValues[addModelMaxTokensStep]); s != "" {
 					n, err := strconv.Atoi(s)
 					if err != nil {
-						m.formError = fmt.Sprintf("Invalid max tokens: %s", m.formValues[3])
+						m.formError = fmt.Sprintf("Invalid max tokens: %s", m.formValues[addModelMaxTokensStep])
 						return m, nil
 					}
 					maxTok = n
 				}
-				vision := m.formValues[4] == "yes"
+				vision := m.formValues[addModelVisionStep] == "yes"
 				if m.modalMode == ModalEditModel {
-					// Edit flow: update in place (Temperature/Reasoning and any
-					// other field not covered by the form survive), then land
-					// back on the provider detail with the row highlighted.
-					if err := m.updateModelInProvider(m.providerSelectedName, m.modelEditAlias, m.formValues[0], m.formValues[1], ctxWin, maxTok, vision, thinkType); err != nil {
+					// Edit flow: update in place (Temperature/Video and any
+					// other field the form does not ask about survive, the
+					// reasoning config is rebuilt from its five steps), then
+					// land back on the provider detail with the row highlighted.
+					reasoning, err := reasoningFromFormValues(m.formValues)
+					if err != nil {
+						m.formError = err.Error()
+						return m, nil
+					}
+					if err := m.updateModelInProvider(m.providerSelectedName, m.modelEditAlias, m.formValues[addModelAliasStep], m.formValues[addModelModelNameStep], ctxWin, maxTok, vision, thinkType, reasoning); err != nil {
 						m.formError = err.Error()
 						return m, nil // stay in the form; typed values are kept
 					}
-					saved := strings.ToLower(strings.TrimSpace(m.formValues[0]))
+					saved := strings.ToLower(strings.TrimSpace(m.formValues[addModelAliasStep]))
 					m.enterProviderDetail(m.providerSelectedName, saved)
 					m.closeCatalogPicker()
 					m.syncTextInputEcho()
 					return m, nil
 				}
-				if err := m.addModelToProvider(m.providerSelectedName, m.formValues[0], m.formValues[1], ctxWin, maxTok, vision, thinkType); err != nil {
+				// Add flow: the reasoning config keeps being seeded from the
+				// catalog by addModelToProvider — the add form never asks.
+				if err := m.addModelToProvider(m.providerSelectedName, m.formValues[addModelAliasStep], m.formValues[addModelModelNameStep], ctxWin, maxTok, vision, thinkType); err != nil {
 					m.formError = err.Error()
 					return m, nil
 				}
@@ -660,58 +710,112 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.textInput.SetValue(nextVal)
 			switch m.formStepIndex {
-			case 1:
+			case addModelModelNameStep:
 				m.textInput.Placeholder = "Actual model name (e.g. gpt-4o-2024-08-06)"
 				m.startCatalogPickerIfNeeded()
-			case 2:
+			case addModelContextWindowStep:
 				m.textInput.Placeholder = "Context window (e.g. 128000)"
 				m.closeCatalogPicker()
-			case 3:
+			case addModelMaxTokensStep:
 				m.textInput.Placeholder = "Max tokens (e.g. 4096)"
 				m.closeCatalogPicker()
-			case 4:
+			case addModelVisionStep:
 				m.textInput.Placeholder = "Vision support? (yes/no)"
 				m.closeCatalogPicker()
-			case 5:
+			case addModelThinkSystemStep:
 				m.textInput.Placeholder = "auto, deepseek, openai, openrouter, qwen or none"
+				m.closeCatalogPicker()
+			case editModelReasoningEnableStep:
+				m.textInput.Placeholder = "Reasoning enabled? (yes/no)"
+				m.closeCatalogPicker()
+			case editModelReasoningEffortStep:
+				m.textInput.Placeholder = "low, medium, high or default"
+				m.closeCatalogPicker()
+			case editModelReasoningMaxTokensStep:
+				m.textInput.Placeholder = "Max reasoning tokens (blank or default = unset)"
+				m.closeCatalogPicker()
+			case editModelReasoningExcludeStep:
+				m.textInput.Placeholder = "Exclude reasoning tokens? (yes/no/default)"
+				m.closeCatalogPicker()
+			case editModelReasoningSummaryStep:
+				m.textInput.Placeholder = "auto, detailed, concise or default"
 				m.closeCatalogPicker()
 			}
 			return m, nil
 		} else if m.modalMode == ModalEditProvider {
-			// Form-based modal: three steps — provider type, API key, API base
-			// URL. Only the type is required: the form cannot show a stored
-			// secret back, so a blank API key / base URL means "keep the stored
-			// value" (see updateProvider).
+			// Form-based modal: one step per editable provider config field
+			// (see editProviderStepCount). Only the type is required: the form
+			// cannot show a stored secret back, so a blank API key / base URL /
+			// headers blob means "keep the stored value" (see updateProvider).
 			val := strings.TrimSpace(m.textInput.Value())
-			// An empty input still accepts a pre-filled value (the type and the
-			// base URL are seeded from the stored provider).
+			// An empty input still accepts a pre-filled value (the type, the
+			// base URL and the optional middle fields are seeded from the
+			// stored provider), so Enter-through cannot wipe them.
 			if val == "" && m.formStepIndex < len(m.formValues) && m.formValues[m.formStepIndex] != "" {
 				val = m.formValues[m.formStepIndex]
 			}
-			if m.formStepIndex == 0 && val == "" {
+			if m.formStepIndex == editProviderTypeStep && val == "" {
 				m.formError = "Provider type is required"
 				return m, nil
 			}
+			// Validate the two value-typed steps on advance, so a typo surfaces
+			// on the step that caused it instead of on the final save.
+			switch m.formStepIndex {
+			case editProviderWebSearchStep:
+				token, err := parseWebSearchToken(val)
+				if err != nil {
+					m.formError = err.Error()
+					return m, nil
+				}
+				val = token // canonical lowercase, so the step reads back what was stored
+			case editProviderHeadersStep:
+				if _, _, err := parseHeaderEditValue(nil, val); err != nil {
+					m.formError = err.Error()
+					return m, nil
+				}
+			}
 			m.formError = ""
 			m.formValues[m.formStepIndex] = val
-			if m.formStepIndex < 2 {
+			if m.formStepIndex < len(m.formValues)-1 {
 				// Advance: the next step shows its pre-filled value (empty for
-				// the API key) so it can be edited in place.
+				// the API key and the headers blob) so it can be edited in
+				// place.
 				m.formStepIndex++
 				m.textInput.SetValue(m.formValues[m.formStepIndex])
 				switch m.formStepIndex {
-				case 1:
+				case editProviderAPIKeyStep:
 					m.textInput.Placeholder = "API Key"
-				case 2:
+				case editProviderAPIBaseStep:
 					m.textInput.Placeholder = "API Base URL (e.g. https://api.example.com/v1)"
+				case editProviderProxyStep:
+					m.textInput.Placeholder = "Proxy URL (- to clear)"
+				case editProviderAuthMethodStep:
+					m.textInput.Placeholder = "Auth method, e.g. oauth (- to clear)"
+				case editProviderConnectModeStep:
+					m.textInput.Placeholder = "stdio or grpc — GitHub Copilot only (- to clear)"
+				case editProviderWebSearchStep:
+					m.textInput.Placeholder = "Web search: yes, no or default"
+				case editProviderHeadersStep:
+					m.textInput.Placeholder = `Headers JSON, e.g. {"X-Title":"lele"}`
 				}
-				// Audit M2: step 1 collects the key, so the echo mode must be
-				// re-derived BEFORE the next frame paints the widget.
+				// Audit M2: the API-key and headers steps collect secrets, so
+				// the echo mode must be re-derived BEFORE the next frame paints
+				// the widget.
 				m.syncTextInputEcho()
 				return m, nil
 			}
 			// Last step — save in place and land back on the provider detail.
-			if err := m.updateProvider(m.providerSelectedName, m.formValues[0], m.formValues[1], m.formValues[2]); err != nil {
+			values := providerEditValues{
+				Type:        m.formValues[editProviderTypeStep],
+				APIKey:      m.formValues[editProviderAPIKeyStep],
+				APIBase:     m.formValues[editProviderAPIBaseStep],
+				Proxy:       m.formValues[editProviderProxyStep],
+				AuthMethod:  m.formValues[editProviderAuthMethodStep],
+				ConnectMode: m.formValues[editProviderConnectModeStep],
+				WebSearch:   m.formValues[editProviderWebSearchStep],
+				Headers:     m.formValues[editProviderHeadersStep],
+			}
+			if err := m.updateProvider(m.providerSelectedName, values); err != nil {
 				m.formError = err.Error()
 				return m, nil // stay in the form; typed values are kept
 			}
@@ -883,7 +987,8 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 							m.clearProviderDeleteConfirm()
 							m.modalMode = ModalAddModel
 							m.formStepIndex = 0
-							m.formValues = make([]string, 6)
+							// addModelStepCount: the add form has no reasoning steps.
+							m.formValues = make([]string, addModelStepCount)
 							m.formError = ""
 							m.formConfirmMode = false
 							m.textInput.SetValue("")

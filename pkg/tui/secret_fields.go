@@ -14,10 +14,15 @@ import (
 // that re-derives the widget state on every keystroke.
 
 // isSecretInputStep reports whether the CURRENT form step collects a secret
-// (API key / secret value). ModalAddProvider step 2 is "API Key" and
-// ModalAddSecret step 1 is "Secret value"; the onboarding connect flow
-// (onboardingStep==obConnect) reuses ModalAddProvider with identical step
+// (API key / secret value / secret-bearing blob). ModalAddProvider step 2 is
+// "API Key" and ModalAddSecret step 1 is "Secret value"; the onboarding connect
+// flow (onboardingStep==obConnect) reuses ModalAddProvider with identical step
 // numbering, so it is covered by the same rule.
+//
+// The provider edit form (ModalEditProvider) has TWO such steps: the API key
+// (step 1) and the custom headers JSON (step 7). Headers may carry credentials
+// — an Authorization override, a gateway token — so the blob is masked while it
+// is typed and in the completed-step list, exactly like the key.
 //
 // The MCP-add wizard (ModalMCPAdd) masks the env/headers steps too: those
 // lines hold `KEY=VALUE` pairs (a bearer token, an API key) and docs/mcp.md
@@ -33,8 +38,9 @@ func (m *Model) isSecretInputStep() bool {
 	case ModalAddProvider:
 		return m.formStepIndex == 2
 	case ModalEditProvider:
-		// Step 1 of the provider edit form rewrites the API key.
-		return m.formStepIndex == 1
+		// Step 1 rewrites the API key, step 7 the custom headers blob; both can
+		// carry credentials.
+		return m.formStepIndex == editProviderAPIKeyStep || m.formStepIndex == editProviderHeadersStep
 	case ModalAddSecret:
 		return m.formStepIndex == 1
 	case ModalMCPAdd:
@@ -50,7 +56,7 @@ func (m *Model) isSecretFormValue(stepIdx int) bool {
 	case ModalAddProvider:
 		return stepIdx == 2
 	case ModalEditProvider:
-		return stepIdx == 1
+		return stepIdx == editProviderAPIKeyStep || stepIdx == editProviderHeadersStep
 	case ModalAddSecret:
 		return stepIdx == 1
 	}

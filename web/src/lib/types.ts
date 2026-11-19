@@ -449,8 +449,17 @@ export type EditableChannelsConfig = {
   web?: EditableWebConfig
 }
 
+// Per-model reasoning overrides. Kept in sync with config.ReasoningConfig in
+// Go (pkg/config/config.go) — every field is optional and omitted when unset,
+// so "absent" means "let the provider/model decide". Validation lives
+// server-side (ReasoningConfig.Validate) on PUT /api/v1/config.
 export type ReasoningConfig = {
   effort?: 'low' | 'medium' | 'high'
+  // Reasoning token cap (OpenRouter).
+  max_tokens?: number
+  // Hide reasoning tokens from the response (OpenRouter).
+  exclude?: boolean
+  // Reasoning summary verbosity (OpenAI o-series).
   summary?: 'auto' | 'detailed' | 'concise'
   enable?: boolean
 }

@@ -119,7 +119,7 @@ What reaches the wire depends on the resolved level:
 
 Note that `"off"` is not an accepted value for the per-model
 `reasoning.effort` field; it is specific to `thinking_level` and the `/think`
-override.
+override. The TUI edit-model form rejects it as an effort for that reason.
 
 `/think` stays a per-session override on top of all of this. `/think default`
 clears the override and falls back to the agent level; `/think off` does not
@@ -297,20 +297,47 @@ The `openai` provider family also supports `web_search`.
 ### Editing a provider from the TUI
 
 `/providers` → ENTER on a provider opens its detail view, where **Edit provider**
-(the action row, or the `e` shortcut) rewrites the three identity fields of the
-provider without touching the rest:
+(the action row, or the `e` shortcut) walks every editable field of the provider
+entry one step at a time, without touching the rest:
 
 - **Provider type** — pre-filled with the stored `type`; required.
 - **API Key** — always starts BLANK (a stored secret is never rendered back into
   the form, not even masked); leaving it blank keeps the stored key.
 - **API Base URL** — pre-filled with the stored `api_base`; blank keeps it.
+- **Proxy** — pre-filled with the stored `proxy`; blank keeps it, `-` clears it.
+- **Auth method** — pre-filled with the stored `auth_method`; blank keeps it, `-`
+  clears it.
+- **Connect mode** — pre-filled with the stored `connect_mode` (`stdio` or
+  `grpc`, GitHub Copilot only); blank keeps it, `-` clears it.
+- **Web search** — pre-filled as `yes`/`no`/`default` from the stored
+  `web_search`; `default` unsets it so the transport falls back to its own
+  default. Any other answer is refused on the step.
+- **Headers** — a JSON object of string→string, masked as it is typed and never
+  pre-filled; blank keeps the stored map, `{}` clears it. The value is validated
+  with the same `protocoltypes.ValidateCustomHeaders` the config loader runs, so
+  a transport-owned header (`Host`, `Content-Type`, …) or a typo is refused where
+  it is typed instead of failing the config load.
 
-The entry is updated in place, so `models`, `proxy`, `headers`, `connect_mode`,
-`auth_method` and every other field survive the edit — editing a provider never
-drops its model list. The provider *name* is not editable there: renaming would
-have to re-point every agent model reference, so do it in `config.json` (or add
-the provider under the new name and delete the old one). ESC discards the draft
-and returns to the detail view.
+Blank means **keep** on every step: the form never renders a stored secret or a
+stored header value back, so a step walked through with Enter cannot wipe what it
+cannot show. Because blank cannot mean two things, `-` is the only way to ask for
+an optional text field (proxy, auth method, connect mode) to be *removed*, and
+the Headers step is masked like the API-key step because header values can carry
+credentials (an `Authorization` override, a gateway token). Both validations run
+as the form advances, so an `invalid web search value` or an `invalid headers`
+error lands on the step that caused it.
+
+The entry is updated in place, so `models` and every field the edit did not touch
+survive the edit — editing a provider never drops its model list. Only the fields
+the edit actually CHANGED are mirrored into the typed provider config that
+transport selection reads first: re-submitting a pre-filled value counts as
+untouched, so an `env:`-provided credential the typed copy is the sole carrier of
+is never blanked or swapped. The detail view itself lists the optional fields
+that are set — proxy, auth method, connect mode, web search and the custom header
+**names** only, never their values — above the model list. The provider *name* is
+not editable there: renaming would have to re-point every agent model reference,
+so do it in `config.json` (or add the provider under the new name and delete the
+old one). ESC discards the draft and returns to the detail view.
 
 ### Custom headers
 
@@ -407,12 +434,14 @@ Everything else is allowed on purpose, including `Authorization`,
 `User-Agent`, `X-Api-Key`, `Anthropic-Version`, `Accept` and
 `x-opencode-session` itself.
 
-There is no editor for the map yet — it is a `config.json`/API field, with no
-control in either UI. Both UIs keep it intact when they write other provider
-fields: the TUI mutates the loaded entry and saves the runtime config, which
-carries the map, and the WebUI settings document models the field and
-round-trips it, so a save from the browser — even one that only edits an
-unrelated section — rewrites the providers block **with** `headers`.
+The map is editable from the TUI: `/providers` → *Edit provider* ends with a
+**Headers** step that takes a JSON object of string→string, masked as it is
+typed (values can carry credentials), never pre-filled, blank keeping the stored
+map and `{}` clearing it, validated by the same `ValidateCustomHeaders` the
+loader runs so a transport-owned header or a typo is refused where it is typed.
+The Web UI still has no headers editor; it models the field in the settings
+document and round-trips it, so a save from the browser — even one that only
+edits an unrelated section — rewrites the providers block **with** `headers`.
 
 Resolution: the map comes from the provider entry the request resolved to — the
 Named entry, or the typed `providers.<builtin>` section, which
@@ -681,6 +710,23 @@ needs `"qwen"`. For OpenAI models that reject a disable (`o1`, `o3`), use
 the Web UI exposes a per-model **Think system** dropdown in the provider
 settings model editor. Leave the field empty (or pick "auto") to keep the
 default heuristics.
+
+The `reasoning` object (`enable`, `effort`, `max_tokens`, `exclude`, `summary`)
+is editable from both UIs as well, so none of it needs `config.json`:
+
+- **TUI** — `/providers` → provider detail → ENTER on a model row appends five
+  reasoning steps to the edit form: **Reasoning** (`yes`/`no`), **effort**
+  (`low`/`medium`/`high`), **max tokens** (a positive integer), **exclude**
+  (`yes`/`no`) and **summary** (`auto`/`detailed`/`concise`). `default` on any
+  of the four optional ones clears that override back to unset; disabling
+  reasoning with every override cleared drops the whole object, so the saved
+  entry stays clean.
+- **Web UI** — settings → providers → model editor exposes one control per
+  option (the optional ones prune the key when left on "default").
+
+Adding a model (`/add-model`, `/connect`) is unchanged: reasoning there is
+seeded from the catalog. The resolution order above is unchanged too — a
+per-model `reasoning` config remains the lowest-priority layer.
 
 `vision: true` enables the `read_image` tool and `read_video`'s frames mode
 (keyframes + audio transcript); `video: true` adds native `video_url`

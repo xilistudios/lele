@@ -29,6 +29,16 @@ func TestIsSecretInputStep(t *testing.T) {
 		{ModalAddSecret, 1, true, "secret step 1 = value"},
 		{ModalAddSecret, 0, false, "secret step 0 = name"},
 		{ModalAddSecret, 2, false, "secret step 2 = description"},
+		// Provider edit form: step 1 is the API key, step 7 the headers blob
+		// (which may carry an Authorization override); the rest are plain text.
+		{ModalEditProvider, 1, true, "edit-provider step 1 = API key"},
+		{ModalEditProvider, 7, true, "edit-provider step 7 = headers JSON"},
+		{ModalEditProvider, 0, false, "edit-provider step 0 = type"},
+		{ModalEditProvider, 2, false, "edit-provider step 2 = api base"},
+		{ModalEditProvider, 3, false, "edit-provider step 3 = proxy"},
+		{ModalEditProvider, 4, false, "edit-provider step 4 = auth method"},
+		{ModalEditProvider, 5, false, "edit-provider step 5 = connect mode"},
+		{ModalEditProvider, 6, false, "edit-provider step 6 = web search"},
 		{ModalAddModel, 1, false, "add-model has no secret steps"},
 		{ModalSkillInstall, 2, false, "skill install has no secret steps"},
 		{ModalSecrets, 1, false, "list modal never secret step"},
@@ -55,6 +65,15 @@ func TestIsSecretFormValue(t *testing.T) {
 		{ModalAddProvider, 3, false},
 		{ModalAddSecret, 1, true},
 		{ModalAddSecret, 0, false},
+		// The provider edit form masks the API key and the headers blob only.
+		{ModalEditProvider, editProviderAPIKeyStep, true},
+		{ModalEditProvider, editProviderHeadersStep, true},
+		{ModalEditProvider, editProviderTypeStep, false},
+		{ModalEditProvider, editProviderAPIBaseStep, false},
+		{ModalEditProvider, editProviderProxyStep, false},
+		{ModalEditProvider, editProviderAuthMethodStep, false},
+		{ModalEditProvider, editProviderConnectModeStep, false},
+		{ModalEditProvider, editProviderWebSearchStep, false},
 		{ModalAddModel, 1, false},
 		{ModalNone, 2, false},
 	}

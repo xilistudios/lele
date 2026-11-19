@@ -234,7 +234,7 @@ func TestProviderModelConfigLookup(t *testing.T) {
 func TestUpdateModelInProviderInPlaceEditPersists(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
-	if err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-2", 111000, 3333, true, "deepseek"); err != nil {
+	if err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-2", 111000, 3333, true, "deepseek", nil); err != nil {
 		t.Fatalf("updateModelInProvider: %v", err)
 	}
 
@@ -267,12 +267,17 @@ func TestUpdateModelInProviderInPlaceEditPersists(t *testing.T) {
 	}
 }
 
-// TestUpdateModelInProviderPreservesTemperatureAndReasoning verifies fields
-// not covered by the edit survive (Reasoning is NOT re-derived from catalog).
-func TestUpdateModelInProviderPreservesTemperatureAndReasoning(t *testing.T) {
+// TestUpdateModelInProviderPreservesTemperatureAndStoresReasoning verifies
+// fields the form does not ask about (Temperature, Video) survive the edit
+// while the reasoning config — which the form DOES ask about — is whatever the
+// caller passed. The edit form rebuilds it from its five reasoning steps, so an
+// Enter-through edit round-trips the stored config and an explicit nil clears it.
+func TestUpdateModelInProviderPreservesTemperatureAndStoresReasoning(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
-	if err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-2", 111000, 3333, true, ""); err != nil {
+	// What the edit form produces from a fully-loaded stored config.
+	stored := m.cfg.Providers.Named["myprov"].Models["alpha"].Reasoning
+	if err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-2", 111000, 3333, true, "", stored); err != nil {
 		t.Fatalf("updateModelInProvider: %v", err)
 	}
 
@@ -281,10 +286,18 @@ func TestUpdateModelInProviderPreservesTemperatureAndReasoning(t *testing.T) {
 		t.Errorf("Temperature = %v, want 0.7 (preserved)", got.Temperature)
 	}
 	if got.Reasoning == nil || got.Reasoning.Effort == nil {
-		t.Fatal("Reasoning/Effort must survive the edit")
+		t.Fatal("Reasoning/Effort must be stored from the form answer")
 	}
 	if *got.Reasoning.Effort != "high" {
-		t.Errorf("Effort = %q, want high (preserved)", *got.Reasoning.Effort)
+		t.Errorf("Effort = %q, want high (round-tripped)", *got.Reasoning.Effort)
+	}
+
+	// A nil answer means "no reasoning override" and must clear the stored one.
+	if err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-2", 111000, 3333, true, "", nil); err != nil {
+		t.Fatalf("updateModelInProvider(nil reasoning): %v", err)
+	}
+	if got := m.cfg.Providers.Named["myprov"].Models["alpha"]; got.Reasoning != nil {
+		t.Errorf("Reasoning = %+v, want nil after a nil answer", got.Reasoning)
 	}
 }
 
@@ -293,7 +306,7 @@ func TestUpdateModelInProviderPreservesTemperatureAndReasoning(t *testing.T) {
 func TestUpdateModelInProviderZeroContextKeepsExisting(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
-	if err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-2", 0, 0, false, ""); err != nil {
+	if err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-2", 0, 0, false, "", nil); err != nil {
 		t.Fatalf("updateModelInProvider: %v", err)
 	}
 
@@ -313,7 +326,7 @@ func TestUpdateModelInProviderZeroContextKeepsExisting(t *testing.T) {
 func TestUpdateModelInProviderThinkingType(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
-	if err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-1", 0, 0, false, "qwen"); err != nil {
+	if err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-1", 0, 0, false, "qwen", nil); err != nil {
 		t.Fatalf("updateModelInProvider(qwen): %v", err)
 	}
 	if got := m.cfg.Providers.Named["myprov"].Models["alpha"].ThinkingType; got != "qwen" {
@@ -321,7 +334,7 @@ func TestUpdateModelInProviderThinkingType(t *testing.T) {
 	}
 
 	// "auto" clears back to unset.
-	if err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-1", 0, 0, false, "auto"); err != nil {
+	if err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-1", 0, 0, false, "auto", nil); err != nil {
 		t.Fatalf("updateModelInProvider(auto): %v", err)
 	}
 	if got := m.cfg.Providers.Named["myprov"].Models["alpha"].ThinkingType; got != "" {
@@ -329,7 +342,7 @@ func TestUpdateModelInProviderThinkingType(t *testing.T) {
 	}
 
 	// Invalid dialect errors and leaves the entry untouched.
-	err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-1", 0, 0, false, "bogus")
+	err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-1", 0, 0, false, "bogus", nil)
 	if err == nil {
 		t.Fatal("expected error for invalid thinking type")
 	}
@@ -343,7 +356,7 @@ func TestUpdateModelInProviderThinkingType(t *testing.T) {
 func TestUpdateModelInProviderRename(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
-	if err := m.updateModelInProvider("myprov", "alpha", "Alpha2", "model-alpha-2", 111000, 3333, true, ""); err != nil {
+	if err := m.updateModelInProvider("myprov", "alpha", "Alpha2", "model-alpha-2", 111000, 3333, true, "", nil); err != nil {
 		t.Fatalf("updateModelInProvider: %v", err)
 	}
 
@@ -368,7 +381,7 @@ func TestUpdateModelInProviderRename(t *testing.T) {
 func TestUpdateModelInProviderRenameCollisionLeavesConfigUnchanged(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
-	err := m.updateModelInProvider("myprov", "alpha", "beta", "changed", 1, 1, true, "")
+	err := m.updateModelInProvider("myprov", "alpha", "beta", "changed", 1, 1, true, "", nil)
 	if err == nil {
 		t.Fatal("expected collision error")
 	}
@@ -395,7 +408,7 @@ func TestUpdateModelInProviderRenameCollisionLeavesConfigUnchanged(t *testing.T)
 func TestUpdateModelInProviderUnknownOrigAlias(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
-	err := m.updateModelInProvider("myprov", "nope", "nope", "model-x", 1, 1, false, "")
+	err := m.updateModelInProvider("myprov", "nope", "nope", "model-x", 1, 1, false, "", nil)
 	if err == nil {
 		t.Fatal("expected error for unknown origAlias")
 	}
@@ -410,7 +423,7 @@ func TestUpdateModelInProviderUnknownOrigAlias(t *testing.T) {
 func TestUpdateModelInProviderEmptyNewAlias(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
-	err := m.updateModelInProvider("myprov", "alpha", "   ", "model-x", 1, 1, false, "")
+	err := m.updateModelInProvider("myprov", "alpha", "   ", "model-x", 1, 1, false, "", nil)
 	if err == nil {
 		t.Fatal("expected error for empty new alias")
 	}
@@ -428,7 +441,7 @@ func TestUpdateModelInProviderEmptyNewAlias(t *testing.T) {
 func TestUpdateModelInProviderEmptyModelName(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
-	err := m.updateModelInProvider("myprov", "alpha", "alpha", "  ", 1, 1, false, "")
+	err := m.updateModelInProvider("myprov", "alpha", "alpha", "  ", 1, 1, false, "", nil)
 	if err == nil {
 		t.Fatal("expected error for empty model name")
 	}
