@@ -40,8 +40,9 @@ import (
 // second process): each keeps its own snapshot in memory, so a save may never
 // write that snapshot verbatim — it would drop the increments another manager
 // recorded since this one last wrote. Writes therefore apply the pending
-// DELTAS on top of the file's current content (read/merge/replace, see
-// saveLocked), which keeps every manager's increments.
+// DELTAS on top of the file's current content (read/merge/replace under a
+// cross-process lock on the file, see saveLocked and lockUsageFile), which
+// keeps every manager's increments.
 type usageStore struct {
 	mu     sync.Mutex
 	path   string
@@ -168,9 +169,10 @@ func (s *usageStore) addPendingLocked(server, remote string) {
 //
 // Reading first is what makes the shared file safe: writing this store's own
 // snapshot verbatim would drop whatever another manager recorded in between.
-// The read/merge/replace window is not a distributed lock — two managers
-// writing at the exact same moment can still lose one increment — but it turns
-// silent, permanent loss into a rare race on a counter that only ranks tools.
+// The whole read/merge/replace sequence runs under a cross-process lock on the
+// file (see lockUsageFile), so two managers sharing a LeleDir — including two
+// lele processes — cannot both read, both merge and then have the last rename
+// silently drop the other's increment.
 //
 // On success the merged map becomes this store's snapshot and pending is
 // cleared; on failure both are left alone, so the next inc retries the same
@@ -178,6 +180,13 @@ func (s *usageStore) addPendingLocked(server, remote string) {
 // (the counts only rank tools), and calling sync on every remote tool call
 // would be a real cost. Temp files are removed on every failure path.
 func (s *usageStore) saveLocked() error {
+	// Released on every path (it is a no-op when the lock could not be taken).
+	release, lockErr := lockUsageFile(s.path)
+	defer release()
+	if lockErr != nil {
+		warnUsage("could not lock the MCP usage file, saving without the lock", s.path, lockErr)
+	}
+
 	merged := s.readSnapshotLocked()
 	for server, tools := range s.pending {
 		counts := merged[server]
