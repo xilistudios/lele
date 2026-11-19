@@ -237,3 +237,67 @@ func TestSubagentResult_ArmsTick(t *testing.T) {
 		t.Fatal("a resumed subagent.result must set startTime so the startup grace keeps the spinner alive")
 	}
 }
+
+// TestSubagentResult_InjectedMidTurn_DoesNotArmContinuation is the mid-turn
+// counterpart of the AM2 test above. A result injected into a turn that is
+// ALREADY running arrives with resumed=true AND injected=true: the parent turn
+// is the one that will clear the loading state when it ends, so arming
+// subagentContinuationPending here would leave the TUI waiting for a
+// continuation turn that never comes. The progress row must still be dropped.
+func TestSubagentResult_InjectedMidTurn_DoesNotArmContinuation(t *testing.T) {
+	m, key := setupContinuationModel(t)
+	m.processing = false
+	m.startTime = time.Time{}
+	m.tickPending = false
+	m.subagentProgress = map[string]string{"subagent-1": "working"}
+
+	deliverEvent(t, m, bus.OutboundMessage{
+		Channel: "native",
+		ChatID:  key,
+		Event:   "subagent.result",
+		Metadata: map[string]string{
+			"task_id":  "subagent-1",
+			"resumed":  "true",
+			"injected": "true",
+		},
+	})
+
+	if _, ok := m.subagentProgress["subagent-1"]; ok {
+		t.Fatal("subagent.result must delete the progress row even when injected mid-turn")
+	}
+	if m.subagentContinuationPending {
+		t.Fatal("injected=true must NOT set subagentContinuationPending: the running turn clears loading")
+	}
+	if m.processing {
+		t.Fatal("injected=true must NOT start a processing state")
+	}
+	if m.tickPending {
+		t.Fatal("injected=true must NOT arm the animation tick: the running turn already drives it")
+	}
+}
+
+// TestSubagentResult_ResumedWithoutInjected_StillArmsContinuation is the
+// positive control for the check above: an idle parent's resume (resumed=true,
+// no injected stamp) must keep arming the turn exactly as before.
+func TestSubagentResult_ResumedWithoutInjected_StillArmsContinuation(t *testing.T) {
+	m, key := setupContinuationModel(t)
+	m.processing = false
+	m.subagentProgress = map[string]string{"subagent-1": "working"}
+
+	deliverEvent(t, m, bus.OutboundMessage{
+		Channel:  "native",
+		ChatID:   key,
+		Event:    "subagent.result",
+		Metadata: map[string]string{"task_id": "subagent-1", "resumed": "true", "injected": "false"},
+	})
+
+	if !m.subagentContinuationPending {
+		t.Fatal("resumed=true without injected must still set subagentContinuationPending")
+	}
+	if !m.processing {
+		t.Fatal("resumed=true without injected must mark the session as processing")
+	}
+	if _, ok := m.subagentProgress["subagent-1"]; ok {
+		t.Fatal("subagent.result must delete the task's progress row")
+	}
+}

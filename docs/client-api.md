@@ -1286,6 +1286,10 @@ Emitted after a message is fully processed and persisted to storage. Signals tha
 }
 ```
 
+It is also emitted mid-turn when the agent injects a subagent completion into a turn that is already running (the notice is persisted as a `[System: subagent] …` user message without a new turn starting). Those events carry `"reason": "subagent_notice"`; the payload shape is otherwise identical, so the same refetch handler applies.
+
+The matching `subagent.result` event carries `metadata["resumed"]` (`"true"` when the parent owns the result) and, when the parent was already mid-turn, `metadata["injected"] == "true"`. `injected` means the running turn's notice queue ACCEPTED the result, not that mid-turn delivery is guaranteed: delivery is mid-turn unless that turn exits before draining its queue (LLM error, cancellation, iteration-limit exhaustion, tool failure), in which case the result is re-published as an ordinary inbound and delivered by the usual continuation turn. Do not treat `injected == "true"` as "no further turn will follow for this session".
+
 #### `subscribe.ack`, `unsubscribe.ack`, `approve.ack`, `cancel.ack`, `pong`
 
 Acknowledgement and control events for client-side state handling.

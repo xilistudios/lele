@@ -48,11 +48,12 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID, task
 		metadata["subagent_session_key"] = result.Metadata["subagent_session_key"]
 	}
 
-	// The claim decides exactly one thing: whether this result is injected as a
-	// system inbound message, which is what resumes the parent's turn. It is
-	// taken BEFORE the publish so "claim" and "inject" are a single
-	// winner-takes-all step — claiming after would let a duplicate callback for
-	// the same task publish twice before either claimed.
+	// The claim decides exactly one thing: whether this result is delivered on
+	// behalf of the parent, which means either injecting it into the turn that
+	// is already running or resuming an idle parent's turn. It is taken BEFORE
+	// the publish so "claim" and "deliver" are a single winner-takes-all step —
+	// claiming after would let a duplicate callback for the same task publish
+	// twice before either claimed.
 	//
 	// It does NOT gate the subagent.result event below. That event is what
 	// tells the clients the task is over (the TUI deletes its progress row on
@@ -61,16 +62,42 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID, task
 	// gate did — leaves both showing a finished task as still running.
 	resumed := al.toolCoordinator != nil &&
 		al.toolCoordinator.claimSubagentResultForInjection(taskID)
+
+	// A claimed result is delivered one of two ways:
+	//   - the parent is MID-TURN: the per-session mid-turn queue is active, so
+	//     the notice is enqueued and the running loop injects it at its next
+	//     iteration boundary. No inbound is published: the turn that would run
+	//     it already exists.
+	//   - the parent is IDLE: the queue is inactive, enqueue reports false and
+	//     the system inbound below resumes the parent with a new turn.
+	// The queue mutex makes this an atomic either/or (see midturn_notices.go),
+	// so a claimed result is never both injected and resumed, and never lost.
+	//
+	// Note the deliberate asymmetry with the consumer side: this producer
+	// resolves the CURRENT session alias (enqueueMidTurnNotice is by-key), while
+	// the running turn drains the queue pointer it captured at activation. A
+	// "/new" remap during the turn therefore still delivers — either into the
+	// queue that turn owns, or into the fresh (inactive) key's queue, where
+	// enqueue returns false and the inbound below takes over.
+	injected := false
+	if resumed {
+		injected = al.enqueueMidTurnNotice(sessionKey, content, taskID)
+	}
+
 	if resumed {
 		metadata["resumed"] = "true"
 	} else {
 		metadata["resumed"] = "false"
 	}
+	if injected {
+		metadata["injected"] = "true"
+	}
 
 	// Notify interactive clients. Unconditional — exactly once per terminal
 	// outcome (pkg/tools only invokes the callback for the final attempt of the
 	// retry chain) and independent of whether the parent is mid-turn.
-	// "resumed" tells the client whether a continuation turn is owed.
+	// "resumed" says whether the parent owns the result, "injected" that the
+	// already-running turn carries it (so no continuation turn is coming).
 	al.bus.PublishOutbound(bus.OutboundMessage{
 		Channel:  channel,
 		ChatID:   sessionKey,
@@ -78,17 +105,19 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID, task
 		Metadata: metadata,
 	})
 
-	if !resumed {
-		// Another party owns this result (a wait_for_subagent read it in-turn,
-		// or a duplicate callback lost the claim) or the task is unknown to
-		// every manager — with no task there is no dedup, so injecting would be
-		// unguarded. The UI was still told; the parent must not run a turn.
+	if !resumed || injected {
+		// Three terminal outcomes, one delivery each:
+		//   - resumed=false: another party owns the result (a wait_for_subagent
+		//     read it in-turn, or a duplicate callback lost the claim) or the
+		//     task is unknown to every manager. The UI was still told; the
+		//     parent must not run a turn.
+		//   - injected=true: the running turn already owns delivery.
 		return
 	}
 
 	al.bus.PublishInbound(bus.InboundMessage{
 		Channel:    "system",
-		SenderID:   "subagent",
+		SenderID:   midTurnNoticeSender,
 		ChatID:     fmt.Sprintf("%s:%s", channel, chatID),
 		Content:    content,
 		SessionKey: sessionKey,

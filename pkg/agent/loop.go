@@ -103,6 +103,14 @@ type AgentLoop struct {
 	subagentSessionAgent sync.Map                  // subagent session key -> agent ID (O(1) lookup, not O(N))
 	wg                   sync.WaitGroup            // tracks in-flight message goroutines
 
+	// midTurnNotices carries subagent completions that arrive while a turn is
+	// already running on the session (sessionKey -> *midTurnNoticeQueue). The
+	// running turn injects them at iteration boundaries so the parent reacts to
+	// a subagent result inside the same turn instead of after it. When the
+	// session is idle the queue is inactive and the completion takes the
+	// inbound-resume path instead. See midturn_notices.go.
+	midTurnNotices sync.Map
+
 	// inProgressTools mirrors the tool each session is currently executing
 	// (sessionKey -> *session.InProgressTool), fed by publishToolLifecycle and
 	// dropped when the turn ends. It exists so a chat reload (TUI session
@@ -503,6 +511,16 @@ type processOptions struct {
 	// on the user message so the WebUI can show the original "/name args" and
 	// re-render the command chip from history.
 	AppliedCommand *appliedCommand
+
+	// midTurnQueue is the mid-turn subagent notice queue THIS turn activated,
+	// captured by runAgentLoop right before it calls runLLMIteration. The loop
+	// drains through this pointer instead of re-resolving opts.SessionKey,
+	// because a "/new" mid-turn remaps the session alias and a re-resolved key
+	// could point at a different queue than the one the turn is accepting
+	// notices into. nil when the turn has no usable session key (all queue
+	// methods are nil-safe). It is an internal per-turn field: callers that
+	// build processOptions never set it.
+	midTurnQueue *midTurnNoticeQueue
 }
 
 // appliedCommand is the display metadata of one expanded harness command: the

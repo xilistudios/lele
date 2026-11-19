@@ -115,6 +115,60 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		}
 	}
 
+	// Mid-turn subagent notices. Activating the queue here — right after the
+	// per-session semaphore is held — is what turns "the parent is running"
+	// into a fact a subagent callback can observe: while it is active,
+	// publishSubagentAsyncResult enqueues the result instead of publishing an
+	// inbound (which would block on the semaphore until this turn ended) and
+	// the loop below injects it at the next iteration boundary.
+	//
+	// The flush defer is registered AFTER the semaphore-release defer above,
+	// so LIFO ordering runs it BEFORE the semaphore is released. Anything the
+	// loop never got to inject (LLM error, ctx cancel, empty-response limit,
+	// iteration limit, tool failure) is re-published as the ordinary system
+	// inbound; that inbound then acquires the semaphore immediately after this
+	// function returns and runs as a normal continuation turn. Nothing is
+	// re-claimed here: the result was already claimed by
+	// publishSubagentAsyncResult, so re-publishing cannot duplicate it.
+	//
+	// noticeQueue is the turn's mid-turn notice identity. The session key is
+	// resolved ONCE here (activateMidTurnNotices) and the returned queue is
+	// used for the whole turn: a /new alias remap that happens while this turn
+	// runs must not make the drain/deactivate steps address a different queue
+	// than the one this turn activated, or notices accepted into the activated
+	// queue (whose producer skipped the inbound fallback) would be stranded.
+	// nil (empty/unusable session key) is fine: every queue method is nil-safe.
+	noticeQueue := lr.al.activateMidTurnNotices(opts.SessionKey)
+	defer func() {
+		for _, n := range noticeQueue.deactivate() {
+			// n.content is the RAW result text, exactly what
+			// publishSubagentAsyncResult publishes on the idle path:
+			// processSystemMessage adds the "[System: subagent] " prefix
+			// there, so the persisted message is identical either way.
+			//
+			// PublishInbound is at-most-once: it returns false when the bus is
+			// closed or its inbound buffer is full (non-blocking drop). This
+			// flush runs on the shutdown path (it is deferred before the
+			// semaphore is released, so retrying or sleeping here would keep
+			// the session blocked and could delay an exiting process), so a
+			// rejected publish is LOGGED loudly instead of retried: the loss
+			// must never be silent, but it must not turn into a stall either.
+			if !lr.al.bus.PublishInbound(bus.InboundMessage{
+				Channel:    "system",
+				SenderID:   midTurnNoticeSender,
+				ChatID:     fmt.Sprintf("%s:%s", opts.Channel, opts.ChatID),
+				Content:    n.content,
+				SessionKey: opts.SessionKey,
+				Metadata:   map[string]string{"task_id": n.taskID},
+			}) {
+				logger.ErrorCF("agent", "Mid-turn subagent notice lost: inbound bus rejected publish", map[string]interface{}{
+					"session_key": opts.SessionKey,
+					"task_id":     n.taskID,
+				})
+			}
+		}
+	}()
+
 	// 0. Record last channel for heartbeat notifications (skip internal channels)
 	if opts.Channel != "" && opts.ChatID != "" {
 		// Don't record internal channels (cli, system, subagent)
@@ -255,6 +309,10 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	}
 
 	// 4. Run LLM iteration loop
+	// Hand the captured notice queue to the iteration loop; it is the only
+	// identity the drain points below and inside use (see the activation
+	// comment above).
+	opts.midTurnQueue = noticeQueue
 	finalContent, iteration, err := lr.runLLMIteration(runCtx, agent, messages, opts)
 	if err != nil {
 		// Surface a clear error when the LLM loop timed out.
@@ -616,6 +674,20 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			agent.Sessions.DiscardStreamingDraft(opts.SessionKey)
 		}
 
+		// Mid-turn subagent notices, injected at the iteration boundary: the
+		// previous iteration just closed with tool results (or with an
+		// assistant turn plus guidance), so a user message here keeps the
+		// conversation well-formed. When the previous message IS a user
+		// message (empty-response retry, malformed-tool-call guidance, loop
+		// guidance) appending another one would break the providers' role
+		// alternation, so the notices stay queued: the final-exit check below
+		// guarantees they are delivered regardless.
+		if iteration > 1 && midTurnNoticeBoundaryIsSafe(messages) {
+			if notices := opts.midTurnQueue.drain(); len(notices) > 0 {
+				messages = lr.injectMidTurnNotices(agent, messages, opts, notices)
+			}
+		}
+
 		logger.DebugCF("agent", "LLM iteration",
 			map[string]interface{}{
 				"agent_id":  agent.ID,
@@ -882,6 +954,31 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				continue
 			}
 
+			// Final-exit check: the model just produced a final answer, but a
+			// subagent may have finished while this turn was running. Loading
+			// the notices here (atomically, together with deactivating the
+			// queue when there is nothing left) keeps them in THIS turn
+			// instead of turning them into a separate continuation turn. The
+			// assistant message above stays persisted and streamed as an
+			// intermediate answer; the loop simply runs one more iteration so
+			// the model can react to what it just learned. Role safety is
+			// guaranteed here: the last message is that assistant message.
+			//
+			// Only worth doing when the loop can actually run another
+			// iteration. With the budget exhausted, the `continue` below would
+			// re-evaluate the loop condition, exit, and leave the notice
+			// already drained+persisted with no turn left to react to it. So a
+			// spent budget skips the check entirely and leaves the notices
+			// QUEUED: the flush defer in runAgentLoop deactivates the queue and
+			// re-publishes them as inbound, and that continuation turn reacts.
+			hasBudget := agent.MaxIterations <= 0 || iteration < agent.MaxIterations
+			if hasBudget {
+				if notices := opts.midTurnQueue.drainOrDeactivate(); len(notices) > 0 {
+					messages = lr.injectMidTurnNotices(agent, messages, opts, notices)
+					continue
+				}
+			}
+
 			break
 		}
 
@@ -1062,6 +1159,71 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 	}
 
 	return finalContent, iteration, nil
+}
+
+// midTurnNoticeBoundaryIsSafe reports whether appending user-role mid-turn
+// notices after messages keeps the conversation well-formed. Providers reject
+// two consecutive messages of the same role, so a boundary whose last message
+// is already a user message (empty-response retry prompt, malformed-tool-call
+// guidance, loop guidance) is not usable: the caller leaves the notices queued
+// for a later boundary or for the final-exit check.
+func midTurnNoticeBoundaryIsSafe(messages []providers.Message) bool {
+	if len(messages) == 0 {
+		return true
+	}
+	return messages[len(messages)-1].Role != "user"
+}
+
+// injectMidTurnNotices appends the drained subagent notices to the live
+// message context AND to the session history, so the running turn reacts to
+// them immediately and every later turn (and compaction) still sees them.
+//
+// The WHOLE batch becomes exactly ONE user message, with the notices joined by
+// a blank line behind the canonical prefix. That is a role-alternation
+// requirement, not cosmetics: appending one user message per notice produces
+// two consecutive user messages when two results land at the same boundary,
+// which Bedrock Converse (among others) rejects with a 400 — and the messages
+// are persisted, so the breakage would replay on every later turn. Merging
+// keeps a single same-role message, which every provider accepts.
+//
+// The prefix stays at the START of the merged text so pkg/tui/system_notice.go
+// and the pkg/session synthetic-marker classification still recognise it.
+//
+// One Save for the whole batch, and one live-update event: the clients only
+// need to know that the transcript grew behind their back (they refetch it),
+// which is exactly what "history.updated" means. The event carries
+// reason=subagent_notice so a client can tell it apart from the normal
+// post-completion refresh.
+func (lr *llmRunnerImpl) injectMidTurnNotices(agent *AgentInstance, messages []providers.Message, opts processOptions, notices []midTurnNotice) []providers.Message {
+	if len(notices) == 0 {
+		return messages
+	}
+
+	raw := make([]string, 0, len(notices))
+	for _, n := range notices {
+		raw = append(raw, n.content)
+	}
+	content := midTurnNoticePrefix + strings.Join(raw, midTurnNoticeSeparator)
+
+	messages = append(messages, providers.Message{Role: "user", Content: content})
+	agent.Sessions.AddMessage(opts.SessionKey, "user", content)
+
+	if saveErr := agent.Sessions.Save(opts.SessionKey); saveErr != nil {
+		logger.WarnCF("agent", "Failed to save mid-turn subagent notices", map[string]interface{}{
+			"session_key": opts.SessionKey,
+			"notices":     len(notices),
+			"error":       saveErr.Error(),
+		})
+	}
+
+	lr.al.bus.PublishOutbound(bus.OutboundMessage{
+		Channel:  opts.Channel,
+		ChatID:   opts.SessionKey,
+		Event:    "history.updated",
+		Metadata: map[string]string{"reason": "subagent_notice"},
+	})
+
+	return messages
 }
 
 // iterationMsgID appends the iteration number as a suffix to baseID for
