@@ -145,7 +145,7 @@ lele tui -s <id>      # 恢复会话
 
 **提供器：** `anthropic`、`openai`、`openrouter`、`groq`、`zhipu`、`gemini`、`vllm`、`nvidia`、`ollama`、`moonshot`、`deepseek`、`github_copilot`，以及命名的 OpenAI 兼容后端（`model`、`context_window`、`vision`、`reasoning` 等）。
 
-**工作区**（`~/.lele/workspace/`）：`sessions/`、`memory/`、`state/`、`cron/`、`skills/`、`AGENT.md`、`HEARTBEAT.md`、`IDENTITY.md`、`SOUL.md`、`USER.md`。
+**工作区**（`~/.lele/workspace/`）：`sessions/`、`memory/`、`state/`、`cron/`、`skills/`、`AGENT.md`、`HEARTBEAT.md`、`MEMORY.md`。
 
 ## CLI
 

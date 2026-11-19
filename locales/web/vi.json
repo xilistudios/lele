@@ -265,7 +265,7 @@
       "subagentsIterationsHelp": "0 = không giới hạn.",
       "noOtherAgents": "Chưa có agent nào khác để ủy quyền.",
       "filesTitle": "Tệp agent",
-      "filesHint": "Các tệp văn bản trong không gian làm việc của agent này. AGENTS.md, IDENTITY.md, SOUL.md và USER.md được đưa vào prompt của agent.",
+      "filesHint": "Các tệp văn bản trong không gian làm việc của agent này. AGENT.md và MEMORY.md được đưa vào prompt của agent.",
       "filesOpen": "Mở tệp agent",
       "descriptionPlaceholder": "Agent này dùng để làm gì? Khi nào nên dùng?",
       "inherit": "Kế thừa",

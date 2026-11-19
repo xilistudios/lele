@@ -17,6 +17,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	lelecontext "github.com/xilistudios/lele/pkg/context"
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
@@ -174,11 +175,11 @@ func TestHandleNewCommand(t *testing.T) {
 	if !strings.Contains(result, "New conversation started") {
 		t.Errorf("Expected 'New conversation started' message, got: %s", result)
 	}
-	if !strings.Contains(result, "SOUL.md") {
-		t.Errorf("Expected SOUL.md reference in response, got: %s", result)
-	}
-	if !strings.Contains(result, "AGENT.md") {
-		t.Errorf("Expected AGENT.md reference in response, got: %s", result)
+	// The reply must not name context files: the persona files are deprecated
+	// (context.DeprecatedContextFiles), so a message listing them could only go
+	// stale — it is the shared, file-agnostic string.
+	if result != lelecontext.ContextRefreshedMessage {
+		t.Errorf("Expected the shared refresh message %q, got: %s", lelecontext.ContextRefreshedMessage, result)
 	}
 }
 
@@ -792,9 +793,13 @@ func TestHandleNewCommand_RefreshesBootstrapFiles(t *testing.T) {
 
 	ch := newCommandHandler(al)
 	response := ch.handleNewCommand(agent, "test:new-refresh")
-	if !strings.Contains(response, "AGENT.md") {
-		t.Fatalf("Expected refresh message to mention AGENT.md, got: %s", response)
+	// The reply no longer enumerates context files (they are not a stable
+	// contract: see context.DeprecatedContextFiles) — it is the shared,
+	// file-agnostic string…
+	if response != lelecontext.ContextRefreshedMessage {
+		t.Fatalf("Expected the shared refresh message %q, got: %s", lelecontext.ContextRefreshedMessage, response)
 	}
+	// …and what actually matters is that the prompt was rebuilt from disk.
 
 	if !strings.Contains(agent.ContextBuilder.BuildSystemPrompt(), "agent context v2") {
 		t.Fatal("Expected refreshed system prompt to contain updated AGENT.md content")

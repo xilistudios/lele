@@ -15,6 +15,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
+	lelecontext "github.com/xilistudios/lele/pkg/context"
 	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/mcp"
@@ -980,7 +981,7 @@ func (ap *agentProvidableImpl) ClearSession(sessionKey string) string {
 		baseSessionKey = sessionKey
 	}
 	ap.al.startFreshConversation(baseSessionKey, agent.ID, agentModel)
-	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
+	return lelecontext.ContextRefreshedMessage
 }
 
 // GetName returns the name of a session.

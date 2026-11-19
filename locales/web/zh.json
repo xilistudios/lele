@@ -265,7 +265,7 @@
       "subagentsIterationsHelp": "0 = 无限制。",
       "noOtherAgents": "还没有可委派的其他智能体。",
       "filesTitle": "智能体文件",
-      "filesHint": "此智能体工作区中的文本文件。AGENTS.md、IDENTITY.md、SOUL.md 和 USER.md 会注入到智能体提示中。",
+      "filesHint": "此智能体工作区中的文本文件。AGENT.md 和 MEMORY.md 会注入到智能体提示中。",
       "filesOpen": "打开智能体文件",
       "descriptionPlaceholder": "这个智能体是做什么的？什么时候使用？",
       "inherit": "继承",

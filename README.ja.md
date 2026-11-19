@@ -145,7 +145,7 @@ lele tui -s <id>      # セッションの再開
 
 **プロバイダー：** `anthropic`、`openai`、`openrouter`、`groq`、`zhipu`、`gemini`、`vllm`、`nvidia`、`ollama`、`moonshot`、`deepseek`、`github_copilot`、および名前付きOpenAI互換バックエンド（`model`、`context_window`、`vision`、`reasoning` など）。
 
-**ワークスペース**（`~/.lele/workspace/`）：`sessions/`、`memory/`、`state/`、`cron/`、`skills/`、`AGENT.md`、`HEARTBEAT.md`、`IDENTITY.md`、`SOUL.md`、`USER.md`。
+**ワークスペース**（`~/.lele/workspace/`）：`sessions/`、`memory/`、`state/`、`cron/`、`skills/`、`AGENT.md`、`HEARTBEAT.md`、`MEMORY.md`。
 
 ## CLI
 

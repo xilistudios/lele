@@ -385,7 +385,7 @@
       "subagentsIterationsHelp": "0 = ilimitado.",
       "noOtherAgents": "Todavía no hay otros agentes a los que delegar.",
       "filesTitle": "Archivos del agente",
-      "filesHint": "Archivos de texto del workspace de este agente. AGENTS.md, IDENTITY.md, SOUL.md y USER.md se inyectan en el prompt del agente.",
+      "filesHint": "Archivos de texto del workspace de este agente. AGENT.md y MEMORY.md se inyectan en el prompt del agente.",
       "filesOpen": "Abrir archivos del agente",
       "descriptionPlaceholder": "¿Para qué sirve este agente? ¿Cuándo debería usarse?",
       "inherit": "Heredar",
