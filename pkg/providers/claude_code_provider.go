@@ -957,7 +957,7 @@ var claudeBridgeAssetFiles = []string{"bridge.mjs", "bridge_lib.mjs"}
 var (
 	claudeBridgeDirOnce sync.Once
 	claudeBridgeDirPath string
-	claudeBridgeDirErr  error
+	errClaudeBridgeDir  error
 )
 
 // claudeBridgeDir extracts the embedded bridge once per process and returns the
@@ -968,9 +968,9 @@ var (
 // rewriting the same files.
 func claudeBridgeDir() (string, error) {
 	claudeBridgeDirOnce.Do(func() {
-		claudeBridgeDirPath, claudeBridgeDirErr = extractClaudeBridge()
+		claudeBridgeDirPath, errClaudeBridgeDir = extractClaudeBridge()
 	})
-	return claudeBridgeDirPath, claudeBridgeDirErr
+	return claudeBridgeDirPath, errClaudeBridgeDir
 }
 
 // extractClaudeBridge writes the bridge into
