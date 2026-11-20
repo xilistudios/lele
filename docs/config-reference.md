@@ -216,10 +216,13 @@ no configuration, and one field that is opt-in:
 
 - The OpenAI-compatible and Anthropic Messages transports send
   `User-Agent: lele/<version>` on every inference call. The OAuth/CLI provider
-  families deliberately do **not**: Claude OAuth (`claude-cli/…`), Gemini
-  Code Assist (`GeminiCLI-tui/…`) and Antigravity (`antigravity/…`) send their
-  official client's User-Agent because those endpoints require impersonation —
-  do not "unify" them, a `lele/…` value there would be rejected.
+  families deliberately do **not**: Claude OAuth (`anthropic` with
+  `auth_method: oauth`, which sends the CLI UA `claude-cli/2.x (external,
+  sdk-cli)`), Gemini Code Assist (`GeminiCLI-tui/…`) and Antigravity
+  (`antigravity/…`) send their official client's User-Agent because those
+  endpoints require impersonation — do not "unify" them, a `lele/…` value there
+  would be rejected. The `claude-code`/`codex-cli` CLI transports are not in
+  this list at all: lele writes no HTTP request for them.
 - Entries that resolve to **OpenCode Go** — by explicit name or `type`
   (`opencode_go` / `opencode-go`) or by an `api_base` whose path is an OpenCode
   Go route (`opencode.ai/zen/go` or `opencode.ai/inference/go`; the plain
@@ -247,6 +250,51 @@ no configuration, and one field that is opt-in:
   blank keeps, `{}` clears, validated on the spot); the Web UI has no headers
   editor but its document round-trips the map. See
   **Custom headers** in `docs/agents-models-providers.md` (`#custom-headers`).
+
+### `providers.claude-code` (CLI transport)
+
+`claude-code` — aliases `claude-cli`, `claudecode` — runs the user's Claude
+Code install through the official Claude Agent SDK and bills the **Claude
+subscription** `claude` is logged in with. There is no `api_key`, no `api_base`
+and no `proxy`; the catalog marks the type `base_less`. A `providers.claude-code`
+entry is therefore optional (`"claude-code": {}` is accepted and changes
+nothing) — naming the provider in the agent defaults is what selects it:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "provider": "claude-code",
+      "model": "claude-code"
+    }
+  }
+}
+```
+
+`model: "claude-code"` is the provider's sentinel (= let Claude Code pick its
+default); `"claude-code:claude-sonnet-4-5"` passes that model id through to the
+SDK.
+
+Requirements and environment variables:
+
+- Node.js ≥ 18.14 (`LELE_NODE_BIN` overrides the binary, default `node`).
+- `npm install -g @anthropic-ai/claude-agent-sdk` — `CLAUDE_AGENT_SDK_PATH`
+  points at the `node_modules` directory (or the package directory) that holds
+  it, searched before `npm root -g` and the usual global prefixes.
+- A logged-in `claude` session: run `claude` and log in with the subscription.
+  `CLAUDE_CODE_PATH` pins a specific CLI binary; empty means `PATH`, then the
+  SDK's bundled CLI.
+
+The provider never uses an API key, so lele strips `ANTHROPIC_API_KEY`,
+`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_CUSTOM_HEADERS`,
+`ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU}_MODEL`,
+`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`,
+`CLAUDE_CODE_SKIP_BEDROCK_AUTH` and `CLAUDE_CODE_SKIP_VERTEX_AUTH` from the
+bridge's environment, so billing can never fall back to the API. lele's own
+tools execute in lele (built-in Claude Code tools are disabled and tool calls
+are captured and interrupted) and every call replays the transcript statelessly
+— no Claude Code session files, no `CLAUDE.md`/`settings.json` leakage. See
+**Claude Code** in `docs/agents-models-providers.md` for the full behaviour.
 
 ## `tools`
 
