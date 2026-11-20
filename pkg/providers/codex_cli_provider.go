@@ -233,7 +233,7 @@ func (p *CodexCliProvider) parseJSONLEvents(output string) (*LLMResponse, error)
 
 	content := strings.Join(contentParts, "\n")
 
-	// Extract tool calls from response text (same pattern as ClaudeCliProvider)
+	// Extract tool calls from response text (see tool_call_extract.go)
 	toolCalls := extractToolCallsFromText(content)
 
 	finishReason := "stop"

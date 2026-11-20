@@ -253,6 +253,11 @@ Built-in providers such as `openai`, `anthropic`, `openrouter`, `groq`, `zhipu`,
 
 The runtime also supports additional named provider entries beyond the built-ins.
 
+Two families do not speak HTTP to a model endpoint at all: the local **CLI
+transports** `claude-code` (Claude Code, via the Claude Agent SDK) and
+`codex-cli` (Codex CLI). They have no `api_key` and no `api_base`, which is why
+the catalog marks them `base_less`; see **Claude Code** below.
+
 ### Model catalog and prefetch
 
 `pkg/catalog` downloads a curated catalog from this repository's `catalog/` directory (not embedded in the binary):
@@ -394,10 +399,15 @@ value, exactly like an `api_key` written the same way.
 
 `headers` is honoured by the two API-key HTTP transports described above. The
 families that build their own clients — Claude and Codex OAuth, the
-`claude-cli`/`codex-cli` transports, Gemini Code Assist, GitHub Copilot — never
-read the map, so switching one of those provider entries to OAuth
+`claude-code`/`codex-cli` CLI transports, Gemini Code Assist, GitHub Copilot —
+never read the map, so switching one of those provider entries to OAuth
 (`auth_method: oauth`/`token`) silently stops sending the headers. Configure the
 map on the provider whose transport can carry it.
+
+The `claude-code` transport reads none of these fields: it holds no HTTP client
+of its own, so `headers`, `api_key`, `api_base` and `proxy` are meaningless
+there (`claude-cli` and `claudecode` are still accepted as aliases of the
+provider name).
 
 Precedence: custom headers are applied **last** — after the transport defaults
 (`Content-Type`, `User-Agent`, and `Authorization` or `X-Api-Key` plus
@@ -450,6 +460,156 @@ Named entry, or the typed `providers.<builtin>` section, which
 from the model name, with no configured provider name, carries no custom
 headers.
 
+### Claude Code (subscription, no API key)
+
+`claude-code` is the **local CLI transport**: lele drives the user's own Claude
+Code install through the official
+[Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk)
+(`@anthropic-ai/claude-agent-sdk`), and the request is billed to the **Claude
+subscription that `claude` is logged in with** — never to an API key. There is
+nothing to configure: no `api_key`, no `api_base`, no `proxy`. The catalog marks
+the type `base_less` for exactly that reason.
+
+```
+lele agent loop (Go)
+  └─ persistent child: node bridge.mjs  (embedded in the binary, JSON lines over stdio)
+       └─ @anthropic-ai/claude-agent-sdk query()
+            └─ claude CLI  (subscription auth)
+```
+
+The bridge is embedded in the lele binary with `go:embed` and extracted to a
+temp directory on first use, so lele stays a single binary and never writes
+JavaScript itself.
+
+#### Requirements
+
+- Node.js **≥ 18.14** on `PATH` (the bridge is an ES module).
+- The SDK installed where lele can find it:
+  `npm install -g @anthropic-ai/claude-agent-sdk`.
+- A **logged-in** Claude Code session: run `claude` once and complete the login
+  with the subscription. Either the `claude` on `PATH` or the CLI bundled with
+  the SDK works — both read the same `~/.claude` credentials.
+
+lele never runs `npm install` for you. All three requirements are checked the
+first time a model call is made; a missing SDK comes back as an error naming the
+exact install command, and a missing login as an auth-class failure whose
+message ends with *"Run 'claude' and log in with your Claude subscription (no
+API key)."* — that one is classified as `auth`, so `model_fallbacks` can route
+around it.
+
+#### Configuration
+
+No provider entry is needed: point the agent at the provider name and let the
+model be the provider's own sentinel, `claude-code` (which means *let Claude Code
+pick its default*).
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "provider": "claude-code",
+      "model": "claude-code"
+    }
+  }
+}
+```
+
+An explicit model is passed through to the SDK as a bare model id:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "provider": "claude-code",
+      "model": "claude-code:claude-sonnet-4-5"
+    }
+  }
+}
+```
+
+An empty `providers.claude-code` entry is accepted too (it changes nothing), and
+`claude-cli` / `claudecode` are accepted as aliases of the provider name.
+
+#### Environment variables
+
+| Variable | Meaning |
+| --- | --- |
+| `CLAUDE_AGENT_SDK_PATH` | `node_modules` directory (or the package directory) containing `@anthropic-ai/claude-agent-sdk`. Searched **first**; needed only when the SDK is not in npm's global root. |
+| `CLAUDE_CODE_PATH` | Path to the `claude` CLI to use. Empty means `PATH`, then the SDK's own resolution. |
+| `LELE_NODE_BIN` | Node binary to spawn. Empty means `node` from `PATH`. |
+
+Without `CLAUDE_AGENT_SDK_PATH`, lele looks in `npm root -g`,
+`/opt/homebrew/lib/node_modules`, `/usr/local/lib/node_modules` and
+`~/.npm-global/lib/node_modules`, in that order, and also honours whatever is
+already on `NODE_PATH` (which it re-exports to the child, aggregated from the
+same candidate list — an ES module `import` needs the explicit paths, not just
+`NODE_PATH`).
+
+#### Subscription only: API-key variables are stripped
+
+Anything that could redirect the CLI to a **different billing path** is removed
+from the bridge's environment before it is spawned: `ANTHROPIC_API_KEY`,
+`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_CUSTOM_HEADERS`,
+`ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`,
+`ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`,
+`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`,
+`CLAUDE_CODE_SKIP_BEDROCK_AUTH`, `CLAUDE_CODE_SKIP_VERTEX_AUTH`. A key exported
+for the `anthropic` provider is therefore never picked up here: this transport
+authenticates with the subscription or not at all.
+
+#### Tools run in lele, not in Claude Code
+
+lele keeps its own agent loop; the SDK query is a **single model step**:
+
+- every built-in Claude Code tool is disabled (`tools: []`), and lele's tool set
+  is exposed to the model as an in-process MCP server named `lele`, with each
+  tool's JSON Schema passed through unchanged;
+- when the model emits a `tool_use` block the bridge **captures** it and
+  **interrupts** the query, then answers with `finish_reason: "tool_calls"`;
+  lele executes the tool itself (its own sandbox, approvals and workspace rules
+  apply) and calls the model again with the appended history;
+- as defence in depth, `permissionMode` stays `default` and a `canUseTool`
+  callback denies everything, so even a racing interrupt cannot execute
+  anything inside Claude Code. There is no `--dangerously-skip-permissions`
+  anywhere in this path.
+
+Consequence: a permission prompt, a sandbox decision or an approval in lele
+applies exactly as it does for every other provider — Claude Code's own tool
+policy never enters the picture.
+
+#### Stateless transcript replay
+
+Each model step starts a **fresh** SDK query with the whole conversation
+serialised into the prompt (`persistSession: false`, `settingSources: []`, no
+`--resume`). Nothing about the conversation is written to `~/.claude`, and
+nothing from the machine leaks into the prompt: no `CLAUDE.md`, no
+`settings.json`, no skills, no MCP servers from the user's Claude Code config.
+The same conversation replayed by lele produces the same prompt, and `/new`
+simply starts an empty transcript.
+
+Images are carried through: a `data:` URL image in the last user message is sent
+to the model as a real image block; images anywhere else in the history are
+rendered as a short `[image: …]` placeholder (and video as `[video omitted]`).
+
+#### Development / testing
+
+The bridge is covered by its own Node test suite, which needs no SDK, no login
+and no network:
+
+```bash
+node --test pkg/providers/claudecode/bridge_test.mjs   # or: make test-claude-bridge
+```
+
+The Go side is covered by unit tests against a fake bridge (`go test
+./pkg/providers/`), and the real end-to-end path by the integration suite, which
+**skips** unless node, a resolvable SDK and a logged-in subscription are all
+present:
+
+```bash
+CLAUDE_AGENT_SDK_PATH=/path/to/node_modules \
+  go test -tags=integration ./pkg/providers/ -run ClaudeCode -v
+```
+
 ### OpenCode Go
 
 `opencode_go` is OpenCode's subscription LLM service
@@ -489,10 +649,12 @@ configure:
   Messages transports (lele identifies itself instead of appearing as a generic
   HTTP client). The OAuth/CLI provider families deliberately keep their own
   User-Agents because those endpoints require impersonating the official
-  clients — Claude OAuth (`claude-cli/…`), Gemini Code Assist
+  clients — Claude OAuth (`claude-cli/2.x (external, sdk-cli)`, the UA the
+  `anthropic` provider sends under `auth_method: oauth`), Gemini Code Assist
   (`GeminiCLI-tui/…`) and Antigravity (`antigravity/…`); a `lele/…` value
   there would be rejected, so the impersonation is a requirement, not an
-  oversight.
+  oversight. The `claude-code`/`codex-cli` CLI transports are outside this list
+  entirely: lele writes no HTTP request for them, the official CLI does.
 - `x-opencode-session: <64 hex chars>` — the gateway rejects requests without
   it (`400 MissingSessionID`, validated before authentication). The value is
   the SHA-256 hash of lele's internal conversation session key: stable across

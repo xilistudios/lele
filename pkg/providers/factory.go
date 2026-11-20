@@ -862,7 +862,7 @@ func createProviderFromSelection(sel *providerSelection) (LLMProvider, error) {
 		c.enableWebSearch = sel.enableWebSearch
 		return c, nil
 	case providerTypeClaudeCLI:
-		return NewClaudeCliProvider(sel.workspace), nil
+		return NewClaudeCodeProvider(sel.workspace), nil
 	case providerTypeCodexCLI:
 		return NewCodexCliProvider(sel.workspace), nil
 	case providerTypeGitHubCopilot:
