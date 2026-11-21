@@ -155,7 +155,7 @@ export function AgentFilesPage() {
   const btnDanger = `${btnCls} bg-state-error/10 text-state-error hover:bg-state-error/20`
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
+    <div className="flex app-shell bg-background-primary text-text-primary">
       <Sidebar
         collapsed={!sidebarOpen}
         mobileOpen={mobileSidebarOpen}

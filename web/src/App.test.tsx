@@ -1745,7 +1745,7 @@ describe('Session deletion', () => {
 
     // Test that the component renders without errors
     await waitFor(() => {
-      expect(document.querySelector('.h-screen')).not.toBeNull()
+      expect(document.querySelector('.app-shell')).not.toBeNull()
     })
   })
 })
