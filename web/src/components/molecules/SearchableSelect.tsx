@@ -112,8 +112,8 @@ export function SearchableSelect({
       // Check if there's enough space below
       if (rootRef.current) {
         const rect = rootRef.current.getBoundingClientRect()
-        const windowHeight = window.innerHeight
-        const spaceBelow = windowHeight - rect.bottom
+        const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+        const spaceBelow = viewportHeight - rect.bottom
         const popupHeight = 256 // max-h-64
 
         // If not enough space below, open upwards
@@ -174,23 +174,29 @@ export function SearchableSelect({
     [],
   )
 
-  // Recalculate direction on window resize
+  // Recalculate direction on window resize and on visual-viewport resize
+  // (the on-screen keyboard shrinks only the visual viewport on iOS)
   useEffect(() => {
     if (!isMounted) return
 
     const handleResize = () => {
       if (rootRef.current) {
         const rect = rootRef.current.getBoundingClientRect()
-        const windowHeight = window.innerHeight
-        const spaceBelow = windowHeight - rect.bottom
+        const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+        const spaceBelow = viewportHeight - rect.bottom
         const popupHeight = 256
 
         setIsOpenUp(spaceBelow < popupHeight + 20)
       }
     }
 
+    const visualViewport = window.visualViewport
     window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
+    visualViewport?.addEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      visualViewport?.removeEventListener('resize', handleResize)
+    }
   }, [isMounted])
 
   const open = () => {
