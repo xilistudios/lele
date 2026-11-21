@@ -102,7 +102,7 @@ export function Modal({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
       {/* Decorative backdrop: Escape (document listener) is the keyboard path to close. */}
       <div
         className="absolute inset-0 bg-overlay backdrop-blur-sm transition-opacity"

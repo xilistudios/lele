@@ -102,7 +102,7 @@ export function QuickChatPanel({
 
       {/* Panel — right side */}
       <aside
-        className={`flex h-full w-full max-w-sm flex-shrink-0 flex-col border-l border-border bg-background-primary shadow-2xl ${closing ? 'animate-panel-slide-out' : 'animate-panel-slide-in'}`}
+        className={`flex h-full w-full max-w-sm flex-shrink-0 safe-area-y flex-col border-l border-border bg-background-primary shadow-2xl ${closing ? 'animate-panel-slide-out' : 'animate-panel-slide-in'}`}
       >
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-border px-4 py-3">

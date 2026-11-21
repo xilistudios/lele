@@ -230,6 +230,29 @@
 .app-shell {
   height: var(--app-vh);
   overflow: hidden;
+  /* Notch / home-indicator / status-bar insets. env() = 0px without
+   * viewport-fit=cover and on desktop -> pixel-identical there. The shell has
+   * no Tailwind padding utilities, so these cannot fight the px and py
+   * utilities (a plain .pb-safe next to py-3 would OVERRIDE the 12px with 0). */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+/* For fixed-position drawers that escape .app-shell's padding box: below md the
+ * sidebar/subagent/quick-chat drawers are `fixed`, so they own no shell padding
+ * and must carry the insets themselves. At `md:` they become `md:relative` (or
+ * are inside .app-shell), which already applies the same env() insets —
+ * applying both would double them on an iPad in landscape. Hence mobile-only.
+ * Applies to the PANEL, never to the `fixed inset-0` backdrop behind it: a
+ * backdrop has to dim the whole screen, edges and notch included. Only apply to
+ * elements with NO competing padding utilities. */
+@media (max-width: 767.98px) {
+  .safe-area-y {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
 }
 
 /* Replaces `min-h-screen` on scrollable centered pages (auth, error, loading). */
