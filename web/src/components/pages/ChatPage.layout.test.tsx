@@ -1,7 +1,7 @@
 import '../../test/setup'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { cleanup, render } from '@testing-library/react'
-import { createElement, type ReactElement } from 'react'
+import { type ReactElement, createElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import '../../test/i18n'
 import {
@@ -133,7 +133,8 @@ const listWrapperOf = (container: HTMLElement) =>
   mainOf(container)?.querySelector(':scope > div.flex-1') ?? null
 const composerWrapperOf = (container: HTMLElement) =>
   mainOf(container)?.querySelector(':scope > div.border-t') ?? null
-const headerOf = (container: HTMLElement) => mainOf(container)?.querySelector(':scope > div.border-b') ?? null
+const headerOf = (container: HTMLElement) =>
+  mainOf(container)?.querySelector(':scope > div.border-b') ?? null
 
 afterEach(() => {
   cleanup()
@@ -183,7 +184,12 @@ describe('ChatPage layout contract', () => {
 
   test('the shared shell carries no mobile-only layout', () => {
     const container = renderChatPage()
-    const suspects = [shellOf(container), mainOf(container), listWrapperOf(container), composerWrapperOf(container)]
+    const suspects = [
+      shellOf(container),
+      mainOf(container),
+      listWrapperOf(container),
+      composerWrapperOf(container),
+    ]
     for (const el of suspects) {
       for (const token of classesOf(el)) expect(token.startsWith('max-md:')).toBe(false)
     }
