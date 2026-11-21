@@ -3,11 +3,12 @@ import { useTranslation } from 'react-i18next'
 import { IconButton } from '../atoms/IconButton'
 
 type Props = {
+  className?: string
   onUpload: (files: File[]) => Promise<string[]>
   onAttach: (paths: string[]) => void
 }
 
-export function AttachmentInput({ onUpload, onAttach }: Props) {
+export function AttachmentInput({ className, onUpload, onAttach }: Props) {
   const { t } = useTranslation()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
@@ -55,6 +56,7 @@ export function AttachmentInput({ onUpload, onAttach }: Props) {
         onClick={() => fileInputRef.current?.click()}
         title={t('chat.attachFiles')}
         ariaLabel={t('chat.attachFiles')}
+        className={className}
       >
         <svg
           width="14"

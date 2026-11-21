@@ -16,6 +16,7 @@ type Direction = 'up' | 'down'
 type Props = {
   ariaLabel: string
   buttonLabel: string
+  className?: string
   direction?: Direction
   disabled?: boolean
   emptyLabel: string
@@ -41,6 +42,7 @@ const formatDisplayValue = shortModelName
 export function SearchableSelect({
   ariaLabel,
   buttonLabel,
+  className,
   direction = 'up',
   disabled = false,
   emptyLabel,
@@ -214,10 +216,10 @@ export function SearchableSelect({
   }
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className={`relative ${className ?? ''}`}>
       <button
         aria-label={ariaLabel}
-        className="flex min-w-0 items-center gap-1.5 sm:gap-2 rounded-md border border-border bg-background-primary px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm text-text-primary transition-all duration-fast hover:border-border hover:bg-background-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex w-full min-w-0 items-center gap-1.5 sm:gap-2 rounded-md border border-border bg-background-primary px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm text-text-primary transition-all duration-fast hover:border-border hover:bg-background-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
         disabled={disabled}
         type="button"
         onClick={() => (isMounted ? close() : open())}
@@ -293,9 +295,7 @@ export function SearchableSelect({
                             type="button"
                             onClick={() => handleSelect(option.value)}
                           >
-                            <span className="truncate text-xs leading-relaxed">
-                              {option.label}
-                            </span>
+                            <span className="truncate text-xs leading-relaxed">{option.label}</span>
                             {active ? (
                               <span className="ml-3 text-xs text-state-success">●</span>
                             ) : null}
