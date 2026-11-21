@@ -101,7 +101,7 @@ export const ChatHeader = memo(function ChatHeader() {
 
   return (
     <>
-      <div className="flex items-center justify-between border-b border-border px-4 py-3 md:px-6">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3 md:px-6">
         <div className="flex items-center gap-2 md:gap-3 min-w-0">
           <button
             type="button"
