@@ -26,6 +26,7 @@ import { SettingsPage } from './components/pages/SettingsPage'
 import { SkillsPage } from './components/pages/SkillsPage'
 import { AppLogicProvider, useAppLogicContext } from './contexts/AppLogicContext'
 import { AuthProvider, defaultApiUrlFromWindow, useAuthContext } from './contexts/AuthContext'
+import { useAppViewportHeight } from './hooks/useAppViewportHeight'
 import { useBackendStatus } from './hooks/useBackendStatus'
 import { wsDebug } from './lib/debug'
 import { isDesktop } from './lib/desktop'
@@ -347,6 +348,8 @@ function AppContent() {
 }
 
 function App() {
+  useAppViewportHeight()
+
   return (
     <AuthProvider defaultApiUrl={defaultApiUrl}>
       <AppContent />

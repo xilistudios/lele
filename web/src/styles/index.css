@@ -260,8 +260,19 @@
   min-height: var(--app-vh);
 }
 
-html,
-body,
+/* The document must never be taller than the shell: a 100%-tall `html` floors
+ * the document at the layout-viewport height even when the shell shrinks for
+ * the keyboard, which leaves a blank pannable region and scrolls the header
+ * away again. `auto` lets the document height equal the body height.
+ * `body` tracks the same single source as the shell; `#root` percentages then
+ * resolve against a definite height, exactly as they did before. */
+html {
+  height: auto;
+}
+body {
+  height: var(--app-vh);
+  min-height: 0;
+}
 #root {
   height: 100%;
   min-height: 100%;
