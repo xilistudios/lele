@@ -198,6 +198,20 @@ describe('MCPSettings — agent selection', () => {
     expect(u.container.textContent).toContain(tr('settings.mcpPage.implicitMain'))
   })
 
+  test('switching agents resets the source filter chip', async () => {
+    const u = await ready(setup())
+    fireEvent.click(u.need('mcp-filter-global'))
+    expect(u.need('mcp-filter-global').getAttribute('aria-pressed')).toBe('true')
+    expect(u.need('mcp-filter-all').getAttribute('aria-pressed')).toBe('false')
+
+    fireEvent.change(u.selectOf(), { target: { value: 'coder' } })
+    await waitFor(() => expect(u.need('mcp-filter-all')).not.toBeNull())
+
+    expect(u.selectOf().value).toBe('coder')
+    expect(u.need('mcp-filter-all').getAttribute('aria-pressed')).toBe('true')
+    expect(u.need('mcp-filter-global').getAttribute('aria-pressed')).toBe('false')
+  })
+
   test('a deleted selection falls back to the default agent', async () => {
     const u = await ready(setup())
     fireEvent.change(u.selectOf(), { target: { value: 'coder' } })

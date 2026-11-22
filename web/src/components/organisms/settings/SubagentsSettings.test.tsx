@@ -6,7 +6,14 @@ import '../../../test/i18n'
 import { SettingsProvider } from '../../../contexts/SettingsContext'
 import type { EditableAgentConfig } from '../../../lib/types'
 import type { ApiClient } from '../../../services/http/client'
-import { autoCleanup, makeState, renderWithSettings, tr } from '../../../test/agentsHarness'
+import {
+  autoCleanup,
+  makeState,
+  renderWithSettings,
+  settle,
+  tr,
+  withModels,
+} from '../../../test/agentsHarness'
 import { SubagentsSettings } from './SubagentsSettings'
 
 const DEFAULTS = {
@@ -143,6 +150,28 @@ describe('SubagentsSettings — agent selector', () => {
       'agents.list.0.subagents',
       { allow_agents: [] },
     ])
+  })
+
+  test('switching agents closes the open subagent model picker', async () => {
+    withModels(['gpt-4o'])
+    const u = setup([
+      { ...CODER, subagents: { allow_agents: [] } },
+      { ...RESEARCHER, subagents: { allow_agents: [] } },
+    ])
+    await settle()
+
+    const searchInput = () =>
+      u.queryByLabelText(`${tr('settings.agentPage.subagentsModel')} search`)
+    fireEvent.click(u.getByLabelText(tr('settings.agentPage.subagentsModel')))
+    await settle(250)
+    expect(searchInput()).not.toBeNull()
+    fireEvent.change(searchInput() as HTMLElement, { target: { value: 'gpt' } })
+
+    fireEvent.change(u.getByLabelText(tr('settings.subagentsPage.agentLabel')), {
+      target: { value: 'coder' },
+    })
+    expect(selectOf(u.container)?.value).toBe('coder')
+    expect(searchInput()).toBeNull()
   })
 
   test('a deleted selection falls back to the default agent', () => {
