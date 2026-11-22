@@ -134,6 +134,20 @@ describe('SettingsPage — layout & tab strip', () => {
     ).toBe('page')
   })
 
+  test('every tab entry carries its own icon', async () => {
+    const view = renderLayout('/settings/general', { config: 0 })
+    await waitFor(() => expect(view.getByTestId('probe-tab')).not.toBeNull())
+
+    const buttons = Array.from(tabStrip(view.container)?.querySelectorAll('button') ?? [])
+    expect(buttons.length).toBeGreaterThan(0)
+
+    const glyphs = buttons.map((button) => button.querySelector('svg')?.innerHTML ?? null)
+    // An icon per entry, and no two entries sharing one: the glyph has to
+    // disambiguate the entry, not repeat the label.
+    expect(glyphs).not.toContain(null)
+    expect(new Set(glyphs).size).toBe(buttons.length)
+  })
+
   test('the agents list is a settings tab: strip visible, Agents highlighted', async () => {
     const view = renderLayout('/settings/agents', { config: 0 })
     await waitFor(() => expect(view.getByTestId('probe-tab')).not.toBeNull())

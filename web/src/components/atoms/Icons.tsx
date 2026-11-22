@@ -600,7 +600,7 @@ export function CheckIcon({ size = 14 }: { size?: number }) {
   )
 }
 
-export function CodeIcon({ size = 14 }: { size?: number }) {
+export function CodeIcon({ size = 14, className }: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -612,6 +612,7 @@ export function CodeIcon({ size = 14 }: { size?: number }) {
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
+      className={className}
     >
       <polyline points="16 18 22 12 16 6" />
       <polyline points="8 6 2 12 8 18" />
@@ -824,6 +825,89 @@ export function ToolsIcon({
       className={className}
     >
       <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+    </svg>
+  )
+}
+
+/**
+ * "Updates" icon — arrow into a tray: download/install the new build.
+ * Used by the Settings tab strip (`settings/updates`).
+ */
+export function DownloadIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  )
+}
+
+/**
+ * "Diagnostics" icon — heartbeat/pulse line: live status of the running
+ * system (channels, tools, config). Used by the Settings tab strip.
+ */
+export function ActivityIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    </svg>
+  )
+}
+
+/**
+ * "Logs" icon — a text page: the raw log lines the Logs tab streams.
+ * Distinct from `TerminalIcon` (interactive CLI/native clients).
+ */
+export function FileTextIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="8" y1="13" x2="16" y2="13" />
+      <line x1="8" y1="17" x2="14" y2="17" />
     </svg>
   )
 }

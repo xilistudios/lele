@@ -1,6 +1,44 @@
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import type { SettingsTab } from '../../lib/settingsTabs'
+import {
+  ActivityIcon,
+  AgentsIcon,
+  ClockIcon,
+  CodeIcon,
+  DownloadIcon,
+  FileTextIcon,
+  GroupsIcon,
+  ProvidersIcon,
+  SendIcon,
+  ServerIcon,
+  SettingsIcon,
+  TerminalIcon,
+  ToolsIcon,
+} from '../atoms/Icons'
+
+/**
+ * One icon per Settings entry, same vocabulary as `AgentSettingsTabs`:
+ * a 14px stroke icon to the left of the label. Thirteen entries of very
+ * different nature are recognised faster by silhouette than by text alone,
+ * and the icon stays put when the strip collapses to a scrollable bar on
+ * mobile (only the label truncates, never the icon).
+ */
+const TAB_ICONS: Record<SettingsTab, typeof SettingsIcon> = {
+  general: SettingsIcon,
+  agents: AgentsIcon,
+  providers: ProvidersIcon,
+  session: ClockIcon, // ephemeral sessions / compaction — lifetime of a conversation
+  channels: SendIcon, // Telegram, WhatsApp, … outbound message pipes
+  native: TerminalIcon, // paired native CLI clients
+  groups: GroupsIcon,
+  tools: ToolsIcon,
+  system: ServerIcon, // heartbeat, devices, log rotation — runtime of the host
+  updates: DownloadIcon,
+  advanced: CodeIcon, // gateway, bindings — hand-edited config surface
+  diagnostics: ActivityIcon,
+  logs: FileTextIcon,
+}
 
 type Props = {
   activeTab: SettingsTab
@@ -35,22 +73,26 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
       className="w-full md:w-[200px] flex-shrink-0 border-b md:border-b-0 md:border-r border-border bg-background-secondary p-2 md:p-4 overflow-x-auto md:overflow-x-visible no-scrollbar"
     >
       <div className="flex md:flex-col gap-1 md:space-y-1 min-w-max md:min-w-0">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => onTabChange(tab.id)}
-            type="button"
-            data-testid={`settings-tab-${tab.id}`}
-            aria-current={activeTab === tab.id ? 'page' : undefined}
-            className={`rounded-md border px-3 py-1.5 md:py-2.5 text-center md:text-left text-xs md:text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
-              activeTab === tab.id
-                ? 'border-accent-primary/30 bg-surface-selected text-accent-primary'
-                : 'border-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+        {tabs.map((tab) => {
+          const Icon = TAB_ICONS[tab.id]
+          return (
+            <button
+              key={tab.id}
+              onClick={() => onTabChange(tab.id)}
+              type="button"
+              data-testid={`settings-tab-${tab.id}`}
+              aria-current={activeTab === tab.id ? 'page' : undefined}
+              className={`flex items-center rounded-md border px-3 py-1.5 md:py-2.5 text-center md:text-left text-xs md:text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
+                activeTab === tab.id
+                  ? 'border-accent-primary/30 bg-surface-selected text-accent-primary'
+                  : 'border-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+              }`}
+            >
+              <Icon size={14} className="mr-2 flex-shrink-0 opacity-80" />
+              {tab.label}
+            </button>
+          )
+        })}
       </div>
     </nav>
   )

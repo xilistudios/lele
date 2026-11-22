@@ -114,6 +114,43 @@ describe('Sidebar — navigation', () => {
   })
 })
 
+describe('Sidebar — new chat + search share one row', () => {
+  test('both actions are laid out on a single horizontal line', () => {
+    const view = renderSidebar()
+
+    const newChat = view.getByLabelText('Nuevo chat')
+    const search = view.getByLabelText('Buscar')
+
+    // Same parent: they are siblings of one `flex` row (jsdom has no layout
+    // engine, so the class contract is what pins "same line").
+    const row = newChat.parentElement
+    expect(row).not.toBeNull()
+    expect(search.parentElement?.parentElement).toBe(row)
+    const classes = (row?.getAttribute('class') ?? '').split(/\s+/)
+    expect(classes).toContain('flex')
+    expect(classes).toContain('items-center')
+    // A `flex-col` here would stack them again, which is the bug this pins.
+    expect(classes).not.toContain('flex-col')
+  })
+
+  test('the new-chat label yields width instead of pushing search out of the drawer', () => {
+    const view = renderSidebar()
+    const newChat = view.getByLabelText('Nuevo chat')
+    const classes = (newChat.getAttribute('class') ?? '').split(/\s+/)
+
+    // `flex-1 min-w-0` + `truncate` is what lets a long localized label shrink
+    // inside the 280px drawer without overflowing the search button.
+    expect(classes).toContain('flex-1')
+    expect(classes).toContain('min-w-0')
+    // `truncate` lives on the label itself, not on the row.
+    const label = Array.from(newChat.querySelectorAll('span')).find((el) =>
+      (el.textContent ?? '').includes('Nuevo chat'),
+    )
+    expect(label).toBeDefined()
+    expect((label?.getAttribute('class') ?? '').split(/\s+/)).toContain('truncate')
+  })
+})
+
 describe('Sidebar — collapsed rail', () => {
   test('renders Chat as an icon button behind a tooltip', () => {
     const view = renderSidebar({ collapsed: true })

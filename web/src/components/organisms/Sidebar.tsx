@@ -296,30 +296,43 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
               </div>
             </>
           ) : (
-            <>
+            /* One single row: the primary "New chat" action takes the leftover
+               width and the secondary "Search" action is an icon button pinned
+               to its right, so both sit on the same line instead of stacking as
+               two full-width rows. `min-w-0` + `truncate` let a long localized
+               label shrink instead of pushing the search button out of the
+               280px drawer. */
+            <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => onCreateSession()}
                 aria-label={t('chat.newChat')}
-                className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
               >
-                <div className="h-10 w-10 flex items-center justify-center">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center">
                   <PlusCircleIcon size={24} />
                 </div>
-                <span className="leading-none">{t('chat.newChat')}</span>
+                <span className="truncate leading-none">{t('chat.newChat')}</span>
               </button>
-              <button
-                type="button"
-                onClick={() => openPanel(true)}
-                aria-label={t('chat.search')}
-                className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-              >
-                <div className="h-10 w-10 flex items-center justify-center">
+              <div className="group relative flex items-center justify-center">
+                <IconButton
+                  onClick={() => openPanel(true)}
+                  ariaLabel={t('chat.search')}
+                  variant="nav"
+                  className="flex h-10 w-10 items-center justify-center"
+                >
                   <SearchIcon size={16} />
-                </div>
-                <span>{t('chat.search')}</span>
-              </button>
-            </>
+                </IconButton>
+                {/* The icon-only button keeps its label in a tooltip, using the
+                    same `left-full` anchoring as the rest of the sidebar's
+                    icon buttons. Opening it downwards (`top-full`) instead
+                    would cover the Chat/Agent mode selector that sits right
+                    below this row. */}
+                <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                  {t('chat.search')}
+                </span>
+              </div>
+            </div>
           )}
         </div>
 
