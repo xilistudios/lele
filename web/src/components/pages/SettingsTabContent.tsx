@@ -12,6 +12,7 @@ import {
   NativeClientsSettings,
   ProvidersSettings,
   SessionSettings,
+  SubagentsSettings,
   SystemSettings,
   ToolsSettings,
   UpdatesSettings,
@@ -40,6 +41,8 @@ export function SettingsTabContent() {
       return <GeneralSettings />
     case 'agents':
       return <AgentsListPage />
+    case 'subagents':
+      return <SubagentsSettings />
     case 'providers':
       return <ProvidersSettings />
     case 'session':
