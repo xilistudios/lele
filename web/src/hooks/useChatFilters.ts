@@ -22,6 +22,75 @@ function formatMonthYear(d: Date): string {
   return `${month} ${d.getFullYear()}`
 }
 
+export function groupSessionsByTime(sessions: ChatSession[]): TimeGroup[] {
+  if (!sessions.length) return []
+
+  const groups = new Map<string, { key: string; label: string; sessions: ChatSession[] }>()
+  const now = new Date()
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const yesterdayStart = new Date(todayStart)
+  yesterdayStart.setDate(yesterdayStart.getDate() - 1)
+  const weekStart = new Date(todayStart)
+  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7))
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+
+  for (const session of sessions) {
+    const updated = safeDate(session.updated)
+    if (!updated) continue
+
+    let key: string
+    let label: string
+
+    if (updated >= todayStart) {
+      key = 'today'
+      label = 'chat.today'
+    } else if (updated >= yesterdayStart) {
+      key = 'yesterday'
+      label = 'chat.yesterday'
+    } else if (updated >= weekStart) {
+      key = 'thisWeek'
+      label = 'chat.thisWeek'
+    } else if (updated >= monthStart) {
+      key = 'thisMonth'
+      label = 'chat.thisMonth'
+    } else {
+      key = `${updated.getFullYear()}-${String(updated.getMonth() + 1).padStart(2, '0')}`
+      label = formatMonthYear(updated)
+    }
+
+    if (!groups.has(key)) {
+      groups.set(key, { key, label, sessions: [] })
+    }
+    const g = groups.get(key)
+    if (g) {
+      g.sessions.push(session)
+    }
+  }
+
+  const order = ['today', 'yesterday', 'thisWeek', 'thisMonth']
+  const result: TimeGroup[] = []
+
+  for (const key of order) {
+    const item = groups.get(key)
+    if (item) {
+      result.push(item)
+    }
+  }
+
+  const monthKeys = Array.from(groups.keys())
+    .filter((k) => !order.includes(k))
+    .sort((a, b) => b.localeCompare(a))
+
+  for (const key of monthKeys) {
+    const item = groups.get(key)
+    if (item) {
+      result.push(item)
+    }
+  }
+
+  return result
+}
+
 export function useChatFilters(allSessions: ChatSession[], options?: { includeEmpty?: boolean }) {
   const [query, setQuery] = useState('')
   const [sortMode, setSortMode] = useState<SortMode>('recent')
@@ -54,74 +123,7 @@ export function useChatFilters(allSessions: ChatSession[], options?: { includeEm
     return list
   }, [allSessions, query, sortMode, includeEmpty])
 
-  const grouped: TimeGroup[] = useMemo(() => {
-    if (!filteredSessions.length) return []
-
-    const groups = new Map<string, { key: string; label: string; sessions: ChatSession[] }>()
-    const now = new Date()
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const yesterdayStart = new Date(todayStart)
-    yesterdayStart.setDate(yesterdayStart.getDate() - 1)
-    const weekStart = new Date(todayStart)
-    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7))
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-
-    for (const session of filteredSessions) {
-      const updated = safeDate(session.updated)
-      if (!updated) continue
-
-      let key: string
-      let label: string
-
-      if (updated >= todayStart) {
-        key = 'today'
-        label = 'chat.today'
-      } else if (updated >= yesterdayStart) {
-        key = 'yesterday'
-        label = 'chat.yesterday'
-      } else if (updated >= weekStart) {
-        key = 'thisWeek'
-        label = 'chat.thisWeek'
-      } else if (updated >= monthStart) {
-        key = 'thisMonth'
-        label = 'chat.thisMonth'
-      } else {
-        key = `${updated.getFullYear()}-${String(updated.getMonth() + 1).padStart(2, '0')}`
-        label = formatMonthYear(updated)
-      }
-
-      if (!groups.has(key)) {
-        groups.set(key, { key, label, sessions: [] })
-      }
-      const g = groups.get(key)
-      if (g) {
-        g.sessions.push(session)
-      }
-    }
-
-    const order = ['today', 'yesterday', 'thisWeek', 'thisMonth']
-    const result: TimeGroup[] = []
-
-    for (const key of order) {
-      const item = groups.get(key)
-      if (item) {
-        result.push(item)
-      }
-    }
-
-    const monthKeys = Array.from(groups.keys())
-      .filter((k) => !order.includes(k))
-      .sort((a, b) => b.localeCompare(a))
-
-    for (const key of monthKeys) {
-      const item = groups.get(key)
-      if (item) {
-        result.push(item)
-      }
-    }
-
-    return result
-  }, [filteredSessions])
+  const grouped = useMemo(() => groupSessionsByTime(filteredSessions), [filteredSessions])
 
   return {
     query,

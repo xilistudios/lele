@@ -1,6 +1,6 @@
 import '../../test/setup'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { createElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import '../../test/i18n'
@@ -11,12 +11,13 @@ import type { ChatSession } from '../../lib/types'
 import { CHAT_PAGE_SIZE, ChatHistoryPage } from './ChatHistoryPage'
 
 const originalFetch = globalThis.fetch
+const originalIntersectionObserver = globalThis.IntersectionObserver
 
 const TOTAL_SESSIONS = 120
 
 const ALL_SESSIONS: ChatSession[] = Array.from({ length: TOTAL_SESSIONS }, (_, i) => ({
   key: `native:client-1:s${String(i).padStart(3, '0')}`,
-  name: `Chat ${i}`,
+  name: `Chat ${String(i).padStart(3, '0')}`,
   kind: 'chat' as const,
   created: '2026-01-01T00:00:00.000Z',
   updated: new Date(2026, 0, 1, 0, 0, i).toISOString(),
@@ -24,7 +25,7 @@ const ALL_SESSIONS: ChatSession[] = Array.from({ length: TOTAL_SESSIONS }, (_, i
 
 type PageRequest = { offset: number; limit: number }
 
-function installSessionServer(requests: PageRequest[]) {
+function installSessionServer(requests: PageRequest[], sessions = ALL_SESSIONS) {
   globalThis.fetch = mock(async (input: RequestInfo | URL) => {
     const url = String(input)
     if (!url.split('?')[0].endsWith('/api/v1/chat/sessions')) {
@@ -32,18 +33,70 @@ function installSessionServer(requests: PageRequest[]) {
     }
     const params = new URL(url).searchParams
     const offset = Number(params.get('offset') ?? '0')
-    const limit = Number(params.get('limit') ?? '50')
+    const limit = Number(params.get('limit') ?? String(CHAT_PAGE_SIZE))
     requests.push({ offset, limit })
-    const page = ALL_SESSIONS.slice(offset, offset + limit)
     return new Response(
       JSON.stringify({
-        sessions: page,
-        total: TOTAL_SESSIONS,
-        has_more: offset + limit < TOTAL_SESSIONS,
+        sessions: sessions.slice(offset, offset + limit),
+        total: sessions.length,
+        has_more: offset + limit < sessions.length,
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )
   }) as unknown as typeof fetch
+}
+
+type ObserverRecord = {
+  callback: IntersectionObserverCallback
+  targets: Set<Element>
+}
+
+let observers: ObserverRecord[] = []
+
+function installIntersectionObserver() {
+  observers = []
+  class FakeIntersectionObserver {
+    private record: ObserverRecord
+
+    constructor(callback: IntersectionObserverCallback) {
+      this.record = { callback, targets: new Set() }
+      observers.push(this.record)
+    }
+
+    observe(target: Element) {
+      this.record.targets.add(target)
+    }
+
+    unobserve(target: Element) {
+      this.record.targets.delete(target)
+    }
+
+    disconnect() {
+      this.record.targets.clear()
+    }
+
+    takeRecords() {
+      return []
+    }
+  }
+  globalThis.IntersectionObserver =
+    FakeIntersectionObserver as unknown as typeof IntersectionObserver
+}
+
+function hasLiveSentinel(): boolean {
+  return observers.some((o) => o.targets.size > 0)
+}
+
+function scrollSentinelIntoView() {
+  const live = observers.filter((o) => o.targets.size > 0)
+  for (const record of live) {
+    act(() => {
+      record.callback(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        record as unknown as IntersectionObserver,
+      )
+    })
+  }
 }
 
 const apiClient = createApiClient('http://127.0.0.1:18793')
@@ -55,48 +108,45 @@ const authValue = {
   session: { token: 'token', client_id: 'client-1' },
 } as unknown as AuthContextValue
 
-const logicValue = {
-  sessions: [],
-  currentSessionKey: null,
-  parentSessionKey: null,
-  sidebarOpen: true,
-  mobileSidebarOpen: false,
-  processingSessions: new Set<string>(),
-  chatMode: 'agent',
-  groupsEnabled: false,
-  onCloseMobileSidebar: () => undefined,
-  onOpenMobileSidebar: () => undefined,
-  onSelectSession: () => undefined,
-  onDeleteSession: async () => undefined,
-  onCreateSession: async () => undefined,
-  onToggleSidebar: () => undefined,
-  onSelectMode: () => undefined,
-  onLogout: async () => undefined,
-} as unknown as AppLogicContextValue
+function makeLogicValue(sessions: ChatSession[]) {
+  return {
+    sessions,
+    currentSessionKey: null,
+    parentSessionKey: null,
+    sidebarOpen: true,
+    mobileSidebarOpen: false,
+    processingSessions: new Set<string>(),
+    chatMode: 'agent',
+    groupsEnabled: false,
+    onCloseMobileSidebar: () => undefined,
+    onOpenMobileSidebar: () => undefined,
+    onSelectSession: () => undefined,
+    onDeleteSession: async () => undefined,
+    onCreateSession: async () => undefined,
+    onToggleSidebar: () => undefined,
+    onSelectMode: () => undefined,
+    onLogout: async () => undefined,
+  } as unknown as AppLogicContextValue
+}
 
-function renderPage() {
+function renderPage(sessions: ChatSession[]) {
   return render(
     createElement(
       AuthContext.Provider,
       { value: authValue },
       createElement(
         AppLogicContext.Provider,
-        { value: logicValue },
+        { value: makeLogicValue(sessions) },
         createElement(MemoryRouter, { initialEntries: ['/chats'] }, createElement(ChatHistoryPage)),
       ),
     ),
   )
 }
 
-function loadMoreButton(container: HTMLElement): HTMLButtonElement | undefined {
-  return Array.from(container.querySelectorAll('button')).find((b) =>
-    (b.textContent ?? '').includes('Cargar'),
-  )
-}
-
 function renderedChatCount(container: HTMLElement): number {
   const main = container.querySelector('main')
-  return ALL_SESSIONS.filter((s) => (main?.textContent ?? '').includes(s.name ?? '')).length
+  const text = main?.textContent ?? ''
+  return ALL_SESSIONS.filter((s) => text.includes(s.name ?? '')).length
 }
 
 beforeEach(() => {
@@ -106,55 +156,72 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   globalThis.fetch = originalFetch
+  globalThis.IntersectionObserver = originalIntersectionObserver
 })
 
 describe('ChatHistoryPage pagination', () => {
-  test('default page size is 50 chats', () => {
-    expect(CHAT_PAGE_SIZE).toBe(50)
+  test('default page size is 20 chats', () => {
+    expect(CHAT_PAGE_SIZE).toBe(20)
   })
 
-  test('first load requests a single page of 50 sessions', async () => {
+  test('renders a single page even when the app already holds every session', async () => {
     const requests: PageRequest[] = []
     installSessionServer(requests)
 
-    renderPage()
+    const view = renderPage(ALL_SESSIONS)
 
-    await waitFor(() => expect(requests.length).toBeGreaterThan(0))
-    expect(requests[0]).toEqual({ offset: 0, limit: CHAT_PAGE_SIZE })
-    expect(requests.length).toBe(1)
+    await waitFor(() => expect(renderedChatCount(view.container)).toBe(CHAT_PAGE_SIZE))
+    expect(requests).toEqual([{ offset: 0, limit: CHAT_PAGE_SIZE }])
+    expect(renderedChatCount(view.container)).toBeLessThan(ALL_SESSIONS.length)
   })
 
-  test('only the first 50 chats are rendered while more remain on the server', async () => {
+  test('scrolling the sentinel reveals the next page', async () => {
     const requests: PageRequest[] = []
     installSessionServer(requests)
+    installIntersectionObserver()
 
-    const view = renderPage()
+    const view = renderPage(ALL_SESSIONS)
+    await waitFor(() => expect(renderedChatCount(view.container)).toBe(CHAT_PAGE_SIZE))
 
-    await waitFor(() => expect(loadMoreButton(view.container)).toBeTruthy())
-    expect(renderedChatCount(view.container)).toBe(50)
+    scrollSentinelIntoView()
+
+    await waitFor(() => expect(renderedChatCount(view.container)).toBe(CHAT_PAGE_SIZE * 2))
   })
 
-  test('"Load more" fetches the next page of 50 and appends it', async () => {
+  test('loads the next server page when the revealed window runs out of sessions', async () => {
     const requests: PageRequest[] = []
     installSessionServer(requests)
+    installIntersectionObserver()
 
-    const view = renderPage()
-    await waitFor(() => expect(loadMoreButton(view.container)).toBeTruthy())
+    const view = renderPage([])
 
-    const button = loadMoreButton(view.container) as HTMLButtonElement
-    await act(async () => {
-      fireEvent.click(button)
-    })
+    await waitFor(() => expect(requests).toContainEqual({ offset: 0, limit: CHAT_PAGE_SIZE }))
+    await waitFor(() =>
+      expect(requests).toContainEqual({ offset: CHAT_PAGE_SIZE, limit: CHAT_PAGE_SIZE }),
+    )
 
-    await waitFor(() => expect(renderedChatCount(view.container)).toBe(100))
-    expect(requests).toContainEqual({ offset: 50, limit: CHAT_PAGE_SIZE })
+    await waitFor(() => expect(hasLiveSentinel()).toBe(true))
+    scrollSentinelIntoView()
 
-    const lastButton = loadMoreButton(view.container) as HTMLButtonElement
-    await act(async () => {
-      fireEvent.click(lastButton)
-    })
-    await waitFor(() => expect(renderedChatCount(view.container)).toBe(TOTAL_SESSIONS))
-    expect(requests).toContainEqual({ offset: 100, limit: CHAT_PAGE_SIZE })
-    await waitFor(() => expect(loadMoreButton(view.container)).toBeUndefined())
+    await waitFor(() => expect(renderedChatCount(view.container)).toBe(CHAT_PAGE_SIZE * 2))
+  })
+
+  test('stops requesting pages once every session is loaded', async () => {
+    const requests: PageRequest[] = []
+    installSessionServer(requests, ALL_SESSIONS.slice(0, 25))
+    installIntersectionObserver()
+
+    const view = renderPage([])
+
+    await waitFor(() => expect(requests).toHaveLength(2))
+    expect(requests).toContainEqual({ offset: 0, limit: CHAT_PAGE_SIZE })
+    expect(requests).toContainEqual({ offset: CHAT_PAGE_SIZE, limit: CHAT_PAGE_SIZE })
+
+    await waitFor(() => expect(hasLiveSentinel()).toBe(true))
+    scrollSentinelIntoView()
+
+    await waitFor(() => expect(renderedChatCount(view.container)).toBe(25))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(requests).toHaveLength(2)
   })
 })
