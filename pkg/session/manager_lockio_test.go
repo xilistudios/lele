@@ -24,17 +24,12 @@ func newTestStoreLockIO(t *testing.T) *store.Store {
 	return s
 }
 
-// TestSaveDoesNotHoldLockDuringIO verifies the fix for the TUI freeze:
-// while a save is doing disk I/O, the manager's
-// mutex must be released so that readers (TUI renders calling GetHistory,
-// GetCurrentContextUsage, ...) are never blocked for hundreds of ms.
 func TestSaveDoesNotHoldLockDuringIO(t *testing.T) {
 	s := newTestStoreLockIO(t)
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
 	key := "test:lockio"
 
-	// Build a session large enough that encoding + fsync takes a while.
 	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "hello"})
 	big := strings.Repeat("x", 64*1024)
 	for i := 0; i < 40; i++ {
@@ -44,7 +39,6 @@ func TestSaveDoesNotHoldLockDuringIO(t *testing.T) {
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 
-	// Writer: save repeatedly.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -61,8 +55,6 @@ func TestSaveDoesNotHoldLockDuringIO(t *testing.T) {
 		}
 	}()
 
-	// Readers: measure how long a read-lock acquisition takes while saves
-	// are in flight. Before the fix, this could block 100-300ms per save.
 	maxWait := time.Duration(0)
 	var mu sync.Mutex
 	for r := 0; r < 4; r++ {
@@ -78,7 +70,7 @@ func TestSaveDoesNotHoldLockDuringIO(t *testing.T) {
 				start := time.Now()
 				sm.mu.RLock()
 				wait := time.Since(start)
-				_ = len(sm.sessions) // trivial read work
+				_ = len(sm.sessions)
 				sm.mu.RUnlock()
 				mu.Lock()
 				if wait > maxWait {
@@ -93,17 +85,13 @@ func TestSaveDoesNotHoldLockDuringIO(t *testing.T) {
 	close(stop)
 	wg.Wait()
 
-	// Allow generous slack for CI/slow storage
-	const limit = 200 * time.Millisecond // increased for sqlite transaction tests
+	const limit = 200 * time.Millisecond
 	if maxWait > limit {
 		t.Errorf("read lock blocked for %v while saving (limit %v) — lock held during disk I/O?", maxWait, limit)
 	}
 	fmt.Printf("max reader wait during concurrent saves: %v\n", maxWait)
 }
 
-// TestConcurrentSavesNeverLoseNewestData verifies the ordering guard: when
-// two saves of the same key overlap, the final file must contain the newest
-// message, never an older snapshot.
 func TestConcurrentSavesNeverLoseNewestData(t *testing.T) {
 	s := newTestStoreLockIO(t)
 	sm := NewSessionManager()
@@ -128,13 +116,10 @@ func TestConcurrentSavesNeverLoseNewestData(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Final explicit save of current state, then verify it parses
-	// and contains at least the base message plus consistent content.
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("final Save failed: %v", err)
 	}
 
-	// Reload from disk into a fresh manager
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	sm2.ensureLoaded()

@@ -1,12 +1,5 @@
 package session
 
-// SessionManager: construction and message mutation.
-//
-// Owns the manager struct itself plus the API that creates sessions and
-// mutates their message history (append, replace, truncate, remove, read).
-// Loading lives in load.go, durability in persist.go, memory pressure in
-// eviction.go.
-
 import (
 	"sync"
 	"time"
@@ -19,28 +12,17 @@ import (
 type SessionManager struct {
 	sessions    map[string]*Session
 	mu          sync.RWMutex
-	sessionRepo *store.SessionRepo // SQLite sessions repository
-	loadOnce    sync.Once          // ensures loadSessions runs exactly once, on first access
+	sessionRepo *store.SessionRepo
+	loadOnce    sync.Once
 
-	// sessionKV is the shared key/value store, when one is configured. It is
-	// only read by SubagentAgentPin (the durable spawn-time executor pin, which
-	// pkg/agent writes into this same namespace). Nil is valid: JSON-only
-	// deployments and every hand-built test manager simply have no pin.
 	sessionKV *store.KVRepo
 
-	// Lazy loading: lightweight metadata for sessions not yet loaded into memory.
-	// Populated by loadSessionMetadata() instead of loading full message history.
-	sessionMeta map[string]*sessionMetadata // keyed by session key
+	sessionMeta map[string]*sessionMetadata
 
-	// LRU eviction
-	maxInMemory int                  // max sessions to keep in memory (0 = unlimited). Default: 50.
-	evictionTTL time.Duration        // idle time before a session is eligible for eviction. Default: 30m.
-	accessTimes map[string]time.Time // last access time per session key (for LRU)
+	maxInMemory int
+	evictionTTL time.Duration
+	accessTimes map[string]time.Time
 
-	// countsCache memoizes the batched store-side message-count query behind
-	// AllMessageCounts / AllTotalMessageCounts (see storeCountsCache in
-	// listing.go). Guarded by its own mutex because the query deliberately runs
-	// with sm.mu released.
 	countsCache storeCountsCache
 }
 
@@ -56,25 +38,14 @@ func NewSessionManager() *SessionManager {
 	return sm
 }
 
-// SetSessionRepo sets the SQLite sessions repository for persistence. When
-// set, the manager will use SQLite instead of JSON files for session storage.
 func (sm *SessionManager) SetSessionRepo(r *store.SessionRepo) {
 	sm.sessionRepo = r
 }
 
-// HasSessionRepo reports whether a persistence repository is configured. It is
-// the read-only twin of SetSessionRepo, for callers that must distinguish "no
-// rows on disk" from "no disk at all" — a manager without a repo answers every
-// persisted read with an empty result, which is indistinguishable from an empty
-// ledger. Test fixtures use it to fail loudly instead of silently asserting
-// against a memory-only manager.
 func (sm *SessionManager) HasSessionRepo() bool {
 	return sm.sessionRepo != nil
 }
 
-// SetSessionKV wires the shared key/value store used by SubagentAgentPin. It is
-// optional: without it the durable spawn-time executor pin is simply unreadable,
-// which degrades a pre-v8 ledger row to "no executor" instead of failing.
 func (sm *SessionManager) SetSessionKV(kv *store.KVRepo) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -95,23 +66,6 @@ func (sm *SessionManager) AddMessage(sessionKey, role, content string) {
 	})
 }
 
-// AddFullMessage adds a complete message with tool calls and tool call ID to the session.
-// This is used to save the full conversation flow including tool calls and tool results.
-// If the last message is a streaming assistant message (added by AppendAssistantChunk),
-// it updates that message in-place instead of appending a duplicate.
-//
-// Invariant (enforced at this funnel): through AddFullMessage/AddMessage, a
-// message flagged Streaming=true is only ever the LAST message of the history.
-// (SetHistory can still install a legacy history that violates it.) Before any
-// non-assistant message is appended, the streaming tail is resolved by
-// resolveStreamingTailLocked — finalized in place when it already carries
-// content, or replaced when it is an empty placeholder. Without this, a
-// guidance/tool message appended right after a streamed assistant (the
-// loop-detector path in pkg/agent/llm_runner.go) left the streaming flag set
-// forever: it was persisted, survived restarts, and the WebUI then treated that
-// message as a live stream on every later turn. The normal paths are untouched:
-// an assistant message takes the in-place branch below, and a non-assistant
-// append after a finalized or non-assistant tail is a no-op in the helper.
 func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Message) {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -119,9 +73,6 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 
 	session := sm.getOrCreateUnlocked(sessionKey)
 
-	// The session name is what the user sees they asked, not what the model
-	// received: a harness command stores the expanded prompt in Content but the
-	// original "/name args" in DisplayContent.
 	if msg.Role == "user" && len(session.Messages) == 0 && session.Name == "" {
 		name := msg.DisplayContent
 		if name == "" {
@@ -132,34 +83,23 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 		sm.syncSessionMetaLocked(session)
 	}
 
-	// New user message starts a new turn — clear the streamed content flag
-	// so the deduplication logic is fresh for the next assistant response.
 	if msg.Role == "user" {
 		session.hadStreamedContent = false
 	}
 
-	// If the last message is a streaming assistant and this is an assistant
-	// message, update it in-place to avoid duplicates.
 	if msg.Role == "assistant" && len(session.Messages) > 0 {
 		lastMsg := &session.Messages[len(session.Messages)-1]
 		if lastMsg.Role == "assistant" && lastMsg.Streaming {
-			// Replace the streaming message with the final version.
-			// Keep hadStreamedContent=true so HasStreamedContent still returns
-			// true until the next user message arrives.
 			msg.Streaming = false
 			*lastMsg = msg
 			session.Updated = time.Now()
-			session.markModified(len(session.Messages) - 1) // in-place update, not a new append
-			session.publishViewLocked()                     // rewrite of the last element
+			session.markModified(len(session.Messages) - 1)
+			session.publishViewLocked()
 			sm.syncSessionMetaLocked(session)
 			return
 		}
 	}
 
-	// Restore the streaming-tail invariant before appending a non-assistant
-	// message (see resolveStreamingTailLocked). Returns true only when the
-	// empty streaming placeholder took the incoming message in its slot, in
-	// which case there is nothing left to append.
 	if msg.Role != "assistant" && sm.resolveStreamingTailLocked(session, msg) {
 		return
 	}
@@ -177,10 +117,8 @@ func (sm *SessionManager) GetHistory(key string) []providers.Message {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	// Try in-memory first
 	session, ok := sm.sessions[key]
 	if !ok {
-		// Try loading from disk (needs write lock, which we already hold)
 		session, ok = sm.loadSessionFromDisk(key)
 	}
 	if !ok {
@@ -200,33 +138,9 @@ func (sm *SessionManager) GetHistory(key string) []providers.Message {
 	return history
 }
 
-// GetHistoryView returns a read-only view of the session's message history.
-//
-// The returned slice is an immutable snapshot published by the writer side
-// (copy-on-write, see view.go). It is safe to read without holding the session
-// lock and will not be affected by later AppendAssistantChunk/AddFullMessage/
-// RemoveLastMessage calls. On the hot path the call performs NO allocation and
-// NO copy: it returns the already-published snapshot. The view is rebuilt (and
-// republished) only when the snapshot is missing or stale, i.e. when a writer
-// mutated the session and either published a new snapshot (structural writers)
-// or deliberately left it stale (streaming chunks — the epoch check turns that
-// into one lazy rebuild per read burst instead of one copy per writer call).
-//
-// The caller MUST NOT modify the returned slice or any message in it — the
-// same backing array is shared by every concurrent reader. For external use
-// where the caller may modify, use GetHistory instead.
 func (sm *SessionManager) GetHistoryView(key string) []providers.Message {
 	sm.ensureLoaded()
 
-	// HOT PATH: session already in memory. Return the published snapshot when
-	// it is fresh for the current epoch: O(1), zero allocations.
-	//
-	// Reads intentionally do NOT touch the LRU access time: an active session
-	// is kept fresh by its own writes (AppendAssistantChunk/AddFullMessage
-	// call touchSession), and a purely-passive read of an idle session that
-	// later gets evicted simply reloads from disk on the next call — cheap and
-	// correct, never corrupt. This mirrors GetInProgressAssistant/HasMessages,
-	// which already read under RLock without touching.
 	sm.mu.RLock()
 	if session, ok := sm.sessions[key]; ok {
 		snap := session.viewSnapshot.Load()
@@ -234,28 +148,17 @@ func (sm *SessionManager) GetHistoryView(key string) []providers.Message {
 			sm.mu.RUnlock()
 			return snap.view
 		}
-		// Stale (or never published): rebuild the view while still holding the
-		// read lock — Session.Messages cannot change under it, since every
-		// writer needs the write lock. Stamp it with the epoch observed under
-		// the lock so a late CAS can never publish content/epoch that were not
-		// read together.
 		view := cloneMessages(session.Messages)
 		fresh := &messageSnapshot{epoch: session.saveEpoch, view: view}
 		sm.mu.RUnlock()
-		// Best-effort publish so the next reader is O(1). Losing the race
-		// (another reader already published, or a writer stored its own
-		// snapshot meanwhile) simply discards this copy: whoever won published
-		// a snapshot consistent with the epoch it carries.
 		session.viewSnapshot.CompareAndSwap(snap, fresh)
 		return view
 	}
 	sm.mu.RUnlock()
 
-	// COLD PATH: not resident — load from disk. loadSessionFromDisk mutates the
-	// sessions/accessTimes maps and may evict, so it needs the write lock.
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	if session, ok := sm.sessions[key]; ok { // re-check under the write lock
+	if session, ok := sm.sessions[key]; ok {
 		sm.touchSession(key)
 		return sm.viewLocked(session)
 	}
@@ -266,12 +169,6 @@ func (sm *SessionManager) GetHistoryView(key string) []providers.Message {
 	return []providers.Message{}
 }
 
-// viewLocked returns the read-only view of a session's Messages, publishing a
-// fresh snapshot when the current one is stale.
-//
-// Caller MUST hold sm.mu (write lock), so the publish cannot race with a
-// concurrent mutation and costs at most one copy — exactly the copy the cold
-// path used to make unconditionally.
 func (sm *SessionManager) viewLocked(session *Session) []providers.Message {
 	if snap := session.viewSnapshot.Load(); snap != nil && snap.epoch == session.saveEpoch {
 		return snap.view
@@ -295,8 +192,7 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 	if keepLast <= 0 {
 		session.Messages = []providers.Message{}
 		session.Updated = time.Now()
-		session.lastPersistedSeq = -1 // full rewrite: all messages removed
-		// The suffix is empty: both fields described the old prefix and are invalid.
+		session.lastPersistedSeq = -1
 		session.excludedRange = [2]int{}
 		session.excludeBoundary = 0
 		session.bumpEpoch()
@@ -311,8 +207,7 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 
 	session.Messages = session.Messages[len(session.Messages)-keepLast:]
 	session.Updated = time.Now()
-	session.lastPersistedSeq = -1 // full rewrite: kept messages re-indexed
-	// The suffix re-indexes every element, so the old prefix's boundary is stale.
+	session.lastPersistedSeq = -1
 	session.excludedRange = [2]int{}
 	session.excludeBoundary = 0
 	session.bumpEpoch()
@@ -337,17 +232,10 @@ func (sm *SessionManager) RemoveLastMessage(key string) bool {
 		return false
 	}
 
-	// Capture the absolute seq of the message being removed BEFORE slicing.
-	// The save path uses this as a delete watermark (DELETE WHERE seq >= N)
-	// instead of "delete max seq", which would race with concurrent appends
-	// that reuse the same seq slot.
 	session.deleteFromSeq = session.seqForIndex(len(session.Messages) - 1)
 	session.Messages = session.Messages[:len(session.Messages)-1]
 	session.Updated = time.Now()
 	session.lastMsgDeleted = true
-	// The prefix preserves its indices, so excludedRange (a targeted UPDATE
-	// span on a now-bounded row) is a harmless no-op and does not need
-	// clearing. But the boundary must stay within the new slice length.
 	if session.excludeBoundary > len(session.Messages) {
 		session.excludeBoundary = 0
 	}
@@ -357,8 +245,6 @@ func (sm *SessionManager) RemoveLastMessage(key string) bool {
 	return true
 }
 
-// residentKeys returns the keys of the sessions currently held in memory.
-// The result is not sorted; callers that need a stable order must sort it.
 func (sm *SessionManager) residentKeys() []string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -370,7 +256,6 @@ func (sm *SessionManager) residentKeys() []string {
 	return keys
 }
 
-// SetHistory updates the messages of a session.
 func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -384,21 +269,12 @@ func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 		}
 	}
 
-	// Create a deep copy to strictly isolate internal state
-	// from the caller's slice.
 	msgs := make([]providers.Message, len(history))
 	copy(msgs, history)
 	session.Messages = msgs
 	session.Updated = time.Now()
-	session.lastPersistedSeq = -1 // force full rewrite on next save
-	// excludedRange tracks dirty rows of the slice that was just replaced: clear it.
+	session.lastPersistedSeq = -1
 	session.excludedRange = [2]int{}
-	// excludeBoundary must SURVIVE this call: the agent layer replaces the history
-	// right here, between ExcludeOldMessagesFromContext and EvictExcludedMessages
-	// (pkg/agent/session_manager.go summarizeSessionCore), to un-exclude the summary
-	// message. Clearing it disabled the eviction clamp on every compaction round ≥ 2.
-	// It is dropped only when the replacement slice is too short for the boundary to
-	// refer to anything (indices re-indexed or truncated).
 	if session.excludeBoundary > len(msgs) {
 		session.excludeBoundary = 0
 	}
@@ -407,14 +283,6 @@ func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 	sm.touchSession(key)
 }
 
-// syncSessionMetaLocked keeps the lightweight listing index in step with a
-// resident session. ListSessions (TUI /sessions, WebUI sidebar) builds
-// metadata-only Session shells for non-resident keys from sessionMeta. Name is
-// set by AddFullMessage and Updated moves on every mutation — neither used to
-// touch sessionMeta, so after an idle LRU/TTL eviction the shell lost the
-// chat's name and sorted as if it had never been used. That made chats look
-// missing from the TUI while SQLite still held every message.
-// Caller must hold sm.mu (write).
 func (sm *SessionManager) syncSessionMetaLocked(session *Session) {
 	if session == nil || session.Key == "" {
 		return
@@ -441,17 +309,6 @@ func (sm *SessionManager) syncSessionMetaLocked(session *Session) {
 	}
 }
 
-// getOrCreateUnlocked returns or creates a session (caller must hold mu).
-// Uses lazy loading to load sessions from disk on demand.
-//
-// It is the single place where a session becomes resident in memory, and it
-// guarantees the invariant "resident ⇒ present in sessionMeta": the metadata
-// index is what ListSessions (and therefore the WebUI session-history
-// endpoints) use for sessions that are not resident, and loadSessionFromDisk
-// refuses to reload a session that has no metadata entry. Any path that
-// materializes a session must go through here — hand-rolling the
-// sessions[key] assignment silently drops the session from every listing as
-// soon as it is evicted (this was the cron-spawn/subagent invisibility bug).
 func (sm *SessionManager) getOrCreateUnlocked(key string) *Session {
 	session, ok := sm.sessions[key]
 	if !ok {

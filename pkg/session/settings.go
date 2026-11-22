@@ -1,12 +1,5 @@
 package session
 
-// Per-session settings: name, summary, model, folder, mode, thinking and
-// verbosity levels.
-//
-// Every setter validates its input, applies the change, marks the session's
-// metadata dirty, and persists. Setters that change persisted metadata return
-// an error when persistence fails so callers can surface it.
-
 import (
 	"fmt"
 	"strings"
@@ -33,11 +26,9 @@ func (sm *SessionManager) GetName(key string) string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	// Try in-memory first
 	if session, ok := sm.sessions[key]; ok {
 		return session.Name
 	}
-	// Try metadata
 	if meta, ok := sm.sessionMeta[key]; ok {
 		return meta.Name
 	}
@@ -64,13 +55,6 @@ func (sm *SessionManager) SetSummary(key string, summary string) {
 	sm.touchSession(key)
 }
 
-// SetSubagentStatus records the terminal status of a subagent session
-// ("completed", "failed", "not_done", "cancelled", "needs_context") and
-// persists it immediately. It creates no session when the key is unknown:
-// the runner only calls it for sessions it already recorded via the
-// SessionRecorder, so there is nothing legitimate to materialize here.
-// Failures are best-effort: the in-memory task keeps the authoritative
-// status until eviction/restart regardless of this call's result.
 func (sm *SessionManager) SetSubagentStatus(key string, status string) {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -92,30 +76,11 @@ func (sm *SessionManager) SetSubagentStatus(key string, status string) {
 	}
 	sm.touchSession(key)
 
-	// Best-effort persistence: ignore errors, the in-memory task holds the
-	// authoritative status until eviction/restart regardless.
 	if sm.sessionRepo != nil {
 		_ = sm.saveMetaOnlyUnlocked(key)
 	}
 }
 
-// SetSubagentAgentID records the agent that executes a subagent session and
-// persists it immediately. The WebUI needs it for HISTORICAL subagents: the
-// in-memory spawn-time mapping (AgentLoop.subagentSessionAgent) is lost on
-// restart, and every agent shares one SessionManager, so without a persisted
-// executor the listing can only report the agent that owns the storage.
-//
-// Unlike SetSubagentStatus this CREATES the session when the key is unknown:
-// it runs at spawn time, before the subagent's first message materializes the
-// child session, and a row that does not exist yet is a row the executor can
-// never be written to (nothing re-records it after a restart). The session
-// starts message-less and the recorder fills it in moments later; listing
-// endpoints already filter message-less sessions out via HasMessages, so
-// nothing new becomes visible. An empty agentID is ignored — callers fall back
-// to the owner agent before calling, and "" must not overwrite a real value.
-//
-// Best-effort like SetSubagentStatus: routing for the running task keeps
-// working through the in-memory map regardless of this call's result.
 func (sm *SessionManager) SetSubagentAgentID(key string, agentID string) {
 	if key == "" || agentID == "" {
 		return
@@ -126,7 +91,7 @@ func (sm *SessionManager) SetSubagentAgentID(key string, agentID string) {
 
 	session := sm.getOrCreateUnlocked(key)
 	if session.AgentID == agentID {
-		return // already recorded (a retried spawn re-runs the callback)
+		return
 	}
 
 	session.AgentID = agentID
@@ -134,34 +99,13 @@ func (sm *SessionManager) SetSubagentAgentID(key string, agentID string) {
 	session.bumpEpoch()
 	sm.syncSessionMetaLocked(session)
 
-	// Best-effort persistence: ignore errors, the in-memory map holds the
-	// authoritative executor for the running task regardless.
 	if sm.sessionRepo != nil {
 		_ = sm.saveMetaOnlyUnlocked(key)
 	}
 }
 
-// sessionStateAgentKeyPrefix is the KV namespace of the durable spawn-time
-// executor pin (sessionKey -> agent ID). It is the same namespace
-// AgentLoop.setSubagentSessionAgent writes and loadDurableSessionState
-// rehydrates; it lives here so SubagentAgentPin can read it without pkg/session
-// importing pkg/agent.
 const sessionStateAgentKeyPrefix = "sess:agent:"
 
-// SubagentAgentPin returns the durable spawn-time executor pin recorded for a
-// subagent session key, or "" when there is none.
-//
-// The pin lives in the shared session-state KV namespace (sess:agent:<key>),
-// written by AgentLoop.setSubagentSessionAgent at spawn time and rehydrated by
-// loadDurableSessionState at startup. It predates the agent_id column on the
-// session row, so it is the only executor record that exists for a task spawned
-// before migration v8 — which is exactly the population the ledger's executor
-// fallback serves.
-//
-// It is a single indexed KV lookup and performs no session-store query, so it is
-// safe on the listing path; callers only ask for rows whose AgentID is empty.
-// Returns "" when no store is configured (JSON-only deployments keep the
-// historical behaviour of an unnamed executor).
 func (sm *SessionManager) SubagentAgentPin(key string) string {
 	if key == "" {
 		return ""
@@ -208,7 +152,6 @@ func (sm *SessionManager) HasVerbosePreference(key string) bool {
 	return session.VerboseLevel != "" || session.VerboseMode
 }
 
-// GetVerboseMode returns the verbose mode setting for a session (legacy compatibility).
 func (sm *SessionManager) GetVerboseMode(key string) bool {
 	sm.ensureLoaded()
 	sm.mu.RLock()
@@ -221,7 +164,6 @@ func (sm *SessionManager) GetVerboseMode(key string) bool {
 	return session.VerboseMode
 }
 
-// SetVerboseMode sets the verbose mode for a session and persists it (legacy compatibility).
 func (sm *SessionManager) SetVerboseMode(key string, enabled bool) error {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -235,12 +177,9 @@ func (sm *SessionManager) SetVerboseMode(key string, enabled bool) error {
 	session.bumpEpoch()
 	sm.touchSession(key)
 
-	// Persist immediately
 	return sm.saveMetaOnlyUnlocked(key)
 }
 
-// GetVerboseLevel returns the verbose level for a session ("off", "basic", or "full").
-// Migration: if VerboseMode is true but VerboseLevel is empty, returns "full".
 func (sm *SessionManager) GetVerboseLevel(key string) string {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -254,7 +193,6 @@ func (sm *SessionManager) GetVerboseLevel(key string) string {
 		}
 	}
 
-	// Migration: handle legacy VerboseMode field
 	if session.VerboseLevel == "" && session.VerboseMode {
 		return "full"
 	}
@@ -264,7 +202,6 @@ func (sm *SessionManager) GetVerboseLevel(key string) string {
 	return session.VerboseLevel
 }
 
-// SetVerboseLevel sets the verbose level for a session and persists it.
 func (sm *SessionManager) SetVerboseLevel(key string, level string) error {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -278,11 +215,9 @@ func (sm *SessionManager) SetVerboseLevel(key string, level string) error {
 	session.bumpEpoch()
 	sm.touchSession(key)
 
-	// Persist immediately
 	return sm.saveMetaOnlyUnlocked(key)
 }
 
-// GetModel returns the model override for a session.
 func (sm *SessionManager) GetModel(key string) string {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -298,7 +233,6 @@ func (sm *SessionManager) GetModel(key string) string {
 	return session.Model
 }
 
-// SetModel sets the model override for a session and persists it.
 func (sm *SessionManager) SetModel(key string, model string) error {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -312,18 +246,9 @@ func (sm *SessionManager) SetModel(key string, model string) error {
 	session.bumpEpoch()
 	sm.touchSession(key)
 
-	// Persist immediately
 	return sm.saveMetaOnlyUnlocked(key)
 }
 
-// GetFolder returns the user-selected folder for a session.
-// Returns "" when no folder is set.
-//
-// Unlike GetModel, this reads the lightweight metadata when the session is not
-// resident in memory: the WebUI session-list endpoints call it once per
-// session, and a full loadSessionFromDisk fallback would re-materialize every
-// session's entire message history just to read one string (the N+1 the meta
-// fast path exists to avoid).
 func (sm *SessionManager) GetFolder(key string) string {
 	sm.ensureLoaded()
 	sm.mu.RLock()
@@ -338,8 +263,6 @@ func (sm *SessionManager) GetFolder(key string) string {
 	return ""
 }
 
-// SetFolder sets the user-selected folder for a session and persists it.
-// An empty folder clears the selection.
 func (sm *SessionManager) SetFolder(key string, folder string) error {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -353,17 +276,11 @@ func (sm *SessionManager) SetFolder(key string, folder string) error {
 	session.bumpEpoch()
 	sm.touchSession(key)
 
-	// Keep the lightweight metadata in sync so read-only listing paths
-	// (GetFolder on non-resident sessions) observe the new value without a
-	// full load.
 	sm.syncSessionMetaLocked(session)
 
-	// Persist immediately
 	return sm.saveMetaOnlyUnlocked(key)
 }
 
-// GetMode returns the mode override for a session.
-// Returns "" if not set. Callers should normalize "" to "agent" (backward compat).
 func (sm *SessionManager) GetMode(key string) string {
 	sm.ensureLoaded()
 	sm.mu.RLock()
@@ -373,17 +290,13 @@ func (sm *SessionManager) GetMode(key string) string {
 	if ok {
 		return session.Mode
 	}
-	// Try metadata
 	if meta, ok := sm.sessionMeta[key]; ok {
 		return meta.Mode
 	}
 	return ""
 }
 
-// SetMode sets the mode for a session and persists it.
-// Valid values: "", "chat", "agent", "group".
 func (sm *SessionManager) SetMode(key string, mode string) error {
-	// Validate mode
 	validModes := map[string]bool{"": true, "chat": true, "agent": true, "group": true}
 	if !validModes[mode] {
 		return fmt.Errorf("invalid mode %q: must be one of \"\", \"chat\", \"agent\", \"group\"", mode)
@@ -401,13 +314,11 @@ func (sm *SessionManager) SetMode(key string, mode string) error {
 	session.bumpEpoch()
 	sm.touchSession(key)
 
-	// Update metadata
 	sm.syncSessionMetaLocked(session)
 
 	return sm.saveMetaOnlyUnlocked(key)
 }
 
-// GetThinkingLevel returns the thinking level for a session.
 func (sm *SessionManager) GetThinkingLevel(key string) string {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -423,7 +334,6 @@ func (sm *SessionManager) GetThinkingLevel(key string) string {
 	return session.ThinkingLevel
 }
 
-// SetThinkingLevel sets the thinking level for a session and persists it.
 func (sm *SessionManager) SetThinkingLevel(key string, level string) error {
 	sm.ensureLoaded()
 	sm.mu.Lock()

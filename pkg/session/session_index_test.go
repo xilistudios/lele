@@ -1,23 +1,9 @@
 package session
 
-// Tests for the single-pass session index used by the WebUI sidebar listing
-// endpoint (ListSessionIndex / SessionKeysWithMessages).
-//
-// The index exists because the sidebar used to call ~8 getters per session,
-// each taking sm.mu + ensureLoaded + an agent-registry walk, which made the
-// endpoint O(N_total) per page. These tests pin the index's contract:
-//   - every known session appears exactly once (resident + metadata-only)
-//   - fields match the individual getters it replaced
-//   - Resident/HasMessages let a caller answer "has messages?" without a
-//     per-session store query
-//   - non-resident sessions are resolved by the batched store query
-
 import (
 	"testing"
 )
 
-// evictAll drops every session from memory, leaving only metadata — the state
-// a restarted server or an LRU-evicted instance is actually in.
 func evictAll(sm *SessionManager) {
 	sm.mu.Lock()
 	for k := range sm.sessions {
@@ -85,8 +71,6 @@ func TestListSessionIndex_ResidentSessions(t *testing.T) {
 	}
 }
 
-// The index must agree with the per-session getters it replaces, including for
-// sessions that only exist as metadata (evicted / loaded from a cold store).
 func TestListSessionIndex_MatchesGetters(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -140,9 +124,6 @@ func TestListSessionIndex_MatchesGetters(t *testing.T) {
 	}
 }
 
-// Non-resident sessions report HasMessages=false from the index alone because
-// the answer lives in the store; SessionKeysWithMessages resolves every one of
-// them in a single query. Together they must match HasMessages exactly.
 func TestSessionKeysWithMessages_MatchesHasMessages(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -179,8 +160,6 @@ func TestSessionKeysWithMessages_MatchesHasMessages(t *testing.T) {
 	}
 }
 
-// Without a store there is no way to count persisted messages, so the batched
-// query returns nil and callers must treat "unknown" like HasMessages does.
 func TestSessionKeysWithMessages_NoStore(t *testing.T) {
 	sm := NewSessionManager()
 	sm.GetOrCreate("memory:only")
@@ -189,7 +168,6 @@ func TestSessionKeysWithMessages_NoStore(t *testing.T) {
 	if got := sm.SessionKeysWithMessages(); got != nil {
 		t.Fatalf("SessionKeysWithMessages() = %v, want nil without a store", got)
 	}
-	// The resident answer still comes from the index, no store needed.
 	byKey := indexByKey(sm.ListSessionIndex())
 	if !byKey["memory:only"].HasMessages {
 		t.Errorf("memory:only HasMessages = false, want true (resident)")

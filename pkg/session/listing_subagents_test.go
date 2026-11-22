@@ -1,14 +1,5 @@
 package session
 
-// Tests for the read-only subagent listing path.
-//
-// FindSubagentSessions used to take the session manager's GLOBAL EXCLUSIVE lock,
-// load every matching subagent session from SQLite (whole message lists, JSON
-// and all) and insert those loads into the in-memory LRU. These tests pin the
-// two properties that matter now: the reported fields are bit-for-bit the same
-// as the load-based implementation produced, and the call never materializes a
-// session nor perturbs the LRU.
-
 import (
 	"encoding/json"
 	"fmt"
@@ -19,8 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// recordSubagent persists a subagent session with one user message followed by
-// the given assistant replies.
 func recordSubagent(t *testing.T, sm *SessionManager, parent, taskID string, replies ...string) string {
 	t.Helper()
 	key := parent + ":" + taskID
@@ -73,11 +62,6 @@ func assertSubagentSame(t *testing.T, label string, want, got SubagentSessionInf
 	}
 }
 
-// TestFindSubagentSessions_ResidentColdAndRestartAgree is the "result
-// unchanged" test: for the same parent, a resident session, a metadata-only
-// (evicted) session and a session discovered after a restart must report
-// identical fields. The evicted and restart cases are the ones that used to
-// pay for a full history load.
 func TestFindSubagentSessions_ResidentColdAndRestartAgree(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -86,11 +70,10 @@ func TestFindSubagentSessions_ResidentColdAndRestartAgree(t *testing.T) {
 	parent := "native:client-parity"
 	recordSubagent(t, sm, parent, "subagent-1", "first answer")
 	withSummary := recordSubagent(t, sm, parent, "subagent-2", "short", strings.Repeat("x", 300))
-	recordSubagent(t, sm, parent, "subagent-3") // user message only: no assistant reply
+	recordSubagent(t, sm, parent, "subagent-3")
 	sm.SetSummary(withSummary, "Found 3 files")
 	sm.SetSubagentStatus(parent+":subagent-1", "failed")
 	sm.SetSubagentStatus(parent+":subagent-2", "completed")
-	// A session of another parent and the parent itself must stay out.
 	recordSubagent(t, sm, "native:other-client", "subagent-9", "unrelated")
 	recordSubagent(t, sm, parent, "not-a-subagent", "unrelated")
 
@@ -99,8 +82,6 @@ func TestFindSubagentSessions_ResidentColdAndRestartAgree(t *testing.T) {
 		t.Fatalf("resident listing = %d entries, want 3 (%+v)", len(resident), resident)
 	}
 
-	// Sanity-check the values themselves, not just their stability: they are
-	// what the WebUI renders.
 	one := subagentByTaskID(t, resident, "subagent-1")
 	if one.Iterations != 1 || one.Summary != "first answer" || one.Status != "failed" {
 		t.Errorf("subagent-1 = %+v, want 1 iteration, summary %q, status failed", one, "first answer")
@@ -114,7 +95,6 @@ func TestFindSubagentSessions_ResidentColdAndRestartAgree(t *testing.T) {
 		t.Errorf("subagent-3 = %+v, want 0 iterations, empty summary, named session", three)
 	}
 
-	// Phase 2: evict every subagent → metadata-only, no messages in memory.
 	for _, taskID := range []string{"subagent-1", "subagent-2", "subagent-3"} {
 		if !sm.EvictSession(parent + ":" + taskID) {
 			t.Fatalf("EvictSession(%s) = false", taskID)
@@ -128,8 +108,6 @@ func TestFindSubagentSessions_ResidentColdAndRestartAgree(t *testing.T) {
 		assertSubagentSame(t, "cold "+want.TaskID, want, subagentByTaskID(t, cold, want.TaskID))
 	}
 
-	// Phase 3: a fresh manager (restart) only has the store and the metadata
-	// mirror to work from.
 	restarted := NewSessionManager()
 	restarted.SetSessionRepo(s.Sessions())
 	afterRestart := restarted.FindSubagentSessions(parent)
@@ -141,11 +119,6 @@ func TestFindSubagentSessions_ResidentColdAndRestartAgree(t *testing.T) {
 	}
 }
 
-// TestFindSubagentSessions_DoesNotLoadOrTouchLRU proves the read path stays
-// read-only: it must not materialize the matching sessions (which is what fed
-// the LRU thrash loop) and must not touch the access times or the resident set.
-// maxInMemory is pinned to 1 so that any insert into sm.sessions would
-// immediately evict the live chat session — the failure mode this guards.
 func TestFindSubagentSessions_DoesNotLoadOrTouchLRU(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -161,7 +134,6 @@ func TestFindSubagentSessions_DoesNotLoadOrTouchLRU(t *testing.T) {
 		t.Fatalf("Save(%q): %v", chatKey, err)
 	}
 
-	// Subagents are done: evict them so the listing has to work from metadata.
 	for i := 1; i <= 4; i++ {
 		if !sm.EvictSession(fmt.Sprintf("%s:subagent-%d", parent, i)) {
 			t.Fatalf("EvictSession(subagent-%d) = false", i)
@@ -196,7 +168,7 @@ func TestFindSubagentSessions_DoesNotLoadOrTouchLRU(t *testing.T) {
 		return snap
 	}
 
-	sm.SetMaxInMemory(1) // any load from here on evicts the live chat
+	sm.SetMaxInMemory(1)
 	beforeResident := snapshotResident()
 	beforeAccess := snapshotAccess()
 	beforeMeta := snapshotMeta()
@@ -205,7 +177,6 @@ func TestFindSubagentSessions_DoesNotLoadOrTouchLRU(t *testing.T) {
 	if len(results) != 4 {
 		t.Fatalf("listing = %d entries, want 4 (%+v)", len(results), results)
 	}
-	// The two fields that need the store were still resolved.
 	for _, info := range results {
 		if info.Iterations != 1 || info.Summary != "answer" {
 			t.Errorf("%s: Iterations = %d, Summary = %q, want 1 and %q", info.TaskID, info.Iterations, info.Summary, "answer")
@@ -249,12 +220,6 @@ func TestFindSubagentSessions_DoesNotLoadOrTouchLRU(t *testing.T) {
 	}
 }
 
-// TestFindSubagentSessions_ColdCountMatchesFullLoad pins the store-side count
-// against the implementation it replaced. When a session has evicted rows
-// (first_in_memory_seq > 0) a cold load restores only the rows at/after the
-// boundary, so the iteration count is the in-context assistant messages, not
-// every assistant row: a naive COUNT(*) of the whole history would report 5
-// where the load-based path reported 3.
 func TestFindSubagentSessions_ColdCountMatchesFullLoad(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -269,8 +234,6 @@ func TestFindSubagentSessions_ColdCountMatchesFullLoad(t *testing.T) {
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("Save(%q): %v", key, err)
 	}
-	// A save persists the in-memory boundary, so evict first and only then
-	// simulate the compaction that evicted rows 0..2 (user + 2 assistants).
 	if !sm.EvictSession(key) {
 		t.Fatal("EvictSession = false")
 	}
@@ -280,8 +243,6 @@ func TestFindSubagentSessions_ColdCountMatchesFullLoad(t *testing.T) {
 
 	got := subagentByTaskID(t, sm.FindSubagentSessions(parent), "subagent-1")
 
-	// Reference: the pre-change behaviour, computed from an explicit full load
-	// of the same rows through the real load path.
 	ref := NewSessionManager()
 	ref.SetSessionRepo(s.Sessions())
 	ref.ensureLoaded()
@@ -317,7 +278,6 @@ func TestFindSubagentSessions_ColdCountMatchesFullLoad(t *testing.T) {
 		t.Errorf("Summary = %q, want %q", got.Summary, refSummary)
 	}
 
-	// The full history really is larger: the listing must not be counting it.
 	totalAssistants := 0
 	all, err := s.Sessions().LoadMessagesWithSeq(key)
 	if err != nil {
@@ -336,10 +296,6 @@ func TestFindSubagentSessions_ColdCountMatchesFullLoad(t *testing.T) {
 	}
 }
 
-// TestFindSubagentSessions_FallbackSummaryEdgeCases keeps the summary fallback
-// byte-identical around the two edges the old inline code had: the fallback is
-// the LAST assistant message even when its content is empty (no further search
-// backwards), and long content is truncated to 200 bytes plus an ellipsis.
 func TestFindSubagentSessions_FallbackSummaryEdgeCases(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -354,12 +310,10 @@ func TestFindSubagentSessions_FallbackSummaryEdgeCases(t *testing.T) {
 		t.Errorf("summary of a session whose last assistant message is empty = %q, want empty", got)
 	}
 	long := subagentByTaskID(t, resident, "subagent-2").Summary
-	// 200 content bytes plus the 3-byte ellipsis rune.
 	if len(long) != 203 || !strings.HasSuffix(long, "…") {
 		t.Errorf("long summary = %d bytes (suffix %q), want 200 content bytes + ellipsis", len(long), long[len(long)-3:])
 	}
 
-	// The metadata-only path must produce the same two strings.
 	sm.EvictSession(emptyLast)
 	sm.EvictSession(longLast)
 	cold := sm.FindSubagentSessions(parent)
@@ -368,9 +322,6 @@ func TestFindSubagentSessions_FallbackSummaryEdgeCases(t *testing.T) {
 	}
 }
 
-// TestFindSubagentSessions_NoStore covers the store-less manager: resident
-// sessions are still listed, and metadata-only keys (which cannot be read
-// without a store) are omitted rather than reported as empty shells.
 func TestFindSubagentSessions_NoStore(t *testing.T) {
 	sm := NewSessionManager()
 	parent := "native:client-nostore"
@@ -386,16 +337,10 @@ func TestFindSubagentSessions_NoStore(t *testing.T) {
 	}
 }
 
-// storedMsgJSON renders a message the way providers.Message marshals into the
-// session_messages.message column.
 func storedMsgJSON(role, content string) string {
 	return storedMessagePayload(role, content, false)
 }
 
-// storedMsgJSONExcluded renders a message flagged as excluded from context.
-// Both the JSON flag and the row's `excluded` column carry that state
-// (saveFullUnlocked derives the column from the field) and the cold load prunes
-// on the flag, so a test reproducing evicted history has to set both.
 func storedMsgJSONExcluded(role, content string) string {
 	return storedMessagePayload(role, content, true)
 }
@@ -412,13 +357,6 @@ func storedMessagePayload(role, content string, excluded bool) string {
 	return string(b)
 }
 
-// fullLoadListingReference reproduces what the pre-change listing reported for
-// one session by running the real cold load: a throwaway manager loads the
-// session from the same store and the assistant messages that ended up in
-// memory are counted/summarised exactly as the load-based implementation did.
-//
-// It is the oracle for the parity tests below — the metadata-only path must
-// report the same numbers without materialising anything.
 func fullLoadListingReference(t *testing.T, s *store.Store, key string) (iterations int, summary string) {
 	t.Helper()
 	ref := NewSessionManager()
@@ -445,9 +383,6 @@ func fullLoadListingReference(t *testing.T, s *store.Store, key string) (iterati
 	return iterations, subagentSummary(loaded.Summary, lastAssistant)
 }
 
-// persistRawSubagent writes a session row plus explicit message rows, so a
-// test can reproduce stored shapes the regular API cannot produce in one step
-// (a boundary left at 0 with excluded rows, a corrupt row, ...).
 func persistRawSubagent(t *testing.T, s *store.Store, key string, boundary int, rows []store.MessageRow) {
 	t.Helper()
 	now := time.Now()
@@ -465,9 +400,6 @@ func persistRawSubagent(t *testing.T, s *store.Store, key string, boundary int, 
 	}
 }
 
-// coldSubagentListing lists a parent's subagents through a manager that has
-// neither the session nor (necessarily) its messages in memory — the path that
-// has to consult the store.
 func coldSubagentListing(t *testing.T, s *store.Store, parent string) []SubagentSessionInfo {
 	t.Helper()
 	sm := NewSessionManager()
@@ -475,12 +407,6 @@ func coldSubagentListing(t *testing.T, s *store.Store, parent string) []Subagent
 	return sm.FindSubagentSessions(parent)
 }
 
-// TestFindSubagentSessions_ZeroBoundaryWithLeadingExcludedRun pins the
-// boundary == 0 shape against the path it replaces. loadFromSQLite prunes a
-// leading run of excluded rows when no boundary is recorded and rewrites the
-// boundary, so those rows are not iterations of the restored session. A count
-// that only filters on `seq >= first_in_memory_seq` reports them anyway
-// (verified: 4 against the load path's 2).
 func TestFindSubagentSessions_ZeroBoundaryWithLeadingExcludedRun(t *testing.T) {
 	s := newTestStore(t)
 
@@ -495,12 +421,8 @@ func TestFindSubagentSessions_ZeroBoundaryWithLeadingExcludedRun(t *testing.T) {
 		{Seq: 5, Role: "assistant", JSON: storedMsgJSON("assistant", "in context 2")},
 	})
 
-	// The listing runs BEFORE the reference load: loadSessionFromDisk rewrites
-	// the persisted boundary, and the point of this test is the stored
-	// boundary == 0 state.
 	got := subagentByTaskID(t, coldSubagentListing(t, s, parent), "subagent-1")
 
-	// A read-only listing must not have fixed the boundary up behind our back.
 	meta, err := s.Sessions().GetSessionMeta(key)
 	if err != nil {
 		t.Fatalf("GetSessionMeta: %v", err)
@@ -520,8 +442,6 @@ func TestFindSubagentSessions_ZeroBoundaryWithLeadingExcludedRun(t *testing.T) {
 		t.Errorf("Summary = %q, want %q", got.Summary, refSummary)
 	}
 
-	// The excluded rows really are assistant rows in SQLite: the listing must
-	// not be counting "every assistant row", which would give 4.
 	all, err := s.Sessions().LoadMessagesWithSeq(key)
 	if err != nil {
 		t.Fatalf("LoadMessagesWithSeq: %v", err)
@@ -537,12 +457,6 @@ func TestFindSubagentSessions_ZeroBoundaryWithLeadingExcludedRun(t *testing.T) {
 	}
 }
 
-// TestFindSubagentSessions_CorruptRowMatchesFullLoad pins the other half of the
-// parity claim: a message row whose JSON does not parse is skipped by the cold
-// load ("skip corrupted messages"), so it must not be counted and must not
-// shadow the summary fallback. Verified against the load path: it reports
-// {iterations: 1, summary: "older ok"} while a plain COUNT(*) over the rows
-// reports 2 and decodes the corrupt newest row to an empty summary.
 func TestFindSubagentSessions_CorruptRowMatchesFullLoad(t *testing.T) {
 	s := newTestStore(t)
 
@@ -551,7 +465,6 @@ func TestFindSubagentSessions_CorruptRowMatchesFullLoad(t *testing.T) {
 	persistRawSubagent(t, s, key, 0, []store.MessageRow{
 		{Seq: 0, Role: "user", JSON: storedMsgJSON("user", "task")},
 		{Seq: 1, Role: "assistant", JSON: storedMsgJSON("assistant", "older ok")},
-		// Truncated write: loadFromSQLite drops it.
 		{Seq: 2, Role: "assistant", JSON: `{"role":"assistant","content":"trunc`},
 	})
 
@@ -568,7 +481,6 @@ func TestFindSubagentSessions_CorruptRowMatchesFullLoad(t *testing.T) {
 		t.Errorf("Summary = %q, want %q (the older, readable assistant row must stay the fallback)", got.Summary, refSummary)
 	}
 
-	// Same rows, session resident in memory: the two paths must agree.
 	resident := NewSessionManager()
 	resident.SetSessionRepo(s.Sessions())
 	resident.ensureLoaded()

@@ -13,7 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// newTestStore creates a temporary SQLite store for testing.
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -31,18 +30,15 @@ func TestSQLite_SessionManager_CreateAndLoad(t *testing.T) {
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
 
-	// Create a session
 	key := "test:session-1"
 	sm.GetOrCreate(key)
 	sm.AddMessage(key, "user", "Hello")
 	sm.AddMessage(key, "assistant", "Hi there!")
 
-	// Save
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	// Verify in SQLite
 	repo := s.Sessions()
 	meta, err := repo.GetSessionMeta(key)
 	if err != nil {
@@ -55,7 +51,6 @@ func TestSQLite_SessionManager_CreateAndLoad(t *testing.T) {
 		t.Errorf("expected key %q, got %q", key, meta.Key)
 	}
 
-	// Load messages from SQLite
 	msgs, err := repo.LoadMessages(key)
 	if err != nil {
 		t.Fatalf("LoadMessages failed: %v", err)
@@ -64,7 +59,6 @@ func TestSQLite_SessionManager_CreateAndLoad(t *testing.T) {
 		t.Fatalf("expected 2 messages, got %d", len(msgs))
 	}
 
-	// Create a new manager and load from SQLite
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	history := sm2.GetHistory(key)
@@ -88,17 +82,14 @@ func TestSQLite_SessionManager_Streaming(t *testing.T) {
 	sm.GetOrCreate(key)
 	sm.AddMessage(key, "user", "Tell me a story")
 
-	// Simulate streaming
 	sm.AppendAssistantChunk(key, "Once ")
 	sm.AppendAssistantChunk(key, "upon ")
 	sm.AppendAssistantChunk(key, "a time...")
 
-	// Save
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	// Load and verify
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	history := sm2.GetHistory(key)
@@ -121,12 +112,10 @@ func TestSQLite_SessionManager_TokenCounts(t *testing.T) {
 	sm.AddTokenCounts(key, 100, 50)
 	sm.AddTokenCounts(key, 200, 100)
 
-	// Save
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	// Load and verify
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	input, output := sm2.GetTokenCounts(key)
@@ -149,12 +138,10 @@ func TestSQLite_SessionManager_Mode(t *testing.T) {
 		t.Fatalf("SetMode failed: %v", err)
 	}
 
-	// Save
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	// Load and verify
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	mode := sm2.GetMode(key)
@@ -162,7 +149,6 @@ func TestSQLite_SessionManager_Mode(t *testing.T) {
 		t.Errorf("expected mode %q, got %q", "chat", mode)
 	}
 
-	// List by mode
 	sessions := sm2.ListSessionsByMode("chat")
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 chat session, got %d", len(sessions))
@@ -177,7 +163,6 @@ func TestSQLite_SessionManager_ListSessions(t *testing.T) {
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
 
-	// Create multiple sessions
 	sm.GetOrCreate("session-1")
 	sm.AddMessage("session-1", "user", "hello")
 	sm.GetOrCreate("session-2")
@@ -185,12 +170,10 @@ func TestSQLite_SessionManager_ListSessions(t *testing.T) {
 	sm.GetOrCreate("session-3")
 	sm.AddMessage("session-3", "user", "test")
 
-	// Save all
 	sm.Save("session-1")
 	sm.Save("session-2")
 	sm.Save("session-3")
 
-	// List sessions
 	sessions := sm.ListSessions()
 	if len(sessions) != 3 {
 		t.Fatalf("expected 3 sessions, got %d", len(sessions))
@@ -207,10 +190,8 @@ func TestSQLite_SessionManager_SessionExists(t *testing.T) {
 	sm.AddMessage(key, "user", "hello")
 	sm.Save(key)
 
-	// Evict from memory
 	sm.EvictSession(key)
 
-	// Should still exist in SQLite
 	if !sm.SessionExists(key) {
 		t.Error("expected session to exist after eviction")
 	}
@@ -225,28 +206,23 @@ func TestSQLite_SessionManager_StreamingUpdate(t *testing.T) {
 	sm.GetOrCreate(key)
 	sm.AddMessage(key, "user", "hello")
 
-	// Add streaming message
 	sm.AppendAssistantChunk(key, "part1 ")
 	sm.Save(key)
 
-	// Verify streaming message is persisted
 	repo := s.Sessions()
 	count, _ := repo.MessageCount(key)
 	if count != 2 {
 		t.Fatalf("expected 2 messages, got %d", count)
 	}
 
-	// Add more chunks
 	sm.AppendAssistantChunk(key, "part2 ")
 	sm.Save(key)
 
-	// Should still be 2 messages (streaming message updated in place)
 	count, _ = repo.MessageCount(key)
 	if count != 2 {
 		t.Fatalf("expected 2 messages after streaming update, got %d", count)
 	}
 
-	// Load and verify final content
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	history := sm2.GetHistory(key)
@@ -278,7 +254,6 @@ func TestSQLite_SessionManager_Concurrent(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Verify all sessions persisted
 	repo := s.Sessions()
 	metas, err := repo.ListSessionMeta()
 	if err != nil {
@@ -300,7 +275,6 @@ func TestSQLite_SessionManager_CompactionCount(t *testing.T) {
 	sm.IncrementCompactionCount(key)
 	sm.Save(key)
 
-	// Load and verify
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	session := sm2.GetOrCreate(key)
@@ -319,7 +293,6 @@ func TestSQLite_SessionManager_ThinkingLevel(t *testing.T) {
 	sm.SetThinkingLevel(key, "high")
 	sm.Save(key)
 
-	// Load and verify
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	level := sm2.GetThinkingLevel(key)
@@ -340,11 +313,9 @@ func TestSQLite_SessionManager_TruncateHistory(t *testing.T) {
 	}
 	sm.Save(key)
 
-	// Truncate to keep last 3
 	sm.TruncateHistory(key, 3)
 	sm.Save(key)
 
-	// Verify
 	repo := s.Sessions()
 	count, _ := repo.MessageCount(key)
 	if count != 3 {
@@ -362,7 +333,6 @@ func TestSQLite_SessionManager_ThinkingLevel_Persistence(t *testing.T) {
 	sm.SetThinkingLevel(key, "medium")
 	sm.Save(key)
 
-	// Create new manager to test persistence
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 
@@ -382,7 +352,6 @@ func TestSQLite_SessionManager_SetHistory(t *testing.T) {
 	sm.AddMessage(key, "user", "old message")
 	sm.Save(key)
 
-	// Set new history
 	newHistory := []providers.Message{
 		{Role: "user", Content: "new message 1"},
 		{Role: "assistant", Content: "response 1"},
@@ -391,7 +360,6 @@ func TestSQLite_SessionManager_SetHistory(t *testing.T) {
 	sm.SetHistory(key, newHistory)
 	sm.Save(key)
 
-	// Verify
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	history := sm2.GetHistory(key)
@@ -415,13 +383,9 @@ func TestSQLite_SessionManager_ExcludeOldMessages(t *testing.T) {
 	}
 	sm.Save(key)
 
-	// Exclude first 7 messages (index 0 preserved, indices 1-6 excluded)
 	sm.ExcludeOldMessagesFromContext(key, 3)
 	sm.Save(key)
 
-	// Verify excluded flag is persisted.
-	// With 10 user messages, keepCount=3: indices 1-5 are excluded (index 6 is
-	// one of the last preservedUserMessages human turns → preserved).
 	repo := s.Sessions()
 	msgJSONs, _ := repo.LoadMessages(key)
 	excludedCount := 0
@@ -447,7 +411,6 @@ func TestSQLite_SessionManager_Name(t *testing.T) {
 	sm.SetName(key, "My Session")
 	sm.Save(key)
 
-	// Verify
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	name := sm2.GetName(key)
@@ -466,7 +429,6 @@ func TestSQLite_SessionManager_Summary(t *testing.T) {
 	sm.SetSummary(key, "This is a summary")
 	sm.Save(key)
 
-	// Verify
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	summary := sm2.GetSummary(key)
@@ -487,14 +449,12 @@ func TestSQLite_SessionManager_RemoveLastMessage(t *testing.T) {
 	sm.AddMessage(key, "user", "msg3")
 	sm.Save(key)
 
-	// Remove last message
 	removed := sm.RemoveLastMessage(key)
 	if !removed {
 		t.Fatal("expected message to be removed")
 	}
 	sm.Save(key)
 
-	// Verify
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	history := sm2.GetHistory(key)
@@ -516,14 +476,12 @@ func TestSQLite_SessionManager_ShouldStartFreshSession(t *testing.T) {
 	sm.AddMessage(key, "user", "hello")
 	sm.Save(key)
 
-	// Simulate old session
 	sm.mu.Lock()
 	session := sm.sessions[key]
 	session.Updated = time.Now().Add(-2 * time.Hour)
 	sm.mu.Unlock()
 	sm.Save(key)
 
-	// Should start fresh
 	shouldReset, idle := sm.ShouldStartFreshSession(key, time.Hour)
 	if !shouldReset {
 		t.Error("expected session to require fresh start")
@@ -544,10 +502,8 @@ func TestSQLite_SessionManager_GetOrCreate_NoMessages(t *testing.T) {
 		t.Errorf("expected key %q, got %q", key, session.Key)
 	}
 
-	// Save (should upsert metadata)
 	sm.Save(key)
 
-	// Verify metadata exists
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	name := sm2.GetName(key)
@@ -566,7 +522,6 @@ func TestSQLite_SessionManager_VerboseLevel(t *testing.T) {
 	sm.SetVerboseLevel(key, "full")
 	sm.Save(key)
 
-	// Verify
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	level := sm2.GetVerboseLevel(key)
@@ -585,7 +540,6 @@ func TestSQLite_SessionManager_Model(t *testing.T) {
 	sm.SetModel(key, "gpt-4")
 	sm.Save(key)
 
-	// Verify
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	model := sm2.GetModel(key)
@@ -606,7 +560,6 @@ func TestSQLite_SessionManager_CreatedUpdated(t *testing.T) {
 	sm.Save(key)
 	after := time.Now()
 
-	// Verify
 	created := sm.GetCreated(key)
 	updated := sm.GetUpdated(key)
 
@@ -623,7 +576,6 @@ func TestSQLite_SessionManager_GetHistory_NonExistent(t *testing.T) {
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
 
-	// Get history for non-existent session
 	history := sm.GetHistory("nonexistent:session")
 	if len(history) != 0 {
 		t.Errorf("expected empty history, got %d messages", len(history))
@@ -638,7 +590,6 @@ func TestSQLite_SessionManager_SetName_CreatesSession(t *testing.T) {
 	key := "test:setname-create"
 	sm.SetName(key, "New Name")
 
-	// Verify
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	name := sm2.GetName(key)
@@ -655,13 +606,11 @@ func TestSQLite_SessionManager_MultipleSaves(t *testing.T) {
 	key := "test:multi-save"
 	sm.GetOrCreate(key)
 
-	// Multiple saves
 	for i := 0; i < 10; i++ {
 		sm.AddMessage(key, "user", "msg")
 		sm.Save(key)
 	}
 
-	// Verify final state
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	history := sm2.GetHistory(key)
@@ -680,7 +629,6 @@ func TestSQLite_SessionManager_ConcurrentReadersWriter(t *testing.T) {
 	sm.AddMessage(key, "user", "initial")
 	sm.Save(key)
 
-	// Measure reader wait during writes
 	var maxWait time.Duration
 	var mu sync.Mutex
 
@@ -699,7 +647,6 @@ func TestSQLite_SessionManager_ConcurrentReadersWriter(t *testing.T) {
 		}
 	}()
 
-	// Concurrent writes
 	for i := 0; i < 10; i++ {
 		sm.AddMessage(key, "user", "msg")
 		sm.Save(key)
@@ -708,7 +655,6 @@ func TestSQLite_SessionManager_ConcurrentReadersWriter(t *testing.T) {
 
 	<-done
 
-	// Readers should never be blocked >50ms (SQLite WAL allows concurrent reads)
 	if maxWait > 50*time.Millisecond {
 		t.Errorf("reader blocked for %v (>50ms threshold)", maxWait)
 	}
@@ -725,10 +671,8 @@ func TestSQLite_SessionManager_LoadFromDisk(t *testing.T) {
 	sm.AddMessage(key, "assistant", "hi")
 	sm.Save(key)
 
-	// Evict from memory
 	sm.EvictSession(key)
 
-	// Access should trigger load from SQLite
 	history := sm.GetHistory(key)
 	if len(history) != 2 {
 		t.Fatalf("expected 2 messages after lazy load, got %d", len(history))
@@ -743,23 +687,18 @@ func TestSQLite_SessionManager_AllMessageCounts(t *testing.T) {
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
 
-	// Create sessions with messages
 	sm.GetOrCreate("sess-a")
 	sm.AddMessage("sess-a", "user", "hello")
 	sm.AddMessage("sess-a", "assistant", "hi there")
 	sm.GetOrCreate("sess-b")
 	sm.AddMessage("sess-b", "user", "world")
 
-	// Save to SQLite
 	sm.Save("sess-a")
 	sm.Save("sess-b")
 
-	// Create a session with no messages (just metadata)
 	sm.GetOrCreate("sess-empty")
 	sm.Save("sess-empty")
 
-	// Evict all sessions from memory to simulate the real scenario
-	// where sessions are only in metadata (the bug condition)
 	sm.mu.Lock()
 	for k := range sm.sessions {
 		delete(sm.sessions, k)
@@ -767,8 +706,6 @@ func TestSQLite_SessionManager_AllMessageCounts(t *testing.T) {
 	}
 	sm.mu.Unlock()
 
-	// Now AllMessageCounts should still return correct counts
-	// even though sessions are not in memory
 	counts := sm.AllMessageCounts()
 
 	if counts["sess-a"] != 2 {
@@ -782,12 +719,6 @@ func TestSQLite_SessionManager_AllMessageCounts(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// Incremental save tests
-// ============================================================================
-
-// TestSQLite_IncrementalSave_AppendOnly verifies that adding new messages
-// uses InsertMessage (incremental) instead of ReplaceMessages (full rewrite).
 func TestSQLite_IncrementalSave_AppendOnly(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -796,7 +727,6 @@ func TestSQLite_IncrementalSave_AppendOnly(t *testing.T) {
 	key := "test:incr-append"
 	sm.GetOrCreate(key)
 
-	// Add 3 messages and save (first save is always full)
 	sm.AddMessage(key, "user", "hello")
 	sm.AddMessage(key, "assistant", "hi")
 	sm.AddMessage(key, "user", "how are you?")
@@ -804,27 +734,23 @@ func TestSQLite_IncrementalSave_AppendOnly(t *testing.T) {
 		t.Fatalf("initial save: %v", err)
 	}
 
-	// Verify 3 messages in DB
 	repo := s.Sessions()
 	count, _ := repo.MessageCount(key)
 	if count != 3 {
 		t.Fatalf("after initial save: got %d messages, want 3", count)
 	}
 
-	// Add 2 more messages — next save should be incremental
 	sm.AddMessage(key, "assistant", "I'm good")
 	sm.AddMessage(key, "user", "great")
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("incremental save: %v", err)
 	}
 
-	// Verify all 5 messages in DB
 	count, _ = repo.MessageCount(key)
 	if count != 5 {
 		t.Fatalf("after incremental save: got %d messages, want 5", count)
 	}
 
-	// Verify content of last message
 	msgJSONs, _ := repo.LoadMessages(key)
 	var lastMsg providers.Message
 	json.Unmarshal([]byte(msgJSONs[4]), &lastMsg)
@@ -833,8 +759,6 @@ func TestSQLite_IncrementalSave_AppendOnly(t *testing.T) {
 	}
 }
 
-// TestSQLite_IncrementalSave_StreamingUpdate verifies that streaming updates
-// use UpdateMessage for the last message instead of full ReplaceMessages.
 func TestSQLite_IncrementalSave_StreamingUpdate(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -844,22 +768,16 @@ func TestSQLite_IncrementalSave_StreamingUpdate(t *testing.T) {
 	sm.GetOrCreate(key)
 	sm.AddMessage(key, "user", "tell me a story")
 
-	// Initial save — creates the user message
 	sm.Save(key)
 
-	// Simulate streaming: create streaming message + append chunk
-	// The first chunk creates the streaming message and triggers a flush
-	// (first chunk always flushes because lastStreamFlush is zero).
 	sm.AppendAssistantChunk(key, "Once upon a time...")
 
-	// The streaming message should be in DB after flush
 	repo := s.Sessions()
 	count, _ := repo.MessageCount(key)
 	if count != 2 {
 		t.Fatalf("after streaming: got %d messages, want 2", count)
 	}
 
-	// Verify the streaming content was persisted
 	msgJSONs, _ := repo.LoadMessages(key)
 	var streamMsg providers.Message
 	json.Unmarshal([]byte(msgJSONs[1]), &streamMsg)
@@ -868,8 +786,6 @@ func TestSQLite_IncrementalSave_StreamingUpdate(t *testing.T) {
 	}
 }
 
-// TestSQLite_MetaOnlySave verifies that metadata-only setters (SetName, SetModel)
-// don't touch the messages table.
 func TestSQLite_MetaOnlySave(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -881,18 +797,15 @@ func TestSQLite_MetaOnlySave(t *testing.T) {
 	sm.AddMessage(key, "assistant", "hi")
 	sm.Save(key)
 
-	// Get initial message count in DB
 	repo := s.Sessions()
 	countBefore, _ := repo.MessageCount(key)
 	if countBefore != 2 {
 		t.Fatalf("before meta save: got %d messages, want 2", countBefore)
 	}
 
-	// Change only metadata — should not touch messages
 	sm.SetName(key, "My Chat")
 	sm.SetModel(key, "gpt-4")
 
-	// Verify metadata was saved
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	name := sm2.GetName(key)
@@ -904,15 +817,12 @@ func TestSQLite_MetaOnlySave(t *testing.T) {
 		t.Errorf("model = %q, want %q", model, "gpt-4")
 	}
 
-	// Messages should still be intact
 	countAfter, _ := repo.MessageCount(key)
 	if countAfter != 2 {
 		t.Errorf("after meta save: got %d messages, want 2", countAfter)
 	}
 }
 
-// TestSQLite_FullRewrite_AfterTruncate verifies that TruncateHistory forces
-// a full rewrite (ReplaceMessages) on the next save.
 func TestSQLite_FullRewrite_AfterTruncate(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -925,24 +835,20 @@ func TestSQLite_FullRewrite_AfterTruncate(t *testing.T) {
 	}
 	sm.Save(key)
 
-	// Verify 10 messages in DB
 	repo := s.Sessions()
 	count, _ := repo.MessageCount(key)
 	if count != 10 {
 		t.Fatalf("before truncate: got %d messages, want 10", count)
 	}
 
-	// Truncate to last 3
 	sm.TruncateHistory(key, 3)
 	sm.Save(key)
 
-	// Verify only 3 messages remain
 	count, _ = repo.MessageCount(key)
 	if count != 3 {
 		t.Errorf("after truncate: got %d messages, want 3", count)
 	}
 
-	// Verify content
 	msgJSONs, _ := repo.LoadMessages(key)
 	var firstMsg providers.Message
 	json.Unmarshal([]byte(msgJSONs[0]), &firstMsg)
@@ -951,8 +857,6 @@ func TestSQLite_FullRewrite_AfterTruncate(t *testing.T) {
 	}
 }
 
-// TestSQLite_DirtyFlags_Basic verifies that dirty flags are set and cleared
-// correctly after saves.
 func TestSQLite_DirtyFlags_Basic(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -961,12 +865,10 @@ func TestSQLite_DirtyFlags_Basic(t *testing.T) {
 	key := "test:dirty"
 	session := sm.GetOrCreate(key)
 
-	// New session has lastPersistedSeq = -1, which forces full save
 	if session.lastPersistedSeq != -1 {
 		t.Errorf("new session lastPersistedSeq = %d, want -1", session.lastPersistedSeq)
 	}
 
-	// After save, flags should be cleared
 	sm.Save(key)
 	if session.metaDirty {
 		t.Error("after save: metaDirty should be false")
@@ -978,13 +880,11 @@ func TestSQLite_DirtyFlags_Basic(t *testing.T) {
 		t.Errorf("after save (no messages): lastPersistedSeq = %d, want -1", session.lastPersistedSeq)
 	}
 
-	// Add a message — should set msgsAppended
 	sm.AddMessage(key, "user", "hello")
 	if session.msgsAppended != 1 {
 		t.Errorf("after add: msgsAppended = %d, want 1", session.msgsAppended)
 	}
 
-	// After save, should be cleared
 	sm.Save(key)
 	if session.msgsAppended != 0 {
 		t.Errorf("after save: msgsAppended = %d, want 0", session.msgsAppended)
@@ -993,7 +893,6 @@ func TestSQLite_DirtyFlags_Basic(t *testing.T) {
 		t.Errorf("lastPersistedSeq = %d, want 0", session.lastPersistedSeq)
 	}
 
-	// SetName should set metaDirty, then clear it after immediate save
 	sm.SetName(key, "test")
 	if session.metaDirty {
 		t.Error("after SetName+save: metaDirty should be false (already persisted)")
@@ -1013,14 +912,12 @@ func TestSQLite_GapAware_IncrementalSave_SeqOffset(t *testing.T) {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// Simulate 5 evicted messages: in-memory slice element 0 is SQLite seq 5.
 	sess := sm.sessions[key]
 	if sess == nil {
 		t.Fatal("session not in memory")
 	}
 	sess.firstInMemorySeq = 5
 
-	// Append at slice index 3; incremental save must write absolute seq 8.
 	sm.AddMessage(key, "user", "m3")
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("incremental Save failed: %v", err)
@@ -1033,7 +930,6 @@ func TestSQLite_GapAware_IncrementalSave_SeqOffset(t *testing.T) {
 	if len(rows) != 4 {
 		t.Fatalf("expected 4 rows, got %d", len(rows))
 	}
-	// Original rows keep seqs 0,1,2 (full rewrite). Newly appended row is seq 8.
 	wantSeqs := []int{0, 1, 2, 8}
 	for i, want := range wantSeqs {
 		if rows[i].Seq != want {
@@ -1057,11 +953,6 @@ func TestSQLite_GapAware_ExcludedRange_SeqOffset(t *testing.T) {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// Simulate a gap of 10 evicted messages: 10 messages with seqs 0-9 were
-	// evicted from memory (still in SQLite), and the in-memory slice now maps
-	// to absolute seqs 10-13. Re-insert the in-memory rows at their absolute
-	// seqs (as eviction would leave them), and set firstInMemorySeq = 10 (the
-	// seq of in-memory slice element 0).
 	sess := sm.sessions[key]
 	if sess == nil {
 		t.Fatal("session not in memory")
@@ -1093,7 +984,6 @@ func TestSQLite_GapAware_ExcludedRange_SeqOffset(t *testing.T) {
 	if len(fullRows) != 4 {
 		t.Fatalf("expected 4 rows, got %d", len(fullRows))
 	}
-	// Slice index 1 -> seq 11, slice index 2 -> seq 12, both excluded.
 	for _, r := range fullRows {
 		switch r.Seq {
 		case 11:
@@ -1128,10 +1018,6 @@ func TestSQLite_GapAware_FullRewrite_PreservesEvictionGap(t *testing.T) {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// Simulate post-eviction state: persist evicted rows at seqs 0-6 in
-	// SQLite (outside the in-memory slice), with the in-memory slice mapping
-	// to absolute seqs 7-9. This mirrors what EvictExcludedMessages leaves
-	// behind: the evicted (excluded) rows remain persisted in SQLite.
 	sess := sm.sessions[key]
 	if sess == nil {
 		t.Fatal("session not in memory")
@@ -1142,7 +1028,6 @@ func TestSQLite_GapAware_FullRewrite_PreservesEvictionGap(t *testing.T) {
 		evJSON, _ := json.Marshal(ev)
 		evictedRows = append(evictedRows, store.MessageRow{Seq: i, Role: ev.Role, JSON: string(evJSON), Excluded: true})
 	}
-	// Re-insert the actual persisted (in-memory) messages at absolute seqs 7-9.
 	for i, m := range sess.Messages {
 		mJSON, _ := json.Marshal(m)
 		evictedRows = append(evictedRows, store.MessageRow{Seq: 7 + i, Role: m.Role, JSON: string(mJSON)})
@@ -1153,7 +1038,6 @@ func TestSQLite_GapAware_FullRewrite_PreservesEvictionGap(t *testing.T) {
 	sess.firstInMemorySeq = 7
 	sess.evictedTotal = 7
 
-	// Force a full rewrite via SetHistory (replaces slice with 2 messages).
 	sm.SetHistory(key, []providers.Message{
 		{Role: "user", Content: "n0"},
 		{Role: "assistant", Content: "n1"},
@@ -1162,19 +1046,12 @@ func TestSQLite_GapAware_FullRewrite_PreservesEvictionGap(t *testing.T) {
 		t.Fatalf("full-rewrite Save failed: %v", err)
 	}
 
-	// A full rewrite re-materializes the evicted rows into SQLite but they are
-	// still NOT resident in the in-memory slice. So the eviction gap must be
-	// PRESERVED: firstInMemorySeq stays at the number of evicted rows and
-	// evictedTotal stays equal to it. Resetting them to 0 here would break the
-	// `seq = firstInMemorySeq + sliceIndex` invariant and silently drop the
-	// next incremental append.
 	if sess.firstInMemorySeq != 7 {
 		t.Errorf("after full rewrite firstInMemorySeq = %d, want 7 (gap preserved)", sess.firstInMemorySeq)
 	}
 	if sess.evictedTotal != 7 {
 		t.Errorf("after full rewrite evictedTotal = %d, want 7 (gap preserved)", sess.evictedTotal)
 	}
-	// lastPersistedSeq is slice-relative: all 2 in-memory messages persisted.
 	if sess.lastPersistedSeq != 1 {
 		t.Errorf("after full rewrite lastPersistedSeq = %d, want 1", sess.lastPersistedSeq)
 	}
@@ -1183,13 +1060,9 @@ func TestSQLite_GapAware_FullRewrite_PreservesEvictionGap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
 	}
-	// The full rewrite must KEEP the evicted (excluded) rows: re-materializing
-	// them from SQLite before ReplaceMessages means they survive at seqs 0-6,
-	// followed by the new in-context messages re-based at 7-8. Total 9 rows.
 	if len(rows) != 9 {
 		t.Fatalf("expected 9 rows (7 evicted + 2 new), got %d", len(rows))
 	}
-	// First 7 rows are the evicted excluded messages.
 	for i := 0; i < 7; i++ {
 		if rows[i].Seq != i {
 			t.Errorf("evicted row %d seq = %d, want %d", i, rows[i].Seq, i)
@@ -1198,7 +1071,6 @@ func TestSQLite_GapAware_FullRewrite_PreservesEvictionGap(t *testing.T) {
 			t.Errorf("evicted row %d should be excluded", i)
 		}
 	}
-	// Final 2 rows are the new in-context messages, re-based.
 	if rows[7].Seq != 7 || rows[8].Seq != 8 {
 		t.Errorf("expected seqs 7,8 after rewrite, got %d,%d", rows[7].Seq, rows[8].Seq)
 	}
@@ -1217,10 +1089,6 @@ func TestSQLite_EvictExcluded_WindowRoundTrip(t *testing.T) {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// Exclude the first 7 (keep index 0 + 2 in-context), then save, then
-	// evict. EvictExcludedMessages folds index 0 into the summary and evicts
-	// the whole contiguous [0..7) prefix so the in-memory slice stays
-	// contiguous (index 0 is NOT left dangling in memory).
 	sm.ExcludeOldMessagesFromContext(key, 3)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("exclude Save failed: %v", err)
@@ -1239,8 +1107,6 @@ func TestSQLite_EvictExcluded_WindowRoundTrip(t *testing.T) {
 		t.Fatalf("EvictExcludedMessages evicted %d, want 7", evicted)
 	}
 
-	// After eviction: in-memory slice has 3 (the contiguous kept suffix
-	// m7..m9), evicted=7. Index 0 was folded into the summary.
 	hist := sm.GetHistoryView(key)
 	if len(hist) != 3 {
 		t.Fatalf("in-memory len after evict = %d, want 3", len(hist))
@@ -1248,25 +1114,20 @@ func TestSQLite_EvictExcluded_WindowRoundTrip(t *testing.T) {
 	if hist[0].Content != "m7" {
 		t.Errorf("first in-memory message after evict = %q, want %q", hist[0].Content, "m7")
 	}
-	// Index 0's content must have been folded into the summary.
 	if got := sm.GetSummary(key); !strings.Contains(got, "m0") {
 		t.Errorf("summary after eviction should contain folded index-0 content, got %q", got)
 	}
 	if got := sm.GetEvictedMessageCount(key); got != 7 {
 		t.Fatalf("GetEvictedMessageCount after evict = %d, want 7", got)
 	}
-	// Total stays stable across eviction.
 	if got := sm.GetTotalMessageCount(key); got != 10 {
 		t.Fatalf("GetTotalMessageCount after evict = %d, want 10", got)
 	}
 
-	// Idempotency: a second eviction is a no-op.
 	if again := sm.EvictExcludedMessages(key); again != 0 {
 		t.Fatalf("second EvictExcludedMessages = %d, want 0", again)
 	}
 
-	// Save after eviction must NOT be a full rewrite that destroys rows; the
-	// next save is a no-op. Verify SQLite still has all 10 rows.
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("save after eviction failed: %v", err)
 	}
@@ -1278,9 +1139,6 @@ func TestSQLite_EvictExcluded_WindowRoundTrip(t *testing.T) {
 		t.Fatalf("SQLite rows after evict-save = %d, want 10 (no data loss)", len(rows))
 	}
 
-	// On-demand window serving: the newest evicted page (no cursor) returns
-	// the messages immediately below the memory boundary (seqs 4,5,6 =
-	// m4,m5,m6) WITHOUT touching the in-memory slice.
 	page := sm.LoadMessagesWindow(key, -1, 0, 3)
 	if page == nil {
 		t.Fatalf("LoadMessagesWindow newest page = nil, want a page")
@@ -1305,8 +1163,6 @@ func TestSQLite_EvictExcluded_WindowRoundTrip(t *testing.T) {
 		t.Errorf("page counts = evicted %d total %d, want 7/10", page.EvictedCount, page.TotalCount)
 	}
 
-	// Paging with before=4 returns the older page (seqs 1,2,3); m0 (seq 0)
-	// remains reachable via one more page.
 	page2 := sm.LoadMessagesWindow(key, 4, 0, 3)
 	if page2 == nil || len(page2.Messages) != 3 {
 		t.Fatalf("older page = %+v, want 3 messages", page2)
@@ -1325,12 +1181,10 @@ func TestSQLite_EvictExcluded_WindowRoundTrip(t *testing.T) {
 		t.Errorf("oldest page HasOlder = true, want false")
 	}
 
-	// Excluded flags survive on the served pages (evicted rows keep them).
 	if !page2.Messages[0].ExcludeFromContext {
 		t.Errorf("m1 served without ExcludeFromContext flag")
 	}
 
-	// CRITICAL: none of the window reads materialized anything.
 	if got := len(sm.GetHistoryView(key)); got != 3 {
 		t.Fatalf("in-memory history after paging = %d, want 3 (window reads must not materialize)", got)
 	}
@@ -1338,7 +1192,6 @@ func TestSQLite_EvictExcluded_WindowRoundTrip(t *testing.T) {
 		t.Fatalf("evicted count after paging = %d, want 7 (must be untouched)", got)
 	}
 
-	// The window path is idempotent and repeatable: same page, same answer.
 	again := sm.LoadMessagesWindow(key, -1, 0, 3)
 	if again == nil || again.FirstSeq != 4 || again.LastSeq != 6 {
 		t.Fatalf("repeat newest page = %+v, want seqs [4,6]", again)
@@ -1363,9 +1216,6 @@ func TestSQLite_ReloadAfterEviction_SeqAccounting(t *testing.T) {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// Evict: exclude first 5 (keep 0 + last 2 human turns + 2 in-context), save, evict.
-	// Index 4 (user) is one of the last preservedUserMessages human turns → preserved.
-	// Indices 1-3 are excluded; after evicting [0..4), kept range is [4..8).
 	sm.ExcludeOldMessagesFromContext(key, 3)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("exclude Save failed: %v", err)
@@ -1375,16 +1225,11 @@ func TestSQLite_ReloadAfterEviction_SeqAccounting(t *testing.T) {
 		t.Fatalf("evicted %d, want 4", evicted)
 	}
 
-	// Append a new message after eviction; incremental save must write an
-	// absolute seq that fits after the evicted rows (seqs 0-7 exist in
-	// SQLite; firstInMemorySeq=4, in-memory index 4 -> abs seq 8).
 	sm.AddMessage(key, "user", "m8")
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("append-after-evict Save failed: %v", err)
 	}
 
-	// SQLite must have 9 rows: seqs 0-8 (evicted m0-m3 at 0-3, kept m4-m7 at
-	// 4-7, new m8 at 8).
 	rows, err := s.Sessions().LoadMessagesWithSeq(key)
 	if err != nil {
 		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
@@ -1401,14 +1246,8 @@ func TestSQLite_ReloadAfterEviction_SeqAccounting(t *testing.T) {
 		t.Errorf("row 8 should contain appended m8")
 	}
 
-	// Evict the session from memory entirely.
 	sm.EvictSession(key)
 
-	// Reload a fresh session manager over the same store. Per the
-	// context-only in-memory design (Phase 7), a cold load must NOT re-inflate
-	// evicted rows into RAM: it restores firstInMemorySeq (4) and loads only
-	// the non-evicted suffix (m4..m8), so SQLite rows (seqs 0-8) map to
-	// in-memory slice indices as seq = firstInMemorySeq + i.
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	hist := sm2.GetHistoryView(key)
@@ -1421,7 +1260,6 @@ func TestSQLite_ReloadAfterEviction_SeqAccounting(t *testing.T) {
 			t.Errorf("reloaded[%d].Content = %q, want %q", i, msg.Content, want)
 		}
 	}
-	// Evicted boundary restored: 4 evicted rows still in SQLite, 9 total.
 	if got := sm2.GetEvictedMessageCount(key); got != 4 {
 		t.Errorf("GetEvictedMessageCount after reload = %d, want 4", got)
 	}
@@ -1429,7 +1267,6 @@ func TestSQLite_ReloadAfterEviction_SeqAccounting(t *testing.T) {
 		t.Errorf("GetTotalMessageCount after reload = %d, want 9", got)
 	}
 
-	// A save on the fresh manager is a no-op (no full rewrite) — data intact.
 	if err := sm2.Save(key); err != nil {
 		t.Fatalf("reload save failed: %v", err)
 	}
@@ -1451,7 +1288,6 @@ func TestSQLite_EvictExcluded_WhenDisabled(t *testing.T) {
 	}
 	sm.Save(key)
 
-	// Nothing excluded -> eviction is a no-op.
 	if got := sm.EvictExcludedMessages(key); got != 0 {
 		t.Fatalf("EvictExcludedMessages with no excluded = %d, want 0", got)
 	}
@@ -1460,39 +1296,29 @@ func TestSQLite_EvictExcluded_WhenDisabled(t *testing.T) {
 	}
 }
 
-// TestEvictExcluded_NoStore verifies that eviction refuses to run when the
-// manager has no SQLite store. Without a store, Save is a no-op and evicting
-// would permanently drop messages that were never persisted.
 func TestEvictExcluded_NoStore(t *testing.T) {
-	sm := NewSessionManager() // no store
+	sm := NewSessionManager()
 
 	key := "test:evict-nostore"
 	sm.GetOrCreate(key)
 	for i := 0; i < 8; i++ {
 		sm.AddMessage(key, "user", fmt.Sprintf("m%d", i))
 	}
-	// Exclude a prefix so eviction would have work to do if it were allowed.
 	sm.ExcludeOldMessagesFromContext(key, 3)
-	_ = sm.Save(key) // no-op without a store
+	_ = sm.Save(key)
 
 	if got := sm.EvictExcludedMessages(key); got != 0 {
 		t.Fatalf("EvictExcludedMessages without store = %d, want 0", got)
 	}
-	// All messages must still be in memory.
 	hist := sm.GetHistory(key)
 	if len(hist) != 8 {
 		t.Fatalf("history length after refused eviction = %d, want 8", len(hist))
 	}
 }
 
-// TestSQLite_ColdLoad_RestoresEvictionBoundary verifies that a cold load
-// (new SessionManager over the same store) restores the eviction boundary
-// (firstInMemorySeq/evictedTotal) from SQLite metadata and does NOT re-inflate
-// the evicted rows into RAM: only the non-evicted suffix is loaded.
 func TestSQLite_ColdLoad_RestoresEvictionBoundary(t *testing.T) {
 	s := newTestStore(t)
 
-	// Manager 1: create + persist the session, exclude a prefix, save, evict.
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
 
@@ -1505,9 +1331,6 @@ func TestSQLite_ColdLoad_RestoresEvictionBoundary(t *testing.T) {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// Exclude all but the last 3 in-context (keep m7..m9), persist, then evict.
-	// Index 6 (user) is in the excluded range [1,7) and NOT one of the last 2
-	// human turns (those are 8,9, outside the range) → stays excluded.
 	sm.ExcludeOldMessagesFromContext(key, 3)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("exclude Save failed: %v", err)
@@ -1516,12 +1339,9 @@ func TestSQLite_ColdLoad_RestoresEvictionBoundary(t *testing.T) {
 		t.Fatalf("EvictExcludedMessages evicted %d, want 7", evicted)
 	}
 
-	// Manager 2: cold load from the same store.
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 
-	// Only the non-evicted suffix is resident in RAM (this also triggers the
-	// cold load for the count assertions below).
 	hist := sm2.GetHistory(key)
 	if len(hist) != 3 {
 		t.Fatalf("in-memory len after cold load = %d, want 3", len(hist))
@@ -1533,7 +1353,6 @@ func TestSQLite_ColdLoad_RestoresEvictionBoundary(t *testing.T) {
 		t.Errorf("unexpected kept suffix after cold load: %q, %q, %q", hist[0].Content, hist[1].Content, hist[2].Content)
 	}
 
-	// Boundary restored: 7 evicted, 10 total.
 	if got := sm2.GetEvictedMessageCount(key); got != 7 {
 		t.Fatalf("GetEvictedMessageCount after cold load = %d, want 7", got)
 	}
@@ -1541,9 +1360,6 @@ func TestSQLite_ColdLoad_RestoresEvictionBoundary(t *testing.T) {
 		t.Fatalf("GetTotalMessageCount after cold load = %d, want 10", got)
 	}
 
-	// The invariant seq = firstInMemorySeq + sliceIndex must hold: the first
-	// in-memory row's SQLite seq equals firstInMemorySeq (7). Verify against
-	// the persisted rows.
 	rows, err := s.Sessions().LoadMessagesWithSeq(key)
 	if err != nil {
 		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
@@ -1551,7 +1367,6 @@ func TestSQLite_ColdLoad_RestoresEvictionBoundary(t *testing.T) {
 	if len(rows) != 10 {
 		t.Fatalf("SQLite rows = %d, want 10", len(rows))
 	}
-	// The first persistent row after the boundary is seq 7.
 	found := false
 	for _, r := range rows {
 		if r.Seq == 7 {
@@ -1564,18 +1379,9 @@ func TestSQLite_ColdLoad_RestoresEvictionBoundary(t *testing.T) {
 	}
 }
 
-// TestSQLite_ColdLoad_PrunedPrefixBelowBoundary is a regression test for the
-// stale-eviction-boundary guard. saveFullUnlocked physically prunes the OLDEST
-// excluded rows from SQLite for oversized sessions, leaving a gap BELOW the
-// eviction boundary. The cold-load guard must validate contiguity ABOVE the
-// boundary (via MaxSeq), not contiguity from seq 0 (via MessageCount), so a
-// pruned prefix must NOT trigger the fallback that would reset
-// firstInMemorySeq to 0 and corrupt the `seq = firstInMemorySeq + sliceIndex`
-// invariant.
 func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 	s := newTestStore(t)
 
-	// Manager 1: create + persist a session, exclude a prefix, save, evict.
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
 
@@ -1588,11 +1394,6 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// Exclude the first 8 (keep 0 + last 2 human turns), persist + evict.
-	// keepCount=2 (not 3) because with preservedUserMessages the boundary
-	// is higher and PruneExcluded needs enough excluded rows to actually prune.
-	// With keepCount=2: excludeUpTo=8, preserved={0,8,9}, indices 1-7 excluded
-	// (m8 un-excluded). Evict [0..8), FirstInMemorySeq=8.
 	sm.ExcludeOldMessagesFromContext(key, 2)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("exclude Save failed: %v", err)
@@ -1600,8 +1401,6 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 	if evicted := sm.EvictExcludedMessages(key); evicted != 8 {
 		t.Fatalf("EvictExcludedMessages evicted %d, want 8", evicted)
 	}
-	// EvictExcludedMessages persists the boundary (FirstInMemorySeq == 8);
-	// confirm it survived in SQLite metadata.
 	meta, err := s.Sessions().GetSessionMeta(key)
 	if err != nil || meta == nil {
 		t.Fatalf("GetSessionMeta failed: %v (err=%v)", meta, err)
@@ -1610,10 +1409,6 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 		t.Fatalf("FirstInMemorySeq persisted = %d, want 8", meta.FirstInMemorySeq)
 	}
 
-	// Simulate the post-full-rewrite pruning of the OLDEST excluded rows
-	// (which live below the boundary) by calling the repo directly, the same
-	// method saveFullUnlocked uses. keepCount small enough that rows are
-	// actually deleted: boundary=8, keepCount=7 -> 3 oldest excluded rows pruned.
 	pruned, pErr := s.Sessions().PruneExcluded(key, 7)
 	if pErr != nil {
 		t.Fatalf("PruneExcluded failed: %v", pErr)
@@ -1622,8 +1417,6 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 		t.Fatalf("PruneExcluded deleted %d rows, want 3 (oldest excluded prefix)", pruned)
 	}
 
-	// rows remaining after pruning are m4..m9 (seq 4..9): m4..m7 still
-	// excluded (evicted + persisted), m8..m9 in-context. Boundary is still 8.
 	rows, err := s.Sessions().LoadMessagesWithSeq(key)
 	if err != nil {
 		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
@@ -1632,13 +1425,10 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 		t.Fatalf("SQLite rows after prune = %d, want 7", len(rows))
 	}
 
-	// Cold load via a NEW manager over the same store. With the old guard,
-	// MessageCount - boundary = 7 - 8 = -1 != 2 would falsely trigger the
-	// fallback and reset firstInMemorySeq to 0.
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 
-	hist := sm2.GetHistory(key) // triggers the cold load
+	hist := sm2.GetHistory(key)
 	if len(hist) != 2 {
 		t.Fatalf("in-memory len after cold load = %d, want 2", len(hist))
 	}
@@ -1646,8 +1436,6 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 		t.Fatalf("unexpected kept suffix after cold load: %q, %q", hist[0].Content, hist[1].Content)
 	}
 
-	// Boundary was NOT reset to 0: evicted rows still persisted = B - pruned
-	// (8 - 3 = 5), and total = 5 + in-memory 2 = 7.
 	if got := sm2.GetEvictedMessageCount(key); got != 8-pruned {
 		t.Fatalf("GetEvictedMessageCount after cold load = %d, want %d (B-pruned)", got, 8-pruned)
 	}
@@ -1658,10 +1446,6 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 		t.Fatalf("GetTotalMessageCount after cold load = %d, want %d", got, 8-pruned+len(hist))
 	}
 
-	// The invariant seq = firstInMemorySeq + sliceIndex must hold after an
-	// append: appending one more message via the manager and saving must
-	// insert at absolute seq = firstInMemorySeq + sliceIndex (8 + 2 = 10) and
-	// must NOT overwrite any existing row.
 	sm2.AddMessage(key, "user", "m10")
 	if err := sm2.Save(key); err != nil {
 		t.Fatalf("save after append failed: %v", err)
@@ -1674,17 +1458,11 @@ func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
 		t.Fatalf("SQLite rows after append = %d, want 8 (grew by exactly 1)", len(finalRows))
 	}
 	newRow := finalRows[len(finalRows)-1]
-	// No seq was overwritten: the new row's seq must equal firstInMemorySeq +
-	// sliceIndex (8 + 2 = 10), one beyond the previous max (9). The total row
-	// count growing by exactly 1 already proves no existing row was replaced.
 	if newRow.Seq != 10 {
 		t.Fatalf("appended row seq = %d, want 10 (firstInMemorySeq+sliceIndex), json=%q", newRow.Seq, newRow.JSON)
 	}
 }
 
-// TestSQLite_ColdLoad_NoEviction_BoundaryZero is a regression test: a session
-// with no eviction reloads all messages with firstInMemorySeq == 0, i.e. the
-// legacy behavior is unchanged.
 func TestSQLite_ColdLoad_NoEviction_BoundaryZero(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -1718,9 +1496,6 @@ func TestSQLite_ColdLoad_NoEviction_BoundaryZero(t *testing.T) {
 	}
 }
 
-// TestSQLite_EvictionBoundary_PersistedOnEvict verifies that after
-// EvictExcludedMessages + save, a fresh GetSessionMeta via the store sees
-// FirstInMemorySeq == number of evicted rows.
 func TestSQLite_EvictionBoundary_PersistedOnEvict(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -1739,13 +1514,9 @@ func TestSQLite_EvictionBoundary_PersistedOnEvict(t *testing.T) {
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("exclude Save failed: %v", err)
 	}
-	// With 8 user messages, keepCount=2: indices 1-5 excluded (m6 is one of
-	// the last preservedUserMessages human turns → preserved). Evict [0..6).
 	if evicted := sm.EvictExcludedMessages(key); evicted != 6 {
 		t.Fatalf("EvictExcludedMessages evicted %d, want 6", evicted)
 	}
-	// Persist boundary explicitly (EvictExcludedMessages already did, but a
-	// save keeps the metadata consistent).
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("save after evict failed: %v", err)
 	}
@@ -1762,10 +1533,6 @@ func TestSQLite_EvictionBoundary_PersistedOnEvict(t *testing.T) {
 	}
 }
 
-// TestSQLite_MultipleCompactions_ColdLoadContextOnly verifies that after multiple
-// rounds of compactions and new messages, cold-loading the session in a brand new
-// SessionManager loads ONLY the in-context messages into RAM (e.g. 2 messages),
-// and not the dozens of evicted messages.
 func TestSQLite_MultipleCompactions_ColdLoadContextOnly(t *testing.T) {
 	s := newTestStore(t)
 	sm1 := NewSessionManager()
@@ -1774,7 +1541,6 @@ func TestSQLite_MultipleCompactions_ColdLoadContextOnly(t *testing.T) {
 	const key = "test:multi-compaction-cold-load"
 	sm1.GetOrCreate(key)
 
-	// Round 1: 10 messages, compact keeping 2 -> 8 evicted, 2 kept.
 	for i := 0; i < 10; i++ {
 		sm1.AddMessage(key, "user", fmt.Sprintf("Question round 1: %d", i))
 	}
@@ -1790,7 +1556,6 @@ func TestSQLite_MultipleCompactions_ColdLoadContextOnly(t *testing.T) {
 		t.Fatalf("round 1 in-mem = %d, want 2", inMem)
 	}
 
-	// Round 2: append 10 more messages -> 12 total in memory, compact keeping 2 -> 10 evicted, 2 kept.
 	for i := 0; i < 10; i++ {
 		sm1.AddMessage(key, "user", fmt.Sprintf("Question round 2: %d", i))
 	}
@@ -1806,7 +1571,6 @@ func TestSQLite_MultipleCompactions_ColdLoadContextOnly(t *testing.T) {
 		t.Fatalf("round 2 in-mem = %d, want 2", inMem)
 	}
 
-	// Round 3: append 10 more messages -> 12 total, compact keeping 2 -> 10 evicted, 2 kept.
 	for i := 0; i < 10; i++ {
 		sm1.AddMessage(key, "user", fmt.Sprintf("Question round 3: %d", i))
 	}
@@ -1822,13 +1586,11 @@ func TestSQLite_MultipleCompactions_ColdLoadContextOnly(t *testing.T) {
 		t.Fatalf("round 3 in-mem = %d, want 2", inMem)
 	}
 
-	// Total messages in SQLite is 30, but in RAM only 2 should exist.
 	totalCount, _ := s.Sessions().MessageCount(key)
 	if totalCount != 30 {
 		t.Fatalf("SQLite total messages = %d, want 30", totalCount)
 	}
 
-	// Cold load with a new SessionManager (simulating app start).
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 
@@ -1844,9 +1606,6 @@ func TestSQLite_MultipleCompactions_ColdLoadContextOnly(t *testing.T) {
 	}
 }
 
-// TestSQLite_ColdLoad_UnmigratedExcludedPruned verifies that an older session
-// stored with boundary 0 but containing excluded messages is automatically
-// pruned to in-context messages on cold load.
 func TestSQLite_ColdLoad_UnmigratedExcludedPruned(t *testing.T) {
 	s := newTestStore(t)
 	repo := s.Sessions()
@@ -1856,12 +1615,11 @@ func TestSQLite_ColdLoad_UnmigratedExcludedPruned(t *testing.T) {
 	_ = repo.UpsertSession(store.SessionMeta{
 		Key:              key,
 		Name:             "Unmigrated",
-		FirstInMemorySeq: 0, // Legacy boundary 0
+		FirstInMemorySeq: 0,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	})
 
-	// Insert 20 messages: first 16 excluded, last 4 in-context.
 	var rows []store.MessageRow
 	for i := 0; i < 20; i++ {
 		isExcluded := i < 16
@@ -1876,7 +1634,6 @@ func TestSQLite_ColdLoad_UnmigratedExcludedPruned(t *testing.T) {
 		t.Fatalf("insert messages failed: %v", err)
 	}
 
-	// Load with a new SessionManager.
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
 
@@ -1888,7 +1645,6 @@ func TestSQLite_ColdLoad_UnmigratedExcludedPruned(t *testing.T) {
 		t.Errorf("history[0].Content = %q, want 'msg 16'", history[0].Content)
 	}
 
-	// Boundary must have been persisted to SQLite.
 	meta, err := repo.GetSessionMeta(key)
 	if err != nil || meta == nil {
 		t.Fatalf("GetSessionMeta failed: %v", err)
@@ -1898,7 +1654,6 @@ func TestSQLite_ColdLoad_UnmigratedExcludedPruned(t *testing.T) {
 	}
 }
 
-// seqsOf extracts the ordered seq values from persistence rows for assertions.
 func seqsOf(rows []store.MessageRowFull) []int {
 	seqs := make([]int, 0, len(rows))
 	for _, r := range rows {
@@ -1907,15 +1662,11 @@ func seqsOf(rows []store.MessageRowFull) []int {
 	return seqs
 }
 
-// TestSQLite_AllTotalMessageCounts_MatchesPerKey verifies that the batched
-// AllTotalMessageCounts returns the same per-session totals as calling
-// GetTotalMessageCount for each session individually.
 func TestSQLite_AllTotalMessageCounts_MatchesPerKey(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
 
-	// Create 3 sessions with different message counts.
 	sm.GetOrCreate("sess-a")
 	sm.AddMessage("sess-a", "user", "hello")
 	sm.AddMessage("sess-a", "assistant", "hi there")
@@ -1949,9 +1700,6 @@ func TestSQLite_AllTotalMessageCounts_MatchesPerKey(t *testing.T) {
 	}
 }
 
-// TestSQLite_AllTotalMessageCounts_ColdSessions verifies that sessions evicted
-// from memory (metadata only) still get their correct persisted totals via the
-// batched store query, matching GetTotalMessageCount.
 func TestSQLite_AllTotalMessageCounts_ColdSessions(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -1971,7 +1719,6 @@ func TestSQLite_AllTotalMessageCounts_ColdSessions(t *testing.T) {
 		t.Fatalf("save sess-b: %v", err)
 	}
 
-	// Evict both sessions from memory. EvictSession persists before removing.
 	if !sm.EvictSession("sess-a") {
 		t.Fatal("EvictSession(sess-a) returned false")
 	}
@@ -1979,7 +1726,6 @@ func TestSQLite_AllTotalMessageCounts_ColdSessions(t *testing.T) {
 		t.Fatal("EvictSession(sess-b) returned false")
 	}
 
-	// Confirm they are cold (not in the in-memory map) but still known via metadata.
 	sm.mu.RLock()
 	if _, ok := sm.sessions["sess-a"]; ok {
 		t.Fatal("sess-a should be evicted from memory")
@@ -1998,7 +1744,6 @@ func TestSQLite_AllTotalMessageCounts_ColdSessions(t *testing.T) {
 		t.Errorf("cold sess-b count = %d, want 1", counts["sess-b"])
 	}
 
-	// Batched cold-path totals must match the per-key lookup.
 	for _, key := range []string{"sess-a", "sess-b"} {
 		if got, want := counts[key], sm.GetTotalMessageCount(key); got != want {
 			t.Errorf("cold AllTotalMessageCounts[%q] = %d, want GetTotalMessageCount = %d", key, got, want)
@@ -2006,10 +1751,8 @@ func TestSQLite_AllTotalMessageCounts_ColdSessions(t *testing.T) {
 	}
 }
 
-// TestAllTotalMessageCounts_NoStore verifies that in-memory sessions are
-// counted correctly and nothing panics when no store is configured.
 func TestAllTotalMessageCounts_NoStore(t *testing.T) {
-	sm := NewSessionManager() // store is nil
+	sm := NewSessionManager()
 
 	sm.GetOrCreate("sess-a")
 	sm.AddMessage("sess-a", "user", "hello")
@@ -2031,20 +1774,6 @@ func TestAllTotalMessageCounts_NoStore(t *testing.T) {
 	}
 }
 
-// TestSQLite_EvictionGap_IncrementalAndRebase is regression coverage for the
-// seq-slicing corruption class around eviction gaps. The old
-// LoadEvictedMessages materialization path (which reset firstInMemorySeq to 0
-// while persisted rows kept gapped seqs after PruneExcluded) has been REMOVED:
-// evicted history is now served on demand via LoadMessagesWindow, which never
-// touches memory or the seq<->sliceIndex invariant. This test pins the three
-// properties that keep that corruption structurally impossible:
-//  1. With a gap below the eviction boundary, incremental appends still write
-//     absolute seqs via seqForIndex and never overwrite existing rows.
-//  2. LoadMessagesWindow serves gapped rows with their REAL seqs (page.Seqs),
-//     so consumers cannot derive wrong cursors from slice offsets.
-//  3. When a full rewrite does run (SetHistory/compaction), saveFullUnlocked
-//     re-materializes + renumbers rows contiguously from 0, healing the gap
-//     with role/JSON alignment preserved on every row.
 func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -2052,7 +1781,6 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 
 	key := "test:gap-rebase"
 	sm.GetOrCreate(key)
-	// 12 alternating messages to have enough excluded rows for PruneExcluded.
 	for i := 0; i < 12; i++ {
 		role := "user"
 		if i%2 != 0 {
@@ -2064,9 +1792,6 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// Exclude most messages, keep 1 in-context + 2 preserved human turns.
-	// With keepCount=1: excludeUpTo=11, preserved={0,10,11}, indices 1-9
-	// excluded (m10 preserved as last human turn → un-excluded). Evict [0..10).
 	sm.ExcludeOldMessagesFromContext(key, 1)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("exclude Save failed: %v", err)
@@ -2075,10 +1800,6 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 		t.Fatalf("EvictExcludedMessages evicted %d, want 10", evicted)
 	}
 
-	// Prune the OLDEST excluded rows to create a gap: excluded rows are
-	// at seq 1..7 and 9 (8 rows; seq 0 never excluded, seq 8 and 10 are
-	// preserved human turns → un-excluded). total=12, keepCount=9 →
-	// toDelete=3, deletes the 3 oldest excluded rows (seq 1,2,3).
 	pruned, pErr := s.Sessions().PruneExcluded(key, 9)
 	if pErr != nil {
 		t.Fatalf("PruneExcluded failed: %v", pErr)
@@ -2087,9 +1808,6 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 		t.Fatalf("PruneExcluded deleted %d rows, want 3", pruned)
 	}
 
-	// loadRaw reads seq + the raw role column + JSON + excluded directly, since
-	// the historical corruption was a role-column vs JSON-role mismatch that
-	// the higher-level MessageRowFull (no Role field) cannot surface.
 	type rawRow struct {
 		Seq      int
 		Role     string
@@ -2126,8 +1844,6 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 		t.Fatalf("second row seq = %d, want 4 (gap at seq 1..3 not present?)", rowsBefore[1].Seq)
 	}
 
-	// (1) An incremental append with the gap in place must land at absolute
-	// seq 12 (firstInMemorySeq 10 + sliceIndex 2), never on a gapped seq.
 	sm.AddMessage(key, "user", "m12")
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("append-with-gap Save failed: %v", err)
@@ -2146,14 +1862,10 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 		t.Errorf("appended row misaligned: role=%q content=%q, want user/m12", last.Role, lastMsg.Content)
 	}
 
-	// (2) The on-demand window serves the gapped evicted region with REAL
-	// seqs so pagination cursors stay correct across the gap.
 	page := sm.LoadMessagesWindow(key, 9, 0, 10)
 	if page == nil {
 		t.Fatalf("window page below boundary = nil, want the evicted rows")
 	}
-	// Evicted rows below seq 9: seq 0,4,5,6,7,8 (6 rows; pruned 1,2,3;
-	// seq 8 is a preserved human turn that was folded+evicted).
 	wantSeqs := []int{0, 4, 5, 6, 7, 8}
 	if len(page.Seqs) != len(wantSeqs) {
 		t.Fatalf("window seqs = %v, want %v", page.Seqs, wantSeqs)
@@ -2167,10 +1879,7 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 		t.Errorf("window message at seq 4 = %q, want m4", page.Messages[1].Content)
 	}
 
-	// (3) A full rewrite (SetHistory forces one, e.g. after compaction) must
-	// re-materialize the evicted rows and renumber everything contiguously
-	// from 0, healing the gap without shifting content relative to role.
-	kept := sm.GetHistoryView(key) // m10,m11,m12
+	kept := sm.GetHistoryView(key)
 	sm.SetHistory(key, kept)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("full-rewrite Save failed: %v", err)
@@ -2192,8 +1901,6 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 		}
 	}
 
-	// Content order after the rebase: m0,m4,m5,m6,m7,m8,m9 (surviving
-	// evicted rows; pruned m1..m3 gone for good) then the resident m10..m12.
 	wantContent := []string{"m0", "m4", "m5", "m6", "m7", "m8", "m9", "m10", "m11", "m12"}
 	for i, row := range rowsAfter {
 		var msg providers.Message
@@ -2203,9 +1910,6 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 		}
 	}
 
-	// Excluded flags must survive the rebase: m0 never excluded; m4..m7 stay
-	// excluded; m8 is preserved human turn (not excluded); m9 excluded;
-	// m10..m12 in-context.
 	wantExcluded := []bool{false, true, true, true, true, false, true, false, false, false}
 	for i, row := range rowsAfter {
 		if row.Excluded != wantExcluded[i] {
@@ -2213,8 +1917,6 @@ func TestSQLite_EvictionGap_IncrementalAndRebase(t *testing.T) {
 		}
 	}
 
-	// Post-rewrite bookkeeping: the invariant seq == sliceIndex must hold for
-	// the next incremental append (row 10, content m13).
 	sm.AddMessage(key, "user", "m13")
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("post-rewrite append Save failed: %v", err)

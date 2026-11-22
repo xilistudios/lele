@@ -1,14 +1,5 @@
 package session
 
-// Tests for the metadata-only subagent ledger listing and the windowed detail
-// loader.
-//
-// These are the two halves of the LLM-facing subagent ledger: the metadata half
-// must be free (no store query, no residency change) because it runs on every
-// turn inside the system prompt, and the detail half must be bounded to the
-// page that is actually rendered. FindSubagentSessions stays byte-identical and
-// keeps serving the UI; the last test in this file is the guard for that.
-
 import (
 	"fmt"
 	"strings"
@@ -19,7 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// metaByTaskID returns the metadata row for a task ID, failing when absent.
 func metaByTaskID(t *testing.T, rows []SubagentSessionMeta, taskID string) SubagentSessionMeta {
 	t.Helper()
 	for _, row := range rows {
@@ -31,7 +21,6 @@ func metaByTaskID(t *testing.T, rows []SubagentSessionMeta, taskID string) Subag
 	return SubagentSessionMeta{}
 }
 
-// metaByKey returns the metadata row for a full session key, failing when absent.
 func metaByKey(t *testing.T, rows []SubagentSessionMeta, key string) SubagentSessionMeta {
 	t.Helper()
 	for _, row := range rows {
@@ -43,9 +32,6 @@ func metaByKey(t *testing.T, rows []SubagentSessionMeta, key string) SubagentSes
 	return SubagentSessionMeta{}
 }
 
-// TestListSubagentSessionMeta_ResidentAndColdAgree pins the invariant the
-// ledger depends on: whichever map answers (sm.sessions or sm.sessionMeta), the
-// identifying fields are the same, and Resident records which one it was.
 func TestListSubagentSessionMeta_ResidentAndColdAgree(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -56,7 +42,6 @@ func TestListSubagentSessionMeta_ResidentAndColdAgree(t *testing.T) {
 	recordSubagent(t, sm, parent, "subagent-2", "second answer")
 	sm.SetSubagentStatus(parent+":subagent-1", "failed")
 	sm.SetSubagentAgentID(parent+":subagent-1", "coder")
-	// A session of another parent and a non-subagent key must stay out.
 	recordSubagent(t, sm, "native:other-meta", "subagent-9", "unrelated")
 	recordSubagent(t, sm, parent, "not-a-subagent", "unrelated")
 
@@ -79,7 +64,6 @@ func TestListSubagentSessionMeta_ResidentAndColdAgree(t *testing.T) {
 		}
 	}
 
-	// Evict both: the rows must survive from the metadata mirror alone.
 	for _, taskID := range []string{"subagent-1", "subagent-2"} {
 		if !sm.EvictSession(parent + ":" + taskID) {
 			t.Fatalf("EvictSession(%s) = false", taskID)
@@ -106,14 +90,8 @@ func TestListSubagentSessionMeta_ResidentAndColdAgree(t *testing.T) {
 	}
 }
 
-// TestListSubagentSessionMeta_NoStoreStillReportsColdRows is the deliberate
-// divergence from FindSubagentSessions (which omits cold rows without a store,
-// pinned by TestFindSubagentSessions_NoStore). EvictSession keeps sessionMeta
-// on purpose, so in a JSON-only deployment a retention-reaped task is still
-// known by name, status and timestamps — hiding it would lose the ledger for
-// exactly the deployments that have no other copy.
 func TestListSubagentSessionMeta_NoStoreStillReportsColdRows(t *testing.T) {
-	sm := NewSessionManager() // no session repo
+	sm := NewSessionManager()
 	parent := "native:meta-nostore"
 	key := parent + ":subagent-1"
 	sm.AddMessage(key, "user", "task")
@@ -142,18 +120,11 @@ func TestListSubagentSessionMeta_NoStoreStillReportsColdRows(t *testing.T) {
 		t.Errorf("Status = %q, want %q", row.Status, "completed")
 	}
 
-	// The historical path still omits it: the divergence is intentional and
-	// must not leak into FindSubagentSessions.
 	if got := sm.FindSubagentSessions(parent); len(got) != 0 {
 		t.Errorf("FindSubagentSessions = %d rows, want 0 (its no-store behaviour must not change)", len(got))
 	}
 }
 
-// TestListSubagentSessionMeta_DoesNotLoadOrTouchLRU mirrors
-// TestFindSubagentSessions_DoesNotLoadOrTouchLRU for the metadata path: it must
-// not materialize a session, must not move access times and must not replace
-// metadata entries. maxInMemory is pinned to 1 so any insert would evict the
-// live chat immediately.
 func TestListSubagentSessionMeta_DoesNotLoadOrTouchLRU(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -202,10 +173,9 @@ func TestListSubagentSessionMeta_DoesNotLoadOrTouchLRU(t *testing.T) {
 		return snap
 	}
 
-	// The listing must not consult the store at all: any query is a failure.
 	rec := useRecordingSessionRepo(t, s.Sessions())
 
-	sm.SetMaxInMemory(1) // any load from here on evicts the live chat
+	sm.SetMaxInMemory(1)
 	beforeResident := snapshotResident()
 	beforeAccess := snapshotAccess()
 	beforeMeta := snapshotMeta()
@@ -255,10 +225,6 @@ func TestListSubagentSessionMeta_DoesNotLoadOrTouchLRU(t *testing.T) {
 	}
 }
 
-// TestListSubagentSessionMeta_DedupesAcrossOverlappingPrefixes pins R2: the
-// caller passes several prefixes (SubagentScopePrefixes returns the key and
-// every ':'-aligned ancestor), and a row matched by more than one of them must
-// be reported once.
 func TestListSubagentSessionMeta_DedupesAcrossOverlappingPrefixes(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -267,8 +233,6 @@ func TestListSubagentSessionMeta_DedupesAcrossOverlappingPrefixes(t *testing.T) 
 	parent := "native:dedupe-parent"
 	key := recordSubagent(t, sm, parent, "subagent-1", "answer")
 
-	// Every ancestor of the parent is a candidate prefix, as the tool and the
-	// prompt resolver produce them.
 	prefixes := []string{"native", "native:dedupe-parent", parent, parent}
 	rows := sm.ListSubagentSessionMeta(prefixes)
 	if len(rows) != 1 {
@@ -278,7 +242,6 @@ func TestListSubagentSessionMeta_DedupesAcrossOverlappingPrefixes(t *testing.T) 
 		t.Errorf("Key = %q, want %q", rows[0].Key, key)
 	}
 
-	// Same after eviction, where the metadata mirror answers.
 	if !sm.EvictSession(key) {
 		t.Fatal("EvictSession = false")
 	}
@@ -287,9 +250,6 @@ func TestListSubagentSessionMeta_DedupesAcrossOverlappingPrefixes(t *testing.T) 
 	}
 }
 
-// TestListSubagentSessionMeta_EmptyAndBlankPrefixes pins the no-scan contract:
-// nil and empty slices return nil, and a blank prefix must not degrade into
-// ":subagent-" (which would match every session's subagents).
 func TestListSubagentSessionMeta_EmptyAndBlankPrefixes(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -305,16 +265,12 @@ func TestListSubagentSessionMeta_EmptyAndBlankPrefixes(t *testing.T) {
 	if rows := sm.ListSubagentSessionMeta([]string{"", ""}); rows != nil {
 		t.Errorf("blank prefixes = %+v, want nil (a blank prefix must not match every subagent)", rows)
 	}
-	// A blank prefix mixed with a real one must not widen the match.
 	rows := sm.ListSubagentSessionMeta([]string{"", "native:blank-parent"})
 	if len(rows) != 1 || rows[0].TaskID != "subagent-1" {
 		t.Errorf("mixed prefixes = %+v, want exactly subagent-1", rows)
 	}
 }
 
-// TestListSubagentSessionMeta_CrossOriginSameTaskIDBothReported pins R4: two
-// chats legitimately both have "subagent-1". Deduplicating by bare task ID (as
-// the spec suggested) would silently drop one of them.
 func TestListSubagentSessionMeta_CrossOriginSameTaskIDBothReported(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -332,16 +288,12 @@ func TestListSubagentSessionMeta_CrossOriginSameTaskIDBothReported(t *testing.T)
 	metaByKey(t, rows, keyA)
 	metaByKey(t, rows, keyB)
 
-	// Scoped to one chat, the other must not leak in.
 	scoped := sm.ListSubagentSessionMeta([]string{chatA})
 	if len(scoped) != 1 || scoped[0].Key != keyA {
 		t.Errorf("scoped listing = %+v, want only %q", scoped, keyA)
 	}
 }
 
-// TestListSubagentSessionMeta_StatusAndAgentIDFromMetadata pins C3: the
-// persisted status and executor are durable facts and must be reported as-is
-// (never hard-coded to "completed"), including from the metadata mirror.
 func TestListSubagentSessionMeta_StatusAndAgentIDFromMetadata(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -385,16 +337,12 @@ func TestListSubagentSessionMeta_StatusAndAgentIDFromMetadata(t *testing.T) {
 	check("cold", sm.ListSubagentSessionMeta([]string{parent}))
 }
 
-// recordingSessionRepo wraps the real repo and records which keys each
-// SessionListingStats call received, so a test can assert the detail loader is
-// windowed rather than scanning the history.
 type recordingSessionRepo struct {
-	sessionRepo // the real repo, for every method other than the one observed
-	mu          sync.Mutex
-	keys        [][]string
+	sessionRepo
+	mu   sync.Mutex
+	keys [][]string
 }
 
-// SessionListingStats records the requested keys and forwards the query.
 func (r *recordingSessionRepo) SessionListingStats(keys []string) (map[string]store.SessionListingStats, error) {
 	r.mu.Lock()
 	r.keys = append(r.keys, append([]string(nil), keys...))
@@ -402,15 +350,6 @@ func (r *recordingSessionRepo) SessionListingStats(keys []string) (map[string]st
 	return r.sessionRepo.(*store.SessionRepo).SessionListingStats(keys)
 }
 
-// useRecordingSessionRepo swaps the repoFor seam for a recording wrapper (the
-// same seam persist_lock_test.go and eviction_lock_test.go use) until the test
-// ends. The SessionManager field is a concrete *store.SessionRepo, so the seam
-// is the only way to observe the batched query's key set.
-//
-// The wrapper is installed BEFORE the manager ever loads, so the manager's
-// one-time metadata bootstrap also goes through it (repoFor is consulted by the
-// save paths; the read paths use the concrete field, which is why the wrapper
-// embeds it).
 func useRecordingSessionRepo(t *testing.T, inner *store.SessionRepo) *recordingSessionRepo {
 	t.Helper()
 	rec := &recordingSessionRepo{sessionRepo: inner}
@@ -430,9 +369,6 @@ func (r *recordingSessionRepo) queried() []string {
 	return all
 }
 
-// TestSubagentSessionDetails_BoundedKeySet pins the windowed contract: the
-// store query receives exactly the requested keys (never the whole history of
-// the parent), and resident keys cost no query at all.
 func TestSubagentSessionDetails_BoundedKeySet(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -443,7 +379,6 @@ func TestSubagentSessionDetails_BoundedKeySet(t *testing.T) {
 	for i := 1; i <= 10; i++ {
 		keys = append(keys, recordSubagent(t, sm, parent, fmt.Sprintf("subagent-%d", i), fmt.Sprintf("answer %d", i)))
 	}
-	// Evict all but the first: one resident, nine cold.
 	for _, key := range keys[1:] {
 		if !sm.EvictSession(key) {
 			t.Fatalf("EvictSession(%q) = false", key)
@@ -452,8 +387,7 @@ func TestSubagentSessionDetails_BoundedKeySet(t *testing.T) {
 
 	rec := useRecordingSessionRepo(t, s.Sessions())
 
-	// A page of two cold rows plus one resident row.
-	page := []string{keys[0], keys[3], keys[7], keys[7]} // duplicate on purpose
+	page := []string{keys[0], keys[3], keys[7], keys[7]}
 	got := sm.SubagentSessionDetails(page)
 	if len(got) != 3 {
 		t.Fatalf("details = %d entries, want 3 (%+v)", len(got), got)
@@ -479,10 +413,6 @@ func TestSubagentSessionDetails_BoundedKeySet(t *testing.T) {
 	}
 }
 
-// TestSubagentSessionDetails_MatchesFindSubagentSessionsSummary pins the
-// equivalence with the UI path: for the same session, resident, cold and
-// restart, the detail loader must report exactly the summary and iteration
-// count FindSubagentSessions reports, so the tool and the WebUI never disagree.
 func TestSubagentSessionDetails_MatchesFindSubagentSessionsSummary(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -529,9 +459,6 @@ func TestSubagentSessionDetails_MatchesFindSubagentSessionsSummary(t *testing.T)
 	assertAgrees("restart", restarted)
 }
 
-// TestSubagentSessionDetails_CorruptRowOmitted pins the omission policy: a key
-// whose rows cannot be decoded is absent from the map rather than reported with
-// empty fields, matching FindSubagentSessions.
 func TestSubagentSessionDetails_CorruptRowOmitted(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -546,8 +473,6 @@ func TestSubagentSessionDetails_CorruptRowOmitted(t *testing.T) {
 	})
 	persistRawSubagent(t, s, corrupt, 0, []store.MessageRow{
 		{Seq: 0, Role: "user", JSON: storedMsgJSON("user", "task")},
-		// Truncated write: the cold load drops it, so there is no assistant
-		// message to report.
 		{Seq: 1, Role: "assistant", JSON: `{"role":"assistant","content":"trunc`},
 	})
 
@@ -558,23 +483,17 @@ func TestSubagentSessionDetails_CorruptRowOmitted(t *testing.T) {
 	if details[good].Iterations != 1 || details[good].Summary != "older ok" {
 		t.Errorf("readable detail = %+v, want 1 iteration and %q", details[good], "older ok")
 	}
-	// The corrupt row decodes to nothing: the same shape
-	// FindSubagentSessions reports (0 iterations, empty summary), and the
-	// parity test above is what keeps the two in step.
 	if got, ok := details[corrupt]; !ok || got.Iterations != 0 || got.Summary != "" {
 		t.Errorf("corrupt detail = %+v (present %v), want {0, \"\"}", got, ok)
 	}
 
-	// A key with no sessions row at all is omitted, not reported empty.
 	if _, ok := details[parent+":subagent-404"]; ok {
 		t.Error("missing session was reported instead of omitted")
 	}
 }
 
-// TestSubagentSessionDetails_NoStoreReturnsEmpty pins the store-less manager:
-// resident sessions are answered from memory and cold keys are simply absent.
 func TestSubagentSessionDetails_NoStoreReturnsEmpty(t *testing.T) {
-	sm := NewSessionManager() // no session repo
+	sm := NewSessionManager()
 	residentKey := "native:details-nostore:subagent-1"
 	sm.AddMessage(residentKey, "user", "task")
 	sm.AddMessage(residentKey, "assistant", "done")
@@ -595,9 +514,6 @@ func TestSubagentSessionDetails_NoStoreReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestFindSubagentSessions_UnchangedByLedgerAdditions is the guard for the
-// byte-identical contract: the new listing functions must not change what the
-// UI path reports, for resident, cold and restarted managers.
 func TestFindSubagentSessions_UnchangedByLedgerAdditions(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -612,7 +528,6 @@ func TestFindSubagentSessions_UnchangedByLedgerAdditions(t *testing.T) {
 		t.Fatalf("listing = %d entries, want 1", len(before))
 	}
 
-	// Exercise the new functions between the two readings.
 	sm.ListSubagentSessionMeta([]string{parent, "native"})
 	sm.SubagentSessionDetails([]string{key})
 
@@ -628,19 +543,6 @@ func TestFindSubagentSessions_UnchangedByLedgerAdditions(t *testing.T) {
 	}
 }
 
-// TestListSubagentSessionMeta_NoResidencyNoLRUTouch pins the cost contract of
-// the per-turn digest at the session layer, in the narrow form the ledger
-// depends on: a listing must not ADD a resident session and must not MOVE an
-// access time.
-//
-// It is deliberately narrower than
-// TestListSubagentSessionMeta_DoesNotLoadOrTouchLRU (which also forbids any
-// store query and any sessionMeta replacement): this one guards the two
-// properties a future refactor is most likely to break by calling a
-// convenience helper — GetOrCreate/GetHistory would make a cold subagent
-// resident, and touchSession would reorder the LRU and evict a live chat.
-// maxInMemory is pinned to 1 so a single accidental load is visible as an
-// eviction rather than as a silently larger map.
 func TestListSubagentSessionMeta_NoResidencyNoLRUTouch(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -655,7 +557,6 @@ func TestListSubagentSessionMeta_NoResidencyNoLRUTouch(t *testing.T) {
 	if err := sm.Save(liveKey); err != nil {
 		t.Fatalf("Save(%q): %v", liveKey, err)
 	}
-	// Push the subagent sessions out of memory: they must stay cold.
 	for i := 1; i <= 3; i++ {
 		if !sm.EvictSession(fmt.Sprintf("%s:subagent-%d", parent, i)) {
 			t.Fatalf("EvictSession(subagent-%d) = false", i)
@@ -721,28 +622,11 @@ func TestListSubagentSessionMeta_NoResidencyNoLRUTouch(t *testing.T) {
 		}
 	}
 
-	// The live chat must still be the resident one: an accidental load with
-	// maxInMemory=1 would have evicted it.
 	if _, ok := beforeAccess[liveKey]; !ok {
 		t.Fatalf("the live chat %q is not resident; the fixture is wrong", liveKey)
 	}
 }
 
-// TestListSubagentSessionMeta_NestedSubagentParent pins the parent arithmetic
-// for a subagent that spawned a subagent: "parent:subagent-1:subagent-2" belongs
-// to "parent:subagent-1", not to "parent".
-//
-// The separator is the LAST ":subagent-" (subagentParentKey), because task IDs
-// are always "subagent-<digits>" and a parent key may itself contain one. Using
-// the FIRST separator — or a plain strings.Split — would attribute the nested
-// task to the grandparent.
-//
-// The listing itself is PREFIX-based, so a grandparent-scoped call still returns
-// the grandchild row (it is a descendant). That is the intended, documented
-// behaviour: the ROW is reported, but its ParentKey/TaskID must name the
-// innermost parent, which is what keeps the ledger's dedupe key
-// ("{parent}:{taskID}") equal to the session key and what stops a reader from
-// attributing the grandchild to the grandparent.
 func TestListSubagentSessionMeta_NestedSubagentParent(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -755,7 +639,6 @@ func TestListSubagentSessionMeta_NestedSubagentParent(t *testing.T) {
 	recordSubagent(t, sm, grandparent, "subagent-1", "parent answer")
 	recordSubagent(t, sm, parent, "subagent-2", "child answer")
 
-	// Scoped to the middle parent: exactly the child, attributed to it.
 	rows := sm.ListSubagentSessionMeta([]string{parent})
 	if len(rows) != 1 {
 		t.Fatalf("listing for the parent = %d rows, want 1 (%+v)", len(rows), rows)
@@ -767,13 +650,10 @@ func TestListSubagentSessionMeta_NestedSubagentParent(t *testing.T) {
 	if row.TaskID != "subagent-2" {
 		t.Errorf("TaskID = %q, want %q", row.TaskID, "subagent-2")
 	}
-	// The dedupe key the ledger builds must round-trip to the session key.
 	if got := row.ParentKey + ":" + row.TaskID; got != child {
 		t.Errorf("ParentKey+TaskID = %q, want the session key %q", got, child)
 	}
 
-	// Scoped to the grandparent: both rows (it is a prefix of both), but the
-	// grandchild must still be attributed to the middle parent.
 	grandRows := sm.ListSubagentSessionMeta([]string{grandparent})
 	if len(grandRows) != 2 {
 		t.Fatalf("listing for the grandparent = %d rows, want 2 (%+v)", len(grandRows), grandRows)
@@ -790,7 +670,6 @@ func TestListSubagentSessionMeta_NestedSubagentParent(t *testing.T) {
 		t.Errorf("the grandchild %q was attributed to the grandparent", child)
 	}
 
-	// The cold path must agree: the same arithmetic runs over sessionMeta.
 	if !sm.EvictSession(child) {
 		t.Fatalf("EvictSession(%q) = false", child)
 	}

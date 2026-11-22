@@ -8,15 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// GetHistoryView on a resident session must NOT touch the LRU access time.
-//
-// Rationale: the TUI render loop calls GetHistoryView on every frame while an
-// agent streams. If reads touched accessTimes, (a) they would need the
-// exclusive write lock (map mutation), serializing every frame behind
-// in-flight stream flushes, and (b) a purely-passive reader would pin cold
-// sessions in memory forever. Reads now take RLock and skip the touch; an
-// idle session read-only can be evicted and simply reloads from disk on the
-// next call — cheap and correct.
 func TestGetHistoryView_ResidentReadDoesNotTouchLRU(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -29,7 +20,6 @@ func TestGetHistoryView_ResidentReadDoesNotTouchLRU(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	// Force the session to look stale in the LRU map, then read it.
 	stale := time.Now().Add(-time.Hour)
 	sm.mu.Lock()
 	sm.accessTimes[key] = stale
@@ -48,8 +38,6 @@ func TestGetHistoryView_ResidentReadDoesNotTouchLRU(t *testing.T) {
 	}
 }
 
-// Cold reads must still populate the session and refresh access time (the
-// disk-load path keeps its original write-lock semantics).
 func TestGetHistoryView_ColdReadStillTouches(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -60,12 +48,10 @@ func TestGetHistoryView_ColdReadStillTouches(t *testing.T) {
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	// Fresh manager over the same store: session is cold (metadata only),
-	// exactly like a TUI process reopening a stored chat.
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 
-	view := sm2.GetHistoryView(key) // cold path → loadSessionFromDisk
+	view := sm2.GetHistoryView(key)
 	if len(view) != 1 {
 		t.Fatalf("cold GetHistoryView len = %d, want 1", len(view))
 	}
@@ -81,9 +67,6 @@ func TestGetHistoryView_ColdReadStillTouches(t *testing.T) {
 	}
 }
 
-// Concurrent readers must not serialize behind each other while a writer
-// holds the lock only briefly. Uses a slow store-backed flush window: readers
-// that needed the write lock (old behavior) would queue behind the flush.
 func TestGetHistoryView_ReadersRunDuringStreamFlush(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -96,7 +79,6 @@ func TestGetHistoryView_ReadersRunDuringStreamFlush(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	// Keep a streaming message alive so writers hold sm.mu across the flush.
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func() {
@@ -106,7 +88,6 @@ func TestGetHistoryView_ReadersRunDuringStreamFlush(t *testing.T) {
 			}
 		}()
 	}
-	// Readers must complete promptly even while writes/flushes are in flight.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -124,7 +105,6 @@ func TestGetHistoryView_ReadersRunDuringStreamFlush(t *testing.T) {
 	}
 	<-readerDone
 
-	// Final state sanity: history intact.
 	if h := sm.GetHistoryView(key); len(h) != 2 {
 		t.Fatalf("final history len = %d, want 2 (user + streaming assistant)", len(h))
 	}
