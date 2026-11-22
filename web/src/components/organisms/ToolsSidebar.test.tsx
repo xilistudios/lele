@@ -10,13 +10,16 @@ function LocationProbe() {
   return <div data-testid="location">{location.pathname}</div>
 }
 
-function renderDrawer(isOpen = true) {
+function renderDrawer(
+  isOpen = true,
+  connectionStatus: 'connected' | 'connecting' | 'disconnected' = 'connected',
+) {
   return render(
     <MemoryRouter initialEntries={['/']}>
       <ToolsSidebar
         isOpen={isOpen}
         onClose={() => undefined}
-        connectionStatus="connected"
+        connectionStatus={connectionStatus}
         apiUrl="http://127.0.0.1:18793"
       />
       <LocationProbe />
@@ -65,6 +68,31 @@ describe('ToolsSidebar', () => {
 
     const panel = view.getByTestId('tools-sidebar')
     expect(panel.querySelector('button[aria-label^="Estado de conexión"]')).not.toBeNull()
+  })
+
+  test('the footer status is a bare dot, not an icon', async () => {
+    const view = renderDrawer()
+    await waitFor(() => expect(view.getByTestId('tools-sidebar')).not.toBeNull())
+
+    const trigger = view.getByTestId('connection-status-dot')
+    expect(trigger.querySelector('svg')).toBeNull()
+    expect(trigger.children.length).toBe(1)
+    expect(trigger.firstElementChild?.className).toContain('rounded-full')
+  })
+
+  test('the dot color follows the connection status', async () => {
+    const colors = new Map<string, string>()
+    for (const status of ['connected', 'connecting', 'disconnected'] as const) {
+      const view = renderDrawer(true, status)
+      await waitFor(() => expect(view.getByTestId('tools-sidebar')).not.toBeNull())
+      colors.set(
+        status,
+        view.getByTestId('connection-status-dot').firstElementChild?.className ?? '',
+      )
+      cleanup()
+    }
+
+    expect(new Set(colors.values()).size).toBe(3)
   })
 
   test('Escape closes the drawer', async () => {
