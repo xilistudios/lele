@@ -1,6 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Copyright (c) 2026 Lele contributors
-
 package common
 
 import (
@@ -14,7 +11,6 @@ import (
 	"time"
 )
 
-// hdr builds an http.Header from alternating key/value pairs.
 func hdr(kv ...string) http.Header {
 	h := http.Header{}
 	for i := 0; i+1 < len(kv); i += 2 {
@@ -24,8 +20,6 @@ func hdr(kv ...string) http.Header {
 }
 
 func TestParseRetryAfter(t *testing.T) {
-	// A future HTTP-date, computed at table-construction time so the test is
-	// not sensitive to when it runs.
 	future := time.Now().Add(45 * time.Second).UTC().Format(http.TimeFormat)
 	farFuture := time.Now().Add(24 * time.Hour).UTC().Format(http.TimeFormat)
 	past := time.Now().Add(-30 * time.Second).UTC().Format(http.TimeFormat)
@@ -42,7 +36,7 @@ func TestParseRetryAfter(t *testing.T) {
 		{"not a number and not a date", hdr("Retry-After", "not-a-number"), 0},
 		{"negative seconds", hdr("Retry-After", "-5"), 0},
 		{"http-date in the past", hdr("Retry-After", past), 0},
-		{"http-date in the future", hdr("Retry-After", future), -1}, // range-checked below
+		{"http-date in the future", hdr("Retry-After", future), -1},
 		{"http-date far in the future is clamped", hdr("Retry-After", farFuture), MaxRetryAfter},
 		{"absurd value is clamped", hdr("Retry-After", "999999"), MaxRetryAfter},
 		{"fractional seconds", hdr("Retry-After", "1.5"), 1500 * time.Millisecond},
@@ -52,11 +46,8 @@ func TestParseRetryAfter(t *testing.T) {
 		{"x-ratelimit-reset-requests fractional", hdr("x-ratelimit-reset-requests", "12.5"), 12500 * time.Millisecond},
 		{"x-ratelimit-reset", hdr("x-ratelimit-reset", "8"), 8 * time.Second},
 		{"x-ratelimit-reset clamped", hdr("x-ratelimit-reset", "3600"), MaxRetryAfter},
-		// Precedence: the standard header wins when it parses, even if the
-		// secondary sources disagree.
 		{"Retry-After wins over ms", hdr("Retry-After", "30", "retry-after-ms", "1500"), 30 * time.Second},
 		{"ms wins over ratelimit-reset", hdr("retry-after-ms", "1500", "x-ratelimit-reset-requests", "12.5"), 1500 * time.Millisecond},
-		// An unparsable primary falls through to the secondary source.
 		{"falls through to ms", hdr("Retry-After", "garbage", "retry-after-ms", "2000"), 2 * time.Second},
 	}
 
@@ -64,8 +55,6 @@ func TestParseRetryAfter(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ParseRetryAfter(tt.head)
 			if tt.want < 0 {
-				// HTTP-date has one-second resolution, so the remaining wait is
-				// 45s minus however long the test took to get here.
 				if got <= 40*time.Second || got > 45*time.Second {
 					t.Errorf("ParseRetryAfter(future date) = %v, want ~45s", got)
 				}
@@ -84,9 +73,6 @@ func TestParseRetryAfter(t *testing.T) {
 	}
 }
 
-// TestNewAPIError_MessageFormats pins the exact text providers have always
-// emitted. pkg/providers/error_classifier_test.go and fallback_test.go match on
-// "Status: %d", so these strings are part of the contract.
 func TestNewAPIError_MessageFormats(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -153,7 +139,6 @@ func TestNewAPIError_MessageFormats(t *testing.T) {
 			if apiErr.RetryAfterHint() != tt.hint {
 				t.Errorf("RetryAfterHint() = %v, want %v", apiErr.RetryAfterHint(), tt.hint)
 			}
-			// It must be reachable through errors.As even when wrapped.
 			var target *APIError
 			if !errors.As(fmt.Errorf("call: %w", apiErr), &target) {
 				t.Error("wrapped *APIError not found by errors.As")
@@ -162,9 +147,6 @@ func TestNewAPIError_MessageFormats(t *testing.T) {
 	}
 }
 
-// TestAPIErrorTruncatedBodyMatchesHandleErrorResponse guards the refactor of
-// HandleErrorResponse: the preview truncation stays in the caller, so the text
-// is unchanged while the error is now structured.
 func TestAPIErrorTruncatedBodyMatchesHandleErrorResponse(t *testing.T) {
 	long := strings.Repeat("x", 500)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -193,8 +175,6 @@ func TestAPIErrorTruncatedBodyMatchesHandleErrorResponse(t *testing.T) {
 	}
 }
 
-// TestHandleErrorResponse_HTMLKeepsDescriptiveError: the HTML path must still
-// return the dedicated message, not an *APIError.
 func TestHandleErrorResponse_HTMLKeepsDescriptiveError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -218,7 +198,6 @@ func TestHandleErrorResponse_HTMLKeepsDescriptiveError(t *testing.T) {
 	}
 }
 
-// TestAPIErrorUnwrap covers the optional base error.
 func TestAPIErrorUnwrap(t *testing.T) {
 	base := errors.New("dial tcp: broken pipe")
 	apiErr := &APIError{StatusCode: 502, Body: "bad gateway"}
@@ -231,8 +210,6 @@ func TestAPIErrorUnwrap(t *testing.T) {
 	}
 }
 
-// TestAPIErrorMessageOverride covers the HTML-style descriptive messages that
-// keep their own wording.
 func TestAPIErrorMessageOverride(t *testing.T) {
 	apiErr := &APIError{
 		StatusCode: 502,
@@ -246,7 +223,6 @@ func TestAPIErrorMessageOverride(t *testing.T) {
 	}
 }
 
-// TestNewAPIErrorNilResponse documents the defensive zero-value path.
 func TestNewAPIErrorNilResponse(t *testing.T) {
 	apiErr := NewAPIError(nil, []byte("boom"), "")
 	if apiErr.HTTPStatus() != 0 {

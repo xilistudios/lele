@@ -8,7 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
 
-// bedrockCachePoint builds a Converse-API cache point block.
 func bedrockCachePoint(ttl string) types.CachePointBlock {
 	cp := types.CachePointBlock{Type: types.CachePointTypeDefault}
 	if ttl == "1h" {
@@ -19,9 +18,6 @@ func bedrockCachePoint(ttl string) types.CachePointBlock {
 	return cp
 }
 
-// applyBedrockSystemCache appends a cache point after the last text system
-// block so the (static) system prompt is cached. It returns the (possibly
-// reallocated) slice.
 func applyBedrockSystemCache(system []types.SystemContentBlock, ttl string) []types.SystemContentBlock {
 	for i := len(system) - 1; i >= 0; i-- {
 		if _, ok := system[i].(*types.SystemContentBlockMemberText); ok {
@@ -33,8 +29,6 @@ func applyBedrockSystemCache(system []types.SystemContentBlock, ttl string) []ty
 	return system
 }
 
-// applyBedrockToolsCache appends a cache point after the last tool spec so the
-// tool definitions prefix is cached.
 func applyBedrockToolsCache(tools []types.Tool, ttl string) []types.Tool {
 	for i := len(tools) - 1; i >= 0; i-- {
 		if _, ok := tools[i].(*types.ToolMemberToolSpec); ok {
@@ -46,10 +40,6 @@ func applyBedrockToolsCache(tools []types.Tool, ttl string) []types.Tool {
 	return tools
 }
 
-// applyBedrockHistoryCache appends a cache point to the last message when it
-// ends with plain text (user or assistant). Messages ending in tool_use /
-// tool_result blocks are skipped: their position shifts every turn, so a
-// breakpoint there would never be reused.
 func applyBedrockHistoryCache(messages []types.Message, ttl string) {
 	if len(messages) == 0 {
 		return
@@ -68,8 +58,6 @@ func applyBedrockHistoryCache(messages []types.Message, ttl string) {
 	}
 }
 
-// applyBedrockCacheBreakpoints places cache points after the stable request
-// prefixes (system, tools, history). See protocoltypes for the option keys.
 func applyBedrockCacheBreakpoints(input *bedrockruntime.ConverseInput, options map[string]any) {
 	if !protocoltypes.CacheEnabled(options) || input == nil {
 		return

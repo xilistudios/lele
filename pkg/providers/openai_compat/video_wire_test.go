@@ -1,11 +1,5 @@
 package openai_compat
 
-// read_video produces messages carrying a video_url content part (either an
-// http(s) URL or a data:video/...;base64 payload). The provider serializes
-// messages through common.SerializeMessages, so these tests pin that video
-// parts actually reach the wire in the OpenAI-compatible shape — and that
-// the whole payload survives both Chat and ChatStream requests untouched.
-
 import (
 	"context"
 	"encoding/json"
@@ -18,8 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
 
-// videoWireMessage builds a user message carrying a video content part the
-// same way the read_video tool does.
 func videoWireMessage(dataURL string, fps float64) []Message {
 	return []Message{{
 		Role: "user",
@@ -30,8 +22,6 @@ func videoWireMessage(dataURL string, fps float64) []Message {
 	}}
 }
 
-// videoRequest is the decoded shape we assert against: messages[].content[]
-// entries with an optional video_url object.
 type videoRequest struct {
 	Messages []struct {
 		Content []struct {

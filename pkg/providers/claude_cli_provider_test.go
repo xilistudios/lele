@@ -13,14 +13,8 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// --- Compile-time interface check ---
-
 var _ LLMProvider = (*ClaudeCliProvider)(nil)
 
-// --- Helper: create mock CLI scripts ---
-
-// createMockCLI creates a temporary script that simulates the claude CLI.
-// Uses files for stdout/stderr to avoid shell quoting issues with JSON.
 func createMockCLI(t *testing.T, stdout, stderr string, exitCode int) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -57,7 +51,6 @@ func createMockCLI(t *testing.T, stdout, stderr string, exitCode int) string {
 	return script
 }
 
-// createSlowMockCLI creates a script that sleeps before responding (for context cancellation tests).
 func createSlowMockCLI(t *testing.T, sleepSeconds int) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -73,7 +66,6 @@ func createSlowMockCLI(t *testing.T, sleepSeconds int) string {
 	return script
 }
 
-// createArgCaptureCLI creates a script that captures CLI args to a file, then outputs JSON.
 func createArgCaptureCLI(t *testing.T, argsFile string) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -93,8 +85,6 @@ EOFMOCK
 	}
 	return script
 }
-
-// --- Constructor tests ---
 
 func TestNewClaudeCliProvider(t *testing.T) {
 	p := NewClaudeCliProvider("/test/workspace")
@@ -116,16 +106,12 @@ func TestNewClaudeCliProvider_EmptyWorkspace(t *testing.T) {
 	}
 }
 
-// --- GetDefaultModel tests ---
-
 func TestClaudeCliProvider_GetDefaultModel(t *testing.T) {
 	p := NewClaudeCliProvider("/workspace")
 	if got := p.GetDefaultModel(); got != "claude-code" {
 		t.Errorf("GetDefaultModel() = %q, want %q", got, "claude-code")
 	}
 }
-
-// --- Chat() tests ---
 
 func TestChat_Success(t *testing.T) {
 	mockJSON := `{"type":"result","subtype":"success","is_error":false,"result":"Hello from mock!","session_id":"sess_123","total_cost_usd":0.005,"duration_ms":200,"duration_api_ms":150,"num_turns":1,"usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":100,"cache_read_input_tokens":0}}`
@@ -153,13 +139,13 @@ func TestChat_Success(t *testing.T) {
 	if resp.Usage == nil {
 		t.Fatal("Usage should not be nil")
 	}
-	if resp.Usage.PromptTokens != 110 { // 10 + 100 + 0
+	if resp.Usage.PromptTokens != 110 {
 		t.Errorf("PromptTokens = %d, want 110", resp.Usage.PromptTokens)
 	}
 	if resp.Usage.CompletionTokens != 5 {
 		t.Errorf("CompletionTokens = %d, want 5", resp.Usage.CompletionTokens)
 	}
-	if resp.Usage.TotalTokens != 115 { // 110 + 5
+	if resp.Usage.TotalTokens != 115 {
 		t.Errorf("TotalTokens = %d, want 115", resp.Usage.TotalTokens)
 	}
 }
@@ -279,7 +265,7 @@ func TestChat_InvalidResponseJSON(t *testing.T) {
 }
 
 func TestChat_ContextCancellation(t *testing.T) {
-	script := createSlowMockCLI(t, 2) // sleep 2s
+	script := createSlowMockCLI(t, 2)
 
 	p := NewClaudeCliProvider(t.TempDir())
 	p.command = script
@@ -296,7 +282,6 @@ func TestChat_ContextCancellation(t *testing.T) {
 	if err == nil {
 		t.Fatal("Chat() expected error on context cancellation")
 	}
-	// Should fail well before the full 2s sleep completes
 	if elapsed > 3*time.Second {
 		t.Errorf("Chat() took %v, expected to fail faster via context cancellation", elapsed)
 	}
@@ -412,8 +397,6 @@ func TestChat_EmptyWorkspaceDoesNotSetDir(t *testing.T) {
 	}
 }
 
-// --- CreateProvider factory tests ---
-
 func TestCreateProvider_ClaudeCli(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Provider = "claude-cli"
@@ -477,8 +460,6 @@ func TestCreateProvider_ClaudeCliDefaultWorkspace(t *testing.T) {
 		t.Errorf("workspace = %q, want %q (default from WorkspacePath)", cliProvider.workspace, cfg.WorkspacePath())
 	}
 }
-
-// --- messagesToPrompt tests ---
 
 func TestMessagesToPrompt_SingleUser(t *testing.T) {
 	p := NewClaudeCliProvider("/workspace")
@@ -554,8 +535,6 @@ func TestMessagesToPrompt_OnlySystemMessages(t *testing.T) {
 	}
 }
 
-// --- buildSystemPrompt tests ---
-
 func TestBuildSystemPrompt_NoSystemNoTools(t *testing.T) {
 	p := NewClaudeCliProvider("/workspace")
 	messages := []Message{
@@ -593,7 +572,6 @@ func TestBuildSystemPrompt_MultipleSystemMessages(t *testing.T) {
 	if !strings.Contains(got, "Be concise.") {
 		t.Error("missing second system message")
 	}
-	// Should be joined with double newline
 	want := "You are helpful.\n\nBe concise."
 	if got != want {
 		t.Errorf("buildSystemPrompt() = %q, want %q", got, want)
@@ -649,8 +627,6 @@ func TestBuildSystemPrompt_ToolsOnlyNoSystem(t *testing.T) {
 	}
 }
 
-// --- buildToolsPrompt tests ---
-
 func TestBuildToolsPrompt_SkipsNonFunction(t *testing.T) {
 	p := NewClaudeCliProvider("/workspace")
 	tools := []ToolDefinition{
@@ -693,8 +669,6 @@ func TestBuildToolsPrompt_NoParameters(t *testing.T) {
 		t.Error("should not include Parameters: section when nil")
 	}
 }
-
-// --- parseClaudeCliResponse tests ---
 
 func TestParseClaudeCliResponse_TextOnly(t *testing.T) {
 	p := NewClaudeCliProvider("/workspace")
@@ -825,8 +799,6 @@ func TestParseClaudeCliResponse_WhitespaceResult(t *testing.T) {
 	}
 }
 
-// --- extractToolCalls tests ---
-
 func TestExtractToolCalls_NoToolCalls(t *testing.T) {
 	p := NewClaudeCliProvider("/workspace")
 	got := p.extractToolCalls("Just a regular response.")
@@ -877,7 +849,6 @@ func TestExtractToolCalls_MultipleToolCalls(t *testing.T) {
 	if got[1].Name != "write_file" {
 		t.Errorf("[1].Name = %q, want %q", got[1].Name, "write_file")
 	}
-	// Verify arguments were parsed
 	if got[0].Arguments["path"] != "/tmp/test" {
 		t.Errorf("[0].Arguments[path] = %v, want /tmp/test", got[0].Arguments["path"])
 	}
@@ -902,7 +873,6 @@ func TestExtractToolCalls_ToolCallArgumentsParsing(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("len = %d, want 1", len(got))
 	}
-	// Verify different argument types
 	if got[0].Arguments["num"] != float64(42) {
 		t.Errorf("Arguments[num] = %v (%T), want 42", got[0].Arguments["num"], got[0].Arguments["num"])
 	}
@@ -912,13 +882,10 @@ func TestExtractToolCalls_ToolCallArgumentsParsing(t *testing.T) {
 	if got[0].Arguments["name"] != "test" {
 		t.Errorf("Arguments[name] = %v, want test", got[0].Arguments["name"])
 	}
-	// Verify raw arguments string is preserved in FunctionCall
 	if got[0].Function.Arguments == "" {
 		t.Error("Function.Arguments should contain raw JSON string")
 	}
 }
-
-// --- stripToolCallsJSON tests ---
 
 func TestStripToolCallsJSON(t *testing.T) {
 	p := NewClaudeCliProvider("/workspace")
@@ -956,8 +923,6 @@ func TestStripToolCallsJSON_OnlyToolCalls(t *testing.T) {
 	}
 }
 
-// --- findMatchingBrace tests ---
-
 func TestFindMatchingBrace(t *testing.T) {
 	tests := []struct {
 		text string
@@ -967,15 +932,14 @@ func TestFindMatchingBrace(t *testing.T) {
 		{`{"a":1}`, 0, 7},
 		{`{"a":{"b":2}}`, 0, 13},
 		{`text {"a":1} more`, 5, 12},
-		{`{unclosed`, 0, 0},      // no match returns pos
-		{`{}`, 0, 2},             // empty object
-		{`{{{}}}`, 0, 6},         // deeply nested
-		{`{"a":"b{c}d"}`, 0, 13}, // braces in strings (ignored, string-aware)
+		{`{unclosed`, 0, 0},
+		{`{}`, 0, 2},
+		{`{{{}}}`, 0, 6},
+		{`{"a":"b{c}d"}`, 0, 13},
 
-		// Regression: braces inside JSON string values must not affect brace matching
-		{`{"tool_calls":[{"id":"c1","type":"function","function":{"name":"exec","arguments":"{\"command\":\"echo }\"}"}}]}`, 0, 112}, // escaped } in arguments
-		{`{"a":"unbalanced { brace"}`, 0, 26},     // unbalanced { in string
-		{`{"a":"escaped quote \" and }"}`, 0, 30}, // escaped quote + } in string
+		{`{"tool_calls":[{"id":"c1","type":"function","function":{"name":"exec","arguments":"{\"command\":\"echo }\"}"}}]}`, 0, 112},
+		{`{"a":"unbalanced { brace"}`, 0, 26},
+		{`{"a":"escaped quote \" and }"}`, 0, 30},
 	}
 	for _, tt := range tests {
 		got := findMatchingBrace(tt.text, tt.pos)

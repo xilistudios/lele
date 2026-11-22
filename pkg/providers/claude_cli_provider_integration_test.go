@@ -10,10 +10,7 @@ import (
 	"time"
 )
 
-// TestIntegration_RealClaudeCLI tests the ClaudeCliProvider with a real claude CLI.
-// Run with: go test -tags=integration ./pkg/providers/...
 func TestIntegration_RealClaudeCLI(t *testing.T) {
-	// Check if claude CLI is available
 	path, err := exec.LookPath("claude")
 	if err != nil {
 		t.Skip("claude CLI not found in PATH, skipping integration test")
@@ -33,7 +30,6 @@ func TestIntegration_RealClaudeCLI(t *testing.T) {
 		t.Fatalf("Chat() with real CLI error = %v", err)
 	}
 
-	// Verify response structure
 	if resp.Content == "" {
 		t.Error("Content is empty")
 	}
@@ -55,7 +51,6 @@ func TestIntegration_RealClaudeCLI(t *testing.T) {
 
 	t.Logf("Response content: %q", resp.Content)
 
-	// Loose check - should contain "pong" somewhere (model might capitalize or add punctuation)
 	if !strings.Contains(strings.ToLower(resp.Content), "pong") {
 		t.Errorf("Content = %q, expected to contain 'pong'", resp.Content)
 	}
@@ -92,7 +87,6 @@ func TestIntegration_RealClaudeCLI_ParsesRealJSON(t *testing.T) {
 		t.Skip("claude CLI not found in PATH")
 	}
 
-	// Run claude directly and verify our parser handles real output
 	cmd := exec.Command("claude", "-p", "--output-format", "json",
 		"--dangerously-skip-permissions", "--no-chrome", "--no-session-persistence", "-")
 	cmd.Stdin = strings.NewReader("Say hi")
@@ -105,7 +99,6 @@ func TestIntegration_RealClaudeCLI_ParsesRealJSON(t *testing.T) {
 
 	t.Logf("Raw CLI output: %s", string(output))
 
-	// Verify our parser can handle real output
 	p := NewClaudeCliProvider("")
 	resp, err := p.parseClaudeCliResponse(string(output))
 	if err != nil {

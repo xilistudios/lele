@@ -181,8 +181,6 @@ func TestProviderChat_StripsMoonshotPrefixAndNormalizesKimiTemperature(t *testin
 	defer server.Close()
 
 	p := NewProvider("key", server.URL, "")
-	// In production, StripProviderPrefix strips "moonshot:" before Chat is called,
-	// so Chat receives the bare model name directly.
 	_, err := p.Chat(
 		t.Context(),
 		[]Message{{Role: "user", Content: "hi"}},
@@ -203,9 +201,6 @@ func TestProviderChat_StripsMoonshotPrefixAndNormalizesKimiTemperature(t *testin
 }
 
 func TestProviderChat_StripsGroqAndOllamaPrefixes(t *testing.T) {
-	// In production, StripProviderPrefix strips "provider:" before Chat is called,
-	// so Chat receives bare model names. Models with slashes or colons in their
-	// name (e.g., "openai/gpt-oss-120b", "qwen2.5:14b") pass through as-is.
 	tests := []struct {
 		name      string
 		input     string
@@ -498,7 +493,6 @@ func TestProviderChat_ToolOrderAffectsRequestOnlyWhenInputOrderChanges(t *testin
 }
 
 func TestNormalizeModel_UsesAPIBase(t *testing.T) {
-	// Bare model names pass through (already stripped by StripProviderPrefix upstream)
 	if got := normalizeModel("deepseek-chat", "https://api.deepseek.com/v1"); got != "deepseek-chat" {
 		t.Fatalf("normalizeModel(bare) = %q, want %q", got, "deepseek-chat")
 	}
@@ -506,12 +500,10 @@ func TestNormalizeModel_UsesAPIBase(t *testing.T) {
 		t.Fatalf("normalizeModel(bare) = %q, want %q", got, "minimax-m2.5")
 	}
 
-	// Models containing colons (e.g., Ollama tags) pass through untouched
 	if got := normalizeModel("qwen2.5:14b", "http://localhost:11434/v1"); got != "qwen2.5:14b" {
 		t.Fatalf("normalizeModel(ollama tag) = %q, want %q", got, "qwen2.5:14b")
 	}
 
-	// Legacy: openrouter/ prefix still stripped for backward compat
 	if got := normalizeModel("openrouter/auto", "https://openrouter.ai/api/v1"); got != "auto" {
 		t.Fatalf("normalizeModel(openrouter/auto) = %q, want %q", got, "auto")
 	}
@@ -519,13 +511,10 @@ func TestNormalizeModel_UsesAPIBase(t *testing.T) {
 		t.Fatalf("normalizeModel(openrouter legacy) = %q, want %q", got, "deepseek/deepseek-v4-pro")
 	}
 
-	// Deprecated slash format for non-OpenRouter: passes through as-is
 	if got := normalizeModel("deepseek/deepseek-chat", "https://api.deepseek.com/v1"); got != "deepseek/deepseek-chat" {
 		t.Fatalf("normalizeModel(deprecated slash) = %q, want %q", got, "deepseek/deepseek-chat")
 	}
 }
-
-// --- Reasoning tests ---
 
 func TestProviderChat_ReasoningConfigEffort(t *testing.T) {
 	var requestBody map[string]interface{}
@@ -619,7 +608,7 @@ func TestProviderChat_ReasoningConfigMaxTokensAndExclude(t *testing.T) {
 	if reasoning["effort"] != "low" {
 		t.Fatalf("reasoning.effort = %v, want low", reasoning["effort"])
 	}
-	if reasoning["max_tokens"] != float64(2000) { // JSON numbers unmarshal to float64
+	if reasoning["max_tokens"] != float64(2000) {
 		t.Fatalf("reasoning.max_tokens = %v, want 2000", reasoning["max_tokens"])
 	}
 	if reasoning["exclude"] != true {
@@ -673,16 +662,11 @@ func TestProviderChat_ReasoningConfigEnabled(t *testing.T) {
 	}
 }
 
-// capturedRequest records both the raw bytes and the decoded JSON of the single
-// request a provider call sends, so tests can assert on the exact wire payload.
 type capturedRequest struct {
 	raw     []byte
 	decoded map[string]interface{}
 }
 
-// newReasoningCaptureServer starts an httptest server that records the request
-// body and answers with a minimal completion. When stream is true it replies
-// with an SSE body (for ChatStream), otherwise with a JSON body (for Chat).
 func newReasoningCaptureServer(t *testing.T, stream bool, got *capturedRequest) *httptest.Server {
 	t.Helper()
 
@@ -711,11 +695,6 @@ func newReasoningCaptureServer(t *testing.T, stream bool, got *capturedRequest) 
 	}))
 }
 
-// assertReasoningEnabledFalse pins the /think off contract: the request must
-// carry a reasoning object whose "enabled" key exists, is a bool, and is false.
-// A refactor of the passthrough from `if enabled, ok := ...; ok` to
-// `if enabled, ok := ...; ok && enabled` drops the key entirely and fails here.
-// It returns the reasoning object for further field assertions.
 func assertReasoningEnabledFalse(t *testing.T, got *capturedRequest) map[string]interface{} {
 	t.Helper()
 
@@ -739,8 +718,6 @@ func assertReasoningEnabledFalse(t *testing.T, got *capturedRequest) map[string]
 		t.Fatalf("reasoning.enabled = true, want false")
 	}
 
-	// The decoded assertions above could be satisfied by a transport-level
-	// default; the raw bytes prove the field really reached the wire.
 	if !strings.Contains(string(got.raw), `"enabled":false`) {
 		t.Fatalf("raw request body does not contain \"enabled\":false: %s", got.raw)
 	}
@@ -796,8 +773,6 @@ func TestProviderChatStream_ReasoningDisabledExplicitly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ChatStream() error = %v", err)
 	}
-	// Guard: with a nil onChunk, ChatStream delegates to Chat, which would
-	// silently skip the streaming request-builder copy of the passthrough.
 	if got.decoded["stream"] != true {
 		t.Fatalf("stream = %v, want true (request must go through ChatStream)", got.decoded["stream"])
 	}
@@ -831,19 +806,11 @@ func TestProviderChat_ReasoningDisabledWithEffortPassthrough(t *testing.T) {
 		t.Fatalf("Chat() error = %v", err)
 	}
 
-	// Current provider semantics: every field in options["reasoning"] is
-	// forwarded independently - enabled:false does NOT suppress effort.
-	// This is passthrough only, not a recommended wire payload: the agent loop
-	// intentionally never sends effort alongside off (buildLLMOptions in
-	// pkg/agent/llm_caller.go emits {"enabled": false} alone for a session
-	// thinking level of "off"), so no real request looks like this today.
 	reasoning := assertReasoningEnabledFalse(t, &got)
 	if reasoning["effort"] != "high" {
 		t.Fatalf("reasoning.effort = %v, want high", reasoning["effort"])
 	}
 
-	// applyThinkingMode must stay out of the way: it only acts when
-	// options["thinking"] is true, which is absent here.
 	if _, ok := got.decoded["thinking"]; ok {
 		t.Fatalf("thinking must not be sent when options[\"thinking\"] is unset: %#v", got.decoded)
 	}
@@ -873,7 +840,6 @@ func TestProviderChat_ReasoningSummaryOnlySentToOpenAI(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Use a mock transport that routes OpenRouter URLs to our test server
 	transport := &mockTransport{
 		fallback:    server.Client().Transport,
 		redirectTo:  server.URL,
@@ -937,8 +903,7 @@ func TestProviderChat_ReasoningSummarySentToOpenAI(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// OpenAI endpoint: summary SHOULD be included
-	p := NewProvider("key", server.URL, "") // using test server, not OpenAI
+	p := NewProvider("key", server.URL, "")
 	_, err := p.Chat(
 		t.Context(),
 		[]Message{{Role: "user", Content: "hi"}},
@@ -955,7 +920,6 @@ func TestProviderChat_ReasoningSummarySentToOpenAI(t *testing.T) {
 		t.Fatalf("Chat() error = %v", err)
 	}
 
-	// The test server is NOT OpenAI, so summary should NOT be included
 	reasoning, ok := requestBody["reasoning"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected reasoning in request body")
@@ -1012,7 +976,6 @@ func TestProviderChat_ReasoningParseResponseWithBothReasoningFields(t *testing.T
 func TestProviderChatStream_ReasoningInSSE(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		// Simulate OpenRouter-style reasoning in delta (reasoning field, not reasoning_content)
 		_, _ = w.Write([]byte("data:{\"choices\":[{\"delta\":{\"reasoning\":\"Let me think\"}}]}\n\n"))
 		_, _ = w.Write([]byte("data:{\"choices\":[{\"delta\":{\"reasoning\":\" step by step\"}}]}\n\n"))
 		_, _ = w.Write([]byte("data:{\"choices\":[{\"delta\":{\"content\":\"Answer is 42\"},\"finish_reason\":\"stop\"}]}\n\n"))
@@ -1067,12 +1030,10 @@ func TestApplyThinkingMode_OpenRouter(t *testing.T) {
 
 	applyThinkingMode(requestBody, options, apiBase)
 
-	// Should have thinking.type = enabled
 	thinking, ok := requestBody["thinking"].(map[string]interface{})
 	if !ok || thinking["type"] != "enabled" {
 		t.Fatalf("thinking = %#v, want {type: enabled}", requestBody["thinking"])
 	}
-	// reasoning_effort should be inside reasoning, not top-level
 	if _, ok := requestBody["reasoning_effort"]; ok {
 		t.Fatalf("reasoning_effort should NOT be at top-level for OpenRouter")
 	}
@@ -1092,11 +1053,9 @@ func TestApplyThinkingMode_NonOpenRouter(t *testing.T) {
 
 	applyThinkingMode(requestBody, options, apiBase)
 
-	// Non-OpenRouter: reasoning_effort at top-level (classic behavior)
 	if requestBody["reasoning_effort"] != "medium" {
 		t.Fatalf("reasoning_effort = %v, want medium", requestBody["reasoning_effort"])
 	}
-	// Should also have thinking
 	thinking, ok := requestBody["thinking"].(map[string]interface{})
 	if !ok || thinking["type"] != "enabled" {
 		t.Fatalf("thinking = %#v, want {type: enabled}", requestBody["thinking"])
@@ -1141,9 +1100,6 @@ func TestIsOpenAIEndpoint(t *testing.T) {
 	}
 }
 
-// mockTransport redirects requests for a specific host to a test server.
-// This allows testing host-based logic (like isOpenRouterEndpoint) without making
-// real network requests.
 type mockTransport struct {
 	fallback    http.RoundTripper
 	redirectTo  string
@@ -1152,7 +1108,6 @@ type mockTransport struct {
 
 func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if strings.Contains(req.URL.Host, m.triggerHost) {
-		// Redirect to test server but preserve the path
 		u, _ := url.Parse(m.redirectTo)
 		req.URL.Scheme = u.Scheme
 		req.URL.Host = u.Host
@@ -1170,13 +1125,11 @@ func TestNewProvider_StreamingClientHasNoTotalTimeout(t *testing.T) {
 	}
 }
 
-// --- applyReasoningOptions: per-model thinking_type wire dialects ----------
-
 func TestApplyReasoningOptions_DeepSeekStyle(t *testing.T) {
 	tests := []struct {
 		name     string
 		options  map[string]interface{}
-		wantType string // "" means: no thinking key expected
+		wantType string
 	}{
 		{
 			name:     "enable sends thinking enabled",
@@ -1215,8 +1168,6 @@ func TestApplyReasoningOptions_DeepSeekStyle(t *testing.T) {
 			if !ok || obj["type"] != tc.wantType {
 				t.Fatalf("thinking = %#v, want {type: %s}", thinking, tc.wantType)
 			}
-			// The thinking object is the whole wire format: the generic
-			// reasoning object and top-level reasoning_effort must not leak.
 			if _, ok := requestBody["reasoning"]; ok {
 				t.Fatalf("reasoning object must not be sent for deepseek style: %#v", requestBody)
 			}
@@ -1271,7 +1222,6 @@ func TestApplyReasoningOptions_OpenAIStyle(t *testing.T) {
 	if disableBody["reasoning_effort"] != "none" {
 		t.Fatalf("reasoning_effort = %v, want none (explicit disable)", disableBody["reasoning_effort"])
 	}
-	// The generic reasoning object is not part of the OpenAI dialect.
 	if _, ok := disableBody["reasoning"]; ok {
 		t.Fatalf("reasoning object must not be sent for openai style: %#v", disableBody)
 	}
@@ -1319,9 +1269,6 @@ func TestApplyReasoningOptions_NoneStyle(t *testing.T) {
 }
 
 func TestApplyReasoningOptions_AutoDisablesThinkingObjectModels(t *testing.T) {
-	// Models whose endpoints default thinking ON and only understand
-	// `thinking: {"type": ...}` must receive an explicit disable on "off",
-	// even in auto mode (no thinking_type configured).
 	for _, model := range []string{"mimo-v2.5-pro", "deepseek-chat", "glm-4.6", "z-ai/glm-4.6"} {
 		requestBody := map[string]interface{}{"model": model}
 		applyReasoningOptions(requestBody, map[string]interface{}{
@@ -1334,7 +1281,6 @@ func TestApplyReasoningOptions_AutoDisablesThinkingObjectModels(t *testing.T) {
 		}
 	}
 
-	// Non-thinking-object models keep the legacy behavior: no thinking key.
 	requestBody := map[string]interface{}{"model": "gpt-4o"}
 	applyReasoningOptions(requestBody, map[string]interface{}{
 		"reasoning": map[string]interface{}{"enabled": false},
@@ -1369,11 +1315,9 @@ func TestProviderChat_ThinkingTypeDeepSeekWirePayload(t *testing.T) {
 	if !ok || thinking["type"] != "disabled" {
 		t.Fatalf("thinking = %#v, want {type: disabled}", got.decoded["thinking"])
 	}
-	// The raw bytes prove the disable really reached the wire.
 	if !strings.Contains(string(got.raw), `"type":"disabled"`) {
 		t.Fatalf("raw request body does not contain the thinking disable: %s", got.raw)
 	}
-	// DeepSeek dialect: the generic reasoning object is suppressed.
 	if _, ok := got.decoded["reasoning"]; ok {
 		t.Fatalf("reasoning object must not be sent for deepseek style: %s", got.raw)
 	}

@@ -21,23 +21,10 @@ type ToolFunctionDefinition = protocoltypes.ToolFunctionDefinition
 
 const defaultBaseURL = "https://api.anthropic.com"
 
-// Claude-Code-compatible OAuth request markers. The OAuth surface of the
-// Anthropic Messages API rejects (or degrades) requests that do not present the
-// same beta list, CLI User-Agent and identity system block as the official
-// Claude Code client, so they must be sent verbatim when the credential was
-// obtained through the OAuth login flow.
-//
-// Mirrors jcode's ANTHROPIC_OAUTH_BETA_HEADERS (8 entries, same order).
 const oauthBetaHeaders = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advisor-tool-2026-03-01,advanced-tool-use-2025-11-20,effort-2025-11-24"
 
-// claudeCLIUserAgent is a DELIBERATE impersonation of the official Claude Code
-// CLI, required by the OAuth surface. It is kept in a SINGLE constant on
-// purpose so it can be removed with a one-line change: this is a product
-// decision, flagged to the maintainer (see .lele/tasks/oauth-providers-f1-tasks.md §8).
 const claudeCLIUserAgent = "claude-cli/2.1.280 (external, sdk-cli)"
 
-// claudeIdentityLine is the identity system block the OAuth surface expects as
-// the first system block. Mirrors jcode's CLAUDE_CODE_IDENTITY.
 const claudeIdentityLine = "You are a Claude agent, built on Anthropic's Claude Agent SDK."
 
 type Provider struct {
@@ -78,9 +65,6 @@ func NewProviderWithTokenSourceAndBaseURL(token string, tokenSource func() (stri
 	return NewProviderWithTokenSourceBaseURLAndOAuthMode(token, tokenSource, apiBase, false)
 }
 
-// NewProviderWithTokenSourceBaseURLAndOAuthMode builds a provider that refreshes
-// its token through tokenSource. When oauth is true the provider sends the
-// Claude-Code-compatible OAuth request markers (see oauthBetaHeaders).
 func NewProviderWithTokenSourceBaseURLAndOAuthMode(token string, tokenSource func() (string, error), apiBase string, oauth bool) *Provider {
 	p := NewProviderWithBaseURL(token, apiBase)
 	p.tokenSource = tokenSource
@@ -88,8 +72,6 @@ func NewProviderWithTokenSourceBaseURLAndOAuthMode(token string, tokenSource fun
 	return p
 }
 
-// OAuthMode reports whether the provider sends the Claude-Code-compatible OAuth
-// request markers.
 func (p *Provider) OAuthMode() bool {
 	return p.oauthMode
 }
@@ -133,8 +115,6 @@ func (p *Provider) BaseURL() string {
 	return p.baseURL
 }
 
-// buildParams builds the request body like the free buildParams, prepending the
-// Claude identity system block when the provider runs in OAuth mode.
 func (p *Provider) buildParams(messages []Message, tools []ToolDefinition, model string, options map[string]interface{}) (anthropic.MessageNewParams, error) {
 	params, err := buildParams(messages, tools, model, options)
 	if err != nil {
@@ -212,8 +192,6 @@ func buildParams(messages []Message, tools []ToolDefinition, model string, optio
 		params.Tools = translateTools(tools)
 	}
 
-	// Explicit prompt caching: place cache_control breakpoints after the
-	// stable prefixes (system, tools, history) when enabled for the agent.
 	if protocoltypes.CacheEnabled(options) {
 		applyCacheBreakpoints(&params, protocoltypes.CacheTTLOptions(options))
 	}
@@ -247,7 +225,6 @@ func buildAnthropicContentBlocks(msg Message) []anthropic.ContentBlockParamUnion
 			}
 			blocks = append(blocks, anthropic.NewImageBlockBase64(mediaType, encoded))
 		case "video_url":
-			// Anthropic has no native video input; video parts are gated upstream (model config video flag) and dropped here defensively.
 			continue
 		}
 	}
@@ -346,9 +323,6 @@ func parseResponse(resp *anthropic.Message) *LLMResponse {
 		ToolCalls:    toolCalls,
 		FinishReason: finishReason,
 		Usage: &UsageInfo{
-			// Anthropic's input_tokens excludes cached tokens; include them so
-			// context-window accounting matches the model's true input size
-			// (same convention as claude_cli_provider).
 			PromptTokens:             int(resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens),
 			CompletionTokens:         int(resp.Usage.OutputTokens),
 			TotalTokens:              int(resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens + resp.Usage.OutputTokens),

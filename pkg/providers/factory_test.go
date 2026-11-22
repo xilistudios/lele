@@ -163,10 +163,6 @@ func TestResolveProviderSelection(t *testing.T) {
 		{
 			name: "gemini oauth routes to gemini code assist",
 			setup: func(cfg *config.Config) {
-				// The provider spelling matters here only because
-				// resolveProviderSelection reads it: "gemini" is the canonical
-				// config name for the provider whose API-key path the sibling
-				// test below pins.
 				cfg.Agents.Defaults.Provider = "gemini"
 				cfg.Providers.Gemini.AuthMethod = "oauth"
 			},
@@ -326,10 +322,6 @@ func TestCreateProviderReturnsClaudeProviderForAnthropicOAuth(t *testing.T) {
 	}
 }
 
-// TestCreateProviderClaudeProviderTokenAuthMethodIsNotOAuth is the sibling of
-// TestCreateProviderReturnsClaudeProviderForAnthropicOAuth: it takes the same
-// claude-auth selection path but a credential whose AuthMethod is "token"
-// (paste-token), so the delegate must not enable OAuth mode.
 func TestCreateProviderClaudeProviderTokenAuthMethodIsNotOAuth(t *testing.T) {
 	originalGetCredential := getCredential
 	t.Cleanup(func() { getCredential = originalGetCredential })
@@ -362,11 +354,6 @@ func TestCreateProviderClaudeProviderTokenAuthMethodIsNotOAuth(t *testing.T) {
 	}
 }
 
-// TestCreateProviderReturnsGeminiCodeAssistForGeminiOAuth pins the
-// providers.gemini.auth_method == "oauth" + no-API-key selection: the factory
-// must build a Code Assist provider seeded with the stored credential's access
-// token and wired to createGeminiTokenSource(), without any network access at
-// construction time.
 func TestCreateProviderReturnsGeminiCodeAssistForGeminiOAuth(t *testing.T) {
 	originalGetCredential := getCredential
 	t.Cleanup(func() { getCredential = originalGetCredential })
@@ -402,11 +389,6 @@ func TestCreateProviderReturnsGeminiCodeAssistForGeminiOAuth(t *testing.T) {
 	}
 }
 
-// TestCreateProviderForCandidateRawGoogleSpellingUsesCodeAssist covers the
-// un-normalized entry point: CreateProviderForCandidate does not normalize its
-// argument, so the raw "google" spelling (a fallback candidate built from a
-// "google/model" prefix) must select Code Assist from the same Providers.Gemini
-// config the "gemini" spelling uses.
 func TestCreateProviderForCandidateRawGoogleSpellingUsesCodeAssist(t *testing.T) {
 	originalGetCredential := getCredential
 	t.Cleanup(func() { getCredential = originalGetCredential })
@@ -433,9 +415,6 @@ func TestCreateProviderForCandidateRawGoogleSpellingUsesCodeAssist(t *testing.T)
 	}
 }
 
-// TestCreateGeminiAuthProviderReportsMissingCredentials pins the wording of the
-// OAuth-credential error. It must name gemini (not claude, whose provider
-// createGeminiAuthProvider mirrors) and the exact login command to run.
 func TestCreateGeminiAuthProviderReportsMissingCredentials(t *testing.T) {
 	originalGetCredential := getCredential
 	t.Cleanup(func() { getCredential = originalGetCredential })
@@ -457,10 +436,6 @@ func TestCreateGeminiAuthProviderReportsMissingCredentials(t *testing.T) {
 	}
 }
 
-// TestResolveProviderSelectionGeminiAPIKeyUnchanged is the regression guard for
-// the other half of F2-T08: with no auth_method the gemini provider config still
-// selects the plain API-key (HTTP-compat) transport against the public
-// Generative Language base.
 func TestResolveProviderSelectionGeminiAPIKeyUnchanged(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Provider = "gemini"
@@ -481,29 +456,6 @@ func TestResolveProviderSelectionGeminiAPIKeyUnchanged(t *testing.T) {
 	}
 }
 
-// geminiNamedOnlyConfig builds a hand-assembled "Named-only caller" shape:
-// Providers.Named["gemini"] carries the decision data while the typed
-// Providers.Gemini field is deliberately left zero-valued.
-//
-// That shape is not what EditableDocument.ToConfig() produces, and no current
-// production caller is it (see the note in selectionFromNamedProvider): every
-// production config also fills the typed field. ToConfig() cannot hand back a
-// Config whose Providers.Named["gemini"] is populated AND whose typed
-// Providers.Gemini is not, because ToConfig returns its json round-tripped
-// `validated` Config and ProvidersConfig.UnmarshalJSON fills the typed field
-// from the same flat "providers.<name>" object (empirically verified for
-// F2-T12: with providers.gemini.auth_method == "oauth", ToConfig() returns
-// Providers.Gemini.AuthMethod == "oauth"). The helper therefore keeps only the
-// half a Named-only caller sees, exactly like the reviewer's overlay test.
-//
-// Pinning it is still worth it: it is the only shape that exercises the new
-// `case "gemini"` in selectionFromNamedProvider, which is defence-in-depth for
-// exactly such a caller.
-//
-// The Named entry itself is produced through the public pkg/config API
-// (LoadEditableDocument -> EditableDocument.ToConfig), the same route the
-// finding used, so the decision data under test is parsed by the real
-// provider-config path rather than by a hand-written literal.
 func geminiNamedOnlyConfig(t *testing.T, providerEntryJSON string) (*config.Config, config.NamedProviderConfig) {
 	t.Helper()
 
@@ -535,23 +487,12 @@ func geminiNamedOnlyConfig(t *testing.T, providerEntryJSON string) (*config.Conf
 	cfg.Providers = &config.ProvidersConfig{
 		Named: map[string]config.NamedProviderConfig{"gemini": named},
 	}
-	// DeepEqual, not ==: ProviderConfig gained Headers (a map), which makes the
-	// struct non-comparable; the intent — typed field must be zero — is unchanged.
 	if !reflect.DeepEqual(cfg.Providers.Gemini, config.ProviderConfig{}) {
 		t.Fatalf("typed Providers.Gemini = %+v, want the zero value: the test must exercise the Named-only path", cfg.Providers.Gemini)
 	}
 	return cfg, named
 }
 
-// TestResolveProviderSelectionGeminiOAuthFromNamedEntryOnly pins F2-T12: the
-// Code Assist transport must be selected when the decision data lives in
-// Providers.Named["gemini"] (auth_method "oauth", no api key) even though the
-// typed Providers.Gemini field is zero. That is the hand-assembled Named-only
-// caller shape described on geminiNamedOnlyConfig and, since every production
-// config also fills the typed field, the only shape that reaches the new
-// `case "gemini"`. Before it was added only the typed field was consulted (the
-// pre-check), so this shape fell through selectionFromNamedProvider's generic
-// tail and failed with "no API key configured for provider".
 func TestResolveProviderSelectionGeminiOAuthFromNamedEntryOnly(t *testing.T) {
 	cfg, named := geminiNamedOnlyConfig(t, `{"type": "gemini", "auth_method": "oauth"}`)
 	if named.AuthMethod != "oauth" {
@@ -573,11 +514,6 @@ func TestResolveProviderSelectionGeminiOAuthFromNamedEntryOnly(t *testing.T) {
 	}
 }
 
-// TestResolveProviderSelectionGeminiNamedEntryWithAPIKeyStaysAPIKey pins the
-// other half of the "gemini" case added to selectionFromNamedProvider: an entry
-// with auth_method "oauth" AND an api_key must keep the developer API-key path
-// (providerTypeHTTPCompat against the Generative Language base), i.e. the new
-// case must not hijack a keyed config.
 func TestResolveProviderSelectionGeminiNamedEntryWithAPIKeyStaysAPIKey(t *testing.T) {
 	cfg, named := geminiNamedOnlyConfig(t, `{"type": "gemini", "auth_method": "oauth", "api_key": "named-gemini-key"}`)
 	if named.APIKey != "named-gemini-key" {
@@ -690,7 +626,6 @@ func TestDefaultAPIBaseByType_CatalogProviders(t *testing.T) {
 		{"alibaba_token_plan", "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"},
 		{"qwen-token-plan", "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"},
 		{"alibaba_token_plan_cn", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"},
-		// Existing providers still resolve
 		{"openai", "https://api.openai.com/v1"},
 		{"anthropic", defaultAnthropicAPIBase},
 		{"github_copilot", "localhost:4321"},
@@ -772,13 +707,9 @@ func TestOpenCodeGoSessionHeader(t *testing.T) {
 		typ          string
 		apiBase      string
 		want         string
-		// wantRequired: true ⇒ a missing session id fails the call fast
-		// (ErrMissingWireSession), false ⇒ the header is opportunistic (sent
-		// when present, silently omitted when not).
 		wantRequired bool
 	}{
 		{
-			// Explicit name/type configuration: required regardless of base.
 			name:         "canonical name and type",
 			providerName: "opencode_go",
 			typ:          "opencode_go",
@@ -811,7 +742,6 @@ func TestOpenCodeGoSessionHeader(t *testing.T) {
 			wantRequired: true,
 		},
 		{
-			// URL sniff ⇒ opportunistic, never fail-fast (FIX-B).
 			name:         "detected by api base, inference go path",
 			providerName: "oc-alias",
 			typ:          "openai",
@@ -836,9 +766,6 @@ func TestOpenCodeGoSessionHeader(t *testing.T) {
 			wantRequired: false,
 		},
 		{
-			// FIX-A: the first-class Zen base shares the host but not the Go
-			// path. It used to over-match and, with the fail-fast, would have
-			// turned "works" into a local error on unkeyed egresses.
 			name:         "opencode zen base is not detected as go",
 			providerName: "opencode",
 			typ:          "opencode",
@@ -847,7 +774,6 @@ func TestOpenCodeGoSessionHeader(t *testing.T) {
 			wantRequired: false,
 		},
 		{
-			// Path-segment boundary: "/zen/gopher" is not "/zen/go".
 			name:         "longer path segment is not detected as go",
 			providerName: "oc-alias",
 			typ:          "openai",
@@ -856,12 +782,6 @@ func TestOpenCodeGoSessionHeader(t *testing.T) {
 			wantRequired: false,
 		},
 		{
-			// NIT-2 flip (deliberate): with the parsed-host matcher
-			// (isOpenCodeGoAPIBase uses net/url) a lookalike host carrying
-			// the Go path NO LONGER matches at all. The old substring match
-			// matched here but only ever yielded an inert opportunistic
-			// header ("matched but inert"); no match is strictly better —
-			// the sniff cannot claim a foreign host anymore.
 			name:         "lookalike host with go path no longer matches",
 			providerName: "corp-proxy",
 			typ:          "openai",
@@ -870,10 +790,6 @@ func TestOpenCodeGoSessionHeader(t *testing.T) {
 			wantRequired: false,
 		},
 		{
-			// NIT-2: an explicit port on the real host must not break the
-			// check — the literal substring matcher missed
-			// "opencode.ai:443/zen/go" and the header was silently omitted
-			// (upstream 400 MissingSessionID). Hostname() strips any port.
 			name:         "explicit port on the opencode.ai host still matches",
 			providerName: "oc-alias",
 			typ:          "openai",
@@ -882,8 +798,6 @@ func TestOpenCodeGoSessionHeader(t *testing.T) {
 			wantRequired: false,
 		},
 		{
-			// NIT-2 pinned decision: subdomains of opencode.ai count (host is
-			// "opencode.ai or a subdomain of it").
 			name:         "subdomain of opencode.ai matches",
 			providerName: "oc-alias",
 			typ:          "openai",
@@ -892,9 +806,6 @@ func TestOpenCodeGoSessionHeader(t *testing.T) {
 			wantRequired: false,
 		},
 		{
-			// NIT-2 pinned consequence: an apiBase that net/url cannot parse
-			// falls back to no-match (no header) instead of matching by
-			// accident. "http://[::1/zen/go" has an unclosed IPv6 bracket.
 			name:         "unparseable api base falls back to no match",
 			providerName: "oc-alias",
 			typ:          "openai",
@@ -937,11 +848,6 @@ func TestOpenCodeGoSessionHeader(t *testing.T) {
 	}
 }
 
-// startFactoryHeaderServer starts a server that records the session header of
-// the first inference request and answers with a minimal valid completion.
-// Returns the server URL and a getter for the captured header value. The
-// capture is mutex-guarded and copied inside the handler (the plan's rule:
-// reading request state after the handler returns races).
 func startFactoryHeaderServer(t *testing.T) (string, func() string) {
 	t.Helper()
 	var (
@@ -1028,12 +934,6 @@ func TestCreateProviderForCandidate_NonOpenCodeDoesNotSendSessionHeader(t *testi
 	}
 }
 
-// TestCreateProviderForCandidate_OpenCodeGoNameTypeRequiresSessionHeader pins
-// the REQUIRED branch (FIX-B): detection from explicit name/type config means
-// the user asked for OpenCode Go, so an unstamped call (no wire_session_id
-// option) must fail locally with ErrMissingWireSession and never reach the
-// server — the error is the honest signal that a call site forgot
-// providers.WithWireSessionID.
 func TestCreateProviderForCandidate_OpenCodeGoNameTypeRequiresSessionHeader(t *testing.T) {
 	apiBase, sessionHeader := startFactoryHeaderServer(t)
 
@@ -1062,18 +962,6 @@ func TestCreateProviderForCandidate_OpenCodeGoNameTypeRequiresSessionHeader(t *t
 	}
 }
 
-// TestCreateProviderForCandidate_OpenCodeGoURLSniffIsOpportunistic pins the
-// OPPORTUNISTIC branch (FIX-B): detection from api_base alone must never fail
-// the call locally. Without a session id the header is silently omitted (the
-// upstream answers its own descriptive 400 if it cares); with one it is sent.
-//
-// NIT-2 changed how the api_base is matched (parsed host, not substring), so
-// a local httptest URL can no longer be spoofed by appending
-// "/opencode.ai/zen/go" to its path — that lookalike pattern now correctly
-// does NOT match. To keep this end-to-end with the REAL host, the api_base is
-// http://opencode.ai/zen/go/v1 and the httptest server plays HTTP proxy: for
-// plain-http targets Go's transport sends the absolute-form request to the
-// configured proxy, so no DNS lookup of opencode.ai ever happens.
 func TestCreateProviderForCandidate_OpenCodeGoURLSniffIsOpportunistic(t *testing.T) {
 	proxy, sessionHeader := startFactoryHeaderServer(t)
 
@@ -1095,7 +983,6 @@ func TestCreateProviderForCandidate_OpenCodeGoURLSniffIsOpportunistic(t *testing
 		t.Fatalf("CreateProviderForCandidate() error = %v", err)
 	}
 
-	// No session id: the call proceeds and the header stays off the wire.
 	if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, "gpt-4o", nil); err != nil {
 		t.Fatalf("Chat() without session id error = %v, want success (opportunistic header)", err)
 	}
@@ -1103,7 +990,6 @@ func TestCreateProviderForCandidate_OpenCodeGoURLSniffIsOpportunistic(t *testing
 		t.Fatalf("x-opencode-session = %q, want omitted when the call carries no session id", got)
 	}
 
-	// With a session id: the opportunistic header is sent.
 	options := map[string]interface{}{OptWireSessionID: "abc"}
 	if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, "gpt-4o", options); err != nil {
 		t.Fatalf("Chat() with session id error = %v", err)
@@ -1113,15 +999,6 @@ func TestCreateProviderForCandidate_OpenCodeGoURLSniffIsOpportunistic(t *testing
 	}
 }
 
-// TestCreateProviderForCandidate_OpenCodeZenNotDetectedAsGo pins FIX-A at the
-// factory level: the first-class Zen base (https://opencode.ai/zen/v1) shares
-// the opencode.ai host but not the Go path, so it must NOT be detected as
-// OpenCode Go — even a stamped call must keep the header off the wire (before
-// the fix, Zen was falsely detected and unkeyed egresses failed locally).
-//
-// NIT-2: same local-proxy setup as the opportunistic test above — the parsed
-// host check means the real opencode.ai host is required for the path
-// comparison to be exercised at all.
 func TestCreateProviderForCandidate_OpenCodeZenNotDetectedAsGo(t *testing.T) {
 	proxy, sessionHeader := startFactoryHeaderServer(t)
 

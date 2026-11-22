@@ -1,6 +1,3 @@
-// Package providers: byte/char accounting and deterministic shrinking for
-// multimodal (image/video) message payloads. See image_budget.go.
-
 package providers
 
 import (
@@ -12,8 +9,6 @@ import (
 	"unicode/utf8"
 )
 
-// deepCopyMessages snapshots a message list including the pointed-to
-// ImageURL/VideoURL values, so tests can detect any mutation of the input.
 func deepCopyMessages(in []Message) []Message {
 	out := make([]Message, len(in))
 	for i, m := range in {
@@ -48,11 +43,8 @@ func deepCopyMessages(in []Message) []Message {
 	return out
 }
 
-// TestEstimateRequestBytes_Calibration pins the two bounds of the estimator:
-// it must never fall below the real marshaled size and must stay within 25 %
-// on realistic content.
 func TestEstimateRequestBytes_Calibration(t *testing.T) {
-	longText := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 100) // ~4.4 KB
+	longText := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 100)
 	bigBase64 := strings.Repeat("A", 40*1024)
 
 	msgs := []Message{
@@ -94,13 +86,8 @@ func TestEstimateRequestBytes_Calibration(t *testing.T) {
 		t.Errorf("EstimateRequestBytes = %d exceeds the real wire size %d by more than 25%%", got, len(wire))
 	}
 
-	// Sub-case: JSON-escapable bytes (quotes, angle brackets, ampersand,
-	// newline, tab) plus CJK text. The escaping surcharge must stay safe:
-	// got >= len(wire) has to hold even when most bytes need escaping.
 	tricky := []Message{{
 		Role: "user",
-		// CJK text (written as escapes to keep source ASCII-only) to prove the
-		// surcharge stays safe on multi-byte runes too.
 		Content: `he said "hi" & <bye>` + "\n" +
 			"\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c8\u3067\u3059" + "\n\ttabbed",
 	}}
@@ -115,10 +102,6 @@ func TestEstimateRequestBytes_Calibration(t *testing.T) {
 	}
 }
 
-// TestReduceImageParts_KeepsNewestAndPreservesShape: six messages each carrying
-// one heavy part; keepLastImages=4 must keep exactly the four newest heavy
-// parts alive, evict the two oldest without leaving any message invalid, and
-// must not mutate the input.
 func TestReduceImageParts_KeepsNewestAndPreservesShape(t *testing.T) {
 	makeMsg := func(i int) Message {
 		return Message{
@@ -147,8 +130,6 @@ func TestReduceImageParts_KeepsNewestAndPreservesShape(t *testing.T) {
 	}
 	for i, m := range got {
 		if i < 2 {
-			// Evicted: the text prompt stays first and intact, in order, and a
-			// placeholder part keeps the message valid (never zero parts).
 			if len(m.ContentParts) < 1 {
 				t.Errorf("message %d: evicted message lost all parts", i)
 				continue
@@ -165,7 +146,6 @@ func TestReduceImageParts_KeepsNewestAndPreservesShape(t *testing.T) {
 			}
 			continue
 		}
-		// The four newest heavy parts must be untouched.
 		if !IsHeavyMultimodalPart(m.ContentParts[len(m.ContentParts)-1]) {
 			t.Errorf("message %d: newest heavy part should have been kept", i)
 		}
@@ -173,15 +153,11 @@ func TestReduceImageParts_KeepsNewestAndPreservesShape(t *testing.T) {
 			t.Errorf("message %d: kept message text changed", i)
 		}
 	}
-	// The input slice, its messages and its parts must be untouched.
 	if !reflect.DeepEqual(msgs, snapshot) {
 		t.Errorf("input messages were mutated:\ngot:  %+v\nwant: %+v", msgs, snapshot)
 	}
 }
 
-// TestReduceImageParts_RehydratedMessageDropsPart: a message whose textual
-// Content already carries the "[image]" marker loses the heavy part outright
-// (no duplicate placeholder text).
 func TestReduceImageParts_RehydratedMessageDropsPart(t *testing.T) {
 	msgs := []Message{{
 		Role:    "user",
@@ -202,15 +178,7 @@ func TestReduceImageParts_RehydratedMessageDropsPart(t *testing.T) {
 	}
 }
 
-// TestMessageCharCost_ImageCountedOnceAfterRehydrate pins the accounting bug
-// where images stop being counted once Content is repopulated from the content
-// parts by Message.UnmarshalJSON: the same logical message must cost the same
-// before and after a wire round trip.
 func TestMessageCharCost_ImageCountedOnceAfterRehydrate(t *testing.T) {
-	// The image part carries the same textual marker the rehydrator will
-	// synthesize ("[image]"), so the message's textual weight is identical
-	// before and after the round trip and any cost delta means the image
-	// itself was counted twice or not at all.
 	before := Message{
 		Role:    "user",
 		Content: "",
@@ -235,9 +203,6 @@ func TestMessageCharCost_ImageCountedOnceAfterRehydrate(t *testing.T) {
 		t.Fatalf("fixture sanity: after.Content = %q, want the rehydrated %q", after.Content, "[image]")
 	}
 
-	// Natural shape (no mirrored marker text): the only delta allowed is the
-	// "[image]" marker that textFromParts injects into Content - the image
-	// part itself must still be counted exactly once on both sides.
 	natural := Message{
 		Role:    "user",
 		Content: "",
@@ -258,8 +223,6 @@ func TestMessageCharCost_ImageCountedOnceAfterRehydrate(t *testing.T) {
 	}
 }
 
-// TestMessageCharCost_CountsVideoAndMedia pins the fixed per-part costs and the
-// double-count guard for text parts.
 func TestMessageCharCost_CountsVideoAndMedia(t *testing.T) {
 	base := Message{Role: "user"}
 
@@ -290,8 +253,6 @@ func TestMessageCharCost_CountsVideoAndMedia(t *testing.T) {
 		t.Errorf("media cost = %d, want %d", got, want)
 	}
 
-	// Text parts are counted only when Content == "" (Message.UnmarshalJSON
-	// repopulates Content from the text parts; counting both would double it).
 	textOnly := []ContentPart{{Type: "text", Text: "hello"}}
 	empty := Message{Role: "user", Content: "", ContentParts: textOnly}
 	if got, want := MessageCharCost(empty)-MessageCharCost(base), 5; got != want {
@@ -303,8 +264,6 @@ func TestMessageCharCost_CountsVideoAndMedia(t *testing.T) {
 	}
 }
 
-// TestReduceImageParts_NoHeavyPartsIsNoop: without heavy parts the call is a
-// cheap no-op returning the input slice itself.
 func TestReduceImageParts_NoHeavyPartsIsNoop(t *testing.T) {
 	msgs := []Message{
 		{Role: "user", Content: "hello"},
@@ -329,8 +288,6 @@ func TestReduceImageParts_NoHeavyPartsIsNoop(t *testing.T) {
 	}
 }
 
-// TestReduceImageParts_ZeroKeepsNothing: keepLastImages <= 0 evicts every
-// heavy part without panicking.
 func TestReduceImageParts_ZeroKeepsNothing(t *testing.T) {
 	for _, keep := range []int{0, -3} {
 		msgs := []Message{
@@ -359,8 +316,6 @@ func TestReduceImageParts_ZeroKeepsNothing(t *testing.T) {
 	}
 }
 
-// TestLiveMultimodalParts_IgnoresRemoteURLs: only data: URLs are heavy; remote
-// http(s) URLs are tiny and must not be counted or evicted.
 func TestLiveMultimodalParts_IgnoresRemoteURLs(t *testing.T) {
 	remote := "https://example.com/remote.png"
 	dataURL := "data:image/png;base64," + strings.Repeat("D", 128)
@@ -381,13 +336,6 @@ func TestLiveMultimodalParts_IgnoresRemoteURLs(t *testing.T) {
 	}
 }
 
-// TestIsHeavyMediaEntry pins the Media-entry counterpart of
-// IsHeavyMultimodalPart: only "data:" URLs embed payload; file paths and
-// remote URLs are tiny and are never heavy. URI schemes are case-insensitive
-// (RFC 3986), so uppercase/mixed-case schemes must be heavy too (N4: the
-// estimator charges every entry, so the evictor must see every entry). The
-// 4-byte/5-byte boundary pair pins the length guard (N8: dropping it makes
-// "data" panic instead of returning false).
 func TestIsHeavyMediaEntry(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -413,10 +361,6 @@ func TestIsHeavyMediaEntry(t *testing.T) {
 	}
 }
 
-// TestReduceImageParts_EvictsHeavyMediaDataURLs: a "data:" Media entry is
-// payload the estimator already charges, so the evictor must remove it under
-// the same keepLastImages budget as heavy parts - while leaving the textual
-// Content and the caller's Media backing array untouched (copy-on-write).
 func TestReduceImageParts_EvictsHeavyMediaDataURLs(t *testing.T) {
 	heavyMedia := "data:image/png;base64," + strings.Repeat("A", 200)
 	msgs := []Message{{
@@ -436,7 +380,6 @@ func TestReduceImageParts_EvictsHeavyMediaDataURLs(t *testing.T) {
 	if got[0].Content != "hi" {
 		t.Fatalf("Content = %q, want %q untouched", got[0].Content, "hi")
 	}
-	// Copy-on-write proof: the input message's Media slice must be unchanged.
 	if len(msgs[0].Media) != 2 {
 		t.Fatalf("len(input Media) = %d, want 2 (copy-on-write violated)", len(msgs[0].Media))
 	}
@@ -448,10 +391,6 @@ func TestReduceImageParts_EvictsHeavyMediaDataURLs(t *testing.T) {
 	}
 }
 
-// TestReduceImageParts_MediaOnlyMessageStaysValid: evicting the only payload
-// of a media-only message (no ContentParts, empty Content) must leave the
-// message valid for the adapters by appending exactly one text placeholder
-// part - never zero parts AND empty content.
 func TestReduceImageParts_MediaOnlyMessageStaysValid(t *testing.T) {
 	msgs := []Message{{
 		Role:    "user",
@@ -472,19 +411,11 @@ func TestReduceImageParts_MediaOnlyMessageStaysValid(t *testing.T) {
 	if m.Content != "" {
 		t.Fatalf("Content = %q, want %q untouched", m.Content, "")
 	}
-	// The validity invariant, asserted explicitly.
 	if len(m.ContentParts) == 0 && m.Content == "" {
 		t.Fatalf("message ended with zero parts and empty content (invalid for adapters)")
 	}
 }
 
-// TestReduceImageParts_SurvivingPathMediaNeedsNoPlaceholder pins the NEGATIVE
-// direction of the combined validity invariant (review mutation P2): after
-// the heavy data: entry is evicted, the surviving path-only Media entry still
-// counts as content for the invariant, so no placeholder part may be added -
-// even though the serializers drop path entries on the wire (pre-existing
-// shape, out of scope). A placeholder there would claim an image was omitted
-// when the message still carries its attachment path.
 func TestReduceImageParts_SurvivingPathMediaNeedsNoPlaceholder(t *testing.T) {
 	msgs := []Message{{
 		Role:    "user",
@@ -508,12 +439,6 @@ func TestReduceImageParts_SurvivingPathMediaNeedsNoPlaceholder(t *testing.T) {
 	}
 }
 
-// TestReduceImageParts_EvictsUppercaseSchemeMedia pins the N4 invariant in
-// the direction that can bite: EstimateRequestBytes charges every Media entry
-// regardless of the scheme's case (URI schemes are case-insensitive, RFC
-// 3986), so a DATA: entry must be evictable too - otherwise the pre-request
-// guard believes it is over budget forever and pays for a summarisation call
-// that cannot remove a payload the transport never sees.
 func TestReduceImageParts_EvictsUppercaseSchemeMedia(t *testing.T) {
 	heavy := "DATA:image/png;base64," + strings.Repeat("U", 128)
 	msgs := []Message{{
@@ -533,19 +458,7 @@ func TestReduceImageParts_EvictsUppercaseSchemeMedia(t *testing.T) {
 	}
 }
 
-// TestLiveMultimodalParts_CountsMediaDataURLs pins the accounting across both
-// carriers: a ContentParts-only control (existing behaviour), plus one heavy
-// part + two heavy Media entries (one of them with an uppercase scheme) + one
-// path + one remote URL in the same message: only the heavy payloads count.
-//
-// The uppercase entry is not decoration (N10): LiveMultimodalParts is the gate
-// EnforceImageBudget consults before it evicts anything, and each of its arms
-// calls a predicate independently - so a case-sensitive regression in the
-// *Media* arm would count 0 for a DATA: entry, make the guard early-return,
-// and resurrect on Media exactly the charged-but-un-evictable hole the
-// scheme fold closes, while no other test in the four packages notices.
 func TestLiveMultimodalParts_CountsMediaDataURLs(t *testing.T) {
-	// Control: ContentParts-only accounting is unchanged.
 	partURL := "data:image/png;base64," + strings.Repeat("C", 64)
 	control := []Message{{Role: "user", ContentParts: []ContentPart{
 		{Type: "image_url", ImageURL: &ImageURL{URL: partURL}},
@@ -574,15 +487,10 @@ func TestLiveMultimodalParts_CountsMediaDataURLs(t *testing.T) {
 	}
 }
 
-// TestReduceImageParts_MediaKeepLastOrdering pins the shared keep budget and
-// its ordering: across messages the newest media entry survives; within one
-// message a heavy media entry outranks a heavy part because it is added later
-// on the wire (common.SerializeMessages emits parts -> text -> media).
 func TestReduceImageParts_MediaKeepLastOrdering(t *testing.T) {
 	mediaA := "data:image/png;base64," + strings.Repeat("A", 64)
 	mediaB := "data:image/png;base64," + strings.Repeat("B", 64)
 
-	// Across messages: keepLast=1 keeps only the LAST message's media entry.
 	msgs := []Message{
 		{Role: "user", Content: "a", Media: []string{mediaA}},
 		{Role: "user", Content: "b", Media: []string{mediaB}},
@@ -598,8 +506,6 @@ func TestReduceImageParts_MediaKeepLastOrdering(t *testing.T) {
 		t.Errorf("message 1 Media = %+v, want [%s] (newest entry kept)", got[1].Media, mediaB)
 	}
 
-	// Within one message: heavy part + heavy media, keepLast=1 -> the media
-	// entry (later on the wire) survives and the part is evicted.
 	partURL := "data:image/png;base64," + strings.Repeat("P", 96)
 	mixed := []Message{{
 		Role:    "user",
@@ -627,9 +533,6 @@ func TestReduceImageParts_MediaKeepLastOrdering(t *testing.T) {
 	}
 }
 
-// TestReduceImageParts_PlainMediaIsNoop: a message carrying only path/remote
-// Media entries is never heavy; keepLast=0 must evict nothing and return the
-// very same input slice (cheap no-op contract).
 func TestReduceImageParts_PlainMediaIsNoop(t *testing.T) {
 	msgs := []Message{
 		{Role: "user", Content: "hi", Media: []string{"/tmp/photo.jpg", "https://example.com/x.png"}},
@@ -646,13 +549,6 @@ func TestReduceImageParts_PlainMediaIsNoop(t *testing.T) {
 	}
 }
 
-// TestIsHeavyMultimodalPart pins the ContentPart carrier of the scheme fold
-// (N7): EstimateRequestBytes charges a DATA: payload its full byte length, so
-// the evictor's predicate must see it too - URI schemes are case-insensitive
-// (RFC 3986), exactly as for IsHeavyMediaEntry, and the two predicates share
-// hasDataScheme so they can never diverge again. Every row runs as BOTH an
-// image part and a video part: heaviness follows the URL field that is set,
-// never the MIME or the part's Type string.
 func TestIsHeavyMultimodalPart(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -663,13 +559,7 @@ func TestIsHeavyMultimodalPart(t *testing.T) {
 		{"image data URL", "data:image/png;base64,AA", true, true},
 		{"image data URL, uppercase scheme", "DATA:image/png;base64,AA", true, true},
 		{"image data URL, mixed-case scheme", "DaTa:image/png;base64,AA", true, true},
-		// The video row, checked field by field: the VideoURL field carries
-		// it (heavy), and the ImageURL field must be heavy too, because
-		// contentPartWireUpperBound charges an ImageURL of ANY MIME at its
-		// full length - a false here would recreate the charged-but-
-		// un-evictable N7 hole for a part the wire does emit.
 		{"video data URL, uppercase scheme", "DATA:video/mp4;base64,AA", true, true},
-		// Controls: the fold must not over-match beyond ASCII case.
 		{"file URL", "file:///tmp/a.png", false, false},
 		{"file URL, uppercase scheme", "FILE:///tmp/a.png", false, false},
 		{"remote URL", "https://example.com/a.png", false, false},
@@ -688,9 +578,6 @@ func TestIsHeavyMultimodalPart(t *testing.T) {
 			t.Errorf("video part %s (%q): IsHeavyMultimodalPart = %v, want %v", tc.name, tc.url, got, tc.wantVideo)
 		}
 	}
-	// "Check the field, not the string": the predicates inspect the ImageURL/
-	// VideoURL fields only. A part whose Type or Text merely MENTIONS a DATA:
-	// URL while both URL fields are nil is not heavy.
 	mention := ContentPart{Type: "image_url", Text: "DATA:video/mp4;base64,AA"}
 	if IsHeavyMultimodalPart(mention) {
 		t.Errorf("image part mentioning a DATA: URL only in Text = heavy, want false (field, not string)")
@@ -701,14 +588,6 @@ func TestIsHeavyMultimodalPart(t *testing.T) {
 	}
 }
 
-// TestReduceImageParts_EvictsUppercaseSchemeContentPart is the end-to-end N7
-// symptom: a DATA: URL inside a ContentPart must be counted by
-// LiveMultimodalParts, evicted by ReduceImageParts and shrink
-// EstimateRequestBytes - all three on the same tree. A case-sensitive
-// predicate leaves all three at their pre-fix values (heavy=0, evicted=0,
-// estimate unchanged - the review measured estimate=9437307 with count=0 and
-// evicted=0, i.e. a guard that believes it is over budget forever and pays
-// for a summarisation call that cannot remove the payload).
 func TestReduceImageParts_EvictsUppercaseSchemeContentPart(t *testing.T) {
 	payload := "DATA:image/png;base64," + strings.Repeat("U", 32*1024)
 	msgs := []Message{{
@@ -721,7 +600,6 @@ func TestReduceImageParts_EvictsUppercaseSchemeContentPart(t *testing.T) {
 	}}
 	snapshot := deepCopyMessages(msgs)
 
-	// Symptom 1: the estimator's counter must see the payload.
 	count, bytes := LiveMultimodalParts(msgs)
 	if count != 1 || bytes != len(payload) {
 		t.Fatalf("LiveMultimodalParts = (%d, %d), want (1, %d): a case-sensitive predicate leaves the "+
@@ -729,7 +607,6 @@ func TestReduceImageParts_EvictsUppercaseSchemeContentPart(t *testing.T) {
 			count, bytes, len(payload))
 	}
 
-	// Symptom 2 + 3: the evictor removes it and the estimate drops accordingly.
 	before := EstimateRequestBytes(msgs)
 	got, evicted := ReduceImageParts(msgs, 0)
 	if evicted != 1 {
@@ -748,22 +625,15 @@ func TestReduceImageParts_EvictsUppercaseSchemeContentPart(t *testing.T) {
 		t.Fatalf("estimate dropped only %d bytes (%d -> %d), want >= %d: the %d-byte payload is still "+
 			"charged - a case-sensitive predicate leaves the estimate unchanged (heavy=0, evicted=0)", drop, before, after, len(payload)-64, len(payload))
 	}
-	// Copy-on-write: the input must be untouched.
 	if !reflect.DeepEqual(msgs, snapshot) {
 		t.Fatalf("input messages were mutated:\ngot:  %+v\nwant: %+v", msgs, snapshot)
 	}
 }
 
-// schemePredicateSink gives the allocation measurement below a home for its
-// results, so the compiler cannot optimize the predicate calls away.
 var schemePredicateSink bool
 
-// TestSchemeFoldIsAllocationFree pins the N9 doc claim on hasDataScheme: the
-// scheme test runs on payload-sized strings (a 1 MiB entry here), so it must
-// stay length-guarded and allocation-free - a whole-string ToLower fold would
-// allocate a megabyte copy per predicate pass and turn this red.
 func TestSchemeFoldIsAllocationFree(t *testing.T) {
-	payload := "data:image/png;base64," + strings.Repeat("U", 1<<20) // 1 MiB+
+	payload := "data:image/png;base64," + strings.Repeat("U", 1<<20)
 	img := ContentPart{Type: "image_url", ImageURL: &ImageURL{URL: payload}}
 	vid := ContentPart{Type: "video_url", VideoURL: &VideoURL{URL: payload}}
 	allocs := testing.AllocsPerRun(200, func() {

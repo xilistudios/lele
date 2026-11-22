@@ -1,6 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Copyright (c) 2026 Lele contributors
-
 package providers
 
 import (
@@ -16,11 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers/common"
 )
 
-// countingProvider wraps a factory-built provider and counts non-streaming
-// Chat calls. ChatIdle's safety net is the only interesting caller: the wire
-// itself cannot be used to detect the second attempt, because a REQUIRED
-// OpenCode Go provider raises ErrMissingWireSession while BUILDING the
-// request — both Chat and ChatStream fail before any byte reaches the server.
 type countingProvider struct {
 	inner LLMProvider
 
@@ -51,8 +43,6 @@ func (c *countingProvider) chatCalls() int {
 	return c.chats
 }
 
-// newIdleTestProvider builds a REQUIRED OpenCode Go provider (explicit name
-// and type ⇒ SessionHeaderRequired) against the given server URL.
 func newIdleTestProvider(t *testing.T, serverURL string) LLMProvider {
 	t.Helper()
 	cfg := config.DefaultConfig()
@@ -73,13 +63,6 @@ func newIdleTestProvider(t *testing.T, serverURL string) LLMProvider {
 	return p
 }
 
-// TestChatIdle_MissingWireSessionSkipsSafetyNet pins the guard in ChatIdle
-// (chat_idle.go): a REQUIRED OpenCode Go provider rejects an unstamped call
-// while the request is being BUILT, so the non-streaming safety net must not
-// re-issue the identical doomed call. Round-2 mutation M-G (guard disabled)
-// survived every test in the suite; this is its killer: without the guard
-// Chat() is attempted a second time (chatCalls would be 1) and the misleading
-// "retrying non-streaming" debug line is logged.
 func TestChatIdle_MissingWireSessionSkipsSafetyNet(t *testing.T) {
 	var (
 		mu       sync.Mutex
@@ -109,7 +92,6 @@ func TestChatIdle_MissingWireSessionSkipsSafetyNet(t *testing.T) {
 	p := newIdleTestProvider(t, server.URL)
 	wrapped := &countingProvider{inner: p}
 
-	// Unstamped: no OptWireSessionID option (nil options map).
 	_, err := ChatIdle(t.Context(), wrapped, []Message{{Role: "user", Content: "hi"}}, nil, "gpt-5.6-luna", nil)
 	if !errors.Is(err, common.ErrMissingWireSession) {
 		t.Fatalf("ChatIdle() error = %v, want errors.Is(err, common.ErrMissingWireSession)", err)
@@ -122,10 +104,6 @@ func TestChatIdle_MissingWireSessionSkipsSafetyNet(t *testing.T) {
 	}
 }
 
-// TestChatIdle_ServerRejectedStreamFallsBackToChat is the negative control
-// for the guard above: it must not swallow the case the safety net exists for
-// — a server that rejects the SSE attempt (400 ⇒ FailoverFormat) gets exactly
-// ONE non-streaming retry, and the call succeeds.
 func TestChatIdle_ServerRejectedStreamFallsBackToChat(t *testing.T) {
 	var (
 		mu       sync.Mutex
@@ -140,7 +118,6 @@ func TestChatIdle_ServerRejectedStreamFallsBackToChat(t *testing.T) {
 		stream, _ := body["stream"].(bool)
 		w.Header().Set("Content-Type", "application/json")
 		if stream {
-			// Reject SSE the way a proxy that does not support it would.
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"error": map[string]interface{}{"message": "streaming not supported", "code": 400},
@@ -166,7 +143,6 @@ func TestChatIdle_ServerRejectedStreamFallsBackToChat(t *testing.T) {
 	p := newIdleTestProvider(t, server.URL)
 	wrapped := &countingProvider{inner: p}
 
-	// Stamped, so the build succeeds and the server is reached.
 	options := map[string]interface{}{OptWireSessionID: "abc"}
 	resp, err := ChatIdle(t.Context(), wrapped, []Message{{Role: "user", Content: "hi"}}, nil, "gpt-5.6-luna", options)
 	if err != nil {

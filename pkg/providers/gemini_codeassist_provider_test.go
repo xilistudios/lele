@@ -17,10 +17,6 @@ import (
 	"github.com/xilistudios/lele/pkg/auth"
 )
 
-// TestGeminiCodeAssistGenerateEnvelopeGolden pins the exact bytes of the Code
-// Assist generateContent envelope for the simplest request (one user message,
-// no tools). The golden literal is written by hand from spec §5 so that any
-// accidental rename of a JSON key (notably `user_prompt_id`) shows up as a diff.
 func TestGeminiCodeAssistGenerateEnvelopeGolden(t *testing.T) {
 	got := buildCodeAssistRequest(
 		[]Message{{Role: "user", Content: "Hello"}},
@@ -36,8 +32,6 @@ func TestGeminiCodeAssistGenerateEnvelopeGolden(t *testing.T) {
 		t.Fatalf("marshal envelope: %v", err)
 	}
 
-	// Key order follows the Go struct field order (Model, Project, UserPromptID,
-	// Request) / (Contents, SystemInstruction, Tools, ToolConfig, SessionID).
 	const want = `{"model":"gemini-pro-latest","project":"test-project","user_prompt_id":"","request":{"contents":[{"role":"user","parts":[{"text":"Hello"}]}],"session_id":"sess-abc"}}`
 
 	if string(raw) != want {
@@ -45,11 +39,6 @@ func TestGeminiCodeAssistGenerateEnvelopeGolden(t *testing.T) {
 	}
 }
 
-// TestGeminiCodeAssistEnvelopeUsesSnakeUserPromptID guards the one deliberate
-// snake_case key. jcode's CodeAssistGenerateRequest has no rename_all, so the
-// keys are `model`/`project`/`user_prompt_id`/`request`. It also asserts the
-// inner object does NOT carry the Antigravity envelope members
-// (requestType/userAgent/requestId), which belong to a different envelope.
 func TestGeminiCodeAssistEnvelopeUsesSnakeUserPromptID(t *testing.T) {
 	got := buildCodeAssistRequest(
 		[]Message{{Role: "user", Content: "Hello"}},
@@ -91,34 +80,12 @@ func TestGeminiCodeAssistEnvelopeUsesSnakeUserPromptID(t *testing.T) {
 	}
 }
 
-// geminiFunctionCallGuardWant is jcode's GEMINI_FUNCTION_CALL_GUARD, copied by
-// hand from crates/jcode-provider-gemini/src/lib.rs. It is deliberately NOT the
-// production const: an independent copy means a typo in geminiFunctionCallGuard
-// fails the tests below instead of agreeing with itself.
-//
-// Rust swallows a trailing `\` plus the newline and the following indentation
-// of a string literal, so the source spelling
-//
-//	"\n\n## Function calling\n\
-//	     - When you call a tool, ... Never write \
-//	     Python ... never wrap a call in \
-//	     print(...) or a code block.\n\
-//	     - Use the function name ... `default_api.` \
-//	     or any other namespace to the function name."
-//
-// is exactly the value below (verified by compiling the Rust literal and
-// diffing its stdout: see the F2-T13 evidence under /tmp/f2_t13/).
 const geminiFunctionCallGuardWant = "\n\n## Function calling\n" +
 	"- When you call a tool, emit a native function call, not code. Never write Python (or any language) that calls the tool, and never wrap a call in print(...) or a code block.\n" +
 	"- Use the function name exactly as defined. Do not prepend `default_api.` or any other namespace to the function name."
 
-// geminiFunctionCallGuardMarker is the guard's opening heading, used to assert
-// the fragment is ABSENT where it must not be sent.
 const geminiFunctionCallGuardMarker = "## Function calling"
 
-// geminiGuardTestTools is the smallest tool set that makes hasTools true: one
-// "function" tool. A non-"function" tool is skipped by
-// codeAssistFunctionDeclarations and therefore must NOT trigger the guard.
 func geminiGuardTestTools() []ToolDefinition {
 	return []ToolDefinition{{
 		Type:     "function",
@@ -126,9 +93,6 @@ func geminiGuardTestTools() []ToolDefinition {
 	}}
 }
 
-// TestGeminiCodeAssistSystemInstructionAppendsFunctionCallGuard pins jcode's
-// `build_system_instruction_with_tool_guard`: with tools advertised the system
-// instruction is trim(system) + GEMINI_FUNCTION_CALL_GUARD, role "user".
 func TestGeminiCodeAssistSystemInstructionAppendsFunctionCallGuard(t *testing.T) {
 	const systemText = "  You are a careful assistant.  "
 
@@ -157,17 +121,12 @@ func TestGeminiCodeAssistSystemInstructionAppendsFunctionCallGuard(t *testing.T)
 	if text != want {
 		t.Fatalf("system instruction text mismatch:\n got: %q\nwant: %q", text, want)
 	}
-	// The guard must follow the trimmed prompt verbatim and immediately: exactly
-	// one occurrence, starting right after the trimmed system text.
 	trimmed := strings.TrimSpace(systemText)
 	if at := strings.Index(text, geminiFunctionCallGuardWant); at != len(trimmed) {
 		t.Fatalf("guard starts at offset %d, want it to immediately follow the trimmed system text at %d", at, len(trimmed))
 	}
 }
 
-// TestGeminiCodeAssistSystemInstructionHasNoGuardWithoutTools pins the other
-// half of build_system_instruction_with_tool_guard: no tools means the system
-// instruction is exactly trim(system), with no guard fragment.
 func TestGeminiCodeAssistSystemInstructionHasNoGuardWithoutTools(t *testing.T) {
 	const systemText = "  You are a careful assistant.  "
 
@@ -198,17 +157,6 @@ func TestGeminiCodeAssistSystemInstructionHasNoGuardWithoutTools(t *testing.T) {
 	}
 }
 
-// TestGeminiCodeAssistSystemInstructionGuardOnlyWhenToolsAndNoSystem
-// reproduces jcode's consequence on purpose: with tools advertised and NO
-// system message, the request still carries a systemInstruction, and it is the
-// guard alone.
-//
-// "Alone" means the guard as build_system_instruction returns it, i.e.
-// TrimSpace(guard): jcode builds `system.trim() + GUARD` and then runs that
-// through build_system_instruction, whose own `trim()` strips the guard's
-// leading blank line when the prompt was empty. Verified by compiling the Rust
-// helper (see /tmp/f2_t13/guard_semantics.txt): with tools and an empty prompt
-// the value starts directly at "## Function calling".
 func TestGeminiCodeAssistSystemInstructionGuardOnlyWhenToolsAndNoSystem(t *testing.T) {
 	got := buildCodeAssistRequest(
 		[]Message{{Role: "user", Content: "Hello"}},
@@ -234,16 +182,6 @@ func TestGeminiCodeAssistSystemInstructionGuardOnlyWhenToolsAndNoSystem(t *testi
 	}
 }
 
-// TestGeminiCodeAssistEnvelopeGoldenWithToolsSystemAndImages closes the
-// coverage gap of the simple golden above: it pins, byte for byte, the
-// highest-risk part of the wire — the deliberate camelCase/snake_case mixing
-// and the shapes that diverge from antigravity_provider.go.
-//
-// The marshalled string (not a parsed comparison) is asserted so key ORDER is
-// pinned too: contents/systemInstruction/tools/toolConfig/session_id for the
-// inner request, text/inlineData/functionCall/functionResponse/thoughtSignature
-// for a part, and `user_prompt_id` (snake_case, emitted as "" because the fresh
-// id belongs to Chat, not to this pure builder) on the outer envelope.
 func TestGeminiCodeAssistEnvelopeGoldenWithToolsSystemAndImages(t *testing.T) {
 	messages := []Message{
 		{Role: "system", Content: "  You are a careful assistant.  "},
@@ -295,20 +233,6 @@ func TestGeminiCodeAssistEnvelopeGoldenWithToolsSystemAndImages(t *testing.T) {
 		t.Fatalf("marshal envelope: %v", err)
 	}
 
-	// Hand-written from spec §5. Notes on the deliberate details:
-	//   - `user_prompt_id` is snake_case on the outer envelope;
-	//   - `session_id` is snake_case INSIDE the camelCase inner object;
-	//   - the system instruction carries the function-call guard because tools
-	//     are advertised (its text is trim(system) + the guard);
-	//   - the assistant part order is text, functionCall, thoughtSignature;
-	//   - the tool result is a functionResponse with {"content": ...};
-	//   - the image is inlineData:{mimeType,data};
-	//   - the schema map keys are alphabetical because encoding/json sorts maps.
-	//
-	// The expected value is the MARSHALLED string, so the guard's newlines appear
-	// here escaped (encoding/json writes "\n" for a newline): the guard fragment
-	// below is the hand-written literal with exactly that escape applied. The
-	// comparison is byte-for-byte, so key order is pinned too.
 	const wantHead = `{"model":"gemini-pro-latest","project":"test-project","user_prompt_id":"","request":{"contents":[` +
 		`{"role":"model","parts":[{"text":"Let me read that file."},` +
 		`{"functionCall":{"name":"read_file","args":{"path":"README.md"},"id":"call-1"},"thoughtSignature":"sig-abc"}]},` +
@@ -327,8 +251,6 @@ func TestGeminiCodeAssistEnvelopeGoldenWithToolsSystemAndImages(t *testing.T) {
 	}
 }
 
-// TestGeminiCodeAssistParseResponse checks that text parts across candidates
-// are joined and that usageMetadata maps onto UsageInfo.
 func TestGeminiCodeAssistParseResponse(t *testing.T) {
 	body := []byte(`{"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"Hello "},{"text":"world"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}}`)
 
@@ -354,8 +276,6 @@ func TestGeminiCodeAssistParseResponse(t *testing.T) {
 	}
 }
 
-// TestGeminiCodeAssistParseResponseToolCall checks that a functionCall part
-// becomes exactly one ToolCall and flips the finish reason to "tool_calls".
 func TestGeminiCodeAssistParseResponseToolCall(t *testing.T) {
 	body := []byte(`{"response":{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"get_weather","args":{"city":"Madrid"}}}]},"finishReason":"STOP"}]}}`)
 
@@ -385,8 +305,6 @@ func TestGeminiCodeAssistParseResponseToolCall(t *testing.T) {
 	}
 }
 
-// TestGeminiCodeAssistParseResponseEmptyCandidates requires a clear error when
-// the response is well-formed but carries no candidates.
 func TestGeminiCodeAssistParseResponseEmptyCandidates(t *testing.T) {
 	_, err := parseCodeAssistResponse([]byte(`{"response":{"candidates":[]}}`))
 	if err == nil {
@@ -394,25 +312,6 @@ func TestGeminiCodeAssistParseResponseEmptyCandidates(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Runtime test helpers
-// -----------------------------------------------------------------------------
-
-// setupGeminiTestEnv isolates the credential store used by the token source and
-// by project persistence: a throwaway LELE_CONFIG_DIR plus UseStore(nil)
-// selects the legacy JSON backend. UseStore(nil) is the only store seam
-// exported to this package (pkg/auth's in-package SQLite helpers are not
-// importable), and an isolated config dir makes that backend safe to write to.
-// It also pins the two project env vars: loadCodeAssistProject reads them into
-// the loadCodeAssist request (and uses them as the project fallback), so a
-// developer shell that exports them would otherwise change what these tests
-// observe.
-//
-// UseStore(nil) deliberately resets pkg/auth's package-global store and cannot
-// restore it: pkg/auth exposes no getter for the active repository (only the
-// unexported currentRepo), so there is no prior value to hand back to a
-// t.Cleanup. The tests in this file must therefore stay serial — no
-// t.Parallel — and must not depend on a store a previous test installed.
 func setupGeminiTestEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
@@ -421,8 +320,6 @@ func setupGeminiTestEnv(t *testing.T) {
 	t.Setenv("GOOGLE_CLOUD_PROJECT_ID", "")
 }
 
-// geminiTokenServer is a fake Gemini token endpoint that counts requests and
-// rotates the refresh token, like Google's does.
 type geminiTokenServer struct {
 	*httptest.Server
 	mu   sync.Mutex
@@ -450,9 +347,6 @@ func newGeminiTokenServer(t *testing.T) *geminiTokenServer {
 	return ts
 }
 
-// pointGeminiOAuthConfigAt redirects the Gemini token endpoint to the fake
-// server by overriding the package-level seam, restoring the original value
-// when the test ends.
 func pointGeminiOAuthConfigAt(t *testing.T, srv *httptest.Server) {
 	t.Helper()
 	original := geminiOAuthConfig
@@ -465,8 +359,6 @@ func pointGeminiOAuthConfigAt(t *testing.T, srv *httptest.Server) {
 	t.Cleanup(func() { geminiOAuthConfig = original })
 }
 
-// storedGeminiCredential builds an expired oauth credential that NeedsRefresh()
-// and carries the given refresh token.
 func storedGeminiCredential(refreshToken string) *auth.AuthCredential {
 	return &auth.AuthCredential{
 		AccessToken:  "stale-access",
@@ -477,17 +369,12 @@ func storedGeminiCredential(refreshToken string) *auth.AuthCredential {
 	}
 }
 
-// capturedCodeAssistRequest is one request a provider made to the stub.
 type capturedCodeAssistRequest struct {
 	path   string
 	header http.Header
 	body   []byte
 }
 
-// geminiCodeAssistStub stands in for cloudcode-pa.googleapis.com: it records
-// every request and answers it with the status/body the test's handler returns.
-// A nil handler answers 200 {} (enough for tests that only assert an endpoint
-// is NOT called).
 type geminiCodeAssistStub struct {
 	*httptest.Server
 	handler func(req capturedCodeAssistRequest) (int, string)
@@ -519,7 +406,6 @@ func newGeminiCodeAssistStub(t *testing.T, handler func(req capturedCodeAssistRe
 	return stub
 }
 
-// requestsFor returns the requests the stub received for one path.
 func (s *geminiCodeAssistStub) requestsFor(path string) []capturedCodeAssistRequest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -532,9 +418,6 @@ func (s *geminiCodeAssistStub) requestsFor(path string) []capturedCodeAssistRequ
 	return out
 }
 
-// newGeminiTestProvider builds a provider whose token source returns token and
-// whose base URL is the stub (the package-private test seam; production always
-// leaves baseURL empty and therefore talks to geminiCodeAssistBaseURL).
 func newGeminiTestProvider(t *testing.T, stub *httptest.Server, token string) *GeminiCodeAssistProvider {
 	t.Helper()
 	p := NewGeminiCodeAssistProvider(token, func() (string, error) { return token, nil })
@@ -542,8 +425,6 @@ func newGeminiTestProvider(t *testing.T, stub *httptest.Server, token string) *G
 	return p
 }
 
-// requireGeminiHeaders asserts the headers spec §5 puts on every Code Assist
-// request.
 func requireGeminiHeaders(t *testing.T, header http.Header, token string) {
 	t.Helper()
 	if got := header.Get("Authorization"); got != "Bearer "+token {
@@ -555,8 +436,6 @@ func requireGeminiHeaders(t *testing.T, header http.Header, token string) {
 	if got := header.Get("X-Goog-Api-Client"); got != geminiCodeAssistXGoogAPIClient {
 		t.Errorf("x-goog-api-client = %q, want %q", got, geminiCodeAssistXGoogAPIClient)
 	}
-	// The UA always embeds the DEFAULT model, even for calls that requested a
-	// different one (jcode formats gemini_user_agent() from DEFAULT_MODEL).
 	wantUA := geminiCodeAssistUserAgentPrefix + "/" + geminiCodeAssistDefaultModel + " ("
 	ua := header.Get("User-Agent")
 	if !strings.HasPrefix(ua, wantUA) || !strings.HasSuffix(ua, "; terminal)") {
@@ -564,16 +443,6 @@ func requireGeminiHeaders(t *testing.T, header http.Header, token string) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Token source
-// -----------------------------------------------------------------------------
-
-// TestGeminiTokenSourceUsesCoordinator is the mandatory mutation #8 guard: two
-// concurrent callers of the token source must collapse into exactly ONE
-// token-endpoint request (single-flight, spec §6) and both must observe the
-// fresh access token, with the rotated refresh token persisted. Replacing
-// auth.EnsureFreshCredential with a plain store read makes this test fail
-// (0 hits and a stale token).
 func TestGeminiTokenSourceUsesCoordinator(t *testing.T) {
 	setupGeminiTestEnv(t)
 	srv := newGeminiTokenServer(t)
@@ -625,13 +494,6 @@ func TestGeminiTokenSourceUsesCoordinator(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Project discovery
-// -----------------------------------------------------------------------------
-
-// TestGeminiLoadCodeAssistProjectFromStoredCredential pins D7's shortcut: a
-// credential that already carries a project id is used as-is, with ZERO network
-// calls (no loadCodeAssist, no onboarding).
 func TestGeminiLoadCodeAssistProjectFromStoredCredential(t *testing.T) {
 	setupGeminiTestEnv(t)
 	stub := newGeminiCodeAssistStub(t, nil)
@@ -655,17 +517,6 @@ func TestGeminiLoadCodeAssistProjectFromStoredCredential(t *testing.T) {
 	}
 }
 
-// TestGeminiLoadCodeAssistProjectFromEnv pins the env override (spec §5
-// `google_cloud_project_from_env`): GOOGLE_CLOUD_PROJECT wins,
-// GOOGLE_CLOUD_PROJECT_ID is the fallback, both are trimmed and an empty value
-// is ignored.
-//
-// C1: the env project is a REQUEST INPUT, not a short-circuit. jcode's
-// setup_runtime_state always POSTs loadCodeAssist (its response carries
-// currentTier), so this test now asserts the call HAPPENS, that the env project
-// rides on the wire as cloudaicompanionProject AND metadata.duetProject, and
-// that it is the result when the (currentTier-bearing) response names no
-// project.
 func TestGeminiLoadCodeAssistProjectFromEnv(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -685,9 +536,6 @@ func TestGeminiLoadCodeAssistProjectFromEnv(t *testing.T) {
 			t.Setenv("GOOGLE_CLOUD_PROJECT", tc.project)
 			t.Setenv("GOOGLE_CLOUD_PROJECT_ID", tc.projectID)
 
-			// The handshake IS expected: a currentTier response with no
-			// cloudaicompanionProject is exactly the case where the env project
-			// is the answer. Any other path (in particular onboarding) is a bug.
 			stub := newGeminiCodeAssistStub(t, func(req capturedCodeAssistRequest) (int, string) {
 				if req.path != "/v1internal:loadCodeAssist" {
 					t.Errorf("unexpected request to %q", req.path)
@@ -709,9 +557,6 @@ func TestGeminiLoadCodeAssistProjectFromEnv(t *testing.T) {
 			if len(requests) != 1 {
 				t.Fatalf("loadCodeAssist requests = %d, want exactly 1 (jcode always calls it, env project or not)", len(requests))
 			}
-			// The env project must be on the wire, both as the request's
-			// cloudaicompanionProject and as metadata.duetProject (jcode's
-			// load_code_assist_request / client_metadata).
 			if want := `"cloudaicompanionProject":"` + tc.want + `"`; !strings.Contains(string(requests[0].body), want) {
 				t.Errorf("loadCodeAssist body must contain %s, got: %s", want, requests[0].body)
 			}
@@ -731,9 +576,6 @@ func TestGeminiLoadCodeAssistProjectFromEnv(t *testing.T) {
 	}
 }
 
-// TestGeminiLoadCodeAssistResponseWinsOverEnv pins jcode's precedence: the
-// server's cloudaicompanionProject beats the env project (setup_runtime_state
-// step 3 checks the response first, the env project second).
 func TestGeminiLoadCodeAssistResponseWinsOverEnv(t *testing.T) {
 	setupGeminiTestEnv(t)
 	t.Setenv("GOOGLE_CLOUD_PROJECT", "env-proj")
@@ -759,10 +601,6 @@ func TestGeminiLoadCodeAssistResponseWinsOverEnv(t *testing.T) {
 	}
 }
 
-// TestGeminiLoadCodeAssistOmitsEmptyProjectField guards the omitempty contract
-// on the request: with no env project the key `cloudaicompanionProject` must be
-// ABSENT from the body (not present-and-empty), exactly like jcode's
-// `skip_serializing_if = "Option::is_none"` on LoadCodeAssistRequest.
 func TestGeminiLoadCodeAssistOmitsEmptyProjectField(t *testing.T) {
 	setupGeminiTestEnv(t)
 
@@ -776,8 +614,6 @@ func TestGeminiLoadCodeAssistOmitsEmptyProjectField(t *testing.T) {
 
 	p := newGeminiTestProvider(t, stub.Server, "tok")
 	_, err := p.loadCodeAssistProject(context.Background(), "tok")
-	// The handshake succeeds, but there is no project anywhere (no env, no
-	// response project): the actionable error is the expected outcome.
 	if err == nil {
 		t.Fatal("expected an error when no project can be determined, got nil")
 	}
@@ -802,10 +638,6 @@ func TestGeminiLoadCodeAssistOmitsEmptyProjectField(t *testing.T) {
 	}
 }
 
-// TestGeminiLoadCodeAssistProjectFromResponse pins the wire of the handshake:
-// POST {base}/v1internal:loadCodeAssist with the spec §5 body, an OAuth bearer
-// token and the official-CLI identity headers, and a project taken from the
-// response's cloudaicompanionProject — then persisted onto the credential.
 func TestGeminiLoadCodeAssistProjectFromResponse(t *testing.T) {
 	setupGeminiTestEnv(t)
 	stub := newGeminiCodeAssistStub(t, func(req capturedCodeAssistRequest) (int, string) {
@@ -852,8 +684,6 @@ func TestGeminiLoadCodeAssistProjectFromResponse(t *testing.T) {
 			t.Errorf("metadata.%s = %v, want %q", key, got, want)
 		}
 	}
-	// The env project is absent (and therefore omitted) when the environment
-	// carries none: spec §5's `cloudaicompanionProject` is optional.
 	if _, ok := body["cloudaicompanionProject"]; ok {
 		t.Errorf("loadCodeAssist body must omit an empty cloudaicompanionProject: %s", requests[0].body)
 	}
@@ -861,8 +691,6 @@ func TestGeminiLoadCodeAssistProjectFromResponse(t *testing.T) {
 		t.Errorf("metadata must omit an empty duetProject: %s", requests[0].body)
 	}
 
-	// D7: a discovered project is persisted so the next turn skips the
-	// handshake.
 	stored, err := auth.GetCredential("gemini")
 	if err != nil {
 		t.Fatalf("GetCredential() error: %v", err)
@@ -872,10 +700,6 @@ func TestGeminiLoadCodeAssistProjectFromResponse(t *testing.T) {
 	}
 }
 
-// TestGeminiLoadCodeAssistProjectOnboardsWhenNoTier pins spec §5 step 4-5: a
-// response with no currentTier starts the onboarding operation, the LRO is
-// polled at {base}/{version}/{name} until done, and the project comes from
-// response.cloudaicompanionProject.id.
 func TestGeminiLoadCodeAssistProjectOnboardsWhenNoTier(t *testing.T) {
 	setupGeminiTestEnv(t)
 
@@ -927,9 +751,6 @@ func TestGeminiLoadCodeAssistProjectOnboardsWhenNoTier(t *testing.T) {
 	requireGeminiHeaders(t, polls[0].header, "tok")
 }
 
-// shrinkGeminiOnboardPollInterval makes the onboarding LRO poll delay
-// millisecond-scale for the duration of a test (the seam exists for exactly
-// this); production keeps 5s.
 func shrinkGeminiOnboardPollInterval(t *testing.T) {
 	t.Helper()
 	original := geminiOnboardPollInterval
@@ -937,11 +758,6 @@ func shrinkGeminiOnboardPollInterval(t *testing.T) {
 	t.Cleanup(func() { geminiOnboardPollInterval = original })
 }
 
-// TestGeminiOnboardUserFreeTierOmitsProject pins jcode's free-tier branch of
-// setup_runtime_state steps 4-5: FREE-tier onboarding sends `{tierId, metadata}`
-// with metadata.duetProject = None and NO cloudaicompanionProject, even when an
-// env project is configured (free accounts may not name a Cloud project). With
-// no project on the LRO, the env project is the final fallback.
 func TestGeminiOnboardUserFreeTierOmitsProject(t *testing.T) {
 	setupGeminiTestEnv(t)
 	t.Setenv("GOOGLE_CLOUD_PROJECT", "env-proj")
@@ -964,7 +780,6 @@ func TestGeminiOnboardUserFreeTierOmitsProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadCodeAssistProject() error: %v", err)
 	}
-	// The LRO carried no project, so the env project is the fallback.
 	if project != "env-proj" {
 		t.Errorf("project = %q, want the env fallback %q", project, "env-proj")
 	}
@@ -992,12 +807,6 @@ func TestGeminiOnboardUserFreeTierOmitsProject(t *testing.T) {
 	}
 }
 
-// TestGeminiOnboardUserNonFreeTierSendsProject pins the OTHER branch of jcode's
-// setup_runtime_state steps 4-5: any tier but free-tier sends `{tierId,
-// cloudaicompanionProject: <envProject>, metadata}` with duetProject =
-// <envProject>. This branch is only reachable from C1 on: before the fix the
-// env project short-circuited the handshake, so envProject was always empty
-// here.
 func TestGeminiOnboardUserNonFreeTierSendsProject(t *testing.T) {
 	setupGeminiTestEnv(t)
 	t.Setenv("GOOGLE_CLOUD_PROJECT", "env-proj")
@@ -1047,10 +856,6 @@ func TestGeminiOnboardUserNonFreeTierSendsProject(t *testing.T) {
 	}
 }
 
-// TestGeminiLoadCodeAssistProjectErrorNamesEnvVars requires the actionable
-// fallback error (spec §5 `ineligible_or_project_error`) to name BOTH env vars
-// when neither the response nor the environment yields a project, and to prefer
-// the server's own reason messages when it sends any.
 func TestGeminiLoadCodeAssistProjectErrorNamesEnvVars(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -1090,15 +895,6 @@ func TestGeminiLoadCodeAssistProjectErrorNamesEnvVars(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Chat
-// -----------------------------------------------------------------------------
-
-// TestGeminiChatWire runs a full turn against a stub that serves BOTH the
-// handshake and generateContent, and pins everything spec §5 requires on the
-// wire: the {base}/{version}:generateContent path, the OAuth bearer token, the
-// JSON content type, the official-CLI UA / x-goog-api-client, and the envelope
-// keys model/project/user_prompt_id/request.
 func TestGeminiChatWire(t *testing.T) {
 	setupGeminiTestEnv(t)
 	stub := newGeminiCodeAssistStub(t, func(req capturedCodeAssistRequest) (int, string) {
@@ -1181,17 +977,12 @@ func TestGeminiChatWire(t *testing.T) {
 	}
 }
 
-// TestGeminiChatDefaultModel pins the empty-model fallback: the envelope is
-// built with geminiCodeAssistDefaultModel ("gemini-pro-latest"), the same model
-// jcode's DEFAULT_MODEL resolves to.
 func TestGeminiChatDefaultModel(t *testing.T) {
 	setupGeminiTestEnv(t)
 	t.Setenv("GOOGLE_CLOUD_PROJECT", "env-proj")
 	stub := newGeminiCodeAssistStub(t, func(req capturedCodeAssistRequest) (int, string) {
 		switch req.path {
 		case "/v1internal:loadCodeAssist":
-			// C1: the handshake always runs; the env project is the fallback
-			// when the response names none.
 			return http.StatusOK, `{"currentTier":{"id":"free-tier"}}`
 		case "/v1internal:generateContent":
 			return http.StatusOK, `{"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}]}}`
@@ -1222,16 +1013,6 @@ func TestGeminiChatDefaultModel(t *testing.T) {
 	}
 }
 
-// TestGeminiChatUsesStaticTokenWhenNoTokenSource pins the middle link of the
-// constructor's token chain (C2): NewGeminiCodeAssistProvider(seed, nil) must
-// authenticate with the seed token itself and NEVER fall through to
-// createGeminiTokenSource().
-//
-// The credential store is deliberately primed with an EXPIRED credential and
-// the token endpoint with a hit counter, so the two behaviours are
-// distinguishable: if the provider wrongly fell through to the coordinator, the
-// request would carry "fresh-access" (after exactly one token-endpoint hit)
-// instead of the seed.
 func TestGeminiChatUsesStaticTokenWhenNoTokenSource(t *testing.T) {
 	setupGeminiTestEnv(t)
 	tokenSrv := newGeminiTokenServer(t)
@@ -1269,13 +1050,9 @@ func TestGeminiChatUsesStaticTokenWhenNoTokenSource(t *testing.T) {
 	requireGeminiHeaders(t, requests[0].header, "static-seed")
 }
 
-// TestGeminiChatReportsHTTPError requires a non-2xx Code Assist response to
-// surface as an error carrying the status code and (truncated) body.
 func TestGeminiChatReportsHTTPError(t *testing.T) {
 	setupGeminiTestEnv(t)
 	t.Setenv("GOOGLE_CLOUD_PROJECT", "env-proj")
-	// C1: the handshake runs first, so it must succeed for the turn to reach
-	// generateContent; only generateContent returns the 429 under test.
 	stub := newGeminiCodeAssistStub(t, func(req capturedCodeAssistRequest) (int, string) {
 		if req.path == "/v1internal:loadCodeAssist" {
 			return http.StatusOK, `{"currentTier":{"id":"free-tier"}}`
@@ -1295,8 +1072,6 @@ func TestGeminiChatReportsHTTPError(t *testing.T) {
 	}
 }
 
-// TestGeminiChatPropagatesTokenSourceError requires an authentication failure
-// to abort the turn before any request is made.
 func TestGeminiChatPropagatesTokenSourceError(t *testing.T) {
 	setupGeminiTestEnv(t)
 	stub := newGeminiCodeAssistStub(t, nil)
@@ -1318,14 +1093,8 @@ func TestGeminiChatPropagatesTokenSourceError(t *testing.T) {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Small units
-// -----------------------------------------------------------------------------
-
 var errGeminiTestAuth = errors.New("gemini test auth failure")
 
-// TestGeminiGetDefaultModel pins the default-model accessor, including the
-// empty-field fallback.
 func TestGeminiGetDefaultModel(t *testing.T) {
 	if got := (&GeminiCodeAssistProvider{}).GetDefaultModel(); got != geminiCodeAssistDefaultModel {
 		t.Errorf("zero-value GetDefaultModel() = %q, want %q", got, geminiCodeAssistDefaultModel)
@@ -1335,18 +1104,13 @@ func TestGeminiGetDefaultModel(t *testing.T) {
 	}
 }
 
-// TestGeminiCodeAssistUserAgent pins jcode's `gemini_user_agent()` (spec §5):
-// the UA is built from the DEFAULT model (never the requested one) and the
-// OS/arch names are the ones Rust's std::env::consts emits, which is what the
-// official Gemini CLI sends. It is load-bearing: jcode measured 429
-// RATE_LIMIT_EXCEEDED with a custom UA and no throttling with this identity.
 func TestGeminiCodeAssistUserAgent(t *testing.T) {
 	osCases := map[string]string{
 		"linux":   "linux",
-		"darwin":  "macos", // Rust's std::env::consts::OS calls it "macos"
+		"darwin":  "macos",
 		"macos":   "macos",
 		"windows": "windows",
-		"plan9":   "plan9", // unknown values pass through, like jcode's `other` arm
+		"plan9":   "plan9",
 	}
 	for in, want := range osCases {
 		if got := geminiUserAgentOS(in); got != want {
@@ -1373,14 +1137,11 @@ func TestGeminiCodeAssistUserAgent(t *testing.T) {
 	if got != want {
 		t.Fatalf("composed UA = %q, want %q", got, want)
 	}
-	// The live UA must follow the same shape on this machine.
 	if ua := geminiCodeAssistUserAgent(); !strings.HasPrefix(ua, "GeminiCLI-tui/0.57.0/"+geminiCodeAssistDefaultModel+" (") || !strings.HasSuffix(ua, "; terminal)") {
 		t.Errorf("geminiCodeAssistUserAgent() = %q, want the GeminiCLI-tui/0.57.0/<default-model> (os; arch; terminal) shape", ua)
 	}
 }
 
-// TestGeminiSessionIDFromOptions pins the option plumbing: a string session id
-// is passed through (trimmed), anything else yields "".
 func TestGeminiSessionIDFromOptions(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -1402,14 +1163,6 @@ func TestGeminiSessionIDFromOptions(t *testing.T) {
 	}
 }
 
-// TestCodeAssistRequest_IgnoresWireSessionID is the T2.0 regression guard for
-// the locked D3 ruling: wire_session_id (pkg/providers/protocoltypes) is the
-// agent loop's routing contract for OpenCode Go and is now stamped on EVERY
-// LLM egress — this provider's calls included. The Code Assist transport keeps
-// reading only options["session_id"] (its own BODY field, honoured when
-// explicitly passed — see TestGeminiChatWire), so the stamped wire session id
-// must never change this provider's wire format: no session_id in the body,
-// and the wire option itself must not leak into it either.
 func TestCodeAssistRequest_IgnoresWireSessionID(t *testing.T) {
 	setupGeminiTestEnv(t)
 	t.Setenv("GOOGLE_CLOUD_PROJECT", "env-proj")
@@ -1426,9 +1179,6 @@ func TestCodeAssistRequest_IgnoresWireSessionID(t *testing.T) {
 	})
 
 	p := newGeminiTestProvider(t, stub.Server, "tok")
-	// The exact options shape the agent loop sends for this provider: the
-	// wire session id stamped for transports that need a routing header, and
-	// no Gemini session_id (no production caller sets that option).
 	options := map[string]any{OptWireSessionID: WireSessionID("native:e2e-gemini:chat:3")}
 	if _, err := p.Chat(context.Background(), []Message{{Role: "user", Content: "Hi"}}, nil, "gemini-2.5-pro", options); err != nil {
 		t.Fatalf("Chat() error: %v", err)

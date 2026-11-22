@@ -14,8 +14,6 @@ import (
 	"github.com/xilistudios/lele/pkg/version"
 )
 
-// --- NewHTTPClient tests ---
-
 func TestNewHTTPClient_DefaultTimeout(t *testing.T) {
 	client := NewHTTPClient("")
 	if client.Timeout != DefaultRequestTimeout {
@@ -47,7 +45,6 @@ func TestNewHTTPClient_NoProxy(t *testing.T) {
 }
 
 func TestNewHTTPClient_InvalidProxy(t *testing.T) {
-	// Should not panic, just log and return client without proxy
 	client := NewHTTPClient("://bad-url")
 	if client == nil {
 		t.Fatal("expected non-nil client even with invalid proxy")
@@ -114,7 +111,6 @@ func TestIdleTimeoutReader_TimesOutWhenIdle(t *testing.T) {
 		t.Fatal("read did not unblock within expected window")
 	}
 
-	// Clean up (Close unblocks the pipe writer).
 	_ = pw.Close()
 	_ = r.Close()
 }
@@ -123,7 +119,6 @@ func TestIdleTimeoutReader_ResetsOnActivity(t *testing.T) {
 	pr, pw := io.Pipe()
 	r := NewIdleTimeoutReader(pr, 100*time.Millisecond)
 
-	// Writer goroutine: write bytes every 20ms for ~150ms total.
 	go func() {
 		for i := 0; i < 8; i++ {
 			_, _ = pw.Write([]byte{'a'})
@@ -143,7 +138,6 @@ func TestIdleTimeoutReader_ResetsOnActivity(t *testing.T) {
 }
 
 func TestNewIdleTimeoutReader_ZeroTimeoutNoop(t *testing.T) {
-	// Use io.NopCloser to verify identity is preserved.
 	someCloser := io.NopCloser(strings.NewReader("data"))
 	r := NewIdleTimeoutReader(someCloser, 0)
 	if r != someCloser {
@@ -151,7 +145,6 @@ func TestNewIdleTimeoutReader_ZeroTimeoutNoop(t *testing.T) {
 	}
 }
 
-// --- SerializeMessages tests ---
 func TestSerializeMessages_PlainText(t *testing.T) {
 	messages := []Message{
 		{Role: "user", Content: "hello"},
@@ -243,8 +236,6 @@ func TestSerializeMessages_MediaWithToolCallID(t *testing.T) {
 	}
 }
 
-// serializeToMaps marshals SerializeMessages output and decodes it back the
-// same way the request body round-trips through JSON on the wire.
 func serializeToMaps(t *testing.T, result []any) []map[string]any {
 	t.Helper()
 	data, err := json.Marshal(result)
@@ -258,7 +249,6 @@ func serializeToMaps(t *testing.T, result []any) []map[string]any {
 	return msgs
 }
 
-// contentPartsOf returns the decoded content array of a wire message.
 func contentPartsOf(t *testing.T, msg map[string]any) []any {
 	t.Helper()
 	content, ok := msg["content"].([]any)
@@ -268,9 +258,6 @@ func contentPartsOf(t *testing.T, msg map[string]any) []any {
 	return content
 }
 
-// TestSerializeMessages_VideoContentPart pins the exact wire shape of a
-// video_url content part: fps is present only when > 0, and parts with an
-// empty/whitespace URL (or a nil VideoURL) are skipped entirely.
 func TestSerializeMessages_VideoContentPart(t *testing.T) {
 	dataURL := "data:video/mp4;base64,AAAA"
 
@@ -346,8 +333,6 @@ func TestSerializeMessages_VideoContentPart(t *testing.T) {
 	})
 }
 
-// TestSerializeMessages_WithVideoMedia mirrors TestSerializeMessages_WithAudioMedia
-// for data:video/... entries in Message.Media (channel attachments path).
 func TestSerializeMessages_WithVideoMedia(t *testing.T) {
 	messages := []Message{
 		{Role: "user", Content: "watch this", Media: []string{"data:video/mp4;base64,abc123"}},
@@ -375,13 +360,10 @@ func TestSerializeMessages_WithVideoMedia(t *testing.T) {
 	if video["url"] != "data:video/mp4;base64,abc123" {
 		t.Fatalf("video url = %v, want data:video/mp4;base64,abc123", video["url"])
 	}
-	// The media path carries no fps hint.
 	if _, hasFPS := video["fps"]; hasFPS {
 		t.Errorf("media video part must not carry fps: %v", video)
 	}
 }
-
-// --- ParseResponse tests ---
 
 func TestParseResponse_BasicContent(t *testing.T) {
 	body := `{"choices":[{"message":{"content":"hello world"},"finish_reason":"stop"}]}`
@@ -460,8 +442,6 @@ func TestParseResponse_InvalidJSON(t *testing.T) {
 	}
 }
 
-// --- DecodeToolCallArguments tests ---
-
 func TestDecodeToolCallArguments_ObjectJSON(t *testing.T) {
 	raw := json.RawMessage(`{"city":"Seattle","units":"metric"}`)
 	args := DecodeToolCallArguments(raw, "test")
@@ -529,8 +509,6 @@ func TestDecodeToolCallArguments_InvalidStringJSONHasNoRawArgument(t *testing.T)
 	}
 }
 
-// --- HandleErrorResponse tests ---
-
 func TestHandleErrorResponse_JSONError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -578,8 +556,6 @@ func TestHandleErrorResponse_HTMLError(t *testing.T) {
 	}
 }
 
-// --- ReadAndParseResponse tests ---
-
 func TestReadAndParseResponse_ValidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -622,8 +598,6 @@ func TestReadAndParseResponse_HTMLResponse(t *testing.T) {
 	}
 }
 
-// --- LooksLikeHTML tests ---
-
 func TestLooksLikeHTML_ContentTypeHTML(t *testing.T) {
 	if !LooksLikeHTML(nil, "text/html; charset=utf-8") {
 		t.Error("expected true for text/html content type")
@@ -662,8 +636,6 @@ func TestLooksLikeHTML_NotHTML(t *testing.T) {
 	}
 }
 
-// --- ResponsePreview tests ---
-
 func TestResponsePreview_Short(t *testing.T) {
 	got := ResponsePreview([]byte("hello"), 128)
 	if got != "hello" {
@@ -674,7 +646,7 @@ func TestResponsePreview_Short(t *testing.T) {
 func TestResponsePreview_Truncated(t *testing.T) {
 	body := strings.Repeat("a", 200)
 	got := ResponsePreview([]byte(body), 128)
-	if len(got) != 131 { // 128 + "..."
+	if len(got) != 131 {
 		t.Errorf("len = %d, want 131", len(got))
 	}
 	if !strings.HasSuffix(got, "...") {
@@ -695,8 +667,6 @@ func TestResponsePreview_Whitespace(t *testing.T) {
 		t.Errorf("got %q, want %q for whitespace-only body", got, "<empty>")
 	}
 }
-
-// --- AsInt tests ---
 
 func TestAsInt(t *testing.T) {
 	tests := []struct {
@@ -722,8 +692,6 @@ func TestAsInt(t *testing.T) {
 	}
 }
 
-// --- AsFloat tests ---
-
 func TestAsFloat(t *testing.T) {
 	tests := []struct {
 		name string
@@ -748,8 +716,6 @@ func TestAsFloat(t *testing.T) {
 	}
 }
 
-// --- WrapHTMLResponseError tests ---
-
 func TestWrapHTMLResponseError(t *testing.T) {
 	err := WrapHTMLResponseError(502, []byte("<html>bad</html>"), "text/html", "https://api.example.com")
 	if err == nil {
@@ -767,13 +733,10 @@ func TestWrapHTMLResponseError(t *testing.T) {
 	}
 }
 
-// --- HandleErrorResponse with read failure ---
-
 func TestHandleErrorResponse_EmptyBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		// empty body
 	}))
 	defer server.Close()
 
@@ -790,8 +753,6 @@ func TestHandleErrorResponse_EmptyBody(t *testing.T) {
 		t.Errorf("expected status code, got %v", err)
 	}
 }
-
-// --- ReadAndParseResponse with invalid JSON ---
 
 func TestReadAndParseResponse_InvalidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -810,8 +771,6 @@ func TestReadAndParseResponse_InvalidJSON(t *testing.T) {
 		t.Fatal("expected error for invalid JSON")
 	}
 }
-
-// --- ParseResponse with thought_signature (Google/Gemini) ---
 
 func TestParseResponse_WithThoughtSignature(t *testing.T) {
 	body := `{"choices":[{"message":{"content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"test_tool","arguments":"{}"},"extra_content":{"google":{"thought_signature":"sig123"}}}]},"finish_reason":"tool_calls"}]}`
@@ -834,12 +793,6 @@ func TestParseResponse_WithThoughtSignature(t *testing.T) {
 	}
 }
 
-// --- Timeout policy invariants ---
-//
-// These guard the reasoning-model fix: long-thinking requests must survive as
-// long as the upstream is alive, so the idle window must dominate the old
-// duration-based cap and the lifetime ceiling must sit above both.
-
 func TestTimeoutPolicy_IdleWindowDominatesRequestTimeout(t *testing.T) {
 	if DefaultStreamIdleTimeout <= DefaultRequestTimeout {
 		t.Errorf("DefaultStreamIdleTimeout (%v) must exceed DefaultRequestTimeout (%v): "+
@@ -858,8 +811,6 @@ func TestTimeoutPolicy_LifetimeCapAboveIdleWindow(t *testing.T) {
 }
 
 func TestTimeoutPolicy_IdleWindowWithinLifetimeCap(t *testing.T) {
-	// Sanity: the cap is a generous safety net, not a practical limit for a
-	// single request.
 	if MaxRequestLifetime < 10*time.Minute {
 		t.Errorf("MaxRequestLifetime = %v, expected a generous safety net (>= 10m)", MaxRequestLifetime)
 	}
@@ -872,11 +823,6 @@ func TestUserAgent_IsLeleVersioned(t *testing.T) {
 	}
 }
 
-// TestSerializeMessages_OmitsUIMetadata pins the "UI metadata only" contract of
-// the failure field: ErrorDetail is persisted for the UIs, but the wire payload
-// built for a provider is assembled from explicit fields, so it must never
-// appear in a request. Same guarantee the other UI-only fields rely on
-// (DisplayContent, Attachments, Command).
 func TestSerializeMessages_OmitsUIMetadata(t *testing.T) {
 	messages := []Message{
 		{

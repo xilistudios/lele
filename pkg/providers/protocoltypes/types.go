@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package protocoltypes
 
 import (
@@ -10,7 +5,6 @@ import (
 	"strings"
 )
 
-// ToolCall represents a tool call from the LLM.
 type ToolCall struct {
 	ID               string                 `json:"id"`
 	Type             string                 `json:"type,omitempty"`
@@ -20,46 +14,28 @@ type ToolCall struct {
 	ThoughtSignature string                 `json:"thought_signature,omitempty"`
 	ExtraContent     *ExtraContent          `json:"extra_content,omitempty"`
 
-	// ArgumentsTruncated records that the arguments arrived cut off mid-write
-	// (the model hit its output token limit while streaming them) and were
-	// closed up by the repair pass. The map above therefore holds only the
-	// members that completed before the cut; anything being written at that
-	// moment - typically a large "content" field - is missing.
-	//
-	// It is never sent on the wire: it is a flag for the agent loop, which must
-	// not execute a call whose payload is known to be incomplete.
-	//
-	// json:"-" is therefore deliberate and also means the flag does not survive
-	// session persistence. That is fine: it only governs whether a call is
-	// executed, and by the time a session is replayed the call already has its
-	// recorded result.
 	ArgumentsTruncated bool `json:"-"`
 }
 
-// FunctionCall represents a function call within a ToolCall.
 type FunctionCall struct {
 	Name             string `json:"name"`
 	Arguments        string `json:"arguments"`
 	ThoughtSignature string `json:"thought_signature,omitempty"`
 }
 
-// ExtraContent holds provider-specific extra content.
 type ExtraContent struct {
 	Google *GoogleExtra `json:"google,omitempty"`
 }
 
-// GoogleExtra contains Google-specific extra fields.
 type GoogleExtra struct {
 	ThoughtSignature string `json:"thought_signature,omitempty"`
 }
 
-// ReasoningDetail contains reasoning information from the model.
 type ReasoningDetail struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
 }
 
-// LLMResponse represents the response from an LLM provider.
 type LLMResponse struct {
 	Content          string            `json:"content"`
 	ToolCalls        []ToolCall        `json:"tool_calls,omitempty"`
@@ -70,36 +46,21 @@ type LLMResponse struct {
 	ReasoningDetails []ReasoningDetail `json:"reasoning_details,omitempty"`
 }
 
-// UsageInfo contains token usage information.
-//
-// CacheReadInputTokens and CacheCreationInputTokens are reported by providers
-// that support prompt caching (Anthropic, Bedrock, OpenAI-compatible endpoints
-// exposing prompt_tokens_details). PromptTokens always reflects the *total*
-// input tokens billed for the request (cache read + cache write + uncached),
-// so cache hit-rate can be derived as CacheReadInputTokens / PromptTokens.
 type UsageInfo struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
 
-	// CacheReadInputTokens counts input tokens served from prompt cache.
-	CacheReadInputTokens int `json:"cache_read_input_tokens,omitempty"`
-	// CacheCreationInputTokens counts input tokens written to prompt cache.
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	// PromptTokensDetails carries the OpenAI-style usage breakdown; some
-	// OpenAI-compatible endpoints (OpenRouter, DeepSeek, Gemini compat)
-	// report cache hits as prompt_tokens_details.cached_tokens.
-	PromptTokensDetails *PromptTokensDetails `json:"prompt_tokens_details,omitempty"`
+	CacheReadInputTokens     int                  `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int                  `json:"cache_creation_input_tokens,omitempty"`
+	PromptTokensDetails      *PromptTokensDetails `json:"prompt_tokens_details,omitempty"`
 }
 
-// PromptTokensDetails is the OpenAI Chat Completions usage breakdown.
 type PromptTokensDetails struct {
 	CachedTokens    int `json:"cached_tokens,omitempty"`
 	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 }
 
-// NormalizeCacheUsage folds OpenAI-style prompt_tokens_details.cached_tokens
-// into CacheReadInputTokens. Call after unmarshaling a provider response.
 func (u *UsageInfo) NormalizeCacheUsage() {
 	if u == nil || u.PromptTokensDetails == nil {
 		return
@@ -109,8 +70,6 @@ func (u *UsageInfo) NormalizeCacheUsage() {
 	}
 }
 
-// CacheHitRate returns the fraction of input tokens served from the prompt
-// cache for this request, or 0 when there is no input-token data.
 func (u *UsageInfo) CacheHitRate() float64 {
 	if u == nil || u.PromptTokens <= 0 {
 		return 0
@@ -118,21 +77,16 @@ func (u *UsageInfo) CacheHitRate() float64 {
 	return float64(u.CacheReadInputTokens) / float64(u.PromptTokens)
 }
 
-// ImageURL represents an image URL for multimodal content.
 type ImageURL struct {
 	URL    string `json:"url"`
 	Detail string `json:"detail,omitempty"`
 }
 
-// VideoURL represents a video URL for multimodal content; URL may be an
-// http(s) URL or a data:video/...;base64 URL. FPS is an optional
-// sampling-hint forwarded only to providers that support it (Qwen-VL family).
 type VideoURL struct {
 	URL string  `json:"url"`
 	FPS float64 `json:"fps,omitempty"`
 }
 
-// ContentPart represents a part of multimodal content.
 type ContentPart struct {
 	Type     string    `json:"type"`
 	Text     string    `json:"text,omitempty"`
@@ -140,15 +94,6 @@ type ContentPart struct {
 	VideoURL *VideoURL `json:"video_url,omitempty"`
 }
 
-// MessageAttachment is a file attachment associated with a message. It is the
-// persistence/display counterpart of bus.FileAttachment: defined here (and NOT
-// imported from pkg/bus) so the providers layer stays free of bus dependencies.
-// Path is always a filesystem path the WebUI can serve via
-// /api/v1/files/view (staged under the lele dir by the native channel).
-//
-// IMPORTANT: Attachments are metadata for the UI only. Providers build LLM
-// request payloads from explicit fields (Content/ContentParts/ToolCalls/...),
-// so this field is never injected into model requests.
 type MessageAttachment struct {
 	Name     string `json:"name,omitempty"`
 	Path     string `json:"path,omitempty"`
@@ -157,44 +102,22 @@ type MessageAttachment struct {
 	Caption  string `json:"caption,omitempty"`
 }
 
-// Message represents a message in a conversation.
 type Message struct {
-	Role               string        `json:"role"`
-	Content            string        `json:"content"`
-	ContentParts       []ContentPart `json:"content_parts,omitempty"`
-	ToolCalls          []ToolCall    `json:"tool_calls,omitempty"`
-	ToolCallID         string        `json:"tool_call_id,omitempty"`
-	Media              []string      `json:"media,omitempty"`
-	ReasoningContent   string        `json:"reasoning_content,omitempty"`
-	ExcludeFromContext bool          `json:"exclude_from_context,omitempty"`
-	Streaming          bool          `json:"streaming,omitempty"`
-	// Attachments carries file attachments delivered with this message (e.g.
-	// via the send_file tool) so the WebUI can list and download them from
-	// chat history. UI metadata only — never sent to LLM providers.
-	Attachments []MessageAttachment `json:"attachments,omitempty"`
-	// DisplayContent is the text a UI should show instead of Content. It exists
-	// for user messages whose stored Content was rewritten before reaching the
-	// model — today only harness slash commands, whose expanded prompt is what
-	// the LLM must see while the user's bubble should keep the original
-	// "/name args" they typed. UI metadata only — never sent to LLM providers
-	// (providers serialize from explicit fields, see common.SerializeMessages).
-	DisplayContent string `json:"display_content,omitempty"`
-	// Command records the harness slash command that produced this message, so
-	// the WebUI can re-render the command chip from history instead of only
-	// from the live command.applied event. UI metadata only.
-	Command *CommandApplied `json:"harness_command,omitempty"`
-	// ErrorDetail carries the failure detail of an LLM request that could not
-	// complete the turn. The message is persisted with ExcludeFromContext=true
-	// so it never reaches the model; UIs render it as an error box instead of
-	// a normal assistant bubble. Content keeps the legacy "❌ Error …" text for
-	// channels that only understand plain text. UI metadata only — never sent
-	// to LLM providers.
-	ErrorDetail string `json:"error_detail,omitempty"`
+	Role               string              `json:"role"`
+	Content            string              `json:"content"`
+	ContentParts       []ContentPart       `json:"content_parts,omitempty"`
+	ToolCalls          []ToolCall          `json:"tool_calls,omitempty"`
+	ToolCallID         string              `json:"tool_call_id,omitempty"`
+	Media              []string            `json:"media,omitempty"`
+	ReasoningContent   string              `json:"reasoning_content,omitempty"`
+	ExcludeFromContext bool                `json:"exclude_from_context,omitempty"`
+	Streaming          bool                `json:"streaming,omitempty"`
+	Attachments        []MessageAttachment `json:"attachments,omitempty"`
+	DisplayContent     string              `json:"display_content,omitempty"`
+	Command            *CommandApplied     `json:"harness_command,omitempty"`
+	ErrorDetail        string              `json:"error_detail,omitempty"`
 }
 
-// CommandApplied describes a user-defined slash command (pkg/harness) that was
-// expanded into the prompt of a user message. It mirrors the payload of the
-// command.applied outbound event so live and history render the same chip.
 type CommandApplied struct {
 	Name        string `json:"command"`
 	Description string `json:"description,omitempty"`
@@ -318,21 +241,13 @@ func (m *Message) HasVideoContent() bool {
 	return false
 }
 
-// TextOnlyContent returns a guaranteed text-only representation of the message,
-// suitable for feeding into a summarization/compaction model that may not
-// support vision. Image content parts are rendered as "[image]", video content
-// parts as "[video]", and attached media entries as "[media]" placeholders, so
-// no base64 payloads, image URLs or video URLs ever reach the model. The
-// result is always plain text.
 func (m *Message) TextOnlyContent() string {
 	var builder strings.Builder
 
-	// Plain text content takes priority.
 	if text := strings.TrimSpace(m.Content); text != "" {
 		builder.WriteString(m.Content)
 	}
 
-	// Append text from multimodal content parts (images become "[image]").
 	for _, part := range m.ContentParts {
 		switch part.Type {
 		case "text":
@@ -357,7 +272,6 @@ func (m *Message) TextOnlyContent() string {
 		}
 	}
 
-	// Append placeholders for channel media attachments.
 	for range m.Media {
 		if builder.Len() > 0 {
 			builder.WriteByte('\n')
@@ -368,10 +282,6 @@ func (m *Message) TextOnlyContent() string {
 	return builder.String()
 }
 
-// textFromParts rebuilds a plain-text Content value from multimodal content
-// parts (used when a persisted message is reloaded). Besides the joined text
-// parts it keeps "[image]" and "[video]" placeholders for media parts, so the
-// reloaded message never loses the fact that media was attached.
 func textFromParts(parts []ContentPart) string {
 	if len(parts) == 0 {
 		return ""
@@ -405,13 +315,11 @@ func textFromParts(parts []ContentPart) string {
 	return builder.String()
 }
 
-// ToolDefinition represents a tool definition for the LLM.
 type ToolDefinition struct {
 	Type     string                 `json:"type"`
 	Function ToolFunctionDefinition `json:"function"`
 }
 
-// ToolFunctionDefinition represents the function definition within a ToolDefinition.
 type ToolFunctionDefinition struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`

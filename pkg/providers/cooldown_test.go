@@ -27,19 +27,16 @@ func TestCooldown_StandardEscalation(t *testing.T) {
 	now := time.Now()
 	ct, current := newTestTracker(now)
 
-	// 1st error → 1 min cooldown
 	ct.MarkFailure("openai", FailoverRateLimit)
 	if ct.IsAvailable("openai") {
 		t.Error("should be in cooldown after 1st error")
 	}
 
-	// Advance 61 seconds → available
 	*current = now.Add(61 * time.Second)
 	if !ct.IsAvailable("openai") {
 		t.Error("should be available after 1 min cooldown")
 	}
 
-	// 2nd error → 5 min cooldown
 	ct.MarkFailure("openai", FailoverRateLimit)
 	*current = now.Add(61*time.Second + 4*time.Minute)
 	if ct.IsAvailable("openai") {
@@ -52,7 +49,6 @@ func TestCooldown_StandardEscalation(t *testing.T) {
 }
 
 func TestCooldown_StandardCap(t *testing.T) {
-	// Verify formula: 1m, 5m, 25m, 1h, 1h, 1h...
 	expected := []time.Duration{
 		1 * time.Minute,
 		5 * time.Minute,
@@ -73,19 +69,16 @@ func TestCooldown_BillingEscalation(t *testing.T) {
 	now := time.Now()
 	ct, current := newTestTracker(now)
 
-	// 1st billing error → 5h cooldown
 	ct.MarkFailure("openai", FailoverBilling)
 	if ct.IsAvailable("openai") {
 		t.Error("should be disabled after billing error")
 	}
 
-	// Advance 4h → still disabled
 	*current = now.Add(4 * time.Hour)
 	if ct.IsAvailable("openai") {
 		t.Error("should still be disabled (5h cooldown)")
 	}
 
-	// Advance 5h + 1s → available
 	*current = now.Add(5*time.Hour + 1*time.Second)
 	if !ct.IsAvailable("openai") {
 		t.Error("should be available after 5h billing cooldown")
@@ -137,19 +130,16 @@ func TestCooldown_FailureWindowReset(t *testing.T) {
 	now := time.Now()
 	ct, current := newTestTracker(now)
 
-	// 4 errors → 1h cooldown
 	for i := 0; i < 4; i++ {
 		ct.MarkFailure("openai", FailoverRateLimit)
-		*current = current.Add(2 * time.Second) // small advance between errors
+		*current = current.Add(2 * time.Second)
 	}
 	if ct.ErrorCount("openai") != 4 {
 		t.Errorf("error count = %d, want 4", ct.ErrorCount("openai"))
 	}
 
-	// Advance 25 hours (past 24h failure window)
 	*current = now.Add(25 * time.Hour)
 
-	// Next error should reset counters first, then increment to 1
 	ct.MarkFailure("openai", FailoverRateLimit)
 	if ct.ErrorCount("openai") != 1 {
 		t.Errorf("error count after window reset = %d, want 1 (reset + 1)", ct.ErrorCount("openai"))
@@ -182,17 +172,14 @@ func TestCooldown_BillingTakesPrecedence(t *testing.T) {
 	now := time.Now()
 	ct, current := newTestTracker(now)
 
-	// Standard cooldown (1 min) + billing disable (5h)
-	ct.MarkFailure("openai", FailoverRateLimit) // 1 min cooldown
-	ct.MarkFailure("openai", FailoverBilling)   // 5h disable
+	ct.MarkFailure("openai", FailoverRateLimit)
+	ct.MarkFailure("openai", FailoverBilling)
 
-	// After 2 min: standard cooldown expired but billing still active
 	*current = now.Add(2 * time.Minute)
 	if ct.IsAvailable("openai") {
 		t.Error("billing disable should take precedence over standard cooldown")
 	}
 
-	// After 5h + 1s: both expired
 	*current = now.Add(5*time.Hour + 1*time.Second)
 	if !ct.IsAvailable("openai") {
 		t.Error("should be available after all cooldowns expire")
@@ -203,7 +190,6 @@ func TestCooldown_CooldownRemaining(t *testing.T) {
 	now := time.Now()
 	ct, current := newTestTracker(now)
 
-	// No failures → 0 remaining
 	if ct.CooldownRemaining("openai") != 0 {
 		t.Error("expected 0 remaining for new provider")
 	}
@@ -219,7 +205,6 @@ func TestCooldown_CooldownRemaining(t *testing.T) {
 
 func TestCooldown_SuccessOnUnknownProvider(t *testing.T) {
 	ct := NewCooldownTracker()
-	// Should not panic
 	ct.MarkSuccess("nonexistent")
 	if !ct.IsAvailable("nonexistent") {
 		t.Error("nonexistent provider should be available")
@@ -247,7 +232,6 @@ func TestCooldown_ConcurrentAccess(t *testing.T) {
 	}
 
 	wg.Wait()
-	// If we got here without panic, concurrent access is safe
 }
 
 func TestCooldown_MultipleProviders(t *testing.T) {
@@ -262,7 +246,6 @@ func TestCooldown_MultipleProviders(t *testing.T) {
 	if ct.IsAvailable("anthropic") {
 		t.Error("anthropic should be in cooldown")
 	}
-	// groq was never touched
 	if !ct.IsAvailable("groq") {
 		t.Error("groq should be available")
 	}

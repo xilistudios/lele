@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package anthropicmessages
 
 import (
@@ -197,20 +192,7 @@ func TestBuildRequestBody(t *testing.T) {
 	}
 }
 
-// TestBuildRequestBodyReasoningThinking locks the mapping from the internal
-// "reasoning" option to the Anthropic thinking/output_config request fields.
-// The "enabled" flag is tri-state:
-//
-//	enabled:false (explicit) -> thinking {"type":"disabled"}, NO output_config
-//	enabled:true             -> thinking {"type":"adaptive"} + output_config.effort
-//	"enabled" key absent     -> neither field, even when effort is present
-//	no reasoning option      -> neither field (unchanged behaviour)
-//
-// Assertions use whole-body equality, so the presence AND absence of both keys
-// is locked exactly (reflect.DeepEqual on maps compares key sets).
 func TestBuildRequestBodyReasoningThinking(t *testing.T) {
-	// baseBody returns the expected request body for the fixed one-message
-	// input used by every case, with the given extra keys merged in.
 	baseBody := func(extra map[string]any) map[string]any {
 		want := map[string]any{
 			"model":      "test-model",
@@ -231,8 +213,6 @@ func TestBuildRequestBodyReasoningThinking(t *testing.T) {
 		want    map[string]any
 	}{
 		{
-			// The regression this guards: explicit false used to fall through
-			// silently, leaving thinking at the server default.
 			name:    "explicit disabled emits thinking disabled",
 			options: map[string]any{"max_tokens": 8192, "reasoning": map[string]any{"enabled": false}},
 			want:    baseBody(map[string]any{"thinking": map[string]any{"type": "disabled"}}),
@@ -281,7 +261,6 @@ func TestBuildRequestBodyReasoningThinking(t *testing.T) {
 			}),
 		},
 		{
-			// Conservative rule: absence means "server default", never "off".
 			name:    "enabled absent with effort emits nothing",
 			options: map[string]any{"max_tokens": 8192, "reasoning": map[string]any{"effort": "medium"}},
 			want:    baseBody(nil),
@@ -297,7 +276,6 @@ func TestBuildRequestBodyReasoningThinking(t *testing.T) {
 			want:    baseBody(nil),
 		},
 		{
-			// A non-bool "enabled" is not an explicit disable; stay conservative.
 			name:    "non-bool enabled is treated as absent",
 			options: map[string]any{"max_tokens": 8192, "reasoning": map[string]any{"enabled": "false"}},
 			want:    baseBody(nil),
@@ -321,8 +299,6 @@ func TestBuildRequestBodyReasoningThinking(t *testing.T) {
 				t.Fatalf("buildRequestBody() unexpected error: %v", err)
 			}
 
-			// Lock presence/absence of the two keys first: these failures are
-			// far easier to read than a whole-body diff.
 			gotThinking, hasThinking := got["thinking"]
 			wantThinking, wantHasThinking := tt.want["thinking"]
 			if hasThinking != wantHasThinking {
@@ -341,7 +317,6 @@ func TestBuildRequestBodyReasoningThinking(t *testing.T) {
 				t.Errorf("output_config = %#v, want %#v", gotOut, wantOut)
 			}
 
-			// Whole-body equality catches any unrelated drift in the block.
 			if !reflect.DeepEqual(got, tt.want) {
 				gotJSON, _ := json.MarshalIndent(got, "", "  ")
 				wantJSON, _ := json.MarshalIndent(tt.want, "", "  ")
@@ -485,7 +460,6 @@ func TestParseResponseBody(t *testing.T) {
 				return
 			}
 
-			// Compare individual fields
 			if got.Content != tt.want.Content {
 				t.Errorf("Content = %q, want %q", got.Content, tt.want.Content)
 			}
@@ -586,7 +560,6 @@ func TestGetDefaultModel(t *testing.T) {
 	}
 }
 
-// TestBuildRequestBodyEdgeCases tests edge cases for buildRequestBody.
 func TestBuildRequestBodyEdgeCases(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -673,7 +646,6 @@ func TestBuildRequestBodyEdgeCases(t *testing.T) {
 				return
 			}
 
-			// Verify basic structure
 			if got == nil {
 				t.Error("buildRequestBody() returned nil")
 				return
@@ -717,7 +689,6 @@ func TestBuildRequestBodyEdgeCases(t *testing.T) {
 }
 
 func TestBuildRequestBody_ConsecutiveToolResultsMerged(t *testing.T) {
-	// Consecutive tool results (role "tool") should be merged into a single "user" message
 	messages := []Message{
 		{Role: "user", Content: "Use tools"},
 		{Role: "assistant", Content: "", ToolCalls: []ToolCall{
@@ -738,7 +709,6 @@ func TestBuildRequestBody_ConsecutiveToolResultsMerged(t *testing.T) {
 		t.Fatalf("messages is not []any")
 	}
 
-	// Expect: user, assistant, user (merged tool results)
 	if len(apiMessages) != 3 {
 		for i, m := range apiMessages {
 			t.Logf("message[%d]: %+v", i, m)
@@ -746,7 +716,6 @@ func TestBuildRequestBody_ConsecutiveToolResultsMerged(t *testing.T) {
 		t.Fatalf("expected 3 API messages, got %d", len(apiMessages))
 	}
 
-	// The third message should be a user message with 2 tool_result blocks
 	toolResultMsg, ok := apiMessages[2].(map[string]any)
 	if !ok {
 		t.Fatalf("tool result message is not map[string]any")
@@ -770,7 +739,6 @@ func TestBuildRequestBody_ConsecutiveToolResultsMerged(t *testing.T) {
 }
 
 func TestBuildRequestBody_UserToolResultsMerged(t *testing.T) {
-	// Consecutive tool results using role "user" with ToolCallID should also be merged
 	messages := []Message{
 		{Role: "user", Content: "Use tools"},
 		{Role: "assistant", Content: "", ToolCalls: []ToolCall{
@@ -791,7 +759,6 @@ func TestBuildRequestBody_UserToolResultsMerged(t *testing.T) {
 		t.Fatalf("messages is not []any")
 	}
 
-	// Expect: user, assistant, user (merged tool results)
 	if len(apiMessages) != 3 {
 		t.Fatalf("expected 3 API messages, got %d", len(apiMessages))
 	}
@@ -806,7 +773,6 @@ func TestBuildRequestBody_UserToolResultsMerged(t *testing.T) {
 	}
 }
 
-// TestParseResponseBodyEdgeCases tests edge cases for parseResponseBody.
 func TestParseResponseBodyEdgeCases(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -877,8 +843,6 @@ func TestParseResponseBodyEdgeCases(t *testing.T) {
 	}
 }
 
-// TestProviderChatErrors tests error handling in Chat.
-// Note: apiBase check removed as it's dead code - normalizeBaseURL() always provides a default.
 func TestProviderChatErrors(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -896,7 +860,6 @@ func TestProviderChatErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create provider using constructor to ensure proper initialization
 			provider := NewProvider(tt.apiKey, "https://api.example.com")
 
 			_, err := provider.Chat(context.Background(), tt.messages, nil, "test-model", nil)
@@ -910,7 +873,6 @@ func TestProviderChatErrors(t *testing.T) {
 	}
 }
 
-// TestParseAnthropicSSEStream tests the Anthropic SSE streaming parser.
 func TestParseAnthropicSSEStream(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -1054,7 +1016,6 @@ func TestParseAnthropicSSEStream(t *testing.T) {
 				t.Errorf("FinishReason = %q, want %q", resp.FinishReason, tt.wantReason)
 			}
 
-			// Verify chunk callbacks
 			gotContent := strings.Join(chunks, "")
 			if gotContent != tt.wantContent {
 				t.Errorf("chunked content = %q, want %q", gotContent, tt.wantContent)
@@ -1110,7 +1071,6 @@ func TestParseAnthropicSSEStream_ToolCalls(t *testing.T) {
 		t.Errorf("ToolCall.Function.Name = %q, want %q", tc.Function.Name, "get_weather")
 	}
 
-	// Finish reason should be tool_calls
 	if resp.FinishReason != "tool_calls" {
 		t.Errorf("FinishReason = %q, want tool_calls", resp.FinishReason)
 	}
@@ -1121,14 +1081,12 @@ func TestParseAnthropicSSEStream_ContextCancellation(t *testing.T) {
 		sseEvent("message_start", `{"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":0}}}`),
 		sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`),
 		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`),
-		// No message_stop — simulate cancellation mid-stream
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	body := strings.NewReader(sseData)
 	_, err := parseAnthropicSSEStream(ctx, body, func(chunk string, done bool) {
-		// Cancel after first chunk
 		cancel()
 	}, nil)
 
@@ -1181,29 +1139,18 @@ func TestMapStopReason(t *testing.T) {
 }
 
 func TestNormalizeModel(t *testing.T) {
-	// normalizeModel always strips provider prefix and anthropic. prefix.
-	// Bedrock proxy endpoints (e.g. bedrock-mantle) normalize the anthropic.
-	// prefix internally for non-streaming requests, but pass it through
-	// unchanged for SSE streaming, causing "Not supported model" errors.
-	// Always stripping is safe because all Anthropic Messages API-compatible
-	// endpoints use the base model name.
 	tests := []struct {
 		input string
 		want  string
 	}{
-		// Provider prefix stripping + anthropic. prefix stripping
 		{"aws_ant/anthropic.claude-opus-4-7", "claude-opus-4-7"},
 		{"aws_ant/anthropic.claude-sonnet-4-5-20250929", "claude-sonnet-4-5-20250929"},
-		// Anthropic. prefix stripping (AWS Bedrock model IDs)
 		{"anthropic.claude-opus-4-7", "claude-opus-4-7"},
 		{"anthropic.claude-sonnet-4-5-20250929", "claude-sonnet-4-5-20250929"},
 		{"anthropic.some-model", "some-model"},
-		// Non-anthropic provider prefix stripping
 		{"openrouter/deepseek/deepseek-chat", "deepseek/deepseek-chat"},
-		// Already clean model names
 		{"claude-sonnet-4-6", "claude-sonnet-4-6"},
 		{"claude-opus-4-7", "claude-opus-4-7"},
-		// No prefix to strip
 		{"", ""},
 		{"test-model", "test-model"},
 	}
@@ -1238,9 +1185,6 @@ func TestChatStream_MissingAPIKey(t *testing.T) {
 }
 
 func TestChatStream_NilOnChunkFallsBackToChat(t *testing.T) {
-	// When onChunk is nil, ChatStream should fall back to Chat.
-	// We can't easily test the fallback without a mock server, but we can verify
-	// that nil onChunk doesn't panic and properly delegates.
 	provider := NewProvider("test-key", "https://api.example.com")
 	_, err := provider.ChatStream(
 		context.Background(),
@@ -1248,23 +1192,18 @@ func TestChatStream_NilOnChunkFallsBackToChat(t *testing.T) {
 		nil,
 		"test-model",
 		map[string]any{"max_tokens": 100},
-		nil, // nil onChunk → should fall back to Chat
+		nil,
 		nil,
 	)
-	// Will fail because the server doesn't exist, but shouldn't panic
 	if err == nil {
 		t.Log("ChatStream with nil onChunk unexpectedly succeeded (no real server)")
 	}
 }
 
-// Helper functions for constructing SSE test data
-
-// sseEvent formats an Anthropic SSE event with event type and data.
 func sseEvent(eventType, data string) string {
 	return "event: " + eventType + "\ndata: " + data + "\n\n"
 }
 
-// joinSSEEvents concatenates SSE event strings.
 func joinSSEEvents(events ...string) string {
 	return strings.Join(events, "")
 }

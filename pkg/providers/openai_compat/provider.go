@@ -24,8 +24,6 @@ type Message = protocoltypes.Message
 type ToolDefinition = protocoltypes.ToolDefinition
 type ToolFunctionDefinition = protocoltypes.ToolFunctionDefinition
 
-// builderPool provides reusable strings.Builder instances to reduce
-// allocations during SSE stream parsing.
 var builderPool = sync.Pool{
 	New: func() interface{} {
 		return &strings.Builder{}
@@ -33,55 +31,24 @@ var builderPool = sync.Pool{
 }
 
 type Provider struct {
-	apiKey     string
-	apiBase    string
-	httpClient *http.Client
-	// sessionHeader is the static, per-instance header that carries the
-	// per-call wire session id (e.g. "x-opencode-session" for OpenCode Go).
-	// Empty means: never send it.
-	sessionHeader string
-	// sessionHeaderRequired decides what a missing session id means: true =
-	// fail the call fast with common.ErrMissingWireSession (the target was
-	// configured by explicit name/type), false = send the header only when a
-	// session id is present and silently omit it otherwise (the target was
-	// merely sniffed from api_base, review MAYOR-1).
+	apiKey                string
+	apiBase               string
+	httpClient            *http.Client
+	sessionHeader         string
 	sessionHeaderRequired bool
-	// customHeaders are the provider's static custom request headers (config
-	// `headers`), applied last so an explicit entry wins over the defaults
-	// above. Values may contain protocoltypes.SessionHeaderPlaceholder, which
-	// is expanded per call — the map itself never changes.
-	//
-	// It is the Options map assigned as-is, never copied: nothing here writes
-	// into it (setRequestHeaders only reads it) and the config layer hands out
-	// a fresh map per decode, so a defensive copy would only hide the aliasing
-	// rather than prevent it.
-	customHeaders map[string]string
+	customHeaders         map[string]string
 }
 
-// Options are the static, per-instance transport extras. Conversation-scoped
-// values (the session id itself) never live here: they are read per call from
-// the options map via protocoltypes.OptWireSessionID.
 type Options struct {
-	// SessionHeader is the header that carries the per-call wire session id,
-	// e.g. "x-opencode-session". Empty means: never send it.
-	SessionHeader string
-	// SessionHeaderRequired controls the reaction to a missing session id:
-	// true fails the call fast with common.ErrMissingWireSession (explicit
-	// name/type detection), false omits the header silently (opportunistic
-	// URL-sniff detection). Ignored when SessionHeader is empty.
+	SessionHeader         string
 	SessionHeaderRequired bool
-	// Headers are the provider's static custom request headers (config
-	// `headers`). Applied AFTER the transport defaults and after the session
-	// header, so an explicit entry wins. Values may contain
-	// protocoltypes.SessionHeaderPlaceholder, expanded per call.
-	Headers map[string]string
+	Headers               map[string]string
 }
 
 func NewProvider(apiKey, apiBase, proxy string) *Provider {
 	return NewProviderWithOptions(apiKey, apiBase, proxy, Options{})
 }
 
-// NewProviderWithOptions creates a provider with static transport extras.
 func NewProviderWithOptions(apiKey, apiBase, proxy string, opts Options) *Provider {
 	client := common.NewStreamingHTTPClient(proxy)
 
@@ -95,23 +62,13 @@ func NewProviderWithOptions(apiKey, apiBase, proxy string, opts Options) *Provid
 	}
 }
 
-// setRequestHeaders applies every header an inference request carries. Both
-// Chat and ChatStream must go through it: they are separate code paths, and a
-// header added to only one of them is a silent, partial behaviour.
-//
-// Three sequential stages, never an early return that skips a later one:
-// (1) the transport defaults, (2) the detected session header, (3) the
-// provider's custom headers — stage 3 last so an explicit config entry wins
-// over what the transport would have sent, including over stage 2.
 func (p *Provider) setRequestHeaders(req *http.Request, options map[string]interface{}) error {
-	// Stage 1: defaults.
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", common.UserAgent())
 	if p.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
 
-	// Stage 2: the session header the factory detected for this target.
 	if p.sessionHeader != "" {
 		sessionID := protocoltypes.WireSessionFromOptions(options)
 		switch {
@@ -121,21 +78,9 @@ func (p *Provider) setRequestHeaders(req *http.Request, options map[string]inter
 			return fmt.Errorf("%w: this provider requires %q and the call carried no %q option (a call site is missing providers.WithWireSessionID)",
 				common.ErrMissingWireSession, p.sessionHeader, protocoltypes.OptWireSessionID)
 		default:
-			// Opportunistic header (URL-sniff detection): without a session id
-			// we omit it and let the upstream answer its own descriptive 400
-			// if it cares — a lookalike or unkeyed egress must not fail here.
 		}
 	}
 
-	// Stage 3: custom headers. WireSessionForHeaders never returns "", so a
-	// {{session}} template always expands to a non-empty value — which matters
-	// because Go does send a header with an empty value, and an empty
-	// x-opencode-session defeats the gateway's session routing, after which it
-	// answers its own opaque 400.
-	//
-	// Map order is random, so two entries that canonicalize to the same wire
-	// name ("x-foo" and "X-Foo") have no defined winner; validation does not
-	// dedupe them because the request would carry one of the two either way.
 	if len(p.customHeaders) == 0 {
 		return nil
 	}
@@ -180,7 +125,6 @@ func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDef
 
 	if temperature, ok := asFloat(options["temperature"]); ok {
 		lowerModel := strings.ToLower(model)
-		// Kimi k2 models only support temperature=1.
 		if strings.Contains(lowerModel, "kimi") && strings.Contains(lowerModel, "k2") {
 			requestBody["temperature"] = 1.0
 		} else {
@@ -216,11 +160,6 @@ func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDef
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		// Structured error: keeps the historical message text (no URL line, no
-		// body truncation - both are this provider's observable behaviour) but
-		// carries the status code and the server's Retry-After hint so the
-		// classifier does not have to rebuild them from the message string.
-		// See common.APIError.
 		return nil, common.NewAPIError(resp, body, "")
 	}
 
@@ -290,10 +229,6 @@ func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []T
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		// Structured error, same as Chat(). The old message carried a
-		// "(OpenIA)" typo in its first line; nothing parses that string (only
-		// the "Status: %d" pattern does, which the canonical format preserves),
-		// so the two error paths now emit one identical shape.
 		return nil, common.NewAPIError(resp, body, req.URL.String())
 
 	}
@@ -369,14 +304,7 @@ func parseResponse(body []byte) (*LLMResponse, error) {
 }
 
 func normalizeModel(model, apiBase string) string {
-	// NOTE: Provider prefix stripping ("provider:model") is handled by
-	// StripProviderPrefix in llm_caller.go before calling Chat.
-	// Do NOT strip ":" here — model names may legitimately contain colons
-	// (e.g., Ollama tags like "qwen2.5:14b").
 
-	// Legacy: handle old "openrouter/deepseek/..." slash format.
-	// The colon format ("openrouter:deepseek/...") is already handled by
-	// StripProviderPrefix upstream.
 	if strings.Contains(strings.ToLower(apiBase), "openrouter.ai") {
 		if idx := strings.Index(model, "/"); idx > 0 {
 			if strings.HasPrefix(strings.ToLower(model), "openrouter/") {
@@ -386,18 +314,13 @@ func normalizeModel(model, apiBase string) string {
 		return model
 	}
 
-	// For all other providers: return model as-is.
-	// The deprecated "provider/model" slash format is no longer stripped here;
-	// models with slashes are legitimate identifiers (e.g., "namespace/model-name").
 	return model
 }
 
-// isOpenRouterEndpoint checks if the apiBase belongs to OpenRouter.
 func isOpenRouterEndpoint(apiBase string) bool {
 	return strings.Contains(strings.ToLower(apiBase), "openrouter.ai")
 }
 
-// isOpenAIEndpoint checks if the apiBase belongs to OpenAI directly.
 func isOpenAIEndpoint(apiBase string) bool {
 	lower := strings.ToLower(apiBase)
 	return strings.Contains(lower, "api.openai.com") ||
@@ -451,8 +374,6 @@ func parseSSEStream(ctx context.Context, body io.Reader, onChunk func(chunk stri
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
-		// Check for context cancellation (e.g., user cancel) to stop processing
-		// the SSE stream promptly instead of waiting for the server to close.
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -577,8 +498,6 @@ func parseSSEStream(ctx context.Context, body io.Reader, onChunk func(chunk stri
 	}, nil
 }
 
-// Thinking wire styles accepted in options["thinking_type"], kept in sync with
-// config.ThinkingType* (per-model config: providers.<name>.models.<alias>.thinking_type).
 const (
 	thinkingStyleAuto       = "auto"
 	thinkingStyleDeepSeek   = "deepseek"
@@ -588,9 +507,6 @@ const (
 	thinkingStyleNone       = "none"
 )
 
-// resolveThinkingStyle picks the wire dialect for reasoning params. An explicit
-// options["thinking_type"] wins; "auto"/absent/unknown keeps the legacy
-// behavior decided by endpoint and model-name heuristics.
 func resolveThinkingStyle(options map[string]interface{}) string {
 	if tt, ok := options["thinking_type"].(string); ok {
 		switch v := strings.ToLower(strings.TrimSpace(tt)); v {
@@ -601,10 +517,6 @@ func resolveThinkingStyle(options map[string]interface{}) string {
 	return thinkingStyleAuto
 }
 
-// reasoningState reports the explicit thinking on/off request carried in the
-// options, if any. options["reasoning"]["enabled"] wins, an explicit effort
-// implies enabled, and the legacy options["thinking"] bool is honored last.
-// ok=false means the caller has no opinion and the model default applies.
 func reasoningState(options map[string]interface{}) (enabled bool, ok bool) {
 	if r, ok := options["reasoning"].(map[string]interface{}); ok {
 		if e, ok := r["enabled"].(bool); ok {
@@ -620,8 +532,6 @@ func reasoningState(options map[string]interface{}) (enabled bool, ok bool) {
 	return false, false
 }
 
-// reasoningEffort returns the requested effort level from the legacy
-// options["reasoning_effort"] or the agent's options["reasoning"]["effort"].
 func reasoningEffort(options map[string]interface{}) string {
 	if effort, ok := options["reasoning_effort"].(string); ok && effort != "" {
 		return effort
@@ -634,13 +544,8 @@ func reasoningEffort(options map[string]interface{}) string {
 	return ""
 }
 
-// thinkingObjectModelFragments lists model-name fragments for families whose
-// endpoints use DeepSeek's `thinking: {"type": ...}` object and default
-// thinking ON (so "off" must send an explicit disable).
 var thinkingObjectModelFragments = []string{"deepseek", "mimo", "glm"}
 
-// isThinkingObjectModel reports whether a model name belongs to a known
-// thinking-object family (DeepSeek, Xiaomi MiMo, Zhipu GLM).
 func isThinkingObjectModel(model interface{}) bool {
 	m, ok := model.(string)
 	if !ok {
@@ -655,20 +560,11 @@ func isThinkingObjectModel(model interface{}) bool {
 	return false
 }
 
-// applyReasoningOptions translates the agent's reasoning options into the
-// wire-level "think system" parameters for the target endpoint. The dialect is
-// selected by options["thinking_type"] (per-model config field
-// providers.<name>.models.<alias>.thinking_type); "auto" keeps the legacy
-// behavior. This is the single translation point shared by Chat and ChatStream.
 func applyReasoningOptions(requestBody map[string]interface{}, options map[string]interface{}, apiBase string) {
 	switch resolveThinkingStyle(options) {
 	case thinkingStyleNone:
-		// The model has no thinking switch — never send thinking params.
 
 	case thinkingStyleDeepSeek:
-		// DeepSeek V3.2+, Xiaomi MiMo, Zhipu GLM-4.5+: `thinking` object with
-		// an explicit type. These endpoints default thinking ON, so "off" must
-		// send the disable or reasoning keeps running.
 		if enabled, ok := reasoningState(options); ok {
 			typ := "disabled"
 			if enabled {
@@ -678,15 +574,11 @@ func applyReasoningOptions(requestBody map[string]interface{}, options map[strin
 		}
 
 	case thinkingStyleQwen:
-		// Alibaba DashScope / Qwen3 compatible-mode: enable_thinking bool.
 		if enabled, ok := reasoningState(options); ok {
 			requestBody["enable_thinking"] = enabled
 		}
 
 	case thinkingStyleOpenAI:
-		// OpenAI o-series / gpt-5: top-level reasoning_effort ("none" disables
-		// on gpt-5.1+; models without a disable switch reject it — use
-		// thinking_type "none" for those).
 		if enabled, ok := reasoningState(options); ok && !enabled {
 			requestBody["reasoning_effort"] = "none"
 			return
@@ -701,7 +593,6 @@ func applyReasoningOptions(requestBody map[string]interface{}, options map[strin
 		}
 
 	case thinkingStyleOpenRouter:
-		// OpenRouter: everything lives inside the `reasoning` object.
 		if reasoning, ok := options["reasoning"].(map[string]interface{}); ok && reasoning != nil {
 			reasoningBody := map[string]interface{}{}
 			if effort := reasoningEffort(options); effort != "" {
@@ -721,21 +612,15 @@ func applyReasoningOptions(requestBody map[string]interface{}, options map[strin
 			}
 		}
 
-	default: // thinkingStyleAuto: legacy behavior.
+	default:
 		applyLegacyReasoningBody(requestBody, options, apiBase)
 		applyThinkingMode(requestBody, options, apiBase)
-		// Thinking-object families (DeepSeek/MiMo/GLM) default thinking ON and
-		// ignore the `reasoning` object, so an explicit disable must go out as
-		// `thinking: {"type": "disabled"}` or "off" silently does nothing.
 		if enabled, ok := reasoningState(options); ok && !enabled && isThinkingObjectModel(requestBody["model"]) {
 			requestBody["thinking"] = map[string]interface{}{"type": "disabled"}
 		}
 	}
 }
 
-// applyLegacyReasoningBody is the pre-thinking_type behavior: every field in
-// options["reasoning"] is forwarded into a top-level `reasoning` object
-// (summary only for OpenAI endpoints).
 func applyLegacyReasoningBody(requestBody map[string]interface{}, options map[string]interface{}, apiBase string) {
 	reasoning, ok := options["reasoning"].(map[string]interface{})
 	if !ok || reasoning == nil {
@@ -754,7 +639,6 @@ func applyLegacyReasoningBody(requestBody map[string]interface{}, options map[st
 		reasoningBody["exclude"] = exclude
 	}
 	if summary, ok := reasoning["summary"].(string); ok && summary != "" {
-		// summary is OpenAI-specific; only send to OpenAI API endpoints
 		if isOpenAIEndpoint(apiBase) {
 			reasoningBody["summary"] = summary
 		}
@@ -767,20 +651,13 @@ func applyLegacyReasoningBody(requestBody map[string]interface{}, options map[st
 	}
 }
 
-// applyThinkingMode is the legacy (auto) thinking adapter: it only acts when
-// options["thinking"] is true, mapping effort to the right wire position for
-// OpenRouter vs. other endpoints. Kept for the auto path; explicit thinking
-// types are handled by applyReasoningOptions instead.
 func applyThinkingMode(requestBody map[string]interface{}, options map[string]interface{}, apiBase string) {
 	thinkingEnabled, _ := options["thinking"].(bool)
 	if !thinkingEnabled {
 		return
 	}
 
-	// For OpenRouter, reasoning_effort belongs inside the reasoning object,
-	// not at top-level. OpenRouter ignores top-level reasoning_effort.
 	if isOpenRouterEndpoint(apiBase) {
-		// Ensure the reasoning object exists
 		if _, ok := requestBody["reasoning"]; !ok {
 			requestBody["reasoning"] = map[string]interface{}{}
 		}
@@ -800,7 +677,6 @@ func applyThinkingMode(requestBody map[string]interface{}, options map[string]in
 		return
 	}
 
-	// Non-OpenRouter: keep original behavior (OpenAI direct, DeepSeek, etc.)
 	requestBody["thinking"] = map[string]interface{}{
 		"type": "enabled",
 	}

@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package anthropicmessages
 
 import (
@@ -38,73 +33,36 @@ const (
 	defaultRequestTimeout = 120 * time.Second
 )
 
-// builderPool provides reusable strings.Builder instances to reduce
-// allocations during SSE stream parsing.
 var builderPool = sync.Pool{
 	New: func() interface{} {
 		return &strings.Builder{}
 	},
 }
 
-// Provider implements Anthropic Messages API via HTTP (without SDK).
-// It supports custom endpoints that use Anthropic's native message format.
 type Provider struct {
-	apiKey         string
-	apiBase        string
-	httpClient     *http.Client
-	requestTimeout time.Duration
-	// sessionHeader is the static, per-instance header that carries the
-	// per-call wire session id (e.g. "x-opencode-session" for OpenCode Go).
-	// Empty means: never send it.
-	sessionHeader string
-	// sessionHeaderRequired decides what a missing session id means: true =
-	// fail the call fast with common.ErrMissingWireSession (the target was
-	// configured by explicit name/type), false = send the header only when a
-	// session id is present and silently omit it otherwise (the target was
-	// merely sniffed from api_base, review MAYOR-1).
+	apiKey                string
+	apiBase               string
+	httpClient            *http.Client
+	requestTimeout        time.Duration
+	sessionHeader         string
 	sessionHeaderRequired bool
-	// customHeaders are the provider's static custom request headers (config
-	// `headers`), applied last so an explicit entry wins over the defaults
-	// above. Values may contain protocoltypes.SessionHeaderPlaceholder, which
-	// is expanded per call — the map itself never changes.
-	//
-	// It is the Options map assigned as-is, never copied: nothing here writes
-	// into it (setRequestHeaders only reads it) and the config layer hands out
-	// a fresh map per decode, so a defensive copy would only hide the aliasing
-	// rather than prevent it.
-	customHeaders map[string]string
+	customHeaders         map[string]string
 }
 
-// Options are the static, per-instance transport extras. Conversation-scoped
-// values (the session id itself) never live here: they are read per call from
-// the options map via protocoltypes.OptWireSessionID.
 type Options struct {
-	// SessionHeader is the header that carries the per-call wire session id,
-	// e.g. "x-opencode-session". Empty means: never send it.
-	SessionHeader string
-	// SessionHeaderRequired controls the reaction to a missing session id:
-	// true fails the call fast with common.ErrMissingWireSession (explicit
-	// name/type detection), false omits the header silently (opportunistic
-	// URL-sniff detection). Ignored when SessionHeader is empty.
+	SessionHeader         string
 	SessionHeaderRequired bool
-	// Headers are the provider's static custom request headers (config
-	// `headers`). Applied AFTER the transport defaults and after the session
-	// header, so an explicit entry wins. Values may contain
-	// protocoltypes.SessionHeaderPlaceholder, expanded per call.
-	Headers map[string]string
+	Headers               map[string]string
 }
 
-// NewProvider creates a new Anthropic Messages API provider.
 func NewProvider(apiKey, apiBase string) *Provider {
 	return NewProviderWithTimeout(apiKey, apiBase, 0)
 }
 
-// NewProviderWithTimeout creates a provider with custom request timeout.
 func NewProviderWithTimeout(apiKey, apiBase string, timeoutSeconds int) *Provider {
 	return newProvider(apiKey, apiBase, timeoutSeconds, Options{})
 }
 
-// NewProviderWithOptions creates a provider with static transport extras.
 func NewProviderWithOptions(apiKey, apiBase string, opts Options) *Provider {
 	return newProvider(apiKey, apiBase, 0, opts)
 }
@@ -127,22 +85,12 @@ func newProvider(apiKey, apiBase string, timeoutSeconds int, opts Options) *Prov
 	}
 }
 
-// setRequestHeaders applies every header an inference request carries. Both
-// Chat and ChatStream must go through it: they are separate code paths, and a
-// header added to only one of them is a silent, partial behaviour.
-//
-// Three sequential stages, never an early return that skips a later one:
-// (1) the transport defaults, (2) the detected session header, (3) the
-// provider's custom headers — stage 3 last so an explicit config entry wins
-// over what the transport would have sent, including over stage 2.
 func (p *Provider) setRequestHeaders(req *http.Request, options map[string]any) error {
-	// Stage 1: defaults.
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", common.UserAgent())
 	req.Header.Set("X-Api-Key", p.apiKey)
 	req.Header.Set("Anthropic-Version", defaultAPIVersion)
 
-	// Stage 2: the session header the factory detected for this target.
 	if p.sessionHeader != "" {
 		sessionID := protocoltypes.WireSessionFromOptions(options)
 		switch {
@@ -152,21 +100,9 @@ func (p *Provider) setRequestHeaders(req *http.Request, options map[string]any) 
 			return fmt.Errorf("%w: this provider requires %q and the call carried no %q option (a call site is missing providers.WithWireSessionID)",
 				common.ErrMissingWireSession, p.sessionHeader, protocoltypes.OptWireSessionID)
 		default:
-			// Opportunistic header (URL-sniff detection): without a session id
-			// we omit it and let the upstream answer its own descriptive 400
-			// if it cares — a lookalike or unkeyed egress must not fail here.
 		}
 	}
 
-	// Stage 3: custom headers. WireSessionForHeaders never returns "", so a
-	// {{session}} template always expands to a non-empty value — which matters
-	// because Go does send a header with an empty value, and an empty
-	// x-opencode-session defeats the gateway's session routing, after which it
-	// answers its own opaque 400.
-	//
-	// Map order is random, so two entries that canonicalize to the same wire
-	// name ("x-foo" and "X-Foo") have no defined winner; validation does not
-	// dedupe them because the request would carry one of the two either way.
 	if len(p.customHeaders) == 0 {
 		return nil
 	}
@@ -177,7 +113,6 @@ func (p *Provider) setRequestHeaders(req *http.Request, options map[string]any) 
 	return nil
 }
 
-// Chat sends messages to the Anthropic Messages API and returns the response.
 func (p *Provider) Chat(
 	ctx context.Context,
 	messages []Message,
@@ -195,60 +130,41 @@ func (p *Provider) Chat(
 		defer cancel()
 	}
 
-	// Strip provider prefix from model name.
-	// Also strips anthropic. prefix only when using official Anthropic API
-	// (e.g. "aws_ant/anthropic.claude-opus-4-7" → "claude-opus-4-7")
-	//model = normalizeModel(model)
-
-	// Build request body
 	requestBody, err := buildRequestBody(messages, tools, model, options)
 	if err != nil {
 		return nil, fmt.Errorf("building request body: %w", err)
 	}
 
-	// Serialize to JSON
 	jsonBody, err := json.Marshal(requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("serializing request body: %w", err)
 	}
 
-	// Build request URL
 	endpointURL, err := url.JoinPath(p.apiBase, "messages")
 	if err != nil {
 		return nil, fmt.Errorf("building endpoint URL: %w", err)
 	}
 
-	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, "POST", endpointURL, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("creating HTTP request: %w", err)
 	}
 
-	// Set headers
 	if err := p.setRequestHeaders(req, options); err != nil {
 		return nil, fmt.Errorf("setting request headers: %w", err)
 	}
 
-	// Execute request
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("executing HTTP request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
 
-	// Check for HTTP errors with detailed messages.
-	//
-	// Every branch returns a structured *common.APIError: the per-status
-	// messages below are this provider's historical wording and are kept
-	// verbatim through APIError.Message, while the status code and the
-	// server's Retry-After hint travel as data. The 429 case is the whole
-	// point: it is the one status whose hint must survive to the backoff.
 	if resp.StatusCode == http.StatusOK {
 		return parseResponseBody(body)
 	}
@@ -272,7 +188,6 @@ func (p *Provider) Chat(
 	return nil, apiErr
 }
 
-// ChatStream sends messages to the Anthropic Messages API with streaming (SSE).
 func (p *Provider) ChatStream(
 	ctx context.Context,
 	messages []Message,
@@ -289,7 +204,6 @@ func (p *Provider) ChatStream(
 		return p.Chat(ctx, messages, tools, model, options)
 	}
 
-	// Build request body with streaming enabled
 	requestBody, err := buildRequestBody(messages, tools, model, options)
 	if err != nil {
 		return nil, fmt.Errorf("building request body: %w", err)
@@ -323,7 +237,6 @@ func (p *Provider) ChatStream(
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		// Structured error, see Chat().
 		return nil, common.NewAPIError(resp, body, endpointURL)
 	}
 
@@ -331,19 +244,16 @@ func (p *Provider) ChatStream(
 	return parseAnthropicSSEStream(ctx, streamBody, onChunk, onReasoning)
 }
 
-// GetDefaultModel returns the default model for this provider.
 func (p *Provider) GetDefaultModel() string {
 	return "claude-sonnet-4.6"
 }
 
-// buildRequestBody converts internal message format to Anthropic Messages API format.
 func buildRequestBody(
 	messages []Message,
 	tools []ToolDefinition,
 	model string,
 	options map[string]any,
 ) (map[string]any, error) {
-	// max_tokens is required and guaranteed by agent loop
 	maxTokens, ok := asInt(options["max_tokens"])
 	if !ok {
 		return nil, fmt.Errorf("max_tokens is required in options")
@@ -355,11 +265,6 @@ func buildRequestBody(
 		"messages":   []any{},
 	}
 
-	// Add thinking config from reasoning options. The "enabled" flag is treated
-	// as tri-state:
-	//   - explicit true  -> adaptive thinking + output_config.effort
-	//   - explicit false -> an explicit disable request (see below)
-	//   - absent         -> emit nothing; omission means "server default"
 	if reasonOpts, hasReasoning := options["reasoning"].(map[string]any); hasReasoning {
 		if enabled, isSet := reasonOpts["enabled"].(bool); isSet {
 			if enabled {
@@ -367,7 +272,7 @@ func buildRequestBody(
 					"type": "adaptive",
 				}
 
-				effort := "high" // default
+				effort := "high"
 				if e, ok := reasonOpts["effort"].(string); ok && e != "" {
 					effort = e
 				}
@@ -375,8 +280,6 @@ func buildRequestBody(
 					"effort": effort,
 				}
 			} else {
-				// Explicit session-level disable: tell the API to turn thinking off
-				// rather than omitting the field (absence = server default).
 				result["thinking"] = map[string]any{
 					"type": "disabled",
 				}
@@ -384,14 +287,12 @@ func buildRequestBody(
 		}
 	}
 
-	// Process messages
 	var systemPrompt string
 	var apiMessages []any
 
 	for _, msg := range messages {
 		switch msg.Role {
 		case "system":
-			// Accumulate system messages
 			if systemPrompt != "" {
 				systemPrompt += "\n\n" + msg.Content
 			} else {
@@ -399,9 +300,7 @@ func buildRequestBody(
 			}
 
 		case "user":
-			// ContentParts (incl. video_url) are intentionally not forwarded — content is built from msg.Content only.
 			if msg.ToolCallID != "" {
-				// Tool result message — merge into previous user message if it contains tool_results
 				toolResultBlock := map[string]any{
 					"type":        "tool_result",
 					"tool_use_id": common.SanitizeToolCallID(msg.ToolCallID),
@@ -420,7 +319,6 @@ func buildRequestBody(
 					"content": []map[string]any{toolResultBlock},
 				})
 			} else {
-				// Regular user message — ContentParts (incl. video_url) are intentionally not forwarded.
 				apiMessages = append(apiMessages, map[string]any{
 					"role":    "user",
 					"content": msg.Content,
@@ -430,7 +328,6 @@ func buildRequestBody(
 		case "assistant":
 			content := []any{}
 
-			// Add text content if present
 			if msg.Content != "" {
 				content = append(content, map[string]any{
 					"type": "text",
@@ -438,13 +335,11 @@ func buildRequestBody(
 				})
 			}
 
-			// Add tool_use blocks
 			for _, tc := range msg.ToolCalls {
 				if strings.TrimSpace(tc.Name) == "" {
 					continue
 				}
 
-				// Handle nil Arguments (GLM-4 may return null input)
 				input := tc.Arguments
 				if input == nil {
 					input = map[string]any{}
@@ -465,7 +360,6 @@ func buildRequestBody(
 			})
 
 		case "tool":
-			// Tool result (alternative format) — merge into previous user message if it contains tool_results
 			toolResultBlock := map[string]any{
 				"type":        "tool_result",
 				"tool_use_id": common.SanitizeToolCallID(msg.ToolCallID),
@@ -488,18 +382,14 @@ func buildRequestBody(
 
 	result["messages"] = apiMessages
 
-	// Set system prompt if present
 	if systemPrompt != "" {
 		result["system"] = systemPrompt
 	}
 
-	// Add tools if present
 	if len(tools) > 0 {
 		result["tools"] = buildTools(tools)
 	}
 
-	// Explicit prompt caching: cache_control breakpoints after the stable
-	// prefixes (system, tools, history) when enabled.
 	if protocoltypes.CacheEnabled(options) {
 		applyPromptCacheBreakpoints(result, protocoltypes.CacheTTLOptions(options))
 	}
@@ -507,7 +397,6 @@ func buildRequestBody(
 	return result, nil
 }
 
-// buildTools converts tool definitions to Anthropic format.
 func buildTools(tools []ToolDefinition) []any {
 	result := make([]any, len(tools))
 	for i, tool := range tools {
@@ -521,16 +410,14 @@ func buildTools(tools []ToolDefinition) []any {
 	return result
 }
 
-// parseResponseBody parses Anthropic Messages API response.
 func parseResponseBody(body []byte) (*LLMResponse, error) {
 	var resp anthropicMessageResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("parsing JSON response: %w", err)
 	}
 
-	// Extract content and tool calls
 	var content strings.Builder
-	toolCalls := make([]ToolCall, 0) // Initialize as empty slice (not nil) for consistent JSON serialization
+	toolCalls := make([]ToolCall, 0)
 
 	for _, block := range resp.Content {
 		switch block.Type {
@@ -550,7 +437,6 @@ func parseResponseBody(body []byte) (*LLMResponse, error) {
 		}
 	}
 
-	// Map stop_reason
 	finishReason := "stop"
 	switch resp.StopReason {
 	case "tool_use":
@@ -568,8 +454,6 @@ func parseResponseBody(body []byte) (*LLMResponse, error) {
 		ToolCalls:    toolCalls,
 		FinishReason: finishReason,
 		Usage: &UsageInfo{
-			// Anthropic's input_tokens excludes cached tokens; include them so
-			// context-window accounting matches the model's true input size.
 			PromptTokens:             int(resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens),
 			CompletionTokens:         int(resp.Usage.OutputTokens),
 			TotalTokens:              int(resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens + resp.Usage.OutputTokens),
@@ -579,8 +463,6 @@ func parseResponseBody(body []byte) (*LLMResponse, error) {
 	}, nil
 }
 
-// parseAnthropicSSEStream parses the Anthropic SSE streaming response.
-// Events: message_start, content_block_start, content_block_delta, content_block_stop, message_delta, message_stop, ping
 func parseAnthropicSSEStream(ctx context.Context, body io.Reader, onChunk func(chunk string, done bool), onReasoning func(reasoningChunk string)) (*LLMResponse, error) {
 	contentBuf := builderPool.Get().(*strings.Builder)
 	contentBuf.Reset()
@@ -594,9 +476,8 @@ func parseAnthropicSSEStream(ctx context.Context, body io.Reader, onChunk func(c
 	var finishReason string
 	var usage *UsageInfo
 
-	// Track content blocks by index for tool use accumulation
 	type blockState struct {
-		blockType string // "text", "thinking", "tool_use"
+		blockType string
 		id        string
 		name      string
 		inputJSON strings.Builder
@@ -613,7 +494,6 @@ func parseAnthropicSSEStream(ctx context.Context, body io.Reader, onChunk func(c
 
 		line := scanner.Text()
 
-		// SSE format: "event: <type>" followed by "data: <json>"
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
@@ -670,9 +550,7 @@ func parseAnthropicSSEStream(ctx context.Context, body io.Reader, onChunk func(c
 			bs := &blockState{blockType: event.ContentBlock.Type}
 			switch event.ContentBlock.Type {
 			case "text":
-				// text blocks start empty
 			case "thinking":
-				// thinking blocks accumulate in reasoningBuf
 			case "tool_use":
 				bs.id = event.ContentBlock.ID
 				bs.name = event.ContentBlock.Name
@@ -731,13 +609,11 @@ func parseAnthropicSSEStream(ctx context.Context, body io.Reader, onChunk func(c
 			}
 
 		case "message_stop":
-			// Stream complete
 		}
 	}
 
-	onChunk("", true) // Signal completion
+	onChunk("", true)
 
-	// If we didn't get usage from events, there's none available
 	if usage == nil {
 		usage = &UsageInfo{}
 	}
@@ -751,34 +627,24 @@ func parseAnthropicSSEStream(ctx context.Context, body io.Reader, onChunk func(c
 	}, nil
 }
 
-// normalizeBaseURL ensures the base URL is properly formatted.
-// It removes /v1 suffix if present (to avoid duplication) and always appends /v1.
-// This handles edge cases like "https://api.example.com/v1/proxy" correctly.
 func normalizeBaseURL(apiBase string) string {
 	base := strings.TrimSpace(apiBase)
 	if base == "" {
 		return defaultBaseURL
 	}
 
-	// Remove trailing slashes
 	base = strings.TrimRight(base, "/")
 
-	// Remove /v1 suffix if present (will be re-added)
-	// This prevents duplication for URLs like "https://api.example.com/v1/proxy"
 	if before, ok := strings.CutSuffix(base, "/v1"); ok {
 		base = before
 	}
 
-	// Ensure we don't have an empty string after cutting
 	if base == "" {
 		return defaultBaseURL
 	}
 
-	// Add /v1 suffix (required by Anthropic Messages API)
 	return base + "/v1"
 }
-
-// Helper functions for type conversion
 
 func mapStopReason(anthropicStopReason string) string {
 	switch anthropicStopReason {
@@ -793,23 +659,10 @@ func mapStopReason(anthropicStopReason string) string {
 	}
 }
 
-// normalizeModel strips provider and AWS Bedrock prefixes from model names.
-// AWS Bedrock model IDs (e.g. "anthropic.claude-opus-4-7") include an "anthropic."
-// prefix that is not part of the Anthropic Messages API model namespace.
-// Bedrock proxy endpoints (e.g. bedrock-mantle) normalize this internally for
-// non-streaming requests, but pass it through unchanged for SSE streaming,
-// causing "Not supported model" errors. Always stripping is safe because all
-// Anthropic Messages API-compatible endpoints use the base model name.
-//
-// Examples:
-//   - "aws_ant/anthropic.claude-opus-4-7" → "claude-opus-4-7"
-//   - "anthropic.claude-opus-4-7" → "claude-opus-4-7"
-//   - "openrouter/deepseek/deepseek-chat" → "deepseek/deepseek-chat"
 func normalizeModel(model string) string {
 	if idx := strings.Index(model, "/"); idx >= 0 {
 		model = model[idx+1:]
 	}
-	// Strip anthropic. prefix (AWS Bedrock model ID convention, not used by Anthropic API)
 	model = strings.TrimPrefix(model, "anthropic.")
 	return model
 }
@@ -839,8 +692,6 @@ func asFloat(v any) (float64, bool) {
 		return 0, false
 	}
 }
-
-// Anthropic API response structures
 
 type anthropicMessageResponse struct {
 	ID         string         `json:"id"`

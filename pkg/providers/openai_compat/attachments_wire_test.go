@@ -1,11 +1,5 @@
 package openai_compat
 
-// send_file attachments are UI metadata persisted on session messages. The
-// openai_compat provider passes the messages slice straight into the request
-// body, which is marshalled through protocoltypes.Message.MarshalJSON — so a
-// leak here would send unknown fields to every OpenAI-compatible endpoint.
-// These tests pin that the wire format never carries attachments.
-
 import (
 	"context"
 	"encoding/json"
@@ -52,12 +46,9 @@ func TestAttachmentsNotSentToProvider_Chat(t *testing.T) {
 	if strings.Contains(body, "aa_report.pdf") {
 		t.Errorf("request body leaks attachment path: %s", body)
 	}
-	// Sanity: the message itself is there.
 	if !strings.Contains(body, "here is your file") {
 		t.Errorf("request body lost message content: %s", body)
 	}
-	// And the body must be valid JSON with our message serialized as an
-	// object with content/tool_calls fields only.
 	var parsed struct {
 		Messages []map[string]json.RawMessage `json:"messages"`
 	}

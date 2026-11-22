@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package protocoltypes
 
 import (
@@ -12,19 +7,8 @@ import (
 	"testing"
 )
 
-// --- regression: the exact production failure -------------------------------
-
-// TestToolCallWire_NilArgumentsNeverEmitsNull reproduces the production bug:
-// a provider that streamed empty tool-call deltas leaves Arguments nil, and
-// json.Marshal(nil map) produced the string "null" for function.arguments.
-// The upstream then answered 400 invalid_parameter_error:
-//
-//	The "function.arguments" parameter of the code model must be in JSON format.
-//
-// and because the assistant message was persisted, every later turn replayed
-// it and the agent was permanently stuck.
 func TestToolCallWire_NilArgumentsNeverEmitsNull(t *testing.T) {
-	tc := ToolCall{ID: "call_deadbeef", Type: "function"} // nil Name, nil Arguments
+	tc := ToolCall{ID: "call_deadbeef", Type: "function"}
 
 	msg := Message{Role: "assistant", ToolCalls: []ToolCall{tc}}
 	out, err := json.Marshal(msg)
@@ -56,10 +40,6 @@ func TestToolCallWire_NilArgumentsNeverEmitsNull(t *testing.T) {
 	}
 }
 
-// TestToolCallWire_NoDuplicateTopLevelArguments guards the second half of the
-// bug: the wire used to carry function.arguments (a string) AND a top-level
-// arguments (an object) for the same call. Strict gateways reject that and it
-// doubled the token cost of every replayed turn.
 func TestToolCallWire_NoDuplicateTopLevelArguments(t *testing.T) {
 	tc := ToolCall{
 		ID:        "call_1",
@@ -88,8 +68,6 @@ func TestToolCallWire_NoDuplicateTopLevelArguments(t *testing.T) {
 	}
 }
 
-// TestToolCallWire_CanonicalShapeStable checks the whole emitted shape, so a
-// future field addition cannot silently change the wire again.
 func TestToolCallWire_CanonicalShapeStable(t *testing.T) {
 	tc := ToolCall{
 		ID:        "call_1",
@@ -107,11 +85,6 @@ func TestToolCallWire_CanonicalShapeStable(t *testing.T) {
 	}
 }
 
-// --- round trip -------------------------------------------------------------
-
-// TestToolCallRoundTrip_KeepsDecodedMap is what protects every non-OpenAI
-// provider (Anthropic, Bedrock, Codex, Antigravity) plus tool execution: they
-// read tc.Arguments, so unmarshalling must rehydrate it from function.arguments.
 func TestToolCallRoundTrip_KeepsDecodedMap(t *testing.T) {
 	original := ToolCall{
 		ID:        "call_1",
@@ -141,8 +114,6 @@ func TestToolCallRoundTrip_KeepsDecodedMap(t *testing.T) {
 	}
 }
 
-// TestMessageRoundTrip_WithToolCalls covers the container: Message has its own
-// MarshalJSON, so the nested canonicalization must survive it.
 func TestMessageRoundTrip_WithToolCalls(t *testing.T) {
 	msg := Message{
 		Role:    "assistant",
@@ -176,16 +147,11 @@ func TestMessageRoundTrip_WithToolCalls(t *testing.T) {
 	}
 }
 
-// --- legacy stored shapes ---------------------------------------------------
-
-// TestToolCallUnmarshal_LegacyShapes checks sessions already on disk. They hold
-// a mix of shapes written by older code; all of them must load into something
-// whose re-marshalled function.arguments is valid JSON.
 func TestToolCallUnmarshal_LegacyShapes(t *testing.T) {
 	cases := []struct {
 		name string
 		json string
-		want string // expected function.arguments after canonicalization
+		want string
 	}{
 		{
 			name: "object top-level only (no function)",
@@ -239,12 +205,9 @@ func TestToolCallUnmarshal_LegacyShapes(t *testing.T) {
 			if !json.Valid([]byte(call.Function.Arguments)) {
 				t.Fatalf("function.arguments is not valid JSON: %q", call.Function.Arguments)
 			}
-			// The decoded map must agree with the canonical string, otherwise
-			// tool execution and non-OpenAI providers see something else.
 			if call.Arguments == nil {
 				t.Fatalf("decoded Arguments map is nil for %s", tc.json)
 			}
-			// And re-marshalling must be clean: no duplicate, no null.
 			out, err := json.Marshal(call)
 			if err != nil {
 				t.Fatalf("re-marshal: %v", err)
@@ -264,11 +227,7 @@ func TestToolCallUnmarshal_LegacyShapes(t *testing.T) {
 	}
 }
 
-// --- CanonicalToolCalls ------------------------------------------------------
-
 func TestCanonicalToolCalls_DropsNamelessEntries(t *testing.T) {
-	// A provider that streamed a tool-call delta with only an index produces an
-	// empty shell. It cannot be executed and replaying it breaks the request.
 	calls := []ToolCall{
 		{ID: "call_bad"},
 		{ID: "call_ok", Name: "exec", Arguments: map[string]interface{}{"command": "ls"}},
@@ -316,8 +275,6 @@ func TestCanonicalToolCalls_PopulatesBothFields(t *testing.T) {
 }
 
 func TestCanonicalToolCalls_RepairsTruncatedArguments(t *testing.T) {
-	// max_tokens can cut a large argument payload mid-write. The old code
-	// forwarded the broken string verbatim and the provider rejected the turn.
 	got := CanonicalToolCalls([]ToolCall{{
 		ID:       "c1",
 		Function: &FunctionCall{Name: "write_file", Arguments: `{"path":"/tmp/a","content":"hello`},
@@ -335,8 +292,6 @@ func TestCanonicalToolCalls_RepairsTruncatedArguments(t *testing.T) {
 }
 
 func TestCanonicalToolCalls_PreservesThoughtSignature(t *testing.T) {
-	// Gemini-style thought_signature must survive canonicalization; dropping it
-	// silently would break multi-turn tool calls on that provider.
 	got := CanonicalToolCalls([]ToolCall{{
 		ID:               "c1",
 		Name:             "exec",
@@ -350,8 +305,6 @@ func TestCanonicalToolCalls_PreservesThoughtSignature(t *testing.T) {
 		t.Fatalf("thought_signature lost: %#v", got[0])
 	}
 }
-
-// --- helpers ---------------------------------------------------------------
 
 func TestNormalizeArgumentsJSON(t *testing.T) {
 	cases := map[string]string{
@@ -374,8 +327,6 @@ func TestNormalizeArgumentsJSON(t *testing.T) {
 }
 
 func TestNormalizeArgumentsJSON_AlwaysValidObject(t *testing.T) {
-	// Property-style sweep: whatever we get from a provider or an old session,
-	// the output must be a valid JSON object.
 	inputs := []string{
 		"", "null", "NULL", "{", "}", "[]", "{}", `{"a"}`, "1", `"1"`, `"{}"`,
 		`{"a":1}`, `{"a":"b"`, "{a:1}", "\x00", `{"nested":{"deep":[1,2,{"k":"v"}]}}`,
@@ -394,8 +345,6 @@ func TestNormalizeArgumentsJSON_AlwaysValidObject(t *testing.T) {
 }
 
 func TestArgumentJSON_PrefersCanonicalString(t *testing.T) {
-	// function.arguments is authoritative when it is a valid object; the decoded
-	// map is only the fallback for calls that never populated Function.
 	tc := ToolCall{
 		Name:      "exec",
 		Arguments: map[string]interface{}{"command": "from-map"},
@@ -405,13 +354,11 @@ func TestArgumentJSON_PrefersCanonicalString(t *testing.T) {
 		t.Fatalf("ArgumentJSON() = %q, want the canonical function.arguments", got)
 	}
 
-	// No Function at all -> encode the map.
 	only := ToolCall{Name: "exec", Arguments: map[string]interface{}{"command": "ls"}}
 	if got := only.ArgumentJSON(); got != `{"command":"ls"}` {
 		t.Fatalf("ArgumentJSON() map fallback = %q", got)
 	}
 
-	// Nothing at all -> empty object, never "" or "null".
 	empty := ToolCall{ID: "c1"}
 	if got := empty.ArgumentJSON(); got != "{}" {
 		t.Fatalf("ArgumentJSON() empty = %q, want {}", got)
@@ -433,14 +380,12 @@ func TestFunctionName_PrefersFunction(t *testing.T) {
 	}
 }
 
-// --- truncated-argument repair ----------------------------------------------
-
 func TestRepairTruncatedObject_Cases(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
-		want string // expected canonical arguments
-		lost bool   // whether the repair had to discard a member
+		want string
+		lost bool
 	}{
 		{"cut inside a string value", `{"path":"/tmp/a","content":"hello`, `{"path":"/tmp/a"}`, true},
 		{"cut after a comma", `{"a":1,`, `{"a":1}`, true},
@@ -479,8 +424,6 @@ func TestRepairTruncatedObject_Cases(t *testing.T) {
 	}
 }
 
-// The repair must not be quadratic: arguments payloads (file bodies, long
-// commands) reach hundreds of kilobytes and this runs on every malformed call.
 func TestRepairTruncatedObject_LinearOnLargePayload(t *testing.T) {
 	body := strings.Repeat("x", 400_000)
 	in := `{"path":"/tmp/a","content":"` + body
@@ -497,8 +440,6 @@ func TestRepairTruncatedObject_LinearOnLargePayload(t *testing.T) {
 	}
 }
 
-// A truncated string member is lost entirely, so an escaped quote must not
-// make the scanner treat the following brace as still-inside-the-string.
 func TestNormalizeArgumentsJSON_CutInsideEscapedString(t *testing.T) {
 	got := normalizeArgumentsJSON(`{"a":"x\",\"b\":\"y`)
 	if got != emptyArgumentsJSON {
@@ -506,11 +447,6 @@ func TestNormalizeArgumentsJSON_CutInsideEscapedString(t *testing.T) {
 	}
 }
 
-// --- truncated-arguments flag ----------------------------------------------
-
-// The repair makes a cut-off payload valid JSON again, so nothing downstream
-// can tell that the tail is missing. The flag is what carries that knowledge to
-// the agent loop.
 func TestCanonicalToolCalls_FlagsTruncatedArguments(t *testing.T) {
 	got := CanonicalToolCalls([]ToolCall{{
 		ID:       "c1",
@@ -522,7 +458,6 @@ func TestCanonicalToolCalls_FlagsTruncatedArguments(t *testing.T) {
 	if !got[0].ArgumentsTruncated {
 		t.Fatal("a repaired payload must be flagged as truncated")
 	}
-	// What survived is kept: the model already paid for it.
 	if got[0].Arguments["path"] != "/tmp/a" {
 		t.Fatalf("lost the completed argument: %#v", got[0].Arguments)
 	}
@@ -544,8 +479,6 @@ func TestCanonicalToolCalls_CompleteArgumentsNotFlagged(t *testing.T) {
 	}
 }
 
-// Trailing noise after a closed object loses nothing, so it must not be
-// reported as truncation: the arguments are complete and executable.
 func TestCanonicalToolCalls_TrailingJunkNotFlagged(t *testing.T) {
 	got := CanonicalToolCalls([]ToolCall{{
 		ID:       "c1",
@@ -559,8 +492,6 @@ func TestCanonicalToolCalls_TrailingJunkNotFlagged(t *testing.T) {
 	}
 }
 
-// A provider that already knows the stream was cut (it sees finish_reason) can
-// flag the call itself; canonicalisation must preserve that.
 func TestCanonicalToolCalls_PreservesProviderFlag(t *testing.T) {
 	got := CanonicalToolCalls([]ToolCall{{
 		ID:                 "c1",
@@ -575,8 +506,6 @@ func TestCanonicalToolCalls_PreservesProviderFlag(t *testing.T) {
 	}
 }
 
-// Unrecoverable payloads are still incomplete: the loop should treat them the
-// same as a repaired one rather than running a tool with no arguments.
 func TestNormalizeArgumentsJSON_FlagsUnrecoverableObject(t *testing.T) {
 	normalized, truncated := normalizeArgumentsJSONWithFlag(`{"a":[1,2}`)
 	if normalized != emptyArgumentsJSON {
@@ -588,8 +517,6 @@ func TestNormalizeArgumentsJSON_FlagsUnrecoverableObject(t *testing.T) {
 }
 
 func TestNormalizeArgumentsJSON_AbsentPayloadNotFlagged(t *testing.T) {
-	// A tool that takes no arguments legitimately sends "". Flagging that would
-	// block every such call.
 	for _, in := range []string{"", "   ", "null", `{"a":1}`} {
 		if _, truncated := normalizeArgumentsJSONWithFlag(in); truncated {
 			t.Errorf("normalizeArgumentsJSONWithFlag(%q) reported truncation", in)
@@ -597,9 +524,6 @@ func TestNormalizeArgumentsJSON_AbsentPayloadNotFlagged(t *testing.T) {
 	}
 }
 
-// The flag must never reach a provider on the wire: it is loop-internal. The
-// marshal path goes through an explicit wire struct, so pinning the exact key
-// set is what catches a future field being added there.
 func TestToolCallArgumentsTruncatedNotSerialized(t *testing.T) {
 	encoded, err := json.Marshal(ToolCall{
 		ID:                 "c1",
@@ -628,8 +552,6 @@ func TestToolCallArgumentsTruncatedNotSerialized(t *testing.T) {
 	}
 }
 
-// Wire-shaped input (what a provider response decodes into) must set the flag
-// too, otherwise the streaming path would lose it.
 func TestToolCallUnmarshalJSON_FlagsTruncatedArguments(t *testing.T) {
 	var tc ToolCall
 	raw := []byte(`{"id":"c1","type":"function","function":{"name":"write_file","arguments":"{\"path\":\"/tmp/a\",\"content\":\"hel"}}`)

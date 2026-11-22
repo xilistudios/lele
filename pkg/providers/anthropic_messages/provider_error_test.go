@@ -1,6 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Copyright (c) 2026 Lele contributors
-
 package anthropicmessages
 
 import (
@@ -15,7 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers/common"
 )
 
-// serverPath is the placeholder for the endpoint URL in expected messages.
 const serverPath = "<<SERVER>>"
 
 func errorServer(status int, headers map[string]string, body string) *httptest.Server {
@@ -29,8 +25,6 @@ func errorServer(status int, headers map[string]string, body string) *httptest.S
 	}))
 }
 
-// The per-status branches of Chat keep their historical wording AND now carry
-// the status + hint as data (previously the 429 branch dropped Retry-After).
 func TestChat_StatusBranchesAreStructured(t *testing.T) {
 	tests := []struct {
 		name    string

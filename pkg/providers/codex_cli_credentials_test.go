@@ -34,7 +34,6 @@ func TestReadCodexCliCredentials_Valid(t *testing.T) {
 	if accountID != "org-test123" {
 		t.Errorf("accountID = %q, want %q", accountID, "org-test123")
 	}
-	// Expiry should be within ~1 hour from now (file was just written)
 	if expiresAt.Before(time.Now()) {
 		t.Errorf("expiresAt = %v, should be in the future", expiresAt)
 	}
@@ -165,7 +164,6 @@ func TestCreateCodexCliTokenSource_Expired(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Set file modification time to 2 hours ago
 	oldTime := time.Now().Add(-2 * time.Hour)
 	if err := os.Chtimes(authPath, oldTime, oldTime); err != nil {
 		t.Fatal(err)
