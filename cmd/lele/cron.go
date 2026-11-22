@@ -26,12 +26,9 @@ func cronCmd() {
 
 	cronStorePath := filepath.Join(cfg.WorkspacePath(), "cron", "jobs.json")
 
-	// Open SQLite store when available so the CLI reads/writes the same
-	// database as the running server. Any open error is intentionally
-	// ignored here: the CLI falls back to the JSON file, exactly as before.
 	var cronRepo *store.CronRepo
 	s, cleanup, _ := openSharedStore(defaultDBPath(), "cron-cli")
-	defer cleanup() // no-op when the store could not be opened
+	defer cleanup()
 	if s != nil {
 		cronRepo = s.Cron()
 	}

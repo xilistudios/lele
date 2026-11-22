@@ -4,11 +4,7 @@ import (
 	"testing"
 )
 
-// parseCLIArgs tests the argument parsing logic extracted from agentCmd.
-// This isolates the pure parsing logic from I/O and agent setup.
-
 func TestParseCLIArgs_Default(t *testing.T) {
-	// Simulate: lele agent
 	msg, session, _, verbose := parseCLIArgs([]string{})
 	if msg != "" {
 		t.Errorf("message = %q, want %q", msg, "")
@@ -76,8 +72,6 @@ func TestParseCLIArgs_DebugShort(t *testing.T) {
 }
 
 func TestParseCLIArgs_DebugAndVerboseCombined(t *testing.T) {
-	// When both --debug and --verbose are passed, both should be true
-	// The precedence logic is in agentCmd (debug wins), but parseCLIArgs should return both as true
 	_, _, debug, verbose := parseCLIArgs([]string{"--debug", "--verbose"})
 	if !debug {
 		t.Error("debug = false, want true")
@@ -88,7 +82,6 @@ func TestParseCLIArgs_DebugAndVerboseCombined(t *testing.T) {
 }
 
 func TestParseCLIArgs_VerboseAndDebugCombined(t *testing.T) {
-	// Order shouldn't matter - test reverse order
 	_, _, debug, verbose := parseCLIArgs([]string{"-v", "-d"})
 	if !debug {
 		t.Error("debug = false, want true")
@@ -149,7 +142,6 @@ func TestParseCLIArgs_UnknownFlagIgnored(t *testing.T) {
 }
 
 func TestParseCLIArgs_MessageMissingValue(t *testing.T) {
-	// When -m is last, there's no value to consume
 	msg, _, _, _ := parseCLIArgs([]string{"-m"})
 	if msg != "" {
 		t.Errorf("message = %q, want empty (no value to consume)", msg)

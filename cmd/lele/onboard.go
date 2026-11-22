@@ -40,7 +40,6 @@ type providerInfo struct {
 }
 
 func providerRegistry() []providerInfo {
-	// catalogBase returns the catalog default API base for a provider type.
 	catalogBase := func(typ string) string {
 		return catalog.DefaultAPIBaseByType(typ)
 	}
@@ -62,7 +61,6 @@ func providerRegistry() []providerInfo {
 		{name: "alibaba_token_plan", displayName: "Qwen Cloud Token Plan", typeKey: "alibaba_token_plan", apiBase: catalogBase("alibaba_token_plan"), authHeader: "Bearer"},
 		{name: "alibaba_token_plan_cn", displayName: "Qwen Cloud Token Plan (CN)", typeKey: "alibaba_token_plan_cn", apiBase: catalogBase("alibaba_token_plan_cn"), authHeader: "Bearer"},
 		{name: "github_copilot", displayName: "GitHub Copilot", typeKey: "github_copilot", apiBase: "localhost:4321", authHeader: "Bearer"},
-		// Optional catalog-backed providers (hermes-agent pending set).
 		{name: "xai", displayName: "xAI (Grok)", typeKey: "xai", apiBase: catalogBase("xai"), authHeader: "Bearer"},
 		{name: "nous", displayName: "Nous Portal", typeKey: "nous", apiBase: catalogBase("nous"), authHeader: "Bearer"},
 		{name: "lmstudio", displayName: "LM Studio (local)", typeKey: "lmstudio", apiBase: catalogBase("lmstudio"), authHeader: "Bearer", local: true},
@@ -371,7 +369,6 @@ func configureProvider(cfg *config.Config, info providerInfo) {
 	case "github_copilot":
 		cfg.Providers.GitHubCopilot = named.ProviderConfig
 	case "nanogpt":
-		// nanogpt is handled via the Named map (openai_compat type)
 	}
 
 	fmt.Println(styleSuccess.Render(fmt.Sprintf("✓ Provider %s configured", info.displayName)))
@@ -548,9 +545,6 @@ func configureAdditionalAgents(cfg *config.Config) {
 	}
 }
 
-// setWebUIEnabled applies the "Enable Web UI + native channel?" decision to
-// cfg. Pure (no terminal I/O) so it is unit-testable: the Web UI server and
-// the native channel (its auth backend) are turned on and off together.
 func setWebUIEnabled(cfg *config.Config, enabled bool) {
 	cfg.Channels.Web.Enabled = enabled
 	cfg.Channels.Native.Enabled = enabled
@@ -560,9 +554,6 @@ func configureWebUI(cfg *config.Config, leleDir string) {
 	fmt.Printf("\n%s\n", styleTitle.Render("=== Web UI Configuration ==="))
 
 	setWebUIEnabled(cfg, true)
-	// Gateway is the section the editable document models (server.* is not).
-	// The prompt default matches the gateway code default (18790), so the
-	// common answer writes nothing extra to a minimal config.json.
 	cfg.Gateway.Port = askInt("Server port", 18790)
 
 	fmt.Printf("\n%s\n", styleSuccess.Render(fmt.Sprintf("✓ Web UI will be served on port %d", cfg.Gateway.Port)))
@@ -694,7 +685,6 @@ func printSummary(cfg *config.Config) {
 	}
 }
 
-// enabledLabel renders a boolean channel state for the summary.
 func enabledLabel(enabled bool) string {
 	if enabled {
 		return styleSuccess.Render("enabled")
@@ -728,9 +718,6 @@ func onboard() {
 		configureWebUI(cfg, leleDir)
 		maybeGeneratePIN(cfg, leleDir)
 	} else {
-		// Defaults are enabled, so "no" must be written as an explicit
-		// deviation; without this branch the answer was a no-op. PIN
-		// generation and service start stay gated on Web.Enabled.
 		setWebUIEnabled(cfg, false)
 	}
 
@@ -741,10 +728,6 @@ func onboard() {
 		return
 	}
 
-	// Minimal save: persist only what the user configured (providers, agents)
-	// and explicit deviations from the code defaults (disabled channels, a
-	// custom gateway port). Values equal to the defaults are omitted and are
-	// restored by LoadConfig, which unmarshals the file over DefaultConfig.
 	if err := config.SaveMinimalConfig(configPath, cfg); err != nil {
 		fmt.Println(styleWarning.Render(fmt.Sprintf("Error saving config: %v", err)))
 		os.Exit(1)

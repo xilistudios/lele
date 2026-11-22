@@ -16,7 +16,6 @@ import (
 	"github.com/xilistudios/lele/pkg/update"
 )
 
-// silenceGatewayOutput keeps the "Shutting down..." banner out of test logs.
 func silenceGatewayOutput(t *testing.T) {
 	t.Helper()
 	orig := gatewayOut
@@ -24,8 +23,6 @@ func silenceGatewayOutput(t *testing.T) {
 	t.Cleanup(func() { gatewayOut = orig })
 }
 
-// newGatewayTestLoop builds a real AgentLoop in a throwaway workspace so the
-// teardown helpers run against production wiring instead of a partial struct.
 func newGatewayTestLoop(t *testing.T) *agent.AgentLoop {
 	t.Helper()
 
@@ -44,10 +41,6 @@ func newGatewayTestLoop(t *testing.T) *agent.AgentLoop {
 	return agent.NewAgentLoop(cfg, bus.NewMessageBus())
 }
 
-// TestRunGracefulShutdownOrder pins the ordering guarantees the gateway's
-// teardown exists for: hooks run LIFO, and the root context is cancelled only
-// after every hook has returned. Cancelling earlier is what used to kill
-// in-flight turns mid-request.
 func TestRunGracefulShutdownOrder(t *testing.T) {
 	silenceGatewayOutput(t)
 
@@ -85,9 +78,6 @@ func TestRunGracefulShutdownOrder(t *testing.T) {
 	}
 }
 
-// TestRunGracefulShutdownIsIdempotent covers the case the whole design depends
-// on: the SIGTERM path and the self-restart path both call it, so the second
-// call must not re-run hooks or panic inside AgentLoop.Stop.
 func TestRunGracefulShutdownIsIdempotent(t *testing.T) {
 	silenceGatewayOutput(t)
 
@@ -118,18 +108,11 @@ func TestRunGracefulShutdownIsIdempotent(t *testing.T) {
 	if ran != 1 {
 		t.Errorf("hooks ran %d times, want 1 (RunAll is idempotent)", ran)
 	}
-	// The cancel now lives inside the once (it must run before the join, and
-	// only the first teardown performs the join), so a repeat call is fully
-	// inert: the context was already released by the first pass.
 	if cancels != 1 {
 		t.Errorf("cancel called %d times, want 1: the teardown runs exactly once", cancels)
 	}
 }
 
-// TestRunGracefulShutdownContinuesAfterFailingHook asserts a hook that errors is
-// recorded and the rest of the teardown still runs: one bad stop step must never
-// leave the process holding the instance lock. Hooks run LIFO, so "broken"
-// (registered last) runs before "lock-like" (registered first).
 func TestRunGracefulShutdownContinuesAfterFailingHook(t *testing.T) {
 	silenceGatewayOutput(t)
 
@@ -151,7 +134,6 @@ func TestRunGracefulShutdownContinuesAfterFailingHook(t *testing.T) {
 		return wanted
 	})
 
-	// Nothing may panic and the function must return even though a hook failed.
 	runGracefulShutdown(coord, newGatewayTestLoop(t), func() {})
 
 	mu.Lock()
@@ -161,10 +143,6 @@ func TestRunGracefulShutdownContinuesAfterFailingHook(t *testing.T) {
 	}
 }
 
-// TestRestarterOnRestartRunsTeardownOnce exercises the actual wiring contract
-// between the restarter and the gateway: Restart calls OnRestart before exiting
-// the parent, and OnRestart must drive the same coordinator the signal path
-// uses - never a second, competing one.
 func TestRestarterOnRestartRunsTeardownOnce(t *testing.T) {
 	silenceGatewayOutput(t)
 	t.Setenv("LELE_RESTART_DRY_RUN", "1")
@@ -190,7 +168,6 @@ func TestRestarterOnRestartRunsTeardownOnce(t *testing.T) {
 	if _, err := r.Restart(); err != nil {
 		t.Fatalf("Restart() = %v", err)
 	}
-	// The signal path fires right after the restart path in the worst case.
 	runGracefulShutdown(coord, al, cancel)
 
 	mu.Lock()
@@ -200,17 +177,9 @@ func TestRestarterOnRestartRunsTeardownOnce(t *testing.T) {
 	}
 }
 
-// fakeTurnJoiner records when the gateway performs its final join, and can be
-// made to wait for something the teardown is supposed to do first. It stands in
-// for the AgentLoop's in-flight-turn tracking, which is unexported.
 type fakeTurnJoiner struct {
-	// release, when non-nil, is closed by the test's cancel func and StopWithin
-	// blocks until it is. This reproduces the real dependency - an in-flight
-	// turn can only end once the root context is cancelled - without reaching
-	// into the loop's unexported WaitGroup.
 	release chan struct{}
-	// joined counts the joins so a test can assert the teardown ran exactly one.
-	joined int
+	joined  int
 }
 
 func (f *fakeTurnJoiner) StopWithin(time.Duration) error {
@@ -221,20 +190,6 @@ func (f *fakeTurnJoiner) StopWithin(time.Duration) error {
 	return nil
 }
 
-// TestRunGracefulShutdownCancelsBeforeJoin is the regression test for the
-// self-update restart hang.
-//
-// A turn that outlived the agent-drain budget runs on the gateway's root
-// context and is tracked on the loop's WaitGroup, so the teardown can only
-// finish if it cancels that context before joining: joining first waits for the
-// turn, the turn waits for the cancel, and the cancel sits behind the join.
-// That cycle is what made systemd hit TimeoutStopUSec and SIGKILL the service
-// during an update - and, on the self-exec path, what kept the parent from ever
-// exiting so the replacement child gave up on the instance lock and died with
-// "already running".
-//
-// The fake joiner below blocks until the cancel fires, so a teardown that
-// cancels after joining hangs and this test fails by timeout.
 func TestRunGracefulShutdownCancelsBeforeJoin(t *testing.T) {
 	silenceGatewayOutput(t)
 
@@ -248,8 +203,6 @@ func TestRunGracefulShutdownCancelsBeforeJoin(t *testing.T) {
 
 	joiner := &fakeTurnJoiner{release: make(chan struct{})}
 	coord := update.NewShutdownCoordinator(5 * time.Second)
-	// The drain hook loses the race against the turn, as it does in production
-	// for any turn longer than its budget.
 	coord.Register("agent-drain", time.Second, func(context.Context) error {
 		record("hook")
 		return nil
@@ -275,17 +228,11 @@ func TestRunGracefulShutdownCancelsBeforeJoin(t *testing.T) {
 	if got := strings.Join(events, ","); got != "hook,cancel" {
 		t.Errorf("teardown order = %q, want %q", got, "hook,cancel")
 	}
-	// The join ran, and it could only run after the cancel: StopWithin blocks
-	// until the cancel func closes joiner.release, so runGracefulShutdown
-	// returning at all is the proof that the root context was released first.
 	if joiner.joined != 1 {
 		t.Errorf("final join ran %d times, want 1", joiner.joined)
 	}
 }
 
-// TestRunGracefulShutdownJoinsOnlyOnceAcrossTriggers pins that the restart path
-// and the signal path share one teardown, so a turn is never joined twice and
-// the store is never closed under a second Stop.
 func TestRunGracefulShutdownJoinsOnlyOnceAcrossTriggers(t *testing.T) {
 	silenceGatewayOutput(t)
 

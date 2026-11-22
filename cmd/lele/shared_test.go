@@ -102,21 +102,8 @@ func TestLogoConstant(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// MCP secret vault wiring
-// ---------------------------------------------------------------------------
-
-// These tests pin the PRODUCTION wiring of pkg/mcp's secret vault: the factory
-// that loadConfig installs (through registerKeyringResolver → the same keyring
-// Service as the {{SECRET:}} resolver). They drive the real registration helper
-// and the real mcp.NewAuthStore, so a regression in either half — the factory
-// not registered, registered with a different Service, or answering for a
-// directory it does not own — fails here.
-
 const sharedTestMCPURL = "https://mcp.example.com/mcp"
 
-// newFileKeyringService builds a file-backed keyring Service rooted at dir, so
-// no test ever reaches the OS keychain.
 func newFileKeyringService(t *testing.T, dir string) *keyring.Service {
 	t.Helper()
 	return keyring.NewService(keyring.ServiceConfig{
@@ -128,17 +115,12 @@ func newFileKeyringService(t *testing.T, dir string) *keyring.Service {
 	})
 }
 
-// useMCPSecretVault registers svc as the process-wide vault for one test and
-// restores the package default (no factory ⇒ legacy plaintext mode) afterwards,
-// so the tests of this package that never wire a keyring stay untouched.
 func useMCPSecretVault(t *testing.T, svc *keyring.Service) {
 	t.Helper()
 	registerMCPSecretVault(svc)
 	t.Cleanup(func() { mcp.RegisterSecretVaultFactory(nil) })
 }
 
-// mcpAuthFileBytes returns the raw bytes of <dir>/mcp-auth.json, failing the
-// test when the file is missing: every case below saves a record first.
 func mcpAuthFileBytes(t *testing.T, dir string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(dir, "mcp-auth.json"))
@@ -148,8 +130,6 @@ func mcpAuthFileBytes(t *testing.T, dir string) string {
 	return string(data)
 }
 
-// seedLegacyMCPAuthFile writes the PRE-vault shape of mcp-auth.json: a record
-// that still carries its credential half in the file.
 func seedLegacyMCPAuthFile(t *testing.T, dir, name, clientSecret, accessToken string) {
 	t.Helper()
 	body := `{"servers":{"` + name + `":{"url":"` + sharedTestMCPURL + `","client_id":"cid-123",` +
@@ -159,10 +139,6 @@ func seedLegacyMCPAuthFile(t *testing.T, dir, name, clientSecret, accessToken st
 	}
 }
 
-// TestRegisterMCPSecretVault_StoresCredentialsInTheKeyring is the end-to-end
-// wiring assertion: with the factory registered from an enabled Service, a
-// saved record keeps NO credential in mcp-auth.json and every one of them is
-// readable from the keyring under "mcp.<server>.auth".
 func TestRegisterMCPSecretVault_StoresCredentialsInTheKeyring(t *testing.T) {
 	dir := t.TempDir()
 	svc := newFileKeyringService(t, dir)
@@ -193,7 +169,6 @@ func TestRegisterMCPSecretVault_StoresCredentialsInTheKeyring(t *testing.T) {
 			t.Errorf("mcp-auth.json still holds %q: %s", secret, raw)
 		}
 	}
-	// The non-secret half stays in the file: it is the record's identity.
 	for _, want := range []string{`"url":"` + sharedTestMCPURL + `"`, `"client_id":"cid-123"`} {
 		if !strings.Contains(raw, want) {
 			t.Errorf("mcp-auth.json lost %s: %s", want, raw)
@@ -210,8 +185,6 @@ func TestRegisterMCPSecretVault_StoresCredentialsInTheKeyring(t *testing.T) {
 		}
 	}
 
-	// The store still answers with the whole record (the vault is overlaid on
-	// every read), so nothing downstream notices the split.
 	got, ok := store.Record("api")
 	if !ok {
 		t.Fatal("Record(api) = absent after a successful save")
@@ -224,9 +197,6 @@ func TestRegisterMCPSecretVault_StoresCredentialsInTheKeyring(t *testing.T) {
 	}
 }
 
-// TestRegisterMCPSecretVault_MigratesLegacyFile: an existing plaintext
-// mcp-auth.json is migrated by the first store opened through the factory —
-// secrets into the keyring, file rewritten once without them.
 func TestRegisterMCPSecretVault_MigratesLegacyFile(t *testing.T) {
 	dir := t.TempDir()
 	seedLegacyMCPAuthFile(t, dir, "api", "legacy-secret", "legacy-token")
@@ -250,18 +220,12 @@ func TestRegisterMCPSecretVault_MigratesLegacyFile(t *testing.T) {
 			t.Errorf("the migrated blob is missing %q: %s", secret, blob)
 		}
 	}
-	// And the migration is lossless from the store's point of view.
 	got, ok := store.Record("api")
 	if !ok || got.ClientSecret != "legacy-secret" || got.Token == nil || got.Token.AccessToken != "legacy-token" {
 		t.Errorf("record after migration = %+v (present=%v), want the full credential", got, ok)
 	}
 }
 
-// TestRegisterMCPSecretVault_DeclinesOtherDirectories: the factory answers for
-// ONE lele directory. A store opened for another directory must fall back to
-// plaintext in its own file rather than writing this installation's keyring —
-// which is exactly the shape of a second `-c` dir, and of a package test
-// inheriting a factory registered by an earlier test.
 func TestRegisterMCPSecretVault_DeclinesOtherDirectories(t *testing.T) {
 	svcDir := t.TempDir()
 	svc := newFileKeyringService(t, svcDir)
@@ -282,11 +246,6 @@ func TestRegisterMCPSecretVault_DeclinesOtherDirectories(t *testing.T) {
 	}
 }
 
-// TestRegisterMCPSecretVault_DisabledModuleKeepsPlaintext pins the degradation
-// path: a nil Service (keyring switched off in config) and a Service that was
-// built disabled both register NO factory, so mcp-auth.json keeps holding the
-// credential exactly as it did before the vault existed. A disabled module must
-// never turn every login into an ErrDisabled failure.
 func TestRegisterMCPSecretVault_DisabledModuleKeepsPlaintext(t *testing.T) {
 	tests := []struct {
 		name string
@@ -325,12 +284,9 @@ func TestRegisterMCPSecretVault_DisabledModuleKeepsPlaintext(t *testing.T) {
 	}
 }
 
-// TestSameLeleDir pins the identity rule the factory relies on: two spellings
-// of one directory match (absolute/cleaned), different directories and empty
-// strings do not.
 func TestSameLeleDir(t *testing.T) {
 	base := t.TempDir()
-	t.Chdir(base) // makes the relative spellings below deterministic
+	t.Chdir(base)
 
 	tests := []struct {
 		name       string
@@ -354,17 +310,7 @@ func TestSameLeleDir(t *testing.T) {
 			}
 		})
 	}
-} // TestLoadConfigWiresMCPSecretVault pins the REGISTRATION POINT: loadConfig —
-// the shared setup every entry point (gateway, TUI, plain agent CLI, `lele mcp
-// …`) runs first — is what installs the MCP vault factory, from the same keyring
-// Service as the {{SECRET:}} resolver.
-//
-// The assertion is behavioural, not structural: a LEGACY plaintext mcp-auth.json
-// in the config's own lele directory is migrated by the first store opened after
-// loadConfig (secrets to the keyring, file rewritten without them). With the
-// factory unregistered — the state these tests start in — the file keeps its
-// token and no vault file appears, which is exactly what the disabled subtest
-// pins as the other side of the contract.
+}
 func TestLoadConfigWiresMCPSecretVault(t *testing.T) {
 	t.Cleanup(func() { mcp.RegisterSecretVaultFactory(nil) })
 
@@ -389,8 +335,6 @@ func TestLoadConfigWiresMCPSecretVault(t *testing.T) {
 		if !cfg.Keyring.Enabled {
 			t.Fatal("fixture premise broken: the keyring module is disabled")
 		}
-		// loadConfig installed the factory; a store for its own directory must
-		// therefore migrate the legacy credential on construction.
 		if _, ok := mcp.NewAuthStore(dir).Record("api"); !ok {
 			t.Fatal("Record(api) = absent after the migration")
 		}
