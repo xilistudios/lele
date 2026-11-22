@@ -251,7 +251,7 @@ export function UpdatesSettings() {
 
       {/* Confirmation modal */}
       {confirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
           <div className="w-full max-w-md rounded-lg border border-border bg-background-primary p-6 shadow-xl">
             <h3 className="mb-2 text-sm font-semibold text-text-primary">
               {t('settings.updates.confirmTitle')}
@@ -281,7 +281,7 @@ export function UpdatesSettings() {
 
       {/* Rollback confirmation modal */}
       {rollbackConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
           <div className="w-full max-w-md rounded-lg border border-border bg-background-primary p-6 shadow-xl">
             <h3 className="mb-2 text-sm font-semibold text-text-primary">
               {t('settings.updates.rollbackConfirmTitle')}

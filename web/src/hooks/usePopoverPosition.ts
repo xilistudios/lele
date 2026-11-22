@@ -23,7 +23,8 @@ function calculatePosition(
   const rect = element.getBoundingClientRect()
   const spaceLeft = rect.left
   const spaceRight = window.innerWidth - rect.right
-  const spaceBelow = window.innerHeight - rect.bottom
+  const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+  const spaceBelow = viewportHeight - rect.bottom
   const spaceAbove = rect.top
 
   const horizontal =
@@ -64,8 +65,13 @@ export function usePopoverPosition({
       setPosition(calculatePosition(ref.current, popoverWidth, popoverHeight, padding))
     }
 
+    const visualViewport = window.visualViewport
     window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
+    visualViewport?.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      visualViewport?.removeEventListener('resize', onResize)
+    }
   }, [isOpen, popoverWidth, popoverHeight, padding])
 
   return { position, ref }

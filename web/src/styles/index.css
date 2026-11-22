@@ -210,8 +210,69 @@
   --shadow-float: 0 12px 32px rgb(0 0 0 / 0.16), 0 4px 8px rgb(0 0 0 / 0.06);
 }
 
-html,
-body,
+/* Single source of truth for the app shell height.
+ * 100vh on mobile = LARGE viewport (toolbars retracted) -> the shell overflows
+ * the visible area by the browser-chrome height and the document scrolls the
+ * header away. dvh tracks the dynamic (visible) viewport. The px override is
+ * written by useAppViewportHeight ONLY while an on-screen keyboard shrinks the
+ * visual viewport below the layout viewport (iOS); it is removed otherwise. */
+:root {
+  --app-vh: 100vh;
+}
+@supports (height: 100dvh) {
+  :root {
+    --app-vh: 100dvh;
+  }
+}
+
+/* Replaces `h-screen overflow-hidden` on every full-height page shell.
+ * Keep the `flex` utility in markup; this class owns only height + overflow. */
+.app-shell {
+  height: var(--app-vh);
+  overflow: hidden;
+  /* Notch / home-indicator / status-bar insets. env() = 0px without
+   * viewport-fit=cover and on desktop -> pixel-identical there. The shell has
+   * no Tailwind padding utilities, so these cannot fight the px and py
+   * utilities (a plain .pb-safe next to py-3 would OVERRIDE the 12px with 0). */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+/* For fixed-position drawers that escape .app-shell's padding box: below md the
+ * sidebar/subagent/quick-chat drawers are `fixed`, so they own no shell padding
+ * and must carry the insets themselves. At `md:` they become `md:relative` (or
+ * are inside .app-shell), which already applies the same env() insets —
+ * applying both would double them on an iPad in landscape. Hence mobile-only.
+ * Applies to the PANEL, never to the `fixed inset-0` backdrop behind it: a
+ * backdrop has to dim the whole screen, edges and notch included. Only apply to
+ * elements with NO competing padding utilities. */
+@media (max-width: 767.98px) {
+  .safe-area-y {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+/* Replaces `min-h-screen` on scrollable centered pages (auth, error, loading). */
+.app-shell-min {
+  min-height: var(--app-vh);
+}
+
+/* The document must never be taller than the shell: a 100%-tall `html` floors
+ * the document at the layout-viewport height even when the shell shrinks for
+ * the keyboard, which leaves a blank pannable region and scrolls the header
+ * away again. `auto` lets the document height equal the body height.
+ * `body` tracks the same single source as the shell; `#root` percentages then
+ * resolve against a definite height, exactly as they did before. */
+html {
+  height: auto;
+}
+body {
+  height: var(--app-vh);
+  min-height: 0;
+}
 #root {
   height: 100%;
   min-height: 100%;

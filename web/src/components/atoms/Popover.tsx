@@ -71,7 +71,8 @@ export function Popover({
   useLayoutEffect(() => {
     if (!ref.current || isOpen || !tooltip) return
     const rect = ref.current.getBoundingClientRect()
-    const spaceBelow = window.innerHeight - rect.bottom
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+    const spaceBelow = viewportHeight - rect.bottom
     const spaceAbove = rect.top
     const spaceRight = window.innerWidth - rect.right
 

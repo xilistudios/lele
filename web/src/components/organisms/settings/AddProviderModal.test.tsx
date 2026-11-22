@@ -27,7 +27,7 @@
 
 import '../../../test/setup'
 import { describe, expect, mock, test } from 'bun:test'
-import { fireEvent, render, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, waitFor } from '@testing-library/react'
 import '../../../test/i18n'
 import { SettingsProvider } from '../../../contexts/SettingsContext'
 import type { SettingsConfigState } from '../../../hooks/useSettingsConfig'
@@ -658,19 +658,28 @@ describe('AddProviderModal', () => {
     expect(tileByType(container, 'xai')).not.toBeNull()
 
     gate.resolve({ providers: [XAI_CATALOG] })
-    // Wait on the catalog's own content: the synthesized tile already carries
-    // `data-provider-type="xai"`, so a selector count would resolve instantly
-    // and the api_base effect would not have run yet. "xAI" (the catalog name)
-    // beats the synthesized "Xai" fallback only once the merge re-ran.
-    await waitFor(() => {
-      expect(tile(container, 'xai').textContent).toContain('xAI')
+    // The catalog answer lands outside React's event system, so flush the
+    // microtask queue and the resulting commit inside `act()` before reading
+    // the DOM. Polling instead would race the commit under a loaded run.
+    await act(async () => {
+      await flush()
     })
+    // "xAI" (the catalog name) beats the synthesized "Xai" fallback only once
+    // the merge re-ran, so this is the catalog's own content, not the tile that
+    // was already there.
+    expect(tile(container, 'xai').textContent).toContain('xAI')
     expect(container.querySelectorAll('[data-provider-type="xai"]')).toHaveLength(1)
     // Deduped through the same map: the grid did not grow a second xai tile.
     expect(tilesIn(container)).toHaveLength(before)
     expect(tile(container, 'xai').getAttribute('aria-pressed')).toBe('true')
 
     fireEvent.click(addButton(container))
+    // The api_base follows the selected tile through an effect, so it lands one
+    // commit after the catalog merge that swapped the synthesized tile for the
+    // real one: flush that commit before reading the write.
+    await act(async () => {
+      await flush()
+    })
     expect(written(modal).xai.api_base).toBe('https://api.x.ai/v1')
   })
 

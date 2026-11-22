@@ -81,7 +81,7 @@ export function SlashCommandMenu({ items, activeIndex, onSelect, onHover }: Prop
       // Focus (and aria-activedescendant) stays in the textarea; -1 keeps the
       // list out of the tab order.
       tabIndex={-1}
-      className="mx-2 mb-1 max-h-48 overflow-y-auto rounded-lg border border-border bg-background-secondary shadow-lg"
+      className="mx-2 mb-1 max-h-48 max-md:max-h-[min(12rem,25dvh)] overflow-y-auto rounded-lg border border-border bg-background-secondary shadow-lg"
       data-testid="slash-command-menu"
     >
       {items.map((command, index) => (

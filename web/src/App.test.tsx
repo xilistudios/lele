@@ -1745,7 +1745,7 @@ describe('Session deletion', () => {
 
     // Test that the component renders without errors
     await waitFor(() => {
-      expect(document.querySelector('.h-screen')).not.toBeNull()
+      expect(document.querySelector('.app-shell')).not.toBeNull()
     })
   })
 })
@@ -2111,7 +2111,7 @@ describe('Logout', () => {
 
   test('a session-list pass still in flight cannot revive the state after logout', async () => {
     const allSessions = buildPaginatedSessions(2)
-    let releaseMetaPass: ((value: Response) => void) | undefined
+    const pendingMetaPasses: Array<(value: Response) => void> = []
     let pendingMetaUrl = ''
 
     // The bootstrap pass hangs until this test releases it, so it is still in
@@ -2119,7 +2119,7 @@ describe('Logout', () => {
     const fetchMock = createConnectionLifecycleFetchMock(allSessions, (url) => {
       pendingMetaUrl = url
       return new Promise<Response>((resolve) => {
-        releaseMetaPass = resolve
+        pendingMetaPasses.push(resolve)
       })
     })
     globalThis.fetch = fetchMock as unknown as typeof fetch
@@ -2129,13 +2129,24 @@ describe('Logout', () => {
     // i18n is pinned to `es` in test/i18n.ts, hence the Spanish label.
     const logoutButton = await waitFor(() => view.getByLabelText('Cerrar sesión'))
     await waitFor(() => expect(requestedMetaOffsets(fetchMock)).toEqual(['0']))
+    expect(pendingMetaPasses).toHaveLength(1)
+    const [releaseMetaPass] = pendingMetaPasses
 
     // fireEvent ignores the closed Popover's `pointer-events-none`, so the
     // button is clickable without opening the device menu first.
     fireEvent.click(logoutButton)
 
+    // The logout round-trip (server revoke -> reset -> unmount of the chat
+    // tree) is not instantaneous, and `waitFor`'s polling budget is shared with
+    // the act() work it has to flush, so give the UI a beat to settle before
+    // asserting. Without it the first poll can observe the pre-logout tree and
+    // the test's own 5s budget expires under a loaded run.
+    await settleEffects()
+
     // Logged out: the chat UI is gone and both stored keys were cleared.
-    await waitFor(() => expect(view.queryByLabelText('Cerrar sesión')).toBeNull())
+    await waitFor(() => expect(view.queryByLabelText('Cerrar sesión')).toBeNull(), {
+      timeout: 5000,
+    })
     expect(view.queryByTestId('sidebar-history-section')).toBeNull()
     expect(localStorage.getItem('lele.session')).toBeNull()
     expect(localStorage.getItem('lele.currentSessionKey')).toBeNull()

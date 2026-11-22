@@ -39,6 +39,44 @@ function buildFileUrl(apiUrl: string, path: string): string {
   return `${base}${endpoints.files.view}?path=${encodeURIComponent(path)}`
 }
 
+/**
+ * Folder chip: the session folder plus its clear button. Rendered twice — in
+ * the toolbar row (md+) and at the start of the controls row (mobile, where the
+ * toolbar row is hidden) — so the markup lives here instead of being duplicated.
+ */
+function FolderChip({
+  folder,
+  onClear,
+  className,
+}: {
+  folder: string
+  onClear: () => void
+  className?: string
+}) {
+  const { t } = useTranslation()
+  return (
+    <span
+      title={folder}
+      data-testid="folder-chip"
+      className={`flex max-w-[180px] items-center gap-1 rounded-full border border-accent-primary/30 bg-accent-primary/10 px-2 py-0.5 text-accent-primary ${className ?? ''}`}
+    >
+      <FolderIcon size={11} className="flex-shrink-0" />
+      <span className="truncate text-2xs font-medium">
+        {folder.split('/').filter(Boolean).pop() || folder}
+      </span>
+      <button
+        type="button"
+        onClick={onClear}
+        title={t('chat.removeFolder')}
+        aria-label={t('chat.removeFolder')}
+        className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full hover:bg-accent-primary/25 transition-colors"
+      >
+        <CloseIcon size={8} />
+      </button>
+    </span>
+  )
+}
+
 export function ChatComposer() {
   const { t } = useTranslation()
   const { canCancel, hasConversation, availableModels, groupedModels, selectedModel, thinkLevel } =
@@ -189,7 +227,8 @@ export function ChatComposer() {
     if (isPaletteTrigger(e.target.value)) setPaletteDismissed(false)
     if (queueFullHint && e.target.value.trim()) setQueueFullHint(false)
     e.target.style.height = 'auto'
-    e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`
+    const cap = Number.parseFloat(getComputedStyle(e.target).maxHeight)
+    e.target.style.height = `${Math.min(e.target.scrollHeight, Number.isFinite(cap) ? cap : 200)}px`
 
     const now = Date.now()
     if (now - lastTypingSentRef.current > 2000 && currentSessionKey) {
@@ -259,7 +298,7 @@ export function ChatComposer() {
         </p>
       )}
       {pendingAttachments.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-end gap-2">
+        <div className="mb-3 flex flex-wrap items-end gap-2 max-md:max-h-20 max-md:overflow-y-auto">
           {pendingAttachments.map((attachment) => {
             const isImg = isImageByExtension(attachment)
             if (isImg) {
@@ -337,7 +376,7 @@ export function ChatComposer() {
       <div className="rounded-lg border border-border bg-background-secondary transition-all duration-fast focus-within:border-border focus-within:ring-1 focus-within:ring-accent-primary/40">
         <div className={`h-0.5 w-full rounded-t-lg ${composerTheme.accentBar}`} />
         {/* Top toolbar: folder picker above the input, folder chip when set */}
-        <div className="flex items-center gap-1 px-2 pt-1.5">
+        <div className="flex items-center gap-1 px-2 pt-1.5 max-md:hidden">
           <IconButton
             onClick={() => setFolderPickerOpen(true)}
             title={t('chat.addFolder')}
@@ -345,26 +384,7 @@ export function ChatComposer() {
           >
             <PlusIcon size={14} />
           </IconButton>
-          {sessionFolder && (
-            <span
-              title={sessionFolder}
-              className="flex max-w-[180px] items-center gap-1 rounded-full border border-accent-primary/30 bg-accent-primary/10 px-2 py-0.5 text-accent-primary"
-            >
-              <FolderIcon size={11} className="flex-shrink-0" />
-              <span className="truncate text-2xs font-medium">
-                {sessionFolder.split('/').filter(Boolean).pop() || sessionFolder}
-              </span>
-              <button
-                type="button"
-                onClick={onClearFolder}
-                title={t('chat.removeFolder')}
-                aria-label={t('chat.removeFolder')}
-                className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full hover:bg-accent-primary/25 transition-colors"
-              >
-                <CloseIcon size={8} />
-              </button>
-            </span>
-          )}
+          {sessionFolder && <FolderChip folder={sessionFolder} onClear={onClearFolder} />}
         </div>
         {paletteOpen && (
           <SlashCommandMenu
@@ -376,7 +396,7 @@ export function ChatComposer() {
         )}
         <textarea
           ref={textareaRef}
-          className="min-h-[44px] max-h-[200px] w-full resize-none bg-transparent px-4 pb-2 pt-1.5 text-sm text-text-primary outline-none placeholder:text-text-tertiary"
+          className="min-h-[44px] max-h-[200px] max-md:max-h-[min(200px,30dvh)] w-full resize-none bg-transparent px-4 pb-2 pt-1.5 text-sm text-text-primary outline-none placeholder:text-text-tertiary"
           placeholder={t('chat.messagePlaceholder')}
           value={draft}
           onChange={handleTextareaChange}
@@ -387,65 +407,127 @@ export function ChatComposer() {
           disabled={false}
           rows={1}
         />
-        <div className="flex flex-wrap items-center gap-2 px-3 pb-2 pt-1 sm:gap-3">
-          <AttachmentInput
-            onUpload={onUploadAttachments}
-            onAttach={(paths) => onAttachmentsChange((prev) => [...prev, ...paths])}
-          />
-          <SearchableSelect
-            ariaLabel={t('chat.model')}
-            buttonLabel={t('chat.model')}
-            emptyLabel={t('chat.default')}
-            groups={groupedModels}
-            onChange={onSelectModel}
-            options={groupedModels ? undefined : availableModels}
-            placeholder={selectedModel}
-            searchAriaLabel={`${t('chat.model')} ${t('chat.search')}`}
-            searchPlaceholder={t('chat.model')}
-            value={selectedModel}
-          />
-          {thinkingEnabled && (
-            <SearchableSelect
-              ariaLabel={t('chat.thinking')}
-              buttonLabel={t('chat.thinking')}
-              direction="up"
-              emptyLabel={t('chat.thinkingOff')}
-              onChange={onSelectThinkLevel}
-              options={thinkOptions}
-              placeholder={
-                thinkOptions.find((o) => o.value === thinkLevel)?.label ?? t('chat.thinkingOff')
-              }
-              searchAriaLabel={`${t('chat.thinking')} ${t('chat.search')}`}
-              searchPlaceholder={t('chat.thinking')}
-              value={thinkLevel}
+        {/* The control strip is two-tiered below `md` and one line from `md` up.
+            The send button lives OUTSIDE the wrapping group, so no tier split can
+            ever push it to a second line. The group is `md:contents`, so at ≥768px
+            its box disappears and its children become direct flex items of this
+            row — the exact pre-fix geometry, where StreamMetricsChip's ml-auto
+            shares the free space with send's ml-auto.
+            The tiered layout is a `max-md`-only construct, and `max-md` is the
+            ONLY boundary the tiers use: the thinking/agent wrapper is `md:contents`
+            too, so it collapses at the same 768px the group does. A `sm:contents`
+            wrapper would dissolve the second tier while the `max-md:` utilities
+            still apply, leaving 640–767px with five selectors fighting for one
+            line (the model trigger collapses to a blank pill there). */}
+        <div className="flex flex-wrap items-center gap-2 px-3 pb-2 pt-1 max-md:gap-1.5 sm:gap-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 max-md:gap-1.5 md:contents">
+            <IconButton
+              onClick={() => setFolderPickerOpen(true)}
+              title={t('chat.addFolder')}
+              ariaLabel={t('chat.addFolder')}
+              className="md:hidden max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center"
+            >
+              <PlusIcon size={14} />
+            </IconButton>
+            <AttachmentInput
+              onUpload={onUploadAttachments}
+              onAttach={(paths) => onAttachmentsChange((prev) => [...prev, ...paths])}
+              className="max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center"
             />
-          )}
-          {agentsOptions.length > 1 && (
             <SearchableSelect
-              ariaLabel={t('chat.agent')}
-              buttonLabel={t('chat.agent')}
-              disabled={hasConversation}
-              emptyLabel={t('chat.agentLocked')}
-              onChange={onSelectAgent}
-              options={agentsOptions}
-              placeholder={
-                agentsOptions.find((a) => a.value === selectedAgentId)?.label ?? t('chat.agent')
-              }
-              searchAriaLabel={`${t('chat.agent')} ${t('chat.search')}`}
-              searchPlaceholder={t('chat.agent')}
-              value={selectedAgentId}
+              className="max-md:min-w-0 max-md:flex-1"
+              ariaLabel={t('chat.model')}
+              buttonLabel={t('chat.model')}
+              emptyLabel={t('chat.default')}
+              groups={groupedModels}
+              onChange={onSelectModel}
+              options={groupedModels ? undefined : availableModels}
+              placeholder={selectedModel}
+              searchAriaLabel={`${t('chat.model')} ${t('chat.search')}`}
+              searchPlaceholder={t('chat.model')}
+              value={selectedModel}
             />
-          )}
-          {/* Token-speed chip: sits just before the send button (ml-auto pins
-              it right; the button keeps its own ml-auto so it stays right when
-              the chip is hidden). Hidden entirely when there is no valid
-              rate, so it never displaces the controls or renders "0.0 tok/s". */}
-          <StreamMetricsChip className="ml-auto" />
+            {/* Second tier below `md`: the session-folder chip, then the thinking
+                and agent selectors, on a full-width line (or two) of their own.
+                The chip belongs HERE and not on the primary line: the primary line
+                is `+` (folder picker) · attach · model · send, and every one of
+                those but the model is a fixed 44px touch target, so a chip there
+                made the model trigger the only shrinkable item — measured with a
+                folder set, before this arrangement: 26px wide with a 0px value
+                span at 360 (a blank pill) and 56px with a 20px span at 390.
+                Three cases below `md`:
+                  - no folder  => one tier line, thinking + agent side by side;
+                  - folder     => the chip takes a line of its own (`basis-full`,
+                    hence the wrapper's `flex-wrap`), thinking + agent share the
+                    next one, so the chip can never eat their width — sharing the
+                    line with them crushed the pair to 50px/64px at 320, where the
+                    rendered labels read `Def…` / `Main A…`;
+                  - 768px up   => the wrapper is `md:contents` and the chip wrapper
+                    is `md:hidden`, so everything collapses back onto the single
+                    desktop row.
+                The `+` button stays on the primary line because it is the control
+                a finger reaches for. The tier exists whenever it has something to
+                hold. */}
+            {(thinkingEnabled || agentsOptions.length > 1 || Boolean(sessionFolder)) && (
+              <div className="max-md:flex max-md:min-w-0 max-md:basis-full max-md:flex-wrap max-md:items-center max-md:gap-2 md:contents">
+                {sessionFolder && (
+                  <div className="max-md:basis-full md:hidden">
+                    <FolderChip
+                      folder={sessionFolder}
+                      onClear={onClearFolder}
+                      className="min-w-0 max-md:max-w-[200px]"
+                    />
+                  </div>
+                )}
+                {thinkingEnabled && (
+                  <SearchableSelect
+                    className="max-md:min-w-0"
+                    ariaLabel={t('chat.thinking')}
+                    buttonLabel={t('chat.thinking')}
+                    direction="up"
+                    emptyLabel={t('chat.thinkingOff')}
+                    onChange={onSelectThinkLevel}
+                    options={thinkOptions}
+                    placeholder={
+                      thinkOptions.find((o) => o.value === thinkLevel)?.label ??
+                      t('chat.thinkingOff')
+                    }
+                    searchAriaLabel={`${t('chat.thinking')} ${t('chat.search')}`}
+                    searchPlaceholder={t('chat.thinking')}
+                    value={thinkLevel}
+                  />
+                )}
+                {agentsOptions.length > 1 && (
+                  <SearchableSelect
+                    className="max-md:min-w-0"
+                    ariaLabel={t('chat.agent')}
+                    buttonLabel={t('chat.agent')}
+                    disabled={hasConversation}
+                    emptyLabel={t('chat.agentLocked')}
+                    onChange={onSelectAgent}
+                    options={agentsOptions}
+                    placeholder={
+                      agentsOptions.find((a) => a.value === selectedAgentId)?.label ??
+                      t('chat.agent')
+                    }
+                    searchAriaLabel={`${t('chat.agent')} ${t('chat.search')}`}
+                    searchPlaceholder={t('chat.agent')}
+                    value={selectedAgentId}
+                  />
+                )}
+              </div>
+            )}
+            {/* Token-speed chip: sits just before the send button (ml-auto pins
+                it right; the button keeps its own ml-auto so it stays right when
+                the chip is hidden). Hidden entirely when there is no valid
+                rate, so it never displaces the controls or renders "0.0 tok/s". */}
+            <StreamMetricsChip className="ml-auto" />
+          </div>
           <button
             type={canCancel ? 'button' : 'submit'}
             disabled={false}
             aria-label={canCancel ? t('chat.cancel') : t('chat.send')}
-            className={`ml-auto flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md transition-colors ${
+            className={`ml-auto flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md transition-colors max-md:h-11 max-md:w-11 ${
               canCancel
                 ? 'bg-state-error/10 text-state-error hover:bg-state-error-fill hover:text-text-on-accent border border-state-error/30'
                 : 'bg-accent-primary text-text-on-accent hover:bg-accent-hover'

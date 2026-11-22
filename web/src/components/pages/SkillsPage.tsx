@@ -236,7 +236,7 @@ export function SkillsPage() {
   const listErrorText = view === 'agent' ? t('skills.catalogLoadError') : global.error
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
+    <div className="flex app-shell bg-background-primary text-text-primary">
       <Sidebar
         collapsed={!sidebarOpen}
         mobileOpen={mobileSidebarOpen}

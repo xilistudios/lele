@@ -27,7 +27,7 @@ export function QueuedMessages() {
 
   return (
     <div
-      className="mb-2 flex flex-col gap-1 rounded-lg border border-border bg-background-secondary p-2"
+      className="mb-2 flex flex-col gap-1 rounded-lg border border-border bg-background-secondary p-2 max-md:max-h-[min(10rem,20dvh)] max-md:overflow-y-auto"
       data-testid="queued-messages"
       aria-label={t('chat.queueHeader', { count: sessionQueue.length })}
     >
