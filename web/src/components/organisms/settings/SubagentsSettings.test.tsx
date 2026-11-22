@@ -187,9 +187,13 @@ describe('SubagentsSettings — agent selector', () => {
 
   test('empty agent list keeps defaults editable and shows the no-agents hint', () => {
     const u = setup([])
-    expect(u.getByTestId('subagents-no-agents')).not.toBeNull()
+    const hint = u.getByTestId('subagents-no-agents')
+    expect(hint.textContent).toContain(tr('settings.subagentsPage.noAgents'))
     expect(u.getByLabelText(tr('settings.fields.subagentTimeout'))).not.toBeNull()
     expect(selectOf(u.container)).toBeNull()
+    const link = u.getByRole('link', { name: tr('settings.subagentsPage.noAgentsAction') })
+    expect(link.getAttribute('href')).toBe('/settings/agents')
+    expect(link.textContent).not.toBe(tr('settings.tabs.agents'))
   })
 
   test('open-agent link encodes the agent id', () => {

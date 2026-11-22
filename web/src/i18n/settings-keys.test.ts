@@ -67,6 +67,7 @@ const NEW_TAB_KEYS = [
   'settings.subagentsPage.agentLabel',
   'settings.subagentsPage.openAgent',
   'settings.subagentsPage.noAgents',
+  'settings.subagentsPage.noAgentsAction',
   'settings.mcpPage.agentLabel',
   'settings.mcpPage.intro',
   'settings.mcpPage.unsavedAgent',

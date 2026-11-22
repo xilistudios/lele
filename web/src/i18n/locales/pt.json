@@ -491,7 +491,8 @@
     "subagentsPage": {
       "agentLabel": "Agente",
       "openAgent": "Abrir página do agente",
-      "noAgents": "Ainda não há agentes configurados. Crie um na aba Agentes para gerenciar seus subagentes."
+      "noAgents": "Ainda não há agentes configurados. Crie um para gerenciar seus subagentes.",
+      "noAgentsAction": "Ir para Agentes"
     },
     "selectModel": "Selecionar modelo",
     "loading": "Carregando...",

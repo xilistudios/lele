@@ -119,11 +119,14 @@ export function SubagentsSettings() {
       ) : (
         <div
           data-testid="subagents-no-agents"
-          className="rounded-lg border border-dashed border-border px-6 py-10 text-center text-sm text-text-secondary"
+          className="space-y-3 rounded-lg border border-dashed border-border px-6 py-10 text-center text-sm text-text-secondary"
         >
-          {t('settings.subagentsPage.noAgents')}
-          <Link to="/settings/agents" className="ml-1 text-accent-primary hover:underline">
-            {t('settings.tabs.agents')}
+          <p>{t('settings.subagentsPage.noAgents')}</p>
+          <Link
+            to="/settings/agents"
+            className="inline-block rounded-md border border-border px-3 py-1.5 text-xs font-medium text-accent-primary hover:underline"
+          >
+            {t('settings.subagentsPage.noAgentsAction')}
           </Link>
         </div>
       )}
