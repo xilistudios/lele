@@ -8,12 +8,9 @@ import (
 	"testing"
 )
 
-// T1: disable must touch ONLY the target entry — top-level member order,
-// unknown keys and every other entry survive byte-for-byte (rule 5).
 func TestSetDisabled_T1_DisablePreservesEveryOtherByte(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
 	in := `{"version":"1","custom":{"deep":[1,2]},"mcpServers":{"keep":{"command":"k","args":["--a"]},"target":{"command":"t"}},"other":true}`
-	// Golden: the single difference from `in` is the flag inside the target.
 	want := strings.Replace(in, `{"command":"t"}`, `{"command":"t", "disabled": true}`, 1)
 	writeRawFixture(t, path, in)
 
@@ -32,8 +29,6 @@ func TestSetDisabled_T1_DisablePreservesEveryOtherByte(t *testing.T) {
 	}
 }
 
-// T2: enable DELETES the "disabled" key from a real entry (never writes
-// "disabled": false — rule 2) and every other byte stays identical (rule 5).
 func TestSetDisabled_T2_EnableDeletesKeyFromRealEntry(t *testing.T) {
 	tests := []struct {
 		name string
@@ -80,8 +75,6 @@ func TestSetDisabled_T2_EnableDeletesKeyFromRealEntry(t *testing.T) {
 	}
 }
 
-// T3 (MANDATORY): enabling a pure stub in the agent layer DELETES the whole
-// entry so the global layer wins again — the EVIDENCE B1 un-shadowing (rule 2).
 func TestSetDisabled_T3_EnablePureStubRestoresLowerLayer(t *testing.T) {
 	root := t.TempDir()
 	leleDir := filepath.Join(root, "lele")
@@ -118,9 +111,6 @@ func TestSetDisabled_T3_EnablePureStubRestoresLowerLayer(t *testing.T) {
 	}
 }
 
-// T4: disable on a missing file creates the stub document (parents and all)
-// with mode 0600; enable on a missing file is a no-op — no file is created
-// (rules 1, 3, 6).
 func TestSetDisabled_T4_MissingFile(t *testing.T) {
 	t.Run("disable creates stub with 0600", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "nested", "deep", "mcp.json")
@@ -160,9 +150,6 @@ func TestSetDisabled_T4_MissingFile(t *testing.T) {
 	})
 }
 
-// T5: a missing "mcpServers" member (absent or null) is created while every
-// other top-level member keeps its bytes and position; an existing
-// mcpServers without the entry gets the stub appended (rules 1, 5).
 func TestSetDisabled_T5_MissingMCPServers(t *testing.T) {
 	tests := []struct {
 		name string
@@ -207,9 +194,6 @@ func TestSetDisabled_T5_MissingMCPServers(t *testing.T) {
 	}
 }
 
-// T6: SaveRawFile follows the atomic recipe — success leaves no *.tmp and
-// mode 0600; a failing rename removes the temp and never touches the target
-// (rule 6).
 func TestSaveRawFile_T6_Atomicity(t *testing.T) {
 	t.Run("success leaves no temp", func(t *testing.T) {
 		dir := t.TempDir()
@@ -234,8 +218,6 @@ func TestSaveRawFile_T6_Atomicity(t *testing.T) {
 
 	t.Run("rename failure removes temp and keeps target", func(t *testing.T) {
 		dir := t.TempDir()
-		// The target is a non-empty directory: writing the temp file
-		// succeeds, os.Rename fails (EISDIR/ENOTEMPTY) after Sync+Close.
 		path := filepath.Join(dir, "mcp.json")
 		if err := os.MkdirAll(path, 0755); err != nil {
 			t.Fatalf("mkdir target: %v", err)
@@ -261,7 +243,7 @@ func TestSaveRawFile_T6_Atomicity(t *testing.T) {
 		if err := os.Chmod(dir, 0555); err != nil {
 			t.Fatalf("chmod: %v", err)
 		}
-		defer os.Chmod(dir, 0755) // let t.TempDir clean up
+		defer os.Chmod(dir, 0755)
 
 		if err := SaveRawFile(dir+"/mcp.json", []byte(`{"mcpServers":{}}`)); err == nil {
 			t.Fatal("SaveRawFile() error = nil, want failure in a read-only dir")
@@ -273,15 +255,12 @@ func TestSaveRawFile_T6_Atomicity(t *testing.T) {
 	})
 }
 
-// T7: envelope problems are fatal (err), per-entry validation problems are
-// warnings that name the entry — invalid entries are non-fatal by design
-// (rule 9).
 func TestValidateRawJSON_T7_EnvelopeVsWarnings(t *testing.T) {
 	tests := []struct {
 		name     string
 		in       string
 		wantErr  bool
-		wantWarn []string // entry names expected in the warnings
+		wantWarn []string
 	}{
 		{name: "incomplete envelope", in: `{`, wantErr: true},
 		{name: "servers not an object", in: `{"mcpServers":[]}`, wantErr: true},
@@ -330,9 +309,6 @@ func TestValidateRawJSON_T7_EnvelopeVsWarnings(t *testing.T) {
 	}
 }
 
-// T8: path-metacharacter names must round-trip through disable→enable with
-// ONLY that entry touched; empty and '/'-shaped names are rejected before
-// anything is written (rules 5, 8).
 func TestSetDisabled_T8_NameBattery(t *testing.T) {
 	names := []string{"a.b", "a:b", "a*b", "a?b", "a#b", `a\b`, "ñ", "a b"}
 	for _, name := range names {
@@ -397,8 +373,6 @@ func TestSetDisabled_T8_NameBattery(t *testing.T) {
 	}
 }
 
-// T9: an identical second call is a no-op — Changed=false and the bytes on
-// disk are untouched, in both directions (rule 4).
 func TestSetDisabled_T9_Idempotent(t *testing.T) {
 	t.Run("second disable is a no-op", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "mcp.json")
@@ -460,9 +434,6 @@ func TestSetDisabled_T9_Idempotent(t *testing.T) {
 	})
 }
 
-// T10: with duplicate entry names the LAST occurrence wins (encoding/json
-// map semantics) — it is the one mutated, the first is re-emitted verbatim
-// (rules 4, 5).
 func TestSetDisabled_T10_DuplicateKeyLastOccurrenceMutated(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
 	in := `{"mcpServers":{"s":{"command":"first"},"s":{"command":"last"}}}`
@@ -484,7 +455,6 @@ func TestSetDisabled_T10_DuplicateKeyLastOccurrenceMutated(t *testing.T) {
 		t.Fatalf("first occurrence not verbatim: %s", got)
 	}
 
-	// Round-trip: enable removes the flag from the last occurrence only.
 	res, err = SetDisabled(path, "s", false)
 	if err != nil {
 		t.Fatalf("SetDisabled(enable) error = %v", err)
@@ -496,8 +466,6 @@ func TestSetDisabled_T10_DuplicateKeyLastOccurrenceMutated(t *testing.T) {
 		t.Fatalf("round-trip is not byte-exact:\n got: %s\nwant: %s", got, in)
 	}
 }
-
-// --- helpers ---------------------------------------------------------------
 
 func writeRawFixture(t *testing.T, path, content string) {
 	t.Helper()
@@ -518,7 +486,6 @@ func readRawFixture(t *testing.T, path string) string {
 	return string(b)
 }
 
-// assertNoTmp fails if any temp file survived a SaveRawFile call.
 func assertNoTmp(t *testing.T, dir string) {
 	t.Helper()
 	leaked, err := filepath.Glob(filepath.Join(dir, "*.tmp"))
@@ -530,19 +497,6 @@ func assertNoTmp(t *testing.T, dir string) {
 	}
 }
 
-// T11: differential — the writer must never change the document's RUNTIME
-// name set. For each document, SetDisabled runs the planned edit on disk,
-// then the RESULT is loaded with ParseFile (the runtime's own loader, i.e.
-// json.Unmarshal into File) and three invariants are asserted:
-//   - resulting name set == input name set ∪ {created} \ {deleted}, with
-//     created/deleted taken from ToggleResult (Removed/Created);
-//   - every NON-targeted name keeps its exact effective value;
-//   - the targeted name ends in the requested state (absent iff Removed).
-//
-// Golden bytes additionally pin that no envelope occurrence collapses into
-// another: deleteMemberSpan used to be fed the cross-occurrence fold, so its
-// neighbour lookup could splice across TWO duplicate envelopes and merge
-// them (or fail outright) — the name set alone does not see a collapse.
 func TestWriteEditDifferentialNameSetAndValues(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -551,14 +505,9 @@ func TestWriteEditDifferentialNameSetAndValues(t *testing.T) {
 		disable     bool
 		wantRemoved bool
 		wantCreated bool
-		golden      string // exact expected bytes on disk ("" = skip)
+		golden      string
 	}{
 		{
-			// THE corner: the winning "a" lives in the exact envelope,
-			// "b" in the case-variant one. Deleting the stub used to splice
-			// from a's key to b's key ACROSS the envelope boundary,
-			// relocating b under "mcpServers" and destroying the
-			// "MCPServers" envelope.
 			name:        "corner: stub enable across case-variant duplicate envelopes",
 			in:          `{"mcpServers":{"a":{"disabled":true}},"MCPServers":{"b":{"command":"y"}}}`,
 			target:      "a",
@@ -629,7 +578,7 @@ func TestWriteEditDifferentialNameSetAndValues(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "mcp.json")
 			writeRawFixture(t, path, tt.in)
 
-			inFile, err := ParseFile(path) // the runtime's view of the INPUT
+			inFile, err := ParseFile(path)
 			if err != nil {
 				t.Fatalf("ParseFile(input) error = %v", err)
 			}
@@ -646,12 +595,11 @@ func TestWriteEditDifferentialNameSetAndValues(t *testing.T) {
 				t.Errorf("bytes after the edit:\n got: %s\nwant: %s", got, tt.golden)
 			}
 
-			outFile, err := ParseFile(path) // the runtime's view of the RESULT
+			outFile, err := ParseFile(path)
 			if err != nil {
 				t.Fatalf("ParseFile(result) error = %v (the writer must never emit a document the runtime refuses)", err)
 			}
 
-			// Name set: input ∪ {created} \ {deleted}.
 			wantNames := make(map[string]bool, len(inFile.MCPServers)+1)
 			for n := range inFile.MCPServers {
 				wantNames[n] = true
@@ -673,22 +621,19 @@ func TestWriteEditDifferentialNameSetAndValues(t *testing.T) {
 				}
 			}
 
-			// Per-name effective values: only the target may change.
 			for n, srv := range outFile.MCPServers {
 				if n == tt.target {
 					continue
 				}
 				before, ok := inFile.MCPServers[n]
 				if !ok {
-					continue // reported by the name-set checks above
+					continue
 				}
 				if !reflect.DeepEqual(before, srv) {
 					t.Errorf("non-target %q changed: before %+v, after %+v", n, before, srv)
 				}
 			}
 
-			// Target state: present with the requested flag, or absent iff
-			// the entry was deleted (Removed).
 			after, present := outFile.MCPServers[tt.target]
 			switch {
 			case res.Removed && present:
@@ -702,14 +647,6 @@ func TestWriteEditDifferentialNameSetAndValues(t *testing.T) {
 	}
 }
 
-// T12: accept/reject parity between the raw-editor gate and the runtime.
-// ValidateRawJSON is what PUT /api/v1/mcp/{layer}/raw runs BEFORE writing a
-// user payload; ParseFile is what Discover runs when loading the file. The
-// two must agree on EVERY document: ValidateRawJSON errors iff ParseFile
-// errors. Otherwise the endpoint answers 200 and persists bytes the runtime
-// refuses to load (or rejects bytes it would happily run). Per-entry
-// VALIDATION is deliberately out of scope: ParseFile never fails on it and
-// ValidateRawJSON reports it as warnings.
 func TestValidateRawJSONParityWithParseFile(t *testing.T) {
 	tests := []struct {
 		name string
@@ -742,7 +679,7 @@ func TestValidateRawJSONParityWithParseFile(t *testing.T) {
 
 			path := filepath.Join(t.TempDir(), "mcp.json")
 			writeRawFixture(t, path, tt.in)
-			_, perr := ParseFile(path) // the runtime's own accept/reject
+			_, perr := ParseFile(path)
 
 			if (verr != nil) != (perr != nil) {
 				t.Errorf("verdict mismatch: ValidateRawJSON err = %v, ParseFile err = %v", verr, perr)

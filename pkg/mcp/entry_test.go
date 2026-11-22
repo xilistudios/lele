@@ -9,12 +9,6 @@ import (
 	"testing"
 )
 
-// The tests below mirror write_test.go's rigour for the entry-level writer:
-// every assertion is a CONTENT assertion (exact bytes / ParseFile round-trip)
-// so each one fails when the feature is broken, and every rejected or no-op
-// call is checked to have left the file byte-identical.
-
-// filePerm returns the permission bits of an existing file.
 func filePerm(t *testing.T, path string) os.FileMode {
 	t.Helper()
 	fi, err := os.Stat(path)
@@ -24,10 +18,6 @@ func filePerm(t *testing.T, path string) os.FileMode {
 	return fi.Mode().Perm()
 }
 
-// T-U1: inserting a NEW entry must not touch any pre-existing byte — odd
-// whitespace, unknown keys, JSON escapes, tabs. The inserted member lands
-// after the object's last member, so everything before the splice point is
-// the original prefix and everything after it the original suffix.
 func TestUpsertEntry_TU1_InsertPreservesEveryOtherByte(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
 	in := "{\n" +
@@ -57,13 +47,10 @@ func TestUpsertEntry_TU1_InsertPreservesEveryOtherByte(t *testing.T) {
 	if got != want {
 		t.Fatalf("inserted entry is not what was expected:\n got: %s\nwant: %s", got, want)
 	}
-	// Explicit prefix/suffix proof (T1 style): the original bytes survive on
-	// both sides of the splice.
 	i := strings.Index(in, anchor) + len(anchor)
 	if !strings.HasPrefix(got, in[:i]) || !strings.HasSuffix(got, in[i:]) {
 		t.Fatalf("bytes outside the splice changed:\n got: %q\nwant prefix %q + suffix %q", got, in[:i], in[i:])
 	}
-	// The reader must load the result and see both names.
 	f, err := ParseFile(path)
 	if err != nil {
 		t.Fatalf("ParseFile(result) error = %v", err)
@@ -79,9 +66,6 @@ func TestUpsertEntry_TU1_InsertPreservesEveryOtherByte(t *testing.T) {
 	}
 }
 
-// T-U2: replacing an existing entry rewrites ONLY that member's value bytes
-// (the key and the user's own spacing stay), reports Replaced, and a second
-// call with the same entry is a pure no-op.
 func TestUpsertEntry_TU2_ReplaceTouchesOnlyThatMember(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
 	in := `{"mcpServers":{"keep":{"command":"k"},"target":  {"command":"t","args":["1"]}  },"other":true}`
@@ -123,13 +107,10 @@ func TestUpsertEntry_TU2_ReplaceTouchesOnlyThatMember(t *testing.T) {
 	}
 }
 
-// T-U3: file and/or envelope creation. Every shape SetDisabled can create
-// must be created byte-identically here, and the result must always be a
-// document ParseFile loads with the new name present.
 func TestUpsertEntry_TU3_CreatesFileAndEnvelope(t *testing.T) {
 	tests := []struct {
 		name   string
-		in     string // "" = the file does not exist
+		in     string
 		want   string
 		reason string
 	}{
@@ -182,10 +163,6 @@ func TestUpsertEntry_TU3_CreatesFileAndEnvelope(t *testing.T) {
 			reason: "appended after the last member of the object",
 		},
 		{
-			// The fold unions both occurrences, so its last member lives in
-			// the FIRST envelope while the last occurrence is the empty one:
-			// the entry goes next to the fold's last member (planAppendEntry),
-			// exactly like SetDisabled's stub — both names stay visible.
 			name:   "duplicate envelopes, last one empty",
 			in:     `{"mcpServers":{"other":{"command":"o"}},"mcpServers":{}}`,
 			want:   `{"mcpServers":{"other":{"command":"o"}, "s": {"command":"x"}},"mcpServers":{}}`,
@@ -236,9 +213,6 @@ func TestUpsertEntry_TU3_CreatesFileAndEnvelope(t *testing.T) {
 	}
 }
 
-// T-U4: idempotence and deterministic serialization. The canonical form is
-// pinned byte-for-byte (fixed field order, sorted env keys, compact) and a
-// second identical call must not rewrite the file.
 func TestUpsertEntry_TU4_IdempotentAndCanonical(t *testing.T) {
 	entry := ServerConfig{
 		Command: "npx",
@@ -278,8 +252,6 @@ func TestUpsertEntry_TU4_IdempotentAndCanonical(t *testing.T) {
 	})
 
 	t.Run("serialization is deterministic across runs", func(t *testing.T) {
-		// Map iteration order is random: two independent writes of the same
-		// entry must still produce identical bytes.
 		first := filepath.Join(t.TempDir(), "a", "mcp.json")
 		second := filepath.Join(t.TempDir(), "b", "mcp.json")
 		for _, p := range []string{first, second} {
@@ -293,9 +265,6 @@ func TestUpsertEntry_TU4_IdempotentAndCanonical(t *testing.T) {
 	})
 }
 
-// T-U5: name battery. Names that need JSON escaping must round-trip through
-// the file and back into ParseFile's name set; empty and '/'-shaped names are
-// refused before anything is written (rule 1).
 func TestUpsertEntry_TU5_NameBattery(t *testing.T) {
 	accepted := []string{"a.b", "a:b", "a*b", "a?b", "a#b", "a&b", "ñ", "a b", `a\b`, `x"y`, "a<b>"}
 	for _, name := range accepted {
@@ -359,8 +328,6 @@ func TestUpsertEntry_TU5_NameBattery(t *testing.T) {
 	}
 }
 
-// T-U6: invalid entries are refused (the reader's own rule: command XOR url,
-// type in {"", "http", "sse"}) and the file is left untouched (rule 2).
 func TestUpsertEntry_TU6_InvalidEntryBattery(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -419,10 +386,6 @@ func TestUpsertEntry_TU6_InvalidEntryBattery(t *testing.T) {
 	}
 }
 
-// T-U7: round-trip. Written values are RAW: no expansion on write, ever (a
-// process variable that the reference names must not leak into the file), and
-// the reader is the only thing that expands. Values survive verbatim,
-// including the bytes json.Marshal would have rewritten ('&').
 func TestUpsertEntry_TU7_RoundTripRawValues(t *testing.T) {
 	entry := ServerConfig{
 		URL:  "https://x/y?a=1&b=2",
@@ -437,7 +400,7 @@ func TestUpsertEntry_TU7_RoundTripRawValues(t *testing.T) {
 	}
 
 	t.Run("values are written verbatim", func(t *testing.T) {
-		t.Setenv("TOKEN", "LEAKME") // must never appear on disk
+		t.Setenv("TOKEN", "LEAKME")
 		path := filepath.Join(t.TempDir(), "mcp.json")
 		if _, err := UpsertEntry(path, "s", entry); err != nil {
 			t.Fatalf("UpsertEntry() error = %v", err)
@@ -462,7 +425,6 @@ func TestUpsertEntry_TU7_RoundTripRawValues(t *testing.T) {
 			t.Fatalf("HTML escaping rewrote user bytes:\n%s", got)
 		}
 
-		// The raw view (no expansion) holds exactly what was asked for.
 		doc, err := parseRawDoc([]byte(got))
 		if err != nil {
 			t.Fatalf("parseRawDoc(result) error = %v", err)
@@ -560,11 +522,6 @@ func TestUpsertEntry_TU7_RoundTripRawValues(t *testing.T) {
 	})
 }
 
-// T-U8: duplicate names mirror write_test.go T10 exactly — the LAST (winning)
-// occurrence is the one replaced / deleted, earlier copies stay verbatim. The
-// consequence for delete is pinned too: after removing the winning copy the
-// name still resolves to the earlier one, so removing every copy needs a
-// second call.
 func TestUpsertEntry_TU8_DuplicateKeyLastOccurrenceMutated(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
 	in := `{"mcpServers":{"s":{"command":"first"},"s":{"command":"last"}}}`
@@ -593,7 +550,6 @@ func TestUpsertEntry_TU8_DuplicateKeyLastOccurrenceMutated(t *testing.T) {
 		t.Fatalf("winning s.Command = %q, want third", got)
 	}
 
-	// Replacing the winner with what it already holds is a no-op.
 	before := readRawFixture(t, path)
 	res, err = UpsertEntry(path, "s", ServerConfig{Command: "third"})
 	if err != nil {
@@ -606,8 +562,6 @@ func TestUpsertEntry_TU8_DuplicateKeyLastOccurrenceMutated(t *testing.T) {
 		t.Fatalf("bytes rewritten by a no-op: %s", got)
 	}
 
-	// Delete removes the winning occurrence only: "s" still resolves (to the
-	// earlier copy), which is the documented mirror of T10.
 	dres, err := DeleteEntry(path, "s")
 	if err != nil {
 		t.Fatalf("DeleteEntry() error = %v", err)
@@ -627,7 +581,6 @@ func TestUpsertEntry_TU8_DuplicateKeyLastOccurrenceMutated(t *testing.T) {
 		t.Fatalf("after deleting the winner, s.Command = %q, want first (earlier copy)", got)
 	}
 
-	// A second delete removes the remaining copy.
 	dres, err = DeleteEntry(path, "s")
 	if err != nil {
 		t.Fatalf("second DeleteEntry() error = %v", err)
@@ -640,15 +593,11 @@ func TestUpsertEntry_TU8_DuplicateKeyLastOccurrenceMutated(t *testing.T) {
 	}
 }
 
-// T-D1: deleting a member removes its key, value and the adjacent comma —
-// nothing else, valid JSON left behind and every other member byte-identical.
 func TestDeleteEntry_TD1_CommaAndWhitespaceCleanup(t *testing.T) {
 	tests := []struct {
-		name string
-		in   string
-		want string
-		// The full effective content of the result: the surviving members
-		// must be exactly these, with exactly these values.
+		name        string
+		in          string
+		want        string
 		wantServers map[string]ServerConfig
 	}{
 		{
@@ -677,9 +626,6 @@ func TestDeleteEntry_TD1_CommaAndWhitespaceCleanup(t *testing.T) {
 			wantServers: map[string]ServerConfig{"keep": {Command: "k"}},
 		},
 		{
-			// The removed member's own indentation and its preceding comma
-			// go with it; the neighbour's bytes are untouched, so the
-			// closing brace ends up on the neighbour's line.
 			name: "pretty printed, last member",
 			in: "{\n  \"mcpServers\": {\n    \"keep\": {\"command\": \"k\"},\n" +
 				"    \"drop\": {\"command\": \"d\"}\n  }\n}\n",
@@ -720,19 +666,13 @@ func TestDeleteEntry_TD1_CommaAndWhitespaceCleanup(t *testing.T) {
 	}
 }
 
-// T-D2: deleting the last member leaves a valid, empty envelope — and never
-// merges duplicate envelopes into one (the collapse bug the envelope-scoped
-// splice in planDeleteEntry prevents).
 func TestDeleteEntry_TD2_EmptyEnvelopeStaysValid(t *testing.T) {
 	tests := []struct {
-		name   string
-		in     string
-		target string
-		want   string
-		// The full effective content of the result: deleting the winning
-		// occurrence of a duplicated name lets the earlier copy win again,
-		// so that (still present) name is pinned here too.
-		wantPresent map[string]string // name → command
+		name        string
+		in          string
+		target      string
+		want        string
+		wantPresent map[string]string
 	}{
 		{
 			name:        "only member, exact envelope",
@@ -797,13 +737,10 @@ func TestDeleteEntry_TD2_EmptyEnvelopeStaysValid(t *testing.T) {
 	}
 }
 
-// T-D3: no-op paths — missing file (and no file created), no envelope, null
-// envelope, empty envelope, absent entry, null document. All nil error, zero
-// result, bytes untouched.
 func TestDeleteEntry_TD3_NoOps(t *testing.T) {
 	tests := []struct {
 		name    string
-		in      string // "" = file does not exist
+		in      string
 		missing bool
 	}{
 		{name: "missing file", in: "", missing: true},
@@ -844,9 +781,6 @@ func TestDeleteEntry_TD3_NoOps(t *testing.T) {
 	}
 }
 
-// T-D4: the write recipe (0600, no temp file left behind) and the failure
-// contract of both functions: a rejected or impossible call leaves the file
-// byte-identical (rules 6, 7).
 func TestEntryWriter_TD4_AtomicityAndFailures(t *testing.T) {
 	t.Run("successful upsert and delete leave 0600 and no temp", func(t *testing.T) {
 		dir := t.TempDir()
@@ -978,8 +912,6 @@ func TestEntryWriter_TD4_AtomicityAndFailures(t *testing.T) {
 	})
 
 	t.Run("unreadable path is an error, not a creation", func(t *testing.T) {
-		// A directory cannot be read as a file: neither function may
-		// "create" over it.
 		dir := t.TempDir()
 		path := filepath.Join(dir, "mcp.json")
 		if err := os.Mkdir(path, 0700); err != nil {
@@ -998,10 +930,6 @@ func TestEntryWriter_TD4_AtomicityAndFailures(t *testing.T) {
 	})
 }
 
-// T-U9: differential — after an upsert, ParseFile must load the result, every
-// name that was visible before must still be visible with identical effective
-// values, and the target must carry exactly the new entry. Golden bytes pin
-// the splice (including the ones the name set alone cannot see).
 func TestUpsertEntry_TU9_Differential(t *testing.T) {
 	entry := ServerConfig{Command: "npx", Args: []string{"-y", "pkg"}}
 	tests := []struct {
@@ -1070,7 +998,6 @@ func TestUpsertEntry_TU9_Differential(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseFile(result) error = %v (the writer must never emit a document the runtime refuses)", err)
 			}
-			// Names visible before stay visible with the same values.
 			for n, before := range inFile.MCPServers {
 				if n == tt.target {
 					continue
@@ -1094,18 +1021,13 @@ func TestUpsertEntry_TU9_Differential(t *testing.T) {
 	}
 }
 
-// T-D5: differential for delete — the name set may only lose the target and
-// every surviving name keeps its effective value; golden bytes pin the splice.
 func TestDeleteEntry_TD5_Differential(t *testing.T) {
 	tests := []struct {
 		name   string
 		in     string
 		target string
 		golden string
-		// The full effective content of the result. Deleting the winning
-		// occurrence of a duplicated name changes that name's value (the
-		// earlier copy wins again) — pinned here rather than assumed away.
-		want map[string]ServerConfig
+		want   map[string]ServerConfig
 	}{
 		{
 			name:   "plain document",
@@ -1148,8 +1070,6 @@ func TestDeleteEntry_TD5_Differential(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "mcp.json")
 			writeRawFixture(t, path, tt.in)
 
-			// The input itself must be a document the runtime loads, so a
-			// difference in the result is the writer's doing.
 			if _, err := ParseFile(path); err != nil {
 				t.Fatalf("ParseFile(input) error = %v", err)
 			}
@@ -1170,10 +1090,6 @@ func TestDeleteEntry_TD5_Differential(t *testing.T) {
 	}
 }
 
-// T-E1: EntryRaw hands back the entry's value bytes EXACTLY as stored — odd
-// whitespace/escaping survive (it is the editor's payload), and ${VAR}/$$ are
-// literal, never expanded: an environment variable that the reference names
-// must not leak into the returned bytes.
 func TestEntryRaw_TE1_ExactStoredBytes(t *testing.T) {
 	const canary = "CANARY-t-e1-value"
 	t.Setenv("T", canary)
@@ -1199,15 +1115,12 @@ func TestEntryRaw_TE1_ExactStoredBytes(t *testing.T) {
 	if got := string(raw); got != entry {
 		t.Fatalf("raw bytes:\n got: %s\nwant: %s", got, entry)
 	}
-	// A raw read is expansion-free: the canary's VALUE must not appear.
 	if strings.Contains(string(raw), canary) {
 		t.Fatalf("expansion ran in EntryRaw: %s", raw)
 	}
-	// It is the entry object only — no name wrapper.
 	if !strings.HasPrefix(string(raw), "{") || strings.Contains(string(raw), `"s"`) {
 		t.Fatalf("raw must be the bare entry object, got: %s", raw)
 	}
-	// The bytes are a copy: mutating them must not affect a second read.
 	raw[0] = 'X'
 	again, _, err := EntryRaw(path, "s")
 	if err != nil {
@@ -1218,10 +1131,6 @@ func TestEntryRaw_TE1_ExactStoredBytes(t *testing.T) {
 	}
 }
 
-// T-E2: when a name is duplicated, EntryRaw reports the WINNING occurrence —
-// the last one in file order, the copy UpsertEntry would replace. The pairing
-// is pinned by editing that same writer afterwards: the first copy must stay
-// verbatim, proving both operations agree on which copy is "the entry".
 func TestEntryRaw_TE2_DuplicateNameWinner(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
 	in := `{"mcpServers":{"s":{"command":"first"},"s":{"command":"last"}}}`
@@ -1238,7 +1147,6 @@ func TestEntryRaw_TE2_DuplicateNameWinner(t *testing.T) {
 		t.Fatalf("raw = %s, want the winning (last) copy %s", got, want)
 	}
 
-	// UpsertEntry must replace the same occurrence EntryRaw reported.
 	if _, err := UpsertEntry(path, "s", ServerConfig{Command: "third"}); err != nil {
 		t.Fatalf("UpsertEntry() error = %v", err)
 	}
@@ -1248,14 +1156,11 @@ func TestEntryRaw_TE2_DuplicateNameWinner(t *testing.T) {
 	}
 }
 
-// T-E3: the envelope rules EntryRaw must inherit from parseRawDoc — a
-// case-variant "mcpServers" and repeated occurrences folded with
-// last-in-file-order precedence (the name set json.Unmarshal produces).
 func TestEntryRaw_TE3_EnvelopeVariants(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
-		want map[string]string // name → expected raw bytes ("" ⇒ not found)
+		want map[string]string
 	}{
 		{
 			name: "case-variant envelope",
@@ -1293,10 +1198,6 @@ func TestEntryRaw_TE3_EnvelopeVariants(t *testing.T) {
 	}
 }
 
-// T-E4: the negative battery. A missing file, a missing entry, a document
-// whose null envelope cleared an earlier object, and a malformed document —
-// each must be classified the way the rest of the entry layer classifies it
-// (nil-error "not found" vs. an error naming the path).
 func TestEntryRaw_TE4_NotFoundAndErrors(t *testing.T) {
 	t.Run("missing file", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "absent", "mcp.json")
@@ -1364,10 +1265,6 @@ func TestEntryRaw_TE4_NotFoundAndErrors(t *testing.T) {
 	}
 }
 
-// T-U10: the optional "auth" block is serialized canonically — a compact
-// object holding only non-zero fields, in the fixed key order — and it lands
-// exactly between "headers" (or "type" when there are no headers) and
-// "description".
 func TestUpsertEntry_TU10_AuthCanonicalBytes(t *testing.T) {
 	full := &AuthSpec{
 		Type:                         "oauth",
@@ -1384,7 +1281,7 @@ func TestUpsertEntry_TU10_AuthCanonicalBytes(t *testing.T) {
 		name   string
 		entry  ServerConfig
 		want   string
-		before string // the key that must immediately precede "auth"
+		before string
 	}{
 		{
 			name: "after headers, before description",
@@ -1434,8 +1331,6 @@ func TestUpsertEntry_TU10_AuthCanonicalBytes(t *testing.T) {
 			if got != tt.want {
 				t.Fatalf("canonical bytes:\n got: %s\nwant: %s", got, tt.want)
 			}
-			// Positional proof of the fixed order: "auth" sits after its
-			// predecessor key and before "description".
 			ai := strings.Index(got, `"auth":`)
 			bi := strings.Index(got, tt.before)
 			di := strings.Index(got, `"description":`)
@@ -1449,15 +1344,10 @@ func TestUpsertEntry_TU10_AuthCanonicalBytes(t *testing.T) {
 	}
 }
 
-// T-U11: an entry carrying an auth block is idempotent — the second identical
-// upsert leaves the file byte-identical and reports a pure no-op (auth
-// included, so the block never drifts between two runs).
 func TestUpsertEntry_TU11_AuthIdempotent(t *testing.T) {
 	entry := ServerConfig{
-		URL:  "https://mcp.example/mcp",
-		Type: "http",
-		// Map iteration order is random: the sorted keys must still make the
-		// serialization stable.
+		URL:     "https://mcp.example/mcp",
+		Type:    "http",
 		Headers: map[string]string{"X-B": "2", "X-A": "1"},
 		Auth: &AuthSpec{
 			Type:        "oauth",
@@ -1493,10 +1383,6 @@ func TestUpsertEntry_TU11_AuthIdempotent(t *testing.T) {
 	}
 }
 
-// T-U12: auth values are RAW. "${MY_SECRET}" is written byte-for-byte (never
-// expanded: the referenced value must not leak into the file) and "$$" is
-// written verbatim too (it only collapses at READ time), with no HTML
-// escaping either.
 func TestUpsertEntry_TU12_AuthValuesWrittenVerbatim(t *testing.T) {
 	const canary = "LEAKME-t-u12-auth"
 	t.Setenv("MY_SECRET", canary)
@@ -1533,7 +1419,6 @@ func TestUpsertEntry_TU12_AuthValuesWrittenVerbatim(t *testing.T) {
 		t.Fatalf("escaping rewrote user bytes:\n%s", got)
 	}
 
-	// The raw view returns the same literal bytes: still unexpanded.
 	raw, found, err := EntryRaw(path, "s")
 	if err != nil {
 		t.Fatalf("EntryRaw() error = %v", err)
@@ -1559,9 +1444,6 @@ func TestUpsertEntry_TU12_AuthValuesWrittenVerbatim(t *testing.T) {
 	}
 }
 
-// T-U13: a declared-but-empty auth block is NOT dropped: it is written as
-// "{}", the raw view hands it back and the reader sees a non-nil Auth (which
-// is how "declared, discovery will fill it" is spelled).
 func TestUpsertEntry_TU13_AuthEmptyObjectRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
 	if _, err := UpsertEntry(path, "s", ServerConfig{URL: "https://x", Auth: &AuthSpec{}}); err != nil {
@@ -1594,8 +1476,6 @@ func TestUpsertEntry_TU13_AuthEmptyObjectRoundTrip(t *testing.T) {
 	}
 }
 
-// T-U14: Auth == nil means "the caller declared no auth block" — no "auth"
-// key appears anywhere in the file, and the reader reports a nil Auth.
 func TestUpsertEntry_TU14_AuthOmittedWhenNil(t *testing.T) {
 	entry := ServerConfig{
 		URL:         "https://x",
@@ -1632,9 +1512,6 @@ func TestUpsertEntry_TU14_AuthOmittedWhenNil(t *testing.T) {
 	}
 }
 
-// T-U15: the full round-trip an `mcp edit` needs. UpsertEntry → EntryRaw →
-// json.Unmarshal must hand back an Auth deep-equal to the one that went in,
-// for every spec shape (values are raw, so no expansion intervenes).
 func TestUpsertEntry_TU15_AuthRoundTrip(t *testing.T) {
 	tests := []struct {
 		name string

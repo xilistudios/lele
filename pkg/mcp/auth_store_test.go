@@ -16,30 +16,17 @@ import (
 	"github.com/mark3labs/mcp-go/client/transport"
 )
 
-// These tests are the T4 contract: the file format and its 0600 mode, the URL
-// binding, the "usable token" predicate, the revision that invalidates a
-// cached connection, the disabled store, Clear's file removal and the
-// cross-process stat revalidation. Nothing here touches the network and every
-// store is built on t.TempDir(), so the tests never read or write a real
-// lele directory.
-
-// authTestURL / authTestOtherURL are the two resource URLs the URL-binding
-// tests swap: a record saved for one must be absent for the other.
 const (
 	authTestURL      = "https://mcp.example.com/mcp"
 	authTestOtherURL = "https://mcp.example.com/other"
 )
 
-// newAuthTestStore returns a store on a fresh temp dir plus the path of the
-// file it owns.
 func newAuthTestStore(t *testing.T) (*AuthStore, string) {
 	t.Helper()
 	dir := t.TempDir()
 	return NewAuthStore(dir), filepath.Join(dir, authFileName)
 }
 
-// authTestRecord is one server's record with every field populated, so a test
-// can tell "preserved" from "silently dropped".
 func authTestRecord(t *testing.T, url, access string) AuthRecord {
 	t.Helper()
 	return AuthRecord{
@@ -60,9 +47,6 @@ func authTestRecord(t *testing.T, url, access string) AuthRecord {
 	}
 }
 
-// assertAuthTestToken compares tokens field by field: reflect.DeepEqual would
-// compare time.Time's monotonic component and location pointer, which says
-// nothing about the stored state.
 func assertAuthTestToken(t *testing.T, got, want *transport.Token) {
 	t.Helper()
 	if (got == nil) != (want == nil) {
@@ -83,7 +67,6 @@ func assertAuthTestToken(t *testing.T, got, want *transport.Token) {
 	}
 }
 
-// assertAuthTestRecord compares every field of a record, token included.
 func assertAuthTestRecord(t *testing.T, got, want AuthRecord) {
 	t.Helper()
 	if got.URL != want.URL ||
@@ -97,9 +80,6 @@ func assertAuthTestRecord(t *testing.T, got, want AuthRecord) {
 	assertAuthTestToken(t, got.Token, want.Token)
 }
 
-// TestAuthStoreSaveRecordRoundTrip proves the write/read pair and the on-disk
-// format: the envelope is {"servers":{...}} keyed by name, the field names are
-// the documented JSON ones, and the file is 0600 because it holds secrets.
 func TestAuthStoreSaveRecordRoundTrip(t *testing.T) {
 	store, path := newAuthTestStore(t)
 	rec := authTestRecord(t, authTestURL, "access-1")
@@ -149,7 +129,6 @@ func TestAuthStoreSaveRecordRoundTrip(t *testing.T) {
 		}
 	}
 
-	// A second, unrelated name must not disturb the first record.
 	if err := store.Save("srv-2", authTestRecord(t, authTestOtherURL, "access-2")); err != nil {
 		t.Fatalf("Save srv-2: %v", err)
 	}
@@ -160,13 +139,11 @@ func TestAuthStoreSaveRecordRoundTrip(t *testing.T) {
 	assertAuthTestRecord(t, got, rec)
 }
 
-// TestAuthStoreURLBinding is the URL-binding table: a record is bound to the
-// resource URL it was obtained for, so any read for another URL sees nothing.
 func TestAuthStoreURLBinding(t *testing.T) {
 	cases := []struct {
 		name     string
-		record   string // URL stored in the record
-		query    string // URL the caller asks about
+		record   string
+		query    string
 		wantSeen bool
 	}{
 		{name: "matching URL", record: authTestURL, query: authTestURL, wantSeen: true},
@@ -180,7 +157,6 @@ func TestAuthStoreURLBinding(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			store, _ := newAuthTestStore(t)
-			// Record is the RAW accessor: it sees the record whatever its URL.
 			if err := store.Save("srv", authTestRecord(t, tc.record, "access-1")); err != nil {
 				t.Fatalf("Save: %v", err)
 			}
@@ -206,8 +182,6 @@ func TestAuthStoreURLBinding(t *testing.T) {
 	}
 }
 
-// TestAuthStoreAbsentRecord pins the "nothing stored" contract every caller
-// relies on: no error, no panic, a zero revision and ErrNoToken.
 func TestAuthStoreAbsentRecord(t *testing.T) {
 	store, path := newAuthTestStore(t)
 
@@ -230,18 +204,11 @@ func TestAuthStoreAbsentRecord(t *testing.T) {
 		t.Fatalf("a read created %s (stat error = %v)", path, err)
 	}
 
-	// An absent record whose Revision is asked for twice must stay 0 (the
-	// cached "file does not exist" load must not turn into a parse attempt).
 	if got := store.Revision("missing"); got != 0 {
 		t.Fatalf("second Revision = %d, want 0", got)
 	}
 }
 
-// TestAuthStoreAuthenticatedUsability is the predicate table. `usable` is what
-// Authenticated must answer; `handedOut` is whether GetToken must return the
-// token at all — GetToken deliberately hands over an EXPIRED token (that is how
-// mcp-go gets a refresh token to work with), so the two columns differ for an
-// expired token without a refresh token.
 func TestAuthStoreAuthenticatedUsability(t *testing.T) {
 	past := time.Now().Add(-time.Hour)
 	future := time.Now().Add(time.Hour)
@@ -323,10 +290,6 @@ func TestAuthStoreAuthenticatedUsability(t *testing.T) {
 	}
 }
 
-// TestAuthStoreSaveTokenPreservesRegistration proves the read-modify-write:
-// transport.Token carries no client_id/client_secret/resource metadata, so a
-// naive write would drop the registration and force a fresh DCR on every
-// refresh.
 func TestAuthStoreSaveTokenPreservesRegistration(t *testing.T) {
 	firstTok := transport.Token{AccessToken: "access-1", TokenType: "Bearer", RefreshToken: "refresh-1", ExpiresAt: time.Now().Add(time.Hour)}
 	secondTok := transport.Token{AccessToken: "access-2-longer", TokenType: "Bearer", RefreshToken: "refresh-2", ExpiresAt: time.Now().Add(2 * time.Hour)}
@@ -352,7 +315,6 @@ func TestAuthStoreSaveTokenPreservesRegistration(t *testing.T) {
 	want.Token = &secondTok
 	assertAuthTestRecord(t, got, want)
 
-	// The registration must also have survived to disk, not just to the cache.
 	if err := ts.SaveToken(context.Background(), &thirdTok); err != nil {
 		t.Fatalf("second SaveToken: %v", err)
 	}
@@ -364,8 +326,6 @@ func TestAuthStoreSaveTokenPreservesRegistration(t *testing.T) {
 	want.Token = &thirdTok
 	assertAuthTestRecord(t, got, want)
 
-	// A stale URL on the record is corrected by SaveToken: the adapter is
-	// bound to the URL the manager dialled.
 	stale := registration
 	stale.URL = authTestOtherURL
 	if err := store.Save("srv-stale", stale); err != nil {
@@ -386,8 +346,6 @@ func TestAuthStoreSaveTokenPreservesRegistration(t *testing.T) {
 	}
 }
 
-// TestAuthStoreGetTokenReturnsCopy guards the cache against the transport
-// mutating a token it was handed.
 func TestAuthStoreGetTokenReturnsCopy(t *testing.T) {
 	store, _ := newAuthTestStore(t)
 	rec := authTestRecord(t, authTestURL, "access-1")
@@ -415,8 +373,6 @@ func TestAuthStoreGetTokenReturnsCopy(t *testing.T) {
 	}
 }
 
-// TestAuthStoreTokenStoreContext checks the interface contract: a cancelled or
-// expired context wins over any stored token.
 func TestAuthStoreTokenStoreContext(t *testing.T) {
 	store, _ := newAuthTestStore(t)
 	if err := store.Save("srv", authTestRecord(t, authTestURL, "access-1")); err != nil {
@@ -433,15 +389,12 @@ func TestAuthStoreTokenStoreContext(t *testing.T) {
 		t.Fatalf("SaveToken with a cancelled ctx = %v, want context.Canceled", err)
 	}
 
-	// A disabled store must still honour the context (err, not ErrNoToken).
 	disabled := NewAuthStore("")
 	if _, err := disabled.TokenStore("srv", authTestURL).GetToken(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("disabled GetToken with a cancelled ctx = %v, want context.Canceled", err)
 	}
 }
 
-// TestAuthStoreRevision pins the invalidation signal: 0 when absent, changing
-// after a write (any field, token included) and stable across reads.
 func TestAuthStoreRevision(t *testing.T) {
 	store, _ := newAuthTestStore(t)
 
@@ -466,8 +419,6 @@ func TestAuthStoreRevision(t *testing.T) {
 		}
 	}
 
-	// A different token ⇒ a different revision, even though every other field
-	// is identical.
 	if err := store.Save("srv", authTestRecord(t, authTestURL, "access-2")); err != nil {
 		t.Fatalf("second Save: %v", err)
 	}
@@ -476,7 +427,6 @@ func TestAuthStoreRevision(t *testing.T) {
 	}
 	tokenChanged := store.Revision("srv")
 
-	// A change that only touches a registration field counts too.
 	rec.ClientID = "client-id-2"
 	if err := store.Save("srv", rec); err != nil {
 		t.Fatalf("third Save: %v", err)
@@ -485,8 +435,6 @@ func TestAuthStoreRevision(t *testing.T) {
 		t.Fatalf("Revision = %d after a client_id change, want a different value than %d", got, tokenChanged)
 	}
 
-	// The revision is a hash of the RECORD, so it is reproducible: a fresh
-	// store (another process) must compute the same value for the same bytes.
 	other := NewAuthStore(filepath.Dir(store.path))
 	if got, want := other.Revision("srv"), store.Revision("srv"); got != want {
 		t.Fatalf("Revision from a second store = %d, want %d (same bytes)", got, want)
@@ -500,9 +448,6 @@ func TestAuthStoreRevision(t *testing.T) {
 	}
 }
 
-// TestAuthStoreDisabledIsNoop pins NewAuthStore(""): every read is "absent",
-// every write is a silent no-op and — the important part — no process-relative
-// mcp-auth.json appears anywhere.
 func TestAuthStoreDisabledIsNoop(t *testing.T) {
 	store := NewAuthStore("")
 	if store.path != "" {
@@ -537,20 +482,14 @@ func TestAuthStoreDisabledIsNoop(t *testing.T) {
 		t.Fatalf("disabled GetToken = %v, want transport.ErrNoToken", err)
 	}
 
-	// Nothing may be created relative to the process working directory: that
-	// is exactly the "never create a process-relative file" rule.
 	if _, err := os.Stat(authFileName); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("a disabled store created %s in the working directory (stat error = %v)", authFileName, err)
 	}
 }
 
-// TestAuthStoreClear walks the deletion rules: the record goes, the other
-// records stay, the flag goes with it and the file disappears when the last
-// record does.
 func TestAuthStoreClear(t *testing.T) {
 	store, path := newAuthTestStore(t)
 
-	// Clearing something that was never stored must not create a file.
 	if err := store.Clear("absent"); err != nil {
 		t.Fatalf("Clear(absent) = %v, want nil", err)
 	}
@@ -594,15 +533,11 @@ func TestAuthStoreClear(t *testing.T) {
 		t.Fatal("Record srv-b after Clear: ok = true, want false")
 	}
 
-	// A second Clear of the same name is a no-op, not an error.
 	if err := store.Clear("srv-b"); err != nil {
 		t.Fatalf("second Clear(srv-b) = %v, want nil", err)
 	}
 }
 
-// TestAuthStoreCrossProcessRefresh is the stat-revalidation test: the file is
-// written DIRECTLY with SaveRawFile (as the other lele process would) while
-// this store's cache is warm, and the change must be visible immediately.
 func TestAuthStoreCrossProcessRefresh(t *testing.T) {
 	t.Run("rewritten by another process", func(t *testing.T) {
 		store, path := newAuthTestStore(t)
@@ -614,8 +549,6 @@ func TestAuthStoreCrossProcessRefresh(t *testing.T) {
 			t.Fatal("Revision = 0 after Save")
 		}
 
-		// The other process writes a record with a fresh token AND a new
-		// field, through the same atomic helper, without this store's help.
 		other := authTestRecord(t, authTestURL, "access-from-the-TUI")
 		other.RedirectURI = "http://127.0.0.1:9999/other-callback"
 		doc, err := json.Marshal(authEnvelope{Servers: map[string]AuthRecord{"srv": other}})
@@ -643,7 +576,6 @@ func TestAuthStoreCrossProcessRefresh(t *testing.T) {
 
 	t.Run("created by another process", func(t *testing.T) {
 		store, path := newAuthTestStore(t)
-		// Warm the cache with a "file does not exist" load.
 		if _, ok := store.Record("srv"); ok {
 			t.Fatal("Record on an empty store: ok = true, want false")
 		}
@@ -688,9 +620,6 @@ func TestAuthStoreCrossProcessRefresh(t *testing.T) {
 	})
 }
 
-// TestAuthStoreMalformedFileIsEmptyThenRepaired documents the deliberate
-// choice: a file we cannot parse reads as empty (no error, no panic) and the
-// next Save rewrites it from that empty map.
 func TestAuthStoreMalformedFileIsEmptyThenRepaired(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -728,7 +657,6 @@ func TestAuthStoreMalformedFileIsEmptyThenRepaired(t *testing.T) {
 			}
 			assertAuthTestRecord(t, got, rec)
 
-			// The repaired file must be readable by a fresh store too.
 			if _, ok := NewAuthStore(dir).Record("srv"); !ok {
 				t.Fatal("a fresh store cannot read the repaired file")
 			}
@@ -736,8 +664,6 @@ func TestAuthStoreMalformedFileIsEmptyThenRepaired(t *testing.T) {
 	}
 }
 
-// TestAuthStoreMissingLeleDirIsCreated proves SaveRawFile's parent-directory
-// creation is what makes a fresh install work: the directory need not exist.
 func TestAuthStoreMissingLeleDirIsCreated(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "does", "not", "exist")
 	store := NewAuthStore(dir)
@@ -758,9 +684,6 @@ func TestAuthStoreMissingLeleDirIsCreated(t *testing.T) {
 	}
 }
 
-// TestAuthStoreConcurrentSaveAndRecord is the race-detector hammer: writers
-// and readers on one store (the shared-goroutine reality: a refresh from a
-// transport goroutine while the manager reads revisions).
 func TestAuthStoreConcurrentSaveAndRecord(t *testing.T) {
 	store, path := newAuthTestStore(t)
 	const (
@@ -813,8 +736,6 @@ func TestAuthStoreConcurrentSaveAndRecord(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Whatever order the writes landed in, the file must still be the
-	// documented envelope and readable by another process.
 	other := NewAuthStore(filepath.Dir(path))
 	if _, ok := other.Record("srv-0"); !ok {
 		t.Fatal("srv-0 missing after the hammer: the last writer must win, not lose data")
@@ -824,32 +745,10 @@ func TestAuthStoreConcurrentSaveAndRecord(t *testing.T) {
 	}
 }
 
-// TestAuthTokenStoreSaveTokenStoresACopyOfTheCallersToken is the finding-F4 fix
-// guard: SaveToken must persist a COPY of the token it is handed, so that the
-// object the caller keeps mutating afterwards can neither rewrite what was
-// stored nor race the record/revision logic. Every observation below goes
-// through the public surface — this process's AuthStore (Record/Revision), the
-// transport-facing TokenStore (GetToken), a SECOND AuthStore built on the same
-// directory (the other lele process: the TUI and the gateway share a lele dir)
-// and the bytes on disk.
-//
-// Scope note, so nobody mistakes this for a stronger guarantee than it is: with
-// SaveToken storing an alias the test would still pass today, because Save puts
-// the record into a temporary map, marshals it SYNCHRONOUSLY under the mutex
-// and then invalidates the cache — the caller's pointer never reaches the
-// cache, so no reader can observe it (the same negative probe is recorded in
-// TestAuthTokenStoreSaveTokenDoesNotAliasTheCallersToken). What this test pins
-// is the CONTRACT: the moment the store retains a written record (the obvious
-// optimisation: assigning s.servers = servers instead of invalidating) the
-// alias becomes observable, and the copy added in SaveToken is what keeps this
-// test green. It also pins that a nil token clears the stored token instead of
-// panicking on the copy.
 func TestAuthTokenStoreSaveTokenStoresACopyOfTheCallersToken(t *testing.T) {
 	store, path := newAuthTestStore(t)
 	ctx := context.Background()
 
-	// A registration half (everything transport.Token cannot carry) that must
-	// survive the token write.
 	if err := store.Save("srv", AuthRecord{
 		ClientID:            "client-id",
 		ClientSecret:        "client-secret",
@@ -868,15 +767,13 @@ func TestAuthTokenStoreSaveTokenStoresACopyOfTheCallersToken(t *testing.T) {
 		Scope:        "mcp.read",
 		ExpiresAt:    time.Now().Add(time.Hour),
 	}
-	tok := saved // the caller's own object, handed to the store below
+	tok := saved
 	ts := store.TokenStore("srv", authTestURL)
 	if err := ts.SaveToken(ctx, &tok); err != nil {
 		t.Fatalf("SaveToken: %v", err)
 	}
 	afterSave := store.Revision("srv")
 
-	// The caller mutates the object it handed over (mcp-go does not do this
-	// today; a future version, or any other caller, may).
 	tok.AccessToken = "mutated-access-token"
 	tok.RefreshToken = "mutated-refresh-token"
 	tok.TokenType = "MAC"
@@ -884,14 +781,11 @@ func TestAuthTokenStoreSaveTokenStoresACopyOfTheCallersToken(t *testing.T) {
 	tok.ExpiresIn = 0
 	tok.ExpiresAt = time.Time{}
 
-	// 1. This process's AuthStore: the record must be what was SAVED.
 	rec, ok := store.Record("srv")
 	if !ok {
 		t.Fatal("Record after SaveToken: ok = false, want true")
 	}
 	assertAuthTestToken(t, rec.Token, &saved)
-	// ... with the URL forced onto the adapter's binding and the registration
-	// half intact, i.e. the read-modify-write still behaves as documented.
 	if rec.URL != authTestURL {
 		t.Fatalf("record URL = %q after SaveToken, want %q", rec.URL, authTestURL)
 	}
@@ -899,14 +793,12 @@ func TestAuthTokenStoreSaveTokenStoresACopyOfTheCallersToken(t *testing.T) {
 		t.Fatalf("SaveToken dropped the registration half: %s", redactedRecord(rec))
 	}
 
-	// 2. The transport-facing reader.
 	got, err := ts.GetToken(ctx)
 	if err != nil {
 		t.Fatalf("GetToken: %v", err)
 	}
 	assertAuthTestToken(t, got, &saved)
 
-	// 3. A second AuthStore on the same directory (the other lele process).
 	other := NewAuthStore(filepath.Dir(path))
 	otherTok, err := other.TokenStore("srv", authTestURL).GetToken(ctx)
 	if err != nil {
@@ -917,8 +809,6 @@ func TestAuthTokenStoreSaveTokenStoresACopyOfTheCallersToken(t *testing.T) {
 		t.Fatal("Authenticated from a second store = false, want true")
 	}
 
-	// 4. The bytes on disk, and the revision that hashes them: the mutation
-	// must not have reached either.
 	if data, err := os.ReadFile(path); err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	} else if strings.Contains(string(data), "mutated") {
@@ -928,8 +818,6 @@ func TestAuthTokenStoreSaveTokenStoresACopyOfTheCallersToken(t *testing.T) {
 		t.Fatalf("Revision changed after the caller mutated its token (%d → %d)", afterSave, after)
 	}
 
-	// A nil token still CLEARS the stored one (the pre-existing behaviour the
-	// copy must not turn into a panic), and the registration survives it.
 	if err := ts.SaveToken(ctx, nil); err != nil {
 		t.Fatalf("SaveToken(nil): %v", err)
 	}
@@ -948,24 +836,6 @@ func TestAuthTokenStoreSaveTokenStoresACopyOfTheCallersToken(t *testing.T) {
 	}
 }
 
-// TestAuthTokenStoreSaveTokenDoesNotAliasTheCallersToken probes the finding-F4
-// claim that SaveToken stores the CALLER's *transport.Token (auth_store.go:
-// `rec.Token = tok`) and that mutating it afterwards rewrites the store.
-//
-// THE PROBE CAME OUT NEGATIVE, and the reason is worth recording: the record
-// handed to Save is put into a TEMPORARY map (Save copies s.servers, sets the
-// new record in the copy and hands that map to writeLocked), so the caller's
-// pointer never reaches the cache; a successful write then calls
-// invalidateLocked, so the next read reloads the record from disk (fresh
-// tokens), and a failed write leaves the cache exactly as it was. No reader —
-// GetToken, Record, Revision or a second AuthStore on the same directory — can
-// observe the caller's mutation, which is what this test asserts.
-//
-// It is kept as the guard for that observable contract: a change that made the
-// cache RETAIN the written record (the obvious optimisation: assigning
-// s.servers = servers instead of invalidating) would make the aliasing real, and
-// this test is what would catch it. The copy in Save/GetToken/Record is what
-// pkg/mcp documents as the store's ownership rule; see copyRecord.
 func TestAuthTokenStoreSaveTokenDoesNotAliasTheCallersToken(t *testing.T) {
 	store, path := newAuthTestStore(t)
 	ctx := context.Background()
@@ -984,10 +854,6 @@ func TestAuthTokenStoreSaveTokenDoesNotAliasTheCallersToken(t *testing.T) {
 	}
 	before := store.Revision("srv")
 
-	// The caller keeps its object and mutates it afterwards. transport.Token is
-	// strings, one int64 and a time.Time — there is no slice, map or pointer
-	// inside it, so a struct copy IS a deep copy and nothing here can be left
-	// aliased by accident.
 	tok.AccessToken = "mutated-access-token"
 	tok.RefreshToken = ""
 	tok.TokenType = "MAC"
@@ -1004,8 +870,6 @@ func TestAuthTokenStoreSaveTokenDoesNotAliasTheCallersToken(t *testing.T) {
 		t.Fatalf("GetToken = %s after the caller mutated its token, want the values as they were saved", redactedToken(got))
 	}
 
-	// The record the cache serves is a copy as well, and the revision (the
-	// hash of the stored bytes) did not move.
 	rec, ok := store.Record("srv")
 	if !ok {
 		t.Fatal("record missing after SaveToken")
@@ -1017,7 +881,6 @@ func TestAuthTokenStoreSaveTokenDoesNotAliasTheCallersToken(t *testing.T) {
 		t.Fatalf("Revision changed after the caller mutated its token (%d → %d)", before, after)
 	}
 
-	// And so is what another process reads back from the file.
 	other := NewAuthStore(filepath.Dir(path))
 	if !other.Authenticated("srv", authTestURL) {
 		t.Fatal("the stored token is not usable for another reader")

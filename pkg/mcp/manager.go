@@ -15,57 +15,27 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// Manager owns the per-agent set of MCP servers: lazy connections (dial on
-// first use), cached tool specs and reconnect-once semantics. It is safe for
-// concurrent use.
-//
-// Logging policy: only server names, transport kinds, layer names and error
-// strings ever reach a log sink — never srv.Env or srv.Headers values, which
-// hold API keys (guarded by TestNoSecretsLogged).
 type Manager struct {
 	paths  Paths
 	dialer Dialer
-	// auth is the per-lele-directory OAuth store. Built by NewManager from
-	// paths.LeleDir; nil is tolerated (buildAuthRuntime/fingerprint are
-	// nil-safe) so a Manager built without one keeps working unauthenticated.
-	auth *AuthStore
-	// usage records per-server remote-tool call counts (<LeleDir>/mcp_usage.json,
-	// or memory-only when LeleDir is unknown). nil is tolerated: inc/countsFor
-	// are nil-safe, so usage tracking can never break a remote call.
-	usage *usageStore
+	auth   *AuthStore
+	usage  *usageStore
 
-	mu sync.Mutex
-	// conns caches open connections, keyed by server name (nil until first use).
-	conns map[string]ClientConn
-	// loaded caches tool specs per server: after one successful LoadServer,
-	// further calls return the slice without dialing.
-	loaded map[string][]tools.LoadedMCPTool
-	// inflight dedupes concurrent loads of the same server (singleflight).
-	inflight map[string]*loadFlight
-	// fps fingerprints the winning ServerConfig each server was last resolved
-	// with. When it changes (mcp.json edited), the live connection and the
-	// cached specs of that server are retired lazily on the next use — see
-	// applyConfigChange.
-	fps map[string]string
-	// lastWarning is the text of the last discovery warning logged. An
-	// identical repeat (the same malformed layer, once per remote call) is
-	// suppressed so a broken file cannot spam the log.
+	mu          sync.Mutex
+	conns       map[string]ClientConn
+	loaded      map[string][]tools.LoadedMCPTool
+	inflight    map[string]*loadFlight
+	fps         map[string]string
 	lastWarning string
-	// closed is set by Close; new dials are rejected afterwards so a
-	// shutdown race cannot leak a freshly spawned stdio child.
-	closed bool
+	closed      bool
 }
 
-// loadFlight coordinates one in-flight LoadServer: waiters block on done and
-// then observe specs/err (published before close).
 type loadFlight struct {
 	done  chan struct{}
 	specs []tools.LoadedMCPTool
 	err   error
 }
 
-// NewManager builds a manager over the given layer paths. A nil dialer means
-// "use the real mcp-go dialer" (tests inject a fake).
 func NewManager(paths Paths, dialer Dialer) *Manager {
 	if dialer == nil {
 		dialer = newMCPDialer()
@@ -82,13 +52,6 @@ func NewManager(paths Paths, dialer Dialer) *Manager {
 	}
 }
 
-// usageFilePath returns the usage counter file inside a lele directory:
-//
-//	<LeleDir>/mcp_usage.json
-//
-// i.e. one file next to mcp.json and the auth store. An unknown LeleDir (empty
-// Paths, e.g. a manager a test or a probe built by hand) yields "" — the usage
-// store then stays memory-only instead of guessing a path.
 func usageFilePath(leleDir string) string {
 	if leleDir == "" {
 		return ""
@@ -96,14 +59,6 @@ func usageFilePath(leleDir string) string {
 	return filepath.Join(leleDir, "mcp_usage.json")
 }
 
-// discover re-reads the three mcp.json layers (at most three small files) and
-// logs non-fatal warnings. Discovery errors are warnings by contract — the
-// result is always usable — and their text carries paths and validation
-// messages, never expanded secret values.
-//
-// The same warning is logged only when its text changes: discover runs on
-// every LoadServer/CallRemote, so a malformed layer must not emit one line
-// per remote call. A later error-free discovery re-arms the dedup.
 func (m *Manager) discover() DiscoveryResult {
 	res, err := Discover(m.paths)
 	if err == nil {
@@ -125,11 +80,6 @@ func (m *Manager) discover() DiscoveryResult {
 	return res
 }
 
-// Servers returns the configured servers sorted by name with their provenance
-// layer, excluding disabled and invalid ones. This feeds the system prompt's
-// "## MCP Servers" section (names + descriptions only, no tool schemas).
-// The mcp.json layers are re-read on every call, so an edit (a new name, a
-// changed description or URL) shows up on the next sync without a restart.
 func (m *Manager) Servers() []tools.MCPServerInfo {
 	res := m.discover()
 	infos := make([]tools.MCPServerInfo, 0, len(res.Names))
@@ -143,24 +93,9 @@ func (m *Manager) Servers() []tools.MCPServerInfo {
 	return infos
 }
 
-// resolve returns the active config for name or a descriptive error (a
-// disabled server gets its own message naming the layer that disabled it).
-// The error deliberately does NOT list the known servers: the authoritative
-// list is appended exactly once by the loader layer (pkg/tools loadError),
-// so a manager error flowing through it never yields "known servers: …"
-// twice in the final message. On success the winning config is fingerprinted
-// so an edit to the entry retires the connection/specs of the previous
-// config (applyConfigChange).
 func (m *Manager) resolve(name string) (ServerConfig, error) {
 	res := m.discover()
 	if cfg, ok := res.Servers[name]; ok {
-		// Resolve the OAuth state of THIS dial before fingerprinting: the
-		// runtime is what buildTransport reads to decide whether the remote
-		// transport is built with OAuth attached. It is unexported and
-		// json:"-", so it never affects the fingerprint. AttachAuthRuntime
-		// is the single attach seam — the CLI's ProbeServer resolves the
-		// same runtime through the same function, since a probe without it
-		// would report "authentication required" for a logged-in server.
 		cfg = AttachAuthRuntime(name, cfg, m.auth)
 		m.applyConfigChange(name, cfg)
 		return cfg, nil
@@ -171,17 +106,6 @@ func (m *Manager) resolve(name string) (ServerConfig, error) {
 	return ServerConfig{}, fmt.Errorf("mcp server %q is not configured", name)
 }
 
-// applyConfigChange records the fingerprint of name's winning config and, on
-// the first change since the server was last resolved, retires everything
-// produced by the previous config: the cached specs and the live connection
-// (closed immediately via dropConn, which only unmaps it if it is still the
-// cached one). The next LoadServer/CallRemote dials lazily with the new
-// config; a call already in flight on the retired connection fails at the
-// transport level and is recovered by the reconnect-once retry, which
-// RE-RESOLVES the config before redialing (fetchTools/CallRemote) — so the
-// retry dials the config that is current at that moment, not the retired one
-// it entered with. Because fps already advanced here, that re-resolve never
-// retires the freshly redialed connection.
 func (m *Manager) applyConfigChange(name string, cfg ServerConfig) {
 	fp := m.fingerprint(name, cfg)
 	m.mu.Lock()
@@ -199,27 +123,16 @@ func (m *Manager) applyConfigChange(name string, cfg ServerConfig) {
 	}
 }
 
-// configFingerprint hashes the normalized JSON of one server entry. The
-// struct's field order is fixed and encoding/json sorts map keys, so equal
-// configs always hash equal; FNV-1a keeps the check cheap enough to run on
-// every resolve.
 func configFingerprint(cfg ServerConfig) string {
 	data, err := json.Marshal(cfg)
 	if err != nil {
-		return "" // unreachable for ServerConfig; never falsely "changed"
+		return ""
 	}
 	h := fnv.New64a()
 	_, _ = h.Write(data)
 	return fmt.Sprintf("%016x", h.Sum64())
 }
 
-// fingerprint is the config fingerprint PLUS the auth store revision of the
-// server: the revision is what makes a token write retire the cached
-// connection of a server whose mcp.json entry did not change.
-//
-// The revision is appended even when it is 0, so the formatting is uniform and
-// a server with no stored token still has a stable fingerprint. When there is
-// no store at all (m.auth == nil) the base fingerprint is returned unchanged.
 func (m *Manager) fingerprint(name string, cfg ServerConfig) string {
 	fp := configFingerprint(cfg)
 	if m.auth != nil {
@@ -228,37 +141,16 @@ func (m *Manager) fingerprint(name string, cfg ServerConfig) string {
 	return fp
 }
 
-// LoadServer returns the tool specs of one server, dialing lazily on the
-// first call. It is idempotent (cached specs are returned without dialing)
-// and deduped per server: N concurrent calls result in exactly one dial, the
-// others wait and observe the same result. Registration into the ToolRegistry
-// is the caller's job (see tools.GetMCPToolTool).
 func (m *Manager) LoadServer(ctx context.Context, name string) ([]tools.LoadedMCPTool, error) {
 	cfg, err := m.resolve(name)
 	if err != nil {
 		return nil, err
 	}
-	// Fingerprint captured BEFORE the (slow) fetch: a config edit landing
-	// mid-flight advances m.fps[name] — and applyConfigChange clears the
-	// cached specs — while this load still carries the v1-era cfg. The store
-	// below compares against this captured value so a stale flight can never
-	// re-poison the cache it is about to overwrite (N1). The specs are still
-	// returned to THIS caller: it asked while v1 was current, and the next
-	// call will re-dial with v2.
-	//
-	// Note the fingerprint window: resolve read AuthStore.Revision for
-	// m.fps[name] and this second read of the same revision each hit the
-	// store independently, so a token write landing between them makes the
-	// m.fps[name] == fp guard below refuse to cache the specs this flight
-	// fetched. The direction is safe — cached specs are never stale — and the
-	// only cost is one extra dial on the next call.
 	fp := m.fingerprint(name, cfg)
 
 	m.mu.Lock()
 	if specs, ok := m.loaded[name]; ok {
 		m.mu.Unlock()
-		// A cancelled caller gets its own error back instead of cached specs
-		// it cannot use — cheap and less surprising than a silent success.
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("mcp load %q: %w", name, err)
 		}
@@ -285,10 +177,6 @@ func (m *Manager) LoadServer(ctx context.Context, name string) ([]tools.LoadedMC
 
 	m.mu.Lock()
 	delete(m.inflight, name)
-	// Store ONLY while this flight's config is still the winning one: a
-	// mid-flight edit (fps advanced, cache cleared, conn dropped by
-	// applyConfigChange) or a Close must not resurrect the stale specs. The
-	// flight's result is published to the waiters either way.
 	if err == nil && !m.closed && m.fps[name] == fp {
 		m.loaded[name] = specs
 	}
@@ -299,10 +187,6 @@ func (m *Manager) LoadServer(ctx context.Context, name string) ([]tools.LoadedMC
 	return specs, err
 }
 
-// fetchTools lists a server's tools through the (possibly cached) connection
-// and retries exactly once after dropping a connection that failed at the
-// transport level. Non-transport failures (MCP error responses, caller
-// cancellation) are returned as-is.
 func (m *Manager) fetchTools(ctx context.Context, name string, cfg ServerConfig) ([]mcp.Tool, error) {
 	conn, err := m.conn(ctx, name, cfg)
 	if err != nil {
@@ -312,30 +196,13 @@ func (m *Manager) fetchTools(ctx context.Context, name string, cfg ServerConfig)
 	if err == nil || ctx.Err() != nil {
 		return list, wrapLoad(name, err)
 	}
-	// The authorization challenge is tested BEFORE isTransportFailure, and
-	// the order is load-bearing. mcp-go's client.Client.sendRequest wraps
-	// EVERY SendRequest error in transport.NewError (client/client.go), so a
-	// challenge observed on an already-cached connection arrives here as
-	// *transport.Error wrapping the OAuth error — exactly the shape
-	// isTransportFailure reports as a transport failure. Redialing cannot fix
-	// a missing credential (the fresh dial fails identically), so a challenge
-	// must neither drop the healthy connection nor retry: it is reported as
-	// ErrAuthRequired so the caller runs the auth flow instead.
 	if authRequiredError(err) {
 		return nil, fmt.Errorf("mcp load %q: %w", name, ErrAuthRequired)
 	}
 	if !isTransportFailure(err) {
 		return list, wrapLoad(name, err)
 	}
-	// The conn that failed is the one being retired: pass it explicitly so a
-	// newer connection installed by a concurrent redial is left alone.
 	m.dropConn(name, conn)
-	// Re-resolve BEFORE redialing: a mcp.json edit landing mid-call retired
-	// the entry-time cfg above (fps advanced, specs cleared, conn dropped),
-	// so redialing with it would install a v1 connection that no later
-	// resolve ever retires again (fps already equals v2). If the server
-	// vanished between the failure and the retry, keep the original cfg —
-	// the dial will fail cleanly, as before.
 	cfg2, err2 := m.resolve(name)
 	if err2 != nil {
 		cfg2 = cfg
@@ -351,7 +218,6 @@ func (m *Manager) fetchTools(ctx context.Context, name string, cfg ServerConfig)
 	return list, nil
 }
 
-// wrapLoad contextualizes a list failure; success wraps to nil.
 func wrapLoad(name string, err error) error {
 	if err == nil {
 		return nil
@@ -359,12 +225,6 @@ func wrapLoad(name string, err error) error {
 	return fmt.Errorf("mcp load %q: %w", name, err)
 }
 
-// buildSpecs converts a server's raw tool list into registry-ready specs.
-// The registered Name is computed here (pkg/tools cannot call
-// NamespacedName); pkg/tools only checks registry.Get(spec.Name). Every spec
-// is stamped with its Server so ToolFactory binds the RemoteTool from the
-// spec itself — no lookup in the loaded cache (which a mid-flight config
-// change deliberately leaves empty, NEW-2).
 func buildSpecs(server string, remoteTools []mcp.Tool) []tools.LoadedMCPTool {
 	specs := make([]tools.LoadedMCPTool, 0, len(remoteTools))
 	for _, t := range remoteTools {
@@ -379,18 +239,6 @@ func buildSpecs(server string, remoteTools []mcp.Tool) []tools.LoadedMCPTool {
 	return specs
 }
 
-// CallRemote invokes a remote tool by its original MCP name. The connection
-// is dialed lazily; if it fails at the transport level, the connection is
-// dropped, re-dialed and the call retried exactly once (then a clean wrapped
-// error is returned). Note: a call that dies mid-flight is retried — the plan
-// accepts the (small) double-execution risk in exchange for transparent
-// recovery from a crashed stdio child.
-//
-// Every call that reaches the server is recorded through the usage store (see
-// ToolUsage), exactly once and only on success: a result carrying
-// IsError=true still counts — the tool WAS used, and a tool that keeps failing
-// is exactly what a usage ranking should surface — while a transport failure,
-// an auth challenge or a cancelled caller counts nothing.
 func (m *Manager) CallRemote(ctx context.Context, server, remoteTool string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	cfg, err := m.resolve(server)
 	if err != nil {
@@ -408,22 +256,12 @@ func (m *Manager) CallRemote(ctx context.Context, server, remoteTool string, arg
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("mcp call %s.%s: %w", server, remoteTool, err)
 	}
-	// Same ordering rule as fetchTools, for the same reason: sendRequest
-	// wraps every send failure in transport.NewError (client/client.go), so a
-	// challenge would otherwise look like a transport failure and be retried
-	// after a pointless redial — a missing credential is not fixed by
-	// redialing. The connection is left intact and ErrAuthRequired is
-	// reported under the same message prefix as the other failures.
 	if authRequiredError(err) {
 		return nil, fmt.Errorf("mcp call %s.%s: %w", server, remoteTool, ErrAuthRequired)
 	}
 	if !isTransportFailure(err) {
 		return nil, fmt.Errorf("mcp call %s.%s: %w", server, remoteTool, err)
 	}
-	// Same rule as fetchTools: retire exactly the conn that failed, then
-	// re-resolve so the single redial dials the config that is current now
-	// (a mid-flight edit retired the entry-time cfg) — falling back to the
-	// original cfg when the server vanished between failure and retry.
 	m.dropConn(server, conn)
 	cfg2, err2 := m.resolve(server)
 	if err2 != nil {
@@ -437,27 +275,14 @@ func (m *Manager) CallRemote(ctx context.Context, server, remoteTool string, arg
 	if err != nil {
 		return nil, fmt.Errorf("mcp call %s.%s: %w", server, remoteTool, err)
 	}
-	// The retry succeeded: this is the FIRST and only successful attempt of
-	// this call, so it is recorded exactly once (the increment above only runs
-	// when the first attempt succeeded).
 	m.usage.inc(server, remoteTool)
 	return res, nil
 }
 
-// ToolUsage returns the recorded call counts for one server's tools, keyed
-// by REMOTE tool name (the name on the server, not the namespaced registry
-// name). Returns an empty map when nothing was recorded. Safe for concurrent
-// use.
 func (m *Manager) ToolUsage(server string) map[string]uint64 {
 	return m.usage.countsFor(server)
 }
 
-// serverOf reverse-looks-up which server owns a registered tool name in the
-// loaded set. It is only the defensive fallback of ToolFactory, for specs
-// that carry no Server of their own (foreign specs built by a non-mcp
-// loader): a spec produced by buildSpecs always binds via spec.Server, since
-// the loaded cache a mid-flight config change clears cannot be the source of
-// truth (NEW-2). Returns "" when the name is not loaded.
 func (m *Manager) serverOf(registered string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -471,9 +296,6 @@ func (m *Manager) serverOf(registered string) string {
 	return ""
 }
 
-// conn returns the cached connection for name, dialing on first use. Two
-// concurrent dials cannot install two connections: the loser is closed and
-// the winner reused.
 func (m *Manager) conn(ctx context.Context, name string, cfg ServerConfig) (ClientConn, error) {
 	m.mu.Lock()
 	if m.closed {
@@ -498,7 +320,7 @@ func (m *Manager) conn(ctx context.Context, name string, cfg ServerConfig) (Clie
 	}
 	if existing, ok := m.conns[name]; ok {
 		m.mu.Unlock()
-		_ = conn.Close() // lost the dial race: reuse the installed connection
+		_ = conn.Close()
 		return existing, nil
 	}
 	m.conns[name] = conn
@@ -506,12 +328,6 @@ func (m *Manager) conn(ctx context.Context, name string, cfg ServerConfig) (Clie
 	return conn, nil
 }
 
-// dropConn retires one specific connection: stale is the conn that failed
-// and is always closed (it is the one being retired), but the cache is only
-// updated while it still maps to that exact connection. A concurrent redial
-// may have installed a newer conn in the meantime — deleting/closing whatever
-// is cached would destroy healthy state (the lost-update bug). Closing
-// happens outside the lock, since stdio shutdown can block.
 func (m *Manager) dropConn(name string, stale ClientConn) {
 	if stale == nil {
 		return
@@ -524,9 +340,6 @@ func (m *Manager) dropConn(name string, stale ClientConn) {
 	_ = stale.Close()
 }
 
-// Close closes every open connection (terminating stdio children) and clears
-// the caches. It is idempotent, safe after partial or failed dials, and
-// rejects subsequent dials.
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	m.closed = true
@@ -546,9 +359,6 @@ func (m *Manager) Close() error {
 	return errors.Join(errs...)
 }
 
-// isTransportFailure reports whether err came from the connection itself
-// (transport.Error wraps every send failure in mcp-go) rather than from an
-// MCP-level error response — only the former is worth a redial.
 func isTransportFailure(err error) bool {
 	var tErr *transport.Error
 	return errors.As(err, &tErr)

@@ -11,7 +11,6 @@ import (
 	"testing"
 )
 
-// writeFileAt creates (including parent dirs) a fixture file and returns path.
 func writeFileAt(t *testing.T, path, content string) string {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -23,13 +22,11 @@ func writeFileAt(t *testing.T, path, content string) string {
 	return path
 }
 
-// writeConfig writes content to <tempdir>/mcp.json and returns the path.
 func writeConfig(t *testing.T, content string) string {
 	t.Helper()
 	return writeFileAt(t, filepath.Join(t.TempDir(), "mcp.json"), content)
 }
 
-// staticExpand returns a pure expander over a fixed set of variables.
 func staticExpand(vars map[string]string) ExpandFunc {
 	return newExpand(func(name string) (string, bool) {
 		v, ok := vars[name]
@@ -103,8 +100,6 @@ func TestParseFileValidEntries(t *testing.T) {
 			if !reflect.DeepEqual(f.MCPServers, tt.want) {
 				t.Errorf("MCPServers = %#v, want %#v", f.MCPServers, tt.want)
 			}
-			// The active set is Discover's job now (File.Active was removed as
-			// a dead API): same file, read through the agent layer.
 			res, _ := Discover(Paths{AgentWorkspace: filepath.Dir(path)})
 			if len(res.Names) != len(tt.wantActive) {
 				t.Fatalf("active set = %v, want %v", res.Names, tt.wantActive)
@@ -218,8 +213,6 @@ func TestParseFileInvalidEntriesDoNotKillFile(t *testing.T) {
 			if _, stillParsed := f.MCPServers[tt.badServer]; !stillParsed {
 				t.Errorf("invalid entry %q was dropped from MCPServers", tt.badServer)
 			}
-			// Active-set check through Discover (File.Active was removed as a
-			// dead API): invalid entries must be excluded from the active set.
 			res, _ := Discover(Paths{AgentWorkspace: filepath.Dir(path)})
 			if !slices.Equal(res.Names, tt.wantActive) {
 				t.Fatalf("active set = %v, want %v", res.Names, tt.wantActive)
@@ -336,9 +329,6 @@ func TestExpandString(t *testing.T) {
 	}
 }
 
-// TestDiscoverActiveFiltering: the active set excludes invalid and disabled
-// entries — the semantics File.Active used to own, now asserted through the
-// production path (Discover), which also records the disabled name.
 func TestDiscoverActiveFiltering(t *testing.T) {
 	content := `{"mcpServers": {
 		"good": {"command": "c"},
@@ -366,9 +356,6 @@ func TestDiscoverActiveFiltering(t *testing.T) {
 	}
 }
 
-// TestParseFileAuthBlock: the optional "auth" block of a remote entry decodes
-// into ServerConfig.Auth and, when absent, stays nil so every existing entry
-// keeps its current behaviour untouched.
 func TestParseFileAuthBlock(t *testing.T) {
 	tests := []struct {
 		name string
@@ -433,9 +420,6 @@ func TestParseFileAuthBlock(t *testing.T) {
 	}
 }
 
-// TestAuthTypeValidation: the auth mode is a closed set — anything unknown
-// (a typo like "bearer" would silently disable lele's OAuth flow) is reported
-// per entry and never kills the file.
 func TestAuthTypeValidation(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -468,9 +452,6 @@ func TestAuthTypeValidation(t *testing.T) {
 	}
 }
 
-// TestParseFileAuthInvalidEntries: remote-only and client_id/secret coupling
-// are enforced through the production path, with the failing entry kept in
-// MCPServers for inspection like every other validation failure.
 func TestParseFileAuthInvalidEntries(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -524,10 +505,6 @@ func TestParseFileAuthInvalidEntries(t *testing.T) {
 	}
 }
 
-// TestParseFileAuthExpansion: the auth string fields are ${VAR}-expanded on
-// READ (a token in client_secret is the normal case), while Auth.Type is not
-// — it is a literal selector, so an unexpanded "${X}" there must be rejected
-// by validate instead of quietly becoming a valid mode.
 func TestParseFileAuthExpansion(t *testing.T) {
 	expand := staticExpand(map[string]string{
 		"MY_TOKEN": "s3cr3t",
@@ -577,15 +554,11 @@ func TestParseFileAuthExpansion(t *testing.T) {
 	if auth.ProtectedResourceMetadataURL != "https://pr/meta" {
 		t.Errorf("Auth.ProtectedResourceMetadataURL = %q, want expanded ${PRM}", auth.ProtectedResourceMetadataURL)
 	}
-	// Proof that the literal type reached validation: had ${X} been expanded,
-	// the entry would have been valid ("oauth" is a known mode).
 	if _, bad := f.EntryErrors["remote"]; !bad {
 		t.Errorf("EntryErrors = %v, want an unknown auth type error for the literal ${X}", f.EntryErrors)
 	}
 }
 
-// TestParseFileAuthExpansionNilSafe: expanding an entry without an auth block
-// must not panic and must leave every other field's behaviour intact.
 func TestParseFileAuthExpansionNilSafe(t *testing.T) {
 	path := writeConfig(t, `{"mcpServers": {"x": {"url": "${URL}"}}}`)
 	f, err := parseFile(path, staticExpand(map[string]string{"URL": "https://x/mcp"}))
@@ -601,9 +574,6 @@ func TestParseFileAuthExpansionNilSafe(t *testing.T) {
 	}
 }
 
-// TestServerConfigAuthJSONRoundTrip guards the json tags of AuthSpec: a
-// marshalled entry must decode back into the same value, and a nil Auth must
-// stay absent from the document (writers keep the file as the user wrote it).
 func TestServerConfigAuthJSONRoundTrip(t *testing.T) {
 	in := ServerConfig{
 		URL:  "https://x/mcp",
@@ -635,8 +605,6 @@ func TestServerConfigAuthJSONRoundTrip(t *testing.T) {
 		t.Errorf("round trip = %#v, want %#v", out, in)
 	}
 
-	// A nil Auth must not appear at all: omitempty keeps the document clean
-	// and ParseFile then reports Auth == nil for it.
 	plain, err := json.Marshal(ServerConfig{URL: "https://x/mcp"})
 	if err != nil {
 		t.Fatalf("json.Marshal error: %v", err)

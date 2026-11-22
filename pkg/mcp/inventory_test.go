@@ -10,10 +10,6 @@ import (
 	"testing"
 )
 
-// writeInventoryLayers writes the fixture contents, resolving each layer
-// through LayerFile so a fixture can never write to an empty-root layer.
-// For aliased fixtures (HOME case) only the global key may be used for the
-// shared file: global and project resolve to the same path.
 func writeInventoryLayers(t *testing.T, paths Paths, files map[string]string) {
 	t.Helper()
 	for _, layer := range Layers() {
@@ -29,11 +25,6 @@ func writeInventoryLayers(t *testing.T, paths Paths, files map[string]string) {
 	}
 }
 
-// assertInventoryAgrees is the drift guard: ReadInventory's Effective must
-// agree with Discover name by name (Servers → enabled, Layers provenance,
-// Disabled → disabled). The only names the inventory may add are the ones
-// Discover silently drops — invalid winners — and each addition must be
-// corroborated by Discover's own warning text and by the winning copy.
 func assertInventoryAgrees(t *testing.T, paths Paths) Inventory {
 	t.Helper()
 	disc, derr := Discover(paths)
@@ -47,7 +38,6 @@ func assertInventoryAgrees(t *testing.T, paths Paths) Inventory {
 		want[n] = stateDisabled
 	}
 
-	// Every verdict Discover reports must surface identically.
 	for n, e := range want {
 		got, ok := inv.Effective[n]
 		if !ok || got != e {
@@ -79,9 +69,6 @@ func assertInventoryAgrees(t *testing.T, paths Paths) Inventory {
 		return strings.Contains(derrText, fmt.Sprintf("mcp server %q", n))
 	}
 
-	// The inventory may only add names Discover dropped, and only as
-	// "invalid" (a dropped invalid winner) or "disabled" (a dropped
-	// disabled stub) — never as "enabled".
 	for n, e := range inv.Effective {
 		rows := inv.ByName[n]
 		var last EntryState
@@ -95,10 +82,8 @@ func assertInventoryAgrees(t *testing.T, paths Paths) Inventory {
 			}
 		case stateDisabled:
 			if want[n] == stateEnabled || want[n] == stateDisabled {
-				continue // delegated verdict, checked above
+				continue
 			}
-			// A dropped name reported as disabled must be a disabled stub
-			// that failed validation (otherwise Discover would report it).
 			if !last.Disabled || last.Invalid == "" || !warnsAbout(n) {
 				t.Errorf("Effective[%q] = disabled for a name Discover dropped; last row = {disabled:%v invalid:%q}, warning mentions it: %v",
 					n, last.Disabled, last.Invalid, warnsAbout(n))
@@ -118,7 +103,6 @@ func assertInventoryAgrees(t *testing.T, paths Paths) Inventory {
 		}
 	}
 
-	// Aliased or not, one file must never be listed twice for one name.
 	for n, rows := range inv.ByName {
 		seen := make(map[string]bool, len(rows))
 		for _, r := range rows {
@@ -129,7 +113,6 @@ func assertInventoryAgrees(t *testing.T, paths Paths) Inventory {
 		}
 	}
 
-	// Warnings are Discover's, unmangled.
 	joined := errors.Join(inv.Warnings...)
 	switch {
 	case (derr == nil) != (joined == nil):
@@ -141,11 +124,6 @@ func assertInventoryAgrees(t *testing.T, paths Paths) Inventory {
 	return inv
 }
 
-// TestReadInventoryAgreesWithDiscover is the equivalence matrix required by
-// the plan: missing layers, empty roots, aliased roots (HOME case), an
-// invalid entry shadowing a valid lower one, a disabled winner, a stub
-// winner and broken JSON in one layer — Effective must agree with Discover
-// name by name in every one.
 func TestReadInventoryAgreesWithDiscover(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -172,7 +150,6 @@ func TestReadInventoryAgreesWithDiscover(t *testing.T) {
 				paths := Paths{
 					LeleDir: filepath.Join(base, "lele-home"),
 					Cwd:     filepath.Join(base, "project"),
-					// AgentWorkspace deliberately empty: the layer is off.
 				}
 				return paths, map[string]string{
 					LayerGlobal:  `{"mcpServers":{"g":{"command":"cg"},"dup":{"command":"cg2"}}}`,
@@ -190,8 +167,6 @@ func TestReadInventoryAgreesWithDiscover(t *testing.T) {
 					Cwd:            home,
 				}
 				return paths, map[string]string{
-					// global and project resolve to <home>/.lele/mcp.json;
-					// only the global key may be written for the shared file.
 					LayerGlobal: `{"mcpServers":{"shared":{"command":"cs"},"dup":{"command":"cg"}}}`,
 					LayerAgent:  `{"mcpServers":{"dup":{"command":"ca"}}}`,
 				}
@@ -263,10 +238,6 @@ func TestReadInventoryAgreesWithDiscover(t *testing.T) {
 	}
 }
 
-// TestReadInventoryCanarySecret is the no-secret-leak test: a layer whose
-// env and header values reference ${CANARY}. The summary must expose key
-// names only, and the expanded VALUE must appear nowhere in the inventory —
-// not in a dump, not in the JSON encoding, not in Paths, not in Warnings.
 func TestReadInventoryCanarySecret(t *testing.T) {
 	const canary = "CANARY-5f3a-exp42-value"
 	t.Setenv("CANARY", canary)
@@ -274,7 +245,6 @@ func TestReadInventoryCanarySecret(t *testing.T) {
 	fx := newDiscoveryFixture(t)
 	fx.writeLayer(t, LayerGlobal, `{"mcpServers":{"leaky":{"command":"cmd ${CANARY}",`+
 		`"env":{"TOKEN":"${CANARY}"},"headers":{"Authorization":"Bearer ${CANARY}"}}}}`)
-	// A broken layer guarantees Warnings is exercised by the canary check.
 	fx.writeLayer(t, LayerProject, `{"mcpServers": {`)
 
 	inv := ReadInventory(fx.paths)
@@ -300,8 +270,6 @@ func TestReadInventoryCanarySecret(t *testing.T) {
 		t.Fatal("fixture must produce a warning so the Warnings canary check is meaningful")
 	}
 
-	// Requirement: the canary's VALUE appears nowhere.
-	// (json.Marshal must also succeed: Inventory is marshal-safe, errors and all.)
 	marshaled, err := json.Marshal(inv) //nolint:musttag // Inventory is deliberately UNTAGGED: it is an internal view, not a wire type — the REST layer builds its own MCP*Response shapes (pkg/channels/rest_mcp.go) and adding json tags here would advertise a contract nobody serves while inviting callers to marshal a struct that carries absolute layer paths and unmangled Discover errors. This marshal IS the check that doing so would leak nothing; the tag warning is the linter asking for the contract we are refusing.
 	if err != nil {
 		t.Fatalf("json.Marshal(Inventory) error = %v (must be marshal-safe)", err)
@@ -317,20 +285,16 @@ func TestReadInventoryCanarySecret(t *testing.T) {
 			t.Errorf("expanded canary value leaked into %s: %s", label, dump)
 		}
 	}
-	// The literal placeholder in the dump proves the value was never expanded.
 	if !strings.Contains(dumps["fmt.Sprintf(\"%+v\", inv)"], "${CANARY}") {
 		t.Error("expected the literal ${CANARY} in the inventory dump (raw, unexpanded)")
 	}
 }
 
-// TestReadInventoryInvalidWinner pins the case Discover cannot express: an
-// invalid higher-layer entry shadowing a valid lower one.
 func TestReadInventoryInvalidWinner(t *testing.T) {
 	fx := newDiscoveryFixture(t)
 	fx.writeLayer(t, LayerGlobal, `{"mcpServers":{"s":{"command":"cg"}}}`)
 	fx.writeLayer(t, LayerProject, `{"mcpServers":{"s":{"url":"https://x/mcp","type":"ftp"}}}`)
 
-	// Context: Discover drops the name entirely (no Servers, no Disabled).
 	if disc, _ := Discover(fx.paths); len(disc.Servers) != 0 || len(disc.Disabled) != 0 {
 		t.Fatalf("fixture premise broken: Discover reported %v / %v", disc.Servers, disc.Disabled)
 	}
@@ -364,10 +328,6 @@ func TestReadInventoryInvalidWinner(t *testing.T) {
 	}
 }
 
-// TestReadInventoryDisabledStub pins the disable-stub pattern: the winning
-// copy is {"disabled":true} with no definition, so Discover drops it as
-// invalid, but the user-facing verdict is "disabled" (the server is off
-// because of this copy) — this is the state Q6's stub-create reports.
 func TestReadInventoryDisabledStub(t *testing.T) {
 	fx := newDiscoveryFixture(t)
 	fx.writeLayer(t, LayerGlobal, `{"mcpServers":{"s":{"command":"cg"}}}`)
@@ -406,10 +366,6 @@ func TestReadInventoryDisabledStub(t *testing.T) {
 	}
 }
 
-// TestReadInventoryAliasedRoots pins requirement 5: roots that resolve to
-// the same file are folded — one LayerInfo for the shared file with
-// AliasedWith naming the other layer, and ByName never lists the same
-// file's entry twice.
 func TestReadInventoryAliasedRoots(t *testing.T) {
 	t.Run("HOME case: global and project share one file", func(t *testing.T) {
 		home := t.TempDir()
@@ -423,8 +379,6 @@ func TestReadInventoryAliasedRoots(t *testing.T) {
 
 		inv := assertInventoryAgrees(t, paths)
 
-		// Exactly one LayerInfo for the shared file, owned by the highest
-		// layer (Discover's provenance), naming the other one.
 		var sharedRows []LayerInfo
 		for _, li := range inv.Layers {
 			if li.Path == shared {
@@ -445,7 +399,6 @@ func TestReadInventoryAliasedRoots(t *testing.T) {
 			t.Error("shared file Exists = false, want true")
 		}
 
-		// The name's entry appears once, under the owning layer.
 		rows := inv.ByName["s"]
 		if len(rows) != 1 {
 			t.Fatalf("ByName[\"s\"] has %d rows, want 1 (same file never twice)", len(rows))
@@ -482,9 +435,6 @@ func TestReadInventoryAliasedRoots(t *testing.T) {
 	})
 }
 
-// TestLayerFileEdges pins requirement 6: unknown layer names and empty
-// roots resolve to "" (mirroring joinRoot), so callers can never build a
-// process-relative path.
 func TestLayerFileEdges(t *testing.T) {
 	full := Paths{LeleDir: "/h", AgentWorkspace: "/w", Cwd: "/p"}
 	tests := []struct {
@@ -512,8 +462,6 @@ func TestLayerFileEdges(t *testing.T) {
 	}
 }
 
-// TestLayersOrder pins the low → high layer order and that callers cannot
-// mutate the package-level slice.
 func TestLayersOrder(t *testing.T) {
 	if want := []string{LayerGlobal, LayerAgent, LayerProject}; !reflect.DeepEqual(Layers(), want) {
 		t.Fatalf("Layers() = %v, want %v", Layers(), want)
@@ -525,8 +473,6 @@ func TestLayersOrder(t *testing.T) {
 	}
 }
 
-// TestLayerInfoExistence checks the per-layer file view for the plain
-// (non-aliased) case: rows low → high with Exists tracking the disk.
 func TestLayerInfoExistence(t *testing.T) {
 	fx := newDiscoveryFixture(t)
 

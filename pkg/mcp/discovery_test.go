@@ -8,11 +8,8 @@ import (
 	"testing"
 )
 
-// discoveryFixture wires three layer roots inside a fresh temp dir.
 type discoveryFixture struct {
-	paths Paths
-	// precomputed paths of each layer file, built with filepath.Join like
-	// the production code does (but independently of it).
+	paths       Paths
 	globalPath  string
 	agentPath   string
 	projectPath string
@@ -34,7 +31,6 @@ func newDiscoveryFixture(t *testing.T) discoveryFixture {
 	}
 }
 
-// writeLayer writes content at the path of the given layer name.
 func (f discoveryFixture) writeLayer(t *testing.T, layer, content string) {
 	t.Helper()
 	switch layer {
@@ -49,7 +45,6 @@ func (f discoveryFixture) writeLayer(t *testing.T, layer, content string) {
 	}
 }
 
-// serverWant is the expected outcome for one server name.
 type serverWant struct {
 	command     string
 	url         string
@@ -60,7 +55,7 @@ type serverWant struct {
 func TestDiscoverPrecedence(t *testing.T) {
 	tests := []struct {
 		name         string
-		files        map[string]string // layer → content (absent = no file)
+		files        map[string]string
 		wantServers  map[string]serverWant
 		wantDisabled map[string]string
 		wantErr      bool
@@ -123,7 +118,6 @@ func TestDiscoverPrecedence(t *testing.T) {
 				LayerProject: `{"mcpServers": {"dup": {"url": "https://only.example/mcp"}}}`,
 			},
 			wantServers: map[string]serverWant{
-				// command from the global entry must NOT leak through.
 				"dup": {command: "", url: "https://only.example/mcp", layer: LayerProject},
 			},
 		},
@@ -224,8 +218,8 @@ func TestDiscoverMalformedLayerKeepsOthers(t *testing.T) {
 		name          string
 		brokenLayer   string
 		brokenContent string
-		keepFirst     string // server expected from the lower valid layer
-		keepLast      string // server expected from the higher valid layer
+		keepFirst     string
+		keepLast      string
 		errContains   string
 	}{
 		{
@@ -266,7 +260,6 @@ func TestDiscoverMalformedLayerKeepsOthers(t *testing.T) {
 			fx := newDiscoveryFixture(t)
 			fx.writeLayer(t, LayerGlobal, validA)
 			fx.writeLayer(t, LayerProject, validB)
-			// written last so a broken project layer overwrites its own fixture
 			fx.writeLayer(t, tt.brokenLayer, tt.brokenContent)
 
 			got, err := Discover(fx.paths)
@@ -284,7 +277,6 @@ func TestDiscoverMalformedLayerKeepsOthers(t *testing.T) {
 					t.Errorf("server %q lost by the broken layer (kept %v)", name, serverNames(got.Servers))
 				}
 			}
-			// a broken agent layer must not hide valid siblings of its own file
 			if tt.brokenLayer == LayerAgent && strings.Contains(tt.brokenContent, `"sib"`) {
 				if _, ok := got.Servers["sib"]; !ok {
 					t.Errorf("valid sibling lost: kept %v", serverNames(got.Servers))
@@ -326,12 +318,6 @@ func TestLayerFilesPathsUseFilepathJoin(t *testing.T) {
 	}
 }
 
-// TestLayerFilesAliasedRootsReadOnce pins the <LeleDir>/mcp.json aliasing:
-// running the process from the parent of LeleDir (the classic `cd ~ &&
-// lele agent`) makes the global and the project layer resolve to the SAME
-// file. It must be read once, and the highest layer must own the provenance
-// so a bad file is neither double-reported nor blamed on a layer that did
-// not win the merge.
 func TestLayerFilesAliasedRootsReadOnce(t *testing.T) {
 	home := t.TempDir()
 	paths := Paths{LeleDir: filepath.Join(home, ".lele"), Cwd: home}
@@ -341,7 +327,6 @@ func TestLayerFilesAliasedRootsReadOnce(t *testing.T) {
 		t.Errorf("layerFiles() = %#v, want %#v", got, want)
 	}
 
-	// End to end: one malformed file, one warning, provenance of the winner.
 	if err := os.MkdirAll(filepath.Join(home, ".lele"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +367,6 @@ func TestLayerFilesSkipsEmptyRoots(t *testing.T) {
 	}
 }
 
-// serverNames is a sorted-ish helper for failure messages.
 func serverNames(m map[string]ServerConfig) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

@@ -16,9 +16,6 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 )
 
-// --- test doubles -----------------------------------------------------------
-
-// fakeTransport is a no-op transport.Interface.
 type fakeTransport struct{}
 
 func (fakeTransport) Start(context.Context) error { return nil }
@@ -30,18 +27,15 @@ func (fakeTransport) SetNotificationHandler(func(mcp.JSONRPCNotification))      
 func (fakeTransport) Close() error                                                    { return nil }
 func (fakeTransport) GetSessionId() string                                            { return "" }
 
-// recordingClient implements mcpClient and records the handshake calls.
 type recordingClient struct {
 	starts []context.Context
 	inits  []struct {
 		ctx context.Context
 		req mcp.InitializeRequest
 	}
-	closes   int
-	startErr error
-	initErr  error
-	// blockInit makes Initialize wait for its context to expire, to prove
-	// the Start context is independent of the dial timeout.
+	closes    int
+	startErr  error
+	initErr   error
 	blockInit bool
 }
 
@@ -78,9 +72,8 @@ func (c *recordingClient) Close() error {
 	return nil
 }
 
-// transportRecord captures how one transport constructor was invoked.
 type transportRecord struct {
-	kind    string // "stdio" | "http" | "sse"
+	kind    string
 	command string
 	args    []string
 	env     []string
@@ -88,7 +81,6 @@ type transportRecord struct {
 	headers map[string]string
 }
 
-// recordingFactory builds fake transports while remembering their arguments.
 func recordingFactory(recs *[]transportRecord) transportFactory {
 	return transportFactory{
 		stdio: func(command string, env []string, args ...string) transport.Interface {
@@ -106,7 +98,6 @@ func recordingFactory(recs *[]transportRecord) transportFactory {
 	}
 }
 
-// newTestDialer wires a dialer over the recording factory and client.
 func newTestDialer(recs *[]transportRecord, cli mcpClient) *mcpDialer {
 	return &mcpDialer{
 		factory:   recordingFactory(recs),
@@ -114,10 +105,6 @@ func newTestDialer(recs *[]transportRecord, cli mcpClient) *mcpDialer {
 	}
 }
 
-// --- T4: routing, handshake, failures ---------------------------------------
-
-// TestDialRoutesServerConfigToTransport proves each ServerConfig shape goes
-// to the right constructor and that Dial runs Start + Initialize once.
 func TestDialRoutesServerConfigToTransport(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -227,14 +214,11 @@ func TestDialRoutesServerConfigToTransport(t *testing.T) {
 	}
 }
 
-// TestDialInitializeRequestFields pins the initialize handshake content.
 func TestDialInitializeRequestFields(t *testing.T) {
 	var recs []transportRecord
 	cli := &recordingClient{}
 	d := newTestDialer(&recs, cli)
 
-	// Parent with a deadline: Start must NOT inherit it (detached), while
-	// Initialize must be bounded by the dial timeout.
 	parent, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Hour))
 	defer cancel()
 	if _, err := d.Dial(parent, ServerConfig{Command: "/bin/anything"}); err != nil {
@@ -261,9 +245,6 @@ func TestDialInitializeRequestFields(t *testing.T) {
 	}
 }
 
-// TestDialStartContextSurvivesDialTimeout proves the dial timeout only bounds
-// Initialize: a timed-out Initialize must not cancel the Start context (that
-// would kill a healthy stdio child spawned by exec.CommandContext).
 func TestDialStartContextSurvivesDialTimeout(t *testing.T) {
 	var recs []transportRecord
 	cli := &recordingClient{blockInit: true}
@@ -294,7 +275,6 @@ func TestDialStartContextSurvivesDialTimeout(t *testing.T) {
 	}
 }
 
-// TestDialPreInitSkipsInitialize: an already initialized client only gets Start.
 func TestDialPreInitSkipsInitialize(t *testing.T) {
 	var recs []transportRecord
 	cli := &recordingClient{}
@@ -312,7 +292,6 @@ func TestDialPreInitSkipsInitialize(t *testing.T) {
 	}
 }
 
-// TestDialFailuresCloseClient: start and initialize failures both clean up.
 func TestDialFailuresCloseClient(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -343,8 +322,6 @@ func TestDialFailuresCloseClient(t *testing.T) {
 	}
 }
 
-// TestDialUnreachableHTTP: a real dialer against a closed port fails with a
-// useful error instead of hanging (bounded by the dial timeout).
 func TestDialUnreachableHTTP(t *testing.T) {
 	d := newMCPDialer()
 	d.timeout = 2 * time.Second
@@ -366,7 +343,6 @@ func TestDialUnreachableHTTP(t *testing.T) {
 	}
 }
 
-// TestDialUnreachableSSE: the legacy SSE transport fails at Start, not hang.
 func TestDialUnreachableSSE(t *testing.T) {
 	d := newMCPDialer()
 	d.timeout = 2 * time.Second
@@ -385,7 +361,6 @@ func TestDialUnreachableSSE(t *testing.T) {
 	}
 }
 
-// TestDialBadStdioCommand: a launcher that does not exist fails at Start.
 func TestDialBadStdioCommand(t *testing.T) {
 	d := newMCPDialer()
 	d.timeout = 2 * time.Second
@@ -401,8 +376,6 @@ func TestDialBadStdioCommand(t *testing.T) {
 	}
 }
 
-// TestStdioEnvBaseThenSortedConfigured pins the child environment contract:
-// inherited base env first, configured entries after, sorted by key.
 func TestStdioEnvBaseThenSortedConfigured(t *testing.T) {
 	env := stdioEnv(map[string]string{"ZOO": "1", "ALPHA": "2", "MIDDLE": "3"})
 	base := osEnvironLen()
@@ -415,8 +388,6 @@ func TestStdioEnvBaseThenSortedConfigured(t *testing.T) {
 			t.Errorf("env[%d] = %q, want %q", base+i, got, kv)
 		}
 	}
-	// The base must keep the process environment (PATH at minimum) so stdio
-	// wrapper scripts keep working.
 	foundPath := false
 	for _, kv := range env[:base] {
 		if strings.HasPrefix(kv, "PATH=") {
@@ -428,13 +399,8 @@ func TestStdioEnvBaseThenSortedConfigured(t *testing.T) {
 	}
 }
 
-// osEnvironLen is a tiny helper kept separate for readability.
 func osEnvironLen() int { return len(stdioEnv(nil)) }
 
-// TestNoSecretsLogged: secrets passed as env/headers must reach the transport
-// (they are required for auth) but never the log sinks nor the returned
-// error strings. The sinks captured are exactly the ones pkg/logger writes to
-// (the standard log package) plus the slog default used by mcp-go.
 func TestNoSecretsLogged(t *testing.T) {
 	const envSecret = "s3cr3t-env-VALUE-9f2a1b"
 	const hdrSecret = "s3cr3t-hdr-VALUE-7c1d2e"
@@ -466,14 +432,12 @@ func TestNoSecretsLogged(t *testing.T) {
 	d := newMCPDialer()
 	d.timeout = 500 * time.Millisecond
 
-	// 1) stdio: secret env handed to the transport, spawn fails.
 	_, err := d.Dial(context.Background(), ServerConfig{
 		Command: "/nonexistent/lele-mcp-secret-test",
 		Env:     map[string]string{"LELE_TEST_SECRET": envSecret},
 	})
 	assertClean("stdio", err)
 
-	// 2) streamable HTTP: secret header, unreachable endpoint.
 	_, err = d.Dial(context.Background(), ServerConfig{
 		URL:     "http://127.0.0.1:1/mcp",
 		Type:    typeHTTP,
@@ -481,7 +445,6 @@ func TestNoSecretsLogged(t *testing.T) {
 	})
 	assertClean("http", err)
 
-	// 3) SSE: secret header, unreachable endpoint.
 	_, err = d.Dial(context.Background(), ServerConfig{
 		URL:     "http://127.0.0.1:1/sse",
 		Type:    typeSSE,
@@ -489,9 +452,6 @@ func TestNoSecretsLogged(t *testing.T) {
 	})
 	assertClean("sse", err)
 
-	// 4) The discovery warning path through pkg/logger: a layer with an
-	// invalid entry whose env holds the secret must log a warning (proves
-	// the sink is actually exercised) without the secret value.
 	dir := t.TempDir()
 	writeFileAt(t, dir+"/mcp.json", `{
   "mcpServers": {
@@ -509,18 +469,13 @@ func TestNoSecretsLogged(t *testing.T) {
 	}
 }
 
-// --- T5: OAuth opt-in at the transport seam --------------------------------
-
-// oauthRecord captures one httpOAuth/sseOAuth constructor call.
 type oauthRecord struct {
-	kind    string // "httpOAuth" | "sseOAuth"
+	kind    string
 	url     string
 	headers map[string]string
 	cfg     transport.OAuthConfig
 }
 
-// oauthRecordingFactory records plain and OAuth constructor calls separately,
-// so a test can prove WHICH constructor a config routed to.
 func oauthRecordingFactory(plain *[]transportRecord, oauth *[]oauthRecord) transportFactory {
 	return transportFactory{
 		stdio: func(command string, env []string, args ...string) transport.Interface {
@@ -546,12 +501,6 @@ func oauthRecordingFactory(plain *[]transportRecord, oauth *[]oauthRecord) trans
 	}
 }
 
-// TestBuildTransportOAuthOptIn is the falsifiable guard of the narrow attach
-// rule: OAuth is attached ONLY when the entry opts in explicitly (auth.type ==
-// "oauth") or the store records a real 401. Every other shape must take the
-// PLAIN constructor (attaching OAuth would break a healthy server, since
-// mcp-go's SendRequest returns OAuthAuthorizationRequiredError before sending
-// anything when the token store is empty).
 func TestBuildTransportOAuthOptIn(t *testing.T) {
 	const name = "srv"
 	const url = "https://srv.example/mcp"
@@ -561,10 +510,10 @@ func TestBuildTransportOAuthOptIn(t *testing.T) {
 		name             string
 		cfg              ServerConfig
 		seed             func(t *testing.T, store *AuthStore)
-		wantKind         string // constructor the dialer must use
-		wantClientID     string // OAuth case: ClientID handed to mcp-go
-		wantClientSecret string // OAuth case: ClientSecret handed to mcp-go
-		wantRedirectURI  string // OAuth case: RedirectURI handed to mcp-go
+		wantKind         string
+		wantClientID     string
+		wantClientSecret string
+		wantRedirectURI  string
 		wantScopes       []string
 		wantPRMURL       string
 	}{
@@ -583,8 +532,6 @@ func TestBuildTransportOAuthOptIn(t *testing.T) {
 			wantScopes:   []string{"read", "write"},
 		},
 		{
-			// Falsifiability M-guard: a persisted ClientID alone (residue of a
-			// cancelled/failed attempt) must NOT attach OAuth.
 			name: "stored client id but not required => plain http",
 			cfg:  ServerConfig{URL: url, Type: typeHTTP},
 			seed: func(t *testing.T, store *AuthStore) {
@@ -613,12 +560,6 @@ func TestBuildTransportOAuthOptIn(t *testing.T) {
 			wantKind: "stdio",
 		},
 		{
-			// The cfg.Command != "" clause of buildAuthRuntime, pinned on its
-			// own: a stdio entry carrying an Auth block (constructed directly,
-			// bypassing validate) AND an AuthRequired record must still take
-			// the stdio path. OAuth is a remote-transport concern — stdio has
-			// no HTTP challenge to answer, so attaching it would break a
-			// perfectly healthy stdio server.
 			name: "stdio with an auth block and an auth-required record stays stdio",
 			cfg: ServerConfig{Command: "/bin/lele-mcp", Auth: &AuthSpec{
 				Type: typeAuthOAuth, ClientID: "cid",
@@ -629,7 +570,6 @@ func TestBuildTransportOAuthOptIn(t *testing.T) {
 			wantKind: "stdio",
 		},
 		{
-			// An explicit config value always wins over the stored one.
 			name: "explicit client id wins over stored",
 			cfg: ServerConfig{URL: url, Type: typeHTTP, Auth: &AuthSpec{
 				Type: typeAuthOAuth, ClientID: "explicit",
@@ -641,10 +581,6 @@ func TestBuildTransportOAuthOptIn(t *testing.T) {
 			wantClientID: "explicit",
 		},
 		{
-			// An EMPTY field is filled from the persisted record — secret and
-			// redirect URI included: they are part of the registration
-			// (client_secret / redirect_uris), and a regression that dropped
-			// either would have passed while only clientID/PRMURL were pinned.
 			name: "empty field filled from stored record",
 			cfg: ServerConfig{URL: url, Type: typeHTTP, Auth: &AuthSpec{
 				Type: typeAuthOAuth,
@@ -665,8 +601,6 @@ func TestBuildTransportOAuthOptIn(t *testing.T) {
 			wantPRMURL:       "https://srv.example/.well-known/oauth-protected-resource",
 		},
 		{
-			// An explicit config value always wins over the stored one — for
-			// the secret and the redirect URI too, not just the client id.
 			name: "explicit secret and redirect uri win over the stored record",
 			cfg: ServerConfig{URL: url, Type: typeHTTP, Auth: &AuthSpec{
 				Type:         typeAuthOAuth,
@@ -685,7 +619,6 @@ func TestBuildTransportOAuthOptIn(t *testing.T) {
 			wantRedirectURI:  "http://127.0.0.1:7777/cb",
 		},
 		{
-			// A record bound to a different URL must not fill the config.
 			name: "record bound to another url is ignored",
 			cfg: ServerConfig{URL: url, Type: typeHTTP, Auth: &AuthSpec{
 				Type: typeAuthOAuth,
@@ -738,7 +671,7 @@ func TestBuildTransportOAuthOptIn(t *testing.T) {
 			}
 
 			if len(oauth) == 0 {
-				return // plain path: nothing more to assert
+				return
 			}
 			oc := oauth[0]
 			if !oc.cfg.PKCEEnabled {
@@ -771,7 +704,6 @@ func TestBuildTransportOAuthOptIn(t *testing.T) {
 	}
 }
 
-// saveRecord writes a record through the store, failing the test on error.
 func saveRecord(t *testing.T, store *AuthStore, name string, rec AuthRecord) {
 	t.Helper()
 	if err := store.Save(name, rec); err != nil {
@@ -779,9 +711,6 @@ func saveRecord(t *testing.T, store *AuthStore, name string, rec AuthRecord) {
 	}
 }
 
-// TestDialMapsAuthorizationChallengeToErrAuthRequired proves an authorization
-// challenge from Start or Initialize is reported as ErrAuthRequired (so the
-// caller runs the auth flow) and that the message carries no URL or token.
 func TestDialMapsAuthorizationChallengeToErrAuthRequired(t *testing.T) {
 	cases := []struct {
 		name string
@@ -804,9 +733,6 @@ func TestDialMapsAuthorizationChallengeToErrAuthRequired(t *testing.T) {
 			cli:  &recordingClient{startErr: &transport.AuthorizationRequiredError{}},
 		},
 		{
-			// The PRODUCTION wrapping shape: mcp-go's sendRequest wraps every
-			// send failure in transport.NewError, so this is what Dial actually
-			// sees for a challenge on the wire.
 			name: "initialize: transport.NewError(oauth authorization required)",
 			cli:  &recordingClient{initErr: transport.NewError(&transport.OAuthAuthorizationRequiredError{})},
 		},
