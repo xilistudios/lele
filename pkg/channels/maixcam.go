@@ -13,11 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 )
 
-// maixcamWriteTimeout caps how long a single conn.Write may block. When a
-// device's TCP window is full (or the peer is hung), an uncapped Write blocks
-// indefinitely and holds the read-lock, preventing Stop from acquiring the
-// write-lock → deadlock on shutdown.  10 s mirrors the sendTimeout already
-// used by the Discord channel (discord.go:20).
 const maixcamWriteTimeout = 10 * time.Second
 
 type MaixCamChannel struct {
@@ -201,9 +196,6 @@ func (c *MaixCamChannel) Send(ctx context.Context, msg bus.OutboundMessage) erro
 		return fmt.Errorf("maixcam channel not running")
 	}
 
-	// Snapshot connections under RLock, then release before any blocking I/O.
-	// Holding RLock during conn.Write was the root cause of SURV-02: a hung
-	// TCP write would block RLock forever, starving Stop's Lock acquisition.
 	c.clientsMux.RLock()
 	conns := make([]net.Conn, 0, len(c.clients))
 	for conn := range c.clients {
@@ -216,8 +208,6 @@ func (c *MaixCamChannel) Send(ctx context.Context, msg bus.OutboundMessage) erro
 		return fmt.Errorf("no connected MaixCam devices")
 	}
 
-	// Set a write deadline so that a hung peer cannot block Send indefinitely.
-	// If the caller supplied a tighter ctx deadline, honour that instead.
 	writeDeadline := time.Now().Add(maixcamWriteTimeout)
 	if dl, ok := ctx.Deadline(); ok && dl.Before(writeDeadline) {
 		writeDeadline = dl
@@ -245,7 +235,7 @@ func (c *MaixCamChannel) Send(ctx context.Context, msg bus.OutboundMessage) erro
 			})
 			sendErr = err
 		}
-		_ = conn.SetWriteDeadline(time.Time{}) // clear deadline
+		_ = conn.SetWriteDeadline(time.Time{})
 	}
 
 	return sendErr

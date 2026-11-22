@@ -15,27 +15,12 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// Tests for SURV-05: sendChunk must not leak a goroutine per timed-out send.
-// The old implementation fired the discordgo call in a fire-and-forget
-// goroutine and returned on timeout, leaving that goroutine blocked in the
-// HTTP call until Discord answered — result discarded. The fix threads the
-// deadline INTO the request via discordgo.WithContext, so the HTTP call
-// itself is canceled and the caller's goroutine is the only one involved.
-
-// newDiscordSendFixture spins up an httptest server masquerading as the
-// Discord API (discordgo.EndpointDiscord is a mutable package var), and a
-// DiscordChannel wired to it. Real JSON is returned so discordgo parses the
-// response normally on the happy path.
 func newDiscordSendFixture(t *testing.T, handler http.HandlerFunc) (*DiscordChannel, *httptest.Server) {
 	t.Helper()
 
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 
-	// Repoint discordgo at the fake API (old values restored for other
-	// tests). EndpointChannels and friends are computed at package init from
-	// EndpointAPI, so each leaf actually used by sends must be repointed
-	// individually — mutating the parents alone sends traffic to real Discord.
 	oldEndpoint := discordgo.EndpointDiscord
 	oldChannels := discordgo.EndpointChannels
 	fakeAPI := srv.URL + "/api/v" + discordgo.APIVersion + "/"
@@ -83,8 +68,6 @@ func discordMessageJSON(t *testing.T) []byte {
 	return b
 }
 
-// TestSendChunk_Success verifies the happy path still works through
-// ChannelMessageSendComplex with the context option attached.
 func TestSendChunk_Success(t *testing.T) {
 	var hits atomic.Int32
 	ch, _ := newDiscordSendFixture(t, func(w http.ResponseWriter, r *http.Request) {
@@ -101,21 +84,14 @@ func TestSendChunk_Success(t *testing.T) {
 	}
 }
 
-// TestSendChunk_TimeoutCancelsRequest is the core SURV-05 assertion: when the
-// server is slower than the deadline, sendChunk returns at the deadline AND
-// the server observes its request context being canceled — proof the cancel
-// propagated into the in-flight HTTP call instead of abandoning it.
 func TestSendChunk_TimeoutCancelsRequest(t *testing.T) {
 	requestCanceled := make(chan struct{}, 1)
 	var hits atomic.Int32
 
 	ch, _ := newDiscordSendFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
-		// Drain the JSON body first: while body bytes remain unread the
-		// server cannot detect the client disconnect, and ctx.Done() never
-		// fires — that masked the very signal this test asserts on.
 		_, _ = io.Copy(io.Discard, r.Body)
-		<-r.Context().Done() // hang until the client gives up
+		<-r.Context().Done()
 		requestCanceled <- struct{}{}
 	})
 
@@ -135,15 +111,11 @@ func TestSendChunk_TimeoutCancelsRequest(t *testing.T) {
 	}
 	select {
 	case <-requestCanceled:
-		// Server saw the cancellation: the deadline reached the HTTP layer.
 	case <-time.After(2 * time.Second):
 		t.Fatalf("server never observed request cancellation; ctx not propagated to the HTTP call")
 	}
 }
 
-// TestSendChunk_CallerCancelPropagates verifies an already-canceled caller
-// context aborts the send immediately — the ctx parameter participates in
-// the deadline chain.
 func TestSendChunk_CallerCancelPropagates(t *testing.T) {
 	var hits atomic.Int32
 	ch, _ := newDiscordSendFixture(t, func(w http.ResponseWriter, r *http.Request) {

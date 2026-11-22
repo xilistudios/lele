@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package channels
 
 import (
@@ -29,67 +23,23 @@ type Manager struct {
 	dispatchTask    *asyncTask
 	runCtx          context.Context
 
-	// outboundSpooler and peerFlusher carry the durable outbound seam into the
-	// dispatcher goroutines. Unlike BaseChannel's InboundSpooler - which is set
-	// once before a channel starts and read by that channel's own goroutines -
-	// these are read from every dispatcher goroutine while SetOutboundSpooler
-	// may still be running, so both are guarded by mu.
 	outboundSpooler OutboundCompleter
 	peerFlusher     PeerFlusher
 
-	// nativeClientRepo and inboundSpooler are post-construction seams: the
-	// gateway hands them to the channels that were built at startup, but
-	// ReloadConfig throws those channels away and builds new ones. Like
-	// outboundSpooler/peerFlusher above, the values must live on the Manager so
-	// they can be re-applied to the replacements - otherwise a config reload
-	// silently un-wires them and the new channels run in their pre-seam mode.
-	//
-	// nativeClientRepo: without it the rebuilt NativeChannel's AuthManager has
-	// no SQLite repo and falls back to the JSON client file, which is empty on
-	// a SQLite-backed install, so that instance sees zero clients.
-	// inboundSpooler: without it the rebuilt channels stop spooling inbound
-	// messages, silently disabling durable inbound after the first reload.
 	nativeClientRepo *store.NativeClientRepo
 	inboundSpooler   InboundSpooler
 
-	// nativeStoreUnavailable is the mirror seam of nativeClientRepo for the
-	// degraded case: the gateway could not open the shared SQLite store on a
-	// binary that supports SQLite, so the native channel must refuse pairing
-	// with a diagnosable error instead of answering "invalid PIN" from an
-	// empty JSON file. Retained here for the same reason - ReloadConfig builds
-	// a fresh AuthManager that knows nothing about the failed open (#330).
 	nativeStoreUnavailable error
 
 	mu sync.RWMutex
 }
 
-// OutboundCompleter closes the loop on the spool row that backed an outbound
-// message. Implemented by *durable.Outbound; pkg/channels deliberately does not
-// import pkg/durable - this interface is the seam, exactly as InboundSpooler is
-// on the publishing side.
-//
-// The three methods are the whole vocabulary of "how far did the send get", and
-// picking the wrong one is a user-visible bug: Complete deletes a row that every
-// chunk of was delivered, Release hands back a row that nothing was sent for so
-// the pump can replay it whole, and Forget deletes a row that is now only
-// partially on the wire - the one state that must never be replayed, because a
-// replay would duplicate the chunks already out.
-//
-// All three take the message rather than a bare id so the implementation can log
-// channel, chat and preview alongside the row, and all three are no-ops on a
-// message with SpoolID == 0, which is what makes the flag-off path free.
 type OutboundCompleter interface {
 	Complete(msg *bus.OutboundMessage) bool
 	Forget(msg *bus.OutboundMessage, reason string) bool
 	Release(msg *bus.OutboundMessage) bool
 }
 
-// PeerFlusher wakes the durable outbound pump so rows for a peer that just
-// reconnected go out immediately. Implemented by *durable.Outbound.
-//
-// It is a signal only: it never claims or delivers anything itself, which is
-// what keeps the pump the single owner of row claims. A nil PeerFlusher means
-// durability is off and no wake-up is needed.
 type PeerFlusher interface {
 	FlushPeer(channel, peer string)
 }
@@ -317,10 +267,6 @@ func (m *Manager) ReloadConfig(cfg *config.Config) error {
 		m.mu.Unlock()
 		return err
 	}
-	// Re-apply the post-construction seams to the channels initChannels just
-	// built. This runs while m.mu is still held and iterates m.channels
-	// directly: the public setters take RLock/Lock themselves and sync.RWMutex
-	// is not reentrant, so calling them from here would deadlock the gateway.
 	if m.nativeClientRepo != nil {
 		if ch, ok := m.channels["native"]; ok {
 			if nc, ok := ch.(*NativeChannel); ok {
@@ -342,10 +288,6 @@ func (m *Manager) ReloadConfig(cfg *config.Config) error {
 			}
 		}
 	}
-	// Snapshot before releasing the lock. The restart loop below runs
-	// unlocked, and ranging over m.channels (or reading m.dispatchQueues)
-	// there races with any concurrent reader or a second reload. This used to
-	// be masked by a `newChannels` copy that was built and then never used.
 	reloaded := make(map[string]Channel, len(m.channels))
 	queues := make(map[string]chan bus.OutboundMessage, len(m.channels))
 	for name, channel := range m.channels {
@@ -409,8 +351,6 @@ func (m *Manager) dispatchOutbound(ctx context.Context) {
 			}
 
 			if constants.IsInternalChannel(msg.Channel) {
-				// Defensive: ShouldSpoolOutbound already excludes internal
-				// channels, so this is a no-op in practice - SpoolID is 0.
 				m.releaseOutbound(msg, nil)
 				continue
 			}
@@ -423,9 +363,6 @@ func (m *Manager) dispatchOutbound(ctx context.Context) {
 				logger.WarnCF("channels", "Unknown channel for outbound message", map[string]interface{}{
 					"channel": msg.Channel,
 				})
-				// Release, NOT Forget: a disabled channel can come back, and the
-				// pump's own deliver will then fail with unknown-channel and climb
-				// attempts until it dead-letters. Nothing reached the wire here.
 				m.releaseOutbound(msg, nil)
 				continue
 			}
@@ -436,43 +373,16 @@ func (m *Manager) dispatchOutbound(ctx context.Context) {
 				logger.WarnCF("channels", "Dispatch queue full for channel, dropping message", map[string]interface{}{
 					"channel": msg.Channel,
 				})
-				// The bus accepted this message and the per-channel queue killed
-				// it: without the release the durability paid for is lost at the
-				// last hop. The pump retries within a tick and very likely delivers.
 				m.releaseOutbound(msg, nil)
 			}
 		}
 	}
 }
 
-// EventSignalConsumer is implemented by channels that interpret
-// bus.OutboundMessage.Event themselves inside Send and therefore must receive
-// signals even when those signals carry no content.
-//
-// The channel dispatcher drops contentless events by default (see
-// shouldDropEventSignal) because most channels ignore msg.Event and would
-// render a signal as an empty message. A channel that adds handling for a new
-// event declares it here, so the guard can never swallow a signal its own
-// channel is waiting for — the mistake a channel-name allowlist would invite.
 type EventSignalConsumer interface {
 	ConsumesEvent(event string) bool
 }
 
-// shouldDropEventSignal reports whether an event-only outbound message must be
-// kept away from a channel's Send.
-//
-// A message with Event != "" is a signal, not content. The same FIFO queue
-// feeds every channel, and channels that do not switch on msg.Event would
-// render an empty-content signal as an empty bubble. Dropping contentless
-// signals before Send is the structural guard: a future event can never become
-// a blank message on a channel that does not handle it.
-//
-// Channels that do handle events (native, telegram for turn.end) opt out per
-// event by implementing EventSignalConsumer.
-//
-// Signals that carry content or attachments are always passed through:
-// today's behavior for content-carrying events (group.*, verbose tool output)
-// is preserved, and no real message can be lost.
 func shouldDropEventSignal(ch Channel, msg bus.OutboundMessage) bool {
 	if msg.Event == "" {
 		return false
@@ -494,21 +404,14 @@ func (m *Manager) startChannelDispatcher(ctx context.Context, name string, ch Ch
 					"channel": name,
 					"event":   msg.Event,
 				})
-				// Defensive: spooled rows are never events (ShouldSpoolOutbound
-				// excludes them), so this forgets nothing real - it just makes it
-				// impossible for a dropped signal to leave a row behind.
 				m.forgetOutbound(msg, forgetReasonContentlessSignal)
 				continue
 			}
 			o := m.SendNow(ctx, ch, msg)
 			switch {
 			case o.Delivered:
-				// First action after success: every instruction between the send
-				// and the delete widens the at-least-once duplicate window.
 				m.completeOutbound(msg)
 			case o.SentAnyChunk:
-				// Part of the message is on the wire. Releasing would replay it,
-				// so the row is dead-lettered instead.
 				m.forgetOutbound(msg, o.Err.Error())
 			default:
 				m.releaseOutbound(msg, o.Err)
@@ -517,36 +420,12 @@ func (m *Manager) startChannelDispatcher(ctx context.Context, name string, ch Ch
 	}
 }
 
-// SendOutcome reports how far sending one outbound message got. It mirrors
-// durable.Delivery field-for-field on purpose: two layer vocabularies, joined
-// only by the gateway closure.
 type SendOutcome struct {
-	// Delivered means every chunk reached the channel.
-	Delivered bool
-	// SentAnyChunk means at least one chunk went out, so a failure is partial
-	// and must never be replayed. It is only ever true together with a non-nil
-	// Err - a chunk that failed is the only way to be partway out - which is what
-	// lets callers report o.Err.Error() unguarded.
+	Delivered    bool
 	SentAnyChunk bool
-	// Err is the first chunk failure. It is nil only when Delivered. A non-nil
-	// Err with SentAnyChunk=false is a transient failure nobody has seen a piece
-	// of yet - the row is retryable and the caller Releases it; a non-nil Err
-	// with SentAnyChunk=true is a partial send that replay would duplicate -
-	// the caller Forgets the row instead. Note the direction: SentAnyChunk
-	// implies Err, never the other way round - sendNotStarted returns Err with
-	// SentAnyChunk=false - which is what lets callers report o.Err.Error()
-	// unguarded on the SentAnyChunk path.
-	Err error
+	Err          error
 }
 
-// SendNow delivers msg on an already-resolved channel: the single send path for
-// both the live dispatcher and the durable replay pump. Splitting into chunks,
-// the retry policy per chunk and the tri-state result are shared by both, so
-// replay can never diverge from live traffic.
-//
-// It touches no spool row: closing the cycle is the caller's job, because only
-// the caller knows whether it is the live dispatcher (which must Complete or
-// Forget) or a replay pass (which must not double-count attempts).
 func (m *Manager) SendNow(ctx context.Context, ch Channel, msg bus.OutboundMessage) SendOutcome {
 	res, err := sendOutboundMessage(ctx, ch, msg)
 	switch res {
@@ -559,11 +438,6 @@ func (m *Manager) SendNow(ctx context.Context, ch Channel, msg bus.OutboundMessa
 	}
 }
 
-// SendToPeer is SendNow for callers that only know the channel's name, which is
-// what a spool row carries. The gateway's replay deliverer goes through here so
-// an unknown channel is reported as an ordinary send failure - transient by
-// design: the pump releases the row and retries, and a channel that stays gone
-// climbs to the attempt ceiling and dead-letters on its own.
 func (m *Manager) SendToPeer(ctx context.Context, channelName string, msg bus.OutboundMessage) SendOutcome {
 	ch, ok := m.GetChannel(channelName)
 	if !ok {
@@ -579,21 +453,6 @@ func (m *Manager) GetChannel(name string) (Channel, bool) {
 	return channel, ok
 }
 
-// SetOutboundSpooler wires the durable outbound seam into the manager and wakes
-// the pump through f when a native peer reconnects. Call after channels are
-// constructed and before StartAll; nil,nil turns it off again.
-//
-// Unlike SetInboundSpooler, which hands the spooler to every channel, this one
-// stores the pair on the manager: it is the CONSUMER of durability, so the
-// dispatchers need it, not the publishers. The only propagation is the flusher to
-// whichever channel can signal a reconnect - today NativeChannel, matched through
-// the outboundFlushSetter capability rather than by name so a future channel that
-// grows the same need is covered without touching this loop. When no registered
-// channel implements the setter the loop is a plain no-op: the pump still retries
-// on its own tick, only without the instant wake-up on reconnect.
-//
-// The two fields are written under m.mu.Lock because dispatcher goroutines read
-// them concurrently.
 func (m *Manager) SetOutboundSpooler(s OutboundCompleter, f PeerFlusher) {
 	m.mu.Lock()
 	m.outboundSpooler = s
@@ -606,17 +465,10 @@ func (m *Manager) SetOutboundSpooler(s OutboundCompleter, f PeerFlusher) {
 	m.mu.Unlock()
 }
 
-// outboundFlushSetter is the seam Manager.SetOutboundSpooler uses to hand the
-// pump's wake-up signal to the channel that detects peer reconnects. Satisfied by
-// NativeChannel, which owns the WebSocket clients.
 type outboundFlushSetter interface {
 	SetOutboundFlusher(f PeerFlusher)
 }
 
-// completeOutbound deletes the row behind a fully delivered message. It is the
-// first thing the dispatcher does after a successful send: the window between the
-// last chunk and the delete is the only duplicate window this path has, so nothing
-// may be squeezed in before it. No-op without a spooler or a row.
 func (m *Manager) completeOutbound(msg bus.OutboundMessage) {
 	m.mu.RLock()
 	sp := m.outboundSpooler
@@ -628,19 +480,6 @@ func (m *Manager) completeOutbound(msg bus.OutboundMessage) {
 	sp.Complete(&msg)
 }
 
-// releaseOutbound hands the row behind a message that never started going out
-// back to the pending set, so the pump replays it whole. The error is the reason
-// the send failed, or nil when routing dropped the message; when there is one it
-// is logged here, which keeps the dispatcher's long-standing "Error sending
-// message to channel" line on exactly the paths that used to print it. No-op
-// without a spooler or a row.
-//
-// The level follows whoever owns the retry. When the row survives this call -
-// SpoolID set and a spooler wired - Release puts it back in pending and the pump
-// will send it again, so the line is a WARN: an ERROR on every retry tick would
-// cry wolf at the operator while the queue is healthy and working. Without a
-// durable row nobody is going to retry, and the ERROR stands exactly as before,
-// which also keeps the flag-off contract byte-identical.
 func (m *Manager) releaseOutbound(msg bus.OutboundMessage, err error) {
 	m.mu.RLock()
 	sp := m.outboundSpooler
@@ -666,22 +505,8 @@ func (m *Manager) releaseOutbound(msg bus.OutboundMessage, err error) {
 	sp.Release(&msg)
 }
 
-// forgetReasonContentlessSignal labels a row dropped because the dispatcher's
-// event guard swallowed a contentless signal. It is not a send failure, so
-// forgetOutbound must not log it as one - the guard already prints its own debug
-// line for that case.
 const forgetReasonContentlessSignal = "contentless-signal"
 
-// forgetOutbound dead-letters the row behind a message that is partially on the
-// wire. Replay would duplicate the chunks already sent, and a user would rather
-// lose the tail with a log than read the beginning twice, so this deletes without
-// retrying. reason is the send error, or the label of the routing drop. No-op
-// without a spooler or a row.
-//
-// A real send failure is logged here, whatever the spool wiring says, so the
-// dispatcher keeps the "Error sending message to channel" line it has always
-// printed: with durability off the row does not exist, but the operator still has
-// to see that half a message went out and the rest did not.
 func (m *Manager) forgetOutbound(msg bus.OutboundMessage, reason string) {
 	m.mu.RLock()
 	sp := m.outboundSpooler
@@ -699,20 +524,6 @@ func (m *Manager) forgetOutbound(msg bus.OutboundMessage, reason string) {
 	sp.Forget(&msg, reason)
 }
 
-// SetInboundSpooler wires the durable inbound spooler into every registered
-// channel, so all inbound messages are backed by the spool before publish.
-// Call after channels are constructed and before StartAll.
-//
-// Channels are matched through the spoolerSetter interface rather than by
-// name, so a channel added later is covered without touching this loop:
-// every channel in this package either embeds *BaseChannel - whose setter is
-// promoted to the outer type - or forwards to its base explicitly, as
-// NativeChannel does because it keeps the base in a named field. Anything that
-// implements neither (a custom channel registered by an embedder) is skipped
-// silently: its messages simply stay unpersisted, which is exactly the
-// behaviour before durability existed.
-//
-// s may be nil, which turns spooling off again for every channel.
 func (m *Manager) SetInboundSpooler(s InboundSpooler) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -726,17 +537,10 @@ func (m *Manager) SetInboundSpooler(s InboundSpooler) {
 	}
 }
 
-// spoolerSetter is the seam Manager.SetInboundSpooler uses to reach a channel's
-// BaseChannel without enumerating channel types. Satisfied by *BaseChannel and
-// therefore by every channel that embeds it.
 type spoolerSetter interface {
 	SetInboundSpooler(s InboundSpooler)
 }
 
-// SetNativeClientStore wires the SQLite native client repository into the
-// native channel's auth manager and retains the reference so that
-// ReloadConfig can re-inject it after recreating channels. No-op if the
-// native channel is not enabled.
 func (m *Manager) SetNativeClientStore(repo *store.NativeClientRepo) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -750,15 +554,6 @@ func (m *Manager) SetNativeClientStore(repo *store.NativeClientRepo) {
 	}
 }
 
-// SetNativeStoreUnavailable records that the shared SQLite store could not be
-// opened even though this binary supports SQLite, and propagates it to the
-// native channel's auth manager so pairing answers 503 store_unavailable
-// instead of a misleading 400 "invalid PIN" (#330). The value is retained so
-// ReloadConfig can re-apply it to the channels it rebuilds.
-//
-// Pass nil to clear. Callers must NOT call this for
-// store.ErrUnsupportedPlatform: there JSON is the real shared backend and
-// pairing keeps working.
 func (m *Manager) SetNativeStoreUnavailable(err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

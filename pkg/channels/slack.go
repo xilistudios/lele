@@ -121,10 +121,6 @@ func (c *SlackChannel) Send(ctx context.Context, msg bus.OutboundMessage) error 
 
 	_, _, err := c.api.PostMessageContext(ctx, channelID, opts...)
 	if err != nil {
-		// Map 429s onto RateLimitError so the retry layer honors the
-		// Retry-After hint instead of blind backoff (SURV-07). slack-go
-		// returns *RateLimitedError when the response carries a parseable
-		// Retry-After header.
 		var rle *slack.RateLimitedError
 		if errors.As(err, &rle) {
 			return &RateLimitError{Channel: "slack", RetryAfter: rle.RetryAfter}
@@ -200,7 +196,6 @@ func (c *SlackChannel) handleMessageEvent(ev *slackevents.MessageEvent) {
 		return
 	}
 
-	// 检查白名单，避免为被拒绝的用户下载附件
 	if !c.IsAllowed(ev.User) {
 		logger.DebugCF("slack", "Message rejected by allowlist", map[string]interface{}{
 			"user_id": ev.User,
@@ -232,9 +227,8 @@ func (c *SlackChannel) handleMessageEvent(ev *slackevents.MessageEvent) {
 	content = c.stripBotMention(content)
 
 	var mediaPaths []string
-	localFiles := []string{} // 跟踪需要清理的本地文件
+	localFiles := []string{}
 
-	// 确保临时文件在函数返回时被清理
 	defer func() {
 		for _, file := range localFiles {
 			if err := os.Remove(file); err != nil {

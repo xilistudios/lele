@@ -7,8 +7,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// newSpawnModelValidator builds a NativeChannel whose config snapshot is the
-// given cfg, exposing validateSpawnModel for direct unit testing.
 func newSpawnModelValidator(cfg *config.Config) *NativeChannel {
 	loop := newNativeTestAgentLoop(cfg)
 	return &NativeChannel{
@@ -17,9 +15,6 @@ func newSpawnModelValidator(cfg *config.Config) *NativeChannel {
 	}
 }
 
-// spawnModelTestConfig returns a config with one creatable provider (has an
-// API key) and one configured-but-unusable provider (exists in GetNamed but
-// has no API key or api_base, so CreateProviderForCandidate fails at runtime).
 func spawnModelTestConfig() *config.Config {
 	cfg := config.DefaultConfig()
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
@@ -48,8 +43,6 @@ func TestValidateSpawnModel(t *testing.T) {
 	})
 
 	t.Run("rejects provider that exists but cannot be created", func(t *testing.T) {
-		// "keyless" is present in cfg.Providers.GetNamed but has no API key or
-		// api_base: the runtime resolver would fail, so creation must fail too.
 		err := n.validateSpawnModel("keyless:orphan-model")
 		if err == nil {
 			t.Fatal("validateSpawnModel(keyless:orphan-model) = nil, want error")
@@ -66,8 +59,6 @@ func TestValidateSpawnModel(t *testing.T) {
 	})
 
 	t.Run("accepts bare model that resolves to a usable provider", func(t *testing.T) {
-		// Bare names go through ResolveModelAlias against the default provider;
-		// "gpt-4o" is configured under openai, which is creatable.
 		if err := n.validateSpawnModel("gpt-4o"); err != nil {
 			t.Fatalf("validateSpawnModel(gpt-4o) = %v, want nil", err)
 		}

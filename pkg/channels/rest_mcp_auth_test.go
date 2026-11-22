@@ -1,25 +1,3 @@
-// HTTP-level tests for the five MCP OAuth routes (rest_mcp.go, registry in
-// mcp_auth_flows.go): start, poll, complete, cancel and logout.
-//
-// These tests drive the REAL stack — ServeMux + withAuth + the real engine
-// (pkg/mcp/auth.go against the in-process authorization server in
-// pkg/mcp/authtest) — so they are the ones that pin what an HTTP client
-// actually sees:
-//
-//   - the routes are REGISTERED and behind withAuth (a 404 would mean missing,
-//     a 401 means guarded);
-//   - the start response carries a WORKING auth_url (its loopback listener is
-//     really bound) and no credential;
-//   - poll/complete report pending → done, and the reload seam fires exactly
-//     once, on that transition only;
-//   - a failed exchange stays retryable ("error", flow still resolvable);
-//   - cancel is best-effort-idempotent and releases the listener;
-//   - logout forgets the record, cancels the pair's live flow and reloads;
-//   - every error cell of the contract's matrix is answered with its code.
-//
-// mcp_auth_flows_test.go covers the registry in isolation; this file covers the
-// contract an HTTP client holds.
-
 package channels
 
 import (
@@ -41,10 +19,6 @@ import (
 	"github.com/xilistudios/lele/pkg/mcp"
 )
 
-// --- HTTP helpers -----------------------------------------------------------
-
-// mcpAuthDo issues one request against the fixture server. body == nil sends
-// none; authed=false omits the Authorization header.
 func mcpAuthDo(t *testing.T, ts *nativeTestServer, method, url string, body any, authed bool) (int, []byte) {
 	t.Helper()
 
@@ -78,11 +52,8 @@ func mcpAuthDo(t *testing.T, ts *nativeTestServer, method, url string, body any,
 	return resp.StatusCode, out
 }
 
-// mcpAuthURL is the URL of the fixture's HTTP server, i.e. the prefix every
-// route below is built on.
 func mcpAuthURL(fx *mcpAuthEngineFixture) string { return fx.f.ts.server.URL }
 
-// mcpAuthStartFlow performs contract route 2 and decodes its DTO.
 func mcpAuthStartFlow(t *testing.T, fx *mcpAuthEngineFixture, agentID, name string) (int, MCPAuthStart, []byte) {
 	t.Helper()
 	status, body := mcpAuthDo(t, fx.f.ts, http.MethodPost,
@@ -96,7 +67,6 @@ func mcpAuthStartFlow(t *testing.T, fx *mcpAuthEngineFixture, agentID, name stri
 	return status, out, body
 }
 
-// mcpAuthPoll performs contract route 3 and decodes its DTO.
 func mcpAuthPoll(t *testing.T, fx *mcpAuthEngineFixture, agentID, flowID string) (int, MCPAuthStatus, []byte) {
 	t.Helper()
 	status, body := mcpAuthDo(t, fx.f.ts, http.MethodGet,
@@ -110,7 +80,6 @@ func mcpAuthPoll(t *testing.T, fx *mcpAuthEngineFixture, agentID, flowID string)
 	return status, out, body
 }
 
-// mcpAuthComplete performs contract route 4 and decodes its DTO.
 func mcpAuthComplete(t *testing.T, fx *mcpAuthEngineFixture, agentID, flowID, code, state string) (int, MCPAuthStatus, []byte) {
 	t.Helper()
 	status, body := mcpAuthDo(t, fx.f.ts, http.MethodPost,
@@ -125,31 +94,24 @@ func mcpAuthComplete(t *testing.T, fx *mcpAuthEngineFixture, agentID, flowID, co
 	return status, out, body
 }
 
-// mcpAuthCancel performs contract route 5.
 func mcpAuthCancel(t *testing.T, fx *mcpAuthEngineFixture, agentID, flowID string) (int, []byte) {
 	t.Helper()
 	return mcpAuthDo(t, fx.f.ts, http.MethodDelete,
 		fmt.Sprintf("%s/api/v1/mcp/auth/%s?agent_id=%s", mcpAuthURL(fx), flowID, agentID), nil, true)
 }
 
-// mcpAuthLogout performs contract route 6.
 func mcpAuthLogout(t *testing.T, fx *mcpAuthEngineFixture, agentID, name string) (int, []byte) {
 	t.Helper()
 	return mcpAuthDo(t, fx.f.ts, http.MethodDelete,
 		fmt.Sprintf("%s/api/v1/mcp/servers/%s/auth?agent_id=%s", mcpAuthURL(fx), name, agentID), nil, true)
 }
 
-// mcpAuthReloads installs a counting reload seam and returns the counter. The
-// reload fires on the pending → done transition and after a successful logout,
-// never on start/cancel/error — the counter is how the tests see the
-// difference (invariant 2).
 func mcpAuthReloads(fx *mcpAuthEngineFixture) *int64 {
 	var calls int64
 	fx.f.ts.channel.SetReloadMCP(func() { atomic.AddInt64(&calls, 1) })
 	return &calls
 }
 
-// mcpAuthBodyCode decodes the `code` of an APIError body.
 func mcpAuthBodyCode(t *testing.T, body []byte) string {
 	t.Helper()
 	var e APIError
@@ -159,15 +121,6 @@ func mcpAuthBodyCode(t *testing.T, body []byte) string {
 	return e.Code
 }
 
-// mcpAuthStoredSecrets returns the secret VALUES the auth store holds for name,
-// so a test can prove they appear in no response body. The canary is the
-// cheapest way to notice a regression that starts echoing what it read.
-//
-// The client ID is deliberately NOT included: it is a public identifier that
-// belongs in the authorization URL the user is sent to (the REST DTOs still
-// never carry it outside that URL, which is what mcp_auth_flows.go's
-// no-secret rule is about). The client SECRET and every token value are, and
-// they are what this returns.
 func mcpAuthStoredSecrets(t *testing.T, f *mcpFixture, name string) []string {
 	t.Helper()
 	rec, ok := mcp.NewAuthStore(f.paths.LeleDir).Record(name)
@@ -188,11 +141,6 @@ func mcpAuthStoredSecrets(t *testing.T, f *mcpFixture, name string) []string {
 	return out
 }
 
-// mcpAuthAssertNoSecrets fails when body carries a credential-shaped key or one
-// of the values the store holds. `client_id` as a KEY NAME is allowed inside the
-// authorization URL (a public client id belongs there, and the user must be
-// sent to the authorization server); the client SECRET and every token value
-// are not.
 func mcpAuthAssertNoSecrets(t *testing.T, what string, body []byte, secrets []string) {
 	t.Helper()
 	for _, key := range []string{"access_token", "refresh_token", "id_token", "client_secret", "code_verifier", "verifier"} {
@@ -207,15 +155,9 @@ func mcpAuthAssertNoSecrets(t *testing.T, what string, body []byte, secrets []st
 	}
 }
 
-// --- routing, auth and the no-secret rule ----------------------------------
-
-// TestMCPAuthRoutes_RequireBearerToken proves all five routes are registered
-// and guarded: an unregistered path would answer 404, a registered one guarded
-// by withAuth answers 401 without a token.
 func TestMCPAuthRoutes_RequireBearerToken(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	base := mcpAuthURL(fx)
-	// A shape-valid id, so the 401 cannot be confused with a 400 for a bad id.
 	flowID := strings.Repeat("a", mcpAuthFlowIDLen)
 
 	requests := []struct {
@@ -237,13 +179,6 @@ func TestMCPAuthRoutes_RequireBearerToken(t *testing.T) {
 	}
 }
 
-// --- route 2: start ---------------------------------------------------------
-
-// TestMCPAuthStart_ReturnsAWorkingURLAndNoSecret pins the start response: the
-// DTO's four fields, an auth_url that really leads to the authorization server
-// with this flow's state and PKCE challenge, a redirect_uri whose loopback
-// listener is BOUND (invariant 1's "always a working auth_url"), and no
-// credential anywhere in the body.
 func TestMCPAuthStart_ReturnsAWorkingURLAndNoSecret(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	before := time.Now()
@@ -272,11 +207,8 @@ func TestMCPAuthStart_ReturnsAWorkingURLAndNoSecret(t *testing.T) {
 	if err != nil || redirect.Hostname() != "127.0.0.1" {
 		t.Fatalf("redirect_uri = %q (err %v), want a 127.0.0.1 loopback URI", start.RedirectURI, err)
 	}
-	// The listener is the "working" half of the URL: without it the user's
-	// browser would land on a dead port.
 	assertPortOpen(t, portOf(t, start.RedirectURI))
 
-	// 5m budget, matching pkg/mcp's defaultAuthTimeout.
 	if d := start.ExpiresAt.Sub(before); d < 4*time.Minute || d > 6*time.Minute {
 		t.Fatalf("expires_at is %v away, want ~5m", d)
 	}
@@ -284,10 +216,6 @@ func TestMCPAuthStart_ReturnsAWorkingURLAndNoSecret(t *testing.T) {
 	mcpAuthAssertNoSecrets(t, "start", body, mcpAuthStoredSecrets(t, fx.f, mcpAuthRemoteName))
 }
 
-// TestMCPAuthStart_SecondStartReplacesThePairsFlow pins invariant 1 over HTTP:
-// the second start returns a NEW working URL bound to the SAME (pinned) port —
-// which is only possible because the first listener was released — and the
-// first flow id stops resolving.
 func TestMCPAuthStart_SecondStartReplacesThePairsFlow(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 
@@ -308,7 +236,6 @@ func TestMCPAuthStart_SecondStartReplacesThePairsFlow(t *testing.T) {
 		t.Fatalf("second start bound %q, want the pinned %q (the release would otherwise not be exercised)",
 			second.RedirectURI, first.RedirectURI)
 	}
-	// The pinned port is bound by the flow that replaced the first one.
 	assertPortOpen(t, firstPort)
 
 	if status, _, body := mcpAuthPoll(t, fx, "agent1", first.FlowID); status != http.StatusNotFound {
@@ -319,16 +246,12 @@ func TestMCPAuthStart_SecondStartReplacesThePairsFlow(t *testing.T) {
 		t.Fatalf("poll of the replacing flow = (%d, %+v), want (200, pending); body=%s", status, poll, body)
 	}
 
-	// Releasing the survivor frees the one listener the pair owns.
 	if status, body := mcpAuthCancel(t, fx, "agent1", second.FlowID); status != http.StatusNoContent {
 		t.Fatalf("cancel status = %d, want 204; body=%s", status, body)
 	}
 	assertPortClosed(t, firstPort)
 }
 
-// TestMCPAuthStart_ErrorMatrix walks the contract's error table for route 2:
-// an unknown name, a name that exists but has no resolved config, a stdio
-// entry (nothing to authorize), and the two agent_id failures.
 func TestMCPAuthStart_ErrorMatrix(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 
@@ -359,13 +282,6 @@ func TestMCPAuthStart_ErrorMatrix(t *testing.T) {
 	}
 }
 
-// --- route 3 + 4: poll and complete ----------------------------------------
-
-// TestMCPAuthPoll_PendingThenDoneFiresTheReloadOnce is the happy path end to
-// end: start, poll pending, drive the authorization server, complete with the
-// code, and see done + authenticated. The reload seam must fire exactly once —
-// on the pending → done transition — and the inventory must agree that the
-// server is now usable (route 1 and route 3 read the same store).
 func TestMCPAuthPoll_PendingThenDoneFiresTheReloadOnce(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	reloads := mcpAuthReloads(fx)
@@ -390,7 +306,6 @@ func TestMCPAuthPoll_PendingThenDoneFiresTheReloadOnce(t *testing.T) {
 		t.Fatalf("reload fired %d times before completion, want 0", got)
 	}
 
-	// The user's browser half: GET the authorization URL and take the code.
 	code, state := mcpAuthAuthorizeCode(t, start.AuthURL)
 
 	status, done, body := mcpAuthComplete(t, fx, "agent1", start.FlowID, code, state)
@@ -405,7 +320,6 @@ func TestMCPAuthPoll_PendingThenDoneFiresTheReloadOnce(t *testing.T) {
 	}
 	mcpAuthAssertNoSecrets(t, "complete", body, secrets)
 
-	// Further polls are stable AND do not reload again.
 	for i := 0; i < 3; i++ {
 		status, poll, body := mcpAuthPoll(t, fx, "agent1", start.FlowID)
 		if status != http.StatusOK || poll.State != "done" || !poll.Authenticated {
@@ -417,8 +331,6 @@ func TestMCPAuthPoll_PendingThenDoneFiresTheReloadOnce(t *testing.T) {
 		t.Fatalf("reload fired %d times over repeated polls, want 1", got)
 	}
 
-	// The credential is visible to the inventory route, from a store built by
-	// the request rather than shared with the flow.
 	invStatus, inv, invBody := mcpInventory(t, fx.f, "agent1")
 	if invStatus != http.StatusOK {
 		t.Fatalf("inventory status = %d, want 200; body=%s", invStatus, invBody)
@@ -429,9 +341,6 @@ func TestMCPAuthPoll_PendingThenDoneFiresTheReloadOnce(t *testing.T) {
 	}
 }
 
-// TestMCPAuthComplete_FailedExchangeIsRetryableAndDoesNotReload: a wrong code
-// leaves the flow OPEN ("error" without Done, per the engine), the client keeps
-// its paste box, no reload fires, and the SAME flow recovers with the real code.
 func TestMCPAuthComplete_FailedExchangeIsRetryableAndDoesNotReload(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	reloads := mcpAuthReloads(fx)
@@ -449,7 +358,6 @@ func TestMCPAuthComplete_FailedExchangeIsRetryableAndDoesNotReload(t *testing.T)
 		t.Fatalf("code = %q, want mcp_auth_failed; body=%s", code, body)
 	}
 
-	// Still resolvable, reported as a retryable error, and never reloaded.
 	status, poll, body := mcpAuthPoll(t, fx, "agent1", start.FlowID)
 	if status != http.StatusOK {
 		t.Fatalf("poll after the failure: status = %d, want 200 (a failed exchange is not terminal); body=%s", status, body)
@@ -461,7 +369,6 @@ func TestMCPAuthComplete_FailedExchangeIsRetryableAndDoesNotReload(t *testing.T)
 		t.Fatalf("reload fired %d times for a failed exchange, want 0", got)
 	}
 
-	// Retry on the SAME flow.
 	code, state := mcpAuthAuthorizeCode(t, start.AuthURL)
 	status, done, body := mcpAuthComplete(t, fx, "agent1", start.FlowID, code, state)
 	if status != http.StatusOK || done.State != "done" {
@@ -472,17 +379,12 @@ func TestMCPAuthComplete_FailedExchangeIsRetryableAndDoesNotReload(t *testing.T)
 	}
 }
 
-// mcpAuthCompleteRaw posts route 4 with a caller-supplied body, so a test can
-// send a shape the typed helper cannot express (blank code, junk JSON).
 func mcpAuthCompleteRaw(t *testing.T, fx *mcpAuthEngineFixture, agentID, flowID string, req MCPAuthCompleteRequest) (int, []byte) {
 	t.Helper()
 	return mcpAuthDo(t, fx.f.ts, http.MethodPost,
 		fmt.Sprintf("%s/api/v1/mcp/auth/%s/complete?agent_id=%s", mcpAuthURL(fx), flowID, agentID), req, true)
 }
 
-// TestMCPAuthComplete_RejectsBlankCodeAndBadBody pins route 4's client errors:
-// a missing code is named as such instead of surfacing as a generic flow
-// failure, and a body that is not JSON is body_invalid.
 func TestMCPAuthComplete_RejectsBlankCodeAndBadBody(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 
@@ -499,7 +401,6 @@ func TestMCPAuthComplete_RejectsBlankCodeAndBadBody(t *testing.T) {
 		t.Fatalf("blank code: code = %q, want invalid_request; body=%s", code, body)
 	}
 
-	// Junk body: the decoder refuses it before the flow is touched.
 	status, body = mcpAuthDo(t, fx.f.ts, http.MethodPost,
 		fmt.Sprintf("%s/api/v1/mcp/auth/%s/complete?agent_id=agent1", mcpAuthURL(fx), start.FlowID),
 		"not-json", true)
@@ -510,18 +411,11 @@ func TestMCPAuthComplete_RejectsBlankCodeAndBadBody(t *testing.T) {
 		t.Fatalf("junk body: code = %q, want body_invalid; body=%s", code, body)
 	}
 
-	// The flow survived both refusals.
 	if status, poll, body := mcpAuthPoll(t, fx, "agent1", start.FlowID); status != http.StatusOK || poll.State != "pending" {
 		t.Fatalf("poll after the refused completes = (%d, %+v), want (200, pending); body=%s", status, poll, body)
 	}
 }
 
-// --- route 3: unknown, malformed and foreign ids ---------------------------
-
-// TestMCPAuthStatus_RejectsUnknownMalformedAndForeignIDs pins the lookup's three
-// answers: a valid-shaped id nobody holds is 404, a malformed one is 400 (a
-// client error, not a missing resource), and another agent's id is 404 — the
-// same answer as unknown, so the route leaks nothing about other agents.
 func TestMCPAuthStatus_RejectsUnknownMalformedAndForeignIDs(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1", "agent2")
 
@@ -530,11 +424,9 @@ func TestMCPAuthStatus_RejectsUnknownMalformedAndForeignIDs(t *testing.T) {
 		t.Fatalf("start status = %d, want 200; body=%s", status, body)
 	}
 
-	// The owner resolves it...
 	if status, poll, body := mcpAuthPoll(t, fx, "agent1", start.FlowID); status != http.StatusOK || poll.State != "pending" {
 		t.Fatalf("owner poll = (%d, %+v), want (200, pending); body=%s", status, poll, body)
 	}
-	// ...another known agent does not (invariant 4).
 	for _, route := range []struct {
 		name string
 		call func(agentID, flowID string) (int, []byte)
@@ -550,7 +442,6 @@ func TestMCPAuthStatus_RejectsUnknownMalformedAndForeignIDs(t *testing.T) {
 			t.Fatalf("%s as another agent: code = %q, want mcp_auth_flow_not_found; body=%s", route.name, code, body)
 		}
 	}
-	// The owner still holds it: a foreign lookup must not disturb the flow.
 	if status, poll, body := mcpAuthPoll(t, fx, "agent1", start.FlowID); status != http.StatusOK || poll.State != "pending" {
 		t.Fatalf("owner poll after the foreign attempts = (%d, %+v), want (200, pending); body=%s", status, poll, body)
 	}
@@ -580,12 +471,6 @@ func TestMCPAuthStatus_RejectsUnknownMalformedAndForeignIDs(t *testing.T) {
 	}
 }
 
-// --- route 5: cancel --------------------------------------------------------
-
-// TestMCPAuthCancel_IsIdempotentAndFreesTheListener pins invariant 7 and the
-// listener release: 204 while the flow is in the registry (twice), the port
-// closed, the DTO reporting the literal "canceled", and no reload — a cancelled
-// login produced no credential.
 func TestMCPAuthCancel_IsIdempotentAndFreesTheListener(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	reloads := mcpAuthReloads(fx)
@@ -616,11 +501,9 @@ func TestMCPAuthCancel_IsIdempotentAndFreesTheListener(t *testing.T) {
 		t.Fatalf("reload fired %d times for a cancelled flow, want 0", got)
 	}
 
-	// Idempotent while the entry lives...
 	if status, body := mcpAuthCancel(t, fx, "agent1", start.FlowID); status != http.StatusNoContent {
 		t.Fatalf("second cancel status = %d, want 204; body=%s", status, body)
 	}
-	// ...and 404 for an id that never existed.
 	unknown := strings.Repeat("f", mcpAuthFlowIDLen)
 	status, body = mcpAuthCancel(t, fx, "agent1", unknown)
 	if status != http.StatusNotFound {
@@ -631,18 +514,10 @@ func TestMCPAuthCancel_IsIdempotentAndFreesTheListener(t *testing.T) {
 	}
 }
 
-// --- route 6: logout --------------------------------------------------------
-
-// TestMCPAuthLogout_ForgetsTheRecordAndCancelsTheFlow pins route 6's whole job:
-// the stored credential is gone, the pair's live flow is cancelled (a login
-// completing after the logout must not re-store what the user removed), the
-// reload fires once, and the route is idempotent for a known server with
-// nothing stored.
 func TestMCPAuthLogout_ForgetsTheRecordAndCancelsTheFlow(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	reloads := mcpAuthReloads(fx)
 
-	// A completed login: the record carries the credential the logout must drop.
 	writer := mcp.NewAuthStore(fx.f.paths.LeleDir)
 	if err := writer.Save(mcpAuthRemoteName, mcp.AuthRecord{
 		URL:          fx.resource,
@@ -664,7 +539,6 @@ func TestMCPAuthLogout_ForgetsTheRecordAndCancelsTheFlow(t *testing.T) {
 		t.Fatalf("inventory before the logout = %+v, want authenticated (the fixture did not seed a usable token)", auth)
 	}
 
-	// And a live flow for the same pair.
 	status, start, body := mcpAuthStartFlow(t, fx, "agent1", mcpAuthRemoteName)
 	if status != http.StatusOK {
 		t.Fatalf("start status = %d, want 200; body=%s", status, body)
@@ -684,15 +558,12 @@ func TestMCPAuthLogout_ForgetsTheRecordAndCancelsTheFlow(t *testing.T) {
 		t.Fatalf("reload fired %d times for one successful logout, want 1", got)
 	}
 
-	// The live flow went with it.
 	if status, poll, body := mcpAuthPoll(t, fx, "agent1", start.FlowID); status != http.StatusOK {
 		t.Fatalf("poll after logout: status = %d, want 200; body=%s", status, body)
 	} else if poll.State != "error" || poll.Authenticated {
 		t.Fatalf("poll after logout = %+v, want the flow cancelled", poll)
 	}
 
-	// Idempotent: the name is still a known server, there is just nothing left
-	// to forget. Each successful logout reloads once.
 	if status, body := mcpAuthLogout(t, fx, "agent1", mcpAuthRemoteName); status != http.StatusNoContent {
 		t.Fatalf("second logout status = %d, want 204; body=%s", status, body)
 	}
@@ -700,7 +571,6 @@ func TestMCPAuthLogout_ForgetsTheRecordAndCancelsTheFlow(t *testing.T) {
 		t.Fatalf("reload fired %d times after two successful logouts, want 2", got)
 	}
 
-	// A name that is neither a server nor a record is a typo, not a no-op.
 	status, body = mcpAuthLogout(t, fx, "agent1", "no-such-server")
 	if status != http.StatusNotFound {
 		t.Fatalf("logout of an unknown server: status = %d, want 404; body=%s", status, body)
@@ -713,17 +583,9 @@ func TestMCPAuthLogout_ForgetsTheRecordAndCancelsTheFlow(t *testing.T) {
 	}
 }
 
-// TestMCPAuthLogout_ClearsARecordForANameThatIsNotInAnyLayer: a record can
-// outlive the entry that created it (the user edited mcp.json after logging
-// in), and that leftover is exactly what a logout must clear. The name exists
-// in no layer, so the route's "unknown name" guard must consult the STORE
-// before answering 404 — otherwise a stale credential would be impossible to
-// remove through the API.
 func TestMCPAuthLogout_ClearsARecordForANameThatIsNotInAnyLayer(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 
-	// A record can outlive the entry that created it (the user edited mcp.json
-	// after logging in), and that is exactly the leftover a logout must clear.
 	writer := mcp.NewAuthStore(fx.f.paths.LeleDir)
 	if err := writer.Save("gone-from-config", mcp.AuthRecord{URL: "https://old.example/mcp"}); err != nil {
 		t.Fatalf("Save(): %v", err)
@@ -738,30 +600,12 @@ func TestMCPAuthLogout_ClearsARecordForANameThatIsNotInAnyLayer(t *testing.T) {
 	}
 }
 
-// --- the contract's error table (finding 1 of the adversarial review) -------
-
-// TestMCPAuthErrorCode_PinsTheContractErrorTable is the UNIT half of the
-// contract's error table. mcpAuthErrorCode (rest_mcp.go) is the single
-// implementation of it, and before this test ONLY its default branch ever ran:
-// the 501 the HTTP suite asserts for a stdio entry comes from
-// handleMCPAuthStart's own pre-check, which never reaches the mapping. Swapping
-// the 503 and 409 pairs therefore left the whole MCP suite green.
-//
-// Each sentinel is passed BOTH bare and wrapped with %w, and ErrAuthProbeFailed
-// once doubly wrapped: the contract specifies the mapping by errors.Is, so a
-// rewrite to `err == sentinel` — which the wrapped rows would silently stop
-// matching — fails here.
-//
-// Contract rows pinned: mcp_auth_not_supported/501, mcp_auth_disabled/503,
-// mcp_auth_not_required/409, mcp_auth_flow_not_found/404, mcp_auth_failed/502.
 func TestMCPAuthErrorCode_PinsTheContractErrorTable(t *testing.T) {
 	tests := []struct {
-		name string
-		err  error
-		want int
-		code string
-		// forbidden is a code this row must NOT produce: it names the
-		// neighbouring cell the sentinel exists to be distinguished from.
+		name      string
+		err       error
+		want      int
+		code      string
 		forbidden string
 	}{
 		{name: "nil error", err: nil, want: http.StatusBadGateway, code: "mcp_auth_failed"},
@@ -779,16 +623,9 @@ func TestMCPAuthErrorCode_PinsTheContractErrorTable(t *testing.T) {
 		{name: "errMCPAuthFlowNotFound", err: errMCPAuthFlowNotFound, want: http.StatusNotFound, code: "mcp_auth_flow_not_found"},
 		{name: "wrapped errMCPAuthFlowNotFound", err: fmt.Errorf("lookup %q: %w", "abc", errMCPAuthFlowNotFound), want: http.StatusNotFound, code: "mcp_auth_flow_not_found"},
 
-		// ErrAuthProbeFailed must land on the GENERIC 502. pkg/mcp defines it
-		// precisely so that a server answering garbage is never reported as a
-		// server that needs no login (see its doc comment): reporting it as
-		// "not required" would tell the operator to do nothing.
 		{name: "ErrAuthProbeFailed", err: mcp.ErrAuthProbeFailed, want: http.StatusBadGateway, code: "mcp_auth_failed", forbidden: "mcp_auth_not_required"},
 		{name: "doubly wrapped ErrAuthProbeFailed", err: fmt.Errorf("outer: %w", fmt.Errorf("mcp auth %q: probe: %w", "srv", mcp.ErrAuthProbeFailed)), want: http.StatusBadGateway, code: "mcp_auth_failed", forbidden: "mcp_auth_not_required"},
 
-		// Cancellation and timeout are DTO material (AuthFlow.Status/Error), not
-		// response codes: they reach the mapping only if something misroutes
-		// them, and the generic 502 is then the honest answer.
 		{name: "ErrAuthCanceled", err: mcp.ErrAuthCanceled, want: http.StatusBadGateway, code: "mcp_auth_failed"},
 		{name: "ErrAuthTimedOut", err: mcp.ErrAuthTimedOut, want: http.StatusBadGateway, code: "mcp_auth_failed"},
 	}
@@ -805,19 +642,6 @@ func TestMCPAuthErrorCode_PinsTheContractErrorTable(t *testing.T) {
 	}
 }
 
-// TestMCPAuthStart_EngineFailuresReachTheContractCodes is the ROUTE-level half
-// of the same table: handleMCPAuthStart's engine-failure branch (step 5) is the
-// only place the mapping is applied to a start, and the startMCPAuthFlow seam
-// exists for exactly this. The seam returns the WRAPPED error a real engine call
-// returns (`fmt.Errorf("…: %w", sentinel)`), so the route is proved to classify
-// by errors.Is rather than by message text.
-//
-// The 503 mcp_auth_disabled row is the contract's "the store is off" cell; the
-// same answer is driven through the REAL engine, with no seam, by
-// TestMCPAuthStart_StoreDisabledIs503.
-//
-// Contract rows pinned: mcp_auth_disabled/503, mcp_auth_not_required/409,
-// mcp_auth_not_supported/501, mcp_auth_failed/502.
 func TestMCPAuthStart_EngineFailuresReachTheContractCodes(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 
@@ -850,14 +674,9 @@ func TestMCPAuthStart_EngineFailuresReachTheContractCodes(t *testing.T) {
 			if code := mcpAuthBodyCode(t, body); code != tc.wantCode {
 				t.Fatalf("code = %q, want %q; body=%s", code, tc.wantCode, body)
 			}
-			// The probe failure must never be answered as "this server needs no
-			// login": that collapse is exactly what the engine's sentinel
-			// prevents, and 409 mcp_auth_not_required would tell the caller to
-			// stop trying.
 			if tc.fail == mcp.ErrAuthProbeFailed && strings.Contains(string(body), "mcp_auth_not_required") {
 				t.Fatalf("a failed probe was reported as not-required: %s", body)
 			}
-			// Nothing started, so no flow may be live for the pair.
 			if got := fx.f.ts.channel.mcpAuthFlowRegistry().entryCount(); got != 0 {
 				t.Fatalf("registry holds %d live flows after a refused start, want 0", got)
 			}
@@ -865,49 +684,21 @@ func TestMCPAuthStart_EngineFailuresReachTheContractCodes(t *testing.T) {
 	}
 }
 
-// mcpAuthAddRootlessAgent wires one extra agent whose roots RESOLVE — so
-// mcpPathsFor and Discover both succeed and the request reaches the flow start
-// — but whose LeleDir is EMPTY, i.e. an agent with nowhere to persist a login.
-//
-// The entry lives in the AGENT layer file because the global layer's root IS the
-// (empty) LeleDir: an empty root resolves to "" and is skipped by the merge's
-// own layerFiles (pkg/mcp/discovery.go).
 func mcpAuthAddRootlessAgent(t *testing.T, fx *mcpAuthEngineFixture, agentID string) {
 	t.Helper()
 	agentDir := t.TempDir()
 	writeMCPJSON(t, filepath.Join(agentDir, "mcp.json"), fx.f.globalRaw)
 	fx.f.loop.paths[agentID] = mcp.Paths{
-		LeleDir:        "", // no lele dir: no place to persist a login
+		LeleDir:        "",
 		AgentWorkspace: agentDir,
-		Cwd:            t.TempDir(), // no project layer
+		Cwd:            t.TempDir(),
 	}
 }
 
-// TestMCPAuthStart_StoreDisabledIs503 pins the contract's mcp_auth_disabled row
-// through the REAL engine, with no seam. An agent whose roots resolve but whose
-// LeleDir is empty makes mcpAuthStoreFor hand mcp.StartAuth a store that is
-// present yet DISABLED (mcp.NewAuthStore("") is a deliberate no-op store, never
-// a process-relative file), and StartAuth reports ErrAuthStoreDisabled for it —
-// the same verdict the CLI gives when there is no lele directory.
-//
-// On the premise that the 503 can only surface "via mcpAuthStoreFor returning
-// nil": that nil is NOT reachable from this route, and the reason is structural
-// rather than a missing fixture. mcpAuthStoreFor returns nil exactly when (a)
-// the agent loop does not implement mcpPathsSource, or (b) MCPPathsFor reports
-// the agent unknown — and BOTH are already refused one step earlier by
-// mcpPathsFor in the same handler (500 mcp_unavailable and 404 agent_not_found
-// respectively). A nil would therefore need MCPPathsFor to answer differently
-// twice within one request, which no implementation does. The reachable
-// store-less path is this one, and the nil returns themselves are pinned
-// directly by TestMCPAuthStoreFor_NilWhenTheAgentIsUnresolvable.
-//
-// Contract row pinned: mcp_auth_disabled/503.
 func TestMCPAuthStart_StoreDisabledIs503(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1", "rootless")
 	mcpAuthAddRootlessAgent(t, fx, "rootless")
 
-	// Non-vacuity: the same request shape resolves AND starts for the agent that
-	// does have a lele dir, so a 503 below cannot mean "the fixture is broken".
 	if status, start, body := mcpAuthStartFlow(t, fx, "agent1", mcpAuthRemoteName); status != http.StatusOK || start.FlowID == "" {
 		t.Fatalf("control start for the rooted agent = (%d, %+v); body=%s", status, start, body)
 	}
@@ -922,25 +713,9 @@ func TestMCPAuthStart_StoreDisabledIs503(t *testing.T) {
 	}
 }
 
-// --- the failure half of the routes (finding 3 of the adversarial review) ---
-
-// TestMCPAuthRoutes_RefuseEscapedServerNames pins the {name} guard on BOTH
-// {name} routes (start = route 2, logout = route 6). Go's ServeMux hands the
-// handler the DECODED segment, so `POST /api/v1/mcp/servers/a%2Fb/auth` reaches
-// handleMCPAuthStart with PathValue("name") == "a/b", and
-// `..%2F..%2Fetc%2Fpasswd` with "../../etc/passwd" (verified against a
-// standalone ServeMux). The `strings.Contains(name, "/")` check is the only
-// thing keeping such a name out of the registry and out of the
-// "failed to start authorization for %q" message, which is echoed in the
-// response body and lands in the gateway logs.
-//
-// Contract rows pinned: invalid_request/400 (the "bad name" cell of the start
-// route, and the same guard on logout).
 func TestMCPAuthRoutes_RefuseEscapedServerNames(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 
-	// Escaped names Go's mux really produces: a separator, a traversal attempt,
-	// a rooted path, and the lowercase escape spelling.
 	for _, escaped := range []string{"a%2Fb", "a%2fb", "..%2F..%2Fetc%2Fpasswd", "%2Fetc%2Fpasswd"} {
 		for _, route := range []struct {
 			name   string
@@ -958,8 +733,6 @@ func TestMCPAuthRoutes_RefuseEscapedServerNames(t *testing.T) {
 				if code := mcpAuthBodyCode(t, body); code != "invalid_request" {
 					t.Fatalf("%s %s: code = %q, want invalid_request; body=%s", route.method, escaped, code, body)
 				}
-				// The refused name crosses no surface: not echoed, not logged
-				// into a URL, not registered as a live flow.
 				if strings.Contains(string(body), "a/b") || strings.Contains(string(body), "passwd") {
 					t.Fatalf("%s %s echoed the refused name: %s", route.method, escaped, body)
 				}
@@ -970,8 +743,6 @@ func TestMCPAuthRoutes_RefuseEscapedServerNames(t *testing.T) {
 		}
 	}
 
-	// Non-vacuity: the same guard lets a legitimate name through (and the
-	// logout of a known server with nothing stored is the idempotent 204).
 	status, body := mcpAuthDo(t, fx.f.ts, http.MethodDelete,
 		fmt.Sprintf("%s/api/v1/mcp/servers/%s/auth?agent_id=agent1", mcpAuthURL(fx), mcpAuthRemoteName), nil, true)
 	if status != http.StatusNoContent {
@@ -979,30 +750,14 @@ func TestMCPAuthRoutes_RefuseEscapedServerNames(t *testing.T) {
 	}
 }
 
-// TestMCPAuthCompleteAndCancel_RejectMalformedFlowIDsEarly pins the early
-// flow_id SHAPE guard on the two routes that take a flow id in the path but had
-// no coverage for it: complete (route 4) and cancel (route 5). A malformed id
-// is a client error (400 invalid_request), never the 404
-// mcp_auth_flow_not_found reserved for an unknown/expired/foreign id.
-//
-// The complete case sends a JUNK body on purpose: the handler validates the id
-// BEFORE decoding (see its documented order), so invalid_request here also pins
-// that order — a decoder-first implementation would answer body_invalid.
-//
-// The agent_id half is pinned for both routes too: an unknown agent is
-// 404 agent_not_found even for a MALFORMED id, which is only possible if
-// agent_id is checked before the id shape.
-//
-// Contract rows pinned: invalid_request/400 (bad flow_id shape),
-// agent_not_found/404.
 func TestMCPAuthCompleteAndCancel_RejectMalformedFlowIDsEarly(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 
 	badIDs := []string{
-		"abc",                                   // too short
-		strings.Repeat("a", mcpAuthFlowIDLen+1), // too long
-		strings.ToUpper(strings.Repeat("a", mcpAuthFlowIDLen)), // uppercase hex
-		strings.Repeat("z", mcpAuthFlowIDLen),                  // non-hex, right length
+		"abc",
+		strings.Repeat("a", mcpAuthFlowIDLen+1),
+		strings.ToUpper(strings.Repeat("a", mcpAuthFlowIDLen)),
+		strings.Repeat("z", mcpAuthFlowIDLen),
 	}
 	for _, id := range badIDs {
 		t.Run("complete "+id, func(t *testing.T) {
@@ -1026,11 +781,6 @@ func TestMCPAuthCompleteAndCancel_RejectMalformedFlowIDsEarly(t *testing.T) {
 		})
 	}
 
-	// Non-vacuity, both halves. A WELL-FORMED id is not a shape error: it is the
-	// 404 mcp_auth_flow_not_found reserved for unknown/expired/foreign ids — and
-	// on complete that 404 is produced by mcpAuthErrorCode (via writeMCPAuthError
-	// around registry.Complete's errMCPAuthFlowNotFound), which is the mapping
-	// branch the unit table pins in isolation.
 	unknown := strings.Repeat("f", mcpAuthFlowIDLen)
 	status, _, body := mcpAuthComplete(t, fx, "agent1", unknown, "a-code", "a-state")
 	if status != http.StatusNotFound {
@@ -1043,8 +793,6 @@ func TestMCPAuthCompleteAndCancel_RejectMalformedFlowIDsEarly(t *testing.T) {
 		t.Fatalf("cancel of a well-formed unknown id: status = %d, want 404; body=%s", status, body)
 	}
 
-	// Order: agent_id first, so an unknown agent wins over a malformed id on
-	// both routes.
 	for _, route := range []struct {
 		name string
 		call func(agentID, flowID string) (int, []byte)

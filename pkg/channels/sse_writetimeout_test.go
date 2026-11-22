@@ -13,19 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// GW-L9 regression: server.WriteTimeout (30s in production) applies to the
-// WHOLE response, not per write — a spike test proved a flushing SSE stream
-// is killed mid-body ("unexpected EOF") once the deadline fires. The SSE
-// handlers have their own bounded lifetimes (restStreamDeadline, client
-// disconnect, process completion), so they must clear the write deadline
-// via http.ResponseController.
-//
-// This test runs the REAL handler behind a REAL server with
-// WriteTimeout=2s and a stream that lasts ~4s: without the fix the client
-// sees EOF before the terminal "done" event; with the fix it receives it.
-
-// streamingTestLoop overrides only GetBackgroundExecOutput: running with
-// growing output for ~3s, then completed.
 type streamingTestLoop struct {
 	*nativeTestAgentLoop
 	start time.Time

@@ -11,7 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 )
 
-// setTestLogsPath points the global logger at dir and returns a restore func.
 func setTestLogsPath(t *testing.T, dir string) {
 	t.Helper()
 	original := logger.GetLogsPath()
@@ -19,9 +18,6 @@ func setTestLogsPath(t *testing.T, dir string) {
 	t.Cleanup(func() { logger.SetLogsPath(original) })
 }
 
-// TestHandleLogsReadsErrorsFile is the regression test for the empty WebUI
-// Error tab: level=error must resolve errors-{date}.log (plural) — the file
-// the logger writer actually creates — not error-{date}.log.
 func TestHandleLogsReadsErrorsFile(t *testing.T) {
 	tempDir := t.TempDir()
 	setTestLogsPath(t, tempDir)
@@ -68,9 +64,6 @@ func TestHandleLogsReadsErrorsFile(t *testing.T) {
 	}
 }
 
-// TestHandleLogsMissingFileReturnsEmpty asserts the missing-file contract: an
-// absent log file yields HTTP 200 with an empty entries list (and the
-// canonical file name for the requested level).
 func TestHandleLogsMissingFileReturnsEmpty(t *testing.T) {
 	setTestLogsPath(t, t.TempDir())
 
@@ -95,9 +88,6 @@ func TestHandleLogsMissingFileReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestHandleLogsDatesIncludesErrorOnlyDates asserts that /logs/dates lists the
-// union of dates present in info-* and errors-* files: a date with only error
-// entries must be visible.
 func TestHandleLogsDatesIncludesErrorOnlyDates(t *testing.T) {
 	tempDir := t.TempDir()
 	setTestLogsPath(t, tempDir)

@@ -1,19 +1,5 @@
 package channels
 
-// Tests for the empty-content completion signal in dispatchOutboundMessage.
-//
-// Bug: when the agent finished a turn with empty final content and no
-// attachments (e.g. finalContent=="" after silent tool calls), the non-streamed
-// branch of dispatchOutboundMessage returned early WITHOUT emitting
-// message.complete / history.updated. The frontend had already registered the
-// turn as processing via message.ack and created an assistant placeholder with
-// streaming:true, so the WebUI loading spinner stayed stuck until the HTTP
-// polling safety-net (and the placeholder could go stale if the poll missed it).
-//
-// Contract pinned here: a turn that reaches the non-streamed finalization
-// branch ALWAYS emits message.complete + history.updated, even with empty
-// content; message.stream is still suppressed when there is nothing to show.
-
 import (
 	"encoding/json"
 	"testing"
@@ -21,9 +7,6 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
-// registerFakeWSClient subscribes a fake WS client (no real connection —
-// QueueSend only touches the buffered SendChan) to the given session key and
-// removes it on cleanup.
 func registerFakeWSClient(t *testing.T, ts *nativeTestServer, sessionKey string) *WSClient {
 	t.Helper()
 	client := &WSClient{
@@ -38,8 +21,6 @@ func registerFakeWSClient(t *testing.T, ts *nativeTestServer, sessionKey string)
 	return client
 }
 
-// drainWSEvents non-blockingly reads everything currently queued on a fake
-// client, preserving delivery order.
 func drainWSEvents(t *testing.T, client *WSClient) []WSMessage {
 	t.Helper()
 	var events []WSMessage
@@ -57,7 +38,6 @@ func drainWSEvents(t *testing.T, client *WSClient) []WSMessage {
 	}
 }
 
-// findWSEvent returns the first event with the given name, or nil.
 func findWSEvent(events []WSMessage, name string) *WSMessage {
 	for i := range events {
 		if events[i].Event == name {
@@ -67,10 +47,6 @@ func findWSEvent(events []WSMessage, name string) *WSMessage {
 	return nil
 }
 
-// TestDispatchOutboundEmptyContentStillCompletes pins the fix: an outbound
-// message with empty content and no attachments must still emit
-// message.complete (content "") + history.updated so the frontend can end the
-// turn, and must NOT emit message.stream.
 func TestDispatchOutboundEmptyContentStillCompletes(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -126,16 +102,11 @@ func TestDispatchOutboundEmptyContentStillCompletes(t *testing.T) {
 		t.Errorf("history name = %q, want %q", historyData.Name, "empty turn session")
 	}
 
-	// Ordering: completion must arrive before the history signal so the
-	// frontend finalizes the message before refetching canonical history.
 	if indexOfEvent(events, "message.complete") > indexOfEvent(events, "history.updated") {
 		t.Error("message.complete must be emitted before history.updated")
 	}
 }
 
-// TestDispatchOutboundEmptyContentWithAttachmentsCompletes is the
-// no-regression case: empty content WITH attachments must emit exactly one
-// message.complete carrying the attachments (and still no message.stream).
 func TestDispatchOutboundEmptyContentWithAttachmentsCompletes(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -188,9 +159,6 @@ func TestDispatchOutboundEmptyContentWithAttachmentsCompletes(t *testing.T) {
 	}
 }
 
-// TestDispatchOutboundNonEmptyContentEmitsStreamAndComplete guards the
-// untouched happy path: non-empty content still produces message.stream
-// (Done=true) followed by message.complete with that content.
 func TestDispatchOutboundNonEmptyContentEmitsStreamAndComplete(t *testing.T) {
 	ts := newNativeTestServer(t)
 

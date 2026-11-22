@@ -12,21 +12,6 @@ import (
 	"testing"
 )
 
-// ---------------------------------------------------------------------------
-// Test scaffolding
-// ---------------------------------------------------------------------------
-//
-// fsTestRoot creates a throwaway directory inside a tree that
-// isAllowedWorkspacePath actually trusts, so the handler is exercised against
-// the real allow-list rather than a stub.
-//
-// t.TempDir() is deliberately NOT used for the browsed directories: it lives
-// under $TMPDIR, which on some CI images points outside home//tmp/cwd and would
-// therefore be rejected by the security gate under test. The user home is always
-// allowed, so tests root themselves in ~/.lele-fs-list-test-<pid>-<testname> and
-// remove it via t.Cleanup. If home is unavailable (unlikely) we fall back to a
-// subdir of cwd, which is also in the allow-list. Each test gets its own unique
-// root so listings cannot leak between cases.
 func fsTestRoot(t *testing.T) string {
 	t.Helper()
 
@@ -40,8 +25,6 @@ func fsTestRoot(t *testing.T) string {
 	}
 
 	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
-	// NOTE: the root is deliberately NOT dot-prefixed: the endpoint hides
-	// dot-directories, so a hidden root would never show up in a home listing.
 	root := filepath.Join(base, fmt.Sprintf("lele-fs-list-test-%d-%s", os.Getpid(), name))
 	if err := os.RemoveAll(root); err != nil {
 		t.Fatalf("RemoveAll(%s) error = %v", root, err)
@@ -53,8 +36,6 @@ func fsTestRoot(t *testing.T) string {
 	return root
 }
 
-// fsListGet performs a GET /api/v1/fs/list and returns status + raw body so
-// callers can decode either a success payload or an APIError.
 func fsListGet(t *testing.T, ts *nativeTestServer, path string) (int, []byte) {
 	t.Helper()
 
@@ -81,7 +62,6 @@ func fsListGet(t *testing.T, ts *nativeTestServer, path string) (int, []byte) {
 	return resp.StatusCode, body
 }
 
-// fsListOK asserts HTTP 200 and decodes the listing payload.
 func fsListOK(t *testing.T, ts *nativeTestServer, path string) FsListResponse {
 	t.Helper()
 
@@ -96,7 +76,6 @@ func fsListOK(t *testing.T, ts *nativeTestServer, path string) FsListResponse {
 	return payload
 }
 
-// fsListErr asserts the expected error status and returns the API error code.
 func fsListErr(t *testing.T, ts *nativeTestServer, path string, wantStatus int) string {
 	t.Helper()
 
@@ -111,7 +90,6 @@ func fsListErr(t *testing.T, ts *nativeTestServer, path string, wantStatus int) 
 	return payload.Code
 }
 
-// resolve mirrors what the handler reports in `path` (symlinks collapsed).
 func resolve(t *testing.T, path string) string {
 	t.Helper()
 
@@ -122,13 +100,8 @@ func resolve(t *testing.T, path string) string {
 	return filepath.Clean(got)
 }
 
-// ---------------------------------------------------------------------------
-// Cases
-// ---------------------------------------------------------------------------
-
 func TestFsList_EmptyPathListsHome(t *testing.T) {
 	ts := newNativeTestServer(t)
-	// The root itself is the known child we look for in the home listing.
 	root := fsTestRoot(t)
 
 	payload := fsListOK(t, ts, "")
@@ -285,8 +258,6 @@ func TestFsList_SymlinkEscapeIsForbidden(t *testing.T) {
 		t.Fatalf("Symlink() error = %v", err)
 	}
 
-	// The literal path sits inside an allowed tree; only the symlink target is
-	// outside. The handler must gate the resolved path as well.
 	if code := fsListErr(t, ts, link, http.StatusForbidden); code != "fs_forbidden" {
 		t.Errorf("code = %q, want fs_forbidden", code)
 	}
@@ -299,8 +270,6 @@ func TestFsList_ParentHiddenWhenOutsideAllowedTrees(t *testing.T) {
 
 	ts := newNativeTestServer(t)
 
-	// /tmp is an allowed root whose parent ("/") is never allowed, so the UI
-	// must be told it cannot go up.
 	payload := fsListOK(t, ts, "/tmp")
 	if payload.Parent != "" {
 		t.Errorf("parent = %q, want empty (no browsable above an allowed root)", payload.Parent)

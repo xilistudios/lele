@@ -645,7 +645,6 @@ func (c *OneBotChannel) handleRawEvent(raw *oneBotRawEvent) {
 		c.handleMessage(raw)
 
 	case "message_sent":
-		// bot's own sent message, ignore
 
 	case "meta_event":
 		c.handleMetaEvent(raw)
@@ -654,27 +653,20 @@ func (c *OneBotChannel) handleRawEvent(raw *oneBotRawEvent) {
 		c.handleNoticeEvent(raw)
 
 	case "request":
-		// friend/add group requests, ignore for now
 
 	case "":
-		// API response, already handled
 
 	default:
-		// unknown, ignore
 	}
 }
 
 func (c *OneBotChannel) handleMetaEvent(raw *oneBotRawEvent) {
-	// lifecycle events and heartbeats are normal, ignore
 }
 
 func (c *OneBotChannel) handleNoticeEvent(raw *oneBotRawEvent) {
-	// group_recall, group_increase, group_decrease, friend_add, group_admin, group_ban, etc.
-	// No action needed for typical notice events
 }
 
 func (c *OneBotChannel) handleMessage(raw *oneBotRawEvent) {
-	// Parse fields from raw event
 	userID, err := parseJSONInt64(raw.UserID)
 	if err != nil {
 		logger.WarnCF("onebot", "Failed to parse user_id", map[string]interface{}{
@@ -721,7 +713,6 @@ func (c *OneBotChannel) handleMessage(raw *oneBotRawEvent) {
 		}
 	}
 
-	// Clean up temp files when done
 	if len(parsed.LocalFiles) > 0 {
 		defer func() {
 			for _, f := range parsed.LocalFiles {
@@ -783,10 +774,9 @@ func (c *OneBotChannel) handleMessage(raw *oneBotRawEvent) {
 		metadata["nickname"] = sender.Nickname
 	}
 
-	// Routing metadata: group messages → group, private → direct.
 	if raw.MessageType == "group" {
 		metadata["peer_kind"] = "group"
-		metadata["peer_id"] = chatID // "group:<groupID>"
+		metadata["peer_id"] = chatID
 	} else {
 		metadata["peer_kind"] = "direct"
 		metadata["peer_id"] = senderID

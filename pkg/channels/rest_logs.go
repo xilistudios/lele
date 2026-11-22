@@ -17,7 +17,6 @@ import (
 
 var validDateRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
-// LogsResponse is the JSON structure returned by GET /api/v1/logs.
 type LogsResponse struct {
 	Entries       []logger.LogEntry `json:"entries"`
 	TotalLines    int               `json:"total_lines"`
@@ -27,14 +26,11 @@ type LogsResponse struct {
 	Level         string            `json:"level"`
 }
 
-// LogsDatesResponse is the JSON structure returned by GET /api/v1/logs/dates.
 type LogsDatesResponse struct {
 	Dates []string `json:"dates"`
 }
 
-// handleLogs returns the last N lines of a log file for a given date and level.
 func (n *NativeChannel) handleLogs(w http.ResponseWriter, r *http.Request) {
-	// Parse and validate query parameters.
 	level := getQueryParam(r, "level")
 	if level == "" {
 		level = "info"
@@ -67,8 +63,6 @@ func (n *NativeChannel) handleLogs(w http.ResponseWriter, r *http.Request) {
 		maxLines = n
 	}
 
-	// Build file path using the canonical filename contract shared with the
-	// logger writer (logger.LogPathFor maps "error" → errors-{date}.log).
 	logPath, err := logger.LogPathFor(level, date)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error(), "invalid_level")
@@ -76,7 +70,6 @@ func (n *NativeChannel) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	fileName := filepath.Base(logPath)
 
-	// Read the file. If it doesn't exist, return an empty response.
 	allLines, err := readAllLines(logPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -96,14 +89,12 @@ func (n *NativeChannel) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 	totalLines := len(allLines)
 
-	// Take the last maxLines lines.
 	start := totalLines - maxLines
 	if start < 0 {
 		start = 0
 	}
 	tailLines := allLines[start:]
 
-	// Parse each line as JSON into a LogEntry.
 	entries := make([]logger.LogEntry, 0, len(tailLines))
 	for _, line := range tailLines {
 		line = strings.TrimSpace(line)
@@ -112,7 +103,6 @@ func (n *NativeChannel) handleLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		var entry logger.LogEntry
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			// Skip lines that aren't valid JSON (e.g. corrupted entries).
 			continue
 		}
 		entries = append(entries, entry)
@@ -128,13 +118,11 @@ func (n *NativeChannel) handleLogs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleLogsDates returns the list of dates that have log files available.
 func (n *NativeChannel) handleLogsDates(w http.ResponseWriter, r *http.Request) {
 	logsPath := logger.GetLogsPath()
 
 	entries, err := os.ReadDir(logsPath)
 	if err != nil {
-		// If the directory doesn't exist yet, return an empty list.
 		if os.IsNotExist(err) {
 			writeJSON(w, http.StatusOK, LogsDatesResponse{Dates: []string{}})
 			return
@@ -148,11 +136,6 @@ func (n *NativeChannel) handleLogsDates(w http.ResponseWriter, r *http.Request) 
 		if entry.IsDir() {
 			continue
 		}
-		// Accept canonical log files from either level (info-YYYY-MM-DD.log
-		// and errors-YYYY-MM-DD.log): a date with only error entries must be
-		// listed too. The reverse of the filename contract lives in
-		// logger.LogDateFromFileName (single implementation, single
-		// validation policy shared with the writer).
 		date, ok := logger.LogDateFromFileName(entry.Name())
 		if ok {
 			seen[date] = true
@@ -168,7 +151,6 @@ func (n *NativeChannel) handleLogsDates(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, LogsDatesResponse{Dates: dates})
 }
 
-// readAllLines reads every line from a file and returns them as a slice.
 func readAllLines(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {

@@ -47,76 +47,39 @@ type NativeChannel struct {
 	wsClients       map[string]*WSClient
 	restStreams     map[string]*restStreamSubscriber
 
-	// loopCtx scopes the background loops Start launches (upload cleanup, auth
-	// revocation reconciliation) to a single run of this channel. It must NOT be
-	// the ctx handed to Start: Manager.ReloadConfig stops the old channel and
-	// starts a freshly built one with the same long-lived process context, so
-	// loops bound to it would outlive the channel they belong to — each reload
-	// leaking another ticker polling SQLite forever, and keeping the whole
-	// retired NativeChannel reachable. Stop cancels it. loopCancel is nil once
-	// Stop has run, so a Start/Stop/Start cycle always gets a fresh context.
-	loopCtx    context.Context
-	loopCancel context.CancelFunc
-	// activeLoops counts the running loops so Stop can wait for them to exit
-	// instead of returning with goroutines still in flight.
-	activeLoops atomic.Int64
-	// authReconcileEvery overrides authReconcileInterval for tests. Zero means
-	// the production interval, which keeps hand-built &NativeChannel{} fixtures
-	// working without going through NewNativeChannel.
+	loopCtx            context.Context
+	loopCancel         context.CancelFunc
+	activeLoops        atomic.Int64
 	authReconcileEvery time.Duration
 	leleDir            string
-	configPath         string // path to config file, defaults to DefaultConfigPath() if empty
+	configPath         string
 	mu                 sync.RWMutex
 	startTime          time.Time
 	pinLimiter         *rateLimiter
 	pairLimiter        *rateLimiter
-	// refreshLimiter guards token renewal on its own bucket. Sharing the pairing
-	// bucket meant an ordinary signed-in browser competing for the same 5 req/min
-	// as every pairing attempt, and the pairing endpoint is the one that can
-	// legitimately burst (retries, several devices, a mistyped PIN).
-	refreshLimiter   *rateLimiter
-	apiLimiter       *rateLimiter
-	wsMessageLimiter *rateLimiter
-	// authLogLimiter samples auth/rate-limit rejections so a permanently dead
-	// token polling in a loop cannot flood the log, while still leaving a
-	// trace for a user reporting unexpected sign-outs.
-	authLogLimiter *rateLimiter
-	skillsLoader   *skills.SkillsLoader
-	skillInstaller *skills.SkillInstaller
-	workspacePath  string
-	reloadConfig   func() error // called after config save to reload runtime config
-	// reloadMCP re-runs the MCP wiring pass after an out-of-band mcp.json
-	// edit (AgentLoop.SyncMCPServers). NOT called anywhere yet (T4 wires the
-	// handlers); handlers must guard it nil-safely:
-	// if n.reloadMCP != nil { n.reloadMCP() }.
-	reloadMCP      func()
-	cronService    CronProvidable
-	keyringService *keyring.Service
-	updateService  *update.Updater
-	localesMgr     *locales.Manager
+	refreshLimiter     *rateLimiter
+	apiLimiter         *rateLimiter
+	wsMessageLimiter   *rateLimiter
+	authLogLimiter     *rateLimiter
+	skillsLoader       *skills.SkillsLoader
+	skillInstaller     *skills.SkillInstaller
+	workspacePath      string
+	reloadConfig       func() error
+	reloadMCP          func()
+	cronService        CronProvidable
+	keyringService     *keyring.Service
+	updateService      *update.Updater
+	localesMgr         *locales.Manager
 
-	// outboundFlusher wakes the durable outbound pump when a native peer comes
-	// back. Set through SetOutboundFlusher by Manager.SetOutboundSpooler; nil
-	// means durability is off, which must leave Send exactly as it was.
-	// Guarded by mu: Send reads it on every dispatched message while the
-	// manager writes it at wiring time.
 	outboundFlusher PeerFlusher
 
-	// subagentsCached collapses repeated/stampeding reads of the subagents
-	// REST endpoint (see subagents_cache.go). Initialised by NewNativeChannel,
-	// with a lazy fallback for bare &NativeChannel{} literals in tests.
 	subagentsCacheMu sync.Mutex
 	subagentsCached  *subagentsCache
 
-	// mcpAuthFlows is the registry of LIVE REST-started MCP OAuth flows (see
-	// mcp_auth_flows.go), created on first use by mcpAuthFlowRegistry(). It
-	// owns the one-live-flow-per-(agent, server) rule, the flow ids the API
-	// hands out, and the "this flow already reloaded the manager" claim.
 	mcpAuthFlows     *mcpAuthFlows
 	mcpAuthFlowsOnce sync.Once
 }
 
-// CronProvidable is the interface for managing cron jobs via the API.
 type CronProvidable interface {
 	ListJobs(includeDisabled bool) []cron.CronJob
 	GetJob(jobID string) *cron.CronJob
@@ -128,44 +91,30 @@ type CronProvidable interface {
 	Status() map[string]interface{}
 }
 
-// SetCronService sets the cron service for API access.
 func (n *NativeChannel) SetCronService(cs CronProvidable) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.cronService = cs
 }
 
-// SetKeyringService sets the keyring service for API access.
 func (n *NativeChannel) SetKeyringService(ks *keyring.Service) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.keyringService = ks
 }
 
-// SetReloadConfig sets a callback to be called after config is saved via the API.
-// This enables the gateway to reload runtime config (agent registry, channels, etc.)
-// synchronously instead of relying on the file watcher (which can be slow/unreliable).
 func (n *NativeChannel) SetReloadConfig(fn func() error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.reloadConfig = fn
 }
 
-// SetReloadMCP sets a callback that re-runs the MCP wiring pass (tool
-// registry + "## MCP Servers" prompt section) after an out-of-band mcp.json
-// edit. Unlike reloadConfig it does NOT re-read config.json: an mcp.json
-// write must not inherit the config reload's blast radius (ContextBuilder
-// recreation, subagent cancellation, failing the landed write because
-// config.json is broken — see AgentLoop.SyncMCPServers).
-// Handlers call it nil-safe: if n.reloadMCP != nil { n.reloadMCP() }.
 func (n *NativeChannel) SetReloadMCP(fn func()) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.reloadMCP = fn
 }
 
-// RegisterDesktopClient registers the built-in desktop client with the
-// underlying auth manager. See AuthManager.RegisterDesktopClient.
 func (nc *NativeChannel) RegisterDesktopClient(token, refreshToken string) error {
 	if nc == nil || nc.auth == nil {
 		return fmt.Errorf("native channel not initialized")
@@ -178,15 +127,12 @@ type WSClient struct {
 	Conn          *websocket.Conn
 	ClientInfo    *ClientInfo
 	SessionKey    string
-	Subscriptions map[string]bool // all sessions this client is subscribed to
+	Subscriptions map[string]bool
 	SendChan      chan []byte
 	closed        bool
 
-	// doneClosed reports whether the done channel has been closed. nil-safe:
-	// a client built by tests without a done channel reports false.
 	doneClosed func() bool
 
-	// Reconnection support
 	reconnecting   bool
 	disconnectedAt time.Time
 	pendingMsgs    []json.RawMessage
@@ -194,27 +140,11 @@ type WSClient struct {
 	reconnectTimer *time.Timer
 	mu             sync.Mutex
 
-	// done is closed to signal wsWriteLoop and wsReadLoop to exit.  Each
-	// goroutine captures the channel ONCE at entry (local variable) so that
-	// a subsequent reconnect can replace it without the old loop picking up
-	// the new channel.  Guarded by mu: created in newWSClient, replaced in
-	// reconnectWSClient, closed in markWSClientReconnecting / removeWSClient / Stop.
-	//
-	// Lock ordering (MUST be respected everywhere):
-	//   NativeChannel.mu  →  WSClient.mu
-	// No code path may acquire NativeChannel.mu while holding WSClient.mu.
 	done chan struct{}
 
-	// activeWriteLoops tracks the number of live wsWriteLoop goroutines
-	// for this client.  Monotonically transitions to 0 once the loop exits.
-	// Exposed for tests and diagnostics; not a concurrency control.
 	activeWriteLoops atomic.Int64
 }
 
-// rateOr falls back to the built-in default when the config carries 0
-// ("unset / use the default") or a negative value (a hand-edited config.json).
-// Without it, newRateLimiter(-3, ...) would build a bucket that rejects
-// everything, since allow() compares count <= rate.
 func rateOr(value, def int) int {
 	if value <= 0 {
 		return def
@@ -222,16 +152,10 @@ func rateOr(value, def int) int {
 	return value
 }
 
-// IsLoopbackHost reports whether host is a loopback address that is only
-// reachable from the local machine. It recognises the empty string (Go's
-// net/http treats "" as "all interfaces" — return false), "localhost", the
-// IPv4 and IPv6 loopback literals, and any IP for which net.IP.IsLoopback is
-// true. IPv6 bracket notation (e.g. "[::1]") is accepted for convenience.
 func IsLoopbackHost(host string) bool {
 	if host == "" {
 		return false
 	}
-	// Strip optional IPv6 brackets.
 	if len(host) > 2 && host[0] == '[' && host[len(host)-1] == ']' {
 		host = host[1 : len(host)-1]
 	}
@@ -246,19 +170,6 @@ func IsLoopbackHost(host string) bool {
 func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable, approvalManager *ApprovalManager) (*NativeChannel, error) {
 	nativeCfg := cfg.Channels.Native
 
-	// Resolve the data directory once, into this copy of the config: n.cfg
-	// points at nativeCfg, not at the shared *config.Config, so the write
-	// stays local and never leaks into the struct that gets saved.
-	//
-	// The default is empty (see DefaultConfig) and the field is resolved
-	// here rather than baked in, so LELE_CONFIG_DIR is honoured per run
-	// without being frozen into config.json. An explicit lele_dir in the
-	// file still wins, because it reaches this function non-empty.
-	//
-	// Resolving into nativeCfg — and not just into the local leleDir below —
-	// matters: uploads (upload.go), attachment staging and the skills dirs
-	// read n.cfg.LeleDir directly. Leaving it empty would build relative
-	// paths like "tmp/uploads" against the process cwd.
 	if nativeCfg.LeleDir == "" {
 		nativeCfg.LeleDir = config.GetLeleDir()
 	}
@@ -271,22 +182,14 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 
 	base := NewBaseChannel(ChannelName, nativeCfg, messageBus, []string{})
 
-	// Traffic limiters are only constructed when rate limiting is enabled in
-	// config.  When disabled (the default), they remain nil — rateLimitMiddleware
-	// treats a nil limiter as "no throttle", and Stop() is nil-safe.
 	var pinLimiter, pairLimiter, refreshLimiter, apiLimiter, wsMessageLimiter *rateLimiter
 	if rl := nativeCfg.RateLimit; rl.Enabled {
 		pinLimiter = newRateLimiter(rateOr(rl.PinPerMinute, config.DefaultNativeRateLimitPinPerMinute), time.Minute)
 		pairLimiter = newRateLimiter(rateOr(rl.PairPerMinute, config.DefaultNativeRateLimitPairPerMinute), time.Minute)
-		// Renewal is a background, client-driven call: it must be generous enough
-		// that normal use can never trip it, and tight enough to still bound abuse.
 		refreshLimiter = newRateLimiter(rateOr(rl.RefreshPerMinute, config.DefaultNativeRateLimitRefreshPerMinute), time.Minute)
 		apiLimiter = newRateLimiter(rateOr(rl.APIPerMinute, config.DefaultNativeRateLimitAPIPerMinute), time.Minute)
 		wsMessageLimiter = newRateLimiter(rateOr(rl.WSMessagesPerMinute, config.DefaultNativeRateLimitWSMessagesPerMinute), time.Minute)
 	}
-	// authLogLimiter is not a traffic limiter: it samples log lines so a dead
-	// token polling in a loop cannot fill the log.  It stays on even when rate
-	// limiting is disabled, because authMiddleware rejects regardless of throttling.
 	authLogLimiter := newRateLimiter(6, time.Minute)
 
 	workspacePath := cfg.WorkspacePath()
@@ -319,16 +222,6 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 	}, nil
 }
 
-// SetInboundSpooler wires the durable inbound spooler into the channel.
-//
-// NativeChannel holds its BaseChannel in a named field instead of embedding it,
-// so the setter is not promoted and Manager.SetInboundSpooler would otherwise
-// skip this channel silently - which would leave every web, desktop and REST
-// inbound message unpersisted. This forwards to the base, which owns the single
-// publish chokepoint used by the native publishers.
-//
-// Same contract as BaseChannel.SetInboundSpooler: call before Start, never while
-// traffic is flowing.
 func (n *NativeChannel) SetInboundSpooler(s InboundSpooler) {
 	if n == nil || n.base == nil {
 		return
@@ -336,35 +229,20 @@ func (n *NativeChannel) SetInboundSpooler(s InboundSpooler) {
 	n.base.SetInboundSpooler(s)
 }
 
-// ErrPeerNotReady reports that a durable outbound message was handed to the
-// native channel while no live client was subscribed to its peer.
-//
-// The dispatcher treats every Channel.Send error as sendNotStarted - nothing
-// reached the wire, so the spool row is Released back to pending and the pump
-// retries it - which is exactly why Send must raise this BEFORE dispatching:
-// once a single event is emitted the message is half-out, and a retry would
-// duplicate it. Emitting nothing and returning this error keeps the row whole.
 var ErrPeerNotReady = errors.New("native: no live client for peer")
 
-// SetOutboundFlusher wires the durable outbound pump wake-up. Called by
-// Manager.SetOutboundSpooler through the outboundFlushSetter capability.
 func (n *NativeChannel) SetOutboundFlusher(f PeerFlusher) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.outboundFlusher = f
 }
 
-// hasOutboundFlusher reports whether durability is wired. When it is not, Send
-// skips the pre-flight gate entirely so the flag-off path stays the old code.
 func (n *NativeChannel) hasOutboundFlusher() bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.outboundFlusher != nil
 }
 
-// outboundFlusherSnapshot returns the current flusher under the read lock so a
-// caller can invoke it without holding n.mu: FlushPeer may be reached from the
-// reconnect path, which must not keep the client map locked.
 func (n *NativeChannel) outboundFlusherSnapshot() PeerFlusher {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
@@ -375,8 +253,6 @@ func (n *NativeChannel) Name() string {
 	return ChannelName
 }
 
-// getConfigPath returns the path to the config file.
-// If configPath is set, it uses that; otherwise it returns the default path.
 func (n *NativeChannel) getConfigPath() string {
 	if n.configPath != "" {
 		return n.configPath
@@ -403,7 +279,6 @@ func (n *NativeChannel) Start(ctx context.Context) error {
 	}
 
 	n.startTime = time.Now()
-	// A context of its own, cancelled by Stop — see loopCtx.
 	n.loopCtx, n.loopCancel = context.WithCancel(ctx)
 	n.startLoop(n.loopCtx, n.runUploadCleanup)
 	n.startLoop(n.loopCtx, n.runAuthRevocationReconcile)
@@ -415,10 +290,6 @@ func (n *NativeChannel) Start(ctx context.Context) error {
 	return nil
 }
 
-// startLoop runs one of the channel's periodic background loops under the
-// channel's own lifecycle context and counts it in activeLoops, so Stop can
-// join it. The ctx is passed in rather than read from n.loopCtx so the goroutine
-// never touches a field another Start could rewrite.
 func (n *NativeChannel) startLoop(ctx context.Context, run func(context.Context)) {
 	n.activeLoops.Add(1)
 	go func() {
@@ -427,16 +298,8 @@ func (n *NativeChannel) startLoop(ctx context.Context, run func(context.Context)
 	}()
 }
 
-// loopJoinTimeout bounds how long Stop waits for its loops to finish the tick in
-// flight. It is a safety valve, not a normal path: both loops return on ctx
-// cancellation, and the only work between ticks is a directory sweep or one
-// SELECT over a handful of rows. If it ever does expire, leaking one goroutine is
-// strictly better than hanging a config reload.
 const loopJoinTimeout = 2 * time.Second
 
-// waitForLoops cancels the loop context and waits (bounded) for the loops to
-// exit. Callers must NOT hold n.mu: dropWSClientsForAuth takes it, so waiting
-// under the lock would deadlock a Stop that lands during a reconciliation tick.
 func (n *NativeChannel) waitForLoops() {
 	n.mu.Lock()
 	cancel := n.loopCancel
@@ -460,20 +323,13 @@ func (n *NativeChannel) waitForLoops() {
 	}
 }
 
-// catalogPrefetchOnce guards process-wide catalog warm-up so a channel
-// that is started twice (or recreated) does not double-fetch.
 var catalogPrefetchOnce sync.Once
 
-// startCatalogPrefetch warms the GitHub-hosted model catalog in the background.
-// Disk cache is applied first so an offline start still has the last snapshot.
-// If no cache exists, a background download starts. Fully async so Start does
-// not block on disk or network I/O.
 func startCatalogPrefetch() {
 	catalogPrefetchOnce.Do(func() {
 		catalog.Ensure()
 		go func() {
 			_ = catalog.LoadDiskCache("")
-			// Refresh when the index is missing or stale (24h).
 			if !catalog.HasCachedIndex() || !catalog.IsPrefetchFresh(0) {
 				ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 				defer cancel()
@@ -484,8 +340,6 @@ func startCatalogPrefetch() {
 }
 
 func (n *NativeChannel) Stop(ctx context.Context) error {
-	// Registered before the unlock so LIFO runs it AFTER the lock is released:
-	// the loops it waits on take n.mu to kick revoked WebSockets.
 	defer n.waitForLoops()
 
 	n.mu.Lock()
@@ -503,8 +357,6 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 			client.reconnectTimer = nil
 		}
 		client.reconnecting = false
-		// Permanently discarded (deleted below): close done without
-		// replacing it, matching abandonWSClientLocked.
 		closeDoneChan(client.done)
 		client.mu.Unlock()
 		if client.Conn != nil {
@@ -533,18 +385,11 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 func (n *NativeChannel) runUploadCleanup(ctx context.Context) {
 	uploadDir := filepath.Join(n.cfg.LeleDir, "tmp", "uploads")
 	maxAge := time.Duration(n.cfg.UploadTTLHours) * time.Hour
-	// Outbound send_file attachments staged for download (see stageAttachment)
-	// live under tmp/attachments and must expire too, or every external file
-	// ever sent would fill the disk. After the TTL old downloads break —
-	// acceptable trade-off (history keeps showing the file name).
 	stagingDir := attachmentStagingDir(n.cfg.LeleDir)
 
 	utils.CleanupOldUploads(uploadDir, maxAge)
 	utils.CleanupOldUploads(stagingDir, maxAge)
 
-	// Hourly, and under loopCtx since #369: bound to the Start context it would
-	// survive every config reload, which is how the leak went unnoticed for so
-	// long (one idle ticker per reload is cheap; a 15s store poll is not).
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
@@ -559,9 +404,6 @@ func (n *NativeChannel) runUploadCleanup(ctx context.Context) {
 	}
 }
 
-// reconcileInterval is the polling period, or authReconcileInterval when the
-// channel did not set a shorter one. A non-positive override would panic in
-// time.NewTicker, so it is clamped rather than trusted.
 func (n *NativeChannel) reconcileInterval() time.Duration {
 	if n.authReconcileEvery > 0 {
 		return n.authReconcileEvery
@@ -569,29 +411,11 @@ func (n *NativeChannel) reconcileInterval() time.Duration {
 	return authReconcileInterval
 }
 
-// runAuthRevocationReconcile periodically drops clients that no longer exist
-// in the shared SQLite store, so a `lele client remove` performed by the CLI
-// (or any other process sharing the DB) stops authenticating here within
-// authReconcileInterval instead of surviving until the gateway restarts, and
-// tears down the WebSocket sessions those clients already hold.
-//
-// Runs under the channel's lifecycle context (loopCtx), so Stop ends it: a
-// reload that left this ticking would keep polling the store from a retired
-// channel forever, and #327's whole point is that this process's map is not the
-// only authority.
-//
-// A failed reconcile is logged and skipped, never fatal: the next tick retries,
-// and the store being briefly unreadable must not take the channel down.
 func (n *NativeChannel) runAuthRevocationReconcile(ctx context.Context) {
 	if n.auth == nil {
-		// Defensive: a channel built without NewNativeChannel (hand-made test
-		// fixtures) has no auth manager to reconcile.
 		return
 	}
 
-	// The JSON backend has nothing to reconcile and reports no error, so this
-	// loop simply idles there; the tick is cheap enough not to be worth a
-	// special case in Start.
 	ticker := time.NewTicker(n.reconcileInterval())
 	defer ticker.Stop()
 
@@ -614,19 +438,6 @@ func (n *NativeChannel) runAuthRevocationReconcile(ctx context.Context) {
 	}
 }
 
-// dropWSClientsForAuth tears down every live WebSocket whose authenticated
-// client was revoked out from under this process.
-//
-// Without this, dropping the client from the auth map only stops FUTURE
-// requests: an already-upgraded connection keeps streaming events for its
-// remaining lifetime, because the token was validated once at handshake. That
-// would leave the revoked device in full possession of the session #327 is
-// about ending.
-//
-// n.wsClients is keyed by a per-connection uuid (see handleWebSocket), not by
-// the auth client ID, so this has to scan; the map holds one entry per live
-// connection, which is a handful of items. Teardown goes through
-// abandonWSClientLocked, the same path used for an explicitly removed client.
 func (n *NativeChannel) dropWSClientsForAuth(authClientIDs []string) {
 	revoked := make(map[string]struct{}, len(authClientIDs))
 	for _, id := range authClientIDs {
@@ -661,17 +472,6 @@ func (n *NativeChannel) Send(ctx context.Context, msg bus.OutboundMessage) error
 		sessionKey = n.agentLoop.ResolveSessionKey(sessionKey)
 	}
 
-	// Durability pre-flight, and it is a pre-flight: nothing may be emitted
-	// before it. A message that carries a spool row has a second life - the
-	// pump will replay it if the send fails - and a replay is only safe while
-	// the row is whole. With no live client the dispatch below would drop the
-	// reply into the void (or into a reconnecting client's in-memory buffer,
-	// which dies with the process), so the send must be refused before it
-	// starts. Requiring a non-nil flusher keeps the gate off whenever
-	// durability is off: without it Send behaves exactly as it always did,
-	// which is the whole flag-off contract. ResolveSessionKey is repeated here
-	// on purpose - one map read under a read lock is cheaper than threading
-	// the resolved key through dispatchOutboundMessage's signature.
 	if msg.SpoolID != 0 && n.hasOutboundFlusher() && !n.hasLiveClientFor(sessionKey) {
 		return ErrPeerNotReady
 	}
@@ -680,14 +480,8 @@ func (n *NativeChannel) Send(ctx context.Context, msg bus.OutboundMessage) error
 	return nil
 }
 
-// ConsumesEvent declares that the native channel interprets every protocol
-// event itself (see dispatchOutboundMessage), including contentless ones such
-// as message.stream with done=true and turn.end. It therefore opts out of the
-// dispatcher's contentless-signal guard.
 func (n *NativeChannel) ConsumesEvent(string) bool { return true }
 
-// RegisterRoutes registers all native channel API routes on the given mux.
-// This is called by the unified server to mount the native channel endpoints.
 func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	withAuth := func(h http.HandlerFunc) http.HandlerFunc {
 		return n.authMiddleware(h).ServeHTTP
@@ -695,7 +489,7 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 
 	withBodyLimit := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB
+			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -704,16 +498,6 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 		return withBodyLimit(h).ServeHTTP
 	}
 
-	// Public auth endpoints — /auth/pin is behind withAuth so that only an
-	// already-authenticated principal (e.g. the WebUI settings page) can
-	// generate a PIN.  This restores the out-of-band property of the pairing
-	// protocol: the PIN authenticates whoever redeems it because the issuer
-	// was already verified.  /auth/pair remains public (the new device has no
-	// token yet).
-	// pinLimiter was constructed, stopped and never attached to anything: the
-	// 10/min it advertises guarded nothing, so one authenticated client could
-	// generate PINs in a loop and keep evicting the oldest pending PIN (see
-	// maxPendingPINs) — including the one another device is about to redeem.
 	mux.HandleFunc("GET /api/v1/auth/pin", n.rateLimitMiddleware(n.pinLimiter, withAuth(n.handleGetPIN)).ServeHTTP)
 	mux.HandleFunc("POST /api/v1/auth/pair", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handlePair)).ServeHTTP)
 	mux.HandleFunc("POST /api/v1/auth/refresh", n.rateLimitMiddleware(n.refreshLimiter, http.HandlerFunc(n.handleRefresh)).ServeHTTP)
@@ -722,10 +506,8 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/auth/clients/{clientID}", withAuth(n.handleRemoveClient))
 	mux.HandleFunc("POST /api/v1/auth/logout", withAuth(n.handleLogout))
 
-	// WebSocket
 	mux.HandleFunc("GET /api/v1/ws", n.handleWebSocket)
 
-	// Chat
 	mux.HandleFunc("POST /api/v1/chat/send", withAuth(applyBodyLimit(n.handleChatSend)))
 	mux.HandleFunc("POST /api/v1/chat/send/stream", withAuth(applyBodyLimit(n.handleChatSendStream)))
 	mux.HandleFunc("GET /api/v1/chat/streams/{sessionKey}", withAuth(n.handleStreamStatus))
@@ -755,7 +537,6 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/chat/sessions/{sessionKey}/compact", withAuth(n.handleSessionCompact))
 	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/subagents", withAuth(n.handleSessionSubagents))
 
-	// Agents
 	mux.HandleFunc("GET /api/v1/agents", withAuth(n.handleAgents))
 	mux.HandleFunc("GET /api/v1/agents/{agentID}", withAuth(n.handleAgentInfo))
 	mux.HandleFunc("GET /api/v1/agents/{agentID}/status", withAuth(n.handleAgentStatus))
@@ -764,25 +545,21 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/agents/{agentID}/files/{fileName}", withAuth(n.handleAgentFileRead))
 	mux.HandleFunc("PUT /api/v1/agents/{agentID}/files/{fileName}", withAuth(applyBodyLimit(n.handleAgentFileSave)))
 
-	// Per-agent skills (workspace-scoped: the agent's own <workspace>/skills)
 	mux.HandleFunc("PUT /api/v1/agents/{agentID}/skills/{name}/toggle", withAuth(applyBodyLimit(n.handleAgentSkillToggle)))
 	mux.HandleFunc("DELETE /api/v1/agents/{agentID}/skills/{name}", withAuth(n.handleAgentSkillRemove))
 	mux.HandleFunc("POST /api/v1/agents/{agentID}/skills/install", withAuth(applyBodyLimit(n.handleAgentSkillInstall)))
 	mux.HandleFunc("POST /api/v1/agents/{agentID}/skills/install-batch", withAuth(applyBodyLimit(n.handleAgentSkillInstallBatch)))
 
-	// Per-agent slash commands (workspace-scoped: the agent's own <workspace>/commands)
 	mux.HandleFunc("GET /api/v1/agents/{agentID}/commands", withAuth(n.handleAgentCommands))
 	mux.HandleFunc("GET /api/v1/agents/{agentID}/commands/{name}", withAuth(n.handleAgentCommandDetail))
 	mux.HandleFunc("POST /api/v1/agents/{agentID}/commands", withAuth(applyBodyLimit(n.handleAgentCommandCreate)))
 	mux.HandleFunc("PUT /api/v1/agents/{agentID}/commands/{name}", withAuth(applyBodyLimit(n.handleAgentCommandUpdate)))
 	mux.HandleFunc("DELETE /api/v1/agents/{agentID}/commands/{name}", withAuth(n.handleAgentCommandDelete))
 
-	// Config
 	mux.HandleFunc("GET /api/v1/config", withAuth(n.handleGetConfig))
 	mux.HandleFunc("PUT /api/v1/config", withAuth(applyBodyLimit(n.handlePutConfig)))
 	mux.HandleFunc("POST /api/v1/config/validate", withAuth(applyBodyLimit(n.handleValidateConfig)))
 
-	// System / self-update
 	mux.HandleFunc("GET /api/v1/system/version", withAuth(n.handleSystemVersion))
 	mux.HandleFunc("GET /api/v1/system/updates/check", n.rateLimitMiddleware(n.apiLimiter, withAuth(n.handleUpdatesCheck)).ServeHTTP)
 	mux.HandleFunc("POST /api/v1/system/updates/apply", withAuth(applyBodyLimit(n.handleUpdatesApply)))
@@ -790,12 +567,10 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/system/updates/rollback", withAuth(n.handleUpdatesRollback))
 	mux.HandleFunc("POST /api/v1/system/restart", withAuth(n.handleSystemRestart))
 
-	// Tools, Models, Skills, Status, Channels
 	mux.HandleFunc("GET /api/v1/tools", withAuth(n.handleTools))
 	mux.HandleFunc("GET /api/v1/models", withAuth(n.handleModels))
 	mux.HandleFunc("GET /api/v1/providers/{name}/models", withAuth(n.handleProviderModels))
 
-	// Model catalog (embedded + models.dev prefetch)
 	mux.HandleFunc("GET /api/v1/catalog/providers", withAuth(n.handleCatalogProviders))
 	mux.HandleFunc("GET /api/v1/catalog/models", withAuth(n.handleCatalogModels))
 	mux.HandleFunc("POST /api/v1/catalog/prefetch", withAuth(applyBodyLimit(n.handleCatalogPrefetch)))
@@ -809,30 +584,12 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/skills/{name}/toggle", withAuth(applyBodyLimit(n.handleSkillToggle)))
 	mux.HandleFunc("GET /api/v1/skills/workspace-config", withAuth(n.handleSkillWorkspaceConfig))
 
-	// MCP servers (management view: merged inventory + raw layer file, plus
-	// the per-layer enable/disable toggle, the raw editor save and the
-	// dry-run validator)
-	//
-	// NOTE on "GET /api/v1/mcp/{layer}/{doc}": the raw-file read is registered
-	// through the doc wildcard + shim (handleMCPRawDoc accepts only "raw")
-	// because Go's ServeMux refuses to register "GET /api/v1/mcp/{layer}/raw"
-	// next to the OAuth status route "GET /api/v1/mcp/auth/{flow_id}": both
-	// match GET /api/v1/mcp/auth/raw and neither is more specific, so the
-	// ServeMux PANICS at registration ("conflicts with pattern"). The shim
-	// keeps the raw endpoint's URL, status codes and response byte-identical
-	// (a /{doc}/ that is not "raw" is a plain 404) while letting the literal
-	// "auth" segment win, which is what route 3 of the frozen contract needs.
 	mux.HandleFunc("GET /api/v1/mcp", withAuth(n.handleMCPInventory))
 	mux.HandleFunc("GET /api/v1/mcp/{layer}/{doc}", withAuth(n.handleMCPRawDoc))
 	mux.HandleFunc("PUT /api/v1/mcp/{layer}/raw", withAuth(applyBodyLimit(n.handleMCPRawPut)))
 	mux.HandleFunc("PUT /api/v1/mcp/{layer}/servers/{name}/toggle", withAuth(applyBodyLimit(n.handleMCPToggle)))
 	mux.HandleFunc("POST /api/v1/mcp/validate", withAuth(applyBodyLimit(n.handleMCPValidate)))
 
-	// MCP OAuth flow (routes 2-6 of .lele/tasks/mcp-oauth-rest-contract.md;
-	// see pkg/channels/mcp_auth_flows.go and the OAuth section of rest_mcp.go).
-	// "servers/{name}/auth" and the {layer} routes collide on no method+path,
-	// and the literal "auth" segment outranks {layer} in the mux, so these five
-	// coexist with the five above without another shim.
 	mux.HandleFunc("POST /api/v1/mcp/servers/{name}/auth", withAuth(applyBodyLimit(n.handleMCPAuthStart)))
 	mux.HandleFunc("DELETE /api/v1/mcp/servers/{name}/auth", withAuth(n.handleMCPAuthLogout))
 	mux.HandleFunc("GET /api/v1/mcp/auth/{flow_id}", withAuth(n.handleMCPAuthStatus))
@@ -843,13 +600,11 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/logs", withAuth(n.handleLogs))
 	mux.HandleFunc("GET /api/v1/logs/dates", withAuth(n.handleLogsDates))
 
-	// Background execs
 	mux.HandleFunc("GET /api/v1/background-exec", withAuth(n.handleBackgroundExecs))
 	mux.HandleFunc("GET /api/v1/background-exec/{id}/output", withAuth(n.handleBackgroundExecOutput))
 	mux.HandleFunc("POST /api/v1/background-exec/{id}/stop", withAuth(n.handleBackgroundExecStop))
 	mux.HandleFunc("GET /api/v1/background-exec/{id}/stream", withAuth(n.handleBackgroundExecStream))
 
-	// Cron jobs
 	mux.HandleFunc("GET /api/v1/cron", withAuth(n.handleCronList))
 	mux.HandleFunc("POST /api/v1/cron", withAuth(applyBodyLimit(n.handleCronCreate)))
 	mux.HandleFunc("GET /api/v1/cron/{id}", withAuth(n.handleCronGet))
@@ -859,7 +614,6 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/cron/{id}/disable", withAuth(n.handleCronDisable))
 	mux.HandleFunc("POST /api/v1/cron/{id}/run", withAuth(n.handleCronRun))
 
-	// Secrets (keyring)
 	mux.HandleFunc("GET /api/v1/secrets", withAuth(n.handleSecretsList))
 	mux.HandleFunc("POST /api/v1/secrets", withAuth(applyBodyLimit(n.handleSecretCreate)))
 	mux.HandleFunc("PUT /api/v1/secrets/{name}", withAuth(applyBodyLimit(n.handleSecretUpdate)))
@@ -868,17 +622,12 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/secrets/{name}", withAuth(n.handleSecretGet))
 	mux.HandleFunc("DELETE /api/v1/secrets/{name}", withAuth(n.handleSecretDelete))
 
-	// Files — the public endpoint only serves files from the staging directory
-	// (<leleDir>/tmp/attachments/) without auth, for WebUI <img src>/links.
-	// The secure endpoint allows authenticated access to the broader leleDir.
 	mux.HandleFunc("POST /api/v1/files/upload", withAuth(n.handleFileUpload))
 	mux.HandleFunc("GET /api/v1/files/view", n.handleFileView)
 	mux.HandleFunc("GET /api/v1/files/view-secure", withAuth(n.handleFileViewSecure))
 
-	// Filesystem browsing (folder picker for the WebUI)
 	mux.HandleFunc("GET /api/v1/fs/list", withAuth(n.handleFsList))
 
-	// Language packs (lazy download from GitHub; builtins stay embedded)
 	mux.HandleFunc("GET /api/v1/locales", withAuth(n.handleLocalesList))
 	mux.HandleFunc("POST /api/v1/locales/refresh", withAuth(n.handleLocalesRefresh))
 	mux.HandleFunc("GET /api/v1/locales/{code}", withAuth(n.handleLocaleGet))
@@ -886,25 +635,6 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/locales/{code}", withAuth(n.handleLocaleUninstall))
 }
 
-// WEB-M13: corsMiddleware and securityHeadersMiddleware were removed from
-// this file. Production never wired them — the gateway mounts native routes
-// on the server mux (cmd/lele/gateway.go: nc.RegisterRoutes(srv.Mux())),
-// which applies pkg/server's live middleware and the canonical CSP in
-// pkg/security. The dead copies diverged from the live policy and gave tests
-// a false green. isOriginAllowed stays: it is live for the WebSocket
-// CheckOrigin path below.
-
-// isOriginAllowed decides whether a cross-origin WebSocket handshake may be
-// upgraded. checkOrigin already accepts same-origin requests (Origin.Host ==
-// r.Host) before calling this, so this function only ever sees genuinely
-// cross-origin traffic.
-//
-// GW-M6: the previous implementation returned true for ANY http/https origin
-// whenever cfg.Host was "0.0.0.0" — the default bind address — turning the
-// check into a no-op for every default install, and used HasPrefix on
-// "http://localhost", which also matched http://localhost.evil.com. Origins
-// are now parsed and compared by exact hostname. Extra origins (e.g. a dev
-// server on another port) must be listed explicitly in channels.native.cors_origins.
 func (n *NativeChannel) isOriginAllowed(origin string) bool {
 	for _, allowedOrigin := range n.cfg.CORSOrigins {
 		if origin == allowedOrigin {
@@ -917,8 +647,6 @@ func (n *NativeChannel) isOriginAllowed(origin string) bool {
 		return false
 	}
 
-	// Tauri desktop: exact, well-known origins only. A HasPrefix on "tauri://"
-	// would accept any scheme-relative variant.
 	switch origin {
 	case "tauri://localhost", "https://tauri.localhost":
 		return true
@@ -929,16 +657,10 @@ func (n *NativeChannel) isOriginAllowed(origin string) bool {
 	}
 	originHost := parsedOrigin.Hostname()
 
-	// Loopback names are always fine: the gateway is a local-first service and
-	// a browser page on localhost can only be served by something the user ran.
-	// Compared by equality, so "localhost.evil.com" no longer matches.
 	if originHost == "localhost" || originHost == "127.0.0.1" || originHost == "::1" {
 		return true
 	}
 
-	// The configured bind host is only meaningful as an allowlist entry when it
-	// is a concrete address. "0.0.0.0"/"::"/"" are bind wildcards, never a host
-	// a browser would put in Origin, so they must NOT imply "allow everything".
 	serverHost := n.cfg.Host
 	if serverHost == "" || serverHost == "0.0.0.0" || serverHost == "::" || serverHost == "*" {
 		return false
@@ -952,12 +674,6 @@ func (n *NativeChannel) checkOrigin(r *http.Request) bool {
 		return true
 	}
 
-	// Allow same-origin connections: the Origin the page was loaded from
-	// matches the host the request was sent to. This lets the WebUI open the
-	// WebSocket via any IP/hostname it was served from (e.g. a LAN IP such as
-	// http://192.168.0.171:18790) without explicit CORS configuration, while
-	// still rejecting cross-origin requests. Mirrors gorilla/websocket's
-	// default same-origin check.
 	if parsedOrigin, err := url.Parse(origin); err == nil && parsedOrigin.Host == r.Host {
 		return true
 	}
@@ -966,14 +682,8 @@ func (n *NativeChannel) checkOrigin(r *http.Request) bool {
 }
 
 func (n *NativeChannel) authMiddleware(next http.Handler) http.Handler {
-	// Rejections used to leave no trace at all, so "I keep getting logged out"
-	// was impossible to confirm or locate after the fact. Sampled per source so
-	// a stuck client polling with a dead token cannot write the log full.
 	reject := func(w http.ResponseWriter, r *http.Request, status int, message, code, reason string) {
 		host := extractHost(r.RemoteAddr)
-		// Sampled per source address, so a client stuck polling with a dead
-		// token cannot fill the log, while a real user's sign-out still leaves
-		// a trace that names the endpoint and the reason.
 		if n.authLogLimiter.sample(host + "|auth") {
 			log.Printf("WARNING: auth rejected %s %s from %s: %s (%s)", r.Method, r.URL.Path, host, reason, code)
 		}
@@ -1022,14 +732,7 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		sessionKey = n.agentLoop.ResolveSessionKey(sessionKey)
 	}
 
-	// Outbound file attachments (send_file tool): make them servable by
-	// /api/v1/files/view (staging outside paths under <leleDir>/tmp/attachments)
-	// and persist them on the assistant message so they survive reloads. This
-	// must happen BEFORE any emit below so the history.updated refetch the
-	// frontend triggers already sees the attachments.
 	if len(msg.Attachments) > 0 {
-		// Copy before mutating: the same OutboundMessage may be delivered to
-		// other channel subscribers sharing the slice backing array.
 		staged := make([]bus.FileAttachment, len(msg.Attachments))
 		copy(staged, msg.Attachments)
 		stageAttachments(staged, n.cfg.LeleDir)
@@ -1042,7 +745,6 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	switch msg.Event {
 	case "message.stream":
 		done := msg.Metadata["done"] == "true"
-		// Persist stream chunk directly in the session file
 		if n.agentLoop != nil {
 			if !done {
 				n.agentLoop.AppendAssistantChunk(sessionKey, msg.Content)
@@ -1061,11 +763,6 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			newWSThinkingPayload(msg.MessageID, sessionKey, msg.Content, msg.Metadata), msg.MessageID)
 		return
 	case "message.discard":
-		// The agent threw away an iteration it had already streamed to this
-		// client: it carries no content and nothing of it survives, so the
-		// session is NOT touched here (no append, no finalize) — the only job
-		// of the event is to carry the streamed message id back to the client
-		// so it can drop the bubble that history will never confirm.
 		n.emitNativeEvent(sessionKey, "message.discard", WSMessageDiscardPayload{
 			MessageID:  msg.MessageID,
 			SessionKey: sessionKey,
@@ -1091,12 +788,6 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		if msg.Metadata != nil && msg.Metadata["result"] != "" {
 			result = msg.Metadata["result"]
 		}
-		// A completed spawn tool means a new subagent task exists: drop the
-		// cached list for the PARENT session (sessionKey is resolved from
-		// msg.ChatID above) before emitting, so the refresh the WebUI makes on
-		// this event cannot be served a pre-spawn payload. Same event set the
-		// TUI invalidates on (pkg/tui/handlers_events.go); without this the
-		// sidebar could miss a just-spawned task for up to subagentsCacheTTL.
 		if msg.Metadata["tool"] == "spawn" {
 			n.invalidateSubagentsCache(sessionKey)
 		}
@@ -1109,11 +800,6 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		}, "")
 		return
 	case "subagent.result":
-		// The task reached a terminal state: invalidate before emitting so the
-		// list the client refetches carries the final status instead of the
-		// "running" entry cached moments earlier. sessionKey is the parent
-		// session (the event is published on the parent's key), which is also
-		// the key the REST endpoint caches under.
 		n.invalidateSubagentsCache(sessionKey)
 		n.emitNativeEvent(sessionKey, "subagent.result", WSToolResultPayload{
 			SessionKey:         sessionKey,
@@ -1124,11 +810,6 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		}, "")
 		return
 	case "history.updated":
-		// The agent persisted messages outside the stream/complete path — the
-		// mid-turn subagent notices it injects into a running turn. The
-		// payload mirrors the history.updated emits of the normal completion
-		// path below, so clients handle it with the same refetch; reason lets
-		// them tell the two apart.
 		sessionName := ""
 		if n.agentLoop != nil {
 			sessionName = n.agentLoop.GetName(sessionKey)
@@ -1201,10 +882,6 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		}, "")
 		return
 	case "command.applied":
-		// A user-defined (harness) slash command was expanded into the prompt
-		// for this turn. Every field arrives pre-resolved in Metadata (see
-		// messageProcessorImpl.publishCommandApplied), so this branch needs no
-		// agent loop at all — only the sessionKey Send already computed.
 		n.emitNativeEvent(sessionKey, "command.applied", WSCommandAppliedPayload{
 			SessionKey:  sessionKey,
 			Command:     msg.Metadata["command"],
@@ -1216,12 +893,6 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		}, "")
 		return
 	case "turn.end":
-		// turn.end exists for channels that show transient "the bot is
-		// working" state (Telegram's typing indicator). The WebUI derives its
-		// processing state from message.ack/message.complete, so it has
-		// nothing to clear here — and it must NOT fall through to the
-		// full-message path below, which would emit a spurious empty
-		// message.complete on every turn whose final message was suppressed.
 		return
 	}
 
@@ -1230,29 +901,11 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		messageID = uuid.New().String()
 	}
 
-	// A failed turn is delivered through this legacy full-message path (the
-	// agent published the legacy "❌ Error …" text as a normal final answer).
-	// The outbound Metadata carries the marker set by pkg/agent/loop.go; it is
-	// mirrored onto message.complete so the client can paint the failure as an
-	// error box immediately instead of waiting for the history refetch.
 	isErrorMessage := msg.Metadata["error"] == "true"
 
-	// Skip duplicate message.stream if content was already delivered via
-	// streaming (the provider's ChatStream already sent chunks via onChunk).
-	// This prevents the frontend from receiving two message.stream events
-	// with Done=true, which causes visual flickering.
-	//
-	// HasStreamedContent checks if the session already has a streaming
-	// assistant message with content. Since multi-iteration LLM runs stream
-	// each response, the streaming message covers both the exact messageID
-	// and iteration-suffixed variants.
 	alreadyStreamed := n.agentLoop != nil && n.agentLoop.HasStreamedContent(sessionKey)
 
 	if alreadyStreamed {
-		// Content was already delivered via streaming chunks.
-		// Only send message.complete + history.updated — these signal the
-		// frontend to finalize the message and refetch canonical history.
-		// Do NOT re-emit message.stream regardless of attachments.
 		n.emitNativeEvent(sessionKey, "message.complete", WSMessageCompletePayload{
 			MessageID:   messageID,
 			SessionKey:  sessionKey,
@@ -1274,15 +927,6 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	}
 
 	if msg.Content == "" && len(msg.Attachments) == 0 {
-		// Even with empty final content we MUST emit message.complete +
-		// history.updated: message.complete is the turn-end signal the frontend
-		// uses to clear its processing state and finalize the assistant
-		// placeholder created on message.ack (streaming:true). Suppressing it
-		// leaves the WebUI loading spinner stuck until the HTTP polling
-		// safety-net kicks in (and the placeholder stale if the poll misses
-		// it). An empty-content complete is safe client-side:
-		// applyMessageComplete keeps the existing accumulated content when the
-		// server sends none (web/src/hooks/streamingOps.ts).
 		var sessionName string
 		if n.agentLoop != nil {
 			sessionName = n.agentLoop.GetName(sessionKey)
@@ -1310,7 +954,6 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		Error:       isErrorMessage,
 	}, messageID)
 
-	// Signal that session data has been persisted and is safe to refetch
 	n.emitNativeEvent(sessionKey, "history.updated", map[string]interface{}{
 		"session_key": sessionKey,
 		"name":        n.agentLoop.GetName(sessionKey),
@@ -1318,11 +961,8 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 }
 
 const (
-	// wsReconnectWindow is how long a disconnected client can reconnect
-	// and resume its session without losing subscriptions or buffered events.
 	wsReconnectWindow = 30 * time.Second
-	// wsMaxPendingMsgs caps the number of events buffered during the reconnect window.
-	wsMaxPendingMsgs = 512
+	wsMaxPendingMsgs  = 512
 )
 
 func (n *NativeChannel) addWSClient(client *WSClient) {
@@ -1331,9 +971,6 @@ func (n *NativeChannel) addWSClient(client *WSClient) {
 	n.wsClients[client.ID] = client
 }
 
-// closeDoneChan safely closes a channel, handling nil and already-closed
-// channels. Uses recover because Go has no try-close idiom. Called under
-// client.mu where noted; close() itself does not acquire any lock.
 func closeDoneChan(ch chan struct{}) {
 	if ch == nil {
 		return
@@ -1342,8 +979,6 @@ func closeDoneChan(ch chan struct{}) {
 	close(ch)
 }
 
-// removeWSClient permanently removes and cleans up a WebSocket client.
-// It cancels any pending reconnect timer and frees all resources.
 func (n *NativeChannel) removeWSClient(clientID string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -1352,30 +987,6 @@ func (n *NativeChannel) removeWSClient(clientID string) {
 	}
 }
 
-// abandonWSClientLocked fully tears down a client the channel has decided to
-// discard: an explicitly removed client, one whose reconnect window expired,
-// one Stop()ped at shutdown, or — the SURV-03 case — one whose SendChan is
-// wedged (QueueSend timed out / buffer full) and was flagged for cleanup by a
-// broadcast.
-//
-// Signal discipline (SURV-03): teardown signals via `done` and `closed`, and
-// deliberately does NOT close SendChan. Closing a channel while any goroutine
-// is still blocked sending on it panics ("send on closed channel"), and
-// QueueSend senders block in `select { case SendChan <- data }` after passing
-// the closed check — precisely the wedged-client case. Both consumers are
-// already covered without close(SendChan):
-//   - wsWriteLoop exits when the captured `done` closes (select case)
-//   - QueueSend returns immediately: closed-flag check at entry, or the
-//     `done` case if it is already parked on a full channel
-//
-// The abandoned SendChan (plus any buffered frames) becomes unreachable once
-// the last reference drops and is reclaimed by the GC.
-//
-// Exactly-once: the exists-check + delete in n.wsClients by each caller's
-// loop under n.mu serializes removal, so the teardown runs at most once per
-// client. Callers MUST hold n.mu (hence the Locked suffix); client.mu is
-// taken inside for the state fields, respecting the documented lock order
-// NativeChannel.mu → WSClient.mu.
 func (n *NativeChannel) abandonWSClientLocked(client *WSClient) {
 	client.mu.Lock()
 	client.closed = true
@@ -1384,11 +995,6 @@ func (n *NativeChannel) abandonWSClientLocked(client *WSClient) {
 		client.reconnectTimer = nil
 	}
 	client.reconnecting = false
-	// Close done WITHOUT replacing it: this client is permanently discarded,
-	// so no new loops will ever capture a fresh channel. Keeping the closed
-	// channel in place lets every late observer (loops that captured it at
-	// entry, doneClosed probes) see the exit signal. Paths where the client
-	// lives on (markWSClientReconnecting, reconnectWSClient) still replace it.
 	closeDoneChan(client.done)
 	client.mu.Unlock()
 
@@ -1398,10 +1004,6 @@ func (n *NativeChannel) abandonWSClientLocked(client *WSClient) {
 	delete(n.wsClients, client.ID)
 }
 
-// removeAbandonedClients tears down the clients flagged by a broadcast's
-// QueueSend failures. It re-checks membership under n.mu so a client already
-// removed by another path (read-loop error, reconnect expiry, Stop) is
-// skipped — that exists-check is what makes close-once safe.
 func (n *NativeChannel) removeAbandonedClients(ids []string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -1412,28 +1014,18 @@ func (n *NativeChannel) removeAbandonedClients(ids []string) {
 	}
 }
 
-// markWSClientReconnecting puts a client into reconnecting state instead of
-// fully removing it. A 30-second timer is started; if the client doesn't
-// reconnect before it fires, the client is permanently removed.
 func (n *NativeChannel) markWSClientReconnecting(client *WSClient) {
 	client.mu.Lock()
-	// A reconnect may have already replaced Conn while the old read loop was
-	// exiting. Only tear down the connection this loop was using.
 	if !client.reconnecting {
 		client.reconnecting = true
 		client.disconnectedAt = time.Now()
-		client.closed = false // not closed yet, QueueSend will buffer
+		client.closed = false
 		client.pendingMsgs = nil
 		client.maxPendingMsgs = wsMaxPendingMsgs
 	}
-	// Signal stale wsWriteLoop/wsReadLoop to exit, then create a fresh done
-	// channel for the next connection. The old loops captured the old channel
-	// at entry, so they see the close; the new loop will capture the new one.
 	closeDoneChan(client.done)
 	client.done = make(chan struct{})
 
-	// Close the old connection — signal the write loop to exit.
-	// Leave Conn alone if a newer connection is already attached.
 	oldConn := client.Conn
 	if oldConn != nil && client.reconnecting {
 		client.Conn = nil
@@ -1443,7 +1035,6 @@ func (n *NativeChannel) markWSClientReconnecting(client *WSClient) {
 		oldConn.Close()
 	}
 
-	// Start the expiry timer. If the timer fires, remove permanently.
 	client.mu.Lock()
 	if client.reconnectTimer != nil {
 		client.reconnectTimer.Stop()
@@ -1463,9 +1054,6 @@ func (n *NativeChannel) markWSClientReconnecting(client *WSClient) {
 	})
 }
 
-// findReconnectingClient looks for an existing client in reconnecting state
-// that matches the given userID. Only one reconnecting slot per userID is
-// allowed; the most recent disconnected session is returned.
 func (n *NativeChannel) findReconnectingClient(userID string) *WSClient {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
@@ -1481,25 +1069,16 @@ func (n *NativeChannel) findReconnectingClient(userID string) *WSClient {
 	return nil
 }
 
-// reconnectWSClient resumes a disconnected WebSocket client with a new
-// connection. It restores the read/write loops, flushes buffered messages,
-// and sends a reconnected welcome event.
 func (n *NativeChannel) reconnectWSClient(client *WSClient, conn *websocket.Conn) []json.RawMessage {
 	client.mu.Lock()
-	// Stop the expiry timer
 	if client.reconnectTimer != nil {
 		client.reconnectTimer.Stop()
 		client.reconnectTimer = nil
 	}
 
-	// Signal the old write/read loops to exit via a fresh done channel.
-	// The old loops captured the previous channel at entry, so they see the
-	// close and exit. New loops launched after this return will capture the
-	// fresh channel.
 	closeDoneChan(client.done)
 	client.done = make(chan struct{})
 
-	// Drain any stale messages from the old SendChan
 	for {
 		select {
 		case <-client.SendChan:
@@ -1509,10 +1088,8 @@ func (n *NativeChannel) reconnectWSClient(client *WSClient, conn *websocket.Conn
 	}
 drained:
 
-	// Capture buffered messages before clearing state
 	buffered := client.pendingMsgs
 
-	// Restore active state
 	client.Conn = conn
 	client.reconnecting = false
 	client.closed = false
@@ -1529,16 +1106,6 @@ drained:
 	return buffered
 }
 
-// hasLiveClientFor reports whether some connected, non-reconnecting client is
-// subscribed to sessionKey. It mirrors broadcastToSession's targeting rules -
-// sessionKeyMatches on the client's own key, then Subscriptions, then the
-// ResolveSessionKey fallback (skipped when there is no agent loop, exactly as
-// broadcastToSession skips it) - but ALSO requires !reconnecting and !closed
-// under client.mu. That extra bar is the point: a reconnecting client's
-// pendingMsgs buffer is in-memory and dies with the process, so counting it as
-// live would let Send "succeed" on a message that is really lost, and the
-// durable row would be completed instead of retried. O(#clients), typically
-// 1-3.
 func (n *NativeChannel) hasLiveClientFor(sessionKey string) bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
@@ -1592,8 +1159,6 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 			targets = append(targets, client)
 			continue
 		}
-		// Snapshot subscription keys under client.mu to avoid racing with
-		// concurrent writes (handleWSSubscribe, handleWebSocket reconnect).
 		client.mu.Lock()
 		subs := make([]string, 0, len(client.Subscriptions))
 		for k := range client.Subscriptions {
@@ -1679,8 +1244,6 @@ func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []
 
 		absPath, err = filepath.EvalSymlinks(absPath)
 		if err != nil {
-			// Used to be a silent continue: this branch dropped every
-			// attachment (missing file included) without leaving any trace.
 			logger.WarnCF("native", "Attachment path cannot be resolved",
 				map[string]interface{}{
 					"session_key": sessionKey,
@@ -1690,11 +1253,6 @@ func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []
 			continue
 		}
 
-		// The path above is resolved (EvalSymlinks) so the allowed directory
-		// must be canonical too — comparing against filepath.Abs(uploadDir)
-		// rejected every attachment as soon as LeleDir traversed a symlink.
-		// isContainedIn canonicalizes both sides and is Rel-based, so the
-		// sibling directory "uploads-evil" no longer matches either.
 		if !isContainedIn(absPath, uploadDir) {
 			logger.WarnCF("native", "Attachment path outside upload directory rejected",
 				map[string]interface{}{
@@ -1727,9 +1285,6 @@ func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []
 
 		mimeType := detectMimeType(absPath)
 
-		// Temporary shares the predicate of the containment guard above:
-		// keeping the two in sync is what makes persistAttachment move the
-		// staged file instead of copying it (and leaking the staging copy).
 		attachments = append(attachments, bus.FileAttachment{
 			Path:      absPath,
 			Name:      filepath.Base(absPath),
@@ -1742,16 +1297,11 @@ func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []
 }
 
 func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bool {
-	// Native channel clients are all on the same machine/lele instance.
-	// All native sessions are shared across all native clients.
-	// We still validate the client exists (valid auth token) but don't
-	// restrict session access to individual clients.
 	_, ok := n.auth.GetClient(clientID)
 	if !ok {
 		return false
 	}
 
-	// Subagent sessions require the parent session to exist in the agent loop
 	isSubagent := strings.HasPrefix(sessionKey, "subagent:")
 	if !isSubagent {
 		if idx := strings.LastIndex(sessionKey, ":subagent-"); idx > 0 {
@@ -1768,8 +1318,6 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 		}
 	}
 
-	// All native sessions are shared — any authenticated native client
-	// can access any native session.
 	return true
 }
 
@@ -1779,12 +1327,11 @@ func (c *WSClient) Send(data []byte) error {
 
 func (c *WSClient) QueueSend(data []byte) error {
 	c.mu.Lock()
-	done := c.done // snapshot under the lock: removal/reconnect replaces this field (SURV-03 race)
+	done := c.done
 	if c.closed {
 		c.mu.Unlock()
 		return fmt.Errorf("client is closed")
 	}
-	// If reconnecting, buffer messages so they can be flushed on reconnection.
 	if c.reconnecting {
 		if len(c.pendingMsgs) >= c.maxPendingMsgs {
 			c.mu.Unlock()
@@ -1799,9 +1346,6 @@ func (c *WSClient) QueueSend(data []byte) error {
 	timer := time.NewTimer(wsQueueSendTimeout)
 	defer timer.Stop()
 
-	// done is checked alongside the enqueue timeout: once the client has been
-	// removed (SURV-03 teardown), SendChan may already be closed and this call
-	// must return immediately instead of burning the whole timeout window.
 	select {
 	case c.SendChan <- data:
 		return nil
@@ -1869,8 +1413,6 @@ func getQueryParam(r *http.Request, key string) string {
 	return r.URL.Query().Get(key)
 }
 
-// handleBackgroundExecs returns all background processes.
-// GET /api/v1/background-exec?include_completed=true
 func (n *NativeChannel) handleBackgroundExecs(w http.ResponseWriter, r *http.Request) {
 	includeCompleted := r.URL.Query().Get("include_completed") == "true"
 	processes := n.agentLoop.GetBackgroundExecs(includeCompleted)
@@ -1879,8 +1421,6 @@ func (n *NativeChannel) handleBackgroundExecs(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// handleBackgroundExecOutput returns the output of a specific background process.
-// GET /api/v1/background-exec/{id}/output?tail=N
 func (n *NativeChannel) handleBackgroundExecOutput(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -1907,8 +1447,6 @@ func (n *NativeChannel) handleBackgroundExecOutput(w http.ResponseWriter, r *htt
 	})
 }
 
-// handleBackgroundExecStop stops a running background process.
-// POST /api/v1/background-exec/{id}/stop
 func (n *NativeChannel) handleBackgroundExecStop(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -1927,8 +1465,6 @@ func (n *NativeChannel) handleBackgroundExecStop(w http.ResponseWriter, r *http.
 	})
 }
 
-// handleBackgroundExecStream provides real-time SSE streaming of background process output.
-// GET /api/v1/background-exec/{id}/stream
 func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -1946,7 +1482,6 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Verify the process exists before starting the stream
 	_, _, _, err := n.agentLoop.GetBackgroundExecOutput(id, 0)
 	if err != nil {
 		fmt.Fprintf(w, "data: %s\n\n", mustMarshal(map[string]interface{}{"error": err.Error()}))
@@ -1956,9 +1491,6 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 
 	lastLen := 0
 
-	// GW-L9: clear the server-level WriteTimeout so the stream is not
-	// killed mid-body after 30s.  Each individual write still gets a
-	// per-write deadline via sseGuardedWrite.
 	rc := http.NewResponseController(w)
 	if err := rc.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
 		logger.DebugCF("native", "bg exec stream: could not clear write deadline", map[string]interface{}{"error": err})
@@ -1967,11 +1499,6 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	// GW-L9 review M2: pre-fix, the server WriteTimeout was an accidental
-	// backstop for this loop; now that the stream survives it, cap its
-	// wall-clock lifetime explicitly. 24h is generous enough for any
-	// legitimate background process (the loop normally exits via the done
-	// event or client disconnect long before this).
 	bgDeadline := time.After(24 * time.Hour)
 
 	for {
@@ -2019,11 +1546,6 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 	}
 }
 
-// ============================================================================
-// Cron job handlers
-// ============================================================================
-
-// cronScheduleInput is the request body shape for creating/updating a schedule.
 type cronScheduleInput struct {
 	Kind    string `json:"kind"`
 	AtMS    *int64 `json:"atMs,omitempty"`
@@ -2032,7 +1554,6 @@ type cronScheduleInput struct {
 	TZ      string `json:"tz,omitempty"`
 }
 
-// cronSpawnInput mirrors cron.SpawnConfig for API input.
 type cronSpawnInput struct {
 	Task     string `json:"task"`
 	Label    string `json:"label,omitempty"`
@@ -2041,9 +1562,6 @@ type cronSpawnInput struct {
 	Model    string `json:"model,omitempty"`
 }
 
-// cronJobInput is the request body for creating or updating a cron job.
-// Message, Command and Spawn are raw JSON so updates can distinguish
-// between "not provided" (nil), "explicitly cleared" (null), and "set".
 type cronJobInput struct {
 	Name     string            `json:"name"`
 	Enabled  *bool             `json:"enabled,omitempty"`
@@ -2056,9 +1574,6 @@ type cronJobInput struct {
 	Spawn    json.RawMessage   `json:"spawn,omitempty"`
 }
 
-// parseStringField decodes a raw JSON string field. It returns
-// ("", false, nil) when omitted, ("", true, nil) for an explicit null,
-// and the string value otherwise.
 func parseStringField(raw json.RawMessage) (string, bool, error) {
 	if raw == nil {
 		return "", false, nil
@@ -2074,9 +1589,6 @@ func parseStringField(raw json.RawMessage) (string, bool, error) {
 	return s, true, nil
 }
 
-// parseSpawnInput decodes the raw spawn JSON. It returns (nil, false, nil)
-// when the field was omitted, (nil, true, nil) for an explicit null (clear),
-// and the parsed config otherwise.
 func parseSpawnInput(raw json.RawMessage) (*cronSpawnInput, bool, error) {
 	if raw == nil {
 		return nil, false, nil
@@ -2092,9 +1604,6 @@ func parseSpawnInput(raw json.RawMessage) (*cronSpawnInput, bool, error) {
 	return &in, true, nil
 }
 
-// validateSpawnInput checks the spawn configuration and resolves it to the
-// service type. The agent ID, when provided, must reference an existing agent.
-// The model, when provided, must reference a configured provider.
 func (n *NativeChannel) validateSpawnInput(in *cronSpawnInput) (*cron.SpawnConfig, error) {
 	if in == nil {
 		return nil, nil
@@ -2131,12 +1640,6 @@ func (n *NativeChannel) validateSpawnInput(in *cronSpawnInput) (*cron.SpawnConfi
 	}, nil
 }
 
-// validateSpawnModel checks that a model override can actually be honored at
-// runtime. It mirrors the resolver chain used by subagent spawns
-// (ResolveModelAlias -> provider extraction -> CreateProviderForCandidate) so
-// a model accepted at job-creation time cannot later be silently dropped.
-// Models may be "provider:model" or a bare model name (resolved against the
-// default provider at runtime).
 func (n *NativeChannel) validateSpawnModel(model string) error {
 	ref := providers.ParseModelRef(model, "")
 	if ref == nil {
@@ -2144,20 +1647,14 @@ func (n *NativeChannel) validateSpawnModel(model string) error {
 	}
 	cfg := n.cfgSnapshot()
 	if cfg == nil {
-		// Keep lenient behavior when no config snapshot is available.
 		return nil
 	}
-	// Same alias resolution as the runtime resolver (pkg/agent tool_coordinator).
 	resolved := cfg.Providers.ResolveModelAlias(model, cfg.Agents.Defaults.Provider)
-	// Extract the provider name the same way the runtime does
-	// (agent.extractProviderFromModel delegates to providers.ParseModelRef).
-	// Inlined here to avoid importing pkg/agent from pkg/channels.
 	providerName := cfg.Agents.Defaults.Provider
 	if idx := strings.Index(resolved, ":"); idx > 0 {
 		providerName = resolved[:idx]
 	}
 	if providerName == "" {
-		// No explicit provider and no default: only a shape check is possible.
 		return nil
 	}
 	if _, err := providers.CreateProviderForCandidate(cfg, providerName); err != nil {
@@ -2174,8 +1671,6 @@ func (n *NativeChannel) cronAvailable(w http.ResponseWriter) bool {
 	return true
 }
 
-// handleCronList returns all cron jobs.
-// GET /api/v1/cron?include_disabled=true
 func (n *NativeChannel) handleCronList(w http.ResponseWriter, r *http.Request) {
 	if !n.cronAvailable(w) {
 		return
@@ -2191,8 +1686,6 @@ func (n *NativeChannel) handleCronList(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleCronGet returns a single cron job.
-// GET /api/v1/cron/{id}
 func (n *NativeChannel) handleCronGet(w http.ResponseWriter, r *http.Request) {
 	if !n.cronAvailable(w) {
 		return
@@ -2206,8 +1699,6 @@ func (n *NativeChannel) handleCronGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"job": job})
 }
 
-// handleCronCreate creates a new cron job.
-// POST /api/v1/cron
 func (n *NativeChannel) handleCronCreate(w http.ResponseWriter, r *http.Request) {
 	if !n.cronAvailable(w) {
 		return
@@ -2277,9 +1768,6 @@ func (n *NativeChannel) handleCronCreate(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// Default channel to "native" so results are delivered to the WebUI.
-	// When the channel is empty, ExecuteJob would default to "cli" which is
-	// an internal channel whose outbound messages are silently dropped.
 	channel := input.Channel
 	if channel == "" {
 		channel = "native"
@@ -2307,8 +1795,6 @@ func (n *NativeChannel) handleCronCreate(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, map[string]interface{}{"job": job})
 }
 
-// handleCronUpdate updates an existing cron job.
-// PUT /api/v1/cron/{id}
 func (n *NativeChannel) handleCronUpdate(w http.ResponseWriter, r *http.Request) {
 	if !n.cronAvailable(w) {
 		return
@@ -2366,7 +1852,6 @@ func (n *NativeChannel) handleCronUpdate(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err.Error(), "invalid_spawn")
 		return
 	} else if spawnProvided {
-		// Explicitly provided: set ("spawn": {...}) or clear ("spawn": null).
 		spawnConfig, err := n.validateSpawnInput(spawnIn)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error(), "invalid_spawn")
@@ -2375,12 +1860,10 @@ func (n *NativeChannel) handleCronUpdate(w http.ResponseWriter, r *http.Request)
 		existing.Payload.Spawn = spawnConfig
 	}
 
-	// A job must retain at least one action.
 	if existing.Payload.Message == "" && existing.Payload.Command == "" && existing.Payload.Spawn == nil {
 		writeError(w, http.StatusBadRequest, "message, command, or spawn task is required", "missing_message")
 		return
 	}
-	// Command and spawn jobs never deliver directly.
 	if existing.Payload.Command != "" || existing.Payload.Spawn != nil {
 		existing.Payload.Deliver = false
 	}
@@ -2393,8 +1876,6 @@ func (n *NativeChannel) handleCronUpdate(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"job": existing})
 }
 
-// handleCronDelete removes a cron job.
-// DELETE /api/v1/cron/{id}
 func (n *NativeChannel) handleCronDelete(w http.ResponseWriter, r *http.Request) {
 	if !n.cronAvailable(w) {
 		return
@@ -2407,8 +1888,6 @@ func (n *NativeChannel) handleCronDelete(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"id": id, "removed": true})
 }
 
-// handleCronEnable enables a cron job.
-// POST /api/v1/cron/{id}/enable
 func (n *NativeChannel) handleCronEnable(w http.ResponseWriter, r *http.Request) {
 	if !n.cronAvailable(w) {
 		return
@@ -2422,8 +1901,6 @@ func (n *NativeChannel) handleCronEnable(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"job": job})
 }
 
-// handleCronDisable disables a cron job.
-// POST /api/v1/cron/{id}/disable
 func (n *NativeChannel) handleCronDisable(w http.ResponseWriter, r *http.Request) {
 	if !n.cronAvailable(w) {
 		return
@@ -2437,8 +1914,6 @@ func (n *NativeChannel) handleCronDisable(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]interface{}{"job": job})
 }
 
-// handleCronRun triggers a cron job immediately.
-// POST /api/v1/cron/{id}/run
 func (n *NativeChannel) handleCronRun(w http.ResponseWriter, r *http.Request) {
 	if !n.cronAvailable(w) {
 		return

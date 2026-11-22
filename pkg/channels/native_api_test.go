@@ -29,44 +29,33 @@ import (
 type nativeTestAgentLoop struct {
 	config             *config.Config
 	histories          map[string][]providers.Message
-	evicted            map[string][]providers.Message // messages evicted from in-memory history, loaded on demand
+	evicted            map[string][]providers.Message
 	sessionAgents      map[string]string
 	sessionModels      map[string]string
-	sessionFolders     map[string]string // sessionKey -> user-selected folder
-	sessionAliases     map[string]string // base -> resolved
+	sessionFolders     map[string]string
+	sessionAliases     map[string]string
 	sessionAliasesMu   sync.RWMutex
-	subagentParents    map[string]string // subagent_key -> parent_key
-	workspace          string            // Override workspace path for GetAgentInfo (default: "/tmp/workspace")
-	agentTools         []AgentToolInfo   // Override for ListAgentTools ("main" only; default: non-empty fake registry)
+	subagentParents    map[string]string
+	workspace          string
+	agentTools         []AgentToolInfo
 	sessionNames       map[string]string
 	sessionThinkLevels map[string]string
-	sessionSubagents   map[string][]SubagentTaskInfo      // sessionKey -> subagent tasks
-	processing         map[string]bool                    // sessionKey -> is session processing
-	inProgressTools    map[string]*session.InProgressTool // sessionKey -> running tool (chat-reload restore)
+	sessionSubagents   map[string][]SubagentTaskInfo
+	processing         map[string]bool
+	inProgressTools    map[string]*session.InProgressTool
 
-	// groupSnapshotsBySession lets a test control what the store-backed session
-	// lookup returns; groupSnapshotCalls records that the channel delegated to
-	// the agent loop instead of filtering memory itself (#239).
 	groupSnapshotsBySession map[string][]group.GroupSnapshot
 	groupSnapshotCalls      []string
 	groupSnapshotMu         sync.Mutex
-	// allGroupSnapshotsCalls counts uses of the memory-only API, which the
-	// session read path must no longer touch (#239).
-	allGroupSnapshotsCalls int
+	allGroupSnapshotsCalls  int
 
-	// attachFilesCalls records AttachFilesToLastAssistant invocations made by
-	// the outbound dispatch path (send_file staging/persistence).
 	attachFilesCalls []attachFilesCall
 	attachMu         sync.Mutex
 
-	// hintedAgents records HintSessionAgent calls so tests can prove the chat
-	// send paths route per-message agent_id through the advisory hint instead of
-	// the explicit-bind SetSessionAgent, which would reset the session model.
 	hintedAgents []hintCall
 	hintMu       sync.Mutex
 }
 
-// hintCall is one recorded HintSessionAgent invocation.
 type hintCall struct {
 	sessionKey string
 	agentID    string
@@ -100,10 +89,6 @@ func (m *nativeTestAgentLoop) SetSessionAgent(sessionKey, agentID string) {
 	m.sessionAgents[sessionKey] = agentID
 }
 
-// HintSessionAgent mirrors the production contract closely enough for the
-// channel tests: restating the current agent is a no-op, a differing agent still
-// binds, and the session model is left untouched either way (production preserves
-// the user's model override across a hint).
 func (m *nativeTestAgentLoop) HintSessionAgent(sessionKey, agentID string) {
 	m.hintMu.Lock()
 	m.hintedAgents = append(m.hintedAgents, hintCall{sessionKey: sessionKey, agentID: agentID})
@@ -115,9 +100,6 @@ func (m *nativeTestAgentLoop) HintSessionAgent(sessionKey, agentID string) {
 	m.sessionAgents[sessionKey] = agentID
 }
 
-// HintedAgents returns the (sessionKey, agentID) pairs received via
-// HintSessionAgent, so tests can prove the send paths use the hint rather than
-// the explicit-bind SetSessionAgent.
 func (m *nativeTestAgentLoop) HintedAgents() []hintCall {
 	m.hintMu.Lock()
 	defer m.hintMu.Unlock()
@@ -150,9 +132,6 @@ func (m *nativeTestAgentLoop) GetAgentInfo(agentID string) (AgentBasicInfo, bool
 	}, true
 }
 
-// ListAgentTools mirrors GetAgentInfo: only "main" exists in the fake. When a
-// test doesn't set agentTools, it returns a small non-empty registry so catalog
-// handlers can be exercised without per-test setup.
 func (m *nativeTestAgentLoop) ListAgentTools(agentID string) ([]AgentToolInfo, bool) {
 	if agentID != "main" {
 		return nil, false
@@ -186,8 +165,6 @@ func (m *nativeTestAgentLoop) LoadEvictedMessagesPage(sessionKey string, before,
 	if len(evicted) == 0 {
 		return nil
 	}
-	// The mock models the evicted region as seqs 0..len-1 in chronological
-	// order; `before` is an exclusive seq cursor (-1 = newest page).
 	end := len(evicted)
 	if before >= 0 && before < end {
 		end = before
@@ -342,8 +319,6 @@ func (m *nativeTestAgentLoop) GetThinkLevel(sessionKey string) string {
 }
 
 func (m *nativeTestAgentLoop) GetEffectiveThinkLevel(sessionKey string) string {
-	// The fake has no per-agent thinking_level config, so the effective level
-	// reduces to the session override.
 	return m.GetThinkLevel(sessionKey)
 }
 
@@ -463,8 +438,6 @@ func (m *nativeTestAgentLoop) AppendReasoningChunk(sessionKey, chunk string) {}
 
 func (m *nativeTestAgentLoop) FinalizeAssistantMessage(sessionKey string) {}
 
-// attachFilesCalls records (sessionKey, attachments) pairs passed to
-// AttachFilesToLastAssistant so tests can assert staging/persistence wiring.
 type attachFilesCall struct {
 	sessionKey  string
 	attachments []providers.MessageAttachment
@@ -522,8 +495,6 @@ func (m *nativeTestAgentLoop) AllGroupSnapshots() []group.GroupSnapshot {
 	return nil
 }
 
-// GroupSnapshotsForSession is the store-backed session lookup the channel now
-// delegates to (#239).
 func (m *nativeTestAgentLoop) GroupSnapshotsForSession(sessionKey string) []group.GroupSnapshot {
 	m.groupSnapshotMu.Lock()
 	defer m.groupSnapshotMu.Unlock()
@@ -531,7 +502,6 @@ func (m *nativeTestAgentLoop) GroupSnapshotsForSession(sessionKey string) []grou
 	return m.groupSnapshotsBySession[sessionKey]
 }
 
-// setGroupSnapshotsForSession publishes the snapshots a session should get.
 func (m *nativeTestAgentLoop) setGroupSnapshotsForSession(sessionKey string, snaps ...group.GroupSnapshot) {
 	m.groupSnapshotMu.Lock()
 	defer m.groupSnapshotMu.Unlock()
@@ -541,16 +511,12 @@ func (m *nativeTestAgentLoop) setGroupSnapshotsForSession(sessionKey string, sna
 	m.groupSnapshotsBySession[sessionKey] = snaps
 }
 
-// groupSnapshotCallCount reports how many times the channel delegated the
-// session group lookup to the agent loop.
 func (m *nativeTestAgentLoop) groupSnapshotCallCount() int {
 	m.groupSnapshotMu.Lock()
 	defer m.groupSnapshotMu.Unlock()
 	return len(m.groupSnapshotCalls)
 }
 
-// allGroupSnapshotsCallCount reports how many times the memory-only group API
-// was used; the session read path must leave it at zero (#239).
 func (m *nativeTestAgentLoop) allGroupSnapshotsCallCount() int {
 	m.groupSnapshotMu.Lock()
 	defer m.groupSnapshotMu.Unlock()
@@ -558,7 +524,6 @@ func (m *nativeTestAgentLoop) allGroupSnapshotsCallCount() int {
 }
 
 func (m *nativeTestAgentLoop) ResolveRoute(channel, peerKind, peerID string) string {
-	// Simple test implementation: use per-peer scope if configured, else main.
 	if m.config != nil && m.config.Session.DMScope == "per-peer" && peerKind == "direct" && peerID != "" {
 		return fmt.Sprintf("agent:main:direct:%s", peerID)
 	}
@@ -589,9 +554,6 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 	cfg.Channels.Native.MaxClients = 5
 	cfg.Channels.Native.SessionExpiryDays = 30
 
-	// Configure test providers for model endpoint tests. API keys are set so
-	// cron spawn model validation (which must be able to CREATE a provider,
-	// mirroring the runtime resolver) accepts these providers.
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"openai": {
 			Type:           "openai",
@@ -636,7 +598,6 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 
 	mux := http.NewServeMux()
 	channel.RegisterRoutes(mux)
-	// Routes already have auth middleware applied via withAuth wrapper
 	server := httptest.NewServer(security.Middleware()(mux))
 
 	t.Cleanup(func() {
@@ -663,8 +624,6 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 	}
 }
 
-// newNativeTestServerWithConfigPath creates a test server with a custom config path.
-// This is useful for tests that need to control the config file location.
 func newNativeTestServerWithConfigPath(t *testing.T, configPath string) *nativeTestServer {
 	t.Helper()
 
@@ -677,9 +636,6 @@ func newNativeTestServerWithConfigPath(t *testing.T, configPath string) *nativeT
 	cfg.Channels.Native.MaxClients = 5
 	cfg.Channels.Native.SessionExpiryDays = 30
 
-	// Configure test providers for model endpoint tests. API keys are set so
-	// cron spawn model validation (which must be able to CREATE a provider,
-	// mirroring the runtime resolver) accepts these providers.
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"openai": {
 			Type:           "openai",
@@ -725,7 +681,6 @@ func newNativeTestServerWithConfigPath(t *testing.T, configPath string) *nativeT
 
 	mux := http.NewServeMux()
 	channel.RegisterRoutes(mux)
-	// Routes already have auth middleware applied via withAuth wrapper
 	server := httptest.NewServer(security.Middleware()(mux))
 
 	t.Cleanup(func() {
@@ -752,10 +707,6 @@ func newNativeTestServerWithConfigPath(t *testing.T, configPath string) *nativeT
 	}
 }
 
-// TestHandleTools_ReadVideoGating pins the new read_video entry of the tools
-// endpoint: read_video is listed iff the session model's config sets the
-// "video" OR the "vision" capability flag (native video_url vs the
-// keyframes fallback), while read_image keeps tracking "vision" only.
 func TestHandleTools_ReadVideoGating(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -785,14 +736,11 @@ func TestHandleTools_ReadVideoGating(t *testing.T) {
 		return names
 	}
 
-	// Model without either flag: read_video must be hidden.
 	noVideo := fetchToolNames(t, "native:gating-no-video")
 	if noVideo["read_video"] {
 		t.Fatal("expected read_video to be absent for a model without video: true and vision: true")
 	}
 
-	// Add video- and vision-capable models to the fake config and point
-	// sessions at them: read_video must appear for both.
 	prov := ts.loop.config.Providers.Named["openai"]
 	prov.Models["video-model"] = config.ProviderModelConfig{Model: "video-actual", Video: true}
 	prov.Models["vision-model"] = config.ProviderModelConfig{Model: "vision-actual", Vision: true}
@@ -808,7 +756,6 @@ func TestHandleTools_ReadVideoGating(t *testing.T) {
 		t.Fatal("expected read_image to stay gated by vision, not video")
 	}
 
-	// Vision-only model: read_video listed (frames fallback), read_image too.
 	withVision := fetchToolNames(t, "native:gating-vision")
 	if !withVision["read_video"] {
 		t.Fatal("expected read_video to be present for a model with vision: true")
@@ -849,12 +796,6 @@ func TestNativeChannelAuthStatusInvalidTokenReturnsValidFalse(t *testing.T) {
 		t.Fatalf("client_id = %q, want empty", payload.ClientID)
 	}
 }
-
-// TestNativeChannelConfigPreflightAllowsPutFromSameHost was removed (WEB-M13):
-// it exercised NativeChannel.corsMiddleware, which production never wired —
-// native routes mount on the server mux whose live CORS policy (pkg/server)
-// was already re-verified by the audit. A green here validated headers that
-// never ship.
 
 func TestNativeChannelChatHistoryReturnsPersistedMessages(t *testing.T) {
 	ts := newNativeTestServer(t)
@@ -936,17 +877,14 @@ func TestNativeChannelSubagentHistoryReturnsMessages(t *testing.T) {
 		{Role: "assistant", Content: "Hi there!"},
 	}
 
-	// Register subagent history - new format: native:{parent_uuid}:{task_id}
 	subagentSessionKey := sessionKey + ":subagent-1"
 	ts.loop.histories[subagentSessionKey] = []providers.Message{
 		{Role: "user", Content: "Subagent task"},
 		{Role: "assistant", Content: "Subagent result"},
 	}
 
-	// Registrar relación parent-subagent (using new format without subagent: prefix)
 	ts.loop.subagentParents[sessionKey+":subagent-1"] = sessionKey
 
-	// Test subagent history endpoint
 	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.QueryEscape(sessionKey)+"/history/subagent-1", nil)
 	if err != nil {
 		t.Fatalf("NewRequest() error = %v", err)
@@ -990,7 +928,6 @@ func TestNativeChannelChatSessionsReturnsTrackedSessionKeys(t *testing.T) {
 	trackedSession := "native:" + ts.clientID + ":secondary"
 	ts.channel.auth.TrackSessionKey(ts.clientID, trackedSession)
 
-	// Both sessions need history so neither is skipped as empty
 	ts.loop.histories[ts.clientID] = []providers.Message{
 		{Role: "user", Content: "First message"},
 	}
@@ -1041,14 +978,10 @@ func TestChatHistory_ServesEvictedMessagesOnDemand(t *testing.T) {
 	sessionKey := "native:" + ts.clientID + ":evicted-history"
 	ts.channel.auth.TrackSessionKey(ts.clientID, sessionKey)
 
-	// Older messages were evicted (out-of-context) after compaction; they
-	// remain in SQLite and MUST be served page-by-page without ever being
-	// materialized back into the in-memory history.
 	ts.loop.evicted[sessionKey] = []providers.Message{
 		{Role: "user", Content: "Evicted-1"},
 		{Role: "assistant", Content: "Evicted-2"},
 	}
-	// Recent messages remain in the in-memory slice.
 	ts.loop.histories[sessionKey] = []providers.Message{
 		{Role: "user", Content: "Recent-1"},
 		{Role: "assistant", Content: "Recent-2"},
@@ -1076,8 +1009,6 @@ func TestChatHistory_ServesEvictedMessagesOnDemand(t *testing.T) {
 		return &payload
 	}
 
-	// 1) First page returns ONLY the resident window; evicted messages stay
-	//    out of memory (the whole point of on-demand loading).
 	payload := get("?limit=2")
 	if len(payload.Messages) != 2 {
 		t.Fatalf("page1 len(messages) = %d, want 2 (resident only)", len(payload.Messages))
@@ -1095,8 +1026,6 @@ func TestChatHistory_ServesEvictedMessagesOnDemand(t *testing.T) {
 		t.Fatalf("in-memory history = %d messages, want 2 (must stay untouched)", len(ts.loop.histories[sessionKey]))
 	}
 
-	// 2) Paging with the oldest resident ID as cursor crosses into the
-	//    evicted region and returns the newest evicted page with seq-based IDs.
 	beforeID := payload.Messages[0].ID
 	payload2 := get("?limit=2&before_id=" + url.QueryEscape(beforeID))
 	if len(payload2.Messages) != 2 {
@@ -1108,7 +1037,6 @@ func TestChatHistory_ServesEvictedMessagesOnDemand(t *testing.T) {
 	if payload2.HasMore {
 		t.Fatalf("page2 has_more = true, want false (reached oldest)")
 	}
-	// Evicted IDs embed the persisted seq and double as the next cursor.
 	if payload2.Messages[0].ID != "evicted:0" || payload2.Messages[1].ID != "evicted:1" {
 		t.Fatalf("page2 ids = [%q, %q], want [evicted:0, evicted:1]", payload2.Messages[0].ID, payload2.Messages[1].ID)
 	}
@@ -1116,8 +1044,6 @@ func TestChatHistory_ServesEvictedMessagesOnDemand(t *testing.T) {
 		t.Fatalf("in-memory history = %d messages after evicted page, want 2 (never materialized)", len(ts.loop.histories[sessionKey]))
 	}
 
-	// 3) Paging directly with an evicted cursor beyond the oldest seq returns
-	//    an empty final page without touching memory.
 	payload3 := get("?limit=2&before_id=evicted:0")
 	if len(payload3.Messages) != 0 {
 		t.Fatalf("page3 len(messages) = %d, want 0 (no messages older than evicted:0)", len(payload3.Messages))
@@ -1135,12 +1061,10 @@ func TestChatSessions_CountIncludesEvicted(t *testing.T) {
 	trackedSession := "native:" + ts.clientID + ":evicted-count"
 	ts.channel.auth.TrackSessionKey(ts.clientID, trackedSession)
 
-	// In-memory: 2 counted user/assistant messages.
 	ts.loop.histories[trackedSession] = []providers.Message{
 		{Role: "user", Content: "Recent user"},
 		{Role: "assistant", Content: "Recent assistant"},
 	}
-	// Evicted: 2 more user/assistant messages not in the in-memory slice.
 	ts.loop.evicted[trackedSession] = []providers.Message{
 		{Role: "user", Content: "Evicted user"},
 		{Role: "assistant", Content: "Evicted assistant"},
@@ -1177,7 +1101,6 @@ func TestChatSessions_CountIncludesEvicted(t *testing.T) {
 		t.Fatalf("expected session %q in payload %#v", trackedSession, payload.Sessions)
 	}
 
-	// The evicted messages must NOT have been materialized by handleChatSessions.
 	if len(ts.loop.evicted[trackedSession]) != 2 {
 		t.Fatalf("evicted pool mutated by handleChatSessions: %d remaining, want 2", len(ts.loop.evicted[trackedSession]))
 	}
@@ -1186,12 +1109,9 @@ func TestChatSessions_CountIncludesEvicted(t *testing.T) {
 func TestNativeChannelChatSessionsKindFilter(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// Tracked user session
 	userSession := "native:" + ts.clientID + ":user-chat"
 	ts.channel.auth.TrackSessionKey(ts.clientID, userSession)
 
-	// System sessions that exist in the shared session store but are NOT
-	// tracked by any native client (heartbeat + cron).
 	ts.loop.histories[userSession] = []providers.Message{
 		{Role: "user", Content: "Hello"},
 		{Role: "assistant", Content: "Hi"},
@@ -1327,8 +1247,6 @@ func TestNativeChannelChatSessionsKindFilter(t *testing.T) {
 	})
 
 	t.Run("kind filter keeps empty system sessions", func(t *testing.T) {
-		// An empty cron session (no messages) must still show up in the
-		// cron view so users can see that a cron run happened.
 		ts.loop.histories["cron-empty-job"] = []providers.Message{}
 
 		req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions?kind=cron", nil)
@@ -1429,7 +1347,6 @@ func TestNativeChannelCreateSessionAllowsAnyValidKey(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// Session creation accepts any valid key; ownership is validated on access
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
 	}
@@ -1519,11 +1436,9 @@ func TestNativeChannelSessionModelEndpoints(t *testing.T) {
 }
 
 func TestNativeChannelConfigUsesEditableDocument(t *testing.T) {
-	// Create a temporary config file with default values
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.json")
 
-	// Write a minimal config file with default native settings
 	defaultConfig := config.DefaultConfig()
 	configData, err := json.MarshalIndent(defaultConfig, "", "  ")
 	if err != nil {
@@ -1556,7 +1471,6 @@ func TestNativeChannelConfigUsesEditableDocument(t *testing.T) {
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	// Verificar que la respuesta contiene los datos esperados
 	configMap, ok := response.Config.(map[string]interface{})
 	if !ok {
 		t.Fatalf("config is not a map, got %T", response.Config)
@@ -1572,17 +1486,14 @@ func TestNativeChannelConfigUsesEditableDocument(t *testing.T) {
 		t.Fatal("native channel config not found or invalid")
 	}
 
-	// Verificar que el native config tiene valores por defecto (documento editable)
 	if native["host"] != "127.0.0.1" {
 		t.Errorf("host = %v, want 127.0.0.1 (default)", native["host"])
 	}
 
-	// JSON numbers are decoded as float64
 	if native["port"] != float64(18790) {
 		t.Errorf("port = %v, want 18790 (default)", native["port"])
 	}
 
-	// Verificar metadata
 	if response.Metadata.Source != "file" {
 		t.Errorf("metadata.source = %q, want 'file'", response.Metadata.Source)
 	}
@@ -1661,7 +1572,6 @@ func TestNativeChannelWebSocketSupportsQueryTokenAndStructuredEvents(t *testing.
 		t.Fatalf("complete payload = %#v, want msg-1/Hello back", completePayload)
 	}
 
-	// After message.complete, a history.updated event is emitted to signal persistence
 	historyUpdated := readWSMessage(t, conn)
 	if historyUpdated.Event != "history.updated" {
 		t.Fatalf("event after complete = %q, want history.updated", historyUpdated.Event)
@@ -1853,7 +1763,6 @@ func TestNativeChannelWebSocketBroadcastsToBaseSessionKeyWhenAliased(t *testing.
 	baseSessionKey := "native:" + ts.clientID
 	aliasedSessionKey := baseSessionKey + ":chat:1"
 
-	// Set up alias: base -> aliased
 	ts.loop.sessionAliasesMu.Lock()
 	ts.loop.sessionAliases[baseSessionKey] = aliasedSessionKey
 	ts.loop.sessionAliasesMu.Unlock()
@@ -1865,13 +1774,11 @@ func TestNativeChannelWebSocketBroadcastsToBaseSessionKeyWhenAliased(t *testing.
 	}
 	defer conn.Close()
 
-	// Read welcome
 	welcome := readWSMessage(t, conn)
 	if welcome.Event != "welcome" {
 		t.Fatalf("first event = %q, want welcome", welcome.Event)
 	}
 
-	// Subscribe to base session key
 	if err := conn.WriteJSON(map[string]interface{}{
 		"event": "subscribe",
 		"data": map[string]interface{}{
@@ -1881,21 +1788,18 @@ func TestNativeChannelWebSocketBroadcastsToBaseSessionKeyWhenAliased(t *testing.
 		t.Fatalf("WriteJSON() error = %v", err)
 	}
 
-	// Read subscribe.ack
 	ack := readWSMessage(t, conn)
 	if ack.Event != "subscribe.ack" {
 		t.Fatalf("ack event = %q, want subscribe.ack", ack.Event)
 	}
 
-	// Publish outbound message to the aliased session key (simulating what happens when a new chat starts)
 	ts.channel.Send(context.Background(), bus.OutboundMessage{
 		Channel:   ChannelName,
-		ChatID:    aliasedSessionKey, // Message is published with the resolved key
+		ChatID:    aliasedSessionKey,
 		Content:   "Message from aliased session",
 		MessageID: "msg-aliased-1",
 	})
 
-	// Should receive message.stream even though we subscribed to base key
 	stream := readWSMessage(t, conn)
 	if stream.Event != "message.stream" {
 		t.Fatalf("stream event = %q, want message.stream", stream.Event)
@@ -1906,7 +1810,6 @@ func TestNativeChannelWebSocketBroadcastsToBaseSessionKeyWhenAliased(t *testing.
 		t.Fatalf("stream payload = %#v, want msg-aliased-1/%s", streamPayload, aliasedSessionKey)
 	}
 
-	// Should also receive message.complete
 	complete := readWSMessage(t, conn)
 	if complete.Event != "message.complete" {
 		t.Fatalf("complete event = %q, want message.complete", complete.Event)
@@ -1917,8 +1820,6 @@ func TestNativeChannelWebSocketBroadcastsToBaseSessionKeyWhenAliased(t *testing.
 		t.Fatalf("complete payload = %#v, want msg-aliased-1/%s", completePayload, aliasedSessionKey)
 	}
 }
-
-// ==================== Config API Tests ====================
 
 func TestHandleConfig_Get(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -2283,7 +2184,6 @@ func TestNativeChannelAgentFiles_ListFiles(t *testing.T) {
 	ts := newNativeTestServer(t)
 	ts.loop.workspace = workspace
 
-	// Create test workspace with context files
 	for _, name := range []string{"AGENT.md", "SOUL.md", "MEMORY.md"} {
 		os.WriteFile(filepath.Join(workspace, name), []byte("test content"), 0644)
 	}
@@ -2313,12 +2213,11 @@ func TestNativeChannelAgentFiles_ListFiles(t *testing.T) {
 		t.Fatal("expected at least one file in response")
 	}
 
-	// Check that AGENT.md is listed
 	found := false
 	for _, f := range payload.Files {
 		if f.Name == "AGENT.md" {
 			found = true
-			if f.Size != 12 { // "test content" length
+			if f.Size != 12 {
 				t.Errorf("AGENT.md size = %d, want 12", f.Size)
 			}
 			break
@@ -2389,7 +2288,6 @@ func readBody(resp *http.Response) string {
 }
 
 func TestCheckOrigin(t *testing.T) {
-	// Build a minimal NativeChannel for unit-level checkOrigin tests.
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
 	cfg.Channels.Native.Host = "127.0.0.1"
@@ -2421,7 +2319,7 @@ func TestCheckOrigin(t *testing.T) {
 		name     string
 		origin   string
 		host     string
-		bindHost string // override channel.cfg.Host (empty: keep 127.0.0.1)
+		bindHost string
 		want     bool
 	}{
 		{
@@ -2454,12 +2352,10 @@ func TestCheckOrigin(t *testing.T) {
 			host:   "192.168.0.171:18790",
 			want:   true,
 		},
-		// GW-M6: the old code returned true for ANY origin when the configured
-		// bind host was the default wildcard.
 		{
 			name:     "wildcard bind host does not allow arbitrary origins",
 			origin:   "http://evil.example.com",
-			host:     "192.168.0.171:18790", // differs from Origin -> reaches isOriginAllowed
+			host:     "192.168.0.171:18790",
 			bindHost: "0.0.0.0",
 			want:     false,
 		},
@@ -2504,13 +2400,11 @@ func TestCheckOrigin(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// For the CORSOrigins test, set the config value.
 			if tt.name == "cross-origin allowed via CORSOrigins config" {
 				channel.cfg.CORSOrigins = []string{"http://custom.example.com"}
 			} else {
 				channel.cfg.CORSOrigins = nil
 			}
-			// Bind host override: exercise the wildcard-bind path (GW-M6).
 			if tt.bindHost != "" {
 				channel.cfg.Host = tt.bindHost
 			} else {
@@ -2531,10 +2425,6 @@ func TestCheckOrigin(t *testing.T) {
 	}
 }
 
-// TestNativeChannelChatSessionsMeta verifies the lightweight metadata endpoint
-// (/api/v1/chat/sessions/meta). It must NOT load full history to check for
-// messages — it only uses HasMessages/getters, and any evicted messages must
-// stay in the evicted pool (not materialized).
 func TestNativeChannelChatSessionsMeta(t *testing.T) {
 	ts := newNativeTestServer(t)
 	trackedSession := "native:" + ts.clientID + ":meta"
@@ -2542,7 +2432,6 @@ func TestNativeChannelChatSessionsMeta(t *testing.T) {
 	ts.channel.auth.TrackSessionKey(ts.clientID, trackedSession)
 	ts.channel.auth.TrackSessionKey(ts.clientID, emptySession)
 
-	// trackedSession: has messages (and evicted ones).
 	ts.loop.histories[trackedSession] = []providers.Message{
 		{Role: "user", Content: "Recent user"},
 		{Role: "assistant", Content: "Recent assistant"},
@@ -2550,7 +2439,6 @@ func TestNativeChannelChatSessionsMeta(t *testing.T) {
 	ts.loop.evicted[trackedSession] = []providers.Message{
 		{Role: "user", Content: "Evicted user"},
 	}
-	// emptySession: tracked but never used → must be skipped.
 	ts.loop.histories[emptySession] = nil
 
 	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/meta", nil)
@@ -2590,14 +2478,11 @@ func TestNativeChannelChatSessionsMeta(t *testing.T) {
 		t.Fatalf("empty session %q should not appear in payload %#v", emptySession, payload.Sessions)
 	}
 
-	// The meta endpoint must NOT materialize evicted history.
 	if len(ts.loop.evicted[trackedSession]) != 1 {
 		t.Fatalf("evicted pool mutated by handleChatSessionsMeta: %d remaining, want 1", len(ts.loop.evicted[trackedSession]))
 	}
 }
 
-// TestNativeChannelChatSessionsMetaKindFilter verifies mode/kind filtering on
-// the lightweight endpoint and its pagination behavior.
 func TestNativeChannelChatSessionsMetaKindFilter(t *testing.T) {
 	ts := newNativeTestServer(t)
 	trackedSession := "native:" + ts.clientID + ":meta-kind"
@@ -2606,7 +2491,6 @@ func TestNativeChannelChatSessionsMetaKindFilter(t *testing.T) {
 		{Role: "user", Content: "Hello"},
 	}
 
-	// kind=chat filter should include it.
 	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/meta?kind=chat", nil)
 	if err != nil {
 		t.Fatalf("NewRequest() error = %v", err)
@@ -2633,7 +2517,6 @@ func TestNativeChannelChatSessionsMetaKindFilter(t *testing.T) {
 		t.Fatalf("kind=chat filter should include %q, got %#v", trackedSession, payload.Sessions)
 	}
 
-	// kind=heartbeat filter should exclude it.
 	req2, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/meta?kind=heartbeat", nil)
 	if err != nil {
 		t.Fatalf("NewRequest() error = %v", err)
@@ -2660,12 +2543,6 @@ func TestNativeChannelChatSessionsMetaKindFilter(t *testing.T) {
 	}
 }
 
-// TestChatHistory_DuplicateContentGetsDistinctIDs verifies that two messages
-// with identical content receive distinct IDs. Before the fix,
-// residentMessageID hashed only (role, content, toolCallID, toolCalls) so
-// duplicates collapsed into the same id — the WebUI lost one bubble (duplicate
-// React key) and before_id resolved to the first occurrence instead of the
-// intended one.
 func TestChatHistory_DuplicateContentGetsDistinctIDs(t *testing.T) {
 	ts := newNativeTestServer(t)
 	sessionKey := "native:" + ts.clientID + ":dup-content"
@@ -2702,7 +2579,6 @@ func TestChatHistory_DuplicateContentGetsDistinctIDs(t *testing.T) {
 
 	payload := get("?limit=50")
 
-	// 1) All 4 messages returned in order.
 	if len(payload.Messages) != 4 {
 		t.Fatalf("len(messages) = %d, want 4", len(payload.Messages))
 	}
@@ -2718,7 +2594,6 @@ func TestChatHistory_DuplicateContentGetsDistinctIDs(t *testing.T) {
 		ids[i] = m.ID
 	}
 
-	// 2) All 4 ids are distinct.
 	seen := make(map[string]bool, 4)
 	for i, id := range ids {
 		if seen[id] {
@@ -2727,28 +2602,22 @@ func TestChatHistory_DuplicateContentGetsDistinctIDs(t *testing.T) {
 		seen[id] = true
 	}
 
-	// 3) First assistant occurrence keeps the legacy format (no suffix).
 	expectedKey := residentMessageKey(ts.loop.histories[sessionKey][1])
 	expectedFirst := sessionKey + ":" + expectedKey
 	if ids[1] != expectedFirst {
 		t.Fatalf("messages[1].ID = %q, want %q (legacy format)", ids[1], expectedFirst)
 	}
 
-	// 4) Second assistant occurrence gets the -1 suffix.
 	expectedSecond := expectedFirst + "-1"
 	if ids[3] != expectedSecond {
 		t.Fatalf("messages[3].ID = %q, want %q", ids[3], expectedSecond)
 	}
 
-	// 5) Pagination targeting the SECOND occurrence (before_id = ids[3])
-	//    returns exactly 3 messages (all messages before the second "same answer").
 	payload2 := get("?limit=50&before_id=" + url.QueryEscape(ids[3]))
 	if len(payload2.Messages) != 3 {
 		t.Fatalf("before_id=ids[3] len(messages) = %d, want 3", len(payload2.Messages))
 	}
 
-	// 6) Pagination targeting the FIRST occurrence (before_id = ids[1])
-	//    returns exactly 1 message ("same question").
 	payload3 := get("?limit=50&before_id=" + url.QueryEscape(ids[1]))
 	if len(payload3.Messages) != 1 {
 		t.Fatalf("before_id=ids[1] len(messages) = %d, want 1", len(payload3.Messages))
@@ -2758,22 +2627,14 @@ func TestChatHistory_DuplicateContentGetsDistinctIDs(t *testing.T) {
 	}
 }
 
-// TestSetReloadMCP_NilSafe pins T3's channel-side contract: the setter is a
-// plain field write and the handler calling convention
-// (if n.reloadMCP != nil { n.reloadMCP() }) is safe with nothing wired —
-// no callback, a wired callback, and after un-wiring again. This lives in
-// the channels package because the field (and therefore the convention) is
-// unexported; T4 wires the real handler call sites on top of this.
 func TestSetReloadMCP_NilSafe(t *testing.T) {
 	n := &NativeChannel{}
 
-	// Nil from the start: the convention must be a no-op, not a panic.
 	n.SetReloadMCP(nil)
 	if n.reloadMCP != nil {
 		n.reloadMCP()
 	}
 
-	// A wired callback is invoked by the same convention.
 	calls := 0
 	n.SetReloadMCP(func() { calls++ })
 	if n.reloadMCP != nil {
@@ -2783,8 +2644,6 @@ func TestSetReloadMCP_NilSafe(t *testing.T) {
 		t.Fatalf("wired reloadMCP invoked %d times, want 1", calls)
 	}
 
-	// Un-wiring (SetReloadMCP(nil)) leaves the same convention callable
-	// without panic and without invoking the previous callback.
 	n.SetReloadMCP(nil)
 	if n.reloadMCP != nil {
 		n.reloadMCP()

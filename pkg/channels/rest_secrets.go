@@ -9,7 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/keyring"
 )
 
-// secretInput is the request body for creating/updating a secret.
 type secretInput struct {
 	Name        string   `json:"name"`
 	Value       string   `json:"value"`
@@ -18,8 +17,6 @@ type secretInput struct {
 	Scope       []string `json:"scope"`
 }
 
-// keyringAvailable reports whether the keyring service is wired up, writing an
-// error response and returning false if it is not.
 func (n *NativeChannel) keyringAvailable(w http.ResponseWriter) bool {
 	if n.keyringService == nil {
 		writeError(w, http.StatusServiceUnavailable, "keyring service not available", "keyring_unavailable")
@@ -28,8 +25,6 @@ func (n *NativeChannel) keyringAvailable(w http.ResponseWriter) bool {
 	return true
 }
 
-// handleSecretsList returns metadata for all secrets (no values).
-// GET /api/v1/secrets
 func (n *NativeChannel) handleSecretsList(w http.ResponseWriter, r *http.Request) {
 	if !n.keyringAvailable(w) {
 		return
@@ -48,8 +43,6 @@ func (n *NativeChannel) handleSecretsList(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// handleSecretGet returns a single secret's value (for UI "reveal").
-// GET /api/v1/secrets/{name}
 func (n *NativeChannel) handleSecretGet(w http.ResponseWriter, r *http.Request) {
 	if !n.keyringAvailable(w) {
 		return
@@ -71,8 +64,6 @@ func (n *NativeChannel) handleSecretGet(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// handleSecretCreate creates or updates a secret.
-// POST /api/v1/secrets
 func (n *NativeChannel) handleSecretCreate(w http.ResponseWriter, r *http.Request) {
 	if !n.keyringAvailable(w) {
 		return
@@ -98,10 +89,6 @@ func (n *NativeChannel) handleSecretCreate(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusCreated, map[string]interface{}{"secret": meta})
 }
 
-// handleSecretUpdate edits an existing secret. The name in the path is the
-// secret's key (it cannot be renamed) and an empty value keeps the stored one,
-// so metadata can be edited without re-sending the plaintext.
-// PUT /api/v1/secrets/{name}
 func (n *NativeChannel) handleSecretUpdate(w http.ResponseWriter, r *http.Request) {
 	if !n.keyringAvailable(w) {
 		return
@@ -128,8 +115,6 @@ func (n *NativeChannel) handleSecretUpdate(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]interface{}{"secret": meta})
 }
 
-// handleSecretDelete removes a secret.
-// DELETE /api/v1/secrets/{name}
 func (n *NativeChannel) handleSecretDelete(w http.ResponseWriter, r *http.Request) {
 	if !n.keyringAvailable(w) {
 		return
@@ -146,8 +131,6 @@ func (n *NativeChannel) handleSecretDelete(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]interface{}{"deleted": name})
 }
 
-// handleSecretsStatus returns backend info and secret count.
-// GET /api/v1/secrets/status
 func (n *NativeChannel) handleSecretsStatus(w http.ResponseWriter, r *http.Request) {
 	if !n.keyringAvailable(w) {
 		return
@@ -155,8 +138,6 @@ func (n *NativeChannel) handleSecretsStatus(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, n.keyringService.Status())
 }
 
-// handleSecretsAudit returns the in-memory access audit log.
-// GET /api/v1/secrets/audit
 func (n *NativeChannel) handleSecretsAudit(w http.ResponseWriter, r *http.Request) {
 	if !n.keyringAvailable(w) {
 		return
@@ -168,7 +149,6 @@ func (n *NativeChannel) handleSecretsAudit(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]interface{}{"audit": records})
 }
 
-// findSecretMeta looks up a secret's metadata by name.
 func (n *NativeChannel) findSecretMeta(name string) (keyring.SecretMeta, bool) {
 	all, err := n.keyringService.ListAll()
 	if err != nil {

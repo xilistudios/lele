@@ -10,8 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/cron"
 )
 
-// attachCronService wires a real cron service (backed by a temp store) into
-// the test server's native channel so the cron REST endpoints are usable.
 func attachCronService(t *testing.T, ts *nativeTestServer) *cron.CronService {
 	t.Helper()
 	cs := cron.NewCronService(filepath.Join(t.TempDir(), "cron.json"), nil)
@@ -235,7 +233,6 @@ func TestCronUpdateSpawn(t *testing.T) {
 	})
 
 	t.Run("clear spawn with explicit null", func(t *testing.T) {
-		// Build raw JSON body so "spawn": null is preserved.
 		raw := []byte(`{"spawn": null}`)
 		req, err := http.NewRequest(http.MethodPut, ts.server.URL+"/api/v1/cron/"+job.ID, bytes.NewReader(raw))
 		if err != nil {
@@ -257,7 +254,6 @@ func TestCronUpdateSpawn(t *testing.T) {
 	})
 
 	t.Run("omitted spawn leaves existing untouched", func(t *testing.T) {
-		// Re-add spawn first.
 		body := map[string]interface{}{
 			"spawn": map[string]interface{}{"task": "Keep me"},
 		}
@@ -267,7 +263,6 @@ func TestCronUpdateSpawn(t *testing.T) {
 		}
 		resp.Body.Close()
 
-		// Update only the name.
 		resp = doCronRequest(t, ts, http.MethodPut, "/api/v1/cron/"+job.ID, map[string]interface{}{"name": "renamed"})
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)

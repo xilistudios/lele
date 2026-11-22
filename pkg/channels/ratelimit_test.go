@@ -32,12 +32,9 @@ func TestExtractHost_FallbackNoPort(t *testing.T) {
 }
 
 func TestRateLimiter_SameHostDifferentPortsShareBucket(t *testing.T) {
-	// FIX-3: the middleware keys on host only (no port). Two requests from
-	// the same IP but different ports share the same bucket.
 	rl := newRateLimiter(2, time.Minute)
 	defer rl.Stop()
 
-	// Simulate what the middleware does: extractHost strips the port.
 	key1 := extractHost("10.0.0.1:1000")
 	key2 := extractHost("10.0.0.1:2000")
 
@@ -47,7 +44,6 @@ func TestRateLimiter_SameHostDifferentPortsShareBucket(t *testing.T) {
 	if !rl.allow(key1) {
 		t.Fatal("second request should be allowed")
 	}
-	// Third request from different port, same host — must be blocked.
 	if rl.allow(key2) {
 		t.Fatal("third request from same host different port should be blocked")
 	}
@@ -60,13 +56,11 @@ func TestRateLimiter_DifferentHostsIsolation(t *testing.T) {
 	keyA := extractHost("10.0.0.1:1000")
 	keyB := extractHost("10.0.0.2:1000")
 
-	// Host A: use up quota.
 	rl.allow(keyA)
 	rl.allow(keyA)
 	if rl.allow(keyA) {
 		t.Fatal("host A should be rate-limited")
 	}
-	// Host B: separate bucket, should be fine.
 	if !rl.allow(keyB) {
 		t.Fatal("host B should be allowed (separate bucket)")
 	}
@@ -94,7 +88,6 @@ func TestRateLimiter_EntryCapViaAllow(t *testing.T) {
 	rl := newRateLimiter(100, time.Minute)
 	defer rl.Stop()
 
-	// Fill to maxRateLimitEntries.
 	rl.mu.Lock()
 	for i := 0; i < maxRateLimitEntries; i++ {
 		rl.entries[fmt.Sprintf("10.0.%d.%d", i/256, i%256)] = &rateLimitEntry{
@@ -104,7 +97,6 @@ func TestRateLimiter_EntryCapViaAllow(t *testing.T) {
 	}
 	rl.mu.Unlock()
 
-	// One more entry should trigger eviction.
 	rl.allow("192.168.1.1")
 
 	rl.mu.Lock()
@@ -138,13 +130,10 @@ func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 	defer rl.Stop()
 
 	var wg sync.WaitGroup
-	// 50 goroutines, 5 unique hosts.
 	for i := 0; i < 50; i++ {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			// ExtractHost strips the port; all goroutines with same n%5
-			// produce the same host key.
 			remoteAddr := fmt.Sprintf("10.0.0.%d:%d", n%5+1, n)
 			key := extractHost(remoteAddr)
 			rl.allow(key)
@@ -152,7 +141,6 @@ func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 
-	// 5 unique hosts (10.0.0.1 through 10.0.0.5).
 	rl.mu.Lock()
 	size := len(rl.entries)
 	rl.mu.Unlock()
@@ -162,7 +150,6 @@ func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 }
 
 func TestRateLimiter_IPv6BucketSharing(t *testing.T) {
-	// FIX-3: IPv6 addresses like [::1]:1234 must be keyed on "::1".
 	rl := newRateLimiter(1, time.Minute)
 	defer rl.Stop()
 
@@ -177,7 +164,6 @@ func TestRateLimiter_IPv6BucketSharing(t *testing.T) {
 	if rl.allow(key) {
 		t.Fatal("should be rate limited (same IPv6 host)")
 	}
-	// Different IPv6 host.
 	key2 := extractHost("[::2]:5678")
 	if !rl.allow(key2) {
 		t.Fatal("different IPv6 host should be allowed")

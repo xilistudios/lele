@@ -115,7 +115,6 @@ func TestHandleChatHistory_ReturnsMessages(t *testing.T) {
 	if payload.SessionKey == "" {
 		t.Fatal("expected non-empty session_key")
 	}
-	// system message should be filtered out
 	if len(payload.Messages) != 3 {
 		t.Fatalf("got %d messages, want 3", len(payload.Messages))
 	}
@@ -130,7 +129,6 @@ func TestHandleChatHistory_ReturnsMessages(t *testing.T) {
 func TestHandleChatHistory_Pagination(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// Create enough history to paginate
 	sessionKey := "native:" + ts.clientID
 	msgs := make([]providers.Message, 60)
 	for i := 0; i < 60; i++ {
@@ -375,7 +373,6 @@ func TestHandleChatClear(t *testing.T) {
 	beforeClear, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.PathEscape(sessionKey)+"/history", nil)
 	beforeClear.Header.Set("Authorization", "Bearer "+ts.token)
 
-	// Clear the session
 	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/chat/sessions/"+url.PathEscape(sessionKey)+"/clear", nil)
 	req.Header.Set("Authorization", "Bearer "+ts.token)
 
@@ -403,7 +400,6 @@ func TestHandleChatSend_Unauthorized(t *testing.T) {
 
 	body := mustMarshal(ChatSendRequest{Content: "Hello"})
 	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/chat/send", strings.NewReader(string(body)))
-	// No Authorization header
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -421,7 +417,6 @@ func TestHandleChatHistory_Unauthorized(t *testing.T) {
 
 	sessionKey := "native:" + ts.clientID
 	req, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.PathEscape(sessionKey)+"/history", nil)
-	// No Authorization header
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

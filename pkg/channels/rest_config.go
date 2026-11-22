@@ -44,11 +44,6 @@ func (n *NativeChannel) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Overlay semantics: load the current on-disk document first, then
-	// unmarshal the incoming payload ON TOP. Go's json.Unmarshal merges
-	// nested objects and leaves absent keys untouched, so a partial PUT
-	// (e.g. only touching agents) no longer wipes channels.web.enabled
-	// or native.cors_origins with zero values.
 	doc, _, err := config.LoadEditableDocument(configPath)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load current config: "+err.Error(), "config_load_failed")
@@ -85,8 +80,6 @@ func (n *NativeChannel) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Reload runtime config synchronously so changes take effect immediately
-	// without waiting for the file watcher (fsnotify/kqueue which can be unreliable).
 	if n.reloadConfig != nil {
 		if err := n.reloadConfig(); err != nil {
 			logger.WarnCF("native", "Runtime config reload after save failed", map[string]interface{}{

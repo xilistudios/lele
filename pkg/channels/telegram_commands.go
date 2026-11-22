@@ -275,7 +275,6 @@ func (c *cmd) Agent(ctx context.Context, message telego.Message) error {
 	sessionKey := fmt.Sprintf("telegram:%d", message.Chat.ID)
 	args := commandArgs(message.Text)
 	if args == "" {
-		// Verificar si hay agentes configurados
 		agentIDs := c.agentLoop.ListAvailableAgentIDs()
 		if len(agentIDs) == 0 {
 			_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
@@ -288,7 +287,6 @@ func (c *cmd) Agent(ctx context.Context, message telego.Message) error {
 			return err
 		}
 
-		// Crear botones para cada agente
 		rows := make([][]telego.InlineKeyboardButton, 0, len(agentIDs))
 		for _, agentID := range agentIDs {
 			agentInfo, ok := c.agentLoop.GetAgentInfo(agentID)
@@ -313,7 +311,6 @@ func (c *cmd) Agent(ctx context.Context, message telego.Message) error {
 		return err
 	}
 
-	// Cambio directo de agente
 	c.agentLoop.SetSessionAgent(sessionKey, args)
 	response := c.agentLoop.ClearSession(sessionKey)
 	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
@@ -327,7 +324,6 @@ func (c *cmd) Agent(ctx context.Context, message telego.Message) error {
 }
 
 func (c *cmd) Verbose(ctx context.Context, message telego.Message, currentLevel string) error {
-	// Build the message showing current level and available options
 	var currentEmoji string
 	switch currentLevel {
 	case "off":
@@ -350,7 +346,6 @@ func (c *cmd) Verbose(ctx context.Context, message telego.Message, currentLevel 
 			"Use /verbose to cycle through levels.",
 		currentEmoji, currentLevel)
 
-	// Create inline keyboard with the three options
 	rows := [][]telego.InlineKeyboardButton{
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton("🔇 off").WithCallbackData("verbose:set:off"),

@@ -19,10 +19,6 @@ import (
 	"github.com/xilistudios/lele/pkg/skills"
 )
 
-// rateLimitTestServer is a minimal test server built from the PRODUCTION
-// constructor (NewNativeChannel), so it exercises the config-driven limiter
-// construction path.  Tests that set RateLimit.Enabled = false (the default)
-// will have nil traffic limiters; the authLogLimiter is always non-nil.
 type rateLimitTestServer struct {
 	channel  *NativeChannel
 	server   *httptest.Server
@@ -34,8 +30,6 @@ type rateLimitTestServer struct {
 func newRateLimitTestServer(t *testing.T, cfg *config.Config) *rateLimitTestServer {
 	t.Helper()
 
-	// Each test gets its own LeleDir so the auth store on disk does not
-	// leak clients across tests (MaxClients defaults to 5).
 	cfg.Channels.Native.LeleDir = t.TempDir()
 
 	msgBus := bus.NewMessageBus()
@@ -83,7 +77,6 @@ func newRateLimitTestServer(t *testing.T, cfg *config.Config) *rateLimitTestServ
 	}
 }
 
-// postPair sends a POST /api/v1/auth/pair and returns the response.
 func postPair(t *testing.T, baseURL, pin string) *http.Response {
 	t.Helper()
 	resp, err := http.Post(baseURL+"/api/v1/auth/pair", "application/json",
@@ -95,7 +88,6 @@ func postPair(t *testing.T, baseURL, pin string) *http.Response {
 	return resp
 }
 
-// postRefresh sends a POST /api/v1/auth/refresh and returns the response.
 func postRefresh(t *testing.T, baseURL, token string) *http.Response {
 	t.Helper()
 	resp, err := http.Post(baseURL+"/api/v1/auth/refresh", "application/json",
@@ -107,11 +99,6 @@ func postRefresh(t *testing.T, baseURL, token string) *http.Response {
 	return resp
 }
 
-// TestRateLimitDisabledByDefaultServesNo429 is the direct test of the user's
-// request: with the default config (rate limiting OFF), hammer the pairing and
-// refresh endpoints and assert that not a single 429 comes back.  This is the
-// mirror of TestRefreshAndPairLimitsAreIndependent (auth_ratelimit_test.go:49),
-// which asserts the opposite with explicit limiters.
 func TestRateLimitDisabledByDefaultServesNo429(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -120,7 +107,6 @@ func TestRateLimitDisabledByDefaultServesNo429(t *testing.T) {
 
 	ts := newRateLimitTestServer(t, cfg)
 
-	// 20 pairing attempts — more than the old 5/min bucket allowed.
 	for i := 0; i < 20; i++ {
 		resp := postPair(t, ts.server.URL, "000000")
 		if resp.StatusCode == http.StatusTooManyRequests {
@@ -128,7 +114,6 @@ func TestRateLimitDisabledByDefaultServesNo429(t *testing.T) {
 		}
 	}
 
-	// 40 refresh attempts — more than the old 20/min bucket allowed.
 	for i := 0; i < 40; i++ {
 		resp := postRefresh(t, ts.server.URL, "not-a-real-token")
 		if resp.StatusCode == http.StatusTooManyRequests {
@@ -137,10 +122,6 @@ func TestRateLimitDisabledByDefaultServesNo429(t *testing.T) {
 	}
 }
 
-// TestRateLimitDisabledLeavesLimitersNil asserts that with the default config
-// (Enabled = false) the 5 traffic limiters are nil while authLogLimiter is
-// always constructed.  This is the structural invariant that the nil-gate
-// design depends on.
 func TestRateLimitDisabledLeavesLimitersNil(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -170,8 +151,6 @@ func TestRateLimitDisabledLeavesLimitersNil(t *testing.T) {
 	}
 }
 
-// TestRateLimitEnabledRespectsConfiguredLimits asserts that a custom rate
-// (PairPerMinute: 2) is actually enforced: request #3 must be 429.
 func TestRateLimitEnabledRespectsConfiguredLimits(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -184,7 +163,6 @@ func TestRateLimitEnabledRespectsConfiguredLimits(t *testing.T) {
 
 	ts := newRateLimitTestServer(t, cfg)
 
-	// Requests 1 and 2 should pass (not 429).
 	for i := 0; i < 2; i++ {
 		resp := postPair(t, ts.server.URL, "000000")
 		if resp.StatusCode == http.StatusTooManyRequests {
@@ -192,7 +170,6 @@ func TestRateLimitEnabledRespectsConfiguredLimits(t *testing.T) {
 		}
 	}
 
-	// Request 3 must be 429.
 	resp := postPair(t, ts.server.URL, "000000")
 	if resp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("pair attempt 3: status = %d, want 429", resp.StatusCode)
@@ -207,9 +184,6 @@ func TestRateLimitEnabledRespectsConfiguredLimits(t *testing.T) {
 	}
 }
 
-// TestRateLimitEnabledDefaultsMatchLegacyRates asserts that when Enabled = true
-// but all rates are left at 0 (the "use default" sentinel), the built-in
-// defaults reproduce the legacy rates: pair = 5/min.
 func TestRateLimitEnabledDefaultsMatchLegacyRates(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -217,12 +191,10 @@ func TestRateLimitEnabledDefaultsMatchLegacyRates(t *testing.T) {
 	cfg.Channels.Native.Port = 0
 	cfg.Channels.Native.RateLimit = config.NativeRateLimitConfig{
 		Enabled: true,
-		// All rates 0 → defaults: 5/min for pair.
 	}
 
 	ts := newRateLimitTestServer(t, cfg)
 
-	// Requests 1–5 should pass; #6 is the first 429.
 	for i := 0; i < 5; i++ {
 		resp := postPair(t, ts.server.URL, "000000")
 		if resp.StatusCode == http.StatusTooManyRequests {
@@ -236,10 +208,6 @@ func TestRateLimitEnabledDefaultsMatchLegacyRates(t *testing.T) {
 	}
 }
 
-// TestRateLimitEnabledConstructsEveryBucket asserts that when Enabled = true,
-// all 5 traffic limiters are non-nil.  This is a safety net: if one were
-// accidentally left nil, the nil-gate in rateLimitMiddleware would silently
-// skip it — the route would be unguarded with no error or log.
 func TestRateLimitEnabledConstructsEveryBucket(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -272,10 +240,6 @@ func TestRateLimitEnabledConstructsEveryBucket(t *testing.T) {
 	}
 }
 
-// TestRateLimitNegativeRateFallsBackToDefault asserts that a negative rate
-// (e.g. from a hand-edited config.json) is treated as "unset" and falls back
-// to the built-in default (5 for pair), not to a bucket that rejects
-// everything (which allow()'s count <= rate would produce with rate = -5).
 func TestRateLimitNegativeRateFallsBackToDefault(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -288,7 +252,6 @@ func TestRateLimitNegativeRateFallsBackToDefault(t *testing.T) {
 
 	ts := newRateLimitTestServer(t, cfg)
 
-	// 5 requests should pass (default rate = 5/min).
 	for i := 0; i < 5; i++ {
 		resp := postPair(t, ts.server.URL, "000000")
 		if resp.StatusCode == http.StatusTooManyRequests {
@@ -296,16 +259,12 @@ func TestRateLimitNegativeRateFallsBackToDefault(t *testing.T) {
 		}
 	}
 
-	// #6 must be 429.
 	resp := postPair(t, ts.server.URL, "000000")
 	if resp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("pair attempt 6: status = %d, want 429 (default 5/min rate not applied)", resp.StatusCode)
 	}
 }
 
-// TestRateLimitDisabledStopIsSafe asserts that Stop() on a channel whose
-// traffic limiters are nil (the default config) does not panic, and is
-// idempotent.
 func TestRateLimitDisabledStopIsSafe(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -324,7 +283,6 @@ func TestRateLimitDisabledStopIsSafe(t *testing.T) {
 		t.Fatalf("NewNativeChannel() error = %v", err)
 	}
 
-	// The 5 traffic limiters must be nil.
 	if native.pinLimiter != nil || native.pairLimiter != nil ||
 		native.refreshLimiter != nil || native.apiLimiter != nil ||
 		native.wsMessageLimiter != nil {
@@ -333,16 +291,11 @@ func TestRateLimitDisabledStopIsSafe(t *testing.T) {
 
 	ctx := t.Context()
 
-	// First Stop — must not panic.
 	native.Stop(ctx)
 
-	// Second Stop — idempotent, still no panic.
 	native.Stop(ctx)
 }
 
-// TestWSMessageRateLimitSkippedWhenDisabled asserts that handleWSClientMessage
-// with a nil wsMessageLimiter (rate limiting disabled) does not panic and
-// processes the message normally.
 func TestWSMessageRateLimitSkippedWhenDisabled(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -355,9 +308,6 @@ func TestWSMessageRateLimitSkippedWhenDisabled(t *testing.T) {
 		t.Fatal("wsMessageLimiter must be nil when rate limiting is disabled")
 	}
 
-	// Fake client: no real WebSocket connection needed.  QueueSend touches
-	// only the buffered SendChan as long as the client is not reconnecting.
-	// Uses the authenticated clientID so validateSessionOwnership passes.
 	client := &WSClient{
 		ID:         "ws-rl-test",
 		SessionKey: "test-session",
@@ -377,7 +327,6 @@ func TestWSMessageRateLimitSkippedWhenDisabled(t *testing.T) {
 		ts.channel.handleWSClientMessage(client, payload, "evt-ws-rl")
 	}()
 
-	// Drain the inbound bus message so the handler never blocks.
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer drainCancel()
 	inbound, ok := ts.bus.ConsumeInbound(drainCtx)
@@ -394,7 +343,6 @@ func TestWSMessageRateLimitSkippedWhenDisabled(t *testing.T) {
 		t.Fatal("handleWSClientMessage did not return (possible nil dereference?)")
 	}
 
-	// The ack must have been sent.
 	select {
 	case raw := <-client.SendChan:
 		var ack WSMessage
@@ -409,17 +357,11 @@ func TestWSMessageRateLimitSkippedWhenDisabled(t *testing.T) {
 	}
 }
 
-// TestAuthLogSamplerStaysActiveWhenRateLimitDisabled asserts that even with
-// rate limiting OFF, the authLogLimiter still samples log lines.  Without it,
-// a dead token polling in a loop would flood the log.  This extends
-// TestRateLimitSamplerDoesNotFloodTheLog (auth_ratelimit_test.go:164) to the
-// rate-limiting-OFF case.
 func TestAuthLogSamplerStaysActiveWhenRateLimitDisabled(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
 	cfg.Channels.Native.Host = "127.0.0.1"
 	cfg.Channels.Native.Port = 0
-	// RateLimit.Enabled defaults to false — OFF.
 
 	ts := newRateLimitTestServer(t, cfg)
 
@@ -427,9 +369,6 @@ func TestAuthLogSamplerStaysActiveWhenRateLimitDisabled(t *testing.T) {
 		t.Fatal("authLogLimiter must be non-nil even when rate limiting is disabled")
 	}
 
-	// Hammer auth rejections with a bad Bearer token.  With the sampler
-	// active at 6/min, 200 rejections should produce far fewer than 200
-	// log lines (the same logic as TestRateLimitSamplerDoesNotFloodTheLog).
 	var buf bytes.Buffer
 	previous := log.Writer()
 	log.SetOutput(&buf)
@@ -462,10 +401,6 @@ func TestAuthLogSamplerStaysActiveWhenRateLimitDisabled(t *testing.T) {
 	}
 }
 
-// TestRateLimitDisabledConstructorUsesNilNotNoop is a structural check that
-// verifies the constructor uses nil (not a noop limiter) when rate limiting
-// is off.  A noop limiter would still spawn a cleanup goroutine and allocate
-// an entries map — wasteful for the default case.
 func TestRateLimitDisabledConstructorUsesNilNotNoop(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -484,7 +419,6 @@ func TestRateLimitDisabledConstructorUsesNilNotNoop(t *testing.T) {
 		t.Fatalf("NewNativeChannel() error = %v", err)
 	}
 
-	// All 5 traffic limiters must be exactly nil, not a shared noop sentinel.
 	lims := []*rateLimiter{
 		native.pinLimiter,
 		native.pairLimiter,
@@ -499,9 +433,6 @@ func TestRateLimitDisabledConstructorUsesNilNotNoop(t *testing.T) {
 	}
 }
 
-// Verify that Stop is safe when limiters are nil — an integration-level
-// guard for group_events_test.go and multi_channel_test.go, which build
-// channels via NewNativeChannel and call Stop.
 func TestNewNativeChannelStopWithNilLimiters(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -526,7 +457,6 @@ func TestNewNativeChannelStopWithNilLimiters(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Concurrent Stop calls to exercise the nil-guard under contention.
 	go func() {
 		defer wg.Done()
 		native.Stop(ctx)
@@ -549,10 +479,6 @@ func TestNewNativeChannelStopWithNilLimiters(t *testing.T) {
 	}
 }
 
-// Ensure the constructor builds the production struct — a bare
-// &NativeChannel{} literal bypasses NewNativeChannel and would never exercise
-// the config-driven path.  This test is here as a guard, not because the
-// code currently has this bug.
 func TestRateLimitTestHelperUsesProductionConstructor(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -561,17 +487,14 @@ func TestRateLimitTestHelperUsesProductionConstructor(t *testing.T) {
 
 	ts := newRateLimitTestServer(t, cfg)
 
-	// The skills loader must be set (a bare literal would leave it nil).
 	if ts.channel.skillsLoader == nil {
 		t.Fatal("skillsLoader is nil; the test helper must use NewNativeChannel, not a bare literal")
 	}
-	// The auth manager must be set.
 	if ts.channel.auth == nil {
 		t.Fatal("auth is nil; the test helper must use NewNativeChannel, not a bare literal")
 	}
 }
 
-// Ensure the test helper sets up the authLogLimiter.
 func TestRateLimitTestHelperAuthLogLimiterNotNil(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -585,9 +508,6 @@ func TestRateLimitTestHelperAuthLogLimiterNotNil(t *testing.T) {
 	}
 }
 
-// Ensure that bare (non-constructor) test literals with explicit limiters
-// still work after the change — the nil-gate in rateLimitMiddleware must not
-// affect them.
 func TestBareChannelWithExplicitLimitersStillWorks(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	defer msgBus.Close()
@@ -628,7 +548,6 @@ func TestBareChannelWithExplicitLimitersStillWorks(t *testing.T) {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	// Pairing with explicit limiters must still enforce the pair bucket.
 	pending, err := auth.GeneratePIN("BareTestDevice")
 	if err != nil {
 		t.Fatalf("GeneratePIN() error = %v", err)
@@ -639,7 +558,6 @@ func TestBareChannelWithExplicitLimitersStillWorks(t *testing.T) {
 	}
 	_ = token
 
-	// Hammer the refresh endpoint (20/min); the 21st should be 429.
 	limited := false
 	for i := 0; i < 40; i++ {
 		resp := postRefresh(t, server.URL, "not-a-real-token")
@@ -652,10 +570,6 @@ func TestBareChannelWithExplicitLimitersStillWorks(t *testing.T) {
 		t.Fatal("refresh never rate limited over 40 attempts with explicit limiters; nil-gate broke the literal path")
 	}
 }
-
-// Note: postAuth from auth_ratelimit_test.go is also available in the same
-// package; this variant accepts a base URL rather than a full URL to keep
-// the call sites uniform.
 
 func TestIsLoopbackHost(t *testing.T) {
 	tests := []struct {
@@ -680,10 +594,6 @@ func TestIsLoopbackHost(t *testing.T) {
 	}
 }
 
-// TestConfiguredRateIsEnforcedPerBucket verifies, for every one of the five
-// traffic buckets, that the exact rate from config is the one enforced.  The
-// rates are deliberately non-default so that any mutant that ignores the
-// config field (falling back to the legacy 10/5/20/120/120) fails.
 func TestConfiguredRateIsEnforcedPerBucket(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -778,8 +688,6 @@ func TestConfiguredRateIsEnforcedPerBucket(t *testing.T) {
 		})
 	}
 
-	// WebSocket bucket — driven directly through handleWSClientMessage.
-	// The wsMessageLimiter keys on ClientID, not IP.
 	t.Run("ws_message (WSMessagesPerMinute=5)", func(t *testing.T) {
 		client := &WSClient{
 			ID:         "ws-bucket-test",
@@ -801,10 +709,6 @@ func TestConfiguredRateIsEnforcedPerBucket(t *testing.T) {
 				ts.channel.handleWSClientMessage(client, payload, "evt-ws-"+strconv.Itoa(idx))
 			}(i)
 
-			// Only await the inbound bus message when we expect the handler
-			// to publish one (i.e. the request is allowed).  Rate-limited
-			// requests return before publishing, so ConsumeInbound would
-			// block for the full timeout.
 			if i < 5 {
 				dCtx, dCancel := context.WithTimeout(context.Background(), 2*time.Second)
 				inbound, ok := ts.bus.ConsumeInbound(dCtx)
@@ -820,7 +724,6 @@ func TestConfiguredRateIsEnforcedPerBucket(t *testing.T) {
 				t.Fatalf("handleWSClientMessage did not return for request %d", i+1)
 			}
 
-			// Drain the ack or error from SendChan.
 			select {
 			case raw := <-client.SendChan:
 				var msg WSMessage

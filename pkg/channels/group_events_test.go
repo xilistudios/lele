@@ -16,9 +16,6 @@ import (
 	"github.com/xilistudios/lele/pkg/security"
 )
 
-// TestGroupEventsBridge verifies that group.status, group.turn, and
-// group.complete bus events are bridged to WebSocket clients with the
-// correct payload structure and field values.
 func TestGroupEventsBridge(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -46,14 +43,12 @@ func TestGroupEventsBridge(t *testing.T) {
 	}
 	defer native.Stop(ctx)
 
-	// Set up HTTP test server with WebSocket support.
 	mux := http.NewServeMux()
 	native.RegisterRoutes(mux)
 	handler := security.Middleware()(mux)
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	// Authenticate and get token.
 	pin, err := native.auth.GeneratePIN("GroupTestDevice")
 	if err != nil {
 		t.Fatalf("GeneratePIN() error = %v", err)
@@ -63,7 +58,6 @@ func TestGroupEventsBridge(t *testing.T) {
 		t.Fatalf("PairWithPIN() error = %v", err)
 	}
 
-	// Connect via WebSocket.
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/ws"
 	wsConn, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{
 		"Authorization": []string{"Bearer " + token},
@@ -73,15 +67,12 @@ func TestGroupEventsBridge(t *testing.T) {
 	}
 	defer wsConn.Close()
 
-	// Consume the welcome event.
 	wsConn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	_, _, err = wsConn.ReadMessage()
 	if err != nil {
 		t.Fatalf("ReadMessage(welcome) error = %v", err)
 	}
 
-	// Start a bus consumer that routes outbound messages to the native channel
-	// (same pattern used by TestWebSocketRapidMessagesUnderLoad).
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -104,7 +95,6 @@ func TestGroupEventsBridge(t *testing.T) {
 
 	sessionKey := client.ClientID
 
-	// Collect received WS events.
 	type wsEvent struct {
 		Event string          `json:"event"`
 		Data  json.RawMessage `json:"data"`
@@ -124,10 +114,8 @@ func TestGroupEventsBridge(t *testing.T) {
 		}
 	}()
 
-	// Give the goroutine time to start.
 	time.Sleep(50 * time.Millisecond)
 
-	// --- Test 1: group.status ---
 	msgBus.PublishOutbound(bus.OutboundMessage{
 		Channel:        "native",
 		ChatID:         sessionKey,
@@ -162,7 +150,6 @@ func TestGroupEventsBridge(t *testing.T) {
 		t.Fatal("timeout waiting for group.status event")
 	}
 
-	// --- Test 2: group.turn ---
 	msgBus.PublishOutbound(bus.OutboundMessage{
 		Channel:        "native",
 		ChatID:         sessionKey,
@@ -213,7 +200,6 @@ func TestGroupEventsBridge(t *testing.T) {
 		t.Fatal("timeout waiting for group.turn event")
 	}
 
-	// --- Test 3: group.complete ---
 	msgBus.PublishOutbound(bus.OutboundMessage{
 		Channel:        "native",
 		ChatID:         sessionKey,

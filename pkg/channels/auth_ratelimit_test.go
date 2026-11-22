@@ -10,13 +10,6 @@ import (
 	"time"
 )
 
-// The WebUI renews its access token through /auth/refresh in the background.
-// That endpoint used to share the pairing bucket — 5 requests per minute per
-// IP — so ordinary use (several tabs, a few sessions, a page left open) could
-// exhaust it, and the client treated the resulting 429 as a dead credential
-// and signed the user out. These tests pin the structural fix: renewal has its
-// own budget, and a rejection tells the client how long to wait.
-
 func postAuth(t *testing.T, url, body string) *http.Response {
 	t.Helper()
 
@@ -31,10 +24,6 @@ func postAuth(t *testing.T, url, body string) *http.Response {
 func TestRefreshEndpointHasItsOwnBudget(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// Ten renewals is more than the pairing bucket (5/min) allows but well
-	// within renewal's own budget, and each is rejected by the handler with 400
-	// because the token is fake. Anything answering 429 here means the two
-	// endpoints are sharing a bucket again.
 	for i := 0; i < 10; i++ {
 		resp := postAuth(t, ts.server.URL+"/api/v1/auth/refresh", `{"refresh_token":"not-a-real-token"}`)
 		if resp.StatusCode == http.StatusTooManyRequests {
@@ -49,7 +38,6 @@ func TestRefreshEndpointHasItsOwnBudget(t *testing.T) {
 func TestRefreshAndPairLimitsAreIndependent(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// Drain the pairing bucket completely.
 	var pairLimited bool
 	for i := 0; i < 12; i++ {
 		resp := postAuth(t, ts.server.URL+"/api/v1/auth/pair", `{"pin":"000000"}`)
@@ -62,8 +50,6 @@ func TestRefreshAndPairLimitsAreIndependent(t *testing.T) {
 		t.Fatal("pairing never rate limited over 12 attempts; the pair bucket is not enforcing its limit")
 	}
 
-	// A signed-in browser renewing right now must be unaffected: this is the
-	// exact interleaving that used to log users out.
 	for i := 0; i < 5; i++ {
 		resp := postAuth(t, ts.server.URL+"/api/v1/auth/refresh", `{"refresh_token":"not-a-real-token"}`)
 		if resp.StatusCode == http.StatusTooManyRequests {
@@ -75,8 +61,6 @@ func TestRefreshAndPairLimitsAreIndependent(t *testing.T) {
 func TestRateLimitRejectionAdvertisesRetryAfter(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// The renewal limiter is configured at 20/min; walk past it until the
-	// limiter answers.
 	var limited *http.Response
 	for i := 0; i < 40; i++ {
 		resp := postAuth(t, ts.server.URL+"/api/v1/auth/refresh", `{"refresh_token":"not-a-real-token"}`)
@@ -102,7 +86,6 @@ func TestRateLimitRejectionAdvertisesRetryAfter(t *testing.T) {
 	}
 }
 
-// captureLogs redirects the standard logger for the duration of fn.
 func captureLogs(t *testing.T, fn func()) string {
 	t.Helper()
 
@@ -164,9 +147,6 @@ func TestRateLimitRejectionIsLogged(t *testing.T) {
 func TestRateLimitSamplerDoesNotFloodTheLog(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// The limiter can reject far more often than once a minute (the renewal
-	// bucket is 20/min and several endpoints share a source IP), so the log
-	// line has to be sampled or a stuck client would write the log full.
 	out := captureLogs(t, func() {
 		for i := 0; i < 200; i++ {
 			resp := postAuth(t, ts.server.URL+"/api/v1/auth/refresh", `{"refresh_token":"not-a-real-token"}`)
@@ -213,10 +193,6 @@ func TestLimiterTimeUntilResetCountsDown(t *testing.T) {
 func TestPINEndpointRateLimitIsEnforced(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// The PIN limiter existed, was stopped on shutdown and was wired to nothing:
-	// a declared control that guarded no route. PIN generation evicts the oldest
-	// pending PIN once the cap is reached, so unlimited generation from one
-	// client could keep replacing the PIN another device is about to redeem.
 	limited := false
 	for i := 0; i < 15; i++ {
 		req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/auth/pin?device_name=probe", nil)

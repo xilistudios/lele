@@ -1,9 +1,3 @@
-// Regression tests: Manager.ReloadConfig must preserve the post-construction
-// seams (NativeClientRepo and InboundSpooler) across channel reconstruction.
-// initChannels builds a fresh NativeChannel whose AuthManager.repo is nil and
-// whose channels have no spooler, so without re-application a config reload
-// silently un-wires both.
-
 package channels
 
 import (
@@ -16,8 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// newTestManagerForReload creates a minimal Manager with a native channel
-// enabled. Returns the manager and a cleanup function.
 func newTestManagerForReload(t *testing.T) *Manager {
 	t.Helper()
 
@@ -33,8 +25,6 @@ func newTestManagerForReload(t *testing.T) *Manager {
 	return m
 }
 
-// openTestNativeRepo opens a real NativeClientRepo backed by an in-memory
-// SQLite database in a temp directory.
 func openTestNativeRepo(t *testing.T) *store.NativeClientRepo {
 	t.Helper()
 
@@ -47,9 +37,6 @@ func openTestNativeRepo(t *testing.T) *store.NativeClientRepo {
 	return s.NativeClients()
 }
 
-// getNativeAuth extracts the AuthManager from the current native channel
-// in the manager. Fails the test if the native channel is missing or has
-// the wrong type.
 func getNativeAuth(t *testing.T, m *Manager) *AuthManager {
 	t.Helper()
 
@@ -64,27 +51,17 @@ func getNativeAuth(t *testing.T, m *Manager) *AuthManager {
 	return nc.auth
 }
 
-// TestReloadConfig_PreservesNativeClientRepo verifies the H1 fix:
-// SetNativeClientStore persists the repo on the Manager, and ReloadConfig
-// re-injects it into the new NativeChannel after initChannels.
-//
-// Before the fix the new AuthManager.repo was nil after every reload,
-// causing the channel to fall back to the JSON file and silently drop
-// every SQLite-only client.
 func TestReloadConfig_PreservesNativeClientRepo(t *testing.T) {
 	m := newTestManagerForReload(t)
 	repo := openTestNativeRepo(t)
 
-	// Wire the repo (simulates gateway startup).
 	m.SetNativeClientStore(repo)
 
-	// Verify it took effect on the current native channel.
 	auth := getNativeAuth(t, m)
 	if auth.repo != repo {
 		t.Fatal("SetNativeClientStore: repo not wired into current native channel")
 	}
 
-	// Reload with a fresh config (simulates config file change or API save).
 	newCfg := &config.Config{}
 	newCfg.Channels.Native.Enabled = true
 	newCfg.Channels.Native.LeleDir = t.TempDir()
@@ -93,7 +70,6 @@ func TestReloadConfig_PreservesNativeClientRepo(t *testing.T) {
 		t.Fatalf("ReloadConfig() error = %v", err)
 	}
 
-	// The new native channel must have the SAME repo, not nil.
 	newAuth := getNativeAuth(t, m)
 	if newAuth.repo != repo {
 		t.Fatal("H1: NativeClientRepo lost after ReloadConfig — " +
@@ -101,10 +77,6 @@ func TestReloadConfig_PreservesNativeClientRepo(t *testing.T) {
 	}
 }
 
-// TestReloadConfig_NoRepoIsNoop verifies that ReloadConfig succeeds
-// when SetNativeClientStore was never called (repo is nil). The native
-// channel simply runs without SQLite persistence, as it did before the
-// feature existed.
 func TestReloadConfig_NoRepoIsNoop(t *testing.T) {
 	m := newTestManagerForReload(t)
 
@@ -122,7 +94,6 @@ func TestReloadConfig_NoRepoIsNoop(t *testing.T) {
 	}
 }
 
-// TestReloadConfig_NilConfigRejected verifies the nil-config guard.
 func TestReloadConfig_NilConfigRejected(t *testing.T) {
 	m := newTestManagerForReload(t)
 
@@ -131,8 +102,6 @@ func TestReloadConfig_NilConfigRejected(t *testing.T) {
 	}
 }
 
-// TestReloadConfig_RepoSurvivesMultipleReloads verifies that the repo
-// persists through several successive reloads — not just one.
 func TestReloadConfig_RepoSurvivesMultipleReloads(t *testing.T) {
 	m := newTestManagerForReload(t)
 	repo := openTestNativeRepo(t)
@@ -155,23 +124,17 @@ func TestReloadConfig_RepoSurvivesMultipleReloads(t *testing.T) {
 	}
 }
 
-// TestSetNativeClientStore_PersistsReference verifies that
-// SetNativeClientStore stores the repo on the Manager struct itself,
-// not just on the current channel.
 func TestSetNativeClientStore_PersistsReference(t *testing.T) {
 	m := newTestManagerForReload(t)
 	repo := openTestNativeRepo(t)
 
 	m.SetNativeClientStore(repo)
 
-	// Directly inspect the manager field (same package access).
 	if m.nativeClientRepo != repo {
 		t.Fatal("SetNativeClientStore did not persist repo on Manager.nativeClientRepo")
 	}
 }
 
-// TestSetNativeClientStore_NilClearsRepo verifies that passing nil
-// clears the stored repo (analogous to disabling SQLite persistence).
 func TestSetNativeClientStore_NilClearsRepo(t *testing.T) {
 	m := newTestManagerForReload(t)
 	repo := openTestNativeRepo(t)
@@ -184,9 +147,6 @@ func TestSetNativeClientStore_NilClearsRepo(t *testing.T) {
 	}
 }
 
-// nativeSpoolerOf reads the inbound spooler currently wired into the manager's
-// native channel, failing the test if the channel is missing or of the wrong
-// type.
 func nativeSpoolerOf(t *testing.T, m *Manager) InboundSpooler {
 	t.Helper()
 
@@ -204,10 +164,6 @@ func nativeSpoolerOf(t *testing.T, m *Manager) InboundSpooler {
 	return nc.base.InboundSpooler
 }
 
-// TestReloadConfig_PreservesInboundSpooler covers the sibling of the
-// native-client seam: durable inbound is handed to channels after
-// construction, so ReloadConfig must re-apply it to the channels it builds.
-// Losing it would silently switch spooling off after the first config reload.
 func TestReloadConfig_PreservesInboundSpooler(t *testing.T) {
 	m := newTestManagerForReload(t)
 	spooler := newFakeSpooler(bus.NewMessageBus())
@@ -230,8 +186,6 @@ func TestReloadConfig_PreservesInboundSpooler(t *testing.T) {
 	}
 }
 
-// TestSetInboundSpooler_PersistsReference pins that the value is retained on
-// the Manager, which is what makes the re-application above possible at all.
 func TestSetInboundSpooler_PersistsReference(t *testing.T) {
 	m := newTestManagerForReload(t)
 	spooler := newFakeSpooler(bus.NewMessageBus())
@@ -243,12 +197,6 @@ func TestSetInboundSpooler_PersistsReference(t *testing.T) {
 	}
 }
 
-// TestReloadConfig_PreservesNativeStoreUnavailable is the #330 mirror of
-// TestReloadConfig_PreservesNativeClientRepo: the degraded mark (SQLite-capable
-// binary whose store failed to open) is also a post-construction seam, so
-// ReloadConfig must re-apply it. Without that, a config reload would silently
-// turn a gateway that refuses pairing with a diagnosable 503 back into one that
-// answers 400 "invalid PIN" for PINs it cannot read.
 func TestReloadConfig_PreservesNativeStoreUnavailable(t *testing.T) {
 	m := newTestManagerForReload(t)
 	storeErr := realStoreOpenError(t)

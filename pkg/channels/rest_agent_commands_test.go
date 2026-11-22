@@ -1,12 +1,3 @@
-// Tests for the per-agent command endpoints (rest_agent_commands.go).
-//
-// The risk these tests target is the one the feature exists for: a command
-// request for agent X must never be answered from — or written into — the
-// DEFAULT workspace, and a write must never touch a level the agent does not
-// run. So the tests build two agents with two real on-disk workspaces plus an
-// isolated ~/.lele (LELE_CONFIG_DIR), and assert which file each call created,
-// changed or removed.
-
 package channels
 
 import (
@@ -23,16 +14,10 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// commandsTestLoop widens the base fake (which only knows "main") with a set of
-// agents, each pointing at its own workspace directory.
 type commandsWorkspaceLoop struct {
 	*nativeTestAgentLoop
 	workspaces map[string]string
 }
-
-// commandsWorkspaceLoop knows every agent but deliberately implements NO
-// InvalidateHarnessWorkspace, which is how a test simulates an agent loop
-// without the optional capability.
 
 func (l *commandsWorkspaceLoop) GetAgentInfo(agentID string) (AgentBasicInfo, bool) {
 	if ws, ok := l.workspaces[agentID]; ok {
@@ -52,23 +37,16 @@ func (l *commandsWorkspaceLoop) ListAvailableAgentIDs() []string {
 type commandsTestLoop struct {
 	*commandsWorkspaceLoop
 
-	// invalidations records the workspace keys passed to
-	// InvalidateHarnessWorkspace, so the tests can assert the runtime cache is
-	// dropped after every write. mu guards it because the channel may call the
-	// hook from any handler.
 	invalidations []string
 	mu            sync.Mutex
 }
 
-// InvalidateHarnessWorkspace implements the optional harnessCommandInvalidator
-// capability of the real agent loop.
 func (l *commandsTestLoop) InvalidateHarnessWorkspace(workspace string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.invalidations = append(l.invalidations, workspace)
 }
 
-// takeInvalidations returns and clears the recorded calls.
 func (l *commandsTestLoop) takeInvalidations() []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -77,9 +55,6 @@ func (l *commandsTestLoop) takeInvalidations() []string {
 	return out
 }
 
-// newCommandsTestServer isolates the global level in a temp dir and gives
-// agents "alpha" and "beta" their own workspaces. The returned map holds the
-// workspace of each agent plus "lele" for the fake ~/.lele.
 func newCommandsTestServer(t *testing.T) (*nativeTestServer, map[string]string) {
 	t.Helper()
 
@@ -102,7 +77,6 @@ func newCommandsTestServer(t *testing.T) (*nativeTestServer, map[string]string) 
 	return ts, map[string]string{"alpha": alpha, "beta": beta, "lele": leleDir, "default": ts.loop.workspace}
 }
 
-// writeCommandFile puts a command markdown file at one of the discovery levels.
 func writeCommandFile(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -115,7 +89,6 @@ func writeCommandFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
-// commandMarkdown builds the front-matter form the UI sends.
 func commandMarkdown(description, template string) string {
 	return "---\ndescription: \"" + description + "\"\n---\n" + template + "\n"
 }
@@ -164,8 +137,6 @@ func findCommandRow(rows []AgentCommandInfo, name, source string) (AgentCommandI
 	return AgentCommandInfo{}, false
 }
 
-// --- list -------------------------------------------------------------------
-
 func TestAgentCommandsList_MergesLevelsPerAgent(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
 
@@ -199,7 +170,6 @@ func TestAgentCommandsList_MergesLevelsPerAgent(t *testing.T) {
 	if _, ok := findCommandRow(alpha.Commands, "shared", "global"); !ok {
 		t.Fatalf("global command missing from alpha's list: %+v", alpha.Commands)
 	}
-	// The central guarantee: beta's command must not leak into alpha's page.
 	for _, row := range alpha.Commands {
 		if row.Name == "beta-only" {
 			t.Fatalf("beta's workspace command leaked into agent alpha: %+v", alpha.Commands)
@@ -264,7 +234,6 @@ func TestAgentCommandsList_FlagsDeletableOnlyOnWritableLevels(t *testing.T) {
 func TestAgentCommandsList_TagsShadowedRows(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
 
-	// Same name at global and workspace: workspace wins (higher precedence).
 	writeCommandFile(t, filepath.Join(dirs["lele"], "commands"), "dup.md",
 		commandMarkdown("global version", "global body"))
 	writeCommandFile(t, filepath.Join(dirs["alpha"], "commands"), "dup.md",
@@ -320,8 +289,6 @@ func TestAgentCommandsList_UnknownAgent(t *testing.T) {
 	}
 }
 
-// --- detail -----------------------------------------------------------------
-
 func TestAgentCommandDetail_ReturnsRawMarkdown(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
 
@@ -376,12 +343,7 @@ func TestAgentCommandDetail_UnknownIsNotFound(t *testing.T) {
 func TestAgentCommandDetail_RejectsTraversal(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
 
-	// A name that would escape the commands dir must be rejected by the grammar
-	// before any path is built.
 	for _, tc := range []struct{ raw, label string }{
-		// ".." must be percent-encoded: Go's ServeMux cleans the literal form
-		// out of the path before the handler ever runs, so it cannot test the
-		// grammar. %2e%2e reaches PathValue as "..".
 		{"%2e%2e", ".."},
 		{"%2e%2e%2f%2e%2e%2fetc%2fpasswd", "../../etc/passwd"},
 		{"a%20b", "a b"},
@@ -394,7 +356,6 @@ func TestAgentCommandDetail_RejectsTraversal(t *testing.T) {
 			t.Fatalf("name %q: status = %d body=%s, want 400 (must never reach disk)", tc.label, resp.StatusCode, body)
 		}
 	}
-	// Nothing was created outside the workspace while probing.
 	if _, err := os.Stat(filepath.Join(dirs["alpha"], "commands")); err == nil {
 		entries, _ := os.ReadDir(filepath.Join(dirs["alpha"], "commands"))
 		if len(entries) != 0 {
@@ -402,8 +363,6 @@ func TestAgentCommandDetail_RejectsTraversal(t *testing.T) {
 		}
 	}
 }
-
-// --- create -----------------------------------------------------------------
 
 func TestAgentCommandCreate_WritesIntoAgentWorkspace(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
@@ -437,13 +396,10 @@ func TestAgentCommandCreate_WritesIntoAgentWorkspace(t *testing.T) {
 		t.Fatalf("description = %q, want it parsed back from the stored frontmatter", created.Command.Description)
 	}
 
-	// The list must show it immediately: no cache sits in front of the file.
 	if _, listed := getAgentCommands(t, ts, "alpha"); !listed.has("deploy", "workspace") {
 		t.Fatalf("created command not listed: %+v", listed.Commands)
 	}
 
-	// The other agent's workspace and the shared global dir must be untouched —
-	// the whole point of a per-agent endpoint.
 	if entries, _ := os.ReadDir(filepath.Join(dirs["beta"], "commands")); len(entries) != 0 {
 		t.Fatalf("beta's workspace was written: %v", entries)
 	}
@@ -484,8 +440,6 @@ func TestAgentCommandCreate_RejectsGlobalScope(t *testing.T) {
 func TestAgentCommandCreate_RejectsInvalidContent(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
 
-	// allow_shell must parse: a typo there is a hard error in the loader, and
-	// storing it would leave a file the agent silently skips.
 	body := `{"name":"broken","content":"---\ndescription: \"x\"\nallow_shell: maybe\n---\nbody"}`
 	resp, payload := doCommandRequest(t, ts, http.MethodPost, ts.server.URL+"/api/v1/agents/alpha/commands", body)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -518,8 +472,6 @@ func TestAgentCommandCreate_Conflicts(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
 
 	writeCommandFile(t, filepath.Join(dirs["alpha"], "commands"), "exists.md", commandMarkdown("here", "b"))
-	// Real newlines: the front-matter regex anchors on "\n", so a literal
-	// backslash-n (what a raw Go string yields) never parses as front matter.
 	content := "---\ndescription: \"x\"\n---\nbody"
 
 	resp, payload := doCommandRequest(t, ts, http.MethodPost, ts.server.URL+"/api/v1/agents/alpha/commands",
@@ -528,11 +480,6 @@ func TestAgentCommandCreate_Conflicts(t *testing.T) {
 		t.Fatalf("existing name: status = %d body=%s, want 409 exists", resp.StatusCode, payload)
 	}
 
-	// A built-in name would be shadowed by the dispatcher, so the file would be
-	// dead the moment it is written.
-	// "clear" is dispatched by handleCommand; "help" is answered by Telegram
-	// before the message ever reaches the agent loop. Both are reserved by
-	// commands.DispatcherReserved(), which pkg/agent keeps synced to both sources.
 	for _, name := range []string{"clear", "help", "status", "model", "start"} {
 		resp, payload = doCommandRequest(t, ts, http.MethodPost, ts.server.URL+"/api/v1/agents/alpha/commands",
 			`{"name":`+jsonQuote(name)+`,"content":`+jsonQuote(content)+`}`)
@@ -544,8 +491,6 @@ func TestAgentCommandCreate_Conflicts(t *testing.T) {
 		}
 	}
 
-	// A name nothing dispatches must work, even when it *looks* reserved: /review
-	// is the canonical custom command and no built-in owns it.
 	resp, payload = doCommandRequest(t, ts, http.MethodPost, ts.server.URL+"/api/v1/agents/alpha/commands",
 		`{"name":"review","content":`+jsonQuote(content)+`}`)
 	if resp.StatusCode != http.StatusCreated {
@@ -562,8 +507,6 @@ func TestAgentCommandCreate_UnknownAgent(t *testing.T) {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 }
-
-// --- update -----------------------------------------------------------------
 
 func TestAgentCommandUpdate_ReplacesFileContent(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
@@ -608,7 +551,6 @@ func TestAgentCommandUpdate_RespectsSourceOfTheWinner(t *testing.T) {
 		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, payload)
 	}
 
-	// The agent's own copy wins precedence, so it is the one that gets written.
 	if raw, _ := os.ReadFile(workspace); !strings.Contains(string(raw), "workspace v2") {
 		t.Fatalf("workspace file untouched: %q", raw)
 	}
@@ -671,8 +613,6 @@ func TestAgentCommandUpdate_RejectsInvalidContent(t *testing.T) {
 	}
 }
 
-// --- delete -----------------------------------------------------------------
-
 func TestAgentCommandDelete_RemovesOnlyTheWinningFile(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
 
@@ -696,8 +636,6 @@ func TestAgentCommandDelete_RemovesOnlyTheWinningFile(t *testing.T) {
 	if _, err := os.Stat(workspace); !os.IsNotExist(err) {
 		t.Fatalf("the winning workspace file survived: %v", err)
 	}
-	// Deleting the override reveals the global command underneath — the correct
-	// meaning of "delete this level", and the reason beta still sees it.
 	if _, err := os.Stat(global); err != nil {
 		t.Fatalf("the shadowed global file must be left alone: %v", err)
 	}
@@ -712,9 +650,6 @@ func TestAgentCommandDelete_ReadOnlyAndMissing(t *testing.T) {
 		"from-config": {Description: "config level", Template: "inline"},
 	}
 
-	// DELETE reports not_deletable (not not_editable): the UI keeps the delete
-	// button disabled from `deletable`, so this code only shows up on a stale
-	// view, and it must be distinguishable from "cannot open this file".
 	resp, payload := doCommandRequest(t, ts, http.MethodDelete, ts.server.URL+"/api/v1/agents/alpha/commands/from-config", "")
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(payload), "not_deletable") {
 		t.Fatalf("status = %d body=%s, want 403 not_deletable", resp.StatusCode, payload)
@@ -726,16 +661,11 @@ func TestAgentCommandDelete_ReadOnlyAndMissing(t *testing.T) {
 	}
 }
 
-// --- helpers used by the tests above ----------------------------------------
-
-// has reports whether the payload lists name at source.
 func (r AgentCommandsResponse) has(name, source string) bool {
 	_, ok := findCommandRow(r.Commands, name, source)
 	return ok
 }
 
-// jsonQuote encodes a string as a JSON literal so test bodies can embed
-// markdown without hand-escaping it.
 func jsonQuote(s string) string {
 	b, err := json.Marshal(s)
 	if err != nil {
@@ -744,18 +674,11 @@ func jsonQuote(s string) string {
 	return string(b)
 }
 
-// --- runtime cache invalidation ---------------------------------------------
-
-// The agent loops cache one command manager per workspace behind a refresh TTL
-// (pkg/agent harnessRefreshTTL). A REST write that only touched the disk would
-// therefore leave the just-created command untypeable in chat for up to 30
-// seconds, so every mutation must also drop the cached managers it affects.
 func TestAgentCommandWrites_InvalidateWorkspaceCache(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
 	loop := ts.channel.agentLoop.(*commandsTestLoop)
 	content := "---\ndescription: \"x\"\n---\nbody"
 
-	// create (workspace scope) -> only that agent's workspace.
 	resp, payload := doCommandRequest(t, ts, http.MethodPost, ts.server.URL+"/api/v1/agents/alpha/commands",
 		`{"name":"fresh","content":`+jsonQuote(content)+`}`)
 	if resp.StatusCode != http.StatusCreated {
@@ -765,7 +688,6 @@ func TestAgentCommandWrites_InvalidateWorkspaceCache(t *testing.T) {
 		t.Fatalf("create invalidated %v, want exactly alpha's workspace", got)
 	}
 
-	// update of that workspace file -> same single workspace.
 	resp, payload = doCommandRequest(t, ts, http.MethodPut, ts.server.URL+"/api/v1/agents/alpha/commands/fresh",
 		`{"content":`+jsonQuote(commandMarkdown("x", "edited"))+`}`)
 	if resp.StatusCode != http.StatusOK {
@@ -775,7 +697,6 @@ func TestAgentCommandWrites_InvalidateWorkspaceCache(t *testing.T) {
 		t.Fatalf("update invalidated %v, want exactly alpha's workspace", got)
 	}
 
-	// delete -> same single workspace.
 	resp, payload = doCommandRequest(t, ts, http.MethodDelete, ts.server.URL+"/api/v1/agents/alpha/commands/fresh", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("delete: status = %d body=%s", resp.StatusCode, payload)
@@ -798,10 +719,6 @@ func TestAgentCommandGlobalWrite_InvalidatesEveryWorkspace(t *testing.T) {
 	}
 
 	got := loop.takeInvalidations()
-	// "" is the loop's key for the defaults workspace, which also reads the
-	// global level, plus every agent's resolved workspace — beta included,
-	// because a global command changes what beta can run even though beta made
-	// no request.
 	for _, want := range []string{"", dirs["alpha"], dirs["beta"], dirs["default"]} {
 		if !slices.Contains(got, want) {
 			t.Fatalf("global write invalidated %v, missing %q", got, want)
@@ -812,12 +729,8 @@ func TestAgentCommandGlobalWrite_InvalidatesEveryWorkspace(t *testing.T) {
 	}
 }
 
-// A loop without the optional capability must keep working: the write is a
-// success and the runtime simply reloads on its own TTL. This is what protects
-// every other channel fake in the package.
 func TestAgentCommandWrites_WorkWithoutInvalidationHook(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
-	// Same agents and workspaces, but no InvalidateHarnessWorkspace method.
 	ts.channel.agentLoop = ts.channel.agentLoop.(*commandsTestLoop).commandsWorkspaceLoop
 
 	resp, payload := doCommandRequest(t, ts, http.MethodPost, ts.server.URL+"/api/v1/agents/alpha/commands",
@@ -830,14 +743,9 @@ func TestAgentCommandWrites_WorkWithoutInvalidationHook(t *testing.T) {
 	}
 }
 
-// --- content rules the parser does not enforce (brief §6) --------------------
-
 func TestAgentCommandCreate_RejectsEmptyTemplate(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
 
-	// The loader accepts a body-less file (the config level skips it, the file
-	// levels store it), so without this check the API would happily create a
-	// command that expands to nothing.
 	body := `{"name":"hollow","content":"---\ndescription: \"no body\"\n---\n"}`
 	resp, payload := doCommandRequest(t, ts, http.MethodPost, ts.server.URL+"/api/v1/agents/alpha/commands", body)
 	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(payload), "command_invalid") {
@@ -870,8 +778,6 @@ func TestAgentCommandCreate_RejectsEmptyDescription(t *testing.T) {
 func TestAgentCommandCreate_RejectsOversizedContent(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
 
-	// Just above the 256 KB cap and below the gateway's 1 MB body limit, so the
-	// handler — not the transport — is what answers.
 	oversized := "---\ndescription: \"big\"\n---\n" + strings.Repeat("x", maxAgentCommandSize)
 	resp, payload := doCommandRequest(t, ts, http.MethodPost, ts.server.URL+"/api/v1/agents/alpha/commands",
 		`{"name":"big","content":`+jsonQuote(oversized)+`}`)
@@ -883,8 +789,6 @@ func TestAgentCommandCreate_RejectsOversizedContent(t *testing.T) {
 	}
 }
 
-// PUT runs the same validator: bypassing it through the update path would let a
-// client store a file the agent refuses to load.
 func TestAgentCommandUpdate_RejectsEmptyTemplate(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
 
@@ -901,19 +805,9 @@ func TestAgentCommandUpdate_RejectsEmptyTemplate(t *testing.T) {
 	}
 }
 
-// --- workspace policy -------------------------------------------------------
-
-// An agent whose workspace sits outside the allowed roots is a policy refusal,
-// not a missing agent: answering 404 would tell a caller the id is unknown when
-// the real reason is that the configured path is off-limits. Every /agents/{id}
-// endpoint already splits the two (handleAgentFiles); the command endpoints must
-// not be the exception, and all five of them share the resolution helper.
 func TestAgentCommands_ForeignWorkspaceIsForbidden(t *testing.T) {
 	ts, _ := newCommandsTestServer(t)
 	loop := ts.channel.agentLoop.(*commandsTestLoop)
-	// /etc is outside home, /tmp and the cwd — the three roots
-	// isAllowedWorkspacePath accepts. The path is never created: the grammar
-	// check rejects it before any filesystem call.
 	loop.workspaces["jail"] = "/etc/lele-outside-roots"
 
 	calls := []struct {
@@ -936,17 +830,12 @@ func TestAgentCommands_ForeignWorkspaceIsForbidden(t *testing.T) {
 	}
 }
 
-// T-B12: the tri-state of allow_absolute_files must survive the wire in both
-// directions. nil means "inherit the harness default", so collapsing it to false
-// would silently turn off a capability an agent configured globally — and the
-// editor's third option ("heredar") has nothing to select if the API cannot say
-// "absent".
 func TestAgentCommands_TriStateRoundTrip(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
 
 	cases := []struct {
 		name    string
-		front   string // the front-matter line, "" = key absent
+		front   string
 		want    *bool
 		wantPtr bool
 	}{
@@ -982,8 +871,6 @@ func TestAgentCommands_TriStateRoundTrip(t *testing.T) {
 		}
 	}
 
-	// And on the wire: the JSON itself must carry null / true / false, not omit
-	// the key — the UI distinguishes the three from the parsed value.
 	var rows []map[string]any
 	if err := json.Unmarshal(structFieldJSON(t, body, "commands"), &rows); err != nil {
 		t.Fatalf("unmarshal rows: %v", err)
@@ -1003,10 +890,6 @@ func TestAgentCommands_TriStateRoundTrip(t *testing.T) {
 	}
 }
 
-// T-B13: a GET right after a PUT must show the new content. The catalog is built
-// from disk on demand (never from the loop's TTL cache), so this holds even for a
-// loop that cannot invalidate — what it guards is that no response-level caching
-// crept in between the two endpoints.
 func TestAgentCommandUpdate_GetReflectsChangeImmediately(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
 
@@ -1019,7 +902,6 @@ func TestAgentCommandUpdate_GetReflectsChangeImmediately(t *testing.T) {
 		t.Fatalf("put: status = %d body=%s", resp.StatusCode, payload)
 	}
 
-	// Detail endpoint (raw bytes of the file).
 	resp, payload = doCommandRequest(t, ts, http.MethodGet, ts.server.URL+"/api/v1/agents/alpha/commands/live", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get detail: status = %d body=%s", resp.StatusCode, payload)
@@ -1028,7 +910,6 @@ func TestAgentCommandUpdate_GetReflectsChangeImmediately(t *testing.T) {
 		t.Fatalf("detail still serves the old content: %s", payload)
 	}
 
-	// List endpoint (parsed row).
 	_, listed := getAgentCommands(t, ts, "alpha")
 	row, ok := findCommandRow(listed.Commands, "live", "workspace")
 	if !ok {
@@ -1039,9 +920,6 @@ func TestAgentCommandUpdate_GetReflectsChangeImmediately(t *testing.T) {
 	}
 }
 
-// structFieldJSON pulls one top-level field out of a JSON object as raw bytes,
-// so a test can look at what the wire actually carried instead of at what the
-// typed struct chose to represent.
 func structFieldJSON(t *testing.T, body []byte, field string) []byte {
 	t.Helper()
 	var envelope map[string]json.RawMessage
@@ -1055,9 +933,6 @@ func structFieldJSON(t *testing.T, body []byte, field string) []byte {
 	return raw
 }
 
-// The loader discovers .markdown as well as .md, so an existence check limited
-// to "<name>.md" would let a create drop a second file on a command the agent
-// already has — and which body runs would then depend on directory read order.
 func TestAgentCommandCreate_ExistingMarkdownExtensionIsConflict(t *testing.T) {
 	ts, dirs := newCommandsTestServer(t)
 

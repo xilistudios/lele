@@ -141,7 +141,6 @@ func TestRenderTelegramText_HTMLMode(t *testing.T) {
 }
 
 func TestRenderTelegramText_DefaultMode(t *testing.T) {
-	// Empty string should default to markdown
 	input := "**bold**"
 	result := renderTelegramText(input, "")
 	expected := "<b>bold</b>"
@@ -151,7 +150,6 @@ func TestRenderTelegramText_DefaultMode(t *testing.T) {
 }
 
 func TestIsTelegramParseError(t *testing.T) {
-	// Test with actual parse errors
 	parseErrors := []string{
 		"can't parse message",
 		"parse error",
@@ -180,7 +178,6 @@ func TestIsTelegramParseError(t *testing.T) {
 		}
 	}
 
-	// Test nil error
 	if isTelegramParseError(nil) {
 		t.Error("isTelegramParseError(nil) = true, want false")
 	}

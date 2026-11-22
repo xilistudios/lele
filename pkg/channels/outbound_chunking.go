@@ -22,10 +22,6 @@ const (
 	slackTextChunkMaxLen    = 40000
 )
 
-// splitOutboundMessage expands a single outbound message into multiple sends when a
-// channel has strict text limits. Text chunks are sent first; for channels with
-// outbound attachment support, attachments are sent as a final attachment-only
-// message to avoid duplication.
 func splitOutboundMessage(msg bus.OutboundMessage) []bus.OutboundMessage {
 	maxLen := outboundTextChunkMaxLen(msg.Channel)
 	if maxLen <= 0 || msg.Content == "" {
@@ -85,22 +81,14 @@ func outboundChannelSeparatesAttachments(channel string) bool {
 	}
 }
 
-// sendResult says how far a whole-message send got, which decides what the
-// durable spool does with the backing row: Delivered completes it,
-// NotStarted releases it for replay, Partial must be forgotten because
-// re-sending would duplicate the chunks already on the wire.
 type sendResult int
 
 const (
-	sendDelivered  sendResult = iota // every chunk reached the channel
-	sendNotStarted                   // failed before the first successful chunk
-	sendPartial                      // >=1 chunk out, then failed: never retry
+	sendDelivered sendResult = iota
+	sendNotStarted
+	sendPartial
 )
 
-// sendOutboundMessage splits msg the way the channel needs it and sends every
-// chunk. The returned sendResult is the tri-state above; the error is the first
-// chunk failure, if any. Callers that own a spool row must map the result to
-// Complete/Release/Forget - only Release is safe to replay.
 func sendOutboundMessage(ctx context.Context, channel Channel, msg bus.OutboundMessage) (sendResult, error) {
 	chunks := splitOutboundMessage(msg)
 	for i, chunk := range chunks {
@@ -114,12 +102,6 @@ func sendOutboundMessage(ctx context.Context, channel Channel, msg bus.OutboundM
 	return sendDelivered, nil
 }
 
-// RateLimitError is returned by channel Send implementations when the remote
-// API answers 429 WITH an explicit retry-after hint. sendChunkWithRetry waits
-// that long (capped) before its next attempt instead of the default backoff —
-// retrying sooner would only burn attempts against a known window. Channels
-// whose SDK returns a wrapped native 429 (telego, discordgo, slack-go) map it
-// to this type at their boundary.
 type RateLimitError struct {
 	Channel    string
 	RetryAfter time.Duration
@@ -129,9 +111,6 @@ func (e *RateLimitError) Error() string {
 	return fmt.Sprintf("%s rate limited, retry after %s", e.Channel, e.RetryAfter)
 }
 
-// TelegramRateLimitError maps a telego API error carrying a 429 code (with
-// its retry_after in whole seconds) onto RateLimitError so sendChunkWithRetry
-// can honor the hint. Returns err unchanged when it is not a 429.
 func TelegramRateLimitError(err error) error {
 	var apiErr *telegoapi.Error
 	if !errors.As(err, &apiErr) || apiErr.ErrorCode != 429 {
@@ -144,14 +123,8 @@ func TelegramRateLimitError(err error) error {
 	return &RateLimitError{Channel: "telegram", RetryAfter: retryAfter}
 }
 
-// maxRetryAfter caps any retry-after hint: an API asking for minutes of sleep
-// must not freeze an outbound worker for that long; the capped wait still
-// honors the hint better than the plain backoff.
 const maxRetryAfter = 60 * time.Second
 
-// retryWaitTime decides how long to wait before the given attempt (1-based:
-// the wait preceding attempt N). A RateLimitError with a positive hint wins
-// over the default linear backoff, capped at maxRetryAfter.
 func retryWaitTime(lastErr error, attempt int) time.Duration {
 	waitTime := time.Duration(attempt) * time.Second
 	var rle *RateLimitError
@@ -165,9 +138,6 @@ func sendChunkWithRetry(ctx context.Context, channel Channel, msg bus.OutboundMe
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			// An explicit retry-after hint (429 with Retry-After) replaces
-			// the default backoff, capped at maxRetryAfter. Still honored
-			// only if ctx allows the wait.
 			waitTime := retryWaitTime(lastErr, attempt)
 			select {
 			case <-ctx.Done():

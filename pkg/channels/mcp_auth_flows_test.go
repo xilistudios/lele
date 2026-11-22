@@ -1,20 +1,3 @@
-// Tests for the REST layer's live-flow registry (mcp_auth_flows.go).
-//
-// The registry is the piece that turns a process-local *mcp.AuthFlow into a
-// flow id an HTTP client can hold across requests, so these tests pin the four
-// rules that make that safe:
-//
-//  1. one live flow per (agent, server) — a second Start cancels the first;
-//  2. agent scoping — an id only resolves for the agent that created it;
-//  3. the lazy sweep — an expired lookup drops AND cancels the flow (closing
-//     its loopback listener) without a background goroutine;
-//  4. the reload claim — exactly one caller ever observes a completed flow.
-//
-// The flows are REAL: they come from the real engine (mcp.StartAuth) against
-// authtest's in-process authorization server, so a loopback listener is really
-// bound and really released. Only the one test that needs a Start FAILURE
-// substitutes the seam.
-
 package channels
 
 import (
@@ -38,28 +21,20 @@ import (
 	"github.com/xilistudios/lele/pkg/mcp/authtest"
 )
 
-// mcpAuthEngineFixture is the in-process authorization server (authtest) plus
-// the mcp.json layer that points a remote entry at it. Every flow in this file
-// is started against it by the real engine, so the fixture is the only place
-// that knows the fake AS exists.
 type mcpAuthEngineFixture struct {
 	f        *mcpFixture
 	as       *authtest.Server
 	asrv     *httptest.Server
-	resource string           // the resource URL the entry points at
-	srv      mcp.ServerConfig // the RESOLVED config of entry "remote-srv"
+	resource string
+	srv      mcp.ServerConfig
 }
 
-// The three entry names every fixture carries: a usable remote OAuth entry, a
-// local (stdio) entry, and a remote entry the merge rejects (command + url).
 const (
 	mcpAuthRemoteName = "remote-srv"
 	mcpAuthStdioName  = "stdio-srv"
 	mcpAuthBrokenName = "broken-srv"
 )
 
-// newMCPAuthEngineFixture starts the fake AS, writes one global mcp.json and
-// wires the SAME roots for every given agent id.
 func newMCPAuthEngineFixture(t *testing.T, agentIDs ...string) *mcpAuthEngineFixture {
 	t.Helper()
 
@@ -89,18 +64,11 @@ func newMCPAuthEngineFixture(t *testing.T, agentIDs ...string) *mcpAuthEngineFix
 	loop := &mcpTestLoop{nativeTestAgentLoop: ts.loop, paths: byAgent}
 	ts.channel.agentLoop = loop
 
-	// Discover reports per-entry validation failures as a WARNING while still
-	// returning every entry it could resolve (the handlers ignore that error for
-	// the same reason: a broken entry must not blind the API to the good ones).
-	// The fixture keeps one broken entry on purpose, so the routes' "known but
-	// unresolved" path is reachable.
 	merged, _ := mcp.Discover(paths)
 	srv, ok := merged.Servers[mcpAuthRemoteName]
 	if !ok {
 		t.Fatalf("fixture did not resolve %q: %+v", mcpAuthRemoteName, merged)
 	}
-	// Pin the two other entries the error matrix depends on, so the fixture
-	// cannot silently stop exercising them.
 	if _, resolved := merged.Servers[mcpAuthBrokenName]; resolved {
 		t.Fatalf("fixture %q resolved, want it excluded as invalid", mcpAuthBrokenName)
 	}
@@ -117,8 +85,6 @@ func newMCPAuthEngineFixture(t *testing.T, agentIDs ...string) *mcpAuthEngineFix
 	}
 }
 
-// registry builds a registry bound to the fixture's own lele dir (one store per
-// agent), exactly as the channel's accessor does.
 func (fx *mcpAuthEngineFixture) registry() *mcpAuthFlows {
 	return newMCPAuthFlows(func(agentID string) *mcp.AuthStore {
 		if _, known := fx.f.loop.paths[agentID]; !known {
@@ -128,8 +94,6 @@ func (fx *mcpAuthEngineFixture) registry() *mcpAuthFlows {
 	})
 }
 
-// start starts a flow for the fixture's remote entry and fails the test when
-// the real engine refuses it.
 func (fx *mcpAuthEngineFixture) start(t *testing.T, r *mcpAuthFlows, agentID, name string) (*mcp.AuthFlow, string, time.Time) {
 	t.Helper()
 	flow, id, deadline, err := r.Start(context.Background(), agentID, name, fx.srv)
@@ -142,23 +106,18 @@ func (fx *mcpAuthEngineFixture) start(t *testing.T, r *mcpAuthFlows, agentID, na
 	return flow, id, deadline
 }
 
-// entryCount reports how many live flows the registry holds (white box: the
-// concurrency tests are about the INDEXES staying consistent).
 func (r *mcpAuthFlows) entryCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.entries)
 }
 
-// pairCount reports how many pairs are indexed.
 func (r *mcpAuthFlows) pairCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.pairs)
 }
 
-// expire forces the entry's deadline into the past: the sweep is lazy, so the
-// NEXT lookup is what must notice. Only deadline is touched — never the flow.
 func (r *mcpAuthFlows) expire(t *testing.T, flowID string) {
 	t.Helper()
 	r.mu.Lock()
@@ -170,23 +129,12 @@ func (r *mcpAuthFlows) expire(t *testing.T, flowID string) {
 	e.deadline = time.Now().Add(-time.Second)
 }
 
-// --- one live flow per pair (contract invariant 1) -------------------------
-
-// TestMCPAuthFlows_SecondStartReplacesThePairsFlow pins invariant 1: the same
-// (agent, server) never has two live flows. The second Start returns a NEW id,
-// the first id stops resolving, and the first flow is CANCELLED — which is also
-// what releases the loopback port the replacement has to bind.
 func TestMCPAuthFlows_SecondStartReplacesThePairsFlow(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
 
 	flow1, id1, _ := fx.start(t, r, "agent1", mcpAuthRemoteName)
 
-	// The replacement binds the SAME port: the engine pins the first login's
-	// redirect URI in the auth store, so a second start is only possible once
-	// the first listener is closed. A successful second Start is therefore the
-	// proof that the previous flow was released, and the URI equality below
-	// proves the test would have hit EADDRINUSE without that release.
 	flow2, id2, _ := fx.start(t, r, "agent1", mcpAuthRemoteName)
 	if flow2.RedirectURI() != flow1.RedirectURI() {
 		t.Fatalf("second start bound %q, want the pinned %q (the test would then not exercise the port conflict)",
@@ -209,7 +157,6 @@ func TestMCPAuthFlows_SecondStartReplacesThePairsFlow(t *testing.T) {
 		t.Fatalf("registry holds %d flows for one pair, want 1", got)
 	}
 
-	// The replaced flow is terminal with the cancel sentinel...
 	state, ferr := flow1.Status()
 	if state != "error" || !errors.Is(ferr, mcp.ErrAuthCanceled) {
 		t.Fatalf("replaced flow status = (%q, %v), want (error, ErrAuthCanceled)", state, ferr)
@@ -218,28 +165,17 @@ func TestMCPAuthFlows_SecondStartReplacesThePairsFlow(t *testing.T) {
 		t.Fatal("replaced flow is not Done(), want a terminal outcome")
 	}
 
-	// The new flow is the pending one.
 	if state, _ := flow2.Status(); state != "pending" {
 		t.Fatalf("new flow status = %q, want pending", state)
 	}
 }
 
-// TestMCPAuthFlows_DifferentPairsDoNotShareFlows: the pair key is
-// (agent, server) — two agents, or two servers of one agent, coexist.
-//
-// Each pair uses its own server NAME: the auth store (and with it the pinned
-// loopback redirect URI) is keyed by name inside ONE lele dir, so two agents
-// logging into the same name would share — and contend for — the same port.
-// That is the engine's storage rule, not a property of this registry, and the
-// test does not depend on it.
 func TestMCPAuthFlows_DifferentPairsDoNotShareFlows(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1", "agent2")
 	r := fx.registry()
 
 	_, idA1, _ := fx.start(t, r, "agent1", mcpAuthRemoteName)
 	_, idA2, _ := fx.start(t, r, "agent2", "remote-srv-b")
-	// A second SERVER for the same agent, proving the key is not just the agent
-	// (the registry never reads the config; it is the caller's resolved entry).
 	_, idB1, _ := fx.start(t, r, "agent1", "remote-srv-alias")
 
 	if len(map[string]string{idA1: "", idA2: "", idB1: ""}) != 3 {
@@ -253,11 +189,6 @@ func TestMCPAuthFlows_DifferentPairsDoNotShareFlows(t *testing.T) {
 	}
 }
 
-// --- agent scoping (contract invariant 4) ---------------------------------
-
-// TestMCPAuthFlows_LookupIsAgentScoped: a flow id resolves only for its own
-// agent. The owner still resolves it afterwards (a foreign lookup must not
-// consume or cancel the entry).
 func TestMCPAuthFlows_LookupIsAgentScoped(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1", "agent2")
 	r := fx.registry()
@@ -277,7 +208,6 @@ func TestMCPAuthFlows_LookupIsAgentScoped(t *testing.T) {
 		t.Fatalf("Complete(agent2) = %v, want errMCPAuthFlowNotFound", err)
 	}
 
-	// The owner is unaffected: still resolvable, still pending.
 	entry, ok := r.Get("agent1", id)
 	if !ok {
 		t.Fatal("the owner lost its flow after foreign lookups")
@@ -290,13 +220,6 @@ func TestMCPAuthFlows_LookupIsAgentScoped(t *testing.T) {
 	}
 }
 
-// --- the lazy sweep (contract invariant 3) --------------------------------
-
-// TestMCPAuthFlows_ExpiredLookupCancelsAndUnindexes: the deadline is what makes
-// a forgotten flow release its loopback port. Nothing sweeps in the background,
-// so the FIRST lookup after the deadline must drop the entry, cancel the flow
-// (closing the listener) and free the pair — after which the same pair can be
-// started again.
 func TestMCPAuthFlows_ExpiredLookupCancelsAndUnindexes(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
@@ -304,12 +227,10 @@ func TestMCPAuthFlows_ExpiredLookupCancelsAndUnindexes(t *testing.T) {
 	flow, id, deadline := fx.start(t, r, "agent1", mcpAuthRemoteName)
 	port := portOf(t, flow.RedirectURI())
 
-	// The reported deadline is the registry's own TTL, not a placeholder.
 	if d := time.Until(deadline); d <= 0 || d > mcpAuthFlowTTL+time.Minute {
 		t.Fatalf("ExpiresAt is %v away, want within (0, %v]", d, mcpAuthFlowTTL+time.Minute)
 	}
 
-	// Nothing expires early: a lookup well before the deadline keeps the flow.
 	if _, ok := r.Get("agent1", id); !ok {
 		t.Fatal("the flow did not resolve before its deadline")
 	}
@@ -319,7 +240,6 @@ func TestMCPAuthFlows_ExpiredLookupCancelsAndUnindexes(t *testing.T) {
 
 	r.expire(t, id)
 
-	// Every entry point sweeps: use Get here, MarkReloaded below.
 	if _, ok := r.Get("agent1", id); ok {
 		t.Fatal("the expired flow id still resolves, want it dropped")
 	}
@@ -334,7 +254,6 @@ func TestMCPAuthFlows_ExpiredLookupCancelsAndUnindexes(t *testing.T) {
 		t.Fatalf("registry holds %d pair keys after the sweep, want 0", got)
 	}
 
-	// A swept pair is startable again, and it does not resurrect the old id.
 	_, id2, _ := fx.start(t, r, "agent1", mcpAuthRemoteName)
 	if id2 == id {
 		t.Fatalf("the new flow reused the swept id %q", id)
@@ -344,18 +263,14 @@ func TestMCPAuthFlows_ExpiredLookupCancelsAndUnindexes(t *testing.T) {
 	}
 }
 
-// TestMCPAuthFlows_ExpiredFlowDoesNotLeakIntoAnotherPair: the sweep is global —
-// a lookup for pair B must reap pair A's expired flow too (otherwise a pair
-// nobody asks about again would pin its listener for the life of the process).
 func TestMCPAuthFlows_ExpiredFlowIsReapedByAnyLookup(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1", "agent2")
 	r := fx.registry()
 
 	flowA, idA, _ := fx.start(t, r, "agent1", mcpAuthRemoteName)
-	_, idB, _ := fx.start(t, r, "agent2", "remote-srv-b") // its own name: its own pinned port
+	_, idB, _ := fx.start(t, r, "agent2", "remote-srv-b")
 	r.expire(t, idA)
 
-	// Look up B: A's flow must be reaped as a side effect.
 	if _, ok := r.Get("agent2", idB); !ok {
 		t.Fatal("agent2's live flow did not resolve")
 	}
@@ -367,18 +282,12 @@ func TestMCPAuthFlows_ExpiredFlowIsReapedByAnyLookup(t *testing.T) {
 	}
 }
 
-// --- the reload claim (contract invariant 2) -------------------------------
-
-// TestMCPAuthFlows_ReloadIsClaimedExactlyOnce: the manager must be re-wired
-// once per completed flow, no matter how many times a client polls — and never
-// for a flow that has not produced a credential.
 func TestMCPAuthFlows_ReloadIsClaimedExactlyOnce(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
 
 	flow, id, _ := fx.start(t, r, "agent1", mcpAuthRemoteName)
 
-	// Pending: nothing to reload yet, however often it is asked.
 	if r.MarkReloaded("agent1", id) {
 		t.Fatal("MarkReloaded on a PENDING flow claimed the reload (the flow has no credential yet)")
 	}
@@ -386,7 +295,6 @@ func TestMCPAuthFlows_ReloadIsClaimedExactlyOnce(t *testing.T) {
 		t.Fatal("MarkReloaded on a pending flow claimed twice")
 	}
 
-	// Complete it: now the claim is owed exactly once.
 	code, state := mcpAuthAuthorizeCode(t, flow.URL())
 	if err := r.Complete(context.Background(), "agent1", id, code, state); err != nil {
 		t.Fatalf("Complete() = %v", err)
@@ -404,9 +312,6 @@ func TestMCPAuthFlows_ReloadIsClaimedExactlyOnce(t *testing.T) {
 	}
 }
 
-// TestMCPAuthFlows_FailedFlowNeverClaimsReload: invariant 2 fires the manager's
-// re-wiring pass on the pending → done transition ONLY, so a cancelled flow —
-// which is equally terminal — must never claim it.
 func TestMCPAuthFlows_FailedFlowNeverClaimsReload(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
@@ -423,15 +328,10 @@ func TestMCPAuthFlows_FailedFlowNeverClaimsReload(t *testing.T) {
 	}
 }
 
-// TestMCPAuthFlows_ConcurrentReloadClaimHasOneWinner: the claim is the reason
-// the registry has a mutex — N concurrent polls of one completed flow must
-// reload once, not N times.
 func TestMCPAuthFlows_ConcurrentReloadClaimHasOneWinner(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
 	flow, id, _ := fx.start(t, r, "agent1", mcpAuthRemoteName)
-	// The flow must be DONE before the race: that is the only state in which a
-	// claim is honored at all.
 	code, state := mcpAuthAuthorizeCode(t, flow.URL())
 	if err := r.Complete(context.Background(), "agent1", id, code, state); err != nil {
 		t.Fatalf("Complete() = %v", err)
@@ -445,7 +345,7 @@ func TestMCPAuthFlows_ConcurrentReloadClaimHasOneWinner(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			<-start // maximize overlap
+			<-start
 			if r.MarkReloaded("agent1", id) {
 				claims.Add(1)
 			}
@@ -459,12 +359,6 @@ func TestMCPAuthFlows_ConcurrentReloadClaimHasOneWinner(t *testing.T) {
 	}
 }
 
-// --- cancel (contract invariant 7) ----------------------------------------
-
-// TestMCPAuthFlows_CancelIsBestEffortIdempotent: 204 semantics — cancelling a
-// live flow works, cancelling an already-terminal one works again (while the id
-// is still in the registry), and only an id that does not resolve reports
-// not-found.
 func TestMCPAuthFlows_CancelIsBestEffortIdempotent(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
@@ -480,7 +374,6 @@ func TestMCPAuthFlows_CancelIsBestEffortIdempotent(t *testing.T) {
 	}
 	assertPortClosed(t, port)
 
-	// Idempotent: the entry is still resolvable until its deadline.
 	if err := r.Cancel("agent1", id); err != nil {
 		t.Fatalf("second Cancel() = %v, want nil", err)
 	}
@@ -488,20 +381,16 @@ func TestMCPAuthFlows_CancelIsBestEffortIdempotent(t *testing.T) {
 		t.Fatal("a cancelled-but-unexpired flow id stopped resolving, want it to keep resolving until the TTL")
 	}
 
-	// Unknown shape-valid id → not found.
 	if err := r.Cancel("agent1", "abababababababababababababababab"); !errors.Is(err, errMCPAuthFlowNotFound) {
 		t.Fatalf("Cancel(unknown) = %v, want errMCPAuthFlowNotFound", err)
 	}
 
-	// After the sweep, the cancelled flow's id is gone for good.
 	r.expire(t, id)
 	if err := r.Cancel("agent1", id); !errors.Is(err, errMCPAuthFlowNotFound) {
 		t.Fatalf("Cancel(swept) = %v, want errMCPAuthFlowNotFound", err)
 	}
 }
 
-// TestMCPAuthFlows_SweepReleasesEveryListener: the port is the resource being
-// leaked, so a bulk expiry must release all of them.
 func TestMCPAuthFlows_SweepReleasesEveryListener(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1", "agent2")
 	r := fx.registry()
@@ -510,7 +399,7 @@ func TestMCPAuthFlows_SweepReleasesEveryListener(t *testing.T) {
 	ids := make([]string, 0, 3)
 	for _, pair := range []struct{ agent, name string }{
 		{"agent1", mcpAuthRemoteName},
-		{"agent2", "remote-srv-b"}, // its own name: its own pinned port
+		{"agent2", "remote-srv-b"},
 	} {
 		flow, id, _ := fx.start(t, r, pair.agent, pair.name)
 		ports = append(ports, portOf(t, flow.RedirectURI()))
@@ -522,7 +411,6 @@ func TestMCPAuthFlows_SweepReleasesEveryListener(t *testing.T) {
 	for _, id := range ids {
 		r.expire(t, id)
 	}
-	// One lookup reaps everything that expired.
 	if _, ok := r.Get("agent1", ids[0]); ok {
 		t.Fatal("expired id still resolves")
 	}
@@ -535,9 +423,6 @@ func TestMCPAuthFlows_SweepReleasesEveryListener(t *testing.T) {
 	}
 }
 
-// TestMCPAuthFlows_CancelPairStopsTheLogoutRace: logout cancels the pair's
-// flow (a login that completed after the logout would re-store the credential
-// the user just dropped). Absence is not an error.
 func TestMCPAuthFlows_CancelPairStopsTheLogoutRace(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
@@ -552,13 +437,10 @@ func TestMCPAuthFlows_CancelPairStopsTheLogoutRace(t *testing.T) {
 		t.Fatalf("status after CancelPair = (%q, %v), want (error, ErrAuthCanceled)", state, ferr)
 	}
 	assertPortClosed(t, port)
-	// The entry stays resolvable (logout does not delete state the client may
-	// still be polling), but the flow behind it is dead.
 	if _, ok := r.Get("agent1", id); !ok {
 		t.Fatal("CancelPair removed the entry, want it kept until its deadline")
 	}
 
-	// Idempotent, and a pair with no flow is not an error.
 	if err := r.CancelPair("agent1", mcpAuthRemoteName); err != nil {
 		t.Fatalf("second CancelPair() = %v, want nil", err)
 	}
@@ -567,18 +449,14 @@ func TestMCPAuthFlows_CancelPairStopsTheLogoutRace(t *testing.T) {
 	}
 }
 
-// --- completion -----------------------------------------------------------
-
-// TestMCPAuthFlows_CompleteUnknownFlowIsNotFound: the complete route's 404 path
-// (unknown, expired or foreign id) never reaches the engine.
 func TestMCPAuthFlows_CompleteUnknownFlowIsNotFound(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
 
 	for _, id := range []string{
-		"abababababababababababababababab", // well-formed, unknown
-		"",                                 // empty
-		"short",                            // wrong shape (the handler refuses it earlier)
+		"abababababababababababababababab",
+		"",
+		"short",
 	} {
 		if err := r.Complete(context.Background(), "agent1", id, "code", ""); !errors.Is(err, errMCPAuthFlowNotFound) {
 			t.Fatalf("Complete(%q) = %v, want errMCPAuthFlowNotFound", id, err)
@@ -586,13 +464,6 @@ func TestMCPAuthFlows_CompleteUnknownFlowIsNotFound(t *testing.T) {
 	}
 }
 
-// TestMCPAuthFlows_CompleteWithTheAuthorizationServersCode drives the one path
-// that must really work: the code the fake AS issues, submitted out of band,
-// completes the flow, stores the credential and leaves the flow resolvable as
-// "done" — and the engine then reports the server as authenticated.
-//
-// It is the registry-level half of the REST complete test (the REST layer only
-// adds routing, DTO projection and the reload claim on top of it).
 func TestMCPAuthFlows_CompleteStoresTheCredential(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
@@ -614,22 +485,15 @@ func TestMCPAuthFlows_CompleteStoresTheCredential(t *testing.T) {
 		t.Fatal("completed flow is not Done()")
 	}
 
-	// The credential is in the REAL store (the engine's own TokenStore), and
-	// CheckAuth — the projection the status DTO uses — sees it.
 	status := mcp.CheckAuth(mcp.NewAuthStore(fx.f.paths.LeleDir), mcpAuthRemoteName, fx.srv)
 	if !status.Authenticated {
 		t.Fatalf("CheckAuth after Complete = %+v, want authenticated", status)
 	}
-	// A second Complete on a terminal flow is idempotent (nil), which is what
-	// makes a retried request harmless.
 	if err := r.Complete(context.Background(), "agent1", id, code, state); err != nil {
 		t.Fatalf("second Complete() = %v, want nil (terminal flows are idempotent)", err)
 	}
 }
 
-// TestMCPAuthFlows_FailedCompleteLeavesTheFlowOpen: a wrong code is retryable —
-// the flow stays pending-capable ("error", not Done), which is the state the
-// WebUI's paste box depends on.
 func TestMCPAuthFlows_FailedCompleteLeavesTheFlowOpen(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
@@ -646,7 +510,6 @@ func TestMCPAuthFlows_FailedCompleteLeavesTheFlowOpen(t *testing.T) {
 	if flow.Done() {
 		t.Fatal("a failed token exchange must leave the flow open and retryable")
 	}
-	// Retry with the real code: the SAME flow recovers.
 	code, st := mcpAuthAuthorizeCode(t, flow.URL())
 	if err := r.Complete(context.Background(), "agent1", id, code, st); err != nil {
 		t.Fatalf("retry Complete() = %v, want nil", err)
@@ -656,18 +519,11 @@ func TestMCPAuthFlows_FailedCompleteLeavesTheFlowOpen(t *testing.T) {
 	}
 }
 
-// --- the seam, and the shape of what Start returns ------------------------
-
-// TestMCPAuthFlows_StartFailureKeepsATerminalFlow: a failed Start (dead server,
-// disabled store) must not tear down what the pair already had — as long as
-// that flow holds no loopback port (a terminal flow has released it). The seam
-// is substituted so the failure is deterministic.
 func TestMCPAuthFlows_StartFailureKeepsATerminalFlow(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
 
 	flow, id, _ := fx.start(t, r, "agent1", mcpAuthRemoteName)
-	// Cancel it FIRST: terminal, listener released, still resolvable.
 	if err := r.Cancel("agent1", id); err != nil {
 		t.Fatalf("Cancel() = %v", err)
 	}
@@ -680,8 +536,6 @@ func TestMCPAuthFlows_StartFailureKeepsATerminalFlow(t *testing.T) {
 	restore := startMCPAuthFlow
 	startMCPAuthFlow = func(ctx context.Context, name string, srv mcp.ServerConfig, store *mcp.AuthStore, opts mcp.AuthOptions) (*mcp.AuthFlow, error) {
 		calls.Add(1)
-		// The seam receives the config the REST layer resolved and the store of
-		// the CALLING agent — the two things the registry owes the engine.
 		if srv.URL != fx.srv.URL {
 			t.Errorf("seam got url %q, want the resolved %q", srv.URL, fx.srv.URL)
 		}
@@ -707,12 +561,6 @@ func TestMCPAuthFlows_StartFailureKeepsATerminalFlow(t *testing.T) {
 	}
 }
 
-// TestMCPAuthFlows_StartFailureAfterALiveFlowLeavesThePairEmpty documents the
-// deliberate consequence of the port rule: a flow that is still LIVE has to
-// release its loopback port BEFORE the new flow can bind it, so a Start that
-// then fails leaves the pair empty. The alternative — binding first — is not
-// available: the store pins the port, so the new flow could never bind while
-// the old listener is open.
 func TestMCPAuthFlows_StartFailureAfterALiveFlowLeavesThePairEmpty(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
@@ -730,7 +578,6 @@ func TestMCPAuthFlows_StartFailureAfterALiveFlowLeavesThePairEmpty(t *testing.T)
 		t.Fatal("Start() = nil, want the seam error")
 	}
 
-	// The old flow was released to free the port, and no new one was indexed.
 	if state, ferr := flow.Status(); state != "error" || !errors.Is(ferr, mcp.ErrAuthCanceled) {
 		t.Fatalf("previous flow = (%q, %v), want it cancelled to free the port", state, ferr)
 	}
@@ -743,9 +590,6 @@ func TestMCPAuthFlows_StartFailureAfterALiveFlowLeavesThePairEmpty(t *testing.T)
 	}
 }
 
-// TestMCPAuthFlows_StoreFactoryIsPerAgentAndNilWhenUnknown: the registry never
-// guesses a store, and an unknown agent (no roots) yields nil, which the engine
-// reports as a disabled store.
 func TestMCPAuthFlows_StoreFactoryIsPerAgentAndNilWhenUnknown(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
@@ -759,8 +603,6 @@ func TestMCPAuthFlows_StoreFactoryIsPerAgentAndNilWhenUnknown(t *testing.T) {
 		return mcp.NewAuthStore(fx.f.paths.LeleDir)
 	}
 
-	// A nil store is what the engine sees as ErrAuthStoreDisabled — the REST
-	// layer's 503. The registry must forward it, not invent a path.
 	if _, _, _, err := r.Start(context.Background(), "ghost-agent", mcpAuthRemoteName, fx.srv); !errors.Is(err, mcp.ErrAuthStoreDisabled) {
 		t.Fatalf("Start(ghost) = %v, want ErrAuthStoreDisabled", err)
 	}
@@ -768,7 +610,6 @@ func TestMCPAuthFlows_StoreFactoryIsPerAgentAndNilWhenUnknown(t *testing.T) {
 		t.Fatalf("storeFor calls = %v, want [ghost-agent]", asked)
 	}
 
-	// And the working agent still starts.
 	fx.start(t, r, "agent1", mcpAuthRemoteName)
 	if len(asked) != 2 || asked[1] != "agent1" {
 		t.Fatalf("storeFor calls = %v, want the agent id of every Start", asked)
@@ -778,15 +619,6 @@ func TestMCPAuthFlows_StoreFactoryIsPerAgentAndNilWhenUnknown(t *testing.T) {
 	}
 }
 
-// TestMCPAuthFlows_ConcurrentStartLeavesOneLiveFlow: N concurrent Starts for
-// one pair must leave exactly ONE live flow, cancel the rest (or their loopback
-// listeners are leaked), and — the harder half — SUCCEED for every caller.
-//
-// Every one of these starts wants the pair's single PINNED port (they all ask
-// for the same redirect URI, asserted below), so this is the test that pins the
-// pair's serialization: without it, the losers of the bind race fail with
-// EADDRINUSE and a client that fired twice gets a spurious 502. Run under -race
-// it also covers the two indexes being mutated from many goroutines.
 func TestMCPAuthFlows_ConcurrentStartLeavesOneLiveFlow(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
@@ -830,7 +662,6 @@ func TestMCPAuthFlows_ConcurrentStartLeavesOneLiveFlow(t *testing.T) {
 		t.Fatalf("registry holds %d pair keys, want 1", got)
 	}
 
-	// Exactly one id survives, and it is one of the returned ones.
 	live := -1
 	for i, id := range ids {
 		if _, ok := r.Get("agent1", id); ok {
@@ -847,8 +678,6 @@ func TestMCPAuthFlows_ConcurrentStartLeavesOneLiveFlow(t *testing.T) {
 		t.Fatal("the surviving id resolves to a flow that is not the one Start returned")
 	}
 
-	// The losers are terminal and cancelled — that is what frees the port for
-	// the winner — and the winner still holds it.
 	for i, flow := range flows {
 		if i == live {
 			continue
@@ -863,14 +692,12 @@ func TestMCPAuthFlows_ConcurrentStartLeavesOneLiveFlow(t *testing.T) {
 	port := portOf(t, flows[live].RedirectURI())
 	assertPortOpen(t, port)
 
-	// And the pair's ONE listener is released with its flow.
 	if err := r.Cancel("agent1", ids[live]); err != nil {
 		t.Fatalf("Cancel(survivor) = %v", err)
 	}
 	assertPortClosed(t, port)
 }
 
-// mustGet resolves a flow id or fails the test.
 func mustGet(t *testing.T, r *mcpAuthFlows, agentID, flowID string) *mcpAuthEntry {
 	t.Helper()
 	e, ok := r.Get(agentID, flowID)
@@ -880,10 +707,6 @@ func mustGet(t *testing.T, r *mcpAuthFlows, agentID, flowID string) *mcpAuthEntr
 	return e
 }
 
-// mcpAuthAuthorizeCode plays the browser's half of the flow: GET the
-// authorization URL, stop at the AS's 302 and return the code and state it
-// carries. The redirect itself is NOT followed (the REST layer's manual flow
-// never receives it — the user pastes the code instead).
 func mcpAuthAuthorizeCode(t *testing.T, authURL string) (code, state string) {
 	t.Helper()
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -914,8 +737,6 @@ func mcpAuthAuthorizeCode(t *testing.T, authURL string) (code, state string) {
 	return q.Get("code"), q.Get("state")
 }
 
-// portOf extracts the port from a loopback redirect URI, so a test can prove
-// the listener behind it was released.
 func portOf(t *testing.T, redirectURI string) int {
 	t.Helper()
 	u, err := url.Parse(redirectURI)
@@ -929,11 +750,6 @@ func portOf(t *testing.T, redirectURI string) int {
 	return port
 }
 
-// assertPortClosed fails when the port still accepts connections. It is the
-// only way to observe that a cancelled/expired flow really released its
-// loopback listener rather than leaving a half-dead server behind.
-// assertPortOpen is the positive twin of assertPortClosed: the loopback
-// listener behind a live flow must really accept connections.
 func assertPortOpen(t *testing.T, port int) {
 	t.Helper()
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), time.Second)
@@ -950,7 +766,7 @@ func assertPortClosed(t *testing.T, port int) {
 	for {
 		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
 		if err != nil {
-			return // refused: the listener is gone
+			return
 		}
 		_ = conn.Close()
 		if time.Now().After(deadline) {
@@ -960,10 +776,6 @@ func assertPortClosed(t *testing.T, port int) {
 	}
 }
 
-// TestMCPAuthFlows_NoTokenBeforeCompletion is a negative guard on the
-// registry's "no secret stored" rule: no token exists anywhere until a code is
-// exchanged, so a started-but-uncompleted flow must leave no access token in
-// the store — only the client registration the flow needs to persist.
 func TestMCPAuthFlows_NoTokenBeforeCompletion(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 	r := fx.registry()
@@ -984,8 +796,6 @@ func TestMCPAuthFlows_NoTokenBeforeCompletion(t *testing.T) {
 		t.Fatal("the store holds a token before any code was exchanged")
 	}
 
-	// The store file itself is the secret: it must not be word-readable, and
-	// no token may be findable in it.
 	path := filepath.Join(fx.f.paths.LeleDir, "mcp-auth.json")
 	info, err := os.Stat(path)
 	if err != nil {
@@ -1003,26 +813,6 @@ func TestMCPAuthFlows_NoTokenBeforeCompletion(t *testing.T) {
 	}
 }
 
-// TestMCPAuthStoreFor_NilWhenTheAgentIsUnresolvable pins the channel's store
-// factory directly (finding 3 of the adversarial review). It is the thing that
-// decides whether mcp.StartAuth sees a usable store at all: a nil store and a
-// DISABLED store both become ErrAuthStoreDisabled → 503 mcp_auth_disabled, so
-// neither may be a guess.
-//
-//   - no agent loop at all (a bare &NativeChannel{}, i.e. every channel fake
-//     that does not opt into the optional mcpPathsSource capability): nil, never
-//     a process-relative path;
-//   - the capability is present but does not know the agent: nil;
-//   - a known agent: a store rooted in THAT agent's lele dir and Enabled;
-//   - a known agent with an EMPTY lele dir: a store that is present but
-//     DISABLED — the reachable store-less path of the start route (see
-//     TestMCPAuthStart_StoreDisabledIs503 in rest_mcp_auth_test.go).
-//
-// Neither nil return is reachable THROUGH the routes: mcpPathsFor refuses the
-// same two conditions one step earlier (500 mcp_unavailable, 404
-// agent_not_found). This is the direct test.
-//
-// Contract row pinned: mcp_auth_disabled/503 (the disabled-store cell).
 func TestMCPAuthStoreFor_NilWhenTheAgentIsUnresolvable(t *testing.T) {
 	fx := newMCPAuthEngineFixture(t, "agent1")
 

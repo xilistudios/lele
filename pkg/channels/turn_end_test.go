@@ -11,15 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// Issue #240, layer A: the agent loop publishes a terminal "turn.end" event on
-// every turn exit, so a channel's typing indicator can never outlive the turn
-// that started it — not even when the turn produced no final message.
-
-// --- shouldDropEventSignal (pure predicate behind the dispatcher guard) -----
-
-// channelsWithEventSupport mirrors the channels that declare (and implement)
-// event handling, so the predicate is tested against the real capability
-// surface rather than a name.
 func TestShouldDropEventSignal(t *testing.T) {
 	native := &NativeChannel{}
 	telegram := &TelegramChannel{}
@@ -115,14 +106,7 @@ func TestShouldDropEventSignal(t *testing.T) {
 	}
 }
 
-// TestConsumesEventMatchesSendHandler is the structural guard against the
-// allowlist rot that a name-based exemption would introduce: every event a
-// channel declares it consumes must actually be branched on in its Send, and
-// every event Send branches on must be declared. A channel that adds an event
-// to one side only would either render an empty message or silently lose the
-// signal (stuck typing).
 func TestConsumesEventMatchesSendHandler(t *testing.T) {
-	// Events the agent protocol can emit as contentless signals.
 	protocolEvents := []string{
 		"turn.end", "message.stream", "message.thinking", "tool.executing",
 		"tool.result", "subagent.result", "group.status", "group.turn",
@@ -146,9 +130,6 @@ func TestConsumesEventMatchesSendHandler(t *testing.T) {
 	}
 }
 
-// telegramSendHandlesEvent mirrors the events TelegramChannel.Send actually
-// branches on. It is the test-side oracle for the consistency check above;
-// keep it in sync with Send (a mismatch fails TestConsumesEventMatchesSendHandler).
 func telegramSendHandlesEvent(event string) bool {
 	switch event {
 	case "turn.end":
@@ -158,20 +139,12 @@ func telegramSendHandlesEvent(event string) bool {
 	}
 }
 
-// --- the guard wired into the real per-channel dispatcher -------------------
-
-// eventCapableMock is a mock channel that declares event capability, the way
-// native and telegram do.
 type eventCapableMock struct {
 	*mockChannel
 }
 
 func (e *eventCapableMock) ConsumesEvent(string) bool { return true }
 
-// TestDispatcherGuardAppliedForumslessChannels exercises the guard where it
-// lives (Manager.startChannelDispatcher): a channel that never inspects
-// msg.Event must not receive contentless signals, while a channel that declares
-// capability must receive them untouched.
 func TestDispatcherGuardAppliedForChannels(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	defer messageBus.Close()
@@ -193,16 +166,10 @@ func TestDispatcherGuardAppliedForChannels(t *testing.T) {
 	go mgr.startChannelDispatcher(ctx, "dumb", dumb, mgr.dispatchQueues["dumb"])
 	go mgr.startChannelDispatcher(ctx, ChannelName, capable, mgr.dispatchQueues[ChannelName])
 
-	// Push straight into the per-channel queues: this test is about
-	// startChannelDispatcher, not about the bus routing done by dispatchOutbound.
-	//
-	// Signals that must never reach a channel that does not handle events.
 	mgr.dispatchQueues["dumb"] <- bus.OutboundMessage{Channel: "dumb", ChatID: "c1", Event: "turn.end"}
 	mgr.dispatchQueues["dumb"] <- bus.OutboundMessage{Channel: "dumb", ChatID: "c1", Event: "tool.result", Content: "   "}
-	// Payloads that must always reach it.
 	mgr.dispatchQueues["dumb"] <- bus.OutboundMessage{Channel: "dumb", ChatID: "c1", Content: "hello"}
 	mgr.dispatchQueues["dumb"] <- bus.OutboundMessage{Channel: "dumb", ChatID: "c1", Event: "tool.result", Content: "verbose result"}
-	// A capability-declaring channel receives its signals.
 	mgr.dispatchQueues[ChannelName] <- bus.OutboundMessage{Channel: ChannelName, ChatID: "s1", Event: "turn.end"}
 
 	deadline := time.Now().Add(3 * time.Second)
@@ -230,10 +197,6 @@ func TestDispatcherGuardAppliedForChannels(t *testing.T) {
 	}
 }
 
-// TestDispatcherDeliversTurnEndToRealTelegramChannel is the regression that
-// makes the guard safe: the real TelegramChannel must still get turn.end
-// through the dispatcher, because stopping the typing indicator depends on it.
-// A name-based exemption would have silently swallowed this signal.
 func TestDispatcherDeliversTurnEndToRealTelegramChannel(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	defer messageBus.Close()
@@ -265,11 +228,6 @@ func TestDispatcherDeliversTurnEndToRealTelegramChannel(t *testing.T) {
 	}
 }
 
-// --- Telegram.Send handles turn.end as a terminal, silent, idempotent signal -
-
-// newTelegramSendTestChannel builds a TelegramChannel that is running but has
-// no bot: the turn.end path must clean state and return before touching c.bot,
-// which is what makes the test network-free.
 func newTelegramSendTestChannel(t *testing.T) (*TelegramChannel, *recordingRoundTripper) {
 	t.Helper()
 
@@ -285,9 +243,6 @@ func newTelegramSendTestChannel(t *testing.T) (*TelegramChannel, *recordingRound
 	return ch, rt
 }
 
-// storeFakeThinking registers a typing indicator whose loop is already dead
-// (doneChan closed), so Cancel() returns immediately without a real bot. It
-// reports whether the indicator has been cancelled.
 func storeFakeThinking(ch *TelegramChannel, key string) func() bool {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -347,9 +302,6 @@ func TestTelegramSendTurnEndIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestTelegramSendTurnEndWithInvalidChatIDStillStopsTyping is the CAPA D
-// invariant stated early: cleanup happens before chat-ID parsing, so a
-// malformed ChatID can never leave the indicator running.
 func TestTelegramSendTurnEndWithInvalidChatIDStillStopsTyping(t *testing.T) {
 	ch, _ := newTelegramSendTestChannel(t)
 
@@ -403,9 +355,6 @@ func TestTelegramSendTurnEndEmptyChatIDIsSafe(t *testing.T) {
 	}
 }
 
-// TestTelegramSendTurnEndNotGatedByRateLimiter proves the terminal signal does
-// no network work and takes no rate-limit token: a burst must complete at once
-// instead of queueing behind the outbound limiter.
 func TestTelegramSendTurnEndNotGatedByRateLimiter(t *testing.T) {
 	ch, _ := newTelegramSendTestChannel(t)
 
@@ -439,11 +388,6 @@ func TestTelegramSendTurnEndNotGatedByRateLimiter(t *testing.T) {
 	}
 }
 
-// TestNativeSendTurnEndEmitsNothing asserts the native channel consumes the
-// signal silently. Without the explicit `case "turn.end"` in the dispatch
-// switch, an event with empty content falls through to the full-message path
-// and emits message.complete + history.updated — a spurious empty completion
-// bubble in the WebUI on every turn.
 func TestNativeSendTurnEndEmitsNothing(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -461,9 +405,6 @@ func TestNativeSendTurnEndEmitsNothing(t *testing.T) {
 	}
 }
 
-// TestNativeDispatchControlFinalMessageStillEmits is the liveness control for
-// the test above: the same channel/session does emit events for a normal final
-// message, so "zero frames" can only mean turn.end was consumed.
 func TestNativeDispatchControlFinalMessageStillEmits(t *testing.T) {
 	ts := newNativeTestServer(t)
 

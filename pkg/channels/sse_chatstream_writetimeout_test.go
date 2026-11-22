@@ -14,12 +14,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// GW-L9 regression, part 2: handleChatSendStream stays open for up to
-// restStreamDeadline (5 min). With the server WriteTimeout of 30s still in
-// effect, a stream whose chunks arrive past the deadline is killed mid-body.
-// Same reproduction as the background-exec test: real http.Server with
-// WriteTimeout=2s, chunks pushed at ~1s intervals for ~4s.
-
 func TestSSEChatStreamSurvivesWriteTimeout(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.LeleDir = t.TempDir()
@@ -69,15 +63,11 @@ func TestSSEChatStreamSurvivesWriteTimeout(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// The handler writes the ack immediately; the subscriber is registered
-	// before that. Once we see the ack we can push events for this session.
 	scanner := bufio.NewScanner(resp.Body)
 	if !scanner.Scan() || !strings.HasPrefix(scanner.Text(), "event: message.ack") {
 		t.Fatalf("expected ack as first event, got: %q", scanner.Text())
 	}
 
-	// Pump: one chunk per second for ~4s (crossing the 2s WriteTimeout),
-	// then the terminal pair the handler waits for.
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		for i := 0; i < 4; i++ {
