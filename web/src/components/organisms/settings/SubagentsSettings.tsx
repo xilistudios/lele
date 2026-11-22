@@ -58,7 +58,7 @@ export function SubagentsSettings() {
   const selection = selectable.find((entry) => entry.id === activeId)
 
   return (
-    <div data-testid="subagents-settings-page" className="mx-auto w-full max-w-[820px] space-y-6">
+    <div data-testid="subagents-settings-page" className="w-full max-w-[820px] space-y-6">
       <SettingsSection
         title={t('settings.sections.subagentDefaults')}
         description={t('settings.descriptions.subagentDefaults')}
