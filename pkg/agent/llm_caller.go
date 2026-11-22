@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -19,11 +13,9 @@ import (
 )
 
 const (
-	// MaxLLMRetries is the maximum number of retries for LLM calls on context errors
 	MaxLLMRetries = 2
 )
 
-// llmCallOptions aggregates all options for an LLM call
 type llmCallOptions struct {
 	ctx            context.Context
 	agent          *AgentInstance
@@ -64,16 +56,12 @@ func (s *streamingState) onReasoning(delegate func(reasoningChunk string)) func(
 	}
 }
 
-// llmCaller handles communication with LLM providers including fallback and retry
 type llmCaller struct {
 	al *AgentLoop
 
-	// retryWait is called to wait between retry attempts.
-	// Defaults to time.After. Override in tests to avoid real sleeps.
 	retryWait func(time.Duration) <-chan time.Time
 }
 
-// newLLMCaller creates a new LLM caller
 func newLLMCaller(al *AgentLoop) *llmCaller {
 	return &llmCaller{
 		al:        al,
@@ -81,31 +69,21 @@ func newLLMCaller(al *AgentLoop) *llmCaller {
 	}
 }
 
-// buildLLMOptions constructs LLM options including reasoning and thinking config
 func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{} {
 	llmOptions := map[string]interface{}{
 		"max_tokens":  opts.agent.MaxTokens,
 		"temperature": opts.agent.Temperature,
 	}
 
-	// Per-model "think system" wire style (config:
-	// providers.<name>.models.<alias>.thinking_type). Resolved from the model
-	// actually being called (which may be a session override like
-	// "xiaomi:mimo-v2.5-pro"), then passed through to the provider so
-	// enable/disable is rendered in the dialect the endpoint understands
-	// (e.g. MiMo/DeepSeek `thinking: {"type": "disabled"}` for "off").
 	if tt := getThinkingType(lc.al.cfg(), opts.model, lc.al.cfg().Agents.Defaults.Provider); tt != "" {
 		llmOptions["thinking_type"] = tt
 	}
 
-	// Explicit prompt caching (Anthropic-style cache_control breakpoints).
-	// Providers that cache implicitly ignore these keys.
 	if opts.agent.PromptCache.Enabled {
 		llmOptions[providers.OptPromptCache] = true
 		llmOptions[providers.OptPromptCacheTTL] = opts.agent.PromptCache.NormalizedTTL()
 	}
 
-	// Add reasoning config with per-session override support
 	sessionEffort := ""
 	if opts.sessionKey != "" {
 		if v, ok := lc.al.sessionThinking.Load(opts.sessionKey); ok {
@@ -113,7 +91,6 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 				sessionEffort = s
 			}
 		}
-		// Fallback: check persisted session (survives restarts)
 		if sessionEffort == "" {
 			agent := lc.al.agentForSession(opts.sessionKey)
 			if agent != nil && agent.Sessions != nil {
@@ -122,11 +99,6 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 		}
 	}
 
-	// Layer the resolved per-agent config default under the session override:
-	// session wins when set, otherwise the agent's thinking_level applies. The
-	// two layers feed the SAME switch so "off" semantics (explicit wire-level
-	// disable) are identical regardless of where the level came from. "" means
-	// neither layer has an opinion and we fall back to the model ReasoningConfig.
 	effort := sessionEffort
 	if effort == "" {
 		effort = opts.agent.ThinkingLevel
@@ -134,26 +106,12 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 
 	switch {
 	case effort == "off":
-		// Explicitly disabled for this session or agent — send an explicit
-		// disable so transparent proxies don't fall back to their server-side
-		// default (same pattern as the goal judge, goal.go). Omitting the key
-		// would make "off" behave exactly like thinking-on. An agent-level
-		// "off" fires here too, which is required so a proxy's server-side
-		// default can't re-enable reasoning the operator turned off.
-		// Config fields (max_tokens/exclude/summary) are deliberately NOT
-		// merged here: they are meaningless with reasoning disabled and strict
-		// endpoints could reject them.
 		llmOptions["reasoning"] = map[string]interface{}{"enabled": false}
 	case effort != "":
-		// An explicit level (session or agent config) is an explicit request
-		// to reason, so `enabled: true` must not depend on the agent config:
-		// providers that gate emission on `enabled` (anthropic_messages) would
-		// otherwise drop the level on the floor.
 		reasoningMap := map[string]interface{}{
 			"effort":  effort,
 			"enabled": true,
 		}
-		// Merge other reasoning fields from agent config (if any)
 		if opts.agent.Reasoning != nil {
 			if opts.agent.Reasoning.MaxTokens != nil {
 				reasoningMap["max_tokens"] = *opts.agent.Reasoning.MaxTokens
@@ -206,11 +164,6 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 		}
 	}
 
-	// Enable thinking mode for DeepSeek models if reasoning is enabled.
-	// For OpenRouter, thinking is handled via reasoning.enabled / reasoning.effort.
-	// An explicit "off" at either layer (session override or agent config) wins
-	// over the model ReasoningConfig: otherwise the DeepSeek wire adapter would
-	// re-enable thinking the user or operator just disabled.
 	if opts.agent.Reasoning != nil && opts.agent.Reasoning.Enable && effort != "off" {
 		if isDeepSeekModel(opts.model) {
 			llmOptions["thinking"] = true
@@ -222,37 +175,12 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 		}
 	}
 
-	// Conversation-scoped wire identity (e.g. OpenCode Go's x-opencode-session).
-	// The value is conversation-scoped and providers are rebuilt for every call
-	// (factory.go createProviderFromSelection), so it cannot live on the provider
-	// instance: it travels through the per-call options map.
-	//
-	// Stamped here because buildLLMOptions is the single place every main-loop
-	// egress takes its options from: the direct call (:320), both fallback paths
-	// (:347, :355) and the streaming path (:292) all share this map — group turns
-	// (group_turn.go:182,285,349) and retries included.
 	llmOptions = providers.WithWireSessionID(llmOptions, opts.sessionKey)
 
 	return llmOptions
 }
 
-// call performs the LLM call with optional streaming, fallback chain
 func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
-	// Every provider request the agent loop makes leaves through this function -
-	// main loop, group turns, retries and the fallback chain - so tool-call
-	// pairing is guaranteed for all of them here, once. The one path that does
-	// not come through is the subagent tool loop (pkg/tools/toolloop.go), which
-	// calls the provider directly and heals its own requests.
-	//
-	// A turn that dies mid-flight (interrupted, crashed, or a result that never
-	// landed) leaves an assistant call with no matching tool result, and
-	// excluding a result from context while keeping its assistant block does the
-	// same. Strict providers answer either with a 400, and since the history is
-	// replayed on every later turn the session never recovers on its own.
-	//
-	// Healing the outgoing request rather than the stored history keeps real
-	// tool output in the session - the UI and any later full read still see what
-	// actually happened - and costs nothing when the pairing is already valid.
 	if healed, changed := providers.HealToolCallPairs(opts.messages); changed {
 		logger.WarnCF("agent", "Healed broken tool-call pairing before provider call",
 			map[string]interface{}{
@@ -266,15 +194,8 @@ func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
 
 	llmOptions := lc.buildLLMOptions(opts)
 
-	// Strip provider prefix from model for API calls.
-	// The provider prefix (e.g., "openrouter:") is for internal routing only
-	// and must not be sent to the external LLM API.
 	apiModel := providers.StripProviderPrefix(opts.model)
 
-	// Resolve the correct provider for this call.
-	// When a session overrides the model to use a different provider,
-	// the agent's default provider is stale — route to the provider
-	// specified in the model string instead.
 	callProvider := opts.agent.Provider
 	if ref := providers.ParseModelRef(opts.model, ""); ref != nil && ref.Provider != "" {
 		agentRef := providers.ParseModelRef(opts.agent.Model, "")
@@ -285,7 +206,6 @@ func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
 		}
 	}
 
-	// Try streaming if available and requested
 	if opts.streamOnChunk != nil {
 		if sp, ok := callProvider.(providers.StreamingLLMProvider); ok {
 			state := &streamingState{}
@@ -310,29 +230,16 @@ func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
 		}
 	}
 
-	// Execute with fallback chain if configured
 	if len(opts.candidates) > 0 && lc.al.fallback != nil {
 		return lc.callWithFallback(opts, llmOptions)
 	}
 
-	// Direct call without fallback. Use the streaming transport so long
-	// reasoning is bounded by an idle timeout instead of a fixed 120s cap.
 	return providers.ChatIdle(opts.ctx, callProvider, opts.messages, opts.toolDefs, apiModel, llmOptions)
 }
 
-// callWithFallback executes LLM call through the fallback chain
 func (lc *llmCaller) callWithFallback(opts llmCallOptions, llmOptions map[string]interface{}) (*providers.LLMResponse, error) {
 	fbResult, fbErr := lc.al.fallback.Execute(opts.ctx, opts.candidates,
 		func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
-			// Strip media content this candidate model can't handle. The
-			// read_image tool is exposed based on the primary model, so
-			// messages may contain image_url ContentParts that a non-vision
-			// fallback would reject with an API error; likewise, messages may
-			// contain video_url ContentParts that a fallback without native
-			// video support would reject. Each capability is evaluated
-			// per-candidate, so a vision-capable fallback keeps images (and a
-			// video-capable fallback keeps videos) even when another candidate
-			// in the chain lacks them.
 			messages := opts.messages
 			candidateModel := provider + ":" + model
 			candidateHasImages := getSupportsImages(lc.al.cfg(), candidateModel, provider)
@@ -348,10 +255,6 @@ func (lc *llmCaller) callWithFallback(opts llmCallOptions, llmOptions map[string
 				}
 				return nil, fmt.Errorf("no provider available for model %s", model)
 			}
-			// Use model directly - candidates already carry bare model names
-			// (e.g., "deepseek/deepseek-v4-pro") resolved from ResolveModelAlias.
-			// Do NOT wrap with FormatProviderModel — the "provider:model" colon
-			// format is internal-only and would break the API call.
 			return providers.ChatIdle(ctx, providerInst, messages, opts.toolDefs, model, llmOptions)
 		},
 	)
@@ -366,8 +269,6 @@ func (lc *llmCaller) callWithFallback(opts llmCallOptions, llmOptions map[string
 	return fbResult.Response, nil
 }
 
-// executeWithRetry performs LLM call with retry logic for context/token errors
-// Returns the response and an updated messages slice (after potential summarization)
 func (lc *llmCaller) executeWithRetry(
 	opts llmCallOptions,
 	messages []providers.Message,
@@ -388,10 +289,6 @@ func (lc *llmCaller) executeWithRetry(
 		}
 
 		errMsg := strings.ToLower(err.Error())
-		// Use the shared data-driven classifier (pkg/providers/context_overflow.go)
-		// instead of a broad substring heuristic: "token"/"length" also match
-		// unrelated errors (e.g. max_tokens generation limits), which would
-		// trigger needless session summarization.
 		isContextError := providers.IsContextOverflowError(err)
 		isNetworkTimeout := strings.Contains(errMsg, "context deadline exceeded") ||
 			strings.Contains(errMsg, "timeout") ||
@@ -412,18 +309,6 @@ func (lc *llmCaller) executeWithRetry(
 		}
 
 		if isContextError && retry < MaxLLMRetries {
-			// Recovery order matters. A context error is often not about the text
-			// at all: read_image injects base64 image parts, they are persisted with
-			// the session and the estimators only now account for them. Summarizing
-			// the history cannot remove those bytes (the compactor keeps the recent
-			// messages, which is exactly where a freshly read image lives), so the
-			// cheapest guaranteed reduction comes first: drop the media parts and
-			// retry immediately, without paying for a summarization call.
-			//
-			// Only on the first attempt: if the reduced payload is rejected again,
-			// the remaining problem is textual and the summarization path below is
-			// the right one. When there is nothing to evict (a text-only overflow)
-			// ReduceImageParts returns 0 and we fall through unchanged.
 			if retry == 0 {
 				if reduced, evicted := providers.ReduceImageParts(currentMessages, 0); evicted > 0 {
 					logger.WarnCF("agent", "Request rejected, media evicted and retrying", map[string]interface{}{
@@ -434,9 +319,6 @@ func (lc *llmCaller) executeWithRetry(
 						"evicted_parts": evicted,
 						"request_bytes": providers.EstimateRequestBytes(reduced),
 					})
-					// De-poison the stored session as well: the reduction above only
-					// fixes this request, while the next turn rebuilds the messages
-					// from the session and would resend the same blobs.
 					if opts.agent != nil && opts.agent.Sessions != nil && opts.sessionKey != "" {
 						if _, pErr := opts.agent.Sessions.EvictImageContent(opts.sessionKey, 0); pErr != nil {
 							logger.WarnCF("agent", "Failed to persist media eviction", map[string]interface{}{
@@ -474,8 +356,6 @@ func (lc *llmCaller) executeWithRetry(
 				}
 			}
 
-			// Summarize session to reduce context, under the shared guard so it
-			// never races with proactive summarization of the same session.
 			var stats *SummarizeStats
 			if sm, ok := lc.al.sessionManager.(*sessionManagerImpl); ok {
 				var ran bool
@@ -490,14 +370,12 @@ func (lc *llmCaller) executeWithRetry(
 					sm.forceCompression(opts.agent, opts.sessionKey)
 				}
 			} else {
-				// Fallback for non-standard sessionManager implementations (e.g. tests).
 				stats = lc.al.sessionManager.summarizeSession(opts.agent, opts.sessionKey)
 				if stats == nil {
 					logger.ErrorCF("agent", "Summarization failed (no compression fallback available)", nil)
 				}
 			}
 
-			// Rebuild messages with summarized history
 			newHistory := opts.agent.Sessions.GetHistory(opts.sessionKey)
 			newSummary := opts.agent.Sessions.GetSummary(opts.sessionKey)
 			newHistory = ensureSummaryMaterialized(opts.agent, opts.sessionKey, newHistory, newSummary)

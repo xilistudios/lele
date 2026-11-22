@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -22,8 +16,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// testCommandHandler builds a minimal AgentLoop + command handler good enough to
-// dispatch slash commands, mirroring the setup used by command_handler_test.go.
 func testCommandHandler(t *testing.T) *commandHandlerImpl {
 	t.Helper()
 
@@ -43,8 +35,6 @@ func testCommandHandler(t *testing.T) *commandHandlerImpl {
 	return newCommandHandler(NewAgentLoop(cfg, bus.NewMessageBus()))
 }
 
-// TestWebUICommands_ReturnsClearAndCompactSorted asserts the registry exposes
-// exactly the commands the WebUI palette should show, in stable order.
 func TestWebUICommands_ReturnsClearAndCompactSorted(t *testing.T) {
 	got := WebUICommands()
 
@@ -64,7 +54,6 @@ func TestWebUICommands_ReturnsClearAndCompactSorted(t *testing.T) {
 		}
 	}
 
-	// Defensive: sorted by name must hold regardless of declaration order.
 	for i := 1; i < len(got); i++ {
 		if got[i-1].Name >= got[i].Name {
 			t.Errorf("commands not sorted by name: %q before %q", got[i-1].Name, got[i].Name)
@@ -72,13 +61,9 @@ func TestWebUICommands_ReturnsClearAndCompactSorted(t *testing.T) {
 	}
 }
 
-// TestWebUICommands_ReturnsCopy asserts the internal registry is not exposed for
-// mutation: overwriting the returned slice (or its elements) must not leak into
-// subsequent calls.
 func TestWebUICommands_ReturnsCopy(t *testing.T) {
 	first := WebUICommands()
 
-	// Clobber the elements and shrink the slice via append-into-backing-array.
 	for i := range first {
 		first[i] = CommandInfo{Name: "/tampered", Description: "tampered", Usage: "tampered"}
 	}
@@ -98,14 +83,9 @@ func TestWebUICommands_ReturnsCopy(t *testing.T) {
 	}
 }
 
-// TestWebUICommands_MatchDispatchedCommands guards the one real risk of keeping
-// the registry separate from the handleCommand switch: drift. Every command the
-// registry advertises must actually be dispatched by the backend, and no
-// session-scoped, argument-free command may be missing from the registry.
 func TestWebUICommands_MatchDispatchedCommands(t *testing.T) {
 	ch := testCommandHandler(t)
 
-	// Every advertised command must be handled by the dispatcher.
 	for _, c := range WebUICommands() {
 		if _, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 			Channel:  "test",
@@ -117,9 +97,6 @@ func TestWebUICommands_MatchDispatchedCommands(t *testing.T) {
 		}
 	}
 
-	// The commands the WebUI must expose today; if handleCommand grows a new
-	// session-scoped command, decide explicitly whether to register it here (and
-	// in the registry).
 	for _, name := range []string{"/clear", "/compact", "/goal"} {
 		found := false
 		for _, c := range WebUICommands() {
@@ -134,8 +111,6 @@ func TestWebUICommands_MatchDispatchedCommands(t *testing.T) {
 	}
 }
 
-// TestWebUICommands_FieldsNonEmpty keeps the palette honest: a command with an
-// empty description or usage renders as a broken row in the UI.
 func TestWebUICommands_FieldsNonEmpty(t *testing.T) {
 	for _, c := range WebUICommands() {
 		if c.Name == "" || c.Description == "" || c.Usage == "" {
@@ -144,10 +119,6 @@ func TestWebUICommands_FieldsNonEmpty(t *testing.T) {
 	}
 }
 
-// TestCommandRegistry_ReexportMatchesSource guards the alias in
-// command_registry.go: agent.WebUICommands must keep returning exactly what the
-// registry package (the single source of truth pkg/channels reads) returns, so
-// the two entry points can never disagree.
 func TestCommandRegistry_ReexportMatchesSource(t *testing.T) {
 	viaAgent := WebUICommands()
 	viaSource := commands.WebUICommands()
@@ -163,12 +134,6 @@ func TestCommandRegistry_ReexportMatchesSource(t *testing.T) {
 	}
 }
 
-// TestDispatcherReserved_MatchesSource is the guard the hand-maintained reserved
-// list needs: it reads the real dispatch sources with go/parser and compares
-// them against commands.DispatcherReserved(). Drift in either direction fails —
-// a new built-in that nobody reserved (its custom-command file would be dead)
-// and a reserved name that nothing dispatches anymore (it would block a free
-// name forever).
 func TestDispatcherReserved_MatchesSource(t *testing.T) {
 	dispatched := switchCasesOn(t, "command_handler.go", "handleCommand", "cmd")
 	if len(dispatched) == 0 {
@@ -200,8 +165,6 @@ func TestDispatcherReserved_MatchesSource(t *testing.T) {
 	}
 }
 
-// TestDispatcherReserved_Shape pins the format the API relies on: lowercase, no
-// leading slash, no duplicates, sorted.
 func TestDispatcherReserved_Shape(t *testing.T) {
 	list := commands.DispatcherReserved()
 	if len(list) == 0 {
@@ -223,23 +186,15 @@ func TestDispatcherReserved_Shape(t *testing.T) {
 	if !slices.IsSorted(list) {
 		t.Errorf("DispatcherReserved() must be sorted, got %v", list)
 	}
-	// The copy must be fresh: a caller mutating the result may not corrupt the
-	// registry for the next one.
 	list[0] = "tampered"
 	if got := commands.DispatcherReserved(); got[0] == "tampered" {
 		t.Error("DispatcherReserved() leaked its backing slice")
 	}
 }
 
-// switchCasesOn parses a Go source file and returns the string literals of every
-// `switch <varName>` case clause, optionally restricted to one function (empty
-// funcName = whole file). It is a source-level check on purpose: the dispatcher
-// is a switch statement with no reflective way to enumerate it at runtime.
 func switchCasesOn(t *testing.T, file, funcName, varName string) []string {
 	t.Helper()
 
-	// The test runs with the package dir as cwd, so the callers pass paths
-	// relative to pkg/agent.
 	path := file
 	fset := token.NewFileSet()
 	parsed, err := parser.ParseFile(fset, path, nil, 0)
@@ -254,7 +209,7 @@ func switchCasesOn(t *testing.T, file, funcName, varName string) []string {
 			return true
 		}
 		if ident, ok := sw.Tag.(*ast.Ident); !ok || ident.Name != varName {
-			return true // a switch on something else (subcommands, modes, ...)
+			return true
 		}
 		for _, clause := range sw.Body.List {
 			cs, ok := clause.(*ast.CaseClause)

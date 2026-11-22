@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -16,30 +10,11 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// ============================================================================
-// The injected subagent result belongs in the parent's history.
-//
-// A resume that forgets what it resumed on is half a fix: the continuation
-// turn's request carries the result (that is A2), but the NEXT turn's request
-// would not, so the parent could answer "the subagent finished" and nothing
-// more, and compaction/eviction could never see it either.
-//
-// The persistence is therefore the ordinary user-message write in
-// llmRunnerImpl.runAgentLoop: the injected turn is a normal turn and its
-// "[System: subagent] <result>" message goes through SkipUserMessage=false.
-// One writer only — processSystemMessage must NOT also append it.
-// ============================================================================
-
 const (
-	// subagentResultPrefix is the marker processSystemMessage puts in front of a
-	// subagent-produced user message.
 	subagentResultPrefix = "[System: subagent]"
-	// subagentResultText is the payload every test in this file publishes.
-	subagentResultText = "the subagent result"
+	subagentResultText   = "the subagent result"
 )
 
-// subagentResultHistory returns the persisted messages of sessionKey that carry
-// an injected subagent result.
 func subagentResultHistory(t *testing.T, al *AgentLoop, sessionKey string) []providers.Message {
 	t.Helper()
 	agent := al.registry.GetDefaultAgent()
@@ -55,8 +30,6 @@ func subagentResultHistory(t *testing.T, al *AgentLoop, sessionKey string) []pro
 	return found
 }
 
-// publishUserTurnWithID is publishUserTurn with an explicit message id: the
-// durable-inbound ledger dedupes replayed ids, so each turn needs its own.
 func publishUserTurnWithID(t *testing.T, msgBus *bus.MessageBus, sessionKey, messageID string) {
 	t.Helper()
 	if !msgBus.PublishInbound(bus.InboundMessage{
@@ -71,9 +44,6 @@ func publishUserTurnWithID(t *testing.T, msgBus *bus.MessageBus, sessionKey, mes
 	}
 }
 
-// runIdleTurnAndResume publishes one user turn, waits for it to finish, then
-// completes a subagent and waits for the continuation turn to reach the
-// provider. It returns the provider call count reached before the completion.
 func runIdleTurnAndResume(t *testing.T, provider *requestRecordingProvider, al *AgentLoop,
 	msgBus *bus.MessageBus, sessionKey, taskID, messageID, resultText string) {
 	t.Helper()
@@ -90,14 +60,9 @@ func runIdleTurnAndResume(t *testing.T, provider *requestRecordingProvider, al *
 	if !waitFor(t, 15*time.Second, func() bool { return provider.requestCount() > before }) {
 		t.Fatalf("the parent loop never resumed after %s completed (provider calls = %d)", taskID, provider.requestCount())
 	}
-	// The injected turn arrives on the internal "system" channel, so it has no
-	// turn.end (publishTurnEnd skips internal channels). Its final message is the
-	// terminal signal available: turn 1's copy was already drained above.
 	waitForOutboundContent(t, msgBus, "parent answer", 15*time.Second)
 }
 
-// waitForOutboundContent drains the outbound bus until a message whose content
-// contains marker arrives.
 func waitForOutboundContent(t *testing.T, msgBus *bus.MessageBus, marker string, within time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(within)
@@ -116,12 +81,6 @@ func waitForOutboundContent(t *testing.T, msgBus *bus.MessageBus, marker string,
 	}
 }
 
-// TestSubagentResult_PersistedInParentHistory is the A3 headline test: after the
-// resume, the parent's transcript contains the result as ONE user message whose
-// text is the "[System: subagent] <result>" rendering (the same shape
-// buildSummaryMessage and the cron/goal continuations use). Role "system" is
-// deliberately not used: mid-history system messages are only supported by the
-// CLI-style providers.
 func TestSubagentResult_PersistedInParentHistory(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -149,9 +108,6 @@ func TestSubagentResult_PersistedInParentHistory(t *testing.T) {
 	}
 }
 
-// TestSubagentResult_NotPersistedWhenWaitConsumed is the negative control for
-// race (b): when a wait_for_subagent already consumed the result, the injector
-// never runs a turn, so nothing may enter the history.
 func TestSubagentResult_NotPersistedWhenWaitConsumed(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -160,7 +116,6 @@ func TestSubagentResult_NotPersistedWhenWaitConsumed(t *testing.T) {
 	cancel := startResumeLoop(t, al)
 	defer cancel()
 
-	// The in-turn wait read the result.
 	if sm.ClaimResult("subagent-1") {
 		t.Fatal("ClaimResult lost on a fresh task")
 	}
@@ -181,9 +136,6 @@ func TestSubagentResult_NotPersistedWhenWaitConsumed(t *testing.T) {
 	}
 }
 
-// TestSubagentResult_VisibleToNextTurn proves the persistence is what makes the
-// resume durable: a third, ordinary user turn also sees the result, which can
-// only come from the history (BuildMessages carries no other copy of it).
 func TestSubagentResult_VisibleToNextTurn(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -194,7 +146,6 @@ func TestSubagentResult_VisibleToNextTurn(t *testing.T) {
 
 	runIdleTurnAndResume(t, provider, al, msgBus, sessionKey, "subagent-1", "m-1", subagentResultText)
 
-	// Turn 3: a plain user message.
 	publishUserTurnWithID(t, msgBus, sessionKey, "m-3")
 	if !waitFor(t, 15*time.Second, func() bool { return provider.requestCount() >= 3 }) {
 		t.Fatalf("the third turn never reached the provider (provider calls = %d)", provider.requestCount())
@@ -204,9 +155,6 @@ func TestSubagentResult_VisibleToNextTurn(t *testing.T) {
 	}
 }
 
-// TestSubagentResult_PersistedExactlyOnce guards against the tempting
-// "belt and braces" fix of appending the message in processSystemMessage as
-// well: two writers would put two copies of the result in the transcript.
 func TestSubagentResult_PersistedExactlyOnce(t *testing.T) {
 	const (
 		firstResult  = "the subagent result one"

@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -23,24 +17,10 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// End-to-end resume tests: a REAL durable spool + REAL SQLite across two
-// sequential AgentLoops sharing one config dir (LELE_CONFIG_DIR). Process A
-// dies mid-turn (provider request outstanding, spool row unfinished,
-// checkpoint present); process B boots, drains the spool, and the replayed
-// message resumes the interrupted turn instead of re-running it.
-//
-// This is the full loop of the design: Enqueue stamps DedupeID before the
-// bus ever sees the message, the crash leaves the row unfinished (the
-// shutdown path in loop.go), Drain re-publishes with the identity intact,
-// and the dedupe match in processMessage routes into ContinueTurn.
-
-// e2eScriptedProvider answers iteration 1 with a tool call and blocks inside
-// iteration 2 until its context dies - the exact moment a crash interrupts a
-// live provider request.
 type e2eScriptedProvider struct {
 	mu      sync.Mutex
 	calls   int
-	blocked chan struct{} // closed on entry to call >= 2
+	blocked chan struct{}
 }
 
 func (p *e2eScriptedProvider) Chat(ctx context.Context, messages []providers.Message, _ []providers.ToolDefinition, _ string, _ map[string]interface{}) (*providers.LLMResponse, error) {
@@ -71,8 +51,6 @@ func (p *e2eScriptedProvider) Chat(ctx context.Context, messages []providers.Mes
 
 func (p *e2eScriptedProvider) GetDefaultModel() string { return "mock-e2e-model" }
 
-// answerProvider is the second process's provider: it always answers with a
-// fixed final text and records every request.
 type answerProvider struct {
 	mu       sync.Mutex
 	requests [][]providers.Message
@@ -97,9 +75,6 @@ func (p *answerProvider) last() []providers.Message {
 	return p.requests[len(p.requests)-1]
 }
 
-// e2eProbeTool is the fake tool the first iteration calls. It returns
-// immediately so the turn reaches iteration 2 (the one that "crashes") with
-// the assistant message and the tool result already persisted.
 type e2eProbeTool struct{}
 
 func (e2eProbeTool) Name() string        { return "e2e_probe" }
@@ -111,9 +86,6 @@ func (e2eProbeTool) Execute(context.Context, map[string]interface{}) *tools.Tool
 	return tools.NewToolResult("probe-A done")
 }
 
-// e2eLoop builds one "process": an AgentLoop over the shared config dir with
-// resume+durable_inbound on, a real spool-backed durability wired, and the
-// given provider installed on the default agent.
 func e2eLoop(t *testing.T, dir string, provider providers.LLMProvider) (*AgentLoop, *bus.MessageBus, *durable.Inbound) {
 	t.Helper()
 
@@ -147,7 +119,6 @@ func e2eLoop(t *testing.T, dir string, provider providers.LLMProvider) (*AgentLo
 	return al, msgBus, di
 }
 
-// collectOutbound drains the bus until turn.end, returning every message seen.
 func collectOutbound(t *testing.T, msgBus *bus.MessageBus, within time.Duration) []bus.OutboundMessage {
 	t.Helper()
 	var out []bus.OutboundMessage
@@ -178,8 +149,6 @@ func countContains(msgs []bus.OutboundMessage, substr string) int {
 	return n
 }
 
-// waitForProviderCall blocks until the crashed process enters its second
-// provider request (the one left outstanding at teardown).
 func waitForProviderCall(t *testing.T, started chan struct{}, within time.Duration) {
 	t.Helper()
 	select {
@@ -189,9 +158,6 @@ func waitForProviderCall(t *testing.T, started chan struct{}, within time.Durati
 	}
 }
 
-// crashProcessA runs the teardown exactly like a gateway death mid-turn:
-// running=false, drain budget spent, context cancelled, claims released for
-// the successor, then a full Stop that joins the killed turn.
 func crashProcessA(t *testing.T, al *AgentLoop, di *durable.Inbound, cancel context.CancelFunc, done <-chan error) {
 	t.Helper()
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -205,18 +171,10 @@ func crashProcessA(t *testing.T, al *AgentLoop, di *durable.Inbound, cancel cont
 	al.Stop()
 }
 
-// TestResumeE2E_ReplayResumesInterruptedTurn walks the full two-process
-// lifecycle on a real SQLite store: process A takes an inbound message,
-// executes one tool call, and dies while the second provider request is
-// outstanding. The spool row stays unfinished and the turn marker keeps the
-// checkpoint. Process B boots on the same store, drains the spool, and the
-// replayed message resumes the turn from history - the user message is NOT
-// re-appended and the final answer is published exactly once.
 func TestResumeE2E_ReplayResumesInterruptedTurn(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", dir)
 
-	// ── Process A: crash mid-turn (iteration 2 provider request outstanding)
 	providerA := &e2eScriptedProvider{blocked: make(chan struct{})}
 	alA, _, diA := e2eLoop(t, dir, providerA)
 
@@ -242,7 +200,6 @@ func TestResumeE2E_ReplayResumesInterruptedTurn(t *testing.T) {
 
 	waitForProviderCall(t, providerA.blocked, 10*time.Second)
 
-	// The turn must have checkpointed past the tool phase before dying.
 	marker, ok := alA.getTurnMarker("telegram:e2e-chat")
 	if !ok {
 		t.Fatal("expected turn marker while the turn is in flight")
@@ -253,8 +210,6 @@ func TestResumeE2E_ReplayResumesInterruptedTurn(t *testing.T) {
 
 	crashProcessA(t, alA, diA, cancelA, doneA)
 
-	// The checkpoint survives the death of the process (KV is on SQLite).
-	// Reopen the store to read it the way the successor will.
 	{
 		s, err := openStoreForE2E(t, dir)
 		if err != nil {
@@ -275,7 +230,6 @@ func TestResumeE2E_ReplayResumesInterruptedTurn(t *testing.T) {
 		}
 	}
 
-	// ── Process B: boot, drain, resume
 	providerB := &answerProvider{final: "respuesta final tras el resume"}
 	alB, busB, diB := e2eLoop(t, dir, providerB)
 
@@ -283,7 +237,6 @@ func TestResumeE2E_ReplayResumesInterruptedTurn(t *testing.T) {
 	defer cancelB()
 	doneB := make(chan error, 1)
 	go func() { doneB <- alB.Run(ctxB) }()
-	// Give Run a moment to be consuming before the drain republishes.
 	time.Sleep(50 * time.Millisecond)
 
 	if n, err := diB.Drain(ctxB); err != nil || n != 1 {
@@ -292,17 +245,13 @@ func TestResumeE2E_ReplayResumesInterruptedTurn(t *testing.T) {
 
 	out := collectOutbound(t, busB, 20*time.Second)
 
-	// The user is told once that the turn is being resumed...
 	if n := countContains(out, "se reinició"); n != 1 {
 		t.Fatalf("resume notice published %d times, want 1 (out=%+v)", n, out)
 	}
-	// ...and receives exactly one final answer.
 	if n := countContains(out, "respuesta final tras el resume"); n != 1 {
 		t.Fatalf("final answer published %d times, want 1 (out=%+v)", n, out)
 	}
 
-	// The resumed request must carry the ORIGINAL user message exactly once:
-	// a fresh re-run (the bug this feature prevents) would append it again.
 	req := providerB.last()
 	if req == nil {
 		t.Fatal("process B never reached the provider")
@@ -314,7 +263,6 @@ func TestResumeE2E_ReplayResumesInterruptedTurn(t *testing.T) {
 		t.Fatalf("resumed request lost the persisted tool result: %+v", req)
 	}
 
-	// The cycle closes: marker gone, spool row completed.
 	if _, ok := alB.getTurnMarker("telegram:e2e-chat"); ok {
 		t.Fatal("marker must be cleared after a successful resume")
 	}
@@ -328,8 +276,6 @@ func TestResumeE2E_ReplayResumesInterruptedTurn(t *testing.T) {
 	alB.Stop()
 }
 
-// openStoreForE2E reopens the SQLite store of a "dead process" so a test can
-// inspect what survived on disk (markers, spool rows, session history).
 func openStoreForE2E(t *testing.T, dir string) (*store.Store, error) {
 	t.Helper()
 	return store.Open(filepath.Join(dir, "lele.db"))

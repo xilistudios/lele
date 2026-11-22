@@ -1,18 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-//
-// T3 tests for the exported MCP resync seam (plan Q1 / T3):
-//   - MCPPathsFor returns EXACTLY what mcpManagerSet.pathsFor resolves for
-//     the agent (never re-derived from config.json or pkg/channels — plan
-//     EVIDENCE B2), is ok=false for unknown ids and nil-safe on a bare loop.
-//   - SyncMCPServers is a no-op on a bare loop and after closeMCPManagers
-//     (stopped guard), and — the real behaviour test — reflects an mcp.json
-//     server gaining/losing "disabled": true between two calls, which is
-//     exactly what the T4 write endpoint will rely on.
-
 package agent
 
 import (
@@ -25,18 +10,11 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// --- MCPPathsFor ------------------------------------------------------------
-
-// TestMCPPathsFor_MatchesPathsFor pins the resolver contract: MCPPathsFor
-// returns EXACTLY what the agent's manager set resolves (pathsFor — the code
-// path the manager itself was built with) for the default agent AND for an
-// agent whose workspace moved; ok=false for an unknown id.
 func TestMCPPathsFor_MatchesPathsFor(t *testing.T) {
 	al, workspace := newMCPTestLoop(t)
 	tc := mcpTestCoordinator(t, al)
 	agent := mcpTestAgent(t, al)
 
-	// Default agent: equals pathsFor, spelled out as the three roots.
 	got, ok := al.MCPPathsFor("main")
 	if !ok {
 		t.Fatal(`MCPPathsFor("main") ok=false, want true`)
@@ -52,8 +30,6 @@ func TestMCPPathsFor_MatchesPathsFor(t *testing.T) {
 		t.Errorf("MCPPathsFor = %+v, want %+v (config dir / real temp workspace / startup cwd)", got, want)
 	}
 
-	// Workspace moved: the answer follows agent.Workspace, still the same
-	// resolver the next sync would use for this agent.
 	moved := t.TempDir()
 	agent.Workspace = moved
 	got, ok = al.MCPPathsFor("main")
@@ -71,14 +47,11 @@ func TestMCPPathsFor_MatchesPathsFor(t *testing.T) {
 		t.Errorf("MCPPathsFor after move = %+v, want pathsFor %+v", got, want)
 	}
 
-	// Unknown id: nothing resolved, ok=false, zero value.
 	if paths, ok := al.MCPPathsFor("ghost-agent"); ok || paths != (mcp.Paths{}) {
 		t.Errorf("MCPPathsFor(unknown) = (%+v, %v), want (zero, false)", paths, ok)
 	}
 }
 
-// TestMCPPathsFor_BareLoop is the belt for loops torn down (or built) before
-// the coordinator/registry existed: never panics, ok=false.
 func TestMCPPathsFor_BareLoop(t *testing.T) {
 	al := &AgentLoop{}
 	paths, ok := al.MCPPathsFor("main")
@@ -87,24 +60,15 @@ func TestMCPPathsFor_BareLoop(t *testing.T) {
 	}
 }
 
-// --- SyncMCPServers ---------------------------------------------------------
-
-// TestSyncMCPServers_BareLoop: a bare &AgentLoop{} (nil coordinator) must
-// make SyncMCPServers a no-op — no panic, mirroring CloseMCPManagers.
 func TestSyncMCPServers_BareLoop(t *testing.T) {
 	al := &AgentLoop{}
-	al.SyncMCPServers() // must not panic
+	al.SyncMCPServers()
 }
 
-// TestSyncMCPServers_AfterCloseInstallsNothing: after closeMCPManagers() the
-// set is stopped, so SyncMCPServers must install NOTHING — the manager set
-// entry count stays 0 and no discovery tool is registered (the stopped guard is
-// reused inside syncMCPTools, never re-implemented by the seam).
 func TestSyncMCPServers_AfterCloseInstallsNothing(t *testing.T) {
 	al, workspace := newMCPTestLoop(t)
 	tc := mcpTestCoordinator(t, al)
 
-	// A server IS configured — the late sync must still install nothing.
 	writeAgentMCPJSON(t, workspace,
 		`{"mcpServers": {"s": {"command": "true", "description": "Server s"}}}`)
 
@@ -134,25 +98,11 @@ func TestSyncMCPServers_AfterCloseInstallsNothing(t *testing.T) {
 	}
 }
 
-// TestSyncMCPServers_ReflectsMCPJSONToggle is THE behaviour test for the
-// seam: a workspace whose mcp.json GAINS a server between two syncs → the
-// first SyncMCPServers() wires the discovery tools (list_mcp_tools +
-// get_mcp_tool) into the session view and sets the "## MCP Servers" prompt
-// section; then "disabled": true is written into that mcp.json by hand (raw
-// os.WriteFile via writeAgentMCPJSON — no pkg/mcp helper) and a second
-// SyncMCPServers() drops the layer and empties the section. This is the end-to-end proof that the T4 endpoint's write path
-// can refresh the surface without re-reading config.json.
 func TestSyncMCPServers_ReflectsMCPJSONToggle(t *testing.T) {
 	al, workspace := newMCPTestLoop(t)
 	tc := mcpTestCoordinator(t, al)
 	agent := mcpTestAgent(t, al)
 
-	// The session view is where the discovery tools are offered (MCP tools are
-	// session-scoped: the agent-wide registry never carries them).
-	//
-	// Offering and absence are checked PER TOOL: a discovery surface that
-	// carries only one of the pair is still wrong, and a helper that answers
-	// "both or nothing" would accept it.
 	sessionOffers := func(name string) bool {
 		_, ok := tc.sessionTools(agent, "chat-a").Get(name)
 		return ok
@@ -174,7 +124,6 @@ func TestSyncMCPServers_ReflectsMCPJSONToggle(t *testing.T) {
 		return nil
 	}
 
-	// Sync #1 — baseline: no mcp.json anywhere → empty surface.
 	al.SyncMCPServers()
 	if err := sessionOffersNoDiscovery(); err != nil {
 		t.Fatalf("discovery tools offered before any server exists: %v", err)
@@ -183,7 +132,6 @@ func TestSyncMCPServers_ReflectsMCPJSONToggle(t *testing.T) {
 		t.Fatalf("baseline prompt already has an MCP section: %q", sec)
 	}
 
-	// The workspace GAINS server "s" between two syncs (raw write).
 	writeAgentMCPJSON(t, workspace,
 		`{"mcpServers": {"s": {"command": "true", "description": "Server s"}}}`)
 	al.SyncMCPServers()
@@ -198,7 +146,6 @@ func TestSyncMCPServers_ReflectsMCPJSONToggle(t *testing.T) {
 		t.Fatal("sync after mcp.json gained a server must install a manager")
 	}
 
-	// Toggle the same server off by hand: "disabled": true (raw write again).
 	writeAgentMCPJSON(t, workspace,
 		`{"mcpServers": {"s": {"command": "true", "description": "Server s", "disabled": true}}}`)
 	al.SyncMCPServers()

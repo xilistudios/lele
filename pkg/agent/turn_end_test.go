@@ -10,18 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// The typing indicator of a messaging channel is only stopped by something
-// leaving the turn: a final message (which sweeps as a side effect) or the
-// terminal turn.end event. Before #240 the "processing canceled" and "empty
-// response" exits published nothing at all, so Telegram kept "typing..."
-// forever (76 occurrences/day in production logs).
-//
-// These tests pin the invariant: every turn of an external channel ends with
-// exactly one turn.end, and internal channels never receive one.
-
-// newTurnEndTestLoop builds an AgentLoop backed by a real bus, configured like
-// the other loop tests but with a provider that blocks until its context is
-// cancelled (so the turn ends through the context.Canceled path).
 func newTurnEndTestLoop(t *testing.T, provider *blockingMockProvider) (*AgentLoop, *bus.MessageBus) {
 	t.Helper()
 
@@ -54,7 +42,6 @@ func newTurnEndTestLoop(t *testing.T, provider *blockingMockProvider) (*AgentLoo
 	return al, msgBus
 }
 
-// recvOutbound waits for one outbound message, failing the test on timeout.
 func recvOutbound(t *testing.T, msgBus *bus.MessageBus, timeout time.Duration) (bus.OutboundMessage, bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -62,7 +49,6 @@ func recvOutbound(t *testing.T, msgBus *bus.MessageBus, timeout time.Duration) (
 	return msgBus.SubscribeOutbound(ctx)
 }
 
-// assertNoOutbound asserts nothing is published within the window.
 func assertNoOutbound(t *testing.T, msgBus *bus.MessageBus, within time.Duration) {
 	t.Helper()
 	if msg, ok := recvOutbound(t, msgBus, within); ok {
@@ -70,9 +56,6 @@ func assertNoOutbound(t *testing.T, msgBus *bus.MessageBus, within time.Duration
 	}
 }
 
-// TestPublishTurnEnd_TelegramChannelEmitsEvent checks the shape of the signal:
-// event name, routing fields, no content, and the propagated message id that
-// lets the channel cancel the exact indicator key.
 func TestPublishTurnEnd_TelegramChannelEmitsEvent(t *testing.T) {
 	al, msgBus := newTurnEndTestLoop(t, &blockingMockProvider{started: make(chan struct{})})
 
@@ -109,12 +92,6 @@ func TestPublishTurnEnd_TelegramChannelEmitsEvent(t *testing.T) {
 	}
 }
 
-// TestPublishTurnEnd_SkipsInternalAndEmptyChannels pins the other half of the
-// contract: cli/system/subagent have no typing indicator to stop, and an empty
-// channel cannot be routed — publishing there would only add queue pressure.
-// Each case proves the signal was skipped by showing the same bus still
-// delivers a turn.end for a real channel (so a closed/busy bus can never make
-// the negative assertion pass vacuously).
 func TestPublishTurnEnd_SkipsInternalAndEmptyChannels(t *testing.T) {
 	for _, channel := range []string{"subagent", "cli", "system", ""} {
 		t.Run("channel="+channel, func(t *testing.T) {
@@ -129,7 +106,6 @@ func TestPublishTurnEnd_SkipsInternalAndEmptyChannels(t *testing.T) {
 
 			assertNoOutbound(t, msgBus, 100*time.Millisecond)
 
-			// Liveness control: this bus is still able to publish.
 			al.publishTurnEnd(bus.InboundMessage{Channel: "telegram", ChatID: "999"})
 			if msg, ok := recvOutbound(t, msgBus, time.Second); !ok || msg.Event != "turn.end" {
 				t.Fatalf("control publish failed (bus unusable?): ok=%v msg=%+v", ok, msg)
@@ -138,8 +114,6 @@ func TestPublishTurnEnd_SkipsInternalAndEmptyChannels(t *testing.T) {
 	}
 }
 
-// TestPublishTurnEnd_NoMetadataIsStillValid guards the nil-map path: a turn
-// whose inbound message had no metadata must still emit a routable signal.
 func TestPublishTurnEnd_NoMetadataIsStillValid(t *testing.T) {
 	al, msgBus := newTurnEndTestLoop(t, &blockingMockProvider{started: make(chan struct{})})
 
@@ -157,10 +131,6 @@ func TestPublishTurnEnd_NoMetadataIsStillValid(t *testing.T) {
 	}
 }
 
-// TestRun_CanceledTurnPublishesTurnEnd is the regression test for the exact
-// production path in the bug report: StopAgent cancels the in-flight turn,
-// processMessage returns context.Canceled, and Run returns early without a
-// final message. The terminal signal must still reach the channel.
 func TestRun_CanceledTurnPublishesTurnEnd(t *testing.T) {
 	provider := &blockingMockProvider{started: make(chan struct{})}
 	al, msgBus := newTurnEndTestLoop(t, provider)

@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package commands
 
 import (
@@ -22,8 +16,6 @@ func TestWithCustom_MergesAndSorts(t *testing.T) {
 	}
 
 	got := WithCustom(base, custom)
-	// Source is carried over from CustomCommandInfo (custom entries) and stays
-	// empty for the built-in base entries, so UIs can badge them apart.
 	want := []CommandInfo{
 		{Name: "/audit", Description: "audit", Usage: "/audit", Source: "config"},
 		{Name: "/clear", Description: "clear", Usage: "/clear"},
@@ -35,9 +27,6 @@ func TestWithCustom_MergesAndSorts(t *testing.T) {
 	}
 }
 
-// TestWithCustom_BuiltInWinsCollision pins the precedence rule: a custom command
-// shadowed by a dispatched built-in must not be advertised, because the backend
-// never reaches it. Comparison is normalized (slash + case).
 func TestWithCustom_BuiltInWinsCollision(t *testing.T) {
 	base := []CommandInfo{{Name: "/Clear", Description: "builtin", Usage: "/clear"}}
 	custom := []CustomCommandInfo{
@@ -66,14 +55,11 @@ func TestWithCustom_DedupesCustomsAndSkipsGarbage(t *testing.T) {
 	if len(got) != 1 || got[0].Name != "/dup" || got[0].Description != "first" {
 		t.Fatalf("got %+v", got)
 	}
-	// First definition wins the dedupe, and with it its source.
 	if got[0].Source != "config" {
 		t.Errorf("/dup source = %q, want %q (first definition wins)", got[0].Source, "config")
 	}
 }
 
-// TestWithCustom_LeavesInputsUntouched guards the "fresh slice" contract that
-// WebUICommands() already provides for the static list.
 func TestWithCustom_LeavesInputsUntouched(t *testing.T) {
 	base := []CommandInfo{{Name: "/b", Description: "d", Usage: "u"}}
 	original := append([]CommandInfo(nil), base...)
@@ -90,7 +76,6 @@ func TestWithCustom_EmptyInputs(t *testing.T) {
 	}
 }
 
-// TestWebUICommands_StillStaticList guards the untouched source of truth.
 func TestWebUICommands_StillStaticList(t *testing.T) {
 	got := WebUICommands()
 	if len(got) != 3 || got[0].Name != "/clear" || got[1].Name != "/compact" || got[2].Name != "/goal" {

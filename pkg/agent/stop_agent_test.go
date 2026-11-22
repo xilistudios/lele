@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -16,16 +10,12 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// TestStopAgent_StopsActiveGroup verifies that StopAgent stops groups whose
-// originChatID matches the session key and that the return string mentions groups.
 func TestStopAgent_StopsActiveGroup(t *testing.T) {
 	defs := []e2eAgentDef{
 		{id: "agent-a", name: "Agent A", response: "response-A"},
 	}
 	al, _, _ := buildE2EAgentLoop(t, defs)
 
-	// Replace the mock provider with one that blocks until context is cancelled
-	// so the group stays in StatusRunning long enough for StopAgent to stop it.
 	blocking := &llmRunnerMockLLMProvider{
 		onChatCalled: func(ctx context.Context, _ []providers.Message, _ []providers.ToolDefinition, _ string, _ map[string]interface{}) (*providers.LLMResponse, error) {
 			<-ctx.Done()
@@ -44,24 +34,21 @@ func TestStopAgent_StopsActiveGroup(t *testing.T) {
 		{AgentID: "agent-a", Label: "Agent A"},
 	}
 
-	// Start the group on the AgentLoop's own GroupManager with originChatID = sessionKey.
 	groupID, err := al.GroupManager().Start(ctx,
 		"test-group-stop", "", "test objective", "round_robin",
 		participants,
-		group.GroupOptions{Rounds: 100}, // many rounds — group will run until cancelled
+		group.GroupOptions{Rounds: 100},
 		"test", sessionKey,
 	)
 	if err != nil {
 		t.Fatalf("GroupManager.Start failed: %v", err)
 	}
 
-	// Verify the group is running before we try to stop it.
 	state, ok := al.GroupManager().Status(groupID)
 	if !ok || state.Status != group.StatusRunning {
 		t.Fatalf("group should be running, got status=%q found=%v", state.Status, ok)
 	}
 
-	// Call StopAgent with the matching session key.
 	response := al.providable.StopAgent(sessionKey)
 
 	if !strings.Contains(response, "Agente detenido") {
@@ -71,7 +58,6 @@ func TestStopAgent_StopsActiveGroup(t *testing.T) {
 		t.Errorf("response should mention groups, got: %s", response)
 	}
 
-	// Wait briefly for the group goroutine to process the cancellation and update status.
 	time.Sleep(200 * time.Millisecond)
 
 	state, ok = al.GroupManager().Status(groupID)
@@ -83,10 +69,6 @@ func TestStopAgent_StopsActiveGroup(t *testing.T) {
 	}
 }
 
-// TestStopAgent_ResponseMessageFormatting is a table-driven test that verifies
-// the message formatting logic in StopAgent for all combinations of
-// subagentCount, groupCount and procCount. It exercises the production
-// formatStopAgentResponse (agent_providable.go) directly.
 func TestStopAgent_ResponseMessageFormatting(t *testing.T) {
 	cases := []struct {
 		name           string
@@ -150,7 +132,6 @@ func TestStopAgent_ResponseMessageFormatting(t *testing.T) {
 					t.Errorf("response should NOT contain %q, got: %s", avoid, result)
 				}
 			}
-			// Verify exact content for the "all zero" case.
 			if tc.subagentCount == 0 && tc.groupCount == 0 && tc.procCount == 0 {
 				if result != "⏹️ Agente detenido." {
 					t.Errorf("exact response = %q, want %q", result, "⏹️ Agente detenido.")

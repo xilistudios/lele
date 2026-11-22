@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -18,14 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// Group turns replay the same message list across iterations, so a malformed
-// tool call that is appended and then answered with a tool result breaks the
-// next request exactly like it does in the main agent loop. These tests pin
-// that the group-turn loop keeps tool results aligned with the tool calls it
-// actually appended.
-
-// scriptedProvider replays a canned list of responses and records the messages
-// of every request, so a test can inspect what the next iteration would send.
 type scriptedGroupProvider struct {
 	mu        sync.Mutex
 	responses []*providers.LLMResponse
@@ -53,7 +40,6 @@ func (p *scriptedGroupProvider) requests() [][]providers.Message {
 	return p.sent
 }
 
-// groupTurnCounterTool counts executions.
 type groupTurnCounterTool struct {
 	mu       sync.Mutex
 	calls    int
@@ -102,8 +88,6 @@ func runGroupTurnWithProvider(t *testing.T, p *scriptedGroupProvider, tool *grou
 	return content, err
 }
 
-// When every tool call in a response is invalid, the loop must not append tool
-// results for calls that were dropped - the next request would carry orphans.
 func TestRunGroupTurn_AllInvalidToolCallsDoNotOrphanResults(t *testing.T) {
 	tool := &groupTurnCounterTool{toolName: "exec"}
 	p := &scriptedGroupProvider{responses: []*providers.LLMResponse{
@@ -122,7 +106,6 @@ func TestRunGroupTurn_AllInvalidToolCallsDoNotOrphanResults(t *testing.T) {
 		t.Fatalf("an invalid tool call was executed %d time(s)", tool.count())
 	}
 
-	// The second request is the one that would have carried the orphan.
 	reqs := p.requests()
 	if len(reqs) < 2 {
 		t.Fatalf("expected a retry request, got %d requests", len(reqs))
@@ -130,8 +113,6 @@ func TestRunGroupTurn_AllInvalidToolCallsDoNotOrphanResults(t *testing.T) {
 	assertGroupTurnMessagesConsistent(t, reqs[1])
 }
 
-// Mixed batch: only the valid call runs, and its result must reference the
-// tool_call that was actually appended to the conversation.
 func TestRunGroupTurn_ToolResultsMatchAppendedCalls(t *testing.T) {
 	tool := &groupTurnCounterTool{toolName: "exec"}
 	p := &scriptedGroupProvider{responses: []*providers.LLMResponse{
@@ -171,9 +152,6 @@ func TestRunGroupTurn_ToolResultsMatchAppendedCalls(t *testing.T) {
 	}
 }
 
-// assertGroupTurnMessagesConsistent verifies that a request the group loop
-// would send is provider-safe: every assistant tool call is named with JSON
-// object arguments, and every tool result points at one of them.
 func assertGroupTurnMessagesConsistent(t *testing.T, messages []providers.Message) {
 	t.Helper()
 

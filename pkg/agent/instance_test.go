@@ -78,7 +78,6 @@ func TestNewAgentInstance_DefaultsTemperatureWhenUnset(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	cfg := createTestConfig(tmpDir)
-	// Temperature is nil, should default to 0.7
 	cfg.Agents.Defaults.Temperature = nil
 
 	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
@@ -218,8 +217,6 @@ func TestNewAgentInstance_ReadImageToolAlwaysRegistered(t *testing.T) {
 	}
 
 	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
-	// read_image is always registered now, but filtered out dynamically
-	// based on the current session model
 	if _, ok := agent.Tools.Get("read_image"); !ok {
 		t.Fatal("expected read_image tool to be registered regardless of vision support")
 	}
@@ -228,10 +225,6 @@ func TestNewAgentInstance_ReadImageToolAlwaysRegistered(t *testing.T) {
 	}
 }
 
-// TestNewAgentInstance_RegistersReadImageToolWithModelAlias tests that read_image
-// is registered when using a model alias that maps to a different resolved model name.
-// This tests the bug fix where getProviderModelConfig was using the resolved model
-// name instead of the alias to look up the config.
 func TestNewAgentInstance_RegistersReadImageToolWithModelAlias(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-instance-test-*")
 	if err != nil {
@@ -247,7 +240,6 @@ func TestNewAgentInstance_RegistersReadImageToolWithModelAlias(t *testing.T) {
 		"myprovider": {
 			Type: "openai",
 			Models: map[string]config.ProviderModelConfig{
-				// Alias "vision-model" maps to resolved model "gpt-4o-vision"
 				"vision-model": {Model: "gpt-4o-vision", Vision: true},
 			},
 		},
@@ -262,9 +254,6 @@ func TestNewAgentInstance_RegistersReadImageToolWithModelAlias(t *testing.T) {
 	}
 }
 
-// TestNewAgentInstance_RegistersReadVideoToolWhenVideoEnabled mirrors the
-// read_image registration test: read_video must be present in the tools
-// registry when the model has the video capability flag.
 func TestNewAgentInstance_RegistersReadVideoToolWhenVideoEnabled(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-instance-test-*")
 	if err != nil {
@@ -294,9 +283,6 @@ func TestNewAgentInstance_RegistersReadVideoToolWhenVideoEnabled(t *testing.T) {
 	}
 }
 
-// TestNewAgentInstance_ReadVideoToolAlwaysRegistered mirrors the read_image
-// always-registered test: read_video is registered regardless of model
-// capabilities and filtered out dynamically per session model.
 func TestNewAgentInstance_ReadVideoToolAlwaysRegistered(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-instance-test-*")
 	if err != nil {
@@ -318,8 +304,6 @@ func TestNewAgentInstance_ReadVideoToolAlwaysRegistered(t *testing.T) {
 	}
 
 	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
-	// read_video is always registered now, but filtered out dynamically
-	// based on the current session model
 	if _, ok := agent.Tools.Get("read_video"); !ok {
 		t.Fatal("expected read_video tool to be registered regardless of video support")
 	}
@@ -328,9 +312,6 @@ func TestNewAgentInstance_ReadVideoToolAlwaysRegistered(t *testing.T) {
 	}
 }
 
-// TestNewAgentInstance_RegistersReadVideoToolWithModelAlias mirrors the
-// read_image model-alias registration test: read_video is registered when
-// using a model alias that maps to a different resolved model name.
 func TestNewAgentInstance_RegistersReadVideoToolWithModelAlias(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-instance-test-*")
 	if err != nil {
@@ -346,7 +327,6 @@ func TestNewAgentInstance_RegistersReadVideoToolWithModelAlias(t *testing.T) {
 		"myprovider": {
 			Type: "openai",
 			Models: map[string]config.ProviderModelConfig{
-				// Alias "video-model" maps to resolved model "video-actual"
 				"video-model": {Model: "video-actual", Video: true},
 			},
 		},
@@ -361,8 +341,6 @@ func TestNewAgentInstance_RegistersReadVideoToolWithModelAlias(t *testing.T) {
 	}
 }
 
-// TestGetSupportsVideo_Cases locks the video capability predicate: it mirrors
-// getSupportsImages but reads the model config's "video" flag.
 func TestGetSupportsVideo_Cases(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
@@ -394,10 +372,6 @@ func TestGetSupportsVideo_Cases(t *testing.T) {
 		})
 	}
 }
-
-// ============================================================================
-// resolveAgentThinkingLevel
-// ============================================================================
 
 func TestResolveAgentThinkingLevel(t *testing.T) {
 	tests := []struct {
@@ -471,9 +445,6 @@ func TestResolveAgentThinkingLevel(t *testing.T) {
 	}
 }
 
-// TestNewAgentInstance_SetsThinkingLevel pins the wiring: the value stored on
-// the instance must be the resolved one (agent over defaults), because
-// buildLLMOptions relies on it being pre-resolved.
 func TestNewAgentInstance_SetsThinkingLevel(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-instance-think-*")
 	if err != nil {
@@ -484,13 +455,11 @@ func TestNewAgentInstance_SetsThinkingLevel(t *testing.T) {
 	cfg := createTestConfig(tmpDir)
 	cfg.Agents.Defaults.ThinkingLevel = strPtr("low")
 
-	// Defaults path (nil agent config = default agent).
 	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
 	if agent.ThinkingLevel != "low" {
 		t.Fatalf("ThinkingLevel = %q, want %q (defaults)", agent.ThinkingLevel, "low")
 	}
 
-	// Agent-specific path wins over defaults.
 	agentCfg := &config.AgentConfig{ID: "main", Default: true, ThinkingLevel: strPtr(" HIGH ")}
 	agent = NewAgentInstance(agentCfg, &cfg.Agents.Defaults, cfg)
 	if agent.ThinkingLevel != "high" {

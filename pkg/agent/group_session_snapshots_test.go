@@ -12,25 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/group"
 )
 
-// ---------------------------------------------------------------------------
-// AgentLoop.GroupSnapshotsForSession — the thin exposure of
-// GroupManager.SnapshotsForSession for the channels layer (#239, read path).
-//
-// Two things must hold at this boundary:
-//   - the loop injects a session-alias resolver into the group manager, so a
-//     group whose origin is a base session key is still reported once
-//     startFreshConversation has rotated that base to a new conversation key.
-//     Without the wiring the WebUI loses the card on a session switch even
-//     though the history payload asks for the right session;
-//   - GroupSnapshotsForSession never panics on a loop without a group manager
-//     (the same nil-guard AllGroupSnapshots uses), because channels call it on
-//     every welcome/reconnected/history request.
-// ---------------------------------------------------------------------------
-
-// TestGroupSnapshotsForSession_ResolvesSessionAliases pins the resolver wiring
-// through a real AgentLoop: the group is persisted under the base key, the loop
-// rotates the conversation, and the group must still be reported for the new
-// key — which only happens if the manager was given AgentLoop.ResolveSessionKey.
 func TestGroupSnapshotsForSession_ResolvesSessionAliases(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "group-session-snap-*")
 	if err != nil {
@@ -38,11 +19,9 @@ func TestGroupSnapshotsForSession_ResolvesSessionAliases(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
-	// The loop wires the SQLite group repo package-globally (group.UseStore);
-	// reset it so this test leaves no store pointing at the temp dir.
 	t.Cleanup(func() { group.UseStore(nil) })
 
-	const groupID = "session-snap-group" // no ':' or '/' → the legacy file name is the ID
+	const groupID = "session-snap-group"
 	state := &group.GroupState{
 		ID:            groupID,
 		ProfileID:     "p1",
@@ -99,23 +78,17 @@ func TestGroupSnapshotsForSession_ResolvesSessionAliases(t *testing.T) {
 		t.Fatalf("ResolveSessionKey(%q) = %q, want %q", base, got, fresh)
 	}
 
-	// The rotated key is what the client now subscribes with: the group must be
-	// reachable there through the alias resolver.
 	if ids := groupSnapshotIDs(al.GroupSnapshotsForSession(fresh)); !containsID(ids, groupID) {
 		t.Errorf("group %s not reported for the rotated session key %q (got %v): the loop did not wire the session-alias resolver into GroupManager", groupID, fresh, ids)
 	}
-	// The original key keeps working by exact match.
 	if ids := groupSnapshotIDs(al.GroupSnapshotsForSession(base)); !containsID(ids, groupID) {
 		t.Errorf("group %s not reported for its own origin key %q (got %v)", groupID, base, ids)
 	}
-	// An unrelated session must see nothing.
 	if ids := groupSnapshotIDs(al.GroupSnapshotsForSession("agent:main:web:someone-else")); len(ids) != 0 {
 		t.Errorf("unrelated session got %v, want none", ids)
 	}
 }
 
-// TestGroupSnapshotsForSession_NilManagerIsSafe pins the defensive guard that
-// keeps the channels from panicking on a partially built loop.
 func TestGroupSnapshotsForSession_NilManagerIsSafe(t *testing.T) {
 	al := &AgentLoop{}
 	if got := al.GroupSnapshotsForSession("anything"); got != nil {

@@ -111,7 +111,6 @@ func TestAgentRegistry_GetDefaultAgent(t *testing.T) {
 	})
 	registry := NewAgentRegistry(cfg)
 
-	// GetDefaultAgent first checks for "main", then returns any
 	agent := registry.GetDefaultAgent()
 	if agent == nil {
 		t.Fatal("expected a default agent")
@@ -170,13 +169,12 @@ func TestAgentRegistry_CanSpawnSubagent_Wildcard(t *testing.T) {
 
 func TestAgentRegistry_CanSpawnSubagent_DefaultAgentNoConfig(t *testing.T) {
 	cfg := testCfg(t, []config.AgentConfig{
-		{ID: "main", Default: true}, // No subagents config
+		{ID: "main", Default: true},
 		{ID: "coder"},
 		{ID: "reviewer"},
 	})
 	registry := NewAgentRegistry(cfg)
 
-	// Main agent without config should be able to spawn existing agents
 	if !registry.CanSpawnSubagent("main", "coder") {
 		t.Error("expected main to be allowed to spawn coder (no config, but coder exists)")
 	}
@@ -184,12 +182,10 @@ func TestAgentRegistry_CanSpawnSubagent_DefaultAgentNoConfig(t *testing.T) {
 		t.Error("expected main to be allowed to spawn reviewer")
 	}
 
-	// Main should NOT be able to spawn nonexistent agent
 	if registry.CanSpawnSubagent("main", "nonexistent") {
 		t.Error("expected main to NOT be allowed to spawn nonexistent agent")
 	}
 
-	// Non-default agent without config cannot spawn
 	if registry.CanSpawnSubagent("coder", "reviewer") {
 		t.Error("expected coder (non-default, no config) to NOT be allowed to spawn")
 	}
@@ -224,7 +220,7 @@ func TestAgentInstance_FallbackInheritance(t *testing.T) {
 func TestAgentInstance_FallbackExplicitEmpty(t *testing.T) {
 	model := &config.AgentModelConfig{
 		Primary:   "gpt-4",
-		Fallbacks: []string{}, // explicitly empty = disable
+		Fallbacks: []string{},
 	}
 	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "no-fallback", Default: true, Model: model},
@@ -248,7 +244,6 @@ func TestAgentRegistry_ReloadAgents_AddNewAgent(t *testing.T) {
 		t.Fatalf("expected 1 agent, got %d", len(registry.ListAgentIDs()))
 	}
 
-	// Add a new agent via reload
 	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 		{ID: "beta"},
@@ -271,7 +266,6 @@ func TestAgentRegistry_ReloadAgents_RemoveAgent(t *testing.T) {
 	})
 	registry := NewAgentRegistry(cfg)
 
-	// Remove beta via reload
 	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 	})
@@ -290,9 +284,8 @@ func TestAgentRegistry_ReloadAgents_PreserveUnchanged(t *testing.T) {
 	registry := NewAgentRegistry(cfg)
 
 	original, _ := registry.GetAgent("alpha")
-	originalPtr := original // Save pointer to compare
+	originalPtr := original
 
-	// Reload with same config — agent should be preserved
 	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 	})
@@ -312,7 +305,6 @@ func TestAgentRegistry_ReloadAgents_RecreateOnModelChange(t *testing.T) {
 
 	original, _ := registry.GetAgent("alpha")
 
-	// Change model
 	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Model: &config.AgentModelConfig{Primary: "testprovider:different-model"}},
 	})
@@ -331,7 +323,6 @@ func TestAgentConfigChanged_Temperature(t *testing.T) {
 	registry := NewAgentRegistry(cfg)
 	original, _ := registry.GetAgent("alpha")
 
-	// Change temperature via agent config
 	temp := 0.3
 	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Temperature: &temp},
@@ -354,7 +345,6 @@ func TestAgentConfigChanged_Fallbacks(t *testing.T) {
 	registry := NewAgentRegistry(cfg)
 	original, _ := registry.GetAgent("alpha")
 
-	// Change fallbacks via agent model config
 	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Model: &config.AgentModelConfig{
 			Primary:   "testprovider:test-model",
@@ -376,7 +366,6 @@ func TestAgentConfigChanged_ContextWindow(t *testing.T) {
 	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 	})
-	// Add a model config with a specific context window
 	cfg.Providers.Named["testprovider"] = config.NamedProviderConfig{
 		Type: "openai",
 		ProviderConfig: config.ProviderConfig{
@@ -399,7 +388,6 @@ func TestAgentConfigChanged_ContextWindow(t *testing.T) {
 		t.Fatalf("expected initial context window 64000, got %d", original.ContextWindow)
 	}
 
-	// Change model to one with a different context window
 	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Model: &config.AgentModelConfig{Primary: "testprovider:different-model"}},
 	})
@@ -429,11 +417,6 @@ func TestAgentConfigChanged_ContextWindow(t *testing.T) {
 	}
 }
 
-// TestAgentConfigChanged_SupportsVideo locks the instance-rebuild path for
-// the video capability flag: flipping a model's `video` config while the
-// resolved model name stays the same must recreate the instance, otherwise
-// a /model switch (or config edit) would keep serving stale video gating
-// until gateway restart. Mirrors the SupportsImages rebuild check.
 func TestAgentConfigChanged_SupportsVideo(t *testing.T) {
 	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
@@ -455,7 +438,6 @@ func TestAgentConfigChanged_SupportsVideo(t *testing.T) {
 		t.Fatal("expected initial instance to not support video")
 	}
 
-	// Same model name, but the model config now advertises video support.
 	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 	})
@@ -480,10 +462,6 @@ func TestAgentConfigChanged_SupportsVideo(t *testing.T) {
 	}
 }
 
-// TestAgentConfigChanged_ThinkingLevel locks the hot-reload path: saving a new
-// thinking_level in config.json must make ReloadRegistry recreate the instance
-// (agentConfigChanged=true), otherwise the stale resolved level survives until
-// gateway restart.
 func TestAgentConfigChanged_ThinkingLevel(t *testing.T) {
 	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
@@ -494,7 +472,6 @@ func TestAgentConfigChanged_ThinkingLevel(t *testing.T) {
 		t.Fatalf("precondition: initial ThinkingLevel = %q, want \"\"", original.ThinkingLevel)
 	}
 
-	// Change ONLY the thinking level — everything else stays identical.
 	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, ThinkingLevel: strPtr("medium")},
 	})
@@ -508,8 +485,6 @@ func TestAgentConfigChanged_ThinkingLevel(t *testing.T) {
 		t.Errorf("expected thinking level medium, got %q", reloaded.ThinkingLevel)
 	}
 
-	// Same effective level expressed differently (defaults vs agent field)
-	// must NOT trigger a pointless recreate.
 	sameCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 	})

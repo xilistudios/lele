@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -15,9 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// newInProgressToolTestLoop builds a real loop (no provider calls are made by
-// these tests: they only exercise the tool lifecycle bookkeeping) in a
-// throwaway config dir so the shared store cannot leak between tests.
 func newInProgressToolTestLoop(t *testing.T) *AgentLoop {
 	t.Helper()
 
@@ -67,9 +58,6 @@ func toolResultMsg(key, tool, callID string) bus.OutboundMessage {
 	}
 }
 
-// TestInProgressTool_Lifecycle pins the core contract: a native tool.executing
-// records the running tool (so a chat reload can restore the row) and the
-// matching tool.result clears it.
 func TestInProgressTool_Lifecycle(t *testing.T) {
 	al := newInProgressToolTestLoop(t)
 	key := "native:in-progress"
@@ -101,21 +89,17 @@ func TestInProgressTool_Lifecycle(t *testing.T) {
 	}
 }
 
-// TestInProgressTool_StaleResultDoesNotClear covers the out-of-order case: a
-// result that belongs to another call must not erase the tool actually running.
 func TestInProgressTool_StaleResultDoesNotClear(t *testing.T) {
 	al := newInProgressToolTestLoop(t)
 	key := "native:stale-result"
 
 	al.publishToolLifecycle(toolExecutingMsg(key, "wait_for_subagent", "wait_for_subagent: subagent-1", "", "call_wait"))
 
-	// Different tool_call_id (a nested/previous call completing late).
 	al.publishToolLifecycle(toolResultMsg(key, "exec", "call_other"))
 	if al.GetInProgressTool(key) == nil {
 		t.Fatal("a result for another call cleared the in-flight tool")
 	}
 
-	// Same id, different tool name: still not ours.
 	al.publishToolLifecycle(toolResultMsg(key, "exec", "call_wait"))
 	if al.GetInProgressTool(key) == nil {
 		t.Fatal("a result with a mismatching tool name cleared the in-flight tool")
@@ -127,8 +111,6 @@ func TestInProgressTool_StaleResultDoesNotClear(t *testing.T) {
 	}
 }
 
-// TestInProgressTool_IdLessResultFallsBackToName covers the special events that
-// publish a result without an id (compact, goal): they clear by tool name.
 func TestInProgressTool_IdLessResultFallsBackToName(t *testing.T) {
 	al := newInProgressToolTestLoop(t)
 	key := "native:id-less"
@@ -147,9 +129,6 @@ func TestInProgressTool_IdLessResultFallsBackToName(t *testing.T) {
 	}
 }
 
-// TestInProgressTool_OnlyNativeChannelTracked: the record feeds the TUI and
-// WebUI only; foreign channels must not populate it (their tool events never
-// carry the UI payload).
 func TestInProgressTool_OnlyNativeChannelTracked(t *testing.T) {
 	al := newInProgressToolTestLoop(t)
 
@@ -162,9 +141,6 @@ func TestInProgressTool_OnlyNativeChannelTracked(t *testing.T) {
 	}
 }
 
-// TestInProgressTool_ResolvesSessionAlias: tool events are published under the
-// resolved (active) key while the UI may hold the base key, so the lookup must
-// bridge the alias both ways.
 func TestInProgressTool_ResolvesSessionAlias(t *testing.T) {
 	al := newInProgressToolTestLoop(t)
 	base := "native:alias-base"
@@ -181,9 +157,6 @@ func TestInProgressTool_ResolvesSessionAlias(t *testing.T) {
 	}
 }
 
-// TestInProgressTool_ClearedWhenTurnEnds: the record's lifetime is the turn, not
-// the (optional) matching result event. Without this, a cancelled turn left the
-// row restorable on the next chat reload.
 func TestInProgressTool_ClearedWhenTurnEnds(t *testing.T) {
 	al := newInProgressToolTestLoop(t)
 	key := "native:turn-end"
@@ -196,7 +169,6 @@ func TestInProgressTool_ClearedWhenTurnEnds(t *testing.T) {
 		t.Fatal("tool.executing did not record the in-flight tool")
 	}
 
-	// The turn finished without ever publishing the matching tool.result.
 	unregister()
 
 	if tool := al.GetInProgressTool(key); tool != nil {
@@ -204,8 +176,6 @@ func TestInProgressTool_ClearedWhenTurnEnds(t *testing.T) {
 	}
 }
 
-// TestInProgressTool_CancelSessionClears: an explicit stop must drop the record
-// too, so the UI cannot restore a row for a cancelled turn.
 func TestInProgressTool_CancelSessionClears(t *testing.T) {
 	al := newInProgressToolTestLoop(t)
 	key := "native:cancelled"
@@ -227,9 +197,6 @@ func TestInProgressTool_CancelSessionClears(t *testing.T) {
 	}
 }
 
-// TestInProgressTool_GetReturnsCopy: callers on other goroutines must not share
-// the stored record (a later event replaces the pointer, but the copy contract
-// keeps readers race-free and immune to future in-place mutation).
 func TestInProgressTool_GetReturnsCopy(t *testing.T) {
 	al := newInProgressToolTestLoop(t)
 	key := "native:copy"

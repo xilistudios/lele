@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -21,7 +15,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// TestHandleCommand_NotACommand verifies that messages not starting with "/" are not handled
 func TestHandleCommand_NotACommand(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -62,7 +55,6 @@ func TestHandleCommand_NotACommand(t *testing.T) {
 	}
 }
 
-// TestHandleCommand_EmptyCommand verifies empty command is not handled
 func TestHandleCommand_EmptyCommand(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -103,7 +95,6 @@ func TestHandleCommand_EmptyCommand(t *testing.T) {
 	}
 }
 
-// TestHandleCommand_UnknownCommand verifies unknown commands are not handled
 func TestHandleCommand_UnknownCommand(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -144,7 +135,6 @@ func TestHandleCommand_UnknownCommand(t *testing.T) {
 	}
 }
 
-// TestHandleNewCommand tests the /new command
 func TestHandleNewCommand(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -175,15 +165,11 @@ func TestHandleNewCommand(t *testing.T) {
 	if !strings.Contains(result, "New conversation started") {
 		t.Errorf("Expected 'New conversation started' message, got: %s", result)
 	}
-	// The reply must not name context files: the persona files are deprecated
-	// (context.DeprecatedContextFiles), so a message listing them could only go
-	// stale — it is the shared, file-agnostic string.
 	if result != lelecontext.ContextRefreshedMessage {
 		t.Errorf("Expected the shared refresh message %q, got: %s", lelecontext.ContextRefreshedMessage, result)
 	}
 }
 
-// TestHandleNewCommand_NoAgent tests /new command when no agent is configured
 func TestHandleNewCommand_NoAgent(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -206,7 +192,6 @@ func TestHandleNewCommand_NoAgent(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Remove default agent for this test
 	al.registry.mu.Lock()
 	al.registry.agents = make(map[string]*AgentInstance)
 	al.registry.mu.Unlock()
@@ -219,7 +204,6 @@ func TestHandleNewCommand_NoAgent(t *testing.T) {
 	}
 }
 
-// TestHandleClearCommand tests the /clear command resets all session state
 func TestHandleClearCommand(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -242,11 +226,9 @@ func TestHandleClearCommand(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Use agent: prefixed key so the handler accepts it from msg.SessionKey
 	sessionKey := "agent:main:test:clear-session"
 	agent := al.registry.GetDefaultAgent()
 
-	// Add some history, tokens, and session overrides
 	agent.Sessions.AddMessage(sessionKey, "user", "Hello")
 	agent.Sessions.AddMessage(sessionKey, "assistant", "Hi there!")
 	agent.Sessions.AddTokenCounts(sessionKey, 500, 250)
@@ -269,36 +251,30 @@ func TestHandleClearCommand(t *testing.T) {
 		t.Errorf("Expected clear message, got: %s", result)
 	}
 
-	// Verify history was cleared
 	history := agent.Sessions.GetHistory(sessionKey)
 	if len(history) > 0 {
 		t.Errorf("Expected empty history after clear, got %d messages", len(history))
 	}
 
-	// Verify summary was cleared
 	summary := agent.Sessions.GetSummary(sessionKey)
 	if summary != "" {
 		t.Errorf("Expected empty summary after clear, got: %s", summary)
 	}
 
-	// Verify token counts were reset
 	inputTokens, outputTokens := agent.Sessions.GetTokenCounts(sessionKey)
 	if inputTokens != 0 || outputTokens != 0 {
 		t.Errorf("Expected token counts (0, 0) after clear, got (%d, %d)", inputTokens, outputTokens)
 	}
 
-	// Verify think level override was cleared
 	if _, ok := al.sessionThinking.Load(sessionKey); ok {
 		t.Error("Expected session thinking override to be cleared after /clear")
 	}
 
-	// Verify model override was cleared
 	if _, ok := al.sessionModels.Load(sessionKey); ok {
 		t.Error("Expected session model override to be cleared after /clear")
 	}
 }
 
-// TestHandleStatusCommand tests the /status command
 func TestHandleStatusCommand(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -340,7 +316,6 @@ func TestHandleStatusCommand(t *testing.T) {
 	}
 }
 
-// TestHandleModelCommand_NoArgs tests /model command without arguments
 func TestHandleModelCommand_NoArgs(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -395,10 +370,8 @@ func TestHandleModelCommand_NoArgs(t *testing.T) {
 	if !strings.Contains(result, "Current model:") {
 		t.Errorf("Expected current model info, got: %s", result)
 	}
-	// Note: Available models only shown when provider has models configured
 }
 
-// TestHandleModelCommand_WithArgs tests /model command with model name
 func TestHandleModelCommand_WithArgs(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -453,7 +426,6 @@ func TestHandleModelCommand_WithArgs(t *testing.T) {
 	}
 }
 
-// TestHandleModelCommand_NoSession tests /model command without session
 func TestHandleModelCommand_NoSession(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -488,14 +460,11 @@ func TestHandleModelCommand_NoSession(t *testing.T) {
 	if !handled {
 		t.Error("Expected /model to be handled")
 	}
-	// Note: The actual code allows model change without session, stores in sessionModels
-	// This test reflects actual behavior
 	if !strings.Contains(result, "Model changed") {
 		t.Logf("Model change allowed without session: %s", result)
 	}
 }
 
-// TestHandleVerboseCommand tests the /verbose command
 func TestHandleVerboseCommand(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -532,7 +501,6 @@ func TestHandleVerboseCommand(t *testing.T) {
 	if !handled {
 		t.Error("Expected /verbose to be handled")
 	}
-	// Verbose cycles through levels, should be one of the valid responses
 	validResponses := []string{
 		"🔇 Verbose mode **OFF**",
 		"🛠️ Verbose mode **BASIC**",
@@ -550,7 +518,6 @@ func TestHandleVerboseCommand(t *testing.T) {
 	}
 }
 
-// TestHandleVerboseCommand_NoSession tests /verbose without session
 func TestHandleVerboseCommand_NoSession(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -585,8 +552,6 @@ func TestHandleVerboseCommand_NoSession(t *testing.T) {
 	if !handled {
 		t.Error("Expected /verbose to be handled")
 	}
-	// Note: The actual code allows verbose cycling without session
-	// This test reflects actual behavior
 	validResponses := []string{
 		"🔇 Verbose mode **OFF**",
 		"🛠️ Verbose mode **BASIC**",
@@ -671,7 +636,6 @@ func TestHandleToggleEphemeralCommand(t *testing.T) {
 	}
 }
 
-// TestHandleAgentCommand_NoArgs lists available agents
 func TestHandleAgentCommand_NoArgs(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -713,7 +677,6 @@ func TestHandleAgentCommand_NoArgs(t *testing.T) {
 	}
 }
 
-// TestHandleAgentCommand_WithAgent switches to specified agent
 func TestHandleAgentCommand_WithAgent(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -758,7 +721,6 @@ func TestHandleAgentCommand_WithAgent(t *testing.T) {
 	}
 }
 
-// TestHandleNewCommand_RefreshesBootstrapFiles verifies /new picks up current workspace bootstrap files.
 func TestHandleNewCommand_RefreshesBootstrapFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
@@ -793,20 +755,15 @@ func TestHandleNewCommand_RefreshesBootstrapFiles(t *testing.T) {
 
 	ch := newCommandHandler(al)
 	response := ch.handleNewCommand(agent, "test:new-refresh")
-	// The reply no longer enumerates context files (they are not a stable
-	// contract: see context.DeprecatedContextFiles) — it is the shared,
-	// file-agnostic string…
 	if response != lelecontext.ContextRefreshedMessage {
 		t.Fatalf("Expected the shared refresh message %q, got: %s", lelecontext.ContextRefreshedMessage, response)
 	}
-	// …and what actually matters is that the prompt was rebuilt from disk.
 
 	if !strings.Contains(agent.ContextBuilder.BuildSystemPrompt(), "agent context v2") {
 		t.Fatal("Expected refreshed system prompt to contain updated AGENT.md content")
 	}
 }
 
-// TestHandleAgentCommand_UsesSelectedAgentWorkspaceContext verifies /agent switches to the selected agent workspace context.
 func TestHandleAgentCommand_UsesSelectedAgentWorkspaceContext(t *testing.T) {
 	mainDir := t.TempDir()
 	supportDir := t.TempDir()
@@ -954,7 +911,6 @@ func TestHandleNewCommand_PreservesSelectedAgentOnFreshSession(t *testing.T) {
 	}
 }
 
-// TestHandleAgentCommand_UnknownAgent tests switching to non-existent agent
 func TestHandleAgentCommand_UnknownAgent(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -996,7 +952,6 @@ func TestHandleAgentCommand_UnknownAgent(t *testing.T) {
 	}
 }
 
-// TestHandleAgentCommand_NoSession tests /agent without session
 func TestHandleAgentCommand_NoSession(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -1031,14 +986,11 @@ func TestHandleAgentCommand_NoSession(t *testing.T) {
 	if !handled {
 		t.Error("Expected /agent to be handled")
 	}
-	// Note: The actual code allows agent switching without session
-	// This test reflects actual behavior
 	if !strings.Contains(result, "Agent changed to:") {
 		t.Logf("Agent change allowed without session: %s", result)
 	}
 }
 
-// TestHandleSubagentsCommand_NoRunning shows no running subagents
 func TestHandleSubagentsCommand_NoRunning(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -1140,8 +1092,6 @@ func (m *commandHandlerSubagentCoordinatorStub) GetStartupInfo() map[string]inte
 	return map[string]interface{}{}
 }
 
-// renderSubagentLedgerDigest keeps the stub implementing toolCoordinator; the
-// command-handler tests do not exercise the prompt digest.
 func (m *commandHandlerSubagentCoordinatorStub) renderSubagentLedgerDigest(agentID, sessionKey string) string {
 	return ""
 }
@@ -1256,7 +1206,6 @@ func TestHandleSubagentsCommand_ContinueUsage(t *testing.T) {
 	}
 }
 
-// TestHandleStopCommand tests the /stop command
 func TestHandleStopCommand(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -1291,14 +1240,11 @@ func TestHandleStopCommand(t *testing.T) {
 	if !handled {
 		t.Error("Expected /stop to be handled")
 	}
-	// /stop shares the StopAgent response format across channels (#230):
-	// bare message when nothing else was cancelled, counts when it was.
 	if result != "⏹️ Agente detenido." {
 		t.Errorf("Expected stop message, got: %s", result)
 	}
 }
 
-// TestHandleShowCommand tests /show command variants
 func TestHandleShowCommand(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -1323,7 +1269,6 @@ func TestHandleShowCommand(t *testing.T) {
 
 	ch := newCommandHandler(al)
 
-	// Test /show without args
 	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1338,7 +1283,6 @@ func TestHandleShowCommand(t *testing.T) {
 		t.Errorf("Expected usage message, got: %s", result)
 	}
 
-	// Test /show model
 	result, handled = ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1353,7 +1297,6 @@ func TestHandleShowCommand(t *testing.T) {
 		t.Errorf("Expected current model info, got: %s", result)
 	}
 
-	// Test /show channel
 	result, handled = ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1368,7 +1311,6 @@ func TestHandleShowCommand(t *testing.T) {
 		t.Errorf("Expected current channel info, got: %s", result)
 	}
 
-	// Test /show agents
 	result, handled = ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1383,7 +1325,6 @@ func TestHandleShowCommand(t *testing.T) {
 		t.Errorf("Expected agents list, got: %s", result)
 	}
 
-	// Test /show unknown
 	result, handled = ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1399,14 +1340,12 @@ func TestHandleShowCommand(t *testing.T) {
 	}
 }
 
-// TestHandleListCommand tests /list command variants
 func TestHandleListCommand(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
-	// Isolate test from real user sessions
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
@@ -1425,7 +1364,6 @@ func TestHandleListCommand(t *testing.T) {
 
 	ch := newCommandHandler(al)
 
-	// Test /list without args
 	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1440,7 +1378,6 @@ func TestHandleListCommand(t *testing.T) {
 		t.Errorf("Expected usage message, got: %s", result)
 	}
 
-	// Test /list models
 	result, handled = ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1455,7 +1392,6 @@ func TestHandleListCommand(t *testing.T) {
 		t.Errorf("Expected models info, got: %s", result)
 	}
 
-	// Test /list channels
 	result, handled = ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1466,12 +1402,10 @@ func TestHandleListCommand(t *testing.T) {
 	if !handled {
 		t.Error("Expected /list channels to be handled")
 	}
-	// Channel manager is nil by default in tests
 	if result != "Channel manager not initialized" {
 		t.Errorf("Expected channel manager not initialized, got: %s", result)
 	}
 
-	// Test /list agents
 	result, handled = ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1486,7 +1420,6 @@ func TestHandleListCommand(t *testing.T) {
 		t.Errorf("Expected agents list, got: %s", result)
 	}
 
-	// Test /list unknown
 	result, handled = ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1502,7 +1435,6 @@ func TestHandleListCommand(t *testing.T) {
 	}
 }
 
-// TestHandleSwitchCommand tests /switch command
 func TestHandleSwitchCommand(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -1527,7 +1459,6 @@ func TestHandleSwitchCommand(t *testing.T) {
 
 	ch := newCommandHandler(al)
 
-	// Test /switch without args
 	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1542,7 +1473,6 @@ func TestHandleSwitchCommand(t *testing.T) {
 		t.Errorf("Expected usage message, got: %s", result)
 	}
 
-	// Test /switch model to <name>
 	result, handled = ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1557,7 +1487,6 @@ func TestHandleSwitchCommand(t *testing.T) {
 		t.Errorf("Expected model switch message, got: %s", result)
 	}
 
-	// Test /switch channel to <name>
 	result, handled = ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1568,13 +1497,10 @@ func TestHandleSwitchCommand(t *testing.T) {
 	if !handled {
 		t.Error("Expected /switch channel to be handled")
 	}
-	// Channel switch requires channel manager to be initialized
-	// In tests, it's nil by default
 	if !strings.Contains(result, "Switched target channel to") && !strings.Contains(result, "Channel manager not initialized") {
 		t.Errorf("Expected channel switch or not initialized message, got: %s", result)
 	}
 
-	// Test /switch unknown target
 	result, handled = ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1590,7 +1516,6 @@ func TestHandleSwitchCommand(t *testing.T) {
 	}
 }
 
-// TestHandleCompactCommand tests /compact command
 func TestHandleCompactCommand(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -1616,7 +1541,6 @@ func TestHandleCompactCommand(t *testing.T) {
 	sessionKey := "test:compact-session"
 	agent := al.registry.GetDefaultAgent()
 
-	// Add minimal history (not enough to compact)
 	agent.Sessions.AddMessage(sessionKey, "user", "Hello")
 	agent.Sessions.AddMessage(sessionKey, "assistant", "Hi")
 
@@ -1638,9 +1562,7 @@ func TestHandleCompactCommand(t *testing.T) {
 	}
 }
 
-// TestExtractPeer tests the extractPeer helper function
 func TestExtractPeer(t *testing.T) {
-	// Test with peer_kind metadata
 	msg := bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1662,7 +1584,6 @@ func TestExtractPeer(t *testing.T) {
 		t.Errorf("Expected peer ID 'custom-peer-id', got '%s'", peer.ID)
 	}
 
-	// Test with peer_kind but no peer_id (should use SenderID for direct)
 	msg2 := bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user2",
@@ -1680,7 +1601,6 @@ func TestExtractPeer(t *testing.T) {
 		t.Errorf("Expected peer ID 'user2', got '%s'", peer2.ID)
 	}
 
-	// Test with peer_kind but no peer_id (should use ChatID for non-direct)
 	msg3 := bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user3",
@@ -1698,7 +1618,6 @@ func TestExtractPeer(t *testing.T) {
 		t.Errorf("Expected peer ID 'chat3', got '%s'", peer3.ID)
 	}
 
-	// Test with no peer_kind
 	msg4 := bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user4",
@@ -1712,9 +1631,7 @@ func TestExtractPeer(t *testing.T) {
 	}
 }
 
-// TestExtractParentPeer tests the extractParentPeer helper function
 func TestExtractParentPeer(t *testing.T) {
-	// Test with parent metadata
 	msg := bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user1",
@@ -1736,7 +1653,6 @@ func TestExtractParentPeer(t *testing.T) {
 		t.Errorf("Expected parent peer ID 'parent-id', got '%s'", peer.ID)
 	}
 
-	// Test with no parent metadata
 	msg2 := bus.InboundMessage{
 		Channel:  "test",
 		SenderID: "user2",
@@ -1750,16 +1666,13 @@ func TestExtractParentPeer(t *testing.T) {
 	}
 }
 
-// TestGatewayVersion tests the gatewayVersion helper function
 func TestGatewayVersion(t *testing.T) {
 	version := gatewayVersion()
-	// Version should be either "dev" or a valid version string
 	if version == "" {
 		t.Error("Expected non-empty version")
 	}
 }
 
-// TestFormatSubagentsResponse_Info tests /subagents info command
 func TestFormatSubagentsResponse_Info(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -1799,7 +1712,6 @@ func TestFormatSubagentsResponse_Info(t *testing.T) {
 	}
 }
 
-// TestFormatSubagentsResponse_Stop tests /subagents stop command
 func TestFormatSubagentsResponse_Stop(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -1839,7 +1751,6 @@ func TestFormatSubagentsResponse_Stop(t *testing.T) {
 	}
 }
 
-// TestSessionKeyOverride tests that session key from message overrides route session key
 func TestSessionKeyOverride(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -1863,7 +1774,6 @@ func TestSessionKeyOverride(t *testing.T) {
 	al := NewAgentLoop(cfg, msgBus)
 	ch := newCommandHandler(al)
 
-	// Test with agent: prefixed session key
 	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:    "test",
 		SenderID:   "user1",
@@ -1879,7 +1789,6 @@ func TestSessionKeyOverride(t *testing.T) {
 		t.Errorf("Expected clear message, got: %s", result)
 	}
 
-	// Test with telegram: prefixed session key
 	result, handled = ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:    "telegram",
 		SenderID:   "user1",
@@ -1896,7 +1805,6 @@ func TestSessionKeyOverride(t *testing.T) {
 	}
 }
 
-// TestHandleCommand_SessionAgentOverride tests that session agent overrides default agent
 func TestHandleCommand_SessionAgentOverride(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -1922,7 +1830,6 @@ func TestHandleCommand_SessionAgentOverride(t *testing.T) {
 	sessionKey := "test:session-agent-override"
 	ch := newCommandHandler(al)
 
-	// First, switch to main agent
 	al.sessionAgents.Store(sessionKey, "main")
 
 	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
@@ -1941,7 +1848,6 @@ func TestHandleCommand_SessionAgentOverride(t *testing.T) {
 	}
 }
 
-// TestHandleStatusCommand_WithTokens tests /status command shows token counts
 func TestHandleStatusCommand_WithTokens(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -1964,11 +1870,9 @@ func TestHandleStatusCommand_WithTokens(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Use the default agent's session directly
 	agent := al.registry.GetDefaultAgent()
-	sessionKey := "agent:main:main" // This is what the command handler will use
+	sessionKey := "agent:main:main"
 
-	// Add some token counts to the session
 	agent.Sessions.AddTokenCounts(sessionKey, 150, 80)
 	agent.Sessions.AddMessage(sessionKey, "user", "test message")
 
@@ -1984,17 +1888,14 @@ func TestHandleStatusCommand_WithTokens(t *testing.T) {
 		t.Error("Expected /status to be handled")
 	}
 
-	// Verify token information is present
 	if !strings.Contains(result, "Tokens:") {
 		t.Errorf("Expected 'Tokens:' in status, got: %s", result)
 	}
 
-	// The new format should show "X in / Y out (Z total)"
 	if !strings.Contains(result, "in") || !strings.Contains(result, "out") {
 		t.Errorf("Expected token format 'in / out', got: %s", result)
 	}
 
-	// Verify context information
 	if !strings.Contains(result, "Context:") {
 		t.Errorf("Expected 'Context:' in status, got: %s", result)
 	}
@@ -2002,7 +1903,6 @@ func TestHandleStatusCommand_WithTokens(t *testing.T) {
 	t.Logf("Status output: %s", result)
 }
 
-// TestHandleStatusCommand_TokenAccumulation tests that tokens accumulate correctly
 func TestHandleStatusCommand_TokenAccumulation(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -2025,11 +1925,9 @@ func TestHandleStatusCommand_TokenAccumulation(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Use the default agent's session directly
 	agent := al.registry.GetDefaultAgent()
-	sessionKey := "agent:main:main" // This is what the command handler will use
+	sessionKey := "agent:main:main"
 
-	// Add tokens multiple times to test accumulation
 	agent.Sessions.AddTokenCounts(sessionKey, 100, 50)
 	agent.Sessions.AddTokenCounts(sessionKey, 200, 75)
 	agent.Sessions.AddTokenCounts(sessionKey, 50, 25)
@@ -2046,7 +1944,6 @@ func TestHandleStatusCommand_TokenAccumulation(t *testing.T) {
 		t.Error("Expected /status to be handled")
 	}
 
-	// Total should be 350 in + 150 out = 500 total
 	if !strings.Contains(result, "350") || !strings.Contains(result, "150") || !strings.Contains(result, "500") {
 		t.Errorf("Expected accumulated tokens (350 in / 150 out / 500 total), got: %s", result)
 	}
@@ -2054,7 +1951,6 @@ func TestHandleStatusCommand_TokenAccumulation(t *testing.T) {
 	t.Logf("Status with accumulated tokens: %s", result)
 }
 
-// TestHandleStatusCommand_ZeroTokens tests /status when no tokens have been used
 func TestHandleStatusCommand_ZeroTokens(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -2080,7 +1976,6 @@ func TestHandleStatusCommand_ZeroTokens(t *testing.T) {
 	agent := al.registry.GetDefaultAgent()
 	sessionKey := "agent:main:main"
 
-	// Don't add any tokens - should show zeros
 	agent.Sessions.AddMessage(sessionKey, "user", "test")
 
 	ch := newCommandHandler(al)
@@ -2095,7 +1990,6 @@ func TestHandleStatusCommand_ZeroTokens(t *testing.T) {
 		t.Error("Expected /status to be handled")
 	}
 
-	// Should still show token format even with zeros
 	if !strings.Contains(result, "Tokens:") {
 		t.Errorf("Expected 'Tokens:' in status, got: %s", result)
 	}
@@ -2103,8 +1997,6 @@ func TestHandleStatusCommand_ZeroTokens(t *testing.T) {
 	t.Logf("Status with zero tokens: %s", result)
 }
 
-// TestHandleStatusCommand_ContextIncludesSystemPrompt verifies that /status includes system prompt tokens
-// in the context calculation (not just history tokens).
 func TestHandleStatusCommand_ContextIncludesSystemPrompt(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -2113,7 +2005,6 @@ func TestHandleStatusCommand_ContextIncludesSystemPrompt(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
-	// Create bootstrap files to have non-empty system prompt
 	os.WriteFile(filepath.Join(tmpDir, "SOUL.md"), []byte("# SOUL\nTest soul content with enough text"), 0644)
 	os.WriteFile(filepath.Join(tmpDir, "AGENT.md"), []byte("# AGENT\nTest agent content with enough text"), 0644)
 	os.WriteFile(filepath.Join(tmpDir, "MEMORY.md"), []byte("# Memory\nTest memory content"), 0644)
@@ -2135,7 +2026,6 @@ func TestHandleStatusCommand_ContextIncludesSystemPrompt(t *testing.T) {
 	sessionKey := "test:context-tokens"
 	ch := newCommandHandler(al)
 
-	// Build system prompt to verify it's non-empty
 	agent := al.registry.GetDefaultAgent()
 	_ = agent.ContextBuilder.BuildSystemPrompt()
 
@@ -2151,19 +2041,15 @@ func TestHandleStatusCommand_ContextIncludesSystemPrompt(t *testing.T) {
 		t.Error("Expected /status to be handled")
 	}
 
-	// Verify context is shown
 	if !strings.Contains(result, "Context:") {
 		t.Fatal("Expected 'Context:' in status output")
 	}
 
-	// Extract the context percentage
-	// Format: "📚 Context: ~1234/128000 (0%)"
 	contextIdx := strings.Index(result, "Context: ~")
 	if contextIdx == -1 {
 		t.Fatal("Could not find 'Context: ~' in status output")
 	}
 
-	// Parse the context number
 	contextPart := result[contextIdx+len("Context: ~"):]
 	var contextTokens int
 	n, _ := fmt.Sscanf(contextPart, "%d", &contextTokens)
@@ -2171,10 +2057,6 @@ func TestHandleStatusCommand_ContextIncludesSystemPrompt(t *testing.T) {
 		t.Fatal("Could not parse context tokens from status output")
 	}
 
-	// System prompt should contribute significant tokens
-	// With our bootstrap files (~150 chars), system prompt should be ~60 tokens minimum
-	// If status only counted history, it would show ~0-10 tokens for empty history
-	// So context should be > 50 tokens if system prompt is included
 	if contextTokens < 50 {
 		t.Errorf("Context tokens (%d) too low - seems system prompt not included. Expected > 50", contextTokens)
 	}
@@ -2182,7 +2064,6 @@ func TestHandleStatusCommand_ContextIncludesSystemPrompt(t *testing.T) {
 	t.Logf("Context tokens: %d (includes system prompt with bootstrap files)", contextTokens)
 }
 
-// TestHandleCompactCommand_WithError tests /compact command with error handling
 func TestHandleCompactCommand_WithError(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -2205,17 +2086,13 @@ func TestHandleCompactCommand_WithError(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Use a session key that matches the expected format
 	sessionKey := "agent:main:test:compact-error-session"
 	agent := al.registry.GetDefaultAgent()
 
-	// Add enough history to trigger compaction (5+ messages)
-	// Add 10 messages total to ensure we pass the threshold
 	for i := 0; i < 10; i++ {
 		agent.Sessions.AddMessage(sessionKey, "user", fmt.Sprintf("Message %d", i))
 	}
 
-	// Debug: check message count
 	history := agent.Sessions.GetHistory(sessionKey)
 	t.Logf("Added %d messages to session", len(history))
 
@@ -2233,7 +2110,6 @@ func TestHandleCompactCommand_WithError(t *testing.T) {
 		t.Error("Expected /compact to be handled")
 	}
 
-	// Should either show success stats, not enough messages, or an error message
 	success := strings.Contains(result, "Memory compacted")
 	notEnough := strings.Contains(result, "Not enough messages")
 	failed := strings.Contains(result, "Compaction failed")
@@ -2242,11 +2118,9 @@ func TestHandleCompactCommand_WithError(t *testing.T) {
 		t.Errorf("Expected compaction result, not enough messages, or error, got: %s", result)
 	}
 
-	// Log the actual result for debugging
 	t.Logf("Compact result: %s", result)
 }
 
-// TestHandleClearCommand_NoAgent tests /clear command when no agent is configured
 func TestHandleClearCommand_NoAgent(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -2269,7 +2143,6 @@ func TestHandleClearCommand_NoAgent(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Remove default agent for this test
 	al.registry.mu.Lock()
 	al.registry.agents = make(map[string]*AgentInstance)
 	al.registry.mu.Unlock()
@@ -2290,7 +2163,6 @@ func TestHandleClearCommand_NoAgent(t *testing.T) {
 	}
 }
 
-// TestNewCommand_CleanSession verifies that /new properly cleans session context
 func TestNewCommand_CleanSession(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
@@ -2313,7 +2185,6 @@ func TestNewCommand_CleanSession(t *testing.T) {
 	ch := newCommandHandler(al)
 	sessionKey := "telegram:99999"
 
-	// Step 1: Send first message
 	_, _ = ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:    "telegram",
 		SenderID:   "user1",
@@ -2322,11 +2193,9 @@ func TestNewCommand_CleanSession(t *testing.T) {
 		SessionKey: sessionKey,
 	})
 
-	// Get the active session key after first message
 	firstActiveSession := al.ResolveSessionKey(sessionKey)
 	t.Logf("First active session: %s", firstActiveSession)
 
-	// Add some history manually to simulate a long conversation
 	defaultAgent, _ := al.registry.GetAgent("main")
 	defaultAgent.Sessions.AddMessage(firstActiveSession, "user", "Message 1")
 	defaultAgent.Sessions.AddMessage(firstActiveSession, "assistant", "Response 1")
@@ -2337,7 +2206,6 @@ func TestNewCommand_CleanSession(t *testing.T) {
 	historyCount1 := len(defaultAgent.Sessions.GetHistory(firstActiveSession))
 	t.Logf("History count in first session: %d", historyCount1)
 
-	// Step 2: Execute /new
 	response, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:    "telegram",
 		SenderID:   "user1",
@@ -2352,7 +2220,6 @@ func TestNewCommand_CleanSession(t *testing.T) {
 		t.Fatalf("Unexpected /new response: %s", response)
 	}
 
-	// Step 3: Get the new active session key
 	secondActiveSession := al.ResolveSessionKey(sessionKey)
 	t.Logf("Second active session: %s", secondActiveSession)
 
@@ -2360,7 +2227,6 @@ func TestNewCommand_CleanSession(t *testing.T) {
 		t.Fatal("/new should create a new session key, but it didn't")
 	}
 
-	// Step 4: Check that the new session has no history
 	historyCount2 := len(defaultAgent.Sessions.GetHistory(secondActiveSession))
 	t.Logf("History count in second session: %d", historyCount2)
 
@@ -2368,16 +2234,11 @@ func TestNewCommand_CleanSession(t *testing.T) {
 		t.Errorf("Expected 0 messages in new session, got %d", historyCount2)
 	}
 
-	// Step 5: Check that old session is preserved (for safety)
 	historyCountOld := len(defaultAgent.Sessions.GetHistory(firstActiveSession))
 	t.Logf("History count in old session: %d", historyCountOld)
 
-	// Note: Steps 6-7 removed because handleCommand only processes commands (messages starting with "/").
-	// To test message processing, use processMessage via the message processor, which requires
-	// more complex setup including the LLM runner.
 }
 
-// TestAgentCommand_CleanSession verifies that /agent <id> properly cleans session context
 func TestAgentCommand_CleanSession(t *testing.T) {
 	tmpDir1 := t.TempDir()
 	tmpDir2 := t.TempDir()
@@ -2405,7 +2266,6 @@ func TestAgentCommand_CleanSession(t *testing.T) {
 	ch := newCommandHandler(al)
 	sessionKey := "telegram:88888"
 
-	// Step 1: Send message with main agent
 	_, _ = ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:    "telegram",
 		SenderID:   "user1",
@@ -2417,7 +2277,6 @@ func TestAgentCommand_CleanSession(t *testing.T) {
 	firstActiveSession := al.ResolveSessionKey(sessionKey)
 	t.Logf("First active session (main): %s", firstActiveSession)
 
-	// Add some history
 	mainAgent, _ := al.registry.GetAgent("main")
 	mainAgent.Sessions.AddMessage(firstActiveSession, "user", "Long conversation message 1")
 	mainAgent.Sessions.AddMessage(firstActiveSession, "assistant", "Response 1")
@@ -2428,7 +2287,6 @@ func TestAgentCommand_CleanSession(t *testing.T) {
 	historyCount1 := len(mainAgent.Sessions.GetHistory(firstActiveSession))
 	t.Logf("History count before /agent: %d", historyCount1)
 
-	// Step 2: Switch to coder agent
 	response, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:    "telegram",
 		SenderID:   "user1",
@@ -2443,7 +2301,6 @@ func TestAgentCommand_CleanSession(t *testing.T) {
 		t.Fatalf("Unexpected /agent response: %s", response)
 	}
 
-	// Step 3: Verify new session key
 	secondActiveSession := al.ResolveSessionKey(sessionKey)
 	t.Logf("Second active session (coder): %s", secondActiveSession)
 
@@ -2451,7 +2308,6 @@ func TestAgentCommand_CleanSession(t *testing.T) {
 		t.Fatal("/agent should create a new session key, but it didn't")
 	}
 
-	// Step 4: Verify the coder agent has no history in the new session
 	coderAgent, _ := al.registry.GetAgent("coder")
 	historyCount2 := len(coderAgent.Sessions.GetHistory(secondActiveSession))
 	t.Logf("History count in coder session: %d", historyCount2)
@@ -2460,7 +2316,6 @@ func TestAgentCommand_CleanSession(t *testing.T) {
 		t.Errorf("Expected 0 messages in coder session, got %d", historyCount2)
 	}
 
-	// Step 5: Verify old main session is preserved
 	historyCountOld := len(mainAgent.Sessions.GetHistory(firstActiveSession))
 	t.Logf("History count in old main session: %d", historyCountOld)
 

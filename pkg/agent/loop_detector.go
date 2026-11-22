@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -15,21 +9,17 @@ import (
 )
 
 const (
-	// MaxLoopRepetitions is the number of times the same tool call pattern can repeat
 	MaxLoopRepetitions = 3
 )
 
-// loopDetector detects repeated tool call patterns to identify LLM loops
 type loopDetector struct {
 	lastMessage *messageSignature
 }
 
-// newLoopDetector creates a new loop detector
 func newLoopDetector() *loopDetector {
 	return &loopDetector{}
 }
 
-// buildSignature creates a signature from tool calls for comparison
 func (ld *loopDetector) buildSignature(toolCalls []providers.ToolCall) messageSignature {
 	sig := messageSignature{
 		toolCalls: make([]toolCallSignature, 0, len(toolCalls)),
@@ -44,7 +34,6 @@ func (ld *loopDetector) buildSignature(toolCalls []providers.ToolCall) messageSi
 	return sig
 }
 
-// Check examines tool calls for loop patterns and returns guidance message if needed
 func (ld *loopDetector) Check(toolCalls []providers.ToolCall, agentID string, iteration int) *providers.Message {
 	currentSig := ld.buildSignature(toolCalls)
 
@@ -83,7 +72,6 @@ func (ld *loopDetector) Check(toolCalls []providers.ToolCall, agentID string, it
 	return nil
 }
 
-// Reset clears the loop detector state
 func (ld *loopDetector) Reset() {
 	ld.lastMessage = nil
 }

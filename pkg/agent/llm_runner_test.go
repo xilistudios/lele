@@ -19,19 +19,12 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// instantRetryWait returns a channel that is already closed, causing any
-// select on it to fire immediately. Used to eliminate real sleeps in tests.
 func instantRetryWait(time.Duration) <-chan time.Time {
 	ch := make(chan time.Time)
 	close(ch)
 	return ch
 }
 
-// ============================================================================
-// Mock Implementations (unique to llm_runner_test.go)
-// ============================================================================
-
-// llmRunnerMockToolRegistry is a mock implementation of tools.ToolRegistry for testing
 type llmRunnerMockToolRegistry struct {
 	tools          map[string]tools.Tool
 	executeFunc    func(ctx context.Context, name string, args map[string]interface{}, channel, chatID string, asyncCallback tools.AsyncCallback) *tools.ToolResult
@@ -77,7 +70,6 @@ func (m *llmRunnerMockToolRegistry) List() []string {
 	return names
 }
 
-// llmRunnerMockSessionStore is a mock implementation of session storage
 type llmRunnerMockSessionStore struct {
 	history      map[string][]providers.Message
 	summary      map[string]string
@@ -172,7 +164,6 @@ func (m *llmRunnerMockSessionStore) SetVerboseLevel(key, level string) error {
 	return nil
 }
 
-// llmRunnerMockContextBuilder is a mock implementation of ContextBuilder
 type llmRunnerMockContextBuilder struct {
 	messages []providers.Message
 }
@@ -203,7 +194,6 @@ func (m *llmRunnerMockContextBuilder) GetSkillsInfo() map[string]interface{} {
 
 func (m *llmRunnerMockContextBuilder) ResetMemoryContext() {}
 
-// llmRunnerMockLLMProvider is a mock implementation of providers.LLMProvider
 type llmRunnerMockLLMProvider struct {
 	response     *providers.LLMResponse
 	err          error
@@ -236,7 +226,6 @@ func (m *llmRunnerMockLLMProvider) GetDefaultModel() string {
 	return "mock-model"
 }
 
-// llmRunnerMockFallbackChain is a mock implementation of fallback chain
 type llmRunnerMockFallbackChain struct {
 	executeFunc func(ctx context.Context, candidates []providers.FallbackCandidate, run func(ctx context.Context, provider, model string) (*providers.LLMResponse, error)) (*providers.FallbackResult, error)
 }
@@ -252,7 +241,6 @@ func (m *llmRunnerMockFallbackChain) Execute(ctx context.Context, candidates []p
 	}, nil
 }
 
-// llmRunnerMockEventBus is a mock implementation of bus.MessageBus
 type llmRunnerMockEventBus struct {
 	publishedOutbound []bus.OutboundMessage
 	publishedInbound  []bus.InboundMessage
@@ -294,7 +282,6 @@ func (m *llmRunnerMockEventBus) ClearPublished() {
 	m.publishedInbound = m.publishedInbound[:0]
 }
 
-// llmRunnerMockToolCoordinator is a mock implementation of toolCoordinator
 type llmRunnerMockToolCoordinator struct {
 	updateToolContextsCalled bool
 	lastAgent                *AgentInstance
@@ -345,7 +332,6 @@ func (m *llmRunnerMockToolCoordinator) GetStartupInfo() map[string]interface{} {
 	return map[string]interface{}{}
 }
 
-// llmRunnerMockSessionManager is a mock implementation of sessionManager
 type llmRunnerMockSessionManager struct {
 	summarizeCalled bool
 	summarizeStats  *SummarizeStats
@@ -360,7 +346,6 @@ func (m *llmRunnerMockSessionManager) summarizeSession(agent *AgentInstance, ses
 	return m.summarizeStats
 }
 
-// llmRunnerMockApprovalManager is a mock implementation of channels.ApprovalManager
 type llmRunnerMockApprovalManager struct {
 	approvalResult  bool
 	approvalError   error
@@ -397,7 +382,6 @@ func (m *llmRunnerMockApprovalManager) GetApproval(approvalID string) *channels.
 
 func (m *llmRunnerMockApprovalManager) SetTimeout(timeout time.Duration) {}
 
-// llmRunnerMockExecTool is a mock implementation of the exec tool for testing approval flow
 type llmRunnerMockExecTool struct {
 	approvalRequired bool
 }
@@ -430,7 +414,6 @@ func (m *llmRunnerMockExecTool) Execute(ctx context.Context, args map[string]int
 	return tools.SilentResult("Command executed")
 }
 
-// llmRunnerMockContextualTool is a mock tool that implements ContextualTool
 type llmRunnerMockContextualTool struct {
 	name             string
 	channel          string
@@ -459,7 +442,6 @@ func (m *llmRunnerMockContextualTool) SetContext(channel, chatID string) {
 	m.setContextCalled = true
 }
 
-// llmRunnerMockCustomTool is a flexible mock tool for testing
 type llmRunnerMockCustomTool struct {
 	name        string
 	executeFunc func(ctx context.Context, args map[string]interface{}) *tools.ToolResult
@@ -487,16 +469,11 @@ func (m *llmRunnerMockCustomTool) Execute(ctx context.Context, args map[string]i
 	return tools.SilentResult("mock result")
 }
 
-// ============================================================================
-// Test Setup Helpers
-// ============================================================================
-
 func createLLMRunnerTestAgentLoop(t *testing.T) (*AgentLoop, string) {
 	tmpDir, err := os.MkdirTemp("", "llm-runner-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	// Isolate tests from real user sessions
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
@@ -509,9 +486,6 @@ func createLLMRunnerTestAgentLoop(t *testing.T) (*AgentLoop, string) {
 				Provider:          "test-provider",
 			},
 		},
-		// Groups enabled: helpers built on this loop (e.g. StopAgent tests)
-		// start real groups through the loop's GroupManager, which is
-		// feature-gated (B10).
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -528,7 +502,6 @@ func createLLMRunnerTestAgentInstance(t *testing.T, tmpDir string) *AgentInstanc
 	provider := &llmRunnerMockLLMProvider{}
 	toolRegistry := tools.NewToolRegistry()
 
-	// Create a properly initialized ContextBuilder
 	contextBuilder := NewContextBuilder(tmpDir)
 	contextBuilder.SetToolsRegistry(toolRegistry)
 
@@ -549,10 +522,6 @@ func createLLMRunnerTestAgentInstance(t *testing.T, tmpDir string) *AgentInstanc
 	}
 }
 
-// ============================================================================
-// Tests for newLLMRunner
-// ============================================================================
-
 func TestNewLLMRunner(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -568,10 +537,6 @@ func TestNewLLMRunner(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// Tests for runAgentLoop
-// ============================================================================
-
 func TestRunAgentLoop_BasicExecution(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -579,7 +544,6 @@ func TestRunAgentLoop_BasicExecution(t *testing.T) {
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Mock the provider to return a simple response
 	agent.Provider = &llmRunnerMockLLMProvider{
 		response: &providers.LLMResponse{
 			Content:   "Hello, world!",
@@ -609,7 +573,6 @@ func TestRunAgentLoop_BasicExecution(t *testing.T) {
 		t.Errorf("Expected 'Hello, world!', got: %s", response)
 	}
 
-	// Verify message was saved to session
 	history := agent.Sessions.GetHistory(opts.SessionKey)
 	if len(history) < 2 {
 		t.Errorf("Expected at least 2 messages in history, got: %d", len(history))
@@ -621,12 +584,9 @@ func TestRunAgentLoop_EmptyResponse(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	runner := newLLMRunner(al)
-	// The provider always returns empty, so the loop retries with backoff
-	// (1s, 2s, 3s...). Without an instant wait this test sleeps ~27s.
 	runner.retryWait = instantRetryWait
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Mock the provider to return an empty response
 	agent.Provider = &llmRunnerMockLLMProvider{
 		response: &providers.LLMResponse{
 			Content:   "",
@@ -664,7 +624,6 @@ func TestRunAgentLoop_NoHistory(t *testing.T) {
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Add some history first
 	agent.Sessions.AddMessage("test-session", "user", "Previous message")
 	agent.Sessions.AddMessage("test-session", "assistant", "Previous response")
 
@@ -683,7 +642,7 @@ func TestRunAgentLoop_NoHistory(t *testing.T) {
 		DefaultResponse: "Default",
 		EnableSummary:   false,
 		SendResponse:    false,
-		NoHistory:       true, // Skip history
+		NoHistory:       true,
 	}
 
 	ctx := context.Background()
@@ -693,7 +652,6 @@ func TestRunAgentLoop_NoHistory(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// Verify the new message was still saved
 	history := agent.Sessions.GetHistory(opts.SessionKey)
 	foundNewMessage := false
 	for _, msg := range history {
@@ -862,10 +820,9 @@ func TestRunAgentLoop_InternalChannel(t *testing.T) {
 		},
 	}
 
-	// Test with internal channel (should not record last channel)
 	opts := processOptions{
 		SessionKey:      "test-session",
-		Channel:         "cli", // Internal channel
+		Channel:         "cli",
 		ChatID:          "test-chat-id",
 		UserMessage:     "Test message",
 		DefaultResponse: "Default",
@@ -881,7 +838,6 @@ func TestRunAgentLoop_InternalChannel(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// Verify last channel was NOT recorded for internal channel
 	lastChannel := al.state.GetLastChannel()
 	if lastChannel == "cli:test-chat-id" {
 		t.Error("Expected internal channel to not be recorded as last channel")
@@ -895,7 +851,6 @@ func TestRunAgentLoop_ProviderError(t *testing.T) {
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Mock the provider to return an error
 	agent.Provider = &llmRunnerMockLLMProvider{
 		err: errors.New("provider connection failed"),
 	}
@@ -922,10 +877,6 @@ func TestRunAgentLoop_ProviderError(t *testing.T) {
 		t.Errorf("Expected error to contain 'provider connection failed', got: %v", err)
 	}
 }
-
-// ============================================================================
-// Tests for runLLMIteration
-// ============================================================================
 
 func TestRunLLMIteration_DirectResponse(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
@@ -981,7 +932,6 @@ func TestRunLLMIteration_WithToolCalls(t *testing.T) {
 		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
 			callCount++
 			if callCount == 1 {
-				// First call: return tool call
 				return &providers.LLMResponse{
 					Content: "",
 					ToolCalls: []providers.ToolCall{
@@ -994,7 +944,6 @@ func TestRunLLMIteration_WithToolCalls(t *testing.T) {
 					},
 				}, nil
 			}
-			// Second call: return final response
 			return &providers.LLMResponse{
 				Content:   "File content retrieved",
 				ToolCalls: []providers.ToolCall{},
@@ -1002,7 +951,6 @@ func TestRunLLMIteration_WithToolCalls(t *testing.T) {
 		},
 	}
 
-	// Register a mock read_file tool
 	agent.Tools.Register(&llmRunnerMockCustomTool{
 		name: "read_file",
 		executeFunc: func(ctx context.Context, args map[string]interface{}) *tools.ToolResult {
@@ -1042,8 +990,6 @@ func TestRunLLMIteration_AppendsToolContextMessages(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
-	// Configure the model with vision support so read_image is NOT filtered
-	// and image ContentParts are preserved in messages.
 	al.cfg().Providers = &config.ProvidersConfig{
 		Named: map[string]config.NamedProviderConfig{
 			"test-provider": {
@@ -1135,15 +1081,11 @@ func TestRunLLMIteration_StripsImageContentParts_WhenNoVision(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
-	// No vision-capable model configured — getSupportsImages returns false.
-	// Image ContentParts in historical messages should be stripped before
-	// being sent to the LLM.
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
 	agent.Provider = &llmRunnerMockLLMProvider{
 		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
-			// Verify no messages contain image_url ContentParts
 			for _, msg := range messages {
 				for _, part := range msg.ContentParts {
 					if part.Type == "image_url" {
@@ -1155,7 +1097,6 @@ func TestRunLLMIteration_StripsImageContentParts_WhenNoVision(t *testing.T) {
 		},
 	}
 
-	// Pre-populate messages with image content (simulates historical read_image result)
 	messages := []providers.Message{
 		{Role: "system", Content: "System prompt"},
 		{Role: "user", Content: "Read image"},
@@ -1183,10 +1124,8 @@ func TestRunLLMIteration_MaxIterations(t *testing.T) {
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Set max iterations to a low number
 	agent.MaxIterations = 3
 
-	// Always return tool calls to force iteration
 	agent.Provider = &llmRunnerMockLLMProvider{
 		response: &providers.LLMResponse{
 			Content: "",
@@ -1201,7 +1140,6 @@ func TestRunLLMIteration_MaxIterations(t *testing.T) {
 		},
 	}
 
-	// Register a test tool
 	agent.Tools.Register(&llmRunnerMockCustomTool{
 		name: "test_tool",
 		executeFunc: func(ctx context.Context, args map[string]interface{}) *tools.ToolResult {
@@ -1228,12 +1166,10 @@ func TestRunLLMIteration_MaxIterations(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// Should stop at max iterations
 	if iterations > agent.MaxIterations {
 		t.Errorf("Expected iterations <= %d, got: %d", agent.MaxIterations, iterations)
 	}
 
-	// Content should be empty since we never got a final response
 	_ = content
 }
 
@@ -1249,13 +1185,11 @@ func TestRunLLMIteration_EmptyResponseRetry(t *testing.T) {
 		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
 			callCount++
 			if callCount == 1 {
-				// First call: return empty response
 				return &providers.LLMResponse{
-					Content:   "   ", // Whitespace only
+					Content:   "   ",
 					ToolCalls: []providers.ToolCall{},
 				}, nil
 			}
-			// Second call: return actual response
 			return &providers.LLMResponse{
 				Content:   "Actual response",
 				ToolCalls: []providers.ToolCall{},
@@ -1303,10 +1237,8 @@ func TestRunLLMIteration_ContextErrorRetry(t *testing.T) {
 		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
 			callCount++
 			if callCount == 1 {
-				// First call: return token/context error
 				return nil, errors.New("InvalidParameter: Total tokens exceed max message tokens")
 			}
-			// Second call: succeed after "summarization"
 			return &providers.LLMResponse{
 				Content:   "Recovered response",
 				ToolCalls: []providers.ToolCall{},
@@ -1314,7 +1246,6 @@ func TestRunLLMIteration_ContextErrorRetry(t *testing.T) {
 		},
 	}
 
-	// Add some history to trigger summarization
 	for i := 0; i < 10; i++ {
 		agent.Sessions.AddMessage("test-session", "user", fmt.Sprintf("Message %d", i))
 		agent.Sessions.AddMessage("test-session", "assistant", fmt.Sprintf("Response %d", i))
@@ -1349,7 +1280,7 @@ func TestRunLLMIteration_NetworkTimeoutRetry(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	runner := newLLMRunner(al)
-	runner.retryWait = instantRetryWait // avoid real 2s sleep
+	runner.retryWait = instantRetryWait
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
 	callCount := 0
@@ -1357,10 +1288,8 @@ func TestRunLLMIteration_NetworkTimeoutRetry(t *testing.T) {
 		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
 			callCount++
 			if callCount == 1 {
-				// First call: timeout
 				return nil, errors.New("context deadline exceeded")
 			}
-			// Second call: succeed
 			return &providers.LLMResponse{
 				Content:   "Success after timeout",
 				ToolCalls: []providers.ToolCall{},
@@ -1393,27 +1322,18 @@ func TestRunLLMIteration_NetworkTimeoutRetry(t *testing.T) {
 }
 
 func TestRunLLMIteration_FallbackChain(t *testing.T) {
-	// This test verifies that the fallback chain mechanism is properly integrated.
-	// When there are multiple candidates AND a fallback chain is configured,
-	// the code attempts to use the fallback chain. Since we can't test the full
-	// fallback without real API keys, we test that the code correctly falls back
-	// to using agent.Provider when there's only one candidate.
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
-	// Set up fallback chain
 	al.fallback = providers.NewFallbackChain(providers.NewCooldownTracker())
 
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Use only ONE candidate - this ensures the code uses agent.Provider directly
-	// instead of going through the fallback chain
 	agent.Candidates = []providers.FallbackCandidate{
 		{Provider: "test-provider", Model: "test-model"},
 	}
 
-	// Use a provider that succeeds on first call
 	callCount := 0
 	agent.Provider = &llmRunnerMockLLMProvider{
 		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
@@ -1448,15 +1368,10 @@ func TestRunLLMIteration_FallbackChain(t *testing.T) {
 		t.Errorf("Expected 'Success response', got: %s", content)
 	}
 
-	// Verify the provider was called
 	if callCount != 1 {
 		t.Errorf("Expected provider to be called once, got %d calls", callCount)
 	}
 }
-
-// ============================================================================
-// Tests for updateToolContexts
-// ============================================================================
 
 func TestUpdateToolContexts(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
@@ -1464,7 +1379,6 @@ func TestUpdateToolContexts(t *testing.T) {
 
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Create mock contextual tools
 	messageTool := &llmRunnerMockContextualTool{name: "send_file"}
 	spawnTool := &llmRunnerMockContextualTool{name: "spawn"}
 	subagentTool := &llmRunnerMockContextualTool{name: "subagent"}
@@ -1473,10 +1387,8 @@ func TestUpdateToolContexts(t *testing.T) {
 	agent.Tools.Register(spawnTool)
 	agent.Tools.Register(subagentTool)
 
-	// Call updateToolContexts via toolCoordinator
 	al.toolCoordinator.updateToolContexts(agent, "test-channel", "test-chat-id", "test-session")
 
-	// Verify all tools received context
 	if !messageTool.setContextCalled {
 		t.Error("Expected send_file tool SetContext to be called")
 	}
@@ -1501,14 +1413,8 @@ func TestUpdateToolContexts_MissingTools(t *testing.T) {
 
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Don't register any contextual tools
-	// Should not panic
 	al.toolCoordinator.updateToolContexts(agent, "test-channel", "test-chat-id", "test-session")
 }
-
-// ============================================================================
-// Tests for modelForSession
-// ============================================================================
 
 func TestModelForSession_DefaultModel(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
@@ -1534,7 +1440,6 @@ func TestModelForSession_SessionOverride(t *testing.T) {
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 	agent.Model = "default-model"
 
-	// Set session-specific model
 	al.sessionModels.Store("test-session", "session-specific-model")
 
 	model := al.sessionManager.ModelForSession(agent, "test-session")
@@ -1553,7 +1458,6 @@ func TestModelForSession_EmptySessionKey(t *testing.T) {
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 	agent.Model = "default-model"
 
-	// Should return default model for empty session key
 	model := al.sessionManager.ModelForSession(agent, "")
 
 	if model != "default-model" {
@@ -1570,21 +1474,15 @@ func TestModelForSession_InvalidStoredValue(t *testing.T) {
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 	agent.Model = "default-model"
 
-	// Store non-string value
 	al.sessionModels.Store("test-session", 12345)
 
 	model := al.sessionManager.ModelForSession(agent, "test-session")
 
-	// Should fall back to default model
 	if model != "default-model" {
 		t.Errorf("Expected 'default-model' for invalid stored value, got: %s", model)
 	}
 	_ = runner
 }
-
-// ============================================================================
-// Tests for FormatProviderModel (standalone function in helpers.go)
-// ============================================================================
 
 func TestLLMRunnerFormatProviderModel(t *testing.T) {
 	tests := []struct {
@@ -1636,10 +1534,6 @@ func TestLLMRunnerFormatProviderModel(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// Tests for Verbose Mode
-// ============================================================================
-
 func TestRunLLMIteration_VerboseModeFull(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -1647,7 +1541,6 @@ func TestRunLLMIteration_VerboseModeFull(t *testing.T) {
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Set verbose mode to full
 	al.verboseManager.SetLevel("test-session", session.VerboseFull)
 
 	agent.Provider = &llmRunnerMockLLMProvider{
@@ -1690,8 +1583,6 @@ func TestRunLLMIteration_VerboseModeFull(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// In full verbose mode with tool calls, the code should execute without panic
-	// The actual bus messages are sent via al.bus which is a real MessageBus in this test
 }
 
 func TestRunLLMIteration_VerboseModeBasic(t *testing.T) {
@@ -1701,7 +1592,6 @@ func TestRunLLMIteration_VerboseModeBasic(t *testing.T) {
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Set verbose mode to basic
 	al.verboseManager.SetLevel("test-session", session.VerboseBasic)
 
 	agent.Provider = &llmRunnerMockLLMProvider{
@@ -1730,8 +1620,6 @@ func TestRunLLMIteration_VerboseModeBasic(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// In basic mode without tool calls, no verbose messages should be sent
-	// (since there are no tools being executed)
 }
 
 func TestRunLLMIteration_VerboseModeOff(t *testing.T) {
@@ -1741,7 +1629,6 @@ func TestRunLLMIteration_VerboseModeOff(t *testing.T) {
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Ensure verbose mode is off
 	al.verboseManager.SetLevel("test-session", session.VerboseOff)
 
 	agent.Provider = &llmRunnerMockLLMProvider{
@@ -1784,12 +1671,7 @@ func TestRunLLMIteration_VerboseModeOff(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// In verbose off mode, no verbose notifications should be sent
 }
-
-// ============================================================================
-// Tests for Tool Error Handling
-// ============================================================================
 
 func TestRunLLMIteration_ToolExecutionError(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
@@ -1822,7 +1704,6 @@ func TestRunLLMIteration_ToolExecutionError(t *testing.T) {
 		},
 	}
 
-	// Register a tool that returns an error
 	agent.Tools.Register(&llmRunnerMockCustomTool{
 		name: "failing_tool",
 		executeFunc: func(ctx context.Context, args map[string]interface{}) *tools.ToolResult {
@@ -1885,8 +1766,6 @@ func TestRunLLMIteration_ToolNotFound(t *testing.T) {
 		},
 	}
 
-	// Don't register the tool - it doesn't exist
-
 	messages := []providers.Message{
 		{Role: "system", Content: "System prompt"},
 		{Role: "user", Content: "Use nonexistent tool"},
@@ -1911,10 +1790,6 @@ func TestRunLLMIteration_ToolNotFound(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// Tests for SendResponse Option
-// ============================================================================
-
 func TestRunAgentLoop_SendResponseEnabled(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -1936,7 +1811,7 @@ func TestRunAgentLoop_SendResponseEnabled(t *testing.T) {
 		UserMessage:     "Hello",
 		DefaultResponse: "Default",
 		EnableSummary:   false,
-		SendResponse:    true, // Enable sending response
+		SendResponse:    true,
 		NoHistory:       false,
 	}
 
@@ -1947,8 +1822,6 @@ func TestRunAgentLoop_SendResponseEnabled(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// The response should be sent via bus when SendResponse is enabled
-	// Note: We can't easily verify this without a mock bus, but we verify no error occurs
 }
 
 func TestRunAgentLoop_SendResponseDisabled(t *testing.T) {
@@ -1972,7 +1845,7 @@ func TestRunAgentLoop_SendResponseDisabled(t *testing.T) {
 		UserMessage:     "Hello",
 		DefaultResponse: "Default",
 		EnableSummary:   false,
-		SendResponse:    false, // Disable sending response
+		SendResponse:    false,
 		NoHistory:       false,
 	}
 
@@ -1983,12 +1856,7 @@ func TestRunAgentLoop_SendResponseDisabled(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// The response should NOT be sent via bus when SendResponse is disabled
 }
-
-// ============================================================================
-// Tests for EnableSummary Option
-// ============================================================================
 
 func TestRunAgentLoop_EnableSummary(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
@@ -2010,7 +1878,7 @@ func TestRunAgentLoop_EnableSummary(t *testing.T) {
 		ChatID:          "test-chat-id",
 		UserMessage:     "Hello",
 		DefaultResponse: "Default",
-		EnableSummary:   true, // Enable summarization
+		EnableSummary:   true,
 		SendResponse:    false,
 		NoHistory:       false,
 	}
@@ -2022,13 +1890,7 @@ func TestRunAgentLoop_EnableSummary(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// Note: Actual summarization would require enough history to trigger it
-	// This test just verifies the option is passed through without error
 }
-
-// ============================================================================
-// Integration Tests
-// ============================================================================
 
 func TestLLMRunner_FullConversationFlow(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
@@ -2097,9 +1959,8 @@ func TestLLMRunner_FullConversationFlow(t *testing.T) {
 		t.Errorf("Expected analysis response, got: %s", response)
 	}
 
-	// Verify conversation history
 	history := agent.Sessions.GetHistory(opts.SessionKey)
-	if len(history) < 4 { // system + user + assistant with tool calls + tool result + final assistant
+	if len(history) < 4 {
 		t.Errorf("Expected at least 4 messages in history, got: %d", len(history))
 	}
 }
@@ -2184,7 +2045,6 @@ func TestLLMRunner_ContextCancellation(t *testing.T) {
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Provider that takes a long time
 	agent.Provider = &llmRunnerMockLLMProvider{
 		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
 			select {
@@ -2211,13 +2071,11 @@ func TestLLMRunner_ContextCancellation(t *testing.T) {
 		SendResponse: false,
 	}
 
-	// Create a context that will be cancelled
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	_, _, err := runner.runLLMIteration(ctx, agent, messages, opts)
 
-	// Should get a timeout error
 	if err == nil {
 		t.Error("Expected timeout error, got nil")
 	}
@@ -2296,47 +2154,19 @@ func TestLLMRunner_SessionModelPersistence(t *testing.T) {
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 	agent.Model = "default-model"
 
-	// Set a session-specific model
 	al.sessionModels.Store("user-session-1", "custom-model-v1")
 
-	// Verify the session model is used
 	model := al.sessionManager.ModelForSession(agent, "user-session-1")
 	if model != "custom-model-v1" {
 		t.Errorf("Expected 'custom-model-v1', got: %s", model)
 	}
 
-	// Verify default model is used for different session
 	model = al.sessionManager.ModelForSession(agent, "user-session-2")
 	if model != "default-model" {
 		t.Errorf("Expected 'default-model' for different session, got: %s", model)
 	}
 }
 
-// TestRunLLMIteration_IntraLoopCompaction verifies that proactive context
-// compaction triggers INSIDE the tool loop (between turns) and that the loop
-// CONTINUES running afterwards, instead of only compacting at loop exit
-// (maybeSummarize) or reactively on an LLM context-window error.
-//
-// Setup notes:
-//   - getSessionContextWindow resolves through getContextWindow, which falls
-//     back to 128000 when the model has no explicit provider config (the case
-//     for the test model). So the effective threshold is 128000*75/100 = 96000.
-//   - The mock tool returns 100K chars (~40K tokens) per invocation, so after
-//     ~3 tool-call iterations the accumulated context exceeds 96000 and the
-//     intra-loop compaction fires.
-//   - CompactLoopMessages needs len(messages) > keepLast+2 (=8) to compact and
-//     keeps system + summary + last 6 messages, so the message count stays
-//     bounded even as we keep adding 100K-char tool results.
-//   - The compaction summary call is detected by its distinctive prompt (a
-//     single user message containing "summarizing the conversation history of an AI agent").
-//
-// The test asserts that:
-//  1. a compaction summary call happened (compaction ran),
-//  2. the loop kept running for several more iterations AFTER the first
-//     compaction and still produced a final answer (it did not abort),
-//  3. the message count seen by the LLM stayed bounded (compaction prevented
-//     unbounded growth), and
-//  4. the native "compact" bus events were published.
 func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -2344,15 +2174,8 @@ func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Large tool result content (~100K chars ≈ 40K tokens) so that a few
-	// tool-call iterations exceed the 96000-token compaction threshold.
 	largeContent := strings.Repeat("X", 100000)
 
-	// Counters to distinguish regular LLM calls from the compaction summary
-	// call (which sends a single user message starting with "summarizing the
-	// conversation history of an AI agent"). regularCallsAtFirstSummary records how many
-	// regular iterations had run when compaction first fired, proving it
-	// happened mid-loop rather than at loop exit.
 	summaryCallDetected := false
 	summaryCalls := 0
 	regularCalls := 0
@@ -2361,7 +2184,6 @@ func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 
 	agent.Provider = &llmRunnerMockLLMProvider{
 		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
-			// Detect the compaction summary call made by CompactLoopMessages.
 			if len(messages) == 1 && messages[0].Role == "user" &&
 				strings.Contains(messages[0].Content, "summarizing the conversation history of an AI agent") {
 				summaryCalls++
@@ -2375,15 +2197,11 @@ func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 				}, nil
 			}
 
-			// Regular LLM call.
 			regularCalls++
 			if len(messages) > peakMsgCount {
 				peakMsgCount = len(messages)
 			}
 
-			// Keep requesting tool calls for the first several iterations so the
-			// context keeps growing and compaction fires; then return a final
-			// answer to end the loop cleanly.
 			if regularCalls <= 5 {
 				return &providers.LLMResponse{
 					Content: "",
@@ -2404,7 +2222,6 @@ func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 		},
 	}
 
-	// Register a tool that returns very large content.
 	agent.Tools.Register(&llmRunnerMockCustomTool{
 		name: "large_tool",
 		executeFunc: func(ctx context.Context, args map[string]interface{}) *tools.ToolResult {
@@ -2419,7 +2236,7 @@ func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 
 	opts := processOptions{
 		SessionKey:   "test-session",
-		Channel:      "native", // native channel publishes compact bus events
+		Channel:      "native",
 		ChatID:       "test-chat-id",
 		SendResponse: false,
 	}
@@ -2429,13 +2246,10 @@ func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// 1. Compaction must have run (a summary call was issued).
 	if !summaryCallDetected {
 		t.Fatal("Expected intra-loop compaction to fire (summary call detected), but it never did")
 	}
 
-	// 2. The loop must have CONTINUED after the first compaction and still
-	// produced a final answer (it did not abort because of compaction).
 	if content != "Final response" {
 		t.Errorf("Expected 'Final response', got: %q", content)
 	}
@@ -2449,9 +2263,6 @@ func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 		t.Errorf("Expected at least 2 regular iterations after the first compaction, got regularCalls=%d regularCallsAtFirstSummary=%d", regularCalls, regularCallsAtFirstSummary)
 	}
 
-	// 3. Message count seen by the LLM must stay bounded despite repeatedly
-	// adding 100K-char tool results (compaction prevents unbounded growth).
-	// keepLast=6 → compacted size is system+summary+continue+6 = 9; allow small margin.
 	if peakMsgCount > 9 {
 		t.Errorf("Expected compaction to keep message count bounded (<=9), got peak=%d", peakMsgCount)
 	}
@@ -2463,7 +2274,6 @@ func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 		t.Errorf("Expected at least 4 iterations (multiple tool-call turns + final), got: %d", iterations)
 	}
 
-	// 4. Native "compact" bus events must have been published.
 	compactExecuting := false
 	compactResult := false
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -2488,21 +2298,14 @@ func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// Tests for bounded empty-response retry and LLM loop timeout
-// ============================================================================
-
-// TestRunAgentLoop_EmptyResponseRetriedUntilRealResponse verifies that when
-// the provider returns empty content several times and then a real response,
-// the loop keeps retrying (no fixed bound) and returns the real response.
 func TestRunAgentLoop_EmptyResponseRetriedUntilRealResponse(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
 	runner := newLLMRunner(al)
-	runner.retryWait = instantRetryWait // avoid real backoff sleeps
+	runner.retryWait = instantRetryWait
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
-	agent.MaxIterations = 0 // unlimited: only a real response stops empty loops
+	agent.MaxIterations = 0
 
 	const emptiesBeforeReal = 5
 	emptyCalls := 0
@@ -2533,16 +2336,11 @@ func TestRunAgentLoop_EmptyResponseRetriedUntilRealResponse(t *testing.T) {
 	if response != "Finally a real response" {
 		t.Errorf("Expected the real response after empty retries, got: %q", response)
 	}
-	// emptyCalls consumed exactly emptiesBeforeReal before the real response.
 	if emptyCalls != emptiesBeforeReal {
 		t.Errorf("Expected %d empty responses before the real response, got %d", emptiesBeforeReal, emptyCalls)
 	}
 }
 
-// TestRunAgentLoop_AlwaysEmpty_BoundedByMaxIterations verifies that when the
-// provider ALWAYS returns empty, the loop keeps retrying but is still bounded
-// by MaxIterations — it terminates with the DefaultResponse only once the
-// iteration budget is exhausted (not via a fixed empty-retry cap).
 func TestRunAgentLoop_AlwaysEmpty_BoundedByMaxIterations(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -2550,7 +2348,7 @@ func TestRunAgentLoop_AlwaysEmpty_BoundedByMaxIterations(t *testing.T) {
 	runner := newLLMRunner(al)
 	runner.retryWait = instantRetryWait
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
-	agent.MaxIterations = 5 // finite: bounds the always-empty retry loop
+	agent.MaxIterations = 5
 
 	provider := &llmRunnerMockLLMProvider{
 		response: &providers.LLMResponse{Content: "", ToolCalls: []providers.ToolCall{}},
@@ -2574,15 +2372,11 @@ func TestRunAgentLoop_AlwaysEmpty_BoundedByMaxIterations(t *testing.T) {
 	if response != "Default fallback" {
 		t.Errorf("Expected default fallback response, got: %q", response)
 	}
-	// Chat called once per iteration until MaxIterations is exhausted.
 	if provider.callCount != agent.MaxIterations {
 		t.Errorf("Expected provider.Chat to be called %d times (once per iteration), got %d", agent.MaxIterations, provider.callCount)
 	}
 }
 
-// TestRunAgentLoop_EmptyBlipResetsCounter verifies that a single empty blip
-// mid-loop followed by a non-empty response resets the counter so a later
-// sequence of empties still gets the full retry budget.
 func TestRunAgentLoop_EmptyBlipResetsCounter(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -2590,21 +2384,18 @@ func TestRunAgentLoop_EmptyBlipResetsCounter(t *testing.T) {
 	runner := newLLMRunner(al)
 	runner.retryWait = instantRetryWait
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
-	agent.MaxIterations = 0 // unlimited
+	agent.MaxIterations = 0
 
 	calls := 0
 	agent.Provider = &llmRunnerMockLLMProvider{
 		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
 			calls++
-			// Blip: empty, then a real response, then empty... empty again.
 			switch calls {
 			case 1:
 				return &providers.LLMResponse{Content: "", ToolCalls: []providers.ToolCall{}}, nil
 			case 2:
 				return &providers.LLMResponse{Content: "real", ToolCalls: []providers.ToolCall{}}, nil
 			default:
-				// Not reached in this test: call 2 returns the real response and
-				// terminates the loop.
 				return &providers.LLMResponse{Content: "", ToolCalls: []providers.ToolCall{}}, nil
 			}
 		},
@@ -2620,23 +2411,15 @@ func TestRunAgentLoop_EmptyBlipResetsCounter(t *testing.T) {
 		SendResponse:    false,
 	}
 
-	// Sequence: call1 empty (retry), call2 real (break, counter reset would
-	// happen on a new loop but here we break). Because the loop breaks after
-	// the real response, we run a second turn to exercise the reset is not
-	// strictly observable here. This test asserts the loop still terminates.
 	response, err := runner.runAgentLoop(context.Background(), agent, opts)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
-	// The real response on call 2 should terminate the loop immediately.
 	if response != "real" {
 		t.Errorf("Expected 'real' response, got: %q", response)
 	}
 }
 
-// TestRunAgentLoop_EmptyResponseRetryWithinBudget verifies that empty retries
-// only happen while the retry budget is not exhausted, and that a tool-call
-// response stops the empty retry path (it must not be skipped).
 func TestRunAgentLoop_ToolCallThenEmpty(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -2644,9 +2427,8 @@ func TestRunAgentLoop_ToolCallThenEmpty(t *testing.T) {
 	runner := newLLMRunner(al)
 	runner.retryWait = instantRetryWait
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
-	agent.MaxIterations = 5 // finite: bounds the loop after the tool call
+	agent.MaxIterations = 5
 
-	// Register a real tool so tool-call execution works.
 	agent.Tools.Register(&llmRunnerMockCustomTool{
 		name: "my_tool",
 		executeFunc: func(ctx context.Context, args map[string]interface{}) *tools.ToolResult {
@@ -2659,7 +2441,6 @@ func TestRunAgentLoop_ToolCallThenEmpty(t *testing.T) {
 		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
 			calls++
 			if calls == 1 {
-				// First: a tool call (not empty) — must not enter empty-retry path.
 				return &providers.LLMResponse{
 					Content: "",
 					ToolCalls: []providers.ToolCall{
@@ -2667,7 +2448,6 @@ func TestRunAgentLoop_ToolCallThenEmpty(t *testing.T) {
 					},
 				}, nil
 			}
-			// Then always empty.
 			return &providers.LLMResponse{Content: "", ToolCalls: []providers.ToolCall{}}, nil
 		},
 	}
@@ -2689,32 +2469,20 @@ func TestRunAgentLoop_ToolCallThenEmpty(t *testing.T) {
 	if response != "Default" {
 		t.Errorf("Expected default fallback after tool call + MaxIterations exhausted, got: %q", response)
 	}
-	// 1 tool-call iteration + (MaxIterations-1) empty iterations.
 	if calls != agent.MaxIterations {
 		t.Errorf("Expected %d provider calls (bounded by MaxIterations), got %d", agent.MaxIterations, calls)
 	}
 }
 
-// TestRunAgentLoop_TinyTimeout verifies that when LLMLoopTimeoutMinutes is set
-// (via a blocking provider), the loop respects the timeout by checking the
-// context deadline. LLMLoopTimeoutMinutes is in minutes, so we use the
-// smallest possible value (1 minute) with a provider that blocks until the
-// context is cancelled; the loop must return a timeout error.
 func TestRunAgentLoop_TinyTimeout(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
 	runner := newLLMRunner(al)
-	// LLMLoopTimeoutMinutes has minute granularity by contract, so exercising
-	// the real timeout would cost a minute of wall clock. The unit is
-	// injectable for exactly this: the timeout still fires through the real
-	// context machinery, just on a compressed scale.
 	runner.loopTimeoutUnit = 200 * time.Millisecond
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
-	agent.LLMLoopTimeoutMinutes = 1 // minimum granularity (whole minutes)
+	agent.LLMLoopTimeoutMinutes = 1
 
-	// Provider blocks until the context is cancelled (i.e. the loop timeout
-	// fires) and then returns, so the loop sees ctx.Err() == DeadlineExceeded.
 	agent.Provider = &llmRunnerMockLLMProvider{
 		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
 			<-ctx.Done()
@@ -2739,13 +2507,9 @@ func TestRunAgentLoop_TinyTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected a timeout error, got nil")
 	}
-	// The user-facing message reports the configured minutes, not the
-	// injected unit — that mapping is the point of this test.
 	if !strings.Contains(err.Error(), "LLM loop exceeded 1 minute timeout") {
 		t.Errorf("Expected timeout error message, got: %v", err)
 	}
-	// The provider blocks until cancellation, so the loop cannot return before
-	// the (compressed) timeout fires.
 	if elapsed < 150*time.Millisecond {
 		t.Errorf("Expected the loop to wait for the timeout, completed in %v", elapsed)
 	}
@@ -2754,9 +2518,6 @@ func TestRunAgentLoop_TinyTimeout(t *testing.T) {
 	}
 }
 
-// TestRunAgentLoop_TimeoutContextDerived verifies (deterministically) that
-// runAgentLoop derives a timeout context when LLMLoopTimeoutMinutes > 0, by
-// having the provider inspect the ctx deadline and report it.
 func TestRunAgentLoop_TimeoutContextDerived(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -2801,15 +2562,13 @@ func TestRunAgentLoop_TimeoutContextDerived(t *testing.T) {
 	}
 }
 
-// TestRunAgentLoop_NoTimeoutWhenDisabled verifies that when
-// LLMLoopTimeoutMinutes == 0 (default), no deadline is derived on the ctx.
 func TestRunAgentLoop_NoTimeoutWhenDisabled(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
-	agent.LLMLoopTimeoutMinutes = 0 // disabled
+	agent.LLMLoopTimeoutMinutes = 0
 
 	deadlineSeen := make(chan bool, 1)
 	agent.Provider = &llmRunnerMockLLMProvider{
@@ -2845,10 +2604,6 @@ func TestRunAgentLoop_NoTimeoutWhenDisabled(t *testing.T) {
 	}
 }
 
-// TestRunAgentLoop_AlwaysEmpty_BoundedByEmptyLimit verifies the core fix for
-// the "session won't continue" bug: with unlimited MaxIterations (0) and a
-// provider that ALWAYS returns blank content, the loop must NOT spin forever.
-// It ends after maxConsecutiveEmptyResponses retries with the DefaultResponse.
 func TestRunAgentLoop_AlwaysEmpty_BoundedByEmptyLimit(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -2856,7 +2611,7 @@ func TestRunAgentLoop_AlwaysEmpty_BoundedByEmptyLimit(t *testing.T) {
 	runner := newLLMRunner(al)
 	runner.retryWait = instantRetryWait
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
-	agent.MaxIterations = 0 // unlimited: only the empty-retry cap can stop it
+	agent.MaxIterations = 0
 
 	provider := &llmRunnerMockLLMProvider{
 		response: &providers.LLMResponse{Content: "", ToolCalls: []providers.ToolCall{}},
@@ -2887,12 +2642,10 @@ func TestRunAgentLoop_AlwaysEmpty_BoundedByEmptyLimit(t *testing.T) {
 		if response != "Default fallback" {
 			t.Errorf("Expected default fallback, got: %q", response)
 		}
-		// 1 initial call + maxConsecutiveEmptyResponses retries.
 		want := maxConsecutiveEmptyResponses + 1
 		if provider.callCount != want {
 			t.Errorf("Expected %d provider calls (bounded by empty limit), got %d", want, provider.callCount)
 		}
-		// No blank assistant messages must have been persisted.
 		for _, m := range agent.Sessions.GetHistory("test-session") {
 			if m.Role == "assistant" && strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0 {
 				t.Errorf("blank assistant message persisted: %+v", m)
@@ -2903,13 +2656,6 @@ func TestRunAgentLoop_AlwaysEmpty_BoundedByEmptyLimit(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// stripContentParts — generalized image/video content stripping
-// ============================================================================
-
-// stripTestMessages builds a message slice containing one message of each
-// interesting shape: plain text, a mixed text/image/video message, and a
-// message with no ContentParts.
 func stripTestMessages() []providers.Message {
 	return []providers.Message{
 		{Role: "system", Content: "System prompt"},
@@ -2922,7 +2668,6 @@ func stripTestMessages() []providers.Message {
 	}
 }
 
-// partTypes collects the Type of every content part across all messages.
 func partTypes(messages []providers.Message) []string {
 	var out []string
 	for _, msg := range messages {
@@ -2940,7 +2685,6 @@ func TestStripContentParts_DropsVideoOnly(t *testing.T) {
 	if !reflect.DeepEqual(types, want) {
 		t.Errorf("part types = %v, want %v", types, want)
 	}
-	// Messages without ContentParts keep their text content.
 	if got[0].Content != "System prompt" || got[2].Content != "done" {
 		t.Errorf("plain messages altered: %q / %q", got[0].Content, got[2].Content)
 	}
@@ -2967,7 +2711,6 @@ func TestStripContentParts_DropsBoth(t *testing.T) {
 func TestStripContentParts_NeitherFlagIsIdentity(t *testing.T) {
 	msgs := stripTestMessages()
 	got := stripContentParts(msgs, false, false)
-	// Identity: no allocation, same backing array.
 	if &got[0] != &msgs[0] {
 		t.Error("expected input returned unchanged (same backing array) when no flags are set")
 	}
@@ -2993,8 +2736,6 @@ func TestStripContentParts_PreservesNonMediaParts(t *testing.T) {
 	}
 }
 
-// TestStripImageContentParts_Wrapper locks the legacy single-flag helper: it
-// must drop image_url parts while leaving video_url parts alone.
 func TestStripImageContentParts_Wrapper(t *testing.T) {
 	got := stripImageContentParts(stripTestMessages())
 	types := partTypes(got)
@@ -3004,20 +2745,6 @@ func TestStripImageContentParts_Wrapper(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// T4: request image/byte budget in maybeCompactLoopContext.
-// ============================================================================
-
-// TestMaybeCompactLoopContext_NoContextWindowStillBudgetsImages verifies the
-// image/byte budget prelude. Note there is no such thing as "no context
-// window configured": getContextWindow always resolves to at least the hard
-// 128000 default. What this test pins is that the budget prelude runs and
-// the eviction alone brings a ~12 MB payload (6 base64 images) under the
-// transport budget WITHOUT charging a summarization call: the token estimate
-// stays far below the 75% compaction threshold because image parts are
-// charged a fixed 2500 chars each after T3, so only the byte-eviction prelude
-// can act. Before T4 the oversized input was shipped to the transport
-// untouched.
 func TestMaybeCompactLoopContext_NoContextWindowStillBudgetsImages(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -3055,25 +2782,10 @@ func TestMaybeCompactLoopContext_NoContextWindowStillBudgetsImages(t *testing.T)
 	}
 }
 
-// TestMaybeCompactLoopContext_ByteThresholdTriggersCompaction verifies the
-// escalation path: the payload is over the byte budget even after image
-// eviction (a ~9 MiB text body; the token threshold is unreachable because
-// the context window is huge), so the guard must fall back to LLM compaction
-// exactly once and return the compacted slice.
 func TestMaybeCompactLoopContext_ByteThresholdTriggersCompaction(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
-	// Huge configured context window, set where getSessionContextWindow
-	// actually looks: it resolves getContextWindow(cfg, model, provider) FIRST
-	// and only falls back to the agent's ContextWindow field when that yields
-	// 0 — but getContextWindow hard-defaults to 128000 for unknown models, so
-	// the agent field is unreachable here. Configure the model in the provider
-	// config instead (GetNamed returns a value copy → mutate the map entry).
-	// The window must make the 75% token threshold unreachable: the ~9 MiB
-	// text body estimates ≈3.78M tokens (chars×2/5), so W×0.75 must exceed
-	// that → W ≥ ~5.04M. 10M leaves the token branch provably inert while the
-	// byte estimate (9.44 MiB) still exceeds the 8 MiB budget.
 	cfg := al.cfg()
 	if cfg.Providers == nil {
 		cfg.Providers = &config.ProvidersConfig{}
@@ -3081,16 +2793,12 @@ func TestMaybeCompactLoopContext_ByteThresholdTriggersCompaction(t *testing.T) {
 	if cfg.Providers.Named == nil {
 		cfg.Providers.Named = map[string]config.NamedProviderConfig{}
 	}
-	prov := cfg.Providers.Named["test-provider"] // GetNamed lowercases the name
+	prov := cfg.Providers.Named["test-provider"]
 	prov.Models = map[string]config.ProviderModelConfig{
 		"test-model": {ContextWindow: 10_000_000},
 	}
 	cfg.Providers.Named["test-provider"] = prov
 
-	// Anti-hollowness guard: assert the lever really took effect in the exact
-	// resolution path the SUT uses, so this test can never go silently hollow
-	// again (it previously mutated the agent's ContextWindow field, which
-	// getContextWindow never consults).
 	if w := al.getSessionContextWindow("byte-threshold-session"); w < 8_000_000 {
 		t.Fatalf("test setup: effective context window = %d, the byte trigger cannot be isolated", w)
 	}
@@ -3111,9 +2819,6 @@ func TestMaybeCompactLoopContext_ByteThresholdTriggersCompaction(t *testing.T) {
 		},
 	}
 
-	// > keepLast+2 messages (so CompactLoopMessages can act), one small image
-	// part that fits the count/size caps, and a ~9 MiB text body: eviction
-	// cannot bring the total under budget, only compaction can.
 	in := []providers.Message{{Role: "system", Content: "System prompt"}}
 	for i := 0; i < 6; i++ {
 		in = append(in, providers.Message{Role: "user", Content: fmt.Sprintf("filler %d", i)})

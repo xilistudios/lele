@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// TestFormatBasicToolMessage_UpdateMemory: update_memory must render through
-// its own case (mode + content preview) instead of falling back to the
-// truncated raw-JSON args preview of the default branch (review finding L4).
 func TestFormatBasicToolMessage_UpdateMemory(t *testing.T) {
 	got := formatBasicToolMessage("update_memory", map[string]interface{}{
 		"content": "persisted the fix\nround",
@@ -20,7 +17,6 @@ func TestFormatBasicToolMessage_UpdateMemory(t *testing.T) {
 		t.Errorf("expected no raw-JSON keys in the rendered message, got: %q", got)
 	}
 
-	// Default mode when the arg is absent, replace when present.
 	def := formatBasicToolMessage("update_memory", map[string]interface{}{
 		"content": "x",
 	})
@@ -35,7 +31,6 @@ func TestFormatBasicToolMessage_UpdateMemory(t *testing.T) {
 		t.Errorf("expected replace mode in: %q", rep)
 	}
 
-	// Long/multi-line content is sanitized and clamped to MaxBasicMessageSize.
 	long := formatBasicToolMessage("update_memory", map[string]interface{}{
 		"content": strings.Repeat("y", 200),
 		"mode":    "append",

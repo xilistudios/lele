@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -16,9 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// createGroupTurnTestHarness sets up an AgentLoop with a registered test agent
-// whose provider returns the given response. Returns the llmRunnerImpl, the
-// registered agent instance, and a cleanup function.
 func createGroupTurnTestHarness(t *testing.T, response *providers.LLMResponse) (*llmRunnerImpl, *AgentInstance, func()) {
 	t.Helper()
 
@@ -26,7 +17,6 @@ func createGroupTurnTestHarness(t *testing.T, response *providers.LLMResponse) (
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 	agent.Provider = &llmRunnerMockLLMProvider{response: response}
 
-	// Register agent in the registry (same-package access to unexported map).
 	al.registry.mu.Lock()
 	al.registry.agents["test-agent"] = agent
 	al.registry.mu.Unlock()
@@ -36,9 +26,6 @@ func createGroupTurnTestHarness(t *testing.T, response *providers.LLMResponse) (
 	return lr, agent, cleanup
 }
 
-// TestRunGroupTurn_BasicExecution verifies that runGroupTurn resolves the agent,
-// calls the LLM with the correct system/user messages, and returns content and
-// token usage from the response.
 func TestRunGroupTurn_BasicExecution(t *testing.T) {
 	response := &providers.LLMResponse{
 		Content:   "hello from group",
@@ -68,8 +55,6 @@ func TestRunGroupTurn_BasicExecution(t *testing.T) {
 	}
 }
 
-// TestRunGroupTurn_InstructionOnly verifies that when Transcript is empty, the
-// user message contains only the instruction (no transcript prefix).
 func TestRunGroupTurn_InstructionOnly(t *testing.T) {
 	var capturedMessages []providers.Message
 	response := &providers.LLMResponse{
@@ -80,7 +65,6 @@ func TestRunGroupTurn_InstructionOnly(t *testing.T) {
 	lr, _, cleanup := createGroupTurnTestHarness(t, response)
 	defer cleanup()
 
-	// Replace provider with one that captures messages.
 	lr.al.registry.mu.Lock()
 	lr.al.registry.agents["test-agent"].Provider = &llmRunnerMockLLMProvider{
 		onChatCalled: func(_ context.Context, messages []providers.Message, _ []providers.ToolDefinition, _ string, _ map[string]interface{}) (*providers.LLMResponse, error) {
@@ -109,9 +93,6 @@ func TestRunGroupTurn_InstructionOnly(t *testing.T) {
 	}
 }
 
-// TestRunGroupTurn_MaxTokensOverride verifies that a non-zero MaxTokens in the
-// request is applied to the LLM call options without mutating the original
-// AgentInstance.
 func TestRunGroupTurn_MaxTokensOverride(t *testing.T) {
 	var capturedMaxTokens int
 	response := &providers.LLMResponse{
@@ -151,16 +132,11 @@ func TestRunGroupTurn_MaxTokensOverride(t *testing.T) {
 	if capturedMaxTokens != 999 {
 		t.Errorf("LLM received max_tokens=%d, want 999", capturedMaxTokens)
 	}
-	// Original agent must not be mutated.
 	if agent.MaxTokens != originalMaxTokens {
 		t.Errorf("original agent MaxTokens changed from %d to %d", originalMaxTokens, agent.MaxTokens)
 	}
 }
 
-// TestRunGroupTurn_SemaphoreIsolation verifies that the semaphore key
-// "group:<groupID>:<speaker>" isolates group turns from each other: a busy
-// semaphore for a different key does NOT block a runGroupTurn with a different
-// speaker.
 func TestRunGroupTurn_SemaphoreIsolation(t *testing.T) {
 	response := &providers.LLMResponse{
 		Content:   "proceeded",
@@ -169,15 +145,12 @@ func TestRunGroupTurn_SemaphoreIsolation(t *testing.T) {
 	lr, _, cleanup := createGroupTurnTestHarness(t, response)
 	defer cleanup()
 
-	// Occupy the semaphore for a DIFFERENT session key.
 	otherKey := "group:g1:OTHER"
 	sem, _ := lr.al.sessionProcessing.LoadOrStore(otherKey, make(chan struct{}, 1))
 	semCh := sem.(chan struct{})
-	semCh <- struct{}{} // fill the semaphore — otherKey is now "busy"
+	semCh <- struct{}{}
 	defer func() { <-semCh }()
 
-	// runGroupTurn with Speaker="test-agent" uses key "group:g1:test-agent",
-	// which is different from "group:g1:OTHER" and must NOT block.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -195,8 +168,6 @@ func TestRunGroupTurn_SemaphoreIsolation(t *testing.T) {
 	}
 }
 
-// TestRunGroupTurn_AgentNotFound verifies that requesting a speaker that does
-// not exist in the registry returns a descriptive error.
 func TestRunGroupTurn_AgentNotFound(t *testing.T) {
 	response := &providers.LLMResponse{
 		Content:   "irrelevant",
@@ -216,9 +187,6 @@ func TestRunGroupTurn_AgentNotFound(t *testing.T) {
 	}
 }
 
-// TestRunGroupTurn_ContextCancelled verifies that runGroupTurn respects context
-// cancellation when the semaphore cannot be acquired (i.e. the same session is
-// already busy).
 func TestRunGroupTurn_ContextCancelled(t *testing.T) {
 	response := &providers.LLMResponse{
 		Content:   "should not reach",
@@ -227,11 +195,10 @@ func TestRunGroupTurn_ContextCancelled(t *testing.T) {
 	lr, _, cleanup := createGroupTurnTestHarness(t, response)
 	defer cleanup()
 
-	// Occupy the semaphore for the SAME session key that runGroupTurn will use.
 	sessionKey := "group:g1:test-agent"
 	sem, _ := lr.al.sessionProcessing.LoadOrStore(sessionKey, make(chan struct{}, 1))
 	semCh := sem.(chan struct{})
-	semCh <- struct{}{} // block the semaphore
+	semCh <- struct{}{}
 	defer func() { <-semCh }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -248,8 +215,6 @@ func TestRunGroupTurn_ContextCancelled(t *testing.T) {
 	}
 }
 
-// TestRunGroupTurn_TranscriptIncluded verifies that when Transcript is non-empty,
-// the user message contains the transcript prefix before the instruction.
 func TestRunGroupTurn_TranscriptIncluded(t *testing.T) {
 	var capturedMessages []providers.Message
 	response := &providers.LLMResponse{

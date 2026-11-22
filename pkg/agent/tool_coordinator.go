@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -25,54 +19,25 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// toolCoordinator is an internal interface for tool coordination operations.
 type toolCoordinator interface {
 	updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string)
 	stopAllSubagents() int
 	stopSessionSubagents(sessionKey string) int
-	// cancelSessionTree stops every running resource owned by a session:
-	// its subagents, its group runs and its background processes. It returns
-	// the counts of each so callers can report what was cancelled.
 	cancelSessionTree(sessionKey string) (subagents, groups, procs int)
-	// cancelRemovedSubagents stops the running work of agents that left the
-	// config and drops their managers. It is the reload path's replacement for
-	// the old blanket cancelAll, which killed every subagent in the process.
 	cancelRemovedSubagents(liveAgentIDs []string) int
 	cancelSession(sessionKey string)
 	listRunningSubagentTasks() []*tools.SubagentTask
-	// snapshotRunningSubagents filters listRunningSubagentTasks down to the
-	// tasks owned by a session (alias-aware), for the resume checkpoint.
 	snapshotRunningSubagents(sessionKey string) []*tools.SubagentTask
 	getSubagentTask(taskID string) (*tools.SubagentTask, bool)
-	// claimSubagentResultForInjection is the injector's single atomic decision
-	// point: it claims the task's result for the parent's LLM context, or
-	// reports that another party (a wait_for_subagent waiter, or an earlier
-	// claim) owns it.
 	claimSubagentResultForInjection(taskID string) bool
 	stopSubagentTask(taskID string) bool
 	continueSubagentTask(ctx context.Context, sessionKey, taskID, guidance string) (string, error)
-	// renderSubagentLedgerDigest renders the "## Subagent Tasks" system-prompt
-	// section for one agent's session, or "" when the session has no subagent
-	// tasks. Zero I/O: it runs on every turn and on every context-usage
-	// refresh (C5/C11/D2).
 	renderSubagentLedgerDigest(agentID, sessionKey string) string
 	GetStartupInfo() map[string]interface{}
 	RegisterTool(tool tools.Tool)
-	// syncMCPTools re-evaluates every live agent's MCP server set after
-	// startup or a config reload: manager lifecycle, the discovery tools
-	// (list_mcp_tools + get_mcp_tool) and the "## MCP Servers" prompt section
-	// (see mcp.go).
 	syncMCPTools()
-	// closeMCPManagers closes every live MCP manager exactly once
-	// (idempotent, nil-safe): the teardown path for stdio children.
 	closeMCPManagers() error
-	// sessionTools returns the tool registry a session must use to build tool
-	// definitions and execute calls: the agent's base registry, or a
-	// session-scoped layer over it while MCP servers are configured (so tools
-	// loaded with get_mcp_tool never leak into other sessions).
 	sessionTools(agent *AgentInstance, sessionKey string) *tools.ToolRegistry
-	// dropSessionTools forgets a session's scoped layer (its history was
-	// cleared, so the MCP tools it had loaded go too).
 	dropSessionTools(sessionKey string)
 	GetSubagents() map[string]*tools.SubagentManager
 	getBackgroundExecs(includeCompleted bool) []BackgroundExecInfo
@@ -80,19 +45,16 @@ type toolCoordinator interface {
 	stopBackgroundExec(id string) error
 }
 
-// toolCoordinatorImpl implements the toolCoordinator interface for handling
-// tool context updates, subagent lifecycle management, and tool registration.
 type toolCoordinatorImpl struct {
 	al          *AgentLoop
-	subagents   map[string]*tools.SubagentManager          // Owned by coordinator
-	bgManagers  map[string]*tools.BackgroundProcessManager // Keyed by agentID
-	mcpManagers *mcpManagerSet                             // Per-agent MCP managers, keyed by agentID (mcp.go)
+	subagents   map[string]*tools.SubagentManager
+	bgManagers  map[string]*tools.BackgroundProcessManager
+	mcpManagers *mcpManagerSet
 	registry    *AgentRegistry
 	bus         *bus.MessageBus
 	approvalMgr *channels.ApprovalManager
 }
 
-// newToolCoordinator creates a new tool coordinator instance.
 func newToolCoordinator(al *AgentLoop) *toolCoordinatorImpl {
 	return &toolCoordinatorImpl{
 		al:          al,
@@ -105,11 +67,6 @@ func newToolCoordinator(al *AgentLoop) *toolCoordinatorImpl {
 	}
 }
 
-// newToolCoordinatorWithSubagents creates a tool coordinator with existing
-// subagents, background-process managers and MCP managers. mcpManagers may be
-// nil (fresh set, cwd captured now); ReloadRegistry passes the previous
-// coordinator's set so live MCP connections survive a reload instead of being
-// orphaned.
 func newToolCoordinatorWithSubagents(al *AgentLoop, subagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager, mcpManagers *mcpManagerSet) *toolCoordinatorImpl {
 	if mcpManagers == nil {
 		mcpManagers = newMCPManagerSet()
@@ -125,12 +82,6 @@ func newToolCoordinatorWithSubagents(al *AgentLoop, subagents map[string]*tools.
 	}
 }
 
-// updateToolContexts updates the context for all tools that implement ContextualTool.
-// It iterates over all registered tools instead of hardcoding tool names.
-//
-// It walks the SESSION's view (see sessionTools), so tools the session loaded
-// through get_mcp_tool get their context too — and a tool loaded by another
-// session is never touched from here.
 func (tc *toolCoordinatorImpl) updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string) {
 	registry := tc.sessionTools(agent, sessionKey)
 	if registry == nil {
@@ -142,16 +93,12 @@ func (tc *toolCoordinatorImpl) updateToolContexts(agent *AgentInstance, channel,
 			continue
 		}
 
-		// Set session context for tools implementing SessionAwareTool interface
-		// (provides channel, chatID, AND sessionKey)
 		if st, ok := tool.(tools.SessionAwareTool); ok {
 			st.SetSessionContext(channel, chatID, sessionKey)
 		} else if ct, ok := tool.(tools.ContextualTool); ok {
-			// Fallback: set context for tools implementing only ContextualTool
 			ct.SetContext(channel, chatID)
 		}
 
-		// Configure exec tool with verbose level and feedback callback
 		if et, ok := tool.(*tools.ExecTool); ok {
 			verboseLevel := tc.al.verboseManager.GetLevel(sessionKey)
 			et.SetVerbose(verboseLevel)
@@ -167,9 +114,6 @@ func (tc *toolCoordinatorImpl) updateToolContexts(agent *AgentInstance, channel,
 	}
 }
 
-// stopAllSubagents stops all running subagents and returns the count of stopped tasks.
-// It is for process shutdown only: a config reload must not use it (see
-// cancelRemovedSubagents).
 func (tc *toolCoordinatorImpl) stopAllSubagents() int {
 	totalStopped := 0
 	for _, manager := range tc.subagents {
@@ -181,12 +125,6 @@ func (tc *toolCoordinatorImpl) stopAllSubagents() int {
 	return totalStopped
 }
 
-// sessionCancellationKeys returns the distinct identities a session can be
-// referenced by when matching owned resources: the key as given (typically
-// the resolved/active session key) and its alias resolution. Task and process
-// matching uses tools.SessionKeysRelated, which bridges the remaining format
-// differences ("native:<uuid>" vs "<uuid>", "telegram:123" vs
-// "agent:main:telegram:123").
 func (tc *toolCoordinatorImpl) sessionCancellationKeys(sessionKey string) []string {
 	if sessionKey == "" {
 		return nil
@@ -198,14 +136,6 @@ func (tc *toolCoordinatorImpl) sessionCancellationKeys(sessionKey string) []stri
 	return keys
 }
 
-// stopSessionSubagents stops running subagents for a specific session and
-// seals every task it owns so none of them can resume the parent.
-// A task belongs to the session when its spawn-time runtime key, its
-// routing-derived origin key, or its child session key is related to any of
-// the session's identities (see tools.TaskBelongsToSession). This replaces
-// the pre-#230 equality comparison that never matched because
-// OriginSessionKey ("<channel>:<chatID>") and the runtime key can use
-// different forms of the same session.
 func (tc *toolCoordinatorImpl) stopSessionSubagents(sessionKey string) int {
 	keys := tc.sessionCancellationKeys(sessionKey)
 	totalStopped := 0
@@ -216,20 +146,6 @@ func (tc *toolCoordinatorImpl) stopSessionSubagents(sessionKey string) int {
 					if manager.StopTask(task.ID) {
 						totalStopped++
 					}
-					// A stopped task must never resume the parent: its
-					// completion callback still fires with "Task cancelled
-					// during execution" (subagent_runner.go), and injecting
-					// that would resurrect the session the user just stopped.
-					// Seal EVERY owned task, not only the ones StopTask
-					// actually stopped — a task still in `pending` (waiting on
-					// dependencies), one that already finished but whose
-					// completion callback has not run yet, or one whose
-					// StopTask lost a race must not inject either.
-					//
-					// This lives here, in the shared leaf all three stop entry
-					// points funnel through (the /stop command, /stop as an
-					// inbound message, and StopAgent from the TUI's ESC key /
-					// the REST stop endpoint), so they cannot disagree.
 					manager.SealResult(task.ID)
 				}
 			}
@@ -238,13 +154,6 @@ func (tc *toolCoordinatorImpl) stopSessionSubagents(sessionKey string) int {
 	return totalStopped
 }
 
-// cancelSessionTree stops every running resource owned by a session: its
-// subagents (and transitively their child subagents and background
-// processes, which are attributed to the spawner's session), its group runs,
-// and its background exec processes. sessionKey is expected to be the
-// resolved key, but alias resolution is applied defensively here. Callers
-// still need to cancel the session's own in-flight turn separately
-// (al.cancelSession).
 func (tc *toolCoordinatorImpl) cancelSessionTree(sessionKey string) (subagents, groups, procs int) {
 	if sessionKey == "" {
 		return 0, 0, 0
@@ -253,20 +162,12 @@ func (tc *toolCoordinatorImpl) cancelSessionTree(sessionKey string) (subagents, 
 	subagents = tc.stopSessionSubagents(sessionKey)
 	keys := tc.sessionCancellationKeys(sessionKey)
 
-	// Group runs are keyed by the origin chat/session key they were started
-	// with; stop once per identity (a stopped group cannot be counted twice
-	// because StopByOrigin only matches running groups).
 	if gm := tc.al.GroupManager(); gm != nil {
 		for _, k := range keys {
 			groups += gm.StopByOrigin("", k)
 		}
 	}
 
-	// Background processes track their owning session at spawn time; the
-	// relation also covers subagent-owned processes ("{owner}:{task_id}").
-	// Every session identity is tried (alias first, then resolved): a process
-	// stopped under one identity cannot be counted twice because
-	// StopForSession only matches running processes.
 	for _, mgr := range tc.bgManagers {
 		if mgr == nil {
 			continue
@@ -279,19 +180,6 @@ func (tc *toolCoordinatorImpl) cancelSessionTree(sessionKey string) (subagents, 
 	return subagents, groups, procs
 }
 
-// cancelRemovedSubagents cancels the running work that belongs to agents which
-// are no longer in the config, and drops their managers. It replaces the old
-// blanket cancelAll on the reload path: a config reload used to kill every
-// subagent, group run and background process in the process — including those
-// of agents whose configuration had not changed — which is what users observed
-// as subagents being cancelled "spontaneously". Live agents keep their running
-// tasks untouched; recreated agents keep them too, because
-// registerSharedToolsForAgent now re-uses their manager.
-//
-// For each removed agent it stops: its subagent tasks, every running group it
-// participates in (such a group has lost a speaker and can never finish
-// correctly), and its background processes (their owning toolset is gone).
-// Returns the number of subagent tasks stopped.
 func (tc *toolCoordinatorImpl) cancelRemovedSubagents(liveAgentIDs []string) int {
 	live := make(map[string]bool, len(liveAgentIDs))
 	for _, id := range liveAgentIDs {
@@ -305,16 +193,8 @@ func (tc *toolCoordinatorImpl) cancelRemovedSubagents(liveAgentIDs []string) int
 		}
 		if manager != nil {
 			stopped += manager.StopAll()
-			// The manager leaves the process together with its agent: stop its
-			// retention sweeper too, or the goroutine would keep pruning a task
-			// map nothing can reach anymore (its stop is idempotent, waits for
-			// the goroutine to exit and gives up after
-			// tools.DefaultRetentionStopGrace).
 			manager.StopRetentionCleanup()
 		}
-		// A running group that counted this agent among its speakers can never
-		// run as configured again (the registry can no longer resolve it), so
-		// stop it instead of letting it degrade or error mid-run.
 		if tc.al != nil && tc.al.groupManager != nil {
 			tc.al.groupManager.StopByAgent(agentID)
 		}
@@ -327,12 +207,10 @@ func (tc *toolCoordinatorImpl) cancelRemovedSubagents(liveAgentIDs []string) int
 	return stopped
 }
 
-// cancelSession cancels any active processing for a specific session
 func (tc *toolCoordinatorImpl) cancelSession(sessionKey string) {
 	tc.al.cancelSession(sessionKey)
 }
 
-// listRunningSubagentTasks lists all running subagent tasks.
 func (tc *toolCoordinatorImpl) listRunningSubagentTasks() []*tools.SubagentTask {
 	tasks := make([]*tools.SubagentTask, 0)
 	for _, manager := range tc.subagents {
@@ -345,7 +223,6 @@ func (tc *toolCoordinatorImpl) listRunningSubagentTasks() []*tools.SubagentTask 
 	return tasks
 }
 
-// getSubagentTask gets a specific subagent task by ID.
 func (tc *toolCoordinatorImpl) getSubagentTask(taskID string) (*tools.SubagentTask, bool) {
 	for _, manager := range tc.subagents {
 		if task, ok := manager.GetTask(taskID); ok {
@@ -355,23 +232,15 @@ func (tc *toolCoordinatorImpl) getSubagentTask(taskID string) (*tools.SubagentTa
 	return nil, false
 }
 
-// claimSubagentResultForInjection claims a task's terminal result for the
-// parent's LLM context so it can be injected as a system inbound message.
-//
-// Returns false when another party already owns the result: a wait_for_subagent
-// waiter is registered (the parent will read the result in-turn, so injecting
-// would double-report it), the result was already claimed, or no manager knows
-// the task (with no task there is no dedup, so injecting would be unguarded).
 func (tc *toolCoordinatorImpl) claimSubagentResultForInjection(taskID string) bool {
 	for _, manager := range tc.subagents {
 		if _, ok := manager.GetTask(taskID); ok {
 			return manager.ClaimResultForInjection(taskID)
 		}
 	}
-	return false // Task not found in any manager
+	return false
 }
 
-// stopSubagentTask stops a specific subagent task.
 func (tc *toolCoordinatorImpl) stopSubagentTask(taskID string) bool {
 	for _, manager := range tc.subagents {
 		if manager.StopTask(taskID) {
@@ -381,7 +250,6 @@ func (tc *toolCoordinatorImpl) stopSubagentTask(taskID string) bool {
 	return false
 }
 
-// continueSubagentTask continues a paused subagent with fresh guidance.
 func (tc *toolCoordinatorImpl) continueSubagentTask(ctx context.Context, sessionKey, taskID, guidance string) (string, error) {
 	for _, manager := range tc.subagents {
 		task, ok := manager.GetTask(taskID)
@@ -399,54 +267,23 @@ func (tc *toolCoordinatorImpl) continueSubagentTask(ctx context.Context, session
 	return "", fmt.Errorf("subagent task not found: %s", taskID)
 }
 
-// subagentLedgerDigestRows is the maximum number of rows the digest renders.
-// The section is rebuilt on every turn, so it must stay small and BOUNDED: the
-// worst case is 8 rows of (200-byte label + 200-byte summary + the fixed row
-// scaffolding), which measures 3859 bytes — about 4 KB, not the ~1 KB a typical
-// 8-row section takes. The bound is what matters on the per-turn path; the full
-// history stays reachable through list_active_subagents (plan §11 Q2).
 const subagentLedgerDigestRows = 8
 
-// subagentLedgerDigestFieldBytes bounds the two model-authored fields of a
-// digest row (label and summary). The section is bounded per row by this cap, so
-// one unbounded summary cannot blow the per-turn budget; 200 bytes is the same
-// bound the paginated tool applies to the same fields.
 const subagentLedgerDigestFieldBytes = 200
 
-// subagentLedgerDigestHeader introduces the section. It states the compaction
-// property explicitly, because that is the reason the section exists: a
-// summarizer drops the spawn tool results, and this is what remains.
 const subagentLedgerDigestHeader = "## Subagent Tasks\n\n" +
 	"Subagent tasks spawned from this session (newest first). " +
 	"This ledger survives context compaction: finished tasks stay listed here " +
 	"even when the original tool results are no longer in context."
 
-// subagentLedgerDigestHint is the static trailing line. It is always emitted
-// when the section is rendered: it names the two tools the model needs to act
-// on the ledger, and it never changes, so it cannot perturb the prompt.
 const subagentLedgerDigestHint = "Use `list_active_subagents` (status/limit/offset) to page through the full " +
 	"history, and `wait_for_subagent` for the full result of a task that is still alive."
 
-// renderSubagentLedgerDigest renders the "## Subagent Tasks" system-prompt
-// section for one agent's session, or "" when the session has no subagent tasks.
-//
-// Metadata only: it reads the manager's live tasks and the session metadata
-// mirror, never a message body and never the store, because it runs on every
-// turn and on every TUI/REST context-usage refresh. No elapsed time is
-// rendered: a volatile field would change the prompt every turn and break the
-// byte-identical-prompt invariant BuildMessages documents.
-//
-// scopeKeys covers the runtime key, its alias target and the origin key
-// recorded for the conversation (see subagentLedgerScopeKeys); SubagentScopePrefixes
-// strips the ":chat:N" alias internally, so tasks recorded under the base key
-// are found from an aliased conversation.
 func (tc *toolCoordinatorImpl) renderSubagentLedgerDigest(agentID, sessionKey string) string {
 	if tc == nil || sessionKey == "" {
 		return ""
 	}
 
-	// One manager, the one that owns this agent's tasks (C6/D6): sweeping every
-	// agent would run the same scan once per agent on every turn.
 	sm := tc.subagents[agentID]
 	if sm == nil {
 		return ""
@@ -478,31 +315,6 @@ func (tc *toolCoordinatorImpl) renderSubagentLedgerDigest(agentID, sessionKey st
 	return b.String()
 }
 
-// subagentLedgerScopeKeys returns the session-key forms the ledger must be
-// scoped by: the runtime key, its alias target, and EVERY origin key recorded
-// for this conversation, deduplicated and in first-seen order. ResolveSessionKey
-// and sessionOriginsFor are pure map lookups, so this stays zero-I/O. A nil loop
-// (tests build coordinators without one) degrades to the raw key.
-//
-// The origin keys are what make reaped and restarted rows visible on routed
-// channels. A live task is reachable through its spawner key (see
-// ledgerScopeMatches), but a persisted row carries no spawner key — its parent
-// is the origin key — and the prefix closure of a routed runtime key
-// ("agent:main:main", or "agent:main:telegram:direct:12345") cannot reach
-// "telegram:12345". Without the origin form the digest loses the history on
-// every routed channel after the first retention reap or restart, which is the
-// exact failure the ledger exists to prevent.
-//
-// It unions the whole recorded set rather than the newest origin alone because
-// the runtime key is many-to-one: with the default dm_scope=main every direct
-// peer of an agent runs on "agent:<agentID>:main", so "telegram:111" and
-// "telegram:222" are two origins of one runtime key. Scoping by one of them
-// would silently hide the other peer's persisted rows. The peers share one
-// conversation, so showing their tasks together is consistent.
-//
-// The order is stable (runtime, resolved, then origins newest first, each
-// deduplicated) because the result feeds the prefix set of a sorted merge: a
-// stable input keeps the rendered prompt byte-identical across turns.
 func (tc *toolCoordinatorImpl) subagentLedgerScopeKeys(sessionKey string) []string {
 	if sessionKey == "" {
 		return nil
@@ -527,11 +339,6 @@ func (tc *toolCoordinatorImpl) subagentLedgerScopeKeys(sessionKey string) []stri
 	return keys
 }
 
-// subagentLedgerExecutor resolves the agent that ran a ledger row. A live task
-// carries its own AgentID; a persisted row carries the one stored on the
-// session, which is empty for rows written before agent_id existed. Those fall
-// back to the spawn-time pin (R8/C7), the same 3-step fallback the WebUI
-// listing uses, so a historical subagent is not named after an arbitrary agent.
 func (tc *toolCoordinatorImpl) subagentLedgerExecutor(entry tools.SubagentLedgerEntry) string {
 	if entry.AgentID != "" {
 		return entry.AgentID
@@ -542,31 +349,8 @@ func (tc *toolCoordinatorImpl) subagentLedgerExecutor(entry tools.SubagentLedger
 	return tc.al.subagentSessionPin(entry.SessionKey)
 }
 
-// renderSubagentLedgerDigestRow renders one digest row:
-//
-//   - <id> [<status>] [(persisted)] [<agentID>] ["<label>"] [: <summary>]
-//
-// The summary is rendered only for a live task: a persisted row's summary
-// lives in the session store, and fetching it would turn a per-turn render into
-// a store query (C5/D2). The label is enough of a pointer; the tool page
-// carries the summary.
-//
-// Label and summary are model-authored (the label can come from a spawn
-// argument, the summary from the subagent's own JSON outcome), and this row is
-// interpolated into the PARENT's system prompt — the one context a subagent must
-// not be able to rewrite. Both therefore go through tools.SanitizeLedgerText,
-// the same rewriter the paginated tool uses, which flattens control runes and
-// line separators to spaces, collapses runs of spaces, strips leading bullet or
-// heading decoration and truncates on a rune boundary. That makes the rendered
-// row a single line for ANY input: a summary like
-// "done\n- subagent-99 [completed] injected\n\n---\n\n## Selected Folder" can no
-// longer fake a row, a section break or an extra heading. The label keeps its
-// %q quoting on top of that, so it stays visually delimited in the row.
 func renderSubagentLedgerDigestRow(entry tools.SubagentLedgerEntry, agentID string) string {
 	var b strings.Builder
-	// An empty status means "we cannot tell" and renders as [unknown], the same
-	// rule ledgerEntryFromPersisted applies to a status-less disk row: an empty
-	// bracket would read as a missing field, and "completed" would be a lie.
 	status := entry.Status
 	if status == "" {
 		status = tools.SubagentStatusUnknown
@@ -591,7 +375,6 @@ func renderSubagentLedgerDigestRow(entry tools.SubagentLedgerEntry, agentID stri
 	return b.String()
 }
 
-// GetStartupInfo returns information about loaded tools and skills for logging.
 func (tc *toolCoordinatorImpl) GetStartupInfo() map[string]interface{} {
 	info := make(map[string]interface{})
 
@@ -600,17 +383,14 @@ func (tc *toolCoordinatorImpl) GetStartupInfo() map[string]interface{} {
 		return info
 	}
 
-	// Tools info
 	toolsList := agent.Tools.List()
 	info["tools"] = map[string]interface{}{
 		"count": len(toolsList),
 		"names": toolsList,
 	}
 
-	// Skills info
 	info["skills"] = agent.ContextBuilder.GetSkillsInfo()
 
-	// Agents info
 	info["agents"] = map[string]interface{}{
 		"count": len(tc.al.registry.ListAgentIDs()),
 		"ids":   tc.al.registry.ListAgentIDs(),
@@ -619,13 +399,6 @@ func (tc *toolCoordinatorImpl) GetStartupInfo() map[string]interface{} {
 	return info
 }
 
-// RegisterTool registers a tool to all agents.
-//
-// B2b: tools added after startup (today: cron, wired by the gateway once the
-// agent loop exists) bypass registerSharedToolsForAgent, so the per-agent
-// allowlist has to be honoured here as well — otherwise a restricted agent would
-// regain any tool registered later. An agent with no allowlist (or an empty one)
-// keeps receiving everything, which is the default behaviour.
 func (tc *toolCoordinatorImpl) RegisterTool(tool tools.Tool) {
 	cfg := tc.al.cfg()
 	name := tool.Name()
@@ -641,17 +414,14 @@ func (tc *toolCoordinatorImpl) RegisterTool(tool tools.Tool) {
 	}
 }
 
-// GetSubagents returns the subagent managers map.
 func (tc *toolCoordinatorImpl) GetSubagents() map[string]*tools.SubagentManager {
 	return tc.subagents
 }
 
-// GetBgManagers returns the background process managers map.
 func (tc *toolCoordinatorImpl) GetBgManagers() map[string]*tools.BackgroundProcessManager {
 	return tc.bgManagers
 }
 
-// BackgroundExecInfo contains information about a background execution.
 type BackgroundExecInfo struct {
 	ID         string
 	AgentID    string
@@ -664,7 +434,6 @@ type BackgroundExecInfo struct {
 	Elapsed    time.Duration
 }
 
-// getBackgroundExecs returns all background processes across all agents.
 func (tc *toolCoordinatorImpl) getBackgroundExecs(includeCompleted bool) []BackgroundExecInfo {
 	var result []BackgroundExecInfo
 	for agentID, mgr := range tc.bgManagers {
@@ -691,8 +460,6 @@ func (tc *toolCoordinatorImpl) getBackgroundExecs(includeCompleted bool) []Backg
 	return result
 }
 
-// getBackgroundExecOutput returns the output of a background process by ID.
-// It searches across all agents' background managers.
 func (tc *toolCoordinatorImpl) getBackgroundExecOutput(id string, tail int) (output string, status string, elapsed time.Duration, err error) {
 	for _, mgr := range tc.bgManagers {
 		if p, ok := mgr.Get(id); ok {
@@ -707,8 +474,6 @@ func (tc *toolCoordinatorImpl) getBackgroundExecOutput(id string, tail int) (out
 	return "", "", 0, fmt.Errorf("background process not found: %s", id)
 }
 
-// stopBackgroundExec stops a background process by ID.
-// It searches across all agents' background managers.
 func (tc *toolCoordinatorImpl) stopBackgroundExec(id string) error {
 	for _, mgr := range tc.bgManagers {
 		if p, ok := mgr.Get(id); ok {
@@ -724,15 +489,6 @@ func (tc *toolCoordinatorImpl) stopBackgroundExec(id string) error {
 	return fmt.Errorf("background process not found: %s", id)
 }
 
-// agentConfigForID looks up the config entry of an agent by (already normalized)
-// id, exactly the way the registry keys its instances: NewAgentRegistry /
-// ReloadAgents store every cfg.Agents.List[i] under routing.NormalizeAgentID(ac.ID).
-// The incoming agentID is normalized defensively so a caller that passes a raw
-// config id still matches; NormalizeAgentID is idempotent.
-//
-// Returns nil when the agent has no config entry, which happens for the implicit
-// "main" instance created when agents.list is empty. Callers must treat nil as
-// "no per-agent overrides", i.e. keep every tool.
 func agentConfigForID(cfg *config.Config, agentID string) *config.AgentConfig {
 	if cfg == nil {
 		return nil
@@ -746,11 +502,6 @@ func agentConfigForID(cfg *config.Config, agentID string) *config.AgentConfig {
 	return nil
 }
 
-// allowlistKeeps reports whether a tool name survives an agent's per-agent
-// allowlist. It mirrors applyToolsAllowlist for a single name: no config entry,
-// no allowlist, or one made only of blank entries keeps everything; otherwise the
-// name must be listed (surrounding whitespace ignored, like the helper), because
-// the registry keys tools case-sensitively.
 func allowlistKeeps(agentCfg *config.AgentConfig, name string) bool {
 	if agentCfg == nil || len(agentCfg.Tools) == 0 {
 		return true
@@ -766,21 +517,10 @@ func allowlistKeeps(agentCfg *config.AgentConfig, name string) bool {
 			return true
 		}
 	}
-	// An allowlist made only of blank entries means "no allowlist" — the same
-	// reading applyToolsAllowlist takes when it returns before touching the
-	// registry. Otherwise the name was absent from a real allowlist: drop it.
 	return !known
 }
 
-// registerSharedToolsForAgent registers all shared tools (web, hardware, file, exec, spawn, group_chat)
-// for a single agent. Returns the created SubagentManager.
-//
-// It is also the enforcement point of the per-agent tools allowlist (B2b): the
-// shared registrations are filtered against agents.list[].tools at the end of the
-// function, before the subagent tool clone is taken, so neither the agent nor its
-// subagents can see a tool its config excluded.
 func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, agentID string, subagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager, groupManager *group.GroupManager, keyringSvc *keyring.Service) *tools.SubagentManager {
-	// Web tools
 	if searchTool := tools.NewWebSearchTool(tools.WebSearchToolOptions{
 		BraveAPIKey:          cfg.Tools.Web.Brave.APIKey,
 		BraveMaxResults:      cfg.Tools.Web.Brave.MaxResults,
@@ -801,16 +541,13 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	}
 	agent.Tools.Register(tools.NewWebFetchTool(50000))
 
-	// Keyring secret tool (scoped, audited access to stored secrets)
 	if keyringSvc != nil {
 		agent.Tools.Register(tools.NewSecretTool(keyringSvc))
 	}
 
-	// Hardware tools (I2C, SPI) - Linux only, returns error on other platforms
 	agent.Tools.Register(tools.NewI2CTool())
 	agent.Tools.Register(tools.NewSPITool())
 
-	// File tool
 	sendFileTool := tools.NewSendFileTool()
 	sendFileTool.SetWorkspaceRestrictions(agent.Workspace, cfg.Agents.Defaults.RestrictToWorkspace)
 	sendFileTool.SetSendCallback(func(channel, chatID string, payload tools.SendFilePayload) error {
@@ -824,11 +561,6 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	})
 	agent.Tools.Register(sendFileTool)
 
-	// Shell/Exec tool with approval support and background process management.
-	// The manager is re-used across config reloads (issue: spontaneous
-	// subagent cancellation): processes a subagent backgrounded keep a live
-	// home after their owner agent is recreated, so they stay visible and
-	// stoppable instead of being orphaned by a fresh manager.
 	bgManager, reusedBg := bgManagers[agentID]
 	if !reusedBg || bgManager == nil {
 		bgManager = tools.NewBackgroundProcessManager()
@@ -845,12 +577,10 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	}
 	agent.Tools.Register(execTool)
 
-	// Background exec management tools
 	agent.Tools.Register(tools.NewListBackgroundExecsTool(bgManager))
 	agent.Tools.Register(tools.NewGetBackgroundExecOutputTool(bgManager))
 	agent.Tools.Register(tools.NewStopBackgroundExecTool(bgManager))
 
-	// Spawn tool with allowlist checker - resolve subagent model override from SubagentsConfig.Model
 	subagentDefaultModel := agent.Model
 	subagentDefaultProvider := agent.Provider
 	subagentDefaultContextWindow := agent.ContextWindow
@@ -877,28 +607,17 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		}
 	}
 
-	// Determine max iterations for subagent tasks.
-	// Priority: 1) agent-specific subagent config, 2) global subagent_max_iterations, 3) agent's max_tool_iterations
-	// A value of 0 means unlimited (converted to large number by NewSubagentManager).
-	subagentMaxIter := 0 // default: unlimited
+	subagentMaxIter := 0
 	if cfg.Agents.Defaults.SubagentMaxIterations > 0 {
 		subagentMaxIter = cfg.Agents.Defaults.SubagentMaxIterations
 	}
 	if agent.Subagents != nil && agent.Subagents.MaxIterations > 0 {
 		subagentMaxIter = agent.Subagents.MaxIterations
 	}
-	// If still 0 and agent has explicit max iterations, use that as fallback
 	if subagentMaxIter == 0 && agent.MaxIterations > 0 {
 		subagentMaxIter = agent.MaxIterations
 	}
 
-	// Re-use the agent's existing manager when there is one (reload of a
-	// recreated agent) instead of building a fresh one. The manager owns the
-	// running tasks; replacing it would leave them without a home, so their
-	// results, cancellation and status persistence would all be lost — and a
-	// config reload that touched nothing about this agent would still kill
-	// them. New tasks and settings below are applied to the same manager, and
-	// SetDefaults refreshes the values the constructor would have taken.
 	subagentManager, reusedManager := subagents[agentID]
 	if !reusedManager || subagentManager == nil {
 		subagentManager = tools.NewSubagentManager(subagentDefaultProvider, subagentDefaultModel, agent.Workspace, msgBus, subagentMaxIter)
@@ -906,20 +625,11 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	} else {
 		subagentManager.SetDefaults(subagentDefaultProvider, subagentDefaultModel, agent.Workspace, subagentMaxIter)
 	}
-	// Issue #234: remember which agent owns this manager. Tasks that arrive
-	// without any identity (no explicit agent_id and no agent tool context at
-	// spawn time, e.g. legacy cron spawn jobs) are attributed to this agent at
-	// run time, so the subagent's tool loop never runs owner-less.
 	subagentManager.SetDefaultAgentID(agentID)
 	subagentManager.SetCompactionThresholdPercent(cfg.SessionCompactionThresholdPercent())
 	subagentManager.SetRedactor(keyring.NewRedactor(keyringSvc))
 	subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
-	// Manager-level fallback thinking level: the PARENT's resolved config level.
-	// Only used when a task has no agent-context callback (standalone/cron
-	// managers). The parent's per-session /think override is deliberately NOT
-	// propagated here — it belongs to the parent's user conversation.
 	subagentManager.SetThinkingLevel(agent.ThinkingLevel)
-	// Resolve per-task model overrides (e.g. from cron spawn jobs) into providers.
 	subagentManager.SetModelOverrideResolver(func(model string) (providers.LLMProvider, string, int, error) {
 		resolvedModel := cfg.Providers.ResolveModelAlias(model, cfg.Agents.Defaults.Provider)
 		providerName := extractProviderFromModel(resolvedModel, cfg.Agents.Defaults.Provider)
@@ -938,50 +648,28 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		}
 		return overrideProvider, resolvedModel, getContextWindow(cfg, resolvedModel, providerName), nil
 	})
-	// Report whether a model supports vision so subagent tool loops can
-	// filter out read_image for non-vision models.
 	subagentManager.SetVisionChecker(func(model string) bool {
 		providerName := extractProviderFromModel(model, cfg.Agents.Defaults.Provider)
 		return getSupportsImages(cfg, model, providerName)
 	})
-	// Report whether a model supports native video so subagent tool loops can
-	// filter out read_video for models without video support.
 	subagentManager.SetVideoChecker(func(model string) bool {
 		providerName := extractProviderFromModel(model, cfg.Agents.Defaults.Provider)
 		return getSupportsVideo(cfg, model, providerName)
 	})
-	// Set subagent timeout from agent config (per-agent override or global default)
 	if agent.Subagents != nil && agent.Subagents.TimeoutMin > 0 {
 		subagentManager.SetTimeout(time.Duration(agent.Subagents.TimeoutMin) * time.Minute)
 	} else if cfg.Agents.Defaults.SubagentTimeoutMinutes > 0 {
 		subagentManager.SetTimeout(time.Duration(cfg.Agents.Defaults.SubagentTimeoutMinutes) * time.Minute)
 	}
-	// Set max concurrent subagents from agent config or global default
 	if agent.Subagents != nil && agent.Subagents.MaxConcurrent > 0 {
 		subagentManager.SetMaxConcurrent(agent.Subagents.MaxConcurrent)
 	} else if cfg.Agents.Defaults.SubagentMaxConcurrent > 0 {
 		subagentManager.SetMaxConcurrent(cfg.Agents.Defaults.SubagentMaxConcurrent)
 	}
-	// Set default max retries from global config. Unconditional on purpose: the
-	// `> 0` guard this replaces made an explicit 0 depend on SubagentManager's own
-	// zero value also meaning "disabled", an undocumented coupling. Passing the
-	// configured value directly makes 0 mean disabled in exactly one place.
 	subagentManager.SetDefaultMaxRetries(cfg.Agents.Defaults.SubagentMaxRetries)
-	// Retention window for terminal subagent tasks: how long a finished task
-	// stays listed — with its session resident — before the periodic sweeper
-	// reaps it. 0 keeps the manager's built-in default (5m) instead of
-	// disabling the sweep, because an accidental zero must never let the task
-	// map (and the native:<parent>:subagent-N sessions) grow without bound.
 	if mins := cfg.Agents.Defaults.SubagentRetentionMinutes; mins > 0 {
 		subagentManager.SetRetentionPeriod(time.Duration(mins) * time.Minute)
 	}
-	// Start the periodic retention sweep. Until this ticker existed,
-	// CleanupTerminalTasks only ran from SpawnWithOptions/ContinueTask, so an
-	// owner that stopped spawning kept every finished task in memory forever
-	// and made each TUI frame more expensive. Idempotent: the config-reload
-	// path re-uses managers (see updateSharedToolsForAgent) and must not stack
-	// goroutines. Stopped by AgentLoop.StopWithin (stopOnce) and, for agents
-	// removed from the config, by toolCoordinatorImpl.cancelRemovedSubagents.
 	subagentManager.StartRetentionCleanup(tools.DefaultSubagentRetentionSweepInterval)
 	subagentManager.SetAgentContextCallback(func(targetAgentID string) tools.AgentContextInfo {
 		if targetAgent, ok := registry.GetAgent(targetAgentID); ok {
@@ -998,7 +686,6 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 				ThinkingLevel: targetAgent.ThinkingLevel,
 			}
 		}
-		// Fallback: use subagent model override if configured, otherwise parent agent's config
 		return tools.AgentContextInfo{
 			Context:       agent.ContextBuilder.GetInitialContext(),
 			Workspace:     agent.Workspace,
@@ -1020,58 +707,18 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	})
 	agent.Tools.Register(spawnTool)
 
-	// Subagent management tools: let the parent agent wait for and list
-	// subagent tasks spawned via the spawn tool above.
 	agent.Tools.Register(tools.NewWaitForSubagentTool(subagentManager))
 	agent.Tools.Register(tools.NewListSubagentsTool(subagentManager))
 	agent.Tools.Register(tools.NewCancelSubagentTool(subagentManager))
 
-	// Sleep tool: useful for rate limiting, polling intervals, etc.
 	agent.Tools.Register(tools.NewSleepTool())
 
-	// Group collaboration tool (Mixture of Agents): lets this agent delegate a
-	// problem to a multi-agent panel. Uses the shared GroupManager.
-	// Registration is gated by cfg.Groups.Enabled (B10) — see syncGroupChatTool.
 	syncGroupChatTool(agent, cfg, registry, currentAgentID, groupManager)
 
-	// B2b: enforce the per-agent tools allowlist over the SHARED tools too.
-	//
-	// NewAgentInstance already filters the registry it builds, but every tool
-	// registered above (web_search, web_fetch, secret, i2c, spi, send_file,
-	// exec, the background-exec trio, spawn and the subagent-management tools,
-	// sleep, group_chat) is added AFTER that filter, so without this second pass
-	// an agent configured with tools: ["read_file"] still ended up with
-	// exec/spawn/web.
-	//
-	// Placement matters: it must run after the last registration (so the whole
-	// shared set is visible) and before the CloneWithout below (so a restricted
-	// agent's subagents inherit the restricted set instead of the full one).
-	// It is idempotent — an empty allowlist is a no-op and re-applying the same
-	// allowlist removes nothing new — which makes it safe on both reload paths:
-	// a recreated agent arrives here with an already filtered base registry, and
-	// a preserved agent skips this function entirely (updateSharedToolsForAgent
-	// early-returns while spawn is registered, so its toolset is untouched and
-	// stays consistent with what the first registration produced).
 	if agentCfg := agentConfigForID(cfg, agentID); agentCfg != nil {
 		applyToolsAllowlist(agent.Tools, agentCfg.Tools, routing.NormalizeAgentID(agentCfg.ID))
 	}
 
-	// Subagents get all tools except send_file (user-facing) and the
-	// subagent-management tools (prevent recursive wait/list overhead).
-	//
-	// The background-exec tools (list_background_execs,
-	// get_background_exec_output, stop_background_exec) ARE included. They
-	// are bound to the agent's single BackgroundProcessManager and
-	// CloneWithout shares tool instances, so a subagent's backgrounded
-	// commands land in that same manager regardless — excluding the tools
-	// never isolated anything, it only left the subagent blind to (and
-	// unable to stop) processes it started itself.
-	//
-	// Isolation is per-session, not per-registry: every process records its
-	// OwnerSessionKey at Register time and the tools filter results through
-	// BackgroundProcess.VisibleTo, so a subagent sees the processes of its
-	// own session family (its own + its parent's, per #230's cascade design)
-	// while foreign sessions' processes report "not found".
 	subagentManager.SetTools(agent.Tools.CloneWithout(
 		"send_file",
 		"wait_for_subagent",
@@ -1079,14 +726,7 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		"cancel_subagent",
 	))
 	subagentManager.SetSessionRecorder(agent.Sessions)
-	// Sync subagent loop compaction to the persisted session: summary +
-	// excluded-message state survive restarts, and the persisted session
-	// does not grow unbounded across long-running tasks.
 	subagentManager.SetSessionCompactor(agent.Sessions)
-	// Bill subagent LLM consumption to the session that spawned them, so the
-	// cumulative token counters (TUI status, /status, WebUI context
-	// indicator) include subagent work instead of showing only the main
-	// agent's own responses.
 	subagentManager.SetTokenUsageReporter(newSubagentTokenReporter(agent.Sessions))
 	subagentManager.SetCompactionConfig(
 		cfg.SessionCompactionThresholdPercent(),
@@ -1094,54 +734,22 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		cfg.EvictExcludedFromMemory(),
 	)
 
-	// Evict subagent sessions from memory when their terminal tasks are cleaned up,
-	// freeing RAM. The session data remains on disk.
 	subagentManager.SetSessionEvictCallback(func(sessionKey string) {
 		agent.Sessions.EvictSession(sessionKey)
 	})
 
-	// Persist the terminal status of each subagent on its session, so the
-	// WebUI subagents sidebar shows the real outcome (failed, not_done,
-	// needs_context, cancelled) after eviction or restart instead of the
-	// historical hard-coded "completed".
 	subagentManager.SetSessionStatusCallback(func(sessionKey, status string) {
 		agent.Sessions.SetSubagentStatus(sessionKey, status)
 	})
 
-	// Make the subagent ledger disk-backed AND give the manager its task-ID
-	// collision probe, in one call. The two are one invariant: the ledger lists
-	// the tasks whose in-memory row retention reaped (or that a restart
-	// dropped) by reading their persisted sessions, and the probe is what stops
-	// a later spawn from reusing an ID one of those persisted rows still holds
-	// (after a restart the in-memory ID counter resets but the session files
-	// remain). SetLedgerWiring takes both so the half-wired state — disk rows
-	// listed, no probe — cannot be expressed.
 	subagentManager.SetLedgerWiring(
 		newPersistedSubagentLister(agent.Sessions),
 		func(sessionKey string) bool { return agent.Sessions.SessionExists(sessionKey) },
 	)
-	// The detail source is optional and separate: nil only means persisted rows
-	// render their label without a summary, never a mis-wiring.
 	subagentManager.SetPersistedTaskDetail(newPersistedSubagentDetail(agent.Sessions))
 
-	// Resolve the executor of a persisted row whose session row predates
-	// agent_id from the durable spawn-time pin, so list_active_subagents names
-	// the same agent the prompt digest does (the digest resolves the pin
-	// itself in subagentLedgerExecutor).
-	//
-	// The pin is a map read on the caller's side, but it is NOT the loop's
-	// subagentSessionAgent map: this function has no *AgentLoop (it is also
-	// called from the reload path), and that map is memory-only. The durable
-	// copy is the sess:agent: KV entry setSubagentSessionAgent writes, which
-	// loadDurableSessionState rehydrates at startup — exactly the rows this
-	// fallback exists for (written before agent_id existed, i.e. old).
 	subagentManager.SetPersistedTaskExecutorFallback(newPersistedSubagentExecutorPin(agent.Sessions))
 
-	// Report the ledger wiring at startup: this is the observability surface for
-	// LedgerWiringEnabled, which otherwise only a test would read. A manager that
-	// came up memory-only (no SessionManager, or a half-wired setter) loses its
-	// history on the first retention reap, and that is invisible until a user
-	// asks about a finished task — so say it once, at startup, per agent.
 	ledgerFields := map[string]interface{}{
 		"agent":         agent.ID,
 		"ledger_backed": subagentManager.LedgerWiringEnabled(),
@@ -1159,23 +767,6 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	return subagentManager
 }
 
-// newPersistedSubagentLister builds the disk-side source for an agent's subagent
-// ledger. It reads the recorder's own SessionManager — the manager
-// SetSessionRecorder was handed above — which in production is the single shared
-// manager (AgentRegistry.SetSharedSessionManager), so no per-agent sweep is
-// needed: sweeping ListAgentIDs would run the same scan once per agent.
-//
-// Metadata only: ListSubagentSessionMeta performs no store I/O and never makes a
-// session resident, so this is safe to call from a tool execution path.
-//
-// SETUP-TIME CAPTURE — this closes over the *SessionManager it is given at
-// setup time, and AgentRegistry.SetSharedSessionManager does NOT re-wire these
-// callbacks: a swap after setup re-points every agent's Sessions but leaves the
-// lister (and its Detail/ExecutorPin siblings) reading the original manager, so
-// rows written through the swap are invisible to the ledger. Production swaps
-// exactly once, inside NewAgentLoop, and only then calls setupSubagentManager,
-// which is why the capture is correct there; any code that swaps later must
-// re-run the subagent-manager setup instead of assuming the callbacks follow.
 func newPersistedSubagentLister(sessions *session.SessionManager) func(parentPrefixes []string) []tools.PersistedSubagentTask {
 	if sessions == nil {
 		return nil
@@ -1192,38 +783,16 @@ func newPersistedSubagentLister(sessions *session.SessionManager) func(parentPre
 				SessionKey: meta.Key,
 				ParentKey:  meta.ParentKey,
 				Label:      meta.Name,
-				// Status and AgentID are persisted on the session; an empty
-				// value means "we cannot tell" and is left for the reader to
-				// resolve to tools.SubagentStatusUnknown (never "completed":
-				// the row may be a task interrupted by a restart, and claiming
-				// completion would contradict wait_for_subagent). Hard-coding
-				// either here would misreport failed or cancelled tasks.
-				Status:  meta.Status,
-				AgentID: meta.AgentID,
-				Created: meta.Created.UnixMilli(),
-				Updated: meta.Updated.UnixMilli(),
+				Status:     meta.Status,
+				AgentID:    meta.AgentID,
+				Created:    meta.Created.UnixMilli(),
+				Updated:    meta.Updated.UnixMilli(),
 			})
 		}
 		return rows
 	}
 }
 
-// newPersistedSubagentExecutorPin builds the executor fallback for persisted
-// ledger rows whose AgentID is empty — the rows written before the session row
-// carried agent_id (migration v8). It answers from the durable spawn-time pin
-// (sess:agent:<sessionKey>, written by setSubagentSessionAgent and rehydrated by
-// loadDurableSessionState), which is the same value the prompt digest resolves
-// through subagentSessionPin, so the tool and the digest cannot disagree about
-// who ran a historical task.
-//
-// It is deliberately NOT the loop's in-memory subagentSessionAgent map: that map
-// dies with the process, and the rows this fallback serves are precisely the
-// ones that outlived a restart. The KV read is one indexed lookup per row with
-// an empty AgentID, and only for the page being rendered (fillPageExecutors),
-// never for the whole history.
-//
-// nil (no store) leaves rows with their empty AgentID, which is the behaviour of
-// every standalone manager constructed in tests.
 func newPersistedSubagentExecutorPin(sessions *session.SessionManager) func(sessionKey string) string {
 	if sessions == nil {
 		return nil
@@ -1233,10 +802,6 @@ func newPersistedSubagentExecutorPin(sessions *session.SessionManager) func(sess
 	}
 }
 
-// newPersistedSubagentDetail builds the windowed detail source for the ledger:
-// summary and iteration count for a bounded page of session keys. Unlike the
-// lister this DOES query the store, so it is only ever called for the rows a
-// page actually returns, never for a whole history.
 func newPersistedSubagentDetail(sessions *session.SessionManager) func(keys []string) map[string]tools.PersistedSubagentDetail {
 	if sessions == nil {
 		return nil
@@ -1257,27 +822,17 @@ func newPersistedSubagentDetail(sessions *session.SessionManager) func(keys []st
 	}
 }
 
-// syncGroupChatTool is the registration-time enforcement point for the groups
-// feature gate (B10). group_chat is only present in an agent's toolset while
-// cfg.Groups.Enabled is true; when the feature is off the tool is removed (if
-// present) so no agent can invoke groups the user never activated. It is called
-// both on first registration and on every reload, keeping toolsets consistent
-// when the flag is toggled at runtime.
 func syncGroupChatTool(agent *AgentInstance, cfg *config.Config, registry *AgentRegistry, agentID string, groupManager *group.GroupManager) {
 	if !cfg.GroupsFeatureEnabled() || groupManager == nil {
 		agent.Tools.Unregister("group_chat")
 		return
 	}
-	// B2b: the allowlist wins over the feature gate. This also covers the reload
-	// path, where updateSharedToolsForAgent early-returns (spawn already present)
-	// and only re-syncs this tool — without the check it would hand group_chat
-	// back to an agent whose allowlist had it removed at first registration.
 	if !allowlistKeeps(agentConfigForID(cfg, agentID), "group_chat") {
 		agent.Tools.Unregister("group_chat")
 		return
 	}
 	if _, exists := agent.Tools.Get("group_chat"); exists {
-		return // already registered with the same manager
+		return
 	}
 	groupChatTool := tools.NewGroupChatTool(groupManager)
 	groupChatTool.SetAllowlistChecker(func(targetAgentID string) bool {
@@ -1286,8 +841,6 @@ func syncGroupChatTool(agent *AgentInstance, cfg *config.Config, registry *Agent
 	agent.Tools.Register(groupChatTool)
 }
 
-// registerSharedTools registers tools that are shared across all agents (web, message, spawn, group_chat).
-// Each agent uses its own provider for subagent spawning.
 func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, groupManager *group.GroupManager, keyringSvc *keyring.Service) (map[string]*tools.SubagentManager, map[string]*tools.BackgroundProcessManager) {
 	subagents := make(map[string]*tools.SubagentManager)
 	bgManagers := make(map[string]*tools.BackgroundProcessManager)
@@ -1301,22 +854,14 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 	return subagents, bgManagers
 }
 
-// updateSharedToolsForAgent registers shared tools for a specific agent.
-// It returns the SubagentManager for that agent.
-// This is used during reload to update tools for new or recreated agents.
 func updateSharedToolsForAgent(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, agentID string, existingSubagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager, groupManager *group.GroupManager, keyringSvc *keyring.Service) *tools.SubagentManager {
 	agent, ok := registry.GetAgent(agentID)
 	if !ok {
 		return nil
 	}
 
-	// Check if spawn is already registered
 	if _, hasSpawn := agent.Tools.Get("spawn"); hasSpawn {
-		// Even when shared tools are already registered, re-sync the gated
-		// group_chat tool so toggling cfg.Groups.Enabled takes effect on
-		// reload without re-registering everything else (B10).
 		syncGroupChatTool(agent, cfg, registry, agentID, groupManager)
-		// Already has shared tools, return existing subagent manager if present
 		if existingSm, ok := existingSubagents[agentID]; ok {
 			return existingSm
 		}
@@ -1326,23 +871,18 @@ func updateSharedToolsForAgent(cfg *config.Config, msgBus *bus.MessageBus, regis
 	return registerSharedToolsForAgent(agent, cfg, msgBus, registry, approvalManager, agentID, existingSubagents, bgManagers, groupManager, keyringSvc)
 }
 
-// updateSharedTools updates shared tools for all agents after a reload.
-// It preserves existing subagent managers and only updates recreated agents.
 func updateSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, existingSubagents map[string]*tools.SubagentManager, existingBgManagers map[string]*tools.BackgroundProcessManager, groupManager *group.GroupManager, keyringSvc *keyring.Service) (map[string]*tools.SubagentManager, map[string]*tools.BackgroundProcessManager) {
 	updated := make(map[string]*tools.SubagentManager)
 	bgManagers := make(map[string]*tools.BackgroundProcessManager)
 
-	// Preserve existing subagent managers
 	for id, sm := range existingSubagents {
 		updated[id] = sm
 	}
 
-	// Preserve existing background managers
 	for id, bm := range existingBgManagers {
 		bgManagers[id] = bm
 	}
 
-	// Update each agent
 	for _, agentID := range registry.ListAgentIDs() {
 		sm := updateSharedToolsForAgent(cfg, msgBus, registry, approvalManager, agentID, existingSubagents, bgManagers, groupManager, keyringSvc)
 		if sm != nil {

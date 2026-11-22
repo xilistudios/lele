@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-// =============================================================================
-// Tests for basic verbose formatting
-// =============================================================================
-
 func TestFormatBasicVerboseSubagentContent(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -34,8 +30,6 @@ To github.com:xilistudios/lele
    1234567..89abcdef  main -> main
 
 STATUS: completed`,
-			// The tool notification header (🛠️) and output header (📤) are removed,
-			// but the actual command and output are kept (they might be useful context)
 			expected: "cd ~/.lele/workspace/lele && git push\nTo github.com:xilistudios/lele\n   1234567..89abcdef  main -> main\n\nSTATUS: completed",
 		},
 		{

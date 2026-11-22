@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -22,18 +16,13 @@ import (
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
-// llmRunner is an internal interface for LLM execution
 type llmRunner interface {
 	runAgentLoop(ctx context.Context, agent *AgentInstance, opts processOptions) (string, error)
 	maybeRunGoalContinuation(agent *AgentInstance, opts processOptions, lastResponse string)
 }
 
-// transientLLMRetries is the number of times a transient LLM error is retried
-// within the same execution before giving up and terminating the run.
 const transientLLMRetries = 3
 
-// transientLLMBackoff returns the wait duration before the given transient
-// retry attempt (5s, 15s, 30s, capped at 30s).
 func transientLLMBackoff(attempt int) time.Duration {
 	backoffs := []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second}
 	if attempt >= len(backoffs) {
@@ -42,19 +31,8 @@ func transientLLMBackoff(attempt int) time.Duration {
 	return backoffs[attempt]
 }
 
-// maxConsecutiveEmptyResponses bounds how many consecutive empty (blank)
-// assistant responses the agent loop will retry before ending the turn with
-// the default response. A blank HTTP-200 is usually transient (thinking model
-// exhausting its token budget on reasoning, provider hiccup), so a few
-// retries recover it — but retrying forever (the old behavior) hangs the
-// session: the per-session semaphore is held, follow-up user messages queue
-// up, and the conversation appears dead ("session won't continue").
 const maxConsecutiveEmptyResponses = 5
 
-// emptyRetryBackoff returns the wait duration before the given empty-response
-// retry attempt (1s, 2s, 3s, capped at 3s). Empty responses are retried up to
-// maxConsecutiveEmptyResponses times, bounded by context cancellation (user
-// abort / session cancel); after the limit the turn ends cleanly.
 func emptyRetryBackoff(attempt int) time.Duration {
 	backoffs := []time.Duration{1 * time.Second, 2 * time.Second, 3 * time.Second}
 	if attempt >= len(backoffs) {
@@ -63,30 +41,18 @@ func emptyRetryBackoff(attempt int) time.Duration {
 	return backoffs[attempt]
 }
 
-// llmRunnerImpl implements the llmRunner interface
 type llmRunnerImpl struct {
 	al *AgentLoop
 
-	// retryWait is called to wait between retry attempts.
-	// nil means use default (time.After, set on llmCaller).
-	// Override in tests to avoid real sleeps.
 	retryWait func(time.Duration) <-chan time.Time
 
-	// loopTimeoutUnit converts LLMLoopTimeoutMinutes into a duration.
-	// Production uses time.Minute; tests override it so the loop-timeout path
-	// can be exercised without waiting a real minute.
 	loopTimeoutUnit time.Duration
 }
 
-// newLLMRunner creates a new LLM runner
 func newLLMRunner(al *AgentLoop) *llmRunnerImpl {
 	return &llmRunnerImpl{al: al, loopTimeoutUnit: time.Minute}
 }
 
-// waitForBackoff blocks for d or until ctx is done, honouring the test-injectable
-// retryWait hook. Production uses time.After; tests set retryWait to
-// instantRetryWait so retry logic can be exercised without real sleeps.
-// Returns true if the wait completed, false if ctx was cancelled.
 func (lr *llmRunnerImpl) waitForBackoff(ctx context.Context, d time.Duration) bool {
 	var ch <-chan time.Time
 	if lr.retryWait != nil {
@@ -102,7 +68,6 @@ func (lr *llmRunnerImpl) waitForBackoff(ctx context.Context, d time.Duration) bo
 	}
 }
 
-// runAgentLoop is the core message processing logic.
 func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance, opts processOptions) (string, error) {
 	if opts.SessionKey != "" {
 		sem, _ := lr.al.sessionProcessing.LoadOrStore(opts.SessionKey, make(chan struct{}, 1))
@@ -115,44 +80,9 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		}
 	}
 
-	// Mid-turn subagent notices. Activating the queue here — right after the
-	// per-session semaphore is held — is what turns "the parent is running"
-	// into a fact a subagent callback can observe: while it is active,
-	// publishSubagentAsyncResult enqueues the result instead of publishing an
-	// inbound (which would block on the semaphore until this turn ended) and
-	// the loop below injects it at the next iteration boundary.
-	//
-	// The flush defer is registered AFTER the semaphore-release defer above,
-	// so LIFO ordering runs it BEFORE the semaphore is released. Anything the
-	// loop never got to inject (LLM error, ctx cancel, empty-response limit,
-	// iteration limit, tool failure) is re-published as the ordinary system
-	// inbound; that inbound then acquires the semaphore immediately after this
-	// function returns and runs as a normal continuation turn. Nothing is
-	// re-claimed here: the result was already claimed by
-	// publishSubagentAsyncResult, so re-publishing cannot duplicate it.
-	//
-	// noticeQueue is the turn's mid-turn notice identity. The session key is
-	// resolved ONCE here (activateMidTurnNotices) and the returned queue is
-	// used for the whole turn: a /new alias remap that happens while this turn
-	// runs must not make the drain/deactivate steps address a different queue
-	// than the one this turn activated, or notices accepted into the activated
-	// queue (whose producer skipped the inbound fallback) would be stranded.
-	// nil (empty/unusable session key) is fine: every queue method is nil-safe.
 	noticeQueue := lr.al.activateMidTurnNotices(opts.SessionKey)
 	defer func() {
 		for _, n := range noticeQueue.deactivate() {
-			// n.content is the RAW result text, exactly what
-			// publishSubagentAsyncResult publishes on the idle path:
-			// processSystemMessage adds the "[System: subagent] " prefix
-			// there, so the persisted message is identical either way.
-			//
-			// PublishInbound is at-most-once: it returns false when the bus is
-			// closed or its inbound buffer is full (non-blocking drop). This
-			// flush runs on the shutdown path (it is deferred before the
-			// semaphore is released, so retrying or sleeping here would keep
-			// the session blocked and could delay an exiting process), so a
-			// rejected publish is LOGGED loudly instead of retried: the loss
-			// must never be silent, but it must not turn into a stall either.
 			if !lr.al.bus.PublishInbound(bus.InboundMessage{
 				Channel:    "system",
 				SenderID:   midTurnNoticeSender,
@@ -169,9 +99,7 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		}
 	}()
 
-	// 0. Record last channel for heartbeat notifications (skip internal channels)
 	if opts.Channel != "" && opts.ChatID != "" {
-		// Don't record internal channels (cli, system, subagent)
 		if !constants.IsInternalChannel(opts.Channel) {
 			channelKey := fmt.Sprintf("%s:%s", opts.Channel, opts.ChatID)
 			if err := lr.al.RecordLastChannel(channelKey); err != nil {
@@ -183,10 +111,6 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	runCtx := ctx
 	if opts.SessionKey != "" {
 		sessionCtx, cancel := context.WithCancel(ctx)
-		// Apply the configurable LLM loop timeout. The timeout context is a
-		// child of sessionCtx so that cancelling the session (user stop /
-		// shutdown) also cancels the loop. When the timeout expires, the loop
-		// returns a clear error instead of hanging indefinitely.
 		var timeoutCancel context.CancelFunc
 		if agent.LLMLoopTimeoutMinutes > 0 {
 			unit := lr.loopTimeoutUnit
@@ -203,19 +127,8 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		}
 	}
 
-	// 1. Update tool contexts
 	lr.al.toolCoordinator.updateToolContexts(agent, opts.Channel, opts.ChatID, opts.SessionKey)
 
-	// 2. Build messages (skip history for heartbeat)
-	// Sync the system prompt's vision/video flags with the session's current
-	// model. The flags are initialized at instance creation, but the session
-	// model can change at runtime (/model, TUI model picker, REST). Without
-	// this sync, the tools section of the system prompt keeps hiding
-	// read_image/read_video based on stale flags even after switching to a
-	// vision-/video-capable model.
-	// A harness custom command's per-turn model wins over the session model so
-	// the flags match the model actually used for this request. The override
-	// is never stored, so the next turn re-reads the session model.
 	if agent.ContextBuilder != nil {
 		sessionModel := lr.modelForTurn(agent, opts)
 		if sessionModel != "" {
@@ -229,16 +142,6 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	if !opts.NoHistory {
 		history = agent.Sessions.GetHistory(opts.SessionKey)
 		summary = agent.Sessions.GetSummary(opts.SessionKey)
-		// Heal sessions contaminated by the legacy blank-persistence bug:
-		// assistant messages with no content and no tool calls are dropped
-		// from the history (and rewritten to the store) so the model cannot
-		// imitate them into a fresh empty-response loop.
-		// Heal sessions contaminated by the legacy tool-call persistence bug:
-		// assistant messages whose tool calls carry invalid arguments ("null",
-		// empty, a duplicate top-level object) or no tool name are rewritten to
-		// the canonical shape (and orphaned tool results dropped). Left alone,
-		// such a message makes every provider reject the request with 400 and
-		// the session never recovers on its own.
 		if healed, changed := healAssistantToolCalls(history); changed {
 			logger.WarnCF("agent", "Healed malformed assistant tool calls in session history",
 				map[string]interface{}{
@@ -262,7 +165,6 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 			agent.Sessions.SetHistory(opts.SessionKey, history)
 		}
 		history = ensureSummaryMaterialized(agent, opts.SessionKey, history, summary)
-		// Initialize verbose mode from persistent storage
 		lr.al.verboseManager.InitializeFromSession(opts.SessionKey)
 	}
 	persistedAttachments, err := utils.PersistAttachmentsToWorkspace(agent.Workspace, opts.Attachments)
@@ -283,12 +185,8 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		sessionMode,
 	)
 
-	// 3. Save user message to session and persist immediately
 	if !opts.SkipUserMessage {
 		if opts.AppliedCommand != nil {
-			// Command-driven turn: store the expanded prompt (what the model
-			// must see on replay) but keep the original "/name args" and the
-			// command metadata for the UI. See providers.Message.DisplayContent.
 			agent.Sessions.AddFullMessage(opts.SessionKey, providers.Message{
 				Role:           "user",
 				Content:        renderedUserMessage,
@@ -308,14 +206,9 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		})
 	}
 
-	// 4. Run LLM iteration loop
-	// Hand the captured notice queue to the iteration loop; it is the only
-	// identity the drain points below and inside use (see the activation
-	// comment above).
 	opts.midTurnQueue = noticeQueue
 	finalContent, iteration, err := lr.runLLMIteration(runCtx, agent, messages, opts)
 	if err != nil {
-		// Surface a clear error when the LLM loop timed out.
 		if agent.LLMLoopTimeoutMinutes > 0 && errors.Is(err, context.DeadlineExceeded) {
 			err = fmt.Errorf("LLM loop exceeded %d minute timeout", agent.LLMLoopTimeoutMinutes)
 		}
@@ -328,19 +221,10 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		return "", err
 	}
 
-	// If last tool had ForUser content and we already sent it, we might not need to send final response
-	// This is controlled by the tool's Silent flag and ForUser content
-
-	// 5. Handle empty response
 	if finalContent == "" {
 		finalContent = opts.DefaultResponse
 	}
 
-	// 6. Save final assistant message to session (only if not already saved in the loop)
-	// The loop saves assistant messages with ReasoningContent when:
-	// - There are tool calls (line ~565)
-	// - There are no tool calls (line ~477, newly added)
-	// Only save here if we never entered the loop (iteration == 0)
 	if iteration == 0 && finalContent != "" {
 		agent.Sessions.AddMessage(opts.SessionKey, "assistant", finalContent)
 	}
@@ -351,18 +235,11 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		})
 	}
 
-	// 7. Optional: summarization
 	if opts.EnableSummary {
 		lr.al.sessionManager.maybeSummarize(agent, opts.SessionKey, opts.Channel, opts.ChatID)
 	}
 
-	// 8. Optional: send response via bus
 	if opts.SendResponse {
-		// Use the iteration-suffixed messageID so the frontend's message.complete
-		// handler can match the streaming bubble created during runLLMIteration.
-		// Without this, multi-iteration LLM runs (iteration > 1) produce duplicate
-		// message bubbles: one from streaming (msgID-2) and one from message.complete
-		// (msgID), because the IDs don't match.
 		finalMsgID := iterationMsgID(opts.MessageID, iteration)
 		outboundMsg := bus.OutboundMessage{
 			Channel:   opts.Channel,
@@ -376,23 +253,13 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		lr.al.bus.PublishOutbound(outboundMsg)
 	}
 
-	// 9. Goal continuation is triggered by the caller (message processor)
-	// AFTER this function returns and releases the per-session semaphore.
-	// See maybeRunGoalContinuation. This avoids the recursive runAgentLoop
-	// deadlock on the per-session semaphore.
-
 	if opts.SendResponse {
-		// Return empty string to prevent duplicate publish in loop.go
 		return "", nil
 	}
 
 	return finalContent, nil
 }
 
-// lastAssistantResponse returns the content of the most recent assistant
-// message in the session's history, or an empty string if there is none.
-// It is used by the caller-side goal trigger to pass the latest agent output
-// to the continuation loop / judge.
 func lastAssistantResponse(agent *AgentInstance, sessionKey string) string {
 	if agent == nil || agent.Sessions == nil {
 		return ""
@@ -402,8 +269,6 @@ func lastAssistantResponse(agent *AgentInstance, sessionKey string) string {
 		if history[i].Role != "assistant" {
 			continue
 		}
-		// Skip blank assistant turns: a legacy bug persisted empty responses,
-		// and the goal judge must not receive an empty "last response".
 		if strings.TrimSpace(history[i].Content) == "" {
 			continue
 		}
@@ -412,12 +277,6 @@ func lastAssistantResponse(agent *AgentInstance, sessionKey string) string {
 	return ""
 }
 
-// maybeRunGoalContinuation is the caller-side trigger for the autonomous goal
-// loop. It is invoked by the message processor AFTER runAgentLoop returns
-// (and releases the per-session semaphore), so the recursive runAgentLoop
-// calls inside the continuation each acquire and release the semaphore
-// independently. Without this, the recursive call would re-acquire the still
-// held semaphore and deadlock.
 func (lr *llmRunnerImpl) maybeRunGoalContinuation(agent *AgentInstance, opts processOptions, lastResponse string) {
 	if opts.SkipGoalLoop {
 		return
@@ -425,8 +284,6 @@ func (lr *llmRunnerImpl) maybeRunGoalContinuation(agent *AgentInstance, opts pro
 	if lr.al.goalManager == nil || !lr.al.goalManager.IsActive(opts.SessionKey) {
 		return
 	}
-	// Use the goal stop context as parent so /goal clear and loop shutdown can
-	// cancel an in-flight continuation loop.
 	ctx := lr.al.goalStopCtx
 	if ctx == nil {
 		ctx = context.Background()
@@ -434,16 +291,9 @@ func (lr *llmRunnerImpl) maybeRunGoalContinuation(agent *AgentInstance, opts pro
 	lr.runGoalContinuation(ctx, agent, opts, lastResponse)
 }
 
-// runGoalContinuation implements the autonomous goal loop. After each agent
-// turn, it evaluates whether the goal is achieved (via the judge). If not,
-// it injects a continuation prompt and runs another turn, repeating until
-// the goal is done, the budget is exhausted, or the context is cancelled.
 func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentInstance, opts processOptions, lastResponse string) {
 	gm := lr.al.goalManager
 
-	// Mark the session as inside a goal loop for the entire duration so
-	// IsSessionProcessing stays true during the judge-evaluation gap between
-	// turns (when the per-session semaphore is released).
 	lr.al.markGoalLoopActive(opts.SessionKey)
 	defer lr.al.clearGoalLoopActive(opts.SessionKey)
 
@@ -457,7 +307,6 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 			return
 		}
 
-		// Increment turn counter; if budget exhausted, notify and stop.
 		if exhausted := gm.IncrementTurn(opts.SessionKey); exhausted {
 			updatedGoal := gm.Get(opts.SessionKey)
 			notice := fmt.Sprintf("🚫 Goal budget exhausted (%d/%d turns).\nGoal: %s\n\nThe goal has been marked as blocked. Use /goal clear to remove it, or /goal <text> --turns N to retry with a larger budget.",
@@ -470,10 +319,8 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 			return
 		}
 
-		// Evaluate goal completion via judge (if configured).
 		judgeAnswer := ""
 		if gm.judge != nil {
-			// Notify TUI that the goal is being reviewed.
 			lr.al.publishToolLifecycle(bus.OutboundMessage{
 				Channel: opts.Channel,
 				ChatID:  opts.ChatID,
@@ -487,7 +334,6 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 			var isDone bool
 			var err error
 			isDone, judgeAnswer, err = gm.judge.JudgeGoal(ctx, opts.SessionKey, goal.Text, lastResponse)
-			// Clear the reviewing indicator.
 			lr.al.publishToolLifecycle(bus.OutboundMessage{
 				Channel: opts.Channel,
 				ChatID:  opts.ChatID,
@@ -502,7 +348,6 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 					"session_key": opts.SessionKey,
 					"error":       err.Error(),
 				})
-				// On judge error, continue the loop (don't block progress)
 			} else if isDone {
 				gm.MarkDone(opts.SessionKey)
 				notice := fmt.Sprintf("✅ Goal achieved!\n🎯 %s\n   Completed in %d turns.", goal.Text, goal.TurnsUsed)
@@ -515,16 +360,11 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 			}
 		}
 
-		// Re-check goal is still active (user may have cleared it).
 		if !gm.IsActive(opts.SessionKey) {
 			return
 		}
 
-		// Inject continuation prompt and run another turn.
 		updatedGoal := gm.Get(opts.SessionKey)
-		// If the judge supplied specific next-step guidance (subagent judge
-		// acting as a supervisor), use it as the next turn's prompt instead of
-		// the generic continuation prompt.
 		guidance := extractContinuationGuidance(judgeAnswer)
 		var continuationPrompt string
 		if guidance != "" {
@@ -553,7 +393,6 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 			"goal":        updatedGoal.Text,
 		})
 
-		// Run another agent turn with the continuation prompt.
 		contOpts := processOptions{
 			SessionKey:      opts.SessionKey,
 			Channel:         opts.Channel,
@@ -563,7 +402,7 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 			EnableSummary:   true,
 			SendResponse:    true,
 			NoHistory:       false,
-			SkipGoalLoop:    true, // prevent recursion
+			SkipGoalLoop:    true,
 		}
 
 		_, err := lr.runAgentLoop(ctx, agent, contOpts)
@@ -575,7 +414,6 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 				"session_key": opts.SessionKey,
 				"error":       err.Error(),
 			})
-			// On error, stop the loop to avoid infinite retries
 			notice := fmt.Sprintf("⚠️ Goal continuation encountered an error: %s\nUse /goal resume to retry.", err.Error())
 			lr.al.bus.PublishOutbound(bus.OutboundMessage{
 				Channel: opts.Channel,
@@ -586,20 +424,10 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 			return
 		}
 
-		// runAgentLoop returns "" when SendResponse=true (it publishes the
-		// outbound itself). Re-fetch the actual last assistant response from
-		// session history so the judge sees the real content.
 		lastResponse = lastAssistantResponse(agent, opts.SessionKey)
 	}
 }
 
-// modelForTurn returns the model this turn should use: a per-turn override
-// coming from a harness custom command wins, otherwise the session model
-// (user /model selection, persisted session model, or agent default) applies.
-// The override is turn-scoped by design — it is never written to sessionModels
-// nor to the session store, so the next turn falls back to the session model.
-// Alias resolution stays with the callers, which already resolve the value they
-// get from here.
 func (lr *llmRunnerImpl) modelForTurn(agent *AgentInstance, opts processOptions) string {
 	if opts.ModelOverride != "" {
 		return opts.ModelOverride
@@ -610,15 +438,7 @@ func (lr *llmRunnerImpl) modelForTurn(agent *AgentInstance, opts processOptions)
 	return lr.al.sessionManager.ModelForSession(agent, opts.SessionKey)
 }
 
-// runLLMIteration executes the LLM call loop with tool handling.
 func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstance, messages []providers.Message, opts processOptions) (string, int, error) {
-	// The session's tool view. MCP tools loaded with get_mcp_tool land in a
-	// session-scoped layer over agent.Tools (never in agent.Tools itself), so
-	// one chat's load is invisible to the other chats served by this agent.
-	// Tool definitions AND executions go through this same instance: it must be
-	// the layer get_mcp_tool registers into, or the loop would not see what it
-	// just loaded. Resolved per iteration — a load in the previous iteration is
-	// visible on the next one without re-reading anything.
 	toolRegistry := lr.al.toolCoordinator.sessionTools(agent, opts.SessionKey)
 	if toolRegistry == nil {
 		toolRegistry = agent.Tools
@@ -628,14 +448,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 	var finalContent string
 	emptyRetries := 0
 	loopDetector := newLoopDetector()
-	// opts.ModelOverride carries the model pinned by a harness custom command
-	// for this turn only; without it the session model (user /model selection,
-	// persisted session model, or agent default) applies as before.
 	model := lr.modelForTurn(agent, opts)
-	// Resolve model alias to ensure a provider prefix is present for routing.
-	// Persisted session models may lack the prefix (e.g., stored before alias
-	// resolution was fixed), which causes ParseModelRef to fall back to the
-	// default provider and route requests to the wrong endpoint.
 	model = lr.al.cfg().Providers.ResolveModelAlias(model, lr.al.cfg().Agents.Defaults.Provider)
 	candidates := agent.Candidates
 	if model != agent.Model {
@@ -654,7 +467,6 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		}
 	}
 
-	// MaxIterations <= 0 means unlimited (timeout + loop detector are the real safety guards)
 	for agent.MaxIterations <= 0 || iteration < agent.MaxIterations {
 		if err := ctx.Err(); err != nil {
 			return "", iteration, err
@@ -662,26 +474,10 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 
 		iteration++
 
-		// A new iteration begins: anything the session still holds as an
-		// in-progress streaming draft belongs to an iteration this loop
-		// DISCARDED (the empty response retry / invalid tool-call paths
-		// `continue` without persisting). Drop it so this iteration's reasoning
-		// does not get concatenated onto it and a reload never shows the same
-		// thinking text repeated. Strict no-op when the previous iteration was
-		// persisted (AddFullMessage clears Streaming) — see
-		// SessionManager.DiscardStreamingDraft.
 		if iteration > 1 {
 			agent.Sessions.DiscardStreamingDraft(opts.SessionKey)
 		}
 
-		// Mid-turn subagent notices, injected at the iteration boundary: the
-		// previous iteration just closed with tool results (or with an
-		// assistant turn plus guidance), so a user message here keeps the
-		// conversation well-formed. When the previous message IS a user
-		// message (empty-response retry, malformed-tool-call guidance, loop
-		// guidance) appending another one would break the providers' role
-		// alternation, so the notices stay queued: the final-exit check below
-		// guarantees they are delivered regardless.
 		if iteration > 1 && midTurnNoticeBoundaryIsSafe(messages) {
 			if notices := opts.midTurnQueue.drain(); len(notices) > 0 {
 				messages = lr.injectMidTurnNotices(agent, messages, opts, notices)
@@ -695,33 +491,17 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				"max":       agent.MaxIterations,
 			})
 
-		// Build tool definitions from the session's view (re-read every
-		// iteration: a get_mcp_tool call in the previous iteration added its
-		// remote tools to this same layer).
 		providerToolDefs := toolRegistry.ToProviderDefs()
 
-		// Determine whether the current (primary) model supports vision and
-		// native video. The read_image/read_video tools are exposed based on
-		// the primary model only. When the fallback chain fails over to a
-		// weaker model, image/video content is stripped per-candidate in
-		// callWithFallback (see llm_caller.go), so a capable primary model no
-		// longer loses read_image just because a fallback in the chain lacks
-		// vision. filterToolDefs is the same pure policy group turns use.
 		modelProvider := extractProviderFromModel(model, lr.al.cfg().Agents.Defaults.Provider)
 		modelHasVision := getSupportsImages(lr.al.cfg(), model, modelProvider)
 		modelHasVideo := getSupportsVideo(lr.al.cfg(), model, modelProvider)
 		providerToolDefs = filterToolDefs(providerToolDefs, modelHasVision, modelHasVideo, nil)
 
-		// Strip image_url/video_url ContentParts from messages. Historical
-		// messages may contain media data from previous turns (or from a
-		// different model that supported vision/video). Sending image content
-		// to a non-vision model, or video content to a model without native
-		// video support, causes API errors.
 		if !modelHasVision || !modelHasVideo {
 			messages = stripContentParts(messages, !modelHasVision, !modelHasVideo)
 		}
 
-		// In chat mode, only expose web_search and web_fetch tools.
 		if agent.Sessions.GetMode(opts.SessionKey) == "chat" {
 			chatTools := map[string]bool{"web_search": true, "web_fetch": true}
 			filtered := make([]providers.ToolDefinition, 0, 2)
@@ -733,13 +513,8 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			providerToolDefs = filtered
 		}
 
-		// Pre-LLM compaction check: guards the request itself. A single
-		// iteration can add hundreds of thousands of tokens of tool results
-		// and context messages; without this check the request goes out
-		// oversized and fails before the post-tool check ever runs.
 		messages = lr.maybeCompactLoopContext(ctx, agent, messages, model, opts, iteration)
 
-		// Log LLM request details
 		logger.DebugCF("agent", "LLM request",
 			map[string]interface{}{
 				"agent_id":          agent.ID,
@@ -752,7 +527,6 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				"system_prompt_len": len(messages[0].Content),
 			})
 
-		// Log full messages (detailed)
 		logger.DebugCF("agent", "Full LLM request",
 			map[string]interface{}{
 				"iteration":     iteration,
@@ -760,10 +534,6 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				"tools_json":    FormatToolsForLog(providerToolDefs),
 			})
 
-		// Setup streaming handlers for native channel.
-		// Each iteration gets a unique messageID so that separate
-		// LLM responses (with their own reasoning + text) render as
-		// separate sections in the chat, not merged into one slot.
 		var streamOnChunk func(chunk string, done bool)
 		var streamOnReasoning func(reasoningChunk string)
 		iterationMsgID := iterationMsgID(opts.MessageID, iteration)
@@ -773,7 +543,6 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			streamOnReasoning = streamer.onReasoning
 		}
 
-		// Call LLM using llmCaller with retry logic
 		llmCallerInstance := newLLMCaller(lr.al)
 		if lr.retryWait != nil {
 			llmCallerInstance.retryWait = lr.retryWait
@@ -797,19 +566,11 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		var err error
 
 		for transientAttempt := 0; ; transientAttempt++ {
-			// Checkpoint "an actual provider request is outstanding" right
-			// before the call, inside the transient-retry loop: each attempt
-			// may rebuild the messages (context-overflow compaction inside
-			// executeWithRetry), and a crash during any of them must be
-			// resumable. Update-only (see writeTurnMarker): turns that did not
-			// come through a spooled inbound never have a marker to advance,
-			// so ProcessDirect/goal/cron paths stay untouched.
 			lr.al.writeTurnMarker(opts.SessionKey, turnPhaseLLMWait, iteration, nil)
 			response, messages, err = llmCallerInstance.executeWithRetry(callOpts, messages)
 			if err == nil {
 				break
 			}
-			// User abort or non-retriable error: stop the execution immediately.
 			if ctx.Err() != nil || !providers.IsRetriableError(err) {
 				break
 			}
@@ -841,22 +602,11 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			return "", iteration, fmt.Errorf("LLM call failed after retries: %w", err)
 		}
 
-		// Track token usage from response
 		trackTokenUsage(agent.Sessions, opts.SessionKey, agent.ID, messages, response)
 
-		// Check if no tool calls - we're done
 		if len(response.ToolCalls) == 0 {
 			finalContent = response.Content
 
-			// If the response is empty, do NOT persist it and retry a bounded
-			// number of times. Persisting an assistant message with empty content
-			// (which happens when a thinking model burns the whole token budget on
-			// reasoning and returns content:"" with finish_reason:length) poisons
-			// the session history: every later turn replays those blanks, the model
-			// imitates them, and the session becomes permanently stuck in an empty
-			// loop that never terminates when MaxIterations is unlimited (0).
-			// Instead we keep only the follow-up prompt in memory for the retry and
-			// bound consecutive empties so the turn always ends cleanly.
 			if len(strings.TrimSpace(finalContent)) == 0 {
 				emptyRetries++
 				if emptyRetries > maxConsecutiveEmptyResponses {
@@ -867,13 +617,9 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 							"retries":   emptyRetries,
 							"max":       maxConsecutiveEmptyResponses,
 						})
-					// The iteration streamed a bubble that will never be
-					// confirmed by history: tell the client to drop it.
 					if streamer.shouldStream(opts.SendResponse) {
 						lr.discardIterationStream(opts, streamer.messageID, discardReasonEmptyResponse)
 					}
-					// Return empty content so runAgentLoop falls back to
-					// DefaultResponse and the session is left clean.
 					return "", iteration, nil
 				}
 				logger.WarnCF("agent", "Empty response received, retrying with follow-up prompt",
@@ -882,15 +628,11 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 						"iteration": iteration,
 						"retry":     emptyRetries,
 					})
-				// Keep the blank turn in the in-memory context only (preserves
-				// user/assistant role alternation and shows the model what it
-				// just produced) but never persist it to the session.
 				messages = append(messages, providers.Message{
 					Role:             "assistant",
 					Content:          response.Content,
 					ReasoningContent: response.ReasoningContent,
 				})
-				// Small backoff between empty-response retries (capped).
 				if !lr.waitForBackoff(ctx, emptyRetryBackoff(emptyRetries-1)) {
 					return "", iteration, ctx.Err()
 				}
@@ -898,20 +640,13 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					Role:    "user",
 					Content: "Your previous response was empty. Please provide a helpful response to my request.",
 				})
-				// The blank iteration streamed a bubble that is never persisted:
-				// tell the client to drop it before the next one starts.
 				if streamer.shouldStream(opts.SendResponse) {
 					lr.discardIterationStream(opts, streamer.messageID, discardReasonEmptyResponse)
 				}
 				continue
 			}
-			// Non-empty final content: reset the consecutive-empty counter so the
-			// backoff restarts small after a real response.
 			emptyRetries = 0
 
-			// Save assistant message with reasoning content (important for thinking
-			// models like DeepSeek). Only reached for non-empty content, so blanks
-			// are never written to the session.
 			assistantMsg := providers.Message{
 				Role:             "assistant",
 				Content:          response.Content,
@@ -920,19 +655,14 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			messages = append(messages, assistantMsg)
 			agent.Sessions.AddFullMessage(opts.SessionKey, assistantMsg)
 
-			// Check if the response contains plain-text tool invocations (e.g., `read_file{"path":"..."}`)
-			// instead of proper function calls. Some models (like DeepSeek) sometimes output tool call
-			// syntax as plain text, which would break the loop and send raw tool invocation text to the user.
 			if containsPlainToolCall(finalContent, toolRegistry) {
 				logger.WarnCF("agent", "LLM response contains plain-text tool calls instead of function calls, injecting guidance",
 					map[string]interface{}{
 						"agent_id":  agent.ID,
 						"iteration": iteration,
 					})
-				// Remove the assistant message we just added (replaced with guidance)
 				messages = messages[:len(messages)-1]
 				agent.Sessions.RemoveLastMessage(opts.SessionKey)
-				// Get available tool names for guidance
 				toolNames := knownToolNames(toolRegistry)
 				guidanceMsg := fmt.Sprintf(
 					"⚠️ You wrote tool invocations as plain text (e.g., `read_file{...}`) instead of using the proper function calling mechanism.\n\n"+
@@ -945,32 +675,12 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					Content: guidanceMsg,
 				})
 				agent.Sessions.AddMessage(opts.SessionKey, "user", guidanceMsg)
-				// The assistant message this iteration streamed was just removed
-				// again (RemoveLastMessage above), so the bubble the client
-				// rendered for it can never be confirmed: drop it.
 				if streamer.shouldStream(opts.SendResponse) {
 					lr.discardIterationStream(opts, streamer.messageID, discardReasonPlainTextToolCall)
 				}
 				continue
 			}
 
-			// Final-exit check: the model just produced a final answer, but a
-			// subagent may have finished while this turn was running. Loading
-			// the notices here (atomically, together with deactivating the
-			// queue when there is nothing left) keeps them in THIS turn
-			// instead of turning them into a separate continuation turn. The
-			// assistant message above stays persisted and streamed as an
-			// intermediate answer; the loop simply runs one more iteration so
-			// the model can react to what it just learned. Role safety is
-			// guaranteed here: the last message is that assistant message.
-			//
-			// Only worth doing when the loop can actually run another
-			// iteration. With the budget exhausted, the `continue` below would
-			// re-evaluate the loop condition, exit, and leave the notice
-			// already drained+persisted with no turn left to react to it. So a
-			// spent budget skips the check entirely and leaves the notices
-			// QUEUED: the flush defer in runAgentLoop deactivates the queue and
-			// re-publishes them as inbound, and that continuation turn reacts.
 			hasBudget := agent.MaxIterations <= 0 || iteration < agent.MaxIterations
 			if hasBudget {
 				if notices := opts.midTurnQueue.drainOrDeactivate(); len(notices) > 0 {
@@ -982,35 +692,23 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			break
 		}
 
-		// Log tool calls
 		toolNames := make([]string, 0, len(response.ToolCalls))
 		for _, tc := range response.ToolCalls {
 			toolNames = append(toolNames, tc.Name)
 		}
 
-		// Check for loop patterns and inject guidance if needed
 		if guidanceMsg := loopDetector.Check(response.ToolCalls, agent.ID, iteration); guidanceMsg != nil {
 			messages = append(messages, *guidanceMsg)
 			agent.Sessions.AddMessage(opts.SessionKey, "user", guidanceMsg.Content)
 		}
 
-		// Build assistant message with tool calls
 		assistantMsg := providers.Message{
 			Role:             "assistant",
 			Content:          response.Content,
 			ReasoningContent: response.ReasoningContent,
 		}
-		// Canonicalize before persisting: a tool call with no name, or with
-		// arguments that are not a JSON object, must never reach the session.
-		// Replaying such a message makes every provider reject the request with
-		// 400 "function.arguments must be in JSON format", and because the
-		// message is persisted the session stays broken on every later turn.
 		assistantMsg.ToolCalls = providers.CanonicalToolCalls(response.ToolCalls)
 
-		// If nothing survived canonicalization, do not enter the tool phase:
-		// executing the raw (rejected) calls would persist tool results whose
-		// ids have no matching tool_call, which is the same 400 in a different
-		// shape. Tell the model instead and let it retry.
 		if len(assistantMsg.ToolCalls) == 0 {
 			logger.WarnCF("agent", "all tool calls from response were invalid, requesting a retry",
 				map[string]interface{}{
@@ -1019,10 +717,6 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					"agent_id":    agent.ID,
 					"session_key": opts.SessionKey,
 				})
-			// Keep the assistant turn in the live context so the guidance below
-			// stays a valid user message (providers reject two consecutive
-			// messages of the same role), but never persist a tool-call message
-			// that has no tool calls in it.
 			if strings.TrimSpace(response.Content) != "" {
 				messages = append(messages, assistantMsg)
 				agent.Sessions.AddFullMessage(opts.SessionKey, assistantMsg)
@@ -1032,11 +726,6 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					Content:          response.Content,
 					ReasoningContent: response.ReasoningContent,
 				})
-				// Content-less response with nothing but rejected tool calls:
-				// this iteration persisted NOTHING, so the bubble it streamed
-				// can never be confirmed by history — drop it. (The branch
-				// above does persist the assistant turn, so its bubble stays
-				// and is confirmed as usual.)
 				if streamer.shouldStream(opts.SendResponse) {
 					lr.discardIterationStream(opts, streamer.messageID, discardReasonInvalidToolCalls)
 				}
@@ -1054,35 +743,22 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 
 		messages = append(messages, assistantMsg)
 
-		// Save assistant message with tool calls to session
 		agent.Sessions.AddFullMessage(opts.SessionKey, assistantMsg)
 
-		// Execute tool calls
 		executor := newToolExecutor(lr.al)
 
-		// Checkpoint "tools are executing" before Phase 1 starts. The
-		// assistant message with its tool_calls is already persisted above,
-		// so a crash from here on leaves a resumable state: the replayed turn
-		// re-enters with HealToolCallPairs synthesizing results for whatever
-		// never completed.
 		lr.al.writeTurnMarker(opts.SessionKey, turnPhaseToolsRun, iteration, nil)
-		// Re-checkpoint live subagents: a spawn tool from the previous
-		// iteration may have added tasks since inbound_start.
 		lr.al.writeTurnSubagentSnapshot(opts.SessionKey)
 
-		// Phase 1: Execute all tools and collect results
 		type toolExecResult struct {
 			tc  providers.ToolCall
 			res *tools.ToolResult
 			err error
 		}
 		var execResults []toolExecResult
-		var execErr error // tracks the first execution error encountered
-		// Execute the canonical list, not the raw one: every tool result must
-		// reference a tool_call id that was actually persisted above.
+		var execErr error
 		for _, tc := range assistantMsg.ToolCalls {
 			if execErr != nil || ctx.Err() != nil {
-				// Already errored or cancelled — add placeholder for remaining tools
 				execResults = append(execResults, toolExecResult{
 					tc:  tc,
 					res: &tools.ToolResult{ForLLM: "[Tool execution was cancelled]"},
@@ -1111,8 +787,6 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			execResults = append(execResults, toolExecResult{tc: tc, res: toolResult})
 		}
 
-		// Phase 2: Append all tool result messages (role: "tool") in order
-		// This includes placeholder results for cancelled/failed tools to keep the session consistent.
 		var allContextMsgs []providers.Message
 		for _, er := range execResults {
 			contentForLLM := lr.al.redactor.Redact(buildToolResultContent(er.res))
@@ -1124,15 +798,11 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			messages = append(messages, toolResultMsg)
 			agent.Sessions.AddFullMessage(opts.SessionKey, toolResultMsg)
 
-			// Collect context messages for phase 3
 			if len(er.res.ContextMessages) > 0 {
 				allContextMsgs = append(allContextMsgs, er.res.ContextMessages...)
 			}
 		}
 
-		// Phase 3: Append all context messages (role: "user") after all tool messages
-		// This ensures tool messages are contiguous, satisfying the API requirement
-		// that all tool responses follow immediately after the assistant's tool_calls.
 		if !modelHasVision || !modelHasVideo {
 			allContextMsgs = stripContentParts(allContextMsgs, !modelHasVision, !modelHasVideo)
 		}
@@ -1141,18 +811,12 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			agent.Sessions.AddFullMessage(opts.SessionKey, ctxMsg)
 		}
 
-		// Return error if one occurred, now that placeholder results have been saved
 		if execErr != nil {
 			return "", iteration, execErr
 		}
 
-		// Post-tool compaction check: runs after tool results and context
-		// messages are appended so oversized contexts are compacted before the
-		// next iteration's pre-LLM check.
 		messages = lr.maybeCompactLoopContext(ctx, agent, messages, model, opts, iteration)
 
-		// Check context after all tool results are processed to allow prompt cancellation
-		// before starting the next LLM iteration.
 		if err := ctx.Err(); err != nil {
 			return "", iteration, err
 		}
@@ -1161,12 +825,6 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 	return finalContent, iteration, nil
 }
 
-// midTurnNoticeBoundaryIsSafe reports whether appending user-role mid-turn
-// notices after messages keeps the conversation well-formed. Providers reject
-// two consecutive messages of the same role, so a boundary whose last message
-// is already a user message (empty-response retry prompt, malformed-tool-call
-// guidance, loop guidance) is not usable: the caller leaves the notices queued
-// for a later boundary or for the final-exit check.
 func midTurnNoticeBoundaryIsSafe(messages []providers.Message) bool {
 	if len(messages) == 0 {
 		return true
@@ -1174,26 +832,6 @@ func midTurnNoticeBoundaryIsSafe(messages []providers.Message) bool {
 	return messages[len(messages)-1].Role != "user"
 }
 
-// injectMidTurnNotices appends the drained subagent notices to the live
-// message context AND to the session history, so the running turn reacts to
-// them immediately and every later turn (and compaction) still sees them.
-//
-// The WHOLE batch becomes exactly ONE user message, with the notices joined by
-// a blank line behind the canonical prefix. That is a role-alternation
-// requirement, not cosmetics: appending one user message per notice produces
-// two consecutive user messages when two results land at the same boundary,
-// which Bedrock Converse (among others) rejects with a 400 — and the messages
-// are persisted, so the breakage would replay on every later turn. Merging
-// keeps a single same-role message, which every provider accepts.
-//
-// The prefix stays at the START of the merged text so pkg/tui/system_notice.go
-// and the pkg/session synthetic-marker classification still recognise it.
-//
-// One Save for the whole batch, and one live-update event: the clients only
-// need to know that the transcript grew behind their back (they refetch it),
-// which is exactly what "history.updated" means. The event carries
-// reason=subagent_notice so a client can tell it apart from the normal
-// post-completion refresh.
 func (lr *llmRunnerImpl) injectMidTurnNotices(agent *AgentInstance, messages []providers.Message, opts processOptions, notices []midTurnNotice) []providers.Message {
 	if len(notices) == 0 {
 		return messages
@@ -1226,9 +864,6 @@ func (lr *llmRunnerImpl) injectMidTurnNotices(agent *AgentInstance, messages []p
 	return messages
 }
 
-// iterationMsgID appends the iteration number as a suffix to baseID for
-// iterations >1 so that the frontend creates distinct assistant bubbles
-// for each LLM response instead of merging them into one slot.
 func iterationMsgID(baseID string, iteration int) string {
 	if iteration > 1 && baseID != "" {
 		return fmt.Sprintf("%s-%d", baseID, iteration)
@@ -1236,16 +871,6 @@ func iterationMsgID(baseID string, iteration int) string {
 	return baseID
 }
 
-// stripContentParts returns a copy of messages with image_url ContentParts
-// removed when dropImage is set, and video_url ContentParts removed when
-// dropVideo is set. All other parts are preserved and the copy semantics match
-// the original stripImageContentParts helper. If neither flag is set the input
-// is returned unchanged (no allocation).
-//
-// This is used when the current model does not support vision and/or native
-// video — historical messages may contain media data from previous turns (or
-// from a different model that supported it), and sending unsupported image or
-// video content to the model causes API errors.
 func stripContentParts(messages []providers.Message, dropImage, dropVideo bool) []providers.Message {
 	if !dropImage && !dropVideo {
 		return messages
@@ -1272,30 +897,11 @@ func stripContentParts(messages []providers.Message, dropImage, dropVideo bool) 
 	return stripped
 }
 
-// stripImageContentParts returns a copy of messages with all image_url
-// ContentParts removed. Thin wrapper around stripContentParts for callers (and
-// tests) that only need the vision path.
 func stripImageContentParts(messages []providers.Message) []providers.Message {
 	return stripContentParts(messages, true, false)
 }
 
-// maybeCompactLoopContext runs the proactive intra-loop context compaction
-// check shared by the main agent loop. It mirrors the subagent RunToolLoop
-// behavior (pkg/tools/toolloop.go step 8): when the accumulated context
-// exceeds the configured threshold, summarize old messages so the loop can
-// keep running instead of only compacting reactively (on LLM context error)
-// or at the very end (maybeSummarize).
-//
-// It is called from two places in runLLMIteration: BEFORE each LLM request
-// (a single iteration can add hundreds of thousands of tokens of tool
-// results, and without this pre-request check the request goes out
-// oversized and fails) and AFTER tool execution (the original check). It
-// takes the current messages slice and returns the (possibly compacted)
-// slice.
 func (lr *llmRunnerImpl) maybeCompactLoopContext(ctx context.Context, agent *AgentInstance, messages []providers.Message, model string, opts processOptions, iteration int) []providers.Message {
-	// Image/byte budget is unconditional: it must also run for sessions without a
-	// configured context window, otherwise an oversized payload (base64 images)
-	// reaches the transport and is rejected with HTTP 400.
 	if reduced, evicted := tools.EnforceImageBudget(messages); evicted > 0 {
 		messages = reduced
 		logger.InfoCF("agent", "Request image budget enforced", map[string]interface{}{
@@ -1335,11 +941,6 @@ func (lr *llmRunnerImpl) maybeCompactLoopContext(ctx context.Context, agent *Age
 			if cm := lr.al.cfg().CompactionModel(); cm != "" {
 				compactModel = cm
 			}
-			// Resolve the correct provider for the compaction model (which may
-			// be the session model or a dedicated compaction_model). Without
-			// this, the default agent.Provider is used even when the model
-			// belongs to a different provider (e.g. moonshotai/kimi-k3 on an
-			// Anthropic agent), causing 404 errors.
 			if ref := providers.ParseModelRef(compactModel, ""); ref != nil && ref.Provider != "" {
 				agentRef := providers.ParseModelRef(agent.Model, "")
 				if agentRef == nil || agentRef.Provider != ref.Provider {
@@ -1361,15 +962,9 @@ func (lr *llmRunnerImpl) maybeCompactLoopContext(ctx context.Context, agent *Age
 						},
 					})
 				}
-				// Sync compaction state to the session so post-turn
-				// maybeSummarize sees the reduced history and the
-				// excluded messages don't bloat the next turn's context.
 				if len(compacted) > 1 && strings.HasPrefix(compacted[1].Content, "[Context compacted") {
 					agent.Sessions.SetSummary(opts.SessionKey, compacted[1].Content)
 					agent.Sessions.ExcludeOldMessagesFromContext(opts.SessionKey, 6)
-					// Increment before Save so the counter is persisted in
-					// this save; incrementing after would leave the count
-					// in memory until the next Save.
 					agent.Sessions.IncrementCompactionCount(opts.SessionKey)
 					if saveErr := agent.Sessions.Save(opts.SessionKey); saveErr != nil {
 						logger.WarnCF("agent", "Failed to save session after intra-loop compaction", map[string]interface{}{
@@ -1392,47 +987,14 @@ func (lr *llmRunnerImpl) maybeCompactLoopContext(ctx context.Context, agent *Age
 	return messages
 }
 
-// Discard reasons carried by message.discard. They are advisory (logs,
-// debugging, future filtering): the client only needs the message id, which is
-// what ties the event to the bubble it must drop.
 const (
-	// discardReasonEmptyResponse — the bounded empty-response retry: the
-	// iteration produced no content and is never persisted.
-	discardReasonEmptyResponse = "empty_response"
-	// discardReasonPlainTextToolCall — the model wrote tool invocations as
-	// plain text, so the assistant message it produced is removed again.
+	discardReasonEmptyResponse     = "empty_response"
 	discardReasonPlainTextToolCall = "plain_text_tool_call"
-	// discardReasonInvalidToolCalls — every tool call failed
-	// canonicalization, so nothing survivable is left of the iteration.
-	discardReasonInvalidToolCalls = "invalid_tool_calls"
+	discardReasonInvalidToolCalls  = "invalid_tool_calls"
 )
 
-// discardIterationStream tells connected clients to DROP the streaming bubble
-// of an iteration this loop is throwing away.
-//
-// WHY: the client cannot infer that an iteration was discarded on its own. It
-// received message.thinking/message.stream chunks for it and no
-// message.complete — only the LAST iteration of a turn gets one, published from
-// runLLMIteration's tail — so the bubble it built can never be confirmed
-// against history and is rendered below newer answers forever. This event is
-// the only signal that ties a streamed id to "this one never happened".
-//
-// It publishes through the same bus shape as the stream handler (see
-// streamHandler.onChunk) so the native channel forwards it on the same
-// subscription path: Channel/ChatID address the client and MessageID carries the
-// id the client actually built the bubble from — `streamer.messageID`, NOT
-// `iterationMsgID(opts.MessageID, iteration)`.
-//
-// WHY the streamer's id and not the derived one: newStreamHandler substitutes a
-// generated UUID when `opts.MessageID` is empty, and that substitution is real —
-// the client's bubble is keyed by it. Turns that never carry an inbound message
-// id (the goal-continuation loop builds its processOptions without one, cron and
-// API-driven turns likewise) would otherwise emit a discard with an EMPTY
-// message id, which every client drops on the floor: the stray bubble this event
-// exists to remove would survive in exactly those turns.
 func (lr *llmRunnerImpl) discardIterationStream(opts processOptions, msgID, reason string) {
 	if lr == nil || lr.al == nil || lr.al.bus == nil {
-		// No bus: nothing is connected, so no client can hold a phantom bubble.
 		return
 	}
 	lr.al.bus.PublishOutbound(bus.OutboundMessage{

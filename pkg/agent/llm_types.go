@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -13,19 +7,16 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// messageSignature tracks repeated LLM responses to detect loops
 type messageSignature struct {
 	toolCalls []toolCallSignature
 	count     int
 }
 
-// toolCallSignature represents a unique signature of a tool call for loop detection
 type toolCallSignature struct {
 	name      string
 	arguments string
 }
 
-// messageSignaturesEqual compares two sets of tool call signatures
 func messageSignaturesEqual(a, b []toolCallSignature) bool {
 	if len(a) != len(b) {
 		return false
@@ -38,15 +29,12 @@ func messageSignaturesEqual(a, b []toolCallSignature) bool {
 	return true
 }
 
-// knownDeepSeekPrefixes lists model name prefixes that support DeepSeek's
-// native thinking mode.
 var knownDeepSeekPrefixes = []string{
 	"deepseek/",
 	"deepseek-",
 	"deepseek_v",
 }
 
-// isDeepSeekModel checks if a model name matches known DeepSeek prefixes
 func isDeepSeekModel(model string) bool {
 	lower := strings.ToLower(model)
 	for _, prefix := range knownDeepSeekPrefixes {
@@ -57,10 +45,6 @@ func isDeepSeekModel(model string) bool {
 	return false
 }
 
-// knownToolNames returns a sorted list of the tool names visible to one
-// session: it takes the session's registry (see toolCoordinator.sessionTools)
-// rather than an agent, because MCP tools live in a per-session layer and must
-// be reported only to the session that loaded them.
 func knownToolNames(registry *tools.ToolRegistry) []string {
 	if registry == nil {
 		return nil
@@ -70,8 +54,6 @@ func knownToolNames(registry *tools.ToolRegistry) []string {
 	return names
 }
 
-// containsPlainToolCall checks if the response content contains plain-text tool
-// invocations like `read_file{"path":"..."}` instead of proper function calling.
 func containsPlainToolCall(content string, registry *tools.ToolRegistry) bool {
 	if len(strings.TrimSpace(content)) == 0 {
 		return false

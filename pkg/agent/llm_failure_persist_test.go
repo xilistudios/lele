@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -19,54 +13,25 @@ import (
 	"github.com/xilistudios/lele/pkg/session"
 )
 
-// A turn whose LLM request fails after every retry used to vanish: the error
-// text was published as a normal (never persisted) final answer, so the TUI
-// reloaded an unchanged history and the WebUI saw it deleted by the refetch.
-//
-// These tests pin the fix at the turn boundary — publish an inbound message,
-// block on the bus until turn.end, then inspect the outbound messages and the
-// session history the next history request would read. Nothing here calls
-// persistLLMFailure or filterContextMessages: both are reached through the real
-// Run → processMessage path, so a regression that stops calling them fails
-// these tests.
-
-// llmFailureDetail is the provider error the persisted failure must carry. The
-// "invalid request format" prefix is ClassifyError's terminal marker, so the
-// fallback chain gives up immediately instead of spending its backoff budget on
-// a test that only wants to see the error path. No status code appears on
-// purpose: a bare "429" in the text would classify as a rate limit and drag the
-// whole retry/failover budget into the test.
 const llmFailureDetail = "invalid request format: LLM call failed after retries"
 
-// legacyErrorPrefix is the ❌ wording channels that only render Content
-// (Telegram, WhatsApp) still receive. The trailing detail is the wrapped
-// provider error, so the tests match on the prefix plus the marker above rather
-// than on an exact string the retry/failover layers are free to decorate.
 const legacyErrorPrefix = "❌ Error processing message: "
 
-// scriptedTurnProvider fails every request while failing is set and answers
-// with answer otherwise. Keying the failure on a flag instead of a call count
-// keeps the tests independent of how many attempts the retry layers make before
-// they give up. Every request is recorded, which is what lets a test assert what
-// actually reached the model.
 type scriptedTurnProvider struct {
-	mu      sync.Mutex
-	failing bool
-	once    sync.Once
-	onFail  func()
-	// requests holds a copy of the messages of every call, in order.
+	mu       sync.Mutex
+	failing  bool
+	once     sync.Once
+	onFail   func()
 	requests [][]providers.Message
 	answer   string
 }
 
-// fails makes subsequent calls fail.
 func (p *scriptedTurnProvider) fails() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.failing = true
 }
 
-// succeeds makes subsequent calls answer.
 func (p *scriptedTurnProvider) succeeds() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -82,8 +47,6 @@ func (p *scriptedTurnProvider) Chat(_ context.Context, messages []providers.Mess
 	if !failing {
 		return &providers.LLMResponse{Content: p.answer, ToolCalls: []providers.ToolCall{}}, nil
 	}
-	// The stream callback fires once per turn, however many attempts the
-	// retry layers make.
 	p.once.Do(func() {
 		if p.onFail != nil {
 			p.onFail()
@@ -94,7 +57,6 @@ func (p *scriptedTurnProvider) Chat(_ context.Context, messages []providers.Mess
 
 func (p *scriptedTurnProvider) GetDefaultModel() string { return "mock-scripted-model" }
 
-// requestsSeen returns a copy of the recorded requests under the lock.
 func (p *scriptedTurnProvider) requestsSeen() [][]providers.Message {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -105,10 +67,6 @@ func (p *scriptedTurnProvider) requestsSeen() [][]providers.Message {
 	return out
 }
 
-// runOneTurn publishes msg and blocks until the turn finishes, returning every
-// outbound message the turn produced (turn.end included). The bus subscription
-// is the synchronisation: by the time turn.end arrives, the turn's persistence
-// has already happened in the same goroutine.
 func runOneTurn(t *testing.T, msgBus *bus.MessageBus, msg bus.InboundMessage) []bus.OutboundMessage {
 	t.Helper()
 	if !msgBus.PublishInbound(msg) {
@@ -117,7 +75,6 @@ func runOneTurn(t *testing.T, msgBus *bus.MessageBus, msg bus.InboundMessage) []
 	return collectOutbound(t, msgBus, 60*time.Second)
 }
 
-// findFailureOutbound returns the outbound message carrying the failure text.
 func findFailureOutbound(t *testing.T, outbound []bus.OutboundMessage) bus.OutboundMessage {
 	t.Helper()
 	for _, m := range outbound {
@@ -130,10 +87,6 @@ func findFailureOutbound(t *testing.T, outbound []bus.OutboundMessage) bus.Outbo
 	return bus.OutboundMessage{}
 }
 
-// newLLMFailureLoop builds the same real-bus/real-session-manager loop the
-// durable-inbound tests use, with the retry backoff made instant so a turn that
-// fails every attempt ends in milliseconds instead of burning the production
-// 5s/15s/30s budget.
 func newLLMFailureLoop(t *testing.T, provider providers.LLMProvider) (*AgentLoop, *bus.MessageBus) {
 	t.Helper()
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -145,7 +98,6 @@ func newLLMFailureLoop(t *testing.T, provider providers.LLMProvider) (*AgentLoop
 	return al, msgBus
 }
 
-// startLoop runs the loop until the test ends.
 func startLoop(t *testing.T, al *AgentLoop) {
 	t.Helper()
 	runCtx, cancelRun := context.WithCancel(context.Background())
@@ -154,26 +106,15 @@ func startLoop(t *testing.T, al *AgentLoop) {
 	t.Cleanup(func() { stopRun(t, cancelRun, done) })
 }
 
-// TestLLMFailureTurn is the matrix of inbound shapes a failed turn can arrive
-// in. Every case must end with the failure persisted as an assistant message
-// carrying the UI-only detail, excluded from the model context, and published
-// to the channel as a normal final answer marked with Metadata["error"].
 func TestLLMFailureTurn(t *testing.T) {
 	const partialAnswer = "partial answer the user already saw"
 
 	type failureCase struct {
-		name string
-		// prepare runs before the turn (session setup and provider side
-		// effects).
-		prepare func(agent *AgentInstance, sessionKey string)
-		// inbound overrides the published message.
-		inbound func() bus.InboundMessage
-		// wantHistory pins the messages after the turn (role/content/error
-		// triples are checked case by case below).
+		name           string
+		prepare        func(agent *AgentInstance, sessionKey string)
+		inbound        func() bus.InboundMessage
 		wantHistoryLen int
-		// wantDraft is set when the case streamed a visible draft: it must
-		// survive as its own message, ahead of the failure.
-		wantDraft bool
+		wantDraft      bool
 	}
 
 	cases := []failureCase{
@@ -189,8 +130,6 @@ func TestLLMFailureTurn(t *testing.T) {
 		{
 			name: "empty streaming draft placeholder is reused",
 			prepare: func(agent *AgentInstance, sessionKey string) {
-				// The very first think-chunk creates the placeholder with
-				// nothing visible in it.
 				agent.Sessions.AppendReasoningChunk(sessionKey, "")
 			},
 			wantHistoryLen: 2,
@@ -218,8 +157,6 @@ func TestLLMFailureTurn(t *testing.T) {
 			sessionKey := al.ResolveSessionKey("telegram:123")
 
 			if tc.wantDraft {
-				// Streaming needs the session the turn will use, so the
-				// provider can only be wired once the loop exists.
 				provider.onFail = func() {
 					agent.Sessions.AppendAssistantChunk(sessionKey, partialAnswer)
 				}
@@ -236,7 +173,6 @@ func TestLLMFailureTurn(t *testing.T) {
 			msg := tc.inbound()
 			outbound := runOneTurn(t, msgBus, msg)
 
-			// ---- outbound contract (what every channel consumes) ----
 			failure := findFailureOutbound(t, outbound)
 			if failure.Event != "" {
 				t.Errorf("failure event = %q, want \"\" (turn-completion semantics must not change)", failure.Event)
@@ -254,7 +190,6 @@ func TestLLMFailureTurn(t *testing.T) {
 					failure.Channel, failure.ChatID, msg.Channel, msg.ChatID)
 			}
 
-			// ---- history contract (what the next refetch reads) ----
 			history := agent.Sessions.GetHistory(sessionKey)
 			if len(history) != tc.wantHistoryLen {
 				t.Fatalf("history has %d messages, want %d: %+v", len(history), tc.wantHistoryLen, history)
@@ -299,16 +234,11 @@ func TestLLMFailureTurn(t *testing.T) {
 	}
 }
 
-// TestLLMFailureResumedTurn covers the OTHER call site: a turn interrupted by a
-// gateway restart resumes from its checkpoint and then fails terminally. It must
-// produce the same persisted error box, with the resume wording in Content.
 func TestLLMFailureResumedTurn(t *testing.T) {
 	provider := &scriptedTurnProvider{answer: "unused"}
 	provider.fails()
 	al, msgBus := newLLMFailureLoop(t, provider)
 
-	// Resume needs both gates on: the config flag, and a non-nil durability
-	// handle (that is the in-loop signal that the durable spool exists).
 	yes := true
 	al.cfg().Session.Resume = &yes
 	al.SetInboundDurability(&fakeDurability{})
@@ -323,8 +253,6 @@ func TestLLMFailureResumedTurn(t *testing.T) {
 	msg := spooledMessage()
 	sessionKey := al.ResolveSessionKey(msg.SessionKey)
 
-	// Reconstruct a crashed turn: the user message is already in the history
-	// and the checkpoint carries the spool identity the replay will present.
 	agent.Sessions.AddMessage(sessionKey, "user", msg.Content)
 	al.writeTurnMarker(sessionKey, turnPhaseInbound, 0, func(m *TurnMarker) {
 		m.DedupeID = msg.DedupeID
@@ -365,12 +293,7 @@ func TestLLMFailureResumedTurn(t *testing.T) {
 	}
 }
 
-// TestLLMFailureNeverReachesTheModel is the observable form of "ExcludeFromContext
-// worked": the turn AFTER a failure is served from the same session, and the
-// request the provider receives must not contain the failure in any form — not
-// the ❌ text, not the detail.
 func TestLLMFailureNeverReachesTheModel(t *testing.T) {
-	// Two turns on one session: the first fails, the second answers.
 	provider := &scriptedTurnProvider{answer: "second answer"}
 	provider.fails()
 
@@ -416,9 +339,6 @@ func TestLLMFailureNeverReachesTheModel(t *testing.T) {
 	}
 }
 
-// TestLLMFailureIsDurable pins the other half of "the box survives a restart":
-// the failure row must be on disk when the turn completes, not merely in memory
-// waiting for a later save.
 func TestLLMFailureIsDurable(t *testing.T) {
 	provider := &scriptedTurnProvider{answer: "unused"}
 	provider.fails()
@@ -432,8 +352,6 @@ func TestLLMFailureIsDurable(t *testing.T) {
 	startLoop(t, al)
 	runOneTurn(t, msgBus, spooledMessage())
 
-	// A fresh manager over the same repository is what a new process sees: it
-	// holds no in-memory session, so every message it returns came from disk.
 	if al.dbStore == nil {
 		t.Fatal("expected a SQLite store")
 	}
@@ -447,7 +365,6 @@ func TestLLMFailureIsDurable(t *testing.T) {
 	}
 }
 
-// countErrorRows counts the messages that carry the UI-only failure detail.
 func countErrorRows(history []providers.Message) int {
 	n := 0
 	for _, m := range history {

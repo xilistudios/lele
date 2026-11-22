@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -26,44 +20,21 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// agentProvidableImpl implements the channels.AgentProvidable interface.
-// It delegates operations to the appropriate internal components.
 type agentProvidableImpl struct {
 	al *AgentLoop
 }
 
-// newAgentProvidable creates a new agent providable instance.
 func newAgentProvidable(al *AgentLoop) *agentProvidableImpl {
 	return &agentProvidableImpl{al: al}
 }
 
-// ============================================================================
-// AgentSessionManager Interface (embedded in AgentProvidable)
-// ============================================================================
-
-// GetSessionAgent gets the active agent for a session.
 func (ap *agentProvidableImpl) GetSessionAgent(sessionKey string) string {
 	return ap.al.getSessionAgent(sessionKey)
 }
 
-// SetSessionAgent binds a session to an agent. This is the EXPLICIT switch
-// path: /agent, PUT /sessions/{key}/agent, the TUI picker and the Telegram
-// picker all call it, and all of them intend to re-bind.
-//
-// Per-message routing hints must NOT come through here — use
-// HintSessionAgent. The WebUI attaches `agent_id` to every websocket message
-// (useMessages.ts sends currentAgentId alongside each send), so routing it
-// through this method re-ran the bind on every turn. On an unpinned session the
-// guard below does not fire, the bind falls through, and the trailing
-// SetModel(key, "") clears the model the user picked in the dropdown — which is
-// why the selection reverted to the agent default after one message.
 func (ap *agentProvidableImpl) SetSessionAgent(sessionKey, agentID string) {
 	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
 	currentAgentID := ap.GetSessionAgent(sessionKey)
-	// Only an actual pin makes "already on that agent" true. GetSessionAgent
-	// falls back to the default agent, so without this guard "/agent <default>"
-	// on a session routed to someone else would return early and never store the
-	// pin, leaving the binding in place.
 	if _, pinned := ap.al.sessionAgentOverride(resolvedKey); pinned && currentAgentID == agentID {
 		return
 	}
@@ -71,35 +42,15 @@ func (ap *agentProvidableImpl) SetSessionAgent(sessionKey, agentID string) {
 	ap.assignSessionAgent(resolvedKey, currentAgentID, agentID)
 }
 
-// HintSessionAgent applies the advisory `agent_id` that a chat client attaches
-// to a message — typically the agent currently rendered in the UI, restated on
-// every send so the backend agrees with what the user sees.
-//
-// A hint may bind, but it never carries intent to move the model selection, so
-// it differs from SetSessionAgent in two ways:
-//
-//   - When the session already resolves to that agent (pin, subagent binding or
-//     default fallback) it is a no-op. This is the common case for the WebUI,
-//     which re-sends the displayed agent with every message, and it means a hint
-//     never manufactures a pin on an unpinned session — routes keep winning.
-//   - When it does bind (a client switching agents purely via agent_id, or a
-//     session whose route changed underneath it) the model override survives, so
-//     a hint can never revert the user's dropdown selection. The bind itself,
-//     including the history migration, is identical to an explicit switch.
 func (ap *agentProvidableImpl) HintSessionAgent(sessionKey, agentID string) {
 	if agentID == "" {
 		return
 	}
-	// Already on this agent: an advisory restatement has nothing to do, and in
-	// particular must not touch the model override.
 	currentAgentID := ap.GetSessionAgent(sessionKey)
 	if currentAgentID == agentID {
 		return
 	}
 	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
-	// Capture the override before the bind clears it: a bind drops the model
-	// (correct for an explicit switch, which must not leak the old agent's
-	// model), but a hint is not a switch.
 	override, hadOverride := ap.al.sessionModels.Load(resolvedKey)
 	ap.assignSessionAgent(resolvedKey, currentAgentID, agentID)
 	if hadOverride {
@@ -109,11 +60,7 @@ func (ap *agentProvidableImpl) HintSessionAgent(sessionKey, agentID string) {
 	}
 }
 
-// assignSessionAgent performs the shared bind: record the mapping, migrate
-// session history from the previous owner, and clear the session's model
-// override so the previous agent's model does not leak into the new one.
 func (ap *agentProvidableImpl) assignSessionAgent(resolvedKey, currentAgentID, agentID string) {
-	// Migrate session history from old agent to new agent
 	if currentAgentID != "" {
 		oldAgent, oldOk := ap.al.registry.GetAgent(currentAgentID)
 		newAgent, newOk := ap.al.registry.GetAgent(agentID)
@@ -124,7 +71,6 @@ func (ap *agentProvidableImpl) assignSessionAgent(resolvedKey, currentAgentID, a
 			verboseLevel := oldAgent.Sessions.GetVerboseLevel(resolvedKey)
 			thinkingLevel := oldAgent.Sessions.GetThinkingLevel(resolvedKey)
 
-			// Copy history to new agent's session manager
 			if len(history) > 0 || summary != "" || name != "" || thinkingLevel != "" {
 				newAgent.Sessions.GetOrCreate(resolvedKey)
 				if len(history) > 0 {
@@ -156,29 +102,19 @@ func (ap *agentProvidableImpl) assignSessionAgent(resolvedKey, currentAgentID, a
 	ap.al.setSessionAgent(resolvedKey, agentID)
 	ap.al.sessionModels.Delete(resolvedKey)
 
-	// Clear the persisted model override in the shared session store.
-	// Since all agents share the same SessionManager now, the old model
-	// would otherwise survive across agent switches.
 	if agent, ok := ap.al.registry.GetAgent(agentID); ok && agent != nil && agent.Sessions != nil {
 		agent.Sessions.SetModel(resolvedKey, "")
 	}
 }
 
-// ListAvailableAgentIDs returns the list of available agent IDs.
 func (ap *agentProvidableImpl) ListAvailableAgentIDs() []string {
 	return ap.al.registry.ListAgentIDs()
 }
 
-// GetDefaultAgentID returns the default agent ID.
 func (ap *agentProvidableImpl) GetDefaultAgentID() string {
 	return ap.al.getDefaultAgentID()
 }
 
-// ============================================================================
-// AgentProvidable Interface - Agent Info
-// ============================================================================
-
-// GetAgentInfo returns basic agent info for the UI.
 func (ap *agentProvidableImpl) GetAgentInfo(agentID string) (channels.AgentBasicInfo, bool) {
 	agent, ok := ap.al.registry.GetAgent(agentID)
 	if !ok {
@@ -201,11 +137,6 @@ func (ap *agentProvidableImpl) GetAgentInfo(agentID string) (channels.AgentBasic
 	}, true
 }
 
-// ListAgentTools returns the tools registered in the agent instance's live
-// ToolRegistry, sorted by name. Name/Description come straight from the Tool
-// interface (Tool.Name() / Tool.Description()) — the same text the LLM sees in
-// its tool definitions — so the catalog never drifts from the real registry.
-// ok=false when the agent ID is unknown.
 func (ap *agentProvidableImpl) ListAgentTools(agentID string) ([]channels.AgentToolInfo, bool) {
 	agent, ok := ap.al.registry.GetAgent(agentID)
 	if !ok || agent == nil || agent.Tools == nil {
@@ -225,18 +156,6 @@ func (ap *agentProvidableImpl) ListAgentTools(agentID string) ([]channels.AgentT
 	return infos, true
 }
 
-// AgentSkills returns the live skills state of an agent instance:
-//   - loader: the SAME *skills.SkillsLoader that backs the <skills> block of
-//     this agent's system prompt, so listing/toggling through it can never
-//     drift from what the agent actually sees;
-//   - invalidate: drops the agent's cached static prompt (and harness cache)
-//     so the next turn re-reads skills from disk — call it after installing,
-//     removing or toggling a skill;
-//   - ok=false when the agent ID is unknown or has no context builder.
-//
-// This is the single entry point the WebUI per-agent skills endpoints use.
-// Previously those endpoints shared one loader built on the DEFAULT agent's
-// workspace, so editing agent X listed and wrote X's sibling's skills.
 func (ap *agentProvidableImpl) AgentSkills(agentID string) (loader *skills.SkillsLoader, invalidate func(), ok bool) {
 	agent, found := ap.al.registry.GetAgent(agentID)
 	if !found || agent == nil || agent.ContextBuilder == nil {
@@ -246,12 +165,6 @@ func (ap *agentProvidableImpl) AgentSkills(agentID string) (loader *skills.Skill
 	return cb.SkillsLoader(), cb.InvalidatePromptCache, true
 }
 
-// MCPPathsFor returns the mcp.json paths one agent reads. The native channel's
-// MCP inventory routes resolve this through a runtime type assertion
-// (channels.mcpPathsSource), so it has to be reachable through the facade:
-// without it, a gateway built here answers 500 mcp_unavailable for every
-// agent, because gateway.go hands NewManager GetProvidable() — this facade —
-// and not the *AgentLoop itself.
 func (ap *agentProvidableImpl) MCPPathsFor(agentID string) (mcp.Paths, bool) {
 	if ap.al == nil {
 		return mcp.Paths{}, false
@@ -259,11 +172,6 @@ func (ap *agentProvidableImpl) MCPPathsFor(agentID string) (mcp.Paths, bool) {
 	return ap.al.MCPPathsFor(agentID)
 }
 
-// InvalidateHarnessWorkspace forwards the seam the REST command writes use: the
-// gateway hands channels.NewManager this facade, not the real loop, so without
-// this the !ok branch of harnessCommandInvalidator (rest_agent_commands.go:868)
-// silently swallows every invalidation and the dispatcher serves a stale
-// registry for up to harnessRefreshTTL.
 func (ap *agentProvidableImpl) InvalidateHarnessWorkspace(workspace string) {
 	if ap.al == nil {
 		return
@@ -271,11 +179,6 @@ func (ap *agentProvidableImpl) InvalidateHarnessWorkspace(workspace string) {
 	ap.al.InvalidateHarnessWorkspace(workspace)
 }
 
-// ============================================================================
-// AgentProvidable Interface - Session History
-// ============================================================================
-
-// AddSessionMessage adds a message to the persisted session history.
 func (ap *agentProvidableImpl) AddSessionMessage(sessionKey string, msg providers.Message) error {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 
@@ -288,62 +191,20 @@ func (ap *agentProvidableImpl) AddSessionMessage(sessionKey string, msg provider
 	return nil
 }
 
-// GetSessionHistory returns a defensive COPY of the persisted history for a
-// session. The returned slice is owned by the caller: it may be truncated,
-// reordered or rewritten in place without affecting the session or any other
-// reader, which makes it the safe API to cross a package boundary with.
-//
-// This is exactly what pkg/channels needs: the only out-of-package caller is
-// the WebUI history endpoint (pkg/channels/rest_chat.go), which feeds the slice
-// to the chat-history builder — a request-scoped, non-hot path where one O(n)
-// copy is negligible.
-//
-// Contrast with GetHistoryView, which hands out the session's shared snapshot
-// ("MUST NOT mutate") and exists for the hot in-package paths (TUI rendering,
-// token estimation, message counting). Handing that shared slice to another
-// package would make the immutability contract load-bearing without a
-// mechanical guard: an in-place mutation by an external caller would poison the
-// snapshot served to every later reader, and no saveEpoch bump would ever
-// invalidate it, since only pkg/session writers bump epochs.
-//
-// Only the slice is copied (element fields are copied value-wise, so
-// msg.Content = ... / msg.Role = ... in the returned slice are private).
-// Nested slices reachable from a message (ToolCalls, ContentParts, Media,
-// Attachments) stay shared and MUST still be treated as read-only — cloning
-// them (plus the ToolCall Function/Arguments pointers) is out of proportion for
-// a read-only consumer; this matches SessionManager.GetHistory's contract.
 func (ap *agentProvidableImpl) GetSessionHistory(sessionKey string) []providers.Message {
 	return copyMessageSlice(ap.GetHistoryView(sessionKey))
 }
 
-// copyMessageSlice returns a private copy of msgs: a fresh backing array whose
-// element values are independent of the source. The returned slice is never
-// aliased by the source, so it may be handed to a caller that owns it.
-//
-// pkg/session carries an equivalent unexported helper (cloneMessages) for its
-// own copy-on-write publish; it is deliberately not reused here — that would
-// mean exporting a pkg/session internal across packages for a three-line copy.
 func copyMessageSlice(msgs []providers.Message) []providers.Message {
 	out := make([]providers.Message, len(msgs))
 	copy(out, msgs)
 	return out
 }
 
-// GetHistoryView returns the history as an immutable shared snapshot, without
-// copying it. The returned slice is the session's published read-only view: the
-// same backing array is handed to every concurrent caller (the TUI render loop
-// calls this several times per frame), so callers MUST NOT mutate the returned
-// slice or any message in it. Used by hot read paths (TUI viewport rendering,
-// message counting, token estimation) where a full copy per render would
-// allocate tens of MB for long conversations.
-//
-// Cross-package callers (pkg/channels / WebUI) must use GetSessionHistory
-// instead — it returns a private copy for exactly that reason.
 func (ap *agentProvidableImpl) GetHistoryView(sessionKey string) []providers.Message {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 
 	if routing.IsSubagentSessionKey(resolvedSessionKey) {
-		// Fast path: O(1) lookup in the subagent-to-agent mapping
 		if agentID, ok := ap.al.subagentSessionAgent.Load(resolvedSessionKey); ok {
 			if agent, ok := ap.al.registry.GetAgent(agentID.(string)); ok && agent != nil {
 				history := agent.Sessions.GetHistoryView(resolvedSessionKey)
@@ -353,7 +214,6 @@ func (ap *agentProvidableImpl) GetHistoryView(sessionKey string) []providers.Mes
 			}
 		}
 
-		// Fallback: O(N) scan over all agents (self-healing — caches first hit)
 		for _, agentID := range ap.al.registry.ListAgentIDs() {
 			agent, ok := ap.al.registry.GetAgent(agentID)
 			if !ok {
@@ -361,7 +221,6 @@ func (ap *agentProvidableImpl) GetHistoryView(sessionKey string) []providers.Mes
 			}
 			history := agent.Sessions.GetHistoryView(resolvedSessionKey)
 			if len(history) > 0 {
-				// Cache this mapping for future O(1) lookups
 				ap.al.setSubagentSessionAgent(resolvedSessionKey, agent.ID)
 				return history
 			}
@@ -376,8 +235,6 @@ func (ap *agentProvidableImpl) GetHistoryView(sessionKey string) []providers.Mes
 	return agent.Sessions.GetHistoryView(resolvedSessionKey)
 }
 
-// GetEvictedMessageCount returns the number of messages that were evicted
-// from memory (excluded + persisted in SQLite but not in the in-memory slice).
 func (ap *agentProvidableImpl) GetEvictedMessageCount(sessionKey string) int {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 
@@ -407,8 +264,6 @@ func (ap *agentProvidableImpl) GetEvictedMessageCount(sessionKey string) int {
 	return agent.Sessions.GetEvictedMessageCount(resolvedSessionKey)
 }
 
-// GetTotalMessageCount returns the total persisted message count for a
-// session: in-memory slice length plus evicted messages.
 func (ap *agentProvidableImpl) GetTotalMessageCount(sessionKey string) int {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 
@@ -438,10 +293,6 @@ func (ap *agentProvidableImpl) GetTotalMessageCount(sessionKey string) int {
 	return agent.Sessions.GetTotalMessageCount(resolvedSessionKey)
 }
 
-// HasMessages returns true if the session has any user/assistant messages,
-// WITHOUT materializing the full history. It prefers the lightweight session
-// manager check (in-memory length + evicted count + a cold SQLite count)
-// over loading the whole history like GetSessionHistory does.
 func (ap *agentProvidableImpl) HasMessages(sessionKey string) bool {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 
@@ -471,25 +322,17 @@ func (ap *agentProvidableImpl) HasMessages(sessionKey string) bool {
 	return agent.Sessions.HasMessages(resolvedSessionKey)
 }
 
-// ============================================================================
-// AgentProvidable Interface - Model Management
-// ============================================================================
-
-// GetSessionModel returns the effective model for a session.
-// It checks in order: 1) in-memory sessionModels, 2) persisted session model, 3) agent default.
 func (ap *agentProvidableImpl) GetSessionModel(sessionKey string) string {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(resolvedSessionKey)
 	if agent == nil {
 		return ""
 	}
-	// First check in-memory override (fast path)
 	if model, ok := ap.al.sessionModels.Load(resolvedSessionKey); ok {
 		if selected, ok := model.(string); ok && selected != "" {
 			return selected
 		}
 	}
-	// Then check persisted session model (survives restarts)
 	if agent.Sessions != nil {
 		persistedModel := agent.Sessions.GetModel(resolvedSessionKey)
 		if persistedModel != "" {
@@ -499,8 +342,6 @@ func (ap *agentProvidableImpl) GetSessionModel(sessionKey string) string {
 	return agent.Model
 }
 
-// GetSessionMode returns the mode for a session ("chat", "agent", "group").
-// Returns "" if not set (callers should normalize "" to "agent").
 func (ap *agentProvidableImpl) GetSessionMode(sessionKey string) string {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(resolvedSessionKey)
@@ -510,7 +351,6 @@ func (ap *agentProvidableImpl) GetSessionMode(sessionKey string) string {
 	return agent.Sessions.GetMode(resolvedSessionKey)
 }
 
-// SetSessionMode sets the mode for a session and persists it.
 func (ap *agentProvidableImpl) SetSessionMode(sessionKey, mode string) error {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(resolvedSessionKey)
@@ -520,7 +360,6 @@ func (ap *agentProvidableImpl) SetSessionMode(sessionKey, mode string) error {
 	return agent.Sessions.SetMode(resolvedSessionKey, mode)
 }
 
-// GetSessionModelSupportsImages returns true if the session's current model supports vision.
 func (ap *agentProvidableImpl) GetSessionModelSupportsImages(sessionKey string) bool {
 	model := ap.GetSessionModel(sessionKey)
 	if model == "" {
@@ -535,7 +374,6 @@ func (ap *agentProvidableImpl) GetSessionModelSupportsImages(sessionKey string) 
 	return getSupportsImages(cfg, model, providerName)
 }
 
-// GetSessionModelSupportsVideo returns true if the session's current model supports native video input.
 func (ap *agentProvidableImpl) GetSessionModelSupportsVideo(sessionKey string) bool {
 	model := ap.GetSessionModel(sessionKey)
 	if model == "" {
@@ -550,16 +388,13 @@ func (ap *agentProvidableImpl) GetSessionModelSupportsVideo(sessionKey string) b
 	return getSupportsVideo(cfg, model, providerName)
 }
 
-// SetSessionModel sets the model for a session and persists it.
 func (ap *agentProvidableImpl) SetSessionModel(sessionKey, model string) string {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 	if resolvedSessionKey == "" {
 		return ""
 	}
 	next := ap.al.cfg().Providers.ResolveModelAlias(model, ap.al.cfg().Agents.Defaults.Provider)
-	// Store in memory for fast access
 	ap.al.sessionModels.Store(resolvedSessionKey, next)
-	// Persist to session storage (survives restarts)
 	agent := ap.al.agentForSession(resolvedSessionKey)
 	if agent != nil && agent.Sessions != nil {
 		agent.Sessions.SetModel(resolvedSessionKey, next)
@@ -567,8 +402,6 @@ func (ap *agentProvidableImpl) SetSessionModel(sessionKey, model string) string 
 	return next
 }
 
-// SetSessionFolder sets the user-selected folder for a session and persists
-// it. An empty folder clears the selection. Returns the effective folder.
 func (ap *agentProvidableImpl) SetSessionFolder(sessionKey, folder string) string {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 	if resolvedSessionKey == "" {
@@ -587,8 +420,6 @@ func (ap *agentProvidableImpl) SetSessionFolder(sessionKey, folder string) strin
 	return folder
 }
 
-// GetSessionFolder returns the user-selected folder for a session, or ""
-// when none is set.
 func (ap *agentProvidableImpl) GetSessionFolder(sessionKey string) string {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 	if resolvedSessionKey == "" {
@@ -601,7 +432,6 @@ func (ap *agentProvidableImpl) GetSessionFolder(sessionKey string) string {
 	return agent.Sessions.GetFolder(resolvedSessionKey)
 }
 
-// ListAvailableModels returns configured model aliases for the provider backing an agent.
 func (ap *agentProvidableImpl) ListAvailableModels(agentID string) []string {
 	providerName := ap.al.cfg().Agents.Defaults.Provider
 	if agentID != "" {
@@ -625,34 +455,19 @@ func (ap *agentProvidableImpl) ListAvailableModels(agentID string) []string {
 	return models
 }
 
-// ============================================================================
-// AgentProvidable Interface - Config
-// ============================================================================
-
-// GetConfigSnapshot returns the current configuration snapshot.
 func (ap *agentProvidableImpl) GetConfigSnapshot() *config.Config {
 	return ap.al.cfg()
 }
 
-// ============================================================================
-// AgentProvidable Interface - Status & Control
-// ============================================================================
-
-// GetStatus returns the current status for a session.
 func (ap *agentProvidableImpl) GetStatus(sessionKey string) string {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(sessionKey)
 	if agent == nil {
 		return "No default agent configured."
 	}
-	// Delegate to message processor for formatting
 	return ap.al.messageProcessor.formatStatusResponse(agent, sessionKey, "telegram")
 }
 
-// StopAgent stops the agent processing for a session. It cascades through
-// every resource the session owns - subagents (and transitively their child
-// subagents and background processes), group runs and background exec
-// processes - before cancelling the session's own in-flight turn.
 func (ap *agentProvidableImpl) StopAgent(sessionKey string) string {
 	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
 	logger.InfoCF("agent", "StopAgent called", map[string]interface{}{
@@ -677,9 +492,6 @@ func (ap *agentProvidableImpl) StopAgent(sessionKey string) string {
 	return formatStopAgentResponse(subagentCount, groupCount, procCount)
 }
 
-// formatStopAgentResponse renders the user-facing summary of a stop request.
-// counts are the number of subagents, group runs and background processes
-// that were cancelled; zero values are omitted so a plain stop stays terse.
 func formatStopAgentResponse(subagentCount, groupCount, procCount int) string {
 	var parts []string
 	if subagentCount > 0 {
@@ -697,7 +509,6 @@ func formatStopAgentResponse(subagentCount, groupCount, procCount int) string {
 	return fmt.Sprintf("⏹️ Agente detenido (incluye %s).", strings.Join(parts, " y "))
 }
 
-// CompactSession compacts the session history.
 func (ap *agentProvidableImpl) CompactSession(sessionKey string) string {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(sessionKey)
@@ -709,14 +520,11 @@ func (ap *agentProvidableImpl) CompactSession(sessionKey string) string {
 		return "📭 Not enough messages to compact (need 5+)."
 	}
 
-	// Register a session cancel so IsSessionProcessing returns true during
-	// compaction. This keeps the TUI loading animation active while the LLM
-	// summarization call runs (can take several seconds).
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	unregister := ap.al.sessionManager.RegisterSessionCancel(sessionKey, cancel)
 	defer unregister()
-	_ = ctx // context is used internally by summarizeSession
+	_ = ctx
 
 	stats := ap.al.sessionManager.summarizeSession(agent, sessionKey)
 	if stats == nil {
@@ -727,11 +535,6 @@ func (ap *agentProvidableImpl) CompactSession(sessionKey string) string {
 		stats.BeforeMessages, stats.AfterMessages, stats.SavedTokens)
 }
 
-// ============================================================================
-// AgentProvidable Interface - Verbose Management
-// ============================================================================
-
-// ToggleVerbose toggles verbose mode for a session.
 func (ap *agentProvidableImpl) ToggleVerbose(sessionKey string) string {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	if sessionKey == "" {
@@ -749,7 +552,6 @@ func (ap *agentProvidableImpl) ToggleVerbose(sessionKey string) string {
 	return "Unknown verbose level"
 }
 
-// GetVerboseLevel returns the current verbose level for a session.
 func (ap *agentProvidableImpl) GetVerboseLevel(sessionKey string) string {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	if sessionKey == "" {
@@ -758,7 +560,6 @@ func (ap *agentProvidableImpl) GetVerboseLevel(sessionKey string) string {
 	return string(ap.al.verboseManager.GetLevel(sessionKey))
 }
 
-// SetVerboseLevel sets the verbose level for a session.
 func (ap *agentProvidableImpl) SetVerboseLevel(sessionKey string, level string) bool {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	if sessionKey == "" {
@@ -771,34 +572,20 @@ func (ap *agentProvidableImpl) SetVerboseLevel(sessionKey string, level string) 
 	return true
 }
 
-// ============================================================================
-// AgentProvidable Interface - Thinking Level
-// ============================================================================
-
-// GetThinkLevel returns the current reasoning effort level for a session.
-//
-// Contract (do not change): this is the SESSION-OVERRIDE getter used by the
-// /think cycle and the WebUI chip. It returns "default" when no override is
-// set — it does NOT resolve the agent's configured thinking_level. Consumers
-// that need the level that will actually be applied to the next request must
-// use GetEffectiveThinkLevel instead.
 func (ap *agentProvidableImpl) GetThinkLevel(sessionKey string) string {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	if sessionKey == "" {
 		return "default"
 	}
-	// 1) In-memory (fast path)
 	if v, ok := ap.al.sessionThinking.Load(sessionKey); ok {
 		if s, ok := v.(string); ok && s != "" {
 			return s
 		}
 	}
-	// 2) Persisted (survives restarts)
 	agent := ap.al.agentForSession(sessionKey)
 	if agent != nil && agent.Sessions != nil {
 		persisted := agent.Sessions.GetThinkingLevel(sessionKey)
 		if persisted != "" {
-			// Sync back to in-memory
 			ap.al.sessionThinking.Store(sessionKey, persisted)
 			return persisted
 		}
@@ -806,14 +593,6 @@ func (ap *agentProvidableImpl) GetThinkLevel(sessionKey string) string {
 	return "default"
 }
 
-// GetEffectiveThinkLevel returns the thinking level that will actually be
-// applied to the next request: session override if set, else the agent's
-// resolved config level (AgentInstance.ThinkingLevel), else "default".
-//
-// This mirrors what buildLLMOptions resolves (session override → agent level
-// → model ReasoningConfig) so /status and similar displays never diverge from
-// the wire payload. The model-ReasoningConfig layer is not surfaced here: when
-// both explicit layers are empty the display shows "default", same as before.
 func (ap *agentProvidableImpl) GetEffectiveThinkLevel(sessionKey string) string {
 	level := ap.GetThinkLevel(sessionKey)
 	if level != "default" {
@@ -825,14 +604,6 @@ func (ap *agentProvidableImpl) GetEffectiveThinkLevel(sessionKey string) string 
 	return "default"
 }
 
-// SetThinkLevel sets the reasoning effort level for a session.
-//
-// Accepted levels are the canonical thinking levels from
-// config.NormalizeThinkingLevel: "off", "low", "medium", "high", and the
-// "default" aliases "default" / "none" (both clear the override so the agent's
-// configured thinking_level applies again). An empty string is rejected: an
-// unset level is ambiguous, callers must ask for it explicitly. Anything else
-// returns false and leaves the current level untouched.
 func (ap *agentProvidableImpl) SetThinkLevel(sessionKey string, level string) bool {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	if sessionKey == "" {
@@ -845,13 +616,11 @@ func (ap *agentProvidableImpl) SetThinkLevel(sessionKey string, level string) bo
 	if !ok {
 		return false
 	}
-	// normalized == "" means "no override" ("default" / "none").
 	if normalized == "" || normalized == "off" {
 		ap.al.sessionThinking.Delete(sessionKey)
 	} else {
 		ap.al.sessionThinking.Store(sessionKey, normalized)
 	}
-	// Persist to survive restarts
 	agent := ap.al.agentForSession(sessionKey)
 	if agent != nil && agent.Sessions != nil {
 		agent.Sessions.SetThinkingLevel(sessionKey, normalized)
@@ -859,27 +628,16 @@ func (ap *agentProvidableImpl) SetThinkLevel(sessionKey string, level string) bo
 	return true
 }
 
-// ============================================================================
-// AgentProvidable Interface - Subagents
-// ============================================================================
-
-// GetSubagents lists running subagents.
 func (ap *agentProvidableImpl) GetSubagents() string {
 	return formatSubagentTaskList(ap.al.toolCoordinator.listRunningSubagentTasks())
 }
 
-// GetSessionSubagents returns subagent tasks that belong to a given session.
-// It returns both in-memory tasks (from SubagentManagers) and persisted past
-// tasks discovered from session storage, so that completed subagents survive
-// server restarts.
 func (ap *agentProvidableImpl) GetSessionSubagents(sessionKey string) []channels.SubagentTaskInfo {
 	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
 	var result []channels.SubagentTaskInfo
 
-	// Track which task IDs we already have from in-memory managers
 	seen := make(map[string]bool)
 
-	// 1. Collect in-memory tasks (rich data: label, agentID, live status)
 	for _, manager := range ap.al.toolCoordinator.GetSubagents() {
 		for _, task := range manager.ListTasks() {
 			resolvedOrigin := ap.al.ResolveSessionKey(task.OriginSessionKey)
@@ -901,9 +659,6 @@ func (ap *agentProvidableImpl) GetSessionSubagents(sessionKey string) []channels
 		}
 	}
 
-	// 2. Scan all agents' session storage for persisted past subagent sessions.
-	//    These are subagents that ran in previous server sessions and whose
-	//    in-memory tasks are gone, but whose history was saved to disk.
 	for _, agentID := range ap.al.registry.ListAgentIDs() {
 		agent, ok := ap.al.registry.GetAgent(agentID)
 		if !ok || agent == nil || agent.Sessions == nil {
@@ -911,30 +666,17 @@ func (ap *agentProvidableImpl) GetSessionSubagents(sessionKey string) []channels
 		}
 		for _, past := range agent.Sessions.FindSubagentSessions(resolvedKey) {
 			if seen[past.TaskID] {
-				continue // in-memory version takes precedence
+				continue
 			}
 			seen[past.TaskID] = true
 
-			// Determine a human-readable summary
 			summary := past.Summary
 
-			// Status: the terminal status persisted on the session at task
-			// completion. Empty for sessions predating subagent_status
-			// persistence — fall back to "completed", the historical
-			// hard-coded value, so old rows stay consistent.
 			status := past.Status
 			if status == "" {
 				status = tools.SubagentStatusCompleted
 			}
 
-			// Executor of the task, which is NOT necessarily the agent whose
-			// storage is being swept: in production every agent shares one
-			// SessionManager, so FindSubagentSessions returns the same rows for
-			// each agentID and the first one in the registry wins the seen[]
-			// dedupe. The session row carries the real executor (migration v8);
-			// rows written before that fall back to the durable routing pin
-			// recorded at spawn time, and only then to the storage owner — the
-			// historical, arbitrary value — when neither exists.
 			executor := past.AgentID
 			if executor == "" {
 				executor = ap.al.subagentSessionPin(past.Key)
@@ -946,7 +688,7 @@ func (ap *agentProvidableImpl) GetSessionSubagents(sessionKey string) []channels
 			result = append(result, channels.SubagentTaskInfo{
 				TaskID:     past.TaskID,
 				SessionKey: past.Key,
-				Label:      past.Name, // session Name doubles as label fallback
+				Label:      past.Name,
 				AgentID:    executor,
 				Status:     status,
 				Summary:    summary,
@@ -960,12 +702,6 @@ func (ap *agentProvidableImpl) GetSessionSubagents(sessionKey string) []channels
 	return result
 }
 
-// ============================================================================
-// AgentProvidable Interface - Session Management
-// ============================================================================
-
-// ClearSession starts a fresh conversation for the current chat.
-// It preserves the selected agent while switching the chat to a new empty session.
 func (ap *agentProvidableImpl) ClearSession(sessionKey string) string {
 	baseSessionKey := strings.TrimSpace(sessionKey)
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
@@ -984,7 +720,6 @@ func (ap *agentProvidableImpl) ClearSession(sessionKey string) string {
 	return lelecontext.ContextRefreshedMessage
 }
 
-// GetName returns the name of a session.
 func (ap *agentProvidableImpl) GetName(sessionKey string) string {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(sessionKey)
@@ -994,7 +729,6 @@ func (ap *agentProvidableImpl) GetName(sessionKey string) string {
 	return agent.Sessions.GetName(sessionKey)
 }
 
-// GetUpdated returns the timestamp of last update for a session.
 func (ap *agentProvidableImpl) GetUpdated(sessionKey string) time.Time {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(sessionKey)
@@ -1004,7 +738,6 @@ func (ap *agentProvidableImpl) GetUpdated(sessionKey string) time.Time {
 	return agent.Sessions.GetUpdated(sessionKey)
 }
 
-// GetCreated returns the creation timestamp of a session.
 func (ap *agentProvidableImpl) GetCreated(sessionKey string) time.Time {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(sessionKey)
@@ -1014,7 +747,6 @@ func (ap *agentProvidableImpl) GetCreated(sessionKey string) time.Time {
 	return agent.Sessions.GetCreated(sessionKey)
 }
 
-// SetName sets the name of a session.
 func (ap *agentProvidableImpl) SetName(sessionKey string, name string) error {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(sessionKey)
@@ -1024,7 +756,6 @@ func (ap *agentProvidableImpl) SetName(sessionKey string, name string) error {
 	return agent.Sessions.SetName(sessionKey, name)
 }
 
-// GetSessionSummary returns the summary of a session.
 func (ap *agentProvidableImpl) GetSessionSummary(sessionKey string) string {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(sessionKey)
@@ -1034,25 +765,14 @@ func (ap *agentProvidableImpl) GetSessionSummary(sessionKey string) string {
 	return agent.Sessions.GetSummary(sessionKey)
 }
 
-// ============================================================================
-// AgentProvidable Interface - Session Key Resolution
-// ============================================================================
-
-// ResolveSessionKey resolves the alias of session_key if exists.
 func (ap *agentProvidableImpl) ResolveSessionKey(sessionKey string) string {
 	return ap.al.ResolveSessionKey(sessionKey)
 }
 
-// GetSubagentParentSessionKey returns the parent session key for a subagent.
 func (ap *agentProvidableImpl) GetSubagentParentSessionKey(sessionKey string) string {
 	return ap.al.GetSubagentParentSessionKey(sessionKey)
 }
 
-// ============================================================================
-// AgentProvidable Interface - Processing Status
-// ============================================================================
-
-// IsSessionProcessing returns true if there is an active LLM processing loop for the session.
 func (ap *agentProvidableImpl) IsSessionProcessing(sessionKey string) bool {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	if ap.al.sessionManager.IsSessionProcessing(sessionKey) {
@@ -1061,11 +781,6 @@ func (ap *agentProvidableImpl) IsSessionProcessing(sessionKey string) bool {
 	return ap.al.isGoalLoopActive(sessionKey)
 }
 
-// ============================================================================
-// AgentProvidable Interface - Token Counts
-// ============================================================================
-
-// GetTokenCounts returns the input/output token counts and context window for a session.
 func (ap *agentProvidableImpl) GetTokenCounts(sessionKey string) (inputTokens, outputTokens int, contextWindow int) {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(resolvedSessionKey)
@@ -1077,7 +792,6 @@ func (ap *agentProvidableImpl) GetTokenCounts(sessionKey string) (inputTokens, o
 	return
 }
 
-// GetCompactionCount returns the number of compactions performed on a session.
 func (ap *agentProvidableImpl) GetCompactionCount(sessionKey string) int {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(resolvedSessionKey)
@@ -1091,12 +805,10 @@ func (ap *agentProvidableImpl) GetCompactionCount(sessionKey string) int {
 	return session.CompactionCount
 }
 
-// GetSessionContextWindow returns the context window for a session.
 func (ap *agentProvidableImpl) GetSessionContextWindow(sessionKey string) int {
 	return ap.al.getSessionContextWindow(sessionKey)
 }
 
-// GetCurrentContextUsage returns the actual current context size.
 func (ap *agentProvidableImpl) GetCurrentContextUsage(sessionKey string) (currentTokens, contextWindow int) {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(resolvedSessionKey)
@@ -1104,18 +816,15 @@ func (ap *agentProvidableImpl) GetCurrentContextUsage(sessionKey string) (curren
 		return 0, 0
 	}
 
-	// Get history and estimate its token count
 	history := agent.Sessions.GetHistoryView(resolvedSessionKey)
 	historyTokens := ap.al.sessionManager.EstimateTokens(history)
 
-	// Get summary and estimate its token count
 	summary := agent.Sessions.GetSummary(resolvedSessionKey)
 	summaryTokens := 0
 	if summary != "" && !hasSummaryMessage(history, summary) {
 		summaryTokens = ap.al.sessionManager.EstimateTokens([]providers.Message{{Role: "user", Content: summary}})
 	}
 
-	// Build system prompt and estimate its token count
 	systemPrompt := agent.ContextBuilder.BuildSystemPromptForSessionWithFolder(resolvedSessionKey, "")
 	systemTokens := ap.al.sessionManager.EstimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
 
@@ -1124,12 +833,6 @@ func (ap *agentProvidableImpl) GetCurrentContextUsage(sessionKey string) (curren
 	return
 }
 
-// ============================================================================
-// Public Methods for External Access (Direct Processing)
-// ============================================================================
-
-// ResolveRoute computes the unified session key for a channel+peer combination
-// using the configured DM scope and identity links via the routing resolver.
 func (ap *agentProvidableImpl) ResolveRoute(channel, peerKind, peerID string) string {
 	peer := &routing.RoutePeer{
 		Kind: peerKind,
@@ -1146,33 +849,18 @@ func (ap *agentProvidableImpl) ResolveRoute(channel, peerKind, peerID string) st
 	return route.SessionKey
 }
 
-// ProcessDirect processes a message directly without going through the
-// inbound message bus. Returns the turn's final text to the caller without
-// publishing it (CLI contract); see messageProcessorImpl.ProcessDirect.
 func (ap *agentProvidableImpl) ProcessDirect(ctx context.Context, content, sessionKey string) (string, error) {
 	return ap.al.messageProcessor.ProcessDirect(ctx, content, sessionKey)
 }
 
-// ProcessDirectWithChannel processes a message directly with channel
-// information. The final text is delivered via the outbound bus on
-// channel/chatID and the return value is "" (cron contract).
 func (ap *agentProvidableImpl) ProcessDirectWithChannel(ctx context.Context, content, sessionKey, channel, chatID string) (string, error) {
 	return ap.al.messageProcessor.ProcessDirectWithChannel(ctx, content, sessionKey, channel, chatID)
 }
 
-// ProcessHeartbeat processes a heartbeat request without session history.
 func (ap *agentProvidableImpl) ProcessHeartbeat(ctx context.Context, content, channel, chatID string) (string, error) {
 	return ap.al.messageProcessor.ProcessHeartbeat(ctx, content, channel, chatID)
 }
 
-// ListAllSessions returns a summary of every persisted session across all
-// agents (including system sessions such as heartbeat and cron).
-//
-// It is the single-pass source for listing endpoints: every field comes from
-// the shared session manager's index, so callers never need per-session
-// getters. For sessions whose messages are not resident in memory, emptiness is
-// resolved for all of them with one batched store query instead of one COUNT
-// each.
 func (ap *agentProvidableImpl) ListAllSessions() []channels.SessionKindInfo {
 	sm := ap.al.SessionManager()
 	if sm == nil {
@@ -1181,7 +869,6 @@ func (ap *agentProvidableImpl) ListAllSessions() []channels.SessionKindInfo {
 
 	entries := sm.ListSessionIndex()
 
-	// One query covers every non-resident session.
 	needsStore := false
 	for _, e := range entries {
 		if !e.Resident {
@@ -1215,12 +902,6 @@ func (ap *agentProvidableImpl) ListAllSessions() []channels.SessionKindInfo {
 	return result
 }
 
-// classifySessionKind derives the session kind from the session key.
-//   - "heartbeat"  — heartbeat service runs (key "heartbeat")
-//   - "cron"       — global cron job turns (key "cron-<jobID>")
-//   - "cron-spawn" — cron jobs that spawn a subagent (key "cron-spawn-<jobID>")
-//   - "subagent"   — subagent sessions (key "subagent:..." or ":subagent-N")
-//   - "chat"       — everything else (user chats)
 func classifySessionKind(sessionKey string) string {
 	if sessionKey == "" {
 		return "chat"
@@ -1231,7 +912,6 @@ func classifySessionKind(sessionKey string) string {
 	if strings.HasPrefix(sessionKey, "cron-spawn-") {
 		return "cron-spawn"
 	}
-	// cron jobs that spawned a subagent: native:cron-<jobID>:subagent-<N>
 	if strings.Contains(sessionKey, ":cron-") && strings.Contains(sessionKey, ":subagent-") {
 		return "cron-spawn"
 	}
@@ -1247,11 +927,6 @@ func classifySessionKind(sessionKey string) string {
 	return "chat"
 }
 
-// ============================================================================
-// Streaming support — persists assistant message chunks in the session file
-// ============================================================================
-
-// AppendAssistantChunk appends a content chunk to the in-progress assistant message.
 func (ap *agentProvidableImpl) AppendAssistantChunk(sessionKey, chunk string) {
 	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(resolvedKey)
@@ -1261,7 +936,6 @@ func (ap *agentProvidableImpl) AppendAssistantChunk(sessionKey, chunk string) {
 	agent.Sessions.AppendAssistantChunk(resolvedKey, chunk)
 }
 
-// AppendReasoningChunk appends a reasoning chunk to the in-progress assistant message.
 func (ap *agentProvidableImpl) AppendReasoningChunk(sessionKey, chunk string) {
 	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(resolvedKey)
@@ -1271,7 +945,6 @@ func (ap *agentProvidableImpl) AppendReasoningChunk(sessionKey, chunk string) {
 	agent.Sessions.AppendReasoningChunk(resolvedKey, chunk)
 }
 
-// FinalizeAssistantMessage marks the in-progress assistant message as complete.
 func (ap *agentProvidableImpl) FinalizeAssistantMessage(sessionKey string) {
 	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(resolvedKey)
@@ -1281,9 +954,6 @@ func (ap *agentProvidableImpl) FinalizeAssistantMessage(sessionKey string) {
 	agent.Sessions.FinalizeAssistantMessage(resolvedKey)
 }
 
-// AttachFilesToLastAssistant persists file attachments on the last assistant
-// message of a session (see SessionManager). Used by the native channel when a
-// turn delivers send_file attachments so they appear in chat history.
 func (ap *agentProvidableImpl) AttachFilesToLastAssistant(sessionKey string, attachments []providers.MessageAttachment) {
 	if len(attachments) == 0 {
 		return
@@ -1296,7 +966,6 @@ func (ap *agentProvidableImpl) AttachFilesToLastAssistant(sessionKey string, att
 	agent.Sessions.AttachFilesToLastAssistant(resolvedKey, attachments)
 }
 
-// HasStreamedContent returns true if the session has an in-progress streaming message with content.
 func (ap *agentProvidableImpl) HasStreamedContent(sessionKey string) bool {
 	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(resolvedKey)
@@ -1306,7 +975,6 @@ func (ap *agentProvidableImpl) HasStreamedContent(sessionKey string) bool {
 	return agent.Sessions.HasStreamedContent(resolvedKey)
 }
 
-// GetInProgressAssistant returns the in-progress assistant message, if any.
 func (ap *agentProvidableImpl) GetInProgressAssistant(sessionKey string) *providers.Message {
 	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
 	agent := ap.al.agentForSession(resolvedKey)
@@ -1316,19 +984,10 @@ func (ap *agentProvidableImpl) GetInProgressAssistant(sessionKey string) *provid
 	return agent.Sessions.GetInProgressAssistant(resolvedKey)
 }
 
-// GetInProgressTool returns the tool the session is currently executing, if
-// any. UIs use it to restore the "running tool" row after a chat reload, which
-// the live tool.executing event stream cannot do on its own (see
-// session.InProgressTool). Callers must gate on IsSessionProcessing.
 func (ap *agentProvidableImpl) GetInProgressTool(sessionKey string) *session.InProgressTool {
 	return ap.al.GetInProgressTool(sessionKey)
 }
 
-// ============================================================================
-// AgentProvidable Interface - Background Exec Management
-// ============================================================================
-
-// GetBackgroundExecs returns all background processes across all agents.
 func (ap *agentProvidableImpl) GetBackgroundExecs(includeCompleted bool) []channels.BackgroundExecInfo {
 	if ap.al.toolCoordinator == nil {
 		return nil
@@ -1351,7 +1010,6 @@ func (ap *agentProvidableImpl) GetBackgroundExecs(includeCompleted bool) []chann
 	return result
 }
 
-// GetBackgroundExecOutput returns the output of a background process.
 func (ap *agentProvidableImpl) GetBackgroundExecOutput(id string, tail int) (output string, status string, elapsedMs int64, err error) {
 	if ap.al.toolCoordinator == nil {
 		return "", "", 0, fmt.Errorf("tool coordinator not available")
@@ -1360,7 +1018,6 @@ func (ap *agentProvidableImpl) GetBackgroundExecOutput(id string, tail int) (out
 	return output, status, elapsed.Milliseconds(), err
 }
 
-// StopBackgroundExec stops a running background process.
 func (ap *agentProvidableImpl) StopBackgroundExec(id string) error {
 	if ap.al.toolCoordinator == nil {
 		return fmt.Errorf("tool coordinator not available")
@@ -1368,25 +1025,14 @@ func (ap *agentProvidableImpl) StopBackgroundExec(id string) error {
 	return ap.al.toolCoordinator.stopBackgroundExec(id)
 }
 
-// AllGroupSnapshots returns a GroupSnapshot for every tracked group.
 func (ap *agentProvidableImpl) AllGroupSnapshots() []group.GroupSnapshot {
 	return ap.al.AllGroupSnapshots()
 }
 
-// GroupSnapshotsForSession returns the group snapshots belonging to a session,
-// unioning memory with the persisted store (see AgentLoop).
 func (ap *agentProvidableImpl) GroupSnapshotsForSession(sessionKey string) []group.GroupSnapshot {
 	return ap.al.GroupSnapshotsForSession(sessionKey)
 }
 
-// LoadEvictedMessagesPage returns a page of the session's persisted messages
-// that are no longer resident in memory (evicted history / out-of-context
-// messages), read directly from SQLite. Read-only: it never loads the session
-// into memory and never affects the agent's context. Returns nil when the
-// session has no out-of-memory messages or does not exist.
-//
-// before/after are exclusive seq cursors (-1/0 = unset); limit is clamped by
-// the session manager.
 func (ap *agentProvidableImpl) LoadEvictedMessagesPage(sessionKey string, before, after, limit int) *session.EvictedMessagesPage {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 

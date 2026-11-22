@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -103,7 +97,6 @@ MODEL: anthropic:claude-opus`,
 func TestParseSystemSpawnMessage_Truncation(t *testing.T) {
 	mp := &messageProcessorImpl{}
 
-	// Test that long tasks are truncated for label
 	longTask := strings.Repeat("a", 100)
 	content := "SYSTEM_SPAWN:\nTASK: " + longTask
 

@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -18,8 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// fakeClock is a hand-driven clock: tests advance it explicitly so the
-// throughput math is deterministic and no test ever sleeps.
 type fakeClock struct {
 	t time.Time
 }
@@ -32,8 +24,6 @@ func (c *fakeClock) now() time.Time { return c.t }
 
 func (c *fakeClock) advance(d time.Duration) { c.t = c.t.Add(d) }
 
-// newMetricsStreamer builds a stream handler wired to a fake clock, so the
-// handler is deterministic without touching the real time source.
 func newMetricsStreamer(t *testing.T, msgBus *bus.MessageBus, clock *fakeClock) *streamHandler {
 	t.Helper()
 	sh := newStreamHandler(msgBus, channels.ChannelName, "chat-metrics", "msg-metrics")
@@ -41,8 +31,6 @@ func newMetricsStreamer(t *testing.T, msgBus *bus.MessageBus, clock *fakeClock) 
 	return sh
 }
 
-// recvStream pulls the next outbound message and asserts it is a stream event
-// for our handler.
 func recvStream(t *testing.T, msgBus *bus.MessageBus, sh *streamHandler) bus.OutboundMessage {
 	t.Helper()
 	msg, ok := recvOutbound(t, msgBus, 5*time.Second)
@@ -63,8 +51,6 @@ func recvStream(t *testing.T, msgBus *bus.MessageBus, sh *streamHandler) bus.Out
 	return msg
 }
 
-// recvThinking pulls the next outbound message and asserts it is a reasoning
-// event for our handler carrying the four throughput metric keys.
 func recvThinking(t *testing.T, msgBus *bus.MessageBus, sh *streamHandler) bus.OutboundMessage {
 	t.Helper()
 	msg, ok := recvOutbound(t, msgBus, 5*time.Second)
@@ -114,9 +100,6 @@ func metadataFloat(t *testing.T, msg bus.OutboundMessage, key string) float64 {
 	return f
 }
 
-// TestStreamHandlerMetricsAccumulateAcrossChunks pins the accumulated token
-// count to the shared chars*2/5 heuristic and checks the running elapsed window
-// on an intermediate (not final) event.
 func TestStreamHandlerMetricsAccumulateAcrossChunks(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	clock := newFakeClock()
@@ -124,8 +107,6 @@ func TestStreamHandlerMetricsAccumulateAcrossChunks(t *testing.T) {
 
 	chunks := []string{"Hello world! ", "Esta es una respuesta ", "más larga todavía."}
 
-	// Expected cumulative estimate: the handler sums one chars*2/5 estimate per
-	// chunk (integer truncation applied per chunk, not on the joined text).
 	wantCumulative := make([]int, len(chunks))
 	running := 0
 	for i, chunk := range chunks {
@@ -135,8 +116,6 @@ func TestStreamHandlerMetricsAccumulateAcrossChunks(t *testing.T) {
 	wantTokens := running
 
 	for i, chunk := range chunks {
-		// Pretend each chunk took 500ms of streaming time; the clock is only
-		// moved AFTER the first chunk, so chunk 0 lands on elapsed_ms == 0.
 		if i > 0 {
 			clock.advance(500 * time.Millisecond)
 		}
@@ -162,8 +141,6 @@ func TestStreamHandlerMetricsAccumulateAcrossChunks(t *testing.T) {
 		}
 	}
 
-	// Final event carries the total token count, total elapsed window and a
-	// tok/s derived from both.
 	clock.advance(500 * time.Millisecond)
 	sh.onChunk("", true)
 
@@ -189,15 +166,12 @@ func TestStreamHandlerMetricsAccumulateAcrossChunks(t *testing.T) {
 	}
 }
 
-// TestStreamHandlerZeroElapsedIsNotNaN covers the division-by-zero guard: when
-// the first chunk and the clock read land in the same millisecond, tok/s must
-// be reported as 0.0 rather than +Inf or NaN.
 func TestStreamHandlerZeroElapsedIsNotNaN(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	clock := newFakeClock()
 	sh := newMetricsStreamer(t, msgBus, clock)
 
-	sh.onChunk(strings.Repeat("a", 250), false) // 100 estimated tokens
+	sh.onChunk(strings.Repeat("a", 250), false)
 	first := recvStream(t, msgBus, sh)
 
 	if got := metadataInt(t, first, "elapsed_ms"); got != 0 {
@@ -213,7 +187,6 @@ func TestStreamHandlerZeroElapsedIsNotNaN(t *testing.T) {
 		t.Fatalf("tokens = %d, want 100", got)
 	}
 
-	// A done event on the same frozen clock must not divide by zero either.
 	sh.onChunk("", true)
 	doneMsg := recvStream(t, msgBus, sh)
 	if got := metadataFloat(t, doneMsg, "tok_per_sec"); got != 0.0 {
@@ -221,9 +194,6 @@ func TestStreamHandlerZeroElapsedIsNotNaN(t *testing.T) {
 	}
 }
 
-// TestStreamHandlerEmptySegment checks that a segment with no content at all
-// (done without any chunk) still emits well-formed zeroed metrics and does not
-// panic.
 func TestStreamHandlerEmptySegment(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	clock := newFakeClock()
@@ -247,15 +217,11 @@ func TestStreamHandlerEmptySegment(t *testing.T) {
 	if msg.Metadata["estimated"] != "true" {
 		t.Fatalf("estimated = %q, want \"true\"", msg.Metadata["estimated"])
 	}
-	// The clock must not have been started by an empty chunk.
 	if !sh.content.start.IsZero() {
 		t.Fatalf("content start = %v, want zero for a content-free segment", sh.content.start)
 	}
 }
 
-// TestStreamHandlerSegmentsAreIndependent locks in the per-segment scope: two
-// handlers (as created for two LLM iterations in the same turn) never share
-// counters or start times.
 func TestStreamHandlerSegmentsAreIndependent(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	clock := newFakeClock()
@@ -265,11 +231,11 @@ func TestStreamHandlerSegmentsAreIndependent(t *testing.T) {
 	second := newMetricsStreamer(t, msgBus, clock)
 	second.messageID = "msg-iter-1"
 
-	first.onChunk(strings.Repeat("x", 100), false) // 40 tokens
+	first.onChunk(strings.Repeat("x", 100), false)
 	clock.advance(2 * time.Second)
 	first.onChunk("tail", false)
 
-	second.onChunk(strings.Repeat("y", 50), false) // 20 tokens, its own window
+	second.onChunk(strings.Repeat("y", 50), false)
 
 	wantFirst := providers.EstimateTokensFromText(strings.Repeat("x", 100)) + providers.EstimateTokensFromText("tail")
 	wantSecond := providers.EstimateTokensFromText(strings.Repeat("y", 50))
@@ -294,10 +260,6 @@ func TestStreamHandlerSegmentsAreIndependent(t *testing.T) {
 	}
 }
 
-// TestStreamHandlerReasoningMetricsAreSeparate pins the two-surface contract:
-// message.thinking carries its OWN throughput metrics (so the TUI and the web UI
-// can show a live tok/s while the model is still thinking) and reasoning tokens
-// never leak into the answer surface's counters.
 func TestStreamHandlerReasoningMetricsAreSeparate(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	clock := newFakeClock()
@@ -306,9 +268,6 @@ func TestStreamHandlerReasoningMetricsAreSeparate(t *testing.T) {
 	firstChunk := strings.Repeat("think ", 100)
 	sh.onReasoning(firstChunk)
 
-	// First reasoning chunk: no elapsed window yet, so the token count is
-	// already visible but the rate is a safe 0 (never NaN/+Inf) — the frontend
-	// keeps its previous figure rather than blanking.
 	first := recvThinking(t, msgBus, sh)
 	if first.Content != firstChunk {
 		t.Fatalf("thinking content = %q, want the reasoning chunk", first.Content)
@@ -327,8 +286,6 @@ func TestStreamHandlerReasoningMetricsAreSeparate(t *testing.T) {
 		t.Fatalf("first thinking estimated = %q, want \"true\"", got)
 	}
 
-	// Second reasoning chunk: the reasoning surface has its own elapsed window
-	// and cumulative token count.
 	secondChunk := strings.Repeat("more ", 100)
 	clock.advance(2 * time.Second)
 	sh.onReasoning(secondChunk)
@@ -345,14 +302,12 @@ func TestStreamHandlerReasoningMetricsAreSeparate(t *testing.T) {
 		t.Fatalf("second thinking tok_per_sec = %v, want %v", metadataFloat(t, second, "tok_per_sec"), wantRate)
 	}
 
-	// Reasoning must NOT have touched the answer surface: it still starts its
-	// own window from scratch on the first content chunk.
 	if !sh.content.start.IsZero() || sh.content.tokens != 0 {
 		t.Fatalf("reasoning leaked into the answer metrics: start=%v tokens=%d", sh.content.start, sh.content.tokens)
 	}
 
 	clock.advance(3 * time.Second)
-	sh.onChunk(strings.Repeat("a", 25), false) // 10 tokens
+	sh.onChunk(strings.Repeat("a", 25), false)
 	msg := recvStream(t, msgBus, sh)
 	if got := metadataInt(t, msg, "tokens"); got != 10 {
 		t.Fatalf("answer tokens = %d, want 10 (reasoning excluded)", got)

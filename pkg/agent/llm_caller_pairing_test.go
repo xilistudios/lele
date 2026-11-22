@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -13,10 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// assertPairingValid checks a request the way a strict provider does: every
-// tool call announced by an assistant message must be answered by exactly one
-// tool result, every result must answer a call that is present, and results
-// must sit directly behind their assistant block.
 func assertPairingValid(t *testing.T, messages []providers.Message) {
 	t.Helper()
 
@@ -38,8 +29,6 @@ func assertPairingValid(t *testing.T, messages []providers.Message) {
 			continue
 		}
 
-		// Any other role closes the previous block: anything still waiting was
-		// never answered, which is the 400 that bricks a session.
 		if len(waiting) > 0 {
 			t.Fatalf("message %d (%s): previous assistant block left %d call(s) unanswered", i, m.Role, len(waiting))
 		}
@@ -64,9 +53,6 @@ func assertPairingValid(t *testing.T, messages []providers.Message) {
 	}
 }
 
-// The provider request is the last place a broken session can be repaired:
-// healing must happen there, not in the stored history, so a session that was
-// bricked by an interrupted turn recovers without losing its real tool output.
 func TestLLMCaller_HealsPairingBeforeProviderCall(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -144,8 +130,6 @@ func TestLLMCaller_HealsPairingBeforeProviderCall(t *testing.T) {
 	}
 }
 
-// A healthy request must reach the provider untouched: healing that rewrites
-// valid conversations would reorder real tool output the model depends on.
 func TestLLMCaller_LeavesValidPairingAlone(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -190,7 +174,6 @@ func TestLLMCaller_LeavesValidPairingAlone(t *testing.T) {
 	}
 }
 
-// namedCall builds a tool call in the canonical shape the loop records.
 func namedCall(id, name string) providers.ToolCall {
 	return providers.ToolCall{
 		ID: id, Type: "function", Name: name,
