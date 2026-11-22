@@ -12,37 +12,16 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// AgentRegistry manages multiple agent instances and routes messages to them.
 type AgentRegistry struct {
-	agents               map[string]*AgentInstance
-	resolver             *routing.RouteResolver
-	mu                   sync.RWMutex
-	sharedSessionManager *session.SessionManager // optionally set by AgentLoop
-	// toolsAllowlists records the raw `tools:` allowlist (agents.list[].tools)
-	// that produced each instance, keyed by normalized agent ID. The reload diff
-	// needs the *config* content, not the resulting tool set: an allowlist is
-	// applied by NewAgentInstance (nil/empty = all tools, unknown names are
-	// ignored, a non-matching allowlist keeps everything) and ReloadRegistry
-	// re-registers shared tools (spawn, web, background exec) on top of the
-	// fresh instance, so comparing the live ToolRegistry against the new config
-	// would report a change on every reload and never converge. AgentInstance
-	// has no field for the allowlist and pkg/agent/instance.go is owned by
-	// another task, so the baseline lives here. Slices are cloned because the
-	// caller may keep mutating the config it passed.
-	toolsAllowlists map[string][]string
-	// folderResolver is propagated to every agent's ContextBuilder so each
-	// session's system prompt can inject the folder the user selected for it
-	// (WebUI "per-session folder context"). Set by AgentLoop after the
-	// registry is created; applied to instances as they are created.
-	folderResolver func(sessionKey string) string
-	// subagentLedgerResolver is propagated to every agent's ContextBuilder so
-	// the per-session subagent ledger reaches the system prompt. It takes the
-	// agent ID because the ledger lives in that agent's SubagentManager.
+	agents                 map[string]*AgentInstance
+	resolver               *routing.RouteResolver
+	mu                     sync.RWMutex
+	sharedSessionManager   *session.SessionManager
+	toolsAllowlists        map[string][]string
+	folderResolver         func(sessionKey string) string
 	subagentLedgerResolver func(agentID, sessionKey string) string
 }
 
-// NewAgentRegistry creates a registry from config, instantiating all agents.
-// Each agent creates its own provider based on its model configuration.
 func NewAgentRegistry(cfg *config.Config) *AgentRegistry {
 	registry := &AgentRegistry{
 		agents:          make(map[string]*AgentInstance),
@@ -72,10 +51,6 @@ func NewAgentRegistry(cfg *config.Config) *AgentRegistry {
 	return registry
 }
 
-// rememberToolsAllowlistLocked records the `tools:` allowlist that produced an
-// instance, keyed by normalized agent ID. nil/empty clears the entry because
-// both mean "all tools" and must never be told apart by the reload diff.
-// Caller must hold r.mu.
 func (r *AgentRegistry) rememberToolsAllowlistLocked(id string, allowed []string) {
 	if len(allowed) == 0 {
 		delete(r.toolsAllowlists, id)
@@ -87,15 +62,10 @@ func (r *AgentRegistry) rememberToolsAllowlistLocked(id string, allowed []string
 	r.toolsAllowlists[id] = cloneStrings(allowed)
 }
 
-// toolsAllowlistLocked returns the recorded allowlist baseline for id. A nil
-// map (registry built as a bare literal, e.g. in tests) reads as "no allowlist".
-// Caller must hold r.mu.
 func (r *AgentRegistry) toolsAllowlistLocked(id string) []string {
 	return r.toolsAllowlists[id]
 }
 
-// cloneStrings copies a string slice so the registry never aliases the caller's
-// config (which may keep being mutated after a reload). nil in, nil out.
 func cloneStrings(s []string) []string {
 	if s == nil {
 		return nil
@@ -103,7 +73,6 @@ func cloneStrings(s []string) []string {
 	return append([]string(nil), s...)
 }
 
-// GetAgent returns the agent instance for a given ID.
 func (r *AgentRegistry) GetAgent(agentID string) (*AgentInstance, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -112,12 +81,10 @@ func (r *AgentRegistry) GetAgent(agentID string) (*AgentInstance, bool) {
 	return agent, ok
 }
 
-// ResolveRoute determines which agent handles the message.
 func (r *AgentRegistry) ResolveRoute(input routing.RouteInput) routing.ResolvedRoute {
 	return r.resolver.ResolveRoute(input)
 }
 
-// ListAgentIDs returns all registered agent IDs.
 func (r *AgentRegistry) ListAgentIDs() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -128,9 +95,6 @@ func (r *AgentRegistry) ListAgentIDs() []string {
 	return ids
 }
 
-// SetSharedSessionManager replaces every agent's individual session manager
-// with the given shared instance, ensuring all agents operate on the same
-// session storage. New agents created during ReloadAgents also receive it.
 func (r *AgentRegistry) SetSharedSessionManager(sm *session.SessionManager) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -142,11 +106,6 @@ func (r *AgentRegistry) SetSharedSessionManager(sm *session.SessionManager) {
 	}
 }
 
-// SetFolderResolver stores fn and wires it into every current agent's
-// ContextBuilder so per-session folder context reaches the system prompt.
-// Agents created later (ReloadAgents) inherit the same resolver, which is how
-// the loop's attachFolderResolver reaches builders created inside
-// NewAgentInstance without instance.go seeing the loop.
 func (r *AgentRegistry) SetFolderResolver(fn func(sessionKey string) string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -156,10 +115,6 @@ func (r *AgentRegistry) SetFolderResolver(fn func(sessionKey string) string) {
 	}
 }
 
-// applyFolderResolverLocked wires the stored resolver into one instance.
-// A nil resolver is propagated as well: it means "folder injection disabled",
-// and clearing must reach builders that were already wired.
-// Caller must hold r.mu.
 func (r *AgentRegistry) applyFolderResolverLocked(instance *AgentInstance) {
 	if instance == nil || instance.ContextBuilder == nil {
 		return
@@ -167,12 +122,6 @@ func (r *AgentRegistry) applyFolderResolverLocked(instance *AgentInstance) {
 	instance.ContextBuilder.SetFolderResolver(r.folderResolver)
 }
 
-// SetSubagentLedgerResolver stores fn and wires it into every current agent's
-// ContextBuilder, binding each instance's own ID. Agents created later
-// (ReloadAgents) inherit the same resolver, which is how the loop's
-// attachSubagentLedgerResolver reaches builders created inside
-// NewAgentInstance without instance.go seeing the loop. Mirrors
-// SetFolderResolver.
 func (r *AgentRegistry) SetSubagentLedgerResolver(fn func(agentID, sessionKey string) string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -182,12 +131,6 @@ func (r *AgentRegistry) SetSubagentLedgerResolver(fn func(agentID, sessionKey st
 	}
 }
 
-// applySubagentLedgerResolverLocked wires the stored resolver into one instance,
-// binding the instance's ID by VALUE: capturing the instance pointer would pin a
-// stale object across ReloadAgents, which replaces instances while preserving
-// their ContextBuilder. A nil resolver is propagated as well — it means the
-// ledger section is disabled, and clearing must reach already-wired builders.
-// Caller must hold r.mu.
 func (r *AgentRegistry) applySubagentLedgerResolverLocked(instance *AgentInstance) {
 	if instance == nil || instance.ContextBuilder == nil {
 		return
@@ -197,16 +140,12 @@ func (r *AgentRegistry) applySubagentLedgerResolverLocked(instance *AgentInstanc
 		instance.ContextBuilder.SetSubagentLedgerResolver(nil)
 		return
 	}
-	id := instance.ID // by value, not the pointer
+	id := instance.ID
 	instance.ContextBuilder.SetSubagentLedgerResolver(func(sessionKey string) string {
 		return fn(id, sessionKey)
 	})
 }
 
-// SetExecWhitelist applies (or re-applies) the exec command whitelist to every
-// agent's exec tool without rebuilding the registry. Used when the user adds a
-// command to the whitelist from the TUI approval prompt, so the decision takes
-// effect on the very next tool call.
 func (r *AgentRegistry) SetExecWhitelist(commands []string) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -222,14 +161,12 @@ func (r *AgentRegistry) SetExecWhitelist(commands []string) {
 	}
 }
 
-// CanSpawnSubagent checks if parentAgentID is allowed to spawn targetAgentID.
 func (r *AgentRegistry) CanSpawnSubagent(parentAgentID, targetAgentID string) bool {
 	parent, ok := r.GetAgent(parentAgentID)
 	if !ok {
 		return false
 	}
 
-	// If parent has explicit allowlist, use it
 	if parent.Subagents != nil && parent.Subagents.AllowAgents != nil {
 		targetNorm := routing.NormalizeAgentID(targetAgentID)
 		for _, allowed := range parent.Subagents.AllowAgents {
@@ -243,36 +180,28 @@ func (r *AgentRegistry) CanSpawnSubagent(parentAgentID, targetAgentID string) bo
 		return false
 	}
 
-	// No explicit allowlist - check if parent is default agent
-	// Default agent can spawn any existing agent
 	if parent.ID == "main" || parent.ID == routing.DefaultAgentID {
-		// Check if target agent exists in registry
 		_, exists := r.GetAgent(targetAgentID)
 		return exists
 	}
 
-	// Non-default agents without allowlist cannot spawn
 	return false
 }
 
-// GetDefaultAgent returns the default agent instance.
 func (r *AgentRegistry) GetDefaultAgent() *AgentInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// First check for agent "main" (backward compatibility)
 	if agent, ok := r.agents["main"]; ok {
 		return agent
 	}
 
-	// Then iterate through all agents and return the one with IsDefault=true
 	for _, agent := range r.agents {
 		if agent.IsDefault {
 			return agent
 		}
 	}
 
-	// If no default found, fall back to the first alphabetically sorted agent
 	ids := make([]string, 0, len(r.agents))
 	for id := range r.agents {
 		ids = append(ids, id)
@@ -284,21 +213,14 @@ func (r *AgentRegistry) GetDefaultAgent() *AgentInstance {
 	return nil
 }
 
-// ReloadAgents updates the registry with new agent configurations.
-// It only recreates agent instances whose effective configuration has changed.
-// Agents that no longer exist in the config are removed (with a warning if they
-// have active sessions). New agents are created and existing unchanged agents
-// are preserved along with their in-memory sessions.
 func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Update the route resolver
 	r.resolver = routing.NewRouteResolver(cfg)
 
 	agentConfigs := cfg.Agents.List
 	if len(agentConfigs) == 0 {
-		// No agents configured — remove existing agents and ensure main agent exists.
 		for id, instance := range r.agents {
 			if id != "main" {
 				logActiveSessions(id, instance)
@@ -324,14 +246,12 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 		return
 	}
 
-	// Build set of new agent IDs
 	newIDs := make(map[string]bool)
 	for i := range agentConfigs {
 		id := routing.NormalizeAgentID(agentConfigs[i].ID)
 		newIDs[id] = true
 	}
 
-	// Remove agents that no longer exist in config
 	for id, instance := range r.agents {
 		if !newIDs[id] {
 			logActiveSessions(id, instance)
@@ -340,25 +260,15 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 		}
 	}
 
-	// Create or update agent instances from current config.
-	// Only recreate if the effective config (model, workspace, provider) changed.
 	for i := range agentConfigs {
 		ac := &agentConfigs[i]
 		id := routing.NormalizeAgentID(ac.ID)
 
 		if existing, ok := r.agents[id]; ok && !agentConfigChanged(existing, ac, &cfg.Agents.Defaults, cfg, r.toolsAllowlistLocked(id)) {
-			// Agent config unchanged — but subagent list may have changed if
-			// another agent was added/removed/updated, so refresh it.
 			if ac.Subagents != nil && len(ac.Subagents.AllowAgents) > 0 {
 				available := resolveAvailableSubagents(ac, cfg)
 				existing.ContextBuilder.SetAvailableSubagents(available)
 			}
-			// Preserved builder already carries the resolver; re-attach so a
-			// builder created before SetFolderResolver also gets it (no-op
-			// otherwise). The ledger resolver is re-attached for the same
-			// reason, and it re-binds the CURRENT instance ID (D7): the builder
-			// outlives the instance, so a closure that captured the old ID would
-			// keep reading the old agent's ledger.
 			r.applyFolderResolverLocked(existing)
 			r.applySubagentLedgerResolverLocked(existing)
 			continue
@@ -366,34 +276,19 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 
 		instance := NewAgentInstance(ac, &cfg.Agents.Defaults, cfg)
 
-		// If replacing an existing agent, migrate its session manager so active
-		// conversations are not lost. The session manager persists to disk, but
-		// in-flight sessions hold a reference to the old manager instance.
 		if old, ok := r.agents[id]; ok {
 			instance.Sessions = old.Sessions
 			instance.ContextBuilder = old.ContextBuilder
-			// The preserved builder still carries the skills allowlist the OLD
-			// instance was built with (SetSkillsFilter is the only writer, and
-			// NewAgentInstance configures the builder it discards here). Without
-			// this refresh a skills change would be detected, the instance
-			// recreated, and the agent would STILL render the old <skills> block
-			// — the exact symptom the content diff exists to fix. Same semantics
-			// as the fresh path in NewAgentInstance: nil/empty = all skills.
 			old.ContextBuilder.SetSkillsFilter(ac.Skills)
-			// Refresh subagents on the preserved ContextBuilder since the
-			// agent list may have changed.
 			if ac.Subagents != nil && len(ac.Subagents.AllowAgents) > 0 {
 				available := resolveAvailableSubagents(ac, cfg)
 				old.ContextBuilder.SetAvailableSubagents(available)
 			}
 		} else if r.sharedSessionManager != nil {
-			// New agent: use the shared session manager if one is configured.
 			instance.Sessions = r.sharedSessionManager
 		}
 
-		// Newly created builders must see the loop's folder resolver too.
 		r.applyFolderResolverLocked(instance)
-		// Same for the subagent ledger: a recreated agent has a fresh builder.
 		r.applySubagentLedgerResolverLocked(instance)
 
 		r.agents[id] = instance
@@ -401,15 +296,6 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 	}
 }
 
-// agentConfigChanged returns true if the effective configuration of an agent
-// has changed and the instance needs to be recreated.
-//
-// existingTools is the raw `tools:` allowlist recorded for the instance when it
-// was built (see AgentRegistry.toolsAllowlists). It cannot be derived from
-// existing.Tools: the live registry is the allowlist applied to the base tools
-// and then re-filtered over the shared tools registered by the tool
-// coordinator, so its name set is larger than the allowlist and comparing it
-// against ac.Tools would flag a change on every reload.
 func agentConfigChanged(existing *AgentInstance, ac *config.AgentConfig, defaults *config.AgentDefaults, cfg *config.Config, existingTools []string) bool {
 	newModel := resolveAgentModelForReload(ac, defaults, cfg)
 	newWorkspace := resolveAgentWorkspace(ac, defaults)
@@ -424,10 +310,6 @@ func agentConfigChanged(existing *AgentInstance, ac *config.AgentConfig, default
 	if extractProviderFromModel(existing.Model, defaults.Provider) != newProvider {
 		return true
 	}
-	// Identity fields are editable from the WebUI agent pages and surface
-	// through GetAgentInfo (runtime), so a change here must recreate the
-	// instance; otherwise the UI keeps showing a stale name/description and
-	// the wrong agent is reported as default until restart.
 	if existing.Name != ac.Name {
 		return true
 	}
@@ -437,7 +319,6 @@ func agentConfigChanged(existing *AgentInstance, ac *config.AgentConfig, default
 	if existing.IsDefault != ac.Default {
 		return true
 	}
-	// Check max iterations
 	newMaxIter := defaults.MaxToolIterations
 	if newMaxIter == 0 {
 		newMaxIter = 20
@@ -445,7 +326,6 @@ func agentConfigChanged(existing *AgentInstance, ac *config.AgentConfig, default
 	if existing.MaxIterations != newMaxIter {
 		return true
 	}
-	// Check max tokens
 	newMaxTokens := defaults.MaxTokens
 	if newMaxTokens == 0 {
 		newMaxTokens = 8192
@@ -453,11 +333,9 @@ func agentConfigChanged(existing *AgentInstance, ac *config.AgentConfig, default
 	if existing.MaxTokens != newMaxTokens {
 		return true
 	}
-	// Check subagents config
 	if (existing.Subagents == nil) != (ac.Subagents == nil) {
 		return true
 	}
-	// Check subagents model override
 	if existing.Subagents != nil && ac.Subagents != nil {
 		existingModel := ""
 		newModel := ""
@@ -471,21 +349,12 @@ func agentConfigChanged(existing *AgentInstance, ac *config.AgentConfig, default
 			return true
 		}
 	}
-	// Check skills filter — by CONTENT, order-insensitive. A length-only
-	// comparison let ["a","b"] -> ["c","d"] pass as "unchanged", so the agent
-	// kept serving the old skills until restart. Same set in different order is
-	// NOT a change (the skills block is rendered from the loader's own order).
 	if !sameStringSet(existing.SkillsFilter, ac.Skills) {
 		return true
 	}
-	// Check tools allowlist — by CONTENT, order-insensitive, against the
-	// allowlist recorded at instance-build time (nil and [] are both "all
-	// tools" and must not look like a change).
 	if !sameStringSet(existingTools, ac.Tools) {
 		return true
 	}
-	// Check temperature — same resolution logic as NewAgentInstance:
-	// agent config overrides defaults, default is 0.7
 	newTemperature := 0.7
 	if defaults.Temperature != nil {
 		newTemperature = *defaults.Temperature
@@ -496,40 +365,29 @@ func agentConfigChanged(existing *AgentInstance, ac *config.AgentConfig, default
 	if existing.Temperature != newTemperature {
 		return true
 	}
-	// Check fallbacks — compare resolved fallback lists
 	newFallbacks := resolveAgentFallbacks(ac, defaults, cfg)
 	if !stringSlicesEqual(existing.Fallbacks, newFallbacks) {
 		return true
 	}
-	// Check context window — computed from provider model config
 	newCtxWindow := getContextWindow(cfg, newModel, newProvider)
 	if existing.ContextWindow != newCtxWindow {
 		return true
 	}
-	// Check supports images/video — computed from provider model config.
-	// Both capabilities gate per-request content stripping and tool exposure,
-	// so a switch between models that differ in vision OR video must rebuild.
 	newSupportsImages := getSupportsImages(cfg, newModel, newProvider)
 	newSupportsVideo := getSupportsVideo(cfg, newModel, newProvider)
 	if existing.SupportsImages != newSupportsImages || existing.SupportsVideo != newSupportsVideo {
 		return true
 	}
-	// Check reasoning config — computed from provider model config
 	newReasoning := getReasoningConfig(cfg, newModel, newProvider)
 	if !reasoningConfigsEqual(existing.Reasoning, newReasoning) {
 		return true
 	}
-	// Check thinking level — same resolution logic as NewAgentInstance:
-	// agent config overrides defaults, invalid/unset resolves to "". Without
-	// this, saving a new thinking_level in config.json + ReloadRegistry would
-	// keep the old instance and the stale level.
 	if existing.ThinkingLevel != resolveAgentThinkingLevel(ac, defaults) {
 		return true
 	}
 	return false
 }
 
-// stringSlicesEqual returns true if both slices have the same length and elements.
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -542,11 +400,6 @@ func stringSlicesEqual(a, b []string) bool {
 	return true
 }
 
-// sameStringSet reports whether two string slices hold the same set of values,
-// ignoring order and duplicates. nil and empty are equal (both mean "no
-// allowlist"), which is what the per-agent `tools:` field requires: nil and []
-// both resolve to "all tools". Used for membership-style allowlists (skills,
-// tools), whose consumers test containment and never index or multiplicity.
 func sameStringSet(a, b []string) bool {
 	setA, setB := toNameSet(a), toNameSet(b)
 	if len(setA) != len(setB) {
@@ -560,7 +413,6 @@ func sameStringSet(a, b []string) bool {
 	return true
 }
 
-// toNameSet folds a string slice into a set, dropping order and duplicates.
 func toNameSet(s []string) map[string]struct{} {
 	set := make(map[string]struct{}, len(s))
 	for _, v := range s {
@@ -569,7 +421,6 @@ func toNameSet(s []string) map[string]struct{} {
 	return set
 }
 
-// reasoningConfigsEqual compares two ReasoningConfig values for equality.
 func reasoningConfigsEqual(a, b *config.ReasoningConfig) bool {
 	if a == nil && b == nil {
 		return true
@@ -589,7 +440,6 @@ func reasoningConfigsEqual(a, b *config.ReasoningConfig) bool {
 	return true
 }
 
-// ptrStringsEqual compares two *string values for equality.
 func ptrStringsEqual(a, b *string) bool {
 	if a == nil && b == nil {
 		return true
@@ -600,8 +450,6 @@ func ptrStringsEqual(a, b *string) bool {
 	return *a == *b
 }
 
-// resolveAgentModelForReload resolves the model for an agent during registry reload.
-// This is a simplified version that avoids the debug logging in resolveAgentModel.
 func resolveAgentModelForReload(ac *config.AgentConfig, defaults *config.AgentDefaults, cfg *config.Config) string {
 	if ac != nil && ac.Model != nil && strings.TrimSpace(ac.Model.Primary) != "" {
 		return cfg.Providers.ResolveModelAlias(strings.TrimSpace(ac.Model.Primary), defaults.Provider)
@@ -609,7 +457,6 @@ func resolveAgentModelForReload(ac *config.AgentConfig, defaults *config.AgentDe
 	return cfg.Providers.ResolveModelAlias(defaults.Model, defaults.Provider)
 }
 
-// logActiveSessions warns if an agent being removed has active sessions.
 func logActiveSessions(agentID string, instance *AgentInstance) {
 	if instance == nil || instance.Sessions == nil {
 		return

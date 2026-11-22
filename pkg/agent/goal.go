@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -24,21 +18,17 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// GoalStatus represents the state of a persistent goal.
 type GoalStatus string
 
 const (
 	GoalActive  GoalStatus = "active"
 	GoalPaused  GoalStatus = "paused"
 	GoalDone    GoalStatus = "done"
-	GoalBlocked GoalStatus = "blocked" // budget exhausted without completion
+	GoalBlocked GoalStatus = "blocked"
 )
 
-// DefaultGoalMaxTurns is the default turn budget for a goal loop.
 const DefaultGoalMaxTurns = 20
 
-// Goal represents a persistent objective that the agent works toward
-// across multiple turns until achieved or the budget is exhausted.
 type Goal struct {
 	Text       string     `json:"text"`
 	Status     GoalStatus `json:"status"`
@@ -49,25 +39,18 @@ type Goal struct {
 	SessionKey string     `json:"session_key"`
 }
 
-// GoalManager manages persistent goals per session.
 type GoalManager struct {
 	mu       sync.RWMutex
-	goals    map[string]*Goal // sessionKey -> active goal
+	goals    map[string]*Goal
 	storeDir string
 	judge    GoalJudge
 	repo     *store.GoalRepo
 }
 
-// GoalJudge evaluates whether a goal has been achieved after each turn.
 type GoalJudge interface {
-	// JudgeGoal evaluates the agent's progress toward the goal using the
-	// session's conversation summary (fetched by the judge) and the latest
-	// agent response. Returns true if the goal is achieved, false if more
-	// work is needed.
 	JudgeGoal(ctx context.Context, sessionKey, goalText string, lastResponse string) (bool, string, error)
 }
 
-// NewGoalManager creates a new goal manager.
 func NewGoalManager(storeDir string) *GoalManager {
 	gm := &GoalManager{
 		goals:    make(map[string]*Goal),
@@ -77,16 +60,12 @@ func NewGoalManager(storeDir string) *GoalManager {
 	return gm
 }
 
-// SetJudge sets the goal judge implementation.
 func (gm *GoalManager) SetJudge(judge GoalJudge) {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
 	gm.judge = judge
 }
 
-// SetStore switches goal persistence to the given SQLite repository.
-// If the repository is empty and legacy goal files exist, they are
-// migrated lazily. Pass nil to revert to the JSON backend.
 func (gm *GoalManager) SetStore(repo *store.GoalRepo) {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
@@ -119,7 +98,6 @@ func (gm *GoalManager) SetStore(repo *store.GoalRepo) {
 		return
 	}
 
-	// Repository empty: migrate goals already loaded in memory by loadFromDisk.
 	for sessionKey, goal := range gm.goals {
 		data, err := json.Marshal(goal)
 		if err != nil {
@@ -138,7 +116,6 @@ func (gm *GoalManager) SetStore(repo *store.GoalRepo) {
 	}
 }
 
-// Set creates or replaces the goal for a session.
 func (gm *GoalManager) Set(sessionKey, text string, maxTurns int) *Goal {
 	if maxTurns <= 0 {
 		maxTurns = DefaultGoalMaxTurns
@@ -168,14 +145,12 @@ func (gm *GoalManager) Set(sessionKey, text string, maxTurns int) *Goal {
 	return goal
 }
 
-// Get returns the active goal for a session, or nil.
 func (gm *GoalManager) Get(sessionKey string) *Goal {
 	gm.mu.RLock()
 	defer gm.mu.RUnlock()
 	return gm.goals[sessionKey]
 }
 
-// IsActive returns true if the session has an active (not paused/done) goal.
 func (gm *GoalManager) IsActive(sessionKey string) bool {
 	gm.mu.RLock()
 	defer gm.mu.RUnlock()
@@ -183,7 +158,6 @@ func (gm *GoalManager) IsActive(sessionKey string) bool {
 	return ok && g.Status == GoalActive
 }
 
-// Pause pauses the goal for a session.
 func (gm *GoalManager) Pause(sessionKey string) bool {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
@@ -198,7 +172,6 @@ func (gm *GoalManager) Pause(sessionKey string) bool {
 	return true
 }
 
-// Resume resumes a paused goal for a session.
 func (gm *GoalManager) Resume(sessionKey string) bool {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
@@ -213,7 +186,6 @@ func (gm *GoalManager) Resume(sessionKey string) bool {
 	return true
 }
 
-// Clear removes the goal for a session.
 func (gm *GoalManager) Clear(sessionKey string) bool {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
@@ -227,8 +199,6 @@ func (gm *GoalManager) Clear(sessionKey string) bool {
 	return true
 }
 
-// IncrementTurn increments the turn counter and returns whether the budget
-// is exhausted. If exhausted, the goal status is set to Blocked.
 func (gm *GoalManager) IncrementTurn(sessionKey string) (exhausted bool) {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
@@ -256,7 +226,6 @@ func (gm *GoalManager) IncrementTurn(sessionKey string) (exhausted bool) {
 	return false
 }
 
-// MarkDone marks the goal as completed.
 func (gm *GoalManager) MarkDone(sessionKey string) {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
@@ -275,7 +244,6 @@ func (gm *GoalManager) MarkDone(sessionKey string) {
 	})
 }
 
-// FormatStatus returns a human-readable status string for the goal.
 func (g *Goal) FormatStatus() string {
 	statusEmoji := map[GoalStatus]string{
 		GoalActive:  "🎯",
@@ -290,12 +258,7 @@ func (g *Goal) FormatStatus() string {
 		g.CreatedAt.Format("2006-01-02 15:04"))
 }
 
-// ============================================================================
-// Persistence
-// ============================================================================
-
 func (gm *GoalManager) goalFilePath(sessionKey string) string {
-	// Sanitize session key for filesystem use
 	safe := sanitizeFileName(sessionKey)
 	return filepath.Join(gm.storeDir, safe+".json")
 }
@@ -359,8 +322,6 @@ func (gm *GoalManager) loadFromDisk() {
 	gm.loadFromLegacyFiles()
 }
 
-// loadFromLegacyFiles loads goals from JSON files on disk. Only active
-// or paused goals are restored.
 func (gm *GoalManager) loadFromLegacyFiles() {
 	if gm.storeDir == "" {
 		return
@@ -381,17 +342,12 @@ func (gm *GoalManager) loadFromLegacyFiles() {
 		if err := json.Unmarshal(data, &goal); err != nil {
 			continue
 		}
-		// Only restore active or paused goals
 		if goal.Status == GoalActive || goal.Status == GoalPaused {
 			gm.goals[goal.SessionKey] = &goal
 		}
 	}
 }
 
-// loadFromRepo loads goals from the SQLite repository. Corrupt entries
-// are skipped with a warning. Only active or paused goals are restored.
-// If the repository is empty and legacy JSON files exist in storeDir,
-// they are loaded and migrated into the repository best-effort.
 func (gm *GoalManager) loadFromRepo() {
 	goalsJSON, err := gm.repo.ListGoals()
 	if err != nil {
@@ -416,7 +372,6 @@ func (gm *GoalManager) loadFromRepo() {
 		return
 	}
 
-	// Repository empty: load legacy JSON files and migrate them.
 	gm.loadFromLegacyFiles()
 	for sessionKey, goal := range gm.goals {
 		data, err := json.Marshal(goal)
@@ -436,7 +391,6 @@ func (gm *GoalManager) loadFromRepo() {
 	}
 }
 
-// sanitizeFileName replaces characters that are unsafe for filenames.
 func sanitizeFileName(s string) string {
 	replacer := func(r rune) rune {
 		switch {
@@ -452,31 +406,18 @@ func sanitizeFileName(s string) string {
 	for _, r := range s {
 		result = append(result, replacer(r))
 	}
-	// Limit length
 	if len(result) > 128 {
 		result = result[:128]
 	}
 	return string(result)
 }
 
-// ============================================================================
-// Summary-based Goal Judge
-// ============================================================================
-
-// SummaryProvider returns the conversation summary for a given session key.
 type SummaryProvider interface {
-	// GetSummary returns the current compressed summary for the session.
 	GetSummary(sessionKey string) string
 }
 
-// ModelResolver returns the model to use for a given session key.
 type ModelResolver func(sessionKey string) string
 
-// SummaryGoalJudge uses an LLM to evaluate whether a goal has been achieved,
-// based on the session's conversation summary and the latest agent response.
-// The summary is fetched from the session manager instead of passing raw
-// history, so the judge sees the full trajectory of the conversation in a
-// compact form rather than only the final message.
 type SummaryGoalJudge struct {
 	provider      providers.LLMProvider
 	model         string
@@ -485,12 +426,6 @@ type SummaryGoalJudge struct {
 	cfg           *config.Config
 }
 
-// NewSummaryGoalJudge creates a goal judge that evaluates progress using the
-// conversation summary (from the provided SummaryProvider) plus the latest
-// agent response. model is the fallback model used when resolver is nil or
-// returns an empty string. The resolver, when provided, selects the model at
-// evaluation time (e.g. the session's own model) so the judge uses the same
-// model as the main agent loop.
 func NewSummaryGoalJudge(provider providers.LLMProvider, model string, summary SummaryProvider, resolver ModelResolver) *SummaryGoalJudge {
 	return &SummaryGoalJudge{
 		provider:      provider,
@@ -500,9 +435,6 @@ func NewSummaryGoalJudge(provider providers.LLMProvider, model string, summary S
 	}
 }
 
-// SetConfig sets the config used to resolve the correct provider for the
-// session's model. Required for correct provider routing when the session
-// model uses a different provider than the agent default.
 func (j *SummaryGoalJudge) SetConfig(cfg *config.Config) {
 	j.cfg = cfg
 }
@@ -517,9 +449,6 @@ Rules:
 - If the agent is stuck or going in circles, say CONTINUE (the budget system handles exhaustion).
 - Do NOT explain your reasoning. Only output DONE or CONTINUE.`
 
-// buildGoalJudgePrompt assembles the evaluation prompt from the goal text,
-// the session summary, and the latest response. The summary is fetched by the
-// caller and passed in, keeping this function pure and testable.
 func buildGoalJudgePrompt(goalText, summary, lastResponse string) string {
 	truncated := lastResponse
 	if len(truncated) > 4000 {
@@ -537,12 +466,6 @@ func buildGoalJudgePrompt(goalText, summary, lastResponse string) string {
 	return prompt
 }
 
-// buildSubagentJudgePrompt assembles the evaluation prompt for the SUBAGENT
-// goal judge. It is like buildGoalJudgePrompt but instructs the evaluator to
-// act as a supervisor: when more work is needed it must provide a specific
-// next step (CONTINUE: <step>) that the continuation loop uses as the next
-// turn's prompt. The summary is fetched by the caller and passed in, keeping
-// this function pure and testable.
 func buildSubagentJudgePrompt(goalText, summary, lastResponse string) string {
 	truncated := lastResponse
 	if len(truncated) > 4000 {
@@ -563,15 +486,8 @@ func buildSubagentJudgePrompt(goalText, summary, lastResponse string) string {
 	return prompt
 }
 
-// continueGuidanceRe matches the "CONTINUE:" prefix (case-insensitive,
-// allowing optional whitespace before the colon, e.g. "CONTINUE:" or
-// "CONTINUE :"). The text after it is the specific next-step guidance.
 var continueGuidanceRe = regexp.MustCompile(`(?i)CONTINUE\s*:`)
 
-// extractContinuationGuidance returns the specific next-step guidance from a
-// subagent judge answer, or "" if none is available. It returns "" when the
-// answer does not indicate CONTINUE (DONE or empty), and also when the answer
-// contains "CONTINUE" without a "CONTINUE:" prefix (no guidance available).
 func extractContinuationGuidance(answer string) string {
 	if answer == "" {
 		return ""
@@ -581,7 +497,6 @@ func extractContinuationGuidance(answer string) string {
 	}
 	loc := continueGuidanceRe.FindStringIndex(answer)
 	if loc == nil {
-		// Contains CONTINUE but no CONTINUE: prefix -> no guidance available.
 		return ""
 	}
 	return strings.TrimSpace(answer[loc[1]:])
@@ -592,9 +507,6 @@ func (j *SummaryGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText s
 		return false, "", fmt.Errorf("goal judge: no provider configured")
 	}
 
-	// Resolve the model to use. Prefer the session model from the resolver
-	// (so the judge uses the same model as the main agent loop), falling back
-	// to the fixed model captured at construction.
 	model := j.model
 	if j.modelResolver != nil {
 		if m := j.modelResolver(sessionKey); m != "" {
@@ -602,7 +514,6 @@ func (j *SummaryGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText s
 		}
 	}
 
-	// Fetch the session summary for the given session key.
 	summary := ""
 	if j.summary != nil {
 		summary = j.summary.GetSummary(sessionKey)
@@ -615,12 +526,6 @@ func (j *SummaryGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText s
 		{Role: "user", Content: userPrompt},
 	}
 
-	// The judge is a trivial one-word classifier (DONE / CONTINUE). Reasoning
-	// models (e.g. mimo-v2.5-pro) spend the max_tokens budget on thinking
-	// tokens BEFORE producing content, so a tiny max_tokens yields an empty
-	// answer and the loop never sees DONE. Disable reasoning where supported
-	// and give enough headroom that even a model that ignores the disable can
-	// still emit its answer.
 	options := map[string]interface{}{
 		"max_tokens":  1024,
 		"temperature": 0.0,
@@ -628,22 +533,13 @@ func (j *SummaryGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText s
 			"enabled": false,
 		},
 	}
-	// Same conversation-scoped wire identity as the main loop (see
-	// pkg/agent/llm_caller.go buildLLMOptions).
 	options = providers.WithWireSessionID(options, sessionKey)
-	// Per-model think system (providers.<name>.models.<alias>.thinking_type):
-	// lets the provider render the disable in the dialect the endpoint
-	// understands (e.g. MiMo/DeepSeek `thinking: {"type": "disabled"}`).
 	if j.cfg != nil {
 		if tt := getThinkingType(j.cfg, model, j.cfg.Agents.Defaults.Provider); tt != "" {
 			options["thinking_type"] = tt
 		}
 	}
 
-	// Resolve the correct provider for the session's model, mirroring the
-	// main agent loop (llm_caller.go call()). The model may carry a provider
-	// prefix (e.g. "llmproxy:mimo-v2.5-pro") that must be stripped for the
-	// API call, and the provider may differ from the agent's default.
 	apiModel := providers.StripProviderPrefix(model)
 	callProvider := j.provider
 	if ref := providers.ParseModelRef(model, ""); ref != nil && ref.Provider != "" {
@@ -679,43 +575,26 @@ func (j *SummaryGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText s
 	return isDone, answer, nil
 }
 
-// containsDone checks if the judge response indicates completion.
 func containsDone(s string) bool {
 	upper := strings.ToUpper(s)
 	return strings.Contains(upper, "DONE") && !strings.Contains(upper, "NOT DONE")
 }
 
-// ============================================================================
-// Subagent-based Goal Judge
-// ============================================================================
-
-// SubagentRunner is the minimal interface the subagent goal judge needs to
-// spawn and await a subagent task. It is satisfied by *tools.SubagentManager.
 type SubagentRunner interface {
-	// SpawnWithOptions starts a subagent task and returns its task ID.
 	SpawnWithOptions(ctx context.Context, task, label, agentID, originChannel, originChatID string, callback tools.AsyncCallback, opts tools.SpawnOptions) (string, error)
-	// GetTask returns the task snapshot, or false if not found.
 	GetTask(taskID string) (*tools.SubagentTask, bool)
 }
 
-// SubagentGoalJudge evaluates goal completion by running a separate subagent
-// that reads the goal text, the conversation summary, and the latest response.
-// This decouples evaluation from the main agent loop and gives it a clean
-// context for reasoning.
 type SubagentGoalJudge struct {
 	runner     SubagentRunner
 	summary    SummaryProvider
-	agentID    string // agent to run the evaluator as (empty = default)
-	originChan string // origin channel for the spawned subagent
-	originChat string // origin chat id for the spawned subagent
+	agentID    string
+	originChan string
+	originChat string
 	timeout    time.Duration
 	retries    int
 }
 
-// NewSubagentGoalJudge creates a goal judge that evaluates progress by
-// spawning a separate subagent. agentID selects the evaluator agent (empty =
-// default). originChannel/originChatID identify the session context the
-// subagent is spawned from. timeout bounds the wait for the subagent result.
 func NewSubagentGoalJudge(runner SubagentRunner, summary SummaryProvider, agentID, originChannel, originChatID string, timeout time.Duration) *SubagentGoalJudge {
 	return &SubagentGoalJudge{
 		runner:     runner,
@@ -727,28 +606,23 @@ func NewSubagentGoalJudge(runner SubagentRunner, summary SummaryProvider, agentI
 	}
 }
 
-// WithRetries sets the number of automatic retries for transient failures.
 func (j *SubagentGoalJudge) WithRetries(n int) *SubagentGoalJudge {
 	j.retries = n
 	return j
 }
 
-// JudgeGoal spawns a subagent to evaluate the goal and awaits its result.
 func (j *SubagentGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText string, lastResponse string) (bool, string, error) {
 	if j.runner == nil {
 		return false, "", fmt.Errorf("goal subagent judge: no subagent runner configured")
 	}
 
-	// Fetch the session summary.
 	summary := ""
 	if j.summary != nil {
 		summary = j.summary.GetSummary(sessionKey)
 	}
 
-	// Build the evaluation task prompt.
 	taskPrompt := buildSubagentJudgePrompt(goalText, summary, lastResponse)
 
-	// Origin session key for the spawned subagent.
 	originChannel := j.originChan
 	if originChannel == "" {
 		originChannel = "goal"
@@ -758,7 +632,6 @@ func (j *SubagentGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText 
 		originChat = sessionKey
 	}
 
-	// Spawn the evaluator subagent.
 	taskID, err := j.runner.SpawnWithOptions(ctx, taskPrompt, "goal-evaluator", j.agentID, originChannel, originChat, nil, tools.SpawnOptions{
 		MaxRetries: j.retries,
 	})
@@ -766,7 +639,6 @@ func (j *SubagentGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText 
 		return false, "", fmt.Errorf("goal subagent judge: spawn failed: %w", err)
 	}
 
-	// Await completion, bounded by the configured timeout.
 	waitCtx := ctx
 	cancel := func() {}
 	if j.timeout > 0 {
@@ -785,7 +657,6 @@ func (j *SubagentGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText 
 	case <-task.DoneChannel():
 	}
 
-	// Re-fetch the task for its final result.
 	task, ok = j.runner.GetTask(taskID)
 	if !ok {
 		return false, "", fmt.Errorf("goal subagent judge: task %s not found after completion", taskID)

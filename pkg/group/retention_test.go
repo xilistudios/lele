@@ -7,28 +7,6 @@ import (
 	"time"
 )
 
-// ---------------------------------------------------------------------------
-// Regression tests for B6: finished groups must not accumulate in memory.
-//
-// Before the retention sweep, GroupManager.groups never dropped a terminated
-// group, so every group ever started — with its full transcript — stayed in RAM
-// and kept appearing in List()/AllSnapshots() (unbounded WS welcome payload and
-// "/group list"). The rule under test:
-//
-//   - a group in a terminal status (done | stopped | error) becomes invisible
-//     to Start/Status/List/AllSnapshots/Wait once retention has elapsed since
-//     finalize stamped finishedAt;
-//   - a running group is never evicted, no matter how small retention is;
-//   - within the retention window a finished group stays visible, which is what
-//     lets the UI welcome snapshot still show the group that just ended.
-//
-// Retention values are small but not degenerate (200ms) so the "still visible"
-// assertions are not timing-flaky, while the eviction assertions only need to
-// sleep past the window.
-// ---------------------------------------------------------------------------
-
-// releaseStep unblocks a stepExecutor parked inside a turn. Idempotent so a
-// test can call it from both the success and the failure path.
 func releaseStep(e *stepExecutor) {
 	select {
 	case <-e.release:
@@ -37,8 +15,6 @@ func releaseStep(e *stepExecutor) {
 	}
 }
 
-// runQuickGroup starts a one-shot group and blocks until it reaches a terminal
-// status, returning the group ID.
 func runQuickGroup(t *testing.T, gm *GroupManager, id string) string {
 	t.Helper()
 	groupID, err := gm.Start(context.Background(), id, "p1", "task", "round_robin",
@@ -61,7 +37,6 @@ func TestRegression_FinishedGroupsEvictedAfterRetention(t *testing.T) {
 
 	groupID := runQuickGroup(t, gm, "ret-done-1")
 
-	// Inside the window: still tracked, and Wait stays idempotent.
 	if _, ok := gm.Status(groupID); !ok {
 		t.Fatal("finished group not visible inside retention window")
 	}
@@ -71,7 +46,7 @@ func TestRegression_FinishedGroupsEvictedAfterRetention(t *testing.T) {
 		}
 	})
 
-	time.Sleep(400 * time.Millisecond) // > retention
+	time.Sleep(400 * time.Millisecond)
 
 	if got := gm.List(); len(got) != 0 {
 		t.Fatalf("List after retention = %d groups, want 0 (eviction broken)", len(got))
@@ -84,12 +59,9 @@ func TestRegression_FinishedGroupsEvictedAfterRetention(t *testing.T) {
 	}
 }
 
-// TestRegression_ActiveGroupsNeverEvicted pins the guard that only terminal
-// statuses are swept: with a 1ms retention the in-flight group must stay
-// visible, otherwise a long-running group would vanish from the UI mid-run.
 func TestRegression_ActiveGroupsNeverEvicted(t *testing.T) {
 	rec := newLifecycleRecorder()
-	exec := newStepExecutor(1) // turn 1 fast, turn 2 blocks until release
+	exec := newStepExecutor(1)
 	gm := NewGroupManager(mockResolve, exec.execute, rec.publish)
 	gm.SetRetention(time.Millisecond)
 
@@ -101,7 +73,6 @@ func TestRegression_ActiveGroupsNeverEvicted(t *testing.T) {
 	defer releaseStep(exec)
 	exec.waitBlockedFor(t, 2)
 
-	// Sleep far beyond the retention window while the group is running.
 	time.Sleep(50 * time.Millisecond)
 
 	states := gm.List()
@@ -119,8 +90,6 @@ func TestRegression_ActiveGroupsNeverEvicted(t *testing.T) {
 	}
 }
 
-// TestRegression_EvictedWaitError checks the contract of Wait on a group that
-// has already been swept: a clear error, never a panic and never a hang.
 func TestRegression_EvictedWaitError(t *testing.T) {
 	rec := newLifecycleRecorder()
 	gm := NewGroupManager(mockResolve, (&mockExecutor{}).execute, rec.publish)
@@ -130,7 +99,6 @@ func TestRegression_EvictedWaitError(t *testing.T) {
 
 	time.Sleep(400 * time.Millisecond)
 
-	// List performs the sweep; Wait must then report the group as gone.
 	if n := len(gm.List()); n != 0 {
 		t.Fatalf("List = %d, want 0 before the Wait check", n)
 	}
@@ -147,8 +115,6 @@ func TestRegression_EvictedWaitError(t *testing.T) {
 	}
 }
 
-// TestRegression_StoppedGroupEvicted covers the other terminal statuses: Stop
-// ends the group, so it must age out exactly like a done group.
 func TestRegression_StoppedGroupEvicted(t *testing.T) {
 	rec := newLifecycleRecorder()
 	exec := newStepExecutor(1)
@@ -188,9 +154,6 @@ func TestRegression_StoppedGroupEvicted(t *testing.T) {
 	}
 }
 
-// TestRegression_DefaultRetentionKeepsFinishedGroupVisible guards the default:
-// with no SetRetention call a just-finished group stays listed (the welcome
-// payload depends on it), so the sweep cannot be over-aggressive.
 func TestRegression_DefaultRetentionKeepsFinishedGroupVisible(t *testing.T) {
 	rec := newLifecycleRecorder()
 	gm := NewGroupManager(mockResolve, (&mockExecutor{}).execute, rec.publish)
@@ -210,7 +173,6 @@ func TestRegression_DefaultRetentionKeepsFinishedGroupVisible(t *testing.T) {
 	if _, ok := gm.Status(groupID); !ok {
 		t.Error("Status = not found, want found within default retention")
 	}
-	// Wait on a finished, retained group must still resolve.
 	waitWithTimeout(t, 2*time.Second, "Wait on retained finished group", func() {
 		if _, err := gm.Wait(groupID); err != nil {
 			t.Errorf("Wait: %v", err)
@@ -218,9 +180,6 @@ func TestRegression_DefaultRetentionKeepsFinishedGroupVisible(t *testing.T) {
 	})
 }
 
-// TestRegression_ReStartAfterEviction checks that eviction frees the ID slot:
-// reusing a group ID after the old group aged out is a fresh start, not an
-// "already exists" collision with a zombie entry.
 func TestRegression_ReStartAfterEviction(t *testing.T) {
 	rec := newLifecycleRecorder()
 	gm := NewGroupManager(mockResolve, (&mockExecutor{}).execute, rec.publish)

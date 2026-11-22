@@ -26,14 +26,12 @@ export function AdvancedSettings() {
   const isInternalChange = useRef(false)
   const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Clear the "Copied" feedback timer if the component unmounts mid-toast.
   useEffect(() => {
     return () => {
       if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
     }
   }, [])
 
-  // Sync raw text when opening the editor or when draftConfig changes externally (not from textarea edits)
   useEffect(() => {
     if (showRawJson && draftConfig && !isInternalChange.current) {
       setRawJsonText(JSON.stringify(draftConfig, null, 2))
@@ -66,9 +64,7 @@ export function AdvancedSettings() {
       setRawJsonText(formatted)
       setJsonParseError(null)
       replaceDraft(parsed as EditableConfig)
-    } catch {
-      // Can't format invalid JSON
-    }
+    } catch {}
   }, [rawJsonText, replaceDraft])
 
   const handleCopyJson = useCallback(async () => {
@@ -77,14 +73,11 @@ export function AdvancedSettings() {
       setCopied(true)
       if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
       copiedTimeoutRef.current = setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // Clipboard not available
-    }
+    } catch {}
   }, [rawJsonText])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      // Tab key inserts spaces
       if (e.key === 'Tab') {
         e.preventDefault()
         const textarea = textareaRef.current
@@ -94,11 +87,9 @@ export function AdvancedSettings() {
         const newValue = `${rawJsonText.substring(0, start)}  ${rawJsonText.substring(end)}`
         isInternalChange.current = true
         setRawJsonText(newValue)
-        // Restore cursor position after React re-render
         requestAnimationFrame(() => {
           textarea.selectionStart = textarea.selectionEnd = start + 2
         })
-        // Also parse
         try {
           const parsed = JSON.parse(newValue) as EditableConfig
           replaceDraft(parsed)

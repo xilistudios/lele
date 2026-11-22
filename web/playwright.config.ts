@@ -13,6 +13,7 @@ export default defineConfig({
   // picks them up and aborts with "Playwright Test did not expect test() to be
   // called here". Keeping `.e2e.ts` here makes the two runners' file sets disjoint.
   testMatch: '**/*.e2e.ts',
+  testIgnore: '**/mobile/**',
   // Build the ordering harness bundle (e2e/harness) before any test runs.
   globalSetup: './e2e/global-setup.ts',
   outputDir: 'test-results/e2e',

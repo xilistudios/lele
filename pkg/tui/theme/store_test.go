@@ -78,7 +78,7 @@ func TestLoadMalformedJSON(t *testing.T) {
 
 func TestSaveAtomic(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "sub", "tui.json") // parent dir must be created
+	path := filepath.Join(dir, "sub", "tui.json")
 
 	if err := Save(path, "nord", nil, nil); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -89,7 +89,6 @@ func TestSaveAtomic(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 
-	// Must be valid JSON...
 	var cfg tuiConfigFile
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		t.Fatalf("file is not valid JSON: %v", err)
@@ -98,7 +97,6 @@ func TestSaveAtomic(t *testing.T) {
 		t.Errorf("theme = %q, want %q", cfg.Theme, "nord")
 	}
 
-	// ...and 2-space indented.
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) > 1 {
 		indent := ""
@@ -117,7 +115,6 @@ func TestSaveAtomic(t *testing.T) {
 		}
 	}
 
-	// No temp file should be left behind.
 	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
 		t.Errorf("temp file %q still exists", path+".tmp")
 	}
@@ -205,21 +202,18 @@ func TestAddInstalledCommunity(t *testing.T) {
 		t.Errorf("AddInstalledCommunity = %+v, want %+v", got, want)
 	}
 
-	// No duplicates — adding an existing name is a no-op.
 	got = AddInstalledCommunity("forest", []string{"forest", "cyberpunk"})
 	want = []string{"forest", "cyberpunk"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("AddInstalledCommunity duplicate = %+v, want %+v", got, want)
 	}
 
-	// Adding to nil input.
 	got = AddInstalledCommunity("ocean", nil)
 	want = []string{"ocean"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("AddInstalledCommunity nil = %+v, want %+v", got, want)
 	}
 
-	// Input must not be mutated.
 	src := []string{"forest"}
 	got = AddInstalledCommunity("ocean", src)
 	if !reflect.DeepEqual(src, []string{"forest"}) {
@@ -235,21 +229,18 @@ func TestRemoveInstalledCommunity(t *testing.T) {
 		t.Errorf("RemoveInstalledCommunity = %+v, want %+v", got, want)
 	}
 
-	// Non-existent name is a no-op.
 	got = RemoveInstalledCommunity("ocean", []string{"cyberpunk", "forest"})
 	want = []string{"cyberpunk", "forest"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("RemoveInstalledCommunity no-op = %+v, want %+v", got, want)
 	}
 
-	// Input must not be mutated.
 	src := []string{"cyberpunk", "forest"}
 	RemoveInstalledCommunity("cyberpunk", src)
 	if !reflect.DeepEqual(src, []string{"cyberpunk", "forest"}) {
 		t.Errorf("input mutated: %+v", src)
 	}
 
-	// Removing the last element yields an empty, non-nil slice.
 	got = RemoveInstalledCommunity("cyberpunk", []string{"cyberpunk"})
 	if got == nil || len(got) != 0 {
 		t.Errorf("RemoveInstalledCommunity last = %+v, want empty non-nil", got)

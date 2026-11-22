@@ -1,13 +1,5 @@
 package tools
 
-// Tests for the subagent ledger model: scope-prefix derivation, the memory/disk
-// merge, dedupe, the total order and the lock discipline.
-//
-// The ledger is the durable view of a session's subagents — it is what keeps
-// finished tasks visible after retention reaped them and after a restart, so
-// most of these tests are about the two sources agreeing rather than about
-// formatting.
-
 import (
 	"fmt"
 	"sort"
@@ -17,22 +9,14 @@ import (
 	"time"
 )
 
-// ledgerTestManager builds a manager with no provider: the ledger never runs a
-// task, it only reads the task map and the wired lister.
 func ledgerTestManager() *SubagentManager {
 	return NewSubagentManager(nil, "test-model", "/tmp/test", nil, 10)
 }
 
-// setTestLedgerLister wires the disk side of the ledger on a standalone test
-// manager. SetLedgerWiring requires the task-ID collision probe as well, so a
-// test that only cares about listing passes a probe that never matches: these
-// managers never spawn, so claimTaskID is not exercised here and the probe is
-// inert (the probe's own behaviour is pinned by subagent_id_reuse_test.go).
 func setTestLedgerLister(sm *SubagentManager, lister func(parentPrefixes []string) []PersistedSubagentTask) {
 	sm.SetLedgerWiring(lister, func(string) bool { return false })
 }
 
-// addLedgerTask registers a live task the way a finished run leaves one behind.
 func addLedgerTask(sm *SubagentManager, id, origin, status string, created int64) *SubagentTask {
 	task := &SubagentTask{
 		ID:               id,
@@ -51,7 +35,6 @@ func addLedgerTask(sm *SubagentManager, id, origin, status string, created int64
 	return task
 }
 
-// ledgerByKey indexes rows by session key for assertions.
 func ledgerByKey(entries []SubagentLedgerEntry) map[string]SubagentLedgerEntry {
 	out := make(map[string]SubagentLedgerEntry, len(entries))
 	for _, entry := range entries {
@@ -60,24 +43,12 @@ func ledgerByKey(entries []SubagentLedgerEntry) map[string]SubagentLedgerEntry {
 	return out
 }
 
-// sortedStrings returns the sorted copy of a string slice, so prefix-set
-// assertions do not depend on emission order.
 func sortedStrings(in []string) []string {
 	out := append([]string(nil), in...)
 	sort.Strings(out)
 	return out
 }
 
-// TestSubagentScopePrefixes_Table pins the worked examples of the derivation:
-// the key itself, every ':'-aligned prefix, every ':'-aligned suffix that
-// contains a ':' (a bare single-segment suffix is deliberately excluded), and
-// the native-qualified form of a bare uuid.
-//
-// The single-segment prefixes ("telegram", "agent", "native") are kept on
-// purpose: they are the historical behaviour and they are what makes an
-// ancestor key find a deeper parent's tasks. They cannot leak another session's
-// rows because the disk scan only ever asks for "{prefix}:subagent-", and no
-// task is ever recorded under a bare channel name.
 func TestSubagentScopePrefixes_Table(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -94,16 +65,13 @@ func TestSubagentScopePrefixes_Table(t *testing.T) {
 			sessionKey: "native:uuid-A:chat:2",
 			want: []string{
 				"native", "native:uuid-A", "native:uuid-A:chat", "native:uuid-A:chat:2",
-				// suffixes containing a ':'
 				"uuid-A:chat:2", "chat:2",
 			},
 		},
 		{
 			name:       "bare uuid",
 			sessionKey: "uuid-A",
-			// The native-qualified form is load-bearing: without it a bare-uuid
-			// caller (the WebUI) finds no persisted row at all.
-			want: []string{"uuid-A", "native:uuid-A", "native"},
+			want:       []string{"uuid-A", "native:uuid-A", "native"},
 		},
 		{
 			name:       "subagent child",
@@ -114,10 +82,6 @@ func TestSubagentScopePrefixes_Table(t *testing.T) {
 			},
 		},
 		{
-			// The routed runtime key a Telegram turn carries. Its suffixes are
-			// what reach the origin key the task is recorded under; "12345"
-			// alone is NOT a prefix (a bare chat ID is a namespace nothing is
-			// written under).
 			name:       "routed agent key",
 			sessionKey: "agent:main:telegram:direct:12345",
 			want: []string{
@@ -139,7 +103,6 @@ func TestSubagentScopePrefixes_Table(t *testing.T) {
 			if want, have := sortedStrings(tt.want), sortedStrings(got); !equalStrings(want, have) {
 				t.Errorf("SubagentScopePrefixes(%q) = %v, want %v", tt.sessionKey, have, want)
 			}
-			// Deduplicated: no prefix may appear twice.
 			seen := make(map[string]bool, len(got))
 			for _, prefix := range got {
 				if seen[prefix] {
@@ -147,9 +110,6 @@ func TestSubagentScopePrefixes_Table(t *testing.T) {
 				}
 				seen[prefix] = true
 			}
-			// A bare SINGLE-SEGMENT suffix is never a prefix: "12345" is a chat
-			// ID with no channel, a namespace nothing is written under. (A bare
-			// prefix such as "telegram" is a different thing and is kept.)
 			for _, prefix := range got {
 				if prefix == tt.sessionKey || strings.Contains(prefix, ":") {
 					continue
@@ -162,37 +122,13 @@ func TestSubagentScopePrefixes_Table(t *testing.T) {
 	}
 }
 
-// TestSubagentScopePrefixes_Empty pins the no-key case: nil, not a slice
-// containing "".
 func TestSubagentScopePrefixes_Empty(t *testing.T) {
 	if got := SubagentScopePrefixes(""); got != nil {
 		t.Errorf("SubagentScopePrefixes(\"\") = %v, want nil", got)
 	}
 }
 
-// TestSubagentScopePrefixes_EquivalentToRelated is the property test the whole
-// design rests on: the disk prefix set and the memory filter must admit exactly
-// the same rows.
-//
-// The two sides are not symmetric in shape, and that is the point:
-//
-//   - the memory filter is the symmetric SessionKeysRelated, so a task recorded
-//     under ANY key of the session family is found;
-//   - the disk scan can only ask "is this stored key {prefix}:subagent-N", i.e.
-//     it matches a stored key that STARTS WITH one of the scope's prefixes. It
-//     therefore cannot reach a stored key that is a strict EXTENSION of the
-//     scope (a ":chat:N" alias, a ":subagent-N" child, a deeper routed key):
-//     those are keys the scope is a prefix of, and no prefix set can enumerate
-//     them.
-//
-// The property pinned here is the one the merge depends on: every stored key
-// the disk side can return is also admitted by the memory filter. A divergence
-// in that direction would mean the tool shows a row the digest drops (or the
-// reverse) for the same session.
 func TestSubagentScopePrefixes_EquivalentToRelated(t *testing.T) {
-	// Keys a task can actually be recorded under: a channel+chatID pair
-	// (BuildOriginSessionKey) or a native chat ID, plus the child keys the
-	// ledger dedupes on.
 	origins := []string{
 		"",
 		"telegram:123",
@@ -232,7 +168,7 @@ func TestSubagentScopePrefixes_EquivalentToRelated(t *testing.T) {
 		}
 		for _, origin := range origins {
 			if !prefixes[origin] {
-				continue // the disk side cannot reach it; nothing to compare
+				continue
 			}
 			if !SessionKeysRelated(origin, scope) {
 				t.Errorf("%q is in SubagentScopePrefixes(%q) but the memory filter rejects it: "+
@@ -242,10 +178,6 @@ func TestSubagentScopePrefixes_EquivalentToRelated(t *testing.T) {
 	}
 }
 
-// addRoutedLedgerTask registers a live task the way a spawn from a routed
-// conversation leaves one behind: the runtime session key the agent loop holds
-// (SpawnerSessionKey) and the "<channel>:<chatID>" key the task is recorded
-// under (OriginSessionKey) are DIFFERENT strings.
 func addRoutedLedgerTask(sm *SubagentManager, id, spawnerKey, originKey, status string, created int64) *SubagentTask {
 	task := &SubagentTask{
 		ID:                id,
@@ -265,13 +197,6 @@ func addRoutedLedgerTask(sm *SubagentManager, id, spawnerKey, originKey, status 
 	return task
 }
 
-// TestLedgerEntries_RoutedChannelScope is the B1 regression: a task spawned from
-// a routed conversation is recorded under BuildOriginSessionKey(channel, chatID)
-// ("telegram:12345") while the runtime session key the prompt digest holds is
-// "agent:main:telegram:direct:12345". The ledger must match the task through its
-// SPAWNER key — the identity the rest of the codebase already uses
-// (taskBelongsToSession) — or the digest renders nothing on every routed
-// channel (Telegram, Discord, Slack, …).
 func TestLedgerEntries_RoutedChannelScope(t *testing.T) {
 	const (
 		runtimeKey = "agent:main:telegram:direct:12345"
@@ -279,7 +204,6 @@ func TestLedgerEntries_RoutedChannelScope(t *testing.T) {
 	)
 	sm := ledgerTestManager()
 	addRoutedLedgerTask(sm, "subagent-1", runtimeKey, originKey, SubagentStatusRunning, 2000)
-	// A task of a DIFFERENT chat, spawned from a different conversation.
 	addRoutedLedgerTask(sm, "subagent-2", "agent:main:telegram:direct:99999", "telegram:99999", SubagentStatusRunning, 1000)
 
 	t.Run("scoped by the runtime key", func(t *testing.T) {
@@ -313,8 +237,6 @@ func TestLedgerEntries_RoutedChannelScope(t *testing.T) {
 	})
 
 	t.Run("scoped by the child session key", func(t *testing.T) {
-		// Documented behaviour: a subagent's own session key lists its parent's
-		// ledger, so a stop/listing issued against the child reaches the task.
 		entries := sm.LedgerEntries([]string{originKey + ":subagent-1"})
 		if len(entries) != 1 || entries[0].SessionKey != originKey+":subagent-1" {
 			t.Fatalf("child-scoped ledger = %+v, want the parent's task", entries)
@@ -322,9 +244,6 @@ func TestLedgerEntries_RoutedChannelScope(t *testing.T) {
 	})
 
 	t.Run("default DM scope", func(t *testing.T) {
-		// "agent:main:main" is the runtime key when the DM scope is the default;
-		// it shares no segment with "telegram:12345", so only the spawner key
-		// can bridge it.
 		sm2 := ledgerTestManager()
 		addRoutedLedgerTask(sm2, "subagent-1", "agent:main:main", originKey, SubagentStatusRunning, 1000)
 		entries := sm2.LedgerEntries([]string{"agent:main:main"})
@@ -334,11 +253,6 @@ func TestLedgerEntries_RoutedChannelScope(t *testing.T) {
 	})
 }
 
-// TestLedgerEntries_DiskRowsNeedOriginKey pins the documented consequence of
-// scoping a persisted row: it carries no spawner key (the session row does not
-// store one), so a caller holding only the routed runtime key finds the LIVE
-// task but not the reaped one. Callers that need the full history must pass the
-// origin form too — that is the contract the follow-up digest task relies on.
 func TestLedgerEntries_DiskRowsNeedOriginKey(t *testing.T) {
 	const (
 		runtimeKey = "agent:main:telegram:direct:12345"
@@ -346,8 +260,6 @@ func TestLedgerEntries_DiskRowsNeedOriginKey(t *testing.T) {
 	)
 	sm := ledgerTestManager()
 	setTestLedgerLister(sm, func(prefixes []string) []PersistedSubagentTask {
-		// Stand-in for ListSubagentSessionMeta: the row is stored under the
-		// ORIGIN key, and the scan only answers for "{prefix}:subagent-".
 		for _, prefix := range prefixes {
 			if prefix == originKey {
 				return []PersistedSubagentTask{{
@@ -363,15 +275,6 @@ func TestLedgerEntries_DiskRowsNeedOriginKey(t *testing.T) {
 		return nil
 	})
 
-	// Runtime key alone: the disk row is unreachable. This is the half that
-	// makes the origin key mandatory for history — and it only holds because
-	// the prefix set carries the ':'-aligned SUFFIXES of the runtime key. With
-	// the prefix closure alone the scan would ask for
-	// "agent:main:telegram:direct:12345:subagent-", which no row is stored
-	// under, so the assertion below is what pins the suffix direction.
-	//
-	// The lister is a faithful stand-in for ListSubagentSessionMeta: it answers
-	// only for the exact "{prefix}:subagent-" keys it is handed.
 	scanned := func(prefixes []string) []string {
 		out := make([]string, 0, len(prefixes))
 		for _, prefix := range prefixes {
@@ -382,10 +285,6 @@ func TestLedgerEntries_DiskRowsNeedOriginKey(t *testing.T) {
 	if entries := sm.LedgerEntries([]string{runtimeKey}); len(entries) != 0 {
 		t.Fatalf("runtime-key-scoped ledger = %+v, want none (a persisted row has no spawner key)", entries)
 	}
-	// The suffix direction is what makes the scan reach a row stored under a
-	// key that is a ':'-aligned SUFFIX of the runtime key. The origin key
-	// itself is not a prefix or a suffix of the runtime key, so it is never in
-	// the set — which is exactly why the digest must pass it explicitly.
 	var sawSuffixProbe bool
 	for _, probe := range scanned(SubagentScopePrefixes(runtimeKey)) {
 		if probe == "telegram:direct:12345:subagent-" {
@@ -397,7 +296,6 @@ func TestLedgerEntries_DiskRowsNeedOriginKey(t *testing.T) {
 			runtimeKey, "telegram:direct:12345:subagent-", SubagentScopePrefixes(runtimeKey))
 	}
 
-	// Origin key in the scope set: the row appears.
 	entries := sm.LedgerEntries([]string{runtimeKey, originKey})
 	if len(entries) != 1 {
 		t.Fatalf("ledger = %d rows, want 1 (%+v)", len(entries), entries)
@@ -409,8 +307,6 @@ func TestLedgerEntries_DiskRowsNeedOriginKey(t *testing.T) {
 		t.Errorf("SpawnerKey = %q, want empty (a persisted row has no spawner key)", entries[0].SpawnerKey)
 	}
 
-	// And the live task is still found by the runtime key alone, which is the
-	// asymmetry the two halves above describe.
 	sm2 := ledgerTestManager()
 	addRoutedLedgerTask(sm2, "subagent-1", runtimeKey, originKey, SubagentStatusRunning, 1000)
 	if entries := sm2.LedgerEntries([]string{runtimeKey}); len(entries) != 1 {
@@ -418,8 +314,6 @@ func TestLedgerEntries_DiskRowsNeedOriginKey(t *testing.T) {
 	}
 }
 
-// TestLedgerEntries_MemoryWinsOverDisk pins R3/D3: a task that is both alive
-// and persisted is reported once, with the live (authoritative) fields.
 func TestLedgerEntries_MemoryWinsOverDisk(t *testing.T) {
 	sm := ledgerTestManager()
 	origin := "cli:direct"
@@ -452,14 +346,8 @@ func TestLedgerEntries_MemoryWinsOverDisk(t *testing.T) {
 	}
 }
 
-// TestLedgerEntries_DedupesBySessionKeyNotID pins R4: two chats both have
-// "subagent-1", and an unscoped ledger must show both. Deduplicating by bare ID
-// (as the spec suggested) would silently drop one of them.
 func TestLedgerEntries_DedupesBySessionKeyNotID(t *testing.T) {
 	sm := ledgerTestManager()
-	// addLedgerTask registers by bare ID in the manager's map (one task per ID),
-	// so the two origins are modelled as two managers' worth of rows: distinct
-	// IDs, identical numeric suffix is not required for the collision.
 	addLedgerTask(sm, "subagent-1", "native:chat-a", SubagentStatusCompleted, 2000)
 	addLedgerTask(sm, "subagent-2", "native:chat-b", SubagentStatusCompleted, 1000)
 
@@ -474,7 +362,6 @@ func TestLedgerEntries_DedupesBySessionKeyNotID(t *testing.T) {
 		}
 	}
 
-	// The same holds for disk rows: two origins, one ID.
 	sm2 := ledgerTestManager()
 	setTestLedgerLister(sm2, func([]string) []PersistedSubagentTask {
 		return []PersistedSubagentTask{
@@ -487,8 +374,6 @@ func TestLedgerEntries_DedupesBySessionKeyNotID(t *testing.T) {
 	}
 }
 
-// TestLedgerEntries_DiskOnlyAfterCleanup is the feature's core promise: a task
-// that retention reaped from memory is still listed, from disk.
 func TestLedgerEntries_DiskOnlyAfterCleanup(t *testing.T) {
 	sm := ledgerTestManager()
 	origin := "cli:direct"
@@ -496,8 +381,6 @@ func TestLedgerEntries_DiskOnlyAfterCleanup(t *testing.T) {
 	addLedgerTask(sm, "subagent-1", origin, SubagentStatusCompleted, finished)
 	sm.SetRetentionPeriod(time.Millisecond)
 
-	// The lister stands in for the session layer: it reports what the session
-	// store still knows about the key.
 	setTestLedgerLister(sm, func(prefixes []string) []PersistedSubagentTask {
 		for _, prefix := range prefixes {
 			if prefix == origin {
@@ -534,9 +417,6 @@ func TestLedgerEntries_DiskOnlyAfterCleanup(t *testing.T) {
 	}
 }
 
-// TestLedgerEntries_PersistedStatusNotHardcoded pins C3: the session layer
-// persists the real terminal status, so a failed/cancelled/not_done task must
-// not be reported as completed.
 func TestLedgerEntries_PersistedStatusNotHardcoded(t *testing.T) {
 	for _, status := range []string{
 		SubagentStatusFailed,
@@ -566,12 +446,6 @@ func TestLedgerEntries_PersistedStatusNotHardcoded(t *testing.T) {
 	}
 }
 
-// TestLedgerEntries_PersistedEmptyStatusIsUnknown pins M2: an empty persisted
-// status is NOT a terminal outcome. The session row is created at spawn
-// (SetSubagentAgentID) and subagent_status is written only on a terminal
-// transition, so "" means "interrupted by a restart" or "the live row now lives
-// in another agent's manager after a re-pin". Reporting it as completed told the
-// model the work was finished while wait_for_subagent still blocked.
 func TestLedgerEntries_PersistedEmptyStatusIsUnknown(t *testing.T) {
 	t.Run("disk only", func(t *testing.T) {
 		sm := ledgerTestManager()
@@ -596,9 +470,6 @@ func TestLedgerEntries_PersistedEmptyStatusIsUnknown(t *testing.T) {
 		}
 	})
 
-	// The second half of the invariant: when a live memory row exists for the
-	// same session key, it wins the dedupe and keeps its REAL status — the
-	// unknown fallback never masks a task that is still running.
 	t.Run("memory row wins the dedupe", func(t *testing.T) {
 		sm := ledgerTestManager()
 		origin := "cli:direct"
@@ -624,19 +495,13 @@ func TestLedgerEntries_PersistedEmptyStatusIsUnknown(t *testing.T) {
 	})
 }
 
-// TestLedgerEntries_TotalOrderOnCreatedTies pins R6/D8: several spawns in one
-// turn share a Created millisecond, so the order must fall through to the
-// numeric task ID and then the session key. Without the tie-breaks, pagination
-// duplicates or drops rows.
 func TestLedgerEntries_TotalOrderOnCreatedTies(t *testing.T) {
 	sm := ledgerTestManager()
 	origin := "cli:direct"
 	const created = int64(1_700_000_000_000)
-	// Inserted out of order on purpose.
 	for _, id := range []string{"subagent-2", "subagent-10", "subagent-1", "subagent-9"} {
 		addLedgerTask(sm, id, origin, SubagentStatusCompleted, created)
 	}
-	// A newer row sorts first regardless of ID.
 	addLedgerTask(sm, "subagent-3", origin, SubagentStatusCompleted, created+1)
 
 	entries := sm.LedgerEntries([]string{origin})
@@ -649,10 +514,6 @@ func TestLedgerEntries_TotalOrderOnCreatedTies(t *testing.T) {
 		t.Fatalf("order = %v, want %v (Created desc, numeric ID desc)", got, want)
 	}
 
-	// The order is total: rows that tie on Created and on the numeric ID
-	// (different origins, same task ID) are still ordered deterministically, by
-	// session key. Disk rows are used because the manager's map is keyed by the
-	// bare task ID and cannot hold two rows with the same ID.
 	sm2 := ledgerTestManager()
 	setTestLedgerLister(sm2, func([]string) []PersistedSubagentTask {
 		return []PersistedSubagentTask{
@@ -669,9 +530,6 @@ func TestLedgerEntries_TotalOrderOnCreatedTies(t *testing.T) {
 	}
 }
 
-// TestLedgerEntries_NilListerIsMemoryOnly pins D13: a manager with no lister
-// (every standalone manager in the tests) reports its live tasks and nothing
-// else, with no panic.
 func TestLedgerEntries_NilListerIsMemoryOnly(t *testing.T) {
 	sm := ledgerTestManager()
 	addLedgerTask(sm, "subagent-1", "cli:direct", SubagentStatusRunning, 1000)
@@ -686,19 +544,12 @@ func TestLedgerEntries_NilListerIsMemoryOnly(t *testing.T) {
 		t.Errorf("empty manager ledger = %+v, want none", entries)
 	}
 
-	// A nil manager must not panic either (defensive: callers hold one from a
-	// map that may not have the agent).
 	var nilManager *SubagentManager
 	if entries := nilManager.LedgerEntries(nil); entries != nil {
 		t.Errorf("nil manager ledger = %+v, want nil", entries)
 	}
 }
 
-// TestLedgerEntries_ListerRunsOutsideManagerLock pins R7 / the lock-order
-// hazard: the lister reaches the SessionManager, whose reverse path takes
-// SubagentManager.mu. If LedgerEntries called it with sm.mu held, a lister that
-// touches the manager (here: ListTasks, which needs sm.mu.RLock) would
-// deadlock. The timeout turns a deadlock into a failure instead of a hang.
 func TestLedgerEntries_ListerRunsOutsideManagerLock(t *testing.T) {
 	sm := ledgerTestManager()
 	origin := "cli:direct"
@@ -706,8 +557,6 @@ func TestLedgerEntries_ListerRunsOutsideManagerLock(t *testing.T) {
 
 	var listerSawTasks int
 	setTestLedgerLister(sm, func([]string) []PersistedSubagentTask {
-		// Re-entering the manager is exactly what the session layer does when
-		// it resolves a key.
 		listerSawTasks = len(sm.ListTasks())
 		return nil
 	})
@@ -728,17 +577,12 @@ func TestLedgerEntries_ListerRunsOutsideManagerLock(t *testing.T) {
 	}
 }
 
-// TestLedgerEntries_ScopingHidesOtherSessions pins the isolation contract: a
-// scoped ledger shows only the rows of that session (and its children), while
-// an unscoped one shows everything.
 func TestLedgerEntries_ScopingHidesOtherSessions(t *testing.T) {
 	sm := ledgerTestManager()
 	addLedgerTask(sm, "subagent-1", "native:chat-a", SubagentStatusCompleted, 3000)
 	addLedgerTask(sm, "subagent-2", "native:chat-b", SubagentStatusCompleted, 2000)
-	// A task of a completely different chat.
 	addLedgerTask(sm, "subagent-3", "native:chat-c", SubagentStatusCompleted, 500)
 
-	// Scoped to chat A: only its own task.
 	scoped := sm.LedgerEntries([]string{"native:chat-a"})
 	if len(scoped) != 1 {
 		t.Fatalf("scoped ledger = %d rows, want 1 (%+v)", len(scoped), scoped)
@@ -749,30 +593,21 @@ func TestLedgerEntries_ScopingHidesOtherSessions(t *testing.T) {
 		}
 	}
 
-	// The alias form of the same chat resolves to the same rows: tasks are
-	// recorded under the base key, which /new never rewrites.
 	aliased := sm.LedgerEntries([]string{"native:chat-a:chat:3"})
 	if len(aliased) != 1 || aliased[0].SessionKey != "native:chat-a:subagent-1" {
 		t.Errorf("aliased ledger = %+v, want only native:chat-a:subagent-1", aliased)
 	}
 
-	// A subagent's own session key lists its parent's ledger (the prefix branch
-	// of sameSessionKey).
 	child := sm.LedgerEntries([]string{"native:chat-a:subagent-1"})
 	if len(child) != 1 || child[0].SessionKey != "native:chat-a:subagent-1" {
 		t.Errorf("child ledger = %+v, want the parent's task", child)
 	}
 
-	// Unscoped: everything.
 	if all := sm.LedgerEntries(nil); len(all) != 3 {
 		t.Errorf("unscoped ledger = %d rows, want 3 (%+v)", len(all), all)
 	}
 }
 
-// TestLedgerEntries_PrefixesPassedToLister pins the contract between the two
-// halves: the lister receives the union of SubagentScopePrefixes over the scope
-// keys (deduplicated), so the disk scan and the memory filter admit the same
-// rows by construction.
 func TestLedgerEntries_PrefixesPassedToLister(t *testing.T) {
 	sm := ledgerTestManager()
 	var got []string
@@ -784,7 +619,6 @@ func TestLedgerEntries_PrefixesPassedToLister(t *testing.T) {
 	sm.LedgerEntries([]string{"native:uuid-A:chat:2", "native:uuid-A"})
 	want := []string{
 		"native", "native:uuid-A", "native:uuid-A:chat", "native:uuid-A:chat:2",
-		// the ':'-aligned suffixes of the first key
 		"uuid-A:chat:2", "chat:2",
 	}
 	if !equalStrings(sortedStrings(got), sortedStrings(want)) {
@@ -798,7 +632,6 @@ func TestLedgerEntries_PrefixesPassedToLister(t *testing.T) {
 		seen[prefix] = true
 	}
 
-	// No scoping means no disk scan at all.
 	got = nil
 	sm.LedgerEntries(nil)
 	if got != nil {
@@ -806,10 +639,6 @@ func TestLedgerEntries_PrefixesPassedToLister(t *testing.T) {
 	}
 }
 
-// TestLedgerEntries_ConcurrentWithMutation is the stand-in for `-race` (unusable
-// on this host): the ledger is read while tasks are added and the lister is
-// swapped, which would trip the race detector if any field were read outside
-// the manager lock.
 func TestLedgerEntries_ConcurrentWithMutation(t *testing.T) {
 	sm := ledgerTestManager()
 	origin := "cli:direct"
@@ -847,7 +676,6 @@ func TestLedgerEntries_ConcurrentWithMutation(t *testing.T) {
 
 	for i := 0; i < 200; i++ {
 		entries := sm.LedgerEntries([]string{origin})
-		// Every row must be unique by session key, whatever the interleaving.
 		seen := make(map[string]bool, len(entries))
 		for _, entry := range entries {
 			if seen[entry.SessionKey] {
@@ -863,7 +691,6 @@ func TestLedgerEntries_ConcurrentWithMutation(t *testing.T) {
 	wg.Wait()
 }
 
-// equalStrings reports whether two string slices are element-wise equal.
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -876,15 +703,6 @@ func equalStrings(a, b []string) bool {
 	return true
 }
 
-// TestSetLedgerWiring_AllOrNothing pins the invariant review R1 (NIT-2) asked
-// for structurally: the disk lister and the task-ID collision probe are one
-// call, so no caller can list persisted rows without the probe that stops a
-// later spawn from reusing a task ID whose session still exists on disk.
-//
-// The regression this guards is not "the setter forgot a field" — it is "a
-// future change split the setter back into two", which is why every assertion is
-// on the observable state (LedgerWiringEnabled) plus the fields, never on the
-// call shape.
 func TestSetLedgerWiring_AllOrNothing(t *testing.T) {
 	lister := func([]string) []PersistedSubagentTask { return nil }
 	probe := func(string) bool { return false }

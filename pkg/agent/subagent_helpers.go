@@ -12,11 +12,8 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// Pre-compiled regex patterns for basic verbose formatting
 var (
-	// Matches verbose tool notification lines like "🛠️ Exec: push git changes"
-	toolLineRegex = regexp.MustCompile(`(?m)^🛠️ \w+:.*$`)
-	// Matches multiple consecutive empty lines
+	toolLineRegex         = regexp.MustCompile(`(?m)^🛠️ \w+:.*$`)
 	multipleNewlinesRegex = regexp.MustCompile(`\n{3,}`)
 )
 
@@ -48,37 +45,9 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID, task
 		metadata["subagent_session_key"] = result.Metadata["subagent_session_key"]
 	}
 
-	// The claim decides exactly one thing: whether this result is delivered on
-	// behalf of the parent, which means either injecting it into the turn that
-	// is already running or resuming an idle parent's turn. It is taken BEFORE
-	// the publish so "claim" and "deliver" are a single winner-takes-all step —
-	// claiming after would let a duplicate callback for the same task publish
-	// twice before either claimed.
-	//
-	// It does NOT gate the subagent.result event below. That event is what
-	// tells the clients the task is over (the TUI deletes its progress row on
-	// it, the WebUI patches its spawn card and invalidates the subagents cache),
-	// so suppressing it — as the previous `if !isSessionProcessing(sessionKey)`
-	// gate did — leaves both showing a finished task as still running.
 	resumed := al.toolCoordinator != nil &&
 		al.toolCoordinator.claimSubagentResultForInjection(taskID)
 
-	// A claimed result is delivered one of two ways:
-	//   - the parent is MID-TURN: the per-session mid-turn queue is active, so
-	//     the notice is enqueued and the running loop injects it at its next
-	//     iteration boundary. No inbound is published: the turn that would run
-	//     it already exists.
-	//   - the parent is IDLE: the queue is inactive, enqueue reports false and
-	//     the system inbound below resumes the parent with a new turn.
-	// The queue mutex makes this an atomic either/or (see midturn_notices.go),
-	// so a claimed result is never both injected and resumed, and never lost.
-	//
-	// Note the deliberate asymmetry with the consumer side: this producer
-	// resolves the CURRENT session alias (enqueueMidTurnNotice is by-key), while
-	// the running turn drains the queue pointer it captured at activation. A
-	// "/new" remap during the turn therefore still delivers — either into the
-	// queue that turn owns, or into the fresh (inactive) key's queue, where
-	// enqueue returns false and the inbound below takes over.
 	injected := false
 	if resumed {
 		injected = al.enqueueMidTurnNotice(sessionKey, content, taskID)
@@ -93,11 +62,6 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID, task
 		metadata["injected"] = "true"
 	}
 
-	// Notify interactive clients. Unconditional — exactly once per terminal
-	// outcome (pkg/tools only invokes the callback for the final attempt of the
-	// retry chain) and independent of whether the parent is mid-turn.
-	// "resumed" says whether the parent owns the result, "injected" that the
-	// already-running turn carries it (so no continuation turn is coming).
 	al.bus.PublishOutbound(bus.OutboundMessage{
 		Channel:  channel,
 		ChatID:   sessionKey,
@@ -106,12 +70,6 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID, task
 	})
 
 	if !resumed || injected {
-		// Three terminal outcomes, one delivery each:
-		//   - resumed=false: another party owns the result (a wait_for_subagent
-		//     read it in-turn, or a duplicate callback lost the claim) or the
-		//     task is unknown to every manager. The UI was still told; the
-		//     parent must not run a turn.
-		//   - injected=true: the running turn already owns delivery.
 		return
 	}
 
@@ -125,8 +83,6 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID, task
 	})
 }
 
-// formatBasicVerboseSubagentContent formats subagent content for basic verbose mode.
-// It simplifies verbose tool call notifications while preserving important status info.
 func formatBasicVerboseSubagentContent(content string) string {
 	if content == "" {
 		return content
@@ -139,35 +95,27 @@ func formatBasicVerboseSubagentContent(content string) string {
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		// Check if this line matches a verbose tool notification pattern
 		if toolLineRegex.MatchString(trimmed) {
-			// Skip this line in basic mode - it's too verbose
-			// But if it's the last line, keep it
 			if i == len(lines)-1 {
 				resultLines = append(resultLines, line)
 			}
 			continue
 		}
 
-		// Skip the blank line after tool notifications
 		if trimmed == "" && i > 0 && toolLineRegex.MatchString(strings.TrimSpace(lines[i-1])) {
 			continue
 		}
 
-		// Skip tool result headers like "📤 Output:", "✅ Success:", etc.
 		if strings.HasPrefix(trimmed, "📤") || strings.HasPrefix(trimmed, "📥") {
 			continue
 		}
 
-		// Skip result line markers in basic mode
 		if strings.HasPrefix(trimmed, "→") || strings.HasPrefix(trimmed, "Result:") {
 			continue
 		}
 
-		// Check if entering details section (before checking status lines)
 		isDetailsHeader := strings.HasPrefix(trimmed, "Details:") || strings.HasPrefix(trimmed, "DETAILS:")
 
-		// Preserve important status lines
 		if strings.HasPrefix(trimmed, "STATUS:") ||
 			strings.HasPrefix(trimmed, "Summary:") ||
 			strings.HasPrefix(trimmed, "SUMMARY:") ||
@@ -176,18 +124,14 @@ func formatBasicVerboseSubagentContent(content string) string {
 			strings.HasPrefix(trimmed, "Context needed:") ||
 			strings.HasPrefix(trimmed, "CONTEXT_NEEDED:") {
 			resultLines = append(resultLines, line)
-			// If this was a details header, mark that we're now in details section
 			if isDetailsHeader {
 				inDetails = true
 			}
 			continue
 		}
 
-		// Process lines inside the details section
 		if inDetails {
-			// Keep details but truncate if too long
 			if len(trimmed) > 300 {
-				// Preserve indentation when truncating
 				leadingSpaces := len(line) - len(strings.TrimLeft(line, " \t"))
 				if leadingSpaces > 0 {
 					resultLines = append(resultLines, line[:leadingSpaces]+trimmed[:297]+"...")
@@ -200,11 +144,9 @@ func formatBasicVerboseSubagentContent(content string) string {
 			continue
 		}
 
-		// Keep everything else (preserving original formatting)
 		resultLines = append(resultLines, line)
 	}
 
-	// Join and clean up multiple empty lines
 	result := strings.Join(resultLines, "\n")
 	result = multipleNewlinesRegex.ReplaceAllString(result, "\n\n")
 

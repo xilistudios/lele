@@ -13,15 +13,6 @@ type Props = {
   currentFolder?: string
 }
 
-/**
- * Server-side folder browser used by the composer "+" button.
- *
- * Navigates GET /api/v1/fs/list (one directory per request), keeps a local
- * name filter, exposes clickable breadcrumbs + a "go up" button, quick-jump
- * chips for the sandbox roots (Home, /tmp, cwd), and a footer button that
- * confirms the directory currently being listed. Double-click on an entry
- * selects it directly as the target folder.
- */
 export function FolderPickerModal({ open, onClose, onSelect, currentFolder }: Props) {
   const { t } = useTranslation()
   const { api } = useAuthContext()
@@ -32,8 +23,6 @@ export function FolderPickerModal({ open, onClose, onSelect, currentFolder }: Pr
   const [query, setQuery] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
 
-  // Monotonic request id: only the latest navigation may update state, so a
-  // slow response cannot overwrite a newer directory (out-of-order responses).
   const requestIdRef = useRef(0)
 
   const loadPath = useCallback(
@@ -56,8 +45,6 @@ export function FolderPickerModal({ open, onClose, onSelect, currentFolder }: Pr
     [api, t],
   )
 
-  // On open, load the current folder (if any) so the picker starts where the
-  // session left off; otherwise the backend defaults to the user home.
   useEffect(() => {
     if (!open) return
     setQuery('')
@@ -74,7 +61,6 @@ export function FolderPickerModal({ open, onClose, onSelect, currentFolder }: Pr
     loadPath(entry.path)
   }
 
-  // Breadcrumb: split the listed path into clickable prefixes.
   const segments = useMemo(() => {
     const path = listing?.path ?? ''
     if (!path) return [] as { label: string; path: string }[]
@@ -108,7 +94,6 @@ export function FolderPickerModal({ open, onClose, onSelect, currentFolder }: Pr
       size="md"
     >
       <div className="flex flex-col">
-        {/* Toolbar: up button + search */}
         <div className="flex items-center gap-2 px-6 pt-4 pb-2">
           <IconButton
             onClick={goUp}
@@ -129,7 +114,6 @@ export function FolderPickerModal({ open, onClose, onSelect, currentFolder }: Pr
           />
         </div>
 
-        {/* Breadcrumb of the current path */}
         {segments.length > 0 && (
           <nav
             aria-label={t('chat.currentFolder', 'Current folder')}
@@ -151,7 +135,6 @@ export function FolderPickerModal({ open, onClose, onSelect, currentFolder }: Pr
           </nav>
         )}
 
-        {/* Roots quick-jump chips */}
         {roots.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-6 pb-3">
             {roots.map((root) => {
@@ -181,7 +164,6 @@ export function FolderPickerModal({ open, onClose, onSelect, currentFolder }: Pr
           </div>
         )}
 
-        {/* Entries list */}
         <div className="max-h-72 min-h-40 overflow-y-auto px-6 pb-2">
           {loading ? (
             <div className="flex items-center justify-center py-12">
@@ -233,7 +215,6 @@ export function FolderPickerModal({ open, onClose, onSelect, currentFolder }: Pr
           )}
         </div>
 
-        {/* Footer: confirm the directory being listed */}
         <div className="flex items-center justify-between gap-3 border-t border-border px-6 py-4">
           <span
             className="min-w-0 flex-1 truncate text-xs text-text-tertiary"

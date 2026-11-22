@@ -10,11 +10,8 @@ import (
 	"golang.org/x/text/language"
 )
 
-// MaxBasicMessageSize is the maximum character limit for verbose basic mode messages
 const MaxBasicMessageSize = 80
 
-// formatBasicToolMessage genera un mensaje simplificado para verbose basic
-// Ejemplo: "🛠️ Exec: push git changes (in ~/.openclaw/workspace/lele)"
 func formatBasicToolMessage(toolName string, args map[string]interface{}) string {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("🛠️ %s", cases.Title(language.English).String(toolName)))
@@ -45,7 +42,6 @@ func formatBasicToolMessage(toolName string, args map[string]interface{}) string
 	case "list", "list_dir":
 		return formatBasicListDir(args)
 	default:
-		// Para otros tools, mostrar nombre y preview de args
 		argsJSON, _ := json.Marshal(args)
 		preview := string(argsJSON)
 		if len(preview) > 60 {
@@ -53,7 +49,6 @@ func formatBasicToolMessage(toolName string, args map[string]interface{}) string
 		}
 		builder.WriteString(fmt.Sprintf(": %s", preview))
 		result := builder.String()
-		// Ensure total message doesn't exceed limit
 		if len(result) > MaxBasicMessageSize {
 			return result[:MaxBasicMessageSize-3] + "..."
 		}
@@ -68,9 +63,7 @@ func formatBasicExec(args map[string]interface{}) string {
 		var builder strings.Builder
 		builder.WriteString(fmt.Sprintf("🛠️ Exec: %s", desc))
 
-		// Si hay cwd, mostrarlo
 		if cwd, ok := args["cwd"].(string); ok && cwd != "" {
-			// Limit cwd length for basic mode
 			displayCwd := cwd
 			if len(displayCwd) > 50 {
 				displayCwd = displayCwd[:47] + "..."
@@ -78,7 +71,6 @@ func formatBasicExec(args map[string]interface{}) string {
 			builder.WriteString(fmt.Sprintf(" (in %s)", displayCwd))
 		}
 
-		// Limit command length for basic mode
 		displayCmd := cmd
 		if len(displayCmd) > 200 {
 			displayCmd = displayCmd[:197] + "..."
@@ -86,7 +78,6 @@ func formatBasicExec(args map[string]interface{}) string {
 		builder.WriteString(fmt.Sprintf("\n%s", displayCmd))
 
 		result := builder.String()
-		// Ensure total message doesn't exceed limit
 		if len(result) > MaxBasicMessageSize {
 			return result[:MaxBasicMessageSize-3] + "..."
 		}
@@ -106,7 +97,6 @@ func formatBasicFileOp(action string, args map[string]interface{}) string {
 		var builder strings.Builder
 		builder.WriteString(fmt.Sprintf("🛠️ %s: %s (in %s)", cases.Title(language.English).String(action), baseName, dir))
 
-		// Para write/edit, mostrar preview del contenido si existe
 		if action == "write" || action == "edit" {
 			if content, ok := args["content"].(string); ok && content != "" {
 				lines := strings.Split(content, "\n")
@@ -121,7 +111,6 @@ func formatBasicFileOp(action string, args map[string]interface{}) string {
 		}
 
 		result := builder.String()
-		// Ensure total message doesn't exceed limit
 		if len(result) > MaxBasicMessageSize {
 			return result[:MaxBasicMessageSize-3] + "..."
 		}
@@ -130,9 +119,6 @@ func formatBasicFileOp(action string, args map[string]interface{}) string {
 	return fmt.Sprintf("🛠️ %s: [no path]", cases.Title(language.English).String(action))
 }
 
-// formatBasicUpdateMemory renders update_memory: the mode plus a sanitized
-// one-line preview of the content (the tool has no "path" arg, so the generic
-// formatBasicFileOp cannot be used).
 func formatBasicUpdateMemory(args map[string]interface{}) string {
 	mode := "append"
 	if raw, ok := args["mode"].(string); ok && strings.TrimSpace(raw) != "" {
@@ -150,7 +136,6 @@ func formatBasicUpdateMemory(args map[string]interface{}) string {
 	}
 
 	result := builder.String()
-	// Ensure total message doesn't exceed limit
 	if len(result) > MaxBasicMessageSize {
 		return result[:MaxBasicMessageSize-3] + "..."
 	}
@@ -159,7 +144,6 @@ func formatBasicUpdateMemory(args map[string]interface{}) string {
 
 func formatBasicWebSearch(args map[string]interface{}) string {
 	if query, ok := args["query"].(string); ok && query != "" {
-		// Limit query length for basic mode
 		displayQuery := query
 		if len(displayQuery) > 100 {
 			displayQuery = displayQuery[:97] + "..."
@@ -171,7 +155,6 @@ func formatBasicWebSearch(args map[string]interface{}) string {
 
 func formatBasicWebFetch(args map[string]interface{}) string {
 	if url, ok := args["url"].(string); ok && url != "" {
-		// Truncar URL largas
 		display := url
 		if len(display) > 60 {
 			display = display[:57] + "..."
@@ -222,7 +205,6 @@ func formatBasicListDir(args map[string]interface{}) string {
 	path := "current"
 	if p, ok := args["path"].(string); ok && p != "" {
 		path = p
-		// Limit path length for basic mode
 		if len(path) > 100 {
 			path = path[:97] + "..."
 		}
@@ -230,13 +212,10 @@ func formatBasicListDir(args map[string]interface{}) string {
 	return fmt.Sprintf("🛠️ List: %s", path)
 }
 
-// extractCommandDescription extrae una descripción legible de un comando
-// Ej: "cd ~/.openclaw/workspace/lele && git push" → "push git changes"
 func extractCommandDescription(cmd string) string {
 	cmd = strings.TrimSpace(cmd)
 	lower := strings.ToLower(cmd)
 
-	// Detectar patrones comunes de git
 	switch {
 	case strings.Contains(lower, "git commit"):
 		return "commit git changes"
@@ -258,7 +237,6 @@ func extractCommandDescription(cmd string) string {
 		return "clone repository"
 	}
 
-	// Detectar patrones de build
 	switch {
 	case strings.Contains(lower, "go build"):
 		return "build Go project"
@@ -288,7 +266,6 @@ func extractCommandDescription(cmd string) string {
 		return "run Rust project"
 	}
 
-	// Detectar operaciones de archivos
 	switch {
 	case strings.Contains(lower, "mkdir"):
 		return "create directory"
@@ -324,7 +301,6 @@ func extractCommandDescription(cmd string) string {
 		return "archive files"
 	}
 
-	// Detectar procesos del sistema
 	switch {
 	case strings.Contains(lower, "ps "):
 		return "list processes"
@@ -338,7 +314,6 @@ func extractCommandDescription(cmd string) string {
 		return "view logs"
 	}
 
-	// Detectar red
 	switch {
 	case strings.Contains(lower, "curl "):
 		return "HTTP request"
@@ -352,27 +327,22 @@ func extractCommandDescription(cmd string) string {
 		return "secure copy"
 	}
 
-	// Default: usar primer comando después de cd y &&
 	parts := strings.Fields(cmd)
 	if len(parts) > 0 {
-		// Saltar cd inicial
 		start := 0
 		for start < len(parts) && (parts[start] == "cd" || strings.HasPrefix(parts[start], "~")) {
 			start++
 			if start < len(parts) && !strings.HasPrefix(parts[start], "~") && parts[start] != "&&" {
-				start++ // saltar también el argumento de cd
+				start++
 			}
 		}
 
-		// Saltar &&
 		if start < len(parts) && parts[start] == "&&" {
 			start++
 		}
 
-		// Encontrar comando real
 		for start < len(parts) {
 			cmd := parts[start]
-			// Ignorar sudo
 			if cmd == "sudo" {
 				start++
 				if start < len(parts) {

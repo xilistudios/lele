@@ -6,7 +6,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// RouteInput contains the routing context from an inbound message.
 type RouteInput struct {
 	Channel    string
 	AccountID  string
@@ -16,29 +15,23 @@ type RouteInput struct {
 	TeamID     string
 }
 
-// ResolvedRoute is the result of agent routing.
 type ResolvedRoute struct {
 	AgentID        string
 	Channel        string
 	AccountID      string
 	SessionKey     string
 	MainSessionKey string
-	MatchedBy      string // "binding.peer", "binding.peer.parent", "binding.guild", "binding.team", "binding.account", "binding.channel", "default"
+	MatchedBy      string
 }
 
-// RouteResolver determines which agent handles a message based on config bindings.
 type RouteResolver struct {
 	cfg *config.Config
 }
 
-// NewRouteResolver creates a new route resolver.
 func NewRouteResolver(cfg *config.Config) *RouteResolver {
 	return &RouteResolver{cfg: cfg}
 }
 
-// ResolveRoute determines which agent handles the message and constructs session keys.
-// Implements the 7-level priority cascade:
-// peer > parent_peer > guild > team > account > channel_wildcard > default
 func (r *RouteResolver) ResolveRoute(input RouteInput) ResolvedRoute {
 	channel := strings.ToLower(strings.TrimSpace(input.Channel))
 	accountID := NormalizeAccountID(input.AccountID)
@@ -73,14 +66,12 @@ func (r *RouteResolver) ResolveRoute(input RouteInput) ResolvedRoute {
 		}
 	}
 
-	// Priority 1: Peer binding
 	if peer != nil && strings.TrimSpace(peer.ID) != "" {
 		if match := r.findPeerMatch(bindings, peer); match != nil {
 			return choose(match.AgentID, "binding.peer")
 		}
 	}
 
-	// Priority 2: Parent peer binding
 	parentPeer := input.ParentPeer
 	if parentPeer != nil && strings.TrimSpace(parentPeer.ID) != "" {
 		if match := r.findPeerMatch(bindings, parentPeer); match != nil {
@@ -88,7 +79,6 @@ func (r *RouteResolver) ResolveRoute(input RouteInput) ResolvedRoute {
 		}
 	}
 
-	// Priority 3: Guild binding
 	guildID := strings.TrimSpace(input.GuildID)
 	if guildID != "" {
 		if match := r.findGuildMatch(bindings, guildID); match != nil {
@@ -96,7 +86,6 @@ func (r *RouteResolver) ResolveRoute(input RouteInput) ResolvedRoute {
 		}
 	}
 
-	// Priority 4: Team binding
 	teamID := strings.TrimSpace(input.TeamID)
 	if teamID != "" {
 		if match := r.findTeamMatch(bindings, teamID); match != nil {
@@ -104,17 +93,14 @@ func (r *RouteResolver) ResolveRoute(input RouteInput) ResolvedRoute {
 		}
 	}
 
-	// Priority 5: Account binding
 	if match := r.findAccountMatch(bindings); match != nil {
 		return choose(match.AgentID, "binding.account")
 	}
 
-	// Priority 6: Channel wildcard binding
 	if match := r.findChannelWildcardMatch(bindings); match != nil {
 		return choose(match.AgentID, "binding.channel")
 	}
 
-	// Priority 7: Default agent
 	return choose(r.resolveDefaultAgentID(), "default")
 }
 

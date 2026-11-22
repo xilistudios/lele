@@ -1,52 +1,13 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Outlet, useMatch, useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { SettingsProvider } from '../../contexts/SettingsContext'
 import { useSettingsConfig } from '../../hooks/useSettingsConfig'
+import { type SettingsTab, isSettingsTab } from '../../lib/settingsTabs'
 import { SettingsFooter, SettingsHeader, SettingsTabs } from '../molecules'
-import { DiagnosticsPanel } from '../organisms/DiagnosticsPanel'
 import { Sidebar } from '../organisms/Sidebar'
-import {
-  AdvancedSettings,
-  ChannelSettings,
-  GeneralSettings,
-  GroupsSettings,
-  LogsViewer,
-  NativeClientsSettings,
-  SessionSettings,
-  SystemSettings,
-  ToolsSettings,
-  UpdatesSettings,
-} from '../organisms/settings'
-
-type SettingsTab =
-  | 'general'
-  | 'session'
-  | 'channels'
-  | 'native'
-  | 'groups'
-  | 'tools'
-  | 'system'
-  | 'updates'
-  | 'advanced'
-  | 'diagnostics'
-  | 'logs'
-
-const VALID_TABS: SettingsTab[] = [
-  'general',
-  'session',
-  'channels',
-  'native',
-  'groups',
-  'tools',
-  'system',
-  'updates',
-  'advanced',
-  'diagnostics',
-  'logs',
-]
 
 export function SettingsPage() {
   const { t } = useTranslation()
@@ -54,24 +15,19 @@ export function SettingsPage() {
   const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar } =
     useAppLogicContext()
   const navigate = useNavigate()
-  const { tab: tabParam } = useParams<{ tab?: string }>()
 
-  const activeTab = useMemo<SettingsTab>(() => {
-    if (tabParam && VALID_TABS.includes(tabParam as SettingsTab)) {
-      return tabParam as SettingsTab
-    }
-    return 'general'
-  }, [tabParam])
+  const tabMatch = useMatch('/settings/:tab')
+  const activeTab: SettingsTab | null = isSettingsTab(tabMatch?.params.tab)
+    ? (tabMatch?.params.tab as SettingsTab)
+    : null
+  const isAgentDetail = !!useMatch('/settings/agents/:agentId/:tab?')
 
+  const rawTab = tabMatch?.params.tab
   useEffect(() => {
-    if (!tabParam || !VALID_TABS.includes(tabParam as SettingsTab)) {
+    if (rawTab !== undefined && !isSettingsTab(rawTab)) {
       navigate('/settings/general', { replace: true })
     }
-  }, [tabParam, navigate])
-
-  const handleTabChange = (tab: SettingsTab) => {
-    navigate(`/settings/${tab}`)
-  }
+  }, [rawTab, navigate])
 
   const settingsState = useSettingsConfig(api)
 
@@ -82,46 +38,13 @@ export function SettingsPage() {
     }
   }
 
-  const renderTabContent = () => {
-    if (!settingsState.draftConfig) {
-      return (
-        <div className="flex h-64 items-center justify-center">
-          <div className="text-sm text-text-secondary">{t('common.loading')}</div>
-        </div>
-      )
-    }
-
-    switch (activeTab) {
-      case 'general':
-        return <GeneralSettings />
-      case 'session':
-        return <SessionSettings />
-      case 'channels':
-        return <ChannelSettings />
-      case 'native':
-        return <NativeClientsSettings />
-      case 'groups':
-        return <GroupsSettings />
-      case 'tools':
-        return <ToolsSettings />
-      case 'system':
-        return <SystemSettings />
-      case 'updates':
-        return <UpdatesSettings />
-      case 'advanced':
-        return <AdvancedSettings />
-      case 'diagnostics':
-        return <DiagnosticsPanel />
-      case 'logs':
-        return <LogsViewer />
-      default:
-        return null
-    }
+  const handleTabChange = (tab: SettingsTab) => {
+    navigate(`/settings/${tab}`)
   }
 
   return (
     <SettingsProvider settingsState={settingsState} api={api}>
-      <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
+      <div className="flex app-shell bg-background-primary text-text-primary">
         <Sidebar
           collapsed={!sidebarOpen}
           mobileOpen={mobileSidebarOpen}
@@ -129,18 +52,19 @@ export function SettingsPage() {
         />
         <main className="flex flex-1 flex-col overflow-hidden">
           <SettingsHeader
+            title={isAgentDetail ? t('settings.tabs.agents') : undefined}
             configPath={settingsState.metadata?.config_path}
             onOpenMobileSidebar={onOpenMobileSidebar}
           />
 
           <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
-            <SettingsTabs activeTab={activeTab} onTabChange={handleTabChange} />
+            {!isAgentDetail && (
+              <SettingsTabs activeTab={activeTab ?? 'general'} onTabChange={handleTabChange} />
+            )}
 
             <div className="flex flex-1 flex-col overflow-hidden">
               <div className="flex-1 overflow-y-auto p-4 md:p-6">
-                <div key={activeTab} className="animate-step-enter">
-                  {renderTabContent()}
-                </div>
+                <Outlet />
               </div>
 
               <SettingsFooter

@@ -140,13 +140,11 @@ func TestHandleAgentFile_ReadWrite(t *testing.T) {
 	tmpDir := t.TempDir()
 	ts.loop.workspace = tmpDir
 
-	// First write AGENT.md to the workspace so it's recognized as a context file
 	agentFilePath := tmpDir + "/AGENT.md"
 	if err := os.WriteFile(agentFilePath, []byte("test agent content"), 0644); err != nil {
 		t.Fatalf("WriteFile error = %v", err)
 	}
 
-	// Read the file
 	readReq, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/agents/main/files/AGENT.md", nil)
 	readReq.Header.Set("Authorization", "Bearer "+ts.token)
 
@@ -168,7 +166,6 @@ func TestHandleAgentFile_ReadWrite(t *testing.T) {
 		t.Fatalf("content = %q, want %q", readPayload.Content, "test agent content")
 	}
 
-	// Write the file
 	writeBody := mustMarshal(AgentFilesRequest{Content: "updated content"})
 	writeReq, _ := http.NewRequest(http.MethodPut, ts.server.URL+"/api/v1/agents/main/files/AGENT.md", strings.NewReader(string(writeBody)))
 	writeReq.Header.Set("Authorization", "Bearer "+ts.token)
@@ -183,7 +180,6 @@ func TestHandleAgentFile_ReadWrite(t *testing.T) {
 		t.Fatalf("write status = %d, want %d", writeResp.StatusCode, http.StatusOK)
 	}
 
-	// Verify the content was written
 	var writePayload AgentFilesResponse
 	if err := json.NewDecoder(writeResp.Body).Decode(&writePayload); err != nil {
 		t.Fatalf("Decode write error = %v", err)
@@ -195,7 +191,6 @@ func TestHandleAgentFile_ReadWrite(t *testing.T) {
 		t.Fatalf("file name = %q, want %q", writePayload.Files[0].Name, "AGENT.md")
 	}
 
-	// Read back to confirm
 	data, err := os.ReadFile(agentFilePath)
 	if err != nil {
 		t.Fatalf("ReadFile error = %v", err)
@@ -240,8 +235,6 @@ func TestHandleAgentFiles_AgentNotFound(t *testing.T) {
 	}
 }
 
-// --- B4: per-agent catalog endpoint (GET /api/v1/agents/{id}/catalog) -------
-
 func TestHandleAgentCatalog_OK(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -264,8 +257,6 @@ func TestHandleAgentCatalog_OK(t *testing.T) {
 	if payload.AgentID != "main" {
 		t.Fatalf("agent_id = %q, want %q", payload.AgentID, "main")
 	}
-	// Tools must be non-empty and every entry must carry a readable name and
-	// description (that is the whole point of the endpoint for the frontend).
 	if len(payload.Tools) == 0 {
 		t.Fatal("expected non-empty tools")
 	}
@@ -274,14 +265,12 @@ func TestHandleAgentCatalog_OK(t *testing.T) {
 			t.Fatalf("tool entry has empty field: %+v", tool)
 		}
 	}
-	// Deterministic ordering by name (frontend renders without sorting).
 	for i := 1; i < len(payload.Tools); i++ {
 		if payload.Tools[i-1].Name > payload.Tools[i].Name {
 			t.Fatalf("tools not sorted by name: %q after %q",
 				payload.Tools[i-1].Name, payload.Tools[i].Name)
 		}
 	}
-	// Skills must always be present in the payload ([] when none installed).
 	if payload.Skills == nil {
 		t.Fatal("skills must be non-nil (empty array, not null)")
 	}
@@ -290,8 +279,6 @@ func TestHandleAgentCatalog_OK(t *testing.T) {
 func TestHandleAgentCatalog_ToolsDerivedFromRegistry(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// Override the fake agent's "registry": the endpoint must echo exactly
-	// what the agent loop reports (proving nothing is hardcoded server-side).
 	ts.loop.agentTools = []AgentToolInfo{
 		{Name: "zeta_tool", Description: "zeta does things"},
 		{Name: "alpha_tool", Description: "alpha does things"},
@@ -326,9 +313,6 @@ func TestHandleAgentCatalog_ToolsDerivedFromRegistry(t *testing.T) {
 func TestHandleAgentCatalog_Skills(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// Build a real skills loader over a temp workspace with two skills, one
-	// disabled via the workspace config — the catalog must report both, with
-	// the correct enabled flag and source.
 	workspace := t.TempDir()
 	writeTestSkill(t, workspace, "alpha-skill", "Alpha does things")
 	writeTestSkill(t, workspace, "beta-skill", "Beta does things")
@@ -402,7 +386,6 @@ func TestHandleAgentCatalog_AgentNotFound(t *testing.T) {
 	}
 }
 
-// newAuthedRequest builds a GET/PUT request with a bearer token header.
 func newAuthedRequest(t *testing.T, method, url, token string) *http.Request {
 	t.Helper()
 	req, err := http.NewRequest(method, url, nil)
@@ -413,8 +396,6 @@ func newAuthedRequest(t *testing.T, method, url, token string) *http.Request {
 	return req
 }
 
-// writeTestSkill creates workspace/skills/<name>/SKILL.md with a minimal
-// frontmatter so the skills loader picks it up.
 func writeTestSkill(t *testing.T, workspace, name, description string) {
 	t.Helper()
 	dir := filepath.Join(workspace, "skills", name)

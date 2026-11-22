@@ -130,7 +130,6 @@ func TestListGroups_Multiple(t *testing.T) {
 		t.Fatalf("ListGroups returned %d, want 3", len(list))
 	}
 
-	// Should be sorted by UpdatedAt descending → beta, gamma, alpha.
 	expected := []string{"group-beta", "group-gamma", "group-alpha"}
 	for i, id := range expected {
 		if list[i].ID != id {
@@ -179,7 +178,6 @@ func TestSanitizeGroupID(t *testing.T) {
 }
 
 func TestSanitizeGroupID_SafeForFilepath(t *testing.T) {
-	// IDs with ":" and "/" must still round-trip through SaveGroup/LoadGroup.
 	dir := t.TempDir()
 
 	dangerousIDs := []string{
@@ -210,7 +208,6 @@ func TestSanitizeGroupID_SafeForFilepath(t *testing.T) {
 		}
 	}
 
-	// Verify no path separators snuck into filenames.
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)

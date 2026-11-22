@@ -52,9 +52,6 @@ func (m *USBMonitor) Start(ctx context.Context) (<-chan *events.DeviceEvent, err
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// udevadm monitor outputs: UDEV/KERNEL [timestamp] action devpath (subsystem)
-	// Followed by KEY=value lines, empty line separates events
-	// Use -s/--subsystem-match (eudev) or --udev-subsystem-match (systemd udev)
 	cmd := exec.CommandContext(ctx, "udevadm", "monitor", "--property", "--subsystem-match=usb")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -73,12 +70,11 @@ func (m *USBMonitor) Start(ctx context.Context) (<-chan *events.DeviceEvent, err
 		scanner := bufio.NewScanner(stdout)
 		var props map[string]string
 		var action string
-		isUdev := false // Only UDEV events have complete info (ID_VENDOR, ID_MODEL); KERNEL events come first with less info
+		isUdev := false
 
 		for scanner.Scan() {
 			line := scanner.Text()
 			if line == "" {
-				// End of event block - only process UDEV events (skip KERNEL to avoid duplicate/incomplete notifications)
 				if isUdev && props != nil && (action == "add" || action == "remove") {
 					if ev := parseUSBEvent(action, props); ev != nil {
 						select {
@@ -95,13 +91,11 @@ func (m *USBMonitor) Start(ctx context.Context) (<-chan *events.DeviceEvent, err
 			}
 
 			idx := strings.Index(line, "=")
-			// First line of block: "UDEV  [ts] action devpath" or "KERNEL[ts] action devpath" - no KEY=value
 			if idx <= 0 {
 				isUdev = strings.HasPrefix(strings.TrimSpace(line), "UDEV")
 				continue
 			}
 
-			// Parse KEY=value
 			key := line[:idx]
 			val := line[idx+1:]
 			if props == nil {
@@ -129,7 +123,6 @@ func (m *USBMonitor) Stop() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.cmd != nil && m.cmd.Process != nil {
-		// Ignore error - process may have already exited
 		_ = m.cmd.Process.Kill()
 		m.cmd = nil
 	}
@@ -137,17 +130,14 @@ func (m *USBMonitor) Stop() error {
 }
 
 func parseUSBEvent(action string, props map[string]string) *events.DeviceEvent {
-	// Only care about add/remove for physical devices (not interfaces)
 	subsystem := props["SUBSYSTEM"]
 	if subsystem != "usb" {
 		return nil
 	}
-	// Skip interface events - we want device-level only to avoid duplicates
 	devType := props["DEVTYPE"]
 	if devType == "usb_interface" {
 		return nil
 	}
-	// Prefer usb_device, but accept if DEVTYPE not set (varies by udev version)
 	if devType != "" && devType != "usb_device" {
 		return nil
 	}
@@ -189,7 +179,6 @@ func parseUSBEvent(action string, props map[string]string) *events.DeviceEvent {
 		}
 	}
 
-	// Map USB class to capability
 	if class := props["ID_USB_CLASS"]; class != "" {
 		ev.Capabilities = usbClassToCapability[strings.ToLower(class)]
 	}

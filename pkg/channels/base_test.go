@@ -56,10 +56,6 @@ func TestBaseChannelIsAllowed(t *testing.T) {
 	}
 }
 
-// TestBaseChannelHandleMessageInvokesInboundDroppedHook pins the rollback
-// contract of HandleMessageWithAttachments: when the bus rejects the message
-// (here: closed bus), the configured InboundDroppedHook receives the exact
-// message that was dropped.
 func TestBaseChannelHandleMessageInvokesInboundDroppedHook(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -123,13 +119,10 @@ func TestBaseChannelHandleMessageInvokesInboundDroppedHook(t *testing.T) {
 	}
 }
 
-// TestBaseChannelHandleMessageFiresHookOnFullQueue covers the other rejection
-// branch: queue full (not just closed bus).
 func TestBaseChannelHandleMessageFiresHookOnFullQueue(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	defer messageBus.Close()
 
-	// Fill the inbound queue without any consumer.
 	inLen, inCap, _, _, _, _ := messageBus.Stats()
 	for i := inLen; i < inCap; i++ {
 		if !messageBus.PublishInbound(bus.InboundMessage{Channel: "test"}) {

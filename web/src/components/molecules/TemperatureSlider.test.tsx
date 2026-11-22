@@ -3,8 +3,6 @@ import { fireEvent, render } from '@testing-library/react'
 import i18n from '../../test/i18n'
 import { TemperatureSlider } from './TemperatureSlider'
 
-// The shared test i18n boots in Spanish; read the label through the same key
-// the component uses so the assertion holds for any active locale.
 const NOT_SET = i18n.t('settings.agentPage.tempNotSet', { defaultValue: 'Model default' })
 const RESET = i18n.t('settings.agentPage.tempReset', { defaultValue: 'Reset to model default' })
 
@@ -23,7 +21,6 @@ function setup(
   return { ...utils, input, onChange }
 }
 
-/** Render the slider bare (no mock wiring). */
 function renderSlider(
   props: Partial<Parameters<typeof TemperatureSlider>[0]> & {
     onChange: (value: number | undefined) => void
@@ -40,7 +37,6 @@ function renderSlider(
   )
 }
 
-/** Click the reset button (only rendered when a value is set). */
 function pressReset(container: HTMLElement) {
   const button = container.querySelector(`button[aria-label="${RESET}"]`) as HTMLButtonElement
   fireEvent.click(button)
@@ -78,7 +74,6 @@ describe('TemperatureSlider', () => {
     expect(input.getAttribute('aria-valuetext')).toContain(NOT_SET)
     expect(input.dataset.inherited).toBe('true')
     expect(input.className).toContain('lele-range--inherit')
-    // "Default" badge next to the readout, and the readout itself shows 0.7.
     expect(container.textContent).toContain(NOT_SET)
     expect(container.querySelector('.font-mono')?.textContent).toBe('0.7')
   })

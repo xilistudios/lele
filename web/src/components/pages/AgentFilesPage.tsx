@@ -7,7 +7,7 @@ import type { AgentFileInfo } from '../../lib/types'
 import { SettingsHeader } from '../molecules'
 import { Sidebar } from '../organisms/Sidebar'
 
-type DirtyMap = Record<string, string | null> // fileName -> content if dirty, null if synced
+type DirtyMap = Record<string, string | null>
 
 export function AgentFilesPage() {
   const { agentId, fileName } = useParams<{ agentId: string; fileName?: string }>()
@@ -25,13 +25,9 @@ export function AgentFilesPage() {
   const [originalContent, setOriginalContent] = useState('')
   const [saving, setSaving] = useState(false)
   const [showMobileFileList, setShowMobileFileList] = useState(true)
-  // useRef for dirty content cache — avoids fragile dependency on React batching semantics.
-  // Refs are always up-to-date, so effects and callbacks always see the latest cache.
   const dirtyFilesRef = useRef<DirtyMap>({})
-  // Generation counter so a slow content fetch cannot overwrite a newer selection.
   const contentRequestRef = useRef(0)
 
-  // Load file list on mount. Deep-link (`:fileName?`) wins over the first file.
   // biome-ignore lint/correctness/useExhaustiveDependencies: activeFile is intentionally excluded to avoid re-triggering on mount
   useEffect(() => {
     if (!agentId) return
@@ -53,23 +49,19 @@ export function AgentFilesPage() {
     })()
   }, [agentId])
 
-  // Load file content when active file changes
   // biome-ignore lint/correctness/useExhaustiveDependencies: api is stable, dirtyFilesRef is intentionally excluded
   useEffect(() => {
     if (!agentId || !activeFile) return
     const requestId = ++contentRequestRef.current
 
-    // Check if we have dirty content cached from a previous edit
     const cached = dirtyFilesRef.current[activeFile]
     if (cached !== undefined && cached !== null) {
-      // Need to also fetch original content for comparison
       ;(async () => {
         try {
           setError(null)
           const res = await api.agentFile(agentId, activeFile)
           if (requestId !== contentRequestRef.current) return
           setOriginalContent(res.content || '')
-          // Restore dirty content from cache
           setContent(cached)
         } catch (e) {
           if (requestId !== contentRequestRef.current) return
@@ -98,7 +90,6 @@ export function AgentFilesPage() {
   const handleFileSelect = useCallback(
     (name: string) => {
       if (isDirty) {
-        // Store current dirty content in ref before switching tabs
         dirtyFilesRef.current = {
           ...dirtyFilesRef.current,
           ...(activeFile && { [activeFile]: content !== originalContent ? content : null }),
@@ -138,7 +129,6 @@ export function AgentFilesPage() {
   const hasAnyDirty =
     isDirty || Object.values(dirtyFilesRef.current).some((v) => v !== null && v !== undefined)
 
-  // Warn on page unload while any file still has unsaved edits.
   useEffect(() => {
     if (!hasAnyDirty) return
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -155,7 +145,7 @@ export function AgentFilesPage() {
   const btnDanger = `${btnCls} bg-state-error/10 text-state-error hover:bg-state-error/20`
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
+    <div className="flex app-shell bg-background-primary text-text-primary">
       <Sidebar
         collapsed={!sidebarOpen}
         mobileOpen={mobileSidebarOpen}
@@ -186,7 +176,6 @@ export function AgentFilesPage() {
           </div>
         ) : (
           <div className="flex flex-1 overflow-hidden relative">
-            {/* File Tabs Sidebar */}
             <div
               className={`absolute inset-y-0 left-0 w-full md:relative md:w-48 flex-shrink-0 border-r border-border bg-background-tertiary overflow-y-auto transition-transform duration-300 ease-in-out md:transform-none md:translate-x-0 z-10 ${
                 showMobileFileList ? 'translate-x-0' : '-translate-x-full'
@@ -242,13 +231,11 @@ export function AgentFilesPage() {
               })}
             </div>
 
-            {/* Editor Area */}
             <div
               className={`absolute inset-y-0 right-0 w-full md:relative md:flex-1 bg-background-primary flex flex-col overflow-hidden transition-transform duration-300 ease-in-out md:transform-none md:translate-x-0 z-20 ${
                 showMobileFileList ? 'translate-x-full' : 'translate-x-0'
               }`}
             >
-              {/* Toolbar */}
               <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-background-secondary">
                 <div className="flex items-center gap-3 min-w-0">
                   <button
@@ -296,7 +283,6 @@ export function AgentFilesPage() {
                 </div>
               </div>
 
-              {/* Editor */}
               <div className="flex-1 overflow-hidden">
                 <textarea
                   value={content}
@@ -307,7 +293,6 @@ export function AgentFilesPage() {
                 />
               </div>
 
-              {/* Status Bar */}
               <div className="flex items-center justify-between px-4 py-1.5 border-t border-border bg-background-secondary text-xs text-text-tertiary">
                 <span>{t('agentFiles.chars', { count: content.length })}</span>
                 <span>
@@ -320,7 +305,6 @@ export function AgentFilesPage() {
           </div>
         )}
 
-        {/* Global save bar if any file is dirty */}
         {hasAnyDirty && !loading && (
           <div className="flex items-center justify-between px-4 py-2 border-t border-state-warning/30 bg-state-warning/10">
             <span className="text-xs text-state-warning">

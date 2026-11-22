@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image"
-	_ "image/jpeg" // register the JPEG decoder for image.DecodeConfig
+	_ "image/jpeg"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,10 +13,6 @@ import (
 	"strings"
 	"testing"
 )
-
-// ---------------------------------------------------------------------------
-// Pure argv builder tests (no ffmpeg required)
-// ---------------------------------------------------------------------------
 
 func TestBuildFFProbeDurationArgs(t *testing.T) {
 	got := buildFFProbeDurationArgs("/videos/in.mp4")
@@ -73,18 +69,14 @@ func TestBuildFFmpegAudioArgs(t *testing.T) {
 	}
 }
 
-// fpsExprFor mirrors the fps expression computed by extractVideoFrames:
-// frames / duration formatted with 6 decimal places.
 func fpsExprFor(frames, duration float64) string {
 	return strconv.FormatFloat(frames/duration, 'f', 6, 64)
 }
 
 func TestFramesFPSExpressionFormatting(t *testing.T) {
-	// Spec case: 2.5/10 -> "0.250000".
 	if got := fpsExprFor(2.5, 10); got != "0.250000" {
 		t.Errorf("fpsExprFor(2.5, 10) = %q, want %q", got, "0.250000")
 	}
-	// Integer-frame cases exactly as production computes them.
 	cases := []struct {
 		frames   int
 		duration float64
@@ -134,11 +126,6 @@ func TestFFmpegFFprobeAvailableMatchLookPath(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Integration tests (skipped when ffmpeg/ffprobe are not installed)
-// ---------------------------------------------------------------------------
-
-// requireFFmpeg skips the test when ffmpeg or ffprobe is missing from PATH.
 func requireFFmpeg(t *testing.T) {
 	t.Helper()
 	if _, ok := ffmpegAvailable(); !ok {
@@ -149,14 +136,6 @@ func requireFFmpeg(t *testing.T) {
 	}
 }
 
-// makeTestVideo generates a short test video in dir and returns its path plus
-// whether it carries an audio track. Strategy, in order:
-//  1. combined testsrc + sine muxed as libx264/aac,
-//  2. same with mpeg4 (libx264 missing),
-//  3. video-only fallback (audio mux failed) — hasAudio=false so the audio
-//     test expects an error.
-//
-// It skips the test when fixture generation fails entirely.
 func makeTestVideo(t *testing.T, dir string, durationS int) (path string, hasAudio bool) {
 	t.Helper()
 	ffmpeg, ok := ffmpegAvailable()
@@ -261,9 +240,6 @@ func TestExtractAudioTrack_Integration(t *testing.T) {
 
 	wavPath, err := extractAudioTrack(context.Background(), path, outDir)
 	if err != nil {
-		// Tolerant behavior: either a WAV exists or an error is returned.
-		// No-audio videos are documented to error out; the caller decides
-		// how to report it.
 		if err.Error() == "" {
 			t.Fatal("extractAudioTrack returned an empty error")
 		}

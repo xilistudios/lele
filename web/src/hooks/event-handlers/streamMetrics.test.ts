@@ -1,12 +1,3 @@
-/**
- * `message.stream` metric propagation tests (handler level).
- *
- * The backend adds four fields to every `message.stream` event — `tokens`,
- * `elapsed_ms`, `tok_per_sec`, `estimated`. The handler must parse them
- * tolerantly (an older backend without them degrades to zeros, never NaN) and
- * forward the result to the metrics state, on EVERY chunk including the
- * terminal one so the final figure is retained downstream.
- */
 import { describe, expect, mock, test } from 'bun:test'
 import type { StreamMetrics } from '../useStreamMetrics'
 import { handleMessageStream, handleMessageThinking, handleWelcome } from './streaming'
@@ -88,7 +79,6 @@ describe('handleMessageStream — token metrics', () => {
       tokPerSec: 0,
       estimated: false,
     })
-    // The chunk itself is still queued as before — metrics are additive.
     expect(enqueueChunk.mock.calls.length).toBe(1)
   })
 

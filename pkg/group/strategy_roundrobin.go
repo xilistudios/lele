@@ -2,8 +2,6 @@ package group
 
 import "fmt"
 
-// RoundRobinStrategy cycles through participants in order, one speaker per turn.
-// It stops when StopReason fires or when the number of turns reaches Rounds * len(participants).
 type RoundRobinStrategy struct{}
 
 func (s *RoundRobinStrategy) Name() string { return "round_robin" }
@@ -20,7 +18,6 @@ func (s *RoundRobinStrategy) Next(state *GroupState) ([]string, bool, error) {
 
 	turns := len(state.Transcript)
 
-	// If Rounds is set, cap at Rounds * n total turns.
 	if state.Rounds > 0 && turns >= state.Rounds*n {
 		return nil, true, nil
 	}

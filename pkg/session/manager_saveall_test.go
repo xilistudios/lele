@@ -13,9 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// openStoreAt opens (or creates) a SQLite store at an explicit path so a test
-// can close it and reopen it again — the graceful-shutdown scenario SaveAll
-// exists for. Cleanup closes the store but tolerates an already-closed handle.
 func openStoreAt(t *testing.T, dbPath string) *store.Store {
 	t.Helper()
 	s, err := store.Open(dbPath)
@@ -26,7 +23,6 @@ func openStoreAt(t *testing.T, dbPath string) *store.Store {
 	return s
 }
 
-// mustParseMsg splits a "role:content" fixture into its two halves.
 func mustParseMsg(t *testing.T, fixture string) (role, content string) {
 	t.Helper()
 	parts := strings.SplitN(fixture, ":", 2)
@@ -36,9 +32,6 @@ func mustParseMsg(t *testing.T, fixture string) (role, content string) {
 	return parts[0], parts[1]
 }
 
-// saveAllWithin runs fn (a SaveAll call) and fails the test if it does not
-// return within limit. A deadlock inside SaveAll would otherwise hang CI
-// forever; this turns it into a readable test failure.
 func saveAllWithin(t *testing.T, sm *SessionManager, limit time.Duration) (int, int) {
 	t.Helper()
 
@@ -61,7 +54,6 @@ func saveAllWithin(t *testing.T, sm *SessionManager, limit time.Duration) (int, 
 	}
 }
 
-// residentKeysOf returns the session keys currently held in memory.
 func residentKeysOf(sm *SessionManager) map[string]bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -79,7 +71,6 @@ func TestSaveAllPersistsResidentSessions(t *testing.T) {
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
 
-	// Three sessions, never individually saved: everything lives in RAM only.
 	wants := map[string][]string{
 		"test:alpha": {"user:call", "assistant:hi", "user:bye"},
 		"test:beta":  {"user:hello", "assistant:world"},
@@ -106,7 +97,6 @@ func TestSaveAllPersistsResidentSessions(t *testing.T) {
 		t.Errorf("SaveAll failed = %d, want 0", failed)
 	}
 
-	// Simulate process exit: close the DB and reopen it from scratch.
 	if err := s.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
@@ -130,9 +120,8 @@ func TestSaveAllPersistsResidentSessions(t *testing.T) {
 }
 
 func TestSaveAllNoStoreIsSafe(t *testing.T) {
-	sm := NewSessionManager() // deliberately no SetSessionRepo
+	sm := NewSessionManager()
 
-	// In-memory mutations still work without a store.
 	sm.AddMessage("nostore:1", "user", "hello")
 	sm.AddMessage("nostore:2", "user", "world")
 
@@ -194,9 +183,6 @@ func TestSaveAllConcurrentWithAppend(t *testing.T) {
 		}(a)
 	}
 
-	// Hammer SaveAll while the appenders run. Before the snapshot-then-release
-	// design this deadlocked: saveUnlocked releases sm.mu for I/O and
-	// re-acquires it, which can never happen if the caller holds it.
 	for r := 0; r < rounds; r++ {
 		saved, failed := saveAllWithin(t, sm, 30*time.Second)
 		if failed != 0 {
@@ -210,8 +196,6 @@ func TestSaveAllConcurrentWithAppend(t *testing.T) {
 	close(stop)
 	wg.Wait()
 
-	// Final flush with the writers quiesced, then verify nothing was lost:
-	// every appended message must be readable from SQLite.
 	if _, failed := saveAllWithin(t, sm, 30*time.Second); failed != 0 {
 		t.Fatalf("final SaveAll: failed != 0")
 	}
@@ -221,7 +205,7 @@ func TestSaveAllConcurrentWithAppend(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MessageCount(%q): %v", key, err)
 		}
-		want := 1 + appended[key] // seed + appended
+		want := 1 + appended[key]
 		if got != want {
 			t.Errorf("session %q persisted %d messages, want %d", key, got, want)
 		}
@@ -234,8 +218,6 @@ func TestSaveAllSkipsEvicted(t *testing.T) {
 
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
-	// One resident session max, so creating the third session forces the LRU
-	// path to evict the first one (and persist it on the way out).
 	sm.SetMaxInMemory(1)
 	sm.SetEvictionTTL(0)
 
@@ -247,7 +229,6 @@ func TestSaveAllSkipsEvicted(t *testing.T) {
 		t.Logf("CleanupIdleSessions evicted %d sessions", n)
 	}
 
-	// The LRU path must have dropped exactly the oldest session.
 	resident := residentKeysOf(sm)
 	if resident["evict:a"] {
 		t.Fatalf("fixture broken: evict:a is still resident, nothing was evicted (resident: %v)", resident)
@@ -264,13 +245,11 @@ func TestSaveAllSkipsEvicted(t *testing.T) {
 		t.Errorf("SaveAll saved = %d, want 2 (only the resident sessions)", saved)
 	}
 
-	// SaveAll must not resurrect the evicted session into memory.
 	if residentKeysOf(sm)["evict:a"] {
 
 		t.Error("SaveAll resurrected evicted session evict:a in memory")
 	}
 
-	// ...but its data is durable and readable straight from the store.
 	count, err := s.Sessions().MessageCount("evict:a")
 	if err != nil {
 		t.Fatalf("MessageCount(evict:a): %v", err)
@@ -279,7 +258,6 @@ func TestSaveAllSkipsEvicted(t *testing.T) {
 		t.Errorf("evicted session has %d persisted messages, want 2", count)
 	}
 
-	// A fresh manager over the same DB (i.e. after a restart) sees it too.
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	if history := sm2.GetHistory("evict:a"); len(history) != 2 {

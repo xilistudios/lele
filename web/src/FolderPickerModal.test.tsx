@@ -89,13 +89,11 @@ describe('FolderPickerModal', () => {
       { wrapper },
     )
 
-    // Entries fetched from the service are rendered
     await waitFor(() => {
       expect(getByText('projects')).not.toBeNull()
     })
     expect(getByText('docs')).not.toBeNull()
 
-    // Confirm button selects the directory currently being listed
     fireEvent.click(getByRole('button', { name: /Seleccionar esta carpeta/i }))
     expect(onSelect).toHaveBeenCalledWith('/home/alfredo')
   })
@@ -141,7 +139,6 @@ describe('FolderPickerModal', () => {
       expect(getByText('projects')).not.toBeNull()
     })
 
-    // Double-click selects the entry itself as the target folder
     fireEvent.doubleClick(getByText('projects'))
     expect(onSelect).toHaveBeenCalledWith('/home/alfredo/projects')
   })

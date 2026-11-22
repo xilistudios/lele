@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-// AuditRing is a fixed-size ring buffer of access records. When full, the
-// oldest records are overwritten. It is safe for concurrent use.
 type AuditRing struct {
 	buf  []AccessRecord
 	size int
@@ -15,8 +13,6 @@ type AuditRing struct {
 	mu   sync.RWMutex
 }
 
-// NewAuditRing creates an AuditRing that retains up to size records.
-// A non-positive size defaults to 1000.
 func NewAuditRing(size int) *AuditRing {
 	if size <= 0 {
 		size = 1000
@@ -27,7 +23,6 @@ func NewAuditRing(size int) *AuditRing {
 	}
 }
 
-// Record appends an access record to the ring.
 func (r *AuditRing) Record(rec AccessRecord) {
 	if rec.Timestamp.IsZero() {
 		rec.Timestamp = time.Now()
@@ -42,7 +37,6 @@ func (r *AuditRing) Record(rec AccessRecord) {
 	}
 }
 
-// Records returns all stored records in chronological order (oldest first).
 func (r *AuditRing) Records() []AccessRecord {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -54,13 +48,11 @@ func (r *AuditRing) Records() []AccessRecord {
 	}
 
 	out := make([]AccessRecord, 0, r.size)
-	// Oldest entries start at r.pos (the next slot to be overwritten).
 	out = append(out, r.buf[r.pos:]...)
 	out = append(out, r.buf[:r.pos]...)
 	return out
 }
 
-// Len returns the number of records currently stored.
 func (r *AuditRing) Len() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

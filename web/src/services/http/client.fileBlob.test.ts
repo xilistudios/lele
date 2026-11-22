@@ -73,7 +73,6 @@ describe('fileBlob', () => {
         })
       }
 
-      // First file request → 401, second → 200
       if (callIndex === 1) {
         return new Response(JSON.stringify({ error: 'unauthorized', code: 'auth_error' }), {
           status: 401,
@@ -92,9 +91,7 @@ describe('fileBlob', () => {
     expect(blob).toBeInstanceOf(Blob)
     expect(await blob.text()).toBe('recovered')
 
-    // First call had old token, second had refreshed token
     expect(capturedAuth[0]).toBe('Bearer my-token')
-    // The refresh call happens in the middle, so index 2 is the retry
     expect(capturedAuth[2]).toBe('Bearer new-access')
   })
 
@@ -116,7 +113,6 @@ describe('fileBlob', () => {
       code: 'access_denied',
     })
 
-    // Only 1 fetch call — no refresh attempted (403 is not 401)
     expect(fetchCallCount).toBe(1)
   })
 

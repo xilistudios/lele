@@ -7,7 +7,6 @@ export type ButtonSize = 'sm' | 'md' | 'lg'
 type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant
   size?: ButtonSize
-  /** Shows a spinner and disables the button. */
   loading?: boolean
   children?: ReactNode
 }
@@ -18,11 +17,8 @@ const baseClasses =
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
     'bg-accent-primary text-text-on-accent shadow-sm hover:bg-accent-hover active:bg-accent-active',
-  secondary:
-    'border border-border bg-background-tertiary text-text-primary hover:bg-surface-hover',
+  secondary: 'border border-border bg-background-tertiary text-text-primary hover:bg-surface-hover',
   ghost: 'bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary',
-  // §5 spec: relleno destructivo = state-error-fill (blanco 4.95 D / 5.74 L).
-  // bg-state-error era ❌ 2.77 en oscuro (#F87171 es texto de error, no superficie).
   danger: 'bg-state-error-fill text-text-on-accent hover:opacity-90',
 }
 
@@ -32,12 +28,6 @@ const sizeClasses: Record<ButtonSize, string> = {
   lg: 'px-5 py-2.5 text-sm',
 }
 
-/**
- * Standard button atom. Use instead of inline button class strings.
- *
- * @example
- * <Button variant="primary" size="md" loading={isSaving}>Save</Button>
- */
 export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
   {
     variant = 'primary',

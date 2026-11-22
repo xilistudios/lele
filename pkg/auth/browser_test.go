@@ -8,12 +8,6 @@ import (
 	"time"
 )
 
-// These tests drive startAndConfirm with `sh` rather than a platform launcher:
-// the point of that split is precisely that the wait/exit logic can be proven
-// without spawning a browser or depending on xdg-open/open being installed.
-// Windows has no sh, and browserCommand is asserted per platform instead.
-
-// requirePOSIX skips a test on a platform without a POSIX shell.
 func requirePOSIX(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -24,8 +18,6 @@ func requirePOSIX(t *testing.T) {
 	}
 }
 
-// TestStartAndConfirm_ExitsZero: a launcher that exits cleanly within the
-// budget is a success.
 func TestStartAndConfirm_ExitsZero(t *testing.T) {
 	requirePOSIX(t)
 	if err := startAndConfirm(exec.Command("sh", "-c", "exit 0"), toolWait); err != nil {
@@ -33,9 +25,6 @@ func TestStartAndConfirm_ExitsZero(t *testing.T) {
 	}
 }
 
-// TestStartAndConfirm_NonZeroExitIsAnError is the behaviour the caller needs:
-// xdg-open starting is not the same as the URL opening, and its failure must
-// reach the caller.
 func TestStartAndConfirm_NonZeroExitIsAnError(t *testing.T) {
 	requirePOSIX(t)
 	err := startAndConfirm(exec.Command("sh", "-c", "exit 3"), toolWait)
@@ -50,9 +39,6 @@ func TestStartAndConfirm_NonZeroExitIsAnError(t *testing.T) {
 	}
 }
 
-// TestStartAndConfirm_StillRunningIsASuccess: a launcher that has not exited
-// after the budget is assumed to have handed the URL off (some launchers stay
-// as the browser's parent). It must not block past the budget either.
 func TestStartAndConfirm_StillRunningIsASuccess(t *testing.T) {
 	requirePOSIX(t)
 	start := time.Now()
@@ -67,8 +53,6 @@ func TestStartAndConfirm_StillRunningIsASuccess(t *testing.T) {
 	}
 }
 
-// TestStartAndConfirm_ZeroWaitDoesNotBlock: a non-positive budget means "start
-// it and do not wait", the pre-existing OpenBrowser behaviour.
 func TestStartAndConfirm_ZeroWaitDoesNotBlock(t *testing.T) {
 	requirePOSIX(t)
 	start := time.Now()
@@ -80,8 +64,6 @@ func TestStartAndConfirm_ZeroWaitDoesNotBlock(t *testing.T) {
 	}
 }
 
-// TestStartAndConfirm_StartFailureIsReported covers the missing launcher: no
-// xdg-open installed at all.
 func TestStartAndConfirm_StartFailureIsReported(t *testing.T) {
 	err := startAndConfirm(exec.Command("/nonexistent/lele-browser-launcher", "https://example.test/"), toolWait)
 	if err == nil {
@@ -89,8 +71,6 @@ func TestStartAndConfirm_StartFailureIsReported(t *testing.T) {
 	}
 }
 
-// TestBrowserCommand_PerPlatform pins the one platform switch: the command each
-// OS is opened with, and the URL as its last argument.
 func TestBrowserCommand_PerPlatform(t *testing.T) {
 	url := "https://auth.example.test/authorize?client_id=abc&state=s"
 	cmd, err := browserCommand(url)
@@ -118,8 +98,6 @@ func TestBrowserCommand_PerPlatform(t *testing.T) {
 	}
 }
 
-// TestLauncherExitError_NeverCarriesTheCommandLine guards the "no value in an
-// error" rule this package follows for every OAuth failure.
 func TestLauncherExitError_NeverCarriesTheCommandLine(t *testing.T) {
 	requirePOSIX(t)
 	cmd := exec.Command("sh", "-c", "exit 4")
@@ -139,6 +117,4 @@ func TestLauncherExitError_NeverCarriesTheCommandLine(t *testing.T) {
 	}
 }
 
-// toolWait is the budget used by the tests above: long enough for a shell to
-// start and exit on a loaded CI box, short enough to keep the suite fast.
 const toolWait = 5 * time.Second

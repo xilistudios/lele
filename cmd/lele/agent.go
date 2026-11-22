@@ -16,8 +16,6 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 )
 
-// parseCLIArgs extracts the pure argument parsing logic from agentCmd for testability.
-// Returns: message, sessionKey, debugMode, verboseMode.
 func parseCLIArgs(args []string) (message, sessionKey string, debug bool, verbose bool) {
 	sessionKey = "cli:default"
 	for i := 0; i < len(args); i++ {
@@ -61,7 +59,6 @@ func parseCLIArgs(args []string) (message, sessionKey string, debug bool, verbos
 func agentCmd() {
 	message, sessionKey, debug, verbose := parseCLIArgs(os.Args[2:])
 
-	// By default, suppress console logs (only write to file)
 	logger.SetQuiet(true)
 
 	if debug {
@@ -83,18 +80,11 @@ func agentCmd() {
 
 	msgBus := bus.NewMessageBus()
 
-	// Open the shared SQLite store via the single helper. On any error
-	// (including unsupported platform) the same warning is logged and the
-	// loop receives nil, falling back to JSON storage — identical to the
-	// old inline fallback in NewAgentLoop.
 	dbPath := defaultDBPath()
 	s, storeCleanup, storeErr := openSharedStore(dbPath, "agent-loop")
 	if storeErr != nil {
 		log.Printf("Failed to open SQLite store at %s: %v — falling back to JSON storage", dbPath, storeErr)
 	}
-	// cleanup is a no-op when s is nil. When non-nil the loop owns the
-	// store and closes it on shutdown, so we only use cleanup on the
-	// failure path (where the store was never handed over).
 	if s == nil {
 		defer storeCleanup()
 	}

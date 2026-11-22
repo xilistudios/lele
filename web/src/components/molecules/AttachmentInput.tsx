@@ -3,11 +3,12 @@ import { useTranslation } from 'react-i18next'
 import { IconButton } from '../atoms/IconButton'
 
 type Props = {
+  className?: string
   onUpload: (files: File[]) => Promise<string[]>
   onAttach: (paths: string[]) => void
 }
 
-export function AttachmentInput({ onUpload, onAttach }: Props) {
+export function AttachmentInput({ className, onUpload, onAttach }: Props) {
   const { t } = useTranslation()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
@@ -18,15 +19,9 @@ export function AttachmentInput({ onUpload, onAttach }: Props) {
 
     try {
       const paths = await onUpload(files)
-      // onUpload may swallow the API error and return [] — treat that as a
-      // failure so the user is not left wondering why nothing was attached.
       if (paths.length === 0) {
         setError(t('chat.uploadFailed'))
       } else {
-        // A PARTIAL failure is not silent either: the upload endpoint skips the
-        // files it cannot store (`continue` in upload.go) and answers with
-        // fewer paths than were sent, so N-1 chips would appear with no
-        // explanation. Keep the paths that DID upload and say how many failed.
         setError(
           paths.length < files.length
             ? t('chat.uploadPartial', { failed: files.length - paths.length, total: files.length })
@@ -55,6 +50,7 @@ export function AttachmentInput({ onUpload, onAttach }: Props) {
         onClick={() => fileInputRef.current?.click()}
         title={t('chat.attachFiles')}
         ariaLabel={t('chat.attachFiles')}
+        className={className}
       >
         <svg
           width="14"

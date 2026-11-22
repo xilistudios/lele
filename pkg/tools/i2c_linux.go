@@ -7,30 +7,23 @@ import (
 	"unsafe"
 )
 
-// I2C ioctl constants from Linux kernel headers (<linux/i2c-dev.h>, <linux/i2c.h>)
 const (
-	i2cSlave = 0x0703 // Set slave address (fails if in use by driver)
-	i2cFuncs = 0x0705 // Query adapter functionality bitmask
-	i2cSmbus = 0x0720 // Perform SMBus transaction
+	i2cSlave = 0x0703
+	i2cFuncs = 0x0705
+	i2cSmbus = 0x0720
 
-	// I2C_FUNC capability bits
 	i2cFuncSmbusQuick    = 0x00010000
 	i2cFuncSmbusReadByte = 0x00020000
 
-	// SMBus transaction types
 	i2cSmbusRead  = 0
 	i2cSmbusWrite = 1
 
-	// SMBus protocol sizes
 	i2cSmbusQuick = 0
 	i2cSmbusByte  = 1
 )
 
-// i2cSmbusData matches the kernel union i2c_smbus_data (34 bytes max).
-// For quick and byte transactions only the first byte is used (if at all).
 type i2cSmbusData [34]byte
 
-// i2cSmbusArgs matches the kernel struct i2c_smbus_ioctl_data.
 type i2cSmbusArgs struct {
 	readWrite uint8
 	command   uint8
@@ -38,17 +31,10 @@ type i2cSmbusArgs struct {
 	data      *i2cSmbusData
 }
 
-// smbusProbe performs a single SMBus probe at the given address.
-// Uses SMBus Quick Write (safest) or falls back to SMBus Read Byte for
-// EEPROM address ranges where quick write can corrupt AT24RF08 chips.
-// This matches i2cdetect's MODE_AUTO behavior.
 func smbusProbe(fd int, addr int, hasQuick bool) bool {
-	// EEPROM ranges: use read byte (quick write can corrupt AT24RF08)
 	useReadByte := (addr >= 0x30 && addr <= 0x37) || (addr >= 0x50 && addr <= 0x5F)
 
 	if !useReadByte && hasQuick {
-		// SMBus Quick Write: [START] [ADDR|W] [ACK/NACK] [STOP]
-		// Safest probe — no data transferred
 		args := i2cSmbusArgs{
 			readWrite: i2cSmbusWrite,
 			command:   0,
@@ -59,7 +45,6 @@ func smbusProbe(fd int, addr int, hasQuick bool) bool {
 		return errno == 0
 	}
 
-	// SMBus Read Byte: [START] [ADDR|R] [ACK/NACK] [DATA] [STOP]
 	var data i2cSmbusData
 	args := i2cSmbusArgs{
 		readWrite: i2cSmbusRead,
@@ -71,9 +56,6 @@ func smbusProbe(fd int, addr int, hasQuick bool) bool {
 	return errno == 0
 }
 
-// scan probes valid 7-bit addresses on a bus for connected devices.
-// Uses the same hybrid probe strategy as i2cdetect's MODE_AUTO:
-// SMBus Quick Write for most addresses, SMBus Read Byte for EEPROM ranges.
 func (t *I2CTool) scan(args map[string]interface{}) *ToolResult {
 	bus, errResult := parseI2CBus(args)
 	if errResult != nil {
@@ -87,8 +69,6 @@ func (t *I2CTool) scan(args map[string]interface{}) *ToolResult {
 	}
 	defer syscall.Close(fd)
 
-	// Query adapter capabilities to determine available probe methods.
-	// I2C_FUNCS writes an unsigned long, which is word-sized on Linux.
 	var funcs uintptr
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), i2cFuncs, uintptr(unsafe.Pointer(&funcs)))
 	if errno != 0 {
@@ -108,9 +88,7 @@ func (t *I2CTool) scan(args map[string]interface{}) *ToolResult {
 	}
 
 	var found []deviceEntry
-	// Scan 0x08-0x77, skipping I2C reserved addresses 0x00-0x07
 	for addr := 0x08; addr <= 0x77; addr++ {
-		// Set slave address — EBUSY means a kernel driver owns this address
 		_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), i2cSlave, uintptr(addr))
 		if errno != 0 {
 			if errno == syscall.EBUSY {
@@ -141,7 +119,6 @@ func (t *I2CTool) scan(args map[string]interface{}) *ToolResult {
 	return SilentResult(fmt.Sprintf("Scan of %s:\n%s", devPath, string(result)))
 }
 
-// readDevice reads bytes from an I2C device, optionally at a specific register
 func (t *I2CTool) readDevice(args map[string]interface{}) *ToolResult {
 	bus, errResult := parseI2CBus(args)
 	if errResult != nil {
@@ -168,13 +145,11 @@ func (t *I2CTool) readDevice(args map[string]interface{}) *ToolResult {
 	}
 	defer syscall.Close(fd)
 
-	// Set slave address
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), i2cSlave, uintptr(addr))
 	if errno != 0 {
 		return ErrorResult(fmt.Sprintf("failed to set I2C address 0x%02x: %v", addr, errno))
 	}
 
-	// If register is specified, write it first
 	if regFloat, ok := args["register"].(float64); ok {
 		reg := int(regFloat)
 		if reg < 0 || reg > 255 {
@@ -186,14 +161,12 @@ func (t *I2CTool) readDevice(args map[string]interface{}) *ToolResult {
 		}
 	}
 
-	// Read data
 	buf := make([]byte, length)
 	n, err := syscall.Read(fd, buf)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to read from device 0x%02x: %v", addr, err))
 	}
 
-	// Format as hex bytes
 	hexBytes := make([]string, n)
 	intBytes := make([]int, n)
 	for i := 0; i < n; i++ {
@@ -211,7 +184,6 @@ func (t *I2CTool) readDevice(args map[string]interface{}) *ToolResult {
 	return SilentResult(string(result))
 }
 
-// writeDevice writes bytes to an I2C device, optionally at a specific register
 func (t *I2CTool) writeDevice(args map[string]interface{}) *ToolResult {
 	confirm, _ := args["confirm"].(bool)
 	if !confirm {
@@ -238,7 +210,6 @@ func (t *I2CTool) writeDevice(args map[string]interface{}) *ToolResult {
 
 	data := make([]byte, 0, len(dataRaw)+1)
 
-	// If register is specified, prepend it to the data
 	if regFloat, ok := args["register"].(float64); ok {
 		reg := int(regFloat)
 		if reg < 0 || reg > 255 {
@@ -266,13 +237,11 @@ func (t *I2CTool) writeDevice(args map[string]interface{}) *ToolResult {
 	}
 	defer syscall.Close(fd)
 
-	// Set slave address
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), i2cSlave, uintptr(addr))
 	if errno != 0 {
 		return ErrorResult(fmt.Sprintf("failed to set I2C address 0x%02x: %v", addr, errno))
 	}
 
-	// Write data
 	n, err := syscall.Write(fd, data)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to write to device 0x%02x: %v", addr, err))

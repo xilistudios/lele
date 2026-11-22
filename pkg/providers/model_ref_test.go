@@ -80,7 +80,6 @@ func TestNormalizeProvider(t *testing.T) {
 		{"google", "gemini"},
 		{"groq", "groq"},
 		{"", ""},
-		// Catalog / hermes-agent aliases
 		{"grok", "xai"},
 		{"x.ai", "xai"},
 		{"x-ai", "xai"},

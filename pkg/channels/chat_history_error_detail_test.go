@@ -11,16 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// A failed LLM turn is persisted as an assistant message carrying ErrorDetail
-// (UI-only) with ExcludeFromContext=true. GET
-// /api/v1/chat/sessions/{sessionKey}/history is how the WebUI learns about it
-// after a refetch, so these tests drive the real mux and assert on the decoded
-// response instead of on the private DTO builder: a regression that filtered
-// the failure row out of the endpoint would otherwise pass.
-
-// getChatHistoryRaw performs the authenticated history request and returns the
-// status plus the raw body, so the wire contract (key present vs omitted) can be
-// asserted on the bytes the WebUI actually receives.
 func getChatHistoryRaw(t *testing.T, ts *nativeTestServer, sessionKey string) (int, []byte) {
 	t.Helper()
 
@@ -44,10 +34,6 @@ func getChatHistoryRaw(t *testing.T, ts *nativeTestServer, sessionKey string) (i
 	return resp.StatusCode, body
 }
 
-// TestChatHistoryEndpoint_ErrorDetail is the contract the WebUI refetch relies
-// on: a persisted failure comes back with its detail and its exclusion flag,
-// and an ordinary assistant message still omits the key entirely (omitempty),
-// so stored and transmitted JSON stays compatible.
 func TestChatHistoryEndpoint_ErrorDetail(t *testing.T) {
 	const (
 		failureDetail = "LLM call failed after retries: 429 Too Many Requests"
@@ -55,15 +41,12 @@ func TestChatHistoryEndpoint_ErrorDetail(t *testing.T) {
 	)
 
 	cases := []struct {
-		name string
-		// messages is the session history the endpoint serves.
-		messages []providers.Message
-		// wantErrorDetail / wantExcluded describe the message at wantIndex.
+		name            string
+		messages        []providers.Message
 		wantIndex       int
 		wantErrorDetail string
 		wantExcluded    bool
-		// wantKeyPresent is the raw-JSON contract for "error_detail".
-		wantKeyPresent bool
+		wantKeyPresent  bool
 	}{
 		{
 			name: "failed turn is served with its detail and exclusion flag",
@@ -121,8 +104,6 @@ func TestChatHistoryEndpoint_ErrorDetail(t *testing.T) {
 				t.Errorf("messages[%d].exclude_from_context = %v, want %v",
 					tc.wantIndex, got.ExcludeFromContext, tc.wantExcluded)
 			}
-			// The legacy plain text must still be there: every non-box channel
-			// renders Content, not error_detail.
 			if got.Content != tc.messages[tc.wantIndex].Content {
 				t.Errorf("messages[%d].content = %q, want %q",
 					tc.wantIndex, got.Content, tc.messages[tc.wantIndex].Content)

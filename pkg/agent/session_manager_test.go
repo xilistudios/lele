@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -21,7 +15,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// TestSummarizeSessionWithError_InsufficientMessages tests error handling for insufficient messages
 func TestSummarizeSessionWithError_InsufficientMessages(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "session-manager-test-*")
 	if err != nil {
@@ -62,7 +55,6 @@ func TestSummarizeSessionWithError_InsufficientMessages(t *testing.T) {
 	}
 	sessionKey := "test:insufficient"
 
-	// Test with no messages
 	stats, err := sm.summarizeSessionWithError(agent, sessionKey)
 	if err == nil {
 		t.Error("Expected error for no messages")
@@ -74,7 +66,6 @@ func TestSummarizeSessionWithError_InsufficientMessages(t *testing.T) {
 		t.Errorf("Expected not enough messages error, got: %v", err)
 	}
 
-	// Test with 1 message
 	agent.Sessions.AddMessage(sessionKey, "user", "Hello")
 	stats, err = sm.summarizeSessionWithError(agent, sessionKey)
 	if err == nil {
@@ -84,7 +75,6 @@ func TestSummarizeSessionWithError_InsufficientMessages(t *testing.T) {
 		t.Error("Expected nil stats for 1 message")
 	}
 
-	// Test with 2 messages
 	agent.Sessions.AddMessage(sessionKey, "assistant", "Hi")
 	stats, err = sm.summarizeSessionWithError(agent, sessionKey)
 	if err == nil {
@@ -94,17 +84,13 @@ func TestSummarizeSessionWithError_InsufficientMessages(t *testing.T) {
 		t.Error("Expected nil stats for 2 messages")
 	}
 
-	// Test with 3 messages (minimum required)
 	agent.Sessions.AddMessage(sessionKey, "user", "How are you?")
-	// This should attempt summarization but may fail due to mock provider
 	stats, err = sm.summarizeSessionWithError(agent, sessionKey)
 	if err != nil {
-		// Should be LLM-related error since we have enough messages
 		if !strings.Contains(err.Error(), "LLM summarization failed") {
 			t.Errorf("Expected LLM error for 3 messages, got: %v", err)
 		}
 	} else {
-		// If it succeeds, verify the stats
 		if stats == nil {
 			t.Error("Expected stats when no error")
 		} else if stats.BeforeMessages < 3 {
@@ -113,7 +99,6 @@ func TestSummarizeSessionWithError_InsufficientMessages(t *testing.T) {
 	}
 }
 
-// TestSummarizeSessionWithError_EmptyResult tests handling of empty summarization results
 func TestSummarizeSessionWithError_EmptyResult(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "session-manager-test-*")
 	if err != nil {
@@ -148,13 +133,12 @@ func TestSummarizeSessionWithError_EmptyResult(t *testing.T) {
 	}
 	agent.Provider = &llmRunnerMockLLMProvider{
 		response: &providers.LLMResponse{
-			Content:   "", // Empty response to test handling
+			Content:   "",
 			ToolCalls: []providers.ToolCall{},
 		},
 	}
 	sessionKey := "test:empty-result"
 
-	// Add enough messages to trigger summarization
 	for i := 0; i < 5; i++ {
 		agent.Sessions.AddMessage(sessionKey, "user", fmt.Sprintf("Message %d", i))
 		agent.Sessions.AddMessage(sessionKey, "assistant", fmt.Sprintf("Response %d", i))
@@ -172,7 +156,6 @@ func TestSummarizeSessionWithError_EmptyResult(t *testing.T) {
 	}
 }
 
-// TestSummarizeSessionWithError_Success tests successful summarization
 func TestSummarizeSessionWithError_Success(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "session-manager-test-*")
 	if err != nil {
@@ -180,9 +163,6 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
-
-	// Create a dedicated session directory for this test to avoid loading
-	// real user sessions from ~/.lele/sessions.
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -203,8 +183,6 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Override the shared session manager with a test-local one so we don't
-	// load or persist data in the user's real ~/.lele/sessions directory.
 	testSessionMgr := session.NewSessionManager()
 	al.registry.SetSharedSessionManager(testSessionMgr)
 
@@ -221,7 +199,6 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 	}
 	sessionKey := "test:success"
 
-	// Add enough messages to trigger summarization
 	for i := 0; i < 6; i++ {
 		agent.Sessions.AddMessage(sessionKey, "user", fmt.Sprintf("Question %d about important topic", i))
 		agent.Sessions.AddMessage(sessionKey, "assistant", fmt.Sprintf("Answer %d with detailed information", i))
@@ -237,7 +214,6 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 		t.Fatal("Expected stats for successful summarization")
 	}
 
-	// Verify stats
 	if stats.BeforeMessages != beforeCount {
 		t.Errorf("Expected BeforeMessages=%d, got %d", beforeCount, stats.BeforeMessages)
 	}
@@ -249,7 +225,6 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 		t.Errorf("Expected positive dropped messages, got %d", stats.DroppedMessages)
 	}
 
-	// Verify summary was set
 	summary := agent.Sessions.GetSummary(sessionKey)
 	if summary == "" {
 		t.Error("Expected summary to be set, got empty string")
@@ -258,9 +233,6 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 		t.Errorf("Expected summary to contain 'Summary', got: %s", summary)
 	}
 
-	// Verify messages are preserved in memory with ExcludeFromContext flags.
-	// Old messages stay in memory (for TUI display) but are marked as excluded
-	// from the LLM context.
 	afterHistory := agent.Sessions.GetHistory(sessionKey)
 	excludedCount := 0
 	includedCount := 0
@@ -274,15 +246,11 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 	if excludedCount == 0 {
 		t.Error("Expected some messages to be excluded from context")
 	}
-	// 4 included: first message (index 0, always preserved) + 1 preserved
-	// human turn inside the excluded range (one of the last preservedUserMessages
-	// human turns) + last 2 kept for continuity
 	if includedCount != 4 {
 		t.Errorf("Expected 4 messages included in context (first + preserved human + last 2), got %d", includedCount)
 	}
 }
 
-// TestAddTokenCounts_SessionKeyWithoutAgentPrefix tests token counting with session keys without agent prefix
 func TestAddTokenCounts_SessionKeyWithoutAgentPrefix(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "session-manager-test-*")
 	if err != nil {
@@ -307,15 +275,12 @@ func TestAddTokenCounts_SessionKeyWithoutAgentPrefix(t *testing.T) {
 
 	sm := newSessionManager(al)
 
-	// Test with session key without agent prefix (e.g., "telegram:12345")
 	sessionKey := "telegram:12345"
 	inputTokens := 100
 	outputTokens := 50
 
-	// This should use the default agent and add token counts
 	sm.AddTokenCounts(sessionKey, inputTokens, outputTokens)
 
-	// Verify token counts were added
 	defaultAgent := al.registry.GetDefaultAgent()
 	inputTokensActual, outputTokensActual := defaultAgent.Sessions.GetTokenCounts(sessionKey)
 	if inputTokensActual != inputTokens || outputTokensActual != outputTokens {
@@ -323,14 +288,12 @@ func TestAddTokenCounts_SessionKeyWithoutAgentPrefix(t *testing.T) {
 			inputTokens, outputTokens, inputTokensActual, outputTokensActual)
 	}
 
-	// Test with session key with agent prefix (e.g., "agent:main:telegram:12345")
 	sessionKeyWithPrefix := "agent:main:telegram:12345"
 	inputTokens2 := 200
 	outputTokens2 := 75
 
 	sm.AddTokenCounts(sessionKeyWithPrefix, inputTokens2, outputTokens2)
 
-	// Verify token counts were added to the correct agent
 	parsed := routing.ParseAgentSessionKey(sessionKeyWithPrefix)
 	if parsed == nil {
 		t.Fatal("Failed to parse session key with prefix")
@@ -348,9 +311,6 @@ func TestAddTokenCounts_SessionKeyWithoutAgentPrefix(t *testing.T) {
 	}
 }
 
-// TestMaybeSummarize_TriggersWhenThresholdExceeded proves that maybeSummarize
-// actually triggers compaction when the token estimate exceeds the configured
-// threshold (ContextWindow * thresholdPercent / 100).
 func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "session-manager-test-*")
 	if err != nil {
@@ -359,9 +319,6 @@ func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
-	// The agent model must be registered in the provider's Models map so that
-	// getSessionContextWindow (which resolves via getContextWindow) returns the
-	// small context window instead of the 128000 default.
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
@@ -391,8 +348,6 @@ func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Use a test-local session manager so we don't touch real sessions.
-
 	testSessionMgr := session.NewSessionManager()
 	al.registry.SetSharedSessionManager(testSessionMgr)
 
@@ -402,21 +357,14 @@ func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
 		t.Fatal("No default agent found")
 	}
 
-	// Also set agent.ContextWindow as a safety net.
 	agent.ContextWindow = 1000
 
-	// Mock provider returns a non-empty summary string.
 	agent.Provider = &mockProvider{
 		mockResponse: "Summary of the conversation about testing compaction behavior.",
 	}
 
 	sessionKey := "test:maybe-summarize-triggers-threshold-exceeded"
 
-	// Seed session with enough messages so EstimateTokens exceeds threshold.
-	// With ContextWindow=1000 and default 75% threshold, the threshold is 750
-	// tokens. Each message is 200 chars + 10 structural overhead = 210 chars;
-	// EstimateTokens uses chars*2/5, so ~84 tokens per message.
-	// 20 messages × 84 = ~1680 tokens, plus system prompt — comfortably > 750.
 	longContent := strings.Repeat("x", 200)
 	for i := 0; i < 10; i++ {
 		agent.Sessions.AddMessage(sessionKey, "user", fmt.Sprintf("Question %d: %s", i, longContent))
@@ -430,14 +378,11 @@ func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
 		t.Fatalf("Expected 20 seeded messages, got %d", beforeCount)
 	}
 
-	// Act: call maybeSummarize. With a 1000-token context window the threshold
-	// (750) should already be exceeded by history alone.
 	stats := sm.maybeSummarize(agent, sessionKey, "test", "test-chat")
 	if stats == nil {
 		t.Fatal("Expected non-nil SummarizeStats; compaction should have been triggered")
 	}
 
-	// Assert: at least one message was dropped.
 	if stats.DroppedMessages <= 0 {
 		t.Errorf("Expected DroppedMessages > 0, got %d", stats.DroppedMessages)
 	}
@@ -445,8 +390,6 @@ func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
 		stats.BeforeMessages, stats.AfterMessages, stats.DroppedMessages,
 		stats.BeforeTokens, stats.AfterTokens, stats.SavedTokens)
 
-	// Assert: old excluded messages are marked with ExcludeFromContext but
-	// remain in the in-memory slice for TUI display.
 	afterHistory := agent.Sessions.GetHistory(sessionKey)
 	excludedCount := 0
 	includedCount := 0
@@ -460,14 +403,10 @@ func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
 	if excludedCount == 0 {
 		t.Error("Expected some messages to be excluded from context")
 	}
-	// 4 included: first message (index 0, always preserved) + 1 preserved
-	// human turn inside the excluded range (one of the last preservedUserMessages
-	// human turns) + last 2 kept for continuity
 	if includedCount != 4 {
 		t.Errorf("Expected 4 messages included in context (first + preserved human + last 2), got %d", includedCount)
 	}
 
-	// Summary messages (if any) should never be excluded from context.
 	for i, m := range afterHistory {
 		if isSummaryMessage(m) && m.ExcludeFromContext {
 			t.Errorf("Summary message [%d] should not be excluded from context", i)
@@ -475,12 +414,6 @@ func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
 	}
 }
 
-// TestEstimateTokens_VideoPartCounts pins the video token accounting fix:
-// a message carrying a video_url content part must be estimated substantially
-// higher than an identical text-only message, by at least
-// videoPartEstimateChars (converted through the same 2.5 chars/token
-// heuristic), so compaction triggers before the provider rejects an
-// over-length request.
 func TestEstimateTokens_VideoPartCounts(t *testing.T) {
 	sm := &sessionManagerImpl{}
 
@@ -504,9 +437,6 @@ func TestEstimateTokens_VideoPartCounts(t *testing.T) {
 
 	textTokens := sm.EstimateTokens(textOnly)
 	videoTokens := sm.EstimateTokens(withVideo)
-	// The video branch adds videoPartEstimateChars raw chars; EstimateTokens
-	// returns chars * 2 / 5, so the expected delta is at least that value
-	// converted with the same heuristic.
 	minDelta := videoPartEstimateChars * 2 / 5
 	if delta := videoTokens - textTokens; delta < minDelta {
 		t.Fatalf("video part raised estimate by %d tokens, want >= %d (text=%d, video=%d)",
@@ -514,12 +444,6 @@ func TestEstimateTokens_VideoPartCounts(t *testing.T) {
 	}
 }
 
-// TestEstimateTokens_CountsImagesAfterRehydration pins the fix for the
-// reloaded-session blind spot: EstimateTokens used to gate content-part
-// counting behind `m.Content == ""`, but Message.UnmarshalJSON repopulates
-// Content from the parts (rendering the image as "[image]"), so a session
-// reload billed a message carrying a huge base64 image as ~0 tokens. With the
-// shared providers.MessageCharCost rule image parts are ALWAYS counted.
 func TestEstimateTokens_CountsImagesAfterRehydration(t *testing.T) {
 	sm := &sessionManagerImpl{}
 	msgs := []providers.Message{
@@ -539,7 +463,6 @@ func TestEstimateTokens_CountsImagesAfterRehydration(t *testing.T) {
 		t.Fatalf("live message: EstimateTokens = %d, want >= 1000", before)
 	}
 
-	// Round trip through JSON: this is what a session reload does.
 	raw, err := json.Marshal(msgs)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -558,17 +481,9 @@ func TestEstimateTokens_CountsImagesAfterRehydration(t *testing.T) {
 	}
 }
 
-// TestEstimatorsAgree guarantees the parity invariant between the two token
-// estimators: for any message list without ExcludeFromContext entries,
-// tools.EstimateLoopTokens(msgs) == sm.EstimateTokens(msgs) exactly (both
-// sum providers.MessageCharCost). The second case pins the ONE intentional
-// difference: an ExcludeFromContext message is skipped only by EstimateTokens,
-// lowering it by exactly that message's MessageCharCost*2/5.
 func TestEstimatorsAgree(t *testing.T) {
 	sm := &sessionManagerImpl{}
 
-	// Fixture: plain text, tool calls, a live image message (Content == ""),
-	// a rehydrated (JSON round-tripped) image message and a message with Media.
 	textMsg := providers.Message{Role: "system", Content: "You are helpful."}
 	toolMsg := providers.Message{
 		Role:    "assistant",
@@ -615,14 +530,9 @@ func TestEstimatorsAgree(t *testing.T) {
 		t.Errorf("estimators disagree on no-exclusion list: EstimateLoopTokens = %d, EstimateTokens = %d", loopTokens, smTokens)
 	}
 
-	// Second case: an ExcludeFromContext message is counted only by the loop
-	// estimator, and the gap equals exactly its MessageCharCost*2/5.
-	// Content length is chosen so MessageCharCost (len + 10 structural) is a
-	// multiple of 5: then 2*cost/5 is integral and the floor of the total
-	// division cannot erode or inflate the delta.
 	excluded := providers.Message{
 		Role:               "user",
-		Content:            "payload removed", // 15 + 10 structural = 25 chars
+		Content:            "payload removed",
 		ExcludeFromContext: true,
 	}
 	withExcluded := append(append([]providers.Message{}, msgs...), excluded)

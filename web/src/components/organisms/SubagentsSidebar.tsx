@@ -31,8 +31,6 @@ export function SubagentsSidebar({
   useEffect(() => {
     if (isOpen) {
       setVisible(true)
-      // Use double-rAF via useLayoutEffect timing to ensure the browser has
-      // painted the initial off-screen state before we trigger the transition.
       rafRef.current =
         typeof requestAnimationFrame !== 'undefined'
           ? requestAnimationFrame(() => {
@@ -68,7 +66,6 @@ export function SubagentsSidebar({
 
   return (
     <>
-      {/* Backdrop — fades in/out */}
       <button
         type="button"
         className={`fixed inset-0 z-40 bg-overlay transition-opacity duration-300 ease-out ${animate ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
@@ -76,11 +73,9 @@ export function SubagentsSidebar({
         aria-label={t('common.close')}
       />
 
-      {/* Sidebar — slides in from right */}
       <div
-        className={`bg-background-secondary fixed right-0 top-0 z-50 h-full w-80 max-w-[90vw] border-l border-border shadow-lg flex flex-col transition-transform duration-300 ease-out ${animate ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`bg-background-secondary fixed right-0 top-0 z-50 h-full w-80 max-w-[90vw] safe-area-y border-l border-border shadow-lg flex flex-col transition-transform duration-300 ease-out ${animate ? 'translate-x-0' : 'translate-x-full'}`}
       >
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="text-sm font-medium text-text-primary">{t('chat.subagentsTitle')}</h3>
           <IconButton
@@ -92,7 +87,6 @@ export function SubagentsSidebar({
           </IconButton>
         </div>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto">
           {loading && subagents.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-text-tertiary gap-2">

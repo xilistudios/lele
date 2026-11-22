@@ -11,9 +11,6 @@ import (
 	"time"
 )
 
-// TestServer_Serve_DynamicPort verifies that serving on a listener with a
-// dynamically allocated port (0) reports the actual bound port and serves
-// requests correctly.
 func TestServer_Serve_DynamicPort(t *testing.T) {
 	s := New(&Config{Host: "127.0.0.1", Port: 0})
 	s.RegisterHealth()
@@ -34,7 +31,6 @@ func TestServer_Serve_DynamicPort(t *testing.T) {
 		}
 	}()
 
-	// Poll until the actual port is known.
 	port := 0
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -48,7 +44,6 @@ func TestServer_Serve_DynamicPort(t *testing.T) {
 		t.Fatal("ActualPort never became > 0 within timeout")
 	}
 
-	// Perform an HTTP GET against the /health endpoint.
 	resp, err := http.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/health")
 	if err != nil {
 		t.Fatalf("GET /health failed: %v", err)
@@ -59,7 +54,6 @@ func TestServer_Serve_DynamicPort(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.StatusCode)
 	}
 
-	// Read the body and assert it contains "ok".
 	buf := new(strings.Builder)
 	if _, err := io.Copy(buf, resp.Body); err != nil {
 		t.Fatalf("failed to read response body: %v", err)
@@ -69,9 +63,6 @@ func TestServer_Serve_DynamicPort(t *testing.T) {
 	}
 }
 
-// TestServer_ActualPort_BeforeServe verifies that ActualPort falls back to the
-// statically configured port when the server hasn't begun serving on a dynamic
-// listener yet.
 func TestServer_ActualPort_BeforeServe(t *testing.T) {
 	s := New(&Config{Host: "127.0.0.1", Port: 3005})
 	if got := s.ActualPort(); got != 3005 {

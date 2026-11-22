@@ -125,11 +125,9 @@ func TestGoalManager_MarkDone(t *testing.T) {
 func TestGoalManager_Persistence(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create and persist a goal
 	gm1 := NewGoalManager(dir)
 	gm1.Set("telegram:12345", "Build the feature", 15)
 
-	// Load from disk in a new manager
 	gm2 := NewGoalManager(dir)
 	goal := gm2.Get("telegram:12345")
 	if goal == nil {
@@ -148,7 +146,6 @@ func TestGoalManager_PersistenceClearRemovesFile(t *testing.T) {
 	gm := NewGoalManager(dir)
 	gm.Set("sess1", "goal", 5)
 
-	// Verify file exists
 	files, _ := os.ReadDir(dir)
 	if len(files) == 0 {
 		t.Fatal("expected persisted file")
@@ -156,7 +153,6 @@ func TestGoalManager_PersistenceClearRemovesFile(t *testing.T) {
 
 	gm.Clear("sess1")
 
-	// Verify file removed
 	files, _ = os.ReadDir(dir)
 	if len(files) != 0 {
 		t.Fatalf("expected no files after clear, got %d", len(files))
@@ -169,7 +165,6 @@ func TestGoalManager_DoneGoalsNotRestored(t *testing.T) {
 	gm1.Set("s1", "done goal", 5)
 	gm1.MarkDone("s1")
 
-	// Load from disk - done goals should not be restored
 	gm2 := NewGoalManager(dir)
 	if gm2.Get("s1") != nil {
 		t.Fatal("done goal should not be restored from disk")
@@ -228,7 +223,6 @@ func TestSanitizeFileName(t *testing.T) {
 	}
 }
 
-// mockGoalJudge is a test judge that always returns a fixed result.
 type mockGoalJudge struct {
 	done bool
 }
@@ -286,7 +280,6 @@ func TestGoalManager_PersistDir(t *testing.T) {
 	gm := NewGoalManager(dir)
 	gm.Set("s1", "nested goal", 5)
 
-	// Verify nested dir was created
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		t.Fatal("nested goals dir was not created")
 	}
@@ -305,7 +298,6 @@ func goalContainsStr(s, substr string) bool {
 	return false
 }
 
-// mockSummaryProvider returns a fixed summary for testing.
 type mockSummaryProvider struct {
 	summary string
 }
@@ -374,8 +366,6 @@ func TestSummaryGoalJudge_EmptyResponseIsError(t *testing.T) {
 	}
 }
 
-// capturingJudgeProvider records the options passed to Chat so tests can
-// assert the judge's LLM call configuration.
 type capturingJudgeProvider struct {
 	gotOpts map[string]interface{}
 }
@@ -420,8 +410,6 @@ func TestSummaryGoalJudge_DisablesReasoningAndUsesHeadroom(t *testing.T) {
 	}
 }
 
-// recordingProvider records the model passed to Chat and returns a fixed
-// response, so tests can assert which model the judge used.
 type recordingProvider struct {
 	mockResponse string
 	lastModel    string
@@ -503,8 +491,6 @@ func TestSummaryGoalJudge_StripsProviderPrefix(t *testing.T) {
 	resolver := func(sessionKey string) string { return "llmproxy:mimo-v2.5-pro" }
 
 	judge := NewSummaryGoalJudge(provider, "fallback-model", summary, resolver)
-	// Config left nil: provider-routing is skipped, but the prefix is still
-	// stripped before the API call.
 	_, _, err := judge.JudgeGoal(context.Background(), "skey", "goal", "response")
 	if err != nil {
 		t.Fatalf("JudgeGoal error: %v", err)
@@ -601,7 +587,6 @@ func TestExtractContinuationGuidance(t *testing.T) {
 	}
 }
 
-// mockSubagentRunner simulates a SubagentManager for the subagent goal judge.
 type mockSubagentRunner struct {
 	mu       sync.Mutex
 	tasks    map[string]*tools.SubagentTask
@@ -636,7 +621,6 @@ func (m *mockSubagentRunner) SpawnWithOptions(_ context.Context, task, label, ag
 		MaxRetries:    opts.MaxRetries,
 	}
 	t.InitDoneChannel()
-	// Signal completion immediately.
 	t.SignalDone()
 	m.tasks[id] = t
 	return id, nil

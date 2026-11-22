@@ -1,16 +1,3 @@
-/**
- * useCronJobs tests — polling cadence and visibility gating.
- *
- * `GET /api/v1/cron?include_disabled=true` used to be requested every 5 s from
- * every open tab, hidden or not. These tests pin the new contract:
- *   1. visible: one poll per 5 s window (unchanged),
- *   2. hidden: no interval, no request,
- *   3. becoming visible: exactly one immediate refresh, then the same cadence.
- *
- * Plain `setInterval` (no React Query), so fake timers fully control the clock
- * and `waitFor` is unusable — effects/promises are flushed by hand.
- */
-
 import { afterEach, beforeEach, describe, expect, jest, mock, test } from 'bun:test'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { type ReactNode, createElement } from 'react'
@@ -39,20 +26,15 @@ afterEach(() => {
   setVisibility('visible')
 })
 
-/** jsdom never fires `visibilitychange`; `visibilityState` is a prototype
- *  getter, so both are simulated the way a browser does (see
- *  `services/ws/client.test.ts`). */
 function setVisibility(state: DocumentVisibilityState) {
   Object.defineProperty(document, 'visibilityState', { value: state, configurable: true })
   document.dispatchEvent(new window.Event('visibilitychange'))
 }
 
-/** Number of cron-list requests the mock saw. */
 function cronFetchCalls(fetchMock: ReturnType<typeof mock>): number {
   return fetchMock.mock.calls.filter((call) => String(call[0]).includes('/api/v1/cron')).length
 }
 
-/** Fetch mock answering the cron list (and 404 for anything else). */
 function cronFetchMock() {
   const fetchMock = mock(async (input: RequestInfo | URL) => {
     const url = String(input)
@@ -98,7 +80,6 @@ describe('useCronJobs polling', () => {
     await flushEffects()
     expect(cronFetchCalls(fetchMock)).toBe(2)
 
-    // 4999 ms later the next window has not started yet: no extra poll.
     act(() => {
       jest.advanceTimersByTime(4999)
     })
@@ -129,19 +110,16 @@ describe('useCronJobs polling', () => {
     act(() => setVisibility('hidden'))
     await flushEffects()
 
-    // A minute hidden: 12 ticks would have been ~12 requests per tab.
     act(() => {
       jest.advanceTimersByTime(60_000)
     })
     await flushEffects()
     expect(cronFetchCalls(fetchMock)).toBe(2)
 
-    // Shown again: one immediate refresh, no wait for the next tick.
     act(() => setVisibility('visible'))
     await flushEffects()
     expect(cronFetchCalls(fetchMock)).toBe(3)
 
-    // ...and the 5 s cadence resumes.
     act(() => {
       jest.advanceTimersByTime(5000)
     })

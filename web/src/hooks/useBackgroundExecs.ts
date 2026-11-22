@@ -34,7 +34,6 @@ export function useBackgroundExecs() {
     hasRunningRef.current = processes.some((p) => p.status === 'running')
   }, [processes])
 
-  // Poll every 3s while any process is running
   useEffect(() => {
     if (!hasRunningRef.current) return
     const id = setInterval(() => {

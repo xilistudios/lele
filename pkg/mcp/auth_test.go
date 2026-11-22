@@ -26,15 +26,6 @@ import (
 	"github.com/xilistudios/lele/pkg/mcp/authtest"
 )
 
-// This file drives the interactive flow against pkg/mcp/authtest. Compile-time
-// invariant (mirrored by TestPackageDoesNotImportAuth below): pkg/mcp must NOT
-// import pkg/auth, pkg/config or pkg/agent — the browser opener is injected by
-// the caller and this package never reaches for agent machinery.
-
-// ---------------------------------------------------------------------------
-// fixtures
-// ---------------------------------------------------------------------------
-
 type authFixture struct {
 	t          *testing.T
 	as         *authtest.Server
@@ -64,14 +55,10 @@ func newAuthFixture(t *testing.T, opts ...authtest.Option) *authFixture {
 	}
 }
 
-// serverConfig builds the ServerConfig the CLI would hand StartAuth: a remote
-// entry that opts into the OAuth flow.
 func (f *authFixture) serverConfig() ServerConfig {
 	return ServerConfig{URL: f.mcpURL, Type: typeHTTP, Auth: &AuthSpec{Type: typeAuthOAuth}}
 }
 
-// authorizeRedirect stops at the authorization server's 302 and returns the
-// parsed Location (the redirect_uri with code/state or error appended).
 func authorizeRedirect(t *testing.T, hc *http.Client, authURL string) *url.URL {
 	t.Helper()
 	resp, err := hc.Get(authURL)
@@ -89,9 +76,6 @@ func authorizeRedirect(t *testing.T, hc *http.Client, authURL string) *url.URL {
 	return loc
 }
 
-// completeLoopback drives a loopback flow: it follows the authorization
-// redirect by hand (the client must NOT follow it) and fetches the loopback
-// callback with the code and state the AS issued.
 func completeLoopback(t *testing.T, hc *http.Client, flow *AuthFlow) {
 	t.Helper()
 	loc := authorizeRedirect(t, hc, flow.URL())
@@ -110,13 +94,6 @@ func completeLoopback(t *testing.T, hc *http.Client, flow *AuthFlow) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// end to end
-// ---------------------------------------------------------------------------
-
-// TestStartAuthCompletesLoopbackFlowEndToEnd runs the whole interactive flow:
-// start, visit the authorization URL, deliver the callback to the loopback
-// server, and observe the token land in the REAL store.
 func TestStartAuthCompletesLoopbackFlowEndToEnd(t *testing.T) {
 	f := newAuthFixture(t, authtest.WithScopes("mcp", "offline_access"))
 	ctx := context.Background()
@@ -127,8 +104,6 @@ func TestStartAuthCompletesLoopbackFlowEndToEnd(t *testing.T) {
 	}
 	defer flow.Cancel()
 
-	// (a) the authorization URL carries the public client id, the CSRF state
-	// and the PKCE S256 challenge.
 	authURL, err := url.Parse(flow.URL())
 	if err != nil {
 		t.Fatalf("parse authorization URL: %v", err)
@@ -152,20 +127,14 @@ func TestStartAuthCompletesLoopbackFlowEndToEnd(t *testing.T) {
 		t.Fatalf("Wait: %v", err)
 	}
 
-	// (b) falsifiability: the token exchange only succeeds if the S256
-	// transformation of the verifier matches the challenge /authorize recorded
-	// (authtest rejects the code otherwise). Reaching "done" therefore proves
-	// PKCE was actually performed end to end.
 	if len(f.as.AuthorizeRequests()) == 0 {
 		t.Fatal("no authorization request reached the AS")
 	}
 
-	// (c) the token landed in the real store.
 	if !f.store.Authenticated("srv", f.mcpURL) {
 		t.Fatal("store.Authenticated = false, want true after a completed flow")
 	}
 
-	// (d) the flow reports done.
 	if state, ferr := flow.Status(); state != authStatusDone || ferr != nil {
 		t.Fatalf("Status = (%q, %v), want (%q, nil)", state, ferr, authStatusDone)
 	}
@@ -173,12 +142,6 @@ func TestStartAuthCompletesLoopbackFlowEndToEnd(t *testing.T) {
 		t.Fatal("Done = false after a successful flow")
 	}
 
-	// (e) the server is now recorded as REQUIRING auth, which is what makes the
-	// zero-config next dial attach OAuth. This is the flag mutation M5 clears
-	// (rec.AuthRequired = false) while the rest of the suite stays green, so it
-	// is pinned here: the entry below has NO auth block, which leaves the
-	// store's flag as the only thing that can opt the server in (case (b) of
-	// buildAuthRuntime).
 	if !f.store.AuthRequired("srv", f.mcpURL) {
 		t.Fatal("store.AuthRequired = false after a flow, want true")
 	}
@@ -190,9 +153,6 @@ func TestStartAuthCompletesLoopbackFlowEndToEnd(t *testing.T) {
 		t.Fatal("AttachAuthRuntime attached no runtime to a zero-config server that needs auth")
 	}
 
-	// The authtest fake never records a credential: it records the scheme only.
-	// Drive one authenticated resource request and prove the observation holds
-	// the scheme without the token value.
 	rec, ok := f.store.Record("srv")
 	if !ok || rec.Token == nil || rec.Token.AccessToken == "" {
 		t.Fatal("no token in the store after the flow")
@@ -220,7 +180,7 @@ func TestStartAuthCompletesLoopbackFlowEndToEnd(t *testing.T) {
 			t.Error("the AS observation leaked the access token value")
 		}
 		if !obs.HasBearer {
-			continue // the plain probe hits the resource without a credential
+			continue
 		}
 		sawBearer = true
 		if obs.Authorization != "Bearer" {
@@ -232,13 +192,6 @@ func TestStartAuthCompletesLoopbackFlowEndToEnd(t *testing.T) {
 	}
 }
 
-// TestStartAuthOnSSEServerCompletesEndToEnd is the SSE guard (finding F1): the
-// SSE transport dials its event stream INSIDE Start, so mcp-go reports the
-// authorization challenge from cli.Start (transport/sse.go:270-283) and NOT
-// from Initialize. An engine that only inspects the Initialize error leaves
-// handler == nil and answers ErrAuthNotRequired — an SSE server could then
-// never be logged into. The streamable-HTTP path is unaffected (its Start is a
-// no-op).
 func TestStartAuthOnSSEServerCompletesEndToEnd(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
@@ -274,20 +227,10 @@ func TestStartAuthOnSSEServerCompletesEndToEnd(t *testing.T) {
 	}
 }
 
-// TestStartAuthKeepsTheCredentialOfAnAbandonedFlow is the finding-F2 guard: the
-// registration write stores a whole AuthRecord, so a flow that forgets the
-// existing token logs out a working server — and bumps the revision, which
-// makes the manager retire the healthy connection and makes buildAuthRuntime
-// attach OAuth with no token. An abandoned or failed login must be a no-op for
-// a logged-in server; the "fresh authorization" guarantee lives in
-// flowTokenStore.GetToken, not in the absence of a stored token.
 func TestStartAuthKeepsTheCredentialOfAnAbandonedFlow(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
 
-	// The flow must bind the very port already on file, so its registration
-	// write is field-for-field identical to the stored record — which is what
-	// lets the revision stay put.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("reserve a port: %v", err)
@@ -322,7 +265,6 @@ func TestStartAuthKeepsTheCredentialOfAnAbandonedFlow(t *testing.T) {
 		t.Fatal("a freshly started flow is already Done")
 	}
 
-	// Starting a login must not disturb the working credential.
 	if !f.store.Authenticated("srv", f.mcpURL) {
 		t.Fatal("StartAuth logged the server out: store.Authenticated = false")
 	}
@@ -337,7 +279,6 @@ func TestStartAuthKeepsTheCredentialOfAnAbandonedFlow(t *testing.T) {
 		t.Fatal("startAuth cleared the auth_required flag")
 	}
 
-	// Abandoning the flow is just as harmless.
 	if err := flow.Cancel(); err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
@@ -356,26 +297,10 @@ func TestStartAuthKeepsTheCredentialOfAnAbandonedFlow(t *testing.T) {
 	}
 }
 
-// TestStartAuthDoesNotCarryCredentialAcrossResourceURL pins the URL-mismatch
-// branch of the credential carry-over in StartAuth. The registration write
-// carries the existing token over only when the stored record belongs to the
-// SAME resource URL (`current.URL == srv.URL`); a record bound to another URL is
-// a different server's credential and is not ours to keep.
-//
-// Before this test existed, a reviewer proved that DELETING the
-// `&& current.URL == srv.URL` clause left every ./pkg/mcp/... and
-// ./pkg/channels/... suite green: the branch was correct but unpinned. THIS test
-// is that pin — it fails as soon as the clause goes, which is why the old
-// "every suite green" claim no longer holds. It seeds an AUTHENTICATED record
-// for (name, urlA) and starts a flow for the SAME name at urlB: the flow's
-// by-name registration write must NOT drag urlA's token onto urlB.
 func TestStartAuthDoesNotCarryCredentialAcrossResourceURL(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
 
-	// An independent authorization server + resource, so urlB is a real,
-	// auth-required URL the flow can dial (a different PATH on f's server would
-	// not be the protected resource).
 	asB := authtest.New()
 	asrvB := httptest.NewServer(asB.Handler())
 	t.Cleanup(asrvB.Close)
@@ -409,9 +334,6 @@ func TestStartAuthDoesNotCarryCredentialAcrossResourceURL(t *testing.T) {
 	}
 	defer flow.Cancel()
 
-	// The record now belongs to urlB (the flow rewrites it by name) and must NOT
-	// have inherited urlA's token. Authenticated(name, urlB) is exactly the
-	// predicate that flips when the URL clause is removed.
 	if f.store.Authenticated("srv", urlB) {
 		t.Fatal("StartAuth carried a token bound to another resource URL over to urlB")
 	}
@@ -427,23 +349,11 @@ func TestStartAuthDoesNotCarryCredentialAcrossResourceURL(t *testing.T) {
 	}
 }
 
-// TestStartAuthForcesFreshAuthorization proves the flow never silently reuses a
-// stored credential: even with a live token present, an authorization request
-// is issued and the stored token is REPLACED.
-//
-// FALSIFIABILITY: the seeded token is registered with the fake authorization
-// server. Without that, the AS would 401 an unknown bearer token and the flow
-// would be forced to authorize no matter what the flow token store does — so
-// mutation M9 (flow store delegating GetToken to the real store) left this test
-// green. With the token known to the AS, a flow that reused it would complete
-// the handshake and never issue an authorization request.
 func TestStartAuthForcesFreshAuthorization(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
 
 	const oldToken = "pre-existing-access-token"
-	// The AS now accepts the seeded token: it is a LIVE credential, so a flow
-	// that read it from the real store would not need to authorize at all.
 	f.as.NewAccessToken(oldToken, time.Hour)
 	if err := f.store.Save("srv", AuthRecord{
 		URL:          f.mcpURL,
@@ -487,9 +397,6 @@ func TestStartAuthForcesFreshAuthorization(t *testing.T) {
 	}
 }
 
-// TestSubmitManualFlowWithoutLoopback covers the non-loopback redirect: no
-// listener is created and the caller completes the flow with the code it
-// obtained itself.
 func TestSubmitManualFlowWithoutLoopback(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
@@ -523,7 +430,6 @@ func TestSubmitManualFlowWithoutLoopback(t *testing.T) {
 	if !f.store.Authenticated("srv", f.mcpURL) {
 		t.Fatal("token not stored after a manual Submit")
 	}
-	// The token request must carry the configured redirect URI verbatim.
 	tokens := f.as.TokenRequests()
 	if len(tokens) == 0 || tokens[len(tokens)-1].RedirectURI != manualRedirect {
 		t.Fatalf("token request redirect_uri = %s, want %q", redactTokenRequests(tokens), manualRedirect)
@@ -549,10 +455,6 @@ func TestSubmitRejectsStateMismatch(t *testing.T) {
 	}
 }
 
-// TestSubmitAfterFailureCanRetry is the finding-3 guard: mcp-go consumes the
-// expected state on the first ProcessAuthorizationResponse call regardless of
-// the outcome, so a retry must re-arm it. A scripted token-endpoint failure
-// followed by the SAME code/state must succeed.
 func TestSubmitAfterFailureCanRetry(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
@@ -567,7 +469,6 @@ func TestSubmitAfterFailureCanRetry(t *testing.T) {
 	loc := authorizeRedirect(t, f.noRedirect, flow.URL())
 	code, state := loc.Query().Get("code"), loc.Query().Get("state")
 
-	// First attempt: the token endpoint fails once.
 	f.as.SetTokenError("invalid_grant", http.StatusBadRequest)
 	if err := flow.Submit(ctx, code, state); err == nil {
 		t.Fatal("first Submit succeeded, want the scripted token failure")
@@ -576,7 +477,6 @@ func TestSubmitAfterFailureCanRetry(t *testing.T) {
 		t.Fatalf("Status after a failed exchange = %q, want error", got)
 	}
 
-	// Second attempt: same code and state, must succeed (the state was re-armed).
 	if err := flow.Submit(ctx, code, state); err != nil {
 		t.Fatalf("retry Submit: %v (the expected state was not re-armed?)", err)
 	}
@@ -588,11 +488,6 @@ func TestSubmitAfterFailureCanRetry(t *testing.T) {
 	}
 }
 
-// TestDoneDistinguishesRetryableFromTerminal is the finding-F9 guard: Status's
-// "error" means two different things — a retryable token-exchange failure that
-// leaves the flow OPEN, and a terminal cancel/timeout/failed callback — and a
-// consumer that cannot tell them apart and then calls Wait blocks until the
-// five minute deadline. Done() is the missing bit.
 func TestDoneDistinguishesRetryableFromTerminal(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
@@ -627,7 +522,6 @@ func TestDoneDistinguishesRetryableFromTerminal(t *testing.T) {
 		t.Fatal("Done = false after a successful Submit")
 	}
 
-	// Cancel/timeout are the OTHER meaning of "error": terminal.
 	terminal, err := StartAuth(ctx, "srv-terminal", f.serverConfig(), f.store, AuthOptions{})
 	if err != nil {
 		t.Fatalf("StartAuth (terminal): %v", err)
@@ -643,8 +537,6 @@ func TestDoneDistinguishesRetryableFromTerminal(t *testing.T) {
 	}
 }
 
-// TestDCRIsPersistedAndReused proves a dynamic client registration survives the
-// flow and is reused by the next one (a single registration for two flows).
 func TestDCRIsPersistedAndReused(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
@@ -660,7 +552,7 @@ func TestDCRIsPersistedAndReused(t *testing.T) {
 	if !ok || rec.ClientID == "" {
 		t.Fatal("the dynamically registered client id was not persisted")
 	}
-	flow1.Cancel() // release the loopback so the next flow can rebind the port
+	flow1.Cancel()
 
 	flow2, err := StartAuth(ctx, "srv", f.serverConfig(), f.store, AuthOptions{})
 	if err != nil {
@@ -675,7 +567,6 @@ func TestDCRIsPersistedAndReused(t *testing.T) {
 	}
 }
 
-// TestCancelFreesThePort proves Cancel is terminal and releases the listener.
 func TestCancelFreesThePort(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
@@ -697,20 +588,16 @@ func TestCancelFreesThePort(t *testing.T) {
 	if state, ferr := flow.Status(); state != authStatusError || !errors.Is(ferr, ErrAuthCanceled) {
 		t.Fatalf("Status = (%q, %v), want (error, ErrAuthCanceled)", state, ferr)
 	}
-	// The port must be free again.
 	ln2, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		t.Fatalf("the port was not released after Cancel: %v", err)
 	}
 	_ = ln2.Close()
-	// Cancel is idempotent.
 	if err := flow.Cancel(); err != nil {
 		t.Fatalf("second Cancel: %v", err)
 	}
 }
 
-// TestTimeoutIsBounded proves a never-completed flow ends on its budget instead
-// of hanging.
 func TestTimeoutIsBounded(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
@@ -721,8 +608,6 @@ func TestTimeoutIsBounded(t *testing.T) {
 	}
 	defer flow.Cancel()
 
-	// context.WithTimeout is a belt-and-braces guard: a regression that made
-	// the flow hang would fail the test instead of blocking forever.
 	wctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := flow.Wait(wctx); !errors.Is(err, ErrAuthTimedOut) {
@@ -740,18 +625,9 @@ func TestStartAuthRefusesDisabledStore(t *testing.T) {
 	}
 }
 
-// TestStartAuthOnUnreachableServerReportsProbeFailure is the finding-F4 guard:
-// the probe must tell three cases apart. A server that completes the handshake
-// needs no login (ErrAuthNotRequired); one that answers an authorization
-// challenge is the case the flow exists for; one that never answers at all
-// (DNS, refused connection, a typo'd URL) must NOT be reported as "the server
-// did not request authentication", which sends the operator looking in the
-// wrong place.
 func TestStartAuthOnUnreachableServerReportsProbeFailure(t *testing.T) {
 	store := NewAuthStore(t.TempDir())
 
-	// Port 1 is closed on a Linux host: the connection is refused before any
-	// OAuth exchange happens.
 	_, err := StartAuth(context.Background(), "dead", ServerConfig{URL: "http://127.0.0.1:1/mcp"}, store, AuthOptions{})
 	if err == nil {
 		t.Fatal("StartAuth against a closed port succeeded")
@@ -762,7 +638,6 @@ func TestStartAuthOnUnreachableServerReportsProbeFailure(t *testing.T) {
 	if !errors.Is(err, ErrAuthProbeFailed) {
 		t.Fatalf("StartAuth = %v, want %v", err, ErrAuthProbeFailed)
 	}
-	// The report names the server, and nothing else: no URL, no token.
 	if got, want := err.Error(), `mcp auth "dead": probe: `+ErrAuthProbeFailed.Error(); got != want {
 		t.Fatalf("error = %q, want %q", got, want)
 	}
@@ -771,10 +646,6 @@ func TestStartAuthOnUnreachableServerReportsProbeFailure(t *testing.T) {
 	}
 }
 
-// TestStartAuthOnServerThatNeedsNoAuth proves the probe distinguishes a healthy
-// server from one demanding credentials: an OAuth-attached transport would fail
-// before any HTTP call (contract fact 6), so StartAuth would never be able to
-// report ErrAuthNotRequired.
 func TestStartAuthOnServerThatNeedsNoAuth(t *testing.T) {
 	srv := newNoAuthMCPServer(t)
 	store := NewAuthStore(t.TempDir())
@@ -785,10 +656,6 @@ func TestStartAuthOnServerThatNeedsNoAuth(t *testing.T) {
 	}
 }
 
-// TestNoSecretsInFlowErrors collects every error a failing authorization server
-// produces and proves none of them echoes a secret. The canaries are injected
-// so that a regression which surfaces mcp-go's raw error (it embeds the token
-// response body) is caught.
 func TestNoSecretsInFlowErrors(t *testing.T) {
 	const (
 		clientSecretCanary     = "CANARY_CLIENT_SECRET"
@@ -800,10 +667,7 @@ func TestNoSecretsInFlowErrors(t *testing.T) {
 	canaries := []string{clientSecretCanary, accessTokenCanary, codeCanary, redirectQuery, errorDescriptionCanary}
 
 	as := authtest.New()
-	// DCR returns a client secret we must never surface.
 	as.SetClientSecretSecret(clientSecretCanary)
-	// The token AND registration endpoints' error bodies carry a canary:
-	// mcp-go would embed it verbatim in its error.
 	asrv := httptest.NewServer(canaryBodyHandler{next: as.Handler(), canary: accessTokenCanary})
 	t.Cleanup(asrv.Close)
 	as.SetIssuer(asrv.URL)
@@ -820,8 +684,6 @@ func TestNoSecretsInFlowErrors(t *testing.T) {
 		}
 	}
 
-	// Flow A: manual completion whose token exchange fails with the injected
-	// canary body.
 	flowA, err := StartAuth(ctx, "srv", ServerConfig{URL: mcpURL, Auth: &AuthSpec{Type: typeAuthOAuth}}, store, AuthOptions{RedirectURI: manualRedirect})
 	if err != nil {
 		t.Fatalf("StartAuth: %v", err)
@@ -835,11 +697,9 @@ func TestNoSecretsInFlowErrors(t *testing.T) {
 	if code != codeCanary {
 		t.Fatalf("code = %q, want the scripted canary", code)
 	}
-	collect(flowA.Submit(ctx, code, state))         // token-endpoint failure
-	collect(flowA.Submit(ctx, code, "wrong-state")) // state mismatch
+	collect(flowA.Submit(ctx, code, state))
+	collect(flowA.Submit(ctx, code, "wrong-state"))
 
-	// Flow B: the authorization server rejects the request (the loopback error
-	// path), and Wait surfaces the terminal error.
 	as.SetAuthorizeError("access_denied")
 	flowB, err := StartAuth(ctx, "srv-b", ServerConfig{URL: mcpURL, Auth: &AuthSpec{Type: typeAuthOAuth}}, store, AuthOptions{})
 	if err != nil {
@@ -857,14 +717,6 @@ func TestNoSecretsInFlowErrors(t *testing.T) {
 	defer cancel()
 	collect(flowB.Wait(wctx))
 
-	// Flow C: a HOSTILE authorization server redirects the browser with a
-	// canaried error_description. What a flow-level canary CAN prove is the
-	// reduction step: valueFreeError replaces the canaried AS body/code before
-	// the error reaches the caller, so the description cannot survive into a
-	// collected error. It does NOT pin the loopback itself: run() launders
-	// whatever the callback returned, so a loopback that echoed
-	// error_description (mutation M11) leaves THIS test green — that property
-	// is pinned at the loopback by TestLoopbackNeverSurfacesErrorDescription.
 	flowC, err := StartAuth(ctx, "srv-c", ServerConfig{URL: mcpURL, Auth: &AuthSpec{Type: typeAuthOAuth}}, store, AuthOptions{})
 	if err != nil {
 		t.Fatalf("StartAuth C: %v", err)
@@ -882,12 +734,6 @@ func TestNoSecretsInFlowErrors(t *testing.T) {
 	_ = respC.Body.Close()
 	collect(flowC.Wait(wctx))
 
-	// Flow D: dynamic client registration fails. mcp-go embeds the registrar's
-	// response body in its error; the engine replaces it with a fixed sentinel,
-	// so the canary the hostile registrar smuggled into the description must
-	// not survive. (The metadata-discovery failure path is not driven: the fake
-	// serves every discovery variant, and scripting a half-broken one would
-	// test mcp-go's JSON handling, not this engine's error reduction.)
 	as.FailRegistrationOnce("invalid_client_metadata")
 	_, err = StartAuth(ctx, "srv-d", ServerConfig{URL: mcpURL, Auth: &AuthSpec{Type: typeAuthOAuth}}, store, AuthOptions{})
 	collect(err)
@@ -938,86 +784,48 @@ func TestLogoutClearsEverything(t *testing.T) {
 	}
 }
 
-// TestCheckAuthReportsRequiredAuthenticatedAndMethod pins the THREE-field
-// contract of CheckAuth for every combination of "declared carrier" and
-// "recorded challenge".
-//
-// The authority for each expectation:
-//
-//   - the frozen design decision (plan C1,
-//     .lele/tasks/mcp-oauth-plan.md:145-147):
-//     auth.required == auth.type == "oauth" || store.auth_required, with the
-//     note that a 401 is recorded IN THE STORE ONLY;
-//   - the AuthStatus.Required doc comment, which restates exactly that rule;
-//   - AuthStatus.Method's doc comment: "oauth" | "headers" | "" (none).
-//
-// The headers-only row is the regression this table exists for: an entry that
-// merely carries headers (frequently non-credential: Accept, User-Agent,
-// X-Client-Version) must NOT report "authentication required", while Method
-// stays "headers" because that is still the useful carrier hint.
 func TestCheckAuthReportsRequiredAuthenticatedAndMethod(t *testing.T) {
 	const url = "https://example.test/mcp"
 
-	// headers is the non-credential-headers entry: no auth block, no
-	// challenge. A credential-looking Authorization header is used on
-	// purpose — even THAT is not evidence of anything the store does not
-	// know, because lele never reads header VALUES here.
 	headers := ServerConfig{URL: url, Headers: map[string]string{"Authorization": "Bearer api-key"}}
 	plain := ServerConfig{URL: url}
 	oauth := ServerConfig{URL: url, Auth: &AuthSpec{Type: typeAuthOAuth}}
 
 	tests := []struct {
-		name string
-		srv  ServerConfig
-		// challenged seeds a RECORDED 401 (store.auth_required) for (name,url)
-		// before CheckAuth runs, i.e. "the store holds a real challenge".
+		name       string
+		srv        ServerConfig
 		challenged bool
-		// token seeds a usable stored token (only meaningful with oauth).
-		token bool
-		want  AuthStatus
+		token      bool
+		want       AuthStatus
 	}{
 		{
-			// plan C1 + doc comment: nothing declared, nothing recorded ⇒ zero
-			// value.
 			name: "empty entry with no challenge",
 			srv:  plain,
 			want: AuthStatus{Required: false, Authenticated: false, Method: ""},
 		},
 		{
-			// THE regression: headers are not evidence of auth (doc comment:
-			// Required is "declared auth or a 401 was recorded"), and no 401
-			// is recorded here.
 			name: "headers only, no challenge",
 			srv:  headers,
 			want: AuthStatus{Required: false, Authenticated: false, Method: "headers"},
 		},
 		{
-			// plan C1: store.auth_required true ⇒ required; the carrier is
-			// still headers (Method doc comment), and there is no token.
 			name:       "headers plus persisted challenge",
 			srv:        headers,
 			challenged: true,
 			want:       AuthStatus{Required: true, Authenticated: false, Method: "headers"},
 		},
 		{
-			// plan C1: store.auth_required true ⇒ required. No declared
-			// carrier, so Method is "" — the zero-config OAuth login is the
-			// remedy.
 			name:       "no headers, no auth block, persisted challenge",
 			srv:        plain,
 			challenged: true,
 			want:       AuthStatus{Required: true, Authenticated: false, Method: ""},
 		},
 		{
-			// plan C1: auth.type == "oauth" ⇒ required. Usable only after a
-			// login, so Authenticated is false until a token is stored.
 			name: "oauth block without a token",
 			srv:  oauth,
 			want: AuthStatus{Required: true, Authenticated: false, Method: "oauth"},
 		},
 		{
-			// Same as above plus a usable stored token: Authenticated flips,
-			// Required and Method do not.
 			name:  "oauth block after SaveToken",
 			srv:   oauth,
 			token: true,
@@ -1050,8 +858,6 @@ func TestCheckAuthReportsRequiredAuthenticatedAndMethod(t *testing.T) {
 		})
 	}
 
-	// A nil store is the "no lele directory" case: nothing can be recorded, so
-	// only the declared side of the rule can fire, and it must not panic.
 	if got := CheckAuth(nil, "srv", oauth); got != (AuthStatus{Required: true, Authenticated: false, Method: "oauth"}) {
 		t.Fatalf("CheckAuth(nil store, oauth) = %+v, want oauth required and not authenticated", got)
 	}
@@ -1060,8 +866,6 @@ func TestCheckAuthReportsRequiredAuthenticatedAndMethod(t *testing.T) {
 	}
 }
 
-// TestListenerSeam proves startLoopback uses the injected listener: a failing
-// bind surfaces as an error instead of touching the network.
 func TestListenerSeam(t *testing.T) {
 	f := newAuthFixture(t)
 
@@ -1083,11 +887,6 @@ func TestListenerSeam(t *testing.T) {
 	}
 }
 
-// TestValueFreeErrorMatchesPointerOAuthError covers the pointer form of
-// mcp-go's OAuthError. Today's library only wraps the value type, but a pointer
-// is one of the shapes the same type can arrive as, and without this branch a
-// specific OAuth code would silently degrade to the generic
-// "authorization token exchange failed" message.
 func TestValueFreeErrorMatchesPointerOAuthError(t *testing.T) {
 	if got := valueFreeError(&transport.OAuthError{ErrorCode: "invalid_grant"}); got.Error() != "authorization failed: invalid_grant" {
 		t.Errorf("pointer OAuthError = %q, want the sanitized code", got.Error())
@@ -1095,12 +894,10 @@ func TestValueFreeErrorMatchesPointerOAuthError(t *testing.T) {
 	if got := valueFreeError(transport.OAuthError{ErrorCode: "invalid_grant"}); got.Error() != "authorization failed: invalid_grant" {
 		t.Errorf("value OAuthError = %q, want the sanitized code", got.Error())
 	}
-	// A code that is not a safe token still falls back, whichever form it has.
 	unsafe := "invalid grant <script>"
 	if got := valueFreeError(&transport.OAuthError{ErrorCode: unsafe}); !errors.Is(got, errAuthExchangeFailed) {
 		t.Errorf("unsafe pointer code = %q, want the fixed message", got.Error())
 	}
-	// A typed nil pointer must not panic and must not be read as a code.
 	var nilPtr *transport.OAuthError
 	if got := valueFreeError(nilPtr); !errors.Is(got, errAuthExchangeFailed) {
 		t.Errorf("nil *OAuthError = %v, want the fixed message", got)
@@ -1110,11 +907,6 @@ func TestValueFreeErrorMatchesPointerOAuthError(t *testing.T) {
 	}
 }
 
-// TestStartAuthRejectsRelativeRedirectURI covers the F10 redirect-URI guard:
-// mcp-go passes OAuthConfig.RedirectURI verbatim to /authorize and to the token
-// request and never validates it (see authtest's contract note (5)), so an
-// override must be an absolute http/https URL with a host or the flow would
-// build an authorization URL nobody can follow.
 func TestStartAuthRejectsRelativeRedirectURI(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
@@ -1126,12 +918,8 @@ func TestStartAuthRejectsRelativeRedirectURI(t *testing.T) {
 		"https:///cb",
 		"://nope",
 		"urn:ietf:wg:oauth:2.0:oob",
-		// The two dangerous shapes: a script-scheme URI the AS must never be
-		// handed, and a scheme-relative URL (no scheme) that would resolve
-		// against the AS's own host.
 		"javascript:alert(1)",
 		"//evil.example/cb",
-		// No host: a scheme with nothing to redirect to, and a bare fragment.
 		"http://",
 		"https://#frag",
 	} {
@@ -1144,8 +932,6 @@ func TestStartAuthRejectsRelativeRedirectURI(t *testing.T) {
 		}
 	}
 
-	// A conforming override still flows (and binds no listener: the URI is not
-	// a loopback http one).
 	flow, err := StartAuth(ctx, "srv", f.serverConfig(), f.store, AuthOptions{RedirectURI: "https://client.example/cb"})
 	if err != nil {
 		t.Fatalf("StartAuth with a valid redirect uri: %v", err)
@@ -1156,10 +942,6 @@ func TestStartAuthRejectsRelativeRedirectURI(t *testing.T) {
 	}
 }
 
-// TestLoopbackServesOnlyGetAndPostOnTheCallbackPath covers the F10 hardening:
-// the callback listener answers 404 elsewhere and 405 on the callback path for
-// any method other than GET/POST. Only the GET/POST request may deliver a
-// result, so the rejected methods cannot drive a token exchange.
 func TestLoopbackServesOnlyGetAndPostOnTheCallbackPath(t *testing.T) {
 	lb, err := startLoopback("http://127.0.0.1:0/callback", nil)
 	if err != nil {
@@ -1167,7 +949,6 @@ func TestLoopbackServesOnlyGetAndPostOnTheCallbackPath(t *testing.T) {
 	}
 	defer lb.Close()
 
-	// A wrong path is a 404, whatever the method.
 	req, err := http.NewRequest(http.MethodGet, lb.RedirectURI(), nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
@@ -1182,7 +963,6 @@ func TestLoopbackServesOnlyGetAndPostOnTheCallbackPath(t *testing.T) {
 		t.Errorf("GET /other status = %d, want 404", resp.StatusCode)
 	}
 
-	// Every other method on the callback path is a 405 with an Allow header.
 	for _, method := range []string{http.MethodHead, http.MethodPut, http.MethodDelete, http.MethodPatch} {
 		req, err := http.NewRequest(method, lb.RedirectURI(), nil)
 		if err != nil {
@@ -1200,15 +980,12 @@ func TestLoopbackServesOnlyGetAndPostOnTheCallbackPath(t *testing.T) {
 			t.Errorf("%s Allow = %q, want \"GET, POST\"", method, got)
 		}
 	}
-	// None of the rejected requests delivered a result to the flow.
 	noResultCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	if _, _, err := lb.Await(noResultCtx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Await after the rejected methods = %v, want a timeout (no result was delivered)", err)
 	}
 
-	// A GET on the callback path IS served (400: the request carries no code,
-	// but it is neither a 404 nor a 405) and delivers the flow's result.
 	resp, err = http.DefaultClient.Get(lb.RedirectURI())
 	if err != nil {
 		t.Fatalf("GET callback: %v", err)
@@ -1222,14 +999,6 @@ func TestLoopbackServesOnlyGetAndPostOnTheCallbackPath(t *testing.T) {
 	}
 }
 
-// TestLoopbackAcceptsFormPostCallbackBody pins the form_post half of the same
-// contract the test above covers for GET: the handler's doc says GET (the
-// ordinary redirect) and POST (response_mode=form_post) are accepted, and a
-// POSTing authorization server puts code/state in the urlencoded BODY, not the
-// query string. Reading only r.URL.Query() would answer 400 "authorization
-// callback carried no code" and the login could never complete — so this test
-// drives a real PostForm and demands the exact code and state back through
-// Await. It is the falsifier for the r.Form-vs-r.URL.Query() read.
 func TestLoopbackAcceptsFormPostCallbackBody(t *testing.T) {
 	lb, err := startLoopback("http://127.0.0.1:0/callback", nil)
 	if err != nil {
@@ -1241,8 +1010,6 @@ func TestLoopbackAcceptsFormPostCallbackBody(t *testing.T) {
 		code  = "form-post-code"
 		state = "form-post-state"
 	)
-	// PostForm sends Content-Type: application/x-www-form-urlencoded and puts
-	// code/state in the BODY, i.e. nowhere the query string can see.
 	resp, err := http.PostForm(lb.RedirectURI(), url.Values{"code": {code}, "state": {state}})
 	if err != nil {
 		t.Fatalf("POST callback: %v", err)
@@ -1260,17 +1027,7 @@ func TestLoopbackAcceptsFormPostCallbackBody(t *testing.T) {
 	}
 }
 
-// TestLoopbackBoundsTheCallbackBody pins the 64 KiB cap the form_post path puts
-// on a callback body. The handler reads r.Form, and ParseForm's own default
-// would let a single unauthenticated localhost POST allocate up to 10 MiB
-// before any code was looked at. An oversized body must therefore NOT be
-// honoured: the exchange still refuses with a value-free 'no code', exactly as
-// before the cap existed. A body comfortably under the cap must still complete,
-// so the bound is proved to be a bound and not a blanket refusal.
 func TestLoopbackBoundsTheCallbackBody(t *testing.T) {
-	// The request body is written by a big reader; the server can answer (and
-	// close) before it is drained, so a transport error is tolerated here — it
-	// is the DELIVERED result, not the HTTP status, that decides the test.
 	post := func(t *testing.T, lb *loopbackServer, body string) *http.Response {
 		t.Helper()
 		resp, err := http.Post(lb.RedirectURI(), "application/x-www-form-urlencoded", strings.NewReader(body))
@@ -1287,9 +1044,6 @@ func TestLoopbackBoundsTheCallbackBody(t *testing.T) {
 		}
 		defer lb.Close()
 
-		// 1 MiB of urlencoded form data carrying a VALID code: the cap has to
-		// win over the code, which is the whole point. Well under ParseForm's
-		// old 10 MiB default, so only the new cap can refuse it.
 		body := "code=oversized-code&state=s&padding=" + strings.Repeat("x", 1<<20)
 		if resp := post(t, lb, body); resp != nil {
 			_ = resp.Body.Close()
@@ -1336,17 +1090,6 @@ func TestLoopbackBoundsTheCallbackBody(t *testing.T) {
 	})
 }
 
-// TestLoopbackNeverSurfacesErrorDescription is the finding-F7/F8 guard at the
-// only level where it is falsifiable: `error_description` is attacker-controlled
-// prose (the authorization server may echo back whatever the client was sent),
-// so it must never appear in the error Await returns nor in the page the
-// browser gets.
-//
-// A FLOW-level assertion cannot see this: run() launders whatever Await returns
-// through valueFreeError before it becomes the flow's error, which is defence in
-// depth — but it also means a mutation that started echoing the description
-// would stay invisible to a canary collected from the flow. Checking the
-// loopback directly closes that gap.
 func TestLoopbackNeverSurfacesErrorDescription(t *testing.T) {
 	const canary = "CANARY_ERROR_DESCRIPTION"
 	lb, err := startLoopback("http://127.0.0.1:0/callback", nil)
@@ -1384,9 +1127,6 @@ func TestLoopbackNeverSurfacesErrorDescription(t *testing.T) {
 	}
 }
 
-// TestAwaitReturnsPromptlyAfterClose covers the F10 liveness guard: Close must
-// wake a waiting Await instead of leaving it blocked until the flow's five
-// minute deadline (or forever, with a ctx that has no deadline at all).
 func TestAwaitReturnsPromptlyAfterClose(t *testing.T) {
 	lb, err := startLoopback("http://127.0.0.1:0/callback", nil)
 	if err != nil {
@@ -1395,7 +1135,7 @@ func TestAwaitReturnsPromptlyAfterClose(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := lb.Await(context.Background()) // deliberately NO deadline
+		_, _, err := lb.Await(context.Background())
 		done <- err
 	}()
 
@@ -1410,15 +1150,11 @@ func TestAwaitReturnsPromptlyAfterClose(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Await did not return after Close")
 	}
-	// Close stays idempotent.
 	if err := lb.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
 	}
 }
 
-// TestPackageDoesNotImportAuth is the import guard: pkg/mcp must stay free of
-// pkg/auth, pkg/config and pkg/agent (the opts injection points exist precisely
-// so it does not need them).
 func TestPackageDoesNotImportAuth(t *testing.T) {
 	forbidden := map[string]bool{
 		"github.com/xilistudios/lele/pkg/auth":   true,
@@ -1450,21 +1186,6 @@ func TestPackageDoesNotImportAuth(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-// tokenCredentialKeys is the denylist of token-endpoint parameter names whose
-// VALUES are credentials, so a failure message may name the key but must never
-// print what it carried: code_verifier is the PKCE secret, client_secret the
-// confidential-client secret, code and refresh_token are single-use bearer
-// material, and assertion/client_assertion are signed client assertions.
-//
-// `code` IS redacted, and that is the policy shared with the fake's own
-// redaction helpers (pkg/mcp/authtest's secretFormKeys): an authorization code
-// is single-use bearer material — while it lives it can be exchanged for a
-// token, exactly like the refresh token beside it — and a name is enough to
-// make a failure message useful. The two denylists must not disagree about it.
 var tokenCredentialKeys = map[string]bool{
 	"code_verifier":    true,
 	"client_secret":    true,
@@ -1474,16 +1195,6 @@ var tokenCredentialKeys = map[string]bool{
 	"client_assertion": true,
 }
 
-// redactTokenRequests renders token observations for a failure message with
-// every credential replaced by "[redacted]".
-//
-// Blanking the credential FIELDS alone is not enough: authtest.TokenRequest
-// also mirrors the parsed form into Raw, which holds the SAME secrets under
-// their wire keys (code_verifier, client_secret, code, ...), so a helper that
-// only touched the fields still printed a live PKCE verifier and client secret
-// into CI logs. Both are covered here; the Raw map is copied, never mutated,
-// and a nil Raw is fine. Non-credential keys (grant_type, scope, redirect_uri,
-// ...) stay readable, which is what keeps the message useful for debugging.
 func redactTokenRequests(reqs []authtest.TokenRequest) string {
 	out := make([]authtest.TokenRequest, len(reqs))
 	for i, r := range reqs {
@@ -1515,22 +1226,6 @@ func redactTokenRequests(reqs []authtest.TokenRequest) string {
 	return fmt.Sprintf("%+v", out)
 }
 
-// TestRedactTokenRequestsHidesCredentials guards redactTokenRequests against a
-// regression it already had: blanking the observed FIELDS is not enough because
-// authtest.TokenRequest also mirrors the parsed form into Raw, where the very
-// same secrets sit under their wire keys (code_verifier, client_secret, ...).
-//
-// The verifier and the client secret asserted on below are the values the REAL
-// flow produced against the fake AS (the client secret comes from dynamic
-// client registration), not hand-made strings, so a helper that leaks anything
-// the engine really sent fails here. A non-secret key (grant_type) must stay
-// legible: the redaction has to keep the message useful for debugging.
-//
-// NO LIVE CREDENTIAL IS EVER PRINTED BY THIS TEST, on success or on failure:
-// the verifier and the secret appear only as lengths, a short hash and a
-// yes/no, and the failure messages name the field, never its value. That is the
-// whole point — a redaction test that logs the very secret it protects would
-// leak it into CI logs exactly when it is -v or failing.
 func TestRedactTokenRequestsHidesCredentials(t *testing.T) {
 	const clientSecret = "real-client-secret-from-dcr"
 	f := newAuthFixture(t)
@@ -1556,12 +1251,8 @@ func TestRedactTokenRequestsHidesCredentials(t *testing.T) {
 		t.Fatal("token request carried no code_verifier")
 	}
 	if got := tokens[0].ClientSecret; got != clientSecret {
-		// Lengths only: the mismatch is diagnosable without echoing either
-		// secret into the log.
 		t.Fatalf("token request client_secret mismatch (len got %d, want %d)", len(got), len(clientSecret))
 	}
-	// The secrets are ALSO in Raw under their wire keys: that is the map the
-	// helper used to print verbatim.
 	for key, want := range map[string]string{"code_verifier": verifier, "client_secret": clientSecret} {
 		if got := tokens[0].Raw.Get(key); got != want {
 			t.Fatalf("Raw[%s] does not carry the field value (len got %d, want %d)", key, len(got), len(want))
@@ -1569,16 +1260,10 @@ func TestRedactTokenRequestsHidesCredentials(t *testing.T) {
 	}
 
 	got := redactTokenRequests(tokens)
-	// Non-secret evidence only: lengths plus a short hash, so the assertion
-	// below stays identifiable without the value ever reaching the log. `got`
-	// itself is deliberately NOT logged or echoed in a failure message: when the
-	// helper regresses it is exactly where the live credentials reappear, so
-	// printing it would leak them at the very moment the test is failing.
 	t.Logf("real credentials: code_verifier(len=%d sha256=%s) client_secret(len=%d sha256=%s)",
 		len(verifier), shortHash(verifier), len(clientSecret), shortHash(clientSecret))
 	for name, secret := range map[string]string{"code_verifier": verifier, "client_secret": clientSecret} {
 		if strings.Contains(got, secret) {
-			// Name the field, never the value it carried, and never `got`.
 			t.Errorf("redacted output still contains the real %s", name)
 		}
 	}
@@ -1587,22 +1272,16 @@ func TestRedactTokenRequestsHidesCredentials(t *testing.T) {
 	}
 }
 
-// shortHash is a short, non-reversible fingerprint of a value, so a test can
-// keep a failure log identifiable WITHOUT ever printing the value itself.
 func shortHash(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:4])
 }
 
-// redactedRecord renders a stored record for a failure message without any
-// credential: URL, client id and flags are safe to print, the token is not.
 func redactedRecord(rec AuthRecord) string {
 	return fmt.Sprintf("AuthRecord{URL:%q ClientID:%q ClientSecret:%s ResourceMetadataURL:%q RedirectURI:%q AuthRequired:%t Token:%s}",
 		rec.URL, rec.ClientID, redactValue(rec.ClientSecret), rec.ResourceMetadataURL, rec.RedirectURI, rec.AuthRequired, redactedToken(rec.Token))
 }
 
-// redactedToken renders a stored token for a failure message without its
-// values.
 func redactedToken(tok *transport.Token) string {
 	if tok == nil {
 		return "nil"
@@ -1611,7 +1290,6 @@ func redactedToken(tok *transport.Token) string {
 		redactValue(tok.AccessToken), tok.TokenType, redactValue(tok.RefreshToken), tok.ExpiresAt, tok.Scope)
 }
 
-// redactValue hides a non-empty secret and keeps "empty" legible.
 func redactValue(s string) string {
 	if s == "" {
 		return `""(empty)`
@@ -1619,10 +1297,6 @@ func redactValue(s string) string {
 	return "[redacted]"
 }
 
-// newNoAuthMCPServer serves just enough of the MCP handshake to complete
-// initialize without credentials: server/discover is refused (so the client
-// falls back to legacy initialize), initialize answers, and the initialized
-// notification is accepted.
 func newNoAuthMCPServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1648,7 +1322,6 @@ func newNoAuthMCPServer(t *testing.T) *httptest.Server {
 		case strings.HasPrefix(req.Method, "notifications/"):
 			w.WriteHeader(http.StatusAccepted)
 		default:
-			// Refuse server/discover so the client falls back to initialize.
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
@@ -1657,10 +1330,6 @@ func newNoAuthMCPServer(t *testing.T) *httptest.Server {
 	return srv
 }
 
-// canaryBodyHandler rewrites the /token and /register response bodies to carry
-// a canary, so a regression that surfaces mcp-go's raw error (which embeds the
-// response body — and with it whatever description the server chose) is
-// detectable on both credential paths.
 type canaryBodyHandler struct {
 	next   http.Handler
 	canary string
@@ -1677,9 +1346,6 @@ func (h canaryBodyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header()[k] = vs
 	}
 	w.WriteHeader(rec.Code)
-	// Both scripted failures (the token one and the registration one) contain
-	// the word "scripted"; a successful body does not, so only a failing
-	// response is ever annotated.
 	body := strings.Replace(rec.Body.String(), "scripted", "scripted "+h.canary, 1)
 	_, _ = io.WriteString(w, body)
 }

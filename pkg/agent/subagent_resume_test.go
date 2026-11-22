@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -18,33 +12,12 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// ============================================================================
-// Subagent completion resumes the parent loop.
-//
-// The reported bug: a subagent's result was published as a system inbound and
-// then unconditionally pre-marked "delivered", so processSystemMessage skipped
-// it and the parent never ran the continuation turn — the chat sat "loading"
-// while the answer was already in the task.
-//
-// The fix has two halves: the injector claims the result atomically
-// (pkg/agent/subagent_helpers.go) and the claim is the ONLY gate on the system
-// inbound (pkg/tools owns the primitives). The subagent.result UI event is
-// published unconditionally, with metadata["resumed"] carrying whether the
-// claim won, so neither client is left showing a finished task as running.
-// ============================================================================
-
-// requestRecordingProvider records every request the loop sends to the
-// provider, and can hold its first call open so a test can create a
-// deterministic "the parent is mid-turn" condition (the session semaphore is
-// held for the whole call).
 type requestRecordingProvider struct {
 	mu       sync.Mutex
 	requests [][]providers.Message
 	response string
 
-	// blockFirst, when non-nil, blocks the FIRST Chat call until it is closed.
-	blockFirst chan struct{}
-	// entered is closed when the first Chat call is entered.
+	blockFirst  chan struct{}
 	entered     chan struct{}
 	enteredOnce sync.Once
 }
@@ -98,8 +71,6 @@ func (p *requestRecordingProvider) lastRequestText() string {
 	return flattenMessages(p.lastRequest())
 }
 
-// flattenMessages renders a request as one string so a test can assert on the
-// text the model was actually given.
 func flattenMessages(messages []providers.Message) string {
 	var sb strings.Builder
 	for _, m := range messages {
@@ -111,13 +82,6 @@ func flattenMessages(messages []providers.Message) string {
 	return sb.String()
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ──────────────────────────────────────────────────────────────────────────────
-
-// addSubagentTaskForTest registers a terminal subagent task owned by sessionKey
-// in one of the loop's managers, so the coordinator's claim can find it. It
-// returns that manager.
 func addSubagentTaskForTest(t *testing.T, al *AgentLoop, taskID, sessionKey string) *tools.SubagentManager {
 	t.Helper()
 
@@ -143,7 +107,6 @@ func addSubagentTaskForTest(t *testing.T, al *AgentLoop, taskID, sessionKey stri
 	return chosen
 }
 
-// startResumeLoop runs the loop until the test (or its cleanup) cancels it.
 func startResumeLoop(t *testing.T, al *AgentLoop) context.CancelFunc {
 	t.Helper()
 	runCtx, cancelRun := context.WithCancel(context.Background())
@@ -160,7 +123,6 @@ func startResumeLoop(t *testing.T, al *AgentLoop) context.CancelFunc {
 	return cancelRun
 }
 
-// publishUserTurn sends an ordinary user message for sessionKey.
 func publishUserTurn(t *testing.T, msgBus *bus.MessageBus, sessionKey string) {
 	t.Helper()
 	if !msgBus.PublishInbound(bus.InboundMessage{
@@ -175,9 +137,6 @@ func publishUserTurn(t *testing.T, msgBus *bus.MessageBus, sessionKey string) {
 	}
 }
 
-// waitForOutboundEvent drains the outbound bus until the named event arrives.
-// The bus is shared with the rest of the turn, so unrelated messages are
-// skipped rather than failing the test.
 func waitForOutboundEvent(t *testing.T, msgBus *bus.MessageBus, event string, within time.Duration) bus.OutboundMessage {
 	t.Helper()
 	deadline := time.Now().Add(within)
@@ -196,7 +155,6 @@ func waitForOutboundEvent(t *testing.T, msgBus *bus.MessageBus, event string, wi
 	}
 }
 
-// waitForTaskClaim polls until the manager reports the task's result claimed.
 func waitForTaskClaim(t *testing.T, sm *tools.SubagentManager, taskID string, within time.Duration) bool {
 	t.Helper()
 	return waitFor(t, within, func() bool {
@@ -205,15 +163,6 @@ func waitForTaskClaim(t *testing.T, sm *tools.SubagentManager, taskID string, wi
 	})
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Race (a): the parent is idle when the subagent completes
-// ──────────────────────────────────────────────────────────────────────────────
-
-// TestSubagentCompletion_ParentIdle_ResumesLoop is the headline regression test
-// for the reported bug: the completion must start a SECOND parent turn whose
-// request carries the subagent's result. Before the fix the result was
-// pre-marked delivered, processSystemMessage skipped it, and no second turn
-// ever ran.
 func TestSubagentCompletion_ParentIdle_ResumesLoop(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -222,14 +171,12 @@ func TestSubagentCompletion_ParentIdle_ResumesLoop(t *testing.T) {
 	cancel := startResumeLoop(t, al)
 	defer cancel()
 
-	// First turn: an ordinary user message.
 	publishUserTurn(t, msgBus, sessionKey)
 	if !waitFor(t, 10*time.Second, func() bool { return provider.requestCount() >= 1 }) {
 		t.Fatal("the initial user turn never reached the provider")
 	}
 	drainUntil(t, msgBus, 10*time.Second, "parent answer")
 
-	// The subagent completes while the session is idle.
 	publishSubagentAsyncResult(al, sessionKey, "native", "chat-1", "subagent-1",
 		&tools.ToolResult{ForLLM: "the subagent result"})
 
@@ -241,15 +188,6 @@ func TestSubagentCompletion_ParentIdle_ResumesLoop(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// AM2: the UI event is decoupled from the injection claim
-// ──────────────────────────────────────────────────────────────────────────────
-
-// TestSubagentCompletion_PublishesResultEventEvenWhenBusy pins AM2: the
-// subagent.result event must be published while the parent holds the session
-// semaphore. The old `if !isSessionProcessing(sessionKey)` gate suppressed it
-// exactly when the parent was busy, leaving the TUI progress row and the WebUI
-// card stuck on "running".
 func TestSubagentCompletion_PublishesResultEventEvenWhenBusy(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	provider.blockFirst = make(chan struct{})
@@ -283,10 +221,6 @@ func TestSubagentCompletion_PublishesResultEventEvenWhenBusy(t *testing.T) {
 	close(provider.blockFirst)
 }
 
-// TestSubagentCompletion_ClaimLost_StillPublishesEventWithoutResume is the
-// other half of AM2: when the result is already consumed (a wait_for_subagent
-// read it in-turn), the UI must still be told — with resumed=false — and no
-// continuation turn may run.
 func TestSubagentCompletion_ClaimLost_StillPublishesEventWithoutResume(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -295,7 +229,6 @@ func TestSubagentCompletion_ClaimLost_StillPublishesEventWithoutResume(t *testin
 	cancel := startResumeLoop(t, al)
 	defer cancel()
 
-	// Simulate wait_for_subagent having consumed the result in-turn.
 	if sm.ClaimResult("subagent-1") {
 		t.Fatal("ClaimResult lost on a fresh task")
 	}
@@ -314,14 +247,6 @@ func TestSubagentCompletion_ClaimLost_StillPublishesEventWithoutResume(t *testin
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Race (b): the parent is inside wait_for_subagent
-// ──────────────────────────────────────────────────────────────────────────────
-
-// TestSubagentCompletion_WaitInFlight_NoInjection pins race (b): with a waiter
-// registered, the injector must not claim and must not publish a system
-// inbound — the waiter owns the result and will return it in-turn. The UI event
-// still goes out.
 func TestSubagentCompletion_WaitInFlight_NoInjection(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -343,9 +268,6 @@ func TestSubagentCompletion_WaitInFlight_NoInjection(t *testing.T) {
 		t.Error("ResultClaimed() = true while a waiter is registered, want false")
 	}
 
-	// The waiter gives up (timeout). Per AM1 that release must not simply drop
-	// the registration: the injector refused to publish because a waiter was
-	// registered, so the last waiter out owns the result and hands it back.
 	claimed := sm.ReleaseResultWaiterAndClaim("subagent-1")
 	if claimed == nil {
 		t.Fatal("ReleaseResultWaiterAndClaim = nil on a terminal unclaimed task: the result would be lost (AM1 window)")
@@ -357,23 +279,12 @@ func TestSubagentCompletion_WaitInFlight_NoInjection(t *testing.T) {
 		t.Error("ClaimResultForInjection = true after the AM1 claim, want false")
 	}
 
-	// The waiter hands the result back in-turn, so the parent must not also be
-	// woken by a continuation turn.
 	time.Sleep(250 * time.Millisecond)
 	if n := provider.requestCount(); n != 0 {
 		t.Errorf("provider calls = %d after the AM1 claim, want 0 (the waiter owns the result)", n)
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Race (c): the parent is busy and NOT waiting
-// ──────────────────────────────────────────────────────────────────────────────
-
-// TestSubagentCompletion_ParentBusyNotWaiting_InjectsAtTurnEnd pins race (c):
-// the claim is taken immediately and the result reaches the in-flight turn,
-// so the parent sees it without waiting for the per-session semaphore to be
-// released. The result must reach the provider exactly once across the turn's
-// requests (a second delivery would mean the inbound fallback fired too).
 func TestSubagentCompletion_ParentBusyNotWaiting_InjectsAtTurnEnd(t *testing.T) {
 	const resultText = "the subagent result"
 	provider := newRequestRecordingProvider("parent answer")
@@ -417,12 +328,6 @@ func TestSubagentCompletion_ParentBusyNotWaiting_InjectsAtTurnEnd(t *testing.T) 
 	}
 }
 
-// TestSubagentCompletion_EndOfTurnDoesNotStealUnclaimedResults guards against
-// reinstating the end-of-turn sweep that used to mark every terminal subagent of
-// a session as delivered. A task that is already terminal but whose completion
-// callback has not run yet is NOT owned by any turn boundary: if the turn swept
-// it, the callback's claim would lose and the result would be lost forever —
-// the same "no resume" bug in a narrower window.
 func TestSubagentCompletion_EndOfTurnDoesNotStealUnclaimedResults(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -431,14 +336,12 @@ func TestSubagentCompletion_EndOfTurnDoesNotStealUnclaimedResults(t *testing.T) 
 	cancel := startResumeLoop(t, al)
 	defer cancel()
 
-	// A full turn runs and ends while the task is already terminal.
 	publishUserTurn(t, msgBus, sessionKey)
 	if !waitFor(t, 10*time.Second, func() bool { return provider.requestCount() >= 1 }) {
 		t.Fatal("the initial user turn never reached the provider")
 	}
-	drainUntil(t, msgBus, 10*time.Second, "parent answer") // turn.end: the turn is over
+	drainUntil(t, msgBus, 10*time.Second, "parent answer")
 
-	// The completion callback lands only now.
 	publishSubagentAsyncResult(al, sessionKey, "native", "chat-1", "subagent-1",
 		&tools.ToolResult{ForLLM: "the subagent result"})
 
@@ -447,16 +350,6 @@ func TestSubagentCompletion_EndOfTurnDoesNotStealUnclaimedResults(t *testing.T) 
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Claim semantics at the publish site
-// ──────────────────────────────────────────────────────────────────────────────
-
-// TestSubagentCompletion_RetryAttempts_SingleInjection proves the injector
-// accepts at most one delivery per task, so the retry chain can never resume
-// the parent twice. (pkg/tools gates the callback so the transient attempt is
-// not published at all — TestRunTask_CallbackFiresOnlyForFinalAttempt — and
-// this test pins the second line of defence: even if two payloads arrive, only
-// the first injects.)
 func TestSubagentCompletion_RetryAttempts_SingleInjection(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	al, _ := newDurableInboundTestLoop(t, provider)
@@ -479,9 +372,6 @@ func TestSubagentCompletion_RetryAttempts_SingleInjection(t *testing.T) {
 	}
 }
 
-// TestPublishSubagentAsyncResult_ClaimIsOnceOnly pins the claim as the single
-// gate on the inbound: two publications for one task yield one turn, and the
-// second still produces the UI event (with resumed=false).
 func TestPublishSubagentAsyncResult_ClaimIsOnceOnly(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -495,7 +385,6 @@ func TestPublishSubagentAsyncResult_ClaimIsOnceOnly(t *testing.T) {
 	publishSubagentAsyncResult(al, sessionKey, "native", "chat-1", "subagent-1",
 		&tools.ToolResult{ForLLM: "the subagent result"})
 
-	// First event claims, second loses.
 	first := waitForOutboundEvent(t, msgBus, "subagent.result", 5*time.Second)
 	second := waitForOutboundEvent(t, msgBus, "subagent.result", 5*time.Second)
 	if first.Metadata["resumed"] != "true" || second.Metadata["resumed"] != "false" {
@@ -511,9 +400,6 @@ func TestPublishSubagentAsyncResult_ClaimIsOnceOnly(t *testing.T) {
 	}
 }
 
-// TestPublishSubagentAsyncResult_NilCoordinator_DoesNotInject pins the
-// deliberate behaviour change: with no coordinator there is no task registry,
-// hence no dedup, so injecting would be unguarded. The UI is still told.
 func TestPublishSubagentAsyncResult_NilCoordinator_DoesNotInject(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -534,9 +420,6 @@ func TestPublishSubagentAsyncResult_NilCoordinator_DoesNotInject(t *testing.T) {
 	}
 }
 
-// TestPublishSubagentAsyncResult_UnknownTask_SkipsInjection covers the unknown
-// task id (a task evicted between the callback and the publish): the event is
-// published with resumed=false and nothing is injected.
 func TestPublishSubagentAsyncResult_UnknownTask_SkipsInjection(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -557,14 +440,6 @@ func TestPublishSubagentAsyncResult_UnknownTask_SkipsInjection(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// /stop must not resurrect the session
-// ──────────────────────────────────────────────────────────────────────────────
-
-// TestStopSession_SealsSubagentResults_NoResurrection is parametrised over all
-// three production stop entry points. Each funnels through cancelSessionTree ->
-// stopSessionSubagents, which seals every owned task; a completion callback
-// arriving afterwards must produce the UI event but NO continuation turn.
 func TestStopSession_SealsSubagentResults_NoResurrection(t *testing.T) {
 	type stopStep struct {
 		name string
@@ -618,7 +493,6 @@ func TestStopSession_SealsSubagentResults_NoResurrection(t *testing.T) {
 				t.Fatal("the stop path did not seal the subagent result")
 			}
 
-			// The cancelled task's completion callback still fires.
 			publishSubagentAsyncResult(al, sessionKey, "native", "chat-1", "subagent-1",
 				&tools.ToolResult{ForLLM: "Task cancelled during execution"})
 
@@ -634,25 +508,6 @@ func TestStopSession_SealsSubagentResults_NoResurrection(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Mid-turn delivery: the claim's two outcomes
-//
-// publishSubagentAsyncResult has exactly three terminal outcomes and one
-// delivery each:
-//   1. resumed == false  -> nothing is delivered by this publish (a waiter
-//      consumed the result, or the callback lost the claim / the task is
-//      unknown). The UI event still goes out.
-//   2. resumed && a turn is ALREADY running -> the notice is enqueued for that
-//      turn (metadata["injected"] = "true") and NO inbound is published: the
-//      inbound would only block on the per-session semaphore until the turn it
-//      is meant to inform is over.
-//   3. resumed && the parent is IDLE -> the inbound is published, exactly as
-//      before, and resumes the parent with a new turn.
-// ──────────────────────────────────────────────────────────────────────────────
-
-// recvInbound returns the next inbound message published on msgBus, or false
-// when none arrives within the window. These tests run no agent loop, so the
-// inbound channel holds exactly what the publisher enqueued.
 func recvInbound(t *testing.T, msgBus *bus.MessageBus, within time.Duration) (bus.InboundMessage, bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), within)
@@ -660,8 +515,6 @@ func recvInbound(t *testing.T, msgBus *bus.MessageBus, within time.Duration) (bu
 	return msgBus.ConsumeInbound(ctx)
 }
 
-// assertNoInbound fails when an inbound message shows up: the publishing code
-// runs synchronously, so a bounded wait is enough to prove nothing was queued.
 func assertNoInbound(t *testing.T, msgBus *bus.MessageBus, what string) {
 	t.Helper()
 	if msg, ok := recvInbound(t, msgBus, 200*time.Millisecond); ok {
@@ -669,10 +522,6 @@ func assertNoInbound(t *testing.T, msgBus *bus.MessageBus, what string) {
 	}
 }
 
-// TestPublishSubagentAsyncResult_ParentIdle_PublishesInbound pins outcome 3:
-// with no turn running the queue is inactive, so the result takes the familiar
-// inbound path with the RAW text (processSystemMessage adds the
-// "[System: subagent] " prefix) and the event carries no injected stamp.
 func TestPublishSubagentAsyncResult_ParentIdle_PublishesInbound(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -708,17 +557,12 @@ func TestPublishSubagentAsyncResult_ParentIdle_PublishesInbound(t *testing.T) {
 	}
 }
 
-// TestPublishSubagentAsyncResult_MidTurn_InjectsInsteadOfInbound pins outcome
-// 2: an active queue (the parent is mid-turn) swallows the result into the
-// notice queue and publishes NO inbound, and the UI learns that no continuation
-// turn is coming from metadata["injected"].
 func TestPublishSubagentAsyncResult_MidTurn_InjectsInsteadOfInbound(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	al, msgBus := newDurableInboundTestLoop(t, provider)
 	const sessionKey = "session-midturn-busy"
 	addSubagentTaskForTest(t, al, "subagent-1", sessionKey)
 
-	// The parent turn is running: it captured the queue at activation.
 	queue := al.activateMidTurnNotices(sessionKey)
 
 	publishSubagentAsyncResult(al, sessionKey, "native", "chat-1", "subagent-1",
@@ -732,16 +576,12 @@ func TestPublishSubagentAsyncResult_MidTurn_InjectsInsteadOfInbound(t *testing.T
 		t.Errorf("event metadata[injected] = %q, want %q", got, "true")
 	}
 
-	// The running turn owns delivery: a second turn must not be queued.
 	assertNoInbound(t, msgBus, "mid-turn injection")
 
 	notices := queue.drain()
 	if len(notices) != 1 {
 		t.Fatalf("queued notices = %d, want 1", len(notices))
 	}
-	// The queue stores the RAW text; the prefix is added when it is injected
-	// (and by processSystemMessage on the inbound path), so both deliveries
-	// persist the identical message.
 	if notices[0].content != "the subagent result" {
 		t.Errorf("queued content = %q, want the raw result text", notices[0].content)
 	}
@@ -753,18 +593,12 @@ func TestPublishSubagentAsyncResult_MidTurn_InjectsInsteadOfInbound(t *testing.T
 	}
 }
 
-// TestPublishSubagentAsyncResult_ClaimLost_NeverEnqueues pins outcome 1, and it
-// deliberately activates the queue first: without that, an enqueue would be
-// refused merely because no turn is running, and the test would pass for the
-// wrong reason. With an active queue the only thing keeping the result out is
-// the claim, which is exactly the invariant under test.
 func TestPublishSubagentAsyncResult_ClaimLost_NeverEnqueues(t *testing.T) {
 	provider := newRequestRecordingProvider("parent answer")
 	al, msgBus := newDurableInboundTestLoop(t, provider)
 	const sessionKey = "session-midturn-consumed"
 	sm := addSubagentTaskForTest(t, al, "subagent-1", sessionKey)
 
-	// A wait_for_subagent consumed the result in-turn.
 	if sm.ClaimResult("subagent-1") {
 		t.Fatal("ClaimResult lost on a fresh task")
 	}

@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -15,24 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// ---------------------------------------------------------------------------
-// Regression tests for B6 (agent half): the per-(group, speaker) processing
-// semaphore used to leak.
-//
-// runGroupTurn acquires the semaphore with key "group:<groupID>:<speaker>" via
-// sessionProcessing.LoadOrStore but previously never removed the entry, so the
-// loop's sync.Map grew one 1-slot channel per group+speaker pair for the whole
-// lifetime of the process. The rule under test:
-//
-//   - while a group turn runs, the key is present and its channel is held;
-//   - once the turn returns, the key is gone (idle channels are deleted);
-//   - a turn that never acquired the semaphore (context cancelled while the
-//     key was busy) must NOT delete a channel another holder owns.
-// ---------------------------------------------------------------------------
-
-// semLen reports the number of tokens currently in the semaphore channel stored
-// under key, plus whether the key exists at all. Reading len() on a channel is
-// non-blocking and safe.
 func semLen(t *testing.T, al *AgentLoop, key string) (n int, exists bool) {
 	t.Helper()
 	raw, ok := al.sessionProcessing.Load(key)
@@ -46,8 +22,6 @@ func semLen(t *testing.T, al *AgentLoop, key string) (n int, exists bool) {
 	return len(ch), true
 }
 
-// TestRegression_GroupTurnReleasesSessionKey is the core B6 assertion: a
-// completed group turn leaves nothing behind in sessionProcessing.
 func TestRegression_GroupTurnReleasesSessionKey(t *testing.T) {
 	response := &providers.LLMResponse{
 		Content:   "done",
@@ -77,10 +51,6 @@ func TestRegression_GroupTurnReleasesSessionKey(t *testing.T) {
 	}
 }
 
-// TestRegression_GroupTurnHoldsSessionKeyWhileRunning proves the cleanup does
-// not delete the entry too early: with the provider blocked, the key must be
-// present and held, so isSessionProcessing keeps reporting the group speaker as
-// busy for the whole turn.
 func TestRegression_GroupTurnHoldsSessionKeyWhileRunning(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
@@ -120,7 +90,6 @@ func TestRegression_GroupTurnHoldsSessionKeyWhileRunning(t *testing.T) {
 		t.Fatal("provider never entered")
 	}
 
-	// The turn is parked inside the LLM call: key present and held.
 	if n, exists := semLen(t, lr.al, key); !exists {
 		t.Errorf("sessionProcessing missing %q during the turn", key)
 	} else if n != 1 {
@@ -140,8 +109,6 @@ func TestRegression_GroupTurnHoldsSessionKeyWhileRunning(t *testing.T) {
 		t.Fatal("runGroupTurn never returned")
 	}
 
-	// Give the deferred cleanup a moment (it runs before the return reaches us,
-	// but keep the assertion robust against scheduling noise).
 	deadline := time.Now().Add(time.Second)
 	for {
 		if _, exists := semLen(t, lr.al, key); !exists {
@@ -155,9 +122,6 @@ func TestRegression_GroupTurnHoldsSessionKeyWhileRunning(t *testing.T) {
 	}
 }
 
-// TestRegression_GroupTurnKeepsForeignSemaphore covers the race guard: when
-// another holder already owns the semaphore for the key, a turn that fails to
-// acquire it (context cancelled) must leave the entry and its token untouched.
 func TestRegression_GroupTurnKeepsForeignSemaphore(t *testing.T) {
 	lr, _, cleanup := createGroupTurnTestHarness(t, &providers.LLMResponse{Content: "unused"})
 	defer cleanup()
@@ -165,7 +129,7 @@ func TestRegression_GroupTurnKeepsForeignSemaphore(t *testing.T) {
 	const key = "group:cleanup-3:test-agent"
 	sem, _ := lr.al.sessionProcessing.LoadOrStore(key, make(chan struct{}, 1))
 	foreign := sem.(chan struct{})
-	foreign <- struct{}{} // someone else holds it
+	foreign <- struct{}{}
 	defer func() { <-foreign }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -186,15 +150,10 @@ func TestRegression_GroupTurnKeepsForeignSemaphore(t *testing.T) {
 	}
 }
 
-// TestRegression_GroupTurnReleasesKeyOnLLMError checks the cleanup is not
-// limited to the happy path: an error from the provider still unwinds through
-// the defer and frees both the token and the map entry.
 func TestRegression_GroupTurnReleasesKeyOnLLMError(t *testing.T) {
 	lr, _, cleanup := createGroupTurnTestHarness(t, &providers.LLMResponse{Content: "unused"})
 	defer cleanup()
 
-	// The mock below returns a "network timeout" error, which executeWithRetry
-	// retries with a backoff; make those waits instant so the test is fast.
 	lr.retryWait = instantRetryWait
 
 	lr.al.registry.mu.Lock()

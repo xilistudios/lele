@@ -11,28 +11,26 @@ import {
   useSearchParams,
 } from 'react-router-dom'
 import { DesktopDisconnectOverlay } from './components/organisms/DesktopDisconnectOverlay'
-import { AgentEntityLayout } from './components/organisms/agents'
 import { AgentConfigPage } from './components/pages/AgentConfigPage'
 import { AgentFilesPage } from './components/pages/AgentFilesPage'
-import { AgentsListPage } from './components/pages/AgentsListPage'
 import { AuthPage } from './components/pages/AuthPage'
 import { BackgroundExecsPage } from './components/pages/BackgroundExecsPage'
 import { ChatHistoryPage } from './components/pages/ChatHistoryPage'
 import { ChatPage } from './components/pages/ChatPage'
 import { CronPage } from './components/pages/CronPage'
-import { ProvidersPage } from './components/pages/ProvidersPage'
 import { SecretsPage } from './components/pages/SecretsPage'
 import { SettingsPage } from './components/pages/SettingsPage'
+import { SettingsTabContent } from './components/pages/SettingsTabContent'
 import { SkillsPage } from './components/pages/SkillsPage'
 import { AppLogicProvider, useAppLogicContext } from './contexts/AppLogicContext'
 import { AuthProvider, defaultApiUrlFromWindow, useAuthContext } from './contexts/AuthContext'
+import { useAppViewportHeight } from './hooks/useAppViewportHeight'
 import { useBackendStatus } from './hooks/useBackendStatus'
 import { wsDebug } from './lib/debug'
 import { isDesktop } from './lib/desktop'
 
 const defaultApiUrl = defaultApiUrlFromWindow()
 
-// Auth wrapper component to handle auto-pairing from URL params
 function AuthRoute() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -40,8 +38,6 @@ function AuthRoute() {
   const [searchParams] = useSearchParams()
   const [autoAuthAttempted, setAutoAuthAttempted] = useState(false)
   const [autoAuthError, setAutoAuthError] = useState<string | null>(null)
-  // True only while the URL-code auto-pair is in flight. Manual submit uses
-  // AuthPage's own loading state, so it must not flip this spinner.
   const [isAutoPairing, setIsAutoPairing] = useState(false)
   const { apiUrl, session, handleAuth, isLoading } = useAuthContext()
   const [authError, setAuthError] = useState<string | null>(null)
@@ -50,7 +46,6 @@ function AuthRoute() {
   const codeFromUrl = searchParams.get('code')
   const deviceName = 'My Desktop'
 
-  // Where ProtectedRoute sent us before bouncing to /pair
   const fromPath = (() => {
     const from = (
       location.state as { from?: { pathname?: string; search?: string; hash?: string } } | null
@@ -58,7 +53,6 @@ function AuthRoute() {
     return from ? `${from.pathname ?? '/'}${from.search ?? ''}${from.hash ?? ''}` : '/'
   })()
 
-  // Auto-pair if code is provided and no session exists
   useEffect(() => {
     if (codeFromUrl && !session?.token && !autoAuthAttempted && !isLoading) {
       setAutoAuthAttempted(true)
@@ -68,8 +62,6 @@ function AuthRoute() {
           setAutoAuthError(null)
           setIsAutoPairing(true)
           await handleAuth({ apiUrl, pin: codeFromUrl, deviceName })
-          // Return to the originally requested path (or home) with replace
-          // to avoid back-button issues
           navigate(fromPath, { replace: true })
         } catch (err) {
           setAutoAuthError((err as Error).message)
@@ -104,13 +96,11 @@ function AuthRoute() {
     [handleAuth, navigate, fromPath],
   )
 
-  // Pre-fill PIN from URL if available
   const initialPin = codeFromUrl ?? ''
 
   if (isAutoAuthenticating && !autoAuthError) {
-    // Show loading state during auto-auth
     return (
-      <main className="flex min-h-screen items-center justify-center px-4 py-12">
+      <main className="flex app-shell-min items-center justify-center px-4 py-12">
         <div className="w-full max-w-md space-y-5 rounded-3xl border border-border bg-background-secondary p-6 shadow-card">
           <div className="flex items-center justify-center py-8">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-focus border-t-transparent" />
@@ -131,7 +121,6 @@ function AuthRoute() {
   )
 }
 
-// Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { session } = useAuthContext()
   const location = useLocation()
@@ -143,7 +132,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-// Chat route component
 function ChatRoute() {
   const { chat_id, parent_chat_id, child_chat_id } = useParams<{
     chat_id?: string
@@ -192,15 +180,10 @@ function ChatRoute() {
     const hasValidParent =
       !isNestedSubagent ||
       (derivedParentSessionKey ? availableKeys.has(derivedParentSessionKey) : false)
-    // System session keys (heartbeat, cron-*, cron-spawn-*) may not be in the
-    // regular sessions list, but they are still valid chat targets reachable
-    // from the chats (history) page.
     const isSystemSessionKey =
       targetSessionKey === 'heartbeat' ||
       targetSessionKey.startsWith('cron-') ||
       targetSessionKey.startsWith('cron-spawn-')
-    // For nested subagents, the key comes from the subagent API (e.g. "UUID:taskID")
-    // and won't be in the sessions list. We trust the URL since the parent is validated.
     const hasValidTarget = isNestedSubagent
       ? targetSessionKey.length > 0
       : !targetSessionKey.startsWith('subagent:') &&
@@ -226,10 +209,8 @@ function ChatRoute() {
   ])
 
   useEffect(() => {
-    // Skip when creating new session — first useEffect handles this
     if (chat_id === 'new') return
 
-    // Only sync URL→state on chat paths; don't interfere with other pages
     const isChatPath = location.pathname === '/' || location.pathname.startsWith('/chat')
     if (!isChatPath) return
 
@@ -260,9 +241,6 @@ function ChatRoute() {
     chat_id,
   ])
 
-  // Note: onCreateSession, onDeleteSession, onClearSession, and onLogout are handled
-  // directly within the ChatPage components via context hooks
-
   return <ChatPage />
 }
 
@@ -282,17 +260,14 @@ function ProtectedLayout() {
   )
 }
 
-// Settings route component (layout wrapper with shared state)
 function SettingsRoute() {
   return <SettingsPage />
 }
 
-// Agents route layout (Sidebar + SettingsHeader/Footer + <Outlet/>).
-// Owns the single useSettingsConfig() instance shared by the agents list and
-// every agent-detail tab, so the unsaved draft survives navigation
-// (/agents <-> /agents/:agentId/:tab). See AgentEntityLayout for details.
-function AgentsRouteShell() {
-  return <AgentEntityLayout titleKey="sidebar.agents" />
+function LegacySectionRedirect({ base }: { base: '/agents' | '/providers' }) {
+  const location = useLocation()
+  const rest = location.pathname.slice(base.length)
+  return <Navigate to={`/settings${base}${rest}${location.search}`} replace />
 }
 
 function AppContent() {
@@ -300,8 +275,6 @@ function AppContent() {
   const navigate = useNavigate()
   const location = useLocation()
 
-  // Redirect authenticated users away from /pair, honouring ProtectedRoute's
-  // saved location so a session restored from storage still lands on `from`.
   useEffect(() => {
     if (session?.token && location.pathname === '/pair') {
       const from = (
@@ -315,38 +288,35 @@ function AppContent() {
 
   return (
     <Routes>
-      {/* Public routes */}
       <Route path="/pair" element={<AuthRoute />} />
 
-      {/* Protected routes */}
       <Route path="/" element={<ProtectedLayout />}>
         <Route index element={<ChatRoute />} />
         <Route path="chat/:chat_id" element={<ChatRoute />} />
         <Route path="chat/:parent_chat_id/subagent/:child_chat_id" element={<ChatRoute />} />
-        <Route path="agents" element={<AgentsRouteShell />}>
-          <Route index element={<AgentsListPage />} />
-          <Route path=":agentId" element={<AgentConfigPage />} />
-          <Route path=":agentId/:tab" element={<AgentConfigPage />} />
-        </Route>
-        <Route path="providers" element={<ProvidersPage />} />
         <Route path="skills" element={<SkillsPage />} />
         <Route path="chats" element={<ChatHistoryPage />} />
         <Route path="background-exec" element={<BackgroundExecsPage />} />
         <Route path="cron" element={<CronPage />} />
         <Route path="secrets" element={<SecretsPage />} />
-        <Route path="settings/:tab?" element={<SettingsRoute />} />
+        <Route path="settings" element={<SettingsRoute />}>
+          <Route index element={<Navigate to="general" replace />} />
+          <Route path=":tab" element={<SettingsTabContent />} />
+          <Route path="agents/:agentId/:tab?" element={<AgentConfigPage />} />
+        </Route>
         <Route path="settings/agent/:agentId/:fileName?" element={<AgentFilesPage />} />
-        <Route path="settings/agents" element={<Navigate to="/agents" replace />} />
-        <Route path="settings/providers" element={<Navigate to="/providers" replace />} />
+        <Route path="agents/*" element={<LegacySectionRedirect base="/agents" />} />
+        <Route path="providers/*" element={<LegacySectionRedirect base="/providers" />} />
       </Route>
 
-      {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }
 
 function App() {
+  useAppViewportHeight()
+
   return (
     <AuthProvider defaultApiUrl={defaultApiUrl}>
       <AppContent />

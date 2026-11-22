@@ -8,10 +8,6 @@ import (
 	"time"
 )
 
-// errorCodeStoreUnavailable is the API error code answered by the pairing
-// endpoints while the gateway runs degraded (SQLite-capable binary, store not
-// open). It is a distinct code from pair_error/pin_error on purpose: those mean
-// "this credential was rejected", this one means "the gateway cannot check it".
 const errorCodeStoreUnavailable = "store_unavailable"
 
 func (n *NativeChannel) handleGetPIN(w http.ResponseWriter, r *http.Request) {
@@ -42,10 +38,6 @@ func (n *NativeChannel) handlePair(w http.ResponseWriter, r *http.Request) {
 
 	client, token, refreshToken, err := n.auth.PairWithPIN(req.PIN, req.DeviceName)
 	if err != nil {
-		// A degraded gateway is a SERVER-side fault, not a bad credential:
-		// 503 + an explicit code so the client (and whoever reads its error
-		// message) learns the store is down instead of retrying PINs that are
-		// valid in a database this process cannot open (#330).
 		if errors.Is(err, ErrPairingUnavailable) {
 			writeError(w, http.StatusServiceUnavailable, err.Error(), errorCodeStoreUnavailable)
 			return
@@ -71,13 +63,6 @@ func (n *NativeChannel) handleRefresh(w http.ResponseWriter, r *http.Request) {
 
 	client, token, refreshToken, err := n.auth.RefreshToken(req.RefreshToken)
 	if err != nil {
-		// A refresh whose store reload was suppressed by the per-manager
-		// budget is NOT a credential rejection: the token may be valid in the
-		// shared DB (another process rotated it) and we simply could not look.
-		// Answer 429 + Retry-After, which the WebUI treats as NON-fatal and
-		// retries, instead of the fatally-handled 400 below. Turning this into
-		// a 400 would expel a perfectly healthy session as soon as two
-		// processes rotate the same client inside slowReloadMinInterval.
 		if errors.Is(err, errRefreshUnavailable) {
 			w.Header().Set("Retry-After", "1")
 			writeError(w, http.StatusTooManyRequests, "auth store busy, retry", "refresh_unavailable")
@@ -142,7 +127,6 @@ func (n *NativeChannel) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := n.auth.RemoveClient(clientID); err != nil {
-		// Client already removed is not an error
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}

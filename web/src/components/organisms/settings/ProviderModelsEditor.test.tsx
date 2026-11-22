@@ -1,22 +1,3 @@
-/**
- * ProviderModelsEditor — per-model reasoning overrides.
- *
- * The backend (config.ReasoningConfig in Go) accepts effort, summary,
- * max_tokens and exclude on top of the pre-existing enable toggle; this suite
- * pins what the editor writes for each of them:
- * - current values are rendered from the stored ReasoningConfig;
- * - a change keeps every sibling field of the model (immutable update);
- * - picking the "default" option PRUNES the key instead of writing an empty
- *   or explicit value, so an unset override stays absent in the saved config;
- * - a model without a `reasoning` object gets one created on first write
- *   instead of crashing on the `...undefined` spread.
- *
- * Harness rules: tests boot in Spanish (`src/test/i18n.ts`), so copy is
- * asserted through `tr(key)` — never hardcoded prose. The editor embeds
- * ModelSearchInput, which needs the settings context and a react-query client,
- * hence the wrapper below (same harness as ModelSearchInput.test.tsx).
- */
-
 import '../../../test/setup'
 import { describe, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -57,7 +38,6 @@ function makeSettingsState(): SettingsConfigState {
   }
 }
 
-/** The editor only reads the model list from the API on user interaction. */
 function makeApi(): ApiClient {
   return {
     models: async () => ({ models: [] }),
@@ -87,7 +67,6 @@ function renderEditor(models: Models) {
     utils.container.querySelector(`select[id="${path(suffix)}"]`) as HTMLSelectElement
   const numberInput = (suffix: string) =>
     utils.container.querySelector(`input[id="${path(suffix)}"]`) as HTMLInputElement
-  /** The single model object the editor wrote back on the last change. */
   const lastModel = () => {
     const calls = onChange.mock.calls
     return (calls[calls.length - 1]?.[0] as Models)[KEY] as {
@@ -129,7 +108,6 @@ describe('ProviderModelsEditor reasoning overrides', () => {
     expect(u.select('reasoning.summary').value).toBe('detailed')
     expect(u.numberInput('reasoning.max_tokens').value).toBe('2048')
     expect(u.select('reasoning.exclude').value).toBe('yes')
-    // The pre-existing toggle is still there and still reflects the config.
     expect(u.getByText(tr('settings.fields.modelThinking'))).toBeTruthy()
   })
 
@@ -140,7 +118,6 @@ describe('ProviderModelsEditor reasoning overrides', () => {
     expect(u.select('reasoning.summary').value).toBe('')
     expect(u.numberInput('reasoning.max_tokens').value).toBe('0')
     expect(u.select('reasoning.exclude').value).toBe('')
-    // Option labels are translated, not raw wire values, for effort.
     const labels = Array.from(u.select('reasoning.effort').options).map((o) => o.textContent)
     expect(labels).toEqual([
       tr('settings.options.reasoningDefault'),
@@ -209,9 +186,6 @@ describe('ProviderModelsEditor reasoning overrides', () => {
   })
 
   test('max_tokens persists a positive cap', () => {
-    // One write per render: the editor is fully controlled by its `models`
-    // prop, which the mock onChange never feeds back, so a second change to the
-    // same value React already tracks would not dispatch (value tracker).
     const u = renderEditor({ [KEY]: { reasoning: { effort: 'low' } } })
 
     fireEvent.change(u.numberInput('reasoning.max_tokens'), { target: { value: '1500' } })

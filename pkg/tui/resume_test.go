@@ -104,7 +104,6 @@ func TestNewModel_ResolvesBareUUIDAndSetsMode(t *testing.T) {
 	defer cancel()
 	go al.Run(ctx)
 
-	// Open model passing bare UUID
 	m := NewModel(cfg, al, sm, uuid)
 
 	if m.currentKey != fullKey {
@@ -153,7 +152,6 @@ func TestNewModel_ResolvesPrefixedKey(t *testing.T) {
 	defer cancel()
 	go al.Run(ctx)
 
-	// Open model passing full key
 	m := NewModel(cfg, al, sm, fullKey)
 
 	if m.currentKey != fullKey {

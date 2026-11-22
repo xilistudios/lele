@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package harness
 
 import (
@@ -14,10 +8,8 @@ import (
 	"testing"
 )
 
-// boolPtr returns a pointer to b: fixtures for tri-state flags.
 func boolPtr(b bool) *bool { return &b }
 
-// writeFile creates a fixture file inside t.TempDir(), returning its path.
 func writeFile(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -30,19 +22,14 @@ func writeFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
-// loadCase is one entry of the fixture table shared by TestLoadMarkdownFile
-// and TestParseCommandMarkdownMatchesLoadMarkdownFile (T-B1): the same bytes
-// must produce the same command (or the same error) through both entry points.
 type loadCase struct {
 	name    string
 	file    string
 	content string
 	wantErr bool
-	wantCmd *Command // zero fields are compared too
+	wantCmd *Command
 }
 
-// markdownLoadCases returns a FRESH copy of the table on every call, so each
-// test may mutate wantCmd (setting Path) without leaking into the other.
 func markdownLoadCases() []loadCase {
 	return []loadCase{
 		{
@@ -75,7 +62,7 @@ func markdownLoadCases() []loadCase {
 			content: "---\ndescription: \"hello: world\"\nagent: 'coder'\n---\nbody\n",
 			wantCmd: &Command{
 				Name:        "quoted",
-				Description: "hello: world", // split on FIRST colon only
+				Description: "hello: world",
 				Agent:       "coder",
 				Template:    "body",
 				Source:      SourceGlobal,
@@ -176,8 +163,6 @@ func TestLoadMarkdownFile(t *testing.T) {
 				t.Fatalf("LoadMarkdownFile: %v", err)
 			}
 			tc.wantCmd.Path = path
-			// DeepEqual, not struct comparison: AllowAbsoluteFiles is a
-			// *bool, and == would compare pointers.
 			if !reflect.DeepEqual(got, tc.wantCmd) {
 				t.Errorf("got %+v, want %+v", *got, *tc.wantCmd)
 			}
@@ -194,12 +179,12 @@ func TestLoadMarkdownFileMissing(t *testing.T) {
 func TestLoadDir(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "beta.md", "---\ndescription: b\n---\nbeta body")
-	writeFile(t, dir, "Alpha.MARKDOWN", "alpha body")          // case-insensitive ext
-	writeFile(t, dir, "notes.txt", "ignored")                  // wrong ext
-	writeFile(t, dir, "bad.md", "---\nallow_shell: nope\n---") // invalid => skipped
+	writeFile(t, dir, "Alpha.MARKDOWN", "alpha body")
+	writeFile(t, dir, "notes.txt", "ignored")
+	writeFile(t, dir, "bad.md", "---\nallow_shell: nope\n---")
 	if err := os.MkdirAll(filepath.Join(dir, "sub.md"), 0o755); err != nil {
 		t.Fatal(err)
-	} // directory named *.md => skipped
+	}
 
 	cmds, err := LoadDir(dir, SourceWorkspace)
 	if err != nil {
@@ -210,7 +195,7 @@ func TestLoadDir(t *testing.T) {
 		names = append(names, c.Name)
 	}
 	got := strings.Join(names, ",")
-	if got != "alpha,beta" { // sorted, invalid/dirs/non-md skipped
+	if got != "alpha,beta" {
 		t.Errorf("names = %q, want %q", got, "alpha,beta")
 	}
 	for _, c := range cmds {
@@ -253,9 +238,6 @@ func TestParseFrontmatterUnknownAndComments(t *testing.T) {
 	}
 }
 
-// T-B1: ParseCommandMarkdown over the same bytes must behave IDENTICALLY to
-// LoadMarkdownFile over disk — same fields, same errors. Runs the shared
-// fixture table through both entry points and diffs the results.
 func TestParseCommandMarkdownMatchesLoadMarkdownFile(t *testing.T) {
 	dir := t.TempDir()
 	for _, tc := range markdownLoadCases() {
@@ -266,8 +248,6 @@ func TestParseCommandMarkdownMatchesLoadMarkdownFile(t *testing.T) {
 			disk, diskErr := LoadMarkdownFile(path, SourceGlobal)
 			mem, memErr := ParseCommandMarkdown(stem, path, []byte(tc.content))
 
-			// Error parity: both must fail, with the same message (path is
-			// the only context either one gets).
 			if (diskErr != nil) != (memErr != nil) {
 				t.Fatalf("error mismatch: disk=%v mem=%v", diskErr, memErr)
 			}
@@ -286,8 +266,6 @@ func TestParseCommandMarkdownMatchesLoadMarkdownFile(t *testing.T) {
 			if diskErr != nil {
 				t.Fatalf("LoadMarkdownFile: %v", diskErr)
 			}
-			// ParseCommandMarkdown leaves Source unset; tag it so the
-			// comparison covers every other field exactly.
 			mem.Source = SourceGlobal
 			if !reflect.DeepEqual(mem, disk) {
 				t.Errorf("got %+v, want %+v", *mem, *disk)
@@ -296,9 +274,6 @@ func TestParseCommandMarkdownMatchesLoadMarkdownFile(t *testing.T) {
 	}
 }
 
-// ParseCommandMarkdown validates the stem it is given (lowercasing it first),
-// so names that could escape the namespace are rejected even when no file
-// exists on disk.
 func TestParseCommandMarkdownInvalidName(t *testing.T) {
 	for _, bad := range []string{"", ".", "..", "a/b", `a\b`} {
 		_, err := ParseCommandMarkdown(bad, "/virtual/dir/"+bad+".md", []byte("body"))
@@ -306,7 +281,6 @@ func TestParseCommandMarkdownInvalidName(t *testing.T) {
 			t.Errorf("ParseCommandMarkdown(name=%q) = nil error, want rejection", bad)
 		}
 	}
-	// Mixed case is accepted and lowercased, like the disk path does.
 	cmd, err := ParseCommandMarkdown("Foo.Bar", "/virtual/Foo.Bar.md", []byte("body"))
 	if err != nil {
 		t.Fatalf("valid stem rejected: %v", err)

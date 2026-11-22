@@ -99,8 +99,6 @@ func (t *ReadImageTool) Execute(ctx context.Context, args map[string]interface{}
 		return ErrorResult("detail must be one of: auto, low, high")
 	}
 
-	// Origin-side payload bound: downscale/re-encode so a single read_image
-	// can never exceed the request byte budget by itself.
 	bounded, outMIME, boundW, boundH, resized, err := boundImagePayload(data, mimeType, detail, defaultImageLimits)
 	if err != nil {
 		return ErrorResult(err.Error())

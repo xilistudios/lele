@@ -12,13 +12,9 @@ import (
 	"time"
 )
 
-// DefaultRemoteBase is the GitHub raw base for the catalog directory in this repo.
-// Override with LELE_CATALOG_BASE_URL.
 const DefaultRemoteBase = "https://raw.githubusercontent.com/xilistudios/lele/main/catalog"
 
-// RemoteBase returns the configured catalog remote base URL.
 func RemoteBase() string {
-	// Avoid importing os in a hot path signature; read env at call sites via helper.
 	return remoteBaseFromEnv()
 }
 
@@ -32,34 +28,27 @@ type downloadState struct {
 var (
 	download = &downloadState{}
 
-	ensureOnce sync.Once
-	// providerEnsure tracks in-flight per-provider background downloads.
+	ensureOnce       sync.Once
 	providerEnsureMu sync.Mutex
 	providerInflight = map[string]bool{}
 )
 
-// LastDownload returns the last full-refresh time and error.
 func LastDownload() (time.Time, error) {
 	download.mu.Lock()
 	defer download.mu.Unlock()
 	return download.lastAt, download.lastError
 }
 
-// IsDownloading reports whether a full refresh is in progress.
 func IsDownloading() bool {
 	download.mu.Lock()
 	defer download.mu.Unlock()
 	return download.running
 }
 
-// Options control catalog downloads from GitHub.
 type Options struct {
-	// BaseURL defaults to DefaultRemoteBase (or LELE_CATALOG_BASE_URL).
-	BaseURL string
-	// HTTPClient defaults to a 30s client.
+	BaseURL    string
 	HTTPClient *http.Client
-	// Providers limits which provider files to fetch (empty = all from index).
-	Providers []string
+	Providers  []string
 }
 
 func (o Options) withDefaults() Options {
@@ -73,8 +62,6 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
-// Ensure loads disk cache if present; if the index is missing, starts a
-// background full download. Never blocks on network.
 func Ensure() {
 	if offlineMode() {
 		_ = LoadIndexFromCache()
@@ -84,12 +71,10 @@ func Ensure() {
 		if err := LoadIndexFromCache(); err == nil {
 			return
 		}
-		// No cache: download in the background.
 		EnsureAsync()
 	})
 }
 
-// EnsureAsync starts a background full catalog download (single-flight).
 func EnsureAsync() {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
@@ -98,7 +83,6 @@ func EnsureAsync() {
 	}()
 }
 
-// EnsureProviderAsync downloads one provider file in the background if missing.
 func EnsureProviderAsync(provider string) {
 	key := normalizeType(provider)
 	if key == "" || HasCachedProvider(key) {
@@ -124,8 +108,6 @@ func EnsureProviderAsync(provider string) {
 	}()
 }
 
-// Refresh downloads index.json and (optionally all or selected) provider files
-// from GitHub into the disk cache. Replaces the in-memory overlay.
 func Refresh(ctx context.Context, opts Options) error {
 	opts = opts.withDefaults()
 
@@ -151,9 +133,7 @@ func Refresh(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	// Persist index immediately so partial failures still leave a usable manifest.
 	if err := writeIndexCache(*idx); err != nil {
-		// non-fatal
 		_ = err
 	}
 	setIndex(idx)
@@ -176,7 +156,6 @@ func Refresh(ctx context.Context, opts Options) error {
 			if firstErr == nil {
 				firstErr = err
 			}
-			// Keep previously cached file if present.
 			if cached := loadProviderFromDisk(key); cached != nil {
 				live[key] = *cached
 			}
@@ -203,7 +182,6 @@ func Refresh(ctx context.Context, opts Options) error {
 	return nil
 }
 
-// FetchProvider downloads a single provider file into the cache.
 func FetchProvider(ctx context.Context, provider string, opts Options) error {
 	opts = opts.withDefaults()
 	key := normalizeType(provider)
@@ -211,7 +189,6 @@ func FetchProvider(ctx context.Context, provider string, opts Options) error {
 		return fmt.Errorf("empty provider")
 	}
 
-	// Ensure index exists so file path is known (or use default path).
 	if loadIndex() == nil {
 		if idx, err := fetchIndex(ctx, opts); err == nil {
 			_ = writeIndexCache(*idx)
@@ -266,7 +243,6 @@ func fetchProviderFile(ctx context.Context, opts Options, key string) (*Provider
 			file = e.File
 		}
 	}
-	// Only allow files under providers/.
 	file = strings.TrimPrefix(file, "/")
 	if strings.Contains(file, "..") {
 		return nil, fmt.Errorf("invalid provider file path %q", file)
@@ -308,6 +284,5 @@ func httpGet(ctx context.Context, client *http.Client, url string) ([]byte, erro
 }
 
 func remoteBaseFromEnv() string {
-	// Lazy: keep os import here only.
 	return envOr("LELE_CATALOG_BASE_URL", DefaultRemoteBase)
 }

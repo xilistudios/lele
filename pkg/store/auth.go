@@ -7,15 +7,10 @@ import (
 	"time"
 )
 
-// AuthRepo provides CRUD operations on the auth_credentials table. The
-// credential column stores an opaque JSON string serialised by the
-// domain layer; this package never interprets its contents.
 type AuthRepo struct {
 	db *sql.DB
 }
 
-// GetCredential returns the credential JSON for the given provider key.
-// If no row exists the found return is false with a nil error.
 func (r *AuthRepo) GetCredential(providerKey string) (string, bool, error) {
 	var credential string
 	err := r.db.QueryRow(
@@ -30,8 +25,6 @@ func (r *AuthRepo) GetCredential(providerKey string) (string, bool, error) {
 	return credential, true, nil
 }
 
-// SetCredential inserts or updates the credential for the given provider
-// key.
 func (r *AuthRepo) SetCredential(providerKey, credentialJSON string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := r.db.Exec(
@@ -45,7 +38,6 @@ func (r *AuthRepo) SetCredential(providerKey, credentialJSON string) error {
 	return nil
 }
 
-// DeleteCredential removes the credential for the given provider key.
 func (r *AuthRepo) DeleteCredential(providerKey string) error {
 	if _, err := r.db.Exec(`DELETE FROM auth_credentials WHERE provider_key = ?`, providerKey); err != nil {
 		return fmt.Errorf("store: delete credential %q: %w", providerKey, err)
@@ -53,7 +45,6 @@ func (r *AuthRepo) DeleteCredential(providerKey string) error {
 	return nil
 }
 
-// DeleteAllCredentials removes all credentials.
 func (r *AuthRepo) DeleteAllCredentials() error {
 	if _, err := r.db.Exec(`DELETE FROM auth_credentials`); err != nil {
 		return fmt.Errorf("store: delete all credentials: %w", err)
@@ -61,8 +52,6 @@ func (r *AuthRepo) DeleteAllCredentials() error {
 	return nil
 }
 
-// ListCredentials returns all credentials keyed by provider key. The
-// returned map is never nil.
 func (r *AuthRepo) ListCredentials() (map[string]string, error) {
 	rows, err := r.db.Query(`SELECT provider_key, credential FROM auth_credentials`)
 	if err != nil {

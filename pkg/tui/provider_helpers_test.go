@@ -8,10 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// newProviderHelpersTestModel builds a Model with a provider holding two
-// models (alpha carries Temperature/Reasoning so edit-survival can be
-// asserted) and a provider with no models. agentLoop is nil so
-// configSource() falls back to m.cfg, matching the settings selector tests.
 func newProviderHelpersTestModel(t *testing.T) *Model {
 	t.Helper()
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
@@ -60,9 +56,6 @@ func newProviderHelpersTestModel(t *testing.T) *Model {
 	return &Model{cfg: cfg}
 }
 
-// TestProviderDetailListRowsAndModelRows verifies the detail list content is
-// byte-identical to the previously inlined blocks and that modelRows maps
-// exactly the model-row indices (no separators, no action rows).
 func TestProviderDetailListRowsAndModelRows(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
@@ -72,7 +65,7 @@ func TestProviderDetailListRowsAndModelRows(t *testing.T) {
 	want := []string{
 		"Type: openai",
 		"API Base: https://api.example.com/v1",
-		"API Key: sk-1...cdef", // maskAPIKey keeps first/last 4
+		"API Key: sk-1...cdef",
 		"---",
 		"  alpha",
 		"  beta",
@@ -90,7 +83,6 @@ func TestProviderDetailListRowsAndModelRows(t *testing.T) {
 		}
 	}
 
-	// The action-row indices must point at the localized action labels.
 	if editIdx != 7 || addIdx != 8 || delIdx != 9 {
 		t.Errorf("editIdx, addIdx, delIdx = %d, %d, %d; want 7, 8, 9", editIdx, addIdx, delIdx)
 	}
@@ -104,7 +96,6 @@ func TestProviderDetailListRowsAndModelRows(t *testing.T) {
 		t.Errorf("items[delIdx] = %q, want %q", items[delIdx], i18n.T("tui.deleteProviderAction"))
 	}
 
-	// modelRows: only indices 4 and 5 (the model rows), aliases trimmed.
 	wantRows := map[int]string{4: "alpha", 5: "beta"}
 	if len(modelRows) != len(wantRows) {
 		t.Fatalf("modelRows = %v, want %v", modelRows, wantRows)
@@ -119,7 +110,6 @@ func TestProviderDetailListRowsAndModelRows(t *testing.T) {
 			t.Errorf("modelRows[%d] = %q, want %q", idx, got, alias)
 		}
 	}
-	// Info rows, separators and action rows must NOT be in the map.
 	for _, idx := range []int{0, 1, 2, 3, 6, 7, 8, 9} {
 		if alias, ok := modelRows[idx]; ok {
 			t.Errorf("modelRows unexpectedly maps index %d (%q) to %q", idx, items[idx], alias)
@@ -127,8 +117,6 @@ func TestProviderDetailListRowsAndModelRows(t *testing.T) {
 	}
 }
 
-// TestProviderDetailListNoModels verifies the placeholder row yields an
-// EMPTY modelRows map (no placeholder index leak) and the layout is intact.
 func TestProviderDetailListNoModels(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
@@ -136,7 +124,7 @@ func TestProviderDetailListNoModels(t *testing.T) {
 	items, modelRows, addIdx, delIdx := layout.Items, layout.ModelRows, layout.AddIdx, layout.DelIdx
 
 	wantTail := []string{"---", "  (no models)", "---", i18n.T("tui.editProviderAction"), i18n.T("tui.addModelAction"), i18n.T("tui.deleteProviderAction")}
-	if len(items) != 3+len(wantTail) { // 3 info rows + tail
+	if len(items) != 3+len(wantTail) {
 		t.Fatalf("items count = %d, want %d: %q", len(items), 3+len(wantTail), items)
 	}
 	for i, w := range wantTail {
@@ -154,7 +142,6 @@ func TestProviderDetailListNoModels(t *testing.T) {
 	if len(modelRows) != 0 {
 		t.Errorf("modelRows must be empty for the placeholder, got %v", modelRows)
 	}
-	// No action row or separator may ever be mapped.
 	for idx, alias := range modelRows {
 		if strings.HasPrefix(alias, "+") || strings.HasPrefix(alias, "-") || alias == "---" {
 			t.Errorf("modelRows[%d] = %q must not map action/separator rows", idx, alias)
@@ -162,9 +149,6 @@ func TestProviderDetailListNoModels(t *testing.T) {
 	}
 }
 
-// TestProviderDetailListProviderNotFound verifies the three info rows are
-// skipped when the provider does not exist, while separators/models/actions
-// are still emitted.
 func TestProviderDetailListProviderNotFound(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
@@ -188,8 +172,6 @@ func TestProviderDetailListProviderNotFound(t *testing.T) {
 	}
 }
 
-// TestProviderModelConfigLookup covers found / not-found / case-insensitive
-// (and whitespace-trimmed) lookups for both keys.
 func TestProviderModelConfigLookup(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
@@ -229,8 +211,6 @@ func TestProviderModelConfigLookup(t *testing.T) {
 	})
 }
 
-// TestUpdateModelInProviderInPlaceEditPersists verifies an in-place edit
-// updates model/context/max/vision and round-trips to disk.
 func TestUpdateModelInProviderInPlaceEditPersists(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
@@ -255,7 +235,6 @@ func TestUpdateModelInProviderInPlaceEditPersists(t *testing.T) {
 		t.Errorf("ThinkingType = %q, want deepseek", got.ThinkingType)
 	}
 
-	// Persisted to disk?
 	reloaded, err := config.LoadConfig(config.DefaultConfigPath())
 	if err != nil {
 		t.Fatalf("reload config: %v", err)
@@ -267,15 +246,9 @@ func TestUpdateModelInProviderInPlaceEditPersists(t *testing.T) {
 	}
 }
 
-// TestUpdateModelInProviderPreservesTemperatureAndStoresReasoning verifies
-// fields the form does not ask about (Temperature, Video) survive the edit
-// while the reasoning config — which the form DOES ask about — is whatever the
-// caller passed. The edit form rebuilds it from its five reasoning steps, so an
-// Enter-through edit round-trips the stored config and an explicit nil clears it.
 func TestUpdateModelInProviderPreservesTemperatureAndStoresReasoning(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
-	// What the edit form produces from a fully-loaded stored config.
 	stored := m.cfg.Providers.Named["myprov"].Models["alpha"].Reasoning
 	if err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-2", 111000, 3333, true, "", stored); err != nil {
 		t.Fatalf("updateModelInProvider: %v", err)
@@ -292,7 +265,6 @@ func TestUpdateModelInProviderPreservesTemperatureAndStoresReasoning(t *testing.
 		t.Errorf("Effort = %q, want high (round-tripped)", *got.Reasoning.Effort)
 	}
 
-	// A nil answer means "no reasoning override" and must clear the stored one.
 	if err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-2", 111000, 3333, true, "", nil); err != nil {
 		t.Fatalf("updateModelInProvider(nil reasoning): %v", err)
 	}
@@ -301,8 +273,6 @@ func TestUpdateModelInProviderPreservesTemperatureAndStoresReasoning(t *testing.
 	}
 }
 
-// TestUpdateModelInProviderZeroContextKeepsExisting verifies contextWindow=0
-// (and maxTokens=0) keep the stored values instead of zeroing them.
 func TestUpdateModelInProviderZeroContextKeepsExisting(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
@@ -319,10 +289,6 @@ func TestUpdateModelInProviderZeroContextKeepsExisting(t *testing.T) {
 	}
 }
 
-// TestUpdateModelInProviderThinkingType verifies the think-system step answer
-// is applied explicitly: a real dialect replaces the old value, and ""/auto
-// clear the field back to the default heuristics. An invalid value errors
-// without touching the config.
 func TestUpdateModelInProviderThinkingType(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
@@ -333,7 +299,6 @@ func TestUpdateModelInProviderThinkingType(t *testing.T) {
 		t.Errorf("ThinkingType = %q, want qwen", got)
 	}
 
-	// "auto" clears back to unset.
 	if err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-1", 0, 0, false, "auto", nil); err != nil {
 		t.Fatalf("updateModelInProvider(auto): %v", err)
 	}
@@ -341,7 +306,6 @@ func TestUpdateModelInProviderThinkingType(t *testing.T) {
 		t.Errorf("ThinkingType = %q, want empty after auto", got)
 	}
 
-	// Invalid dialect errors and leaves the entry untouched.
 	err := m.updateModelInProvider("myprov", "alpha", "alpha", "model-alpha-1", 0, 0, false, "bogus", nil)
 	if err == nil {
 		t.Fatal("expected error for invalid thinking type")
@@ -351,8 +315,6 @@ func TestUpdateModelInProviderThinkingType(t *testing.T) {
 	}
 }
 
-// TestUpdateModelInProviderRename verifies a rename moves the map key,
-// removes the old one and carries the updated entry over.
 func TestUpdateModelInProviderRename(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
@@ -364,7 +326,7 @@ func TestUpdateModelInProviderRename(t *testing.T) {
 	if _, ok := models["alpha"]; ok {
 		t.Error("old key \"alpha\" must be removed after rename")
 	}
-	got, ok := models["alpha2"] // normalized: lowercased + trimmed
+	got, ok := models["alpha2"]
 	if !ok {
 		t.Fatalf("renamed key \"alpha2\" missing, models = %v", models)
 	}
@@ -376,8 +338,6 @@ func TestUpdateModelInProviderRename(t *testing.T) {
 	}
 }
 
-// TestUpdateModelInProviderRenameCollisionLeavesConfigUnchanged verifies
-// renaming onto an existing alias errors and mutates nothing.
 func TestUpdateModelInProviderRenameCollisionLeavesConfigUnchanged(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
@@ -403,8 +363,6 @@ func TestUpdateModelInProviderRenameCollisionLeavesConfigUnchanged(t *testing.T)
 	}
 }
 
-// TestUpdateModelInProviderUnknownOrigAlias verifies the descriptive error
-// for an alias that does not exist in the provider.
 func TestUpdateModelInProviderUnknownOrigAlias(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
@@ -418,8 +376,6 @@ func TestUpdateModelInProviderUnknownOrigAlias(t *testing.T) {
 	}
 }
 
-// TestUpdateModelInProviderEmptyNewAlias verifies an empty (after
-// normalize) new alias is rejected.
 func TestUpdateModelInProviderEmptyNewAlias(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
@@ -430,14 +386,11 @@ func TestUpdateModelInProviderEmptyNewAlias(t *testing.T) {
 	if err.Error() != "model alias cannot be empty" {
 		t.Errorf("err = %q, want %q", err.Error(), "model alias cannot be empty")
 	}
-	// Config untouched.
 	if got := m.cfg.Providers.Named["myprov"].Models["alpha"]; got.Model != "model-alpha-1" {
 		t.Errorf("alpha entry changed: %+v", got)
 	}
 }
 
-// TestUpdateModelInProviderEmptyModelName verifies an empty model name is
-// rejected.
 func TestUpdateModelInProviderEmptyModelName(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 
@@ -448,21 +401,11 @@ func TestUpdateModelInProviderEmptyModelName(t *testing.T) {
 	if err.Error() != "model name cannot be empty" {
 		t.Errorf("err = %q, want %q", err.Error(), "model name cannot be empty")
 	}
-	// Config untouched.
 	if got := m.cfg.Providers.Named["myprov"].Models["alpha"]; got.Model != "model-alpha-1" {
 		t.Errorf("alpha entry changed: %+v", got)
 	}
 }
 
-// ── NamedProviderConfig.IsEmpty / ensureProvider: keyless-endpoint preservation ──
-
-// TestEnsureProviderKeepsKeylessEndpoint is the regression test for the
-// "/connect silently wipes a keyless provider's endpoint" bug: an ollama
-// entry with a custom APIBase + Proxy (and no key/models/auth method — the
-// supported "API key is optional for local providers" shape) must NOT be
-// classified as a disposable ensureNamedDefaults() placeholder. The row-driven
-// /connect path goes through ensureProvider, which must update the key/base in
-// place and KEEP the endpoint/proxy, not replace the entry wholesale.
 func TestEnsureProviderKeepsKeylessEndpoint(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 	m.cfg.Providers.Named["ollama"] = config.NamedProviderConfig{
@@ -473,9 +416,6 @@ func TestEnsureProviderKeepsKeylessEndpoint(t *testing.T) {
 		},
 	}
 
-	// The API-key row skips the base step, so the row's preset base arrives
-	// here as a preset (baseIsPreset=true) and must not move the provider off
-	// the host the user configured.
 	alreadyUsable, err := m.ensureProvider("ollama", "ollama", "", "http://localhost:11434/v1", true)
 	if err != nil {
 		t.Fatalf("ensureProvider: %v", err)
@@ -488,15 +428,12 @@ func TestEnsureProviderKeepsKeylessEndpoint(t *testing.T) {
 	if !ok {
 		t.Fatal("named provider entry disappeared")
 	}
-	// The endpoint and proxy are user data and MUST survive.
 	if p.APIBase != "http://192.168.1.50:11434/v1" {
 		t.Errorf("APIBase = %q, want the pre-configured endpoint kept", p.APIBase)
 	}
 	if p.Proxy != "http://proxy.lan:3128" {
 		t.Errorf("Proxy = %q, want the pre-configured proxy kept", p.Proxy)
 	}
-	// It was treated as an in-place update, not a replacement: no key was
-	// asked for here, so the entry still has none and no models.
 	if p.APIKey != "" {
 		t.Errorf("APIKey = %q, want empty (none was supplied)", p.APIKey)
 	}
@@ -505,14 +442,8 @@ func TestEnsureProviderKeepsKeylessEndpoint(t *testing.T) {
 	}
 }
 
-// TestEnsureProviderStillReplacesTrulyEmptyPlaceholder is the control case for
-// the predicate change: a genuine ensureNamedDefaults()-shaped placeholder
-// (no key, no base, no proxy, no auth method, no models) is still REPLACED
-// wholesale, exactly as before — the "already exists" error must not return.
 func TestEnsureProviderStillReplacesTrulyEmptyPlaceholder(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
-	// The ollama placeholder as ensureNamedDefaults() creates it (Type set,
-	// everything else empty).
 	m.cfg.Providers.Named["ollama"] = config.NamedProviderConfig{Type: "ollama"}
 
 	alreadyUsable, err := m.ensureProvider("ollama", "ollama", "sk-new", "http://localhost:11434/v1", true)
@@ -535,9 +466,6 @@ func TestEnsureProviderStillReplacesTrulyEmptyPlaceholder(t *testing.T) {
 	}
 }
 
-// TestNamedProviderConfigIsEmptyFieldMatrix pins the predicate itself against every
-// field that represents real user data, plus the two fields that must stay
-// out of it (Type and WebSearch — see the config.NamedProviderConfig.IsEmpty doc).
 func TestNamedProviderConfigIsEmptyFieldMatrix(t *testing.T) {
 	base := config.NamedProviderConfig{Type: "ollama"}
 	if !base.IsEmpty() {
@@ -555,7 +483,6 @@ func TestNamedProviderConfigIsEmptyFieldMatrix(t *testing.T) {
 		{"connect_mode", withProviderConfig(base, config.ProviderConfig{ConnectMode: "stdio"}), false},
 		{"auth_method", withProviderConfig(base, config.ProviderConfig{AuthMethod: "oauth"}), false},
 		{"models", withModels(base), false},
-		// Type and WebSearch must NOT make an entry non-empty.
 		{"type_only", base, true},
 		{"web_search_only", withWebSearch(base), true},
 	}
@@ -582,12 +509,6 @@ func withWebSearch(p config.NamedProviderConfig) config.NamedProviderConfig {
 	return p
 }
 
-// TestEnsureProviderMirrorsToTypedField pins the typed-field mirror in the
-// in-place update path. ProvidersConfig.MarshalJSON persists the NAMED copy,
-// but ensureNamedDefaults() re-creates it from the typed field on the next
-// load, so a save that only touched Named would be silently reverted (the
-// freshly entered key would disappear after a restart). Mutant it kills:
-// dropping the syncProviderToTypedField call in the update branch.
 func TestEnsureProviderMirrorsToTypedField(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 	m.cfg.Providers.OpenAI.ProviderConfig = config.ProviderConfig{
@@ -621,8 +542,6 @@ func TestEnsureProviderMirrorsToTypedField(t *testing.T) {
 	if len(named.Models) != 1 {
 		t.Errorf("named models = %v, want the existing model list kept", named.Models)
 	}
-	// The mirror is what survives a reload (ensureNamedDefaults rebuilds the
-	// named entry from the typed field).
 	if got := m.cfg.Providers.OpenAI.APIKey; got != "sk-new-key" {
 		t.Errorf("typed Providers.OpenAI.APIKey = %q, want %q (mirror missing)", got, "sk-new-key")
 	}

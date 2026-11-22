@@ -32,9 +32,6 @@ function renderSidebar(subagents: SubagentTaskInfo[]) {
   )
 }
 
-// Statuses the sidebar must color-code distinctly. The WebUI bug this guards:
-// every persisted subagent used to render as "completed" regardless of the
-// real terminal status.
 const DISTINGUISHABLE_STATUSES: Array<SubagentTaskInfo['status']> = [
   'running',
   'pending',
@@ -59,8 +56,6 @@ describe('SubagentsSidebar status badges', () => {
         subagent({ task_id: `s-${i}`, status, label: `worker-${status}` }),
       ),
     )
-    // Mutation check: if two statuses share a color, the badge class set is
-    // smaller than the status list. Map status -> badge className.
     const colorByStatus = new Map<string, string>()
     for (const status of DISTINGUISHABLE_STATUSES) {
       const badge = view.getByText(status)
@@ -81,7 +76,6 @@ describe('SubagentsSidebar status badges', () => {
       subagent({ task_id: 's-pend', status: 'pending', label: 'waiter' }),
       subagent({ task_id: 's-done', status: 'completed', label: 'done-one' }),
     ])
-    // Spinner renders an animated SVG with animate-spin.
     const spinners = document.querySelectorAll('.animate-spin')
     expect(spinners.length).toBe(2)
   })

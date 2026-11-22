@@ -23,12 +23,8 @@ import (
 	"github.com/xilistudios/lele/pkg/voice"
 )
 
-// telegramOffsetKey is the KV store key used to persist the last
-// processed Telegram UpdateID.
 const telegramOffsetKey = "telegram:offset"
 
-// Dedup cache bounds (SURV-04): eviction triggers above Max and keeps the
-// newest Keep entries by insertion timestamp.
 const (
 	telegramProcessedMax  = 1000
 	telegramProcessedKeep = 500
@@ -41,29 +37,23 @@ type TelegramChannel struct {
 	config          *config.Config
 	chatIDs         map[string]int64
 	transcriber     *voice.GroqTranscriber
-	placeholders    sync.Map         // chatID -> messageID
-	stopThinking    sync.Map         // chatID -> thinkingCancel
-	approvalManager *ApprovalManager // Gestor de aprobaciones de comandos
-	agentLoop       AgentProvidable  // Reference to agent loop for session agent management
+	placeholders    sync.Map
+	stopThinking    sync.Map
+	approvalManager *ApprovalManager
+	agentLoop       AgentProvidable
 	sendMu          sync.Mutex
 	lastSend        time.Time
 	cancel          context.CancelFunc
 	botHandler      *th.BotHandler
 	reconnectMu     sync.Mutex
-	stopped         bool // Flag to prevent reconnect after explicit Stop()
-	// Deduplication using UpdateID (Telegram's unique identifier for each update)
-	lastUpdateID   int
-	updateIDMu     sync.Mutex
-	offsetFilePath string // Path to persist last UpdateID (fallback when kvRepo is nil)
-	kvRepo         *store.KVRepo
-	// Fallback deduplication using ChatID:MessageID. Values are insertion
-	// timestamps (UnixNano) so eviction can keep the newest entries instead
-	// of a random half (map iteration order is random in Go).
-	processedIDs map[string]int64
-	processedMu  sync.Mutex
-	// deleteHTTP optionally overrides the HTTP client used by deleteMessage
-	// (tests). When nil, http.DefaultClient is used. Assign before Start.
-	deleteHTTP *http.Client
+	stopped         bool
+	lastUpdateID    int
+	updateIDMu      sync.Mutex
+	offsetFilePath  string
+	kvRepo          *store.KVRepo
+	processedIDs    map[string]int64
+	processedMu     sync.Mutex
+	deleteHTTP      *http.Client
 }
 
 type telegramCommandSpec struct {
@@ -142,11 +132,8 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus, agentLoop Agent
 
 	base := NewBaseChannel("telegram", telegramCfg, bus, telegramCfg.AllowFrom)
 
-	// Determine offset file path for persisting last UpdateID
 	offsetFilePath := filepath.Join(config.GetLeleDir(), "telegram_offset.txt")
 
-	// Load persisted last UpdateID (flat file; the KV store is wired later
-	// via SetKVRepo once the channel manager is built)
 	lastUpdateID := loadLastUpdateIDFromFile(offsetFilePath)
 
 	ch := &TelegramChannel{
@@ -165,10 +152,6 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus, agentLoop Agent
 		processedIDs:    make(map[string]int64),
 	}
 
-	// Roll back user-visible side effects (typing indicator, "Thinking..."
-	// placeholder) when the bus rejects an inbound message. Assigned here —
-	// not inside NewBaseChannel — because the closure needs the concrete
-	// channel; it must be set before Start begins processing updates.
 	ch.InboundDroppedHook = ch.handleInboundDropped
 
 	return ch, nil
@@ -178,10 +161,6 @@ func (c *TelegramChannel) SetTranscriber(transcriber *voice.GroqTranscriber) {
 	c.transcriber = transcriber
 }
 
-// SetKVRepo wires the KV store used to persist the last processed
-// UpdateID. When set, the KV store takes precedence over the flat file
-// fallback. If the KV store already holds an offset, it is preferred
-// over the offset loaded from the flat file in the constructor.
 func (c *TelegramChannel) SetKVRepo(repo *store.KVRepo) {
 	c.kvRepo = repo
 	if repo == nil {
@@ -196,8 +175,6 @@ func (c *TelegramChannel) SetKVRepo(repo *store.KVRepo) {
 	}
 }
 
-// loadOffsetFromKV reads the last processed UpdateID from the KV store.
-// It returns 0 when no offset has been persisted yet or on error.
 func (c *TelegramChannel) loadOffsetFromKV() int {
 	if c.kvRepo == nil {
 		return 0
@@ -213,11 +190,10 @@ func (c *TelegramChannel) loadOffsetFromKV() int {
 	return id
 }
 
-// loadLastUpdateIDFromFile reads the last processed UpdateID from a file
 func loadLastUpdateIDFromFile(path string) int {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return 0 // No persisted offset, start fresh
+		return 0
 	}
 	id, err := strconv.Atoi(string(bytes.TrimSpace(data)))
 	if err != nil {
@@ -226,9 +202,6 @@ func loadLastUpdateIDFromFile(path string) int {
 	return id
 }
 
-// saveLastUpdateID persists the last processed UpdateID. The KV store is
-// the primary backend when wired via SetKVRepo; otherwise it falls back
-// to the flat file.
 func (c *TelegramChannel) saveLastUpdateID() {
 	c.updateIDMu.Lock()
 	id := c.lastUpdateID
@@ -238,7 +211,6 @@ func (c *TelegramChannel) saveLastUpdateID() {
 		return
 	}
 
-	// KV store is the primary persistence backend.
 	if c.kvRepo != nil {
 		if err := c.kvRepo.Set(telegramOffsetKey, fmt.Sprintf("%d", id)); err != nil {
 			logger.WarnCF("telegram", "Failed to persist UpdateID offset to KV store", map[string]interface{}{
@@ -249,7 +221,6 @@ func (c *TelegramChannel) saveLastUpdateID() {
 		return
 	}
 
-	// Fallback: write as simple text file.
 	if c.offsetFilePath == "" {
 		return
 	}
@@ -263,12 +234,10 @@ func (c *TelegramChannel) saveLastUpdateID() {
 	}
 }
 
-// updateOffset processes an update and updates the last UpdateID
 func (c *TelegramChannel) updateOffset(update telego.Update) bool {
 	c.updateIDMu.Lock()
 	defer c.updateIDMu.Unlock()
 
-	// Skip if we've already processed this or older updates
 	if update.UpdateID <= c.lastUpdateID {
 		logger.DebugCF("telegram", "Skipping already processed update", map[string]interface{}{
 			"update_id":      update.UpdateID,
@@ -277,30 +246,26 @@ func (c *TelegramChannel) updateOffset(update telego.Update) bool {
 		return false
 	}
 
-	// Update the last processed ID
 	c.lastUpdateID = update.UpdateID
 	return true
 }
 
-// setupBotHandler initializes the bot handler with all command and callback handlers
 func (c *TelegramChannel) setupBotHandler(ctx context.Context) (*th.BotHandler, context.CancelFunc, error) {
 	cancelCtx, cancel := context.WithCancel(ctx)
 
-	// Get the current offset to pass to Telegram API
 	c.updateIDMu.Lock()
-	offset := c.lastUpdateID + 1 // Telegram expects offset = lastProcessedUpdateID + 1
+	offset := c.lastUpdateID + 1
 	c.updateIDMu.Unlock()
 
 	updates, err := c.bot.UpdatesViaLongPolling(cancelCtx, &telego.GetUpdatesParams{
 		Timeout: 30,
-		Offset:  offset, // Start from last processed update + 1
+		Offset:  offset,
 	})
 	if err != nil {
 		cancel()
 		return nil, nil, fmt.Errorf("failed to start long polling: %w", err)
 	}
 
-	// Create a wrapper channel that tracks UpdateIDs and filters duplicates
 	wrappedUpdates := c.wrapUpdatesWithOffsetTracking(cancelCtx, updates)
 
 	bh, err := th.NewBotHandler(c.bot, wrappedUpdates)
@@ -333,8 +298,6 @@ func (c *TelegramChannel) setupBotHandler(ctx context.Context) (*th.BotHandler, 
 		})
 	}
 
-	// Handler for non-command messages (exclude commands that have specific handlers)
-	// This prevents double processing where both CommandEqual and AnyMessage match
 	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
 		return c.handleMessage(ctx, &message)
 	}, th.Not(th.Or(
@@ -359,20 +322,17 @@ func (c *TelegramChannel) setupBotHandler(ctx context.Context) (*th.BotHandler, 
 	return bh, cancel, nil
 }
 
-// wrapUpdatesWithOffsetTracking creates a wrapper channel that tracks UpdateIDs
-// and periodically persists the last processed offset
 func (c *TelegramChannel) wrapUpdatesWithOffsetTracking(ctx context.Context, updates <-chan telego.Update) <-chan telego.Update {
 	wrapped := make(chan telego.Update, 100)
 
 	go func() {
 		defer close(wrapped)
-		saveTicker := time.NewTicker(10 * time.Second) // Persist offset every 10s
+		saveTicker := time.NewTicker(10 * time.Second)
 		defer saveTicker.Stop()
 
 		for {
 			select {
 			case <-ctx.Done():
-				// Save offset before exiting
 				c.saveLastUpdateID()
 				return
 			case update, ok := <-updates:
@@ -380,12 +340,10 @@ func (c *TelegramChannel) wrapUpdatesWithOffsetTracking(ctx context.Context, upd
 					c.saveLastUpdateID()
 					return
 				}
-				// Track and validate the update
 				if c.updateOffset(update) {
 					wrapped <- update
 				}
 			case <-saveTicker.C:
-				// Periodically persist the offset
 				c.saveLastUpdateID()
 			}
 		}
@@ -399,13 +357,11 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 	c.stopped = false
 	c.setRunning(true)
 
-	// Start polling loop with auto-reconnect
 	go c.pollingLoop(ctx)
 
 	return nil
 }
 
-// pollingLoop manages the bot handler lifecycle with automatic reconnect
 func (c *TelegramChannel) pollingLoop(parentCtx context.Context) {
 	reconnectDelay := 5 * time.Second
 	maxReconnectDelay := 60 * time.Second
@@ -425,7 +381,6 @@ func (c *TelegramChannel) pollingLoop(parentCtx context.Context) {
 				"error": err.Error(),
 			})
 
-			// Wait before retry with exponential backoff
 			time.Sleep(currentDelay)
 			currentDelay = min(currentDelay*2, maxReconnectDelay)
 			continue
@@ -438,13 +393,10 @@ func (c *TelegramChannel) pollingLoop(parentCtx context.Context) {
 			"username": c.bot.Username(),
 		})
 
-		// Reset reconnect delay on successful connection
 		currentDelay = reconnectDelay
 
-		// Run the handler - this blocks until it stops
 		bh.Start()
 
-		// Check if we should stop reconnecting
 		c.reconnectMu.Lock()
 		if c.stopped {
 			c.reconnectMu.Unlock()
@@ -452,18 +404,12 @@ func (c *TelegramChannel) pollingLoop(parentCtx context.Context) {
 		}
 		c.reconnectMu.Unlock()
 
-		// Handler stopped unexpectedly - log and reconnect
 		logger.WarnCF("telegram", "BotHandler stopped unexpectedly - reconnecting in %s", map[string]interface{}{
 			"delay": currentDelay.String(),
 		})
 
-		// Handler died and its turns are gone: sweep the orphaned typing state.
-		// context.Background() is deliberate — there is no request-scoped ctx
-		// here, and the reconnect must not be gated by the parent lifetime;
-		// clearAllPlaceholders caps the work at placeholderSweepDeadline.
 		c.sweepOrphanedTurnState(context.Background(), "bot handler stopped unexpectedly")
 
-		// Clean up before reconnect
 		if cancel != nil {
 			cancel()
 		}
@@ -475,16 +421,12 @@ func (c *TelegramChannel) pollingLoop(parentCtx context.Context) {
 
 func (c *TelegramChannel) Stop(ctx context.Context) error {
 
-	// Mark as stopped to prevent reconnect
 	c.reconnectMu.Lock()
 	c.stopped = true
 	c.reconnectMu.Unlock()
 
 	c.setRunning(false)
 
-	// The caller's ctx is the parent so an already-cancelled/short-deadline
-	// shutdown cannot be prolonged by the sweep (the deadline cap keeps the
-	// reverse from happening too: the sweep never blocks for N timeouts).
 	c.sweepOrphanedTurnState(ctx, "channel stopping")
 
 	if c.cancel != nil {
@@ -497,16 +439,6 @@ func (c *TelegramChannel) Stop(ctx context.Context) error {
 	return nil
 }
 
-// sweepOrphanedTurnState clears the per-turn UI state that can no longer be
-// reported by its owner: typing indicator loops and "Thinking..." placeholders.
-//
-// It is called whenever the update-processing path is torn down — explicit
-// Stop, or a BotHandler that died and is about to reconnect — because the
-// turns that started that state will never emit their terminal turn.end again.
-//
-// ctx bounds the whole sweep: placeholder deletes are network calls, so without
-// a shared deadline Stop() could block for (number of placeholders × per-call
-// timeout). reason is only for the log line.
 func (c *TelegramChannel) sweepOrphanedTurnState(ctx context.Context, reason string) {
 	stopped := countMapEntries(&c.stopThinking)
 	placeholders := countMapEntries(&c.placeholders)
@@ -530,9 +462,6 @@ func countMapEntries(m *sync.Map) int {
 	return n
 }
 
-// stopAllThinking cancels every running typing-indicator loop, not just the
-// ones belonging to a single chat. Used on shutdown and before a reconnect,
-// when the turns that owned them are gone.
 func (c *TelegramChannel) stopAllThinking() {
 	c.stopThinking.Range(func(key, value interface{}) bool {
 		if cf, ok := value.(*thinkingCancel); ok && cf != nil {
@@ -543,21 +472,8 @@ func (c *TelegramChannel) stopAllThinking() {
 	})
 }
 
-// placeholderSweepDeadline caps the total wall time of a placeholder sweep,
-// independently of how many placeholders are pending. Once it expires the
-// remaining deletes fail fast on the context, but the entries are still
-// dropped from the map — the sweep's real job is forgetting state, the API
-// call is only a courtesy to the user's chat.
 const placeholderSweepDeadline = 5 * time.Second
 
-// clearAllPlaceholders deletes every pending "Thinking... 💭" placeholder.
-// Best-effort: an individual delete failure only logs, and each entry is
-// removed from the map regardless so a stale placeholder can never be edited
-// into a later, unrelated turn.
-//
-// ctx bounds the sweep as a whole: all deletes share ONE deadline derived
-// from it (placeholderSweepDeadline at most), so degraded networking cannot
-// turn shutdown into N sequential timeouts.
 func (c *TelegramChannel) clearAllPlaceholders(ctx context.Context) {
 	if c.config == nil {
 		return
@@ -579,8 +495,6 @@ func (c *TelegramChannel) clearAllPlaceholders(ctx context.Context) {
 	})
 }
 
-// isDuplicate checks if a message has already been processed.
-// Returns true if the message is a duplicate.
 func (c *TelegramChannel) isDuplicate(messageID string) bool {
 	c.processedMu.Lock()
 	defer c.processedMu.Unlock()
@@ -593,14 +507,8 @@ func (c *TelegramChannel) isDuplicate(messageID string) bool {
 		return true
 	}
 
-	// Add to processed set, stamped with the insertion time.
 	c.processedIDs[messageID] = time.Now().UnixNano()
 
-	// Evict when the set grows past telegramProcessedMax, keeping the
-	// telegramProcessedKeep newest entries by insertion time. Without the
-	// stamp this used to keep a RANDOM half (Go map iteration order), so the
-	// oldest keys were as likely to survive as the newest — duplicates could
-	// sneak back in right after every eviction.
 	if len(c.processedIDs) > telegramProcessedMax {
 		type entry struct {
 			key string
@@ -612,9 +520,9 @@ func (c *TelegramChannel) isDuplicate(messageID string) bool {
 		}
 		sort.Slice(entries, func(i, j int) bool {
 			if entries[i].ts != entries[j].ts {
-				return entries[i].ts > entries[j].ts // newest first
+				return entries[i].ts > entries[j].ts
 			}
-			return entries[i].key < entries[j].key // deterministic tie-break
+			return entries[i].key < entries[j].key
 		})
 		keep := make(map[string]int64, telegramProcessedKeep)
 		for _, e := range entries[:telegramProcessedKeep] {

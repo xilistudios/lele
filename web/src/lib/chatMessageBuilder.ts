@@ -14,27 +14,18 @@ import type {
   ToolMessageStatus,
 } from './types'
 
-// ---------------------------------------------------------------------------
-// ID generators
-// ---------------------------------------------------------------------------
-
-/** Deterministic ID for history-sourced messages (stable across refetches). */
 export function createHistoryMessageId(sessionKey: string, index: number, role: string): string {
   return `${sessionKey}:${index}:${role}`
 }
 
 let lastOptimisticTs = 0
 
-/** Ephemeral ID for optimistic user messages. The timestamp is forced to be
- *  monotonically increasing: two sends inside the same millisecond must not
- *  share an id, or React sees duplicate keys and drops a bubble. */
 export function createOptimisticUserId(): string {
   const now = Date.now()
   lastOptimisticTs = now > lastOptimisticTs ? now : lastOptimisticTs + 1
   return `temp-user-${lastOptimisticTs}`
 }
 
-/** Ephemeral ID for tool execution messages in streaming. */
 export function createToolMessageId(toolName: string, suffix?: string): string {
   return `tool-${toolName}-${suffix ?? Date.now()}`
 }
@@ -43,28 +34,8 @@ export function createDeterministicToolMessageId(messageId: string, toolCallId: 
   return `tool:${messageId}:${toolCallId}`
 }
 
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
 const ATTACHMENTS_HEADER = '## Attachments'
 
-/**
- * True if a message is an internal context-compaction summary that must be
- * hidden from the chat UI.
- *
- * Mirrors the TUI guard in `pkg/tui/viewport.go` (isCompactionSummary):
- * these are synthetic "user" messages inserted by the backend when the
- * context window is compacted, e.g.
- *
- *   ## Summary of Previous Conversation\n\n...
- *   [Context compacted — summary of previous N messages]\n...
- *
- * They carry `exclude_from_context`, so they may also be filtered by flag,
- * but the content-prefix guard is the authoritative signal (the flag is
- * also set on user-excluded attachments). Showing the summary as a real
- * user bubble is confusing — the user never sent it.
- */
 export function isCompactionSummary(message: {
   role: ChatMessage['role']
   content: string
@@ -76,33 +47,12 @@ export function isCompactionSummary(message: {
   )
 }
 
-/**
- * True if a message exists in the session history but must never appear in the
- * chat log: the synthetic rows the backend persists with role "user" for its
- * own bookkeeping (compaction summaries, loop-detector guidance).
- *
- * WHY it is a shared predicate and not a local filter: TWO places need the exact
- * same rule and silently disagreeing is a data-loss bug.
- *
- *  - `MessageList` drops these rows before rendering, so the user never sees
- *    them;
- *  - `mergeMessages` must therefore never treat one of them as the persisted
- *    copy of an optimistic user bubble (`findUnclaimedBaseUserForStaleBubble`).
- *    Claiming an invisible row would DELETE the user's bubble in exchange for a
- *    row that renders nothing: the message vanishes from the screen with no
- *    replacement anywhere in the transcript.
- */
 export function isHiddenFromChat(message: { role: ChatMessage['role']; content: string }): boolean {
   if (message.content.startsWith('⚠️ GUIDANCE:')) return true
   if (message.content.startsWith('GUIDANCE:')) return true
   return isCompactionSummary(message)
 }
 
-/**
- * Parses attachment paths from a message content string that contains
- * "## Attachments\n- /path/file.png" appended by the backend.
- * Returns the cleaned content and extracted attachment info.
- */
 export function parseAttachmentsFromContent(content: string): {
   content: string
   attachments: Attachment[]
@@ -139,10 +89,6 @@ export function parseAttachmentsFromContent(content: string): {
   return { content: cleanContent, attachments }
 }
 
-/**
- * Extracts a subagent session key from a spawn tool result string.
- * Handles formats like "Spawned subagent task task-1 (...)" and "task id: abc".
- */
 export function parseSubagentSessionKey(value: string | undefined): string | undefined {
   if (!value) return undefined
 
@@ -162,7 +108,6 @@ export function parseSubagentSessionKey(value: string | undefined): string | und
   return undefined
 }
 
-/** Formats a HistoryToolCall into a human-readable string for toolArgs. */
 export function formatToolCallArgs(toolCall: HistoryToolCall): string {
   if (typeof toolCall.arguments === 'undefined') {
     return toolCall.name ?? ''
@@ -173,29 +118,8 @@ export function formatToolCallArgs(toolCall: HistoryToolCall): string {
     : JSON.stringify(toolCall.arguments)
 }
 
-// ---------------------------------------------------------------------------
-// System notices
-// ---------------------------------------------------------------------------
-
-/**
- * Synthetic tool name used to render a system notice (`[System: <sender>] …`)
- * through ToolCallDisplay. Deliberately NOT a real backend tool name (no tool in
- * pkg/tools is called `system_notice`), so it can never collide with a live card.
- */
 export const SYSTEM_NOTICE_TOOL_NAME = 'system_notice'
 
-/**
- * Parses a synthetic system notice persisted by the backend. Returns undefined
- * for anything that is not exactly `[System: <sender>] <body>` at the START of
- * the content (a user may legitimately type "[System: …" mid-sentence).
- * An empty body is allowed; an empty sender is not.
- *
- * Known false positive: a real user message that literally starts with
- * "[System: …" is classified here too. Accepted on purpose — the backend uses
- * "[System:" as the canonical synthetic marker (pkg/session/context.go:49,
- * isHumanUserMessage), so the frontend mirrors backend semantics instead of
- * inventing a second rule.
- */
 export function parseSystemNotice(content: string): { sender: string; body: string } | undefined {
   const match = /^\[System:\s*([^\]]+)\]\s*([\s\S]*)$/.exec(content ?? '')
   if (!match) return undefined
@@ -204,18 +128,8 @@ export function parseSystemNotice(content: string): { sender: string; body: stri
   return { sender, body: match[2].trim() }
 }
 
-// ---------------------------------------------------------------------------
-// Harness command chip
-// ---------------------------------------------------------------------------
-
-/** Tool name of the command chip card; ToolCallDisplay maps it to ⚡/'command'. */
 export const COMMAND_TOOL_NAME = 'command'
 
-/**
- * Normalize a persisted/live command payload into the `arguments` object
- * rendered by ToolCallDisplay. The command name gains its leading slash here
- * because the backend sends it bare (harness canonical form has none).
- */
 export function normalizeCommandArgs(cmd: {
   command: string
   args?: string
@@ -235,27 +149,10 @@ export function normalizeCommandArgs(cmd: {
   }
 }
 
-/**
- * Build the `toolArgs` string of a command chip from its persisted payload,
- * following the `"toolName {json}"` convention of formatToolCallArgs and the
- * live command.applied handler (hooks/event-handlers/command.ts). The shapes
- * are identical on purpose: ToolCallDisplay.parseCommandArgs reads one parser
- * for both sources.
- *
- * Exported so the event handler shares it (DRY) — the live WS payload and the
- * history `harness_command` field carry the same information.
- */
 export function buildCommandChipToolArgs(cmd: HistoryCommandInfo): string {
   return `${COMMAND_TOOL_NAME} ${JSON.stringify(normalizeCommandArgs(cmd))}`
 }
 
-/**
- * The command chip message for a command-driven history user message, or
- * undefined when the message carries no harness_command. Rendered as a
- * role:'tool' message right after the user bubble — the same card the live
- * command.applied event inserts — so the chip survives refetches instead of
- * dying with clearStreaming().
- */
 export function buildCommandChipFromHistory(
   message: RawHistoryMessage,
   msgId: string,
@@ -272,7 +169,6 @@ export function buildCommandChipFromHistory(
   })
 }
 
-/** Builds a map of tool_call_id → HistoryToolCall from the history array. */
 export function buildToolCallMap(
   history: Array<{
     tool_calls?: HistoryToolCall[]
@@ -291,17 +187,12 @@ export function buildToolCallMap(
   return map
 }
 
-// ---------------------------------------------------------------------------
-// Message factory functions
-// ---------------------------------------------------------------------------
-
 interface BaseMessageProps {
   id: string
   sessionKey: string
   createdAt?: string
   attachments?: Attachment[]
   excludeFromContext?: boolean
-  /** Durable render-key identity carried over from the streaming copy. */
   stableId?: string
 }
 
@@ -317,7 +208,6 @@ interface AssistantMessageProps extends BaseMessageProps {
   content: string
   reasoningContent?: string
   streaming?: boolean
-  /** Failure text: the message renders as an error box instead of a bubble. */
   error?: string
 }
 
@@ -384,25 +274,6 @@ export function createToolMessage(props: ToolMessageProps): ChatMessage {
   }
 }
 
-// ---------------------------------------------------------------------------
-// History-to-chat conversion
-// ---------------------------------------------------------------------------
-
-/**
- * Identity text a persisted message registers (and later looks up) its durable
- * stableId under. Shared by the pre-pass and the conversion pass so the two
- * always agree on what counts as "the same identity".
- *
- * - `display_content` first: a command-driven turn stores the EXPANDED prompt
- *   in `content` and the text the user typed in `display_content`, and the
- *   optimistic copy registered the latter.
- * - an assistant iteration with no text (a thinking step, or the tool-call step
- *   of a model that emits no text alongside the call) is identified by its
- *   reasoning — the same rule `isConfirmedInCache` and `mergeMessages` use
- *   (lib/messageIdentity.ts).
- * - everything else (user text, a tool's RESULT — tools carry it in `content`)
- *   is its content.
- */
 function historyStableContent(message: RawHistoryMessage): string {
   return (
     message.display_content ||
@@ -412,7 +283,6 @@ function historyStableContent(message: RawHistoryMessage): string {
   )
 }
 
-/** How many copies of every stable identity this page holds (see above). */
 function countStableIdentities(history: RawHistoryMessage[]): Map<string, number> {
   const totals = new Map<string, number>()
   for (const message of history) {
@@ -422,31 +292,10 @@ function countStableIdentities(history: RawHistoryMessage[]): Map<string, number
   return totals
 }
 
-/**
- * How a page relates to the durable stableId registry.
- *
- * `bindStableIds: true` may only be passed for a page that is the TAIL of the
- * session — the newest page a refetch returns, or the catchup payload, which
- * carries the same window. The registry holds the ids of the newest copies this
- * page confirmed, so a page that is NOT the tail (an older page fetched by
- * `loadMore`) must not bind at all: rank would hand its copies the ids of newer
- * messages that are still rendered, and `enforceUniqueRenderKeys` would then
- * re-key a live bubble — the very React-key shuffle this registry exists to
- * prevent.
- *
- * Even on the tail the alignment can be impossible (a copy that has not been
- * confirmed yet, i.e. a refetch that won the race against the
- * `history.updated` event); see the count gate inside `toChatMessages` — an
- * unprovable binding is skipped, never guessed.
- */
 export type ToChatMessagesOptions = {
   bindStableIds?: boolean
 }
 
-/**
- * Converts raw history messages from the API into ChatMessage objects.
- * Handles attachment parsing, tool call mapping, and approval message formatting.
- */
 export function toChatMessages(
   history: RawHistoryMessage[],
   sessionKey: string,
@@ -456,13 +305,7 @@ export function toChatMessages(
   const seenIds = new Map<string, number>()
   const bindStableIds = options.bindStableIds === true
 
-  // Occurrence index per role+content key: the stableId registry records one
-  // ephemeral id per confirmed copy, so every message with a repeated identity
-  // must look up its OWN recorded id. Without this two identical messages
-  // shared one stableId and React dropped one of their bubbles.
   const stableOccurrences = new Map<string, number>()
-  // Copies of every identity in THIS page, so the number of occurrences left
-  // until the end of the page can be computed (see `lookupStableIdFromEnd`).
   const stableTotals = countStableIdentities(history)
 
   return history.flatMap((message, index) => {
@@ -471,55 +314,19 @@ export function toChatMessages(
     const count = seenIds.get(msgId) ?? 0
     seenIds.set(msgId, count + 1)
     if (count > 0) {
-      // The history id is derived from the message CONTENT (see
-      // residentMessageID in pkg/channels/rest_chat.go), so two genuinely
-      // different messages with identical content legitimately share an id.
-      // Treating the repeat as a backend re-emit and dropping it DELETED a real
-      // message from the UI (4 server messages rendered as 3 bubbles, with the
-      // remaining answer sitting above the wrong user message). Keep every
-      // message and disambiguate repeats by suffix so render keys stay unique.
       msgId = `${msgId}_${count}`
     }
 
     let messageContent = message.content
     let parsedAttachments: undefined | ReturnType<typeof parseAttachmentsFromContent>['attachments']
 
-    // Re-attach a durable stableId recorded when the streaming (ephemeral)
-    // copy of this message was confirmed into history. This keeps React
-    // render keys identical across the WebSocket→HTTP transition and across
-    // subsequent refetches (prevents remount flicker). See stableIdRegistry.ts.
-    // For user messages the lookup key must match what the optimistic copy
-    // registered — the text the user typed, which for command-driven turns is
-    // display_content, not the expanded content.
-    // Tools additionally look up by tool_call_id (their content may be empty).
-    // An assistant iteration with no text (thinking / tool-call step) registers
-    // under its reasoning text — the same identity `isConfirmedInCache` uses
-    // (see event-handlers/streaming.ts) — since its content is empty.
     const stableContent = historyStableContent(message)
     const stableKey = stableIdKey(message.role, stableContent)
     const stableOccurrence = stableOccurrences.get(stableKey) ?? 0
     stableOccurrences.set(stableKey, stableOccurrence + 1)
-    // Occurrence counted from the NEWEST end of the page (0 = the last copy).
-    // That is the only end that does not move when the sliding history window
-    // drops the oldest messages: counting from the start made every copy of a
-    // repeated identity read its predecessor's id once one copy slid out, which
-    // re-keyed bubbles onto the wrong message (they swap places in the
-    // virtualized list until a reload). See `lookupStableIdFromEnd`.
     const copiesInPage = stableTotals.get(stableKey) ?? 1
     const fromEnd = copiesInPage - 1 - stableOccurrence
-    // Rank-based binding is only PROVABLE when every copy of this identity in
-    // the page has a recorded id: then the page holds the newest
-    // `copiesInPage` copies and the alignment above is exact. If the page holds
-    // MORE copies than the registry knows (a refetch that beat the
-    // `history.updated` event, or an older page), the extra copies are
-    // indistinguishable from the registered ones and any rank would bind an id
-    // to the wrong message — so those identities keep their own history id,
-    // which is stable because it is derived from the content.
     const rankBinding = bindStableIds && countStableIds(message.role, stableContent) >= copiesInPage
-    // Tools carry their RESULT in `content`, which repeats across calls
-    // (`ls`, `git status`, an identical failing test). Their tool_call_id is
-    // exact and position-independent, so it is consulted first and the fuzzy
-    // result-text identity only covers tools that arrive without one.
     const toolStableId =
       message.role === 'tool' && message.tool_call_id
         ? lookupStableId('tool', `id:${message.tool_call_id}`)
@@ -536,22 +343,14 @@ export function toChatMessages(
       }
     }
 
-    // Structured attachments from the backend (any role) win over the
-    // text-block parsing above, which only applies to the legacy
-    // "## Attachments" section of user messages.
     if (message.attachments?.length) {
       parsedAttachments = message.attachments
     }
 
     if (message.role === 'user') {
-      // A harness command stores the EXPANDED prompt in content (that is what
-      // the model receives on replay); the UI shows the original "/name args"
-      // the user typed when the backend carried it.
       const userContent = message.display_content || messageContent
       const systemNotice = parseSystemNotice(userContent)
 
-      // Signature-based duplicate detection above compares `message.content`
-      // (the canonical text), so display changes cannot break dedup.
       const userMessage = createUserMessage({
         id: msgId,
         sessionKey,
@@ -562,9 +361,6 @@ export function toChatMessages(
         systemNotice,
       })
 
-      // Command-driven turn: re-render the chip from history (the live WS card
-      // is ephemeral streaming state). The chip rides in base messages, so it
-      // survives refetches, session switches and reloads.
       const chip = buildCommandChipFromHistory(message, msgId, sessionKey)
       return chip ? [userMessage, chip] : [userMessage]
     }
@@ -575,9 +371,6 @@ export function toChatMessages(
         message.reasoning_content && message.reasoning_content.trim() !== '',
       )
       const hasContent = Boolean(messageContent && messageContent.trim() !== '')
-      // error_detail marks a persisted FAILURE (an LLM request that could not
-      // complete the turn): the row renders as an error box, and it must never be
-      // dropped for lacking visible content of its own.
       const errorDetail = message.error_detail || undefined
       const shouldAddAssistant = hasContent || hasReasoning || !hasToolCalls || Boolean(errorDetail)
       if (shouldAddAssistant) {
@@ -599,7 +392,6 @@ export function toChatMessages(
     }
 
     if (message.role === 'tool') {
-      // Approval messages should render as simple text, not tool cards
       if (message.tool_call_id?.startsWith('approval:')) {
         return [
           {

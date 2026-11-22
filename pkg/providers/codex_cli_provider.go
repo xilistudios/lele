@@ -10,13 +10,11 @@ import (
 	"strings"
 )
 
-// CodexCliProvider implements LLMProvider by wrapping the codex CLI as a subprocess.
 type CodexCliProvider struct {
 	command   string
 	workspace string
 }
 
-// NewCodexCliProvider creates a new Codex CLI provider.
 func NewCodexCliProvider(workspace string) *CodexCliProvider {
 	return &CodexCliProvider{
 		command:   "codex",
@@ -24,7 +22,6 @@ func NewCodexCliProvider(workspace string) *CodexCliProvider {
 	}
 }
 
-// Chat implements LLMProvider.Chat by executing the codex CLI in non-interactive mode.
 func (p *CodexCliProvider) Chat(ctx context.Context, messages []Message, tools []ToolDefinition, model string, options map[string]interface{}) (*LLMResponse, error) {
 	if p.command == "" {
 		return nil, fmt.Errorf("codex command not configured")
@@ -45,7 +42,7 @@ func (p *CodexCliProvider) Chat(ctx context.Context, messages []Message, tools [
 	if p.workspace != "" {
 		args = append(args, "-C", p.workspace)
 	}
-	args = append(args, "-") // read prompt from stdin
+	args = append(args, "-")
 
 	cmd := exec.CommandContext(ctx, p.command, args...)
 	cmd.Stdin = bytes.NewReader([]byte(prompt))
@@ -56,9 +53,6 @@ func (p *CodexCliProvider) Chat(ctx context.Context, messages []Message, tools [
 
 	err := cmd.Run()
 
-	// Parse JSONL from stdout even if exit code is non-zero,
-	// because codex writes diagnostic noise to stderr (e.g. rollout errors)
-	// but still produces valid JSONL output.
 	if stdoutStr := stdout.String(); stdoutStr != "" {
 		resp, parseErr := p.parseJSONLEvents(stdoutStr)
 		if parseErr == nil && resp != nil && (resp.Content != "" || len(resp.ToolCalls) > 0) {
@@ -79,13 +73,10 @@ func (p *CodexCliProvider) Chat(ctx context.Context, messages []Message, tools [
 	return p.parseJSONLEvents(stdout.String())
 }
 
-// GetDefaultModel returns the default model identifier.
 func (p *CodexCliProvider) GetDefaultModel() string {
 	return "codex-cli"
 }
 
-// buildPrompt converts messages to a prompt string for the Codex CLI.
-// System messages are prepended as instructions since Codex CLI has no --system-prompt flag.
 func (p *CodexCliProvider) buildPrompt(messages []Message, tools []ToolDefinition) string {
 	var systemParts []string
 	var conversationParts []string
@@ -117,7 +108,6 @@ func (p *CodexCliProvider) buildPrompt(messages []Message, tools []ToolDefinitio
 		sb.WriteString("\n\n")
 	}
 
-	// Simplify single user message (no prefix)
 	if len(conversationParts) == 1 && len(systemParts) == 0 && len(tools) == 0 {
 		return conversationParts[0]
 	}
@@ -126,7 +116,6 @@ func (p *CodexCliProvider) buildPrompt(messages []Message, tools []ToolDefinitio
 	return sb.String()
 }
 
-// buildToolsPrompt creates a tool definitions section for the prompt.
 func (p *CodexCliProvider) buildToolsPrompt(tools []ToolDefinition) string {
 	var sb strings.Builder
 
@@ -156,7 +145,6 @@ func (p *CodexCliProvider) buildToolsPrompt(tools []ToolDefinition) string {
 	return sb.String()
 }
 
-// codexEvent represents a single JSONL event from `codex exec --json`.
 type codexEvent struct {
 	Type     string          `json:"type"`
 	ThreadID string          `json:"thread_id,omitempty"`
@@ -186,7 +174,6 @@ type codexEventErr struct {
 	Message string `json:"message"`
 }
 
-// parseJSONLEvents processes the JSONL output from codex exec --json.
 func (p *CodexCliProvider) parseJSONLEvents(output string) (*LLMResponse, error) {
 	var contentParts []string
 	var usage *UsageInfo
@@ -201,7 +188,7 @@ func (p *CodexCliProvider) parseJSONLEvents(output string) (*LLMResponse, error)
 
 		var event codexEvent
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			continue // skip malformed lines
+			continue
 		}
 
 		switch event.Type {
@@ -233,7 +220,6 @@ func (p *CodexCliProvider) parseJSONLEvents(output string) (*LLMResponse, error)
 
 	content := strings.Join(contentParts, "\n")
 
-	// Extract tool calls from response text (see tool_call_extract.go)
 	toolCalls := extractToolCallsFromText(content)
 
 	finishReason := "stop"

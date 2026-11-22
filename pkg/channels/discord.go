@@ -20,8 +20,6 @@ const (
 	transcriptionTimeout = 30 * time.Second
 )
 
-// discordSendTimeout bounds each Discord REST send. Var (not const) so tests
-// can shorten it; production reads the 10s default.
 var discordSendTimeout = 10 * time.Second
 
 type DiscordChannel struct {
@@ -31,7 +29,7 @@ type DiscordChannel struct {
 	transcriber *voice.GroqTranscriber
 	ctx         context.Context
 	typingMu    sync.Mutex
-	typingStop  map[string]chan struct{} // chatID → stop signal
+	typingStop  map[string]chan struct{}
 }
 
 func NewDiscordChannel(cfg config.DiscordConfig, bus *bus.MessageBus) (*DiscordChannel, error) {
@@ -84,7 +82,6 @@ func (c *DiscordChannel) Start(ctx context.Context) error {
 func (c *DiscordChannel) Stop(ctx context.Context) error {
 	c.setRunning(false)
 
-	// Stop all typing goroutines before closing session
 	c.typingMu.Lock()
 	for chatID, stop := range c.typingStop {
 		close(stop)
@@ -120,12 +117,6 @@ func (c *DiscordChannel) Send(ctx context.Context, msg bus.OutboundMessage) erro
 }
 
 func (c *DiscordChannel) sendChunk(ctx context.Context, channelID, content string) error {
-	// Bound the send with the caller's ctx plus the per-send timeout. The
-	// context flows INTO the discordgo request via WithContext, so a timeout
-	// cancels the in-flight HTTP call instead of abandoning it: the previous
-	// goroutine+select pattern left the goroutine blocked in the API call
-	// until Discord answered (potentially minutes), result discarded — a
-	// leak per timed-out send (SURV-05).
 	sendCtx, cancel := context.WithTimeout(ctx, discordSendTimeout)
 	defer cancel()
 
@@ -133,26 +124,15 @@ func (c *DiscordChannel) sendChunk(ctx context.Context, channelID, content strin
 		Content: content,
 	}, discordgo.WithContext(sendCtx), discordgo.WithRetryOnRatelimit(false))
 	if err != nil {
-		// Map 429s onto RateLimitError so the retry layer honors the
-		// retry_after hint instead of blind backoff (SURV-07). With
-		// ShouldRetryOnRateLimit disabled, discordgo returns its
-		// RateLimitError (carrying RetryAfter) instead of sleeping
-		// internally — possibly for minutes — inside this call.
 		var rle *discordgo.RateLimitError
 		if errors.As(err, &rle) {
 			return &RateLimitError{Channel: "discord", RetryAfter: rle.RetryAfter}
 		}
-		// At-least-once semantics: the request may have reached Discord
-		// before the deadline fired, so the message may exist despite this
-		// error. Callers (the outbound spool) must NOT blindly retry —
-		// sendChunkWithRetry only retries transient errors and the durable
-		// spool forgets partial sends.
 		return fmt.Errorf("failed to send discord message: %w", err)
 	}
 	return nil
 }
 
-// appendContent 安全地追加内容到现有文本
 func appendContent(content, suffix string) string {
 	if content == "" {
 		return suffix
@@ -169,7 +149,6 @@ func (c *DiscordChannel) handleMessage(s *discordgo.Session, m *discordgo.Messag
 		return
 	}
 
-	// 检查白名单，避免为被拒绝的用户下载附件和转录
 	if !c.IsAllowed(m.Author.ID) {
 		logger.DebugCF("discord", "Message rejected by allowlist", map[string]any{
 			"user_id": m.Author.ID,
@@ -187,7 +166,6 @@ func (c *DiscordChannel) handleMessage(s *discordgo.Session, m *discordgo.Messag
 	mediaPaths := make([]string, 0, len(m.Attachments))
 	localFiles := make([]string, 0, len(m.Attachments))
 
-	// 确保临时文件在函数返回时被清理
 	defer func() {
 		for _, file := range localFiles {
 			if err := os.Remove(file); err != nil {
@@ -211,7 +189,7 @@ func (c *DiscordChannel) handleMessage(s *discordgo.Session, m *discordgo.Messag
 				if c.transcriber != nil && c.transcriber.IsAvailable() {
 					ctx, cancel := context.WithTimeout(c.getContext(), transcriptionTimeout)
 					result, err := c.transcriber.Transcribe(ctx, localPath)
-					cancel() // 立即释放context资源，避免在for循环中泄漏
+					cancel()
 
 					if err != nil {
 						logger.ErrorCF("discord", "Voice transcription failed", map[string]any{
@@ -251,7 +229,6 @@ func (c *DiscordChannel) handleMessage(s *discordgo.Session, m *discordgo.Messag
 		content = "[media only]"
 	}
 
-	// Start typing after all early returns — guaranteed to have a matching Send()
 	c.startTyping(m.ChannelID)
 
 	logger.DebugCF("discord", "Received message", map[string]any{
@@ -282,11 +259,8 @@ func (c *DiscordChannel) handleMessage(s *discordgo.Session, m *discordgo.Messag
 	c.HandleMessage(senderID, m.ChannelID, content, mediaPaths, metadata)
 }
 
-// startTyping starts a continuous typing indicator loop for the given chatID.
-// It stops any existing typing loop for that chatID before starting a new one.
 func (c *DiscordChannel) startTyping(chatID string) {
 	c.typingMu.Lock()
-	// Stop existing loop for this chatID if any
 	if stop, ok := c.typingStop[chatID]; ok {
 		close(stop)
 	}
@@ -318,7 +292,6 @@ func (c *DiscordChannel) startTyping(chatID string) {
 	}()
 }
 
-// stopTyping stops the typing indicator loop for the given chatID.
 func (c *DiscordChannel) stopTyping(chatID string) {
 	c.typingMu.Lock()
 	defer c.typingMu.Unlock()

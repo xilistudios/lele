@@ -1,19 +1,3 @@
-/**
- * Shared harness for tests that need the REAL `useAppLogic` mounted.
- *
- * `useAppLogic` is the only place where the composer's contract lives (chips,
- * queueing, upload, error banner), so tests about "what the user sees after a
- * send/upload" have to render it for real rather than re-implement its logic.
- * Everything it talks to over the network is stubbed here; the hooks under it
- * are the production ones.
- *
- * Two gotchas, both learned the hard way in this repo:
- *  - `waitFor` from testing-library never settles under bun+jsdom → poll with
- *    `waitUntil` below;
- *  - the api stub and the `wsSend` callback must keep a STABLE identity across
- *    renders, otherwise `useAppLogic`'s effects re-arm on every render and the
- *    test hangs forever instead of failing.
- */
 import '../test/setup'
 import '../test/i18n'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -28,10 +12,6 @@ export type SentEvent = { event: string; data: Record<string, unknown> }
 
 const DEFAULT_AGENT = 'main'
 
-/**
- * Minimal API stub: only the calls awaited on mount need a real shape, the rest
- * resolve to `{}` (a Proxy), which is enough for hooks that guard their reads.
- */
 export function stubApi(overrides: Record<string, unknown> = {}): ApiClient {
   const impl: Record<string, unknown> = {
     agents: async () => ({ agents: [{ id: DEFAULT_AGENT, name: 'Main' }] }),
@@ -68,7 +48,6 @@ export type RenderAppLogicOptions = {
   clientId?: string | null
 }
 
-/** Mount the real `useAppLogic` and record everything it sends over the socket. */
 export function renderAppLogic(options: RenderAppLogicOptions = {}) {
   const sessionKey = options.sessionKey ?? 'native:test-session'
   const token = options.token === undefined ? 'tok' : options.token
@@ -85,7 +64,6 @@ export function renderAppLogic(options: RenderAppLogicOptions = {}) {
       createElement(MemoryRouter, null, children),
     )
 
-  // Built ONCE, outside the render callback (see the file header).
   const api = options.api ?? stubApi()
   const wsSend = (event: string, data: Record<string, unknown>) => sent.push({ event, data })
 
@@ -109,7 +87,6 @@ export function renderAppLogic(options: RenderAppLogicOptions = {}) {
   return { ...rendered, sent, waitUntilReady, sessionKey }
 }
 
-/** `waitFor` does not settle under bun+jsdom → flush a macrotask and look again. */
 export async function waitUntil(
   predicate: () => boolean,
   what = 'condition',

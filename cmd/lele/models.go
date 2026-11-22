@@ -51,7 +51,6 @@ func modelsRefreshCmd() {
 	err := catalog.Refresh(ctx, catalog.Options{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Catalog refresh failed: %v\n", err)
-		// Still show whatever is cached.
 		if !catalog.HasCachedIndex() {
 			os.Exit(1)
 		}

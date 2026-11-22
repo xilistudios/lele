@@ -1,10 +1,3 @@
-// ProbeServer (out-of-band MCP diagnostics) tests.
-//
-// Coverage split mirrors the package: the happy paths run against REAL MCP
-// servers (the mcptest fixture from e2e_test.go, and an in-process transport
-// driven by the production dialer), while failures use the recording and
-// counting doubles from manager_test.go/transport_test.go.
-
 package mcp
 
 import (
@@ -22,37 +15,29 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-// --- fixtures ---------------------------------------------------------------
-
 const (
 	probeFixtureName    = "probe-fixture"
 	probeFixtureVersion = "9.9.9"
 )
 
-// countingTransport wraps a real transport and reports the first Close, so a
-// test can prove ProbeServer tore the connection down (and did it once).
 type countingTransport struct {
 	transport.Interface
 	once    sync.Once
 	onClose func()
 }
 
-// Close counts the first close only, then delegates.
 func (c *countingTransport) Close() error {
 	c.once.Do(c.onClose)
 	return c.Interface.Close()
 }
 
-// countingConn wraps a real ClientConn and counts Close calls.
 type countingConn struct {
 	ClientConn
 	mu     sync.Mutex
 	closeN int
-	// err, when set, is what Close returns instead of the wrapped result.
-	err error
+	err    error
 }
 
-// Close records the call and returns the scripted error, if any.
 func (c *countingConn) Close() error {
 	c.mu.Lock()
 	c.closeN++
@@ -63,19 +48,12 @@ func (c *countingConn) Close() error {
 	return c.ClientConn.Close()
 }
 
-// closes reports how many times Close was called.
 func (c *countingConn) closes() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.closeN
 }
 
-// probeFixture is a real in-process MCP server plus a counting transport
-// factory. A probe dialed through a production mcpDialer therefore exercises
-// the whole dial path — transport selection, Start, initialize handshake, real
-// mcp-go client, ListTools — against a real server without spawning anything.
-// The factory counts the transports it built (0 proves a config was refused
-// before any dial) and the ones closed.
 type probeFixture struct {
 	srv *server.MCPServer
 
@@ -84,8 +62,6 @@ type probeFixture struct {
 	closes     int
 }
 
-// newProbeFixture builds a real MCP server reporting a known name/version and
-// exposing the given tools.
 func newProbeFixture(t *testing.T, tools ...server.ServerTool) *probeFixture {
 	t.Helper()
 	f := &probeFixture{srv: server.NewMCPServer(
@@ -94,7 +70,6 @@ func newProbeFixture(t *testing.T, tools ...server.ServerTool) *probeFixture {
 	return f
 }
 
-// probeTool builds one fixture tool with a no-op handler.
 func probeTool(name string) server.ServerTool {
 	return server.ServerTool{
 		Tool: mcp.NewTool(name),
@@ -104,15 +79,12 @@ func probeTool(name string) server.ServerTool {
 	}
 }
 
-// countClose records one transport close.
 func (f *probeFixture) countClose() {
 	f.mu.Lock()
 	f.closes++
 	f.mu.Unlock()
 }
 
-// factory returns a transport factory that builds a real in-process transport
-// for every constructor call, whatever the config shape routes to.
 func (f *probeFixture) factory() transportFactory {
 	build := func() transport.Interface {
 		f.mu.Lock()
@@ -130,43 +102,30 @@ func (f *probeFixture) factory() transportFactory {
 	}
 }
 
-// dialer returns the production dialer over the counting factory and the real
-// mcp-go client: the full production dial path minus the process spawn.
 func (f *probeFixture) dialer() *mcpDialer {
 	d := newMCPDialer()
 	d.factory = f.factory()
 	return d
 }
 
-// counts snapshots the transport build/close counters.
 func (f *probeFixture) counts() (transports, closes int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.transports, f.closes
 }
 
-// cancelDialer cancels the probe context while Dial runs: it models a
-// cancellation landing mid-flight, so the listing (and the close) happen on an
-// already-cancelled context.
 type cancelDialer struct {
 	cancel context.CancelFunc
 	conn   ClientConn
 	dials  int
 }
 
-// Dial cancels the caller's context before handing the scripted connection
-// back.
 func (d *cancelDialer) Dial(context.Context, ServerConfig) (ClientConn, error) {
 	d.dials++
 	d.cancel()
 	return d.conn, nil
 }
 
-// --- happy path against real servers ----------------------------------------
-
-// TestProbeServerRealMCPServer probes the package's real mcptest fixture: the
-// reported tools come back unnamespaced in server order and the connection is
-// closed exactly once.
 func TestProbeServerRealMCPServer(t *testing.T) {
 	srv, _ := startMCPServer(t, "probe")
 	conn := &countingConn{ClientConn: connFor(t, srv)}
@@ -177,8 +136,6 @@ func TestProbeServerRealMCPServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("probeServer: %v", err)
 	}
-	// The mcptest server sorts tool names; more importantly they are the
-	// remote names, never the mcp_<server>_<tool> registry names.
 	if want := []string{"echo", "summary"}; !slices.Equal(res.Tools, want) {
 		t.Errorf("Tools = %v, want %v", res.Tools, want)
 	}
@@ -190,11 +147,6 @@ func TestProbeServerRealMCPServer(t *testing.T) {
 	}
 }
 
-// TestProbeServerProductionDialAgainstRealServer runs the whole production
-// dial path — transport selection, Start, the real initialize handshake, the
-// real mcp-go client, ListTools, Close — against a real MCP server reached
-// through the in-process transport. The server identity therefore comes from
-// the handshake, not from the config.
 func TestProbeServerProductionDialAgainstRealServer(t *testing.T) {
 	fixture := newProbeFixture(t, probeTool("echo"), probeTool("zeta"))
 
@@ -213,20 +165,11 @@ func TestProbeServerProductionDialAgainstRealServer(t *testing.T) {
 	}
 }
 
-// --- the point of the API: a disabled config is still probed ---------------
-
-// TestProbeServerProbesDisabledConfig pins the reason this API exists: the
-// runtime path refuses an entry with Disabled true (Manager.resolve →
-// LoadServer, pinned by TestE2EDisabledServerExcludedAndNeverDials), while
-// ProbeServer dials it and reports its tools like any other. The config is
-// resolved exactly the way the CLI must: ParseFile keeps disabled entries
-// (Discover does not).
 func TestProbeServerProbesDisabledConfig(t *testing.T) {
 	paths := e2ePaths(t)
 	entry := `{"mcpServers": {"off": {"command": "probe-bin", "disabled": true, "description": "Off"}}}`
 	writeFileAt(t, filepath.Join(paths.LeleDir, "mcp.json"), entry)
 
-	// The runtime view drops it…
 	res, err := Discover(paths)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -234,7 +177,6 @@ func TestProbeServerProbesDisabledConfig(t *testing.T) {
 	if len(res.Names) != 0 {
 		t.Errorf("Discover.Names = %v, want none (disabled)", res.Names)
 	}
-	// …while ParseFile still holds the entry a probe needs.
 	f, err := ParseFile(filepath.Join(paths.LeleDir, "mcp.json"))
 	if err != nil {
 		t.Fatalf("ParseFile: %v", err)
@@ -263,12 +205,6 @@ func TestProbeServerProbesDisabledConfig(t *testing.T) {
 	}
 }
 
-// --- config handling --------------------------------------------------------
-
-// TestProbeServerPassesConfigVerbatim documents the no-re-expansion contract:
-// the dialer receives the config as given (Disabled included, ${VAR} left
-// literal — callers resolve it through ParseFile/Discover), except for the
-// validated Type default.
 func TestProbeServerPassesConfigVerbatim(t *testing.T) {
 	dialer := &fakeDialer{}
 	cfg := ServerConfig{
@@ -299,9 +235,6 @@ func TestProbeServerPassesConfigVerbatim(t *testing.T) {
 	}
 }
 
-// TestProbeServerRefusesInvalidConfigWithoutDialing: validation runs before
-// any dial, so an invalid entry never builds a transport (the real dial path
-// would otherwise spawn a child for a config that can never work).
 func TestProbeServerRefusesInvalidConfigWithoutDialing(t *testing.T) {
 	cases := []struct {
 		name string
@@ -347,11 +280,6 @@ func TestProbeServerRefusesInvalidConfigWithoutDialing(t *testing.T) {
 	}
 }
 
-// --- failures ---------------------------------------------------------------
-
-// TestProbeServerDialFailure: a config that cannot be spawned surfaces the
-// transport failure and reports no tools — the production dialer is used, so
-// the failure is a real one (nothing is listening at that path).
 func TestProbeServerDialFailure(t *testing.T) {
 	res, err := ProbeServer(t.Context(), ServerConfig{Command: "/nonexistent/lele-probe-bin"})
 	if err == nil {
@@ -365,8 +293,6 @@ func TestProbeServerDialFailure(t *testing.T) {
 	}
 }
 
-// TestProbeServerContextDoneBeforeDial: a context that is already done is
-// refused before a dial is attempted.
 func TestProbeServerContextDoneBeforeDial(t *testing.T) {
 	fixture := newProbeFixture(t, probeTool("echo"))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -381,8 +307,6 @@ func TestProbeServerContextDoneBeforeDial(t *testing.T) {
 	}
 }
 
-// TestProbeServerContextExpiresDuringDial: an in-flight dial is bounded by the
-// caller's context, not by defaultDialTimeout.
 func TestProbeServerContextExpiresDuringDial(t *testing.T) {
 	dialer := &fakeDialer{delay: 5 * time.Second}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -400,8 +324,6 @@ func TestProbeServerContextExpiresDuringDial(t *testing.T) {
 	}
 }
 
-// TestProbeServerListErrorClosesConnection: a failing listing is reported and
-// the connection is still closed (no leaked child) with no tools returned.
 func TestProbeServerListErrorClosesConnection(t *testing.T) {
 	conn := &fakeConn{listErrs: []error{errors.New("list exploded")}}
 	dialer := &scriptedDialer{conns: []ClientConn{conn}}
@@ -421,9 +343,6 @@ func TestProbeServerListErrorClosesConnection(t *testing.T) {
 	}
 }
 
-// TestProbeServerCancellationDuringListWins: when the caller's context is
-// cancelled mid-listing, the context error is reported (the cause) rather than
-// the transport failure it produced — and the connection is still closed.
 func TestProbeServerCancellationDuringListWins(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -445,9 +364,6 @@ func TestProbeServerCancellationDuringListWins(t *testing.T) {
 	}
 }
 
-// TestProbeServerCloseErrorIsReported: a successful listing whose connection
-// cannot be torn down returns both the tools (a diagnostic caller can still
-// print them) and a close error, so a stuck child never passes silently.
 func TestProbeServerCloseErrorIsReported(t *testing.T) {
 	inner := &fakeConn{listTools: []mcp.Tool{remoteTool("echo")}}
 	conn := &countingConn{ClientConn: inner, err: errors.New("close exploded")}

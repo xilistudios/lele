@@ -1,19 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-//
-// T11: end-to-end tests through real in-process MCP servers (mcptest).
-//
-// Everything exercised here is production code — the three mcp.json layers
-// on disk, Discover, the Manager, the RemoteTool adapter, the
-// list_mcp_tools/get_mcp_tool discovery pair and the ToolRegistry. The only
-// substituted piece is the Dialer seam: it hands the manager the
-// already-initialized mcptest client wrapped in the production clientConn, so
-// no process is spawned (Start/Initialize against the real transports are
-// covered by the T4 dialer tests).
-
 package mcp
 
 import (
@@ -33,21 +17,11 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// --- harness ----------------------------------------------------------------
-
-// dialStep is one scripted outcome of e2eDialer: a ready connection or an
-// error.
 type dialStep struct {
 	conn ClientConn
 	err  error
 }
 
-// e2eDialer substitutes the production Dialer. Each ServerConfig is routed by
-// its Command field (the fixtures give every fake server a distinct command)
-// onto the steps scripted for that command, consumed in order. Every config
-// passed to Dial is recorded so tests can assert which merged layer entry
-// reached the dialer. An exhausted queue fails with a descriptive error —
-// that doubles as the "server stays dead" reconnect case.
 type e2eDialer struct {
 	mu    sync.Mutex
 	steps map[string][]dialStep
@@ -58,14 +32,12 @@ func newE2EDialer() *e2eDialer {
 	return &e2eDialer{steps: make(map[string][]dialStep)}
 }
 
-// script queues dial outcomes for configs whose Command is command.
 func (d *e2eDialer) script(command string, steps ...dialStep) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.steps[command] = append(d.steps[command], steps...)
 }
 
-// Dial implements Dialer.
 func (d *e2eDialer) Dial(_ context.Context, srv ServerConfig) (ClientConn, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -82,7 +54,6 @@ func (d *e2eDialer) Dial(_ context.Context, srv ServerConfig) (ClientConn, error
 	return step.conn, nil
 }
 
-// dials counts how often a config with the given Command was dialed.
 func (d *e2eDialer) dials(command string) int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -95,7 +66,6 @@ func (d *e2eDialer) dials(command string) int {
 	return n
 }
 
-// configs returns every ServerConfig passed to Dial, in order.
 func (d *e2eDialer) configs() []ServerConfig {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -104,9 +74,6 @@ func (d *e2eDialer) configs() []ServerConfig {
 	return out
 }
 
-// connFor wraps an already-initialized mcptest client in the production
-// clientConn — the manager sees a plain ClientConn, the same wrapper the
-// production dialer builds (the pre-init path itself is T4 territory).
 func connFor(t *testing.T, srv *mcptest.Server) ClientConn {
 	t.Helper()
 	cli := srv.Client()
@@ -116,13 +83,6 @@ func connFor(t *testing.T, srv *mcptest.Server) ClientConn {
 	return &clientConn{cli: cli}
 }
 
-// startMCPServer starts an in-process MCP server exposing two tools:
-//   - echo    ("message")  → text "<tag>:<message>"
-//   - summary ("label")    → text plus structured content {label, server: tag}
-//
-// It returns the server and an idempotent close func: mcptest.Server.Close
-// is NOT safe to call twice (its pipe fields are nilled), so tests that kill
-// the server mid-flight must use the returned func instead of Close.
 func startMCPServer(t *testing.T, tag string) (*mcptest.Server, func()) {
 	t.Helper()
 	srv, err := mcptest.NewServer(t,
@@ -160,8 +120,6 @@ func startMCPServer(t *testing.T, tag string) (*mcptest.Server, func()) {
 	return srv, closeOnce
 }
 
-// e2ePaths builds the three layer roots (global/agent/project) under one
-// temp dir. The roots start empty; tests write the mcp.json files they need.
 func e2ePaths(t *testing.T) Paths {
 	t.Helper()
 	base := t.TempDir()
@@ -172,13 +130,6 @@ func e2ePaths(t *testing.T) Paths {
 	}
 }
 
-// --- three layers → dial → round trip ---------------------------------------
-
-// TestE2EThreeLayersToRoundTrip walks the whole happy path: three mcp.json
-// layers on disk merge (project wins for the shared name), the merged entry
-// is what reaches the Dialer, LoadServer namespaces the specs, and tools
-// built by ToolFactory round-trip a call — text and structured content —
-// through the production clientConn into the in-process server.
 func TestE2EThreeLayersToRoundTrip(t *testing.T) {
 	paths := e2ePaths(t)
 
@@ -197,7 +148,6 @@ func TestE2EThreeLayersToRoundTrip(t *testing.T) {
 			"shared": {"command": "project-shared", "description": "Project shared"}
 		}}`)
 
-	// Discovery: the merge itself, before any manager exists.
 	res, err := Discover(paths)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
@@ -218,8 +168,6 @@ func TestE2EThreeLayersToRoundTrip(t *testing.T) {
 		t.Errorf("onlyagent layer = %q, want %q", got, LayerAgent)
 	}
 
-	// Manager over the scripted dialer; the server's tag mirrors the winning
-	// layer so the answer itself proves which entry was dialed.
 	srv, _ := startMCPServer(t, "project")
 	dialer := newE2EDialer()
 	dialer.script("project-shared", dialStep{conn: connFor(t, srv)})
@@ -239,7 +187,6 @@ func TestE2EThreeLayersToRoundTrip(t *testing.T) {
 		t.Errorf("specs = %v, want exactly mcp_shared_echo and mcp_shared_summary", specNames(specs))
 	}
 
-	// Idempotent load: a second LoadServer must not dial again.
 	if _, err := mgr.LoadServer(ctx, "shared"); err != nil {
 		t.Fatalf("second LoadServer: %v", err)
 	}
@@ -250,7 +197,6 @@ func TestE2EThreeLayersToRoundTrip(t *testing.T) {
 		t.Errorf("dialed configs = %+v, want the merged project entry", cfgs)
 	}
 
-	// ToolFactory → RemoteTool → Execute round trip.
 	factory := mgr.ToolFactory()
 	var echo, summary tools.Tool
 	for _, spec := range specs {
@@ -293,7 +239,6 @@ func TestE2EThreeLayersToRoundTrip(t *testing.T) {
 	}
 }
 
-// specNames renders the registered names of specs for failure messages.
 func specNames(specs []tools.LoadedMCPTool) []string {
 	out := make([]string, 0, len(specs))
 	for _, spec := range specs {
@@ -302,15 +247,6 @@ func specNames(specs []tools.LoadedMCPTool) []string {
 	return out
 }
 
-// --- the discovery pair against a real registry -----------------------------
-
-// TestE2EGetMCPToolRegistersAndReloads runs the integration the LLM sees: a
-// real ToolRegistry plus the production discovery tools. list_mcp_tools names
-// the server's tools (no schema, no registration), get_mcp_tool loads a batch
-// and registers exactly those specs under their namespaced names, a second
-// get_mcp_tool is a no-op for the registry while still rendering the specs,
-// the registered remote tool round-trips, and an unknown server yields a clean
-// error — all without a second dial.
 func TestE2EGetMCPToolRegistersAndReloads(t *testing.T) {
 	paths := e2ePaths(t)
 	writeFileAt(t, filepath.Join(paths.AgentWorkspace, "mcp.json"),
@@ -327,7 +263,6 @@ func TestE2EGetMCPToolRegistersAndReloads(t *testing.T) {
 	list := tools.NewListMCPToolsTool(mgr)
 	get := tools.NewGetMCPToolTool(mgr, registry, mgr.ToolFactory())
 
-	// Discovery step: names only, and nothing reaches the registry.
 	res := list.Execute(ctx, map[string]interface{}{"server": "files"})
 	if res.IsError {
 		t.Fatalf("list failed: %s", res.ForLLM)
@@ -344,7 +279,6 @@ func TestE2EGetMCPToolRegistersAndReloads(t *testing.T) {
 		t.Errorf("Count() = %d after listing, want 0 (listing registers nothing)", registry.Count())
 	}
 
-	// Load step: both specs registered under namespaced names.
 	batch := map[string]interface{}{"server": "files", "tools": []interface{}{"echo", "summary"}}
 	res = get.Execute(ctx, batch)
 	if res.IsError {
@@ -368,9 +302,6 @@ func TestE2EGetMCPToolRegistersAndReloads(t *testing.T) {
 		t.Errorf("first load rendered %d schemas, want 2:\n%s", got, res.ForLLM)
 	}
 
-	// Second load: registry count stable, every block reports the tool as
-	// already there, and the specs are still rendered (the LLM re-reads the
-	// schema after a reload).
 	res = get.Execute(ctx, batch)
 	if res.IsError {
 		t.Fatalf("second load failed: %s", res.ForLLM)
@@ -404,7 +335,6 @@ func TestE2EGetMCPToolRegistersAndReloads(t *testing.T) {
 		t.Errorf("GetDefinitions() has %d unique names, Count() = %d", len(defNames), registry.Count())
 	}
 
-	// The registered tool executes through the registry like any built-in.
 	res = registry.Execute(ctx, "mcp_files_echo", map[string]interface{}{"message": "hola"})
 	if res.IsError {
 		t.Fatalf("registry execution failed: %s", res.ForLLM)
@@ -413,10 +343,6 @@ func TestE2EGetMCPToolRegistersAndReloads(t *testing.T) {
 		t.Errorf("echo via registry = %q, want %q", res.ForLLM, "files:hola")
 	}
 
-	// Unknown server: clean error naming the server; the authoritative
-	// known-servers list comes from the loader layer EXACTLY ONCE (N4 — the
-	// manager error itself no longer carries a list, so the wrapped error
-	// cannot duplicate it).
 	res = get.Execute(ctx, map[string]interface{}{"server": "ghost", "tool": "echo"})
 	if !res.IsError {
 		t.Errorf("unknown server succeeded: %s", res.ForLLM)
@@ -429,17 +355,11 @@ func TestE2EGetMCPToolRegistersAndReloads(t *testing.T) {
 		t.Errorf("known-servers list appears %d times in the final message, want exactly 1:\n%s", n, res.ForLLM)
 	}
 
-	// Everything above ran over exactly one connection.
 	if n := dialer.dials("files-bin"); n != 1 {
 		t.Errorf("dials = %d, want 1", n)
 	}
 }
 
-// --- two servers, same remote tool name -------------------------------------
-
-// TestE2ETwoServersSameRemoteToolName proves the namespacing keeps two
-// servers that both expose a tool called "echo" apart in one registry: both
-// get their own registered name and each answer comes from its own server.
 func TestE2ETwoServersSameRemoteToolName(t *testing.T) {
 	paths := e2ePaths(t)
 	writeFileAt(t, filepath.Join(paths.AgentWorkspace, "mcp.json"), `{
@@ -459,8 +379,6 @@ func TestE2ETwoServersSameRemoteToolName(t *testing.T) {
 	ctx := context.Background()
 	registry := tools.NewToolRegistry()
 	get := tools.NewGetMCPToolTool(mgr, registry, mgr.ToolFactory())
-	// One batch per server: both of its tools, so every namespaced name has
-	// to coexist in the same registry.
 	for _, name := range []string{"alpha", "beta"} {
 		res := get.Execute(ctx, map[string]interface{}{
 			"server": name,
@@ -476,8 +394,6 @@ func TestE2ETwoServersSameRemoteToolName(t *testing.T) {
 	}
 	want := []string{"mcp_alpha_echo", "mcp_alpha_summary", "mcp_beta_echo", "mcp_beta_summary"}
 	got := registry.List()
-	// List() iterates a map: no order contract, so compare as a set (want is
-	// written in lexicographic order).
 	slices.Sort(got)
 	if !slices.Equal(got, want) {
 		t.Errorf("List() = %v, want %v as a set", got, want)
@@ -498,7 +414,6 @@ func TestE2ETwoServersSameRemoteToolName(t *testing.T) {
 	}
 }
 
-// infoNames extracts the names of a server info list in order.
 func infoNames(infos []tools.MCPServerInfo) []string {
 	out := make([]string, 0, len(infos))
 	for _, info := range infos {
@@ -507,13 +422,6 @@ func infoNames(infos []tools.MCPServerInfo) []string {
 	return out
 }
 
-// --- server dies mid-session --------------------------------------------------
-
-// TestE2EServerDiesReconnectOnce pins the reconnect-once semantics against a
-// server that really dies (the mcptest transport is closed, exactly like a
-// crashed stdio child): the first post-mortem call drops the dead
-// connection, redials once and either succeeds on the new connection or
-// fails with a clean wrapped "reconnect" error — never a panic or a hang.
 func TestE2EServerDiesReconnectOnce(t *testing.T) {
 	t.Run("redial fails cleanly", func(t *testing.T) {
 		paths := e2ePaths(t)
@@ -550,7 +458,7 @@ func TestE2EServerDiesReconnectOnce(t *testing.T) {
 			t.Fatalf("call before death = %q (err=%v), want old:hola", alive.ForLLM, alive.IsError)
 		}
 
-		kill() // the server dies
+		kill()
 
 		dead := echo.Execute(ctx, map[string]interface{}{"message": "hola"})
 		if !dead.IsError {
@@ -566,7 +474,6 @@ func TestE2EServerDiesReconnectOnce(t *testing.T) {
 			t.Errorf("dials = %d, want 2 (initial + one redial)", n)
 		}
 
-		// A later direct call fails the same way, without wedging or panicking.
 		if _, err := mgr.CallRemote(ctx, "dying", "echo", map[string]interface{}{"message": "x"}); err == nil {
 			t.Error("CallRemote after death succeeded")
 		} else if !strings.Contains(err.Error(), "no dial scripted") {
@@ -625,11 +532,6 @@ func TestE2EServerDiesReconnectOnce(t *testing.T) {
 	})
 }
 
-// --- disabled / absent configuration -----------------------------------------
-
-// TestE2EDisabledServerExcludedAndNeverDials: the project layer can disable
-// a server the global layer enables; the name leaves Servers(), LoadServer
-// reports the layer that disabled it, and no dial is ever attempted.
 func TestE2EDisabledServerExcludedAndNeverDials(t *testing.T) {
 	paths := e2ePaths(t)
 	writeFileAt(t, filepath.Join(paths.LeleDir, "mcp.json"),
@@ -648,7 +550,7 @@ func TestE2EDisabledServerExcludedAndNeverDials(t *testing.T) {
 		t.Errorf("Disabled[off] = %q, want %q", layer, LayerProject)
 	}
 
-	dialer := newE2EDialer() // nothing scripted: any dial would fail loudly
+	dialer := newE2EDialer()
 	mgr := NewManager(paths, dialer)
 	t.Cleanup(func() { _ = mgr.Close() })
 
@@ -665,11 +567,6 @@ func TestE2EDisabledServerExcludedAndNeverDials(t *testing.T) {
 	}
 }
 
-// TestE2ENoMCPFilesAnywhere: with the three roots empty the manager reports
-// no servers, never dials and both discovery tools say so — no error, no
-// panic.
-// (The agent-level counterpart — no discovery tool staying registered — is
-// TestMCPSync_NoServersLeavesLoaderUnregistered in pkg/agent.)
 func TestE2ENoMCPFilesAnywhere(t *testing.T) {
 	paths := e2ePaths(t)
 
@@ -697,9 +594,6 @@ func TestE2ENoMCPFilesAnywhere(t *testing.T) {
 	}
 
 	registry := tools.NewToolRegistry()
-	// Both discovery tools must answer a completely unconfigured manager with
-	// the same clean "known servers: (none)" shape instead of panicking or
-	// dialing anything.
 	listOut := tools.NewListMCPToolsTool(mgr).Execute(context.Background(), map[string]interface{}{"server": "x"})
 	if !listOut.IsError || !strings.Contains(listOut.ForLLM, "known servers: (none)") {
 		t.Errorf("list output = %q (IsError=%v), want a clean unknown-server error", listOut.ForLLM, listOut.IsError)
@@ -717,19 +611,8 @@ func TestE2ENoMCPFilesAnywhere(t *testing.T) {
 	}
 }
 
-// --- usage ordering, end to end ---------------------------------------------
-
-// TestE2EUsageOrderingListGetCallList walks the whole lazy-discovery loop
-// against a real manager and a real on-disk usage store: the first listing is
-// alphabetical (nothing was ever called), get_mcp_tool loads one of the two
-// tools, calling it records one use in <LeleDir>/mcp_usage.json, and the next
-// listing puts the called tool FIRST. A second manager over the same paths (a
-// restart, in effect) still ranks it first, so the ranking is persisted
-// rather than living in one process's memory.
 func TestE2EUsageOrderingListGetCallList(t *testing.T) {
 	paths := e2ePaths(t)
-	// The usage store writes a real file next to mcp.json, so the lele
-	// directory has to exist.
 	if err := os.MkdirAll(paths.LeleDir, 0o700); err != nil {
 		t.Fatalf("MkdirAll(%s): %v", paths.LeleDir, err)
 	}
@@ -747,8 +630,6 @@ func TestE2EUsageOrderingListGetCallList(t *testing.T) {
 	list := tools.NewListMCPToolsTool(mgr)
 	get := tools.NewGetMCPToolTool(mgr, registry, mgr.ToolFactory())
 
-	// Nothing has been used yet: the listing is alphabetical, so summary —
-	// the tool about to be called — is NOT on top.
 	before := list.Execute(ctx, map[string]interface{}{"server": "files"})
 	if before.IsError {
 		t.Fatalf("first list failed: %s", before.ForLLM)
@@ -757,7 +638,6 @@ func TestE2EUsageOrderingListGetCallList(t *testing.T) {
 		t.Fatalf("first listing = %v, want alphabetical [mcp_files_echo mcp_files_summary]", got)
 	}
 
-	// Load and call the second name: only a real call can promote it.
 	if res := get.Execute(ctx, map[string]interface{}{"server": "files", "tool": "summary"}); res.IsError {
 		t.Fatalf("get failed: %s", res.ForLLM)
 	}
@@ -769,7 +649,6 @@ func TestE2EUsageOrderingListGetCallList(t *testing.T) {
 		t.Errorf("call result = %q, want the server's answer", call.ForLLM)
 	}
 
-	// The counter landed on disk, keyed by REMOTE tool name.
 	usagePath := filepath.Join(paths.LeleDir, "mcp_usage.json")
 	data, err := os.ReadFile(usagePath)
 	if err != nil {
@@ -783,8 +662,6 @@ func TestE2EUsageOrderingListGetCallList(t *testing.T) {
 		t.Errorf(`usage["files"]["summary"] = %d, want 1 (file: %s)`, got, data)
 	}
 
-	// Second listing: the tool that was actually used sorts first and carries
-	// its count.
 	after := list.Execute(ctx, map[string]interface{}{"server": "files"})
 	if after.IsError {
 		t.Fatalf("second list failed: %s", after.ForLLM)
@@ -796,9 +673,6 @@ func TestE2EUsageOrderingListGetCallList(t *testing.T) {
 		t.Errorf("the used tool should carry its count:\n%s", after.ForLLM)
 	}
 
-	// A fresh manager over the same paths ranks from the persisted file, so
-	// the ranking survives a restart. It gets its own server instance, which
-	// keeps the test out of shared-client territory.
 	srv2, _ := startMCPServer(t, "files")
 	dialer2 := newE2EDialer()
 	dialer2.script("files-bin", dialStep{conn: connFor(t, srv2)})
@@ -815,13 +689,11 @@ func TestE2EUsageOrderingListGetCallList(t *testing.T) {
 		t.Errorf("reloaded listing = %v, want the persisted ranking", got)
 	}
 
-	// The first manager's work rode on exactly one connection.
 	if n := dialer.dials("files-bin"); n != 1 {
 		t.Errorf("dials = %d, want 1", n)
 	}
 }
 
-// e2eListedNames extracts the tool names of a listing page, in output order.
 func e2eListedNames(out string) []string {
 	var names []string
 	for _, line := range strings.Split(out, "\n") {

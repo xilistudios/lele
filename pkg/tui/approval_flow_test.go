@@ -13,17 +13,12 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// TestApproval_FullFlowWithAgent tests the complete approval flow:
-// TUI publishes an inbound message → agent runs exec tool (dangerous command)
-// → approval.request published → TUI receives it → TUI approves → agent
-// continues.
 func TestApproval_FullFlowWithAgent(t *testing.T) {
 	m := newTestModelWithDenyPatterns(t)
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
 	m = updated.(*Model)
 
-	// Create a session and switch to it
 	key := "tui:chat:approval-full"
 	m.sessionMgr.GetOrCreate(key)
 	_ = m.sessionMgr.SetMode(key, "agent")
@@ -32,13 +27,6 @@ func TestApproval_FullFlowWithAgent(t *testing.T) {
 	m.reloadSessions()
 	m.viewport.Width = 118
 
-	// Register a mock provider so the agent loop can respond
-	// (agent loop already runs from newTestModel)
-
-	// Publish an inbound message that triggers the exec tool.
-	// Since we can't easily run the full LLM loop here, directly simulate
-	// the agent-side flow: create an approval via the shared ApprovalManager
-	// and publish approval.request — this is what executeWithApproval does.
 	am := m.agentLoop.GetApprovalManager()
 	if am == nil {
 		t.Fatal("approval manager is nil")
@@ -57,7 +45,6 @@ func TestApproval_FullFlowWithAgent(t *testing.T) {
 		},
 	})
 
-	// Wait for approval in a goroutine (simulates executeWithApproval blocking)
 	approvalResult := make(chan bool, 1)
 	go func() {
 		approved, err := approval.WaitForResponse(context.Background(), 10*time.Second)
@@ -68,7 +55,6 @@ func TestApproval_FullFlowWithAgent(t *testing.T) {
 		approvalResult <- approved
 	}()
 
-	// Deliver the approval.request to the TUI
 	got := false
 	for i := 0; i < 5; i++ {
 		cmd := m.startOutboundListener()
@@ -88,17 +74,14 @@ func TestApproval_FullFlowWithAgent(t *testing.T) {
 		t.Fatal("BUG: TUI did not receive approval.request")
 	}
 
-	// Verify the approval prompt shows the command
 	m.updateViewport()
 	overlayText := strings.Join(m.viewport.overlayLines, "\n")
 	if !strings.Contains(overlayText, "rm -rf /tmp/danger") {
 		t.Fatalf("BUG: approval prompt missing command. overlay:\n%s", overlayText)
 	}
 
-	// Press 'y' to approve
 	m = sendKeys(m, "y")
 
-	// The approval goroutine should be unblocked with approved=true
 	select {
 	case approved := <-approvalResult:
 		if !approved {
@@ -109,7 +92,6 @@ func TestApproval_FullFlowWithAgent(t *testing.T) {
 	}
 }
 
-// TestApproval_RejectFlow verifies the reject path.
 func TestApproval_RejectFlow(t *testing.T) {
 	m := newTestModelWithDenyPatterns(t)
 
@@ -148,7 +130,6 @@ func TestApproval_RejectFlow(t *testing.T) {
 		approvalResult <- approved
 	}()
 
-	// Deliver to TUI
 	for i := 0; i < 5; i++ {
 		cmd := m.startOutboundListener()
 		msg := cmd()
@@ -163,7 +144,6 @@ func TestApproval_RejectFlow(t *testing.T) {
 		}
 	}
 
-	// Press 'n' to reject
 	m = sendKeys(m, "n")
 
 	select {
@@ -176,8 +156,6 @@ func TestApproval_RejectFlow(t *testing.T) {
 	}
 }
 
-// newTestModelWithDenyPatterns builds a TUI model with deny patterns enabled
-// so the exec tool triggers the approval flow.
 func newTestModelWithDenyPatterns(t *testing.T) *Model {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -217,7 +195,6 @@ func newTestModelWithDenyPatterns(t *testing.T) *Model {
 	}
 
 	m := NewModel(cfg, al, sessionMgr)
-	// Onboarding wizard disabled for feature tests (see newTestModel).
 	m.onboardingActive = false
 	return m
 }

@@ -1,62 +1,9 @@
-/**
- * Opt-in ordering instrumentation for the WebUI chat list.
- *
- * WHY this exists: "the message order breaks after a while and only a reload
- * fixes it" has been reported and "fixed" several times. Reproducing it in a
- * unit test requires knowing WHICH render broke and WHAT the two inputs looked
- * like at that instant, so this module keeps a browser-side ring buffer of
- * every WS event, every HTTP history snapshot and every merge, and checks the
- * four invariants whose violation IS the bug:
- *
- *   A `stable-order`   the relative order of two messages that both existed in
- *                      the previous render never flips. This is the literal
- *                      user-visible symptom.
- *   B `duplicate-key`  two entries share a render key (`stableId ?? id`). React
- *                      then drops or misplaces a bubble in the virtualized list.
- *   C `base-order`     merge must not reorder canonical history: the base ids
- *                      that survive into the merged list keep their base order.
- *   D `stranded-copy`  a live (WS) copy is rendered as its OWN entry while
- *                      history already holds the same message (same role +
- *                      identity text). That is the "old block below a newer
- *                      answer" shape.
- *   E `key-identity`   a render key that already denoted one message is now
- *                      used by a DIFFERENT one. This is the ROOT CAUSE behind
- *                      A and B: React/Virtuoso reconcile by key, so a key that
- *                      jumps to another message moves the wrong DOM node into
- *                      the slot (bubbles swap, an old message shows up where
- *                      the newest belongs). It is what the durable stableId
- *                      registry used to do when its occurrence index was
- *                      counted from the start of the sliding history window
- *                      (see `lookupStableIdFromEnd` in stableIdRegistry.ts).
- *
- * It is DISABLED by default and costs one `isOrderingDebugEnabled()` call per
- * merge when off. Enable it with either
- *
- *   localStorage.setItem('lele.orderingDebug', '1')   (persistent, per browser)
- *   ?orderingDebug=1                                  (one URL, e.g. a bug link)
- *
- * and read the collected evidence in the console with
- *
- *   window.__leleOrderingReport()      full report (violations + trace)
- *   window.__leleOrderingReport().print()   same, human-readable
- *
- * Everything stays in memory plus the last report in `localStorage` (so a
- * crash/tab close does not lose it). No network, no PII beyond message text
- * prefixes (already in the DOM).
- */
 import { assistantIdentityText } from './messageIdentity'
 import type { ChatMessage } from './types'
 
-/** Ring buffer sizes: enough to hold a few turns of chunks without growing. */
 const MAX_TRACE = 600
 const MAX_VIOLATIONS = 40
-/**
- * Render keys remembered for the `key-identity` invariant. A key is a short
- * string (a uuid or a content hash), so a few thousand cost ~100 KB; the cap is
- * there so a very long debug session cannot grow without bound.
- */
 const MAX_KEYS = 4000
-/** How much message text a trace entry keeps — enough to identify, not to leak. */
 const TEXT_PREVIEW = 80
 
 export type OrderingKind =
@@ -68,13 +15,10 @@ export type OrderingKind =
 
 export type OrderingViolation = {
   kind: OrderingKind
-  /** Human-readable, self-contained explanation of what flipped. */
   detail: string
-  /** Compact render-order fingerprint at the moment it was detected. */
   merged: string[]
   base: string[]
   streaming: string[]
-  /** Index into the trace of the merge that produced it. */
   at: number
   timestamp: number
 }
@@ -84,20 +28,11 @@ type TraceEntry =
   | { kind: 'http'; t: number; sessionKey: string; count: number; ids: string[] }
   | { kind: 'merge'; t: number; base: number; streaming: number; merged: string[] }
 
-// ── Enablement ──────────────────────────────────────────────────────────────
-
-/**
- * Whether instrumentation is on. Read from `localStorage` first (persistent
- * opt-in), then the URL query (one-shot, great for "reproduce it here" links).
- * Exported because the wiring points use it to skip building payloads at all.
- */
 export function isOrderingDebugEnabled(): boolean {
   if (typeof window === 'undefined') return false
   try {
     if (window.localStorage?.getItem('lele.orderingDebug') === '1') return true
-  } catch {
-    // Private mode / blocked storage: fall through to the URL check.
-  }
+  } catch {}
   try {
     return new URLSearchParams(window.location.search).get('orderingDebug') === '1'
   } catch {
@@ -105,23 +40,12 @@ export function isOrderingDebugEnabled(): boolean {
   }
 }
 
-// ── State ───────────────────────────────────────────────────────────────────
-
 let trace: TraceEntry[] = []
 let violations: OrderingViolation[] = []
-/**
- * Render order of the PREVIOUS merge, as render keys. `null` means "no previous
- * render to compare against" (first merge, monitor reset, session switch).
- */
 let previousOrder: string[] | null = null
-/**
- * What each render key has denoted so far: key → identity text of the message it
- * was first seen on. Feeds the `key-identity` invariant.
- */
 const keyIdentities = new Map<string, string>()
 let mergeCount = 0
 
-/** Reset the whole buffer. Exported for tests and for `window.__leleOrderingReset`. */
 export function resetOrderingMonitor(): void {
   trace = []
   violations = []
@@ -130,30 +54,16 @@ export function resetOrderingMonitor(): void {
   mergeCount = 0
 }
 
-// ── Fingerprints ────────────────────────────────────────────────────────────
-
-/** The render key React/Virtuoso uses (see `enforceUniqueRenderKeys`). */
 function renderKey(msg: ChatMessage): string {
   return msg.stableId ?? msg.id
 }
 
-/** Identity text used for duplicate detection (shared rule, see messageIdentity). */
 function identityText(msg: ChatMessage): string {
   if (msg.role === 'assistant') return assistantIdentityText(msg.content, msg.reasoningContent)
   if (msg.role === 'tool') return `tool:${msg.toolCallId ?? ''}:${msg.toolResult ?? ''}`
   return msg.content
 }
 
-/**
- * Compact one-line description of a message for the evidence payload:
- * `["role","renderKey","identity text"]`, as JSON.
- *
- * JSON and not `role:key:text` because render keys (`ui-b:1a2b`, `ws:call_1`)
- * and message text both contain `:` — the old colon-joined form could not be
- * split back apart, so a saved report could not be checked mechanically for the
- * invariant that actually matters: does a render key still denote the SAME
- * message? With this shape `JSON.parse` round-trips exactly.
- */
 function preview(msg: ChatMessage): string {
   const text = identityText(msg).replace(/\s+/g, ' ').trim().slice(0, TEXT_PREVIEW)
   return JSON.stringify([msg.role, renderKey(msg), text])
@@ -171,24 +81,14 @@ function pushTrace(entry: TraceEntry): void {
 function pushViolation(v: OrderingViolation): void {
   violations.push(v)
   if (violations.length > MAX_VIOLATIONS) violations.shift()
-  // Persist immediately: the interesting case is a tab that is reloaded before
-  // anyone gets to copy the console.
   try {
     window.localStorage?.setItem(
       'lele.orderingReport',
       JSON.stringify({ violations, mergeCount, savedAt: new Date().toISOString() }),
     )
-  } catch {
-    // Storage full/blocked: the in-memory report is still authoritative.
-  }
+  } catch {}
 }
 
-// ── Recording ───────────────────────────────────────────────────────────────
-
-/**
- * Record one WebSocket event. Called from the single dispatch point in
- * `useMessages` so the trace mirrors exactly what the handlers saw, in order.
- */
 export function noteWsEvent(event: string, data: unknown): void {
   if (!isOrderingDebugEnabled()) return
   let serialized: string
@@ -205,11 +105,6 @@ export function noteWsEvent(event: string, data: unknown): void {
   })
 }
 
-/**
- * Record one HTTP history snapshot (the newest page). Its ids are what the
- * merge treats as canonical, so a snapshot whose ids disagree between polls is
- * the smoking gun for "the same message keeps a different identity".
- */
 export function noteHistorySnapshot(sessionKey: string, messages: ChatMessage[]): void {
   if (!isOrderingDebugEnabled()) return
   pushTrace({
@@ -221,9 +116,6 @@ export function noteHistorySnapshot(sessionKey: string, messages: ChatMessage[])
   })
 }
 
-// ── Invariant checks ────────────────────────────────────────────────────────
-
-/** Index pairs where two entries share a render key. */
 function findDuplicateKeys(messages: ChatMessage[]): string[] {
   const seen = new Map<string, number>()
   const dups: string[] = []
@@ -239,11 +131,6 @@ function findDuplicateKeys(messages: ChatMessage[]): string[] {
   return dups
 }
 
-/**
- * Base ids that survive into the merged list, in merged order, compared with
- * their order inside base. Any difference means the merge reordered canonical
- * history (the "answer above its question" shape).
- */
 function checkBaseOrder(baseMessages: ChatMessage[], merged: ChatMessage[]): string | undefined {
   const baseIds = baseMessages.map((m) => m.id)
   const baseRank = new Map(baseIds.map((id, i) => [id, i]))
@@ -259,16 +146,6 @@ function checkBaseOrder(baseMessages: ChatMessage[], merged: ChatMessage[]): str
   return undefined
 }
 
-/**
- * Live copies that duplicate a message already present in base.
- *
- * Identity is role + identity text, and only identities that HISTORY ALREADY
- * CONTAINS are considered: a message that is legitimately new (still streaming,
- * no base counterpart yet) has a base count of 0 and can never be stranded —
- * flagging those was a false positive that would drown the real signal.
- * Legitimate repeats inside base are allowed too, because the comparison is
- * "more copies than history holds", not "more than one".
- */
 function checkStrandedCopies(
   baseMessages: ChatMessage[],
   merged: ChatMessage[],
@@ -280,13 +157,8 @@ function checkStrandedCopies(
   }
   const mergedCounts = new Map<string, number>()
   for (const msg of merged) {
-    // A message that is still streaming is the LIVE TAIL by definition, never a
-    // stale leftover — and its text is a growing prefix, so a shorter earlier
-    // message ("answer 1" vs the streaming "answer 1" of "answer 16") looked
-    // like a duplicate. Only settled copies are counted.
     if (msg.streaming === true) continue
     const identity = identityText(msg).trim()
-    // Empty identities render nothing; `filterStreamingLeftovers` drops them.
     if (identity === '') continue
     const key = `${msg.role}\0${identity}`
     mergedCounts.set(key, (mergedCounts.get(key) ?? 0) + 1)
@@ -300,56 +172,22 @@ function checkStrandedCopies(
   return undefined
 }
 
-/**
- * Identity a render key must keep denoting, for the `key-identity` invariant.
- *
- * Not the same thing as the fingerprint text: a tool card's payload (its RESULT)
- * arrives when the call finishes, so the card renders `""` and then the output
- * under the same key — content that lands late is not a key that moved. The call
- * id is the tool's identity; two different calls still differ, which is what the
- * invariant has to catch.
- */
 function stableIdentityText(msg: ChatMessage): string {
   if (msg.role === 'tool' && msg.toolCallId) return `tool:${msg.toolCallId}`
   return identityText(msg).trim()
 }
 
-/**
- * Render keys that now denote a different message than before, updating the
- * key → identity map as it goes.
- *
- * This is the root-cause invariant. `stable-order` (A) and `duplicate-key` (B)
- * are its symptoms; a key moving to another message is the defect itself. It is
- * what the durable stableId registry did when it counted occurrences from the
- * START of the sliding history window: once the oldest copy of a repeated
- * identity slid out, every remaining copy read its predecessor's id, so the id
- * of message N was handed to message N+1 — a bubble then renders somebody
- * else's content, or jumps to another slot, until a reload clears the registry.
- *
- * Only the identity TEXT is compared, so two messages that are indistinguishable
- * on screen (a repeated answer, the same reasoning verbatim) swapping keys is
- * correctly not reported: nothing can move that the user could see.
- */
 function findKeyRepointing(messages: ChatMessage[]): string | undefined {
   let firstMismatch: string | undefined
   for (const msg of messages) {
-    // A message that is still streaming grows between renders: its identity
-    // text changing is the typewriter, not a re-pointed key. It joins the map
-    // once it settles, with its final text.
     if (msg.streaming === true) continue
     const key = renderKey(msg)
     const text = stableIdentityText(msg)
-    // An entry with no visible identity renders nothing; it has no message to
-    // be confused with.
     if (text === '') continue
     const previous = keyIdentities.get(key)
     if (previous !== undefined && previous !== text && firstMismatch === undefined) {
       firstMismatch = `key ${key} used to be "${previous.slice(0, TEXT_PREVIEW)}" and now renders "${text.slice(0, TEXT_PREVIEW)}"`
     }
-    // Adopt the identity the key renders NOW, whether or not it matched: the
-    // report is about the TRANSITION. Keeping the old text would report the same
-    // mismatch on every following merge (filling the 40-slot violation buffer
-    // and hiding whatever comes next) and would stop tracking the new message.
     keyIdentities.delete(key)
     keyIdentities.set(key, text)
     if (keyIdentities.size > MAX_KEYS) {
@@ -360,16 +198,6 @@ function findKeyRepointing(messages: ChatMessage[]): string | undefined {
   return firstMismatch
 }
 
-/**
- * Relative order of the keys present in BOTH renders. A pair that swapped is
- * the user-visible "the order broke" event: nothing new arrived, yet a message
- * moved.
- *
- * Compared against the previous order only for keys that survived, so a
- * message scrolling out of the 50-message window (or being legitimately
- * confirmed and re-keyed) cannot produce a false positive: if either member of
- * a pair is missing from one side it simply is not compared.
- */
 function findOrderFlips(previous: string[], current: string[]): string | undefined {
   const currentIndex = new Map(current.map((key, i) => [key, i]))
   let lastIndex = -1
@@ -386,16 +214,6 @@ function findOrderFlips(previous: string[], current: string[]): string | undefin
   return undefined
 }
 
-// ── Entry point ─────────────────────────────────────────────────────────────
-
-/**
- * Observe one merge result. Returns `merged` UNCHANGED (identity preserved) so
- * the caller can wrap its `useMemo` value with it on a hot path: when the debug
- * flag is off this is a single boolean check plus a return.
- *
- * `baseMessages` and `streamingMessages` are the merge inputs; they are only
- * used to build the evidence payload of a violation.
- */
 export function observeMergedOrder(
   merged: ChatMessage[],
   baseMessages: ChatMessage[],
@@ -416,8 +234,6 @@ export function observeMergedOrder(
       at: trace.length,
       timestamp: Date.now(),
     })
-    // Loud on purpose: this is a diagnostic build, and a silent violation is
-    // exactly what made the previous investigations fail.
     console.error(`[order] ${kind}: ${detail}`, {
       merged: fingerprint(merged),
       base: fingerprint(baseMessages),
@@ -428,8 +244,6 @@ export function observeMergedOrder(
   const duplicates = findDuplicateKeys(merged)
   if (duplicates.length > 0) report('duplicate-key', duplicates.join('; '))
 
-  // Root cause first: a key that moved to another message explains a reorder,
-  // so reporting it before `stable-order` keeps the evidence causal.
   const repointed = findKeyRepointing(merged)
   if (repointed) report('key-identity', repointed)
 
@@ -456,7 +270,6 @@ export function observeMergedOrder(
   return merged
 }
 
-/** The whole collected evidence, plus a `print()` helper for the console. */
 export type OrderingReport = {
   mergeCount: number
   violations: OrderingViolation[]
@@ -480,7 +293,6 @@ export function orderingReport(): OrderingReport {
   return report
 }
 
-/** Install the console/global entry points (idempotent). */
 export function installOrderingMonitorGlobals(target: Window | undefined = window): void {
   if (!target) return
   const w = target as unknown as Record<string, unknown>

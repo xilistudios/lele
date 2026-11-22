@@ -14,11 +14,6 @@ type KindTab = 'all' | SessionKind
 
 const KIND_TABS: KindTab[] = ['all', 'chat', 'heartbeat', 'cron', 'cron-spawn', 'subagent']
 
-// Number of chats fetched per request. Matches the backend default in
-// parsePagination (pkg/channels/rest_system.go), which caps a page at 200 and
-// falls back to 50 when the client sends no limit. The remaining chats stay on
-// the server and are pulled by the "Load more" button, so the first paint of a
-// large history stays cheap.
 export const CHAT_PAGE_SIZE = 50
 
 export function ChatHistoryPage() {
@@ -46,8 +41,6 @@ export function ChatHistoryPage() {
   const [total, setTotal] = useState(0)
   const [refreshKey, setRefreshKey] = useState(0)
 
-  // Fetch the first page of persisted sessions on mount or when kind filter changes.
-  // `refreshKey` is only a re-fetch trigger for the retry button.
   useEffect(() => {
     void refreshKey
     let cancelled = false
@@ -99,8 +92,6 @@ export function ChatHistoryPage() {
   }, [api, activeKind, allFetchedSessions.length, hasMore, loadingMore])
 
   const allSessions = useMemo(() => {
-    // Filter context sessions by active kind — without this, live sessions
-    // bypass the kind tab filter because they are merged before API results.
     const kindFiltered =
       activeKind === 'all' ? sessions : sessions.filter((s) => s.kind === activeKind)
     const byKey = new Map<string, ChatSession>()
@@ -118,7 +109,6 @@ export function ChatHistoryPage() {
 
   const handleSelect = useCallback(
     (key: string) => {
-      // Subagent sessions are only reachable via their parent chat's nested route
       if (key.startsWith('subagent:')) return
       onSelectSession(key)
       navigate(`/chat/${encodeURIComponent(key)}`)
@@ -137,22 +127,19 @@ export function ChatHistoryPage() {
     async (key: string) => {
       try {
         await api.clearSession(key)
-      } catch {
-        // Silently ignore; session may already be gone
-      }
+      } catch {}
     },
     [api],
   )
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
+    <div className="flex app-shell bg-background-primary text-text-primary">
       <Sidebar
         collapsed={!sidebarOpen}
         mobileOpen={mobileSidebarOpen}
         onClose={() => onCloseMobileSidebar()}
       />
       <main className="flex flex-1 flex-col overflow-hidden">
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-4 md:px-6">
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <button
@@ -181,7 +168,6 @@ export function ChatHistoryPage() {
           />
         </div>
 
-        {/* Kind tabs */}
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2 md:px-6">
           {KIND_TABS.map((kind) => (
             <button
@@ -199,7 +185,6 @@ export function ChatHistoryPage() {
           ))}
         </div>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {loading && allSessions.length === 0 ? (
             <div className="flex h-64 items-center justify-center">

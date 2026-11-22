@@ -1,16 +1,5 @@
 package channels
 
-// Tests for outbound attachment staging and the /api/v1/files/view and
-// /api/v1/files/view-secure endpoints.
-//
-// Contract:
-//   - PUBLIC  GET /api/v1/files/view?path=<abs>  → staging dir ONLY (no auth)
-//   - SECURED GET /api/v1/files/view-secure?path=<abs> → broader leleDir (auth required)
-//   - Both endpoints deny sensitive filenames (defence in depth).
-//   - Files outside leleDir are copied to <leleDir>/tmp/attachments/<id>_<name>.
-//   - Files under leleDir but outside staging are ALSO copied to staging
-//     (invariant: "public == staging").
-
 import (
 	"io"
 	"net/http"
@@ -23,8 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
-// newStagingTestServer returns a native test server whose LeleDir points at a
-// temp dir (so staging never touches the real ~/.lele).
 func newStagingTestServer(t *testing.T) *nativeTestServer {
 	t.Helper()
 	ts := newNativeTestServer(t)
@@ -32,12 +19,10 @@ func newStagingTestServer(t *testing.T) *nativeTestServer {
 	return ts
 }
 
-// stagingDir returns the staging directory path for the given test server.
 func stagingDir(ts *nativeTestServer) string {
 	return filepath.Join(ts.channel.cfg.LeleDir, "tmp", "attachments")
 }
 
-// writeStagingFile creates a file under the staging directory and returns its path.
 func writeStagingFile(t *testing.T, ts *nativeTestServer, name, content string) string {
 	t.Helper()
 	dir := stagingDir(ts)
@@ -51,12 +36,10 @@ func writeStagingFile(t *testing.T, ts *nativeTestServer, name, content string) 
 	return path
 }
 
-// uploadDir returns the upload directory path for the given test server.
 func uploadDir(ts *nativeTestServer) string {
 	return filepath.Join(ts.channel.cfg.LeleDir, "tmp", "uploads")
 }
 
-// writeUploadFile creates a file under the uploads directory and returns its path.
 func writeUploadFile(t *testing.T, ts *nativeTestServer, name, content string) string {
 	t.Helper()
 	dir := uploadDir(ts)
@@ -70,11 +53,9 @@ func writeUploadFile(t *testing.T, ts *nativeTestServer, name, content string) s
 	return path
 }
 
-// --- stageAttachment unit tests ---
-
 func TestStageAttachment_CopiesOutsideFileUnderLeleDir(t *testing.T) {
 	leleDir := t.TempDir()
-	src := filepath.Join(t.TempDir(), "my report.txt") // outside leleDir
+	src := filepath.Join(t.TempDir(), "my report.txt")
 	if err := os.WriteFile(src, []byte("payload"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -97,11 +78,9 @@ func TestStageAttachment_CopiesOutsideFileUnderLeleDir(t *testing.T) {
 	if err != nil || string(data) != "payload" {
 		t.Errorf("staged copy content = %q, err %v, want payload", data, err)
 	}
-	// Original must remain untouched.
 	if _, err := os.Stat(src); err != nil {
 		t.Errorf("original file was removed: %v", err)
 	}
-	// Staged file name carries the original base name (id prefix + name).
 	base := filepath.Base(a.Path)
 	if !strings.HasSuffix(base, "_my report.txt") || len(base) <= len("_my report.txt") {
 		t.Errorf("staged base name = %q, want <id>_my report.txt", base)
@@ -109,9 +88,6 @@ func TestStageAttachment_CopiesOutsideFileUnderLeleDir(t *testing.T) {
 }
 
 func TestStageAttachment_CopiesInsideLeleDirToStaging(t *testing.T) {
-	// After FIX-1: files under leleDir but OUTSIDE the staging dir are copied
-	// to staging so the public endpoint can serve them. This enforces the
-	// "public == staging" invariant.
 	leleDir := t.TempDir()
 	inside := filepath.Join(leleDir, "tmp", "uploads", "ab_cd.png")
 	if err := os.MkdirAll(filepath.Dir(inside), 0755); err != nil {
@@ -125,15 +101,12 @@ func TestStageAttachment_CopiesInsideLeleDirToStaging(t *testing.T) {
 	if err := stageAttachment(&a, leleDir); err != nil {
 		t.Fatalf("stageAttachment() error = %v", err)
 	}
-	// Path must now point to staging, not the original upload dir.
 	if a.Path == inside {
 		t.Fatalf("expected path to be rewritten to staging, got %q", a.Path)
 	}
 	if !strings.HasPrefix(a.Path, filepath.Join(leleDir, "tmp", "attachments")) {
 		t.Errorf("staged path %q not under staging dir", a.Path)
 	}
-	// Name is set to the base name of the original path ("ab_cd.png")
-	// because stageAttachment uses filepath.Base(absPath) for the display name.
 	if a.Name != "ab_cd.png" {
 		t.Errorf("name = %q, want ab_cd.png (base of original path)", a.Name)
 	}
@@ -187,8 +160,6 @@ func TestStageAttachment_EmptyPath(t *testing.T) {
 	}
 }
 
-// --- public view endpoint tests (/api/v1/files/view — staging only) ---
-
 func getView(t *testing.T, ts *nativeTestServer, params url.Values) (*http.Response, string) {
 	t.Helper()
 	req, err := http.NewRequest("GET", ts.server.URL+"/api/v1/files/view?"+params.Encode(), nil)
@@ -204,7 +175,6 @@ func getView(t *testing.T, ts *nativeTestServer, params url.Values) (*http.Respo
 	return resp, string(body)
 }
 
-// getSecureView hits the authenticated /api/v1/files/view-secure endpoint.
 func getSecureView(t *testing.T, ts *nativeTestServer, params url.Values) (*http.Response, string) {
 	t.Helper()
 	req, err := http.NewRequest("GET", ts.server.URL+"/api/v1/files/view-secure?"+params.Encode(), nil)
@@ -266,7 +236,6 @@ func TestFileView_NameOverrideSanitized(t *testing.T) {
 	ts := newStagingTestServer(t)
 	path := writeStagingFile(t, ts, "safe.txt", "x")
 
-	// Header injection attempt in the display name must be neutralized.
 	resp, _ := getView(t, ts, url.Values{"path": {path}, "download": {"1"}, "name": {"ev\nil.txt"}})
 	cd := resp.Header.Get("Content-Disposition")
 	if strings.ContainsAny(cd, "\r\n") {
@@ -331,16 +300,13 @@ func TestFileView_MissingPathParam(t *testing.T) {
 
 func TestFileView_NotFound(t *testing.T) {
 	ts := newStagingTestServer(t)
-	// Must be under staging dir to get 404 (not 403).
 	missing := writeStagingFile(t, ts, "exists.txt", "x")
-	os.Remove(missing) // file existed during write, now gone
+	os.Remove(missing)
 	resp, _ := getView(t, ts, url.Values{"path": {missing}})
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
 }
-
-// --- symlink containment ---
 
 func TestFileView_RejectsSymlinkEscape(t *testing.T) {
 	ts := newStagingTestServer(t)
@@ -348,7 +314,6 @@ func TestFileView_RejectsSymlinkEscape(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("top secret"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// Symlink inside staging that points outside.
 	dir := stagingDir(ts)
 	os.MkdirAll(dir, 0755)
 	link := filepath.Join(dir, "sneaky.txt")
@@ -387,8 +352,6 @@ func TestFileView_AllowsSymlinkWithinStaging(t *testing.T) {
 	}
 }
 
-// --- symlink in stageAttachment ---
-
 func TestStageAttachment_SymlinkUnderLeleDirIsCopied(t *testing.T) {
 	leleDir := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "data.bin")
@@ -419,11 +382,8 @@ func TestStageAttachment_SymlinkUnderLeleDirIsCopied(t *testing.T) {
 	}
 }
 
-// --- FIX-1: public endpoint rejects non-staging paths under leleDir ---
-
 func TestFileView_PublicRejectsNonStagingPathUnderLeleDir(t *testing.T) {
 	ts := newStagingTestServer(t)
-	// File is under leleDir but NOT under tmp/attachments.
 	path := filepath.Join(ts.channel.cfg.LeleDir, "secret.txt")
 	if err := os.WriteFile(path, []byte("sensitive"), 0644); err != nil {
 		t.Fatal(err)
@@ -434,8 +394,6 @@ func TestFileView_PublicRejectsNonStagingPathUnderLeleDir(t *testing.T) {
 		t.Errorf("public endpoint served non-staging file: status = %d, want 403", resp.StatusCode)
 	}
 }
-
-// --- FIX-1: secure endpoint serves broader leleDir ---
 
 func TestFileView_SecureServesNonStagingPath(t *testing.T) {
 	ts := newStagingTestServer(t)
@@ -467,7 +425,6 @@ func TestFileView_SecureRejectsWithoutAuth(t *testing.T) {
 	}
 
 	req, _ := http.NewRequest("GET", ts.server.URL+"/api/v1/files/view-secure?url.QueryEscape(path)="+url.QueryEscape(path), nil)
-	// No Authorization header
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -478,8 +435,6 @@ func TestFileView_SecureRejectsWithoutAuth(t *testing.T) {
 		t.Errorf("status = %d, want 401", resp.StatusCode)
 	}
 }
-
-// --- FIX-1: denylist ---
 
 func TestFileView_PublicRejectsDeniedFilenames(t *testing.T) {
 	ts := newStagingTestServer(t)
@@ -538,8 +493,6 @@ func TestFileView_SecureRejectsDeniedFilenames(t *testing.T) {
 	}
 }
 
-// --- FIX-1: isDeniedViewPath unit tests ---
-
 func TestIsDeniedViewPath(t *testing.T) {
 	denied := []string{
 		"/home/user/.lele/keyring.key",
@@ -566,7 +519,7 @@ func TestIsDeniedViewPath(t *testing.T) {
 		"/home/user/.lele/workspace-coder/main.go",
 		"/tmp/lele/report.pdf",
 		"/home/user/.lele/notes.txt",
-		"/home/user/.lele/cache.json", // not config.json
+		"/home/user/.lele/cache.json",
 	}
 	for _, p := range allowed {
 		if isDeniedViewPath(p) {
@@ -575,18 +528,8 @@ func TestIsDeniedViewPath(t *testing.T) {
 	}
 }
 
-// --- FIXA-2: uploads dir must be publicly viewable ---
-
-// TestFileView_RegressionUploadsDirServed verifies that files under
-// <leleDir>/tmp/uploads (the second staging dir used by handleFileUpload)
-// are servable by the public GET /api/v1/files/view endpoint.
-//
-// This test FAILS (403) on code before the fixa-2 patch because the jail
-// only allowed <leleDir>/tmp/attachments.
 func TestFileView_RegressionUploadsDirServed(t *testing.T) {
 	ts := newStagingTestServer(t)
-	// Simulate a file as it would exist after handleFileUpload: under
-	// tmp/uploads with a uuid-prefixed name.
 	path := writeUploadFile(t, ts, "abcd1234_photo.png", "image-bytes")
 
 	resp, body := getView(t, ts, url.Values{"path": {path}})
@@ -598,12 +541,6 @@ func TestFileView_RegressionUploadsDirServed(t *testing.T) {
 	}
 }
 
-// TestFileView_UploadsDirDeniedSensitiveFiles verifies that the defence-in-depth
-// denylist (keyring.key, config.json, *.db, etc.) still applies to files
-// under the uploads directory — the broader jail must not bypass denylist.
-// Filenames in the uploads dir carry a uuid prefix (e.g. abcd_keyring.key),
-// but the denylist checks the base name, so files that still end with a
-// denied suffix must be rejected.
 func TestFileView_UploadsDirDeniedSensitiveFiles(t *testing.T) {
 	ts := newStagingTestServer(t)
 
@@ -622,8 +559,6 @@ func TestFileView_UploadsDirDeniedSensitiveFiles(t *testing.T) {
 	}
 
 	for _, name := range denied {
-		// Write directly to the uploads dir with the exact denied name
-		// (no uuid prefix) to test that the denylist fires.
 		dir := uploadDir(ts)
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
@@ -640,11 +575,8 @@ func TestFileView_UploadsDirDeniedSensitiveFiles(t *testing.T) {
 	}
 }
 
-// TestFileView_RejectsPathOutsideBothStagingRoots verifies that paths under
-// leleDir but outside both tmp/attachments and tmp/uploads are rejected.
 func TestFileView_RejectsPathOutsideBothStagingRoots(t *testing.T) {
 	ts := newStagingTestServer(t)
-	// Directly under leleDir
 	secret := filepath.Join(ts.channel.cfg.LeleDir, "config.json")
 	if err := os.WriteFile(secret, []byte("secret"), 0644); err != nil {
 		t.Fatal(err)
@@ -654,7 +586,6 @@ func TestFileView_RejectsPathOutsideBothStagingRoots(t *testing.T) {
 		t.Errorf("config.json under leleDir: status = %d, want 403", resp.StatusCode)
 	}
 
-	// Under tmp/ but in a different subdir
 	other := filepath.Join(ts.channel.cfg.LeleDir, "tmp", "otro", "x.png")
 	if err := os.MkdirAll(filepath.Dir(other), 0755); err != nil {
 		t.Fatal(err)
@@ -668,8 +599,6 @@ func TestFileView_RejectsPathOutsideBothStagingRoots(t *testing.T) {
 	}
 }
 
-// TestFileView_RejectsUploadsSiblingPrefixEscape verifies that a directory
-// with a name like "tmp/uploads_evil" is not accepted under the uploads jail.
 func TestFileView_RejectsUploadsSiblingPrefixEscape(t *testing.T) {
 	ts := newStagingTestServer(t)
 	leleDir := ts.channel.cfg.LeleDir
@@ -688,8 +617,6 @@ func TestFileView_RejectsUploadsSiblingPrefixEscape(t *testing.T) {
 	}
 }
 
-// TestFileView_UploadsSymlinkEscape verifies that a symlink inside
-// tmp/uploads pointing outside both staging roots is rejected.
 func TestFileView_UploadsSymlinkEscape(t *testing.T) {
 	ts := newStagingTestServer(t)
 	outside := filepath.Join(t.TempDir(), "secret.txt")

@@ -31,8 +31,6 @@ function msg(
   }
 }
 
-// ── messageInsertion ────────────────────────────────────────────────────────
-
 describe('computeToolInsertIndex', () => {
   test('appends at end when no assistant exists', () => {
     const current = [msg('t1', 'tool', '', { toolName: 'exec' })]
@@ -46,7 +44,6 @@ describe('computeToolInsertIndex', () => {
       msg('t1', 'tool', '', { toolName: 'exec' }),
       msg('t2', 'tool', '', { toolName: 'read_file' }),
     ]
-    // After t2 → index 4
     expect(computeToolInsertIndex(current)).toBe(4)
   })
 
@@ -65,8 +62,6 @@ describe('computeAssistantInsertIndex (re-exported from messageInsertion)', () =
     expect(computeAssistantInsertIndex(current)).toBe(2)
   })
 })
-
-// ── streamingOps ────────────────────────────────────────────────────────────
 
 describe('migrateRestoreId', () => {
   test('renames restore placeholder to real id', () => {
@@ -130,7 +125,6 @@ describe('restoreInProgressAssistant', () => {
   test('inserts after last user for session when flag set', () => {
     const current = [msg('u1', 'user', 'q'), msg('a-old', 'assistant', 'prev')]
     const next = restoreInProgressAssistant(current, 's1', 'restored', '', true)
-    // inserted right after u1 (index 1), before a-old
     expect(next.map((m) => m.id)).toEqual(['u1', 'restore-s1', 'a-old'])
   })
 
@@ -153,7 +147,7 @@ describe('applyMessageComplete', () => {
     const next = applyMessageComplete(current, 'a1', 's1', undefined)
     expect(next.map((m) => m.id)).toEqual(['u1', 'a1', 't1'])
     expect(next.find((m) => m.id === 'a1')?.streaming).toBe(false)
-    expect(next.find((m) => m.id === 'a1')?.content).toBe('streamed') // kept (server empty)
+    expect(next.find((m) => m.id === 'a1')?.content).toBe('streamed')
     expect(next.find((m) => m.id === 't1')?.streaming).toBe(false)
   })
 
@@ -164,9 +158,6 @@ describe('applyMessageComplete', () => {
   })
 
   test('creates the message when complete arrives before any stream chunk drained', () => {
-    // message.complete can arrive before the typewriter queue's first tick
-    // (or when stream events are coalesced). The message must still appear
-    // with the final content instead of being silently dropped.
     const current = [msg('u1', 'user', 'hi')]
     const next = applyMessageComplete(current, 'a1', 's1', 'Parent response')
     expect(next.map((m) => m.id)).toEqual(['u1', 'a1'])
@@ -225,9 +216,6 @@ describe('applyMessageComplete', () => {
   })
 
   test('marks the completed message as an error when the turn failed', () => {
-    // A failed turn is flagged on the wire (message.complete error === true, see
-    // pkg/channels/native.go): the bubble must render the red error box straight
-    // away instead of waiting for the history refetch that carries error_detail.
     const current = [msg('u1', 'user', 'hi'), msg('a1', 'assistant', '', { streaming: true })]
     const next = applyMessageComplete(current, 'a1', 's1', 'ERROR_TEXT', undefined, true)
 
@@ -278,15 +266,11 @@ describe('markNewestOptimisticUserFailed', () => {
     const next = markNewestOptimisticUserFailed(current, 's1')
 
     expect(next[1].failed).toBe(true)
-    // The flag that keeps the composer's spinner logic honest.
     expect(next[1].streaming).toBe(false)
-    // The earlier turn was accepted and may still be answered: untouched.
     expect(next[0].failed).toBeUndefined()
     expect(next[0].streaming).toBe(false)
-    // Every other message is the very same object (nothing else re-renders).
     expect(next[2]).toBe(current[2])
     expect(next[0]).toBe(current[0])
-    // Input is not mutated.
     expect(current[1].failed).toBeUndefined()
   })
 
@@ -311,7 +295,6 @@ describe('markNewestOptimisticUserFailed', () => {
       msg('a1', 'assistant', 'answer', { streaming: true }),
     ]
     expect(markNewestOptimisticUserFailed(current, 's1')).toBe(current)
-    // Empty list too (a refusal before any send was accepted locally).
     const empty: ChatMessage[] = []
     expect(markNewestOptimisticUserFailed(empty, 's1')).toBe(empty)
   })
@@ -324,10 +307,8 @@ describe('markNewestOptimisticUserFailed', () => {
     const next = markNewestOptimisticUserFailed(current, 's1')
 
     expect(next[0].failed).toBe(true)
-    // The NEWEST optimistic message overall belongs to s2: it must stay clean.
     expect(next[1].failed).toBeUndefined()
 
-    // A session with no bubble at all is a no-op (same instance).
     const foreignOnly = [msg('u2', 'user', 'theirs', { optimistic: true, sessionKey: 's2' })]
     expect(markNewestOptimisticUserFailed(foreignOnly, 's1')).toBe(foreignOnly)
   })
@@ -337,22 +318,10 @@ describe('markNewestOptimisticUserFailed', () => {
       msg('u1', 'user', 'first', { optimistic: true }),
       msg('u2', 'user', 'second', { optimistic: true, failed: true }),
     ]
-    // A late/duplicate refusal must not schedule a pointless state update.
     expect(markNewestOptimisticUserFailed(current, 's1')).toBe(current)
   })
 
   test('matches a bubble carrying the conversation alias against the bare key', () => {
-    // The WS handlers re-tag transient messages with the pane's effective
-    // session key, which can be the aliased `base:chat:N` built by
-    // pkg/agent/loop.go `nextConversationSessionKey` while the refusal handler
-    // queries with the bare pane key (or vice versa). A strict `===` left the
-    // bubble unmarked — stranded with no retry affordance — which is exactly
-    // what this helper exists to prevent.
-    //
-    // NOTE the alias shape: the suffix is `:chat:<digits>` appended to the
-    // WHOLE base key (`native:client-1` -> `native:client-1:chat:7`), so the
-    // pair is base vs base+suffix. A bare `chat:7` has no `:chat:` prefix and
-    // is therefore a root of its own (see the `chat:8` case below).
     const aliased = [
       msg('u1', 'user', 'aliased', {
         optimistic: true,
@@ -364,10 +333,8 @@ describe('markNewestOptimisticUserFailed', () => {
 
     expect(next[0].failed).toBe(true)
     expect(next[0].streaming).toBe(false)
-    // Input is not mutated (the flagged copy is a new object).
     expect(aliased[0].failed).toBeUndefined()
 
-    // …and the mirror case: bubble on the bare key, queried with the alias.
     const bare = [
       msg('u1', 'user', 'bare', {
         optimistic: true,
@@ -382,14 +349,6 @@ describe('markNewestOptimisticUserFailed', () => {
   })
 
   test('still ignores a bubble of a genuinely different session (chat:8)', () => {
-    // Loosening the match must not widen it to another conversation. `chat:8`
-    // has no `:chat:<digits>` suffix, so its root is itself and it can never
-    // match `native:client-1` (or its alias). Same for another client's pane.
-    //
-    // NOTE (intentional, documented in event-handlers/helpers.ts): two ALIASES
-    // of the SAME base (`native:client-1:chat:7` vs `…:chat:8`) DO loosely
-    // match — one client, one visible conversation per base. That is not what
-    // this test guards; it guards against matching ACROSS roots.
     const current = [
       msg('u1', 'user', 'mine', {
         optimistic: true,
@@ -411,8 +370,6 @@ describe('markNewestOptimisticUserFailed', () => {
     expect(next[2].failed).toBeUndefined()
     expect(next[2].streaming).toBe(true)
 
-    // A refusal for a session that has no bubble in this list is a no-op
-    // (same instance, no pointless state update).
     const untouched = markNewestOptimisticUserFailed(current, 'native:client-9')
     expect(untouched).toBe(current)
   })

@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -24,11 +18,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// newHarnessTestLoop builds an AgentLoop whose config declares the given
-// commands. It reuses the llm_runner helper, which already isolates the agent
-// from the real user by pointing LELE_CONFIG_DIR at a temp dir, so the global
-// and workspace command levels load from empty directories and only the
-// config.json level (plus a possible ./.lele/commands) is in play.
 func newHarnessTestLoop(t *testing.T, defs map[string]config.CommandDefinition) (*AgentLoop, string) {
 	t.Helper()
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
@@ -39,8 +28,6 @@ func newHarnessTestLoop(t *testing.T, defs map[string]config.CommandDefinition) 
 	return al, tmpDir
 }
 
-// consumeCommandApplied drains the (buffered) outbound bus until the
-// command.applied event shows up, ignoring anything published earlier.
 func consumeCommandApplied(t *testing.T, mb *bus.MessageBus) bus.OutboundMessage {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
@@ -62,11 +49,6 @@ func consumeCommandApplied(t *testing.T, mb *bus.MessageBus) bus.OutboundMessage
 	}
 }
 
-// TestHarnessCommand_ArgsKeptWithoutPlaceholder covers the "my arguments
-// vanished" report: a command whose template does not mention $ARGUMENTS used
-// to DROP everything the user typed after the command name, so "/pr revisa los
-// tests" reached the model as the bare template. The arguments must survive as
-// a trailing "ARGUMENTS: …" line instead.
 func TestHarnessCommand_ArgsKeptWithoutPlaceholder(t *testing.T) {
 	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"pr": {Description: "inicia el pr", Template: "inicia el pr"},
@@ -87,10 +69,6 @@ func TestHarnessCommand_ArgsKeptWithoutPlaceholder(t *testing.T) {
 	}
 }
 
-// TestHarnessCommand_ArgsVerbatim pins the two raw-argument rules the UIs rely
-// on: $ARGUMENTS receives exactly what was typed (inner spacing and line breaks
-// included, not re-joined fields), and the trailer appended when the template
-// has no placeholder uses that same verbatim text.
 func TestHarnessCommand_ArgsVerbatim(t *testing.T) {
 	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"echo":   {Template: "[$ARGUMENTS]"},
@@ -121,9 +99,6 @@ func TestHarnessCommand_ArgsVerbatim(t *testing.T) {
 	}
 	consumeCommandApplied(t, al.bus)
 
-	// A template whose positional placeholders cannot receive every typed word
-	// still forwards the rest: dropping "second" here is exactly the bug where
-	// "/task proceed with this error: …" reached the model as "proceed".
 	msg = bus.InboundMessage{Channel: "native", ChatID: "c", Content: "/quoted first second"}
 	if !mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
 		t.Fatal("expected /quoted to apply")
@@ -136,12 +111,6 @@ func TestHarnessCommand_ArgsVerbatim(t *testing.T) {
 	}
 }
 
-// TestHarnessCommand_PositionalKeepsRestOfArguments is the regression pin for
-// the "only the first word is sent" report: a custom command whose template
-// references a positional ($1) used to receive only the FIRST token of a long
-// free-form argument, so "/task proceed with this error: boom" reached the
-// model as "TASK: proceed" and it ignored everything after it. The words the
-// positional cannot receive must come along as the ARGUMENTS: trailer.
 func TestHarnessCommand_PositionalKeepsRestOfArguments(t *testing.T) {
 	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"task": {Description: "task runner", Template: "TASK: $1"},
@@ -161,8 +130,6 @@ func TestHarnessCommand_PositionalKeepsRestOfArguments(t *testing.T) {
 	if got := msg.Metadata["harness_args"]; got != typed {
 		t.Errorf("harness_args = %q, want %q", got, typed)
 	}
-	// The one-word case must stay byte-identical: no trailer when the
-	// positional already received everything the user typed.
 	consumeCommandApplied(t, al.bus)
 	msg = bus.InboundMessage{Channel: "native", ChatID: "c", Content: "/task short"}
 	if !mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
@@ -173,8 +140,6 @@ func TestHarnessCommand_PositionalKeepsRestOfArguments(t *testing.T) {
 	}
 }
 
-// TestHarnessCommand_NoArgsNoTrailer guards the empty-argument case: a bare
-// "/pr" must expand to the template alone, with no empty ARGUMENTS: line.
 func TestHarnessCommand_NoArgsNoTrailer(t *testing.T) {
 	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"pr": {Template: "inicia el pr"},
@@ -216,12 +181,9 @@ func TestHarnessCommand_AppliesAndPublishes(t *testing.T) {
 	if got := msg.Metadata["harness_source"]; got != string(harness.SourceConfig) {
 		t.Errorf("metadata harness_source = %q, want %q", got, harness.SourceConfig)
 	}
-	// Description rides in metadata so the persisted user message can re-render
-	// the command chip from history (providers.Message.Command).
 	if got := msg.Metadata["harness_description"]; got != "Review code" {
 		t.Errorf("metadata harness_description = %q, want %q", got, "Review code")
 	}
-	// agent/model are only set when the command declares them.
 	if _, ok := msg.Metadata["harness_agent"]; ok {
 		t.Errorf("unexpected harness_agent metadata: %q", msg.Metadata["harness_agent"])
 	}
@@ -241,8 +203,6 @@ func TestHarnessCommand_AppliesAndPublishes(t *testing.T) {
 	}
 }
 
-// TestHarnessCommand_SessionKeyWinsForEventChatID pins the routing key used by
-// the command.applied event: clients correlate on the session key.
 func TestHarnessCommand_SessionKeyWinsForEventChatID(t *testing.T) {
 	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"t": {Template: "body $ARGUMENTS"},
@@ -314,15 +274,12 @@ func TestHarnessCommand_EmptyExpansionDeclined(t *testing.T) {
 	})
 	mp := newMessageProcessor(al)
 
-	// The manager skips empty templates at load time, so the lookup misses.
 	msg := bus.InboundMessage{Channel: "cli", ChatID: "c", Content: "/blank hi"}
 	if mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
 		t.Fatal("expected empty-template command to be declined")
 	}
 }
 
-// TestHarnessManager_RebuildsOnConfigChange guards the fingerprint: adding a
-// command (or flipping the shell default) must be visible without a restart.
 func TestHarnessManager_RebuildsOnConfigChange(t *testing.T) {
 	al, _ := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"one": {Template: "first"},
@@ -348,7 +305,6 @@ func TestHarnessManager_RebuildsOnConfigChange(t *testing.T) {
 		t.Fatal("command 'two' missing after rebuild")
 	}
 
-	// Unchanged config must reuse the manager (no rebuild per message).
 	if al.harnessManager() != second {
 		t.Error("manager rebuilt without a config change")
 	}
@@ -362,12 +318,6 @@ func TestHarnessManager_RebuildsOnConfigChange(t *testing.T) {
 	}
 }
 
-// TestHarnessManager_ConcurrentRebuild hammers harnessManager() from several
-// goroutines while the config fingerprint changes underneath (simulating a
-// hot-reload racing message processing). Guards the lock ordering that makes
-// the lazy rebuild safe: harnessMu serializes rebuilds, the returned Manager
-// is always fully loaded, and Registry pointers stay stable per Manager. Run
-// under -race in CI.
 func TestHarnessManager_ConcurrentRebuild(t *testing.T) {
 	al, _ := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"base": {Template: "b"},
@@ -393,11 +343,6 @@ func TestHarnessManager_ConcurrentRebuild(t *testing.T) {
 			}
 		}()
 	}
-	// Mutate the config (fingerprint changes -> rebuilds) while readers run.
-	// Each iteration publishes a NEW Config: a real hot-reload replaces the
-	// whole struct, and mutating the shared map in place would be a test-only
-	// race. The clone goes through JSON because Config embeds a RWMutex (vet
-	// forbids copying it with *cfg).
 	for n := 1; n <= 30; n++ {
 		raw, err := json.Marshal(al.cfg())
 		if err != nil {
@@ -418,7 +363,6 @@ func TestHarnessManager_ConcurrentRebuild(t *testing.T) {
 	close(stop)
 	wg.Wait()
 
-	// Final state must contain every command published so far.
 	names := map[string]bool{}
 	for _, c := range al.HarnessCommands() {
 		names[c.Name] = true
@@ -442,8 +386,6 @@ func TestHarnessCommandDefsFromConfig(t *testing.T) {
 	}
 }
 
-// TestHarnessCommand_AllowShellDefault verifies the global harness switch
-// reaches expansion.
 func TestHarnessCommand_AllowShellDefault(t *testing.T) {
 	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"sh": {Template: "run !`echo hi`"},
@@ -463,9 +405,6 @@ func TestHarnessCommand_AllowShellDefault(t *testing.T) {
 	_ = consumeCommandApplied(t, al.bus)
 }
 
-// TestHarnessCommand_AbsoluteFileOptIn pins the security default: @/abs/path
-// inlining is blocked unless the harness default or the command tri-state
-// enables it, and an explicit tri-state false vetoes a global true.
 func TestHarnessCommand_AbsoluteFileOptIn(t *testing.T) {
 	yes, no := true, false
 	secret := filepath.Join(t.TempDir(), "id_rsa")
@@ -474,7 +413,6 @@ func TestHarnessCommand_AbsoluteFileOptIn(t *testing.T) {
 	}
 	ref := "@" + secret
 
-	// Default off: blocked placeholder, content never appears.
 	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"peek": {Template: "see " + ref},
 	})
@@ -488,7 +426,6 @@ func TestHarnessCommand_AbsoluteFileOptIn(t *testing.T) {
 	}
 	_ = consumeCommandApplied(t, al.bus)
 
-	// Harness-wide default on: inlined.
 	cfg := al.cfg()
 	cfg.Harness.AllowAbsoluteFiles = true
 	al.cfgPtr.Store(cfg)
@@ -501,8 +438,6 @@ func TestHarnessCommand_AbsoluteFileOptIn(t *testing.T) {
 	}
 	_ = consumeCommandApplied(t, al.bus)
 
-	// Tri-state false vetoes the global true (the deliberate difference from
-	// allow_shell's OR merge).
 	cfg = al.cfg()
 	cfg.Commands["peek"] = config.CommandDefinition{Template: "see " + ref, AllowAbsoluteFiles: &no}
 	al.cfgPtr.Store(cfg)
@@ -515,7 +450,6 @@ func TestHarnessCommand_AbsoluteFileOptIn(t *testing.T) {
 	}
 	_ = consumeCommandApplied(t, al.bus)
 
-	// And with the global default off, tri-state true opts in.
 	cfg = al.cfg()
 	cfg.Harness.AllowAbsoluteFiles = false
 	cfg.Commands["peek"] = config.CommandDefinition{Template: "see " + ref, AllowAbsoluteFiles: &yes}
@@ -530,9 +464,6 @@ func TestHarnessCommand_AbsoluteFileOptIn(t *testing.T) {
 	_ = consumeCommandApplied(t, al.bus)
 }
 
-// TestModelForTurn_PrefersOverride covers the runner-side half of the model
-
-// override: turn override wins, session model otherwise.
 func TestModelForTurn_PrefersOverride(t *testing.T) {
 	al, tmpDir := newHarnessTestLoop(t, nil)
 	defer os.RemoveAll(tmpDir)
@@ -542,7 +473,6 @@ func TestModelForTurn_PrefersOverride(t *testing.T) {
 	if got := runner.modelForTurn(agent, processOptions{SessionKey: "s", ModelOverride: "turn-model"}); got != "turn-model" {
 		t.Errorf("modelForTurn = %q, want turn-model", got)
 	}
-	// Without an override the session model (agent default here) applies.
 	if got := runner.modelForTurn(agent, processOptions{SessionKey: "s"}); got == "" {
 		t.Error("modelForTurn returned empty without an override")
 	}
@@ -551,9 +481,6 @@ func TestModelForTurn_PrefersOverride(t *testing.T) {
 	}
 }
 
-// TestModelOverride_FlowsIntoLLMCall proves processOptions.ModelOverride reaches
-// the provider call instead of the session model, and that using it does not
-// contaminate sessionModels.
 func TestModelOverride_FlowsIntoLLMCall(t *testing.T) {
 	al, tmpDir := newHarnessTestLoop(t, nil)
 	defer os.RemoveAll(tmpDir)
@@ -589,8 +516,6 @@ func TestModelOverride_FlowsIntoLLMCall(t *testing.T) {
 	}
 }
 
-// TestCommandRegistry_CustomReexport keeps pkg/agent re-exports in sync with the
-// leaf package (same guard style as TestCommandRegistry_ReexportMatchesSource).
 func TestCommandRegistry_CustomReexport(t *testing.T) {
 	base := []CommandInfo{{Name: "/clear", Description: "c", Usage: "/clear"}}
 	custom := []CustomCommandInfo{{Name: "review", Description: "r", Usage: "/review", Source: "config"}}
@@ -610,15 +535,12 @@ func TestCommandRegistry_CustomReexport(t *testing.T) {
 	}
 }
 
-// TestHarnessCommand_SanitizesSpoofedMetadata pins that inbound harness_* keys
-// cannot be used to switch agent/model without a matching custom command.
 func TestHarnessCommand_SanitizesSpoofedMetadata(t *testing.T) {
 	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"review": {Template: "check $ARGUMENTS"},
 	})
 	mp := newMessageProcessor(al)
 
-	// No command matches, but the payload claims an agent/model override.
 	msg := bus.InboundMessage{
 		Channel:  "webui",
 		ChatID:   "c",
@@ -638,8 +560,6 @@ func TestHarnessCommand_SanitizesSpoofedMetadata(t *testing.T) {
 		t.Error("sanitization must not touch unrelated metadata")
 	}
 
-	// Even a matching command must not inherit the spoofed values: the ones it
-	// declares itself (none here) are the only ones present afterwards.
 	msg2 := bus.InboundMessage{
 		Channel:  "webui",
 		ChatID:   "c",
@@ -661,9 +581,6 @@ func TestHarnessCommand_SanitizesSpoofedMetadata(t *testing.T) {
 	_ = consumeCommandApplied(t, al.bus)
 }
 
-// TestHarnessManager_DiscoversWorkspaceMarkdownCommands exercises the file
-// levels: <Workspace>/commands/*.md must load and win over a same-name config
-// entry (precedence config < global < workspace < directory).
 func TestHarnessManager_DiscoversWorkspaceMarkdownCommands(t *testing.T) {
 	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"review": {Description: "from config", Template: "config body $ARGUMENTS"},
@@ -694,8 +611,6 @@ func TestHarnessManager_DiscoversWorkspaceMarkdownCommands(t *testing.T) {
 	_ = consumeCommandApplied(t, al.bus)
 }
 
-// TestHarnessManager_RebuildsOnInPlaceTemplateEdit pins the fingerprint hash:
-// changing a command's template without adding/removing entries must be seen.
 func TestHarnessManager_RebuildsOnInPlaceTemplateEdit(t *testing.T) {
 	al, _ := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"same": {Template: "v1"},
@@ -714,18 +629,7 @@ func TestHarnessManager_RebuildsOnInPlaceTemplateEdit(t *testing.T) {
 	}
 }
 
-// TestAgentProvidable_ExposesHarnessCommands is the structural guard for the
-// wiring gap this pins down: channels.NewManager receives
-// AgentLoop.GetProvidable() — the agentProvidableImpl wrapper — NOT the loop,
-// and it discovers custom commands through an optional interface assertion
-// (channels.customCommandProvider). If the wrapper ever stops exposing
-// HarnessCommands, the assertion fails silently and the WebUI palette shows
-// built-ins only, while the TUI (which holds *AgentLoop) keeps working. That
-// asymmetry is exactly what a test must catch, so it is asserted here against
-// the same interface shape channels/rest_commands.go declares.
 func TestAgentProvidable_ExposesHarnessCommands(t *testing.T) {
-	// Same shape as channels.customCommandProvider (pkg/channels cannot import
-	// pkg/agent, so the declaration is duplicated by design).
 	type harnessProvider interface {
 		HarnessCommands() []*harness.Command
 	}
@@ -752,10 +656,6 @@ func TestAgentProvidable_ExposesHarnessCommands(t *testing.T) {
 	}
 }
 
-// TestHarnessFingerprintTriStateByValue guards D4: the fingerprint must
-// depend on the VALUE of the per-command *bool, not on the pointer address.
-// Re-parsing the same config allocates new pointers; if the hash used %v the
-// fingerprint would change on every re-parse and trigger spurious rebuilds.
 func TestHarnessFingerprintTriStateByValue(t *testing.T) {
 	yes1, yes2 := true, true
 	no1 := false
@@ -777,12 +677,6 @@ func TestHarnessFingerprintTriStateByValue(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Per-workspace manager cache (harnessManagerFor / HarnessCommandsFor)
-// ──────────────────────────────────────────────────────────────────────────────
-
-// writeHarnessCommandFile creates <workspace>/commands/<name>.md with the given
-// frontmatter block (may be empty) and template body.
 func writeHarnessCommandFile(t *testing.T, workspace, name, frontmatter, template string) {
 	t.Helper()
 	dir := filepath.Join(workspace, "commands")
@@ -799,7 +693,6 @@ func writeHarnessCommandFile(t *testing.T, workspace, name, frontmatter, templat
 	}
 }
 
-// commandNamesOf maps a command slice to its names for readable assertions.
 func commandNamesOf(cmds []*harness.Command) map[string]bool {
 	out := make(map[string]bool, len(cmds))
 	for _, c := range cmds {
@@ -808,10 +701,6 @@ func commandNamesOf(cmds []*harness.Command) map[string]bool {
 	return out
 }
 
-// TestHarnessManagerFor_PerWorkspaceManagers pins the core of the per-agent
-// commands fix: one cached manager per workspace, each seeing the commands of
-// ITS workspace, while the defaults workspace keeps exactly the view
-// HarnessCommands() has always had.
 func TestHarnessManagerFor_PerWorkspaceManagers(t *testing.T) {
 	al, defaultsWs := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"shared": {Description: "from config", Template: "config body"},
@@ -821,13 +710,9 @@ func TestHarnessManagerFor_PerWorkspaceManagers(t *testing.T) {
 	wsB := t.TempDir()
 	writeHarnessCommandFile(t, wsA, "a-only", "description: A", "body A")
 	writeHarnessCommandFile(t, wsB, "b-only", "description: B", "body B")
-	// Same name in two workspaces: each manager must report ITS OWN file, which
-	// a shared manager could never do.
 	writeHarnessCommandFile(t, wsA, "clash", "description: from A", "A body")
 	writeHarnessCommandFile(t, wsB, "clash", "description: from B", "B body")
 
-	// "" is the defaults workspace, and so is the defaults workspace spelled
-	// out: one entry, one manager.
 	def := al.harnessManagerFor("")
 	if def != al.harnessManager() {
 		t.Error(`harnessManagerFor("") and harnessManager() returned different managers`)
@@ -835,7 +720,6 @@ func TestHarnessManagerFor_PerWorkspaceManagers(t *testing.T) {
 	if got, want := al.harnessManagerFor(defaultsWs), def; got != want {
 		t.Errorf("defaults workspace resolved to a second manager (%p vs %p)", got, want)
 	}
-	// Trailing separators must not fork an entry either.
 	if got, want := al.harnessManagerFor(wsA+string(filepath.Separator)), al.harnessManagerFor(wsA); got != want {
 		t.Errorf("trailing separator forked the entry for %s", wsA)
 	}
@@ -845,12 +729,10 @@ func TestHarnessManagerFor_PerWorkspaceManagers(t *testing.T) {
 	if mgrA == mgrB || mgrA == def || mgrB == def {
 		t.Fatalf("workspaces share a manager: def=%p A=%p B=%p", def, mgrA, mgrB)
 	}
-	// Repeated access reuses the cached manager (no rebuild per message).
 	if al.harnessManagerFor(wsA) != mgrA {
 		t.Error("manager for workspace A rebuilt without a config change")
 	}
 
-	// Registry contents per workspace.
 	namesA := commandNamesOf(mgrA.Registry().All())
 	namesB := commandNamesOf(mgrB.Registry().All())
 	for _, tc := range []struct {
@@ -875,7 +757,6 @@ func TestHarnessManagerFor_PerWorkspaceManagers(t *testing.T) {
 		}
 	}
 
-	// The clash must resolve to each workspace's own template.
 	cmdA, _ := mgrA.Registry().Get("clash")
 	cmdB, _ := mgrB.Registry().Get("clash")
 	if cmdA.Template != "A body" {
@@ -885,8 +766,6 @@ func TestHarnessManagerFor_PerWorkspaceManagers(t *testing.T) {
 		t.Errorf("workspace B clash template = %q, want %q", cmdB.Template, "B body")
 	}
 
-	// HarnessCommands() must be exactly HarnessCommandsFor("") — the palette
-	// channels and the TUI keep seeing the defaults view, unchanged.
 	defaults := al.HarnessCommands()
 	for _, ws := range []string{wsA, wsB} {
 		if got := commandNamesOf(al.HarnessCommandsFor(ws)); !got["clash"] {
@@ -901,10 +780,6 @@ func TestHarnessManagerFor_PerWorkspaceManagers(t *testing.T) {
 	}
 }
 
-// TestHarnessManagerFor_RebuildsEntryOnHarnessFlagChange pins the hot-reload
-// half of the per-entry fingerprint: flipping a harness permission default must
-// replace every cached manager that depends on it, so no agent keeps running
-// with the OLD permissions after a config reload.
 func TestHarnessManagerFor_RebuildsEntryOnHarnessFlagChange(t *testing.T) {
 	al, _ := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"sh": {Description: "d", Template: "run !`echo hi`"},
@@ -936,18 +811,15 @@ func TestHarnessManagerFor_RebuildsEntryOnHarnessFlagChange(t *testing.T) {
 	if !defAfter.AllowShell(mustHarnessCommand(t, defAfter, "sh")) {
 		t.Error("rebuilt defaults manager still reports shell disabled")
 	}
-	// The other workspace's commands survive the rebuild.
 	if _, ok := mgrAfter.Registry().Get("local"); !ok {
 		t.Error("workspace command lost after rebuild")
 	}
-	// And the entry is cached again: no rebuild without a further change.
 	if al.harnessManagerFor(ws) != mgrAfter {
 		t.Error("manager rebuilt twice for one config change")
 	}
 
 }
 
-// mustHarnessCommand fetches a command from a manager's registry or fails.
 func mustHarnessCommand(t *testing.T, mgr *harness.Manager, name string) *harness.Command {
 	t.Helper()
 	cmd, ok := mgr.Registry().Get(name)
@@ -957,10 +829,6 @@ func mustHarnessCommand(t *testing.T, mgr *harness.Manager, name string) *harnes
 	return cmd
 }
 
-// TestHarnessManagerFor_GlobalConfigChangeRebuildsAllEntriesLazily documents the
-// intended laziness of the map: after a global config change, EVERY entry is
-// rebuilt the next time it is touched (each computes its own fingerprint), and
-// an entry nobody touches is never rebuilt.
 func TestHarnessManagerFor_GlobalConfigChangeRebuildsAllEntriesLazily(t *testing.T) {
 	al, _ := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"one": {Template: "first"},
@@ -981,8 +849,6 @@ func TestHarnessManagerFor_GlobalConfigChangeRebuildsAllEntriesLazily(t *testing
 	if _, ok := mgrANew.Registry().Get("two"); !ok {
 		t.Fatal("new config command missing from rebuilt workspace A manager")
 	}
-	// B was untouched while the config changed; accessing it now must still see
-	// the new config, because its own fingerprint changed too.
 	mgrBNew := al.harnessManagerFor(wsB)
 	if mgrBNew == mgrBDef {
 		t.Fatal("workspace B entry not rebuilt on first access after a global config change")
@@ -992,10 +858,6 @@ func TestHarnessManagerFor_GlobalConfigChangeRebuildsAllEntriesLazily(t *testing
 	}
 }
 
-// TestHarnessManagerFor_ConcurrentPerWorkspaceAccess hammers harnessManagerFor
-// from several goroutines across several workspaces while the config changes
-// underneath, guarding the map and its entries under harnessMu. Run under -race
-// in CI.
 func TestHarnessManagerFor_ConcurrentPerWorkspaceAccess(t *testing.T) {
 	al, _ := newHarnessTestLoop(t, map[string]config.CommandDefinition{
 		"base": {Template: "b"},
@@ -1042,16 +904,6 @@ func TestHarnessManagerFor_ConcurrentPerWorkspaceAccess(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// T-B4: regression for the per-agent commands bug.
-// ──────────────────────────────────────────────────────────────────────────────
-
-// perWorkspaceHarnessLoop builds a loop with two agents living in two distinct
-// workspaces, each carrying its own commands/ folder and its own notes.txt.
-// "main" owns the defaults workspace; "coder" is reached either by a guild
-// binding (discord/g1) or by a session agent override. The mock provider
-// records what the LLM actually saw, which is the only way to observe the
-// content processMessage expanded.
 func perWorkspaceHarnessLoop(t *testing.T) (*AgentLoop, *llmRunnerMockLLMProvider, string, string) {
 	t.Helper()
 
@@ -1069,9 +921,6 @@ func perWorkspaceHarnessLoop(t *testing.T) (*AgentLoop, *llmRunnerMockLLMProvide
 			t.Fatalf("mkdir %s: %v", ws, err)
 		}
 	}
-	// The SAME command name exists in both workspaces with a different template,
-	// and the SAME relative @file reference resolves to different content in
-	// each — so a wrong-workspace expansion cannot pass by accident.
 	writeHarnessCommandFile(t, defaultsWs, "peek", "description: from main", "main sees @notes.txt")
 	writeHarnessCommandFile(t, coderWs, "peek", "description: from coder", "coder sees @notes.txt")
 	if err := os.WriteFile(filepath.Join(defaultsWs, "notes.txt"), []byte("MAIN-NOTE"), 0o644); err != nil {
@@ -1105,8 +954,6 @@ func perWorkspaceHarnessLoop(t *testing.T) (*AgentLoop, *llmRunnerMockLLMProvide
 		response:    &providers.LLMResponse{Content: "ok", ToolCalls: []providers.ToolCall{}},
 		callHistory: []providers.Message{},
 	}
-	// Both agents need the mock: the routed one answers, the other must never be
-	// reached with the real (keyless) provider.
 	for _, id := range []string{"main", "coder"} {
 		agent, ok := al.registry.GetAgent(id)
 		if !ok || agent == nil {
@@ -1119,7 +966,6 @@ func perWorkspaceHarnessLoop(t *testing.T) (*AgentLoop, *llmRunnerMockLLMProvide
 	return al, provider, defaultsWs, coderWs
 }
 
-// lastUserMessage returns the content of the last user message the provider saw.
 func lastUserMessage(t *testing.T, p *llmRunnerMockLLMProvider) string {
 	t.Helper()
 	if p.callCount == 0 {
@@ -1137,12 +983,6 @@ func lastUserMessage(t *testing.T, p *llmRunnerMockLLMProvider) string {
 	return last
 }
 
-// TestProcessMessage_HarnessCommandUsesRoutedAgentWorkspace is the regression
-// test for the bug this change fixes: a custom command defined in the ROUTED
-// agent's workspace must be found there and expanded with that workspace as the
-// working directory. Before the fix, applyHarnessCommand ran before routing with
-// the agents.defaults workspace, so an agent with its own workspace could never
-// see or run its own commands.
 func TestProcessMessage_HarnessCommandUsesRoutedAgentWorkspace(t *testing.T) {
 	al, provider, _, coderWs := perWorkspaceHarnessLoop(t)
 
@@ -1165,16 +1005,11 @@ func TestProcessMessage_HarnessCommandUsesRoutedAgentWorkspace(t *testing.T) {
 	if strings.Contains(got, "MAIN-NOTE") || strings.Contains(got, "main sees") {
 		t.Errorf("expansion leaked the defaults workspace: %q", got)
 	}
-	// The command really came from the workspace level of the routed agent.
 	if _, ok := al.harnessManagerFor(coderWs).Registry().Get("peek"); !ok {
 		t.Error("coder workspace has no peek command — test setup broken")
 	}
 }
 
-// TestProcessMessage_HarnessCommandUsesSessionAgentWorkspace pins the second
-// half of the effective-agent resolution: the session's agent override (set by
-// /agent) wins over the route, so it is also the workspace the command is looked
-// up in. Here the channel routes to "main" but the session is pinned to "coder".
 func TestProcessMessage_HarnessCommandUsesSessionAgentWorkspace(t *testing.T) {
 	al, provider, _, _ := perWorkspaceHarnessLoop(t)
 
@@ -1198,9 +1033,6 @@ func TestProcessMessage_HarnessCommandUsesSessionAgentWorkspace(t *testing.T) {
 	}
 }
 
-// TestProcessMessage_HarnessCommandFallsBackToDefaultsWorkspace pins the other
-// side: with no binding and no session override, the routed agent IS the defaults
-// agent, so its workspace keeps being used — the historical behaviour.
 func TestProcessMessage_HarnessCommandFallsBackToDefaultsWorkspace(t *testing.T) {
 	al, provider, _, _ := perWorkspaceHarnessLoop(t)
 
@@ -1221,15 +1053,6 @@ func TestProcessMessage_HarnessCommandFallsBackToDefaultsWorkspace(t *testing.T)
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// sessionAgentOverride: the raw "is this session pinned?" lookup
-// ──────────────────────────────────────────────────────────────────────────────
-
-// TestSessionAgentOverride_DistinguishesPinFromDefault pins the root cause of
-// the per-agent commands bug: getSessionAgent falls back to the default agent,
-// so it cannot tell "no pin" from "pinned to the default agent". The override
-// getter must, otherwise any route resolved from a binding is silently replaced
-// by the default agent downstream.
 func TestSessionAgentOverride_DistinguishesPinFromDefault(t *testing.T) {
 	al, _, _, _ := perWorkspaceHarnessLoop(t)
 
@@ -1237,37 +1060,24 @@ func TestSessionAgentOverride_DistinguishesPinFromDefault(t *testing.T) {
 		t.Errorf("unpinned session reported a pin to %q", id)
 	}
 
-	// A pin to the default agent is still a pin — the two getters must differ
-	// exactly here, and the routed path must be able to tell them apart.
 	al.setSessionAgent("sess-a", "main")
 	id, pinned := al.sessionAgentOverride("sess-a")
 	if !pinned || id != "main" {
 		t.Errorf("sessionAgentOverride() = (%q,%v), want (\"main\",true)", id, pinned)
 	}
 
-	// ResolveSessionKey must be honoured: the pin lives on the active key the
-	// base alias points at.
 	al.setSessionAgent("sess-active", "coder")
 	al.setSessionAlias("sess-base", "sess-active")
 	if id, pinned := al.sessionAgentOverride("sess-base"); !pinned || id != "coder" {
 		t.Errorf("override through alias = (%q,%v), want (\"coder\",true)", id, pinned)
 	}
 
-	// Deleting the pin returns the session to "no opinion", which is what lets
-	// routing win again.
 	al.deleteDurableSessionAgent("sess-a")
 	if _, pinned := al.sessionAgentOverride("sess-a"); pinned {
 		t.Error("pin survived deletion")
 	}
 }
 
-// TestProcessMessage_HarnessCommandSurvivesNewCommand closes the loop between
-// the two halves of the fix. /new rotates the session key and re-pins the agent
-// it resolved, so if the command dispatcher still let the default-agent fallback
-// of getSessionAgent win, /new on a bound channel would pin the WRONG agent on
-// the fresh key and every later turn — including this one — would expand the
-// defaults workspace again. The pin path and the expansion path must agree on
-// who owns the session.
 func TestProcessMessage_HarnessCommandSurvivesNewCommand(t *testing.T) {
 	al, provider, _, _ := perWorkspaceHarnessLoop(t)
 
@@ -1286,7 +1096,6 @@ func TestProcessMessage_HarnessCommandSurvivesNewCommand(t *testing.T) {
 	if _, err := al.messageProcessor.processMessage(context.Background(), newMsg("/new")); err != nil {
 		t.Fatalf("/new: %v", err)
 	}
-	// /new must have rotated the session and pinned the routed agent.
 	if id, pinned := al.sessionAgentOverride(al.ResolveSessionKey(base)); !pinned || id != "coder" {
 		t.Fatalf("after /new, session pin = (%q,%v), want (\"coder\",true)", id, pinned)
 	}
@@ -1299,15 +1108,9 @@ func TestProcessMessage_HarnessCommandSurvivesNewCommand(t *testing.T) {
 	}
 }
 
-// TestInvalidateHarnessWorkspace_ForcesRebuildFromDisk covers the hook the REST
-// command endpoints use after writing <workspace>/commands/*.md: a file created
-// behind the manager's back must be visible on the next read, not after the
-// 30 s rescan TTL.
 func TestInvalidateHarnessWorkspace_ForcesRebuildFromDisk(t *testing.T) {
 	al, _, defaultsWs, coderWs := perWorkspaceHarnessLoop(t)
 
-	// Warm both caches, then add a command to each workspace without touching
-	// the managers.
 	before := len(al.HarnessCommandsFor(coderWs))
 	writeHarnessCommandFile(t, coderWs, "fresh", "description: written after warm-up", "do the thing")
 	writeHarnessCommandFile(t, defaultsWs, "fresh-defaults", "description: defaults too", "do the other thing")
@@ -1328,14 +1131,10 @@ func TestInvalidateHarnessWorkspace_ForcesRebuildFromDisk(t *testing.T) {
 	if _, ok := al.harnessManagerFor("").Registry().Get("fresh-defaults"); !ok {
 		t.Error("newly written defaults command missing after invalidation")
 	}
-	// The defaults entry must have been rebuilt too, and its commands are still
-	// only its own.
 	if _, ok := al.harnessManagerFor("").Registry().Get("fresh"); ok {
 		t.Error("invalidation leaked coder's command into the defaults manager")
 	}
 
-	// Unknown / unpinned workspaces are no-ops, and "" resolves through the
-	// same key rule as the cache itself.
 	al.InvalidateHarnessWorkspace(filepath.Join(coderWs, "..", "nowhere"))
 	al.InvalidateHarnessWorkspace("")
 	if _, ok := al.harnessManagerFor("").Registry().Get("fresh-defaults"); !ok {
@@ -1343,12 +1142,6 @@ func TestInvalidateHarnessWorkspace_ForcesRebuildFromDisk(t *testing.T) {
 	}
 }
 
-// TestSetSessionAgent_CanPinDefaultAgent covers the corollary of the pin/route
-// split: now that routing is honoured, "/agent main" is the only way to pull a
-// bound session back to the default agent, so it must actually store a pin.
-// SetSessionAgent's "already there" early return compared against
-// GetSessionAgent, which answers "main" for any unpinned session, so the pin was
-// silently dropped and the binding kept winning.
 func TestSetSessionAgent_CanPinDefaultAgent(t *testing.T) {
 	al, _, _, _ := perWorkspaceHarnessLoop(t)
 
@@ -1356,8 +1149,6 @@ func TestSetSessionAgent_CanPinDefaultAgent(t *testing.T) {
 	if _, pinned := al.sessionAgentOverride(sessionKey); pinned {
 		t.Fatal("session starts pinned — test setup broken")
 	}
-	// The legacy getter already answers "main": that is exactly the confusion
-	// this guards against.
 	if got := al.getSessionAgent(sessionKey); got != "main" {
 		t.Fatalf("getSessionAgent() = %q, want the default fallback", got)
 	}
@@ -1369,8 +1160,6 @@ func TestSetSessionAgent_CanPinDefaultAgent(t *testing.T) {
 		t.Errorf("after SetSessionAgent(\"main\"): override = (%q,%v), want (\"main\",true)", id, pinned)
 	}
 
-	// A redundant re-pin of an already-pinned session still short-circuits, so
-	// the history migration and the model reset below it do not run twice.
 	al.providable.SetSessionModel(sessionKey, "some-model")
 	al.providable.SetSessionAgent(sessionKey, "main")
 	if _, hasModel := al.sessionModels.Load(al.ResolveSessionKey(sessionKey)); !hasModel {
@@ -1378,13 +1167,6 @@ func TestSetSessionAgent_CanPinDefaultAgent(t *testing.T) {
 	}
 }
 
-// --- harness-command persistence on the user message ------------------------
-
-// TestRunAgentLoop_AppliedCommandPersistsDisplayFields is the runner half of the
-// custom-commands-in-chat feature: for a command-driven turn the persisted user
-// message must carry the EXPANDED prompt in Content (that is what the model must
-// receive when the session is replayed) plus the original "/name args" and the
-// chip metadata, while the live LLM call still sees the expansion.
 func TestRunAgentLoop_AppliedCommandPersistsDisplayFields(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -1405,7 +1187,7 @@ func TestRunAgentLoop_AppliedCommandPersistsDisplayFields(t *testing.T) {
 		SessionKey:      "cmd-persist",
 		Channel:         "webui",
 		ChatID:          "chat-1",
-		UserMessage:     "review the src dir please", // expanded prompt
+		UserMessage:     "review the src dir please",
 		DefaultResponse: "fallback",
 		SendResponse:    false,
 		EnableSummary:   false,
@@ -1445,7 +1227,6 @@ func TestRunAgentLoop_AppliedCommandPersistsDisplayFields(t *testing.T) {
 		t.Errorf("persisted Command = %+v, want %+v", *user.Command, want)
 	}
 
-	// The model must receive the expansion, never the display text.
 	found := false
 	for _, m := range sawMessages {
 		if m.Role == "user" {
@@ -1463,9 +1244,6 @@ func TestRunAgentLoop_AppliedCommandPersistsDisplayFields(t *testing.T) {
 	}
 }
 
-// TestRunAgentLoop_PlainMessageKeepsLegacyPersistence guards the other branch:
-// without AppliedCommand the user message goes through the plain AddMessage path
-// and grows no display fields.
 func TestRunAgentLoop_PlainMessageKeepsLegacyPersistence(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -1502,8 +1280,6 @@ func TestRunAgentLoop_PlainMessageKeepsLegacyPersistence(t *testing.T) {
 	t.Fatal("no user message persisted")
 }
 
-// TestCommandAppliedOf covers the pure record→wire mapping, including the nil
-// guard (nil AppliedCommand must not produce an empty chip on the wire).
 func TestCommandAppliedOf(t *testing.T) {
 	if commandAppliedOf(nil) != nil {
 		t.Error("nil appliedCommand must map to nil")

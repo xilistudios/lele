@@ -1,69 +1,28 @@
-/**
- * AgentMCPRawEditor — the per-layer raw mcp.json editor of the MCP tab.
- *
- * One instance hangs off the layer row the user clicked (mounted by
- * AgentMCPSection with `key={layer}`, so its mutation state never leaks
- * between layers). Structure and controls follow the house idiom the Commands
- * tab already uses (`AgentCommandEditorDialog`): a monospace textarea holding
- * the FILE BYTES verbatim, a visible path line, an inline `role="alert"`
- * banner for every backend rejection (the server's own words, never a
- * generic toast), and a Cancel/…/Save footer.
- *
- * Two rules this component must keep:
- *
- *  - NO SECRET EXPANSION. `content` is the literal file bytes with `${VAR}`
- *    never expanded — that is the design, and the textarea shows it as-is.
- *    There is deliberately no control that requests expanded values (no such
- *    endpoint exists) and none may be invented here.
- *  - WARNINGS NEVER BLOCK A SAVE. A per-entry problem is a 200 with
- *    `warnings[]`; only a fatal envelope problem is a 422 `config_invalid`.
- *    So Validate is always reachable (it is how a broken file gets repaired),
- *    Save is disabled only while a request is in flight, and warnings —
- *    from Validate or from the Save response itself — render AFTER the
- *    document is already on disk.
- *
- * Dirty tracking lives in the SECTION (it must survive this component's
- * remount when the user switches layers), so the draft/baseline pair and the
- * close/switch gating are wired through props; this component only reports
- * intent (`onClose`, `onDraftChange`) and renders the inline unsaved-changes
- * warning the section holds back (`nav`).
- */
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { mcpErrorCode, useMCPValidate, useSaveMCPRaw } from '../../../hooks/useAgentMCP'
 import type { MCPLayerName, MCPRawFileResponse, MCPValidateResponse } from '../../../lib/mcpTypes'
 import { Button } from '../../atoms/Button'
 
-/**
- * Navigation the section is holding back because the draft is dirty: the
- * inline warning asks for an explicit discard before anything is thrown away.
- */
 export type MCPRawNav = { kind: 'close' } | { kind: 'switch'; target: MCPLayerName }
 
 type Props = {
   agentId: string
-  /** The open layer (the section already filtered to a stored layer). */
   layer: MCPLayerName
-  /** Raw GET payload of THAT layer once loaded (undefined while loading). */
   file: MCPRawFileResponse | undefined
   loading: boolean
   loadFailed: boolean
   onRetryLoad: () => void
-  /** Current draft bytes (section-owned state). */
   draft: string
-  /** Human label of any stored layer — for the aliasing warning. */
   layerLabel: (layer: string) => string
-  /** Pending unsaved-changes navigation, or null. */
   nav: MCPRawNav | null
   onDraftChange: (content: string) => void
-  /** Save succeeded with the bytes actually on disk (response `content`). */
   onSaved: (content: string) => void
   onClose: () => void
   onConfirmNav: () => void
   onDismissNav: () => void
 }
 
-/** Inline server-message banner (commands dialog `ServerError`, same idiom). */
 function ErrorBanner({
   testid,
   message,
@@ -87,7 +46,6 @@ function ErrorBanner({
   )
 }
 
-/** One warning list: validate warnings and post-save warnings share it. */
 function WarningList({ testid, title, items }: { testid: string; title: string; items: string[] }) {
   return (
     <div
@@ -136,10 +94,6 @@ export function AgentMCPRawEditor({
   const [savedOk, setSavedOk] = useState(false)
   const [savedWarnings, setSavedWarnings] = useState<string[]>([])
 
-  /**
-   * Validate the DRAFT (what the user is looking at), never the file on
-   * disk: the whole point is repairing a document the server would reject.
-   */
   const handleValidate = () => {
     setValidateError(null)
     validate.mutate(
@@ -156,17 +110,11 @@ export function AgentMCPRawEditor({
     setSaveError(null)
     save.mutate(draft, {
       onSuccess: (data) => {
-        // `data.content` is what is on disk: sync the draft/baseline so the
-        // textarea shows the SAVED bytes and the editor goes clean, even
-        // before the invalidated raw query refetches.
         setSavedOk(true)
         setSavedWarnings(data.warnings ?? [])
         onSaved(data.content)
       },
       onError: (error) => {
-        // 422 config_invalid / 403 mcp_path_not_allowed / 400 mcp_layer_unavailable
-        // / 400 body_invalid / 413: the server's message is the useful part.
-        // The draft is NOT touched — dirty state survives a failed save.
         setSavedOk(false)
         setSavedWarnings([])
         setSaveError({
@@ -177,7 +125,6 @@ export function AgentMCPRawEditor({
     })
   }
 
-  /** A keystroke invalidates every result computed from older bytes. */
   const handleChange = (value: string) => {
     setValidation(null)
     setValidateError(null)
@@ -201,7 +148,6 @@ export function AgentMCPRawEditor({
         </p>
       </div>
 
-      {/* ---------- inline unsaved-changes warning (never a modal) ---------- */}
       {nav && (
         <div
           role="alert"
@@ -233,7 +179,6 @@ export function AgentMCPRawEditor({
         </div>
       )}
 
-      {/* ---------- path line ---------- */}
       {file && (
         <div
           data-testid="mcp-editor-path-block"
@@ -257,7 +202,6 @@ export function AgentMCPRawEditor({
         </p>
       )}
 
-      {/* ---------- aliasing: editing THIS file edits those layers too ---------- */}
       {aliased.length > 0 && (
         <div
           role="alert"
@@ -268,7 +212,6 @@ export function AgentMCPRawEditor({
         </div>
       )}
 
-      {/* ---------- load states ---------- */}
       {loading && (
         <p data-testid="mcp-editor-loading" className="mb-3 text-xs text-text-tertiary">
           {t('mcp.editor.loading')}
@@ -292,7 +235,6 @@ export function AgentMCPRawEditor({
         </div>
       )}
 
-      {/* ---------- the document: literal bytes, never expanded ---------- */}
       {file && (
         <textarea
           data-testid="mcp-editor-content"
@@ -305,7 +247,6 @@ export function AgentMCPRawEditor({
         />
       )}
 
-      {/* ---------- validate result: fatal vs. warnings, shown distinctly ---------- */}
       {validateError && (
         <ErrorBanner testid="mcp-editor-validate-request-error" message={validateError} />
       )}
@@ -329,7 +270,6 @@ export function AgentMCPRawEditor({
         </p>
       )}
 
-      {/* ---------- save result ---------- */}
       {saveError && (
         <div className="mb-3">
           <ErrorBanner
@@ -354,7 +294,6 @@ export function AgentMCPRawEditor({
         </div>
       )}
 
-      {/* ---------- footer (commands dialog idiom: Close · Validate · Save) ---------- */}
       <div className="flex items-center justify-end gap-2 pt-1">
         <Button variant="ghost" size="md" data-testid="mcp-editor-close" onClick={onClose}>
           {t('mcp.editor.close')}

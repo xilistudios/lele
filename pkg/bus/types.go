@@ -20,16 +20,8 @@ type InboundMessage struct {
 	Attachments []FileAttachment  `json:"attachments,omitempty"`
 	SessionKey  string            `json:"session_key"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
-	// SpoolID is the internal handle of the durable spool row that backs this
-	// message, or 0 when durability is disabled or the row could not be
-	// written. It is never serialised: the id belongs to the database, not to
-	// the wire, and the replay path re-attaches it from the row it claimed.
-	SpoolID int64 `json:"-"`
-	// DedupeID is the idempotency key this message is recorded under in the
-	// processed_messages ledger. Unlike SpoolID it must survive JSON
-	// round-trips: it travels inside the durable spool payload, so a replayed
-	// message can still be recognised as a duplicate.
-	DedupeID string `json:"dedupe_id,omitempty"`
+	SpoolID     int64             `json:"-"`
+	DedupeID    string            `json:"dedupe_id,omitempty"`
 }
 
 type OutboundMessage struct {
@@ -39,24 +31,18 @@ type OutboundMessage struct {
 	Content        string            `json:"content"`
 	Attachments    []FileAttachment  `json:"attachments,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
-	ReplyTo        string            `json:"reply_to,omitempty"`        // Message ID to reply to
-	MessageID      string            `json:"message_id,omitempty"`      // Original command message ID
-	ReplyMarkup    interface{}       `json:"reply_markup,omitempty"`    // Optional inline keyboard markup for Telegram
-	IsIntermediate bool              `json:"is_intermediate,omitempty"` // If true, does not stop typing indicator
-	TextMode       string            `json:"text_mode,omitempty"`       // "markdown" (default) or "html"
-	PlainText      string            `json:"plain_text,omitempty"`      // Fallback plain text if formatting fails
-	LinkPreview    *bool             `json:"link_preview,omitempty"`    // Enable/disable link previews (nil = default true)
-	// SpoolID is the internal handle of the durable spool row backing this
-	// message, or 0 when durability is off or the row was not written. Never
-	// serialized: the id belongs to the database, not the wire (mirror of
-	// InboundMessage.SpoolID).
-	SpoolID int64 `json:"-"`
+	ReplyTo        string            `json:"reply_to,omitempty"`
+	MessageID      string            `json:"message_id,omitempty"`
+	ReplyMarkup    interface{}       `json:"reply_markup,omitempty"`
+	IsIntermediate bool              `json:"is_intermediate,omitempty"`
+	TextMode       string            `json:"text_mode,omitempty"`
+	PlainText      string            `json:"plain_text,omitempty"`
+	LinkPreview    *bool             `json:"link_preview,omitempty"`
+	SpoolID        int64             `json:"-"`
 }
 
-// MessageHandler is a function that handles incoming messages
 type MessageHandler func(InboundMessage) error
 
-// ApprovalStatus represents the current status of an approval request
 type ApprovalStatus string
 
 const (
@@ -66,7 +52,6 @@ const (
 	ApprovalExpired  ApprovalStatus = "expired"
 )
 
-// ApprovalRequest represents a request for command approval
 type ApprovalRequest struct {
 	ID          string         `json:"id"`
 	SessionKey  string         `json:"session_key"`

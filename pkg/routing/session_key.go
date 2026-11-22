@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// DMScope controls DM session isolation granularity.
 type DMScope string
 
 const (
@@ -15,13 +14,11 @@ const (
 	DMScopePerAccountChannelPeer DMScope = "per-account-channel-peer"
 )
 
-// RoutePeer represents a chat peer with kind and ID.
 type RoutePeer struct {
-	Kind string // "direct", "group", "channel"
+	Kind string
 	ID   string
 }
 
-// SessionKeyParams holds all inputs for session key construction.
 type SessionKeyParams struct {
 	AgentID       string
 	Channel       string
@@ -31,18 +28,15 @@ type SessionKeyParams struct {
 	IdentityLinks map[string][]string
 }
 
-// ParsedSessionKey is the result of parsing an agent-scoped session key.
 type ParsedSessionKey struct {
 	AgentID string
 	Rest    string
 }
 
-// BuildAgentMainSessionKey returns "agent:<agentId>:main".
 func BuildAgentMainSessionKey(agentID string) string {
 	return fmt.Sprintf("agent:%s:%s", NormalizeAgentID(agentID), DefaultMainKey)
 }
 
-// BuildAgentPeerSessionKey constructs a session key based on agent, channel, peer, and DM scope.
 func BuildAgentPeerSessionKey(params SessionKeyParams) string {
 	agentID := NormalizeAgentID(params.AgentID)
 
@@ -62,7 +56,6 @@ func BuildAgentPeerSessionKey(params SessionKeyParams) string {
 		}
 		peerID := strings.TrimSpace(peer.ID)
 
-		// Resolve identity links (cross-platform collapse)
 		if dmScope != DMScopeMain && peerID != "" {
 			if linked := resolveLinkedPeerID(params.IdentityLinks, params.Channel, peerID); linked != "" {
 				peerID = linked
@@ -90,7 +83,6 @@ func BuildAgentPeerSessionKey(params SessionKeyParams) string {
 		return BuildAgentMainSessionKey(agentID)
 	}
 
-	// Group/channel peers always get per-peer sessions
 	channel := normalizeChannel(params.Channel)
 	peerID := strings.ToLower(strings.TrimSpace(peer.ID))
 	if peerID == "" {
@@ -99,7 +91,6 @@ func BuildAgentPeerSessionKey(params SessionKeyParams) string {
 	return fmt.Sprintf("agent:%s:%s:%s:%s", agentID, channel, peerKind, peerID)
 }
 
-// ParseAgentSessionKey extracts agentId and rest from "agent:<agentId>:<rest>".
 func ParseAgentSessionKey(sessionKey string) *ParsedSessionKey {
 	raw := strings.TrimSpace(sessionKey)
 	if raw == "" {
@@ -120,7 +111,6 @@ func ParseAgentSessionKey(sessionKey string) *ParsedSessionKey {
 	return &ParsedSessionKey{AgentID: agentID, Rest: rest}
 }
 
-// IsSubagentSessionKey returns true if the session key represents a subagent.
 func IsSubagentSessionKey(sessionKey string) bool {
 	raw := strings.TrimSpace(sessionKey)
 	if raw == "" {
@@ -136,7 +126,6 @@ func IsSubagentSessionKey(sessionKey string) bool {
 	if strings.HasPrefix(strings.ToLower(parsed.Rest), "subagent:") {
 		return true
 	}
-	// Check for channel:chat_id:subagent_id format (e.g., "native:uuid:subagent-1")
 	parts := strings.Split(raw, ":")
 	if len(parts) >= 3 {
 		lastPart := parts[len(parts)-1]

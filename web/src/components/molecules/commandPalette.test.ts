@@ -93,11 +93,6 @@ describe('completeDraft', () => {
   })
 })
 
-// ── Custom (harness-defined) commands ───────────────────────────────────────
-// The backend now merges user-defined commands into /api/v1/chat/commands with
-// the same shape plus `source`. Nothing may filter them out: the palette is
-// their only discovery surface.
-
 const review: SlashCommandInfo = {
   name: '/review',
   description: 'Review the current diff',
@@ -131,7 +126,6 @@ describe('custom commands in the palette', () => {
   test('the completed custom draft hides the palette and is ready for args', () => {
     const draft = completeDraft('/rev', review)
     expect(isPaletteTrigger(draft)).toBe(false)
-    // Typing args after the completion keeps the command in use.
     expect(filterCommands([...commands, review], `${draft}src/main.go`)).toEqual([])
   })
 })

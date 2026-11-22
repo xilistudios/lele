@@ -1,14 +1,3 @@
-/**
- * Pure transitions over the streaming message list.
- *
- * Every WebSocket handler that mutates `streamingMessages` should go through
- * one of these functions instead of inlining `setStreamingMessages(updater)`
- * logic. Keeping the transitions here means the rules (ID migration, restore
- * hydration, placeholder upsert, failure marking) live in ONE place and can be
- * unit-tested without React or a WebSocket.
- *
- * All functions are pure: (current, ...args) => next.
- */
 import { createAssistantMessage } from '../lib/chatMessageBuilder'
 import type { ChatMessage } from '../lib/types'
 import { sessionKeysLooselyMatch } from './event-handlers/helpers'
@@ -17,20 +6,10 @@ import { isAttachmentsOnly } from './messageMerge'
 
 const RESTORE_PREFIX = 'restore-'
 
-/** True if the message is a reconnect/restore placeholder for a session. */
 function isRestorePlaceholder(m: ChatMessage, sessionKey: string): boolean {
   return m.id.startsWith(RESTORE_PREFIX) && m.sessionKey === sessionKey
 }
 
-/**
- * Migrate a `restore-<session>` placeholder to a real message id.
- *
- * After a page reload or reconnect, the welcome/subscribe event creates a
- * placeholder holding accumulated content. When the real stream/thinking
- * chunks arrive with the actual message_id, we rename the placeholder so its
- * content is preserved instead of spawning a duplicate. No-op if a message
- * with the real id already exists.
- */
 export function migrateRestoreId(
   current: ChatMessage[],
   msgId: string,
@@ -42,7 +21,6 @@ export function migrateRestoreId(
   return current.map((m, i) => (i === restoreIdx ? { ...m, id: msgId } : m))
 }
 
-/** Remove all restore placeholders for a session. */
 export function removeRestorePlaceholders(
   current: ChatMessage[],
   sessionKey: string,
@@ -50,16 +28,6 @@ export function removeRestorePlaceholders(
   return current.filter((m) => !isRestorePlaceholder(m, sessionKey))
 }
 
-/**
- * Insert (or update) an assistant placeholder at the correct chronological
- * position. Used by message.ack and by thinking chunks that arrive before any
- * stream chunk.
- *
- * - If a message with `msgId` exists, it is returned unchanged (content is
- *   filled in by the stream queue / thinking handler).
- * - Otherwise a new empty assistant is spliced in at
- *   `computeAssistantInsertIndex`.
- */
 export function upsertAssistantPlaceholder(
   current: ChatMessage[],
   msgId: string,
@@ -78,16 +46,6 @@ export function upsertAssistantPlaceholder(
   return arr
 }
 
-/**
- * Append (or merge into) a restore placeholder from accumulated in-progress
- * content sent by the backend on welcome/reconnect/subscribe.
- *
- * `insertAfterLastUserForSession` controls placement:
- *   - true  (subscribe.ack): insert right after the session's last user
- *     message. Pushing to the end would break position-based matching in
- *     mergeMessages and render the restored assistant ABOVE the user.
- *   - false (welcome): push to the end (no user context yet).
- */
 export function restoreInProgressAssistant(
   current: ChatMessage[],
   sessionKey: string,
@@ -135,17 +93,6 @@ export function restoreInProgressAssistant(
   return arr
 }
 
-/**
- * Apply the final state for a completed message:
- *   - drop restore placeholders for the session,
- *   - mark the completed assistant (overwriting content only if the server
- *     sent a non-empty final version),
- *   - attach server-provided attachments when present (the `attachments`
- *     event / final payload is authoritative; existing attachments are kept
- *     when the server sends none),
- *   - drop empty user messages for the session,
- *   - mark session tools as no longer streaming.
- */
 export function applyMessageComplete(
   current: ChatMessage[],
   msgId: string,
@@ -156,10 +103,6 @@ export function applyMessageComplete(
 ): ChatMessage[] {
   const hasServerAttachments = !!serverAttachments && serverAttachments.length > 0
 
-  // If the message never made it into the streaming list (e.g. message.complete
-  // arrived before the typewriter queue drained its first tick, or the stream
-  // events were coalesced/lost), create it with the final content instead of
-  // silently dropping the response.
   if (!current.some((m) => m.role === 'assistant' && m.id === msgId)) {
     const content = serverContent && serverContent.length > 0 ? serverContent : ''
     const newMsg = createAssistantMessage({
@@ -185,11 +128,6 @@ export function applyMessageComplete(
           ...m,
           content,
           streaming: false,
-          // A turn that ended in a provider/tool failure is marked on the wire
-          // (message.complete error, see pkg/channels/native.go): paint the red
-          // error box right away instead of waiting for the history refetch.
-          // The refetch then replaces this LIVE text with the persisted
-          // error_detail, which is the same failure in more detail.
           ...(serverError ? { error: content } : {}),
           ...(hasServerAttachments ? { attachments: serverAttachments } : {}),
         },
@@ -205,7 +143,6 @@ export function applyMessageComplete(
   })
 }
 
-/** Mark the optimistic user message for a session as failed. */
 export function markOptimisticUserFailed(
   current: ChatMessage[],
   sessionKey: string,
@@ -217,32 +154,6 @@ export function markOptimisticUserFailed(
   )
 }
 
-/**
- * Mark ONLY the NEWEST optimistic user message of a session as failed, so the
- * user gets the "failed to send" label and the retry button instead of a bubble
- * that is stranded at the end of the list.
- *
- * WHY the newest and not all (unlike `markOptimisticUserFailed`): a server
- * refusal answers exactly ONE send — the last one the client transmitted — and
- * the envelope carries no client message id to say which (see `sendError` in
- * pkg/channels/websocket.go). Marking EVERY optimistic bubble of the session
- * would wrongly label earlier, successfully-sent bubbles as failed; that
- * blanket rule is only acceptable for `message.error`, which reports a per-turn
- * failure of the whole conversation stream.
- *
- * Session matching is LOOSE (`sessionKeysLooselyMatch`, like its sibling
- * `removeDiscardedMessage` above): the WS handlers re-tag transient messages
- * with the pane's EFFECTIVE session key (`effectiveSessionKey` in
- * event-handlers/helpers), and the backend may report the conversation alias
- * (`base:chat:N`) while the UI pane only knows the bare `base`. A strict `===`
- * comparison therefore misses the very bubble this helper exists for: one
- * carrying the alias stays stranded at the end of the list after a server send
- * refusal, with no "failed" label and no retry affordance.
- *
- * Returns the SAME array instance when there is nothing to mark — no optimistic
- * user for that session, or the newest one is already failed — so a late or
- * duplicate refusal cannot churn React state.
- */
 export function markNewestOptimisticUserFailed(
   current: ChatMessage[],
   sessionKey: string,
@@ -251,7 +162,6 @@ export function markNewestOptimisticUserFailed(
     const m = current[i]
     if (m.role !== 'user' || !m.optimistic || !sessionKeysLooselyMatch(m.sessionKey, sessionKey))
       continue
-    // Idempotent: a second copy of the same refusal has nothing left to mark.
     if (m.failed === true) return current
     const next = [...current]
     next[i] = { ...m, failed: true, streaming: false }
@@ -260,28 +170,6 @@ export function markNewestOptimisticUserFailed(
   return current
 }
 
-/**
- * Retract the OLDEST unconfirmed attachments-only optimistic bubble and report
- * which paths the composer should carry again.
- *
- * WHY this transition exists: a turn with no text is confirmed through the
- * attachments identity (see `isAttachmentsOnly` in messageMerge), and a bubble
- * the SERVER refuses (`attachments_rejected`) never gets a persisted copy to be
- * confirmed by — it would stay on screen forever, while the chips burned on
- * local acceptance (`useMessages.sendMessage` clears them before the server
- * answers) would be gone. Retracting the bubble hands the turn back in the only
- * shape the user can act on.
- *
- * Pairing rule: the OLDEST match, because the refusal carries no client message
- * id (pkg/channels/websocket.go `sendError` builds an envelope with no ID) and
- * `attachments_rejected` is produced by the POST-processing guard, which only
- * fires for a text-less turn. Two simultaneous text-less sends are therefore an
- * accepted limitation of the envelope, not of this rule.
- *
- * Returns `null` when there is nothing to retract (a late/duplicate refusal, or
- * the bubble was already confirmed and left the list), so the caller degrades to
- * a plain banner update.
- */
 export function retractAttachmentsOnlyBubble(
   current: ChatMessage[],
   sessionKey: string | null,
@@ -302,31 +190,6 @@ export function retractAttachmentsOnlyBubble(
   return { messages: current.filter((_, i) => i !== index), restoredPaths }
 }
 
-/**
- * Remove the assistant bubble of an iteration the backend streamed and then
- * THREW AWAY (`message.discard`).
- *
- * WHY this transition exists: the backend persists/discards LLM iterations one
- * by one. Some of them are streamed to the client FIRST — the WebUI builds a
- * bubble out of their `message.thinking` / `message.stream` chunks — and are
- * dropped afterwards (empty-response retry, plain-text tool-call guidance,
- * every tool call invalid). Such an iteration is never persisted, so no twin
- * will ever arrive to confirm the bubble: `mergeMessages` appends unconfirmed
- * streaming messages AFTER the canonical history, which is exactly the stray
- * "Thinking…" card rendered below the final answer (or two thinking cards in a
- * row). `message.discard` is the ONLY signal that ties a streamed message id to
- * "this never happened", so it is the only place such a bubble can be retracted.
- *
- * WHY removing on this event cannot delete real content: an iteration that WAS
- * persisted is never discarded by the backend, so its id never appears here. A
- * late/duplicate event finds nothing and returns the SAME array instance, which
- * keeps React from re-rendering while the turn — which is still running — keeps
- * emitting events.
- *
- * Only an ASSISTANT message is ever removed: the event names an iteration id,
- * but a discarded bubble must never take a user bubble or a tool card with it
- * even if an id collided.
- */
 export function removeDiscardedMessage(
   current: ChatMessage[],
   messageID: string,
@@ -338,12 +201,10 @@ export function removeDiscardedMessage(
       m.role === 'assistant' &&
       sessionKeysLooselyMatch(m.sessionKey, sessionKey),
   )
-  // Identity preserved on no-op: see the late/duplicate note above.
   if (index < 0) return current
   return current.filter((_, i) => i !== index)
 }
 
-/** Mark all actively-streaming assistants for a session as errored. */
 export function markStreamingAssistantsErrored(
   current: ChatMessage[],
   sessionKey: string,
@@ -356,12 +217,10 @@ export function markStreamingAssistantsErrored(
   )
 }
 
-/** Mark every message as no longer streaming (used by cancel.ack). */
 export function stopAllStreaming(current: ChatMessage[]): ChatMessage[] {
   return current.map((m) => ({ ...m, streaming: false }))
 }
 
-/** Attach files to the most recent assistant message and stop its streaming. */
 export function attachToLastAssistant(
   current: ChatMessage[],
   attachments: ChatMessage['attachments'],

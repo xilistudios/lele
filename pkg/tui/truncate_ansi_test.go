@@ -12,12 +12,8 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// auditDot mirrors the truecolor bouncing dots emitted by
-// Model.getBouncingDots(): each visible cell costs ~22 bytes of ANSI.
 const auditDot = "\x1b[38;2;139;233;253m●\x1b[0m"
 
-// buildAuditDots replicates the "[● ● ●         ]" bracket frame produced by
-// the real dot animation string.
 func buildAuditDots(active int) string {
 	var b strings.Builder
 	b.WriteRune('[')
@@ -32,18 +28,11 @@ func buildAuditDots(active int) string {
 	return b.String()
 }
 
-// assertANSIIntact fails if s contains a truncated/malformed escape sequence.
-// Robust checks: after ansi.Strip no ESC may remain (a partial CSI swallowed
-// by Strip would otherwise hide corruption in the visible text), no ESC run
-// may sit at the end of the string (mid-sequence cut), and the sequence
-// counts must match between the original and the truncated result modulo
-// resets that ansi.Truncate appends.
 func assertANSIIntact(t *testing.T, name, s string) {
 	t.Helper()
 	if strings.Contains(ansi.Strip(s), "\x1b") {
 		t.Errorf("%s: stripped text still contains ESC: %q", name, ansi.Strip(s))
 	}
-	// Every ESC must open a CSI whose terminator appears before the next ESC.
 	rest := s
 	for {
 		i := strings.IndexByte(rest, '\x1b')
@@ -65,8 +54,6 @@ func assertANSIIntact(t *testing.T, name, s string) {
 	}
 }
 
-// statusLineAtWidth composes a status line exactly like view.go does before
-// the clamp, then applies the same clamp (truncateRightCells).
 func statusLineAtWidth(raw string, leftWidth int) string {
 	if maxSW := leftWidth - 2; maxSW > 0 && ansi.StringWidth(raw) > maxSW {
 		return truncateRightCells(raw, maxSW)
@@ -99,8 +86,6 @@ func TestStatusLineTruncateKeepsANSIIntact(t *testing.T) {
 			if got > maxSW {
 				t.Errorf("%s at term width %d: width %d exceeds budget %d", name, w, got, maxSW)
 			}
-			// Regression for audit H1: rune-slicing collapsed an 80-col
-			// subagent line from 63 visible cells down to 3.
 			if got < maxSW-10 {
 				t.Errorf("%s at term width %d: line collapses to %d visible cols (budget %d, want >= %d) — output %q", name, w, got, maxSW, maxSW-10, out)
 			}
@@ -122,15 +107,12 @@ func TestTruncateRightCellsBasics(t *testing.T) {
 	if !strings.HasSuffix(ansi.Strip(out), "...") {
 		t.Errorf("expected ellipsis tail, got %q", out)
 	}
-	// Budget smaller than the ellipsis: ansi.Truncate(s, n<3, "...") collapses
-	// to "", so the helper must drop the tail instead.
 	for _, n := range []int{1, 2} {
 		out := truncateRightCells("abcdefgh", n)
 		if w := ansi.StringWidth(out); w != n {
 			t.Errorf("cells=%d: width %d, want %d (out %q)", n, w, n, out)
 		}
 	}
-	// Wide characters count as cells, not runes.
 	out = truncateRightCells("\u6a21\u578b\u6d4b\u8bd5", 5)
 	if w := ansi.StringWidth(out); w > 5 {
 		t.Errorf("CJK width %d > 5: %q", w, out)
@@ -141,7 +123,7 @@ func TestTruncateRightCellsBasics(t *testing.T) {
 }
 
 func TestGoalBadgeBudget(t *testing.T) {
-	prefixCells := ansi.StringWidth(goalBadgePrefix) // "🎯 " = 3 cells
+	prefixCells := ansi.StringWidth(goalBadgePrefix)
 	labels := []string{
 		"\u6a21\u578b\U0001f680test",
 		"fix the ANSI truncation bug across the whole TUI rendering pipeline",
@@ -161,7 +143,6 @@ func TestGoalBadgeBudget(t *testing.T) {
 			}
 		}
 	}
-	// Degenerate budgets never emit negative-length truncation.
 	if got := truncateGoalLabel("x", ansi.StringWidth(goalBadgePrefix)); got != "" {
 		t.Errorf("budget exactly prefix size: want empty label, got %q", got)
 	}
@@ -171,7 +152,7 @@ func TestGoalBadgeBudget(t *testing.T) {
 }
 
 func TestSidebarPathLeftTruncate(t *testing.T) {
-	contentWidth := 21 // e.g. 36-col sidebar minus padding
+	contentWidth := 21
 	path := "/home/alfredo/projects/lele-workspace-tui-audit"
 	out := truncateLeftCells(path, contentWidth-1)
 	if w := ansi.StringWidth(out); w > contentWidth-1 {
@@ -180,23 +161,19 @@ func TestSidebarPathLeftTruncate(t *testing.T) {
 	if !strings.HasPrefix(out, ellipsis) {
 		t.Errorf("expected ellipsis prefix, got %q", out)
 	}
-	// Must end with a contiguous tail of the original path.
 	tail := strings.TrimPrefix(out, ellipsis)
 	if !strings.HasSuffix(path, tail) {
 		t.Errorf("result %q does not end with a tail of %q", out, path)
 	}
-	// Short paths are untouched.
 	if got := truncateLeftCells("short/path", contentWidth-1); got != "short/path" {
 		t.Errorf("short path modified: %q", got)
 	}
-	// Styled paths keep their sequences intact.
 	styled := "/very/long/path/\x1b[31mrepo-name\x1b[0m"
 	out = truncateLeftCells(styled, 12)
 	if w := ansi.StringWidth(out); w > 12 {
 		t.Errorf("styled width %d > 12: %q", w, out)
 	}
 	assertANSIIntact(t, "styled-path", out)
-	// Tiny budgets degrade to right truncation but still fit.
 	for _, n := range []int{1, 2, 3, 4} {
 		out := truncateLeftCells(path, n)
 		if w := ansi.StringWidth(out); w > n {
@@ -224,24 +201,12 @@ func TestSidebarSessionNameTruncate(t *testing.T) {
 	}
 }
 
-// TestViewRealPathStatusLineCells drives the actual Model.View() with the
-// subagent processing status line (real getBouncingDots truecolor ANSI), a
-// goal badge with emoji/CJK text, a long workspace path and a long session
-// name, across the audit width matrix. It asserts the rendered frame never
-// contains a broken escape sequence and that no line collapses below the
-// visible-width floor that the rune-slicing bug produced.
 func TestViewRealPathStatusLineCells(t *testing.T) {
-	// Force truecolor so getBouncingDots emits the ~22-bytes-per-cell ANSI
-	// that triggers the rune-slicing collapse; without this the test profile
-	// is Ascii and the bug is invisible.
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 
 	m := newTestModel(t)
-	// Pin the locale AFTER NewModel (it re-inits i18n from cfg.GetLanguage()
-	// and the host LANG may select es/pt), so the English content assertions
-	// below are deterministic (same convention as onboarding_test.go).
 	i18n.InitWithLanguage("en")
 
 	key := "native:chat:h1-e2e"
@@ -271,10 +236,6 @@ func TestViewRealPathStatusLineCells(t *testing.T) {
 					t.Fatalf("term %dx%d line %d overflows terminal width: %d > %d (%q)", w, h, i, lw, w, line)
 				}
 			}
-			// The status line must keep its visible content: at term widths
-			// >= 50 the left-column budget (0.72*w - 2) fits at least
-			// "[● ● ●          ] Press ESC" (~31 cells), so the text may not
-			// collapse the way rune-slicing collapsed 63 cells down to 3.
 			if w >= 50 && !strings.Contains(out, "Press ESC") {
 				t.Errorf("term %dx%d: status line collapsed — 'Press ESC' missing from frame", w, h)
 			}

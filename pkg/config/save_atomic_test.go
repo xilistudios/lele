@@ -11,8 +11,6 @@ import (
 	"time"
 )
 
-// newTestSaveConfig builds a Config with a couple of distinctive,
-// env-var-free values so LoadConfig round-trips them unchanged.
 func newTestSaveConfig() *Config {
 	cfg := DefaultConfig()
 	cfg.Language = "pt"
@@ -43,7 +41,6 @@ func TestSaveConfigRoundTrip(t *testing.T) {
 		t.Errorf("Agents.List round-trip mismatch: %+v", loaded.Agents.List)
 	}
 
-	// Atomic rename must still leave the file at mode 0600.
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("Stat failed: %v", err)
@@ -70,17 +67,10 @@ func TestSaveConfigNoTempLeftovers(t *testing.T) {
 	}
 }
 
-// TestSaveConfigFailureKeepsOldFile injects a deterministic failure in the
-// final os.Rename step: the target path is pre-created as a DIRECTORY, and
-// renaming a regular file onto a directory fails with ENOTDIR/EEXIST on Linux
-// (verified: "rename ...: file exists" for both empty and non-empty dirs).
-// This exercises the post-CreateTemp error path, so we also assert the temp
-// file is cleaned up and the old config content is untouched.
 func TestSaveConfigFailureKeepsOldFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 
-	// Step 1: failure after temp creation (rename onto a directory).
 	if err := os.Mkdir(path, 0755); err != nil {
 		t.Fatalf("mkdir target failed: %v", err)
 	}
@@ -101,7 +91,6 @@ func TestSaveConfigFailureKeepsOldFile(t *testing.T) {
 		t.Errorf("temp files left behind after failed save: %v", leftovers)
 	}
 
-	// Step 2: with a valid old file present, a later failure must not alter it.
 	if err := os.RemoveAll(path); err != nil {
 		t.Fatalf("RemoveAll failed: %v", err)
 	}
@@ -113,9 +102,6 @@ func TestSaveConfigFailureKeepsOldFile(t *testing.T) {
 		t.Fatalf("ReadFile failed: %v", err)
 	}
 
-	// Make the whole dir read-only after the file exists: MkdirAll on an
-	// existing dir succeeds, but CreateTemp then fails with permission
-	// denied, so nothing can touch the old file.
 	if err := os.Chmod(dir, 0555); err != nil {
 		t.Fatalf("chmod failed: %v", err)
 	}
@@ -142,11 +128,6 @@ func TestSaveConfigFailureKeepsOldFile(t *testing.T) {
 	}
 }
 
-// TestSaveConfigConcurrentReaderNeverSeesPartial runs a background reader
-// looping LoadConfig while the main goroutine loops SaveConfig. With the old
-// direct os.WriteFile, the reader could observe truncated JSON ("unexpected
-// end of JSON input"); with tmp+rename the file is swapped atomically, so the
-// reader must never see a JSON syntax error.
 func TestSaveConfigConcurrentReaderNeverSeesPartial(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
@@ -159,7 +140,7 @@ func TestSaveConfigConcurrentReaderNeverSeesPartial(t *testing.T) {
 	var (
 		stop    atomic.Bool
 		wg      sync.WaitGroup
-		partial atomic.Value // stores first error string
+		partial atomic.Value
 		readers = 2
 	)
 
@@ -173,10 +154,6 @@ func TestSaveConfigConcurrentReaderNeverSeesPartial(t *testing.T) {
 				if err != nil && errors.As(err, &syn) {
 					partial.CompareAndSwap(nil, err.Error())
 				}
-				// Yield the hot read loop briefly: with the old direct
-				// WriteFile a partial file persisted for the whole write,
-				// so even a sampled reader reliably observes corruption,
-				// while here it keeps I/O contention (and runtime) down.
 				time.Sleep(time.Millisecond)
 			}
 		}()
@@ -184,7 +161,7 @@ func TestSaveConfigConcurrentReaderNeverSeesPartial(t *testing.T) {
 
 	for i := 0; i < iterations; i++ {
 		cfg := newTestSaveConfig()
-		cfg.Gateway.Port = 9000 + i // vary content so each write differs
+		cfg.Gateway.Port = 9000 + i
 		if err := SaveConfig(path, cfg); err != nil {
 			stop.Store(true)
 			wg.Wait()
@@ -198,7 +175,6 @@ func TestSaveConfigConcurrentReaderNeverSeesPartial(t *testing.T) {
 		t.Fatalf("reader observed partial config: %v", v)
 	}
 
-	// No temp leftovers after the hammering either.
 	leftovers, err := filepath.Glob(filepath.Join(dir, ".lele-config-*"))
 	if err != nil {
 		t.Fatalf("Glob failed: %v", err)
@@ -207,7 +183,6 @@ func TestSaveConfigConcurrentReaderNeverSeesPartial(t *testing.T) {
 		t.Errorf("temp files left behind: %v", leftovers)
 	}
 
-	// Final file must be valid JSON with the last written port.
 	final, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("final LoadConfig failed: %v", err)

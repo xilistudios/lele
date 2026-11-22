@@ -1,30 +1,3 @@
-/**
- * REGRESSION SUITE — React keys must survive the sliding history window.
- *
- * The backend serves chat history as a sliding window of the last `limit`
- * messages (pkg/channels/rest_chat.go), so as a conversation grows the OLDEST
- * messages fall off the page while the durable stableId registry
- * (hooks/stableIdRegistry.ts) keeps one entry per copy this page confirmed.
- *
- * `toChatMessages` used to look the recorded id up by the occurrence index of
- * the message INSIDE the page. That index is not stable: once an older copy of
- * a repeated identity slid out, every remaining copy read its PREDECESSOR's
- * id, so the React key of a bubble moved to a different message. React and
- * Virtuoso then reconcile the wrong DOM node into the slot — the transcript
- * looks reordered, an old bubble shows up where the newest message belongs,
- * and thinking blocks pile up as a run of copies. A reload cleared the
- * registry and "fixed" it.
- *
- * Tools made this systematic rather than rare: a tool message carries its
- * RESULT in `content`, which is identical across calls (`ls`, `git status`, a
- * failing test), and every thinking model repeats reasoning verbatim. Both are
- * covered here, plus repeated user texts and repeated answers.
- *
- * The invariant under test (the one the user sees): RENDER KEY → MESSAGE TEXT
- * must be a stable mapping across successive windows. A key may disappear from
- * the page (its message scrolled out) but it must never be re-pointed at a
- * different message, and two messages must never share one.
- */
 import { describe, expect, test } from 'bun:test'
 import { toChatMessages } from '../lib/chatMessageBuilder'
 import type { ChatMessage, RawHistoryMessage } from '../lib/types'
@@ -32,31 +5,20 @@ import { clearStableIdRegistry, lookupStableIdFromEnd, registerStableId } from '
 
 const SESSION = 'window-session'
 
-/** The key `MessageList` / Virtuoso actually reconcile on. */
 const renderKey = (m: ChatMessage) => m.stableId ?? m.id
 
-/** What the bubble visibly is: enough to tell two entries apart. */
 const contentOf = (m: ChatMessage) => m.content.trim() || m.reasoningContent?.trim() || ''
 
-/** The options a refetch of the session tail passes (see ToChatMessagesOptions). */
 const TAIL = { bindStableIds: true }
 
-/** Render keys of a converted page, in document order. */
 function keysOf(history: RawHistoryMessage[], tail = true): string[] {
   return toChatMessages(history, SESSION, tail ? TAIL : {}).map(renderKey)
 }
 
-/** Render keys and their visible text, in document order. */
 function renderOf(history: RawHistoryMessage[], tail = true): Array<[string, string]> {
   return toChatMessages(history, SESSION, tail ? TAIL : {}).map((m) => [renderKey(m), contentOf(m)])
 }
 
-/**
- * Assert the user-visible invariant over every page of a slide sequence:
- * a key always denotes the same text, and no key is used twice in one page.
- *
- * `seen` accumulates key → text across the pages, in the order they render.
- */
 function expectStableKeys(pages: RawHistoryMessage[][], seen: Map<string, string>): void {
   for (const [pageIndex, page] of pages.entries()) {
     const rendered = renderOf(page)
@@ -66,8 +28,6 @@ function expectStableKeys(pages: RawHistoryMessage[][], seen: Map<string, string
       keysInPage.add(key)
       const previous = seen.get(key)
       if (previous !== undefined) {
-        // A key that now denotes different text means the registry handed the
-        // bubble the id of ANOTHER message — the reordering bug.
         expect({ key, page: pageIndex, text }).toEqual({ key, page: pageIndex, text: previous })
       }
       seen.set(key, text)
@@ -86,15 +46,9 @@ describe('durable stableIds across the sliding history window', () => {
         content: ANSWER,
       }) as unknown as RawHistoryMessage
 
-    // Two copies of this identity are confirmed and STILL ON SCREEN in the tail
-    // page, so the registry holds exactly two ids for it.
     registerStableId('assistant', ANSWER, 'ws-tail-1')
     registerStableId('assistant', ANSWER, 'ws-tail-2')
 
-    // An older page happens to hold exactly two copies too. Binding by rank
-    // would hand it the ids of the tail messages, and `enforceUniqueRenderKeys`
-    // would then re-key one of the bubbles that is still rendered (a key jump =
-    // the reorder this suite exists to prevent). An older page must not bind.
     const olderPage = [answer(1), answer(2)]
     const bound = keysOf(olderPage, false)
     expect(bound).toEqual([`${SESSION}:old-1`, `${SESSION}:old-2`])
@@ -114,18 +68,12 @@ describe('durable stableIds across the sliding history window', () => {
         tool_name: 'read_file',
       }) as unknown as RawHistoryMessage
 
-    // Only call_1 and call_2 were confirmed when the tail page is built, and the
-    // page already holds call_3 (the poll landed before `history.updated`).
     registerStableId('tool', 'id:call_1', 'ws-call-1')
     registerStableId('tool', 'id:call_2', 'ws-call-2')
 
     const page = [tool(1), tool(2), tool(3)]
-    // Tools bind on their exact tool_call_id, which is position-independent, so
-    // they keep their own keys …
     expect(keysOf(page)).toEqual(['ws-call-1', 'ws-call-2', `${SESSION}:tool-3`])
 
-    // … and for a rank-bound identity the unprovable page binds nothing instead
-    // of shifting one id onto the wrong copy.
     clearStableIdRegistry()
     const ANSWER = 'same answer'
     const answer = (n: number): RawHistoryMessage =>
@@ -137,7 +85,6 @@ describe('durable stableIds across the sliding history window', () => {
     registerStableId('assistant', ANSWER, 'ws-a1')
     registerStableId('assistant', ANSWER, 'ws-a2')
     expect(keysOf([answer(1), answer(2)])).toEqual(['ws-a1', 'ws-a2'])
-    // Three copies in the page, two known ids: no rank is provable.
     expect(keysOf([answer(1), answer(2), answer(3)])).toEqual([
       `${SESSION}:a-1`,
       `${SESSION}:a-2`,
@@ -154,7 +101,6 @@ describe('durable stableIds across the sliding history window', () => {
     expect(lookupStableIdFromEnd('tool', 'same result', 0)).toBe('ws-3')
     expect(lookupStableIdFromEnd('tool', 'same result', 1)).toBe('ws-2')
     expect(lookupStableIdFromEnd('tool', 'same result', 2)).toBe('ws-1')
-    // More copies asked for than recorded: no id, never a wrong one.
     expect(lookupStableIdFromEnd('tool', 'same result', 3)).toBeUndefined()
     expect(lookupStableIdFromEnd('tool', 'never registered', 0)).toBeUndefined()
   })
@@ -171,7 +117,6 @@ describe('durable stableIds across the sliding history window', () => {
         tool_name: 'read_file',
       }) as unknown as RawHistoryMessage
 
-    // Three calls confirmed by the page, in chronological order.
     registerStableId('tool', 'id:call_1', 'ws-call-1')
     registerStableId('tool', 'note content\n', 'ws-call-1')
     registerStableId('tool', 'id:call_2', 'ws-call-2')
@@ -180,9 +125,6 @@ describe('durable stableIds across the sliding history window', () => {
     registerStableId('tool', 'note content\n', 'ws-call-3')
 
     expect(keysOf([tool(1), tool(2), tool(3)])).toEqual(['ws-call-1', 'ws-call-2', 'ws-call-3'])
-    // The window slides: call_1 falls off the page. Before the fix this page
-    // read occurrence 0 → 'ws-call-1', so call_2's card silently took call_1's
-    // key and the list reordered itself.
     expect(keysOf([tool(2), tool(3)])).toEqual(['ws-call-2', 'ws-call-3'])
     expect(keysOf([tool(3)])).toEqual(['ws-call-3'])
   })
@@ -197,11 +139,8 @@ describe('durable stableIds across the sliding history window', () => {
         content: ANSWER,
       }) as unknown as RawHistoryMessage
 
-    // Every page holds just the newest copy: it must keep ITS key, not the
-    // previous copy's (which is what counting from the start of the page did).
     const pages = [1, 2, 3].map((n) => {
       registerStableId('assistant', ANSWER, `ws-answer-${n}`)
-      // Converted immediately, while only this copy is registered.
       return keysOf([answer(n)])
     })
 
@@ -223,8 +162,6 @@ describe('durable stableIds across the sliding history window', () => {
     registerStableId('assistant', REASONING, 'ws-think-2')
 
     expect(keysOf([thinking(1), thinking(2)])).toEqual(['ws-think-1', 'ws-think-2'])
-    // thinking(1) slid out: thinking(2) must keep ws-think-2 (it used to fall
-    // back to ws-think-1 and render one Think block on top of another).
     expect(keysOf([thinking(2)])).toEqual(['ws-think-2'])
   })
 
@@ -239,9 +176,6 @@ describe('durable stableIds across the sliding history window', () => {
 
     registerStableId('user', TEXT, 'temp-user-2')
     expect(keysOf([user(1), user(2)])).toEqual(['temp-user-1', 'temp-user-2'])
-    // The FIRST message of the conversation slides out of the window: the copy
-    // that stays is the new one and must not inherit the first one's key (the
-    // "my first message shows up as the newest one" report).
     expect(keysOf([user(2)])).toEqual(['temp-user-2'])
   })
 
@@ -259,12 +193,9 @@ describe('durable stableIds across the sliding history window', () => {
     const seen = new Map<string, string>()
 
     for (let n = 1; n <= TURNS; n++) {
-      // Optimistic user bubble, then its persisted copy (same text).
       registerStableId('user', `question ${n}`, `temp-user-${n}`)
       log.push({ role: 'user', content: `question ${n}` })
 
-      // Thinking iteration that emits no text, then a tool with a REPEATED
-      // result — the two identities that collide in real sessions.
       registerStableId('assistant', 'same reasoning', `ws-think-${n}`)
       log.push({ role: 'assistant', content: '', reasoning: 'same reasoning' })
 
@@ -289,7 +220,6 @@ describe('durable stableIds across the sliding history window', () => {
       pages.push(page)
     }
 
-    // Every page alone, and every page against the previous one.
     expectStableKeys(pages, seen)
   })
 })

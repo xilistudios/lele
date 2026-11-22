@@ -11,7 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 )
 
-// handleApprovalCallback processes callback queries from approval inline keyboards
 func (c *TelegramChannel) handleApprovalCallback(ctx context.Context, query telego.CallbackQuery) error {
 	logger.DebugCF("telegram", "handleApprovalCallback called", map[string]interface{}{
 		"data":                 query.Data,
@@ -48,9 +47,6 @@ func (c *TelegramChannel) handleApprovalCallback(ctx context.Context, query tele
 		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Unknown action"))
 	}
 
-	// Resolve the caller session key ("telegram:<chatID>") BEFORE handling so
-	// the approval can be rejected when it belongs to another chat. Approval
-	// IDs are broadcast/visible and must not be resolvable cross-chat (TUI-H2).
 	if query.Message == nil {
 		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Approval request not available"))
 	}
@@ -105,7 +101,6 @@ func (c *TelegramChannel) handleApprovalCallback(ctx context.Context, query tele
 	return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText(feedback))
 }
 
-// handleApprovalView handles the "view" action to show the full command
 func (c *TelegramChannel) handleApprovalView(ctx context.Context, query telego.CallbackQuery, approvalID string) error {
 	approval := c.approvalManager.GetApproval(approvalID)
 	if approval == nil {

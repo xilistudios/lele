@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -34,52 +28,22 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// InboundDurability is the consumer-side view of the durable inbound spool
-// (implemented by *durable.Inbound, which the gateway wires in).
-//
-// pkg/agent deliberately does not import pkg/durable: the gateway owns the
-// storage wiring and hands the implementation in through SetInboundDurability,
-// so the loop depends only on this narrow contract and stays free of any
-// database knowledge. It only ever asks "was this already handled?" and
-// "this turn is over, release the row".
-//
-// Both methods must be safe to call from the message goroutines and must never
-// block on I/O for long; the implementations in pkg/durable are best-effort and
-// log instead of returning errors.
 type InboundDurability interface {
-	// ShouldSkip reports whether msg has already been fully processed, i.e.
-	// this delivery is a replay after a restart and the turn must not run a
-	// second time.
 	ShouldSkip(msg bus.InboundMessage) bool
-	// Finish records that the turn for msg is over: the spool row is completed
-	// and msg is entered in the dedupe ledger. It is a no-op for messages that
-	// were never spooled (empty DedupeID and SpoolID 0 - TUI, synthetic events,
-	// durability off).
 	Finish(msg bus.InboundMessage)
 }
 
-// AgentLoop is the main agent loop structure that orchestrates message processing.
 type AgentLoop struct {
-	bus             *bus.MessageBus
-	cfgPtr          atomic.Pointer[config.Config]
-	registry        *AgentRegistry
-	state           *state.Manager
-	running         atomic.Bool
-	summarizing     sync.Map
-	sessionAliases  sync.Map // base session key -> active session key
-	sessionModels   sync.Map
-	sessionAgents   sync.Map // sessionKey -> agentID for agent switching
-	sessionThinking sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
-	// sessionOrigins maps a runtime session key to the origin keys its inbound
-	// messages carry (tools.BuildOriginSessionKey(msg.Channel, msg.ChatID)).
-	// The subagent ledger is written under that origin key while the prompt is
-	// built from the runtime key, and on a routed channel the two are not
-	// related by any prefix/suffix rule ("agent:main:main" vs "telegram:12345"),
-	// so the digest cannot reach reaped rows without it. It is a bounded,
-	// newest-first SET per key, not a single value: the default dm_scope=main
-	// gives every direct peer of an agent the same runtime key, so one slot
-	// would let a second peer hide the first peer's persisted rows. Guarded by
-	// sessionOriginsMu. Memory only, on purpose: see setSessionOrigin.
+	bus              *bus.MessageBus
+	cfgPtr           atomic.Pointer[config.Config]
+	registry         *AgentRegistry
+	state            *state.Manager
+	running          atomic.Bool
+	summarizing      sync.Map
+	sessionAliases   sync.Map
+	sessionModels    sync.Map
+	sessionAgents    sync.Map
+	sessionThinking  sync.Map
 	sessionOriginsMu sync.Mutex
 	sessionOrigins   map[string][]string
 	fallback         *providers.FallbackChain
@@ -87,84 +51,42 @@ type AgentLoop struct {
 	verboseManager   *session.VerboseManager
 	sessionKeySeq    atomic.Uint64
 
-	// seqSeeds is the per-base high-water mark of the chat:N conversation keys
-	// handed out so far (base session key -> last N used). It is persisted under
-	// sess:seq:<baseKey> and rehydrated at startup, because sessionKeySeq resets
-	// to 0 on every process start and would otherwise re-issue keys that already
-	// exist in SQLite with old history. seqSeedPersisted remembers what is
-	// already on disk so the value is only rewritten when it moves. seqSeedMu
-	// guards both and makes the read-modify-write in nextChatSession atomic with
-	// respect to concurrent /new calls for the same base.
 	seqSeedMu            sync.Mutex
 	seqSeeds             map[string]uint64
 	seqSeedPersisted     map[string]uint64
-	approvalManager      *channels.ApprovalManager // Manager for command approvals
-	sessionProcessing    sync.Map                  // sessionKey -> chan struct{} (semaphore per session)
-	subagentSessionAgent sync.Map                  // subagent session key -> agent ID (O(1) lookup, not O(N))
-	wg                   sync.WaitGroup            // tracks in-flight message goroutines
+	approvalManager      *channels.ApprovalManager
+	sessionProcessing    sync.Map
+	subagentSessionAgent sync.Map
+	wg                   sync.WaitGroup
 
-	// midTurnNotices carries subagent completions that arrive while a turn is
-	// already running on the session (sessionKey -> *midTurnNoticeQueue). The
-	// running turn injects them at iteration boundaries so the parent reacts to
-	// a subagent result inside the same turn instead of after it. When the
-	// session is idle the queue is inactive and the completion takes the
-	// inbound-resume path instead. See midturn_notices.go.
 	midTurnNotices sync.Map
 
-	// inProgressTools mirrors the tool each session is currently executing
-	// (sessionKey -> *session.InProgressTool), fed by publishToolLifecycle and
-	// dropped when the turn ends. It exists so a chat reload (TUI session
-	// switch, WebUI page reload/re-subscribe) can restore the "running tool"
-	// row, which otherwise only travels in the live event stream. See
-	// in_progress_tool.go.
 	inProgressTools sync.Map
 
-	// Internal components (delegated operations)
 	messageProcessor   messageProcessor
 	llmRunner          llmRunner
 	commandHandler     commandHandler
 	sessionManager     sessionManager
 	toolCoordinator    toolCoordinator
-	groupManager       *group.GroupManager  // Mixture of Agents group collaboration
-	goalManager        *GoalManager         // Persistent goals (Hermes-style /goal)
-	keyringService     *keyring.Service     // Encrypted secret storage
-	redactor           *keyring.Redactor    // redacts secret values from tool results
-	dbStore            *store.Store         // SQLite state store (nil if not available)
-	providable         *agentProvidableImpl // AgentProvidable interface implementation
-	stopSessionCleanup func()               // stops the background session cleanup goroutine
+	groupManager       *group.GroupManager
+	goalManager        *GoalManager
+	keyringService     *keyring.Service
+	redactor           *keyring.Redactor
+	dbStore            *store.Store
+	providable         *agentProvidableImpl
+	stopSessionCleanup func()
 
-	// stopOnce makes Stop idempotent: its cleanup steps (cancel the goal loop,
-	// close the session-cleanup stop channel, join in-flight turns, close the
-	// SQLite store) run exactly once, so calling Stop after Shutdown — or twice
-	// by mistake — can never panic on a double close or double-close the store.
 	stopOnce sync.Once
 
-	// goalStopCtx is the parent context for goal continuation loops. Cancelling
-	// it (via goalStopCancel, called on Stop) aborts any in-flight /goal
-	// continuation loop.
 	goalStopCtx    context.Context
 	goalStopCancel context.CancelFunc
 
-	// goalLoopSessions tracks sessions that are inside an active goal
-	// continuation loop, so IsSessionProcessing stays true during the
-	// judge-evaluation gap between turns.
 	goalLoopMu       sync.Mutex
 	goalLoopSessions map[string]struct{}
 
-	// harnessMgrs caches the custom slash-command managers built from the
-	// current config, keyed by the absolute cleaned workspace each manager was
-	// built for (""-workspace requests map to the defaults workspace key).
-	// entry.fp fingerprints the config inputs that manager depends on; when it
-	// changes, that entry is rebuilt (config hot-reload). harnessMu guards the
-	// map and its entries.
 	harnessMgrs map[string]*harnessEntry
 	harnessMu   sync.Mutex
 
-	// inboundDurability completes the durable spool row for every turn this
-	// loop runs. nil means durability is off: no dedupe check, no Finish, and
-	// the message goroutine behaves exactly as before the feature existed.
-	// Written only by SetInboundDurability, which must be called once at
-	// startup before Run, so no synchronisation is needed here.
 	inboundDurability InboundDurability
 }
 
@@ -175,8 +97,6 @@ func (al *AgentLoop) cfg() *config.Config {
 	return config.DefaultConfig()
 }
 
-// ReloadRegistry updates the agent registry with new agent configurations.
-// This should be called when the configuration changes (agents.list, defaults, etc.).
 func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	if cfg == nil || al.registry == nil {
 		return
@@ -184,12 +104,6 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 
 	al.registry.ReloadAgents(cfg)
 
-	// Stop the running work of agents that are gone from the new config.
-	// Agents that survive the reload — recreated or not — keep their running
-	// subagents: the tool registration below re-uses their existing managers.
-	// (The old code cancelled every subagent, group run and background process
-	// in the process on every reload, which surfaced as spontaneous
-	// cancellations.)
 	if al.toolCoordinator != nil {
 		stopped := al.toolCoordinator.cancelRemovedSubagents(al.registry.ListAgentIDs())
 		if stopped > 0 {
@@ -197,37 +111,22 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 				map[string]interface{}{"tasks_stopped": stopped})
 		}
 	}
-	// ReloadAgents may have created fresh ContextBuilders; re-attach the
-	// folder resolver so per-session folder context survives config reloads.
 	al.attachFolderResolver()
-	// Same for the subagent ledger: a recreated agent has a fresh builder, and
-	// the digest must keep reaching the prompt after a reload.
 	al.attachSubagentLedgerResolver()
 	al.cfgPtr.Store(cfg)
 
-	// Re-register shared tools for new/recreated agents
 	existingSubagents := al.toolCoordinator.GetSubagents()
 	existingBgManagers := al.toolCoordinator.(*toolCoordinatorImpl).bgManagers
-	// MCP managers outlive the coordinator rebuild: they hold live
-	// connections, so the previous coordinator's set travels to the new one
-	// instead of being dropped (they are retired per agent by syncMCPTools).
 	existingMCPManagers := al.toolCoordinator.(*toolCoordinatorImpl).mcpManagers
 	updatedSubagents, updatedBgManagers := updateSharedTools(cfg, al.bus, al.registry, al.approvalManager, existingSubagents, existingBgManagers, al.groupManager, al.keyringService)
 
-	// Wire up session key and cancel callbacks for all subagents
 	for agentID, sm := range updatedSubagents {
-		id := agentID // capture loop variable
+		id := agentID
 		sm.SetSessionKeyCallback(func(sessionKey, targetAgentID string) {
-			// Use the subagent's target agent (task.AgentID) so the session maps
-			// to the agent that actually executes it. Fall back to the owner
-			// agent when no explicit target was given.
 			if targetAgentID == "" {
 				targetAgentID = id
 			}
 			al.setSubagentSessionAgent(sessionKey, targetAgentID)
-			// The mapping above is routing state; the WebUI header reads the
-			// session listing instead, so the executor has to live on the
-			// session row too (#332).
 			al.persistSubagentSessionAgent(id, sessionKey, targetAgentID)
 		})
 		sm.SetRegisterSessionCancelCallback(func(sessionKey string, cancel context.CancelFunc) func() {
@@ -235,20 +134,11 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 		})
 	}
 
-	// Update tool coordinator with new subagents
 	al.toolCoordinator = newToolCoordinatorWithSubagents(al, updatedSubagents, updatedBgManagers, existingMCPManagers)
 
-	// Re-evaluate every agent's MCP server set against the new config:
-	// rebuild/refresh the list_mcp_tools + get_mcp_tool session layers, refresh
-	// the "## MCP Servers" prompt section and close+drop managers whose
-	// servers vanished or whose agent was removed (mcp.go).
 	al.toolCoordinator.syncMCPTools()
 }
 
-// UpdateConfigSnapshot atomically swaps the config pointer used by the loop.
-// Unlike ReloadRegistry it does NOT rebuild registries or cancel work; use it
-// when only config values changed. The caller MUST pass a private copy
-// (e.g. cfg.Snapshot()) that it will not mutate afterwards.
 func (al *AgentLoop) UpdateConfigSnapshot(cfg *config.Config) {
 	if cfg == nil {
 		return
@@ -256,7 +146,6 @@ func (al *AgentLoop) UpdateConfigSnapshot(cfg *config.Config) {
 	al.cfgPtr.Store(cfg)
 }
 
-// ResolveSessionKey resolves the session key alias if one exists.
 func (al *AgentLoop) ResolveSessionKey(sessionKey string) string {
 	if sessionKey == "" {
 		return ""
@@ -269,13 +158,6 @@ func (al *AgentLoop) ResolveSessionKey(sessionKey string) string {
 	return sessionKey
 }
 
-// attachFolderResolver wires the per-session folder context into every agent's
-// ContextBuilder. The resolver mirrors the read path used by
-// agentProvidableImpl.GetSessionFolder: resolve the alias, find the agent that
-// owns the session, and read the folder persisted on the shared session
-// manager. It is called once in NewAgentLoop (after the registry exists) and
-// again after ReloadRegistry, which may hand back freshly built instances with
-// fresh ContextBuilders.
 func (al *AgentLoop) attachFolderResolver() {
 	if al.registry == nil {
 		return
@@ -293,21 +175,6 @@ func (al *AgentLoop) attachFolderResolver() {
 	})
 }
 
-// attachSubagentLedgerResolver wires the per-session subagent ledger into every
-// agent's ContextBuilder, so the "## Subagent Tasks" digest is part of the
-// system prompt and therefore survives context compaction (the prompt is
-// rebuilt every turn and never persisted nor summarized).
-//
-// The resolver reads the agent's own SubagentManager — the ledger is per-owner —
-// and renders metadata only, so it is safe on the per-turn and per-refresh
-// paths. It is called once in NewAgentLoop (after the registry exists) and again
-// after ReloadRegistry, which may hand back freshly built instances with fresh
-// ContextBuilders. Mirrors attachFolderResolver.
-//
-// The coordinator is read at call time, not captured: ReloadRegistry replaces
-// al.toolCoordinator, and a captured pointer would render the previous
-// coordinator's managers forever. A nil coordinator (tests build loops without
-// one) leaves the resolver unwired rather than panicking.
 func (al *AgentLoop) attachSubagentLedgerResolver() {
 	if al == nil || al.registry == nil || al.toolCoordinator == nil {
 		return
@@ -321,18 +188,8 @@ func (al *AgentLoop) attachSubagentLedgerResolver() {
 	})
 }
 
-// subagentTaskIDPattern matches the task-ID segment of a subagent session key
-// ("<parent>:subagent-<N>"). Compiled once at package level: regexp.MatchString
-// compiles the expression on every call, and this sits in per-request paths.
 var subagentTaskIDPattern = regexp.MustCompile(`^subagent-\d+$`)
 
-// GetSubagentParentSessionKey returns the parent session key for a subagent session.
-//
-// Hot path: it is called by NativeChannel.validateSessionOwnership on every
-// subagent-scoped API request / WebSocket message, so its logs are debug-only.
-// At INFO level (the default) logger.logMessage returns before any work, while
-// an INFO call costs a global write mutex + runtime.Caller unwind +
-// json.Marshal + an unbuffered write per request.
 func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
 	var taskID string
 	if strings.HasPrefix(sessionKey, "subagent:") {
@@ -360,8 +217,6 @@ func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
 		}
 	}
 
-	// Fallback: parse parent from session key structure {parent}:{taskID}
-	// Only use this fallback if taskID matches the expected subagent format
 	if subagentTaskIDPattern.MatchString(taskID) {
 		if idx := strings.LastIndex(sessionKey, ":"+taskID); idx > 0 {
 			parent := sessionKey[:idx]
@@ -374,12 +229,6 @@ func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
 		}
 	}
 
-	// Debug, not Warn: this is reached whenever the in-memory task registry no
-	// longer knows the task (gateway restarted, task expired/finished) or the
-	// key is not in the "<parent>:subagent-<N>" shape — both are expected for
-	// a reconnecting UI holding a stale subagent key, so a Warn here would fire
-	// on every such request without anything being wrong. The caller treats it
-	// as a plain ownership miss (validateSessionOwnership returns false).
 	logger.DebugCF("agent", "GetSubagentParentSessionKey: unable to resolve parent", map[string]interface{}{
 		"session_key": sessionKey,
 		"task_id":     taskID,
@@ -393,8 +242,6 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 		return ""
 	}
 
-	// Backward compatibility: handle old native:<uuid>:<digits> format
-	// Old sessions on disk with this format should still be cleaned up correctly.
 	if strings.HasPrefix(baseSessionKey, "native:") {
 		parts := strings.Split(baseSessionKey[7:], ":")
 		if len(parts) == 2 && parts[1] != "" {
@@ -406,7 +253,6 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 				}
 			}
 			if allDigits {
-				// Old format - reset the session in-place, no new key generation
 				var sessionAgent *AgentInstance
 				if agentID != "" {
 					if a, ok := al.registry.GetAgent(agentID); ok {
@@ -417,15 +263,11 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 					sessionAgent = al.registry.GetDefaultAgent()
 				}
 
-				// Reset session state on the existing key
 				if sessionAgent != nil {
 					sessionAgent.Sessions.GetOrCreate(baseSessionKey)
 					sessionAgent.Sessions.ResetTokenCounts(baseSessionKey)
 					sessionAgent.Sessions.TruncateHistory(baseSessionKey, 0)
 					sessionAgent.Sessions.SetSummary(baseSessionKey, "")
-					// Clear the persisted thinking override as well — the
-					// in-memory delete below alone would let buildLLMOptions
-					// resurrect the old level from session meta.
 					sessionAgent.Sessions.SetThinkingLevel(baseSessionKey, "")
 				}
 
@@ -436,8 +278,6 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 					al.sessionModels.Store(baseSessionKey, model)
 				}
 				al.sessionThinking.Delete(baseSessionKey)
-				// The conversation was reset in place: the MCP tools it had
-				// loaded must not survive into the fresh one.
 				al.dropSessionTools(baseSessionKey)
 
 				return baseSessionKey
@@ -457,8 +297,6 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 
 	newSessionKey := al.nextConversationSessionKey(baseSessionKey)
 	al.setSessionAlias(baseSessionKey, newSessionKey)
-	// The abandoned conversation key is never served again: forget the MCP
-	// tools it had loaded instead of waiting for the LRU to retire them.
 	al.dropSessionTools(baseSessionKey)
 
 	if agentID != "" {
@@ -467,19 +305,11 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 	if model != "" {
 		al.sessionModels.Store(newSessionKey, model)
 	}
-	// No persisted-meta clear needed for newSessionKey: the rotated key has no
-	// session meta yet and GetThinkingLevel returns "" for unknown keys.
 	al.sessionThinking.Delete(newSessionKey)
 
 	if sessionAgent != nil {
-		// GetOrCreate ensures the session exists in memory.
-		// Do NOT save to disk yet — the session should only persist
-		// once the user actually sends a message.
 		sessionAgent.Sessions.GetOrCreate(newSessionKey)
 		sessionAgent.Sessions.ResetTokenCounts(newSessionKey)
-		// Truncate history and clear summary so the new session is truly
-		// fresh.  This is necessary because loadSessions() may have already
-		// populated the session from a previous run's on-disk files.
 		sessionAgent.Sessions.TruncateHistory(newSessionKey, 0)
 		sessionAgent.Sessions.SetSummary(newSessionKey, "")
 	}
@@ -487,7 +317,6 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 	return newSessionKey
 }
 
-// processOptions configures how a message is processed
 type processOptions struct {
 	SessionKey      string
 	Channel         string
@@ -501,45 +330,23 @@ type processOptions struct {
 	ReplyTo         string
 	MessageID       string
 	SkipUserMessage bool
-	SkipGoalLoop    bool // true when called from goal continuation (prevents recursion)
-	// ModelOverride is a per-turn model selected by a harness custom command
-	// (config/markdown "model:" field). It wins over the session model for this
-	// turn only and is NEVER persisted into sessionModels or the session store.
-	ModelOverride string
-	// AppliedCommand describes the harness slash command that was expanded into
-	// UserMessage for this turn (nil for plain messages). The runner persists it
-	// on the user message so the WebUI can show the original "/name args" and
-	// re-render the command chip from history.
-	AppliedCommand *appliedCommand
+	SkipGoalLoop    bool
+	ModelOverride   string
+	AppliedCommand  *appliedCommand
 
-	// midTurnQueue is the mid-turn subagent notice queue THIS turn activated,
-	// captured by runAgentLoop right before it calls runLLMIteration. The loop
-	// drains through this pointer instead of re-resolving opts.SessionKey,
-	// because a "/new" mid-turn remaps the session alias and a re-resolved key
-	// could point at a different queue than the one the turn is accepting
-	// notices into. nil when the turn has no usable session key (all queue
-	// methods are nil-safe). It is an internal per-turn field: callers that
-	// build processOptions never set it.
 	midTurnQueue *midTurnNoticeQueue
 }
 
-// appliedCommand is the display metadata of one expanded harness command: the
-// original text the user typed plus what the expansion recorded. It is written
-// onto the persisted user message (providers.Message.Command/DisplayContent),
-// never onto the prompt sent to the model.
 type appliedCommand struct {
-	Original    string // the raw "/name args" the user sent
-	Name        string // command name, no leading slash (harness canonical)
+	Original    string
+	Name        string
 	Description string
 	Args        string
-	Source      string // harness.Source of the winning command
-	Agent       string // per-turn agent override ("" = none)
-	Model       string // per-turn model override ("" = none)
+	Source      string
+	Agent       string
+	Model       string
 }
 
-// commandAppliedOf maps the runner-side record onto the wire type persisted on
-// the user message (providers.CommandApplied), the same shape the
-// command.applied event carries so live and history render one chip.
 func commandAppliedOf(c *appliedCommand) *providers.CommandApplied {
 	if c == nil {
 		return nil
@@ -554,7 +361,6 @@ func commandAppliedOf(c *appliedCommand) *providers.CommandApplied {
 	}
 }
 
-// SummarizeStats contains statistics about a summarization operation.
 type SummarizeStats struct {
 	BeforeMessages  int
 	AfterMessages   int
@@ -564,21 +370,11 @@ type SummarizeStats struct {
 	SavedTokens     int
 }
 
-// NewAgentLoopWithStore creates a new agent loop instance with an injected
-// SQLite store. The store may be nil, in which case the loop falls back to
-// JSON-based storage for all state (identical semantics to a store open
-// failure).
-//
-// Ownership: the AgentLoop OWNS the injected store and closes it during
-// shutdown (Stop/StopWithContext). Callers MUST NOT close the store
-// themselves after passing it in.
 func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.Store) *AgentLoop {
 	registry := NewAgentRegistry(cfg)
 
-	// Create approval manager early so it can be passed to tools during registration
 	approvalManager := channels.NewApprovalManager()
 
-	// Initialize keyring service for encrypted secret storage
 	keyringSvc := keyring.NewService(keyring.ServiceConfig{
 		Enabled:          cfg.Keyring.Enabled,
 		VaultPath:        cfg.KeyringVaultPath(),
@@ -590,35 +386,23 @@ func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.
 	})
 	redactor := keyring.NewRedactor(keyringSvc)
 
-	// Wire the injected SQLite store. When s is nil (caller could not open
-	// the store, e.g. unsupported platform), the loop operates in JSON-only
-	// mode — identical to the old fallback path.
 	var dbStore *store.Store
 	if s != nil {
 		dbStore = s
 		logger.InfoC("store", fmt.Sprintf("SQLite store opened"))
-		// Wire auth package to use SQLite for credential persistence.
 		auth.UseStore(dbStore.Auth())
 	}
 
-	// Set up shared fallback chain
 	cooldown := providers.NewCooldownTracker()
 	fallbackChain := providers.NewFallbackChain(cooldown)
 
-	// Create a single, shared session manager for all agents.
-	// Uses SQLite for persistence when dbStore is available.
 	sharedSessionManager := session.NewSessionManager()
 
-	// Wire SQLite store into session manager for persistent storage.
 	if dbStore != nil {
 		sharedSessionManager.SetSessionRepo(dbStore.Sessions())
-		// The subagent ledger's executor fallback reads the durable spawn-time
-		// pin from the shared KV namespace (sess:agent:<key>), which the loop
-		// writes through setSubagentSessionAgent.
 		sharedSessionManager.SetSessionKV(dbStore.KV())
 	}
 
-	// Warn if a legacy JSON sessions directory exists — it will be ignored.
 	legacyDir := filepath.Join(config.GetLeleDir(), "sessions")
 	if info, statErr := os.Stat(legacyDir); statErr == nil && info.IsDir() {
 		logger.WarnCF("session", "Legacy JSON sessions directory found — ignored (SQLite-only)", map[string]interface{}{
@@ -627,27 +411,20 @@ func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.
 		})
 	}
 
-	// Replace per-agent session managers with the shared one.
 	registry.SetSharedSessionManager(sharedSessionManager)
 
-	// Start background goroutine to periodically evict idle sessions
-	// and clean up orphaned metadata. Runs every 5 minutes.
 	stopCleanup := sharedSessionManager.StartCleanupGoroutine(5 * time.Minute)
 
-	// Create state manager using default agent's workspace for channel recording
 	defaultAgent := registry.GetDefaultAgent()
 	var stateManager *state.Manager
 	if defaultAgent != nil {
 		stateManager = state.NewManager(defaultAgent.Workspace)
 	}
 
-	// Wire SQLite KV store into the state manager for persistent workspace
-	// state. Falls back to JSON file storage when the store is unavailable.
 	if dbStore != nil && stateManager != nil {
 		stateManager.SetKVRepo(dbStore.KV())
 	}
 
-	// Create verbose manager with session persistence
 	sessionManager := sharedSessionManager
 	verboseManager := session.NewVerboseManager()
 	if sessionManager != nil {
@@ -684,29 +461,17 @@ func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.
 	}
 	loop.goalStopCtx, loop.goalStopCancel = context.WithCancel(context.Background())
 	loop.goalLoopSessions = make(map[string]struct{})
-	// Per-base conversation-key high-water marks, restored from KV below. The
-	// maps are always non-nil so the durable helpers can write without checking
-	// even when SQLite is unavailable (memory-only mode).
 	loop.seqSeeds = make(map[string]uint64)
 	loop.seqSeedPersisted = make(map[string]uint64)
 	loop.cfgPtr.Store(cfg)
 
-	// Wire per-session folder context into every agent's ContextBuilder. The
-	// registry keeps the resolver and applies it to existing and future
-	// instances, so agents recreated by ReloadRegistry stay wired as well.
 	loop.attachFolderResolver()
 
-	// Initialize internal components
 	loop.messageProcessor = newMessageProcessor(loop)
 	loop.llmRunner = newLLMRunner(loop)
 	loop.commandHandler = newCommandHandler(loop)
 	loop.sessionManager = newSessionManager(loop)
 
-	// Group collaboration manager (Mixture of Agents). Created before tool
-	// registration so that group_chat is available from the start. The closures
-	// capture `loop` (a pointer already set above) so they will resolve fields
-	// lazily at call time — safe because they are only invoked during turn
-	// execution, well after the loop is fully initialised.
 	groupLLMRunner := newLLMRunner(loop)
 	resolveAgent := func(agentID string) (group.AgentContext, bool) {
 		agent, ok := loop.registry.GetAgent(agentID)
@@ -734,53 +499,32 @@ func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.
 		return groupLLMRunner.runGroupTurn(ctx, req)
 	}
 	gm := group.NewGroupManager(resolveAgent, turnExecutor, loop.bus.PublishOutbound)
-	// Feature-gate enforcement inside Start (B10): the manager refuses to start
-	// groups when the feature is disabled, regardless of the caller (tool,
-	// /group command, or any internal path).
 	gm.SetEnabledHook(loop.GroupsEnabled)
-	// Session-alias resolution for read paths (#239): a group records the chat
-	// session that started it, but startFreshConversation rotates that base key
-	// to a new conversation key. Without this hook the session-scoped history
-	// payload filters the group out and its card disappears on a session switch.
 	gm.SetSessionAliasResolver(loop.ResolveSessionKey)
 	gm.SetStoreDir(filepath.Join(config.GetLeleDir(), "groups"))
 	if dbStore != nil {
 		gm.SetStore(dbStore.Groups())
 	}
-	// B7: rehydrate the groups already on disk so "/group list" and the WS
-	// welcome payload still show finished groups after a restart, the way chat
-	// sessions do. Best-effort by design — an unreadable store must never block
-	// the agent from starting; the manager simply comes up empty.
 	if _, err := gm.LoadHistorical(); err != nil {
 		logger.WarnC("group", fmt.Sprintf("groups: failed to hydrate history: %v", err))
 	}
 	loop.groupManager = gm
 
-	// Goal manager (persistent goals, Hermes-style /goal command).
 	goalMgr := NewGoalManager(filepath.Join(config.GetLeleDir(), "goals"))
 	if dbStore != nil {
 		goalMgr.SetStore(dbStore.Goals())
 	}
 	loop.goalManager = goalMgr
 
-	// Register shared tools and create tool coordinator with subagents
 	subagents, bgManagers := registerSharedTools(cfg, msgBus, registry, approvalManager, loop.groupManager, keyringSvc)
 
-	// Wire up session key and cancel callbacks so the agent layer can build an O(1)
-	// subagent session-to-agent mapping for GetSessionHistory.
 	for agentID, sm := range subagents {
-		id := agentID // capture loop variable
+		id := agentID
 		sm.SetSessionKeyCallback(func(sessionKey, targetAgentID string) {
-			// Use the subagent's target agent (task.AgentID) so the session maps
-			// to the agent that actually executes it. Fall back to the owner
-			// agent when no explicit target was given.
 			if targetAgentID == "" {
 				targetAgentID = id
 			}
 			loop.setSubagentSessionAgent(sessionKey, targetAgentID)
-			// The mapping above is routing state; the WebUI header reads the
-			// session listing instead, so the executor has to live on the
-			// session row too (#332).
 			loop.persistSubagentSessionAgent(id, sessionKey, targetAgentID)
 		})
 		sm.SetRegisterSessionCancelCallback(func(sessionKey string, cancel context.CancelFunc) func() {
@@ -790,38 +534,19 @@ func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.
 
 	loop.toolCoordinator = newToolCoordinatorWithSubagents(loop, subagents, bgManagers, nil)
 
-	// Now that the coordinator (and with it the per-agent SubagentManagers)
-	// exists, wire the subagent ledger digest into every ContextBuilder. It
-	// cannot happen next to attachFolderResolver above: the resolver needs the
-	// coordinator, and attachSubagentLedgerResolver is a no-op without one.
-	// The digest is the only subagent state that compaction cannot erase, so it
-	// is wired for the same reason as the folder resolver.
 	loop.attachSubagentLedgerResolver()
 
-	// Initial MCP wiring: build per-agent managers, wire the discovery tools
-	// (list_mcp_tools + get_mcp_tool) and feed the "## MCP Servers" prompt
-	// section (mcp.go). Best-effort by design — a broken mcp.json must not keep
-	// the agent from starting.
 	loop.toolCoordinator.syncMCPTools()
 
-	// Wire up the goal judge. The default is an inline LLM judge that evaluates
-	// progress from the session's conversation summary plus the latest response.
-	// When config goal.judge.mode = "subagent", a separate subagent evaluator is
-	// used instead (decoupled from the main agent loop).
 	if defaultAgent != nil && defaultAgent.Provider != nil {
 		judgeModel := defaultAgent.Model
 		if judgeModel == "" {
 			judgeModel = cfg.Agents.Defaults.Model
 		}
-		// Resolve the session's model at evaluation time (the session may have a
-		// different model than the agent default, e.g. a per-session override).
-		// This ensures the judge uses the same model as the main agent loop.
 		modelResolver := func(sessionKey string) string {
 			return loop.sessionManager.ModelForSession(defaultAgent, sessionKey)
 		}
 		if cfg.Goal.Judge.Mode == "subagent" {
-			// Resolve the evaluator agent's SubagentManager. Fall back to the
-			// default agent's manager.
 			evaluatorAgentID := cfg.Goal.Judge.Agent
 			sm := subagents[evaluatorAgentID]
 			if sm == nil {
@@ -830,7 +555,6 @@ func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.
 			if sm != nil {
 				goalMgr.SetJudge(NewSubagentGoalJudge(sm, defaultAgent.Sessions, evaluatorAgentID, "goal", "", 60*time.Second))
 			} else {
-				// No subagent manager available; fall back to inline.
 				logger.WarnCF("agent", "goal.judge.mode=subagent but no subagent manager found; falling back to inline judge", map[string]interface{}{
 					"agent": evaluatorAgentID,
 				})
@@ -848,35 +572,23 @@ func NewAgentLoopWithStore(cfg *config.Config, msgBus *bus.MessageBus, s *store.
 	loop.providable = newAgentProvidable(loop)
 	loop.stopSessionCleanup = stopCleanup
 
-	// Rehydrate durable per-session routing state (aliases, agent overrides and
-	// conversation-key seeds). Runs last so dbStore, the registry and the shared
-	// session manager are all wired; without it a restart would silently move
-	// every session back to its pre-restart conversation and agent.
 	loop.loadDurableSessionState()
 
 	return loop
 }
 
-// GetProvidable returns the AgentProvidable interface implementation.
-// This is used by channel managers to access agent capabilities.
 func (al *AgentLoop) GetProvidable() channels.AgentProvidable {
 	return al.providable
 }
 
-// MessageBus returns the unexported bus of the agent loop.
 func (al *AgentLoop) MessageBus() *bus.MessageBus {
 	return al.bus
 }
 
-// Store returns the SQLite state store, or nil if SQLite is not available.
-// Callers can use this to wire additional consumers (e.g., cron) to the
-// shared database.
 func (al *AgentLoop) Store() *store.Store {
 	return al.dbStore
 }
 
-// GetDefaultAgent returns the default agent instance (used by tests and
-// tooling that need to inspect or override the active provider).
 func (al *AgentLoop) GetDefaultAgent() *AgentInstance {
 	if al.registry == nil {
 		return nil
@@ -884,27 +596,18 @@ func (al *AgentLoop) GetDefaultAgent() *AgentInstance {
 	return al.registry.GetDefaultAgent()
 }
 
-// GroupManager returns the group collaboration manager (Mixture of Agents).
 func (al *AgentLoop) GroupManager() *group.GroupManager {
 	return al.groupManager
 }
 
-// GroupsEnabled reports whether the groups feature is active. It is the
-// pkg/agent-side accessor for the single source of truth,
-// config.Config.GroupsFeatureEnabled (B10): tool registration, the /group
-// command, GroupManager.Start and the WS welcome payload all consult it.
 func (al *AgentLoop) GroupsEnabled() bool {
 	return al.cfg().GroupsFeatureEnabled()
 }
 
-// GoalManager returns the persistent goal manager.
 func (al *AgentLoop) GoalManager() *GoalManager {
 	return al.goalManager
 }
 
-// HandleGoalCommand processes a /goal command for the given session key.
-// This is exposed for the TUI, which dispatches slash commands locally
-// without routing them through the message bus.
 func (al *AgentLoop) HandleGoalCommand(sessionKey string, args []string) string {
 	if al.commandHandler == nil {
 		return "❌ Command handler not initialized."
@@ -916,14 +619,10 @@ func (al *AgentLoop) HandleGoalCommand(sessionKey string, args []string) string 
 	return impl.handleGoalCommand(context.Background(), "native", sessionKey, sessionKey, args)
 }
 
-// KeyringService returns the encrypted secret storage service (may be nil if
-// the keyring module is disabled).
 func (al *AgentLoop) KeyringService() *keyring.Service {
 	return al.keyringService
 }
 
-// SkillsLoader returns the skills loader from the default agent's context
-// builder. Returns nil if no default agent is available.
 func (al *AgentLoop) SkillsLoader() *skills.SkillsLoader {
 	if al.registry == nil {
 		return nil
@@ -935,8 +634,6 @@ func (al *AgentLoop) SkillsLoader() *skills.SkillsLoader {
 	return agent.ContextBuilder.skillsLoader
 }
 
-// SkillInstaller returns a skill installer for the default agent's workspace.
-// Returns nil if no default agent is available.
 func (al *AgentLoop) SkillInstaller() *skills.SkillInstaller {
 	if al.registry == nil {
 		return nil
@@ -948,7 +645,6 @@ func (al *AgentLoop) SkillInstaller() *skills.SkillInstaller {
 	return skills.NewSkillInstaller(agent.Workspace)
 }
 
-// AllGroupSnapshots returns a GroupSnapshot for every tracked group.
 func (al *AgentLoop) AllGroupSnapshots() []group.GroupSnapshot {
 	if al.groupManager == nil {
 		return nil
@@ -956,11 +652,6 @@ func (al *AgentLoop) AllGroupSnapshots() []group.GroupSnapshot {
 	return al.groupManager.AllSnapshots()
 }
 
-// GroupSnapshotsForSession returns the group snapshots that belong to a session,
-// unioning the groups tracked in memory with the persisted history (#239).
-// Filtering honours the loop's session aliases, so a group started before
-// startFreshConversation rotated the conversation key is still reported for the
-// key the client now uses.
 func (al *AgentLoop) GroupSnapshotsForSession(sessionKey string) []group.GroupSnapshot {
 	if al.groupManager == nil {
 		return nil
@@ -968,7 +659,6 @@ func (al *AgentLoop) GroupSnapshotsForSession(sessionKey string) []group.GroupSn
 	return al.groupManager.SnapshotsForSession(sessionKey)
 }
 
-// SessionManager returns the shared session manager used by all agents.
 func (al *AgentLoop) SessionManager() *session.SessionManager {
 	if al.registry != nil {
 		return al.registry.sharedSessionManager
@@ -976,19 +666,14 @@ func (al *AgentLoop) SessionManager() *session.SessionManager {
 	return nil
 }
 
-// registerSessionCancel delegates to sessionManager.
 func (al *AgentLoop) registerSessionCancel(sessionKey string, cancel context.CancelFunc) func() {
 	return al.sessionManager.RegisterSessionCancel(sessionKey, cancel)
 }
 
-// cancelSession delegates to sessionManager.
 func (al *AgentLoop) cancelSession(sessionKey string) int {
 	return al.sessionManager.CancelSession(sessionKey)
 }
 
-// isSessionProcessing returns true if the session is currently being processed
-// (the processing semaphore is held). This is used to avoid sending redundant
-// subagent.result events when the parent will handle the result via wait_for_subagent.
 func (al *AgentLoop) isSessionProcessing(sessionKey string) bool {
 	resolvedKey := al.ResolveSessionKey(sessionKey)
 	val, ok := al.sessionProcessing.Load(resolvedKey)
@@ -998,30 +683,13 @@ func (al *AgentLoop) isSessionProcessing(sessionKey string) bool {
 	ch := val.(chan struct{})
 	select {
 	case ch <- struct{}{}:
-		// Nobody was processing — release immediately
 		<-ch
 		return false
 	default:
-		// Channel is full — someone is processing
 		return true
 	}
 }
 
-// publishTurnEnd emits the terminal "turn.end" event for a turn.
-//
-// Channels use it as the single guaranteed signal that a turn is over, so
-// transient user-facing state (Telegram's typing indicator and "Thinking..."
-// placeholder) can never outlive the turn that started it — even when the
-// turn produced no final message (cancellation, error, or empty response).
-//
-// The event carries no content: it must never be rendered as a message.
-// Handlers are required to be idempotent, because the happy path emits
-// turn.end right after the final message, which already performed the same
-// cleanup on its way out. Publishing unconditionally keeps the agent loop
-// free of "did a final message escape?" bookkeeping.
-//
-// Internal channels (cli/system/subagent) have no user-visible indicator, and
-// an empty channel is unroutable, so both are skipped.
 func (al *AgentLoop) publishTurnEnd(m bus.InboundMessage) {
 	if m.Channel == "" || constants.IsInternalChannel(m.Channel) {
 		return
@@ -1033,8 +701,6 @@ func (al *AgentLoop) publishTurnEnd(m bus.InboundMessage) {
 		Event:          "turn.end",
 		IsIntermediate: false,
 	}
-	// Carry the originating user message id so channels that key their
-	// per-message state on it (chatID:messageID) can locate the exact entry.
 	if m.Metadata != nil && m.Metadata["message_id"] != "" {
 		msg.Metadata = map[string]string{"message_id": m.Metadata["message_id"]}
 	}
@@ -1046,19 +712,10 @@ func (al *AgentLoop) publishTurnEnd(m bus.InboundMessage) {
 	al.bus.PublishOutbound(msg)
 }
 
-// SetInboundDurability wires the durable inbound spool into the loop so every
-// turn completes its spool row and replays are deduplicated.
-//
-// Call it exactly once, at startup and BEFORE Run: the field is read by every
-// message goroutine without a lock, and swapping the implementation mid-flight
-// would let old and new rows be completed by different owners. Passing nil
-// turns durability off again, which is the state a loop built without the
-// feature flag starts in.
 func (al *AgentLoop) SetInboundDurability(d InboundDurability) {
 	al.inboundDurability = d
 }
 
-// Run starts the main agent loop.
 func (al *AgentLoop) Run(ctx context.Context) error {
 	al.running.Store(true)
 
@@ -1076,25 +733,8 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 			go func(m bus.InboundMessage) {
 				defer al.wg.Done()
 
-				// turn.end is the terminal signal of a turn: channels use it to
-				// stop the typing indicator. It is published on EVERY exit path
-				// below, including the ones that publish no final message (that
-				// is the whole point of the signal). Handlers must be idempotent
-				// because the happy path emits it right after the final message,
-				// which already performed the cleanup itself.
 				defer al.publishTurnEnd(m)
 
-				// Durable inbound: a replay after a restart may deliver a
-				// message the previous process already answered. The ledger is
-				// the authority, so the turn is skipped entirely - but the
-				// deferred turn.end above still fires, which is intentional: it
-				// is idempotent and the channel needs the terminal signal for
-				// anything it had already started for this message id.
-				//
-				// Messages that were never spooled (TUI input, synthetic events,
-				// durability off) carry an empty DedupeID and SpoolID 0, and
-				// pkg/durable's own guards make ShouldSkip false and Finish a
-				// no-op for them, so this path never touches the ledger.
 				dur := al.inboundDurability
 				if dur != nil && dur.ShouldSkip(m) {
 					logger.InfoCF("durable", "Skipping already-processed inbound replay",
@@ -1107,47 +747,16 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 					return
 				}
 
-				// Finish must run on every exit path that actually consumed the
-				// message, and must NOT run when the turn was killed by gateway
-				// teardown, so the row survives for the successor process to
-				// replay. A single defer plus this flag keeps that rule in one
-				// place instead of duplicating Finish across branches.
-				//
-				// The two cancellation sources look identical from here (both
-				// surface as context.Canceled) and are told apart by
-				// al.running:
-				//   - user /cancel: llm_runner.go cancels the session context
-				//     while the loop is still running -> running is true -> the
-				//     turn is done as far as the user is concerned -> Finish.
-				//   - Shutdown: it stores running=false BEFORE the shutdown
-				//     hooks cancel any context, so a false flag means the
-				//     gateway is tearing the process down mid-turn -> do NOT
-				//     Finish; the spool row is replayed after the restart.
 				finishTurn := true
 				if dur != nil {
 					defer func() {
 						if !finishTurn {
 							return
 						}
-						// Runs after the final PublishOutbound below (defers
-						// unwind LIFO and the response is published from the
-						// goroutine body), so the row is only completed once the
-						// answer is queued for delivery. The accepted
-						// at-least-once window: a crash between that publish and
-						// this Finish leaves the row pending, and the next
-						// replay delivers a duplicate answer. Losing the message
-						// outright is the worse failure, so the ordering favours
-						// completing late.
 						dur.Finish(m)
 					}()
 				}
 
-				// persistLLMFailure marks the turn by writing into m.Metadata
-				// (the map is shared by reference with the processor's copy),
-				// and only does so when the map already exists. Allocate it
-				// here so a message that arrived without metadata still gets
-				// tagged and the outbound check below propagates the marker to
-				// the live UI.
 				if m.Metadata == nil {
 					m.Metadata = make(map[string]string, 1)
 				}
@@ -1156,8 +765,6 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 				if err != nil {
 					if errors.Is(err, context.Canceled) {
 						if !al.running.Load() {
-							// Gateway teardown, not a user stop: keep the row
-							// pending so the successor process replays it.
 							finishTurn = false
 							logger.WarnCF("durable", "Inbound turn cancelled by shutdown; spool row left for replay",
 								map[string]interface{}{
@@ -1173,13 +780,8 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 								"chat_id":     m.ChatID,
 								"session_key": m.SessionKey,
 							})
-						// No final message will be published: the deferred
-						// turn.end is the only thing that can stop typing.
 						return
 					}
-					// Provider/tool failure: the user is told below, so the
-					// message is handled and its row must be completed - a
-					// replay would only answer them twice.
 					response = fmt.Sprintf("Error processing message: %v", err)
 				}
 
@@ -1193,22 +795,11 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 						outboundMsg.MessageID = m.Metadata["message_id"]
 						outboundMsg.ReplyTo = m.Metadata["message_id"]
 					}
-					// A turn that ended in a provider/tool failure carries the
-					// marker set by messageProcessorImpl.persistLLMFailure (the
-					// map is shared by reference). It travels as Metadata only:
-					// the Event stays "" so every turn-completion consumer —
-					// TUI case "", native dispatch, the turn.end fallthrough —
-					// keeps treating this as a normal final answer. The WebUI
-					// uses it to paint the live failure as an error box instead
-					// of a plain assistant bubble.
 					if m.Metadata != nil && m.Metadata[llmErrorMetadataKey] == "true" {
 						outboundMsg.Metadata = map[string]string{"error": "true"}
 					}
 					al.bus.PublishOutbound(outboundMsg)
 				}
-				// Empty response: nothing was published above, yet the turn is
-				// over. The deferred turn.end still fires, and so does Finish:
-				// an empty answer is still an answer the user got.
 			}(msg)
 		}
 	}
@@ -1216,45 +807,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 	return nil
 }
 
-// Shutdown stops accepting new inbound work and waits up to the caller's
-// deadline for turns already in flight to finish. Unlike Stop it does NOT close
-// the SQLite store, so it is safe to run before the rest of shutdown.
-//
-// Follow-up design decision (to be implemented in a later commit):
-//
-//	Draining `al.wg` can only be bounded if the work it tracks is itself
-//	bounded, and today a turn inherits the root context that the gateway
-//	cancels *after* this function returns. The plan is therefore to commit each
-//	turn to a shutdown-owned context — context.WithoutCancel(rootCtx) plus its
-//	own cancel registered through the existing
-//	al.sessionManager.RegisterSessionCancel — but to do so ONLY AFTER the turn
-//	has acquired the per-session semaphore at
-//	pkg/agent/llm_runner.go:227-236 (the cap-1 `chan struct{}` per sessionKey
-//	stored in al.sessionProcessing).
-//
-//	Why after the acquisition and not before: if a turn were made
-//	uncancellable while it was merely WAITING for the semaphore, shutdown could
-//	never drain, because the current holder may run for minutes (a long LLM
-//	loop, or a tool that ignores cancellation) and the queued turn would sit
-//	there uninterruptibly. Waiting for the semaphore must stay cancellable —
-//	the durable spool replays such a turn — while work that is already underway
-//	must not be killed mid-call. Acquiring first, then detaching from the root
-//	cancellation, is the only ordering that satisfies both.
-//
-//	Goal-continuation loops (/goal) are tracked by al.wg but run under
-//	goalStopCtx, which Shutdown deliberately does NOT cancel — only Stop does,
-//	after every hook. The consequence: an in-flight goal turn is allowed to
-//	progress during the drain, so a self-restart can hand off to the new
-//	binary without interrupting it. If it has not finished when the drain budget
-//	is spent, Shutdown returns DeadlineExceeded and Stop cancels goalStopCtx;
-//	the goal is then left paused and the user resumes it with /goal resume (goals
-//	are not auto-resumed at startup). The shutdown budget is therefore sized so a
-//	normal turn fits, and a long-running goal is an accepted, bounded loss rather
-//	than something to drain unconditionally.
 func (al *AgentLoop) Shutdown(ctx context.Context) error {
-	// Stop taking new inbound messages: Run's loop re-checks this flag, and the
-	// backlog left in the bus is harmless because channels re-deliver after the
-	// process comes back up.
 	al.running.Store(false)
 
 	drained := make(chan struct{})
@@ -1266,29 +819,12 @@ func (al *AgentLoop) Shutdown(ctx context.Context) error {
 	select {
 	case <-drained:
 		logger.InfoC("agent", "Agent loop drained: no turn in flight at shutdown")
-		// MCP teardown belongs here, after the drain: an in-flight turn may be
-		// mid-call on a remote tool, and closing its connection under it would
-		// turn a graceful stop into a failed tool call. When the drain times
-		// out (ctx.Done below) the managers are deliberately left open for the
-		// gateway's "mcp-stop" hook, which runs after agent-drain either way —
-		// so the stdio children are closed exactly once on both paths.
-		// A close failure is logged, not returned: it must not mark the drain
-		// itself as failed.
 		if err := al.CloseMCPManagers(); err != nil {
 			logger.WarnCF("agent", "Failed to close MCP managers during shutdown",
 				map[string]interface{}{"error": err.Error()})
 		}
 		return nil
 	case <-ctx.Done():
-		// The caller's budget (the shutdown coordinator's per-hook timeout) is
-		// spent while turns are still running. Those goroutines are left alone
-		// on purpose: the gateway cancels the root context right after the
-		// hooks and then joins them again through StopWithin, which is bounded.
-		//
-		// The `drained` goroutine above is intentionally not cancelled here:
-		// it blocks only on al.wg.Wait(), which Stop/StopWithin join, and the
-		// process exits as soon as that join is done or abandoned. It needs no
-		// lifecycle handle of its own.
 		logger.WarnCF("agent", "Agent loop drain timed out", map[string]interface{}{
 			"error": ctx.Err().Error(),
 		})
@@ -1296,55 +832,18 @@ func (al *AgentLoop) Shutdown(ctx context.Context) error {
 	}
 }
 
-// Stop stops the agent loop and waits, unbounded, for in-flight message
-// goroutines to finish. It is the unbounded form of StopWithin, kept for tests
-// and for callers that genuinely want to drain without a budget; production
-// exit paths (the gateway and the TUI) use StopWithin so a turn that ignores
-// cancellation cannot hold the process open.
 func (al *AgentLoop) Stop() {
 	_ = al.StopWithin(0)
 }
 
-// StopWithin tears the loop down and joins the in-flight turns, giving up on
-// them after grace. grace <= 0 waits forever, which is what Stop does.
-//
-// The bounded form exists because a turn that outlived the drain can only be
-// released by cancelling the root context it runs on, and both exit paths —
-// the gateway's runGracefulShutdown and the TUI's shutdownTUI — do exactly that
-// right before calling this. If a turn still refuses to exit - a
-// tool that does not observe cancellation, a subagent with its own context -
-// the join must not be what keeps the process alive: systemd's
-// TimeoutStopUSec would fire, SIGKILL would land on every turn, and a
-// self-update restart would look like a crash (this was the 90 s hang that
-// made the updater appear to "stop the service and never start it").
-//
-// When the grace expires the store is deliberately left open: closing it
-// under a live turn would pull persistence out from underneath it, and
-// SQLite recovers the WAL on the next open anyway. The returned error tells
-// the caller the join was abandoned, never that the teardown failed.
-//
-// grace bounds the WHOLE teardown, not each stage of it. The teardown is a
-// sequence of bounded waits - the retention sweepers, the turn join and the
-// group-run drain - and giving each of them the full grace would let a slow
-// but healthy stage spend the budget of the one after it, so the caller's
-// promised bound (tuiExitJoinGrace for the TUI, finalTurnJoinGrace for the
-// gateway) could stretch to a multiple of itself. One deadline is taken at the
-// top instead, every stage gets only what is left of it, and a stage that
-// finds the budget already spent is abandoned exactly like one that ran out
-// mid-wait: the store stays open and the process exits.
 func (al *AgentLoop) StopWithin(grace time.Duration) error {
 	al.running.Store(false)
 
 	abandoned := false
-	// A zero deadline means "no budget" (grace <= 0 waits forever). Every
-	// stage below asks for what is left of it instead of using grace directly.
 	var deadline time.Time
 	if grace > 0 {
 		deadline = time.Now().Add(grace)
 	}
-	// remaining reports the budget left for the next stage. false means it is
-	// already spent, so the stage must not start waiting at all: passing 0 down
-	// would mean "wait forever", the opposite of what the caller asked for.
 	remaining := func() (time.Duration, bool) {
 		if deadline.IsZero() {
 			return 0, true
@@ -1361,22 +860,10 @@ func (al *AgentLoop) StopWithin(grace time.Duration) error {
 		if al.goalStopCancel != nil {
 			al.goalStopCancel()
 		}
-		// stopSessionCleanup is func(){ close(stop) } (see
-		// session.StartCleanupGoroutine), so a second call would panic. It is
-		// guarded together with the store close below by stopOnce, which makes
-		// Stop safe both after Shutdown and when called twice.
 		if al.stopSessionCleanup != nil {
 			al.stopSessionCleanup()
 		}
 
-		// Stop the subagent retention sweepers (one per manager, see
-		// SubagentManager.StartRetentionCleanup). No sweep may touch the task
-		// map or evict sessions into the session layer while the loop tears
-		// down the store below, but the join is bounded: a sweeper stuck inside
-		// CleanupTerminalTasks -> sessionEvictCallback (synchronous SQLite per
-		// session) must not hold the teardown open. Managers dropped by a
-		// config reload are stopped in
-		// toolCoordinatorImpl.cancelRemovedSubagents instead.
 		if al.toolCoordinator != nil {
 			for _, sm := range al.toolCoordinator.GetSubagents() {
 				if sm == nil {
@@ -1388,12 +875,6 @@ func (al *AgentLoop) StopWithin(grace time.Duration) error {
 					return
 				}
 				if err := sm.StopRetentionCleanupWithin(left); err != nil {
-					// The manager is detached now (no further sweeps), but the
-					// eviction the sweeper was blocked in is still in flight.
-					// Closing the store under it is exactly what this teardown
-					// must not do, so abandon the whole teardown the same way a
-					// stuck turn does: leave the store open and let the process
-					// exit release it.
 					abandoned = true
 					logger.WarnCF("agent", "Subagent retention sweeper did not stop; abandoning teardown",
 						map[string]interface{}{"error": err.Error()})
@@ -1403,9 +884,6 @@ func (al *AgentLoop) StopWithin(grace time.Duration) error {
 		}
 
 		if grace > 0 {
-			// Same bounded-wait shape as Shutdown: the helper goroutine is
-			// safe to leave blocked on wg.Wait() when the grace expires
-			// because the process exits right after this returns.
 			done := make(chan struct{})
 			go func() {
 				al.wg.Wait()
@@ -1428,11 +906,6 @@ func (al *AgentLoop) StopWithin(grace time.Duration) error {
 			al.wg.Wait()
 		}
 
-		// Drain group run goroutines before closing the store (CORE-04).
-		// Without this, runGroup's deferred saveStateBestEffort executes
-		// against a closed DB and the terminal group state is silently lost.
-		// Reuses the deadline taken at the top, so it cannot spend budget the
-		// turn drain above already consumed.
 		if al.groupManager != nil {
 			left, ok := remaining()
 			if !ok {
@@ -1456,18 +929,11 @@ func (al *AgentLoop) StopWithin(grace time.Duration) error {
 	})
 
 	if abandoned {
-		// The teardown stopped short of closing the store: a turn, a group run
-		// or a retention sweep is still in flight and may still write through
-		// it. The process exits right after this, which releases the file.
 		return fmt.Errorf("agent loop stop timed out after %s; teardown abandoned with work in flight", grace)
 	}
 	return nil
 }
 
-// markGoalLoopActive records that the session is inside an active goal
-// continuation loop. While active, IsSessionProcessing reports true even
-// during the judge-evaluation gap between turns, so the TUI loading indicator
-// stays on for the whole autonomous run.
 func (al *AgentLoop) markGoalLoopActive(sessionKey string) {
 	al.goalLoopMu.Lock()
 	defer al.goalLoopMu.Unlock()
@@ -1477,15 +943,12 @@ func (al *AgentLoop) markGoalLoopActive(sessionKey string) {
 	al.goalLoopSessions[sessionKey] = struct{}{}
 }
 
-// clearGoalLoopActive removes the session from the goal-loop tracking set.
 func (al *AgentLoop) clearGoalLoopActive(sessionKey string) {
 	al.goalLoopMu.Lock()
 	defer al.goalLoopMu.Unlock()
 	delete(al.goalLoopSessions, sessionKey)
 }
 
-// isGoalLoopActive reports whether the session is currently inside a goal
-// continuation loop.
 func (al *AgentLoop) isGoalLoopActive(sessionKey string) bool {
 	al.goalLoopMu.Lock()
 	defer al.goalLoopMu.Unlock()
@@ -1493,25 +956,18 @@ func (al *AgentLoop) isGoalLoopActive(sessionKey string) bool {
 	return ok
 }
 
-// SetChannelManager sets the channel manager for the agent loop.
 func (al *AgentLoop) SetChannelManager(cm *channels.Manager) {
 	al.channelManager = cm
 }
 
-// SetApprovalManager configures the approval manager for command approvals.
 func (al *AgentLoop) SetApprovalManager(am *channels.ApprovalManager) {
 	al.approvalManager = am
 }
 
-// GetApprovalManager returns the approval manager for command approvals.
 func (al *AgentLoop) GetApprovalManager() *channels.ApprovalManager {
 	return al.approvalManager
 }
 
-// SetExecWhitelist hot-applies the exec command whitelist to all live agents
-// without rebuilding the registry. Called after the user adds a command to the
-// whitelist from the TUI approval prompt so the decision takes effect
-// immediately, without waiting for a config reload.
 func (al *AgentLoop) SetExecWhitelist(commands []string) {
 	if al.registry == nil {
 		return
@@ -1519,8 +975,6 @@ func (al *AgentLoop) SetExecWhitelist(commands []string) {
 	al.registry.SetExecWhitelist(commands)
 }
 
-// RecordLastChannel records the last active channel for this workspace.
-// This uses the atomic state save mechanism to prevent data loss on crash.
 func (al *AgentLoop) RecordLastChannel(channel string) error {
 	if al.state == nil {
 		return nil
@@ -1528,8 +982,6 @@ func (al *AgentLoop) RecordLastChannel(channel string) error {
 	return al.state.SetLastChannel(channel)
 }
 
-// RecordLastChatID records the last active chat ID for this workspace.
-// This uses the atomic state save mechanism to prevent data loss on crash.
 func (al *AgentLoop) RecordLastChatID(chatID string) error {
 	if al.state == nil {
 		return nil
@@ -1537,11 +989,6 @@ func (al *AgentLoop) RecordLastChatID(chatID string) error {
 	return al.state.SetLastChatID(chatID)
 }
 
-// ============================================================================
-// Internal Methods (for use by components within this package)
-// ============================================================================
-
-// getSessionAgent returns the agent ID for a session (internal use).
 func (al *AgentLoop) getSessionAgent(sessionKey string) string {
 	sessionKey = al.ResolveSessionKey(sessionKey)
 	if agentID, ok := al.sessionAgents.Load(sessionKey); ok {
@@ -1552,8 +999,6 @@ func (al *AgentLoop) getSessionAgent(sessionKey string) string {
 		})
 		return result
 	}
-	// Check subagent session mapping — subagent sessions are stored in a
-	// separate map populated by SetSessionKeyCallback at spawn time.
 	if agentID, ok := al.subagentSessionAgent.Load(sessionKey); ok {
 		result := agentID.(string)
 		logger.DebugCF("agent", "getSessionAgent found in subagentSessionAgent", map[string]interface{}{
@@ -1573,14 +1018,6 @@ func (al *AgentLoop) getSessionAgent(sessionKey string) string {
 	return defaultID
 }
 
-// sessionAgentOverride reports the agent explicitly pinned to a session and
-// whether such a pin exists at all. Pins come from /agent, from
-// startFreshConversation (which mirrors the previous session's pin onto the
-// rotated key) and from subagent spawns.
-//
-// It exists because getSessionAgent cannot answer "is this session pinned?":
-// it falls back to the default agent ID, so its result is never empty and a
-// caller that treats "non-empty" as "pinned" silently overrides routing.
 func (al *AgentLoop) sessionAgentOverride(sessionKey string) (string, bool) {
 	sessionKey = al.ResolveSessionKey(sessionKey)
 	if v, ok := al.sessionAgents.Load(sessionKey); ok {
@@ -1596,7 +1033,6 @@ func (al *AgentLoop) sessionAgentOverride(sessionKey string) (string, bool) {
 	return "", false
 }
 
-// getDefaultAgentID returns the default agent ID (internal use).
 func (al *AgentLoop) getDefaultAgentID() string {
 	if defaultAgent := al.registry.GetDefaultAgent(); defaultAgent != nil {
 		return defaultAgent.ID
@@ -1604,7 +1040,6 @@ func (al *AgentLoop) getDefaultAgentID() string {
 	return "main"
 }
 
-// getSessionContextWindow returns the context window for a session (internal use).
 func (al *AgentLoop) getSessionContextWindow(sessionKey string) int {
 	resolvedSessionKey := al.ResolveSessionKey(sessionKey)
 	agent := al.agentForSession(resolvedSessionKey)
@@ -1612,7 +1047,6 @@ func (al *AgentLoop) getSessionContextWindow(sessionKey string) int {
 		return 128000
 	}
 
-	// Check if the session has an overridden model
 	model := agent.Model
 	if m, ok := al.sessionModels.Load(resolvedSessionKey); ok {
 		if selected, ok := m.(string); ok && selected != "" {
@@ -1620,7 +1054,6 @@ func (al *AgentLoop) getSessionContextWindow(sessionKey string) int {
 		}
 	}
 
-	// Resolve context window from provider config, fall back to agent's value, then to default
 	cfg := al.cfg()
 	providerName := extractProviderFromModel(model, cfg.Agents.Defaults.Provider)
 	if cw := getContextWindow(cfg, model, providerName); cw > 0 {
@@ -1632,22 +1065,18 @@ func (al *AgentLoop) getSessionContextWindow(sessionKey string) int {
 	return 128000
 }
 
-// RegisterTool registers a tool to all agents.
 func (al *AgentLoop) RegisterTool(tool tools.Tool) {
 	al.toolCoordinator.RegisterTool(tool)
 }
 
-// GetSubagents returns the subagent managers (for tests).
 func (al *AgentLoop) GetSubagents() map[string]*tools.SubagentManager {
 	return al.toolCoordinator.GetSubagents()
 }
 
-// GetStartupInfo returns information about loaded tools and skills for logging.
 func (al *AgentLoop) GetStartupInfo() map[string]interface{} {
 	return al.toolCoordinator.GetStartupInfo()
 }
 
-// agentForSession returns the agent instance for a session.
 func (al *AgentLoop) agentForSession(sessionKey string) *AgentInstance {
 	resolvedSessionKey := al.ResolveSessionKey(sessionKey)
 	agent := al.registry.GetDefaultAgent()
@@ -1670,8 +1099,6 @@ func (al *AgentLoop) agentForSession(sessionKey string) *AgentInstance {
 	return agent
 }
 
-// dropSessionTools forgets the MCP tools a session loaded (nil-safe: loops
-// built by tests may have no coordinator yet).
 func (al *AgentLoop) dropSessionTools(sessionKey string) {
 	if al == nil || al.toolCoordinator == nil {
 		return
@@ -1679,24 +1106,14 @@ func (al *AgentLoop) dropSessionTools(sessionKey string) {
 	al.toolCoordinator.dropSessionTools(sessionKey)
 }
 
-// resetAgentSession clears the session history and state for an agent.
 func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) error {
 	previousHistory := agent.Sessions.GetHistory(sessionKey)
 	previousSummary := agent.Sessions.GetSummary(sessionKey)
 	agent.Sessions.TruncateHistory(sessionKey, 0)
 	agent.Sessions.SetSummary(sessionKey, "")
 	agent.Sessions.ResetTokenCounts(sessionKey)
-	// Clear any session-specific model and thinking overrides. The in-memory
-	// delete alone is not enough: buildLLMOptions (thinking) and
-	// syncSessionModel/ModelForSession (model) fall back to the persisted
-	// session meta, so an override that survived /clear would resurrect on the
-	// very next turn. Clear both persisted values as well. (SetModel("") /
-	// SetThinkingLevel("") write the empty string, which every reader treats
-	// as "no override".)
 	al.sessionModels.Delete(sessionKey)
 	al.sessionThinking.Delete(sessionKey)
-	// Clearing the history also clears the MCP tools this session had loaded
-	// through get_mcp_tool: they are part of what the user is resetting.
 	al.dropSessionTools(sessionKey)
 	if agent.Sessions != nil {
 		agent.Sessions.SetThinkingLevel(sessionKey, "")
@@ -1714,7 +1131,6 @@ func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) 
 	return nil
 }
 
-// ToggleEphemeral toggles the ephemeral session mode.
 func (al *AgentLoop) ToggleEphemeral() string {
 	current := al.cfg().SessionEphemeralEnabled()
 	next := !current

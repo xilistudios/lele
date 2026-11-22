@@ -9,7 +9,6 @@ import (
 	"testing"
 )
 
-// TestWebTool_WebFetch_Success verifies successful URL fetching
 func TestWebTool_WebFetch_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -27,23 +26,19 @@ func TestWebTool_WebFetch_Success(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Success should not be an error
 	if result.IsError {
 		t.Errorf("Expected success, got IsError=true: %s", result.ForLLM)
 	}
 
-	// ForUser should contain the fetched content
 	if !strings.Contains(result.ForUser, "Test Page") {
 		t.Errorf("Expected ForUser to contain 'Test Page', got: %s", result.ForUser)
 	}
 
-	// ForLLM should contain summary
 	if !strings.Contains(result.ForLLM, "bytes") && !strings.Contains(result.ForLLM, "extractor") {
 		t.Errorf("Expected ForLLM to contain summary, got: %s", result.ForLLM)
 	}
 }
 
-// TestWebTool_WebFetch_JSON verifies JSON content handling
 func TestWebTool_WebFetch_JSON(t *testing.T) {
 	testData := map[string]string{"key": "value", "number": "123"}
 	expectedJSON, _ := json.MarshalIndent(testData, "", "  ")
@@ -64,18 +59,15 @@ func TestWebTool_WebFetch_JSON(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Success should not be an error
 	if result.IsError {
 		t.Errorf("Expected success, got IsError=true: %s", result.ForLLM)
 	}
 
-	// ForUser should contain formatted JSON
 	if !strings.Contains(result.ForUser, "key") && !strings.Contains(result.ForUser, "value") {
 		t.Errorf("Expected ForUser to contain JSON data, got: %s", result.ForUser)
 	}
 }
 
-// TestWebTool_WebFetch_InvalidURL verifies error handling for invalid URL
 func TestWebTool_WebFetch_InvalidURL(t *testing.T) {
 	tool := NewWebFetchTool(50000)
 	ctx := context.Background()
@@ -85,18 +77,15 @@ func TestWebTool_WebFetch_InvalidURL(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error for invalid URL")
 	}
 
-	// Should contain error message (either "invalid URL" or scheme error)
 	if !strings.Contains(result.ForLLM, "URL") && !strings.Contains(result.ForUser, "URL") {
 		t.Errorf("Expected error message for invalid URL, got ForLLM: %s", result.ForLLM)
 	}
 }
 
-// TestWebTool_WebFetch_UnsupportedScheme verifies error handling for non-http URLs
 func TestWebTool_WebFetch_UnsupportedScheme(t *testing.T) {
 	tool := NewWebFetchTool(50000)
 	ctx := context.Background()
@@ -106,18 +95,15 @@ func TestWebTool_WebFetch_UnsupportedScheme(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error for unsupported URL scheme")
 	}
 
-	// Should mention only http/https allowed
 	if !strings.Contains(result.ForLLM, "http/https") && !strings.Contains(result.ForUser, "http/https") {
 		t.Errorf("Expected scheme error message, got ForLLM: %s", result.ForLLM)
 	}
 }
 
-// TestWebTool_WebFetch_MissingURL verifies error handling for missing URL
 func TestWebTool_WebFetch_MissingURL(t *testing.T) {
 	tool := NewWebFetchTool(50000)
 	ctx := context.Background()
@@ -125,18 +111,15 @@ func TestWebTool_WebFetch_MissingURL(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error when URL is missing")
 	}
 
-	// Should mention URL is required
 	if !strings.Contains(result.ForLLM, "url is required") && !strings.Contains(result.ForUser, "url is required") {
 		t.Errorf("Expected 'url is required' message, got ForLLM: %s", result.ForLLM)
 	}
 }
 
-// TestWebTool_WebFetch_Truncation verifies content truncation
 func TestWebTool_WebFetch_Truncation(t *testing.T) {
 	longContent := strings.Repeat("x", 20000)
 
@@ -147,7 +130,7 @@ func TestWebTool_WebFetch_Truncation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool := NewWebFetchTool(1000) // Limit to 1000 chars
+	tool := NewWebFetchTool(1000)
 	tool.allowPrivate = true
 	ctx := context.Background()
 	args := map[string]interface{}{
@@ -156,41 +139,35 @@ func TestWebTool_WebFetch_Truncation(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Success should not be an error
 	if result.IsError {
 		t.Errorf("Expected success, got IsError=true: %s", result.ForLLM)
 	}
 
-	// ForUser should contain truncated content (not the full 20000 chars)
 	resultMap := make(map[string]interface{})
 	json.Unmarshal([]byte(result.ForUser), &resultMap)
 	if text, ok := resultMap["text"].(string); ok {
-		if len(text) > 1100 { // Allow some margin
+		if len(text) > 1100 {
 			t.Errorf("Expected content to be truncated to ~1000 chars, got: %d", len(text))
 		}
 	}
 
-	// Should be marked as truncated
 	if truncated, ok := resultMap["truncated"].(bool); !ok || !truncated {
 		t.Errorf("Expected 'truncated' to be true in result")
 	}
 }
 
-// TestWebTool_WebSearch_NoApiKey verifies that no tool is created when API key is missing
 func TestWebTool_WebSearch_NoApiKey(t *testing.T) {
 	tool := NewWebSearchTool(WebSearchToolOptions{BraveEnabled: true, BraveAPIKey: ""})
 	if tool != nil {
 		t.Errorf("Expected nil tool when Brave API key is empty")
 	}
 
-	// Also nil when nothing is enabled
 	tool = NewWebSearchTool(WebSearchToolOptions{})
 	if tool != nil {
 		t.Errorf("Expected nil tool when no provider is enabled")
 	}
 }
 
-// TestWebTool_WebSearch_MissingQuery verifies error handling for missing query
 func TestWebTool_WebSearch_MissingQuery(t *testing.T) {
 	tool := NewWebSearchTool(WebSearchToolOptions{BraveEnabled: true, BraveAPIKey: "test-key", BraveMaxResults: 5})
 	ctx := context.Background()
@@ -198,13 +175,11 @@ func TestWebTool_WebSearch_MissingQuery(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error when query is missing")
 	}
 }
 
-// TestWebTool_WebFetch_HTMLExtraction verifies HTML text extraction
 func TestWebTool_WebFetch_HTMLExtraction(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -222,23 +197,19 @@ func TestWebTool_WebFetch_HTMLExtraction(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Success should not be an error
 	if result.IsError {
 		t.Errorf("Expected success, got IsError=true: %s", result.ForLLM)
 	}
 
-	// ForUser should contain extracted text (without script/style tags)
 	if !strings.Contains(result.ForUser, "Title") && !strings.Contains(result.ForUser, "Content") {
 		t.Errorf("Expected ForUser to contain extracted text, got: %s", result.ForUser)
 	}
 
-	// Should NOT contain script or style tags
 	if strings.Contains(result.ForUser, "<script>") || strings.Contains(result.ForUser, "<style>") {
 		t.Errorf("Expected script/style tags to be removed, got: %s", result.ForUser)
 	}
 }
 
-// TestWebFetchTool_extractText verifies text extraction preserves newlines
 func TestWebFetchTool_extractText(t *testing.T) {
 	tool := &WebFetchTool{}
 
@@ -312,7 +283,6 @@ func TestWebFetchTool_extractText(t *testing.T) {
 	}
 }
 
-// TestWebTool_WebFetch_MissingDomain verifies error handling for URL without domain
 func TestWebTool_WebFetch_MissingDomain(t *testing.T) {
 	tool := NewWebFetchTool(50000)
 	ctx := context.Background()
@@ -322,18 +292,14 @@ func TestWebTool_WebFetch_MissingDomain(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error for URL without domain")
 	}
 
-	// Should mention missing domain
 	if !strings.Contains(result.ForLLM, "domain") && !strings.Contains(result.ForUser, "domain") {
 		t.Errorf("Expected domain error message, got ForLLM: %s", result.ForLLM)
 	}
 }
-
-// ========== DuckDuckGo Search Provider Tests ==========
 
 func TestDuckDuckGoSearchProvider_ExtractResults_Success(t *testing.T) {
 	provider := &DuckDuckGoSearchProvider{}
@@ -433,8 +399,6 @@ func TestDuckDuckGoSearchProvider_ExtractResults_HTMLInTitle(t *testing.T) {
 	}
 }
 
-// ========== StripTags Tests ==========
-
 func TestStripTags(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -459,8 +423,6 @@ func TestStripTags(t *testing.T) {
 		})
 	}
 }
-
-// ========== WebSearchTool Metadata Tests ==========
 
 func TestWebSearchTool_Name(t *testing.T) {
 	tool := NewWebSearchTool(WebSearchToolOptions{DuckDuckGoEnabled: true})
@@ -501,8 +463,6 @@ func TestWebSearchTool_Parameters(t *testing.T) {
 		t.Errorf("Expected 'query' in required, got %v", required)
 	}
 }
-
-// ========== NewWebSearchTool Constructor Tests ==========
 
 func TestNewWebSearchTool_Perplexity(t *testing.T) {
 	tool := NewWebSearchTool(WebSearchToolOptions{
@@ -601,8 +561,6 @@ func TestNewWebSearchTool_Priority_BraveOverDuckDuckGo(t *testing.T) {
 	}
 }
 
-// ========== WebFetchTool Metadata Tests ==========
-
 func TestWebFetchTool_Name(t *testing.T) {
 	tool := NewWebFetchTool(50000)
 	if tool.Name() != "web_fetch" {
@@ -649,8 +607,6 @@ func TestNewWebFetchTool_NegativeMaxChars(t *testing.T) {
 		t.Errorf("maxChars = %d, want %d (default for negative)", tool.maxChars, 50000)
 	}
 }
-
-// ========== WebFetchTool Execute Edge Cases ==========
 
 func TestWebFetchTool_Execute_MaxCharsOverride(t *testing.T) {
 	longContent := strings.Repeat("x", 500)
@@ -761,8 +717,6 @@ func TestWebFetchTool_Execute_ServerError(t *testing.T) {
 		t.Errorf("Expected status 500, got: %v", resultMap["status"])
 	}
 }
-
-// ========== SearXNG Search Provider Tests ==========
 
 func TestSearXNGSearchProvider_Search_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -898,7 +852,7 @@ func TestSearXNGSearchProvider_Search_CountCapping(t *testing.T) {
 
 func TestSearXNGSearchProvider_Search_NetworkError(t *testing.T) {
 	provider := &SearXNGSearchProvider{
-		instanceURL: "http://127.0.0.1:1", // port 1 should refuse connections
+		instanceURL: "http://127.0.0.1:1",
 		categories:  "general",
 		language:    "auto",
 	}
@@ -963,8 +917,6 @@ func TestSearXNGSearchProvider_Search_NoContentSnippet(t *testing.T) {
 	}
 }
 
-// ========== SearXNG WebSearchTool Integration Tests ==========
-
 func TestWebSearchTool_SearXNG_Created(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1025,7 +977,6 @@ func TestWebSearchTool_SearXNG_PriorityOverDDG(t *testing.T) {
 	if tool == nil {
 		t.Fatal("Expected non-nil tool")
 	}
-	// SearXNG should take priority over DuckDuckGo
 	if _, ok := tool.provider.(*SearXNGSearchProvider); !ok {
 		t.Errorf("Expected SearXNG provider, got %T", tool.provider)
 	}
@@ -1041,7 +992,6 @@ func TestWebSearchTool_SearXNG_DefaultsApplied(t *testing.T) {
 	tool := NewWebSearchTool(WebSearchToolOptions{
 		SearXNGEnabled:     true,
 		SearXNGInstanceURL: server.URL + "/",
-		// Categories, Language left empty to test defaults
 	})
 	if tool == nil {
 		t.Fatal("Expected non-nil tool")
@@ -1056,7 +1006,6 @@ func TestWebSearchTool_SearXNG_DefaultsApplied(t *testing.T) {
 	if provider.language != "auto" {
 		t.Errorf("Expected default language 'auto', got '%s'", provider.language)
 	}
-	// Trailing slash should be trimmed
 	if strings.HasSuffix(provider.instanceURL, "/") {
 		t.Errorf("Expected instanceURL without trailing slash, got '%s'", provider.instanceURL)
 	}
@@ -1094,10 +1043,6 @@ func TestWebSearchTool_SearXNG_Execute(t *testing.T) {
 	}
 }
 
-// ========== SSRF Protection Tests ==========
-
-// TestWebFetchTool_Execute_BlocksLoopback verifies that fetching loopback
-// addresses is denied (SSRF protection).
 func TestWebFetchTool_Execute_BlocksLoopback(t *testing.T) {
 	tool := NewWebFetchTool(50000)
 	ctx := context.Background()
@@ -1111,8 +1056,6 @@ func TestWebFetchTool_Execute_BlocksLoopback(t *testing.T) {
 	}
 }
 
-// TestWebFetchTool_Execute_BlocksLinkLocal verifies that fetching the cloud
-// metadata address (169.254.169.254) is denied (SSRF protection).
 func TestWebFetchTool_Execute_BlocksLinkLocal(t *testing.T) {
 	tool := NewWebFetchTool(50000)
 	ctx := context.Background()
@@ -1126,8 +1069,6 @@ func TestWebFetchTool_Execute_BlocksLinkLocal(t *testing.T) {
 	}
 }
 
-// TestWebFetchTool_Execute_BlocksPrivateRange verifies that private ranges
-// (10.x, 192.168.x, 172.16-31.x) are denied (SSRF protection).
 func TestWebFetchTool_Execute_BlocksPrivateRange(t *testing.T) {
 	tool := NewWebFetchTool(50000)
 	ctx := context.Background()
@@ -1147,8 +1088,6 @@ func TestWebFetchTool_Execute_BlocksPrivateRange(t *testing.T) {
 	}
 }
 
-// TestWebFetchTool_Execute_BlocksLocalhostName verifies that the "localhost"
-// hostname is denied (SSRF protection).
 func TestWebFetchTool_Execute_BlocksLocalhostName(t *testing.T) {
 	tool := NewWebFetchTool(50000)
 	ctx := context.Background()

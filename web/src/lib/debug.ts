@@ -14,6 +14,5 @@ export function wsDebug(...args: unknown[]) {
 }
 
 export function wsWarn(...args: unknown[]) {
-  // Warnings are always shown
   console.warn(...args)
 }

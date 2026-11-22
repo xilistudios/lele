@@ -9,8 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// newSystemSettingsTestModel builds a Model owned by a temp config dir so that
-// load/persist through saveConfigToDisk work end to end.
 func newSystemSettingsTestModel(t *testing.T) *Model {
 	t.Helper()
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
@@ -69,7 +67,6 @@ func TestLoadSystemSettingsSixGroups(t *testing.T) {
 	if len(m.modalItems) != 6 {
 		t.Fatalf("expected 6 system groups, got %d", len(m.modalItems))
 	}
-	// Order: Session, Tools, Logs, Language, Goal, Updates.
 	if !strings.EqualFold(m.modalItems[0], i18n.T("tui.settings.session")) {
 		t.Errorf("group 0 should be Session: %q", m.modalItems[0])
 	}
@@ -101,13 +98,11 @@ func TestHandleSessionEnterTogglesEphemeral(t *testing.T) {
 	if !m.cfg.Session.Ephemeral {
 		t.Fatal("expected ephemeral toggled to true")
 	}
-	// Toggling again turns it off.
 	m.handleSessionEnter()
 	if m.cfg.Session.Ephemeral {
 		t.Fatal("expected ephemeral toggled back to false")
 	}
 
-	// Entering an int field switches to edit mode.
 	m.modalSelectedIdx = 1
 	m.handleSessionEnter()
 	if m.settingsEditField != "ephemeralThreshold" {
@@ -122,7 +117,6 @@ func TestHandleSystemSettingsInputValidatesAndPersists(t *testing.T) {
 	m := newSystemSettingsTestModel(t)
 	m.settingsSection = sysSubViewName(sysGroupSession)
 
-	// Valid range for compaction percent.
 	m.settingsEditField = "compactionPercent"
 	m.handleSystemSettingsInput("80")
 	if m.cfg.Session.CompactionThresholdPercent != 80 {
@@ -134,7 +128,6 @@ func TestHandleSystemSettingsInputValidatesAndPersists(t *testing.T) {
 	if m.settingsEditField != "" {
 		t.Fatalf("expected edit field cleared, got %q", m.settingsEditField)
 	}
-	// Reload config from disk to confirm persistence.
 	reloaded, err := config.LoadConfig(config.DefaultConfigPath())
 	if err != nil {
 		t.Fatalf("reload config: %v", err)
@@ -143,7 +136,6 @@ func TestHandleSystemSettingsInputValidatesAndPersists(t *testing.T) {
 		t.Fatalf("expected persisted compaction 80, got %d", reloaded.Session.CompactionThresholdPercent)
 	}
 
-	// Out-of-range percent is rejected.
 	m.settingsEditField = "compactionPercent"
 	m.handleSystemSettingsInput("150")
 	if m.cfg.Session.CompactionThresholdPercent != 80 {
@@ -172,7 +164,6 @@ func TestHandleSystemSettingsInputCustomDenyPatterns(t *testing.T) {
 		t.Errorf("pattern 1 should trim spaces: %q", m.cfg.Tools.Exec.CustomDenyPatterns[1])
 	}
 
-	// Empty clears the patterns.
 	m.settingsEditField = "customDenyPatterns"
 	m.handleSystemSettingsInput("")
 	if m.cfg.Tools.Exec.CustomDenyPatterns != nil {
@@ -186,7 +177,6 @@ func TestHandleLanguageEnterPersistsToConfig(t *testing.T) {
 	m.settingsSection = sysSubViewName(sysGroupLanguage)
 	m.loadLanguageSettings()
 
-	// Select "English (en)" — index 1.
 	m.modalSelectedIdx = 1
 	m.handleLanguageEnter()
 	if m.cfg.Language != "en" {
@@ -196,7 +186,6 @@ func TestHandleLanguageEnterPersistsToConfig(t *testing.T) {
 		t.Fatalf("expected i18n locale en, got %q", i18n.GetLanguage())
 	}
 
-	// Confirm persistence on disk.
 	reloaded, err := config.LoadConfig(config.DefaultConfigPath())
 	if err != nil {
 		t.Fatalf("reload config: %v", err)
@@ -205,7 +194,6 @@ func TestHandleLanguageEnterPersistsToConfig(t *testing.T) {
 		t.Fatalf("expected persisted language en, got %q", reloaded.Language)
 	}
 
-	// The sub-view should be reloaded with the checkmark on English.
 	m.loadLanguageSettings()
 	if !strings.Contains(m.modalItems[1], "✓") {
 		t.Errorf("expected English to be marked after selection: %q", m.modalItems[1])
@@ -235,7 +223,6 @@ func TestHandleUpdatesToggleWhenNotEditing(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected nil cmd for pure toggle")
 	}
-	// Reparse modal items to reflect the toggle.
 	m.loadUpdatesSettings()
 	if !strings.Contains(m.modalItems[0], "✓") {
 		t.Errorf("expected updates enabled checkmark: %q", m.modalItems[0])

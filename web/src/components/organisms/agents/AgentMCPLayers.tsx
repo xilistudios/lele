@@ -1,23 +1,7 @@
-/**
- * AgentMCPLayers — the per-layer file status block of the MCP tab.
- *
- * Extracted from AgentMCPSection (which owns inventory fetching and the raw
- * editor wiring) so the panel file stays readable: this component renders one
- * row per layer of the mcp.json stack — its label, path (or "disabled"),
- * exists/missing state, aliasing, and the Edit affordance that opens that
- * layer's raw editor.
- *
- * Invariant this block must keep: it renders whenever the INVENTORY has
- * layers, regardless of `servers.length`. A broken or empty mcp.json yields
- * zero servers plus `warnings[]` — the exact state the raw editor exists to
- * repair — so this block (like the warnings block) must never be hidden
- * behind the empty-state card; only the servers TABLE is swapped for it.
- */
 import { useTranslation } from 'react-i18next'
 import type { MCPLayer, MCPLayerName } from '../../../lib/mcpTypes'
 import { Button } from '../../atoms/Button'
 
-/** Stored layers the UI can translate; anything else renders raw. */
 export const STORED_LAYERS = ['global', 'agent', 'project'] as const
 
 export function isStoredLayer(value: string): value is (typeof STORED_LAYERS)[number] {
@@ -25,11 +9,8 @@ export function isStoredLayer(value: string): value is (typeof STORED_LAYERS)[nu
 }
 
 type Props = {
-  /** Inventory layers (low → high, aliases folded). */
   layers: MCPLayer[]
-  /** Human label for a layer name — section-owned i18n helper. */
   layerLabel: (layer: string) => string
-  /** Open the raw mcp.json editor of that layer (stored layers only). */
   onEdit: (layer: MCPLayerName) => void
 }
 
@@ -59,7 +40,6 @@ export function AgentMCPLayers({ layers, layerLabel, onEdit }: Props) {
                 {layer.path}
               </code>
             ) : (
-              // Absent path ⇔ disabled layer (no workspace root): never read/written.
               <span
                 data-testid={`mcp-layer-disabled-${layer.layer}`}
                 className="text-state-warning"
@@ -81,9 +61,6 @@ export function AgentMCPLayers({ layers, layerLabel, onEdit }: Props) {
               </span>
             )}
 
-            {/* Raw editor affordance: one per layer row. A layer without
-                path is disabled (never read/written); an unknown layer the
-                raw routes would refuse (invalid_layer) is disabled too. */}
             <span className="ml-auto flex-none pl-2">
               <Button
                 variant="secondary"

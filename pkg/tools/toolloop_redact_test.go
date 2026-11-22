@@ -11,8 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// redactTestRecorder records messages added during a RunToolLoop run so tests
-// can assert what actually reached session history / the LLM context.
 type redactTestRecorder struct {
 	mu       sync.Mutex
 	messages []providers.Message
@@ -38,7 +36,6 @@ func (r *redactTestRecorder) toolContents() []string {
 	return out
 }
 
-// redactTool returns a tool whose ForLLM contains the given secret value.
 func redactTool(t *testing.T, secret string) Tool {
 	t.Helper()
 	return &secretTool{t: t, secret: secret}
@@ -58,13 +55,9 @@ func (s *secretTool) Execute(_ context.Context, _ map[string]interface{}) *ToolR
 	return &ToolResult{ForLLM: "result contains " + s.secret}
 }
 
-// runRedactLoop drives a single tool call and returns the tool messages the
-// recorder captured.
 func runRedactLoop(t *testing.T, cfg ToolLoopConfig, result string, sessionKey string) []string {
 	t.Helper()
 
-	// Provider: first call asks for the tool, second call returns a plain
-	// answer terminating the loop.
 	p := &redactScriptProvider{t: t, result: result}
 	rec := &redactTestRecorder{}
 	cfg.Provider = p
@@ -86,7 +79,6 @@ func runRedactLoop(t *testing.T, cfg ToolLoopConfig, result string, sessionKey s
 	return rec.toolContents()
 }
 
-// redactScriptProvider returns a tool call first, then a terminating answer.
 type redactScriptProvider struct {
 	t        *testing.T
 	result   string
@@ -119,11 +111,8 @@ func (p *redactScriptProvider) Chat(ctx context.Context, messages []providers.Me
 
 func (p *redactScriptProvider) GetDefaultModel() string { return "test-model" }
 
-// newRedactorTestService builds an opened keyring Service bound to a temp vault.
 func newRedactorTestService(t *testing.T) *keyring.Service {
 	t.Helper()
-	// Reuse the same construction approach as the keyring tests: a file-backed
-	// service over a temp dir so tests never touch the OS keychain.
 	dir := t.TempDir()
 	svc := keyring.NewService(keyring.ServiceConfig{
 		Enabled:      true,
@@ -139,7 +128,7 @@ func newRedactorTestService(t *testing.T) *keyring.Service {
 }
 
 func TestRunToolLoop_RedactsSecretFromToolResult(t *testing.T) {
-	const secretVal = "sk-super-secret-value-123456" // >= 8 chars
+	const secretVal = "sk-super-secret-value-123456"
 	svc := newRedactorTestService(t)
 	if err := svc.SetFromUI("gh.token", secretVal, "token desc", nil, nil, "tui"); err != nil {
 		t.Fatalf("set secret: %v", err)
@@ -161,7 +150,6 @@ func TestRunToolLoop_RedactsSecretFromToolResult(t *testing.T) {
 
 func TestRunToolLoop_NilRedactorPassesThrough(t *testing.T) {
 	const secretVal = "sk-super-secret-value-123456"
-	// No Redactor set -> content must pass through unchanged (backward compat).
 	contents := runRedactLoop(t, ToolLoopConfig{}, "done", "nil-redact-session")
 	if len(contents) == 0 {
 		t.Fatal("expected at least one tool message")
@@ -176,19 +164,14 @@ func TestRunToolLoop_NilRedactorPassesThrough(t *testing.T) {
 }
 
 func TestRunToolLoop_RedactsBeforeTruncation(t *testing.T) {
-	const secretVal = "sk-super-secret-value-123456" // >= 8 chars, near the start
+	const secretVal = "sk-super-secret-value-123456"
 	svc := newRedactorTestService(t)
 	if err := svc.SetFromUI("github.token", secretVal, "token desc", nil, nil, "tui"); err != nil {
 		t.Fatalf("set secret: %v", err)
 	}
 	redactor := keyring.NewRedactor(svc)
 
-	// A tool result far longer than maxToolResultChars (50000). The secret sits
-	// at the very beginning, which proves that (a) redaction ran before the
-	// truncation path and (b) the {{SECRET:name}} placeholder survives
-	// truncation intact in the retained prefix.
 	result := secretVal + strings.Repeat("x", 60000)
-	// Override the tool's ForLLM via scripted result content.
 	contents := runRedactLoopWithResult(t, result, "done", "trunc-redact-session", redactor)
 	if len(contents) == 0 {
 		t.Fatal("expected at least one tool message")
@@ -205,8 +188,6 @@ func TestRunToolLoop_RedactsBeforeTruncation(t *testing.T) {
 	}
 }
 
-// runRedactLoopWithResult is like runRedactLoop but lets the caller control the
-// ForLLM content exactly (used for the truncation test).
 func runRedactLoopWithResult(t *testing.T, forLLM, result, sessionKey string, redactor *keyring.Redactor) []string {
 	t.Helper()
 	p := &redactScriptProvider{t: t, result: result, toolName: "bigout"}
@@ -233,7 +214,6 @@ func runRedactLoopWithResult(t *testing.T, forLLM, result, sessionKey string, re
 	return rec.toolContents()
 }
 
-// fixedResultTool returns a fixed ForLLM payload, useful for truncation tests.
 type fixedResultTool struct {
 	result string
 }

@@ -1,7 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Tests for the GroupManager feature gate (B10: single gating point).
-// License: MIT
-
 package group
 
 import (
@@ -10,8 +6,6 @@ import (
 	"testing"
 )
 
-// TestStart_RejectedWhenDisabledHookFalse: with an enabled hook that returns
-// false, Start must refuse with ErrGroupsDisabled and create no state.
 func TestStart_RejectedWhenDisabledHookFalse(t *testing.T) {
 	exec := &mockExecutor{}
 	pub := &mockPublisher{}
@@ -27,7 +21,6 @@ func TestStart_RejectedWhenDisabledHookFalse(t *testing.T) {
 	if id != "" {
 		t.Errorf("expected empty group id, got %q", id)
 	}
-	// No state created, nothing executed, nothing published.
 	if _, ok := gm.Status("gate-off-1"); ok {
 		t.Error("group must not exist after rejected Start")
 	}
@@ -42,13 +35,10 @@ func TestStart_RejectedWhenDisabledHookFalse(t *testing.T) {
 	}
 }
 
-// TestStart_AllowedWhenHookNil: managers constructed directly (as the ~30
-// existing tests do) must keep working — nil hook means allowed.
 func TestStart_AllowedWhenHookNil(t *testing.T) {
 	exec := &mockExecutor{}
 	pub := &mockPublisher{}
 	gm := NewGroupManager(mockResolve, exec.execute, pub.publish)
-	// No SetEnabledHook call at all.
 
 	id, err := gm.Start(context.Background(), "gate-nil-1", "p1", "task", "round_robin",
 		[]Participant{plainParticipant("a")}, GroupOptions{Rounds: 1}, "test", "0")
@@ -63,8 +53,6 @@ func TestStart_AllowedWhenHookNil(t *testing.T) {
 	}
 }
 
-// TestStart_HookEvaluatedPerCall: toggling the hook flips the decision on
-// subsequent Start calls (config reload semantics).
 func TestStart_HookEvaluatedPerCall(t *testing.T) {
 	exec := &mockExecutor{}
 	pub := &mockPublisher{}
@@ -90,9 +78,8 @@ func TestStart_HookEvaluatedPerCall(t *testing.T) {
 		t.Fatalf("Wait failed: %v", err)
 	}
 
-	// Resetting the hook restores the permissive default.
 	gm.SetEnabledHook(nil)
-	enabled = false // hook is gone; the flag value must be ignored
+	enabled = false
 	if _, err := gm.Start(context.Background(), "gate-t-3", "p1", "task", "round_robin",
 		[]Participant{plainParticipant("a")}, GroupOptions{Rounds: 1}, "test", "0"); err != nil {
 		t.Fatalf("nil hook must always allow, got %v", err)

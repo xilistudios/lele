@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -15,11 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/routing"
 )
 
-// ============================================================================
-// Tests for FormatMessagesForLog
-// ============================================================================
-
-// TestFormatMessagesForLog_EmptySlice tests with empty messages slice
 func TestFormatMessagesForLog_EmptySlice(t *testing.T) {
 	result := FormatMessagesForLog([]providers.Message{})
 	if result != "[]" {
@@ -27,7 +16,6 @@ func TestFormatMessagesForLog_EmptySlice(t *testing.T) {
 	}
 }
 
-// TestFormatMessagesForLog_NilSlice tests with nil messages slice
 func TestFormatMessagesForLog_NilSlice(t *testing.T) {
 	result := FormatMessagesForLog(nil)
 	if result != "[]" {
@@ -35,7 +23,6 @@ func TestFormatMessagesForLog_NilSlice(t *testing.T) {
 	}
 }
 
-// TestFormatMessagesForLog_SingleMessage tests with a single simple message
 func TestFormatMessagesForLog_SingleMessage(t *testing.T) {
 	messages := []providers.Message{
 		{Role: "user", Content: "Hello"},
@@ -50,7 +37,6 @@ func TestFormatMessagesForLog_SingleMessage(t *testing.T) {
 	}
 }
 
-// TestFormatMessagesForLog_MultipleMessages tests with multiple messages
 func TestFormatMessagesForLog_MultipleMessages(t *testing.T) {
 	messages := []providers.Message{
 		{Role: "user", Content: "Hello"},
@@ -59,7 +45,6 @@ func TestFormatMessagesForLog_MultipleMessages(t *testing.T) {
 	}
 	result := FormatMessagesForLog(messages)
 
-	// Check for all message indices
 	if !strings.Contains(result, "[0] Role: user") {
 		t.Error("Expected result to contain [0] for first message")
 	}
@@ -71,7 +56,6 @@ func TestFormatMessagesForLog_MultipleMessages(t *testing.T) {
 	}
 }
 
-// TestFormatMessagesForLog_WithToolCalls tests messages containing tool calls
 func TestFormatMessagesForLog_WithToolCalls(t *testing.T) {
 	messages := []providers.Message{
 		{
@@ -105,7 +89,6 @@ func TestFormatMessagesForLog_WithToolCalls(t *testing.T) {
 	}
 }
 
-// TestFormatMessagesForLog_WithToolCallID tests messages with tool call ID
 func TestFormatMessagesForLog_WithToolCallID(t *testing.T) {
 	messages := []providers.Message{
 		{Role: "tool", Content: "Tool result", ToolCallID: "call-123"},
@@ -117,20 +100,17 @@ func TestFormatMessagesForLog_WithToolCallID(t *testing.T) {
 	}
 }
 
-// TestFormatMessagesForLog_EmptyContent tests message with empty content
 func TestFormatMessagesForLog_EmptyContent(t *testing.T) {
 	messages := []providers.Message{
 		{Role: "assistant", Content: ""},
 	}
 	result := FormatMessagesForLog(messages)
 
-	// Should not contain "Content:" when content is empty
 	if strings.Contains(result, "Content:") {
 		t.Error("Expected result to not contain Content section when empty")
 	}
 }
 
-// TestFormatMessagesForLog_LongContentTruncation tests that long content is truncated
 func TestFormatMessagesForLog_LongContentTruncation(t *testing.T) {
 	longContent := strings.Repeat("a", 300)
 	messages := []providers.Message{
@@ -138,13 +118,11 @@ func TestFormatMessagesForLog_LongContentTruncation(t *testing.T) {
 	}
 	result := FormatMessagesForLog(messages)
 
-	// Should contain truncation indicator
 	if !strings.Contains(result, "...") {
 		t.Error("Expected long content to be truncated with '...'")
 	}
 }
 
-// TestFormatMessagesForLog_MultipleToolCalls tests message with multiple tool calls
 func TestFormatMessagesForLog_MultipleToolCalls(t *testing.T) {
 	messages := []providers.Message{
 		{
@@ -165,7 +143,6 @@ func TestFormatMessagesForLog_MultipleToolCalls(t *testing.T) {
 	}
 }
 
-// TestFormatMessagesForLog_ToolCallWithoutFunction tests tool call with nil Function
 func TestFormatMessagesForLog_ToolCallWithoutFunction(t *testing.T) {
 	messages := []providers.Message{
 		{
@@ -177,14 +154,11 @@ func TestFormatMessagesForLog_ToolCallWithoutFunction(t *testing.T) {
 	}
 	result := FormatMessagesForLog(messages)
 
-	// Should not panic and should still show tool call info
 	if !strings.Contains(result, "call-1") {
 		t.Error("Expected result to contain tool call ID even without function")
 	}
 }
 
-// TestFormatMessagesForLog_VideoPart verifies video_url parts render as the
-// "[video]" placeholder and the URL/base64 payload is never logged.
 func TestFormatMessagesForLog_VideoPart(t *testing.T) {
 	messages := []providers.Message{
 		{
@@ -205,11 +179,6 @@ func TestFormatMessagesForLog_VideoPart(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// Tests for FormatToolsForLog
-// ============================================================================
-
-// TestFormatToolsForLog_EmptySlice tests with empty tools slice
 func TestFormatToolsForLog_EmptySlice(t *testing.T) {
 	result := FormatToolsForLog([]providers.ToolDefinition{})
 	if result != "[]" {
@@ -217,7 +186,6 @@ func TestFormatToolsForLog_EmptySlice(t *testing.T) {
 	}
 }
 
-// TestFormatToolsForLog_NilSlice tests with nil tools slice
 func TestFormatToolsForLog_NilSlice(t *testing.T) {
 	result := FormatToolsForLog(nil)
 	if result != "[]" {
@@ -225,7 +193,6 @@ func TestFormatToolsForLog_NilSlice(t *testing.T) {
 	}
 }
 
-// TestFormatToolsForLog_SingleTool tests with a single tool
 func TestFormatToolsForLog_SingleTool(t *testing.T) {
 	tools := []providers.ToolDefinition{
 		{
@@ -250,7 +217,6 @@ func TestFormatToolsForLog_SingleTool(t *testing.T) {
 	}
 }
 
-// TestFormatToolsForLog_MultipleTools tests with multiple tools
 func TestFormatToolsForLog_MultipleTools(t *testing.T) {
 	tools := []providers.ToolDefinition{
 		{
@@ -284,7 +250,6 @@ func TestFormatToolsForLog_MultipleTools(t *testing.T) {
 	}
 }
 
-// TestFormatToolsForLog_WithParameters tests tool with parameters
 func TestFormatToolsForLog_WithParameters(t *testing.T) {
 	tools := []providers.ToolDefinition{
 		{
@@ -310,7 +275,6 @@ func TestFormatToolsForLog_WithParameters(t *testing.T) {
 	}
 }
 
-// TestFormatToolsForLog_EmptyParameters tests tool with empty parameters
 func TestFormatToolsForLog_EmptyParameters(t *testing.T) {
 	tools := []providers.ToolDefinition{
 		{
@@ -324,13 +288,11 @@ func TestFormatToolsForLog_EmptyParameters(t *testing.T) {
 	}
 	result := FormatToolsForLog(tools)
 
-	// Should not contain Parameters section when empty
 	if strings.Contains(result, "Parameters:") {
 		t.Error("Expected result to not contain Parameters section when empty")
 	}
 }
 
-// TestFormatToolsForLog_LongParametersTruncation tests that long parameters are truncated
 func TestFormatToolsForLog_LongParametersTruncation(t *testing.T) {
 	longParams := map[string]interface{}{
 		"data": strings.Repeat("x", 300),
@@ -347,17 +309,11 @@ func TestFormatToolsForLog_LongParametersTruncation(t *testing.T) {
 	}
 	result := FormatToolsForLog(tools)
 
-	// Should contain truncation indicator
 	if !strings.Contains(result, "...") {
 		t.Error("Expected long parameters to be truncated with '...'")
 	}
 }
 
-// ============================================================================
-// Tests for FormatProviderModel
-// ============================================================================
-
-// TestFormatProviderModel_NormalCase tests normal provider/model combination
 func TestFormatProviderModel_NormalCase(t *testing.T) {
 	result := FormatProviderModel("openai", "gpt-4")
 	expected := "openai:gpt-4"
@@ -366,7 +322,6 @@ func TestFormatProviderModel_NormalCase(t *testing.T) {
 	}
 }
 
-// TestFormatProviderModel_AlreadyPrefixed tests when model already has provider prefix
 func TestFormatProviderModel_AlreadyPrefixed(t *testing.T) {
 	result := FormatProviderModel("openai", "openai:gpt-4")
 	expected := "openai:gpt-4"
@@ -375,7 +330,6 @@ func TestFormatProviderModel_AlreadyPrefixed(t *testing.T) {
 	}
 }
 
-// TestFormatProviderModel_EmptyProvider tests with empty provider
 func TestFormatProviderModel_EmptyProvider(t *testing.T) {
 	result := FormatProviderModel("", "gpt-4")
 	expected := "gpt-4"
@@ -384,7 +338,6 @@ func TestFormatProviderModel_EmptyProvider(t *testing.T) {
 	}
 }
 
-// TestFormatProviderModel_EmptyModel tests with empty model
 func TestFormatProviderModel_EmptyModel(t *testing.T) {
 	result := FormatProviderModel("openai", "")
 	expected := "openai:"
@@ -393,7 +346,6 @@ func TestFormatProviderModel_EmptyModel(t *testing.T) {
 	}
 }
 
-// TestFormatProviderModel_BothEmpty tests with both empty
 func TestFormatProviderModel_BothEmpty(t *testing.T) {
 	result := FormatProviderModel("", "")
 	expected := ""
@@ -402,7 +354,6 @@ func TestFormatProviderModel_BothEmpty(t *testing.T) {
 	}
 }
 
-// TestFormatProviderModel_WhitespaceTrimming tests that whitespace is trimmed
 func TestFormatProviderModel_WhitespaceTrimming(t *testing.T) {
 	result := FormatProviderModel("  openai  ", "  gpt-4  ")
 	expected := "openai:gpt-4"
@@ -411,7 +362,6 @@ func TestFormatProviderModel_WhitespaceTrimming(t *testing.T) {
 	}
 }
 
-// TestFormatProviderModel_DifferentProviderPrefix tests with different provider prefix
 func TestFormatProviderModel_DifferentProviderPrefix(t *testing.T) {
 	result := FormatProviderModel("anthropic", "claude-3")
 	expected := "anthropic:claude-3"
@@ -420,7 +370,6 @@ func TestFormatProviderModel_DifferentProviderPrefix(t *testing.T) {
 	}
 }
 
-// TestFormatProviderModel_CaseSensitivity tests case sensitivity
 func TestFormatProviderModel_CaseSensitivity(t *testing.T) {
 	result := FormatProviderModel("OpenAI", "GPT-4")
 	expected := "OpenAI:GPT-4"
@@ -429,9 +378,7 @@ func TestFormatProviderModel_CaseSensitivity(t *testing.T) {
 	}
 }
 
-// TestFormatProviderModel_PartialPrefix tests model with partial/different prefix
 func TestFormatProviderModel_PartialPrefix(t *testing.T) {
-	// Model has a different prefix than provider
 	result := FormatProviderModel("openai", "anthropic:claude-3")
 	expected := "openai:anthropic:claude-3"
 	if result != expected {
@@ -439,11 +386,6 @@ func TestFormatProviderModel_PartialPrefix(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// Tests for ExtractPeer
-// ============================================================================
-
-// TestExtractPeer_NormalCase tests normal peer extraction
 func TestExtractPeer_NormalCase(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: map[string]string{
@@ -464,7 +406,6 @@ func TestExtractPeer_NormalCase(t *testing.T) {
 	}
 }
 
-// TestExtractPeer_NoPeerKind tests when peer_kind is missing
 func TestExtractPeer_NoPeerKind(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: map[string]string{
@@ -478,7 +419,6 @@ func TestExtractPeer_NoPeerKind(t *testing.T) {
 	}
 }
 
-// TestExtractPeer_NoMetadata tests when metadata is nil
 func TestExtractPeer_NoMetadata(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: nil,
@@ -490,7 +430,6 @@ func TestExtractPeer_NoMetadata(t *testing.T) {
 	}
 }
 
-// TestExtractPeer_EmptyMetadata tests when metadata is empty
 func TestExtractPeer_EmptyMetadata(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: map[string]string{},
@@ -502,7 +441,6 @@ func TestExtractPeer_EmptyMetadata(t *testing.T) {
 	}
 }
 
-// TestExtractPeer_DirectKindNoPeerID tests direct kind with no peer_id uses SenderID
 func TestExtractPeer_DirectKindNoPeerID(t *testing.T) {
 	msg := bus.InboundMessage{
 		SenderID: "sender-456",
@@ -523,7 +461,6 @@ func TestExtractPeer_DirectKindNoPeerID(t *testing.T) {
 	}
 }
 
-// TestExtractPeer_GroupKindNoPeerID tests group kind with no peer_id uses ChatID
 func TestExtractPeer_GroupKindNoPeerID(t *testing.T) {
 	msg := bus.InboundMessage{
 		ChatID:   "chat-789",
@@ -545,7 +482,6 @@ func TestExtractPeer_GroupKindNoPeerID(t *testing.T) {
 	}
 }
 
-// TestExtractPeer_ChannelKindNoPeerID tests channel kind with no peer_id uses ChatID
 func TestExtractPeer_ChannelKindNoPeerID(t *testing.T) {
 	msg := bus.InboundMessage{
 		ChatID: "channel-abc",
@@ -566,7 +502,6 @@ func TestExtractPeer_ChannelKindNoPeerID(t *testing.T) {
 	}
 }
 
-// TestExtractPeer_PeerIDOverridesSenderID tests that peer_id overrides SenderID
 func TestExtractPeer_PeerIDOverridesSenderID(t *testing.T) {
 	msg := bus.InboundMessage{
 		SenderID: "sender-456",
@@ -585,7 +520,6 @@ func TestExtractPeer_PeerIDOverridesSenderID(t *testing.T) {
 	}
 }
 
-// TestExtractPeer_EmptyPeerKind tests with empty peer_kind
 func TestExtractPeer_EmptyPeerKind(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: map[string]string{
@@ -600,11 +534,6 @@ func TestExtractPeer_EmptyPeerKind(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// Tests for ExtractParentPeer
-// ============================================================================
-
-// TestExtractParentPeer_NormalCase tests normal parent peer extraction
 func TestExtractParentPeer_NormalCase(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: map[string]string{
@@ -625,7 +554,6 @@ func TestExtractParentPeer_NormalCase(t *testing.T) {
 	}
 }
 
-// TestExtractParentPeer_NoParentKind tests when parent_peer_kind is missing
 func TestExtractParentPeer_NoParentKind(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: map[string]string{
@@ -639,7 +567,6 @@ func TestExtractParentPeer_NoParentKind(t *testing.T) {
 	}
 }
 
-// TestExtractParentPeer_NoParentID tests when parent_peer_id is missing
 func TestExtractParentPeer_NoParentID(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: map[string]string{
@@ -653,7 +580,6 @@ func TestExtractParentPeer_NoParentID(t *testing.T) {
 	}
 }
 
-// TestExtractParentPeer_NoMetadata tests when metadata is nil
 func TestExtractParentPeer_NoMetadata(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: nil,
@@ -665,7 +591,6 @@ func TestExtractParentPeer_NoMetadata(t *testing.T) {
 	}
 }
 
-// TestExtractParentPeer_EmptyMetadata tests when metadata is empty
 func TestExtractParentPeer_EmptyMetadata(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: map[string]string{},
@@ -677,7 +602,6 @@ func TestExtractParentPeer_EmptyMetadata(t *testing.T) {
 	}
 }
 
-// TestExtractParentPeer_GroupKind tests with group kind
 func TestExtractParentPeer_GroupKind(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: map[string]string{
@@ -698,7 +622,6 @@ func TestExtractParentPeer_GroupKind(t *testing.T) {
 	}
 }
 
-// TestExtractParentPeer_ChannelKind tests with channel kind
 func TestExtractParentPeer_ChannelKind(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: map[string]string{
@@ -719,7 +642,6 @@ func TestExtractParentPeer_ChannelKind(t *testing.T) {
 	}
 }
 
-// TestExtractParentPeer_EmptyValues tests with empty values
 func TestExtractParentPeer_EmptyValues(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: map[string]string{
@@ -734,7 +656,6 @@ func TestExtractParentPeer_EmptyValues(t *testing.T) {
 	}
 }
 
-// TestExtractParentPeer_OnlyKindEmpty tests with only kind empty
 func TestExtractParentPeer_OnlyKindEmpty(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: map[string]string{
@@ -749,7 +670,6 @@ func TestExtractParentPeer_OnlyKindEmpty(t *testing.T) {
 	}
 }
 
-// TestExtractParentPeer_OnlyIDEmpty tests with only ID empty
 func TestExtractParentPeer_OnlyIDEmpty(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: map[string]string{
@@ -764,38 +684,26 @@ func TestExtractParentPeer_OnlyIDEmpty(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// Tests for GatewayVersion
-// ============================================================================
-
-// TestGatewayVersion_ReturnsString tests that GatewayVersion returns a string
 func TestGatewayVersion_ReturnsString(t *testing.T) {
 	version := GatewayVersion()
 
-	// Should return a non-empty string
 	if version == "" {
 		t.Error("Expected non-empty version string")
 	}
 }
 
-// TestGatewayVersion_ReturnsDevOrVersion tests that version is either "dev" or a version string
 func TestGatewayVersion_ReturnsDevOrVersion(t *testing.T) {
 	version := GatewayVersion()
 
-	// In test environment, this will likely return "dev" since tests don't have build info
-	// But it should never be empty
 	if version == "" {
 		t.Error("Expected version to not be empty")
 	}
 
-	// Version should be either "dev" or contain version-like characters
 	if version != "dev" && !strings.Contains(version, ".") && !strings.Contains(version, "v") {
-		// This is a loose check - version could be many formats
 		t.Logf("Version returned: %s (this may be expected in test environment)", version)
 	}
 }
 
-// TestGatewayVersion_Consistency tests that multiple calls return the same value
 func TestGatewayVersion_Consistency(t *testing.T) {
 	version1 := GatewayVersion()
 	version2 := GatewayVersion()
@@ -805,9 +713,7 @@ func TestGatewayVersion_Consistency(t *testing.T) {
 	}
 }
 
-// TestGatewayVersion_NotPanic tests that the function doesn't panic
 func TestGatewayVersion_NotPanic(t *testing.T) {
-	// This test simply verifies the function doesn't panic
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("GatewayVersion panicked: %v", r)
@@ -817,11 +723,6 @@ func TestGatewayVersion_NotPanic(t *testing.T) {
 	_ = GatewayVersion()
 }
 
-// ============================================================================
-// Integration/Combined Tests
-// ============================================================================
-
-// TestExtractPeerAndParentPeer_Together tests both extraction functions together
 func TestExtractPeerAndParentPeer_Together(t *testing.T) {
 	msg := bus.InboundMessage{
 		SenderID: "sender-123",
@@ -844,18 +745,15 @@ func TestExtractPeerAndParentPeer_Together(t *testing.T) {
 		t.Fatal("Expected non-nil parent peer")
 	}
 
-	// Verify peer
 	if peer.Kind != "direct" || peer.ID != "peer-789" {
 		t.Error("Peer extraction failed")
 	}
 
-	// Verify parent peer
 	if parentPeer.Kind != "group" || parentPeer.ID != "parent-group" {
 		t.Error("Parent peer extraction failed")
 	}
 }
 
-// TestRoutePeer_UsageWithRouting tests that extracted peers work with routing package
 func TestRoutePeer_UsageWithRouting(t *testing.T) {
 	msg := bus.InboundMessage{
 		Metadata: map[string]string{
@@ -869,7 +767,6 @@ func TestRoutePeer_UsageWithRouting(t *testing.T) {
 		t.Fatal("Expected non-nil peer")
 	}
 
-	// Verify the peer can be used with routing.RoutePeer expectations
 	_ = routing.RoutePeer{
 		Kind: peer.Kind,
 		ID:   peer.ID,

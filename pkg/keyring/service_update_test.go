@@ -7,15 +7,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// UpdateFromUI is the WebUI/TUI edit path: it edits a stored secret and never
-// creates one, and an empty value means "keep the plaintext the editor did not
-// touch" so metadata can be changed without a round trip of the secret value.
 func TestUpdateFromUIKeepsValueWhenBlank(t *testing.T) {
 	svc := newTestService(t)
 	require.NoError(t, svc.SetFromUI("openai.api_key", "sk-secret", "OpenAI key",
 		[]string{"provider"}, []string{"coder"}, "tui"))
 
-	// Edit the metadata only: no value in the request.
 	require.NoError(t, svc.UpdateFromUI("openai.api_key", "", "OpenAI key (rotated docs)",
 		[]string{"provider", "llm"}, nil, "webui"))
 
@@ -42,8 +38,6 @@ func TestUpdateFromUIReplacesValueWhenProvided(t *testing.T) {
 	assert.Equal(t, "ghp_new", val)
 }
 
-// Editing is not creating: the original creation stamps survive a metadata-only
-// edit, so "Created by" keeps naming who created the secret.
 func TestUpdateFromUIPreservesCreationStamps(t *testing.T) {
 	svc := newTestService(t)
 	require.NoError(t, svc.SetFromUI("slack.webhook", "https://hooks", "", nil, nil, "tui"))
@@ -62,8 +56,6 @@ func TestUpdateFromUIPreservesCreationStamps(t *testing.T) {
 	assert.False(t, after[0].UpdatedAt.Before(before[0].UpdatedAt))
 }
 
-// A missing name is an error, not an upsert: a stale WebUI card must not be able
-// to (re)create a secret that was deleted from another surface.
 func TestUpdateFromUIMissingSecretDoesNotCreate(t *testing.T) {
 	svc := newTestService(t)
 
@@ -82,8 +74,6 @@ func TestUpdateFromUIRequiresName(t *testing.T) {
 	assert.NotErrorIs(t, err, ErrNotFound)
 }
 
-// The edit path trims the name like every other write, so a lookup by the
-// stored key hits.
 func TestUpdateFromUITrimsName(t *testing.T) {
 	svc := newTestService(t)
 	require.NoError(t, svc.SetFromUI("token", "v1", "", nil, nil, "tui"))

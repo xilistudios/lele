@@ -9,34 +9,19 @@ import { Button } from '../../atoms/Button'
 import { ChevronRightIcon } from '../../atoms/Icons'
 import { SettingsSection } from '../../molecules/SettingsSection'
 
-/**
- * `tab=files` — read-only summary of the agent workspace (spec §4.8).
- *
- * The editor itself is `AgentFilesPage` (`/settings/agent/:agentId/:fileName?`),
- * already on main; this section must NOT re-implement it. It answers one
- * question — "what lives in this workspace, and how do I get to it?" — with the
- * workspace path, a CTA to the editor and one chip per file.
- *
- * It never writes config, so it can never be dirty (§5.3: files has no dot).
- */
-
 type Props = {
   agent: EditableAgentConfig
-  /** Real id from the draft (not the URL param), so casing cannot drift. */
   agentId: string
 }
 
-/** Query key of the file list. Exported for tests and future invalidation. */
 export const agentFilesQueryKey = (agentId: string) => ['agentFiles', agentId] as const
 
-/** Route of the editor for one file of this agent. */
 const editorPath = (agentId: string, name?: string) =>
   name ? `/settings/agent/${agentId}/${encodeURIComponent(name)}` : `/settings/agent/${agentId}`
 
 const CHIP_CLS =
   'inline-flex items-center gap-2 rounded-md border border-border bg-background-secondary px-2.5 py-1.5 font-mono text-xs text-text-secondary transition-colors duration-fast hover:border-border-strong'
 
-/** §5.1: one card skeleton with the geometry of the real card. */
 function FilesSkeleton() {
   const { t } = useTranslation()
   return (
@@ -68,8 +53,6 @@ export function AgentFilesSection({ agent, agentId }: Props) {
     retry: 1,
   })
 
-  // Error FIRST: a retry refetches, and answering that with the skeleton again
-  // would swap a readable banner for a fake card (§5.1: no layout jumps).
   if (isError) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-surface-sunken px-4 py-8 text-center">

@@ -11,10 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// TestMetadataParsers_Tolerant exercises the tolerant metadata accessors used
-// to read message.stream throughput metrics. On the wire the numbers are
-// encoded as strings, but the signed contract allows int/int64/float64 writers,
-// so every accessor must accept all of them and default to 0 otherwise.
 func TestMetadataParsers_Tolerant(t *testing.T) {
 	intCases := []struct {
 		name string
@@ -29,8 +25,6 @@ func TestMetadataParsers_Tolerant(t *testing.T) {
 		{"nil", nil, 0},
 		{"empty", "", 0},
 		{"garbage", "abc", 0},
-		// Non-finite values (strconv.ParseFloat accepts them silently) must
-		// degrade to the zero value, both as strings and as native floats.
 		{"string NaN", "NaN", 0},
 		{"string Inf", "Inf", 0},
 		{"string +Inf", "+Inf", 0},
@@ -101,7 +95,6 @@ func TestMetadataParsers_Tolerant(t *testing.T) {
 		{"string false", "false", false},
 		{"bool false", false, false},
 		{"nil", nil, false},
-		// A non-finite value is not a truthiness token either.
 		{"string NaN", "NaN", false},
 		{"float64 Inf", math.Inf(1), false},
 	}
@@ -112,8 +105,6 @@ func TestMetadataParsers_Tolerant(t *testing.T) {
 	}
 }
 
-// TestFormatTokPerSec checks the exact fragment rendered in the status line and
-// that a non-positive rate yields an empty string (so callers can omit it).
 func TestFormatTokPerSec(t *testing.T) {
 	i18n.InitWithLanguage("en")
 	if got := formatTokPerSec(42.53); got != "42.5 tok/s" {
@@ -126,12 +117,9 @@ func TestFormatTokPerSec(t *testing.T) {
 	}
 }
 
-// TestRenderStatusLine_ShowsLiveTokPerSec verifies the live throughput appears
-// next to the spinner while a turn streams, in a single status line so the
-// layout height is unchanged.
 func TestRenderStatusLine_ShowsLiveTokPerSec(t *testing.T) {
 	m := newTestModel(t)
-	i18n.InitWithLanguage("en") // after NewModel, which resets to the config default
+	i18n.InitWithLanguage("en")
 
 	key := "tui:chat:tok-per-sec-live"
 	m.sessionMgr.GetOrCreate(key)
@@ -157,7 +145,6 @@ func TestRenderStatusLine_ShowsLiveTokPerSec(t *testing.T) {
 		t.Fatalf("status line %q must stay a single line", status)
 	}
 
-	// The full frame must carry it too, and its height must not grow.
 	view := m.View()
 	if !strings.Contains(view, "50.0 tok/s") {
 		t.Fatalf("view does not show the live throughput:\n%s", view)
@@ -167,11 +154,9 @@ func TestRenderStatusLine_ShowsLiveTokPerSec(t *testing.T) {
 	}
 }
 
-// TestRenderStatusLine_ShowsFinalTokPerSec verifies the last segment's rate is
-// kept next to "Done in Xs" once the turn finishes.
 func TestRenderStatusLine_ShowsFinalTokPerSec(t *testing.T) {
 	m := newTestModel(t)
-	i18n.InitWithLanguage("en") // after NewModel, which resets to the config default
+	i18n.InitWithLanguage("en")
 
 	key := "tui:chat:tok-per-sec-done"
 	m.sessionMgr.GetOrCreate(key)
@@ -188,7 +173,6 @@ func TestRenderStatusLine_ShowsFinalTokPerSec(t *testing.T) {
 	if !strings.Contains(status, "42.5 tok/s") {
 		t.Fatalf("status line %q does not show the final throughput", status)
 	}
-	// The throughput must be joined to the done indicator, not stand alone.
 	doneText := fmt.Sprintf(i18n.T("tui.doneIn"), m.lastDuration.Seconds())
 	if !strings.Contains(status, doneText) {
 		t.Fatalf("status line %q lost the done indicator %q", status, doneText)
@@ -198,12 +182,9 @@ func TestRenderStatusLine_ShowsFinalTokPerSec(t *testing.T) {
 	}
 }
 
-// TestRenderStatusLine_HidesTokPerSecWithoutMetrics guards the clean-omission
-// rule: a stream-less turn (error reply, tool-only reply) must never leave a
-// stray "0.0 tok/s" on the status line, whether it is still processing or done.
 func TestRenderStatusLine_HidesTokPerSecWithoutMetrics(t *testing.T) {
 	m := newTestModel(t)
-	i18n.InitWithLanguage("en") // after NewModel, which resets to the config default
+	i18n.InitWithLanguage("en")
 
 	key := "tui:chat:tok-per-sec-hidden"
 	m.sessionMgr.GetOrCreate(key)
@@ -211,7 +192,6 @@ func TestRenderStatusLine_HidesTokPerSecWithoutMetrics(t *testing.T) {
 	m.showWelcome = false
 	m.width, m.height = 200, 40
 
-	// Processing but no metrics seen yet.
 	m.processing = true
 	m.startTime = time.Now()
 	m.currentStream = "no metrics here"
@@ -225,7 +205,6 @@ func TestRenderStatusLine_HidesTokPerSecWithoutMetrics(t *testing.T) {
 		t.Fatalf("processing status line %q should omit tok/s when there are no metrics", status)
 	}
 
-	// Done but the segment produced no throughput.
 	m.processing = false
 	m.startTime = time.Time{}
 	m.lastDuration = 1500 * time.Millisecond
@@ -237,12 +216,9 @@ func TestRenderStatusLine_HidesTokPerSecWithoutMetrics(t *testing.T) {
 	}
 }
 
-// TestHandleOutboundMsg_ParsesStreamMetrics verifies the event handler plumbs
-// the metadata into the model state, including the "done" retention of the
-// final rate, using the string encoding the wire actually uses.
 func TestHandleOutboundMsg_ParsesStreamMetrics(t *testing.T) {
 	m := newTestModel(t)
-	i18n.InitWithLanguage("en") // after NewModel, which resets to the config default
+	i18n.InitWithLanguage("en")
 
 	key := "tui:chat:tok-per-sec-handler"
 	m.sessionMgr.GetOrCreate(key)
@@ -282,7 +258,6 @@ func TestHandleOutboundMsg_ParsesStreamMetrics(t *testing.T) {
 		t.Errorf("lastTokPerSec = %v, want 0 before the done chunk", m.lastTokPerSec)
 	}
 
-	// The final chunk (done=true) retains the rate for the "Done in" line.
 	doneMsg := outboundMsg{msg: bus.OutboundMessage{
 		ChatID:    key,
 		Event:     "message.stream",
@@ -304,13 +279,9 @@ func TestHandleOutboundMsg_ParsesStreamMetrics(t *testing.T) {
 	}
 }
 
-// TestHandleOutboundMsg_ParsesThinkingMetrics verifies reasoning chunks feed the
-// SAME live counters as the answer: the tok/s readout is up from the first
-// thinking token, and a rate-less answer chunk does not blank it at the
-// thinking → answer hand-off.
 func TestHandleOutboundMsg_ParsesThinkingMetrics(t *testing.T) {
 	m := newTestModel(t)
-	i18n.InitWithLanguage("en") // after NewModel, which resets to the config default
+	i18n.InitWithLanguage("en")
 
 	key := "tui:chat:tok-per-sec-thinking"
 	m.sessionMgr.GetOrCreate(key)
@@ -320,8 +291,6 @@ func TestHandleOutboundMsg_ParsesThinkingMetrics(t *testing.T) {
 	m.processing = true
 	m.startTime = time.Now()
 
-	// First reasoning chunk: metrics present → the readout turns on while the
-	// model is still thinking.
 	updated, _ := m.Update(outboundMsg{msg: bus.OutboundMessage{
 		ChatID:    key,
 		Event:     "message.thinking",
@@ -346,8 +315,6 @@ func TestHandleOutboundMsg_ParsesThinkingMetrics(t *testing.T) {
 		t.Fatalf("status line %q should show tok/s while thinking", status)
 	}
 
-	// The answer's first chunk reports no rate (no elapsed window yet): the
-	// previous figure must be kept, not blanked.
 	updated, _ = m.Update(outboundMsg{msg: bus.OutboundMessage{
 		ChatID:    key,
 		Event:     "message.stream",
@@ -367,7 +334,6 @@ func TestHandleOutboundMsg_ParsesThinkingMetrics(t *testing.T) {
 		t.Fatalf("streamTokPerSec = %v, want 40 retained across the thinking→answer hand-off", m.streamTokPerSec)
 	}
 
-	// A later answer chunk with a real rate takes over.
 	updated, _ = m.Update(outboundMsg{msg: bus.OutboundMessage{
 		ChatID:    key,
 		Event:     "message.stream",
@@ -387,8 +353,6 @@ func TestHandleOutboundMsg_ParsesThinkingMetrics(t *testing.T) {
 	}
 }
 
-// TestResetStreamState_ClearsThroughputMetrics ensures no stale figure can
-// survive a reset (new segment / session switch).
 func TestResetStreamState_ClearsThroughputMetrics(t *testing.T) {
 	m := newTestModel(t)
 	m.streamTokens = 100

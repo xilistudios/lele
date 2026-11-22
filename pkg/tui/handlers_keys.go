@@ -7,35 +7,21 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// handleNormalKey processes a keystroke on the main input surface: no modal,
-// no pending approval and no active autocomplete. It owns global shortcuts,
-// viewport scrolling, mode cycling and message submission/queueing. cmds
-// carries commands collected earlier in update() so batching semantics are
-// preserved. The bool reports whether a key case consumed the event; an
-// unconsumed KeyMsg (no case matched — bare runes, left/right, …) must still
-// reach finishUpdate's chatInput forwarding, exactly like the original
-// inline switch falling out of the key switch into the post-switch block.
 func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd, bool) {
 	if msg.Type == tea.KeyEsc {
 		m.lastEscTime = time.Now()
 	}
 	switch msg.String() {
 	case "esc":
-		// The subagent clause is explicit here because isSessionProcessing()
-		// deliberately ignores background work now: ESC is the only keyboard
-		// path to StopAgent while subagents run, so it must still fire when the
-		// parent turn is idle and only subagents are working.
 		if m.isSessionProcessing() || m.processing || m.hasRunningSubagents() {
 			now := time.Now()
 			if now.Sub(m.escLastPress) < escHintTimeout {
-				// Double press detected - cancel the agent
 				m.escPressCount = 0
 				m.escHint = false
 				m.agentLoop.GetProvidable().StopAgent(m.currentKey)
 				m.clearStreamingState()
 				m.reloadSessions()
 			} else {
-				// First press - show hint
 				m.escPressCount = 1
 				m.escHint = true
 			}
@@ -44,12 +30,6 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 		}
 
 	case "tab":
-		// Cycle agents: each press binds the next configured agent to the
-		// session on screen (or to the pending selection on the welcome
-		// screen), wrapping around at the end of the list.
-		// Mode switching lives in /mode now — it is a rarer, more deliberate
-		// choice than "talk to a different agent".
-		// Only when no autocomplete and no modal is active.
 		if m.showAutocomplete || m.modalMode != ModalNone {
 			return m, nil, true
 		}
@@ -61,14 +41,12 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 		return m, tea.Quit, true
 
 	case "ctrl+b":
-		// Go back to parent chat if currently viewing a subagent session.
 		if m.parentSessionKey != "" {
 			m.setCurrentChatKey(m.parentSessionKey)
 			m.parentSessionKey = ""
 			m.clearStreamingState()
 			m.reloadSessions()
 		}
-		// Restart tick animation if the parent session has active subagents.
 		if m.isSessionProcessing() {
 			return m, m.tickCmd(), true
 		}
@@ -94,7 +72,6 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 		return m, tea.Batch(cmds...), true
 
 	case "ctrl+t":
-		// Toggle mouse capture as fallback for terminals without Shift bypass.
 		m.mouseEnabled = !m.mouseEnabled
 		if m.mouseEnabled {
 			return m, tea.EnableMouseCellMotion, true
@@ -117,38 +94,25 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 
 	case "ctrl+y":
 		copied := m.copyLastAssistantMessage()
-		// Consume the key so it never reaches the textarea, and show
-		// brief feedback (same pattern as mouse-selection copy).
 		m.selectionFeedback = copied
 		m.selectionFeedbackAt = time.Now()
 		if !copied {
-			// Still consume; the status line would otherwise show "Copied!"
-			// incorrectly. Leave feedback off when there was nothing to copy.
 			m.selectionFeedback = false
 		}
 		return m, nil, true
 
 	case queueRemoveKey:
-		// Undo the last queued message of the current session. Only acts
-		// on an empty composer so it can never eat text the user is still
-		// typing — with a draft the key keeps its textarea meaning
-		// (delete word forward) and is not consumed here.
 		if strings.TrimSpace(m.chatInput.Value()) == "" {
 			m.removeLastQueued()
 			return m, nil, true
 		}
 
 	case queueFlushKey:
-		// Force-send the next queued message now (cancels a busy turn).
-		// Empty composer only, so alt+enter never hijacks a multi-line
-		// draft the user meant to keep editing. An empty queue leaves the
-		// key free for the textarea's insert-newline binding.
 		if strings.TrimSpace(m.chatInput.Value()) == "" && m.queueDepth() > 0 {
 			return m, m.forceSendNextQueued(), true
 		}
 
 	case "up", "down", "pgup", "pgdown":
-		// Group mode welcome: cycle profile selection with up/down arrows
 		if (msg.String() == "up" || msg.String() == "down") &&
 			m.currentMode == ModeGroup && m.showWelcome &&
 			!m.showAutocomplete && m.modalMode == ModalNone {
@@ -178,12 +142,6 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 		}
 		return m, tea.Batch(cmds...), true
 	case "home":
-		// Expand the lazy render window all the way to the start of history
-		// before jumping, so Home lands on the first message rather than the
-		// "↑ N earlier messages" banner. Bounded: each iteration may hit
-		// SQLite for an archived page and rebuild the base, so a session
-		// with thousands of compacted messages must not turn Home into an
-		// unbounded loop.
 		for i := 0; i < maxHomeExpandIterations; i++ {
 			if !m.maybeExpandRenderWindow() {
 				break
@@ -197,25 +155,12 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 
 	case "enter":
 		inputVal := m.chatInput.Value()
-		// The busy gate guards every path that starts a turn: group mode
-		// and plain messages fall through to the queue instead of starting
-		// a concurrent second turn. Slash commands stay exempt — they run
-		// locally in the TUI (see below).
-		//
-		// isSessionProcessing() is the shared predicate the queue flush and
-		// the spinner also use, so the three cannot drift. It intentionally
-		// excludes running subagents: background work must not block input.
 		busy := m.isSessionProcessing()
 
-		// Group mode: wrap non-command input as /group start <profileID> <task>
 		if m.currentMode == ModeGroup && !strings.HasPrefix(inputVal, "/") &&
 			strings.TrimSpace(inputVal) != "" {
 			profiles := m.getGroupProfiles()
 			if len(profiles) > 0 && m.groupProfileIdx >= 0 && m.groupProfileIdx < len(profiles) {
-				// submitGroupStart publishes immediately, so it must not run
-				// while the session is busy. Queue the SAME wrapped command
-				// the idle path would have sent — the flushed turn then
-				// behaves identically to one started while idle.
 				if busy {
 					wrapped := groupStartCommand(profiles[m.groupProfileIdx].ID, inputVal)
 					if cmd := m.enqueueCurrentInputWhileBusy(wrapped); cmd != nil {
@@ -229,14 +174,9 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 				}
 				return m, tea.Batch(cmds...), true
 			}
-			// No valid profiles — fall through to normal submitMessage
 		}
 
 		if strings.HasPrefix(inputVal, "/") {
-			// Slash commands run locally in the TUI (modals, /clearq,
-			// /quit, …), so they must stay responsive while the agent is
-			// busy — queuing them would defer UI actions that are exactly
-			// what the user reaches for during a turn.
 			cmd := m.executeCommand(inputVal)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
@@ -248,9 +188,6 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 				cmds = append(cmds, cmd)
 			}
 		} else {
-			// Agent is busy: park the message in the per-session FIFO
-			// queue instead of swallowing it. It is auto-submitted when
-			// the turn ends (see maybeFlushQueue).
 			if cmd := m.enqueueCurrentInput(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}

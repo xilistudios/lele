@@ -1,27 +1,4 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package channels
-
-// Durable inbound, publisher side.
-//
-// pkg/durable owns the spool row; this package decides WHEN it is written. The
-// rule these tests pin is that a channel may publish a message only after the
-// spooler has been offered the chance to back it, and that the spooler stays
-// invisible to the rest of the flow:
-//
-//	spooler wired + write succeeds -> row exists (claimed) before the bus sees it
-//	spooler wired + write fails    -> message is published anyway (availability)
-//	spooler wired + bus rejects    -> rollback hook fires AND that one row is
-//	                                  released back to pending for the pump
-//	spooler nil                    -> behaviour identical to before the feature
-//
-// Nobody here completes or deletes a row: Finish belongs to the consumer (the
-// agent loop), and after a rejected publish the row is the only copy of the
-// message left, so the most the publisher may do is hand it back to pending.
 
 import (
 	"context"
@@ -36,17 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Test double
-// ──────────────────────────────────────────────────────────────────────────────
-
-// fakeSpooler stands in for *durable.Inbound. It tags SpoolID/DedupeID in place
-// exactly like the real Enqueue and keeps a snapshot of every row it accepted,
-// so a test can check that nothing deletes it. Release is the other half of the
-// real protocol: it marks exactly the row it is handed as handed back to the
-// pump, which is what a rejected publish must trigger. messageBus is optional:
-// when set, Enqueue also samples how deep the inbound queue is at that instant,
-// which is what proves the write happened before the publish.
 type fakeSpooler struct {
 	mu       sync.Mutex
 	messageB *bus.MessageBus
@@ -63,8 +29,6 @@ func newFakeSpooler(messageBus *bus.MessageBus) *fakeSpooler {
 	return &fakeSpooler{messageB: messageBus, nextID: 100}
 }
 
-// Enqueue mirrors durable.Inbound.Enqueue: identity in place, true only when
-// the row was written, and never a publish.
 func (f *fakeSpooler) Enqueue(msg *bus.InboundMessage) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -92,9 +56,6 @@ func (f *fakeSpooler) Enqueue(msg *bus.InboundMessage) bool {
 	return true
 }
 
-// Release mirrors durable.Inbound.Release: only a message Enqueue actually
-// backed (non-zero SpoolID) has a row to hand back, and the call is scoped to
-// exactly that one id.
 func (f *fakeSpooler) Release(msg *bus.InboundMessage) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -106,14 +67,12 @@ func (f *fakeSpooler) Release(msg *bus.InboundMessage) bool {
 	return true
 }
 
-// released returns the ids Release was asked to hand back, under the lock.
 func (f *fakeSpooler) released() []int64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]int64(nil), f.release...)
 }
 
-// snapshot returns the recorded state under the lock.
 func (f *fakeSpooler) snapshot() (int, []bus.InboundMessage, []int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -122,14 +81,12 @@ func (f *fakeSpooler) snapshot() (int, []bus.InboundMessage, []int64) {
 		append([]int64(nil), f.depths...)
 }
 
-// setFail scripts a spool write failure, as a closed database would cause.
 func (f *fakeSpooler) setFail(v bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.fail = v
 }
 
-// waitInbound reads one message from the bus, reporting false on timeout.
 func waitInbound(t *testing.T, messageBus *bus.MessageBus, within time.Duration) (bus.InboundMessage, bool) {
 	t.Helper()
 
@@ -138,13 +95,6 @@ func waitInbound(t *testing.T, messageBus *bus.MessageBus, within time.Duration)
 	return messageBus.ConsumeInbound(ctx)
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// BaseChannel.publishInbound
-// ──────────────────────────────────────────────────────────────────────────────
-
-// TestPublishInboundSpoolsBeforePublish is the core ordering guarantee: the row
-// must exist before the message can be observed on the bus, or a crash between
-// the two silently loses a message the channel already accepted.
 func TestPublishInboundSpoolsBeforePublish(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	defer messageBus.Close()
@@ -177,8 +127,6 @@ func TestPublishInboundSpoolsBeforePublish(t *testing.T) {
 	}
 }
 
-// Without a spooler the path must be exactly what it was before the feature:
-// the message is published and nothing panics.
 func TestPublishInboundWithoutSpoolerIsUnchanged(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	defer messageBus.Close()
@@ -206,8 +154,6 @@ func TestPublishInboundWithoutSpoolerIsUnchanged(t *testing.T) {
 	}
 }
 
-// A spool write that fails is not a reason to drop a live message: durability
-// is best-effort and availability wins.
 func TestPublishInboundStillPublishesWhenSpoolFails(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	defer messageBus.Close()
@@ -241,17 +187,10 @@ func TestPublishInboundStillPublishesWhenSpoolFails(t *testing.T) {
 	}
 }
 
-// The interesting combination: the row was written (and claimed), then the bus
-// rejected the publish. The rollback hook must fire (the user may already see a
-// typing indicator) and publishInbound must hand exactly that one row back to
-// the pump with Release: it is the only copy of the message, so deleting it
-// would lose it and leaving it claimed would stall it until the stale-claim
-// timeout.
 func TestPublishInboundRejectedReleasesSpoolRowForPump(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	defer messageBus.Close()
 
-	// Fill the queue so the next publish is rejected.
 	inLen, inCap, _, _, _, _ := messageBus.Stats()
 	for i := inLen; i < inCap; i++ {
 		if !messageBus.PublishInbound(bus.InboundMessage{Channel: "filler"}) {
@@ -287,14 +226,11 @@ func TestPublishInboundRejectedReleasesSpoolRowForPump(t *testing.T) {
 		t.Error("caller SpoolID = 0, want the row id the spooler assigned")
 	}
 
-	// The rollback is scoped to exactly that row: no other id, no second call.
 	if got := spooler.released(); len(got) != 1 || got[0] != msg.SpoolID {
 		t.Errorf("Release called for %v, want exactly [%d]", got, msg.SpoolID)
 	}
 }
 
-// HandleMessageWithAttachments is what every real channel calls; the spooler
-// must be reached through it, with the identity visible on the wire.
 func TestHandleMessageWithAttachmentsCarriesSpoolIdentity(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	defer messageBus.Close()
@@ -329,8 +265,6 @@ func TestHandleMessageWithAttachmentsCarriesSpoolIdentity(t *testing.T) {
 	}
 }
 
-// A sender the allowlist rejects must never reach the spool: a row for a
-// message nobody wanted would be replayed by the pump on every restart.
 func TestHandleMessageRejectedByAllowlistIsNotSpooled(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	defer messageBus.Close()
@@ -349,12 +283,6 @@ func TestHandleMessageRejectedByAllowlistIsNotSpooled(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Manager propagation
-// ──────────────────────────────────────────────────────────────────────────────
-
-// embeddedChannel is a channel in the shape most of them have: *BaseChannel
-// embedded, so BaseChannel's setter is promoted to it.
 type embeddedChannel struct {
 	*BaseChannel
 }
@@ -363,8 +291,6 @@ func (embeddedChannel) Start(context.Context) error                     { return
 func (embeddedChannel) Stop(context.Context) error                      { return nil }
 func (embeddedChannel) Send(context.Context, bus.OutboundMessage) error { return nil }
 
-// plainChannel knows nothing about BaseChannel at all: the case the manager has
-// to skip without breaking the wiring of everything else.
 type plainChannel struct{}
 
 func (plainChannel) Name() string                                    { return "plain" }
@@ -374,10 +300,6 @@ func (plainChannel) Send(context.Context, bus.OutboundMessage) error { return ni
 func (plainChannel) IsRunning() bool                                 { return false }
 func (plainChannel) IsAllowed(string) bool                           { return true }
 
-// TestManagerSetInboundSpoolerReachesEveryChannel pins the wiring contract: one
-// call on the manager covers the channels that embed BaseChannel (setter
-// promoted), the one that keeps the base in a named field (NativeChannel, via
-// its forwarder), and leaves a channel that supports neither alone.
 func TestManagerSetInboundSpoolerReachesEveryChannel(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	defer messageBus.Close()
@@ -417,14 +339,10 @@ func TestManagerSetInboundSpoolerReachesEveryChannel(t *testing.T) {
 		}
 	}
 
-	// The unsupported channel is skipped silently rather than panicking, and it
-	// really is unsupported: if that ever stops being true this test stops
-	// covering the skip path.
 	if _, ok := Channel(foreign).(spoolerSetter); ok {
 		t.Error("plainChannel unexpectedly satisfies spoolerSetter; the skip path is no longer covered")
 	}
 
-	// Clearing propagates the same way: nil is the "durability off" wiring.
 	m.SetInboundSpooler(nil)
 	for name, base := range map[string]*BaseChannel{
 		"embedded": embedded.BaseChannel,
@@ -438,10 +356,6 @@ func TestManagerSetInboundSpoolerReachesEveryChannel(t *testing.T) {
 	}
 }
 
-// TestEveryChannelTypeExposesTheSetter guards the assumption behind
-// Manager.SetInboundSpooler: channels are wired by capability, not by name, so
-// a channel that could not be reached would be easy to forget. Build every real
-// channel and check each one answers to the setter and stores what it is given.
 func TestEveryChannelTypeExposesTheSetter(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	defer messageBus.Close()
@@ -475,7 +389,6 @@ func TestEveryChannelTypeExposesTheSetter(t *testing.T) {
 	}
 }
 
-// baseOf returns the BaseChannel a concrete channel writes through.
 func baseOf(ch Channel) *BaseChannel {
 	switch c := ch.(type) {
 	case *TelegramChannel:
@@ -505,9 +418,6 @@ func baseOf(ch Channel) *BaseChannel {
 	}
 }
 
-// The manager hands the setter to whatever is registered, including a channel
-// that was only half built (the test fixtures do exactly that). Forwarding must
-// be a no-op rather than a panic.
 func TestNativeSetInboundSpoolerToleratesAMissingBase(t *testing.T) {
 	var nilChannel *NativeChannel
 	nilChannel.SetInboundSpooler(newFakeSpooler(nil)) //nolint:staticcheck // the nil receiver is the point
@@ -519,13 +429,6 @@ func TestNativeSetInboundSpoolerToleratesAMissingBase(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Native publishers
-// ──────────────────────────────────────────────────────────────────────────────
-
-// The REST chat publisher used to write straight to the bus. It has to go
-// through the same chokepoint as everything else, or web/desktop/REST messages
-// stay the one class of inbound a crash can lose.
 func TestNativeChatSendRoutesThroughTheSpooler(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -572,8 +475,6 @@ func TestNativeChatSendRoutesThroughTheSpooler(t *testing.T) {
 			got.Channel, got.Content, ChannelName)
 	}
 
-	// The response must still report the id the client can pair events with:
-	// spooling may not eat the caller's metadata.
 	var payload ChatSendResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("Decode() error = %v", err)
@@ -584,9 +485,6 @@ func TestNativeChatSendRoutesThroughTheSpooler(t *testing.T) {
 	}
 }
 
-// The native publishers share one helper, so the WebSocket path is covered by
-// the same code. This drives it directly (no real connection needed) to pin
-// that a spool failure cannot stop a WS message either.
 func TestNativeWSMessageStillPublishesWhenSpoolFails(t *testing.T) {
 	ts := newNativeTestServer(t)
 

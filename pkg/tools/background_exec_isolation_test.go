@@ -7,10 +7,6 @@ import (
 	"testing"
 )
 
-// ---------------------------------------------------------------------------
-// BackgroundProcess.VisibleTo
-// ---------------------------------------------------------------------------
-
 func TestBackgroundProcess_VisibleTo(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -38,10 +34,6 @@ func TestBackgroundProcess_VisibleTo(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Manager session-scoped accessors
-// ---------------------------------------------------------------------------
-
 func TestBackgroundProcessManager_SessionScoping(t *testing.T) {
 	mgr := NewBackgroundProcessManager()
 
@@ -51,7 +43,6 @@ func TestBackgroundProcessManager_SessionScoping(t *testing.T) {
 	foreign := mgr.Register(exec.Command("echo", "c"), "echo c", "/tmp", &stdout, &stderr, func() {}, "telegram:chat-2")
 	unowned := mgr.Register(exec.Command("echo", "d"), "echo d", "/tmp", &stdout, &stderr, func() {}, "")
 
-	// Owner sees own + subagent + unowned, but not foreign.
 	visible := mgr.ListForSession("telegram:chat-1")
 	ids := processIDs(visible)
 	if !containsID(ids, owned.ID) || !containsID(ids, ownedSub.ID) || !containsID(ids, unowned.ID) {
@@ -61,7 +52,6 @@ func TestBackgroundProcessManager_SessionScoping(t *testing.T) {
 		t.Errorf("owner must not see foreign process, got %v", ids)
 	}
 
-	// Foreign session sees only its own + unowned.
 	visible = mgr.ListForSession("telegram:chat-2")
 	ids = processIDs(visible)
 	if !containsID(ids, foreign.ID) || !containsID(ids, unowned.ID) {
@@ -71,7 +61,6 @@ func TestBackgroundProcessManager_SessionScoping(t *testing.T) {
 		t.Errorf("foreign session must not see other sessions' processes, got %v", ids)
 	}
 
-	// GetForSession hides foreign processes.
 	if _, ok := mgr.GetForSession(foreign.ID, "telegram:chat-1"); ok {
 		t.Error("GetForSession must hide foreign process from other session")
 	}
@@ -85,17 +74,12 @@ func TestBackgroundProcessManager_SessionScoping(t *testing.T) {
 		t.Error("GetForSession must return false for missing process")
 	}
 
-	// ListRunningForSession applies the same filter.
 	running := mgr.ListRunningForSession("telegram:chat-1")
 	ids = processIDs(running)
 	if containsID(ids, foreign.ID) {
 		t.Errorf("ListRunningForSession must hide foreign process, got %v", ids)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Tool-level isolation (list / get / stop)
-// ---------------------------------------------------------------------------
 
 func TestBackgroundExecTools_SessionIsolation(t *testing.T) {
 	mgr := NewBackgroundProcessManager()
@@ -111,19 +95,16 @@ func TestBackgroundExecTools_SessionIsolation(t *testing.T) {
 	getTool := NewGetBackgroundExecOutputTool(mgr)
 	stopTool := NewStopBackgroundExecTool(mgr)
 
-	// Owner sees the process.
 	res := listTool.Execute(ownerCtx, map[string]interface{}{"include_completed": true})
 	if !strings.Contains(res.ForLLM, proc.ID) {
 		t.Errorf("owner list should contain %s, got: %s", proc.ID, res.ForLLM)
 	}
 
-	// Other session does not see it.
 	res = listTool.Execute(otherCtx, map[string]interface{}{"include_completed": true})
 	if strings.Contains(res.ForLLM, proc.ID) {
 		t.Errorf("foreign list must not contain %s, got: %s", proc.ID, res.ForLLM)
 	}
 
-	// Other session cannot read output.
 	res = getTool.Execute(otherCtx, map[string]interface{}{"id": proc.ID})
 	if !res.IsError || !strings.Contains(res.ForLLM, "not found") {
 		t.Errorf("foreign get should report not found, got error=%v: %s", res.IsError, res.ForLLM)
@@ -132,7 +113,6 @@ func TestBackgroundExecTools_SessionIsolation(t *testing.T) {
 		t.Error("foreign get must not leak process output")
 	}
 
-	// Other session cannot stop it.
 	res = stopTool.Execute(otherCtx, map[string]interface{}{"id": proc.ID})
 	if !res.IsError || !strings.Contains(res.ForLLM, "not found") {
 		t.Errorf("foreign stop should report not found, got error=%v: %s", res.IsError, res.ForLLM)
@@ -141,13 +121,11 @@ func TestBackgroundExecTools_SessionIsolation(t *testing.T) {
 		t.Errorf("foreign stop must not affect process, status=%s", p.Status)
 	}
 
-	// Owner can read output.
 	res = getTool.Execute(ownerCtx, map[string]interface{}{"id": proc.ID})
 	if res.IsError || !strings.Contains(res.ForLLM, "secret output") {
 		t.Errorf("owner get should return output, got error=%v: %s", res.IsError, res.ForLLM)
 	}
 
-	// Owner can stop it.
 	res = stopTool.Execute(ownerCtx, map[string]interface{}{"id": proc.ID})
 	if res.IsError {
 		t.Errorf("owner stop should succeed, got: %s", res.ForLLM)
@@ -157,8 +135,6 @@ func TestBackgroundExecTools_SessionIsolation(t *testing.T) {
 	}
 }
 
-// TestBackgroundExecTools_NoSessionKey verifies backward compatibility:
-// callers without a session key (e.g. legacy paths) still see everything.
 func TestBackgroundExecTools_NoSessionKey(t *testing.T) {
 	mgr := NewBackgroundProcessManager()
 
@@ -171,10 +147,6 @@ func TestBackgroundExecTools_NoSessionKey(t *testing.T) {
 		t.Errorf("caller without session key should see all processes, got: %s", res.ForLLM)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
 
 func processIDs(procs []*BackgroundProcess) []string {
 	ids := make([]string, 0, len(procs))

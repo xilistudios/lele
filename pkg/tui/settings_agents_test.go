@@ -8,9 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// newAgentsTestModel builds a Model owned by a temp config dir (so mutations
-// can persist via saveConfigToDisk) with two sample agents and no agent loop
-// (applyAgentReload is nil-guarded).
 func newAgentsTestModel(t *testing.T) *Model {
 	t.Helper()
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
@@ -52,26 +49,21 @@ func TestLoadAgentsSettings(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.loadAgentsSettings()
 
-	// Defaults + 2 agents + add action = 4 items
 	if len(m.modalItems) != 4 {
 		t.Fatalf("expected 4 items, got %d", len(m.modalItems))
 	}
 	if len(m.settingsAgentKeys) != 4 {
 		t.Fatalf("expected 4 keys, got %d", len(m.settingsAgentKeys))
 	}
-	// First is defaults
 	if m.settingsAgentKeys[0] != "" {
 		t.Errorf("first key should be empty (defaults), got %q", m.settingsAgentKeys[0])
 	}
-	// Agents follow
 	if m.settingsAgentKeys[1] != "coder" || m.settingsAgentKeys[2] != "writer" {
 		t.Errorf("agent keys mismatch: %v", m.settingsAgentKeys)
 	}
-	// Add action last
 	if m.settingsAgentKeys[3] != settingsAgentAddKey {
 		t.Errorf("last key should be add action, got %q", m.settingsAgentKeys[3])
 	}
-	// The default agent is marked with ★ in its label
 	if !strings.Contains(m.modalItems[1], "★") {
 		t.Errorf("default agent should be starred in label: %q", m.modalItems[1])
 	}
@@ -81,7 +73,7 @@ func TestHandleAgentsEnterNavigatesToDetail(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.loadAgentsSettings()
 
-	m.modalSelectedIdx = 1 // select "coder"
+	m.modalSelectedIdx = 1
 	m.handleAgentsEnter()
 	if m.modalMode != ModalSettingsAgentEdit {
 		t.Fatalf("expected navigation to AgentEdit modal, got %v", m.modalMode)
@@ -89,7 +81,6 @@ func TestHandleAgentsEnterNavigatesToDetail(t *testing.T) {
 	if m.settingsAgentID != "coder" {
 		t.Fatalf("expected settingsAgentID coder, got %q", m.settingsAgentID)
 	}
-	// Detail view should contain the agent ID and editable fields
 	if len(m.modalItems) == 0 {
 		t.Fatal("expected detail modal items")
 	}
@@ -102,7 +93,7 @@ func TestHandleAgentsEnterStartsAddFlow(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.loadAgentsSettings()
 
-	m.modalSelectedIdx = 3 // add action
+	m.modalSelectedIdx = 3
 	m.handleAgentsEnter()
 	if m.settingsEditField != "newAgentID" {
 		t.Fatalf("expected newAgentID edit field, got %q", m.settingsEditField)
@@ -114,7 +105,7 @@ func TestHandleAgentEditEnterEntersEditMode(t *testing.T) {
 	m.settingsAgentID = "coder"
 	m.loadAgentDetail("coder")
 
-	m.modalSelectedIdx = 1 // Name
+	m.modalSelectedIdx = 1
 	m.handleAgentEditEnter()
 	if m.settingsEditField != "agentName" {
 		t.Fatalf("expected agentName edit field, got %q", m.settingsEditField)
@@ -133,7 +124,6 @@ func TestHandleAgentSettingsInputCreatesNewAgent(t *testing.T) {
 	if len(m.cfg.Agents.List) != 3 {
 		t.Fatalf("expected 3 agents, got %d", len(m.cfg.Agents.List))
 	}
-	// findAgent should return the new agent with Name set to its ID
 	ag := m.findAgent("sysadmin")
 	if ag == nil {
 		t.Fatal("expected to find sysadmin agent")
@@ -141,11 +131,9 @@ func TestHandleAgentSettingsInputCreatesNewAgent(t *testing.T) {
 	if ag.Name != "sysadmin" {
 		t.Errorf("expected name sysadmin, got %q", ag.Name)
 	}
-	// Only set as default if it was the first agent
 	if ag.Default {
 		t.Error("appended agent should not be default when list is non-empty")
 	}
-	// Edit field cleared and list reloaded
 	if m.settingsEditField != "" {
 		t.Errorf("expected edit field cleared, got %q", m.settingsEditField)
 	}
@@ -246,7 +234,6 @@ func TestDeleteAgent(t *testing.T) {
 	if m.cfg.Agents.List[0].ID != "coder" {
 		t.Fatalf("expected coder to remain, got %q", m.cfg.Agents.List[0].ID)
 	}
-	// Back to agents list
 	if m.settingsAgentID != "" {
 		t.Errorf("expected settingsAgentID cleared, got %q", m.settingsAgentID)
 	}
@@ -257,7 +244,6 @@ func TestDeleteAgent(t *testing.T) {
 
 func TestDeleteAgentDefaultPromotesFirst(t *testing.T) {
 	m := newAgentsTestModel(t)
-	// coder is the default; delete it
 	m.deleteAgent("coder")
 	if len(m.cfg.Agents.List) != 1 {
 		t.Fatalf("expected 1 agent after delete, got %d", len(m.cfg.Agents.List))
@@ -276,7 +262,6 @@ func TestFindAgent(t *testing.T) {
 	if m.findAgent("nope") != nil {
 		t.Fatal("expected nil for missing agent")
 	}
-	// findAgent returns a pointer into the slice (in-place mutation works)
 	ag.Name = "Changed"
 	if m.cfg.Agents.List[0].Name != "Changed" {
 		t.Error("findAgent should return pointer into the config slice")
@@ -286,7 +271,6 @@ func TestFindAgent(t *testing.T) {
 func TestLoadAgentDetailDefaults(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.loadAgentDetail("")
-	// Defaults view has 11 rows (10 fields + thinking level)
 	if len(m.modalItems) != 11 {
 		t.Fatalf("expected 11 defaults rows, got %d", len(m.modalItems))
 	}
@@ -300,7 +284,7 @@ func TestHandleDefaultsEditEnter(t *testing.T) {
 	m.settingsAgentID = ""
 	m.loadAgentDetail("")
 
-	m.modalSelectedIdx = 2 // MaxTokens
+	m.modalSelectedIdx = 2
 	m.handleDefaultsEditEnter()
 	if m.settingsEditField != "defaultMaxTokens" {
 		t.Fatalf("expected defaultMaxTokens, got %q", m.settingsEditField)
@@ -322,9 +306,6 @@ func TestHandleDefaultsFieldEdit(t *testing.T) {
 	}
 }
 
-// TestHandleDefaultsMemoryMaxLines covers the MemoryMaxLines row end-to-end:
-// Enter preloads the current value, a valid number is stored, and invalid
-// input errors without clobbering the previous value (mirrors MaxReadLines).
 func TestHandleDefaultsMemoryMaxLines(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.settingsAgentID = ""
@@ -339,13 +320,11 @@ func TestHandleDefaultsMemoryMaxLines(t *testing.T) {
 		t.Fatalf("expected 500 in input, got %q", got)
 	}
 
-	// Valid value lands in the config.
 	m.handleAgentSettingsInput("120")
 	if m.cfg.Agents.Defaults.MemoryMaxLines != 120 {
 		t.Fatalf("expected MemoryMaxLines 120, got %d", m.cfg.Agents.Defaults.MemoryMaxLines)
 	}
 
-	// Invalid value errors and preserves the previous value.
 	m.settingsEditField = "defaultMemoryMaxLines"
 	m.handleAgentSettingsInput("abc")
 	if m.formError == "" {
@@ -358,7 +337,6 @@ func TestHandleDefaultsMemoryMaxLines(t *testing.T) {
 
 func TestLoadAgentDetailSubagentsSplit(t *testing.T) {
 	m := newAgentsTestModel(t)
-	// Give coder a subagent allow-list and max concurrent.
 	ag := m.findAgent("coder")
 	ag.Subagents = &config.SubagentsConfig{
 		AllowAgents:   []string{"writer"},
@@ -366,7 +344,6 @@ func TestLoadAgentDetailSubagentsSplit(t *testing.T) {
 	}
 	m.loadAgentDetail("coder")
 
-	// 12 rows: 10 fields (incl. Thinking) + set-as-default + delete
 	if len(m.modalItems) != 12 {
 		t.Fatalf("expected 12 rows, got %d: %v", len(m.modalItems), m.modalItems)
 	}
@@ -383,26 +360,23 @@ func TestHandleAgentEditEnterSubagentsAllowOpensPicker(t *testing.T) {
 	m.settingsAgentID = "coder"
 	m.loadAgentDetail("coder")
 
-	m.modalSelectedIdx = agentFieldSubagentsAllow // 7
+	m.modalSelectedIdx = agentFieldSubagentsAllow
 	m.handleAgentEditEnter()
 
 	if !m.subagentPickerActive {
 		t.Fatal("expected subagent picker to be active")
 	}
-	// Picker should list all agents except self (coder). Only writer remains.
 	if len(m.subagentPickerItems) != 1 {
 		t.Fatalf("expected 1 picker item (writer), got %d: %v", len(m.subagentPickerItems), m.subagentPickerItems)
 	}
 	if m.subagentPickerItems[0] != "writer" {
 		t.Errorf("expected writer in picker, got %q", m.subagentPickerItems[0])
 	}
-	// Self must not appear.
 	for _, id := range m.subagentPickerItems {
 		if id == "coder" {
 			t.Fatal("current agent must not be listed as its own subagent")
 		}
 	}
-	// No allow-list configured → writer unchecked.
 	if m.subagentPickerSelected[0] {
 		t.Error("writer should be unchecked when no allow-list is set")
 	}
@@ -430,7 +404,6 @@ func TestToggleSubagentPicker(t *testing.T) {
 	m.settingsAgentID = "coder"
 	m.startSubagentPicker(ag)
 
-	// Initially unchecked.
 	if m.subagentPickerSelected[0] {
 		t.Fatal("expected initially unchecked")
 	}
@@ -450,7 +423,6 @@ func TestSaveSubagentPickerSetsAllowAgents(t *testing.T) {
 	m.settingsAgentID = "coder"
 	m.startSubagentPicker(ag)
 
-	// Select writer.
 	m.subagentPickerSelected[0] = true
 	m.saveSubagentPicker()
 
@@ -473,12 +445,10 @@ func TestSaveSubagentPickerEmptyClearsAndNils(t *testing.T) {
 	m.settingsAgentID = "coder"
 	m.startSubagentPicker(ag)
 
-	// Deselect everything (writer currently selected → toggle off).
 	m.subagentPickerSelected[0] = false
 	m.saveSubagentPicker()
 
 	ag = m.findAgent("coder")
-	// With no other meaningful fields, Subagents should be nil to keep config clean.
 	if ag.Subagents != nil {
 		t.Fatalf("expected Subagents to be nil when empty, got %+v", ag.Subagents)
 	}
@@ -521,7 +491,6 @@ func TestCancelSubagentPicker(t *testing.T) {
 	if m.subagentPickerItems != nil || m.subagentPickerLabels != nil || m.subagentPickerSelected != nil {
 		t.Fatal("picker state should be cleared after cancel")
 	}
-	// Cancel must not mutate the config.
 	ag = m.findAgent("coder")
 	if ag.Subagents != nil {
 		t.Fatal("cancel must not create Subagents")
@@ -533,7 +502,7 @@ func TestHandleAgentEditEnterSubagentsMaxConcurrent(t *testing.T) {
 	m.settingsAgentID = "coder"
 	m.loadAgentDetail("coder")
 
-	m.modalSelectedIdx = agentFieldSubagentsMaxConcurrent // 8
+	m.modalSelectedIdx = agentFieldSubagentsMaxConcurrent
 	m.handleAgentEditEnter()
 	if m.settingsEditField != "agentSubagentsMaxConcurrent" {
 		t.Fatalf("expected agentSubagentsMaxConcurrent, got %q", m.settingsEditField)
@@ -574,17 +543,15 @@ func TestHandleAgentEditEnterModelAlwaysSelector(t *testing.T) {
 	m.settingsAgentID = "coder"
 	m.loadAgentDetail("coder")
 
-	m.modalSelectedIdx = agentFieldModel // 4
+	m.modalSelectedIdx = agentFieldModel
 	m.handleAgentEditEnter()
 
-	// Even with no models configured, the selector must open (never text input).
 	if !m.settingsSelectorActive {
 		t.Fatal("expected model selector to be active")
 	}
 	if m.settingsSelectorField != "agentModel" {
 		t.Fatalf("expected selector field agentModel, got %q", m.settingsSelectorField)
 	}
-	// Options: (default), (custom...) — with no models just those two.
 	if len(m.settingsSelectorValues) != 2 {
 		t.Fatalf("expected 2 selector values, got %d: %v", len(m.settingsSelectorValues), m.settingsSelectorValues)
 	}
@@ -600,7 +567,6 @@ func TestHandleSelectorConfirmCustomOpensTextInput(t *testing.T) {
 
 	m.modalSelectedIdx = agentFieldModel
 	m.handleAgentEditEnter()
-	// Select the last option "(custom...)".
 	m.settingsSelectorIdx = len(m.settingsSelectorValues) - 1
 	m.handleSelectorConfirm()
 
@@ -617,7 +583,7 @@ func TestHandleDefaultsEditEnterModelAlwaysSelector(t *testing.T) {
 	m.settingsAgentID = ""
 	m.loadAgentDetail("")
 
-	m.modalSelectedIdx = 1 // Model
+	m.modalSelectedIdx = 1
 	m.handleDefaultsEditEnter()
 
 	if !m.settingsSelectorActive {
@@ -628,18 +594,10 @@ func TestHandleDefaultsEditEnterModelAlwaysSelector(t *testing.T) {
 	}
 }
 
-// ── Thinking level (per-agent + defaults) ──────────────────────────────
-
-// TestAgentDetailRowIndexAlignment guards the classic row-misalignment bug:
-// every agentField* constant must address the row whose label starts with the
-// field it names, and the action rows must remain the last two. If a row is
-// inserted in loadAgentDetail without bumping the iota block (or vice versa),
-// this test fails.
 func TestAgentDetailRowIndexAlignment(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.loadAgentDetail("coder")
 
-	// Prefix each constant with the expected "Label: " of its row.
 	wantPrefix := map[int]string{
 		agentFieldID:                     "ID:",
 		agentFieldName:                   "Name:",
@@ -665,8 +623,6 @@ func TestAgentDetailRowIndexAlignment(t *testing.T) {
 	}
 }
 
-// TestDefaultsDetailRowIndexAlignment is the same guard for the defaults view
-// (defaultsField* constants vs loadAgentDetail("") rows).
 func TestDefaultsDetailRowIndexAlignment(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.loadAgentDetail("")
@@ -695,8 +651,6 @@ func TestDefaultsDetailRowIndexAlignment(t *testing.T) {
 	}
 }
 
-// TestThinkingLevelRowDisplay checks the row renders "default" when unset and
-// the explicit level otherwise, in both views.
 func TestThinkingLevelRowDisplay(t *testing.T) {
 	m := newAgentsTestModel(t)
 
@@ -712,7 +666,6 @@ func TestThinkingLevelRowDisplay(t *testing.T) {
 		t.Errorf("explicit level should render value: %q", got)
 	}
 
-	// Defaults view
 	m.loadAgentDetail("")
 	if got := m.modalItems[defaultsFieldThinkingLevel]; got != "Thinking: default" {
 		t.Errorf("defaults nil level should render default: %q", got)
@@ -724,9 +677,6 @@ func TestThinkingLevelRowDisplay(t *testing.T) {
 	}
 }
 
-// TestHandleAgentEditEnterThinkingOpensSelector verifies Enter on the Thinking
-// row opens the selector with 5 options and pre-selects the current value
-// (nil → "(default)" at index 0; "medium" → index 4).
 func TestHandleAgentEditEnterThinkingOpensSelector(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.settingsAgentID = "coder"
@@ -746,13 +696,11 @@ func TestHandleAgentEditEnterThinkingOpensSelector(t *testing.T) {
 			len(m.settingsSelectorItems), len(m.settingsSelectorValues),
 			m.settingsSelectorItems, m.settingsSelectorValues)
 	}
-	// Unset value pre-selects "(default)".
 	if m.settingsSelectorIdx != 0 {
 		t.Errorf("nil level should pre-select index 0, got %d", m.settingsSelectorIdx)
 	}
 	m.closeSettingsSelector()
 
-	// Explicit value pre-selects its row.
 	medium := "medium"
 	m.findAgent("coder").ThinkingLevel = &medium
 	m.modalSelectedIdx = agentFieldThinkingLevel
@@ -762,9 +710,6 @@ func TestHandleAgentEditEnterThinkingOpensSelector(t *testing.T) {
 	}
 }
 
-// TestSelectorConfirmThinkingLevelEndToEnd drives the full selector path
-// (Enter → pick option → handleSelectorConfirm) the same way the real key
-// handler does, including modalMode, and checks the value lands in config.
 func TestSelectorConfirmThinkingLevelEndToEnd(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.resetModal(ModalSettingsAgentEdit)
@@ -774,7 +719,6 @@ func TestSelectorConfirmThinkingLevelEndToEnd(t *testing.T) {
 	m.modalSelectedIdx = agentFieldThinkingLevel
 	m.handleAgentEditEnter()
 
-	// Pick "off" (index 1: values are "", "off", "low", "medium", "high").
 	m.settingsSelectorIdx = 1
 	m.handleSelectorConfirm()
 
@@ -786,7 +730,6 @@ func TestSelectorConfirmThinkingLevelEndToEnd(t *testing.T) {
 		t.Fatalf("expected thinking level off, got %v", ag.ThinkingLevel)
 	}
 
-	// Pick "(default)" (index 0) → clears back to nil (field is not sticky).
 	m.modalSelectedIdx = agentFieldThinkingLevel
 	m.handleAgentEditEnter()
 	m.settingsSelectorIdx = 0
@@ -798,14 +741,10 @@ func TestSelectorConfirmThinkingLevelEndToEnd(t *testing.T) {
 	}
 }
 
-// TestHandleAgentFieldEditThinkingLevel covers the edit handler directly:
-// "" clears to nil, valid levels are stored, invalid ones error and leave the
-// field untouched (mirrors the temperature conventions).
 func TestHandleAgentFieldEditThinkingLevel(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.settingsAgentID = "writer"
 
-	// Valid value.
 	m.settingsEditField = "agentThinkingLevel"
 	m.handleAgentSettingsInput("high")
 	ag := m.findAgent("writer")
@@ -816,7 +755,6 @@ func TestHandleAgentFieldEditThinkingLevel(t *testing.T) {
 		t.Errorf("unexpected error: %q", m.formError)
 	}
 
-	// Invalid value must not clobber the previous one.
 	m.settingsEditField = "agentThinkingLevel"
 	m.handleAgentSettingsInput("bogus")
 	if m.formError == "" {
@@ -827,7 +765,6 @@ func TestHandleAgentFieldEditThinkingLevel(t *testing.T) {
 		t.Fatalf("invalid input must leave field unchanged, got %v", ag.ThinkingLevel)
 	}
 
-	// Empty value clears to nil (the "(default)" sentinel).
 	m.settingsEditField = "agentThinkingLevel"
 	m.handleAgentSettingsInput("")
 	ag = m.findAgent("writer")
@@ -839,9 +776,6 @@ func TestHandleAgentFieldEditThinkingLevel(t *testing.T) {
 	}
 }
 
-// TestHandleAgentFieldEditThinkingLevelNormalized checks that mixed-case /
-// padded input is canonicalized through config.NormalizeThinkingLevel before
-// being stored.
 func TestHandleAgentFieldEditThinkingLevelNormalized(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.settingsAgentID = "writer"
@@ -853,15 +787,11 @@ func TestHandleAgentFieldEditThinkingLevelNormalized(t *testing.T) {
 	}
 }
 
-// TestHandleDefaultsThinkingLevel covers the defaults view: Enter on the
-// Thinking row opens the selector, and the edit handler writes
-// m.cfg.Agents.Defaults.ThinkingLevel with the same validation semantics.
 func TestHandleDefaultsThinkingLevel(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.settingsAgentID = ""
 	m.loadAgentDetail("")
 
-	// Row Enter opens the selector wired to defaultThinkingLevel.
 	m.modalSelectedIdx = defaultsFieldThinkingLevel
 	m.handleDefaultsEditEnter()
 	if !m.settingsSelectorActive {
@@ -875,7 +805,6 @@ func TestHandleDefaultsThinkingLevel(t *testing.T) {
 	}
 	m.closeSettingsSelector()
 
-	// Set a level.
 	m.settingsEditField = "defaultThinkingLevel"
 	m.handleDefaultsFieldEdit("low")
 	d := m.cfg.Agents.Defaults.ThinkingLevel
@@ -883,7 +812,6 @@ func TestHandleDefaultsThinkingLevel(t *testing.T) {
 		t.Fatalf("expected defaults low, got %v", d)
 	}
 
-	// Invalid value errors and preserves.
 	m.settingsEditField = "defaultThinkingLevel"
 	m.handleDefaultsFieldEdit("nope")
 	if m.formError == "" {
@@ -894,7 +822,6 @@ func TestHandleDefaultsThinkingLevel(t *testing.T) {
 		t.Fatalf("invalid input must leave defaults unchanged, got %v", d)
 	}
 
-	// Clear back to inherit.
 	m.settingsEditField = "defaultThinkingLevel"
 	m.handleDefaultsFieldEdit("")
 	if m.cfg.Agents.Defaults.ThinkingLevel != nil {
@@ -902,9 +829,6 @@ func TestHandleDefaultsThinkingLevel(t *testing.T) {
 	}
 }
 
-// TestDefaultsSelectorConfirmThinkingLevelEndToEnd runs the defaults selector
-// confirm path through handleAgentSettingsInput (which falls through to
-// handleDefaultsFieldEdit when settingsAgentID has no matching agent).
 func TestDefaultsSelectorConfirmThinkingLevelEndToEnd(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.resetModal(ModalSettingsAgentEdit)
@@ -912,9 +836,9 @@ func TestDefaultsSelectorConfirmThinkingLevelEndToEnd(t *testing.T) {
 	m.loadAgentDetail("")
 
 	m.modalSelectedIdx = defaultsFieldThinkingLevel
-	m.handleAgentEditEnter() // routes to handleDefaultsEditEnter (empty ID)
+	m.handleAgentEditEnter()
 
-	m.settingsSelectorIdx = 1 // "off"
+	m.settingsSelectorIdx = 1
 	m.handleSelectorConfirm()
 
 	d := m.cfg.Agents.Defaults.ThinkingLevel
@@ -923,45 +847,32 @@ func TestDefaultsSelectorConfirmThinkingLevelEndToEnd(t *testing.T) {
 	}
 }
 
-// TestAddAgentFlowRendersInput guards the rendering half of the add-agent
-// flow: after selecting "+ Add Agent" (which sets settingsEditField to
-// "newAgentID" while modalMode stays ModalSettingsAgents), the view must show
-// the Agent ID text input — not the plain list. Previously the renderer for
-// ModalSettingsAgents ignored settingsEditField, so the input was focused but
-// invisible and the whole flow looked dead (Enter/typing had no feedback).
 func TestAddAgentFlowRendersInput(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.resetModal(ModalSettingsAgents)
 	m.loadAgentsSettings()
 	m.width, m.height = 100, 30
 
-	// Enter on the "Add Agent" row starts the flow.
 	m.modalSelectedIdx = len(m.settingsAgentKeys) - 1
 	m.handleAgentsEnter()
 	if m.settingsEditField != "newAgentID" {
 		t.Fatalf("expected newAgentID edit field, got %q", m.settingsEditField)
 	}
 
-	// The rendered frame must contain the input prompt, not just the list.
 	frame := m.renderAgentEditInput()
 	if !strings.Contains(frame, "Agent ID") {
 		t.Fatalf("add-agent view must render the 'Agent ID' input prompt, got:\n%s", frame)
 	}
 
-	// View dispatch for ModalSettingsAgents must route to the edit input.
 	view := m.renderActiveModal()
 	if !strings.Contains(view, "Agent ID") {
 		t.Fatal("modal dispatch for ModalSettingsAgents + newAgentID must render the input prompt")
 	}
-	// And must NOT show the plain list (no "> + Add Agent" row while editing).
 	if strings.Contains(view, "+ Add Agent") {
 		t.Fatal("edit view must replace the list while the add-agent input is active")
 	}
 }
 
-// TestAddAgentFlowRendersErrors guards that validation errors during the
-// add-agent flow (empty ID / duplicate ID) are surfaced in the rendered view;
-// they were invisible while the flow rendered the plain list.
 func TestAddAgentFlowRendersErrors(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.resetModal(ModalSettingsAgents)
@@ -969,7 +880,7 @@ func TestAddAgentFlowRendersErrors(t *testing.T) {
 	m.width, m.height = 100, 30
 	m.settingsEditField = "newAgentID"
 
-	m.handleAgentSettingsInput("coder") // duplicate of an existing agent
+	m.handleAgentSettingsInput("coder")
 	if m.formError == "" {
 		t.Fatal("expected duplicate-id error to be set")
 	}

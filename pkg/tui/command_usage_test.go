@@ -11,9 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// TestCommandUsageStore_RecordPersists pins the whole point of the store: the
-// counts survive a restart, and a name recorded without its slash still lands
-// on the same key.
 func TestCommandUsageStore_RecordPersists(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "command_usage.json")
 	store := newCommandUsageStore(path)
@@ -37,8 +34,6 @@ func TestCommandUsageStore_RecordPersists(t *testing.T) {
 	}
 }
 
-// TestCommandUsageStore_MissingFile makes sure a first run (no file yet) is not
-// an error and that the first Record creates the file.
 func TestCommandUsageStore_MissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "command_usage.json")
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -59,8 +54,6 @@ func TestCommandUsageStore_MissingFile(t *testing.T) {
 	}
 }
 
-// TestCommandUsageStore_MalformedFile keeps a corrupt file from breaking the
-// TUI: the store starts empty, logs, and keeps recording.
 func TestCommandUsageStore_MalformedFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "command_usage.json")
 	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
@@ -78,8 +71,6 @@ func TestCommandUsageStore_MalformedFile(t *testing.T) {
 	}
 }
 
-// TestCommandUsageStore_PrunesToMaxEntries pins the cap: the file cannot grow
-// without bound, and the prune keeps the commands that were actually used.
 func TestCommandUsageStore_PrunesToMaxEntries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "command_usage.json")
 	store := newCommandUsageStore(path)
@@ -87,8 +78,6 @@ func TestCommandUsageStore_PrunesToMaxEntries(t *testing.T) {
 	for i := 0; i < commandUsageMaxEntries+50; i++ {
 		store.Record(fmt.Sprintf("/cmd-%d", i))
 	}
-	// One frequent command must survive the prune even though it was recorded
-	// after the map was already over the cap.
 	for i := 0; i < 7; i++ {
 		store.Record("/frequent")
 	}
@@ -118,8 +107,6 @@ func TestCommandUsageStore_PrunesToMaxEntries(t *testing.T) {
 	}
 }
 
-// TestFilterAutocomplete_OrdersByUsage pins the ranking itself, plus the
-// invariant that reordering never drops or duplicates a command.
 func TestFilterAutocomplete_OrdersByUsage(t *testing.T) {
 	m := newTestModel(t)
 	m.cmdUsage = newCommandUsageStore(filepath.Join(t.TempDir(), "usage.json"))
@@ -143,7 +130,6 @@ func TestFilterAutocomplete_OrdersByUsage(t *testing.T) {
 			idxStatus, idxClear, idxSessions, names)
 	}
 
-	// Reordering must not lose or duplicate anything.
 	if len(m.autocompleteItems) != len(allCommands) {
 		t.Errorf("autocomplete items = %d, want %d (no duplicates/losses)",
 			len(m.autocompleteItems), len(allCommands))
@@ -155,8 +141,6 @@ func TestFilterAutocomplete_OrdersByUsage(t *testing.T) {
 	}
 }
 
-// TestFilterAutocomplete_StableWithoutUsage is the backward-compatibility pin:
-// a user with no history keeps today's declared order byte for byte.
 func TestFilterAutocomplete_StableWithoutUsage(t *testing.T) {
 	m := newTestModel(t)
 	m.cmdUsage = newCommandUsageStore(filepath.Join(t.TempDir(), "usage.json"))
@@ -174,8 +158,6 @@ func TestFilterAutocomplete_StableWithoutUsage(t *testing.T) {
 	}
 }
 
-// TestExecuteCommand_RecordsUsage ties the counter to the real entry point:
-// known commands are counted, unknown ones are not.
 func TestExecuteCommand_RecordsUsage(t *testing.T) {
 	m := newTestModel(t)
 
@@ -190,18 +172,10 @@ func TestExecuteCommand_RecordsUsage(t *testing.T) {
 	}
 }
 
-// TestExecuteCommand_NormalizesCase pins that a command typed with capitals is
-// counted under its canonical key AND actually dispatched: the token is
-// normalized once at the top of executeCommand, so the ranking and the switch
-// can never disagree about which command ran. Both halves are asserted on the
-// rendered frame — the palette order for the ranking, the settings modal for
-// the dispatch — so the test fails if either half regresses.
 func TestExecuteCommand_NormalizesCase(t *testing.T) {
 	m := newTestModel(t)
 	m.width = 160
 	m.height = 40
-	// The welcome screen paints its own smaller palette block; the chat layout
-	// is where the real one lives, so leave the welcome state first.
 	m.showWelcome = false
 
 	m.executeCommand("/Settings")
@@ -210,11 +184,7 @@ func TestExecuteCommand_NormalizesCase(t *testing.T) {
 	}
 	m.modalMode = ModalNone
 
-	// One mixed-case hit must be enough to outrank every command with no
-	// history, which is what proves the count landed on the canonical key.
 	m.executeCommand("/Status")
-	// ctrl+p is the real way the palette is opened, and it is what sets
-	// showAutocomplete — filterAutocomplete alone only fills the items.
 	m.showAutocomplete = true
 	m.filterAutocomplete("/")
 	out := m.View()
@@ -231,7 +201,6 @@ func TestExecuteCommand_NormalizesCase(t *testing.T) {
 	}
 }
 
-// indexOfName returns the position of want in names, or -1.
 func indexOfName(names []string, want string) int {
 	for i, n := range names {
 		if n == want {
@@ -241,9 +210,6 @@ func indexOfName(names []string, want string) int {
 	return -1
 }
 
-// TestCommandUsageStore_SnapshotIsACopy pins that the ranking cannot be
-// corrupted by a caller that mutates the map it was handed, and that the
-// snapshot is taken under the lock (Count must not observe the mutation).
 func TestCommandUsageStore_SnapshotIsACopy(t *testing.T) {
 	store := newCommandUsageStore(filepath.Join(t.TempDir(), "usage.json"))
 	store.Record("/models")
@@ -260,11 +226,9 @@ func TestCommandUsageStore_SnapshotIsACopy(t *testing.T) {
 	}
 }
 
-// TestCommandUsageStore_NilStoreIsSafe covers the `&Model{}` case: several TUI
-// tests build a Model by hand, so the store must never be a precondition.
 func TestCommandUsageStore_NilStoreIsSafe(t *testing.T) {
 	var store *commandUsageStore
-	store.Record("/models") // must not panic
+	store.Record("/models")
 	if got := store.Count("/models"); got != 0 {
 		t.Errorf("Count on a nil store = %d, want 0", got)
 	}
@@ -274,12 +238,9 @@ func TestCommandUsageStore_NilStoreIsSafe(t *testing.T) {
 	if err := store.save(); err != nil {
 		t.Errorf("save on a nil store = %v, want nil", err)
 	}
-	sortCommandsByUsage([]commandInfo{{name: "/a"}, {name: "/b"}}, store) // must not panic
+	sortCommandsByUsage([]commandInfo{{name: "/a"}, {name: "/b"}}, store)
 }
 
-// TestFilterAutocomplete_CustomOutranksBuiltin completes the ranking rule: the
-// source of a command (built-in vs harness) never decides its position, only
-// its usage does.
 func TestFilterAutocomplete_CustomOutranksBuiltin(t *testing.T) {
 	m := harnessTestModel(t)
 	m.cmdUsage = newCommandUsageStore(filepath.Join(t.TempDir(), "usage.json"))
@@ -296,15 +257,11 @@ func TestFilterAutocomplete_CustomOutranksBuiltin(t *testing.T) {
 	if got := indexOfName(names, "/sessions"); got != 1 {
 		t.Errorf("/sessions (1 use) should come second, got index %d: %v", got, names)
 	}
-	// Everything else keeps the declared built-in order after the ranked ones.
 	if got := indexOfName(names, "/new"); got != 2 {
 		t.Errorf("/new (0 uses) should come third, got index %d: %v", got, names)
 	}
 }
 
-// TestAllCommands_IncludesAddModel guards the palette entry added alongside the
-// ranking: /add-model is a real command (executeCommand handles it) and must be
-// discoverable, otherwise it can never be ranked either.
 func TestAllCommands_IncludesAddModel(t *testing.T) {
 	found := false
 	for _, cmd := range allCommands {

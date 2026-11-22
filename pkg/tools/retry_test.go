@@ -88,13 +88,6 @@ func TestIsRetryableError_Timeout(t *testing.T) {
 			expected: false,
 		},
 		{
-			// Updated by T8: the old whitelist called every "400" terminal.
-			// providers.IsRetriableError is default-to-transient and this string
-			// carries no HTTP status the classifier can parse, so it is now
-			// retried - matching what the parent agent loop already does with
-			// the same error. A genuinely malformed request is still terminal,
-			// but only when it classifies as format (see the delegation table in
-			// subagent_retry_test.go).
 			name:     "unclassifiable 400 - transient by default",
 			err:      errors.New("400 Bad Request: invalid model"),
 			expected: true,
@@ -123,31 +116,26 @@ func TestCalculateDelay(t *testing.T) {
 		Multiplier: 2.0,
 	}
 
-	// Attempt 0: 1s * 2^0 = 1s
 	delay := calculateDelay(config, 0)
 	if delay != 1*time.Second {
 		t.Errorf("attempt 0: expected 1s, got %v", delay)
 	}
 
-	// Attempt 1: 1s * 2^1 = 2s
 	delay = calculateDelay(config, 1)
 	if delay != 2*time.Second {
 		t.Errorf("attempt 1: expected 2s, got %v", delay)
 	}
 
-	// Attempt 2: 1s * 2^2 = 4s
 	delay = calculateDelay(config, 2)
 	if delay != 4*time.Second {
 		t.Errorf("attempt 2: expected 4s, got %v", delay)
 	}
 
-	// Attempt 3: 1s * 2^3 = 8s
 	delay = calculateDelay(config, 3)
 	if delay != 8*time.Second {
 		t.Errorf("attempt 3: expected 8s, got %v", delay)
 	}
 
-	// Attempt 10: 1s * 2^10 = 1024s, but capped at 30s
 	delay = calculateDelay(config, 10)
 	if delay != 30*time.Second {
 		t.Errorf("attempt 10: expected 30s (max), got %v", delay)

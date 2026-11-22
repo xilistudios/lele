@@ -17,15 +17,8 @@ import (
 	"github.com/xilistudios/lele/pkg/skills"
 )
 
-// seedCatalogForTest plants a minimal openai catalog file so offline fallback
-// and autocomplete tests do not require network or an embedded catalog.
 func seedCatalogForTest(t *testing.T) {
 	t.Helper()
-	// Offline mode: catalog reads never spawn background downloads. Without
-	// this, EnsureProviderAsync can fire from another test's ModelsForProvider
-	// call and write into THIS test's TempDir after it was seeded — t.TempDir
-	// cleanup then fails ("directory not empty") and results flicker between
-	// runs (the real mechanism behind issue #282's catalog flakes).
 	t.Setenv("LELE_CATALOG_OFFLINE", "1")
 	cacheDir := filepath.Join(t.TempDir(), ".lele", "cache", "catalog")
 	catalog.SetCacheDir(cacheDir)
@@ -43,7 +36,6 @@ func seedCatalogForTest(t *testing.T) {
 	}
 }
 
-// newCatalogTestServer builds a NativeChannel test server with custom named providers.
 func newCatalogTestServer(t *testing.T, named map[string]config.NamedProviderConfig) *nativeTestServer {
 	t.Helper()
 	seedCatalogForTest(t)
@@ -305,7 +297,6 @@ func TestCatalogPrefetchEndpointConflict(t *testing.T) {
 
 	orig := catalogPrefetchFn
 	t.Cleanup(func() { catalogPrefetchFn = orig })
-	// Mirrors catalog.Prefetch's concurrent-caller error text.
 	catalogPrefetchFn = func(ctx context.Context, opts catalog.PrefetchOptions) error {
 		return errPrefetchRunning
 	}
@@ -323,7 +314,6 @@ func TestCatalogPrefetchEndpointConflict(t *testing.T) {
 	}
 }
 
-// errPrefetchRunning mirrors catalog.Prefetch's concurrent-caller error text.
 var errPrefetchRunning = &prefetchRunningError{}
 
 type prefetchRunningError struct{}
@@ -331,11 +321,10 @@ type prefetchRunningError struct{}
 func (e *prefetchRunningError) Error() string { return "catalog prefetch already running" }
 
 func TestProviderModelsOfflineFallbackNoAPIKey(t *testing.T) {
-	// Provider exists but has no api_key — catalog models must be returned.
 	ts := newCatalogTestServer(t, map[string]config.NamedProviderConfig{
 		"openai": {
 			Type:           "openai",
-			ProviderConfig: config.ProviderConfig{}, // no key
+			ProviderConfig: config.ProviderConfig{},
 		},
 	})
 
@@ -354,11 +343,9 @@ func TestProviderModelsOfflineFallbackNoAPIKey(t *testing.T) {
 	if len(payload.Models) == 0 {
 		t.Fatal("expected catalog models offline")
 	}
-	// id field must stay present for existing clients.
 	if payload.Models[0].ID == "" {
 		t.Fatal("model id empty")
 	}
-	// At least some catalog models carry enrichment metadata.
 	enriched := false
 	for _, m := range payload.Models {
 		if m.ContextWindow > 0 {
@@ -372,7 +359,6 @@ func TestProviderModelsOfflineFallbackNoAPIKey(t *testing.T) {
 }
 
 func TestProviderModelsLiveFetchFailureFallsBackToCatalog(t *testing.T) {
-	// api_base is a public HTTPS host that will fail DNS/connect; catalog wins.
 	ts := newCatalogTestServer(t, map[string]config.NamedProviderConfig{
 		"openai": {
 			Type: "openai",
@@ -409,7 +395,6 @@ func TestProviderModelsLiveFetchFailureFallsBackToCatalog(t *testing.T) {
 }
 
 func TestProviderModelsSSRFBlockedFallsBackToCatalog(t *testing.T) {
-	// Localhost api_base is blocked by the SSRF guard; catalog is still served.
 	ts := newCatalogTestServer(t, map[string]config.NamedProviderConfig{
 		"openai": {
 			Type: "openai",
@@ -438,7 +423,6 @@ func TestProviderModelsSSRFBlockedFallsBackToCatalog(t *testing.T) {
 }
 
 func TestEnrichProviderModelInfo(t *testing.T) {
-	// Find a real catalog model to enrich against.
 	models := catalog.ModelsForProvider("openai")
 	if len(models) == 0 {
 		t.Skip("openai catalog empty")
@@ -472,11 +456,9 @@ func TestEnrichProviderModelInfo(t *testing.T) {
 	if len(info.ThinkingLevels) != len(target.ThinkingLevels) {
 		t.Fatalf("thinking_levels = %v, want %v", info.ThinkingLevels, target.ThinkingLevels)
 	}
-	// Existing fields preserved.
 	if info.Object != "model" || info.OwnedBy != "openai" {
 		t.Fatalf("existing fields clobbered: %+v", info)
 	}
-	// id field unchanged (client compat).
 	if info.ID != target.ID {
 		t.Fatalf("id = %q, want %q", info.ID, target.ID)
 	}
@@ -538,13 +520,7 @@ func TestCatalogEndpointsRequireAuth(t *testing.T) {
 	}
 }
 
-// TestCatalogProvidersEndpointServesEveryKnownType is the endpoint half of the
-// issue #404 drift guard: the WebUI builds its provider picker from this
-// response, so every known id must arrive with the api_base the wizard
-// pre-fills. A provider that only exists in the hardcoded offline set must be
-// there too — that is the case that used to be missing from the UI.
 func TestCatalogProvidersEndpointServesEveryKnownType(t *testing.T) {
-	// Empty cache dir + offline: the hardcoded set is the only source.
 	t.Setenv("LELE_CATALOG_OFFLINE", "1")
 	catalog.SetCacheDir(t.TempDir())
 	t.Cleanup(catalog.ResetCacheDir)
@@ -583,7 +559,6 @@ func TestCatalogProvidersEndpointServesEveryKnownType(t *testing.T) {
 		}
 	}
 
-	// The ids the issue lists as unselectable must be present with an endpoint.
 	for _, id := range []string{
 		"vercel", "xai", "lmstudio", "ollama_cloud", "huggingface", "stepfun",
 		"minimax", "mistral", "together", "fireworks", "cerebras", "gmi",
@@ -607,12 +582,8 @@ func TestCatalogProvidersEndpointServesEveryKnownType(t *testing.T) {
 	}
 }
 
-// TestProviderModelsForUnconfiguredTypeServesCatalog covers the Add-provider
-// screen asking for the models of a type the user has not saved yet: the
-// wizard offers every catalog provider, so the picker must be populated before
-// the provider exists in config.
 func TestProviderModelsForUnconfiguredTypeServesCatalog(t *testing.T) {
-	ts := newCatalogTestServer(t, nil) // openai seeded, nothing configured
+	ts := newCatalogTestServer(t, nil)
 	if err := catalog.SeedProvider(catalog.Provider{
 		ID: "xai", Name: "xAI", Type: "openai",
 		APIBase: "https://api.x.ai/v1",
@@ -641,10 +612,6 @@ func TestProviderModelsForUnconfiguredTypeServesCatalog(t *testing.T) {
 	}
 }
 
-// TestProviderModelsForKnownTypeWithoutModelsStill404 pins the boundary of the
-// unconfigured-type branch: a catalog id with no cached models (offline, never
-// prefetched) has nothing to offer, so it keeps the old 404 instead of an
-// empty 200 the picker would render as "no models found".
 func TestProviderModelsForKnownTypeWithoutModelsStill404(t *testing.T) {
 	ts := newCatalogTestServer(t, nil)
 
@@ -654,8 +621,6 @@ func TestProviderModelsForKnownTypeWithoutModelsStill404(t *testing.T) {
 	}
 }
 
-// TestProviderModelsForUnknownNameStill404 pins the boundary: the new
-// unconfigured-type branch must not turn every typo into a 200.
 func TestProviderModelsForUnknownNameStill404(t *testing.T) {
 	ts := newCatalogTestServer(t, nil)
 

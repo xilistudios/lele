@@ -2,9 +2,6 @@ package session
 
 import "testing"
 
-// TestSessionManager_Folder_RoundTripAndPersistence mirrors
-// TestSQLite_SessionManager_Model: set, read back, then verify the value
-// survives a cold reload through a second SessionManager on the same store.
 func TestSessionManager_Folder_RoundTripAndPersistence(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -25,15 +22,12 @@ func TestSessionManager_Folder_RoundTripAndPersistence(t *testing.T) {
 	}
 	sm.Save(key)
 
-	// Cold reload: a fresh manager over the same store must see the folder
-	// (proves the SQLite migration + meta-only save path persist it).
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	if got := sm2.GetFolder(key); got != "/home/user/projects/demo" {
 		t.Errorf("GetFolder after reload = %q, want %q", got, "/home/user/projects/demo")
 	}
 
-	// Clearing persists too.
 	if err := sm2.SetFolder(key, ""); err != nil {
 		t.Fatalf("SetFolder clear: %v", err)
 	}
@@ -47,9 +41,6 @@ func TestSessionManager_Folder_RoundTripAndPersistence(t *testing.T) {
 	}
 }
 
-// TestSessionManager_Folder_LightweightMetaRead guards the N+1 fix: reading
-// the folder of a NON-resident session must come from the lightweight
-// metadata and must not materialize the session's message history in memory.
 func TestSessionManager_Folder_LightweightMetaRead(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -64,8 +55,6 @@ func TestSessionManager_Folder_LightweightMetaRead(t *testing.T) {
 	}
 	sm.Save(key)
 
-	// Fresh manager: ensureLoaded populates metadata only; GetFolder on a
-	// cold session must answer from sessionMeta without loading messages.
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	if got := sm2.GetFolder(key); got != "/tmp/whatever" {
@@ -79,8 +68,6 @@ func TestSessionManager_Folder_LightweightMetaRead(t *testing.T) {
 	}
 }
 
-// TestSessionManager_Folder_SetOnUnknownSession creates the session lazily,
-// matching SetModel's behavior.
 func TestSessionManager_Folder_SetOnUnknownSession(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -95,8 +82,6 @@ func TestSessionManager_Folder_SetOnUnknownSession(t *testing.T) {
 	}
 }
 
-// TestSessionManager_Folder_SetNameKeepsFolder verifies that rebuilding the
-// lightweight metadata in SetName does not drop the folder field.
 func TestSessionManager_Folder_SetNameKeepsFolder(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()

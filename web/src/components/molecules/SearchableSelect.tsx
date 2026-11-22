@@ -16,6 +16,7 @@ type Direction = 'up' | 'down'
 type Props = {
   ariaLabel: string
   buttonLabel: string
+  className?: string
   direction?: Direction
   disabled?: boolean
   emptyLabel: string
@@ -30,17 +31,12 @@ type Props = {
 
 const ANIMATION_MS = 200
 
-/**
- * Display form of a model id. The implementation now lives in
- * `lib/modelName.ts` (`shortModelName`) so the agents list/header badges and
- * this trigger button cannot drift apart (spec §3.8). Kept as a local alias to
- * avoid touching every call site in this file.
- */
 const formatDisplayValue = shortModelName
 
 export function SearchableSelect({
   ariaLabel,
   buttonLabel,
+  className,
   direction = 'up',
   disabled = false,
   emptyLabel,
@@ -107,14 +103,12 @@ export function SearchableSelect({
     if (!isMounted) return undefined
 
     const frame = window.requestAnimationFrame(() => {
-      // Check if there's enough space below
       if (rootRef.current) {
         const rect = rootRef.current.getBoundingClientRect()
-        const windowHeight = window.innerHeight
-        const spaceBelow = windowHeight - rect.bottom
-        const popupHeight = 256 // max-h-64
+        const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+        const spaceBelow = viewportHeight - rect.bottom
+        const popupHeight = 256
 
-        // If not enough space below, open upwards
         setIsOpenUp(spaceBelow < popupHeight + 20)
       }
 
@@ -172,23 +166,27 @@ export function SearchableSelect({
     [],
   )
 
-  // Recalculate direction on window resize
   useEffect(() => {
     if (!isMounted) return
 
     const handleResize = () => {
       if (rootRef.current) {
         const rect = rootRef.current.getBoundingClientRect()
-        const windowHeight = window.innerHeight
-        const spaceBelow = windowHeight - rect.bottom
+        const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+        const spaceBelow = viewportHeight - rect.bottom
         const popupHeight = 256
 
         setIsOpenUp(spaceBelow < popupHeight + 20)
       }
     }
 
+    const visualViewport = window.visualViewport
     window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
+    visualViewport?.addEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      visualViewport?.removeEventListener('resize', handleResize)
+    }
   }, [isMounted])
 
   const open = () => {
@@ -214,10 +212,10 @@ export function SearchableSelect({
   }
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className={`relative ${className ?? ''}`}>
       <button
         aria-label={ariaLabel}
-        className="flex min-w-0 items-center gap-1.5 sm:gap-2 rounded-md border border-border bg-background-primary px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm text-text-primary transition-all duration-fast hover:border-border hover:bg-background-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex w-full min-w-0 items-center gap-1.5 sm:gap-2 rounded-md border border-border bg-background-primary px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm text-text-primary transition-all duration-fast hover:border-border hover:bg-background-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
         disabled={disabled}
         type="button"
         onClick={() => (isMounted ? close() : open())}
@@ -293,9 +291,7 @@ export function SearchableSelect({
                             type="button"
                             onClick={() => handleSelect(option.value)}
                           >
-                            <span className="truncate text-xs leading-relaxed">
-                              {option.label}
-                            </span>
+                            <span className="truncate text-xs leading-relaxed">{option.label}</span>
                             {active ? (
                               <span className="ml-3 text-xs text-state-success">●</span>
                             ) : null}

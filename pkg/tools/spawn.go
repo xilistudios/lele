@@ -11,7 +11,7 @@ type SpawnTool struct {
 	originChannel  string
 	originChatID   string
 	allowlistCheck func(targetAgentID string) bool
-	callback       AsyncCallback // For async completion notification
+	callback       AsyncCallback
 }
 
 func NewSpawnTool(manager *SubagentManager) *SpawnTool {
@@ -22,7 +22,6 @@ func NewSpawnTool(manager *SubagentManager) *SpawnTool {
 	}
 }
 
-// SetCallback implements AsyncTool interface for async completion notification
 func (t *SpawnTool) SetCallback(cb AsyncCallback) {
 	t.callback = cb
 }
@@ -93,7 +92,6 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *T
 	agentID, _ := args["agent_id"].(string)
 	modelOverride, _ := args["model"].(string)
 
-	// Extract dependencies
 	var dependencies []string
 	if depsRaw, ok := args["dependencies"].([]interface{}); ok {
 		for _, d := range depsRaw {
@@ -103,7 +101,6 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *T
 		}
 	}
 
-	// Extract max_retries
 	maxRetries := 0
 	if mr, ok := args["max_retries"].(float64); ok {
 		maxRetries = int(mr)
@@ -113,7 +110,6 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *T
 		return ErrorResult("task is required when task_id is not provided")
 	}
 
-	// Check allowlist if targeting a specific agent
 	if agentID != "" && t.allowlistCheck != nil {
 		if !t.allowlistCheck(agentID) {
 			return ErrorResult(fmt.Sprintf("not allowed to spawn agent '%s'", agentID))
@@ -170,10 +166,6 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *T
 	return toolResult
 }
 
-// ExtractSpawnTaskID extracts the raw task ID (e.g. "subagent-3") from the
-// human-readable message returned by SpawnWithOptions
-// (e.g. "Spawned subagent task subagent-3 ('...') for task: ...").
-// Returns an empty string if no task ID is found.
 func ExtractSpawnTaskID(result string) string {
 	return extractSpawnTaskID(result)
 }

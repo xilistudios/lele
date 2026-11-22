@@ -1,15 +1,3 @@
-// Command smokerunner performs the manual T12 MCP smoke against a REAL stdio
-// child process: discovery reads a real mcp.json from disk, the production
-// dialer (NewManager with a nil Dialer) spawns the testdata smokeserver
-// binary, the MCP initialize handshake runs over pipes, and one remote tool
-// call round-trips through the production ToolFactory wrapper.
-//
-// Usage (also documented in docs/mcp.md, "Manual smoke"):
-//
-//	go build -o /tmp/mcp-smoke/smokeserver ./pkg/mcp/testdata/smokeserver
-//	go run ./pkg/mcp/testdata/smokerunner /tmp/mcp-smoke
-//
-// Exit code 0 prints "SMOKE OK"; any failure prints the reason and exits 1.
 package main
 
 import (
@@ -41,8 +29,6 @@ func main() {
 		fail("smokeserver binary %q not found (build it first): %v", serverBin, err)
 	}
 
-	// The agent-workspace layer: the mcp.json the plan places at
-	// /tmp/mcp-smoke/.lele/mcp.json.
 	workspace := filepath.Join(root, ".lele")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		fail("mkdir workspace: %v", err)
@@ -60,8 +46,6 @@ func main() {
 		AgentWorkspace: workspace,
 		Cwd:            root,
 	}
-	// nil Dialer = the production stdio/http/sse dialer: this smoke spawns a
-	// real child process; nothing is faked.
 	mgr := mcp.NewManager(paths, nil)
 	defer mgr.Close()
 
@@ -92,7 +76,6 @@ func main() {
 	}
 	fmt.Printf("round trip: %q\n", res.ForLLM)
 
-	// Second call on the same live connection (no re-handshake).
 	res = echo.Execute(ctx, map[string]interface{}{"message": "again"})
 	if res.IsError || res.ForLLM != "smoke:again" {
 		fail("second call = %q (err=%v), want smoke:again", res.ForLLM, res.IsError)

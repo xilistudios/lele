@@ -109,7 +109,6 @@ func TestSleepTool_Execute_ContextCancellation(t *testing.T) {
 	tool := NewSleepTool()
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Cancel after 50ms
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		cancel()
@@ -123,7 +122,6 @@ func TestSleepTool_Execute_ContextCancellation(t *testing.T) {
 	if !result.IsError {
 		t.Error("Expected error for interrupted sleep")
 	}
-	// Should return well before 10 seconds.
 	if elapsed > 2*time.Second {
 		t.Errorf("Expected sleep to be interrupted quickly, took %v", elapsed)
 	}

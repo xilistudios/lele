@@ -39,7 +39,6 @@ export function BasicInfoStep({
         </p>
       </div>
 
-      {/* Agent ID */}
       <div className="space-y-2">
         <label
           htmlFor="wizard-agent-id"
@@ -109,7 +108,6 @@ export function BasicInfoStep({
         </p>
       </div>
 
-      {/* Agent Name */}
       <div className="space-y-2">
         <label htmlFor="wizard-agent-name" className="text-sm font-medium text-text-primary">
           {t('settings.fields.agentName')}
@@ -125,7 +123,6 @@ export function BasicInfoStep({
         <p className="text-xs text-text-tertiary">{t('settings.descriptions.agentName')}</p>
       </div>
 
-      {/* Agent Description */}
       <div className="space-y-2">
         <label htmlFor="wizard-agent-description" className="text-sm font-medium text-text-primary">
           {t('settings.fields.agentDescription')}
@@ -141,7 +138,6 @@ export function BasicInfoStep({
         <p className="text-xs text-text-tertiary">{t('settings.descriptions.agentDescription')}</p>
       </div>
 
-      {/* Default checkbox */}
       <div className="rounded-lg border border-border bg-background-secondary/50 p-4">
         <div className="flex items-start gap-3">
           <div className="pt-0.5">

@@ -9,7 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// parseClientSubcommand extracts the subcommand for testability.
 func parseClientSubcommand(args []string) (subcommand string) {
 	if len(args) < 1 {
 		return ""
@@ -77,7 +76,6 @@ func clientHelp() {
 	fmt.Println("  lele client status")
 }
 
-// parseClientPinArgs extracts the pin argument parsing logic for testability.
 func parseClientPinArgs(args []string) (deviceName string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {

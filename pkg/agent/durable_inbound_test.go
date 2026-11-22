@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -20,32 +14,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// The durable inbound spool (pkg/durable) only buys exactly-once processing if
-// the consumer completes a row for every turn it really ran, and leaves the row
-// alone when the process was torn down mid-turn. These tests pin that consume
-// side of the contract, i.e. what AgentLoop.Run owes the spool:
-//
-//	ShouldSkip true      -> the turn never runs, turn.end still fires
-//	success              -> Finish exactly once, with the consumed identity
-//	provider error       -> Finish (the user was told; a replay answers twice)
-//	user /cancel         -> Finish (running is still true: the turn is over)
-//	shutdown teardown    -> NO Finish (running is false: the row must replay)
-//	durability not wired -> behaviour identical to before the feature
-//
-// Durability is injected through the narrow InboundDurability interface, so
-// pkg/agent never imports pkg/durable and these tests need no database.
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Test doubles
-// ──────────────────────────────────────────────────────────────────────────────
-
-// fakeDurability records every ShouldSkip/Finish call. The methods run on the
-// message goroutine while the test goroutine reads the counters, so all state
-// is mutex guarded.
-//
-// When bus is set, Finish also samples how deep the outbound queue is at the
-// moment it runs. That sample is what proves the ordering rule: the answer must
-// already be published before the spool row is completed.
 type fakeDurability struct {
 	mu        sync.Mutex
 	skip      bool
@@ -81,15 +49,12 @@ func (f *fakeDurability) setSkip(v bool) {
 	f.skip = v
 }
 
-// snapshot returns the recorded calls under the lock.
 func (f *fakeDurability) snapshot() (skipCalls int, finished []bus.InboundMessage, pendingAtFinish int64, sampled bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.skipCalls, append([]bus.InboundMessage(nil), f.finished...), f.pendingAtFinish, f.finishSampleTaken
 }
 
-// countingMockProvider answers with a fixed string and counts the calls, so a
-// test can prove whether the turn really reached the provider.
 type countingMockProvider struct {
 	mu       sync.Mutex
 	response string
@@ -111,10 +76,6 @@ func (m *countingMockProvider) count() int {
 	return m.calls
 }
 
-// failingMockProvider always fails with a fixed error. The default error text is
-// a request-format failure, which ClassifyError marks terminal: the fallback
-// chain then gives up immediately instead of spending its whole exponential
-// backoff budget on a test that only wants to see the error path.
 type failingMockProvider struct {
 	err error
 }
@@ -128,13 +89,6 @@ func (m *failingMockProvider) Chat(ctx context.Context, messages []providers.Mes
 
 func (m *failingMockProvider) GetDefaultModel() string { return "mock-failing-model" }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ──────────────────────────────────────────────────────────────────────────────
-
-// newDurableInboundTestLoop builds an AgentLoop on a real bus the way the other
-// loop tests do - same config shape, same provider injection - and isolates the
-// SQLite store in a throwaway config dir so no test touches ~/.lele/lele.db.
 func newDurableInboundTestLoop(t *testing.T, provider providers.LLMProvider) (*AgentLoop, *bus.MessageBus) {
 	t.Helper()
 
@@ -169,9 +123,6 @@ func newDurableInboundTestLoop(t *testing.T, provider providers.LLMProvider) (*A
 	return al, msgBus
 }
 
-// spooledMessage is an inbound message as the channel hands it over after
-// durable.Inbound.Enqueue: external channel, real session key, and the spool
-// identity (SpoolID + DedupeID) the loop must echo back on Finish.
 func spooledMessage() bus.InboundMessage {
 	return bus.InboundMessage{
 		Channel:    "telegram",
@@ -185,7 +136,6 @@ func spooledMessage() bus.InboundMessage {
 	}
 }
 
-// waitFor polls cond until it holds or the budget is spent.
 func waitFor(t *testing.T, within time.Duration, cond func() bool) bool {
 	t.Helper()
 	deadline := time.Now().Add(within)
@@ -200,7 +150,6 @@ func waitFor(t *testing.T, within time.Duration, cond func() bool) bool {
 	}
 }
 
-// stopRun cancels the root context and joins Run.
 func stopRun(t *testing.T, cancel context.CancelFunc, done <-chan error) {
 	t.Helper()
 	cancel()
@@ -214,10 +163,6 @@ func stopRun(t *testing.T, cancel context.CancelFunc, done <-chan error) {
 	}
 }
 
-// drainUntil reads outbound events until turn.end arrives, reporting whether the
-// content marker was seen before it. The bus is a single channel shared by every
-// subscriber, so a test that has seen the answer can keep reading and still
-// observe the deferred turn.end.
 func drainUntil(t *testing.T, msgBus *bus.MessageBus, within time.Duration, marker string) (sawMarker bool) {
 	t.Helper()
 	deadline := time.Now().Add(within)
@@ -239,16 +184,6 @@ func drainUntil(t *testing.T, msgBus *bus.MessageBus, within time.Duration, mark
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Tests
-// ──────────────────────────────────────────────────────────────────────────────
-
-// TestRun_DurableInbound_SkippedReplayRunsNoTurn covers the replay-dedupe path:
-// the ledger says a previous process already answered, so the turn must not run
-// again, while the channel still receives its terminal turn.end. That deferred
-// signal intentionally keeps firing - handlers are idempotent, and suppressing
-// it would reintroduce the "did a final message escape?" bookkeeping the signal
-// exists to avoid.
 func TestRun_DurableInbound_SkippedReplayRunsNoTurn(t *testing.T) {
 	provider := &countingMockProvider{response: "must never run"}
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -277,7 +212,6 @@ func TestRun_DurableInbound_SkippedReplayRunsNoTurn(t *testing.T) {
 		t.Fatalf("turn.end routing = %q/%q, want telegram/123", msg.Channel, msg.ChatID)
 	}
 
-	// Let a stray turn show itself before asserting the negatives.
 	time.Sleep(200 * time.Millisecond)
 
 	if calls := provider.count(); calls != 0 {
@@ -294,12 +228,6 @@ func TestRun_DurableInbound_SkippedReplayRunsNoTurn(t *testing.T) {
 	stopRun(t, cancelRun, done)
 }
 
-// TestRun_DurableInbound_SuccessFinishesOnceWithIdentity pins the happy path:
-// exactly one Finish carrying the very SpoolID/DedupeID that were consumed, and
-// only after the answer was published. The queue-depth sample taken inside
-// Finish proves that ordering: the test deliberately does not consume the bus
-// until Finish has run, so a non-empty outbound queue at that instant can only
-// be the response already on its way out.
 func TestRun_DurableInbound_SuccessFinishesOnceWithIdentity(t *testing.T) {
 	provider := &countingMockProvider{response: "final answer"}
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -317,8 +245,6 @@ func TestRun_DurableInbound_SuccessFinishesOnceWithIdentity(t *testing.T) {
 		t.Fatal("inbound publish rejected")
 	}
 
-	// Nothing is consumed from the bus yet: Finish must land while the answer is
-	// still sitting in the outbound queue.
 	finishedEarly := waitFor(t, 10*time.Second, func() bool {
 		_, finished, _, _ := dur.snapshot()
 		return len(finished) > 0
@@ -350,7 +276,6 @@ func TestRun_DurableInbound_SuccessFinishesOnceWithIdentity(t *testing.T) {
 		t.Errorf("outbound queue was %d deep when Finish ran: the row was completed before the answer was published", pending)
 	}
 
-	// And the user-visible order is answer first, turn.end last.
 	if !drainUntil(t, msgBus, 10*time.Second, "final answer") {
 		t.Fatal("response was not published before turn.end")
 	}
@@ -358,14 +283,6 @@ func TestRun_DurableInbound_SuccessFinishesOnceWithIdentity(t *testing.T) {
 	stopRun(t, cancelRun, done)
 }
 
-// TestRun_DurableInbound_ProviderErrorFinishes covers the failure path: the loop
-// answers "Error processing message..." instead, so the user has been told and
-// the row must be completed - replaying the message after a restart would only
-// confuse them a second time.
-//
-// The mock fails with a request-format error on purpose: ClassifyError marks it
-// terminal, so the fallback chain gives up at once instead of burning its
-// exponential backoff budget, which would only make the test slow, not wrong.
 func TestRun_DurableInbound_ProviderErrorFinishes(t *testing.T) {
 	provider := &failingMockProvider{}
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -399,10 +316,6 @@ func TestRun_DurableInbound_ProviderErrorFinishes(t *testing.T) {
 	stopRun(t, cancelRun, done)
 }
 
-// TestRun_DurableInbound_UserCancelFinishes is the /cancel case. StopAgent
-// cancels the session context while the loop is still running, so the turn is
-// done as far as the user is concerned - they asked for it to stop - and the row
-// must be completed even though no final message was published.
 func TestRun_DurableInbound_UserCancelFinishes(t *testing.T) {
 	provider := &blockingMockProvider{started: make(chan struct{})}
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -453,11 +366,6 @@ func TestRun_DurableInbound_UserCancelFinishes(t *testing.T) {
 	stopRun(t, cancelRun, done)
 }
 
-// TestRun_DurableInbound_ShutdownCancelLeavesRowForReplay is the other half of
-// the cancellation rule. Shutdown stores running=false BEFORE the coordinator's
-// hooks cancel any context, so a turn that dies with the flag false was killed by
-// gateway teardown, not by the user: its spool row must survive so the successor
-// process replays it.
 func TestRun_DurableInbound_ShutdownCancelLeavesRowForReplay(t *testing.T) {
 	provider := &blockingMockProvider{started: make(chan struct{})}
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -481,11 +389,6 @@ func TestRun_DurableInbound_ShutdownCancelLeavesRowForReplay(t *testing.T) {
 		t.Fatal("provider never started the turn")
 	}
 
-	// Reproduce the teardown ordering: the flag goes false first (Shutdown),
-	// then the root context the turn inherits is cancelled. The drain budget is
-	// what lets Shutdown return while the blocking turn is still running - in
-	// production that is the shutdown coordinator's per-hook timeout, and it is
-	// exactly why a turn can still be in flight when the root is cancelled.
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancelDrain()
 	if err := al.Shutdown(drainCtx); !errors.Is(err, context.DeadlineExceeded) {
@@ -493,7 +396,6 @@ func TestRun_DurableInbound_ShutdownCancelLeavesRowForReplay(t *testing.T) {
 	}
 	cancelRun()
 
-	// The turn still winds down and the channel still gets its terminal signal.
 	got, ok := recvOutbound(t, msgBus, 10*time.Second)
 	if !ok {
 		t.Fatal("shutdown-cancelled turn published no turn.end")
@@ -511,17 +413,12 @@ func TestRun_DurableInbound_ShutdownCancelLeavesRowForReplay(t *testing.T) {
 		t.Fatal("agent loop did not stop")
 	}
 
-	// Give the goroutine's defers a moment, then assert the negative: a Finish
-	// here would delete the row and lose the message for good.
 	time.Sleep(200 * time.Millisecond)
 	if _, finished, _, _ := dur.snapshot(); len(finished) != 0 {
 		t.Fatalf("Finish called %d times on shutdown teardown, want 0: the spool row must be replayed", len(finished))
 	}
 }
 
-// TestRun_DurableInbound_NotWiredKeepsBehaviour proves the off path: with no
-// durability wired the loop must still answer and emit turn.end, i.e. the new
-// code is inert rather than merely untested.
 func TestRun_DurableInbound_NotWiredKeepsBehaviour(t *testing.T) {
 	provider := &countingMockProvider{response: "plain answer"}
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -549,10 +446,6 @@ func TestRun_DurableInbound_NotWiredKeepsBehaviour(t *testing.T) {
 	stopRun(t, cancelRun, done)
 }
 
-// TestRun_DurableInbound_UnspooledMessageNeverTouchesLedger mirrors the TUI and
-// synthetic-event paths: durability is on, but the message carries no spool
-// identity, so it must be processed normally and Finish must still be reached
-// without panicking - pkg/durable's own guards make it a no-op there.
 func TestRun_DurableInbound_UnspooledMessageNeverTouchesLedger(t *testing.T) {
 	provider := &countingMockProvider{response: "tui answer"}
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -592,10 +485,6 @@ func TestRun_DurableInbound_UnspooledMessageNeverTouchesLedger(t *testing.T) {
 	stopRun(t, cancelRun, done)
 }
 
-// TestInboundDurabilityContractIsStable documents the narrow contract the
-// gateway wires *durable.Inbound into: the loop stores the implementation
-// through the setter and reads it back on every turn. A signature drift breaks
-// compilation of this file long before the wiring is exercised at runtime.
 func TestInboundDurabilityContractIsStable(t *testing.T) {
 	var d InboundDurability = &fakeDurability{}
 

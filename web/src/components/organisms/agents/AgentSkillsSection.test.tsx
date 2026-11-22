@@ -16,21 +16,8 @@ import type { ApiClient } from '../../../services/http/client'
 import { type Write, makeState, tr } from '../../../test/agentsHarness'
 import { AgentSkillsSection } from './AgentSkillsSection'
 
-/**
- * The shared agentsHarness pins a models-only fake api inside SettingsProvider,
- * but this section fetches its catalog through `api.getAgentCatalog`
- * (react-query), so the provider is assembled here with a catalog-capable fake.
- * makeState is reused untouched: same draft + recorded-writes contract.
- *
- * `screen` is unusable in this environment (see agentsHarness header): all
- * queries come from the render result.
- */
-
-/** Workspace the fake catalog reports; the install dialog echoes it. */
 const AGENT_WORKSPACE = '/home/u/.lele/workspace-coder'
 
-// `deletable` mirrors what the backend computes: true ONLY for a skill living
-// in this agent's own workspace dir (global/builtin are shared with others).
 const CATALOG: AgentCatalogResponse = {
   agent_id: 'coder',
   workspace: AGENT_WORKSPACE,
@@ -100,7 +87,6 @@ function setup(options: {
 
   const byTestId = (id: string) => utils.container.querySelector(`[data-testid="${id}"]`)
 
-  /** Click a test id, failing loudly (not silently on null) when missing. */
   const clickTestId = (id: string) => {
     const el = byTestId(id)
     if (!el) throw new Error(`expected element with data-testid="${id}"`)
@@ -110,7 +96,6 @@ function setup(options: {
   return { ...utils, writes, byTestId, clickTestId }
 }
 
-/** Wait until the catalog resolves and the real grid is on screen. */
 async function ready(utils: ReturnType<typeof setup>) {
   await waitFor(() => {
     expect(utils.byTestId('skills-grid')).toBeTruthy()
@@ -183,7 +168,6 @@ describe('AgentSkillsSection — grid + writing', () => {
     expect(cards[1].textContent).toContain('Built-in')
     expect(cards[2].textContent).toContain('weather')
     expect(cards[2].textContent).toContain('Global')
-    // md card (§7.3: p-3.5)
     expect(cards[0].className).toContain('p-3.5')
   })
 
@@ -215,7 +199,6 @@ describe('AgentSkillsSection — grid + writing', () => {
     const utils = await ready(setup({ agent: { id: 'coder' } }))
     const card = cardFor(utils, 'memory')
     expect(card.textContent).toContain(tr('settings.agentPage.skillDisabledGlobally'))
-    // opacity-60 wrapper (the card itself stays interactive, only dimmed)
     expect((card.parentElement as HTMLElement).className).toContain('opacity-60')
     const input = card.querySelector('input[type="checkbox"]') as HTMLInputElement
     expect(input.disabled).toBe(false)
@@ -237,7 +220,6 @@ describe('AgentSkillsSection — orphans (§4.5.4)', () => {
     const orphanCard = block.firstElementChild as HTMLElement
     expect(orphanCard.className).toContain('border-state-warning/40')
     expect(orphanCard.className).toContain('bg-state-warning/10')
-    // The grid still shows the installed ones, and the orphan block sits ABOVE it.
     expect(utils.container.querySelectorAll('[data-testid="skills-grid"] label')).toHaveLength(3)
     const grid = utils.byTestId('skills-grid') as HTMLElement
     const siblings = Array.from(block.parentElement?.children ?? [])
@@ -277,7 +259,6 @@ describe('AgentSkillsSection — toolbar', () => {
     let cards = utils.container.querySelectorAll('[data-testid="skills-grid"] label')
     expect(cards).toHaveLength(1)
     expect(cards[0].textContent).toContain('chrome')
-    // "forecasts" only exists in weather's description
     fireEvent.change(search, { target: { value: 'forecasts' } })
     cards = utils.container.querySelectorAll('[data-testid="skills-grid"] label')
     expect(cards).toHaveLength(1)
@@ -309,7 +290,6 @@ describe('AgentSkillsSection — toolbar', () => {
     const utils = await ready(setup({ agent: { id: 'coder', skills: ['weather'] } }))
     utils.clickTestId('skills-batch-none')
     expect(utils.writes.at(-1)).toEqual(['agents.list.0.skills', []])
-    // "Todas" ignores the active search filter: the full catalog, sorted.
     const search = utils.byTestId('skills-search') as HTMLInputElement
     fireEvent.change(search, { target: { value: 'wea' } })
     utils.clickTestId('skills-batch-all')
@@ -320,7 +300,6 @@ describe('AgentSkillsSection — toolbar', () => {
 
 describe('AgentSkillsSection — loading / empty / error', () => {
   test('loading: 4 ToggleCard skeletons marked aria-busy (no spinner)', async () => {
-    // A never-resolving promise keeps the query in isLoading.
     let release: (value: AgentCatalogResponse) => void = () => undefined
     const utils = setup({
       agent: { id: 'coder' },
@@ -329,17 +308,12 @@ describe('AgentSkillsSection — loading / empty / error', () => {
           release = resolve
         }),
     })
-    // Same a11y pattern as the agents list: aria-busy + sr-only text (the
-    // house does not use live-region roles on skeleton blocks).
     const status = utils.container.querySelector('[aria-busy="true"]') as HTMLElement
     expect(status).toBeTruthy()
     expect(status.textContent).toContain(tr('settings.loading'))
-    // 4 skeleton cards × 4 pulsing blocks each (title bar, 2 description
-    // lines mirroring the line-clamp-2 text, 18px check) — §5.1 keeps the
-    // final geometry so swapping in real ToggleCards causes no reflow.
     expect(status.querySelectorAll('.animate-pulse')).toHaveLength(16)
     expect(utils.container.querySelectorAll('input[type="checkbox"]')).toHaveLength(0)
-    release(CATALOG) // avoid a dangling promise
+    release(CATALOG)
     await waitFor(() => {
       expect(utils.byTestId('skills-grid')).toBeTruthy()
     })
@@ -368,7 +342,6 @@ describe('AgentSkillsSection — loading / empty / error', () => {
         return CATALOG
       },
     })
-    // The query retries once internally (backoff), so allow for that cycle.
     await waitFor(() => expect(utils.byTestId('skills-retry')).toBeTruthy(), { timeout: 4000 })
     failing = false
     const attemptsBeforeRetry = attempts

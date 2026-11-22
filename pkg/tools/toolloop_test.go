@@ -12,9 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// captureProvider is a minimal LLMProvider used in tests. It records the tool
-// definitions passed to each Chat call so tests can assert what was (or was
-// not) advertised to the model.
 type captureProvider struct {
 	mu       sync.Mutex
 	lastDefs []providers.ToolDefinition
@@ -24,7 +21,6 @@ func (p *captureProvider) Chat(_ context.Context, _ []providers.Message, tools [
 	p.mu.Lock()
 	p.lastDefs = tools
 	p.mu.Unlock()
-	// Return a direct answer (no tool calls) so the loop exits after one iteration.
 	return &providers.LLMResponse{Content: "done"}, nil
 }
 
@@ -32,9 +28,6 @@ func (p *captureProvider) GetDefaultModel() string {
 	return "test-model"
 }
 
-// scriptedProvider returns a fixed sequence of responses, then fails if called
-// beyond that. Used to verify that RunToolLoop retries empty responses instead
-// of terminating early.
 type scriptedProvider struct {
 	mu        sync.Mutex
 	responses []*providers.LLMResponse
@@ -81,8 +74,6 @@ func contains(name string, names []string) bool {
 	return false
 }
 
-// mockTool is a trivial Tool used to verify that non-image tools survive the
-// vision filtering in RunToolLoop.
 type mockTool struct{}
 
 func (mockTool) Name() string        { return "echo" }
@@ -94,9 +85,6 @@ func (mockTool) Execute(_ context.Context, _ map[string]interface{}) *ToolResult
 	return &ToolResult{ForLLM: "ok"}
 }
 
-// namedMockTool is a trivial Tool with a caller-chosen name, used to exercise
-// the read_video filter with an isolated stand-in, so the gating logic is
-// tested independently of the real read_video tool's behaviour (pkg/tools/video.go).
 type namedMockTool struct{ toolName string }
 
 func (m namedMockTool) Name() string        { return m.toolName }
@@ -179,8 +167,6 @@ func TestRunToolLoop_EmptyResponseRetries(t *testing.T) {
 		},
 	}
 
-	// RetryWait never actually sleeps — it returns a channel that is
-	// immediately ready, so the empty-response backoff adds no real delay.
 	result, err := RunToolLoop(context.Background(), ToolLoopConfig{
 		Provider:      p,
 		Model:         "test-model",
@@ -206,9 +192,6 @@ func TestRunToolLoop_EmptyResponseRetries(t *testing.T) {
 	}
 }
 
-// ctxCaptureTool records the agent tool context visible during Execute.
-// All methods use a pointer receiver: Execute mutates the struct, and mixing
-// receiver kinds on one type is a lint error (recvcheck).
 type ctxCaptureTool struct{ agentID, sessionKey string }
 
 func (c *ctxCaptureTool) Name() string        { return "ctxprobe" }
@@ -221,7 +204,6 @@ func (c *ctxCaptureTool) Execute(ctx context.Context, _ map[string]interface{}) 
 	return &ToolResult{ForLLM: "ok"}
 }
 
-// toolCallProvider emits one tool call on the first turn, then a final answer.
 type toolCallProvider struct {
 	calls int
 }
@@ -240,10 +222,6 @@ func (p *toolCallProvider) Chat(_ context.Context, _ []providers.Message, _ []pr
 
 func (p *toolCallProvider) GetDefaultModel() string { return "test-model" }
 
-// TestRunToolLoop_InjectsOwnerContext verifies that a tool loop configured
-// with an owner injects the agent tool context into tool executions, so
-// nested spawns/background processes can be attributed to the owning session
-// for cancellation (issue #230).
 func TestRunToolLoop_InjectsOwnerContext(t *testing.T) {
 	reg := NewToolRegistry()
 	probe := &ctxCaptureTool{}
@@ -268,9 +246,6 @@ func TestRunToolLoop_InjectsOwnerContext(t *testing.T) {
 	}
 }
 
-// TestRunToolLoop_InheritsOwnerFromContext verifies that without an explicit
-// owner the loop keeps the context's owner (used by the sync subagent tool,
-// whose caller context already carries it). An explicit owner wins.
 func TestRunToolLoop_InheritsOwnerFromContext(t *testing.T) {
 	reg := NewToolRegistry()
 	probe := &ctxCaptureTool{}
@@ -289,7 +264,6 @@ func TestRunToolLoop_InheritsOwnerFromContext(t *testing.T) {
 		t.Errorf("tool saw session key %q, want inherited %q", probe.sessionKey, "inherited-key")
 	}
 
-	// Explicit owner overrides the inherited one.
 	probe2 := &ctxCaptureTool{}
 	reg2 := NewToolRegistry()
 	reg2.Register(probe2)
@@ -308,7 +282,6 @@ func TestRunToolLoop_InheritsOwnerFromContext(t *testing.T) {
 	}
 }
 
-// unlimitedProvider returns a fixed response for every Chat call.
 type unlimitedProvider struct {
 	mu    sync.Mutex
 	calls int
@@ -329,10 +302,6 @@ func (p *unlimitedProvider) callCount() int {
 	return p.calls
 }
 
-// TestRunToolLoop_EmptyResponsesNotPersisted verifies that blank assistant
-// responses never reach the session recorder (they used to be saved before
-// the empty-retry check, contaminating subagent sessions), while the task
-// prompt and the eventual real response are.
 func TestRunToolLoop_EmptyResponsesNotPersisted(t *testing.T) {
 	p := &scriptedProvider{
 		responses: []*providers.LLMResponse{
@@ -369,9 +338,6 @@ func TestRunToolLoop_EmptyResponsesNotPersisted(t *testing.T) {
 	}
 }
 
-// TestRunToolLoop_EmptyResponsesBounded verifies that a provider that ALWAYS
-// returns blank content cannot hang the subagent loop: the run ends after a
-// bounded number of retries with a not_done status and persists no blanks.
 func TestRunToolLoop_EmptyResponsesBounded(t *testing.T) {
 	p := &unlimitedProvider{}
 	rec := &recordingSessionRecorder{}
@@ -379,7 +345,7 @@ func TestRunToolLoop_EmptyResponsesBounded(t *testing.T) {
 	result, err := RunToolLoop(context.Background(), ToolLoopConfig{
 		Provider:        p,
 		Model:           "test-model",
-		MaxIterations:   0, // unlimited iterations — empty-retry cap is the guard
+		MaxIterations:   0,
 		SessionRecorder: rec,
 		SessionKey:      "origin:task-2",
 		RetryWait:       instantToolLoopWait,
@@ -390,7 +356,7 @@ func TestRunToolLoop_EmptyResponsesBounded(t *testing.T) {
 	if !strings.Contains(result.Content, "STATUS: not_done") {
 		t.Fatalf("expected not_done fallback, got %q", result.Content)
 	}
-	wantCalls := maxConsecutiveEmptyResponses + 1 // 1 initial + N retries
+	wantCalls := maxConsecutiveEmptyResponses + 1
 	if got := p.callCount(); got != wantCalls {
 		t.Fatalf("expected %d provider calls, got %d", wantCalls, got)
 	}
@@ -401,17 +367,12 @@ func TestRunToolLoop_EmptyResponsesBounded(t *testing.T) {
 	}
 }
 
-// instantToolLoopWait returns an already-ready channel so empty-response
-// backoffs add no real delay in tests.
 func instantToolLoopWait(time.Duration) <-chan time.Time {
 	ch := make(chan time.Time, 1)
 	ch <- time.Now()
 	return ch
 }
 
-// identityProbeTool records the agent identity visible to the tool during
-// Execute (issue #234). It is registered under the name "ctxprobe" so the
-// existing toolCallProvider (which emits a call to that tool) can drive it.
 type identityProbeTool struct {
 	gotAgent string
 	gotSess  string
@@ -427,10 +388,6 @@ func (t *identityProbeTool) Execute(ctx context.Context, _ map[string]interface{
 	return &ToolResult{ForLLM: "ok"}
 }
 
-// TestRunToolLoop_InjectsOwnerIdentityWithSubagentSession covers issue #234:
-// a standalone tool loop (subagent tool, cron, cron spawn) must expose its
-// owning agent identity to the tools it runs, otherwise identity-scoped tools
-// such as the secret lookup (keyring.GetScoped) fail with no agent id.
 func TestRunToolLoop_InjectsOwnerIdentityWithSubagentSession(t *testing.T) {
 	reg := NewToolRegistry()
 	probe := &identityProbeTool{}
@@ -454,9 +411,6 @@ func TestRunToolLoop_InjectsOwnerIdentityWithSubagentSession(t *testing.T) {
 	}
 }
 
-// TestRunToolLoop_InjectsOwnerIdentityWithoutSessionKey covers the cron case:
-// the owning agent is known but no session key exists yet. The agent identity
-// must still reach the tools, and it must not be wiped by context inheritance.
 func TestRunToolLoop_InjectsOwnerIdentityWithoutSessionKey(t *testing.T) {
 	reg := NewToolRegistry()
 	probe := &identityProbeTool{}
@@ -479,10 +433,6 @@ func TestRunToolLoop_InjectsOwnerIdentityWithoutSessionKey(t *testing.T) {
 	}
 }
 
-// TestRunToolLoop_FiltersReadVideoWithoutVideo mirrors
-// TestRunToolLoop_FiltersReadImageWithoutVision for the video capability:
-// read_video must be filtered from tool defs only when the model supports
-// NEITHER video (native mode) NOR vision (frames fallback).
 func TestRunToolLoop_FiltersReadVideoWithoutVideo(t *testing.T) {
 	registry := NewToolRegistry()
 	registry.Register(namedMockTool{toolName: "read_video"})
@@ -565,13 +515,6 @@ func TestRunToolLoop_FiltersReadVideoWithoutVideo(t *testing.T) {
 	})
 }
 
-// TestEstimateLoopTokens_CountsImageParts pins the fix for oversized image
-// requests: a read_image message carrying a large base64 payload in
-// ContentParts (with Content == "") must raise the intra-loop estimate to at
-// least ImagePartCharCost, otherwise maybeCompactLoopContext bills it as ~10
-// tokens and the compaction guard never fires. The image is charged at a
-// FIXED char cost, far below the payload's real byte length: counting base64
-// bytes as tokens would fire compaction on every image read.
 func TestEstimateLoopTokens_CountsImageParts(t *testing.T) {
 	base64URL := "data:image/png;base64," + strings.Repeat("A", 200_000)
 	msgs := []providers.Message{
@@ -589,16 +532,11 @@ func TestEstimateLoopTokens_CountsImageParts(t *testing.T) {
 	if min := providers.ImagePartCharCost * 2 / 5; got < min {
 		t.Fatalf("EstimateLoopTokens = %d, want >= %d (image part must be charged at its fixed cost)", got, min)
 	}
-	// The whole point of the fixed cost: len(base64URL)*2/5 would be ~160k
-	// tokens, which would trip compaction on every image read.
 	if limit := 20_000; got >= limit {
 		t.Fatalf("EstimateLoopTokens = %d, want < %d (fixed image cost, not base64 byte length)", got, limit)
 	}
 }
 
-// TestEstimateLoopTokens_CountsMedia pins that Media (file path) entries are
-// charged their fixed char cost: two media entries must raise the estimate by
-// at least 2*MediaPartCharCost chars (converted with the *2/5 heuristic).
 func TestEstimateLoopTokens_CountsMedia(t *testing.T) {
 	base := providers.Message{Role: "user", Content: "Please look at these files."}
 	withMedia := base
@@ -606,17 +544,11 @@ func TestEstimateLoopTokens_CountsMedia(t *testing.T) {
 
 	delta := EstimateLoopTokens([]providers.Message{withMedia}) -
 		EstimateLoopTokens([]providers.Message{base})
-	// The delta in chars is exactly 2*MediaPartCharCost (5000), and 5000*2/5
-	// is integral, so the floor of the division cannot erode it.
 	if min := 2 * providers.MediaPartCharCost * 2 / 5; delta < min {
 		t.Fatalf("Media raised estimate by %d tokens, want >= %d", delta, min)
 	}
 }
 
-// TestEstimateLoopTokens_CountsVideoParts pins the video part accounting: a
-// video_url content part raises the estimate by exactly
-// VideoPartCharCost*2/5 tokens (video parts are always counted, even when the
-// message carries textual ContentParts).
 func TestEstimateLoopTokens_CountsVideoParts(t *testing.T) {
 	textMsg := providers.Message{
 		Role: "user",
@@ -639,12 +571,6 @@ func TestEstimateLoopTokens_CountsVideoParts(t *testing.T) {
 	}
 }
 
-// TestEstimateLoopTokens_TextOnlyUnchanged documents the exact delta of the
-// estimator rewrite for text-only lists: the new rule adds (a) tool-call
-// function NAME lengths (the old loop estimator skipped them) and (b) the
-// 10-char per-message structural overhead (the old loop estimator skipped it
-// too). Everything else — content, reasoning, tool-call arguments — is
-// byte-identical, so a text-only list without tool calls is unchanged.
 func TestEstimateLoopTokens_TextOnlyUnchanged(t *testing.T) {
 	msgs := []providers.Message{
 		{Role: "system", Content: "You are a helpful assistant."},
@@ -660,7 +586,6 @@ func TestEstimateLoopTokens_TextOnlyUnchanged(t *testing.T) {
 		{Role: "tool", Content: "hello world", ToolCallID: "call_1"},
 	}
 
-	// Old rule (pre-fix): content + reasoning + tool-call arguments only.
 	oldChars := 0
 	for _, m := range msgs {
 		oldChars += utf8.RuneCountInString(m.Content)
@@ -671,7 +596,6 @@ func TestEstimateLoopTokens_TextOnlyUnchanged(t *testing.T) {
 			}
 		}
 	}
-	// Documented delta: tool-call names + 10 structural chars per message.
 	nameChars := 0
 	for _, m := range msgs {
 		for _, tc := range m.ToolCalls {
@@ -688,7 +612,6 @@ func TestEstimateLoopTokens_TextOnlyUnchanged(t *testing.T) {
 		t.Errorf("EstimateLoopTokens = %d, want %d (old rule %d + tool-call names %d + structural %d chars)",
 			got, want, oldChars, nameChars, structChars)
 	}
-	// Sanity: the delta is exactly the two additions, nothing else changed.
 	if want := (wantChars - oldChars) * 2 / 5; want == 0 {
 		t.Fatalf("test fixture too small: expected a nonzero documented delta, got 0")
 	}

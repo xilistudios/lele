@@ -2,10 +2,6 @@ package tui
 
 import "testing"
 
-// TestRecordGroupCompleteStatusPreservesTerminal guards the TUI side of the
-// single-terminal-signal contract (B1): the backend now emits group.complete on
-// every terminal path (done | stopped | error), right after the matching
-// group.status. The TUI must not overwrite a failed/stopped group with "done".
 func TestRecordGroupCompleteStatusPreservesTerminal(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -54,8 +50,6 @@ func TestRecordGroupCompleteStatusPreservesTerminal(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &Model{groupStatus: tt.initial}
-			// Snapshot the unrelated group's status before the call, since
-			// m.groupStatus aliases tt.initial.
 			wantOther, hadOther := "", false
 			if v, ok := tt.initial["g2"]; ok && tt.groupID != "g2" {
 				wantOther, hadOther = v, true

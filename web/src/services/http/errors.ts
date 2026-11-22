@@ -21,11 +21,8 @@ export const parseApiError = async (response: Response): Promise<ApiError> => {
     payload = null
   }
 
-  // Extract validation errors if present (e.g. 422 from config save)
   const validationErrors = Array.isArray(payload?.errors) ? payload.errors : undefined
 
-  // Build a meaningful message: prefer explicit message/error, then first
-  // validation error, and finally the HTTP status text as a last resort.
   let message = payload?.message ?? payload?.error
   if (!message && validationErrors && validationErrors.length > 0) {
     message = validationErrors.map((e) => e.message).join('; ')

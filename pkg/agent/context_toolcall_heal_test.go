@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -13,9 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// legacyToolCall builds a tool call the way the old message builders left it in
-// memory and on disk: Function.Arguments holds whatever json.Marshal produced
-// (including the four bytes "null") and the decoded map may be nil.
 func legacyToolCall(id, name, arguments string, decoded map[string]any) providers.ToolCall {
 	return providers.ToolCall{
 		ID:        id,
@@ -26,7 +18,6 @@ func legacyToolCall(id, name, arguments string, decoded map[string]any) provider
 	}
 }
 
-// wireArguments returns the arguments value as the provider would receive it.
 func wireArguments(t *testing.T, tc providers.ToolCall) string {
 	t.Helper()
 	out, err := json.Marshal(tc)
@@ -45,9 +36,6 @@ func wireArguments(t *testing.T, tc providers.ToolCall) string {
 	return parsed.Function.Arguments
 }
 
-// A provider that streamed empty tool-call deltas left Arguments nil, so the
-// old builder persisted function.arguments:"null". Every later turn replayed it
-// and the session was stuck on 400 forever.
 func TestHealAssistantToolCalls_RepairsNullArguments(t *testing.T) {
 	history := []providers.Message{
 		{Role: "user", Content: "run it"},
@@ -75,9 +63,6 @@ func TestHealAssistantToolCalls_RepairsNullArguments(t *testing.T) {
 	}
 }
 
-// A tool call with no name cannot be repaired - there is no tool to name - so
-// both it and its tool result must go. Leaving the result behind is an orphan
-// tool message, which fails the request with a different 400.
 func TestHealAssistantToolCalls_DropsNamelessCallAndOrphanResult(t *testing.T) {
 	history := []providers.Message{
 		{Role: "user", Content: "hi"},
@@ -105,8 +90,6 @@ func TestHealAssistantToolCalls_DropsNamelessCallAndOrphanResult(t *testing.T) {
 	}
 }
 
-// When a nameless call shares an assistant message with a healthy one, the
-// healthy call and its result must survive.
 func TestHealAssistantToolCalls_KeepsHealthySiblings(t *testing.T) {
 	history := []providers.Message{
 		{Role: "assistant", ToolCalls: []providers.ToolCall{
@@ -132,9 +115,6 @@ func TestHealAssistantToolCalls_KeepsHealthySiblings(t *testing.T) {
 	}
 }
 
-// A clean session must be reported as unchanged and returned as the same slice,
-// otherwise every turn would rewrite (and bump the epoch of) every session it
-// loads.
 func TestHealAssistantToolCalls_CleanSessionIsNoOp(t *testing.T) {
 	clean := []providers.Message{
 		{Role: "user", Content: "hi"},
@@ -153,8 +133,6 @@ func TestHealAssistantToolCalls_CleanSessionIsNoOp(t *testing.T) {
 	}
 }
 
-// Arguments that are valid JSON but not an object (or malformed) are the other
-// shape the provider rejects; they must all heal into a JSON object.
 func TestHealAssistantToolCalls_NormalisesNonObjectArguments(t *testing.T) {
 	for _, args := range []string{"null", "", "not json", "[1,2]", "123", `"double encoded"`} {
 		history := []providers.Message{
@@ -177,8 +155,6 @@ func TestHealAssistantToolCalls_NormalisesNonObjectArguments(t *testing.T) {
 	}
 }
 
-// Truncated arguments (cut off by max_tokens) are recoverable and carry real
-// intent, so healing keeps what parsed.
 func TestHealAssistantToolCalls_RepairsTruncatedArguments(t *testing.T) {
 	history := []providers.Message{
 		{Role: "assistant", ToolCalls: []providers.ToolCall{
@@ -199,8 +175,6 @@ func TestHealAssistantToolCalls_RepairsTruncatedArguments(t *testing.T) {
 	}
 }
 
-// Messages without tool calls are not this function's concern; blank assistant
-// turns in particular are handled by dropBlankAssistantMessages.
 func TestHealAssistantToolCalls_IgnoresPlainMessages(t *testing.T) {
 	history := []providers.Message{
 		{Role: "user", Content: "hi"},

@@ -10,12 +10,6 @@ import (
 	"github.com/muesli/termenv"
 )
 
-// TestView_BorderColumnStableWithLongPathsAndEmoji renders a realistic chat
-// (glamour headers with emoji + unbreakable filesystem paths) and asserts the
-// sidebar border sits on the same display-cell column on every row, with no
-// leftover content painted into that cell. This is the Terminal.app scroll
-// glitch: one overflow row steals the border cell and shows as a short
-// Accent-coloured bar.
 func TestView_BorderColumnStableWithLongPathsAndEmoji(t *testing.T) {
 	forceTrueColor(t)
 	m := newTestModel(t)
@@ -55,7 +49,6 @@ func TestView_BorderColumnStableWithLongPathsAndEmoji(t *testing.T) {
 		t.Fatal("empty frame")
 	}
 
-	// Discover the border column from a line that definitely has it.
 	borderCol := -1
 	borderLine := -1
 	for i, line := range lines {
@@ -71,15 +64,11 @@ func TestView_BorderColumnStableWithLongPathsAndEmoji(t *testing.T) {
 		t.Fatalf("no sidebar border found in frame (%d lines)", len(lines))
 	}
 
-	// Every row that contains a border must put it on the same column,
-	// and the cell must be exactly '│' (not a leftover glyph).
 	bad := 0
 	for i, line := range lines {
 		plain := ansi.Strip(line)
 		col := cellIndex(plain, '│')
 		if col < 0 {
-			// Row with no border — only OK if it's outside the pane area
-			// (vertical centering can add full-width blank rows).
 			continue
 		}
 		if col != borderCol {
@@ -91,7 +80,6 @@ func TestView_BorderColumnStableWithLongPathsAndEmoji(t *testing.T) {
 		t.Fatalf("%d rows have the sidebar border on the wrong column (first found line=%d col=%d)", bad, borderLine, borderCol)
 	}
 
-	// Also: no line may be wider than the terminal (overflow).
 	maxW := 0
 	for i, line := range lines {
 		w := ansi.StringWidth(line)
@@ -105,8 +93,6 @@ func TestView_BorderColumnStableWithLongPathsAndEmoji(t *testing.T) {
 	t.Logf("frame lines=%d borderCol=%d maxWidth=%d term=%dx%d", len(lines), borderCol, maxW, m.width, m.height)
 }
 
-// cellIndex returns the display-cell column of target in plain (already
-// ANSI-stripped), counting wide runes as 2 cells.
 func cellIndex(plain string, target rune) int {
 	col := 0
 	for _, r := range plain {
@@ -123,8 +109,6 @@ func cellIndex(plain string, target rune) int {
 }
 
 func isWideRune(r rune) bool {
-	// Same heuristic used in ad-hoc repros: ansi.StringWidth on a single
-	// rune is the source of truth.
 	return ansi.StringWidth(string(r)) == 2
 }
 

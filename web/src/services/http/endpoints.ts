@@ -19,11 +19,6 @@ export const endpoints = {
       const base = `/api/v1/agents/${encodeURIComponent(agentId)}/files`
       return fileName ? `${base}/${encodeURIComponent(fileName)}` : base
     },
-    /**
-     * Skills of THIS agent's workspace. Reading is `catalog` (it carries
-     * source/enabled/deletable per skill, resolved from the agent's own
-     * loader), so only the mutating routes live here.
-     */
     skills: {
       toggle: (agentId: string, name: string) =>
         `/api/v1/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(name)}/toggle`,
@@ -33,19 +28,10 @@ export const endpoints = {
       installBatch: (agentId: string) =>
         `/api/v1/agents/${encodeURIComponent(agentId)}/skills/install-batch`,
     },
-    /**
-     * MCP (mcp.json) management: merged inventory, per-layer raw file view and
-     * the surgical toggle. `layer` is a string union, never free text: the raw
-     * routes speak the three stored layers and the server refuses `auto`
-     * (invalid_layer); the toggle also accepts `auto` (the server resolves the
-     * layer owning the winning copy). Every dynamic segment and `agent_id` is
-     * percent-encoded.
-     */
     mcp: {
       inventory: (agentId: string) => `/api/v1/mcp?agent_id=${encodeURIComponent(agentId)}`,
       raw: (agentId: string, layer: MCPLayerName) =>
         `/api/v1/mcp/${encodeURIComponent(layer)}/raw?agent_id=${encodeURIComponent(agentId)}`,
-      // Same URL as raw — the HTTP verb (PUT) lives at the call site.
       putRaw: (agentId: string, layer: MCPLayerName) =>
         `/api/v1/mcp/${encodeURIComponent(layer)}/raw?agent_id=${encodeURIComponent(agentId)}`,
       toggle: (agentId: string, layer: MCPQueryLayer, name: string, force?: boolean) => {
@@ -53,13 +39,6 @@ export const endpoints = {
         return force ? `${base}&force=true` : base
       },
       validate: (agentId: string) => `/api/v1/mcp/validate?agent_id=${encodeURIComponent(agentId)}`,
-      /**
-       * OAuth flows of one server — a 1:1 mirror of pkg/channels/rest_mcp.go.
-       * `agent_id` is required on every route and every dynamic segment
-       * (`name`, `flow_id`) is percent-encoded: a server name comes from
-       * mcp.json and must not escape its route. Only `start` and `logout` address
-       * the server by name; the other three address the flow the server gave out.
-       */
       auth: {
         start: (agentId: string, name: string) =>
           `/api/v1/mcp/servers/${encodeURIComponent(name)}/auth?agent_id=${encodeURIComponent(agentId)}`,
@@ -67,20 +46,12 @@ export const endpoints = {
           `/api/v1/mcp/auth/${encodeURIComponent(flowId)}?agent_id=${encodeURIComponent(agentId)}`,
         complete: (agentId: string, flowId: string) =>
           `/api/v1/mcp/auth/${encodeURIComponent(flowId)}/complete?agent_id=${encodeURIComponent(agentId)}`,
-        // Same URL as status — the HTTP verb (DELETE) lives at the call site.
         cancel: (agentId: string, flowId: string) =>
           `/api/v1/mcp/auth/${encodeURIComponent(flowId)}?agent_id=${encodeURIComponent(agentId)}`,
-        // Same URL as start — the HTTP verb (DELETE) lives at the call site.
         logout: (agentId: string, name: string) =>
           `/api/v1/mcp/servers/${encodeURIComponent(name)}/auth?agent_id=${encodeURIComponent(agentId)}`,
       },
     },
-    /**
-     * Slash commands of THIS agent (brief §6). `list` flattens the four
-     * harness discovery levels with precedence; `one` reads the raw markdown
-     * of a global/workspace command for the editor; create/update/remove write
-     * files under <workspace>/commands (or the global dir), never config.
-     */
     commands: {
       list: (agentId: string) => `/api/v1/agents/${encodeURIComponent(agentId)}/commands`,
       one: (agentId: string, name: string) =>
@@ -110,12 +81,6 @@ export const endpoints = {
     },
     sessions: '/api/v1/chat/sessions',
     sessionsMeta: '/api/v1/chat/sessions/meta',
-    /**
-     * Slash-command palette list. `agentId` scopes the custom (harness) part to
-     * that agent's own workspace — the palette must show what the answering
-     * agent can actually run. Without it the server falls back to the default
-     * workspace view.
-     */
     commands: (agentId?: string) =>
       agentId
         ? `/api/v1/chat/commands?agent_id=${encodeURIComponent(agentId)}`
@@ -171,9 +136,7 @@ export const endpoints = {
   },
   files: {
     upload: '/api/v1/files/upload',
-    // Public staging-only view (restricted to <leleDir>/tmp/{attachments,uploads}).
     view: '/api/v1/files/view',
-    // Authenticated view — serves any path under leleDir (Bearer required).
     viewSecure: '/api/v1/files/view-secure',
   },
   fs: {

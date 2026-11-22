@@ -52,10 +52,8 @@ func TestFallback_SecondCandidateSuccess(t *testing.T) {
 		makeCandidate("anthropic", "claude-opus"),
 	}
 
-	// Use retriable error - retry will exhaust then fallback to second candidate
 	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
 		if provider == "openai" {
-			// Retriable error: will retry 3 times, then fallback
 			return nil, errors.New("rate limit exceeded")
 		}
 		return &LLMResponse{Content: "from claude", FinishReason: "stop"}, nil
@@ -95,8 +93,6 @@ func TestFallback_AllFail(t *testing.T) {
 	if !errors.As(err, &exhausted) {
 		t.Errorf("expected FallbackExhaustedError, got %T: %v", err, err)
 	}
-	// With retry logic, each candidate exhausts retries before moving to next
-	// But we only record 1 attempt per candidate in the final error
 	if len(exhausted.Attempts) != 3 {
 		t.Errorf("attempts = %d, want 3 (one per candidate)", len(exhausted.Attempts))
 	}
@@ -116,7 +112,7 @@ func TestFallback_ContextCanceled(t *testing.T) {
 	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
 		attempt++
 		if attempt == 1 {
-			cancel() // cancel context
+			cancel()
 			return nil, context.Canceled
 		}
 		t.Error("should not reach second candidate after cancel")
@@ -173,7 +169,6 @@ func TestFallback_RetryWithBackoff(t *testing.T) {
 	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
 		callCount++
 		if provider == "openai" && callCount <= 3 {
-			// Fail first 3 calls with retriable error, succeed on 4th
 			return nil, errors.New("rate limit exceeded")
 		}
 		return &LLMResponse{Content: "success after retry", FinishReason: "stop"}, nil
@@ -186,7 +181,6 @@ func TestFallback_RetryWithBackoff(t *testing.T) {
 	if result.Response.Content != "success after retry" {
 		t.Errorf("content = %q, want 'success after retry'", result.Response.Content)
 	}
-	// Should succeed on 4th call (3 retries on first candidate)
 	if callCount != 4 {
 		t.Errorf("callCount = %d, want 4 (3 retries + 1 success)", callCount)
 	}
@@ -217,14 +211,12 @@ func TestFallback_RetryExhaustedThenFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// After maxRetryAttempts on openai, should fallback to anthropic
 	if result.Provider != "anthropic" {
 		t.Errorf("provider = %q, want anthropic", result.Provider)
 	}
 	if result.Response.Content != "from anthropic" {
 		t.Errorf("content = %q, want 'from anthropic'", result.Response.Content)
 	}
-	// OpenAI should be called maxRetryAttempts times before fallback
 	if openaiCalls != 3 {
 		t.Errorf("openaiCalls = %d, want 3 (maxRetryAttempts for this test)", openaiCalls)
 	}
@@ -235,7 +227,6 @@ func TestFallback_CooldownSkip(t *testing.T) {
 	ct, _ := newTestTracker(now)
 	fc := NewFallbackChain(ct)
 
-	// Put openai in cooldown
 	ct.MarkFailure("openai", FailoverRateLimit)
 
 	candidates := []FallbackCandidate{
@@ -257,7 +248,6 @@ func TestFallback_CooldownSkip(t *testing.T) {
 	if result.Provider != "anthropic" {
 		t.Errorf("provider = %q, want anthropic", result.Provider)
 	}
-	// Should have 1 skipped attempt
 	skipped := 0
 	for _, a := range result.Attempts {
 		if a.Skipped {
@@ -272,17 +262,12 @@ func TestFallback_CooldownSkip(t *testing.T) {
 func TestFallback_AllInCooldown(t *testing.T) {
 	ct := NewCooldownTracker()
 	fc := NewFallbackChain(ct)
-	// T3 made an all-cooldown chain wait instead of failing instantly, so the
-	// real 90s cap would slow this test down. A no-op fake sleep keeps it
-	// instant while still exercising the wait loop (the cooldown, driven by the
-	// real clock, never expires here, so the chain must still give up).
 	var waits []time.Duration
 	fc.sleepFn = func(ctx context.Context, d time.Duration) error {
 		waits = append(waits, d)
 		return nil
 	}
 
-	// Put all providers in cooldown
 	ct.MarkFailure("openai", FailoverRateLimit)
 	ct.MarkFailure("anthropic", FailoverBilling)
 
@@ -304,8 +289,6 @@ func TestFallback_AllInCooldown(t *testing.T) {
 	if !errors.As(err, &exhausted) {
 		t.Fatalf("expected FallbackExhaustedError, got %T", err)
 	}
-	// It waited the maximum number of rounds before declaring the chain dead,
-	// and each wait was bounded by maxCooldownWait.
 	if len(waits) != maxCooldownWaits {
 		t.Fatalf("waits = %d, want %d (bounded all-cooldown waiting)", len(waits), maxCooldownWaits)
 	}
@@ -316,26 +299,19 @@ func TestFallback_AllInCooldown(t *testing.T) {
 	}
 }
 
-// TestExecute_AllInCooldownWaitsAndSucceeds is defect C's fix: a chain whose
-// candidates are all in cooldown must block until the earliest one frees up
-// and then succeed, instead of returning FallbackExhaustedError for the caller
-// to retry a millisecond later against the same wall.
 func TestExecute_AllInCooldownWaitsAndSucceeds(t *testing.T) {
 	now := time.Now()
 	ct, current := newTestTracker(now)
 	fc := NewFallbackChain(ct)
 
-	// Both providers punished with the 1-minute first rung of the ladder.
 	ct.MarkFailure("openai", FailoverRateLimit)
 	ct.MarkFailure("anthropic", FailoverRateLimit)
 
-	// The fake sleep advances the tracker's clock past the cooldown, which is
-	// exactly what a real 60s wait does - without the test sleeping.
 	fc.sleepFn = func(ctx context.Context, d time.Duration) error {
 		*current = current.Add(d)
 		return nil
 	}
-	fc.randFn = func() float64 { return 0 } // deterministic jitter
+	fc.randFn = func() float64 { return 0 }
 
 	candidates := []FallbackCandidate{
 		makeCandidate("openai", "gpt-4"),
@@ -358,7 +334,6 @@ func TestExecute_AllInCooldownWaitsAndSucceeds(t *testing.T) {
 	if result.Response.Content != "back from cooldown" {
 		t.Errorf("content = %q", result.Response.Content)
 	}
-	// The skipped attempts must not be reported: the chain never gave up.
 	for _, a := range result.Attempts {
 		if a.Skipped {
 			t.Errorf("unexpected skipped attempt after a successful wait: %+v", a)
@@ -366,8 +341,6 @@ func TestExecute_AllInCooldownWaitsAndSucceeds(t *testing.T) {
 	}
 }
 
-// TestExecute_AllInCooldownRespectsContext: the wait is still tied to ctx, so a
-// cancelled turn cannot be blocked by a cooldown wait.
 func TestExecute_AllInCooldownRespectsContext(t *testing.T) {
 	ct := NewCooldownTracker()
 	fc := NewFallbackChain(ct)
@@ -394,7 +367,6 @@ func TestFallback_NoCandidates(t *testing.T) {
 }
 
 func TestFallback_EmptyFallbacks(t *testing.T) {
-	// Single primary, no fallbacks: should work like direct call
 	ct := NewCooldownTracker()
 	fc := NewFallbackChain(ct)
 
@@ -408,17 +380,8 @@ func TestFallback_EmptyFallbacks(t *testing.T) {
 	}
 }
 
-// TestFallback_UnknownErrorFallsBackToNextCandidate replaces the former
-// TestFallback_UnclassifiedError, which asserted that an unrecognised error
-// must abort the chain after a single call. That was the bug: transport
-// failures (unexpected EOF, connection reset, ...) are unrecognised yet fully
-// recoverable, so aborting killed sessions that a retry would have saved.
-// Under default-to-transient an unknown error is retriable and the chain moves
-// on to the next candidate.
 func TestFallback_UnknownErrorFallsBackToNextCandidate(t *testing.T) {
 	ct := NewCooldownTracker()
-	// 1 retry per candidate + ~0s backoff: keeps the test fast while exercising
-	// the (now-backing-off) unknown path.
 	fc := NewFallbackChain(ct).WithRetryConfig(1, time.Millisecond)
 
 	candidates := []FallbackCandidate{
@@ -447,9 +410,6 @@ func TestFallback_UnknownErrorFallsBackToNextCandidate(t *testing.T) {
 	}
 }
 
-// TestFallback_WrappedContextCanceledAborts is the counterpart: cancellation is
-// the ONE case ClassifyError still refuses to classify, so the chain must stop
-// without trying the next candidate.
 func TestFallback_WrappedContextCanceledAborts(t *testing.T) {
 	ct := NewCooldownTracker()
 	fc := NewFallbackChain(ct).WithRetryConfig(3, time.Millisecond)
@@ -487,7 +447,7 @@ func TestFallback_SuccessResetsCooldown(t *testing.T) {
 	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
 		attempt++
 		if attempt == 1 {
-			ct.MarkFailure("openai", FailoverRateLimit) // simulate failure tracked elsewhere
+			ct.MarkFailure("openai", FailoverRateLimit)
 		}
 		return &LLMResponse{Content: "ok", FinishReason: "stop"}, nil
 	}
@@ -500,8 +460,6 @@ func TestFallback_SuccessResetsCooldown(t *testing.T) {
 		t.Error("success should reset cooldown")
 	}
 }
-
-// --- Image Fallback Tests ---
 
 func TestImageFallback_Success(t *testing.T) {
 	ct := NewCooldownTracker()
@@ -602,8 +560,6 @@ func TestImageFallback_NoCandidates(t *testing.T) {
 	}
 }
 
-// --- ResolveCandidates Tests ---
-
 func TestResolveCandidates_Simple(t *testing.T) {
 	cfg := ModelConfig{
 		Primary:   "gpt-4",
@@ -663,15 +619,13 @@ func TestResolveCandidates_EmptyPrimary(t *testing.T) {
 }
 
 func TestFallback_SingleCandidate_RetriableError_NoCooldown(t *testing.T) {
-	// Bug fix: with a single candidate (no fallbacks), a retriable error
-	// should NOT apply cooldown because there's no alternative to switch to.
 	ct := NewCooldownTracker()
 	fc := NewFallbackChain(ct).WithRetryConfig(1, 50*time.Millisecond)
 
 	candidates := []FallbackCandidate{makeCandidate("openai", "gpt-4")}
 
 	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
-		return nil, errors.New("rate limit exceeded") // retriable
+		return nil, errors.New("rate limit exceeded")
 	}
 
 	_, err := fc.Execute(context.Background(), candidates, run)
@@ -683,7 +637,6 @@ func TestFallback_SingleCandidate_RetriableError_NoCooldown(t *testing.T) {
 		t.Fatalf("expected FallbackExhaustedError, got %T: %v", err, err)
 	}
 
-	// CRITICAL: provider should still be available (no cooldown applied)
 	if !ct.IsAvailable("openai") {
 		t.Error("single candidate should NOT be put in cooldown on retriable error (no fallbacks to switch to)")
 	}
@@ -693,8 +646,6 @@ func TestFallback_SingleCandidate_RetriableError_NoCooldown(t *testing.T) {
 }
 
 func TestFallback_TwoCandidates_RetriableError_AppliesCooldown(t *testing.T) {
-	// Control: with two candidates, a retriable error on the first SHOULD apply
-	// cooldown because there is a fallback to switch to.
 	ct := NewCooldownTracker()
 	fc := NewFallbackChain(ct).WithRetryConfig(1, 50*time.Millisecond)
 
@@ -707,7 +658,7 @@ func TestFallback_TwoCandidates_RetriableError_AppliesCooldown(t *testing.T) {
 	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
 		if provider == "openai" {
 			openaiCalls++
-			return nil, errors.New("rate limit exceeded") // retriable
+			return nil, errors.New("rate limit exceeded")
 		}
 		return &LLMResponse{Content: "from claude", FinishReason: "stop"}, nil
 	}
@@ -720,7 +671,6 @@ func TestFallback_TwoCandidates_RetriableError_AppliesCooldown(t *testing.T) {
 		t.Errorf("provider = %q, want anthropic", result.Provider)
 	}
 
-	// CRITICAL: openai SHOULD be in cooldown (there's a fallback candidate)
 	if ct.IsAvailable("openai") {
 		t.Error("first provider should be in cooldown when fallback candidates exist")
 	}
@@ -741,10 +691,6 @@ func TestFallbackExhaustedError_Message(t *testing.T) {
 		t.Error("expected non-empty error message")
 	}
 }
-
-// ============================================================================
-// Tests for IsRetriableError
-// ============================================================================
 
 func TestIsRetriableError(t *testing.T) {
 	tests := []struct {
@@ -770,9 +716,6 @@ func TestIsRetriableError(t *testing.T) {
 			&FallbackExhaustedError{Attempts: []FallbackAttempt{{Reason: FailoverFormat}}},
 			false,
 		},
-		// Updated by T1: a chain where every candidate is in cooldown is not a
-		// failure, it is a "wait, the cooldown will expire". The old `false`
-		// made an all-skipped chain terminal and killed the turn.
 		{
 			"FallbackExhaustedError with only skipped attempts (all in cooldown)",
 			&FallbackExhaustedError{Attempts: []FallbackAttempt{{Skipped: true, Reason: FailoverRateLimit}}},
@@ -827,8 +770,6 @@ func TestIsRetriableError(t *testing.T) {
 			&FailoverError{Reason: FailoverFormat},
 			false,
 		},
-		// The bug-catch case: an unrecognised error used to be reported as
-		// non-retriable (false) and ended the agent's turn.
 		{
 			"generic error is transient by default",
 			errors.New("weird sdk failure xyz"),
@@ -849,8 +790,6 @@ func TestIsRetriableError(t *testing.T) {
 			fmt.Errorf("outer: %w", &FallbackExhaustedError{Attempts: []FallbackAttempt{{Reason: FailoverRateLimit}}}),
 			true,
 		},
-		// Raw transport errors from the non-streaming path are never wrapped in
-		// a FailoverError. A single timeout must not abort the whole agent run.
 		{
 			"raw deadline exceeded (no fallback chain)",
 			errors.New("failed to send request: context deadline exceeded"),
@@ -871,7 +810,6 @@ func TestIsRetriableError(t *testing.T) {
 			errors.New("API request failed:\n  Status: 502\n  Body: bad gateway"),
 			true,
 		},
-		// Permanent failures must fail fast, never be hammered with retries.
 		{
 			"raw auth error is not retried",
 			errors.New("API request failed:\n  Status: 401\n  Body: invalid api key"),
@@ -904,18 +842,6 @@ func TestIsRetriableError(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// Tests for the per-candidate retry budget
-// ============================================================================
-
-// TestFallback_SingleCandidateGetsFullBudget is the anti-regression test for
-// defect A. The old code capped a single-candidate chain at
-// singleCandidateMaxRetries (3) with a 1s/2s ladder, so a 429 carrying
-// `Retry-After: 30` was retried at t=0, 1s and 3s: the chain died in ~3
-// seconds while the provider's quota window was still open. One candidate is
-// exactly the case that needs MORE budget, not less, so the special case is
-// gone: a lone provider now gets the same attempt count and the full
-// wall-clock budget as the first candidate of a multi-provider chain.
 func TestFallback_SingleCandidateGetsFullBudget(t *testing.T) {
 	ct := NewCooldownTracker()
 	fc := NewFallbackChain(ct).WithRetryConfig(10, time.Millisecond)
@@ -925,7 +851,7 @@ func TestFallback_SingleCandidateGetsFullBudget(t *testing.T) {
 	callCount := 0
 	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
 		callCount++
-		return nil, errors.New("rate limit exceeded") // retriable
+		return nil, errors.New("rate limit exceeded")
 	}
 
 	_, err := fc.Execute(context.Background(), candidates, run)
@@ -933,16 +859,11 @@ func TestFallback_SingleCandidateGetsFullBudget(t *testing.T) {
 		t.Fatal("expected error when single candidate fails")
 	}
 
-	// The single candidate is no longer truncated to 3 attempts.
 	if callCount != 10 {
 		t.Errorf("callCount = %d, want 10 (full retry budget, single candidate)", callCount)
 	}
 }
 
-// TestExecute_SingleCandidateHonorsRetryAfterFloor proves the Retry-After hint
-// is actually consumed: the waits the chain performs must be at least the
-// server's ask, not the 1s/2s exponential ladder. A fake clock/sleep keeps the
-// test instant while still exercising the real budget arithmetic.
 func TestExecute_SingleCandidateHonorsRetryAfterFloor(t *testing.T) {
 	ct := NewCooldownTracker()
 	fc := NewFallbackChain(ct).WithRetryBudget(10, time.Millisecond, time.Minute)
@@ -955,13 +876,11 @@ func TestExecute_SingleCandidateHonorsRetryAfterFloor(t *testing.T) {
 	fc.randFn = func() float64 { return 0 }
 	fc.sleepFn = func(ctx context.Context, d time.Duration) error {
 		waits = append(waits, d)
-		clock = clock.Add(d) // the fake clock advances with every wait
+		clock = clock.Add(d)
 		return nil
 	}
 
 	candidates := []FallbackCandidate{makeCandidate("openai", "gpt-4")}
-	// The realistic shape: providers surface 429 as *common.APIError, which is
-	// what carries the hint through ClassifyError's structured path.
 	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
 		return nil, &common.APIError{StatusCode: 429, RetryAfter: 30 * time.Second, Body: "slow down"}
 	}
@@ -973,8 +892,6 @@ func TestExecute_SingleCandidateHonorsRetryAfterFloor(t *testing.T) {
 	if len(waits) < 2 {
 		t.Fatalf("waits = %v, want at least 2 backoff sleeps", waits)
 	}
-	// The first waits are the server's ask; only the tail may be clamped to
-	// whatever budget was left over.
 	honored := 0
 	for _, w := range waits {
 		if w >= 30*time.Second {
@@ -984,15 +901,12 @@ func TestExecute_SingleCandidateHonorsRetryAfterFloor(t *testing.T) {
 	if honored < 2 {
 		t.Errorf("waits = %v, want at least 2 waits >= 30s (server Retry-After floor)", waits)
 	}
-	// Total elapsed must be well beyond the ~3s the old code gave up in.
 	if elapsed := clock.Sub(start); elapsed <= 3*time.Second {
 		t.Errorf("chain gave up after %v, want > 3s (defect A regression)", elapsed)
 	}
 }
 
 func TestFallback_MultipleCandidatesNoReduction(t *testing.T) {
-	// With two candidates, the first should use the full retry budget (10)
-	// before falling back to the second.
 	ct := NewCooldownTracker()
 	fc := NewFallbackChain(ct).WithRetryConfig(10, time.Millisecond)
 
@@ -1018,19 +932,12 @@ func TestFallback_MultipleCandidatesNoReduction(t *testing.T) {
 		t.Errorf("provider = %q, want anthropic", result.Provider)
 	}
 
-	// With 2 candidates the full retry budget is used.
 	if openaiCalls != 10 {
 		t.Errorf("openaiCalls = %d, want 10 (full retry budget with fallback)", openaiCalls)
 	}
 }
 
-// ============================================================================
-// IsRetriableError: default-to-transient blacklist (T1)
-// ============================================================================
-
 func TestIsRetriableError_AllSkippedCooldownIsTransient(t *testing.T) {
-	// Every candidate in cooldown: nothing was actually tried, and cooldowns
-	// expire, so the caller must keep retrying instead of aborting the turn.
 	err := &FallbackExhaustedError{Attempts: []FallbackAttempt{
 		{Provider: "openai", Model: "gpt-4", Skipped: true, Reason: FailoverRateLimit},
 		{Provider: "anthropic", Model: "claude", Skipped: true, Reason: FailoverRateLimit},
@@ -1041,7 +948,6 @@ func TestIsRetriableError_AllSkippedCooldownIsTransient(t *testing.T) {
 }
 
 func TestIsRetriableError_TransportErrorsAreTransient(t *testing.T) {
-	// Real strings seen in production logs; each one killed a session before T1.
 	msgs := []string{
 		"unexpected EOF",
 		"read tcp 10.0.0.5:443->1.2.3.4:443: connection reset by peer",
@@ -1061,8 +967,6 @@ func TestIsRetriableError_TransportErrorsAreTransient(t *testing.T) {
 }
 
 func TestIsRetriableError_TerminalBlacklist(t *testing.T) {
-	// The ONLY non-retriable inputs: cancellation plus explicitly terminal
-	// reasons. Everything else is transient by default.
 	terminal := []error{
 		context.Canceled,
 		fmt.Errorf("wrap: %w", context.Canceled),
@@ -1084,10 +988,6 @@ func TestIsRetriableError_TerminalBlacklist(t *testing.T) {
 		}
 	}
 
-	// A bare FailoverError with an auth/billing reason is terminal for THAT
-	// provider but still candidate-swappable (FailoverError.IsRetriable), so it
-	// reports true here by design: the chain may still have work left. Only a
-	// chain whose every attempt is terminal is a dead end (covered above).
 	for _, r := range []FailoverReason{FailoverAuth, FailoverBilling} {
 		if !IsRetriableError(&FailoverError{Reason: r}) {
 			t.Errorf("FailoverError(%s) must be retriable for the chain (next candidate)", r)

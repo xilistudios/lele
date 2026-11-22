@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -20,14 +14,9 @@ import (
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
-// toolExecOptions aggregates all options for tool execution
 type toolExecOptions struct {
-	ctx   context.Context
-	agent *AgentInstance
-	// registry is the SESSION's tool view (see toolCoordinator.sessionTools):
-	// the agent's base registry plus that session's scoped layer, where MCP
-	// tools loaded with get_mcp_tool live. Nil falls back to agent.Tools for
-	// callers that have no session (tests, direct invocations).
+	ctx          context.Context
+	agent        *AgentInstance
 	registry     *tools.ToolRegistry
 	tc           providers.ToolCall
 	channel      string
@@ -37,9 +26,6 @@ type toolExecOptions struct {
 	sendResponse bool
 }
 
-// tools returns the registry this call must run against. The session view wins
-// because MCP tools are registered only there; agent.Tools is the fallback so a
-// caller that never resolved a session still behaves as before.
 func (o toolExecOptions) tools() *tools.ToolRegistry {
 	if o.registry != nil {
 		return o.registry
@@ -50,44 +36,27 @@ func (o toolExecOptions) tools() *tools.ToolRegistry {
 	return o.agent.Tools
 }
 
-// toolExecutor handles the execution of tool calls and result publishing
 type toolExecutor struct {
 	al *AgentLoop
 }
 
-// newToolExecutor creates a new tool executor
 func newToolExecutor(al *AgentLoop) *toolExecutor {
 	return &toolExecutor{al: al}
 }
 
-// Execute runs a tool call, handles approval flow, and returns the result
 func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error) {
-	// Check context first
 	if err := opts.ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	// A call whose arguments were cut off mid-write cannot do the right thing:
-	// the value that was being written is gone. Report it to the model instead
-	// of running the tool and letting it fail on a missing parameter, which
-	// would point the model at the wrong problem.
 	if opts.tc.ArgumentsTruncated {
 		return tools.TruncatedArgumentsError(opts.tc), nil
 	}
 
-	// Defensive early return: an agent context is a hard precondition of
-	// every branch below (publishExecuting reads opts.agent.ID and both
-	// execution branches read opts.agent.Tools). Without this guard a nil
-	// agent panics deep inside the publisher; with it the invariant
-	// "opts.agent != nil" holds for the rest of the function, so the
-	// pre-existing nil guards in the chat-mode/vision checks below are
-	// belt-and-braces only and the context injection needs no guard at all.
 	if opts.agent == nil {
 		return nil, fmt.Errorf("tool %s: execution requires an agent context", opts.tc.Name)
 	}
 
-	// Chat mode: only web_search and web_fetch are allowed (defense-in-depth;
-	// the LLM normally never sees other tool defs in chat mode).
 	if opts.agent != nil && opts.agent.Sessions != nil {
 		if opts.agent.Sessions.GetMode(opts.sessionKey) == "chat" {
 			if opts.tc.Name != "web_search" && opts.tc.Name != "web_fetch" {
@@ -96,9 +65,6 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 		}
 	}
 
-	// Vision guard: block read_image if the session's model doesn't support vision.
-	// This is defense-in-depth — the tool definition is normally filtered out in
-	// llm_runner.go, but this prevents execution if the LLM somehow calls it anyway.
 	if opts.tc.Name == "read_image" && opts.agent != nil && te.al != nil {
 		model := te.al.sessionManager.ModelForSession(opts.agent, opts.sessionKey)
 		if model != "" {
@@ -110,21 +76,6 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 		}
 	}
 
-	// Video guard: block read_video if the session's model supports neither
-	// native video (video_url delivery) nor vision (keyframes+transcript
-	// frames fallback). Same defense-in-depth rationale as the vision guard
-	// above (the definition is normally filtered out in llm_runner.go / the
-	// subagent tool loop), and the same historical skip behaviour: when no
-	// model can be resolved for the session (model == ""), the guard does not
-	// fire — parity with the read_image guard, which only checks resolvable
-	// models.
-	//
-	// When a model IS resolvable, the same resolved caps are kept in
-	// videoCaps and stamped onto the tool context below (only for
-	// read_video — the caps type is read_video-specific), so mode=auto
-	// resolves against the model handling this call (session/turn model)
-	// instead of the tool's construction-time snapshot. Nil = no stamp: the
-	// tool falls back to its snapshot.
 	var videoCaps *tools.VideoCapabilities
 	if opts.tc.Name == "read_video" && opts.agent != nil && te.al != nil {
 		model := te.al.sessionManager.ModelForSession(opts.agent, opts.sessionKey)
@@ -140,10 +91,8 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 		}
 	}
 
-	// Publish tool execution notification
 	te.publishExecuting(opts)
 
-	// Create async callback for tools that implement AsyncTool
 	asyncCallback := func(callbackCtx context.Context, result *tools.ToolResult) {
 		if result == nil {
 			return
@@ -159,27 +108,12 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 		publishSubagentAsyncResult(te.al, opts.sessionKey, opts.channel, opts.chatID, taskID, result)
 	}
 
-	// Inject the acting agent ID and session key ONCE, right before the
-	// execution branches (issue #231). opts is a by-value struct, so this
-	// enrichment is local to the call and never leaks to the caller.
-	// Both branches — executeWithApproval (which reads opts.ctx for the
-	// pre-approval probe, WaitForResponse and the post-approval retry) and
-	// the plain ExecuteWithContext path — now share this single enriched
-	// context, making a divergent context structurally impossible.
-	//
-	// No nil guard here: the early return at the top of Execute guarantees
-	// opts.agent != nil by the time we reach this line.
 	opts.ctx = tools.WithAgentToolContext(opts.ctx, opts.agent.ID, opts.sessionKey)
 
-	// Per-call read_video capability stamp: videoCaps is only set inside the
-	// read_video guard above, so no other tool pays for this. Stamped caps
-	// take precedence over the tool's construction-time snapshot (see
-	// tools.WithVideoCaps), keeping mode=auto aligned with the session model.
 	if videoCaps != nil {
 		opts.ctx = tools.WithVideoCaps(opts.ctx, *videoCaps)
 	}
 
-	// Execute tool with approval handling for exec
 	var toolResult *tools.ToolResult
 	if opts.tc.Name == "exec" && te.al.approvalManager != nil {
 		toolResult = te.executeWithApproval(opts, asyncCallback)
@@ -191,7 +125,6 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 		toolResult = registry.ExecuteWithContext(opts.ctx, opts.tc.Name, opts.tc.Arguments, opts.channel, opts.chatID, asyncCallback)
 	}
 
-	// Handle nil result
 	if toolResult == nil {
 		if err := opts.ctx.Err(); err != nil {
 			return nil, err
@@ -199,13 +132,11 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 		toolResult = tools.ErrorResult(fmt.Sprintf("tool %s returned no result", opts.tc.Name))
 	}
 
-	// Publish result notification
 	te.publishResult(opts, toolResult)
 
 	return toolResult, nil
 }
 
-// executeWithApproval handles exec tool with approval workflow
 func (te *toolExecutor) executeWithApproval(opts toolExecOptions, asyncCallback tools.AsyncCallback) *tools.ToolResult {
 	registry := opts.tools()
 	if registry == nil {
@@ -213,12 +144,10 @@ func (te *toolExecutor) executeWithApproval(opts toolExecOptions, asyncCallback 
 	}
 	toolResult := registry.ExecuteWithContext(opts.ctx, opts.tc.Name, opts.tc.Arguments, opts.channel, opts.chatID, asyncCallback)
 
-	// Check if approval is required
 	if toolResult.ApprovalRequired == nil {
 		return toolResult
 	}
 
-	// Send approval request to user
 	approvalMsg := fmt.Sprintf("⚠️ **Se requiere aprobación**\n\n"+
 		"El siguiente comando puede ser peligroso:\n"+
 		"`%s`\n\n"+
@@ -226,11 +155,9 @@ func (te *toolExecutor) executeWithApproval(opts toolExecOptions, asyncCallback 
 		toolResult.ApprovalRequired.Command,
 		toolResult.ApprovalRequired.Reason)
 
-	// Parse chatID as int64 for approval manager
 	var chatIDInt int64
 	fmt.Sscanf(opts.chatID, "%d", &chatIDInt)
 
-	// Create approval request
 	approval := te.al.approvalManager.CreateApproval(
 		opts.sessionKey,
 		toolResult.ApprovalRequired.Command,
@@ -259,11 +186,10 @@ func (te *toolExecutor) executeWithApproval(opts toolExecOptions, asyncCallback 
 		})
 	}
 
-	// Wait for user response
 	approved, err := approval.WaitForResponse(opts.ctx, te.al.approvalManager.GetTimeout())
 	if err != nil {
 		if opts.ctx.Err() != nil {
-			return nil // Context cancelled
+			return nil
 		}
 		return &tools.ToolResult{
 			IsError: true,
@@ -272,10 +198,6 @@ func (te *toolExecutor) executeWithApproval(opts toolExecOptions, asyncCallback 
 	}
 
 	if approved {
-		// User approved - execute the command directly, passing the bypass
-		// through context so it is scoped to THIS invocation and THIS
-		// approved command string. Concurrent sessions see their own context
-		// and are never affected.
 		approvedCmd := toolResult.ApprovalRequired.Command
 		bypassCtx := tools.WithBypassGuard(opts.ctx, approvedCmd)
 		if execTool, ok := registry.Get("exec"); ok {
@@ -287,7 +209,6 @@ func (te *toolExecutor) executeWithApproval(opts toolExecOptions, asyncCallback 
 			toolResult = tools.ErrorResult("Failed to execute approved command")
 		}
 	} else {
-		// User rejected
 		toolResult = &tools.ToolResult{
 			IsError: true,
 			ForLLM:  "El comando fue rechazado por el usuario por razones de seguridad.",
@@ -297,7 +218,6 @@ func (te *toolExecutor) executeWithApproval(opts toolExecOptions, asyncCallback 
 	return toolResult
 }
 
-// publishExecuting publishes tool execution notification to the appropriate channel
 func (te *toolExecutor) publishExecuting(opts toolExecOptions) {
 	argsJSON, _ := json.Marshal(opts.tc.Arguments)
 	argsPreview := utils.Truncate(string(argsJSON), 200)
@@ -342,7 +262,6 @@ func (te *toolExecutor) publishExecuting(opts toolExecOptions) {
 	}
 }
 
-// publishResult publishes tool result notification to the appropriate channel
 func (te *toolExecutor) publishResult(opts toolExecOptions, toolResult *tools.ToolResult) {
 	if opts.channel == channels.ChannelName {
 		resultPreview := toolResult.ForLLM
@@ -382,10 +301,6 @@ func (te *toolExecutor) publishResult(opts toolExecOptions, toolResult *tools.To
 		})
 	}
 
-	// Send ForUser content to user immediately if not Silent.
-	// For the native channel, skip ForUser publish — the tool.result event
-	// already provides visual feedback via ToolCallDisplay. ForUser is meant
-	// for messaging channels (Telegram, WhatsApp) that don't have rich tool cards.
 	if !toolResult.Silent && toolResult.ForUser != "" && opts.sendResponse &&
 		opts.channel != channels.ChannelName && te.al.verboseManager.IsFull(opts.sessionKey) {
 		te.al.bus.PublishOutbound(bus.OutboundMessage{
@@ -401,7 +316,6 @@ func (te *toolExecutor) publishResult(opts toolExecOptions, toolResult *tools.To
 	}
 }
 
-// buildToolResultContent extracts the content to send to the LLM from a tool result
 func buildToolResultContent(toolResult *tools.ToolResult) string {
 	contentForLLM := toolResult.ForLLM
 	if contentForLLM == "" && toolResult.Err != nil {

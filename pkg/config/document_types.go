@@ -2,21 +2,15 @@ package config
 
 import "os"
 
-// SecretMode indicates how a secret field is handled.
 type SecretMode string
 
 const (
-	// SecretModeLiteral means the value is literal (stored directly).
 	SecretModeLiteral SecretMode = "literal"
-	// SecretModeEnv means the value comes from an environment variable.
-	SecretModeEnv SecretMode = "env"
-	// SecretModeKeyring means the value comes from the encrypted keyring.
+	SecretModeEnv     SecretMode = "env"
 	SecretModeKeyring SecretMode = "keyring"
-	// SecretModeEmpty means the value is empty.
-	SecretModeEmpty SecretMode = "empty"
+	SecretModeEmpty   SecretMode = "empty"
 )
 
-// SecretValue represents a secret field that can come from ENV.
 type SecretValue struct {
 	Mode       SecretMode `json:"mode"`
 	Value      string     `json:"value,omitempty"`
@@ -26,8 +20,6 @@ type SecretValue struct {
 	HasEnvVar  bool       `json:"has_env_var"`
 }
 
-// EditableDocument represents an editable config document
-// with metadata to preserve secrets and placeholders.
 type EditableDocument struct {
 	Agents    EditableAgentsConfig    `json:"agents"`
 	Session   EditableSessionConfig   `json:"session,omitempty"`
@@ -41,75 +33,52 @@ type EditableDocument struct {
 	Devices   DevicesConfig           `json:"devices"`
 	Logs      EditableLogsConfig      `json:"logs"`
 
-	// Commands and Harness mirror Config.Commands / Config.Harness so the
-	// editor can read and write custom slash commands. Their element types are
-	// plain (no secret fields, no ENV placeholders), so the editable and
-	// runtime representations are the same structs.
 	Commands map[string]CommandDefinition `json:"commands,omitempty"`
 	Harness  HarnessConfig                `json:"harness,omitempty"`
 }
 
-// EditableAgentsConfig represents agents in editable mode.
 type EditableAgentsConfig struct {
 	Defaults EditableAgentDefaults `json:"defaults"`
 	List     []EditableAgentConfig `json:"list,omitempty"`
 }
 
-// EditableAgentDefaults represents agent defaults in editable mode.
 type EditableAgentDefaults struct {
-	Workspace           string   `json:"workspace"`
-	RestrictToWorkspace bool     `json:"restrict_to_workspace"`
-	Provider            string   `json:"provider"`
-	Model               string   `json:"model"`
-	ModelFallbacks      []string `json:"model_fallbacks,omitempty"`
-	ImageModel          string   `json:"image_model,omitempty"`
-	ImageModelFallbacks []string `json:"image_model_fallbacks,omitempty"`
-	MaxTokens           int      `json:"max_tokens"`
-	Temperature         *float64 `json:"temperature,omitempty"`
-	// ThinkingLevel mirrors AgentDefaults.ThinkingLevel: per-document default
-	// reasoning effort ("off", "low", "medium", "high"); nil = inherit.
-	ThinkingLevel          *string `json:"thinking_level,omitempty"`
-	MaxToolIterations      int     `json:"max_tool_iterations"`
-	MaxReadLines           int     `json:"max_read_lines"`
-	MemoryMaxLines         int     `json:"memory_max_lines"`
-	SubagentTimeoutMinutes int     `json:"subagent_timeout_minutes,omitempty"`
-	SubagentMaxConcurrent  int     `json:"subagent_max_concurrent,omitempty"`
-	SubagentMaxRetries     int     `json:"subagent_max_retries,omitempty"`
-	SubagentMaxIterations  int     `json:"subagent_max_iterations,omitempty"`
-	// SubagentRetentionMinutes mirrors AgentDefaults.SubagentRetentionMinutes:
-	// how long a terminal subagent task stays tracked before the periodic
-	// retention sweeper reaps it (0 = manager default, 5m).
-	SubagentRetentionMinutes int `json:"subagent_retention_minutes,omitempty"`
-	LLMLoopTimeoutMinutes    int `json:"llm_loop_timeout_minutes,omitempty"`
-	// PromptCache mirrors AgentDefaults.PromptCache: explicit prompt-cache
-	// breakpoints for providers that support them (Anthropic-style
-	// cache_control). Without this field the WebUI would silently drop the
-	// setting on every save cycle.
-	PromptCache PromptCacheConfig `json:"prompt_cache,omitempty"`
+	Workspace                string            `json:"workspace"`
+	RestrictToWorkspace      bool              `json:"restrict_to_workspace"`
+	Provider                 string            `json:"provider"`
+	Model                    string            `json:"model"`
+	ModelFallbacks           []string          `json:"model_fallbacks,omitempty"`
+	ImageModel               string            `json:"image_model,omitempty"`
+	ImageModelFallbacks      []string          `json:"image_model_fallbacks,omitempty"`
+	MaxTokens                int               `json:"max_tokens"`
+	Temperature              *float64          `json:"temperature,omitempty"`
+	ThinkingLevel            *string           `json:"thinking_level,omitempty"`
+	MaxToolIterations        int               `json:"max_tool_iterations"`
+	MaxReadLines             int               `json:"max_read_lines"`
+	MemoryMaxLines           int               `json:"memory_max_lines"`
+	SubagentTimeoutMinutes   int               `json:"subagent_timeout_minutes,omitempty"`
+	SubagentMaxConcurrent    int               `json:"subagent_max_concurrent,omitempty"`
+	SubagentMaxRetries       int               `json:"subagent_max_retries,omitempty"`
+	SubagentMaxIterations    int               `json:"subagent_max_iterations,omitempty"`
+	SubagentRetentionMinutes int               `json:"subagent_retention_minutes,omitempty"`
+	LLMLoopTimeoutMinutes    int               `json:"llm_loop_timeout_minutes,omitempty"`
+	PromptCache              PromptCacheConfig `json:"prompt_cache,omitempty"`
 }
 
-// EditableAgentConfig represents an agent in editable mode.
 type EditableAgentConfig struct {
-	ID          string            `json:"id"`
-	Default     bool              `json:"default,omitempty"`
-	Name        string            `json:"name,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Workspace   string            `json:"workspace,omitempty"`
-	Model       *AgentModelConfig `json:"model,omitempty"`
-	Skills      []string          `json:"skills,omitempty"`
-	Subagents   *SubagentsConfig  `json:"subagents,omitempty"`
-	Temperature *float64          `json:"temperature,omitempty"`
-	// ThinkingLevel mirrors AgentConfig.ThinkingLevel: per-agent default
-	// reasoning effort ("off", "low", "medium", "high"); nil = inherit.
-	ThinkingLevel *string `json:"thinking_level,omitempty"`
-	// Tools mirrors AgentConfig.Tools: per-agent tool allowlist;
-	// nil/empty = all tools. Kept LAST and field-for-field identical to
-	// AgentConfig because editableDocumentFromConfig does a direct struct
-	// conversion (see document_convert.go).
-	Tools []string `json:"tools,omitempty"`
+	ID            string            `json:"id"`
+	Default       bool              `json:"default,omitempty"`
+	Name          string            `json:"name,omitempty"`
+	Description   string            `json:"description,omitempty"`
+	Workspace     string            `json:"workspace,omitempty"`
+	Model         *AgentModelConfig `json:"model,omitempty"`
+	Skills        []string          `json:"skills,omitempty"`
+	Subagents     *SubagentsConfig  `json:"subagents,omitempty"`
+	Temperature   *float64          `json:"temperature,omitempty"`
+	ThinkingLevel *string           `json:"thinking_level,omitempty"`
+	Tools         []string          `json:"tools,omitempty"`
 }
 
-// EditableSessionConfig represents session in editable mode.
 type EditableSessionConfig struct {
 	DMScope                    string              `json:"dm_scope,omitempty"`
 	IdentityLinks              map[string][]string `json:"identity_links,omitempty"`
@@ -119,24 +88,13 @@ type EditableSessionConfig struct {
 	CompactionModel            string              `json:"compaction_model,omitempty"`
 	EvictExcludedFromMemory    bool                `json:"evict_excluded_from_memory,omitempty"`
 
-	// DurableInbound mirrors SessionConfig.DurableInbound. It stays tri-state
-	// so an unconfigured file keeps writing no key instead of pinning the
-	// default off.
 	DurableInbound *bool `json:"durable_inbound,omitempty"`
 
-	// DurableOutbound mirrors SessionConfig.DurableOutbound. It stays tri-state
-	// so an unconfigured file keeps writing no key instead of pinning the
-	// default off.
 	DurableOutbound *bool `json:"durable_outbound,omitempty"`
 
-	// Resume mirrors SessionConfig.Resume. It stays tri-state so an
-	// unconfigured file keeps writing no key instead of pinning the default
-	// off. Keep it last: EditableSessionConfig(cfg.Session) is a direct struct
-	// conversion and relies on identical field order.
 	Resume *bool `json:"resume_enabled,omitempty"`
 }
 
-// EditableChannelsConfig represents channels in editable mode.
 type EditableChannelsConfig struct {
 	WhatsApp EditableWhatsAppConfig `json:"whatsapp"`
 	Telegram EditableTelegramConfig `json:"telegram"`
@@ -149,26 +107,19 @@ type EditableChannelsConfig struct {
 	LINE     EditableLINEConfig     `json:"line"`
 	OneBot   EditableOneBotConfig   `json:"onebot"`
 	Native   EditableNativeConfig   `json:"native"`
-	// Web is the Web UI server toggle (runtime: Channels.Web, env
-	// LELE_WEB_ENABLED, default enabled). Without it in the document the
-	// WebUI could neither see nor toggle it, and the key was silently
-	// dropped on every save.
-	Web EditableWebConfig `json:"web"`
+	Web      EditableWebConfig      `json:"web"`
 }
 
-// EditableWebConfig for the Web UI channel toggle.
 type EditableWebConfig struct {
 	Enabled bool `json:"enabled"`
 }
 
-// EditableWhatsAppConfig for WhatsApp.
 type EditableWhatsAppConfig struct {
 	Enabled   bool                `json:"enabled"`
 	BridgeURL string              `json:"bridge_url"`
 	AllowFrom FlexibleStringSlice `json:"allow_from"`
 }
 
-// EditableTelegramConfig for Telegram.
 type EditableTelegramConfig struct {
 	Enabled   bool                `json:"enabled"`
 	Token     SecretValue         `json:"token"`
@@ -177,7 +128,6 @@ type EditableTelegramConfig struct {
 	Verbose   VerboseLevel        `json:"verbose,omitempty"`
 }
 
-// EditableFeishuConfig for Feishu.
 type EditableFeishuConfig struct {
 	Enabled           bool                `json:"enabled"`
 	AppID             SecretValue         `json:"app_id"`
@@ -187,14 +137,12 @@ type EditableFeishuConfig struct {
 	AllowFrom         FlexibleStringSlice `json:"allow_from"`
 }
 
-// EditableDiscordConfig for Discord.
 type EditableDiscordConfig struct {
 	Enabled   bool                `json:"enabled"`
 	Token     SecretValue         `json:"token"`
 	AllowFrom FlexibleStringSlice `json:"allow_from"`
 }
 
-// EditableMaixCamConfig for MaixCam.
 type EditableMaixCamConfig struct {
 	Enabled   bool                `json:"enabled"`
 	Host      string              `json:"host"`
@@ -202,7 +150,6 @@ type EditableMaixCamConfig struct {
 	AllowFrom FlexibleStringSlice `json:"allow_from"`
 }
 
-// EditableQQConfig for QQ.
 type EditableQQConfig struct {
 	Enabled   bool                `json:"enabled"`
 	AppID     SecretValue         `json:"app_id"`
@@ -210,7 +157,6 @@ type EditableQQConfig struct {
 	AllowFrom FlexibleStringSlice `json:"allow_from"`
 }
 
-// EditableDingTalkConfig for DingTalk.
 type EditableDingTalkConfig struct {
 	Enabled      bool                `json:"enabled"`
 	ClientID     SecretValue         `json:"client_id"`
@@ -218,7 +164,6 @@ type EditableDingTalkConfig struct {
 	AllowFrom    FlexibleStringSlice `json:"allow_from"`
 }
 
-// EditableSlackConfig for Slack.
 type EditableSlackConfig struct {
 	Enabled   bool                `json:"enabled"`
 	BotToken  SecretValue         `json:"bot_token"`
@@ -226,7 +171,6 @@ type EditableSlackConfig struct {
 	AllowFrom FlexibleStringSlice `json:"allow_from"`
 }
 
-// EditableLINEConfig for LINE.
 type EditableLINEConfig struct {
 	Enabled            bool                `json:"enabled"`
 	ChannelSecret      SecretValue         `json:"channel_secret"`
@@ -237,7 +181,6 @@ type EditableLINEConfig struct {
 	AllowFrom          FlexibleStringSlice `json:"allow_from"`
 }
 
-// EditableOneBotConfig for OneBot.
 type EditableOneBotConfig struct {
 	Enabled            bool                `json:"enabled"`
 	WSUrl              string              `json:"ws_url"`
@@ -247,7 +190,6 @@ type EditableOneBotConfig struct {
 	AllowFrom          FlexibleStringSlice `json:"allow_from"`
 }
 
-// EditableNativeConfig for Native channel.
 type EditableNativeConfig struct {
 	Enabled           bool                  `json:"enabled"`
 	Host              string                `json:"host"`
@@ -262,38 +204,26 @@ type EditableNativeConfig struct {
 	RateLimit         NativeRateLimitConfig `json:"rate_limit"`
 }
 
-// EditableProvidersConfig for providers.
-// It serializes as a flat object to preserve config.json compatibility.
 type EditableProvidersConfig map[string]EditableNamedProviderConfig
 
-// EditableNamedProviderConfig for named providers.
 type EditableNamedProviderConfig struct {
-	Type        string      `json:"type,omitempty"`
-	APIKey      SecretValue `json:"api_key"`
-	APIBase     string      `json:"api_base"`
-	Proxy       string      `json:"proxy,omitempty"`
-	AuthMethod  string      `json:"auth_method,omitempty"`
-	ConnectMode string      `json:"connect_mode,omitempty"`
-	// Headers mirrors config.ProviderConfig.Headers. There is no UI control
-	// for it yet, but it MUST ride the document: toSerializable re-emits the
-	// providers block field by field, so any field the document does not
-	// model is deleted from config.json by a WebUI save — even a partial edit
-	// that only touches agents, because the browser PUTs the whole document.
-	// omitempty is mandatory: a document without a map then serializes
-	// byte-identically to the documents of existing installs.
-	Headers   map[string]string              `json:"headers,omitempty"`
-	WebSearch *bool                          `json:"web_search,omitempty"`
-	Models    map[string]ProviderModelConfig `json:"models,omitempty"`
+	Type        string                         `json:"type,omitempty"`
+	APIKey      SecretValue                    `json:"api_key"`
+	APIBase     string                         `json:"api_base"`
+	Proxy       string                         `json:"proxy,omitempty"`
+	AuthMethod  string                         `json:"auth_method,omitempty"`
+	ConnectMode string                         `json:"connect_mode,omitempty"`
+	Headers     map[string]string              `json:"headers,omitempty"`
+	WebSearch   *bool                          `json:"web_search,omitempty"`
+	Models      map[string]ProviderModelConfig `json:"models,omitempty"`
 }
 
-// EditableToolsConfig for tools.
 type EditableToolsConfig struct {
 	Web  EditableWebToolsConfig `json:"web"`
 	Cron CronToolsConfig        `json:"cron"`
 	Exec EditableExecConfig     `json:"exec"`
 }
 
-// EditableWebToolsConfig for web tools.
 type EditableWebToolsConfig struct {
 	Brave      EditableBraveConfig      `json:"brave"`
 	DuckDuckGo DuckDuckGoConfig         `json:"duckduckgo"`
@@ -301,21 +231,18 @@ type EditableWebToolsConfig struct {
 	SearXNG    EditableSearXNGConfig    `json:"searxng"`
 }
 
-// EditableBraveConfig for Brave.
 type EditableBraveConfig struct {
 	Enabled    bool        `json:"enabled"`
 	APIKey     SecretValue `json:"api_key"`
 	MaxResults int         `json:"max_results"`
 }
 
-// EditablePerplexityConfig for Perplexity.
 type EditablePerplexityConfig struct {
 	Enabled    bool        `json:"enabled"`
 	APIKey     SecretValue `json:"api_key"`
 	MaxResults int         `json:"max_results"`
 }
 
-// EditableSearXNGConfig for SearXNG.
 type EditableSearXNGConfig struct {
 	Enabled     bool   `json:"enabled"`
 	InstanceURL string `json:"instance_url"`
@@ -325,15 +252,13 @@ type EditableSearXNGConfig struct {
 	MaxResults  int    `json:"max_results"`
 }
 
-// EditableExecConfig for exec.
 type EditableExecConfig struct {
 	EnableDenyPatterns bool     `json:"enable_deny_patterns"`
 	CustomDenyPatterns []string `json:"custom_deny_patterns"`
-	TimeoutSeconds     int      `json:"timeout_seconds"` // 0 means no timeout
+	TimeoutSeconds     int      `json:"timeout_seconds"`
 	WhitelistCommands  []string `json:"whitelist_commands"`
 }
 
-// EditableLogsConfig for logs.
 type EditableLogsConfig struct {
 	Enabled  bool   `json:"enabled"`
 	Path     string `json:"path,omitempty"`
@@ -341,23 +266,20 @@ type EditableLogsConfig struct {
 	Rotation string `json:"rotation,omitempty"`
 }
 
-// DocumentMetadata contains document metadata.
 type DocumentMetadata struct {
 	ConfigPath              string            `json:"config_path"`
-	Source                  string            `json:"source"` // "file"
+	Source                  string            `json:"source"`
 	CanSave                 bool              `json:"can_save"`
 	RestartRequiredSections []string          `json:"restart_required_sections"`
-	SecretsByPath           map[string]string `json:"secrets_by_path"` // path -> mode
+	SecretsByPath           map[string]string `json:"secrets_by_path"`
 }
 
-// ValidationError represents a validation error.
 type ValidationError struct {
 	Path    string `json:"path"`
 	Message string `json:"message"`
 	Code    string `json:"code"`
 }
 
-// resolve returns the real value of a SecretValue.
 func (sv SecretValue) resolve() string {
 	switch sv.Mode {
 	case SecretModeLiteral:
@@ -382,13 +304,8 @@ func (sv SecretValue) resolve() string {
 	}
 }
 
-// keyringResolver resolves a keyring secret name to its value. It is registered
-// by the keyring service at startup to avoid an import cycle (config must not
-// import keyring, but keyring may depend on config types).
 var keyringResolver func(name string) (string, error)
 
-// RegisterKeyringResolver installs the function used to resolve
-// {{SECRET:name}} placeholders. Passing nil clears it.
 func RegisterKeyringResolver(fn func(name string) (string, error)) {
 	keyringResolver = fn
 }

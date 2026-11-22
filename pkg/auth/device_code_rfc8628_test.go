@@ -15,20 +15,6 @@ import (
 	"time"
 )
 
-// This file tests the generic RFC 8628 device grant with httptest servers and a
-// fake clock/sleep so nothing here touches the network and every test is
-// instantaneous and deterministic.
-//
-// The Narrow place: the polling loop sleeps *before* each poll (see
-// LoginDeviceCodeRFC8628), so with the server sequence
-// [authorization_pending, slow_down, success] the recorded sleeps are
-// [i0, i0, i0+5s]: the 5 s back-off produced by the slow_down answer governs the
-// sleep that follows it. (The task spec sketches that assertion as
-// [i0, i0+5s, i0+5s], which would require the back-off of a response to affect
-// the sleep *before* it — impossible with the same response order. The
-// semantically load-bearing properties are asserted instead: one +5 s increment
-// that persists into every later sleep.)
-
 const (
 	rfc8628TestDeviceCode    = "device-secret-code-xyz"
 	rfc8628TestUserCode      = "ABCD-1234"
@@ -38,7 +24,6 @@ const (
 	rfc8628TestRefreshToken  = "refresh-token-1"
 )
 
-// rfc8628HTTPResponse is a canned answer for the fake server.
 type rfc8628HTTPResponse struct {
 	status int
 	body   string
@@ -48,8 +33,6 @@ func rfc8628JSON(status int, body string) rfc8628HTTPResponse {
 	return rfc8628HTTPResponse{status: status, body: body}
 }
 
-// rfc8628TestServer serves /device/code and /token, records every request and
-// replays a fixed list of answers (a nil / empty list answers 200 {}).
 type rfc8628TestServer struct {
 	srv *httptest.Server
 
@@ -60,9 +43,6 @@ type rfc8628TestServer struct {
 	pollForms      []url.Values
 }
 
-// newRFC8628TestServer starts the fake provider. device may be nil (200 {}),
-// and when token is exhausted the server answers 500 with an unknown error code
-// so a buggy polling loop fails fast instead of looping forever.
 func newRFC8628TestServer(t *testing.T, device *rfc8628HTTPResponse, token ...rfc8628HTTPResponse) *rfc8628TestServer {
 	t.Helper()
 
@@ -147,9 +127,6 @@ func (s *rfc8628TestServer) recordedPollForms() []url.Values {
 	return append([]url.Values(nil), s.pollForms...)
 }
 
-// rfc8628TestConfig builds a config pointed at the fake server. Its
-// DeviceVerifyURL doubles as the fallback exercised by
-// TestRFC8628VerifyURLFallback.
 func rfc8628TestConfig(s *rfc8628TestServer) OAuthProviderConfig {
 	return OAuthProviderConfig{
 		Name:            "test-provider",
@@ -162,7 +139,6 @@ func rfc8628TestConfig(s *rfc8628TestServer) OAuthProviderConfig {
 	}
 }
 
-// rfc8628DeviceBody is a well-formed device authorization response.
 func rfc8628DeviceBody(expiresIn, interval string) string {
 	return fmt.Sprintf(
 		`{"device_code":%q,"user_code":%q,"verification_uri":%q,"verification_uri_complete":%q,"expires_in":%s,"interval":%s}`,
@@ -170,15 +146,10 @@ func rfc8628DeviceBody(expiresIn, interval string) string {
 	)
 }
 
-// rfc8628Recorder is a fake clock + sleep: it never blocks and records every
-// requested duration, so tests can assert both the back-off schedule and the
-// number of polls without waiting.
 type rfc8628Recorder struct {
 	mu     sync.Mutex
 	now    time.Time
 	sleeps []time.Duration
-	// cancel, when set, is called on the first sleep to simulate a cancellation
-	// arriving mid-flight.
 	cancel func()
 }
 
@@ -246,7 +217,6 @@ func TestRFC8628HappyPathPendingThenSuccess(t *testing.T) {
 		t.Fatalf("LoginDeviceCodeRFC8628: %v", err)
 	}
 
-	// (a) one device authorization request, three token polls.
 	deviceCodeHits, tokenHits := server.counts()
 	if deviceCodeHits != 1 {
 		t.Errorf("device code endpoint hits = %d, want 1", deviceCodeHits)
@@ -255,7 +225,6 @@ func TestRFC8628HappyPathPendingThenSuccess(t *testing.T) {
 		t.Errorf("token endpoint hits = %d, want 3", tokenHits)
 	}
 
-	// (b) the device request is a form POST with client_id and scope.
 	deviceForm := server.recordedDeviceForm()
 	if got := deviceForm.Get("client_id"); got != cfg.ClientID {
 		t.Errorf("device client_id = %q, want %q", got, cfg.ClientID)
@@ -267,7 +236,6 @@ func TestRFC8628HappyPathPendingThenSuccess(t *testing.T) {
 		t.Errorf("device request must not carry grant_type, got %q", got)
 	}
 
-	// (c) every poll carries grant_type + device_code + client_id.
 	for i, form := range server.recordedPollForms() {
 		if got := form.Get("grant_type"); got != "urn:ietf:params:oauth:grant-type:device_code" {
 			t.Errorf("poll %d grant_type = %q", i, got)
@@ -280,7 +248,6 @@ func TestRFC8628HappyPathPendingThenSuccess(t *testing.T) {
 		}
 	}
 
-	// (d) the credential comes from the token response, tagged with cfg.Name.
 	if cred == nil {
 		t.Fatal("credential = nil, want non-nil")
 	}
@@ -294,8 +261,6 @@ func TestRFC8628HappyPathPendingThenSuccess(t *testing.T) {
 		t.Errorf("Provider = %q, want %q", cred.Provider, cfg.Name)
 	}
 
-	// (e) instructions show the complete URI and the user code, never the device
-	// code (a secret that could be redeemed by anyone who reads it).
 	out := collected.String()
 	if !strings.Contains(out, rfc8628TestVerificationC) {
 		t.Errorf("output does not contain the verification_uri_complete:\n%s", out)
@@ -307,7 +272,6 @@ func TestRFC8628HappyPathPendingThenSuccess(t *testing.T) {
 		t.Errorf("output leaks the device_code:\n%s", out)
 	}
 
-	// A 1 s server interval, floored by the 1 s default MinInterval.
 	rfc8628AssertSleeps(t, recorder.recordedSleeps(), []time.Duration{time.Second, time.Second, time.Second})
 }
 
@@ -330,8 +294,6 @@ func TestRFC8628SlowDownBacksOff(t *testing.T) {
 		t.Fatal("credential = nil, want non-nil")
 	}
 
-	// i0 = 2 s (server): the sleep after authorization_pending keeps 2 s, the
-	// slow_down answer adds exactly 5 s and the increment persists.
 	rfc8628AssertSleeps(t, recorder.recordedSleeps(), []time.Duration{2 * time.Second, 2 * time.Second, 7 * time.Second})
 
 	_, tokenHits := server.counts()
@@ -396,9 +358,6 @@ func TestRFC8628AccessDeniedSurfacesDescription(t *testing.T) {
 }
 
 func TestRFC8628HonorsExpiresIn(t *testing.T) {
-	// The server keeps answering authorization_pending; once the canned answers
-	// run out the test server replies 500 test-server-exhausted, so a loop that
-	// ignored the deadline would fail on that error instead of hanging.
 	server := newRFC8628TestServer(
 		t,
 		ptrRFC8628Response(rfc8628JSON(http.StatusOK, rfc8628DeviceBody("1", "1"))),
@@ -505,8 +464,6 @@ func TestRFC8628MissingDeviceCodeInResponseIsError(t *testing.T) {
 	}
 }
 
-// rfc8628CountingTransport counts round trips so a test can prove the
-// configured client — not http.DefaultClient — was used.
 type rfc8628CountingTransport struct {
 	base http.RoundTripper
 	hits *int64
@@ -552,7 +509,7 @@ func TestRFC8628ContextCancellation(t *testing.T) {
 	defer cancel()
 
 	recorder := newRFC8628Recorder()
-	recorder.cancel = cancel // cancellation lands while the loop is sleeping
+	recorder.cancel = cancel
 	opts := recorder.options()
 
 	done := make(chan struct{})
@@ -588,8 +545,6 @@ func TestRFC8628ContextCancellation(t *testing.T) {
 }
 
 func TestRFC8628VerifyURLFallback(t *testing.T) {
-	// The device response carries no URI at all: cfg.DeviceVerifyURL must be used
-	// for the user-facing instructions instead of failing validation.
 	server := newRFC8628TestServer(
 		t,
 		ptrRFC8628Response(rfc8628JSON(http.StatusOK, fmt.Sprintf(`{"device_code":%q,"user_code":%q,"expires_in":900,"interval":1}`, rfc8628TestDeviceCode, rfc8628TestUserCode))),
@@ -621,8 +576,6 @@ func TestRFC8628VerifyURLFallback(t *testing.T) {
 	}
 }
 
-// ptrRFC8628Response is a tiny helper so the canned device response can be
-// passed as *rfc8628HTTPResponse (nil means "empty 200 {}").
 func ptrRFC8628Response(resp rfc8628HTTPResponse) *rfc8628HTTPResponse {
 	return &resp
 }

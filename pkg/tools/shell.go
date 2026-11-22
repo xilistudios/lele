@@ -26,59 +26,38 @@ type ExecTool struct {
 	denyPatterns        []*regexp.Regexp
 	allowPatterns       []*regexp.Regexp
 	restrictToWorkspace bool
-	approvalMode        bool                                  // Activa modo aprobación
-	approvalCallback    func(cmd string) (bool, error)        // Callback para solicitar aprobación
-	channel             string                                // Channel for feedback messages
-	chatID              string                                // ChatID for feedback messages
-	feedbackCallback    func(channel, chatID, message string) // Callback to send feedback messages
-	verboseLevel        session.VerboseLevel                  // Verbose level for feedback messages
-	backgroundManager   *BackgroundProcessManager             // Manager for background processes
-	backgroundThreshold time.Duration                         // Duration threshold for auto-backgrounding
-	keyringSvc          *keyring.Service                      // Optional keyring for {{SECRET:name}} substitution
-	secretSubstitution  bool                                  // Enable {{SECRET:name}} substitution (default true)
+	approvalMode        bool
+	approvalCallback    func(cmd string) (bool, error)
+	channel             string
+	chatID              string
+	feedbackCallback    func(channel, chatID, message string)
+	verboseLevel        session.VerboseLevel
+	backgroundManager   *BackgroundProcessManager
+	backgroundThreshold time.Duration
+	keyringSvc          *keyring.Service
+	secretSubstitution  bool
 
-	// whitelistMu guards whitelistCmds, which can be extended at run time from
-	// the UI ("always allow" on an approval prompt) while other turns execute.
 	whitelistMu   sync.RWMutex
 	whitelistCmds map[string]struct{}
 }
 
-// NormalizeWhitelistKey canonicalizes a command for whitelist comparison:
-// trimmed, inner whitespace collapsed and lowercased. Exact-match semantics
-// keep the feature predictable — no regex surprises for users typing commands
-// into a config file.
 func NormalizeWhitelistKey(command string) string {
 	return strings.ToLower(strings.Join(strings.Fields(command), " "))
 }
 
-// secretPlaceholderInlineRegex matches {{SECRET:name}} placeholders anywhere in
-// a command string (not just whole-string, unlike the config resolver).
 var secretPlaceholderInlineRegex = regexp.MustCompile(`\{\{SECRET:([^}]+)\}\}`)
 
-// secretValueShellMeta matches characters that have special meaning in shell
-// syntax. If a keyring value contains any of these, inlining it into a shell
-// command would allow injection of arbitrary shell syntax (e.g. command
-// substitution, pipes, redirects). The fix rejects such values outright.
-//
-// Trade-off: values containing legitimate '$' in hashes (e.g. bcrypt "$2b$…")
-// are also rejected. This is acceptable because (a) such values should never be
-// inlined into shell commands — use env vars instead — and (b) blocking '$'
-// closes both $() and ${} vectors in a single check, in addition to the
-// explicit block below.
 var secretValueShellMeta = regexp.MustCompile("[`;$|&<>\n\r\\\\\"']")
 
-// SetContext implements ContextualTool interface
 func (t *ExecTool) SetContext(channel, chatID string) {
 	t.channel = channel
 	t.chatID = chatID
 }
 
-// SetFeedbackCallback sets the callback for sending feedback messages
 func (t *ExecTool) SetFeedbackCallback(callback func(channel, chatID, message string)) {
 	t.feedbackCallback = callback
 }
 
-// SetVerbose sets the verbose level for feedback messages
 func (t *ExecTool) SetVerbose(level session.VerboseLevel) {
 	t.verboseLevel = level
 }
@@ -87,9 +66,9 @@ var defaultDenyPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\brm\s+-[rf]{1,2}\b`),
 	regexp.MustCompile(`\bdel\s+/[fq]\b`),
 	regexp.MustCompile(`\brmdir\s+/s\b`),
-	regexp.MustCompile(`\b(format|mkfs|diskpart)\b\s`), // Match disk wiping commands (must be followed by space/args)
+	regexp.MustCompile(`\b(format|mkfs|diskpart)\b\s`),
 	regexp.MustCompile(`\bdd\s+if=`),
-	regexp.MustCompile(`>\s*/dev/sd[a-z]\b`), // Block writes to disk devices (but allow /dev/null)
+	regexp.MustCompile(`>\s*/dev/sd[a-z]\b`),
 	regexp.MustCompile(`\b(shutdown|reboot|poweroff)\b`),
 	regexp.MustCompile(`:\(\)\s*\{.*\};\s*:`),
 	regexp.MustCompile(`\$\([^)]+\)`),
@@ -139,7 +118,6 @@ func NewExecToolWithConfig(workingDir string, restrict bool, config *config.Conf
 	if config != nil {
 		execConfig := config.Tools.Exec
 		if enableDenyPatterns {
-			// Defaults are always the base; custom patterns are added on top.
 			denyPatterns = append(denyPatterns, defaultDenyPatterns...)
 			if len(execConfig.CustomDenyPatterns) > 0 {
 				logger.DebugCF("tools", "adding custom deny patterns", map[string]interface{}{"patterns": execConfig.CustomDenyPatterns})
@@ -153,7 +131,6 @@ func NewExecToolWithConfig(workingDir string, restrict bool, config *config.Conf
 				}
 			}
 		} else {
-			// If deny patterns are disabled, we won't add any patterns, allowing all commands.
 			logger.WarnCF("tools", "deny patterns are disabled. All commands will be allowed.", nil)
 		}
 	} else {
@@ -181,8 +158,6 @@ func NewExecToolWithConfig(workingDir string, restrict bool, config *config.Conf
 	return t
 }
 
-// SetWhitelist replaces the run-time command whitelist (exact commands the user
-// chose to "always allow"). Empty/whitespace-only entries are ignored.
 func (t *ExecTool) SetWhitelist(commands []string) {
 	next := make(map[string]struct{}, len(commands))
 	for _, c := range commands {
@@ -197,8 +172,6 @@ func (t *ExecTool) SetWhitelist(commands []string) {
 	t.whitelistMu.Unlock()
 }
 
-// AddWhitelistCommand adds one command to the in-memory whitelist. Returns true
-// when the entry is new.
 func (t *ExecTool) AddWhitelistCommand(command string) bool {
 	key := NormalizeWhitelistKey(command)
 	if key == "" {
@@ -216,7 +189,6 @@ func (t *ExecTool) AddWhitelistCommand(command string) bool {
 	return true
 }
 
-// Whitelisted reports whether command matches a whitelisted entry.
 func (t *ExecTool) Whitelisted(command string) bool {
 	key := NormalizeWhitelistKey(command)
 	if key == "" {
@@ -285,12 +257,8 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		}
 	}
 
-	// Parse background mode flag
 	backgroundMode, _ := args["background"].(bool)
 
-	// Validate working_dir against the workspace when restriction is enabled.
-	// Without this check, cwd could point outside the workspace, defeating the
-	// path checks performed by the safety guard below.
 	if t.restrictToWorkspace && cwd != "" {
 		absCwd, err := filepath.Abs(cwd)
 		if err != nil {
@@ -305,24 +273,10 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		}
 	}
 
-	// Check safety guards unless bypass is enabled for THIS specific command
-	// in THIS context. The bypass is scoped to the approved command string
-	// (case/whitespace-normalized comparison) so that a stale or racing flag
-	// can never authorize a different command. See WithBypassGuard in base.go.
 	if !BypassGuardFor(ctx, command) {
 		guardMsg, isBlockable := t.guardCommandWithStatus(command, cwd)
 		if guardMsg != "" {
-			// Si está en modo aprobación y el comando es bloqueable (requiere aprobación)
 			if t.approvalMode && isBlockable {
-				// Retornar resultado especial indicando que se necesita aprobación.
-				//
-				// The ForLLM wording is deliberately terminal and actionable:
-				// the interactive parent path intercepts on ApprovalRequired
-				// BEFORE reading ForLLM (pkg/agent/tool_executor.go), but a
-				// subagent executes through RunToolLoop, which ignores
-				// ApprovalRequired and feeds ForLLM straight to the model.
-				// A "requires user approval" phrasing reads like a transient
-				// state there, so the model retries until the task times out.
 				return &ToolResult{
 					ForLLM: fmt.Sprintf(
 						"Command '%s' was NOT executed: it is blocked by an approval guard (%s) "+
@@ -344,7 +298,6 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		}
 	}
 
-	// Context for the wait loop (timeout + agent cancellation)
 	var cmdCtx context.Context
 	var cancel context.CancelFunc
 	if t.timeout > 0 {
@@ -354,40 +307,13 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	}
 	defer cancel()
 
-	// Resolve {{SECRET:name}} placeholders just before execution. The guard
-	// checks above ran against the placeholder form, so raw secret values are
-	// never exposed to safety guards, logs, or session history.
 	resolvedCommand, err := t.substituteSecrets(ctx, command)
 	if err != nil {
 		return ErrorResult(err.Error())
 	}
 
-	// ── Post-substitution safety re-guard (Layer B) ─────────────────────
-	// Defence-in-depth: the safety guard above checked the command with
-	// placeholders (e.g. "echo {{SECRET:x}}"), not the resolved form. If
-	// substituteSecrets' own metacharacter check (layer A) were ever
-	// relaxed or bypassed, a crafted secret value could introduce shell
-	// syntax that evades the deny patterns. Re-running the guard on the
-	// resolved command catches this. We skip when no substitution occurred
-	// (resolved == original) to avoid redundant work.
-	//
-	// IMPORTANT: we only re-guard when the ORIGINAL command (with
-	// placeholders) was clean — i.e. no deny patterns matched. If the
-	// original already matched deny patterns and was allowed via bypass
-	// (context-based approval), those dangerous patterns were explicitly
-	// authorized by the user who saw the full command template. Re-blocking
-	// them post-substitution would create a false positive for legitimate
-	// approved commands like "echo {{SECRET:token}}; rm -rf /path". The
-	// purpose of B is to catch NEW dangerous patterns introduced by the
-	// secret VALUE, not to re-evaluate patterns the user already approved.
-	//
-	// Layer A (metacharacter check in substituteSecrets) is the primary
-	// injection defense. Layer B catches what A misses (e.g. a value that
-	// contains behavioral patterns like "rm -rf" without metacharacters
-	// but inserted into a context that makes them executable).
 	if resolvedCommand != command {
 		if origMsg, _ := t.guardCommandWithStatus(command, cwd); origMsg == "" {
-			// Original was clean; check if the resolved command is now dangerous.
 			if guardMsg, _ := t.guardCommandWithStatus(resolvedCommand, cwd); guardMsg != "" {
 				return ErrorResult("post-substitution safety guard: " + guardMsg)
 			}
@@ -395,11 +321,8 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	}
 	command = resolvedCommand
 
-	// Detached context for the command process (survives after we return
-	// for backgrounded processes)
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 
-	// Create command with bgCtx so it can survive agent lifecycle
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		cmd = exec.CommandContext(bgCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", command)
@@ -410,13 +333,6 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		cmd.Dir = cwd
 	}
 
-	// ── Non-interactive environment hardening ─────────────────────────
-	// Prevent child processes from blocking on interactive prompts or
-	// pagers. GIT_TERMINAL_PROMPT=0 makes git fail fast instead of
-	// prompting for credentials (even if askpass machinery exists);
-	// GIT_PAGER/PAGER=cat prevents git-log/diff/etc from spawning
-	// interactive pagers that wait for 'q'; DEBIAN_FRONTEND=noninteractive
-	// prevents apt/dpkg configuration dialogs.
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_PAGER=cat",
@@ -424,55 +340,29 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		"DEBIAN_FRONTEND=noninteractive",
 	)
 
-	// Stdin is nil by default (Go connects it to /dev/null). Set it
-	// explicitly as documentation: git reads /dev/tty for credential
-	// prompts (not stdin), so this alone is insufficient — that is what
-	// detachControllingTerminal (setsid) fixes.
 	cmd.Stdin = nil
 
-	// ── Detach controlling terminal (Unix) ────────────────────────────
-	// Prevent the child from inheriting the TUI's terminal. Without
-	// setsid, commands that open /dev/tty (git credential prompts, sudo,
-	// ssh, pagers) would write over the TUI and block forever.
 	detachControllingTerminal(cmd)
 
-	// ── Group-aware cancel ────────────────────────────────────────────
-	// Override the default CommandContext kill behavior. The default only
-	// signals the direct child (the sh wrapper), which orphans
-	// grandchildren (e.g. git spawned by sh -c "git push"). With
-	// Setsid the child is a session/group leader, so killProcessTree
-	// (kill -pgid) reaps everything. WaitDelay bounds the pipe-drain
-	// wait after the group kill.
-	//
-	// Background processes are NOT killed by these settings: Cancel only
-	// fires when bgCtx is canceled. bgCtx is canceled either:
-	//   (a) after cmd.Wait returns (process already exited — no-op), or
-	//   (b) when cmdCtx times out (we want to kill the tree here), or
-	//   (c) when the background manager calls stop (we also want tree kill).
 	cmd.Cancel = func() error {
 		killProcessTree(cmd)
 		return nil
 	}
 	cmd.WaitDelay = 3 * time.Second
 
-	// Thread-safe buffers so the background manager can read while the
-	// process is still writing.
-	stdout := newThreadSafeBuffer(1024 * 1024) // 1MB cap
-	stderr := newThreadSafeBuffer(1024 * 1024) // 1MB cap
+	stdout := newThreadSafeBuffer(1024 * 1024)
+	stderr := newThreadSafeBuffer(1024 * 1024)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
-	// Generate process name for feedback
 	processName := utils.RandomProcessName()
 
-	// Start the command
 	startTime := time.Now()
 	if err := cmd.Start(); err != nil {
 		bgCancel()
 		return ErrorResult(fmt.Sprintf("failed to start command: %v", err))
 	}
 
-	// ── Explicit background mode ──────────────────────────────────────
 	if backgroundMode && t.backgroundManager != nil {
 		_, ownerSessionKey := AgentToolContextFromCtx(ctx)
 		proc := t.backgroundManager.Register(cmd, command, cwd, stdout, stderr, bgCancel, ownerSessionKey)
@@ -483,8 +373,6 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 				if exitErr, ok := err.(*exec.ExitError); ok {
 					exitCode = exitErr.ExitCode()
 				} else if errors.Is(err, exec.ErrWaitDelay) {
-					// Process exited cleanly; only the I/O drain timed out
-					// (a descendant kept the pipes open). Not a failure.
 				} else {
 					exitCode = 1
 				}
@@ -499,13 +387,11 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		}
 	}
 
-	// Channel to signal command completion
 	done := make(chan error, 1)
 	go func() {
 		done <- cmd.Wait()
 	}()
 
-	// Wait for command to complete with periodic heartbeats
 	var execErr error
 	feedbackSent := false
 	heartbeatInterval := 5 * time.Second
@@ -513,30 +399,21 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	for {
 		select {
 		case execErr = <-done:
-			bgCancel() // clean up background context
+			bgCancel()
 		case <-cmdCtx.Done():
-			bgCancel() // kill the command
+			bgCancel()
 			execErr = cmdCtx.Err()
 		case <-time.After(heartbeatInterval):
-			// Auto-background: if the process has been running longer than
-			// the threshold, move it to the background.
 			if t.backgroundManager != nil && t.backgroundThreshold > 0 && time.Since(startTime) >= t.backgroundThreshold {
 				_, ownerSessionKey := AgentToolContextFromCtx(ctx)
 				proc := t.backgroundManager.Register(cmd, command, cwd, stdout, stderr, bgCancel, ownerSessionKey)
 				go func() {
-					// Reuse the single Wait goroutine's result via `done`.
-					// Calling cmd.Wait() a second time here would race with
-					// the foreground Wait goroutine (Cmd.Wait is not
-					// reentrant): the duplicate returns an error, which used
-					// to mark successfully-finished processes as failed(1).
 					err := <-done
 					exitCode := 0
 					if err != nil {
 						if exitErr, ok := err.(*exec.ExitError); ok {
 							exitCode = exitErr.ExitCode()
 						} else if errors.Is(err, exec.ErrWaitDelay) {
-							// Process exited cleanly; only the I/O drain
-							// timed out. Not a failure.
 						} else {
 							exitCode = 1
 						}
@@ -550,7 +427,6 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 					IsError: false,
 				}
 			}
-			// Existing feedback for long-running commands
 			if verboseLevel == session.VerboseFull && feedbackCallback != nil && channel != "" && chatID != "" {
 				elapsedSoFar := time.Since(startTime).Round(time.Second)
 				feedbackMsg := fmt.Sprintf("🧰 Process: %s (running for %v)", processName, elapsedSoFar)
@@ -559,12 +435,11 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 			}
 			continue
 		}
-		break // Exit the loop when command completes
+		break
 	}
 
 	elapsed := time.Since(startTime)
 
-	// Check if context was cancelled due to timeout or user stop
 	if cmdCtx.Err() == context.DeadlineExceeded {
 		msg := fmt.Sprintf("Command timed out after %v", t.timeout)
 		return &ToolResult{
@@ -587,11 +462,6 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		output += "\nSTDERR:\n" + stderr.String()
 	}
 
-	// exec.ErrWaitDelay means the process itself exited successfully but a
-	// surviving descendant (e.g. a daemon spawned outside our process group)
-	// kept our stdout/stderr pipes open past cmd.WaitDelay. The captured
-	// output is valid; surfacing Go's internal error as a command failure
-	// would turn a successful run into a false error for the model.
 	ioDrainTimedOut := errors.Is(execErr, exec.ErrWaitDelay)
 	if execErr != nil && !ioDrainTimedOut {
 		output += fmt.Sprintf("\nExit code: %v", execErr)
@@ -604,16 +474,10 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		output = "(no output)"
 	}
 
-	// AGT-04: cap output at 64KB total with head+tail preservation.
-	// The threadSafeBuffer already bounds memory at 1MB per stream;
-	// this caps the *returned* output that goes into the LLM context.
-	// head 48KB + tail 16KB = 64KB max (+ short marker).
 	const outputHeadBytes = 48 * 1024
 	const outputTailBytes = 16 * 1024
 	output = utils.TruncateOutput(output, outputHeadBytes, outputTailBytes)
 
-	// If feedback was sent and command completed, optionally send completion message
-	// (only if it took significant time)
 	if feedbackSent && elapsed > 10*time.Second && t.feedbackCallback != nil {
 		completionMsg := fmt.Sprintf("✅ Process %s completed (took %v)", processName, elapsed.Round(time.Second))
 		t.feedbackCallback(t.channel, t.chatID, completionMsg)
@@ -643,9 +507,6 @@ func (t *ExecTool) guardCommandWithStatus(command, cwd string) (string, bool) {
 	cmd := strings.TrimSpace(command)
 	lower := strings.ToLower(cmd)
 
-	// Explicit user whitelist ("always allow" on a previous approval prompt)
-	// short-circuits the safety guards, exactly like the post-approval
-	// bypassGuard path does for a single command.
 	if t.Whitelisted(cmd) {
 		return "", false
 	}
@@ -706,24 +567,14 @@ func (t *ExecTool) SetTimeout(timeout time.Duration) {
 	t.timeout = timeout
 }
 
-// SetKeyringService attaches a keyring service used to resolve {{SECRET:name}}
-// placeholders in commands at run time.
 func (t *ExecTool) SetKeyringService(svc *keyring.Service) {
 	t.keyringSvc = svc
 }
 
-// SetSecretSubstitution enables or disables {{SECRET:name}} substitution.
 func (t *ExecTool) SetSecretSubstitution(enabled bool) {
 	t.secretSubstitution = enabled
 }
 
-// substituteSecrets replaces every {{SECRET:name}} placeholder in the command
-// with the corresponding keyring value, scoped to the acting agent. The raw
-// secret value is injected only here, immediately before execution, so it never
-// appears in guard checks, logs, or session history. If no keyring is attached
-// or substitution is disabled, the command is returned unchanged. An unknown or
-// inaccessible secret yields an error so the command is not run with a literal
-// placeholder.
 func (t *ExecTool) substituteSecrets(ctx context.Context, command string) (string, error) {
 	if !t.secretSubstitution || t.keyringSvc == nil {
 		return command, nil
@@ -749,12 +600,6 @@ func (t *ExecTool) substituteSecrets(ctx context.Context, command string) (strin
 			subErr = fmt.Errorf("failed to resolve secret %q: %w", name, err)
 			return match
 		}
-		// Layer A (primary injection defense): a secret value that contains
-		// shell metacharacters ($(), backticks, ;, |, quotes, newlines, ...)
-		// would introduce syntax the safety guard never saw, because the
-		// guard runs on the placeholder form BEFORE substitution. Reject the
-		// whole command instead of inlining an untrusted value. Legit secrets
-		// (alphanumeric, -_./:, base64/JWT/ghp_ prefixes) never match.
 		if secretValueShellMeta.MatchString(value) {
 			subErr = fmt.Errorf("secret %q contains shell metacharacters/substitution syntax and cannot be inlined into a command; store the value without shell syntax or pass it via env", name)
 			return match
@@ -783,30 +628,21 @@ func (t *ExecTool) SetAllowPatterns(patterns []string) error {
 	return nil
 }
 
-// SetApprovalMode activa/desactiva el modo de aprobación para comandos peligrosos
 func (t *ExecTool) SetApprovalMode(enabled bool) {
 	t.approvalMode = enabled
 }
 
-// SetApprovalCallback configura la función de callback para solicitar aprobación
 func (t *ExecTool) SetApprovalCallback(callback func(cmd string) (bool, error)) {
 	t.approvalCallback = callback
 }
 
-// Deprecated: SetBypassGuard was removed in favour of per-call context-based
-// bypass (WithBypassGuard / BypassGuardFor). This stub exists only to satisfy
-// the mock in llm_runner_test.go until it is migrated; it is a no-op.
 func (t *ExecTool) SetBypassGuard(_ bool) {
-	// Intentional no-op. Callers must use WithBypassGuard on the context instead.
 }
 
-// SetBackgroundManager sets the background process manager for long-running commands.
 func (t *ExecTool) SetBackgroundManager(m *BackgroundProcessManager) {
 	t.backgroundManager = m
 }
 
-// SetBackgroundThreshold sets the duration threshold after which a command is
-// automatically moved to the background.
 func (t *ExecTool) SetBackgroundThreshold(d time.Duration) {
 	t.backgroundThreshold = d
 }

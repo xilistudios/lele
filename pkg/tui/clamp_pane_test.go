@@ -8,7 +8,6 @@ import (
 )
 
 func TestClampPaneLinePadsAndTruncates(t *testing.T) {
-	// Short line is padded to exact width (Terminal.app scroll safety).
 	got := clampPaneLine("ab", 5)
 	if w := ansi.StringWidth(got); w != 5 {
 		t.Fatalf("padded width = %d, want 5 (%q)", w, got)
@@ -17,14 +16,12 @@ func TestClampPaneLinePadsAndTruncates(t *testing.T) {
 		t.Fatalf("expected trailing spaces, got %q", got)
 	}
 
-	// Long line is truncated to exact width.
 	long := strings.Repeat("x", 10)
 	got = clampPaneLine(long, 4)
 	if w := ansi.StringWidth(got); w != 4 {
 		t.Fatalf("truncated width = %d, want 4 (%q)", w, got)
 	}
 
-	// Wide emoji at the cut point must not overshoot.
 	withEmoji := strings.Repeat("a", 3) + "🌐" + strings.Repeat("b", 5)
 	got = clampPaneLine(withEmoji, 4)
 	if w := ansi.StringWidth(got); w > 4 {

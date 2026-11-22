@@ -1,8 +1,5 @@
 package session
 
-// Tests for AttachFilesToLastAssistant: persistence of send_file attachments
-// on the last assistant message of a session (WebUI file download feature).
-
 import (
 	"testing"
 
@@ -41,7 +38,6 @@ func TestAttachFilesToLastAssistant_AppendsToLastAssistant(t *testing.T) {
 	if got := last.Attachments[0].Name; got != "report.pdf" {
 		t.Errorf("attachment name = %q, want report.pdf", got)
 	}
-	// The FIRST assistant message must be untouched.
 	if len(hist[1].Attachments) != 0 {
 		t.Errorf("first assistant got %d attachments, want 0", len(hist[1].Attachments))
 	}
@@ -56,10 +52,10 @@ func TestAttachFilesToLastAssistant_DedupesByPath(t *testing.T) {
 
 	once := []providers.MessageAttachment{att("a.txt", "/x/a.txt")}
 	sm.AttachFilesToLastAssistant(key, once)
-	sm.AttachFilesToLastAssistant(key, once) // repeated message.complete
+	sm.AttachFilesToLastAssistant(key, once)
 	sm.AttachFilesToLastAssistant(key, []providers.MessageAttachment{
-		att("a.txt", "/x/a.txt"), // dup path, different name — still skipped
-		att("b.txt", "/x/b.txt"), // new
+		att("a.txt", "/x/a.txt"),
+		att("b.txt", "/x/b.txt"),
 	})
 
 	hist := sm.GetHistory(key)
@@ -88,7 +84,6 @@ func TestAttachFilesToLastAssistant_NoAssistantIsNoop(t *testing.T) {
 		t.Fatalf("user-only session must not gain attachments, got %+v", hist)
 	}
 
-	// Unknown session: must not panic nor create one.
 	sm.AttachFilesToLastAssistant("native:does-not-exist", []providers.MessageAttachment{att("a.txt", "/x/a.txt")})
 }
 
@@ -101,7 +96,6 @@ func TestAttachFilesToLastAssistant_PersistsAcrossReload(t *testing.T) {
 	sm.AddMessage(key, "assistant", "hola")
 	sm.AttachFilesToLastAssistant(key, []providers.MessageAttachment{att("f.bin", "/x/f.bin")})
 
-	// Fresh manager over the same store → loads from SQLite/JSON rows.
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	hist := sm2.GetHistory(key)

@@ -10,11 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// System notices ("[System: <sender>] <body>") are persisted with role "user"
-// but were never typed by the human. They must render as a tool-style card
-// (header + boxed body) like the web UI's synthetic `system_notice` tool, and
-// the raw marker must never leak into the transcript as plain user text.
-
 func TestParseSystemNotice(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -51,9 +46,6 @@ func TestParseSystemNotice(t *testing.T) {
 	}
 }
 
-// TestRenderSystemNotice_CardShape pins the card structure: a compact header
-// carrying the localized label and the SENDER (never the raw marker, never the
-// body), followed by the body inside the tool-result box.
 func TestRenderSystemNotice_CardShape(t *testing.T) {
 	i18n.InitWithLanguage("en")
 	t.Cleanup(func() { i18n.InitWithLanguage("en") })
@@ -75,8 +67,6 @@ func TestRenderSystemNotice_CardShape(t *testing.T) {
 	if !strings.Contains(plain, "Task ID: t1") {
 		t.Fatalf("body missing from the card:\n%s", plain)
 	}
-	// Body rows ride in the tool-result box, so every one of them after the
-	// header carries the left border (row 0 carries the "  → " label instead).
 	if len(rows) < 3 {
 		t.Fatalf("want >= 3 rows (header + 2 body lines), got %d:\n%s", len(rows), plain)
 	}
@@ -87,8 +77,6 @@ func TestRenderSystemNotice_CardShape(t *testing.T) {
 	}
 }
 
-// TestRenderSystemNotice_EmptyBody pins that a body-less notice renders the
-// header only — no dangling empty box.
 func TestRenderSystemNotice_EmptyBody(t *testing.T) {
 	i18n.InitWithLanguage("en")
 	t.Cleanup(func() { i18n.InitWithLanguage("en") })
@@ -102,9 +90,6 @@ func TestRenderSystemNotice_EmptyBody(t *testing.T) {
 	}
 }
 
-// TestRenderSystemNotice_FitsWidth is the frame-cascade guard: the card must fit
-// the pane like every other tool row, or the viewport's wrap pass drops the
-// border/indent and shifts the rows below.
 func TestRenderSystemNotice_FitsWidth(t *testing.T) {
 	longBody := strings.Repeat("the subagent produced a long result that needs wrapping ", 6)
 	for _, width := range []int{40, 60, 100, 140} {
@@ -117,9 +102,6 @@ func TestRenderSystemNotice_FitsWidth(t *testing.T) {
 	}
 }
 
-// TestView_SystemNoticeRendersAsCard is the end-to-end guard: a persisted
-// "[System: subagent] …" message must render as the notice card, while a real
-// user message in the same transcript keeps its "You" bubble.
 func TestView_SystemNoticeRendersAsCard(t *testing.T) {
 	forceTrueColor(t)
 	i18n.InitWithLanguage("en")
@@ -157,7 +139,6 @@ func TestView_SystemNoticeRendersAsCard(t *testing.T) {
 	if !strings.Contains(plain, "hola mundo") {
 		t.Fatalf("frame missing the real user message:\n%s", plain)
 	}
-	// Only the real user message gets a "You" role line.
 	if n := strings.Count(plain, i18n.T("tui.you")); n != 1 {
 		t.Fatalf("found %d %q role lines, want 1 (the notice must not be a user bubble):\n%s", n, i18n.T("tui.you"), plain)
 	}
@@ -168,9 +149,6 @@ func TestView_SystemNoticeRendersAsCard(t *testing.T) {
 	}
 }
 
-// TestSystemNoticeKeyPresentInBuiltinLocales guards the label itself: T() falls
-// back to the default locale for a missing key, so only a verbatim lookup in
-// each builtin pack proves the key was not forgotten in one of them.
 func TestSystemNoticeKeyPresentInBuiltinLocales(t *testing.T) {
 	for _, lang := range i18n.BuiltinLanguages() {
 		i18n.InitWithLanguage(lang)

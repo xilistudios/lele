@@ -6,10 +6,6 @@ import (
 	"time"
 )
 
-// Tests for subagent status persistence (WebUI sidebar shows the real
-// outcome of evicted/restarted subagents instead of a hard-coded
-// "completed").
-
 func TestSetSubagentStatus_PersistsAndSurvivesReload(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -24,15 +20,12 @@ func TestSetSubagentStatus_PersistsAndSurvivesReload(t *testing.T) {
 
 	sm.SetSubagentStatus(key, "failed")
 
-	// In-memory view must reflect it immediately.
 	for _, past := range sm.FindSubagentSessions("native:client-1") {
 		if past.TaskID == "subagent-3" && past.Status != "failed" {
 			t.Fatalf("in-memory status = %q, want %q", past.Status, "failed")
 		}
 	}
 
-	// A fresh SessionManager over the same store must see it too
-	// (restart/eviction path).
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	results := sm2.FindSubagentSessions("native:client-1")
@@ -52,7 +45,6 @@ func TestSetSubagentStatus_UnknownKeyIsNoop(t *testing.T) {
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
 
-	// Must not create the session nor panic.
 	sm.SetSubagentStatus("native:ghost:subagent-1", "completed")
 
 	if sm.SessionExists("native:ghost:subagent-1") {
@@ -61,8 +53,6 @@ func TestSetSubagentStatus_UnknownKeyIsNoop(t *testing.T) {
 }
 
 func TestFindSubagentSessions_StatusEmptyWithoutPersistence(t *testing.T) {
-	// A subagent session recorded before this feature (or without a store)
-	// carries no status: the reader layer falls back to "completed".
 	sm := NewSessionManager()
 	parent := "native:client-1"
 	sm.AddMessage(parent+":subagent-1", "user", "task")
@@ -95,7 +85,6 @@ func TestFindSubagentSessions_StatusAcrossManyTerminals(t *testing.T) {
 		sm.AddMessage(key, "user", "task")
 		sm.AddMessage(key, "assistant", "answer")
 	}
-	// Set statuses AFTER all sessions exist so each one is resident when set.
 	for taskID, status := range statuses {
 		sm.SetSubagentStatus(parent+":"+taskID, status)
 	}
@@ -149,8 +138,6 @@ func sessStatus(s *Session) string {
 	return s.SubagentStatus
 }
 
-// TestSetSubagentStatus_DoesNotClobberMessageContent is a guard: persisting
-// the status must not disturb the message payload of a resident session.
 func TestSetSubagentStatus_DoesNotClobberMessageContent(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -164,7 +151,6 @@ func TestSetSubagentStatus_DoesNotClobberMessageContent(t *testing.T) {
 	}
 	sm.SetSubagentStatus(key, "cancelled")
 
-	// Reload everything from disk: messages must be intact.
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	hist := sm2.GetHistory(key)

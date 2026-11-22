@@ -9,29 +9,19 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// renderFormModal renders a multi-step form modal with step indicators,
-// an input field for the current step, and optional error display. It frames
-// the modal content with paintFrame.
 func (m *Model) renderFormModal(title string, steps []string) string {
 	return m.paintFrame(m.renderFormModalContent(title, steps))
 }
 
-// renderFormModalContent builds the ModalContainer-wrapped (but unframed)
-// content for a form modal. renderFormModal paints it into a full frame; the
-// onboarding wizard renders it inline inside its own frame via renderObConnect.
 func (m *Model) renderFormModalContent(title string, steps []string) string {
 	var sb strings.Builder
 	sb.WriteString(TitleStyle.Render(title) + "\n\n")
 
-	// ── Success screen: show what was saved and how to continue ──
 	if m.connectSuccess {
 		sb.WriteString(m.renderFormSuccess())
 		return ModalContainer.Render(sb.String())
 	}
 
-	// Provider picker: the row catalogue (connectRows) of the row-driven
-	// /connect flow, or the legacy providerPresets list on the free-text
-	// name path.
 	if m.modalMode == ModalAddProvider && m.providerTypePicker {
 		sb.WriteString(m.renderProviderTypePicker())
 		return ModalContainer.Render(sb.String())
@@ -39,45 +29,34 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 
 	isReviewStep := m.modalMode == ModalAddProvider && m.formStepIndex == 10 && m.providerSavedInFlow
 
-	// ── Step list ──
 	sb.WriteString(m.renderFormSteps(steps, isReviewStep))
 	sb.WriteString("\n")
 
-	// Error display
 	if m.formError != "" {
 		sb.WriteString(lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n\n")
 	}
 
-	// OAuth success confirmation: after a native provider login hands off to
-	// this wizard, the "signed in as X" line from connectOAuthFinishDone is
-	// surfaced here (it lives on connectOAuthFeedback, which the form's own
-	// error slot does not show).
 	if m.connectOAuthFeedback != "" {
 		sb.WriteString(SuccessStyle.Render("  ✓ "+m.connectOAuthFeedback) + "\n\n")
 	}
 
-	// Text input field (hidden on review step)
 	if !isReviewStep {
 		m.textInput.Width = 40
 		sb.WriteString(InputBarContainer.Width(44).Render(m.textInputView()) + "\n\n")
 	}
 
-	// Catalog model suggestions (filter-as-you-type) on the model-name step
 	if m.addModelCatalogActive && m.isModelNameFormStep() && !isReviewStep {
 		sb.WriteString(renderCatalogSuggestions(m.addModelCatalogLabels, m.addModelCatalogIdx, m.maxModalVisible()))
 	}
 
-	// Contextual step hint (optional fields)
 	sb.WriteString(m.renderFormStepHint(isReviewStep))
 
-	// Hints
 	sb.WriteString(m.renderFormHints(isReviewStep))
 
 	modalView := ModalContainer.Render(sb.String())
 	return modalView
 }
 
-// renderFormSuccess renders the success screen after a form is submitted.
 func (m *Model) renderFormSuccess() string {
 	var sb strings.Builder
 	sb.WriteString(SuccessStyle.Render("  "+i18n.T("tui.connectModelSaved")) + "\n\n")
@@ -106,11 +85,6 @@ func (m *Model) renderFormSuccess() string {
 	return sb.String()
 }
 
-// renderProviderTypePicker renders the /connect provider picker: the row
-// catalogue built by connectRows() (custom OpenAI/Anthropic first, one row
-// per known provider, free-type last). On the free-text-name path the same
-// widget renders the legacy providerPresets + "custom" list, which the
-// providerTypePickerMax / connectRowIdx-free branch below keeps intact.
 func (m *Model) renderProviderTypePicker() string {
 	var sb strings.Builder
 	sb.WriteString(ModalItemInactive.Render("  "+i18n.T("tui.connectPickProvider")) + "\n\n")
@@ -131,7 +105,6 @@ func (m *Model) renderProviderTypePicker() string {
 		maxVisible--
 	}
 
-	// Keep highlighted preset inside visible window
 	if m.providerTypePickerIdx < m.modalScrollOffset {
 		m.modalScrollOffset = m.providerTypePickerIdx
 	}
@@ -153,12 +126,6 @@ func (m *Model) renderProviderTypePicker() string {
 	if endIdx > max {
 		endIdx = max
 	}
-	// Resolve the row catalogue ONCE per frame. connectRowByIndex() rebuilds
-	// the whole catalogue on every call, so calling it from inside this loop
-	// made the picker frame quadratic: measured 185.6 µs/frame at 40 rows
-	// against 56.8 µs for the flat renderer it replaced. The rows are pure
-	// (built from i18n strings and static presets), so one snapshot is also
-	// the correct semantics for a single frame.
 	var rowRows []connectRow
 	if m.connectRowPicker {
 		rowRows = connectRows()
@@ -166,7 +133,6 @@ func (m *Model) renderProviderTypePicker() string {
 	for i := m.modalScrollOffset; i < endIdx; i++ {
 		var label string
 		if !m.connectRowPicker {
-			// Free-text-name path: legacy providerPresets + "custom" list.
 			if i < len(providerPresets) {
 				p := providerPresets[i]
 				label = p.label
@@ -177,17 +143,12 @@ func (m *Model) renderProviderTypePicker() string {
 				label = i18n.T("tui.connectCustomType")
 			}
 		} else if i >= 0 && i < len(rowRows) {
-			// Row-driven path: one row per (provider, auth method). The
-			// API base is only shown when the row actually carries one —
-			// the free-type row deliberately renders bare.
 			row := rowRows[i]
 			label = row.label
 			if row.apiBase != "" {
 				label += "  ·  " + row.apiBase
 			}
 		} else {
-			// Defensive: an index past the catalogue (providerTypePickerMax
-			// stale after the catalogue shrank) must not render a blank row.
 			continue
 		}
 		if i == m.providerTypePickerIdx {
@@ -204,12 +165,10 @@ func (m *Model) renderProviderTypePicker() string {
 	return sb.String()
 }
 
-// renderFormSteps renders the list of form steps with completion indicators.
 func (m *Model) renderFormSteps(steps []string, isReviewStep bool) string {
 	var sb strings.Builder
 
 	for i, step := range steps {
-		// Review mode: show completed steps
 		if isReviewStep && i < 10 {
 			val := ""
 			if i < len(m.formValues) {
@@ -226,7 +185,6 @@ func (m *Model) renderFormSteps(steps []string, isReviewStep bool) string {
 		}
 
 		if i < m.formStepIndex {
-			// Completed step
 			val := ""
 			if i < len(m.formValues) {
 				val = m.formValues[i]
@@ -256,15 +214,8 @@ func (m *Model) renderFormSteps(steps []string, isReviewStep bool) string {
 	return sb.String()
 }
 
-// renderFormStepHint renders contextual hints for the current form step.
 func (m *Model) renderFormStepHint(isReviewStep bool) string {
 	if m.modalMode == ModalEditProvider {
-		// Both in-place steps are optional: a blank API key / API base URL
-		// keeps the stored value (the key is never pre-filled, see
-		// openProviderEditFlow), so the hint has to say so — otherwise the
-		// blank input reads as "wipe it". The middle steps say the same AND
-		// teach the "-" escape hatch, and the last two spell out the accepted
-		// answer of a value-typed step.
 		switch m.formStepIndex {
 		case editProviderAPIKeyStep, editProviderAPIBaseStep:
 			return CommentColorStyle.Render("  "+i18n.T("tui.editProviderKeepHint")) + "\n\n"
@@ -278,11 +229,6 @@ func (m *Model) renderFormStepHint(isReviewStep bool) string {
 		return ""
 	}
 	if m.modalMode == ModalEditModel {
-		// The reasoning steps accept a fixed set of answers, and the optional
-		// ones need the "default" escape hatch spelled out: blank accepts the
-		// pre-filled answer, so it cannot mean "unset" (see
-		// reasoningFromFormValues). The enabled step is plain yes/no and needs
-		// no hint.
 		switch m.formStepIndex {
 		case editModelReasoningEffortStep, editModelReasoningExcludeStep, editModelReasoningSummaryStep:
 			return CommentColorStyle.Render("  "+i18n.T("tui.editModelReasoningDefaultHint")) + "\n\n"
@@ -307,12 +253,8 @@ func (m *Model) renderFormStepHint(isReviewStep bool) string {
 	return ""
 }
 
-// renderFormHints renders the bottom hints for the form modal.
 func (m *Model) renderFormHints(isReviewStep bool) string {
 	if m.modalMode == ModalEditProvider {
-		// The edit form is plain next/cancel: it borrows none of the /connect
-		// wording (no model steps to skip, nothing to review), so it must not
-		// inherit a stale providerSavedInFlow from an earlier /connect run.
 		return HelpStyle.Render("  " + i18n.T("tui.formEnter"))
 	}
 	if m.addModelCatalogActive && m.isModelNameFormStep() && !isReviewStep {
@@ -327,8 +269,6 @@ func (m *Model) renderFormHints(isReviewStep bool) string {
 	return HelpStyle.Render("  " + i18n.T("tui.formEnter"))
 }
 
-// renderCatalogSuggestions paints the filterable catalog model list shown
-// under the form's text input on the model-name step.
 func renderCatalogSuggestions(labels []string, idx, maxVisible int) string {
 	if len(labels) == 0 {
 		return CommentColorStyle.Render("  "+i18n.T("tui.catalogNoMatches")) + "\n\n"
@@ -360,12 +300,6 @@ func renderCatalogSuggestions(labels []string, idx, maxVisible int) string {
 	return sb.String()
 }
 
-// modelFormStepNames returns the labels of the model form (ModalAddModel /
-// ModalEditModel) in step order. Both modes share the first six labels — the
-// model-name label carries the catalog "(thinking: low/medium/high)" decoration
-// in both — and the edit form appends one label per reasoning override (see
-// addModelStepCount / editModelStepCount). Built from one prefix slice so the
-// shared steps can never drift between the two modes.
 func (m *Model) modelFormStepNames() []string {
 	nameLabel := "Model name"
 	if m.addModelCatalogThink != "" {
@@ -382,7 +316,6 @@ func (m *Model) modelFormStepNames() []string {
 	if m.modalMode != ModalEditModel {
 		return steps
 	}
-	// Reasoning overrides, in ReasoningConfig field order.
 	return append(steps,
 		"Reasoning (yes/no)",
 		"Reasoning effort",
@@ -392,7 +325,6 @@ func (m *Model) modelFormStepNames() []string {
 	)
 }
 
-// formStepNames returns the step names for the current form modal mode.
 func (m *Model) formStepNames() []string {
 	switch m.modalMode {
 	case ModalAddProvider:
@@ -408,12 +340,6 @@ func (m *Model) formStepNames() []string {
 	case ModalAddModel, ModalEditModel:
 		return m.modelFormStepNames()
 	case ModalEditProvider:
-		// One step per editable provider config field, in editProvider*Step
-		// order (the same constants the ENTER handler and the masking
-		// predicates use). The provider NAME is deliberately absent: renaming a
-		// provider would have to re-point every agent model reference, so the
-		// name is shown in the detail view and never rewritten here. The model
-		// list keeps its own flows.
 		return []string{
 			"Provider type",
 			"API Key",
@@ -443,9 +369,6 @@ func (m *Model) formStepNames() []string {
 			i18n.T("tui.secretScope"),
 		}
 	case ModalMCPAdd:
-		// The wizard's renderer is bespoke (renderMCPAddModal), but the
-		// labels still come from ONE place — mcpAddStepNames — so the two
-		// surfaces cannot drift.
 		return m.mcpAddStepNames()
 	default:
 		return nil

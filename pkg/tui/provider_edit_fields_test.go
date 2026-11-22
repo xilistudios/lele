@@ -11,22 +11,11 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// Tests for the "edit provider" flow (ModalEditProvider): a provider's type,
-// API key, API base URL, proxy, auth method, connect mode, web search and custom
-// headers can be changed from the provider detail view — without losing its
-// models or any field the form does not ask about. The flow is reachable both from the "Edit provider" action row and
-// from the "e" shortcut, it is masked on the API-key step, and ESC must leave
-// the stored config untouched.
-
 const (
 	providerEditTestName = "my-proxy"
 	providerEditTestKey  = "sk-1234567890abcdef"
 )
 
-// newProviderEditTestModel builds a Model with one configured provider that
-// carries credentials a form field could clobber: a Proxy, an API key and a
-// model. It is based on newTestModel (real agent loop) because the /providers
-// list is built from the loop's snapshot.
 func newProviderEditTestModel(t *testing.T) *Model {
 	t.Helper()
 	m := newTestModel(t)
@@ -46,8 +35,6 @@ func newProviderEditTestModel(t *testing.T) *Model {
 	return m
 }
 
-// openProviderEditForm lands on the provider detail view and activates the
-// "Edit provider" action row with ENTER.
 func openProviderEditForm(t *testing.T, m *Model) *Model {
 	t.Helper()
 	m = openProviderDetail(m)
@@ -65,9 +52,6 @@ func openProviderEditForm(t *testing.T, m *Model) *Model {
 	return m
 }
 
-// TestProviderDetailHasEditActionRow verifies the detail view exposes the
-// provider-level edit action, between the models separator and the add-model
-// row, and that its index never collides with a model row.
 func TestProviderDetailHasEditActionRow(t *testing.T) {
 	m := newProviderEditTestModel(t)
 	m = openProviderDetail(m)
@@ -84,10 +68,6 @@ func TestProviderDetailHasEditActionRow(t *testing.T) {
 	}
 }
 
-// TestProviderEditFormPreFillsTypeAndBaseButNotKey covers the initial state of
-// the form: type and API base URL are seeded from the stored provider so
-// Enter-through keeps them, while the API key step stays BLANK and masked (the
-// stored secret must never be rendered back into the widget).
 func TestProviderEditFormPreFillsTypeAndBaseButNotKey(t *testing.T) {
 	m := newProviderEditTestModel(t)
 	m = openProviderEditForm(t, m)
@@ -95,10 +75,6 @@ func TestProviderEditFormPreFillsTypeAndBaseButNotKey(t *testing.T) {
 	if m.providerSelectedName != providerEditTestName {
 		t.Errorf("providerSelectedName = %q, want %q", m.providerSelectedName, providerEditTestName)
 	}
-	// One entry per step, in editProvider*Step order: the stored type, base
-	// URL and proxy are seeded, the API key and the headers blob stay blank
-	// (secrets are never rendered back), and an unset web_search shows as
-	// "default".
 	wantValues := []string{"openai", "", "https://api.example.com/v1", "http://proxy.internal:8080", "", "", "default", ""}
 	if len(m.formValues) != len(wantValues) {
 		t.Fatalf("formValues = %q, want %d entries", m.formValues, len(wantValues))
@@ -117,8 +93,6 @@ func TestProviderEditFormPreFillsTypeAndBaseButNotKey(t *testing.T) {
 		}
 	}
 
-	// Moving to the API-key step must mask it, and the rendered frame must not
-	// leak the stored key anywhere.
 	m = sendKeys(m, "\r")
 	if m.formStepIndex != 1 {
 		t.Fatalf("formStepIndex = %d, want 1 (API key)", m.formStepIndex)
@@ -137,28 +111,19 @@ func TestProviderEditFormPreFillsTypeAndBaseButNotKey(t *testing.T) {
 	}
 }
 
-// TestProviderEditSavesInPlaceKeepingUntouchedFields walks the whole form —
-// new type, blank key (keep), new API base — and asserts the provider is
-// updated in place: models and proxy survive, the untouched key is preserved,
-// the result is persisted to disk and the user lands back on the detail view.
 func TestProviderEditSavesInPlaceKeepingUntouchedFields(t *testing.T) {
 	m := newProviderEditTestModel(t)
 	m = openProviderEditForm(t, m)
 
-	// Step 0 — type: replace the stored one.
 	m.textInput.SetValue("openrouter")
 	m = sendKeys(m, "\r")
-	// Step 1 — API key: blank means "keep the stored key".
 	if strings.TrimSpace(m.textInput.Value()) != "" {
 		t.Fatalf("API-key step started with %q, want blank", m.textInput.Value())
 	}
-	m = sendKeys(m, "\r") // keep the key → base step
-	// Step 2 — API base: replace it.
+	m = sendKeys(m, "\r")
 	if got, want := m.textInput.Value(), "https://api.example.com/v1"; got != want {
 		t.Fatalf("API-base step started with %q, want the stored base %q", got, want)
 	}
-	// Walk the remaining steps (base, proxy, auth, connect, web search,
-	// headers) with ENTER; the last one saves.
 	m = walkProviderEditForm(t, m, map[int]string{
 		editProviderAPIBaseStep: "https://new.example.com/v1",
 	})
@@ -190,12 +155,10 @@ func TestProviderEditSavesInPlaceKeepingUntouchedFields(t *testing.T) {
 		t.Errorf("Models = %v, want the original alpha model", provider.Models)
 	}
 
-	// The detail list was rebuilt from the saved config.
 	if len(m.modalItems) == 0 || m.modalItems[0] != "Type: openrouter" {
 		t.Errorf("detail list not rebuilt from the saved config: %q", m.modalItems)
 	}
 
-	// And the change reached the disk, not just the in-memory config.
 	saved, err := config.LoadConfig(config.DefaultConfigPath())
 	if err != nil {
 		t.Fatalf("reloading the saved config: %v", err)
@@ -212,16 +175,12 @@ func TestProviderEditSavesInPlaceKeepingUntouchedFields(t *testing.T) {
 	}
 }
 
-// TestProviderEditNewKeyReplacesStoredKey covers the other half of the "blank
-// means keep" rule: a key that IS typed must replace the stored one.
 func TestProviderEditNewKeyReplacesStoredKey(t *testing.T) {
 	m := newProviderEditTestModel(t)
 	m = openProviderEditForm(t, m)
 
-	m = sendKeys(m, "\r") // keep the type
+	m = sendKeys(m, "\r")
 	m.textInput.SetValue("sk-brand-new-key")
-	// Enter through the remaining steps (key + base + the optional ones); a
-	// blank key step would keep the stored key.
 	m = walkProviderEditForm(t, m, nil)
 
 	if m.modalMode != ModalProviderDetail {
@@ -236,14 +195,12 @@ func TestProviderEditNewKeyReplacesStoredKey(t *testing.T) {
 	}
 }
 
-// TestProviderEditEscKeepsStoredConfig verifies ESC is a pure discard: no field
-// changes and the user lands back on the provider detail.
 func TestProviderEditEscKeepsStoredConfig(t *testing.T) {
 	m := newProviderEditTestModel(t)
 	m = openProviderEditForm(t, m)
 
 	m.textInput.SetValue("anthropic")
-	m = sendKeys(m, "\r") // stage the type change
+	m = sendKeys(m, "\r")
 	m.textInput.SetValue("would-be-key")
 	m = sendKeys(m, "\x1b")
 
@@ -259,8 +216,6 @@ func TestProviderEditEscKeepsStoredConfig(t *testing.T) {
 	}
 }
 
-// TestProviderEditEShortcutOpensForm covers the "e" shortcut of the detail
-// view, which must open the same form as the action row.
 func TestProviderEditEShortcutOpensForm(t *testing.T) {
 	m := newProviderEditTestModel(t)
 	m = openProviderDetail(m)
@@ -274,9 +229,6 @@ func TestProviderEditEShortcutOpensForm(t *testing.T) {
 	}
 }
 
-// TestProviderEditRequiresAType verifies the only required step: a blank type
-// is rejected and the form stays open (an existing provider must never be
-// saved with an empty identity).
 func TestProviderEditRequiresAType(t *testing.T) {
 	m := newProviderEditTestModel(t)
 	m = openProviderEditForm(t, m)
@@ -296,9 +248,6 @@ func TestProviderEditRequiresAType(t *testing.T) {
 	}
 }
 
-// TestOpenProviderEditFlowUnknownProvider verifies a stale/nonexistent
-// selection refuses to open the form and reports why instead of opening an
-// empty editor.
 func TestOpenProviderEditFlowUnknownProvider(t *testing.T) {
 	m := newProviderEditTestModel(t)
 	m = openProviderDetail(m)
@@ -315,7 +264,6 @@ func TestOpenProviderEditFlowUnknownProvider(t *testing.T) {
 	}
 }
 
-// TestUpdateProviderErrors covers the guard clauses of the single save point.
 func TestUpdateProviderErrors(t *testing.T) {
 	m := &Model{cfg: &config.Config{}}
 	if err := m.updateProvider("x", providerEditValues{Type: "openai", APIKey: "k", APIBase: "b"}); err == nil {
@@ -331,14 +279,11 @@ func TestUpdateProviderErrors(t *testing.T) {
 	}
 }
 
-// TestProviderEditFormRenders covers the painted surface: the modal title, the
-// eight steps and the keep-blank hint must reach the frame, so a user can see
-// that a blank API key keeps the stored one.
 func TestProviderEditFormRenders(t *testing.T) {
 	m := newProviderEditTestModel(t)
 	m.width, m.height = 100, 40
 	m = openProviderEditForm(t, m)
-	m = sendKeys(m, "\r") // land on the API-key step
+	m = sendKeys(m, "\r")
 
 	frame := m.View()
 	for _, want := range []string{
@@ -359,8 +304,6 @@ func TestProviderEditFormRenders(t *testing.T) {
 	}
 }
 
-// TestProviderDetailRendersEditActionRow verifies the action row is actually
-// painted in the detail view (not just present in modalItems).
 func TestProviderDetailRendersEditActionRow(t *testing.T) {
 	m := newProviderEditTestModel(t)
 	m.width, m.height = 100, 40
@@ -377,15 +320,11 @@ func TestProviderDetailRendersEditActionRow(t *testing.T) {
 	}
 }
 
-// TestProviderEditHintsIgnoreStaleConnectState verifies the edit form does not
-// inherit the /connect wording: a stale providerSavedInFlow flag from an
-// earlier /connect run must not replace the plain next/cancel hint with the
-// "ESC: skip model" one (the edit form has no model steps).
 func TestProviderEditHintsIgnoreStaleConnectState(t *testing.T) {
 	m := newProviderEditTestModel(t)
 	m.width, m.height = 100, 40
 	m = openProviderEditForm(t, m)
-	m.providerSavedInFlow = true // stale state a previous /connect left behind
+	m.providerSavedInFlow = true
 
 	frame := m.View()
 	if !strings.Contains(frame, i18n.T("tui.formEnter")) {
@@ -396,15 +335,8 @@ func TestProviderEditHintsIgnoreStaleConnectState(t *testing.T) {
 	}
 }
 
-// TestUpdateProviderRollsBackWhenSaveFails covers the failed-save contract: the
-// edit is applied in memory before it is persisted, so a save error has to put
-// BOTH copies (named + typed mirror) back. Otherwise the rejected edit would
-// survive in m.cfg — the error keeps the user in the form, and any later save
-// from another flow would persist a change this one already reported as failed.
 func TestUpdateProviderRollsBackWhenSaveFails(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
-	// A regular file where the config directory should be: MkdirAll fails, so
-	// SaveConfig cannot write and updateProvider must roll back.
 	blocked := filepath.Join(t.TempDir(), "blocked")
 	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
 		t.Fatalf("preparing the blocked config dir: %v", err)
@@ -435,11 +367,6 @@ func TestUpdateProviderRollsBackWhenSaveFails(t *testing.T) {
 	}
 }
 
-// TestUpdateProviderMirrorPreservesTypedCredentials covers the mirror rules: the
-// typed field is a derived copy of the named entry, but it can legitimately be
-// the ONLY carrier of a value (an env override is applied after the JSON is
-// decoded), so a field the edit left blank must not blank it — while a value
-// the named entry does have is still mirrored in for type-first selection.
 func TestUpdateProviderMirrorPreservesTypedCredentials(t *testing.T) {
 	t.Run("blank edit keeps the env-provided typed key", func(t *testing.T) {
 		m := newProviderHelpersTestModel(t)
@@ -447,8 +374,6 @@ func TestUpdateProviderMirrorPreservesTypedCredentials(t *testing.T) {
 			Type:           "openai",
 			ProviderConfig: config.ProviderConfig{APIBase: "https://api.example.com/v1"},
 		}
-		// Simulates LELE_PROVIDERS_OPENAI_API_KEY, applied by env.Parse after
-		// the JSON is decoded.
 		m.cfg.Providers.OpenAI.ProviderConfig = config.ProviderConfig{APIKey: "sk-from-env"}
 
 		if err := m.updateProvider("openai", providerEditValues{Type: "openai", APIBase: "https://new.example/v1"}); err != nil {
@@ -491,12 +416,8 @@ func TestUpdateProviderMirrorPreservesTypedCredentials(t *testing.T) {
 			Type:           "openai",
 			ProviderConfig: config.ProviderConfig{APIBase: "https://api.example.com/v1"},
 		}
-		// The env override wins at load time; the named entry keeps the URL the
-		// form shows back to the user.
 		m.cfg.Providers.OpenAI.ProviderConfig = config.ProviderConfig{APIBase: "https://env.example/v1"}
 
-		// Pressing ENTER through the pre-filled base step submits the stored
-		// value — it is not an edit, so the typed copy keeps the env URL.
 		if err := m.updateProvider("openai", providerEditValues{Type: "openai", APIBase: "https://api.example.com/v1"}); err != nil {
 			t.Fatalf("updateProvider: %v", err)
 		}
@@ -515,11 +436,8 @@ func TestUpdateProviderMirrorPreservesTypedCredentials(t *testing.T) {
 				APIBase: "https://api.example.com/v1",
 			},
 		}
-		// The env override wins at load time; the named entry keeps the older
-		// key from the JSON.
 		m.cfg.Providers.OpenAI.ProviderConfig = config.ProviderConfig{APIKey: "sk-from-env"}
 
-		// Editing ONLY the base URL must not swap the effective key.
 		if err := m.updateProvider("openai", providerEditValues{Type: "openai", APIBase: "https://new.example/v1"}); err != nil {
 			t.Fatalf("updateProvider: %v", err)
 		}

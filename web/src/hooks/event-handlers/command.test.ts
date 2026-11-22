@@ -4,11 +4,6 @@ import { handleCommandApplied } from './command'
 import { dispatchMessageEvent } from './index'
 import type { MessageEventContext } from './types'
 
-// ── Minimal context stub ────────────────────────────────────────────────────
-// Only the two members the command handler touches are real; the rest of the
-// context is an empty object cast, exactly like the handler-facing tests in
-// useMessages.test.ts but scoped down (no groups/approvals/queues here).
-
 function createContext(currentSessionKey: string | null) {
   let streaming: ChatMessage[] = []
   const ctx = {
@@ -147,7 +142,6 @@ describe('handleCommandApplied ordering & filtering', () => {
     expect(messages.map((m) => m.id).slice(0, 3)).toEqual(['u1', 'a1', 't1'])
     expect(messages).toHaveLength(4)
     expect(messages[3].toolName).toBe('command')
-    // The assistant that produced this turn is no longer streaming.
     expect(messages[1].streaming).toBe(false)
   })
 

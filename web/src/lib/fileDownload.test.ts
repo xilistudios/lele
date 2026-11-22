@@ -28,7 +28,6 @@ describe('triggerBlobDownload', () => {
     const clickSpy = mock(() => {})
     const originalCreateElement = document.createElement.bind(document)
 
-    // Intercept createElement to spy on click for the <a> we create
     document.createElement = ((tag: string) => {
       const el = originalCreateElement(tag)
       if (tag === 'a') {
@@ -42,7 +41,6 @@ describe('triggerBlobDownload', () => {
 
     expect(clickSpy).toHaveBeenCalledTimes(1)
     expect(createdObjectUrl).toBe('blob:mock-url/123')
-    // Object URL must be revoked even after a successful download
     expect(revokedUrls).toContain('blob:mock-url/123')
 
     document.createElement = originalCreateElement
@@ -56,7 +54,6 @@ describe('triggerBlobDownload', () => {
       const el = originalCreateElement(tag)
       if (tag === 'a') {
         el.click = mock(() => {}) as () => void
-        // Intercept property set for download
         Object.defineProperty(el, 'download', {
           set(v: string) {
             capturedName = v
@@ -92,7 +89,6 @@ describe('triggerBlobDownload', () => {
 
     const blob = new Blob(['data'])
     expect(() => triggerBlobDownload(blob, 'fail.txt')).toThrow('click failed')
-    // URL is still revoked because of the finally block
     expect(revokedUrls).toContain('blob:mock-url/123')
 
     document.createElement = originalCreateElement

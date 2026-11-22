@@ -11,7 +11,6 @@ import (
 func TestBuildFolderContext_Listing(t *testing.T) {
 	dir := t.TempDir()
 
-	// Deterministic names so lexical order (os.ReadDir) is predictable.
 	if err := os.Mkdir(filepath.Join(dir, "alpha"), 0o755); err != nil {
 		t.Fatalf("mkdir alpha: %v", err)
 	}
@@ -30,7 +29,6 @@ func TestBuildFolderContext_Listing(t *testing.T) {
 
 	got := BuildFolderContext(dir)
 
-	// Header + absolute path.
 	if !strings.HasPrefix(got, "## Selected Folder\n\n") {
 		t.Errorf("missing section header, got %q", got)
 	}
@@ -41,7 +39,6 @@ func TestBuildFolderContext_Listing(t *testing.T) {
 		t.Errorf("missing listing header; got:\n%s", got)
 	}
 
-	// Dirs get a trailing slash, files do not.
 	if !strings.Contains(got, "- alpha/\n") {
 		t.Errorf("expected \"- alpha/\" entry; got:\n%s", got)
 	}
@@ -52,12 +49,10 @@ func TestBuildFolderContext_Listing(t *testing.T) {
 		t.Errorf("expected plain \"- notes.txt\" entry (no slash); got:\n%s", got)
 	}
 
-	// Hidden names must be excluded.
 	if strings.Contains(got, ".hidden") {
 		t.Errorf("hidden entries must be excluded; got:\n%s", got)
 	}
 
-	// File CONTENTS must never be read into the prompt.
 	if strings.Contains(got, "secret contents") {
 		t.Errorf("folder context must not include file contents; got:\n%s", got)
 	}
@@ -72,7 +67,7 @@ func TestBuildFolderContext_Empty(t *testing.T) {
 
 func TestBuildFolderContext_TruncatesAt100(t *testing.T) {
 	dir := t.TempDir()
-	const total = maxHarnessDirEntries + 7 // 107
+	const total = maxHarnessDirEntries + 7
 	for i := 0; i < total; i++ {
 		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%03d", i)), nil, 0o644); err != nil {
 			t.Fatalf("write f%03d: %v", i, err)
@@ -84,14 +79,12 @@ func TestBuildFolderContext_TruncatesAt100(t *testing.T) {
 	if !strings.Contains(got, fmt.Sprintf("- ... and %d more\n", total-maxHarnessDirEntries)) {
 		t.Errorf("expected truncation notice for %d hidden entries; got:\n%s", total-maxHarnessDirEntries, got)
 	}
-	// First 100 listed (f000..f099), the rest only counted.
 	if !strings.Contains(got, "- f000\n") {
 		t.Errorf("expected first entry f000; got:\n%s", got)
 	}
 	if strings.Contains(got, "- f100\n") {
 		t.Errorf("entry beyond the limit must not be listed")
 	}
-	// Count the listing lines.
 	count := 0
 	for _, line := range strings.Split(got, "\n") {
 		if strings.HasPrefix(line, "- f") {
@@ -127,7 +120,6 @@ func TestBuildFolderContext_EmptyInput(t *testing.T) {
 }
 
 func TestBuildFolderContext_UnreadableDir(t *testing.T) {
-	// Root bypasses permission bits, so skip when running as root.
 	if os.Geteuid() == 0 {
 		t.Skip("running as root; directory permissions are not enforced")
 	}

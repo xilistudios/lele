@@ -1,14 +1,11 @@
 export const formatSessionTitle = (sessionKey: string, sessionName?: string) => {
   if (sessionName?.trim()) return sessionName
-  // No session name and the key looks like an auto-generated UUID
-  // (contains hyphens and is long): this is an empty/new session.
   const isUuidLike = sessionKey.includes('-') && sessionKey.length > 20
   if (isUuidLike) return 'New Chat'
   const parts = sessionKey.split(':')
   return parts.length > 2 ? `Session ${parts[parts.length - 1]}` : sessionKey
 }
 
-// Maps internal provider names to user-friendly display names
 export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   alibaba_coding_plan: 'Alibaba Coding Plan',
   anthropic: 'Anthropic',
@@ -32,7 +29,6 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   zhipu: 'Zhipu',
 }
 
-// Converts a provider name to a user-friendly display name
 export function getProviderDisplayName(name: string): string {
   return (
     PROVIDER_DISPLAY_NAMES[name] ||

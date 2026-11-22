@@ -21,7 +21,7 @@ export function ChatPage() {
 
   return (
     <ChatPageProvider>
-      <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
+      <div className="flex app-shell bg-background-primary text-text-primary">
         <Sidebar
           collapsed={!sidebarOpen}
           mobileOpen={mobileSidebarOpen}
@@ -31,15 +31,23 @@ export function ChatPage() {
         <main className="flex flex-1 flex-col overflow-hidden">
           <ChatHeader />
 
-          {error && <ErrorBanner message={error} />}
-          {diagnosticsOpen && <DiagnosticsPanel />}
+          {error && (
+            <div className="shrink-0">
+              <ErrorBanner message={error} />
+            </div>
+          )}
+          {diagnosticsOpen && (
+            <div className="shrink-0">
+              <DiagnosticsPanel />
+            </div>
+          )}
 
-          <div className="flex-1 overflow-hidden px-4 py-3 md:px-6 md:py-4">
+          <div className="flex-1 min-h-0 overflow-hidden px-4 py-3 md:px-6 md:py-4">
             <MessageList />
           </div>
 
           {!parentSessionKey && (
-            <div className="border-t border-border px-4 py-3 md:px-6 md:py-4">
+            <div className="shrink-0 border-t border-border px-4 py-3 md:px-6 md:py-4">
               <div className="mx-auto max-w-3xl">
                 {chatMode === 'group' ? <GroupComposer /> : <ChatComposer />}
               </div>

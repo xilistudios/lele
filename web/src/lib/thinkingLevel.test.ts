@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { THINKING_LEVELS, thinkingLevelLabel, thinkingLevelOptions } from './thinkingLevel'
 
-// t() echoes the key so tests assert on key usage, not on translations.
 const t = (key: string) => key
 
 describe('thinkingLevelOptions', () => {

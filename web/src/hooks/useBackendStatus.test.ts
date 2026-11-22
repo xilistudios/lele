@@ -1,17 +1,3 @@
-/**
- * useBackendStatus tests — polling cadence and visibility gating.
- *
- * The sidecar status poll (Tauri IPC `backend_status`) ran every 3 s in every
- * desktop window, background or not. These tests pin the new contract:
- *   1. visible: one poll per 3 s window (unchanged),
- *   2. hidden: no interval, no IPC call,
- *   3. becoming visible: exactly one immediate poll, then the same cadence,
- *   4. `enabled === false` still clears the reported status and polls nothing.
- *
- * The Tauri bridge is faked through `window.__TAURI_INTERNALS__`, which is the
- * only thing `invokeDesktop` looks at.
- */
-
 import { afterEach, beforeEach, describe, expect, jest, mock, test } from 'bun:test'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import type { BackendStatus } from './useBackendStatus'
@@ -42,9 +28,6 @@ afterEach(() => {
   setVisibility('visible')
 })
 
-/** jsdom never fires `visibilitychange`; `visibilityState` is a prototype
- *  getter, so both are simulated the way a browser does (see
- *  `services/ws/client.test.ts`). */
 function setVisibility(state: DocumentVisibilityState) {
   Object.defineProperty(document, 'visibilityState', { value: state, configurable: true })
   document.dispatchEvent(new window.Event('visibilitychange'))
@@ -54,7 +37,6 @@ function invokeMock(): ReturnType<typeof mock> {
   return (window as TauriWindow).__TAURI_INTERNALS__?.invoke as ReturnType<typeof mock>
 }
 
-/** Number of `backend_status` IPC calls made so far. */
 function statusCallCount(): number {
   return invokeMock().mock.calls.filter((call) => call[0] === 'backend_status').length
 }
@@ -97,7 +79,6 @@ describe('useBackendStatus polling', () => {
     act(() => setVisibility('hidden'))
     await flushEffects()
 
-    // A minute hidden: 20 ticks would have been ~20 IPC calls per window.
     act(() => {
       jest.advanceTimersByTime(60_000)
     })
@@ -122,9 +103,6 @@ describe('useBackendStatus polling', () => {
     const { result } = renderHook(() => useBackendStatus(true))
     await flushEffects()
 
-    // Unlike the list pollers (whose mount fetch lives in its own effect), the
-    // status poll and its interval share one effect, so a hidden window is
-    // completely silent — status simply stays null.
     expect(statusCallCount()).toBe(0)
     expect(result.current.status).toBeNull()
 
@@ -134,7 +112,6 @@ describe('useBackendStatus polling', () => {
     await flushEffects()
     expect(statusCallCount()).toBe(0)
 
-    // Shown: exactly one immediate poll, then the 3 s cadence.
     act(() => setVisibility('visible'))
     await flushEffects()
     expect(statusCallCount()).toBe(1)

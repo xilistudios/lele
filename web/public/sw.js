@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lele-client-v3'
+const CACHE_NAME = 'lele-client-v4'
 const ASSETS = ['/', '/manifest.webmanifest']
 
 self.addEventListener('install', (event) => {

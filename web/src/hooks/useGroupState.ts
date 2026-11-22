@@ -1,15 +1,11 @@
 import { useCallback, useReducer } from 'react'
 import type { GroupInfo } from '../lib/types'
 
-// ── Actions ──────────────────────────────────────────────────────────────────
-
 type GroupAction =
   | { type: 'upsert'; groupId: string; updater: (existing: GroupInfo | undefined) => GroupInfo }
   | { type: 'hydrate'; infos: GroupInfo[] }
   | { type: 'markStopped' }
   | { type: 'clear' }
-
-// ── Reducer ──────────────────────────────────────────────────────────────────
 
 function groupReducer(state: Map<string, GroupInfo>, action: GroupAction): Map<string, GroupInfo> {
   switch (action.type) {
@@ -33,7 +29,7 @@ function groupReducer(state: Map<string, GroupInfo>, action: GroupAction): Map<s
           break
         }
       }
-      if (!found) return state // No change — return same reference to skip re-render
+      if (!found) return state
 
       const next = new Map(state)
       for (const [id, g] of state) {
@@ -49,8 +45,6 @@ function groupReducer(state: Map<string, GroupInfo>, action: GroupAction): Map<s
       return state
   }
 }
-
-// ── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useGroupState() {
   const [groups, dispatch] = useReducer(groupReducer, undefined, () => new Map<string, GroupInfo>())

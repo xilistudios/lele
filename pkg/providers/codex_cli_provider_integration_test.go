@@ -10,8 +10,6 @@ import (
 	"time"
 )
 
-// TestIntegration_RealCodexCLI tests the CodexCliProvider with a real codex CLI.
-// Run with: go test -tags=integration ./pkg/providers/...
 func TestIntegration_RealCodexCLI(t *testing.T) {
 	path, err := exec.LookPath("codex")
 	if err != nil {
@@ -81,7 +79,6 @@ func TestIntegration_RealCodexCLI_ParsesRealJSONL(t *testing.T) {
 		t.Skip("codex CLI not found in PATH")
 	}
 
-	// Run codex directly and verify our parser handles real output
 	cmd := exec.Command("codex", "exec",
 		"--json",
 		"--dangerously-bypass-approvals-and-sandbox",
@@ -93,7 +90,6 @@ func TestIntegration_RealCodexCLI_ParsesRealJSONL(t *testing.T) {
 
 	output, err := cmd.Output()
 	if err != nil {
-		// codex may write diagnostic noise to stderr but still produce valid output
 		if len(output) == 0 {
 			t.Fatalf("codex CLI failed: %v", err)
 		}
@@ -101,7 +97,6 @@ func TestIntegration_RealCodexCLI_ParsesRealJSONL(t *testing.T) {
 
 	t.Logf("Raw CLI output (first 500 chars): %s", string(output[:min(len(output), 500)]))
 
-	// Verify our parser can handle real output
 	p := NewCodexCliProvider("")
 	resp, err := p.parseJSONLEvents(string(output))
 	if err != nil {

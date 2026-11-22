@@ -18,45 +18,20 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// Part B of the /commands panel: create, edit and delete custom slash commands
-// from the TUI. The write semantics mirror pkg/channels/rest_agent_commands.go
-// on purpose — the REST API and this panel are two front doors to the same
-// catalog, and a rule enforced by one but not the other would let the user
-// store a command the backend then refuses to load. The helpers below are
-// deliberately small copies (name grammar, size cap, atomic write) instead of
-// exported REST internals: pkg/channels must not become a TUI dependency for
-// rules the TUI can state on its own.
-//
-// The exception is a predicate whose WHOLE point is to have exactly one
-// implementation shared with the HTTP front door — path policy. pkg/mcp cannot
-// own it (it must not import pkg/config or read the global roots), so
-// channels.IsAllowedWorkspacePath is the single home and pkg/tui/mcp.go calls
-// it (see the comment there); a copy there would let the two front doors drift
-// on the one rule where drift means writing outside the allowed roots.
-
-// commandNamePattern is the command-name grammar, byte-identical to
-// agentCommandNamePattern in pkg/channels (lowercase start; letters, digits,
-// dots, hyphens, underscores).
 var commandNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 const (
 	maxCommandNameLen   = 64
-	maxCommandFileSize  = 256 * 1024 // same cap as the REST layer
-	commandNameRequired = 0          // wizard step indices
+	maxCommandFileSize  = 256 * 1024
+	commandNameRequired = 0
 	commandTemplateStep = 6
 	commandFormSteps    = 7
 )
 
-// commandsDeleteConfirmWindow is how long the "press d again" confirmation
-// stays armed after the first press (mirrors the double-confirm pattern used
-// by force-send while busy).
 const commandsDeleteConfirmWindow = 5 * time.Second
 
-// commandReservedExts would double up once ".md" is appended by the writer
-// ("review.md" -> the command "review.md.md"); rejected, never normalised.
 var commandReservedExts = []string{".md", ".markdown"}
 
-// validateCommandName mirrors channels.agentCommandName exactly.
 func validateCommandName(raw string) (string, error) {
 	name := strings.TrimSpace(raw)
 	switch {
@@ -75,10 +50,6 @@ func validateCommandName(raw string) (string, error) {
 	return name, nil
 }
 
-// commandNameIsReserved reports whether the dispatcher (or a channel) always
-// answers this name first, so a custom command with it would silently never
-// run. Same source of truth as the REST layer: the registry's lists, not a
-// local copy.
 func commandNameIsReserved(name string) bool {
 	for _, r := range agentcommands.DispatcherReserved() {
 		if r == name {
@@ -93,9 +64,6 @@ func commandNameIsReserved(name string) bool {
 	return false
 }
 
-// serializeCommandMarkdown produces the exact file format the WebUI editor
-// writes (web/src/lib/commandMarkdown.ts): front matter only for the fields
-// that are set, and no "---" block at all when nothing needs declaring.
 func serializeCommandMarkdown(description, agentName, model string, allowShell bool, allowAbsFiles *bool, template string) string {
 	lines := make([]string, 0, 5)
 	if description != "" {
@@ -119,11 +87,7 @@ func serializeCommandMarkdown(description, agentName, model string, allowShell b
 	return "---\n" + strings.Join(lines, "\n") + "\n---\n" + strings.TrimSpace(template)
 }
 
-// markdownFieldValue quotes a scalar that would otherwise break the simple
-// "key: value" grammar the harness parser understands.
 func markdownFieldValue(v string) string {
-	// Newlines can never be represented (the parser reads one key: value per
-	// line), so they are flattened to spaces before the quoting decision.
 	v = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(v)
 	if strings.Contains(v, ": ") || strings.Contains(v, `"`) || strings.Contains(v, `\\`) ||
 		strings.HasPrefix(v, " ") || strings.HasSuffix(v, " ") {
@@ -134,9 +98,6 @@ func markdownFieldValue(v string) string {
 	return v
 }
 
-// writeCommandFileAtomic is the TUI twin of channels.writeAgentCommandFile:
-// temp file in the same directory, then rename, so a crash can never leave a
-// half-written command that the loader would reject.
 func writeCommandFileAtomic(path, content string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -147,7 +108,7 @@ func writeCommandFileAtomic(path, content string) error {
 		return fmt.Errorf("failed to write command file: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once the rename succeeded
+	defer os.Remove(tmpName)
 	if _, err := tmp.WriteString(content); err != nil {
 		tmp.Close()
 		return fmt.Errorf("failed to write command file: %w", err)
@@ -155,8 +116,6 @@ func writeCommandFileAtomic(path, content string) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("failed to write command file: %w", err)
 	}
-	// CreateTemp is 0600; command files are plain prompts, and 0644 keeps them
-	// editable by hand from a shell (same choice as the REST writer).
 	if err := os.Chmod(tmpName, 0o644); err != nil {
 		return fmt.Errorf("failed to write command file: %w", err)
 	}
@@ -166,8 +125,6 @@ func writeCommandFileAtomic(path, content string) error {
 	return nil
 }
 
-// commandScopeDir resolves the folder one write scope targets. "config" has no
-// directory (its source of truth is config.json) and returns ok=false.
 func (m *Model) commandScopeDir(scope string) (string, bool) {
 	switch scope {
 	case string(harness.SourceWorkspace):
@@ -183,10 +140,6 @@ func (m *Model) commandScopeDir(scope string) (string, bool) {
 	}
 }
 
-// commandTemplateKeyMap mirrors the chat composer's KeyMap so the template
-// step behaves identically: plain ENTER is captured by the modal handler
-// (save), alt+enter inserts a newline. It is a copy, not a shared value, so
-// the two widgets can diverge later without coupling chat to the wizard.
 func commandTemplateKeyMap() textarea.KeyMap {
 	return textarea.KeyMap{
 		CharacterForward:        key.NewBinding(key.WithKeys("right"), key.WithHelp("right", "character forward")),
@@ -204,10 +157,6 @@ func commandTemplateKeyMap() textarea.KeyMap {
 	}
 }
 
-// newCommandTemplateInput builds the wizard's multi-line template widget. The
-// styling mirrors applyThemeToInputs' chatInput treatment: foreground-only
-// styles, because the stock textarea defaults emit raw ANSI backgrounds that
-// paintFrame re-emits as black patches inside the modal box.
 func newCommandTemplateInput() textarea.Model {
 	ta := textarea.New()
 	ta.CharLimit = 0
@@ -228,24 +177,14 @@ func newCommandTemplateInput() textarea.Model {
 	return ta
 }
 
-// --- wizard open -----------------------------------------------------------
-
-// startCommandCreate opens the wizard for a brand-new workspace-scoped command
-// (the agent-private level, same default as a REST POST without scope).
 func (m *Model) startCommandCreate() {
 	m.openCommandWizard("", string(harness.SourceWorkspace), [commandFormSteps]string{})
 }
 
-// startCommandEdit opens the wizard pre-filled with one definition. Directory
-// level commands are refused: they belong to the checked-out project, not to
-// this machine's config or workspace, and the REST layer refuses to write them
-// for the same reason.
 func (m *Model) startCommandEdit(key string) {
 	row, mgr, ok := m.lookupCommandRow(key)
 	if !ok {
 		m.commandsFeedback = i18n.T("tui.commands.gone")
-		// The row vanished under the cursor: drop back to the list so the
-		// feedback line (only rendered there) is actually visible.
 		if m.modalMode == ModalCommandDetail {
 			m.commandsDetailMode = false
 			m.commandsDetailKey = ""
@@ -271,9 +210,6 @@ func (m *Model) startCommandEdit(key string) {
 	m.openCommandWizard(key, row.Source, values)
 }
 
-// openCommandWizard is the shared entry: it sets the wizard state WITHOUT
-// resetModal, because resetModal would wipe the list under the wizard
-// (commandsRows/commandsModalKeys) and break the return path.
 func (m *Model) openCommandWizard(editKey, scope string, values [commandFormSteps]string) {
 	m.modalMode = ModalAddCommand
 	m.formStepIndex = commandNameRequired
@@ -295,9 +231,6 @@ func (m *Model) openCommandWizard(editKey, scope string, values [commandFormStep
 	m.modalScrollOffset = 0
 }
 
-// commandLevelTemplate returns the template of THIS level's definition (not
-// the merged winner), so editing a shadowed command edits its own text. The
-// registry only keeps the winner, hence the file fallback for file levels.
 func (m *Model) commandLevelTemplate(row commandRow, mgr *harness.Manager) string {
 	if row.Source == string(harness.SourceConfig) {
 		if m.cfg != nil {
@@ -320,22 +253,14 @@ func (m *Model) commandLevelTemplate(row commandRow, mgr *harness.Manager) strin
 	return ""
 }
 
-// --- wizard step advance ---------------------------------------------------
-
-// advanceCommandWizard validates one single-line step and moves to the next,
-// or runs the save when the user finishes the template step. It is called from
-// the "enter" case of handleModalKey with the trimmed textInput value.
 func (m *Model) advanceCommandWizard(val string) tea.Cmd {
 	switch m.formStepIndex {
-	case 0: // name
+	case 0:
 		name, err := validateCommandName(val)
 		if err != nil {
 			m.formError = err.Error()
 			return nil
 		}
-		// Reserved names are only fatal when the command would actually take
-		// effect: creating a new name, or renaming. Editing a command under
-		// its own (already existing) name must keep working.
 		oldName := ""
 		if i := strings.IndexByte(m.commandsEditKey, ':'); i >= 0 {
 			oldName = m.commandsEditKey[i+1:]
@@ -345,18 +270,18 @@ func (m *Model) advanceCommandWizard(val string) tea.Cmd {
 			return nil
 		}
 		val = name
-	case 4: // allow_shell
+	case 4:
 		yn, ok := parseWizardYesNo(val)
 		if !ok {
 			if strings.TrimSpace(val) == "" {
-				yn = "no" // empty = the harness default (shell off)
+				yn = "no"
 			} else {
 				m.formError = i18n.T("tui.commands.yesNoOnly")
 				return nil
 			}
 		}
 		val = yn
-	case 5: // allow_absolute_files (tri-state)
+	case 5:
 		yn, ok := parseWizardYesNo(val)
 		if !ok && strings.TrimSpace(val) != "" {
 			m.formError = i18n.T("tui.commands.yesNoInheritOnly")
@@ -366,7 +291,7 @@ func (m *Model) advanceCommandWizard(val string) tea.Cmd {
 			yn = "inherit"
 		}
 		val = yn
-	default: // description, agent, model: optional free text
+	default:
 	}
 
 	m.formError = ""
@@ -374,10 +299,6 @@ func (m *Model) advanceCommandWizard(val string) tea.Cmd {
 	m.formStepIndex++
 
 	if m.formStepIndex == commandTemplateStep {
-		// Hand over to the multi-line widget; it carries the (possibly
-		// prefilled) template and gets the keystrokes from here on.
-		// Focus() returns the blink command — it must reach bubbletea or
-		// the cursor stays frozen (same contract as syncChatInputFocus).
 		m.textInput.Blur()
 		m.templateInput.SetValue(m.formValues[commandTemplateStep])
 		return m.templateInput.Focus()
@@ -393,9 +314,6 @@ func (m *Model) advanceCommandWizard(val string) tea.Cmd {
 	return nil
 }
 
-// parseWizardYesNo accepts the yes/no spellings of every TUI language (the
-// placeholders are translated, so validation must be too) and normalizes to
-// the canonical "yes"/"no"/"inherit" the save flow switches on.
 func parseWizardYesNo(raw string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "y", "yes", "si", "s\u00ed", "sim":
@@ -409,7 +327,6 @@ func parseWizardYesNo(raw string) (string, bool) {
 	}
 }
 
-// commandStepPlaceholder returns the hint text of one wizard step.
 func (m *Model) commandStepPlaceholder(step int) string {
 	switch step {
 	case 1:
@@ -427,13 +344,6 @@ func (m *Model) commandStepPlaceholder(step int) string {
 	}
 }
 
-// --- save ------------------------------------------------------------------
-
-// saveCommandForm validates the whole wizard payload and persists it to the
-// scope the wizard was opened for. The work is synchronous on purpose: these
-// are tiny local writes (one file, or one config.json rewrite) and the skills
-// flow only went async for network calls. Returns nil when validation kept the
-// user inside the wizard (formError set).
 func (m *Model) saveCommandForm() tea.Cmd {
 	template := m.templateInput.Value()
 	m.formValues[commandTemplateStep] = template
@@ -442,9 +352,6 @@ func (m *Model) saveCommandForm() tea.Cmd {
 	if err != nil {
 		return m.commandFormBackToName(err.Error())
 	}
-	// A body that opens with the frontmatter delimiter would sit right after
-	// the closing --- of the real block and confuse every future reader of
-	// the file, including strict YAML parsers.
 	if t := strings.TrimLeft(template, " \t\r\n"); strings.HasPrefix(t, "---") {
 		m.formError = i18n.T("tui.commands.templateStartsFrontmatter")
 		return nil
@@ -461,9 +368,6 @@ func (m *Model) saveCommandForm() tea.Cmd {
 		return nil
 	}
 	description := strings.TrimSpace(m.formValues[1])
-	// File levels must carry a description: the loader tolerates its absence,
-	// but the palette and the catalog rows would render blank (same rule the
-	// REST validator enforces before storing). Config commands may omit it.
 	if m.commandsEditScope != string(harness.SourceConfig) && description == "" {
 		m.formError = i18n.T("tui.commands.descriptionRequired")
 		return nil
@@ -494,8 +398,6 @@ func (m *Model) saveCommandForm() tea.Cmd {
 	}
 }
 
-// commandFormBackToName parks the user on the name step with the offending
-// value still in the input, so the fix is one keystroke away.
 func (m *Model) commandFormBackToName(msg string) tea.Cmd {
 	m.formError = msg
 	m.formStepIndex = commandNameRequired
@@ -511,8 +413,6 @@ func (m *Model) saveCommandConfig(name, oldName, description, agentName, model s
 		m.formError = i18n.T("tui.commands.noConfig")
 		return nil
 	}
-	// Collision check on create/rename: any existing config command under the
-	// target name (other than the one being edited) would be silently lost.
 	if _, exists := m.cfg.Commands[name]; exists && name != oldName {
 		m.formError = i18n.T("tui.commands.nameTaken")
 		return m.commandFormBackToName(i18n.T("tui.commands.nameTaken"))
@@ -535,8 +435,6 @@ func (m *Model) saveCommandConfig(name, oldName, description, agentName, model s
 		m.formError = err.Error()
 		return nil
 	}
-	// The config fingerprint rebuilds every manager lazily; no explicit
-	// harness invalidation is needed for this scope.
 	m.finishCommandWizard(name, string(harness.SourceConfig))
 	return m.tickCmd()
 }
@@ -553,7 +451,6 @@ func (m *Model) saveCommandFile(name, oldName, description, agentName, model str
 	}
 	path := filepath.Join(dir, name+".md")
 
-	// A rename must not clobber a sibling definition at the same level.
 	if m.commandsEditKey != "" && oldName != name {
 		if _, err := os.Stat(path); err == nil {
 			m.formError = i18n.T("tui.commands.nameTaken")
@@ -561,8 +458,6 @@ func (m *Model) saveCommandFile(name, oldName, description, agentName, model str
 		}
 	}
 	if m.commandsEditKey == "" {
-		// Create: refuse to overwrite anything already at this level, file or
-		// row (the row check also catches the config level shadowing case).
 		if _, err := os.Stat(path); err == nil {
 			m.formError = i18n.T("tui.commands.nameTaken")
 			return m.commandFormBackToName(i18n.T("tui.commands.nameTaken"))
@@ -580,8 +475,6 @@ func (m *Model) saveCommandFile(name, oldName, description, agentName, model str
 		m.formError = i18n.T("tui.commands.tooLarge")
 		return nil
 	}
-	// Validate before writing: the parser is the loader's contract, and a
-	// stored file that fails it would silently disappear from the catalog.
 	if _, err := harness.ParseCommandMarkdown(name, path, []byte(content)); err != nil {
 		m.formError = strings.TrimPrefix(err.Error(), "harness: ")
 		return nil
@@ -590,8 +483,6 @@ func (m *Model) saveCommandFile(name, oldName, description, agentName, model str
 		m.formError = err.Error()
 		return nil
 	}
-	// Rename: the old file must go, or the same name lingers as a stale
-	// definition at this level.
 	if m.commandsEditKey != "" && oldName != name {
 		if oldRow, _, ok := m.lookupCommandRow(m.commandsEditKey); ok && oldRow.Path != "" &&
 			commandFileWithinScope(oldRow, m.commandsEditScope, dir) == nil {
@@ -603,8 +494,6 @@ func (m *Model) saveCommandFile(name, oldName, description, agentName, model str
 	return m.tickCmd()
 }
 
-// invalidateCommandScope drops the caches that could still serve the old
-// content of a level the wizard just wrote.
 func (m *Model) invalidateCommandScope(scope string) {
 	if m.agentLoop == nil {
 		return
@@ -613,18 +502,10 @@ func (m *Model) invalidateCommandScope(scope string) {
 	case string(harness.SourceWorkspace):
 		m.agentLoop.InvalidateHarnessWorkspace(m.commandsWorkspace())
 	case string(harness.SourceGlobal):
-		// The global level is merged into every agent's catalog, so every
-		// cached manager is now potentially stale.
 		m.agentLoop.InvalidateAllHarnessWorkspaces()
 	}
 }
 
-// --- delete ----------------------------------------------------------------
-
-// requestCommandDelete arms the double-confirm: the first "d" only shows the
-// warning line, the second one within commandsDeleteConfirmWindow actually
-// removes the definition. Deleting a command file is irreversible from the
-// TUI, so a stray keystroke must never do it.
 func (m *Model) requestCommandDelete(key string) tea.Cmd {
 	if m.commandsDeleteKey == key && time.Since(m.commandsDeleteArmed) < commandsDeleteConfirmWindow {
 		m.commandsDeleteKey = ""
@@ -636,19 +517,11 @@ func (m *Model) requestCommandDelete(key string) tea.Cmd {
 	return m.tickCmd()
 }
 
-// clearCommandDeleteConfirm disarms a pending delete. Called from every path
-// that moves the cursor or changes the view so an armed delete can never
-// follow its user to a different row.
 func (m *Model) clearCommandDeleteConfirm() {
 	m.commandsDeleteKey = ""
 	m.commandsDeleteArmed = time.Time{}
 }
 
-// commandFileWithinScope is the defense-in-depth gate in front of every
-// os.Remove of a command file: the path the loader discovered must be a
-// direct markdown child of the scope's own commands directory. Symlinks,
-// future loader changes or corrupt rows can then never aim a delete at an
-// arbitrary file.
 func commandFileWithinScope(row commandRow, scope string, dir string) error {
 	if row.Path == "" {
 		return fmt.Errorf("%s", i18n.T("tui.commands.noPath"))
@@ -666,9 +539,6 @@ func commandFileWithinScope(row commandRow, scope string, dir string) error {
 	return nil
 }
 
-// deleteCommandRow removes one definition. The composite key identifies the
-// exact level, so deleting a shadowed workspace file never touches the config
-// entry that wins over it.
 func (m *Model) deleteCommandRow(key string) tea.Cmd {
 	row, _, ok := m.lookupCommandRow(key)
 	if !ok {
@@ -691,7 +561,7 @@ func (m *Model) deleteCommandRow(key string) tea.Cmd {
 			m.commandsFeedback = err.Error()
 			return m.tickCmd()
 		}
-	default: // workspace / global
+	default:
 		if row.Path == "" {
 			m.commandsFeedback = i18n.T("tui.commands.noPath")
 			return m.tickCmd()
@@ -720,10 +590,6 @@ func (m *Model) deleteCommandRow(key string) tea.Cmd {
 	return m.tickCmd()
 }
 
-// --- exit paths ------------------------------------------------------------
-
-// finishCommandWizard closes the wizard back to the list, reloads the catalog
-// and puts the cursor on the row that was just written.
 func (m *Model) finishCommandWizard(name, scope string) {
 	m.commandsFeedback = fmt.Sprintf(i18n.T("tui.commands.saved"), name)
 	m.exitCommandWizard()
@@ -731,7 +597,6 @@ func (m *Model) finishCommandWizard(name, scope string) {
 	m.reselectCommandRow(scope + ":" + name)
 }
 
-// exitCommandWizard resets the wizard-only state but keeps the list intact.
 func (m *Model) exitCommandWizard() {
 	m.modalMode = ModalCommands
 	m.formValues = nil
@@ -745,8 +610,6 @@ func (m *Model) exitCommandWizard() {
 	m.clearCommandDeleteConfirm()
 }
 
-// boolYesNo / triStateYesNo are the wizard-side inverses of the detail view's
-// boolDisplay/triStateDisplay: they seed form steps 4 and 5.
 func boolYesNo(v bool) string {
 	if v {
 		return "yes"
@@ -761,11 +624,6 @@ func triStateYesNo(v *bool) string {
 	return boolYesNo(*v)
 }
 
-// --- template step rendering -----------------------------------------------
-
-// renderCommandTemplateStep renders the wizard's multi-line step with the same
-// chrome as the single-line steps (step list, error line) but a textarea
-// instead of the text input, so the user can write a real prompt body.
 func (m *Model) renderCommandTemplateStep(title string) string {
 	var sb strings.Builder
 	sb.WriteString(TitleStyle.Render(title) + "\n\n")
@@ -776,8 +634,6 @@ func (m *Model) renderCommandTemplateStep(title string) string {
 	}
 	sb.WriteString("\n")
 
-	// The textarea must fit the modal: bubbles' default height plus the
-	// chrome above it stays inside the tallest modal the layout allows.
 	m.templateInput.SetWidth(56)
 	sb.WriteString(m.templateInput.View() + "\n\n")
 	sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.commands.templateHints")) + "\n")

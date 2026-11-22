@@ -16,7 +16,6 @@ export function GroupComposer() {
   const [selectedProfile, setSelectedProfile] = useState('')
   const [task, setTask] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
-  // When session has existing groups, default to follow-up (chat) mode
   const [isNewGroupMode, setIsNewGroupMode] = useState(false)
 
   const groupTheme = getModeTheme('group')
@@ -41,8 +40,6 @@ export function GroupComposer() {
   const hasProfiles = groupProfiles.length > 0
   const activeProcessing = isProcessing || isSubmitting
 
-  // In follow-up mode: can submit with just text
-  // In new-group mode: need profile + text (if profiles exist)
   const showNewGroupForm = isNewGroupMode || !hasExistingGroups
   const canSubmit = showNewGroupForm
     ? task.trim().length > 0 && (!hasProfiles || selectedProfile !== '') && !activeProcessing
@@ -56,21 +53,16 @@ export function GroupComposer() {
     if (showNewGroupForm && hasProfiles) {
       content = `/group start ${selectedProfile} ${task.trim()}`
     } else if (showNewGroupForm && !hasProfiles) {
-      // No profiles configured — send as plain /group command
       content = task.trim()
     } else {
-      // Follow-up mode: send plain message
       content = task.trim()
     }
 
     setIsSubmitting(true)
     try {
       const accepted = await onSend(content, [])
-      // Keep the draft when the send was refused (queue full, missing
-      // session/agent) so the task text is not lost.
       if (accepted === false) return
       setTask('')
-      // After starting a new group, switch back to follow-up mode
       if (showNewGroupForm && hasExistingGroups) {
         setIsNewGroupMode(false)
       }
@@ -84,7 +76,6 @@ export function GroupComposer() {
       <div className="rounded-lg border border-border bg-background-secondary transition-colors focus-within:border-border">
         <div className={`h-0.5 w-full rounded-t-lg ${groupTheme.accentBar}`} />
 
-        {/* Toggle between follow-up and new-group mode */}
         {hasExistingGroups && (
           <div className="flex items-center gap-2 px-4 pt-2">
             <button
@@ -112,7 +103,6 @@ export function GroupComposer() {
           </div>
         )}
 
-        {/* Profile selector — only in new-group mode */}
         {showNewGroupForm && hasProfiles && (
           <div className="px-4 pt-3">
             <select
@@ -152,8 +142,6 @@ export function GroupComposer() {
             e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`
           }}
           onKeyDown={(e) => {
-            // IME safety: while composing (CJK candidates), Enter belongs to
-            // the input method and must not submit the form.
             if (e.nativeEvent.isComposing) return
             if (e.key === 'Enter' && !e.shiftKey && !activeProcessing) {
               e.preventDefault()

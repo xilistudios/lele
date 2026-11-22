@@ -1,18 +1,3 @@
-// Regression test for the gateway MCP 500 defect, built on the PRODUCTION
-// wiring: cmd/lele/gateway.go:225 hands channels.NewManager the
-// agentLoop.GetProvidable() facade, and pkg/channels/rest_mcp.go resolves its
-// MCP inventory through a runtime type assertion for MCPPathsFor. When the
-// facade does not forward MCPPathsFor, that assertion fails for every agent in
-// every real gateway: GET/POST /api/v1/mcp* all answer 500 mcp_unavailable,
-// while the suite stays green because every other test injects a fake loop
-// that implements the capability.
-//
-// The test therefore builds a REAL *agent.AgentLoop (the gateway constructor),
-// wires it through GetProvidable() → channels.NewManager exactly like
-// gateway.go does (see gateway_wiring_export_test.go, which also asserts
-// channel.agentLoop satisfies mcpPathsSource), and asserts the user-visible
-// route: GET /api/v1/mcp must be 200 with servers reflecting the mcp.json
-// fixture, not 500.
 package channels_test
 
 import (
@@ -29,9 +14,6 @@ import (
 )
 
 func TestGatewayWiring_MCPInventoryLive(t *testing.T) {
-	// Isolate the mcp.json layers this agent reads: the global layer lives in
-	// LeleDir (LELE_CONFIG_DIR), the agent layer in the agent workspace. The
-	// project layer (<cwd>/.lele/mcp.json) stays absent in this checkout.
 	cfgDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", cfgDir)
 	workspace := t.TempDir()
@@ -41,8 +23,6 @@ func TestGatewayWiring_MCPInventoryLive(t *testing.T) {
 	cfg.Agents.Defaults.Model = "test-model"
 	cfg.Channels.Native.Enabled = true
 
-	// One fixture server per layer, distinct names, so the merged inventory
-	// proves both roots were read through the facade.
 	writeLayer := func(path, body string) {
 		t.Helper()
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -57,19 +37,12 @@ func TestGatewayWiring_MCPInventoryLive(t *testing.T) {
 	writeLayer(filepath.Join(workspace, "mcp.json"),
 		`{"mcpServers": {"wiring-agent": {"command": "agent-cmd"}}}`)
 
-	// The same constructor the gateway uses (store nil = documented JSON
-	// fallback, identical for the read path under test).
 	msgBus := bus.NewMessageBus()
 	loop := agent.NewAgentLoopWithStore(cfg, msgBus, nil)
 	t.Cleanup(func() { loop.Stop() })
 
-	// Production wiring: GetProvidable() facade → channels.NewManager →
-	// NativeChannel routes. The fixture asserts the mcpPathsSource seam on the
-	// value the router will assert against at request time.
 	fixture := channels.NewGatewayWiringFixture(t, cfg, msgBus, loop.GetProvidable())
 
-	// The user-visible route: before the facade forwarded MCPPathsFor this is
-	// 500 mcp_unavailable for every agent.
 	status, body := fixture.Get(t, "/api/v1/mcp?agent_id=main")
 	if status != http.StatusOK {
 		t.Fatalf("GET /api/v1/mcp?agent_id=main = %d %s, want 200 — the facade does not "+
@@ -97,12 +70,6 @@ func TestGatewayWiring_MCPInventoryLive(t *testing.T) {
 		}
 	}
 
-	// The ok/argument contract across the SAME seam: an agent that does not
-	// exist must be 404 agent_not_found (rest_mcp.go:96-99), not 200 and not
-	// 500. Two review mutants survived without this check: M2 (forward
-	// MCPPathsFor but hardcode "main", ignoring agentID) and M5 (swallow ok and
-	// always return true) both answer 200 here, so this subtest is what makes
-	// an ignored agentID or a swallowed ok fail.
 	t.Run("unknown agent is 404 agent_not_found", func(t *testing.T) {
 		status, body := fixture.Get(t, "/api/v1/mcp?agent_id=ghost")
 		if status != http.StatusNotFound {

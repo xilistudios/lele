@@ -9,38 +9,18 @@ import (
 	"sync"
 )
 
-// MemoryFileName is the long-term memory document, at the workspace root.
-// Mirrors pkg/agent/memory.go's memoryFile (that package can't be imported
-// here: pkg/agent imports pkg/tools).
 const MemoryFileName = "MEMORY.md"
 
-// maxMemoryBytes is a hard ceiling on the size of MEMORY.md, enforced
-// independently of the configured line cap. The line cap alone cannot stop
-// flooding: a single arbitrarily long line stays under any line count while
-// MEMORY.md is inlined into every system prompt, so bytes must be bounded too.
 const maxMemoryBytes = 512 * 1024
 
-// UpdateMemoryTool writes the workspace's MEMORY.md so facts persist across
-// sessions. It supports appending a fragment or replacing the whole file, and
-// refuses to write when the result would exceed a configured line cap or the
-// hard byte ceiling.
 type UpdateMemoryTool struct {
 	workspace string
-	maxLines  int // <= 0 means "no cap"
+	maxLines  int
 	restrict  bool
 
-	// mu serializes the read -> join -> count -> cap-check -> write critical
-	// section. Subagents share the parent's tool instance (CloneWithout shares
-	// pointers), so without it two agents appending concurrently interleave
-	// and lose updates, and the cap checks race (TOCTOU).
 	mu sync.Mutex
 }
 
-// NewUpdateMemoryTool creates an update_memory tool bound to a workspace.
-// maxLines <= 0 disables the line cap inside the tool; resolving a
-// non-positive config value to a default is the caller's job. restrict
-// mirrors the other filesystem tools (NewAppendFileTool et al.): when true,
-// the MEMORY.md path must not resolve outside the workspace.
 func NewUpdateMemoryTool(workspace string, maxLines int, restrict bool) *UpdateMemoryTool {
 	return &UpdateMemoryTool{workspace: workspace, maxLines: maxLines, restrict: restrict}
 }
@@ -91,7 +71,6 @@ func (t *UpdateMemoryTool) Execute(ctx context.Context, args map[string]interfac
 	if raw, exists := args["mode"]; exists && raw != nil {
 		str, isString := raw.(string)
 		if !isString {
-			// A malformed argument is an error, not a silent append.
 			return ErrorResult(fmt.Sprintf("invalid mode %v: expected \"append\" or \"replace\"", raw))
 		}
 		if strings.TrimSpace(str) != "" {
@@ -102,21 +81,13 @@ func (t *UpdateMemoryTool) Execute(ctx context.Context, args map[string]interfac
 		return ErrorResult(fmt.Sprintf("invalid mode %q: expected \"append\" or \"replace\"", mode))
 	}
 
-	// Guard against writing MEMORY.md into the process CWD when the agent was
-	// built without a workspace.
 	if t.workspace == "" {
 		return ErrorResult("memory workspace is not configured")
 	}
 
-	// Serialize the whole read-modify-write: concurrent writers (main agent +
-	// subagents share this instance) would otherwise lose appends and race the
-	// cap checks.
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Same workspace policy as every other path-taking tool: with restrict on,
-	// a symlinked MEMORY.md pointing outside the workspace is denied exactly
-	// like write_file/append_file deny it.
 	path, err := validatePath(filepath.Join(t.workspace, MemoryFileName), t.workspace, t.restrict)
 	if err != nil {
 		return ErrorResult(err.Error())
@@ -137,13 +108,11 @@ func (t *UpdateMemoryTool) Execute(ctx context.Context, args map[string]interfac
 		}
 		joined += content
 	}
-	// The file must end with exactly one terminating newline.
 	if !strings.HasSuffix(joined, "\n") {
 		joined += "\n"
 	}
 
 	n := countMemoryLines(joined)
-	// Cap checks happen before any write: on overflow nothing is written at all.
 	if t.maxLines > 0 && n > t.maxLines {
 		return ErrorResult(fmt.Sprintf(
 			"update_memory rejected: the result would be %d lines, over the %d-line cap. "+
@@ -167,9 +136,6 @@ func (t *UpdateMemoryTool) Execute(ctx context.Context, args map[string]interfac
 	return SilentResult(fmt.Sprintf("Memory updated (%s): %d lines.", mode, n))
 }
 
-// countMemoryLines counts logical lines; a single trailing newline is a
-// terminator, not a line: "" -> 0, "a" -> 1, "a\n" -> 1, "a\nb\n" -> 2,
-// "\n" -> 1, "a\n\n" -> 2.
 func countMemoryLines(s string) int {
 	if s == "" {
 		return 0

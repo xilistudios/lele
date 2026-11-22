@@ -1,15 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-//
-// group_e2e_test.go — End-to-end integration tests that exercise the real
-// execution path: GroupManager → runGroupTurn (pkg/agent) → llmCaller →
-// mock LLM provider.  These tests verify turn ordering, event publishing,
-// MoA synthesis, persistence, and safety-net MaxTurns without mocking the
-// executor itself.
-
 package agent
 
 import (
@@ -26,20 +14,12 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-// e2eAgentDef describes a test agent to register.
 type e2eAgentDef struct {
 	id       string
 	name     string
-	response string // unique content returned by the mock provider
+	response string
 }
 
-// buildE2EAgentLoop creates an AgentLoop with len(defs) agents registered,
-// each backed by a mock provider that returns the def's response.  Returns
-// the loop and a publish-capture function.
 func buildE2EAgentLoop(t *testing.T, defs []e2eAgentDef) (
 	al *AgentLoop,
 	published *[]bus.OutboundMessage,
@@ -48,7 +28,7 @@ func buildE2EAgentLoop(t *testing.T, defs []e2eAgentDef) (
 	t.Helper()
 
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
-	t.Cleanup(func() { _ = tmpDir }) // handled by createLLMRunnerTestAgentLoop's tmpDir
+	t.Cleanup(func() { _ = tmpDir })
 
 	for _, d := range defs {
 		agent := newE2EAgentInstance(t, tmpDir, d.id, d.name, d.response)
@@ -57,7 +37,6 @@ func buildE2EAgentLoop(t *testing.T, defs []e2eAgentDef) (
 		al.registry.mu.Unlock()
 	}
 
-	// Captured events (thread-safe).
 	var msgs []bus.OutboundMessage
 	var mu sync.Mutex
 	published = &msgs
@@ -66,12 +45,10 @@ func buildE2EAgentLoop(t *testing.T, defs []e2eAgentDef) (
 	return
 }
 
-// newE2EAgentInstance builds an AgentInstance for a single test agent with
-// a mock provider returning the given fixed response.
 func newE2EAgentInstance(t *testing.T, tmpDir, id, name, response string) *AgentInstance {
 	t.Helper()
 
-	_ = session.NewSessionManager() // ensure dir creation
+	_ = session.NewSessionManager()
 
 	toolRegistry := tools.NewToolRegistry()
 	cb := NewContextBuilder(tmpDir)
@@ -94,7 +71,6 @@ func newE2EAgentInstance(t *testing.T, tmpDir, id, name, response string) *Agent
 	}
 }
 
-// fixedResponse builds an *LLMResponse with the given content and 10 tokens.
 func fixedResponse(content string) *providers.LLMResponse {
 	return &providers.LLMResponse{
 		Content:   content,
@@ -103,9 +79,6 @@ func fixedResponse(content string) *providers.LLMResponse {
 	}
 }
 
-// buildGroupManager wires a real GroupManager with the real runGroupTurn
-// executor (via newLLMRunner), resolve against the registry, and a publisher
-// that captures events.
 func buildGroupManager(
 	al *AgentLoop,
 	published *[]bus.OutboundMessage,
@@ -149,7 +122,6 @@ func buildGroupManager(
 	return group.NewGroupManager(resolve, executor, publisher)
 }
 
-// publishedEvents returns a snapshot of the captured events.
 func publishedEvents(published *[]bus.OutboundMessage, pubMu *sync.Mutex) []bus.OutboundMessage {
 	pubMu.Lock()
 	defer pubMu.Unlock()
@@ -158,7 +130,6 @@ func publishedEvents(published *[]bus.OutboundMessage, pubMu *sync.Mutex) []bus.
 	return out
 }
 
-// countEvents counts events matching the given event type.
 func countEvents(events []bus.OutboundMessage, event string) int {
 	n := 0
 	for _, e := range events {
@@ -169,7 +140,6 @@ func countEvents(events []bus.OutboundMessage, event string) int {
 	return n
 }
 
-// filterEvents returns events matching the given event type.
 func filterEvents(events []bus.OutboundMessage, event string) []bus.OutboundMessage {
 	var out []bus.OutboundMessage
 	for _, e := range events {
@@ -180,12 +150,6 @@ func filterEvents(events []bus.OutboundMessage, event string) []bus.OutboundMess
 	return out
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-// TestGroupE2E_RoundRobin verifies the full round-robin path:
-// 3 agents speak in order, transcript and synthesis are correct, events fire.
 func TestGroupE2E_RoundRobin(t *testing.T) {
 	defs := []e2eAgentDef{
 		{id: "agent-a", name: "Agent A", response: "respuesta-de-A"},
@@ -219,7 +183,6 @@ func TestGroupE2E_RoundRobin(t *testing.T) {
 		t.Fatalf("Wait failed: %v", err)
 	}
 
-	// --- Status / Transcript ---
 	state, ok := gm.Status(groupID)
 	if !ok {
 		t.Fatal("Status: group not found")
@@ -242,17 +205,14 @@ func TestGroupE2E_RoundRobin(t *testing.T) {
 		}
 	}
 
-	// Synthesis = last turn content.
 	if synthesis != "respuesta-de-C" {
 		t.Errorf("synthesis = %q, want %q", synthesis, "respuesta-de-C")
 	}
 
-	// TotalTokens > 0 (mock returns 10 per turn).
 	if state.TotalTokens <= 0 {
 		t.Errorf("TotalTokens = %d, want > 0", state.TotalTokens)
 	}
 
-	// --- Events ---
 	events := publishedEvents(published, pubMu)
 	if c := countEvents(events, "group.status"); c < 1 {
 		t.Errorf("group.status events = %d, want >= 1", c)
@@ -264,7 +224,6 @@ func TestGroupE2E_RoundRobin(t *testing.T) {
 		t.Errorf("group.complete events = %d, want 1", c)
 	}
 
-	// Verify group.turn metadata.
 	turnEvents := filterEvents(events, "group.turn")
 	for i, te := range turnEvents {
 		wantSpeaker := expectedSpeakers[i]
@@ -277,8 +236,6 @@ func TestGroupE2E_RoundRobin(t *testing.T) {
 	}
 }
 
-// TestGroupE2E_MoA verifies the Mixture-of-Agents path:
-// 2 proposers speak first, then the aggregator synthesizes.
 func TestGroupE2E_MoA(t *testing.T) {
 	defs := []e2eAgentDef{
 		{id: "agent-a", name: "Agent A", response: "proposal-A"},
@@ -320,19 +277,15 @@ func TestGroupE2E_MoA(t *testing.T) {
 		t.Errorf("status = %q, want %q", state.Status, group.StatusDone)
 	}
 
-	// MoA: proposers speak first (layer 0), then aggregator (layer 0).
-	// Order may vary for proposers (parallel), but aggregator must be last.
 	if len(state.Transcript) != 3 {
 		t.Fatalf("transcript length = %d, want 3", len(state.Transcript))
 	}
 
-	// The last turn must be the aggregator.
 	last := state.Transcript[2]
 	if last.Speaker != "agent-c" {
 		t.Errorf("last turn speaker = %q, want %q (aggregator)", last.Speaker, "agent-c")
 	}
 
-	// The first two turns must be proposers (order may vary).
 	proposerSpeakers := map[string]bool{
 		state.Transcript[0].Speaker: true,
 		state.Transcript[1].Speaker: true,
@@ -342,14 +295,12 @@ func TestGroupE2E_MoA(t *testing.T) {
 			state.Transcript[0].Speaker, state.Transcript[1].Speaker)
 	}
 
-	// All turns in layer 0 (single round).
 	for i, turn := range state.Transcript {
 		if turn.Layer != 0 {
 			t.Errorf("turn[%d].Layer = %d, want 0", i, turn.Layer)
 		}
 	}
 
-	// Synthesis = aggregator's content.
 	if synthesis != "moa-synthesis-C" {
 		t.Errorf("synthesis = %q, want %q", synthesis, "moa-synthesis-C")
 	}
@@ -358,7 +309,6 @@ func TestGroupE2E_MoA(t *testing.T) {
 		t.Errorf("TotalTokens = %d, want > 0", state.TotalTokens)
 	}
 
-	// --- Events ---
 	events := publishedEvents(published, pubMu)
 	if c := countEvents(events, "group.complete"); c != 1 {
 		t.Errorf("group.complete events = %d, want 1", c)
@@ -370,15 +320,12 @@ func TestGroupE2E_MoA(t *testing.T) {
 			t.Errorf("group.complete strategy = %q, want %q",
 				completeEvents[0].Metadata["strategy"], "moa")
 		}
-		// layers >= 1
 		if completeEvents[0].Metadata["layers"] == "" {
 			t.Error("group.complete layers metadata is empty")
 		}
 	}
 }
 
-// TestGroupE2E_Persistence (T5.11) verifies that after a group finishes,
-// the state is persisted to disk and can be reconstructed via LoadGroup.
 func TestGroupE2E_Persistence(t *testing.T) {
 	defs := []e2eAgentDef{
 		{id: "agent-a", name: "Agent A", response: "p-A"},
@@ -416,10 +363,8 @@ func TestGroupE2E_Persistence(t *testing.T) {
 		t.Fatalf("Wait failed: %v", err)
 	}
 
-	// Allow a brief moment for the deferred saveStateBestEffort to flush.
 	time.Sleep(100 * time.Millisecond)
 
-	// --- Verify persistence via LoadGroup ---
 	loaded, err := group.LoadGroup(storeDir, groupID)
 	if err != nil {
 		t.Fatalf("LoadGroup failed: %v", err)
@@ -444,9 +389,6 @@ func TestGroupE2E_Persistence(t *testing.T) {
 	}
 }
 
-// TestGroupE2E_MaxTurnsSafetyNet verifies that the moderator strategy with
-// MaxTurns=2 terminates without looping forever.  Uses the real
-// defaultModeratorDecider (cycling through participants).
 func TestGroupE2E_MaxTurnsSafetyNet(t *testing.T) {
 	defs := []e2eAgentDef{
 		{id: "agent-a", name: "Agent A", response: "mod-A"},
@@ -486,7 +428,6 @@ func TestGroupE2E_MaxTurnsSafetyNet(t *testing.T) {
 		t.Errorf("status = %q, want %q", state.Status, group.StatusDone)
 	}
 
-	// Should have <= 2 turns (MaxTurns=2 is a hard stop).
 	if len(state.Transcript) > 2 {
 		t.Errorf("transcript length = %d, want <= 2 (MaxTurns)", len(state.Transcript))
 	}
@@ -494,18 +435,14 @@ func TestGroupE2E_MaxTurnsSafetyNet(t *testing.T) {
 		t.Fatal("transcript is empty — expected at least 1 turn")
 	}
 
-	// Synthesis should be non-empty.
-	_ = synthesis // synthesis is the last turn content
+	_ = synthesis
 
-	// Events captured (at least started + complete).
 	events := publishedEvents(published, pubMu)
 	if c := countEvents(events, "group.complete"); c != 1 {
 		t.Errorf("group.complete events = %d, want 1", c)
 	}
 }
 
-// TestGroupE2E_ContextTimeout ensures that if the parent context is cancelled
-// before the group finishes, Wait returns without blocking forever.
 func TestGroupE2E_ContextTimeout(t *testing.T) {
 	defs := []e2eAgentDef{
 		{id: "agent-a", name: "Agent A", response: "timeout-A"},
@@ -513,7 +450,6 @@ func TestGroupE2E_ContextTimeout(t *testing.T) {
 	al, published, pubMu := buildE2EAgentLoop(t, defs)
 	gm := buildGroupManager(al, published, pubMu)
 
-	// Very short context — should cause the group to stop.
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
@@ -524,14 +460,13 @@ func TestGroupE2E_ContextTimeout(t *testing.T) {
 	groupID, err := gm.Start(ctx,
 		"g-e2e-timeout", "", "timeout test", "round_robin",
 		participants,
-		group.GroupOptions{Rounds: 100}, // many rounds, but context expires
+		group.GroupOptions{Rounds: 100},
 		"test", "0",
 	)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
 
-	// Wait should return (either with err or synthesis) within 5s.
 	done := make(chan struct{})
 	go func() {
 		_, _ = gm.Wait(groupID)
@@ -540,15 +475,11 @@ func TestGroupE2E_ContextTimeout(t *testing.T) {
 
 	select {
 	case <-done:
-		// Good — Wait returned.
 	case <-time.After(5 * time.Second):
 		t.Fatal("Wait did not return after context cancellation — possible deadlock")
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Compile-time check: ensure we import all required packages.
-// ---------------------------------------------------------------------------
 var (
 	_ = fmt.Sprintf
 	_ = bus.OutboundMessage{}

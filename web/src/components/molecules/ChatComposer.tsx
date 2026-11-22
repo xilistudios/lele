@@ -32,11 +32,42 @@ function isImageByExtension(name: string): boolean {
   return ext ? IMAGE_EXTENSIONS.has(`.${ext}`) : false
 }
 
-// Pending uploads live in tmp/uploads (public endpoint, no auth needed), so
-// they use the public /api/v1/files/view path via the endpoints constant.
 function buildFileUrl(apiUrl: string, path: string): string {
   const base = apiUrl.replace(/\/$/, '')
   return `${base}${endpoints.files.view}?path=${encodeURIComponent(path)}`
+}
+
+function FolderChip({
+  folder,
+  onClear,
+  className,
+}: {
+  folder: string
+  onClear: () => void
+  className?: string
+}) {
+  const { t } = useTranslation()
+  return (
+    <span
+      title={folder}
+      data-testid="folder-chip"
+      className={`flex max-w-[180px] items-center gap-1 rounded-full border border-accent-primary/30 bg-accent-primary/10 px-2 py-0.5 text-accent-primary ${className ?? ''}`}
+    >
+      <FolderIcon size={11} className="flex-shrink-0" />
+      <span className="truncate text-2xs font-medium">
+        {folder.split('/').filter(Boolean).pop() || folder}
+      </span>
+      <button
+        type="button"
+        onClick={onClear}
+        title={t('chat.removeFolder')}
+        aria-label={t('chat.removeFolder')}
+        className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full hover:bg-accent-primary/25 transition-colors"
+      >
+        <CloseIcon size={8} />
+      </button>
+    </span>
+  )
 }
 
 export function ChatComposer() {
@@ -65,33 +96,19 @@ export function ChatComposer() {
 
   const [draft, setDraft] = useState('')
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
-  // Set when a submit was refused because this session's queue is full; cleared
-  // by the next accepted submit (or by editing the draft).
   const [queueFullHint, setQueueFullHint] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lastTypingSentRef = useRef(0)
-  // In-flight send counter. A boolean would be reset by the first send's
-  // finally-block while a second overlapping send is still pending; a counter
-  // keeps the guard armed until ALL concurrent sends complete.
   const inFlightRef = useRef(0)
   const lastSubmittedContentRef = useRef('')
 
-  // "/" slash-command palette. The palette only assists composing: accepting a
-  // row inserts "<name> " into the draft and the command itself runs on the
-  // backend once the text is sent as a normal message (handleCommand there).
-  // Scoped to the agent that will answer, because custom commands live in each
-  // agent's own workspace (the built-in half is global and unaffected).
   const { commands } = useSlashCommands(api, currentAgent?.id)
   const [paletteIdx, setPaletteIdx] = useState(0)
-  // Escape hides the palette until the next edit of the trigger text (the
-  // textarea change handler re-arms it).
   const [paletteDismissed, setPaletteDismissed] = useState(false)
 
   const paletteTriggered = isPaletteTrigger(draft)
   const paletteItems = useMemo(() => filterCommands(commands, draft), [commands, draft])
   const paletteOpen = paletteTriggered && !paletteDismissed && paletteItems.length > 0
-  // Items can shrink asynchronously (commands load once, late), so clamp the
-  // highlight instead of trusting paletteIdx to stay in range.
   const activePaletteIdx = Math.min(paletteIdx, Math.max(paletteItems.length - 1, 0))
 
   const selectCommand = (command: SlashCommandInfo) => {
@@ -101,9 +118,6 @@ export function ChatComposer() {
     textareaRef.current?.focus()
   }
 
-  // The composer is not remounted on session switch, so draft/palette/queue
-  // state must be cleared explicitly — otherwise text typed in one chat would
-  // bleed into the next.
   // biome-ignore lint/correctness/useExhaustiveDependencies: currentSessionKey is the trigger, not a read — the effect must run exactly when the session changes.
   useEffect(() => {
     setDraft('')
@@ -119,18 +133,11 @@ export function ChatComposer() {
     e?.preventDefault()
     const content = draft.trim()
     if (!content && pendingAttachments.length === 0) return
-    // Guard against rapid double-submit of the same content (e.g., double-click).
-    // Different content is allowed through for queue operations while the agent
-    // is busy — the counter blocks same-content duplicates while ANY send is
-    // in flight, content comparison permits distinct messages.
     if (inFlightRef.current > 0 && content === lastSubmittedContentRef.current) return
     inFlightRef.current += 1
     lastSubmittedContentRef.current = content
 
     try {
-      // While the agent is busy onSend enqueues instead of sending, and returns
-      // false when that session's queue is full — keep the draft so nothing is
-      // silently lost. Same contract applies when session/agent creation fails.
       const accepted = await onSend(content, pendingAttachments)
       if (accepted === false) {
         setQueueFullHint(true)
@@ -147,8 +154,6 @@ export function ChatComposer() {
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // IME safety: while composing (CJK candidates), every key belongs to the
-    // input method — the palette must not swallow them.
     if (e.nativeEvent.isComposing) return
 
     if (paletteOpen) {
@@ -183,13 +188,12 @@ export function ChatComposer() {
 
   const handleTextareaChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     setDraft(e.target.value)
-    // Any edit restarts the highlight, and typing a new trigger re-arms the
-    // palette after an Escape dismissal.
     setPaletteIdx(0)
     if (isPaletteTrigger(e.target.value)) setPaletteDismissed(false)
     if (queueFullHint && e.target.value.trim()) setQueueFullHint(false)
     e.target.style.height = 'auto'
-    e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`
+    const cap = Number.parseFloat(getComputedStyle(e.target).maxHeight)
+    e.target.style.height = `${Math.min(e.target.scrollHeight, Number.isFinite(cap) ? cap : 200)}px`
 
     const now = Date.now()
     if (now - lastTypingSentRef.current > 2000 && currentSessionKey) {
@@ -206,20 +210,15 @@ export function ChatComposer() {
 
   const composerTheme = getModeTheme(chatMode)
 
-  // Check if the currently selected model has reasoning enabled
   const thinkingEnabled = useMemo(() => {
     if (!selectedModel) return false
 
-    // Normalize model names for comparison (with/without provider prefix)
     const normalizeModelName = (modelName: string): string => {
       const parts = modelName.split('/')
       return parts.length > 1 ? parts[parts.length - 1] : modelName
     }
     const normalizedSelectedModel = normalizeModelName(selectedModel)
 
-    // Build a lookup set of models with reasoning enabled.
-    // Only store models that actually have reasoning — flat availableModels
-    // lack reasoning metadata, so they must not overwrite grouped model data.
     const modelsWithReasoning = new Set<string>()
 
     for (const group of groupedModels ?? []) {
@@ -250,8 +249,6 @@ export function ChatComposer() {
   ]
   return (
     <form onSubmit={submit}>
-      {/* Messages typed while the agent was busy. Rendered inside the form but
-          above the attachments strip; QueuedMessages hides itself when empty. */}
       <QueuedMessages />
       {queueFullHint && (
         <p className="mb-2 px-1 text-xs text-state-error" role="alert">
@@ -259,7 +256,7 @@ export function ChatComposer() {
         </p>
       )}
       {pendingAttachments.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-end gap-2">
+        <div className="mb-3 flex flex-wrap items-end gap-2 max-md:max-h-20 max-md:overflow-y-auto">
           {pendingAttachments.map((attachment) => {
             const isImg = isImageByExtension(attachment)
             if (isImg) {
@@ -336,8 +333,7 @@ export function ChatComposer() {
       )}
       <div className="rounded-lg border border-border bg-background-secondary transition-all duration-fast focus-within:border-border focus-within:ring-1 focus-within:ring-accent-primary/40">
         <div className={`h-0.5 w-full rounded-t-lg ${composerTheme.accentBar}`} />
-        {/* Top toolbar: folder picker above the input, folder chip when set */}
-        <div className="flex items-center gap-1 px-2 pt-1.5">
+        <div className="flex items-center gap-1 px-2 pt-1.5 max-md:hidden">
           <IconButton
             onClick={() => setFolderPickerOpen(true)}
             title={t('chat.addFolder')}
@@ -345,26 +341,7 @@ export function ChatComposer() {
           >
             <PlusIcon size={14} />
           </IconButton>
-          {sessionFolder && (
-            <span
-              title={sessionFolder}
-              className="flex max-w-[180px] items-center gap-1 rounded-full border border-accent-primary/30 bg-accent-primary/10 px-2 py-0.5 text-accent-primary"
-            >
-              <FolderIcon size={11} className="flex-shrink-0" />
-              <span className="truncate text-2xs font-medium">
-                {sessionFolder.split('/').filter(Boolean).pop() || sessionFolder}
-              </span>
-              <button
-                type="button"
-                onClick={onClearFolder}
-                title={t('chat.removeFolder')}
-                aria-label={t('chat.removeFolder')}
-                className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full hover:bg-accent-primary/25 transition-colors"
-              >
-                <CloseIcon size={8} />
-              </button>
-            </span>
-          )}
+          {sessionFolder && <FolderChip folder={sessionFolder} onClear={onClearFolder} />}
         </div>
         {paletteOpen && (
           <SlashCommandMenu
@@ -376,7 +353,7 @@ export function ChatComposer() {
         )}
         <textarea
           ref={textareaRef}
-          className="min-h-[44px] max-h-[200px] w-full resize-none bg-transparent px-4 pb-2 pt-1.5 text-sm text-text-primary outline-none placeholder:text-text-tertiary"
+          className="min-h-[44px] max-h-[200px] max-md:max-h-[min(200px,30dvh)] w-full resize-none bg-transparent px-4 pb-2 pt-1.5 text-sm text-text-primary outline-none placeholder:text-text-tertiary"
           placeholder={t('chat.messagePlaceholder')}
           value={draft}
           onChange={handleTextareaChange}
@@ -387,65 +364,90 @@ export function ChatComposer() {
           disabled={false}
           rows={1}
         />
-        <div className="flex flex-wrap items-center gap-2 px-3 pb-2 pt-1 sm:gap-3">
-          <AttachmentInput
-            onUpload={onUploadAttachments}
-            onAttach={(paths) => onAttachmentsChange((prev) => [...prev, ...paths])}
-          />
-          <SearchableSelect
-            ariaLabel={t('chat.model')}
-            buttonLabel={t('chat.model')}
-            emptyLabel={t('chat.default')}
-            groups={groupedModels}
-            onChange={onSelectModel}
-            options={groupedModels ? undefined : availableModels}
-            placeholder={selectedModel}
-            searchAriaLabel={`${t('chat.model')} ${t('chat.search')}`}
-            searchPlaceholder={t('chat.model')}
-            value={selectedModel}
-          />
-          {thinkingEnabled && (
-            <SearchableSelect
-              ariaLabel={t('chat.thinking')}
-              buttonLabel={t('chat.thinking')}
-              direction="up"
-              emptyLabel={t('chat.thinkingOff')}
-              onChange={onSelectThinkLevel}
-              options={thinkOptions}
-              placeholder={
-                thinkOptions.find((o) => o.value === thinkLevel)?.label ?? t('chat.thinkingOff')
-              }
-              searchAriaLabel={`${t('chat.thinking')} ${t('chat.search')}`}
-              searchPlaceholder={t('chat.thinking')}
-              value={thinkLevel}
+        <div className="flex flex-wrap items-center gap-2 px-3 pb-2 pt-1 max-md:gap-1.5 sm:gap-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 max-md:gap-1.5 md:contents">
+            <IconButton
+              onClick={() => setFolderPickerOpen(true)}
+              title={t('chat.addFolder')}
+              ariaLabel={t('chat.addFolder')}
+              className="md:hidden max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center"
+            >
+              <PlusIcon size={14} />
+            </IconButton>
+            <AttachmentInput
+              onUpload={onUploadAttachments}
+              onAttach={(paths) => onAttachmentsChange((prev) => [...prev, ...paths])}
+              className="max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center"
             />
-          )}
-          {agentsOptions.length > 1 && (
             <SearchableSelect
-              ariaLabel={t('chat.agent')}
-              buttonLabel={t('chat.agent')}
-              disabled={hasConversation}
-              emptyLabel={t('chat.agentLocked')}
-              onChange={onSelectAgent}
-              options={agentsOptions}
-              placeholder={
-                agentsOptions.find((a) => a.value === selectedAgentId)?.label ?? t('chat.agent')
-              }
-              searchAriaLabel={`${t('chat.agent')} ${t('chat.search')}`}
-              searchPlaceholder={t('chat.agent')}
-              value={selectedAgentId}
+              className="max-md:min-w-0 max-md:flex-1"
+              ariaLabel={t('chat.model')}
+              buttonLabel={t('chat.model')}
+              emptyLabel={t('chat.default')}
+              groups={groupedModels}
+              onChange={onSelectModel}
+              options={groupedModels ? undefined : availableModels}
+              placeholder={selectedModel}
+              searchAriaLabel={`${t('chat.model')} ${t('chat.search')}`}
+              searchPlaceholder={t('chat.model')}
+              value={selectedModel}
             />
-          )}
-          {/* Token-speed chip: sits just before the send button (ml-auto pins
-              it right; the button keeps its own ml-auto so it stays right when
-              the chip is hidden). Hidden entirely when there is no valid
-              rate, so it never displaces the controls or renders "0.0 tok/s". */}
-          <StreamMetricsChip className="ml-auto" />
+            {(thinkingEnabled || agentsOptions.length > 1 || Boolean(sessionFolder)) && (
+              <div className="max-md:flex max-md:min-w-0 max-md:basis-full max-md:flex-wrap max-md:items-center max-md:gap-2 md:contents">
+                {sessionFolder && (
+                  <div className="max-md:basis-full md:hidden">
+                    <FolderChip
+                      folder={sessionFolder}
+                      onClear={onClearFolder}
+                      className="min-w-0 max-md:max-w-[200px]"
+                    />
+                  </div>
+                )}
+                {thinkingEnabled && (
+                  <SearchableSelect
+                    className="max-md:min-w-0"
+                    ariaLabel={t('chat.thinking')}
+                    buttonLabel={t('chat.thinking')}
+                    direction="up"
+                    emptyLabel={t('chat.thinkingOff')}
+                    onChange={onSelectThinkLevel}
+                    options={thinkOptions}
+                    placeholder={
+                      thinkOptions.find((o) => o.value === thinkLevel)?.label ??
+                      t('chat.thinkingOff')
+                    }
+                    searchAriaLabel={`${t('chat.thinking')} ${t('chat.search')}`}
+                    searchPlaceholder={t('chat.thinking')}
+                    value={thinkLevel}
+                  />
+                )}
+                {agentsOptions.length > 1 && (
+                  <SearchableSelect
+                    className="max-md:min-w-0"
+                    ariaLabel={t('chat.agent')}
+                    buttonLabel={t('chat.agent')}
+                    disabled={hasConversation}
+                    emptyLabel={t('chat.agentLocked')}
+                    onChange={onSelectAgent}
+                    options={agentsOptions}
+                    placeholder={
+                      agentsOptions.find((a) => a.value === selectedAgentId)?.label ??
+                      t('chat.agent')
+                    }
+                    searchAriaLabel={`${t('chat.agent')} ${t('chat.search')}`}
+                    searchPlaceholder={t('chat.agent')}
+                    value={selectedAgentId}
+                  />
+                )}
+              </div>
+            )}
+            <StreamMetricsChip className="ml-auto" />
+          </div>
           <button
             type={canCancel ? 'button' : 'submit'}
             disabled={false}
             aria-label={canCancel ? t('chat.cancel') : t('chat.send')}
-            className={`ml-auto flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md transition-colors ${
+            className={`ml-auto flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md transition-colors max-md:h-11 max-md:w-11 ${
               canCancel
                 ? 'bg-state-error/10 text-state-error hover:bg-state-error-fill hover:text-text-on-accent border border-state-error/30'
                 : 'bg-accent-primary text-text-on-accent hover:bg-accent-hover'

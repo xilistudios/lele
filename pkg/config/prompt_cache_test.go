@@ -22,7 +22,6 @@ func TestPromptCacheNormalizedTTL(t *testing.T) {
 }
 
 func TestPromptCacheDefaultsDisabled(t *testing.T) {
-	// Zero value must keep caching off so behavior is unchanged by default.
 	var d PromptCacheConfig
 	if d.Enabled {
 		t.Error("prompt cache must be opt-in")

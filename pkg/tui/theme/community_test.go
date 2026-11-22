@@ -40,9 +40,6 @@ func TestFetchCommunityThemeInvalidName(t *testing.T) {
 	}
 }
 
-// TestFetchCommunityIndex fetches the community themes index from GitHub.
-// It is skipped when there is no network access.
-//
 //nolint:errcheck
 func TestFetchCommunityIndex(t *testing.T) {
 	if testing.Short() {
@@ -66,9 +63,6 @@ func TestFetchCommunityIndex(t *testing.T) {
 	}
 }
 
-// hasNetwork does a quick best-effort probe for internet connectivity with
-// a short timeout so the integration test fails fast (and skips) rather
-// than hanging for the full 15-second client timeout.
 func hasNetwork() bool {
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get("https://github.com")

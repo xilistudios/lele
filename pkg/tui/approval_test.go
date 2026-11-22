@@ -7,16 +7,12 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
-// TestApprovalRequest_ShowsPromptInViewport simulates the agent publishing an
-// approval.request outbound event and verifies the TUI displays the inline
-// approval prompt with the command and reason.
 func TestApprovalRequest_ShowsPromptInViewport(t *testing.T) {
 	m := newTestModel(t)
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
 	m = updated.(*Model)
 
-	// Create a session and switch to it
 	key := "tui:chat:approval-test"
 	m.sessionMgr.GetOrCreate(key)
 	_ = m.sessionMgr.SetMode(key, "agent")
@@ -26,7 +22,6 @@ func TestApprovalRequest_ShowsPromptInViewport(t *testing.T) {
 	m.viewport.Width = 118
 	m.updateViewport()
 
-	// Publish an approval.request outbound event (same as executeWithApproval)
 	m.agentLoop.MessageBus().PublishOutbound(bus.OutboundMessage{
 		Channel: "native",
 		ChatID:  key,
@@ -38,10 +33,8 @@ func TestApprovalRequest_ShowsPromptInViewport(t *testing.T) {
 		},
 	})
 
-	// Deliver the outbound message to the model
 	got := false
 	for i := 0; i < 5; i++ {
-		// The outbound listener is a tea.Cmd — run it to get the message
 		cmd := m.startOutboundListener()
 		if cmd == nil {
 			t.Fatal("outbound listener returned nil cmd")
@@ -72,7 +65,6 @@ func TestApprovalRequest_ShowsPromptInViewport(t *testing.T) {
 		t.Fatalf("pendingApprovalCmd = %q, want rm -rf /tmp/foo", m.pendingApprovalCmd)
 	}
 
-	// Verify the approval prompt is rendered in the viewport overlay
 	m.updateViewport()
 	overlay := m.viewport.overlayLines
 	found := false
@@ -96,7 +88,6 @@ func contains(s, sub string) bool {
 	return false
 }
 
-// TestApproval_KeyHandling verifies y/n keys approve/reject the pending approval.
 func TestApproval_KeyHandling(t *testing.T) {
 	m := newTestModel(t)
 
@@ -111,13 +102,11 @@ func TestApproval_KeyHandling(t *testing.T) {
 	m.reloadSessions()
 	m.viewport.Width = 118
 
-	// Manually set the pending approval state (as if approval.request arrived)
 	m.pendingApprovalID = "approval-456"
 	m.pendingApprovalCmd = "sudo rm -rf /"
 	m.pendingApprovalReason = "dangerous"
 	m.updateViewport()
 
-	// Press 'y' to approve
 	m2 := sendKeys(m, "y")
 	if m2.pendingApprovalID != "" {
 		t.Fatalf("pendingApprovalID not cleared after y: %q", m2.pendingApprovalID)
@@ -126,7 +115,6 @@ func TestApproval_KeyHandling(t *testing.T) {
 		t.Fatal("approvalResult not set after y")
 	}
 
-	// Press 'n' to reject
 	m.pendingApprovalID = "approval-789"
 	m.pendingApprovalCmd = "rm -rf /"
 	m.pendingApprovalReason = "dangerous"

@@ -13,16 +13,8 @@ import (
 )
 
 const (
-	// restStreamDeadline is the maximum time an SSE stream stays open waiting for
-	// the agent to finish. If the agent hangs, the stream is closed with an error
-	// event instead of leaking a connection indefinitely.
 	restStreamDeadline = 5 * time.Minute
 
-	// sseWriteTimeout bounds a SINGLE SSE write (GW-L9). The server-level
-	// WriteTimeout (30s, cmd/lele/web.go) applies to the whole response and
-	// would kill streams longer than 30s mid-body; we clear it once at stream
-	// start and re-arm this per-write deadline instead, so a client that stops
-	// draining its socket cannot pin the handler forever.
 	sseWriteTimeout = 30 * time.Second
 )
 
@@ -43,9 +35,7 @@ func (n *NativeChannel) registerRESTStreamSubscriber(sessionKey, messageID strin
 		id:         uuid.New().String(),
 		sessionKey: sessionKey,
 		messageID:  messageID,
-		// Buffer 512 events — large enough to absorb bursts of streaming chunks,
-		// tool events, and completion signals without blocking the publisher.
-		ch: make(chan restStreamEvent, 512),
+		ch:         make(chan restStreamEvent, 512),
 	}
 
 	n.mu.Lock()
@@ -102,20 +92,6 @@ func writeSSE(w http.ResponseWriter, event string, data interface{}) error {
 	return sseGuardedWrite(w, []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", event, payload)))
 }
 
-// sseGuardedWrite re-arms a fresh per-write deadline before each SSE write
-// (GW-L9). The server-level WriteTimeout (30s, cmd/lele/web.go) applies to
-// the WHOLE response when not overridden, which kills long-lived streams
-// mid-body ("unexpected EOF" client-side). handleChatSendStream clears that
-// deadline once at stream start; every event then gets this bounded per-write
-// deadline so a client that stops draining its socket still cannot pin the
-// handler forever. ErrNotSupported (ResponseWriter without deadline support,
-// e.g. test recorders) is tolerated.
-//
-// Caveat (review M1): small SSE frames are copied straight into the kernel
-// socket buffer and return immediately, so this guard only trips once the
-// buffer is full (stalled client + sustained traffic, tens of minutes).
-// The primary liveness backstops remain the request context and the
-// per-handler wall-clock deadlines (restStreamDeadline, bgStreamDeadline).
 func sseGuardedWrite(w http.ResponseWriter, data []byte) error {
 	rc := http.NewResponseController(w)
 	if err := rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
@@ -155,19 +131,12 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Advisory agent_id for this send; see HintSessionAgent for why this is not
-	// SetSessionAgent.
 	if req.AgentID != "" {
 		n.agentLoop.HintSessionAgent(sessionKey, req.AgentID)
 	}
 
 	messageID := uuid.New().String()
 
-	// Resolve the session alias (base -> base:chat:N after /new or /agent) so the
-	// ack and the subscriber both use the same key that dispatchOutboundMessage
-	// emits stream/complete events with. Without this, the ack would report the
-	// unresolved key while all subsequent SSE events are fanned out under the
-	// alias, leaving the frontend unable to pair the ack with its stream.
 	ackSessionKey := sessionKey
 	if n.agentLoop != nil {
 		ackSessionKey = n.agentLoop.ResolveSessionKey(sessionKey)
@@ -178,9 +147,6 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 
 	attachments := n.processAttachments(req.Attachments, sessionKey)
 
-	// Guard placed after the subscriber's defer is registered and before
-	// WriteHeader: returning here unregisters the subscriber and still lets the
-	// client read the 400 instead of an empty SSE stream (see sendpayload.go).
 	if !hasSendablePayload(req.Content, attachments) {
 		writeError(w, http.StatusBadRequest, "attachments could not be read; add text or re-upload", "attachments_rejected")
 		return
@@ -192,9 +158,6 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	// GW-L9: the stream can legitimately outlive the server-level
-	// WriteTimeout (restStreamDeadline is 5 min), so clear it once here.
-	// Individual writes stay bounded by sseWriteTimeout via sseGuardedWrite.
 	rc := http.NewResponseController(w)
 	if err := rc.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
 		logger.DebugCF("native", "chat stream: could not clear write deadline", map[string]interface{}{"error": err})
@@ -219,8 +182,6 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 	}
 	n.base.publishInbound(&msg)
 
-	// Stream events to the client until the message is complete,
-	// an error occurs, the client disconnects, or the deadline expires.
 	deadline := time.After(restStreamDeadline)
 	completeSeen := false
 	historySeen := false
@@ -275,10 +236,6 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-// handleStreamStatus returns a list of active streams for a session.
-// This allows the frontend to discover in-progress streams after a page reload
-// and retrieve their accumulated content. Now uses the session's in-progress
-// assistant message instead of a separate stream state store.
 func (n *NativeChannel) handleStreamStatus(w http.ResponseWriter, r *http.Request) {
 	sessionKey := r.PathValue("sessionKey")
 	if sessionKey == "" {
@@ -314,9 +271,6 @@ func (n *NativeChannel) handleStreamStatus(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// handleStreamState returns the current accumulated state of a specific stream.
-// Used by the frontend after reconnection to recover the streaming content that
-// was produced while disconnected. Now uses the session's in-progress message.
 func (n *NativeChannel) handleStreamState(w http.ResponseWriter, r *http.Request) {
 	sessionKey := r.PathValue("sessionKey")
 	messageID := r.PathValue("messageID")

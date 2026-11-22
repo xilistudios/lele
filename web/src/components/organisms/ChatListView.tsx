@@ -121,7 +121,6 @@ const ChatListItem = memo(function ChatListItem({
   }, [onClear, session.key])
 
   const handleDeleteClick = useCallback(() => {
-    // Two-step confirm, matching SessionItem: first click arms, second deletes.
     if (!confirmingDelete) {
       setConfirmingDelete(true)
       return
@@ -143,8 +142,6 @@ const ChatListItem = memo(function ChatListItem({
         }
       `}
     >
-      {/* When renaming, render the form as a sibling (not inside the select
-          button) so no interactive control is nested inside another button. */}
       {renaming ? (
         <div
           className="min-w-0 flex-1"

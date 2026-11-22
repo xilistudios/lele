@@ -166,7 +166,6 @@ func (c *FeishuChannel) handleMessageReceive(_ context.Context, event *larkim.P2
 		metadata["tenant_key"] = *sender.TenantKey
 	}
 
-	// Routing metadata: "p2p" → direct, otherwise → group.
 	peerKind := "group"
 	if chatType == "p2p" {
 		peerKind = "direct"

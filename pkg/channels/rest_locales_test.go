@@ -11,8 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/locales"
 )
 
-// newLocalesTestChannel builds a minimal NativeChannel with a temp leleDir
-// and a mocked HTTP transport for GitHub raw URLs.
 func newLocalesTestChannel(t *testing.T) (*NativeChannel, *httptest.Server) {
 	t.Helper()
 	dir := t.TempDir()
@@ -72,19 +70,10 @@ func (r rewriteHostForTest) RoundTrip(req *http.Request) (*http.Response, error)
 
 func TestHandleLocalesList(t *testing.T) {
 	n, _ := newLocalesTestChannel(t)
-	// agentLoop is nil — List still works; current defaults to "es".
-	// Avoid nil pointer by not calling GetConfigSnapshot; handler checks nil.
-	// Our handler calls n.agentLoop.GetConfigSnapshot() — need a stub.
-	// Use a lightweight approach: temporarily skip by ensuring agentLoop is set
-	// via a tiny fake. For this unit test we only check status codes that
-	// don't need the snapshot; list always needs it. Use recover-safe path:
-	// if agentLoop is nil the handler would panic — so install a no-op.
 	n.agentLoop = nil
 
-	// Patch: handleLocalesList currently calls agentLoop. Guard was added.
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/locales", nil)
 	rr := httptest.NewRecorder()
-	// Call with nil agentLoop — handler must not panic.
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -127,7 +116,6 @@ func TestHandleLocaleInstallAndGet(t *testing.T) {
 		t.Fatalf("install response = %+v", inst)
 	}
 
-	// Pack should be on disk.
 	if _, err := os.Stat(filepath.Join(n.getLocalesManager().CacheDir(), "web", "fr.json")); err != nil {
 		t.Fatalf("web pack missing: %v", err)
 	}
@@ -147,7 +135,6 @@ func TestHandleLocaleInstallAndGet(t *testing.T) {
 		t.Errorf("source = %q, want cache", pack.Source)
 	}
 
-	// Uninstall
 	req3 := httptest.NewRequest(http.MethodDelete, "/api/v1/locales/fr", nil)
 	req3.SetPathValue("code", "fr")
 	rr3 := httptest.NewRecorder()
@@ -156,7 +143,6 @@ func TestHandleLocaleInstallAndGet(t *testing.T) {
 		t.Fatalf("uninstall status = %d", rr3.Code)
 	}
 
-	// Builtin uninstall rejected
 	req4 := httptest.NewRequest(http.MethodDelete, "/api/v1/locales/en", nil)
 	req4.SetPathValue("code", "en")
 	rr4 := httptest.NewRecorder()

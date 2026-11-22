@@ -7,68 +7,47 @@ import (
 	"path/filepath"
 )
 
-// ToConfig converts the editable document to Config for validation.
 func (doc *EditableDocument) ToConfig() (*Config, error) {
 	cfg := DefaultConfig()
 
-	// Copiar agents
 	cfg.Agents.Defaults = AgentDefaults{
-		Workspace:              doc.Agents.Defaults.Workspace,
-		RestrictToWorkspace:    doc.Agents.Defaults.RestrictToWorkspace,
-		Provider:               doc.Agents.Defaults.Provider,
-		Model:                  doc.Agents.Defaults.Model,
-		ModelFallbacks:         doc.Agents.Defaults.ModelFallbacks,
-		ImageModel:             doc.Agents.Defaults.ImageModel,
-		ImageModelFallbacks:    doc.Agents.Defaults.ImageModelFallbacks,
-		MaxTokens:              doc.Agents.Defaults.MaxTokens,
-		Temperature:            doc.Agents.Defaults.Temperature,
-		ThinkingLevel:          doc.Agents.Defaults.ThinkingLevel,
-		MaxToolIterations:      doc.Agents.Defaults.MaxToolIterations,
-		MaxReadLines:           doc.Agents.Defaults.MaxReadLines,
-		MemoryMaxLines:         doc.Agents.Defaults.MemoryMaxLines,
-		SubagentTimeoutMinutes: doc.Agents.Defaults.SubagentTimeoutMinutes,
-		SubagentMaxConcurrent:  doc.Agents.Defaults.SubagentMaxConcurrent,
-		SubagentMaxRetries:     doc.Agents.Defaults.SubagentMaxRetries,
-		// Side-fix: SubagentMaxIterations was silently dropped by both
-		// hand-written copy blocks (preexisting bug, same class as the
-		// agents-list Temperature drop); the round-trip test now guards it.
-		SubagentMaxIterations: doc.Agents.Defaults.SubagentMaxIterations,
-		// SubagentRetentionMinutes must be carried: dropping it here would
-		// silently revert the retention window to the code default on every
-		// document→Config conversion (WebUI/TUI save).
+		Workspace:                doc.Agents.Defaults.Workspace,
+		RestrictToWorkspace:      doc.Agents.Defaults.RestrictToWorkspace,
+		Provider:                 doc.Agents.Defaults.Provider,
+		Model:                    doc.Agents.Defaults.Model,
+		ModelFallbacks:           doc.Agents.Defaults.ModelFallbacks,
+		ImageModel:               doc.Agents.Defaults.ImageModel,
+		ImageModelFallbacks:      doc.Agents.Defaults.ImageModelFallbacks,
+		MaxTokens:                doc.Agents.Defaults.MaxTokens,
+		Temperature:              doc.Agents.Defaults.Temperature,
+		ThinkingLevel:            doc.Agents.Defaults.ThinkingLevel,
+		MaxToolIterations:        doc.Agents.Defaults.MaxToolIterations,
+		MaxReadLines:             doc.Agents.Defaults.MaxReadLines,
+		MemoryMaxLines:           doc.Agents.Defaults.MemoryMaxLines,
+		SubagentTimeoutMinutes:   doc.Agents.Defaults.SubagentTimeoutMinutes,
+		SubagentMaxConcurrent:    doc.Agents.Defaults.SubagentMaxConcurrent,
+		SubagentMaxRetries:       doc.Agents.Defaults.SubagentMaxRetries,
+		SubagentMaxIterations:    doc.Agents.Defaults.SubagentMaxIterations,
 		SubagentRetentionMinutes: doc.Agents.Defaults.SubagentRetentionMinutes,
 		LLMLoopTimeoutMinutes:    doc.Agents.Defaults.LLMLoopTimeoutMinutes,
-		// PromptCache must be carried: without it a document→Config conversion
-		// silently reverts prompt-cache settings to the code default (off).
-		PromptCache: doc.Agents.Defaults.PromptCache,
+		PromptCache:              doc.Agents.Defaults.PromptCache,
 	}
 
 	for _, agent := range doc.Agents.List {
 		cfg.Agents.List = append(cfg.Agents.List, AgentConfig{
-			ID:        agent.ID,
-			Default:   agent.Default,
-			Name:      agent.Name,
-			Workspace: agent.Workspace,
-			Model:     agent.Model,
-			Skills:    agent.Skills,
-			Subagents: agent.Subagents,
-			// Side-fix: Temperature was silently dropped here even though
-			// EditableAgentConfig carries it (preexisting bug). The result of
-			// ToConfig() is used for validation, so an agent temperature set
-			// in the editor was invisible to anything validating from Config.
+			ID:            agent.ID,
+			Default:       agent.Default,
+			Name:          agent.Name,
+			Workspace:     agent.Workspace,
+			Model:         agent.Model,
+			Skills:        agent.Skills,
+			Subagents:     agent.Subagents,
 			Temperature:   agent.Temperature,
 			ThinkingLevel: agent.ThinkingLevel,
-			// Tools must be carried too: this hand-written copy block is the
-			// editable->runtime conversion (WebUI save path). A new field
-			// that is not copied here is invisible to runtime consumers.
-			// (Note: today ToConfig() returns `validated`, rebuilt from
-			// toSerializable(), so this block is effectively dead — kept in
-			// lockstep anyway so it stays correct if ever revived.)
-			Tools: agent.Tools,
+			Tools:         agent.Tools,
 		})
 	}
 
-	// Copy session.
 	cfg.Session = SessionConfig{
 		DMScope:                    doc.Session.DMScope,
 		IdentityLinks:              doc.Session.IdentityLinks,
@@ -82,13 +61,10 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		Resume:                     doc.Session.Resume,
 	}
 
-	// Copiar bindings
 	cfg.Bindings = doc.Bindings
 
-	// Copiar groups
 	cfg.Groups = doc.Groups
 
-	// Copiar channels
 	cfg.Channels.WhatsApp = WhatsAppConfig(doc.Channels.WhatsApp)
 	cfg.Channels.Telegram = TelegramConfig{
 		Enabled:   doc.Channels.Telegram.Enabled,
@@ -159,15 +135,8 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		UploadTTLHours:    doc.Channels.Native.UploadTTLHours,
 		RateLimit:         doc.Channels.Native.RateLimit,
 	}
-	// Web UI toggle: must be carried like every other channel, otherwise a
-	// document->Config conversion silently reverts it to the code default.
 	cfg.Channels.Web.Enabled = doc.Channels.Web.Enabled
 
-	// Copiar providers — dead by construction: cfg is discarded, ToConfig
-	// returns `validated` rebuilt from doc.toSerializable() below, and that
-	// serializer is the carrier of providers.<name>.headers. The two must stay
-	// in sync: a field toSerializable stops emitting disappears from
-	// config.json on the next save, however carefully cfg is filled here.
 	cfg.Providers.Named = make(map[string]NamedProviderConfig)
 	for name, provider := range doc.Providers {
 		cfg.Providers.Named[name] = NamedProviderConfig{
@@ -184,10 +153,8 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		}
 	}
 
-	// Copiar gateway
 	cfg.Gateway = doc.Gateway
 
-	// Copiar tools
 	cfg.Tools.Web.Brave = BraveConfig{
 		Enabled:    doc.Tools.Web.Brave.Enabled,
 		APIKey:     doc.Tools.Web.Brave.APIKey.resolve(),
@@ -210,18 +177,12 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 	cfg.Tools.Cron = doc.Tools.Cron
 	cfg.Tools.Exec = ExecConfig(doc.Tools.Exec)
 
-	// Copiar heartbeat
 	cfg.Heartbeat = doc.Heartbeat
 
-	// Copy devices.
 	cfg.Devices = doc.Devices
 
-	// Copiar logs
 	cfg.Logs = LogsConfig(doc.Logs)
 
-	// Custom slash commands. The types are identical on both sides, so a
-	// shallow copy is enough; the map is cloned to keep the document and the
-	// resulting config independent.
 	if len(doc.Commands) > 0 {
 		cfg.Commands = make(map[string]CommandDefinition, len(doc.Commands))
 		for name, def := range doc.Commands {
@@ -239,10 +200,6 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 	if err := json.Unmarshal(data, validated); err != nil {
 		return nil, err
 	}
-	// Mirror LoadConfig: an absent session.ephemeral means false, never
-	// DefaultConfig()'s true. The pruned serializer omits the key exactly when
-	// the document means false, so without this ToConfig would hand back true
-	// for a document that LoadConfig/LoadEditableDocument both read as false.
 	if !pinnedSessionEphemeral(serializable) {
 		validated.Session.Ephemeral = SessionEphemeralFileDefault
 	}
@@ -264,9 +221,7 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 	return validated, nil
 }
 
-// SaveEditableDocument guarda el documento editable en archivo
 func SaveEditableDocument(path string, doc *EditableDocument) error {
-	// Convert to a serializable format while preserving placeholders.
 	serializable := doc.toSerializable()
 
 	data, err := json.MarshalIndent(serializable, "", "  ")
@@ -279,7 +234,6 @@ func SaveEditableDocument(path string, doc *EditableDocument) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Write the file with restrictive permissions.
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
@@ -287,43 +241,15 @@ func SaveEditableDocument(path string, doc *EditableDocument) error {
 	return nil
 }
 
-// SaveMinimalConfig writes cfg as JSON containing only values that differ
-// from the code defaults (via the editable-document serializer).
-//
-// It converts cfg to an EditableDocument and saves it with the same
-// prune-on-save path SaveEditableDocument uses: toSerializable emits a key
-// only when it differs from the default the file reloads to (DefaultConfig(),
-// with the documented session.ephemeral exception), and LoadConfig unmarshals
-// the file OVER the defaults, so every omitted key keeps its code default. The
-// result is a minimal, lossless config.json — what first-run onboarding
-// should write instead of SaveConfig's full dump.
-//
-// Note: fields the editable document does not model (e.g. server.*) are not
-// persisted; callers must express such settings through modeled fields
-// (gateway.* for the listen port) to avoid silent data loss.
 func SaveMinimalConfig(path string, cfg *Config) error {
 	return SaveEditableDocument(path, editableDocumentFromConfig(cfg))
 }
 
-// toSerializable converts the document to a serializable format
-// that can include ENV placeholders.
 func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	result := make(map[string]interface{})
 
-	// def is the runtime default every section below is diffed against.
-	// LoadConfig unmarshals the file OVER DefaultConfig() and
-	// LoadEditableDocument re-applies applyDefaults, so a key omitted here is
-	// restored to exactly this value on the next load: pruning the file is
-	// lossless. One exception is documented at "session.ephemeral" below.
 	def := DefaultConfig()
 
-	// Agents.
-	// STRUCTURAL FIX: "defaults" used to be a hand-written map with hardcoded
-	// keys, which silently dropped fields on every WebUI save (max_read_lines
-	// and subagent_max_iterations were lost, and thinking_level would have
-	// been too). Serialize the whole struct instead — EditableAgentDefaults
-	// carries the correct JSON tags — exactly like the agents list below.
-	// This prevents field loss on save for any future field added to the type.
 	result["agents"] = map[string]interface{}{
 		"defaults": doc.Agents.Defaults,
 	}
@@ -331,25 +257,6 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		result["agents"].(map[string]interface{})["list"] = doc.Agents.List
 	}
 
-	// Session.
-	// Prune-on-save like channels and gateway: emit a key only when it
-	// differs from the default the file reloads to, and drop the whole section
-	// when nothing differs.
-	//
-	// The comparison value is the *effective file default* — what LoadConfig
-	// yields when the key is absent — which is not always DefaultConfig():
-	//   - session.ephemeral: DefaultConfig() holds true, but LoadConfig has
-	//     special handling that forces false when the file omits the key. The
-	//     prune therefore compares against false: omitting can only ever
-	//     restore false, so an explicit true must still be written (and is).
-	//   - session.evict_excluded_from_memory has no such override and prunes
-	//     against the runtime default (true).
-	//
-	// Tri-state pointers keep their existing "only when set" semantics: nil
-	// means "inherit". Pruning an explicit false would reload as nil — the same
-	// runtime answer (DurableInboundEnabled & friends resolve nil to false) but
-	// not the same document, so the key stays written (correctness beats
-	// minimalism).
 	session := make(map[string]interface{})
 	putIfDiff(session, "ephemeral", doc.Session.Ephemeral, SessionEphemeralFileDefault)
 	putIfDiff(session, "ephemeral_threshold", doc.Session.EphemeralThreshold, DefaultEphemeralThresholdSeconds)
@@ -357,7 +264,6 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	putIfDiff(session, "compaction_model", doc.Session.CompactionModel, def.Session.CompactionModel)
 	putIfDiff(session, "evict_excluded_from_memory", doc.Session.EvictExcludedFromMemory, def.Session.EvictExcludedFromMemory)
 	putIfDiff(session, "dm_scope", doc.Session.DMScope, def.Session.DMScope)
-	// An empty/nil map is the default, so only a populated one is written.
 	if len(doc.Session.IdentityLinks) > 0 {
 		session["identity_links"] = doc.Session.IdentityLinks
 	}
@@ -372,28 +278,16 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	}
 	putSection(result, "session", session)
 
-	// Bindings
 	if len(doc.Bindings) > 0 {
 		result["bindings"] = doc.Bindings
 	}
 
-	// Groups
 	if doc.Groups.Enabled || len(doc.Groups.List) > 0 {
 		result["groups"] = doc.Groups
 	}
 
-	// Channels.
-	// Prune-on-save: each key is emitted only when it differs from the
-	// corresponding runtime default (def.Channels.X), and a channel block is
-	// emitted only when at least one key differs. Omitted keys keep their code
-	// defaults on load (LoadConfig unmarshals the file OVER DefaultConfig), so
-	// this is lossless and keeps config.json minimal.
-	// Special case: native and web default to enabled:true, so a default
-	// native/web config writes nothing while a disabled one writes
-	// {"enabled": false}.
 	channels := make(map[string]interface{})
 
-	// Native
 	native := make(map[string]interface{})
 	putIfDiff(native, "enabled", doc.Channels.Native.Enabled, def.Channels.Native.Enabled)
 	putIfDiff(native, "host", doc.Channels.Native.Host, def.Channels.Native.Host)
@@ -405,17 +299,13 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	putIfDiff(native, "session_expiry_days", doc.Channels.Native.SessionExpiryDays, def.Channels.Native.SessionExpiryDays)
 	putIfDiff(native, "max_upload_size_mb", doc.Channels.Native.MaxUploadSizeMB, def.Channels.Native.MaxUploadSizeMB)
 	putIfDiff(native, "upload_ttl_hours", doc.Channels.Native.UploadTTLHours, def.Channels.Native.UploadTTLHours)
-	// rate_limit is a comparable struct (bool/int fields only): pruned as a
-	// whole block against the default; any single-field deviation persists it.
 	putIfDiff(native, "rate_limit", doc.Channels.Native.RateLimit, def.Channels.Native.RateLimit)
 	putSection(channels, "native", native)
 
-	// Web UI toggle
 	webChannel := make(map[string]interface{})
 	putIfDiff(webChannel, "enabled", doc.Channels.Web.Enabled, def.Channels.Web.Enabled)
 	putSection(channels, "web", webChannel)
 
-	// Telegram
 	telegram := make(map[string]interface{})
 	putIfDiff(telegram, "enabled", doc.Channels.Telegram.Enabled, def.Channels.Telegram.Enabled)
 	putSecretIfDiff(telegram, "token", doc.Channels.Telegram.Token, def.Channels.Telegram.Token)
@@ -424,14 +314,12 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	putIfDiff(telegram, "verbose", doc.Channels.Telegram.Verbose, def.Channels.Telegram.Verbose)
 	putSection(channels, "telegram", telegram)
 
-	// Discord
 	discord := make(map[string]interface{})
 	putIfDiff(discord, "enabled", doc.Channels.Discord.Enabled, def.Channels.Discord.Enabled)
 	putSecretIfDiff(discord, "token", doc.Channels.Discord.Token, def.Channels.Discord.Token)
 	putSliceIfDiff(discord, "allow_from", doc.Channels.Discord.AllowFrom, def.Channels.Discord.AllowFrom)
 	putSection(channels, "discord", discord)
 
-	// Feishu
 	feishu := make(map[string]interface{})
 	putIfDiff(feishu, "enabled", doc.Channels.Feishu.Enabled, def.Channels.Feishu.Enabled)
 	putSecretIfDiff(feishu, "app_id", doc.Channels.Feishu.AppID, def.Channels.Feishu.AppID)
@@ -441,7 +329,6 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	putSliceIfDiff(feishu, "allow_from", doc.Channels.Feishu.AllowFrom, def.Channels.Feishu.AllowFrom)
 	putSection(channels, "feishu", feishu)
 
-	// Slack
 	slack := make(map[string]interface{})
 	putIfDiff(slack, "enabled", doc.Channels.Slack.Enabled, def.Channels.Slack.Enabled)
 	putSecretIfDiff(slack, "bot_token", doc.Channels.Slack.BotToken, def.Channels.Slack.BotToken)
@@ -449,7 +336,6 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	putSliceIfDiff(slack, "allow_from", doc.Channels.Slack.AllowFrom, def.Channels.Slack.AllowFrom)
 	putSection(channels, "slack", slack)
 
-	// LINE
 	line := make(map[string]interface{})
 	putIfDiff(line, "enabled", doc.Channels.LINE.Enabled, def.Channels.LINE.Enabled)
 	putSecretIfDiff(line, "channel_secret", doc.Channels.LINE.ChannelSecret, def.Channels.LINE.ChannelSecret)
@@ -460,7 +346,6 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	putSliceIfDiff(line, "allow_from", doc.Channels.LINE.AllowFrom, def.Channels.LINE.AllowFrom)
 	putSection(channels, "line", line)
 
-	// OneBot
 	onebot := make(map[string]interface{})
 	putIfDiff(onebot, "enabled", doc.Channels.OneBot.Enabled, def.Channels.OneBot.Enabled)
 	putIfDiff(onebot, "ws_url", doc.Channels.OneBot.WSUrl, def.Channels.OneBot.WSUrl)
@@ -470,7 +355,6 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	putSliceIfDiff(onebot, "allow_from", doc.Channels.OneBot.AllowFrom, def.Channels.OneBot.AllowFrom)
 	putSection(channels, "onebot", onebot)
 
-	// QQ
 	qq := make(map[string]interface{})
 	putIfDiff(qq, "enabled", doc.Channels.QQ.Enabled, def.Channels.QQ.Enabled)
 	putSecretIfDiff(qq, "app_id", doc.Channels.QQ.AppID, def.Channels.QQ.AppID)
@@ -478,7 +362,6 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	putSliceIfDiff(qq, "allow_from", doc.Channels.QQ.AllowFrom, def.Channels.QQ.AllowFrom)
 	putSection(channels, "qq", qq)
 
-	// DingTalk
 	dingtalk := make(map[string]interface{})
 	putIfDiff(dingtalk, "enabled", doc.Channels.DingTalk.Enabled, def.Channels.DingTalk.Enabled)
 	putSecretIfDiff(dingtalk, "client_id", doc.Channels.DingTalk.ClientID, def.Channels.DingTalk.ClientID)
@@ -486,14 +369,12 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	putSliceIfDiff(dingtalk, "allow_from", doc.Channels.DingTalk.AllowFrom, def.Channels.DingTalk.AllowFrom)
 	putSection(channels, "dingtalk", dingtalk)
 
-	// WhatsApp
 	whatsapp := make(map[string]interface{})
 	putIfDiff(whatsapp, "enabled", doc.Channels.WhatsApp.Enabled, def.Channels.WhatsApp.Enabled)
 	putIfDiff(whatsapp, "bridge_url", doc.Channels.WhatsApp.BridgeURL, def.Channels.WhatsApp.BridgeURL)
 	putSliceIfDiff(whatsapp, "allow_from", doc.Channels.WhatsApp.AllowFrom, def.Channels.WhatsApp.AllowFrom)
 	putSection(channels, "whatsapp", whatsapp)
 
-	// MaixCam
 	maixcam := make(map[string]interface{})
 	putIfDiff(maixcam, "enabled", doc.Channels.MaixCam.Enabled, def.Channels.MaixCam.Enabled)
 	putIfDiff(maixcam, "host", doc.Channels.MaixCam.Host, def.Channels.MaixCam.Host)
@@ -505,7 +386,6 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		result["channels"] = channels
 	}
 
-	// Providers
 	providers := make(map[string]interface{})
 	for name, provider := range doc.Providers {
 		prov := map[string]interface{}{
@@ -523,11 +403,6 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		if len(provider.Models) > 0 {
 			prov["models"] = provider.Models
 		}
-		// headers rides the document or a WebUI save deletes it from
-		// config.json (this block re-emits the provider field by field). The
-		// len check is the prune-on-empty style of the neighbours: no map
-		// means no key, never "headers": null, so existing documents serialize
-		// byte-identically.
 		if len(provider.Headers) > 0 {
 			prov["headers"] = provider.Headers
 		}
@@ -538,8 +413,6 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		result["providers"] = providers
 	}
 
-	// Gateway. Written only when it differs from the runtime default
-	// (same prune-on-save rule as channels).
 	gateway := make(map[string]interface{})
 	putIfDiff(gateway, "host", doc.Gateway.Host, def.Gateway.Host)
 	putIfDiff(gateway, "port", doc.Gateway.Port, def.Gateway.Port)
@@ -547,13 +420,6 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		result["gateway"] = gateway
 	}
 
-	// Tools.
-	// Prune-on-save with the same rule as channels: a key is written only
-	// when it differs from the runtime default, an engine block (brave,
-	// duckduckgo, perplexity, searxng, cron, exec) only when at least one of
-	// its keys differs, and "tools" itself only when a block survives. A
-	// config that never touched the tools no longer pins five engine blocks
-	// with every field in the file.
 	tools := make(map[string]interface{})
 
 	cron := make(map[string]interface{})
@@ -563,9 +429,6 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	exec := make(map[string]interface{})
 	putIfDiff(exec, "enable_deny_patterns", doc.Tools.Exec.EnableDenyPatterns, def.Tools.Exec.EnableDenyPatterns)
 	putSliceIfDiff(exec, "custom_deny_patterns", doc.Tools.Exec.CustomDenyPatterns, def.Tools.Exec.CustomDenyPatterns)
-	// timeout_seconds: 0 is a real value ("no timeout", see pkg/tools/shell.go)
-	// and differs from the 60s default, so it keeps being written; only an
-	// untouched 60 disappears from the file.
 	putIfDiff(exec, "timeout_seconds", doc.Tools.Exec.TimeoutSeconds, def.Tools.Exec.TimeoutSeconds)
 	putSliceIfDiff(exec, "whitelist_commands", doc.Tools.Exec.WhitelistCommands, def.Tools.Exec.WhitelistCommands)
 	putSection(tools, "exec", exec)
@@ -577,8 +440,6 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	brave := make(map[string]interface{})
 	putIfDiff(brave, "enabled", doc.Tools.Web.Brave.Enabled, def.Tools.Web.Brave.Enabled)
 	putIfDiff(brave, "max_results", doc.Tools.Web.Brave.MaxResults, def.Tools.Web.Brave.MaxResults)
-	// Placeholder-aware: an env/keyring api_key always counts as configured
-	// and is written as a placeholder, even when the engine is disabled.
 	putSecretIfDiff(brave, "api_key", doc.Tools.Web.Brave.APIKey, def.Tools.Web.Brave.APIKey)
 
 	perplexity := make(map[string]interface{})
@@ -602,22 +463,16 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	putSection(tools, "web", web)
 	putSection(result, "tools", tools)
 
-	// Heartbeat. Default is enabled:true with a 30 minute interval, so an
-	// untouched heartbeat writes nothing.
 	heartbeat := make(map[string]interface{})
 	putIfDiff(heartbeat, "enabled", doc.Heartbeat.Enabled, def.Heartbeat.Enabled)
 	putIfDiff(heartbeat, "interval", doc.Heartbeat.Interval, def.Heartbeat.Interval)
 	putSection(result, "heartbeat", heartbeat)
 
-	// Devices.
 	devices := make(map[string]interface{})
 	putIfDiff(devices, "enabled", doc.Devices.Enabled, def.Devices.Enabled)
 	putIfDiff(devices, "monitor_usb", doc.Devices.MonitorUSB, def.Devices.MonitorUSB)
 	putSection(result, "devices", devices)
 
-	// Logs. path/max_days/rotation are plain runtime defaults (LogsPath()
-	// resolves an empty path to <lele-dir>/logs), so omitting them is exactly
-	// what LoadConfig restores.
 	logs := make(map[string]interface{})
 	putIfDiff(logs, "enabled", doc.Logs.Enabled, def.Logs.Enabled)
 	putIfDiff(logs, "path", doc.Logs.Path, def.Logs.Path)
@@ -625,14 +480,9 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	putIfDiff(logs, "rotation", doc.Logs.Rotation, def.Logs.Rotation)
 	putSection(result, "logs", logs)
 
-	// Custom slash commands. ToConfig round-trips through this map, so any
-	// section missing here is silently dropped from the runtime config.
 	if len(doc.Commands) > 0 {
 		result["commands"] = doc.Commands
 	}
-	// Emit the harness section when ANY of its flags is set: gating on
-	// AllowShell alone would silently drop allow_absolute_files:true on
-	// save (ToConfig re-unmarshals from this map).
 	if doc.Harness.AllowShell || doc.Harness.AllowAbsoluteFiles {
 		result["harness"] = doc.Harness
 	}
@@ -662,17 +512,13 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 		SubagentTimeoutMinutes:   cfg.Agents.Defaults.SubagentTimeoutMinutes,
 		SubagentMaxConcurrent:    cfg.Agents.Defaults.SubagentMaxConcurrent,
 		SubagentMaxRetries:       cfg.Agents.Defaults.SubagentMaxRetries,
-		SubagentMaxIterations:    cfg.Agents.Defaults.SubagentMaxIterations,    // side-fix: was dropped (see ToConfig)
-		SubagentRetentionMinutes: cfg.Agents.Defaults.SubagentRetentionMinutes, // must be carried to avoid silent drop on save
+		SubagentMaxIterations:    cfg.Agents.Defaults.SubagentMaxIterations,
+		SubagentRetentionMinutes: cfg.Agents.Defaults.SubagentRetentionMinutes,
 		LLMLoopTimeoutMinutes:    cfg.Agents.Defaults.LLMLoopTimeoutMinutes,
-		PromptCache:              cfg.Agents.Defaults.PromptCache, // must be carried to avoid silent drop on save
+		PromptCache:              cfg.Agents.Defaults.PromptCache,
 	}
 	doc.Agents.List = make([]EditableAgentConfig, 0, len(cfg.Agents.List))
 	for _, agent := range cfg.Agents.List {
-		// Direct struct conversion: AgentConfig and EditableAgentConfig must
-		// keep identical field sets (names+types+order). New fields such as
-		// ThinkingLevel are carried automatically — extend both structs in
-		// lockstep or this conversion breaks at compile time.
 		doc.Agents.List = append(doc.Agents.List, EditableAgentConfig(agent))
 	}
 	doc.Session = EditableSessionConfig(cfg.Session)
@@ -694,10 +540,6 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 	}
 	doc.Providers = EditableProvidersConfig{}
 	for name, provider := range cfg.Providers.ListNamed() {
-		// Only include providers that have actual data. Headers count as data
-		// (same reasoning as NamedProviderConfig.IsEmpty): a headers-only
-		// provider must reach the document, or the entry — and with it the map
-		// — disappears on the next save.
 		if provider.APIKey == "" && len(provider.Models) == 0 && len(provider.Headers) == 0 {
 			continue
 		}
@@ -708,12 +550,9 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 			Proxy:       provider.Proxy,
 			AuthMethod:  provider.AuthMethod,
 			ConnectMode: provider.ConnectMode,
-			// Shallow like Models: the document and the runtime config are
-			// rebuilt together, so a defensive clone is not this codebase's
-			// convention for provider maps.
-			WebSearch: provider.WebSearch,
-			Models:    provider.Models,
-			Headers:   provider.Headers,
+			WebSearch:   provider.WebSearch,
+			Models:      provider.Models,
+			Headers:     provider.Headers,
 		}
 	}
 	doc.Gateway = cfg.Gateway
@@ -731,7 +570,6 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 	doc.Devices = cfg.Devices
 	doc.Logs = EditableLogsConfig(cfg.Logs)
 
-	// Custom slash commands: same element types, so clone the map directly.
 	if len(cfg.Commands) > 0 {
 		doc.Commands = make(map[string]CommandDefinition, len(cfg.Commands))
 		for name, def := range cfg.Commands {

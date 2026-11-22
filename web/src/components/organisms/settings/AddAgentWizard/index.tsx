@@ -94,7 +94,6 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
   const [step, setStep] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // Form state
   const [agentId, setAgentId] = useState('')
   const [agentName, setAgentName] = useState('')
   const [agentDescription, setAgentDescription] = useState('')
@@ -151,7 +150,6 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
 
     updateField('agents.list', [...list, newAgent])
 
-    // Small delay for visual feedback
     await new Promise((resolve) => setTimeout(resolve, 300))
 
     handleClose()
@@ -162,7 +160,6 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
   const canAdd = canProceedStep1 && !isDuplicate
 
   const handleStepClick = (targetStep: number) => {
-    // Only allow going back or to next available step
     if (targetStep <= step || (targetStep === step + 1 && canProceedStep1)) {
       setStep(targetStep)
     }
@@ -188,9 +185,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
       size="md"
     >
       <div className="flex gap-6 p-6">
-        {/* Left side: Step content */}
         <div className="flex-1 min-w-0">
-          {/* Step indicators */}
           <div className="mb-6">
             <StepIndicator
               steps={STEPS.map((s) => ({ ...s, title: t(s.title) }))}
@@ -199,7 +194,6 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
             />
           </div>
 
-          {/* Step content with animation */}
           <div className="relative min-h-[300px]">
             <div className="transition-all duration-300 ease-in-out">
               {step === 1 && (
@@ -236,7 +230,6 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
             </div>
           </div>
 
-          {/* Navigation */}
           <div className="mt-6 flex justify-between pt-4 border-t border-border">
             <button
               type="button"

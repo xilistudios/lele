@@ -4,10 +4,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// handleApprovalKey processes a keystroke while a command approval is pending.
-// The agent is blocked waiting for the user's decision, so these keys take
-// priority over typing new messages; scrolling is still allowed to review
-// context and every other key is swallowed. The block is terminal.
 func (m *Model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
@@ -17,7 +13,6 @@ func (m *Model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.handleApproval(false)
 		return m, nil
 	case "v", "V":
-		// Toggle between the one-line preview and the full command.
 		m.approvalShowFull = !m.approvalShowFull
 		m.updateViewport()
 		return m, nil
@@ -32,12 +27,9 @@ func (m *Model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	case "ctrl+c":
-		// Never trap quit during an approval prompt — a wedged terminal
-		// would otherwise require SIGINT.
 		m.cancel()
 		return m, tea.Quit
 	}
-	// Block all other input while approval is pending
 	return m, nil
 
 }

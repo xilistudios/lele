@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -24,77 +18,38 @@ import (
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
-// messageProcessor is the internal interface for message processing operations.
 type messageProcessor interface {
 	processMessage(ctx context.Context, msg bus.InboundMessage) (string, error)
 	processSystemMessage(ctx context.Context, msg bus.InboundMessage) (string, error)
-	// Public methods for direct processing (eliminates type assertions)
 	ProcessDirect(ctx context.Context, content, sessionKey string) (string, error)
 	ProcessDirectWithChannel(ctx context.Context, content, sessionKey, channel, chatID string) (string, error)
 	ProcessHeartbeat(ctx context.Context, content, channel, chatID string) (string, error)
 	formatStatusResponse(agent *AgentInstance, sessionKey, originChannel string) string
 }
 
-// messageProcessorImpl implements the messageProcessor interface for handling
-// message routing, agent resolution, and processing orchestration.
 type messageProcessorImpl struct {
 	al *AgentLoop
 }
 
-// newMessageProcessor creates a new message processor instance.
 func newMessageProcessor(al *AgentLoop) *messageProcessorImpl {
 	return &messageProcessorImpl{
 		al: al,
 	}
 }
 
-// processMessage is the main entry point for processing inbound messages.
-// It keeps the bus-publish contract: runAgentLoop publishes the final response
-// to the outbound bus and returns "", which is what the gateway and the channel
-// dispatchers rely on (see loop.go Run).
 func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.InboundMessage) (string, error) {
 	return mp.processMessageWith(ctx, msg, true)
 }
 
-// processMessageWith is processMessage with an explicit sendResponse policy.
-// sendResponse=true is the bus-publish contract above; sendResponse=false
-// returns the final assistant text to the caller instead of publishing it,
-// which is what `lele agent` needs: the CLI bus has no outbound subscriber.
-// Same precedent as ProcessHeartbeat.
-//
-// The flag governs THIS turn's final-text delivery only. It does not silence
-// side deliveries that publish unconditionally regardless of sendResponse:
-// the /compact notice (commandHandlerImpl.handleCommand), the tool-approval
-// prompt for non-native channels (toolExecutor.executeWithApproval), the
-// goal-continuation turns (llmRunnerImpl.runGoalContinuation hardcodes
-// SendResponse:true), and the SYSTEM_SPAWN result
-// (messageProcessorImpl.handleSystemSpawn). See ProcessDirect's doc.
-// Side effect of false: toolExecutor's ForUser publish (already gated on
-// sendResponse) is skipped in CLI turns — no visible change, the CLI has no
-// subscriber to see it either way.
 func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.InboundMessage, sendResponse bool) (string, error) {
-	// Route system messages to processSystemMessage
 	if msg.Channel == "system" {
 		return mp.processSystemMessage(ctx, msg)
 	}
 
-	// Check for commands (delegated to commandHandler)
 	if response, handled := mp.al.commandHandler.handleCommand(ctx, msg); handled {
 		return response, nil
 	}
 
-	// Resolve WHO handles this message before expanding any custom command:
-	// an agent's commands live in ITS workspace (<ws>/commands/*.md), so the
-	// lookup and the @file / !`cmd` resolution must run with the effective
-	// agent's workspace, not the defaults one.
-	//
-	// This ordering is safe because routing needs nothing from msg.Content:
-	// ResolveRoute only consumes Channel, account_id, the peer/parent-peer
-	// metadata, guild_id and team_id (see routing.RouteInput), none of which
-	// command expansion touches — expansion rewrites Content and the harness_*
-	// metadata keys only.
-	//
-	// Route to determine agent and session key
 	route := mp.al.registry.ResolveRoute(routing.RouteInput{
 		Channel:    msg.Channel,
 		AccountID:  msg.Metadata["account_id"],
@@ -109,61 +64,27 @@ func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.
 		agent = mp.al.registry.GetDefaultAgent()
 	}
 
-	// Use routed session key, but honor message's session key when explicitly set
 	sessionKey := route.SessionKey
 	if msg.SessionKey != "" {
 		sessionKey = msg.SessionKey
 	}
 	sessionKey = mp.al.ResolveSessionKey(sessionKey)
 
-	// Record the origin key of this conversation: the key its subagent tasks
-	// are written under (tools.BuildOriginSessionKey(msg.Channel, msg.ChatID)).
-	// This is the only place that knows BOTH identities at once — the runtime
-	// session key (routing + alias resolution, above) and the channel/chat ID
-	// the tasks are keyed by — and it runs on every inbound turn, which is
-	// exactly when the system prompt (and therefore the subagent-ledger
-	// digest) is next built. Without it the digest is scoped by a routed key
-	// like "agent:main:main" while the ledger lives under "telegram:12345",
-	// and every reaped task silently disappears from the prompt.
-	//
-	// The system-message and command paths do not need it: neither builds a
-	// prompt (processSystemMessage answers from the loop directly, and
-	// handleCommand returns before runAgentLoop), and a native/TUI key relates
-	// to its own origin form, so those sessions keep working without it.
 	mp.al.setSessionOrigin(sessionKey, tools.BuildOriginSessionKey(msg.Channel, msg.ChatID))
 
-	// Check if a session-specific agent is pinned (e.g. via /agent). Only a real
-	// pin may override the route: getSessionAgent falls back to the default
-	// agent ID, so using it here would make every unpinned session resolve to
-	// the default agent and silently disable bindings.
 	if sessionAgentID, pinned := mp.al.sessionAgentOverride(sessionKey); pinned {
 		if sessionAgent, ok := mp.al.registry.GetAgent(sessionAgentID); ok {
 			agent = sessionAgent
 		}
 	}
 
-	// Built-in commands declined: try user-defined (harness) slash commands.
-	// When one matches, msg.Content is rewritten with the expanded prompt and
-	// msg.Metadata carries harness_agent / harness_model for this turn only.
-	// The agent resolved above (route → session override) owns the workspace
-	// used both to find the command and to resolve its @file / !`cmd`
-	// references.
 	agentWorkspace := ""
 	if agent != nil {
 		agentWorkspace = agent.Workspace
 	}
-	// The pre-expansion text is what the user actually typed; applyHarnessCommand
-	// overwrites msg.Content with the expanded prompt. Keep the original so the
-	// persisted user message can display it (WebUI bubble) while the model still
-	// receives the expansion.
 	originalText := msg.Content
 	mp.applyHarnessCommand(ctx, &msg, agentWorkspace)
 
-	// A custom command can pin an agent and/or a model for the turn. The
-	// harness agent wins over the session-selected agent (the user asked for it
-	// explicitly in this message) but is never persisted, so the next turn
-	// resumes with the routed/session agent. Same for the model, which is
-	// carried through processOptions.ModelOverride instead of sessionModels.
 	turnModelOverride := ""
 	if msg.Metadata != nil {
 		if harnessAgent := msg.Metadata["harness_agent"]; harnessAgent != "" {
@@ -175,16 +96,10 @@ func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.
 			}
 		}
 		if m := msg.Metadata["harness_model"]; m != "" {
-			// Resolve aliases so the runner sees a provider-qualified model, the
-			// same shape ModelForSession returns for persisted values.
 			turnModelOverride = mp.al.cfg().Providers.ResolveModelAlias(m, mp.al.cfg().Agents.Defaults.Provider)
 		}
 	}
 
-	// When a harness command expanded this message, build the display metadata
-	// the runner persists on the user message (original text + chip payload).
-	// applyHarnessCommand only sets harness_command when it rewrote Content, so
-	// its presence is the authoritative "this turn was command-driven" signal.
 	var appliedCmd *appliedCommand
 	if cmdName := msg.Metadata["harness_command"]; cmdName != "" {
 		appliedCmd = &appliedCommand{
@@ -198,37 +113,10 @@ func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.
 		}
 	}
 
-	// Keep session model in sync with the active/session-selected agent unless user
-	// explicitly changed model with /model.
 	mp.syncSessionModel(agent, sessionKey)
 
-	// Resume branch (session.resume_enabled + durable_inbound). The durable
-	// inbound replay is the resume trigger: after a gateway restart, di.Drain
-	// re-publishes the unfinished spool row and it lands here carrying the
-	// SAME DedupeID the turn checkpointed before dying. That identity match is
-	// what distinguishes "resume this exact turn" from "a new turn on a
-	// session with a stale marker" - a mismatched or absent marker simply
-	// takes the normal path below and overwrites the checkpoint.
-	//
-	// Resuming is strictly better than the plain replay: the user message is
-	// already in the history from the original turn, so ContinueTurn re-enters
-	// the loop with SkipUserMessage and the interrupted turn continues from
-	// the last persisted step instead of being re-run from scratch.
-	//
-	// The branch runs before the ephemeral check on purpose: a resume must
-	// never reset the history it is resuming from. The idle window that trips
-	// the reset is measured from the original user message (the last real
-	// activity), and the replay can land minutes after the crash — long past
-	// the threshold — while the interrupted turn is exactly what must survive.
-	// NOTE: ContinueTurn below hardcodes SendResponse:true. That is safe only
-	// because this branch needs msg.DedupeID == marker.DedupeID != "", which
-	// ProcessDirect (sendResponse=false) never sets — if a durable CLI path
-	// ever sets DedupeID, thread the flag through ContinueTurn first.
 	if marker, ok := mp.al.getTurnMarker(sessionKey); ok && marker.DedupeID != "" && marker.DedupeID == msg.DedupeID {
 		if !marker.ResumeNoticeSent {
-			// Persist the flag BEFORE publishing: a crash between the two
-			// loses at most the notice, while the reverse order would repeat
-			// it on every replay of this turn.
 			mp.al.setResumeNoticeSent(sessionKey)
 			mp.al.bus.PublishOutbound(bus.OutboundMessage{
 				Channel: marker.Channel,
@@ -236,38 +124,23 @@ func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.
 				Content: "⚡ El gateway se reinició a mitad de una tarea; reanudando desde el último paso completado…",
 			})
 		}
-		// Tell the model about subagents that died with the process BEFORE
-		// the resumed loop runs, so it never assumes their results exist.
 		mp.injectSubagentInterruptionWarning(agent, sessionKey)
 		response, err := mp.ContinueTurn(ctx, marker, msg, sessionKey)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-				// Cancelled again (another stop/shutdown mid-resume): keep the
-				// marker so the next replay resumes from the same checkpoint.
 				return "", err
 			}
-			// Terminal resume error (provider/tool failure): hand Run a
-			// user-facing message exactly as the normal path below does. The
-			// marker stays for the same reason the normal path keeps it: if the
-			// process dies before Finish closes the row, the next replay resumes
-			// (and retries) the turn instead of re-running it from scratch.
 			errMsg := fmt.Sprintf("❌ Error resuming message: %v", err)
 			if len(errMsg) > 4000 {
 				errMsg = errMsg[:3997] + "..."
 			}
-			// Same persistence as the normal path: the failure is stored as an
-			// excluded assistant message so both UIs can show it instead of
-			// losing it between the live event and the history refetch.
 			mp.persistLLMFailure(agent, sessionKey, errMsg, err, &msg)
 			return errMsg, nil
 		}
-		// Same conditional clear as the normal path: only THIS turn's marker
-		// goes away, and only once its answer is out.
 		mp.al.clearTurnState(sessionKey, msg.DedupeID)
 		return response, nil
 	}
 
-	// Delegate to llmRunner for processing
 	ephemeralNotice := mp.maybeStartEphemeralSession(agent, sessionKey)
 	messageID := ""
 	replyTo := ""
@@ -276,8 +149,6 @@ func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.
 		replyTo = msg.Metadata["message_id"]
 	}
 
-	// Checkpoint the fresh inbound turn (see the resume branch above for the
-	// feature gates; with the feature off the writes are no-ops).
 	mp.seedInboundTurnMarker(sessionKey, agent, msg, messageID, turnModelOverride)
 
 	response, err := mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
@@ -296,16 +167,8 @@ func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-			// Context cancelled (user stop, shutdown) — do not publish a
-			// response; the cancellation was already acknowledged upstream.
 			return "", err
 		}
-		// Return a user-facing error message instead of a bare error.
-		// With sendResponse=true, runAgentLoop publishes the final response
-		// directly to the bus. When it fails, nothing is published, which
-		// leaves channel-level UI (e.g. Telegram typing indicator + placeholder)
-		// stuck. Returning a non-empty string here lets Run() publish the
-		// error response through the normal path, which stops the indicator.
 		errMsg := fmt.Sprintf("❌ Error processing message: %v", err)
 		if len(errMsg) > 4000 {
 			errMsg = errMsg[:3997] + "..."
@@ -313,17 +176,7 @@ func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.
 		mp.persistLLMFailure(agent, sessionKey, errMsg, err, &msg)
 		return errMsg, nil
 	}
-	// The turn reached a normal end: its checkpoint is no longer needed.
-	// Passing msg.DedupeID makes the marker delete conditional on the marker
-	// still describing THIS turn (a newer turn's marker must survive). Error
-	// and cancellation paths return above without clearing, which is exactly
-	// the point: an interrupted turn keeps its marker so a replay can resume
-	// it. The subagent snapshot goes with it - keeping it would warn about
-	// tasks on a turn that already finished.
 	mp.al.clearTurnState(sessionKey, msg.DedupeID)
-	// Caller-side goal continuation trigger. runAgentLoop has returned and
-	// released the per-session semaphore, so the continuation loop can run its
-	// recursive turns safely. Only triggered on the main processMessage path.
 	mp.al.llmRunner.maybeRunGoalContinuation(agent, processOptions{
 		SessionKey: sessionKey,
 		Channel:    msg.Channel,
@@ -338,29 +191,9 @@ func (mp *messageProcessorImpl) processMessageWith(ctx context.Context, msg bus.
 	return ephemeralNotice + "\n\n" + response, nil
 }
 
-// llmErrorMetadataKey is the inbound-metadata key that marks a turn as having
-// ended in a provider/tool failure. It rides the InboundMessage map (shared by
-// reference with the copy loop.go holds, see Run) so loop.go can tag the
-// outbound message, which is what lets the WebUI render the live failure as an
-// error box instead of a normal assistant bubble that the history refetch
-// deletes.
 const llmErrorMetadataKey = "llm_error"
 
-// persistLLMFailure records a failed turn in the session history as an
-// assistant message that carries the failure detail in ErrorDetail, a UI-only
-// field, with ExcludeFromContext=true so the text can NEVER reach the model
-// (see filterContextMessages in context.go). Both UIs render it as an error
-// box, which is what keeps the failure on screen after the history refetch.
-// Content keeps the legacy "❌ Error …" text so channels that only render plain
-// text (Telegram, WhatsApp) are unaffected.
-//
-// The streamed draft is sealed first: AddFullMessage replaces a streaming
-// assistant tail IN PLACE, which would overwrite whatever the user already saw
-// with the error text.
 func (mp *messageProcessorImpl) persistLLMFailure(agent *AgentInstance, sessionKey, errMsg string, err error, msg *bus.InboundMessage) {
-	// Tag the inbound message first: the marker does not depend on the
-	// session write succeeding (a nil Sessions / agent must not silence the
-	// live UI), and the map is shared with loop.go's copy when non-nil.
 	if msg != nil && msg.Metadata != nil {
 		msg.Metadata[llmErrorMetadataKey] = "true"
 	}
@@ -380,9 +213,6 @@ func (mp *messageProcessorImpl) persistLLMFailure(agent *AgentInstance, sessionK
 		ErrorDetail:        detail,
 		ExcludeFromContext: true,
 	})
-	// Flush immediately: both callers return right after this helper, and the
-	// row is the only copy of the failure. Waking up to a session whose error
-	// box lost its row would reintroduce the disappearing-failure bug.
 	if saveErr := agent.Sessions.Save(sessionKey); saveErr != nil {
 		logger.WarnCF("agent", "Failed to save session after LLM failure", map[string]interface{}{
 			"session_key": sessionKey,
@@ -391,17 +221,9 @@ func (mp *messageProcessorImpl) persistLLMFailure(agent *AgentInstance, sessionK
 	}
 }
 
-// syncSessionModel keeps the session model in sync with the active or
-// session-selected agent unless the user explicitly changed it with /model.
-// Extracted from processMessage so ContinueTurn rebuilds the exact same
-// model state a fresh turn would have after a restart (the in-memory
-// sessionModels map is gone by then).
 func (mp *messageProcessorImpl) syncSessionModel(agent *AgentInstance, sessionKey string) {
 	resolvedSessionKey := mp.al.ResolveSessionKey(sessionKey)
 	if _, hasSessionModel := mp.al.sessionModels.Load(resolvedSessionKey); !hasSessionModel && agent != nil {
-		// Check persisted session model before falling back to agent default.
-		// This prevents the model from silently changing when continuing an
-		// existing session whose in-memory entry was lost (e.g. after restart).
 		persistedModel := ""
 		if agent.Sessions != nil {
 			persistedModel = agent.Sessions.GetModel(resolvedSessionKey)
@@ -417,15 +239,6 @@ func (mp *messageProcessorImpl) syncSessionModel(agent *AgentInstance, sessionKe
 	}
 }
 
-// seedInboundTurnMarker checkpoints a fresh inbound turn at phase
-// inbound_start. The clear-then-write resets any marker left behind by an
-// abandoned turn so this turn starts from a clean phase; every write is
-// gated inside writeTurnMarker, so with the feature off this is a no-op.
-//
-// The marker is managed here and not in Run's defer finishTurn: the defer
-// closes the spool row but does not know the resolved sessionKey, and the
-// marker must live exactly as long as the turn's resumability window.
-// finishTurn's durable Finish stays untouched for the spool side.
 func (mp *messageProcessorImpl) seedInboundTurnMarker(sessionKey string, agent *AgentInstance, msg bus.InboundMessage, messageID, modelOverride string) {
 	mp.al.clearTurnMarker(sessionKey, "")
 	agentID := ""
@@ -442,23 +255,9 @@ func (mp *messageProcessorImpl) seedInboundTurnMarker(sessionKey string, agent *
 		m.AgentID = agentID
 		m.Model = modelOverride
 	})
-	// Checkpoint the session's live subagents alongside the marker: they are
-	// memory-only and die with the process, so this is the only trace a
-	// resume can warn about. Fresh inbound turns can have stragglers from an
-	// earlier turn still running, hence the write here and not only at
-	// tools_running.
 	mp.al.writeTurnSubagentSnapshot(sessionKey)
 }
 
-// injectSubagentInterruptionWarning adds the "your subagents died" notice to
-// the session history before the resumed turn rebuilds its context, so the
-// model sees it as user-visible session text and does not wait for results
-// that will never arrive. It is persisted (not ExcludeFromContext): the
-// warning must be part of the prompt.
-//
-// The snapshot is deleted right after injection, which makes the whole step
-// idempotent across repeated replays of the same crashed turn: the warning
-// already lives in the history, so a second resume needs nothing more.
 func (mp *messageProcessorImpl) injectSubagentInterruptionWarning(agent *AgentInstance, sessionKey string) {
 	subs := mp.al.readTurnSubagentSnapshot(sessionKey)
 	if len(subs) == 0 {
@@ -487,24 +286,9 @@ func (mp *messageProcessorImpl) injectSubagentInterruptionWarning(agent *AgentIn
 	mp.al.clearTurnSubagentSnapshot(sessionKey)
 }
 
-// ContinueTurn resumes an interrupted turn from persisted session state. The
-// user message is NOT re-appended (already in history from the original turn).
-// It re-enters runAgentLoop with SkipUserMessage=true so the system prompt and
-// context window rebuild exactly as a normal turn; HealToolCallPairs
-// (llm_caller.go) synthesizes missing tool results, so a turn interrupted
-// mid-tools continues as if pending tools failed and the model decides.
-//
-// It deliberately does not touch the spool or the dedupe ledger: Run's defer
-// dur.Finish(m) closes the row for whatever path consumed the message, and
-// processMessage clears the marker on success. The error paths return without
-// clearing, keeping the turn resumable after yet another crash.
 func (mp *messageProcessorImpl) ContinueTurn(ctx context.Context, marker TurnMarker, msg bus.InboundMessage, sessionKey string) (string, error) {
 	agent, ok := mp.al.registry.GetAgent(marker.AgentID)
 	if !ok {
-		// The agent that owned the turn is gone (config changed while the
-		// gateway was down). Falling back to the default agent keeps the
-		// session answering; the history is shared, only the persona/model
-		// defaults may differ.
 		logger.WarnCF("session", "resume: unknown agent in turn marker, using default", map[string]any{
 			"session_key": sessionKey,
 			"agent_id":    marker.AgentID,
@@ -512,10 +296,6 @@ func (mp *messageProcessorImpl) ContinueTurn(ctx context.Context, marker TurnMar
 		agent = mp.al.registry.GetDefaultAgent()
 	}
 
-	// Rebuild the per-session model state a fresh turn would have (the map is
-	// in memory and died with the process), then honor the model the
-	// interrupted turn resolved to. A marker model is a per-turn override, so
-	// it travels through ModelOverride exactly like on the normal path.
 	mp.syncSessionModel(agent, sessionKey)
 
 	return mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
@@ -532,13 +312,11 @@ func (mp *messageProcessorImpl) ContinueTurn(ctx context.Context, marker TurnMar
 	})
 }
 
-// processSystemMessage handles messages from the system channel.
 func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bus.InboundMessage) (string, error) {
 	if msg.Channel != "system" {
 		return "", fmt.Errorf("processSystemMessage called with non-system message channel: %s", msg.Channel)
 	}
 
-	// Parse origin channel from chat_id (format: "channel:chat_id")
 	var originChannel, originChatID string
 	if idx := strings.Index(msg.ChatID, ":"); idx > 0 {
 		originChannel = msg.ChatID[:idx]
@@ -548,13 +326,11 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		originChatID = msg.ChatID
 	}
 
-	// Extract reply message ID from metadata if available
 	replyToMessageID := ""
 	if msg.Metadata != nil {
 		replyToMessageID = msg.Metadata["message_id"]
 	}
 
-	// Parse command from content
 	content := msg.Content
 	parts := strings.Fields(content)
 	if len(parts) == 0 {
@@ -563,10 +339,8 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 	cmd := parts[0]
 	args := parts[1:]
 
-	// Use default agent for system messages
 	agent := mp.al.registry.GetDefaultAgent()
 
-	// Use the session key from the message if available, otherwise use main session
 	sessionKey := msg.SessionKey
 	if sessionKey == "" {
 		sessionKey = routing.BuildAgentMainSessionKey(agent.ID)
@@ -574,14 +348,12 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 	baseSessionKey := sessionKey
 	sessionKey = mp.al.ResolveSessionKey(sessionKey)
 
-	// Honor session-selected agent for command/system handling as well.
 	if sessionAgentID := mp.al.getSessionAgent(sessionKey); sessionAgentID != "" {
 		if sessionAgent, ok := mp.al.registry.GetAgent(sessionAgentID); ok {
 			agent = sessionAgent
 		}
 	}
 
-	// Handle commands directly without LLM
 	switch cmd {
 	case "/status":
 		response := mp.formatStatusResponse(agent, sessionKey, originChannel)
@@ -649,8 +421,6 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		return "", nil
 
 	case "/stop":
-		// Cancel the whole session tree (subagents, groups, background
-		// processes) and the session's own in-flight turn (#230).
 		subagentCount, groupCount, procCount := mp.al.toolCoordinator.cancelSessionTree(sessionKey)
 		mp.al.toolCoordinator.cancelSession(sessionKey)
 		response := formatStopAgentResponse(subagentCount, groupCount, procCount)
@@ -675,7 +445,6 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		return "", nil
 
 	case "/compact":
-		// Manual compaction command - use existing sessionKey from caller
 		mp.al.bus.PublishOutbound(bus.OutboundMessage{
 			Channel:   originChannel,
 			ChatID:    originChatID,
@@ -698,7 +467,6 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		stats, err := mp.al.sessionManager.summarizeSessionWithError(agent, sessionKey)
 		if err != nil {
 			errorMsg := fmt.Sprintf("❌ Compaction failed: %v", err)
-			// Truncate error message if too long for Telegram
 			if len(errorMsg) > 4000 {
 				errorMsg = errorMsg[:3997] + "..."
 			}
@@ -770,13 +538,6 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 
 	}
 
-	// A subagent result is a normal turn as far as the transcript is concerned:
-	// it is persisted as a user message ("[System: subagent] …"), so the NEXT
-	// turn's request still carries it and compaction/eviction can see it. Role
-	// "system" is deliberately not used — mid-history system messages are only
-	// special-cased by the CLI-style providers and are not a supported shape for
-	// the wire providers. SkipUserMessage used to be set here for subagent
-	// senders, which made the resume invisible one turn later.
 	return mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
 		SessionKey:      sessionKey,
 		Channel:         originChannel,
@@ -790,23 +551,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 	})
 }
 
-// ProcessDirect processes a message directly without going through the
-// inbound message bus. The CLI has no outbound subscriber, so the final
-// response of the turn is RETURNED to the caller rather than published into
-// the void, and it is never also published (no double delivery).
-//
-// Scope note: this covers the turn's final text only. A plain `lele agent`
-// run still cannot see side deliveries that go through the bus regardless of
-// this method — goal-continuation turns, /compact progress, tool-approval
-// prompts and SYSTEM_SPAWN results publish to "cli"/"direct" and the CLI
-// never subscribes (see processMessageWith's doc). That delivery model
-// predates this method and is unchanged by it.
-//
-// The inbound message is shaped like cron's (SenderID "cron") for parity
-// with ProcessDirectWithChannel; "cli"/"direct" are internal coordinates, so
-// the sender only affects session routing, not channel delivery.
 func (mp *messageProcessorImpl) ProcessDirect(ctx context.Context, content, sessionKey string) (string, error) {
-	// Check for SYSTEM_SPAWN: prefix
 	if strings.HasPrefix(content, "SYSTEM_SPAWN:") {
 		return mp.handleSystemSpawn(ctx, content, sessionKey, "cli", "direct")
 	}
@@ -822,9 +567,7 @@ func (mp *messageProcessorImpl) ProcessDirect(ctx context.Context, content, sess
 	return mp.processMessageWith(ctx, msg, false)
 }
 
-// ProcessDirectWithChannel processes a message directly with channel information.
 func (mp *messageProcessorImpl) ProcessDirectWithChannel(ctx context.Context, content, sessionKey, channel, chatID string) (string, error) {
-	// Check for SYSTEM_SPAWN: prefix
 	if strings.HasPrefix(content, "SYSTEM_SPAWN:") {
 		return mp.handleSystemSpawn(ctx, content, sessionKey, channel, chatID)
 	}
@@ -840,7 +583,6 @@ func (mp *messageProcessorImpl) ProcessDirectWithChannel(ctx context.Context, co
 	return mp.processMessage(ctx, msg)
 }
 
-// handleSystemSpawn parses SYSTEM_SPAWN: message and spawns a subagent
 func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, sessionKey, channel, chatID string) (string, error) {
 	logger.InfoCF("agent", "Handling SYSTEM_SPAWN request",
 		map[string]interface{}{
@@ -849,10 +591,8 @@ func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, 
 			"chat_id":     chatID,
 		})
 
-	// Parse the spawn configuration from the message
 	spawnConfig := mp.parseSystemSpawnMessage(content)
 
-	// Get the agent for this session to access its subagent manager
 	agentID := mp.al.getSessionAgent(sessionKey)
 	if agentID == "" {
 		agentID = mp.al.getDefaultAgentID()
@@ -861,7 +601,6 @@ func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, 
 	subagents := mp.al.toolCoordinator.GetSubagents()
 	subagentManager, ok := subagents[agentID]
 	if !ok || subagentManager == nil {
-		// Try default agent's subagent manager
 		subagentManager = subagents[mp.al.getDefaultAgentID()]
 	}
 
@@ -869,7 +608,6 @@ func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, 
 		return "", fmt.Errorf("no subagent manager available for agent %s", agentID)
 	}
 
-	// Build callback to send result to user when subagent completes
 	callback := func(ctx context.Context, result *tools.ToolResult) {
 		var responseContent string
 		if result.IsError {
@@ -885,8 +623,6 @@ func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, 
 		})
 	}
 
-	// Spawn the subagent (asynchronous; the subagent keeps running even if the
-	// caller finishes first, and the callback publishes the result to the chat).
 	spawnResult, err := subagentManager.SpawnWithOptions(
 		ctx,
 		spawnConfig.Task,
@@ -902,17 +638,11 @@ func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, 
 		return "", fmt.Errorf("failed to spawn subagent: %w", err)
 	}
 
-	// Extract the actual task ID (e.g. "subagent-3") from the human-readable
-	// spawn result (e.g. "Spawned subagent task subagent-3 ('...') for task: ...").
 	taskID := tools.ExtractSpawnTaskID(spawnResult)
 	if taskID == "" {
-		return spawnResult, nil // fallback: return the spawn message as-is
+		return spawnResult, nil
 	}
 
-	// Wait for the subagent to reach a terminal state so the cron job can
-	// report its REAL outcome rather than an optimistic "spawned ok".
-	// The subagent has its own execution timeout; we wait on its done channel
-	// with a generous cap so a pathological task can't hold the caller forever.
 	if task, ok := subagentManager.GetTask(taskID); ok {
 		if done := task.DoneChannel(); done != nil {
 			select {
@@ -945,19 +675,12 @@ func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, 
 	case tools.SubagentStatusNotDone:
 		return "", errors.New("scheduled task was not completed")
 	default:
-		// still running / still waiting for context after the wait window:
-		// leave the async subagent running; the callback will publish the final
-		// result to the chat.
 		return fmt.Sprintf("Scheduled task spawned as subagent (label: %s, status: %s)", spawnConfig.Label, task.Status), nil
 	}
 }
 
-// subagentSpawnWaitTimeout caps how long a cron spawn branch will wait for its
-// subagent before falling back to the async path (where the callback delivers
-// the result when it eventually completes).
 const subagentSpawnWaitTimeout = 5 * time.Minute
 
-// spawnConfig holds parsed SYSTEM_SPAWN configuration
 type spawnConfig struct {
 	Task     string
 	Label    string
@@ -967,7 +690,6 @@ type spawnConfig struct {
 	Model    string
 }
 
-// parseSystemSpawnMessage parses a SYSTEM_SPAWN: message
 func (mp *messageProcessorImpl) parseSystemSpawnMessage(content string) spawnConfig {
 	config := spawnConfig{}
 
@@ -993,17 +715,14 @@ func (mp *messageProcessorImpl) parseSystemSpawnMessage(content string) spawnCon
 		}
 	}
 
-	// If no label, generate one from task
 	if config.Label == "" {
 		config.Label = utils.Truncate(config.Task, 30)
 	}
 
-	// If guidance was provided, append it to the task
 	if config.Guidance != "" {
 		config.Task = config.Task + "\n\nAdditional guidance: " + config.Guidance
 	}
 
-	// If context was provided, prepend it
 	if config.Context != "" {
 		config.Task = "Context: " + config.Context + "\n\nTask: " + config.Task
 	}
@@ -1011,8 +730,6 @@ func (mp *messageProcessorImpl) parseSystemSpawnMessage(content string) spawnCon
 	return config
 }
 
-// ProcessHeartbeat processes a heartbeat request without session history.
-// Each heartbeat is independent and doesn't accumulate context.
 func (mp *messageProcessorImpl) ProcessHeartbeat(ctx context.Context, content, channel, chatID string) (string, error) {
 	agent := mp.al.registry.GetDefaultAgent()
 	return mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
@@ -1023,15 +740,10 @@ func (mp *messageProcessorImpl) ProcessHeartbeat(ctx context.Context, content, c
 		DefaultResponse: "I've completed processing but have no response to give.",
 		EnableSummary:   false,
 		SendResponse:    false,
-		NoHistory:       true, // Don't load session history for heartbeat
+		NoHistory:       true,
 	})
 }
 
-// ============================================================================
-// Command handlers (delegated to commandHandler but kept here for system messages)
-// ============================================================================
-
-// formatStatusResponse formats the status response for a session.
 func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessionKey, originChannel string) string {
 	if agent == nil {
 		return "No default agent configured"
@@ -1049,11 +761,9 @@ func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessi
 		}
 	}
 
-	// Get token counts from session
 	inputTokens, outputTokens := agent.Sessions.GetTokenCounts(sessionKey)
 	totalTokens := inputTokens + outputTokens
 
-	// Calculate context tokens including system prompt (initial context)
 	history := agent.Sessions.GetHistoryView(sessionKey)
 	historyTokens := mp.estimateTokens(history)
 	summary := agent.Sessions.GetSummary(sessionKey)
@@ -1062,11 +772,9 @@ func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessi
 		summaryTokens = mp.estimateTokens([]providers.Message{{Role: "user", Content: summary}})
 	}
 
-	// Build system prompt to get accurate token count
 	systemPrompt := agent.ContextBuilder.BuildSystemPromptForSessionWithFolder(sessionKey, originChannel)
 	systemTokens := mp.estimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
 
-	// Total context = system prompt + summary (if any) + history
 	contextTokens := systemTokens + summaryTokens + historyTokens
 
 	contextWindow := agent.ContextWindow
@@ -1077,16 +785,11 @@ func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessi
 	if contextPercent > 100 {
 		contextPercent = 100
 	}
-	// Effective think level — same source the command-handler renderer uses,
-	// so both /status variants show exactly what buildLLMOptions will send.
-	// (This used to print a hardcoded "medium", which was always a lie.)
 	thinkLevel := mp.al.GetProvidable().GetEffectiveThinkLevel(sessionKey)
 	return fmt.Sprintf("🦞 lele %s\nGateway version: %s\n🧠 Model: %s · 🔑 api-key %s\n🧮 Tokens: ~%d in / ~%d out (~%d total)\n📚 Context: ~%d/%d (%d%%)\n🧵 Session: %s\n⚙️ Runtime: %s · Think: %s",
 		gatewayVersion(), gatewayVersion(), currentModel, apiKey, inputTokens, outputTokens, totalTokens, contextTokens, contextWindow, contextPercent, sessionKey, originChannel, thinkLevel)
 }
 
-// handleNewCommand handles the /new command.
-// It preserves the selected agent while switching the chat to a fresh session.
 func (mp *messageProcessorImpl) handleNewCommand(agent *AgentInstance, sessionKey string) string {
 	if agent == nil {
 		return "No default agent configured"
@@ -1142,7 +845,6 @@ func (mp *messageProcessorImpl) maybeStartEphemeralSession(agent *AgentInstance,
 	return fmt.Sprintf("🫧 New ephemeral session created after %d seconds of inactivity.", idleSeconds)
 }
 
-// handleModelCommand handles the /model command.
 func (mp *messageProcessorImpl) handleModelCommand(agent *AgentInstance, sessionKey string, args []string) string {
 	if agent == nil {
 		return "No default agent configured"
@@ -1159,7 +861,6 @@ func (mp *messageProcessorImpl) handleModelCommand(agent *AgentInstance, session
 	return fmt.Sprintf("Model changed for this chat: %s -> %s", currentModel, next)
 }
 
-// handleVerboseCommand handles the /verbose command.
 func (mp *messageProcessorImpl) handleVerboseCommand(sessionKey string) string {
 	if sessionKey == "" {
 		return "Verbose mode requires a session context. Please start a conversation first."
@@ -1176,13 +877,11 @@ func (mp *messageProcessorImpl) handleVerboseCommand(sessionKey string) string {
 	return "Unknown verbose level"
 }
 
-// handleAgentCommand handles the /agent command.
 func (mp *messageProcessorImpl) handleAgentCommand(sessionKey string, args []string) string {
 	if sessionKey == "" {
 		return "Agent switching requires a session context. Please start a conversation first."
 	}
 
-	// List available agents if no argument provided
 	if len(args) == 0 {
 		agentList := mp.al.registry.ListAgentIDs()
 		if len(agentList) == 0 {
@@ -1207,13 +906,11 @@ func (mp *messageProcessorImpl) handleAgentCommand(sessionKey string, args []str
 
 	agentID := args[0]
 
-	// Validate agent exists
 	agent, ok := mp.al.registry.GetAgent(agentID)
 	if !ok {
 		return fmt.Sprintf("❌ Agent not found: %s", agentID)
 	}
 
-	// Get agent model
 	agentModel := agent.Model
 	if agentModel == "" {
 		agentModel = mp.al.cfg().Agents.Defaults.Model
@@ -1228,11 +925,6 @@ func (mp *messageProcessorImpl) handleAgentCommand(sessionKey string, args []str
 	return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s", agentName, agentModel)
 }
 
-// ============================================================================
-// Session utilities
-// ============================================================================
-
-// estimateTokens estimates the number of tokens in a message list.
 func (mp *messageProcessorImpl) estimateTokens(messages []providers.Message) int {
 	totalChars := 0
 	for _, m := range messages {

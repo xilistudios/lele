@@ -12,20 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/group"
 )
 
-// TestGroupHydration_NewAgentLoopLoadsPersistedGroups (B7) pins the startup
-// wiring: NewAgentLoop must rehydrate the groups found under
-// <LeleDir>/groups so "/group list" and the WebSocket welcome payload still
-// show them after a restart, the way chat sessions already do.
-//
-// The state is written as a legacy JSON file with a non-terminal status — the
-// shape left behind when a process dies mid-run — so the test also pins the
-// re-marking rule through the real loop: the group comes back as error, never
-// as a permanently "running" entry nobody can wait on.
-//
-// Writing the JSON file (instead of opening the SQLite store directly) keeps
-// the test valid on both backends: when the loop manages to open its store,
-// ListGroups migrates the legacy file; where SQLite is unavailable the file is
-// simply the store.
 func TestGroupHydration_NewAgentLoopLoadsPersistedGroups(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "group-hydrate-loop-*")
 	if err != nil {
@@ -33,12 +19,9 @@ func TestGroupHydration_NewAgentLoopLoadsPersistedGroups(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
-	// The loop wires the SQLite group repository package-globally (see
-	// group.UseStore); reset it so this test leaves no store pointing at the
-	// temporary directory for its successors.
 	t.Cleanup(func() { group.UseStore(nil) })
 
-	const groupID = "hydrate-agent-group" // no ':' or '/' → file name is the ID
+	const groupID = "hydrate-agent-group"
 	state := &group.GroupState{
 		ID:           groupID,
 		ProfileID:    "p1",
@@ -76,7 +59,6 @@ func TestGroupHydration_NewAgentLoopLoadsPersistedGroups(t *testing.T) {
 		},
 	}
 
-	// Hydration is best-effort: a store on disk must never break the loop.
 	al := NewAgentLoop(cfg, bus.NewMessageBus())
 	if al == nil {
 		t.Fatal("NewAgentLoop returned nil")
@@ -94,7 +76,6 @@ func TestGroupHydration_NewAgentLoopLoadsPersistedGroups(t *testing.T) {
 		t.Errorf("hydrated status = %q, want %q (non-terminal on disk → error)", st.Status, group.StatusError)
 	}
 
-	// The welcome snapshot path must see it, and Wait must not hang.
 	found := false
 	for _, snap := range al.AllGroupSnapshots() {
 		if snap.GroupID == groupID {

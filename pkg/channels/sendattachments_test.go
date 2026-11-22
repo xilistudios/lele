@@ -1,40 +1,5 @@
 package channels
 
-// Tests for the "empty content + attachments" rule shared by the three send
-// endpoints (WebSocket `message`, POST /api/v1/chat/send and
-// POST /api/v1/chat/send/stream).
-//
-// Before the fix each endpoint rejected `Content == ""` outright, so a user who
-// attached an image and typed nothing had the message dropped after the upload
-// had already succeeded. The rule is now "content OR an attachment", asked
-// twice per endpoint (before and after processing attachments) through
-// hasSendablePayload — see sendpayload.go.
-//
-// The point of driving all three endpoints from one table is that the rule is a
-// single rule: a case that one endpoint accepts must be accepted by all
-// three, and the rejection code must be identical too.
-//
-// Every path lives under t.TempDir() (no machine paths), and the fixtures reuse
-// newNativeTestServer/newTestNativeChannel so the tests stay hermetic.
-//
-// Mutation table (PLAN §5.5-B) — applied one at a time and reverted; each row
-// shows the sub-case that actually turned red, measured with
-// `go test ./pkg/channels/ -run TestSendEndpoints_EmptyContentWithAttachments -v`:
-//
-//	M10  pre-process guard back to `Content == ""` (3 endpoints)
-//	     -> RED: websocket/rest_chat/rest_stream case b (and c, f)
-//	M11  drop the post-processing guard (3 endpoints)
-//	     -> RED: case e of the three endpoints (accepted instead of attachments_rejected)
-//	M12  guard compares `strings.TrimSpace(content) != ""`
-//	     -> RED: case f of the three endpoints ("   " without attachments rejected)
-//	     (case c survives it: whitespace + a valid attachment has attachments > 0)
-//	M13  relax only the WebSocket guard
-//	     -> RED: websocket sub-cases a, c, f (a silent publish; REST stays green)
-//	M14  REST post-processing answers content_missing instead of attachments_rejected
-//	     -> RED: rest_chat case e, on the rejected CODE assertion
-//
-// All five went green again after the reverts; the tree carries no mutation.
-
 import (
 	"context"
 	"encoding/json"
@@ -50,16 +15,13 @@ import (
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
-// sendVerdict is the endpoint-independent outcome of one send attempt.
 type sendVerdict struct {
 	accepted    bool
-	code        string // rejection code, empty when accepted
-	content     string // content as the agent received it
+	code        string
+	content     string
 	attachments []bus.FileAttachment
 }
 
-// sendFixture is a hermetic LeleDir holding one valid upload and one file the
-// containment boundary must reject.
 type sendFixture struct {
 	leleDir     string
 	validPath   string
@@ -80,7 +42,6 @@ func newSendFixture(t *testing.T) *sendFixture {
 		t.Fatal(err)
 	}
 
-	// Outside the upload staging directory: processAttachments must drop it.
 	outsidePath := filepath.Join(t.TempDir(), "elsewhere.txt")
 	if err := os.WriteFile(outsidePath, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -89,8 +50,6 @@ func newSendFixture(t *testing.T) *sendFixture {
 	return &sendFixture{leleDir: leleDir, validPath: validPath, outsidePath: outsidePath}
 }
 
-// newFixtureServer returns a native test server whose channel reads uploads
-// from the fixture's LeleDir.
 func newFixtureServer(t *testing.T, f *sendFixture) *nativeTestServer {
 	t.Helper()
 	ts := newNativeTestServer(t)
@@ -98,9 +57,6 @@ func newFixtureServer(t *testing.T, f *sendFixture) *nativeTestServer {
 	return ts
 }
 
-// driveWSSend sends one message through handleWSClientMessage and reports
-// whether it was accepted (inbound published) or rejected (an `error` event was
-// queued for the client).
 func driveWSSend(t *testing.T, ts *nativeTestServer, content string, attachments []string) sendVerdict {
 	t.Helper()
 
@@ -134,8 +90,6 @@ func driveWSSend(t *testing.T, ts *nativeTestServer, content string, attachments
 		t.Fatal("handleWSClientMessage did not return")
 	}
 
-	// A rejection answers with an `error` event; an accepted send queues the
-	// ack instead, which is skipped here.
 	for {
 		select {
 		case raw := <-client.SendChan:
@@ -161,7 +115,6 @@ func driveWSSend(t *testing.T, ts *nativeTestServer, content string, attachments
 	return sendVerdict{accepted: true, content: inbound.Content, attachments: inbound.Attachments}
 }
 
-// driveRESTChatSend drives POST /api/v1/chat/send.
 func driveRESTChatSend(t *testing.T, ts *nativeTestServer, content string, attachments []string) sendVerdict {
 	t.Helper()
 
@@ -197,10 +150,6 @@ func driveRESTChatSend(t *testing.T, ts *nativeTestServer, content string, attac
 	return sendVerdict{accepted: true, content: inbound.Content, attachments: inbound.Attachments}
 }
 
-// driveRESTChatSendStream drives POST /api/v1/chat/send/stream. The handler
-// streams until the turn completes, so a background goroutine consumes the
-// inbound message and replies with a completion; the verdict itself comes from
-// the bus (accepted) or from the HTTP status (rejected).
 func driveRESTChatSendStream(t *testing.T, ts *nativeTestServer, content string, attachments []string) sendVerdict {
 	t.Helper()
 
@@ -251,7 +200,6 @@ func driveRESTChatSendStream(t *testing.T, ts *nativeTestServer, content string,
 
 	select {
 	case inbound := <-drained:
-		// Drain the SSE body so the handler can finish and release the stream.
 		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
 			t.Fatalf("drain stream error = %v", err)
 		}
@@ -262,9 +210,6 @@ func driveRESTChatSendStream(t *testing.T, ts *nativeTestServer, content string,
 	return sendVerdict{}
 }
 
-// TestSendEndpoints_EmptyContentWithAttachments is the T2.3 table: the same six
-// cases (a-f) against all three endpoints, asserting the verdict AND the
-// rejection code are identical everywhere.
 func TestSendEndpoints_EmptyContentWithAttachments(t *testing.T) {
 	endpoints := []struct {
 		name  string
@@ -283,7 +228,6 @@ func TestSendEndpoints_EmptyContentWithAttachments(t *testing.T) {
 				attachments func(f *sendFixture) []string
 				wantAccept  bool
 				wantCode    string
-				// wantContent, when non-empty, is asserted verbatim.
 				wantContent string
 			}{
 				{
@@ -316,11 +260,6 @@ func TestSendEndpoints_EmptyContentWithAttachments(t *testing.T) {
 					wantContent: "hola",
 				},
 				{
-					// D5.3: content is compared LITERALLY. Only an exactly empty
-					// payload is `content_missing`; a whitespace-only message is
-					// forwarded verbatim (the client trims, the server does not).
-					// Without this case, relaxing the guard to
-					// `strings.TrimSpace(content) == ""` would go unnoticed.
 					name:        "f_whitespace_without_attachments",
 					content:     "   ",
 					wantAccept:  true,
@@ -369,8 +308,6 @@ func TestSendEndpoints_EmptyContentWithAttachments(t *testing.T) {
 						t.Fatalf("attachments = %d, want 1 (the valid upload)", len(got.attachments))
 					}
 					if len(got.attachments) == 1 {
-						// The agent must be able to see the file: the rendered
-						// user message carries the attachment marker.
 						rendered := utils.BuildAttachmentContext(got.attachments)
 						if !strings.HasPrefix(rendered, "## Attachments") {
 							t.Errorf("rendered attachment context = %q, want it to start with the marker", rendered)

@@ -467,7 +467,6 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 		srcDir := t.TempDir()
 		dstDir := t.TempDir()
 
-		// Create MEMORY.md at workspace root
 		os.WriteFile(filepath.Join(srcDir, "MEMORY.md"), []byte("# Memory"), 0644)
 
 		actions, err := PlanWorkspaceMigration(srcDir, dstDir, false)
@@ -490,7 +489,6 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 		srcDir := t.TempDir()
 		dstDir := t.TempDir()
 
-		// Create MEMORY.md in memory/ directory (old location)
 		memDir := filepath.Join(srcDir, "memory")
 		os.MkdirAll(memDir, 0755)
 		os.WriteFile(filepath.Join(memDir, "MEMORY.md"), []byte("# Memory"), 0644)
@@ -500,11 +498,9 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 			t.Fatalf("PlanWorkspaceMigration: %v", err)
 		}
 
-		// Should copy to root, not to memory/ subdirectory
 		hasCopyToRoot := false
 		for _, a := range actions {
 			if a.Type == ActionCopy && filepath.Base(a.Source) == "MEMORY.md" {
-				// Destination should be at root, not in memory/
 				if filepath.Dir(a.Destination) == dstDir {
 					hasCopyToRoot = true
 				}
@@ -519,7 +515,6 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 		srcDir := t.TempDir()
 		dstDir := t.TempDir()
 
-		// Create memory directory with daily notes (not MEMORY.md)
 		memDir := filepath.Join(srcDir, "memory", "202601")
 		os.MkdirAll(memDir, 0755)
 		os.WriteFile(filepath.Join(memDir, "20260105.md"), []byte("# Daily note"), 0644)
@@ -749,7 +744,6 @@ func TestRunFullMigration(t *testing.T) {
 		t.Errorf("AGENT.md content = %q, want %q", string(agentsData), "# Agents from OpenClaw")
 	}
 
-	// MEMORY.md should now be at workspace root (not in memory/)
 	memData, err := os.ReadFile(filepath.Join(picoWs, "MEMORY.md"))
 	if err != nil {
 		t.Fatalf("reading MEMORY.md: %v", err)
@@ -935,16 +929,8 @@ func TestRunWorkspaceOnly(t *testing.T) {
 	}
 }
 
-// TestMergeConfigKeySurvivesAKeylessNamedEntry pins the two-copies hazard: a
-// config that already carries a KEYLESS named provider (api_base/proxy only,
-// e.g. a local endpoint or an OAuth setup) plus an imported key for the same
-// provider. MarshalJSON persists the named copy and put() then skips the typed
-// one, so a merge that only touched Providers.Anthropic would be silently
-// dropped on save — the user would run `lele migrate` and still have no key.
-// Mutant it kills: dropping the syncNamedFromTyped call after the typed merge.
 func TestMergeConfigKeySurvivesAKeylessNamedEntry(t *testing.T) {
 	existing := config.DefaultConfig()
-	// Keyless named entry, typed copy empty: the shape /connect leaves behind.
 	existing.Providers.Named = map[string]config.NamedProviderConfig{
 		"anthropic": {
 			Type: "anthropic",
@@ -965,7 +951,6 @@ func TestMergeConfigKeySurvivesAKeylessNamedEntry(t *testing.T) {
 		t.Fatalf("typed Anthropic.APIKey = %q, want the migrated key", got)
 	}
 
-	// The real contract is what lands on disk.
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := config.SaveConfig(path, merged); err != nil {
 		t.Fatalf("SaveConfig: %v", err)

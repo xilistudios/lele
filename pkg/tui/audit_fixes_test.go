@@ -8,9 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// TestSkillsModal_FromMainChatPath pins the unified modal dispatcher: skills
-// install/picker must render from the split-column (post-welcome) View path,
-// not only from the welcome screen.
 func TestSkillsModal_FromMainChatPath(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 120, 36
@@ -44,8 +41,6 @@ func TestSkillsModal_FromMainChatPath(t *testing.T) {
 	}
 }
 
-// TestSkillsModal_AddSecretTitle pins that the add-secret form is titled
-// differently from the secrets list.
 func TestSkillsModal_AddSecretTitle(t *testing.T) {
 	m := newTestModel(t)
 	m.modalMode = ModalAddSecret
@@ -54,22 +49,15 @@ func TestSkillsModal_AddSecretTitle(t *testing.T) {
 	}
 	if m.modalTitleFor(ModalAddSecret) == m.modalTitleFor(ModalSecrets) &&
 		i18n.T("tui.addSecret") != m.secretsHeader() {
-		// secretsHeader may include backend tags; only fail when the plain
-		// add-secret title is still the list title.
 		if m.modalTitleFor(ModalAddSecret) == i18n.T("tui.secrets") {
 			t.Fatal("ModalAddSecret still uses the secrets list title")
 		}
 	}
 }
 
-// TestLoadSkillsList_EmptyKeepsKeysAligned pins the empty-list key alignment:
-// the "no skills" placeholder must get a matching empty key so Enter on the
-// Install action indexes correctly and the separator is a no-op.
 func TestLoadSkillsList_EmptyKeepsKeysAligned(t *testing.T) {
 	m := newTestModel(t)
 	m.resetModal(ModalSkills)
-	// Force the empty path: loader may be non-nil but return no skills.
-	// Call the loader and inspect alignment for whatever it produced.
 	m.loadSkillsList()
 
 	if len(m.modalItems) != len(m.skillsModalKeys) {
@@ -77,7 +65,6 @@ func TestLoadSkillsList_EmptyKeepsKeysAligned(t *testing.T) {
 			len(m.modalItems), len(m.skillsModalKeys), m.modalItems, m.skillsModalKeys)
 	}
 
-	// Install action must be reachable: last key is __install__ and indexes last item.
 	if len(m.skillsModalKeys) == 0 {
 		t.Fatal("expected at least the install action")
 	}
@@ -88,7 +75,6 @@ func TestLoadSkillsList_EmptyKeepsKeysAligned(t *testing.T) {
 	m.modalSelectedIdx = last
 	cmd := m.handleSkillsEnter()
 	if m.modalMode != ModalSkillInstall && cmd == nil {
-		// handleSkillsEnter returns tickCmd after switching mode
 		t.Fatalf("Enter on install action did not open ModalSkillInstall (mode=%v)", m.modalMode)
 	}
 	if m.modalMode != ModalSkillInstall {
@@ -96,14 +82,12 @@ func TestLoadSkillsList_EmptyKeepsKeysAligned(t *testing.T) {
 	}
 }
 
-// TestAutocomplete_NegativeIndexDoesNotPanic pins the empty-match Up wrap fix.
 func TestAutocomplete_NegativeIndexDoesNotPanic(t *testing.T) {
 	m := newTestModel(t)
 	m.showAutocomplete = true
 	m.autocompleteItems = nil
 	m.autocompleteIdx = 0
 
-	// Up on empty list used to set idx = -1 and later panic on Enter/Tab.
 	msg := tea.KeyMsg{Type: tea.KeyUp, Runes: []rune{'k'}}
 	_, _, handled := m.handleAutocompleteKey(msg)
 	if !handled {
@@ -113,7 +97,6 @@ func TestAutocomplete_NegativeIndexDoesNotPanic(t *testing.T) {
 		t.Fatalf("autocompleteIdx went negative: %d", m.autocompleteIdx)
 	}
 
-	// Enter with a stale negative index must not panic.
 	m.autocompleteIdx = -1
 	m.autocompleteItems = []commandInfo{{name: "/new", description: "x"}}
 	_, _, _ = m.handleAutocompleteKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -122,7 +105,6 @@ func TestAutocomplete_NegativeIndexDoesNotPanic(t *testing.T) {
 	}
 }
 
-// TestFilterAutocomplete_ClampsNegativeIdx pins filterAutocomplete's clamp.
 func TestFilterAutocomplete_ClampsNegativeIdx(t *testing.T) {
 	m := newTestModel(t)
 	m.autocompleteIdx = -5
@@ -132,9 +114,6 @@ func TestFilterAutocomplete_ClampsNegativeIdx(t *testing.T) {
 	}
 }
 
-// TestHandleApproval_ExpiredDoesNotOverwriteWithWhitelistSuccess pins the
-// whitelist path: an expired live approval keeps its warning even after the
-// command is persisted to the allowlist.
 func TestHandleApproval_ReturnsWhetherAccepted(t *testing.T) {
 	m := newTestModel(t)
 	m.pendingApprovalID = ""
@@ -143,11 +122,7 @@ func TestHandleApproval_ReturnsWhetherAccepted(t *testing.T) {
 	}
 }
 
-// TestRenderSingleLine_MultibyteWidth pins display-width wrapping on the
-// streaming path (was using len() bytes).
 func TestRenderSingleLine_MultibyteWidth(t *testing.T) {
-	// 10 CJK chars = 20 display cells; width 10 must wrap.
-	// Escaped so gosmopolitan does not flag a literal Han rune in source.
 	line := strings.Repeat("\u6C49", 10)
 	out := renderSingleLine(line, 10)
 	if strings.Count(out, "\n") < 1 {
@@ -155,15 +130,12 @@ func TestRenderSingleLine_MultibyteWidth(t *testing.T) {
 	}
 }
 
-// TestFormatSkillItem_UTF8Safe pins rune-safe truncation.
 func TestFormatSkillItem_UTF8Safe(t *testing.T) {
 	desc := strings.Repeat("ñ", 80)
 	out := formatSkillItem("test", desc, true, "")
 	if !strings.ContainsRune(out, '…') && !strings.Contains(out, "...") {
-		// truncateRightCells uses "..."
 		t.Fatalf("expected ellipsis, got %q", out)
 	}
-	// Must remain valid UTF-8 with no replacement char from mid-rune cuts.
 	for _, r := range out {
 		if r == '�' {
 			t.Fatalf("invalid UTF-8 replacement in %q", out)
@@ -171,7 +143,6 @@ func TestFormatSkillItem_UTF8Safe(t *testing.T) {
 	}
 }
 
-// TestThemeIsLightBackground pins luminance heuristic.
 func TestThemeIsLightBackground(t *testing.T) {
 	if !themeIsLightBackground("#FFFFFF") {
 		t.Fatal("#FFFFFF should be light")

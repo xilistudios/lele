@@ -12,8 +12,6 @@ import (
 	"testing"
 )
 
-// --- JSONL Event Parsing Tests ---
-
 func TestParseJSONLEvents_AgentMessage(t *testing.T) {
 	p := &CodexCliProvider{}
 	events := `{"type":"thread.started","thread_id":"abc-123"}
@@ -52,7 +50,6 @@ func TestParseJSONLEvents_ToolCallExtraction(t *testing.T) {
 	p := &CodexCliProvider{}
 	toolCallText := `Let me read that file.
 {"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"/tmp/test.txt\"}"}}]}`
-	// Build valid JSONL by marshaling the event
 	item := codexEvent{
 		Type: "item.completed",
 		Item: &codexEventItem{ID: "item_1", Type: "agent_message", Text: toolCallText},
@@ -80,7 +77,6 @@ func TestParseJSONLEvents_ToolCallExtraction(t *testing.T) {
 	if resp.ToolCalls[0].Function.Arguments != `{"path":"/tmp/test.txt"}` {
 		t.Errorf("ToolCalls[0].Function.Arguments = %q", resp.ToolCalls[0].Function.Arguments)
 	}
-	// Content should have the tool call JSON stripped
 	if strings.Contains(resp.Content, "tool_calls") {
 		t.Errorf("Content should not contain tool_calls JSON, got: %q", resp.Content)
 	}
@@ -163,7 +159,6 @@ func TestParseJSONLEvents_TurnFailed(t *testing.T) {
 
 func TestParseJSONLEvents_ErrorWithContent(t *testing.T) {
 	p := &CodexCliProvider{}
-	// If there's an error but also content, return the content (partial success)
 	events := `{"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Partial result."}}
 {"type":"error","message":"connection reset"}
@@ -220,7 +215,6 @@ func TestParseJSONLEvents_CommandExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseJSONLEvents() error: %v", err)
 	}
-	// command_execution items should be skipped; only agent_message text is returned
 	if resp.Content != "Found 2 files." {
 		t.Errorf("Content = %q, want %q", resp.Content, "Found 2 files.")
 	}
@@ -240,8 +234,6 @@ func TestParseJSONLEvents_NoUsage(t *testing.T) {
 		t.Errorf("Usage should be nil when turn.completed has no usage, got %+v", resp.Usage)
 	}
 }
-
-// --- Prompt Building Tests ---
 
 func TestBuildPrompt_SystemAsInstructions(t *testing.T) {
 	p := &CodexCliProvider{}
@@ -372,7 +364,6 @@ func TestBuildPrompt_SystemAndTools(t *testing.T) {
 
 	prompt := p.buildPrompt(messages, tools)
 
-	// System instructions should come first
 	sysIdx := strings.Index(prompt, "## System Instructions")
 	toolIdx := strings.Index(prompt, "## Available Tools")
 	taskIdx := strings.Index(prompt, "## Task")
@@ -388,16 +379,12 @@ func TestBuildPrompt_SystemAndTools(t *testing.T) {
 	}
 }
 
-// --- CLI Argument Tests ---
-
 func TestCodexCliProvider_GetDefaultModel(t *testing.T) {
 	p := NewCodexCliProvider("")
 	if got := p.GetDefaultModel(); got != "codex-cli" {
 		t.Errorf("GetDefaultModel() = %q, want %q", got, "codex-cli")
 	}
 }
-
-// --- Mock CLI Integration Test ---
 
 func createMockCodexCLI(t *testing.T, events []string) string {
 	t.Helper()
@@ -480,7 +467,6 @@ func TestCodexCliProvider_MockCLI_Error(t *testing.T) {
 }
 
 func TestCodexCliProvider_MockCLI_WithModel(t *testing.T) {
-	// Mock script that captures args to verify model flag is passed
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "codex")
 	argsFile := filepath.Join(tmpDir, "args.txt")
@@ -519,7 +505,6 @@ echo '{"type":"turn.completed"}'`
 		t.Fatalf("Chat() error: %v", err)
 	}
 
-	// Verify the args
 	argsData, err := os.ReadFile(filepath.Join(tmpDir, "args.txt"))
 	if err != nil {
 		t.Fatalf("reading args: %v", err)
@@ -541,7 +526,6 @@ echo '{"type":"turn.completed"}'`
 }
 
 func TestCodexCliProvider_MockCLI_ContextCancel(t *testing.T) {
-	// Script that sleeps forever
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "codex")
 	script := "#!/bin/sh\nsleep 60"
@@ -560,7 +544,7 @@ func TestCodexCliProvider_MockCLI_ContextCancel(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately
+	cancel()
 
 	messages := []Message{{Role: "user", Content: "test"}}
 	_, err := p.Chat(ctx, messages, nil, "", nil)
@@ -579,14 +563,11 @@ func TestCodexCliProvider_EmptyCommand(t *testing.T) {
 	}
 }
 
-// --- Integration Test (requires real codex CLI with valid auth) ---
-
 func TestCodexCliProvider_Integration(t *testing.T) {
 	if os.Getenv("LELE_INTEGRATION_TESTS") == "" {
 		t.Skip("skipping integration test (set LELE_INTEGRATION_TESTS=1 to enable)")
 	}
 
-	// Verify codex is available
 	codexPath, err := exec.LookPath("codex")
 	if err != nil {
 		t.Skip("codex CLI not found in PATH")

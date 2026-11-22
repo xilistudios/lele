@@ -13,8 +13,6 @@ func TestBuildCSPPinsWebsocketToRequestHost(t *testing.T) {
 	if !strings.Contains(csp, "connect-src 'self' ws://192.168.0.171 wss://192.168.0.171;") {
 		t.Fatalf("connect-src not pinned to serving host: %q", csp)
 	}
-	// The old wildcard form must be gone: it allowed exfiltrating to ANY
-	// ws:// endpoint (WEB-M13).
 	if strings.Contains(csp, "ws: wss:") {
 		t.Fatalf("bare ws:/wss: wildcard survived: %q", csp)
 	}
@@ -40,8 +38,6 @@ func TestBuildCSPNoInlineScripts(t *testing.T) {
 			scriptPart = directive
 		}
 	}
-	// script-src MUST NOT carry 'unsafe-inline' — it is the XSS kill switch
-	// (WEB-M12/M13). style-src intentionally does (React inline styles).
 	if strings.Contains(scriptPart, "unsafe-inline") {
 		t.Fatalf("script-src regained 'unsafe-inline': %q", scriptPart)
 	}
@@ -51,7 +47,6 @@ func TestBuildCSPNoInlineScripts(t *testing.T) {
 }
 
 func TestBuildCSPNoRequestHost(t *testing.T) {
-	// Defensive: no host available -> 'self' only, never a broken directive.
 	csp := BuildCSP(nil)
 	if !strings.Contains(csp, "connect-src 'self';") {
 		t.Fatalf("expected 'self'-only connect-src without host: %q", csp)
@@ -80,8 +75,6 @@ func TestMiddlewareSetsCanonicalHeaders(t *testing.T) {
 	}
 }
 
-// Review nit #2: a bare unbracketed IPv6 Host ("::1") must not produce a
-// malformed ws://: token — the host is skipped and 'self' covers same-origin.
 func TestBuildCSPBareIPv6HostNoMalformedToken(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.Host = "::1"
@@ -94,8 +87,6 @@ func TestBuildCSPBareIPv6HostNoMalformedToken(t *testing.T) {
 	}
 }
 
-// Bracketed IPv6 with port must keep the bracketed host and strip only the
-// numeric port.
 func TestBuildCSPBracketedIPv6PortStripped(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.Host = "[::1]:8080"
@@ -105,8 +96,6 @@ func TestBuildCSPBracketedIPv6PortStripped(t *testing.T) {
 	}
 }
 
-// A non-numeric ":suffix" (bare IPv6 tail like "::1234") must NOT be treated
-// as a port — stripping it would drop the host or mangle it.
 func TestBuildCSPIPv6TailNotStrippedAsPort(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.Host = "example.com:8080"
@@ -116,10 +105,6 @@ func TestBuildCSPIPv6TailNotStrippedAsPort(t *testing.T) {
 	}
 }
 
-// Review (post-review 1b): a Host header accepted by net/http can carry CSP
-// token separators (; ' ! $ % & ( ) * + = ~). None of them may leak into the
-// policy — otherwise "[::1]:80;frame-ancestors" would override the later
-// frame-ancestors 'none' (first directive wins) and re-open clickjacking.
 func TestBuildCSPHostWithSeparatorsCannotInjectDirectives(t *testing.T) {
 	for _, host := range []string{
 		"[::1]:80;frame-ancestors",
@@ -135,8 +120,6 @@ func TestBuildCSPHostWithSeparatorsCannotInjectDirectives(t *testing.T) {
 		if strings.Contains(csp, "frame-ancestors;") || strings.Contains(csp, "frame-ancestors 'none'; frame-ancestors") {
 			t.Errorf("host %q produced duplicate/injected directive: %s", host, csp)
 		}
-		// The policy must always end with exactly one frame-ancestors 'none'
-		// and one base-uri 'self', and must contain the injected text nowhere.
 		for _, banned := range []string{";frame-ancestors", "'base-uri", "(=http", "ex~ample"} {
 			if strings.Contains(csp, banned) {
 				t.Errorf("host %q leaked %q into CSP: %s", host, banned, csp)

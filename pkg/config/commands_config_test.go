@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package config
 
 import (
@@ -97,8 +91,6 @@ func TestEditableDocumentFromConfigRoundTrip(t *testing.T) {
 	}
 	assertCommandFields(t, back.Commands, back.Harness)
 
-	// The document must not alias the config map, and the config produced by
-	// ToConfig must not alias the document map.
 	doc2 := editableDocumentFromConfig(src)
 	back2, err := doc2.ToConfig()
 	if err != nil {
@@ -123,10 +115,6 @@ func TestEditableDocumentFromConfigRoundTrip(t *testing.T) {
 	}
 }
 
-// TestHarnessFlagsRoundTripIndependently guards the toSerializable gate: the
-// harness section must be emitted when EITHER flag is set, so a config with
-// only allow_absolute_files:true survives save/reload (gating on AllowShell
-// alone dropped it silently).
 func TestHarnessFlagsRoundTripIndependently(t *testing.T) {
 	yes, no := true, false
 	cases := []struct {
@@ -164,7 +152,6 @@ func TestHarnessFlagsRoundTripIndependently(t *testing.T) {
 				t.Errorf("ToConfig AllowAbsoluteFiles = %v, want %v", back.Harness.AllowAbsoluteFiles, abs)
 			}
 
-			// Full save/reload cycle.
 			path := filepath.Join(t.TempDir(), "config.json")
 			if err := SaveEditableDocument(path, doc); err != nil {
 				t.Fatalf("SaveEditableDocument: %v", err)
@@ -215,10 +202,6 @@ func TestCommandsAbsentByDefault(t *testing.T) {
 	}
 }
 
-// TestPerCommandTriStateRoundTrip closes the D5 gap: the per-command
-// allow_absolute_files tri-state (nil / true / false) must survive the full
-// editable-document cycle config -> doc -> save -> reload. A false here would
-// silently flip a trusted command into blocked mode (or vice versa).
 func TestPerCommandTriStateRoundTrip(t *testing.T) {
 	yes, no := true, false
 	src := &Config{}

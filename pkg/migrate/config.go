@@ -215,7 +215,6 @@ func ConvertConfig(data map[string]interface{}) (*config.Config, []string, error
 
 	if tools, ok := getMap(data, "tools"); ok {
 		if web, ok := getMap(tools, "web"); ok {
-			// Migrate old "search" config to "brave" if api_key is present
 			if search, ok := getMap(web, "search"); ok {
 				if v, ok := getString(search, "api_key"); ok {
 					cfg.Tools.Web.Brave.APIKey = v
@@ -234,19 +233,6 @@ func ConvertConfig(data map[string]interface{}) (*config.Config, []string, error
 	return cfg, warnings, nil
 }
 
-// syncNamedFromTyped fills the NAMED copy of a provider from its typed copy
-// after a merge. Both copies exist (Providers.Anthropic vs
-// Providers.Named["anthropic"]) and ProvidersConfig.MarshalJSON persists the
-// NAMED one whenever it carries any data — put() then SKIPS the typed copy for
-// a key that already exists. A merged key written only into the typed field
-// would therefore never reach config.json as soon as the on-disk config has a
-// keyless named entry for that provider (api_base/proxy/connect_mode only,
-// which is exactly what a keyless local or OAuth setup looks like), losing the
-// migrated credential.
-//
-// Only EMPTY named fields are filled: Models, AuthMethod and ConnectMode live
-// in the named copy and must survive the merge, and an existing named value
-// always wins over the typed one (the same precedence MarshalJSON applies).
 func syncNamedFromTyped(p *config.ProvidersConfig, name string, pc config.ProviderConfig) {
 	if p == nil || (pc.APIKey == "" && pc.APIBase == "" && pc.Proxy == "") {
 		return

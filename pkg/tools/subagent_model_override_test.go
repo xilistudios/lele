@@ -10,8 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// recordingProvider captures the model name each Chat call was made with so
-// tests can assert which model the tool loop actually ran on.
 type recordingProvider struct {
 	calls int
 	model string
@@ -27,8 +25,6 @@ func (r *recordingProvider) GetDefaultModel() string { return "default-model" }
 func (r *recordingProvider) SupportsTools() bool     { return false }
 func (r *recordingProvider) GetContextWindow() int   { return 4096 }
 
-// waitForSubagentDone blocks until the task signals completion (terminal
-// state reached and the runner goroutine finished) or the test times out.
 func waitForSubagentDone(t *testing.T, task *SubagentTask) {
 	t.Helper()
 	select {
@@ -38,12 +34,6 @@ func waitForSubagentDone(t *testing.T, task *SubagentTask) {
 	}
 }
 
-// spawnAndWait spawns a task with the given options and waits for completion:
-// first the callback (the runner delivers it before the task goroutine signals
-// done), then the task's DoneChannel, and finally a consistent snapshot of the
-// terminal state. It returns the task snapshot, the first callback result (nil
-// if the callback never fired), and the callback channel so tests can assert
-// that no second callback was delivered.
 func spawnAndWait(t *testing.T, sm *SubagentManager, opts SpawnOptions) (*SubagentTask, *ToolResult, chan *ToolResult) {
 	t.Helper()
 
@@ -65,10 +55,6 @@ func spawnAndWait(t *testing.T, sm *SubagentManager, opts SpawnOptions) (*Subage
 		}
 	}
 
-	// Wait for the completion signal (closed by the task goroutine after
-	// runTask returns, which is after any callback delivery). GetTask returns
-	// a snapshot that shares the live task's doneCh, so it can be waited on;
-	// re-fetch afterwards to read the terminal state consistently.
 	task, ok := sm.GetTask(taskID)
 	if !ok {
 		t.Fatalf("task %s not found after spawn", taskID)
@@ -79,8 +65,6 @@ func spawnAndWait(t *testing.T, sm *SubagentManager, opts SpawnOptions) (*Subage
 	select {
 	case cbResult = <-results:
 	case <-time.After(2 * time.Second):
-		// Callback may legitimately be absent (nil callback scenarios); tests
-		// that require it assert on cbResult == nil.
 	}
 	fresh, ok := sm.GetTask(taskID)
 	if !ok {
@@ -89,11 +73,6 @@ func spawnAndWait(t *testing.T, sm *SubagentManager, opts SpawnOptions) (*Subage
 	return fresh, cbResult, results
 }
 
-// TestRunTask_ModelOverrideResolverError_FailsTask proves the fail-loudly
-// contract: when a task carries a model override and the resolver reports an
-// error, the task must end FAILED with the override name surfaced in
-// Summary/Result and the callback must receive an IsError result — the agent
-// default model must NOT be used.
 func TestRunTask_ModelOverrideResolverError_FailsTask(t *testing.T) {
 	defaultProvider := &recordingProvider{}
 	sm := NewSubagentManager(defaultProvider, "default-model", "/tmp/test", nil, 10)
@@ -128,8 +107,6 @@ func TestRunTask_ModelOverrideResolverError_FailsTask(t *testing.T) {
 	if !strings.Contains(cbResult.ForLLM, "anthropic:claude-opus") {
 		t.Errorf("callback ForLLM = %q, want it to contain the override model name", cbResult.ForLLM)
 	}
-	// The callback must fire exactly once: the failure return must not double
-	// deliver (e.g. once inline and once via the deferred block).
 	select {
 	case extra := <-cbResults:
 		t.Fatalf("callback fired a second time: %+v", extra)
@@ -137,9 +114,6 @@ func TestRunTask_ModelOverrideResolverError_FailsTask(t *testing.T) {
 	}
 }
 
-// TestRunTask_ModelOverrideResolverNilProvider_FailsTask covers resolvers that
-// return a nil provider without an error: the task must still fail instead of
-// falling back to the default model.
 func TestRunTask_ModelOverrideResolverNilProvider_FailsTask(t *testing.T) {
 	defaultProvider := &recordingProvider{}
 	sm := NewSubagentManager(defaultProvider, "default-model", "/tmp/test", nil, 10)
@@ -163,13 +137,9 @@ func TestRunTask_ModelOverrideResolverNilProvider_FailsTask(t *testing.T) {
 	}
 }
 
-// TestRunTask_ModelOverrideNoResolver_FailsTask covers the case where a task
-// carries a model override but no resolver was registered at all: the task
-// must fail with a "no model resolver configured" reason.
 func TestRunTask_ModelOverrideNoResolver_FailsTask(t *testing.T) {
 	defaultProvider := &recordingProvider{}
 	sm := NewSubagentManager(defaultProvider, "default-model", "/tmp/test", nil, 10)
-	// Intentionally do NOT call SetModelOverrideResolver.
 
 	task, cbResult, _ := spawnAndWait(t, sm, SpawnOptions{ModelOverride: "anthropic:claude-opus"})
 
@@ -190,8 +160,6 @@ func TestRunTask_ModelOverrideNoResolver_FailsTask(t *testing.T) {
 	}
 }
 
-// TestRunTask_ModelOverrideSuccess_AppliesOverride verifies the success path
-// is unchanged: a resolvable override is applied to the tool loop.
 func TestRunTask_ModelOverrideSuccess_AppliesOverride(t *testing.T) {
 	defaultProvider := &recordingProvider{}
 	overrideProvider := &recordingProvider{}
@@ -211,8 +179,6 @@ func TestRunTask_ModelOverrideSuccess_AppliesOverride(t *testing.T) {
 	if overrideProvider.calls == 0 {
 		t.Fatal("override provider was never called")
 	}
-	// RunToolLoop strips provider prefixes it doesn't recognize before calling
-	// the provider, so accept either the raw or the bare model name.
 	if overrideProvider.model != "custom:model-x" && overrideProvider.model != "model-x" {
 		t.Errorf("override provider model = %q, want %q", overrideProvider.model, "custom:model-x")
 	}
@@ -221,8 +187,6 @@ func TestRunTask_ModelOverrideSuccess_AppliesOverride(t *testing.T) {
 	}
 }
 
-// TestRunTask_NoModelOverride_Unaffected verifies tasks without an override
-// never consult the resolver and run on the default provider as before.
 func TestRunTask_NoModelOverride_Unaffected(t *testing.T) {
 	defaultProvider := &recordingProvider{}
 	sm := NewSubagentManager(defaultProvider, "default-model", "/tmp/test", nil, 10)

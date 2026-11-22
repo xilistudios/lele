@@ -4,6 +4,7 @@ import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useBackgroundExecStream } from '../../hooks/useBackgroundExecStream'
 import { useBackgroundExecs } from '../../hooks/useBackgroundExecs'
 import type { BackgroundExecInfo } from '../../lib/types'
+import { BackButton } from '../atoms/BackButton'
 import { ErrorBanner } from '../atoms/ErrorBanner'
 import { Sidebar } from '../organisms/Sidebar'
 
@@ -44,7 +45,6 @@ function ProcessOutput({ processId }: { processId: string }) {
   const { output, status, elapsedMs, done } = useBackgroundExecStream(processId)
   const outputRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll to bottom
   useEffect(() => {
     if (outputRef.current) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight
@@ -174,14 +174,13 @@ export function BackgroundExecsPage() {
   )
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
+    <div className="flex app-shell bg-background-primary text-text-primary">
       <Sidebar
         collapsed={!sidebarOpen}
         mobileOpen={mobileSidebarOpen}
         onClose={() => onCloseMobileSidebar()}
       />
       <main className="flex flex-1 flex-col overflow-hidden">
-        {/* Header */}
         <header className="flex items-center justify-between border-b border-border px-4 py-3 md:px-6 md:py-4 shrink-0 bg-background-secondary">
           <div className="flex items-center gap-3">
             <button
@@ -203,6 +202,7 @@ export function BackgroundExecsPage() {
                 <line x1="9" y1="3" x2="9" y2="21" />
               </svg>
             </button>
+            <BackButton />
             <h1 className="text-base font-semibold text-text-primary">
               {t('backgroundExecs.title', 'Background Processes')}
             </h1>
@@ -229,7 +229,6 @@ export function BackgroundExecsPage() {
           </button>
         </header>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto">
           {error && <ErrorBanner message={error} />}
 
@@ -240,7 +239,6 @@ export function BackgroundExecsPage() {
               </div>
             )}
 
-            {/* A failed fetch is an error, not an empty-but-successful list. */}
             {!loading && !error && processes.length === 0 && (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <svg

@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -14,36 +8,20 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// TurnMarker checkpoints an in-flight inbound turn so a restart can resume it.
-// Stored at KV key "sess:turn:<sessionKey>". Written only when BOTH
-// session.durable_inbound and session.resume_enabled are true (the resume
-// trigger is the durable inbound replay, so without durability there is no
-// replay to resume from). Cleared when the turn completes; overwritten by the
-// next inbound turn on the same session. Never expired.
 type TurnMarker struct {
-	SessionKey string `json:"session_key"`
-	// DedupeID is the durable spool dedupe key (== message_id). It is the
-	// resume match key: a replayed inbound carries the same DedupeID as the
-	// turn that was checkpointed before the crash, which is how
-	// processMessage distinguishes "resume this exact turn" from "a new
-	// turn superseding an abandoned one".
-	DedupeID  string    `json:"dedupe_id,omitempty"`
-	SpoolID   int64     `json:"spool_id,omitempty"`
-	Channel   string    `json:"channel,omitempty"`
-	ChatID    string    `json:"chat_id,omitempty"`
-	MsgID     string    `json:"msg_id,omitempty"` // reply target for the final answer
-	AgentID   string    `json:"agent_id,omitempty"`
-	Model     string    `json:"model,omitempty"` // resolved model for this turn ("" = session model)
-	StartedAt time.Time `json:"started_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Iter      int       `json:"iter"`
-	// Phase records how far the turn got before the process stopped:
-	// inbound_start (accepted, no LLM request yet), llm_wait (a real provider
-	// request was outstanding) or tools_running (tool calls were executing).
-	Phase string `json:"phase"`
-	// ResumeNoticeSent guards the "resuming…" user notice so a resume that
-	// itself gets interrupted and replayed does not spam the channel.
-	ResumeNoticeSent bool `json:"resume_notice_sent,omitempty"`
+	SessionKey       string    `json:"session_key"`
+	DedupeID         string    `json:"dedupe_id,omitempty"`
+	SpoolID          int64     `json:"spool_id,omitempty"`
+	Channel          string    `json:"channel,omitempty"`
+	ChatID           string    `json:"chat_id,omitempty"`
+	MsgID            string    `json:"msg_id,omitempty"`
+	AgentID          string    `json:"agent_id,omitempty"`
+	Model            string    `json:"model,omitempty"`
+	StartedAt        time.Time `json:"started_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	Iter             int       `json:"iter"`
+	Phase            string    `json:"phase"`
+	ResumeNoticeSent bool      `json:"resume_notice_sent,omitempty"`
 }
 
 const (
@@ -53,9 +31,6 @@ const (
 	turnPhaseToolsRun = "tools_running"
 )
 
-// resumeGate reports whether the resume feature is enabled in config. Read
-// through al.cfg() so a config reload takes effect for new turns without a
-// restart (same pattern as every other per-turn config read).
 func (al *AgentLoop) resumeGate() bool {
 	if al == nil {
 		return false
@@ -63,16 +38,6 @@ func (al *AgentLoop) resumeGate() bool {
 	return al.cfg().Session.ResumeEnabled()
 }
 
-// turnMarkerEnabled gates all turn-marker writes. The spec asks for
-// resume_enabled && durable_inbound: without the durable spool there is no
-// replay after a restart, and a replay is the only resume trigger in this
-// design. The loop has no direct handle on the config boolean behind
-// durability — the gateway wires durability in through
-// SetInboundDurability exactly when the flag is on (and only when a store and
-// a bus exist), so "inboundDurability != nil" is the faithful in-loop signal
-// for durable_inbound. A marker written while durability is off would be
-// harmless anyway (nothing reads it without a replay), but keeping the gate
-// exact avoids dead KV rows.
 func (al *AgentLoop) turnMarkerEnabled() bool {
 	if al == nil {
 		return false
@@ -80,8 +45,6 @@ func (al *AgentLoop) turnMarkerEnabled() bool {
 	return al.resumeGate() && al.inboundDurability != nil
 }
 
-// getTurnMarker returns the checkpointed marker for a session, if any. A
-// corrupt payload is deleted (it can never be resumed) and reported as absent.
 func (al *AgentLoop) getTurnMarker(sessionKey string) (TurnMarker, bool) {
 	var zero TurnMarker
 	if al == nil || sessionKey == "" {
@@ -107,19 +70,6 @@ func (al *AgentLoop) getTurnMarker(sessionKey string) (TurnMarker, bool) {
 	return m, true
 }
 
-// writeTurnMarker advances (or seeds) the checkpoint for a session.
-//
-// Update-only for every phase except inbound_start: llm_wait and
-// tools_running are mid-turn states, and a marker for them without a
-// preceding inbound_start means the turn was started through a path the
-// resume design does not cover (ProcessDirect, goals, cron). Creating markers
-// there would resume work the spool never held, so those calls are no-ops.
-//
-// Read-modify-write keeps the fields the inbound turn seeded (DedupeID,
-// SpoolID, channel info, StartedAt, ResumeNoticeSent) and only advances
-// Phase/Iter/UpdatedAt. Fail-closed: every error is logged, never returned —
-// a marker that cannot be written only loses crash coverage, it must not
-// fail the live turn.
 func (al *AgentLoop) writeTurnMarker(sessionKey, phase string, iter int, seed func(*TurnMarker)) {
 	if al == nil || sessionKey == "" || !al.turnMarkerEnabled() {
 		return
@@ -141,14 +91,11 @@ func (al *AgentLoop) writeTurnMarker(sessionKey, phase string, iter int, seed fu
 	}
 	if ok && existing != "" {
 		if err := json.Unmarshal([]byte(existing), &m); err != nil {
-			// Unreadable old marker: start a fresh one over it. The inbound
-			// turn that is writing now replaces whatever it described.
 			m = TurnMarker{}
 		}
 	}
 	if !ok || m.SessionKey == "" {
 		if phase != turnPhaseInbound {
-			// Update-only: no inbound_start to advance from.
 			return
 		}
 		m = TurnMarker{SessionKey: sessionKey, StartedAt: time.Now().UTC()}
@@ -178,10 +125,6 @@ func (al *AgentLoop) writeTurnMarker(sessionKey, phase string, iter int, seed fu
 	}
 }
 
-// clearTurnMarker removes the checkpoint. A non-empty dedupeID makes the
-// delete conditional: the caller is announcing "MY turn ended", and a marker
-// belonging to a different (newer) turn must survive. dedupeID == "" is the
-// unconditional reset used before seeding a fresh inbound turn.
 func (al *AgentLoop) clearTurnMarker(sessionKey, dedupeID string) {
 	if al == nil || sessionKey == "" {
 		return
@@ -197,7 +140,6 @@ func (al *AgentLoop) clearTurnMarker(sessionKey, dedupeID string) {
 			return
 		}
 		if m.DedupeID != "" && m.DedupeID != dedupeID {
-			// The marker describes a different turn; leave it alone.
 			return
 		}
 	}
@@ -209,10 +151,6 @@ func (al *AgentLoop) clearTurnMarker(sessionKey, dedupeID string) {
 	}
 }
 
-// setResumeNoticeSent persists the one-shot flag for the resume notice
-// BEFORE the notice is published: a crash between the write and the publish
-// loses at most the notice, while the reverse order would duplicate it on
-// every replay.
 func (al *AgentLoop) setResumeNoticeSent(sessionKey string) {
 	if al == nil || sessionKey == "" || !al.turnMarkerEnabled() {
 		return
@@ -238,34 +176,18 @@ func (al *AgentLoop) setResumeNoticeSent(sessionKey string) {
 	}
 }
 
-// ── Live-subagent snapshot (T2.4) ────────────────────────────────────────────
-
-// turnSubsKeyPrefix keys the per-session snapshot of subagents that were
-// running when the turn was last checkpointed.
 const turnSubsKeyPrefix = "sess:turnsubs:"
 
-// maxSnapshottedSubagents bounds the KV payload; a turn fanning out more
-// tasks than this is rare, and the warning only needs to convey that work
-// was lost, not enumerate an unbounded list.
 const maxSnapshottedSubagents = 10
 
-// maxSnapshotTaskRunes truncates each task description so a snapshot of
-// large prompts cannot bloat the session-state KV.
 const maxSnapshotTaskRunes = 200
 
-// TurnSubagent is one entry of the snapshot. Subagents live only in memory
-// and die with the process, so the resume path cannot recover them - the
-// snapshot exists purely to warn the model that their results are gone.
 type TurnSubagent struct {
 	ID    string `json:"id"`
 	Label string `json:"label,omitempty"`
 	Task  string `json:"task,omitempty"`
 }
 
-// snapshotRunningSubagents returns the running/paused subagent tasks owned by
-// a session (and its key aliases), using the same ownership rule as
-// cancellation (tools.TaskBelongsToSession) so the snapshot and /stop always
-// agree on which tasks belong to the session.
 func (tc *toolCoordinatorImpl) snapshotRunningSubagents(sessionKey string) []*tools.SubagentTask {
 	if tc == nil || sessionKey == "" {
 		return nil
@@ -280,8 +202,6 @@ func (tc *toolCoordinatorImpl) snapshotRunningSubagents(sessionKey string) []*to
 	return out
 }
 
-// snapshotRunningSubagents is the AgentLoop-side accessor: a nil coordinator
-// (unit-test loops) simply owns no tasks.
 func (al *AgentLoop) snapshotRunningSubagents(sessionKey string) []*tools.SubagentTask {
 	if al == nil || al.toolCoordinator == nil {
 		return nil
@@ -289,13 +209,6 @@ func (al *AgentLoop) snapshotRunningSubagents(sessionKey string) []*tools.Subage
 	return al.toolCoordinator.snapshotRunningSubagents(sessionKey)
 }
 
-// writeTurnSubagentSnapshot checkpoints the session's live subagents next to
-// the turn marker. Called at inbound_start and tools_running - the moments a
-// spawn can plausibly be in flight - never at llm_wait, where the task set
-// cannot have changed since the previous write.
-//
-// Zero tasks DELETES the key rather than storing "[]": readTurnSubagentSnapshot
-// then cannot confuse a stale snapshot with the current turn's state.
 func (al *AgentLoop) writeTurnSubagentSnapshot(sessionKey string) {
 	if al == nil || sessionKey == "" || !al.turnMarkerEnabled() {
 		return
@@ -334,9 +247,6 @@ func (al *AgentLoop) writeTurnSubagentSnapshot(sessionKey string) {
 	}
 }
 
-// readTurnSubagentSnapshot returns the checkpointed subagents, or nil when
-// the feature is off, no snapshot exists, or the payload is corrupt (a
-// corrupt row is deleted - it can never be turned into a warning).
 func (al *AgentLoop) readTurnSubagentSnapshot(sessionKey string) []TurnSubagent {
 	if al == nil || sessionKey == "" {
 		return nil
@@ -361,7 +271,6 @@ func (al *AgentLoop) readTurnSubagentSnapshot(sessionKey string) []TurnSubagent 
 	return subs
 }
 
-// clearTurnSubagentSnapshot removes the snapshot row. Safe on missing keys.
 func (al *AgentLoop) clearTurnSubagentSnapshot(sessionKey string) {
 	if al == nil || sessionKey == "" {
 		return
@@ -378,11 +287,6 @@ func (al *AgentLoop) clearTurnSubagentSnapshot(sessionKey string) {
 	}
 }
 
-// clearTurnState removes everything the resume design checkpointed for a
-// finished turn: the marker and the subagent snapshot, under the SAME guard.
-// A non-empty dedupeID that does not match the marker means a newer turn
-// owns the checkpoint, so neither row may be touched by the older turn that
-// is finishing.
 func (al *AgentLoop) clearTurnState(sessionKey, dedupeID string) {
 	if dedupeID != "" {
 		if m, ok := al.getTurnMarker(sessionKey); ok && m.DedupeID != "" && m.DedupeID != dedupeID {
@@ -393,8 +297,6 @@ func (al *AgentLoop) clearTurnState(sessionKey, dedupeID string) {
 	al.clearTurnSubagentSnapshot(sessionKey)
 }
 
-// truncateRunes cuts s to max runes, appending an ellipsis. Rune-safe: task
-// descriptions are user text and may be multi-byte.
 func truncateRunes(s string, max int) string {
 	r := []rune(s)
 	if len(r) <= max {

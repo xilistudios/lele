@@ -1,23 +1,9 @@
 import { useTranslation } from 'react-i18next'
 import { SKILLS_VIEWS, type SkillsView, viewHintKey } from '../../lib/skillsScope'
 import type { Agent } from '../../lib/types'
-// `SegmentedControl` is intentionally NOT re-exported from `molecules/index.ts`
-// (it is a spec-internal molecule), so it is imported from its own module —
-// same import in the rest of the codebase. `SelectInput` is exported, but we
-// keep both from the source file for consistency (plan §4.3).
 import { SegmentedControl } from '../molecules/SegmentedControl'
 import { SelectInput } from '../molecules/SelectInput'
 
-/**
- * The scope bar of the `/skills` page (plan T4): the All/Global/By-agent
- * segmented control, the agent selector shown only in the agent view, and the
- * one-line hint under both.
- *
- * The component is fully CONTROLLED and deliberately dumb — it owns no data
- * fetching, no URL state and no view semantics (those live in
- * `lib/skillsScope.ts` and in `SkillsPage`, which is T5). Everything it needs
- * arrives as props; everything the user does goes back out as a callback.
- */
 type Props = {
   view: SkillsView
   onViewChange: (view: SkillsView) => void
@@ -26,10 +12,6 @@ type Props = {
   onAgentChange: (agentId: string) => void
 }
 
-/**
- * Inline English defaults (house style: every `t()` carries its fallback).
- * The `{{agent}}` placeholder in `skills.viewAgentHint` is filled below.
- */
 const HINT_DEFAULTS: Record<ReturnType<typeof viewHintKey>, string> = {
   'skills.viewAllHint':
     "Everything the default workspace, the shared global directory and lele's built-ins provide.",
@@ -38,7 +20,6 @@ const HINT_DEFAULTS: Record<ReturnType<typeof viewHintKey>, string> = {
     'What {{agent}} can use: its own workspace plus the shared skills. Enable/disable applies to this agent only.',
 }
 
-/** Inline English defaults for the three tab labels. */
 const VIEW_LABEL_DEFAULTS: Record<SkillsView, string> = {
   all: 'All',
   global: 'Global',
@@ -57,11 +38,6 @@ export function SkillsScopeBar({
   const hintKey = viewHintKey(view)
   const selectedAgent = agents.find((a) => a.id === selectedAgentId)
 
-  // The agent hint interpolates the display name (`name || id`, the same rule
-  // as the <option> labels). With no resolved agent we must NOT leave the raw
-  // `{{agent}}` placeholder on screen, and there is no browser-default to fall
-  // back on — so we feed the neutral `skills.selectAgent` label ("Agent"). The
-  // page owns the real empty state for "no agents" (D11), not this bar.
   const agentName = selectedAgent
     ? selectedAgent.name || selectedAgent.id
     : t('skills.selectAgent', 'Agent')
@@ -86,8 +62,6 @@ export function SkillsScopeBar({
 
       {view === 'agent' && agents.length > 0 && (
         <div className="flex items-center gap-2">
-          {/* The visible label is the select's ONLY accessible name:
-              `SelectInput` takes no `aria-label`/`data-testid` (C8). */}
           <label htmlFor="skills-agent" className="text-xs text-text-tertiary">
             {t('skills.selectAgent', 'Agent')}
           </label>

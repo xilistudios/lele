@@ -18,17 +18,6 @@ import (
 	"time"
 )
 
-// --- helpers -----------------------------------------------------------------
-//
-// The flow tests are hermetic: every token endpoint is an httptest.Server and
-// every "callback" is a plain http.Get against the flow's own loopback
-// listener. No test opens a browser or reaches the network.
-
-// flowTokenRecorder is the hermetic token endpoint for the flow tests. It
-// records every request (hit count, raw body, parsed form) and answers 200
-// with a fixed token payload. Fields are read only after the request that
-// wrote them completed (the tests poll on the flow's terminal state first),
-// mirroring the recorder pattern used by pasteTokenRecorder.
 type flowTokenRecorder struct {
 	srv      *httptest.Server
 	mu       sync.Mutex
@@ -37,8 +26,6 @@ type flowTokenRecorder struct {
 	form     url.Values
 }
 
-// newFlowTokenRecorder answers with the given JSON token body (defaults to a
-// generic OpenAI-style token) and registers server cleanup.
 func newFlowTokenRecorder(t *testing.T, responseBody string) *flowTokenRecorder {
 	t.Helper()
 	if responseBody == "" {
@@ -60,24 +47,18 @@ func newFlowTokenRecorder(t *testing.T, responseBody string) *flowTokenRecorder 
 	return rec
 }
 
-// hits returns how many token requests the recorder has served.
 func (rec *flowTokenRecorder) hits() int {
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	return rec.hitCount
 }
 
-// rawBody returns the raw body of the last recorded request.
 func (rec *flowTokenRecorder) rawBody() []byte {
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	return append([]byte(nil), rec.lastBody...)
 }
 
-// sent decodes the last recorded request into a flat map of the FIRST value of
-// every field, whatever the wire encoding was: Claude preset requests are
-// JSON, Gemini/OpenAI preset requests are form-urlencoded. This keeps the
-// assertions encoding-agnostic without re-implementing the parsers.
 func (rec *flowTokenRecorder) sent(t *testing.T) map[string]string {
 	t.Helper()
 	raw := rec.rawBody()
@@ -100,8 +81,6 @@ func (rec *flowTokenRecorder) sent(t *testing.T) map[string]string {
 	return m
 }
 
-// hasField reports whether the last recorded request carried the field at all
-// (the Gemini contract is "no state field on the wire", not "empty value").
 func (rec *flowTokenRecorder) hasField(field string) bool {
 	raw := rec.rawBody()
 
@@ -119,8 +98,6 @@ func (rec *flowTokenRecorder) hasField(field string) bool {
 	return ok
 }
 
-// claudeFlowConfig returns the Claude preset pointed at the recorder. The
-// presets copy by value, so mutating the copy is safe.
 func (rec *flowTokenRecorder) claudeFlowConfig() OAuthProviderConfig {
 	cfg := ClaudeOAuthConfig()
 	cfg.TokenURL = rec.srv.URL
@@ -128,7 +105,6 @@ func (rec *flowTokenRecorder) claudeFlowConfig() OAuthProviderConfig {
 	return cfg
 }
 
-// geminiFlowConfig returns the Gemini preset pointed at the recorder.
 func (rec *flowTokenRecorder) geminiFlowConfig() OAuthProviderConfig {
 	cfg := GeminiOAuthConfig()
 	cfg.TokenURL = rec.srv.URL
@@ -136,17 +112,10 @@ func (rec *flowTokenRecorder) geminiFlowConfig() OAuthProviderConfig {
 	return cfg
 }
 
-// claudeFlowResponseBody includes the inference scope, because the Claude
-// preset gates the exchange on it (RequireInferenceScope) plus a refresh token
-// and expiry (RequireRefreshToken).
 const claudeFlowResponseBody = `{"access_token":"flow-at","refresh_token":"flow-rt","expires_in":3600,"scope":"user:profile user:inference"}`
 
-// geminiFlowResponseBody mirrors the Claude one: the Gemini preset requires a
-// refresh token and expiry (RequireRefreshToken).
 const geminiFlowResponseBody = `{"access_token":"flow-at-gemini","refresh_token":"flow-rt-gemini","expires_in":3600}`
 
-// waitTerminal polls the flow until it is terminal or the deadline passes and
-// returns whether it became terminal in time.
 func waitTerminal(t *testing.T, f *ProviderFlow, within time.Duration) bool {
 	t.Helper()
 	deadline := time.Now().Add(withSlackBudget(within))
@@ -159,11 +128,8 @@ func waitTerminal(t *testing.T, f *ProviderFlow, within time.Duration) bool {
 	return f.Done()
 }
 
-// withSlackBudget stretches a test budget a little so a loaded CI box does not
-// produce flakes on "becomes terminal within ~2s" style assertions.
 func withSlackBudget(d time.Duration) time.Duration { return d + 2*time.Second }
 
-// requireStatusError asserts the flow is terminal with an error matching want.
 func requireStatusError(t *testing.T, f *ProviderFlow, want error) {
 	t.Helper()
 	status, err := f.Status()
@@ -178,8 +144,6 @@ func requireStatusError(t *testing.T, f *ProviderFlow, want error) {
 	}
 }
 
-// cancelFlow is the cleanup that guarantees no listener/goroutine outlives a
-// failing test.
 func cancelFlow(t *testing.T, f *ProviderFlow) {
 	t.Helper()
 	if err := f.Cancel(); err != nil {
@@ -187,8 +151,6 @@ func cancelFlow(t *testing.T, f *ProviderFlow) {
 	}
 }
 
-// callbackPort extracts the loopback port from a redirect_uri of the shape
-// http://localhost:<port><path>.
 func callbackPort(t *testing.T, redirectURI string) int {
 	t.Helper()
 	u, err := url.Parse(redirectURI)
@@ -202,13 +164,6 @@ func callbackPort(t *testing.T, redirectURI string) int {
 	return port
 }
 
-// requirePortFree asserts that the flow's loopback port can be bound again,
-// i.e. that no listener leaked. The bounded retry exists because a loopback
-// listener shared with the Go http transport of OTHER tests in this package
-// (the client side of httptest servers also binds 127.0.0.1:*) can leave the
-// kernel holding the port in TIME_WAIT for a short while. Re-binding the SAME
-// port is still proof that the flow's own listener is gone: a leaked listener
-// would fail forever, not for a second.
 func requirePortFree(t *testing.T, port int, what string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -225,7 +180,6 @@ func requirePortFree(t *testing.T, port int, what string) {
 	}
 }
 
-// flowStateFromURL extracts the state query parameter of an authorize URL.
 func flowStateFromURL(t *testing.T, rawURL string) string {
 	t.Helper()
 	u, err := url.Parse(rawURL)
@@ -235,11 +189,9 @@ func flowStateFromURL(t *testing.T, rawURL string) string {
 	return u.Query().Get("state")
 }
 
-// --- 1. StartProviderFlow: immediate return, correct authorize URL ----------
-
 func TestStartProviderFlowLoopbackBuildsAuthorizeURL(t *testing.T) {
 	rec := newFlowTokenRecorder(t, "")
-	cfg := rec.geminiFlowConfig() // Port 0 => ephemeral loopback, CallbackPath /oauth2callback
+	cfg := rec.geminiFlowConfig()
 
 	start := time.Now()
 	f, err := StartProviderFlow(nil, cfg, FlowOptions{})
@@ -279,8 +231,6 @@ func TestStartProviderFlowLoopbackBuildsAuthorizeURL(t *testing.T) {
 	}
 	q := u.Query()
 
-	// The PKCE challenge and method must be on the URL, and the state must be
-	// the CSRF-style random state (Gemini), not the verifier.
 	if q.Get("code_challenge") == "" {
 		t.Error("authorize URL carries no code_challenge")
 	}
@@ -294,8 +244,6 @@ func TestStartProviderFlowLoopbackBuildsAuthorizeURL(t *testing.T) {
 		t.Errorf("client_id = %q, want %q", q.Get("client_id"), cfg.ClientID)
 	}
 
-	// The port advertised on the URL must be the port the listener actually
-	// bound, and the redirect_uri must be byte-identical to RedirectURI().
 	if q.Get("redirect_uri") != redirectURI {
 		t.Errorf("URL() redirect_uri = %q, want RedirectURI() %q", q.Get("redirect_uri"), redirectURI)
 	}
@@ -303,15 +251,12 @@ func TestStartProviderFlowLoopbackBuildsAuthorizeURL(t *testing.T) {
 		t.Errorf("URL() port = %d, want the bound port %d", got, port)
 	}
 
-	// The bound port must really be the loopback listener.
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
 	if err != nil {
 		t.Fatalf("dialing the bound loopback port %d: %v", port, err)
 	}
 	_ = conn.Close()
 }
-
-// --- 2. loopback callback completes the flow ---------------------------------
 
 func TestProviderFlowCallbackCompletes(t *testing.T) {
 	rec := newFlowTokenRecorder(t, "")
@@ -356,8 +301,6 @@ func TestProviderFlowCallbackCompletes(t *testing.T) {
 	}
 }
 
-// --- 3. a wrong state on the callback terminates with no exchange ------------
-
 func TestProviderFlowStateMismatchRejects(t *testing.T) {
 	rec := newFlowTokenRecorder(t, "")
 	cfg := rec.geminiFlowConfig()
@@ -386,15 +329,9 @@ func TestProviderFlowStateMismatchRejects(t *testing.T) {
 	}
 }
 
-// --- 4. StateIsVerifier wiring ----------------------------------------------
-
-// TestProviderFlowClaudeStateIsVerifier pins the Claude (StateIsVerifier)
-// wiring end to end: the authorize URL's state is the verifier the challenge
-// was derived from (so a callback carrying that state succeeds), and the
-// exchange request carries a `state` field equal to it.
 func TestProviderFlowClaudeStateIsVerifier(t *testing.T) {
 	rec := newFlowTokenRecorder(t, claudeFlowResponseBody)
-	cfg := rec.claudeFlowConfig() // Port 0 => ephemeral, CallbackPath /callback
+	cfg := rec.claudeFlowConfig()
 
 	f, err := StartProviderFlow(nil, cfg, FlowOptions{})
 	if err != nil {
@@ -406,8 +343,6 @@ func TestProviderFlowClaudeStateIsVerifier(t *testing.T) {
 	if state == "" {
 		t.Fatal("authorize URL carries no state")
 	}
-	// Sanity: the state must be the 64-byte base64url verifier GeneratePKCE
-	// produces (86 chars, no padding), i.e. it CAN be the PKCE verifier.
 	if len(state) != 86 || strings.ContainsAny(state, "=/+") {
 		t.Errorf("authorize URL state has the wrong shape for a PKCE verifier: %q", state)
 	}
@@ -439,9 +374,6 @@ func TestProviderFlowClaudeStateIsVerifier(t *testing.T) {
 	}
 }
 
-// TestProviderFlowGeminiStateIsRandomAndNotEchoed is the mirror: Gemini's
-// state is a random CSRF token (not the verifier) and the exchange must NOT
-// carry a `state` field at all.
 func TestProviderFlowGeminiStateIsRandomAndNotEchoed(t *testing.T) {
 	rec := newFlowTokenRecorder(t, "")
 	cfg := rec.geminiFlowConfig()
@@ -456,8 +388,6 @@ func TestProviderFlowGeminiStateIsRandomAndNotEchoed(t *testing.T) {
 	if state == "" {
 		t.Fatal("authorize URL carries no state")
 	}
-	// A random state is hex of 32 bytes (oauth.go generateState), never the
-	// 86-char base64url shape of a PKCE verifier.
 	if len(state) != 64 {
 		t.Errorf("authorize URL state length = %d, want 64 (hex of 32 random bytes)", len(state))
 	}
@@ -482,8 +412,6 @@ func TestProviderFlowGeminiStateIsRandomAndNotEchoed(t *testing.T) {
 	}
 }
 
-// --- 5. manual mode ----------------------------------------------------------
-
 func TestProviderFlowManualModeNoListener(t *testing.T) {
 	rec := newFlowTokenRecorder(t, claudeFlowResponseBody)
 	cfg := rec.claudeFlowConfig()
@@ -500,8 +428,6 @@ func TestProviderFlowManualModeNoListener(t *testing.T) {
 	if want := "https://platform.claude.com/oauth/code/callback"; f.RedirectURI() != want {
 		t.Errorf("RedirectURI() = %q, want %q", f.RedirectURI(), want)
 	}
-	// No port was bound: the redirect URI carries no host/port of ours, and a
-	// second manual flow starts fine even with the first one still pending.
 	if strings.Contains(f.RedirectURI(), "localhost") || strings.Contains(f.RedirectURI(), "127.0.0.1") {
 		t.Errorf("RedirectURI() = %q, want the hosted redirect (no loopback listener)", f.RedirectURI())
 	}
@@ -514,10 +440,6 @@ func TestProviderFlowManualModeNoListener(t *testing.T) {
 		t.Errorf("second flow RedirectURI() = %q, want %q", f2.RedirectURI(), f.RedirectURI())
 	}
 
-	// The manual flow completes only through Submit. A paste whose state does
-	// not belong to THIS flow is rejected and — because the attempt is
-	// validated before the single exchange is claimed — leaves the flow
-	// pending, so the user can paste again without restarting the login.
 	if err := f.Submit("CODE#VERIFIER-PLACEHOLDER"); !errors.Is(err, ErrFlowStateMismatch) {
 		t.Fatalf("Submit(bogus state) error = %v, want ErrFlowStateMismatch", err)
 	}
@@ -528,7 +450,6 @@ func TestProviderFlowManualModeNoListener(t *testing.T) {
 		t.Errorf("token endpoint hits = %d, want 0", got)
 	}
 
-	// The same flow then completes with the real verifier.
 	if err := f.Submit("CODE#" + f.pkce.CodeVerifier); err != nil {
 		t.Fatalf("Submit(real verifier) error: %v", err)
 	}
@@ -538,8 +459,6 @@ func TestProviderFlowManualModeNoListener(t *testing.T) {
 }
 
 func TestProviderFlowManualRequiresPresetRedirect(t *testing.T) {
-	// openai (and google-antigravity) have no hosted redirect: the manual
-	// flow is unavailable and nothing is bound.
 	for _, cfg := range []OAuthProviderConfig{OpenAIOAuthConfig(), GoogleAntigravityOAuthConfig()} {
 		f, err := StartProviderFlow(nil, cfg, FlowOptions{Mode: FlowModeManual})
 		if !errors.Is(err, ErrFlowNoManualRedirect) {
@@ -576,8 +495,6 @@ func TestProviderFlowManualGeminiRedirect(t *testing.T) {
 	}
 }
 
-// --- 6. Submit: the paste grammar -------------------------------------------
-
 func TestProviderFlowSubmitBareCode(t *testing.T) {
 	rec := newFlowTokenRecorder(t, claudeFlowResponseBody)
 	cfg := rec.claudeFlowConfig()
@@ -588,8 +505,6 @@ func TestProviderFlowSubmitBareCode(t *testing.T) {
 	}
 	defer cancelFlow(t, f)
 
-	// Correction V8: a bare code with no state is accepted and the verifier is
-	// substituted as the exchange `state`.
 	if err := f.Submit("BARE-CODE"); err != nil {
 		t.Fatalf("Submit(bare code) error: %v", err)
 	}
@@ -652,9 +567,6 @@ func TestProviderFlowSubmitClaudeStateMismatch(t *testing.T) {
 	if !errors.Is(err, ErrFlowStateMismatch) {
 		t.Fatalf("Submit(code#stale state) error = %v, want ErrFlowStateMismatch", err)
 	}
-	// A rejected paste must NOT consume the single exchange attempt: the flow
-	// stays pending so a TUI paste box can simply ask again (only a claimed
-	// attempt — an actual token request — may turn the flow terminal).
 	if f.Done() {
 		t.Fatalf("Done() = true after a rejected paste, want false (flow must stay pending)")
 	}
@@ -665,7 +577,6 @@ func TestProviderFlowSubmitClaudeStateMismatch(t *testing.T) {
 		t.Errorf("token endpoint hits = %d, want 0 (a stale state must not exchange)", got)
 	}
 
-	// ...and the same flow then accepts the CORRECT paste, echoing the verifier.
 	if err := f.Submit("PASTED-CODE#" + f.pkce.CodeVerifier); err != nil {
 		t.Fatalf("Submit(correct paste after a rejected one) error: %v", err)
 	}
@@ -690,7 +601,6 @@ func TestProviderFlowSubmitGeminiRequiresState(t *testing.T) {
 	}
 	defer cancelFlow(t, f)
 
-	// A callback-shaped paste carrying a WRONG state must be rejected.
 	wrong := f.RedirectURI() + "?code=GEM-CODE&state=WRONG"
 	if err := f.Submit(wrong); !errors.Is(err, ErrFlowStateMismatch) {
 		t.Fatalf("Submit(callback with wrong state) error = %v, want ErrFlowStateMismatch", err)
@@ -702,8 +612,6 @@ func TestProviderFlowSubmitGeminiRequiresState(t *testing.T) {
 		t.Fatalf("token endpoint hits = %d, want 0 (a stale state must not exchange)", got)
 	}
 
-	// A fresh flow: a bare code needs no state and is used verbatim, with NO
-	// `state` field on the exchange.
 	f2, err := StartProviderFlow(nil, cfg, FlowOptions{Mode: FlowModeManual})
 	if err != nil {
 		t.Fatalf("second StartProviderFlow() error: %v", err)
@@ -733,8 +641,6 @@ func TestProviderFlowSubmitGeminiTreatsCodeHashStateAsBareCode(t *testing.T) {
 	}
 	defer cancelFlow(t, f)
 
-	// The documented jcode quirk: `CODE#STATE` is not callback-shaped for the
-	// random-state branch, so the WHOLE line is the code. Do not "fix" this.
 	if err := f.Submit("abc#def"); err != nil {
 		t.Fatalf("Submit(abc#def) error: %v", err)
 	}
@@ -761,8 +667,6 @@ func TestProviderFlowSubmitEmpty(t *testing.T) {
 			t.Errorf("Submit(%q) error = %v, want ErrFlowNoCode", blank, err)
 		}
 	}
-	// A blank paste must not consume the one-shot nor terminate the flow: the
-	// user can simply paste again.
 	if f.Done() {
 		t.Error("Done() = true after blank Submits, want false (still pending)")
 	}
@@ -770,10 +674,6 @@ func TestProviderFlowSubmitEmpty(t *testing.T) {
 		t.Errorf("token endpoint hits = %d, want 0", got)
 	}
 
-	// Once the flow is terminal, EVERY paste — blank included — reports
-	// ErrFlowClosed (terminal check before the blank check): a caller that
-	// keeps its paste box open on ErrFlowNoCode must not wait for a flow that
-	// already ended (e.g. the callback won a Submit-vs-callback race).
 	if err := f.Submit("REAL-CODE"); err != nil {
 		t.Fatalf("Submit(real code) error: %v", err)
 	}
@@ -787,13 +687,6 @@ func TestProviderFlowSubmitEmpty(t *testing.T) {
 	}
 }
 
-// --- 6b. callback `error=` sanitization --------------------------------------
-
-// TestSanitizeCallbackError pins the sanitizer that keeps a crafted local
-// redirect (a query parameter under the attacker's control) from injecting
-// control bytes — ESC sequences that would repaint/clear the TUI's alternate
-// screen, newlines that forge messages — or unbounded junk into the terminal
-// error string handleCallback produces.
 func TestSanitizeCallbackError(t *testing.T) {
 	t.Run("strips control bytes", func(t *testing.T) {
 		got := sanitizeCallbackError("denied\x1b[2J\x1b[1;31mboom\r\nnext\tline\x00")
@@ -826,8 +719,6 @@ func TestSanitizeCallbackError(t *testing.T) {
 	})
 }
 
-// --- 7. one-shot exchange ----------------------------------------------------
-
 func TestProviderFlowSubmitIsOneShot(t *testing.T) {
 	rec := newFlowTokenRecorder(t, "")
 	cfg := rec.geminiFlowConfig()
@@ -852,8 +743,6 @@ func TestProviderFlowSubmitIsOneShot(t *testing.T) {
 	}
 }
 
-// --- 8. Cancel: idempotent, releases the port -------------------------------
-
 func TestProviderFlowCancelReleasesPort(t *testing.T) {
 	rec := newFlowTokenRecorder(t, "")
 	cfg := rec.geminiFlowConfig()
@@ -867,7 +756,6 @@ func TestProviderFlowCancelReleasesPort(t *testing.T) {
 	if err := f.Cancel(); err != nil {
 		t.Fatalf("Cancel() error: %v", err)
 	}
-	// Second Cancel (and any after) must not panic nor return an error.
 	if err := f.Cancel(); err != nil {
 		t.Fatalf("second Cancel() error: %v", err)
 	}
@@ -880,43 +768,13 @@ func TestProviderFlowCancelReleasesPort(t *testing.T) {
 		t.Errorf("token endpoint hits = %d, want 0 (canceled flows never exchange)", got)
 	}
 
-	// The port must be free again: re-binding the very same port must succeed.
-	// The listener was never used for a connection here, so this normally
-	// succeeds instantly; the bounded retry exists because a loopback listener
-	// shared with the Go http transport of OTHER tests in this package (the
-	// client side of httptest servers also binds 127.0.0.1:*) can leave the
-	// kernel holding the port in TIME_WAIT for a short while. A fresh bind of
-	// the SAME port is still proof that the flow's own listener is gone — a
-	// leaked listener would fail forever, not for a second.
 	requirePortFree(t, port, "after Cancel")
 
-	// Submit after Cancel is locked out too (ErrFlowClosed from the one-shot
-	// guard: the flow is terminal).
 	if err := f.Submit("LATE-CODE"); !errors.Is(err, ErrFlowClosed) {
 		t.Errorf("Submit after Cancel error = %v, want ErrFlowClosed", err)
 	}
 }
 
-// TestProviderFlowTerminalTransitionReleasesPort pins the release of the
-// callback listener on EVERY terminal path, not only on Cancel. Before, Cancel
-// returned early once the flow was terminal and was the only caller of
-// server.Shutdown, so a SUCCESSFUL login (or a terminal error) left the port
-// bound for the lifetime of the process — and openai pins that port (1455), so
-// the NEXT login could not bind.
-//
-// Which sub-test kills which mutant:
-//   - "success via callback" and "terminal error via callback" and
-//     "success via Submit" each drop the release of their own succeed/fail
-//     path (dropping `f.release()` from succeed turns the first red; from fail
-//     the second; the third covers the Submit-side succeed path). Because the
-//     success page is flushed BEFORE the exchange (see handleCallback), the
-//     terminal transition now lands asynchronously right after http.Get
-//     returns, so those sub-tests wait for the terminal state before asserting
-//     the port is free — the release must hold whether it is observed before
-//     or after the transition.
-//   - "Cancel after terminal" kills the mutant that restores Cancel's early
-//     `if f.Done() { return }` before release() (previously SURVIVING: none of
-//     the other sub-tests call Cancel after a terminal transition).
 func TestProviderFlowTerminalTransitionReleasesPort(t *testing.T) {
 	t.Run("success via callback", func(t *testing.T) {
 		rec := newFlowTokenRecorder(t, geminiFlowResponseBody)
@@ -934,16 +792,12 @@ func TestProviderFlowTerminalTransitionReleasesPort(t *testing.T) {
 			t.Fatalf("GET callback: %v", err)
 		}
 		_ = resp.Body.Close()
-		// The handler flushes the page before the synchronous exchange, so
-		// http.Get can return while the flow is still exchanging: the terminal
-		// transition is asynchronous from the caller's point of view.
 		if !waitTerminal(t, f, 2*time.Second) {
 			t.Fatal("flow did not become terminal within ~2s of the callback")
 		}
 		if status, serr := f.Status(); status != FlowStatusDone || serr != nil {
 			t.Fatalf("Status() = (%q, %v), want (%q, nil)", status, serr, FlowStatusDone)
 		}
-		// No Cancel() call here on purpose: the release must not depend on it.
 		requirePortFree(t, port, "after a successful callback")
 	})
 
@@ -981,10 +835,6 @@ func TestProviderFlowTerminalTransitionReleasesPort(t *testing.T) {
 		requirePortFree(t, port, "after a successful Submit")
 	})
 
-	// Kills the mutant that restores Cancel's early return
-	// (`if f.Done() { … return }` before f.release()): a flow that already
-	// finished through the callback still gets its port released by a late
-	// Cancel, and — the property the doc promises — the credential survives it.
 	t.Run("Cancel after terminal", func(t *testing.T) {
 		rec := newFlowTokenRecorder(t, geminiFlowResponseBody)
 		cfg := rec.geminiFlowConfig()
@@ -1007,20 +857,15 @@ func TestProviderFlowTerminalTransitionReleasesPort(t *testing.T) {
 		if err := f.Cancel(); err != nil {
 			t.Fatalf("Cancel() after terminal error: %v", err)
 		}
-		// The credential obtained before the Cancel must still be there…
 		if status, serr := f.Status(); status != FlowStatusDone || serr != nil {
 			t.Fatalf("Status() after late Cancel = (%q, %v), want (%q, nil)", status, serr, FlowStatusDone)
 		}
 		if cred := f.Credential(); cred == nil || cred.AccessToken != "flow-at-gemini" {
 			t.Fatalf("Credential() after late Cancel = %#v, want the one from the callback", cred)
 		}
-		// …and the port must be free even if an earlier terminal transition
-		// somehow skipped the release.
 		requirePortFree(t, port, "after Cancel following a terminal transition")
 	})
 }
-
-// --- 9. timeout --------------------------------------------------------------
 
 func TestProviderFlowTimeout(t *testing.T) {
 	rec := newFlowTokenRecorder(t, "")
@@ -1038,10 +883,6 @@ func TestProviderFlowTimeout(t *testing.T) {
 	requireStatusError(t, f, ErrFlowTimeout)
 }
 
-// --- 10. mutation pins: credential fidelity, one-shot races, timeout release -
-
-// newFlowErrorRecorder is newFlowTokenRecorder with an arbitrary status/body
-// (used for token-endpoint failures like 400 invalid_grant).
 func newFlowErrorRecorder(t *testing.T, status int, body string) *flowTokenRecorder {
 	t.Helper()
 	rec := &flowTokenRecorder{}
@@ -1061,8 +902,6 @@ func newFlowErrorRecorder(t *testing.T, status int, body string) *flowTokenRecor
 	return rec
 }
 
-// newFlowSlowRecorder answers with the given JSON body after the delay, so a
-// test can overlap a second claim attempt with an in-flight exchange.
 func newFlowSlowRecorder(t *testing.T, body string, delay time.Duration) *flowTokenRecorder {
 	t.Helper()
 	if body == "" {
@@ -1085,20 +924,6 @@ func newFlowSlowRecorder(t *testing.T, body string, delay time.Duration) *flowTo
 	return rec
 }
 
-// TestProviderFlowCredentialFidelityAfterSubmit pins what the flow publishes
-// after a successful Submit: Credential() must carry the token the endpoint
-// actually returned (AccessToken "flow-at", NOT an empty placeholder), and the
-// exchange-error branch must leave Status()==error with Credential()==nil and
-// the loopback port released — no matter how the exchange is reached.
-//
-// Mutants it kills:
-//   - succeed(&AuthCredential{}) before the exchange (empty placeholder) —
-//     caught by "success carries the real token";
-//   - the same placeholder submitted through the callback — caught by
-//     "success via callback carries the real token";
-//   - the exchange-error branch not recording a terminal error / leaking the
-//     port — caught by the three "exchange error" sub-cases (loopback
-//     callback, loopback Submit, manual Submit).
 func TestProviderFlowCredentialFidelityAfterSubmit(t *testing.T) {
 	t.Run("success carries the real token", func(t *testing.T) {
 		rec := newFlowTokenRecorder(t, claudeFlowResponseBody)
@@ -1209,7 +1034,7 @@ func TestProviderFlowCredentialFidelityAfterSubmit(t *testing.T) {
 
 	t.Run("exchange error via manual Submit", func(t *testing.T) {
 		rec := newFlowErrorRecorder(t, http.StatusBadRequest, `{"error":"invalid_grant"}`)
-		cfg := rec.geminiFlowConfig() // manual mode: no listener, hosted redirect
+		cfg := rec.geminiFlowConfig()
 		f, err := StartProviderFlow(nil, cfg, FlowOptions{Mode: FlowModeManual})
 		if err != nil {
 			t.Fatalf("StartProviderFlow() error: %v", err)
@@ -1232,15 +1057,6 @@ func TestProviderFlowCredentialFidelityAfterSubmit(t *testing.T) {
 	})
 }
 
-// TestProviderFlowOneShotUnderConcurrency pins the exact property the doc
-// claims: the authorization code is exchanged AT MOST ONCE even when two
-// valid claims race inside the same flow (two callbacks, or a callback and a
-// Submit), with a deliberately slow token endpoint to keep the first exchange
-// in flight while the second claim attempt happens.
-//
-// Mutants it kills: dropping `if !f.claimExchange() { return }` in
-// handleCallback (either of the two concurrent claims would then exchange) —
-// caught by both sub-tests.
 func TestProviderFlowOneShotUnderConcurrency(t *testing.T) {
 	t.Run("two concurrent callbacks", func(t *testing.T) {
 		rec := newFlowSlowRecorder(t, geminiFlowResponseBody, 300*time.Millisecond)
@@ -1264,14 +1080,13 @@ func TestProviderFlowOneShotUnderConcurrency(t *testing.T) {
 				}
 			}()
 		}
-		wg.Wait() // both handlers returned (the page is flushed before the exchange)
+		wg.Wait()
 		if !waitTerminal(t, f, 2*time.Second) {
 			t.Fatal("flow did not become terminal within ~2s of the racing callbacks")
 		}
 		if status, serr := f.Status(); status != FlowStatusDone || serr != nil {
 			t.Fatalf("Status() = (%q, %v), want (%q, nil)", status, serr, FlowStatusDone)
 		}
-		// Let any (wrongly) concurrent second exchange finish before counting.
 		time.Sleep(400 * time.Millisecond)
 		if got := rec.hits(); got != 1 {
 			t.Errorf("token endpoint hits = %d, want EXACTLY ONE (one-shot exchange)", got)
@@ -1299,7 +1114,7 @@ func TestProviderFlowOneShotUnderConcurrency(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			_ = f.Submit("PASTED-CODE") // either wins; the loser returns ErrFlowClosed
+			_ = f.Submit("PASTED-CODE")
 		}()
 		wg.Wait()
 		if !waitTerminal(t, f, 2*time.Second) {
@@ -1315,10 +1130,6 @@ func TestProviderFlowOneShotUnderConcurrency(t *testing.T) {
 	})
 }
 
-// TestProviderFlowTimeoutReleasesPortWithoutCancel pins that the timeout path
-// itself releases the loopback port: the test never calls Cancel before
-// asserting, so a mutant that drops the release from the timeout branch (or
-// from fail) leaks the listener and turns requirePortFree red.
 func TestProviderFlowTimeoutReleasesPortWithoutCancel(t *testing.T) {
 	rec := newFlowTokenRecorder(t, "")
 	cfg := rec.geminiFlowConfig()
@@ -1337,11 +1148,6 @@ func TestProviderFlowTimeoutReleasesPortWithoutCancel(t *testing.T) {
 	requirePortFree(t, port, "after a timeout without Cancel")
 }
 
-// --- extra invariants: cancellation races, context tolerance -----------------
-
-// TestProviderFlowCallbackAfterCancelIgnored pins that a callback racing (or
-// following) the cancellation is answered but never changes the terminal
-// state, and never reaches the token endpoint.
 func TestProviderFlowCallbackAfterCancelIgnored(t *testing.T) {
 	rec := newFlowTokenRecorder(t, "")
 	cfg := rec.geminiFlowConfig()
@@ -1358,7 +1164,6 @@ func TestProviderFlowCallbackAfterCancelIgnored(t *testing.T) {
 	}
 	resp, err := http.Get(f.RedirectURI() + "?code=LATE-CODE&state=" + url.QueryEscape(state))
 	if err != nil {
-		// The listener is gone: a refused connection is also a fine outcome.
 		return
 	}
 	_ = resp.Body.Close()
@@ -1371,10 +1176,6 @@ func TestProviderFlowCallbackAfterCancelIgnored(t *testing.T) {
 	}
 }
 
-// TestProviderFlowStartWithCancelledContext pins the ignored-ctx contract: an
-// already-cancelled context neither panics nor aborts the flow — StartProviderFlow
-// deliberately IGNORES ctx (nothing in setup is cancellable; the lifecycle is
-// owned by Cancel), so the flow it returns is a normal pending flow.
 func TestProviderFlowStartWithCancelledContext(t *testing.T) {
 	rec := newFlowTokenRecorder(t, "")
 	cfg := rec.geminiFlowConfig()
@@ -1393,12 +1194,6 @@ func TestProviderFlowStartWithCancelledContext(t *testing.T) {
 	}
 }
 
-// TestProviderFlowCallbackLoserGetsAConflictBody pins the response of a
-// callback that lost the one-shot exchange race. It must not look like a
-// success AND must not leave the browser on an empty 200: the winner is still
-// exchanging, so the loser gets a 4xx with a fixed body that carries no code,
-// state or token. Mutant it kills: returning from the `!f.claimExchange()`
-// branch without writing anything.
 func TestProviderFlowCallbackLoserGetsAConflictBody(t *testing.T) {
 	rec := newFlowTokenRecorder(t, "")
 	cfg := rec.geminiFlowConfig()
@@ -1409,8 +1204,6 @@ func TestProviderFlowCallbackLoserGetsAConflictBody(t *testing.T) {
 	defer cancelFlow(t, f)
 	state := flowStateFromURL(t, f.URL())
 
-	// Simulate the winner: the exchange slot is taken, the flow is still
-	// pending, so a callback arriving now can only be the loser.
 	if !f.claimExchange() {
 		t.Fatal("claimExchange() = false on a fresh flow")
 	}
@@ -1438,7 +1231,6 @@ func TestProviderFlowCallbackLoserGetsAConflictBody(t *testing.T) {
 			t.Errorf("loser body leaks %q: %s", leak, body)
 		}
 	}
-	// The flow must still be pending: refusing the loser does not decide it.
 	if status, _ := f.Status(); status != FlowStatusPending {
 		t.Errorf("status = %q, want %q", status, FlowStatusPending)
 	}

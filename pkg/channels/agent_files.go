@@ -6,26 +6,21 @@ import (
 	"strings"
 )
 
-// AgentFilesRequest is the request body for saving an agent context file.
 type AgentFilesRequest struct {
 	Content string `json:"content"`
 }
 
-// AgentFilesResponse returns file content for the agent context files.
 type AgentFilesResponse struct {
 	Files   []AgentFileInfo `json:"files"`
 	Content string          `json:"content,omitempty"`
 }
 
-// AgentFileInfo describes a single context file.
 type AgentFileInfo struct {
 	Name     string `json:"name"`
 	Size     int64  `json:"size"`
 	Editable bool   `json:"editable"`
 }
 
-// isAllowedWorkspacePath returns true if the absolute workspace path is within
-// an allowed directory tree (user home, /tmp, or /var/folders for macOS).
 func isAllowedWorkspacePath(absPath string) bool {
 	home, err := os.UserHomeDir()
 	if err == nil && strings.HasPrefix(absPath, home+string(filepath.Separator)) {
@@ -34,13 +29,11 @@ func isAllowedWorkspacePath(absPath string) bool {
 	if home != "" && absPath == home {
 		return true
 	}
-	// Allow common sandbox locations
 	for _, allowed := range []string{"/tmp/", "/var/folders/"} {
 		if strings.HasPrefix(absPath, allowed) {
 			return true
 		}
 	}
-	// In development / testing, allow relative paths that resolve under the current dir
 	cwd, err := os.Getwd()
 	if err == nil && strings.HasPrefix(absPath, cwd+string(filepath.Separator)) {
 		return true
@@ -48,13 +41,6 @@ func isAllowedWorkspacePath(absPath string) bool {
 	return false
 }
 
-// IsAllowedWorkspacePath reports whether absPath lies inside an allowed
-// workspace tree (user home, /tmp, /var/folders, or the current working
-// directory). It is the exported face of the very predicate the REST
-// handlers gate every path-bearing request on (403 mcp_path_not_allowed
-// and friends), so other front-ends — the TUI's MCP toggles, for one —
-// apply ONE rule instead of a copy that can drift. It does not change the
-// predicate, its tests, or any call site's behaviour.
 func IsAllowedWorkspacePath(absPath string) bool {
 	return isAllowedWorkspacePath(absPath)
 }
@@ -66,7 +52,7 @@ func expandHomePath(path string) string {
 	if path[0] == '~' {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return path // Return original path if home dir unavailable
+			return path
 		}
 		if len(path) > 1 && path[1] == '/' {
 			return home + path[1:]
@@ -76,7 +62,6 @@ func expandHomePath(path string) string {
 	return path
 }
 
-// normalizePath removes a trailing slash from a URL path (except for root "/").
 func normalizePath(path string) string {
 	if len(path) > 1 && strings.HasSuffix(path, "/") {
 		return strings.TrimSuffix(path, "/")

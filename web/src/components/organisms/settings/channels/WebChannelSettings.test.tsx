@@ -5,19 +5,8 @@ import type { EditableChannelsConfig } from '../../../../lib/types'
 import { autoCleanup, renderWithSettings, tr } from '../../../../test/agentsHarness'
 import { WebChannelSettings } from './WebChannelSettings'
 
-/**
- * Web UI serving toggle (`channels.web`).
- *
- * The contract worth pinning is the default: the backend prunes values that
- * equal their default on save, so an ABSENT `channels.web` block means enabled
- * and must render as "on" — reading the missing key as `false` would show the
- * opposite of what the gateway does. The other half is that turning it off
- * writes the explicit `false` the pruner needs to keep the key.
- */
-
 const PATH = 'channels.web.enabled'
 
-/** Only the fields the card reads; the rest of the document is irrelevant. */
 type ChannelsFixture = {
   native: { enabled: boolean }
   web?: { enabled: boolean }
@@ -29,7 +18,6 @@ function setup(channels: ChannelsFixture) {
   })
 }
 
-/** The checkbox carries the id; the visible label is the section's "Enabled". */
 function checkbox(utils: ReturnType<typeof setup>) {
   return utils.container.querySelector(`input[id="${PATH}"]`) as HTMLInputElement
 }

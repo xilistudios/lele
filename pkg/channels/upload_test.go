@@ -189,32 +189,21 @@ func TestHandleFileUpload_Unauthorized(t *testing.T) {
 	}
 }
 
-// --- GW-M7: MaxBytesReader enforcement ---
-
-// newUploadTestServer returns a test server with a small MaxUploadSizeMB
-// (1 MB) and a temp LeleDir so we can verify disk side effects.
 func newUploadTestServer(t *testing.T) *nativeTestServer {
 	t.Helper()
 	ts := newNativeTestServer(t)
 	ts.channel.cfg.LeleDir = t.TempDir()
-	ts.channel.cfg.MaxUploadSizeMB = 1 // 1 MB
+	ts.channel.cfg.MaxUploadSizeMB = 1
 	return ts
 }
 
-// uploadDirPath returns the uploads directory for the test server.
 func uploadDirPath(ts *nativeTestServer) string {
 	return filepath.Join(ts.channel.cfg.LeleDir, "tmp", "uploads")
 }
 
-// TestHandleFileUpload_OversizedReturns413AndWritesNothing verifies that
-// sending a body larger than MaxUploadSizeMB returns HTTP 413 and does NOT
-// write any file to tmp/uploads. This tests the MaxBytesReader fix (GW-M7);
-// without MaxBytesReader, ParseMultipartForm would silently spool the
-// oversized body to disk and return 200.
 func TestHandleFileUpload_OversizedReturns413AndWritesNothing(t *testing.T) {
 	ts := newUploadTestServer(t)
 
-	// Build a 2 MB payload (limit is 1 MB).
 	bigContent := strings.Repeat("A", 2*1024*1024)
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
@@ -245,12 +234,11 @@ func TestHandleFileUpload_OversizedReturns413AndWritesNothing(t *testing.T) {
 		t.Fatalf("status = %d, want 413; body = %s", resp.StatusCode, respBody)
 	}
 
-	// Verify nothing was written to tmp/uploads.
 	dir := uploadDirPath(ts)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return // directory doesn't exist — nothing written, good
+			return
 		}
 		t.Fatalf("ReadDir: %v", err)
 	}
@@ -259,15 +247,9 @@ func TestHandleFileUpload_OversizedReturns413AndWritesNothing(t *testing.T) {
 	}
 }
 
-// TestHandleFileUpload_JustUnderLimitSucceeds verifies that a file just
-// under the MaxUploadSizeMB limit uploads successfully (200). This is the
-// counterpart to the oversized test: normal uploads must not be broken by
-// MaxBytesReader.
 func TestHandleFileUpload_JustUnderLimitSucceeds(t *testing.T) {
-	ts := newUploadTestServer(t) // 1 MB limit
+	ts := newUploadTestServer(t)
 
-	// 900 KB content (well under 1 MB; multipart overhead adds some bytes
-	// but stays under the limit).
 	content := strings.Repeat("B", 900*1024)
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
@@ -309,23 +291,11 @@ func TestHandleFileUpload_JustUnderLimitSucceeds(t *testing.T) {
 		t.Errorf("size = %d, want %d", payload.Files[0].Size, len(content))
 	}
 
-	// Verify the file exists on disk.
 	if _, err := os.Stat(payload.Files[0].Path); os.IsNotExist(err) {
 		t.Errorf("uploaded file not found at %s", payload.Files[0].Path)
 	}
 }
 
-// --- T1: symlinked LeleDir (incident 2026-10-17) ---
-//
-// Reproduction contract for the view endpoints and for staging: the client
-// always sends the path /upload returned, i.e. the UNRESOLVED spelling through
-// the configured LeleDir. When that directory traverses a symlink, comparing
-// the resolved file path against the unresolved root denied every preview (403)
-// and made staging copy the file again on every call.
-
-// newSymlinkedStagingTestServer returns a native test server whose LeleDir is a
-// symlink (<tmp>/lele -> <tmp>/real) plus the real directory behind it. Both
-// live under t.TempDir().
 func newSymlinkedStagingTestServer(t *testing.T) (ts *nativeTestServer, real string) {
 	t.Helper()
 	real = t.TempDir()
@@ -338,7 +308,6 @@ func newSymlinkedStagingTestServer(t *testing.T) (ts *nativeTestServer, real str
 	return ts, real
 }
 
-// Mutation M8 (handleFileView without a canonical root) turns this test red.
 func TestFileView_SymlinkedLeleDirServesUpload(t *testing.T) {
 	ts, real := newSymlinkedStagingTestServer(t)
 	dir := filepath.Join(real, "tmp", "uploads")
@@ -350,8 +319,6 @@ func TestFileView_SymlinkedLeleDirServesUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Path spelled through the symlinked LeleDir, exactly as the upload
-	// endpoint returned it (unresolved).
 	p := filepath.Join(ts.channel.cfg.LeleDir, "tmp", "uploads", name)
 	resp, body := getView(t, ts, url.Values{"path": {p}})
 	if resp.StatusCode != http.StatusOK {
@@ -395,8 +362,6 @@ func TestFileViewSecure_SymlinkedLeleDirServesNonStagingPath(t *testing.T) {
 	}
 }
 
-// Mutation M9 (stageAttachment without a canonical staging dir) turns this
-// test red: the second call copies the file again.
 func TestStageAttachment_IdempotentUnderSymlinkedLeleDir(t *testing.T) {
 	real := t.TempDir()
 	link := filepath.Join(t.TempDir(), "lele")
@@ -412,7 +377,6 @@ func TestStageAttachment_IdempotentUnderSymlinkedLeleDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Spelled through the symlinked LeleDir, as an outbound attachment would be.
 	staged := filepath.Join(link, "tmp", "attachments", name)
 	a := bus.FileAttachment{Name: name, Path: staged, Kind: "file"}
 

@@ -7,20 +7,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// Tests for the "edit model" flow (ModalEditModel): pressing ENTER on a model
-// row in the provider detail must OPEN a pre-filled edit form — never delete
-// the model —, the form must save in place via updateModelInProvider (keeping
-// the fields it does not ask about and storing the reasoning answers), ESC must
-// return to the detail view from any step, and the shared ENTER branch must not
-// regress the add-model flow.
-//
-// The stored Model names are deliberately NOT in the embedded catalog so the
-// catalog picker cannot prefill/clobber form values while walking the steps.
-
-// newEditModelTestModel builds a Model whose "test-provider" provider holds
-// two models; "gpt-4o" carries Temperature and a FULLY-LOADED Reasoning config
-// (every optional override set) so edit-survival of fields outside the form and
-// the round-trip of the five reasoning steps can both be asserted.
 func newEditModelTestModel(t *testing.T) *Model {
 	t.Helper()
 	m := newTestModel(t)
@@ -56,9 +42,6 @@ func newEditModelTestModel(t *testing.T) *Model {
 	return m
 }
 
-// fullyLoadedReasoning is the "every reasoning option set" config the edit form
-// must round-trip unchanged: enabled, effort high, 2048 max reasoning tokens,
-// tokens excluded from the response and a detailed summary.
 func fullyLoadedReasoning() *config.ReasoningConfig {
 	effort := "high"
 	maxTokens := 2048
@@ -73,11 +56,8 @@ func fullyLoadedReasoning() *config.ReasoningConfig {
 	}
 }
 
-// ptrFloat returns a pointer to v (Temperature is a *float64).
 func ptrFloat(v float64) *float64 { return &v }
 
-// assertFullyLoadedReasoning fails unless rc is exactly the config built by
-// fullyLoadedReasoning (all five fields, values AND presence).
 func assertFullyLoadedReasoning(t *testing.T, rc *config.ReasoningConfig) {
 	t.Helper()
 	if rc == nil {
@@ -100,13 +80,11 @@ func assertFullyLoadedReasoning(t *testing.T, rc *config.ReasoningConfig) {
 	}
 }
 
-// openProviderDetail runs /providers and presses ENTER to land on the detail.
 func openProviderDetail(m *Model) *Model {
 	m.executeCommand("/providers")
 	return sendKeys(m, "\r")
 }
 
-// selectModelRow positions the provider-detail cursor on the given alias row.
 func selectModelRow(t *testing.T, m *Model, alias string) {
 	t.Helper()
 	for idx, a := range m.providerDetailRows {
@@ -118,9 +96,6 @@ func selectModelRow(t *testing.T, m *Model, alias string) {
 	t.Fatalf("no detail row for alias %q (rows=%v)", alias, m.providerDetailRows)
 }
 
-// TestProviderDetailEnterOpensEditDoesNotDelete is the regression test for
-// the reported bug: ENTER on a model row used to DELETE the model. It must
-// open the edit form pre-filled with the stored values instead.
 func TestProviderDetailEnterOpensEditDoesNotDelete(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
@@ -135,7 +110,6 @@ func TestProviderDetailEnterOpensEditDoesNotDelete(t *testing.T) {
 		t.Fatalf("modal = %v, want ModalEditModel after ENTER on a model row", m.modalMode)
 	}
 
-	// Regression: BOTH models must still exist after ENTER.
 	models := m.cfg.Providers.Named["test-provider"].Models
 	if len(models) != 2 {
 		t.Fatalf("models count = %d, want 2 (ENTER must edit, not delete): %v", len(models), models)
@@ -147,8 +121,6 @@ func TestProviderDetailEnterOpensEditDoesNotDelete(t *testing.T) {
 		t.Fatal(`model "gpt-4o-mini" was deleted by ENTER`)
 	}
 
-	// The form is pre-filled with the stored values, reasoning steps included
-	// (a fully-loaded config reads back as yes/high/2048/yes/detailed).
 	wantValues := []string{
 		"gpt-4o", "stored-gpt-4o-001", "128000", "4096", "no", "auto",
 		"yes", "high", "2048", "yes", "detailed",
@@ -169,55 +141,42 @@ func TestProviderDetailEnterOpensEditDoesNotDelete(t *testing.T) {
 	}
 }
 
-// TestProviderDetailEditSaveUpdatesInPlace walks all 11 steps (changing the
-// context window and the think system along the way) and asserts the model is
-// updated in place: the alias survives, Model/ContextWindow/ThinkingType
-// change, Vision stays, the Temperature field the form never asks about is
-// preserved, and the reasoning config is round-tripped EXACTLY (the form now
-// asks about every reasoning option, and Enter-through answers what was stored).
 func TestProviderDetailEditSaveUpdatesInPlace(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
 	selectModelRow(t, m, "gpt-4o")
-	m = sendKeys(m, "\r") // open edit form
+	m = sendKeys(m, "\r")
 	if m.modalMode != ModalEditModel {
 		t.Fatalf("modal = %v, want ModalEditModel", m.modalMode)
 	}
 
-	// Step 0: alias unchanged.
 	m = sendKeys(m, "\r")
 	if m.formStepIndex != 1 {
 		t.Fatalf("step = %d, want 1 after alias step", m.formStepIndex)
 	}
-	// Step 1: change the model name.
 	m.textInput.SetValue("stored-gpt-4o-v2")
 	m = sendKeys(m, "\r")
 	if m.formStepIndex != 2 {
 		t.Fatalf("step = %d, want 2 after model name step", m.formStepIndex)
 	}
-	// Step 2: change the context window.
 	m.textInput.SetValue("200000")
 	m = sendKeys(m, "\r")
 	if m.formStepIndex != 3 {
 		t.Fatalf("step = %d, want 3 after context window step", m.formStepIndex)
 	}
-	// Step 3: accept the prefilled max tokens.
 	m = sendKeys(m, "\r")
 	if m.formStepIndex != 4 {
 		t.Fatalf("step = %d, want 4 after max tokens step", m.formStepIndex)
 	}
-	// Step 4: accept the prefilled vision answer.
 	m = sendKeys(m, "\r")
 	if m.formStepIndex != 5 {
 		t.Fatalf("step = %d, want 5 after vision step", m.formStepIndex)
 	}
-	// Step 5: pick a think system → advance into the reasoning steps.
 	m.textInput.SetValue("deepseek")
 	m = sendKeys(m, "\r")
 	if m.formStepIndex != editModelReasoningEnableStep {
 		t.Fatalf("step = %d, want the reasoning-enabled step (%d)", m.formStepIndex, editModelReasoningEnableStep)
 	}
-	// Steps 6-10: accept every prefilled reasoning answer (the last Enter saves).
 	for step := editModelReasoningEnableStep; step < editModelStepCount; step++ {
 		if m.formStepIndex != step {
 			t.Fatalf("step = %d, want %d (formError = %q)", m.formStepIndex, step, m.formError)
@@ -251,7 +210,6 @@ func TestProviderDetailEditSaveUpdatesInPlace(t *testing.T) {
 		t.Errorf("ThinkingType = %q, want deepseek (edited)", mc.ThinkingType)
 	}
 
-	// The sibling model must be untouched.
 	mini, ok := models["gpt-4o-mini"]
 	if !ok {
 		t.Fatalf("gpt-4o-mini missing, models = %v", keysOfModels(models))
@@ -260,29 +218,22 @@ func TestProviderDetailEditSaveUpdatesInPlace(t *testing.T) {
 		t.Errorf("gpt-4o-mini changed: %+v", mini)
 	}
 
-	// The detail list cursor sits on the edited row.
 	if alias, ok := m.providerDetailRows[m.modalSelectedIdx]; !ok || alias != "gpt-4o" {
 		t.Errorf("detail cursor on idx %d (%q), want the edited row gpt-4o", m.modalSelectedIdx, alias)
 	}
 }
 
-// TestProviderDetailEditRenameMovesAlias renames the alias on step 0 and
-// verifies the old key is gone, the new key carries the updated values (the
-// reasoning config included — it must survive the alias change), and the detail
-// view re-shows the renamed model.
 func TestProviderDetailEditRenameMovesAlias(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
 	selectModelRow(t, m, "gpt-4o")
-	m = sendKeys(m, "\r") // open edit form
+	m = sendKeys(m, "\r")
 	if m.modalMode != ModalEditModel {
 		t.Fatalf("modal = %v, want ModalEditModel", m.modalMode)
 	}
 
-	// Step 0: rename the alias.
 	m.textInput.SetValue("gpt-4o-latest")
 	m = sendKeys(m, "\r")
-	// Steps 1-10: accept the prefilled values (last Enter saves).
 	for step := addModelModelNameStep; step < editModelStepCount; step++ {
 		if m.formStepIndex != step {
 			t.Fatalf("step = %d, want %d (formError = %q)", m.formStepIndex, step, m.formError)
@@ -310,7 +261,6 @@ func TestProviderDetailEditRenameMovesAlias(t *testing.T) {
 		t.Errorf("models count = %d, want 2 (rename, not add/delete)", len(models))
 	}
 
-	// The detail view re-shows the renamed model.
 	found := false
 	for _, item := range m.modalItems {
 		if item == "  gpt-4o-latest" {
@@ -325,13 +275,11 @@ func TestProviderDetailEditRenameMovesAlias(t *testing.T) {
 	}
 }
 
-// TestProviderDetailEditEscReturnsToDetailWithoutChanges verifies ESC leaves
-// the edit form back to the provider detail with nothing modified.
 func TestProviderDetailEditEscReturnsToDetailWithoutChanges(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
 	selectModelRow(t, m, "gpt-4o")
-	m = sendKeys(m, "\r") // open edit form
+	m = sendKeys(m, "\r")
 	if m.modalMode != ModalEditModel {
 		t.Fatalf("modal = %v, want ModalEditModel", m.modalMode)
 	}
@@ -349,15 +297,11 @@ func TestProviderDetailEditEscReturnsToDetailWithoutChanges(t *testing.T) {
 	if mc.Model != "stored-gpt-4o-001" || mc.ContextWindow != 128000 || mc.MaxTokens != 4096 || mc.Vision {
 		t.Errorf("stored values changed by open+ESC: %+v", mc)
 	}
-	// Landed back on the row we came from.
 	if alias, ok := m.providerDetailRows[m.modalSelectedIdx]; !ok || alias != "gpt-4o" {
 		t.Errorf("detail cursor on idx %d (%q), want gpt-4o", m.modalSelectedIdx, alias)
 	}
 }
 
-// TestAddModelFlowStillAdds guards the shared ENTER branch: from the detail
-// view, the add-model action row (matched by providerDetailAddIdx, not by a
-// hardcoded label) must still ADD a new model and close the modal.
 func TestAddModelFlowStillAdds(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
@@ -379,17 +323,17 @@ func TestAddModelFlowStillAdds(t *testing.T) {
 	}
 
 	m.textInput.SetValue("new-model")
-	m = sendKeys(m, "\r") // step 0: alias
+	m = sendKeys(m, "\r")
 	m.textInput.SetValue("brand-new-001")
-	m = sendKeys(m, "\r") // step 1: model name
+	m = sendKeys(m, "\r")
 	m.textInput.SetValue("50000")
-	m = sendKeys(m, "\r") // step 2: context window
+	m = sendKeys(m, "\r")
 	m.textInput.SetValue("8192")
-	m = sendKeys(m, "\r") // step 3: max tokens
+	m = sendKeys(m, "\r")
 	m.textInput.SetValue("yes")
-	m = sendKeys(m, "\r") // step 4: vision
+	m = sendKeys(m, "\r")
 	m.textInput.SetValue("deepseek")
-	m = sendKeys(m, "\r") // step 5: think system → save
+	m = sendKeys(m, "\r")
 
 	if m.modalMode != ModalNone {
 		t.Fatalf("modal = %v, want ModalNone (add flow closes the modal)", m.modalMode)
@@ -409,22 +353,18 @@ func TestAddModelFlowStillAdds(t *testing.T) {
 	if mc.ThinkingType != "deepseek" {
 		t.Errorf("ThinkingType = %q, want deepseek", mc.ThinkingType)
 	}
-	// Existing models were not edited by the add flow.
 	if got := models["gpt-4o"]; got.Model != "stored-gpt-4o-001" || got.ContextWindow != 128000 {
 		t.Errorf("existing model changed by add flow: %+v", got)
 	}
 }
 
-// TestProviderDetailEditInvalidNumberStaysInForm verifies a non-numeric
-// context window keeps the user in the form with an error and never touches
-// the config.
 func TestProviderDetailEditInvalidNumberStaysInForm(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
 	selectModelRow(t, m, "gpt-4o")
-	m = sendKeys(m, "\r") // open edit form
-	m = sendKeys(m, "\r") // step 0 → 1
-	m = sendKeys(m, "\r") // step 1 → 2 (context window)
+	m = sendKeys(m, "\r")
+	m = sendKeys(m, "\r")
+	m = sendKeys(m, "\r")
 	if m.formStepIndex != 2 {
 		t.Fatalf("step = %d, want 2 (context window)", m.formStepIndex)
 	}
@@ -439,7 +379,6 @@ func TestProviderDetailEditInvalidNumberStaysInForm(t *testing.T) {
 		t.Fatal("formError must be set for a non-numeric context window")
 	}
 
-	// Config untouched.
 	models := m.cfg.Providers.Named["test-provider"].Models
 	if len(models) != 2 {
 		t.Fatalf("models count = %d, want 2 (unchanged)", len(models))
@@ -450,9 +389,6 @@ func TestProviderDetailEditInvalidNumberStaysInForm(t *testing.T) {
 	}
 }
 
-// TestEditModelTitleIsLocalized verifies tui.editModel resolves to a real
-// translation (not the raw key) in all three embedded locales and that the
-// modal title uses it.
 func TestEditModelTitleIsLocalized(t *testing.T) {
 	m := &Model{}
 	prev := i18n.GetLanguage()
@@ -476,7 +412,6 @@ func TestEditModelTitleIsLocalized(t *testing.T) {
 	}
 }
 
-// keysOfModels returns the sorted-ish alias list for failure messages.
 func keysOfModels(models map[string]config.ProviderModelConfig) []string {
 	out := make([]string, 0, len(models))
 	for k := range models {

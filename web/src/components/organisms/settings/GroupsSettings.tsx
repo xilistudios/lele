@@ -43,7 +43,6 @@ export function GroupsSettings() {
   return (
     <div className="space-y-6">
       <SettingsSection title={t('settings.sections.groupsList')}>
-        {/* Header with Add button */}
         <div className="flex items-center justify-between mb-4">
           <p className="text-sm text-text-secondary">{t('settings.descriptions.groupsList')}</p>
           <button
@@ -67,7 +66,6 @@ export function GroupsSettings() {
           </button>
         </div>
 
-        {/* Empty state */}
         {list.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed border-border rounded-xl bg-surface-sunken">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-focus/20 to-brand-morado/20 flex items-center justify-center mb-4">
@@ -110,7 +108,6 @@ export function GroupsSettings() {
           </div>
         )}
 
-        {/* Group profile cards */}
         {list.map(
           (
             group: {
@@ -136,7 +133,6 @@ export function GroupsSettings() {
                 key={group.id || `new-${index}`}
                 title={
                   <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                    {/* Group avatar */}
                     <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-focus to-brand-morado flex items-center justify-center text-xs text-text-on-accent font-medium flex-shrink-0">
                       {group.id ? group.id.charAt(0).toUpperCase() : '#'}
                     </div>
@@ -162,7 +158,6 @@ export function GroupsSettings() {
                 onRemove={() => removeProfile(index)}
                 removeLabel={t('settings.removeGroupProfile')}
               >
-                {/* Section: General */}
                 <div className="pb-4 mb-5 border-b border-border">
                   <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
                     {t('settings.sections.general')}
@@ -234,7 +229,6 @@ export function GroupsSettings() {
                   </SettingsField>
                 </div>
 
-                {/* Section: Limits */}
                 <div className="pb-4 mb-5 border-b border-border">
                   <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
                     {t('settings.sections.limits')}
@@ -311,7 +305,6 @@ export function GroupsSettings() {
                   </SettingsField>
                 </div>
 
-                {/* Section: Behavior */}
                 <div>
                   <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
                     {t('settings.sections.behavior')}

@@ -1,21 +1,4 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
-
-// Regression test for the streaming orphan produced by the agent loop itself.
-//
-// The loop detector (llm_runner.go) injects its guidance with
-// AddMessage(sessionKey, "user", guidance) BEFORE the assistant message with
-// the tool calls is persisted. When the stream handler has already written an
-// in-progress assistant message, that AddMessage used to append the guidance
-// right after the streamed assistant and leave it Streaming=true forever: it
-// was persisted, survived restarts and was replayed to the model on every
-// later turn. The session-layer fix finalizes the streamed tail in place before
-// the non-assistant append, so the guidance lands immediately after a finalized
-// assistant and no streaming flag survives the turn.
 
 import (
 	"context"
@@ -27,11 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// TestRunLLMIteration_LoopGuidanceDoesNotLeaveStreamingOrphan drives the REAL
-// runner with a provider that returns the SAME tool-call signature on
-// iterations 1-3 (loopDetector.Check triggers at MaxLoopRepetitions) and plain
-// text on iteration 4. Every call also appends a streamed chunk, exactly like
-// the stream handler does while the response is being produced.
 func TestRunLLMIteration_LoopGuidanceDoesNotLeaveStreamingOrphan(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -48,7 +26,6 @@ func TestRunLLMIteration_LoopGuidanceDoesNotLeaveStreamingOrphan(t *testing.T) {
 
 	const sessionKey = "test-session-orphan"
 
-	// The same signature on every iteration is what the loop detector compares.
 	toolCalls := func() []providers.ToolCall {
 		return []providers.ToolCall{{
 			ID:        "call_loop",
@@ -62,8 +39,6 @@ func TestRunLLMIteration_LoopGuidanceDoesNotLeaveStreamingOrphan(t *testing.T) {
 	agent.Provider = &llmRunnerMockLLMProvider{
 		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
 			callCount++
-			// The stream handler writes the in-progress assistant message
-			// before the response completes, exactly like a real stream.
 			agent.Sessions.AppendAssistantChunk(sessionKey, "streamed")
 			if callCount <= 3 {
 				return &providers.LLMResponse{Content: "", ToolCalls: toolCalls()}, nil

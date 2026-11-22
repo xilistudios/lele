@@ -10,59 +10,40 @@ const (
 	agentIDCtxKey    contextKey = "tool_agent_id"
 	sessionKeyCtxKey contextKey = "tool_session_key"
 
-	// bypassGuardCtxKey marks a context whose exec call should skip safety
-	// guards **only for the specific command stored in approvedCommandCtxKey**.
-	// This replaces the old ExecTool.bypassGuard field which was shared,
-	// mutable state — a data-race and cross-session bypass hazard.
 	bypassGuardCtxKey     contextKey = "exec_bypass_guard"
 	approvedCommandCtxKey contextKey = "exec_approved_command"
 )
 
-// WithToolContext returns a context with channel and chatID stored as values.
 func WithToolContext(ctx context.Context, channel, chatID string) context.Context {
 	ctx = context.WithValue(ctx, channelCtxKey, channel)
 	ctx = context.WithValue(ctx, chatIDCtxKey, chatID)
 	return ctx
 }
 
-// WithAgentToolContext returns a context carrying the acting agent ID and
-// session key. Tools that need to enforce per-agent access control (e.g. the
-// keyring secret tool) read these via AgentToolContextFromCtx.
 func WithAgentToolContext(ctx context.Context, agentID, sessionKey string) context.Context {
 	ctx = context.WithValue(ctx, agentIDCtxKey, agentID)
 	ctx = context.WithValue(ctx, sessionKeyCtxKey, sessionKey)
 	return ctx
 }
 
-// ToolContextFromCtx extracts channel and chatID from a context.
 func ToolContextFromCtx(ctx context.Context) (channel, chatID string) {
 	ch, _ := ctx.Value(channelCtxKey).(string)
 	cid, _ := ctx.Value(chatIDCtxKey).(string)
 	return ch, cid
 }
 
-// AgentToolContextFromCtx extracts the acting agent ID and session key from a
-// context. Both may be empty if the tool was invoked outside an agent turn.
 func AgentToolContextFromCtx(ctx context.Context) (agentID, sessionKey string) {
 	aid, _ := ctx.Value(agentIDCtxKey).(string)
 	sk, _ := ctx.Value(sessionKeyCtxKey).(string)
 	return aid, sk
 }
 
-// WithBypassGuard returns a context that signals exec safety guards should be
-// skipped, but **only** when the command being executed is identical to
-// approvedCmd (after the same normalization the approval path uses). This
-// tightens the bypass to a single command instead of disabling guards for
-// every concurrent call through the shared ExecTool instance.
 func WithBypassGuard(ctx context.Context, approvedCmd string) context.Context {
 	ctx = context.WithValue(ctx, bypassGuardCtxKey, true)
 	ctx = context.WithValue(ctx, approvedCommandCtxKey, NormalizeWhitelistKey(approvedCmd))
 	return ctx
 }
 
-// BypassGuardFor returns true when the context carries a bypass flag AND the
-// supplied command matches the approved command (case/whitespace-normalized).
-// If either condition fails the caller must apply normal safety guards.
 func BypassGuardFor(ctx context.Context, command string) bool {
 	bypass, _ := ctx.Value(bypassGuardCtxKey).(bool)
 	if !bypass {
@@ -72,7 +53,6 @@ func BypassGuardFor(ctx context.Context, command string) bool {
 	return approved != "" && NormalizeWhitelistKey(command) == approved
 }
 
-// Tool is the interface that all tools must implement.
 type Tool interface {
 	Name() string
 	Description() string
@@ -80,70 +60,20 @@ type Tool interface {
 	Execute(ctx context.Context, args map[string]interface{}) *ToolResult
 }
 
-// ContextualTool is an optional interface that tools can implement
-// to receive the current message context (channel, chatID)
 type ContextualTool interface {
 	Tool
 	SetContext(channel, chatID string)
 }
 
-// SessionAwareTool is an optional interface for tools that need the full
-// session context including the session key. Tools implementing this interface
-// will receive the sessionKey in addition to channel and chatID.
 type SessionAwareTool interface {
 	Tool
 	SetSessionContext(channel, chatID, sessionKey string)
 }
 
-// AsyncCallback is a function type that async tools use to notify completion.
-// When an async tool finishes its work, it calls this callback with the result.
-//
-// The ctx parameter allows the callback to be canceled if the agent is shutting down.
-// The result parameter contains the tool's execution result.
-//
-// Example usage in an async tool:
-//
-//	func (t *MyAsyncTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
-//	    // Start async work in background
-//	    go func() {
-//	        result := doAsyncWork()
-//	        if t.callback != nil {
-//	            t.callback(ctx, result)
-//	        }
-//	    }()
-//	    return AsyncResult("Async task started")
-//	}
 type AsyncCallback func(ctx context.Context, result *ToolResult)
 
-// AsyncTool is an optional interface that tools can implement to support
-// asynchronous execution with completion callbacks.
-//
-// Async tools return immediately with an AsyncResult, then notify completion
-// via the callback set by SetCallback.
-//
-// This is useful for:
-// - Long-running operations that shouldn't block the agent loop
-// - Subagent spawns that complete independently
-// - Background tasks that need to report results later
-//
-// Example:
-//
-//	type SpawnTool struct {
-//	    callback AsyncCallback
-//	}
-//
-//	func (t *SpawnTool) SetCallback(cb AsyncCallback) {
-//	    t.callback = cb
-//	}
-//
-//	func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
-//	    go t.runSubagent(ctx, args)
-//	    return AsyncResult("Subagent spawned, will report back")
-//	}
 type AsyncTool interface {
 	Tool
-	// SetCallback registers a callback function to be invoked when the async operation completes.
-	// The callback will be called from a goroutine and should handle thread-safety if needed.
 	SetCallback(cb AsyncCallback)
 }
 

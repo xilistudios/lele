@@ -10,22 +10,15 @@ import {
 import { AuthContext, type AuthContextValue } from '../../contexts/AuthContext'
 import type { StreamMetrics } from '../../hooks/useStreamMetrics'
 
-// Mutable mock returns — tests swap these before each render.
 type MockCtx = Record<string, unknown>
 let mockAppCtxReturn: MockCtx = {}
 let mockAuthCtxReturn: MockCtx = {}
 let mockChatPageCtxReturn: MockCtx = {}
 let mockSlashCommandsReturn: MockCtx = { commands: [], loading: false, error: null }
 
-// Deferred import — resolved in beforeAll AFTER mock.module registration so the
-// component picks up the mocked ChatPageContext and useSlashCommands.
 let ChatComposer: typeof import('./ChatComposer').ChatComposer
 
 beforeAll(() => {
-  // Only mock the two modules that are NOT imported by other test files.
-  // AppLogicContext and AuthContext are provided via real context Providers so
-  // that AgentEntityLayout.test.tsx (and any other file importing them) is
-  // never affected.
   mock.module('../../contexts/ChatPageContext', () => ({
     useChatPageContext: () => mockChatPageCtxReturn,
   }))
@@ -37,24 +30,15 @@ beforeAll(() => {
 })
 
 afterAll(() => {
-  // Restore any mock() spies created in this file.
-  // NOTE: mock.restore() does NOT revert mock.module() in Bun — module mocks are
-  // process-wide and cannot be undone from within a file. The two mock.module()
-  // targets above (ChatPageContext, useSlashCommands) are therefore contained by
-  // running each test file in its own process via `bun test --isolate` (the
-  // canonical command, see BASELINE.md / CI). Do not rely on this call to stop a
-  // module-mock leak under a non-isolated run.
   mock.restore()
 })
 
-/** Find the composer textarea; throws instead of non-null asserting. */
 function getTextarea(container: HTMLElement): HTMLTextAreaElement {
   const el = container.querySelector('textarea')
   if (!el) throw new Error('textarea not found')
   return el
 }
 
-/** Create a deferred promise the test can resolve/reject manually. */
 function deferred<T>() {
   let resolve!: (v: T) => void
   let reject!: (e: unknown) => void
@@ -109,9 +93,6 @@ function baseChatPageCtx(): MockCtx {
   }
 }
 
-/** Wrap ChatComposer in real context Providers so we avoid mock.module for
- *  AppLogicContext and AuthContext (which are also imported by other test files).
- *  `metrics` seeds the StreamMetricsContext (default null → chip hidden). */
 function composerTree(metrics: StreamMetrics | null = null) {
   return (
     <AuthContext.Provider value={mockAuthCtxReturn as unknown as AuthContextValue}>
@@ -147,27 +128,21 @@ describe('ChatComposer — double-submit guard', () => {
     const { container } = renderComposer()
     const textarea = getTextarea(container)
 
-    // Type a message
     fireEvent.change(textarea, { target: { value: 'hello' } })
 
-    // First Enter — fires onSend, promise is pending
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(onSend).toHaveBeenCalledTimes(1)
     expect(callCount).toBe(1)
 
-    // Second Enter while still in-flight — must be swallowed
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(callCount).toBe(1)
 
-    // Third Enter — also swallowed
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(callCount).toBe(1)
 
-    // Resolve the first send
     resolveSend(true)
     await waitFor(() => expect(callCount).toBe(1))
 
-    // After resolution, submit works again
     fireEvent.change(textarea, { target: { value: 'world' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(callCount).toBe(2)
@@ -185,21 +160,17 @@ describe('ChatComposer — double-submit guard', () => {
     const { container } = renderComposer()
     const textarea = getTextarea(container)
 
-    // First submit with "hello"
     fireEvent.change(textarea, { target: { value: 'hello' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(callCount).toBe(1)
 
-    // Same content again — blocked by content guard (double-click scenario)
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(callCount).toBe(1)
 
-    // Different content — allowed through (queue scenario)
     fireEvent.change(textarea, { target: { value: 'world' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(callCount).toBe(2)
 
-    // Resolve both and verify fresh submit works
     resolveSend(true)
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2))
 
@@ -222,15 +193,12 @@ describe('ChatComposer — double-submit guard', () => {
 
     fireEvent.change(textarea, { target: { value: 'hello' } })
 
-    // First Enter
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(callCount).toBe(1)
 
-    // Resolve with false (queue full)
     resolveSend(false)
     await waitFor(() => expect(callCount).toBe(1))
 
-    // Submit works again after queue-full response
     fireEvent.change(textarea, { target: { value: 'retry' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(callCount).toBe(2)
@@ -247,11 +215,9 @@ describe('ChatComposer — double-submit guard', () => {
     const { container } = renderComposer()
     const textarea = getTextarea(container)
 
-    // Enter with no content — no call, no blocking
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(callCount).toBe(0)
 
-    // Type and submit — works fine
     fireEvent.change(textarea, { target: { value: 'hi' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(callCount).toBe(1)
@@ -302,18 +268,14 @@ describe('ChatComposer — token speed chip', () => {
   test('keeps the final figure after the stream ends and clears on a new turn/session', () => {
     const view = render(composerTree())
 
-    // Before any stream: hidden.
     expect(view.queryByText(/tok\/s/)).toBeNull()
 
-    // Streaming: the live rate appears.
     view.rerender(composerTree(liveMetrics))
     expect(view.getByText('50.0 tok/s')).not.toBeNull()
 
-    // Segment done: the same (retained) figure is still shown.
     view.rerender(composerTree(liveMetrics))
     expect(view.getByText('50.0 tok/s')).not.toBeNull()
 
-    // A new send / session switch clears it.
     view.rerender(composerTree(null))
     expect(view.queryByText(/tok\/s/)).toBeNull()
   })

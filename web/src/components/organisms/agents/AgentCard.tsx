@@ -10,40 +10,16 @@ import { IconButton } from '../../atoms/IconButton'
 import { FolderIcon, SettingsIcon } from '../../atoms/Icons'
 import { RemoveButton } from '../../atoms/RemoveButton'
 
-/**
- * Master-list card for one agent (design spec §3.4–§3.5, §3.9).
- *
- * Anatomy: avatar (deterministic gradient) + id row with badges (default /
- * modified / inherits-model) + display name (omitted when equal to the id) +
- * a one-line meta summary (`model · skills · tools · subagents`) + divider +
- * an actions row (Configure / Files / Remove).
- *
- * The card is NOT a global link: the id anchors a stretched hit-area `Link`
- * to the agent config page while the actions sit above it (`relative z-10`).
- * Removal uses an INLINE confirmation that replaces the actions row (§3.5):
- * no modal, the card keeps its height, and the confirmation auto-cancels
- * after 6 s, on Escape, or on click-outside — preserving the confirm-before-
- * destroy semantics `NamedItemCard` had.
- *
- */
-
-/** Auto-cancel window for the inline remove confirmation (§3.5). */
 const REMOVE_CONFIRM_TIMEOUT_MS = 6000
 
 type Props = {
   agent: EditableAgentConfig
-  /** Any dirty path starts with `agents.list.{index}.` (spec §5.3) — the
-   *  page computes this from the agent's position in the UNFILTERED list. */
   isModified: boolean
-  /** `agents.defaults.model` — shown as inherited when the agent has none. */
   defaultsModel: string
-  /** Remove this agent (the page filters it out of `agents.list`). */
   onRemove: () => void
-  /** Override the auto-cancel window of the inline confirmation (tests). */
   confirmTimeoutMs?: number
 }
 
-/** One ` · ` separator between meta segments (decorative for a11y). */
 function MetaDot() {
   return (
     <span aria-hidden="true" className="mx-1.5">
@@ -69,18 +45,15 @@ export function AgentCard({
 
   const cancelRemove = useCallback(() => {
     setConfirmingRemove(false)
-    // Return focus to the ✕ that opened the confirmation (§6.6).
     removeBtnRef.current?.querySelector('button')?.focus()
   }, [])
 
-  // Auto-cancel: an old click must never silently arm a delete (§3.5).
   useEffect(() => {
     if (!confirmingRemove) return
     const timer = setTimeout(() => setConfirmingRemove(false), confirmTimeoutMs)
     return () => clearTimeout(timer)
   }, [confirmingRemove, confirmTimeoutMs])
 
-  // Escape or click-outside cancel the confirmation (§3.5).
   useEffect(() => {
     if (!confirmingRemove) return
     const onKeyDown = (e: KeyboardEvent) => {
@@ -97,15 +70,12 @@ export function AgentCard({
     }
   }, [confirmingRemove, cancelRemove])
 
-  // When the confirmation opens, focus moves to "Remove" (§6.6).
   useEffect(() => {
     if (confirmingRemove) confirmBtnRef.current?.focus()
   }, [confirmingRemove])
 
   const primary = getAgentModelPrimary(agent.model)
   const inherits = !primary && !!defaultsModel
-  // Inherited models are prefixed with `≈` so the summary never reads as an
-  // explicit choice (§3.4.4).
   const modelLabel = primary
     ? shortModelName(primary)
     : inherits
@@ -120,7 +90,7 @@ export function AgentCard({
   const displayName = agent.name && agent.name !== agent.id ? agent.name : ''
   const confirmName = agent.name?.trim() || agent.id
 
-  const openConfig = () => navigate(`/agents/${encodeURIComponent(agent.id)}`)
+  const openConfig = () => navigate(`/settings/agents/${encodeURIComponent(agent.id)}`)
   const openFiles = () => navigate(`/settings/agent/${encodeURIComponent(agent.id)}`)
 
   return (
@@ -133,10 +103,9 @@ export function AgentCard({
         <AgentAvatar id={agent.id} name={agent.name} size="md" className="max-md:h-8 max-md:w-8" />
 
         <div className="min-w-0 flex-1">
-          {/* Row 1 — id (stretched link) + badges */}
           <div className="flex items-center gap-1.5">
             <Link
-              to={`/agents/${encodeURIComponent(agent.id)}`}
+              to={`/settings/agents/${encodeURIComponent(agent.id)}`}
               aria-label={agent.id}
               title={agent.description || agent.id}
               className="truncate font-mono text-sm font-medium text-text-primary after:absolute after:inset-0 after:content-[''] hover:text-accent-primary"
@@ -163,14 +132,12 @@ export function AgentCard({
             </span>
           </div>
 
-          {/* Row 2 — display name (omitted when it duplicates the id) */}
           {displayName && (
             <div className="truncate text-base font-medium text-text-primary">{displayName}</div>
           )}
         </div>
       </div>
 
-      {/* Row 3 — meta summary: model · skills · tools · subagents */}
       <div
         data-testid="agent-card-meta"
         className="mt-2 truncate text-xs text-text-tertiary"
@@ -199,7 +166,6 @@ export function AgentCard({
         </span>
       </div>
 
-      {/* Divider + actions (or the inline remove confirmation) */}
       <div className="relative z-10 mt-2.5 flex items-center gap-2 border-t border-border pt-2.5">
         {confirmingRemove ? (
           <>

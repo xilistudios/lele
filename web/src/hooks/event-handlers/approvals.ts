@@ -1,10 +1,3 @@
-/**
- * Approval / cancellation event handlers.
- *
- * Handles tool-approval requests from the server, approval results,
- * cancel acknowledgements, and subscribe acknowledgements that keep
- * the client processing-session state in sync.
- */
 import type { ChatMessage } from '../../lib/types'
 import { restoreInProgressAssistant, stopAllStreaming } from '../streamingOps'
 import { finalizeStreamingAssistantsForSession } from '../streamingOpsLocal'
@@ -25,10 +18,6 @@ export function handleCancelAck(ctx: MessageEventContext, data: Record<string, u
   ctx.processingSessionKeyRef.current = null
   ctx.clearAllQueues()
 
-  // NOTE: cancel.ack always carries the CLIENT's base key — websocket.go emits
-  // it from client.SessionKey without ResolveSessionKey (unlike message.ack).
-  // If the backend ever resolves aliases here, re-tag with effectiveSessionKey
-  // (see streaming.ts) so the clear below targets the key the UI uses.
   const cancelledSessionKey = (data.session_key as string) ?? ctx.currentSessionKeyRef.current
   if (cancelledSessionKey) {
     ctx.removeProcessingSession(cancelledSessionKey)
@@ -36,27 +25,16 @@ export function handleCancelAck(ctx: MessageEventContext, data: Record<string, u
 
   ctx.setStreamingMessages(stopAllStreaming)
 
-  // Mark any active groups as stopped — without this, groups with status 'started'
-  // would remain 'started' forever and the processing indicator would never clear.
   ctx.markActiveGroupsStopped()
 }
 
 export function handleSubscribeAck(ctx: MessageEventContext, data: Record<string, unknown>) {
-  // NOTE: subscribe.ack always carries the CLIENT's base key — websocket.go
-  // echoes the payload's session_key directly, without ResolveSessionKey
-  // (unlike message.ack). If the backend ever resolves aliases here, re-tag
-  // with effectiveSessionKey (see streaming.ts) so processing-sync, stale
-  // cleanup and restore all target the key the UI state is keyed by.
   const ackSessionKey = (data.session_key as string) ?? ''
   const ackProcessing = data.processing === true
   if (ackSessionKey) {
     ctx.syncProcessingSession(ackSessionKey, ackProcessing)
   }
 
-  // Stale cleanup: the backend says this session is NOT processing, so any
-  // assistant still flagged streaming:true for it (restored by a previous
-  // welcome, an ack placeholder whose message.complete was lost, ...) is
-  // stale and would keep the session-scoped loading indicator lit forever.
   const inProgress = data.in_progress_messages as
     | Array<{ role: string; content?: string; reasoning_content?: string }>
     | undefined
@@ -67,17 +45,8 @@ export function handleSubscribeAck(ctx: MessageEventContext, data: Record<string
     )
   }
 
-  // Restore in-progress streaming content when switching back to a chat
-  // that is still processing. Without this, the accumulated response is
-  // lost until the stream completes (message.complete).
-  //
-  // Only when ackProcessing is true: if the backend already finished
-  // (processing:false) but still reports in_progress leftovers, restoring
-  // them as streaming would re-create the stuck-loading bug this handler is
-  // meant to clear.
   if (ackProcessing && inProgress && inProgress.length > 0 && ackSessionKey) {
     ctx.setStreamingMessages((current) => {
-      // Don't create duplicates if we already have streaming content for this session
       const hasExisting = current.some(
         (m) => m.sessionKey === ackSessionKey && m.role === 'assistant' && m.streaming,
       )
@@ -91,7 +60,7 @@ export function handleSubscribeAck(ctx: MessageEventContext, data: Record<string
             ackSessionKey,
             msg.content ?? '',
             msg.reasoning_content ?? '',
-            true, // subscribe.ack: insert after the session's last user message
+            true,
           )
         },
         [...current],
@@ -99,10 +68,6 @@ export function handleSubscribeAck(ctx: MessageEventContext, data: Record<string
     })
   }
 
-  // Restore the running-tool card for the chat being subscribed to. Same
-  // reason as the in-progress content above — and same gate: only while the
-  // backend confirms processing, so a leftover record from a finished turn is
-  // never replayed as an executing tool.
   if (ackProcessing && ackSessionKey) {
     restoreInProgressTool(ctx, ackSessionKey, data.in_progress_tool as Record<string, unknown>)
   }

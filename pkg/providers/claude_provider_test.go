@@ -73,8 +73,6 @@ func TestClaudeProvider_GetDefaultModel(t *testing.T) {
 	}
 }
 
-// TestClaudeProviderOAuthModeThreading pins that the oauth flag passed to the
-// constructor reaches the anthropic delegate unchanged.
 func TestClaudeProviderOAuthModeThreading(t *testing.T) {
 	for _, oauth := range []bool{true, false} {
 		name := "oauth_disabled"
@@ -103,21 +101,12 @@ func createAnthropicTestClient(baseURL, token string) *anthropic.Client {
 	return &c
 }
 
-// --- createClaudeTokenSource -------------------------------------------------
-
-// setupClaudeTokenSourceTest isolates the credential store used by the token
-// source: a throwaway LELE_CONFIG_DIR plus UseStore(nil) selects the legacy
-// JSON backend. UseStore(nil) is the only store seam exported to this package
-// (the in-package SQLite helpers of pkg/auth are not importable), and the
-// legacy backend is exactly what an isolated config dir makes safe to write to.
 func setupClaudeTokenSourceTest(t *testing.T) {
 	t.Helper()
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	auth.UseStore(nil)
 }
 
-// claudeTokenServer is a fake Claude token endpoint that counts requests and
-// rotates the refresh token, like the real one does.
 type claudeTokenServer struct {
 	*httptest.Server
 	mu   sync.Mutex
@@ -130,9 +119,6 @@ func (s *claudeTokenServer) HitCount() int {
 	return s.hits
 }
 
-// newClaudeTokenServer starts the fake endpoint. The response must carry an
-// inference scope (or no scope at all) because the Claude preset enables the
-// RequireInferenceScope gate; a scope-less fresh token would be rejected.
 func newClaudeTokenServer(t *testing.T) *claudeTokenServer {
 	t.Helper()
 	ts := &claudeTokenServer{}
@@ -148,9 +134,6 @@ func newClaudeTokenServer(t *testing.T) *claudeTokenServer {
 	return ts
 }
 
-// pointClaudeOAuthConfigAt redirects the Claude token endpoint to the fake
-// server by overriding the package-level seam, restoring its original value
-// when the test ends.
 func pointClaudeOAuthConfigAt(t *testing.T, srv *httptest.Server) {
 	t.Helper()
 	original := claudeOAuthConfig
@@ -163,8 +146,6 @@ func pointClaudeOAuthConfigAt(t *testing.T, srv *httptest.Server) {
 	t.Cleanup(func() { claudeOAuthConfig = original })
 }
 
-// storedClaudeCredential builds an expired credential that NeedsRefresh() and
-// carries the given refresh token.
 func storedClaudeCredential(refreshToken, authMethod string) *auth.AuthCredential {
 	return &auth.AuthCredential{
 		AccessToken:  "stale-access",
@@ -175,10 +156,6 @@ func storedClaudeCredential(refreshToken, authMethod string) *auth.AuthCredentia
 	}
 }
 
-// TestCreateClaudeTokenSourceUsesCoordinator is the mandatory mutation #4
-// guard: two concurrent callers of the token source must collapse into exactly
-// ONE token-endpoint request (single-flight) and both must observe the fresh
-// access token, with the rotated refresh token persisted.
 func TestCreateClaudeTokenSourceUsesCoordinator(t *testing.T) {
 	setupClaudeTokenSourceTest(t)
 	srv := newClaudeTokenServer(t)
@@ -230,8 +207,6 @@ func TestCreateClaudeTokenSourceUsesCoordinator(t *testing.T) {
 	}
 }
 
-// TestCreateClaudeTokenSourceWithoutCredentials pins the exact user-facing
-// message shown when nothing is stored for anthropic.
 func TestCreateClaudeTokenSourceWithoutCredentials(t *testing.T) {
 	setupClaudeTokenSourceTest(t)
 	srv := newClaudeTokenServer(t)
@@ -253,9 +228,6 @@ func TestCreateClaudeTokenSourceWithoutCredentials(t *testing.T) {
 	}
 }
 
-// TestCreateClaudeTokenSourceSkipsRefreshForTokenCredential covers the
-// RequireOAuthMethod policy: an expired paste-token credential carrying a
-// refresh token must be returned as-is, never refreshed.
 func TestCreateClaudeTokenSourceSkipsRefreshForTokenCredential(t *testing.T) {
 	setupClaudeTokenSourceTest(t)
 	srv := newClaudeTokenServer(t)

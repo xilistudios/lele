@@ -17,19 +17,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// ── helpers shared with mcp_test.go ────────────────────────────────────
-//
-// mcpWriteDoc, mcpKeyRunes and mcpFixturePaths are reused from mcp_test.go
-// (same package) — this file only adds what it needs on top.
-
-// mcpAddPaths resolves the three mcp.json roots the running test loop
-// reports (the same probe mcpAuthListModel makes), so every caller knows
-// the fixture is exercising a loop that can serve a real Update tail. The
-// three returned roots are TEMP dirs, disjoint from each other and from the
-// loop's real config dir: plant the fixture files under them. Paths
-// resolution in Update (m.mcpPaths()) always uses the loop's own roots, so
-// Update-driven tests must plant the fixture under config.GetLeleDir()
-// (see mcpAddOpenList).
 func mcpAddPaths(t *testing.T) mcp.Paths {
 	t.Helper()
 	m := newTestModel(t)
@@ -44,30 +31,21 @@ func mcpAddPaths(t *testing.T) mcp.Paths {
 	}
 }
 
-// mcpAddEntry returns a minimal valid stdio entry for the tests.
 func mcpAddEntry() mcp.ServerConfig {
 	return mcp.ServerConfig{Command: "npx", Args: []string{"-y", "pkg"}}
 }
 
-// mcpAddOpenList opens the real /mcp list on a loop-backed Model whose
-// global layer is the temp LELE_CONFIG_DIR (mcpAuthListModel's pattern): the
-// ONLY layout Update-driven tests can use, because m.mcpPaths() always
-// resolves the loop's own roots. The other two roots are whatever the loop
-// reports (empty/disjoint in the test fixture).
 func mcpAddOpenList(t *testing.T) *Model {
 	t.Helper()
 	m := newTestModel(t)
 	m.width, m.height = 140, 40
-	m.executeCommand("/mcp") // resetModal(ModalMCP) + loadMCPList
+	m.executeCommand("/mcp")
 	if m.modalMode != ModalMCP {
 		t.Fatalf("mode = %v, want ModalMCP", m.modalMode)
 	}
 	return m
 }
 
-// mcpAddSwapSyncCounter swaps the syncMCPServersFor package var for a
-// counting stub and restores it on cleanup (the seam is a var precisely so
-// tests can count calls — see the doc at pkg/tui/mcp.go syncMCPServersFor).
 func mcpAddSwapSyncCounter(t *testing.T) *int {
 	t.Helper()
 	calls := 0
@@ -77,19 +55,6 @@ func mcpAddSwapSyncCounter(t *testing.T) *int {
 	return &calls
 }
 
-// ── 1. routing: Update dispatches to the handler, never to the input ──
-
-// TestMCPAddResult_RoutedByUpdateWithoutLeakingIntoInput copies the
-// mcp_test.go:154 pattern: the result must reach handleMCPAddResult
-// (feedback set) AND must not mutate the chat textarea. It fails if the
-// dispatch list (handlers.go update()) or the handleAsyncResult case
-// (handlers_async.go) drops mcpAddResultMsg.
-//
-// The third whitelist touch point — the textarea skip list in
-// finishUpdate (handlers.go) — is covered separately by
-// TestMCPAddResult_TextareaSkipListEntry, because bubbles' textarea.Update
-// silently ignores a non-KeyMsg, so an end-to-end Update() call cannot
-// distinguish "skipped" from "forwarded and ignored".
 func TestMCPAddResult_RoutedByUpdateWithoutLeakingIntoInput(t *testing.T) {
 	m := &Model{chatInput: textarea.New()}
 	m.chatInput.SetValue("typed")
@@ -107,18 +72,6 @@ func TestMCPAddResult_RoutedByUpdateWithoutLeakingIntoInput(t *testing.T) {
 	}
 }
 
-// TestMCPAddResult_TextareaSkipListEntry pins the third whitelist touch
-// point (review #1 m1 / review #2 MINOR 2): finishUpdate's ModalNone block
-// must list mcpAddResultMsg in the same skip case as its sibling result
-// messages, so a future reordering (or a new sibling message) cannot drop
-// it while the "text input mutated" assertion above stays green (bubbles'
-// textarea.Update ignores a non-KeyMsg, making that assertion blind to a
-// skip-list miss).
-//
-// The check is a source-level scan of the exact case clause, the same
-// pattern cmd/lele/gateway_mcp_stop_test.go uses for the gateway
-// registrations: the file path is derived from runtime.Caller, not hardcoded,
-// so the test keeps working if the file is renamed.
 func TestMCPAddResult_TextareaSkipListEntry(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -128,8 +81,6 @@ func TestMCPAddResult_TextareaSkipListEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read handlers.go: %v", err)
 	}
-	// Find the case clause inside finishUpdate's ModalNone switch that
-	// starts with outboundMsg and holds the skip list.
 	text := string(src)
 	start := strings.Index(text, "case outboundMsg, completeMsg, tickMsg,")
 	if start < 0 {
@@ -145,10 +96,6 @@ func TestMCPAddResult_TextareaSkipListEntry(t *testing.T) {
 			"(a result msg falling through reaches the chat textarea's Update; harmless today "+
 			"but the sibling list is the documented contract)", clause)
 	}
-	// The other two touch points stay asserted by the routing test above
-	// (dispatch list in update(), handleAsyncResult case); this file-scan
-	// cannot see them, so assert their presence too while we are here —
-	// all three clauses are one grep each.
 	for _, needle := range []struct{ what, want string }{
 		{"the update() dispatch list", "mcpToggleResultMsg, mcpAddResultMsg, mcpAuthStartMsg"},
 		{"the handleAsyncResult case", "case mcpAddResultMsg:"},
@@ -168,13 +115,6 @@ func TestMCPAddResult_TextareaSkipListEntry(t *testing.T) {
 	}
 }
 
-// ── 1b. m4: the feedback line never echoes the raw error ──────────────
-
-// TestMCPAddErrorKind_Table pins the verb-extraction contract: every shaped
-// pkg/mcp writer error ("mcp: <verb> <path>[: context]") reduces to its
-// verb; an unshaped error degrades to its first token; control/bidi chars
-// are stripped (sanitizeDisplayText) before the first token is taken, so a
-// crafted error cannot smuggle an escape sequence into the feedback line.
 func TestMCPAddErrorKind_Table(t *testing.T) {
 	const secret = "s3cr3t-value"
 	cases := []struct {
@@ -187,11 +127,7 @@ func TestMCPAddErrorKind_Table(t *testing.T) {
 		{"shaped read", errors.New("mcp: read /home/u/.lele/mcp.json: permission denied"), "read"},
 		{"shaped edit", errors.New("mcp: edit /home/u/.lele/mcp.json: truncated"), "edit"},
 		{"shaped replace", errors.New("mcp: replace /tmp/x: no space left on device"), "replace"},
-		// Unshaped: the first token only ("permission" of "permission
-		// denied: …"), never the path or the trailing context.
 		{"unshaped", errors.New("permission denied: /home/u/.lele/mcp.json"), "permission"},
-		// Control chars (CSI SGR + BEL) and an embedded secret are stripped
-		// before the token is taken, so the kind cannot smuggle them.
 		{"control chars stripped", errors.New("some\x1b[31mstrict\x07thing"), "somestrictthing"},
 	}
 	for _, tc := range cases {
@@ -207,19 +143,9 @@ func TestMCPAddErrorKind_Table(t *testing.T) {
 	}
 }
 
-// TestMCPAddResult_FeedbackNeverEchoesRawError pins the m4 FIX end-to-end
-// (review #2 MINOR 3, mutation N7): a non-sentinel error carrying a path, a
-// value and control chars must land on the feedback line as its VERB ONLY,
-// with no "=", no path and no control characters — the secrecy invariant
-// DoD 8 says a failed write never echoes what it was writing.
 func TestMCPAddResult_FeedbackNeverEchoesRawError(t *testing.T) {
-	// A crafted error carrying everything the feedback line must drop: the
-	// file path, a KEY=VALUE pair (the "value" half is the secret), a CSI
-	// SGR sequence and a BEL.
 	crafty := errors.New("mcp: write /home/u/.lele/mcp.json: bad value \"TOKEN=" + "s3cr3t" + "\"\x1b[31m\x07")
 
-	// Route through Update so the real dispatch + handler chain runs, the
-	// same path the write cmd's result takes.
 	m := &Model{chatInput: textarea.New()}
 	_, _ = m.Update(mcpAddResultMsg{name: "svc", layer: "global", err: crafty})
 
@@ -244,12 +170,7 @@ func TestMCPAddResult_FeedbackNeverEchoesRawError(t *testing.T) {
 	}
 }
 
-// ── 2. layer isolation: only the named layer file is written ──────────
-
 func TestMCPAddCmdFor_WritesOnlyTheNamedLayer(t *testing.T) {
-	// Disjoint 3-layer fixture (mcpFixturePaths): global=alpha,beta ·
-	// agent=gamma · project=delta. The loop-backed model is only needed so
-	// the sync seam can be counted (the cmd itself is pure closure logic).
 	paths := mcpFixturePaths(t)
 	_ = mcpAddOpenList(t)
 	globalFile := filepath.Join(paths.LeleDir, "mcp.json")
@@ -283,7 +204,6 @@ func TestMCPAddCmdFor_WritesOnlyTheNamedLayer(t *testing.T) {
 		t.Errorf("path = %q, want %q", res.path, agentFile)
 	}
 
-	// AGENT: created, holds the entry.
 	agentAfter, err := os.ReadFile(agentFile)
 	if err != nil {
 		t.Fatalf("re-read agent: %v", err)
@@ -292,7 +212,6 @@ func TestMCPAddCmdFor_WritesOnlyTheNamedLayer(t *testing.T) {
 		t.Errorf("agent file lacks the new entry: %s", agentAfter)
 	}
 
-	// GLOBAL and PROJECT: byte-identical.
 	for _, f := range []string{globalFile, projectFile} {
 		after, err := os.ReadFile(f)
 		if err != nil {
@@ -304,14 +223,9 @@ func TestMCPAddCmdFor_WritesOnlyTheNamedLayer(t *testing.T) {
 	}
 }
 
-// ── 3. refusals with zero writes ──────────────────────────────────────
-
 func TestMCPAddCmdFor_RefusesDisabledLayer(t *testing.T) {
-	// Empty root ⇒ the global layer's LayerFile resolves to "" (joinRoot's
-	// empty-root rule), regardless of whether the loop that serves Update
-	// has live roots — the cmd only sees the captured Paths.
 	paths := mcpAddPaths(t)
-	paths.LeleDir = "" // the global layer is disabled (no root)
+	paths.LeleDir = ""
 	if f := mcp.LayerFile(paths, mcp.LayerGlobal); f != "" {
 		t.Fatalf("fixture is wrong: LayerFile(global) = %q, want \"\" (disabled layer)", f)
 	}
@@ -327,7 +241,6 @@ func TestMCPAddCmdFor_RefusesDisabledLayer(t *testing.T) {
 	if res.layer != mcp.LayerGlobal {
 		t.Errorf("layer = %q, want %q", res.layer, mcp.LayerGlobal)
 	}
-	// No file was created anywhere in the fixture.
 	for _, dir := range []string{paths.AgentWorkspace, paths.Cwd} {
 		f := filepath.Join(dir, "mcp.json")
 		if _, err := os.Stat(f); !os.IsNotExist(err) {
@@ -336,10 +249,6 @@ func TestMCPAddCmdFor_RefusesDisabledLayer(t *testing.T) {
 	}
 }
 
-// TestMCPAddCmdFor_RefusesTargetOutsideAllowedRoots copies the
-// mcp_test.go:865 shape INCLUDING the sanity assert that the predicate
-// really rejects the probe dir (without it the refusal cannot be exercised
-// on this box).
 func TestMCPAddCmdFor_RefusesTargetOutsideAllowedRoots(t *testing.T) {
 	probe, err := os.MkdirTemp("/var/tmp", "lele-tui-guard-*")
 	if err != nil {
@@ -379,7 +288,6 @@ func TestMCPAddCmdFor_RefusesTargetOutsideAllowedRoots(t *testing.T) {
 		t.Errorf("path = %q, want the refused target %q", res.path, file)
 	}
 
-	// Refused BEFORE any write: bytes must be identical.
 	after, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatalf("re-read fixture: %v", err)
@@ -388,7 +296,6 @@ func TestMCPAddCmdFor_RefusesTargetOutsideAllowedRoots(t *testing.T) {
 		t.Errorf("refused target was written:\nbefore=%s\nafter=%s", before, after)
 	}
 
-	// The refusal renders through the result handler and names the path.
 	m := &Model{chatInput: textarea.New()}
 	_, _ = m.Update(res)
 	want := fmt.Sprintf(i18n.T("tui.mcpAddPathNotAllowed"), "newsvc", file)
@@ -399,8 +306,6 @@ func TestMCPAddCmdFor_RefusesTargetOutsideAllowedRoots(t *testing.T) {
 
 func TestMCPAddCmdFor_RefusesInvalidEntry(t *testing.T) {
 	paths := mcpAddPaths(t)
-	// Plant an existing global file so the fixture is realistic (the refusal
-	// must not touch it either).
 	mcpWriteDoc(t, paths.LeleDir, `{"mcpServers":{"svc":{"command":"x"}}}`)
 	file := filepath.Join(paths.LeleDir, "mcp.json")
 	before, err := os.ReadFile(file)
@@ -408,8 +313,6 @@ func TestMCPAddCmdFor_RefusesInvalidEntry(t *testing.T) {
 		t.Fatalf("read fixture: %v", err)
 	}
 
-	// Command AND URL both set — ServerConfig.validate refuses it, and
-	// UpsertEntry validates BEFORE writing anything.
 	invalid := mcp.ServerConfig{Command: "npx", URL: "https://example.com/mcp"}
 	got := mcpAddCmdFor(paths, mcp.LayerGlobal, "newsvc", invalid)()
 	res, ok := got.(mcpAddResultMsg)
@@ -423,7 +326,6 @@ func TestMCPAddCmdFor_RefusesInvalidEntry(t *testing.T) {
 		t.Errorf("created=%v changed=%v, want both false on refusal", res.created, res.changed)
 	}
 
-	// No new file in the (empty) agent layer, and the global file untouched.
 	if _, err := os.Stat(filepath.Join(paths.AgentWorkspace, "mcp.json")); !os.IsNotExist(err) {
 		t.Errorf("invalid add created an agent file (stat err = %v)", err)
 	}
@@ -435,8 +337,6 @@ func TestMCPAddCmdFor_RefusesInvalidEntry(t *testing.T) {
 		t.Errorf("fixture was written on a refused entry:\nbefore=%s\nafter=%s", before, after)
 	}
 }
-
-// ── 4. syncMCPServersFor is called exactly once on success, 0 on refuse ─
 
 func TestMCPAddResult_SyncsOnceOnSuccessAndZeroOnRefusal(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
@@ -465,8 +365,6 @@ func TestMCPAddResult_SyncsOnceOnSuccessAndZeroOnRefusal(t *testing.T) {
 	})
 }
 
-// ── 5. exact bytes + ${TOKEN} literal on disk ─────────────────────────
-
 func TestMCPAddCmdFor_WritesExactBytesAndLiteralToken(t *testing.T) {
 	t.Run("exact bytes", func(t *testing.T) {
 		paths := mcpAddPaths(t)
@@ -478,8 +376,6 @@ func TestMCPAddCmdFor_WritesExactBytesAndLiteralToken(t *testing.T) {
 		if res.err != nil {
 			t.Fatalf("add failed: %v", res.err)
 		}
-		// docs/mcp.md:488 — the canonical compact single-line shape
-		// UpsertEntry produces for a minimal stdio entry.
 		want := `{"mcpServers":{"x":{"command":"npx","args":["-y","pkg"]}}}`
 		after, err := os.ReadFile(filepath.Join(paths.LeleDir, "mcp.json"))
 		if err != nil {
@@ -518,15 +414,7 @@ func TestMCPAddCmdFor_WritesExactBytesAndLiteralToken(t *testing.T) {
 	})
 }
 
-// ── 6. filter reset + cursor lands on the new row ─────────────────────
-
 func TestMCPAddResult_ResetsFilterThatWouldHideTheNewRow(t *testing.T) {
-	// Update reloads the list through m.mcpPaths(), which always resolves
-	// the LOOP's own roots — so the fixture must live under the temp
-	// LELE_CONFIG_DIR (mcpAddOpenList's layout). "alpha" and "delta" are
-	// both owned by the global layer (the loop's project root points into
-	// the real repo tree, so no fixture may be planted there); the filters
-	// exercised are the ones that would hide a global row.
 	m := mcpAddOpenList(t)
 	paths, ok := m.mcpPaths()
 	if !ok {
@@ -536,12 +424,10 @@ func TestMCPAddResult_ResetsFilterThatWouldHideTheNewRow(t *testing.T) {
 
 	t.Run("mismatched filter resets and reselects", func(t *testing.T) {
 		m.mcpFilter = mcpFilterAll
-		m.loadMCPList()                // alpha only (delta does not exist yet)
-		m.mcpFilter = mcpFilterProject // would hide a global row
+		m.loadMCPList()
+		m.mcpFilter = mcpFilterProject
 		m.modalSelectedIdx = 0
 
-		// Mirror on disk what the write cmd would have left behind for the
-		// synthetic result msg fed below: "delta" created in the global layer.
 		mcpWriteDoc(t, paths.LeleDir, `{"mcpServers":{"alpha":{"command":"a"},"delta":{"command":"d"}}}`)
 		_, _ = m.Update(mcpAddResultMsg{name: "delta", layer: mcp.LayerGlobal, created: true, changed: true})
 
@@ -564,7 +450,7 @@ func TestMCPAddResult_ResetsFilterThatWouldHideTheNewRow(t *testing.T) {
 
 	t.Run("matching filter is left alone", func(t *testing.T) {
 		m.mcpFilter = mcpFilterGlobal
-		m.loadMCPList() // alpha, owned by global
+		m.loadMCPList()
 		m.modalSelectedIdx = 0
 
 		_, _ = m.Update(mcpAddResultMsg{name: "alpha", layer: mcp.LayerGlobal, created: true, changed: true})
@@ -574,8 +460,6 @@ func TestMCPAddResult_ResetsFilterThatWouldHideTheNewRow(t *testing.T) {
 		}
 	})
 }
-
-// ── 7. wizard state is never touched ──────────────────────────────────
 
 func TestMCPAddResult_NeverTouchesWizardState(t *testing.T) {
 	m := &Model{chatInput: textarea.New()}
@@ -596,9 +480,6 @@ func TestMCPAddResult_NeverTouchesWizardState(t *testing.T) {
 	}
 }
 
-// TestMCPAddCmdFor_ReportsHighestShadowingLayer pins the read-only pre-write
-// inventory pass (plan §4.4): a copy ABOVE the target layer is reported, a
-// copy below it is ignored, and only the highest shadowing layer survives.
 func TestMCPAddCmdFor_ReportsHighestShadowingLayer(t *testing.T) {
 	root := t.TempDir()
 	paths := mcp.Paths{
@@ -606,8 +487,6 @@ func TestMCPAddCmdFor_ReportsHighestShadowingLayer(t *testing.T) {
 		AgentWorkspace: filepath.Join(root, "agent"),
 		Cwd:            filepath.Join(root, "proj"),
 	}
-	// The agent copy is lower-ranked (it cannot shadow a global write); the
-	// project copy is the only one allowed to shadow the global target.
 	mcpWriteDoc(t, paths.AgentWorkspace,
 		`{"mcpServers":{"svc":{"command":"agent-tool"}}}`)
 	mcpWriteDoc(t, filepath.Join(paths.Cwd, ".lele"),
@@ -635,7 +514,6 @@ func TestMCPAddCmdFor_ReportsHighestShadowingLayer(t *testing.T) {
 		t.Errorf("shadow = %q, want %q (highest layer above the target)", res.shadow, mcp.LayerProject)
 	}
 
-	// The pre-write inventory read must remain read-only for the upper layers.
 	afterAgent, err := os.ReadFile(agentFile)
 	if err != nil {
 		t.Fatalf("re-read agent: %v", err)
@@ -651,7 +529,6 @@ func TestMCPAddCmdFor_ReportsHighestShadowingLayer(t *testing.T) {
 		t.Errorf("project file modified:\nbefore=%s\nafter=%s", beforeProject, afterProject)
 	}
 
-	// The routed result appends the localized shadow note exactly once.
 	m := &Model{chatInput: textarea.New()}
 	_, _ = m.Update(res)
 	base := fmt.Sprintf(i18n.T("tui.mcpAddSuccess"), "svc", mcp.LayerGlobal,
@@ -665,12 +542,6 @@ func TestMCPAddCmdFor_ReportsHighestShadowingLayer(t *testing.T) {
 	}
 }
 
-// TestMCPAddCmdFor_NeverReportsTheTargetLayerAsShadowing pins the self-shadow
-// guard of mcpAddShadowLayer (the `r <= rank` term): a copy in the TARGET
-// layer is the replace case, never a shadow — reporting the layer just
-// written as "shadowing" would make the feedback contradict itself. The
-// mutation `r <= rank` → `r < rank` promotes the same-layer copy to a shadow
-// and must fail here.
 func TestMCPAddCmdFor_NeverReportsTheTargetLayerAsShadowing(t *testing.T) {
 	root := t.TempDir()
 	paths := mcp.Paths{
@@ -678,8 +549,6 @@ func TestMCPAddCmdFor_NeverReportsTheTargetLayerAsShadowing(t *testing.T) {
 		AgentWorkspace: filepath.Join(root, "agent"),
 		Cwd:            filepath.Join(root, "proj"),
 	}
-	// A copy of svc already lives in the TARGET layer itself — the replace
-	// case of the review step, not a shadowing one.
 	mcpWriteDoc(t, paths.LeleDir,
 		`{"mcpServers":{"svc":{"command":"old-global"}}}`)
 

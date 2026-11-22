@@ -17,44 +17,14 @@ import { SegmentedControl } from '../../molecules/SegmentedControl'
 import { SettingsSection } from '../../molecules/SettingsSection'
 import { ToggleCard } from '../../molecules/ToggleCard'
 
-/**
- * `tab=tools` — per-agent tool allowlist (spec §4.6).
- *
- * Two access modes over a single config value (`agents.list.{index}.tools`):
- *
- * - `all`    → the value is absent/undefined: the agent keeps its full default
- *   registry. The grid is still shown, with every card checked, as a live
- *   preview of what "all" grants. Unchecking a card here is the natural entry
- *   point to restriction: it writes the catalog minus that tool, and the mode
- *   (derived from the value, §4.6.1) flips to `custom`.
- * - `custom` → the value is a NON-empty array: only the listed tools stay
- *   registered. Switching through the segmented control pre-selects the whole
- *   catalog (a no-op restriction the user then trims down); switching back
- *   writes `undefined`. Clearing every selection also writes `undefined` —
- *   "no tools at all" is not a state the backend can represent (an empty
- *   allowlist keeps everything), so the UI never pretends otherwise.
- *
- * The tool list comes from `GET /agents/{id}/catalog` — the agent's LIVE tool
- * registry, not the static category map. Allowlisted names that are no longer
- * in the catalog are still rendered (unknown names fall into `other` via
- * `categorize`), so a restricted agent can always be un-restricted from the
- * UI: tools are never lost.
- *
- * Writes always store the array sorted by name (byte order, like Go's
- * `sort.Strings`) so toggling back and forth produces a stable diff.
- */
-
 type ToolsMode = 'all' | 'custom'
 
 type Props = {
   agent: EditableAgentConfig
-  /** Position in `agents.list` — dirty/write paths are positional. */
   index: number
-  /** Agent id; used for the catalog query and the subagents-tab link. */
   agentId: string
 }
 
-/** Deduped, name-sorted array — the shape persisted to config. */
 function sortTools(names: Iterable<string>): string[] {
   return [...new Set(names)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 }
@@ -70,26 +40,15 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
 
   const path = `agents.list.${index}.tools`
 
-  // Read through the shared draft when possible: the parent may hand us the
-  // remote snapshot, but every write lands in the draft, and the segmented
-  // control must reflect what is about to be saved.
   const draftAgent = draftConfig?.agents?.list?.[index]
   const current: EditableAgentConfig = draftAgent && draftAgent.id === agent.id ? draftAgent : agent
 
-  // §4.6.1: the mode is derived from the value, never stored separately. An
-  // EMPTY array is normalized to `all` because "zero tools" is not an
-  // expressible state on the backend: applyToolsAllowlist keeps EVERY tool
-  // when the allowlist is empty (TestApplyToolsAllowlist_EmptyPreservesAll)
-  // and the config field is `omitempty`, so a legacy `tools: []` must render
-  // as unrestricted — showing it as custom-with-0 would lie about what the
-  // agent can actually do.
   const allowlist =
     Array.isArray(current.tools) && current.tools.length > 0 ? current.tools : undefined
   const mode: ToolsMode = allowlist ? 'custom' : 'all'
   const selected = new Set(allowlist ?? [])
 
   const { data, isLoading, isError, refetch } = useQuery({
-    // Keyed by agent: the catalog is the live registry of THAT agent.
     queryKey: ['agentCatalog', agentId],
     queryFn: () => api.getAgentCatalog(agentId),
     staleTime: 30_000,
@@ -98,7 +57,6 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
 
   const catalog = data?.tools ?? []
 
-  /** What the grid shows: catalog ∪ allowlist (unknown names are never hidden). */
   const entries: CatalogEntry[] = sortTools([
     ...catalog.map((tool) => tool.name),
     ...(allowlist ?? []),
@@ -111,18 +69,11 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
   const active = mode === 'custom' ? entries.filter((e) => selected.has(e.name)).length : total
 
   const writeTools = (next: string[]) => {
-    // An emptied allowlist is written as `undefined`, not `[]`: the backend
-    // treats an empty allowlist as "no restriction" (and `omitempty` would
-    // drop `[]` anyway), so normalizing here keeps the saved config, the
-    // derived mode and the banner honest. The path is still marked dirty, so
-    // the tab dot and Save behave as with any other change.
     updateField(path, next.length > 0 ? sortTools(next) : undefined)
   }
 
   const handleModeChange = (next: ToolsMode) => {
     if (next === mode) return
-    // Entering custom starts from "everything the agent has right now";
-    // leaving it drops the key entirely (undefined = default registry).
     if (next === 'custom') writeTools(entries.map((entry) => entry.name))
     else updateField(path, undefined)
   }
@@ -132,7 +83,6 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
     writeTools(checked ? [...base, name] : base.filter((entry) => entry !== name))
   }
 
-  // ── Search (§4.6.4) ──────────────────────────────────────────────────────
   const trimmed = query.trim().toLowerCase()
   const searching = trimmed.length > 0
   const matches = (entry: CatalogEntry) =>
@@ -140,7 +90,6 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
     entry.name.toLowerCase().includes(trimmed) ||
     entry.description.toLowerCase().includes(trimmed)
 
-  // Group in CATEGORY_ORDER; unknown tools land in `other` via categorize.
   const buckets = new Map<ToolCategory, CatalogEntry[]>()
   for (const entry of entries) {
     const category = categorize(entry.name)
@@ -153,11 +102,8 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
     return { category, all, matched: all.filter(matches) }
   })
 
-  // While searching: groups without hits are hidden, groups with hits are
-  // force-expanded (the controlled `open` prop beats the user's collapse).
   const visibleGroups = searching ? groups.filter((group) => group.matched.length > 0) : groups
 
-  // ── Spawn warning (§4.6.6) ───────────────────────────────────────────────
   const delegatingTo = current.subagents?.allow_agents ?? []
   const spawnMissing = mode === 'custom' && delegatingTo.length > 0 && !selected.has('spawn')
 
@@ -218,7 +164,7 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
             })}
           </span>
           <Link
-            to={`/agents/${agentId}/subagents`}
+            to={`/settings/agents/${agentId}/subagents`}
             data-testid="tools-spawn-warning-link"
             className="font-medium text-focus underline"
           >
@@ -248,7 +194,6 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
       )}
 
       {isLoading && (
-        // Skeleton with the shape of the real content: 2 category groups.
         <div data-testid="tools-skeleton" aria-hidden="true" className="space-y-3">
           {[0, 1].map((skeleton) => (
             <div key={skeleton} className="space-y-2">
@@ -313,8 +258,6 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
                 <button
                   type="button"
                   data-testid="tools-batch-essential"
-                  // Essentials the agent's live registry actually has: naming a
-                  // tool the agent never had would be dead config.
                   onClick={() =>
                     writeTools(
                       ESSENTIAL_TOOLS.filter((name) =>
@@ -361,16 +304,12 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
               title={t(CATEGORY_LABEL_KEYS[group.category], {
                 defaultValue: group.category,
               })}
-              // In `all` mode every card is checked (full access), so the
-              // header counter must agree with the grid.
               activeCount={
                 mode === 'all'
                   ? group.all.length
                   : group.all.filter((e) => selected.has(e.name)).length
               }
               totalCount={group.all.length}
-              // Controlled only while searching; otherwise the user can
-              // collapse groups freely (defaultOpen=true, §4.6.4).
               open={searching ? true : undefined}
               defaultOpen={true}
             >

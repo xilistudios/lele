@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { renderHook } from '@testing-library/react'
 import { useIsMobile } from './useIsMobile'
 
-// Mock window.matchMedia
 const originalMatchMedia = globalThis.matchMedia
 const originalInnerWidth = window.innerWidth
 

@@ -1,21 +1,3 @@
-/**
- * Modal.test.tsx
- *
- * Regression test for the "focus lost letter by letter" bug in the Add Agent
- * wizard (and every modal whose parent holds form state).
- *
- * Root cause: the open/close effect depended on `onClose`. A parent that
- * re-renders on each keystroke (e.g. AddAgentModal with local form state)
- * passes a fresh `handleClose` closure every render, so the effect re-ran on
- * every keystroke: its cleanup restored focus to the previously focused
- * element and the re-run moved focus to the first focusable element.
- *
- * These tests pin the contract:
- *  1. Typing in a modal input keeps focus even when onClose identity changes.
- *  2. Escape calls the LATEST onClose closure.
- *  3. Focus is restored to the trigger only when the modal actually closes.
- */
-
 import { afterEach, describe, expect, test } from 'bun:test'
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { useState } from 'react'
@@ -24,13 +6,8 @@ import { Modal } from './Modal'
 
 afterEach(cleanup)
 
-/**
- * Mirrors AddAgentModal: form state lives in the parent of <Modal>, and the
- * onClose handler is an inline closure recreated on every render.
- */
 function FormModal({ onClose }: { onClose: () => void }) {
   const [value, setValue] = useState('')
-  // New closure identity on every render — the exact trigger of the bug.
   const handleClose = () => {
     setValue('')
     onClose()
@@ -43,14 +20,13 @@ function FormModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-/** Same shape but with an Escape handler whose closure content can change. */
 function EscapeHarness({ onClose }: { onClose: () => void }) {
   const [n, setN] = useState(0)
   return (
     <Modal
       isOpen
       onClose={() => {
-        setN(n + 1) // forces a fresh closure each render
+        setN(n + 1)
         onClose()
       }}
       title="Escape"
@@ -68,8 +44,6 @@ describe('Modal focus regression — parent re-renders must not steal focus', ()
     input.focus()
     expect(document.activeElement).toBe(input)
 
-    // Each keystroke re-renders FormModal → new handleClose identity. Before
-    // the fix this re-ran the Modal effect and stole focus on every character.
     let expected = ''
     for (const ch of 'my-agent') {
       expected += ch
@@ -93,9 +67,7 @@ describe('Modal focus regression — parent re-renders must not steal focus', ()
 
   test('Escape calls the latest onClose closure', () => {
     const calls: string[] = []
-    // First render passes closure A...
     const view = render(<EscapeHarness onClose={() => calls.push('A')} />)
-    // ...second render passes closure B.
     view.rerender(<EscapeHarness onClose={() => calls.push('B')} />)
 
     fireEvent.keyDown(document, { key: 'Escape' })

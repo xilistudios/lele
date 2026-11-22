@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// migrate-storage: migrate JSON legacy data to SQLite
-//
-// Copyright (c) 2026 Lele contributors
-// License: MIT
-
 package main
 
 import (
@@ -66,7 +60,6 @@ func migrateStorageHelp() {
 	fmt.Println("  lele migrate-storage --rollback   Restore from backup")
 }
 
-// migrateStorageForward performs the forward migration from JSON to SQLite.
 func migrateStorageForward(leleDir string, dryRun bool) {
 	dbPath := filepath.Join(leleDir, "lele.db")
 
@@ -74,7 +67,6 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 		fmt.Println("=== DRY RUN — no changes will be made ===")
 	}
 
-	// Open the store (creates DB + runs migrations).
 	dbStore, err := store.Open(dbPath)
 	if err != nil {
 		fmt.Printf("Error opening store: %v\n", err)
@@ -90,7 +82,6 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 	totalAuth := 0
 	totalClients := 0
 
-	// ── Sessions ──
 	sessionsDir := filepath.Join(leleDir, "sessions")
 	if info, err := os.Stat(sessionsDir); err == nil && info.IsDir() {
 		entries, _ := os.ReadDir(sessionsDir)
@@ -130,7 +121,6 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 				raw.Key = key
 			}
 
-			// Parse messages array (needed for both migration and log line).
 			var messages []json.RawMessage
 			if raw.Messages != nil {
 				json.Unmarshal(raw.Messages, &messages)
@@ -157,7 +147,6 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 				}
 
 				for i, msgRaw := range messages {
-					// Extract role for the content column.
 					var roleHolder struct {
 						Role               string `json:"role"`
 						ExcludeFromContext bool   `json:"exclude_from_context"`
@@ -178,7 +167,6 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 		fmt.Println("  [sessions] directory not found, skipping")
 	}
 
-	// ── Cron ──
 	cronPath := filepath.Join(leleDir, "cron", "jobs.json")
 	if data, err := os.ReadFile(cronPath); err == nil {
 		var cronStore struct {
@@ -223,7 +211,6 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 		fmt.Println("  [cron] jobs.json not found, skipping")
 	}
 
-	// ── Goals ──
 	goalsDir := filepath.Join(leleDir, "goals")
 	if info, err := os.Stat(goalsDir); err == nil && info.IsDir() {
 		entries, _ := os.ReadDir(goalsDir)
@@ -249,7 +236,6 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 		fmt.Println("  [goals] directory not found, skipping")
 	}
 
-	// ── Groups ──
 	groupsDir := filepath.Join(leleDir, "groups")
 	if info, err := os.Stat(groupsDir); err == nil && info.IsDir() {
 		entries, _ := os.ReadDir(groupsDir)
@@ -275,7 +261,6 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 		fmt.Println("  [groups] directory not found, skipping")
 	}
 
-	// ── Auth ──
 	authPath := filepath.Join(leleDir, "auth.json")
 	if data, err := os.ReadFile(authPath); err == nil {
 		var authStore struct {
@@ -297,7 +282,6 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 		fmt.Println("  [auth] auth.json not found, skipping")
 	}
 
-	// ── Native clients ──
 	clientsPath := filepath.Join(leleDir, "native_clients.json")
 	if data, err := os.ReadFile(clientsPath); err == nil {
 		var clientStore struct {
@@ -319,7 +303,6 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 		fmt.Println("  [native-clients] native_clients.json not found, skipping")
 	}
 
-	// ── Telegram offset ──
 	offsetPath := filepath.Join(leleDir, "telegram_offset.txt")
 	if data, err := os.ReadFile(offsetPath); err == nil {
 		offset := strings.TrimSpace(string(data))
@@ -333,7 +316,6 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 		fmt.Println("  [kv] telegram_offset.txt not found, skipping")
 	}
 
-	// ── Summary ──
 	fmt.Println()
 	fmt.Printf("=== Migration Summary ===\n")
 	fmt.Printf("  Sessions:  %d (%d messages)\n", totalSessions, totalMessages)
@@ -349,10 +331,8 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 		return
 	}
 
-	// ── Backup legacy files ──
 	timestamp := time.Now().Format("20060102-150405")
 	backupDir := filepath.Join(leleDir, "backup-json-"+timestamp)
-	// Guard against same-second re-runs: append an incrementing suffix.
 	if _, err := os.Stat(backupDir); err == nil {
 		for i := 1; ; i++ {
 			candidate := fmt.Sprintf("%s-%d", backupDir, i)
@@ -387,15 +367,12 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 	moveToBackup(clientsPath, "native_clients.json")
 	moveToBackup(offsetPath, "telegram_offset.txt")
 
-	// Write migration marker.
 	dbStore.KV().Set("migrated_from_json", time.Now().Format(time.RFC3339))
 
 	fmt.Printf("\n✅ Migration complete. Backup at: %s\n", backupDir)
 }
 
-// migrateStorageRollback restores JSON files from the latest backup.
 func migrateStorageRollback(leleDir string) {
-	// Find latest backup.
 	entries, err := os.ReadDir(leleDir)
 	if err != nil {
 		fmt.Printf("Error reading lele dir: %v\n", err)
@@ -419,7 +396,6 @@ func migrateStorageRollback(leleDir string) {
 
 	fmt.Printf("Restoring from: %s\n", latestBackup)
 
-	// Delete the DB.
 	dbPath := filepath.Join(leleDir, "lele.db")
 	if _, err := os.Stat(dbPath); err == nil {
 		if err := os.Remove(dbPath); err != nil {
@@ -429,7 +405,6 @@ func migrateStorageRollback(leleDir string) {
 		fmt.Println("  ✓ Deleted lele.db")
 	}
 
-	// Restore backed-up items.
 	restoreFromBackup := func(name string, dest string) {
 		src := filepath.Join(latestBackup, name)
 		if _, err := os.Stat(src); err != nil {

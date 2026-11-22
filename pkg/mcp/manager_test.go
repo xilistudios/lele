@@ -17,10 +17,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// --- shared test doubles ----------------------------------------------------
-
-// fakeConn is an in-memory ClientConn whose failures can be scripted: the
-// *Errs slices are consumed in order, after which calls succeed.
 type fakeConn struct {
 	mu sync.Mutex
 
@@ -73,16 +69,12 @@ func (f *fakeConn) Close() error {
 	return nil
 }
 
-// stats snapshots the counters (safe against concurrent test goroutines).
 func (f *fakeConn) stats() (listCalls, callCalls, closes int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.listCalls, f.callCalls, f.closes
 }
 
-// fakeDialer implements Dialer: scripted per-dial failures first, then
-// success with a fresh fakeConn each time. setup(n, conn) configures the
-// n-th connection (n starts at 1).
 type fakeDialer struct {
 	mu    sync.Mutex
 	errs  []error
@@ -133,16 +125,12 @@ func (d *fakeDialer) connAt(n int) *fakeConn {
 	return d.conns[n]
 }
 
-// cfgAt returns the ServerConfig the n-th Dial received (asserts that a
-// config edit actually reaches the dialer).
 func (d *fakeDialer) cfgAt(n int) ServerConfig {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.cfgs[n]
 }
 
-// mcpFixture writes a global-layer mcp.json with the given server bodies and
-// returns Paths rooted at the temporary directory.
 func mcpFixture(t *testing.T, serversJSON string) Paths {
 	t.Helper()
 	dir := t.TempDir()
@@ -150,13 +138,11 @@ func mcpFixture(t *testing.T, serversJSON string) Paths {
 	return Paths{LeleDir: dir}
 }
 
-// basicFixture returns a Paths with a single active stdio server "srv".
 func basicFixture(t *testing.T) Paths {
 	t.Helper()
 	return mcpFixture(t, `{"mcpServers": {"srv": {"command": "srv-bin", "description": "a server"}}}`)
 }
 
-// remoteTool builds a simple remote tool declaration.
 func remoteTool(name string) mcp.Tool {
 	return mcp.Tool{
 		Name:        name,
@@ -170,14 +156,10 @@ func remoteTool(name string) mcp.Tool {
 	}
 }
 
-// transportFail returns the mcp-go error shape for a dead connection.
 func transportFail(reason string) error {
 	return transport.NewError(errors.New(reason))
 }
 
-// --- T5: Servers() ----------------------------------------------------------
-
-// TestManagerServersSortsAndExcludesDisabled pins the system-prompt source.
 func TestManagerServersSortsAndExcludesDisabled(t *testing.T) {
 	paths := mcpFixture(t, `{
   "mcpServers": {
@@ -208,9 +190,6 @@ func TestManagerServersSortsAndExcludesDisabled(t *testing.T) {
 	}
 }
 
-// --- T5: LoadServer ---------------------------------------------------------
-
-// TestLoadServerIdempotent: two sequential loads dial once and list once.
 func TestLoadServerIdempotent(t *testing.T) {
 	d := &fakeDialer{setup: func(_ int, conn *fakeConn) {
 		conn.listTools = []mcp.Tool{remoteTool("read"), remoteTool("write")}
@@ -248,11 +227,9 @@ func TestLoadServerIdempotent(t *testing.T) {
 	}
 }
 
-// TestLoadServerConcurrentSingleflight: N concurrent loads ⇒ exactly one dial,
-// everyone gets the same specs.
 func TestLoadServerConcurrentSingleflight(t *testing.T) {
 	d := &fakeDialer{
-		delay: 20 * time.Millisecond, // widen the race window
+		delay: 20 * time.Millisecond,
 		setup: func(_ int, conn *fakeConn) {
 			conn.listTools = []mcp.Tool{remoteTool("ping")}
 		},
@@ -288,10 +265,6 @@ func TestLoadServerConcurrentSingleflight(t *testing.T) {
 	}
 }
 
-// TestLoadServerUnknownAndDisabled: descriptive errors. The known-servers
-// list is deliberately NOT part of the manager's error (N4): the loader
-// layer (pkg/tools loadError) appends the authoritative list exactly once,
-// so a manager error flowing through it never duplicates the list.
 func TestLoadServerUnknownAndDisabled(t *testing.T) {
 	paths := mcpFixture(t, `{
   "mcpServers": {
@@ -324,7 +297,6 @@ func TestLoadServerUnknownAndDisabled(t *testing.T) {
 	}
 }
 
-// TestLoadServerDialFailureThenSuccess: a failed dial is not cached.
 func TestLoadServerDialFailureThenSuccess(t *testing.T) {
 	d := &fakeDialer{
 		errs: []error{errors.New("dial exploded")},
@@ -349,8 +321,6 @@ func TestLoadServerDialFailureThenSuccess(t *testing.T) {
 	}
 }
 
-// TestLoadServerTransportFailureRedialsOnce: a dead connection during listing
-// is dropped, re-dialed and listed again.
 func TestLoadServerTransportFailureRedialsOnce(t *testing.T) {
 	d := &fakeDialer{setup: func(n int, conn *fakeConn) {
 		if n == 1 {
@@ -377,8 +347,6 @@ func TestLoadServerTransportFailureRedialsOnce(t *testing.T) {
 	}
 }
 
-// TestLoadServerTransportFailureStopsAfterRetry: still-dead server ⇒ one
-// redial, then a clean wrapped error (no retry loop).
 func TestLoadServerTransportFailureStopsAfterRetry(t *testing.T) {
 	d := &fakeDialer{setup: func(_ int, conn *fakeConn) {
 		conn.listErrs = []error{transportFail("always dead")}
@@ -397,9 +365,6 @@ func TestLoadServerTransportFailureStopsAfterRetry(t *testing.T) {
 	}
 }
 
-// --- T5: CallRemote ---------------------------------------------------------
-
-// TestCallRemoteReconnectsOnce: the "server died after load" scenario.
 func TestCallRemoteReconnectsOnce(t *testing.T) {
 	d := &fakeDialer{setup: func(n int, conn *fakeConn) {
 		if n == 1 {
@@ -430,8 +395,6 @@ func TestCallRemoteReconnectsOnce(t *testing.T) {
 	}
 }
 
-// TestCallRemoteTransportFailureAfterRetryFails: two dead attempts ⇒ error,
-// exactly two dials.
 func TestCallRemoteTransportFailureAfterRetryFails(t *testing.T) {
 	d := &fakeDialer{setup: func(_ int, conn *fakeConn) {
 		conn.callErrs = []error{transportFail("still dead")}
@@ -450,8 +413,6 @@ func TestCallRemoteTransportFailureAfterRetryFails(t *testing.T) {
 	}
 }
 
-// TestCallRemoteMCPErrorDoesNotRedial: an application-level (JSON-RPC) error
-// is not a connection failure — redialing would be pointless.
 func TestCallRemoteMCPErrorDoesNotRedial(t *testing.T) {
 	d := &fakeDialer{setup: func(_ int, conn *fakeConn) {
 		conn.callErrs = []error{errors.New("invalid arguments")}
@@ -470,8 +431,6 @@ func TestCallRemoteMCPErrorDoesNotRedial(t *testing.T) {
 	}
 }
 
-// TestCallRemoteCancelledContextDoesNotRetry: caller cancellation never
-// triggers a reconnect.
 func TestCallRemoteCancelledContextDoesNotRetry(t *testing.T) {
 	d := &fakeDialer{setup: func(_ int, conn *fakeConn) {
 		conn.callErrs = []error{transportFail("context canceled")}
@@ -489,8 +448,6 @@ func TestCallRemoteCancelledContextDoesNotRetry(t *testing.T) {
 	}
 }
 
-// TestCallRemoteUnknownServer: same descriptive error as LoadServer — and,
-// like it, without the known-servers list (N4: the loader layer owns it).
 func TestCallRemoteUnknownServer(t *testing.T) {
 	mgr := NewManager(basicFixture(t), &fakeDialer{})
 	_, err := mgr.CallRemote(context.Background(), "ghost", "ping", nil)
@@ -505,10 +462,6 @@ func TestCallRemoteUnknownServer(t *testing.T) {
 	}
 }
 
-// --- T5: Close --------------------------------------------------------------
-
-// TestCloseIdempotent: closes every connection once, then becomes a no-op and
-// rejects new dials.
 func TestCloseIdempotent(t *testing.T) {
 	d := &fakeDialer{setup: func(_ int, conn *fakeConn) {
 		conn.listTools = []mcp.Tool{remoteTool("read")}
@@ -536,7 +489,6 @@ func TestCloseIdempotent(t *testing.T) {
 	}
 }
 
-// TestCloseAfterFailedDial: no connection was ever installed, Close stays safe.
 func TestCloseAfterFailedDial(t *testing.T) {
 	d := &fakeDialer{errs: []error{errors.New("boom")}}
 	mgr := NewManager(basicFixture(t), d)
@@ -552,7 +504,6 @@ func TestCloseAfterFailedDial(t *testing.T) {
 	}
 }
 
-// TestNewManagerNilDialerWiresRealDialer: the default wiring exists.
 func TestNewManagerNilDialerWiresRealDialer(t *testing.T) {
 	mgr := NewManager(Paths{}, nil)
 	if mgr == nil || mgr.dialer == nil {
@@ -563,12 +514,6 @@ func TestNewManagerNilDialerWiresRealDialer(t *testing.T) {
 	}
 }
 
-// --- M1: stale-connection drop (lost update) --------------------------------
-
-// gatedConn is a ClientConn whose individual CallTool invocations can be held
-// at a gate, so two CallRemote calls over the same connection overlap
-// deterministically. release/errs are keyed by that conn's own 1-based call
-// number and are read-only after construction.
 type gatedConn struct {
 	enter   chan int
 	release map[int]chan struct{}
@@ -623,9 +568,6 @@ func (g *gatedConn) closeCount() int {
 	return g.closes
 }
 
-// scriptedDialer hands out a fixed sequence of connections (no real dialing)
-// and records the ServerConfig every Dial received, so a test can assert
-// WHICH config a redial used (NEW-1).
 type scriptedDialer struct {
 	mu    sync.Mutex
 	conns []ClientConn
@@ -651,8 +593,6 @@ func (d *scriptedDialer) dialCount() int {
 	return d.dials
 }
 
-// cfgAt returns the ServerConfig the n-th Dial received (zero value when
-// fewer dials happened — callers assert the dial count separately).
 func (d *scriptedDialer) cfgAt(n int) ServerConfig {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -662,8 +602,6 @@ func (d *scriptedDialer) cfgAt(n int) ServerConfig {
 	return d.cfgs[n]
 }
 
-// waitEnter waits until the conn reports call number n (bounded so a
-// regression fails instead of hanging the suite).
 func waitEnter(t *testing.T, conn *gatedConn, n int) {
 	t.Helper()
 	select {
@@ -676,11 +614,6 @@ func waitEnter(t *testing.T, conn *gatedConn, n int) {
 	}
 }
 
-// TestCallRemoteStaleDropLeavesNewerConnAlive is the M1 regression: two
-// overlapping transport failures of the SAME connection. The first failure
-// redials and installs a newer conn; the second (stale) drop must close only
-// the conn that failed — never the newer healthy one, and without forcing a
-// third dial. Run under -race (gate 3).
 func TestCallRemoteStaleDropLeavesNewerConnAlive(t *testing.T) {
 	releaseA := make(chan struct{})
 	releaseB := make(chan struct{})
@@ -699,7 +632,6 @@ func TestCallRemoteStaleDropLeavesNewerConnAlive(t *testing.T) {
 		doneA <- err
 	}()
 
-	// A is inside conn1's first call; let B grab the same conn1 too.
 	waitEnter(t, conn1, 1)
 	doneB := make(chan error, 1)
 	go func() {
@@ -708,14 +640,11 @@ func TestCallRemoteStaleDropLeavesNewerConnAlive(t *testing.T) {
 	}()
 	waitEnter(t, conn1, 2)
 
-	// Release A: transport failure → drop conn1 → redial conn2 → success.
 	close(releaseA)
 	if err := <-doneA; err != nil {
 		t.Fatalf("call A (fresh redial) = %v, want nil", err)
 	}
 
-	// The stale failure of B lands only AFTER conn2 is installed: its drop
-	// must retire conn1 (already retired) and leave conn2 untouched.
 	close(releaseB)
 	if err := <-doneB; err != nil {
 		t.Fatalf("call B (stale drop) = %v, want nil — it must reuse the newer conn", err)
@@ -732,14 +661,6 @@ func TestCallRemoteStaleDropLeavesNewerConnAlive(t *testing.T) {
 	}
 }
 
-// --- M2: config staleness ---------------------------------------------------
-
-// TestConfigChangeRedialsWithNewConfig pins the lazy staleness fix: editing a
-// server's mcp.json entry (here: a different command/description) is picked
-// up on the next use — the old connection is closed, the cached specs are
-// dropped and the dialer receives the NEW ServerConfig. The prompt-facing
-// Servers() re-reads the disk on every call, so the new description shows up
-// there too.
 func TestConfigChangeRedialsWithNewConfig(t *testing.T) {
 	paths := mcpFixture(t, `{"mcpServers": {"srv": {"command": "v1", "description": "one"}}}`)
 	d := &fakeDialer{setup: func(_ int, conn *fakeConn) {
@@ -761,7 +682,6 @@ func TestConfigChangeRedialsWithNewConfig(t *testing.T) {
 		t.Fatalf("first dial got command %q, want v1", got)
 	}
 
-	// Rewrite the layer with a different command (a real edit, same path).
 	writeFileAt(t, paths.LeleDir+"/mcp.json",
 		`{"mcpServers": {"srv": {"command": "v2", "description": "two"}}}`)
 
@@ -778,8 +698,6 @@ func TestConfigChangeRedialsWithNewConfig(t *testing.T) {
 		t.Errorf("old conn closes = %d, want 1 (retired with its config)", closes)
 	}
 
-	// The loaded cache was dropped with the config: the next load re-lists
-	// over the new connection without a third dial.
 	if _, err := mgr.LoadServer(ctx, "srv"); err != nil {
 		t.Fatalf("LoadServer after config edit: %v", err)
 	}
@@ -787,19 +705,12 @@ func TestConfigChangeRedialsWithNewConfig(t *testing.T) {
 		t.Errorf("dials = %d, want 2 (specs re-fetched on the live conn)", d.dialCount())
 	}
 
-	// Prompt-facing view re-reads the disk (M2 doc claim).
 	infos := mgr.Servers()
 	if len(infos) != 1 || infos[0].Description != "two" {
 		t.Errorf("Servers() = %+v, want the edited description", infos)
 	}
 }
 
-// --- minor m1: discovery warning dedup -------------------------------------
-
-// TestDiscoveryWarningLoggedOnlyWhenChanged: discover runs on every remote
-// call, so a malformed layer must not emit one warning per call — the same
-// text is logged once, and a later change (or a clean re-read that re-arms
-// the dedup) logs again.
 func TestDiscoveryWarningLoggedOnlyWhenChanged(t *testing.T) {
 	var buf bytes.Buffer
 	origOut := log.Writer()
@@ -820,7 +731,6 @@ func TestDiscoveryWarningLoggedOnlyWhenChanged(t *testing.T) {
 		t.Errorf("warning logged %d times for unchanged text, want 1:\n%s", n, buf.String())
 	}
 
-	// A clean read re-arms the dedup; breaking the layer again logs anew.
 	writeFileAt(t, paths.LeleDir+"/mcp.json", `{"mcpServers": {"ok": {"command": "x"}}}`)
 	_ = mgr.Servers()
 	writeFileAt(t, paths.LeleDir+"/mcp.json", broken)
@@ -830,11 +740,6 @@ func TestDiscoveryWarningLoggedOnlyWhenChanged(t *testing.T) {
 	}
 }
 
-// --- nit: cached load honors a dead context ---------------------------------
-
-// TestLoadServerCancelledContextOnCachedPath: a caller whose context is
-// already done gets ctx.Err() back instead of cached specs it cannot use —
-// no dial, no listing, no surprise success.
 func TestLoadServerCancelledContextOnCachedPath(t *testing.T) {
 	d := &fakeDialer{setup: func(_ int, conn *fakeConn) {
 		conn.listTools = []mcp.Tool{remoteTool("read")}
@@ -856,17 +761,10 @@ func TestLoadServerCancelledContextOnCachedPath(t *testing.T) {
 	}
 }
 
-// --- N1: mid-flight config change must not re-poison the cache -------------
-
-// listGatedConn is a ClientConn whose ListTools blocks at a gate, so a
-// LoadServer flight can be held open while the test edits mcp.json and
-// triggers a resolve. entered is closed on the first ListTools call.
 type listGatedConn struct {
 	entered chan struct{}
 	release chan struct{}
 	tools   []mcp.Tool
-	// listErr, when set, is returned by ListTools once the gate opens: the
-	// transport failure that drives the reconnect-once retry (NEW-1).
 	listErr error
 
 	once   sync.Once
@@ -901,15 +799,6 @@ func (c *listGatedConn) Close() error {
 	return nil
 }
 
-// TestLoadServerMidFlightConfigChangeDoesNotRePoisonCache is the N1
-// regression: a LoadServer flight captured the v1 config, then a mid-flight
-// mcp.json edit advanced the fingerprint (applyConfigChange cleared the
-// loaded cache and dropped the connection). When the flight finishes it must
-// NOT write its v1-era specs back into the cache — the caller of THIS load
-// still gets the specs it asked for (it asked while v1 was current), but the
-// next LoadServer must re-dial with v2 and return the new tools. Pre-fix the
-// store ran unconditionally (`err == nil && !m.closed`) and re-poisoned the
-// cache. Run under -race (gate 3).
 func TestLoadServerMidFlightConfigChangeDoesNotRePoisonCache(t *testing.T) {
 	paths := mcpFixture(t, `{"mcpServers": {"srv": {"command": "v1", "description": "one"}}}`)
 	conn1 := newListGatedConn([]mcp.Tool{remoteTool("v1tool")})
@@ -928,22 +817,18 @@ func TestLoadServerMidFlightConfigChangeDoesNotRePoisonCache(t *testing.T) {
 		done <- result{specs, err}
 	}()
 
-	// The flight dialed with v1 and is now inside conn1's ListTools.
 	select {
 	case <-conn1.entered:
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for the first ListTools to start")
 	}
 
-	// Mid-flight config edit + resolve: advances fps["srv"], clears the
-	// loaded cache and drops the live connection.
 	writeFileAt(t, paths.LeleDir+"/mcp.json",
 		`{"mcpServers": {"srv": {"command": "v2", "description": "two"}}}`)
 	if _, err := mgr.resolve("srv"); err != nil {
 		t.Fatalf("resolve after the mid-flight edit: %v", err)
 	}
 
-	// Let the v1 flight finish.
 	close(conn1.release)
 	res := <-done
 	if res.err != nil {
@@ -953,8 +838,6 @@ func TestLoadServerMidFlightConfigChangeDoesNotRePoisonCache(t *testing.T) {
 		t.Fatalf("this caller must still get the specs it asked for: %+v", res.specs)
 	}
 
-	// The stale specs must NOT land in the cache: the flight captured the v1
-	// fingerprint before fetching and compares it at store time.
 	mgr.mu.Lock()
 	_, cached := mgr.loaded["srv"]
 	mgr.mu.Unlock()
@@ -962,7 +845,6 @@ func TestLoadServerMidFlightConfigChangeDoesNotRePoisonCache(t *testing.T) {
 		t.Fatal("stale v1 specs re-poisoned the loaded cache after a mid-flight config change")
 	}
 
-	// A fresh LoadServer re-dials with v2 and returns the new tools.
 	specs, err := mgr.LoadServer(ctx, "srv")
 	if err != nil {
 		t.Fatalf("fresh LoadServer after the config change: %v", err)
@@ -975,27 +857,13 @@ func TestLoadServerMidFlightConfigChangeDoesNotRePoisonCache(t *testing.T) {
 	}
 }
 
-// --- NEW-1: the reconnect-once retry must re-resolve the config -----------
-
-// TestCallRemoteRedialReResolvesConfig is the NEW-1 regression (CallRemote
-// path): the call enters with the v1 config, a mid-flight mcp.json edit
-// retires that config (fps advanced to v2, the live conn dropped) while the
-// call is still gated inside CallTool, and the transport failure then drives
-// the reconnect-once retry. Pre-fix the retry redialed with the ENTRY-TIME
-// cfg — dial #2 received the retired v1 ServerConfig, and because fps
-// already equalled v2 no later resolve ever retired that stale conn again.
-// Post-fix the retry re-resolves before dialing: dial #2 receives v2, and a
-// subsequent LoadServer serves the v2 tools with NO further edit. Run under
-// -race (gate 3).
 func TestCallRemoteRedialReResolvesConfig(t *testing.T) {
 	paths := mcpFixture(t, `{"mcpServers": {"srv": {"command": "v1", "description": "one"}}}`)
 	release := make(chan struct{})
-	// conn1: the in-flight call, gated at entry, then a transport failure.
 	conn1 := newGatedConn(
 		map[int]chan struct{}{1: release},
 		map[int]error{1: transportFail("stdio child died")},
 	)
-	// conn2: what the retry must dial — under the CURRENT (v2) config.
 	conn2 := &fakeConn{
 		listTools: []mcp.Tool{remoteTool("v2tool")},
 		callResult: &mcp.CallToolResult{
@@ -1012,18 +880,14 @@ func TestCallRemoteRedialReResolvesConfig(t *testing.T) {
 		done <- err
 	}()
 
-	// The call is inside conn1.CallTool, blocked at the gate.
 	waitEnter(t, conn1, 1)
 
-	// Mid-flight edit + resolve: retires the v1 config (clears the specs
-	// cache, drops the live conn) while the call is still in flight.
 	writeFileAt(t, paths.LeleDir+"/mcp.json",
 		`{"mcpServers": {"srv": {"command": "v2", "description": "two"}}}`)
 	if _, err := mgr.resolve("srv"); err != nil {
 		t.Fatalf("resolve after the mid-flight edit: %v", err)
 	}
 
-	// Release: the transport failure drives the reconnect-once retry.
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatalf("CallRemote must recover via the reconnect-once retry: %v", err)
@@ -1039,7 +903,6 @@ func TestCallRemoteRedialReResolvesConfig(t *testing.T) {
 		t.Error("the retired conn must be closed")
 	}
 
-	// No second edit: the next load serves the v2 tools over the redialed conn.
 	specs, err := mgr.LoadServer(ctx, "srv")
 	if err != nil {
 		t.Fatalf("LoadServer after the recovered call: %v", err)
@@ -1052,12 +915,6 @@ func TestCallRemoteRedialReResolvesConfig(t *testing.T) {
 	}
 }
 
-// TestLoadServerRedialReResolvesConfig is the NEW-1 fetchTools twin: the
-// list flight enters with v1, a mid-flight edit retires that config, and the
-// transport failure on release drives the reconnect-once retry — which must
-// re-resolve and redial with v2. Pre-fix dial #2 received the retired v1
-// entry (and the stale conn it installed survived, since fps already held
-// v2). Run under -race (gate 3).
 func TestLoadServerRedialReResolvesConfig(t *testing.T) {
 	paths := mcpFixture(t, `{"mcpServers": {"srv": {"command": "v1", "description": "one"}}}`)
 	conn1 := newListGatedConn([]mcp.Tool{remoteTool("v1tool")})
@@ -1083,7 +940,6 @@ func TestLoadServerRedialReResolvesConfig(t *testing.T) {
 		t.Fatal("timed out waiting for the first ListTools to start")
 	}
 
-	// Mid-flight edit + resolve: retires the v1 config under the open flight.
 	writeFileAt(t, paths.LeleDir+"/mcp.json",
 		`{"mcpServers": {"srv": {"command": "v2", "description": "two"}}}`)
 	if _, err := mgr.resolve("srv"); err != nil {
@@ -1102,25 +958,11 @@ func TestLoadServerRedialReResolvesConfig(t *testing.T) {
 	if got := d.cfgAt(1).Command; got != "v2" {
 		t.Errorf("redial dialed command %q, want v2 — the fetchTools retry must re-resolve the config before dialing (pre-fix it re-dialed the retired v1 entry)", got)
 	}
-	// The retry listed through the redialed (v2) connection.
 	if len(res.specs) != 1 || res.specs[0].RemoteName != "v2tool" {
 		t.Errorf("specs = %+v, want the v2 tool list", res.specs)
 	}
 }
 
-// --- NEW-2: specs deliberately NOT cached still bind to their server -------
-
-// TestToolFactoryBindsSpecServerWithoutLoadedCache is the manager-level probe
-// of the reviewer's scenario: a LoadServer flight lands across a config edit,
-// so the N1 guard keeps its specs OUT of the loaded cache while still
-// returning them to this caller. Handing such a spec to ToolFactory must
-// yield a LIVE RemoteTool: the binding comes from spec.Server (stamped by
-// buildSpecs) and CallRemote re-resolves the current config, dialing lazily.
-// Pre-fix the factory recovered the server from the loaded cache (serverOf →
-// ""), the RemoteTool executed dead ("not linked to a loaded server") and —
-// registration being skip-if-present — that dead instance would permanently
-// shadow the correct one after a later successful load. Run under -race
-// (gate 3).
 func TestToolFactoryBindsSpecServerWithoutLoadedCache(t *testing.T) {
 	paths := mcpFixture(t, `{"mcpServers": {"srv": {"command": "v1", "description": "one"}}}`)
 	conn1 := newListGatedConn([]mcp.Tool{remoteTool("v1tool")})
@@ -1150,7 +992,6 @@ func TestToolFactoryBindsSpecServerWithoutLoadedCache(t *testing.T) {
 		t.Fatal("timed out waiting for the first ListTools to start")
 	}
 
-	// Mid-flight edit + resolve: cache cleared, conn1 retired under the flight.
 	writeFileAt(t, paths.LeleDir+"/mcp.json",
 		`{"mcpServers": {"srv": {"command": "v2", "description": "two"}}}`)
 	if _, err := mgr.resolve("srv"); err != nil {
@@ -1166,7 +1007,6 @@ func TestToolFactoryBindsSpecServerWithoutLoadedCache(t *testing.T) {
 		t.Fatalf("specs = %+v, want this caller's v1tool specs", res.specs)
 	}
 
-	// The N1 state under test: those specs are NOT in the loaded cache.
 	mgr.mu.Lock()
 	_, cached := mgr.loaded["srv"]
 	mgr.mu.Unlock()
@@ -1174,7 +1014,6 @@ func TestToolFactoryBindsSpecServerWithoutLoadedCache(t *testing.T) {
 		t.Fatal("probe expects the mid-flight specs to be absent from the loaded cache")
 	}
 
-	// The factory must still bind the spec to its server (spec.Server).
 	tool := mgr.ToolFactory()(res.specs[0])
 	out := tool.Execute(ctx, nil)
 	if out.IsError {
@@ -1183,7 +1022,6 @@ func TestToolFactoryBindsSpecServerWithoutLoadedCache(t *testing.T) {
 	if out.ForLLM != "pong" {
 		t.Errorf("ForLLM = %q, want pong", out.ForLLM)
 	}
-	// CallRemote re-resolved the current config and dialed it lazily.
 	if got := d.dialCount(); got != 2 {
 		t.Errorf("dials = %d, want 2 (v1 flight + lazy v2 dial)", got)
 	}
@@ -1192,16 +1030,12 @@ func TestToolFactoryBindsSpecServerWithoutLoadedCache(t *testing.T) {
 	}
 }
 
-// TestToolFactoryPrefersSpecServerOverLoadedCache pins the unit contract of
-// the fix: when spec.Server is set the loaded cache is NEVER consulted —
-// here the cache is poisoned with a different owner of the same registered
-// name, which the pre-fix reverse lookup (serverOf) would have bound.
 func TestToolFactoryPrefersSpecServerOverLoadedCache(t *testing.T) {
 	mgr := NewManager(basicFixture(t), &fakeDialer{})
 	spec := tools.LoadedMCPTool{
 		Name: "mcp_srv_ping", Server: "srv", RemoteName: "ping", Description: "d",
 	}
-	mgr.loaded["other"] = []tools.LoadedMCPTool{spec} // poisoned cache
+	mgr.loaded["other"] = []tools.LoadedMCPTool{spec}
 
 	got := mgr.ToolFactory()(spec)
 	tool, ok := got.(*RemoteTool)
@@ -1213,13 +1047,6 @@ func TestToolFactoryPrefersSpecServerOverLoadedCache(t *testing.T) {
 	}
 }
 
-// --- T5: auth revision invalidates the cached connection --------------------
-
-// TestManagerDropsConnectionWhenAuthRevisionChanges is the key falsifiable
-// test of the T5 invalidation rule: a token write (which does not touch
-// mcp.json) must retire the cached connection of that server, so the next
-// LoadServer re-dials with the fresh auth state. A LoadServer with NO store
-// change, by contrast, must reuse the cached connection (no spurious redial).
 func TestManagerDropsConnectionWhenAuthRevisionChanges(t *testing.T) {
 	const url = "https://srv.example/mcp"
 	paths := mcpFixture(t, `{"mcpServers": {"srv": {"url": "`+url+`", "description": "d"}}}`)
@@ -1236,7 +1063,6 @@ func TestManagerDropsConnectionWhenAuthRevisionChanges(t *testing.T) {
 		t.Fatalf("dials = %d, want 1", d.dialCount())
 	}
 
-	// A token write advances the store revision without editing mcp.json.
 	tok := &transport.Token{AccessToken: "access-token", TokenType: "Bearer"}
 	if err := mgr.auth.TokenStore("srv", url).SaveToken(ctx, tok); err != nil {
 		t.Fatalf("SaveToken: %v", err)
@@ -1252,7 +1078,6 @@ func TestManagerDropsConnectionWhenAuthRevisionChanges(t *testing.T) {
 		t.Errorf("first conn closes = %d, want 1 (retired by the revision change)", closes)
 	}
 
-	// No store change: the freshly dialed connection is reused, no third dial.
 	if _, err := mgr.LoadServer(ctx, "srv"); err != nil {
 		t.Fatalf("LoadServer with no store change: %v", err)
 	}
@@ -1261,9 +1086,6 @@ func TestManagerDropsConnectionWhenAuthRevisionChanges(t *testing.T) {
 	}
 }
 
-// TestManagerFingerprintIncludesAuthRevision pins the fingerprint contract:
-// stable when nothing changes, changed by a record write, and equal to the
-// base config fingerprint when there is no store at all.
 func TestManagerFingerprintIncludesAuthRevision(t *testing.T) {
 	paths := mcpFixture(t, `{"mcpServers": {"srv": {"url": "https://srv.example/mcp"}}}`)
 	mgr := NewManager(paths, &fakeDialer{})
@@ -1288,16 +1110,12 @@ func TestManagerFingerprintIncludesAuthRevision(t *testing.T) {
 		t.Fatal("probe expects a non-zero revision after the record write")
 	}
 
-	// With no store there is no revision component: the base fingerprint.
 	mgr.auth = nil
 	if got, want := mgr.fingerprint("srv", cfg), configFingerprint(cfg); got != want {
 		t.Errorf("nil-store fingerprint = %q, want base %q", got, want)
 	}
 }
 
-// TestFingerprintNilStore proves a Manager whose auth store is nil (a Manager
-// built without NewManager, or one explicitly disabled) never panics: the
-// fingerprint falls back to the base and the OAuth runtime stays unset.
 func TestFingerprintNilStore(t *testing.T) {
 	d := &fakeDialer{setup: func(_ int, conn *fakeConn) {
 		conn.listTools = []mcp.Tool{remoteTool("ping")}
@@ -1313,7 +1131,6 @@ func TestFingerprintNilStore(t *testing.T) {
 		t.Errorf("buildAuthRuntime(nil, …) = %+v, want nil", rt)
 	}
 
-	// The full resolve + dial path must not panic either.
 	if _, err := mgr.LoadServer(context.Background(), "srv"); err != nil {
 		t.Fatalf("LoadServer with a nil store: %v", err)
 	}
@@ -1322,21 +1139,6 @@ func TestFingerprintNilStore(t *testing.T) {
 	}
 }
 
-// --- T5 review H1/H4: challenge handling and the attach seam ---------------
-
-// TestAuthChallengeOnCachedConnectionIsNotRetried is the falsifiable guard of
-// H1. mcp-go's client.Client.sendRequest wraps EVERY SendRequest error in
-// transport.NewError (client/client.go), so a challenge observed by ListTools
-// arrives as *transport.Error wrapping the OAuth error — the exact shape
-// isTransportFailure reports as a transport failure. Before the fix the
-// manager dropped the connection and redialed (2 dials) for a missing
-// credential no redial can fix; now the challenge is reported as
-// ErrAuthRequired and the healthy connection is left alone (1 dial, 0 closes).
-//
-// The second LoadServer is the proof the connection survived: the scripted
-// error is consumed, so the SAME cached connection lists successfully without
-// a second dial. The CallRemote assertion covers the same ordering rule on
-// the tool-call path of that server.
 func TestAuthChallengeOnCachedConnectionIsNotRetried(t *testing.T) {
 	const url = "https://srv.example/mcp"
 	challenge := transport.NewError(&transport.OAuthAuthorizationRequiredError{})
@@ -1361,9 +1163,6 @@ func TestAuthChallengeOnCachedConnectionIsNotRetried(t *testing.T) {
 		t.Errorf("conn closes = %d, want 0 (the connection must not be dropped)", closes)
 	}
 
-	// Same rule on the tool-call path of the SAME server: the challenge is
-	// reported as ErrAuthRequired under the existing call prefix, still over
-	// the cached connection (no redial, no drop).
 	_, err = mgr.CallRemote(context.Background(), "srv", "ping", nil)
 	if err == nil {
 		t.Fatal("CallRemote succeeded; want an authentication error")
@@ -1381,7 +1180,6 @@ func TestAuthChallengeOnCachedConnectionIsNotRetried(t *testing.T) {
 		t.Errorf("conn closes = %d, want 0 (the connection must not be dropped)", closes)
 	}
 
-	// The cached connection is still there and still works: no redial.
 	if specs, err := mgr.LoadServer(context.Background(), "srv"); err != nil {
 		t.Fatalf("second LoadServer on the cached conn: %v", err)
 	} else if len(specs) != 0 {
@@ -1392,9 +1190,6 @@ func TestAuthChallengeOnCachedConnectionIsNotRetried(t *testing.T) {
 	}
 }
 
-// TestAuthChallengeOnToolCallIsNotRetried is the CallRemote half of H1: a
-// challenge observed by CallTool is reported as ErrAuthRequired under the
-// existing "mcp call server.tool" prefix, with no redial and no drop.
 func TestAuthChallengeOnToolCallIsNotRetried(t *testing.T) {
 	const url = "https://srv.example/mcp"
 	challenge := transport.NewError(&transport.AuthorizationRequiredError{})
@@ -1422,12 +1217,6 @@ func TestAuthChallengeOnToolCallIsNotRetried(t *testing.T) {
 	}
 }
 
-// TestResolveUsesAttachAuthRuntime pins H4 behaviourally: Manager.resolve must
-// attach the OAuth runtime through the exported AttachAuthRuntime seam — the
-// one the CLI uses when it probes a server without a Manager. A server the
-// store records as 401 gets a runtime, a server that did not opt in does not,
-// and the runtime actually reaches the dial path (buildTransport is what turns
-// it into an OAuth transport).
 func TestResolveUsesAttachAuthRuntime(t *testing.T) {
 	const url = "https://srv.example/mcp"
 	paths := mcpFixture(t, `{
@@ -1451,7 +1240,6 @@ func TestResolveUsesAttachAuthRuntime(t *testing.T) {
 	if cfg.authRuntime == nil {
 		t.Fatal("resolve must attach an OAuth runtime for a store-opted-in server")
 	}
-	// The very same resolution the CLI performs without a Manager.
 	want := AttachAuthRuntime("authed", ServerConfig{URL: url}, mgr.auth)
 	if want.authRuntime == nil {
 		t.Fatal("AttachAuthRuntime returned no runtime for a store-opted-in server")
@@ -1461,15 +1249,12 @@ func TestResolveUsesAttachAuthRuntime(t *testing.T) {
 			cfg.authRuntime.clientID, want.authRuntime.clientID)
 	}
 
-	// Negative: a server that did not opt in carries no runtime.
 	if open, err := mgr.resolve("open"); err != nil {
 		t.Fatalf("resolve(open): %v", err)
 	} else if open.authRuntime != nil {
 		t.Errorf("resolve(open).authRuntime = %+v, want nil", open.authRuntime)
 	}
 
-	// The runtime reaches the dialer: this is what selects the OAuth
-	// transport in buildTransport.
 	if _, err := mgr.LoadServer(context.Background(), "authed"); err != nil {
 		t.Fatalf("LoadServer(authed): %v", err)
 	}
@@ -1477,11 +1262,6 @@ func TestResolveUsesAttachAuthRuntime(t *testing.T) {
 		t.Error("the dial path must receive the resolved OAuth runtime")
 	}
 
-	// And it reaches the actual CONSTRUCTOR: driving a real mcpDialer over
-	// the recording factory (transport_test.go) proves the routing end to
-	// end. The server whose ONLY opt-in is the stored 401 record must be
-	// dialled through httpOAuth; the record-less one must stay on the plain
-	// http constructor (attaching OAuth there would break a healthy server).
 	var plain []transportRecord
 	var oauth []oauthRecord
 	probe := NewManager(paths, &mcpDialer{

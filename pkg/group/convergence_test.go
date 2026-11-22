@@ -179,7 +179,6 @@ func TestStopReason_NoStopConditions(t *testing.T) {
 }
 
 func TestStopReason_Priority_MaxTurnsFirst(t *testing.T) {
-	// MaxTurns and token budget both exceeded; max_turns should win (checked first).
 	state := &GroupState{
 		MaxTurns:         2,
 		TotalTokenBudget: 100,

@@ -7,12 +7,8 @@ import (
 	"testing"
 )
 
-// --- TUI-M5 tests for readLimitedBody ---
-
 func TestReadLimitedBody_ExceedsLimit(t *testing.T) {
-	// Serve a body one byte over the limit.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Write MaxSkillBodyBytes+1 bytes.
 		big := strings.Repeat("x", MaxSkillBodyBytes+1)
 		w.Write([]byte(big))
 	}))
@@ -34,7 +30,6 @@ func TestReadLimitedBody_ExceedsLimit(t *testing.T) {
 }
 
 func TestReadLimitedBody_ExactlyAtLimit(t *testing.T) {
-	// Serve a body of exactly MaxSkillBodyBytes — must succeed (off-by-one guard).
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(strings.Repeat("y", MaxSkillBodyBytes)))
 	}))
@@ -57,7 +52,6 @@ func TestReadLimitedBody_ExactlyAtLimit(t *testing.T) {
 
 func TestReadLimitedBody_EmptyBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 200 with zero bytes.
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()

@@ -20,7 +20,6 @@ export function useBackgroundExecStream(processId: string | null) {
 
     let cancelled = false
 
-    // Fetch initial output first
     const fetchInitial = async () => {
       try {
         const resp = await fetch(
@@ -44,7 +43,6 @@ export function useBackgroundExecStream(processId: string | null) {
     }
     fetchInitial()
 
-    // Poll for live updates (EventSource can't send auth headers)
     pollRef.current = setInterval(async () => {
       if (cancelled) return
       try {
@@ -65,9 +63,7 @@ export function useBackgroundExecStream(processId: string | null) {
             pollRef.current = null
           }
         }
-      } catch {
-        // ignore polling errors
-      }
+      } catch {}
     }, 1000)
 
     return () => {

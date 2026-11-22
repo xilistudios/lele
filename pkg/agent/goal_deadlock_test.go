@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -21,8 +15,6 @@ import (
 	"github.com/xilistudios/lele/pkg/session"
 )
 
-// sequentialMockGoalJudge returns CONTINUE for the first N calls and DONE
-// afterwards. It is used to drive multiple goal continuation turns.
 type sequentialMockGoalJudge struct {
 	continueCalls int32
 	doneAfter     int32
@@ -35,16 +27,7 @@ func (j *sequentialMockGoalJudge) JudgeGoal(_ context.Context, _, _, _ string) (
 	return true, "DONE", nil
 }
 
-// TestGoalContinuation_NoSemaphoreDeadlock is a regression test for the
-// critical semaphore deadlock: runGoalContinuation used to re-enter
-// runAgentLoop while the per-session semaphore was still held, blocking
-// forever on the 2nd continuation turn. The continuation trigger is now
-// invoked by the caller AFTER runAgentLoop returns and releases the
-// semaphore, so each continuation turn acquires and releases it
-// independently.
 func TestGoalContinuation_NoSemaphoreDeadlock(t *testing.T) {
-	// Timeout guard: if the deadlock regresses, this test fails fast
-	// instead of hanging the whole suite.
 	done := make(chan struct{})
 	go func() {
 		select {
@@ -75,8 +58,6 @@ func TestGoalContinuation_NoSemaphoreDeadlock(t *testing.T) {
 	}
 
 	al := NewAgentLoop(cfg, bus.NewMessageBus())
-	// Wire a goal manager with a mock judge that continues for 2 turns then
-	// reports DONE. This forces 2+ recursive runAgentLoop continuation turns.
 	gm := NewGoalManager(filepath.Join(tmpDir, "goals"))
 	gm.SetJudge(&sequentialMockGoalJudge{doneAfter: 2})
 	al.goalManager = gm
@@ -91,11 +72,8 @@ func TestGoalContinuation_NoSemaphoreDeadlock(t *testing.T) {
 		},
 	}
 
-	// Set an active goal with a generous budget.
 	gm.Set("test-session", "Fix all lint errors", 10)
 
-	// First turn: runAgentLoop returns and releases the semaphore. The goal
-	// continuation is triggered by the caller afterwards.
 	firstOpts := processOptions{
 		SessionKey:      "test-session",
 		Channel:         "test-channel",
@@ -111,21 +89,17 @@ func TestGoalContinuation_NoSemaphoreDeadlock(t *testing.T) {
 		t.Fatalf("first runAgentLoop error: %v", err)
 	}
 
-	// Trigger the continuation loop (as processMessage does after runAgentLoop
-	// returns). This must NOT deadlock.
 	runner.maybeRunGoalContinuation(agent, processOptions{
 		SessionKey: "test-session",
 		Channel:    "test-channel",
 		ChatID:     "test-chat-id",
 	}, "Working on the goal...")
 
-	// After the loop, the goal must be marked done by the judge.
 	goal := gm.Get("test-session")
 	if goal == nil || goal.Status != GoalDone {
 		t.Fatalf("expected goal to be DONE after continuation, got: %+v", goal)
 	}
 
-	// The semaphore must be released (capacity reads back as empty).
 	if raw, ok := al.sessionProcessing.Load("test-session"); ok {
 		sem := raw.(chan struct{})
 		if len(sem) != 0 {
@@ -134,9 +108,6 @@ func TestGoalContinuation_NoSemaphoreDeadlock(t *testing.T) {
 	}
 }
 
-// TestGoalContinuation_BudgetExhaustionMarksBlocked verifies that when the
-// continuation budget is exhausted without the judge reporting DONE, the goal
-// is marked blocked (safety net).
 func TestGoalContinuation_BudgetExhaustionMarksBlocked(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "goal-budget-test-*")
 	if err != nil {
@@ -159,7 +130,6 @@ func TestGoalContinuation_BudgetExhaustionMarksBlocked(t *testing.T) {
 
 	al := NewAgentLoop(cfg, bus.NewMessageBus())
 	gm := NewGoalManager(filepath.Join(tmpDir, "goals"))
-	// Judge always continues -> budget will be exhausted.
 	gm.SetJudge(&sequentialMockGoalJudge{doneAfter: 100000})
 	al.goalManager = gm
 	al.goalStopCtx, al.goalStopCancel = context.WithCancel(context.Background())
@@ -175,7 +145,6 @@ func TestGoalContinuation_BudgetExhaustionMarksBlocked(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Set a goal with a very small budget (1 turn) so the loop exhausts quickly.
 	gm.Set("test-session", "Impossible goal", 1)
 
 	firstOpts := processOptions{
@@ -200,8 +169,6 @@ func TestGoalContinuation_BudgetExhaustionMarksBlocked(t *testing.T) {
 	}
 }
 
-// TestLastAssistantResponse verifies the session helper used by the caller-side
-// goal trigger returns the most recent assistant content.
 func TestLastAssistantResponse(t *testing.T) {
 	sm := session.NewSessionManager()
 	agent := &AgentInstance{Sessions: sm}
@@ -215,16 +182,12 @@ func TestLastAssistantResponse(t *testing.T) {
 		t.Errorf("lastAssistantResponse = %q, want %q", got, "second reply")
 	}
 
-	// No assistant messages -> empty.
 	sm2 := session.NewSessionManager()
 	if got := lastAssistantResponse(&AgentInstance{Sessions: sm2}, "other"); got != "" {
 		t.Errorf("lastAssistantResponse = %q, want empty", got)
 	}
 }
 
-// guidanceGoalJudge returns CONTINUE with a specific next step on the first
-// call and DONE on the second, so tests can verify that runGoalContinuation
-// uses the judge's guidance as the next turn's prompt.
 type guidanceGoalJudge struct {
 	calls int32
 }
@@ -236,9 +199,6 @@ func (j *guidanceGoalJudge) JudgeGoal(_ context.Context, _, _, _ string) (bool, 
 	return true, "DONE", nil
 }
 
-// recordingContinuationProvider records every user message it receives so the
-// test can assert that the continuation prompt (injected as the user message)
-// contains the judge's specific guidance.
 type recordingContinuationProvider struct {
 	responses    []*providers.LLMResponse
 	userMessages []string
@@ -265,9 +225,6 @@ func (m *recordingContinuationProvider) GetDefaultModel() string {
 	return "mock-model"
 }
 
-// TestGoalContinuation_UsesJudgeGuidance verifies that when the subagent judge
-// returns CONTINUE with a specific next step, the continuation loop injects
-// that guidance as the next turn's prompt (instead of the generic one).
 func TestGoalContinuation_UsesJudgeGuidance(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "goal-guidance-test-*")
 	if err != nil {
@@ -332,7 +289,6 @@ func TestGoalContinuation_UsesJudgeGuidance(t *testing.T) {
 		t.Fatalf("expected goal to be DONE after continuation, got: %+v", goal)
 	}
 
-	// The continuation turn's user message must contain the judge's guidance.
 	found := false
 	for _, um := range provider.userMessages {
 		if strings.Contains(um, "fix the auth bug") {
@@ -345,31 +301,21 @@ func TestGoalContinuation_UsesJudgeGuidance(t *testing.T) {
 	}
 }
 
-// signalingGoalJudge blocks on JudgeGoal until released, reporting the// observed goal-loop state via a channel so the test can assert that the
-// session is marked as goal-loop-active while the judge is evaluating.
 type signalingGoalJudge struct {
-	evalStarted chan struct{} // closed when JudgeGoal is entered
-	release     chan struct{} // JudgeGoal blocks until this is closed
-	observed    chan bool     // receives al.isGoalLoopActive result mid-eval
+	evalStarted chan struct{}
+	release     chan struct{}
+	observed    chan bool
 	al          *AgentLoop
 	sessionKey  string
 }
 
 func (j *signalingGoalJudge) JudgeGoal(_ context.Context, _, _, _ string) (bool, string, error) {
 	close(j.evalStarted)
-	// Report whether the session is tracked as goal-loop-active while we are
-	// inside the evaluation gap (semaphore released between turns).
 	j.observed <- j.al.isGoalLoopActive(j.sessionKey)
 	<-j.release
 	return true, "DONE", nil
 }
 
-// TestGoalContinuation_SessionMarkedActiveDuringJudgeEval is a regression
-// test for the TUI loading indicator dropping out during the goal loop. The
-// per-session semaphore is released between continuation turns, so
-// IsSessionProcessing would return false during the judge-evaluation gap.
-// runGoalContinuation must mark the session as goal-loop-active for the
-// whole loop so the TUI loading state stays on, and clear it when done.
 func TestGoalContinuation_SessionMarkedActiveDuringJudgeEval(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "goal-loop-active-test-*")
 	if err != nil {
@@ -414,8 +360,6 @@ func TestGoalContinuation_SessionMarkedActiveDuringJudgeEval(t *testing.T) {
 
 	gm.Set("test-session", "Fix all lint errors", 10)
 
-	// Run the continuation loop in a goroutine; it will block inside the
-	// judge's JudgeGoal call.
 	loopDone := make(chan struct{})
 	go func() {
 		defer close(loopDone)
@@ -426,14 +370,12 @@ func TestGoalContinuation_SessionMarkedActiveDuringJudgeEval(t *testing.T) {
 		}, "Working on the goal...")
 	}()
 
-	// Wait for the judge evaluation to start.
 	select {
 	case <-judge.evalStarted:
 	case <-time.After(5 * time.Second):
 		t.Fatal("judge evaluation never started")
 	}
 
-	// While inside the judge gap, the session must be marked active.
 	select {
 	case active := <-judge.observed:
 		if !active {
@@ -446,7 +388,6 @@ func TestGoalContinuation_SessionMarkedActiveDuringJudgeEval(t *testing.T) {
 		t.Error("isGoalLoopActive = false during judge evaluation, want true")
 	}
 
-	// Release the judge (returns DONE) and wait for the loop to finish.
 	close(judge.release)
 	select {
 	case <-loopDone:
@@ -454,21 +395,16 @@ func TestGoalContinuation_SessionMarkedActiveDuringJudgeEval(t *testing.T) {
 		t.Fatal("goal continuation loop did not finish after judge DONE")
 	}
 
-	// After the loop, the session must no longer be marked active.
 	if al.isGoalLoopActive("test-session") {
 		t.Error("session still marked goal-loop-active after loop finished")
 	}
 
-	// Goal must be marked done.
 	goal := gm.Get("test-session")
 	if goal == nil || goal.Status != GoalDone {
 		t.Fatalf("expected goal DONE, got: %+v", goal)
 	}
 }
 
-// TestLastAssistantResponse_SkipsBlanks verifies that legacy blank assistant
-// messages (persisted by the old empty-response bug) do not mask the last
-// real assistant reply from the goal judge.
 func TestLastAssistantResponse_SkipsBlanks(t *testing.T) {
 	sm := session.NewSessionManager()
 	agent := &AgentInstance{Sessions: sm}
@@ -476,7 +412,6 @@ func TestLastAssistantResponse_SkipsBlanks(t *testing.T) {
 	sm.AddMessage("skey", "user", "hello")
 	sm.AddMessage("skey", "assistant", "real reply")
 	sm.AddMessage("skey", "user", "again")
-	// Legacy blanks: no content, no tool calls.
 	sm.AddFullMessage("skey", providers.Message{Role: "assistant", Content: "", ReasoningContent: "thinking..."})
 	sm.AddFullMessage("skey", providers.Message{Role: "assistant", Content: "  "})
 

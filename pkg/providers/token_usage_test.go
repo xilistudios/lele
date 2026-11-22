@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package providers
 
 import (
@@ -49,10 +43,9 @@ func TestResponseTokenCounts(t *testing.T) {
 			wantOutput: 1,
 		},
 		{
-			name:     "no usage falls back to 2.5 chars per token heuristic",
-			messages: []Message{{Role: "user", Content: strings.Repeat("a", 100)}},
-			response: &LLMResponse{Content: strings.Repeat("b", 50)},
-			// 100*2/5 = 40 input, 50*2/5 = 20 output
+			name:       "no usage falls back to 2.5 chars per token heuristic",
+			messages:   []Message{{Role: "user", Content: strings.Repeat("a", 100)}},
+			response:   &LLMResponse{Content: strings.Repeat("b", 50)},
 			wantInput:  40,
 			wantOutput: 20,
 		},
@@ -68,15 +61,13 @@ func TestResponseTokenCounts(t *testing.T) {
 				{Role: "user", Content: strings.Repeat("b", 50)},
 			},
 			response:   &LLMResponse{Content: strings.Repeat("c", 25)},
-			wantInput:  40, // (50+50)*2/5
-			wantOutput: 10, // 25*2/5
+			wantInput:  40,
+			wantOutput: 10,
 		},
 		{
-			name:     "multi-byte content counted in runes, not bytes",
-			messages: []Message{{Role: "user", Content: "éééé"}}, // 4 runes, 8 bytes
-			response: &LLMResponse{Content: "ok"},
-			// Rune-based: 4*2/5 = 1. Byte-based would give 8*2/5 = 3,
-			// so this pins utf8.RuneCountInString over len().
+			name:       "multi-byte content counted in runes, not bytes",
+			messages:   []Message{{Role: "user", Content: "éééé"}},
+			response:   &LLMResponse{Content: "ok"},
 			wantInput:  1,
 			wantOutput: 0,
 		},

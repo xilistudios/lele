@@ -12,11 +12,12 @@ import {
   selectSubagentForSession,
 } from '../../lib/subagentHeader'
 import { formatSessionTitle } from '../../lib/utils'
-import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
 import { ContextIndicator } from '../atoms/ContextIndicator'
-import { ChevronLeftIcon, SidebarToggleIcon } from '../atoms/Icons'
+import { IconButton } from '../atoms/IconButton'
+import { ChevronLeftIcon, SidebarToggleIcon, ToolsIcon } from '../atoms/Icons'
 import { SubagentsIndicator } from '../atoms/SubagentsIndicator'
 import { SubagentsSidebar } from './SubagentsSidebar'
+import { ToolsSidebar } from './ToolsSidebar'
 
 export const ChatHeader = memo(function ChatHeader() {
   const { t } = useTranslation()
@@ -34,19 +35,12 @@ export const ChatHeader = memo(function ChatHeader() {
   const { apiUrl } = useAuthContext()
   const { currentSession, parentSession } = useChatPageContext()
   const [subagentsSidebarOpen, setSubagentsSidebarOpen] = useState(false)
+  const [toolsSidebarOpen, setToolsSidebarOpen] = useState(false)
 
-  // Poll while the parent turn is live so a spawn that lands mid-turn shows
-  // up even before the first refresh has seen a running task.
   const { subagents, loading, refresh } = useSubagents(currentSessionKey, 5000, isProcessing)
 
-  // When viewing a subagent chat, fetch the parent's subagent list once so we
-  // can resolve the subagent's label and agent_id. `NO_POLL_MS` (0) means "do
-  // not poll" — anything positive here would be an interval, and a tiny one
-  // would hammer /subagents. This is a separate instance that does NOT affect
-  // the subagents indicator (which uses the above call).
   const { subagents: parentSubagents } = useSubagents(parentSessionKey, NO_POLL_MS, false)
 
-  // Resolve the subagent entry that matches the current session.
   const matchedSubagent = useMemo(
     () => selectSubagentForSession(parentSubagents, currentSessionKey),
     [parentSubagents, currentSessionKey],
@@ -55,7 +49,6 @@ export const ChatHeader = memo(function ChatHeader() {
   const modeTheme = getModeTheme(chatMode)
   const ModeIcon = modeTheme.Icon
 
-  // Opening the panel always re-fetches — the list may have been idle.
   useEffect(() => {
     if (subagentsSidebarOpen) {
       void refresh()
@@ -63,7 +56,13 @@ export const ChatHeader = memo(function ChatHeader() {
   }, [subagentsSidebarOpen, refresh])
 
   const handleToggleSubagents = useCallback(() => {
+    setToolsSidebarOpen(false)
     setSubagentsSidebarOpen((prev) => !prev)
+  }, [])
+
+  const handleToggleTools = useCallback(() => {
+    setSubagentsSidebarOpen(false)
+    setToolsSidebarOpen((prev) => !prev)
   }, [])
 
   const handleCloseSubagents = useCallback(() => {
@@ -73,10 +72,6 @@ export const ChatHeader = memo(function ChatHeader() {
   const handleSelectSubagent = useCallback(
     (sessionKey: string) => {
       if (currentSessionKey) {
-        // Only navigate — let ChatRoute's first useEffect handle onSelectSession.
-        // Calling onSelectSession here creates a race condition: the state updates
-        // (currentSessionKey → subagent) may be committed before the URL changes,
-        // causing the useEffect to see mismatched state/URL and reset the session.
         navigate(
           `/chat/${encodeURIComponent(currentSessionKey)}/subagent/${encodeURIComponent(sessionKey)}`,
         )
@@ -101,7 +96,7 @@ export const ChatHeader = memo(function ChatHeader() {
 
   return (
     <>
-      <div className="flex items-center justify-between border-b border-border px-4 py-3 md:px-6">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3 md:px-6">
         <div className="flex items-center gap-2 md:gap-3 min-w-0">
           <button
             type="button"
@@ -138,7 +133,17 @@ export const ChatHeader = memo(function ChatHeader() {
         <div className="flex items-center gap-1">
           <SubagentsIndicator count={subagents.length} onClick={handleToggleSubagents} />
           <ContextIndicator />
-          <ConnectionIndicator status={wsStatus} apiUrl={apiUrl} />
+          <IconButton
+            onClick={handleToggleTools}
+            ariaLabel={t('chat.tools')}
+            title={t('chat.tools')}
+            ariaExpanded={toolsSidebarOpen}
+            className={`flex items-center justify-center h-9 w-9 ${
+              toolsSidebarOpen ? 'text-accent-text bg-surface-selected' : ''
+            }`}
+          >
+            <ToolsIcon />
+          </IconButton>
         </div>
       </div>
 
@@ -148,6 +153,13 @@ export const ChatHeader = memo(function ChatHeader() {
         isOpen={subagentsSidebarOpen}
         onClose={handleCloseSubagents}
         onSelectSubagent={handleSelectSubagent}
+      />
+
+      <ToolsSidebar
+        isOpen={toolsSidebarOpen}
+        onClose={() => setToolsSidebarOpen(false)}
+        connectionStatus={wsStatus}
+        apiUrl={apiUrl}
       />
     </>
   )

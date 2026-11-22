@@ -17,12 +17,9 @@ export function AuthPage({ apiUrl, error, initialPin = '', onSubmit }: Props) {
   const [deviceName, setDeviceName] = useState('My Desktop')
   const [loading, setLoading] = useState(false)
 
-  // In the desktop shell a token is injected, so the PIN screen is skipped and
-  // auth completes via the desktop session bootstrap. This guards against a
-  // brief flash of the PIN form while AuthContext is starting up.
   if (getDesktopToken()) {
     return (
-      <main className="flex min-h-screen items-center justify-center px-4 py-12">
+      <main className="flex app-shell-min items-center justify-center px-4 py-12">
         <div className="w-full max-w-md space-y-5 rounded-xl border border-border bg-background-primary p-6 shadow-xl">
           <div className="flex items-center justify-center py-8">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-focus border-t-transparent" />
@@ -52,7 +49,7 @@ export function AuthPage({ apiUrl, error, initialPin = '', onSubmit }: Props) {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4 py-12">
+    <main className="flex app-shell-min items-center justify-center px-4 py-12">
       <form
         className="w-full max-w-md space-y-5 rounded-xl border border-border bg-background-primary p-6 shadow-xl"
         onSubmit={handleSubmit}

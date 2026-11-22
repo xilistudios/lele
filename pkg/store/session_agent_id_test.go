@@ -7,14 +7,6 @@ import (
 	"time"
 )
 
-// Tests for the sessions.agent_id column (migration v8): it persists the agent
-// that EXECUTED a session, which for subagents is the spawn's target agent and
-// not the agent whose SessionManager happens to own the storage. Without it the
-// WebUI shows an arbitrary agent for historical subagents.
-
-// TestAgentID_MetaRoundTrip verifies the column survives a metadata
-// write/read cycle, including the overwrite case (a re-spawn or a retry that
-// re-records the executor).
 func TestAgentID_MetaRoundTrip(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Sessions()
@@ -42,7 +34,6 @@ func TestAgentID_MetaRoundTrip(t *testing.T) {
 		t.Errorf("AgentID = %q, want %q", got.AgentID, "coder")
 	}
 
-	// Upserting the same key with another executor must overwrite it.
 	meta.AgentID = "researcher"
 	if err := repo.UpsertSession(*meta); err != nil {
 		t.Fatalf("UpsertSession (update): %v", err)
@@ -56,10 +47,6 @@ func TestAgentID_MetaRoundTrip(t *testing.T) {
 	}
 }
 
-// TestAgentID_ListSessionMetaIncludesColumn checks the list queries carry the
-// column through: GetSessionMeta is not the only reader — the session manager
-// builds its metadata mirror from ListSessionMeta, and the cold branch of
-// FindSubagentSessions reports the executor out of that mirror.
 func TestAgentID_ListSessionMetaIncludesColumn(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Sessions()
@@ -105,10 +92,6 @@ func TestAgentID_ListSessionMetaIncludesColumn(t *testing.T) {
 	}
 }
 
-// TestAgentID_DefaultEmpty verifies rows written without an executor
-// (non-subagent sessions, and anything persisted before migration v8) read
-// back empty, which is what tells the reader layer to fall back to the
-// storage-owning agent.
 func TestAgentID_DefaultEmpty(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Sessions()
@@ -131,10 +114,6 @@ func TestAgentID_DefaultEmpty(t *testing.T) {
 	}
 }
 
-// TestMigrations_UpgradeV7ToV8_PreservesSessions proves the migration is safe
-// on a real database: a v7 store with session rows and messages keeps every
-// other column, the old rows come back with an empty agent_id (the reader's
-// fallback signal), and the reopened store is writable at v8.
 func TestMigrations_UpgradeV7ToV8_PreservesSessions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
 
@@ -171,7 +150,6 @@ func TestMigrations_UpgradeV7ToV8_PreservesSessions(t *testing.T) {
 		t.Fatalf("Close() failed: %v", err)
 	}
 
-	// Simulate a v7 database: no agent_id column, schema version downgraded.
 	db, err := openRawDB(path)
 	if err != nil {
 		t.Fatalf("openRawDB(%q) failed: %v", path, err)
@@ -186,7 +164,6 @@ func TestMigrations_UpgradeV7ToV8_PreservesSessions(t *testing.T) {
 	}
 	db.Close()
 
-	// Re-open: migrate 7→8 runs over the populated database.
 	s2, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open(%q) after downgrade failed: %v", path, err)
@@ -217,7 +194,6 @@ func TestMigrations_UpgradeV7ToV8_PreservesSessions(t *testing.T) {
 	if got.AgentID != "" {
 		t.Errorf("AgentID of a pre-v8 row = %q, want empty (reader falls back)", got.AgentID)
 	}
-	// Every other column must survive untouched.
 	if got.Name != "Historical subagent" || got.Mode != "agent" || got.Summary != "did the thing" ||
 		got.VerboseLevel != "basic" || got.Model != "test:model" || got.ThinkingLevel != "high" ||
 		got.Folder != "/tmp/work" || got.SubagentStatus != "failed" ||
@@ -238,7 +214,6 @@ func TestMigrations_UpgradeV7ToV8_PreservesSessions(t *testing.T) {
 		t.Errorf("messages after upgrade = %d, want 1", len(msgs))
 	}
 
-	// The upgraded store is writable and now records the executor.
 	got.AgentID = "coder"
 	if err := s2.Sessions().UpsertSession(*got); err != nil {
 		t.Fatalf("UpsertSession after upgrade: %v", err)

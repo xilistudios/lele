@@ -1,15 +1,3 @@
-/**
- * Streaming / message lifecycle event handlers.
- *
- * Handles the full lifecycle of a chat message as it flows through the
- * WebSocket: welcome/reconnect, stream chunks, thinking reasoning,
- * acknowledgement, completion, history updates, catchup, attachments,
- * errors, and typing indicators.
- *
- * State transitions are delegated to the pure helpers in `streamingOps.ts`;
- * this file is responsible for event parsing, session-mismatch guards, and
- * orchestrating side effects (queues, cache, processing state).
- */
 import { wsDebug } from '../../lib/debug'
 import { assistantIdentityText } from '../../lib/messageIdentity'
 import { sendErrorMessage } from '../../lib/sendErrors'
@@ -54,18 +42,11 @@ export function handleWelcome(ctx: MessageEventContext, data: Record<string, unk
     ctx.addProcessingSession(sessionKey)
   }
 
-  // welcome/reconnected: the backend does NOT re-emit stream metrics for a
-  // restored in-progress turn, so any figure still on screen belongs to a past
-  // stream. Drop it — the chip hides cleanly instead of showing a stale rate.
   ctx.clearStreamMetrics()
 
-  // Capture groups feature flag
   const groupsEnabled = data.groups_enabled as boolean | undefined
   ctx.setGroupsEnabled(groupsEnabled ?? false)
 
-  // Restore in-progress streaming messages after page reload or reconnection.
-  // The backend includes accumulated content and reasoning so the frontend
-  // doesn't have to wait for the next chunk to see the current state.
   const inProgress = data.in_progress_messages as
     | Array<{ role: string; content?: string; reasoning_content?: string }>
     | undefined
@@ -79,7 +60,7 @@ export function handleWelcome(ctx: MessageEventContext, data: Record<string, unk
             sessionKey,
             msg.content ?? '',
             msg.reasoning_content ?? '',
-            false, // welcome: no user context yet → append at end
+            false,
           )
         },
         [...current],
@@ -87,45 +68,25 @@ export function handleWelcome(ctx: MessageEventContext, data: Record<string, unk
     )
   }
 
-  // Restore the card of a tool that is still running. Like the in-progress
-  // assistant content above, the in-flight tool call is not part of the
-  // message history, so without it a page reload / reconnect showed the
-  // session as idle-but-spinning with the tool row gone.
-  //
-  // Gated on processing (unlike the content above): the backend only attaches
-  // the payload while the session is processing, and restoring it otherwise
-  // would paint a card that can never complete — the stuck-loading bug class.
   if (processing) {
     restoreInProgressTool(ctx, sessionKey ?? '', data.in_progress_tool as Record<string, unknown>)
   }
 
-  // Rehydrate group snapshots from welcome/reconnected data
   const groups = data.groups as GroupSnapshot[] | undefined
   if (Array.isArray(groups) && groups.length > 0) {
     ctx.hydrateGroups(groups.map(snapshotToGroupInfo))
   }
 }
 
-/**
- * Effective UI session key for an event that belongs to the current session.
- *
- * See `effectiveSessionKey` in ./helpers (shared with the tool handlers).
- */
-
 export function handleMessageStream(ctx: MessageEventContext, data: Record<string, unknown>) {
   const eventSessionKey = getSessionKey(data)
   if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'message.stream')) return
 
   const msgId = data.message_id as string
-  // Re-tag aliased events with the current key (see effectiveSessionKey).
   const sessionKey = effectiveSessionKey(ctx, eventSessionKey)
   const chunk = (data.chunk as string) ?? ''
   const done = (data.done as boolean) ?? false
 
-  // Token-speed metrics for the current segment. Propagated on EVERY chunk
-  // (including the terminal one) so the chip keeps the final figure after the
-  // segment ends; a payload without the fields parses to zeros and is ignored
-  // by the retention policy downstream.
   ctx.setStreamMetrics(parseStreamMetrics(data))
 
   wsDebug('[WS] message.stream received', {
@@ -136,8 +97,6 @@ export function handleMessageStream(ctx: MessageEventContext, data: Record<strin
     done: data.done,
   })
 
-  // Migrate any restore- placeholder to the real message id so accumulated
-  // content is preserved instead of creating a duplicate.
   ctx.setStreamingMessages((current) => migrateRestoreId(current, msgId, sessionKey))
 
   if (done && chunk) {
@@ -156,22 +115,12 @@ export function handleMessageThinking(ctx: MessageEventContext, data: Record<str
 
   const msgId = data.message_id as string
   const chunk = (data.chunk as string) ?? ''
-  // Re-tag aliased events with the current key (see effectiveSessionKey).
   const sessionKey = effectiveSessionKey(ctx, eventSessionKey)
 
-  // Reasoning chunks carry the same throughput metrics as the answer (see
-  // agent/llm_stream.go), metered on the reasoning surface. Forwarding them here
-  // is what keeps the chip live from the first thinking token, instead of only
-  // once the answer starts streaming; a non-positive rate is ignored by the
-  // retention policy downstream, so the previous figure is not blanked.
   ctx.setStreamMetrics(parseStreamMetrics(data))
 
-  // Migrate any restore- placeholder to the real message id (see stream handler).
   ctx.setStreamingMessages((current) => migrateRestoreId(current, msgId, sessionKey))
 
-  // Ensure the assistant placeholder exists before updating reasoning content.
-  // Without this, thinking chunks arriving before message.stream (e.g., after
-  // page reload or reconnection) are silently dropped.
   ctx.ensureAssistantPlaceholder(msgId, sessionKey)
 
   ctx.setStreamingMessages((current) =>
@@ -187,49 +136,22 @@ export function handleMessageThinking(ctx: MessageEventContext, data: Record<str
   )
 }
 
-/**
- * `message.discard` — the backend streamed an LLM iteration to this client and
- * then threw it away (empty-response retry, plain-text tool-call guidance, every
- * tool call invalid).
- *
- * The bubble those chunks built is therefore a ghost: the iteration is never
- * persisted, so no history copy will ever confirm it and `mergeMessages`
- * appends it AFTER the canonical history — the stray "Thinking…" card below the
- * final answer. This event is the only signal that says so; see
- * `removeDiscardedMessage` for the state transition itself.
- *
- * The turn is still RUNNING (discarding an iteration is how the agent retries),
- * so nothing but that one bubble changes: processing state, tool status, error
- * banner and history cache are deliberately left alone.
- */
 export function handleMessageDiscard(ctx: MessageEventContext, data: Record<string, unknown>) {
   const eventSessionKey = getSessionKey(data)
-  // Same guard as the sibling stream handlers: an event for another
-  // conversation — or an aliased key resolved elsewhere — must not retract a
-  // bubble that belongs to the pane on screen.
   if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'message.discard'))
     return
 
   const msgId = data.message_id as string
   if (!msgId) return
 
-  // The typewriter queue can still hold chunks for this id (the last stream
-  // frame may have arrived just before the discard); draining it first keeps a
-  // later tick from re-creating the bubble we are about to remove. Same
-  // precaution `handleMessageComplete` takes for a finished stream.
   ctx.clearQueue(msgId)
 
-  // Re-tag aliased events with the current key (see effectiveSessionKey): the
-  // streaming list is keyed by the session on screen.
   const sessionKey = effectiveSessionKey(ctx, eventSessionKey)
   ctx.setStreamingMessages((current) => removeDiscardedMessage(current, msgId, sessionKey))
 }
 
 export function handleMessageAck(ctx: MessageEventContext, data: Record<string, unknown>) {
   const rawAckKey = (data.session_key as string) ?? ''
-  // Backend may report the alias-resolved key (base:chat:N, see
-  // pkg/channels/websocket.go); UI state is keyed by the current session —
-  // re-tag so processing, the placeholder and restore-cleanup all target it.
   const ackSessionKey = rawAckKey ? effectiveSessionKey(ctx, rawAckKey) : ''
   if (ackSessionKey) {
     ctx.addProcessingSession(ackSessionKey)
@@ -237,9 +159,6 @@ export function handleMessageAck(ctx: MessageEventContext, data: Record<string, 
   }
   ctx.ensureAssistantPlaceholder(data.message_id as string, ackSessionKey)
 
-  // Remove restored placeholder messages for this session now that a real
-  // message is starting, preventing duplicates when restored content and the
-  // real stream coexist briefly.
   if (ackSessionKey) {
     ctx.setStreamingMessages((current) => removeRestorePlaceholders(current, ackSessionKey))
   }
@@ -258,9 +177,6 @@ export function handleMessageComplete(ctx: MessageEventContext, data: Record<str
     completedSessionKey,
   })
 
-  // The ack registers the BASE key as processing while complete can carry the
-  // alias (and vice versa), so clear both sides of an aliased pair — otherwise
-  // the entry added by the ack leaks and the spinner stays stuck.
   if (completedSessionKey) {
     ctx.removeProcessingSession(completedSessionKey)
   }
@@ -268,14 +184,10 @@ export function handleMessageComplete(ctx: MessageEventContext, data: Record<str
     if (sessionKeysLooselyMatch(currentKey, completedSessionKey)) {
       ctx.removeProcessingSession(currentKey)
     } else {
-      // Event for an unrelated session: never touch the current session's
-      // global refs, tool status or streaming state.
       return
     }
   }
 
-  // Streaming state is keyed by the current session key, so complete the
-  // placeholder under it even when the event carried an alias.
   const targetSessionKey = (currentKey ?? completedSessionKey ?? '') as string
   ctx.setStreamingMessages((current) =>
     applyMessageComplete(
@@ -284,8 +196,6 @@ export function handleMessageComplete(ctx: MessageEventContext, data: Record<str
       targetSessionKey,
       data.content as string | undefined,
       data.attachments as ChatMessage['attachments'],
-      // A failed turn is marked on the wire (pkg/channels/native.go): render the
-      // red error box immediately instead of waiting for the history refetch.
       data.error === true,
     ),
   )
@@ -295,35 +205,12 @@ export function handleMessageComplete(ctx: MessageEventContext, data: Record<str
   ctx.debouncedSessionRefresh()
 }
 
-/**
- * Identity of a message for confirmation matching: delegates to
- * lib/messageIdentity.ts, the rule shared with `mergeMessages` and
- * `toChatMessages` (an assistant iteration with no text is identified by its
- * reasoning) and keeps the role dispatch local to this module.
- */
 function confirmationIdentity(msg: ChatMessage): string {
   return msg.role === 'assistant'
     ? assistantIdentityText(msg.content, msg.reasoningContent)
     : msg.content
 }
 
-/**
- * Whether a streaming message already has a confirmed (non-optimistic) copy in
- * the HTTP cache, matched by a 200-char identity prefix (see
- * `confirmationIdentity`). The prefix comparison tolerates minor server-side
- * normalization (trailing newlines, unicode).
- *
- * An empty prefix matches no content, and for a LONG time that was harmless
- * because such a message could not be sent. It is not harmless for an
- * attachments-only turn (valid since the composer and the backend accept it):
- * the bubble would never be confirmed here. The old comment claimed a "4s HTTP
- * polling safety net" reconciled it, but that net is this very function — the
- * poll refetches the history and `handleHistoryUpdated`/`mergeMessages` ask the
- * same question again — so the bubble stayed forever and the image rendered
- * twice once the history copy landed. Such a turn is therefore confirmed
- * through the marker identity shared with `mergeMessages` (see
- * `isAttachmentsOnly` / `isAttachmentsOnlyBase`).
- */
 function isConfirmedInCache(
   msg: ChatMessage,
   cached: { messages?: ChatMessage[] } | undefined,
@@ -359,10 +246,6 @@ function isConfirmedInCache(
 export function handleHistoryUpdated(ctx: MessageEventContext, data: Record<string, unknown>) {
   const eventSessionKey = data.session_key as string | undefined
   const currentKey = ctx.currentSessionKeyRef.current
-  // The query cache is keyed by the session key the frontend knows (the base
-  // key). An aliased event key (`base:chat:N`, pkg/agent/loop.go) refers to the
-  // SAME conversation, so it must resolve to the current key — invalidating the
-  // alias key would be a no-op and the UI would never refetch.
   const historySessionKey: string | null =
     eventSessionKey && sessionKeysLooselyMatch(eventSessionKey, currentKey)
       ? currentKey
@@ -373,40 +256,22 @@ export function handleHistoryUpdated(ctx: MessageEventContext, data: Record<stri
   }
   ctx.debouncedSessionRefresh()
 
-  // Genuinely another conversation: invalidation above is harmless, but the
-  // stripping below only applies to the session currently on screen.
   if (!historySessionKey || historySessionKey !== currentKey) return
 
-  // invalidateQueries triggers an ASYNC refetch. We must only strip optimistic
-  // users / completed assistants once the HTTP cache already holds the
-  // confirmed copy — otherwise the message vanishes until the refetch lands
-  // (flicker, or the assistant appearing to jump ahead of the user). The 4s
-  // HTTP poll + mergeMessages dedup are the safety net if this check misses.
   const cached = ctx.queryClient.getQueryData<{ messages?: ChatMessage[] }>(
     buildChatHistoryQueryKey(historySessionKey, ctx.parentSessionKeyRef.current ?? undefined),
   )
 
   ctx.setStreamingMessages((current) => {
-    // Before stripping confirmed messages, record their ephemeral id in the
-    // durable stableId registry so every future history build (including
-    // refetches from the 4s poll) re-attaches it as `stableId`. This keeps
-    // React render keys identical across the WebSocket→HTTP transition —
-    // without it, the key flips from uuid to content-hash at confirmation
-    // time and the bubble remounts (flicker).
     for (const m of current) {
       if (m.sessionKey !== historySessionKey) continue
       if (m.role === 'user' && m.optimistic && isConfirmedInCache(m, cached)) {
         registerStableId('user', m.content, m.id)
       }
       if (m.role === 'assistant' && !m.streaming && isConfirmedInCache(m, cached)) {
-        // Keyed on the SAME identity the confirmation used (content, or the
-        // reasoning text for a thinking / tool-call iteration with no text), so
-        // toChatMessages can re-attach it to the base copy it confirmed.
         registerStableId('assistant', confirmationIdentity(m), m.id)
       }
       if (m.role === 'tool' && m.toolStatus !== 'executing' && isConfirmedInCache(m, cached)) {
-        // Tools key on tool_call_id (content may be empty) and fall back to
-        // the result text so toChatMessages can re-attach the live id.
         if (m.toolCallId) registerStableId('tool', `id:${m.toolCallId}`, m.id)
         if (m.toolResult) registerStableId('tool', m.toolResult, m.id)
       }
@@ -415,18 +280,9 @@ export function handleHistoryUpdated(ctx: MessageEventContext, data: Record<stri
       if (m.sessionKey !== historySessionKey) return true
       if (m.role === 'user' && m.optimistic) return !isConfirmedInCache(m, cached)
       if (m.role === 'assistant' && !m.streaming) {
-        // A COMPLETED iteration that produced neither text nor reasoning renders
-        // nothing: `filterStreamingLeftovers` in messageMerge.ts drops exactly
-        // this shape. Keeping it here leaks one entry per tool iteration for the
-        // life of the session (it can never match `isConfirmedInCache`, whose
-        // identity is empty), which is the same accumulation the rest of this
-        // filter exists to prevent. An in-flight placeholder (`streaming: true`)
-        // is the visible bubble and is never dropped.
         if (m.content.trim() === '' && !m.reasoningContent) return false
         return !isConfirmedInCache(m, cached)
       }
-      // Completed tools confirmed in HTTP history are dropped here so merge
-      // does not have to reconcile two copies (and so the base id wins).
       if (m.role === 'tool' && m.toolStatus !== 'executing') {
         return !isConfirmedInCache(m, cached)
       }
@@ -463,10 +319,6 @@ export function handleMessagesCatchup(ctx: MessageEventContext, data: Record<str
     ctx.parentSessionKeyRef.current ?? undefined,
   )
 
-  // Identities present in the catchup payload. Streaming copies of these are
-  // safe to drop (they are now in baseMessages); everything else must stay —
-  // catchup can miss in-flight tools/assistants, and wiping them wholesale
-  // made tool cards vanish from the live view.
   const catchupAssistantIds = new Set(
     catchupData.messages.filter((m) => m.role === 'assistant').map((m) => m.id ?? ''),
   )
@@ -481,20 +333,13 @@ export function handleMessagesCatchup(ctx: MessageEventContext, data: Record<str
       if (message.sessionKey !== targetSessionKey) return true
 
       if (message.role === 'assistant') {
-        // Keep actively-streaming assistants; drop completed ones only when
-        // catchup actually carries them (by id) or they are empty leftovers.
         if (message.streaming) return true
         if (catchupAssistantIds.has(message.id)) return false
-        // Completed assistant not in catchup — keep only if it has content
-        // (the merge layer will position-match or append it).
         return message.content.trim() !== '' || Boolean(message.reasoningContent)
       }
 
       if (message.role === 'tool') {
-        // Never drop a tool that is still executing.
         if (message.toolStatus === 'executing') return true
-        // Drop completed tools confirmed in catchup; keep the rest until the
-        // HTTP poll can confirm them.
         if (message.toolCallId && catchupToolCallIds.has(message.toolCallId)) return false
         return true
       }
@@ -511,15 +356,10 @@ export function handleAttachments(ctx: MessageEventContext, event: ClientEvent) 
 }
 
 export function handleMessageError(ctx: MessageEventContext, data: Record<string, unknown>) {
-  // Defense for the future: the backend does not emit message.error today; if
-  // it ever does with an alias-resolved key, re-tag it to the current session
-  // so the failure markers below hit the UI state (keyed by that key).
   const errorSessionKey = effectiveSessionKey(ctx, getSessionKey(data))
 
-  // Mark optimistic user message as failed (instead of removing it)
   ctx.setStreamingMessages((current) => markOptimisticUserFailed(current, errorSessionKey))
 
-  // Rollback from query cache
   const cacheKey = buildChatHistoryQueryKey(
     errorSessionKey,
     ctx.parentSessionKeyRef.current ?? undefined,
@@ -539,9 +379,6 @@ export function handleMessageError(ctx: MessageEventContext, data: Record<string
 }
 
 export function handleStreamError(ctx: MessageEventContext, data: Record<string, unknown>) {
-  // Defense for the future: the backend does not emit stream.error today; if
-  // it ever does with an alias-resolved key, re-tag it to the current session
-  // so the error markers below hit the streaming state (keyed by that key).
   const errorSessionKey = effectiveSessionKey(ctx, getSessionKey(data))
 
   ctx.setStreamingMessages((current) =>
@@ -568,41 +405,14 @@ export function handleTypingIndicator(ctx: MessageEventContext, data: Record<str
   })
 }
 
-/**
- * Server-side send refusal (`{"event":"error","data":{"code","message"}}` —
- * pkg/channels/websocket.go `sendError`).
- *
- * WHY a dedicated handler: the event was simply absent from the dispatcher, so
- * EVERY rejection the send endpoints produced was dropped on the floor — a user
- * could hit "send" with an attachments-only turn whose files the server refused
- * and see nothing happen at all. The refusal must reach `setError`, the same
- * banner the REST failures already use (`ChatPage.tsx`).
- *
- * WHY no DOM/socket-error sniffing is needed: the socket-level error travels a
- * DIFFERENT channel (`services/ws/client.ts` emits `'error'` on the client for
- * the DOM event, and nobody subscribes to it), while this handler only sees
- * events that arrived as a parsed `{event, data}` envelope. A payload without
- * the `{code, message}` shape therefore cannot reach here.
- */
 export function handleServerError(
   ctx: MessageEventContext,
   data: Record<string, unknown> | undefined,
 ) {
-  // An envelope with no `data` at all is malformed, not silent-worthy: report
-  // the generic failure instead of throwing out of the dispatch loop.
   const payload = data ?? {}
   const code = typeof payload.code === 'string' ? payload.code : ''
   const message = typeof payload.message === 'string' ? payload.message : ''
 
-  // `attachments_rejected` is the ONE refusal that answers a turn already
-  // accepted locally: the POST-processing guard produces it only for a send
-  // with no text whose every attachment was dropped, and such a turn never
-  // reaches the history, so the optimistic bubble has no copy to be confirmed
-  // by (see `isAttachmentsOnly` in messageMerge) while the chips were burned on
-  // local acceptance. Retract the oldest one and hand the paths back to the
-  // composer. Two simultaneous text-less sends are an accepted limitation of
-  // this heuristic: the server envelope carries no client message id
-  // (`sendError` in pkg/channels/websocket.go). No bubble → the banner alone.
   if (code === 'attachments_rejected') {
     const retracted = retractAttachmentsOnlyBubble(
       ctx.streamingMessagesRef.current,
@@ -615,24 +425,8 @@ export function handleServerError(
       }
     }
   } else {
-    // Every OTHER refusal answers a send the client had already accepted
-    // locally, so the optimistic user bubble is on screen and no assistant will
-    // ever answer it. Without this marker the bubble is STRANDED: the only code
-    // that marked one failed was `handleMessageError`, which listens for
-    // `message.error` — an event this backend never emits (no emitters under
-    // pkg/) — and `mergeMessages` appends unmatched streaming messages AFTER
-    // the canonical history, so the refused bubble rendered at the very bottom
-    // of the list, below newer answers, with no retry button
-    // (`MessageBubble` only offers it when `message.failed`).
-    //
-    // Only the NEWEST optimistic bubble is marked: the envelope carries no
-    // client message id (see `sendError` in pkg/channels/websocket.go), and a
-    // refusal is the answer to the LAST send transmitted. See
-    // `markNewestOptimisticUserFailed`.
     const current = ctx.streamingMessagesRef.current
     const marked = markNewestOptimisticUserFailed(current, ctx.currentSessionKeyRef.current ?? '')
-    // Identity check: a late/duplicate refusal (or one for a session with no
-    // pending bubble) changes nothing and must not schedule a state update.
     if (marked !== current) ctx.setStreamingMessages(marked)
   }
 

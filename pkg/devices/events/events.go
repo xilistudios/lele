@@ -28,12 +28,12 @@ const (
 type DeviceEvent struct {
 	Action       Action
 	Kind         Kind
-	DeviceID     string            // e.g. "1-2" for USB bus 1 dev 2
-	Vendor       string            // Vendor name or ID
-	Product      string            // Product name or ID
-	Serial       string            // Serial number if available
-	Capabilities string            // Human-readable capability description
-	Raw          map[string]string // Raw properties for extensibility
+	DeviceID     string
+	Vendor       string
+	Product      string
+	Serial       string
+	Capabilities string
+	Raw          map[string]string
 }
 
 func (e *DeviceEvent) FormatMessage() string {

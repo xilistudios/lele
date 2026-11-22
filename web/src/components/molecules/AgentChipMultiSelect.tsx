@@ -2,29 +2,13 @@ import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AgentAvatar } from '../atoms/AgentAvatar'
 
-/**
- * Agent chip multi-select (spec §7.6) — "which agents may this one delegate
- * to?".
- *
- * Replaces the generic `StringListEditor` here: the candidate set is small and
- * static, so showing every agent as a chip and tapping it is strictly better
- * than adding names one by one from a dropdown.
- *
- * Order follows `agents.list` — never re-sorted, because dirty paths are
- * positional (`agents.list.{index}.…`).
- */
-
 type Props = {
-  /** DOM id of the group (also used to build each chip's id). */
   id: string
-  /** Other agents (never the agent being edited). */
   agents: Array<{ id: string; name?: string }>
   value: string[]
   onChange: (value: string[]) => void
   disabled?: boolean
-  /** Block shown when there are no candidates (dashed empty state). */
   empty?: ReactNode
-  /** Accessible name of the group; defaults to the i18n "Allowed agents". */
   ariaLabel?: string
 }
 

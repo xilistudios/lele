@@ -218,7 +218,6 @@ func TestNativeStreamingDoesNotBlockOtherChannels(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Create a mock channel and override send via sendFn
 	telegramCh := &mockChannel{name: "telegram"}
 	telegramCh.running = true
 	var telegramSent atomic.Int32
@@ -256,7 +255,6 @@ func TestNativeStreamingDoesNotBlockOtherChannels(t *testing.T) {
 		}
 	}()
 
-	// Consume telegram messages via a mock channel dispatcher
 	telegramQueue := make(chan bus.OutboundMessage, 200)
 	wg.Add(1)
 	go func() {
@@ -387,8 +385,6 @@ func TestWebSocketRapidMessagesUnderLoad(t *testing.T) {
 		}
 	}()
 
-	// Start a goroutine to consume messages from the bus and dispatch them
-	// to the native channel so they reach the websocket clients.
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {

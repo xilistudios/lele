@@ -14,22 +14,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// ============================================================================
-// T8: the subagent path must decide "transient or not?" with exactly the same
-// policy the parent agent loop uses (providers.IsRetriableError), instead of
-// hand-rolled string whitelists. Both predicates below are thin delegates, so
-// every case is checked twice: against an explicit expected value (documents
-// the taxonomy) and against providers.IsRetriableError itself (proves the
-// delegation, i.e. parent and subagent can never disagree again).
-// ============================================================================
-
-// transientPolicyCases returns the shared table used by both delegation tests.
-//
-// Note on *FailoverError{Auth}: a bare auth error is terminal for THAT provider
-// but still candidate-swappable for the chain (see FailoverError.IsRetriable),
-// so the provider policy reports it as retriable. That is intentional and is
-// the whole point of delegating: the subagent inherits the parent's answer,
-// whatever it is, instead of voting with its own string list.
 func transientPolicyCases() []struct {
 	name string
 	err  error
@@ -108,26 +92,14 @@ func assertDelegatesToProviderPolicy(t *testing.T, name string, fn func(error) b
 	}
 }
 
-// TestIsTransientFailureDelegatesToProviderPolicy covers the subagent retry
-// decision (pkg/tools/subagent_runner.go).
 func TestIsTransientFailureDelegatesToProviderPolicy(t *testing.T) {
 	assertDelegatesToProviderPolicy(t, "isTransientFailure", isTransientFailure)
 }
 
-// TestIsRetryableErrorDelegatesToProviderPolicy covers the per-LLM-call retry
-// decision (pkg/tools/retry.go).
 func TestIsRetryableErrorDelegatesToProviderPolicy(t *testing.T) {
 	assertDelegatesToProviderPolicy(t, "isRetryableError", isRetryableError)
 }
 
-// ============================================================================
-// End-to-end retry behaviour through runTask
-// ============================================================================
-
-// flakySubagentProvider fails the first `failures` calls with err and then
-// returns `final`, so a test can assert that the retry loops actually re-ran
-// the task. It implements only the non-streaming LLMProvider interface, so
-// providers.ChatIdle calls Chat() directly.
 type flakySubagentProvider struct {
 	mu      sync.Mutex
 	failAt  int
@@ -164,18 +136,10 @@ func (p *flakySubagentProvider) GetDefaultModel() string { return "test-model" }
 func (p *flakySubagentProvider) SupportsTools() bool     { return false }
 func (p *flakySubagentProvider) GetContextWindow() int   { return 4096 }
 
-// transportErr is a realistic "the wire broke" error: exactly the shape that
-// the old string whitelists missed and that killed sessions.
 func transportErr() error {
 	return &url.Error{Op: "Post", URL: "https://api.example.com/v1/chat", Err: io.ErrUnexpectedEOF}
 }
 
-// withNoRetrySleep replaces the package's backoff sleep seam (retrySleep in
-// retry.go) with an instantly-ready channel so retry paths run in tests without
-// wall-clock waits. Production always uses time.After; both the per-call retry
-// loop and the subagent task retry select on it alongside ctx.Done(), so
-// cancellation behaviour is identical. pkg/tools tests do not use
-// t.Parallel, so swapping the package-level var is safe.
 func withNoRetrySleep(t *testing.T) {
 	t.Helper()
 	prev := retrySleep
@@ -187,16 +151,10 @@ func withNoRetrySleep(t *testing.T) {
 	t.Cleanup(func() { retrySleep = prev })
 }
 
-// TestSubagentTransientFailureRetries proves Change 2 + Change 4: a transport
-// failure must be classified transient from the real error (not from the
-// rendered result string) and must actually re-run the task.
 func TestSubagentTransientFailureRetries(t *testing.T) {
 	withNoRetrySleep(t)
 
 	provider := &flakySubagentProvider{
-		// The inner ChatWithRetry loop gets the first look at the transport
-		// error and burns its whole budget (MaxRetries attempts + 1), so the
-		// outer runTask retry is what actually recovers the task.
 		failAt:  DefaultRetryConfig().MaxRetries + 1,
 		failErr: transportErr(),
 		final:   "STATUS: completed\nSUMMARY: Done\nDETAILS:\nCompleted after retry",
@@ -227,7 +185,6 @@ func TestSubagentTransientFailureRetries(t *testing.T) {
 	if calls := provider.callsCount(); calls < 2 {
 		t.Errorf("provider calls = %d, want >= 2 (the retry must re-run the LLM)", calls)
 	}
-	// A successful run must not leave a stale error behind for the next one.
 	manager.mu.Lock()
 	lastErr := task.lastErr
 	manager.mu.Unlock()
@@ -236,17 +193,11 @@ func TestSubagentTransientFailureRetries(t *testing.T) {
 	}
 }
 
-// TestSubagentTransientFailureRetriesWithRegisteredCancel reproduces AGT-01:
-// when the cancel func is registered in sm.cancels (as SpawnWithOptions does),
-// runTaskImpl's deferred cleanup cancels the taskCtx, causing the retry
-// select to fire ctx.Done() immediately instead of retrying. The task ends up
-// Cancelled with "Task cancelled during retry backoff" instead of completing.
 func TestSubagentTransientFailureRetriesWithRegisteredCancel(t *testing.T) {
 	withNoRetrySleep(t)
 
 	innerMax := DefaultRetryConfig().MaxRetries
 	provider := &flakySubagentProvider{
-		// Exhaust all inner retries on first attempt so runTaskImpl fails.
 		failAt:  innerMax + 1,
 		failErr: transportErr(),
 		final:   "STATUS: completed\nSUMMARY: Done\nDETAILS:\nCompleted after retry",
@@ -268,10 +219,6 @@ func TestSubagentTransientFailureRetriesWithRegisteredCancel(t *testing.T) {
 		MaxRetries:       2,
 	}
 
-	// Register cancel in sm.cancels, exactly like SpawnWithOptions does.
-	// This is the key difference from TestSubagentTransientFailureRetries:
-	// runTaskImpl's defer finds this entry and (buggy code) unconditionally
-	// cancels it, killing the retry.
 	manager.AddTaskForTest(task, taskCancel)
 
 	manager.runTask(taskCtx, task, nil)
@@ -291,14 +238,9 @@ func TestSubagentTransientFailureRetriesWithRegisteredCancel(t *testing.T) {
 	}
 }
 
-// TestSubagentExplicitCancelDuringBackoff verifies that external cancellation
-// (StopAll/StopTask) during the retry backoff still gives SubagentStatusCancelled.
-// This must not regress with the AGT-01 fix.
 func TestSubagentExplicitCancelDuringBackoff(t *testing.T) {
 	innerMax := DefaultRetryConfig().MaxRetries
 
-	// controllableSleep blocks until the test closes the unblock channel,
-	// giving us a window to cancel the context during the backoff.
 	unblock := make(chan struct{})
 	prev := retrySleep
 	retrySleep = func(d time.Duration) <-chan time.Time {
@@ -339,15 +281,10 @@ func TestSubagentExplicitCancelDuringBackoff(t *testing.T) {
 		close(done)
 	}()
 
-	// Wait for runTaskImpl to fail and runTask to enter the backoff select.
-	// The controllable sleep will block until we unblock it.
 	time.Sleep(50 * time.Millisecond)
 
-	// Simulate external cancellation (StopAll / StopTask).
 	taskCancel()
 
-	// Unblock the backoff select. Since ctx is already cancelled,
-	// ctx.Done() should fire before the sleep channel.
 	close(unblock)
 
 	select {
@@ -357,11 +294,6 @@ func TestSubagentExplicitCancelDuringBackoff(t *testing.T) {
 	}
 
 	snap := task.Snapshot()
-	// When the context is cancelled, runTaskImpl sets SubagentStatusCancelled
-	// in the ctx.Err() branch but then the blanket task.Status=Failed at the
-	// end of the err!=nil block overwrites it (existing behaviour). The
-	// important invariant is that the task does NOT retry: lastErr is nil in
-	// the cancelled branch, so retryPendingLocked returns false.
 	if snap.Status != SubagentStatusFailed {
 		t.Errorf("status = %q, want %q (terminal failure, no retry)", snap.Status, SubagentStatusFailed)
 	}
@@ -373,10 +305,6 @@ func TestSubagentExplicitCancelDuringBackoff(t *testing.T) {
 	}
 }
 
-// TestSubagentTerminalFailureDoesNotRetry proves the blacklist side: a terminal
-// failure is not retried. Uses a chain whose every attempt is a format error,
-// which providers.IsRetriableError rejects outright (a bare auth FailoverError
-// is deliberately retriable for the chain, see FailoverError.IsRetriable).
 func TestSubagentTerminalFailureDoesNotRetry(t *testing.T) {
 	withNoRetrySleep(t)
 
@@ -415,9 +343,6 @@ func TestSubagentTerminalFailureDoesNotRetry(t *testing.T) {
 	if calls := provider.callsCount(); calls != 1 {
 		t.Errorf("provider calls = %d, want 1 (no re-run)", calls)
 	}
-	// Change 3: the rendered error type is the provider layer's reason, not the
-	// old local taxonomy. "format" replaces what used to be reported as
-	// "http_timeout"/"rate_limited"/"connection_error"/"server_error"/"unknown".
 	if !strings.HasPrefix(snap.Result, "Error [format]:") {
 		t.Errorf("Result = %q, want prefix %q", snap.Result, "Error [format]:")
 	}

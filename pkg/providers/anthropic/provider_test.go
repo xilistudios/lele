@@ -129,10 +129,6 @@ func TestBuildParams_WithVisionImage(t *testing.T) {
 	}
 }
 
-// TestBuildAnthropicContentBlocks_DropsVideoParts verifies the defensive
-// hardening: Anthropic has no native video input, so a video_url content part
-// must be silently dropped — the resulting block list is identical to the
-// text-only equivalent and nothing about the video leaks into the payload.
 func TestBuildAnthropicContentBlocks_DropsVideoParts(t *testing.T) {
 	textParts := []protocoltypes.ContentPart{
 		{Type: "text", Text: "Describe this"},
@@ -322,7 +318,6 @@ func createAnthropicTestClient(baseURL, token string) *anthropic.Client {
 	return &c
 }
 
-// writeAnthropicTestResponse writes a minimal valid Messages API response.
 func writeAnthropicTestResponse(w http.ResponseWriter, r *http.Request) {
 	var reqBody map[string]interface{}
 	json.NewDecoder(r.Body).Decode(&reqBody)

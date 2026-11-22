@@ -1,22 +1,4 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
-
-// End-to-end proof that every main-loop egress in pkg/agent stamps the
-// conversation-scoped wire session id (providers.WireSessionID) and that the
-// factory-built OpenCode Go transport turns it into the x-opencode-session
-// header on the wire (T2 of the OpenCode Go support plan).
-//
-// Each positive test runs the REAL transport (CreateProviderForCandidate, not
-// NewHTTPProvider — that is what applies the OpenCode Go detection) against an
-// httptest server and applies the anti-hollowness guard: the header value must
-// equal providers.WireSessionID(sessionKey) exactly, so a test cannot pass on
-// "some header arrived". One negative control per file runs the same path
-// through a plain openai provider and asserts the header is absent, so the
-// positive tests cannot pass on "the handler sees everything".
 
 import (
 	"context"
@@ -34,9 +16,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// ocgoWireRecorder records the headers of every request it serves. Headers are
-// CLONED inside the handler: reading any part of *http.Request after the
-// handler returns races with the server's connection cleanup.
 type ocgoWireRecorder struct {
 	mu      sync.Mutex
 	headers []http.Header
@@ -44,8 +23,6 @@ type ocgoWireRecorder struct {
 	reply   func(w http.ResponseWriter, r *http.Request)
 }
 
-// newOCGOWireRecorder starts a server that records every request and answers
-// with the given reply. Returns the recorder and the server's base URL.
 func newOCGOWireRecorder(t *testing.T, reply func(w http.ResponseWriter, r *http.Request)) (*ocgoWireRecorder, string) {
 	t.Helper()
 	rec := &ocgoWireRecorder{reply: reply}
@@ -64,7 +41,6 @@ func (rec *ocgoWireRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec.reply(w, r)
 }
 
-// recorded returns copies of the recorded paths and x-opencode-session values.
 func (rec *ocgoWireRecorder) recorded() (paths, sessionIDs []string) {
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
@@ -81,7 +57,6 @@ func (rec *ocgoWireRecorder) requestCount() int {
 	return len(rec.headers)
 }
 
-// lastSessionHeader returns the header value of the most recent request.
 func (rec *ocgoWireRecorder) lastSessionHeader(t *testing.T) string {
 	t.Helper()
 	rec.mu.Lock()
@@ -92,8 +67,6 @@ func (rec *ocgoWireRecorder) lastSessionHeader(t *testing.T) string {
 	return rec.headers[len(rec.headers)-1].Get("X-Opencode-Session")
 }
 
-// assertSessionHeader is the anti-hollowness guard: the wire value must be
-// exactly the id derived from the session key.
 func assertSessionHeader(t *testing.T, got, sessionKey string) {
 	t.Helper()
 	want := providers.WireSessionID(sessionKey)
@@ -102,8 +75,6 @@ func assertSessionHeader(t *testing.T, got, sessionKey string) {
 	}
 }
 
-// ocgoSSECompletion answers the streaming transport (ChatIdle prefers it) with
-// a single completion chunk and [DONE], the shape openai_compat parses.
 func ocgoSSECompletion(content string) func(w http.ResponseWriter, _ *http.Request) {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -112,8 +83,6 @@ func ocgoSSECompletion(content string) func(w http.ResponseWriter, _ *http.Reque
 	}
 }
 
-// registerNamedProvider wires a named provider entry in cfg (creating the
-// Providers struct when the test harness left it nil).
 func registerNamedProvider(cfg *config.Config, name, typ, apiBase string) {
 	if cfg.Providers == nil {
 		cfg.Providers = &config.ProvidersConfig{}
@@ -128,10 +97,6 @@ func registerNamedProvider(cfg *config.Config, name, typ, apiBase string) {
 	}
 }
 
-// TestOpenCodeGo_MainLoopSendsSessionHeader drives the main-loop egress
-// (llmCaller.call → buildLLMOptions) through the real OpenCode Go transport
-// and proves: two consecutive turns of one conversation send the SAME id, and
-// a rotated key (/new via nextConversationSessionKey) sends a DIFFERENT one.
 func TestOpenCodeGo_MainLoopSendsSessionHeader(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -157,19 +122,16 @@ func TestOpenCodeGo_MainLoopSendsSessionHeader(t *testing.T) {
 		sessionKey: base,
 	}
 
-	// Turn 1.
 	if _, err := lc.call(opts); err != nil {
 		t.Fatalf("turn 1: %v", err)
 	}
 	assertSessionHeader(t, rec.lastSessionHeader(t), base)
 
-	// Turn 2, same conversation: identical id.
 	if _, err := lc.call(opts); err != nil {
 		t.Fatalf("turn 2: %v", err)
 	}
 	assertSessionHeader(t, rec.lastSessionHeader(t), base)
 
-	// Rotation: the next conversation on the same base must change the id.
 	rotated := al.nextConversationSessionKey(base)
 	if rotated == base {
 		t.Fatal("test setup: rotation must yield a different session key")
@@ -188,10 +150,6 @@ func TestOpenCodeGo_MainLoopSendsSessionHeader(t *testing.T) {
 	}
 }
 
-// TestOpenCodeGo_FallbackCandidateKeepsSessionHeader proves the stamp survives
-// the fallback chain: every candidate provider is rebuilt from config per
-// attempt, so each request (the failing first candidate included) must carry
-// the same conversation id.
 func TestOpenCodeGo_FallbackCandidateKeepsSessionHeader(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -208,7 +166,6 @@ func TestOpenCodeGo_FallbackCandidateKeepsSessionHeader(t *testing.T) {
 	registerNamedProvider(cfg, "prov-a", "opencode_go", baseURL+"/fail")
 	registerNamedProvider(cfg, "prov-b", "opencode_go", baseURL+"/pass")
 
-	// Minimal retries so the failing candidate hands over quickly.
 	al.fallback = providers.NewFallbackChain(providers.NewCooldownTracker()).
 		WithRetryConfig(1, time.Millisecond)
 
@@ -252,8 +209,6 @@ func TestOpenCodeGo_FallbackCandidateKeepsSessionHeader(t *testing.T) {
 	}
 }
 
-// TestOpenCodeGo_GoalJudgeSendsSessionHeader covers the goal-judge egress
-// (goal.go JudgeGoal).
 func TestOpenCodeGo_GoalJudgeSendsSessionHeader(t *testing.T) {
 	rec, baseURL := newOCGOWireRecorder(t, ocgoSSECompletion("CONTINUE"))
 
@@ -278,8 +233,6 @@ func TestOpenCodeGo_GoalJudgeSendsSessionHeader(t *testing.T) {
 	assertSessionHeader(t, rec.lastSessionHeader(t), sessionKey)
 }
 
-// TestOpenCodeGo_SummarizeSendsSessionHeader covers the conversation
-// summarizer egress (session_manager.go summarizeSessionCore).
 func TestOpenCodeGo_SummarizeSendsSessionHeader(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -296,7 +249,6 @@ func TestOpenCodeGo_SummarizeSendsSessionHeader(t *testing.T) {
 
 	sm := newSessionManager(al)
 	sessionKey := "native:e2e-summarize"
-	// summarizeSessionCore needs at least 3 materializable messages.
 	for i := 0; i < 6; i++ {
 		agent.Sessions.AddMessage(sessionKey, "user", fmt.Sprintf("Question %d about topic", i))
 		agent.Sessions.AddMessage(sessionKey, "assistant", fmt.Sprintf("Answer %d with details", i))
@@ -312,12 +264,6 @@ func TestOpenCodeGo_SummarizeSendsSessionHeader(t *testing.T) {
 	assertSessionHeader(t, rec.lastSessionHeader(t), sessionKey)
 }
 
-// TestOpenCodeGo_WithoutOpenCodeGoProviderSendsNoSessionHeader is the file's
-// negative control: the same direct main-loop path with the same stamped
-// options, but through a plain openai provider. The transport without a
-// configured session header must send nothing — otherwise the positive tests
-// could not distinguish "we stamp it and the transport sends it" from "the
-// handler sees every header the client library adds" (D6).
 func TestOpenCodeGo_WithoutOpenCodeGoProviderSendsNoSessionHeader(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -351,14 +297,6 @@ func TestOpenCodeGo_WithoutOpenCodeGoProviderSendsNoSessionHeader(t *testing.T) 
 	}
 }
 
-// TestOpenCodeGo_IntraLoopCompactionSendsSessionHeader covers the main-loop
-// intra-loop compaction egress (llm_runner.go:1138 → tools.CompactLoopMessages,
-// the T2.5 call site that must pass the session key as a parameter). The
-// compaction summary call is made with a private options map built inside
-// CompactLoopMessages, so this test captures the options the call actually
-// carries; that they become the x-opencode-session header on the wire is
-// proven by the transport-level tests in this file (same option key, same
-// factory-built provider).
 func TestOpenCodeGo_IntraLoopCompactionSendsSessionHeader(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -368,9 +306,6 @@ func TestOpenCodeGo_IntraLoopCompactionSendsSessionHeader(t *testing.T) {
 	sessionKey := "native:e2e-intra-compact"
 	want := providers.WireSessionID(sessionKey)
 
-	// ~100K chars per tool result (≈40K tokens): the intra-loop threshold is
-	// 128000*75/100 = 96000 tokens, so a few iterations trigger compaction
-	// (same recipe as TestRunLLMIteration_IntraLoopCompaction).
 	largeContent := strings.Repeat("X", 100000)
 
 	summaryCalls := 0
@@ -432,7 +367,6 @@ func TestOpenCodeGo_IntraLoopCompactionSendsSessionHeader(t *testing.T) {
 	if !summaryStampOK || summaryStamp != want {
 		t.Fatalf("compaction summary call stamped %q (present=%v), want %q", summaryStamp, summaryStampOK, want)
 	}
-	// The regular iterations share buildLLMOptions — same stamp, one source.
 	if regularStamp != want {
 		t.Fatalf("regular iteration stamped %q, want %q", regularStamp, want)
 	}

@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// newRedactorTestService builds an opened Service bound to a temp FileStore,
-// mirroring the pattern used in keyring_test.go.
 func newRedactorTestService(t *testing.T) *Service {
 	t.Helper()
 	svc := newTestService(t)
@@ -18,8 +16,6 @@ func newRedactorTestService(t *testing.T) *Service {
 	return svc
 }
 
-// aClosedService returns an *opened* Service whose store has been Closed to
-// simulate an unavailable/closed vault.
 func aClosedService(t *testing.T) *Service {
 	t.Helper()
 	svc := newRedactorTestService(t)
@@ -96,7 +92,6 @@ func TestRedact_MultipleSecrets(t *testing.T) {
 
 func TestRedact_ShortSecretSkipped(t *testing.T) {
 	svc := newRedactorTestService(t)
-	// 7 chars < MinRedactLength (8).
 	mustSet(t, svc, "short.key", "abc1234")
 	r := NewRedactor(svc)
 
@@ -108,7 +103,6 @@ func TestRedact_ShortSecretSkipped(t *testing.T) {
 
 func TestRedact_ExactlyMinLength(t *testing.T) {
 	svc := newRedactorTestService(t)
-	// Exactly 8 chars.
 	mustSet(t, svc, "eight.key", "abcdefgh")
 	r := NewRedactor(svc)
 
@@ -123,7 +117,6 @@ func TestRedact_EmptyContent(t *testing.T) {
 	mustSet(t, svc, "a.key", "super-secret-value-123456")
 	r := NewRedactor(svc)
 
-	// Empty content must be returned as-is without touching the store.
 	if got := r.Redact(""); got != "" {
 		t.Fatalf("expected empty output, got %q", got)
 	}
@@ -156,7 +149,6 @@ func TestRedact_NilService(t *testing.T) {
 		t.Fatalf("nil service must be a no-op, got %q", out)
 	}
 
-	// A nil *Redactor itself must also not panic.
 	var nilR *Redactor
 	if out := nilR.Redact(content); out != content {
 		t.Fatalf("nil redactor must be a no-op, got %q", out)
@@ -178,7 +170,6 @@ func TestRedact_SubstringLongestWins(t *testing.T) {
 	if !strings.Contains(out, "{{SECRET:short.key}}") {
 		t.Fatalf("short secret not replaced: %q", out)
 	}
-	// No sub-part of the long value should be spliced into the long placeholder.
 	if strings.Contains(out, "{{SECRET:short.key}}-extra") {
 		t.Fatalf("long placeholder mangled by short match: %q", out)
 	}
@@ -189,7 +180,6 @@ func TestRedact_SubstringLongestWins(t *testing.T) {
 
 func TestRedact_RegexMetacharacters(t *testing.T) {
 	svc := newRedactorTestService(t)
-	// Value contains regex metacharacters that must be matched literally.
 	mustSet(t, svc, "meta.key", "a$b+c.d/")
 	r := NewRedactor(svc)
 
@@ -209,12 +199,10 @@ func TestRedact_CacheInvalidation(t *testing.T) {
 	r := NewRedactor(svc)
 
 	content := "now: second-secret-value-67890"
-	// First redaction sees only the first secret; the second value leaks.
 	if out := r.Redact(content); !strings.Contains(out, "second-secret-value-67890") {
 		t.Fatalf("precondition: second value should leak before cache rebuild: %q", out)
 	}
 
-	// Add a new secret, then redact again => fingerprint changed => rebuild.
 	mustSet(t, svc, "second.key", "second-secret-value-67890")
 	out := r.Redact(content)
 	if !strings.Contains(out, "{{SECRET:second.key}}") {
@@ -224,14 +212,12 @@ func TestRedact_CacheInvalidation(t *testing.T) {
 		t.Fatalf("new value leaked after cache rebuild: %q", out)
 	}
 
-	// Updating an existing value must also trigger a rebuild.
 	mustSet(t, svc, "first.key", "changed-secret-value-99999")
 	out = r.Redact("check: changed-secret-value-99999")
 	if !strings.Contains(out, "{{SECRET:first.key}}") {
 		t.Fatalf("updated value not redacted: %q", out)
 	}
 
-	// Deleting a secret must drop its placeholder.
 	if err := svc.DeleteFromUI("second.key", "tui"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}

@@ -15,39 +15,12 @@ type Props = {
   onScan: (repo: string) => Promise<ScannedSkill[] | null>
   onInstallBatch: (repo: string, skills: string[]) => void
   onClearScan: () => void
-  /**
-   * Where the install writes. Passed by the per-agent Skills tab so the same
-   * dialog can install into the agent's own workspace or the shared global
-   * directory. OMITTED = the dialog installs wherever the caller's `onInstall`
-   * already points (the Skills page's global behaviour), and no scope control
-   * is rendered — the existing consumer is untouched.
-   */
   scope?: SkillInstallScope
   onScopeChange?: (scope: SkillInstallScope) => void
-  /**
-   * Where the install writes, when the caller has already decided. Rendered as
-   * a read-only caption where the `ScopePicker` would sit — mutually exclusive
-   * with the interactive picker (the picker wins if both are passed). The All
-   * and Global views use this: there is nothing to choose there, only a place
-   * to state.
-   */
   destinationLabel?: string
-  /** Workspace directory shown next to the "workspace" option, so the choice
-   * is concrete instead of abstract. */
   workspacePath?: string
 }
 
-/**
- * ScopePicker — where the install writes.
- *
- * Only rendered when the caller passes `scope`/`onScopeChange` (the per-agent
- * Skills tab). The Skills page keeps the old, single-destination behaviour and
- * sees no control at all.
- *
- * The workspace option prints the agent's directory because "workspace" means
- * nothing without knowing WHICH workspace — that ambiguity is the exact bug
- * this feature fixes.
- */
 function ScopePicker({
   scope,
   onScopeChange,
@@ -110,15 +83,6 @@ function ScopePicker({
   )
 }
 
-/**
- * DestinationCaption — read-only twin of the ScopePicker.
- *
- * Used when the caller fixes the destination (the Skills page's All and Global
- * views): the box keeps the picker's classes so the two states read as one
- * component, but there is no control to press. It deliberately does NOT carry
- * `data-testid="install-scope"` — that id means "the interactive picker is
- * here" and a regression guard pins its absence for scope-less callers.
- */
 function DestinationCaption({ label }: { label: string }) {
   return (
     <div
@@ -181,7 +145,6 @@ export function InstallSkillModal({
     setScannedRepo(repoUrl.trim())
     const results = await onScan(repoUrl.trim())
     if (results) {
-      // Pre-select all skills
       setSelectedSkills(new Set(results.map((s) => s.path)))
     }
   }
@@ -213,8 +176,6 @@ export function InstallSkillModal({
     onClose()
   }
 
-  // One render rule, shared by both view branches: an interactive picker when
-  // the caller wires one, otherwise a read-only caption, otherwise nothing.
   const destinationControl =
     scope && onScopeChange ? (
       <ScopePicker scope={scope} onScopeChange={onScopeChange} workspacePath={workspacePath} />
@@ -222,7 +183,6 @@ export function InstallSkillModal({
       <DestinationCaption label={destinationLabel} />
     ) : null
 
-  // If scan results are available, show the picker
   if (scanResults && scanResults.length > 0) {
     return (
       <Modal
@@ -303,7 +263,6 @@ export function InstallSkillModal({
       size="lg"
     >
       <div className="flex flex-col">
-        {/* Tab switcher */}
         <div className="flex border-b border-border px-6 pt-2">
           <button
             type="button"
@@ -329,10 +288,8 @@ export function InstallSkillModal({
           </button>
         </div>
 
-        {/* Install destination — shared by both tabs. */}
         {destinationControl && <div className="px-6 pt-4">{destinationControl}</div>}
 
-        {/* Browse tab */}
         {activeTab === 'browse' && (
           <div className="flex flex-col">
             <div className="px-6 pt-4 pb-2">
@@ -407,7 +364,6 @@ export function InstallSkillModal({
           </div>
         )}
 
-        {/* URL tab */}
         {activeTab === 'url' && (
           <div className="flex flex-col gap-4 p-6">
             <div>
@@ -436,7 +392,6 @@ export function InstallSkillModal({
               </p>
             </div>
 
-            {/* Scanning indicator */}
             {isScanning && (
               <div className="flex items-center justify-center py-4">
                 <Spinner />

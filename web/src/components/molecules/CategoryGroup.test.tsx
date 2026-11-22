@@ -19,7 +19,6 @@ describe('CategoryGroup', () => {
   test('header shows the title and the active/total counter', () => {
     const { header } = setup()
     expect(header.textContent).toContain('Archivos')
-    // i18n key categoryCount renders "{{active}} de {{total}}" in the test locale.
     expect(header.textContent).toMatch(/6.*8/)
   })
 
@@ -60,7 +59,6 @@ describe('CategoryGroup', () => {
     const { header, panel } = setup({ open: false })
     expect(header.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(header)
-    // Still closed: `open` is controlled, the click cannot override it.
     expect(header.getAttribute('aria-expanded')).toBe('false')
     expect(panel.className).toContain('grid-rows-[0fr]')
   })

@@ -111,7 +111,6 @@ func TestClassifyError_OverloadedPatterns(t *testing.T) {
 			t.Errorf("pattern %q: expected non-nil", msg)
 			continue
 		}
-		// Overloaded is treated as rate_limit
 		if result.Reason != FailoverRateLimit {
 			t.Errorf("pattern %q: reason = %q, want rate_limit", msg, result.Reason)
 		}
@@ -239,11 +238,6 @@ func TestClassifyError_ImageSizeError(t *testing.T) {
 	}
 }
 
-// Updated by T1: this test used to assert that unrecognised errors are
-// unclassifiable (nil). That nil was the root cause of sessions dying on
-// transient transport failures, so the expectation is now inverted: unknown
-// errors classify as FailoverUnknown and stay retriable. The cancellation test
-// below pins the one case that still returns nil.
 func TestClassifyError_UnknownError(t *testing.T) {
 	err := errors.New("some completely random error")
 	result := ClassifyError(err, "openai", "gpt-4")
@@ -351,14 +345,6 @@ func TestIsImageSizeError(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// Default-to-transient classification (T1)
-// ============================================================================
-
-// transportErrorCases are real strings produced by Go's net/http, the TLS
-// stack, the resolver and provider SDKs. Every one of them used to be
-// unclassifiable (ClassifyError -> nil), which aborted the fallback chain and
-// killed the agent's turn although the failure was purely transient.
 func TestClassifyError_TransportPatterns(t *testing.T) {
 	cases := []string{
 		"unexpected EOF",
@@ -405,8 +391,6 @@ func TestClassifyError_TransportPatterns(t *testing.T) {
 	}
 }
 
-// The bug-catch test: a message matching no pattern at all must still be
-// retried instead of ending the session.
 func TestClassifyError_UnknownErrorIsTransient(t *testing.T) {
 	err := errors.New("weird sdk failure xyz")
 	result := ClassifyError(err, "openai", "gpt-4")
@@ -436,8 +420,6 @@ func TestClassifyError_UnknownErrorIsTransient(t *testing.T) {
 	}
 }
 
-// Cancellation is the only input that still yields nil, and it must be detected
-// through wrapping (errors.Is) and through SDKs that flatten it to a string.
 func TestClassifyError_CanceledIsStillNil(t *testing.T) {
 	cases := []error{
 		context.Canceled,
@@ -457,7 +439,6 @@ func TestClassifyError_CanceledIsStillNil(t *testing.T) {
 	}
 }
 
-// Deadline exceeded is a timeout, not a cancellation, even when wrapped.
 func TestClassifyError_WrappedDeadlineExceeded(t *testing.T) {
 	err := fmt.Errorf("provider call failed: %w", context.DeadlineExceeded)
 	result := ClassifyError(err, "openai", "gpt-4")
@@ -472,11 +453,6 @@ func TestClassifyError_WrappedDeadlineExceeded(t *testing.T) {
 	}
 }
 
-// MENOR-1: a missing wire session id is a LOCAL call-site error (a call site
-// forgot providers.WithWireSessionID) — no server, transport or fallback
-// candidate can change the outcome. It must classify terminal (FailoverFormat)
-// so no retry layer burns its budget (up to 8 requests + ~35s of backoff) on a
-// deterministic failure.
 func TestClassifyError_MissingWireSessionIsTerminal(t *testing.T) {
 	cases := []error{
 		common.ErrMissingWireSession,
@@ -508,27 +484,20 @@ func TestClassifyError_MissingWireSessionIsTerminal(t *testing.T) {
 	}
 }
 
-// Pattern-priority regressions: the network group sits after the provider-facing
-// groups and before auth/format, so ambiguous messages keep their old verdict.
 func TestClassifyError_PatternPriority(t *testing.T) {
 	cases := []struct {
 		msg  string
 		want FailoverReason
 	}{
-		// rate_limit wins over a transport mention in the same body.
 		{"Post \"https://api.openai.com/v1/chat\": unexpected EOF (status: 429)", FailoverRateLimit},
 		{"too many requests: connection reset by peer", FailoverRateLimit},
 		{"overloaded, connection refused", FailoverRateLimit},
 		{"payment required, broken pipe", FailoverBilling},
-		// generic timeout patterns win over the network group.
 		{"net/http: TLS handshake timeout", FailoverTimeout},
 		{"request timeout while reading stream", FailoverTimeout},
-		// network group beats auth/format so a wire error is never mistaken
-		// for a credential or payload problem.
 		{"read tcp: connection reset by peer", FailoverTimeout},
 		{"malformed HTTP response", FailoverTimeout},
 		{"stream disconnected before completion", FailoverTimeout},
-		// terminal classes still win when they are the actual signal.
 		{"invalid api key", FailoverAuth},
 		{"token has expired", FailoverAuth},
 		{"expired subscription", FailoverAuth},
@@ -547,8 +516,6 @@ func TestClassifyError_PatternPriority(t *testing.T) {
 	}
 }
 
-// No network pattern may contain "expired": authPatterns matches that word and
-// a credential error must stay terminal.
 func TestNetworkPatternsDoNotMatchExpired(t *testing.T) {
 	for _, p := range networkPatterns {
 		if strings.Contains(p.substring, "expired") || strings.Contains(p.substring, "cancel") {
@@ -605,9 +572,6 @@ func TestFailoverError_IsTerminal(t *testing.T) {
 	}
 }
 
-// IsRetriable and IsTerminal answer different questions: auth/billing are
-// terminal for the current provider yet must still allow failover to the next
-// candidate. Pin both semantics so nobody merges them.
 func TestFailoverError_IsRetriableVsIsTerminal(t *testing.T) {
 	for _, reason := range []FailoverReason{FailoverAuth, FailoverBilling} {
 		fe := &FailoverError{Reason: reason}
@@ -624,10 +588,6 @@ func TestFailoverError_IsRetriableVsIsTerminal(t *testing.T) {
 	}
 }
 
-// Context-window overflow must NOT be swallowed by default-to-transient: the
-// oversized payload fails identically on every retry and every candidate, and
-// the caller's summarization/compaction path is the only thing that can fix it.
-// Classifying it as FailoverFormat keeps that path reachable.
 func TestClassifyError_ContextOverflowIsTerminal(t *testing.T) {
 	msgs := []string{
 		"InvalidParameter: Total tokens of image and text exceed max message tokens",
@@ -659,9 +619,6 @@ func TestClassifyError_ContextOverflowIsTerminal(t *testing.T) {
 	}
 }
 
-// A timeout that merely mentions "context" is not an overflow and stays
-// transient (guards the interaction between the overflow check and the
-// default-to-transient rule).
 func TestClassifyError_DeadlineMentioningContextStaysTransient(t *testing.T) {
 	err := errors.New("context deadline exceeded")
 	result := ClassifyError(err, "openai", "gpt-4")
@@ -676,11 +633,6 @@ func TestClassifyError_DeadlineMentioningContextStaysTransient(t *testing.T) {
 	}
 }
 
-// Quota and rate-limit bodies frequently contain the generic words the
-// context-overflow classifier uses ("token limit", "too long"). Overflow must
-// therefore be evaluated after the provider-facing patterns, otherwise a
-// transient 429 is misread as a terminal prompt-size error and the session dies
-// exactly as it did before default-to-transient was introduced.
 func TestClassifyError_QuotaNotEclipsedByOverflow(t *testing.T) {
 	cases := []struct {
 		msg  string
@@ -689,8 +641,6 @@ func TestClassifyError_QuotaNotEclipsedByOverflow(t *testing.T) {
 		{"API request failed:\n  Status: 429\n  Body: you exceeded your daily token limit", FailoverRateLimit},
 		{"429 too many requests: monthly token limit reached", FailoverRateLimit},
 		{"status: 429 Your quota is too long to wait, retry later", FailoverRateLimit},
-		// Genuine prompt-size errors must still be terminal so the caller can
-		// compact the session instead of retrying forever.
 		{"API request failed:\n  Status: 400\n  Body: context_length_exceeded", FailoverFormat},
 		{"prompt is too long: 250000 tokens > 200000 maximum", FailoverFormat},
 	}
@@ -710,12 +660,6 @@ func TestClassifyError_QuotaNotEclipsedByOverflow(t *testing.T) {
 	}
 }
 
-// --- Structured error path (HTTP status + Retry-After propagation) ---
-
-// stubAPIError is a local double for the structured provider error contract
-// (see httpStatusError). It exists so these tests pin the *interface*, not the
-// concrete common.APIError: any provider or SDK that exposes HTTPStatus and
-// RetryAfterHint must get the same classification.
 type stubAPIError struct {
 	status int
 	hint   time.Duration
@@ -771,9 +715,6 @@ func TestClassifyError_Structured_BadGatewayIsTimeout(t *testing.T) {
 	}
 }
 
-// An unmapped status (404) with a body that matches no pattern must land on the
-// transient FailoverUnknown, NOT FailoverFormat: an unrecognised status says
-// nothing about the request being malformed, and format aborts the whole chain.
 func TestClassifyError_Structured_UnmappedStatusIsTransientNotFormat(t *testing.T) {
 	result := ClassifyError(&stubAPIError{status: 404, body: "no route for this deployment"}, "openai", "gpt-4o")
 	if result == nil {
@@ -793,20 +734,6 @@ func TestClassifyError_Structured_UnmappedStatusIsTransientNotFormat(t *testing.
 	}
 }
 
-// TestClassifyError_Structured_MappedStatusPrecedesQuotaBody pins the m1
-// interaction from the T1-T7 review as INTENTIONAL: for a status the classifier
-// already maps (400 -> format), the structured path returns that reason without
-// consulting the body patterns. A misconfigured proxy answering 400 with a
-// quota-flavoured body ("rate limit", "exceeded your daily token limit") is
-// therefore terminal, while the string-only path (no structured status) would
-// have matched the quota patterns and stayed transient.
-//
-// The asymmetry is deliberate: when the server tells us the request itself was
-// malformed, retrying or failing over is pointless regardless of what the body
-// prose says, and body text is attacker-influenced while the status is what the
-// server actually answered. If this test ever fails, the ordering in
-// classifyStructured changed and the terminality contract must be re-reviewed,
-// not the test adjusted.
 func TestClassifyError_Structured_MappedStatusPrecedesQuotaBody(t *testing.T) {
 	result := ClassifyError(&stubAPIError{status: 400, body: "error: rate limit exceeded, you exceeded your daily token limit"}, "openai", "gpt-4o")
 	if result == nil {
@@ -818,11 +745,6 @@ func TestClassifyError_Structured_MappedStatusPrecedesQuotaBody(t *testing.T) {
 	if !result.IsTerminal() {
 		t.Error("400+quota-body is terminal by design: the request itself was rejected")
 	}
-	// Contrast that keeps the pin honest: the same prose WITHOUT any status the
-	// classifier can read (neither structured nor extractable from the text)
-	// goes through classifyByMessage, where the quota patterns match first
-	// (rate_limit before format) and the error stays transient. Prose decides
-	// only when no status does.
 	viaMessage := ClassifyError(errors.New("you exceeded your daily token limit: rate limit exceeded"), "openai", "gpt-4o")
 	if viaMessage == nil {
 		t.Fatal("expected non-nil for message path")
@@ -832,9 +754,6 @@ func TestClassifyError_Structured_MappedStatusPrecedesQuotaBody(t *testing.T) {
 	}
 }
 
-// The whole point of the structured path: a body that *mentions* 401 while the
-// server actually answered 429 must be classified from the status, not from the
-// text. Under the old regex-only classifier this was a terminal auth error.
 func TestClassifyError_Structured_BodyCannotSpoofStatus(t *testing.T) {
 	err := &stubAPIError{status: 429, hint: 5 * time.Second, body: "invalid api key 401 unauthorized"}
 	result := ClassifyError(err, "openai", "gpt-4o")
@@ -849,9 +768,6 @@ func TestClassifyError_Structured_BodyCannotSpoofStatus(t *testing.T) {
 	}
 }
 
-// Unmapped statuses still consult the body patterns, so a 404 whose body says
-// "model not found / no such host" keeps the previous transient reading, and a
-// 409 whose body says "invalid request format" stays a format error.
 func TestClassifyError_Structured_UnmappedStatusFallsBackToBodyPatterns(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -878,11 +794,6 @@ func TestClassifyError_Structured_UnmappedStatusFallsBackToBodyPatterns(t *testi
 	}
 }
 
-// The configured gateway caps request bodies at 10 MiB and answers 400 with
-// this exact body. The 400 keeps mapping to FailoverFormat (terminal), while
-// IsContextOverflowError must ALSO match it, so llm_caller.executeWithRetry
-// takes its shrink-and-retry branch instead of aborting the turn and leaving
-// the session poisoned.
 func TestClassifyError_RequestBodyTooLargeIsFormatAndRecoverable(t *testing.T) {
 	err := &stubAPIError{status: 400, body: `{"error":{"message":"failed to read request body: http: request body too large","type":"invalid_request_error"}}`}
 	result := ClassifyError(err, "openai", "gpt-4o")
@@ -903,10 +814,6 @@ func TestClassifyError_RequestBodyTooLargeIsFormatAndRecoverable(t *testing.T) {
 	}
 }
 
-// Deliberate behaviour change: a bare 413 used to be unmapped and fell
-// through to FailoverUnknown (transient), which made the fallback chain
-// re-send the same oversized payload to every candidate. It is now
-// FailoverFormat like 400, regardless of the body prose.
 func TestClassifyError_Status413IsFormat(t *testing.T) {
 	cases := []struct {
 		name string
@@ -934,9 +841,6 @@ func TestClassifyError_Status413IsFormat(t *testing.T) {
 	}
 }
 
-// An image rejected for its dimensions is a request-shape failure: terminal
-// (format) AND detectably recoverable via the overflow path, so image-shrinking
-// retry logic can engage instead of the turn being aborted.
 func TestClassifyError_ImageRejectionIsRecoverable(t *testing.T) {
 	err := &stubAPIError{status: 400, body: "image dimensions exceed max allowed size"}
 	result := ClassifyError(err, "openai", "gpt-4o")
@@ -954,9 +858,6 @@ func TestClassifyError_ImageRejectionIsRecoverable(t *testing.T) {
 	}
 }
 
-// Real callers wrap the provider error (fmt.Errorf("...: %w")), so the
-// structured path must be reached through errors.As, not through a type
-// assertion on the top-level error.
 func TestClassifyError_Structured_ThroughWrappers(t *testing.T) {
 	inner := &stubAPIError{status: 429, hint: 12 * time.Second, body: "too many requests"}
 	wrapped := fmt.Errorf("chat completion: %w", inner)
@@ -976,8 +877,6 @@ func TestClassifyError_Structured_ThroughWrappers(t *testing.T) {
 	}
 }
 
-// A cancellation must stay terminal even when it carries a status: the user
-// pressed /stop, and no amount of waiting is going to change that.
 func TestClassifyError_Structured_CancellationStillTerminal(t *testing.T) {
 	if result := ClassifyError(context.Canceled, "openai", "gpt-4o"); result != nil {
 		t.Errorf("context.Canceled should classify as nil (terminal), got %+v", result)
@@ -987,8 +886,6 @@ func TestClassifyError_Structured_CancellationStillTerminal(t *testing.T) {
 	}
 }
 
-// The concrete common.APIError must satisfy the classifier's interface: this is
-// the compile-time guard that the providers and the classifier agree.
 func TestClassifyError_CommonAPIErrorSatisfiesStructuredPath(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "7")
@@ -1023,9 +920,6 @@ func TestClassifyError_CommonAPIErrorSatisfiesStructuredPath(t *testing.T) {
 	}
 }
 
-// The string/regex path must keep working for providers that were not migrated
-// (bedrock, claude_cli, codex, antigravity, github_copilot): they only ever
-// return formatted strings.
 func TestClassifyError_StringPathStillWorksForUnmigratedProviders(t *testing.T) {
 	msg := "API request failed:\n  Status: 429\n  Body: you exceeded your daily token limit"
 	result := ClassifyError(errors.New(msg), "bedrock", "claude")

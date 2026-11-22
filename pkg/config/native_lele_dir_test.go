@@ -7,35 +7,14 @@ import (
 	"testing"
 )
 
-// Issue #328: channels.native.lele_dir used to default to getDefaultLeleDir(),
-// which is derived from $HOME and ignores LELE_CONFIG_DIR. The gateway opened
-// its SQLite store at $LELE_CONFIG_DIR/lele.db (config.GetLeleDir) while the
-// native channel read native_clients.json from $HOME/.lele, splitting one
-// process's authentication store from the rest of its data.
-//
-// The obvious fix — default the field to GetLeleDir() — is not safe here, and
-// these tests pin down why the field is left empty instead:
-//
-// SaveConfig marshals the whole struct, and lele_dir is only `omitempty`. Any
-// non-empty default is therefore WRITTEN to config.json the next time
-// `lele auth ...` or onboarding saves. A value in the file beats the code
-// default on load, so a single run with LELE_CONFIG_DIR set would freeze that
-// scratch path into the user's config and relocate the auth store, uploads,
-// attachment staging and the skills dirs for every later run that has no such
-// env var. The default must stay unresolved for LELE_CONFIG_DIR to be honoured
-// per run; NewNativeChannel resolves it.
-
 func TestDefaultConfig_NativeLeleDirIsNotBakedIn(t *testing.T) {
 	envDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", envDir)
 
-	// GetLeleDir itself must honour the env var — that is the whole point of
-	// the resolution the channel performs.
 	if got := GetLeleDir(); got != envDir {
 		t.Fatalf("GetLeleDir() = %q, want %q", got, envDir)
 	}
 
-	// The default must NOT capture it.
 	if got := DefaultConfig().Channels.Native.LeleDir; got != "" {
 		t.Errorf("DefaultConfig().Channels.Native.LeleDir = %q, want %q: a "+
 			"path baked into the default gets persisted by SaveConfig and then "+
@@ -43,15 +22,13 @@ func TestDefaultConfig_NativeLeleDirIsNotBakedIn(t *testing.T) {
 	}
 }
 
-// TestSaveConfig_LeavesUnsetNativeLeleDirUnpersisted is the freeze guard: the
-// round trip must not materialise a lele_dir key.
 func TestSaveConfig_LeavesUnsetNativeLeleDirUnpersisted(t *testing.T) {
 	envDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", envDir)
 
 	path := filepath.Join(t.TempDir(), "config.json")
 	cfg := DefaultConfig()
-	cfg.Providers = nil // unrelated to this test; keeps the file small
+	cfg.Providers = nil
 
 	if err := SaveConfig(path, cfg); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
@@ -69,7 +46,6 @@ func TestSaveConfig_LeavesUnsetNativeLeleDirUnpersisted(t *testing.T) {
 			envDir, data)
 	}
 
-	// And reloading elsewhere must not inherit this run's directory.
 	reloaded, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -79,13 +55,10 @@ func TestSaveConfig_LeavesUnsetNativeLeleDirUnpersisted(t *testing.T) {
 	}
 }
 
-// TestNativeLeleDir_ExplicitValueStillWins covers the other half: leaving the
-// default empty must not break installations that set the field on purpose.
 func TestNativeLeleDir_ExplicitValueStillWins(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 
-	// An explicit lele_dir survives a save/load round trip.
 	cfg := DefaultConfig()
 	cfg.Providers = nil
 	cfg.Channels.Native.LeleDir = "/var/lib/lele"
@@ -101,7 +74,6 @@ func TestNativeLeleDir_ExplicitValueStillWins(t *testing.T) {
 		t.Fatalf("explicit lele_dir = %q, want %q", got.Channels.Native.LeleDir, "/var/lib/lele")
 	}
 
-	// The env var must not override an explicit configuration.
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	if err := SaveConfig(path, got); err != nil {
 		t.Fatalf("SaveConfig (second): %v", err)

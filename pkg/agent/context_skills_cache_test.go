@@ -1,13 +1,3 @@
-// Tests for the per-agent skills accessors the WebUI endpoints build on:
-// ContextBuilder.SkillsLoader() and ContextBuilder.InvalidatePromptCache().
-//
-// They guard the two halves of the promise the API makes:
-//   - the loader handed out IS the one the prompt is rendered from, so a
-//     toggle through it cannot describe a state the agent doesn't see;
-//   - after installing/removing a skill on disk, InvalidatePromptCache makes
-//     the NEXT prompt reflect it. Without this, a skill installed from the UI
-//     would stay invisible to the agent until restart.
-
 package agent
 
 import (
@@ -18,8 +8,6 @@ import (
 	"testing"
 )
 
-// writeAgentSkill drops a minimal SKILL.md into the builder's workspace,
-// exactly where a workspace-scoped install would write.
 func writeAgentSkill(t *testing.T, workspace, name string) {
 	t.Helper()
 	dir := filepath.Join(workspace, "skills", name)
@@ -39,9 +27,6 @@ func removeAgentSkill(t *testing.T, workspace, name string) {
 	}
 }
 
-// TestSkillsLoader_IsThePromptSource: the accessor must return the very
-// instance that renders the <skills> block — a copy or a differently-scoped
-// loader would make the WebUI's list/toggle diverge from the agent.
 func TestSkillsLoader_IsThePromptSource(t *testing.T) {
 	workspace := t.TempDir()
 	writeAgentSkill(t, workspace, "alpha")
@@ -58,7 +43,6 @@ func TestSkillsLoader_IsThePromptSource(t *testing.T) {
 		t.Fatalf("loader workspace = %q, want the agent's own %q", loader.WorkspaceDir(), workspace)
 	}
 
-	// What the loader lists is what the prompt advertises.
 	names := map[string]bool{}
 	for _, s := range loader.ListSkills() {
 		names[s.Name] = true
@@ -71,9 +55,6 @@ func TestSkillsLoader_IsThePromptSource(t *testing.T) {
 	}
 }
 
-// TestInvalidatePromptCache_PicksUpInstalledSkill covers the install path:
-// the prompt is cached, so a skill added after the first build is invisible
-// until the cache is dropped.
 func TestInvalidatePromptCache_PicksUpInstalledSkill(t *testing.T) {
 	workspace := t.TempDir()
 	writeAgentSkill(t, workspace, "first")
@@ -87,7 +68,6 @@ func TestInvalidatePromptCache_PicksUpInstalledSkill(t *testing.T) {
 		t.Fatal("precondition: 'second' must not be there yet")
 	}
 
-	// Simulate what POST .../skills/install does on disk.
 	writeAgentSkill(t, workspace, "second")
 	if got := cb.GetInitialContext(); strings.Contains(got, "second") {
 		t.Fatal("prompt must be cached: 'second' should not appear without invalidation")
@@ -103,9 +83,6 @@ func TestInvalidatePromptCache_PicksUpInstalledSkill(t *testing.T) {
 	}
 }
 
-// TestInvalidatePromptCache_DropsRemovedSkill covers the remove path, the
-// other direction of the same bug (advertising a skill that no longer exists
-// makes the agent try to read a missing SKILL.md).
 func TestInvalidatePromptCache_DropsRemovedSkill(t *testing.T) {
 	workspace := t.TempDir()
 	writeAgentSkill(t, workspace, "doomed")
@@ -128,8 +105,6 @@ func TestInvalidatePromptCache_DropsRemovedSkill(t *testing.T) {
 	}
 }
 
-// TestInvalidatePromptCache_ReflectsToggle covers enable/disable: the state
-// lives in the workspace config, and the loader consults it on every build.
 func TestInvalidatePromptCache_ReflectsToggle(t *testing.T) {
 	workspace := t.TempDir()
 	writeAgentSkill(t, workspace, "switchable")
@@ -147,14 +122,11 @@ func TestInvalidatePromptCache_ReflectsToggle(t *testing.T) {
 			t.Fatal("loader still reports the skill enabled after disabling it")
 		}
 	}
-	// A disabled skill must not be advertised as available.
 	if strings.Contains(after, "<name>switchable</name>") {
 		t.Fatal("disabled skill still in the prompt's skills block")
 	}
 }
 
-// TestInvalidatePromptCache_IsIdempotentAndSafeWhenUncached: calling it before
-// anything was cached must not panic, and must leave the builder functional.
 func TestInvalidatePromptCache_IsIdempotentWhenUncached(t *testing.T) {
 	workspace := t.TempDir()
 	cb := NewContextBuilder(workspace)

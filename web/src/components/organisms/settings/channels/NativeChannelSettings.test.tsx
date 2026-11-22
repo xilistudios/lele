@@ -93,12 +93,10 @@ describe('NativeChannelSettings — rate_limit block', () => {
   test('checkbox visible, 5 numbers hidden when rate_limit.enabled=false', () => {
     const { container, queryByLabelText } = renderWithSettings()
 
-    // The rate limit checkbox is visible (found via the label text)
     const checkbox = container.querySelector('#channels\\.native\\.rate_limit\\.enabled')
     expect(checkbox).toBeTruthy()
     expect((checkbox as HTMLInputElement).checked).toBe(false)
 
-    // The 5 rate limit number inputs are NOT in the DOM
     expect(queryByLabelText(tr('settings.fields.nativeRateLimitPin'))).toBeNull()
     expect(queryByLabelText(tr('settings.fields.nativeRateLimitPair'))).toBeNull()
     expect(queryByLabelText(tr('settings.fields.nativeRateLimitRefresh'))).toBeNull()
@@ -118,14 +116,12 @@ describe('NativeChannelSettings — rate_limit block', () => {
       },
     })
 
-    // The rate limit checkbox should be checked
     const checkbox = container.querySelector(
       '#channels\\.native\\.rate_limit\\.enabled',
     ) as HTMLInputElement
     expect(checkbox).toBeTruthy()
     expect(checkbox.checked).toBe(true)
 
-    // The 5 number inputs should be visible with their values
     const pin = container.querySelector(
       '#channels\\.native\\.rate_limit\\.pin_per_minute',
     ) as HTMLInputElement
@@ -169,16 +165,13 @@ describe('NativeChannelSettings — rate_limit block', () => {
       },
     })
 
-    // Change the pin_per_minute field
     const pin = container.querySelector(
       '#channels\\.native\\.rate_limit\\.pin_per_minute',
     ) as HTMLInputElement
     fireEvent.change(pin, { target: { value: '3' } })
 
-    // NumberInput onChange returns a number, not a string
     expect(writes).toContainEqual(['channels.native.rate_limit.pin_per_minute', 3])
 
-    // Change the api_per_minute field
     const api = container.querySelector(
       '#channels\\.native\\.rate_limit\\.api_per_minute',
     ) as HTMLInputElement

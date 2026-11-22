@@ -60,7 +60,6 @@ func (p *BraveSearchProvider) Search(ctx context.Context, query string, count in
 	}
 
 	if err := json.Unmarshal(body, &searchResp); err != nil {
-		// Log error body for debugging
 		fmt.Printf("Brave API Error Body: %s\n", string(body))
 		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
@@ -113,12 +112,7 @@ func (p *DuckDuckGoSearchProvider) Search(ctx context.Context, query string, cou
 }
 
 func (p *DuckDuckGoSearchProvider) extractResults(html string, count int, query string) (string, error) {
-	// Simple regex based extraction for DDG HTML
-	// Strategy: Find all result containers or key anchors directly
 
-	// Try finding the result links directly first, as they are the most critical
-	// Pattern: <a class="result__a" href="...">Title</a>
-	// The previous regex was a bit strict. Let's make it more flexible for attributes order/content
 	reLink := regexp.MustCompile(`<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>`)
 	matches := reLink.FindAllStringSubmatch(html, count+5)
 
@@ -129,14 +123,6 @@ func (p *DuckDuckGoSearchProvider) extractResults(html string, count int, query 
 	var lines []string
 	lines = append(lines, fmt.Sprintf("Results for: %s (via DuckDuckGo)", query))
 
-	// Pre-compile snippet regex to run inside the loop
-	// We'll search for snippets relative to the link position or just globally if needed
-	// But simple global search for snippets might mismatch order.
-	// Since we only have the raw HTML string, let's just extract snippets globally and assume order matches (risky but simple for regex)
-	// Or better: Let's assume the snippet follows the link in the HTML
-
-	// A better regex approach: iterate through text and find matches in order
-	// But for now, let's grab all snippets too
 	reSnippet := regexp.MustCompile(`<a class="result__snippet[^"]*".*?>([\s\S]*?)</a>`)
 	snippetMatches := reSnippet.FindAllStringSubmatch(html, count+5)
 
@@ -147,7 +133,6 @@ func (p *DuckDuckGoSearchProvider) extractResults(html string, count int, query 
 		title := stripTags(matches[i][2])
 		title = strings.TrimSpace(title)
 
-		// URL decoding if needed
 		if strings.Contains(urlStr, "uddg=") {
 			if u, err := url.QueryUnescape(urlStr); err == nil {
 				idx := strings.Index(u, "uddg=")
@@ -159,7 +144,6 @@ func (p *DuckDuckGoSearchProvider) extractResults(html string, count int, query 
 
 		lines = append(lines, fmt.Sprintf("%d. %s\n   %s", i+1, title, urlStr))
 
-		// Attempt to attach snippet if available and index aligns
 		if i < len(snippetMatches) {
 			snippet := stripTags(snippetMatches[i][1])
 			snippet = strings.TrimSpace(snippet)
@@ -341,7 +325,6 @@ func NewWebSearchTool(opts WebSearchToolOptions) *WebSearchTool {
 	var provider SearchProvider
 	maxResults := 5
 
-	// Priority: Perplexity > Brave > SearXNG > DuckDuckGo
 	if opts.PerplexityEnabled && opts.PerplexityAPIKey != "" {
 		provider = &PerplexitySearchProvider{apiKey: opts.PerplexityAPIKey}
 		if opts.PerplexityMaxResults > 0 {
@@ -438,7 +421,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]interface{}
 
 type WebFetchTool struct {
 	maxChars     int
-	allowPrivate bool // test-only escape hatch for httptest servers on loopback
+	allowPrivate bool
 }
 
 func NewWebFetchTool(maxChars int) *WebFetchTool {
@@ -542,9 +525,6 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]interface{})
 	}
 	defer resp.Body.Close()
 
-	// Limit the body read to prevent unbounded memory consumption on huge pages.
-	// The raw HTML can be ~10x larger than the extracted text, so we cap at
-	// maxChars * 10 (with a minimum of 1MB).
 	readLimit := int64(maxChars) * 10
 	if readLimit < 1024*1024 {
 		readLimit = 1024 * 1024

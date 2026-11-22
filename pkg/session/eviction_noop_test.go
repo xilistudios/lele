@@ -1,30 +1,5 @@
 package session
 
-// Eviction tests for #343: the shape where the structural invariant of #340
-// reduces EvictExcludedMessages to a NO-OP.
-//
-// ExcludeOldMessagesFromContext can legitimately pin its boundary at
-// len(Messages) — a whole-prefix compaction does (see seedCapToZeroSession),
-// as do the cold-load / stale-boundary / pin-widening routes. The #340
-// invariant then caps evictUpTo at the LAST in-context message, and when that
-// message is index 0 — a session whose whole history except the pinned first
-// human turn is excluded — the cap yields evictUpTo == 0: nothing is evicted
-// at all (measured: 61 of 957 swept layouts, INFO-1 of #343).
-//
-// Under the Option A retention policy of #343 the anti-splice guard no longer
-// walks the boundary forward over a tool-result tail, so that particular route
-// to boundary == len is gone; the cap-to-zero shape itself is unchanged and
-// still reachable.
-//
-// A no-op is the right outcome (the alternative is emptying the resident
-// context), but until now it was an expensive and misleading one: a SQLite
-// round trip writing an unchanged boundary, a fresh copy-on-write snapshot
-// published for identical content, and an
-// "Evicted excluded messages from memory {evicted=0}" log line.
-//
-// These tests pin the no-op as a no-op, and pin the bookkeeping that must
-// SURVIVE it — the part that keeps the next Save from rewriting the history.
-
 import (
 	"fmt"
 	"reflect"
@@ -35,40 +10,22 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// isZeroish reports whether a dirty-tracking field holds its "nothing pending"
-// value. [2]int{} excludedRange means no range, 0/false mean none.
 func isZeroish(v interface{}) bool {
 	return reflect.ValueOf(v).IsZero()
 }
 
-// seedCapToZeroSession builds a session whose whole history except the pinned
-// first human turn is excluded, so the #340 cap reduces eviction to nothing.
-//
-// Before the Option A retention policy (#343) this shape was produced by the
-// anti-splice guard walking its boundary past a tool-result tail; that route is
-// gone. It is reached instead through a policy-independent boundary case: a
-// whole-prefix compaction (keepCount=0) pins excludeBoundary at len(Messages)
-// and leaves index 0 as the only in-context message.
-//
-// Going through ExcludeOldMessagesFromContext rather than setting the flags by
-// hand is deliberate: if this ever stops yielding boundary == total with a
-// single in-context message, the preconditions below fail loudly instead of
-// quietly testing something else.
 func seedCapToZeroSession(t *testing.T, sm *SessionManager, key string) {
 	t.Helper()
 
-	sm.AddMessage(key, "user", "cuéntame qué repos tengo") // 0: the only human turn (pinned)
-	sm.AddMessage(key, "assistant", "Los busco.")          // 1
-	sm.AddMessage(key, "assistant", "Aquí están.")         // 2
-	sm.AddMessage(key, "assistant", "¿Algo más?")          // 3
+	sm.AddMessage(key, "user", "cuéntame qué repos tengo")
+	sm.AddMessage(key, "assistant", "Los busco.")
+	sm.AddMessage(key, "assistant", "Aquí están.")
+	sm.AddMessage(key, "assistant", "¿Algo más?")
 
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("initial Save: %v", err)
 	}
 
-	// keepCount=0 → excludeUpTo = len: everything from index 1 on is excluded
-	// and the boundary is pinned at len. With no human turn after index 0,
-	// index 0 is the only message left in context.
 	sm.ExcludeOldMessagesFromContext(key, 0)
 
 	sm.mu.Lock()
@@ -96,16 +53,11 @@ func seedCapToZeroSession(t *testing.T, sm *SessionManager, key string) {
 			"that is the shape that makes the #340 cap reduce eviction to nothing", inContext, lastInContext)
 	}
 
-	// The eviction precondition: the excluded flags are persisted.
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("Save after excluding: %v", err)
 	}
 }
 
-// TestEvictExcluded_CapToZeroIsFreeOfIOAndRepublish verifies INFO-1: when the cap
-// reduces eviction to nothing, the call must not write an unchanged boundary to
-// SQLite, must not republish the copy-on-write snapshot, and must not report
-// having evicted anything.
 func TestEvictExcluded_CapToZeroIsFreeOfIOAndRepublish(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -114,16 +66,10 @@ func TestEvictExcluded_CapToZeroIsFreeOfIOAndRepublish(t *testing.T) {
 
 	seedCapToZeroSession(t, sm, key)
 
-	// State before, straight from memory and from the row.
 	beforeSeq, beforeResident, beforeEpoch, beforeSnapEpoch := liveSnapshot(t, sm, key)
 	beforeContents := contentsOf(beforeResident)
 	beforeRow := persistedFirstInMemorySeq(t, s, key)
 
-	// A fake that RECORDS which boundary statement the eviction issues, without
-	// parking it: parking is the wrong instrument here, because the whole point
-	// is that this call must never reach the store, and a fake that blocked on
-	// an unexpected call would turn a regression into a deadlock instead of a
-	// failure. The bounded wait below is what makes a hang observable.
 	gate := newIOGate(&sm.mu)
 	defer gate.unlock()
 	fake := useBlockingEvictionRepo(t, sm, gate, false, false)
@@ -153,11 +99,6 @@ func TestEvictExcluded_CapToZeroIsFreeOfIOAndRepublish(t *testing.T) {
 	}
 }
 
-// TestEvictExcluded_CapToZeroKeepsNextSaveIdle is the half that must NOT be
-// "fixed" by an early return: the phase-3 bookkeeping (dirty flags cleared,
-// lastPersistedSeq at the end of the resident slice) is what makes the next Save
-// a no-op. Dropping it together with the I/O would turn this cleanup into a
-// full history rewrite on the next save of every session that hits the cap.
 func TestEvictExcluded_CapToZeroKeepsNextSaveIdle(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -201,7 +142,6 @@ func TestEvictExcluded_CapToZeroKeepsNextSaveIdle(t *testing.T) {
 		t.Errorf("boundary statement %d issued, want none", got)
 	}
 
-	// Behavioural half: saving now changes nothing in the rows.
 	rowsBefore, err := s.Sessions().LoadMessagesWithSeq(key)
 	if err != nil {
 		t.Fatalf("LoadMessagesWithSeq: %v", err)
@@ -223,10 +163,6 @@ func TestEvictExcluded_CapToZeroKeepsNextSaveIdle(t *testing.T) {
 	}
 }
 
-// mustReturn runs the eviction off the test goroutine and fails instead of
-// hanging if it does not come back: a no-op eviction has no reason to wait on
-// anything, and a regression that reintroduces the store round trip must be
-// reported as a failure rather than as a test that never finishes.
 func mustReturn(t *testing.T, sm *SessionManager, key string) int {
 	t.Helper()
 	done := evictAsync(sm, key)
@@ -239,8 +175,6 @@ func mustReturn(t *testing.T, sm *SessionManager, key string) int {
 	}
 }
 
-// persistedFirstInMemorySeq reads the boundary straight from the row, bypassing
-// any in-memory bookkeeping.
 func persistedFirstInMemorySeq(t *testing.T, s *store.Store, key string) int {
 	t.Helper()
 	meta, err := s.Sessions().GetSessionMeta(key)
@@ -250,32 +184,16 @@ func persistedFirstInMemorySeq(t *testing.T, s *store.Store, key string) int {
 	return meta.FirstInMemorySeq
 }
 
-// TestEvictExcluded_ToolResultTailKeepsWholeGroupInContext anchors the #343
-// retention policy at the session level: when the kept tail would start with a
-// tool result whose owning assistant is about to be excluded, the boundary
-// moves BACK to that owner and the whole tool group stays in context.
-//
-// The layout is the one in the issue: an assistant turn with two parallel tool
-// calls followed by their two results, compacted with keepCount=2. The group
-// {3,4,5} is kept whole, so no excluded row is left resident — the RAM cost the
-// old forward-push accepted (the assistant and both results held in memory
-// while filterContextMessages dropped them from the request) is gone. The token
-// price of keeping the group live was measured before adopting the policy
-// (#343 T1: at most 1.88% of the 128k context window).
-//
-// This is the deliberate rewrite the old version of this test asked for: the
-// change of retention policy is exactly the situation it was designed to
-// detect.
 func TestEvictExcluded_ToolResultTailKeepsWholeGroupInContext(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
 	key := "test:evict-tool-tail-whole-group"
 
-	sm.AddMessage(key, "user", "primera petición") // 0: pinned human turn
-	sm.AddMessage(key, "assistant", "respuesta")   // 1
-	sm.AddMessage(key, "user", "y ahora los dos")  // 2: recent human turn, preserved
-	sm.AddFullMessage(key, providers.Message{      // 3: 2 parallel tool calls (group owner)
+	sm.AddMessage(key, "user", "primera petición")
+	sm.AddMessage(key, "assistant", "respuesta")
+	sm.AddMessage(key, "user", "y ahora los dos")
+	sm.AddFullMessage(key, providers.Message{
 		Role:    "assistant",
 		Content: "Los lanzo.",
 		ToolCalls: []providers.ToolCall{
@@ -283,8 +201,8 @@ func TestEvictExcluded_ToolResultTailKeepsWholeGroupInContext(t *testing.T) {
 			{ID: "call_y", Function: &providers.FunctionCall{Name: "exec"}},
 		},
 	})
-	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "x", ToolCallID: "call_x"}) // 4
-	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "y", ToolCallID: "call_y"}) // 5
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "x", ToolCallID: "call_x"})
+	sm.AddFullMessage(key, providers.Message{Role: "tool", Content: "y", ToolCallID: "call_y"})
 
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("initial Save: %v", err)
@@ -304,8 +222,6 @@ func TestEvictExcluded_ToolResultTailKeepsWholeGroupInContext(t *testing.T) {
 		t.Fatalf("resident = %d messages, want 4 (the user turn plus the whole group {3,4,5}): %+v", len(resident), contentsOf(resident))
 	}
 
-	// The whole group is in context, and no excluded row lingers in RAM: this is
-	// the cost the old policy accepted and the new policy removes.
 	excludedResident := 0
 	inContext := 0
 	for _, m := range resident {

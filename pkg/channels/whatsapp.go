@@ -210,8 +210,6 @@ func (c *WhatsAppChannel) handleIncomingMessage(msg map[string]interface{}) {
 		metadata["user_name"] = userName
 	}
 
-	// Routing metadata: determine peer kind from chat vs sender IDs.
-	// WhatsApp DMs have chatID == senderID; groups have a different chatID.
 	peerKind := "direct"
 	peerID := senderID
 	if chatID != senderID {

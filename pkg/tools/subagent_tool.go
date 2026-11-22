@@ -7,9 +7,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// SubagentTool executes a subagent task synchronously and returns the result.
-// Unlike SpawnTool which runs tasks asynchronously, SubagentTool waits for completion
-// and returns the result directly in the ToolResult.
 type SubagentTool struct {
 	manager       *SubagentManager
 	originChannel string
@@ -73,11 +70,8 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 
 	sm := t.manager
 
-	// Resolve agent config using shared method (same as runTask)
 	agentProvider, agentModel, systemPrompt, maxIter, llmOptions, agentContextWindow := sm.resolveAgentConfig(agentID)
 
-	// Determine whether the resolved model supports vision and native video
-	// so RunToolLoop can filter out read_image/read_video accordingly.
 	sm.mu.RLock()
 	visionChecker := sm.visionChecker
 	sm.mu.RUnlock()
@@ -85,7 +79,6 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 	videoChecker := sm.getVideoChecker()
 	videoSupported := videoChecker != nil && videoChecker(agentModel)
 
-	// Build messages the same way as runTask: system prompt + user task
 	messages := []providers.Message{
 		{
 			Role:    "system",
@@ -97,12 +90,10 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		},
 	}
 
-	// Get tools from manager
 	sm.mu.RLock()
 	tools := sm.tools
 	sm.mu.RUnlock()
 
-	// Resolve origin channel/chatID from context if available
 	originChannel := t.originChannel
 	originChatID := t.originChatID
 	if ch, cid := ToolContextFromCtx(ctx); ch != "" {
@@ -110,13 +101,8 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		originChatID = cid
 	}
 
-	// Owning session for cancellation attribution (#230).
 	ownerAgentID, ownerSessionKey := AgentToolContextFromCtx(ctx)
 
-	// Read the usage reporter under the manager lock (same pattern as the
-	// async runner): subagent spend is billed to the session of the agent
-	// loop that invoked this tool, keeping the parent's cumulative counters
-	// honest for synchronous subagent runs too.
 	sm.mu.RLock()
 	tokenUsage := sm.tokenUsageReporter
 	sm.mu.RUnlock()
@@ -127,14 +113,9 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		tokenUsage(ownerSessionKey, in, out)
 	}
 
-	// Use a background context to decouple the subagent from the parent agent's
-	// lifecycle. This prevents the subagent from being killed by parent context
-	// cancellation (e.g., timeouts, /stop commands). The subagent should run
-	// independently like its async counterpart (SpawnTool).
 	taskCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Apply timeout if configured
 	sm.mu.RLock()
 	timeout := sm.timeout
 	sm.mu.RUnlock()
@@ -144,9 +125,6 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		defer timeoutCancel()
 	}
 
-	// Stamp the resolved model's capabilities so read_video resolves mode=auto
-	// per call instead of falling back to the shared registry snapshot (the
-	// async runner does the same in subagent_runner.go).
 	taskCtx = WithVideoCaps(taskCtx, VideoCapabilities{Video: videoSupported, Vision: visionSupported})
 
 	loopResult, err := RunToolLoop(taskCtx, ToolLoopConfig{
@@ -161,21 +139,16 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		ContextWindow:              agentContextWindow,
 		CompactionThresholdPercent: sm.getCompactionThresholdPercent(),
 		Redactor:                   t.manager.getRedactor(),
-		// taskCtx is detached from the caller's context (see above), so the
-		// owner must be forwarded explicitly: whatever this loop spawns
-		// belongs to the caller's session for cancellation purposes (#230).
-		OwnerAgentID:    ownerAgentID,
-		OwnerSessionKey: ownerSessionKey,
-		OnTokenUsage:    billTokens,
+		OwnerAgentID:               ownerAgentID,
+		OwnerSessionKey:            ownerSessionKey,
+		OnTokenUsage:               billTokens,
 	}, messages, originChannel, originChatID)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("Subagent execution failed: %v", err)).WithError(err)
 	}
 
-	// Parse the outcome using the same parser as runTask
 	outcome := parseSubagentOutcome(loopResult.Content)
 
-	// Build the label string for display
 	labelStr := label
 	if labelStr == "" {
 		if agentID != "" {
@@ -185,9 +158,6 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		}
 	}
 
-	// The headline must match the outcome: a not_done/needs_context/cancelled
-	// run may not read as a success in the parent's context, otherwise the
-	// status line further down is the only thing contradicting it.
 	llmContent := fmt.Sprintf("%s\nLabel: %s\nAgent: %s\nIterations: %d\nStatus: %s\nSummary: %s\nDetails:\n%s",
 		subagentInlineResultHeadline(outcome.Status),
 		labelStr, agentID, loopResult.Iterations, outcome.Status, outcome.Summary, outcome.Details)
@@ -200,10 +170,6 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 	}
 }
 
-// subagentInlineResultHeadline maps a subagent outcome status to the first
-// line of the inline `subagent` tool result. Kept as an unexported helper so
-// the mapping is directly testable. Unknown or unexpected statuses fall back to
-// a neutral headline that neither claims success nor failure.
 func subagentInlineResultHeadline(status string) string {
 	switch status {
 	case SubagentStatusCompleted:

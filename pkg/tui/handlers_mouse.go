@@ -4,15 +4,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// handleMouseMsg processes wheel scrolling on the viewport, click-drag text
-// selection and sidebar subagent clicks. Mouse events no branch consumed
-// still run update()'s post-switch block via finishUpdate: the textarea skips
-// them, but slash-command autocomplete state is refreshed exactly as before.
 func (m *Model) handleMouseMsg(msg tea.MouseMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	if !m.mouseEnabled {
-		return m.finishUpdate(msg, cmds) // mouse capture off
+		return m.finishUpdate(msg, cmds)
 	}
-	// Handle mouse scrolling on the viewport
 	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
@@ -22,7 +17,6 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg, cmds []tea.Cmd) (tea.Model, tea
 		return m, cmd
 	}
 
-	// Handle text selection via click+drag in the viewport area
 	if msg.Button == tea.MouseButtonLeft {
 		leftWidth := int(float64(m.width) * leftColumnRatio)
 		inViewportArea := msg.X < leftWidth-1 && msg.Y < m.viewport.Height
@@ -46,14 +40,9 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg, cmds []tea.Cmd) (tea.Model, tea
 		}
 	}
 
-	// Handle mouse clicks on the status line's "back to parent chat" row and
-	// on subagent items in the sidebar (only if no modal is active)
 	if m.modalMode == ModalNone && msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 		leftWidth := int(float64(m.width) * leftColumnRatio)
 
-		// "◄ Back to parent chat" row in the subagent view: clicking the
-		// affordance returns to the parent chat — exactly the ctrl+b route.
-		// The row is tracked by renderLeftColumn (see backToParentClick).
 		if m.hasBackToParentClick && m.parentSessionKey != "" &&
 			msg.X < leftWidth-1 &&
 			msg.Y >= m.backToParentClick.yStart && msg.Y < m.backToParentClick.yEnd {
@@ -62,25 +51,21 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg, cmds []tea.Cmd) (tea.Model, tea
 			m.clearStreamingState()
 			m.reloadSessions()
 			m.hasBackToParentClick = false
-			// Restart tick animation if the parent session is actively processing.
 			if m.isSessionProcessing() {
 				return m, m.tickCmd()
 			}
 			return m, nil
 		}
 
-		// Check if click is in the right sidebar area
 		rightWidth := m.width - leftWidth - chatSidebarGutter - 3
 		if rightWidth < 1 {
 			rightWidth = 1
 		}
-		sidebarStartX := leftWidth + chatSidebarGutter // gutter, then border
+		sidebarStartX := leftWidth + chatSidebarGutter
 
 		if msg.X >= sidebarStartX && msg.X < sidebarStartX+rightWidth+1 {
-			// Check if click matches any subagent click target Y-coordinate in the sidebar text
 			for _, target := range m.subagentClickTargets {
 				if msg.Y >= target.yStart && msg.Y < target.yEnd {
-					// Clicked on a subagent item - switch to that subagent's chat
 					if m.parentSessionKey == "" {
 						m.parentSessionKey = m.currentKey
 					}
@@ -88,7 +73,6 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg, cmds []tea.Cmd) (tea.Model, tea
 					m.showWelcome = false
 					m.clearStreamingState()
 					m.reloadSessions()
-					// Restart tick animation if the target subagent is actively processing.
 					if m.isSessionProcessing() {
 						return m, m.tickCmd()
 					}

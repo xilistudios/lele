@@ -10,7 +10,7 @@ import (
 func TestProviderPresetByType(t *testing.T) {
 	tests := []struct {
 		typ  string
-		want string // expected preset typ, "" if not found
+		want string
 	}{
 		{typ: "openai", want: "openai"},
 		{typ: "OpenAI", want: "openai"},
@@ -64,7 +64,6 @@ func TestProviderPresetsUniqueTypes(t *testing.T) {
 		}
 		seen[p.typ] = true
 	}
-	// Every preset should have an API base so the /connect flow can pre-fill it.
 	for _, p := range providerPresets {
 		if !strings.HasPrefix(p.apiBase, "http") {
 			t.Fatalf("preset %q has invalid apiBase %q", p.typ, p.apiBase)
@@ -80,8 +79,6 @@ func TestProviderPresetLabels(t *testing.T) {
 	}
 }
 
-// TestProviderPreset_OpenCodeGo verifies the OpenCode Go preset exists in the
-// /connect picker with a catalog-backed base URL and a default model.
 func TestProviderPreset_OpenCodeGo(t *testing.T) {
 	p := providerPresetByType("opencode_go")
 	if p == nil {
@@ -105,10 +102,6 @@ func TestProviderPreset_OpenCodeGo(t *testing.T) {
 	}
 }
 
-// TestProviderPreset_OpenCodeGoModelHint guards the /connect model hint
-// against advertising ids the gateway rejects: the ids below answer
-// `400 ModelProtocolUnsupported` on chat/completions (measured 2026-10-22),
-// so leading with them would steer users straight into dead ends.
 func TestProviderPreset_OpenCodeGoModelHint(t *testing.T) {
 	p := providerPresetByType("opencode_go")
 	if p == nil {

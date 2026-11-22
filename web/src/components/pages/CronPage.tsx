@@ -5,12 +5,8 @@ import { useAuthContext } from '../../contexts/AuthContext'
 import { useAvailableModels } from '../../hooks/useAvailableModels'
 import { useCronJobs } from '../../hooks/useCronJobs'
 import type { Agent, CronJob, CronJobInput, CronSchedule } from '../../lib/types'
-import { Button, ErrorBanner } from '../atoms'
+import { BackButton, Button, ErrorBanner } from '../atoms'
 import { Sidebar } from '../organisms/Sidebar'
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function formatTimestamp(ms?: number | null): string {
   if (!ms) return '—'
@@ -47,17 +43,6 @@ function scheduleLabel(schedule: CronSchedule): string {
   }
 }
 
-/**
- * Header toggle switch for a job's enabled state.
- *
- * Replaces the old read-only "enabled/disabled" pill: the switch is both the
- * status indicator (green track = enabled) and the control, so the duplicated
- * Disable/Enable button in the expanded section is gone.
- *
- * Rendered inside the card header, which is itself a <button> (pre-existing
- * pattern in this file). We keep a nested <button> with stopPropagation rather
- * than an <input type="checkbox"> to avoid invalid interactive-in-button DOM.
- */
 function EnabledToggle({
   job,
   busy,
@@ -97,7 +82,6 @@ function EnabledToggle({
   )
 }
 
-/** Last-run indicator: a bare colored dot (green = ok, red = anything else). */
 function LastRunBadge({ job }: { job: CronJob }) {
   const status = job.state.lastStatus
   if (!status) return null
@@ -110,10 +94,6 @@ function LastRunBadge({ job }: { job: CronJob }) {
     />
   )
 }
-
-// ---------------------------------------------------------------------------
-// Job card
-// ---------------------------------------------------------------------------
 
 function JobCard({
   job,
@@ -312,10 +292,6 @@ function Detail({ label, value, mono }: { label: string; value: string; mono?: b
   )
 }
 
-// ---------------------------------------------------------------------------
-// Create / edit form
-// ---------------------------------------------------------------------------
-
 type ScheduleKind = 'at' | 'every' | 'cron'
 type ActionKind = 'message' | 'command' | 'spawn'
 
@@ -488,18 +464,11 @@ export function JobFormModal({
   const labelCls = 'mb-1 block text-xs font-medium text-text-secondary'
   const dialogRef = useRef<HTMLDialogElement>(null)
 
-  // Keep the latest onClose in a ref so identity changes (inline closures from
-  // parents that re-render, e.g. a refetch of the cron jobs list) don't re-run
-  // the open/close effect below. Re-running it would steal focus from inputs.
   const onCloseRef = useRef(onClose)
   useEffect(() => {
     onCloseRef.current = onClose
   }, [onClose])
 
-  // Escape closes the dialog; initial focus lands on the first field. Runs
-  // once on mount: the parent renders JobFormModal only while the form is open
-  // ({formOpen && <JobFormModal ... />}), so mount == open and the initial
-  // focus must happen exactly once per open — never on parent re-renders.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onCloseRef.current()
@@ -519,7 +488,7 @@ export function JobFormModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))]"
       onClick={onClose}
       onKeyDown={(e) => {
         if (e.key === 'Escape') onClose()
@@ -531,8 +500,6 @@ export function JobFormModal({
         className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-background-secondary p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
-          // Let Escape bubble to the document listener; stop other keys from
-          // closing the overlay when interacting with form controls.
           if (e.key !== 'Escape') e.stopPropagation()
         }}
         aria-modal="true"
@@ -820,10 +787,6 @@ export function JobFormModal({
   )
 }
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
-
 export function CronPage() {
   const { t } = useTranslation()
   const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar, agents } =
@@ -898,7 +861,7 @@ export function CronPage() {
   )
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
+    <div className="flex app-shell bg-background-primary text-text-primary">
       <Sidebar
         collapsed={!sidebarOpen}
         mobileOpen={mobileSidebarOpen}
@@ -926,6 +889,7 @@ export function CronPage() {
                 <line x1="9" y1="3" x2="9" y2="21" />
               </svg>
             </button>
+            <BackButton />
             <h1 className="text-base font-semibold text-text-primary">
               {t('cron.title', 'Scheduled Jobs')}
             </h1>

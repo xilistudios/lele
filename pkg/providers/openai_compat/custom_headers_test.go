@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package openai_compat
 
 import (
@@ -12,24 +7,11 @@ import (
 	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
 
-// These tests pin the config `headers` feature on this transport. The shape
-// they exist to defend: Chat and ChatStream are separate code paths that both
-// go through setRequestHeaders, so a header applied to only one of them (or a
-// stage of setRequestHeaders that returns early and skips the custom headers)
-// is a silent, partial behaviour — invisible until a gateway rejects the calls
-// that happen to be streamed. Every case therefore runs the same assertion on
-// both paths.
-//
-// headerCapture and newOpenAICompletionServer come from session_headers_test.go
-// (same package): one capture helper, not two.
-
 const (
 	customTagHeader = "x-routing-tag"
 	customTagValue  = "prod"
 )
 
-// customHeaderOptions is the minimum call options a custom header needs: the
-// transport reads the same map for the wire session id.
 func customHeaderOptions(sessionID string) map[string]interface{} {
 	options := map[string]interface{}{}
 	if sessionID != "" {
@@ -41,9 +23,6 @@ func customHeaderOptions(sessionID string) map[string]interface{} {
 func TestCustomHeaders_ChatSendsStaticHeader(t *testing.T) {
 	server, captured := newOpenAICompletionServer(t, "application/json")
 
-	// No SessionHeader on purpose: the provider is NOT OpenCode Go, and this is
-	// the exact regression the restructure guards — the old code returned before
-	// the custom-header stage whenever no session header was configured.
 	p := NewProviderWithOptions("key", server, "", Options{
 		Headers: map[string]string{customTagHeader: customTagValue},
 	})
@@ -73,8 +52,6 @@ func TestCustomHeaders_ChatStreamSendsStaticHeader(t *testing.T) {
 }
 
 func TestCustomHeaders_SessionPlaceholderExpands(t *testing.T) {
-	// A real gateway id: 64 hex chars, so a truncated or re-hashed value fails
-	// the equality below instead of passing a Contains check.
 	sessionID := strings.Repeat("a", 64)
 
 	tests := []struct {
@@ -112,10 +89,6 @@ func TestCustomHeaders_SessionPlaceholderExpands(t *testing.T) {
 }
 
 func TestCustomHeaders_SessionPlaceholderWithoutSessionIDUsesUnkeyedBucket(t *testing.T) {
-	// An unstamped call must never produce an empty session header: Go does
-	// send a header with an empty value, and an empty x-opencode-session
-	// defeats the gateway's session routing (it then answers its own opaque
-	// 400). The value lands in the shared bucket WireSessionID("") yields.
 	server, captured := newOpenAICompletionServer(t, "application/json")
 
 	p := NewProviderWithOptions("key", server, "", Options{
@@ -133,9 +106,6 @@ func TestCustomHeaders_SessionPlaceholderWithoutSessionIDUsesUnkeyedBucket(t *te
 func TestCustomHeaders_OverrideTransportDefaults(t *testing.T) {
 	server, captured := newOpenAICompletionServer(t, "application/json")
 
-	// The documented ordering: custom headers are applied last, so explicit user
-	// intent wins over the transport default — the case that motivates it is a
-	// gateway whose auth scheme is not "Bearer <api_key>".
 	p := NewProviderWithOptions("the-api-key", server, "", Options{
 		Headers: map[string]string{"Authorization": "Bearer custom", "User-Agent": "custom-agent/1.0"},
 	})
@@ -154,16 +124,11 @@ func TestCustomHeaders_OverrideTransportDefaults(t *testing.T) {
 func TestCustomHeaders_NilHeadersSendsNothingExtra(t *testing.T) {
 	server, captured := newOpenAICompletionServer(t, "application/json")
 
-	// The byte-identical guarantee: an empty Headers map must not change this
-	// transport's wire format at all (session_headers_test.go runs untouched for
-	// the same reason).
 	p := NewProviderWithOptions("the-api-key", server, "", Options{})
 	if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, "gpt-4o", nil); err != nil {
 		t.Fatalf("Chat() error = %v", err)
 	}
 
-	// has(), not get(): get returns "" for both "absent" and "present but
-	// empty", and the claim here is ABSENCE.
 	if captured.has("X-Routing-Tag") {
 		t.Fatalf("x-routing-tag is present on the wire (value %q), want absent", captured.get("X-Routing-Tag"))
 	}
@@ -176,9 +141,6 @@ func TestCustomHeaders_NilHeadersSendsNothingExtra(t *testing.T) {
 }
 
 func TestCustomHeaders_OverrideDetectedSessionHeader(t *testing.T) {
-	// Stage ordering inside setRequestHeaders: the session header (stage 2) is
-	// written first and a custom entry naming the same header (stage 3) replaces
-	// it — the user's explicit value, not the per-call hash, is what goes out.
 	server, captured := newOpenAICompletionServer(t, "application/json")
 
 	p := NewProviderWithOptions("key", server, "", Options{
@@ -196,8 +158,6 @@ func TestCustomHeaders_OverrideDetectedSessionHeader(t *testing.T) {
 	}
 }
 
-// contentTypeForStream maps the table-driven stream flag onto the content type
-// newOpenAICompletionServer understands.
 func contentTypeForStream(stream bool) string {
 	if stream {
 		return "text/event-stream"

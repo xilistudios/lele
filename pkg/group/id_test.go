@@ -6,7 +6,6 @@ import (
 )
 
 func TestNewGroupID(t *testing.T) {
-	// Uniqueness: generate 1000 IDs with the same label and ensure all are distinct.
 	const count = 1000
 	seen := make(map[string]struct{}, count)
 	for i := 0; i < count; i++ {
@@ -17,7 +16,6 @@ func TestNewGroupID(t *testing.T) {
 		seen[id] = struct{}{}
 	}
 
-	// Format: must have the prefix "group:adhoc-" and a 16-char hex suffix.
 	id := NewGroupID("adhoc")
 	if !strings.HasPrefix(id, "group:adhoc-") {
 		t.Errorf("expected prefix %q, got %q", "group:adhoc-", id)
@@ -27,7 +25,6 @@ func TestNewGroupID(t *testing.T) {
 		t.Errorf("expected 16-char hex suffix, got %d chars: %q", len(suffix), suffix)
 	}
 
-	// Format with different label.
 	id2 := NewGroupID("myprofile")
 	if !strings.HasPrefix(id2, "group:myprofile-") {
 		t.Errorf("expected prefix %q, got %q", "group:myprofile-", id2)

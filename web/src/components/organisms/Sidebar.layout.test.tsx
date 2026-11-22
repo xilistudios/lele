@@ -8,29 +8,6 @@ import { AppLogicContext, type AppLogicContextValue } from '../../contexts/AppLo
 import { AuthContext, type AuthContextValue } from '../../contexts/AuthContext'
 import { Sidebar } from './Sidebar'
 
-/**
- * Layout contract of the sidebar (see Sidebar.tsx).
- *
- * The drawer is `fixed inset-y-0`: its height is the viewport height and every
- * section below the header competes for that fixed budget.
- *
- * Desktop (≥ md) — unchanged behaviour:
- *   nav menu `shrink-0` (natural height, never squeezed) + history section
- *   `flex-1 min-h-0` (absorbs the leftover and scrolls its own list).
- *
- * Mobile (< md) — the bug this fixes:
- *   the `shrink-0` menu consumed the whole budget, so the history section
- *   collapsed to zero (its `shrink-0` header/"show more" then painted over the
- *   first menu rows) and on short viewports the last menu entries (Secrets,
- *   device footer) fell off the bottom edge with nothing able to scroll to
- *   them. Fix: the drawer itself becomes the single scroll surface
- *   (`max-md:overflow-y-auto` on <aside>) and the history section keeps a
- *   minimum height (`max-md:min-h-[...]`) instead of collapsing.
- *
- * jsdom has no layout engine, so these tests assert the class contract: they
- * fail if the responsive prefixes are dropped, swapped or removed.
- */
-
 const authValue = { session: { device_name: 'Phone' } } as unknown as AuthContextValue
 
 const session = (i: number) => ({
@@ -99,7 +76,6 @@ const historyOf = (container: HTMLElement) =>
   container.querySelector('[data-testid="sidebar-history-section"]')
 const navOf = (container: HTMLElement) =>
   container.querySelector('[data-testid="sidebar-nav-section"]')
-/** The inner list scroller of the history section (only rendered when sessions exist). */
 const historyListOf = (container: HTMLElement) => historyOf(container)?.querySelector('nav') ?? null
 
 beforeEach(() => {
@@ -121,8 +97,6 @@ describe('Sidebar — nav menu keeps its natural height', () => {
   test('has no internal scroller: the drawer is the single scroll surface on mobile', () => {
     setViewport(390)
     const { container } = renderSidebar(manySessions)
-    // An `overflow-y-auto` here would capture the touch gesture in a short
-    // inner scroller and the drawer could no longer be scrolled past the menu.
     for (const c of classesOf(navOf(container))) {
       expect(c).not.toMatch(/overflow/)
       expect(c).not.toBe('min-h-0')
@@ -147,8 +121,6 @@ describe('Sidebar — chat history section', () => {
     setViewport(1280)
     const { container } = renderSidebar(manySessions)
     const classes = classesOf(historyOf(container))
-    // `flex-none` must only exist behind the max-md: prefix — an unprefixed
-    // one would stop the section from growing on desktop.
     expect(classes).toContain('flex-1')
     expect(classes.filter((c) => c === 'flex-none')).toEqual([])
   })
@@ -170,8 +142,6 @@ describe('Sidebar — drawer is the mobile scroll surface', () => {
   test('never scrolls on desktop, where inner sections own their overflow', () => {
     setViewport(1280)
     const { container } = renderSidebar(manySessions)
-    // Only max-md:-prefixed overflow is allowed on the drawer: an unprefixed
-    // or md: overflow would double-scroll against the inner list on desktop.
     for (const c of classesOf(asideOf(container))) {
       if (c.includes('overflow')) expect(c.startsWith('max-md:')).toBe(true)
     }
@@ -179,14 +149,13 @@ describe('Sidebar — drawer is the mobile scroll surface', () => {
 })
 
 describe('Sidebar — both sections render together (no conditional hiding)', () => {
-  test('history rows and the last nav entries are in the DOM at once', () => {
+  test('history rows and the nav entry are in the DOM at once', () => {
     setViewport(390)
     const { container } = renderSidebar(manySessions)
     expect(historyOf(container)).not.toBeNull()
     expect(navOf(container)).not.toBeNull()
-    // The entries that used to fall off the bottom edge of the drawer.
     const navText = navOf(container)?.textContent ?? ''
-    expect(navText).toContain('Secretos')
+    expect(navText).toContain('Chats')
     expect(historyListOf(container)?.children.length).toBeGreaterThan(0)
   })
 })

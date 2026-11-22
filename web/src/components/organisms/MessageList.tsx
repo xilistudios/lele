@@ -13,7 +13,6 @@ import { MarkdownText } from '../molecules/MarkdownText'
 import { ToolCallDisplay } from '../molecules/ToolCallDisplay'
 import { MessageBubble } from './MessageBubble'
 
-/** Collapsible tool-call item rendered under a group turn. */
 function GroupToolCallItem({ tc }: { tc: GroupToolCall }) {
   const [expanded, setExpanded] = useState(false)
   return (
@@ -36,10 +35,6 @@ type RenderItem =
 
 const START_INDEX = 10000
 
-/**
- * Durable render key for a message. Prefers `stableId` so keys survive the
- * WebSocket→HTTP id flip without remounting the bubble.
- */
 function messageKey(m: ChatMessage): string {
   return m.stableId ?? m.id
 }
@@ -68,34 +63,15 @@ export function MessageList() {
   const [firstItemIndex, setFirstItemIndex] = useState(START_INDEX)
   const [atBottom, setAtBottom] = useState(true)
   const prevSessionKeyRef = useRef(currentSessionKey)
-
-  // Backend bookkeeping rows (compaction summaries, loop-detector guidance) are
-  // persisted with role "user" but must never render. The SAME predicate guards
-  // the merge's optimistic-bubble pairing (see isHiddenFromChat), so the two
-  // can never drift: a row filtered here must never be claimed as the persisted
-  // copy of a user bubble, or the bubble would be deleted in exchange for
-  // something invisible.
   const visibleMessages = useMemo(() => messages.filter((m) => !isHiddenFromChat(m)), [messages])
-
-  // RENDER-level collapse of adjacent bare thinking cards (lib/thinkingRows.ts).
-  // Only the rows handed to Virtuoso are collapsed: the merge output
-  // (`visibleMessages`) stays the single source of truth for counting, the
-  // prepend bookkeeping below measures the RENDERED items (see the comment
-  // there), and this pass is reversible — dropping it from the memo restores
-  // today's output byte for byte.
   const displayMessages = useMemo(() => collapseThinkingRuns(visibleMessages), [visibleMessages])
 
   const prevFirstMsgKeyRef = useRef<string | undefined>(
     visibleMessages[0] ? messageKey(visibleMessages[0]) : undefined,
   )
-
-  // Track the scroll element so we can attach a reliable scroll listener
-  // for triggering loadMore (Virtuoso's startReached can miss fires after
-  // items are prepended due to scroll-position adjustment).
   const scrollerRef = useRef<HTMLElement | null>(null)
   const loadMoreScrollAttached = useRef(false)
 
-  // Handle session change — reset tracking
   useEffect(() => {
     if (prevSessionKeyRef.current !== currentSessionKey) {
       prevSessionKeyRef.current = currentSessionKey
@@ -104,28 +80,10 @@ export function MessageList() {
       setAtBottom(true)
     }
   }, [currentSessionKey, visibleMessages])
-
-  // When older messages are prepended (loadMore), shift firstItemIndex backward
-  // so Virtuoso preserves scroll position without jumping or blanking the viewport.
-  // Detect the prepend by the *new index of the old first item*, not by a
-  // length+id heuristic — the latter also fires on append+id-change and
-  // over-shifts, which is the scroll-flicker bug.
   useEffect(() => {
     if (prevSessionKeyRef.current === currentSessionKey) {
-      // Measured on the RENDERED list, not on `visibleMessages`: Virtuoso's
-      // contract is `firstItemIndex + data.length` = the number of items ever
-      // rendered, and `data` is built from `displayMessages`. A prepended page
-      // that happens to hold collapsible thinking rows grows the rendered list
-      // by FEWER items than it grows the merge output, so counting the merge
-      // output would decrement `firstItemIndex` one too many per collapsed run
-      // and break that contract (scroll drift, not content loss).
       const nextKeys = displayMessages.map(messageKey)
       const prepended = countPrependedItems(prevFirstMsgKeyRef.current, nextKeys)
-      // Only touch state when a shift is actually due — a pointless
-      // `setFirstItemIndex` with the same number still schedules a re-render.
-      // The arithmetic lives in the tested `nextFirstItemIndex`, which reuses
-      // `countPrependedItems` and clamps the result so the index can never go
-      // negative (see its doc comment for the full contract).
       if (prepended > 0) {
         setFirstItemIndex((prev) => nextFirstItemIndex(prev, prevFirstMsgKeyRef.current, nextKeys))
       }
@@ -133,8 +91,6 @@ export function MessageList() {
     }
   }, [displayMessages, currentSessionKey])
 
-  // Use refs for the scroll handler so it always reads latest state
-  // without needing to reattach the listener on every render.
   const loadMoreRef = useRef(loadMore)
   loadMoreRef.current = loadMore
   const hasMoreRef = useRef(hasMore)
@@ -142,27 +98,20 @@ export function MessageList() {
   const isLoadingMoreScrollRef = useRef(isLoadingMore)
   isLoadingMoreScrollRef.current = isLoadingMore
 
-  // Stable scroll handler — reads from refs to avoid reattachment
   const handleLoadMoreScroll = useCallback(() => {
     const el = scrollerRef.current
     if (!el || !hasMoreRef.current || isLoadingMoreScrollRef.current) return
-    // Trigger when within 100px of the top
     if (el instanceof HTMLElement && el.scrollTop < 100) {
       loadMoreRef.current()
     }
   }, [])
 
-  // Attach a scroll listener to Virtuoso's internal scroll container.
-  // This is more reliable than Virtuoso's startReached for detecting
-  // scroll-to-top after items have been prepended (loadMore).
   const scrollerRefCallback = useCallback(
     (el: HTMLElement | Window | null) => {
-      // Clean up previous listener
       if (scrollerRef.current && loadMoreScrollAttached.current) {
         scrollerRef.current.removeEventListener('scroll', handleLoadMoreScroll)
         loadMoreScrollAttached.current = false
       }
-      // Only track HTMLElement (not Window) for scrollTop-based detection
       const htmlEl = el instanceof HTMLElement ? el : null
       scrollerRef.current = htmlEl
       if (htmlEl && !loadMoreScrollAttached.current) {
@@ -173,7 +122,6 @@ export function MessageList() {
     [handleLoadMoreScroll],
   )
 
-  // Clean up scroll listener on unmount
   useEffect(() => {
     return () => {
       if (scrollerRef.current && loadMoreScrollAttached.current) {
@@ -201,7 +149,6 @@ export function MessageList() {
 
   const hasActiveGroup = Array.from(groups.values()).some((g) => g.status === 'started')
 
-  // ── Build a merged timeline of messages and group blocks ──
   const renderItems: RenderItem[] = useMemo(() => {
     const items: RenderItem[] = []
     for (let i = 0; i < displayMessages.length; i++) {
@@ -227,7 +174,6 @@ export function MessageList() {
         )
       }
 
-      // ── Group block: header + turns + synthesis ──
       const group = item.group
       const groupTheme = getModeTheme('group')
       const highestTurn = group.turns.reduce(
@@ -241,7 +187,6 @@ export function MessageList() {
 
       return (
         <div key={`group-block-${group.groupID}`}>
-          {/* Group header */}
           <div className="py-2">
             <div
               className={`rounded-lg border ${groupTheme.border} ${groupTheme.softBg} px-3 py-2`}
@@ -278,7 +223,6 @@ export function MessageList() {
             </div>
           </div>
 
-          {/* Group turns */}
           {group.turns.map((turn) => (
             <div key={`group-turn-${turn.groupID}-${turn.turnIndex}`} className="py-2">
               <div className="mb-1 flex items-center gap-2">
@@ -299,7 +243,6 @@ export function MessageList() {
             </div>
           ))}
 
-          {/* Group synthesis */}
           {group.synthesis && (
             <div className="py-2">
               <div className="mb-1 flex items-center gap-2">
@@ -330,10 +273,7 @@ export function MessageList() {
     })
   }, [firstItemIndex, renderItems])
 
-  // ── Empty state (AFTER all hooks to satisfy Rules of Hooks) ──
   if (renderItems.length === 0) {
-    // History is still loading for this session — show a spinner instead of
-    // flashing the empty-chat state.
     if (isHistoryLoading) {
       return (
         <div className="flex h-full items-center justify-center">
@@ -458,7 +398,6 @@ export function MessageList() {
                   </div>
                 </div>
               )}
-              {/* Group execution loading indicator — shown when a group is actively running */}
               {hasActiveGroup && !messages.some((m) => m.streaming) && (
                 <div className="flex items-center gap-2 py-3 text-text-tertiary text-sm">
                   <span className="inline-block h-2 w-2 rounded-full bg-mode-group animate-pulse" />
@@ -467,7 +406,6 @@ export function MessageList() {
                   <span className="ml-1 text-xs">{t('groups.executing')}</span>
                 </div>
               )}
-              {/* Regular loading dots — hidden when a group is active to avoid duplication */}
               {isProcessing && !hasActiveGroup && !messages.some((m) => m.streaming) && (
                 <div className="flex items-center gap-2 py-3 text-text-tertiary text-sm">
                   <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse" />
@@ -475,7 +413,6 @@ export function MessageList() {
                   <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse [animation-delay:0.4s]" />
                 </div>
               )}
-              {/* Typing indicator from another device */}
               {typingIndicator && typingIndicator.deviceId !== session?.client_id && (
                 <div className="flex items-center gap-2 px-4 py-2 text-xs text-text-tertiary animate-pulse">
                   <span className="flex gap-0.5">

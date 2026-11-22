@@ -9,14 +9,11 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 )
 
-// SequentialReplaceTool performs multiple replacements in a single operation.
-// It detects overlaps and applies replacements from end to start to maintain indices.
 type SequentialReplaceTool struct {
 	workspace string
 	restrict  bool
 }
 
-// NewSequentialReplaceTool creates a new SequentialReplaceTool
 func NewSequentialReplaceTool(workspace string, restrict bool) *SequentialReplaceTool {
 	return &SequentialReplaceTool{
 		workspace: workspace,
@@ -78,18 +75,15 @@ func (t *SequentialReplaceTool) Execute(ctx context.Context, args map[string]int
 		flags = v
 	}
 
-	// Validate path
 	resolvedPath, err := validatePath(path, t.workspace, t.restrict)
 	if err != nil {
 		return ErrorResult(err.Error())
 	}
 
-	// Check if file exists
 	if _, err := os.Stat(resolvedPath); os.IsNotExist(err) {
 		return ErrorResult(fmt.Sprintf("file not found: %s", path))
 	}
 
-	// Parse pairs
 	var pairs []ReplacementPair
 	if err := json.Unmarshal([]byte(pairsJSON), &pairs); err != nil {
 		return ErrorResult(fmt.Sprintf("failed to parse pairs JSON: %v", err))
@@ -99,14 +93,12 @@ func (t *SequentialReplaceTool) Execute(ctx context.Context, args map[string]int
 		return ErrorResult("no replacement pairs provided")
 	}
 
-	// Validate pairs
 	for i, pair := range pairs {
 		if pair.Old == "" {
 			return ErrorResult(fmt.Sprintf("pair %d: old is empty", i))
 		}
 	}
 
-	// Read file with encoding detection
 	content, encoding, err := ReadFileWithEncoding(resolvedPath)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to read file: %v", err))
@@ -120,7 +112,6 @@ func (t *SequentialReplaceTool) Execute(ctx context.Context, args map[string]int
 			"flags":      flags,
 		})
 
-	// Create matching strategy
 	var strategy MatchStrategy
 	if useRegex {
 		strategy = &RegexMatchStrategy{Flags: flags}
@@ -128,7 +119,6 @@ func (t *SequentialReplaceTool) Execute(ctx context.Context, args map[string]int
 		strategy = &ExactMatchStrategy{}
 	}
 
-	// Apply replacements with overlap detection
 	newContent, err := ApplyReplacements(content, pairs, strategy)
 	if err != nil {
 		logger.ErrorCF("sequential_replace", "Replacement failed",

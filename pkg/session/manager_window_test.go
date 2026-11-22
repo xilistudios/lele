@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// buildEvictedSession creates a session with `total` messages, persists it,
-// excludes all but `keepLast` messages from context, saves (persisting the
-// flags) and evicts the excluded prefix from memory.
 func buildEvictedSession(t *testing.T, sm *SessionManager, key string, total, keepLast int) {
 	t.Helper()
 	sm.GetOrCreate(key)
@@ -30,8 +27,6 @@ func buildEvictedSession(t *testing.T, sm *SessionManager, key string, total, ke
 	}
 }
 
-// setupEvictedSession returns a manager with its own store holding one
-// evicted session (see buildEvictedSession).
 func setupEvictedSession(t *testing.T, key string, total, keepLast int) *SessionManager {
 	t.Helper()
 	sm := NewSessionManager()
@@ -63,7 +58,6 @@ func TestLoadMessagesWindow_ResidentEvictedPrefix(t *testing.T) {
 	if w == nil {
 		t.Fatal("expected window, got nil")
 	}
-	// Evicted region is seq [0,6). Newest 5: seq 1..5, chronological.
 	if len(w.Messages) != 5 {
 		t.Fatalf("expected 5 messages, got %d", len(w.Messages))
 	}
@@ -94,12 +88,10 @@ func TestLoadMessagesWindow_PagingBefore(t *testing.T) {
 	key := "test:paging"
 	sm := setupEvictedSession(t, key, 10, 3)
 
-	// First page: newest 5 of evicted region [0,6) → seq 1..5
 	w := sm.LoadMessagesWindow(key, -1, 0, 5)
 	if w == nil || w.FirstSeq != 1 {
 		t.Fatalf("bad first page: %+v", w)
 	}
-	// Second page: before=1 → seq 0 chronological
 	w2 := sm.LoadMessagesWindow(key, w.FirstSeq, 0, 5)
 	if w2 == nil {
 		t.Fatal("expected second page, got nil")
@@ -116,7 +108,6 @@ func TestLoadMessagesWindow_PagingBefore(t *testing.T) {
 	if !w2.HasNewer {
 		t.Error("expected HasNewer=true (gap up to memory at seq 6)")
 	}
-	// Third page: nothing older.
 	if w3 := sm.LoadMessagesWindow(key, w2.FirstSeq, 0, 5); w3 != nil {
 		t.Fatalf("expected nil third page, got %+v", w3)
 	}
@@ -126,16 +117,11 @@ func TestLoadMessagesWindow_FullyEvictedSession(t *testing.T) {
 	key := "test:full-evict"
 	sm := setupEvictedSession(t, key, 10, 3)
 
-	// Simulate LRU eviction: drop the session object from memory (its rows
-	// were persisted by saveForEviction; seq 6..9 stay in SQLite too).
 	sm.mu.Lock()
 	delete(sm.sessions, key)
 	delete(sm.accessTimes, key)
 	sm.mu.Unlock()
 
-	// Non-resident: the window serves the persisted eviction prefix
-	// (seq < FirstInMemorySeq=6). The tail 6..9 comes back via the normal
-	// cold-load history path, so there is no overlap.
 	w := sm.LoadMessagesWindow(key, -1, 0, 5)
 	if w == nil {
 		t.Fatal("expected window for fully evicted session, got nil")
@@ -153,7 +139,6 @@ func TestLoadMessagesWindow_FullyEvictedSession(t *testing.T) {
 		t.Errorf("counts = %d/%d, want 6/10", w.EvictedCount, w.TotalCount)
 	}
 
-	// Page all the way to the beginning.
 	cur := w
 	pages := 1
 	for cur.HasOlder {
@@ -177,7 +162,6 @@ func TestLoadMessagesWindow_FullyEvictedSession(t *testing.T) {
 		t.Errorf("expected 2 pages for 6 evicted at limit 5, got %d", pages)
 	}
 
-	// Loading a window must NOT resurrect the session into memory.
 	sm.mu.RLock()
 	_, resident := sm.sessions[key]
 	sm.mu.RUnlock()
@@ -185,8 +169,6 @@ func TestLoadMessagesWindow_FullyEvictedSession(t *testing.T) {
 		t.Error("LoadMessagesWindow must not load the session into memory")
 	}
 
-	// Cold-loading the session afterwards must yield exactly the tail, and
-	// combined with the window the transcript is complete and gapless.
 	hist := sm.GetHistoryView(key)
 	if len(hist) != 4 {
 		t.Fatalf("cold load must bring only the tail (4 messages), got %d", len(hist))
@@ -197,7 +179,6 @@ func TestLoadMessagesWindow_AfterCursor(t *testing.T) {
 	key := "test:after"
 	sm := setupEvictedSession(t, key, 10, 3)
 
-	// Gap fill after seq 3 within evicted region [0,6): rows 4,5.
 	w := sm.LoadMessagesWindow(key, -1, 3, 10)
 	if w == nil {
 		t.Fatal("expected window, got nil")
@@ -212,8 +193,6 @@ func TestLoadMessagesWindow_AfterCursor(t *testing.T) {
 		t.Error("expected HasNewer=false")
 	}
 
-	// after >= memory floor returns nothing (the in-memory tail is served by
-	// the regular history endpoints, not the evicted window).
 	if w := sm.LoadMessagesWindow(key, -1, 6, 10); w != nil {
 		t.Errorf("expected nil for after >= memFloor, got %+v", w)
 	}
@@ -223,20 +202,16 @@ func TestLoadMessagesWindow_LimitClampAndValidation(t *testing.T) {
 	key := "test:clamp"
 	sm := setupEvictedSession(t, key, 10, 3)
 
-	// limit larger than max is clamped; returns all 6 evicted rows.
 	w := sm.LoadMessagesWindow(key, -1, 0, maxMessagesWindowLimit+100)
 	if w == nil || len(w.Messages) != 6 {
 		t.Fatalf("expected 6 messages, got %+v", w)
 	}
-	// limit <= 0 rejected.
 	if w := sm.LoadMessagesWindow(key, -1, 0, 0); w != nil {
 		t.Errorf("expected nil for limit=0, got %+v", w)
 	}
-	// Unknown session → nil.
 	if w := sm.LoadMessagesWindow("test:ghost", -1, 0, 10); w != nil {
 		t.Errorf("expected nil for unknown session, got %+v", w)
 	}
-	// No store → nil.
 	smNoStore := NewSessionManager()
 	if w := smNoStore.LoadMessagesWindow(key, -1, 0, 10); w != nil {
 		t.Errorf("expected nil without store, got %+v", w)
@@ -244,9 +219,6 @@ func TestLoadMessagesWindow_LimitClampAndValidation(t *testing.T) {
 }
 
 func TestLoadMessagesWindow_ColdLoadKeepsBoundary(t *testing.T) {
-	// A session saved with an eviction boundary, then loaded cold by a NEW
-	// manager, must expose exactly the evicted prefix through the window and
-	// keep firstInMemorySeq intact (no RAM inflation).
 	s := newTestStore(t)
 	sm := NewSessionManager()
 	sm.SetSessionRepo(s.Sessions())
@@ -255,7 +227,6 @@ func TestLoadMessagesWindow_ColdLoadKeepsBoundary(t *testing.T) {
 
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
-	// Trigger cold load through the normal history path.
 	hist := sm2.GetHistoryView(key)
 	if len(hist) != 4 {
 		t.Fatalf("cold load must keep only the in-memory tail: got %d messages", len(hist))
@@ -274,7 +245,6 @@ func TestLoadMessagesWindow_ColdLoadKeepsBoundary(t *testing.T) {
 		t.Errorf("full-range page should have no more out-of-memory rows: %+v", w)
 	}
 
-	// The store must still hold the boundary (window reads are read-only).
 	meta, err := s.Sessions().GetSessionMeta(key)
 	if err != nil || meta == nil {
 		t.Fatalf("GetSessionMeta: %v", err)

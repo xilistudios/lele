@@ -1,22 +1,5 @@
 package session
 
-// Regression tests for the orphaned streaming assistant message.
-//
-// DEFECT: a streaming assistant message is only ever finalized by
-// AddFullMessage when the incoming message is itself an assistant message
-// (manager.go, the in-place branch) or by a later append that happens to be a
-// streaming assistant again. Every other writer path — the loop-detector
-// guidance in pkg/agent/llm_runner.go, the malformed-tool-call guidance, the
-// early returns — appends a NON-assistant message (user/tool) right after the
-// streamed assistant, so the streaming flag is never cleared. The orphan stays
-// in the middle of the history with Streaming=true: it is persisted to disk,
-// survives restarts and is replayed to the LLM on every later turn.
-//
-// The fix resolves the tail in the session layer, in the single append funnel
-// (AddFullMessage), before a non-assistant message is appended. The tests below
-// pin one route each plus the two guard contracts (no-op when the tail is not a
-// streaming assistant, empty placeholder slot reuse) and durability.
-
 import (
 	"reflect"
 	"strings"
@@ -25,9 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// assertNoStreamingMessage fails when any persisted message of the history is
-// still flagged Streaming=true. A streaming flag left in the history is the
-// defect this file pins: it is replayed to the model on every later turn.
 func assertNoStreamingMessage(t *testing.T, history []providers.Message, ctx string) {
 	t.Helper()
 	for i, m := range history {
@@ -37,8 +17,6 @@ func assertNoStreamingMessage(t *testing.T, history []providers.Message, ctx str
 	}
 }
 
-// assertRoles fails when the history roles do not match want exactly. The fix
-// must finalize the tail in place, never reorder or drop messages.
 func assertRoles(t *testing.T, history []providers.Message, want []string, ctx string) {
 	t.Helper()
 	got := make([]string, 0, len(history))
@@ -50,9 +28,6 @@ func assertRoles(t *testing.T, history []providers.Message, want []string, ctx s
 	}
 }
 
-// loopGuidanceToolCall mirrors the assistant message the runner persists after
-// the loop detector injected its guidance (llm_runner.go, AddFullMessage with
-// tool calls).
 func loopGuidanceToolCall(id string) providers.Message {
 	return providers.Message{
 		Role: "assistant",
@@ -65,9 +40,6 @@ func loopGuidanceToolCall(id string) providers.Message {
 	}
 }
 
-// T1 — the reported route (P1): the loop-detector guidance is appended with
-// AddMessage(sessionKey, "user", guidance) while the streamed assistant is the
-// tail, and the assistant message with tool calls follows right after.
 func TestAddFullMessage_FinalizesStreamingTailBeforeNonAssistantAppend(t *testing.T) {
 	sm := NewSessionManager()
 	key := "test:orphan-p1"
@@ -99,9 +71,6 @@ func TestAddFullMessage_FinalizesStreamingTailBeforeNonAssistantAppend(t *testin
 	assertNoStreamingMessage(t, h, "P1")
 }
 
-// T2 — P2: the guidance is followed by a plain-text assistant answer and then
-// the malformed-tool-call guidance, with no assistant ever overwriting the
-// streamed tail.
 func TestAddFullMessage_ResolvesTailForP2Sequence(t *testing.T) {
 	sm := NewSessionManager()
 	key := "test:orphan-p2"
@@ -124,9 +93,6 @@ func TestAddFullMessage_ResolvesTailForP2Sequence(t *testing.T) {
 	assertNoStreamingMessage(t, h, "P2")
 }
 
-// T3 — P3: invalid tool calls with empty content, so the assistant message is
-// never persisted, and the malformed-call guidance lands next to the streamed
-// reasoning placeholder.
 func TestAddMessage_ResolvesStreamingTailForP3Sequence(t *testing.T) {
 	sm := NewSessionManager()
 	key := "test:orphan-p3"
@@ -148,12 +114,6 @@ func TestAddMessage_ResolvesStreamingTailForP3Sequence(t *testing.T) {
 	assertNoStreamingMessage(t, h, "P3")
 }
 
-// T4 — P4 (early return / crash) plus the crash-recovery contract of
-// pkg/channels/rest_chat.go: a leftover streaming assistant is a crash-recovery
-// orphan and MUST stay visible (the REST layer only hides a streaming message
-// while the session is actively processing). The next turn's AddMessage must
-// finalize it in place — same index, same content — and only then append, so
-// nothing is deleted silently.
 func TestAddMessage_KeepsCrashRecoveryOrphanVisibleThenFinalizesIt(t *testing.T) {
 	sm := NewSessionManager()
 	key := "test:orphan-crash"
@@ -161,8 +121,6 @@ func TestAddMessage_KeepsCrashRecoveryOrphanVisibleThenFinalizesIt(t *testing.T)
 	sm.AddMessage(key, "user", "first question")
 	sm.AppendAssistantChunk(key, "half answer")
 
-	// The process died mid-stream: the last message is still streaming and must
-	// remain the visible tail.
 	h := sm.GetHistory(key)
 	if len(h) != 2 {
 		t.Fatalf("expected 2 messages before recovery, got %d: %+v", len(h), h)
@@ -172,8 +130,6 @@ func TestAddMessage_KeepsCrashRecoveryOrphanVisibleThenFinalizesIt(t *testing.T)
 		t.Fatalf("crash-recovery orphan is not visible as a streaming tail: %+v", last)
 	}
 
-	// Next turn: the orphan must be finalized in place, not deleted and not left
-	// streaming.
 	sm.AddMessage(key, "user", "next")
 
 	h = sm.GetHistory(key)
@@ -189,9 +145,6 @@ func TestAddMessage_KeepsCrashRecoveryOrphanVisibleThenFinalizesIt(t *testing.T)
 	assertNoStreamingMessage(t, h, "crash recovery")
 }
 
-// T5 — the guard must be a strict no-op whenever the tail is not a streaming
-// assistant. This test also passes on the unfixed base: it pins that the fix
-// cannot change any normal path.
 func TestAddFullMessage_NoOpWhenTailIsNotStreaming(t *testing.T) {
 	t.Run("finalized assistant tail", func(t *testing.T) {
 		sm := NewSessionManager()
@@ -233,19 +186,12 @@ func TestAddFullMessage_NoOpWhenTailIsNotStreaming(t *testing.T) {
 	})
 }
 
-// T6 — white-box: an empty streaming placeholder (created before the first
-// chunk arrived) carries no content, so the non-assistant message takes its
-// slot instead of appending a second one. Reusing the slot is what avoids the
-// RemoveLastMessage delete watermark (deleteFromSeq) composed with the
-// msgsAppended++ of the same call.
 func TestResolveStreamingTailLocked_EmptyPlaceholderIsReused(t *testing.T) {
 	sm := NewSessionManager()
 	key := "test:orphan-empty-placeholder"
 
 	sm.mu.Lock()
 	session := sm.getOrCreateUnlocked(key)
-	// Exactly the state AppendAssistantChunk leaves before its first chunk:
-	// {assistant, Streaming:true} with neither content nor reasoning.
 	sm.getOrCreateStreamingMsg(session)
 	sm.mu.Unlock()
 
@@ -268,10 +214,6 @@ func TestResolveStreamingTailLocked_EmptyPlaceholderIsReused(t *testing.T) {
 	}
 }
 
-// T7 — durability: the orphan must not be written to SQLite as a streaming
-// message. The store is read directly (raw SQL) because loading a message runs
-// it through the session decoder, which is exactly what hid the poisoned rows
-// in the tool-call regression.
 func TestStreamingOrphan_NotPersistedAsStreaming(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()

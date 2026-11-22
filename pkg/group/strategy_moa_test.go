@@ -112,13 +112,6 @@ func TestMoACurrentLayer_AfterLayer0Complete(t *testing.T) {
 }
 
 func TestMoAStrategy_FullTwoRounds(t *testing.T) {
-	// 2 proposers (P1, P2) + 1 moderator/aggregator (MOD), Rounds=2.
-	// Expected flow:
-	//   Next → [P1, P2]  (layer 0 proposers)
-	//   Next → [MOD]     (layer 0 aggregator)
-	//   Next → [P1, P2]  (layer 1 proposers)
-	//   Next → [MOD]     (layer 1 aggregator)
-	//   Next → done
 	state := &GroupState{
 		ID:       "moa-test",
 		Status:   StatusRunning,
@@ -133,7 +126,6 @@ func TestMoAStrategy_FullTwoRounds(t *testing.T) {
 
 	s := &MoAStrategy{}
 
-	// Helper: simulate the runner's behavior of appending turns.
 	addTurns := func(speakers []string) {
 		layer := MoACurrentLayer(state)
 		for _, sp := range speakers {
@@ -146,7 +138,6 @@ func TestMoAStrategy_FullTwoRounds(t *testing.T) {
 		}
 	}
 
-	// Iteration 1: proposers for layer 0.
 	speakers, done, err := s.Next(state)
 	if err != nil {
 		t.Fatalf("iter 1: error: %v", err)
@@ -160,7 +151,6 @@ func TestMoAStrategy_FullTwoRounds(t *testing.T) {
 		t.Fatalf("after iter 1: MoACurrentLayer=%d, want 0 (aggregator hasn't spoken)", got)
 	}
 
-	// Iteration 2: aggregator for layer 0.
 	speakers, done, err = s.Next(state)
 	if err != nil {
 		t.Fatalf("iter 2: error: %v", err)
@@ -174,7 +164,6 @@ func TestMoAStrategy_FullTwoRounds(t *testing.T) {
 		t.Fatalf("after iter 2: MoACurrentLayer=%d, want 1", got)
 	}
 
-	// Iteration 3: proposers for layer 1.
 	speakers, done, err = s.Next(state)
 	if err != nil {
 		t.Fatalf("iter 3: error: %v", err)
@@ -188,7 +177,6 @@ func TestMoAStrategy_FullTwoRounds(t *testing.T) {
 		t.Fatalf("after iter 3: MoACurrentLayer=%d, want 1 (aggregator hasn't spoken for layer 1)", got)
 	}
 
-	// Iteration 4: aggregator for layer 1.
 	speakers, done, err = s.Next(state)
 	if err != nil {
 		t.Fatalf("iter 4: error: %v", err)
@@ -202,7 +190,6 @@ func TestMoAStrategy_FullTwoRounds(t *testing.T) {
 		t.Fatalf("after iter 4: MoACurrentLayer=%d, want 2", got)
 	}
 
-	// Iteration 5: Rounds=2, layer=2 → done.
 	_, done, err = s.Next(state)
 	if err != nil {
 		t.Fatalf("iter 5: error: %v", err)
@@ -211,7 +198,6 @@ func TestMoAStrategy_FullTwoRounds(t *testing.T) {
 		t.Fatal("iter 5: expected done=true (Rounds reached)")
 	}
 
-	// Verify transcript order and layer stamps.
 	expectedSeq := []struct {
 		speaker string
 		layer   int
@@ -245,7 +231,6 @@ func TestMoAStrategy_MaxTurnsHardStop(t *testing.T) {
 
 	s := &MoAStrategy{}
 
-	// Turn 0: P1, P2
 	speakers, done, _ := s.Next(state)
 	layer := MoACurrentLayer(state)
 	for _, sp := range speakers {
@@ -255,7 +240,6 @@ func TestMoAStrategy_MaxTurnsHardStop(t *testing.T) {
 		t.Fatal("turn 0: done=true prematurely")
 	}
 
-	// Turn 1 (now 2 turns in transcript → MaxTurns=2 triggers)
 	_, done, _ = s.Next(state)
 	if !done {
 		t.Fatal("expected done=true (MaxTurns reached)")
@@ -281,7 +265,6 @@ func TestMoAStrategy_StopKeyword(t *testing.T) {
 	}
 }
 
-// assertSpeakers checks that speakers contains exactly the expected AgentIDs (order matters).
 func assertSpeakers(t *testing.T, speakers []string, expected ...string) {
 	t.Helper()
 	if len(speakers) != len(expected) {

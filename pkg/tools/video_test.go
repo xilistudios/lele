@@ -10,32 +10,24 @@ import (
 	"testing"
 )
 
-// tinyMP4Header is a minimal ISO base-media file header: size 0x18 + "ftyp"
-// box with the isom brand. http.DetectContentType matches "ftyp" at offset 4
-// for isom/iso2/mp41 brands and reports "video/mp4" (verified empirically).
 var tinyMP4Header = []byte{
-	0x00, 0x00, 0x00, 0x18, // box size
-	0x66, 0x74, 0x79, 0x70, // "ftyp"
-	0x69, 0x73, 0x6f, 0x6d, // "isom"
-	0x69, 0x73, 0x6f, 0x6d, // "isom"
-	0x69, 0x73, 0x6f, 0x32, // "iso2"
-	0x6d, 0x70, 0x34, 0x31, // "mp41"
+	0x00, 0x00, 0x00, 0x18,
+	0x66, 0x74, 0x79, 0x70,
+	0x69, 0x73, 0x6f, 0x6d,
+	0x69, 0x73, 0x6f, 0x6d,
+	0x69, 0x73, 0x6f, 0x32,
+	0x6d, 0x70, 0x34, 0x31,
 	0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00,
 }
 
-// movLikeBytes sniffs as application/octet-stream (a "free" box is not in the
-// stdlib sniff table), so a .mov file with this content must be accepted via
-// the extension fallback (video/quicktime).
 var movLikeBytes = []byte{
-	0x00, 0x00, 0x00, 0x20, 0x66, 0x72, 0x65, 0x65, // size + "free"
+	0x00, 0x00, 0x00, 0x20, 0x66, 0x72, 0x65, 0x65,
 	0xaa, 0xbb, 0xcc, 0xdd, 0x01, 0x02, 0x03, 0x04,
 	0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80,
 	0x90, 0xa0, 0xb0, 0xc0, 0xd0, 0xe0, 0xf0, 0x0f,
 }
 
-// mkvLikeBytes is not an EBML header, so sniffing reports
-// application/octet-stream and the .mkv extension fallback must kick in.
 var mkvLikeBytes = []byte{
 	0x4d, 0x80, 0x81, 0x62, 0x00, 0x01, 0x02, 0x03,
 	0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b,
@@ -86,7 +78,6 @@ func firstVideoPart(t *testing.T, result *ToolResult) *providersContentVideo {
 	return &providersContentVideo{url: msg.ContentParts[1].VideoURL.URL, fps: msg.ContentParts[1].VideoURL.FPS}
 }
 
-// providersContentVideo is a tiny assertion carrier for the video_url part.
 type providersContentVideo struct {
 	url string
 	fps float64
@@ -114,7 +105,6 @@ func TestReadVideoTool_Execute_Success(t *testing.T) {
 		t.Fatalf("video url prefix = %q, want data:video/mp4;base64,", video.url)
 	}
 
-	// The base64 payload must decode back to the original bytes.
 	encoded := strings.TrimPrefix(video.url, "data:video/mp4;base64,")
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
@@ -132,7 +122,6 @@ func TestReadVideoTool_Execute_Success(t *testing.T) {
 	if video.fps != 2.5 {
 		t.Fatalf("fps = %v, want 2.5", video.fps)
 	}
-	// ForLLM must be one short line with no base64 payload.
 	if strings.Contains(result.ForLLM, "base64,") {
 		t.Fatalf("ForLLM must not contain base64 payload: %s", result.ForLLM)
 	}
@@ -162,7 +151,6 @@ func TestReadVideoTool_Execute_DefaultPrompt(t *testing.T) {
 
 func TestReadVideoTool_Execute_ExtensionFallback_MOV(t *testing.T) {
 	tmpDir := t.TempDir()
-	// Content sniffs as application/octet-stream → .mov extension must win.
 	movPath := writeFile(t, tmpDir, "clip.mov", movLikeBytes)
 
 	tool := NewReadVideoTool(tmpDir, true, VideoCapabilities{Video: true, Vision: true}, nil)
@@ -179,7 +167,6 @@ func TestReadVideoTool_Execute_ExtensionFallback_MOV(t *testing.T) {
 
 func TestReadVideoTool_Execute_ExtensionFallback_MKV(t *testing.T) {
 	tmpDir := t.TempDir()
-	// Non-EBML content sniffs as application/octet-stream → .mkv wins.
 	mkvPath := writeFile(t, tmpDir, "clip.mkv", mkvLikeBytes)
 
 	tool := NewReadVideoTool(tmpDir, true, VideoCapabilities{Video: true, Vision: true}, nil)
@@ -224,7 +211,6 @@ func TestReadVideoTool_Execute_Directory(t *testing.T) {
 func TestReadVideoTool_Execute_TooLarge(t *testing.T) {
 	tmpDir := t.TempDir()
 	videoPath := writeTinyMP4(t, tmpDir)
-	// Sparse file just over the cap: stat fails the size check before reading.
 	if err := os.Truncate(videoPath, 21<<20); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -268,7 +254,6 @@ func TestReadVideoTool_Execute_URLMode(t *testing.T) {
 	}
 
 	video := firstVideoPart(t, result)
-	// URL mode passes the URL through untouched — no data: prefix, no fetching.
 	if video.url != rawURL {
 		t.Fatalf("video url = %q, want exact %q", video.url, rawURL)
 	}
@@ -328,7 +313,6 @@ func TestReadVideoTool_Execute_URLRequiresHost(t *testing.T) {
 	tmpDir := t.TempDir()
 	tool := NewReadVideoTool(tmpDir, true, VideoCapabilities{Video: true, Vision: true}, nil)
 
-	// http(s) prefix but no host — must be rejected after net/url parsing.
 	rejected := []string{
 		"http://",
 		"https:///x.mp4",
@@ -343,7 +327,6 @@ func TestReadVideoTool_Execute_URLRequiresHost(t *testing.T) {
 		}
 	}
 
-	// A well-formed URL with a host is accepted.
 	const goodURL = "https://example.com/clip.mp4"
 	result := tool.Execute(context.Background(), map[string]interface{}{"url": goodURL})
 	if result.IsError {
@@ -355,7 +338,6 @@ func TestReadVideoTool_Execute_RequiresPathOrURL(t *testing.T) {
 	tmpDir := t.TempDir()
 	tool := NewReadVideoTool(tmpDir, true, VideoCapabilities{Video: true, Vision: true}, nil)
 
-	// Neither path nor url.
 	result := tool.Execute(context.Background(), map[string]interface{}{})
 	if !result.IsError {
 		t.Fatal("expected error when both path and url are absent")
@@ -364,7 +346,6 @@ func TestReadVideoTool_Execute_RequiresPathOrURL(t *testing.T) {
 		t.Fatalf("unexpected error: %s", result.ForLLM)
 	}
 
-	// Both path and url.
 	videoPath := writeTinyMP4(t, tmpDir)
 	result = tool.Execute(context.Background(), map[string]interface{}{
 		"path": videoPath,
@@ -462,7 +443,6 @@ func TestReadVideoTool_Schema(t *testing.T) {
 	if params["type"] != "object" {
 		t.Fatalf("type = %v, want object", params["type"])
 	}
-	// path XOR url is validated in Execute — no "required" key at all.
 	if _, hasRequired := params["required"]; hasRequired {
 		t.Fatal("schema must not declare a required key")
 	}
@@ -476,8 +456,6 @@ func TestReadVideoTool_Schema(t *testing.T) {
 		}
 	}
 
-	// FIX-9: "Provide exactly one of path or url." is stated once (the
-	// top-level description), never repeated in the property descriptions.
 	const xorSentence = "Provide exactly one of path or url."
 	occurrences := strings.Count(tool.Description(), xorSentence)
 	for key, prop := range props {
@@ -496,14 +474,6 @@ func TestReadVideoTool_Schema(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Frames mode (keyframes + transcript fallback for vision-only models)
-// ---------------------------------------------------------------------------
-
-// countFrameParts returns the number of image_url parts and checks the invariants
-// every frames-mode result must satisfy: prompt text part first, every image
-// part carries a data:image/jpeg;base64 URL, and the trailing text part (when
-// present) is the transcript.
 func framesModeParts(t *testing.T, result *ToolResult) (imageParts int, textParts []string) {
 	t.Helper()
 
@@ -545,10 +515,6 @@ func framesModeParts(t *testing.T, result *ToolResult) (imageParts int, textPart
 	return imageParts, textParts
 }
 
-// TestReadVideoTool_FramesMode_AutoVisionOnly pins mode=auto on a
-// vision-only model: the frames pipeline runs and delivers keyframes as
-// image_url parts (needs ffmpeg on this machine — makeTestVideo skips
-// otherwise).
 func TestReadVideoTool_FramesMode_AutoVisionOnly(t *testing.T) {
 	requireFFmpeg(t)
 	tmpDir := t.TempDir()
@@ -568,7 +534,6 @@ func TestReadVideoTool_FramesMode_AutoVisionOnly(t *testing.T) {
 	if got := result.ContextMessages[0].ContentParts[0].Text; got != "What happens here?" {
 		t.Fatalf("prompt part = %q, want What happens here?", got)
 	}
-	// transcribe is nil → no transcript text part after the prompt.
 	if len(textParts) != 0 {
 		t.Fatalf("expected no transcript text part without a transcriber, got %v", textParts)
 	}
@@ -580,9 +545,6 @@ func TestReadVideoTool_FramesMode_AutoVisionOnly(t *testing.T) {
 	}
 }
 
-// TestReadVideoTool_FramesMode_Transcribe adds a stub transcriber: the result
-// must carry an "Audio transcript:" text part containing the transcript
-// (makeTestVideo fixtures carry a sine audio track).
 func TestReadVideoTool_FramesMode_Transcribe(t *testing.T) {
 	requireFFmpeg(t)
 	tmpDir := t.TempDir()
@@ -618,8 +580,6 @@ func TestReadVideoTool_FramesMode_Transcribe(t *testing.T) {
 	}
 }
 
-// TestReadVideoTool_FramesMode_RequiresFFmpeg pins the missing-binary error:
-// without ffmpeg/ffprobe on PATH the tool must suggest native video_url.
 func TestReadVideoTool_FramesMode_RequiresFFmpeg(t *testing.T) {
 	if _, ok := ffmpegAvailable(); ok {
 		if _, ok := ffprobeAvailable(); ok {
@@ -639,8 +599,6 @@ func TestReadVideoTool_FramesMode_RequiresFFmpeg(t *testing.T) {
 	}
 }
 
-// TestReadVideoTool_FramesMode_CapabilityMatrix pins the mode/capability
-// errors: neither capability, native without video, frames without vision.
 func TestReadVideoTool_FramesMode_CapabilityMatrix(t *testing.T) {
 	tmpDir := t.TempDir()
 	videoPath := writeTinyMP4(t, tmpDir)
@@ -685,8 +643,6 @@ func TestReadVideoTool_FramesMode_CapabilityMatrix(t *testing.T) {
 	})
 }
 
-// TestReadVideoTool_FramesMode_URLRejected pins that frames mode accepts
-// local paths only — URL input is native-only.
 func TestReadVideoTool_FramesMode_URLRejected(t *testing.T) {
 	tmpDir := t.TempDir()
 	tool := NewReadVideoTool(tmpDir, true, VideoCapabilities{Video: false, Vision: true}, nil)
@@ -702,8 +658,6 @@ func TestReadVideoTool_FramesMode_URLRejected(t *testing.T) {
 	}
 }
 
-// TestReadVideoTool_ModeValidation pins that an unknown mode is rejected
-// before anything else runs (mode validation precedes capability resolution).
 func TestReadVideoTool_ModeValidation(t *testing.T) {
 	tmpDir := t.TempDir()
 	tool := NewReadVideoTool(tmpDir, true, VideoCapabilities{}, nil)
@@ -716,9 +670,6 @@ func TestReadVideoTool_ModeValidation(t *testing.T) {
 	}
 }
 
-// TestReadVideoTool_FramesBounds pins the 1..16 keyframe bounds, and that a
-// stray frames argument on a native call is NOT validated (only frames-mode
-// calls care about it).
 func TestReadVideoTool_FramesBounds(t *testing.T) {
 	tmpDir := t.TempDir()
 	videoPath := writeTinyMP4(t, tmpDir)
@@ -738,7 +689,6 @@ func TestReadVideoTool_FramesBounds(t *testing.T) {
 		}
 	}
 
-	// Native call with a stray out-of-bounds frames arg: ignored, not rejected.
 	native := NewReadVideoTool(tmpDir, true, VideoCapabilities{Video: true, Vision: true}, nil)
 	result := native.Execute(context.Background(), map[string]interface{}{
 		"path":   videoPath,
@@ -748,9 +698,6 @@ func TestReadVideoTool_FramesBounds(t *testing.T) {
 		t.Fatalf("stray frames arg must not reject a native call, got: %s", result.ForLLM)
 	}
 
-	// Non-integral and non-numeric forms are rejected outright (no
-	// truncation of 16.9, no string/bool coercion — matching the fps
-	// policy) with the integer-specific error.
 	for _, frames := range []interface{}{16.9, 3.5, "8", true} {
 		result := tool.Execute(context.Background(), map[string]interface{}{
 			"path":   videoPath,
@@ -766,10 +713,6 @@ func TestReadVideoTool_FramesBounds(t *testing.T) {
 	}
 }
 
-// TestReadVideoTool_FramesMode_RaisedSizeCap pins the 200 MiB frames cap: a
-// 21 MiB file exceeds the native 20 MiB cap but must pass the frames-mode
-// size check (it then fails later, at extraction — the point is that
-// "video is too large" is NOT the error).
 func TestReadVideoTool_FramesMode_RaisedSizeCap(t *testing.T) {
 	requireFFmpeg(t)
 	tmpDir := t.TempDir()
@@ -791,13 +734,6 @@ func TestReadVideoTool_FramesMode_RaisedSizeCap(t *testing.T) {
 	}
 }
 
-// TestReadVideoTool_CtxCapsVisionOnlyCtxWins pins per-call capability
-// resolution: capabilities stamped via WithVideoCaps win over the
-// construction-time snapshot when mode=auto resolves. The tool snapshot here
-// is video-capable (the agent's primary model), the stamped ctx caps are
-// vision-only (the session/turn model) — the result must deliver frames as
-// image_url parts, NOT video_url (requires ffmpeg; makeTestVideo skips
-// otherwise).
 func TestReadVideoTool_CtxCapsVisionOnlyCtxWins(t *testing.T) {
 	requireFFmpeg(t)
 	tmpDir := t.TempDir()
@@ -824,10 +760,6 @@ func TestReadVideoTool_CtxCapsVisionOnlyCtxWins(t *testing.T) {
 	}
 }
 
-// TestReadVideoTool_CtxCapsVideoCtxWins is the mirror case: the tool
-// snapshot is vision-only (frames would be picked without a stamp), the
-// stamped ctx caps are video-capable — mode=auto must resolve to native and
-// deliver a video_url part.
 func TestReadVideoTool_CtxCapsVideoCtxWins(t *testing.T) {
 	tmpDir := t.TempDir()
 	videoPath := writeTinyMP4(t, tmpDir)
@@ -842,19 +774,6 @@ func TestReadVideoTool_CtxCapsVideoCtxWins(t *testing.T) {
 	}
 }
 
-// TestReadVideoTool_FramesMode_RemovesTempDir pins that a successful
-// frames-mode Execute leaves no lele-video-frames-* directory behind in
-// os.TempDir(): the extracted keyframes are base64'd into the message, so
-// nothing has to persist on disk.
-//
-// The delta is taken over a PRIVATE temp dir: frames mode extracts into
-// os.MkdirTemp("", "lele-video-frames-*"), i.e. os.TempDir(), which is global
-// to the machine. Asserting on the shared /tmp made this test flaky whenever
-// another lele test process was running at the same time (a parallel
-// `go test ./...`, another workstream) and created a directory with that same
-// prefix between the two snapshots. TMPDIR is process-wide but no test in this
-// package uses t.Parallel(), so pointing it at t.TempDir() cannot race another
-// test here.
 func TestReadVideoTool_FramesMode_RemovesTempDir(t *testing.T) {
 	requireFFmpeg(t)
 	t.Setenv("TMPDIR", t.TempDir())
@@ -869,7 +788,7 @@ func TestReadVideoTool_FramesMode_RemovesTempDir(t *testing.T) {
 		"path": videoPath,
 		"mode": "frames",
 	})
-	framesModeParts(t, result) // asserts success
+	framesModeParts(t, result)
 
 	after := listFramesTempDirs(t)
 	for name := range after {
@@ -879,8 +798,6 @@ func TestReadVideoTool_FramesMode_RemovesTempDir(t *testing.T) {
 	}
 }
 
-// listFramesTempDirs returns the lele-video-frames-* entries currently in
-// os.TempDir().
 func listFramesTempDirs(t *testing.T) map[string]bool {
 	t.Helper()
 	entries, err := os.ReadDir(os.TempDir())
@@ -896,10 +813,6 @@ func listFramesTempDirs(t *testing.T) map[string]bool {
 	return dirs
 }
 
-// TestReadVideoTool_FramesMode_TranscriptNoteSuffixes pins the exact
-// transcriptNote suffix of the frames-mode ForLLM summary for each of the
-// three variants: real transcript attached, transcriber configured but no
-// transcript produced, and transcription not configured at all.
 func TestReadVideoTool_FramesMode_TranscriptNoteSuffixes(t *testing.T) {
 	requireFFmpeg(t)
 	tmpDir := t.TempDir()
@@ -948,10 +861,6 @@ func TestReadVideoTool_FramesMode_TranscriptNoteSuffixes(t *testing.T) {
 			"mode": "frames",
 		})
 		assertSuffix(t, result, "transcript: no)")
-		// The visible placeholder still reaches the model as a trailing text
-		// part — only the summary reports "no transcript attached". Assert on
-		// the actual parts so a regression that drops the placeholder (or
-		// attaches real transcript content under "transcript: no") is caught.
 		imageParts, textParts := framesModeParts(t, result)
 		if imageParts < 1 {
 			t.Fatalf("expected at least one frame part, got %d", imageParts)
@@ -965,9 +874,6 @@ func TestReadVideoTool_FramesMode_TranscriptNoteSuffixes(t *testing.T) {
 	})
 }
 
-// TestIsTranscriptPlaceholder pins the summary/content consistency contract:
-// exactly the degradation placeholders report "transcript: no"; real
-// transcription text (even if it merely resembles a placeholder) does not.
 func TestIsTranscriptPlaceholder(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -991,10 +897,6 @@ func TestIsTranscriptPlaceholder(t *testing.T) {
 	}
 }
 
-// TestReadVideoTool_Execute_FPSValidatedBeforeFileRead pins that a bad fps
-// fails before the path/URL dispatch touches the filesystem: a nonexistent
-// path would normally fail at stat, so seeing the fps error proves
-// validation ran first (no 20 MiB read for a doomed call).
 func TestReadVideoTool_Execute_FPSValidatedBeforeFileRead(t *testing.T) {
 	tmpDir := t.TempDir()
 	tool := NewReadVideoTool(tmpDir, true, VideoCapabilities{Video: true, Vision: true}, nil)

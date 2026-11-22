@@ -7,8 +7,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// modalTitleFor returns the localized title for a modal mode. Shared by both
-// View paths (welcome and split-column) so titles cannot drift.
 func (m *Model) modalTitleFor(mode modalType) string {
 	switch mode {
 	case ModalAgent:
@@ -66,7 +64,6 @@ func (m *Model) modalTitleFor(mode modalType) string {
 	case ModalCommandDetail:
 		return i18n.T("tui.commands.detail")
 	case ModalAddCommand:
-		// One wizard serves both flows; the title says which.
 		if m.commandsEditKey != "" {
 			return i18n.T("tui.commands.edit")
 		}
@@ -95,11 +92,7 @@ func (m *Model) modalTitleFor(mode modalType) string {
 	return ""
 }
 
-// renderActiveModal renders the currently open modal. Both View paths
-// (welcome and split-column) must use this single dispatcher so every
-// modalType has a title and a specialized renderer.
 func (m *Model) renderActiveModal() string {
-	// Detail overlays take precedence over their parent lists.
 	if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode {
 		return m.renderBgExecOutput()
 	}
@@ -124,26 +117,14 @@ func (m *Model) renderActiveModal() string {
 	case ModalCommandDetail:
 		return m.renderCommandDetail()
 	case ModalMCPDetail:
-		// Rendered from the inventory snapshot the list was built from;
-		// falls back to the list when the snapshot is gone.
 		return m.renderMCPDetail()
 	case ModalMCPAuth:
-		// Interactive OAuth: the engine's flow is driven from here and the
-		// box is height-clamped by the renderer itself (see mcpAuthBox).
 		return m.renderMCPAuth()
 	case ModalMCPAdd:
-		// Bespoke renderer: the step set is kind-dependent (args is
-		// stdio-only, type/headers remote-only), so renderFormModal's
-		// steps[i] ↔ formValues[i] alignment does not hold.
 		return m.renderMCPAddModal()
 	case ModalConnectOAuth:
-		// Native provider OAuth login for a /connect OAuth row: mirrors the
-		// MCP auth surface (authorization URL, paste box, cancel) and is
-		// height-clamped by its own renderer (see connectOAuthBox).
 		return m.renderConnectOAuth()
 	case ModalAddCommand:
-		// The template step is multi-line and needs a textarea, which the
-		// generic single-line form renderer cannot offer.
 		if m.formStepIndex == commandTemplateStep {
 			return m.renderCommandTemplateStep(title)
 		}
@@ -151,9 +132,6 @@ func (m *Model) renderActiveModal() string {
 	case ModalSettingsTUI:
 		return m.renderTUISettings(title)
 	case ModalSettingsAgents:
-		// The add-agent flow (settingsEditField == "newAgentID") and its
-		// validation errors render in the inline edit view; without this the
-		// text input is focused but never shown, so "Add Agent" appears dead.
 		if m.settingsEditField != "" {
 			return m.renderAgentEditInput()
 		}
@@ -181,7 +159,6 @@ func (m *Model) renderActiveModal() string {
 	return m.renderModal(title)
 }
 
-// maxModalVisible returns the maximum number of items visible in a modal given terminal height.
 func (m *Model) maxModalVisible() int {
 	maxVisible := m.height - 8
 	if maxVisible < 3 {
@@ -193,14 +170,12 @@ func (m *Model) maxModalVisible() int {
 	return maxVisible
 }
 
-// renderModal renders a modal overlay with scroll support for long lists.
 func (m *Model) renderModal(modalTitle string) string {
 	maxVisible := m.maxModalVisible()
 	if len(m.modalItems) > maxVisible && maxVisible > 1 {
 		maxVisible--
 	}
 
-	// Clamp scroll offset so selected item is always visible
 	if m.modalSelectedIdx < m.modalScrollOffset {
 		m.modalScrollOffset = m.modalSelectedIdx
 	}
@@ -214,20 +189,17 @@ func (m *Model) renderModal(modalTitle string) string {
 	var modalSb strings.Builder
 	modalSb.WriteString(TitleStyle.Render(modalTitle) + "\n")
 
-	// Scroll indicator: show ↑ if there are items above
 	if m.modalScrollOffset > 0 {
 		modalSb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.moreAbove")) + "\n")
 	} else {
 		modalSb.WriteString("\n")
 	}
 
-	// Render only the visible window of items
 	endIdx := m.modalScrollOffset + maxVisible
 	if endIdx > len(m.modalItems) {
 		endIdx = len(m.modalItems)
 	}
 	for i := m.modalScrollOffset; i < endIdx; i++ {
-		// Theme picker: render section headers differently
 		if m.themePickerActive && i < len(m.themePickerItems) {
 			tpItem := m.themePickerItems[i]
 			if tpItem.kind == "header" || tpItem.kind == "loading" || tpItem.kind == "error" {
@@ -235,10 +207,6 @@ func (m *Model) renderModal(modalTitle string) string {
 				continue
 			}
 		}
-		// Regular selectable items. Item sources include user-controlled
-		// session names: sanitize so control/bidi chars cannot desync paint
-		// vs measured width, and truncate to a terminal-derived budget so an
-		// over-long name cannot widen the modal box beyond the frame.
 		item := m.modalItems[i]
 		itemBudget := m.width - 8
 		if itemBudget < 20 {
@@ -252,17 +220,14 @@ func (m *Model) renderModal(modalTitle string) string {
 		}
 	}
 
-	// Scroll indicator: show ↓ if there are items below
 	if endIdx < len(m.modalItems) {
 		modalSb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.moreBelow")) + "\n")
 	}
 
-	// Theme picker: show navigation hint at the bottom
 	if m.themePickerActive {
 		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.settings.themePickerHint")) + "\n")
 	}
 
-	// Skills action feedback
 	if m.modalMode == ModalSkills {
 		if m.skillsFeedback != "" {
 			modalSb.WriteString("\n" + SuccessStyle.Render("  "+m.skillsFeedback) + "\n")
@@ -270,7 +235,6 @@ func (m *Model) renderModal(modalTitle string) string {
 		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.skillsListHints")) + "\n")
 	}
 
-	// Custom-command list: feedback line (reserved for the write flow) + hints.
 	if m.modalMode == ModalCommands {
 		if m.commandsFeedback != "" {
 			modalSb.WriteString("\n" + SuccessStyle.Render("  "+m.commandsFeedback) + "\n")
@@ -278,7 +242,6 @@ func (m *Model) renderModal(modalTitle string) string {
 		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.commands.listHints")) + "\n")
 	}
 
-	// MCP server list: feedback line (toggle results) + filter + hints.
 	if m.modalMode == ModalMCP {
 		if m.mcpFeedback != "" {
 			modalSb.WriteString("\n" + SuccessStyle.Render("  "+m.mcpFeedback) + "\n")
@@ -287,8 +250,6 @@ func (m *Model) renderModal(modalTitle string) string {
 		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.mcpListHints")) + "\n")
 	}
 
-	// Provider detail: feedback line (double-press delete confirm / result)
-	// + row-action hints.
 	if m.modalMode == ModalProviderDetail {
 		if m.providerFeedback != "" {
 			modalSb.WriteString("\n" + SuccessStyle.Render("  "+m.providerFeedback) + "\n")
@@ -296,31 +257,10 @@ func (m *Model) renderModal(modalTitle string) string {
 		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.providerDetailHints")) + "\n")
 	}
 
-	// Interface settings: acquiring keep-awake can fail before any form is
-	// opened (at startup, or on a platform with no mechanism), and formError is
-	// only drawn by form views, so the reason rides the list renderer.
-	// The reason is a raw Go error (100+ cells in the real case): left raw it
-	// makes this row exactly m.width wide, so lipgloss.Place stops padding it
-	// and the right border "│" disappears (and the actionable part of the
-	// message is cut). Sanitize + truncate to a budget that is DELIBERATELY
-	// stricter than the item loop's (m.modalTextBudget shrinks the width-8
-	// item budget by the line's own indent/glyph, so this row can never be the
-	// widest in the box); the 2-cell mismatch against that loop is
-	// preexisting and out of scope here — see modalTextBudget.
-	// ⚠ (not ✗) marks a failed REQUEST so it cannot be confused with the
-	// row's ✗ "off", and Yellow (not HelpStyle) reads as a warning instead of
-	// dim commentary.
-	//
-	// Hidden while the theme picker is open: the picker replaces this list and
-	// its "d" is inert (see the cancel guard in handleModalKey), so printing
-	// "d: stop requesting" there would advertise a key that does nothing.
 	if m.modalMode == ModalSettingsTUI && m.keepAwakeErr != "" && !m.themePickerActive {
-		budget := m.modalTextBudget(4) // "  " indent + "⚠ " glyph
+		budget := m.modalTextBudget(4)
 		errLine := "  ⚠ " + truncateRightCells(sanitizeDisplayText(m.keepAwakeErr), budget)
 		modalSb.WriteString("\n" + lipgloss.NewStyle().Foreground(YellowColor).Render(errLine) + "\n")
-		// Only the ⚠ (requested-but-failed) state gets the "how do I stop
-		// asking for this" hint: in the ✓/✗ states "d" does nothing and must
-		// not be advertised.
 		if m.keepAwakeRequestedButFailed() {
 			hint := truncateRightCells(sanitizeDisplayText(i18n.T("tui.settings.keepAwakeCancelHint")), m.modalTextBudget(2))
 			modalSb.WriteString(HelpStyle.Render("  "+hint) + "\n")

@@ -10,13 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// B2 — running subagents are background work and must not gate input. These
-// tests seed the subagent listing cache directly (no backend call, no 3 s TTL
-// involved) so the busy predicate is exercised deterministically.
-
-// seedRunningSubagents installs a fresh cache entry for the visible chat with
-// the given number of running subagents. at = now keeps refreshSubagentsCache
-// from replacing it during the next Update.
 func seedRunningSubagents(m *Model, running int) {
 	m.subagentsCache = subagentsCacheState{
 		key:     m.subagentQueryKey(),
@@ -59,8 +52,6 @@ func TestEnter_QueuesWhenBackendBusy(t *testing.T) {
 	m := newQuietQueueModel(t, "tui:chat:subgate")
 	m.chatInput.Focus()
 	seedRunningSubagents(m, 1)
-	// Local startup grace keeps isSessionProcessing() true even before the
-	// backend reports busy.
 	m.processing = true
 	m.startTime = time.Now()
 	m.chatInput.SetValue("hello")
@@ -89,8 +80,6 @@ func TestEsc_ArmsCancelWhenOnlySubagentsRun(t *testing.T) {
 
 func TestStatusLine_ShowsSubagentsRunningWithoutSpinner(t *testing.T) {
 	m := newQuietQueueModel(t, "tui:chat:subgate")
-	// NewModel may apply the config's default language; pin English after it so
-	// the assertion is locale-stable.
 	i18n.InitWithLanguage("en")
 	seedRunningSubagents(m, 2)
 	m.processing = false
@@ -108,13 +97,7 @@ func TestStatusLine_ShowsSubagentsRunningWithoutSpinner(t *testing.T) {
 	}
 }
 
-// TestSubagentsRunningText_ReportsOnlyBackgroundWork pins the shape of the idle
-// status line shown while subagents run in the background: it reports the
-// background work and nothing else. Earlier revisions appended a hint about the
-// composer ("input is free"), which read as extra chrome on every idle frame;
-// the composer is already usable, so the line must not editorialize about it.
 func TestSubagentsRunningText_ReportsOnlyBackgroundWork(t *testing.T) {
-	// Locale hints that only make sense for a composer-availability suffix.
 	composerHints := []string{"input", "free", "escrib", "escrev", "writing", "digitar", "escribir"}
 
 	for _, lang := range i18n.AvailableLanguages() {
@@ -134,7 +117,6 @@ func TestSubagentsRunningText_ReportsOnlyBackgroundWork(t *testing.T) {
 		}
 	}
 
-	// Leave the package's locale in a known state for the other tests.
 	i18n.InitWithLanguage("en")
 }
 

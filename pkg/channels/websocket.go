@@ -16,23 +16,14 @@ import (
 )
 
 const (
-	// wsReadBufferSize is the size of the WebSocket read buffer in bytes.
-	wsReadBufferSize = 8192
-	// wsWriteBufferSize is the size of the WebSocket write buffer in bytes.
+	wsReadBufferSize  = 8192
 	wsWriteBufferSize = 8192
-	// wsSendChanSize is the buffered channel capacity for outgoing messages.
-	wsSendChanSize = 512
-	// wsWriteTimeout is the deadline for normal write operations.
-	wsWriteTimeout = 90 * time.Second
-	// wsPingInterval is the interval between WebSocket ping frames.
-	wsPingInterval = 30 * time.Second
-	// wsReadDeadline is the read deadline reset on pong/ping and message receipt.
-	wsReadDeadline = 90 * time.Second
+	wsSendChanSize    = 512
+	wsWriteTimeout    = 90 * time.Second
+	wsPingInterval    = 30 * time.Second
+	wsReadDeadline    = 90 * time.Second
 )
 
-// wsQueueSendTimeout bounds how long QueueSend waits for buffer space before
-// declaring the client wedged and flagging it for cleanup. A var (not const)
-// so tests can shorten it; production reads the default 5s.
 var wsQueueSendTimeout = 5 * time.Second
 
 func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +54,6 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 		sessionKey = clientInfo.ClientID
 	}
 
-	// Validate session key before upgrade (response writer is still valid).
 	if !isValidSessionKeyFormat(sessionKey) {
 		writeError(w, http.StatusBadRequest, "invalid session_key format", "session_key_invalid")
 		return
@@ -73,7 +63,6 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Check if this user has a client in reconnecting state.
 	existingClient := n.findReconnectingClient(clientInfo.ClientID)
 
 	upgrader := websocket.Upgrader{
@@ -94,10 +83,8 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 	n.auth.UpdateLastSeen(clientInfo.ClientID)
 
 	if existingClient != nil {
-		// Reconnect: resume the existing client with the new connection.
 		buffered := n.reconnectWSClient(existingClient, conn)
 
-		// If the session key changed, update it.
 		if sessionKey != existingClient.SessionKey {
 			existingClient.mu.Lock()
 			existingClient.SessionKey = sessionKey
@@ -111,12 +98,10 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 		go n.wsReadLoop(existingClient)
 		go n.wsWriteLoop(existingClient)
 
-		// Send reconnected event with server state.
 		n.sendReconnected(existingClient, buffered)
 		return
 	}
 
-	// New connection: create a fresh WSClient.
 	clientID := uuid.New().String()
 	client := newWSClient(clientID, conn, clientInfo, sessionKey)
 
@@ -134,9 +119,6 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 	n.sendWelcome(client)
 }
 
-// newWSClient builds a WSClient for a fresh connection. Extracted so tests
-// can construct clients with the exact production shape (done-closed probe
-// wired up) instead of hand-rolling struct literals.
 func newWSClient(id string, conn *websocket.Conn, info *ClientInfo, sessionKey string) *WSClient {
 	c := &WSClient{
 		ID:            id,
@@ -151,10 +133,6 @@ func newWSClient(id string, conn *websocket.Conn, info *ClientInfo, sessionKey s
 	return c
 }
 
-// isDoneClosed is the doneClosed probe for clients created via newWSClient;
-// it reads a channel-closed signal without racing the close (a closed
-// receive on a struct{} channel never blocks, and closeDoneChan is
-// recover-guarded against double close).
 func (c *WSClient) isDoneClosed() bool {
 	done := c.snapshotDone()
 	if done == nil {
@@ -168,11 +146,6 @@ func (c *WSClient) isDoneClosed() bool {
 	}
 }
 
-// snapshotDone returns the client's current done channel under client.mu.
-// Every writer of client.done (reconnect, abandon, Stop) holds the lock, so
-// readers must take it too — reading the field without the lock races the
-// pointer word these paths replace (review post-fix follow-up: the same
-// contract QueueSend now follows).
 func (c *WSClient) snapshotDone() chan struct{} {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -187,8 +160,6 @@ func (n *NativeChannel) wsReadLoop(client *WSClient) {
 		})
 	}()
 
-	// Capture done once at entry (same contract as wsWriteLoop), under the
-	// lock: reconnect paths replace client.done while holding client.mu.
 	done := client.snapshotDone()
 
 	conn := client.Conn
@@ -205,15 +176,12 @@ func (n *NativeChannel) wsReadLoop(client *WSClient) {
 		return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(10*time.Second))
 	})
 
-	// doneCheck fires when the client is stopped/replaced. We race it against
-	// ReadMessage (which blocks on the network) via a helper goroutine so the
-	// loop exits promptly even if the underlying conn.Close races us.
 	doneFired := make(chan struct{})
 	closeDoneFired := sync.OnceFunc(func() { close(doneFired) })
 	go func() {
 		select {
 		case <-done:
-			conn.SetReadDeadline(time.Now()) // unblock ReadMessage
+			conn.SetReadDeadline(time.Now())
 			closeDoneFired()
 		case <-doneFired:
 		}
@@ -222,7 +190,6 @@ func (n *NativeChannel) wsReadLoop(client *WSClient) {
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			// If done fired, the error is expected — suppress the warning.
 			select {
 			case <-doneFired:
 			default:
@@ -232,7 +199,7 @@ func (n *NativeChannel) wsReadLoop(client *WSClient) {
 					})
 				}
 			}
-			closeDoneFired() // signal helper goroutine to exit
+			closeDoneFired()
 			return
 		}
 
@@ -252,18 +219,12 @@ func (n *NativeChannel) wsWriteLoop(client *WSClient) {
 	client.activeWriteLoops.Add(1)
 	defer client.activeWriteLoops.Add(-1)
 
-	// Capture the done channel once so a reconnect that replaces
-	// client.done does not make this stale loop follow the new one.
-	// The capture takes client.mu: all writers of client.done hold it.
 	done := client.snapshotDone()
 
 	pingTicker := time.NewTicker(wsPingInterval)
 	defer pingTicker.Stop()
 
 	for {
-		// Blocking read from SendChan is intentional: the buffered channel
-		// (wsSendChanSize) absorbs bursts while the goroutine sleeps when idle,
-		// avoiding busy-wait. QueueSend handles overflow with a timeout.
 		select {
 		case <-done:
 			return
@@ -279,8 +240,6 @@ func (n *NativeChannel) wsWriteLoop(client *WSClient) {
 			client.mu.Lock()
 			conn := client.Conn
 			if conn == nil {
-				// Disconnected; drop this frame rather than crashing. Reconnect
-				// flushes buffered events separately.
 				client.mu.Unlock()
 				continue
 			}
@@ -351,9 +310,6 @@ func (n *NativeChannel) handleWSMessage(client *WSClient, msg WSMessage) {
 }
 
 func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMessage, eventID string) {
-	// nil wsMessageLimiter means rate limiting is disabled by config: skip the
-	// check entirely.  The gate is nil-ness, not the config flag — tests that
-	// build a NativeChannel with explicit limiters must keep throttling active.
 	if n.wsMessageLimiter != nil && !n.wsMessageLimiter.allow(client.ClientInfo.ClientID) {
 		n.sendError(client, "rate_limit_exceeded", "rate limit exceeded, please slow down")
 		return
@@ -386,11 +342,6 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 	}
 	n.auth.TrackSessionKey(client.ClientInfo.ClientID, sessionKey)
 
-	// `agent_id` here is the agent the client is currently displaying, restated
-	// on every message. Route it through HintSessionAgent, not SetSessionAgent:
-	// the latter treats every send as an explicit re-bind and clears the session
-	// model override, which silently reverted the model picked in the WebUI
-	// chat dropdown one message after it was chosen.
 	if payload.AgentID != "" {
 		n.agentLoop.HintSessionAgent(sessionKey, payload.AgentID)
 	}
@@ -399,9 +350,6 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 
 	attachments := n.processAttachments(payload.Attachments, sessionKey)
 
-	// Attachments were carried but none survived processing: forwarding this
-	// would hand the agent an empty turn while the user sees their image. Fail
-	// loudly instead (the client maps this code to a user-facing message).
 	if !hasSendablePayload(payload.Content, attachments) {
 		n.sendError(client, "attachments_rejected", "attachments could not be read; add text or re-upload")
 		return
@@ -418,10 +366,6 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 	}
 	n.base.publishInbound(&msg)
 
-	// The ack must carry the same alias-resolved session_key that stream/complete
-	// events are emitted with (see dispatchOutboundMessage), otherwise the frontend
-	// registers its processing state under the base key while completion arrives
-	// under the alias (e.g. after /new or /agent) and never clears the loading state.
 	ackSessionKey := sessionKey
 	if n.agentLoop != nil {
 		ackSessionKey = n.agentLoop.ResolveSessionKey(sessionKey)
@@ -445,10 +389,6 @@ func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage, 
 
 	command := ""
 	if n.approvalManager != nil {
-		// HandleApprovalForSession atomically verifies that the approving
-		// client's session owns the approval, then finds, removes and returns
-		// it. Resolving by ID alone would let any authenticated client approve
-		// another session's pending exec (TUI-H2).
 		handledApproval, err := n.approvalManager.HandleApprovalForSession(payload.RequestID, payload.Approved, client.SessionKey)
 		if err != nil {
 			if strings.Contains(err.Error(), "approval session mismatch") {
@@ -469,11 +409,9 @@ func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage, 
 		}
 		command = handledApproval.Command
 
-		// Persist the approval decision in session history
 		n.persistApprovalMessage(client.SessionKey, payload.RequestID, payload.Approved, command, "")
 	}
 
-	// Broadcast approval result to the session
 	n.emitNativeEvent(client.SessionKey, "approve.result", map[string]interface{}{
 		"request_id": payload.RequestID,
 		"approved":   payload.Approved,
@@ -542,16 +480,11 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 		"processing":  processing,
 	}
 
-	// Include in-progress messages so the frontend can restore streaming
-	// content when the user switches back to a chat that is still processing.
 	if processing {
 		catchup := n.collectCatchupMessages(sessionKey, processing)
 		if len(catchup) > 0 {
 			ackData["in_progress_messages"] = catchup
 		}
-		// Same for the running tool row: the tool call only lives in the event
-		// stream, so without it the row disappeared on every re-subscribe
-		// (chat switch, page reload) even though the tool kept running.
 		n.addInProgressTool(ackData, sessionKey, processing)
 	}
 
@@ -617,7 +550,6 @@ func (n *NativeChannel) handleWSTyping(client *WSClient, data json.RawMessage) {
 		sessionKey = client.SessionKey
 	}
 
-	// Broadcast typing indicator to clients subscribed to this session
 	n.emitNativeEvent(sessionKey, "typing.indicator", map[string]interface{}{
 		"session_key": sessionKey,
 		"client_id":   client.ClientInfo.ClientID,
@@ -645,8 +577,6 @@ func (n *NativeChannel) handleWSCancel(client *WSClient, data json.RawMessage, e
 	}, "")
 }
 
-// collectCatchupMessages returns in-progress assistant messages for a session
-// so the frontend can restore streaming content after a page reload or reconnect.
 func (n *NativeChannel) collectCatchupMessages(sessionKey string, processing bool) []map[string]interface{} {
 	if !processing || n.agentLoop == nil {
 		return nil
@@ -662,16 +592,6 @@ func (n *NativeChannel) collectCatchupMessages(sessionKey string, processing boo
 	}}
 }
 
-// sessionGroupSnapshots returns the GroupSnapshots that belong to the given
-// sessionKey, unioning the groups tracked in memory with the persisted store.
-//
-// It delegates the whole lookup to the agent loop (#239): filtering by origin
-// chat, session-alias resolution and the memory/store union all live in
-// GroupManager.SnapshotsForSession, which is the only place with access to both
-// sources. Doing it here from AllGroupSnapshots() — as this did before — could
-// only ever see memory, so a finished group disappeared from the session's
-// history as soon as retention swept it (30 min) or the daemon restarted, and
-// its card never came back even though the transcript was still on disk.
 func (n *NativeChannel) sessionGroupSnapshots(sessionKey string) []group.GroupSnapshot {
 	if n.agentLoop == nil {
 		return nil
@@ -679,15 +599,6 @@ func (n *NativeChannel) sessionGroupSnapshots(sessionKey string) []group.GroupSn
 	return n.agentLoop.GroupSnapshotsForSession(sessionKey)
 }
 
-// inProgressToolPayload returns the tool.executing payload of the tool the
-// session is running right now, or nil when there is none to report.
-//
-// It is only produced while the session is processing: the record behind it is
-// in-memory turn state, so a stale one (turn cancelled, process restarted) must
-// never be replayed as "running". Clients restore the live "running tool" row
-// from this after a page reload or a re-subscribe — without it the row
-// vanished while the tool kept running, because the in-flight call only ever
-// travels in the event stream and never reaches the message history.
 func (n *NativeChannel) inProgressToolPayload(sessionKey string, processing bool) *WSToolExecutingPayload {
 	if !processing || n.agentLoop == nil {
 		return nil
@@ -712,10 +623,6 @@ func (n *NativeChannel) inProgressToolPayload(sessionKey string, processing bool
 	return payload
 }
 
-// addInProgressTool copies the session's in-flight tool payload into a
-// welcome/reconnected/subscribe.ack data map, when there is one. The key is
-// added only when a tool is actually running so clients can treat its absence
-// as "nothing to restore" without distinguishing null from missing.
 func (n *NativeChannel) addInProgressTool(data map[string]interface{}, sessionKey string, processing bool) {
 	if payload := n.inProgressToolPayload(sessionKey, processing); payload != nil {
 		data["in_progress_tool"] = payload
@@ -776,8 +683,6 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 	}
 }
 
-// sendReconnected sends a reconnected welcome event and flushes any buffered
-// messages that accumulated while the client was disconnected.
 func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMessage) {
 	status := n.agentLoop.GetStatus(client.SessionKey)
 	agents := make([]map[string]interface{}, 0)
@@ -808,8 +713,6 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 
 	groupsEnabled := n.cfgSnapshot().GroupsFeatureEnabled()
 
-	// Snapshot Subscriptions under lock: the marshal below reads the map,
-	// and Send acquires client.mu internally, so we must not hold it here.
 	client.mu.Lock()
 	subsSnapshot := client.Subscriptions
 	client.mu.Unlock()
@@ -843,16 +746,9 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 		return
 	}
 
-	// Flush buffered events that accumulated during the disconnect window.
-	// Skip message.stream and message.thinking events — their content is
-	// already included in in_progress_messages (accumulated text) sent in
-	// the reconnected payload. Replaying individual chunks would cause the
-	// frontend to build a second assistant message from scratch, resulting
-	// in duplicated/overlapping text.
 	flushed := 0
 	skipped := 0
 	for _, payload := range buffered {
-		// Peek at the event type without full deserialization.
 		var peek struct {
 			Event string `json:"event"`
 		}
@@ -878,30 +774,14 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 		"skipped_stream":  skipped,
 	})
 
-	// Durability: the peer is live again, so wake the outbound pump to replay
-	// the rows that piled up while it was gone. This sits AFTER the pendingMsgs
-	// flush on purpose - in-memory buffer first, durable spool second - so a
-	// message that was only buffered is not overtaken by an older spooled row.
 	n.kickOutboundFlush(client)
 }
 
-// kickOutboundFlush signals the durable outbound pump that client's peer is
-// reachable again. It is a wake-up only: FlushPeer never claims or delivers a
-// row, the pump does, so a spurious or duplicate kick is harmless.
-//
-// Extracted from sendReconnected because the reconnect path needs a live
-// websocket.Conn to be driven end to end, while the wake-up itself depends on
-// nothing but the client's session key and the wired flusher - so this way the
-// ordering contract has a unit test.
-//
-// The flusher is read under n.mu and called outside it: FlushPeer may take the
-// pump's own locks and must never run while the client map is held.
 func (n *NativeChannel) kickOutboundFlush(client *WSClient) {
 	f := n.outboundFlusherSnapshot()
 	if f == nil {
 		return
 	}
-	// The spool keys native peers by ChatID, which is the session key.
 	f.FlushPeer(ChannelName, client.SessionKey)
 }
 
@@ -929,9 +809,6 @@ func marshalWithID(event string, data interface{}, id string) json.RawMessage {
 }
 
 func (n *NativeChannel) StreamMessage(sessionKey, messageID, chunk string, done bool) {
-	// This legacy path carries no throughput metrics, so pass nil: the shared
-	// constructor then serialises the metrics as zeros, exactly like the
-	// hand-built literal it replaces.
 	n.emitNativeEvent(sessionKey, "message.stream",
 		newWSStreamPayload(messageID, sessionKey, chunk, done, nil), messageID)
 }
@@ -965,13 +842,6 @@ func boolToString(b bool) string {
 	return "false"
 }
 
-// isValidSessionKeyFormat validates that a session key follows the expected format:
-// - Non-empty, max 256 chars, printable ASCII only
-// - No path traversal sequences (.., /, \)
-// - native:{client_id} or native:{client_id}:{suffix} (deprecated, kept for backward compatibility)
-// - subagent:{task_id} (deprecated, kept for backward compatibility)
-// - Plain client IDs and custom session keys
-// Returns true if the format is valid, false otherwise.
 func isValidSessionKeyFormat(sessionKey string) bool {
 	if strings.TrimSpace(sessionKey) == "" {
 		return false
@@ -979,7 +849,6 @@ func isValidSessionKeyFormat(sessionKey string) bool {
 	if len(sessionKey) > 256 {
 		return false
 	}
-	// Reject path traversal and control characters
 	if strings.Contains(sessionKey, "..") {
 		return false
 	}
@@ -991,7 +860,6 @@ func isValidSessionKeyFormat(sessionKey string) bool {
 			return false
 		}
 	}
-	// Subagent keys have strict format requirements
 	if strings.HasPrefix(sessionKey, "subagent:") {
 		taskID := strings.TrimPrefix(sessionKey, "subagent:")
 		if !strings.HasPrefix(taskID, "subagent-") {
@@ -1007,7 +875,6 @@ func isValidSessionKeyFormat(sessionKey string) bool {
 		}
 		return true
 	}
-	// For backward compat, validate old native: format if present
 	if strings.HasPrefix(sessionKey, "native:") {
 		parts := strings.Split(sessionKey[7:], ":")
 		if len(parts) < 1 || parts[0] == "" {
@@ -1018,17 +885,13 @@ func isValidSessionKeyFormat(sessionKey string) bool {
 		}
 		return true
 	}
-	// Accept any valid string for plain session keys
 	return true
 }
 
-// sessionKeyMatches checks if two session keys match, handling backward compatibility
-// for the deprecated native: prefix.
 func sessionKeyMatches(a, b string) bool {
 	if a == b {
 		return true
 	}
-	// Strip native: prefix for comparison (backward compat)
 	aNorm := strings.TrimPrefix(a, "native:")
 	bNorm := strings.TrimPrefix(b, "native:")
 	return aNorm == bNorm

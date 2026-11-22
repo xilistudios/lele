@@ -9,33 +9,6 @@ import (
 	"time"
 )
 
-// ---------------------------------------------------------------------------
-// Regression tests for B7: groups persisted on disk must be rehydrated at
-// startup.
-//
-// GroupManager saved state on disk (Start persists the started snapshot and
-// runGroup persists the final one through the deferred saveStateBestEffort),
-// but after a process restart nothing ever read it back: the manager came up
-// empty and "/group list" plus the WebSocket welcome payload lost every
-// finished group, while chat sessions survived the restart.
-//
-// The contract under test (GroupManager.LoadHistorical):
-//   - finished groups come back visible to List/Status/AllSnapshots and Wait
-//     returns immediately with a synthesis recomputed from the transcript;
-//   - a non-terminal status on disk (the process died mid-run) is re-marked
-//     StatusError with a synthetic "terminated by process restart" error, so
-//     Wait fails fast instead of hanging forever;
-//   - hydration is idempotent and never overwrites an already-tracked ID;
-//   - finishedAt is anchored to state.UpdatedAt so the B6 retention sweep
-//     drops week-old history on the first read;
-//   - with no storeDir configured it is a no-op.
-//
-// These tests exercise the legacy JSON dir backend, so each one pins
-// UseStore(nil) for its duration (the SQLite repo is package-global).
-// ---------------------------------------------------------------------------
-
-// useJSONStore pins the package-level store to the legacy JSON backend and
-// restores whatever was configured when the test ends.
 func useJSONStore(t *testing.T) {
 	t.Helper()
 	prev := getGroupRepo()
@@ -43,8 +16,6 @@ func useJSONStore(t *testing.T) {
 	t.Cleanup(func() { UseStore(prev) })
 }
 
-// withJSONStoreDir returns a manager wired to the mock executor, pinned to the
-// legacy JSON backend and persisting into dir.
 func withJSONStoreDir(t *testing.T, dir string, pub Publisher) *GroupManager {
 	t.Helper()
 	useJSONStore(t)
@@ -53,10 +24,6 @@ func withJSONStoreDir(t *testing.T, dir string, pub Publisher) *GroupManager {
 	return gm
 }
 
-// tryGroupFinalized polls dir until the terminal state of groupID lands there
-// (or the timeout elapses), returning nil on timeout. runGroup flushes with a
-// deferred saveStateBestEffort that runs *after* finalize closed done, so a
-// test that only waited on Wait can still race the write.
 func tryGroupFinalized(dir, groupID string, timeout time.Duration) *GroupState {
 	deadline := time.Now().Add(timeout)
 	for {
@@ -70,7 +37,6 @@ func tryGroupFinalized(dir, groupID string, timeout time.Duration) *GroupState {
 	}
 }
 
-// assertGroupFinalized is tryGroupFinalized with a 5s budget and a hard failure.
 func assertGroupFinalized(t *testing.T, dir, groupID string) *GroupState {
 	t.Helper()
 	st := tryGroupFinalized(dir, groupID, 5*time.Second)
@@ -80,11 +46,6 @@ func assertGroupFinalized(t *testing.T, dir, groupID string) *GroupState {
 	return st
 }
 
-// drainGroup releases a group parked by stepExecutor, waits for its terminal
-// flush to reach dir, and then waits for the runGroup goroutine to fully exit
-// (including deferred saveStateBestEffort). Tests that start a live group
-// against a t.TempDir() MUST call it (deferred) so neither the async save nor
-// the goroutine itself can race the directory cleanup (#282).
 func drainGroup(t *testing.T, exec *stepExecutor, dir, groupID string) {
 	t.Helper()
 	releaseStep(exec)
@@ -93,7 +54,6 @@ func drainGroup(t *testing.T, exec *stepExecutor, dir, groupID string) {
 	}
 }
 
-// findState returns the snapshot with the given ID from a List() result.
 func findState(states []*GroupState, id string) (*GroupState, bool) {
 	for _, s := range states {
 		if s.ID == id {
@@ -103,9 +63,6 @@ func findState(states []*GroupState, id string) (*GroupState, bool) {
 	return nil, false
 }
 
-// TestRegression_LoadHistoricalRestoresFinishedGroups runs a real group to
-// completion with persistence enabled, then hydrates a brand-new manager over
-// the same directory — the restart path.
 func TestRegression_LoadHistoricalRestoresFinishedGroups(t *testing.T) {
 	dir := t.TempDir()
 	writer := withJSONStoreDir(t, dir, newLifecycleRecorder().publish)
@@ -120,22 +77,12 @@ func TestRegression_LoadHistoricalRestoresFinishedGroups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
-	// The state finalize produced must be what lands on disk: B7 depends on it,
-	// because without a persisted terminal status there is nothing to hydrate.
-	// runner.go registers saveStateBestEffort as the outermost defer, so the
-	// terminal status set by finalize is always the one saved.
 	finalized := assertGroupFinalized(t, dir, groupID)
 	if finalized.Status != StatusDone {
 		t.Fatalf("persisted status = %q, want %q", finalized.Status, StatusDone)
 	}
-	// Wait for the runGroup goroutine to fully exit — including the deferred
-	// saveStateBestEffort that runs AFTER done is closed. Without this,
-	// t.TempDir() cleanup can race the deferred write and produce ENOTEMPTY (#282).
 	writer.DrainRunGoroutine(groupID)
 
-	// The restart: a fresh manager over the same storeDir.
-	// Poll LoadHistorical: ListGroups can briefly race the deferred save on
-	// slow CI even after LoadGroup saw a terminal file.
 	rec := &mockPublisher{}
 	reader := NewGroupManager(mockResolve, (&mockExecutor{}).execute, rec.publish)
 	reader.SetStoreDir(dir)
@@ -169,8 +116,6 @@ func TestRegression_LoadHistoricalRestoresFinishedGroups(t *testing.T) {
 		t.Errorf("OriginChatID = %q, want %q", st.OriginChatID, "chat-7")
 	}
 
-	// Wait must return immediately (done already closed) with the synthesis
-	// recovered from the persisted transcript — the value the live group gave.
 	var got string
 	waitWithTimeout(t, 3*time.Second, "Wait on hydrated group", func() {
 		got, err = reader.Wait(groupID)
@@ -182,7 +127,6 @@ func TestRegression_LoadHistoricalRestoresFinishedGroups(t *testing.T) {
 		t.Errorf("synthesis = %q, want %q", got, want)
 	}
 
-	// List and AllSnapshots see it too.
 	if states := reader.List(); len(states) != 1 {
 		t.Fatalf("List = %d groups, want 1", len(states))
 	}
@@ -201,15 +145,11 @@ func TestRegression_LoadHistoricalRestoresFinishedGroups(t *testing.T) {
 		t.Errorf("snapshot turns = %d, want 2", len(snaps[0].Turns))
 	}
 
-	// Hydration published nothing: no replayed started or terminal events.
 	if c := rec.count(); c != 0 {
 		t.Errorf("publisher got %d events during hydration, want 0", c)
 	}
 }
 
-// TestRegression_LoadHistoricalRemarksRunningGroup pins the mid-run-crash case:
-// a state persisted with a non-terminal status must come back as error, not as
-// a group that looks alive forever.
 func TestRegression_LoadHistoricalRemarksRunningGroup(t *testing.T) {
 	dir := t.TempDir()
 	useJSONStore(t)
@@ -260,15 +200,11 @@ func TestRegression_LoadHistoricalRemarksRunningGroup(t *testing.T) {
 	if !strings.Contains(werr.Error(), "terminated by process restart") {
 		t.Errorf("Wait error = %v, want it to mention process restart", werr)
 	}
-	// The partial transcript is still surfaced: its last turn stands in for a
-	// synthesis nobody ever produced.
 	if got != "partial" {
 		t.Errorf("result = %q, want %q", got, "partial")
 	}
 }
 
-// TestRegression_LoadHistoricalIdempotent: calling it twice — or hydrating
-// while an active run holds the same ID — must not duplicate or clobber.
 func TestRegression_LoadHistoricalIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	useJSONStore(t)
@@ -279,11 +215,9 @@ func TestRegression_LoadHistoricalIdempotent(t *testing.T) {
 			Participants: []Participant{{AgentID: "a", Role: RoleProposer}},
 			Strategy:     "round_robin",
 			Status:       StatusDone,
-			// Minutes (not hours) apart so the default retention window keeps all
-			// three visible while the counts are asserted.
-			CreatedAt:  time.Now().Add(-time.Duration(i) * time.Minute),
-			UpdatedAt:  time.Now().Add(-time.Duration(i) * time.Minute),
-			Transcript: []Turn{{Index: 0, Speaker: "a", Content: fmt.Sprintf("s%d", i)}},
+			CreatedAt:    time.Now().Add(-time.Duration(i) * time.Minute),
+			UpdatedAt:    time.Now().Add(-time.Duration(i) * time.Minute),
+			Transcript:   []Turn{{Index: 0, Speaker: "a", Content: fmt.Sprintf("s%d", i)}},
 		}
 		if err := SaveGroup(dir, st); err != nil {
 			t.Fatalf("SaveGroup %d: %v", i, err)
@@ -315,8 +249,6 @@ func TestRegression_LoadHistoricalIdempotent(t *testing.T) {
 		t.Error("group:hydrate-idem-2 missing from List")
 	}
 
-	// An ID already tracked by a live run is never overwritten by the copy on
-	// disk.
 	exec := newStepExecutor(1)
 	live := NewGroupManager(mockResolve, exec.execute, newLifecycleRecorder().publish)
 	live.SetStoreDir(dir)
@@ -346,9 +278,6 @@ func TestRegression_LoadHistoricalIdempotent(t *testing.T) {
 	}
 }
 
-// TestRegression_LoadHistoricalExpiredNotShown: retention (B6) must age
-// hydrated groups from their real finish instant, so stale history does not
-// flood the WS welcome payload with weeks of transcript.
 func TestRegression_LoadHistoricalExpiredNotShown(t *testing.T) {
 	dir := t.TempDir()
 	useJSONStore(t)
@@ -386,8 +315,6 @@ func TestRegression_LoadHistoricalExpiredNotShown(t *testing.T) {
 		t.Fatalf("count = %d, want 2 (hydration itself does not evict)", n)
 	}
 
-	// The first read runs the lazy sweep: the 2h-old group is already past its
-	// retention window, the 1min-old one is not.
 	list := gm.List()
 	if len(list) != 1 {
 		t.Fatalf("List = %d groups, want 1 (expired hydrated group not swept)", len(list))
@@ -406,8 +333,6 @@ func TestRegression_LoadHistoricalExpiredNotShown(t *testing.T) {
 	}
 }
 
-// TestRegression_LoadHistoricalZeroUpdatedAtKeepsGroup: a legacy state with no
-// UpdatedAt is aged from now instead of expiring the instant it is loaded.
 func TestRegression_LoadHistoricalZeroUpdatedAtKeepsGroup(t *testing.T) {
 	dir := t.TempDir()
 	useJSONStore(t)
@@ -438,8 +363,6 @@ func TestRegression_LoadHistoricalZeroUpdatedAtKeepsGroup(t *testing.T) {
 	}
 }
 
-// TestRegression_NoStoreDirNoop: a manager without persistence configured
-// hydrates nothing and never fails.
 func TestRegression_NoStoreDirNoop(t *testing.T) {
 	gm := NewGroupManager(mockResolve, (&mockExecutor{}).execute, newLifecycleRecorder().publish)
 	n, err := gm.LoadHistorical()
@@ -454,8 +377,6 @@ func TestRegression_NoStoreDirNoop(t *testing.T) {
 	}
 }
 
-// TestRegression_LoadHistoricalEmptyDirIsNoop covers a configured storeDir that
-// does not exist yet (fresh install): no error, nothing loaded.
 func TestRegression_LoadHistoricalEmptyDirIsNoop(t *testing.T) {
 	gm := NewGroupManager(mockResolve, (&mockExecutor{}).execute, newLifecycleRecorder().publish)
 	gm.SetStoreDir(filepath.Join(t.TempDir(), "does-not-exist"))
@@ -468,9 +389,6 @@ func TestRegression_LoadHistoricalEmptyDirIsNoop(t *testing.T) {
 	}
 }
 
-// TestRegression_LoadHistoricalMoaSynthesisPicksAggregator pins the synthesis
-// rule for a hydrated moa group: the aggregator's last turn, not the last
-// proposal, which is what finalize would have reported.
 func TestRegression_LoadHistoricalMoaSynthesisPicksAggregator(t *testing.T) {
 	dir := t.TempDir()
 	useJSONStore(t)
@@ -511,9 +429,6 @@ func TestRegression_LoadHistoricalMoaSynthesisPicksAggregator(t *testing.T) {
 	}
 }
 
-// TestRegression_LoadHistoricalStopIsInert documents that a hydrated group is
-// not resumable: Stop reports it and does nothing, and the group stays in its
-// terminal state (retention still owns its disappearance).
 func TestRegression_LoadHistoricalStopIsInert(t *testing.T) {
 	dir := t.TempDir()
 	useJSONStore(t)
@@ -545,7 +460,6 @@ func TestRegression_LoadHistoricalStopIsInert(t *testing.T) {
 	if after.Status != StatusStopped {
 		t.Errorf("status = %q, want %q (Stop must not mutate a finished group)", after.Status, StatusStopped)
 	}
-	// A stopped group has no error attached, so Wait reports its transcript.
 	got, err := gm.Wait(st.ID)
 	if err != nil {
 		t.Errorf("Wait on hydrated stopped group: %v", err)

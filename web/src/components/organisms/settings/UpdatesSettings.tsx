@@ -22,7 +22,6 @@ export function UpdatesSettings() {
   const [rollbackConfirmOpen, setRollbackConfirmOpen] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Load version info on mount.
   useEffect(() => {
     api
       .systemVersion()
@@ -53,9 +52,7 @@ export function UpdatesSettings() {
           setError(state.error || 'Update failed')
           stopPolling()
         }
-      } catch {
-        // ignore transient polling errors
-      }
+      } catch {}
     }, 1500)
   }, [api, stopPolling])
 
@@ -107,7 +104,6 @@ export function UpdatesSettings() {
         title={t('settings.updates.title')}
         description={t('settings.updates.description')}
       >
-        {/* Current version info */}
         {versionInfo && (
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
             <span className="text-text-secondary">{t('settings.updates.version')}</span>
@@ -141,7 +137,6 @@ export function UpdatesSettings() {
           <Badge variant="warning">{t('settings.updates.devBuild')}</Badge>
         )}
 
-        {/* Status / progress */}
         {status === 'checking' && (
           <div className="flex items-center gap-2 text-sm text-text-secondary">
             <Spinner size="sm" />
@@ -226,7 +221,6 @@ export function UpdatesSettings() {
           </div>
         )}
 
-        {/* Actions */}
         <div className="flex gap-2 pt-2">
           <button
             type="button"
@@ -249,9 +243,8 @@ export function UpdatesSettings() {
         </div>
       </SettingsSection>
 
-      {/* Confirmation modal */}
       {confirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
           <div className="w-full max-w-md rounded-lg border border-border bg-background-primary p-6 shadow-xl">
             <h3 className="mb-2 text-sm font-semibold text-text-primary">
               {t('settings.updates.confirmTitle')}
@@ -279,9 +272,8 @@ export function UpdatesSettings() {
         </div>
       )}
 
-      {/* Rollback confirmation modal */}
       {rollbackConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
           <div className="w-full max-w-md rounded-lg border border-border bg-background-primary p-6 shadow-xl">
             <h3 className="mb-2 text-sm font-semibold text-text-primary">
               {t('settings.updates.rollbackConfirmTitle')}

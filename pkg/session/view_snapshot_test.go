@@ -1,17 +1,5 @@
 package session
 
-// Tests for the copy-on-write history view (view.go, GetHistoryView).
-//
-// The contract under test has two halves:
-//   - correctness (unchanged from the old copy-per-read implementation): the
-//     view always reflects every mutation, is never aliased by writers, and is
-//     safe to hold across later mutations;
-//   - publication (new): structural writers must publish a fresh snapshot so
-//     the read is O(1), while streaming chunk writers must NOT (coalescing).
-//     A writer that forgets to publish stays correct (the epoch check rebuilds
-//     the view) but silently loses the optimization — that is what
-//     TestHistoryView_PublishContract guards.
-
 import (
 	"fmt"
 	"reflect"
@@ -22,8 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// newSnapshotTestManager returns a store-backed manager with one seeded
-// session, so eviction (which requires SQLite) can be exercised too.
 func newSnapshotTestManager(t *testing.T, key string, msgs ...providers.Message) *SessionManager {
 	t.Helper()
 	sm := NewSessionManager()
@@ -34,7 +20,6 @@ func newSnapshotTestManager(t *testing.T, key string, msgs ...providers.Message)
 	return sm
 }
 
-// snapshotOf returns the currently published snapshot of key (nil when none).
 func snapshotOf(t *testing.T, sm *SessionManager, key string) *messageSnapshot {
 	t.Helper()
 	sm.mu.RLock()
@@ -46,8 +31,6 @@ func snapshotOf(t *testing.T, sm *SessionManager, key string) *messageSnapshot {
 	return session.viewSnapshot.Load()
 }
 
-// assertViewFresh fails when the published snapshot is nil or stale, i.e. when
-// the next GetHistoryView would have to rebuild (and copy) it.
 func assertViewFresh(t *testing.T, sm *SessionManager, key, writer string) {
 	t.Helper()
 	sm.mu.RLock()
@@ -70,8 +53,6 @@ func assertViewFresh(t *testing.T, sm *SessionManager, key, writer string) {
 	}
 }
 
-// viewHasText reports whether any message in view carries substr — in Content
-// or in ReasoningContent (thinking chunks land there).
 func viewHasText(view []providers.Message, substr string) bool {
 	for _, m := range view {
 		if strings.Contains(m.Content, substr) || strings.Contains(m.ReasoningContent, substr) {
@@ -81,7 +62,6 @@ func viewHasText(view []providers.Message, substr string) bool {
 	return false
 }
 
-// assertViewMatchesSession checks the read-only view against the live slice.
 func assertViewMatchesSession(t *testing.T, sm *SessionManager, key, writer string) {
 	t.Helper()
 	view := sm.GetHistoryView(key)
@@ -105,8 +85,6 @@ func assertViewMatchesSession(t *testing.T, sm *SessionManager, key, writer stri
 	}
 }
 
-// TestHistoryView_ReflectsEveryMutation walks every writer of session.Messages
-// and asserts GetHistoryView sees the change immediately.
 func TestHistoryView_ReflectsEveryMutation(t *testing.T) {
 	const key = "tui:chat:view-mutations"
 	user := func(s string) providers.Message { return providers.Message{Role: "user", Content: s} }
@@ -204,7 +182,6 @@ func TestHistoryView_ReflectsEveryMutation(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sm := newSnapshotTestManager(t, key, tc.seed...)
-			// Warm the published view so a stale one would be visible below.
 			if got := len(sm.GetHistoryView(key)); got != len(tc.seed) {
 				t.Fatalf("seed view len = %d, want %d", got, len(tc.seed))
 			}
@@ -222,8 +199,6 @@ func TestHistoryView_ReflectsEveryMutation(t *testing.T) {
 		})
 	}
 
-	// Eviction needs a store and an excluded prefix; exercised separately
-	// because the seeding differs.
 	t.Run("EvictExcludedMessages drops the evicted prefix", func(t *testing.T) {
 		sm := newSnapshotTestManager(t, key, user("one"), assistant("two"), user("three"), assistant("four"))
 		sm.ExcludeOldMessagesFromContext(key, 1)
@@ -241,10 +216,6 @@ func TestHistoryView_ReflectsEveryMutation(t *testing.T) {
 	})
 }
 
-// TestHistoryView_FallbackWhenSnapshotStale covers the safety net: a writer
-// that mutates Messages and bumps the epoch WITHOUT publishing (exactly what a
-// forgotten publishViewLocked() call looks like) must not corrupt the read —
-// the epoch check turns it into a rebuild.
 func TestHistoryView_FallbackWhenSnapshotStale(t *testing.T) {
 	const key = "tui:chat:view-stale"
 	user := func(s string) providers.Message { return providers.Message{Role: "user", Content: s} }
@@ -254,7 +225,6 @@ func TestHistoryView_FallbackWhenSnapshotStale(t *testing.T) {
 		t.Fatalf("seeded view len = %d, want 1", got)
 	}
 
-	// Simulate a writer that forgot to publish: mutate + bump the epoch only.
 	sm.mu.Lock()
 	session := sm.sessions[key]
 	session.Messages = append(session.Messages, user("unpublished"))
@@ -270,20 +240,12 @@ func TestHistoryView_FallbackWhenSnapshotStale(t *testing.T) {
 	if len(view) != 2 || view[1].Content != "unpublished" {
 		t.Fatalf("stale-snapshot fallback returned %+v, want the 2 current messages", view)
 	}
-	// The fallback must also republish, so the next read is O(1) again.
 	assertViewFresh(t, sm, key, "GetHistoryView fallback")
 	if got := len(sm.GetHistoryView(key)); got != 2 {
 		t.Fatalf("re-read after fallback len = %d, want 2", got)
 	}
 }
 
-// TestHistoryView_PublishContract asserts the performance half of the contract:
-// every structural writer publishes a fresh snapshot (so reads stay O(1)),
-// while AppendAssistantChunk deliberately leaves it stale (coalescing).
-//
-// This is the RED test for a writer that drops its publishViewLocked() call:
-// the correctness tests keep passing (the epoch check hides the mistake) but
-// this one fails.
 func TestHistoryView_PublishContract(t *testing.T) {
 	const key = "tui:chat:view-publish"
 	user := func(s string) providers.Message { return providers.Message{Role: "user", Content: s} }
@@ -292,7 +254,7 @@ func TestHistoryView_PublishContract(t *testing.T) {
 	seed := func(t *testing.T) *SessionManager {
 		t.Helper()
 		sm := newSnapshotTestManager(t, key, user("one"), assistant("two"), user("three"), assistant("four"))
-		sm.GetHistoryView(key) // warm the published view
+		sm.GetHistoryView(key)
 		return sm
 	}
 
@@ -336,16 +298,10 @@ func TestHistoryView_PublishContract(t *testing.T) {
 		if snap := snapshotOf(t, sm, key); snap != nil && snap.epoch == sm.sessions[key].saveEpoch {
 			t.Error("streaming chunk published a snapshot: publishing is O(n) per token and must be coalesced")
 		}
-		// Correctness must not depend on the coalescing.
 		assertViewMatchesSession(t, sm, key, "AppendAssistantChunk")
 	})
 }
 
-// TestHistoryView_NotAliasedByMutations is the parity check with the old
-// copy-per-read implementation: a view handed out BEFORE a mutation must not
-// change when the session mutates afterwards — including in-place rewrites of
-// the message the view holds, which a snapshot aliasing the live array would
-// corrupt.
 func TestHistoryView_NotAliasedByMutations(t *testing.T) {
 	const key = "tui:chat:view-alias"
 	user := func(s string) providers.Message { return providers.Message{Role: "user", Content: s} }
@@ -355,7 +311,6 @@ func TestHistoryView_NotAliasedByMutations(t *testing.T) {
 	held := sm.GetHistoryView(key)
 	heldCopy := cloneMessages(held)
 
-	// Every kind of mutation after the view was handed out.
 	sm.AppendAssistantChunk(key, "streamed")
 	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "final answer"})
 	sm.AddFullMessage(key, user("second"))
@@ -374,16 +329,12 @@ func TestHistoryView_NotAliasedByMutations(t *testing.T) {
 	if heldCopy[0].Content != "first" {
 		t.Fatalf("test setup: held view = %+v", heldCopy)
 	}
-	// The live view reflects the mutations; the held one did not follow them.
 	live := sm.GetHistoryView(key)
 	if len(live) != 1 || live[0].Content != "final answer" {
 		t.Errorf("live view = %+v, want the single surviving %q turn", live, "final answer")
 	}
 }
 
-// TestHistoryView_ConcurrentReadersAndWriters runs the race detector over every
-// writer while readers hold the returned views. Run with -race: it must report
-// no data race, no panic and no torn view.
 func TestHistoryView_ConcurrentReadersAndWriters(t *testing.T) {
 	const key = "tui:chat:view-race"
 
@@ -436,9 +387,6 @@ func TestHistoryView_ConcurrentReadersAndWriters(t *testing.T) {
 				default:
 				}
 				view := sm.GetHistoryView(key)
-				// Read every field of every message: a torn or aliased
-				// snapshot would surface as an inconsistent content/role pair
-				// under -race, or as a panic from a mutated slice header.
 				for i := range view {
 					_ = view[i].Role
 					_ = view[i].Content
@@ -448,12 +396,9 @@ func TestHistoryView_ConcurrentReadersAndWriters(t *testing.T) {
 		}()
 	}
 
-	// Readers run until the (bounded) writers are done; the release goroutine
-	// keeps the wait hang-free.
 	go func() { writersWG.Wait(); close(stop) }()
 	writersWG.Wait()
 	readersWG.Wait()
 
-	// The final view must still be internally consistent.
 	assertViewMatchesSession(t, sm, key, "final view after concurrent writes")
 }

@@ -20,32 +20,18 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// ── fixtures and seams ─────────────────────────────────────────────────
-
-// mcpAuthFixtureDoc is one mcp.json holding the two shapes that matter: a
-// remote entry (authorizable) and a stdio entry (not).
 const mcpAuthFixtureDoc = `{"mcpServers":{` +
 	`"remote-srv":{"url":"https://mcp.example.test/mcp","description":"remote"},` +
 	`"local-srv":{"command":"true"}}}`
 
-// mcpAuthListModel builds a Model the way the app does (newTestModel: real
-// widgets, real agent loop, onboarding off) whose global MCP layer is a temp
-// dir holding doc, and opens /mcp on it. Driving the real path (paths →
-// inventory → Discover) is the point: the modal must see exactly what the
-// visible rows were built from.
 func mcpAuthListModel(t *testing.T, doc string) *Model {
 	t.Helper()
 	m := newTestModel(t)
-	// The global layer is <LELE_CONFIG_DIR>/mcp.json — the same root
-	// pkg/agent's MCP fixtures use.
 	mcpWriteDoc(t, config.GetLeleDir(), doc)
 	m.width, m.height = 140, 40
-	// NewModel installs the real launcher; a test must never spawn a browser,
-	// so every MCP test model starts with a no-op opener that a test can
-	// replace (attach / mcpAuthRecordingOpener).
 	m.mcpAuthOpener = func(string) error { return nil }
 
-	m.executeCommand("/mcp") // the real entry point: resetModal + loadMCPList
+	m.executeCommand("/mcp")
 	if m.modalMode != ModalMCP {
 		t.Fatalf("mode = %v, want ModalMCP", m.modalMode)
 	}
@@ -59,8 +45,6 @@ func mcpAuthListModel(t *testing.T, doc string) *Model {
 	return m
 }
 
-// mcpAuthOpenDetail opens the detail modal of name through the real key path
-// (enter on the row under the cursor).
 func mcpAuthOpenDetail(t *testing.T, m *Model, name string) {
 	t.Helper()
 	idx := -1
@@ -81,10 +65,6 @@ func mcpAuthOpenDetail(t *testing.T, m *Model, name string) {
 	}
 }
 
-// fakeMCPAuthFlow is a scripted mcpAuthFlow: it records the submits and the
-// cancels and reports a status the test controls, so no engine — and no
-// network — is involved anywhere in these tests. done mirrors the engine's
-// Done(): "error" is ambiguous unless it is set.
 type fakeMCPAuthFlow struct {
 	url        string
 	status     string
@@ -106,8 +86,6 @@ func (f *fakeMCPAuthFlow) Done() bool { return f.done || f.status == mcpAuthStat
 func (f *fakeMCPAuthFlow) Submit(_ context.Context, code, state string) error {
 	f.submits = append(f.submits, mcpAuthSubmitArgs{code: code, state: state})
 	if f.submitErr != nil {
-		// A failed exchange is recorded as a retryable error: the flow stays
-		// open exactly like the engine leaves it.
 		f.status, f.statusErr = mcpAuthStatusError, f.submitErr
 		return f.submitErr
 	}
@@ -123,22 +101,14 @@ func (f *fakeMCPAuthFlow) Cancel() error {
 	return nil
 }
 
-// mcpAuthStartCapture substitutes the startMCPAuthFlow seam for one test and records
-// what the TUI asked the engine for.
-//
-// It ALSO records the browser launch: attach installs a recording opener on the
-// model (mcpAuthOpener) and, exactly like the engine, the fake start calls the
-// injected opener when the TUI provided one (pkg/mcp ignores its error), so the
-// whole path — model field → AuthOptions.OpenURL → the modal's feedback line —
-// is exercised without a process.
 type mcpAuthStartCapture struct {
 	names   []string
 	srvs    []mcp.ServerConfig
 	opts    []mcp.AuthOptions
 	flow    mcpAuthFlow
 	err     error
-	openErr error    // what the recording opener reports
-	opened  []string // URLs the recording opener was asked to launch
+	openErr error
+	opened  []string
 }
 
 func (c *mcpAuthStartCapture) install(t *testing.T) {
@@ -151,8 +121,6 @@ func (c *mcpAuthStartCapture) install(t *testing.T) {
 		if c.err != nil {
 			return nil, c.err
 		}
-		// The engine launches the browser during its pre-flow phase and never
-		// treats the failure as fatal (pkg/mcp: `_ = opts.OpenURL(authURL)`).
 		if opts.OpenURL != nil && c.flow != nil {
 			_ = opts.OpenURL(c.flow.URL())
 		}
@@ -161,8 +129,6 @@ func (c *mcpAuthStartCapture) install(t *testing.T) {
 	t.Cleanup(func() { startMCPAuthFlow = prevStart })
 }
 
-// attach installs the recording browser opener on m (the dependency now travels
-// as a Model field, not as package state) and returns m for chaining.
 func (c *mcpAuthStartCapture) attach(m *Model) *Model {
 	m.mcpAuthOpener = func(u string) error {
 		c.opened = append(c.opened, u)
@@ -171,10 +137,6 @@ func (c *mcpAuthStartCapture) attach(m *Model) *Model {
 	return m
 }
 
-// mcpAuthRecordingOpener installs a recording browser opener on m and returns
-// the collector. Models built by mcpAuthListModel already carry a no-op opener
-// (a test must never spawn the platform browser); this replaces it when the test
-// needs to see the URL.
 func mcpAuthRecordingOpener(m *Model, err error) *[]string {
 	opened := new([]string)
 	m.mcpAuthOpener = func(u string) error {
@@ -184,10 +146,6 @@ func mcpAuthRecordingOpener(m *Model, err error) *[]string {
 	return opened
 }
 
-// countMCPSyncs substitutes the SyncMCPServers seam and returns the counter.
-// A bare &Model{} cannot observe the real call (a bare loop's pass is a no-op),
-// so the counted seam is what makes "exactly once" assertable; the option
-// handled and the list reload are asserted separately.
 func countMCPSyncs(t *testing.T) *int {
 	t.Helper()
 	prev := syncMCPServersFor
@@ -197,8 +155,6 @@ func countMCPSyncs(t *testing.T) *int {
 	return &n
 }
 
-// runCmd executes a command the model returned and applies its message through
-// the real Update path — what bubbletea would do with it.
 func runCmd(t *testing.T, m *Model, cmd tea.Cmd) {
 	t.Helper()
 	if cmd == nil {
@@ -207,8 +163,6 @@ func runCmd(t *testing.T, m *Model, cmd tea.Cmd) {
 	m.Update(cmd())
 }
 
-// mcpAuthSubmitKey presses ENTER on the auth modal and returns the submit
-// command it produced.
 func mcpAuthSubmitKey(t *testing.T, m *Model) tea.Cmd {
 	t.Helper()
 	cmd, handled := m.handleMCPAuthKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -221,9 +175,6 @@ func mcpAuthSubmitKey(t *testing.T, m *Model) tea.Cmd {
 	return cmd
 }
 
-// mcpAuthEnterFlow drives the whole real path to a live pending flow: list →
-// detail of the remote server → "a" → the start command's message. It returns
-// the model and the fake flow the substituted seam handed back.
 func mcpAuthEnterFlow(t *testing.T, capture *mcpAuthStartCapture, flow *fakeMCPAuthFlow) *Model {
 	t.Helper()
 	capture.flow = flow
@@ -253,12 +204,6 @@ func mcpAuthEnterFlow(t *testing.T, capture *mcpAuthStartCapture, flow *fakeMCPA
 	return m
 }
 
-// ── 1. the "a" entry point ─────────────────────────────────────────────
-
-// TestMCPAuthKey_AOpensFlowOnRemoteEntryAndRefusesStdio drives both entry
-// cases through handleMCPKey: a remote entry switches to ModalMCPAuth and asks
-// the engine for exactly that server, a stdio entry stays on the detail and
-// gets an inline hint with no engine call.
 func TestMCPAuthKey_AOpensFlowOnRemoteEntryAndRefusesStdio(t *testing.T) {
 	t.Run("remote entry starts the flow", func(t *testing.T) {
 		capture := &mcpAuthStartCapture{}
@@ -271,9 +216,6 @@ func TestMCPAuthKey_AOpensFlowOnRemoteEntryAndRefusesStdio(t *testing.T) {
 		if got := capture.srvs[0].URL; got != "https://mcp.example.test/mcp" {
 			t.Errorf("ServerConfig.URL = %q, want the winning remote url", got)
 		}
-		// The browser launch is the engine's contract: the TUI INJECTS the opener
-		// (AuthOptions.OpenURL) instead of spawning anything itself, and the URL
-		// stays on screen with CTRL+Y as the manual fallback.
 		if capture.opts[0].OpenURL == nil {
 			t.Error("AuthOptions.OpenURL is nil; the TUI must hand the engine a browser opener")
 		}
@@ -284,8 +226,6 @@ func TestMCPAuthKey_AOpensFlowOnRemoteEntryAndRefusesStdio(t *testing.T) {
 			t.Errorf("feedback = %q, want the browser-opened line %q",
 				m.mcpAuthFeedback, i18n.T("tui.mcpAuthBrowserOpened"))
 		}
-		// The copy affordance must survive the automatic launch: the URL is
-		// rendered and the hint still advertises CTRL+Y.
 		out := ansi.Strip(m.renderMCPAuth())
 		if !strings.Contains(out, flow.url) {
 			t.Errorf("pending modal lost the authorization URL:\n%s", out)
@@ -324,8 +264,6 @@ func TestMCPAuthKey_AOpensFlowOnRemoteEntryAndRefusesStdio(t *testing.T) {
 		if m.mcpAuthError != want {
 			t.Errorf("inline hint = %q, want %q", m.mcpAuthError, want)
 		}
-		// The hint must actually reach the screen (and the "A" key must be
-		// discoverable, i.e. the detail hints still render).
 		out := ansi.Strip(m.renderMCPDetail())
 		if !strings.Contains(out, want) {
 			t.Errorf("detail does not render the refusal hint %q:\n%s", want, out)
@@ -336,14 +274,9 @@ func TestMCPAuthKey_AOpensFlowOnRemoteEntryAndRefusesStdio(t *testing.T) {
 	})
 }
 
-// TestMCPAuthKey_AOnEntryMissingFromDiscoverShowsInlineError covers the
-// disabled/invalid case: the row can exist in the list (a disabled entry is a
-// row) while Discover excludes it, and the flow must not start.
 func TestMCPAuthKey_AOnEntryMissingFromDiscoverShowsInlineError(t *testing.T) {
 	capture := &mcpAuthStartCapture{}
 	capture.install(t)
-	// "off-srv" is remote-shaped but DISABLED: it is a list row, yet it is
-	// absent from Discover.Servers.
 	doc := `{"mcpServers":{"off-srv":{"url":"https://mcp.example.test/mcp","disabled":true}}}`
 	m := mcpAuthListModel(t, doc)
 	mcpAuthOpenDetail(t, m, "off-srv")
@@ -355,7 +288,6 @@ func TestMCPAuthKey_AOnEntryMissingFromDiscoverShowsInlineError(t *testing.T) {
 	if len(capture.names) != 0 {
 		t.Fatalf("the engine was called for a disabled server: %v", capture.names)
 	}
-	// The start command reports it instead: no engine call, inline error.
 	msg, ok := cmd().(mcpAuthStartMsg)
 	if !ok {
 		t.Fatalf("start command returned %T, want mcpAuthStartMsg", cmd())
@@ -373,14 +305,11 @@ func TestMCPAuthKey_AOnEntryMissingFromDiscoverShowsInlineError(t *testing.T) {
 	}
 }
 
-// ── 2. the happy path: start → poll → done (one sync, list reloaded) ───
-
 func TestMCPAuthFlow_StartPollDoneSyncsOnceAndReloadsList(t *testing.T) {
 	syncs := countMCPSyncs(t)
 	flow := &fakeMCPAuthFlow{url: "https://auth.example.test/authorize?state=s", status: mcpAuthStatusPending}
 	m := mcpAuthEnterFlow(t, &mcpAuthStartCapture{}, flow)
 
-	// The pending modal shows the URL (wrapped, but present) and the hints.
 	out := ansi.Strip(m.renderMCPAuth())
 	if !strings.Contains(out, "https://auth.example.test/authorize?state=s") {
 		t.Errorf("pending modal does not show the authorization URL:\n%s", out)
@@ -393,7 +322,6 @@ func TestMCPAuthFlow_StartPollDoneSyncsOnceAndReloadsList(t *testing.T) {
 		t.Errorf("pending modal lacks its title:\n%s", out)
 	}
 
-	// A pending tick re-arms (the poll chain stays alive).
 	seq := m.mcpAuthSeq
 	updated, cmd := m.Update(mcpAuthPollMsg{seq: seq})
 	if updated.(*Model).modalMode != ModalMCPAuth {
@@ -406,7 +334,6 @@ func TestMCPAuthFlow_StartPollDoneSyncsOnceAndReloadsList(t *testing.T) {
 		t.Fatalf("syncs = %d while still pending, want 0", *syncs)
 	}
 
-	// The flow completes: the tick notices it, reports, syncs once, reloads.
 	flow.status = mcpAuthStatusDone
 	m.Update(mcpAuthPollMsg{seq: seq})
 
@@ -421,8 +348,6 @@ func TestMCPAuthFlow_StartPollDoneSyncsOnceAndReloadsList(t *testing.T) {
 		t.Fatalf("SyncMCPServers calls = %d, want exactly 1", *syncs)
 	}
 
-	// The list really was reloaded from the resolvable roots (observable
-	// equivalent of the sync): the rows are back and still hold the server.
 	found := false
 	for _, key := range m.mcpModalKeys {
 		if key == "remote-srv" {
@@ -433,18 +358,13 @@ func TestMCPAuthFlow_StartPollDoneSyncsOnceAndReloadsList(t *testing.T) {
 		t.Errorf("list not reloaded after the flow completed: keys = %v", m.mcpModalKeys)
 	}
 
-	// Terminal state: the poll chain is NOT re-armed.
 	if _, cmd := m.Update(mcpAuthPollMsg{seq: seq}); cmd != nil {
 		t.Error("a poll was re-armed after a terminal state")
 	}
-	// A stale duplicate of the success can never sync twice — neither through a
-	// repeated poll...
 	m.Update(mcpAuthPollMsg{seq: seq})
 	if *syncs != 1 {
 		t.Errorf("SyncMCPServers calls = %d after a duplicate poll, want 1", *syncs)
 	}
-	// ...nor through a duplicated delivery of the submit result, which passes
-	// the generation check because it belongs to the live generation.
 	m.Update(mcpAuthSubmitMsg{seq: m.mcpAuthSeq})
 	if *syncs != 1 {
 		t.Errorf("SyncMCPServers calls = %d after a duplicate success, want 1", *syncs)
@@ -453,15 +373,11 @@ func TestMCPAuthFlow_StartPollDoneSyncsOnceAndReloadsList(t *testing.T) {
 		t.Errorf("a duplicate success changed the modal: mode=%v state=%d", m.modalMode, m.mcpAuthState)
 	}
 
-	// The rendered done state carries the feedback line.
 	if got := ansi.Strip(m.renderMCPAuth()); !strings.Contains(got, want) {
 		t.Errorf("done modal does not render %q:\n%s", want, got)
 	}
 }
 
-// TestMCPAuthFlow_TerminalErrorStopsTicking: an engine error that ENDED the
-// flow (Done) leaves the modal failed with a value-free message, and the tick
-// chain stops.
 func TestMCPAuthFlow_TerminalErrorStopsTicking(t *testing.T) {
 	flow := &fakeMCPAuthFlow{url: "https://auth.example.test/authorize", status: mcpAuthStatusPending}
 	m := mcpAuthEnterFlow(t, &mcpAuthStartCapture{}, flow)
@@ -477,17 +393,11 @@ func TestMCPAuthFlow_TerminalErrorStopsTicking(t *testing.T) {
 	if m.mcpAuthError != i18n.T("tui.mcpAuthErrTimedOut") {
 		t.Errorf("error = %q, want the localized timeout sentinel", m.mcpAuthError)
 	}
-	// Never the raw engine string: the mapped sentinel must be used.
 	if strings.Contains(m.mcpAuthError, mcp.ErrAuthTimedOut.Error()) {
 		t.Errorf("terminal error leaked the engine text: %q", m.mcpAuthError)
 	}
 }
 
-// TestMCPAuthFlow_RetryableErrorStaysPendingAndKeepsTicking pins the Done()
-// distinction the engine documents: a FAILED TOKEN EXCHANGE records "error"
-// while leaving the flow OPEN and retryable. A poll that saw "error" and
-// stopped there would kill the flow's retry affordance (and let a still-valid
-// ENTER fight a modal that has already declared failure).
 func TestMCPAuthFlow_RetryableErrorStaysPendingAndKeepsTicking(t *testing.T) {
 	flow := &fakeMCPAuthFlow{
 		url:       "https://auth.example.test/authorize",
@@ -496,14 +406,12 @@ func TestMCPAuthFlow_RetryableErrorStaysPendingAndKeepsTicking(t *testing.T) {
 	}
 	m := mcpAuthEnterFlow(t, &mcpAuthStartCapture{}, flow)
 
-	// The user submits a code and the exchange fails (the flow stays open).
 	m.textInput.SetValue("A-CODE")
 	runCmd(t, m, mcpAuthSubmitKey(t, m))
 	if flow.Done() {
 		t.Fatal("precondition: the failed exchange must leave the flow open")
 	}
 
-	// The tick that was already in flight lands now.
 	_, cmd := m.Update(mcpAuthPollMsg{seq: m.mcpAuthSeq})
 	if m.mcpAuthState != mcpAuthPending {
 		t.Fatalf("state = %d, want to stay mcpAuthPending (the flow is retryable)", m.mcpAuthState)
@@ -514,7 +422,6 @@ func TestMCPAuthFlow_RetryableErrorStaysPendingAndKeepsTicking(t *testing.T) {
 	if m.mcpAuthError != i18n.T("tui.mcpAuthErrNotSupported") {
 		t.Errorf("error = %q, want the localized engine sentinel", m.mcpAuthError)
 	}
-	// And ENTER still works: the retry succeeds on the same flow.
 	flow.submitErr = nil
 	m.textInput.SetValue("A-BETTER-CODE")
 	runCmd(t, m, mcpAuthSubmitKey(t, m))
@@ -526,9 +433,6 @@ func TestMCPAuthFlow_RetryableErrorStaysPendingAndKeepsTicking(t *testing.T) {
 	}
 }
 
-// TestMCPAuthFlow_StartErrorIsLocalizedPerSentinel: the start path translates
-// the engine's sentinels in the Update handler (the Cmd goroutine never calls
-// i18n) and never shows the raw text.
 func TestMCPAuthFlow_StartErrorIsLocalizedPerSentinel(t *testing.T) {
 	cases := []struct {
 		name string
@@ -562,20 +466,10 @@ func TestMCPAuthFlow_StartErrorIsLocalizedPerSentinel(t *testing.T) {
 	}
 }
 
-// TestMCPAuthSentinelText_ProbeFailedIsLocalizedInEveryLocale is the C6
-// regression: ErrAuthProbeFailed is the sentinel an unreachable / DNS-failed
-// MCP server reports, and it was the ONE sentinel missing from
-// mcpAuthSentinelText — so an es/pt user read the engine's ENGLISH sentence
-// ("authorization probe failed: the server did not complete the handshake").
-//
-// The wording deliberately does NOT say "authentication required" (the exact
-// conflation the CLI's own comment warns about): the server did not answer, so
-// nothing happened and the sign-in is still owed.
 func TestMCPAuthSentinelText_ProbeFailedIsLocalizedInEveryLocale(t *testing.T) {
 	prev := i18n.GetLanguage()
 	t.Cleanup(func() { i18n.SetLanguage(prev) })
 
-	// The error exactly as a surface sees it: the engine WRAPS the sentinel.
 	err := fmt.Errorf("mcp auth %q: probe: %w", "api", mcp.ErrAuthProbeFailed)
 
 	seen := map[string]string{}
@@ -596,31 +490,22 @@ func TestMCPAuthSentinelText_ProbeFailedIsLocalizedInEveryLocale(t *testing.T) {
 		}
 		seen[lang] = got
 	}
-	// es/pt must really be translated, not a copy of the en sentence.
 	for _, lang := range []string{"es", "pt"} {
 		if seen[lang] == seen["en"] {
 			t.Errorf("[%s] mcpAuthErrProbeFailed carries the English text: %q", lang, seen[lang])
 		}
 	}
 
-	// And it reaches the screen through the start-error path, which is where
-	// an unreachable server used to print the engine's English sentence.
 	i18n.SetLanguage("es")
 	if want, got := i18n.T("tui.mcpAuthErrProbeFailed"), mcpAuthStartErrorText("api", err); got != want {
 		t.Errorf("mcpAuthStartErrorText = %q, want the es sentence %q", got, want)
 	}
 }
 
-// TestMCPAuthFlow_LateStartResultIsCancelledNotAdopted is the leak guard of the
-// in-flight start: leaving the modal while the engine is starting must cancel
-// the flow that appears afterwards (its loopback listener is otherwise pinned
-// for the whole budget) and must not resurrect the modal.
 func TestMCPAuthFlow_LateStartResultIsCancelledNotAdopted(t *testing.T) {
 	capture := &mcpAuthStartCapture{}
 	flow := &fakeMCPAuthFlow{url: "https://auth.example.test/authorize", status: mcpAuthStatusPending}
 	capture.install(t)
-	// The start command is slow: it is still in flight when ESC happens, so
-	// no command has produced a flow yet.
 	startMCPAuthFlow = func(_ context.Context, name string, _ mcp.ServerConfig, _ *mcp.AuthStore, _ mcp.AuthOptions) (mcpAuthFlow, error) {
 		return flow, nil
 	}
@@ -631,14 +516,12 @@ func TestMCPAuthFlow_LateStartResultIsCancelledNotAdopted(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("no start command")
 	}
-	// ESC first: the flow is still in flight, so there is nothing to cancel.
 	if _, handled := m.handleMCPKey(tea.KeyMsg{Type: tea.KeyEsc}); !handled {
 		t.Fatal("esc was not handled")
 	}
 	if m.modalMode != ModalMCPDetail {
 		t.Fatalf("mode after esc = %v, want ModalMCPDetail", m.modalMode)
 	}
-	// The start result lands now: the flow it carries must be released.
 	runCmd(t, m, cmd)
 	if flow.cancelCall != 1 {
 		t.Errorf("late flow cancels = %d, want 1 (a dropped flow pins its listener)", flow.cancelCall)
@@ -651,11 +534,6 @@ func TestMCPAuthFlow_LateStartResultIsCancelledNotAdopted(t *testing.T) {
 	}
 }
 
-// ── 3. manual completion (paste) ───────────────────────────────────────
-
-// TestMCPAuthManualSubmit_AcceptsEveryPasteShape drives ENTER through the real
-// key path for each shape a redirect can produce, asserting the (code, state)
-// the engine receives and that the widget is cleared.
 func TestMCPAuthManualSubmit_AcceptsEveryPasteShape(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -710,7 +588,6 @@ func TestMCPAuthManualSubmit_AcceptsEveryPasteShape(t *testing.T) {
 			if !handled || cmd == nil {
 				t.Fatalf("enter: handled=%v cmd=%v, want a submit command", handled, cmd)
 			}
-			// The code must not linger in the widget while the exchange runs.
 			if got := m.textInput.Value(); got != "" {
 				t.Errorf("text input not cleared after parsing: %q", got)
 			}
@@ -723,7 +600,6 @@ func TestMCPAuthManualSubmit_AcceptsEveryPasteShape(t *testing.T) {
 			if got.code != tc.wantCode || got.state != tc.wantState {
 				t.Errorf("Submit(%q, %q), want (%q, %q)", got.code, got.state, tc.wantCode, tc.wantState)
 			}
-			// A successful submit completes the flow.
 			if m.mcpAuthState != mcpAuthSucceeded {
 				t.Errorf("state = %d, want mcpAuthSucceeded", m.mcpAuthState)
 			}
@@ -731,14 +607,6 @@ func TestMCPAuthManualSubmit_AcceptsEveryPasteShape(t *testing.T) {
 	}
 }
 
-// TestMCPAuthManualSubmit_EmptyAndMalformedInputNeverReachTheEngine: an empty
-// field (or an unreadable paste the engine refuses) is an inline error with no
-// engine call.
-//
-// The expected message is a CLOSURE, evaluated after the model exists: building
-// the strings in the table would freeze the ambient locale, and opening the
-// modal resets i18n to the configured default — the same reason the sibling
-// refusal test does it this way.
 func TestMCPAuthManualSubmit_EmptyAndMalformedInputNeverReachTheEngine(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -749,10 +617,6 @@ func TestMCPAuthManualSubmit_EmptyAndMalformedInputNeverReachTheEngine(t *testin
 		{"blank", "   ", func() string { return i18n.T("tui.mcpAuthEmptyCode") }},
 		{"three tokens", "a b c", func() string { return i18n.T("tui.mcpAuthBadInput") }},
 		{"redirect without a code", "http://127.0.0.1:8080/callback?state=only-state", func() string { return i18n.T("tui.mcpAuthBadInput") }},
-		// The two shapes the OLD private TUI parser submitted as codes (it had
-		// no shape check): an address-bar page of prose and a
-		// parameter-shaped paste holding none of code/state/error. Both are
-		// refusals, and nothing may reach the engine.
 		{"punctuation only", "!!!", func() string { return i18n.T("tui.mcpAuthBadInput") }},
 		{"parameter-shaped garbage", "foo=bar", func() string { return i18n.T("tui.mcpAuthBadInput") }},
 	}
@@ -782,9 +646,6 @@ func TestMCPAuthManualSubmit_EmptyAndMalformedInputNeverReachTheEngine(t *testin
 	}
 }
 
-// TestMCPAuthManualSubmit_ExchangeFailureIsRetryableWithoutRestart: the engine
-// keeps the flow open on a token-exchange failure, so the modal stays pending,
-// shows the engine's (value-free) error and accepts another ENTER.
 func TestMCPAuthManualSubmit_ExchangeFailureIsRetryableWithoutRestart(t *testing.T) {
 	flow := &fakeMCPAuthFlow{
 		url:       "https://auth.example.test/authorize",
@@ -810,7 +671,6 @@ func TestMCPAuthManualSubmit_ExchangeFailureIsRetryableWithoutRestart(t *testing
 		t.Fatal("the flow was released; a retry would have to restart it")
 	}
 
-	// Retry (no restart, same flow) now succeeds.
 	flow.submitErr = nil
 	m.textInput.SetValue("SECOND-CODE")
 	cmd, _ = m.handleMCPKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -833,11 +693,6 @@ func TestMCPAuthManualSubmit_ExchangeFailureIsRetryableWithoutRestart(t *testing
 	}
 }
 
-// ── 4. CTRL+Y copies the URL ───────────────────────────────────────────
-
-// TestMCPAuthKey_CtrlYCopiesTheAuthorizationURL: the key hands the URL to the
-// shared clipboard helper (OSC 52 payload asserted on stdout, since the
-// platform fallback runs in a goroutine) and reports it on the feedback line.
 func TestMCPAuthKey_CtrlYCopiesTheAuthorizationURL(t *testing.T) {
 	flow := &fakeMCPAuthFlow{
 		url:    "https://auth.example.test/authorize?client_id=abc&state=s",
@@ -875,8 +730,6 @@ func TestMCPAuthKey_CtrlYCopiesTheAuthorizationURL(t *testing.T) {
 	}
 }
 
-// TestMCPAuthKey_CtrlYWithNoURLReportsFailure mirrors copyLastAssistantMessage's
-// "nothing to copy" reporting.
 func TestMCPAuthKey_CtrlYWithNoURLReportsFailure(t *testing.T) {
 	m := &Model{modalMode: ModalMCPAuth, mcpAuthState: mcpAuthStarting, mcpAuthName: "srv"}
 
@@ -892,12 +745,6 @@ func TestMCPAuthKey_CtrlYWithNoURLReportsFailure(t *testing.T) {
 	}
 }
 
-// ── 4b. the automatic browser launch ──────────────────────────────────
-
-// TestMCPAuthOpenURL_BrowserLaunchedWithTheFlowURL is the happy half of the
-// automatic launch: the URL the modal displays is the one the opener receives,
-// exactly once per flow, and the modal reports it without stealing the copy
-// path (the URL and the CTRL+Y hint stay on screen).
 func TestMCPAuthOpenURL_BrowserLaunchedWithTheFlowURL(t *testing.T) {
 	capture := &mcpAuthStartCapture{}
 	flow := &fakeMCPAuthFlow{
@@ -924,10 +771,6 @@ func TestMCPAuthOpenURL_BrowserLaunchedWithTheFlowURL(t *testing.T) {
 	}
 }
 
-// TestMCPAuthOpenURL_LaunchFailureKeepsTheCopyPath covers the headless case (an
-// SSH session, a machine with no browser): a failed launch is NOT an
-// authorization failure — the modal stays pending, says why no browser
-// appeared, keeps the URL on screen and CTRL+Y still copies it.
 func TestMCPAuthOpenURL_LaunchFailureKeepsTheCopyPath(t *testing.T) {
 	launchErr := errors.New("xdg-open: no display")
 	capture := &mcpAuthStartCapture{openErr: launchErr}
@@ -956,8 +799,6 @@ func TestMCPAuthOpenURL_LaunchFailureKeepsTheCopyPath(t *testing.T) {
 			t.Errorf("pending modal does not render %q:\n%s", want, out)
 		}
 	}
-	// The manual path still works: CTRL+Y copies the URL and clears the
-	// launch-failure line.
 	if _, handled := m.handleMCPKey(tea.KeyMsg{Type: tea.KeyCtrlY}); !handled {
 		t.Fatal("ctrl+y was not handled after a failed launch")
 	}
@@ -969,9 +810,6 @@ func TestMCPAuthOpenURL_LaunchFailureKeepsTheCopyPath(t *testing.T) {
 	}
 }
 
-// TestMCPAuthOpenURL_NoOpenerClaimsNothing covers a model without an opener
-// (built without NewModel): nothing is attempted, so nothing is claimed — no
-// "opened" line, and the engine is handed no opener at all.
 func TestMCPAuthOpenURL_NoOpenerClaimsNothing(t *testing.T) {
 	capture := &mcpAuthStartCapture{}
 	capture.install(t)
@@ -1004,10 +842,6 @@ func TestMCPAuthOpenURL_NoOpenerClaimsNothing(t *testing.T) {
 	}
 }
 
-// ── 5. ESC cancels and returns to the detail ───────────────────────────
-
-// TestMCPAuthKey_EscCancelsAndReturnsToTheDetail: the cancel key is ESC and
-// only ESC ("q" is covered by TestMCPAuthKey_QInThePasteBoxDoesNotCancel).
 func TestMCPAuthKey_EscCancelsAndReturnsToTheDetail(t *testing.T) {
 	flow := &fakeMCPAuthFlow{url: "https://auth.example.test/authorize", status: mcpAuthStatusPending}
 	m := mcpAuthEnterFlow(t, &mcpAuthStartCapture{}, flow)
@@ -1027,36 +861,24 @@ func TestMCPAuthKey_EscCancelsAndReturnsToTheDetail(t *testing.T) {
 		t.Errorf("cancel left state behind: flow=%v state=%d", m.mcpAuthFlow, m.mcpAuthState)
 	}
 	if cmd, handled := m.handleMCPKey(tea.KeyMsg{Type: tea.KeyEsc}); !handled || cmd != nil || m.modalMode != ModalMCP {
-		// The detail's own esc/q still goes back to the list.
 		t.Errorf("second esc: mode=%v cmd=%v handled=%v, want ModalMCP with no cmd",
 			m.modalMode, cmd, handled)
 	}
 }
 
-// TestMCPAuthKey_QInThePasteBoxDoesNotCancel is the F2 regression: "q" is a
-// REGULAR CHARACTER while the paste box is on screen (the rule every form
-// modal follows). Before this, `case "esc", "q"` cancelled a live flow and
-// freed its loopback port, so a hand-typed or pasted code or URL containing a
-// "q" aborted the authorization in the middle of the paste.
 func TestMCPAuthKey_QInThePasteBoxDoesNotCancel(t *testing.T) {
 	flow := &fakeMCPAuthFlow{url: "https://auth.example.test/authorize?state=s", status: mcpAuthStatusPending}
 	m := mcpAuthEnterFlow(t, &mcpAuthStartCapture{}, flow)
 
-	// The key is NOT owned by the auth modal: that is what lets the generic
-	// modal switch forward it to the shared text input.
 	if cmd, handled := m.handleMCPKey(mcpKeyRunes('q')); handled || cmd != nil {
 		t.Fatalf(`"q": handled=%v cmd=%v, want it passed through to the input`, handled, cmd)
 	}
 
-	// Type a paste containing "q" through the real key path (handleKeyMsg is
-	// what Update calls, so this is the whole chain: handleMCPKey → generic
-	// form-modal forwarding → textinput).
 	m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q7-Zxq")}, nil)
 	if got := m.textInput.Value(); got != "q7-Zxq" {
 		t.Fatalf("text input = %q, want the typed paste including its q", got)
 	}
 
-	// The flow is still live: no cancel, no freed loopback port, no mode change.
 	if flow.cancelCall != 0 {
 		t.Errorf("flow cancels = %d, want 0 — a typed q must not abort the flow", flow.cancelCall)
 	}
@@ -1067,7 +889,6 @@ func TestMCPAuthKey_QInThePasteBoxDoesNotCancel(t *testing.T) {
 		t.Fatalf("a typed q left the modal: mode=%v state=%d", m.modalMode, m.mcpAuthState)
 	}
 
-	// And the paste still submits normally: the q is part of the code.
 	cmd, handled := m.handleMCPKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if !handled || cmd == nil {
 		t.Fatalf("enter after the paste: handled=%v cmd=%v, want a submit command", handled, cmd)
@@ -1081,22 +902,15 @@ func TestMCPAuthKey_QInThePasteBoxDoesNotCancel(t *testing.T) {
 	}
 }
 
-// ── 6. leak guard: reopening /mcp releases the flow ────────────────────
-
-// TestMCPAuthResetModalCancelsLiveFlow is the leak test: /mcp (which calls
-// resetModal) must cancel the flow still alive behind ModalMCPAuth. Without the
-// resetModal hook this test fails — the loopback listener would stay pinned for
-// the flow's whole five-minute budget.
 func TestMCPAuthResetModalCancelsLiveFlow(t *testing.T) {
 	flow := &fakeMCPAuthFlow{url: "https://auth.example.test/authorize", status: mcpAuthStatusPending}
 	m := mcpAuthEnterFlow(t, &mcpAuthStartCapture{}, flow)
 	if m.mcpAuthFlow == nil {
 		t.Fatal("precondition: no live flow")
 	}
-	// An unparsed paste is sitting in the input when the modal is abandoned.
 	m.textInput.SetValue("UNPARSED-PASTED-CODE")
 
-	m.executeCommand("/mcp") // the real entry point of resetModal
+	m.executeCommand("/mcp")
 
 	if flow.cancelCall != 1 {
 		t.Errorf("flow cancels = %d, want 1 — resetModal leaked the loopback listener", flow.cancelCall)
@@ -1118,15 +932,12 @@ func TestMCPAuthResetModalCancelsLiveFlow(t *testing.T) {
 	if m.textInput.Value() != "" {
 		t.Errorf("resetModal kept the pasted code: %q", m.textInput.Value())
 	}
-	// A message of the cancelled flow can never be adopted afterwards.
 	old := m.mcpAuthSeq
 	m.Update(mcpAuthStartMsg{seq: old - 1, name: "remote-srv", flow: flow})
 	if m.mcpAuthFlow != nil || m.modalMode != ModalMCP {
 		t.Errorf("a stale start message was adopted: flow=%v mode=%v", m.mcpAuthFlow, m.modalMode)
 	}
 }
-
-// ── 7. rendering: no panic, honest height ──────────────────────────────
 
 func TestRenderMCPAuth_HeightClampAndNoPanic(t *testing.T) {
 	longURL := "https://auth.example.test/authorize?client_id=abc123&redirect_uri=" +
@@ -1151,7 +962,7 @@ func TestRenderMCPAuth_HeightClampAndNoPanic(t *testing.T) {
 				t.Errorf("height %d state %d: box has %d lines, want <= %d (clamped)",
 					h, state, boxLines, h)
 			}
-			out := m.renderMCPAuth() // must not panic
+			out := m.renderMCPAuth()
 			if got := ansi.Strip(out); strings.Count(got, "\n")+1 > h {
 				t.Errorf("height %d state %d: rendered frame has %d lines, want <= %d",
 					h, state, strings.Count(got, "\n")+1, h)
@@ -1160,9 +971,6 @@ func TestRenderMCPAuth_HeightClampAndNoPanic(t *testing.T) {
 	}
 }
 
-// TestRenderMCPAuth_WrapsTheURLInsideTheBox: an authorization URL has no
-// spaces, so it must be broken by CELLS (the word-based wrapText would leave it
-// one oversized line and the box would be clipped by the frame).
 func TestRenderMCPAuth_WrapsTheURLInsideTheBox(t *testing.T) {
 	url := "https://auth.example.test/authorize?client_id=abc&state=" + strings.Repeat("s", 200)
 	m := &Model{
@@ -1179,14 +987,12 @@ func TestRenderMCPAuth_WrapsTheURLInsideTheBox(t *testing.T) {
 			t.Errorf("box line is %d cells wide (terminal %d): %q", got, m.width, line)
 		}
 	}
-	// Every chunk survives: dropping the box frame and the whitespace the wrap
-	// introduced reproduces the URL as one contiguous run.
 	var joined strings.Builder
 	for _, r := range box {
 		if r == ' ' || r == '\n' || r == '\t' || r == '\r' {
 			continue
 		}
-		if r >= 0x2500 && r <= 0x257F { // box drawing: the frame
+		if r >= 0x2500 && r <= 0x257F {
 			continue
 		}
 		joined.WriteRune(r)
@@ -1196,13 +1002,6 @@ func TestRenderMCPAuth_WrapsTheURLInsideTheBox(t *testing.T) {
 	}
 }
 
-// TestRenderMCPAuth_CloseHintMatchesWhatEscCanDo is the C8 regression: "ESC:
-// cancel and go back to the server" was rendered in EVERY state, but once the
-// flow succeeded or failed Cancel() is a no-op — no cancel can happen, the key
-// only closes the modal, so the cancel wording over-promised. The split is the
-// WebUI's (Cancel while the flow is pending, Close otherwise); the starting
-// state keeps the cancel wording because ESC really does abort the in-flight
-// attempt (it invalidates the generation, so the late flow cancels itself).
 func TestRenderMCPAuth_CloseHintMatchesWhatEscCanDo(t *testing.T) {
 	cases := []struct {
 		state       int
@@ -1237,15 +1036,6 @@ func TestRenderMCPAuth_CloseHintMatchesWhatEscCanDo(t *testing.T) {
 	}
 }
 
-// ── 8. key routing (isFormModal / isListModal choices) ─────────────────
-
-// TestMCPAuthKey_TypingReachesTheInputAndNeverMovesTheListCursor pins WHY
-// ModalMCPAuth is a form modal and not a list modal: what consumes these keys is
-// the generic modal switch (navigation, gated by isListModal) and the
-// text-input forwarding at its tail (gated by isFormModal) — handleMCPAuthKey
-// only owns ENTER/CTRL+Y/ESC/Q and must pass the rest through so a pasted code
-// can be typed. It also pins the FOCUS: textinput.Update drops every key while
-// the widget is blurred, so opening the modal must focus it.
 func TestMCPAuthKey_TypingReachesTheInputAndNeverMovesTheListCursor(t *testing.T) {
 	flow := &fakeMCPAuthFlow{url: "https://auth.example.test/authorize", status: mcpAuthStatusPending}
 	m := mcpAuthEnterFlow(t, &mcpAuthStartCapture{}, flow)
@@ -1253,13 +1043,10 @@ func TestMCPAuthKey_TypingReachesTheInputAndNeverMovesTheListCursor(t *testing.T
 		t.Fatal("the code input is not focused: every keystroke would be dropped")
 	}
 
-	// A printable key reaches the shared text input (the paste area).
 	m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("CO")}, nil)
 	if got := m.textInput.Value(); got != "CO" {
 		t.Errorf("text input = %q, want the typed keys to reach it", got)
 	}
-	// Navigation keys do not move the invisible list cursor behind the modal
-	// (the cursor is preserved for the list the modal returns to).
 	m.modalSelectedIdx = 1
 	before := m.modalSelectedIdx
 	for _, msg := range []tea.KeyMsg{{Type: tea.KeyUp}, {Type: tea.KeyDown}, mcpKeyRunes('j'), mcpKeyRunes('k')} {
@@ -1268,14 +1055,11 @@ func TestMCPAuthKey_TypingReachesTheInputAndNeverMovesTheListCursor(t *testing.T
 			t.Fatalf("%q moved the hidden list cursor to %d", msg.String(), m.modalSelectedIdx)
 		}
 	}
-	// And the typing is visible in the rendered modal.
 	if out := ansi.Strip(m.renderMCPAuth()); !strings.Contains(out, "CO") {
 		t.Errorf("the pasted text is not rendered:\n%s", out)
 	}
 }
 
-// TestMCPAuthKey_EnterIsInertWhileStarting: ENTER before the URL exists must be
-// swallowed (no engine call, no panic).
 func TestMCPAuthKey_EnterIsInertWhileStarting(t *testing.T) {
 	m := &Model{modalMode: ModalMCPAuth, mcpAuthState: mcpAuthStarting, mcpAuthName: "srv"}
 	m.textInput.SetValue("some-code")
@@ -1289,35 +1073,9 @@ func TestMCPAuthKey_EnterIsInertWhileStarting(t *testing.T) {
 	}
 }
 
-// ── 9. paste parsing: the engine's canonical grammar, no TUI copy ──────
-//
-// The TUI used to carry its OWN parser, and a client review proved it
-// disagreed with the CLI and the WebUI: it had no code-shape check at all, so
-// `!!!` or a page of browser prose was POSTed to the token endpoint as the
-// authorization code, while `a b` parsed as (code, state) and `foo=bar` was
-// submitted verbatim as a code. The TUI now delegates to mcp.ParseAuthPaste —
-// the ONE canonical rule every surface compiles against — so this package
-// keeps no private copy that could drift again.
-//
-// The table below is the frozen example table of
-// .lele/tasks/mcp-oauth-paste-grammar.md, asserted THROUGH the engine helper
-// the submit site calls (handleMCPAuthKey → mcp.ParseAuthPaste). Each row also
-// pins the TUI's remaining half of the rule — which localized sentence the
-// outcome maps to (mcpAuthInputErrorText) — and that a refused paste yields NO
-// code, so the flow can never be fed a fabricated one.
-
-// mcpAuthDeniedExpr is the "a refusal carrying exactly this sanitized code"
-// expectation. A pointer distinguishes "a refusal with nothing safe to echo"
-// ("" — its own sentence) from "not a refusal at all" (nil).
 func mcpAuthDeniedExpr(code string) *string { return &code }
 
-// TestMCPAuthParseInput_MatchesTheEngineGrammar is the pure table behind the
-// delegation: the accepted shapes keep working, the refused shapes are refused
-// by the ENGINE (not by a local rule), and the code echoed in a refusal is
-// bounded by the engine's sanitizer.
 func TestMCPAuthParseInput_MatchesTheEngineGrammar(t *testing.T) {
-	// A real, opaque, JWE-length code: RFC 6749 §A.11 makes a code opaque, so
-	// NOTHING here may impose a length rule (only the 8 KiB input bound).
 	longCode := strings.Repeat("a", 1200)
 
 	cases := []struct {
@@ -1326,10 +1084,9 @@ func TestMCPAuthParseInput_MatchesTheEngineGrammar(t *testing.T) {
 		wantOK     bool
 		wantCode   string
 		wantState  string
-		wantErr    error // the engine sentinel when !wantOK
+		wantErr    error
 		wantDenied *string
 	}{
-		// ── accepted ──
 		{name: "bare code", paste: "SplxlOBeZQQYbYS6WxSbIA", wantOK: true, wantCode: "SplxlOBeZQQYbYS6WxSbIA"},
 		{name: "base64url alphabet", paste: "abc-12_3.x~y", wantOK: true, wantCode: "abc-12_3.x~y"},
 		{name: "long opaque code", paste: longCode, wantOK: true, wantCode: longCode},
@@ -1349,7 +1106,6 @@ func TestMCPAuthParseInput_MatchesTheEngineGrammar(t *testing.T) {
 		{name: "single-token query", paste: "code=abc", wantOK: true, wantCode: "abc"},
 		{name: "two tokens", paste: "A-CODE A-STATE", wantOK: true, wantCode: "A-CODE", wantState: "A-STATE"},
 		{name: "two tokens, wide gap", paste: "abc   xyz", wantOK: true, wantCode: "abc", wantState: "xyz"},
-		// ── refused: a denial is the SERVER's own refusal ──
 		{
 			name: "denial redirect", paste: "http://127.0.0.1:8080/callback?error=access_denied&state=s",
 			wantErr: mcp.ErrAuthPasteDenied, wantDenied: mcpAuthDeniedExpr("access_denied"),
@@ -1358,10 +1114,8 @@ func TestMCPAuthParseInput_MatchesTheEngineGrammar(t *testing.T) {
 		{name: "denial with an RFC 6749 code", paste: "http://127.0.0.1:8080/callback?error=invalid_request", wantErr: mcp.ErrAuthPasteDenied, wantDenied: mcpAuthDeniedExpr("invalid_request")},
 		{name: "denial with a hostile code", paste: "http://127.0.0.1:8080/callback?error=%1B%5B31mhax", wantErr: mcp.ErrAuthPasteDenied, wantDenied: mcpAuthDeniedExpr("")},
 		{name: "error wins over a code", paste: "http://127.0.0.1:8080/cb?error=access_denied&code=abc", wantErr: mcp.ErrAuthPasteDenied, wantDenied: mcpAuthDeniedExpr("access_denied")},
-		// ── refused: nothing was pasted ──
 		{name: "empty", paste: "", wantErr: mcp.ErrAuthPasteEmpty},
 		{name: "whitespace only", paste: "   ", wantErr: mcp.ErrAuthPasteEmpty},
-		// ── refused: garbage, never submitted (the C1 divergence) ──
 		{name: "punctuation", paste: "!!!", wantErr: mcp.ErrAuthPasteUnrecognized},
 		{name: "punctuation inside a token", paste: "abc!def", wantErr: mcp.ErrAuthPasteUnrecognized},
 		{name: "parameter with a space", paste: "code=abc def", wantErr: mcp.ErrAuthPasteUnrecognized},
@@ -1369,18 +1123,8 @@ func TestMCPAuthParseInput_MatchesTheEngineGrammar(t *testing.T) {
 		{name: "two tokens, one invalid", paste: "abc! xyz", wantErr: mcp.ErrAuthPasteUnrecognized},
 		{name: "parameter-shaped garbage", paste: "foo=bar", wantErr: mcp.ErrAuthPasteUnrecognized},
 		{name: "malformed query", paste: "code=%zz", wantErr: mcp.ErrAuthPasteUnrecognized},
-		// A malformed percent-escape makes the engine refuse the CHOSEN
-		// substring outright (authPasteBytesRefused) before it ever asks
-		// whether a code is present: `…?code=%zz` is "a query the client will
-		// not decode at all", not "a query that carries no code". The malformed
-		// escape is a property of the whole query, so it stays unrecognized even
-		// inside a redirect URL. NB this row and the no-code rows below BOTH
-		// render as tui.mcpAuthBadInput, so only the sentinel (this field)
-		// distinguishes them — the rendered sentence alone would leave this row
-		// "right for the wrong reason".
 		{name: "malformed query in a redirect", paste: "http://127.0.0.1:8080/callback?code=%zz", wantErr: mcp.ErrAuthPasteUnrecognized},
 		{name: "paste over the input bound", paste: strings.Repeat("a", 8200), wantErr: mcp.ErrAuthPasteUnrecognized},
-		// ── refused: a response arrived, but carries no code ──
 		{name: "redirect without a code", paste: "http://127.0.0.1:8080/callback?state=only", wantErr: mcp.ErrAuthPasteNoCode},
 		{name: "empty code parameter", paste: "http://127.0.0.1:8080/callback?code=", wantErr: mcp.ErrAuthPasteNoCode},
 		{name: "state-only parameter", paste: "state=xyz", wantErr: mcp.ErrAuthPasteNoCode},
@@ -1403,8 +1147,6 @@ func TestMCPAuthParseInput_MatchesTheEngineGrammar(t *testing.T) {
 			if err == nil {
 				t.Fatalf("mcp.ParseAuthPaste(%q) = (%q, %q), want it REFUSED", tc.paste, code, state)
 			}
-			// The engine's contract: a refusal carries NOTHING to submit, so
-			// no code can reach the flow by accident.
 			if code != "" || state != "" {
 				t.Errorf("a refused paste returned (%q, %q), want (\"\", \"\")", code, state)
 			}
@@ -1434,14 +1176,9 @@ func TestMCPAuthParseInput_MatchesTheEngineGrammar(t *testing.T) {
 				case errors.Is(err, mcp.ErrAuthPasteEmpty):
 					want = i18n.T("tui.mcpAuthEmptyCode")
 				default:
-					// unrecognized and no-code share ONE sentence, which the
-					// grammar explicitly allows.
 					want = i18n.T("tui.mcpAuthBadInput")
 				}
 			}
-			// The user-visible half: exactly this sentence, bounded, and never
-			// the raw paste (a hostile `error` value must not reach the
-			// terminal, not even as an escape sequence).
 			if got := mcpAuthInputErrorText(err); got != want {
 				t.Errorf("rendered message = %q, want %q", got, want)
 			}
@@ -1452,9 +1189,6 @@ func TestMCPAuthParseInput_MatchesTheEngineGrammar(t *testing.T) {
 	}
 }
 
-// TestMCPAuthManualSubmit_RefusalsNeverReachTheEngine drives the same shapes
-// through the real key path: a refusal is an inline error, no Submit is made,
-// the modal stays pending and the raw paste is never echoed unbounded.
 func TestMCPAuthManualSubmit_RefusalsNeverReachTheEngine(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -1501,15 +1235,12 @@ func TestMCPAuthManualSubmit_RefusalsNeverReachTheEngine(t *testing.T) {
 			if want := tc.want(); m.mcpAuthError != want {
 				t.Errorf("inline error = %q, want %q", m.mcpAuthError, want)
 			}
-			// The refusal is bounded: it never repeats the paste.
 			if len(m.mcpAuthError) > 200 {
 				t.Errorf("refusal message is %d bytes long (the paste was echoed)", len(m.mcpAuthError))
 			}
 			if m.mcpAuthState != mcpAuthPending {
 				t.Errorf("state = %d, want to stay pending (the flow is still live)", m.mcpAuthState)
 			}
-			// The refused paste stays in the widget so the user can fix it
-			// (the code-clearing branch is only for a PARSED code).
 			if got := m.textInput.Value(); got != tc.paste {
 				t.Errorf("input = %q, want the refused paste to stay for editing", got)
 			}
@@ -1517,18 +1248,11 @@ func TestMCPAuthManualSubmit_RefusalsNeverReachTheEngine(t *testing.T) {
 	}
 }
 
-// ── 10. auth visibility (list marker + detail block) ───────────────────
-
-// mcpAuthVisibilityDoc is the fixture of the visibility and sign-out tests:
-// a remote entry that DECLARES OAuth, a plain remote entry (flagged only once
-// a 401 was recorded) and a stdio entry (never auth-bearing).
 const mcpAuthVisibilityDoc = `{"mcpServers":{` +
 	`"oauth-srv":{"url":"https://oauth.example.test/mcp","auth":{"type":"oauth"}},` +
 	`"challenged-srv":{"url":"https://challenged.example.test/mcp"},` +
 	`"local-srv":{"command":"true"}}}`
 
-// mcpAuthVisibilityURL is the URL the fixture entry carries (records are bound
-// to it: a record saved for another URL is deliberately ignored by the store).
 func mcpAuthVisibilityURL(name string) string {
 	switch name {
 	case "oauth-srv":
@@ -1540,7 +1264,6 @@ func mcpAuthVisibilityURL(name string) string {
 	}
 }
 
-// mcpTestToken is a usable stored token (unexpired, so the store reports it).
 func mcpTestToken() *transport.Token {
 	return &transport.Token{
 		AccessToken: "stored-access-token",
@@ -1549,7 +1272,6 @@ func mcpTestToken() *transport.Token {
 	}
 }
 
-// mcpAuthSeedRecord writes one record through the real store.
 func mcpAuthSeedRecord(t *testing.T, dir, name string, rec mcp.AuthRecord) {
 	t.Helper()
 	if err := mcp.NewAuthStore(dir).Save(name, rec); err != nil {
@@ -1557,7 +1279,6 @@ func mcpAuthSeedRecord(t *testing.T, dir, name string, rec mcp.AuthRecord) {
 	}
 }
 
-// mcpAuthRow returns the rendered row of name and its index in the list.
 func mcpAuthRow(t *testing.T, m *Model, name string) (string, int) {
 	t.Helper()
 	for i, key := range m.mcpModalKeys {
@@ -1569,7 +1290,6 @@ func mcpAuthRow(t *testing.T, m *Model, name string) (string, int) {
 	return "", -1
 }
 
-// mcpAuthSelectRow puts the cursor on name.
 func mcpAuthSelectRow(t *testing.T, m *Model, name string) {
 	t.Helper()
 	_, idx := mcpAuthRow(t, m, name)
@@ -1577,7 +1297,7 @@ func mcpAuthSelectRow(t *testing.T, m *Model, name string) {
 }
 
 func TestFormatMCPItemAuthSuffix(t *testing.T) {
-	pad := strings.Repeat(" ", 12) // %-15s of "srv"
+	pad := strings.Repeat(" ", 12)
 	base := "● srv" + pad + " — [global]"
 	cases := []struct {
 		name       string
@@ -1594,8 +1314,6 @@ func TestFormatMCPItemAuthSuffix(t *testing.T) {
 			if want := base + tc.wantSuffix; got != want {
 				t.Errorf("formatMCPItem(..., %q) = %q, want %q", tc.suffix, got, want)
 			}
-			// The pre-existing shape is untouched: the marker is APPENDED,
-			// never interleaved with the glyph/padding/tag.
 			if !strings.HasPrefix(got, base) {
 				t.Errorf("row %q lost its base shape %q", got, base)
 			}
@@ -1603,15 +1321,6 @@ func TestFormatMCPItemAuthSuffix(t *testing.T) {
 	}
 }
 
-// TestMCPAuthSuffixPerVerdict pins the marker of every verdict the list can
-// hold, including the two that must stay silent (no auth required and no
-// credential stored, no verdict at all).
-//
-// The rule is the WebUI's one: `authenticated` FIRST, then `required`, else
-// nothing — `authenticated` is "a usable credential exists, no sign-in is
-// needed" (mcp.CheckAuth) and is orthogonal to `required`, so a verdict with a
-// token and no requirement MUST say "authenticated" instead of rendering
-// nothing while the WebUI shows its "Authenticated" chip for the same DTO.
 func TestMCPAuthSuffixPerVerdict(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1633,9 +1342,6 @@ func TestMCPAuthSuffixPerVerdict(t *testing.T) {
 	}
 }
 
-// TestMCPAuthVerdictsRemoteOAuthAndChallenge covers the two ways an entry
-// becomes auth-bearing (a declared OAuth block, a recorded 401) and the URL
-// binding of the stored record.
 func TestMCPAuthVerdictsRemoteOAuthAndChallenge(t *testing.T) {
 	root := t.TempDir()
 	paths := mcp.Paths{
@@ -1650,42 +1356,33 @@ func TestMCPAuthVerdictsRemoteOAuthAndChallenge(t *testing.T) {
 		return mcpAuthVerdicts(paths, mcp.ReadInventory(paths))[name]
 	}
 
-	// No store record at all: the declared OAuth block requires a sign-in…
 	if st := verdict("oauth-srv"); !st.Required || st.Authenticated || st.Method != "oauth" {
 		t.Errorf("oauth-srv without a record = %+v, want required oauth, not authenticated", st)
 	}
-	// …a plain remote entry is NOT flagged (Required is never inferred)…
 	if st := verdict("challenged-srv"); st.Required || st.Authenticated || st.Method != "" {
 		t.Errorf("challenged-srv without a challenge = %+v, want the zero verdict", st)
 	}
-	// …and a stdio entry is never auth-bearing.
 	if st := verdict("local-srv"); st != (mcp.AuthStatus{}) {
 		t.Errorf("local-srv = %+v, want the zero verdict", st)
 	}
 
-	// A token bound to the entry's URL authenticates it.
 	mcpAuthSeedRecord(t, paths.LeleDir, "oauth-srv",
 		mcp.AuthRecord{URL: mcpAuthVisibilityURL("oauth-srv"), Token: mcpTestToken()})
 	if st := verdict("oauth-srv"); !st.Required || !st.Authenticated || st.Method != "oauth" {
 		t.Errorf("oauth-srv with a matching token = %+v, want required + authenticated", st)
 	}
 
-	// A record bound to ANOTHER url is deliberately ignored: it belongs to a
-	// different resource and presenting it would be a protocol error.
 	mcpAuthSeedRecord(t, paths.LeleDir, "oauth-srv",
 		mcp.AuthRecord{URL: "https://other.example.test/mcp", Token: mcpTestToken()})
 	if st := verdict("oauth-srv"); st.Authenticated {
 		t.Errorf("oauth-srv with a mismatched-url record = %+v, want not authenticated", st)
 	}
 
-	// A RECORDED 401 marks a plain remote entry (no auth block declared).
 	mcpAuthSeedRecord(t, paths.LeleDir, "challenged-srv",
 		mcp.AuthRecord{URL: mcpAuthVisibilityURL("challenged-srv"), AuthRequired: true})
 	if st := verdict("challenged-srv"); !st.Required || st.Authenticated || st.Method != "" {
 		t.Errorf("challenged-srv with a recorded 401 = %+v, want required, no carrier named", st)
 	}
-	// …and a token for it authenticates it, with Method still "" (the remedy
-	// was the zero-config login: nothing declares a carrier).
 	mcpAuthSeedRecord(t, paths.LeleDir, "challenged-srv",
 		mcp.AuthRecord{URL: mcpAuthVisibilityURL("challenged-srv"), AuthRequired: true, Token: mcpTestToken()})
 	if st := verdict("challenged-srv"); !st.Required || !st.Authenticated || st.Method != "" {
@@ -1693,9 +1390,6 @@ func TestMCPAuthVerdictsRemoteOAuthAndChallenge(t *testing.T) {
 	}
 }
 
-// TestMCPAuthVerdictsHeadersAndStdio: a header carrier is NAMED but is not
-// itself evidence of auth (MCP headers are routinely non-credential), and a
-// stdio entry gets no verdict at all.
 func TestMCPAuthVerdictsHeadersAndStdio(t *testing.T) {
 	root := t.TempDir()
 	paths := mcp.Paths{LeleDir: filepath.Join(root, "global")}
@@ -1710,8 +1404,6 @@ func TestMCPAuthVerdictsHeadersAndStdio(t *testing.T) {
 	if st := verdicts["local-srv"]; st != (mcp.AuthStatus{}) {
 		t.Errorf("local-srv = %+v, want the zero verdict", st)
 	}
-	// A recorded 401 turns the same entry into a required one, with the
-	// header carrier still named.
 	mcpAuthSeedRecord(t, paths.LeleDir, "hdr-srv",
 		mcp.AuthRecord{URL: "https://hdr.example.test/mcp", AuthRequired: true})
 	if st := mcpAuthVerdicts(paths, mcp.ReadInventory(paths))["hdr-srv"]; !st.Required || st.Method != "headers" {
@@ -1719,8 +1411,6 @@ func TestMCPAuthVerdictsHeadersAndStdio(t *testing.T) {
 	}
 }
 
-// TestMCPAuthVerdictsEmptyLeleDir: with no store (an empty LeleDir) there is
-// nothing to report, no panic and no verdict — the modal must keep working.
 func TestMCPAuthVerdictsEmptyLeleDir(t *testing.T) {
 	root := t.TempDir()
 	paths := mcp.Paths{AgentWorkspace: root}
@@ -1732,8 +1422,6 @@ func TestMCPAuthVerdictsEmptyLeleDir(t *testing.T) {
 	}
 }
 
-// TestMCPListShowsAuthSuffix is the end-to-end marker: the row of the remote
-// entry carries it, the stdio row does not, and a stored token flips it.
 func TestMCPListShowsAuthSuffix(t *testing.T) {
 	m := mcpAuthListModel(t, mcpAuthVisibilityDoc)
 	needed, authed := i18n.T("tui.mcpAuthRequired"), i18n.T("tui.mcpAuthOK")
@@ -1752,8 +1440,6 @@ func TestMCPListShowsAuthSuffix(t *testing.T) {
 		}
 	}
 
-	// A stored credential flips the marker to "authenticated" (the store is
-	// re-read with the list, exactly like the inventory).
 	mcpAuthSeedRecord(t, config.GetLeleDir(), "oauth-srv",
 		mcp.AuthRecord{URL: mcpAuthVisibilityURL("oauth-srv"), Token: mcpTestToken()})
 	m.loadMCPList()
@@ -1763,8 +1449,6 @@ func TestMCPListShowsAuthSuffix(t *testing.T) {
 	}
 }
 
-// TestMCPDetailRendersAuthBlock: the detail names the carrier and the state,
-// advertises the sign-out, and renders NEITHER for an entry with no auth.
 func TestMCPDetailRendersAuthBlock(t *testing.T) {
 	m := mcpAuthListModel(t, mcpAuthVisibilityDoc)
 
@@ -1783,7 +1467,6 @@ func TestMCPDetailRendersAuthBlock(t *testing.T) {
 		t.Errorf("detail lost its own hints line:\n%s", out)
 	}
 
-	// A stored credential: the state flips, the block (and the hint) stay.
 	mcpAuthSeedRecord(t, config.GetLeleDir(), "oauth-srv",
 		mcp.AuthRecord{URL: mcpAuthVisibilityURL("oauth-srv"), Token: mcpTestToken()})
 	m.loadMCPList()
@@ -1792,8 +1475,6 @@ func TestMCPDetailRendersAuthBlock(t *testing.T) {
 		t.Errorf("detail missing %q:\n%s", want, out)
 	}
 
-	// A stdio entry: neither line, and no sign-out hint either (there is no
-	// credential to take back).
 	if _, handled := m.handleMCPKey(tea.KeyMsg{Type: tea.KeyEsc}); !handled {
 		t.Fatal("esc was not handled")
 	}
@@ -1807,22 +1488,9 @@ func TestMCPDetailRendersAuthBlock(t *testing.T) {
 	}
 }
 
-// TestMCPListHintsAdvertiseSignOutAndAdd: the LIST footer must advertise the
-// sign-out key like every other action — "d" is wired in the list branch too,
-// so a user scanning the list has to be able to discover it — and it must be
-// the same action label the detail shows, in every builtin locale. The add
-// wizard ("N") gets the same treatment: present in every locale and rendered
-// by the footer, in the sibling fragments' capitalised style and order
-// (sign-out after the toggle and before the filter; add after the sign-out
-// and before the filter). The footer render is asserted too, so a fragment
-// wired only into the string but not the footer fails here.
 func TestMCPListHintsAdvertiseSignOutAndAdd(t *testing.T) {
 	m := mcpAuthListModel(t, mcpAuthVisibilityDoc)
 
-	// (1) EVERY builtin locale must carry both fragments, in order:
-	// toggle < sign-out < add < filter. Checking all three (not just the
-	// active one) is deliberate — T() falls back to the default locale, so
-	// a fragment dropped from one file would otherwise stay invisible.
 	prev := i18n.GetLanguage()
 	t.Cleanup(func() { i18n.SetLanguage(prev) })
 	for _, lang := range []string{"en", "es", "pt"} {
@@ -1854,9 +1522,6 @@ func TestMCPListHintsAdvertiseSignOutAndAdd(t *testing.T) {
 	}
 	i18n.SetLanguage(prev)
 
-	// (2) The footer the user actually sees is built by renderModal; assert on
-	// it too, so a fragment wired only into the string but not the footer —
-	// or a footer that stopped reading the key — fails here.
 	logout, add := i18n.T("tui.mcpLogoutHint"), i18n.T("tui.mcpAddHint")
 	out := ansi.Strip(m.renderModal(m.modalTitleFor(ModalMCP)))
 	if !strings.Contains(out, logout) {
@@ -1870,8 +1535,6 @@ func TestMCPListHintsAdvertiseSignOutAndAdd(t *testing.T) {
 	}
 }
 
-// TestMCPAuthMethodLabel: a server that answered 401 without declaring a
-// carrier still gets an honest value instead of an invented "oauth".
 func TestMCPAuthMethodLabel(t *testing.T) {
 	if got := mcpAuthMethodLabel("oauth"); got != "oauth" {
 		t.Errorf("mcpAuthMethodLabel(oauth) = %q, want oauth", got)
@@ -1881,20 +1544,8 @@ func TestMCPAuthMethodLabel(t *testing.T) {
 	}
 }
 
-// TestMCPAuthTokenWithoutRequirementRendersAuthenticated is the C7 regression,
-// driven through the REAL store: a plain remote entry (no declared auth block,
-// no recorded 401) holding a usable credential is `{Required:false,
-// Authenticated:true}` — the residue pkg/mcp documents (a stored credential
-// whose AuthRequired was never written). Both TUI surfaces keyed on Required
-// and rendered NOTHING for it, while the WebUI painted its "Authenticated"
-// chip + Sign out for the very same DTO. One verdict, one rule, on every
-// surface:
-//
-//	authenticated ⇒ authenticated; else required ⇒ needs-auth; else nothing
 func TestMCPAuthTokenWithoutRequirementRendersAuthenticated(t *testing.T) {
 	m := mcpAuthListModel(t, mcpAuthVisibilityDoc)
-	// A token with NO recorded challenge: the store answers Authenticated,
-	// mcp.json declares nothing and no 401 was ever seen.
 	mcpAuthSeedRecord(t, config.GetLeleDir(), "challenged-srv",
 		mcp.AuthRecord{URL: mcpAuthVisibilityURL("challenged-srv"), Token: mcpTestToken()})
 
@@ -1911,15 +1562,12 @@ func TestMCPAuthTokenWithoutRequirementRendersAuthenticated(t *testing.T) {
 		t.Errorf("mcpAuthSuffix(%+v) = %q, want %q", verdict, got, authed)
 	}
 
-	// The list row says it…
 	m.loadMCPList()
 	row, _ := mcpAuthRow(t, m, "challenged-srv")
 	if !strings.HasSuffix(row, authed) {
 		t.Errorf("row = %q, want the %q marker", row, authed)
 	}
 
-	// …and so does the detail: the state line, plus the sign-out that is
-	// exactly what takes that credential back.
 	mcpAuthOpenDetail(t, m, "challenged-srv")
 	out := ansi.Strip(m.renderMCPDetail())
 	if want := i18n.T("tui.mcpDetailAuthState") + ": " + i18n.T("tui.mcpAuthOK"); !strings.Contains(out, want) {
@@ -1933,11 +1581,6 @@ func TestMCPAuthTokenWithoutRequirementRendersAuthenticated(t *testing.T) {
 	}
 }
 
-// ── 11. sign out ───────────────────────────────────────────────────────
-
-// TestMCPAuthLogoutCmdForClearsTheStoredCredential drives the command itself:
-// it runs the same in-process Logout the CLI runs, and the credential is
-// really gone from a freshly built store (what another process would read).
 func TestMCPAuthLogoutCmdForClearsTheStoredCredential(t *testing.T) {
 	root := t.TempDir()
 	paths := mcp.Paths{LeleDir: filepath.Join(root, "global")}
@@ -1968,9 +1611,6 @@ func TestMCPAuthLogoutCmdForClearsTheStoredCredential(t *testing.T) {
 	}
 }
 
-// TestMCPAuthLogoutCmdForWithoutCredentialRefuses: the store's Clear is
-// idempotent, so a sign-out of an entry with nothing stored must be refused
-// here — reporting success would claim a deletion that never happened.
 func TestMCPAuthLogoutCmdForWithoutCredentialRefuses(t *testing.T) {
 	t.Run("no record at all", func(t *testing.T) {
 		root := t.TempDir()
@@ -1981,7 +1621,6 @@ func TestMCPAuthLogoutCmdForWithoutCredentialRefuses(t *testing.T) {
 		if !errors.Is(msg.err, errMCPAuthNoCredential) {
 			t.Errorf("err = %v, want errMCPAuthNoCredential", msg.err)
 		}
-		// Nothing was created: a refusal must not leave a store file behind.
 		if _, err := os.Stat(filepath.Join(paths.LeleDir, "mcp-auth.json")); err == nil {
 			t.Error("a refused sign-out created mcp-auth.json")
 		}
@@ -1991,8 +1630,6 @@ func TestMCPAuthLogoutCmdForWithoutCredentialRefuses(t *testing.T) {
 		root := t.TempDir()
 		paths := mcp.Paths{LeleDir: filepath.Join(root, "global")}
 		mcpWriteDoc(t, paths.LeleDir, mcpAuthVisibilityDoc)
-		// A 401 was recorded, but no login ever completed: there is no
-		// credential to take back.
 		mcpAuthSeedRecord(t, paths.LeleDir, "challenged-srv",
 			mcp.AuthRecord{URL: mcpAuthVisibilityURL("challenged-srv"), AuthRequired: true})
 
@@ -2000,15 +1637,12 @@ func TestMCPAuthLogoutCmdForWithoutCredentialRefuses(t *testing.T) {
 		if !errors.Is(msg.err, errMCPAuthNoCredential) {
 			t.Errorf("err = %v, want errMCPAuthNoCredential", msg.err)
 		}
-		// The recorded challenge is untouched.
 		if !mcp.NewAuthStore(paths.LeleDir).AuthRequired("challenged-srv", mcpAuthVisibilityURL("challenged-srv")) {
 			t.Error("a refused sign-out dropped the recorded challenge")
 		}
 	})
 }
 
-// TestMCPAuthLogoutCmdWithoutLeleDir: no store at all is its own refusal, not
-// pkg/mcp's "store disabled" engine error.
 func TestMCPAuthLogoutCmdWithoutLeleDir(t *testing.T) {
 	paths := mcp.Paths{AgentWorkspace: t.TempDir()}
 
@@ -2020,8 +1654,6 @@ func TestMCPAuthLogoutCmdWithoutLeleDir(t *testing.T) {
 		t.Error("the raw engine sentinel leaked to the UI")
 	}
 
-	// And the model-level builder reports the unresolvable roots instead of
-	// panicking (a bare loop resolves no MCP paths).
 	m := &Model{}
 	got := m.mcpAuthLogoutCmd("srv")().(mcpToggleResultMsg)
 	if !errors.Is(got.err, errMCPUnavailable) {
@@ -2029,10 +1661,6 @@ func TestMCPAuthLogoutCmdWithoutLeleDir(t *testing.T) {
 	}
 }
 
-// TestMCPAuthLogoutResultCarriesTheOutcomeThroughUpdate is the routing test:
-// the sign-out result reaches the handler through update()'s real dispatch
-// (the same one the toggle uses), lands on the feedback line and never leaks
-// into the chat input.
 func TestMCPAuthLogoutResultCarriesTheOutcomeThroughUpdate(t *testing.T) {
 	m := &Model{chatInput: textarea.New()}
 	m.chatInput.SetValue("typed")
@@ -2049,7 +1677,6 @@ func TestMCPAuthLogoutResultCarriesTheOutcomeThroughUpdate(t *testing.T) {
 		t.Errorf("text input mutated by the msg: %q", got)
 	}
 
-	// Every refusal is localized, never a raw sentinel.
 	cases := []struct {
 		name string
 		err  error
@@ -2071,10 +1698,6 @@ func TestMCPAuthLogoutResultCarriesTheOutcomeThroughUpdate(t *testing.T) {
 	}
 }
 
-// TestMCPAuthLogoutKeyInTheListSignsOutAndRefreshesTheRow is the whole feature
-// end to end on the real model: "d" on a row with a stored credential deletes
-// it, re-wires the loop once, reloads the list (the marker is gone) and
-// reports on the list's feedback line.
 func TestMCPAuthLogoutKeyInTheListSignsOutAndRefreshesTheRow(t *testing.T) {
 	syncs := countMCPSyncs(t)
 	m := mcpAuthListModel(t, mcpAuthVisibilityDoc)
@@ -2094,7 +1717,6 @@ func TestMCPAuthLogoutKeyInTheListSignsOutAndRefreshesTheRow(t *testing.T) {
 	}
 	m.Update(cmd())
 
-	// The credential is gone for a fresh store (another process would agree).
 	if mcp.NewAuthStore(dir).Authenticated("oauth-srv", url) {
 		t.Error("the token is still usable after the sign-out")
 	}
@@ -2104,8 +1726,6 @@ func TestMCPAuthLogoutKeyInTheListSignsOutAndRefreshesTheRow(t *testing.T) {
 	if want := fmt.Sprintf(i18n.T("tui.mcpAuthLogoutDone"), "oauth-srv"); m.mcpFeedback != want {
 		t.Errorf("feedback = %q, want %q", m.mcpFeedback, want)
 	}
-	// The list was reloaded and the row lost its marker (it needs a sign-in
-	// again: the entry declares OAuth).
 	row, _ := mcpAuthRow(t, m, "oauth-srv")
 	if strings.Contains(row, i18n.T("tui.mcpAuthOK")) {
 		t.Errorf("row still says authenticated after the sign-out: %q", row)
@@ -2118,10 +1738,6 @@ func TestMCPAuthLogoutKeyInTheListSignsOutAndRefreshesTheRow(t *testing.T) {
 	}
 }
 
-// TestMCPAuthLogoutKeyInTheDetailStaysOnTheDetail: a sign-out fired from the
-// detail reports on the detail's own auth line (the list's feedback line is not
-// rendered there) and keeps the detail on screen so the refreshed state is
-// visible.
 func TestMCPAuthLogoutKeyInTheDetailStaysOnTheDetail(t *testing.T) {
 	syncs := countMCPSyncs(t)
 	m := mcpAuthListModel(t, mcpAuthVisibilityDoc)
@@ -2150,7 +1766,6 @@ func TestMCPAuthLogoutKeyInTheDetailStaysOnTheDetail(t *testing.T) {
 	if out := ansi.Strip(m.renderMCPDetail()); !strings.Contains(out, want) {
 		t.Errorf("the detail does not render the sign-out outcome %q:\n%s", want, out)
 	}
-	// The marker is gone from the refreshed detail too.
 	if out := ansi.Strip(m.renderMCPDetail()); !strings.Contains(out, i18n.T("tui.mcpAuthRequired")) {
 		t.Errorf("the refreshed detail still claims a credential:\n%s", out)
 	}
@@ -2159,9 +1774,6 @@ func TestMCPAuthLogoutKeyInTheDetailStaysOnTheDetail(t *testing.T) {
 	}
 }
 
-// TestMCPAuthLogoutKeyWithoutCredentialIsAClearRefusal: "d" on a row with
-// nothing stored is not a silent no-op — the outcome line says so, and the
-// store is untouched (no file is even created).
 func TestMCPAuthLogoutKeyWithoutCredentialIsAClearRefusal(t *testing.T) {
 	m := mcpAuthListModel(t, mcpAuthVisibilityDoc)
 	storeFile := filepath.Join(config.GetLeleDir(), "mcp-auth.json")
@@ -2188,9 +1800,6 @@ func TestMCPAuthLogoutKeyWithoutCredentialIsAClearRefusal(t *testing.T) {
 	}
 }
 
-// TestMCPAuthLogoutKeyOnTheEmptyStateRowIsASilentNoOp: the synthetic
-// ""/unavailable rows have no server, so "d" does nothing at all (no command,
-// no feedback) — exactly like enter.
 func TestMCPAuthLogoutKeyOnTheEmptyStateRowIsASilentNoOp(t *testing.T) {
 	root := t.TempDir()
 	paths := mcp.Paths{
@@ -2213,8 +1822,6 @@ func TestMCPAuthLogoutKeyOnTheEmptyStateRowIsASilentNoOp(t *testing.T) {
 	}
 }
 
-// TestResetModalClearsMCPAuth: the verdict map belongs to the inventory
-// snapshot and goes with it, so a stale marker can never survive a reopen.
 func TestResetModalClearsMCPAuth(t *testing.T) {
 	paths := mcpFixturePaths(t)
 	m := &Model{modalMode: ModalMCP}
@@ -2234,7 +1841,6 @@ func TestResetModalClearsMCPAuth(t *testing.T) {
 	if m.mcpInventoryValid {
 		t.Error("resetModal left mcpInventoryValid = true")
 	}
-	// The same holds for the unresolvable-paths branch of loadMCPList.
 	m.loadMCPListWith(paths)
 	m = &Model{agentLoop: &agent.AgentLoop{}, modalMode: ModalMCP}
 	m.mcpAuth = mcpAuthVerdicts(paths, mcp.ReadInventory(paths))

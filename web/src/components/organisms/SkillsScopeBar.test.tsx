@@ -6,26 +6,12 @@ import type { Agent } from '../../lib/types'
 import i18n from '../../test/i18n'
 import { SkillsScopeBar } from './SkillsScopeBar'
 
-/**
- * SkillsScopeBar (plan T4 / §5.7). The bar is fully controlled, so the suite
- * asserts only the *wiring*: what it renders per view, and which callback each
- * interaction fires. SegmentedControl's own keyboard/roving-tabindex logic is
- * covered by SegmentedControl.test.tsx — here we only prove the delegation.
- *
- * House conventions: `screen` is unusable (its global binding is captured
- * before the JSDOM setup), so queries go through `render`'s bound helpers; the
- * i18n instance boots in Spanish (`test/i18n.ts`), so labels are resolved with
- * the `tr()` helper.
- */
-
-/** The test env boots in Spanish; resolve labels through i18n (house pattern). */
 function tr(key: string, options?: Record<string, unknown>): string {
   return i18n.t(key, options) as string
 }
 
 const AGENTS: Agent[] = [
   { id: 'coder', name: 'Coder', workspace: '/w/coder', model: 'gpt-4o', default: true },
-  // Empty name: the option label must fall back to the id (`a.name || a.id`).
   { id: 'planner', name: '', workspace: '/w/planner', model: 'gpt-4o' },
 ]
 
@@ -50,7 +36,6 @@ function setup(overrides: Overrides = {}) {
   return { ...utils, onViewChange, onAgentChange }
 }
 
-/** The three segments, in DOM order. */
 const radios = (container: HTMLElement) =>
   Array.from(container.querySelectorAll<HTMLElement>('[role="radio"]'))
 
@@ -103,8 +88,6 @@ describe('SkillsScopeBar — tabs', () => {
   test('clicking the already-active segment is harmless', () => {
     const { container, onViewChange } = setup({ view: 'all' })
     expect(() => fireEvent.click(radios(container)[0])).not.toThrow()
-    // SegmentedControl re-reports the value it was already on; the bar must
-    // neither crash nor invent a different view. Either 0 or 1 call is fine.
     expect(onViewChange.mock.calls.length).toBeLessThanOrEqual(1)
     if (onViewChange.mock.calls.length === 1) {
       expect(onViewChange.mock.calls[0][0]).toBe('all')
@@ -158,11 +141,6 @@ describe('SkillsScopeBar — agent selector', () => {
     expect(container.querySelector('label[for="skills-agent"]')?.textContent).toBe(
       tr('skills.selectAgent'),
     )
-    // The bar passes `selectedAgentId ?? ''`, but no <option> carries `''`, so
-    // the browser (jsdom included) displays the first agent rather than a blank
-    // select — inherent DOM behaviour, not component logic. In practice the
-    // page only reaches this state with an empty agent list (D11), where the
-    // whole block is skipped (covered above).
   })
 
   test('agents: [] in the agent view renders no select and does not throw (D11)', () => {

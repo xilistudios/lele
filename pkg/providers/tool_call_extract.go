@@ -5,9 +5,6 @@ import (
 	"strings"
 )
 
-// extractToolCallsFromText parses tool call JSON from response text.
-// CodexCliProvider (and any provider whose model emits tool calls as text)
-// uses this to extract tool calls the model outputs in its response text.
 func extractToolCallsFromText(text string) []ToolCall {
 	start := strings.Index(text, `{"tool_calls"`)
 	if start == -1 {
@@ -40,8 +37,6 @@ func extractToolCallsFromText(text string) []ToolCall {
 	for _, tc := range wrapper.ToolCalls {
 		var args map[string]interface{}
 		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-			// If arguments can't be parsed as JSON, keep them as-is in Function.Arguments
-			// and set Arguments to nil to avoid partial data
 			args = nil
 		}
 
@@ -60,7 +55,6 @@ func extractToolCallsFromText(text string) []ToolCall {
 	return result
 }
 
-// stripToolCallsFromText removes tool call JSON from response text.
 func stripToolCallsFromText(text string) string {
 	start := strings.Index(text, `{"tool_calls"`)
 	if start == -1 {

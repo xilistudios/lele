@@ -12,7 +12,6 @@ func TestNormalizeFillsEmpty(t *testing.T) {
 	got.Normalize()
 
 	want := DraculaDefault
-	// Explicitly set fields survive (they are valid colors).
 	want.Background = "#FF0000"
 	want.Primary = "#00FF00"
 	want.Yellow = "#0000FF"
@@ -55,10 +54,10 @@ func TestNormalizeFillsEmpty(t *testing.T) {
 func TestNormalizeInvalidColor(t *testing.T) {
 	got := Theme{
 		Background:          "not-a-color",
-		Primary:             "#GGGGGG", // invalid hex
-		Secondary:           "39",      // valid ANSI 256
-		InputBackground:     "x",       // invalid numeric
-		SelectionBackground: "#fff",    // valid short hex
+		Primary:             "#GGGGGG",
+		Secondary:           "39",
+		InputBackground:     "x",
+		SelectionBackground: "#fff",
 	}
 	got.Normalize()
 
@@ -91,7 +90,6 @@ func TestGetBuiltin(t *testing.T) {
 	if got != want {
 		t.Errorf("Get(\"nord\", nil) = %+v, want %+v", got, want)
 	}
-	// Ensure no empty fields survive.
 	for name, v := range map[string]string{
 		"Background": got.Background, "InputBackground": got.InputBackground,
 		"Primary": got.Primary, "Secondary": got.Secondary, "Accent": got.Accent,
@@ -121,7 +119,6 @@ func TestGetCustom(t *testing.T) {
 	if got.Primary != "#00FFFF" {
 		t.Errorf("Primary = %q, want #00FFFF", got.Primary)
 	}
-	// Unset custom fields fall back to Dracula.
 	if got.Secondary != DraculaDefault.Secondary {
 		t.Errorf("Secondary = %q, want %q", got.Secondary, DraculaDefault.Secondary)
 	}

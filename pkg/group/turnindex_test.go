@@ -12,30 +12,11 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
-// Regression tests for B5: Turn.Index collided under Parallel execution.
-//
-// Before the fix the index was computed as len(state.Transcript) when the turn
-// was appended. With state.Parallel the speakers of a batch run concurrently
-// and append in completion order, so two turns could end up with the same
-// index, and the turn_index a client saw on group.tool (computed at turn
-// start) could differ from the one on group.turn (computed at append time).
-// The frontend dedupes group.turn by turnIndex, so a collision silently drops
-// turns.
-//
-// The fix reserves the index from GroupState.NextTurnIndex inside prepareTurn
-// (under gm.mu) before the speaker runs; recordTurn stores that reserved index
-// verbatim. These tests pin the contract: unique indices, full coverage of the
-// index domain, and group.tool/group.turn agreement per speaker.
-
-// --- helpers ---
-
-// indexedTurnPub is a thread-safe event recorder that keeps group.turn and
-// group.tool events in publication order.
 type indexedTurnPub struct {
 	mu       sync.Mutex
 	turns    []bus.OutboundMessage
 	tools    []bus.OutboundMessage
-	received chan struct{} // signalled (non-blocking) on every event
+	received chan struct{}
 }
 
 func newIndexedTurnPub() *indexedTurnPub {
@@ -73,7 +54,6 @@ func (p *indexedTurnPub) snapshotTools() []bus.OutboundMessage {
 	return out
 }
 
-// turnIndexOf reads the turn_index metadata of an event.
 func turnIndexOf(t *testing.T, msg bus.OutboundMessage) int {
 	t.Helper()
 	raw, ok := msg.Metadata["turn_index"]
@@ -87,9 +67,6 @@ func turnIndexOf(t *testing.T, msg bus.OutboundMessage) int {
 	return idx
 }
 
-// delayToolExecutor sleeps a per-speaker duration (to force an inverted
-// completion order under Parallel) and emits one tool call pair tagged with
-// the speaker, so group.tool events can be matched against group.turn events.
 type delayToolExecutor struct {
 	delay map[string]time.Duration
 }
@@ -110,7 +87,6 @@ func (e *delayToolExecutor) execute(ctx context.Context, req TurnRequest) (strin
 	return fmt.Sprintf("content-%s", req.Speaker), 10, nil
 }
 
-// waitForTurns blocks until at least n group.turn events have been published.
 func waitForTurns(t *testing.T, p *indexedTurnPub, n int, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -127,19 +103,7 @@ func waitForTurns(t *testing.T, p *indexedTurnPub, n int, timeout time.Duration)
 		timeout, n, len(p.snapshotTurns()))
 }
 
-// --- tests ---
-
-// TestRegression_ParallelTurnIndexesUnique runs a MoA group with three
-// proposers whose turns sleep in reverse order (a slowest, c fastest) so the
-// completion order is inverted with respect to the reservation order, and
-// asserts the WS contract holds:
-//
-//	(a) every group.turn carries a distinct turn_index;
-//	(b) the set of indices is exactly the whole domain {0..N-1};
-//	(c) each group.tool of speaker X carries the same turn_index as X's group.turn.
 func TestRegression_ParallelTurnIndexesUnique(t *testing.T) {
-	// a is slowest -> completes last; c is fastest -> completes first.
-	// Reservation order (a,b,c) therefore differs from append order (c,b,a).
 	exec := &delayToolExecutor{delay: map[string]time.Duration{
 		"a":   180 * time.Millisecond,
 		"b":   120 * time.Millisecond,
@@ -168,13 +132,11 @@ func TestRegression_ParallelTurnIndexesUnique(t *testing.T) {
 	turnEvents := pub.snapshotTurns()
 	toolEvents := pub.snapshotTools()
 
-	// 3 proposers + 1 aggregator = 4 turns expected.
 	const wantTurns = 4
 	if len(turnEvents) != wantTurns {
 		t.Fatalf("group.turn events = %d, want %d", len(turnEvents), wantTurns)
 	}
 
-	// (a) All indices distinct; remember index->speaker and speaker->index.
 	speakerByIndex := make(map[int]string, wantTurns)
 	indexBySpeaker := make(map[string]int, wantTurns)
 	for _, ev := range turnEvents {
@@ -189,7 +151,6 @@ func TestRegression_ParallelTurnIndexesUnique(t *testing.T) {
 		indexBySpeaker[speaker] = idx
 	}
 
-	// (b) The index set covers exactly {0..N-1} (0-based domain preserved).
 	idxs := make([]int, 0, len(speakerByIndex))
 	for i := range speakerByIndex {
 		idxs = append(idxs, i)
@@ -204,7 +165,6 @@ func TestRegression_ParallelTurnIndexesUnique(t *testing.T) {
 		}
 	}
 
-	// (c) group.tool turn_index agrees with the speaker's group.turn turn_index.
 	if len(toolEvents) == 0 {
 		t.Fatal("no group.tool events published; assertion (c) was vacuous")
 	}
@@ -222,7 +182,6 @@ func TestRegression_ParallelTurnIndexesUnique(t *testing.T) {
 		}
 	}
 
-	// The persisted transcript must carry the same unique indices.
 	st, ok := gm.Status(groupID)
 	if !ok {
 		t.Fatal("group not found after Wait")
@@ -243,13 +202,7 @@ func TestRegression_ParallelTurnIndexesUnique(t *testing.T) {
 	}
 }
 
-// TestRegression_TurnIndexStableAcrossStop starts a parallel group, stops it
-// mid-flight (after the first turns have been published) and asserts the
-// indices already advertised to clients never change retroactively: every
-// index published before the Stop must still be published afterwards, mapped
-// to the same speaker, and no index may appear twice.
 func TestRegression_TurnIndexStableAcrossStop(t *testing.T) {
-	// Long turns so the Stop lands while the batch is still running.
 	exec := &delayToolExecutor{delay: map[string]time.Duration{
 		"a":   500 * time.Millisecond,
 		"b":   600 * time.Millisecond,
@@ -272,7 +225,6 @@ func TestRegression_TurnIndexStableAcrossStop(t *testing.T) {
 		t.Fatalf("Start failed: %v", err)
 	}
 
-	// Wait for the first turn to be published, snapshot its index, then stop.
 	waitForTurns(t, pub, 1, 5*time.Second)
 	before := pub.snapshotTurns()
 	beforeIdx := make(map[int]string, len(before))
@@ -283,7 +235,7 @@ func TestRegression_TurnIndexStableAcrossStop(t *testing.T) {
 	if !gm.Stop(groupID) {
 		t.Fatal("Stop: group not found")
 	}
-	_, _ = gm.Wait(groupID) // stopped, or finished just in time: either is fine
+	_, _ = gm.Wait(groupID)
 
 	after := pub.snapshotTurns()
 	if len(after) < len(before) {
@@ -291,8 +243,6 @@ func TestRegression_TurnIndexStableAcrossStop(t *testing.T) {
 			len(after), len(before))
 	}
 
-	// Every index published before the stop must still be present afterwards
-	// with the same speaker - nothing renumbered retroactively.
 	afterIdx := make(map[int]string, len(after))
 	for _, ev := range after {
 		idx := turnIndexOf(t, ev)
@@ -313,8 +263,6 @@ func TestRegression_TurnIndexStableAcrossStop(t *testing.T) {
 		}
 	}
 
-	// The transcript agrees with the events: each recorded turn keeps its
-	// reserved index, and no two recorded turns share one.
 	st, ok := gm.Status(groupID)
 	if !ok {
 		t.Fatal("group not found after Wait")
@@ -333,9 +281,6 @@ func TestRegression_TurnIndexStableAcrossStop(t *testing.T) {
 	}
 }
 
-// TestRegression_SequentialIndicesUnchanged pins the non-parallel behaviour:
-// sequential groups keep emitting contiguous 0-based indices in transcript
-// order, exactly as before the fix (the WS contract is unchanged).
 func TestRegression_SequentialIndicesUnchanged(t *testing.T) {
 	exec := &mockExecutor{}
 	pub := newIndexedTurnPub()
@@ -373,19 +318,13 @@ func TestRegression_SequentialIndicesUnchanged(t *testing.T) {
 	}
 }
 
-// TestRegression_ReservedIndexRebasedOnRehydratedState covers the defensive
-// re-base in prepareTurn: a GroupState whose NextTurnIndex is behind the
-// transcript (for example a state rehydrated from a snapshot written before
-// this field existed) must not reuse an index already present in the
-// transcript.
 func TestRegression_ReservedIndexRebasedOnRehydratedState(t *testing.T) {
 	gm := NewGroupManager(mockResolve, (&mockExecutor{}).execute, (&mockPublisher{}).publish)
 
 	state := &GroupState{
-		ID:       "b5-rehydrate",
-		Strategy: "round_robin",
-		Status:   StatusRunning,
-		// Two turns already recorded with indices 0 and 1; counter absent (0).
+		ID:            "b5-rehydrate",
+		Strategy:      "round_robin",
+		Status:        StatusRunning,
 		Transcript:    []Turn{{Index: 0, Speaker: "a"}, {Index: 1, Speaker: "b"}},
 		Participants:  []Participant{plainParticipant("a"), plainParticipant("b")},
 		NextTurnIndex: 0,
@@ -400,7 +339,6 @@ func TestRegression_ReservedIndexRebasedOnRehydratedState(t *testing.T) {
 		t.Errorf("NextTurnIndex = %d, want 3 after reservation", state.NextTurnIndex)
 	}
 
-	// A second reservation keeps advancing, never colliding.
 	inputs2 := gm.prepareTurn(mg, "b", 0, AgentContext{AgentID: "b", Name: "Agent B"})
 	if inputs2.turnIndex != 3 {
 		t.Errorf("second reserved turnIndex = %d, want 3", inputs2.turnIndex)

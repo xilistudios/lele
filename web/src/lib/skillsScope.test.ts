@@ -50,7 +50,7 @@ describe('parseSkillsView', () => {
     expect(parseSkillsView(null)).toBe('all')
     expect(parseSkillsView(undefined)).toBe('all')
     expect(parseSkillsView('')).toBe('all')
-    expect(parseSkillsView('GLOBAL')).toBe('all') // case-sensitive on purpose
+    expect(parseSkillsView('GLOBAL')).toBe('all')
     expect(parseSkillsView('skills')).toBe('all')
   })
 
@@ -63,11 +63,6 @@ describe('parseSkillsView', () => {
 
 describe('GLOBAL_VIEW_SOURCES / isInGlobalView (D2)', () => {
   test("GLOBAL_VIEW_SOURCES is exactly ['global'] — built-ins are excluded by design", () => {
-    // D2: the Global tab is not only a filter, it selects the install
-    // destination (`scope:"global"` ⇒ <leleDir>/skills). Built-ins live in
-    // <leleDir>/lele/skills, can never be installed to or removed from the
-    // global dir, and are already read-only on this page. Think twice before
-    // changing this line: it is a decision, not an oversight.
     expect(GLOBAL_VIEW_SOURCES).toEqual(['global'])
   })
 

@@ -38,7 +38,6 @@ func TestPipelineStrategy_SequentialOrder(t *testing.T) {
 		state.AddTurn(Turn{Index: i, Layer: 0, Speaker: speakers[0], Content: "output"})
 	}
 
-	// After all 3 participants have spoken, should be done.
 	speakers, done, err := s.Next(state)
 	if err != nil {
 		t.Fatalf("after 3 turns: error: %v", err)
@@ -91,21 +90,18 @@ func TestPipelineStrategy_MaxTurnsStop(t *testing.T) {
 	}
 
 	s := &PipelineStrategy{}
-	// Turn 0: A speaks.
 	speakers, done, _ := s.Next(state)
 	state.AddTurn(Turn{Index: 0, Speaker: speakers[0], Content: "x"})
 	if done {
 		t.Fatal("done=true prematurely at turn 0")
 	}
 
-	// Turn 1: B speaks.
 	speakers, done, _ = s.Next(state)
 	state.AddTurn(Turn{Index: 1, Speaker: speakers[0], Content: "x"})
 	if done {
 		t.Fatal("done=true prematurely at turn 1")
 	}
 
-	// Now len(transcript)=2 >= MaxTurns=2 → StopReason triggers.
 	_, done, _ = s.Next(state)
 	if !done {
 		t.Fatal("expected done=true (MaxTurns hit)")
@@ -122,7 +118,6 @@ func TestPipelineStrategy_EmptyParticipants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// 0 participants, 0 turns → turns >= n (0 >= 0) → done.
 	if !done {
 		t.Fatal("expected done=true for empty participants")
 	}

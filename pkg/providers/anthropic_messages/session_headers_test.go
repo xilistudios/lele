@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package anthropicmessages
 
 import (
@@ -20,23 +15,15 @@ import (
 	"github.com/xilistudios/lele/pkg/version"
 )
 
-// anthropicTestOptions returns the options every Chat call in this file needs
-// (max_tokens is mandatory in the Anthropic wire format).
 func anthropicTestOptions() map[string]any {
 	return map[string]any{"max_tokens": 128}
 }
 
-// headerCapture records request headers in a mutex-guarded copy. The headers
-// are copied INSIDE the handler: reading any *http.Request field after the
-// handler returns races with the server's connection cleanup (the plan's rule;
-// pkg/tools/opencode_go_test.go and pkg/agent/opencode_go_e2e_test.go do the
-// same). No captured-request state in this file is read without the mutex.
 type headerCapture struct {
 	mu     sync.Mutex
 	header http.Header
 }
 
-// record snapshots the request headers. It must be called from the handler.
 func (c *headerCapture) record(r *http.Request) {
 	h := r.Header.Clone()
 	c.mu.Lock()
@@ -44,27 +31,18 @@ func (c *headerCapture) record(r *http.Request) {
 	c.mu.Unlock()
 }
 
-// get returns a recorded header value ("" when the header is absent).
 func (c *headerCapture) get(name string) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.header.Get(name)
 }
 
-// has reports whether the header was on the request at all. get cannot
-// distinguish "absent" from "present with an empty value" — both return "" —
-// and the byte-identical guarantee of the nil-headers test is about ABSENCE,
-// so it needs this stronger predicate.
 func (c *headerCapture) has(name string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.header.Values(name)) > 0
 }
 
-// newAnthropicCompletionServer starts a server that records the request
-// headers and answers with a minimal valid Anthropic response (completion for
-// "application/json", SSE for "text/event-stream"). Returns the server URL and
-// the capture.
 func newAnthropicCompletionServer(t *testing.T, contentType string) (string, *headerCapture) {
 	t.Helper()
 	captured := &headerCapture{}
@@ -162,8 +140,6 @@ func TestProviderChatStream_SendsConfiguredSessionHeader(t *testing.T) {
 func TestProviderChat_NoSessionHeaderWhenNotConfigured(t *testing.T) {
 	server, captured := newAnthropicCompletionServer(t, "application/json")
 
-	// A plain provider (not OpenCode Go): the option is set but must never be
-	// stamped — other providers' wire format stays unchanged (D6).
 	p := NewProvider("key", server)
 	options := anthropicTestOptions()
 	options[protocoltypes.OptWireSessionID] = "session-123"
@@ -176,10 +152,6 @@ func TestProviderChat_NoSessionHeaderWhenNotConfigured(t *testing.T) {
 	}
 }
 
-// TestProviderChat_OmitsOpportunisticSessionHeaderWhenMissing pins FIX-B's
-// non-required branch: a session header configured without SessionHeaderRequired
-// (URL-sniff detection) is skipped silently when the call carries no session id
-// — no local failure, no header on the wire.
 func TestProviderChat_OmitsOpportunisticSessionHeaderWhenMissing(t *testing.T) {
 	server, captured := newAnthropicCompletionServer(t, "application/json")
 
@@ -200,8 +172,6 @@ func TestProviderChat_ErrorsWhenSessionIdMissing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// SessionHeaderRequired = explicit name/type detection (FIX-B): the local
-	// fail-fast guards this branch only.
 	p := NewProviderWithOptions("key", server.URL, Options{SessionHeader: "x-opencode-session", SessionHeaderRequired: true})
 	_, err := p.Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, "claude-sonnet-4.6", anthropicTestOptions())
 	if err == nil {

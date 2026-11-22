@@ -6,9 +6,6 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 )
 
-// newFocusTestModel builds a minimal Model for focus-state tests.
-// syncChatInputFocus and applyThemeToInputs only touch chatInput/textInput
-// styles, so a bare literal is sufficient.
 func newFocusTestModel() *Model {
 	m := &Model{chatInput: textarea.New()}
 	m.chatInput.Focus()
@@ -71,7 +68,6 @@ func TestSyncChatInputFocus(t *testing.T) {
 func TestSyncChatInputFocus_RefocusAfterModalReturnsCmd(t *testing.T) {
 	m := newFocusTestModel()
 
-	// Open a modal: input must blur.
 	m.modalMode = ModalSessions
 	if cmd := m.syncChatInputFocus(); cmd != nil {
 		t.Fatalf("blur transition returned a cmd, want nil")
@@ -80,7 +76,6 @@ func TestSyncChatInputFocus_RefocusAfterModalReturnsCmd(t *testing.T) {
 		t.Fatal("input still focused while modal is open")
 	}
 
-	// Close the modal: input must re-focus and return a blink cmd.
 	m.modalMode = ModalNone
 	cmd := m.syncChatInputFocus()
 	if cmd == nil {
@@ -94,7 +89,6 @@ func TestSyncChatInputFocus_RefocusAfterModalReturnsCmd(t *testing.T) {
 func TestSyncChatInputFocus_Idempotent(t *testing.T) {
 	m := newFocusTestModel()
 
-	// Already focused: repeated syncs are stable and return no cmd.
 	if cmd := m.syncChatInputFocus(); cmd != nil {
 		t.Fatalf("first sync on focused input returned cmd, want nil")
 	}
@@ -105,7 +99,6 @@ func TestSyncChatInputFocus_Idempotent(t *testing.T) {
 		t.Fatal("input lost focus after repeated syncs")
 	}
 
-	// Already blurred: repeated syncs are stable and return no cmd.
 	m.modalMode = ModalSessions
 	_ = m.syncChatInputFocus()
 	_ = m.syncChatInputFocus()

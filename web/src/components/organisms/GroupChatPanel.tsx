@@ -13,8 +13,6 @@ interface GroupChatPanelProps {
 
 const ANIMATION_DURATION_MS = 300
 
-// ── Role badge colors ───────────────────────────────────────────────────────
-
 function getRoleBadgeClass(role: string): string {
   switch (role) {
     case 'proposer':
@@ -29,8 +27,6 @@ function getRoleBadgeClass(role: string): string {
       return 'bg-background-tertiary text-text-tertiary'
   }
 }
-
-// ── Layer section ────────────────────────────────────────────────────────────
 
 function LayerSection({
   layer,
@@ -67,8 +63,6 @@ function LayerSection({
   )
 }
 
-// ── Single turn ──────────────────────────────────────────────────────────────
-
 function TurnItem({ turn }: { turn: GroupTurn }) {
   const { t } = useTranslation()
 
@@ -89,12 +83,9 @@ function TurnItem({ turn }: { turn: GroupTurn }) {
   )
 }
 
-// ── Group detail ─────────────────────────────────────────────────────────────
-
 function GroupDetail({ group }: { group: GroupInfo }) {
   const { t } = useTranslation()
 
-  // Group turns by layer
   const turnsByLayer = new Map<number, GroupTurn[]>()
   for (const turn of group.turns) {
     const arr = turnsByLayer.get(turn.layer) ?? []
@@ -103,7 +94,6 @@ function GroupDetail({ group }: { group: GroupInfo }) {
   }
   const sortedLayers = Array.from(turnsByLayer.keys()).sort((a, b) => a - b)
 
-  // Parse participants
   const participantList = group.participants
     ? group.participants
         .split(',')
@@ -113,7 +103,6 @@ function GroupDetail({ group }: { group: GroupInfo }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Participants */}
       {participantList.length > 0 && (
         <div>
           <h4 className="text-xs font-medium text-text-secondary mb-1.5">
@@ -132,7 +121,6 @@ function GroupDetail({ group }: { group: GroupInfo }) {
         </div>
       )}
 
-      {/* Turns grouped by layer */}
       {sortedLayers.map((layer) => (
         <LayerSection
           key={layer}
@@ -142,7 +130,6 @@ function GroupDetail({ group }: { group: GroupInfo }) {
         />
       ))}
 
-      {/* Synthesis */}
       {group.synthesis && (
         <div className="border border-brand-rosa/30 rounded-md overflow-hidden">
           <div className="px-3 py-2 bg-brand-rosa/5">
@@ -156,7 +143,6 @@ function GroupDetail({ group }: { group: GroupInfo }) {
         </div>
       )}
 
-      {/* Stats footer */}
       <div className="flex items-center gap-3 text-xs text-text-tertiary pt-1">
         {group.strategy && (
           <span>
@@ -172,8 +158,6 @@ function GroupDetail({ group }: { group: GroupInfo }) {
     </div>
   )
 }
-
-// ── Status badge ─────────────────────────────────────────────────────────────
 
 function GroupStatusBadge({ status }: { status: string }) {
   const { t } = useTranslation()
@@ -194,8 +178,6 @@ function GroupStatusBadge({ status }: { status: string }) {
     </span>
   )
 }
-
-// ── Main panel ───────────────────────────────────────────────────────────────
 
 export const GroupChatPanel = memo(function GroupChatPanel({
   groups,
@@ -247,7 +229,6 @@ export const GroupChatPanel = memo(function GroupChatPanel({
 
   return (
     <>
-      {/* Backdrop */}
       <button
         type="button"
         className={`fixed inset-0 z-40 bg-overlay transition-opacity duration-300 ease-out ${animate ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
@@ -255,11 +236,9 @@ export const GroupChatPanel = memo(function GroupChatPanel({
         aria-label={t('common.close')}
       />
 
-      {/* Panel */}
       <div
-        className={`bg-background-secondary fixed right-0 top-0 z-50 h-full w-96 max-w-[90vw] border-l border-border shadow-lg flex flex-col transition-transform duration-300 ease-out ${animate ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`bg-background-secondary fixed right-0 top-0 z-50 h-full w-96 max-w-[90vw] safe-area-y border-l border-border shadow-lg flex flex-col transition-transform duration-300 ease-out ${animate ? 'translate-x-0' : 'translate-x-full'}`}
       >
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="text-sm font-medium text-text-primary">{t('groups.title')}</h3>
           <IconButton
@@ -271,7 +250,6 @@ export const GroupChatPanel = memo(function GroupChatPanel({
           </IconButton>
         </div>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto">
           {groups.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-text-tertiary">
@@ -279,7 +257,6 @@ export const GroupChatPanel = memo(function GroupChatPanel({
             </div>
           ) : (
             <div className="p-4 space-y-4">
-              {/* Group list (when multiple groups) */}
               {groups.length > 1 && !selectedGroup && (
                 <ul className="divide-y divide-border border border-border rounded-md overflow-hidden">
                   {groups.map((group) => (
@@ -306,7 +283,6 @@ export const GroupChatPanel = memo(function GroupChatPanel({
                 </ul>
               )}
 
-              {/* Single group detail */}
               {selectedGroup && (
                 <>
                   {groups.length > 1 && (

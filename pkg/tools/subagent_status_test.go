@@ -10,13 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// Tests for persisting terminal subagent statuses onto the subagent's
-// session (SetSessionStatusCallback), so the WebUI sidebar shows the real
-// outcome after eviction/restart instead of a hard-coded "completed".
-
-// TestReportTerminalStatus_CallbackFired verifies the manager reports a
-// task's terminal status to the session layer, keyed by the subagent's
-// session key ({OriginSessionKey}:{ID}).
 func TestReportTerminalStatus_CallbackFired(t *testing.T) {
 	sm := NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
 
@@ -64,9 +57,6 @@ func TestReportTerminalStatus_CallbackFired(t *testing.T) {
 	}
 }
 
-// TestReportTerminalStatus_NoCallbackIsNoop ensures the manager works when no
-// status callback is wired (e.g. standalone managers in tests): no panic, no
-// state change.
 func TestReportTerminalStatus_NoCallbackIsNoop(t *testing.T) {
 	sm := NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
 	task := &SubagentTask{
@@ -76,17 +66,11 @@ func TestReportTerminalStatus_NoCallbackIsNoop(t *testing.T) {
 		mu:               &sync.Mutex{},
 	}
 	task.InitDoneChannel()
-	sm.reportTerminalStatus(task) // must not panic
+	sm.reportTerminalStatus(task)
 }
 
-// TestRunTask_PersistsTerminalStatus is the end-to-end manager-level check:
-// a task that fails inside runTaskImpl (model override unresolvable) gets its
-// terminal status reported through the callback. Mutation check: removing the
-// reportTerminalStatus call from runTask makes this fail.
 func TestRunTask_PersistsTerminalStatus(t *testing.T) {
 	sm := NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
-	// Wire the model-override resolver to fail, forcing the early-fail branch
-	// of runTaskImpl without any provider/network.
 	sm.SetModelOverrideResolver(func(model string) (providers.LLMProvider, string, int, error) {
 		return nil, "", 0, fmt.Errorf("no resolver for %q", model)
 	})
@@ -143,8 +127,6 @@ func TestRunTask_PersistsTerminalStatus(t *testing.T) {
 	}
 }
 
-// TestStopTask_PersistsCancelStatus verifies StopTask reports the cancelled
-// status for tasks that may have no running goroutine (needs_context waiters).
 func TestStopTask_PersistsCancelStatus(t *testing.T) {
 	sm := NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
 

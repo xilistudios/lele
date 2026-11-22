@@ -64,7 +64,6 @@ func TestSetStore_PersistAndReload(t *testing.T) {
 		t.Error("row should be enabled")
 	}
 
-	// Verify round-trip of payload (DeleteAfterRun is false for "every" schedule).
 	var meta cronPayloadWithMeta
 	if err := json.Unmarshal([]byte(rows[0].Payload), &meta); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
@@ -76,7 +75,6 @@ func TestSetStore_PersistAndReload(t *testing.T) {
 		t.Error("DeleteAfterRun should be false for 'every' schedule")
 	}
 
-	// Reload into a fresh service to verify persistence survives reload.
 	cs2 := NewCronService(filepath.Join(t.TempDir(), "other.json"), nil)
 	cs2.SetStore(s.Cron())
 	jobs := cs2.ListJobs(true)
@@ -122,13 +120,11 @@ func TestSetStore_LazyMigration(t *testing.T) {
 		t.Fatalf("write legacy JSON: %v", err)
 	}
 
-	// Sanity: legacy JSON is loadable.
 	cs := NewCronService(jsonPath, nil)
 	if len(cs.ListJobs(true)) != 1 {
 		t.Fatalf("expected 1 job from legacy JSON, got %d", len(cs.ListJobs(true)))
 	}
 
-	// Switch to SQLite – should migrate lazily.
 	s := openCronTestStore(t)
 	cs.SetStore(s.Cron())
 
@@ -143,17 +139,14 @@ func TestSetStore_LazyMigration(t *testing.T) {
 		t.Errorf("migrated row ID = %q, want %q", rows[0].ID, "legacy-1")
 	}
 
-	// In-memory store should also have the job.
 	if len(cs.ListJobs(true)) != 1 {
 		t.Errorf("expected 1 job in memory, got %d", len(cs.ListJobs(true)))
 	}
 
-	// Legacy JSON file should still exist on disk.
 	if _, statErr := os.Stat(jsonPath); statErr != nil {
 		t.Errorf("legacy JSON should still exist: %v", statErr)
 	}
 
-	// Second service switching to same repo should NOT duplicate.
 	cs2 := NewCronService(jsonPath, nil)
 	cs2.SetStore(s.Cron())
 	rows2, err := s.Cron().ListCronJobs()
@@ -169,34 +162,27 @@ func TestSetStore_NilFallback(t *testing.T) {
 	jsonPath := filepath.Join(t.TempDir(), "jobs.json")
 	cs := NewCronService(jsonPath, nil)
 
-	// Add a job while using JSON backend.
 	if _, err := cs.AddJob("json-before", CronSchedule{Kind: "every", EveryMS: int64Ptr(60000)}, "msg1", false, "cli", "direct"); err != nil {
 		t.Fatalf("first AddJob: %v", err)
 	}
 
-	// Switch to SQLite.
 	s := openCronTestStore(t)
 	cs.SetStore(s.Cron())
 
-	// Add another job in SQLite.
 	if _, err := cs.AddJob("sqlite-job", CronSchedule{Kind: "every", EveryMS: int64Ptr(60000)}, "msg2", false, "cli", "direct"); err != nil {
 		t.Fatalf("second AddJob: %v", err)
 	}
 
-	// Switch back to JSON.
 	cs.SetStore(nil)
 
-	// Add a job via JSON backend.
 	if _, err := cs.AddJob("json-job", CronSchedule{Kind: "every", EveryMS: int64Ptr(60000)}, "msg3", false, "cli", "direct"); err != nil {
 		t.Fatalf("third AddJob: %v", err)
 	}
 
-	// JSON file should exist.
 	if _, err := os.Stat(jsonPath); err != nil {
 		t.Errorf("JSON file should exist after SetStore(nil): %v", err)
 	}
 
-	// The repo should NOT contain "json-job".
 	rows, err := s.Cron().ListCronJobs()
 	if err != nil {
 		t.Fatalf("ListCronJobs: %v", err)
@@ -207,7 +193,6 @@ func TestSetStore_NilFallback(t *testing.T) {
 		}
 	}
 
-	// In-memory list should contain json-job.
 	jobs := cs.ListJobs(true)
 	found := false
 	for _, j := range jobs {

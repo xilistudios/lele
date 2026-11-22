@@ -12,10 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// --- test helpers -----------------------------------------------------------
-
-// newTestToolRegistry builds a registry populated with the given tool names
-// using the mockTool defined in context_test.go.
 func newTestToolRegistry(names ...string) *tools.ToolRegistry {
 	r := tools.NewToolRegistry()
 	for _, n := range names {
@@ -24,7 +20,6 @@ func newTestToolRegistry(names ...string) *tools.ToolRegistry {
 	return r
 }
 
-// registeredSorted returns the registry contents in deterministic order.
 func registeredSorted(r *tools.ToolRegistry) []string {
 	got := r.List()
 	sort.Strings(got)
@@ -43,7 +38,6 @@ func equalStrings(a, b []string) bool {
 	return true
 }
 
-// sliceHandler is a minimal slog.Handler that records every log entry.
 type sliceHandler struct {
 	mu      sync.Mutex
 	records []slog.Record
@@ -71,8 +65,6 @@ func (h *sliceHandler) levels() []slog.Level {
 	return out
 }
 
-// captureSlog installs a recording handler on the default logger for the
-// duration of fn and returns everything that was logged.
 func captureSlog(t *testing.T, fn func()) *sliceHandler {
 	t.Helper()
 	prev := slog.Default()
@@ -82,8 +74,6 @@ func captureSlog(t *testing.T, fn func()) *sliceHandler {
 	fn()
 	return h
 }
-
-// --- applyToolsAllowlist unit tests -----------------------------------------
 
 func TestApplyToolsAllowlist_EmptyPreservesAll(t *testing.T) {
 	cases := []struct {
@@ -124,7 +114,6 @@ func TestApplyToolsAllowlist_SubsetRemovesOthers(t *testing.T) {
 	if got := registeredSorted(r); !equalStrings(got, want) {
 		t.Fatalf("tools after subset allowlist: got %v, want %v", got, want)
 	}
-	// A pure subset must not warn or error.
 	if len(h.records) != 0 {
 		t.Fatalf("expected no log output for valid subset, got %v", h.levels())
 	}
@@ -137,13 +126,11 @@ func TestApplyToolsAllowlist_UnknownNameWarnsButDoesNotRemove(t *testing.T) {
 		applyToolsAllowlist(r, []string{"exec", "no_such_tool"}, "tester")
 	})
 
-	// "exec" matched, so filtering proceeds: only exec survives.
 	want := []string{"exec"}
 	if got := registeredSorted(r); !equalStrings(got, want) {
 		t.Fatalf("tools after allowlist with unknown name: got %v, want %v", got, want)
 	}
 
-	// Exactly one WARN (never an error) must mention the unknown tool.
 	if len(h.records) != 1 || h.records[0].Level != slog.LevelWarn {
 		t.Fatalf("expected exactly one WARN record, got %v", h.levels())
 	}
@@ -175,13 +162,9 @@ func TestApplyToolsAllowlist_NoIntersectionKeepsAllAndErrors(t *testing.T) {
 }
 
 func TestApplyToolsAllowlist_NilRegistryIsNoop(t *testing.T) {
-	// Must not panic.
 	applyToolsAllowlist(nil, []string{"exec"}, "tester")
 }
 
-// --- wiring in NewAgentInstance ---------------------------------------------
-
-// newAgentInstanceTestConfig builds a minimal valid config for NewAgentInstance.
 func newAgentInstanceTestConfig(t *testing.T) *config.Config {
 	t.Helper()
 	cfg := config.DefaultConfig()
@@ -213,7 +196,6 @@ func TestNewAgentInstance_ToolsAllowlistNilKeepsAll(t *testing.T) {
 func TestNewAgentInstance_ToolsAllowlistSubset(t *testing.T) {
 	cfg := newAgentInstanceTestConfig(t)
 
-	// Baseline: which names exist without a filter.
 	base := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
 	if _, ok := base.Tools.Get("exec"); !ok {
 		t.Fatal("baseline registry must contain exec")
@@ -261,10 +243,6 @@ func TestNewAgentInstance_ToolsAllowlistNoIntersectionKeepsAll(t *testing.T) {
 	}
 }
 
-// --- update_memory wiring ---------------------------------------------------
-
-// memoryLines returns content of exactly n lines (the trailing newline is a
-// terminator, not a line), for behavioural update_memory probes.
 func memoryLines(n int) string {
 	return strings.Repeat("line\n", n)
 }
@@ -277,16 +255,11 @@ func TestNewAgentInstance_RegistersUpdateMemoryTool(t *testing.T) {
 	if !ok {
 		t.Fatalf("update_memory not registered, have %v", agent.Tools.List())
 	}
-	// The default config resolves to the 500-line cap, which the description
-	// must surface so the model knows its budget.
 	if !strings.Contains(tool.Description(), "500 lines") {
 		t.Errorf("update_memory description does not mention the 500-line cap: %q", tool.Description())
 	}
 }
 
-// TestNewAgentInstance_MemoryMaxLinesFallback probes the registered tool
-// behaviourally (maxLines is unexported): a non-positive config value must be
-// resolved to the 500-line default, and a configured cap must be honoured.
 func TestNewAgentInstance_MemoryMaxLinesFallback(t *testing.T) {
 	ctx := context.Background()
 
@@ -295,7 +268,6 @@ func TestNewAgentInstance_MemoryMaxLinesFallback(t *testing.T) {
 		cfg.Agents.Defaults.MemoryMaxLines = 0
 		agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
 
-		// 501 rejected AND 500 accepted pins the resolved cap to exactly 500.
 		over := agent.Tools.Execute(ctx, "update_memory", map[string]interface{}{
 			"content": memoryLines(501), "mode": "replace",
 		})
@@ -330,10 +302,6 @@ func TestNewAgentInstance_MemoryMaxLinesFallback(t *testing.T) {
 	})
 }
 
-// TestNewAgentInstance_MemoryToolRespectsAllowlist: the allowlist pass runs
-// after all default registrations, so update_memory is subject to the same
-// per-agent `tools:` filter as every other core tool — a read-only agent can
-// be denied it by name, and naming it alone is a valid allowlist.
 func TestNewAgentInstance_MemoryToolRespectsAllowlist(t *testing.T) {
 	cfg := newAgentInstanceTestConfig(t)
 

@@ -28,7 +28,6 @@ export function useChatFilters(allSessions: ChatSession[], options?: { includeEm
   const includeEmpty = options?.includeEmpty ?? false
 
   const filteredSessions = useMemo(() => {
-    // Defensive: drop sessions with invalid dates
     let list = allSessions.filter((s) => {
       const d = safeDate(s.updated)
       return d !== null
@@ -64,7 +63,7 @@ export function useChatFilters(allSessions: ChatSession[], options?: { includeEm
     const yesterdayStart = new Date(todayStart)
     yesterdayStart.setDate(yesterdayStart.getDate() - 1)
     const weekStart = new Date(todayStart)
-    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7)) // Monday
+    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7))
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
 
     for (const session of filteredSessions) {
@@ -100,7 +99,6 @@ export function useChatFilters(allSessions: ChatSession[], options?: { includeEm
       }
     }
 
-    // Order: today, yesterday, thisWeek, thisMonth, then month keys desc
     const order = ['today', 'yesterday', 'thisWeek', 'thisMonth']
     const result: TimeGroup[] = []
 

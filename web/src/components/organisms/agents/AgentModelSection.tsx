@@ -15,23 +15,8 @@ import { SettingsSection } from '../../molecules/SettingsSection'
 import { StringListEditor } from '../../molecules/StringListEditor'
 import { TemperatureSlider } from '../../molecules/TemperatureSlider'
 
-/**
- * `tab=model` — model and reasoning (spec §4.4).
- *
- * Two sections, `Model` (primary + fallbacks) and `Reasoning` (thinking level
- * + temperature). Both keep the existing write semantics:
- * - `model` is written as an object (`{ ...agent.model, primary }`) because the
- *   wire type is `string | { primary, fallbacks }` and the fallbacks must not
- *   be dropped when only the primary changes;
- * - an empty thinking level writes `undefined` (the `''` sentinel means
- *   "inherit", same as the TUI selector and `lib/thinkingLevel.ts`);
- * - `temperature` is `undefined` when inherited — the slider reset goes back to
- *   "no value", NOT to 0.7, because 0.7 is only the display default.
- */
-
 type Props = {
   agent: EditableAgentConfig
-  /** Position in `agents.list` — paths are positional. */
   index: number
 }
 
@@ -47,7 +32,6 @@ export function AgentModelSection({ agent, index }: Props) {
     isLoadingModels,
   } = useSettings()
 
-  /** `agents.defaults.model` — what an unset primary inherits. */
   const defaultsModel = getDefaultModel(draftConfig)
 
   const path = (field: string) => `agents.list.${index}.${field}`
@@ -57,8 +41,6 @@ export function AgentModelSection({ agent, index }: Props) {
   const primary = getAgentModelPrimary(agent.model)
   const emptyLabel = isLoadingModels ? t('settings.loading') : t('settings.noModels')
 
-  // `thinkingLevelOptions` puts "inherit" first with the '' sentinel (§4.4);
-  // SegmentedControl takes the same list the old SelectInput did.
   const thinkingSegments = thinkingLevelOptions(t).map((option) => ({
     value: option.value,
     label: option.label,

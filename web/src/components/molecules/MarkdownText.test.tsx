@@ -2,21 +2,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, mock, test } from '
 import { cleanup, render } from '@testing-library/react'
 import * as markdown from '../../lib/markdown'
 
-/**
- * MarkdownText parses the WHOLE message on every render unless the chunk memo
- * hits. These tests pin that behaviour down with two independent witnesses:
- *
- *  - `chunkScans`: `parseMarkdownTable` is called inside the chunk memo once
- *    per line that is not blank/heading/list, so its call count is an exact
- *    proxy for "the chunk computation ran". It must NOT grow when `content`
- *    is unchanged.
- *  - `childParses`: `DiffStat`/`FileDiffRow` call `parseDiffStat` /
- *    `parseFileDiffRow` in their render bodies (no memo of their own), so when
- *    the memo hits, React reuses the very same element objects and bails out
- *    of re-rendering that subtree — `childParses` must stay flat too.
- */
-
-// Captured before mock.module() runs so the wrapper can never call itself.
 const realParseMarkdownTable = markdown.parseMarkdownTable
 const realParseDiffStat = markdown.parseDiffStat
 const realParseFileDiffRow = markdown.parseFileDiffRow
@@ -24,8 +9,6 @@ const realParseFileDiffRow = markdown.parseFileDiffRow
 let chunkScans = 0
 let childParses = 0
 
-// Deferred import: resolved after mock.module() so the component picks the
-// instrumented markdown module up.
 let MarkdownText: typeof import('./MarkdownText').MarkdownText
 
 beforeAll(() => {
@@ -55,7 +38,6 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-/** Heading + list + blank line + code fence + plain paragraph. */
 const SMALL = '# Title **bold**\n\n- item `one`\n\n```ts\nconst x = 1\n```\n\nPlain *em* text.\n'
 
 const SMALL_HTML =
@@ -74,13 +56,11 @@ const SMALL_HTML =
   '<p class="text-sm leading-6 text-text-secondary whitespace-pre-wrap">Plain <em>em</em> text.</p>' +
   '</div>'
 
-/** Adds table + diff-stat + file-diff rows on top of SMALL. */
 const RICH =
   '# Title **bold**\n\n- item one\n- item `two`\n\n```ts\nconst x = 1\n```\n\n' +
   'Paragraph with [link](https://example.com) and *em*.\n\n' +
   '| a | b |\n| --- | --- |\n| 1 | 2 |\n\n3 changed files, +12 -4\n\nsrc/app.ts +5 -2\n'
 
-/** `parseMarkdownTable` calls for one full computation of RICH (see comment). */
 const RICH_SCANS = 7
 
 describe('MarkdownText — DOM output', () => {
@@ -103,7 +83,6 @@ describe('MarkdownText — DOM output', () => {
   test('renders tables, diff stats and file diff rows as before', () => {
     const { container } = render(<MarkdownText content={RICH} />)
 
-    // every non-blank, non-heading, non-list line produces a scan
     expect(chunkScans).toBe(RICH_SCANS)
 
     expect(container.querySelectorAll('h3').length).toBe(1)
@@ -135,9 +114,7 @@ describe('MarkdownText — chunk memoisation', () => {
       rerender(<MarkdownText content={RICH} />)
     }
 
-    // 30 extra renders of an unchanged message → still exactly ONE parse.
     expect(chunkScans).toBe(scansAfterFirst)
-    // …and React even skips re-rendering the per-line children.
     expect(childParses).toBe(childParsesAfterFirst)
     expect(container.textContent).toContain('3 Changed files')
   })
@@ -165,8 +142,6 @@ describe('MarkdownText — chunk memoisation', () => {
 
     expect(scansPerFullRender).toBe(1)
 
-    // Every distinct content value the typewriter can produce, ending with the
-    // complete message.
     const versions: string[] = []
     for (let end = 4; end < full.length; end += 3) versions.push(full.slice(0, end))
     versions.push(full)
@@ -176,15 +151,12 @@ describe('MarkdownText — chunk memoisation', () => {
     const { rerender, container } = render(<MarkdownText content={versions[0]} />)
     renders += 1
     for (const version of versions.slice(1)) {
-      // the typewriter tick itself…
       rerender(<MarkdownText content={version} />)
       renders += 1
-      // …plus an unrelated parent re-render with identical content.
       rerender(<MarkdownText content={version} />)
       renders += 1
     }
 
-    // 2 renders per version (-1 for the initial one) but only 1 parse per version.
     expect(renders).toBe(versions.length * 2 - 1)
     expect(chunkScans).toBe(versions.length * scansPerFullRender)
     expect(container.textContent).toBe(full)
@@ -202,8 +174,6 @@ describe('MarkdownText — chunk memoisation', () => {
     expect(chunkScans).toBe(scansAfterFirst)
     expect(container.innerHTML).toBe(htmlAfterFirst)
 
-    // 'a\n\n\n' trims down to the same markup as 'a' (the artifact newlines are
-    // dropped inside the memo, so no trailing blank spacer is emitted).
     rerender(<MarkdownText content={'a\n\n\n'} />)
     const trimmedHtml = container.innerHTML
     rerender(<MarkdownText content={'a'} />)

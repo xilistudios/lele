@@ -1,22 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-//
-// T8/T9/T10 tests for the MCP wiring:
-//   - sync: an agent whose workspace has an mcp.json gets the lazy discovery
-//     pair (list_mcp_tools + get_mcp_tool) in each session layer and a live
-//     manager; an agent without one gets neither.
-//   - reload: deleting the mcp.json drops the session layers and closes the
-//     manager exactly once (spy).
-//   - prompt: the "## MCP Servers" section renders name+description only and
-//     the initialContext cache is dropped ONLY when the server set changed.
-//   - shutdown: CloseMCPManagers is idempotent and Shutdown closes once.
-//
-// The bulk loader (load_mcp_tools) is no longer part of the wiring: every test
-// that cares about it asserts it is ABSENT.
-
 package agent
 
 import (
@@ -33,11 +14,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// --- harness ----------------------------------------------------------------
-
-// mcpSpy wraps a real mcp.Manager (so Servers() reflects the mcp.json on disk)
-// and counts Close calls. The inner manager may be nil for shutdown tests that
-// only need the close accounting.
 type mcpSpy struct {
 	inner  mcpManager
 	mu     sync.Mutex
@@ -79,9 +55,6 @@ func (s *mcpSpy) closeCount() int {
 	return s.closes
 }
 
-// mcpSpyRecorder replaces a manager set's factory so every manager created by
-// a sync pass is wrapped in a close spy. Must be attached before the sync
-// under test (the startup sync inside NewAgentLoop runs before this).
 type mcpSpyRecorder struct {
 	mu    sync.Mutex
 	spies []*mcpSpy
@@ -105,17 +78,9 @@ func (r *mcpSpyRecorder) all() []*mcpSpy {
 	return out
 }
 
-// newMCPTestLoop builds a production-wired AgentLoop (registry + tool
-// coordinator + startup MCP sync) isolated in a temp LELE_CONFIG_DIR, and
-// returns it with the agent workspace path (the agent layer root of mcp.json).
 func newMCPTestLoop(t *testing.T) (*AgentLoop, string) {
 	t.Helper()
 
-	// LELE_CONFIG_DIR must NOT be the workspace: the global layer lives at
-	// <LeleDir>/mcp.json, so sharing one directory would make every
-	// agent-layer mcp.json written by these tests also the global layer —
-	// and a test that moves to an "empty" workspace would still see the
-	// servers through global.
 	cfgDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", cfgDir)
 
@@ -134,8 +99,6 @@ func newMCPTestLoop(t *testing.T) (*AgentLoop, string) {
 	return NewAgentLoop(cfg, bus.NewMessageBus()), tmpDir
 }
 
-// writeAgentMCPJSON writes (or removes, with empty body) the agent-layer
-// mcp.json inside the workspace.
 func writeAgentMCPJSON(t *testing.T, workspace, body string) {
 	t.Helper()
 	path := filepath.Join(workspace, "mcp.json")
@@ -150,7 +113,6 @@ func writeAgentMCPJSON(t *testing.T, workspace, body string) {
 	}
 }
 
-// mcpTestAgent fetches the implicit "main" agent from the loop's registry.
 func mcpTestAgent(t *testing.T, al *AgentLoop) *AgentInstance {
 	t.Helper()
 	agent, ok := al.registry.GetAgent("main")
@@ -160,9 +122,6 @@ func mcpTestAgent(t *testing.T, al *AgentLoop) *AgentInstance {
 	return agent
 }
 
-// mcpTestCoordinator downcasts the loop's coordinator to the concrete type so
-// tests can reach the mcpManagers set (the interface deliberately doesn't
-// expose it).
 func mcpTestCoordinator(t *testing.T, al *AgentLoop) *toolCoordinatorImpl {
 	t.Helper()
 	tc, ok := al.toolCoordinator.(*toolCoordinatorImpl)
@@ -172,11 +131,6 @@ func mcpTestCoordinator(t *testing.T, al *AgentLoop) *toolCoordinatorImpl {
 	return tc
 }
 
-// mcpSessionTool returns the named tool a session is offered, failing the test
-// when the session does not have it. The MCP discovery tools live in a
-// per-session layer (tools.NewScopedRegistry over agent.Tools), never in
-// agent.Tools, so every test that runs a discovery tool has to go through
-// sessionTools.
 func mcpSessionTool(t *testing.T, tc *toolCoordinatorImpl, agent *AgentInstance, sessionKey, name string) tools.Tool {
 	t.Helper()
 	view := tc.sessionTools(agent, sessionKey)
@@ -187,8 +141,6 @@ func mcpSessionTool(t *testing.T, tc *toolCoordinatorImpl, agent *AgentInstance,
 	return tool
 }
 
-// mcpLoadTools runs get_mcp_tool through the session's own layer for the given
-// remote tool names of one server, failing the test on an error result.
 func mcpLoadTools(t *testing.T, tc *toolCoordinatorImpl, agent *AgentInstance, sessionKey, server string, names ...string) *tools.ToolResult {
 	t.Helper()
 	getTool := mcpSessionTool(t, tc, agent, sessionKey, tools.GetMCPToolName)
@@ -202,29 +154,18 @@ func mcpLoadTools(t *testing.T, tc *toolCoordinatorImpl, agent *AgentInstance, s
 	return res
 }
 
-// mcpCallableCounts counts the per-tool outcome markers of a get_mcp_tool
-// result: how many tools it reported as newly callable and how many were
-// already registered (idempotency, or a name collision the remote tool lost).
 func mcpCallableCounts(res *tools.ToolResult) (newly, already int) {
 	return strings.Count(res.ForLLM, "is now callable"),
 		strings.Count(res.ForLLM, "is already registered and callable")
 }
 
-// mcpSessionOffers reports whether a session is offered the named tool.
 func mcpSessionOffers(tc *toolCoordinatorImpl, agent *AgentInstance, sessionKey, name string) bool {
 	_, ok := tc.sessionTools(agent, sessionKey).Get(name)
 	return ok
 }
 
-// mcpDiscoveryToolNames returns the pair of lazy discovery tools every
-// MCP-enabled session layer must carry. A fresh slice per call: the fixture is
-// read (and sometimes appended to) by many tests, so it must not be shared.
 func mcpDiscoveryToolNames() []string { return []string{tools.ListMCPToolsName, tools.GetMCPToolName} }
 
-// mcpSectionOf extracts the "## MCP Servers" section of a prompt (up to the
-// next "---" separator). Returns "" when the section is absent. The heading
-// is matched as its own line (leading \n) because the discovery tools quote
-// "'## MCP Servers'" inline in their parameter descriptions and must not match.
 func mcpSectionOf(prompt string) string {
 	start := strings.Index(prompt, "\n## MCP Servers\n")
 	if start < 0 {
@@ -234,7 +175,7 @@ func mcpSectionOf(prompt string) string {
 			return ""
 		}
 	} else {
-		start++ // keep the heading itself, skip the newline
+		start++
 	}
 	rest := prompt[start:]
 	if end := strings.Index(rest, "\n\n---\n\n"); end >= 0 {
@@ -243,12 +184,6 @@ func mcpSectionOf(prompt string) string {
 	return rest
 }
 
-// --- T8: sync ---------------------------------------------------------------
-
-// TestMCPSync_RegistersDiscoveryToolsWhenServersConfigured pins the happy path:
-// an mcp.json in the agent workspace yields a live manager, both lazy discovery
-// tools in the session layer (and the bulk loader nowhere) and a "## MCP
-// Servers" prompt section.
 func TestMCPSync_RegistersDiscoveryToolsWhenServersConfigured(t *testing.T) {
 	al, workspace := newMCPTestLoop(t)
 	tc := mcpTestCoordinator(t, al)
@@ -262,15 +197,11 @@ func TestMCPSync_RegistersDiscoveryToolsWhenServersConfigured(t *testing.T) {
 
 	agent := mcpTestAgent(t, al)
 	baseCount := agent.Tools.Count()
-	// The base registry is shared by every chat of the agent: the discovery
-	// tools must NOT be there (that is what leaked MCP tools into other
-	// sessions) and neither must the retired bulk loader.
 	for _, name := range append([]string{tools.LoadMCPToolsName}, mcpDiscoveryToolNames()...) {
 		if _, ok := agent.Tools.Get(name); ok {
 			t.Errorf("%s must not be registered in the agent-wide registry, have %v", name, agent.Tools.List())
 		}
 	}
-	// They are offered per session, from a scoped layer over the base registry.
 	layer := tc.sessionTools(agent, "chat-a")
 	if !layer.IsScoped() {
 		t.Fatal("the session view must be a scoped layer while MCP servers are configured")
@@ -286,7 +217,6 @@ func TestMCPSync_RegistersDiscoveryToolsWhenServersConfigured(t *testing.T) {
 	if want := baseCount + len(mcpDiscoveryToolNames()); layer.Count() != want {
 		t.Errorf("session layer Count() = %d, want %d (base + the discovery pair)", layer.Count(), want)
 	}
-	// Built-in tools stay reachable through the layer.
 	if _, ok := layer.Get("read_file"); !ok {
 		t.Errorf("the session view must fall back to the agent registry, have %v", layer.List())
 	}
@@ -317,9 +247,6 @@ func TestMCPSync_RegistersDiscoveryToolsWhenServersConfigured(t *testing.T) {
 	}
 }
 
-// TestMCPSync_NoServersLeavesDiscoveryToolsUnregistered pins the negative path:
-// with no mcp.json anywhere neither discovery tool is registered (and the bulk
-// loader is gone too), no manager is kept and the prompt has no MCP section.
 func TestMCPSync_NoServersLeavesDiscoveryToolsUnregistered(t *testing.T) {
 	al, _ := newMCPTestLoop(t)
 	tc := mcpTestCoordinator(t, al)
@@ -334,8 +261,6 @@ func TestMCPSync_NoServersLeavesDiscoveryToolsUnregistered(t *testing.T) {
 			t.Errorf("%s must not be registered, have %v", name, agent.Tools.List())
 		}
 	}
-	// Without servers there is nothing to scope: the session view IS the base
-	// registry (no layer is allocated).
 	if got := tc.sessionTools(agent, "chat-a"); got != agent.Tools {
 		t.Error("with no MCP servers configured the session view must be the base registry")
 	}
@@ -345,8 +270,6 @@ func TestMCPSync_NoServersLeavesDiscoveryToolsUnregistered(t *testing.T) {
 	if sec := mcpSectionOf(agent.ContextBuilder.BuildSystemPrompt()); sec != "" {
 		t.Errorf("empty server list rendered a section: %q", sec)
 	}
-	// The bookkeeping manager created by the sync may have been created and
-	// closed immediately; it must never stay open.
 	for i, s := range rec.all() {
 		if s.closeCount() == 0 {
 			t.Errorf("spy %d was created but never closed (orphan)", i)
@@ -354,10 +277,6 @@ func TestMCPSync_NoServersLeavesDiscoveryToolsUnregistered(t *testing.T) {
 	}
 }
 
-// TestMCPSync_RemovingServersClosesManagerAndUnregistersDiscoveryTools is the
-// reload acceptance criterion: deleting the mcp.json on disk and re-syncing
-// must drop the session layers (discovery tools gone) and Close the manager
-// exactly once, and the prompt section must disappear with it.
 func TestMCPSync_RemovingServersClosesManagerAndUnregistersDiscoveryTools(t *testing.T) {
 	al, workspace := newMCPTestLoop(t)
 	tc := mcpTestCoordinator(t, al)
@@ -375,7 +294,6 @@ func TestMCPSync_RemovingServersClosesManagerAndUnregistersDiscoveryTools(t *tes
 			t.Fatalf("%s not offered after first sync, have %v", name, layer.List())
 		}
 	}
-	// Build once so the cache holds the section; the reload must drop it.
 	if mcpSectionOf(agent.ContextBuilder.BuildSystemPrompt()) == "" {
 		t.Fatal("prompt lacks ## MCP Servers before reload")
 	}
@@ -387,8 +305,6 @@ func TestMCPSync_RemovingServersClosesManagerAndUnregistersDiscoveryTools(t *tes
 	writeAgentMCPJSON(t, workspace, "")
 	tc.syncMCPTools()
 
-	// The retired manager takes every session layer with it: the discovery
-	// tools are gone and the session falls back to the (clean) base registry.
 	if got := tc.sessionTools(agent, "chat-a"); got != agent.Tools {
 		t.Error("the session layer must be dropped when its manager is retired")
 	}
@@ -407,18 +323,12 @@ func TestMCPSync_RemovingServersClosesManagerAndUnregistersDiscoveryTools(t *tes
 		t.Errorf("stale ## MCP Servers section survived the reload: %q", sec)
 	}
 
-	// A third sync must not close anything again (idempotent bookkeeping).
 	tc.syncMCPTools()
 	if got := spies[0].closeCount(); got != 1 {
 		t.Errorf("manager closed %d times after extra sync, want 1", got)
 	}
 }
 
-// --- T9: prompt section + cache invalidation --------------------------------
-
-// TestMCPServersSection covers both render rules: no section for an empty
-// list, and exactly one sorted name+description line per server (with the
-// list_mcp_tools → get_mcp_tool hint) when non-empty.
 func TestMCPServersSection(t *testing.T) {
 	cb := NewContextBuilder(t.TempDir())
 
@@ -458,8 +368,6 @@ func TestMCPServersSection(t *testing.T) {
 		if db > git {
 			t.Error("servers are not rendered sorted by name (db must precede git)")
 		}
-		// Names/descriptions only — never schemas (scoped to the section: the
-		// rest of the prompt legitimately talks about tool "parameters").
 		if sec := mcpSectionOf(prompt); sec == "" {
 			t.Fatal("MCP section not found for schema check")
 		} else if strings.Contains(sec, "inputSchema") || strings.Contains(sec, "parameters") {
@@ -468,12 +376,6 @@ func TestMCPServersSection(t *testing.T) {
 	})
 }
 
-// TestMCPServersSection_DiscoveryHintsMatchPermissions pins that the section
-// documents ONLY the discovery tools the agent can call: an agent whose
-// allowlist keeps list_mcp_tools alone must not be told to call get_mcp_tool
-// (and vice versa) — it would go looking for a tool that does not exist for it.
-// The server names and descriptions stay in every case: they are configuration,
-// not tools.
 func TestMCPServersSection_DiscoveryHintsMatchPermissions(t *testing.T) {
 	servers := []tools.MCPServerInfo{{Name: "git", Description: "Git tools", Layer: "agent"}}
 
@@ -507,9 +409,6 @@ func TestMCPServersSection_DiscoveryHintsMatchPermissions(t *testing.T) {
 	}
 }
 
-// TestPromptCacheInvalidation_MCPDiscovery pins the invalidation rule of
-// SetMCPDiscovery: the cached prompt is dropped when the permission pair
-// changes and kept when a sync repeats the same pair (reloads are frequent).
 func TestPromptCacheInvalidation_MCPDiscovery(t *testing.T) {
 	cb := NewContextBuilder(t.TempDir())
 	cb.SetMCPServers([]tools.MCPServerInfo{{Name: "git", Description: "Git tools"}})
@@ -531,9 +430,6 @@ func TestPromptCacheInvalidation_MCPDiscovery(t *testing.T) {
 	}
 }
 
-// TestPromptCacheInvalidation_MCPServers pins decision (b) from the plan: a
-// changed server set drops the cached initialContext (next build reflects it),
-// while a no-op set leaves the cache untouched (no needless prompt rebuild).
 func TestPromptCacheInvalidation_MCPServers(t *testing.T) {
 	cb := NewContextBuilder(t.TempDir())
 
@@ -542,7 +438,6 @@ func TestPromptCacheInvalidation_MCPServers(t *testing.T) {
 		t.Fatal("expected a populated initialContext cache after first build")
 	}
 
-	// Changed list => cache dropped, next build reflects the new server.
 	cb.SetMCPServers([]tools.MCPServerInfo{{Name: "demo", Description: "Demo", Layer: "agent"}})
 	if cb.initialContext != "" {
 		t.Fatal("SetMCPServers with a changed list did not drop the cache")
@@ -552,7 +447,6 @@ func TestPromptCacheInvalidation_MCPServers(t *testing.T) {
 		t.Error("rebuilt prompt does not reflect the new server list")
 	}
 
-	// Identical list => cache preserved (identity of the built prompt holds).
 	before := cb.initialContext
 	cb.SetMCPServers([]tools.MCPServerInfo{{Name: "demo", Description: "Demo", Layer: "agent"}})
 	if cb.initialContext == "" {
@@ -562,7 +456,6 @@ func TestPromptCacheInvalidation_MCPServers(t *testing.T) {
 		t.Error("no-op SetMCPServers changed the cached prompt")
 	}
 
-	// Description-only change counts as a change too.
 	cb.SetMCPServers([]tools.MCPServerInfo{{Name: "demo", Description: "Demo v2", Layer: "agent"}})
 	if cb.initialContext != "" {
 		t.Error("description change did not drop the cache")
@@ -572,8 +465,6 @@ func TestPromptCacheInvalidation_MCPServers(t *testing.T) {
 	}
 }
 
-// TestMCPServersEqual covers the set-comparison helper: order-insensitive but
-// sensitive to name, description and layer.
 func TestMCPServersEqual(t *testing.T) {
 	a := []tools.MCPServerInfo{
 		{Name: "git", Description: "Git", Layer: "agent"},
@@ -599,12 +490,6 @@ func TestMCPServersEqual(t *testing.T) {
 	}
 }
 
-// --- T10: shutdown ----------------------------------------------------------
-
-// TestMCPShutdown pins the teardown contract: Shutdown closes every live
-// manager exactly once, a second Shutdown (or a direct CloseMCPManagers call,
-// as the gateway's mcp-stop hook does) is a no-op, and errors never surface
-// from the drain.
 func TestMCPShutdown(t *testing.T) {
 	al, _ := newMCPTestLoop(t)
 	tc := mcpTestCoordinator(t, al)
@@ -622,7 +507,6 @@ func TestMCPShutdown(t *testing.T) {
 		t.Error("running must be false after Shutdown")
 	}
 
-	// Second Shutdown + the gateway hook path: both must find nothing left.
 	if err := al.Shutdown(context.Background()); err != nil {
 		t.Fatalf("second Shutdown() = %v, want nil", err)
 	}
@@ -634,8 +518,6 @@ func TestMCPShutdown(t *testing.T) {
 	}
 }
 
-// TestMCPShutdown_NilCoordinator is the belt for loops torn down before the
-// coordinator existed: CloseMCPManagers must be nil-safe, not panic.
 func TestMCPShutdown_NilCoordinator(t *testing.T) {
 	al := &AgentLoop{}
 	if err := al.CloseMCPManagers(); err != nil {
@@ -643,16 +525,6 @@ func TestMCPShutdown_NilCoordinator(t *testing.T) {
 	}
 }
 
-// --- N3: sync after teardown installs nothing -------------------------------
-
-// TestMCPSync_SyncAfterCloseMCPManagersInstallsNothing is the N3 regression:
-// the config watcher's Stop does NOT join its goroutine (pkg/config/
-// watcher.go), so a reload already in flight can legitimately reach
-// syncMCPTools AFTER services-stop ran CloseMCPManagers. The set's stopped
-// flag must turn such a late sync into a no-op: no manager may be installed
-// (nobody would ever close it) and the discovery tools must not be
-// (re)registered. Pre-fix (stopped check removed) the sync created a manager
-// and wired the tools — RED. The put-refusal belt is asserted in the same test.
 func TestMCPSync_SyncAfterCloseMCPManagersInstallsNothing(t *testing.T) {
 	al, workspace := newMCPTestLoop(t)
 	tc := mcpTestCoordinator(t, al)
@@ -660,12 +532,10 @@ func TestMCPSync_SyncAfterCloseMCPManagersInstallsNothing(t *testing.T) {
 	writeAgentMCPJSON(t, workspace,
 		`{"mcpServers": {"demo": {"command": "true", "description": "Demo server"}}}`)
 
-	// Teardown: gateway mcp-stop / AgentLoop.Shutdown → closeAll.
 	if err := al.CloseMCPManagers(); err != nil {
 		t.Fatalf("CloseMCPManagers(): %v", err)
 	}
 
-	// The late reload reaches the sync AFTER teardown.
 	tc.syncMCPTools()
 
 	if _, ok := tc.mcpManagers.get("main"); ok {
@@ -684,7 +554,6 @@ func TestMCPSync_SyncAfterCloseMCPManagersInstallsNothing(t *testing.T) {
 		t.Errorf("late sync must not feed a ## MCP Servers section: %q", sec)
 	}
 
-	// Belt: put() also refuses after teardown and closes the incoming manager.
 	spy := &mcpSpy{}
 	tc.mcpManagers.put("late", mcpManagerEntry{mgr: spy})
 	if _, ok := tc.mcpManagers.get("late"); ok {
@@ -694,7 +563,6 @@ func TestMCPSync_SyncAfterCloseMCPManagersInstallsNothing(t *testing.T) {
 		t.Errorf("refused manager closed %d times, want exactly 1", spy.closeCount())
 	}
 
-	// Teardown stays idempotent.
 	if err := al.CloseMCPManagers(); err != nil {
 		t.Fatalf("second CloseMCPManagers(): %v", err)
 	}

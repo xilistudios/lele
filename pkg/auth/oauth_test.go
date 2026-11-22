@@ -35,9 +35,6 @@ func TestBuildAuthorizeURL(t *testing.T) {
 		Scopes:     "openid profile",
 		Originator: "codex_cli_rs",
 		Port:       1455,
-		// Provider params are now declared explicitly on the config instead of
-		// being sniffed from the issuer URL. This hand-built config must list
-		// them itself (the presets do this for the real providers).
 		ExtraAuthParams: map[string]string{
 			"id_token_add_organizations": "true",
 			"codex_cli_simplified_flow":  "true",
@@ -438,36 +435,25 @@ func TestParseDeviceCodeResponseInvalidInterval(t *testing.T) {
 	}
 }
 
-// TestPresetExplicitFields pins the newly-added explicit metadata of all
-// presets. Each expected value is the literal equivalent of what the legacy
-// code derived from Issuer or hardcoded outright, so any change here is a
-// change in the wire behavior of a live flow and must be intentional.
-//
-// The per-case fields that used to be hardcoded for the two original presets
-// (CallbackPath, TokenRequestStyle, HTTPClient) keep their historical defaults
-// when left zero-valued, so the legacy cases stay assertions-identical while
-// the Claude preset can declare its genuine differences.
 func TestPresetExplicitFields(t *testing.T) {
 	tests := []struct {
-		name            string
-		cfg             OAuthProviderConfig
-		wantName        string
-		wantAuthorize   string
-		wantDeviceCode  string
-		wantDeviceToken string
-		wantVerify      string
-		wantLegacyCode  string
-		wantLegacyToken string
-		wantExtra       map[string]string
-		wantRefresh     string
-		// wantTokenURL/wantClientID/wantScopes are checked only when non-empty.
-		wantTokenURL  string
-		wantClientID  string
-		wantScopes    string
-		wantCallback  string // "" => "/auth/callback"
-		wantStyle     TokenRequestStyle
-		wantHasClient bool
-		// wantRequireRefreshToken is the V7 opt-in gate: only Claude sets it.
+		name                    string
+		cfg                     OAuthProviderConfig
+		wantName                string
+		wantAuthorize           string
+		wantDeviceCode          string
+		wantDeviceToken         string
+		wantVerify              string
+		wantLegacyCode          string
+		wantLegacyToken         string
+		wantExtra               map[string]string
+		wantRefresh             string
+		wantTokenURL            string
+		wantClientID            string
+		wantScopes              string
+		wantCallback            string
+		wantStyle               TokenRequestStyle
+		wantHasClient           bool
 		wantRequireRefreshToken bool
 	}{
 		{
@@ -491,13 +477,10 @@ func TestPresetExplicitFields(t *testing.T) {
 			cfg:           GoogleAntigravityOAuthConfig(),
 			wantName:      "google-antigravity",
 			wantAuthorize: "https://accounts.google.com/o/oauth2/v2/auth",
-			// Google has no device flow: the device fields stay at their zero value.
 			wantExtra: map[string]string{
 				"access_type": "offline",
 				"prompt":      "consent",
 			},
-			// No RefreshScopes override: google-antigravity refreshes with
-			// cfg.Scopes (the scopes it was originally granted with).
 			wantRefresh: "",
 		},
 		{
@@ -508,16 +491,13 @@ func TestPresetExplicitFields(t *testing.T) {
 			wantTokenURL:  "https://platform.claude.com/v1/oauth/token",
 			wantClientID:  "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
 			wantScopes:    "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
-			// Claude has no device flow either.
 			wantExtra: map[string]string{
 				"code": "true",
 			},
-			wantRefresh:   "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
-			wantCallback:  "/callback",
-			wantStyle:     TokenRequestJSON,
-			wantHasClient: true,
-			// V7: the complete-credential gate is opt-in and Claude is the only
-			// preset that opts in (openai/google-antigravity keep their behavior).
+			wantRefresh:             "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
+			wantCallback:            "/callback",
+			wantStyle:               TokenRequestJSON,
+			wantHasClient:           true,
 			wantRequireRefreshToken: true,
 		},
 	}
@@ -560,10 +540,6 @@ func TestPresetExplicitFields(t *testing.T) {
 			if tc.cfg.AuthHeaderStyle != TokenAuthBody {
 				t.Errorf("AuthHeaderStyle = %d, want %d", tc.cfg.AuthHeaderStyle, TokenAuthBody)
 			}
-			// Fields with no preset value yet must stay at their zero value so the
-			// consumers' documented fallbacks (RedirectURI from Port+CallbackPath,
-			// nil HTTPClient => http.DefaultClient) remain in charge. Claude is the
-			// first preset to set them, and it says so explicitly above.
 			if tc.cfg.RedirectURI != "" {
 				t.Errorf("RedirectURI = %q, want empty", tc.cfg.RedirectURI)
 			}
@@ -579,8 +555,6 @@ func TestPresetExplicitFields(t *testing.T) {
 			if tc.wantScopes != "" && tc.cfg.Scopes != tc.wantScopes {
 				t.Errorf("Scopes = %q, want %q", tc.cfg.Scopes, tc.wantScopes)
 			}
-			// V7 opt-in gate: must be false for openai/google-antigravity (their
-			// exchanges and goldens stay untouched) and true only for Claude.
 			if tc.cfg.RequireRefreshToken != tc.wantRequireRefreshToken {
 				t.Errorf("RequireRefreshToken = %v, want %v", tc.cfg.RequireRefreshToken, tc.wantRequireRefreshToken)
 			}
@@ -588,8 +562,6 @@ func TestPresetExplicitFields(t *testing.T) {
 	}
 }
 
-// wantCallbackPath resolves the per-case CallbackPath expectation: the shared
-// "/auth/callback" default for every preset that does not declare its own.
 func wantCallbackPath(perCase string) string {
 	if perCase == "" {
 		return "/auth/callback"
@@ -597,8 +569,6 @@ func wantCallbackPath(perCase string) string {
 	return perCase
 }
 
-// TestPresetLegacyFieldsPreserved guards the pre-existing fields of both presets:
-// appending new fields must not disturb what already worked.
 func TestPresetLegacyFieldsPreserved(t *testing.T) {
 	openai := OpenAIOAuthConfig()
 	openaiChecks := []struct {
@@ -655,15 +625,12 @@ func TestPresetLegacyFieldsPreserved(t *testing.T) {
 }
 
 func TestTokenRequestStyleZeroValues(t *testing.T) {
-	// Documents that the zero value of both enums is the current (legacy) behavior.
 	if TokenRequestFormURLEncoded != 0 {
 		t.Errorf("TokenRequestFormURLEncoded = %d, want 0", TokenRequestFormURLEncoded)
 	}
 	if TokenAuthBody != 0 {
 		t.Errorf("TokenAuthBody = %d, want 0", TokenAuthBody)
 	}
-	// A config that only sets the legacy fields must therefore keep using
-	// form-urlencoded bodies and client credentials in the body.
 	var legacy OAuthProviderConfig
 	if legacy.TokenRequestStyle != TokenRequestFormURLEncoded {
 		t.Errorf("zero-value TokenRequestStyle = %d, want form-urlencoded", legacy.TokenRequestStyle)
@@ -673,11 +640,6 @@ func TestTokenRequestStyleZeroValues(t *testing.T) {
 	}
 }
 
-// TestBuildAuthorizeURLPresetGolden pins the exact authorize URL produced for
-// each shipped preset. The expected strings were captured verbatim from the
-// pre-refactor implementation at c993e50e (same PKCE/state/redirect inputs), so
-// they are the parity contract for F0-T3: any drift in the explicit
-// AuthorizeURL/ExtraAuthParams/Originator wiring fails here.
 func TestBuildAuthorizeURLPresetGolden(t *testing.T) {
 	pkce := PKCECodes{CodeVerifier: "v", CodeChallenge: "CHALLENGE"}
 	const state = "STATE"
@@ -710,10 +672,6 @@ func TestBuildAuthorizeURLPresetGolden(t *testing.T) {
 	}
 }
 
-// TestBuildAuthorizeURLUsesExplicitAuthorizeURL verifies that a non-empty
-// AuthorizeURL is used verbatim instead of being derived from the issuer, and
-// that the query is exactly the base parameter set when no extra params or
-// originator are configured.
 func TestBuildAuthorizeURLUsesExplicitAuthorizeURL(t *testing.T) {
 	cfg := OAuthProviderConfig{
 		Issuer:       "https://example.com/whatever",
@@ -730,10 +688,6 @@ func TestBuildAuthorizeURLUsesExplicitAuthorizeURL(t *testing.T) {
 	}
 }
 
-// TestBuildAuthorizeURLLegacyFallback covers hand-built configs that leave
-// AuthorizeURL empty: the endpoint must be derived from the issuer exactly like
-// the pre-refactor code (Google => /auth, everything else => /oauth/authorize),
-// with the base parameter set intact and no extra parameters injected.
 func TestBuildAuthorizeURLLegacyFallback(t *testing.T) {
 	pkce := PKCECodes{CodeChallenge: "CHALLENGE"}
 
@@ -791,9 +745,6 @@ func TestBuildAuthorizeURLLegacyFallback(t *testing.T) {
 	}
 }
 
-// TestBuildAuthorizeURLExtraParamsAndOriginator verifies that ExtraAuthParams
-// are applied verbatim and that a non-empty Originator is added, while an empty
-// Originator adds nothing.
 func TestBuildAuthorizeURLExtraParamsAndOriginator(t *testing.T) {
 	cfg := OAuthProviderConfig{
 		AuthorizeURL: "https://example.com/authorize",
@@ -821,7 +772,6 @@ func TestBuildAuthorizeURLExtraParamsAndOriginator(t *testing.T) {
 		}
 	}
 
-	// Empty originator must not inject an `originator` param (no more "lele" default).
 	cfgNoOrigin := OAuthProviderConfig{AuthorizeURL: "https://example.com/authorize"}
 	got = buildAuthorizeURL(cfgNoOrigin, pkce, "STATE", "http://localhost:1/auth/callback")
 	parsed, err = url.Parse(got)
@@ -833,9 +783,6 @@ func TestBuildAuthorizeURLExtraParamsAndOriginator(t *testing.T) {
 	}
 }
 
-// TestCallbackPathAndRedirectOverride covers the pure helpers that LoginBrowser
-// uses to derive the loopback callback path and the redirect_uri, including the
-// explicit overrides.
 func TestCallbackPathAndRedirectOverride(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -875,12 +822,6 @@ func TestCallbackPathAndRedirectOverride(t *testing.T) {
 	}
 }
 
-// TestRefreshScope covers the pure scope-selection helper used by
-// RefreshAccessToken: an explicit RefreshScopes wins, otherwise the originally
-// granted Scopes are reused, and with both empty the scope parameter is omitted.
-// OmitRefreshScope wins over both and always means "omit the scope parameter";
-// this precedence is what TestRefreshScopeOmissionWinsOverScopes would assert,
-// so it lives in the table below instead of a duplicated test function.
 func TestRefreshScope(t *testing.T) {
 	tests := []struct {
 		name string
@@ -933,15 +874,6 @@ func TestRefreshScope(t *testing.T) {
 	}
 }
 
-// TestExchangeCodeForTokensProviderName pins the provider identity stored on the
-// credential: it is taken verbatim from cfg.Name (with the legacy "openai"
-// default for hand-built configs) and is never sniffed from TokenURL.
-//
-// The old code set provider = "google-antigravity" whenever TokenURL contained
-// the substring "googleapis.com", so every case below with that substring in the
-// URL would have been labelled google-antigravity before this change. The URLs
-// point at the local httptest server (which happens to expose that substring as
-// part of its path), so the test stays offline.
 func TestExchangeCodeForTokensProviderName(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -1003,10 +935,6 @@ func TestExchangeCodeForTokensProviderName(t *testing.T) {
 	}
 }
 
-// TestRefreshAccessTokenScopeOnWire asserts what RefreshAccessToken actually puts
-// on the wire: the scope is resolved from the config (RefreshScopes, else the
-// originally granted Scopes) and omitted entirely when neither is set, instead of
-// the pre-existing hardcoded "openid profile email".
 func TestRefreshAccessTokenScopeOnWire(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1088,8 +1016,6 @@ func TestRefreshAccessTokenScopeOnWire(t *testing.T) {
 				t.Errorf("scope on the wire = %q, want %q", got, tc.wantScope)
 			}
 
-			// The refresh response carries no refresh_token: the credential's
-			// existing one must survive the refresh.
 			if refreshed.RefreshToken != "rt" {
 				t.Errorf("refreshed.RefreshToken = %q, want %q (preserved)", refreshed.RefreshToken, "rt")
 			}
@@ -1100,10 +1026,6 @@ func TestRefreshAccessTokenScopeOnWire(t *testing.T) {
 	}
 }
 
-// TestRefreshAccessTokenRetriesWithoutScopeOnInvalidScope is the wire-level guard
-// for the invalid_scope retry (mandatory mutation #2). A scoped refresh rejected
-// with invalid_scope is retried exactly once with the `scope` field deleted, and
-// the successful retry's ROTATED refresh token is what the caller receives.
 func TestRefreshAccessTokenRetriesWithoutScopeOnInvalidScope(t *testing.T) {
 	var hits int
 	var wireBodies []string
@@ -1132,8 +1054,6 @@ func TestRefreshAccessTokenRetriesWithoutScopeOnInvalidScope(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Built by hand on purpose: this test drives the retry wire without the
-	// complete-credential gate (ClaudeOAuthConfig() sets RequireRefreshToken).
 	cfg := OAuthProviderConfig{
 		Name:              "anthropic",
 		ClientID:          "cid",
@@ -1177,12 +1097,6 @@ func TestRefreshAccessTokenRetriesWithoutScopeOnInvalidScope(t *testing.T) {
 	}
 }
 
-// TestRefreshAccessTokenRetryFailureKeepsBothDiagnostics is the jcode-parity
-// guard for FIX 3: when the scoped refresh is rejected as invalid_scope AND the
-// unscoped fallback fails too, the returned error must keep BOTH response bodies
-// (jcode: "fallback without scope failed: …; scoped refresh error: …").
-// Reporting only the retry body hides the reason the scope was rejected, which
-// is the diagnostic the user actually needs.
 func TestRefreshAccessTokenRetryFailureKeepsBothDiagnostics(t *testing.T) {
 	const (
 		scopedBody   = `{"error":"invalid_scope","error_description":"scoped attempt rejected"}`
@@ -1240,9 +1154,6 @@ func TestRefreshAccessTokenRetryFailureKeepsBothDiagnostics(t *testing.T) {
 	}
 }
 
-// TestRefreshAccessTokenNonInvalidScopeErrorDoesNotRetry pins that the retry is
-// gated on the invalid_scope markers: any other 400 (e.g. invalid_grant) is
-// surfaced after a single attempt.
 func TestRefreshAccessTokenNonInvalidScopeErrorDoesNotRetry(t *testing.T) {
 	var hits int
 
@@ -1283,9 +1194,6 @@ func TestRefreshAccessTokenNonInvalidScopeErrorDoesNotRetry(t *testing.T) {
 	}
 }
 
-// TestRefreshAccessTokenInvalidScopeWithoutScopeSentNoRetry pins that a refresh
-// which sent no scope has nothing to fall back to: the invalid_scope response is
-// returned as-is after a single attempt.
 func TestRefreshAccessTokenInvalidScopeWithoutScopeSentNoRetry(t *testing.T) {
 	var hits int
 	var wireBodies []string
@@ -1325,9 +1233,6 @@ func TestRefreshAccessTokenInvalidScopeWithoutScopeSentNoRetry(t *testing.T) {
 	}
 }
 
-// TestTokenRequestEncoding exercises tokenRequest in isolation (no sockets) for
-// the four combinations of TokenRequestStyle × AuthHeaderStyle, and pins that
-// the input params map is never mutated.
 func TestTokenRequestEncoding(t *testing.T) {
 	params := url.Values{
 		"a":             {"1"},
@@ -1424,7 +1329,6 @@ func TestTokenRequestEncoding(t *testing.T) {
 		}
 	})
 
-	// None of the four calls above may have mutated the caller's map.
 	if got, ok := params["client_secret"]; !ok || len(got) != 1 || got[0] != "s3cr3t" {
 		t.Errorf("params was mutated: client_secret = %v", params["client_secret"])
 	}
@@ -1433,8 +1337,6 @@ func TestTokenRequestEncoding(t *testing.T) {
 	}
 }
 
-// TestDoTokenRequestWire checks the four style combinations on the wire (not
-// only in the helper): method, path, Content-Type, Authorization and raw body.
 func TestDoTokenRequestWire(t *testing.T) {
 	type capture struct {
 		method        string
@@ -1564,8 +1466,6 @@ func TestDoTokenRequestWire(t *testing.T) {
 	}
 }
 
-// stubTransport is an http.RoundTripper that records the requests it sees and
-// answers with a canned token response, without touching the network.
 type stubTransport struct {
 	mu    sync.Mutex
 	calls int
@@ -1585,9 +1485,6 @@ func (s *stubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-// TestOAuthHTTPClientUsesConfig proves the token-endpoint call goes through
-// cfg.HTTPClient: the issuer points at 127.0.0.1:1 (an impossible connection),
-// yet exchangeCodeForTokens succeeds because the stub transport answers instead.
 func TestOAuthHTTPClientUsesConfig(t *testing.T) {
 	stub := &stubTransport{}
 	cfg := OAuthProviderConfig{
@@ -1627,9 +1524,6 @@ func TestOAuthHTTPClientUsesConfig(t *testing.T) {
 	}
 }
 
-// TestFormBodyParityWithPostForm pins the zero-style wire parity: the request
-// built by doTokenRequest must be indistinguishable from one produced by
-// http.PostForm (method, Content-Type, Content-Length and body).
 func TestFormBodyParityWithPostForm(t *testing.T) {
 	type capture struct {
 		method        string
@@ -1695,12 +1589,6 @@ func TestFormBodyParityWithPostForm(t *testing.T) {
 	}
 }
 
-// TestRefreshAccessTokenOmitsScopeForGooglePreset is the wire-level falsifier for
-// the google-antigravity refresh: unlike the historical hardcoded
-// scope="openid profile email" (which openai must keep), the Google preset must
-// send no scope key at all on the refresh_token request (RFC 6749 §6; jcode
-// omits it too). The assertion parses the real POST body with url.ParseQuery
-// instead of substring-matching it.
 func TestRefreshAccessTokenOmitsScopeForGooglePreset(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1781,9 +1669,6 @@ func TestRefreshAccessTokenOmitsScopeForGooglePreset(t *testing.T) {
 	}
 }
 
-// TestPresetsRefreshScopePolicy pins the refresh-scope policy encoded in both
-// presets: google-antigravity omits the parameter, while openai keeps the
-// historical "openid profile email" (byte-for-byte what c993e50e hardcoded).
 func TestPresetsRefreshScopePolicy(t *testing.T) {
 	google := GoogleAntigravityOAuthConfig()
 	if !google.OmitRefreshScope {
@@ -1801,8 +1686,6 @@ func TestPresetsRefreshScopePolicy(t *testing.T) {
 		t.Errorf("OpenAIOAuthConfig().RefreshScopes = %q, want %q", openai.RefreshScopes, "openid profile email")
 	}
 
-	// Claude refreshes with an EXPLICIT scope list that drops the
-	// API-key-minting scope: the refresh endpoint must never be able to mint one.
 	claude := ClaudeOAuthConfig()
 	if claude.OmitRefreshScope {
 		t.Errorf("ClaudeOAuthConfig().OmitRefreshScope = true, want false")
@@ -1812,12 +1695,6 @@ func TestPresetsRefreshScopePolicy(t *testing.T) {
 	}
 }
 
-// TestTokenRequestJSONMultiValueKeepsFirst pins the documented semantics of the
-// JSON encoder for a key with several values: a flat JSON object cannot express
-// a list, so the FIRST value wins (see tokenRequest's doc comment). Every other
-// test uses single-valued params, so changing "first" to "last" in the encoder
-// would otherwise go unnoticed. No preset uses TokenRequestJSON today, which is
-// exactly why this arbitrary rule must stay pinned by a test.
 func TestTokenRequestJSONMultiValueKeepsFirst(t *testing.T) {
 	params := url.Values{
 		"grant_type": {"refresh_token", "authorization_code"},
@@ -1849,25 +1726,11 @@ func TestTokenRequestJSONMultiValueKeepsFirst(t *testing.T) {
 		t.Errorf("scope = %q, want the first value %q", got["scope"], "a")
 	}
 
-	// The caller's params map is cloned by the encoder and must stay intact.
 	if len(params["grant_type"]) != 2 {
 		t.Errorf("params were mutated: grant_type = %v, want [refresh_token authorization_code]", params["grant_type"])
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Proprietary OpenAI device flow (LoginDeviceCode / pollDeviceCode)
-//
-// These tests exercise the flow end to end without touching the network: every
-// endpoint is served by an httptest.Server and the only client handed to the
-// flow wraps that server's own transport.
-// ---------------------------------------------------------------------------
-
-// countingTransport wraps a RoundTripper and counts the requests that pass
-// through it. It proves the proprietary device flow goes through cfg.HTTPClient
-// instead of http.DefaultClient: a request that bypassed cfg.HTTPClient would
-// not be counted (and would leave the process, since the presets point at the
-// real OpenAI issuer).
 type countingTransport struct {
 	inner http.RoundTripper
 	mu    sync.Mutex
@@ -1887,18 +1750,14 @@ func (c *countingTransport) count() int {
 	return c.calls
 }
 
-// deviceFlowServer is an httptest.Server serving the three endpoints the
-// proprietary flow talks to, recording every request it receives.
 type deviceFlowServer struct {
 	*httptest.Server
 
-	// Canned responses. Tests set these before calling the flow (no request is
-	// in flight yet), so they need no locking.
-	deviceStatus int    // usercode endpoint status (default 200)
-	deviceBody   string // usercode endpoint body
-	pollStatuses []int  // one status consumed per poll (default 200)
-	tokenStatus  int    // token endpoint status (default 200)
-	tokenBody    string // token endpoint body
+	deviceStatus int
+	deviceBody   string
+	pollStatuses []int
+	tokenStatus  int
+	tokenBody    string
 
 	mu sync.Mutex
 
@@ -1921,10 +1780,6 @@ type deviceFlowServer struct {
 	tokenForm url.Values
 }
 
-// deviceFlowDeviceCodeBody is the usercode response: the shape OpenAI's real
-// endpoint returns (device_auth_id + user_code + interval, the latter as a
-// string in the wild). device_code is included on purpose so the "the device
-// code is never printed" assertion is meaningful.
 const deviceFlowDeviceCodeBody = `{"device_auth_id":"dc-1","device_code":"dc-1","user_code":"USER-1","expires_in":900,"interval":1}`
 
 func newDeviceFlowServer(t *testing.T) *deviceFlowServer {
@@ -2002,17 +1857,11 @@ func newDeviceFlowServer(t *testing.T) *deviceFlowServer {
 	return s
 }
 
-// client returns an *http.Client that reaches this server through a counting
-// transport, plus the counter itself.
 func (s *deviceFlowServer) client() (*http.Client, *countingTransport) {
 	counter := &countingTransport{inner: s.Client().Transport}
 	return &http.Client{Transport: counter}, counter
 }
 
-// openAIConfig is the real openai preset with every endpoint the proprietary
-// flow can use pointed at this server, so nothing can escape to the network.
-// Issuer is left untouched (https://auth.openai.com): it is still used for the
-// deviceauth callback redirect and must not trigger any request.
 func (s *deviceFlowServer) openAIConfig(client *http.Client) OAuthProviderConfig {
 	cfg := OpenAIOAuthConfig()
 	cfg.LegacyDeviceCodeURL = s.URL + "/api/accounts/deviceauth/usercode"
@@ -2023,7 +1872,6 @@ func (s *deviceFlowServer) openAIConfig(client *http.Client) OAuthProviderConfig
 	return cfg
 }
 
-// snapshot returns the recorded request data under the server lock.
 func (s *deviceFlowServer) snapshot() (deviceHits int, deviceVerb, deviceCT, deviceReqBody string,
 	pollHits int, pollVerb, pollCT, pollReqBody string,
 	tokenHits int, tokenVerb, tokenCT string, tokenForm url.Values) {
@@ -2034,8 +1882,6 @@ func (s *deviceFlowServer) snapshot() (deviceHits int, deviceVerb, deviceCT, dev
 		s.tokenHits, s.tokenVerb, s.tokenCT, s.tokenForm
 }
 
-// captureDeviceFlowOut swaps the printed-text seam for a buffer and restores it
-// when the test finishes.
 func captureDeviceFlowOut(t *testing.T) *bytes.Buffer {
 	t.Helper()
 
@@ -2046,10 +1892,6 @@ func captureDeviceFlowOut(t *testing.T) *bytes.Buffer {
 	return buf
 }
 
-// TestLoginDeviceCodeProprietaryRequestParity pins the wire format and the user
-// facing text of the proprietary OpenAI device flow against the openai preset:
-// JSON bodies, exact Content-Type, form-encoded exchange, the issuer-derived
-// callback redirect, and byte-identical instructions.
 func TestLoginDeviceCodeProprietaryRequestParity(t *testing.T) {
 	s := newDeviceFlowServer(t)
 	client, counter := s.client()
@@ -2066,7 +1908,6 @@ func TestLoginDeviceCodeProprietaryRequestParity(t *testing.T) {
 		pollHits, pollVerb, pollCT, pollReqBody,
 		tokenHits, tokenVerb, tokenCT, tokenForm := s.snapshot()
 
-	// --- request 1: device code (proprietary usercode endpoint) ------------
 	if deviceHits != 1 {
 		t.Errorf("usercode endpoint hits = %d, want 1", deviceHits)
 	}
@@ -2076,13 +1917,11 @@ func TestLoginDeviceCodeProprietaryRequestParity(t *testing.T) {
 	if deviceCT != "application/json" {
 		t.Errorf("usercode Content-Type = %q, want exactly application/json", deviceCT)
 	}
-	// Built from json.Marshal of a single-entry map: key order is deterministic.
 	const wantDeviceBody = `{"client_id":"app_EMoamEEZ73f0CkXaXp7hrann"}`
 	if deviceReqBody != wantDeviceBody {
 		t.Errorf("usercode body = %q, want %q", deviceReqBody, wantDeviceBody)
 	}
 
-	// --- request 2: poll -----------------------------------------------
 	if pollHits != 1 {
 		t.Errorf("poll endpoint hits = %d, want 1", pollHits)
 	}
@@ -2097,7 +1936,6 @@ func TestLoginDeviceCodeProprietaryRequestParity(t *testing.T) {
 		t.Errorf("poll body = %q, want %q", pollReqBody, wantPollBody)
 	}
 
-	// --- request 3: code exchange (form-encoded, TokenURL override) -------
 	if tokenHits != 1 {
 		t.Errorf("token endpoint hits = %d, want 1", tokenHits)
 	}
@@ -2112,16 +1950,13 @@ func TestLoginDeviceCodeProprietaryRequestParity(t *testing.T) {
 		"code":          "ac-1",
 		"code_verifier": "cv",
 		"client_id":     cfg.ClientID,
-		// The proprietary flow keeps its issuer-derived server callback.
-		"redirect_uri": "https://auth.openai.com/deviceauth/callback",
+		"redirect_uri":  "https://auth.openai.com/deviceauth/callback",
 	} {
 		if got := tokenForm.Get(field); got != want {
 			t.Errorf("token form %s = %q, want %q", field, got, want)
 		}
 	}
 
-	// --- printed instructions -------------------------------------------
-	// The literal format string the flow used before the seam existed.
 	wantText := fmt.Sprintf(
 		"\nTo authenticate, open this URL in your browser:\n\n  %s\n\nThen enter this code: %s\n\nWaiting for authentication...\n",
 		s.URL+"/codex/device", "USER-1",
@@ -2133,7 +1968,6 @@ func TestLoginDeviceCodeProprietaryRequestParity(t *testing.T) {
 		t.Errorf("printed text leaks the device auth id: %q", out.String())
 	}
 
-	// --- credential and client -----------------------------------------
 	if cred.AccessToken != "at-openai" {
 		t.Errorf("AccessToken = %q, want %q", cred.AccessToken, "at-openai")
 	}
@@ -2145,10 +1979,6 @@ func TestLoginDeviceCodeProprietaryRequestParity(t *testing.T) {
 	}
 }
 
-// TestLoginDeviceCodeUsesExplicitLegacyURLs proves the explicit Legacy* fields
-// are honoured: the issuer is an RFC 2606 name that can never resolve, so a
-// flow that ignored the fields would fail with a network error instead of
-// completing.
 func TestLoginDeviceCodeUsesExplicitLegacyURLs(t *testing.T) {
 	s := newDeviceFlowServer(t)
 	client, counter := s.client()
@@ -2183,9 +2013,6 @@ func TestLoginDeviceCodeUsesExplicitLegacyURLs(t *testing.T) {
 	}
 }
 
-// TestLoginDeviceCodeFallsBackToIssuerDerivedURLs pins the legacy derivation:
-// with the explicit fields empty the three endpoints must resolve exactly as
-// they did before they existed.
 func TestLoginDeviceCodeFallsBackToIssuerDerivedURLs(t *testing.T) {
 	s := newDeviceFlowServer(t)
 	client, counter := s.client()
@@ -2234,8 +2061,6 @@ func TestLoginDeviceCodeFallsBackToIssuerDerivedURLs(t *testing.T) {
 	}
 }
 
-// TestLoginDeviceCodePollKeepsPollingOnNon200 pins the "pending" semantics: a
-// non-200 poll is not fatal, the flow polls again and succeeds.
 func TestLoginDeviceCodePollKeepsPollingOnNon200(t *testing.T) {
 	s := newDeviceFlowServer(t)
 	client, counter := s.client()
@@ -2260,14 +2085,11 @@ func TestLoginDeviceCodePollKeepsPollingOnNon200(t *testing.T) {
 	if cred.AccessToken != "at-openai" {
 		t.Errorf("AccessToken = %q, want %q", cred.AccessToken, "at-openai")
 	}
-	// 1 usercode + 2 polls + 1 exchange.
 	if got := counter.count(); got != 4 {
 		t.Errorf("cfg.HTTPClient saw %d requests, want 4 (1 usercode + 2 polls + 1 exchange)", got)
 	}
 }
 
-// TestLoginDeviceCodeDeviceCodeRequestFailure pins the non-200 handling of the
-// usercode request: it must fail before any poll and print nothing.
 func TestLoginDeviceCodeDeviceCodeRequestFailure(t *testing.T) {
 	s := newDeviceFlowServer(t)
 	client, counter := s.client()
@@ -2304,8 +2126,6 @@ func TestLoginDeviceCodeDeviceCodeRequestFailure(t *testing.T) {
 	}
 }
 
-// TestLoginDeviceCodeDeviceCodeResponseParseFailure pins that an unusable 200
-// body (here user_code is not a string) aborts before any poll.
 func TestLoginDeviceCodeDeviceCodeResponseParseFailure(t *testing.T) {
 	s := newDeviceFlowServer(t)
 	client, counter := s.client()
@@ -2338,10 +2158,6 @@ func TestLoginDeviceCodeDeviceCodeResponseParseFailure(t *testing.T) {
 	}
 }
 
-// TestClaudeExchangeSendsStateAndCodeVerifier is the wire contract of the Claude
-// token exchange: the JSON body echoes the PKCE verifier as `state` alongside the
-// regular authorization_code grant. This is mandatory mutation #1 of F1-T02 —
-// deleting the `p.State != ""` branch turns this test red.
 func TestClaudeExchangeSendsStateAndCodeVerifier(t *testing.T) {
 	var mu sync.Mutex
 	var gotContentType string
@@ -2413,9 +2229,6 @@ func TestClaudeExchangeSendsStateAndCodeVerifier(t *testing.T) {
 	}
 }
 
-// TestExchangeCodeForTokensOmitsStateByDefault proves the 4-argument wrapper —
-// the only entry point OpenAI/Google use — never puts `state` on the wire, so
-// their exchange stays byte-identical to the pre-Claude implementation.
 func TestExchangeCodeForTokensOmitsStateByDefault(t *testing.T) {
 	var mu sync.Mutex
 	var gotBody string
@@ -2470,8 +2283,6 @@ func TestExchangeCodeForTokensOmitsStateByDefault(t *testing.T) {
 	}
 }
 
-// TestBindCallbackListenerEphemeralPort covers Port == 0: the OS assigns the
-// port and the advertised redirect carries the real one.
 func TestBindCallbackListenerEphemeralPort(t *testing.T) {
 	cfg := OAuthProviderConfig{Port: 0, CallbackPath: "/callback"}
 
@@ -2497,10 +2308,6 @@ func TestBindCallbackListenerEphemeralPort(t *testing.T) {
 	}
 }
 
-// TestRedirectURIForListener proves the bind-then-derive reorder is a no-op for
-// a correctly fixed port (it equals oauthRedirectURI) and that an explicit
-// cfg.RedirectURI keeps winning verbatim. The port is never hardcoded: it comes
-// from the listener the OS just handed us, so the test cannot be flaky.
 func TestRedirectURIForListener(t *testing.T) {
 	cfg := OAuthProviderConfig{Port: 0, CallbackPath: "/callback"}
 
@@ -2511,8 +2318,6 @@ func TestRedirectURIForListener(t *testing.T) {
 	defer ln.Close()
 
 	port := ln.Addr().(*net.TCPAddr).Port
-	// Pretend the config asked for the port the OS assigned: for a fixed port the
-	// bound port and cfg.Port are equal, which is exactly the parity condition.
 	cfg.Port = port
 
 	want := fmt.Sprintf("http://localhost:%d/callback", port)
@@ -2557,10 +2362,6 @@ func TestLooksLikeCloudflareChallenge(t *testing.T) {
 	}
 }
 
-// TestExchangeCloudflare403Message covers both sides of the 403 branch: a
-// Cloudflare interstitial gets the actionable message (and, crucially, it is
-// produced BEFORE the generic "token exchange failed" error), while a plain 403
-// with an OAuth error document keeps the historical text.
 func TestExchangeCloudflare403Message(t *testing.T) {
 	challenge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -2620,10 +2421,6 @@ func TestExchangeCloudflare403Message(t *testing.T) {
 	})
 }
 
-// cloudflareChallengeServer is the 403 + Cloudflare-interstitial endpoint used
-// by the provider-aware wording tests below. It reuses the exact response shape
-// of TestExchangeCloudflare403Message so the 403 branch is driven for real
-// through exchangeCodeForTokensWithParams instead of a hand-rolled harness.
 func cloudflareChallengeServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2635,13 +2432,6 @@ func cloudflareChallengeServer(t *testing.T) *httptest.Server {
 	return srv
 }
 
-// TestExchangeCloudflare403MessageUsesDisplayName pins the provider-aware
-// wording of the pre-flight error: the 403 branch belongs to a now
-// provider-generic exchange (Claude and Gemini Code Assist share it), so the
-// sentence must name the provider carried by the config instead of hardcoding
-// Anthropic/claude. The message body and the recovery command both follow
-// DisplayName; the mandatory mutation for this test is to hardcode the
-// historical `--provider claude` sentence again.
 func TestExchangeCloudflare403MessageUsesDisplayName(t *testing.T) {
 	cfg := OAuthProviderConfig{
 		Name:        "gemini",
@@ -2681,12 +2471,6 @@ func TestExchangeCloudflare403MessageUsesDisplayName(t *testing.T) {
 	}
 }
 
-// TestExchangeCloudflare403MessageDefaultWordingUnchanged is the byte-for-byte
-// compatibility guard for the same branch: a config that does not set
-// DisplayName (every hand-built config predating the field) must still produce
-// the historical sentence, including the "Anthropic" product word next to the
-// --provider claude flag. The full string is pinned on purpose — a substring
-// check would not catch the prose slipping from "Anthropic" to "Claude".
 func TestExchangeCloudflare403MessageDefaultWordingUnchanged(t *testing.T) {
 	want := "token exchange was blocked by Cloudflare before Anthropic returned OAuth tokens. Switch VPN exit IP or network, then retry with `lele auth login --provider claude --paste-code` and paste the callback URL"
 
@@ -2713,10 +2497,6 @@ func TestExchangeCloudflare403MessageDefaultWordingUnchanged(t *testing.T) {
 	}
 }
 
-// TestOAuthProviderConfigDisplayName pins the accessor that centralises the
-// label rules, so the fallbacks cannot drift per call site. displayName is the
-// gate-message label ("Claude" historically); displayNameOr carries the
-// historical word of one specific message.
 func TestOAuthProviderConfigDisplayName(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -2738,16 +2518,12 @@ func TestOAuthProviderConfigDisplayName(t *testing.T) {
 			if got := cfg.displayNameOr("Claude"); got != tt.wantFallback {
 				t.Errorf("displayNameOr(%q) = %q, want %q", "Claude", got, tt.wantFallback)
 			}
-			// The CLI flag is always the lower-case label, whatever the fallback.
 			if got := strings.ToLower(cfg.displayName()); got != strings.ToLower(tt.wantDisplay) {
 				t.Errorf("lower-case label = %q, want %q", got, strings.ToLower(tt.wantDisplay))
 			}
 		})
 	}
 
-	// The pre-flight message falls back to the "Anthropic" product word, which
-	// is deliberately NOT the gate label: DisplayName == "" is only a stand-in
-	// for the historical Claude config, whose sentence mixes both spellings.
 	if got := (OAuthProviderConfig{}).displayNameOr("Anthropic"); got != "Anthropic" {
 		t.Errorf("displayNameOr(%q) = %q, want the historical product word", "Anthropic", got)
 	}

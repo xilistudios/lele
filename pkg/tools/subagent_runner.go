@@ -11,16 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// subagentFailureReason maps a provider FailoverReason to the human-readable
-// explanation attached to the subagent failure log. The error type itself is
-// the reason string (e.g. "rate_limit", "timeout", "unknown"), so logs, the
-// rendered task result and the retry decision all speak the provider layer's
-// vocabulary.
-//
-// There is no "connection_error" reason: transport failures are classified as
-// "timeout" by providers.ClassifyError, or fall through to "unknown". Both are
-// transient, so the subagent retries them - which is exactly what the old
-// hand-rolled taxonomy got wrong.
 var subagentFailureReason = map[providers.FailoverReason]string{
 	providers.FailoverRateLimit:  "API rate limit exceeded",
 	providers.FailoverTimeout:    "HTTP request timeout (server did not respond in time)",
@@ -31,10 +21,6 @@ var subagentFailureReason = map[providers.FailoverReason]string{
 	providers.FailoverUnknown:    "unexpected error during LLM call or tool execution",
 }
 
-// resolveAgentConfig resolves the agent's provider, model, system prompt, max iterations,
-// LLM options, and context window from the SubagentManager's configuration and the
-// target agent's context callback. Both runTask and SubagentTool use this method
-// to ensure consistent provider/model/system-prompt resolution.
 func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 	provider providers.LLMProvider,
 	model string,
@@ -55,7 +41,6 @@ func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 	defaultThinkingLevel := sm.thinkingLevel
 	sm.mu.RUnlock()
 
-	// Start with manager defaults
 	maxIter = defaultMaxIter
 	maxTokens := defaultMaxTokens
 	temperature := defaultTemperature
@@ -68,7 +53,6 @@ func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 
 	if getContextInfo != nil {
 		ctxInfo := getContextInfo(agentID)
-		// Always use the agent's model and provider from its config, even if context is empty.
 		model = ctxInfo.Model
 		provider = ctxInfo.Provider
 		contextWindow = ctxInfo.ContextWindow
@@ -81,7 +65,6 @@ func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 				"context_window": contextWindow,
 			})
 
-		// Agent overrides take precedence over SubagentManager defaults
 		if ctxInfo.MaxIterations > 0 {
 			maxIter = ctxInfo.MaxIterations
 		}
@@ -93,13 +76,6 @@ func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 			temperature = ctxInfo.Temperature
 			hasTemperature = true
 		}
-		// The thinking level is NOT a "0 means default" scalar like max_tokens:
-		// the target agent's resolved level always wins, even when it is empty.
-		// An empty ThinkingLevel means the target has no config level at all —
-		// resolveAgentThinkingLevel already folded agents.defaults.thinking_level
-		// into the value it publishes here — so emitting the manager (parent)
-		// default would let the parent's config override a target that
-		// deliberately has no level. Hence the unconditional assignment.
 		thinking = ctxInfo.ThinkingLevel
 
 		if ctxInfo.Context != "" {
@@ -116,7 +92,6 @@ func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 		systemPrompt = buildSubagentSystemPrompt("", agentID, agentID, "")
 	}
 
-	// Use the agent's model and provider if available, otherwise fall back to manager's defaults
 	if model == "" {
 		model = defaultModel
 	}
@@ -124,22 +99,6 @@ func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 		provider = defaultManagerProvider
 	}
 
-	// Build LLM options.
-	//
-	// Reasoning level -> wire options, mirroring the main-agent switch in
-	// pkg/agent/llm_caller.go buildLLMOptions so both paths speak identical
-	// semantics:
-	//   - "off":            explicit {"enabled": false} so transparent proxies
-	//                       cannot re-enable reasoning server-side.
-	//   - "low|medium|high": {"effort": level, "enabled": true} — providers that
-	//                       gate emission on `enabled` (anthropic_messages) must
-	//                       not drop the level on the floor.
-	//   - "":               key absent, today's behavior (model ReasoningConfig
-	//                       decides at the provider layer).
-	// Stored values are normalized by config validation and
-	// resolveAgentThinkingLevel, so an invalid level cannot occur in practice;
-	// NormalizeThinkingLevel is applied defensively anyway and anything unknown
-	// is treated as "" (no opinion).
 	reasoningOpts := thinkingReasoningOptions(thinking)
 
 	if hasMaxTokens || hasTemperature || reasoningOpts != nil {
@@ -158,9 +117,6 @@ func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 	return provider, model, systemPrompt, maxIter, llmOptions, contextWindow
 }
 
-// thinkingReasoningOptions maps a normalized thinking level to the "reasoning"
-// entry of the subagent LLM options, or nil when the level carries no opinion
-// ("" or invalid). See resolveAgentConfig for the semantics.
 func thinkingReasoningOptions(level string) map[string]any {
 	normalized, ok := config.NormalizeThinkingLevel(level)
 	if !ok {
@@ -171,32 +127,11 @@ func thinkingReasoningOptions(level string) map[string]any {
 		return nil
 	case "off":
 		return map[string]any{"enabled": false}
-	default: // "low", "medium", "high"
+	default:
 		return map[string]any{"effort": normalized, "enabled": true}
 	}
 }
 
-// ownerAgentID returns the agent identity to attribute a task's tool loop to.
-//
-// Issue #234: identity-scoped tools (keyring secret lookup, nested spawn
-// attribution) key on the OwnerAgentID injected into the tool context, so it
-// must never be empty when the runner knows which agent it is executing.
-// Resolution order:
-//  1. task.AgentID — the explicit target (or the spawner identity inherited at
-//     spawn time, see SpawnWithOptions).
-//  2. the manager's owning agent id, set by the agent layer via
-//     SetDefaultAgentID. This is the agent whose provider/model/system prompt
-//     resolveAgentConfig actually fell back to, so it is the true executing
-//     identity rather than a fabricated literal.
-//  3. "" as a last resort (standalone managers with no owner configured, e.g.
-//     tests) — RunToolLoop then keeps whatever identity its ctx carries.
-//
-// Chosen over extending resolveAgentConfig: the callback there is supplied by
-// the agent layer and returns AgentContextInfo, which carries no id (adding one
-// would touch every implementation for information the manager already knows).
-// Nor is the routing default ("main") used here: pkg/tools must not depend on
-// pkg/routing, and hardcoding a literal id would be wrong for any deployment
-// whose default agent is named differently.
 func (sm *SubagentManager) ownerAgentID(task *SubagentTask) string {
 	if task != nil && task.AgentID != "" {
 		return task.AgentID
@@ -204,9 +139,6 @@ func (sm *SubagentManager) ownerAgentID(task *SubagentTask) string {
 	return sm.getDefaultAgentID()
 }
 
-// extractProgress extracts a "PROGRESS:" line from raw subagent output.
-// Subagents can include a "PROGRESS: <message>" line in their response to report
-// intermediate status updates before the final STATUS/SUMMARY/DETAILS block.
 func extractProgress(raw string) string {
 	for _, line := range strings.Split(raw, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -217,21 +149,6 @@ func extractProgress(raw string) string {
 	return ""
 }
 
-// isTransientFailure reports whether the error from a task's last run is worth
-// retrying at the subagent level.
-//
-// It delegates to providers.IsRetriableError - the same policy the parent agent
-// loop uses (pkg/agent/llm_runner.go) - so a failure can never be transient for
-// the parent and fatal for a subagent. The previous version matched four
-// literal tokens ("rate_limited", "connection_error", "http_timeout",
-// "server_error") against task.Result, a *rendered* string produced by
-// runTaskImpl, which (a) missed every error the token list did not enumerate
-// and (b) silently broke whenever the rendered taxonomy changed.
-//
-// Invariant: a nil error means NOT transient. The timeout and cancellation
-// branches of runTaskImpl deliberately leave task.lastErr nil, so a subagent
-// that burned its whole SubagentTimeoutMinutes is never handed that budget
-// again.
 func isTransientFailure(err error) bool {
 	if err == nil {
 		return false
@@ -239,16 +156,6 @@ func isTransientFailure(err error) bool {
 	return providers.IsRetriableError(err)
 }
 
-// retryPendingLocked reports whether the task will be retried by runTask after
-// the current runTaskImpl call returns. It must be called while holding sm.mu.
-//
-// The decision mirrors the condition in runTask's retry guard, but operates on
-// the state as runTaskImpl leaves it: lastErr is still set (runTask clears it
-// after this function returns), and Status reflects the outcome of this attempt.
-//
-// Only the "transient failure with retries remaining" case returns true; all
-// terminal outcomes (success, timeout, cancellation, exhausted retries,
-// non-transient failure) return false.
 func retryPendingLocked(task *SubagentTask) bool {
 	return task.Status == SubagentStatusFailed &&
 		task.MaxRetries > 0 &&
@@ -256,20 +163,7 @@ func retryPendingLocked(task *SubagentTask) bool {
 		isTransientFailure(task.lastErr)
 }
 
-// runTask is the public entry point for running a subagent task.
-// It wraps runTaskImpl with retry logic for transient failures.
-//
-// Iterative by design: an earlier shape recursed (runTask -> runTaskImpl ->
-// runTask) once per retry. Go's growable stacks made overflow unlikely, but the
-// self-call kept each attempt's frame alive across the backoff sleep for no
-// benefit, and a loop makes the retry flow readable in one screen.
 func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, callback AsyncCallback) {
-	// Cleanup: when the retry loop exits (success, terminal failure, or
-	// exhausted retries), remove the cancel entry from sm.cancels and call
-	// it.  During retries, runTaskImpl's defer leaves the entry in place
-	// (see retryPendingLocked) so StopAll/StopTask can cancel the task
-	// during backoff.  This defer runs AFTER runTaskImpl's defer (LIFO
-	// order), so the entry is still present if a retry was in progress.
 	defer func() {
 		sm.mu.Lock()
 		if c, ok := sm.cancels[task.ID]; ok {
@@ -284,18 +178,10 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	for {
 		sm.runTaskImpl(ctx, task, callback)
 
-		// After runTaskImpl completes, check if we should retry.
-		//
-		// The decision uses task.lastErr (the raw error), never the rendered
-		// task.Result string: see isTransientFailure. A nil lastErr (timeout,
-		// cancellation) is terminal by design.
 		sm.mu.Lock()
 		if task.Status != SubagentStatusFailed || task.MaxRetries <= 0 ||
 			task.RetryCount >= task.MaxRetries || !isTransientFailure(task.lastErr) {
 			sm.mu.Unlock()
-			// Final state of this run chain: persist it on the subagent's
-			// session so the WebUI keeps seeing the real outcome after the
-			// in-memory task is gone. No-op when the callback is unset.
 			sm.reportTerminalStatus(task)
 			return
 		}
@@ -317,14 +203,10 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 			})
 
 		task.Status = SubagentStatusRunning
-		// Clear the error this retry is responding to: a run must never be
-		// judged on a previous attempt's failure (and a nil lastErr means
-		// "nothing pending", see isTransientFailure).
 		task.lastErr = nil
 		task.Updated = time.Now().UnixMilli()
 		sm.mu.Unlock()
 
-		// Wait for backoff, but respect context cancellation
 		select {
 		case <-ctx.Done():
 			sm.mu.Lock()
@@ -341,19 +223,12 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	}
 }
 
-// runTaskImpl contains the actual subagent execution logic.
-// It runs the tool loop, parses the outcome, and updates task state.
-// Retry logic is handled by the runTask wrapper.
 func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, callback AsyncCallback) {
 	startTime := time.Now()
 
 	sm.mu.Lock()
 	previousTask := *task
 	task.Status = SubagentStatusRunning
-	// A fresh run has no pending failure: clear lastErr so this attempt is
-	// never judged on the previous one's error (covers the pending->running
-	// transition, dependency release, and any entry that did not go through
-	// the runTask retry branch).
 	task.lastErr = nil
 	task.Updated = time.Now().UnixMilli()
 	timeout := sm.timeout
@@ -370,22 +245,14 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 			"task_preview":   truncateString(task.Task, 200),
 		})
 
-	// Apply timeout to the context if configured.
-	// This creates a child context that will be cancelled after the timeout,
-	// while the parent cancel func (stored in sm.cancels) can still cancel it earlier.
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
 
-	// Resolve agent config using shared method
 	agentProvider, agentModel, systemPrompt, maxIter, llmOptions, agentContextWindow := sm.resolveAgentConfig(task.AgentID)
 
-	// Apply per-task model override if configured. The override is a hard
-	// requirement: if it cannot be resolved, the task FAILS loudly instead of
-	// silently running on the agent's default model (which would ignore the
-	// model the user selected, e.g. via a cron spawn job).
 	if task.ModelOverride != "" {
 		sm.mu.RLock()
 		resolver := sm.modelOverrideResolver
@@ -418,13 +285,6 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 					"error":          reason,
 				})
 
-			// Mirror the terminal-state mutation style of the early-cancel path
-			// below, then deliver the failure through the cancels cleanup +
-			// callback exactly like the deferred block at the end of this
-			// function does, so the callback fires exactly once and no cancel
-			// func leaks. runTask (the wrapper) sees Status==Failed with a
-			// non-transient Result and will not retry; the task goroutine calls
-			// SignalDone after runTask returns.
 			sm.mu.Lock()
 			task.Status = SubagentStatusFailed
 			task.Summary = msg
@@ -465,8 +325,6 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 			})
 	}
 
-	// Determine whether the resolved model supports vision and native video
-	// so RunToolLoop can filter out read_image/read_video accordingly.
 	sm.mu.RLock()
 	visionChecker := sm.visionChecker
 	sm.mu.RUnlock()
@@ -474,15 +332,10 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 	videoChecker := sm.getVideoChecker()
 	videoSupported := videoChecker != nil && videoChecker(agentModel)
 
-	// Stamp the subagent's actual model capabilities onto the tool context so
-	// read_video's mode=auto resolves against THIS model (not the
-	// construction-time snapshot of the shared tool registry — see
-	// tools.WithVideoCaps). No stamp = the tool's snapshot applies.
 	ctx = WithVideoCaps(ctx, VideoCapabilities{Video: videoSupported, Vision: visionSupported})
 
 	messages := previousTask.buildMessages(systemPrompt)
 
-	// Check if context is already cancelled before starting
 	select {
 	case <-ctx.Done():
 		sm.mu.Lock()
@@ -495,7 +348,6 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 	default:
 	}
 
-	// Get tools and session recorder
 	sm.mu.RLock()
 	tools := sm.tools
 	recorder := sm.sessionRecorder
@@ -506,11 +358,8 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 	tokenUsage := sm.tokenUsageReporter
 	sm.mu.RUnlock()
 
-	// Build subagent session key: {origin_session_key}:{task_id}
-	// This ensures subagent history is saved alongside the parent session
 	sessionKey := task.OriginSessionKey + ":" + task.ID
 
-	// Notify the session key callback so the owner can build an O(1) lookup map
 	sm.mu.RLock()
 	cb := sm.sessionKeyCallback
 	registerCancel := sm.registerSessionCancel
@@ -531,26 +380,8 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		defer cleanup()
 	}
 
-	// The session key this loop's work is attributed to. A subagent's tools
-	// are scoped by it: background-exec visibility treats an empty caller key
-	// as "operator, show everything", so the loop must never run unscoped.
 	loopOwner := subagentLoopOwner(task, sessionKey)
 
-	// Bill the subagent's LLM consumption to its owner session (the parent
-	// agent that spawned it) so cumulative token counters shown by the TUI,
-	// /status and the WebUI include subagent work. Nested spawns bill to the
-	// same owner because the parent subagent's loop propagates its owner key
-	// through the tool context - each loop reports only its own responses, so
-	// nothing is counted twice. Retried attempts (runTask) bill per attempt,
-	// matching the real spend.
-	//
-	// Owner gets the aggregate (TUI/status/WebUI totals include subagent
-	// work); the child session additionally records its own spend so a
-	// subagent chat can show its own counters. The child key is sessionKey
-	// ("{origin}:{taskID}"), which equals loopOwner only when both spawner
-	// and origin keys are absent — in that case the child report is skipped
-	// to avoid double-counting the same key. A nil reporter keeps today's
-	// no-op behavior.
 	billTokens := func(in, out int) {
 		if tokenUsage == nil || loopOwner == "" {
 			return
@@ -588,7 +419,6 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 
 	duration := time.Since(startTime)
 
-	// Save subagent history to disk if recorder is available
 	if recorder != nil && sessionKey != "" {
 		if err := recorder.Save(sessionKey); err != nil {
 			logger.ErrorCF("subagent", "Failed to save subagent history", map[string]interface{}{
@@ -602,16 +432,6 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 	sm.mu.Lock()
 	var result *ToolResult
 	defer func() {
-		// AGT-01 fix: do not cancel taskCtx when a retry is pending.
-		// runTask will re-enter runTaskImpl with the same ctx, so cancelling
-		// it here would cause the backoff select's ctx.Done() to fire
-		// immediately, turning every transient failure into "cancelled".
-		// When a retry IS pending, leave the cancel func in sm.cancels so
-		// StopAll/StopTask can still cancel the task during the backoff.
-		//
-		// The retry decision is captured here, under the lock, because the
-		// callback gate below makes the same decision and retryPendingLocked
-		// requires sm.mu to be held.
 		retryPending := retryPendingLocked(task)
 		var cancel context.CancelFunc
 		if !retryPending {
@@ -624,18 +444,12 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		if cancel != nil {
 			cancel()
 		}
-		// A transient failure that is about to be retried is NOT the task's
-		// outcome. Publishing it would resume the parent on
-		// "Subagent execution failed [rate_limit]" and the claim would then
-		// suppress the successful retry: the callback fires once per attempt
-		// (runTask loops), so only the final attempt may deliver.
 		if callback != nil && result != nil && !retryPending {
 			callback(ctx, result)
 		}
 	}()
 
 	if err != nil {
-		// Classify the error for detailed logging
 		errType := "unknown"
 		errDetails := map[string]interface{}{
 			"task_id":        task.ID,
@@ -670,14 +484,6 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 			task.Summary = "Task cancelled during execution"
 			task.Result = "Task cancelled during execution"
 		} else {
-			// Derive the error type from the provider layer's classifier.
-			//
-			// The switch this replaces re-implemented providers.ClassifyError
-			// with its own substring list, and its default branch produced
-			// "unknown" - a token the retry whitelist rejected, so any error the
-			// list missed was fatal even when the parent would have retried it.
-			// One classifier now serves logging, the rendered task result, and
-			// the retry decision, and they cannot drift apart.
 			reason := providers.FailoverUnknown
 			if fe := providers.ClassifyError(err, "", ""); fe != nil {
 				reason = fe.Reason
@@ -686,9 +492,6 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 			errDetails["reason"] = subagentFailureReason[reason]
 			logger.ErrorCF("subagent", "Subagent FAILED: "+errType, errDetails)
 
-			// The ONLY branch that records lastErr: runTask's retry decision
-			// reads the raw error (see isTransientFailure for why nil means
-			// "do not retry").
 			task.lastErr = err
 		}
 
@@ -712,11 +515,9 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		task.Result = outcome.Details
 		task.ContextRequest = outcome.ContextRequest
 		task.Iterations = loopResult.Iterations
-		// A completed run leaves no pending failure behind.
 		task.lastErr = nil
 		task.Updated = time.Now().UnixMilli()
 
-		// Extract intermediate progress from the subagent output
 		if progress := extractProgress(loopResult.Content); progress != "" {
 			task.Progress = progress
 		}
@@ -743,6 +544,4 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		}
 	}
 
-	// NOTE: Subagents do NOT send messages directly to users.
-	// Their output is returned as LLM context for the parent agent only.
 }

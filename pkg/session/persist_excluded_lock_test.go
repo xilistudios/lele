@@ -1,43 +1,5 @@
 package session
 
-// Lock-scope, byte-parity and concurrency regression tests for the
-// excluded-range persistence path (T11).
-//
-// saveExcludedRangeUnlocked is the path a compaction triggers right after
-// ExcludeOldMessagesFromContext flags a range of messages: the next Save
-// re-marshals every message of that range and rewrites its excluded column and
-// JSON. It used to do the json.Marshal of the whole range while holding sm.mu —
-// the third and last in-lock encode after T9 (eviction) and T10 (full
-// rewrite) — so compacting a long chat froze every concurrent GetHistoryView
-// (a TUI frame) for the whole encode.
-//
-// The tests below pin the same three-phase contract the sibling paths already
-// have (collect under the lock → marshal + I/O with the lock released → relock
-// + guards):
-//
-//   - TestSaveExcludedRangeDoesNotHoldLockDuringIO: neither the SQLite write
-//     nor the marshalling runs under sm.mu (a blocking fake parks the UPDATE,
-//     a TryRLock probe decides that deterministically and a lock watchdog
-//     bounds the longest reader wait across the whole save), and a TUI frame is
-//     served while the write is parked.
-//   - TestSaveExcludedRangePersistedBytesParity: the rows this path writes are
-//     byte-identical to the ones the pre-T11 implementation wrote (same seqs,
-//     JSON and excluded flags, holes included), the rows outside the range are
-//     not touched at all, and a cold load restores the same content/flags.
-//   - TestSaveExcludedRangeHealsConcurrentMutation: a mutation landing in the
-//     unlocked window is never lost — the epoch guard forces the next Save to
-//     rebuild the history from memory and keeps the range pending for a retry.
-//   - TestSaveExcludedRangeAppendDuringWindowIsNotLost: the same with an append
-//     travelling through saveUnlocked's fall-through routing; memory and SQLite
-//     end up in agreement.
-//   - TestSaveExcludedRangeConcurrentRacersStayConsistent: racing writers
-//     (append + chunk + Save) against a compacting goroutine; -race clean, no
-//     marker lost, final memory/SQLite consistent.
-//   - TestSaveExcludedRangeOutsideResidentWindowWritesNoRows: the "evacuated
-//     range" case — a stale range reaching past the resident slice is clamped
-//     exactly like the old inline loop, with no row rewritten and no read back
-//     from SQLite.
-
 import (
 	"database/sql"
 	"encoding/json"
@@ -52,19 +14,6 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// ---------------------------------------------------------------------------
-// Test doubles
-// ---------------------------------------------------------------------------
-
-// excludedRangeBlockingRepo parks the excluded-range UPDATE until the test
-// releases it and records whether sm.mu looked held when the call arrived.
-//
-// It reuses the ioGate handshake of persist_lock_test.go (T10): entering the
-// gate probes sm.mu with TryRLock, which fails deterministically while a writer
-// holds it, so in-lock I/O is detected without racing a timer. Only the
-// targeted UPDATE is parked — UpsertSession is deliberately left alone so the
-// concurrency tests can still write metadata (and their own messages) while
-// this one statement is stuck.
 type excludedRangeBlockingRepo struct {
 	sessionRepo
 	gate *ioGate
@@ -75,7 +24,6 @@ func (b *excludedRangeBlockingRepo) UpdateMessagesExcludedWithJSON(sessionKey st
 	return b.sessionRepo.UpdateMessagesExcludedWithJSON(sessionKey, messages)
 }
 
-// useBlockingExcludedRangeRepo swaps repoFor for the fake until the test ends.
 func useBlockingExcludedRangeRepo(t *testing.T, sm *SessionManager, gate *ioGate) {
 	t.Helper()
 	fake := &excludedRangeBlockingRepo{sessionRepo: sm.sessionRepo, gate: gate}
@@ -84,20 +32,6 @@ func useBlockingExcludedRangeRepo(t *testing.T, sm *SessionManager, gate *ioGate
 	t.Cleanup(func() { repoFor = prev })
 }
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
-// excludedRangeFixture is an 11-turn history that exercises every payload shape
-// the storage encoding has to keep byte-identical (unicode, escapes, tool
-// calls, content parts, attachments) plus a tool_use/tool_result pair the
-// exclusion boundary must not split.
-//
-// With keepCount=3 the compaction that follows pins index 0 and the last two
-// human user turns (indices 7 and 9), so the persisted range is [1, 8) and its
-// last row is a non-excluded HOLE — exactly the shape saveExcludedRangeUnlocked
-// writes row by row (each row's actual ExcludeFromContext value, not a
-// hardcoded flag).
 func excludedRangeFixture() []providers.Message {
 	return []providers.Message{
 		{Role: "user", Content: "quotes \" backslash \\ newline \n tab \t <tag> & ünïcode"},
@@ -129,11 +63,6 @@ func excludedRangeFixture() []providers.Message {
 	}
 }
 
-// seedExcludedRangeSession builds the state saveExcludedRangeUnlocked exists
-// for: a fully persisted session whose next Save has ONLY a pending excluded
-// range to write (lastPersistedSeq != -1, nothing appended or modified) after
-// ExcludeOldMessagesFromContext flagged it. Returns the range and the resident
-// count.
 func seedExcludedRangeSession(t *testing.T, sm *SessionManager, key string, msgs []providers.Message, keep int) (from, to, resident int) {
 	t.Helper()
 	sm.GetOrCreate(key)
@@ -172,7 +101,6 @@ func seedExcludedRangeSession(t *testing.T, sm *SessionManager, key string, msgs
 	return from, to, resident
 }
 
-// readPersistedRow reads one persisted row's raw columns.
 func readPersistedRow(t *testing.T, db *sql.DB, key string, seq int) (store.MessageRow, bool) {
 	t.Helper()
 	var row store.MessageRow
@@ -190,8 +118,6 @@ func readPersistedRow(t *testing.T, db *sql.DB, key string, seq int) (store.Mess
 	return row, true
 }
 
-// countPersistedRows counts the rows of a session without materializing them
-// (the lock-scope fixture is ~80 MB).
 func countPersistedRows(t *testing.T, db *sql.DB, key string) int {
 	t.Helper()
 	var n int
@@ -200,10 +126,6 @@ func countPersistedRows(t *testing.T, db *sql.DB, key string) int {
 	}
 	return n
 }
-
-// ---------------------------------------------------------------------------
-// (a) the regression test: no I/O and no marshalling under sm.mu
-// ---------------------------------------------------------------------------
 
 func TestSaveExcludedRangeDoesNotHoldLockDuringIO(t *testing.T) {
 	if testing.Short() {
@@ -214,9 +136,6 @@ func TestSaveExcludedRangeDoesNotHoldLockDuringIO(t *testing.T) {
 	sm.SetSessionRepo(s.Sessions())
 	key := "test:excluded-lock-scope"
 
-	// Compaction-sized payload: ~80 MB of JSON, which at the measured ~630 MB/s
-	// marshalling throughput is ~125 ms of lock hold if the encode ever moves
-	// back inside sm.mu (that is the mutation the watchdog below catches).
 	const total = 202
 	blob := strings.Repeat("x", 400*1024)
 	msgs := make([]providers.Message, total)
@@ -228,8 +147,6 @@ func TestSaveExcludedRangeDoesNotHoldLockDuringIO(t *testing.T) {
 		msgs[i] = providers.Message{Role: role, Content: blob}
 	}
 
-	// keepCount=2 → excludeUpTo = 200; index 0 and the human user turns 198/200
-	// are pinned, so the range is [1, 200) with index 198 persisted as a hole.
 	from, to, resident := seedExcludedRangeSession(t, sm, key, msgs, 2)
 	if from != 1 || to != 200 {
 		t.Fatalf("fixture drifted: excludedRange = [%d, %d), want [1, 200)", from, to)
@@ -238,10 +155,6 @@ func TestSaveExcludedRangeDoesNotHoldLockDuringIO(t *testing.T) {
 		t.Fatalf("resident messages = %d, want %d", resident, total)
 	}
 
-	// The collect phase copies only the message headers of the window (199
-	// messages × 192 B ≈ 38 KB), so an in-lock marshal of ~80 MB outgrows it by
-	// three orders of magnitude: the watchdog below is calibrated on the JSON
-	// encoding, not on the copy.
 	_, residentMsgs, _, _ := liveSnapshot(t, sm, key)
 
 	gate := newIOGate(&sm.mu)
@@ -253,8 +166,6 @@ func TestSaveExcludedRangeDoesNotHoldLockDuringIO(t *testing.T) {
 	saveErr := make(chan error, 1)
 	go func() { saveErr <- sm.Save(key) }()
 
-	// Reaching the repository is itself part of the contract: if the collect
-	// phase still held sm.mu, this call would never arrive.
 	select {
 	case <-gate.entered:
 	case err := <-saveErr:
@@ -263,17 +174,10 @@ func TestSaveExcludedRangeDoesNotHoldLockDuringIO(t *testing.T) {
 		t.Fatal("Save never reached the repository: it is stuck (holding sm.mu?) before its first I/O")
 	}
 
-	// Deterministic half: the UPDATE is parked right now, so a concurrent read
-	// lock must be available immediately. Reintroducing the I/O under sm.mu
-	// fails here (TryRLock never succeeds while the writer holds the lock).
 	if gate.muHeld.Load() {
 		t.Fatal("repository I/O ran while sm.mu was held: the write lock must cover collection only")
 	}
 
-	// The user-visible property: a TUI frame is served while the save is parked
-	// in the middle of its write, and it still shows the full history (the
-	// excluded prefix stays resident — exclusion is a context flag, not an
-	// eviction).
 	viewDone := make(chan int, 1)
 	go func() { viewDone <- len(sm.GetHistoryView(key)) }()
 	select {
@@ -285,8 +189,6 @@ func TestSaveExcludedRangeDoesNotHoldLockDuringIO(t *testing.T) {
 		t.Fatal("GetHistoryView blocked while an excluded-range save was doing I/O: the lock is held across the I/O")
 	}
 
-	// Park long enough that an in-lock marshal would show up in the watchdog:
-	// without the split the reader is blocked for the whole encode (~125 ms).
 	time.Sleep(400 * time.Millisecond)
 
 	gate.unlock()
@@ -299,18 +201,12 @@ func TestSaveExcludedRangeDoesNotHoldLockDuringIO(t *testing.T) {
 		t.Fatal("Save did not finish after the repository was released")
 	}
 
-	// Timing half: the watchdog covered the whole save, marshalling included.
-	// With the encode under the lock its longest wait is ~125 ms; outside the
-	// lock it is scheduling noise. maxLockWait sits between the two with margin
-	// on both sides.
 	const maxLockWait = 60 * time.Millisecond
 	if observed := watchdog.stopAndWait(); observed > maxLockWait {
 		t.Fatalf("a reader waited %v for sm.mu during an excluded-range save (limit %v): the lock is held across the collect/marshal phase",
 			observed, maxLockWait)
 	}
 
-	// The write really landed: same row count, and the range carries the new
-	// flags — including the non-excluded hole at 198.
 	if got := countPersistedRows(t, s.DB(), key); got != resident {
 		t.Fatalf("persisted %d rows, want %d", got, resident)
 	}
@@ -339,17 +235,6 @@ func TestSaveExcludedRangeDoesNotHoldLockDuringIO(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// (b) byte parity with the pre-T11 implementation + cold-load round trip
-// ---------------------------------------------------------------------------
-
-// TestSaveExcludedRangePersistedBytesParity pins the exact bytes this path
-// leaves in SQLite. The expected rows are rebuilt the way the pre-T11
-// implementation built them inline (walk [from, to), re-marshal the resident
-// message, address it by seq = firstInMemorySeq + index), and the comparison is
-// column by column against a direct SELECT. Rows outside the range must not be
-// touched at all, so a change in json output, in seq mapping or in the excluded
-// flag fails here.
 func TestSaveExcludedRangePersistedBytesParity(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -374,7 +259,6 @@ func TestSaveExcludedRangePersistedBytesParity(t *testing.T) {
 		t.Fatalf("persisted %d rows before the save, want %d", len(before), len(rich))
 	}
 
-	// The pre-T11 expectation, rebuilt inline.
 	want := make([]store.MessageRow, 0, to-from)
 	for i := from; i < to && i < len(residentMsgs); i++ {
 		msg := residentMsgs[i]
@@ -398,7 +282,7 @@ func TestSaveExcludedRangePersistedBytesParity(t *testing.T) {
 			wantExcluded++
 		}
 	}
-	if wantExcluded != 6 { // 1..6 excluded; index 7 is the pinned hole
+	if wantExcluded != 6 {
 		t.Fatalf("fixture drifted: %d excluded rows in the range, want 6", wantExcluded)
 	}
 
@@ -433,8 +317,6 @@ func TestSaveExcludedRangePersistedBytesParity(t *testing.T) {
 		if row.Excluded != w.Excluded {
 			t.Errorf("row seq %d excluded = %v, want %v", row.Seq, row.Excluded, w.Excluded)
 		}
-		// The UPDATE does not write the role column (pre-existing behaviour),
-		// so the role must simply survive untouched.
 		if row.Role != before[i].Role {
 			t.Errorf("row seq %d role = %q, want %q (this statement must not rewrite roles)", row.Seq, row.Role, before[i].Role)
 		}
@@ -442,17 +324,10 @@ func TestSaveExcludedRangePersistedBytesParity(t *testing.T) {
 			flagChanges++
 		}
 	}
-	// Non-vacuous half: the excluded column really was rewritten by this path,
-	// and only for the messages the compaction newly excluded (the pinned hole
-	// inside the range keeps its value).
 	if flagChanges != wantExcluded {
 		t.Errorf("%d rows had their excluded flag rewritten, want %d", flagChanges, wantExcluded)
 	}
 
-	// Round-trip: a cold load (fresh manager, same store) restores the same
-	// content and flags. ContentParts/Media are dropped by the documented
-	// storage encoding (see T10's storageComparable), so they are excluded from
-	// the comparison — the byte parity above still covers their stored form.
 	sm2 := NewSessionManager()
 	sm2.SetSessionRepo(s.Sessions())
 	sm2.GetOrCreate(key)
@@ -476,22 +351,8 @@ func TestSaveExcludedRangePersistedBytesParity(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// (c) concurrency: the unlocked window never loses a mutation
-// ---------------------------------------------------------------------------
-
-// concurrentExcludedSummary is the metadata mutation the healing test lands
-// while the excluded-range write is parked.
 const concurrentExcludedSummary = "summary-during-excluded-save"
 
-// TestSaveExcludedRangeHealsConcurrentMutation proves that a mutation landing
-// in the unlocked window is never lost and that the save does not claim it was
-// persisted.
-//
-// A metadata-only mutation (SetSummary) is used on purpose: it bumps the epoch
-// without marking any message dirty, so it isolates the epoch guard of this
-// path — nothing else in saveUnlocked's fall-through can overwrite the healing
-// flag (lastPersistedSeq == -1) that the guard sets.
 func TestSaveExcludedRangeHealsConcurrentMutation(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -519,7 +380,6 @@ func TestSaveExcludedRangeHealsConcurrentMutation(t *testing.T) {
 		t.Fatal("repository I/O ran while sm.mu was held")
 	}
 
-	// The mutation, in the window where sm.mu is released.
 	sm.SetSummary(key, concurrentExcludedSummary)
 
 	gate.unlock()
@@ -532,14 +392,6 @@ func TestSaveExcludedRangeHealsConcurrentMutation(t *testing.T) {
 		t.Fatal("Save did not finish after the repository was released")
 	}
 
-	// Epoch guard: the save must not claim it persisted a state that no longer
-	// exists. saveExcludedRangeUnlocked signals the uncertainty with
-	// lastPersistedSeq = -1, and saveUnlocked re-verifies that flag right after
-	// the excluded-range step (mirroring the delete-last branch, R3.1) → the
-	// healing full rewrite runs in THIS Save call instead of being deferred to
-	// the next one. Nothing is left pending: the range is not kept for a retry
-	// because the rewrite just persisted it (ReplaceMessages writes every
-	// resident message with its excluded flag).
 	sm.mu.RLock()
 	session := sm.sessions[key]
 	healed := session.lastPersistedSeq
@@ -554,10 +406,6 @@ func TestSaveExcludedRangeHealsConcurrentMutation(t *testing.T) {
 			pending, from, to)
 	}
 
-	// The concurrent metadata mutation itself is durable, carried by that same
-	// rewrite (its phase-1 snapshot was taken after SetSummary). The Save below
-	// is a no-op and must leave the agreement intact: every row matches the
-	// resident message byte for byte, flags included.
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("healing Save: %v", err)
 	}
@@ -588,16 +436,8 @@ func TestSaveExcludedRangeHealsConcurrentMutation(t *testing.T) {
 	}
 }
 
-// concurrentExcludedAppend is the message the append test writes while the
-// excluded-range UPDATE is parked.
 const concurrentExcludedAppend = "appended-during-excluded-save"
 
-// TestSaveExcludedRangeAppendDuringWindowIsNotLost covers the other half of the
-// window: an append. It rides saveUnlocked's routing after the excluded-range
-// save in the same Save call — which, since R3.1 re-verifies the heal flag right
-// after that step, is the healing full rewrite rather than the incremental
-// patch — so the assertion is end-to-end: nothing may be lost and memory/SQLite
-// must agree, rather than on the guard's internal flags.
 func TestSaveExcludedRangeAppendDuringWindowIsNotLost(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -637,10 +477,6 @@ func TestSaveExcludedRangeAppendDuringWindowIsNotLost(t *testing.T) {
 		t.Fatal("Save did not finish after the repository was released")
 	}
 
-	// The range was not claimed as persisted by the UPDATE that lost the epoch,
-	// so the re-verification answers with a full rewrite in this same Save: the
-	// range is already persisted (not left pending) and the concurrent append
-	// went out with it.
 	sm.mu.RLock()
 	pending := sm.sessions[key].excludedRange
 	sm.mu.RUnlock()
@@ -649,8 +485,6 @@ func TestSaveExcludedRangeAppendDuringWindowIsNotLost(t *testing.T) {
 			pending, from, to)
 	}
 
-	// A following Save must leave memory and SQLite in exact agreement, the
-	// concurrent append included.
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("follow-up Save: %v", err)
 	}
@@ -686,11 +520,6 @@ func TestSaveExcludedRangeAppendDuringWindowIsNotLost(t *testing.T) {
 	}
 }
 
-// TestSaveExcludedRangeConcurrentRacersStayConsistent races appending writers
-// (append + streaming chunk + their own Saves) against a goroutine that keeps
-// compacting (exclude + Save). It is the -race companion of the deterministic
-// window tests above: it must report no data race, must not lose any written
-// marker, and must end with memory and SQLite in agreement.
 func TestSaveExcludedRangeConcurrentRacersStayConsistent(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -720,8 +549,6 @@ func TestSaveExcludedRangeConcurrentRacersStayConsistent(t *testing.T) {
 				return
 			default:
 			}
-			// The documented compaction sequence: flag the range, persist it,
-			// repeat as the chat grows.
 			sm.ExcludeOldMessagesFromContext(key, 3)
 			if err := sm.Save(key); err != nil {
 				t.Errorf("compactor Save: %v", err)
@@ -756,9 +583,6 @@ func TestSaveExcludedRangeConcurrentRacersStayConsistent(t *testing.T) {
 	close(stop)
 	<-compactorDone
 
-	// Flush whatever bookkeeping the racing compactor left pending, then assert
-	// the two sources of truth agree. forceFullRewrite only pins the path; the
-	// content is what is under test.
 	forceFullRewrite(sm, key)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("final Save: %v", err)
@@ -778,7 +602,6 @@ func TestSaveExcludedRangeConcurrentRacersStayConsistent(t *testing.T) {
 	if len(rows) < len(resident) {
 		t.Fatalf("persisted %d rows for %d resident messages", len(rows), len(resident))
 	}
-	// The resident block is the tail of the persisted history, byte for byte.
 	for i, msg := range resident {
 		row := rows[len(rows)-len(resident)+i]
 		wantJSON, mErr := json.Marshal(msg)
@@ -794,9 +617,6 @@ func TestSaveExcludedRangeConcurrentRacersStayConsistent(t *testing.T) {
 		t.Errorf("firstInMemorySeq = %d but only %d rows are persisted", firstInMemorySeq, len(rows))
 	}
 
-	// No marker may vanish entirely. A marker can legitimately end up in the
-	// session summary (a fold of a compacted prefix) instead of in a message
-	// row, but it must be somewhere.
 	meta, err := s.Sessions().GetSessionMeta(key)
 	if err != nil || meta == nil {
 		t.Fatalf("GetSessionMeta: %v (meta=%v)", err, meta)
@@ -819,17 +639,6 @@ func TestSaveExcludedRangeConcurrentRacersStayConsistent(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// (d) the "evacuated range" decision
-// ---------------------------------------------------------------------------
-
-// TestSaveExcludedRangeOutsideResidentWindowWritesNoRows pins the decision
-// taken for the "evacuated range" case: excludedRange is an index window into
-// session.Messages, so when a (stale) range reaches past the resident slice the
-// window is clamped exactly like the pre-T11 loop's `i < len(session.Messages)`
-// bound. The missing prefix is deliberately NOT read back from SQLite: that
-// would change *what* this path writes instead of preserving its behaviour
-// (metadata is still upserted, so the save is not a no-op).
 func TestSaveExcludedRangeOutsideResidentWindowWritesNoRows(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -849,9 +658,6 @@ func TestSaveExcludedRangeOutsideResidentWindowWritesNoRows(t *testing.T) {
 		t.Fatalf("persisted %d rows before, want %d", len(before), len(rich))
 	}
 
-	// Simulate what a concurrent eviction leaves behind: the in-memory slice was
-	// trimmed to its last two messages (persisted seqs 4 and 5) while a range
-	// computed against the longer slice is still pending.
 	sm.mu.Lock()
 	session, ok := sm.sessions[key]
 	if !ok {
@@ -863,7 +669,7 @@ func TestSaveExcludedRangeOutsideResidentWindowWritesNoRows(t *testing.T) {
 	session.evictedTotal = len(rich) - 2
 	session.bumpEpoch()
 	session.publishViewLocked()
-	session.excludedRange = [2]int{len(rich) - 2, len(rich) + 3} // entirely past the resident window
+	session.excludedRange = [2]int{len(rich) - 2, len(rich) + 3}
 	sm.mu.Unlock()
 
 	if err := sm.Save(key); err != nil {
@@ -881,8 +687,6 @@ func TestSaveExcludedRangeOutsideResidentWindowWritesNoRows(t *testing.T) {
 		}
 	}
 
-	// The bookkeeping still ran: the range was consumed and the metadata upsert
-	// (idempotent) happened.
 	sm.mu.RLock()
 	pending := sm.sessions[key].excludedRange
 	sm.mu.RUnlock()

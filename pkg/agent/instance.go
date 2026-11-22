@@ -17,10 +17,6 @@ import (
 	"github.com/xilistudios/lele/pkg/voice"
 )
 
-// extractProviderFromModel extracts the provider name from a model string.
-// Delegates to providers.ParseModelRef for consistent parsing.
-// If model is "provider:model-name", returns "provider".
-// If model has no provider prefix, returns defaultProvider.
 func extractProviderFromModel(model, defaultProvider string) string {
 	ref := providers.ParseModelRef(model, defaultProvider)
 	if ref == nil {
@@ -29,8 +25,6 @@ func extractProviderFromModel(model, defaultProvider string) string {
 	return ref.Provider
 }
 
-// AgentInstance represents a fully configured agent with its own workspace,
-// session manager, context builder, and tool registry.
 type AgentInstance struct {
 	ID                    string
 	Name                  string
@@ -43,10 +37,10 @@ type AgentInstance struct {
 	Temperature           float64
 	ContextWindow         int
 	SupportsImages        bool
-	SupportsVideo         bool                     // model accepts native video input (video_url content parts)
-	Reasoning             *config.ReasoningConfig  // Reasoning configuration for the model
-	ThinkingLevel         string                   // resolved per-agent default reasoning effort ("", "off", "low", "medium", "high")
-	PromptCache           config.PromptCacheConfig // Explicit prompt-cache breakpoints (Anthropic-style providers)
+	SupportsVideo         bool
+	Reasoning             *config.ReasoningConfig
+	ThinkingLevel         string
+	PromptCache           config.PromptCacheConfig
 	Provider              providers.LLMProvider
 	Sessions              *session.SessionManager
 	ContextBuilder        *ContextBuilder
@@ -58,19 +52,9 @@ type AgentInstance struct {
 	LLMLoopTimeoutMinutes int
 }
 
-// NewAgentInstance creates an agent instance from config.
-
 func getProviderModelConfig(cfg *config.Config, model string, defaultProvider string) (config.ProviderModelConfig, bool) {
-	// The model parameter is the raw model specification which may be:
-	// 1. An alias like "myprovider:vision-model" that maps to a different resolved model
-	// 2. A direct model reference like "myprovider:gpt-4o-vision"
-	// We handle both by attempting multiple lookup strategies:
-	// - First: exact alias match
-	// - Second: normalized alias match (lowercase, dots replaced with dashes)
-	// - Third: search by resolved model name in the Model field
 	model = strings.TrimSpace(model)
 
-	// Use ParseModelRef for consistent provider:model parsing
 	ref := providers.ParseModelRef(model, defaultProvider)
 	if ref == nil {
 		return config.ProviderModelConfig{}, false
@@ -83,24 +67,19 @@ func getProviderModelConfig(cfg *config.Config, model string, defaultProvider st
 	}
 
 	if prov, ok := cfg.Providers.GetNamed(providerName); ok {
-		// Case 1: Try lookup by alias (exact match)
 		if modelCfg, exists := prov.Models[modelName]; exists {
 			return modelCfg, true
 		}
 
-		// Case 2: Try lookup by normalized alias (lowercase, replace . with -)
 		normalizedAlias := strings.ToLower(strings.ReplaceAll(modelName, ".", "-"))
 		if modelCfg, exists := prov.Models[normalizedAlias]; exists {
 			return modelCfg, true
 		}
 
-		// Case 3: The modelName might be a resolved model name (e.g., "gpt-4o-vision")
-		// Search for an entry where the Model field matches
 		normalizedModelName := strings.ToLower(strings.ReplaceAll(modelName, ".", "-"))
 		for alias, modelCfg := range prov.Models {
 			resolvedModel := strings.TrimSpace(modelCfg.Model)
 			if resolvedModel == "" {
-				// If Model field is empty, treat the alias as the resolved name
 				resolvedModel = alias
 			}
 			normalizedResolved := strings.ToLower(strings.ReplaceAll(resolvedModel, ".", "-"))
@@ -113,7 +92,6 @@ func getProviderModelConfig(cfg *config.Config, model string, defaultProvider st
 	return config.ProviderModelConfig{}, false
 }
 
-// getContextWindow returns the context window for a model from provider config.
 func getContextWindow(cfg *config.Config, model string, provider string) int {
 	if modelCfg, ok := getProviderModelConfig(cfg, model, provider); ok && modelCfg.ContextWindow > 0 {
 		return modelCfg.ContextWindow
@@ -128,7 +106,6 @@ func getSupportsImages(cfg *config.Config, model string, provider string) bool {
 	return false
 }
 
-// getSupportsVideo returns whether a model accepts native video input (video_url content parts), per the model's "video" capability flag.
 func getSupportsVideo(cfg *config.Config, model string, provider string) bool {
 	if modelCfg, ok := getProviderModelConfig(cfg, model, provider); ok {
 		return modelCfg.Video
@@ -136,7 +113,6 @@ func getSupportsVideo(cfg *config.Config, model string, provider string) bool {
 	return false
 }
 
-// getReasoningConfig returns the reasoning configuration for a model from provider config.
 func getReasoningConfig(cfg *config.Config, model string, provider string) *config.ReasoningConfig {
 	if modelCfg, ok := getProviderModelConfig(cfg, model, provider); ok && modelCfg.Reasoning != nil {
 		return modelCfg.Reasoning
@@ -144,11 +120,6 @@ func getReasoningConfig(cfg *config.Config, model string, provider string) *conf
 	return nil
 }
 
-// getThinkingType returns the configured thinking wire style ("think system")
-// for a model from provider config (providers.<name>.models.<alias>.thinking_type).
-// Returns "" when unset/unknown so callers fall back to legacy heuristics;
-// explicit styles are returned normalized ("deepseek", "openai", "openrouter",
-// "qwen", "none").
 func getThinkingType(cfg *config.Config, model string, defaultProvider string) string {
 	if modelCfg, ok := getProviderModelConfig(cfg, model, defaultProvider); ok {
 		if tt, ok := config.NormalizeThinkingType(modelCfg.ThinkingType); ok && tt != config.ThinkingTypeAuto {
@@ -164,8 +135,6 @@ func NewAgentInstance(
 	cfg *config.Config,
 ) *AgentInstance {
 	workspace := resolveAgentWorkspace(agentCfg, defaults)
-	// Initialize workspace with template context files
-	// This creates the directory and copies AGENT.md, SOUL.md, etc.
 	if err := InitializeWorkspace(workspace); err != nil {
 		logger.ErrorCF("agent", "Failed to initialize workspace",
 			map[string]interface{}{
@@ -177,11 +146,8 @@ func NewAgentInstance(
 	model := resolveAgentModel(agentCfg, defaults, cfg)
 	fallbacks := resolveAgentFallbacks(agentCfg, defaults, cfg)
 
-	// Extract provider name from the agent's model specification
-	// This allows each agent to use its own provider based on its model config
 	providerName := extractProviderFromModel(model, defaults.Provider)
 
-	// Create a provider specifically for this agent
 	provider, err := providers.CreateProviderForCandidate(cfg, providerName)
 	if err != nil {
 		logger.WarnCF("agent", "Failed to create provider for agent, falling back to default",
@@ -189,7 +155,6 @@ func NewAgentInstance(
 				"provider": providerName,
 				"error":    err.Error(),
 			})
-		// Fallback: try to create default provider
 		provider, err = providers.CreateProvider(cfg)
 		if err != nil {
 			logger.ErrorCF("agent", "Failed to create any provider",
@@ -221,36 +186,16 @@ func NewAgentInstance(
 	toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewUpdateMemoryTool(workspace, memoryMaxLines, restrict))
 
-	// Advanced editing tools. The legacy FMOD preview/apply workflow is deprecated.
 	toolsRegistry.Register(tools.NewSmartEditTool(workspace, restrict))
-	// toolsRegistry.Register(tools.NewPreviewTool(workspace, restrict))     // DEPRECATED
-	// toolsRegistry.Register(tools.NewApplyTool(workspace, restrict))        // DEPRECATED
 	toolsRegistry.Register(tools.NewPatchTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewSequentialReplaceTool(workspace, restrict))
-	// Always register read_image tool so it's available when the user switches to a vision model.
-	// It will be filtered out from tool definitions if the current session model doesn't support vision.
 	toolsRegistry.Register(tools.NewReadImageTool(workspace, restrict))
-	// Capability snapshot for read_video, computed here (before registration)
-	// from the agent's primary model: Video enables native video_url delivery,
-	// Vision enables the keyframes+transcript frames fallback. This snapshot
-	// is only the FALLBACK for callers that resolve no per-call model (unit
-	// tests, cron): per-call session/subagent model caps are stamped onto the
-	// tool context via tools.WithVideoCaps (agent tool executor + subagent
-	// runner), and mode=auto prefers the stamped caps. Tool-def filtering and
-	// the executor guard still gate availability.
 	videoCaps := tools.VideoCapabilities{
 		Video:  getSupportsVideo(cfg, model, providerName),
 		Vision: getSupportsImages(cfg, model, providerName),
 	}
-	// Audio transcription for frames mode. Config signal: the Groq API key —
-	// the same gate cmd/lele/gateway.go uses to build the voice transcriber
-	// for the messaging channels (cfg has no dedicated voice section). A nil
-	// TranscribeFunc means frames mode omits the transcript part entirely.
 	var transcribe tools.TranscribeFunc
 	if cfg != nil && cfg.Providers != nil && cfg.Providers.Groq.APIKey != "" {
-		// Build the transcriber (and its http.Client) ONCE: the closure only
-		// forwards each call, so per-invocation transcriptions reuse the same
-		// client instead of allocating a new one every time.
 		groqTranscriber := voice.NewGroqTranscriber(cfg.Providers.Groq.APIKey)
 		transcribe = func(ctx context.Context, audioPath string) (string, error) {
 			resp, err := groqTranscriber.Transcribe(ctx, audioPath)
@@ -260,30 +205,17 @@ func NewAgentInstance(
 			return resp.Text, nil
 		}
 	}
-	// Always register read_video tool so it's available when the user switches to a
-	// video- or vision-capable model. It is filtered out from tool definitions unless
-	// the session model has the video OR vision capability flag (frames mode fallback).
 	toolsRegistry.Register(tools.NewReadVideoTool(workspace, restrict, videoCaps, transcribe))
 
-	// Apply the per-agent tools allowlist AFTER all default registrations so the
-	// filter always sees the complete tool set. nil/empty allowlist = all tools.
 	if agentCfg != nil {
 		applyToolsAllowlist(toolsRegistry, agentCfg.Tools, routing.NormalizeAgentID(agentCfg.ID))
 	}
 
-	// SessionManager uses SQLite for persistence. Each agent's Sessions field
-	// is replaced with a shared SessionManager instance when created through
-	// AgentLoop. This per-agent one serves as a fallback for direct
-	// instantiation (e.g., tests).
 	sessionsManager := session.NewSessionManager()
 
 	contextBuilder := NewContextBuilder(workspace)
 	contextBuilder.SetToolsRegistry(toolsRegistry)
-	// Set vision support based on the agent's primary model so the system
-	// prompt correctly shows/hides the read_image tool. Reuses the capability
-	// snapshot captured for the read_video registration above.
 	contextBuilder.SetVisionSupported(videoCaps.Vision)
-	// Same for native video support and the read_video tool.
 	contextBuilder.SetVideoSupported(videoCaps.Video)
 
 	agentID := routing.DefaultAgentID
@@ -304,14 +236,12 @@ func NewAgentInstance(
 
 	contextBuilder.SetSkillsFilter(skillsFilter)
 
-	// Resolve available subagents from config and inject into system prompt.
 	if subagents != nil && len(subagents.AllowAgents) > 0 {
 		available := resolveAvailableSubagents(agentCfg, cfg)
 		contextBuilder.SetAvailableSubagents(available)
 	}
 
 	maxIter := defaults.MaxToolIterations
-	// 0 means unlimited — loop runs until LLM stops calling tools
 
 	maxTokens := defaults.MaxTokens
 	if maxTokens == 0 {
@@ -326,7 +256,6 @@ func NewAgentInstance(
 		temperature = *agentCfg.Temperature
 	}
 
-	// Resolve fallback candidates using the agent's provider
 	modelCfg := providers.ModelConfig{
 		Primary:   model,
 		Fallbacks: fallbacks,
@@ -361,7 +290,6 @@ func NewAgentInstance(
 	}
 }
 
-// resolveAgentWorkspace determines the workspace directory for an agent.
 func resolveAgentWorkspace(agentCfg *config.AgentConfig, defaults *config.AgentDefaults) string {
 	if agentCfg != nil && strings.TrimSpace(agentCfg.Workspace) != "" {
 		return expandHome(strings.TrimSpace(agentCfg.Workspace))
@@ -373,7 +301,6 @@ func resolveAgentWorkspace(agentCfg *config.AgentConfig, defaults *config.AgentD
 	return filepath.Join(config.GetLeleDir(), "workspace-"+id)
 }
 
-// resolveAgentModel resolves the primary model for an agent.
 func resolveAgentModel(agentCfg *config.AgentConfig, defaults *config.AgentDefaults, cfg *config.Config) string {
 	logger.DebugCF("agent", "Resolving agent model",
 		map[string]interface{}{
@@ -396,7 +323,6 @@ func resolveAgentModel(agentCfg *config.AgentConfig, defaults *config.AgentDefau
 	return resolved
 }
 
-// resolveAgentFallbacks resolves the fallback models for an agent.
 func resolveAgentFallbacks(agentCfg *config.AgentConfig, defaults *config.AgentDefaults, cfg *config.Config) []string {
 	resolve := func(in []string) []string {
 		if in == nil {
@@ -414,15 +340,6 @@ func resolveAgentFallbacks(agentCfg *config.AgentConfig, defaults *config.AgentD
 	return resolve(defaults.ModelFallbacks)
 }
 
-// resolveAgentThinkingLevel returns the effective config-level thinking
-// default for an agent: agent-specific value wins over the global default.
-// Invalid values are treated as unset (logged).
-//
-// Returns one of "", "off", "low", "medium", "high". "" means "no explicit
-// level": buildLLMOptions then falls back to the model's ReasoningConfig
-// (legacy behavior). Resolution happens once here (in NewAgentInstance),
-// following the same pattern as Temperature/Model/Fallbacks, so
-// buildLLMOptions only has to layer the per-session override on top.
 func resolveAgentThinkingLevel(agentCfg *config.AgentConfig, defaults *config.AgentDefaults) string {
 	raw := ""
 	if defaults != nil && defaults.ThinkingLevel != nil {
@@ -442,9 +359,6 @@ func resolveAgentThinkingLevel(agentCfg *config.AgentConfig, defaults *config.Ag
 	return normalized
 }
 
-// resolveAvailableSubagents builds the list of subagents that an agent can
-// delegate to, based on its allow_agents config and the full agent list.
-// If allow_agents contains "*", all agents (except self) are included.
 func resolveAvailableSubagents(agentCfg *config.AgentConfig, cfg *config.Config) []subagentInfo {
 	if agentCfg == nil || agentCfg.Subagents == nil {
 		return nil
@@ -465,7 +379,6 @@ func resolveAvailableSubagents(agentCfg *config.AgentConfig, cfg *config.Config)
 		allowedSet[routing.NormalizeAgentID(a)] = true
 	}
 
-	// Build a lookup from agent config list for descriptions.
 	descMap := make(map[string]string, len(cfg.Agents.List))
 	for i := range cfg.Agents.List {
 		ac := &cfg.Agents.List[i]
@@ -476,7 +389,7 @@ func resolveAvailableSubagents(agentCfg *config.AgentConfig, cfg *config.Config)
 	for _, ac := range cfg.Agents.List {
 		id := routing.NormalizeAgentID(ac.ID)
 		if id == selfID {
-			continue // don't list self
+			continue
 		}
 		if wildcard || allowedSet[id] {
 			result = append(result, subagentInfo{
@@ -488,23 +401,6 @@ func resolveAvailableSubagents(agentCfg *config.AgentConfig, cfg *config.Config)
 	return result
 }
 
-// applyToolsAllowlist restricts a freshly built tool registry to the per-agent
-// allowlist from config (agents.list[].tools).
-//
-// Semantics:
-//   - allowed empty/nil  -> no-op: the agent keeps every registered tool.
-//   - allowed non-empty  -> every registered tool NOT in allowed is unregistered.
-//   - a name in allowed that is not registered is only warned about (slog.Warn):
-//     a typo in config must not break the agent, and tool availability is
-//     provider/feature dependent, so unknown names are never an error.
-//   - if the allowlist would remove EVERY tool (no intersection at all), the
-//     registry is left untouched and an error is logged. An agent with zero
-//     tools is useless and silently bricked, while an agent with all tools still
-//     works — so the failure mode is deliberately biased towards "keep all".
-//
-// The "keep all" decision is taken as a pre-check on the registered snapshot,
-// which is equivalent to re-registering everything and avoids having to rebuild
-// tool instances (they need workspace/config that this helper doesn't own).
 func applyToolsAllowlist(registry *tools.ToolRegistry, allowed []string, agentID string) {
 	if registry == nil {
 		return
@@ -518,7 +414,6 @@ func applyToolsAllowlist(registry *tools.ToolRegistry, allowed []string, agentID
 		}
 		allowedSet[trimmed] = struct{}{}
 	}
-	// nil/empty allowlist (or one made only of blank entries) = all tools.
 	if len(allowedSet) == 0 {
 		return
 	}
@@ -549,7 +444,6 @@ func applyToolsAllowlist(registry *tools.ToolRegistry, allowed []string, agentID
 			"agent", agentID, "unknown_tools", unknown)
 	}
 
-	// Fail-safe: never leave the agent with zero tools.
 	if len(registered) > 0 && len(toRemove) == len(registered) {
 		slog.Error("agent tools allowlist matches no registered tool, keeping all tools",
 			"agent", agentID, "allowlist", allowed, "available_tools", registered)

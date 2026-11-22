@@ -7,10 +7,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// TestQKeyTypesIntoFormModal verifies that "q" is inserted into the text input
-// of form-based modals instead of closing them, while ESC still closes. The
-// /connect flow opens on the provider picker now, so the test picks the free-
-// type row to reach a text-input step (the name step) first.
 func TestQKeyTypesIntoFormModal(t *testing.T) {
 	m := newTestModel(t)
 	m.executeCommand("/connect")
@@ -22,7 +18,6 @@ func TestQKeyTypesIntoFormModal(t *testing.T) {
 		t.Fatalf("expected the name step, got %d", m.formStepIndex)
 	}
 
-	// Typing "q" must go into the text input, not close the modal.
 	m = sendKeys(m, "q")
 	if m.modalMode != ModalAddProvider {
 		t.Fatalf("'q' closed the form modal; modal = %v", m.modalMode)
@@ -31,16 +26,12 @@ func TestQKeyTypesIntoFormModal(t *testing.T) {
 		t.Fatalf("'q' not inserted into text input, got %q", got)
 	}
 
-	// ESC must still close the modal.
 	m = sendKeys(m, "\x1b")
 	if m.modalMode != ModalNone {
 		t.Fatalf("ESC did not close the form modal; modal = %v", m.modalMode)
 	}
 }
 
-// TestQKeyTypesIntoSettingsEditField verifies that "q" is typed into the
-// inline edit field of settings modals instead of closing them, while ESC
-// exits the edit (back to the list, not closing the modal entirely).
 func TestQKeyTypesIntoSettingsEditField(t *testing.T) {
 	m := newTestModel(t)
 	m.modalMode = ModalSettingsTUI
@@ -56,7 +47,6 @@ func TestQKeyTypesIntoSettingsEditField(t *testing.T) {
 		t.Fatalf("'q' not inserted into settings edit input, got %q", got)
 	}
 
-	// ESC cancels the edit but keeps the modal open (back to the list).
 	m = sendKeys(m, "\x1b")
 	if m.modalMode != ModalSettingsTUI {
 		t.Fatalf("ESC should return to the settings list, got modal %v", m.modalMode)
@@ -66,8 +56,6 @@ func TestQKeyTypesIntoSettingsEditField(t *testing.T) {
 	}
 }
 
-// TestQKeyStillClosesNonFormModals guards against over-correction: "q" must
-// keep closing list modals like ModalSessions.
 func TestQKeyStillClosesNonFormModals(t *testing.T) {
 	m := newTestModel(t)
 	m.modalMode = ModalSessions
@@ -77,13 +65,9 @@ func TestQKeyStillClosesNonFormModals(t *testing.T) {
 	}
 }
 
-// TestWrapText_CJKVisualWidth verifies wrapText uses visual width, so CJK
-// text (double-width runes) wraps within the visual column limit instead of
-// the byte length.
 func TestWrapText_CJKVisualWidth(t *testing.T) {
-	// \u65e5\u672c\u8a9e = 日本語 (each word: 9 bytes, 6 visual columns).
 	input := "\u65e5\u672c\u8a9e \u65e5\u672c\u8a9e \u65e5\u672c\u8a9e"
-	limit := 7 // fits "日本語" (6 cols) but not two words (13 cols)
+	limit := 7
 	got := wrapText(input, limit)
 
 	for i, line := range strings.Split(got, "\n") {
@@ -92,17 +76,11 @@ func TestWrapText_CJKVisualWidth(t *testing.T) {
 		}
 	}
 
-	// Sanity: byte-based len() would have wrongly wrapped after the first
-	// word (9 bytes > 7), producing 3 lines. With visual width the first
-	// two words (6+1+6=13 > 7... no: 6 <= 7, second word doesn't fit) —
-	// expect exactly 3 lines, one word each.
 	if lines := strings.Split(got, "\n"); len(lines) != 3 {
 		t.Fatalf("expected 3 wrapped lines, got %d (%q)", len(lines), got)
 	}
 }
 
-// TestWrapText_EmojiVisualWidth verifies emoji (2 visual columns, 4 bytes)
-// are measured by width.
 func TestWrapText_EmojiVisualWidth(t *testing.T) {
 	input := "🦞🦞🦞 🦞🦞🦞"
 	got := wrapText(input, 6)
@@ -113,8 +91,6 @@ func TestWrapText_EmojiVisualWidth(t *testing.T) {
 	}
 }
 
-// TestWrapText_ASCIIUnchanged guards against regressions in plain ASCII
-// wrapping behavior.
 func TestWrapText_ASCIIUnchanged(t *testing.T) {
 	got := wrapText("hello world foo", 11)
 	want := "hello world\nfoo"
@@ -126,13 +102,6 @@ func TestWrapText_ASCIIUnchanged(t *testing.T) {
 	}
 }
 
-// TestQKeyTypesIntoConnectOAuthModal pins the paste box of the native
-// /connect OAuth login: "q" is a regular character in a pasted code or
-// redirect URL, so it must reach the shared input instead of falling through
-// to the modal-close path (which is what happens the moment
-// ModalConnectOAuth stops being a form modal — see isFormModal). Mutants it
-// kills: removing ModalConnectOAuth from isFormModal, or letting "q" hit the
-// close handler while the flow is pending.
 func TestQKeyTypesIntoConnectOAuthModal(t *testing.T) {
 	m, _ := connectOAuthEnterPending(t, "anthropic")
 	if m.modalMode != ModalConnectOAuth {

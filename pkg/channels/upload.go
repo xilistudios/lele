@@ -21,14 +21,8 @@ func (n *NativeChannel) handleFileUpload(w http.ResponseWriter, r *http.Request)
 	clientID := getClientID(r)
 
 	maxSize := n.cfg.MaxUploadSizeMB * 1024 * 1024
-	// MaxBytesReader caps the total bytes read from the body. The argument
-	// to ParseMultipartForm only limits the in-memory buffer; without
-	// MaxBytesReader the rest is silently spooled to disk, allowing unbounded
-	// disk consumption from a single request.
 	r.Body = http.MaxBytesReader(w, r.Body, maxSize)
 	if err := r.ParseMultipartForm(maxSize); err != nil {
-		// MaxBytesReader returns "http: request body too large" when the
-		// limit is exceeded. Map it to 413 with a stable error code.
 		if err.Error() == "http: request body too large" {
 			writeError(w, http.StatusRequestEntityTooLarge,
 				"file too large (max "+strconv.FormatInt(n.cfg.MaxUploadSizeMB, 10)+"MB)",
@@ -163,13 +157,6 @@ func detectMimeType(path string) string {
 	return http.DetectContentType(buffer[:n])
 }
 
-// publicStagingDirs son los directorios bajo leleDir cuyos archivos pueden
-// servirse sin autenticación en /api/v1/files/view. Son staging de material
-// que el USUARIO subió o eligió compartir, y que la WebUI previsualiza con
-// <img src> (imposible mandar Authorization header ahí).
-//
-//	tmp/attachments ← stageAttachment() (send_file)
-//	tmp/uploads     ← handleFileUpload() (subida desde el composer)
 func publicStagingDirs(leleDir string) []string {
 	return []string{
 		filepath.Join(leleDir, "tmp", "attachments"),
@@ -177,11 +164,6 @@ func publicStagingDirs(leleDir string) []string {
 	}
 }
 
-// isUnderAnyPublicStagingDir reports whether absPath is inside any of the
-// public staging directories. Both the exact directory match and child
-// containment are accepted. Containment (canonical forms on both sides,
-// Rel-based, fail-closed) lives in isContainedIn (pathcontainment.go) and is
-// used here and by every other caller — there is only one implementation.
 func isUnderAnyPublicStagingDir(absPath string, leleDir string) bool {
 	for _, dir := range publicStagingDirs(leleDir) {
 		if isContainedIn(absPath, dir) {
@@ -191,32 +173,14 @@ func isUnderAnyPublicStagingDir(absPath string, leleDir string) bool {
 	return false
 }
 
-// attachmentStagingDir returns the directory under leleDir where outbound
-// attachments that live outside the lele dir are copied so they can be served
-// by /api/v1/files/view (which only allows paths inside leleDir).
 func attachmentStagingDir(leleDir string) string {
 	return filepath.Join(leleDir, "tmp", "attachments")
 }
 
-// randomHex returns a short random id (8 hex chars) used to make staged
-// attachment file names unique.
 func randomHex() string {
 	return uuid.New().String()[:8]
 }
 
-// stageAttachment makes an outbound attachment servable by /api/v1/files/view.
-//
-// The view endpoint only serves files under leleDir (~/.lele), but the
-// send_file tool can reference absolute paths anywhere on disk (workspaces,
-// /tmp, ...). When a.Path is outside leleDir, the file is copied to
-// <leleDir>/tmp/attachments/<uuid8>_<sanitized-base> (via tmp file + rename,
-// so readers never observe a partial copy) and a.Path is mutated to point at
-// the copy. a.Name keeps the ORIGINAL file name (taken before the mutation)
-// so the download filename stays meaningful to the user.
-//
-// It is idempotent: paths already under leleDir are left untouched. On any
-// failure (missing file, copy error) a.Path is left intact and an error is
-// returned — the caller decides whether to skip the attachment.
 func stageAttachment(a *bus.FileAttachment, leleDir string) error {
 	if a == nil || a.Path == "" {
 		return fmt.Errorf("attachment has empty path")
@@ -232,36 +196,13 @@ func stageAttachment(a *bus.FileAttachment, leleDir string) error {
 		return fmt.Errorf("resolve attachment path %q: %w", a.Path, err)
 	}
 
-	// The user-visible name must stay the original base name (of the path the
-	// agent referenced) even though the staged copy gets a uuid prefix.
 	origName := filepath.Base(absPath)
 
-	// Resolve symlinks BEFORE the containment check: a symlink living under
-	// leleDir that points outside must be treated as outside so the served
-	// path is a real file inside the lele dir (the copy reads the resolved
-	// target). Missing files fail EvalSymlinks and keep their abs path, so
-	// the stat below still surfaces a proper error.
 	realPath := absPath
 	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
 		realPath = resolved
 	}
 
-	// Already servable by the public endpoint — no-op (idempotent). Only
-	// files under one of the public staging directories
-	// (<leleDir>/tmp/attachments/ or <leleDir>/tmp/uploads/) can be served
-	// by the public GET /api/v1/files/view; files elsewhere under leleDir
-	// (e.g. workspaces) require the authenticated /api/v1/files/view-secure
-	// endpoint. By copying everything else to staging we keep the invariant
-	// simple: "public == one of the staging dirs".
-	//
-	// NOTE: this means files already under leleDir (but outside the staging
-	// dirs) are now COPIED into attachments staging rather than left in
-	// place.  The cost is extra disk (one copy per send_file that references
-	// a workspace path), but the security surface is cleaner — there are
-	// exactly two directories that are publicly accessible.
-	// isContainedIn canonicalizes both sides, so "already in staging" holds
-	// even when leleDir traverses a symlink (with the old prefix test against
-	// an unresolved staging dir the file was copied again on every call).
 	stagingAbs := attachmentStagingDir(leleDirAbs)
 	if isContainedIn(realPath, stagingAbs) {
 		return nil
@@ -295,8 +236,6 @@ func stageAttachment(a *bus.FileAttachment, leleDir string) error {
 	return nil
 }
 
-// copyFileAtomic copies src to dst via a temporary file in the destination
-// directory plus rename, with 0644 permissions on the final file.
 func copyFileAtomic(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -338,11 +277,6 @@ func copyFileAtomic(src, dst string) error {
 	return nil
 }
 
-// stageAttachments prepares a list of outbound attachments for delivery over
-// the native channel. It mutates the slice in place and returns it; individual
-// attachments that fail to stage are logged and left with their original path
-// (the WS event still carries them; the view endpoint will simply refuse a
-// path outside the lele dir rather than dropping the message).
 func stageAttachments(list []bus.FileAttachment, leleDir string) []bus.FileAttachment {
 	if leleDir == "" {
 		return list
@@ -360,8 +294,6 @@ func stageAttachments(list []bus.FileAttachment, leleDir string) []bus.FileAttac
 	return list
 }
 
-// attachmentsToProviders converts (already staged) bus attachments into the
-// persistence format stored on session messages.
 func attachmentsToProviders(list []bus.FileAttachment) []providers.MessageAttachment {
 	if len(list) == 0 {
 		return nil
@@ -379,9 +311,6 @@ func attachmentsToProviders(list []bus.FileAttachment) []providers.MessageAttach
 	return out
 }
 
-// contentDispositionFilename sanitizes a filename for use inside a quoted
-// Content-Disposition value: strips CR/LF (header injection), escapes
-// backslash and double quote, and drops control characters.
 func contentDispositionFilename(name string) string {
 	name = strings.NewReplacer("\r", "", "\n", "").Replace(name)
 	name = strings.ReplaceAll(name, `\`, `\\`)
@@ -394,10 +323,6 @@ func contentDispositionFilename(name string) string {
 	}, name)
 }
 
-// deniedViewNames is an explicit list of sensitive filenames that must never be
-// served by the file view endpoint, even if they end up inside the staging
-// directory. This is defence in depth — a future containment regression cannot
-// re-expose these files.
 var deniedViewNames = map[string]bool{
 	"keyring.key":         true,
 	"keyring.enc":         true,
@@ -405,37 +330,23 @@ var deniedViewNames = map[string]bool{
 	"native_clients.json": true,
 }
 
-// isDeniedViewPath reports whether absPath points to a sensitive file that
-// must never be served. The check is filename-based (no path traversal
-// bypass) and covers:
-//   - keyring material (*keyring.key, *keyring.enc)
-//   - config files (config.json, config.*)
-//   - database files (*.db, *.db-wal, *.db-shm)
-//   - TLS key material (*.key, *.pem)
-//   - client metadata (native_clients.json)
 func isDeniedViewPath(absPath string) bool {
 	base := filepath.Base(absPath)
 	if deniedViewNames[base] {
 		return true
 	}
-	// Wildcard patterns: config.* (e.g. config.yaml, config.toml)
 	if strings.HasPrefix(base, "config.") {
 		return true
 	}
-	// Database files
 	if strings.HasSuffix(base, ".db") || strings.HasSuffix(base, ".db-wal") || strings.HasSuffix(base, ".db-shm") {
 		return true
 	}
-	// TLS key material
 	if strings.HasSuffix(base, ".key") || strings.HasSuffix(base, ".pem") {
 		return true
 	}
 	return false
 }
 
-// serveFileView is the shared core for both the public and authenticated file
-// view endpoints. It assumes the path has already been validated against the
-// appropriate root directory.
 func (n *NativeChannel) serveFileView(w http.ResponseWriter, r *http.Request, absPath, realPath string) {
 	info, err := os.Stat(realPath)
 	if err != nil {
@@ -472,15 +383,6 @@ func (n *NativeChannel) serveFileView(w http.ResponseWriter, r *http.Request, ab
 	http.ServeFile(w, r, realPath)
 }
 
-// handleFileView serves files from the public staging directories
-// (<leleDir>/tmp/attachments/ and <leleDir>/tmp/uploads/). This is the
-// UNAUTHENTICATED endpoint used by the WebUI for <img src> and download
-// links that cannot carry an Authorization header.
-//
-// Security layers:
-//  1. Path must resolve inside one of the public staging directories (not the broader leleDir).
-//  2. Symlinks are resolved and re-validated (no escape via symlink).
-//  3. Sensitive filenames are denied even within staging (defence in depth).
 func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
@@ -494,13 +396,8 @@ func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Public endpoint: only serve files under the public staging directories.
-	// The root is canonical so a client path that traverses a symlinked
-	// LeleDir (exactly how /upload returned it) is served instead of denied.
 	leleRoot := canonicalContainmentRoot(n.cfg.LeleDir)
 	if leleRoot == "" || !isUnderAnyPublicStagingDir(absPath, leleRoot) {
-		// Log attempted access to a non-staging path under leleDir so we
-		// can detect legitimate consumers we may have broken.
 		if leleRoot != "" && isContainedIn(absPath, leleRoot) {
 			log.Printf("WARNING: public files/view denied non-staging path under leleDir: %s", absPath)
 		}
@@ -508,7 +405,6 @@ func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Symlink escape check
 	realPath := absPath
 	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
 		realPath = resolved
@@ -518,7 +414,6 @@ func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Defence in depth: deny sensitive filenames even within staging.
 	if isDeniedViewPath(absPath) || isDeniedViewPath(realPath) {
 		writeError(w, http.StatusForbidden, "access denied", "access_denied")
 		return
@@ -527,14 +422,6 @@ func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
 	n.serveFileView(w, r, absPath, realPath)
 }
 
-// handleFileViewSecure serves files from the broader leleDir (~/.lele). This
-// is the AUTHENTICATED endpoint that preserves the original wide-access
-// behaviour for clients that can send an Authorization header (desktop, CLI).
-//
-// Security layers:
-//  1. Endpoint is behind withAuth (set up by RegisterRoutes).
-//  2. Path must resolve inside leleDir (symlink-safe).
-//  3. Sensitive filenames are denied (defence in depth).
 func (n *NativeChannel) handleFileViewSecure(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
@@ -548,15 +435,12 @@ func (n *NativeChannel) handleFileViewSecure(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Same canonical root as the public endpoint: the path may be spelled
-	// through a symlinked LeleDir and must still be served.
 	leleRoot := canonicalContainmentRoot(n.cfg.LeleDir)
 	if leleRoot == "" || !isContainedIn(absPath, leleRoot) {
 		writeError(w, http.StatusForbidden, "access denied", "access_denied")
 		return
 	}
 
-	// Symlink escape check
 	realPath := absPath
 	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
 		realPath = resolved
@@ -566,7 +450,6 @@ func (n *NativeChannel) handleFileViewSecure(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Defence in depth: deny sensitive filenames.
 	if isDeniedViewPath(absPath) || isDeniedViewPath(realPath) {
 		writeError(w, http.StatusForbidden, "access denied", "access_denied")
 		return

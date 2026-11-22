@@ -7,24 +7,17 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
-// TestDepsCallbackAssignment verifies that the callback type aliases are
-// assignable from plain functions, ensuring they can be implemented by
-// pkg/agent without issues.
 func TestDepsCallbackAssignment(t *testing.T) {
-	// TurnExecutor
 	var _ TurnExecutor = func(_ context.Context, _ TurnRequest) (string, int, error) {
 		return "", 0, nil
 	}
 
-	// ResolveAgentFunc
 	var _ ResolveAgentFunc = func(_ string) (AgentContext, bool) {
 		return AgentContext{}, false
 	}
 
-	// Publisher
 	var _ Publisher = func(_ bus.OutboundMessage) {}
 
-	// If this compiles and runs, all callback types are usable.
 }
 
 func TestAgentContextFields(t *testing.T) {

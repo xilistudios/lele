@@ -1,22 +1,5 @@
 package main
 
-// M5: the gateway's mcp-stop hook must be exactly-once even when the drain
-// eats the shutdown budget, and it must run AFTER the config watcher stopped.
-//
-// runGateway is not callable from a unit test (it owns signal handling and
-// the whole service graph), so the test has two halves:
-//
-//   - a static half that reads gateway.go — the effective shutdown order is
-//     decided by WHERE a hook is registered, so the registration kind
-//     (Register vs RegisterCritical) and the source position of mcp-stop
-//     relative to services-stop/lock-release are asserted on the real source
-//     (the same technique as indexOfRegistrationOrder in
-//     gateway_durable_outbound_test.go);
-//   - a behavioral half that replays the relevant registrations against a
-//     recording coordinator, proving what RegisterCritical + LIFO actually
-//     deliver: mcp-stop after services-stop with budget to spare, and
-//     mcp-stop STILL RUN when the budgeted pass is exhausted.
-
 import (
 	"context"
 	"errors"
@@ -29,8 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/update"
 )
 
-// mcpStopSourcePositions returns the byte offsets of the mcp-stop,
-// services-stop and lock-release registrations in gateway.go's source.
 func mcpStopSourcePositions(t *testing.T) (mcpStop, servicesStop, lockRelease int) {
 	t.Helper()
 	src, err := os.ReadFile("gateway.go")
@@ -56,10 +37,6 @@ func mcpStopSourcePositions(t *testing.T) (mcpStop, servicesStop, lockRelease in
 	return mcpStop, servicesStop, lockRelease
 }
 
-// TestMCPStopRegistrationCriticalAndOrdered pins the static half of M5: the
-// hook is critical, registered before services-stop (documenting that it runs
-// after the config watcher stopped) and after lock-release (so the lock is
-// still released last among the criticals).
 func TestMCPStopRegistrationCriticalAndOrdered(t *testing.T) {
 	mcpStop, servicesStop, lockRelease := mcpStopSourcePositions(t)
 	if mcpStop > servicesStop {
@@ -74,9 +51,6 @@ func TestMCPStopRegistrationCriticalAndOrdered(t *testing.T) {
 	}
 }
 
-// TestMCPStopRunsAfterServicesStop pins the behavioral half of M5 (order):
-// replaying the gateway's relevant registrations must run mcp-stop after the
-// drain AND after services-stop, with lock-release last.
 func TestMCPStopRunsAfterServicesStop(t *testing.T) {
 	var mu sync.Mutex
 	var order []string
@@ -110,10 +84,6 @@ func TestMCPStopRunsAfterServicesStop(t *testing.T) {
 	}
 }
 
-// TestMCPStopSurvivesExhaustedBudget pins the other half of M5: after a slow
-// agent-drain spends the whole budget, the budgeted services-stop is skipped
-// but the critical mcp-stop still runs (and lock-release with it) — the
-// stdio children can never be orphaned by a blown budget.
 func TestMCPStopSurvivesExhaustedBudget(t *testing.T) {
 	var mu sync.Mutex
 	var order []string
@@ -133,8 +103,6 @@ func TestMCPStopSurvivesExhaustedBudget(t *testing.T) {
 	coord.RegisterCritical("lock-release", time.Second, record("lock-release", nil))
 	coord.RegisterCritical("mcp-stop", time.Second, record("mcp-stop", nil))
 	coord.Register("services-stop", time.Second, record("services-stop", nil))
-	// The drain eats the whole budget (its own timeout is clamped to the
-	// remaining budget).
 	coord.Register("agent-drain", time.Second, record("agent-drain", func() {
 		time.Sleep(400 * time.Millisecond)
 	}))

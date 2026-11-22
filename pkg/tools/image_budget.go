@@ -1,21 +1,11 @@
 package tools
 
-// This file holds the *origin-side* payload bound for image reads: images are
-// downscaled and re-encoded before being embedded as base64 data URLs, so a
-// single read_image call can never blow the request byte budget by itself.
-// Small images take a fast path and are passed through unchanged.
-//
-// The request-budget helpers (MaxLiveImages, RequestOverBudget,
-// EnforceImageBudget) also live in this file, below: the origin-side bound
-// keeps a single read small, the budget keeps a whole turn within the
-// transport cap.
-
 import (
 	"bytes"
 	"fmt"
 	"image"
 	"image/color"
-	_ "image/gif" // register GIF decoder (first frame only)
+	_ "image/gif"
 	"image/jpeg"
 	"image/png"
 	"strings"
@@ -25,17 +15,16 @@ import (
 )
 
 const (
-	maxImageLongSide       = 1568       // px, long edge for detail auto/high
-	maxImageLongSideLow    = 768        // px, long edge for detail "low"
-	maxImageEncodedBytes   = 1 << 20    // 1 MiB binary target per image
-	maxImageEncodedCeiling = 3 << 19    // 1.5 MiB encoded hard ceiling (data-URL payload)
-	maxImageDecodePixels   = 30_000_000 // 30 MP guard before decoding
+	maxImageLongSide       = 1568
+	maxImageLongSideLow    = 768
+	maxImageEncodedBytes   = 1 << 20
+	maxImageEncodedCeiling = 3 << 19
+	maxImageDecodePixels   = 30_000_000
 	jpegQualityHigh        = 80
 	jpegQualityMid         = 65
 	jpegQualityLow         = 50
 )
 
-// imageLimits bundles the payload bounds so tests can inject tiny values.
 type imageLimits struct {
 	longSide       int
 	longSideLow    int
@@ -52,31 +41,18 @@ var defaultImageLimits = imageLimits{
 	decodePixels:   maxImageDecodePixels,
 }
 
-// boundImagePayload is the origin-side payload bound for read_image. It
-// downscales/re-encodes src so the data-URL payload stays within
-// limits.encodedCeiling and the long edge within the detail-dependent target.
-//
-// It returns the bounded payload, the MIME of that payload, the final pixel
-// dimensions (width, height; only meaningful when resized), and whether the
-// image was resized or re-encoded (resized==false means src was passed through
-// byte-identical). The extra width/height results keep the call site free of a
-// second DecodeConfig pass; the function stays unexported.
 func boundImagePayload(src []byte, mimeType, detail string, limits imageLimits) (data []byte, outMIME string, width, height int, resized bool, err error) {
 	target := limits.longSide
 	if detail == "low" {
 		target = limits.longSideLow
 	}
 
-	// Step 1+2: fast path and pixel-bomb guard. DecodeConfig only reads the
-	// header, so the guard runs before any pixel allocation.
 	cfg, _, cfgErr := image.DecodeConfig(bytes.NewReader(src))
 	srcW, srcH := 0, 0
 	if cfgErr == nil {
 		srcW, srcH = cfg.Width, cfg.Height
 	}
 	if cfgErr != nil {
-		// Undecodable format (e.g. webp): the size condition alone is
-		// sufficient for the fast path.
 		if len(src) <= limits.encodedBytes {
 			return src, mimeType, 0, 0, false, nil
 		}
@@ -85,27 +61,18 @@ func boundImagePayload(src []byte, mimeType, detail string, limits imageLimits) 
 			return nil, "", 0, 0, false, fmt.Errorf("image is too large to process safely (%dx%d pixels); resize it before reading", cfg.Width, cfg.Height)
 		}
 		if len(src) <= limits.encodedCeiling && max(cfg.Width, cfg.Height) <= target {
-			// Fast path: already within every stated bound — the ceiling is
-			// the hard bound this function exists to enforce, so nothing is
-			// decoded or re-encoded and the bytes pass through untouched.
 			return src, mimeType, cfg.Width, cfg.Height, false, nil
 		}
 	}
 
-	// Step 3: full decode (GIF yields its first frame).
 	img, _, decErr := image.Decode(bytes.NewReader(src))
 	if decErr != nil {
-		// No stdlib decoder (webp) or corrupt data: keep today's behaviour
-		// for small payloads, error out for large ones.
 		if len(src) <= limits.encodedCeiling {
 			return src, mimeType, srcW, srcH, false, nil
 		}
 		return nil, "", 0, 0, false, fmt.Errorf("cannot downscale %s (no decoder available); convert it to PNG/JPEG under %d bytes and retry", mimeType, limits.encodedCeiling)
 	}
 
-	// Step 4: compute the target long side. Never upscale — if the decoded
-	// long side is already within target the dimensions are kept and only the
-	// bytes are re-encoded.
 	bounds := img.Bounds()
 	srcW, srcH = bounds.Dx(), bounds.Dy()
 	dstW, dstH := srcW, srcH
@@ -119,30 +86,20 @@ func boundImagePayload(src []byte, mimeType, detail string, limits imageLimits) 
 		}
 	}
 
-	// Step 5: convert to NRGBA and downscale with a box (area-average) filter.
 	nrgba := toNRGBA(img)
 	if dstW != srcW || dstH != srcH {
 		nrgba = downscaleNRGBA(nrgba, dstW, dstH)
 	}
 
-	// Step 6: PNG when the source was PNG or any pixel is translucent;
-	// otherwise JPEG.
 	hasAlpha := detectAlpha(nrgba)
 	usePNG := strings.EqualFold(mimeType, "image/png") || hasAlpha
 
-	// Step 7: byte ladder until the payload fits the ceiling.
 	var encoded []byte
 	outMIME = "image/jpeg"
 	if usePNG {
 		outMIME = "image/png"
 		encoded, err = encodePNGPayload(nrgba)
 		if err == nil && len(encoded) > limits.encodedCeiling {
-			// Before cutting resolution, try a full-size JPEG at this very
-			// size: for a vision model the pixel count is what matters, so a
-			// full-resolution lossy JPEG beats a lossless PNG at 3/4 the
-			// resolution — the ceiling is a hard bound, the
-			// transparent-background fidelity is not (alpha is flattened
-			// onto white only here, when the PNG itself did not fit).
 			jpg := nrgba
 			if hasAlpha {
 				jpg = flattenOnWhite(nrgba)
@@ -158,17 +115,12 @@ func boundImagePayload(src []byte, mimeType, detail string, limits imageLimits) 
 			}
 		}
 		if err == nil && len(encoded) > limits.encodedCeiling {
-			// Not even a full-size JPEG fits: PNG has no quality knob, so
-			// shrink the canvas by 3/4 per pass (at most two extra passes)
-			// and re-encode.
 			for pass := 0; err == nil && len(encoded) > limits.encodedCeiling && pass < 2; pass++ {
 				nrgba = downscaleNRGBA(nrgba, max(1, nrgba.Rect.Dx()*3/4), max(1, nrgba.Rect.Dy()*3/4))
 				encoded, err = encodePNGPayload(nrgba)
 			}
 		}
 		if err == nil && len(encoded) > limits.encodedCeiling {
-			// Explicit size-over-transparency trade-off: alpha can cost
-			// megabytes, so flatten onto white and fall back to JPEG.
 			encoded, err = encodeJPEGPayload(flattenOnWhite(nrgba), jpegQualityMid)
 			outMIME = "image/jpeg"
 		}
@@ -184,18 +136,12 @@ func boundImagePayload(src []byte, mimeType, detail string, limits imageLimits) 
 		return nil, "", 0, 0, false, fmt.Errorf("re-encode image: %w", err)
 	}
 	if len(encoded) > limits.encodedCeiling {
-		// Unreachable in practice (the ladder covers it); never silently
-		// return an oversized payload.
 		return nil, "", 0, 0, false, fmt.Errorf("image payload is still too large after downscaling (%d bytes > %d bytes)", len(encoded), limits.encodedCeiling)
 	}
 
-	// Step 8: bytes were re-encoded, so resized is true even if dimensions
-	// were kept.
 	return encoded, outMIME, nrgba.Rect.Dx(), nrgba.Rect.Dy(), true, nil
 }
 
-// detectAlpha reports whether any pixel of img is translucent (A < 255),
-// scanning with an early exit.
 func detectAlpha(img *image.NRGBA) bool {
 	for i := 3; i < len(img.Pix); i += 4 {
 		if img.Pix[i] < 255 {
@@ -205,8 +151,6 @@ func detectAlpha(img *image.NRGBA) bool {
 	return false
 }
 
-// toNRGBA converts any decoded image to a tightly packed *image.NRGBA via a
-// plain per-pixel copy loop (no image/draw dependency).
 func toNRGBA(src image.Image) *image.NRGBA {
 	b := src.Bounds()
 	dst := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
@@ -223,9 +167,6 @@ func toNRGBA(src image.Image) *image.NRGBA {
 	return dst
 }
 
-// downscaleNRGBA shrinks src to dstW x dstH with a single-pass box
-// (area-average) filter over destination pixels. It never upscales (callers
-// must not ask for larger dimensions) and preserves aspect ratio.
 func downscaleNRGBA(src *image.NRGBA, dstW, dstH int) *image.NRGBA {
 	srcW, srcH := src.Rect.Dx(), src.Rect.Dy()
 	dst := image.NewNRGBA(image.Rect(0, 0, dstW, dstH))
@@ -269,7 +210,6 @@ func downscaleNRGBA(src *image.NRGBA, dstW, dstH int) *image.NRGBA {
 	return dst
 }
 
-// flattenOnWhite composites src over a white background, discarding alpha.
 func flattenOnWhite(src *image.NRGBA) *image.NRGBA {
 	dst := image.NewNRGBA(src.Rect)
 	copy(dst.Pix, src.Pix)
@@ -302,21 +242,12 @@ func encodeJPEGPayload(img image.Image, quality int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// MaxLiveImages is the hard ceiling on how many live (non-evicted) image/video
-// parts may travel in one request. Older ones are replaced by a text placeholder.
 const MaxLiveImages = 4
 
-// RequestOverBudget reports whether the estimated serialized payload of messages
-// exceeds the outbound request-size budget (config.DefaultMaxRequestBytes).
 func RequestOverBudget(messages []providers.Message) bool {
 	return providers.EstimateRequestBytes(messages) > config.DefaultMaxRequestBytes
 }
 
-// EnforceImageBudget reduces the live image/video content of messages so the request
-// fits the transport budget: at most MaxLiveImages live parts, and, when the byte
-// estimate still exceeds the budget, progressively fewer (the oldest first, down to
-// zero). It returns the (possibly copied) slice and the number of parts evicted.
-// With no heavy part it returns the input slice unchanged and 0 (no allocation).
 func EnforceImageBudget(messages []providers.Message) ([]providers.Message, int) {
 	if count, _ := providers.LiveMultimodalParts(messages); count == 0 {
 		return messages, 0

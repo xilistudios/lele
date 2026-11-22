@@ -1,17 +1,5 @@
 package channels
 
-// Tests for message.ack session_key symmetry.
-//
-// Bug: the backend emitted message.ack with the client-provided (base)
-// session_key, while every other event (message.stream, message.complete,
-// history.updated) is emitted with ResolveSessionKey(chatID) — after /new or
-// /agent an alias base -> base:chat:N exists. The frontend registered its
-// processing state under the base key while completion arrived under the alias
-// (and vice versa on cleanup), leaving the loading spinner stuck.
-//
-// These tests pin the contract: message.ack (WebSocket and SSE) must report
-// the RESOLVED key that subsequent events will be emitted with.
-
 import (
 	"bufio"
 	"bytes"
@@ -29,17 +17,12 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
-// setLoopAlias registers a base -> resolved session-key alias on the test
-// agent loop stub (mirrors agent.AgentLoop.sessionAliases).
 func setLoopAlias(loop *nativeTestAgentLoop, base, resolved string) {
 	loop.sessionAliasesMu.Lock()
 	defer loop.sessionAliasesMu.Unlock()
 	loop.sessionAliases[base] = resolved
 }
 
-// TestWSMessageAckCarriesResolvedSessionKey drives handleWSClientMessage directly
-// with a fake WSClient and asserts the ack payload contains the alias-resolved
-// session key (base -> base:chat:3), not the base key the client sent.
 func TestWSMessageAckCarriesResolvedSessionKey(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -47,8 +30,6 @@ func TestWSMessageAckCarriesResolvedSessionKey(t *testing.T) {
 	alias := base + ":chat:3"
 	setLoopAlias(ts.loop, base, alias)
 
-	// Fake client: no real connection needed — QueueSend only touches the
-	// buffered SendChan as long as the client is not marked reconnecting.
 	client := &WSClient{
 		ID:         "fake-client",
 		SessionKey: base,
@@ -68,14 +49,12 @@ func TestWSMessageAckCarriesResolvedSessionKey(t *testing.T) {
 		ts.channel.handleWSClientMessage(client, payload, "evt-1")
 	}()
 
-	// Drain the inbound bus message so the handler never blocks.
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer drainCancel()
 	inbound, ok := ts.bus.ConsumeInbound(drainCtx)
 	if !ok {
 		t.Fatal("expected inbound message from handleWSClientMessage")
 	}
-	// Inbound keeps the client-provided key (resolution happens at emit time).
 	if inbound.ChatID != base {
 		t.Errorf("inbound chat_id = %q, want base %q", inbound.ChatID, base)
 	}
@@ -112,8 +91,6 @@ func TestWSMessageAckCarriesResolvedSessionKey(t *testing.T) {
 	}
 }
 
-// TestWSMessageAckWithoutAliasKeepsSessionKey ensures the nil-safe / no-alias
-// path: when no alias exists the ack carries the original session key.
 func TestWSMessageAckWithoutAliasKeepsSessionKey(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -164,11 +141,6 @@ func TestWSMessageAckWithoutAliasKeepsSessionKey(t *testing.T) {
 	}
 }
 
-// TestNativeRESTChatSendStreamAckCarriesResolvedSessionKey is the SSE mirror of
-// the WebSocket fix: with an alias base -> base:chat:3, the message.ack event
-// must report the resolved key AND subsequent events emitted under the alias
-// (message.stream / message.complete / history.updated) must be delivered to
-// the stream subscriber registered before resolution.
 func TestNativeRESTChatSendStreamAckCarriesResolvedSessionKey(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -176,9 +148,6 @@ func TestNativeRESTChatSendStreamAckCarriesResolvedSessionKey(t *testing.T) {
 	alias := base + ":chat:3"
 	setLoopAlias(ts.loop, base, alias)
 
-	// Reply to the inbound message using the resolved key, exactly like the
-	// agent loop does (PublishInbound carries the base chatID; the loop
-	// resolves it before emitting outbound events).
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -230,8 +199,6 @@ func TestNativeRESTChatSendStreamAckCarriesResolvedSessionKey(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", resp.StatusCode, payload)
 	}
 
-	// Parse SSE frames event-by-event so we can assert ordering: the ack must
-	// arrive first and already carry the resolved key.
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
@@ -281,8 +248,6 @@ func TestNativeRESTChatSendStreamAckCarriesResolvedSessionKey(t *testing.T) {
 	}
 }
 
-// TestNativeRESTChatSendStreamAckWithoutAlias keeps symmetry for the plain
-// case: no alias registered -> ack carries the original key.
 func TestNativeRESTChatSendStreamAckWithoutAlias(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -336,8 +301,6 @@ func TestNativeRESTChatSendStreamAckWithoutAlias(t *testing.T) {
 	}
 }
 
-// TestWSMessageAckEndToEndViaWebSocket exercises the real WS path: dial, send
-// a message with the base session key, and check the ack reports the alias.
 func TestWSMessageAckEndToEndViaWebSocket(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -357,7 +320,6 @@ func TestWSMessageAckEndToEndViaWebSocket(t *testing.T) {
 		t.Fatalf("first event = %q, want welcome", welcome.Event)
 	}
 
-	// Drain the inbound bus in background (the fake agent does not reply).
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()

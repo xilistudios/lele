@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package harness
 
 import (
@@ -50,23 +44,15 @@ func TestExpandArguments(t *testing.T) {
 		{"dollar0 untouched", "$0 $1", "one", "$0 one"},
 		{"dollar10 untouched", "cost $10 and $ARGUMENTS", "x", "cost $10 and x"},
 		{"arguments not eaten by one", "$ARGUMENTS | $1", "full text", "full text | full"},
-		// No argument placeholder in the template: the arguments are appended
-		// instead of dropped (Claude Code's "ARGUMENTS: <value>" rule).
 		{"no placeholder appends args", "plain text", "ignored", "plain text\n\nARGUMENTS: ignored"},
 		{"no placeholder keeps verbatim args", "inicia el pr", "con  dobles  espacios", "inicia el pr\n\nARGUMENTS: con  dobles  espacios"},
 		{"no placeholder keeps newlines", "line", "a\nb", "line\n\nARGUMENTS: a\nb"},
 		{"no placeholder with no args untouched", "plain text", "", "plain text"},
 		{"no placeholder with blank args untouched", "plain text", "  \n\t ", "plain text"},
-		// $0 and $10+ match the placeholder regexp but stay literal, so they
-		// must NOT count as "the template took the arguments".
 		{"dollar10 does not suppress append", "cost $10", "x", "cost $10\n\nARGUMENTS: x"},
 		{"dollar0 does not suppress append", "zero $0", "x", "zero $0\n\nARGUMENTS: x"},
 		{"dollar10 plus positional opts out", "cost $10 and $1", "x", "cost $10 and x"},
 		{"placeholder suppresses append", "run $ARGUMENTS", "extra", "run extra"},
-		// A positional placeholder receives ONE token, so a template that only
-		// references $1 must not swallow the rest of a long free-form argument:
-		// the words it cannot receive are appended (the bug report: "/task
-		// proceed with this error: …" arrived as just "proceed").
 		{"positional without full coverage appends args", "run $1", "extra more", "run extra\n\nARGUMENTS: extra more"},
 		{"all positionals covered suppresses append", "run $1 $2", "a b", "run a b"},
 		{"second positional missing appends args", "run $1 $2", "a b c", "run a b\n\nARGUMENTS: a b c"},
@@ -97,7 +83,7 @@ func TestTokenizeArgs(t *testing.T) {
 		{`"back\\slash"`, []string{`back\slash`}},
 		{`"dollar $VAR stays"`, []string{"dollar $VAR stays"}},
 		{`mix'ed'up`, []string{"mixedup"}},
-		{"unterminated 'quote", []string{"unterminated", "quote"}}, // unterminated quote tolerated: opens a token that runs to EOF
+		{"unterminated 'quote", []string{"unterminated", "quote"}},
 		{"tab\tand\nnewline", []string{"tab", "and", "newline"}},
 	}
 	for _, tc := range tests {
@@ -131,13 +117,11 @@ func TestExpandShellEnabled(t *testing.T) {
 		t.Errorf("got %q, want %q", got, "out:hello")
 	}
 
-	// stderr is captured too and errors still inject partial output
 	got = mustExpand(t, tpl("!`echo part; echo err >&2; exit 3`"), "", ExpandOptions{WorkDir: dir, AllowShell: true})
 	if !strings.HasPrefix(got, "[error:") || !strings.Contains(got, "part") || !strings.Contains(got, "err") {
 		t.Errorf("error case got %q", got)
 	}
 
-	// runs in WorkDir
 	got = mustExpand(t, tpl("!`pwd`"), "", ExpandOptions{WorkDir: dir, AllowShell: true})
 	if resolved, _ := filepath.EvalSymlinks(dir); !strings.HasSuffix(strings.TrimSpace(got), filepath.Base(resolved)) {
 		t.Errorf("pwd %q not run in %q", got, dir)
@@ -173,8 +157,6 @@ func TestExpandFileRefs(t *testing.T) {
 		{"trailing @ alone", "trailing @ alone"},
 	}
 	for _, tc := range tests {
-		// AllowAbsoluteFiles so the "abs" case inlines; the deny-by-default
-		// behavior is covered by TestExpandFileRefEscapeRejected.
 		got := mustExpand(t, tpl(tc.tmpl), "", ExpandOptions{WorkDir: dir, AllowAbsoluteFiles: true})
 		if got != tc.want {
 			t.Errorf("template %q:\n got %q\nwant %q", tc.tmpl, got, tc.want)
@@ -195,8 +177,6 @@ func TestExpandFileRefEscapeRejected(t *testing.T) {
 	if got != "[outside workspace: @../secret]" {
 		t.Errorf("got %q, want escape placeholder", got)
 	}
-	// absolute paths are blocked by default: the file must not even be stat'ed,
-	// and its content must never appear in the output.
 	absPath := filepath.Join(parent, "secret")
 	got = mustExpand(t, tpl("@"+absPath), "", ExpandOptions{WorkDir: work})
 	if got != "[blocked: absolute path]" {
@@ -205,12 +185,10 @@ func TestExpandFileRefEscapeRejected(t *testing.T) {
 	if strings.Contains(got, "TOPSECRET") {
 		t.Errorf("abs default leaked file content: %q", got)
 	}
-	// ...and inlined only when explicitly allowed.
 	got = mustExpand(t, tpl("@"+absPath), "", ExpandOptions{WorkDir: work, AllowAbsoluteFiles: true})
 	if got != "TOPSECRET" {
 		t.Errorf("abs allowed got %q, want content", got)
 	}
-	// Allowed but nonexistent keeps the missing placeholder.
 	got = mustExpand(t, tpl("@/definitely/not/here-42"), "", ExpandOptions{WorkDir: work, AllowAbsoluteFiles: true})
 	if got != "[missing: @/definitely/not/here-42]" {
 		t.Errorf("abs missing got %q, want missing placeholder", got)
@@ -238,19 +216,15 @@ func TestExpandOrderSecurity(t *testing.T) {
 	}
 	dir := t.TempDir()
 
-	// args containing a shell placeholder must never execute: $ARGUMENTS is
-	// substituted AFTER !`cmd` resolution, so the injected text is inert.
 	got := mustExpand(t, tpl("$ARGUMENTS"), "!`echo pwned`", ExpandOptions{WorkDir: dir, AllowShell: false})
 	if got != "!`echo pwned`" {
 		t.Errorf("args placeholder text altered: %q", got)
 	}
-	// and even with shell enabled for the template, injected args are not rescanned
 	got = mustExpand(t, tpl("$ARGUMENTS"), "!`touch pwned.flag`", ExpandOptions{WorkDir: dir, AllowShell: true})
 	if _, err := os.Stat(filepath.Join(dir, "pwned.flag")); err == nil {
 		t.Fatal("argument-injected shell ran")
 	}
 
-	// file content must not be rescanned for $N either
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("FILE_HAS_$1_LITERAL"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +235,6 @@ func TestExpandOrderSecurity(t *testing.T) {
 }
 
 func TestExpandDefaults(t *testing.T) {
-	// zero-value options: WorkDir falls back to cwd, caps to defaults
 	got := mustExpand(t, tpl("plain"), "", ExpandOptions{})
 	if got != "plain" {
 		t.Errorf("got %q", got)

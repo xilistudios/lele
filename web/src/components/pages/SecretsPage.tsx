@@ -3,13 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useSecrets } from '../../hooks/useSecrets'
 import type { Agent, SecretAuditRecord, SecretInput, SecretMeta } from '../../lib/types'
-import { Button, ErrorBanner, Modal } from '../atoms'
+import { BackButton, Button, ErrorBanner, Modal } from '../atoms'
 import { AgentChipMultiSelect } from '../molecules'
 import { Sidebar } from '../organisms/Sidebar'
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function formatTimestamp(iso?: string): string {
   if (!iso) return '—'
@@ -32,10 +28,6 @@ function BackendBadge({ backend }: { backend?: string }) {
     </span>
   )
 }
-
-// ---------------------------------------------------------------------------
-// Secret card
-// ---------------------------------------------------------------------------
 
 function SecretCard({
   secret,
@@ -75,7 +67,6 @@ function SecretCard({
     try {
       const value = await onReveal(secret.name)
       setRevealed(value)
-      // Auto-hide after 10 seconds
       hideTimer.current = setTimeout(() => setRevealed(null), 10_000)
     } catch (err) {
       setRevealError((err as Error).message)
@@ -90,9 +81,7 @@ function SecretCard({
       await navigator.clipboard.writeText(revealed)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // clipboard unavailable — ignore
-    }
+    } catch {}
   }, [revealed])
 
   const tags = secret.tags ?? []
@@ -217,10 +206,6 @@ function SecretCard({
   )
 }
 
-// ---------------------------------------------------------------------------
-// Add / edit form modal
-// ---------------------------------------------------------------------------
-
 export function SecretFormModal({
   busy,
   agents,
@@ -229,13 +214,7 @@ export function SecretFormModal({
   onSubmit,
 }: {
   busy: boolean
-  /** Roster the scope selector grants access to (from the app's agent list). */
   agents: Agent[]
-  /**
-   * Secret being edited. When set the modal opens in edit mode: the name is
-   * fixed (it is the keyring key, not a label), an empty value keeps the stored
-   * plaintext, and the submit button says Save.
-   */
   initial?: SecretMeta | null
   onClose: () => void
   onSubmit: (input: SecretInput) => Promise<void>
@@ -258,8 +237,6 @@ export function SecretFormModal({
       setError(t('secrets.errorName', 'Name is required'))
       return
     }
-    // Editing without a value means "keep the stored secret", so only creating
-    // requires one.
     if (!isEdit && !form.value.trim()) {
       setError(t('secrets.errorValue', 'Value is required'))
       return
@@ -267,15 +244,12 @@ export function SecretFormModal({
     setError(null)
     const input: SecretInput = {
       name: form.name.trim(),
-      // Whitespace-only counts as blank on edit: the contract is "leave it
-      // alone", not "store spaces".
       value: isEdit && !form.value.trim() ? '' : form.value,
       description: form.description?.trim() || undefined,
       tags: tagsText
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean),
-      // Scope is chosen from the agent roster (chips), not parsed from text.
       scope: form.scope ?? [],
     }
     try {
@@ -408,10 +382,6 @@ export function SecretFormModal({
   )
 }
 
-// ---------------------------------------------------------------------------
-// Audit log
-// ---------------------------------------------------------------------------
-
 function AuditLog({ records }: { records: SecretAuditRecord[] }) {
   const { t } = useTranslation()
   if (records.length === 0) {
@@ -457,10 +427,6 @@ function AuditLog({ records }: { records: SecretAuditRecord[] }) {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
-
 export function SecretsPage() {
   const { t } = useTranslation()
   const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar, agents } =
@@ -478,8 +444,6 @@ export function SecretsPage() {
     updateSecret,
     removeSecret,
   } = useSecrets()
-  // `null` = closed, `{ mode: 'create' }` = new secret, `{ mode: 'edit' }` = the
-  // card that was opened. One state, so the two modes cannot be open at once.
   const [form, setForm] = useState<
     { mode: 'create' } | { mode: 'edit'; secret: SecretMeta } | null
   >(null)
@@ -496,8 +460,6 @@ export function SecretsPage() {
       setFormBusy(true)
       try {
         if (form?.mode === 'edit') {
-          // The name travels in the path: editing edits the keyring entry, it
-          // never renames or duplicates it.
           await updateSecret(form.secret.name, {
             value: input.value,
             description: input.description,
@@ -540,7 +502,7 @@ export function SecretsPage() {
     }`
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
+    <div className="flex app-shell bg-background-primary text-text-primary">
       <Sidebar
         collapsed={!sidebarOpen}
         mobileOpen={mobileSidebarOpen}
@@ -568,6 +530,7 @@ export function SecretsPage() {
                 <line x1="9" y1="3" x2="9" y2="21" />
               </svg>
             </button>
+            <BackButton />
             <h1 className="text-base font-semibold text-text-primary">
               {t('secrets.title', 'Secrets')}
             </h1>

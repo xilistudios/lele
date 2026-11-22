@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package update
 
 import (
@@ -15,7 +9,6 @@ import (
 	"time"
 )
 
-// TestRunAllLIFOOrder asserts hooks run in reverse registration order.
 func TestRunAllLIFOOrder(t *testing.T) {
 	c := NewShutdownCoordinator(5 * time.Second)
 
@@ -51,8 +44,6 @@ func TestRunAllLIFOOrder(t *testing.T) {
 	}
 }
 
-// TestRunAllIdempotent asserts a second RunAll returns the recorded results
-// without re-running any hook.
 func TestRunAllIdempotent(t *testing.T) {
 	c := NewShutdownCoordinator(5 * time.Second)
 
@@ -78,7 +69,6 @@ func TestRunAllIdempotent(t *testing.T) {
 		t.Fatalf("second RunAll results = %v, want the recorded counter=boom", second)
 	}
 
-	// Registering after shutdown started is a no-op.
 	c.Register("late", time.Second, func(context.Context) error {
 		t.Error("late hook must never run")
 		return nil
@@ -94,18 +84,14 @@ func TestRunAllIdempotent(t *testing.T) {
 	}
 }
 
-// TestRunAllHookTimeout asserts a hook that ignores its context and sleeps
-// past its timeout is recorded as an error and does not block the next hook.
 func TestRunAllHookTimeout(t *testing.T) {
 	c := NewShutdownCoordinator(10 * time.Second)
 
 	nextRan := make(chan struct{})
-	// Registered first → runs last. Proves the slow hook did not block it.
 	c.Register("fast", time.Second, func(context.Context) error {
 		close(nextRan)
 		return nil
 	})
-	// Registered second → runs first, and hangs well past its timeout.
 	c.Register("stuck", 100*time.Millisecond, func(context.Context) error {
 		time.Sleep(5 * time.Second)
 		return nil
@@ -134,15 +120,11 @@ func TestRunAllHookTimeout(t *testing.T) {
 	if results["fast"] != nil {
 		t.Fatalf("fast hook error = %v, want nil", results["fast"])
 	}
-	// The whole teardown must be bounded by the hook timeout, not the hang.
 	if elapsed > 2*time.Second {
 		t.Fatalf("RunAll took %v; the hanging hook blocked shutdown", elapsed)
 	}
 }
 
-// TestRunAllBudgetExceeded asserts that once the overall budget is spent, the
-// remaining hooks are skipped with the budget error, and that the budget really
-// bounds the total time RunAll takes.
 func TestRunAllBudgetExceeded(t *testing.T) {
 	budget := 200 * time.Millisecond
 	c := NewShutdownCoordinator(budget)
@@ -161,7 +143,6 @@ func TestRunAllBudgetExceeded(t *testing.T) {
 			return nil
 		}
 	}
-	// Registration order (LIFO execution): a → b → c.
 	c.Register("c", time.Second, slow("c", 10*time.Millisecond))
 	c.Register("b", time.Second, slow("b", 10*time.Second))
 	c.Register("a", time.Second, slow("a", 10*time.Millisecond))
@@ -170,16 +151,12 @@ func TestRunAllBudgetExceeded(t *testing.T) {
 	results := c.RunAll(context.Background())
 	elapsed := time.Since(started)
 
-	// "a" runs first and finishes well inside the budget.
 	if err := results["a"]; err != nil {
 		t.Fatalf("hook \"a\" error = %v, want nil (it ran within the budget)", err)
 	}
-	// "b" outlives what is left of the budget, so its own timeout is clamped to
-	// the remaining time and it is recorded as a timeout, not a success.
 	if err := results["b"]; !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("hook \"b\" error = %v, want a deadline-exceeded timeout", err)
 	}
-	// By then the budget is gone: "c" must never be started.
 	if err := results["c"]; !errors.Is(err, ErrShutdownBudgetExceeded) {
 		t.Fatalf("hook \"c\" error = %v, want ErrShutdownBudgetExceeded", err)
 	}
@@ -194,9 +171,6 @@ func TestRunAllBudgetExceeded(t *testing.T) {
 	}
 }
 
-// TestRunAllCriticalHookRunsAfterBudget asserts a critical hook runs even when
-// the overall budget has already been spent by the non-critical pass. This is
-// the guarantee that keeps the instance-lock release from being skipped.
 func TestRunAllCriticalHookRunsAfterBudget(t *testing.T) {
 	c := NewShutdownCoordinator(100 * time.Millisecond)
 
@@ -215,19 +189,14 @@ func TestRunAllCriticalHookRunsAfterBudget(t *testing.T) {
 		}
 	}
 
-	// lock-release is registered first => runs last in LIFO, and is critical.
 	c.RegisterCritical("lock-release", time.Second, slow("lock", 10*time.Millisecond))
-	// This non-critical hook burns the entire budget.
 	c.Register("burn", time.Second, slow("burn", 5*time.Second))
 
 	results := c.RunAll(context.Background())
 
-	// "burn" got started (its timeout was clamped to the budget) and is recorded
-	// as a deadline-exceeded timeout.
 	if err := results["burn"]; !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("hook \"burn\" error = %v, want a deadline-exceeded timeout", err)
 	}
-	// The critical hook must have run to completion despite the budget being gone.
 	if err := results["lock-release"]; err != nil {
 		t.Fatalf("critical hook \"lock-release\" error = %v, want nil (must run regardless of budget)", err)
 	}
@@ -239,8 +208,6 @@ func TestRunAllCriticalHookRunsAfterBudget(t *testing.T) {
 	}
 }
 
-// TestRunAllSurvivesPanic asserts a panicking hook is recorded as an error and
-// the remaining hooks still run.
 func TestRunAllSurvivesPanic(t *testing.T) {
 	c := NewShutdownCoordinator(5 * time.Second)
 
@@ -282,8 +249,6 @@ func TestRunAllSurvivesPanic(t *testing.T) {
 	}
 }
 
-// TestRunAllIgnoresCancelledParentCtx asserts an already-cancelled caller
-// context does not prevent the hooks from running.
 func TestRunAllIgnoresCancelledParentCtx(t *testing.T) {
 	c := NewShutdownCoordinator(5 * time.Second)
 
@@ -292,7 +257,6 @@ func TestRunAllIgnoresCancelledParentCtx(t *testing.T) {
 	ctxFn := func(ctx context.Context) error {
 		mu.Lock()
 		defer mu.Unlock()
-		// The hook's own context must be alive even though the caller's is not.
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -316,8 +280,6 @@ func TestRunAllIgnoresCancelledParentCtx(t *testing.T) {
 	}
 }
 
-// TestRunAllConcurrentCallersSeeResults asserts a second RunAll racing the
-// first blocks and returns the same recorded results.
 func TestRunAllConcurrentCallersSeeResults(t *testing.T) {
 	c := NewShutdownCoordinator(5 * time.Second)
 
@@ -355,8 +317,6 @@ func TestRunAllConcurrentCallersSeeResults(t *testing.T) {
 	}
 }
 
-// TestRegisterNilFuncIgnored asserts a nil hook is dropped instead of panicking
-// during RunAll.
 func TestRegisterNilFuncIgnored(t *testing.T) {
 	c := NewShutdownCoordinator(time.Second)
 	c.Register("nil", time.Second, nil)
@@ -365,8 +325,6 @@ func TestRegisterNilFuncIgnored(t *testing.T) {
 	}
 }
 
-// TestNewShutdownCoordinatorDefaultsTotal asserts a non-positive budget falls
-// back to the default.
 func TestNewShutdownCoordinatorDefaultsTotal(t *testing.T) {
 	if got := NewShutdownCoordinator(0).Total(); got != DefaultShutdownBudget {
 		t.Fatalf("Total() = %v, want default %v", got, DefaultShutdownBudget)

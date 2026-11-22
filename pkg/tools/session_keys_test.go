@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/lele
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package tools
 
 import (
@@ -13,14 +7,10 @@ import (
 
 func TestSessionKeysRelated(t *testing.T) {
 	related := [][2]string{
-		// exact
 		{"telegram:123", "telegram:123"},
-		// channel-qualified vs bare (issue #230 native/WebUI case)
 		{"native:550e8400-e29b-41d4-a716-446655440000", "550e8400-e29b-41d4-a716-446655440000"},
-		// runtime agent key vs origin key
 		{"agent:main:telegram:123", "telegram:123"},
 		{"agent:main:telegram:123", "123"},
-		// parent vs alias / child session
 		{"telegram:123", "telegram:123:chat:2"},
 		{"telegram:123", "telegram:123:subagent-1"},
 	}
@@ -34,14 +24,10 @@ func TestSessionKeysRelated(t *testing.T) {
 	}
 
 	unrelated := [][2]string{
-		// siblings must not leak
 		{"telegram:123:chat:1", "telegram:123:chat:2"},
 		{"native:uuid-a", "native:uuid-b"},
-		// cross-channel same chat id must not leak
 		{"native:uuid", "telegram:uuid"},
-		// substring that is not segment-aligned
 		{"agent:x:native:uuid", "ative:uuid"},
-		// empty never matches
 		{"", ""},
 		{"", "telegram:123"},
 		{"telegram:123", ""},
@@ -93,8 +79,6 @@ func TestTaskBelongsToSession(t *testing.T) {
 			wantMatch: false,
 		},
 		{
-			// Intentional: an origin key covers every alias of the session —
-			// aliases share one history, so a stop must cancel all of them.
 			name:      "origin covers sibling alias",
 			origin:    "telegram:123",
 			taskID:    "subagent-1",
@@ -102,7 +86,6 @@ func TestTaskBelongsToSession(t *testing.T) {
 			wantMatch: true,
 		},
 		{
-			// With only per-alias spawner keys, sibling aliases stay isolated.
 			name:      "sibling alias does not match on spawner alone",
 			spawner:   "telegram:123:chat:1",
 			taskID:    "subagent-1",
@@ -133,9 +116,6 @@ func TestTaskBelongsToSession(t *testing.T) {
 	}
 }
 
-// TestSpawnWithOptionsCapturesSpawnerKey verifies the spawn-time attribution
-// used for cancellation: the runtime session key from the agent tool context
-// is recorded on the task (and stays empty without one).
 func TestSpawnWithOptionsCapturesSpawnerKey(t *testing.T) {
 	sm := NewSubagentManager(&recordingProvider{}, "test-model", "/tmp/test", nil, 10)
 
@@ -155,8 +135,6 @@ func TestSpawnWithOptionsCapturesSpawnerKey(t *testing.T) {
 		t.Errorf("OriginSessionKey = %q, want %q", task.OriginSessionKey, "native:uuid-9")
 	}
 
-	// Spawn without agent tool context: spawner key stays empty, origin is
-	// still recorded, and the task remains stoppable via the origin.
 	if _, err := sm.SpawnWithOptions(context.Background(), "task 2", "label", "", "native", "uuid-9", nil, SpawnOptions{}); err != nil {
 		t.Fatalf("plain spawn: %v", err)
 	}
@@ -177,8 +155,6 @@ func TestSpawnWithOptionsCapturesSpawnerKey(t *testing.T) {
 	}
 }
 
-// TestTaskOwnershipKey documents the ownership inheritance used by the
-// subagent tool loop (nested spawns belong to the spawner's session).
 func TestTaskOwnershipKey(t *testing.T) {
 	if got := taskOwnershipKey(&SubagentTask{SpawnerSessionKey: "agent:main:native:u", OriginSessionKey: "native:u"}); got != "agent:main:native:u" {
 		t.Errorf("taskOwnershipKey = %q, want spawner key", got)
@@ -191,10 +167,6 @@ func TestTaskOwnershipKey(t *testing.T) {
 	}
 }
 
-// TestSubagentLoopOwner pins the guarantee the background-exec tools rely on:
-// a subagent tool loop is never attributed to an empty session key, because
-// VisibleTo treats an empty caller as an unscoped operator view that sees
-// every process in the manager.
 func TestSubagentLoopOwner(t *testing.T) {
 	tests := []struct {
 		name  string

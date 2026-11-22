@@ -17,10 +17,6 @@ import (
 	"time"
 )
 
-// claudeInferenceScopeWant is the exact gate message for
-// action="token exchange" and scopes=["org:create_api_key"]. It is spelled out
-// literally (not reused from the implementation) so that the wording — which is
-// user-facing and points at the recovery command — cannot drift silently.
 const claudeInferenceScopeWant = "Claude OAuth token exchange returned a token without the required user:inference scope (scopes: org:create_api_key). Re-run `lele auth login --provider claude` so lele opens the Claude.ai OAuth flow, or import/use a fresh Claude Code login."
 
 func TestClaudeScopesHaveInference(t *testing.T) {
@@ -29,8 +25,6 @@ func TestClaudeScopesHaveInference(t *testing.T) {
 		scopes []string
 		want   bool
 	}{
-		// The allowlist has SIX entries (jcode `claude_scopes_have_inference`),
-		// not just `user:inference`: any of them grants inference access.
 		{"user:inference", []string{"user:inference"}, true},
 		{"user:ccr_inference", []string{"user:ccr_inference"}, true},
 		{"user:voice", []string{"user:voice"}, true},
@@ -86,8 +80,6 @@ func TestEnsureClaudeInferenceScope(t *testing.T) {
 	})
 }
 
-// claudeScopedTokenServer answers every token request with a 200 carrying the
-// given `scope` value (the field is omitted entirely when scope == "").
 func claudeScopedTokenServer(t *testing.T, body string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -100,15 +92,9 @@ func claudeScopedTokenServer(t *testing.T, body string) *httptest.Server {
 	return srv
 }
 
-// TestClaudeExchangeRejectsMissingInferenceScope is mandatory mutation #3: with
-// RequireInferenceScope set, a 200 whose scope list has no inference scope must
-// fail the exchange and return no credential at all.
 func TestClaudeExchangeRejectsMissingInferenceScope(t *testing.T) {
 	srv := claudeScopedTokenServer(t, `{"access_token":"at","refresh_token":"rt","expires_in":3600,"scope":"org:create_api_key user:profile"}`)
 
-	// Built by hand on purpose: the flag stays off here so this test isolates the
-	// inference gate (see TestClaudeExchangeRequiresRefreshTokenAndExpiry for the
-	// complete-credential gate).
 	cfg := OAuthProviderConfig{
 		Name:                  "anthropic",
 		ClientID:              "cid",
@@ -134,8 +120,6 @@ func TestClaudeExchangeRejectsMissingInferenceScope(t *testing.T) {
 	}
 }
 
-// TestClaudeExchangeAcceptsEmptyScope pins the "no scope reported" case: an
-// unscoped token response is not a gate failure.
 func TestClaudeExchangeAcceptsEmptyScope(t *testing.T) {
 	srv := claudeScopedTokenServer(t, `{"access_token":"at","refresh_token":"rt","expires_in":3600}`)
 
@@ -164,13 +148,6 @@ func TestClaudeExchangeAcceptsEmptyScope(t *testing.T) {
 	}
 }
 
-// TestClaudeExchangeRequiresRefreshTokenAndExpiry is the V7 guard, and the
-// mandatory mutation target for it: with RequireRefreshToken set, a 200 that
-// carries an access token but no refresh_token (or no expires_in) must fail the
-// exchange with the actionable error and return NO credential. Without the gate
-// the exchange "succeeds", prints Login successful! and stores a credential
-// that can never be refreshed (and whose zero expiry makes NeedsRefresh() true
-// forever) — so removing the check must turn this test red.
 func TestClaudeExchangeRequiresRefreshTokenAndExpiry(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -194,9 +171,7 @@ func TestClaudeExchangeRequiresRefreshTokenAndExpiry(t *testing.T) {
 			srv := claudeScopedTokenServer(t, tt.body)
 
 			cfg := OAuthProviderConfig{
-				Name: "anthropic",
-				// The inference gate stays on so the response is otherwise valid
-				// for the Claude flow: the new gate is the only reason to fail.
+				Name:                  "anthropic",
 				ClientID:              "cid",
 				RequireInferenceScope: true,
 				RequireRefreshToken:   true,
@@ -223,21 +198,9 @@ func TestClaudeExchangeRequiresRefreshTokenAndExpiry(t *testing.T) {
 	}
 }
 
-// TestRequireRefreshTokenMessageUsesDisplayName pins the D6 provider-aware
-// wording: reusing the RequireRefreshToken gate for a second provider (Gemini)
-// must name that provider in both the message body and the recovery command,
-// instead of hardcoding "Claude". The label is OAuthProviderConfig.DisplayName;
-// an empty value still falls back to "Claude", so the historical message
-// (asserted byte-for-byte by TestClaudeExchangeRequiresRefreshTokenAndExpiry)
-// is preserved. The mandatory mutation for this test is to hardcode
-// label := "Claude" inside requireRefreshTokenAndExpiry.
 func TestRequireRefreshTokenMessageUsesDisplayName(t *testing.T) {
-	// 200 with an access token but no refresh_token (and a valid expires_in, so
-	// the refresh-token branch is the only reason to fail).
 	srv := claudeScopedTokenServer(t, `{"access_token":"a","expires_in":3600,"token_type":"Bearer"}`)
 
-	// Hand-built on purpose: this task adds no GeminiOAuthConfig(), and the point
-	// is that the message follows whatever DisplayName the config carries.
 	cfg := OAuthProviderConfig{
 		Name:                "gemini",
 		DisplayName:         "Gemini",
@@ -268,11 +231,6 @@ func TestRequireRefreshTokenMessageUsesDisplayName(t *testing.T) {
 	}
 }
 
-// TestClaudeRefreshRejectsMissingInferenceScope is the V2 guard: when the gate
-// rejects a refreshed token, RefreshAccessToken must still hand the caller the
-// credential the endpoint just issued, so the ROTATED refresh token can be
-// persisted before the failure is surfaced. The old refresh token is already
-// consumed at that point; dropping the new one bricks the account.
 func TestClaudeRefreshRejectsMissingInferenceScope(t *testing.T) {
 	var hits int
 	var wireBody []byte
@@ -311,7 +269,6 @@ func TestClaudeRefreshRejectsMissingInferenceScope(t *testing.T) {
 		t.Errorf("token endpoint hits = %d, want 1 (the gate is not a retry trigger)", hits)
 	}
 
-	// The credential travels with the error (correction V2).
 	if refreshed == nil {
 		t.Fatal("RefreshAccessToken() returned a nil credential; the rotated refresh token would be lost")
 	}
@@ -333,8 +290,6 @@ func TestClaudeRefreshRejectsMissingInferenceScope(t *testing.T) {
 		t.Errorf("error %q does not mention user:inference", err.Error())
 	}
 
-	// The refresh request itself is unchanged: same wire as every other
-	// provider, just JSON-encoded.
 	var sent map[string]string
 	if err := json.Unmarshal(wireBody, &sent); err != nil {
 		t.Fatalf("decoding request body %q: %v", string(wireBody), err)
@@ -344,16 +299,8 @@ func TestClaudeRefreshRejectsMissingInferenceScope(t *testing.T) {
 	}
 }
 
-// claudeAuthorizeURLGolden is the byte-for-byte authorize URL the Claude preset
-// must produce (plan F1-T05). It is spelled out literally so any drift in the
-// endpoint host, the scope set/order, the extra `code=true` param or the state
-// wiring fails loudly.
 const claudeAuthorizeURLGolden = "https://claude.com/cai/oauth/authorize?client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&code=true&code_challenge=CHALLENGE&code_challenge_method=S256&redirect_uri=http%3A%2F%2Flocalhost%3A54321%2Fcallback&response_type=code&scope=org%3Acreate_api_key+user%3Aprofile+user%3Ainference+user%3Asessions%3Aclaude_code+user%3Amcp_servers+user%3Afile_upload&state=verifier"
 
-// TestClaudeOAuthConfigPreset pins every field of the Claude preset verbatim.
-// The preset is a fixed contract with a third-party service: changing any value
-// here changes what the user logs into or how the token is presented, so this
-// test is intentionally exhaustive rather than behavioural.
 func TestClaudeOAuthConfigPreset(t *testing.T) {
 	cfg := ClaudeOAuthConfig()
 
@@ -424,8 +371,6 @@ func TestClaudeOAuthConfigPreset(t *testing.T) {
 		t.Errorf("HTTPClient.Timeout = %s, want %s", cfg.HTTPClient.Timeout, 15*time.Second)
 	}
 
-	// Explicit regressions, one per jcode trap. These duplicate the checks above
-	// on purpose: they are the failures a reviewer looks for first.
 	t.Run("authorize host is claude.com not platform", func(t *testing.T) {
 		u, err := url.Parse(cfg.AuthorizeURL)
 		if err != nil {
@@ -454,10 +399,6 @@ func TestClaudeOAuthConfigPreset(t *testing.T) {
 	})
 }
 
-// TestClaudeAuthorizeURLGolden pins the full authorize URL. Changing
-// AuthorizeURL to the platform/console surface is the most expensive jcode trap
-// (tokens that refresh but are rejected for inference), and this test is its
-// primary detector.
 func TestClaudeAuthorizeURLGolden(t *testing.T) {
 	got := buildAuthorizeURL(
 		ClaudeOAuthConfig(),
@@ -470,9 +411,6 @@ func TestClaudeAuthorizeURLGolden(t *testing.T) {
 	}
 }
 
-// TestParseAuthorizeCodeInput covers the jcode precedence (D2): URL with code=,
-// bare query string, plain code, code#state, whitespace, and the two error
-// shapes.
 func TestParseAuthorizeCodeInput(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -515,10 +453,6 @@ func TestParseAuthorizeCodeInput(t *testing.T) {
 		})
 	}
 
-	// A "#" inside the code value wins over a state from the query string, and
-	// only the FIRST "#" splits (jcode splitn(2, '#')). When the hash is outside
-	// the value it is consumed by the URL/query parsing (jcode behaves the same
-	// way), so the precedence case has to percent-encode it.
 	t.Run("hash inside the code overrides query state", func(t *testing.T) {
 		code, state, err := parseAuthorizeCodeInput("code=abc%23fromhash&state=fromquery")
 		if err != nil {
@@ -550,21 +484,10 @@ func TestParseAuthorizeCodeInput(t *testing.T) {
 	})
 }
 
-// --- F1-T06: paste-code login and browser-to-paste fallback --------------------
-
-// claudeManualRedirectForTest is the hosted redirect the Claude paste flow must
-// advertise and echo on the exchange.
 const claudeManualRedirectForTest = "https://platform.claude.com/oauth/code/callback"
 
-// claudeAuthorizeHostForTest is the authorize surface of the Claude preset; the
-// console/platform host mints tokens the inference API rejects.
 const claudeAuthorizeHostForTest = "https://claude.com/cai/oauth/authorize"
 
-// captureStdout swaps os.Stdout for a pipe, runs fn and returns everything it
-// printed. The original descriptor is restored with t.Cleanup so a failing
-// assertion can never leave the process writing into a closed pipe. The pipe is
-// drained on a separate goroutine (the standard os.Pipe capture idiom) so the
-// test cannot deadlock on a full pipe buffer.
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 
@@ -595,11 +518,6 @@ func captureStdout(t *testing.T, fn func()) string {
 	return out
 }
 
-// pasteTokenRecorder is the httptest token endpoint used by the paste-flow
-// tests: it records the raw body and hit count of every request and answers 200
-// with an access token plus an inference scope (the Claude preset gates the
-// exchange on it). The fields are read only after the request has completed,
-// mirroring the recorder pattern already used in TestClaudeRefreshRejects…
 type pasteTokenRecorder struct {
 	srv  *httptest.Server
 	body []byte
@@ -623,7 +541,6 @@ func newPasteTokenRecorder(t *testing.T) *pasteTokenRecorder {
 	return rec
 }
 
-// claudeConfig returns the Claude preset pointed at the recorder endpoint.
 func (rec *pasteTokenRecorder) claudeConfig() OAuthProviderConfig {
 	cfg := ClaudeOAuthConfig()
 	cfg.TokenURL = rec.srv.URL
@@ -631,8 +548,6 @@ func (rec *pasteTokenRecorder) claudeConfig() OAuthProviderConfig {
 	return cfg
 }
 
-// sent decodes the recorded JSON body into a flat map (the Claude preset uses
-// TokenRequestJSON, so every request field is a JSON string).
 func (rec *pasteTokenRecorder) sent(t *testing.T) map[string]string {
 	t.Helper()
 
@@ -643,11 +558,6 @@ func (rec *pasteTokenRecorder) sent(t *testing.T) map[string]string {
 	return m
 }
 
-// TestLoginPasteCodeExchangesWithManualRedirect pins the whole paste wire: the
-// authorize URL must carry the hosted manual redirect and the PKCE verifier as
-// state, and the exchange must echo state, code_verifier and redirect_uri.
-// Dropping the State from the exchange params (or sending the parsed state
-// instead of the verifier) turns this test red — mandatory mutation for F1-T06.
 func TestLoginPasteCodeExchangesWithManualRedirect(t *testing.T) {
 	rec := newPasteTokenRecorder(t)
 	cfg := rec.claudeConfig()
@@ -684,9 +594,6 @@ func TestLoginPasteCodeExchangesWithManualRedirect(t *testing.T) {
 		}
 	}
 
-	// The printed URL must be the claude.com authorize surface carrying the
-	// hosted manual redirect and the PKCE verifier as state: the paste flow never
-	// falls back to the loopback redirect.
 	if !strings.Contains(out, claudeAuthorizeHostForTest) {
 		t.Errorf("stdout does not contain the authorize URL:\n%s", out)
 	}
@@ -698,9 +605,6 @@ func TestLoginPasteCodeExchangesWithManualRedirect(t *testing.T) {
 	}
 }
 
-// TestLoginPasteCodeStateMismatch pins the stale-code guard: a non-empty pasted
-// state that differs from the verifier this flow generated must fail without
-// issuing any request.
 func TestLoginPasteCodeStateMismatch(t *testing.T) {
 	rec := newPasteTokenRecorder(t)
 	cfg := rec.claudeConfig()
@@ -728,8 +632,6 @@ func TestLoginPasteCodeStateMismatch(t *testing.T) {
 	}
 }
 
-// TestLoginPasteCodeAcceptsBareCode covers correction V8: a bare code without a
-// state is valid and the PKCE verifier is substituted as the exchange state.
 func TestLoginPasteCodeAcceptsBareCode(t *testing.T) {
 	rec := newPasteTokenRecorder(t)
 	cfg := rec.claudeConfig()
@@ -763,8 +665,6 @@ func TestLoginPasteCodeAcceptsBareCode(t *testing.T) {
 	}
 }
 
-// TestLoginPasteCodeRequiresManualRedirect pins the guard that keeps the
-// paste-code flow off providers without a hosted redirect.
 func TestLoginPasteCodeRequiresManualRedirect(t *testing.T) {
 	cfg := ClaudeOAuthConfig()
 	cfg.ManualRedirectURI = ""
@@ -782,16 +682,6 @@ func TestLoginPasteCodeRequiresManualRedirect(t *testing.T) {
 	}
 }
 
-// TestLoginBrowserFallsBackToPasteOnBindFailure exercises the degradation path:
-// with the loopback port occupied, loginBrowser must announce the failure and
-// finish the login through the manual paste flow.
-//
-// The fallback calls LoginPasteCode, which mints a fresh PKCE the test cannot
-// predict, so the pasted value is a bare code: an absent pasted state is
-// substituted by the freshly generated verifier (jcode behavior), which keeps
-// this test about the degradation, not about state validation (that is covered
-// by TestLoginPasteCodeExchangesWithManualRedirect and
-// TestLoginPasteCodeStateMismatch).
 func TestLoginBrowserFallsBackToPasteOnBindFailure(t *testing.T) {
 	occupied, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -828,9 +718,6 @@ func TestLoginBrowserFallsBackToPasteOnBindFailure(t *testing.T) {
 	}
 }
 
-// TestLoginBrowserWithoutFallbackKeepsBindError guards the historical behavior:
-// the exported LoginBrowser (fallbackToPaste=false) must return the original
-// bind error untouched.
 func TestLoginBrowserWithoutFallbackKeepsBindError(t *testing.T) {
 	occupied, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -854,16 +741,6 @@ func TestLoginBrowserWithoutFallbackKeepsBindError(t *testing.T) {
 	}
 }
 
-// TestLoginBrowserHeadlessHintIsProviderSpecific pins D9: the hint printed by
-// loginBrowser must name the provider that actually owns the alternative flow.
-// The previous `case cfg.ManualRedirectURI != ""` arm advertised
-// `--provider claude --paste-code` for ANY preset with a hosted redirect, so the
-// Gemini preset would have been told to run the Claude command.
-//
-// All four providers that can reach this switch are covered: openai (device
-// code), anthropic and gemini (hosted paste redirect), and google-antigravity,
-// whose silence is a free regression canary — it has no ManualRedirectURI and no
-// alternative flow, and used to print a misleading openai line.
 func TestLoginBrowserHeadlessHintIsProviderSpecific(t *testing.T) {
 	tests := []struct {
 		name string

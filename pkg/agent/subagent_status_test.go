@@ -7,9 +7,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// Tests for GetSessionSubagents consuming the persisted subagent status
-// instead of reporting every past subagent as "completed" (WebUI sidebar bug).
-
 func getTestAgentWithSessions(t *testing.T, al *AgentLoop) *AgentInstance {
 	t.Helper()
 	inst, ok := al.registry.GetAgent("main")
@@ -19,10 +16,6 @@ func getTestAgentWithSessions(t *testing.T, al *AgentLoop) *AgentInstance {
 	return inst
 }
 
-// TestGetSessionSubagents_PersistedStatusWins documents the fix: a subagent
-// whose task ended as failed/cancelled/... must keep that status once its
-// in-memory task is gone. Before the fix the persisted-session scan hard-coded
-// Status: "completed", so the WebUI sidebar showed failures as green.
 func TestGetSessionSubagents_PersistedStatusWins(t *testing.T) {
 	al, _ := createLLMRunnerTestAgentLoop(t)
 	inst := getTestAgentWithSessions(t, al)
@@ -59,10 +52,6 @@ func TestGetSessionSubagents_PersistedStatusWins(t *testing.T) {
 	}
 }
 
-// TestGetSessionSubagents_LegacySessionsFallBackToCompleted pins the
-// backward-compat fallback: sessions persisted before subagent_status existed
-// carry an empty status and are reported as "completed", matching the
-// historical behavior for old data.
 func TestGetSessionSubagents_LegacySessionsFallBackToCompleted(t *testing.T) {
 	al, _ := createLLMRunnerTestAgentLoop(t)
 	inst := getTestAgentWithSessions(t, al)
@@ -83,9 +72,6 @@ func TestGetSessionSubagents_LegacySessionsFallBackToCompleted(t *testing.T) {
 	}
 }
 
-// TestGetSessionSubagents_InMemoryTakesPrecedence verifies that a live
-// in-memory task (any status, e.g. needs_context) shadows the persisted
-// record for the same task ID — live truth beats history.
 func TestGetSessionSubagents_InMemoryTakesPrecedence(t *testing.T) {
 	al, _ := createLLMRunnerTestAgentLoop(t)
 	inst := getTestAgentWithSessions(t, al)
@@ -97,7 +83,6 @@ func TestGetSessionSubagents_InMemoryTakesPrecedence(t *testing.T) {
 	sm.AddMessage(key, "assistant", "partial")
 	sm.SetSubagentStatus(key, tools.SubagentStatusNeedsContext)
 
-	// Simulate a live manager with a needs_context task of the same ID.
 	smm := tools.NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
 	smm.AddTaskForTest(&tools.SubagentTask{
 		ID:               "subagent-5",

@@ -8,8 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// okProvider is a minimal LLMProvider whose Chat call returns a fixed summary
-// response. It is used as the compaction summarizer in boundary tests.
 type okProvider struct {
 	mu    sync.Mutex
 	calls int
@@ -32,12 +30,10 @@ func (p *okProvider) callCount() int {
 	return p.calls
 }
 
-// msg builds a providers.Message with the given role and content.
 func msg(role, content string) providers.Message {
 	return providers.Message{Role: role, Content: content}
 }
 
-// assistantWithCalls builds an assistant message carrying the given tool-call IDs.
 func assistantWithCalls(ids ...string) providers.Message {
 	m := providers.Message{Role: "assistant", Content: ""}
 	for _, id := range ids {
@@ -53,13 +49,10 @@ func assistantWithCalls(ids ...string) providers.Message {
 	return m
 }
 
-// toolResult builds a tool result message answering the given tool-call ID.
 func toolResult(id string) providers.Message {
 	return providers.Message{Role: "tool", Content: "result", ToolCallID: id}
 }
 
-// validateToolSequence asserts that every tool message in messages is preceded
-// by an assistant message whose ToolCalls include the tool message's ID.
 func validateToolSequence(t *testing.T, messages []providers.Message) {
 	t.Helper()
 	seen := map[string]bool{}
@@ -84,7 +77,7 @@ func TestCompactLoopMessages_TrimsOrphanedToolResults(t *testing.T) {
 		assistantWithCalls("call-1"),
 		toolResult("call-1"),
 		msg("assistant", "intermediate thought"),
-		toolResult("orphan-1"), // tail starts with orphaned tool result
+		toolResult("orphan-1"),
 		toolResult("orphan-2"),
 		msg("user", "follow-up"),
 		msg("assistant", "recent answer"),
@@ -95,9 +88,6 @@ func TestCompactLoopMessages_TrimsOrphanedToolResults(t *testing.T) {
 		t.Fatalf("expected compaction to succeed")
 	}
 
-	// Expected shape: system, summary, continue, then tail from the first safe
-	// boundary (the "follow-up" user message). The two orphaned tool results
-	// and the preceding "intermediate thought" assistant message are trimmed.
 	if len(compacted) != 5 {
 		t.Fatalf("expected 5 messages after compaction, got %d: %+v", len(compacted), compacted)
 	}
@@ -122,17 +112,11 @@ func TestCompactLoopMessages_KeepsCompleteToolGroup(t *testing.T) {
 		msg("assistant", "recent answer"),
 	}
 
-	// Tail = [assistant+calls, result-a, result-b, user, assistant] (keepLast=5).
-	// Index 0 is a safe boundary because the assistant's tool results are
-	// present, so the whole group is kept.
 	compacted, ok := CompactLoopMessages(context.Background(), &okProvider{}, "test-model", messages, 5, "")
 	if !ok {
 		t.Fatalf("expected compaction to succeed")
 	}
 
-	// Tail = [assistant+calls, result-a, result-b, user, assistant]. Index 0 is
-	// a safe boundary because the assistant's tool results are present, so the
-	// whole group is kept.
 	if len(compacted) != 8 {
 		t.Fatalf("expected 8 messages after compaction, got %d: %+v", len(compacted), compacted)
 	}
@@ -153,7 +137,6 @@ func TestCompactLoopMessages_NoSafeBoundary(t *testing.T) {
 		toolResult("x-4"),
 	}
 
-	// keepLast=4 → tail is all tool results with no user/assistant boundary.
 	compacted, ok := CompactLoopMessages(context.Background(), &okProvider{}, "test-model", messages, 4, "")
 	if ok {
 		t.Fatalf("expected compaction to be skipped, got compacted: %+v", compacted)

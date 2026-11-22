@@ -12,14 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// Tests for the persisted executor of a subagent session (#332). The WebUI
-// header names the agent of a HISTORICAL subagent from the session listing, and
-// every agent shares one SessionManager, so without a persisted executor the
-// only agent the listing could report was whichever one the scan swept first.
-
-// twoAgentConfig builds a config with a default "main" agent and a "coder"
-// agent, both served by the "test" provider, so a spawn can target an agent
-// that is not the registry's first one.
 func twoAgentConfig(t *testing.T, workspace string) *config.Config {
 	t.Helper()
 	return &config.Config{
@@ -49,10 +41,6 @@ func twoAgentConfig(t *testing.T, workspace string) *config.Config {
 	}
 }
 
-// TestSubagentSpawn_PersistsExecutorAgent is the write half of the fix: a real
-// spawn targeting "coder" must leave the executor on the child session row, so
-// a process that restarts (and therefore loses the in-memory spawn mapping) can
-// still name the agent that ran the task.
 func TestSubagentSpawn_PersistsExecutorAgent(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
@@ -88,7 +76,7 @@ func TestSubagentSpawn_PersistsExecutorAgent(t *testing.T) {
 		context.Background(),
 		"Implement the fix",
 		"goal-system-fix",
-		"coder", // target agent — NOT the owner ("main") of the session storage
+		"coder",
 		originChannel,
 		originChatID,
 		nil,
@@ -103,8 +91,6 @@ func TestSubagentSpawn_PersistsExecutorAgent(t *testing.T) {
 	parentKey := originChannel + ":" + originChatID
 	childKey := parentKey + ":" + taskID
 
-	// The session-key callback runs inside the subagent goroutine: wait for the
-	// executor to land on the session row.
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		meta, err := db.Sessions().GetSessionMeta(childKey)
@@ -120,15 +106,10 @@ func TestSubagentSpawn_PersistsExecutorAgent(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	// The in-memory routing mapping must stay intact (it is what the TUI header
-	// and agentForSession use for a live subagent).
 	if got := al.getSessionAgent(childKey); got != "coder" {
 		t.Errorf("getSessionAgent(%s) = %q, want %q", childKey, got, "coder")
 	}
 
-	// And the listing must report the executor reading ONLY from disk: a fresh
-	// manager over the same store has no in-memory state at all, which is the
-	// state of a gateway right after a restart.
 	fresh := session.NewSessionManager()
 	fresh.SetSessionRepo(db.Sessions())
 	var got string
@@ -142,9 +123,6 @@ func TestSubagentSpawn_PersistsExecutorAgent(t *testing.T) {
 	}
 }
 
-// restartSessionsOverStore swaps the agent's SessionManager for a brand-new one
-// over the same SQLite store: nothing is resident and no in-memory spawn state
-// survives, which is the situation of a gateway right after a restart.
 func restartSessionsOverStore(t *testing.T, al *AgentLoop, inst *AgentInstance) *session.SessionManager {
 	t.Helper()
 	if al.dbStore == nil {
@@ -156,11 +134,6 @@ func restartSessionsOverStore(t *testing.T, al *AgentLoop, inst *AgentInstance) 
 	return fresh
 }
 
-// TestGetSessionSubagents_PersistedExecutorWins is the read half of the fix:
-// a historical subagent must be reported with the agent that ran it, read back
-// from disk with no in-memory state. Before the fix this returned the first
-// agent of the registry ("main" here), because the persisted branch reported
-// the owner of the session storage instead of the executor.
 func TestGetSessionSubagents_PersistedExecutorWins(t *testing.T) {
 	al, _ := createLLMRunnerTestAgentLoop(t)
 	inst := getTestAgentWithSessions(t, al)
@@ -170,8 +143,6 @@ func TestGetSessionSubagents_PersistedExecutorWins(t *testing.T) {
 	key := parent + ":subagent-4"
 	sm.AddMessage(key, "user", "task")
 	sm.AddMessage(key, "assistant", "done")
-	// An executor that is not in the registry at all: nothing but the persisted
-	// column can produce this value.
 	sm.SetSubagentAgentID(key, "researcher")
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -179,7 +150,6 @@ func TestGetSessionSubagents_PersistedExecutorWins(t *testing.T) {
 
 	ap := &agentProvidableImpl{al: al}
 
-	// Resident path.
 	infos := ap.GetSessionSubagents(parent)
 	if len(infos) != 1 {
 		t.Fatalf("resident: expected 1 subagent info, got %d (%+v)", len(infos), infos)
@@ -188,7 +158,6 @@ func TestGetSessionSubagents_PersistedExecutorWins(t *testing.T) {
 		t.Errorf("resident AgentID = %q, want %q", infos[0].AgentID, "researcher")
 	}
 
-	// Restart path: evicted from memory and re-discovered from the store only.
 	restartSessionsOverStore(t, al, inst)
 	infos = ap.GetSessionSubagents(parent)
 	if len(infos) != 1 {
@@ -203,10 +172,6 @@ func TestGetSessionSubagents_PersistedExecutorWins(t *testing.T) {
 	}
 }
 
-// TestGetSessionSubagents_LegacyRowFallsBackToStorageOwner pins the backward
-// compatibility of the read path: a session persisted before agent_id existed
-// (and with no routing pin) keeps the historical value instead of reporting an
-// empty agent, which the WebUI header would render as a blank name.
 func TestGetSessionSubagents_LegacyRowFallsBackToStorageOwner(t *testing.T) {
 	al, _ := createLLMRunnerTestAgentLoop(t)
 	inst := getTestAgentWithSessions(t, al)
@@ -231,10 +196,6 @@ func TestGetSessionSubagents_LegacyRowFallsBackToStorageOwner(t *testing.T) {
 	}
 }
 
-// TestGetSessionSubagents_LegacyRowUsesDurablePin covers the rows written
-// before the column existed but after the spawn mapping became durable: the
-// routing pin still names the right executor, so upgrading does not leave every
-// historical subagent mislabeled until it is re-run.
 func TestGetSessionSubagents_LegacyRowUsesDurablePin(t *testing.T) {
 	al, _ := createLLMRunnerTestAgentLoop(t)
 	inst := getTestAgentWithSessions(t, al)
@@ -247,7 +208,6 @@ func TestGetSessionSubagents_LegacyRowUsesDurablePin(t *testing.T) {
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	// What a pre-v8 spawn left behind: the durable pin, no column.
 	al.setSubagentSessionAgent(key, "coder")
 	restartSessionsOverStore(t, al, inst)
 

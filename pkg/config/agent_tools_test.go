@@ -7,26 +7,6 @@ import (
 	"testing"
 )
 
-// B1 — per-agent `tools` allowlist (config layer only).
-//
-// Semantics pinned here (see AgentConfig.Tools doc comment):
-//   - nil / absent / JSON null / []  => "all tools" (default behavior)
-//   - non-empty                       => allowlist of tool names; unknown
-//     names are ignored with a warning at instance-build time (B2, runtime).
-//
-// These tests guard the whole config path, because the two historical
-// field-loss bugs in this package (agents Temperature, agents.defaults
-// max_read_lines / subagent_max_iterations) were both silent-drop bugs in
-// hand-written copy blocks, not parse bugs. Every path that copies an agent
-// must carry Tools:
-//
-//	file -> LoadConfig (runtime Config)              : struct tag
-//	file -> LoadEditableDocument (WebUI doc)         : via LoadConfig
-//	doc  -> ToConfig (editable -> runtime)           : hand-written copy  <-- risk
-//	cfg  -> editableDocumentFromConfig (runtime->doc): direct struct conv <-- risk
-//	doc  -> toSerializable -> disk (WebUI save)      : whole-struct emit
-
-// writeAgentToolsConfig writes a minimal config with the given agents JSON.
 func writeAgentToolsConfig(t *testing.T, agentsJSON string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")
@@ -37,10 +17,6 @@ func writeAgentToolsConfig(t *testing.T, agentsJSON string) string {
 	return path
 }
 
-// TestAgentConfigToolsRoundTrip is the disk round-trip for the new field:
-// LoadConfig -> SaveConfig -> LoadConfig must preserve both a present
-// allowlist and the absent (nil) case, and the JSON on disk must not grow a
-// "tools" key when the agent has none (omitempty, backward compat).
 func TestAgentConfigToolsRoundTrip(t *testing.T) {
 	path := writeAgentToolsConfig(t, `[
 		{"id":"coder","tools":["read_file","edit_file","exec"]},
@@ -64,7 +40,6 @@ func TestAgentConfigToolsRoundTrip(t *testing.T) {
 		t.Errorf("chatbot tools = %v, want nil (absent = all tools)", chatbot.Tools)
 	}
 
-	// Re-save through the runtime path and re-load: values must survive.
 	out := filepath.Join(t.TempDir(), "saved.json")
 	if err := SaveConfig(out, cfg); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
@@ -94,13 +69,6 @@ func TestAgentConfigToolsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestAgentConfigToolsEmptyAndNullStayInherit pins the edge cases of the
-// "nil/empty = all tools" contract: absent, JSON null and [] all load to a
-// zero-length slice, which downstream code (B2 runtime filter) must treat as
-// "no restriction" — never as "no tools allowed". JSON null and absent yield
-// nil; [] yields an empty non-nil slice (standard encoding/json behavior,
-// identical to skills), so consumers MUST branch on len(Tools)==0 and not on
-// nil-ness. Asserted explicitly so that rule cannot regress silently.
 func TestAgentConfigToolsEmptyAndNullStayInherit(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -130,9 +98,6 @@ func TestAgentConfigToolsEmptyAndNullStayInherit(t *testing.T) {
 	}
 }
 
-// TestEditableDocument_AgentToolsToConfig guards the hand-written
-// editable->runtime copy in ToConfig (the exact block that used to drop
-// Temperature): a tools allowlist edited in the WebUI must reach Config.
 func TestEditableDocument_AgentToolsToConfig(t *testing.T) {
 	doc := &EditableDocument{}
 	doc.Agents.Defaults.Workspace = "/test"
@@ -159,10 +124,6 @@ func TestEditableDocument_AgentToolsToConfig(t *testing.T) {
 	}
 }
 
-// TestEditableDocument_AgentToolsFromConfig guards the other direction:
-// editableDocumentFromConfig uses a direct struct conversion, so a field
-// added to only one of the two structs breaks at compile time — this test
-// documents that the conversion also carries the values at runtime.
 func TestEditableDocument_AgentToolsFromConfig(t *testing.T) {
 	cfg := &Config{}
 	cfg.Agents.List = []AgentConfig{{ID: "coder", Tools: []string{"spawn", "exec"}}}
@@ -176,9 +137,6 @@ func TestEditableDocument_AgentToolsFromConfig(t *testing.T) {
 	}
 }
 
-// TestEditableDocument_AgentToolsSaveLoadRoundTrip covers the full WebUI
-// disk path: SaveEditableDocument -> LoadEditableDocument (GET /api/v1/config
-// after a PUT), including toSerializable, which is the map actually written.
 func TestEditableDocument_AgentToolsSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 
@@ -196,7 +154,6 @@ func TestEditableDocument_AgentToolsSaveLoadRoundTrip(t *testing.T) {
 		t.Fatalf("SaveEditableDocument: %v", err)
 	}
 
-	// The on-disk document must carry the allowlist for the agent that has one.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read: %v", err)
@@ -214,8 +171,6 @@ func TestEditableDocument_AgentToolsSaveLoadRoundTrip(t *testing.T) {
 	if !ok || len(got) != 2 || got[0] != "read_file" || got[1] != "edit_file" {
 		t.Errorf("on-disk coder tools = %v, want [read_file edit_file]", coder["tools"])
 	}
-	// Empty allowlist is omitempty: absent on disk, and absent == all tools,
-	// so no information is lost (the editor's "all" toggle maps to both).
 	if _, ok := list[1].(map[string]interface{})["tools"]; ok {
 		t.Errorf("on-disk chatbot has a \"tools\" key, want it omitted (empty = all)")
 	}
@@ -235,11 +190,6 @@ func TestEditableDocument_AgentToolsSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
-// TestValidateEditableDocument_AgentToolsAccepted asserts that unknown tool
-// names are NOT a validation error: the spec says they are ignored with a
-// warning at build time (the config layer cannot know the full registry,
-// which lives in pkg/tools). A malformed-shape file, on the other hand, must
-// still fail to load rather than silently wipe the allowlist.
 func TestValidateEditableDocument_AgentToolsAccepted(t *testing.T) {
 	doc := &EditableDocument{}
 	doc.Agents.Defaults.Workspace = "/test"
@@ -259,17 +209,12 @@ func TestValidateEditableDocument_AgentToolsAccepted(t *testing.T) {
 }
 
 func TestAgentConfigToolsShapeError(t *testing.T) {
-	// tools must be an array of strings; a scalar is a hard load error so a
-	// typo cannot silently fall back to "all tools".
 	_, err := LoadConfig(writeAgentToolsConfig(t, `[{"id":"coder","tools":"exec"}]`))
 	if err == nil {
 		t.Fatal("LoadConfig accepted tools as a string, want error")
 	}
 }
 
-// stringSlicesEqualForTest compares two string slices element-wise.
-// Deliberately local: pkg/config has no exported slice helper and the
-// runtime one lives in pkg/agent.
 func stringSlicesEqualForTest(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

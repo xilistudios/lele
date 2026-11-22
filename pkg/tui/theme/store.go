@@ -8,32 +8,22 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// tuiConfigFile is the on-disk representation of the TUI theme config.
 type tuiConfigFile struct {
 	Theme              string           `json:"theme"`
 	CustomThemes       map[string]Theme `json:"custom_themes,omitempty"`
 	InstalledCommunity []string         `json:"installed_community,omitempty"`
 }
 
-// DefaultPath returns the default path for the TUI config file.
 func DefaultPath() string {
 	return filepath.Join(config.GetLeleDir(), "tui.json")
 }
 
-// Load reads the TUI config file at path. If the file does not exist it
-// returns "dracula", nil, nil, nil. If the file is malformed or cannot be
-// read it returns "dracula", nil, nil, err so the caller can log it without
-// crashing. On success it returns the theme name (defaulting to "dracula"
-// if empty), the custom themes map (nil if empty), and the installed
-// community theme names (nil if empty).
 func Load(path string) (name string, custom map[string]Theme, installed []string, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "dracula", nil, nil, nil
 		}
-		// Permission / I/O failures must surface — silently resetting to
-		// Dracula would drop the user's saved theme without a log line.
 		return "dracula", nil, nil, err
 	}
 
@@ -57,10 +47,6 @@ func Load(path string) (name string, custom map[string]Theme, installed []string
 	return cfg.Theme, cfg.CustomThemes, cfg.InstalledCommunity, nil
 }
 
-// Save writes the theme name, custom themes, and installed community theme
-// names to path as pretty-printed JSON. The write is atomic: it writes to a
-// temp file (path+".tmp") and renames it into place. Parent directories are
-// created if needed.
 func Save(path, name string, custom map[string]Theme, installed []string) error {
 	cfg := tuiConfigFile{
 		Theme:              name,
@@ -87,7 +73,6 @@ func Save(path, name string, custom map[string]Theme, installed []string) error 
 	return os.Rename(tmp, path)
 }
 
-// IsInstalledCommunity reports whether name is in the installed community list.
 func IsInstalledCommunity(name string, installed []string) bool {
 	for _, n := range installed {
 		if n == name {
@@ -97,8 +82,6 @@ func IsInstalledCommunity(name string, installed []string) bool {
 	return false
 }
 
-// AddInstalledCommunity appends name to installed if not already present.
-// Returns a new slice (does not mutate the input).
 func AddInstalledCommunity(name string, installed []string) []string {
 	if IsInstalledCommunity(name, installed) {
 		return installed
@@ -108,8 +91,6 @@ func AddInstalledCommunity(name string, installed []string) []string {
 	return append(out, name)
 }
 
-// RemoveInstalledCommunity removes name from installed if present.
-// Returns a new slice (does not mutate the input).
 func RemoveInstalledCommunity(name string, installed []string) []string {
 	out := make([]string, 0, len(installed))
 	for _, n := range installed {

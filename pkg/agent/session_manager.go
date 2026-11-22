@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -21,7 +15,6 @@ import (
 	"github.com/xilistudios/lele/pkg/routing"
 )
 
-// sessionCancelGroup manages multiple cancel functions for a single session.
 type sessionCancelGroup struct {
 	mu      sync.Mutex
 	cancels map[uint64]context.CancelFunc
@@ -64,17 +57,14 @@ func (scg *sessionCancelGroup) cancelAll() int {
 	return len(cancels)
 }
 
-// sessionManagerImpl implements the sessionManager interface for managing
-// session summarization, compression, token estimation, and cancellation.
 type sessionManagerImpl struct {
 	al             *AgentLoop
 	bus            *bus.MessageBus
 	summarizing    *sync.Map
-	sessionCancels sync.Map // sessionKey -> context.CancelFunc
+	sessionCancels sync.Map
 	cancelSeq      atomic.Uint64
 }
 
-// sessionManager is the internal interface for session management operations.
 type sessionManager interface {
 	maybeSummarize(agent *AgentInstance, sessionKey, channel, chatID string) *SummarizeStats
 	summarizeSession(agent *AgentInstance, sessionKey string) *SummarizeStats
@@ -87,7 +77,6 @@ type sessionManager interface {
 	ModelForSession(agent *AgentInstance, sessionKey string) string
 }
 
-// newSessionManager creates a new session manager instance.
 func newSessionManager(al *AgentLoop) *sessionManagerImpl {
 	return &sessionManagerImpl{
 		al:          al,
@@ -96,7 +85,6 @@ func newSessionManager(al *AgentLoop) *sessionManagerImpl {
 	}
 }
 
-// RegisterSessionCancel registers a cancel function for a session and returns a cleanup function.
 func (sm *sessionManagerImpl) RegisterSessionCancel(sessionKey string, cancel context.CancelFunc) func() {
 	if sessionKey == "" || cancel == nil {
 		return func() {}
@@ -119,16 +107,10 @@ func (sm *sessionManagerImpl) RegisterSessionCancel(sessionKey string, cancel co
 		if current, ok := sm.sessionCancels.Load(sessionKey); ok && current == group {
 			sm.sessionCancels.Delete(sessionKey)
 		}
-		// The session's last registered operation just ended: the turn is
-		// over, so the in-flight tool record is stale by definition (its
-		// tool.result may even have been published after cancellation).
-		// Dropping it here keeps the record's lifetime tied to the turn
-		// instead of relying on a matching tool.result event arriving.
 		sm.al.clearInProgressTool(sessionKey)
 	}
 }
 
-// CancelSession cancels all active processing for a session and returns the count of stopped operations.
 func (sm *sessionManagerImpl) CancelSession(sessionKey string) int {
 	if sessionKey == "" {
 		logger.WarnCF("agent", "CancelSession called with empty session key", nil)
@@ -177,25 +159,14 @@ func (sm *sessionManagerImpl) CancelSession(sessionKey string) int {
 	}
 }
 
-// IsSessionProcessing returns true if there is an active LLM processing loop for the session.
 func (sm *sessionManagerImpl) IsSessionProcessing(sessionKey string) bool {
 	_, ok := sm.sessionCancels.Load(sessionKey)
 	return ok
 }
 
-// maybeSummarize triggers summarization if the session history exceeds thresholds.
-// Returns statistics about the compaction if it was triggered.
-//
-// The token estimate includes system prompt + summary + history to match the
-// actual context sent to the LLM (and shown by /status). Without this,
-// the compaction would only trigger based on history tokens, ignoring the
-// potentially large system prompt.
 func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, channel, chatID string) *SummarizeStats {
 	newHistory := agent.Sessions.GetHistoryView(sessionKey)
 
-	// Resolve the effective context window for this session, honoring session
-	// model overrides and provider model config (falls back to agent.ContextWindow
-	// then to 128000).
 	contextWindow := sm.al.getSessionContextWindow(sessionKey)
 
 	if contextWindow <= 0 {
@@ -208,8 +179,6 @@ func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, c
 		return nil
 	}
 
-	// Calculate total context tokens including system prompt and summary,
-	// matching what formatStatusResponse and the actual LLM request use.
 	historyTokens := sm.EstimateTokens(newHistory)
 
 	summaryTokens := 0
@@ -304,19 +273,12 @@ func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, c
 	return nil
 }
 
-// summarizeSessionGuarded runs summarizeSession under the shared `summarizing`
-// guard so that proactive (maybeSummarize) and reactive (context-window error)
-// compaction of the same session can never run concurrently. If a summarization
-// for the same agent+session is already in progress, it returns (nil, false)
-// without doing anything. Otherwise it runs the summarization and returns
-// (stats, true).
 func (sm *sessionManagerImpl) summarizeSessionGuarded(agent *AgentInstance, sessionKey string) (*SummarizeStats, bool) {
 	if agent == nil {
 		return nil, false
 	}
 	summarizeKey := agent.ID + ":" + sessionKey
 	if _, loading := sm.summarizing.LoadOrStore(summarizeKey, true); loading {
-		// Another summarization is already running for this session.
 		return nil, false
 	}
 	defer sm.summarizing.Delete(summarizeKey)
@@ -324,9 +286,6 @@ func (sm *sessionManagerImpl) summarizeSessionGuarded(agent *AgentInstance, sess
 	return stats, true
 }
 
-// summarizeSession summarizes the conversation history for a session.
-// It never returns an error; on failure it logs the cause and returns nil,
-// leaving the session state untouched.
 func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey string) *SummarizeStats {
 	stats, err := sm.summarizeSessionCore(agent, sessionKey)
 	if err != nil {
@@ -339,17 +298,12 @@ func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey 
 	return stats
 }
 
-// forceCompression marks old messages as excluded from context when the limit is hit.
-// It marks the oldest 50% of messages (keeping the last user message included).
-// If no summary exists, builds a basic local summary from excluded messages.
 func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey string) {
 	history := agent.Sessions.GetHistoryView(sessionKey)
 	if len(history) <= 4 {
 		return
 	}
 
-	// history contains only user/assistant/tool messages — no system prompt.
-	// Mark the oldest half of the conversation as excluded, preserving the last message.
 	conversation := history[:len(history)-1]
 	if len(conversation) == 0 {
 		return
@@ -359,8 +313,6 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 
 	droppedCount := mid
 
-	// Build a basic local summary from messages being excluded if no summary exists.
-	// This preserves context that would otherwise be lost when LLM summarization fails.
 	if agent.Sessions.GetSummary(sessionKey) == "" {
 		localSummary := "## Conversation Summary (auto-compressed)\n\n"
 		localSummary += fmt.Sprintf("Messages compressed: %d of %d\n\n", mid, len(history))
@@ -370,8 +322,6 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 		count := 0
 		for i := 0; i < mid && count < maxSummaryMsgs; i++ {
 			msg := conversation[i]
-			// Text-only content so multimodal messages (e.g. from read_image)
-			// still contribute their text instead of being skipped.
 			text := msg.TextOnlyContent()
 			if text == "" {
 				continue
@@ -415,11 +365,7 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 		agent.Sessions.SetSummary(sessionKey, localSummary)
 	}
 
-	// Mark the oldest 'mid' messages as excluded from context
-	// (they remain in storage for the web UI)
 	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, len(history)-mid)
-	// Increment before Save so the counter is persisted in this save;
-	// incrementing after would leave the count in memory until the next Save.
 	agent.Sessions.IncrementCompactionCount(sessionKey)
 	if err := agent.Sessions.Save(sessionKey); err != nil {
 		logger.WarnCF("agent", "Failed to save after forced compression", map[string]interface{}{"session_key": sessionKey, "error": err.Error()})
@@ -434,9 +380,6 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 	})
 }
 
-// evictExcludedAfterCompaction removes excluded (out-of-context) messages from
-// the in-memory session slice after a successful save following compaction.
-// It is a memory-only, idempotent operation guarded by the config flag.
 func (sm *sessionManagerImpl) evictExcludedAfterCompaction(agent *AgentInstance, sessionKey string) {
 	if !sm.al.cfg().EvictExcludedFromMemory() {
 		return
@@ -444,13 +387,10 @@ func (sm *sessionManagerImpl) evictExcludedAfterCompaction(agent *AgentInstance,
 	agent.Sessions.EvictExcludedMessages(sessionKey)
 }
 
-// truncateUTF8Safe returns s truncated to at most maxBytes bytes, cutting at a
-// valid UTF-8 rune boundary so the result is always valid UTF-8.
 func truncateUTF8Safe(s string, maxBytes int) string {
 	if len(s) <= maxBytes {
 		return s
 	}
-	// Walk backwards to find a valid start byte (not a continuation byte).
 	idx := maxBytes
 	for idx > 0 && (s[idx]&0xC0) == 0x80 {
 		idx--
@@ -458,41 +398,8 @@ func truncateUTF8Safe(s string, maxBytes int) string {
 	return s[:idx]
 }
 
-// videoPartEstimateChars is the fixed char estimate charged for one
-// video_url content part (≈5k tokens at 2.5 chars/token). Providers sample
-// video at ~1 fps plus audio (Gemini ≈258 tokens/s) and we cannot know the
-// clip duration client-side cheaply, so a fixed estimate far above the image
-// one (2500) is used: compaction must trigger before the provider rejects an
-// over-length request. Remote URLs get the same fixed estimate.
-//
-// The value is aliased to providers.VideoPartCharCost — the canonical
-// constant in pkg/providers/image_budget.go — so the two estimators cannot
-// drift. The symbol is kept (rather than deleted) because existing tests
-// reference it by name; production code now goes through MessageCharCost,
-// which reads providers.VideoPartCharCost directly.
 const videoPartEstimateChars = providers.VideoPartCharCost
 
-// EstimateTokens estimates the number of tokens in a message list using the
-// 2.5 chars/token heuristic, sharing the accounting rule with the tool loop's
-// tools.EstimateLoopTokens: both sum providers.MessageCharCost
-// (pkg/providers/image_budget.go) over Content, ReasoningContent, tool-call
-// names/arguments, Media entries, content parts (images and videos charged a
-// FIXED char cost — providers.ImagePartCharCost/MediaPartCharCost/
-// VideoPartCharCost — never their base64 length; real bytes are budgeted
-// separately) plus a per-message structural overhead.
-//
-// The only intentional difference from EstimateLoopTokens: messages marked
-// ExcludeFromContext are skipped here (the loop counts them because its
-// messages are the live ones). Consequence: for any message list without
-// ExcludeFromContext entries, tools.EstimateLoopTokens(msgs) ==
-// EstimateTokens(msgs), exactly.
-//
-// The former `if m.Content == ""` gate around content parts is gone:
-// MessageCharCost counts text parts only when Content == "" (because
-// Message.UnmarshalJSON repopulates Content from them on session reload,
-// which would double-count) but ALWAYS counts image/video parts — the gate
-// wrongly billed zero images for a reloaded session, since textFromParts
-// renders them as "[image]" markers.
 func (sm *sessionManagerImpl) EstimateTokens(messages []providers.Message) int {
 	totalChars := 0
 	for _, m := range messages {
@@ -501,21 +408,17 @@ func (sm *sessionManagerImpl) EstimateTokens(messages []providers.Message) int {
 		}
 		totalChars += providers.MessageCharCost(m)
 	}
-	// 2.5 chars per token = totalChars * 2 / 5
 	return totalChars * 2 / 5
 }
 
-// ModelForSession returns the model to use for a session.
 func (sm *sessionManagerImpl) ModelForSession(agent *AgentInstance, sessionKey string) string {
 	if sessionKey != "" {
 		resolvedSessionKey := sm.al.ResolveSessionKey(sessionKey)
-		// First check in-memory override (fast path)
 		if model, ok := sm.al.sessionModels.Load(resolvedSessionKey); ok {
 			if selected, ok := model.(string); ok && selected != "" {
 				return selected
 			}
 		}
-		// Then check persisted session model (survives restarts)
 		if agent.Sessions != nil {
 			persistedModel := agent.Sessions.GetModel(resolvedSessionKey)
 			if persistedModel != "" {
@@ -526,10 +429,7 @@ func (sm *sessionManagerImpl) ModelForSession(agent *AgentInstance, sessionKey s
 	return agent.Model
 }
 
-// AddTokenCounts adds token counts to a session.
-// It respects session agent overrides set via /agent command.
 func (sm *sessionManagerImpl) AddTokenCounts(sessionKey string, inputTokens, outputTokens int) {
-	// Check for session-level agent override first (set via /agent command)
 	var agent *AgentInstance
 	if overrideID := sm.al.getSessionAgent(sessionKey); overrideID != "" {
 		if a, ok := sm.al.registry.GetAgent(overrideID); ok {
@@ -537,7 +437,6 @@ func (sm *sessionManagerImpl) AddTokenCounts(sessionKey string, inputTokens, out
 		}
 	}
 
-	// Fall back to agent ID embedded in the session key
 	if agent == nil {
 		parsed := routing.ParseAgentSessionKey(sessionKey)
 		if parsed != nil {
@@ -547,8 +446,6 @@ func (sm *sessionManagerImpl) AddTokenCounts(sessionKey string, inputTokens, out
 			}
 			agent = a
 		} else {
-			// Session key doesn't have agent prefix (e.g., "telegram:12345")
-			// Use the default agent
 			agent = sm.al.registry.GetDefaultAgent()
 			if agent == nil {
 				return
@@ -559,17 +456,10 @@ func (sm *sessionManagerImpl) AddTokenCounts(sessionKey string, inputTokens, out
 	agent.Sessions.AddTokenCounts(sessionKey, inputTokens, outputTokens)
 }
 
-// summarizeSessionWithError summarizes the conversation history for a session
-// and returns any error. Delegates to summarizeSessionCore.
 func (sm *sessionManagerImpl) summarizeSessionWithError(agent *AgentInstance, sessionKey string) (*SummarizeStats, error) {
 	return sm.summarizeSessionCore(agent, sessionKey)
 }
 
-// summarizeSessionCore performs the actual summarization work shared by
-// summarizeSession and summarizeSessionWithError. It returns statistics on
-// success. On any failure it returns a non-nil error describing the cause.
-// It never applies the "reuse existing summary with error note" fallback —
-// that policy decision is left to the callers.
 func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, sessionKey string) (*SummarizeStats, error) {
 	if agent == nil || agent.Provider == nil {
 		return nil, fmt.Errorf("no provider available for summarization")
@@ -580,39 +470,26 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 	history := agent.Sessions.GetHistoryView(sessionKey)
 	existingSummary := agent.Sessions.GetSummary(sessionKey)
 	historyForSummary := stripSummaryMessages(history)
-	// Filter out messages already excluded from context (from previous
-	// summarization or forceCompression). They should not be re-summarized.
 	historyForSummary = filterContextMessages(historyForSummary)
 
-	// Need at least 3 messages to summarize (keep last 2 for continuity)
 	if len(historyForSummary) <= 2 {
 		return nil, fmt.Errorf("not enough messages to summarize (need at least 3, have %d)", len(historyForSummary))
 	}
 
-	// Calculate before stats
 	beforeMessages := len(history)
 	beforeTokens := sm.EstimateTokens(history)
 
-	// Summarize everything except the last 2 messages (kept for continuity).
-	// Note: history contains only user/assistant/tool messages — no system prompt.
 	toSummarize := historyForSummary[:len(historyForSummary)-2]
 
 	if len(toSummarize) == 0 {
 		return nil, fmt.Errorf("no messages available to summarize")
 	}
 
-	// Build comprehensive summary prompt with old messages.
-	// Limit the total prompt size to avoid exceeding the context window
-	// when there are many messages (which would cause the summarization
-	// LLM call itself to fail).
 	contextWindow := sm.al.getSessionContextWindow(sessionKey)
 	if contextWindow <= 0 {
 		contextWindow = 128000
 	}
-	// Target ~40% of context window for the summarization prompt.
-	// At 2.5 chars/token, this is contextWindow * 2 / 5 * 40 / 100 chars.
 	maxPromptChars := contextWindow * 2 / 5 * 40 / 100
-	// Per-message truncation limit (reduced from 4000 to 2000 to fit more messages)
 	perMessageLimit := 2000
 
 	prompt := "Please provide a comprehensive summary of the following conversation. " +
@@ -624,16 +501,10 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 	}
 
 	prompt += "=== CONVERSATION TO SUMMARIZE ===\n"
-	// Add messages from oldest to newest, respecting the total prompt size limit.
-	// If we can't fit all messages, include as many as possible (from the oldest)
-	// and note that some were skipped.
 	messagesIncluded := 0
 	messagesSkipped := 0
 	for _, m := range toSummarize {
 		role := strings.ToUpper(m.Role)
-		// Use a text-only representation so multimodal messages (e.g. from
-		// read_image) never leak base64 image data into the summarization
-		// prompt. The compaction model may not support vision.
 		content := m.TextOnlyContent()
 		if content == "" {
 			continue
@@ -656,17 +527,12 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 	prompt += "=== END OF CONVERSATION ===\n\n" +
 		"Now provide a detailed summary that preserves all critical context."
 
-	// Call LLM to summarize everything.
-	// Use the session's current model (which may differ from the agent's default
-	// if the user changed it via /model command).
 	summarizeModel := sm.al.sessionManager.ModelForSession(agent, sessionKey)
 	if cm := sm.al.cfg().CompactionModel(); cm != "" {
 		summarizeModel = cm
 	}
 	summarizeProvider := agent.Provider
 
-	// If the session model uses a different provider prefix, resolve the
-	// correct provider (same logic as llm_caller.go).
 	if ref := providers.ParseModelRef(summarizeModel, ""); ref != nil && ref.Provider != "" {
 		agentRef := providers.ParseModelRef(agent.Model, "")
 		if agentRef == nil || agentRef.Provider != ref.Provider {
@@ -676,27 +542,19 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 		}
 	}
 
-	// Strip provider prefix for the API call (same as llm_caller.go)
 	apiModel := providers.StripProviderPrefix(summarizeModel)
 
-	// Build summarization options using the session's model configuration.
-	// This mirrors buildLLMOptions in llm_caller.go so the summarization call
-	// uses the same max_tokens, temperature, and reasoning settings as normal
-	// LLM calls for this session's model.
 	summarizeOpts := map[string]interface{}{}
 
 	cfg := sm.al.cfg()
 	providerName := extractProviderFromModel(summarizeModel, cfg.Agents.Defaults.Provider)
 	if mc, ok := getProviderModelConfig(cfg, summarizeModel, providerName); ok {
-		// Use the model's configured max_tokens (fallback to 2048 for summarization).
 		maxTokens := 2048
 		if mc.MaxTokens > 0 {
 			maxTokens = mc.MaxTokens
 		}
 		summarizeOpts["max_tokens"] = maxTokens
 
-		// Reasoning models deprecate temperature — don't send it.
-		// Also pass reasoning config so the model handles the request properly.
 		if mc.Reasoning != nil && mc.Reasoning.Enable {
 			reasoningMap := map[string]interface{}{
 				"enabled": true,
@@ -714,19 +572,14 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 			summarizeOpts["temperature"] = 0.3
 		}
 	} else {
-		// No model config found, use safe defaults.
 		summarizeOpts["max_tokens"] = 2048
 		summarizeOpts["temperature"] = 0.3
 	}
 
-	// Same conversation-scoped wire identity as the main loop; the summarizer is
-	// an inference call like any other.
 	summarizeOpts = providers.WithWireSessionID(summarizeOpts, sessionKey)
 
 	resp, err := providers.ChatIdle(ctx, summarizeProvider, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, summarizeOpts)
 
-	// Retry without temperature if the model rejects it (safety net for
-	// models that deprecate temperature but aren't flagged as reasoning).
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "temperature") {
 		delete(summarizeOpts, "temperature")
 		resp, err = providers.ChatIdle(ctx, summarizeProvider, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, summarizeOpts)
@@ -740,7 +593,6 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 	if resp != nil {
 		finalSummary = resp.Content
 	} else if existingSummary != "" {
-		// Fall back to existing summary
 		finalSummary = existingSummary + "\n[Update: Additional conversation not summarized due to empty response]"
 	}
 
@@ -749,16 +601,12 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 	}
 
 	agent.Sessions.SetSummary(sessionKey, finalSummary)
-	// Mark old messages as excluded from context instead of deleting them.
 	keepCount := 2
 	if len(historyForSummary) <= 2 {
 		keepCount = 0
 	}
 	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, keepCount)
 
-	// Ensure the most recent summary message is never excluded from context.
-	// Only un-exclude the last summary message to prevent stale summaries
-	// from accumulating across multiple compaction rounds.
 	historyAfter := agent.Sessions.GetHistory(sessionKey)
 	needsSave := false
 	lastSummaryIdx := -1
@@ -775,16 +623,12 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 		agent.Sessions.SetHistory(sessionKey, historyAfter)
 	}
 
-	// Increment before Save so the counter is persisted in this save. The
-	// count applies to both paths: on save failure, still count the
-	// compaction so retry isn't triggered pointlessly.
 	agent.Sessions.IncrementCompactionCount(sessionKey)
 	if err := agent.Sessions.Save(sessionKey); err != nil {
 		return nil, fmt.Errorf("save after summarization: %w", err)
 	}
 	sm.evictExcludedAfterCompaction(agent, sessionKey)
 
-	// Calculate after stats
 	afterHistory := agent.Sessions.GetHistoryView(sessionKey)
 	contextAfter := countContextMessages(afterHistory)
 	afterTokens := sm.EstimateTokens(afterHistory)

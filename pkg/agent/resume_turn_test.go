@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -22,14 +16,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// Resume-branch tests (R-2.x): processMessage must route a durable replay
-// whose DedupeID matches the checkpointed turn into ContinueTurn instead of a
-// fresh turn, must keep the user message single, must honor the marker's
-// model/agent, must publish the notice exactly once, and must clear the
-// checkpoint when the resumed turn finally ends.
-
-// resumeMockProvider captures every provider request (messages + model) so a
-// test can assert exactly what the resumed turn sent upstream.
 type resumeMockProvider struct {
 	mu       sync.Mutex
 	requests [][]providers.Message
@@ -67,10 +53,6 @@ func (p *resumeMockProvider) last() ([]providers.Message, string) {
 	return p.requests[len(p.requests)-1], p.models[len(p.models)-1]
 }
 
-// resumeTestLoop builds a loop on an isolated config dir (so the SQLite KV
-// and the shared session manager are real) with resume + durable inbound on
-// and a fake durability wired, exactly the state the gateway produces when
-// both flags are true.
 func resumeTestLoop(t *testing.T) (*AgentLoop, *bus.MessageBus) {
 	t.Helper()
 
@@ -104,7 +86,6 @@ func resumeTestLoop(t *testing.T) (*AgentLoop, *bus.MessageBus) {
 	return al, msgBus
 }
 
-// resumeMessage is a replayed spool row: same identity as the original turn.
 func resumeMessage(dedupe, content string) bus.InboundMessage {
 	return bus.InboundMessage{
 		Channel:    "telegram",
@@ -118,8 +99,6 @@ func resumeMessage(dedupe, content string) bus.InboundMessage {
 	}
 }
 
-// seedMarker writes a checkpoint directly to the KV, standing in for the
-// process that died mid-turn.
 func seedMarker(t *testing.T, al *AgentLoop, m TurnMarker) {
 	t.Helper()
 	if m.SessionKey == "" {
@@ -137,14 +116,12 @@ func seedMarker(t *testing.T, al *AgentLoop, m TurnMarker) {
 	}
 }
 
-// providerForAgent swaps the default agent's provider for the test's.
 func providerForAgent(al *AgentLoop, p providers.LLMProvider) *AgentInstance {
 	agent := al.registry.GetDefaultAgent()
 	agent.Provider = p
 	return agent
 }
 
-// countRole counts messages with the given role whose content contains substr.
 func countRole(messages []providers.Message, role, substr string) int {
 	n := 0
 	for _, m := range messages {
@@ -155,11 +132,6 @@ func countRole(messages []providers.Message, role, substr string) int {
 	return n
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-
-// R-2.1: a replayed turn whose dedupe matches the marker resumes WITHOUT
-// re-appending the user message: the provider sees the original user message
-// exactly once.
 func TestResume_MatchingDedupeResumesWithoutDuplicateUser(t *testing.T) {
 	provider := &resumeMockProvider{}
 	al, _ := resumeTestLoop(t)
@@ -184,7 +156,6 @@ func TestResume_MatchingDedupeResumesWithoutDuplicateUser(t *testing.T) {
 	}
 }
 
-// R-2.2: the model the interrupted turn resolved to is honored on resume.
 func TestResume_MarkerModelUsed(t *testing.T) {
 	provider := &resumeMockProvider{}
 	al, _ := resumeTestLoop(t)
@@ -204,8 +175,6 @@ func TestResume_MarkerModelUsed(t *testing.T) {
 	}
 }
 
-// R-2.3: an agent that no longer exists must not break the resume; the
-// default agent takes over.
 func TestResume_UnknownAgentFallsBack(t *testing.T) {
 	provider := &resumeMockProvider{}
 	al, _ := resumeTestLoop(t)
@@ -224,9 +193,6 @@ func TestResume_UnknownAgentFallsBack(t *testing.T) {
 	}
 }
 
-// R-2.4: a turn interrupted while waiting on the provider resumes from the
-// persisted history (the user message) and produces its final answer once,
-// through the real Run pipeline.
 func TestResume_MidLLMCompletesTurn(t *testing.T) {
 	provider := &resumeMockProvider{}
 	al, msgBus := resumeTestLoop(t)
@@ -250,17 +216,12 @@ func TestResume_MidLLMCompletesTurn(t *testing.T) {
 	}
 	stopRun(t, cancelRun, done)
 
-	// The resumed request must carry the original user message exactly once
-	// (the replay did not re-append it).
 	messages, _ := provider.last()
 	if original := countRole(messages, "user", "pregunta original"); original != 1 {
 		t.Fatalf("original user message appears %d times in the resumed request, want 1", original)
 	}
 }
 
-// R-2.5: a turn interrupted mid-tools resumes with the orphaned tool call
-// healed: the provider request carries the real result for the finished call
-// and the synthetic missing-result text for the interrupted one.
 func TestResume_MidToolsHealsPendingCalls(t *testing.T) {
 	provider := &resumeMockProvider{}
 	al, _ := resumeTestLoop(t)
@@ -304,14 +265,11 @@ func TestResume_MidToolsHealsPendingCalls(t *testing.T) {
 	if !sawBSynthetic {
 		t.Error("resumed request lacks the synthetic missing-result for interrupted call_B")
 	}
-	// The user message must not have been appended a second time.
 	if users := countRole(messages, "user", "corre dos tools"); users != 1 {
 		t.Fatalf("user message appears %d times, want 1", users)
 	}
 }
 
-// R-2.6: a marker from an abandoned (different) turn must NOT trigger a
-// resume; the new turn runs fresh and overwrites the checkpoint.
 func TestResume_DifferentDedupeRunsFresh(t *testing.T) {
 	provider := &resumeMockProvider{}
 	al, _ := resumeTestLoop(t)
@@ -326,22 +284,15 @@ func TestResume_DifferentDedupeRunsFresh(t *testing.T) {
 		t.Fatalf("processMessage: %v", err)
 	}
 
-	// Fresh turn: the NEW user message reaches the provider...
 	messages, _ := provider.last()
 	if countRole(messages, "user", "mensaje nuevo") == 0 {
 		t.Fatal("fresh turn did not carry its own user message")
 	}
-	// ...and the marker was overwritten by the fresh seed then cleared on
-	// success, so the old dedupe is gone from the KV either way.
 	if m, ok := al.getTurnMarker("telegram:123"); ok && m.DedupeID == "X" {
 		t.Fatalf("stale marker survived the fresh turn: %+v", m)
 	}
 }
 
-// R-2.7: a marker whose ResumeNoticeSent flag is set (the flag was persisted
-// before a crash happened after/before the publish) must resume WITHOUT
-// emitting the notice again - "lost notice beats duplicated notice" is the
-// accepted trade, so the gate is the flag, never the publish result.
 func TestResume_NoticeSentFlagSuppressesSecondNotice(t *testing.T) {
 	provider := &resumeMockProvider{}
 	al, msgBus := resumeTestLoop(t)
@@ -357,11 +308,9 @@ func TestResume_NoticeSentFlagSuppressesSecondNotice(t *testing.T) {
 		t.Fatalf("processMessage: %v", err)
 	}
 
-	// The resume itself must have run (provider reached, answer produced)...
 	if provider.count() == 0 {
 		t.Fatal("resume with notice already sent never reached the provider")
 	}
-	// ...but no notice may appear in any published outbound message.
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for {
 		msg, ok := recvOutbound(t, msgBus, time.Until(deadline))
@@ -374,8 +323,6 @@ func TestResume_NoticeSentFlagSuppressesSecondNotice(t *testing.T) {
 	}
 }
 
-// R-2.8: a successfully resumed turn clears its checkpoint, so a third
-// replay of the same message cannot resume a finished conversation.
 func TestResume_SuccessClearsMarker(t *testing.T) {
 	provider := &resumeMockProvider{}
 	al, _ := resumeTestLoop(t)
@@ -397,9 +344,6 @@ func TestResume_SuccessClearsMarker(t *testing.T) {
 	}
 }
 
-// R-2.7b: the ResumeNoticeSent flag must be durable BEFORE the resumed turn
-// can progress (publish-first, then block in the provider proves ordering):
-// otherwise a crash right after the notice would replay and duplicate it.
 func TestResume_NoticeFlagPersistedBeforePublishReturns(t *testing.T) {
 	blocked := &blockingMockProvider{started: make(chan struct{})}
 	al, msgBus := resumeTestLoop(t)
@@ -428,8 +372,6 @@ func TestResume_NoticeFlagPersistedBeforePublishReturns(t *testing.T) {
 		t.Fatalf("notice routing = %q/%q, want telegram/123", got.Channel, got.ChatID)
 	}
 
-	// The turn is still in flight (provider blocked). If the flag is durable
-	// now, it was written before the publish above.
 	select {
 	case <-blocked.started:
 	case <-time.After(5 * time.Second):
@@ -439,8 +381,6 @@ func TestResume_NoticeFlagPersistedBeforePublishReturns(t *testing.T) {
 		t.Fatalf("ResumeNoticeSent not persisted while the resumed turn is in flight: %+v ok=%v", m, mk)
 	}
 
-	// Teardown exactly like a crash: flag off, drain budget spent, turn dies
-	// with the marker intact.
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancelDrain()
 	_ = al.Shutdown(drainCtx)
@@ -448,12 +388,6 @@ func TestResume_NoticeFlagPersistedBeforePublishReturns(t *testing.T) {
 	<-done
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// R-4.x: live-subagent snapshot + interruption warning (T2.4)
-// ──────────────────────────────────────────────────────────────────────────────
-
-// addLiveSubagent registers a fake running task owned by spawnerKey on the
-// loop's real coordinator, and returns it.
 func addLiveSubagent(t *testing.T, al *AgentLoop, id, label, task, spawnerKey string) {
 	t.Helper()
 	sm, ok := al.GetSubagents()["main"]
@@ -473,7 +407,6 @@ func addLiveSubagent(t *testing.T, al *AgentLoop, id, label, task, spawnerKey st
 	}, func() { cancel() })
 }
 
-// turnSubsKV reads the raw snapshot row straight from the KV store.
 func turnSubsKV(t *testing.T, al *AgentLoop, sessionKey string) (string, bool) {
 	t.Helper()
 	raw, ok, err := al.sessionStateKV().Get(turnSubsKeyPrefix + sessionKey)
@@ -483,13 +416,11 @@ func turnSubsKV(t *testing.T, al *AgentLoop, sessionKey string) (string, bool) {
 	return raw, ok
 }
 
-// R-4.1: only tasks related to the session are snapshotted (foreign sessions
-// excluded), each task text is rune-truncated, and the cap bounds the list.
 func TestResumeSubagents_SnapshotFiltersAndTruncates(t *testing.T) {
 	al, _ := resumeTestLoop(t)
 	resumeOn(t, al)
 
-	long := strings.Repeat("ñ", 250) // multibyte on purpose: truncation is rune-safe
+	long := strings.Repeat("ñ", 250)
 	addLiveSubagent(t, al, "task-mine-1", "alfa", long, "telegram:123")
 	addLiveSubagent(t, al, "task-mine-2", "", "tarea corta", "telegram:123")
 	addLiveSubagent(t, al, "task-other", "ajeno", "de otra sesión", "discord:999")
@@ -514,7 +445,6 @@ func TestResumeSubagents_SnapshotFiltersAndTruncates(t *testing.T) {
 		}
 	}
 
-	// Cap: 12 more tasks -> snapshot keeps at most maxSnapshottedSubagents.
 	for i := 0; i < 12; i++ {
 		addLiveSubagent(t, al, fmt.Sprintf("task-more-%02d", i), "", "x", "telegram:123")
 	}
@@ -524,8 +454,6 @@ func TestResumeSubagents_SnapshotFiltersAndTruncates(t *testing.T) {
 	}
 }
 
-// R-4.1b: zero live tasks deletes the row (no stale snapshot can be read
-// back as "current"), and the feature gate keeps the KV untouched when off.
 func TestResumeSubagents_EmptySnapshotDeletesAndGate(t *testing.T) {
 	al, _ := resumeTestLoop(t)
 	resumeOn(t, al)
@@ -535,7 +463,6 @@ func TestResumeSubagents_EmptySnapshotDeletesAndGate(t *testing.T) {
 		t.Fatal("snapshot row missing after writing one task")
 	}
 
-	// The task finishes -> next snapshot write must remove the row.
 	sm := al.GetSubagents()["main"]
 	if !sm.StopTask("task-a") {
 		t.Fatal("StopTask: task not found")
@@ -545,7 +472,6 @@ func TestResumeSubagents_EmptySnapshotDeletesAndGate(t *testing.T) {
 		t.Fatal("snapshot row survived after the last task went terminal")
 	}
 
-	// Gate: with resume off the writer is a no-op, even with a live task.
 	no := false
 	cfg := al.cfg()
 	cfg.Session.Resume = &no
@@ -557,9 +483,6 @@ func TestResumeSubagents_EmptySnapshotDeletesAndGate(t *testing.T) {
 	}
 }
 
-// R-4.2: resuming a turn whose snapshot lists subagents injects the warning
-// (user role, visible in context) BEFORE the provider request, and the
-// snapshot row is gone afterwards so replays cannot duplicate the warning.
 func TestResumeSubagents_WarningInjectedOnce(t *testing.T) {
 	provider := &resumeMockProvider{}
 	al, _ := resumeTestLoop(t)
@@ -568,7 +491,6 @@ func TestResumeSubagents_WarningInjectedOnce(t *testing.T) {
 
 	addLiveSubagent(t, al, "task-w1", "vigía", "mirar el faro", "telegram:123")
 	addLiveSubagent(t, al, "task-w2", "", "sin etiqueta", "telegram:123")
-	// The snapshot the crashed process left behind.
 	al.writeTurnSubagentSnapshot("telegram:123")
 
 	seedMarker(t, al, TurnMarker{
@@ -594,12 +516,9 @@ func TestResumeSubagents_WarningInjectedOnce(t *testing.T) {
 	if !strings.Contains(w, "vigía: mirar el faro") {
 		t.Errorf("warning lost the labelled task: %q", w)
 	}
-	// Untitled tasks fall back to the ID.
 	if !strings.Contains(w, "task-w2: sin etiqueta") {
 		t.Errorf("warning missing id-fallback for unlabeled task: %q", w)
 	}
-	// The warning sits AFTER the original user message (it is the last user
-	// turn before the model continues).
 	idxWarn, idxUser := -1, -1
 	for i, m := range messages {
 		if m.Role == "user" {
@@ -615,13 +534,11 @@ func TestResumeSubagents_WarningInjectedOnce(t *testing.T) {
 		t.Fatalf("warning (idx %d) must follow the original user message (idx %d)", idxWarn, idxUser)
 	}
 
-	// Snapshot consumed: a second replay cannot re-inject.
 	if _, ok := turnSubsKV(t, al, "telegram:123"); ok {
 		t.Fatal("snapshot row survived injection")
 	}
 }
 
-// R-4.3: a resume without a snapshot adds no warning to the history.
 func TestResumeSubagents_NoSnapshotNoWarning(t *testing.T) {
 	provider := &resumeMockProvider{}
 	al, _ := resumeTestLoop(t)
@@ -643,7 +560,6 @@ func TestResumeSubagents_NoSnapshotNoWarning(t *testing.T) {
 	}
 }
 
-// R-4.4: a completed FRESH turn clears both KV rows (marker + snapshot).
 func TestResumeSubagents_FreshTurnClearsBothRows(t *testing.T) {
 	provider := &resumeMockProvider{}
 	al, _ := resumeTestLoop(t)
@@ -661,8 +577,6 @@ func TestResumeSubagents_FreshTurnClearsBothRows(t *testing.T) {
 	}
 }
 
-// R-4.5: a corrupt snapshot row must not break the resume: the row is
-// dropped and the turn resumes without a warning.
 func TestResumeSubagents_CorruptSnapshotSurvived(t *testing.T) {
 	provider := &resumeMockProvider{}
 	al, _ := resumeTestLoop(t)

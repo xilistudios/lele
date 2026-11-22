@@ -7,11 +7,6 @@ import (
 	"testing"
 )
 
-// --- helpers ----------------------------------------------------------------
-
-// usageLoader builds a fakeLoader for the "fs" server whose specs are specSet()
-// and whose usage counts are keyed by REMOTE tool name, the way the real
-// manager records them.
 func usageLoader(usage map[string]uint64) *fakeLoader {
 	return &fakeLoader{
 		servers: []MCPServerInfo{{Name: "fs", Description: "file system"}},
@@ -20,9 +15,6 @@ func usageLoader(usage map[string]uint64) *fakeLoader {
 	}
 }
 
-// manySpecs returns n specs of one server whose names sort in creation order
-// (mcp_big_tool00, mcp_big_tool01, …), so a listing with no usage is
-// predictable.
 func manySpecs(n int) []LoadedMCPTool {
 	specs := make([]LoadedMCPTool, 0, n)
 	for i := 0; i < n; i++ {
@@ -37,7 +29,6 @@ func manySpecs(n int) []LoadedMCPTool {
 	return specs
 }
 
-// bigLoader wires a server with n tools and no recorded usage.
 func bigLoader(n int) *fakeLoader {
 	return &fakeLoader{
 		servers: []MCPServerInfo{{Name: "big"}},
@@ -45,7 +36,6 @@ func bigLoader(n int) *fakeLoader {
 	}
 }
 
-// listedNames extracts the tool names of a listing page, in output order.
 func listedNames(out string) []string {
 	var names []string
 	for _, line := range strings.Split(out, "\n") {
@@ -57,14 +47,12 @@ func listedNames(out string) []string {
 	return names
 }
 
-// newGetTool wires a get_mcp_tool over a fresh registry.
 func newGetTool(loader MCPLoader) (*GetMCPToolTool, *ToolRegistry, *factoryRecorder) {
 	reg := NewToolRegistry()
 	rec := &factoryRecorder{}
 	return NewGetMCPToolTool(loader, reg, rec.build), reg, rec
 }
 
-// assertOrder checks that every want appears in out, in this order.
 func assertOrder(t *testing.T, out string, want ...string) {
 	t.Helper()
 	prev := -1
@@ -78,12 +66,9 @@ func assertOrder(t *testing.T, out string, want ...string) {
 		}
 		prev = idx
 	}
-} // --- list_mcp_tools ---------------------------------------------------------
+}
 
-// TestListMCPToolsOrderedByUsage pins the ranking: most used first, ties (and
-// never-used tools) broken by registry name ascending.
 func TestListMCPToolsOrderedByUsage(t *testing.T) {
-	// stat is never used, write 3 times, read 12 times.
 	loader := usageLoader(map[string]uint64{"read": 12, "write": 3})
 	out := NewListMCPToolsTool(loader).Execute(context.Background(), map[string]any{"server": "fs"})
 	if out.IsError {
@@ -102,7 +87,6 @@ func TestListMCPToolsOrderedByUsage(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsSingularUsage: one recorded call reads "used 1 time".
 func TestListMCPToolsSingularUsage(t *testing.T) {
 	loader := usageLoader(map[string]uint64{"stat": 1})
 	out := NewListMCPToolsTool(loader).Execute(context.Background(), map[string]any{"server": "fs"})
@@ -117,8 +101,6 @@ func TestListMCPToolsSingularUsage(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsTieBreakByNameAsc: with no usage at all the listing is
-// alphabetical, which keeps repeated calls byte-identical.
 func TestListMCPToolsTieBreakByNameAsc(t *testing.T) {
 	loader := usageLoader(nil)
 	out := NewListMCPToolsTool(loader).Execute(context.Background(), map[string]any{"server": "fs"})
@@ -137,8 +119,6 @@ func TestListMCPToolsTieBreakByNameAsc(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsPaginationDefaults: page 1 with 20 names and the page count
-// in the header.
 func TestListMCPToolsPaginationDefaults(t *testing.T) {
 	out := NewListMCPToolsTool(bigLoader(25)).Execute(context.Background(), map[string]any{"server": "big"})
 	if out.IsError {
@@ -156,8 +136,6 @@ func TestListMCPToolsPaginationDefaults(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsCustomPage: page and page_size are honoured and the last page
-// holds exactly the remaining tools.
 func TestListMCPToolsCustomPage(t *testing.T) {
 	tool := NewListMCPToolsTool(bigLoader(25))
 	first := tool.Execute(context.Background(), map[string]any{"server": "big", "page": 1, "page_size": 10})
@@ -184,8 +162,6 @@ func TestListMCPToolsCustomPage(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsPageSizeClamped: page_size above the maximum is clamped to
-// 100 instead of failing.
 func TestListMCPToolsPageSizeClamped(t *testing.T) {
 	out := NewListMCPToolsTool(bigLoader(150)).Execute(context.Background(), map[string]any{"server": "big", "page_size": 500})
 	if out.IsError {
@@ -199,8 +175,6 @@ func TestListMCPToolsPageSizeClamped(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsPageBeyondRange: a page past the end is clamped to the last
-// page rather than erroring or returning an empty list.
 func TestListMCPToolsPageBeyondRange(t *testing.T) {
 	out := NewListMCPToolsTool(bigLoader(25)).Execute(context.Background(), map[string]any{"server": "big", "page": 99})
 	if out.IsError {
@@ -215,8 +189,6 @@ func TestListMCPToolsPageBeyondRange(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsArgForms: JSON delivers numbers as float64 but in-process
-// callers may pass int — both must page identically.
 func TestListMCPToolsArgForms(t *testing.T) {
 	tool := NewListMCPToolsTool(bigLoader(25))
 	floatOut := tool.Execute(context.Background(), map[string]any{"server": "big", "page": float64(2), "page_size": float64(10)})
@@ -232,8 +204,6 @@ func TestListMCPToolsArgForms(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsInvalidPagingFallsBack: zero, negative, non-numeric, nil and
-// missing values all fall back to page 1 / page size 20.
 func TestListMCPToolsInvalidPagingFallsBack(t *testing.T) {
 	tool := NewListMCPToolsTool(bigLoader(25))
 	baseline := tool.Execute(context.Background(), map[string]any{"server": "big"})
@@ -261,7 +231,6 @@ func TestListMCPToolsInvalidPagingFallsBack(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsEmptyServer: a server that exposes no tool answers plainly.
 func TestListMCPToolsEmptyServer(t *testing.T) {
 	loader := &fakeLoader{
 		servers: []MCPServerInfo{{Name: "empty"}},
@@ -274,8 +243,7 @@ func TestListMCPToolsEmptyServer(t *testing.T) {
 	if out.ForLLM != `MCP server "empty" has no tools.` {
 		t.Errorf("ForLLM = %q", out.ForLLM)
 	}
-} // TestListMCPToolsErrors: unknown server, missing argument and a failed load
-// all use the shared known-servers error shape.
+}
 func TestListMCPToolsErrors(t *testing.T) {
 	loader := &fakeLoader{
 		servers: []MCPServerInfo{{Name: "ghe"}, {Name: "fs"}},
@@ -307,7 +275,6 @@ func TestListMCPToolsErrors(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsNilLoader: no loader is a clean configuration error.
 func TestListMCPToolsNilLoader(t *testing.T) {
 	out := NewListMCPToolsTool(nil).Execute(context.Background(), map[string]any{"server": "fs"})
 	if !out.IsError || !strings.Contains(out.ForLLM, "not configured") {
@@ -315,8 +282,6 @@ func TestListMCPToolsNilLoader(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsNoSchemaInOutput pins the token contract: a listing carries
-// names, a one-line description and a usage marker — never schema JSON.
 func TestListMCPToolsNoSchemaInOutput(t *testing.T) {
 	out := NewListMCPToolsTool(usageLoader(nil)).Execute(context.Background(), map[string]any{"server": "fs"})
 	if out.IsError {
@@ -329,10 +294,8 @@ func TestListMCPToolsNoSchemaInOutput(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsDescriptions: only the first line of a description is shown
-// and long lines are truncated to 120 runes with an ellipsis.
 func TestListMCPToolsDescriptions(t *testing.T) {
-	long := strings.Repeat("a", 119) + "b" + strings.Repeat("c", 80) // 200 runes
+	long := strings.Repeat("a", 119) + "b" + strings.Repeat("c", 80)
 	loader := &fakeLoader{
 		servers: []MCPServerInfo{{Name: "d"}},
 		specs: map[string][]LoadedMCPTool{"d": {
@@ -363,8 +326,6 @@ func TestListMCPToolsDescriptions(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsRegistersNothing: listing must not touch any registry — the
-// discovery step is free of side effects.
 func TestListMCPToolsRegistersNothing(t *testing.T) {
 	base := NewToolRegistry()
 	base.Register(&fakeTool{name: "read_file", desc: "built-in"})
@@ -384,9 +345,6 @@ func TestListMCPToolsRegistersNothing(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsDoesNotMutateCache: LoadServer returns a shared cached slice,
-// so ordering must happen on a copy. Reads the fake's slice twice to make sure
-// it kept its original order.
 func TestListMCPToolsDoesNotMutateCache(t *testing.T) {
 	loader := usageLoader(map[string]uint64{"write": 99})
 	tool := NewListMCPToolsTool(loader)
@@ -395,11 +353,9 @@ func TestListMCPToolsDoesNotMutateCache(t *testing.T) {
 	if first.IsError {
 		t.Fatalf("unexpected error: %s", first.ForLLM)
 	}
-	// The listing ranks mcp_fs_write first …
 	if got := listedNames(first.ForLLM); got[0] != "mcp_fs_write" {
 		t.Fatalf("listing order = %v, want mcp_fs_write first", got)
 	}
-	// … while the loader's cached slice keeps the declaration order.
 	cached := loader.specs["fs"]
 	gotNames := make([]string, len(cached))
 	for i, spec := range cached {
@@ -422,7 +378,6 @@ func TestListMCPToolsDoesNotMutateCache(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsShape: name, description and parameters contract.
 func TestListMCPToolsShape(t *testing.T) {
 	tool := NewListMCPToolsTool(&fakeLoader{})
 	if tool.Name() != ListMCPToolsName || ListMCPToolsName != "list_mcp_tools" {
@@ -458,10 +413,8 @@ func TestListMCPToolsShape(t *testing.T) {
 	if !ok || len(required) != 1 || required[0] != "server" {
 		t.Errorf("required = %v, want [server]", params["required"])
 	}
-} // --- get_mcp_tool -----------------------------------------------------------
+}
 
-// TestGetMCPToolByNamespacedName: one spec is registered (the others stay out),
-// and the full description plus pretty schema reach the context.
 func TestGetMCPToolByNamespacedName(t *testing.T) {
 	tool, reg, rec := newGetTool(usageLoader(nil))
 
@@ -494,8 +447,6 @@ func TestGetMCPToolByNamespacedName(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolByRemoteName: the original server-side name resolves to the
-// same spec.
 func TestGetMCPToolByRemoteName(t *testing.T) {
 	tool, reg, rec := newGetTool(usageLoader(nil))
 
@@ -517,8 +468,6 @@ func TestGetMCPToolByRemoteName(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolSecondCallIdempotent: a repeated load is safe, switches to the
-// already-registered wording and never rebuilds the tool.
 func TestGetMCPToolSecondCallIdempotent(t *testing.T) {
 	tool, reg, rec := newGetTool(usageLoader(nil))
 	args := map[string]any{"server": "fs", "tool": "mcp_fs_read"}
@@ -543,15 +492,11 @@ func TestGetMCPToolSecondCallIdempotent(t *testing.T) {
 	if reg.Count() != 1 {
 		t.Errorf("registry count = %d, want 1", reg.Count())
 	}
-	// The spec is still rendered, so the schema reaches the context both times.
 	if !strings.Contains(second.ForLLM, `"path"`) {
 		t.Errorf("second call must still render the schema:\n%s", second.ForLLM)
 	}
 }
 
-// TestGetMCPToolBaseRegistryWins mirrors GetMCPToolTool's collision rule: a
-// name already registered (a built-in or a parent layer's tool) is never
-// shadowed by a remote tool.
 func TestGetMCPToolBaseRegistryWins(t *testing.T) {
 	tool, reg, rec := newGetTool(usageLoader(nil))
 	sentinel := &fakeTool{name: "mcp_fs_read", desc: "built-in wins"}
@@ -579,11 +524,6 @@ func TestGetMCPToolBaseRegistryWins(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolRetainedEntrySpec is the collision half of the load contract: a
-// name already owned by ANOTHER tool (a built-in, or a foreign tool under an
-// mcp_ name) keeps its registration, so the load result must advertise THAT
-// entry's description and schema — not the remote tool's, which the registry
-// will never run — and must not attribute it to the requested server.
 func TestGetMCPToolRetainedEntrySpec(t *testing.T) {
 	tool, reg, rec := newGetTool(usageLoader(nil))
 	retained := &fakeTool{
@@ -622,14 +562,7 @@ func TestGetMCPToolRetainedEntrySpec(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolRegistryNameWinsOverRemoteName pins name resolution when the
-// two naming forms overlap: a server exposing remote "mcp_fs_read" (registry
-// name mcp_fs_mcp_fs_read) next to remote "read" (registry name mcp_fs_read).
-// The LISTED registry name must resolve to its own spec, never through the
-// other tool's RemoteName, and asking for both listed names must load both.
 func TestGetMCPToolRegistryNameWinsOverRemoteName(t *testing.T) {
-	// The lookalike comes FIRST on purpose: that is the order in which a
-	// single-pass Name-or-RemoteName comparison picks the wrong tool.
 	specs := []LoadedMCPTool{
 		{Name: "mcp_fs_mcp_fs_read", Server: "fs", RemoteName: "mcp_fs_read", Description: "Nested lookalike"},
 		{Name: "mcp_fs_read", Server: "fs", RemoteName: "read", Description: "Read a file"},
@@ -670,9 +603,6 @@ func TestGetMCPToolRegistryNameWinsOverRemoteName(t *testing.T) {
 					break
 				}
 			}
-			// A single-tool request must render ITS tool's description: with a
-			// single Name-or-RemoteName pass, "mcp_fs_read" would resolve to the
-			// lookalike that comes first.
 			if len(tc.request) == 1 {
 				desc := map[string]string{
 					"mcp_fs_read":  "Read a file",
@@ -691,8 +621,6 @@ func TestGetMCPToolRegistryNameWinsOverRemoteName(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolUnknownTool: the error points at list_mcp_tools and does NOT
-// dump the server's tool names — dumping them defeats the token saving.
 func TestGetMCPToolUnknownTool(t *testing.T) {
 	tool, reg, rec := newGetTool(usageLoader(nil))
 
@@ -716,8 +644,6 @@ func TestGetMCPToolUnknownTool(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolMissingArguments: both required arguments are validated before
-// any load happens.
 func TestGetMCPToolMissingArguments(t *testing.T) {
 	loader := &fakeLoader{servers: []MCPServerInfo{{Name: "fs"}}}
 	tool, reg, _ := newGetTool(loader)
@@ -749,7 +675,7 @@ func TestGetMCPToolMissingArguments(t *testing.T) {
 	if loader.loads != 0 {
 		t.Errorf("LoadServer calls = %d, want 0 (rejected locally)", loader.loads)
 	}
-} // TestGetMCPToolUnconfigured: nil seams fail cleanly, never panic.
+}
 func TestGetMCPToolUnconfigured(t *testing.T) {
 	loader := usageLoader(nil)
 	reg := NewToolRegistry()
@@ -779,8 +705,6 @@ func TestGetMCPToolUnconfigured(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolLoadError: a failing load uses the shared error shape and
-// registers nothing.
 func TestGetMCPToolLoadError(t *testing.T) {
 	loader := &fakeLoader{
 		servers: []MCPServerInfo{{Name: "fs"}},
@@ -800,8 +724,6 @@ func TestGetMCPToolLoadError(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolEmptySchema: a tool without an input schema renders "{}"
-// instead of "null".
 func TestGetMCPToolEmptySchema(t *testing.T) {
 	loader := &fakeLoader{
 		servers: []MCPServerInfo{{Name: "s"}},
@@ -820,7 +742,6 @@ func TestGetMCPToolEmptySchema(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolShape: name, description and parameters contract.
 func TestGetMCPToolShape(t *testing.T) {
 	tool, _, _ := newGetTool(&fakeLoader{})
 	if tool.Name() != GetMCPToolName || GetMCPToolName != "get_mcp_tool" {
@@ -853,21 +774,14 @@ func TestGetMCPToolShape(t *testing.T) {
 	if items, _ := tools["items"].(map[string]any); items["type"] != "string" {
 		t.Errorf("tools items = %v, want strings", tools["items"])
 	}
-	// JSON-Schema cannot express "tool OR tools", so only server is required
-	// and Execute enforces the at-least-one rule.
 	required, ok := params["required"].([]string)
 	if !ok || len(required) != 1 || required[0] != "server" {
 		t.Errorf("required = %v, want [server]", params["required"])
 	}
 }
 
-// --- get_mcp_tool: batch loading --------------------------------------------
-
-// specBlocks counts the rendered spec blocks of one result by their schema
-// marker, the cheapest signal that a tool was actually loaded.
 func specBlocks(out string) int { return strings.Count(out, "inputSchema:") }
 
-// batchArgs is the JSON shape of a batch call: arrays arrive as []interface{}.
 func batchArgs(server string, tools ...string) map[string]any {
 	list := make([]any, len(tools))
 	for i, name := range tools {
@@ -876,8 +790,6 @@ func batchArgs(server string, tools ...string) map[string]any {
 	return map[string]any{"server": server, "tools": list}
 }
 
-// TestGetMCPToolBatchLoadsEveryTool: one call loads all requested tools, in the
-// requested order, behind a one-line summary header.
 func TestGetMCPToolBatchLoadsEveryTool(t *testing.T) {
 	loader := usageLoader(nil)
 	tool, reg, rec := newGetTool(loader)
@@ -892,7 +804,6 @@ func TestGetMCPToolBatchLoadsEveryTool(t *testing.T) {
 	if got := specBlocks(out.ForLLM); got != 3 {
 		t.Errorf("rendered %d schema blocks, want 3:\n%s", got, out.ForLLM)
 	}
-	// Caller order is preserved, not the server's declaration order.
 	assertOrder(t, out.ForLLM, "Tool mcp_fs_stat", "Tool mcp_fs_read", "Tool mcp_fs_write")
 	if ids := rec.built; strings.Join(ids, ",") != "mcp_fs_stat,mcp_fs_read,mcp_fs_write" {
 		t.Errorf("factory built %v, want the three in caller order", ids)
@@ -905,8 +816,6 @@ func TestGetMCPToolBatchLoadsEveryTool(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolBatchArrayForms: a JSON []interface{} and an in-process
-// []string behave identically.
 func TestGetMCPToolBatchArrayForms(t *testing.T) {
 	anyTool, anyReg, anyRec := newGetTool(usageLoader(nil))
 	strTool, strReg, strRec := newGetTool(usageLoader(nil))
@@ -927,8 +836,6 @@ func TestGetMCPToolBatchArrayForms(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolBatchUnionOfToolAndTools: "tool" and "tools" are merged in that
-// order and deduplicated, so a name in both is loaded once.
 func TestGetMCPToolBatchUnionOfToolAndTools(t *testing.T) {
 	tool, reg, rec := newGetTool(usageLoader(nil))
 
@@ -952,9 +859,6 @@ func TestGetMCPToolBatchUnionOfToolAndTools(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolBatchRemoteAndNamespacedNameCollapse: asking for the same tool
-// under both naming forms loads and renders it exactly once — and, since only
-// one spec resolves, the output stays the plain single-tool rendering.
 func TestGetMCPToolBatchRemoteAndNamespacedNameCollapse(t *testing.T) {
 	batch, batchReg, batchRec := newGetTool(usageLoader(nil))
 	single, _, _ := newGetTool(usageLoader(nil))
@@ -981,8 +885,6 @@ func TestGetMCPToolBatchRemoteAndNamespacedNameCollapse(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolBatchIdenticalDuplicatesCollapse: the same raw name repeated is
-// requested once.
 func TestGetMCPToolBatchIdenticalDuplicatesCollapse(t *testing.T) {
 	tool, reg, rec := newGetTool(usageLoader(nil))
 
@@ -1001,9 +903,6 @@ func TestGetMCPToolBatchIdenticalDuplicatesCollapse(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolBatchPartialSuccess: the found tools are registered and become
-// callable; only the missing name is reported, in a trailing note, and the call
-// is NOT an error.
 func TestGetMCPToolBatchPartialSuccess(t *testing.T) {
 	tool, reg, rec := newGetTool(usageLoader(nil))
 
@@ -1043,8 +942,6 @@ func TestGetMCPToolBatchPartialSuccess(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolBatchAllMissing: nothing resolved means an error that names the
-// requested tools and points at list_mcp_tools — never the server's name list.
 func TestGetMCPToolBatchAllMissing(t *testing.T) {
 	loader := usageLoader(nil)
 	tool, reg, rec := newGetTool(loader)
@@ -1072,8 +969,6 @@ func TestGetMCPToolBatchAllMissing(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolBatchNoUsableNames: an absent, empty or malformed name list is
-// rejected locally, before any load.
 func TestGetMCPToolBatchNoUsableNames(t *testing.T) {
 	loader := &fakeLoader{servers: []MCPServerInfo{{Name: "fs"}}, specs: map[string][]LoadedMCPTool{"fs": specSet()}}
 	tool, reg, rec := newGetTool(loader)
@@ -1088,8 +983,8 @@ func TestGetMCPToolBatchNoUsableNames(t *testing.T) {
 		{"server": "fs", "tools": []string{"", "\t"}},
 		{"server": "fs", "tools": []any{42, nil, true}},
 		{"server": "fs", "tools": []any{"", 42, ""}},
-		{"server": "fs", "tools": "read"}, // wrong type, not an array
-		{"server": "fs", "tools": 7},      // wrong type
+		{"server": "fs", "tools": "read"},
+		{"server": "fs", "tools": 7},
 	}
 	for _, args := range argSets {
 		out := tool.Execute(context.Background(), args)
@@ -1110,8 +1005,6 @@ func TestGetMCPToolBatchNoUsableNames(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolBatchIdempotent: repeating a batch switches every block to the
-// already-registered wording and never rebuilds a tool.
 func TestGetMCPToolBatchIdempotent(t *testing.T) {
 	tool, reg, rec := newGetTool(usageLoader(nil))
 	args := batchArgs("fs", "read", "write", "stat")
@@ -1141,8 +1034,6 @@ func TestGetMCPToolBatchIdempotent(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolBatchBaseRegistryCollision: a pre-existing tool wins for its own
-// name while the rest of the batch still registers.
 func TestGetMCPToolBatchBaseRegistryCollision(t *testing.T) {
 	tool, reg, rec := newGetTool(usageLoader(nil))
 	sentinel := &fakeTool{name: "mcp_fs_read", desc: "built-in wins"}
@@ -1172,8 +1063,6 @@ func TestGetMCPToolBatchBaseRegistryCollision(t *testing.T) {
 	}
 }
 
-// TestGetMCPToolBatchLoadsServerOnceEvenWithDuplicates pins the cache contract:
-// a batch resolves every name against the single LoadServer result.
 func TestGetMCPToolBatchLoadsServerOnceEvenWithDuplicates(t *testing.T) {
 	loader := usageLoader(nil)
 	tool, _, _ := newGetTool(loader)
@@ -1187,12 +1076,6 @@ func TestGetMCPToolBatchLoadsServerOnceEvenWithDuplicates(t *testing.T) {
 	}
 }
 
-// --- shared helpers ---------------------------------------------------------
-
-// TestDiscoveryToolsListKnownServers drives the known-servers hint through both
-// tools' Execute output (never through a private helper): a model that forgets
-// the "server" argument gets the authoritative, sorted list appended, and
-// "(none)" when nothing is configured.
 func TestDiscoveryToolsListKnownServers(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -1225,20 +1108,11 @@ func TestDiscoveryToolsListKnownServers(t *testing.T) {
 	}
 }
 
-// TestLoadErrorAlwaysAppendsAuthoritativeServers pins the decoupling of
-// loadError from the wrapped error's wording: even when the loader's error
-// mentions "known servers:" with a DIFFERENT (stale) list, the authoritative
-// set from loader.Servers() is appended exactly once — and the cause survives
-// untouched. No strings.Contains coupling may decide whether the list appears.
 func TestLoadErrorAlwaysAppendsAuthoritativeServers(t *testing.T) {
 	cases := []struct {
-		name string
-		err  error
-		// wantCause is the wrapped text that must still reach the model.
-		wantCause string
-		// wantKnownMarkers is how many "known servers:" lines the message
-		// carries: 2 for a cause that repeats the phrase (the stale one plus
-		// the appended authoritative one), 1 for a bare cause.
+		name             string
+		err              error
+		wantCause        string
 		wantKnownMarkers int
 	}{
 		{"stale list in the cause", fmt.Errorf("stale listing from elsewhere: known servers: ghost"), "known servers: ghost", 2},
@@ -1250,8 +1124,6 @@ func TestLoadErrorAlwaysAppendsAuthoritativeServers(t *testing.T) {
 				servers: []MCPServerInfo{{Name: "ghe"}, {Name: "fs"}},
 				err:     tc.err,
 			}
-			// Both tools answer a failed load through the same helper, so
-			// checking one of them pins the shared shape.
 			out := NewListMCPToolsTool(loader).Execute(context.Background(), map[string]any{"server": "fs"})
 			if !out.IsError {
 				t.Fatalf("expected IsError, got: %s", out.ForLLM)
@@ -1259,7 +1131,6 @@ func TestLoadErrorAlwaysAppendsAuthoritativeServers(t *testing.T) {
 			if n := strings.Count(out.ForLLM, "known servers:"); n != tc.wantKnownMarkers {
 				t.Errorf("known-server markers = %d, want %d:\n%s", n, tc.wantKnownMarkers, out.ForLLM)
 			}
-			// The authoritative, sorted list is appended exactly once.
 			if n := strings.Count(out.ForLLM, "known servers: fs, ghe"); n != 1 {
 				t.Errorf("authoritative list appears %d times, want exactly 1:\n%s", n, out.ForLLM)
 			}
@@ -1270,8 +1141,6 @@ func TestLoadErrorAlwaysAppendsAuthoritativeServers(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsUsageMarkers pins the marker wording through the listing
-// output: never used ⇒ no marker, one call ⇒ singular, more ⇒ plural.
 func TestListMCPToolsUsageMarkers(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -1297,9 +1166,6 @@ func TestListMCPToolsUsageMarkers(t *testing.T) {
 	}
 }
 
-// TestListMCPToolsFractionalPagingTruncates pins the defensive parse of JSON
-// numbers: a fractional value truncates toward zero (2.9 → 2) instead of
-// failing the call.
 func TestListMCPToolsFractionalPagingTruncates(t *testing.T) {
 	out := NewListMCPToolsTool(bigLoader(25)).Execute(context.Background(),
 		map[string]any{"server": "big", "page": 2.9, "page_size": 10.7})

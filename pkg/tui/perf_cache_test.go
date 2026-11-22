@@ -7,12 +7,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// TestGetHistoryMessageCount_FrameSnapshot verifies that the count is resolved
-// from the render frame's single history snapshot: repeated calls inside one
-// frame reuse it (no extra GetHistoryView), the next frame picks up an appended
-// message, and switching sessions never serves the previous session's count.
-// This is a hot path: it is called multiple times per frame (token cache key,
-// viewport-skip fingerprint).
 func TestGetHistoryMessageCount_FrameSnapshot(t *testing.T) {
 	m := newTestModel(t)
 
@@ -20,7 +14,7 @@ func TestGetHistoryMessageCount_FrameSnapshot(t *testing.T) {
 	m.sessionMgr.GetOrCreate(key)
 	m.sessionMgr.AddMessage(key, "user", "hello")
 	m.sessionMgr.AddMessage(key, "assistant", "hi there")
-	m.sessionMgr.AddMessage(key, "tool", "tool output") // not counted
+	m.sessionMgr.AddMessage(key, "tool", "tool output")
 	m.currentKey = key
 
 	if got := m.getHistoryMessageCount(); got != 2 {
@@ -30,7 +24,6 @@ func TestGetHistoryMessageCount_FrameSnapshot(t *testing.T) {
 		t.Fatalf("frame snapshot not populated: key=%q count=%d", m.frameKey, m.frameCount)
 	}
 
-	// Inside a frame the snapshot is reused: N calls, exactly one history read.
 	m.beginRenderFrame()
 	reads := 0
 	m.onHistoryRead = func(string) { reads++ }
@@ -46,8 +39,6 @@ func TestGetHistoryMessageCount_FrameSnapshot(t *testing.T) {
 	m.endRenderFrame()
 	m.onHistoryRead = nil
 
-	// Adding a message changes the history and must be visible in the next
-	// frame (the snapshot is never carried across frames).
 	m.sessionMgr.AddMessage(key, "user", "second question")
 	m.beginRenderFrame()
 	if got := m.getHistoryMessageCount(); got != 3 {
@@ -58,7 +49,6 @@ func TestGetHistoryMessageCount_FrameSnapshot(t *testing.T) {
 		t.Fatalf("frame count not refreshed: %d", m.frameCount)
 	}
 
-	// Switching sessions must invalidate the cache.
 	otherKey := "tui:chat:count-cache-other"
 	m.sessionMgr.GetOrCreate(otherKey)
 	m.sessionMgr.AddMessage(otherKey, "user", "only message")
@@ -68,9 +58,6 @@ func TestGetHistoryMessageCount_FrameSnapshot(t *testing.T) {
 	}
 }
 
-// TestBouncingDots_NoPerFrameStyleAllocation verifies the bouncing dots
-// animation renders the pre-styled dot character (package-level style) and
-// produces a stable-width animation string.
 func TestBouncingDots_NoPerFrameStyleAllocation(t *testing.T) {
 	m := newTestModel(t)
 
@@ -79,8 +66,6 @@ func TestBouncingDots_NoPerFrameStyleAllocation(t *testing.T) {
 		t.Fatal("getBouncingDots() returned empty string")
 	}
 
-	// Advance the animation and verify the output stays the same length
-	// (the dots bounce within a fixed-width track).
 	for i := 0; i < 20; i++ {
 		m.animationTick++
 		got := m.getBouncingDots()
@@ -89,18 +74,11 @@ func TestBouncingDots_NoPerFrameStyleAllocation(t *testing.T) {
 		}
 	}
 
-	// The animation must use the pre-rendered dot character (rendered once at
-	// package init, not per frame). Note: in test environments lipgloss may
-	// strip ANSI styling, so we compare against the pre-rendered value rather
-	// than asserting ANSI codes are present.
 	if !strings.Contains(first, bouncingDotChar) {
 		t.Fatal("getBouncingDots output does not use the pre-rendered bouncingDotChar")
 	}
 }
 
-// TestMessageFingerprint_Stable verifies that the same message always
-// produces the same fingerprint, and that different messages produce
-// different fingerprints.
 func TestMessageFingerprint_Stable(t *testing.T) {
 	msg1 := providers.Message{Role: "user", Content: "hello world"}
 	msg2 := providers.Message{Role: "user", Content: "hello world"}
@@ -118,8 +96,6 @@ func TestMessageFingerprint_Stable(t *testing.T) {
 	}
 }
 
-// TestMessageFingerprint_WidthSensitive verifies that the same message
-// with different render widths produces different fingerprints.
 func TestMessageFingerprint_WidthSensitive(t *testing.T) {
 	msg := providers.Message{Role: "assistant", Content: "some response"}
 
@@ -131,8 +107,6 @@ func TestMessageFingerprint_WidthSensitive(t *testing.T) {
 	}
 }
 
-// TestMessageFingerprint_RoleSensitive verifies that messages with different
-// roles produce different fingerprints.
 func TestMessageFingerprint_RoleSensitive(t *testing.T) {
 	user := providers.Message{Role: "user", Content: "same content"}
 	assistant := providers.Message{Role: "assistant", Content: "same content"}
@@ -145,8 +119,6 @@ func TestMessageFingerprint_RoleSensitive(t *testing.T) {
 	}
 }
 
-// TestMessageFingerprint_ToolCallsSensitive verifies that tool calls are
-// included in the fingerprint.
 func TestMessageFingerprint_ToolCallsSensitive(t *testing.T) {
 	msg1 := providers.Message{
 		Role:    "assistant",
@@ -171,7 +143,6 @@ func TestMessageFingerprint_ToolCallsSensitive(t *testing.T) {
 	}
 }
 
-// TestCountHistoryMessages verifies the pure-function message counter.
 func TestCountHistoryMessages(t *testing.T) {
 	history := []providers.Message{
 		{Role: "system", Content: "system prompt"},
@@ -186,13 +157,11 @@ func TestCountHistoryMessages(t *testing.T) {
 		t.Fatalf("countHistoryMessages() = %d, want 4", got)
 	}
 
-	// Empty history
 	if got := countHistoryMessages(nil); got != 0 {
 		t.Fatalf("countHistoryMessages(nil) = %d, want 0", got)
 	}
 }
 
-// TestLastHistoryRoleFromHistory verifies the pure-function role lookup.
 func TestLastHistoryRoleFromHistory(t *testing.T) {
 	history := []providers.Message{
 		{Role: "user", Content: "hello"},
@@ -204,7 +173,6 @@ func TestLastHistoryRoleFromHistory(t *testing.T) {
 		t.Fatalf("lastHistoryRoleFromHistory() = %q, want %q", got, "assistant")
 	}
 
-	// System-only history
 	sysOnly := []providers.Message{{Role: "system", Content: "prompt"}}
 	if got := lastHistoryRoleFromHistory(sysOnly); got != "" {
 		t.Fatalf("system-only: got %q, want empty", got)

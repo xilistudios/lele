@@ -8,37 +8,20 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// lineViewport is a lightweight replacement for bubbles/viewport.Model optimized
-// for large chat histories. The standard viewport.SetContent() does O(n) work
-// on every call (strings.Split + findLongestLineWidth with ansi.StringWidth on
-// every line). For conversations with thousands of rendered lines, this dominates
-// CPU usage — especially during streaming when SetContent is called every32ms.
-//
-// lineViewport stores lines as []string directly (no Split needed) and only
-// processes the visible window in View(). During streaming, callers can use
-// SetBaseLines + SetOverlayLines to avoid rebuilding the entire line buffer.
 type lineViewport struct {
 	Width  int
 	Height int
 	Style  lipgloss.Style
 
-	// YOffset is the scroll position (line index of topmost visible line).
 	YOffset int
 
 	MouseWheelEnabled bool
 	MouseWheelDelta   int
 
-	// baseLines are the committed history lines. Only rebuilt when messages change.
-	baseLines []string
-	// overlayLines are ephemeral lines (streaming, approvals, feedback) appended
-	// after baseLines. Rebuilt every frame during streaming — but they're small.
-	overlayLines []string
-	// longestLineWidth caches the widest line to avoid recomputing on every View().
-	// Updated incrementally when baseLines/overlayLines change.
+	baseLines        []string
+	overlayLines     []string
 	longestLineWidth int
 
-	// Pre-allocated style for View() rendering — avoids creating a new
-	// lipgloss.Style on every frame (which triggers GC pressure).
 	viewStyle  lipgloss.Style
 	viewStyleW int
 	viewStyleH int
@@ -53,25 +36,18 @@ func newLineViewport(width, height int) lineViewport {
 	}
 }
 
-// SetBaseLines replaces the base (history) lines. Call only when message count
-// or width changes. O(1) pointer swap + O(n) width scan (unavoidable for
-// correct horizontal scroll, but amortized by the caller's cache).
 func (v *lineViewport) SetBaseLines(lines []string) {
 	v.baseLines = lines
 	v.recalcLongestWidth()
 	v.clampOffset()
 }
 
-// SetOverlayLines replaces the ephemeral overlay lines (streaming, approvals).
-// Called every frame during streaming but the overlay is small (typically <20 lines).
 func (v *lineViewport) SetOverlayLines(lines []string) {
 	v.overlayLines = lines
 	v.recalcLongestWidth()
 	v.clampOffset()
 }
 
-// SetContent provides backward compatibility with viewport.Model. Splits the
-// string into lines and sets them as baseLines. Prefer SetBaseLines for new code.
 func (v *lineViewport) SetContent(s string) {
 	if s == "" {
 		v.baseLines = nil
@@ -86,15 +62,10 @@ func (v *lineViewport) SetContent(s string) {
 	v.clampOffset()
 }
 
-// totalLines returns the combined line count.
 func (v *lineViewport) totalLines() int {
 	return len(v.baseLines) + len(v.overlayLines)
 }
 
-// lineAt returns the line at the given global index, pulling from baseLines
-// or overlayLines as needed. Returns ("", false) if out of range.
-// This avoids the O(n) allocation of allLines() — callers only touch the
-// specific indices they need.
 func (v *lineViewport) lineAt(i int) (string, bool) {
 	if i < 0 {
 		return "", false
@@ -109,12 +80,6 @@ func (v *lineViewport) lineAt(i int) (string, bool) {
 	return "", false
 }
 
-// visibleLines returns only the lines in the current scroll window. This is
-// O(visible) instead of O(total) — the key performance win over the standard
-// viewport which processes all lines in SetContent.
-//
-// Unlike the previous implementation, this does NOT call allLines() and
-// therefore does NOT allocate a combined slice on every frame during streaming.
 func (v *lineViewport) visibleLines() []string {
 	total := v.totalLines()
 	if total == 0 {
@@ -132,7 +97,6 @@ func (v *lineViewport) visibleLines() []string {
 		return nil
 	}
 
-	// Build only the visible lines directly from base + overlay.
 	result := make([]string, 0, bottom-top)
 	for i := top; i < bottom; i++ {
 		if line, ok := v.lineAt(i); ok {
@@ -145,8 +109,6 @@ func (v *lineViewport) visibleLines() []string {
 	return result
 }
 
-// View renders only the visible portion. O(visible_lines) — typically 30-50.
-// Uses a cached lipgloss.Style to avoid allocating a new one on every frame.
 func (v *lineViewport) View() string {
 	w := v.Width - v.Style.GetHorizontalFrameSize()
 	h := v.Height - v.Style.GetVerticalFrameSize()
@@ -156,7 +118,6 @@ func (v *lineViewport) View() string {
 
 	visible := v.visibleLines()
 	if len(visible) == 0 {
-		// Cache the empty-content style
 		if v.viewStyleW != w || v.viewStyleH != h {
 			v.viewStyle = lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).MaxWidth(w)
 			v.viewStyleW = w
@@ -165,20 +126,12 @@ func (v *lineViewport) View() string {
 		return v.viewStyle.Render("")
 	}
 
-	// Hard clamp: truncate (never word-wrap) any row wider than the render
-	// width. lipgloss Width() re-wraps over-wide rows at render time (cellbuf
-	// treats '-' as a breakpoint), which drops row prefixes (tool-result
-	// "  → ", group-turn "┌ ") and ADDS rows inside the fixed-height window,
-	// shifting every row below — the full-frame corruption cascade. Producers
-	// already wrap to the viewport budget, so this only fires on a width-math
-	// bug or an unsanitized ingress; truncating keeps the frame intact.
 	for i, l := range visible {
 		if ansi.StringWidth(l) > w {
 			visible[i] = closeOpenSGR(ansi.Truncate(l, w, ""))
 		}
 	}
 
-	// Cache the content style (only recreated when dimensions change)
 	if v.viewStyleW != w || v.viewStyleH != h {
 		v.viewStyle = lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).MaxWidth(w)
 		v.viewStyleW = w
@@ -192,33 +145,27 @@ func (v *lineViewport) View() string {
 		Render(contents)
 }
 
-// AtBottom reports whether the viewport is scrolled to the bottom.
 func (v *lineViewport) AtBottom() bool {
 	return v.YOffset >= v.maxYOffset()
 }
 
-// AtTop reports whether the viewport is scrolled to the top.
 func (v *lineViewport) AtTop() bool {
 	return v.YOffset <= 0
 }
 
-// GotoBottom scrolls to the last line.
 func (v *lineViewport) GotoBottom() {
 	v.YOffset = v.maxYOffset()
 }
 
-// GotoTop scrolls to the first line.
 func (v *lineViewport) GotoTop() {
 	v.YOffset = 0
 }
 
-// maxYOffset returns the maximum YOffset.
 func (v *lineViewport) maxYOffset() int {
 	h := v.Height - v.Style.GetVerticalFrameSize()
 	return max(0, v.totalLines()-h)
 }
 
-// clampOffset ensures YOffset is within valid bounds.
 func (v *lineViewport) clampOffset() {
 	maxY := v.maxYOffset()
 	if v.YOffset > maxY {
@@ -229,11 +176,6 @@ func (v *lineViewport) clampOffset() {
 	}
 }
 
-// recalcLongestWidth computes the widest line for horizontal scroll support.
-// We skip the expensive ansi.StringWidth scan on base lines because:
-// 1. We never use horizontal scrolling (xOffset is always 0)
-// 2. Content is word-wrapped to viewport width
-// Only overlay lines are scanned (they're small).
 func (v *lineViewport) recalcLongestWidth() {
 	w := 0
 	for _, l := range v.overlayLines {
@@ -241,17 +183,12 @@ func (v *lineViewport) recalcLongestWidth() {
 			w = ww
 		}
 	}
-	// Base lines: use a cheap estimate (viewport width) instead of ANSI parsing.
-	// This is correct because we word-wrap to viewport.Width.
 	if v.Width > w {
 		w = v.Width
 	}
 	v.longestLineWidth = w
 }
 
-// pageHeight returns the number of visible lines in the viewport, used for
-// page-up/page-down scrolling. Never returns less than 1 so page scrolling
-// always makes progress.
 func (v *lineViewport) pageHeight() int {
 	h := v.Height - v.Style.GetVerticalFrameSize()
 	if h < 1 {
@@ -260,10 +197,6 @@ func (v *lineViewport) pageHeight() int {
 	return h
 }
 
-// Update handles keyboard and mouse wheel events for scrolling.
-//
-// Keyboard scrolling (up/down/pgup/pgdown) always works, regardless of
-// MouseWheelEnabled — that flag only gates mouse wheel events.
 func (v *lineViewport) Update(msg tea.Msg) (lineViewport, tea.Cmd) {
 	switch m := msg.(type) {
 	case tea.MouseMsg:
@@ -301,7 +234,6 @@ func (v *lineViewport) Update(msg tea.Msg) (lineViewport, tea.Cmd) {
 	return *v, nil
 }
 
-// ScrollPercent returns 0..1 scroll position.
 func (v *lineViewport) ScrollPercent() float64 {
 	total := v.totalLines()
 	if v.Height >= total {

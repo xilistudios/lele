@@ -1,26 +1,3 @@
-/**
- * Regression tests for MessageBubble VISIBILITY (the "dead space between chat
- * messages" bug).
- *
- * An assistant row must never render when it has nothing visible: raw
- * `message.content` / `message.reasoningContent` truthiness is not enough
- * because whitespace-only strings (" ", "\n", "\n\n\n") are truthy yet paint
- * nothing in the row.
- *
- * These rows are invisible by construction: nothing inside them has height the
- * user can see, yet the row still occupies its padding (and, for whitespace on
- * interior lines, the blank blocks `MarkdownText` emits) — which is how dead
- * bands appeared between two tool cards in a live turn.
- *
- * What MUST keep rendering: the streaming typing dots (a streaming bubble whose
- * visible content is still empty is *doing* something, so it is not dead space),
- * reasoning-only rows, rows with visible text, the archived-from-context banner,
- * attachments, user rows (the guard is assistant-only), and the streaming caret —
- * which is gated on the same trimmed content test, so it never floats over a
- * payload that paints nothing.
- *
- * Conventions (imports/mocks/i18n/helpers) mirror MessageBubble.test.tsx.
- */
 import '../../test/setup'
 import '../../test/i18n'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
@@ -77,10 +54,6 @@ function makeUserMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
   }
 }
 
-/** The three pulsing dots of the typing indicator (no data-testid on purpose:
- *  the caret and the "thinking…" pulse also carry `animate-pulse`, but neither
- *  of them is reachable while the dots render — content and reasoning are both
- *  empty there — so counting the spans pins the indicator exactly. */
 function typingDotCount(container: HTMLElement) {
   return container.querySelectorAll('span.animate-pulse').length
 }
@@ -119,10 +92,6 @@ describe('MessageBubble — invisible assistant rows are not rendered', () => {
   })
 
   test('3. newlines only ("\\n\\n\\n"), finalized (not streaming) → renders nothing: the 84px ghost row', () => {
-    // The band measured between two tool cards: content that is truthy but
-    // paints nothing. parseBlocks() trims every text block, so "\n\n\n" is not
-    // even a markdown payload — what the row was paying was pure layout, and it
-    // disappeared on reload because the persisted copy is empty.
     const { container, queryByTestId } = renderBubble(
       makeAssistantMessage({ content: '\n\n\n' }),
       ctx,
@@ -160,15 +129,6 @@ describe('MessageBubble — rows that are visible keep rendering', () => {
   })
 
   test('5b. whitespace-only content while streaming → typing dots, never blank markdown lines', () => {
-    // ADAPTED expectation: `showsTypingDots` is measured on the TRIMMED content,
-    // so a streaming bubble that has received nothing but whitespace is "no
-    // visible content yet" and takes the dots branch instead of the markdown
-    // one. The blank blocks a whitespace payload *can* produce come from
-    // MarkdownText (whitespace on interior lines), not from parseBlocks — and
-    // this fixture is not such a case, which is what the assertion below pins:
-    // nothing but the indicator leaks into the row. The row is visible (dots),
-    // so it is not dead space; the moment it finalizes as whitespace it hits the
-    // early return (case 3) and disappears.
     const { container, getByTestId } = renderBubble(
       makeAssistantMessage({ content: '\n\n\n', streaming: true }),
       ctx,
@@ -177,7 +137,6 @@ describe('MessageBubble — rows that are visible keep rendering', () => {
 
     expect(getByTestId('message')).toBeTruthy()
     expect(typingDotCount(container)).toBe(3)
-    // No invisible markdown payload leaked through the dots branch.
     expect(container.querySelectorAll('div.h-2')).toHaveLength(0)
     expect(container.textContent).toBe('')
   })
@@ -237,10 +196,6 @@ describe('MessageBubble — rows that are visible keep rendering', () => {
 describe('MessageBubble — the streaming caret follows the trimmed content test', () => {
   const ctx = makeAuthCtx()
 
-  /** The caret is the row's only `h-4 w-0.5` element (the typing dots are
-   *  `h-2 w-2`, the thinking pulse lives in the collapsed card header), so this
-   *  selector pins the caret and nothing else. The `.` of the tailwind token
-   *  `w-0.5` is escaped — unescaped, CSS reads it as a `5` type selector. */
   function caret(container: HTMLElement) {
     return container.querySelector('span.h-4.w-0\\.5')
   }
@@ -254,14 +209,10 @@ describe('MessageBubble — the streaming caret follows the trimmed content test
 
     expect(getByTestId('message')).toBeTruthy()
     expect(caret(container)).not.toBeNull()
-    // The dots and the caret are mutually exclusive: text has arrived.
     expect(container.querySelectorAll('span.h-2.w-2')).toHaveLength(0)
   })
 
   test('12. streaming + isLast + whitespace-only text → no caret, dots instead', () => {
-    // The caret used to be gated on `message.content !== ''`, so a payload of
-    // whitespace alone drew a blinking bar next to nothing while the row itself
-    // was invisible content. `hasContent` is trimmed, so the indicator wins.
     const { container, getByTestId } = renderBubble(
       makeAssistantMessage({ content: '  ', streaming: true }),
       ctx,

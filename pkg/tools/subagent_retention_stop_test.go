@@ -1,21 +1,5 @@
 package tools
 
-// Tests for the BOUNDED stop of the retention sweeper: StopRetentionCleanup /
-// StopRetentionCleanupWithin.
-//
-// The unbounded form was called by AgentLoop.StopWithin BEFORE its turn drain,
-// so the whole teardown waited on the sweeper without a limit. A sweep can be
-// inside CleanupTerminalTasks -> sessionEvictCallback -> EvictSession
-// (synchronous SQLite, per session), i.e. it can block for as long as that I/O
-// takes — and a callback that never returns hung the teardown (systemd's
-// TimeoutStopUSec would then SIGKILL every live turn).
-//
-// These tests pin the bound, the detachment contract that makes giving up safe,
-// and the no-leak healthy path.
-//
-// Helpers (addRetentionTask, retentionTaskIDs, waitForCondition,
-// waitSweeperExit) live in subagent_retention_test.go.
-
 import (
 	"fmt"
 	"sync"
@@ -24,13 +8,6 @@ import (
 	"time"
 )
 
-// blockedSweep wires a manager whose retention sweeper is provably stuck inside
-// the session-evict callback: the callback signals on `entered` and then blocks
-// until the returned release func is called. It also returns the number of
-// callback invocations (read it with Load).
-//
-// The manager keeps `tasks` terminal tasks, all of them collected by the sweep
-// that blocks, so a batch abandoned half-way still has evictions pending.
 func blockedSweep(t *testing.T, tasks int) (sm *SubagentManager, entered <-chan struct{}, release func(), calls *atomic.Int64) {
 	t.Helper()
 	sm = NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
@@ -43,7 +20,7 @@ func blockedSweep(t *testing.T, tasks int) (sm *SubagentManager, entered <-chan 
 	releaseCh := make(chan struct{})
 	var releaseOnce sync.Once
 	release = func() { releaseOnce.Do(func() { close(releaseCh) }) }
-	t.Cleanup(release) // never leave the sweeper blocked if the test fails early
+	t.Cleanup(release)
 
 	calls = &atomic.Int64{}
 	sm.SetSessionEvictCallback(func(string) {
@@ -58,8 +35,6 @@ func blockedSweep(t *testing.T, tasks int) (sm *SubagentManager, entered <-chan 
 	stop := sm.StartRetentionCleanup(time.Millisecond)
 	t.Cleanup(stop)
 
-	// Wait until the sweeper is INSIDE the callback: the state that used to
-	// make the stop (and the whole teardown) wait without a limit.
 	waitForCondition(t, 3*time.Second, "the sweeper to enter the evict callback", func() bool {
 		select {
 		case <-enteredCh:
@@ -71,9 +46,6 @@ func blockedSweep(t *testing.T, tasks int) (sm *SubagentManager, entered <-chan 
 	return sm, enteredCh, release, calls
 }
 
-// TestSubagentManager_StopRetentionCleanup_IsBounded is the reported bug: the
-// public stop must return on its own budget even when the sweeper is blocked in
-// the evict callback, instead of waiting for it forever.
 func TestSubagentManager_StopRetentionCleanup_IsBounded(t *testing.T) {
 	sm, _, release, calls := blockedSweep(t, 3)
 
@@ -84,8 +56,6 @@ func TestSubagentManager_StopRetentionCleanup_IsBounded(t *testing.T) {
 	if elapsed < DefaultRetentionStopGrace {
 		t.Errorf("stop returned in %s, before the %s grace elapsed", elapsed, DefaultRetentionStopGrace)
 	}
-	// Generous upper bound (the machine is shared) that still fails loudly if
-	// the stop waits for the blocked callback instead of giving up.
 	if elapsed > DefaultRetentionStopGrace+2*time.Second {
 		t.Errorf("stop took %s, want ≈%s (bounded by the grace)", elapsed, DefaultRetentionStopGrace)
 	}
@@ -104,10 +74,6 @@ func TestSubagentManager_StopRetentionCleanup_IsBounded(t *testing.T) {
 	}
 }
 
-// TestSubagentManager_StopRetentionCleanupWithin_DetachesOnTimeout pins the
-// contract that makes giving up safe: after the grace expires the sweeper may
-// no longer touch the task map or fire session-evict callbacks, and the caller
-// is told the join was abandoned.
 func TestSubagentManager_StopRetentionCleanupWithin_DetachesOnTimeout(t *testing.T) {
 	sm, _, release, calls := blockedSweep(t, 3)
 
@@ -124,8 +90,6 @@ func TestSubagentManager_StopRetentionCleanupWithin_DetachesOnTimeout(t *testing
 	}
 	t.Logf("bounded stop returned in %s (grace %s): %v", elapsed, grace, err)
 
-	// Detached: an eligible terminal task added now must survive, and no
-	// callback may fire for it.
 	addRetentionTask(sm, "subagent-4", SubagentStatusCompleted)
 	if n := sm.CleanupTerminalTasks(); n != 0 {
 		t.Errorf("detached manager removed %d tasks, want 0", n)
@@ -134,16 +98,10 @@ func TestSubagentManager_StopRetentionCleanupWithin_DetachesOnTimeout(t *testing
 		t.Errorf("evict callbacks = %d after detachment, want 1 (the blocked one)", got)
 	}
 
-	// The abandonment is remembered: a later stop does not wait again, it just
-	// reports that there is nothing left to join.
 	if err := sm.StopRetentionCleanupWithin(time.Second); err != nil {
 		t.Errorf("stop after detachment = %v, want nil", err)
 	}
 
-	// Releasing the callback lets the blocked eviction finish. The two
-	// remaining sessions of that batch must NOT be evicted (they belong to a
-	// session layer the caller may already be tearing down), and the sweeper
-	// must exit instead of sweeping again.
 	release()
 	waitSweeperExit(t, sm)
 
@@ -155,9 +113,6 @@ func TestSubagentManager_StopRetentionCleanupWithin_DetachesOnTimeout(t *testing
 	}
 }
 
-// TestSubagentManager_StopRetentionCleanupWithin_HealthySweeper covers the
-// normal path: the sweeper exits promptly, without detachment, and without
-// leaking its goroutine.
 func TestSubagentManager_StopRetentionCleanupWithin_HealthySweeper(t *testing.T) {
 	sm := NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
 	sm.SetRetentionPeriod(time.Millisecond)
@@ -176,10 +131,8 @@ func TestSubagentManager_StopRetentionCleanupWithin_HealthySweeper(t *testing.T)
 	if sm.retentionDetached.Load() {
 		t.Error("a healthy stop detached the manager")
 	}
-	waitSweeperExit(t, sm) // no goroutine leak
+	waitSweeperExit(t, sm)
 
-	// Idempotent through both entry points, and the bounded-without-grace form
-	// still joins a sweeper that already exited.
 	sm.StopRetentionCleanup()
 	sm.StopRetentionCleanup()
 	if err := sm.StopRetentionCleanupWithin(0); err != nil {
@@ -187,9 +140,6 @@ func TestSubagentManager_StopRetentionCleanupWithin_HealthySweeper(t *testing.T)
 	}
 }
 
-// TestSubagentManager_StopRetentionCleanup_NeverStarted pins the pre-existing
-// no-op contract of the stop (also exercised by the wiring tests, which call it
-// on managers whose sweeper was never wired).
 func TestSubagentManager_StopRetentionCleanup_NeverStarted(t *testing.T) {
 	sm := NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
 

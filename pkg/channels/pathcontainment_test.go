@@ -1,19 +1,11 @@
 package channels
 
-// Unit tests for the canonical containment helper. The boundary itself is
-// covered end-to-end in processattachments_test.go; these tests pin the helper
-// semantics (empty values fail closed, sibling prefixes are rejected, missing
-// leaves still compare canonically).
-
 import (
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-// TestCanonicalContainmentRoot_EmptyDirFailsClosed: a caller that hands an
-// empty (or not yet configured) directory must not get a root that matches
-// anything. LeleDir == "" is a real configuration state (config documents it).
 func TestCanonicalContainmentRoot_EmptyDirFailsClosed(t *testing.T) {
 	if got := canonicalContainmentRoot(""); got != "" {
 		t.Errorf("canonicalContainmentRoot(%q) = %q, want empty", "", got)
@@ -23,8 +15,6 @@ func TestCanonicalContainmentRoot_EmptyDirFailsClosed(t *testing.T) {
 	}
 }
 
-// TestCanonicalContainmentRoot_ExistentDir: a plain, existing directory is
-// canonicalized and a file inside it (and the directory itself) is contained.
 func TestCanonicalContainmentRoot_ExistentDir(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "tmp", "uploads")
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -46,10 +36,6 @@ func TestCanonicalContainmentRoot_ExistentDir(t *testing.T) {
 	}
 }
 
-// TestCanonicalContainmentRoot_MissingDirWalksAncestors: the root does not
-// exist yet (uploads dir before the first upload). The canonical form must
-// still be built from the deepest existing ancestor, otherwise the check
-// compares an unresolved root against a resolved path.
 func TestCanonicalContainmentRoot_MissingDirWalksAncestors(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "not", "created", "yet")
@@ -66,13 +52,6 @@ func TestCanonicalContainmentRoot_MissingDirWalksAncestors(t *testing.T) {
 	}
 }
 
-// TestIsContainedIn_SymlinkedRoot: LeleDir traverses a symlink (the incident).
-// Mutations M2 (no resolution on the candidate side) and M6 (ancestor-walk
-// drops the unresolved remainder) turn this test red.
-// Paths spelled through the symlink and paths spelled through the real
-// directory must both be contained. A missing leaf through a symlinked root
-// must be contained as well (this is the case that a naive ancestor-walk that
-// returns the unresolved abs path gets wrong).
 func TestIsContainedIn_SymlinkedRoot(t *testing.T) {
 	real := t.TempDir()
 	link := filepath.Join(t.TempDir(), "lele")
@@ -94,8 +73,6 @@ func TestIsContainedIn_SymlinkedRoot(t *testing.T) {
 	if !isContainedIn(filepath.Join(root, "existing.txt"), rootViaLink) {
 		t.Error("real spelling of the file must be contained in the symlinked root")
 	}
-	// Missing leaf: EvalSymlinks fails on the file, the ancestor-walk must
-	// still produce a canonical path inside the canonical root.
 	if !isContainedIn(filepath.Join(rootViaLink, "missing.txt"), rootViaLink) {
 		t.Error("missing file under an existing symlinked root must be contained (D1)")
 	}
@@ -107,10 +84,6 @@ func TestIsContainedIn_SymlinkedRoot(t *testing.T) {
 	}
 }
 
-// TestIsContainedIn_RejectsSiblingPrefix: a sibling directory whose name shares
-// a prefix with the root ("uploads" vs "uploads-evil") must be rejected. With a
-// raw strings.HasPrefix comparison it was accepted (mutation M3, which also
-// turns the S4 row of the processAttachments matrix red).
 func TestIsContainedIn_RejectsSiblingPrefix(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "tmp", "uploads")
@@ -134,9 +107,6 @@ func TestIsContainedIn_RejectsSiblingPrefix(t *testing.T) {
 	}
 }
 
-// TestIsContainedIn_RejectsParentTraversal: ".." escapes stay rejected, both
-// when they leave the root and when they are spelled inside it (mutation M4
-// accepts the ".." remainder and turns this test red).
 func TestIsContainedIn_RejectsParentTraversal(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "tmp", "uploads")
@@ -157,8 +127,6 @@ func TestIsContainedIn_RejectsParentTraversal(t *testing.T) {
 	}
 }
 
-// TestIsContainedIn_EmptyPathFailsClosed: an empty candidate path must be
-// rejected rather than treated as contained.
 func TestIsContainedIn_EmptyPathFailsClosed(t *testing.T) {
 	root := t.TempDir()
 	if isContainedIn("", root) {
@@ -169,9 +137,6 @@ func TestIsContainedIn_EmptyPathFailsClosed(t *testing.T) {
 	}
 }
 
-// TestIsContainedIn_RelativeRoot: a relative LeleDir is resolved against the
-// process working directory (filepath.Abs semantics, unchanged by this helper),
-// so a file under the same relative spelling stays contained.
 func TestIsContainedIn_RelativeRoot(t *testing.T) {
 	abs := filepath.Join(t.TempDir(), "tmp", "uploads")
 	if err := os.MkdirAll(abs, 0o755); err != nil {

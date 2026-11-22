@@ -8,18 +8,15 @@ import { ApiError } from '../services/http/errors'
 export type SaveState = 'idle' | 'validating' | 'saving' | 'saved' | 'error'
 
 export type SettingsConfigState = {
-  // Data
   remoteConfig: EditableConfig | null
   draftConfig: EditableConfig | null
   metadata: ConfigMetadata | null
 
-  // UI State
   dirtyPaths: Set<string>
   validationErrors: ConfigError[]
   saveState: SaveState
   saveError: string | null
 
-  // Actions
   updateField: <T>(path: string, value: T) => void
   updateSecretField: (
     path: string,
@@ -71,16 +68,12 @@ export function useSettingsConfig(apiClient: ApiClient): SettingsConfigState {
   const [isLoading, setIsLoading] = useState(true)
   const [isReloading, setIsReloading] = useState(false)
 
-  // Load initial config. Only show the full-page loader on the very first
-  // fetch (when draftConfig is still null). Subsequent refetches set
-  // isReloading instead so the already-rendered form is never unmounted.
   useEffect(() => {
     const loadConfig = async () => {
-      // Read draftConfig via a functional setter to avoid adding it to deps.
       let isFirstLoad = true
       setDraftConfig((current) => {
         isFirstLoad = current !== null
-        return current // no mutation
+        return current
       })
 
       if (!isFirstLoad) {
@@ -171,7 +164,6 @@ export function useSettingsConfig(apiClient: ApiClient): SettingsConfigState {
       setSaveState('idle')
       return true
     } catch (err) {
-      // Extract validation errors from ApiError (e.g. 422 responses)
       if (err instanceof ApiError && err.validationErrors && err.validationErrors.length > 0) {
         setValidationErrors(err.validationErrors)
         setSaveError(err.message)
@@ -201,7 +193,6 @@ export function useSettingsConfig(apiClient: ApiClient): SettingsConfigState {
       setSaveState('saved')
       return true
     } catch (err) {
-      // Extract validation errors from ApiError (e.g. 422 responses)
       if (err instanceof ApiError && err.validationErrors && err.validationErrors.length > 0) {
         setValidationErrors(err.validationErrors)
         setSaveError(err.message)

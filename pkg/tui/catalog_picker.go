@@ -7,14 +7,8 @@ import (
 	"github.com/xilistudios/lele/pkg/catalog"
 )
 
-// maxCatalogSuggestions caps the filter-as-you-type list so the form modal
-// stays readable on short terminals.
 const maxCatalogSuggestions = 12
 
-// catalogProviderKey resolves a configured provider name to the catalog key
-// (provider type). Looks up Providers.Named[name].Type first so custom names
-// like "my-openai" still hit the openai catalog; falls back to the name
-// itself because catalog.normalizeType already understands aliases.
 func (m *Model) catalogProviderKey(providerName string) string {
 	name := strings.ToLower(strings.TrimSpace(providerName))
 	if name == "" {
@@ -28,10 +22,6 @@ func (m *Model) catalogProviderKey(providerName string) string {
 	return name
 }
 
-// currentCatalogProviderKey returns the catalog provider key for the active
-// add-model / connect flow. Prefers the selected provider's configured type;
-// during the connect flow the type lives in formValues[1] once the provider
-// step has been completed.
 func (m *Model) currentCatalogProviderKey() string {
 	if m.providerSelectedName != "" {
 		if key := m.catalogProviderKey(m.providerSelectedName); key != "" {
@@ -49,8 +39,6 @@ func (m *Model) currentCatalogProviderKey() string {
 	return ""
 }
 
-// isModelNameFormStep reports whether the form cursor is on the "actual model
-// name" field — the step that offers catalog autocomplete.
 func (m *Model) isModelNameFormStep() bool {
 	switch m.modalMode {
 	case ModalAddModel, ModalEditModel:
@@ -61,9 +49,6 @@ func (m *Model) isModelNameFormStep() bool {
 	return false
 }
 
-// startCatalogPickerIfNeeded activates (or tears down) the catalog suggestion
-// list based on the current form step. Call after every formStepIndex
-// transition so the picker never leaks onto the wrong field.
 func (m *Model) startCatalogPickerIfNeeded() {
 	if !m.isModelNameFormStep() {
 		m.closeCatalogPicker()
@@ -72,11 +57,8 @@ func (m *Model) startCatalogPickerIfNeeded() {
 	m.refreshCatalogSuggestions(m.textInput.Value())
 }
 
-// refreshCatalogSuggestions re-filters catalog models for the given query and
-// rebuilds the parallel ID/label slices used by the picker.
 func (m *Model) refreshCatalogSuggestions(query string) {
 	key := m.currentCatalogProviderKey()
-	// Unknown provider type (no catalog models at all) → no picker.
 	if key == "" || len(catalog.ModelsForProvider(key)) == 0 {
 		m.closeCatalogPicker()
 		return
@@ -91,9 +73,6 @@ func (m *Model) refreshCatalogSuggestions(query string) {
 	}
 }
 
-// buildCatalogSuggestions maps catalog models to parallel ID and display-label
-// slices, capped at maxCatalogSuggestions. Pure helper — unit-testable without
-// a TUI Model.
 func buildCatalogSuggestions(models []catalog.Model) (ids, labels []string) {
 	if len(models) == 0 {
 		return nil, nil
@@ -119,7 +98,6 @@ func buildCatalogSuggestions(models []catalog.Model) (ids, labels []string) {
 	return ids, labels
 }
 
-// closeCatalogPicker deactivates the suggestion list and clears its state.
 func (m *Model) closeCatalogPicker() {
 	m.addModelCatalogActive = false
 	m.addModelCatalogIDs = nil
@@ -128,12 +106,6 @@ func (m *Model) closeCatalogPicker() {
 	m.addModelCatalogThink = ""
 }
 
-// applyCatalogSelectionOnEnter runs before the ModalAddModel / ModalAddProvider
-// enter handlers. When the typed value is empty and a suggestion is
-// highlighted, the suggestion is copied into the text input. When the typed
-// value matches a catalog model, the ID is canonicalized and context_window /
-// max_tokens / vision are prefilled into formValues so the remaining steps can
-// be accepted with Enter.
 func (m *Model) applyCatalogSelectionOnEnter() {
 	if !m.isModelNameFormStep() {
 		return
@@ -161,9 +133,6 @@ func (m *Model) applyCatalogSelectionOnEnter() {
 	m.prefillModelFormFromDefaults(typed, d)
 }
 
-// prefillModelFormFromDefaults writes catalog defaults into the form value
-// slots for the active flow. ModalAddModel / ModalEditModel use indices 1-4
-// (model_name, context_window, max_tokens, vision); the connect flow uses 5-8.
 func (m *Model) prefillModelFormFromDefaults(modelID string, d catalog.ModelDefaults) {
 	vision := "no"
 	if d.Vision {
@@ -173,10 +142,6 @@ func (m *Model) prefillModelFormFromDefaults(modelID string, d catalog.ModelDefa
 	case ModalAddModel, ModalEditModel:
 		if len(m.formValues) >= 5 {
 			m.formValues[1] = modelID
-			// Editing an EXISTING model without changing it: only canonicalize
-			// the model name and keep the stored context window / max tokens /
-			// vision — catalog defaults must never clobber the user's saved
-			// values on a plain edit of an unchanged model.
 			sameStoredModel := m.modalMode == ModalEditModel &&
 				m.modelEditOrigModel != "" && modelID == m.modelEditOrigModel
 			if !sameStoredModel {
@@ -196,9 +161,6 @@ func (m *Model) prefillModelFormFromDefaults(modelID string, d catalog.ModelDefa
 	m.addModelCatalogThink = catalogThinkingHint(d.ThinkingLevels)
 }
 
-// defaultThinkingEffort picks a Reasoning.Effort from catalog thinking levels.
-// Prefers "medium" when advertised, otherwise the first low/medium/high entry,
-// falling back to "medium".
 func defaultThinkingEffort(levels []string) string {
 	for _, l := range levels {
 		if strings.EqualFold(strings.TrimSpace(l), "medium") {
@@ -214,8 +176,6 @@ func defaultThinkingEffort(levels []string) string {
 	return "medium"
 }
 
-// catalogThinkingHint returns a short "thinking: low/medium/high" fragment for
-// form labels, or "" when the model has no advertised levels.
 func catalogThinkingHint(levels []string) string {
 	if len(levels) == 0 {
 		return ""

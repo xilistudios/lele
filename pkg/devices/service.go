@@ -25,8 +25,7 @@ type Service struct {
 
 type Config struct {
 	Enabled    bool
-	MonitorUSB bool // When true, monitor USB hotplug (Linux only)
-	// Future: MonitorBluetooth, MonitorPCI, etc.
+	MonitorUSB bool
 }
 
 func NewService(cfg Config, stateMgr *state.Manager) *Service {
@@ -84,7 +83,7 @@ func (s *Service) Stop() {
 	}
 
 	for _, src := range s.sources {
-		_ = src.Stop() // Ignore errors during shutdown
+		_ = src.Stop()
 	}
 }
 

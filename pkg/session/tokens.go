@@ -1,13 +1,7 @@
 package session
 
-// Per-session token accounting.
-//
-// Tracks input/output token totals and the compaction counter used to bound
-// repeated compaction attempts.
-
 import "time"
 
-// GetTokenCounts returns the input and output token counts for a session.
 func (sm *SessionManager) GetTokenCounts(key string) (inputTokens, outputTokens int) {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -24,7 +18,6 @@ func (sm *SessionManager) GetTokenCounts(key string) (inputTokens, outputTokens 
 	return session.InputTokens, session.OutputTokens
 }
 
-// AddTokenCounts adds token counts to a session.
 func (sm *SessionManager) AddTokenCounts(key string, inputTokens, outputTokens int) {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -40,7 +33,6 @@ func (sm *SessionManager) AddTokenCounts(key string, inputTokens, outputTokens i
 	sm.touchSession(key)
 }
 
-// ResetTokenCounts resets the input and output token counts for a session to zero.
 func (sm *SessionManager) ResetTokenCounts(key string) {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -62,7 +54,6 @@ func (sm *SessionManager) ResetTokenCounts(key string) {
 	sm.touchSession(key)
 }
 
-// IncrementCompactionCount atomically increments the compaction counter for a session.
 func (sm *SessionManager) IncrementCompactionCount(key string) {
 	sm.ensureLoaded()
 	sm.mu.Lock()

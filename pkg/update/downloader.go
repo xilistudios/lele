@@ -17,36 +17,26 @@ import (
 	"time"
 )
 
-// DownloadResult holds the outcome of a successful download+verify+extract.
 type DownloadResult struct {
-	// ArchivePath is the downloaded archive (in a temp dir).
 	ArchivePath string
-	// BinaryPath is the extracted lele binary (in a temp dir).
-	BinaryPath string
-	// TempDir owns both files; caller must RemoveAll when done.
-	TempDir string
-	// Size is the archive size in bytes.
-	Size int64
+	BinaryPath  string
+	TempDir     string
+	Size        int64
 }
 
-// Downloader downloads and verifies release assets.
 type Downloader struct {
 	Client *http.Client
 }
 
-// NewDownloader creates a Downloader.
 func NewDownloader() *Downloader {
 	return &Downloader{Client: &http.Client{Timeout: 10 * time.Minute}}
 }
 
-// Platform describes the target platform for asset selection.
 type Platform struct {
-	OS   string // Linux, Darwin, Windows, FreeBSD (title case, goreleaser style)
-	Arch string // x86_64, arm64, armv7, ...
+	OS   string
+	Arch string
 }
 
-// CurrentPlatform detects the platform using the same naming as goreleaser
-// archives (matching install.sh).
 func CurrentPlatform() (Platform, error) {
 	var p Platform
 	switch runtime.GOOS {
@@ -72,7 +62,7 @@ func CurrentPlatform() (Platform, error) {
 	case "arm":
 		arm := os.Getenv("GOARM")
 		if arm == "" {
-			arm = "7" // conservative default, matches most distros
+			arm = "7"
 		}
 		p.Arch = "armv" + arm
 	case "riscv64", "s390x", "mips64":
@@ -83,7 +73,6 @@ func CurrentPlatform() (Platform, error) {
 	return p, nil
 }
 
-// ArchiveName returns the expected archive name for a platform.
 func ArchiveName(p Platform) string {
 	if p.OS == "Windows" {
 		return fmt.Sprintf("lele_%s_%s.zip", p.OS, p.Arch)
@@ -91,15 +80,10 @@ func ArchiveName(p Platform) string {
 	return fmt.Sprintf("lele_%s_%s.tar.gz", p.OS, p.Arch)
 }
 
-// ChecksumsName returns the checksums file name for a release version
-// (without leading v), e.g. "lele_0.9.0_checksums.txt".
 func ChecksumsName(version string) string {
 	return fmt.Sprintf("lele_%s_checksums.txt", strings.TrimPrefix(version, "v"))
 }
 
-// Download fetches the release archive for the current platform, verifies
-// its SHA256 against the release checksums file, and extracts the binary.
-// progress (optional) receives (downloaded, total) byte counts.
 func (d *Downloader) Download(ctx context.Context, rel *Release, progress func(downloaded, total int64)) (*DownloadResult, error) {
 	platform, err := CurrentPlatform()
 	if err != nil {
@@ -206,7 +190,6 @@ func (d *Downloader) downloadFile(ctx context.Context, url, dst string, total in
 	return nil
 }
 
-// verifyChecksum checks the archive's SHA256 against the checksums file.
 func verifyChecksum(archivePath, checksumsPath, archiveName string) error {
 	data, err := os.ReadFile(checksumsPath)
 	if err != nil {
@@ -243,7 +226,6 @@ func verifyChecksum(archivePath, checksumsPath, archiveName string) error {
 	return nil
 }
 
-// extractBinary extracts the lele binary from the archive into outDir.
 func extractBinary(archivePath, outDir string, isZip bool) (string, error) {
 	binaryName := "lele"
 	if isZip {

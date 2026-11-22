@@ -25,15 +25,12 @@ function isImageByExtension(name: string): boolean {
 }
 
 function isImageAttachment(attachment: Attachment): boolean {
-  // Check mime_type first (most reliable)
   if (attachment.mime_type?.startsWith('image/')) return true
-  // Fall back to extension check on name or path
   if (attachment.name && isImageByExtension(attachment.name)) return true
   if (attachment.path && isImageByExtension(attachment.path)) return true
   return false
 }
 
-/** Download icon (12px) shared by the file card and the image overlay. */
 function DownloadIcon({ className = '' }: { className?: string }) {
   return (
     <svg
@@ -60,7 +57,6 @@ function looksLikeHTMLorSVG(content: string): 'html' | 'svg' | null {
   if (trimmed.startsWith('<!doctype html') || trimmed.startsWith('<html')) return 'html'
   if (trimmed.startsWith('<svg')) return 'svg'
 
-  // Check for HTML snippet with multiple tags
   const hasMultipleTags = (content.match(/<[a-zA-Z][^>]*>/g) ?? []).length >= 2
   const hasClosingTag = (content.match(/<\/[a-zA-Z][^>]*>/g) ?? []).length >= 1
   if (trimmed.startsWith('<') && hasMultipleTags && hasClosingTag) {
@@ -82,31 +78,20 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
   const isUser = message.role === 'user'
   const isTool = message.role === 'tool'
   const [expanded, setExpanded] = useState(false)
-
-  // Track whether the enter animation has already played for this component instance.
-  // Using a ref ensures animation plays exactly once per mount, even across
-  // re-renders caused by streaming content updates or block parsing.
   const hasAnimatedRef = useRef(false)
 
-  // Determine initial animation state:
-  // - Non-empty streaming messages: animate immediately
-  // - Non-streaming messages (base/history): animate on mount
-  // - Empty streaming placeholders: wait for content via useEffect below
   const [animate, setAnimate] = useState(() => {
     if (hasAnimatedRef.current) return false
     const isEmptyStreaming = message.streaming && message.content === ''
     return !isEmptyStreaming
   })
 
-  // Mark animation as played once applied
   useEffect(() => {
     if (animate) {
       hasAnimatedRef.current = true
     }
   }, [animate])
 
-  // For streaming messages that start as empty placeholders, trigger the
-  // animation when the first content arrives (typewriter effect starts).
   useEffect(() => {
     if (message.streaming && message.content !== '' && !animate) {
       setAnimate(true)
@@ -114,14 +99,12 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
   }, [message.streaming, message.content, animate])
   const [thinkingOpen, setThinkingOpen] = useState(message.streaming && !!message.reasoningContent)
 
-  // Auto-open thinking when streaming starts
   useEffect(() => {
     if (message.streaming && message.reasoningContent) {
       setThinkingOpen(true)
     }
   }, [message.streaming, message.reasoningContent])
 
-  // Auto-collapse thinking when streaming completes
   const wasStreamingRef = useRef(message.streaming)
   useEffect(() => {
     if (wasStreamingRef.current && !message.streaming) {
@@ -144,27 +127,15 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
 
   const blocks = useMemo(() => {
     if (isUser || isTool) return null
-    // Don't parse blocks while streaming — partial content causes false positives
-    // (e.g., an unclosed ``` triggers code-block mode for all subsequent text).
-    // Nothing to extract from content with no visible text either; skipping it
-    // keeps inert whitespace from doing block work on every render.
     if (message.streaming || !message.content.trim()) return null
     return parseBlocks(message.content)
   }, [isUser, isTool, message.content, message.streaming])
 
-  // Visibility source of truth. Raw `message.content` / `reasoningContent`
-  // truthiness is NOT enough: " ", "\n" and "\n\n\n" are truthy yet nothing in
-  // the row is visible, while the row still lays out — row padding, and any
-  // inert markdown block the whitespace produced. Measured in a live turn: up
-  // to 84px of dead space between two tool cards, gone after a reload.
   const trimmedContent = message.content.trim()
   const trimmedReasoning = (message.reasoningContent ?? '').trim()
   const hasThinking = trimmedReasoning !== ''
   const hasContent = trimmedContent !== ''
   const hasAttachments = (message.attachments?.length ?? 0) > 0
-  // "Nothing typed yet" is measured on VISIBLE content: while streaming, a
-  // whitespace-only payload shows the typing dots instead of the blank markdown
-  // lines the old code used to render (the 84px ghost row).
   const showsTypingDots = !!message.streaming && !hasContent && !hasThinking
 
   if (isTool) {
@@ -193,10 +164,6 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
 
   if (isUser) {
     if (message.systemNotice) {
-      // Synthetic system notice persisted with role 'user' (see
-      // lib/chatMessageBuilder.ts parseSystemNotice). Render it as a tool-style
-      // card — role stays 'user' on purpose so the merge/ordering math counts it
-      // exactly like the backend does.
       return (
         <div
           data-message-id={message.stableId ?? message.id}
@@ -273,12 +240,6 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
     )
   }
 
-  // Never render an assistant row with nothing visible: empty or whitespace-only
-  // content/reasoning would still lay the row out and show up as dead space
-  // between two visible rows (tool cards in practice).
-  // An errored turn (`message.error`) is EXEMPT: it renders as the red error box
-  // below, and null-rendering it would make the failure disappear — the very bug
-  // this render path exists to fix.
   const hasError = Boolean(message.error)
   if (
     !hasContent &&
@@ -292,15 +253,6 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
   }
 
   if (hasError) {
-    // A failed turn (persisted `error_detail`, or a live stream failure): the
-    // error box REPLACES the assistant bubble — content, reasoning and tool
-    // rendering are all skipped, and so is the "archived from context" label
-    // (the message is excluded from context precisely because it is an error).
-    //
-    // role="alert" is what announces the failure to assistive tech (and what
-    // gives the region an accessible name for tests/queries): the box appears
-    // mid-conversation while the user's focus is elsewhere, so a silent
-    // visual-only change would be invisible to a screen reader.
     return (
       <div
         data-message-id={message.stableId ?? message.id}
@@ -581,17 +533,4 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, onRetry }: P
   )
 }
 
-/**
- * Memoized export. During streaming, the shared typewriter tick updates only
- * the messages being appended to (those get fresh ChatMessage objects); every
- * other visible bubble keeps the SAME object reference across ticks (the
- * queue's `.map` returns unchanged refs for untouched messages). Shallow memo
- * thus short-circuits re-rendering of every non-updating bubble each tick —
- * previously ALL visible bubbles re-rendered, re-parsing Markdown and diff
- * rows even though nothing changed for them.
- *
- * `onNavigateToSession`/`onRetry` are stable useCallback refs in MessageList,
- * so they don't defeat the memo. `isLast` only flips when the message at the
- * tail changes, which is exactly when we do want a re-render.
- */
 export const MessageBubble = memo(MessageBubbleInner)

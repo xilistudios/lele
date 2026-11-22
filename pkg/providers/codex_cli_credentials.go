@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// CodexCliAuth represents the ~/.codex/auth.json file structure.
 type CodexCliAuth struct {
 	Tokens struct {
 		AccessToken  string `json:"access_token"`
@@ -17,8 +16,6 @@ type CodexCliAuth struct {
 	} `json:"tokens"`
 }
 
-// ReadCodexCliCredentials reads OAuth tokens from the Codex CLI's auth.json file.
-// Expiry is estimated as file modification time + 1 hour (same approach as moltbot).
 func ReadCodexCliCredentials() (accessToken, accountID string, expiresAt time.Time, err error) {
 	authPath, err := resolveCodexAuthPath()
 	if err != nil {
@@ -49,8 +46,6 @@ func ReadCodexCliCredentials() (accessToken, accountID string, expiresAt time.Ti
 	return auth.Tokens.AccessToken, auth.Tokens.AccountID, expiresAt, nil
 }
 
-// CreateCodexCliTokenSource creates a token source that reads from ~/.codex/auth.json.
-// This allows the existing CodexProvider to reuse Codex CLI credentials.
 func CreateCodexCliTokenSource() func() (string, string, error) {
 	return func() (string, string, error) {
 		token, accountID, expiresAt, err := ReadCodexCliCredentials()

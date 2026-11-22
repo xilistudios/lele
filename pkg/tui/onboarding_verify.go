@@ -14,27 +14,15 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// obVerifyResultMsg is returned by obVerifyKeyCmd once the async API key
-// validation completes. success=false is a WARNING, not a blocker — the user
-// can still proceed to the done screen.
 type obVerifyResultMsg struct {
 	success      bool
 	providerName string
 	err          error
 }
 
-// obVerifyKeyCmd runs async API key validation against the provider that was
-// just configured during onboarding. It runs on a goroutine (via tea.Cmd) so
-// the TUI never blocks. Local providers (ollama / localhost) are skipped and
-// considered valid.
-// obVerifyHTTPClient allows tests to inject a custom HTTP client (e.g. one
-// bound to an httptest server). When nil, a default client is used.
 var obVerifyHTTPClient *http.Client
 
 func (m *Model) obVerifyKeyCmd() tea.Cmd {
-	// Snapshot provider data on the update loop before the goroutine runs —
-	// reading m.cfg from the tea.Cmd goroutine races with concurrent updates.
-	// Prefer the provider the user just configured when it is known.
 	preferred := m.obProviderName
 	if preferred == "" {
 		preferred = m.providerSelectedName
@@ -51,7 +39,6 @@ func (m *Model) obVerifyKeyCmd() tea.Cmd {
 		}
 	}
 	if chosen == nil {
-		// Deterministic fallback: pick the first configured provider by name.
 		names := make([]string, 0, len(providers))
 		for n, prov := range providers {
 			if prov.APIKey != "" || prov.APIBase != "" {
@@ -70,7 +57,6 @@ func (m *Model) obVerifyKeyCmd() tea.Cmd {
 	p := chosen.p
 
 	return func() tea.Msg {
-		// Skip validation for local providers.
 		if p.Type == "ollama" {
 			return obVerifyResultMsg{success: true, providerName: name}
 		}
@@ -87,7 +73,6 @@ func (m *Model) obVerifyKeyCmd() tea.Cmd {
 			return obVerifyResultMsg{success: false, providerName: name, err: err}
 		}
 
-		// Set auth header based on provider type.
 		if p.APIKey != "" {
 			req.Header.Set("Authorization", "Bearer "+p.APIKey)
 		}
@@ -98,8 +83,6 @@ func (m *Model) obVerifyKeyCmd() tea.Cmd {
 		}
 		defer resp.Body.Close()
 
-		// 403 means the key is likely valid (some providers return 403
-		// on /models).
 		if resp.StatusCode == 403 {
 			return obVerifyResultMsg{success: true, providerName: name}
 		}
@@ -108,10 +91,6 @@ func (m *Model) obVerifyKeyCmd() tea.Cmd {
 				err: fmt.Errorf("unexpected status %d", resp.StatusCode)}
 		}
 
-		// A 200 can still carry an error payload (e.g. {"error": "invalid
-		// key"}). Inspect the body (bounded read) and treat a non-empty error
-		// field as a failure. Non-JSON bodies are tolerated — many providers
-		// return plain text on success.
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		if err != nil {
 			return obVerifyResultMsg{success: false, providerName: name,
@@ -124,10 +103,6 @@ func (m *Model) obVerifyKeyCmd() tea.Cmd {
 	}
 }
 
-// checkVerifyBody inspects a 200 response body for an embedded error payload.
-// It returns nil when the body is OK (non-JSON, JSON without an error field,
-// or an empty body). A JSON object with a non-empty "error" field (string, or
-// object carrying a "message") is reported as an error.
 func checkVerifyBody(body []byte) error {
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" {
@@ -158,22 +133,11 @@ func checkVerifyBody(body []byte) error {
 	return nil
 }
 
-// obFinalizeSetup sets the agent defaults (provider + model) from the provider
-// that was just configured during onboarding, persists the config to disk, and
-// ensures the workspace directory exists. It must be called BEFORE the verify
-// cmd so the config is persisted even if validation fails.
 func (m *Model) obFinalizeSetup() {
 	if m.cfg == nil || m.cfg.Providers == nil {
 		return
 	}
 
-	// Find the provider that was just configured — the one with a model
-	// configured. ListNamed() calls ensureNamedDefaults(), which populates
-	// empty placeholders for every known provider name, so we must select the
-	// provider that actually has a model (the connect flow always saves one).
-	// Prefer the provider the user just connected (providerSelectedName) so the
-	// result is deterministic even if a usable default already exists (e.g.
-	// ollama in tests); fall back to scanning for any provider with a model.
 	providers := m.cfg.Providers.ListNamed()
 	var chosenName string
 	var chosen config.NamedProviderConfig
@@ -203,21 +167,12 @@ func (m *Model) obFinalizeSetup() {
 		return
 	}
 
-	// Sync the chosen provider back to the corresponding typed field so that
-	// ensureNamedDefaults() (which runs on every config load) does not
-	// overwrite the user's just-saved provider with an empty placeholder.
 	syncProviderToTypedField(m.cfg.Providers, chosenName, chosen)
 
-	// Set agent defaults to the freshly-configured provider. A true first-run
-	// config (DefaultConfig) seeds placeholder defaults (openrouter /
-	// deepseek-v4-pro) that are NOT usable here — no API key was ever set for
-	// them — so they must be overridden with the chosen provider unless the
-	// user already selected a usable default during setup.
 	pickable := m.cfg.Agents.Defaults.Provider == "" ||
 		!providerIsUsable(m.cfg, m.cfg.Agents.Defaults.Provider)
 	if pickable {
 		m.cfg.Agents.Defaults.Provider = chosenName
-		// Find first model alias.
 		for alias := range chosen.Models {
 			m.cfg.Agents.Defaults.Model = alias
 			m.obModelName = alias
@@ -231,34 +186,21 @@ func (m *Model) obFinalizeSetup() {
 		m.obMaskedKey = "(none)"
 	}
 
-	// Mark onboarding as completed so it doesn't reappear on next launch.
 	m.cfg.TUI.OnboardingCompleted = true
 
-	// Persist config.
 	m.saveConfigToDisk()
 
-	// Ensure the workspace directory exists (full workspace template creation
-	// is a follow-up; the important thing is the config is persisted).
 	if ws := m.cfg.WorkspacePath(); ws != "" {
 		_ = os.MkdirAll(ws, 0o755)
 	}
 }
 
-// syncProviderToTypedField copies a named provider's ProviderConfig (API key,
-// base URL, etc.) into the corresponding typed field on ProvidersConfig. This
-// is necessary because ensureNamedDefaults() recreates named entries from typed
-// fields on every config load — if the typed field is empty, the user's saved
-// provider gets silently wiped.
 func syncProviderToTypedField(p *config.ProvidersConfig, name string, np config.NamedProviderConfig) {
 	if slot := typedProviderSlot(p, name); slot != nil {
 		*slot = np.ProviderConfig
 	}
 }
 
-// providerEditChanges reports which fields of an in-place provider edit
-// actually CHANGED. It is the input the mirror helper needs and cannot derive:
-// the caller knows whether a blank/submitted-unchanged field was "keep" or a
-// deliberate re-submission, the helper only sees the resulting struct.
 type providerEditChanges struct {
 	APIKey      bool
 	APIBase     bool
@@ -269,35 +211,6 @@ type providerEditChanges struct {
 	Headers     bool
 }
 
-// syncEditedProviderCredentials mirrors the fields an in-place provider edit
-// may have written (API key, base URL, proxy, auth method, connect mode and
-// custom headers) into the typed field, instead of copying the whole named
-// ProviderConfig like syncProviderToTypedField does.
-//
-// The typed field can legitimately be the ONLY — or the more authoritative —
-// carrier of a value: an env:"LELE_PROVIDERS_<NAME>_API_KEY" (or _PROXY,
-// _AUTH_METHOD, …) override is applied after the JSON is decoded, and a
-// hand-written config.json that keeps the provider under providers.<name> can
-// decode into the named entry only. So a field the user actually edited wins
-// outright, while an untouched one only FILLS an empty typed copy: an edit that
-// changed the base URL must not swap an env-provided key for the (older) one
-// sitting in the named entry.
-//
-// Filling an empty typed copy is the whole point of the mirror: transport
-// selection is TYPE-FIRST (the Gemini Code Assist pre-check reads
-// Providers.Gemini), so a credential that only reached the named copy would be
-// persisted but invisible to the selector.
-//
-// Headers are a map, so an untouched field fills the typed copy only when that
-// copy has no headers at all, and the map is deep-copied: the two entries are
-// two copies of one provider and must never share (and later mutate) one map.
-//
-// WebSearch is deliberately NOT handled here: the named entry keeps a *bool
-// while the typed OpenAI slot keeps a plain bool, so updateProvider projects it
-// directly (it also has to roll that bool back on a failed save).
-//
-// changed reports which fields the edit actually CHANGED (blank, or
-// re-submitted with the stored value, both mean "not touched").
 func syncEditedProviderCredentials(p *config.ProvidersConfig, name string, np config.NamedProviderConfig, changed providerEditChanges) {
 	slot := typedProviderSlot(p, name)
 	if slot == nil {
@@ -323,11 +236,6 @@ func syncEditedProviderCredentials(p *config.ProvidersConfig, name string, np co
 	}
 }
 
-// typedProviderSlot returns a pointer to the typed ProviderConfig field that
-// mirrors the named provider `name`, or nil when that name has no typed field.
-// It is the single name→field mapping shared by the two mirror helpers above,
-// so adding a built-in provider cannot teach one of them a name the other does
-// not know.
 func typedProviderSlot(p *config.ProvidersConfig, name string) *config.ProviderConfig {
 	if p == nil {
 		return nil
@@ -371,8 +279,6 @@ func typedProviderSlot(p *config.ProvidersConfig, name string) *config.ProviderC
 	return nil
 }
 
-// maskAPIKey masks an API key for display, keeping the first and last 4
-// characters. Short keys are fully masked.
 func maskAPIKey(key string) string {
 	if len(key) <= 8 {
 		return "****"
@@ -380,8 +286,6 @@ func maskAPIKey(key string) string {
 	return key[:4] + "..." + key[len(key)-4:]
 }
 
-// providerIsUsable reports whether the named provider already has a key (or is
-// a local type) AND at least one model — i.e. it is genuinely ready to chat.
 func providerIsUsable(cfg *config.Config, name string) bool {
 	if cfg == nil || cfg.Providers == nil || name == "" {
 		return false

@@ -1,12 +1,3 @@
-/**
- * Unit tests for the stream metrics module.
- *
- * Covers the three responsibilities extracted there: tolerant parsing of the
- * `message.stream` payload, locale-neutral formatting (1 decimal, dot), the
- * visibility rule, and the hook's retention policy (positive rates are kept
- * across a zero-rate chunk; the first chunk of a segment and an explicit clear
- * leave the chip empty).
- */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import {
@@ -100,7 +91,6 @@ describe('useStreamMetrics', () => {
     )
     expect(result.current.metrics?.tokPerSec).toBe(50)
 
-    // Terminal / metrics-less chunk must NOT blank the retained final figure.
     act(() =>
       result.current.reportMetrics({ tokens: 0, elapsedMs: 0, tokPerSec: 0, estimated: false }),
     )
