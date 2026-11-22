@@ -3,10 +3,6 @@ import type { ApprovalRequest, ApprovalResult } from '../lib/types'
 
 const APPROVAL_RESULT_DISPLAY_MS = 5000
 
-/**
- * Manages approval request/result state for command approval flows.
- * Results auto-clear after a timeout.
- */
 export function useApprovals() {
   const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null)
   const [approvalResult, setApprovalResult] = useState<ApprovalResult | null>(null)

@@ -1,20 +1,3 @@
-/**
- * settings-focus-regression.test.tsx
- *
- * Regression test for the focus-loss bug: typing in a settings input while a
- * background data reload occurs must NOT unmount the input or steal focus.
- *
- * The real-world trigger: a 401 response triggers token refresh, which calls
- * persistSession with a new session object. In the old code, `session` was a
- * dependency of the api useMemo, so a new api client was created. This caused
- * useSettingsConfig's useEffect to fire, setting isLoading=true, which made
- * SettingsPage render a loading skeleton instead of the form — unmounting the
- * focused input.
- *
- * This test simulates the trigger by having the models endpoint return a 401
- * mid-typing, which triggers the HTTP client's token refresh flow.
- */
-
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
@@ -22,10 +5,6 @@ import { MemoryRouter } from 'react-router-dom'
 import App from '../App'
 import { ThemeProvider } from '../contexts/ThemeContext'
 import { queryClient } from '../lib/queryClient'
-
-// ---------------------------------------------------------------------------
-// Mock WebSocket
-// ---------------------------------------------------------------------------
 
 class MockWebSocket {
   static instances: MockWebSocket[] = []
@@ -66,10 +45,6 @@ class MockWebSocket {
     MockWebSocket.instances = []
   }
 }
-
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
 
 const jsonResponse = (body: Record<string, unknown>) =>
   new Response(JSON.stringify(body), {
@@ -213,13 +188,6 @@ const AGENTS_RESPONSE = {
   agents: [{ id: 'main', name: 'Main Agent', workspace: '~/.lele', model: 'gpt-4', default: true }],
 }
 
-/**
- * Creates a fetch mock that:
- * - Returns successful responses for initial loads
- * - Returns a 401 for the models endpoint after initial load, triggering
- *   a token refresh which calls persistSession — the real bug trigger.
- * - Returns a slow config response for refetches (simulating network delay)
- */
 const createFetchMock = (options?: { slowConfig?: boolean; triggerModels401?: boolean }) => {
   const { slowConfig = false, triggerModels401 = false } = options ?? {}
   let modelsCallCount = 0
@@ -228,7 +196,6 @@ const createFetchMock = (options?: { slowConfig?: boolean; triggerModels401?: bo
   return mock((input: RequestInfo | URL) => {
     const url = String(input)
 
-    // Auth endpoints
     if (url.endsWith('/api/v1/auth/status')) {
       return Promise.resolve(
         jsonResponse({
@@ -249,7 +216,6 @@ const createFetchMock = (options?: { slowConfig?: boolean; triggerModels401?: bo
       )
     }
 
-    // Config — optionally slow on refetches
     if (url.endsWith('/api/v1/config')) {
       configCallCount++
       const response = jsonResponse(CONFIG_RESPONSE)
@@ -259,12 +225,9 @@ const createFetchMock = (options?: { slowConfig?: boolean; triggerModels401?: bo
       return Promise.resolve(response)
     }
 
-    // Models — optionally return 401 after first call to trigger refresh
     if (url.includes('/api/v1/models')) {
       modelsCallCount++
       if (triggerModels401 && modelsCallCount > 1) {
-        // First call after initial load returns 401 → triggers token refresh
-        // → calls persistSession → (in old code) recreates api → refetches config
         return Promise.resolve(
           new Response(JSON.stringify({ error: 'unauthorized' }), {
             status: 401,
@@ -275,7 +238,6 @@ const createFetchMock = (options?: { slowConfig?: boolean; triggerModels401?: bo
       return Promise.resolve(jsonResponse(MODELS_RESPONSE))
     }
 
-    // Agents
     if (url.endsWith('/api/v1/agents')) {
       return Promise.resolve(jsonResponse(AGENTS_RESPONSE))
     }
@@ -298,7 +260,6 @@ const createFetchMock = (options?: { slowConfig?: boolean; triggerModels401?: bo
       return Promise.resolve(jsonResponse({ id: 'main', status: 'running', active_sessions: 1 }))
     }
 
-    // Other endpoints
     if (url.endsWith('/api/v1/status')) {
       return Promise.resolve(
         jsonResponse({ status: 'ok', uptime: '1h', agents: [], channels: [], version: 'dev' }),
@@ -355,10 +316,6 @@ const createFetchMock = (options?: { slowConfig?: boolean; triggerModels401?: bo
   })
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function renderApp(route: string) {
   return render(
     <ThemeProvider>
@@ -381,10 +338,6 @@ async function waitForInputs(timeout = 5000): Promise<NodeListOf<HTMLInputElemen
   )
   return document.querySelectorAll('input')
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 describe('Settings focus regression — refetch must not unmount focused input', () => {
   const originalFetch = globalThis.fetch
@@ -416,9 +369,7 @@ describe('Settings focus regression — refetch must not unmount focused input',
     })
     try {
       window.dispatchEvent(new window.Event('resize'))
-    } catch {
-      // jsdom may not support resize dispatch
-    }
+    } catch {}
   })
 
   afterEach(() => {
@@ -434,14 +385,10 @@ describe('Settings focus regression — refetch must not unmount focused input',
 
     const view = renderApp('/settings/general')
 
-    // Wait for the form to render
     const inputs = await waitForInputs()
     const inputCount = inputs.length
     expect(inputCount).toBeGreaterThan(0)
 
-    // The form should NOT show a loading skeleton (the "loading" text).
-    // In the old code, after a refetch, isLoading would go back to true
-    // and the form would be replaced by a loading div.
     const mainContent = document.querySelector('main')
     expect(mainContent).toBeTruthy()
     expect(document.querySelectorAll('input').length).toBe(inputCount)
@@ -450,19 +397,13 @@ describe('Settings focus regression — refetch must not unmount focused input',
   })
 
   test('typing survives a token refresh that triggers persistSession', async () => {
-    // Use a fetch mock that will return 401 for models after initial load,
-    // triggering the token refresh → persistSession cascade.
-    // Also make config slow on refetches so the form would be unmounted
-    // during the typing if the old bug were present.
     const fetchMock = createFetchMock({ slowConfig: true, triggerModels401: true })
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
     const view = renderApp('/settings/general')
 
-    // Wait for the form to render
     await waitForInputs()
 
-    // Find a text input
     const allInputs = Array.from(document.querySelectorAll('input')).filter(
       (el) => el.getAttribute('type') !== 'file' && el.getAttribute('type') !== 'hidden',
     )
@@ -472,19 +413,10 @@ describe('Settings focus regression — refetch must not unmount focused input',
     const probeId = 'regression-probe'
     input.setAttribute('data-probe', probeId)
 
-    // Focus the input
     input.focus()
     fireEvent.focus(input)
     expect(document.activeElement).toBe(input)
 
-    // Type character by character. The models endpoint will return 401
-    // on the next call (after initial load), triggering a token refresh.
-    // In the old code, this would:
-    // 1. Call persistSession with new token → session state changes
-    // 2. api useMemo re-runs → new api reference
-    // 3. useSettingsConfig effect fires → isLoading(true)
-    // 4. SettingsPage renders loading skeleton → input unmounted
-    // 5. Focus lost!
     const text = 'abcdefgh'
     for (let i = 0; i < text.length; i++) {
       const ch = text[i]
@@ -496,18 +428,14 @@ describe('Settings focus regression — refetch must not unmount focused input',
       fireEvent.change(input, { target: { value: partial } })
       fireEvent.keyUp(input, { key: ch, code: `Key${ch.toUpperCase()}` })
 
-      // Flush effects — this is where the token refresh and subsequent
-      // state changes would process.
       await act(async () => {
         await new Promise((r) => setTimeout(r, 10))
       })
 
-      // Focus must stay on the probed element
       const activeProbe = document.activeElement?.getAttribute('data-probe')
       expect(activeProbe).toBe(probeId)
     }
 
-    // Final check: still focused
     expect(document.activeElement?.getAttribute('data-probe')).toBe(probeId)
     expect(document.activeElement).toBe(input)
 
@@ -524,22 +452,18 @@ describe('Settings focus regression — refetch must not unmount focused input',
     const initialInputCount = document.querySelectorAll('input').length
     expect(initialInputCount).toBeGreaterThan(0)
 
-    // Tag the first input
     const firstInput = document.querySelectorAll('input')[0] as HTMLInputElement
     firstInput.setAttribute('data-probe', 'survival-check')
     firstInput.focus()
     fireEvent.focus(firstInput)
 
-    // Trigger multiple render cycles
     for (let cycle = 0; cycle < 5; cycle++) {
       await act(async () => {
         await new Promise((r) => setTimeout(r, 50))
       })
 
-      // The same number of inputs must be present
       expect(document.querySelectorAll('input').length).toBe(initialInputCount)
 
-      // The tagged input must still be in the DOM
       const tagged = document.querySelector('[data-probe="survival-check"]')
       expect(tagged).not.toBeNull()
       expect(tagged).toBe(firstInput)
@@ -560,7 +484,6 @@ describe('Settings focus regression — refetch must not unmount focused input',
       (el) => el.getAttribute('type') !== 'file' && el.getAttribute('type') !== 'hidden',
     )
     if (allInputs.length === 0) {
-      // No text inputs on this route — form is still mounted, that's OK.
       view.unmount()
       return
     }

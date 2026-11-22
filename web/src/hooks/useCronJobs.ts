@@ -32,21 +32,15 @@ export function useCronJobs() {
     }
   }, [api])
 
-  // Silent poll: same read as `fetchJobs` but without the loading flag or the
-  // error banner, so a periodic/visibility refresh never flashes the UI. Used
-  // by the interval and by the "tab became visible" refresh.
   const pollJobs = useCallback(async () => {
     try {
       const data = await api.cron.list(true)
       if (!mountedRef.current) return
       setJobs(data?.jobs ?? [])
       setStatus(data?.status ?? null)
-    } catch {
-      // ignore transient polling errors
-    }
+    } catch {}
   }, [api])
 
-  // Initial load
   useEffect(() => {
     mountedRef.current = true
     fetchJobs()
@@ -55,11 +49,6 @@ export function useCronJobs() {
     }
   }, [fetchJobs])
 
-  // Poll to keep next-run / last-status fresh.
-  //
-  // Visibility-gated: a hidden tab must not poll the gateway, so this effect
-  // returns before creating the interval and is re-run by the visibility change
-  // when the tab comes back.
   useEffect(() => {
     if (!pageVisible) return
     const id = setInterval(() => {
@@ -68,9 +57,6 @@ export function useCronJobs() {
     return () => clearInterval(id)
   }, [pageVisible, pollJobs])
 
-  // Refresh once when the tab becomes visible again. While hidden the interval
-  // above was cleared, so waiting for the next tick would leave next-run /
-  // last-status stale for up to POLL_INTERVAL_MS after the user returns.
   useOnPageVisible(() => {
     void pollJobs()
   })

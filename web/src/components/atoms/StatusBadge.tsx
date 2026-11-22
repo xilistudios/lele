@@ -42,6 +42,5 @@ export function StatusBadge({ status }: Props) {
       </Badge>
     )
   }
-  // Don't show badge for completed/success state - it's visual noise
   return null
 }

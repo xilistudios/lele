@@ -16,13 +16,7 @@ type Props = {
   popoverHeight?: number
   block?: boolean
   tooltip?: ReactNode
-  /**
-   * Controlled open state. Leave it undefined to keep the popover
-   * self-managed (the default): the existing callers pass none of these props
-   * and behave exactly as before.
-   */
   open?: boolean
-  /** Notified whenever the popover wants to change its open state. */
   onOpenChange?: (open: boolean) => void
 }
 
@@ -49,8 +43,6 @@ export function Popover({
   open,
   onOpenChange,
 }: Props) {
-  // `open === undefined` keeps the popover uncontrolled, so callers that do not
-  // care about the open state keep the original behaviour untouched.
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
   const isControlled = open !== undefined
   const isOpen = isControlled ? open : uncontrolledOpen

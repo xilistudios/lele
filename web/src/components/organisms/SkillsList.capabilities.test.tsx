@@ -5,23 +5,6 @@ import type { SkillInfo } from '../../lib/types'
 import i18n from '../../test/i18n'
 import { SkillsList } from './SkillsList'
 
-/**
- * Capability-driven rendering of the shared skills grid.
- *
- * `SkillsList` is reused by all three `/skills` views (All, Global, By agent),
- * which differ only in WHICH controls a card offers. That difference is now
- * expressed by the optional `canRemove` / `canToggle` predicates instead of
- * the hard-coded `source !== 'builtin'` rule. These tests pin both halves:
- *
- *  1. omitted predicates reproduce today's behaviour byte-for-byte (the
- *     original consumer keeps its look), and
- *  2. explicit predicates win — a card set can be made read-only or scoped
- *     without touching the component's markup.
- *
- * `screen` is unusable in this environment (see src/test/setup.ts): every query
- * comes from the render result.
- */
-
 const tr = (key: string, options?: Record<string, unknown>) => i18n.t(key, options) as string
 
 function skill(overrides: Partial<SkillInfo> & { name: string }): SkillInfo {
@@ -60,11 +43,6 @@ function setup(options: {
     />,
   )
 
-  /**
-   * The card root is the only element with a bare `group` class; the name
-   * heading is the anchor a user reads. No test id exists in the component and
-   * none may be invented (the card markup is pinned elsewhere).
-   */
   const cardFor = (name: string): HTMLElement => {
     const headings = Array.from(utils.container.querySelectorAll('h4'))
     const heading = headings.find((el) => el.textContent?.trim() === name)
@@ -76,8 +54,6 @@ function setup(options: {
 
   const cards = () => Array.from(utils.container.querySelectorAll('.group')) as HTMLElement[]
 
-  /** The enable/disable button, identified by its glyph (its title is an
-   * inline i18n default and therefore not a stable selector here). */
   const toggleFor = (name: string): HTMLButtonElement | null => {
     const found = Array.from(cardFor(name).querySelectorAll('button')).find((button) => {
       const glyph = button.textContent?.trim()
@@ -145,7 +121,6 @@ describe('SkillsList — canRemove', () => {
     expect(utils.removeFor('alpha')).toBeNull()
     expect(utils.removeFor('beta')).toBeNull()
     expect(utils.removeFor('gamma')).toBeNull()
-    // Only Remove is gated: the toggles are unaffected.
     expect(utils.toggleFor('alpha')).toBeTruthy()
   })
 
@@ -170,7 +145,6 @@ describe('SkillsList — canToggle', () => {
     const utils = setup({ skills: CARDS, canToggle: () => true, withToggle: false })
     expect(utils.toggleFor('alpha')).toBeNull()
     expect(utils.toggleFor('beta')).toBeNull()
-    // Remove is independent and still offered.
     expect(utils.removeFor('alpha')).toBeTruthy()
   })
 
@@ -216,9 +190,7 @@ describe('SkillsList — duplicate names across sources (F3)', () => {
       ],
       withToggle: true,
     })
-    // `key={skill.name}` alone would collapse these two into one node.
     expect(utils.cards()).toHaveLength(2)
-    // The workspace twin keeps its Remove control.
     expect(utils.removeFor('memory')).toBeTruthy()
     expect(utils.cards()[0].textContent).toContain('Workspace')
   })
@@ -233,7 +205,6 @@ describe('SkillsList — duplicate names across sources (F3)', () => {
     const first = utils.cards()[0]
     fireEvent.click(first.querySelector(`button[title="${tr('skills.removeSkill')}"]`) as Element)
 
-    // Exactly one card switched to the confirm state.
     const confirming = utils
       .cards()
       .filter((card) => card.textContent?.includes(tr('skills.removeConfirmYes')))
@@ -253,7 +224,6 @@ describe('SkillsList — inline remove confirmation', () => {
       utils.buttonWithText('alpha', tr('skills.removeConfirmYes')) as HTMLButtonElement,
     )
     expect(utils.removed).toEqual(['alpha'])
-    // The confirmation closes on success.
     expect(utils.buttonWithText('alpha', tr('skills.removeConfirmYes'))).toBeNull()
   })
 

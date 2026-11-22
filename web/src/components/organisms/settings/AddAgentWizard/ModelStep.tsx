@@ -22,7 +22,6 @@ export function ModelStep({ primaryModel, setPrimaryModel, fallbacks, setFallbac
         </p>
       </div>
 
-      {/* Primary Model */}
       <div className="space-y-2">
         <label
           htmlFor="wizard-agent-primary-model"
@@ -61,7 +60,6 @@ export function ModelStep({ primaryModel, setPrimaryModel, fallbacks, setFallbac
         )}
       </div>
 
-      {/* Fallback Models */}
       <div className="space-y-2">
         <label htmlFor="wizard-agent-fallbacks" className="text-sm font-medium text-text-primary">
           {t('settings.fields.agentModelFallbacks')}
@@ -82,7 +80,6 @@ export function ModelStep({ primaryModel, setPrimaryModel, fallbacks, setFallbac
         </p>
       </div>
 
-      {/* Model info cards */}
       <div className="grid grid-cols-2 gap-3 pt-2">
         <div className="rounded-lg border border-border bg-background-secondary/30 p-3">
           <div className="flex items-center gap-2 mb-1">

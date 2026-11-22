@@ -3,22 +3,6 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { SearchableSelect } from './SearchableSelect'
 
-/**
- * The dropdown must decide its direction from the VISUAL viewport: on iOS the
- * on-screen keyboard shrinks only the visual viewport, so a panel that measured
- * against `window.innerHeight` would open downwards behind the keyboard.
- *
- * jsdom has no layout engine, so the trigger's rect is stubbed. The panel is
- * `absolute bottom-full` when it opens upwards and `top-full` when it opens
- * downwards; `requestAnimationFrame` is `setTimeout(16)` in `src/test/setup.ts`,
- * so the open effect needs a flushed timer before the panel exists.
- *
- * The flip needs 276px (256 + 20) of room below. With the trigger's bottom edge
- * at y=400 the layout viewport (800px) leaves 400px → `top-full`, while a
- * 400px visual viewport leaves 0px → `bottom-full`. That is the only geometry
- * where the two height sources disagree.
- */
-
 const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight')
 
 function stubInnerHeight(height: number): void {

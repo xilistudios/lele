@@ -12,7 +12,7 @@ describe('categorize', () => {
   test('unknown tools fall back to other (never lose a tool)', () => {
     expect(categorize('tool_desconocida')).toBe('other')
     expect(categorize('')).toBe('other')
-    expect(categorize('Read_File')).toBe('other') // case-sensitive on purpose: names come from the API
+    expect(categorize('Read_File')).toBe('other')
   })
 
   test('maps the real registered names', () => {

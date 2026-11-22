@@ -21,7 +21,7 @@ const ORIGIN_MAP = {
   },
 } as const
 
-const REFRESH_INTERVAL = 30_000 // 30 seconds
+const REFRESH_INTERVAL = 30_000
 
 function getRingColor(percent: number): string {
   if (percent >= 90) return 'stroke-state-error'
@@ -67,19 +67,16 @@ export function ContextIndicator() {
       const data = await api.sessionContext(currentSessionKey)
       setContext(data)
     } catch {
-      // Silently fail — context indicator is non-critical
       setContext(null)
     } finally {
       setLoading(false)
     }
   }, [currentSessionKey, api])
 
-  // Fetch on mount and when session changes
   useEffect(() => {
     fetchContext()
   }, [fetchContext])
 
-  // Poll constantly in the background to keep indicator updated
   useEffect(() => {
     intervalRef.current = setInterval(fetchContext, REFRESH_INTERVAL)
     return () => {
@@ -108,7 +105,6 @@ export function ContextIndicator() {
   const textColorClass = context ? getTextColor(context.usage_percent) : 'text-text-tertiary'
   const hasData = context && context.context_window > 0
 
-  // Calculate the dash offset for the SVG ring
   const dashOffset = hasData ? CIRCUMFERENCE * (1 - context.usage_percent / 100) : CIRCUMFERENCE
 
   const origin = ORIGIN_MAP[position.vertical][position.horizontal]
@@ -122,9 +118,7 @@ export function ContextIndicator() {
         className="rounded p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-secondary transition-colors duration-fast"
         aria-label={t('connection.context')}
       >
-        {/* Circular progress ring — always visible */}
         <svg width={CIRCLE_SIZE} height={CIRCLE_SIZE} className="-rotate-90" aria-hidden="true">
-          {/* Background circle (total context) */}
           <circle
             cx={CIRCLE_SIZE / 2}
             cy={CIRCLE_SIZE / 2}
@@ -134,7 +128,6 @@ export function ContextIndicator() {
             strokeWidth={STROKE_WIDTH}
             className="text-text-tertiary"
           />
-          {/* Progress circle (used context) */}
           <circle
             cx={CIRCLE_SIZE / 2}
             cy={CIRCLE_SIZE / 2}
@@ -149,7 +142,6 @@ export function ContextIndicator() {
         </svg>
       </IconButton>
 
-      {/* Tooltip on hover */}
       {hasData && (
         <span
           className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap ${
@@ -160,7 +152,6 @@ export function ContextIndicator() {
         </span>
       )}
 
-      {/* Popover with detailed info */}
       <div
         className={`absolute z-50 w-[220px] rounded-lg border border-border bg-background-primary px-3 py-2.5 shadow-lg transition-all duration-fast ${verticalClass} ${horizontalClass} ${origin} ${
           isOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
@@ -180,7 +171,6 @@ export function ContextIndicator() {
               <span className={`text-xs font-mono font-medium ${textColorClass}`}>{percent}%</span>
             </div>
 
-            {/* Progress bar */}
             <div className="h-1.5 w-full rounded-full bg-background-elevated mb-2 overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-300 ${ringColorClass.replace(

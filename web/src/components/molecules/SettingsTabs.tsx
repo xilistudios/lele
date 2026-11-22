@@ -17,25 +17,18 @@ import {
   ToolsIcon,
 } from '../atoms/Icons'
 
-/**
- * One icon per Settings entry, same vocabulary as `AgentSettingsTabs`:
- * a 14px stroke icon to the left of the label. Thirteen entries of very
- * different nature are recognised faster by silhouette than by text alone,
- * and the icon stays put when the strip collapses to a scrollable bar on
- * mobile (only the label truncates, never the icon).
- */
 const TAB_ICONS: Record<SettingsTab, typeof SettingsIcon> = {
   general: SettingsIcon,
   agents: AgentsIcon,
   providers: ProvidersIcon,
-  session: ClockIcon, // ephemeral sessions / compaction — lifetime of a conversation
-  channels: SendIcon, // Telegram, WhatsApp, … outbound message pipes
-  native: TerminalIcon, // paired native CLI clients
+  session: ClockIcon,
+  channels: SendIcon,
+  native: TerminalIcon,
   groups: GroupsIcon,
   tools: ToolsIcon,
-  system: ServerIcon, // heartbeat, devices, log rotation — runtime of the host
+  system: ServerIcon,
   updates: DownloadIcon,
-  advanced: CodeIcon, // gateway, bindings — hand-edited config surface
+  advanced: CodeIcon,
   diagnostics: ActivityIcon,
   logs: FileTextIcon,
 }
@@ -51,8 +44,6 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
 
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: 'general', label: t('settings.tabs.general') },
-    // Agents and Providers used to be top-level sidebar destinations. They are
-    // configuration, so they live here now — same draft, same footer save.
     { id: 'agents', label: t('settings.tabs.agents') },
     { id: 'providers', label: t('settings.tabs.providers') },
     { id: 'session', label: t('settings.tabs.session') },

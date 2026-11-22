@@ -5,15 +5,6 @@ import { MemoryRouter, useLocation } from 'react-router-dom'
 import '../../test/i18n'
 import { ToolsSidebar } from './ToolsSidebar'
 
-/**
- * Tools drawer — the right-hand panel opened from the chat header.
- *
- * It carries the destinations that used to be in the sidebar's "System" group
- * (skills, scheduled jobs, background processes, secrets) plus the connection
- * status that used to be its own header icon. The tests pin those four rows,
- * the navigation + close-after-select behaviour and the Escape/backdrop exits.
- */
-
 function LocationProbe() {
   const location = useLocation()
   return <div data-testid="location">{location.pathname}</div>
@@ -72,8 +63,6 @@ describe('ToolsSidebar', () => {
     const view = renderDrawer()
     await waitFor(() => expect(view.getByTestId('tools-sidebar')).not.toBeNull())
 
-    // The status icon is the drawer's only connection indicator: the header
-    // button that used to host it is the Tools toggle now.
     const panel = view.getByTestId('tools-sidebar')
     expect(panel.querySelector('button[aria-label^="Estado de conexión"]')).not.toBeNull()
   })

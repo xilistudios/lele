@@ -5,32 +5,15 @@ import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
 import { IconButton } from '../atoms/IconButton'
 import { ClockIcon, CloseIcon, LockIcon, SkillsIcon, TerminalIcon } from '../atoms/Icons'
 
-/**
- * Right-hand "Tools" drawer of the chat.
- *
- * The destinations that used to live in the left sidebar's "System" group —
- * skills, scheduled jobs, background processes and secrets — moved here, since
- * they are tooling around the conversation rather than navigation between
- * chats. The drawer is opened from the chat header (the button that replaced
- * the old connection-status icon) and behaves like `SubagentsSidebar`: a
- * backdrop + a panel that slides in from the right, so it works identically on
- * desktop and mobile.
- *
- * The connection status did not disappear with that icon: it now lives in the
- * drawer footer, one tap away instead of always on screen.
- */
-
 type ToolsSidebarProps = {
   isOpen: boolean
   onClose: () => void
-  /** WebSocket status, forwarded to the connection indicator in the footer. */
   connectionStatus: 'disconnected' | 'connecting' | 'connected'
   apiUrl?: string
 }
 
 const ANIMATION_DURATION_MS = 300
 
-/** One destination of the drawer (route + i18n label + icon). */
 type ToolsRow = { path: string; labelKey: string; icon: typeof SkillsIcon }
 
 const TOOLS_ROWS: ToolsRow[] = [
@@ -47,8 +30,6 @@ export function ToolsSidebar({ isOpen, onClose, connectionStatus, apiUrl }: Tool
   const [animate, setAnimate] = useState(false)
   const rafRef = useRef<number>(0)
 
-  // Mount → paint off-screen → transition in. Unmount is delayed until the
-  // slide-out has finished so the exit animation is not cut off.
   useEffect(() => {
     if (isOpen) {
       setVisible(true)
@@ -94,7 +75,6 @@ export function ToolsSidebar({ isOpen, onClose, connectionStatus, apiUrl }: Tool
 
   return (
     <>
-      {/* Backdrop — fades in/out */}
       <button
         type="button"
         className={`fixed inset-0 z-40 bg-overlay transition-opacity duration-300 ease-out ${animate ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
@@ -135,8 +115,6 @@ export function ToolsSidebar({ isOpen, onClose, connectionStatus, apiUrl }: Tool
           ))}
         </nav>
 
-        {/* Connection status moved here from the header (the icon it used to
-            live on is now the Tools button). */}
         <div className="flex items-center gap-2 border-t border-border px-4 py-3">
           <span className="text-xs text-text-tertiary">{t('common.status')}</span>
           <div className="ml-auto">

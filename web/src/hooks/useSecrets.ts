@@ -39,7 +39,6 @@ export function useSecrets() {
     }
   }, [api])
 
-  // Initial load
   useEffect(() => {
     mountedRef.current = true
     fetchSecrets()
@@ -67,10 +66,6 @@ export function useSecrets() {
     [api, fetchSecrets, fetchAudit],
   )
 
-  /**
-   * Edit an existing secret. The name is the key and cannot change, so it is
-   * sent in the path; an empty value means "keep the stored one".
-   */
   const updateSecret = useCallback(
     async (name: string, input: Omit<SecretInput, 'name'>) => {
       const resp = await api.secrets.update(name, input)

@@ -6,13 +6,6 @@ import '../../../test/i18n'
 import type { EditableAgentConfig } from '../../../lib/types'
 import { AgentPageHeader, CAN_OPEN_CHAT_WITH_AGENT } from './AgentPageHeader'
 
-/**
- * AgentPageHeader (spec §4.2). Rendered inside a MemoryRouter because it uses
- * `useNavigate` and `<Link>`. `screen` is unusable in this env (its global
- * document binding is captured before JSDOM is installed), so queries come
- * from the bound helpers returned by `render`.
- */
-
 function LocationProbe() {
   const location = useLocation()
   return <div data-testid="location">{location.pathname}</div>
@@ -90,7 +83,6 @@ describe('AgentPageHeader', () => {
     expect(text).toContain('temp 0.7')
     expect(text).toContain('thinking medium')
     expect(text).toContain('~/.lele/workspace-coder')
-    // three separators between four values
     expect(text.split('·').length).toBe(4)
   })
 
@@ -106,7 +98,6 @@ describe('AgentPageHeader', () => {
   })
 
   test('no meta line at all when there is nothing to say', () => {
-    // No model of its own and no defaults to inherit from → nothing to show.
     const { meta } = setup({}, { defaultsModel: '' })
     expect(meta()).toBeNull()
   })
@@ -132,10 +123,8 @@ describe('AgentPageHeader', () => {
     const { getByTestId } = utils
     expect(getByTestId('badge-inherits')).toBeTruthy()
     expect(utils.getByText('Default')).toBeTruthy()
-    // The agent is not dirty: `getByTestId` would throw, so query for it.
     expect(utils.queryByTestId('badge-modified')).toBeNull()
     cleanup()
-    // Not the default agent, and with its own model: no badges at all.
     const plain = setup({ model: { primary: 'gpt-4o' } })
     expect(plain.queryByTestId('badge-inherits')).toBeNull()
     expect(plain.queryAllByText('Default')).toHaveLength(0)
@@ -144,7 +133,7 @@ describe('AgentPageHeader', () => {
   test('"Open chat" is hidden, not disabled, until the backend supports it (§4.2.3)', () => {
     expect(CAN_OPEN_CHAT_WITH_AGENT).toBe(false)
     const { container } = setup()
-    expect(container.querySelectorAll('header button')).toHaveLength(1) // only the back arrow
+    expect(container.querySelectorAll('header button')).toHaveLength(1)
   })
 
   test('every meta segment carries a title with the full value', () => {

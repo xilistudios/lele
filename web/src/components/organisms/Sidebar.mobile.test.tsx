@@ -13,9 +13,6 @@ const FULL_WIDTH = 'w-[280px]'
 
 const authValue = { session: { device_name: 'Phone' } } as unknown as AuthContextValue
 
-// The Sidebar only destructures a handful of cold-state fields; everything else
-// is unused by it (QuickChatPanel stays closed). ModeSelector needs chatMode,
-// onSelectMode and groupsEnabled.
 const logicValue = {
   sessions: [],
   currentSessionKey: 'native:client-1:1',
@@ -48,8 +45,6 @@ function renderSidebar(collapsed: boolean) {
         createElement(
           MemoryRouter,
           { initialEntries: ['/'] },
-          // mobileOpen=true: this is the state right after the user taps the
-          // hamburger, i.e. the drawer is on screen.
           createElement(Sidebar, { collapsed, mobileOpen: true, onClose: () => undefined }),
         ),
       ),
@@ -88,9 +83,6 @@ describe('Sidebar — mobile drawer ignores the desktop collapsed preference', (
 
     const view = renderSidebar(true)
 
-    // The rail renders each nav entry as an IconButton carrying title=<label>
-    // and reveals the text only through a hover tooltip (unreachable by
-    // touch). The expanded drawer renders plain labelled rows instead.
     expect(view.container.querySelectorAll('button[title="Chats"]').length).toBe(0)
     expect(view.container.querySelectorAll('button[title="Secretos"]').length).toBe(0)
   })
@@ -100,8 +92,6 @@ describe('Sidebar — mobile drawer ignores the desktop collapsed preference', (
 
     const view = renderSidebar(true)
 
-    // ModeSelector is rendered only in the expanded sidebar. 'Agente' is its
-    // tab label and appears nowhere in the rail (whose tooltips read 'Chats').
     expect(view.getByText('Agente')).not.toBeNull()
   })
 })
@@ -115,9 +105,6 @@ describe('Sidebar — desktop rail keeps working', () => {
 
     expect(cls).toContain(RAIL_WIDTH)
     expect(cls).not.toContain(FULL_WIDTH)
-    // The rail contract: tooltip-backed icon buttons and no mode selector.
-    // Since the tooling pages moved to the chat's Tools drawer, the rail
-    // exposes a single nav icon ("Chats"): no System popover, no Agents row.
     expect(view.container.querySelectorAll('button[title="Chats"]').length).toBe(1)
     expect(view.container.querySelectorAll('button[title="Sistema"]').length).toBe(0)
     expect(view.container.querySelectorAll('button[title="Agentes"]').length).toBe(0)

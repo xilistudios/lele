@@ -37,16 +37,10 @@ describe('usePopoverPosition', () => {
       }),
     )
 
-    // El padding interno es 8 (DEFAULT_PADDING)
     expect(result.current).toBeDefined()
   })
 })
 
-/**
- * The flip decision must use the VISUAL viewport, not the layout one: on iOS
- * the on-screen keyboard shrinks only the visual viewport, so a dropdown that
- * measured against `window.innerHeight` would open downwards into the keyboard.
- */
 describe('usePopoverPosition — visual viewport', () => {
   const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight')
 
@@ -67,12 +61,6 @@ describe('usePopoverPosition — visual viewport', () => {
     return listeners
   }
 
-  /**
-   * Element spanning y=350..450 in a 800px layout viewport. Both directions
-   * need 308px (300 + 8): the layout viewport has 350px below and 350px above,
-   * so it says `below` (checked first). A 400px visual viewport leaves -50px
-   * below and still 350px above, so only the visual viewport flips it.
-   */
   function mountWithRect() {
     const element = document.createElement('div')
     element.getBoundingClientRect = () =>

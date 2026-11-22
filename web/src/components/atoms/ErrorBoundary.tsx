@@ -3,7 +3,6 @@ import { Component, type ErrorInfo, type ReactNode } from 'react'
 type Props = { children: ReactNode }
 type State = { error: Error | null }
 
-/** Catches render crashes so the app does not blank out with no explanation. */
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null }
 

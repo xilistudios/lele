@@ -31,7 +31,6 @@ import { isDesktop } from './lib/desktop'
 
 const defaultApiUrl = defaultApiUrlFromWindow()
 
-// Auth wrapper component to handle auto-pairing from URL params
 function AuthRoute() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -39,8 +38,6 @@ function AuthRoute() {
   const [searchParams] = useSearchParams()
   const [autoAuthAttempted, setAutoAuthAttempted] = useState(false)
   const [autoAuthError, setAutoAuthError] = useState<string | null>(null)
-  // True only while the URL-code auto-pair is in flight. Manual submit uses
-  // AuthPage's own loading state, so it must not flip this spinner.
   const [isAutoPairing, setIsAutoPairing] = useState(false)
   const { apiUrl, session, handleAuth, isLoading } = useAuthContext()
   const [authError, setAuthError] = useState<string | null>(null)
@@ -49,7 +46,6 @@ function AuthRoute() {
   const codeFromUrl = searchParams.get('code')
   const deviceName = 'My Desktop'
 
-  // Where ProtectedRoute sent us before bouncing to /pair
   const fromPath = (() => {
     const from = (
       location.state as { from?: { pathname?: string; search?: string; hash?: string } } | null
@@ -57,7 +53,6 @@ function AuthRoute() {
     return from ? `${from.pathname ?? '/'}${from.search ?? ''}${from.hash ?? ''}` : '/'
   })()
 
-  // Auto-pair if code is provided and no session exists
   useEffect(() => {
     if (codeFromUrl && !session?.token && !autoAuthAttempted && !isLoading) {
       setAutoAuthAttempted(true)
@@ -67,8 +62,6 @@ function AuthRoute() {
           setAutoAuthError(null)
           setIsAutoPairing(true)
           await handleAuth({ apiUrl, pin: codeFromUrl, deviceName })
-          // Return to the originally requested path (or home) with replace
-          // to avoid back-button issues
           navigate(fromPath, { replace: true })
         } catch (err) {
           setAutoAuthError((err as Error).message)
@@ -103,11 +96,9 @@ function AuthRoute() {
     [handleAuth, navigate, fromPath],
   )
 
-  // Pre-fill PIN from URL if available
   const initialPin = codeFromUrl ?? ''
 
   if (isAutoAuthenticating && !autoAuthError) {
-    // Show loading state during auto-auth
     return (
       <main className="flex app-shell-min items-center justify-center px-4 py-12">
         <div className="w-full max-w-md space-y-5 rounded-3xl border border-border bg-background-secondary p-6 shadow-card">
@@ -130,7 +121,6 @@ function AuthRoute() {
   )
 }
 
-// Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { session } = useAuthContext()
   const location = useLocation()
@@ -142,7 +132,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-// Chat route component
 function ChatRoute() {
   const { chat_id, parent_chat_id, child_chat_id } = useParams<{
     chat_id?: string
@@ -191,15 +180,10 @@ function ChatRoute() {
     const hasValidParent =
       !isNestedSubagent ||
       (derivedParentSessionKey ? availableKeys.has(derivedParentSessionKey) : false)
-    // System session keys (heartbeat, cron-*, cron-spawn-*) may not be in the
-    // regular sessions list, but they are still valid chat targets reachable
-    // from the chats (history) page.
     const isSystemSessionKey =
       targetSessionKey === 'heartbeat' ||
       targetSessionKey.startsWith('cron-') ||
       targetSessionKey.startsWith('cron-spawn-')
-    // For nested subagents, the key comes from the subagent API (e.g. "UUID:taskID")
-    // and won't be in the sessions list. We trust the URL since the parent is validated.
     const hasValidTarget = isNestedSubagent
       ? targetSessionKey.length > 0
       : !targetSessionKey.startsWith('subagent:') &&
@@ -225,10 +209,8 @@ function ChatRoute() {
   ])
 
   useEffect(() => {
-    // Skip when creating new session — first useEffect handles this
     if (chat_id === 'new') return
 
-    // Only sync URL→state on chat paths; don't interfere with other pages
     const isChatPath = location.pathname === '/' || location.pathname.startsWith('/chat')
     if (!isChatPath) return
 
@@ -259,9 +241,6 @@ function ChatRoute() {
     chat_id,
   ])
 
-  // Note: onCreateSession, onDeleteSession, onClearSession, and onLogout are handled
-  // directly within the ChatPage components via context hooks
-
   return <ChatPage />
 }
 
@@ -281,18 +260,10 @@ function ProtectedLayout() {
   )
 }
 
-// Settings shell: owns the single settings draft shared by every tab AND by
-// the agent detail pages mounted under it (see SettingsPage).
 function SettingsRoute() {
   return <SettingsPage />
 }
 
-/**
- * Legacy section URLs kept alive after Agents and Providers moved into
- * Settings: `/agents[/…]` → `/settings/agents[/…]`, `/providers` →
- * `/settings/providers`. `rest` carries the nested segments (agent id + tab)
- * so old deep links still land on the same screen.
- */
 function LegacySectionRedirect({ base }: { base: '/agents' | '/providers' }) {
   const location = useLocation()
   const rest = location.pathname.slice(base.length)
@@ -304,8 +275,6 @@ function AppContent() {
   const navigate = useNavigate()
   const location = useLocation()
 
-  // Redirect authenticated users away from /pair, honouring ProtectedRoute's
-  // saved location so a session restored from storage still lands on `from`.
   useEffect(() => {
     if (session?.token && location.pathname === '/pair') {
       const from = (
@@ -319,10 +288,8 @@ function AppContent() {
 
   return (
     <Routes>
-      {/* Public routes */}
       <Route path="/pair" element={<AuthRoute />} />
 
-      {/* Protected routes */}
       <Route path="/" element={<ProtectedLayout />}>
         <Route index element={<ChatRoute />} />
         <Route path="chat/:chat_id" element={<ChatRoute />} />
@@ -332,21 +299,16 @@ function AppContent() {
         <Route path="background-exec" element={<BackgroundExecsPage />} />
         <Route path="cron" element={<CronPage />} />
         <Route path="secrets" element={<SecretsPage />} />
-        {/* Settings owns its draft for every child: the tabs themselves and
-            the agent detail pages (agents are a Settings section now). */}
         <Route path="settings" element={<SettingsRoute />}>
           <Route index element={<Navigate to="general" replace />} />
           <Route path=":tab" element={<SettingsTabContent />} />
           <Route path="agents/:agentId/:tab?" element={<AgentConfigPage />} />
         </Route>
-        {/* Context-file editor: its own full-page shell (sidebar + header). */}
         <Route path="settings/agent/:agentId/:fileName?" element={<AgentFilesPage />} />
-        {/* Agents and Providers are Settings sections now. */}
         <Route path="agents/*" element={<LegacySectionRedirect base="/agents" />} />
         <Route path="providers/*" element={<LegacySectionRedirect base="/providers" />} />
       </Route>
 
-      {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

@@ -3,36 +3,13 @@ import { useTranslation } from 'react-i18next'
 import { Badge } from '../atoms/Badge'
 import { IconButton } from '../atoms/IconButton'
 
-/**
- * Temperature slider (spec §7.2 + §4.4).
- *
- * `value === undefined` is a first-class state: "not set, use the model's own
- * default". The thumb then sits at `modelDefault` (0.7 by default) at 60%
- * opacity with a dashed thumb, a "Model default" badge labels the readout, and
- * reset writes `undefined` back — NOT 0.7, because the semantics of reset are
- * "inherit", not "jump to the number".
- *
- * Deviation documented for PR: §4.4 says the reset button is visible when the
- * value differs from the default *or the field is dirty*. The §7.2 props API
- * carries no dirty flag, so the button is shown whenever a value is set
- * (`value !== undefined`) — the only case where it can actually do something.
- * Hiding it for an explicitly-set 0.7 would make that value impossible to
- * clear back to inherit.
- *
- * Cross-browser styling of the native `<input type="range">` (thumb/track)
- * lives in `styles/index.css` as `.lele-range`: the only CSS this feature adds
- * (§9), because Tailwind cannot reach `::-webkit-slider-thumb` without a plugin.
- */
-
 type Props = {
   id: string
-  /** undefined = inherit the model default. */
   value: number | undefined
   onChange: (value: number | undefined) => void
   min?: number
   max?: number
   step?: number
-  /** Tick mark + semantic of the inherited value. Default 0.7. */
   modelDefault?: number
   disabled?: boolean
   ariaLabel?: string
@@ -40,7 +17,6 @@ type Props = {
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
-/** 0.70 -> "0.7" · 1.00 -> "1" · 0.05 -> "0.05" (never a truncated ellipsis). */
 function formatTemperature(value: number): string {
   return String(Number(value.toFixed(2)))
 }
@@ -63,8 +39,6 @@ export function TemperatureSlider({
   const shown = isInherited ? clamp(modelDefault, min, max) : clamp(value, min, max)
   const percent = max > min ? ((shown - min) / (max - min)) * 100 : 0
 
-  // The native input is the only element, so the filled portion of the track
-  // is painted with a gradient stop at the current percentage.
   const trackStyle: CSSProperties = {
     background: `linear-gradient(to right, rgb(var(--color-focus)) 0%, rgb(var(--color-focus)) ${percent}%, rgb(var(--color-bg-tertiary)) ${percent}%, rgb(var(--color-bg-tertiary)) 100%)`,
   }

@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import { render } from '@testing-library/react'
 import { AgentAvatar, agentIdHash, gradientForId } from './AgentAvatar'
 
-// Spec §2.6: all gradients collapsed to accent-tint + border.
 const AVATAR_BG = 'bg-accent-tint'
 
 function box(size: 'sm' | 'md' | 'xl') {
@@ -16,7 +15,6 @@ describe('agentIdHash / gradientForId', () => {
       [...'coder'].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7),
     )
     expect(agentIdHash('')).toBe(7)
-    // A hash used to pick a class must never be negative.
     for (const id of ['coder', 'lele', 'default', 'x'.repeat(40), 'ünïcødé']) {
       expect(agentIdHash(id)).toBeGreaterThanOrEqual(0)
       expect(Number.isInteger(agentIdHash(id))).toBe(true)

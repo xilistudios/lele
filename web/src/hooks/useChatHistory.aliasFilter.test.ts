@@ -1,14 +1,3 @@
-/**
- * Regression cover for the merge filter in useChatHistory.
- *
- * Symptom: tool cards disappear during a live turn and come back after a
- * reload. The backend emits tool events with the resolved conversation alias
- * (`base:chat:N`, pkg/channels/native.go dispatchOutboundMessage →
- * agentLoop.ResolveSessionKey). The handlers now re-tag those messages with
- * the current UI key (effectiveSessionKey), but the merge filter is also made
- * alias-tolerant as defense-in-depth: a transient message that still carries
- * an alias of the session on screen must render, not silently vanish.
- */
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderHook, waitFor } from '@testing-library/react'

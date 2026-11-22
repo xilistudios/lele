@@ -1,42 +1,8 @@
-/**
- * AgentMCPServerRow — one server NAME row of the MCP tab's merged inventory.
- *
- * Extracted from AgentMCPSection (which owns fetching, filtering, the toggle
- * mutations and the raw editor wiring) so the panel file stays readable: this
- * component renders the state glyph + sr-only verdict (§10.5), the winning
- * layer tag, the RAW command/url (`${VAR}` literal, never interpolated), the
- * key NAME chips, the invalid/shadow diagnostics and the row's write
- * controls.
- *
- * Two rules it must keep:
- *
- *  - NO SECRET VALUES. Everything here is a key NAME or a raw unexpanded
- *    string; no control may fetch or render a value (there is no such
- *    endpoint, ever).
- *  - AN INVALID ENTRY HAS NO WORKING TOGGLE. `enabled` on the toggle route is
- *    a SET, not a FLIP: planEnable on an entry with no `disabled` key answers
- *    200 `changed:false` (a silent no-op) and a `disabled:true` write would
- *    hide the verdict. So the toggle renders disabled with the reason, the
- *    row offers the SAME Edit affordance as the layers block (one click from
- *    the file that repairs it), and a `changed:false` write is reported
- *    inline (message + machine code chip, house idiom) instead of pretending
- *    the row moved.
- *
- * The AUTH controls (`server.auth`, the secret-free report the backend omits
- * for stdio servers) follow the same shape: a status chip whose text — never
- * its colour alone — names the state, plus Authenticate / Sign out, disabled
- * while an auth action for this row is in flight. Which of the two shows is
- * decided by the report ONLY: a `required && !authenticated` row is offered a
- * sign-in even when it declares no method (a recorded 401 is exactly that
- * case), and a row with no report gets nothing — it never had a way to
- * authenticate.
- */
 import { useTranslation } from 'react-i18next'
 import type { MCPEffective, MCPLayer, MCPLayerName, MCPServerRow } from '../../../lib/mcpTypes'
 import { Button } from '../../atoms/Button'
 import { isStoredLayer } from './AgentMCPLayers'
 
-/** State indicator per `effective` (§10.5: never colour-only, sr-only text rides along). */
 const STATE_GLYPH: Record<MCPEffective, string> = { enabled: '●', disabled: '○', invalid: '⚠' }
 const STATE_CLASS: Record<MCPEffective, string> = {
   enabled: 'text-state-success',
@@ -44,15 +10,9 @@ const STATE_CLASS: Record<MCPEffective, string> = {
   invalid: 'text-state-warning',
 }
 
-/** One chip style for layer tags, key NAMES and shadow copies. */
 const CHIP_CLS =
   'inline-flex items-center rounded-md border border-border bg-background-secondary px-1.5 py-0.5 font-mono text-2xs text-text-secondary'
 
-/**
- * Auth status chip: same box as the other chips, tinted by state. The tint is
- * redundant on purpose — the TEXT is the verdict (§10.5: nothing is ever
- * colour-only).
- */
 const AUTH_CHIP_CLS: Record<'authenticated' | 'required', string> = {
   authenticated: `${CHIP_CLS} text-state-success`,
   required: `${CHIP_CLS} text-state-warning`,
@@ -60,36 +20,19 @@ const AUTH_CHIP_CLS: Record<'authenticated' | 'required', string> = {
 
 type Props = {
   row: MCPServerRow
-  /** Inventory layers — repair mirrors mcp-edit-<layer> (needs the path). */
   layers: MCPLayer[]
-  /** Human label for a layer name — section-owned i18n helper. */
   layerLabel: (layer: string) => string
-  /** Open the raw editor of a layer (SAME handler as the layers block). */
   onEdit: (layer: MCPLayerName) => void
-  /** A toggle write is in flight FOR THIS ROW (disables its toggle). */
   pending: boolean
-  /** ANY toggle write is in flight (disables the force replay). */
   busy: boolean
   onToggle: (row: MCPServerRow) => void
-  /** Failed-write message for this row (already paired), or null. */
   error: string | null
-  /** Machine code of that failure (chip inside the alert), or null/absent. */
   errorCode?: string | null
-  /** The failure is 409 `mcp_entry_shadowed` → offer the force retry. */
   forceOffered: boolean
   onForceRetry: () => void
-  /** The last successful toggle for this row answered `changed:false`. */
   noChange: boolean
-  /**
-   * An auth action FOR THIS ROW is in flight — its sign-in flow is open (the
-   * POST is already on the wire) or its logout is running. Disables both auth
-   * controls: a second click could only start a flow that CANCELS the one on
-   * screen, or stack a second logout.
-   */
   authBusy: boolean
-  /** Open the sign-in modal of this row (section-owned, like onEdit). */
   onAuthenticate: (row: MCPServerRow) => void
-  /** Forget this row's stored credential (section-owned mutation). */
   onLogout: (row: MCPServerRow) => void
 }
 
@@ -111,21 +54,10 @@ export function AgentMCPServerRow({
   onLogout,
 }: Props) {
   const { t } = useTranslation()
-  // Repair wiring mirrors the layers block: no path (or an unknown layer)
-  // ⇒ nothing to edit, exactly like mcp-edit-<layer>.
   const rowLayer = layers.find((layer) => layer.layer === row.layer)
   const repairBlocked = !isStoredLayer(row.layer) || !rowLayer?.path
 
   const auth = row.server.auth
-  // AUTH is decided by the server's own secret-free report — ABSENT for every
-  // stdio server (no url, no headers, no auth state), which is what keeps
-  // those rows free of any control here. Exactly ONE of three verdicts is
-  // possible, and it drives both the chip and the controls:
-  //   'authenticated' → chip + Sign out
-  //   'required'      → chip + Authenticate (even with no declared method: a
-  //                     recorded 401 declares none)
-  //   null            → nothing at all (no report, or a report with nothing to
-  //                     say: nothing to authenticate and nothing to sign out of)
   const authStatus: 'authenticated' | 'required' | null = auth?.authenticated
     ? 'authenticated'
     : auth?.required
@@ -139,7 +71,6 @@ export function AgentMCPServerRow({
       data-testid={`mcp-row-${row.name}`}
       className="flex gap-2.5 rounded-lg border border-border bg-background-primary p-3.5"
     >
-      {/* Column 1: state glyph — fixed, non-shrinking. */}
       <span
         data-testid={`mcp-state-${row.name}`}
         aria-hidden="true"
@@ -147,10 +78,8 @@ export function AgentMCPServerRow({
       >
         {STATE_GLYPH[row.effective]}
       </span>
-      {/* Never glyph-only (§10.5). */}
       <span className="sr-only">{t(`mcp.state.${row.effective}`)}</span>
 
-      {/* Column 2: one left edge for the name line AND every meta line. */}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span
@@ -160,20 +89,16 @@ export function AgentMCPServerRow({
             {row.name}
           </span>
 
-          {/* Winning layer tag — also the layer every write uses. */}
           <span data-testid={`mcp-layer-tag-${row.name}`} className={CHIP_CLS}>
             {layerLabel(row.layer)}
           </span>
 
-          {/* Auth state: only two states have something to say, and the chip's
-              TEXT says it (authenticated / sign-in required). */}
           {authStatus !== null && (
             <span data-testid={`mcp-auth-chip-${row.name}`} className={AUTH_CHIP_CLS[authStatus]}>
               {t(authenticated ? 'mcp.auth.statusAuthenticated' : 'mcp.auth.statusRequired')}
             </span>
           )}
 
-          {/* RAW strings: `${VAR}` must show literally — no interpolation, ever. */}
           {row.server.command !== undefined && (
             <code
               data-testid={`mcp-command-${row.name}`}
@@ -199,12 +124,6 @@ export function AgentMCPServerRow({
 
           <span className="ml-auto flex-none flex items-center gap-2">
             {row.effective === 'invalid' ? (
-              // INVALID: no working toggle. `enabled` is a SET, not a FLIP —
-              // planEnable here answers 200 `changed:false` (a silent no-op)
-              // and a `disabled:true` write would hide the verdict. The row is
-              // wired to the SAME Edit affordance as the layers block
-              // (mcp-edit-<layer> uses this same onEdit): one click from the
-              // file that repairs it.
               <>
                 <Button
                   variant="secondary"
@@ -244,11 +163,6 @@ export function AgentMCPServerRow({
               </Button>
             )}
 
-            {/* Auth controls. Offered from the report alone: `required &&
-                !authenticated` gets Authenticate even with no declared method
-                (a recorded 401 declares none), `authenticated` gets Sign out,
-                and a row without a report gets NEITHER (it has no way to
-                authenticate, so offering one would be a dead end). */}
             {authRequired && (
               <Button
                 variant="secondary"
@@ -276,7 +190,6 @@ export function AgentMCPServerRow({
           </span>
         </div>
 
-        {/* Key NAMES only — the API never sends values and none is ever fetched. */}
         {row.server.env_keys && row.server.env_keys.length > 0 && (
           <div
             data-testid={`mcp-envkeys-${row.name}`}
@@ -314,8 +227,6 @@ export function AgentMCPServerRow({
           </p>
         )}
 
-        {/* Why there is no toggle here + where to fix it: visible text, not
-          just the button tooltip (§10.5). */}
         {row.effective === 'invalid' && (
           <p
             data-testid={`mcp-repair-hint-${row.name}`}
@@ -325,7 +236,6 @@ export function AgentMCPServerRow({
           </p>
         )}
 
-        {/* Inert copies below the winner, each with the server's reason. */}
         {row.shadowed && row.shadowed.length > 0 && (
           <div
             data-testid={`mcp-shadowed-${row.name}`}
@@ -347,9 +257,6 @@ export function AgentMCPServerRow({
           </div>
         )}
 
-        {/* A failed write has nowhere else to surface (same as Skills). The
-            machine code rides along as a chip (house idiom): the message alone
-            cannot tell `mcp_entry_shadowed` from a timeout. */}
         {error !== null && (
           <div
             role="alert"
@@ -376,9 +283,6 @@ export function AgentMCPServerRow({
           </div>
         )}
 
-        {/* A 200 that wrote NOTHING (`changed:false`): honest inline report
-          (message + machine code chip, house idiom — never a toast) instead
-          of letting the inventory refetch look like the row moved. */}
         {noChange && (
           <output
             data-testid={`mcp-row-nochange-${row.name}`}

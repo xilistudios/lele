@@ -5,12 +5,6 @@ import type { EditableAgentConfig } from '../../../lib/types'
 import { autoCleanup, renderWithSettings, tr } from '../../../test/agentsHarness'
 import { AgentGeneralSection } from './AgentGeneralSection'
 
-/**
- * `tab=general` (spec §4.3). Rendered through the shared SettingsProvider
- * harness so `updateField` calls can be asserted: the paths written are the
- * contract with `lib/agentDirty.ts` and the backend.
- */
-
 const coder: EditableAgentConfig = { id: 'coder', name: 'Coder' }
 const INDEX = 1
 
@@ -48,7 +42,6 @@ describe('AgentGeneralSection', () => {
     expect(field.getAttribute('role')).toBe('textbox')
     expect(field.getAttribute('aria-readonly')).toBe('true')
     expect(field.textContent).toBe('coder')
-    // Not a real input: it can never be typed into.
     expect(field.tagName).toBe('DIV')
   })
 
@@ -56,7 +49,6 @@ describe('AgentGeneralSection', () => {
     const utils = setup()
     const button = utils.getByTitle(tr('settings.agentPage.copyId'))
     fireEvent.click(button)
-    // jsdom has no navigator.clipboard: the fallback path must still confirm.
     await Promise.resolve()
     expect(utils.getByTestId('agent-id-field').textContent).toBe('coder')
   })

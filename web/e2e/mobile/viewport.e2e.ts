@@ -1,21 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-/**
- * Mobile-viewport gate for the WebUI shell-height fix.
- *
- * WHY the `--app-vh` assertion exists: headless Chromium emulation sets
- * `100vh == innerHeight == viewport.height`, so it cannot reproduce the
- * URL-bar chrome delta that caused the reported bug. A pure geometry
- * assertion would therefore pass even at the unfixed base commit. Asserting
- * the *mechanism* (`--app-vh` resolving to a `dvh` value) is what turns this
- * spec red at the base and green after the fix; the geometry assertions then
- * pin the invariants the fix must keep (shell == visible height, header and
- * composer inside the viewport, document not scrollable, message list with a
- * usable share of the height).
- *
- * The app is booted against a total REST mock and a WebSocket stub, so the
- * gate needs no backend: only the Farm dev server.
- */
 import { expect, test } from '@playwright/test'
 import type { Page, TestInfo } from '@playwright/test'
 
@@ -24,25 +8,10 @@ const API_URL = 'http://localhost:18793'
 const AGENT_ID = 'main'
 const SECOND_AGENT_ID = 'ui-engineer'
 
-/** Longest model id the strip has to survive (the reported session's model). */
 const LONG_MODEL = 'deepseek-v4.1-flash'
-/** Longest agent name the strip has to survive. */
 const LONG_AGENT_NAME = 'UI Engineer'
-/**
- * Session folder whose chip the second tier has to hold and truncate.
- *
- * The basename is deliberately longer than the chip's `max-md:max-w-[200px]`
- * can show: with 26 characters the label fits (122 px of the ~151 px available
- * inside the chip) and a truncation assertion would be vacuous. 37 characters
- * overflow it, so the cap and the `truncate` are both exercised.
- */
 const SESSION_FOLDER = '/home/alfredo/projects/lele-mobile-viewport-height-regression'
 
-/**
- * Screenshots are attached to the report AND written here, because the list
- * reporter keeps attachments in memory only: the before/after comparison needs
- * real files on disk.
- */
 const SCREENSHOT_DIR = join(process.cwd(), 'test-results', 'e2e-mobile', 'screenshots')
 
 const AGENT = {
@@ -60,13 +29,6 @@ const SECOND_AGENT = {
   model: LONG_MODEL,
 }
 
-/**
- * `model_groups` is what makes the thinking selector appear: ChatComposer only
- * renders it when the SELECTED model carries `reasoning.enable` in the grouped
- * model list (flat `models` strings carry no reasoning metadata). The first
- * model of the first group is the default selection, so the reasoning model
- * must be listed first.
- */
 const MODEL_GROUPS = [
   {
     provider: 'deepseek',
@@ -121,11 +83,6 @@ const CONFIG = {
   },
 }
 
-/**
- * Path of a request with the session key decoded, so the mock matches whether
- * the client percent-encodes the key or not (the history call sends it raw,
- * the session subresource calls encode it).
- */
 const normalizePath = (url: string): string => {
   const withoutQuery = url.split('?')[0] ?? url
   const marker = '/api/v1/'
@@ -134,24 +91,6 @@ const normalizePath = (url: string): string => {
   return decodeURIComponent(path)
 }
 
-/**
- * Both secondary selectors are opt-in, because each one is a tier of its own on
- * mobile and the two scenarios assert different things:
- *
- * - `multipleAgents` adds a second agent (`agentsOptions.length > 1` is what
- *   renders the agent selector).
- * - `reasoning` serves the GROUPED model list with `reasoning.enable`, which is
- *   the only thing that renders the thinking selector (flat `models` strings
- *   carry no reasoning metadata).
- *
- * The default scenario therefore has ONE selector (model) and must stay on a
- * single line; the three-selector scenario is the one that needs the second
- * tier.
- *
- * `folder` sets the session folder. It is opt-in because a folder adds a chip to
- * the second tier, and the scenarios that measure the primary line without one
- * would otherwise be measuring a different strip.
- */
 type MockOptions = { multipleAgents: boolean; reasoning?: boolean; folder?: string }
 
 const respond = (url: string, method: string, options: MockOptions): unknown => {
@@ -249,17 +188,6 @@ const respond = (url: string, method: string, options: MockOptions): unknown => 
   return {}
 }
 
-/**
- * WebSocket stub that actually CONNECTS.
- *
- * The app only loads the model list (and therefore only learns which models
- * are reasoning models) after the socket reaches `connected` — the model load
- * is gated on `wsStatus === 'connected'` in useAppLogic. A stub that stays in
- * CONNECTING leaves the composer on its single fallback selector, which is
- * exactly the shape the three-selector test must NOT silently fall back to.
- * The stub therefore fires `open` on the next task and records every command
- * the app sends, so the test can drive server-side events.
- */
 const STUB_WS_INIT = ({ key, apiUrl }: { key: string; apiUrl: string }) => {
   localStorage.setItem(
     'lele.session',
@@ -323,14 +251,6 @@ const stubSocketSent = (page: Page): Promise<unknown[]> =>
     return (stub?.sent ?? []).map((raw) => JSON.parse(raw))
   })
 
-/**
- * Boots the chat page against the REST mock.
- *
- * The model trigger is the readiness signal: it renders `Default` until the
- * model list arrives, and the model list only loads once the socket is
- * `connected`, so waiting for a real model name covers bootstrap, socket and
- * model load in one assertion.
- */
 const openChat = async (page: Page, options: MockOptions = { multipleAgents: false }) => {
   await page.route('**/api/**', async (route) => {
     const request = route.request()
@@ -369,14 +289,6 @@ const measure = async (page: Page) =>
     }
   })
 
-/**
- * Waits until a real message bubble is visible AND painted.
- *
- * Virtuoso renders its first window asynchronously, so a screenshot taken right
- * after `message-list` appears can capture an empty list (that is how the first
- * capture of the 390 px chat came out blank). Waiting for a bubble plus two
- * animation frames guarantees the paint that the screenshot will read.
- */
 const waitForPaintedMessages = async (page: Page) => {
   await page.getByTestId('message').first().waitFor({ state: 'visible', timeout: 15_000 })
   await page.evaluate(
@@ -434,27 +346,8 @@ test('a long draft never pushes the composer off screen', async ({ page }, testI
   expect(m.list?.height ?? -1).toBeGreaterThanOrEqual(0.3 * m.innerHeight)
 })
 
-/**
- * Selector used for the three triggers, and why it is this one.
- *
- * `SearchableSelect` renders `<div class="relative max-md:min-w-0 …">
- * <button aria-label="Model|Thinking|Agent">…</button></div>`: the wrapper is
- * the flex item the strip lays out, and the button inside is the trigger a
- * finger has to hit. `main form button[aria-label]` would also match the icon
- * buttons (Add folder / Attach files / Send), so the selectors are pinned to the
- * three translated labels the composer passes as `ariaLabel`.
- */
 const SELECTOR_LABELS = ['Model', 'Thinking', 'Agent'] as const
 
-/**
- * Horizontal chrome of a `SearchableSelect` trigger that is NOT text:
- * `px-2` (8+8) + `gap-1.5` (6) + the 12 px chevron. The trigger's own
- * `scrollWidth` cannot report overflow — its only in-flow child is a
- * `flex-1 min-w-0` span, so the button's content box never exceeds its padding
- * box even when the text is squeezed to 0 px. The intrinsic text width comes
- * from a Range over the value span instead, and the text is clipped exactly
- * when `textWidth + chrome > buttonWidth`.
- */
 const TRIGGER_CHROME_PX = 8 + 8 + 6 + 12
 
 type Box = {
@@ -467,19 +360,14 @@ type Box = {
 }
 
 type ControlMeasurement = {
-  /** `aria-label` of the control's trigger (or of the control itself). */
   label: string
-  /** Box of the flex item — what the strip lays out. */
   box: Box
-  /** Box of the actual trigger button (different from `box` for a select). */
   trigger: Box | null
   text: string | null
   textWidth: number
-  /** Width of the value span itself — what is actually visible of the label. */
   spanWidth: number
   neededWidth: number
   truncated: boolean
-  /** True when the trigger sticks out of the flex item that is supposed to hold it. */
   clipped: boolean
 }
 
@@ -496,40 +384,13 @@ type StripMeasurement = {
   nowrap: boolean
   secondTier: Box | null
   controls: ControlMeasurement[]
-  /** Session-folder chip, wherever it is rendered (mobile chip only: it is `md:hidden`). */
   chip: ChipMeasurement | null
-  /** Every pair of laid-out boxes that intersect — the strip may never do that. */
   overlaps: string[]
   send: Box | null
   scrollWidth: number
   list: { height: number } | null
 }
 
-/**
- * Measures the control strip.
- *
- * `row` is the flex row that also holds the send button; `group` is the
- * wrapping group inside it (`flex-wrap`) and `secondTier` the `max-md:basis-full
- * md:contents` wrapper that holds the folder chip and the secondary selectors
- * below `md`. The wrapper is flattened away so `controls` is always the list of
- * things a finger can actually see, in DOM order.
- *
- * The folder chip is excluded twice over — the chip itself and the `basis-full`
- * cell that holds it on its own tier line — because neither is a control: the
- * cell would otherwise be described by the chip's clear button and report a
- * bogus "Remove folder × Folder chip" overlap with the chip it contains.
- *
- * `flatten` keys on the `md:contents` class TOKEN, not on the computed display:
- * below `md` the wrapper is a real flex box (`max-md:flex`), and the controls
- * inside it are what has to be measured — while at `md:`+ the wrapper is
- * `display: contents` and its children are direct flex items of the group. Both
- * regimes yield the same flat list, which is what keeps the line maths valid on
- * either side of the 768 px boundary (`secondTier` is only consulted below it).
- * The token is `md:contents`, i.e. the same breakpoint as every `max-md:`
- * utility: a `sm:contents` wrapper would collapse at 640 px while the `max-md:`
- * utilities still apply, and 640–767 px would be measured as a tiered layout
- * that no longer exists there.
- */
 const measureStrip = async (page: Page): Promise<StripMeasurement | null> =>
   page.evaluate(
     ({ chrome }: { chrome: number }) => {
@@ -649,7 +510,6 @@ const measureStrip = async (page: Page): Promise<StripMeasurement | null> =>
     { chrome: TRIGGER_CHROME_PX },
   )
 
-/** `1` for the primary line, `2` for the secondary tier. */
 const lineOfBox = (box: Box, secondTier: Box | null): 1 | 2 =>
   secondTier && box.top >= secondTier.top - 1 ? 2 : 1
 
@@ -807,13 +667,6 @@ test('the three-selector strip splits into two tiers with every trigger usable',
   expect(strip.list?.height ?? -1).toBeGreaterThanOrEqual(0.3 * strip.innerHeight)
 })
 
-/**
- * Floors for the two secondary triggers, taken from the NO-folder scenario of
- * "the three-selector strip splits into two tiers…" (70 px and 90 px at every
- * project width). Each trigger sizes itself to its label: `Default` needs 68 px
- * and `Main Agent` 88 px once the 34 px of non-text chrome is added, so these
- * floors are exactly "still readable".
- */
 const THINKING_FLOOR_WIDTH = 68
 const AGENT_FLOOR_WIDTH = 88
 
@@ -823,16 +676,6 @@ const controlByLabel = (strip: StripMeasurement, label: string): ControlMeasurem
   return control as ControlMeasurement
 }
 
-/**
- * The pair a session folder must never squeeze: both secondary triggers clear
- * their floor and paint their label in full.
- *
- * `truncated` compares the label's intrinsic width against the trigger box, so
- * it catches "the trigger is too narrow for the text"; `spanWidth` is the width
- * the label is painted at, so it catches "the text has already been ellipsised
- * away". Both, because an 11 px span still reports the full 34 px intrinsic
- * width through the Range.
- */
 const expectSecondarySelectorsReadable = (strip: StripMeasurement) => {
   for (const [label, floor, spanFloor] of [
     ['Thinking', THINKING_FLOOR_WIDTH, 34],
@@ -845,26 +688,6 @@ const expectSecondarySelectorsReadable = (strip: StripMeasurement) => {
   }
 }
 
-/**
- * The strip also has to survive a session folder, which is the case every other
- * test here misses: the mock answers `folder: ''` unless a test asks for one.
- *
- * With a session folder set, the chip used to sit on the PRIMARY touch line next
- * to the model trigger. Every other item on that line (`+` add-folder, attach,
- * send) is a fixed 44 px target, so the model trigger — the only `flex-1` item —
- * was the single shrinkable element: measured 26 px wide with a 0 px value span
- * at 360 px and 56 px with a 20 px span at 390, i.e. a blank pill. The chip was
- * then moved onto the second tier, next to thinking and agent — and that only
- * moved the damage sideways: measured 50 px / 64 px with 14 px / 28 px value
- * spans at 320 (both below the 60 px bar of the sibling test, and `Def…` /
- * `Main A…` on screen at 390).
- *
- * The chip therefore owns a `basis-full` line of its own on the tier (the tier
- * wraps), so the two selectors keep exactly the widths they have with no folder
- * set. That is what this test pins, and it is the geometry the previous version
- * of this test failed to assert: the chip is ABOVE the selectors, the selectors
- * clear their floors with untruncated value spans, and nothing overlaps.
- */
 test('a session folder never squeezes the primary line', async ({ page }, testInfo) => {
   await openChat(page, { multipleAgents: true, reasoning: true, folder: SESSION_FOLDER })
 
@@ -918,10 +741,8 @@ test('a session folder never squeezes the primary line', async ({ page }, testIn
   expect(lineOfBox(send, secondTier)).toBe(1)
   expect(send.right).toBeLessThanOrEqual(strip.row.right + 1)
 
-  /** The pair that actually got crushed, asserted before anything else. */
   expectSecondarySelectorsReadable(strip)
 
-  /** Chip printed above the selectors: the tier wraps, so `basis-full` applies. */
   expect(chip.box.top).toBeGreaterThanOrEqual(secondTier.top - 1)
   expect(Math.abs(chip.box.left - secondTier.left)).toBeLessThanOrEqual(1)
   expect(chip.box.right).toBeLessThanOrEqual(strip.group.right + 1)
@@ -936,17 +757,6 @@ test('a session folder never squeezes the primary line', async ({ page }, testIn
   expect(strip.list?.height ?? -1).toBeGreaterThanOrEqual(0.3 * strip.innerHeight)
 })
 
-/**
- * The folder chip's own line costs the composer a tier (~28 px), which is only
- * acceptable if the composer still leaves the message list room with the
- * TEXTAREA at its maximum. That combination is what this case pins: a folder
- * set (`basis-full` chip line) plus a 12-line draft, which is the tallest the
- * composer can get below `md` (the textarea is capped at 30dvh).
- *
- * Measured with the fix at 320×568: composer 301.5 px (53.1 % of the viewport),
- * list 152.5 px (26.8 %), no document scroll, send still 44×44 on the primary
- * line, and the two selectors still at their no-folder widths.
- */
 test('a session folder and a long draft still leave the list room', async ({ page }, testInfo) => {
   await openChat(page, { multipleAgents: true, reasoning: true, folder: SESSION_FOLDER })
 

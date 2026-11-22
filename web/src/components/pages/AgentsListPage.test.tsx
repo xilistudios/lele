@@ -11,18 +11,6 @@ import i18n from '../../test/i18n'
 import { AgentCard } from '../organisms/agents/AgentCard'
 import { AgentsListPage } from './AgentsListPage'
 
-/**
- * AgentsListPage + AgentCard (spec §3). Rendered through a SettingsProvider
- * fed with a hand-made `SettingsConfigState` (same pattern as
- * SettingsPage.test.tsx) so the page sees a fixed draft and we can
- * assert exactly which `updateField` calls removals produce.
- *
- * House convention: `screen` is unusable here (its global-document binding
- * is captured before the JSDOM setup runs), so every query goes through the
- * bound helpers returned by `render` / `within`.
- */
-
-/** The test env boots in Spanish; resolve labels through i18n (house pattern). */
 function tr(key: string, options?: Record<string, unknown>): string {
   return i18n.t(key, options) as string
 }
@@ -78,13 +66,11 @@ function renderPage(state: SettingsConfigState) {
   )
 }
 
-/** Prints the current location so navigation targets can be asserted. */
 function LocationProbe() {
   const location = useLocation()
   return <div data-testid="location-probe">{location.pathname}</div>
 }
 
-/** The ✕ lives inside a focus-restoration wrapper span; click the real button. */
 function clickRemove(getAllByTestId: (id: string) => HTMLElement[], i: number) {
   const btn = getAllByTestId('agent-remove-btn')[i].querySelector('button') as HTMLButtonElement
   fireEvent.click(btn)
@@ -199,7 +185,6 @@ describe('AgentCard — meta and badges', () => {
   })
 
   test('modified badge uses the ORIGINAL index while search filters', () => {
-    // Dirty path belongs to agents.list.1 (researcher).
     const state = makeState({ dirtyPaths: new Set(['agents.list.1.model.primary']) })
     const { getByTestId, getAllByTestId } = renderPage(state)
     fireEvent.change(getByTestId('agents-search'), { target: { value: 'researcher' } })
@@ -240,7 +225,6 @@ describe('AgentCard — inline remove', () => {
   test('confirmation names the agent (display name when present)', () => {
     const { getAllByTestId, getByTestId } = renderPage(makeState())
     clickRemove(getAllByTestId, 0)
-    // coder has name "Coder" → confirm text uses it, not the id.
     expect(getByTestId('agent-confirm-remove').parentElement?.textContent).toContain(
       tr('settings.agentPage.removeConfirm', { name: 'Coder' }),
     )
@@ -270,7 +254,6 @@ describe('AgentCard — inline remove', () => {
 })
 
 describe('AgentCard — actions & auto-cancel', () => {
-  /** Standalone card (no page) to control props like the timeout. */
   function renderCard(overrides: Partial<ComponentProps<typeof AgentCard>> = {}) {
     return render(<MemoryRouter>{renderCardNode(overrides)}</MemoryRouter>)
   }
@@ -304,7 +287,6 @@ describe('AgentCard — actions & auto-cancel', () => {
     const link = getByText('coder').closest('a')
     expect(link?.getAttribute('href')).toBe('/settings/agents/coder')
     fireEvent.click(getByText(tr('settings.agentPage.configure')))
-    // /settings/agents/coder matched the detail route (the list route unmounts).
     expect(getByText('/settings/agents/coder')).not.toBeNull()
   })
 
@@ -326,11 +308,9 @@ describe('AgentCard — actions & auto-cancel', () => {
     const { getByText } = renderCard()
     const card = getByText('coder').closest('[data-testid="agent-card"]')
     expect(card).not.toBeNull()
-    // The id anchor carries the stretched ::after hit area…
     const link = getByText('coder')
     expect(link.className).toContain('after:absolute')
     expect(link.className).toContain('after:inset-0')
-    // …and the actions row sits on top of it.
     const actions = within(card as HTMLElement).getByText(
       tr('settings.agentPage.configure'),
     ).parentElement

@@ -10,21 +10,6 @@ import type { ApiClient } from '../../../services/http/client'
 import { type Write, autoCleanup, makeState, tr } from '../../../test/agentsHarness'
 import { AgentToolsSection } from './AgentToolsSection'
 
-/**
- * `tab=tools` (spec §4.6) — the section with the most behaviour behind it:
- * mode derivation, batch writes, search filtering and the conditional spawn
- * warning. Rendered through the shared SettingsProvider harness (fixed draft,
- * recorded `updateField` writes) plus a fresh QueryClient per test, so each
- * catalog fetch is isolated and never cached across mounts.
- *
- * House convention: `screen` is unusable here (its global-document binding is
- * captured before the JSDOM setup runs), so every query goes through the
- * helpers returned by `render`. Every expected string is resolved through
- * `tr()` — the same i18n instance the component reads — so the assertions do
- * not depend on which locale the detector picked.
- */
-
-/** Catalog as the agent's live registry would return it (sorted by name). */
 const CATALOG: AgentCatalogResponse = {
   agent_id: 'coder',
   tools: [
@@ -63,11 +48,9 @@ function makeApi(catalog: Partial<AgentCatalogResponse> | 'fail' = CATALOG): Api
 }
 
 type SetupOptions = {
-  /** Value of `agents.list[index].tools`; undefined = "all" mode. */
   tools?: string[]
   subagents?: EditableAgentConfig['subagents']
   catalog?: Partial<AgentCatalogResponse> | 'fail'
-  /** Catalog promise that never settles: exercises the loading state. */
   pending?: boolean
   dirtyPaths?: string[]
 }
@@ -93,10 +76,6 @@ function setup(options: SetupOptions = {}) {
       } as unknown as ApiClient)
     : makeApi(options.catalog)
 
-  // A client per test: the catalog fetch is never shared with another mount.
-  // `retry:false` keeps the failure-path test fast. (Do NOT set gcTime:0 — it
-  // evicts the resolved data while the observer is still mounted and the
-  // query loops in pending forever.)
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -113,7 +92,6 @@ function setup(options: SetupOptions = {}) {
 
   const lastWrite = (path: string) => [...writes].reverse().find((write) => write[0] === path)
 
-  /** The checkbox of the ToggleCard whose label mentions `name`. */
   const checkboxFor = (name: string): HTMLInputElement => {
     const boxes = utils.container.querySelectorAll('input[type="checkbox"]')
     for (const box of Array.from(boxes)) {
@@ -122,7 +100,6 @@ function setup(options: SetupOptions = {}) {
     throw new Error(`no tool card for ${name}`)
   }
 
-  /** CategoryGroup header button for a translated group title. */
   const groupHeader = (title: string): HTMLButtonElement => {
     const header = utils
       .queryAllByRole('button')
@@ -131,7 +108,6 @@ function setup(options: SetupOptions = {}) {
     return header as HTMLButtonElement
   }
 
-  /** The collapsible panel a group header controls. */
   const panelFor = (title: string): HTMLElement => {
     const id = groupHeader(title).getAttribute('aria-controls') as string
     return utils.container.querySelector(`[id="${id}"]`) as HTMLElement
@@ -144,12 +120,6 @@ function setup(options: SetupOptions = {}) {
 
 autoCleanup()
 
-/**
- * Wait until the catalog resolved and the skeleton is gone.
- * Plain polling instead of testing-library's waitFor: under bun + jsdom the
- * library's MutationObserver-based wait never observes the React 19 render
- * flush, so it hangs until its own timeout even though the DOM is ready.
- */
 async function ready(u: ReturnType<typeof setup>) {
   for (let i = 0; i < 80 && u.queryByTestId('tools-skeleton'); i++) {
     await new Promise((resolve) => setTimeout(resolve, 25))
@@ -165,7 +135,6 @@ describe('AgentToolsSection — mode derived from the value (§4.6.1)', () => {
     const custom = u.getByRole('radio', { name: tr('settings.agentPage.toolsModeCustom') })
     expect(all.getAttribute('aria-checked')).toBe('true')
     expect(custom.getAttribute('aria-checked')).toBe('false')
-    // The banner interpolates the live catalog size.
     expect(u.getByTestId('tools-all-banner').textContent).toContain(
       tr('settings.agentPage.toolsAllBanner', { total: ALL_NAMES.length }),
     )
@@ -183,9 +152,6 @@ describe('AgentToolsSection — mode derived from the value (§4.6.1)', () => {
     )
   })
 
-  // "Zero tools" is not expressible on the backend (an empty allowlist keeps
-  // every tool and `omitempty` would drop the key), so a legacy `tools: []`
-  // must render as unrestricted rather than lie about access.
   test('an empty array renders as ALL mode (backend semantics: empty = no restriction)', async () => {
     const u = await ready(setup({ tools: [] }))
     const all = u.getByRole('radio', { name: tr('settings.agentPage.toolsModeAll') })
@@ -201,9 +167,6 @@ describe('AgentToolsSection — mode derived from the value (§4.6.1)', () => {
     fireEvent.click(u.getByRole('radio', { name: tr('settings.agentPage.toolsModeCustom') }))
     expect(u.lastWrite('agents.list.1.tools')?.[1]).toEqual([...ALL_NAMES].sort())
 
-    // The harness draft is a fixed snapshot: `updateField` records the write
-    // but does not feed it back, so mode is re-derived from a fresh mount that
-    // already carries the array (what the real provider does after a write).
     cleanup()
     const custom = await ready(setup({ tools: [...ALL_NAMES] }))
     fireEvent.click(custom.getByRole('radio', { name: tr('settings.agentPage.toolsModeAll') }))
@@ -214,7 +177,6 @@ describe('AgentToolsSection — mode derived from the value (§4.6.1)', () => {
 
   test('unchecking a card from all mode enters custom with catalog minus that tool', async () => {
     const u = await ready(setup())
-    // All mode previews every card as checked.
     expect(u.checkboxFor('i2c').checked).toBe(true)
     fireEvent.click(u.checkboxFor('i2c'))
     expect(u.lastWrite('agents.list.1.tools')?.[1]).toEqual(
@@ -259,15 +221,9 @@ describe('AgentToolsSection — toggling and batch (§4.6.2, §4.6.3)', () => {
   test('batch Essentials writes only the essentials the live catalog actually has', async () => {
     const u = await ready(setup({ tools: ['exec'] }))
     fireEvent.click(u.getByTestId('tools-batch-essential'))
-    // The catalog has exec/read_file/web_search from ESSENTIAL_TOOLS but not
-    // write_file, edit_file, list_dir, web_fetch, send_file, sleep, spawn —
-    // naming tools the agent does not have would be dead config.
     expect(u.lastWrite('agents.list.1.tools')?.[1]).toEqual(['exec', 'read_file', 'web_search'])
   })
 
-  // Clearing the selection writes `undefined`, never `[]`: the backend maps an
-  // empty allowlist to "all tools", so persisting `[]` would store a value the
-  // UI could not honestly re-render.
   test('batch None writes undefined (back to unrestricted) and batch All writes the full catalog', async () => {
     const u = await ready(setup({ tools: ['exec'] }))
     fireEvent.click(u.getByTestId('tools-batch-none'))
@@ -284,11 +240,9 @@ describe('AgentToolsSection — categories and search (§4.6.4, §4.6.5)', () =>
     const u = await ready(setup({ tools: ['exec', 'read_file'] }))
     const files = u.categoryTitle('files')
     const hardware = u.categoryTitle('hardware')
-    // Files: read_file is the only catalog tool of the group → 1 of 1.
     expect(u.groupHeader(files).textContent).toContain(files)
     expect(u.panelFor(files).textContent).toContain('read_file')
     expect(u.groupHeader(hardware).textContent).toMatch(/0.*1/)
-    // ToggleCard sm renders the catalog description.
     expect(u.panelFor(hardware).textContent).toContain('Talk to I2C peripherals')
   })
 
@@ -305,7 +259,6 @@ describe('AgentToolsSection — categories and search (§4.6.4, §4.6.5)', () =>
 
   test('search hides groups without hits and force-expands those with them', async () => {
     const u = await ready(setup({ tools: [...ALL_NAMES] }))
-    // Collapse Files first: a search must override the user's collapse.
     const files = u.categoryTitle('files')
     fireEvent.click(u.groupHeader(files))
     expect(u.groupHeader(files).getAttribute('aria-expanded')).toBe('false')
@@ -314,7 +267,6 @@ describe('AgentToolsSection — categories and search (§4.6.4, §4.6.5)', () =>
     expect(u.queryByText(files)).toBeTruthy()
     expect(u.groupHeader(files).getAttribute('aria-expanded')).toBe('true')
     expect(u.panelFor(files).textContent).toContain('read_file')
-    // Hardware (i2c) has no match at all: the whole group disappears.
     expect(u.queryByText(u.categoryTitle('hardware'))).toBeNull()
     expect(u.queryByTestId('tools-no-matches')).toBeNull()
   })
@@ -332,7 +284,6 @@ describe('AgentToolsSection — categories and search (§4.6.4, §4.6.5)', () =>
     const u = await ready(setup())
     expect(u.queryByTestId('tools-search')).toBeNull()
     fireEvent.click(u.getByRole('radio', { name: tr('settings.agentPage.toolsModeCustom') }))
-    // The write does not re-render the fixture draft, so re-mount in custom.
     cleanup()
     const custom = await ready(setup({ tools: [...ALL_NAMES] }))
     expect(custom.getByTestId('tools-search')).toBeTruthy()
@@ -377,7 +328,6 @@ describe('AgentToolsSection — loading, empty and error states (§4.6.7)', () =
   test('pending catalog renders two skeleton category groups and no banner', () => {
     const u = setup({ pending: true })
     const skeleton = u.getByTestId('tools-skeleton')
-    // 2 groups × (1 header + 3 cards).
     expect(skeleton.querySelectorAll('[class*="animate-pulse"]').length).toBe(8)
     expect(u.queryByTestId('tools-all-banner')).toBeNull()
     expect(u.queryByTestId('tools-empty')).toBeNull()

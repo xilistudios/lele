@@ -19,7 +19,6 @@ type Props = {
   variant?: 'default' | 'nav' | 'nav-full' | 'danger' | 'ghost'
   className?: string
   ariaLabel?: string
-  /** Renders `aria-expanded` — for buttons that toggle a popover or drawer. */
   ariaExpanded?: boolean
   dataTestId?: string
   children: ReactNode

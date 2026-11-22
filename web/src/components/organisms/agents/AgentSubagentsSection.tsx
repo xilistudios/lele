@@ -8,29 +8,9 @@ import { SearchableSelect } from '../../molecules/SearchableSelect'
 import { SettingsField } from '../../molecules/SettingsField'
 import { SettingsSection } from '../../molecules/SettingsSection'
 
-/**
- * `tab=subagents` — delegation (spec §4.7).
- *
- * The whole section hangs off ONE config node, `agents.list.{i}.subagents`:
- * the feature is on when the object is present and off when it is `undefined`.
- * `SubagentsConfig` on the wire is `{ allow_agents, model, timeout_minutes,
- * max_concurrent, max_iterations }` (`omitempty` on every field), so:
- *
- * - enabling writes `{ allow_agents: [] }` — an empty allowlist means "nobody
- *   yet", which is the safe default; the chips below are how you add some;
- * - every write is an immutable spread of the node that is already there, so
- *   changing one field can never drop the others;
- * - the three numbers keep `0` as a real value (the backend reads 0 as "no
- *   limit"), they are never normalised to `undefined`;
- * - an empty subagent model writes `undefined` for `model` — NOT `{}` — so the
- *   agent inherits its own model.
- */
-
 type Props = {
   agent: EditableAgentConfig
-  /** Position in `agents.list` — paths are positional. */
   index: number
-  /** Full list, used to build the "who may I delegate to" chips. */
   agents: EditableAgentConfig[]
 }
 
@@ -52,18 +32,14 @@ export function AgentSubagentsSection({ agent, index, agents }: Props) {
   const dirty = (field: string) => isDirtyPath(dirtyPaths, field)
   const error = (field: string) => getErrorForPath(validationErrors, field)
 
-  /** Write a new `subagents` node derived from the current one. */
   const write = (patch: Partial<SubagentsConfig>) =>
     updateField(base, { ...subagents, ...patch } as SubagentsConfig)
 
   const toggleEnabled = (value: boolean) => {
-    // OFF removes the node entirely (`undefined` => `omitempty` drops it).
     if (!value) updateField(base, undefined)
     else write({ allow_agents: subagents?.allow_agents ?? [] })
   }
 
-  // Only the OTHER agents are candidates: an agent delegating to itself would
-  // recurse. Order follows `agents.list` (positional dirty paths).
   const otherAgents = agents.filter((entry) => entry.id !== agent.id)
 
   const allowlist = subagents?.allow_agents ?? []
@@ -158,8 +134,6 @@ export function AgentSubagentsSection({ agent, index, agents }: Props) {
                     error={error(path)}
                   >
                     <NumberInput
-                      // `?? 0`: an unset limit shows as 0, which is exactly its
-                      // meaning on the wire ("no limit").
                       value={Number(subagents?.[field] ?? 0)}
                       min={0}
                       onChange={(value) => write({ [field]: value } as Partial<SubagentsConfig>)}

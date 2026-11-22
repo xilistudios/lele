@@ -59,7 +59,6 @@ describe('storage', () => {
   test('ignores subagent session keys (lele.currentSessionKey)', () => {
     clearCurrentSessionKey()
     saveCurrentSessionKey('subagent:task-1')
-    // Debería ignorar la subagent key
     expect(loadCurrentSessionKey()).toBeNull()
   })
 

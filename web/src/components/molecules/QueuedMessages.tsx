@@ -2,11 +2,6 @@ import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { CloseIcon, SendIcon } from '../atoms/Icons'
 
-/**
- * Strip listing the messages waiting for the current session's turn to end.
- * Owns its own visibility: renders nothing while the session's queue is empty,
- * so the composer stays untouched in the common case.
- */
 export function QueuedMessages() {
   const { t } = useTranslation()
   const {
@@ -18,7 +13,6 @@ export function QueuedMessages() {
     clearQueue,
   } = useAppLogicContext()
 
-  // While the turn is live, send-now aborts it (incl. subagents) — say so.
   const sendNowLabel = isProcessing ? t('chat.queueSendNowBusy') : t('chat.queueSendNow')
 
   if (!currentSessionKey) return null

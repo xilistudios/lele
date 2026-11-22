@@ -3,15 +3,10 @@ import { render } from '@testing-library/react'
 import i18n from '../../test/i18n'
 import { ToolCallDisplay } from './ToolCallDisplay'
 
-// Shared test i18n boots in Spanish; read the label through the same key the
-// component uses so the assertion holds for any active locale.
 const LABEL = i18n.t('toolCalls.goal')
 
-// toolArgs as written by hooks/event-handlers/tools.ts handleToolExecuting:
-// the backend puts the human-readable action string in Metadata.action.
 const ACTION = '🔍 Reviewing goal result...'
 
-// The wrench path used by GENERIC_ICON — must NOT appear on a known tool.
 const GENERIC_ICON_START = 'M14.7 6.3a1 1 0 0 0 0 1.4'
 
 function renderGoal(overrides: Record<string, string | undefined> = {}) {
@@ -42,7 +37,6 @@ describe('ToolCallDisplay for tool "goal"', () => {
     const paths = Array.from(container.querySelectorAll('svg path')).map((p) => p.getAttribute('d'))
     expect(paths.length).toBeGreaterThan(0)
     expect(paths.some((d) => d?.startsWith(GENERIC_ICON_START))).toBe(false)
-    // Concentric-circle target: outer/inner ring plus the clock-hand segment.
     expect(paths[0]).toContain('a10 10 0 1 0 10 10')
     expect(paths).toContain('M12 6v6l4 2')
   })

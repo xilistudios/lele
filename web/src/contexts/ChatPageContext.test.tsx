@@ -7,21 +7,6 @@ import type { ReactNode } from 'react'
 import { useSyncExternalStore } from 'react'
 import type { ChatMessage, ChatSession } from '../lib/types'
 
-/**
- * Render-count tests for the two hot contexts. The REAL providers are mounted —
- * only the two hook modules `AppLogicContext` depends on are replaced:
- *
- *  - `useAppLogic` → a tiny external store, so a test can push exactly the
- *    updates a 32 ms typewriter tick produces (a new `messages` array, same
- *    length, one streaming message whose content grew).
- *  - `useSocket`  → a no-op (jsdom must not open a real WebSocket).
- *
- * Each spy component counts its OWN renders, which is what matters: when a
- * provider re-renders, React bails out of the unchanged `children` element, so
- * a child only re-renders when a context it consumes actually changed.
- */
-
-// ── Store standing in for useAppLogic's state ───────────────────────────────
 let appState: Record<string, unknown> = {}
 
 const appListeners = new Set<() => void>()
@@ -35,7 +20,6 @@ const getAppSnapshot = () => appState
 
 const noop = () => {}
 
-/** Every field AppLogicContext/`ChatPageContext` read, with stable identities. */
 function baseApp(): Record<string, unknown> {
   return {
     error: null,
@@ -92,20 +76,17 @@ function baseApp(): Record<string, unknown> {
     hasMore: false,
     isLoadingMore: false,
     isHistoryLoading: false,
-    // hot fields
     messages: [] as ChatMessage[],
     toolStatus: null,
     typingIndicator: false,
   }
 }
 
-/** Replace the app state (patch) and notify the provider. Call inside act(). */
 function pushApp(patch: Record<string, unknown> = {}) {
   appState = { ...baseApp(), ...appState, ...patch }
   for (const listener of appListeners) listener()
 }
 
-/** Reset the store to pristine state + patch, before mounting. */
 function seedApp(patch: Record<string, unknown> = {}) {
   appState = { ...baseApp(), ...patch }
 }
@@ -118,7 +99,6 @@ mock.module('../hooks/useSocket', () => ({
   useSocket: () => ({ status: 'connected', send: noop, close: noop }),
 }))
 
-// Deferred imports: resolved AFTER mock.module() above.
 let AppLogicProvider: typeof import('./AppLogicContext').AppLogicProvider
 let useAppLogicContext: typeof import('./AppLogicContext').useAppLogicContext
 let useAppStreamingContext: typeof import('./AppLogicContext').useAppStreamingContext
@@ -197,7 +177,6 @@ function mountChatPage() {
   )
 }
 
-/** One typewriter tick: same message list length, one grown content. */
 function withStreamedContent(content: string, sessionKey = 's1'): ChatMessage[] {
   return [chatMessage({ id: 'm1', content, sessionKey })]
 }
@@ -250,11 +229,7 @@ describe('AppLogicContext — hot value identity', () => {
       act(() => pushApp({ sidebarOpen: i % 2 === 0 }))
     }
 
-    // The cold value legitimately changes on every real update: 29 of the 30
-    // patches flip `sidebarOpen`, the first one is a no-op (false → false), so
-    // 30 renders total including the initial mount.
     expect(coldRenders).toBe(30)
-    // …but the hot value was never re-created, so its consumers stay put.
     expect(streamingRenders).toBe(1)
     expect(container.textContent).toContain('true:0')
   })
@@ -290,10 +265,7 @@ describe('ChatPageContext — consumer render stability', () => {
       act(() => pushApp({ messages: withStreamedContent('a'.repeat(i)) }))
     }
 
-    // The updates DID flow (the hot consumer moved on every tick)…
     expect(streamingRenders).toBe(31)
-    // …while the ChatPage consumer — which reads none of the grown content —
-    // did not re-render. (Pre-fix this was 31.)
     expect(chatPageRenders).toBeLessThanOrEqual(2)
     expect(chatPageRenders).toBe(1)
     expect(container.textContent).toContain('s1=Named session|idle|conv')
@@ -320,12 +292,9 @@ describe('ChatPageContext — consumer render stability', () => {
       }),
     )
 
-    // The name is derived from the message → the consumer MUST re-render.
     expect(chatPageRenders).toBe(2)
     expect(container.textContent).toContain('s-new=Plan the release|idle|conv')
 
-    // The assistant reply then streams in: the name stops changing, so the
-    // consumer must go quiet again (the content it does not read keeps growing).
     for (let i = 1; i <= 30; i += 1) {
       act(() =>
         pushApp({
@@ -443,7 +412,6 @@ describe('ChatPageContext — consumer render stability', () => {
     expect(chatPageRenders).toBe(2)
     expect(container.textContent).toContain('s1=Named session|idle|conv')
 
-    // …and the list length then stays put while the content grows.
     for (let i = 1; i <= 30; i += 1) {
       act(() => pushApp({ messages: withStreamedContent('a'.repeat(i)) }))
     }
@@ -463,7 +431,6 @@ describe('ChatPageContext — consumer render stability', () => {
 
     const { container } = mountChatPage()
 
-    // Only `modelState.current` changes (same `available` / `groups` identities).
     act(() => pushApp({ modelState: { available, groups, current: 'test/other' } }))
 
     expect(chatPageRenders).toBe(2)

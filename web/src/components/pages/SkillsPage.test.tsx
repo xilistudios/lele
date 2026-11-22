@@ -1,17 +1,3 @@
-/**
- * SkillsPage — scope tabs + destination-aware install (plan T5, §5.8).
- *
- * The page is the integrator: it owns the URL-derived view (`?view=` /
- * `?agent=`), the two data sources that overlap (`GET /api/v1/skills` and the
- * per-agent catalog) and the rule that every mutation refreshes the cache the
- * acting hook did NOT already refresh.
- *
- * The assertions are about the WIRE, not the DOM: a URL router records every
- * `{method, path, body}` and 404s anything unexpected, so a stray request (or
- * a missing one) fails loudly. The env boots i18n in Spanish, so labels are
- * resolved through the same keys the component uses (`tr()`).
- */
-
 import '../../test/setup'
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -35,10 +21,6 @@ afterEach(() => {
 
 const tr = (key: string, options?: Record<string, unknown>) => i18n.t(key, options) as string
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
 const AGENTS: Agent[] = [
   {
     id: 'coder',
@@ -50,7 +32,6 @@ const AGENTS: Agent[] = [
   { id: 'planner', name: 'Planner', workspace: '/home/u/.lele/workspace-planner', model: 'gpt' },
 ]
 
-/** Four skills, one per source (plus a second global), in a fixed order. */
 const SKILLS: SkillInfo[] = [
   {
     id: 'w1',
@@ -86,9 +67,6 @@ const SKILLS: SkillInfo[] = [
   },
 ]
 
-/** One `deletable: true` (chrome) and three `deletable: false` entries.
- *  `pinned` is the D9 witness: `source: 'workspace'` but `deletable: false`, so
- *  the remove control must follow `deletable`, NOT `source`. */
 const CATALOGS: Record<string, AgentCatalogResponse> = {
   coder: {
     agent_id: 'coder',
@@ -151,10 +129,6 @@ const SCANNED = [
   { name: 'beta', description: 'b', path: 'beta', has_skill: true },
 ]
 
-// ---------------------------------------------------------------------------
-// Fetch router
-// ---------------------------------------------------------------------------
-
 type Body = { url?: string; skills?: string[]; repo?: string; enabled?: boolean; scope?: string }
 type Req = { method: string; path: string; url: string; body: Body | undefined }
 
@@ -175,7 +149,6 @@ function installServer(opts: { catalogError?: boolean } = {}): Req[] {
         headers: { 'Content-Type': 'application/json' },
       })
 
-    // Global skills API
     if (path === '/api/v1/skills' && method === 'GET') return json({ skills: SKILLS })
     if (path === '/api/v1/skills' && method === 'POST')
       return json({ skill_id: (body?.url ?? '').split('/').pop(), message: 'ok' })
@@ -192,7 +165,6 @@ function installServer(opts: { catalogError?: boolean } = {}): Req[] {
       return json({ name: 'x', enabled: body?.enabled, message: 'ok' })
     if (path.startsWith('/api/v1/skills/') && method === 'DELETE') return json({ message: 'ok' })
 
-    // Per-agent API
     const catalog = path.match(/^\/api\/v1\/agents\/([^/]+)\/catalog$/)
     if (catalog && method === 'GET') {
       if (opts.catalogError) return json({ error: 'boom' }, 500)
@@ -218,10 +190,6 @@ function installServer(opts: { catalogError?: boolean } = {}): Req[] {
   }) as unknown as typeof fetch
   return requests
 }
-
-// ---------------------------------------------------------------------------
-// Render harness
-// ---------------------------------------------------------------------------
 
 function LocationProbe() {
   const location = useLocation()
@@ -291,18 +259,12 @@ function renderPage(
   return { ...utils, requests, queryClient }
 }
 
-// ---------------------------------------------------------------------------
-// DOM queries
-// ---------------------------------------------------------------------------
-
-/** `screen` is unusable here: every query goes through the render result. */
 function byTestId<T extends HTMLElement = HTMLElement>(container: HTMLElement, id: string): T {
   const el = container.querySelector(`[data-testid="${id}"]`)
   if (!el) throw new Error(`no element with data-testid="${id}"`)
   return el as T
 }
 
-/** Card title order, which is also the order `SkillsList` renders. */
 function cardNames(container: HTMLElement): string[] {
   return Array.from(container.querySelectorAll('h4')).map((el) => el.textContent ?? '')
 }
@@ -335,17 +297,12 @@ function getsTo(requests: Req[], path: string): Req[] {
   return requests.filter((r) => r.method === 'GET' && r.path === path)
 }
 
-/** Open the install modal and wait for the browse list to resolve. */
 async function openInstallModal(container: HTMLElement) {
   fireEvent.click(byTestId(container, 'skills-install-button'))
   await waitFor(() => {
     expect(buttonWithText(container, tr('skills.install'))).toBeTruthy()
   })
 }
-
-// ===========================================================================
-// 1–3 · Tab switching and deep links
-// ===========================================================================
 
 describe('SkillsPage — views', () => {
   test('1. mounts on All with one GET /api/v1/skills, four cards and no URL params', async () => {
@@ -355,7 +312,6 @@ describe('SkillsPage — views', () => {
       expect(cardNames(container)).toEqual(['workspace-skill', 'global-a', 'builtin-a', 'global-b'])
     })
     expect(getsTo(requests, '/api/v1/skills')).toHaveLength(1)
-    // No eager catalog fetch: the agent view is not mounted yet.
     expect(requests.some((r) => r.path.endsWith('/catalog'))).toBe(false)
     expect(locationOf(container)).toBe('/skills')
   })
@@ -393,7 +349,6 @@ describe('SkillsPage — views', () => {
     const { container } = renderPage({ initialEntries: ['/skills?view=global'] })
     await waitFor(() => expect(cardNames(container)).toEqual(['global-a', 'global-b']))
 
-    // D6: the per-agent toggle is hidden in Global, so the note must say why.
     expect(byTestId(container, 'skills-global-toggle-hint').textContent).toBe(
       tr('skills.globalToggleHint'),
     )
@@ -409,10 +364,6 @@ describe('SkillsPage — views', () => {
     expect(container.querySelector('[data-testid="skills-global-toggle-hint"]')).toBeNull()
   })
 })
-
-// ===========================================================================
-// 4–6 · By-agent view, selector and normalisation
-// ===========================================================================
 
 describe('SkillsPage — by agent', () => {
   test('4. By agent fetches the default agent catalog and pins it in the URL', async () => {
@@ -458,10 +409,6 @@ describe('SkillsPage — by agent', () => {
   })
 })
 
-// ===========================================================================
-// 7–10 · Destination-aware install (the heart of the feature)
-// ===========================================================================
-
 describe('SkillsPage — install destination', () => {
   test('7. Global install states the destination and sends scope:"global"', async () => {
     const { container, requests } = renderPage({ initialEntries: ['/skills?view=global'] })
@@ -505,7 +452,6 @@ describe('SkillsPage — install destination', () => {
     )
 
     await openInstallModal(container)
-    // The By-agent view keeps the INTERACTIVE picker, defaulting to workspace.
     expect(byTestId(container, 'install-scope')).toBeTruthy()
     expect(container.querySelector('[data-testid="install-destination"]')).toBeNull()
 
@@ -562,10 +508,6 @@ describe('SkillsPage — install destination', () => {
   })
 })
 
-// ===========================================================================
-// 11–13 · Per-view remove and toggle capabilities
-// ===========================================================================
-
 describe('SkillsPage — capabilities', () => {
   test('11. By agent: only a deletable card offers remove (D9), and it confirms inline', async () => {
     const { container, requests } = renderPage({
@@ -575,10 +517,6 @@ describe('SkillsPage — capabilities', () => {
       expect(cardNames(container)).toEqual(['chrome', 'weather', 'memory', 'pinned']),
     )
 
-    // D9: the remove control follows the server's `deletable`, never `source`.
-    // `pinned` is the discriminator: it has `source: 'workspace'` with
-    // `deletable: false`, so a `source === 'workspace'` predicate would wrongly
-    // offer Remove on it — this assertion is what kills that mutation (§M2).
     const removeTitle = tr('skills.removeSkill')
     expect(
       cardFor(container, 'chrome').querySelector(`button[title="${removeTitle}"]`),
@@ -632,7 +570,6 @@ describe('SkillsPage — capabilities', () => {
     const { container, requests } = renderPage({ initialEntries: ['/skills?view=global'] })
     await waitFor(() => expect(cardNames(container)).toEqual(['global-a', 'global-b']))
 
-    // D6: no per-agent toggle in the Global view.
     expect(
       container.querySelector(
         `button[title="${tr('skills.disable', { defaultValue: 'Disable' })}"]`,
@@ -656,10 +593,6 @@ describe('SkillsPage — capabilities', () => {
   })
 })
 
-// ===========================================================================
-// 14–17 · Dual-cache refresh, errors, empty states, count
-// ===========================================================================
-
 describe('SkillsPage — data coherence and edge cases', () => {
   test('14. a By-agent install refreshes BOTH caches (D7)', async () => {
     const { container, requests } = renderPage({
@@ -677,7 +610,6 @@ describe('SkillsPage — data coherence and edge cases', () => {
     await waitFor(() =>
       expect(postsTo(requests, '/api/v1/agents/coder/skills/install')).toHaveLength(1),
     )
-    // The agent hook invalidates the catalog; the page refetches the global list.
     await waitFor(() => expect(getsTo(requests, '/api/v1/agents/coder/catalog')).toHaveLength(2))
     await waitFor(() => expect(getsTo(requests, '/api/v1/skills')).toHaveLength(2))
   })
@@ -720,8 +652,6 @@ describe('SkillsPage — data coherence and edge cases', () => {
     expect(title).not.toBeNull()
     expect(back).not.toBeNull()
 
-    // Same parent (the header row) and immediately before the title: the
-    // arrow is the way out of a page that no longer has a sidebar entry.
     const row = title?.parentElement
     expect(back?.parentElement).toBe(row)
     const children = Array.from(row?.children ?? [])

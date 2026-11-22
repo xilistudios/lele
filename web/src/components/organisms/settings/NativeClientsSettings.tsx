@@ -11,13 +11,11 @@ export function NativeClientsSettings() {
   const [error, setError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
-  // PIN pairing state
   const [deviceName, setDeviceName] = useState('')
   const [pinLoading, setPinLoading] = useState(false)
   const [pinInfo, setPinInfo] = useState<{ pin: string; expires: string } | null>(null)
   const [showPairModal, setShowPairModal] = useState(false)
 
-  // Inline revoke confirmation (replaces window.confirm)
   const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null)
 
   const fetchClients = useCallback(async () => {

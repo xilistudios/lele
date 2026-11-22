@@ -118,7 +118,6 @@ export function StringListEditor({
               className="group flex items-center justify-between rounded-lg border border-border bg-background-secondary/30 px-3 py-2.5 hover:border-focus hover:bg-background-secondary transition-all duration-fast"
             >
               <div className="flex items-center gap-2.5">
-                {/* Agent icon */}
                 <div className="w-6 h-6 rounded-md bg-accent-tint flex items-center justify-center text-2xs text-text-primary font-medium flex-shrink-0">
                   {item.charAt(0).toUpperCase()}
                 </div>

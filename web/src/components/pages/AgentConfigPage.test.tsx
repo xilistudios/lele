@@ -14,14 +14,6 @@ import type { ApiClient } from '../../services/http/client'
 import { type Write, autoCleanup, makeState, settle, tr } from '../../test/agentsHarness'
 import { AgentConfigPage } from './AgentConfigPage'
 
-/**
- * `/settings/agents/:agentId/:tab?` (spec §4.1, §5.1, §5.2, §5.3). The page is pure
- * composition, so the tests only cover what it owns: URL → tab normalisation,
- * the "unknown agent" block (which must NOT appear while the config is still
- * loading), which section a tab renders, the tabpanel wiring, and the
- * modified badge.
- */
-
 const CODER: EditableAgentConfig = {
   id: 'coder',
   name: 'Coder',
@@ -92,7 +84,6 @@ function setup(
   })
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
-  /** Every location the router visits — how "did it redirect?" is observed. */
   const visited: string[] = []
   function Probe() {
     visited.push(useLocation().pathname)
@@ -164,7 +155,6 @@ describe('AgentConfigPage — unknown agent (§5.2)', () => {
     expect(block).toBeTruthy()
     expect(block?.textContent).toContain('ghost')
     expect(block?.textContent).toContain(tr('settings.agentPage.notFoundDesc'))
-    // No automatic redirect: the user must be able to read the URL that failed.
     expect(u.visited[u.visited.length - 1]).toBe('/settings/agents/ghost/general')
   })
 
@@ -212,7 +202,6 @@ describe('AgentConfigPage — section dispatch (§4.1)', () => {
     const u = setup('/settings/agents/coder/commands')
     await settle(200)
     expect(u.byTestId('command-row-review')).toBeTruthy()
-    // It did NOT fall back to general: the general-only field is absent.
     expect(u.byTestId('agent-id-field')).toBeNull()
   })
 

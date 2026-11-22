@@ -128,8 +128,6 @@ describe('MessageBubble — vertical rhythm of the row wrappers', () => {
     expect(row.classList.contains('py-1.5')).toBe(true)
     expect(row.classList.contains('py-3')).toBe(false)
     expectPadding(row, 'py-1.5')
-    // The old user row was `flex justify-end py-1`; only the padding may change,
-    // and the removed token must not survive as a leftover of the substitution.
     expect(row.classList.contains('flex')).toBe(true)
     expect(row.classList.contains('justify-end')).toBe(true)
     expect(row.classList.contains('py-1')).toBe(false)

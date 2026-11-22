@@ -19,7 +19,6 @@ describe('useSlashCommands', () => {
     expect(result.current.commands).toEqual([clear, compact])
     expect(result.current.error).toBeNull()
     expect(mockApi.chatCommands).toHaveBeenCalledTimes(1)
-    // No agent selected yet -> unscoped request (server keeps the legacy view).
     expect(mockApi.chatCommands).toHaveBeenCalledWith(undefined)
   })
 
@@ -48,7 +47,6 @@ describe('useSlashCommands', () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(mockApi.chatCommands).toHaveBeenCalledWith('coder')
 
-    // Switching agents must refetch: custom commands differ per workspace.
     rerender({ agentId: 'default' })
     await waitFor(() => expect(mockApi.chatCommands).toHaveBeenCalledTimes(2))
     expect(mockApi.chatCommands).toHaveBeenLastCalledWith('default')
@@ -101,8 +99,6 @@ describe('useSlashCommands', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false))
 
-    // The hook must not whitelist fields: `source` reaches the palette as-is
-    // (built-ins keep it undefined, custom ones carry their discovery level).
     expect(result.current.commands).toEqual([builtin, custom])
     expect(result.current.commands[0].source).toBeUndefined()
     expect(result.current.commands[1].source).toBe('workspace')

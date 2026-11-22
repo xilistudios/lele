@@ -76,7 +76,6 @@ describe('MessageBubble — LLM error box', () => {
     const box = getByRole('alert', { name: ERROR_TITLE })
     expect(box.textContent).toContain(DETAIL)
     expect(box.textContent).toContain(ERROR_TITLE)
-    // The box rides inside the normal message row so ordering/anchors hold.
     expect(box.closest('[data-testid="message"]')).not.toBeNull()
     expect(container.querySelector('[data-role="assistant"]')).not.toBeNull()
   })
@@ -88,7 +87,6 @@ describe('MessageBubble — LLM error box', () => {
         content: '❌ Error processing message: boom',
         error: DETAIL,
         excludeFromContext: true,
-        // Reasoning must be dropped too: the box replaces the bubble.
         reasoningContent: 'thinking about the request',
       }),
       ctx,
@@ -96,11 +94,8 @@ describe('MessageBubble — LLM error box', () => {
 
     const box = getByRole('alert', { name: ERROR_TITLE })
     expect(box.textContent).toContain(DETAIL)
-    // The legacy ❌ text is not rendered anywhere in the row.
     expect(container.textContent ?? '').not.toContain('❌ Error processing message')
-    // Neither is the reasoning/thinking card.
     expect(container.textContent ?? '').not.toContain('thinking about the request')
-    // Nor the "archived from context" marker (the row is an error, not context).
     expect(container.textContent ?? '').not.toContain('Archived from context')
   })
 
@@ -112,8 +107,6 @@ describe('MessageBubble — LLM error box', () => {
     )
 
     expect(getByRole('alert', { name: ERROR_TITLE }).textContent).toContain(DETAIL)
-    // A null render would leave the container empty: that was the disappearing
-    // error bug, now impossible.
     expect(container.querySelector('[data-testid="message"]')).not.toBeNull()
   })
 

@@ -18,9 +18,7 @@ describe('formatBytes', () => {
   })
 
   test('never loses the unit when crossing thresholds', () => {
-    // 1023.96 KB would print "1024.0 KB": rounding must promote the unit.
     expect(formatBytes(1023.96 * 1024)).toBe('1.0 MB')
-    // Just below that, the unit is kept as-is (no premature promotion).
     expect(formatBytes(1023.6 * 1024)).toBe('1023.6 KB')
   })
 

@@ -1,38 +1,15 @@
 import { type MouseEvent, type ReactNode, useId } from 'react'
 
-/**
- * ToggleCard (spec §7.3) — shared base of the Skills and Tools grids.
- *
- * A whole card is the click target: the root element is a `<label>` wrapping a
- * real `sr-only` checkbox, so it is keyboard focusable, announces its state
- * natively ("read_file, checkbox, checked"), toggles with Space, and needs no
- * custom ARIA. Focus is shown on the card via `:focus-within`.
- *
- * - off: `border-border bg-background-secondary hover:border-border-strong`
- * - on:  `border-focus/40 bg-accent-subtle` + filled check
- * - size `sm` (p-3, 16px check) = tools · `md` (p-3.5, 18px check) = skills
- */
-
 type Props = {
   id: string
   checked: boolean
   onChange: (checked: boolean) => void
   title: string
-  /** Monospace title (tool/skill identifiers). Default true. */
   titleMono?: boolean
   description?: string
-  /** 1 = tools (compact) · 2 = skills. */
   descriptionLines?: 1 | 2
-  /** Source / "not installed" / "disabled globally" badge slot. */
   badge?: ReactNode
-  /**
-   * Controls rendered in the title row (enable/disable, delete…). The card root
-   * is a <label>, so a click anywhere inside it activates the checkbox —
-   * `CardActions` below cancels that default, which is why actions MUST be
-   * passed through this prop instead of being painted over the card.
-   */
   actions?: ReactNode
-  /** Inline hint, wired to the input through aria-describedby. */
   warning?: string
   disabled?: boolean
   size?: 'sm' | 'md'
@@ -50,7 +27,6 @@ const SIZE_CLS: Record<'sm' | 'md', string> = {
   md: 'p-3.5',
 }
 
-/** Check box: 16px in `sm`, 18px in `md`. */
 const CHECK_SIZE_CLS: Record<'sm' | 'md', string> = {
   sm: 'h-4 w-4',
   md: 'h-[18px] w-[18px]',
@@ -60,24 +36,12 @@ const CHECK_BASE_CLS = 'flex flex-none items-center justify-center rounded-md bo
 const CHECK_ON_CLS = 'border-focus bg-focus text-text-on-accent'
 const CHECK_OFF_CLS = 'border-border-strong bg-background-primary'
 
-/**
- * Keeps a click on a card action from toggling the card's checkbox.
- *
- * The card is a <label> wrapping an sr-only input, and label activation is the
- * DEFAULT ACTION of the click event: React's stopPropagation cannot cancel it
- * (the native event has already reached the label by the time React dispatches
- * synthetic handlers). preventDefault() does — it is the documented way to stop
- * a label from forwarding the click to its control.
- */
 function CardActions({ children }: { children: ReactNode }) {
   const swallow = (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
   }
   return (
-    // The wrapper itself is not interactive: its children are real buttons that
-    // handle their own keyboard activation. These mouse handlers only cancel the
-    // label's default activation, so no key handler belongs here.
     // biome-ignore lint/a11y/useKeyWithClickEvents: non-interactive click canceller, see above
     <span className="flex flex-none items-center gap-1" onClick={swallow} onMouseDown={swallow}>
       {children}
@@ -99,8 +63,6 @@ export function ToggleCard({
   disabled = false,
   size = 'md',
 }: Props) {
-  // useId() contains ':' (valid in HTML ids, awkward in CSS selectors), so it is
-  // sanitized before being used as an attribute value.
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '')
   const inputId = `${id}-toggle-${uid}`
   const warningId = warning ? `${id}-warning-${uid}` : undefined
@@ -117,8 +79,6 @@ export function ToggleCard({
         checked={checked}
         disabled={disabled}
         aria-describedby={warningId}
-        // Guarded (jsdom toggles disabled inputs, real browsers do not): a
-        // disabled card must never report a change.
         onChange={(event) => {
           if (disabled) return
           onChange(event.target.checked)

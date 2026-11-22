@@ -23,21 +23,6 @@ import { Sidebar } from '../organisms/Sidebar'
 import { SkillsList } from '../organisms/SkillsList'
 import { SkillsScopeBar } from '../organisms/SkillsScopeBar'
 
-/**
- * `/skills` — one list, three filters (All · Global · By agent), and an install
- * action that writes wherever the current selection says (plan T5).
- *
- * The filter is NOT local state: it lives in the URL (`?view=` / `?agent=`), so
- * a pasted link restores it and a refresh does not throw the user back to All.
- * The agent config page deep-links here (`AgentSkillsSection`'s empty state) to
- * land on "this agent's view" in one click.
- *
- * Data has two sources that overlap (D7):
- *   - `useSkills`    → GET /api/v1/skills  (All + Global views)
- *   - `useAgentCatalog` → GET /api/v1/agents/{id}/catalog (By-agent view)
- * Every mutation refreshes the cache the acting hook did NOT already refresh,
- * so no view is ever left stale after an install/remove/toggle.
- */
 export function SkillsPage() {
   const { t } = useTranslation()
   const { api } = useAuthContext()
@@ -55,7 +40,6 @@ export function SkillsPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [agentScope, setAgentScope] = useState<SkillInstallScope>('workspace')
 
-  // D1 — the view and the selected agent are derived from the URL, never state.
   const view = parseSkillsView(searchParams.get(VIEW_PARAM))
   const requestedAgent = searchParams.get(AGENT_PARAM)
   const selectedAgentId = useMemo(
@@ -64,15 +48,10 @@ export function SkillsPage() {
   )
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null
 
-  const global = useSkills(api) // always mounted: All + Global read this list
+  const global = useSkills(api)
   const catalog = useAgentCatalog(api, view === 'agent' ? selectedAgentId : null)
-  // Unconditional (hooks rule — R8): issues no request until a mutator is
-  // called, and `invalidateAgentCatalog(qc, '')` matches nothing.
   const agentMut = useAgentSkills(api, { agentId: selectedAgentId ?? '' })
 
-  // D1/R9 — normalise the URL, but NEVER while the agent list is still empty:
-  // the boot fetch may not have landed yet, and stripping a valid `?agent=`
-  // before it arrives would be a visible bug.
   useEffect(() => {
     if (view !== 'agent' || agents.length === 0) return
     const next = new URLSearchParams(searchParams)
@@ -83,9 +62,6 @@ export function SkillsPage() {
     }
   }, [view, agents.length, selectedAgentId, searchParams, setSearchParams])
 
-  // D9/D6 — the install destination is per selection: reset the picker whenever
-  // the view or the agent changes, so a Global choice does not leak across
-  // agents (and vice versa).
   // biome-ignore lint/correctness/useExhaustiveDependencies: both values are the TRIGGER, not inputs — the reset must run on change even though the body reads neither
   useEffect(() => {
     setAgentScope('workspace')
@@ -115,7 +91,6 @@ export function SkillsPage() {
       ? (catalog.data?.skills ?? []).map(catalogEntryToSkillInfo)
       : filterSkillsForView(global.skills, view)
 
-  // Trust the server's `deletable` — never re-derive it from `source`.
   const deletable = useMemo(
     () =>
       new Set(
@@ -124,7 +99,6 @@ export function SkillsPage() {
     [catalog.data],
   )
 
-  /** Refresh the cache the acting hook did NOT already refresh (D7). */
   const refreshCatalog = useCallback(() => {
     if (selectedAgentId) invalidateAgentCatalog(queryClient, selectedAgentId)
   }, [queryClient, selectedAgentId])
@@ -141,9 +115,6 @@ export function SkillsPage() {
     setModalOpen(false)
   }, [])
 
-  // Mutation table (§4.5): agent mutations refresh the GLOBAL list, global
-  // mutations invalidate the catalog — never both from the same handler, so
-  // the common path stays at one extra request.
   const handleInstall = useCallback(
     async (url: string) => {
       if (view === 'agent') {
@@ -212,8 +183,6 @@ export function SkillsPage() {
     }
   }, [view, catalog, global.fetchSkills])
 
-  // D10 — the install destination is stated in the header, the modal and the
-  // tab hint. The By-agent view keeps the interactive picker instead.
   const targetSuffix =
     view === 'global'
       ? t('skills.scopeGlobal', 'Global (all agents)')
@@ -243,7 +212,6 @@ export function SkillsPage() {
         onClose={() => onCloseMobileSidebar()}
       />
       <main className="flex flex-1 flex-col overflow-hidden">
-        {/* Header */}
         <header className="flex items-center justify-between border-b border-border px-4 py-3 md:px-6 md:py-4 shrink-0 bg-background-secondary">
           <div className="flex items-center gap-3">
             <button
@@ -300,7 +268,6 @@ export function SkillsPage() {
           </Button>
         </header>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
           <SkillsScopeBar
             view={view}
@@ -341,8 +308,6 @@ export function SkillsPage() {
             {t('skills.installedCount', { count: visibleSkills.length })}
           </p>
 
-          {/* D6/M1: the Global view hides the enable/disable toggle (it is
-              per-agent state), so say why instead of dropping it silently. */}
           {view === 'global' && (
             <p data-testid="skills-global-toggle-hint" className="mt-1 text-xs text-text-tertiary">
               {t(
@@ -353,8 +318,6 @@ export function SkillsPage() {
           )}
 
           {view === 'agent' && agents.length === 0 ? (
-            /* No agent to manage: installing has no target, so the button above
-               is disabled and this explains why (D11). */
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <h3 className="text-sm font-medium text-text-primary">
                 {t('skills.noAgents', 'No agents configured')}

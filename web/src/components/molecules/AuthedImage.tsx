@@ -1,25 +1,15 @@
-// Authenticated image component for workspace attachment previews.
-//
-// The public /api/v1/files/view endpoint (restricted in PR 305) only serves
-// staging dirs; workspace-persisted attachments return 403. A plain <img src>
-// cannot carry an Authorization header, so this component fetches the blob
-// through the authenticated view-secure endpoint and converts it to an object URL.
-
 import { type RefObject, useEffect, useRef, useState } from 'react'
 import { useAuthContext } from '../../contexts/AuthContext'
 
 type AuthedImageProps = {
   path: string
   alt: string
-  /** Classes applied to the <img> and the loading placeholder. */
   className?: string
 }
 
 const MAX_CACHE_ENTRIES = 50
 
-/** Cache keyed by `${apiUrl}\u0000${path}` → object URL. */
 const urlCache = new Map<string, string>()
-/** In-flight requests for deduplication. */
 const inflight = new Map<string, Promise<string>>()
 
 function cacheKey(apiUrl: string, path: string): string {
@@ -40,9 +30,6 @@ function setCache(key: string, url: string) {
   urlCache.set(key, url)
 }
 
-/**
- * @internal — clears the module-level image cache. Intended for tests.
- */
 export function clearAuthedImageCache(): void {
   for (const url of urlCache.values()) {
     URL.revokeObjectURL(url)
@@ -53,7 +40,6 @@ export function clearAuthedImageCache(): void {
 
 function useIntersectOnce(ref: RefObject<HTMLElement | null>): boolean {
   const [intersected, setIntersected] = useState(() => {
-    // No IntersectionObserver → load immediately (jsdom, old browsers).
     if (typeof IntersectionObserver === 'undefined') return true
     return false
   })

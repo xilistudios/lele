@@ -1,16 +1,7 @@
-/**
- * Group chat (Mixture-of-Agents) event handlers.
- *
- * Handles the lifecycle of collaborative group sessions:
- * status changes, incoming turns, tool calls within turns,
- * and final synthesis on group completion.
- */
 import type { GroupInfo, GroupToolCall, GroupTurn } from '../../lib/types'
 import { getSessionKey, isSessionMismatch } from './helpers'
 import type { MessageEventContext } from './types'
 
-/** Terminal group statuses — a group in one of these states must never be
- *  downgraded by a later event. 'started' is the only non-terminal status. */
 function isTerminalGroupStatus(
   status: GroupInfo['status'] | undefined,
 ): status is 'done' | 'error' | 'stopped' {
@@ -63,7 +54,6 @@ export function handleGroupTurn(ctx: MessageEventContext, data: Record<string, u
 
   ctx.upsertGroup(groupId, (existing) => {
     const turns = existing?.turns ? [...existing.turns] : []
-    // Deduplicate by turn_index — replace if same index exists, preserving existing toolCalls
     const existingIdx = turns.findIndex((t) => t.turnIndex === incomingTurn.turnIndex)
     if (existingIdx >= 0) {
       turns[existingIdx] = {
@@ -103,7 +93,6 @@ export function handleGroupTool(ctx: MessageEventContext, data: Record<string, u
     const turns = existing?.turns ? [...existing.turns] : []
     let targetIdx = turns.findIndex((t) => t.turnIndex === turnIndex)
 
-    // If turn not found, push a placeholder
     if (targetIdx < 0) {
       turns.push({
         groupID: groupId,
@@ -126,7 +115,6 @@ export function handleGroupTool(ctx: MessageEventContext, data: Record<string, u
       tool_call_id: toolCallId,
       tool: toolName,
       status,
-      // Preserve prior arguments if incoming event has none
       arguments: args ?? (existingTcIdx >= 0 ? toolCalls[existingTcIdx].arguments : undefined),
       result,
     }
@@ -165,15 +153,6 @@ export function handleGroupComplete(ctx: MessageEventContext, data: Record<strin
   const content = data.content as string
 
   ctx.upsertGroup(groupId, (existing) => {
-    // Backend contract (pkg/group/manager.go finalize): every group emits
-    // exactly one terminal group.status (done|error|stopped) followed by one
-    // group.complete. WSGroupCompletePayload carries NO status field, so the
-    // status already stored on the card is the only source of truth for the
-    // real outcome — preserve it instead of hardcoding 'done', otherwise an
-    // errored/stopped group would flip to "Done" and hide the failure.
-    // Fall back to 'done' only when no terminal status is known (missing
-    // snapshot or out-of-order events), per "complete without prior error is
-    // a success".
     const status: GroupInfo['status'] = isTerminalGroupStatus(existing?.status)
       ? existing.status
       : 'done'

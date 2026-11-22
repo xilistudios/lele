@@ -9,14 +9,6 @@ import {
 } from '../lib/orderingMonitor'
 import type { ChatMessage } from '../lib/types'
 
-/**
- * The monitor is the instrument the ordering-bug investigation relies on, so a
- * silent false negative here is worse than a missing feature: it would make a
- * broken render look healthy again. These tests pin each invariant with a
- * hand-built violation AND pin that a legitimate, complex render sequence does
- * NOT trip them (false positives would drown the real signal).
- */
-
 const store = new Map<string, string>()
 
 beforeEach(() => {
@@ -113,7 +105,6 @@ describe('observeMergedOrder', () => {
 
   test('stranded-copy: a live copy renders beside its persisted twin', () => {
     const base = [user('u1', 'q1'), assistant('a1', 'the answer')]
-    // Same identity, different id: the live copy was never confirmed.
     const merged = [...base, assistant('temp-a', 'the answer')]
     observeMergedOrder(merged as ChatMessage[], base, [assistant('temp-a', 'the answer')])
     expect(kinds()).toEqual(['stranded-copy'])
@@ -127,9 +118,6 @@ describe('observeMergedOrder', () => {
   })
 
   test('stranded-copy is NOT tripped by the streaming tail being a prefix of an older copy', () => {
-    // Mid-stream the live answer is "answer 1" and an older answer is literally
-    // "answer 1" (this turn will end as "answer 16"): the live tail is not a
-    // stale leftover, so it must not be counted as one.
     const base = [user('u1', 'q1'), assistant('h-a1', 'answer 1')]
     const tail = { ...assistant('temp-a16', 'answer 1'), streaming: true }
     observeMergedOrder([...base, user('u2', 'q2'), tail], base, [tail])
@@ -139,7 +127,6 @@ describe('observeMergedOrder', () => {
   test('stable-order: a message moves above one that preceded it', () => {
     const first = [user('u1', 'q1'), assistant('a1', 'a1'), user('u2', 'q2')]
     observeMergedOrder(first, first, [])
-    // The second render puts q2 before the first turn's answer.
     const second = [user('u1', 'q1'), user('u2', 'q2'), assistant('a1', 'a1')]
     observeMergedOrder(second, first, [])
     expect(kinds()).toContain('stable-order')
@@ -151,16 +138,12 @@ describe('observeMergedOrder', () => {
   })
 
   test('stable-order is NOT tripped by confirmation, growth or window sliding', () => {
-    // Turn 1 streams: base empty, live copies only.
     const live1 = [user('u1', 'q1'), assistant('temp-a', 'a1')]
     observeMergedOrder(live1, [], live1)
 
-    // History catches up: the live copies were CONFIRMED and re-keyed, so the
-    // previous keys are gone — nothing may be compared (and nothing flagged).
     const base2 = [user('h-u1', 'q1'), assistant('h-a1', 'a1')]
     observeMergedOrder(base2, base2, [])
 
-    // Turn 2 streams on top, then history grows again.
     const live2 = [user('u2', 'q2'), assistant('temp-a2', 'a2')]
     observeMergedOrder([...base2, ...live2], base2, live2)
     const base3 = [...base2, user('h-u2', 'q2'), assistant('h-a2', 'a2')]
@@ -172,18 +155,13 @@ describe('observeMergedOrder', () => {
   test('stable-order is NOT tripped when the sliding window drops the oldest turn', () => {
     const base = [user('u1', 'q1'), assistant('a1', 'a1'), user('u2', 'q2')]
     observeMergedOrder(base, base, [])
-    // q1/a1 slid out of the 50-message window: the survivors keep their order.
     const slid = [user('u2', 'q2')]
     observeMergedOrder(slid, slid, [])
     expect(kinds()).toEqual([])
   })
 
   test('key-identity: a render key that moves to ANOTHER message is reported', () => {
-    // Turn 1 renders under its own keys …
     observeMergedOrder([user('k1', 'q1'), assistant('k2', 'answer one')], [], [])
-    // … and the next render hands the same keys to different messages, which is
-    // what the stableId registry did when its occurrence index slid out of sync
-    // with the history window (React then moves the wrong bubble).
     observeMergedOrder([user('k1', 'q2'), assistant('k2', 'answer two')], [], [])
     expect(kinds()).toEqual(['key-identity'])
     const detail = orderingReport().violations[0].detail
@@ -196,8 +174,6 @@ describe('observeMergedOrder', () => {
     observeMergedOrder([user('k1', 'q1')], [], [])
     const moved = [user('k1', 'q2')]
     observeMergedOrder(moved, [], [])
-    // The same render again must not re-report the transition it already
-    // reported (it would fill the 40-slot buffer and hide later violations).
     observeMergedOrder(moved, [], [])
     expect(kinds().filter((k) => k === 'key-identity')).toHaveLength(1)
   })
@@ -205,16 +181,12 @@ describe('observeMergedOrder', () => {
   test('key-identity keeps scanning after a mismatch', () => {
     observeMergedOrder([user('k1', 'q1'), user('k2', 'q2')], [], [])
     observeMergedOrder([user('k1', 'zz'), user('k2', 'yy')], [], [])
-    // The first mismatch is reported, but k2 was still adopted, so a later
-    // change of k2 alone is reported as well.
     observeMergedOrder([user('k1', 'zz'), user('k2', 'xx')], [], [])
     expect(kinds().filter((k) => k === 'key-identity')).toHaveLength(2)
     expect(orderingReport().violations.at(-1)?.detail).toContain('k2')
   })
 
   test('key-identity is NOT tripped when a tool card receives its result', () => {
-    // The card renders while the call executes (`""`) and then shows the output
-    // under the SAME key: content that lands late is not a moved key.
     const executing = tool('ws-call-1', 'call_1', { toolStatus: 'executing' })
     observeMergedOrder([executing], [], [executing])
     const done = { ...executing, toolResult: 'note content', toolStatus: 'completed' as const }
@@ -231,16 +203,12 @@ describe('observeMergedOrder', () => {
   })
 
   test('key-identity is NOT tripped by a message re-keyed onto its own id', () => {
-    // The live copy is confirmed into history and keeps its text under a NEW
-    // key (its content hash): a new key for a message is fine, a key for
-    // another message is not.
     observeMergedOrder([user('live-u1', 'q1'), assistant('live-a1', 'a1')], [], [])
     observeMergedOrder([user('hash-u1', 'q1'), assistant('hash-a1', 'a1')], [], [])
     expect(kinds()).toEqual([])
   })
 
   test('key-identity is NOT tripped by indistinguishable messages swapping keys', () => {
-    // Two copies of the same visible text: nothing a swap could move on screen.
     const base = [user('u1', 'yes'), assistant('a1', 'ok'), user('u2', 'yes')]
     observeMergedOrder(base, base, [])
     const swapped = [user('u2', 'yes'), assistant('a1', 'ok'), user('u1', 'yes')]

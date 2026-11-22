@@ -84,7 +84,6 @@ describe('parseApiError', () => {
     expect(error.validationErrors![0].path).toBe('agents.defaults.model')
     expect(error.validationErrors![0].message).toBe('Model is required')
     expect(error.validationErrors![1].path).toBe('gateway.port')
-    // Message should be the joined validation error messages
     expect(error.message).toBe('Model is required; Port must be > 0')
   })
 

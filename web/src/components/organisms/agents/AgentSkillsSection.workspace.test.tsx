@@ -10,24 +10,10 @@ import type { ApiClient } from '../../../services/http/client'
 import { type Write, makeState, tr } from '../../../test/agentsHarness'
 import { AgentSkillsSection } from './AgentSkillsSection'
 
-/**
- * Workspace administration of the per-agent Skills tab.
- *
- * The sibling file (AgentSkillsSection.test.tsx) covers the ALLOWLIST — what
- * the agent may use, written to the config draft and saved with the form. This
- * one covers the other half: what is INSTALLED and ENABLED in the agent's own
- * workspace, which goes straight to REST and must refresh the grid afterwards.
- *
- * `screen` is unusable in this environment (see agentsHarness header): all
- * queries come from the render result.
- */
-
-/** Workspace the fake catalog reports; the install dialog echoes it. */
 const AGENT_WORKSPACE = '/home/u/.lele/workspace-coder'
 
 const AGENT: EditableAgentConfig = { id: 'coder', name: 'Coder' }
 
-/** One skill per source, so the delete rules can be told apart by name. */
 const CATALOG: AgentCatalogResponse = {
   agent_id: 'coder',
   workspace: AGENT_WORKSPACE,
@@ -57,7 +43,6 @@ const CATALOG: AgentCatalogResponse = {
   ],
 }
 
-/** Recorded calls, so a test can assert WHICH agent and WHICH state was sent. */
 type Call =
   | { kind: 'toggle'; agentId: string; name: string; enabled: boolean }
   | { kind: 'remove'; agentId: string; name: string }
@@ -124,7 +109,6 @@ function setup(options: { failToggle?: boolean } = {}) {
   )
 
   const byTestId = (id: string) => utils.container.querySelector(`[data-testid="${id}"]`)
-  /** Click a test id, failing loudly (not silently on null) when missing. */
   const requireTestId = (id: string): HTMLElement => {
     const el = byTestId(id)
     if (!el) throw new Error(`expected element with data-testid="${id}"`)
@@ -135,7 +119,6 @@ function setup(options: { failToggle?: boolean } = {}) {
     Array.from(utils.container.querySelectorAll('button')).filter(
       (button) => button.textContent?.trim() === text,
     )
-  /** The card's own checkbox (the allowlist control), found the house way. */
   const inputFor = (name: string) => {
     const cards = Array.from(utils.container.querySelectorAll('label')) as HTMLLabelElement[]
     const card = cards.find((element) => element.textContent?.includes(name))
@@ -146,7 +129,6 @@ function setup(options: { failToggle?: boolean } = {}) {
   return { ...utils, writes, calls, callsOf, byTestId, requireTestId, buttonsWithText, inputFor }
 }
 
-/** Wait until the catalog resolves and the real grid is on screen. */
 async function ready(utils: ReturnType<typeof setup>) {
   await waitFor(() => {
     expect(utils.byTestId('skills-grid')).toBeTruthy()
@@ -154,7 +136,6 @@ async function ready(utils: ReturnType<typeof setup>) {
   return utils
 }
 
-/** Open the install dialog and switch it to the "Install from URL" tab. */
 async function openUrlTab(utils: ReturnType<typeof setup>) {
   fireEvent.click(utils.requireTestId('skills-add'))
   await waitFor(() => {
@@ -182,8 +163,6 @@ describe('AgentSkillsSection — workspace enable/disable', () => {
   })
 
   test('a GLOBAL skill can still be disabled for this agent alone', async () => {
-    // The per-agent workspace.json is exactly where "not for me" lives; only
-    // REMOVING is restricted to skills this agent owns.
     const utils = await ready(setup())
 
     fireEvent.click(utils.requireTestId('skill-toggle-weather'))
@@ -196,7 +175,6 @@ describe('AgentSkillsSection — workspace enable/disable', () => {
   })
 
   test('a disabled skill offers an enable action (not a dead icon)', async () => {
-    // `memory` is installed but disabled in the catalog.
     const utils = await ready(setup())
 
     fireEvent.click(utils.requireTestId('skill-toggle-memory'))
@@ -218,26 +196,16 @@ describe('AgentSkillsSection — workspace enable/disable', () => {
   })
 
   test('the card actions cancel the label default activation', async () => {
-    // The card root is a <label> bound to the checkbox, so ANY click inside it
-    // would toggle the allowlist unless the action wrapper cancels the label's
-    // default activation. jsdom never performs label activation itself, so
-    // asserting `input.checked` here would pass vacuously: what is checked is
-    // the mechanism — the click leaving the card already cancelled, which is
-    // what a real browser acts on. (React delegates its own handlers above the
-    // label, so the listener has to sit at the document level.)
     const utils = await ready(setup())
 
     for (const id of ['skill-toggle-chrome', 'skill-remove-chrome']) {
       const action = utils.requireTestId(id)
       expect(action.closest('label')).toBeTruthy()
-      // `MouseEvent` is not on globalThis here (setup.ts only installs
-      // window/document), so it comes through window.
       const event = new window.MouseEvent('click', { bubbles: true, cancelable: true })
       action.dispatchEvent(event)
       expect(event.defaultPrevented).toBe(true)
     }
 
-    // And the allowlist must stay untouched by those clicks.
     expect(utils.writes).toHaveLength(0)
   })
 
@@ -249,7 +217,6 @@ describe('AgentSkillsSection — workspace enable/disable', () => {
     await waitFor(() => {
       expect(utils.byTestId('skills-action-error')?.textContent).toContain('workspace is read only')
     })
-    // The grid is still there: the failure must not blank the panel.
     expect(utils.byTestId('skills-grid')).toBeTruthy()
   })
 })
@@ -348,15 +315,11 @@ describe('AgentSkillsSection — install into the agent', () => {
     await waitFor(() => {
       expect(utils.byTestId('install-scope')).toBeTruthy()
     })
-    // Browse is the default tab, and its list loads asynchronously: wait for
-    // the row's Install button before clicking it.
     let browseButton: HTMLButtonElement | undefined
     await waitFor(() => {
       browseButton = utils.buttonsWithText(tr('skills.install'))[0]
       expect(browseButton).toBeTruthy()
     })
-    // The per-skill Install button must also carry the chosen scope, otherwise
-    // half the dialog ignores the picker.
     fireEvent.click(browseButton as HTMLElement)
 
     await waitFor(() => {
@@ -367,8 +330,6 @@ describe('AgentSkillsSection — install into the agent', () => {
   })
 
   test('the Skills page dialog stays scope-less (no destination control)', async () => {
-    // Regression guard for the shared component: InstallSkillModal must not
-    // grow a scope picker for its original consumer.
     const { InstallSkillModal } = await import('../InstallSkillModal')
     const utils = render(
       <InstallSkillModal

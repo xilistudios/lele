@@ -56,7 +56,6 @@ export function BehaviorStep({
         </p>
       </div>
 
-      {/* Temperature with visual indicator */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <label htmlFor="wizard-temperature" className="text-sm font-medium text-text-primary">
@@ -65,7 +64,6 @@ export function BehaviorStep({
           <span className={`text-xs font-medium ${tempInfo.color}`}>{tempInfo.label}</span>
         </div>
 
-        {/* Temperature gradient bar */}
         <div className="relative">
           <div className="h-2 rounded-full bg-gradient-to-r from-state-info via-state-success via-state-warning to-brand-morado" />
           <div
@@ -85,7 +83,6 @@ export function BehaviorStep({
         <p className="text-xs text-text-tertiary">{tempInfo.desc}</p>
       </div>
 
-      {/* Thinking level (per-agent default reasoning effort) */}
       <div className="space-y-3">
         <label htmlFor="wizard-thinking-level" className="text-sm font-medium text-text-primary">
           {t('settings.fields.agentThinkingLevel')}
@@ -100,8 +97,6 @@ export function BehaviorStep({
           {t('settings.descriptions.agentThinkingLevel')}
         </p>
       </div>
-
-      {/* Other numeric settings in a grid */}
     </div>
   )
 }

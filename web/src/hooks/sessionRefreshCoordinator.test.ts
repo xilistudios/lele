@@ -1,16 +1,3 @@
-/**
- * Unit tests for `createSessionRefreshCoordinator` (no React, no timers).
- *
- * Covered invariants:
- *  - single flight: a burst of `run()` calls performs ONE execution;
- *  - trailing coalescing: N incoming calls schedule at most ONE trailing
- *    pass, and it uses the LAST task received;
- *  - cancellation: `cancel()` invalidates the in-flight pass (awaiters still
- *    receive the real resolution, never a rejection) and drops the pending
- *    coalescing;
- *  - failure: a rejected task rejects the shared promise, drops the
- *    coalescing and leaves the coordinator reusable (never stuck busy).
- */
 import { describe, expect, mock, test } from 'bun:test'
 import { createSessionRefreshCoordinator } from './sessionRefreshCoordinator'
 
@@ -30,7 +17,6 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject }
 }
 
-/** Pushes the coordinator's internal promise chain to its next step. */
 async function flush(times = 10): Promise<void> {
   for (let i = 0; i < times; i += 1) await Promise.resolve()
 }
@@ -41,17 +27,10 @@ describe('createSessionRefreshCoordinator', () => {
     const gate = deferred<number>()
     const task = mock(() => gate.promise)
 
-    // Same task function, no await between the calls: exactly the shape of a
-    // burst of refresh triggers coming from the same render/closure.
     const calls = Array.from({ length: 5 }, () => coordinator.run(task))
 
-    // Threshold: 1 execution is REQUIRED here because all 5 calls are
-    // synchronous, so the 5th arrives before the 1st can resolve and there is
-    // no window in which a trailing pass could be scheduled from a *different*
-    // task. (The coordinator's hard ceiling is 2: one leading + one trailing.)
     expect(task.mock.calls.length).toBe(1)
     expect(coordinator.isBusy()).toBe(true)
-    // Every joiner receives the very same promise object.
     for (const promise of calls) {
       expect(promise).toBe(calls[0])
     }
@@ -60,7 +39,6 @@ describe('createSessionRefreshCoordinator', () => {
     await expect(Promise.all(calls)).resolves.toEqual([42, 42, 42, 42, 42])
     await flush()
 
-    // No trailing pass: re-running the identical task is pure duplication.
     expect(task.mock.calls.length).toBe(1)
     expect(coordinator.isBusy()).toBe(false)
   })
@@ -74,8 +52,6 @@ describe('createSessionRefreshCoordinator', () => {
     const lastTask = mock(() => trailingGate.promise)
 
     const first = coordinator.run(firstTask)
-    // Three more calls while the pass is in flight: never one trailing pass
-    // per call, and the trailing one must use the most recent task.
     const second = coordinator.run(supersededTask)
     const third = coordinator.run(lastTask)
     const fourth = coordinator.run(lastTask)
@@ -92,9 +68,7 @@ describe('createSessionRefreshCoordinator', () => {
     await flush()
 
     expect(firstTask.mock.calls.length).toBe(1)
-    // Only the LATEST task is kept.
     expect(supersededTask.mock.calls.length).toBe(0)
-    // Exactly one trailing pass, not three.
     expect(lastTask.mock.calls.length).toBe(1)
     expect(coordinator.isBusy()).toBe(true)
 
@@ -115,17 +89,13 @@ describe('createSessionRefreshCoordinator', () => {
     expect(coordinator.isBusy()).toBe(true)
 
     coordinator.cancel()
-    // The pass is still physically in flight (its request is pending).
     expect(coordinator.isBusy()).toBe(true)
 
     gate.resolve(7)
-    // Awaiters receive the ACTUAL resolution — a cancel never rejects them.
     await expect(inFlight).resolves.toBe(7)
     await flush()
 
     expect(coordinator.isBusy()).toBe(false)
-    // The coalesced refresh was dropped: a reset/logout must not be followed
-    // by a stale trailing pass.
     expect(coalesced.mock.calls.length).toBe(0)
   })
 
@@ -150,8 +120,6 @@ describe('createSessionRefreshCoordinator', () => {
     await expect(first).resolves.toBe(1)
     await flush()
 
-    // The invalidated pass cannot be applied, so even an identical task must
-    // run again to produce a usable result.
     expect(invocations).toBe(2)
     expect(coordinator.isBusy()).toBe(true)
 
@@ -184,12 +152,10 @@ describe('createSessionRefreshCoordinator', () => {
     await expect(inFlight).rejects.toThrow('meta endpoint exploded')
     await flush()
 
-    // Never stuck "in flight" after a rejection.
     expect(coordinator.isBusy()).toBe(false)
     expect(invocations).toBe(1)
     expect(coalescedInvocations).toBe(0)
 
-    // A later call runs a brand new pass.
     let laterInvocations = 0
     const later = () => {
       laterInvocations += 1

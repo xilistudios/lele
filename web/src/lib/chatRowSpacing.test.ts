@@ -1,20 +1,6 @@
-/**
- * Unit tests for the chat row rhythm (lib/chatRowSpacing.ts).
- *
- * The contract under test is the padding MATRIX, not the implementation:
- *   - tool rows and user rows (bubbles and system notices alike) are compact;
- *   - an assistant row is content ONLY when it carries visible text — a row
- *     holding just a thinking card or the typing dots is activity, not prose,
- *     and must not steal the prose rhythm (that was the irregularity).
- *
- * `ChatMessage['content']` is a plain string (lib/types.ts), so the fixtures
- * below are valid `Pick<ChatMessage, 'role' | 'content'>` values and no message
- * builder is needed.
- */
 import { describe, expect, test } from 'bun:test'
 import { CHAT_ROW_PADDING, type ChatRowKind, chatRowKind, chatRowPadding } from './chatRowSpacing'
 
-/** Every case the row padding must cover, as data. */
 const matrix: ReadonlyArray<{
   name: string
   role: 'user' | 'assistant' | 'tool'
@@ -122,16 +108,12 @@ describe('CHAT_ROW_PADDING — the two rhythms stay distinct', () => {
     expect(CHAT_ROW_PADDING).toEqual({ compact: 'py-1.5', content: 'py-3' })
   })
 
-  /** Pixels out of a tailwind vertical-padding class ('py-1.5' → 1.5). Parsing
-   *  the tail with slice() would drop the integer part ('py-3.5'.slice(4) is
-   *  '.5'), so an inversion like content < compact could slip through. */
   const px = (cls: string) => Number.parseFloat(cls.replace('py-', ''))
 
   test('both are real vertical paddings (a typo like "p-1.5" would not set the rhythm)', () => {
     for (const padding of [CHAT_ROW_PADDING.compact, CHAT_ROW_PADDING.content]) {
       expect(padding.startsWith('py-')).toBe(true)
     }
-    // content > compact, otherwise prose rows would sit tighter than activity.
     expect(px(CHAT_ROW_PADDING.content)).toBeGreaterThan(px(CHAT_ROW_PADDING.compact))
   })
 })
@@ -141,8 +123,6 @@ describe('chatRowKind — agrees with the padding mapping', () => {
     for (const role of ['user', 'assistant', 'tool'] as const) {
       for (const content of ['', 'x', ' \n ']) {
         const message = { role, content }
-        // widened to string: CHAT_ROW_PADDING[] is the literal union, while
-        // chatRowPadding's declared return type is string.
         const fromKind: string = CHAT_ROW_PADDING[chatRowKind(message)]
         expect(fromKind).toBe(chatRowPadding(message))
       }

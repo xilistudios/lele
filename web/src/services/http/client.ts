@@ -88,52 +88,13 @@ import type {
 import { endpoints } from './endpoints'
 import { ApiError, parseApiError } from './errors'
 
-/**
- * Decide whether a failed /auth/refresh response proves the credential is
- * actually dead.
- *
- * Only an explicit rejection from the auth handler does: the server answers
- * 400 with code "refresh_error" when the refresh token is unknown, expired,
- * revoked or already rotated. Anything else is inconclusive and must leave the
- * session alone -- 429 means "ask again later", 5xx means the server had a bad
- * day, and a network error means we never got an answer at all.
- *
- * This distinction matters more than it looks: the session lives in
- * localStorage and is shared by every tab, so treating a transient failure as
- * fatal logs the user out of the entire browser on a single dropped request.
- */
 export function isFatalRefreshFailure(status: number, code?: string): boolean {
   if (status !== 400 && status !== 401) return false
   return code === 'refresh_error'
 }
 
-/**
- * How long to wait before giving the adoption of a rotated session a second
- * look.
- *
- * Refresh tokens are single-use, so when two tabs race the loser is answered
- * 400/refresh_error even though the credential is alive -- the winner holds
- * it. The winner's `saveSession` is not instantaneous, so a read landing in
- * between sees the stale token and finds nothing to adopt. Waiting a moment
- * lets that write land instead of declaring a live session dead.
- */
 const ADOPTION_RETRY_DELAY_MS = 400
 
-/**
- * The deadline to persist for a freshly refreshed session.
- *
- * `/auth/refresh` answers with the session's real `expires` (RFC3339); the
- * server pushes an existing client's deadline forward on every refresh, so
- * that field is the only source of truth for when the credential lapses.
- *
- * It used to be discarded in favour of a fabricated `now + 1h`, which barely
- * mattered while refreshes only ever happened after a 401. It matters now that
- * the UI renews BEFORE the deadline: a stored "one hour left" would look like a
- * session in permanent need of renewal and refresh on every check.
- *
- * A missing or unparsable value (a proxy, an older gateway) keeps the old
- * fallback so a degenerate answer changes no behaviour.
- */
 export function refreshExpires(expires: unknown): string {
   if (typeof expires === 'string' && Number.isFinite(Date.parse(expires))) {
     return expires
@@ -152,22 +113,11 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 type TokenState = {
   token: string | null
   refreshToken: string | null
-  // Which paired client this tab believes it is acting as. Used to tell a
-  // rotation of our own credential apart from an unrelated session that some
-  // other client wrote into the same localStorage slot.
   clientId: string
   onTokenRefresh?: (session: AuthSession) => void
-  // `mayClearStorage` tells the owner whether the session persisted in the
-  // browser is this client's own. It is false when the stored session belongs
-  // to another client: this tab must stop using it, but wiping the shared
-  // localStorage slot would delete a session it never owned.
   onAuthFailure?: (mayClearStorage: boolean) => void
 }
 
-/**
- * Credential available synchronously when the client is created, so the very
- * first request already carries an Authorization header.
- */
 export type ApiClientCredentials = {
   token: string
   refreshToken?: string
@@ -202,7 +152,6 @@ const parseSSEBlock = (block: string): ClientEvent | null => {
       data: JSON.parse(dataLines.join('\n')),
     } as ClientEvent
   } catch {
-    // Non-JSON data payload (e.g., plain text error from proxy)
     return {
       event: eventName,
       data: { raw: dataLines.join('\n') },
@@ -211,18 +160,6 @@ const parseSSEBlock = (block: string): ClientEvent | null => {
 }
 
 export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials) => {
-  // Seed the credential synchronously instead of waiting for the owner's
-  // mount effect: React flushes CHILD passive effects before PARENT ones, so
-  // any request issued from a descendant's effect would otherwise leave with
-  // no Authorization header and the gateway answers it 401 `auth_missing`
-  // without ever consulting the stored session -- which then spends a
-  // single-use `POST /auth/refresh` on every boot. The fields are assigned
-  // directly (not via `setToken`) so the seed never exercises `setToken`'s
-  // `refreshBlockedUntil = 0` reset: that reset belongs to genuine credential
-  // changes, and the initial cooldown is already 0. An empty refresh token
-  // means "nothing to refresh with" and becomes null, matching `runRefresh`'s
-  // `if (!attempted) return null` guard. The seed is deliberately not
-  // reported through `onTokenRefresh`: persistence remains the owner's job.
   const tokenState: TokenState = {
     token: initial?.token ?? null,
     refreshToken: initial?.refreshToken || null,
@@ -230,16 +167,6 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
     onTokenRefresh: undefined,
   }
 
-  // Single-flight: refresh tokens are single-use, so concurrent 401s (parallel
-  // requests, or several tabs) must share one attempt instead of racing to
-  // rotate the same credential -- that race makes every caller but the first
-  // look like it holds an invalid token.
-  //
-  // The cooldown is the other half of the same problem: after a refresh fails
-  // for a transient reason the access token is still the rejected one, so
-  // every following request would trigger yet another refresh and dig itself
-  // deeper into the rate limit. Blocking retries for a moment lets the window
-  // pass instead.
   let refreshInFlight: Promise<string | null> | null = null
   let refreshBlockedUntil = 0
   const REFRESH_COOLDOWN_MS = 15_000
@@ -254,9 +181,6 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
     tokenState.refreshToken = refreshToken
     tokenState.onTokenRefresh = onRefresh
     tokenState.clientId = clientId ?? ''
-    // A fresh credential must not inherit a backoff earned by the previous
-    // one: the cooldown protects against hammering with a token that was
-    // already rejected, and this token has never been offered.
     refreshBlockedUntil = 0
   }
 
@@ -275,18 +199,10 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
     refreshBlockedUntil = Date.now() + Math.max(0, Math.min(ms, 60_000))
   }
 
-  // A 429 may carry Retry-After; honour it when it is a sane number of seconds.
-  // Absent or malformed means "no hint", so the caller falls back to the
-  // default cooldown -- a missing header must not collapse the backoff to zero.
   const retryAfterMs = (response: Response): number | null => {
     const raw = response.headers.get('retry-after')
     if (raw === null || raw.trim() === '') return null
     const seconds = Number(raw)
-    // Non-positive is treated as "no usable hint", not as "retry immediately".
-    // Honouring a 0 would switch the cooldown off entirely and put the client
-    // straight back into the request that was just rejected, which is the
-    // self-amplification this cooldown exists to prevent. Our own server
-    // floors the header at 1s, so a 0 here comes from a proxy or a bug.
     if (!Number.isFinite(seconds) || seconds <= 0) return null
     return seconds * 1000
   }
@@ -294,14 +210,7 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
   const adoptRotatedSession = (staleRefreshToken: string): string | null => {
     const stored = loadSession()
     if (!stored?.token || !stored.refresh_token) return null
-    // Unchanged means nobody rotated it; our token really is the rejected one.
     if (stored.refresh_token === staleRefreshToken) return null
-    // A rotation keeps the client, so a different client_id means this is not
-    // our credential that got refreshed -- it is some other client's session
-    // occupying the shared slot. Adopting that would silently re-point this
-    // tab at a device it never signed into, and if that device's token is
-    // valid the adoption sticks: no logout, no further attempt, and requests
-    // quietly attributed elsewhere. Signing out is the honest answer there.
     if (tokenState.clientId && stored.client_id && tokenState.clientId !== stored.client_id) {
       return null
     }
@@ -323,8 +232,6 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
         body: JSON.stringify({ refresh_token: attempted }),
       })
     } catch {
-      // A dropped request says nothing about the credential. Keep the session
-      // and back off before trying again.
       blockRefreshFor(REFRESH_COOLDOWN_MS)
       return null
     }
@@ -352,30 +259,17 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
     const failure = await parseApiError(response)
 
     if (!isFatalRefreshFailure(failure.status, failure.code)) {
-      // Rate limited or server-side trouble: the refresh token is untouched
-      // (the limiter answers before the handler ever rotates it), so the
-      // session stays signed in and simply tries again once the window passes.
       blockRefreshFor(retryAfterMs(response) ?? REFRESH_COOLDOWN_MS)
       return null
     }
 
-    // The server rejected this exact token. Before tearing the session down,
-    // check whether another tab already rotated it and adopt its result.
     const adopted = adoptRotatedSession(attempted)
     if (adopted) return adopted
 
-    // Nothing to adopt *yet* is not the same as "this credential is dead":
-    // the tab that won the rotation may still be mid-write. Give adoption one
-    // more chance after a short delay before concluding anything.
     await sleep(ADOPTION_RETRY_DELAY_MS)
     const adoptedLate = adoptRotatedSession(attempted)
     if (adoptedLate) return adoptedLate
 
-    // No adoption: this tab's credential is not usable. Disconnecting the tab
-    // is always right; clearing the shared storage is only right when what is
-    // stored is ours (or there is nothing stored). Otherwise the session in
-    // localStorage belongs to a different client, and wiping it here would
-    // delete a device session this tab never held.
     const stored = loadSession()
     const storedIsOurs =
       !stored ||
@@ -390,11 +284,6 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
   }
 
   const refreshToken = (): Promise<string | null> => {
-    // Check for a rotated session before the cooldown, not after. Adoption is a
-    // local read with no request behind it, so sitting out a backoff we never
-    // needed would keep this tab failing for up to 15 s while a perfectly good
-    // token is already in localStorage -- and the multi-tab race is exactly the
-    // case the rescue exists for.
     const current = tokenState.refreshToken
     if (current) {
       const adopted = adoptRotatedSession(current)
@@ -417,19 +306,10 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
   ): Promise<T> => {
     let lastError: Error | null = null
     let retryCount = 0
-    // Set once a refresh has been attempted for this call. Whether it produced
-    // a token or failed, replaying the request with whatever we hold now is
-    // pointless: a rejected access token stays rejected.
     let refreshTried = false
-    // Set once a 401 has been answered by replaying with the credential that
-    // replaced the one the rejected attempt sent. Bounded to a single use so a
-    // credential that keeps changing cannot spin the loop.
     let supersededReplayUsed = false
 
     while (retryCount <= maxRetries) {
-      // The credential THIS attempt is about to send. Captured per iteration,
-      // before the headers are built below, so it reflects any rotation that
-      // landed while the previous attempt was in flight.
       const attemptToken = tokenState.token
       try {
         const headers: Record<string, string> = {
@@ -466,22 +346,6 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
           clearTimeout(timeoutId)
         }
 
-        // The converse of the `refreshTried` note above: "a rejected access
-        // token stays rejected" is about the token we hold NOW. A rejected
-        // SUPERSEDED token says nothing about it. A rotation can land while a
-        // request is in flight -- the proactive renewal on mount or on the 24 h
-        // interval, another tab's rotation adopted here, or the refresh this
-        // very wave triggered -- and the server kills the previous access
-        // token the instant it rotates, with no grace for requests already
-        // carrying it (refresh tokens got a replay window in #354; access
-        // tokens did not). So the 401 that just came back may well be about a
-        // credential that was already dead by design before we sent it: the
-        // only honest reading is "replay with what we hold now", which is
-        // cheap and correct, while rotating again would spend a second
-        // single-use `POST /auth/refresh` on a credential that was never
-        // dead. This branch deliberately sets neither `refreshTried` nor
-        // `retryCount`: if the replay is rejected too, the refresh below must
-        // still be reachable so a genuinely dead credential is not masked.
         if (
           response.status === 401 &&
           !supersededReplayUsed &&
@@ -634,8 +498,6 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
         if (!ackResolved) {
           rejectAck(error as Error)
         } else {
-          // Stream failed after ack — notify the UI so it can show an error indicator
-          // on the incomplete message instead of silently hanging.
           onEvent({
             event: 'stream.error',
             data: { error: (error as Error).message || 'Stream connection lost' },
@@ -654,16 +516,11 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
     setToken,
     clearToken,
     getToken,
-    // Renew the credential on demand, for callers that know the deadline is
-    // near (see `shouldProactivelyRefresh`). This is the very same refresh the
-    // 401 path uses, so single-flight, cooldown and adoption apply unchanged:
-    // null means "not renewed this time", never "session destroyed".
     refreshNow: (): Promise<string | null> => refreshToken(),
     setAuthFailureHandler: (handler: ((mayClearStorage: boolean) => void) | undefined) => {
       tokenState.onAuthFailure = handler
     },
     logout: async () => {
-      // Revoke token server-side (fire-and-forget, don't block on errors)
       if (tokenState.token) {
         try {
           await fetch(joinUrl(baseUrl, endpoints.auth.logout), {
@@ -673,9 +530,7 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
               Authorization: `Bearer ${tokenState.token}`,
             },
           })
-        } catch {
-          // Ignore network errors — we'll clear local state regardless
-        }
+        } catch {}
       }
       clearToken()
     },
@@ -718,18 +573,8 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
     },
     agentFiles: (agentId: string) =>
       request<AgentFilesResponse>(endpoints.agents.files(agentId), { method: 'GET' }),
-    /**
-     * Per-agent catalog of what the agent can actually use right now
-     * (live tool registry + resolved skills). 404 -> ApiError code 'agent_not_found'.
-     */
     getAgentCatalog: (agentId: string): Promise<AgentCatalogResponse> =>
       request<AgentCatalogResponse>(endpoints.agents.catalog(agentId), { method: 'GET' }),
-    /**
-     * Per-agent skill administration. These routes act on the AGENT's own
-     * workspace (its <workspace>/skills dir and its workspace.json), unlike the
-     * global /api/v1/skills routes which are anchored on the default workspace.
-     * Reading is done through getAgentCatalog, which resolves the same loader.
-     */
     agentToggleSkill: (agentId: string, name: string, enabled: boolean) =>
       request<AgentSkillMutationResponse>(endpoints.agents.skills.toggle(agentId, name), {
         method: 'PUT',
@@ -739,10 +584,6 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
       request<AgentSkillMutationResponse>(endpoints.agents.skills.remove(agentId, name), {
         method: 'DELETE',
       }),
-    /**
-     * Install one skill into the agent. `scope` defaults server-side to
-     * 'workspace' (the agent's own dir); pass 'global' for the shared dir.
-     */
     agentInstallSkill: (agentId: string, url: string, scope?: SkillInstallScope) =>
       request<SkillInstallResponse>(endpoints.agents.skills.install(agentId), {
         method: 'POST',
@@ -765,12 +606,6 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
         method: 'PUT',
         body: JSON.stringify({ content }),
       }),
-    /**
-     * Per-agent slash commands (brief §6). `content` is the FULL markdown file
-     * (frontmatter + body): the frontmatter is serialised by the frontend and
-     * validated by the Go parser server-side, so this layer only moves text.
-     * Errors arrive as the repo-standard {error, code} via parseApiError.
-     */
     agentCommands: (agentId: string) =>
       request<AgentCommandsResponse>(endpoints.agents.commands.list(agentId), { method: 'GET' }),
     agentCommand: (agentId: string, name: string) =>
@@ -789,15 +624,6 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
       request<AgentCommandDeleteResponse>(endpoints.agents.commands.remove(agentId, name), {
         method: 'DELETE',
       }),
-    /**
-     * MCP (mcp.json) management (T5 UI): merged inventory, per-layer raw file,
-     * surgical toggle, raw save and validation. Agent-scoped via the
-     * `agent_id` query param (see endpoints.agents.mcp). Same wire contract as
-     * the skill/command routes above: built on request(), so the 401 →
-     * single-flight refresh → replay machinery applies, and failures arrive as
-     * the repo-standard {error, code} parsed into ApiError (mcpErrorCode reads
-     * the code off it).
-     */
     mcpInventory: (agentId: string) =>
       request<MCPInventoryResponse>(endpoints.agents.mcp.inventory(agentId), { method: 'GET' }),
     mcpRaw: (agentId: string, layer: MCPLayerName) =>
@@ -823,15 +649,7 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
         method: 'POST',
         body: JSON.stringify(body),
       }),
-    /**
-     * MCP OAuth of one server — a 1:1 mirror of pkg/channels/rest_mcp.go.
-     * Same seam as the routes above; the shapes carry no secret VALUE: only a
-     * flow id, the authorization URL the user has to open, and booleans/fixed
-     * states. `start` and `complete` are registered with `applyBodyLimit`
-     * server-side (start for symmetry — it has no body).
-     */
     mcpAuthStart: (agentId: string, name: string) =>
-      // POST with NO body: the flow's client registration is server-side.
       request<MCPAuthStart>(endpoints.agents.mcp.auth.start(agentId, name), { method: 'POST' }),
     mcpAuthStatus: (agentId: string, flowId: string) =>
       request<MCPAuthStatus>(endpoints.agents.mcp.auth.status(agentId, flowId), { method: 'GET' }),
@@ -840,7 +658,6 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
         method: 'POST',
         body: JSON.stringify(body),
       }),
-    // Both DELETEs answer 204; `request` resolves those as undefined.
     mcpAuthCancel: (agentId: string, flowId: string) =>
       request<void>(endpoints.agents.mcp.auth.cancel(agentId, flowId), { method: 'DELETE' }),
     mcpLogout: (agentId: string, name: string) =>
@@ -1028,12 +845,6 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
     skills: () => request<SkillsResponse>(endpoints.skills.list, { method: 'GET' }),
     availableSkills: () =>
       request<AvailableSkillsResponse>(endpoints.skills.available, { method: 'GET' }),
-    /**
-     * Install one skill into the default workspace. `scope` is optional and
-     * defaults server-side to that workspace; pass 'global' to write to the
-     * shared ~/.lele/skills directory instead. `undefined` is dropped by
-     * `JSON.stringify`, so the no-scope body stays byte-identical to before.
-     */
     installSkill: (url: string, scope?: SkillInstallScope) =>
       request<SkillInstallResponse>(endpoints.skills.install, {
         method: 'POST',
@@ -1046,7 +857,6 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
         method: 'POST',
         body: JSON.stringify({ repo }),
       }),
-    /** Batch form of `installSkill`; same default destination and `scope` values. */
     installSkillsBatch: (repo: string, skills: string[], scope?: SkillInstallScope) =>
       request<SkillInstallBatchResponse>(endpoints.skills.installBatch, {
         method: 'POST',
@@ -1152,17 +962,6 @@ export const createApiClient = (baseUrl: string, initial?: ApiClientCredentials)
       },
       dates: () => request<LogsDatesResponse>(endpoints.logs.dates, { method: 'GET' }),
     },
-    /**
-     * Fetch a file blob through the authenticated view-secure endpoint.
-     *
-     * WHY: the public /api/v1/files/view endpoint (restricted in PR 305) only
-     * serves files inside the staging dirs leleDir/tmp/attachments and
-     * leleDir/tmp/uploads. Agent-persisted attachments live in workspace paths
-     * (workspace attachments dirs) which return 403 on that public endpoint.
-     * A plain img-src or anchor href cannot carry an Authorization header,
-     * so the UI must fetch the blob authenticated and convert it to an
-     * object URL for display or download.
-     */
     fileBlob: async (path: string, signal?: AbortSignal): Promise<Blob> => {
       const url = `${joinUrl(baseUrl, endpoints.files.viewSecure)}?path=${encodeURIComponent(path)}`
 

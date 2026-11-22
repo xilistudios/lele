@@ -1,14 +1,3 @@
-/**
- * Tests for the key-prefix preselection helper (spec §2.4, plan T1).
- *
- * Mutation pin: the "spec prefixes" test below hardcodes the prefix→type
- * pairs instead of reading them from KEY_PREFIXES. Deleting (or renaming
- * the prefix of) a row from the table turns that test red — the
- * table-driven test above it cannot catch a deletion on its own because it
- * iterates whatever rows remain and would pass vacuously. Verified by hand
- * (2026-10-22): removing the `sk-ant-` row fails `maps every unambiguous
- * spec prefix to its provider type`.
- */
 import { describe, expect, test } from 'bun:test'
 import { KEY_PREFIXES, detectProviderFromKey } from './keyPrefix'
 
@@ -31,24 +20,20 @@ describe('detectProviderFromKey', () => {
   })
 
   test('ambiguous or empty keys detect nothing', () => {
-    // A bare `sk-` must return null BY CONSTRUCTION: no row may have it.
     expect(KEY_PREFIXES.some((row) => row.prefix === 'sk-')).toBe(false)
     expect(detectProviderFromKey('sk-abcdef')).toBeNull()
     expect(detectProviderFromKey('sk_live_x')).toBeNull()
     expect(detectProviderFromKey('sk-')).toBeNull()
     expect(detectProviderFromKey('')).toBeNull()
     expect(detectProviderFromKey('   ')).toBeNull()
-    // An env *name* is not a key; a pasted `export …` line is not supported.
     expect(detectProviderFromKey('ANTHROPIC_API_KEY')).toBeNull()
     expect(detectProviderFromKey('export ANTHROPIC_API_KEY=sk-ant-xyz')).toBeNull()
   })
 
   test('first match wins: overlapping rows keep their intended types', () => {
-    expect(detectProviderFromKey('sk-ant-1')).toBe('anthropic') // not openai
-    expect(detectProviderFromKey('sk-proj-1')).toBe('openai') // not openrouter
+    expect(detectProviderFromKey('sk-ant-1')).toBe('anthropic')
+    expect(detectProviderFromKey('sk-proj-1')).toBe('openai')
     expect(detectProviderFromKey('sk-svcacct-1')).toBe('openai')
-    // The `sk-or-v1-` row shadows `sk-or-`; both answer openrouter anyway —
-    // the test pins the outcome, not the row used.
     expect(detectProviderFromKey('sk-or-v1-abc')).toBe('openrouter')
     expect(detectProviderFromKey('sk-or-abc')).toBe('openrouter')
   })

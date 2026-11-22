@@ -71,7 +71,7 @@ export const loadSidebarOpen = (): boolean => {
   }
   const raw = localStorage.getItem(SIDEBAR_OPEN_KEY)
   if (raw === null) {
-    return true // default: open
+    return true
   }
   return raw === 'true'
 }
@@ -86,7 +86,7 @@ export const loadSystemNavOpen = (): boolean => {
   }
   const raw = localStorage.getItem(SYSTEM_NAV_OPEN_KEY)
   if (raw === null) {
-    return true // default: open
+    return true
   }
   return raw === 'true'
 }

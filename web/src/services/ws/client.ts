@@ -59,7 +59,6 @@ export class LeleSocket {
     return this.reconnectAttempts
   }
 
-  /** Timestamp (ms) of the last pong received from the server. 0 = never. */
   get lastPong(): number {
     return this.lastPongReceived
   }
@@ -118,8 +117,6 @@ export class LeleSocket {
       this.visibilityHandler = () => {
         if (document.visibilityState === 'visible') {
           const rs = this.socket?.readyState
-          // Only force a fresh connection if we have no socket or it's dead
-          // (CLOSED/CLOSING). A CONNECTING socket is already being handled.
           if (!this.socket || rs === WebSocket.CLOSED || rs === WebSocket.CLOSING) {
             this.reconnectAttempts = 0
             this.open()
@@ -141,9 +138,7 @@ export class LeleSocket {
     this.socket = null
     try {
       prev?.close()
-    } catch {
-      // ignore
-    }
+    } catch {}
     this.pendingSessionKey = null
     this.confirmedSessionKey = null
     this.setState('disconnected')
@@ -242,22 +237,17 @@ export class LeleSocket {
   private open() {
     if (!this.shouldReconnect) return
 
-    // Cancel any pending reconnect so we never end up with two sockets racing
-    // (two live sockets = every event delivered twice → duplicated streaming text).
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
 
-    // Close the previous socket (if any) so its handlers can't keep emitting.
     if (this.socket) {
       const prev = this.socket
       this.socket = null
       try {
         prev.close()
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
 
     this.setState('connecting')
@@ -274,7 +264,7 @@ export class LeleSocket {
     this.socket = socket
 
     socket.addEventListener('open', () => {
-      if (this.socket !== socket) return // stale socket
+      if (this.socket !== socket) return
       this.reconnectDelay = this.reconnectStrategy.initialDelay
       this.reconnectAttempts = 0
       this.setState('connected')
@@ -298,7 +288,7 @@ export class LeleSocket {
     })
 
     socket.addEventListener('message', (event) => {
-      if (this.socket !== socket) return // stale socket: don't deliver events twice
+      if (this.socket !== socket) return
       try {
         const parsed = parseEvent(event.data as string)
         this.handleEvent(parsed)
@@ -312,12 +302,12 @@ export class LeleSocket {
     })
 
     socket.addEventListener('error', (event) => {
-      if (this.socket !== socket) return // stale socket
+      if (this.socket !== socket) return
       this.emit('error', event)
     })
 
     socket.addEventListener('close', () => {
-      if (this.socket !== socket) return // stale socket already replaced
+      if (this.socket !== socket) return
       this.clearPingPong()
       this.emit('close')
       if (!this.shouldReconnect) {

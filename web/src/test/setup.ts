@@ -4,12 +4,6 @@ import React from 'react'
 
 import '@testing-library/jest-dom'
 
-// react-virtuoso relies on container measurements (getBoundingClientRect /
-// ResizeObserver) that are always 0 in jsdom, so the real component renders
-// no items and integration tests cannot find message text. Replace it with a
-// simple non-virtualized list that renders every item through the same
-// props (data, itemContent, computeItemKey, components.Header/Footer) so
-// behavior is preserved without depending on layout measurements.
 mock.module('react-virtuoso', () => {
   const Virtuoso = React.forwardRef<unknown, Record<string, unknown>>(
     function Virtuoso(props, ref) {
@@ -88,10 +82,8 @@ if (!dom.window.matchMedia) {
   dom.window.matchMedia = globalThis.matchMedia
 }
 
-// Mock scrollIntoView for jsdom
 dom.window.Element.prototype.scrollIntoView = () => undefined
 
-// Mock scrollTo for jsdom
 dom.window.Element.prototype.scrollTo = () => undefined
 dom.window.scrollTo = () => undefined
 

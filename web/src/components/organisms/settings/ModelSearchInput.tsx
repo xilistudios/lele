@@ -200,14 +200,10 @@ export function ModelSearchInput({
   } = useQuery({
     queryKey: ['settingsModelSuggestions', providerName, providerType ?? ''],
     queryFn: async (): Promise<ModelSuggestion[]> => {
-      // Prefer the live endpoint: backend merges catalog metadata and falls
-      // back to catalog models when the provider has no usable key.
       try {
         const live = await api.providerModels(providerName)
         if (live.models?.length) return live.models
-      } catch {
-        // fall through to catalog
-      }
+      } catch {}
       const catalog = await api.catalogModels(catalogProvider)
       return catalog.models ?? []
     },

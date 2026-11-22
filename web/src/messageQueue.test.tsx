@@ -1,13 +1,3 @@
-/**
- * Client-side message queue tests.
- *
- * Two levels:
- *  1. Unit tests of useMessageQueue (FIFO order, per-session isolation, cap,
- *     dequeue/remove/clear).
- *  2. End-to-end tests through the real App using the same MockWebSocket harness
- *     as App.test.tsx: a message submitted while the agent is busy must show up
- *     in the queued strip and must NOT reach the WebSocket until the turn ends.
- */
 import './test/setup'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -23,13 +13,9 @@ import './test/i18n'
 const SESSION = 'native:client-1:1'
 const SESSION_B = 'native:client-1:2'
 
-// ── WebSocket harness (mirrors App.test.tsx) ────────────────────────────────
-
 class MockWebSocket {
   static instances: MockWebSocket[] = []
 
-  // LeleSocket gates real sends on `readyState !== WebSocket.OPEN`, so the
-  // readyState constants must exist on the mock (App.test.tsx never sends).
   static CONNECTING = 0
   static OPEN = 1
   static CLOSING = 2
@@ -88,9 +74,6 @@ const jsonResponse = (body: FetchResponseBody) =>
     headers: { 'Content-Type': 'application/json' },
   })
 
-// Unhandled URLs answer 404 instead of throwing: a thrown non-ApiError is
-// retried by requestWithRetry ~1s later, by which time fetch is restored and the
-// retry leaks into the next test file (same reasoning as App.test.tsx).
 const notFoundResponse = (url: string) =>
   new Response(JSON.stringify({ error: `Unexpected fetch: ${url}` }), {
     status: 404,
@@ -181,7 +164,6 @@ const createFetchMock = mock((input: RequestInfo | URL) => {
     return Promise.resolve(jsonResponse({ agent_id: 'main', model: 'gpt-4', models: ['gpt-4'] }))
   }
   if (url.includes('/api/v1/chat/sessions/')) {
-    // Covers history, session agent, thinking level and folder lookups.
     return Promise.resolve(
       jsonResponse({
         session_key: SESSION,
@@ -215,7 +197,6 @@ const renderWithProviders = (ui: ReactElement, initialEntries = [`/chat/${SESSIO
     </ThemeProvider>,
   )
 
-/** Contents of the WebSocket payloads that really sent a user message. */
 function sentUserMessages(ws: MockWebSocket): string[] {
   return ws.sent
     .map((raw) => JSON.parse(raw) as { event?: string; data?: { content?: string } })
@@ -241,12 +222,6 @@ function queuedRows(view: ReturnType<typeof renderWithProviders>): string[] {
   )
 }
 
-// ── Unit: useMessageQueue ───────────────────────────────────────────────────
-//
-// Mutations run inside act(): the hook exposes both the state array (which
-// React only refreshes on a render) and ref-backed readers (peek/dequeue/count)
-// that are always current.
-
 describe('useMessageQueue', () => {
   test('mantiene orden FIFO por sesion', () => {
     const { result } = renderHook(() => useMessageQueue())
@@ -259,7 +234,6 @@ describe('useMessageQueue', () => {
     expect(result.current.queueCount(SESSION)).toBe(2)
     expect(result.current.queuedMessages.map((m) => m.content)).toEqual(['uno', 'dos'])
 
-    // peek does not consume.
     expect(result.current.peekNext(SESSION)?.content).toBe('uno')
     expect(result.current.queueCount(SESSION)).toBe(2)
 
@@ -284,7 +258,6 @@ describe('useMessageQueue', () => {
 
     expect(result.current.queueCount(SESSION)).toBe(2)
     expect(result.current.queueCount(SESSION_B)).toBe(1)
-    // Dequeueing one session never touches the other.
     act(() => {
       expect(result.current.dequeueNext(SESSION)?.content).toBe('a1')
     })
@@ -318,7 +291,6 @@ describe('useMessageQueue', () => {
     expect(result.current.queuedMessages.map((m) => m.content)).toEqual(['uno', 'tres'])
     expect(result.current.peekNext(SESSION)?.content).toBe('uno')
 
-    // Unknown id is a no-op.
     act(() => {
       expect(result.current.takeQueuedMessage('missing')).toBeUndefined()
     })
@@ -333,7 +305,6 @@ describe('useMessageQueue', () => {
         expect(result.current.enqueueMessage(SESSION, `m${i}`)).toBe(true)
       })
     }
-    // Another session still has room: the cap is per session.
     expect(result.current.enqueueMessage(SESSION_B, 'other')).toBe(true)
     expect(result.current.enqueueMessage(SESSION, 'overflow')).toBe(false)
     expect(result.current.queueCount(SESSION)).toBe(QUEUE_CAP)
@@ -353,7 +324,6 @@ describe('useMessageQueue', () => {
 
     expect(result.current.enqueueMessage('', 'hola')).toBe(false)
     expect(result.current.enqueueMessage(SESSION, '   ')).toBe(false)
-    // Attachments alone are a valid submission.
     expect(result.current.enqueueMessage(SESSION, '', ['/tmp/a.png'])).toBe(true)
     expect(result.current.queueCount(SESSION)).toBe(1)
     expect(result.current.peekNext(null)).toBeUndefined()
@@ -377,14 +347,10 @@ describe('useMessageQueue', () => {
       result.current.dequeueNext(SESSION)
     })
 
-    // The previously rendered array must keep both entries: React relies on
-    // immutable updates to diff correctly.
     expect(snapshot.map((m) => m.content)).toEqual(['a', 'b'])
     expect(result.current.queuedMessages.map((m) => m.content)).toEqual(['b'])
   })
 })
-
-// ── Integration: composer + auto-flush through the real App ─────────────────
 
 describe('cola de mensajes del composer', () => {
   beforeEach(() => {
@@ -415,24 +381,20 @@ describe('cola de mensajes del composer', () => {
   test('encola mientras el agente trabaja y lo reenvia al cerrar el turno', async () => {
     const { view, ws } = await openChat()
 
-    // Turn 1 goes out immediately and the agent acknowledges it.
     submitMessage(view, 'first message')
     await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message']))
     await act(async () => {
       ws.emitJSON({ event: 'message.ack', data: { session_key: SESSION, message_id: 'm1' } })
     })
 
-    // Turn 2 typed while busy: shown in the strip, never sent.
     submitMessage(view, 'second message')
     await waitFor(() => expect(queuedRows(view).length).toBe(1))
     expect(queuedRows(view)[0]).toContain('second message')
     expect(sentUserMessages(ws)).toEqual(['first message'])
 
-    // The strip reports the queue size.
     const strip = view.container.querySelector('[data-testid="queued-messages"]')
     expect(strip?.textContent).toContain('En cola · 1')
 
-    // Turn ends → the queued message is replayed through the normal send path.
     await act(async () => {
       ws.emitJSON({
         event: 'message.complete',
@@ -464,7 +426,6 @@ describe('cola de mensajes del composer', () => {
       })
     })
 
-    // Only the head of the queue is replayed; the tail waits for the next turn.
     await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message', 'second message']))
     await waitFor(() => {
       const rows = queuedRows(view)
@@ -475,7 +436,6 @@ describe('cola de mensajes del composer', () => {
     await act(async () => {
       ws.emitJSON({ event: 'message.ack', data: { session_key: SESSION, message_id: 'm2' } })
     })
-    // The replayed message raised the busy state again (send button → cancel).
     await waitFor(() =>
       expect(view.container.querySelector('button[aria-label="Cancelar"]')).not.toBeNull(),
     )
@@ -516,7 +476,6 @@ describe('cola de mensajes del composer', () => {
     submitMessage(view, 'drop me')
     await waitFor(() => expect(queuedRows(view).length).toBe(2))
 
-    // Remove the "drop me" row through its X button.
     const dropRow = Array.from(
       view.container.querySelectorAll('[data-testid="queued-message"]'),
     ).find((row) => (row.textContent ?? '').includes('drop me'))
@@ -535,7 +494,6 @@ describe('cola de mensajes del composer', () => {
       expect(rows[0]).toContain('keep me')
     })
 
-    // The removed entry never reaches the socket; the surviving one is flushed.
     await act(async () => {
       ws.emitJSON({
         event: 'message.complete',
@@ -544,7 +502,6 @@ describe('cola de mensajes del composer', () => {
     })
     await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message', 'keep me']))
 
-    // Clear-all: queue two more, then drop them without sending.
     await act(async () => {
       ws.emitJSON({ event: 'message.ack', data: { session_key: SESSION, message_id: 'm2' } })
     })
@@ -565,7 +522,6 @@ describe('cola de mensajes del composer', () => {
         data: { session_key: SESSION, message_id: 'm2', content: 'reply two' },
       })
     })
-    // Nothing new was flushed after clearing.
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(sentUserMessages(ws)).toEqual(['first message', 'keep me'])
   })
@@ -579,7 +535,6 @@ describe('cola de mensajes del composer', () => {
       ws.emitJSON({ event: 'message.ack', data: { session_key: SESSION, message_id: 'm1' } })
     })
 
-    // The only queued entry of the busy turn.
     submitMessage(view, 'drop before turn end')
     await waitFor(() => expect(queuedRows(view).length).toBe(1))
 
@@ -591,11 +546,9 @@ describe('cola de mensajes del composer', () => {
       fireEvent.click(removeButton as HTMLElement)
     })
 
-    // The strip is gone: the session's backlog is empty.
     await waitFor(() => expect(queuedRows(view).length).toBe(0))
     expect(view.container.querySelector('[data-testid="queued-messages"]')).toBeNull()
 
-    // Turn ends → the falling edge fires, but there is nothing to replay.
     await act(async () => {
       ws.emitJSON({
         event: 'message.complete',
@@ -623,8 +576,6 @@ describe('cola de mensajes del composer', () => {
     submitMessage(view, 'second message')
     await waitFor(() => expect(queuedRows(view).length).toBe(1))
 
-    // Switch to the other session while the first is still busy: the backlog
-    // belongs to session 1 and must not be sent into session 2.
     await act(async () => {
       fireEvent.click(view.getByText('Session 2'))
     })
@@ -633,14 +584,12 @@ describe('cola de mensajes del composer', () => {
     })
     expect(sentUserMessages(ws)).toEqual(['first message'])
 
-    // Back to session 1: the strip reappears (its queue was never lost).
     await act(async () => {
       fireEvent.click(view.getByText('Session 1'))
     })
     await waitFor(() => expect(queuedRows(view).length).toBe(1))
     expect(queuedRows(view)[0]).toContain('second message')
 
-    // Ending session 1's turn flushes it with session 1's key.
     await act(async () => {
       ws.emitJSON({
         event: 'message.complete',
@@ -669,13 +618,11 @@ describe('cola de mensajes del composer', () => {
       ws.emitJSON({ event: 'message.ack', data: { session_key: SESSION, message_id: 'm1' } })
     })
 
-    // Fill the session queue to the cap.
     for (let i = 0; i < QUEUE_CAP; i += 1) {
       submitMessage(view, `queued ${i}`)
     }
     await waitFor(() => expect(queuedRows(view).length).toBe(QUEUE_CAP))
 
-    // The next one is refused: the draft survives and the hint appears.
     submitMessage(view, 'overflow message')
     await waitFor(() => {
       expect(view.getByRole('alert')).not.toBeNull()
@@ -695,8 +642,6 @@ describe('cola de mensajes del composer', () => {
       ws.emitJSON({ event: 'message.ack', data: { session_key: SESSION, message_id: 'm1' } })
     })
 
-    // Accepting a slash command from the palette inserts text; Enter while busy
-    // must queue it verbatim (the backend interprets it on delivery).
     submitMessage(view, '/compact')
     await waitFor(() => {
       const rows = queuedRows(view)
@@ -723,23 +668,16 @@ describe('cola de mensajes del composer', () => {
       ws.emitJSON({ event: 'message.ack', data: { session_key: SESSION, message_id: 'm1' } })
     })
 
-    // Two messages queued while busy.
     submitMessage(view, 'keep me')
     submitMessage(view, 'send me now')
     await waitFor(() => expect(queuedRows(view).length).toBe(2))
 
-    // End the turn but prevent auto-flush from racing: we hit send-now while
-    // still busy would cancel; here we end the turn WITHOUT completing so the
-    // session is idle... Actually after complete, auto-flush would fire.
-    // So exercise the idle path by cancelling first (processing clears), then
-    // clicking send now on the remaining row.
     await act(async () => {
       ws.emitJSON({
         event: 'message.complete',
         data: { session_key: SESSION, message_id: 'm1', content: 'reply one' },
       })
     })
-    // Auto-flush already sent "keep me"; one remains.
     await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message', 'keep me']))
     await waitFor(() => expect(queuedRows(view).length).toBe(1))
     expect(queuedRows(view)[0]).toContain('send me now')
@@ -769,7 +707,6 @@ describe('cola de mensajes del composer', () => {
     submitMessage(view, 'jump the queue')
     await waitFor(() => expect(queuedRows(view).length).toBe(2))
 
-    // Click send-now on the SECOND entry (not the FIFO head).
     const rows = Array.from(view.container.querySelectorAll('[data-testid="queued-message"]'))
     const jumpRow = rows.find((row) => (row.textContent ?? '').includes('jump the queue'))
     expect(jumpRow).toBeDefined()
@@ -779,31 +716,25 @@ describe('cola de mensajes del composer', () => {
       fireEvent.click(sendNow as HTMLElement)
     })
 
-    // The chosen entry left the strip; the other stays queued.
     await waitFor(() => {
       const remaining = queuedRows(view)
       expect(remaining.length).toBe(1)
       expect(remaining[0]).toContain('leave me')
     })
 
-    // Cancel was requested for the busy turn.
     const cancelSent = ws.sent
       .map((raw) => JSON.parse(raw) as { event?: string })
       .some((payload) => payload.event === 'cancel')
     expect(cancelSent).toBe(true)
 
-    // cancel.ack clears processing → the parked message is sent, not the head.
     await act(async () => {
       ws.emitJSON({ event: 'cancel.ack', data: { session_key: SESSION, status: 'ok' } })
     })
     await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message', 'jump the queue']))
-    // The FIFO head is still waiting for the next idle edge.
     await waitFor(() => expect(queuedRows(view).length).toBe(1))
     expect(queuedRows(view)[0]).toContain('leave me')
   })
 
-  // Regression: a parked force-send must never be delivered into the session
-  // the user switched to while the cancel was settling.
   test('no entrega un force-send aparcado a otra sesion al cambiar de chat', async () => {
     const { view, ws } = await openChat()
 
@@ -821,26 +752,20 @@ describe('cola de mensajes del composer', () => {
     await act(async () => {
       fireEvent.click(sendNow as HTMLElement)
     })
-    // Parked and cancel requested; the entry left the strip.
     await waitFor(() => expect(queuedRows(view).length).toBe(0))
 
-    // Switch to session 2 before cancel settles — session 2 is idle, so the
-    // auto-flush effect fires on switchedToThisSession. The park must stay
-    // bound to session 1.
     await act(async () => {
       fireEvent.click(view.getByText('Session 2'))
     })
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(sentUserMessages(ws)).toEqual(['first message'])
 
-    // Cancel settles while session 2 is on screen: still nothing for session 2.
     await act(async () => {
       ws.emitJSON({ event: 'cancel.ack', data: { session_key: SESSION, status: 'ok' } })
     })
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(sentUserMessages(ws)).toEqual(['first message'])
 
-    // Back to session 1: the parked message is delivered here, with this key.
     await act(async () => {
       fireEvent.click(view.getByText('Session 1'))
     })
@@ -857,8 +782,6 @@ describe('cola de mensajes del composer', () => {
     expect(flushed?.data?.session_key).toBe(SESSION)
   })
 
-  // Regression: a second send-now click while a park is already waiting must
-  // re-queue the taken message instead of clobbering the park (message loss).
   test('no descarta un segundo enviar-ahora mientras hay un turno cancelandose', async () => {
     const { view, ws } = await openChat()
 
@@ -872,7 +795,6 @@ describe('cola de mensajes del composer', () => {
     submitMessage(view, 'beta')
     await waitFor(() => expect(queuedRows(view).length).toBe(2))
 
-    // Click send-now on both rows before cancel.ack arrives.
     let sendNowButtons = Array.from(
       view.container.querySelectorAll('[data-testid="queued-send-now"]'),
     )
@@ -880,7 +802,6 @@ describe('cola de mensajes del composer', () => {
     await act(async () => {
       fireEvent.click(sendNowButtons[0] as HTMLElement)
     })
-    // Still busy: second click on the remaining row.
     await waitFor(() => {
       const remaining = Array.from(
         view.container.querySelectorAll('[data-testid="queued-message"]'),
@@ -893,14 +814,12 @@ describe('cola de mensajes del composer', () => {
       fireEvent.click(sendNowButtons[0] as HTMLElement)
     })
 
-    // The second message went back into the queue (tail) instead of vanishing.
     await waitFor(() => {
       const rows = queuedRows(view)
       expect(rows.length).toBe(1)
       expect(rows[0]).toContain('beta')
     })
 
-    // Cancel settles: the first park is sent; "beta" stays queued for later.
     await act(async () => {
       ws.emitJSON({ event: 'cancel.ack', data: { session_key: SESSION, status: 'ok' } })
     })

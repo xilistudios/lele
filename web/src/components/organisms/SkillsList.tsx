@@ -34,7 +34,7 @@ export function SkillsList({
   const cardKey = (skill: SkillInfo) => `${skill.source ?? 'unknown'}:${skill.name}`
 
   const handleRemoveClick = (skill: SkillInfo) => {
-    if (skill.source === 'builtin') return // Built-in skills cannot be removed
+    if (skill.source === 'builtin') return
     setConfirmRemove(cardKey(skill))
   }
 
@@ -111,7 +111,6 @@ export function SkillsList({
             </div>
 
             <div className="flex-shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {/* Enable/disable toggle */}
               {onToggle && allowToggle(skill) && (
                 <button
                   type="button"
@@ -129,7 +128,6 @@ export function SkillsList({
                 </button>
               )}
 
-              {/* Remove button */}
               {allowRemove(skill) &&
                 (confirmRemove === cardKey(skill) ? (
                   <div className="flex items-center gap-1">

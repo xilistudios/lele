@@ -10,45 +10,6 @@ import { AuthContext, type AuthContextValue } from '../../contexts/AuthContext'
 import type { StreamMetrics } from '../../hooks/useStreamMetrics'
 import i18n from '../../test/i18n'
 
-/**
- * Mobile layout contract of the chat composer (see ChatComposer.tsx).
- *
- * A single nowrap row cannot hold three `SearchableSelect`s plus the folder,
- * attach and send buttons: measured on device the triggers collapsed to
- * 53/43/30 px (390/360/320), unusable for every one of them. The row is
- * therefore a two-tier layout below `md`:
- *
- *   tier 1  folder `+` · attach · model (flex-1)      [send, outside the group]
- *   tier 2  thinking · agent                          (own `basis-full` line)
- *   tier 2b folder chip, when one is set              (own `basis-full` line)
- *
- * The send button sits OUTSIDE the wrapping group, so the tiers can never push
- * it onto a line of its own. The folder CHIP sits on tier 2, not on tier 1: on
- * tier 1 the model trigger was the only shrinkable item next to it (every other
- * control there is a fixed 44 px touch target), and with a folder set the
- * trigger collapsed to a blank pill — measured 26 px wide with a 0 px value span
- * at 360, 56 px with a 20 px span at 390. The chip does not share tier 2 with the
- * selectors either: at 320 it left them 50 px and 64 px wide, i.e. `Def…` and
- * `Main A…`, so it now takes a `basis-full` line of its own (the tier wraps) and
- * the two selectors keep the widths they have with no folder set. The folder
- * BUTTON (`+`) stays on tier 1 because that is the control a finger reaches for;
- * the chip is the passive display of a folder that is already set.
- *
- * ≥ `md` BOTH the tier-2 wrapper and the wrapping group are `md:contents`, i.e.
- * they produce no box: every control and the send button become direct flex
- * items of the row, which is the pre-fix desktop geometry — the one where
- * StreamMetricsChip's `ml-auto` shares the row's free space with send's. `md:`,
- * not `sm:`, for both, because every tiering utility is `max-md:`: a `sm`
- * boundary would dissolve the tiers at 640 px while the `max-md:` utilities keep
- * applying, which left 640–767 px as a five-selector scramble on one line.
- *
- * jsdom has no layout engine, so these tests assert the class contract: they
- * fail if a `max-md:` prefix is dropped, if the selects stop shrinking or start
- * sharing a single mobile line, if the send button moves back inside the
- * wrapping group, if an `overflow-x` scroller is introduced (it would clip the
- * dropdowns), or if a desktop class is changed.
- */
-
 type MockCtx = Record<string, unknown>
 let mockAppCtxReturn: MockCtx = {}
 let mockAuthCtxReturn: MockCtx = {}
@@ -197,11 +158,9 @@ const toolbarRowOf = (container: HTMLElement) =>
 const folderChipsOf = (container: HTMLElement) =>
   Array.from(container.querySelectorAll('[data-testid="folder-chip"]')) as HTMLElement[]
 
-/** Chip that lives in the hidden-on-mobile toolbar row (the `md:`+ one). */
 const toolbarChipOf = (container: HTMLElement) =>
   folderChipsOf(container).find((chip) => toolbarRowOf(container)?.contains(chip)) ?? null
 
-/** The `basis-full` box that gives the mobile chip a line of its own. */
 const tierChipBoxOf = (container: HTMLElement) =>
   (Array.from(container.querySelectorAll('div')).find(
     (el) => hasClass(el, 'max-md:basis-full') && hasClass(el, 'md:hidden'),

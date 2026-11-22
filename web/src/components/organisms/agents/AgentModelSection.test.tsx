@@ -11,12 +11,6 @@ import {
 } from '../../../test/agentsHarness'
 import { AgentModelSection } from './AgentModelSection'
 
-/**
- * `tab=model` (spec §4.4). The contract under test is what each control
- * writes: model must keep the sibling field it does not touch, thinking `''`
- * must become `undefined`, and the temperature reset must mean "inherit".
- */
-
 const INDEX = 2
 
 function setup(agent: EditableAgentConfig, defaultsModel = 'gemini-2.5-pro') {
@@ -40,7 +34,7 @@ describe('AgentModelSection', () => {
     const utils = setup({ id: 'coder', model: { primary: 'claude-sonnet-4', fallbacks: ['x'] } })
     await settle()
     fireEvent.click(utils.getByLabelText(tr('settings.fields.agentModelPrimary')))
-    await settle(250) // the popup opens on an animation frame
+    await settle(250)
     fireEvent.click(utils.getByRole('button', { name: 'llama-3.1' }))
     expect(utils.lastWrite(`agents.list.${INDEX}.model`)?.[1]).toEqual({
       primary: 'llama-3.1',
@@ -53,7 +47,6 @@ describe('AgentModelSection', () => {
     withModels(['gpt-4o', 'llama-3.1'])
     const utils = setup({ id: 'coder', model: { primary: 'claude-sonnet-4' } })
     await settle()
-    // Fallbacks use StringListEditor, whose trigger is labelled by its path id.
     fireEvent.click(utils.getByLabelText(`agents.list.${INDEX}.model.fallbacks`))
     await settle(250)
     fireEvent.click(utils.getByRole('button', { name: 'gpt-4o' }))
@@ -80,7 +73,7 @@ describe('AgentModelSection', () => {
 
   test('choosing a thinking level writes it', () => {
     const utils = setup({ id: 'coder' })
-    fireEvent.click(utils.getAllByRole('radio')[4]) // high
+    fireEvent.click(utils.getAllByRole('radio')[4])
     expect(utils.lastWrite(`agents.list.${INDEX}.thinking_level`)?.[1]).toBe('high')
   })
 

@@ -124,7 +124,6 @@ export type AgentDetails = Agent & {
   active_sessions?: number
 }
 
-// AgentFiles represents the context files for an agent's workspace.
 export type AgentFileInfo = {
   name: string
   size: number
@@ -136,22 +135,10 @@ export type AgentFilesResponse = {
   content?: string
 }
 
-/**
- * Slash commands of ONE agent (per-agent Commands tab, brief §6).
- *
- * Sources follow the harness discovery levels (`pkg/harness`): `config`
- * (inline in config.json), `global` (<leleDir>/commands), `workspace`
- * (<agent workspace>/commands) and `directory` (./.lele/commands). Precedence
- * is config → global → workspace → directory, and the flattened `commands`
- * list carries the winner of each name plus the losers tagged with
- * `shadowed_by`.
- */
 export type AgentCommandSource = 'config' | 'global' | 'workspace' | 'directory'
 
-/** Scope an explicit command write may target. */
 export type AgentCommandScope = 'workspace' | 'global'
 
-/** One row of GET /api/v1/agents/{agentID}/commands → `commands`. */
 export type AgentCommandInfo = {
   name: string
   description: string
@@ -160,15 +147,11 @@ export type AgentCommandInfo = {
   agent: string
   model: string
   allow_shell: boolean
-  /** Tri-state: null/absent = inherit the agent (harness) default. */
   allow_absolute_files: boolean | null
-  /** Server-decided: true only for a workspace/global file this agent owns. */
   deletable: boolean
-  /** Source of the command that wins precedence over this one; "" = winner. */
   shadowed_by: string
 }
 
-/** One built-in gateway command (GET .../commands → `builtin`). */
 export type BuiltinCommandInfo = {
   name: string
   description: string
@@ -176,54 +159,45 @@ export type BuiltinCommandInfo = {
   source?: string
 }
 
-/** Agent-level harness permission defaults echoed by the API. */
 export type AgentCommandsHarnessConfig = {
   allow_shell: boolean
   allow_absolute_files: boolean
 }
 
-/** Payload of GET /api/v1/agents/{agentID}/commands. */
 export type AgentCommandsResponse = {
   agent_id: string
   workspace: string
   commands_dir: string
   commands_dir_exists: boolean
-  /** Agents sharing this workspace; > 1 → writes affect all of them. */
   shared_by: number
   harness: AgentCommandsHarnessConfig
   commands: AgentCommandInfo[]
   builtin: BuiltinCommandInfo[]
 }
 
-/** Payload of GET /api/v1/agents/{agentID}/commands/{name} (editor load). */
 export type AgentCommandDetail = {
   name: string
-  /** Full markdown file: frontmatter + body, exactly as stored on disk. */
   content: string
   path: string
   source: AgentCommandSource
   deletable: boolean
 }
 
-/** Body of POST /api/v1/agents/{agentID}/commands (201 → {ok, command}). */
 export type AgentCommandWriteRequest = {
   name: string
   content: string
   scope: AgentCommandScope
 }
 
-/** Body of PUT /api/v1/agents/{agentID}/commands/{name} (→ {ok, command}). */
 export type AgentCommandUpdateRequest = {
   content: string
 }
 
-/** Response of the per-agent command mutations (create / update). */
 export type AgentCommandMutationResponse = {
   ok: boolean
   command?: AgentCommandInfo
 }
 
-/** Response of DELETE /api/v1/agents/{agentID}/commands/{name}. */
 export type AgentCommandDeleteResponse = {
   ok: boolean
 }
@@ -248,7 +222,6 @@ export type EditableAgentDefaults = {
   image_model_fallbacks?: string[]
   max_tokens: number
   temperature?: number
-  /** "off" | "low" | "medium" | "high"; absent = inherit from model configuration. */
   thinking_level?: string
   max_tool_iterations: number
   max_read_lines: number
@@ -263,11 +236,8 @@ export type AgentModelConfig = {
 export type SubagentsConfig = {
   allow_agents?: string[]
   model?: AgentModelConfig
-  /** Minutes a subagent turn may run. 0 = no timeout (explicit, not "unset"). */
   timeout_minutes?: number
-  /** Concurrent subagent tasks. 0 = unlimited. */
   max_concurrent?: number
-  /** Tool iterations per subagent task. 0 = unlimited. */
   max_iterations?: number
 }
 
@@ -279,11 +249,9 @@ export type EditableAgentConfig = {
   workspace?: string
   model?: AgentModelConfig
   skills?: string[]
-  /** Per-agent tool allowlist; absent/empty = agent default registry. */
   tools?: string[]
   subagents?: SubagentsConfig
   temperature?: number
-  /** "off" | "low" | "medium" | "high"; absent = inherit from model configuration. */
   thinking_level?: string
   reasoning?: ReasoningConfig
   max_iterations?: number
@@ -422,13 +390,6 @@ export type EditableNativeConfig = {
   rate_limit: EditableNativeRateLimitConfig
 }
 
-/**
- * Web UI serving toggle (`channels.web`).
- *
- * The gateway only serves the SPA when this is true (desktop mode always
- * does). The save path prunes defaults, so an ABSENT block means enabled:
- * keep the field optional and resolve it with `?? true` when reading.
- */
 export type EditableWebConfig = {
   enabled: boolean
 }
@@ -445,28 +406,17 @@ export type EditableChannelsConfig = {
   line: EditableLINEConfig
   onebot: EditableOneBotConfig
   native: EditableNativeConfig
-  /** Absent = enabled (defaults are pruned on save). */
   web?: EditableWebConfig
 }
 
-// Per-model reasoning overrides. Kept in sync with config.ReasoningConfig in
-// Go (pkg/config/config.go) — every field is optional and omitted when unset,
-// so "absent" means "let the provider/model decide". Validation lives
-// server-side (ReasoningConfig.Validate) on PUT /api/v1/config.
 export type ReasoningConfig = {
   effort?: 'low' | 'medium' | 'high'
-  // Reasoning token cap (OpenRouter).
   max_tokens?: number
-  // Hide reasoning tokens from the response (OpenRouter).
   exclude?: boolean
-  // Reasoning summary verbosity (OpenAI o-series).
   summary?: 'auto' | 'detailed' | 'concise'
   enable?: boolean
 }
 
-// ThinkingType names the wire-level "think system" a model's endpoint uses to
-// turn reasoning on/off. Kept in sync with config.ThinkingType* in Go.
-// Omitted/undefined means "auto" (legacy heuristics).
 export type ThinkingType = 'auto' | 'deepseek' | 'openai' | 'openrouter' | 'qwen' | 'none'
 
 export type ProviderModelConfig = {
@@ -684,11 +634,6 @@ export type CatalogProvider = {
   type?: string
   api_base?: string
   model_count?: number
-  /**
-   * The provider has no derivable endpoint (the user supplies it, or the
-   * transport is not HTTP). `api_base` is then legitimately empty and the
-   * wizard must not treat it as a missing pre-fill.
-   */
   base_less?: boolean
 }
 
@@ -745,22 +690,10 @@ export type FsListResponse = {
   truncated: boolean
 }
 
-/**
- * A slash command the backend dispatches and the WebUI palette advertises.
- * Mirrors Go commands.CommandInfo (pkg/agent/commands). `name` already carries
- * the leading "/" (e.g. "/clear"); description/usage arrive in English from the
- * server and are intentionally not translated.
- */
 export type SlashCommandInfo = {
   name: string
   description: string
   usage: string
-  /**
-   * Where the command was defined. Absent (undefined) for built-ins; set for
-   * user-defined harness commands (pkg/harness.Source). Drives the palette
-   * badge and the "[args]" usage hint — never a filter, so unknown future
-   * sources still render.
-   */
   source?: string
 }
 
@@ -805,8 +738,6 @@ export type SessionSubagentsResponse = {
   subagents: SubagentTaskInfo[]
 }
 
-// ── Group chat (MoA) types ──────────────────────────────────────────────────
-
 export type GroupStatusEvent = {
   session_key?: string
   group_id: string
@@ -834,7 +765,6 @@ export type GroupCompleteEvent = {
   content: string
 }
 
-/** A tool call within a group turn. */
 export type GroupToolCall = {
   tool_call_id: string
   tool: string
@@ -843,7 +773,6 @@ export type GroupToolCall = {
   result?: string
 }
 
-/** A single turn in the group transcript (internal state). */
 export type GroupTurn = {
   groupID: string
   speaker: string
@@ -855,7 +784,6 @@ export type GroupTurn = {
   toolCalls?: GroupToolCall[]
 }
 
-/** Full state of a group conversation (internal state). */
 export type GroupInfo = {
   groupID: string
   status: 'started' | 'done' | 'stopped' | 'error'
@@ -868,7 +796,6 @@ export type GroupInfo = {
   synthesis?: string
 }
 
-/** WS event payload for group.tool. */
 export type GroupToolEvent = {
   session_key?: string
   group_id: string
@@ -883,7 +810,6 @@ export type GroupToolEvent = {
   result?: string
 }
 
-/** A single turn from the rehydration snapshot. */
 export type GroupSnapshotTurn = {
   turn_index: number
   speaker: string
@@ -894,7 +820,6 @@ export type GroupSnapshotTurn = {
   tool_calls?: GroupToolCall[]
 }
 
-/** Rehydration snapshot for a group, included in welcome/reconnected/history. */
 export type GroupSnapshot = {
   group_id: string
   status: 'started' | 'done' | 'stopped' | 'error'
@@ -949,25 +874,6 @@ export type ChatMessage = {
   optimistic?: boolean
   failed?: boolean
   optimisticBaseCount?: number
-  /**
-   * Id of the LAST confirmed (non-optimistic) base user message present in the
-   * HTTP history cache at send time.
-   *
-   * Why this exists: `optimisticBaseCount` compares user counts, which is only
-   * valid while the cached history grows monotonically. It does not: the
-   * backend serves history as a sliding window of the last `limit` messages
-   * (pkg/channels/rest_chat.go) and useChatHistory replaces the cache with that
-   * window, so once a conversation exceeds the window the cached user count
-   * SATURATES and `baseUserCount > optimisticBaseCount` is false forever. The
-   * optimistic bubble then became immortal and mergeMessages stranded it at the
-   * END of the list, after newer answers — the "messages lose their order until
-   * I refresh the page" bug.
-   *
-   * Base message ids are content-derived and position-independent, so "a
-   * confirmed copy of my text exists AFTER the anchor" is a monotonic,
-   * window-size-independent novelty signal. `undefined` means the cache was
-   * empty at send time; callers must then fall back to the count rule.
-   */
   optimisticAnchorId?: string
   attachments?: Attachment[]
   sessionKey?: string
@@ -977,43 +883,9 @@ export type ChatMessage = {
   toolStatus?: ToolMessageStatus
   toolCallId?: string
   subagentSessionKey?: string
-  /**
-   * Present when this message is a synthetic system notice persisted by the
-   * backend with role 'user' — always shaped `[System: <sender>] <body>` (the
-   * catch-all of processSystemMessage, pkg/agent/message_processor.go:709;
-   * sender is 'subagent' or 'cron'). The chat renders it as a tool-style card
-   * instead of a user bubble.
-   *
-   * `role` deliberately stays 'user' and `content` is deliberately left
-   * byte-identical: the backend counts this message as a user turn, and the
-   * merge/ordering math (hooks/messageMerge.ts, findStreamingTwin +
-   * collectConfirmCandidates) depends on that count and on content prefixes.
-   */
   systemNotice?: { sender: string; body: string }
-  /**
-   * Failure text of a turn that could not complete. Rendered as a red error box
-   * (components/organisms/MessageBubble.tsx) instead of the normal bubble.
-   *
-   * Two sources feed it, and both are the same failure:
-   *   - the persisted backend message (`error_detail`, mapped by
-   *     lib/chatMessageBuilder.ts), which is what survives reloads/refetches;
-   *   - a live stream failure (markStreamingAssistantsErrored in
-   *     hooks/streamingOps.ts, and the outbound error marker of the final
-   *     message.complete), which paints the box before the refetch lands.
-   */
   error?: string
   excludeFromContext?: boolean
-  /**
-   * Stable logical identity that survives the WebSocket→HTTP transition.
-   *
-   * Streaming messages use ephemeral UUIDs; canonical history uses
-   * content-hash ids. When mergeMessages swaps a message from its ephemeral
-   * form to its confirmed form, it carries the ephemeral id over as
-   * `stableId` so React can key the render tree on it. This prevents the
-   * bubble from remounting (and replaying its enter animation) at the exact
-   * moment a response or sent message is confirmed — the source of the
-   * visible flicker during WebSocket updates.
-   */
   stableId?: string
 }
 
@@ -1025,12 +897,6 @@ export type ToolStatus = {
   subagent_session_key?: string
 }
 
-/**
- * Payload of the `command.applied` WS event, emitted when the backend expands a
- * user-defined slash command (pkg/harness) into its prompt. Mirrors Go
- * channels.WSCommandAppliedPayload. `command` has NO leading slash; the UI adds
- * it. `agent`/`model` are the per-turn overrides ("" when unset).
- */
 export type WSCommandAppliedPayload = {
   session_key: string
   command: string
@@ -1098,8 +964,6 @@ export type SendMessageResponse = {
   session_key: string
 }
 
-// StreamMessageState mirrors the backend's StreamMessageState struct.
-// It represents the accumulated state of an in-progress streaming message.
 export type StreamMessageState = {
   message_id: string
   session_key: string
@@ -1115,11 +979,6 @@ export type StreamStatusResponse = {
   streams: StreamMessageState[]
 }
 
-/**
- * Harness command that produced a user message (mirrors
- * providers.CommandApplied / the command.applied payload). `command` has NO
- * leading slash; the UI adds it. Present only on command-driven messages.
- */
 export type HistoryCommandInfo = {
   command: string
   description?: string
@@ -1129,11 +988,6 @@ export type HistoryCommandInfo = {
   source?: string
 }
 
-/**
- * One raw message of a chat-history page as it comes off the wire. Shared by
- * the HTTP response type, the react-query cache shape and toChatMessages so the
- * three can never drift apart.
- */
 export type RawHistoryMessage = {
   id: string
   role: 'user' | 'assistant' | 'tool'
@@ -1144,19 +998,8 @@ export type RawHistoryMessage = {
   tool_name?: string
   exclude_from_context?: boolean
   attachments?: Attachment[]
-  /**
-   * Text to render instead of `content` (harness commands store the expanded
-   * prompt in content; this keeps the original "/name args" the user typed).
-   */
   display_content?: string
-  /** Set when the message was produced by a custom slash command. */
   harness_command?: HistoryCommandInfo
-  /**
-   * Marks this message as a FAILED turn and carries the failure detail. The
-   * backend persists such a message with `exclude_from_context: true` and the
-   * legacy "❌ Error …" text in `content` (plain-text channels read that); both
-   * UIs render it as an error box instead of an assistant bubble.
-   */
   error_detail?: string
 }
 
@@ -1183,7 +1026,6 @@ export type UploadedFile = {
   size: number
 }
 
-/** Where an installed skill comes from (backend pkg/skills loader). */
 export type SkillSource = 'workspace' | 'global' | 'builtin'
 
 export type SkillInfo = {
@@ -1195,21 +1037,11 @@ export type SkillInfo = {
   source?: SkillSource
 }
 
-/** One entry of the per-agent tool catalog (GET /api/v1/agents/{id}/catalog). */
 export type AgentToolCatalogEntry = {
   name: string
   description: string
 }
 
-/**
- * One entry of the per-agent skill catalog. Unlike SkillInfo (GET /api/v1/skills)
- * it has no id/installed: the catalog only lists skills the loader resolved.
- *
- * `enabled` is the state of the skill in THIS agent's workspace config (the
- * file its loader reads), and `deletable` is decided server-side: true only for
- * a skill installed in this agent's own workspace. The UI must trust both and
- * never derive them from `source`.
- */
 export type AgentSkillCatalogEntry = {
   name: string
   description: string
@@ -1218,15 +1050,6 @@ export type AgentSkillCatalogEntry = {
   deletable: boolean
 }
 
-/**
- * Payload of GET /api/v1/agents/{agentID}/catalog.
- * Both arrays are always present (backend guarantees [] not null) and sorted by name.
- *
- * `workspace` is the directory this agent's workspace skills live in (and the
- * target of a workspace-scoped install). Empty string when the server cannot
- * resolve it — the install dialog then hides the workspace option rather than
- * guessing a path.
- */
 export type AgentCatalogResponse = {
   agent_id: string
   tools: AgentToolCatalogEntry[]
@@ -1234,10 +1057,8 @@ export type AgentCatalogResponse = {
   workspace: string
 }
 
-/** Where an install writes: the agent's own workspace or the shared global dir. */
 export type SkillInstallScope = 'workspace' | 'global'
 
-/** Response of the per-agent skill mutations (toggle / remove / install). */
 export type AgentSkillMutationResponse = {
   message?: string
   agent_id?: string
@@ -1309,10 +1130,6 @@ export type ClientEvent =
         server_time: string
         processing?: boolean
         groups_enabled?: boolean
-        /** Tool the session is running right now, sent only while processing
-         *  (absent when there is nothing to restore). Lets the UI rebuild the
-         *  "running tool" card after a page reload: the in-flight call only
-         *  travels in the event stream and never reaches the message history. */
         in_progress_tool?: ToolStatus & { tool_call_id?: string }
       }
     }
@@ -1335,13 +1152,6 @@ export type ClientEvent =
       }
     }
   | {
-      /**
-       * An LLM iteration that was streamed to this client and then DISCARDED by
-       * the backend (empty-response retry, plain-text tool-call guidance, every
-       * tool call invalid). It is never persisted, so its bubble must be
-       * retracted on this event — no history copy will ever confirm it and
-       * `mergeMessages` would strand it after the canonical history.
-       */
       event: 'message.discard'
       data: {
         message_id: string
@@ -1384,7 +1194,6 @@ export type ClientEvent =
       data: {
         session_key: string
         processing?: boolean
-        /** Tool the session is running right now (see the welcome event). */
         in_progress_tool?: ToolStatus & { tool_call_id?: string }
       }
     }
@@ -1451,7 +1260,6 @@ export type CronSpawnConfig = {
   label?: string
   agent_id?: string
   guidance?: string
-  /** Optional model override (e.g. 'anthropic:claude-opus'). */
   model?: string
 }
 
@@ -1503,14 +1311,11 @@ export type CronJobInput = {
   name?: string
   enabled?: boolean
   schedule: CronSchedule
-  /** Explicit null clears an existing message on update. */
   message?: string | null
-  /** Explicit null clears an existing command on update. */
   command?: string | null
   deliver?: boolean
   channel?: string
   to?: string
-  /** Spawn config. Explicit null clears an existing spawn config on update. */
   spawn?: CronSpawnConfig | null
 }
 

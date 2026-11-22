@@ -47,49 +47,29 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   const hasConversation = (messages?.length ?? 0) > 0
   const canCancel = isProcessing || Boolean(toolStatus)
 
-  // Last synthetic (not-yet-persisted) session handed out by the memo below.
   const syntheticSessionRef = useRef<ChatSession | null>(null)
   const currentSession = useMemo<ChatSession | null>(() => {
     if (!currentSessionKey) return null
 
-    // Persisted sessions keep their own (stable) identity in `sessions`.
     const session = sessions.find((s) => s.key === currentSessionKey)
     if (session) return session
 
-    // Not persisted yet (e.g. a brand-new session still streaming its first
-    // reply): the name is derived from the session messages. `messages` gets a
-    // fresh identity on every typewriter tick, so without the ref below this
-    // object — and therefore the whole context value — would change ~31×/s and
-    // re-render every consumer (ChatHeader, composer, …) for nothing.
     const sessionMessages = messages
       .filter((message) => message.sessionKey === currentSessionKey && message.role !== 'tool')
       .map((message) => message.content)
 
     const name = deriveSessionNameFromMessages(currentSessionKey, sessionMessages)
     const previous = syntheticSessionRef.current
-    // The reuse is only sound while EVERY message-derived field of the object
-    // is part of this comparison — add any new derived field here as well (the
-    // ref write below depends on this guard, see there).
     if (previous && previous.key === currentSessionKey && previous.name === name) {
       return previous
     }
 
-    // `key` or `name` changed (session switch, first user message, rename):
-    // hand out a new object so the header does update.
     const synthesized: ChatSession = {
       key: currentSessionKey,
       name,
       created: new Date(0).toISOString(),
       updated: new Date(0).toISOString(),
     }
-    // Writing this cache ref DURING render is deliberate and safe only because
-    // of the guard above. The ref holds nothing but the last synthesized object,
-    // and that guard compares every derived field, so a concurrent render React
-    // discards can only have published an object that is field-for-field equal
-    // to the one the next render derives — the write is not rolled back with a
-    // discarded render, which is exactly why a NEW derived field must be added
-    // to the guard: an unguarded field would then freeze at the discarded value
-    // while the memo kept handing it out.
     syntheticSessionRef.current = synthesized
     return synthesized
   }, [currentSessionKey, messages, sessions])

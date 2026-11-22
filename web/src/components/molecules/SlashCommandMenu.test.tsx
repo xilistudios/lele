@@ -72,8 +72,6 @@ describe('SlashCommandMenu', () => {
     expect(queryAllByRole('option')).toHaveLength(0)
   })
 
-  // ── Custom (harness) commands ───────────────────────────────────────────
-
   const review: SlashCommandInfo = {
     name: '/review',
     description: 'Review the current diff',

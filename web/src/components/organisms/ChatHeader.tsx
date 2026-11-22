@@ -37,18 +37,10 @@ export const ChatHeader = memo(function ChatHeader() {
   const [subagentsSidebarOpen, setSubagentsSidebarOpen] = useState(false)
   const [toolsSidebarOpen, setToolsSidebarOpen] = useState(false)
 
-  // Poll while the parent turn is live so a spawn that lands mid-turn shows
-  // up even before the first refresh has seen a running task.
   const { subagents, loading, refresh } = useSubagents(currentSessionKey, 5000, isProcessing)
 
-  // When viewing a subagent chat, fetch the parent's subagent list once so we
-  // can resolve the subagent's label and agent_id. `NO_POLL_MS` (0) means "do
-  // not poll" — anything positive here would be an interval, and a tiny one
-  // would hammer /subagents. This is a separate instance that does NOT affect
-  // the subagents indicator (which uses the above call).
   const { subagents: parentSubagents } = useSubagents(parentSessionKey, NO_POLL_MS, false)
 
-  // Resolve the subagent entry that matches the current session.
   const matchedSubagent = useMemo(
     () => selectSubagentForSession(parentSubagents, currentSessionKey),
     [parentSubagents, currentSessionKey],
@@ -57,7 +49,6 @@ export const ChatHeader = memo(function ChatHeader() {
   const modeTheme = getModeTheme(chatMode)
   const ModeIcon = modeTheme.Icon
 
-  // Opening the panel always re-fetches — the list may have been idle.
   useEffect(() => {
     if (subagentsSidebarOpen) {
       void refresh()
@@ -65,8 +56,6 @@ export const ChatHeader = memo(function ChatHeader() {
   }, [subagentsSidebarOpen, refresh])
 
   const handleToggleSubagents = useCallback(() => {
-    // The two drawers share the same right-hand slot: opening one closes the
-    // other instead of stacking two panels on top of each other.
     setToolsSidebarOpen(false)
     setSubagentsSidebarOpen((prev) => !prev)
   }, [])
@@ -83,10 +72,6 @@ export const ChatHeader = memo(function ChatHeader() {
   const handleSelectSubagent = useCallback(
     (sessionKey: string) => {
       if (currentSessionKey) {
-        // Only navigate — let ChatRoute's first useEffect handle onSelectSession.
-        // Calling onSelectSession here creates a race condition: the state updates
-        // (currentSessionKey → subagent) may be committed before the URL changes,
-        // causing the useEffect to see mismatched state/URL and reset the session.
         navigate(
           `/chat/${encodeURIComponent(currentSessionKey)}/subagent/${encodeURIComponent(sessionKey)}`,
         )
@@ -148,9 +133,6 @@ export const ChatHeader = memo(function ChatHeader() {
         <div className="flex items-center gap-1">
           <SubagentsIndicator count={subagents.length} onClick={handleToggleSubagents} />
           <ContextIndicator />
-          {/* Replaces the old connection-status icon: same spot, but it opens
-              the Tools drawer (skills, cron, background processes, secrets).
-              The connection status itself moved into that drawer's footer. */}
           <IconButton
             onClick={handleToggleTools}
             ariaLabel={t('chat.tools')}

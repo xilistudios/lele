@@ -22,11 +22,6 @@ function msg(
   }
 }
 
-/**
- * Minimal fake MessageEventContext. setStreamingMessages applies updater
- * functions against a local array so tests can inspect the resulting list;
- * setToolStatus and the subagent notification are recorded.
- */
 function makeCtx(initialStreaming: ChatMessage[] = []) {
   let streaming = initialStreaming
   const toolStatuses: Array<Record<string, unknown> | null> = []
@@ -95,7 +90,6 @@ describe('restoreInProgressTool', () => {
     expect(cards[0].toolStatus).toBe('executing')
     expect(cards[0].toolCallId).toBe('call_1')
     expect(cards[0].sessionKey).toBe('s1')
-    // The status bar indicator is restored too (same as the live event).
     expect(toolStatuses).toHaveLength(1)
     expect(toolStatuses[0]?.tool).toBe('exec')
   })

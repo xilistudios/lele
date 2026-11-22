@@ -2,17 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import type { ChatMessage } from '../lib/types'
 import { mergeMessages } from './messageMerge'
 
-/**
- * Regression: "the first message I sent shows up as the newest".
- *
- * An optimistic user bubble that no content/positional rule can confirm is
- * appended AFTER canonical history by mergeMessages. When base already holds
- * the turn's ANSWER but no persisted user copy, the sent bubble renders BELOW
- * its own answer — the reported ordering symptom. The first-send strand rule
- * drops it; the reconciliation poll (useChatHistory.wantsPolling) keeps
- * refetching so a user row that lands late still renders in its canonical slot.
- */
-
 function u(id: string, content: string, extra: Partial<ChatMessage> = {}): ChatMessage {
   return { id, role: 'user', content, sessionKey: 's', createdAt: '', ...extra } as ChatMessage
 }
@@ -59,9 +48,6 @@ describe('first message rendered as newest (stranded optimistic bubble)', () => 
   })
 
   test('F: a LATER send in flight is NOT dropped (previous answer is not its own)', () => {
-    // base has a confirmed user (the anchor) + its answer; the new bubble is a
-    // later send whose own row has not landed yet. The first-send rule must not
-    // fire (snapshot > 0, anchor present, base has a confirmed user).
     const base = [u('u-anchor', 'opener'), a('a-1', 'an answer')]
     const bubble = opt('opt-inflight', 'in flight question', {
       optimisticBaseCount: 1,

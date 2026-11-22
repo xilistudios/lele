@@ -36,7 +36,6 @@ export function SkillsStep({ skills, setSkills }: Props) {
         </p>
       </div>
 
-      {/* Popular skills grid */}
       <div className="space-y-2">
         <p className="text-xs font-medium text-text-secondary uppercase tracking-wider">
           {t('settings.addAgentModal.popularSkills')}
@@ -92,7 +91,6 @@ export function SkillsStep({ skills, setSkills }: Props) {
         </div>
       </div>
 
-      {/* Custom skills */}
       <div className="space-y-2">
         <label htmlFor="wizard-agent-skills" className="text-sm font-medium text-text-primary">
           {t('settings.fields.agentSkills')}
@@ -103,7 +101,6 @@ export function SkillsStep({ skills, setSkills }: Props) {
         <p className="text-xs text-text-tertiary">{t('settings.descriptions.agentSkills')}</p>
       </div>
 
-      {/* Selected count */}
       {skills.length > 0 && (
         <div className="flex items-center gap-2 text-sm text-text-secondary">
           <svg

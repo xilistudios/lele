@@ -7,8 +7,6 @@ import type { ChatMessage, GroupInfo, HistoryToolCall, ToolStatus } from '../lib
 import { type MessageEventContext, dispatchMessageEvent } from './messageEventHandlers'
 import { useMessages } from './useMessages'
 
-// ── Test helpers for messageEventHandlers ────────────────────────────────────
-
 function createMockContext(
   overrides?: Partial<MessageEventContext> & { currentSessionKey?: string },
 ): { ctx: MessageEventContext; state: MockState } {
@@ -42,10 +40,6 @@ function createMockContext(
         state.streamingMessages = updater
       }
     },
-    // Read-only view handed to handlers that must know what is on screen before
-    // building their update (the server refusal retracts a bubble and returns its
-    // paths to the composer). Wired to the SAME state the setters above mutate,
-    // so the mock stays honest under `handleServerError`.
     streamingMessagesRef: {
       get current() {
         return state.streamingMessages
@@ -64,8 +58,6 @@ function createMockContext(
         state.pendingAttachments = updater
       }
     },
-    // The chat error banner (server-side send refusals). Recorded so the tests
-    // can assert that a refusal is never swallowed.
     setError: (message: string) => {
       state.errors.push(message)
     },
@@ -129,7 +121,6 @@ type MockState = {
   streamingMessages: ChatMessage[]
   toolStatus: ToolStatus | null
   pendingAttachments: string[]
-  /** Messages pushed to the chat error banner (server-side send refusals). */
   errors: string[]
   processingSessions: Set<string>
   processingSessionKey: string | null
@@ -170,12 +161,10 @@ describe('toChatMessages', () => {
 
     const result = toChatMessages(history, sessionKey)
 
-    // 3 mensajes: user + assistant + tool result (no se genera duplicado del tool_call)
     expect(result.length).toBe(3)
     expect(result[0].role).toBe('user')
     expect(result[1].role).toBe('assistant')
     expect(result[1].content).toBe('Voy a leer el archivo')
-    // Tool result message (with tool info from tool_call)
     expect(result[2].role).toBe('tool')
     expect(result[2].toolName).toBe('read_file')
     expect(result[2].toolArgs).toBe('read_file {"path":"/test.txt"}')
@@ -189,7 +178,7 @@ describe('toChatMessages', () => {
       {
         id: '1',
         role: 'assistant' as const,
-        content: '', // vacío
+        content: '',
         tool_calls: [
           { id: 'call-1', name: 'read_file', arguments: { path: '/test.txt' } },
         ] as HistoryToolCall[],
@@ -199,7 +188,6 @@ describe('toChatMessages', () => {
 
     const result = toChatMessages(history, sessionKey)
 
-    // Solo 2 mensajes: user + tool result (no se genera duplicado del tool_call)
     expect(result.length).toBe(2)
     expect(result[0].role).toBe('user')
     expect(result[1].role).toBe('tool')
@@ -215,7 +203,7 @@ describe('toChatMessages', () => {
       {
         id: '1',
         role: 'assistant' as const,
-        content: '', // vacío
+        content: '',
         tool_calls: [
           { id: 'call-1', name: 'read_file', arguments: { path: '/a.txt' } },
           { id: 'call-2', name: 'read_file', arguments: { path: '/b.txt' } },
@@ -227,7 +215,6 @@ describe('toChatMessages', () => {
 
     const result = toChatMessages(history, sessionKey)
 
-    // Solo 3 mensajes: user + 2 tool results (no duplicados)
     expect(result.length).toBe(3)
     expect(result[0].role).toBe('user')
     expect(result[1].role).toBe('tool')
@@ -243,7 +230,7 @@ describe('toChatMessages', () => {
   test('assistant con content vacío pero sin tool_calls se muestra normal', () => {
     const history = [
       { id: '0', role: 'user' as const, content: 'Hola' },
-      { id: '1', role: 'assistant' as const, content: '' }, // vacío sin tool_calls
+      { id: '1', role: 'assistant' as const, content: '' },
     ]
 
     const result = toChatMessages(history, sessionKey)
@@ -311,15 +298,12 @@ describe('toChatMessages', () => {
   })
 })
 
-// ── cancel.ack + group lifecycle tests ───────────────────────────────────────
-
 describe('cancel.ack stops active groups', () => {
   const sessionKey = 'test-session'
 
   test('group in started transitions to stopped on cancel.ack', () => {
     const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
 
-    // Start a group via group.status event
     dispatchMessageEvent(ctx, {
       event: 'group.status',
       data: {
@@ -332,7 +316,6 @@ describe('cancel.ack stops active groups', () => {
 
     expect(state.groups.get('g1')?.status).toBe('started')
 
-    // Fire cancel.ack
     dispatchMessageEvent(ctx, {
       event: 'cancel.ack',
       data: { session_key: sessionKey },
@@ -344,7 +327,6 @@ describe('cancel.ack stops active groups', () => {
   test('group fields (turns, synthesis, strategy, participants, layers, totalTokens) are preserved after cancel', () => {
     const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
 
-    // Start a group
     dispatchMessageEvent(ctx, {
       event: 'group.status',
       data: {
@@ -355,7 +337,6 @@ describe('cancel.ack stops active groups', () => {
       },
     })
 
-    // Simulate a turn
     dispatchMessageEvent(ctx, {
       event: 'group.turn',
       data: {
@@ -375,7 +356,6 @@ describe('cancel.ack stops active groups', () => {
     expect(beforeCancel.turns).toHaveLength(1)
     expect(beforeCancel.turns[0].content).toBe('My proposal')
 
-    // Fire cancel.ack
     dispatchMessageEvent(ctx, {
       event: 'cancel.ack',
       data: { session_key: sessionKey },
@@ -394,7 +374,6 @@ describe('cancel.ack stops active groups', () => {
   test('group already in done is NOT modified by cancel.ack', () => {
     const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
 
-    // Start a group
     dispatchMessageEvent(ctx, {
       event: 'group.status',
       data: {
@@ -405,7 +384,6 @@ describe('cancel.ack stops active groups', () => {
       },
     })
 
-    // Complete the group
     dispatchMessageEvent(ctx, {
       event: 'group.complete',
       data: {
@@ -420,7 +398,6 @@ describe('cancel.ack stops active groups', () => {
 
     expect(state.groups.get('g1')?.status).toBe('done')
 
-    // Fire cancel.ack — should not touch the done group
     dispatchMessageEvent(ctx, {
       event: 'cancel.ack',
       data: { session_key: sessionKey },
@@ -436,7 +413,6 @@ describe('cancel.ack stops active groups', () => {
   test('only started groups are stopped; done and error groups are untouched', () => {
     const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
 
-    // Create multiple groups in different states
     dispatchMessageEvent(ctx, {
       event: 'group.status',
       data: {
@@ -457,7 +433,6 @@ describe('cancel.ack stops active groups', () => {
       },
     })
 
-    // Complete one of them
     dispatchMessageEvent(ctx, {
       event: 'group.complete',
       data: {
@@ -477,7 +452,6 @@ describe('cancel.ack stops active groups', () => {
       },
     })
 
-    // Manually set g-error to error via upsert (simulating a server error event)
     ctx.upsertGroup('g-error', (existing) => ({
       groupID: 'g-error',
       status: 'error' as const,
@@ -494,7 +468,6 @@ describe('cancel.ack stops active groups', () => {
     expect(state.groups.get('g-done')?.status).toBe('done')
     expect(state.groups.get('g-error')?.status).toBe('error')
 
-    // Cancel
     dispatchMessageEvent(ctx, {
       event: 'cancel.ack',
       data: { session_key: sessionKey },
@@ -518,8 +491,6 @@ describe('cancel.ack stops active groups', () => {
     expect(state.processingSessionKey).toBeNull()
   })
 })
-
-// ── handleGroupTool tests ────────────────────────────────────────────────────
 
 describe('handleGroupTool', () => {
   const sessionKey = 'test-session'
@@ -563,7 +534,6 @@ describe('handleGroupTool', () => {
   test('upserts tool call status to completed and preserves arguments', () => {
     const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
 
-    // First: executing
     dispatchMessageEvent(ctx, {
       event: 'group.tool',
       data: {
@@ -579,7 +549,6 @@ describe('handleGroupTool', () => {
       },
     })
 
-    // Then: completed (no arguments field)
     dispatchMessageEvent(ctx, {
       event: 'group.tool',
       data: {
@@ -598,7 +567,6 @@ describe('handleGroupTool', () => {
     const group = state.groups.get('g1') as GroupInfo
     expect(group.turns[0].toolCalls).toHaveLength(1)
     expect(group.turns[0].toolCalls?.[0].status).toBe('completed')
-    // Arguments preserved from executing event
     expect(group.turns[0].toolCalls?.[0].arguments).toBe('{"path":"/test.txt"}')
     expect(group.turns[0].toolCalls?.[0].result).toBe('file contents here')
   })
@@ -700,15 +668,12 @@ describe('handleGroupTool', () => {
   })
 })
 
-// ── handleGroupTurn preserving toolCalls ─────────────────────────────────────
-
 describe('handleGroupTurn preserves existing toolCalls', () => {
   const sessionKey = 'test-session'
 
   test('incoming turn merge preserves existing toolCalls', () => {
     const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
 
-    // Create a group with a tool call
     dispatchMessageEvent(ctx, {
       event: 'group.tool',
       data: {
@@ -726,7 +691,6 @@ describe('handleGroupTurn preserves existing toolCalls', () => {
 
     expect(state.groups.get('g1')?.turns[0].toolCalls).toHaveLength(1)
 
-    // Now send a group.turn for the same turn_index — should preserve toolCalls
     dispatchMessageEvent(ctx, {
       event: 'group.turn',
       data: {
@@ -744,7 +708,6 @@ describe('handleGroupTurn preserves existing toolCalls', () => {
     const group = state.groups.get('g1') as GroupInfo
     expect(group.turns).toHaveLength(1)
     expect(group.turns[0].content).toBe('Here is my proposal after reading the file')
-    // Tool calls preserved!
     expect(group.turns[0].toolCalls).toHaveLength(1)
     expect(group.turns[0].toolCalls?.[0].tool_call_id).toBe('tc-1')
   })
@@ -770,8 +733,6 @@ describe('handleGroupTurn preserves existing toolCalls', () => {
     expect(group.turns[0].toolCalls).toBeUndefined()
   })
 })
-
-// ── welcome-driven hydrateGroups ─────────────────────────────────────────────
 
 describe('welcome-driven hydrateGroups', () => {
   const sessionKey = 'test-session'
@@ -869,7 +830,6 @@ describe('welcome-driven hydrateGroups', () => {
   test('welcome without groups does not affect existing groups', () => {
     const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
 
-    // First add a group manually
     dispatchMessageEvent(ctx, {
       event: 'group.status',
       data: {
@@ -880,23 +840,14 @@ describe('welcome-driven hydrateGroups', () => {
       },
     })
 
-    // Welcome without groups
     dispatchMessageEvent(ctx, {
       event: 'welcome',
       data: { session_key: sessionKey },
     })
 
-    // Existing group untouched
     expect(state.groups.get('existing')?.status).toBe('started')
   })
 })
-
-// ── group.complete terminal-status preservation ──────────────────────────────
-//
-// Backend contract (pkg/group/manager.go finalize): each group emits exactly
-// one terminal group.status (done|error|stopped) followed by one
-// group.complete. WSGroupCompletePayload has no status field, so the client
-// must NOT downgrade an already-known terminal status to 'done'.
 
 describe('group.complete preserves terminal status', () => {
   const sessionKey = 'test-session'
@@ -1015,20 +966,11 @@ describe('group.complete preserves terminal status', () => {
     expect(group.totalTokens).toBe(42)
   })
 })
-// ── debouncedSessionRefresh: leading + trailing throttle (5 s window) ─────────
-//
-// These mount the REAL hook (the throttle lives in its refs) and inject the
-// trigger the way production does: dispatching a `history.updated` WS event,
-// whose handler calls `ctx.debouncedSessionRefresh()`. So the number of
-// `onSessionUpdated` runs asserted here is exactly the number of session-list
-// refreshes those events produce: a burst of N events must cost 2 passes at
-// most (1 leading + 1 trailing) instead of N.
 
 const THROTTLE_SESSION_KEY = 'native:test-throttle'
 
 type MessagesHook = ReturnType<typeof useMessages>
 
-/** Mounts useMessages with the given refresh callback (needs a QueryClient). */
 function renderMessagesWithRefresh(onSessionUpdated: () => void) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const wrapper = ({ children }: { children: ReactNode }) =>
@@ -1041,7 +983,6 @@ function renderMessagesWithRefresh(onSessionUpdated: () => void) {
   )
 }
 
-/** Fires the WS event that asks for a session-list refresh (production path). */
 function dispatchHistoryUpdated(result: { current: MessagesHook }): void {
   result.current.handleEvent({
     event: 'history.updated',
@@ -1064,18 +1005,13 @@ describe('debouncedSessionRefresh throttle (leading + trailing, 5 s window)', ()
       for (let i = 0; i < 10; i += 1) dispatchHistoryUpdated(result)
     })
 
-    // Leading edge: the first event refreshes immediately, so a brand-new chat
-    // shows up in the sidebar at once.
     expect(onSessionUpdated).toHaveBeenCalledTimes(1)
 
-    // Trailing edge: the whole burst collapses into ONE extra call when the
-    // window closes (the final state after the burst must not be lost).
     act(() => {
       jest.advanceTimersByTime(5_000)
     })
     expect(onSessionUpdated).toHaveBeenCalledTimes(2)
 
-    // No timer is left hanging behind: nothing else happens later.
     act(() => {
       jest.advanceTimersByTime(60_000)
     })
@@ -1091,10 +1027,6 @@ describe('debouncedSessionRefresh throttle (leading + trailing, 5 s window)', ()
       dispatchHistoryUpdated(result)
     })
     expect(onSessionUpdated).toHaveBeenCalledTimes(1)
-    // M1 invariant: the leading edge must NOT arm a timer. `useMessages` lives
-    // as long as the app, so an eagerly armed window would keep a `setTimeout`
-    // pending forever in an idle tab (one per event, forever). The window is
-    // anchored on a timestamp and simply expires.
     expect(jest.getTimerCount()).toBe(0)
 
     act(() => {
@@ -1109,16 +1041,16 @@ describe('debouncedSessionRefresh throttle (leading + trailing, 5 s window)', ()
     const { result } = renderMessagesWithRefresh(onSessionUpdated)
 
     act(() => {
-      dispatchHistoryUpdated(result) // leading → 1
-      dispatchHistoryUpdated(result) // swallowed, owes the trailing
+      dispatchHistoryUpdated(result)
+      dispatchHistoryUpdated(result)
     })
     act(() => {
-      jest.advanceTimersByTime(5_000) // trailing → 2
+      jest.advanceTimersByTime(5_000)
     })
     expect(onSessionUpdated).toHaveBeenCalledTimes(2)
 
     act(() => {
-      dispatchHistoryUpdated(result) // new window → immediate
+      dispatchHistoryUpdated(result)
     })
     expect(onSessionUpdated).toHaveBeenCalledTimes(3)
   })
@@ -1135,18 +1067,14 @@ describe('debouncedSessionRefresh throttle (leading + trailing, 5 s window)', ()
       const { result, unmount } = renderMessagesWithRefresh(onSessionUpdated)
 
       act(() => {
-        dispatchHistoryUpdated(result) // leading → 1
-        dispatchHistoryUpdated(result) // swallowed, trailing pending
+        dispatchHistoryUpdated(result)
+        dispatchHistoryUpdated(result)
       })
       expect(onSessionUpdated).toHaveBeenCalledTimes(1)
-      // The window is open: its trailing timer is still pending.
       expect(jest.getTimerCount()).toBeGreaterThanOrEqual(1)
 
       unmount()
 
-      // The cleanup must CANCEL the pending timer, not merely neutralise it
-      // with the mounted guard: otherwise a stale `setTimeout` stays armed for
-      // 5 s after the hook is gone (and would keep the tab's event loop busy).
       expect(jest.getTimerCount()).toBe(0)
 
       act(() => {
@@ -1166,12 +1094,11 @@ describe('debouncedSessionRefresh throttle (leading + trailing, 5 s window)', ()
     const { result, rerender } = renderMessagesWithRefresh(first)
 
     act(() => {
-      dispatchHistoryUpdated(result) // leading with `first` → 1
-      dispatchHistoryUpdated(result) // swallowed, trailing pending
+      dispatchHistoryUpdated(result)
+      dispatchHistoryUpdated(result)
     })
     expect(first).toHaveBeenCalledTimes(1)
 
-    // The callback changes identity (new render) BEFORE the window closes.
     rerender({ refresh: second })
 
     act(() => {
@@ -1187,39 +1114,27 @@ describe('debouncedSessionRefresh throttle (leading + trailing, 5 s window)', ()
     const { result } = renderMessagesWithRefresh(onSessionUpdated)
 
     act(() => {
-      dispatchHistoryUpdated(result) // t=0: leading → 1, window opens at 0
+      dispatchHistoryUpdated(result)
     })
     expect(onSessionUpdated).toHaveBeenCalledTimes(1)
-    // Nothing owed yet: the leading edge arms no timer (M1 invariant above).
     expect(jest.getTimerCount()).toBe(0)
 
     act(() => {
-      jest.advanceTimersByTime(1_000) // t=1 000
+      jest.advanceTimersByTime(1_000)
     })
     act(() => {
-      dispatchHistoryUpdated(result) // swallowed → trailing armed FOR t=5 000
+      dispatchHistoryUpdated(result)
     })
     expect(onSessionUpdated).toHaveBeenCalledTimes(1)
     expect(jest.getTimerCount()).toBe(1)
 
-    // The trailing timer is due at t=5 000, but a busy event loop can delay it
-    // past its deadline: that is the only ordering in which the next trigger
-    // reaches the NEW window while the OLD timer is still pending. The fake
-    // clock is therefore moved past the edge (t=5 000) WITHOUT running the
-    // pending timer — `advanceTimersByTime` would run it first and destroy the
-    // scenario this test pins.
     act(() => {
       jest.setSystemTime(Date.now() + 4_000)
     })
     act(() => {
-      dispatchHistoryUpdated(result) // t=5 000 → leading edge of a fresh window
+      dispatchHistoryUpdated(result)
     })
 
-    // The leading call already reflects state at least as fresh as the stale
-    // trailing one, so the timer left over from the previous window must have
-    // been DISARMED: exactly 2 refreshes for the two windows (before the fix it
-    // fired a 3rd one, inside a window it does not belong to, and re-anchored
-    // that window mid-flight).
     expect(onSessionUpdated).toHaveBeenCalledTimes(2)
     expect(jest.getTimerCount()).toBe(0)
 

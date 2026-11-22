@@ -21,28 +21,6 @@ import { AgentSkillsSection } from '../organisms/agents/AgentSkillsSection'
 import { AgentSubagentsSection } from '../organisms/agents/AgentSubagentsSection'
 import { AgentToolsSection } from '../organisms/agents/AgentToolsSection'
 
-/**
- * `/settings/agents/:agentId/:tab?` — the per-agent configuration page
- * (spec §4.1, §5).
- *
- * Composition only: the draft lives in the `SettingsProvider` mounted by
- * `SettingsPage`, so navigating between tabs (and back to the list) keeps
- * unsaved changes. This component owns exactly three decisions:
- *
- * 1. **URL → tab** (§5.1): a missing or unknown `:tab` is normalised to
- *    `general` with `replace: true`, mirroring `SettingsPage`. A bad tab is a
- *    redirect, never a broken page. The effect only navigates when the target
- *    differs from the current location, which is what keeps it from looping.
- * 2. **Unknown agent** (§5.2): a centred "not found" block, but only once the
- *    initial config load has finished — while loading, the id legitimately is
- *    not in the list yet, so the skeleton is shown instead. It never redirects
- *    automatically: the user must be able to read which URL failed.
- * 3. **Tab → section**: a plain switch. Skills, MCP, commands and tools run
- *    full width; every other section is capped at 820px so long text fields
- *    stay readable.
- */
-
-/** Sections capped at 820px (§4.1); skills/mcp/commands/tools need the whole panel. */
 const FULL_WIDTH_TABS: ReadonlySet<AgentTab> = new Set<AgentTab>([
   'skills',
   'mcp',
@@ -50,7 +28,6 @@ const FULL_WIDTH_TABS: ReadonlySet<AgentTab> = new Set<AgentTab>([
   'tools',
 ])
 
-/** §5.1 "Detalle": header (48px box + two bars) + four label/input pairs. */
 function DetailSkeleton() {
   const { t } = useTranslation()
   return (
@@ -86,7 +63,6 @@ function DetailSkeleton() {
   )
 }
 
-/** §5.2 — the agent id is not in `agents.list` after the config loaded. */
 function AgentNotFound({ agentId }: { agentId: string }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -124,16 +100,9 @@ export function AgentConfigPage() {
 
   const activeTab: AgentTab = isAgentTab(tab) ? tab : 'general'
 
-  // Normalise the URL (same pattern as SettingsPage): a missing or unknown
-  // `:tab` is replaced by `general` so the address bar always describes what is
-  // on screen. `agentId` is in the dependency list — not just `tab` — because
-  // the first render happens while the config is still loading, and navigating
-  // then would drop the user out of the agent they asked for.
   useEffect(() => {
     if (isAgentTab(tab)) return
     const valid = AGENT_TABS.includes(activeTab) ? activeTab : 'general'
-    // `replace` keeps the back button pointing at the agents list, and the
-    // guard above (only invalid tabs) is what prevents an endless loop.
     navigate(`/settings/agents/${agentId}/${valid}`, { replace: true })
   }, [tab, agentId, activeTab, navigate])
 
@@ -151,8 +120,6 @@ export function AgentConfigPage() {
           <AgentSkillsSection key={agent.id} agent={agent} index={agentIndex} agentId={agent.id} />
         )
       case 'mcp':
-        // File-backed tab (SECTION_PATHS.mcp = []): no draft agent/index — the
-        // panel reads the mcp.json stack through the MCP hooks by id only.
         return <AgentMCPSection key={agent.id} agentId={agent.id} />
       case 'commands':
         return <AgentCommandsSection key={agent.id} agent={agent} agentId={agent.id} />
