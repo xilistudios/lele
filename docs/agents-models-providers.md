@@ -472,30 +472,45 @@ the type `base_less` for exactly that reason.
 
 ```
 lele agent loop (Go)
-  └─ persistent child: node bridge.mjs  (embedded in the binary, JSON lines over stdio)
+  └─ persistent child: node bridge.mjs  (external bridge repo, JSON lines over stdio)
        └─ @anthropic-ai/claude-agent-sdk query()
             └─ claude CLI  (subscription auth)
 ```
 
-The bridge is embedded in the lele binary with `go:embed` and extracted to a
-temp directory on first use, so lele stays a single binary and never writes
-JavaScript itself.
+The bridge lives in its own repository,
+[`xilistudios/lele-claude-bridge`](https://github.com/xilistudios/lele-claude-bridge),
+and is installed once into `<lele-dir>/claude-bridge` with its installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xilistudios/lele-claude-bridge/main/install.sh | sh
+```
+
+Pin a release with `... | sh -s -- --ref v0.1.0`, or point lele somewhere else
+with `LELE_CLAUDE_BRIDGE_PATH`. lele spawns the installed `bridge.mjs` as a
+persistent child and never writes or downloads JavaScript itself.
 
 #### Requirements
 
+- The bridge installed (the one-liner above). The install goes to
+  `<lele-dir>/claude-bridge`, so `LELE_CONFIG_DIR` relocates it too;
+  `LELE_CLAUDE_BRIDGE_PATH` overrides the location.
 - Node.js **≥ 18.14** on `PATH` (the bridge is an ES module).
-- The SDK installed where lele can find it:
-  `npm install -g @anthropic-ai/claude-agent-sdk`.
+- The SDK installed **by that script**, next to the bridge: it runs `npm ci` into
+  `<lele-dir>/claude-bridge/node_modules` with the SDK pinned (`0.3.329`). A
+  global install still works as the manual alternative —
+  `npm install -g @anthropic-ai/claude-agent-sdk` plus `CLAUDE_AGENT_SDK_PATH`
+  pointing at its `node_modules`.
 - A **logged-in** Claude Code session: run `claude` once and complete the login
   with the subscription. Either the `claude` on `PATH` or the CLI bundled with
   the SDK works — both read the same `~/.claude` credentials.
 
-lele never runs `npm install` for you. All three requirements are checked the
-first time a model call is made; a missing SDK comes back as an error naming the
-exact install command, and a missing login as an auth-class failure whose
-message ends with *"Run 'claude' and log in with your Claude subscription (no
-API key)."* — that one is classified as `auth`, so `model_fallbacks` can route
-around it.
+lele itself never runs `npm install`; the bridge installer does, once. All
+requirements are checked the first time a model call is made: a missing install
+comes back as an error naming the installer one-liner and
+`LELE_CLAUDE_BRIDGE_PATH`, a missing SDK as the bridge's own actionable message
+(verbatim), and a missing login as an auth-class failure whose message ends with
+*"Run 'claude' and log in with your Claude subscription (no API key)."* — that
+one is classified as `auth`, so `model_fallbacks` can route around it.
 
 #### Configuration
 
@@ -534,16 +549,22 @@ An empty `providers.claude-code` entry is accepted too (it changes nothing), and
 
 | Variable | Meaning |
 | --- | --- |
-| `CLAUDE_AGENT_SDK_PATH` | `node_modules` directory (or the package directory) containing `@anthropic-ai/claude-agent-sdk`. Searched **first**; needed only when the SDK is not in npm's global root. |
+| `LELE_CLAUDE_BRIDGE_PATH` | Directory containing `bridge.mjs` + `bridge_lib.mjs` (or a direct path to `bridge.mjs`). Empty means `<lele-dir>/claude-bridge`, i.e. the installer default, with `LELE_CONFIG_DIR` honoured. |
+| `CLAUDE_AGENT_SDK_PATH` | `node_modules` directory (or the package directory) containing `@anthropic-ai/claude-agent-sdk`. Searched **first**; it takes effect when the bridge has no side-by-side `node_modules`, i.e. with a global SDK install. |
 | `CLAUDE_CODE_PATH` | Path to the `claude` CLI to use. Empty means `PATH`, then the SDK's own resolution. |
 | `LELE_NODE_BIN` | Node binary to spawn. Empty means `node` from `PATH`. |
 
-Without `CLAUDE_AGENT_SDK_PATH`, lele looks in `npm root -g`,
+lele hands the bridge this candidate list for the SDK, in order:
+`CLAUDE_AGENT_SDK_PATH` when set, the installed bridge's own `node_modules`
+(where the installer puts the SDK), `npm root -g`,
 `/opt/homebrew/lib/node_modules`, `/usr/local/lib/node_modules` and
-`~/.npm-global/lib/node_modules`, in that order, and also honours whatever is
-already on `NODE_PATH` (which it re-exports to the child, aggregated from the
-same candidate list — an ES module `import` needs the explicit paths, not just
-`NODE_PATH`).
+`~/.npm-global/lib/node_modules`. The bridge tries the bare
+`@anthropic-ai/claude-agent-sdk` specifier first, so in the canonical layout the
+side-by-side copy resolves before any candidate is consulted — a set
+`CLAUDE_AGENT_SDK_PATH` is only effective when that side-by-side copy is absent.
+`NODE_PATH` entries are honoured last (the list is also re-exported to the child
+as `NODE_PATH`, aggregated from the same candidates — an ES module `import`
+needs the explicit paths, not just `NODE_PATH`).
 
 #### Subscription only: API-key variables are stripped
 
@@ -593,21 +614,23 @@ rendered as a short `[image: …]` placeholder (and video as `[video omitted]`).
 
 #### Development / testing
 
-The bridge is covered by its own Node test suite, which needs no SDK, no login
-and no network:
+The bridge is covered by its own Node test suite in
+[`xilistudios/lele-claude-bridge`](https://github.com/xilistudios/lele-claude-bridge),
+which needs no SDK, no login and no network:
 
 ```bash
-node --test pkg/providers/claudecode/bridge_test.mjs   # or: make test-claude-bridge
+git clone https://github.com/xilistudios/lele-claude-bridge.git
+cd lele-claude-bridge
+node --test bridge_test.mjs   # 45 tests
 ```
 
 The Go side is covered by unit tests against a fake bridge (`go test
 ./pkg/providers/`), and the real end-to-end path by the integration suite, which
-**skips** unless node, a resolvable SDK and a logged-in subscription are all
-present:
+**skips** unless the bridge is installed, node is present, the SDK is resolvable
+and a subscription is logged in:
 
 ```bash
-CLAUDE_AGENT_SDK_PATH=/path/to/node_modules \
-  go test -tags=integration ./pkg/providers/ -run ClaudeCode -v
+go test -tags=integration ./pkg/providers/ -run ClaudeCode -v
 ```
 
 ### OpenCode Go

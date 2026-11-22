@@ -277,10 +277,20 @@ SDK.
 
 Requirements and environment variables:
 
+- The bridge installed first — it lives in its own repository,
+  [`xilistudios/lele-claude-bridge`](https://github.com/xilistudios/lele-claude-bridge),
+  and its installer drops it in `<lele-dir>/claude-bridge`:
+  `curl -fsSL https://raw.githubusercontent.com/xilistudios/lele-claude-bridge/main/install.sh | sh`
+  (pin with `... | sh -s -- --ref v0.1.0`). `LELE_CLAUDE_BRIDGE_PATH` points at
+  another directory (or directly at its `bridge.mjs`), and `LELE_CONFIG_DIR`
+  relocates the default. `bridge.mjs` and `bridge_lib.mjs` must sit side by side.
 - Node.js ≥ 18.14 (`LELE_NODE_BIN` overrides the binary, default `node`).
-- `npm install -g @anthropic-ai/claude-agent-sdk` — `CLAUDE_AGENT_SDK_PATH`
-  points at the `node_modules` directory (or the package directory) that holds
-  it, searched before `npm root -g` and the usual global prefixes.
+- The SDK, installed by that script next to the bridge (pinned `0.3.329`). A
+  global `npm install -g @anthropic-ai/claude-agent-sdk` still works as the
+  manual alternative: `CLAUDE_AGENT_SDK_PATH` then points at the `node_modules`
+  directory (or the package directory) that holds it, searched first — it takes
+  effect when the bridge has no side-by-side `node_modules`, because the bare
+  specifier resolves that one before any candidate.
 - A logged-in `claude` session: run `claude` and log in with the subscription.
   `CLAUDE_CODE_PATH` pins a specific CLI binary; empty means `PATH`, then the
   SDK's bundled CLI.
