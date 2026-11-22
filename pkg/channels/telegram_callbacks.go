@@ -11,7 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// handleAgentCallback processes callback queries for agent selection
 func (c *TelegramChannel) handleAgentCallback(ctx context.Context, query telego.CallbackQuery) error {
 	if query.Message == nil {
 		return nil
@@ -64,7 +63,6 @@ func (c *TelegramChannel) handleAgentCallback(ctx context.Context, query telego.
 	return nil
 }
 
-// formatAgentSelectedMessage formats a message when an agent is selected
 func formatAgentSelectedMessage(agent AgentBasicInfo, agentID string) string {
 	var parts []string
 	parts = append(parts, "✅ *Agente seleccionado*")
@@ -81,7 +79,6 @@ func formatAgentSelectedMessage(agent AgentBasicInfo, agentID string) string {
 	return strings.Join(parts, "\n")
 }
 
-// handleVerboseCallback processes callback queries for verbose level selection
 func (c *TelegramChannel) handleVerboseCallback(ctx context.Context, query telego.CallbackQuery) error {
 	if query.Message == nil {
 		return nil
@@ -151,7 +148,6 @@ func (c *TelegramChannel) handleVerboseCallback(ctx context.Context, query teleg
 	return nil
 }
 
-// handleThinkCallback processes callback queries for think level selection
 func (c *TelegramChannel) handleThinkCallback(ctx context.Context, query telego.CallbackQuery) error {
 	if query.Message == nil {
 		return nil
@@ -220,7 +216,6 @@ func (c *TelegramChannel) handleThinkCallback(ctx context.Context, query telego.
 	return nil
 }
 
-// telegramCallbackPeerInfo extracts peer kind and peer ID from a Telegram callback query.
 func telegramCallbackPeerInfo(query telego.CallbackQuery) (peerKind string, peerID string) {
 	if query.Message != nil {
 		chat := query.Message.GetChat()
@@ -228,6 +223,5 @@ func telegramCallbackPeerInfo(query telego.CallbackQuery) (peerKind string, peer
 			return "group", fmt.Sprintf("%d", chat.ID)
 		}
 	}
-	// For DMs, use the callback sender's user ID
 	return "direct", fmt.Sprintf("%d", query.From.ID)
 }

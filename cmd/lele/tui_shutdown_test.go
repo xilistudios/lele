@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// fakeCloser records that the TUI model was closed.
 type fakeCloser struct {
 	mu     sync.Mutex
 	closed int
@@ -25,8 +24,6 @@ func (f *fakeCloser) Close() {
 	}
 }
 
-// fakeStopper records the grace and the state of the root context when the
-// join ran, which is what the exit latency depends on.
 type fakeStopper struct {
 	mu     sync.Mutex
 	calls  int
@@ -49,11 +46,6 @@ func (f *fakeStopper) StopWithin(grace time.Duration) error {
 	return f.err
 }
 
-// TestShutdownTUI_CancelsRootBeforeJoining pins the ordering the exit latency
-// depends on: the root context must be cancelled BEFORE the join, because that
-// cancellation is what aborts an in-flight provider stream. Joining first waits
-// out the whole turn (the pre-fix behaviour: 11.5 s to exit during a 15 s
-// streamed response).
 func TestShutdownTUI_CancelsRootBeforeJoining(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	model := &fakeCloser{onCall: func() {
@@ -82,9 +74,6 @@ func TestShutdownTUI_CancelsRootBeforeJoining(t *testing.T) {
 	}
 }
 
-// TestShutdownTUI_AbandonedJoinIsLoggedNotFatal verifies an abandoned teardown
-// (a turn that ignores cancellation) does not panic or abort the exit path: the
-// process must still return the terminal to the user.
 func TestShutdownTUI_AbandonedJoinIsLoggedNotFatal(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -98,8 +87,6 @@ func TestShutdownTUI_AbandonedJoinIsLoggedNotFatal(t *testing.T) {
 	}
 }
 
-// TestShutdownTUI_Idempotent pins that the deferred safety net can run after the
-// explicit call on the exit path without side effects.
 func TestShutdownTUI_Idempotent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	model := &fakeCloser{}
@@ -119,8 +106,6 @@ func TestShutdownTUI_Idempotent(t *testing.T) {
 	}
 }
 
-// TestShutdownTUI_NilTargetsDoNotPanic guards the early-return paths (a loop
-// that failed to initialise) against a nil dereference during exit.
 func TestShutdownTUI_NilTargetsDoNotPanic(t *testing.T) {
 	shutdownTUI(nil, nil, nil)
 }

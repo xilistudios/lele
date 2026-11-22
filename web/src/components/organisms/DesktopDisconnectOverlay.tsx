@@ -6,10 +6,6 @@ type Props = {
   restarting: boolean
 }
 
-/**
- * Full-screen overlay shown when the desktop backend (sidecar gateway) died.
- * Simple presentational component — all state lives in the parent hook.
- */
 export function DesktopDisconnectOverlay({ onRestart, restarting }: Props) {
   const { t } = useTranslation()
   const titleId = useId()

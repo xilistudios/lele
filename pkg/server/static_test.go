@@ -12,11 +12,6 @@ import (
 	"time"
 )
 
-// --- fixtures ---
-
-// testIndexHTML is deliberately larger than 4 KiB so a short read (a single
-// File.Read that returns fewer bytes than requested) shows up as a truncated or
-// zero-padded body.
 const testIndexHTMLSize = 8 * 1024
 
 func testIndexHTML() []byte {
@@ -32,8 +27,6 @@ func testIndexHTML() []byte {
 	return []byte(b.String())
 }
 
-// spaTestFS is a MapFS shaped like web/dist: a big index.html, content-hashed
-// chunks and a handful of names that must stay revalidated.
 func spaTestFS() fstest.MapFS {
 	return fstest.MapFS{
 		"index.html":             &fstest.MapFile{Data: testIndexHTML()},
@@ -43,10 +36,8 @@ func spaTestFS() fstest.MapFS {
 		"assets/nested.0a1b2c3d.js": &fstest.MapFile{
 			Data: []byte("export const nested = true"),
 		},
-		"assets/index-3f2a9b7c.js": &fstest.MapFile{Data: []byte("export const viteEntry = true")},
-		"assets/plain.js":          &fstest.MapFile{Data: []byte("export const plain = true")},
-		// Human-named assets whose short numeric suffix must not be mistaken
-		// for a content hash.
+		"assets/index-3f2a9b7c.js":        &fstest.MapFile{Data: []byte("export const viteEntry = true")},
+		"assets/plain.js":                 &fstest.MapFile{Data: []byte("export const plain = true")},
 		"assets/apple-touch-icon.180.png": &fstest.MapFile{Data: []byte{0x89, 'P', 'N', 'G'}},
 		"assets/font.f2.woff2":            &fstest.MapFile{Data: []byte("wOF2")},
 		"assets/icon.512.png":             &fstest.MapFile{Data: []byte{0x89, 'P', 'N', 'G'}},
@@ -73,8 +64,6 @@ func spaRequest(t *testing.T, h http.Handler, method, target string, headers map
 	h.ServeHTTP(rec, req)
 	return rec
 }
-
-// --- isImmutableAssetPath ---
 
 func TestIsImmutableAssetPath(t *testing.T) {
 	tests := []struct {
@@ -113,8 +102,6 @@ func TestIsImmutableAssetPath(t *testing.T) {
 		{"uppercase hex is not the produced format", "index_ABC.12345678.js", false},
 		{"directory named assets only", "assets/", false},
 
-		// Short numeric suffixes are not hashes (the false positive this rule
-		// was narrowed for): pinning these for a year would be the bug.
 		{"apple touch icon size suffix", "assets/apple-touch-icon.180.png", false},
 		{"font weight suffix", "assets/font.f2.woff2", false},
 		{"icon size suffix", "assets/icon.512.png", false},
@@ -130,8 +117,6 @@ func TestIsImmutableAssetPath(t *testing.T) {
 		})
 	}
 }
-
-// --- cache headers ---
 
 func TestSPAHandlerHashedAssetIsImmutable(t *testing.T) {
 	h := spaTestHandler(t)
@@ -184,7 +169,6 @@ func TestSPAHandlerConditionalHashedAssetRequest(t *testing.T) {
 		t.Errorf("304 Cache-Control = %q, want %q", got, cacheControlImmutable)
 	}
 
-	// A stale validator must still get the full body.
 	stale := spaRequest(t, h, http.MethodGet, "/index_abc.12345678.js", map[string]string{
 		"If-None-Match": `"0-deadbeef"`,
 	})
@@ -238,10 +222,6 @@ func TestSPAHandlerDoesNotCacheNonHashedNames(t *testing.T) {
 	}
 }
 
-// TestCacheControlForPath pins the allow-list decision for names that come
-// from the real bundle: a numeric suffix such as .180 / .512 / .f2 must never
-// be read as a content hash, because those files are mutable and would then be
-// pinned in the browser cache for a year without revalidation.
 func TestCacheControlForPath(t *testing.T) {
 	tests := []struct {
 		path string
@@ -268,8 +248,6 @@ func TestCacheControlForPath(t *testing.T) {
 	}
 }
 
-// TestSPAHandlerCacheControlForRealBundleNames is the same decision observed
-// end to end, through the handler that actually sets the header.
 func TestSPAHandlerCacheControlForRealBundleNames(t *testing.T) {
 	tests := []struct {
 		path string
@@ -339,8 +317,6 @@ func TestSPAHandlerIndexRouteIsRevalidated(t *testing.T) {
 	}
 }
 
-// The explicit /index.html request and the SPA fallback serve the same bytes,
-// so they must advertise the same validator.
 func TestSPAHandlerIndexETagIsStable(t *testing.T) {
 	h := spaTestHandler(t)
 
@@ -377,8 +353,6 @@ func TestSPAHandlerClientRouteFallsBackToIndex(t *testing.T) {
 	}
 }
 
-// --- API/webhook routing must not fall back to the SPA ---
-
 func TestSPAHandlerAPIPathsAreNotFound(t *testing.T) {
 	h := spaTestHandler(t)
 
@@ -395,8 +369,6 @@ func TestSPAHandlerAPIPathsAreNotFound(t *testing.T) {
 		})
 	}
 }
-
-// --- short-read regression ---
 
 func TestSPAHandlerIndexIsNotTruncated(t *testing.T) {
 	h := spaTestHandler(t)
@@ -419,15 +391,11 @@ func TestSPAHandlerIndexIsNotTruncated(t *testing.T) {
 		t.Error("memoised index ETag does not match the full fixture bytes")
 	}
 
-	// The bytes past a 4 KiB single-read boundary must be intact, not zeros.
 	if !strings.HasSuffix(string(h.index), "</html>") {
 		t.Error("memoised index is missing its tail (truncated read)")
 	}
 }
 
-// chunkedFS caps every Read at max bytes so each read returns far fewer bytes
-// than requested — the exact condition that used to truncate index.html when it
-// was loaded with a single Read call.
 type chunkedFS struct {
 	inner http.FileSystem
 	max   int
@@ -484,7 +452,6 @@ func TestSPAHandlerMissingIndexDoesNotServeGarbage(t *testing.T) {
 		t.Fatalf("status = %d, want 404 when index.html cannot be read", rec.Code)
 	}
 
-	// Real assets are still served.
 	asset := spaRequest(t, h, http.MethodGet, "/index_abc.12345678.js", nil)
 	if asset.Code != http.StatusOK {
 		t.Fatalf("asset status = %d, want 200", asset.Code)
@@ -505,9 +472,6 @@ func TestSPAHandlerShortIndexIsStillServed(t *testing.T) {
 	}
 }
 
-// --- ETag memoisation ---
-
-// countingReadSeeker counts Read calls so memoisation can be observed directly.
 type countingReadSeeker struct {
 	r     *bytes.Reader
 	reads int
@@ -552,9 +516,6 @@ func TestSPAHandlerETagForPathIsComputedOnce(t *testing.T) {
 	}
 }
 
-// The validator memo is keyed on (name, size, modTime), so a file that changed
-// on disk must not keep serving the old tag: a client revalidating a stale
-// entry would otherwise be answered 304 for bytes it never received.
 func TestSPAHandlerETagMemoInvalidatedWhenFileChanges(t *testing.T) {
 	fsys := spaTestFS()
 	fsys["assets/chunk.01234567.js"] = &fstest.MapFile{
@@ -572,8 +533,6 @@ func TestSPAHandlerETagMemoInvalidatedWhenFileChanges(t *testing.T) {
 		t.Fatalf("first body = %q, want %q", first.Body.String(), "aaaa")
 	}
 
-	// Same length, different bytes, newer mtime: the served bytes and the
-	// validator must both move.
 	fsys["assets/chunk.01234567.js"] = &fstest.MapFile{
 		Data:    []byte("bbbb"),
 		ModTime: time.Unix(1700000001, 0),
@@ -590,7 +549,6 @@ func TestSPAHandlerETagMemoInvalidatedWhenFileChanges(t *testing.T) {
 		t.Errorf("ETag = %q, want the tag of the current bytes %q", got, strongETag([]byte("bbbb")))
 	}
 
-	// Revalidating with the stale tag must return the new body, not a 304.
 	stale := spaRequest(t, h, http.MethodGet, "/assets/chunk.01234567.js", map[string]string{
 		"If-None-Match": firstETag,
 	})
@@ -602,8 +560,6 @@ func TestSPAHandlerETagMemoInvalidatedWhenFileChanges(t *testing.T) {
 	}
 }
 
-// TestSPAHandlerETagMemoIsBounded covers the cap: RegisterWebUI accepts any
-// http.FileSystem, so the memo must not grow with the number of distinct paths.
 func TestSPAHandlerETagMemoIsBounded(t *testing.T) {
 	h := spaTestHandler(t)
 	h.etagCap = 2
@@ -631,7 +587,6 @@ func TestSPAHandlerETagMemoIsBounded(t *testing.T) {
 		t.Errorf("memo holds %d entries, want <= %d (cap not enforced)", size, h.etagCap)
 	}
 
-	// An evicted path must still be served correctly, not 500.
 	rec := spaRequest(t, h, http.MethodGet, "/index_abc.12345678.js", nil)
 	if rec.Code != http.StatusOK || rec.Body.String() != "console.log('entry-hashed')" {
 		t.Fatalf("re-request after eviction: status = %d body = %q", rec.Code, rec.Body.String())
@@ -641,12 +596,9 @@ func TestSPAHandlerETagMemoIsBounded(t *testing.T) {
 	}
 }
 
-// TestSPAHandlerETagForPathIsSingleFlight pins the cold-start behaviour: the
-// first request for a path reads the asset to hash it, the concurrent ones must
-// reuse that read instead of each io.ReadAll-ing hundreds of KB.
 func TestSPAHandlerETagForPathIsSingleFlight(t *testing.T) {
 	h := newSPAHandler(http.FS(fstest.MapFS{}))
-	data := bytes.Repeat([]byte("console.log('chunk');"), 2048) // ~43 KB
+	data := bytes.Repeat([]byte("console.log('chunk');"), 2048)
 	key := etagKey{name: "/assets/cold.0a1b2c3d.js", size: int64(len(data))}
 
 	const callers = 16
@@ -687,8 +639,6 @@ func TestSPAHandlerETagForPathIsSingleFlight(t *testing.T) {
 	}
 }
 
-// --- concurrency ---
-
 func TestSPAHandlerETagMemoIsConcurrencySafe(t *testing.T) {
 	h := spaTestHandler(t)
 	paths := []string{
@@ -728,12 +678,9 @@ func TestSPAHandlerETagMemoIsConcurrencySafe(t *testing.T) {
 	}
 }
 
-// --- benchmark (no per-request FileServer / no per-request ETag recomputation) ---
-
 func benchmarkSPAHandler(b *testing.B, path string) {
 	h := newSPAHandler(http.FS(spaTestFS()))
 
-	// Warm the memoised index + ETag so the measured path is the cached one.
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
 
 	b.ReportAllocs()
@@ -752,10 +699,6 @@ func BenchmarkSPAHandlerStaticAsset(b *testing.B) {
 	benchmarkSPAHandler(b, "/index_abc.12345678.js")
 }
 
-// BenchmarkSPAHandlerHarnessBaseline measures the harness itself (request +
-// Recorder + a no-op handler) so the delta of the benchmark above is the
-// handler's own cost: any per-request http.FileServer/ETag recomputation would
-// show up as extra allocs/op there.
 func BenchmarkSPAHandlerHarnessBaseline(b *testing.B) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
 

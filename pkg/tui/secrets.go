@@ -9,8 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// keyringSvc returns the keyring service from the agent loop, or nil if the
-// module is disabled / unavailable.
 func (m *Model) keyringSvc() *keyring.Service {
 	if m.agentLoop == nil {
 		return nil
@@ -18,7 +16,6 @@ func (m *Model) keyringSvc() *keyring.Service {
 	return m.agentLoop.KeyringService()
 }
 
-// loadSecrets refreshes the secrets modal list from the keyring service.
 func (m *Model) loadSecrets() {
 	m.modalItems = nil
 	m.secretsModalKeys = nil
@@ -43,12 +40,9 @@ func (m *Model) loadSecrets() {
 		m.secretsModalKeys = append(m.secretsModalKeys, s.Name)
 	}
 
-	// The list may have shrunk (e.g. a secret was deleted while the cursor was
-	// on the last row) — keep the cursor within bounds.
 	m.clampModalCursor()
 }
 
-// formatSecretLine renders a single secret as a compact list line.
 func formatSecretLine(s keyring.SecretMeta) string {
 	name := truncateRightCells(s.Name, 36)
 
@@ -71,7 +65,6 @@ func formatSecretLine(s keyring.SecretMeta) string {
 	return line
 }
 
-// secretsHeader builds the modal title with a backend indicator.
 func (m *Model) secretsHeader() string {
 	svc := m.keyringSvc()
 	backend := "—"
@@ -84,7 +77,6 @@ func (m *Model) secretsHeader() string {
 	return title + "  " + CommentColorStyle.Render("["+i18n.T("tui.secretsBackend")+": "+backend+"]")
 }
 
-// renderSecretDetail renders the detail view for the currently selected secret.
 func (m *Model) renderSecretDetail() string {
 	svc := m.keyringSvc()
 	if svc == nil {
@@ -121,7 +113,6 @@ func (m *Model) renderSecretDetail() string {
 		addField(i18n.T("tui.secretScope"), CommentColorStyle.Render("(all agents)"))
 	}
 
-	// Value: masked by default, revealed on demand.
 	if m.secretsReveal {
 		val, err := svc.GetRaw(name)
 		if err != nil {
@@ -150,7 +141,6 @@ func (m *Model) renderSecretDetail() string {
 	return m.paintFrame(box)
 }
 
-// findSecretMeta looks up a secret's metadata by name.
 func (m *Model) findSecretMeta(svc *keyring.Service, name string) (keyring.SecretMeta, bool) {
 	all, err := svc.ListAll()
 	if err != nil {
@@ -164,7 +154,6 @@ func (m *Model) findSecretMeta(svc *keyring.Service, name string) (keyring.Secre
 	return keyring.SecretMeta{}, false
 }
 
-// selectedSecretName returns the name of the currently selected secret.
 func (m *Model) selectedSecretName() string {
 	if m.secretsDetailMode && m.secretsDetailName != "" {
 		return m.secretsDetailName
@@ -175,8 +164,6 @@ func (m *Model) selectedSecretName() string {
 	return ""
 }
 
-// reselectSecret restores the selection cursor to the secret with the given
-// name after the list has been reloaded.
 func (m *Model) reselectSecret(name string) {
 	for i, n := range m.secretsModalKeys {
 		if n == name {
@@ -192,22 +179,18 @@ func (m *Model) reselectSecret(name string) {
 	}
 }
 
-// startAddSecret initializes the multi-step add-secret form.
 func (m *Model) startAddSecret() {
 	m.modalMode = ModalAddSecret
 	m.modalItems = nil
 	m.formStepIndex = 0
-	m.formValues = make([]string, 5) // name, value, description, tags, scope
+	m.formValues = make([]string, 5)
 	m.formError = ""
 	m.formConfirmMode = false
 	m.textInput.SetValue("")
 	m.textInput.Placeholder = "Secret name (e.g. openai.api_key)"
-	// Audit M2: sync echo before the first frame renders the widget (the
-	// forwarding block only runs on the next keystroke).
 	m.syncTextInputEcho()
 }
 
-// maskSecretValue renders a partially masked secret value for display.
 func maskSecretValue(v string) string {
 	if len(v) <= 8 {
 		return "••••"
@@ -215,7 +198,6 @@ func maskSecretValue(v string) string {
 	return v[:4] + strings.Repeat("•", 8) + v[len(v)-4:]
 }
 
-// renderSecretsList renders the secrets list modal with action hints.
 func (m *Model) renderSecretsList(modalTitle string) string {
 	maxVisible := m.maxModalVisible()
 
@@ -262,7 +244,6 @@ func (m *Model) renderSecretsList(modalTitle string) string {
 	return m.paintFrame(modalView)
 }
 
-// splitCSV splits a comma-separated string into trimmed, non-empty fields.
 func splitCSV(s string) []string {
 	parts := strings.Split(s, ",")
 	out := make([]string, 0, len(parts))

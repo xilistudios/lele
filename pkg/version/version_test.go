@@ -1,6 +1,3 @@
-// Copyright (c) 2026 Lele contributors
-// License: MIT
-
 package version
 
 import (
@@ -36,16 +33,12 @@ func TestStripDirty(t *testing.T) {
 }
 
 func TestSetAndGet(t *testing.T) {
-	// Set with a real value wins over build info.
 	Set("0.7.10")
 	if got := Get(); got != "0.7.10" {
 		t.Errorf("Get() = %q after Set, want %q", got, "0.7.10")
 	}
 }
 
-// TestSetIgnoresInvalid asserts that empty and placeholder values never
-// overwrite a known version (a caller must be able to Set defensively at
-// startup, e.g. with an unstamped "dev" default).
 func TestSetIgnoresInvalid(t *testing.T) {
 	Set("1.2.3")
 	Set("")
@@ -56,44 +49,33 @@ func TestSetIgnoresInvalid(t *testing.T) {
 	}
 }
 
-// TestGetNeverEmpty is the invariant the UI relies on.
 func TestGetNeverEmpty(t *testing.T) {
 	if got := Get(); got == "" {
 		t.Error("Get() returned empty string")
 	}
 }
 
-// TestGetNeverDirty is the regression guard for the released-TUI bug
-// ("0.7.10-dirty" shown in the status bar): whatever the toolchain stamped
-// into build info, Get() must never surface a dirty marker.
 func TestGetNeverDirty(t *testing.T) {
 	got := Get()
 	if got == "v0.7.10+dirty" || got == "0.7.10-dirty" {
 		t.Fatalf("Get() leaked dirty marker: %q", got)
 	}
-	// Belt and braces: no dirty suffix in any resolution path.
 	if StripDirty(got) != got {
 		t.Errorf("Get() = %q, which still carries a dirty marker", got)
 	}
 }
 
-// TestGetFallbackMatchesStripBuildInfo documents the fallback contract: when
-// nothing was injected, the result is the build-info version with the dirty
-// marker stripped (or "dev" for unstamped/(devel) builds).
 func TestGetFallbackMatchesStripBuildInfo(t *testing.T) {
 	info, ok := debug.ReadBuildInfo()
 	if !ok || info == nil {
 		t.Skip("no build info available in this environment")
 	}
-	// Test binaries report "(devel)" or a synthetic pseudo-version; both are
-	// handled. Just assert the value is sane and never empty.
 	v := Get()
 	if v == "" {
 		t.Error("fallback Get() returned empty string")
 	}
 }
 
-// TestConcurrentSetGet guards the atomic access (run with -race in CI).
 func TestConcurrentSetGet(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 32; i++ {

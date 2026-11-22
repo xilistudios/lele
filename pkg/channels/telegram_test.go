@@ -29,8 +29,6 @@ func TestTelegramMenuCommands(t *testing.T) {
 	}
 }
 
-// recordingRoundTripper captures requests instead of sending them, so the
-// hook tests can assert deleteMessage behavior without a real bot/network.
 type recordingRoundTripper struct {
 	mu    sync.Mutex
 	count int
@@ -53,9 +51,6 @@ func (r *recordingRoundTripper) calls() int {
 	return r.count
 }
 
-// newTelegramHookTestChannel builds a minimal TelegramChannel (no bot, no
-// polling) wired exactly like NewTelegramChannel for testing the inbound-drop
-// rollback hook.
 func newTelegramHookTestChannel(t *testing.T) (*TelegramChannel, *recordingRoundTripper) {
 	t.Helper()
 
@@ -69,15 +64,10 @@ func newTelegramHookTestChannel(t *testing.T) (*TelegramChannel, *recordingRound
 	}, rt
 }
 
-// TestTelegramInboundDroppedHookWiredByConstructor asserts the invariant that
-// NewTelegramChannel installs the rollback hook: a channel built by the real
-// constructor must have InboundDroppedHook set, so a dropped inbound message
-// can never leave a stuck typing indicator behind.
 func TestTelegramInboundDroppedHookWiredByConstructor(t *testing.T) {
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 
 	cfg := &config.Config{}
-	// telego.NewBot validates the token format offline (no network call).
 	cfg.Channels.Telegram.Token = "123456:" + string(bytes.Repeat([]byte("a"), 35))
 
 	ch, err := NewTelegramChannel(cfg, bus.NewMessageBus(), nil, nil)
@@ -89,47 +79,33 @@ func TestTelegramInboundDroppedHookWiredByConstructor(t *testing.T) {
 	}
 }
 
-// TestTelegramInboundDroppedHookCancelsTyping verifies the rollback hook that
-// NewTelegramChannel installs on BaseChannel: when the bus rejects an inbound
-// message, the thinking indicator for the exact chatID:messageID key is
-// cancelled and removed from stopThinking, and the pending "Thinking... 💭"
-// placeholder is deleted and removed from placeholders.
 func TestTelegramInboundDroppedHookCancelsTyping(t *testing.T) {
 	ch, rt := newTelegramHookTestChannel(t)
 
-	// Wire the hook exactly as the constructor does.
 	ch.InboundDroppedHook = ch.handleInboundDropped
 
 	const (
 		chatIDStr = "12345"
 		messageID = "678"
 	)
-	thinkingKey := chatIDStr + ":" + messageID // mirrors fmt.Sprintf("%d:%d", chatID, msgID)
+	thinkingKey := chatIDStr + ":" + messageID
 
-	// Thinking indicator: cancel func + closed doneChan (Cancel() waits on
-	// doneChan with a timeout, so a closed channel keeps it fast).
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	close(done)
 	ch.stopThinking.Store(thinkingKey, &thinkingCancel{fn: cancel, doneChan: done})
 
-	// Sibling entry for another message in the same chat: only the
-	// stopAllThinkingForChat safety net should remove it.
 	sibCtx, sibCancel := context.WithCancel(context.Background())
 	sibDone := make(chan struct{})
 	close(sibDone)
 	ch.stopThinking.Store(chatIDStr+":999", &thinkingCancel{fn: sibCancel, doneChan: sibDone})
 
-	// Entry belonging to a DIFFERENT chat: must survive, proving the
-	// rollback is scoped to this chat and does not over-cancel.
 	otherCtx, otherCancel := context.WithCancel(context.Background())
 	otherDone := make(chan struct{})
 	close(otherDone)
 	otherKey := "99999:1"
 	ch.stopThinking.Store(otherKey, &thinkingCancel{fn: otherCancel, doneChan: otherDone})
 
-	// Placeholder for the same chat (stored keyed by chatID string, value
-	// is the int Telegram message ID, as in telegram_messages.go).
 	ch.placeholders.Store(chatIDStr, 4242)
 
 	msg := bus.InboundMessage{
@@ -142,7 +118,6 @@ func TestTelegramInboundDroppedHookCancelsTyping(t *testing.T) {
 
 	ch.InboundDroppedHook(msg)
 
-	// Exact thinking key removed and its context cancelled.
 	if _, ok := ch.stopThinking.Load(thinkingKey); ok {
 		t.Error("thinking entry for exact key was not removed from stopThinking")
 	}
@@ -152,7 +127,6 @@ func TestTelegramInboundDroppedHookCancelsTyping(t *testing.T) {
 		t.Error("typing indicator context for exact key was not cancelled")
 	}
 
-	// Safety net removed the sibling entry too.
 	if _, ok := ch.stopThinking.Load(chatIDStr + ":999"); ok {
 		t.Error("stopAllThinkingForChat safety net did not remove sibling entry")
 	}
@@ -162,7 +136,6 @@ func TestTelegramInboundDroppedHookCancelsTyping(t *testing.T) {
 		t.Error("sibling typing indicator context was not cancelled")
 	}
 
-	// Placeholder deleted from the map and a deleteMessage call issued.
 	if _, ok := ch.placeholders.Load(chatIDStr); ok {
 		t.Error("placeholder entry was not removed from placeholders")
 	}
@@ -170,7 +143,6 @@ func TestTelegramInboundDroppedHookCancelsTyping(t *testing.T) {
 		t.Errorf("expected exactly 1 deleteMessage HTTP call, got %d", got)
 	}
 
-	// The other chat's indicator must be untouched.
 	if _, ok := ch.stopThinking.Load(otherKey); !ok {
 		t.Error("rollback must not cancel thinking entries of other chats")
 	}
@@ -181,9 +153,6 @@ func TestTelegramInboundDroppedHookCancelsTyping(t *testing.T) {
 	}
 }
 
-// TestTelegramInboundDroppedHookMissingMetadata exercises the degraded paths:
-// no metadata (key rebuild impossible — safety net must still sweep) and no
-// placeholder (no HTTP delete must fire).
 func TestTelegramInboundDroppedHookMissingMetadata(t *testing.T) {
 	ch, rt := newTelegramHookTestChannel(t)
 	ch.InboundDroppedHook = ch.handleInboundDropped
@@ -208,8 +177,6 @@ func TestTelegramInboundDroppedHookMissingMetadata(t *testing.T) {
 	}
 }
 
-// TestTelegramInboundDroppedHookEmptyChatID verifies the hook is a no-op for
-// messages without a chat ID (e.g. session-keyed system publishes).
 func TestTelegramInboundDroppedHookEmptyChatID(t *testing.T) {
 	ch, rt := newTelegramHookTestChannel(t)
 	ch.InboundDroppedHook = ch.handleInboundDropped
@@ -221,8 +188,6 @@ func TestTelegramInboundDroppedHookEmptyChatID(t *testing.T) {
 	}
 }
 
-// TestTelegramHandleInboundDroppedHonorsDeadline ensures the placeholder
-// deletion uses a bounded context (5s timeout per spec).
 func TestTelegramHandleInboundDroppedHonorsDeadline(t *testing.T) {
 	ch, _ := newTelegramHookTestChannel(t)
 
@@ -242,7 +207,6 @@ func TestTelegramHandleInboundDroppedHonorsDeadline(t *testing.T) {
 	if !gotDeadline {
 		t.Error("deleteMessage request must carry a bounded context deadline")
 	}
-	// Spec: 5s timeout inside the hook.
 	if deadline <= 0 || deadline > 5*time.Second {
 		t.Errorf("expected a bounded deadline of at most 5s, got %v", deadline)
 	}

@@ -1,10 +1,5 @@
 //go:build bedrock
 
-// PicoClaw - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 PicoClaw contributors
-
 package bedrock
 
 import (
@@ -31,12 +26,10 @@ func TestConvertMessages_SystemPrompts(t *testing.T) {
 	assert.Len(t, systemPrompts, 1)
 	assert.Len(t, bedrockMsgs, 1)
 
-	// Check system prompt
 	textBlock, ok := systemPrompts[0].(*types.SystemContentBlockMemberText)
 	require.True(t, ok)
 	assert.Equal(t, "You are a helpful assistant.", textBlock.Value)
 
-	// Check user message
 	assert.Equal(t, types.ConversationRoleUser, bedrockMsgs[0].Role)
 }
 
@@ -87,8 +80,6 @@ func TestConvertMessages_ToolResult(t *testing.T) {
 }
 
 func TestConvertMessages_MultipleToolResultsMerged(t *testing.T) {
-	// When an assistant makes multiple tool calls, all tool results must be
-	// merged into a single user message for Bedrock
 	messages := []Message{
 		{Role: "user", Content: "What's the weather in NYC and LA?"},
 		{
@@ -105,20 +96,15 @@ func TestConvertMessages_MultipleToolResultsMerged(t *testing.T) {
 
 	bedrockMsgs, _ := convertMessages(messages)
 
-	// Should be: user message, assistant message, merged tool results (single user message)
 	assert.Len(t, bedrockMsgs, 3)
 
-	// First message: user
 	assert.Equal(t, types.ConversationRoleUser, bedrockMsgs[0].Role)
 
-	// Second message: assistant with tool calls
 	assert.Equal(t, types.ConversationRoleAssistant, bedrockMsgs[1].Role)
 
-	// Third message: merged tool results in single user message
 	assert.Equal(t, types.ConversationRoleUser, bedrockMsgs[2].Role)
-	assert.Len(t, bedrockMsgs[2].Content, 2) // Both tool results in one message
+	assert.Len(t, bedrockMsgs[2].Content, 2)
 
-	// Verify both tool results are present
 	result1, ok := bedrockMsgs[2].Content[0].(*types.ContentBlockMemberToolResult)
 	require.True(t, ok)
 	assert.Equal(t, "call_nyc", aws.ToString(result1.Value.ToolUseId))
@@ -146,14 +132,12 @@ func TestConvertMessages_AssistantWithToolCalls(t *testing.T) {
 	bedrockMsgs, _ := convertMessages(messages)
 
 	assert.Len(t, bedrockMsgs, 1)
-	assert.Len(t, bedrockMsgs[0].Content, 2) // text + tool use
+	assert.Len(t, bedrockMsgs[0].Content, 2)
 
-	// Check text content
 	textBlock, ok := bedrockMsgs[0].Content[0].(*types.ContentBlockMemberText)
 	require.True(t, ok)
 	assert.Equal(t, "Let me calculate that.", textBlock.Value)
 
-	// Check tool use
 	toolUse, ok := bedrockMsgs[0].Content[1].(*types.ContentBlockMemberToolUse)
 	require.True(t, ok)
 	assert.Equal(t, "call_456", aws.ToString(toolUse.Value.ToolUseId))
@@ -230,7 +214,6 @@ func TestConvertTools_NilParameters(t *testing.T) {
 	toolConfig := convertTools(tools)
 
 	assert.Len(t, toolConfig.Tools, 1)
-	// Should not panic and should create a valid tool
 }
 
 func TestBuildUserContent_TextOnly(t *testing.T) {
@@ -245,8 +228,6 @@ func TestBuildUserContent_TextOnly(t *testing.T) {
 }
 
 func TestBuildUserContent_WithImage(t *testing.T) {
-	// Base64-encoded 1x1 PNG (the provider doesn't validate image correctness,
-	// it just verifies the format and base64 decoding works)
 	b64Data := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
 
 	msg := Message{
@@ -258,12 +239,10 @@ func TestBuildUserContent_WithImage(t *testing.T) {
 
 	assert.Len(t, content, 2)
 
-	// Check text
 	textBlock, ok := content[0].(*types.ContentBlockMemberText)
 	require.True(t, ok)
 	assert.Equal(t, "Look at this image", textBlock.Value)
 
-	// Check image
 	imageBlock, ok := content[1].(*types.ContentBlockMemberImage)
 	require.True(t, ok)
 	assert.Equal(t, types.ImageFormatPng, imageBlock.Value.Format)
@@ -277,7 +256,6 @@ func TestBuildUserContent_SkipsInvalidBase64(t *testing.T) {
 
 	content := buildUserContent(msg)
 
-	// Should only have text, image should be skipped
 	assert.Len(t, content, 1)
 }
 
@@ -289,13 +267,9 @@ func TestBuildUserContent_SkipsNonBase64Data(t *testing.T) {
 
 	content := buildUserContent(msg)
 
-	// Should only have text, non-base64 image should be skipped
 	assert.Len(t, content, 1)
 }
 
-// TestBuildUserContent_SkipsVideoParts verifies the defensive hardening:
-// Bedrock (Anthropic family) has no native video input, so a video_url
-// content part must be dropped without affecting the remaining blocks.
 func TestBuildUserContent_SkipsVideoParts(t *testing.T) {
 	msg := Message{
 		ContentParts: []protocoltypes.ContentPart{
@@ -306,7 +280,6 @@ func TestBuildUserContent_SkipsVideoParts(t *testing.T) {
 
 	content := buildUserContent(msg)
 
-	// Only the text block survives — the video part is dropped, no panic.
 	assert.Len(t, content, 1)
 	textBlock, ok := content[0].(*types.ContentBlockMemberText)
 	require.True(t, ok)
@@ -325,7 +298,6 @@ func TestBuildAssistantContent_SkipsEmptyToolName(t *testing.T) {
 
 	content := buildAssistantContent(msg)
 
-	// Should have text + 1 valid tool
 	assert.Len(t, content, 2)
 }
 
@@ -345,12 +317,11 @@ func TestBuildAssistantContent_NilArguments(t *testing.T) {
 }
 
 func TestBuildAssistantContent_FunctionFallback(t *testing.T) {
-	// When Name/Arguments are empty (json:"-"), should fallback to Function fields
 	msg := Message{
 		ToolCalls: []protocoltypes.ToolCall{
 			{
 				ID:   "1",
-				Name: "", // empty, should fallback to Function.Name
+				Name: "",
 				Function: &protocoltypes.FunctionCall{
 					Name:      "fallback_tool",
 					Arguments: `{"key":"value"}`,
@@ -428,9 +399,6 @@ func TestParseResponse_StopReasons(t *testing.T) {
 }
 
 func TestParseResponse_WithToolCalls(t *testing.T) {
-	// Note: document.NewLazyDocument has limitations with UnmarshalSmithyDocument in tests,
-	// so we test the structure extraction and verify Arguments gets populated (even if empty
-	// due to SDK limitations). The actual unmarshal works correctly at runtime.
 	toolInput := document.NewLazyDocument(map[string]any{
 		"location": "San Francisco",
 		"unit":     "celsius",
@@ -466,19 +434,15 @@ func TestParseResponse_WithToolCalls(t *testing.T) {
 	assert.Equal(t, "tool_calls", resp.FinishReason)
 	assert.Len(t, resp.ToolCalls, 1)
 
-	// Verify tool call ID and Name are extracted correctly
 	tc := resp.ToolCalls[0]
 	assert.Equal(t, "call_weather_123", tc.ID)
 	assert.Equal(t, "get_weather", tc.Name)
 
-	// Verify Function fields are also populated
 	require.NotNil(t, tc.Function)
 	assert.Equal(t, "get_weather", tc.Function.Name)
 
-	// Verify Arguments is not nil (content may vary due to SDK limitations in tests)
 	assert.NotNil(t, tc.Arguments)
 
-	// Verify usage
 	assert.Equal(t, 20, resp.Usage.PromptTokens)
 	assert.Equal(t, 15, resp.Usage.CompletionTokens)
 	assert.Equal(t, 35, resp.Usage.TotalTokens)
@@ -516,7 +480,6 @@ func TestParseResponse_MultipleToolCalls(t *testing.T) {
 	assert.Equal(t, "tool_calls", resp.FinishReason)
 	assert.Len(t, resp.ToolCalls, 2)
 
-	// Verify tool call structure
 	assert.Equal(t, "call_1", resp.ToolCalls[0].ID)
 	assert.Equal(t, "tool_a", resp.ToolCalls[0].Name)
 	assert.NotNil(t, resp.ToolCalls[0].Arguments)
@@ -555,7 +518,6 @@ func TestParseResponse_ToolCallWithNilInput(t *testing.T) {
 	assert.Len(t, resp.ToolCalls, 1)
 	assert.Equal(t, "call_nil", resp.ToolCalls[0].ID)
 	assert.Equal(t, "no_args_tool", resp.ToolCalls[0].Name)
-	// Arguments should be empty map, not nil
 	assert.NotNil(t, resp.ToolCalls[0].Arguments)
 	assert.Empty(t, resp.ToolCalls[0].Arguments)
 }

@@ -5,21 +5,9 @@ import pt from './locales/pt.json'
 
 type Json = Record<string, unknown>
 
-/**
- * Parity for the per-model reasoning override copy added to the provider model
- * editor (settings.fields.modelReasoning*, their settings.descriptions.*
- * siblings and settings.options.reasoningDefault).
- *
- * Same rationale as add-provider-keys.test.ts: web i18n falls back to 'es', so
- * a key missing from es.json renders the raw key for every local user, and a
- * key missing from pt.json is invisible because the Spanish fallback answers
- * silently. This is the only thing that catches either before it ships.
- */
-
 const PREFIXES = ['settings.fields.modelReasoning', 'settings.descriptions.modelReasoning'] as const
 const OPTION_KEYS = ['settings.options.reasoningDefault'] as const
 
-/** Flatten a nested object into dotted paths ("a.b", "a.c", …). */
 function flatten(prefix: string, value: unknown, out: string[] = []): string[] {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     for (const [key, child] of Object.entries(value as Json)) {
@@ -31,7 +19,6 @@ function flatten(prefix: string, value: unknown, out: string[] = []): string[] {
   return out
 }
 
-/** Every locale key of the reasoning group plus the shared option key. */
 function reasoningKeys(locale: Json): string[] {
   const all = flatten('', locale)
   return all
@@ -40,7 +27,6 @@ function reasoningKeys(locale: Json): string[] {
     .sort()
 }
 
-/** Keys present in `a` but not in `b`, one per line ('' when there are none). */
 function missing(a: string[], b: string[]): string {
   const set = new Set(b)
   return a.filter((key) => !set.has(key)).join('\n')
@@ -50,7 +36,6 @@ const enKeys = reasoningKeys(en as Json)
 const esKeys = reasoningKeys(es as Json)
 const ptKeys = reasoningKeys(pt as Json)
 
-// The four controls the model editor renders, one key each.
 const EXPECTED = [
   'settings.fields.modelReasoningEffort',
   'settings.fields.modelReasoningSummary',

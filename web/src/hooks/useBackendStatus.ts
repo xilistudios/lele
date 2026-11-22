@@ -12,14 +12,6 @@ export type BackendStatus = {
 
 const POLL_INTERVAL_MS = 3000
 
-/**
- * Polls the Tauri sidecar backend for liveness. Only active in desktop mode
- * (`enabled`). Distinguishes "backend not ready yet" from "backend died" by
- * tracking whether a poll ever reported `running: true`; only then is a
- * non-running status reported as a disconnect.
- *
- * Visibility-gated: a hidden tab does no polling at all (see usePageVisible).
- */
 export function useBackendStatus(enabled: boolean) {
   const [status, setStatus] = useState<BackendStatus | null>(null)
   const [restarting, setRestarting] = useState(false)
@@ -33,10 +25,6 @@ export function useBackendStatus(enabled: boolean) {
       return
     }
 
-    // Hidden tab: no interval, no request. Visibility is an effect dependency,
-    // so becoming visible re-runs the effect and the immediate `poll()` below
-    // refreshes once before the interval resumes — the status must never be
-    // left stale just because the interval happened not to fire again.
     if (!pageVisible) return
 
     let cancelled = false
@@ -66,7 +54,6 @@ export function useBackendStatus(enabled: boolean) {
     setRestarting(true)
     try {
       await invokeDesktop('restart_backend')
-      // The old backend is gone; a new one will be reported by the next poll.
       seenRunning.current = false
     } finally {
       setRestarting(false)

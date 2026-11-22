@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// writeValidResponse writes a minimal valid Azure OpenAI chat completion response.
 func writeValidResponse(w http.ResponseWriter) {
 	resp := map[string]any{
 		"choices": []map[string]any{
@@ -209,7 +208,7 @@ func TestProviderChat_AzureDeploymentNameEscaped(t *testing.T) {
 	var capturedPath string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedPath = r.URL.RawPath // use RawPath to see percent-encoding
+		capturedPath = r.URL.RawPath
 		if capturedPath == "" {
 			capturedPath = r.URL.Path
 		}
@@ -219,13 +218,11 @@ func TestProviderChat_AzureDeploymentNameEscaped(t *testing.T) {
 
 	p := NewProvider("test-key", server.URL, "")
 
-	// Deployment name with characters that could cause path injection
 	_, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, "my deploy/../../admin", nil)
 	if err != nil {
 		t.Fatalf("Chat() error = %v", err)
 	}
 
-	// The slash and special chars in the deployment name must be escaped, not treated as path separators
 	if capturedPath == "/openai/deployments/my deploy/../../admin/chat/completions" {
 		t.Fatal("deployment name was interpolated without escaping — path injection possible")
 	}

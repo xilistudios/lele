@@ -258,8 +258,6 @@ func TestSendOutboundMessage_StopsOnChunkError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error when a chunk send fails")
 	}
-	// The first chunk made it out, so this is the partial case: the spool must
-	// Forget the row rather than Release it, or chunk 1 would be sent twice.
 	if res != sendPartial {
 		t.Fatalf("sendOutboundMessage result = %v, want sendPartial", res)
 	}
@@ -268,9 +266,6 @@ func TestSendOutboundMessage_StopsOnChunkError(t *testing.T) {
 	}
 }
 
-// The third arm of the tri-state: a channel that refuses the very first chunk
-// must report sendNotStarted, because nothing reached the wire and the spool is
-// allowed to replay the whole message.
 func TestSendOutboundMessage_NotStartedWhenFirstChunkFails(t *testing.T) {
 	channel := &recordingChannel{failAt: 1}
 	msg := bus.OutboundMessage{

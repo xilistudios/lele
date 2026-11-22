@@ -18,10 +18,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// ── helpers ────────────────────────────────────────────────────────────
-
-// mcpWriteDoc writes doc as <dir>/mcp.json with raw bytes (pkg/mcp's
-// writer is deliberately NOT used in fixtures).
 func mcpWriteDoc(t *testing.T, dir, doc string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -32,15 +28,12 @@ func mcpWriteDoc(t *testing.T, dir, doc string) {
 	}
 }
 
-// mcpKeyRunes builds a rune key (e.g. "f", "q") like bubbletea does.
 func mcpKeyRunes(r rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
 }
 
-// ── 1. formatMCPItem table ─────────────────────────────────────────────
-
 func TestFormatMCPItem(t *testing.T) {
-	pad := strings.Repeat(" ", 12) // %-15s of "srv"
+	pad := strings.Repeat(" ", 12)
 	cases := []struct {
 		name, layer, effective, want string
 	}{
@@ -55,8 +48,6 @@ func TestFormatMCPItem(t *testing.T) {
 		{"srv", mcp.LayerProject, "invalid", "! srv" + pad + " — [project]"},
 	}
 	for _, tc := range cases {
-		// No auth verdict: the marker is empty and the row keeps EXACTLY the
-		// shape it had before the auth suffix existed.
 		got := formatMCPItem(tc.name, tc.layer, tc.effective, "")
 		if got != tc.want {
 			t.Errorf("formatMCPItem(%q,%q,%q) = %q, want %q",
@@ -65,11 +56,6 @@ func TestFormatMCPItem(t *testing.T) {
 	}
 }
 
-// ── 2. loadMCPList on real t.TempDir() fixtures ────────────────────────
-
-// mcpFixturePaths builds three disjoint layer roots:
-//
-//	global: alpha, beta   agent: gamma   project: delta
 func mcpFixturePaths(t *testing.T) mcp.Paths {
 	t.Helper()
 	root := t.TempDir()
@@ -92,7 +78,7 @@ func TestLoadMCPList_FiltersSortKeysAndCursor(t *testing.T) {
 
 	cases := []struct {
 		filter int
-		want   []string // expected keys, sorted
+		want   []string
 	}{
 		{mcpFilterAll, []string{"alpha", "beta", "delta", "gamma"}},
 		{mcpFilterGlobal, []string{"alpha", "beta"}},
@@ -102,7 +88,6 @@ func TestLoadMCPList_FiltersSortKeysAndCursor(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("filter=%d", tc.filter), func(t *testing.T) {
 			m := &Model{modalMode: ModalMCP, mcpFilter: tc.filter}
-			// Cursor far out of range must be clamped into the new list.
 			m.modalSelectedIdx = 99
 			m.loadMCPListWith(paths)
 
@@ -131,7 +116,6 @@ func TestLoadMCPList_FiltersSortKeysAndCursor(t *testing.T) {
 }
 
 func TestLoadMCPList_EmptyInventory(t *testing.T) {
-	// Roots that exist but hold no mcp.json at all.
 	root := t.TempDir()
 	paths := mcp.Paths{
 		LeleDir:        filepath.Join(root, "global"),
@@ -149,8 +133,6 @@ func TestLoadMCPList_EmptyInventory(t *testing.T) {
 	}
 }
 
-// ── 3. registration completeness via Update ────────────────────────────
-
 func TestMCPToggleResult_RoutedByUpdateWithoutLeakingIntoInput(t *testing.T) {
 	m := &Model{chatInput: textarea.New()}
 	m.chatInput.SetValue("typed")
@@ -160,17 +142,13 @@ func TestMCPToggleResult_RoutedByUpdateWithoutLeakingIntoInput(t *testing.T) {
 
 	_, _ = m.Update(mcpToggleResultMsg{name: "svc", err: errors.New("boom")})
 
-	// Routed to the handler (feedback line carries the server name)…
 	if !strings.Contains(m.mcpFeedback, "svc") {
 		t.Errorf("toggle-result not routed to handler: mcpFeedback = %q", m.mcpFeedback)
 	}
-	// …and it never reached the chat textarea.
 	if got := m.chatInput.Value(); got != "typed" {
 		t.Errorf("text input mutated by the msg: %q", got)
 	}
 }
-
-// ── 4. handleMCPKey ────────────────────────────────────────────────────
 
 func TestHandleMCPKey_SpaceTogglesSelectedName(t *testing.T) {
 	m := &Model{modalMode: ModalMCP}
@@ -178,8 +156,6 @@ func TestHandleMCPKey_SpaceTogglesSelectedName(t *testing.T) {
 	m.modalItems = []string{"row0", "row1"}
 	m.modalSelectedIdx = 1
 
-	// No agent loop: the cmd reports unavailability but must carry the
-	// selected name (and must not panic).
 	cmd, handled := m.handleMCPKey(tea.KeyMsg{Type: tea.KeySpace})
 	if !handled {
 		t.Fatal("space not handled")
@@ -245,8 +221,6 @@ func TestHandleMCPKey_EnterKeepsCursor(t *testing.T) {
 	}
 }
 
-// ── 5. the toggle writes the OWNING layer ──────────────────────────────
-
 func TestMCPToggleCmdFor_WritesOwningLayerOnly(t *testing.T) {
 	root := t.TempDir()
 	paths := mcp.Paths{
@@ -266,8 +240,6 @@ func TestMCPToggleCmdFor_WritesOwningLayerOnly(t *testing.T) {
 		t.Fatalf("read global: %v", err)
 	}
 
-	// The agent stub shadows the global definition ⇒ the agent layer owns
-	// the winning entry, so the write must hit the agent file only.
 	got := mcpToggleCmdFor(paths, "svc")()
 	res, ok := got.(mcpToggleResultMsg)
 	if !ok {
@@ -283,7 +255,6 @@ func TestMCPToggleCmdFor_WritesOwningLayerOnly(t *testing.T) {
 		t.Error("result changed = false, want true")
 	}
 
-	// GLOBAL: byte-identical (it was shadowed, never the toggle target).
 	after, err := os.ReadFile(globalPath)
 	if err != nil {
 		t.Fatalf("re-read global: %v", err)
@@ -292,7 +263,6 @@ func TestMCPToggleCmdFor_WritesOwningLayerOnly(t *testing.T) {
 		t.Errorf("global file modified:\nbefore=%s\nafter=%s", before, after)
 	}
 
-	// AGENT: changed, and the stub entry is DELETED (not left as {}).
 	agentAfter, err := os.ReadFile(agentPath)
 	if err != nil {
 		t.Fatalf("re-read agent: %v", err)
@@ -305,10 +275,7 @@ func TestMCPToggleCmdFor_WritesOwningLayerOnly(t *testing.T) {
 	}
 }
 
-// ── 6. MCPPathsFor ok=false ⇒ "MCP unavailable", no panic ──────────────
-
 func TestLoadMCPList_PathsUnavailable(t *testing.T) {
-	// A bare loop resolves no MCP paths (MCPPathsFor → ok=false).
 	m := &Model{agentLoop: &agent.AgentLoop{}}
 	m.loadMCPList()
 
@@ -319,7 +286,6 @@ func TestLoadMCPList_PathsUnavailable(t *testing.T) {
 		t.Fatalf("keys = %v, want [\"\"]", m.mcpModalKeys)
 	}
 
-	// The toggle cmd reports the same condition instead of panicking.
 	cmd := m.mcpToggleCmd("svc")
 	if cmd == nil {
 		t.Fatal("toggle cmd is nil")
@@ -337,17 +303,11 @@ func TestLoadMCPList_PathsUnavailable(t *testing.T) {
 	}
 }
 
-// ── 7. ModalMCPDetail: enter, rendering, snapshot lifecycle ────────────
-
-// TestMCPDetail_EnterOpensDetailAndKeepsCursor covers requirement: enter on
-// a real row opens the detail for THAT name, every other key inside the
-// detail is swallowed (no crash, no cursor drift), and esc/q return to the
-// list with the cursor and rows untouched.
 func TestMCPDetail_EnterOpensDetailAndKeepsCursor(t *testing.T) {
 	paths := mcpFixturePaths(t)
 	m := &Model{modalMode: ModalMCP, width: 140, height: 40}
 	m.loadMCPListWith(paths)
-	m.modalSelectedIdx = 1 // "beta" (sorted: alpha, beta, delta, gamma)
+	m.modalSelectedIdx = 1
 
 	cmd, handled := m.handleMCPKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if !handled || cmd != nil {
@@ -370,9 +330,6 @@ func TestMCPDetail_EnterOpensDetailAndKeepsCursor(t *testing.T) {
 		t.Errorf("detail does not render its title %q:\n%s", i18n.T("tui.mcpDetail"), out)
 	}
 
-	// Any other key inside the detail must be swallowed: no crash, no mode
-	// change, no movement of the hidden list cursor. ("d" is NOT one of them
-	// anymore — it is the sign-out, covered by its own tests.)
 	for _, msg := range []tea.KeyMsg{
 		{Type: tea.KeyUp}, {Type: tea.KeyDown}, {Type: tea.KeyEnter},
 		mcpKeyRunes(' '), mcpKeyRunes('t'), mcpKeyRunes('f'), mcpKeyRunes('x'),
@@ -387,8 +344,6 @@ func TestMCPDetail_EnterOpensDetailAndKeepsCursor(t *testing.T) {
 		}
 	}
 
-	// "d" is the sign-out: handled, and the detail stays on screen (the user
-	// must see the refreshed auth state, not be bounced back to the list).
 	if cmd, handled := m.handleMCPKey(mcpKeyRunes('d')); !handled || cmd == nil {
 		t.Fatalf("d in detail: handled=%v cmd=%v, want handled with the sign-out command", handled, cmd)
 	}
@@ -399,7 +354,6 @@ func TestMCPDetail_EnterOpensDetailAndKeepsCursor(t *testing.T) {
 		t.Errorf("the sign-out moved the hidden list cursor: idx = %d, want 1", m.modalSelectedIdx)
 	}
 
-	// esc returns to the list with the cursor and the rows untouched.
 	cmd, handled = m.handleMCPKey(tea.KeyMsg{Type: tea.KeyEsc})
 	if !handled || cmd != nil {
 		t.Fatalf("esc: handled=%v cmd=%v, want handled with no cmd", handled, cmd)
@@ -414,7 +368,6 @@ func TestMCPDetail_EnterOpensDetailAndKeepsCursor(t *testing.T) {
 		t.Errorf("list rows changed while in the detail: keys = %v", m.mcpModalKeys)
 	}
 
-	// q behaves exactly like esc.
 	if _, handled := m.handleMCPKey(tea.KeyMsg{Type: tea.KeyEnter}); !handled || m.modalMode != ModalMCPDetail {
 		t.Fatalf("re-enter: handled=%v mode=%v, want ModalMCPDetail", handled, m.modalMode)
 	}
@@ -426,9 +379,6 @@ func TestMCPDetail_EnterOpensDetailAndKeepsCursor(t *testing.T) {
 	}
 }
 
-// TestMCPDetail_EnterOnEmptyOrUnavailableRowIsNoOp pins that the two
-// synthetic rows (empty inventory, "MCP unavailable") both carry the ""
-// key and never open a detail.
 func TestMCPDetail_EnterOnEmptyOrUnavailableRowIsNoOp(t *testing.T) {
 	t.Run("empty inventory row", func(t *testing.T) {
 		root := t.TempDir()
@@ -453,7 +403,6 @@ func TestMCPDetail_EnterOnEmptyOrUnavailableRowIsNoOp(t *testing.T) {
 	})
 
 	t.Run("unavailable row", func(t *testing.T) {
-		// A bare loop resolves no MCP paths ⇒ the single "unavailable" row.
 		m := &Model{agentLoop: &agent.AgentLoop{}, modalMode: ModalMCP}
 		m.loadMCPList()
 		if len(m.mcpModalKeys) != 1 || m.mcpModalKeys[0] != "" {
@@ -473,10 +422,6 @@ func TestMCPDetail_EnterOnEmptyOrUnavailableRowIsNoOp(t *testing.T) {
 	})
 }
 
-// TestMCPDetail_StubOverRealEntryShowsWholeStack: the agent layer's
-// {"disabled":true} stub wins over the global real entry. The detail must
-// show the winner (agent, a pure disable stub, verdict "disabled") AND the
-// shadowed global copy with its real command.
 func TestMCPDetail_StubOverRealEntryShowsWholeStack(t *testing.T) {
 	root := t.TempDir()
 	paths := mcp.Paths{
@@ -500,7 +445,6 @@ func TestMCPDetail_StubOverRealEntryShowsWholeStack(t *testing.T) {
 
 	out := ansi.Strip(m.renderMCPDetail())
 
-	// Winner = agent layer, and its copy is a pure disable stub (Defines=false).
 	if want := i18n.T("tui.mcpDetailLayer") + ": " + mcp.LayerAgent; !strings.Contains(out, want) {
 		t.Errorf("detail missing winner layer %q:\n%s", want, out)
 	}
@@ -510,11 +454,9 @@ func TestMCPDetail_StubOverRealEntryShowsWholeStack(t *testing.T) {
 	if bad := i18n.T("tui.mcpDetailDefinition") + ": " + i18n.T("tui.mcpDetailReal"); strings.Contains(out, bad) {
 		t.Errorf("winning stub flagged as a real entry (%q):\n%s", bad, out)
 	}
-	// Effective verdict of the stack: disabled (the stub switches it off).
 	if want := "[" + i18n.T("tui.mcpDisabled") + "]"; !strings.Contains(out, want) {
 		t.Errorf("detail missing effective verdict %q:\n%s", want, out)
 	}
-	// The shadowed global copy: its layer, defines=true, and its command.
 	shadowedLine := false
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, mcp.LayerGlobal) && strings.Contains(line, "defines=true") {
@@ -529,9 +471,6 @@ func TestMCPDetail_StubOverRealEntryShowsWholeStack(t *testing.T) {
 	}
 }
 
-// TestMCPDetail_InvalidEntryShowsInvalidMessage: an entry with neither
-// command nor url renders the validate() message from the stored
-// inventory and the localized "invalid" verdict.
 func TestMCPDetail_InvalidEntryShowsInvalidMessage(t *testing.T) {
 	root := t.TempDir()
 	paths := mcp.Paths{
@@ -561,9 +500,6 @@ func TestMCPDetail_InvalidEntryShowsInvalidMessage(t *testing.T) {
 	}
 }
 
-// TestMCPDetail_ShowsKeyNamesButNeverValues: env/header KEY names (sorted)
-// and the raw ${VAR} literal are shown; every VALUE string, and the arg
-// VALUES behind the arg count, must appear nowhere in the rendered output.
 func TestMCPDetail_ShowsKeyNamesButNeverValues(t *testing.T) {
 	root := t.TempDir()
 	paths := mcp.Paths{
@@ -585,23 +521,19 @@ func TestMCPDetail_ShowsKeyNamesButNeverValues(t *testing.T) {
 
 	out := ansi.Strip(m.renderMCPDetail())
 
-	// KEY names, sorted — one line each.
 	if want := i18n.T("tui.mcpDetailEnvKeys") + ": API_TOKEN, ZZ_OPT"; !strings.Contains(out, want) {
 		t.Errorf("detail missing env key names %q:\n%s", want, out)
 	}
 	if want := i18n.T("tui.mcpDetailHeaderKeys") + ": Authorization, X-Trace"; !strings.Contains(out, want) {
 		t.Errorf("detail missing header key names %q:\n%s", want, out)
 	}
-	// Raw stored bytes: ${VAR} appears literally, never expanded.
 	if want := "${UPSTREAM_HOST}"; !strings.Contains(out, want) {
 		t.Errorf("detail missing raw literal %q:\n%s", want, out)
 	}
-	// Arg COUNT only: the label shows the number, never the arg values.
 	if want := i18n.T("tui.mcpDetailArgs") + ": 1"; !strings.Contains(out, want) {
 		t.Errorf("detail missing arg count %q:\n%s", want, out)
 	}
 
-	// No VALUE may ever reach the screen…
 	for _, secret := range []string{
 		"env-secret-hunter2", "zz-secret-opt",
 		"header-secret-bearer", "trace-secret-value",
@@ -610,15 +542,11 @@ func TestMCPDetail_ShowsKeyNamesButNeverValues(t *testing.T) {
 			t.Errorf("rendered detail leaks the value %q:\n%s", secret, out)
 		}
 	}
-	// …and neither may the arg values behind the count.
 	if strings.Contains(out, "--stdio-flag") {
 		t.Errorf("rendered detail shows an arg value:\n%s", out)
 	}
 }
 
-// TestMCPDetail_ResetModalClearsStoredInventory: reopening /mcp (which
-// resets the modal) must drop the snapshot, so a stale detail can never
-// render after the reset — it falls back to the list instead.
 func TestMCPDetail_ResetModalClearsStoredInventory(t *testing.T) {
 	paths := mcpFixturePaths(t)
 	m := &Model{modalMode: ModalMCP}
@@ -642,7 +570,6 @@ func TestMCPDetail_ResetModalClearsStoredInventory(t *testing.T) {
 		t.Errorf("resetModal left mcpDetailName = %q", m.mcpDetailName)
 	}
 
-	// A detail somehow opened after the reset renders the list, not stale data.
 	m.modalMode = ModalMCPDetail
 	_ = ansi.Strip(m.renderMCPDetail())
 	if m.modalMode != ModalMCP {
@@ -650,29 +577,9 @@ func TestMCPDetail_ResetModalClearsStoredInventory(t *testing.T) {
 	}
 }
 
-// ── 8. MENOR-1: an invalid row is never toggleable ────────────────────
-//
-// The API's `enabled` means SET; the TUI computes `enabled := effective ==
-// "enabled"` and passes it as SetDisabled's `disabled` flag — a FLIP. For
-// an invalid row that flip either LIES (the writer no-ops and the UI would
-// report a state change that never happened) or, when the broken entry
-// literally carries `"disabled": false`, SPLICES bytes of an entry that is
-// already broken. The rule, shared with the WebUI: invalid ⇒ no write,
-// point the user at the file (edit the JSON / raw editor).
-
-// TestMCPToggle_InvalidRowPerformsNoWriteAndShowsHint drives the space/t
-// path (handleMCPKey → mcpToggleCmd → mcpToggleCmdFor; the routing is
-// pinned in TestHandleMCPKey_SpaceTogglesSelectedName) on an invalid row:
-// the cmd must refuse WITHOUT writing, and the refusal must surface as the
-// localized "fix it in the file" hint through the EXISTING result path
-// (mcpToggleResultMsg → Update → handleMCPToggleResult), not as success.
 func TestMCPToggle_InvalidRowPerformsNoWriteAndShowsHint(t *testing.T) {
 	cases := []struct{ name, doc string }{
 		{"plain invalid entry", `{"mcpServers":{"broken":{"description":"no transport configured"}}}`},
-		// Invalid (summary.Disabled == false ⇒ derived verdict "invalid")
-		// but the entry LITERALLY holds "disabled": false — planEnable
-		// splices that member out, i.e. the flip really writes into an
-		// already-invalid entry today.
 		{"invalid entry with disabled:false key", `{"mcpServers":{"broken":{"description":"no transport","disabled":false}}}`},
 	}
 	for _, tc := range cases {
@@ -690,8 +597,6 @@ func TestMCPToggle_InvalidRowPerformsNoWriteAndShowsHint(t *testing.T) {
 				t.Fatalf("read fixture: %v", err)
 			}
 
-			// The verdict must really be invalid, or the test would prove
-			// nothing about the rule it pins.
 			if got := mcp.ReadInventory(paths).Effective["broken"]; got != "invalid" {
 				t.Fatalf("fixture verdict = %q, want invalid", got)
 			}
@@ -713,8 +618,6 @@ func TestMCPToggle_InvalidRowPerformsNoWriteAndShowsHint(t *testing.T) {
 				t.Errorf("invalid row was written:\nbefore=%s\nafter=%s", before, after)
 			}
 
-			// The refusal travels the existing result route: Update must
-			// hand it to handleMCPToggleResult, which renders the hint.
 			m := &Model{chatInput: textarea.New()}
 			_, _ = m.Update(res)
 			want := fmt.Sprintf(i18n.T("tui.mcpToggleInvalid"), "broken")
@@ -725,11 +628,6 @@ func TestMCPToggle_InvalidRowPerformsNoWriteAndShowsHint(t *testing.T) {
 	}
 }
 
-// TestMCPToggle_EnabledAndDisabledRowsStillWrite pins that the invalid-row
-// refusal changed nothing for the two legitimate toggles: an enabled row
-// flips to disabled (writes "disabled": true) and a disabled row flips to
-// enabled (the key is deleted). The layer-ownership assertions live in
-// TestMCPToggleCmdFor_WritesOwningLayerOnly, which is untouched.
 func TestMCPToggle_EnabledAndDisabledRowsStillWrite(t *testing.T) {
 	cases := []struct {
 		name, target, doc string
@@ -789,8 +687,6 @@ func TestMCPToggle_EnabledAndDisabledRowsStillWrite(t *testing.T) {
 				t.Fatalf("file unchanged: %s", before)
 			}
 
-			// The verdict really flipped (the write is the real thing, not
-			// a cosmetic byte change).
 			if got := mcp.ReadInventory(paths).Effective[tc.target]; got != tc.wantState {
 				t.Errorf("verdict after toggle = %q, want %q", got, tc.wantState)
 			}
@@ -798,11 +694,6 @@ func TestMCPToggle_EnabledAndDisabledRowsStillWrite(t *testing.T) {
 	}
 }
 
-// TestMCPToggleResult_NoChangeRendersNoChangeMessage: a result reporting
-// changed==false must say "no change" instead of wearing the success line
-// for a state it never reached. Driven through the same Update routing as
-// TestMCPToggleResult_RoutedByUpdateWithoutLeakingIntoInput (extend, don't
-// fork the result path).
 func TestMCPToggleResult_NoChangeRendersNoChangeMessage(t *testing.T) {
 	m := &Model{chatInput: textarea.New()}
 	m.chatInput.SetValue("typed")
@@ -813,21 +704,15 @@ func TestMCPToggleResult_NoChangeRendersNoChangeMessage(t *testing.T) {
 	if m.mcpFeedback != want {
 		t.Errorf("feedback = %q, want %q", m.mcpFeedback, want)
 	}
-	// It must not be the success line for the state it did NOT reach.
 	lying := fmt.Sprintf(i18n.T("tui.mcpToggleSuccess"), "svc", i18n.T("tui.mcpEnabled"))
 	if m.mcpFeedback == lying {
 		t.Errorf("no-op rendered as success: %q", m.mcpFeedback)
 	}
-	// Same routing guarantee as the test it extends: no leak into input.
 	if got := m.chatInput.Value(); got != "typed" {
 		t.Errorf("text input mutated by the msg: %q", got)
 	}
 }
 
-// TestMCPDetail_InvalidRowShowsFixHint: the detail of an invalid server
-// carries the one-line hint telling the user toggling is off and the file
-// must be fixed (edit the JSON / raw editor) — the same rule the WebUI
-// shows for the same row.
 func TestMCPDetail_InvalidRowShowsFixHint(t *testing.T) {
 	root := t.TempDir()
 	paths := mcp.Paths{
@@ -851,31 +736,13 @@ func TestMCPDetail_InvalidRowShowsFixHint(t *testing.T) {
 	}
 }
 
-// ── 9. MENOR-3: the toggle applies the REST path guard ────────────────
-//
-// REST refuses to read/write a layer file outside the allowed workspace
-// roots with 403 mcp_path_not_allowed (rest_mcp.go mcpGuardLayerFile,
-// backed by channels.isAllowedWorkspacePath). The TUI must refuse the SAME
-// path BEFORE any write, with the same rule (one predicate, exported from
-// pkg/channels — never a copy).
-
-// TestMCPToggleCmdFor_RefusesTargetOutsideAllowedRoots: a target outside
-// home//tmp//var/folders//cwd is refused with no bytes written and a
-// refusal message naming the path; an in-root target still toggles.
 func TestMCPToggleCmdFor_RefusesTargetOutsideAllowedRoots(t *testing.T) {
-	// /var/tmp is world-writable FHS temp but is NOT one of the roots the
-	// predicate accepts (it must not match the "/tmp/" prefix — check:
-	// "/var/tmp/…" starts with "/var…", not "/tmp/").
 	probe, err := os.MkdirTemp("/var/tmp", "lele-tui-guard-*")
 	if err != nil {
-		// Honest failure, not a skip: without a path the predicate rejects,
-		// the refusal cannot be exercised on this box at all.
 		t.Fatalf("cannot create a probe dir outside the allowed roots: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(probe) })
 
-	// Sanity: if the predicate accepts the probe, the refusal assertions
-	// below would prove nothing.
 	if channels.IsAllowedWorkspacePath(probe) {
 		wd, _ := os.Getwd()
 		home, _ := os.UserHomeDir()
@@ -908,7 +775,6 @@ func TestMCPToggleCmdFor_RefusesTargetOutsideAllowedRoots(t *testing.T) {
 		t.Errorf("path = %q, want the refused target %q", res.path, file)
 	}
 
-	// Refused BEFORE any write: bytes must be identical.
 	after, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatalf("re-read fixture: %v", err)
@@ -917,8 +783,6 @@ func TestMCPToggleCmdFor_RefusesTargetOutsideAllowedRoots(t *testing.T) {
 		t.Errorf("refused target was written:\nbefore=%s\nafter=%s", before, after)
 	}
 
-	// The refusal renders through the existing result handler and names
-	// the path (mirroring REST's mcp_path_not_allowed detail).
 	m := &Model{chatInput: textarea.New()}
 	_, _ = m.Update(res)
 	want := fmt.Sprintf(i18n.T("tui.mcpPathNotAllowed"), "svc", file)

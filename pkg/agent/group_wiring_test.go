@@ -59,6 +59,5 @@ func TestGroupManager_SetStoreDir(t *testing.T) {
 		t.Fatal("GroupManager should not be nil")
 	}
 
-	// SetStoreDir should not panic
 	gm.SetStoreDir(tmpDir)
 }

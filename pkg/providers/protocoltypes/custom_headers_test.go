@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package protocoltypes
 
 import (
@@ -61,7 +56,7 @@ func TestValidateCustomHeaders(t *testing.T) {
 	tests := []struct {
 		name    string
 		headers map[string]string
-		wantErr string // "" means the map must be accepted
+		wantErr string
 	}{
 		{
 			name:    "nil map",
@@ -114,9 +109,6 @@ func TestValidateCustomHeaders(t *testing.T) {
 			wantErr: `custom header "x-a": value contains a control character (e.g. CR/LF/NUL)`,
 		},
 		{
-			// The control-char check runs on the RAW value: transports expand
-			// and send it untrimmed, so a trailing CR must fail at load with
-			// the header named, not later inside http.Client.
 			name:    "trailing CR in the raw value",
 			headers: map[string]string{"x-a": "v\r"},
 			wantErr: `custom header "x-a": value contains a control character (e.g. CR/LF/NUL)`,
@@ -156,11 +148,6 @@ func TestValidateCustomHeaders(t *testing.T) {
 			headers: map[string]string{"x-a": "{{sesssion}}"},
 			wantErr: `custom header "x-a": unknown placeholder "{{sesssion}}" (supported: {{session}}, {{ENV_NAME}}, {{ENV_NAME:default}})`,
 		},
-		// The env placeholder is the documented way to keep a secret out of
-		// config.json (pkg/config expandEnvVars substitutes it at load), and
-		// the editable document carries the RAW value — so the validator must
-		// accept the token, not expand it. Rejecting it made every WebUI save
-		// fail with 422, even a save that only touched agents.defaults.model.
 		{
 			name:    "env placeholder without a default",
 			headers: map[string]string{"x-a": "{{ENV_FOO}}"},
@@ -212,8 +199,6 @@ func TestValidateCustomHeaders(t *testing.T) {
 			wantErr: `custom header "x-a": unknown placeholder "{{user:drop}}" (supported: {{session}}, {{ENV_NAME}}, {{ENV_NAME:default}})`,
 		},
 		{
-			// NIT-3: the scan runs on the RAW value, exactly what the
-			// transports expand, so surrounding spaces cannot hide a token.
 			name:    "unknown placeholder padded with spaces",
 			headers: map[string]string{"x-a": "  {{user}}  "},
 			wantErr: `custom header "x-a": unknown placeholder "{{user}}" (supported: {{session}}, {{ENV_NAME}}, {{ENV_NAME:default}})`,
@@ -229,9 +214,7 @@ func TestValidateCustomHeaders(t *testing.T) {
 			wantErr: "",
 		},
 		{
-			name: "several problems report the alphabetically first header",
-			// Map iteration order is random; sorting is what makes the message
-			// (and therefore this assertion) reproducible.
+			name:    "several problems report the alphabetically first header",
 			headers: map[string]string{"z-bad name": "v", "a-bad name": "v"},
 			wantErr: `custom header "a-bad name": invalid name: must be an RFC 7230 token`,
 		},
@@ -291,9 +274,6 @@ func TestWireSessionForHeaders(t *testing.T) {
 	}
 }
 
-// TestWireSessionIDUnkeyedBucket pins the shape the header scheme promises: a
-// blank key is never "no id" but the shared bucket, and every id is 64 hex
-// chars. pkg/providers/wire_session_test.go covers the rest of the scheme.
 func TestWireSessionIDUnkeyedBucket(t *testing.T) {
 	hex64 := regexp.MustCompile(`^[0-9a-f]{64}$`)
 	for _, key := range []string{"", "   "} {

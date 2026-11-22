@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -19,19 +13,10 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// TestCallWithFallback_StripsImagesForNonVisionCandidate verifies that when
-// the fallback chain fails over to a non-vision model, image_url content
-// parts are stripped from messages before being sent to that candidate.
-// Extended for video: the first candidate is vision+video capable and must
-// keep both media part types, while the non-vision fallback must lose both
-// image_url and video_url parts.
 func TestCallWithFallback_StripsImagesForNonVisionCandidate(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
-	// Configure two providers: prov-a (vision+video) and prov-b (non-vision,
-	// no video). Neither has an API key, so CreateProviderForCandidate will
-	// fail and the mock agent.Provider will be used instead.
 	al.cfg().Providers = &config.ProvidersConfig{
 		Named: map[string]config.NamedProviderConfig{
 			"prov-a": {
@@ -49,36 +34,28 @@ func TestCallWithFallback_StripsImagesForNonVisionCandidate(t *testing.T) {
 		},
 	}
 
-	// Use a fallback chain with minimal retries so the test is fast.
 	al.fallback = providers.NewFallbackChain(providers.NewCooldownTracker()).
 		WithRetryConfig(1, time.Millisecond)
 
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Track messages received by each call.
 	var receivedMessages [][]providers.Message
 	callCount := 0
 
 	agent.Provider = &llmRunnerMockLLMProvider{
 		onChatCalled: func(ctx context.Context, messages []providers.Message, toolDefs []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
 			callCount++
-			// Capture a copy of messages for later inspection.
 			msgCopy := make([]providers.Message, len(messages))
 			copy(msgCopy, messages)
 			receivedMessages = append(receivedMessages, msgCopy)
 
 			if callCount == 1 {
-				// First candidate (prov-a/vision-model) fails with a
-				// retriable error to trigger fallback.
 				return nil, fmt.Errorf("status: 500 internal server error")
 			}
-			// Second candidate (prov-b/text-model) succeeds.
 			return &providers.LLMResponse{Content: "fallback response"}, nil
 		},
 	}
 
-	// Messages containing image and video content (simulates read_image /
-	// read_video results).
 	messages := []providers.Message{
 		{Role: "system", Content: "System prompt"},
 		{Role: "user", Content: "Describe this image"},
@@ -111,12 +88,10 @@ func TestCallWithFallback_StripsImagesForNonVisionCandidate(t *testing.T) {
 		t.Errorf("Expected 'fallback response', got: %s", resp.Content)
 	}
 
-	// Should have been called twice (once per candidate).
 	if callCount != 2 {
 		t.Fatalf("Expected 2 calls, got %d", callCount)
 	}
 
-	// First call (vision+video model) should have image_url parts.
 	firstCallHasImage := false
 	firstCallHasVideo := false
 	for _, msg := range receivedMessages[0] {
@@ -136,8 +111,6 @@ func TestCallWithFallback_StripsImagesForNonVisionCandidate(t *testing.T) {
 		t.Error("Expected first call (video-capable model) to receive video_url content parts")
 	}
 
-	// Second call (non-vision, non-video model) should NOT have image_url or
-	// video_url parts.
 	for _, msg := range receivedMessages[1] {
 		for _, part := range msg.ContentParts {
 			if part.Type == "image_url" {
@@ -150,10 +123,6 @@ func TestCallWithFallback_StripsImagesForNonVisionCandidate(t *testing.T) {
 	}
 }
 
-// TestCallWithFallback_PreservesImagesForVisionCandidate verifies that when
-// the fallback chain uses a vision-capable model, image_url content parts
-// are preserved. Extended for video: a video-capable candidate must keep
-// video_url parts too.
 func TestCallWithFallback_PreservesImagesForVisionCandidate(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -209,7 +178,6 @@ func TestCallWithFallback_PreservesImagesForVisionCandidate(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// Vision+video model should receive image_url and video_url parts.
 	hasImage := false
 	hasVideo := false
 	for _, msg := range receivedMessages {
@@ -230,14 +198,10 @@ func TestCallWithFallback_PreservesImagesForVisionCandidate(t *testing.T) {
 	}
 }
 
-// TestRunLLMIteration_ReadImageExposedWhenPrimaryHasVision_FallbackDoesNot
-// verifies that read_image is exposed to the LLM when the primary model
-// supports vision, even if a fallback model in the chain does not.
 func TestRunLLMIteration_ReadImageExposedWhenPrimaryHasVision_FallbackDoesNot(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
-	// Primary model has vision; fallback does not.
 	al.cfg().Providers = &config.ProvidersConfig{
 		Named: map[string]config.NamedProviderConfig{
 			"test-provider": {
@@ -253,13 +217,11 @@ func TestRunLLMIteration_ReadImageExposedWhenPrimaryHasVision_FallbackDoesNot(t 
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Set up candidates: primary (vision) + fallback (non-vision).
 	agent.Candidates = []providers.FallbackCandidate{
 		{Provider: "test-provider", Model: "test-model"},
 		{Provider: "test-provider", Model: "fallback-text"},
 	}
 
-	// Register read_image tool.
 	agent.Tools.Register(&llmRunnerMockCustomTool{
 		name: "read_image",
 		executeFunc: func(ctx context.Context, args map[string]interface{}) *tools.ToolResult {
@@ -267,7 +229,6 @@ func TestRunLLMIteration_ReadImageExposedWhenPrimaryHasVision_FallbackDoesNot(t 
 		},
 	})
 
-	// Capture tool definitions sent to the LLM.
 	var receivedToolDefs []providers.ToolDefinition
 	agent.Provider = &llmRunnerMockLLMProvider{
 		onChatCalled: func(ctx context.Context, messages []providers.Message, toolDefs []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
@@ -290,7 +251,6 @@ func TestRunLLMIteration_ReadImageExposedWhenPrimaryHasVision_FallbackDoesNot(t 
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// read_image should be present because the primary model has vision.
 	found := false
 	for _, def := range receivedToolDefs {
 		if def.Function.Name == "read_image" {
@@ -303,14 +263,10 @@ func TestRunLLMIteration_ReadImageExposedWhenPrimaryHasVision_FallbackDoesNot(t 
 	}
 }
 
-// TestRunLLMIteration_ReadImageHiddenWhenPrimaryLacksVision verifies that
-// read_image is hidden when the primary (session) model does not support
-// vision, regardless of fallback configuration.
 func TestRunLLMIteration_ReadImageHiddenWhenPrimaryLacksVision(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
-	// Primary model does NOT have vision.
 	al.cfg().Providers = &config.ProvidersConfig{
 		Named: map[string]config.NamedProviderConfig{
 			"test-provider": {
@@ -325,7 +281,6 @@ func TestRunLLMIteration_ReadImageHiddenWhenPrimaryLacksVision(t *testing.T) {
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
-	// Register read_image tool.
 	agent.Tools.Register(&llmRunnerMockCustomTool{
 		name: "read_image",
 		executeFunc: func(ctx context.Context, args map[string]interface{}) *tools.ToolResult {
@@ -355,7 +310,6 @@ func TestRunLLMIteration_ReadImageHiddenWhenPrimaryLacksVision(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	// read_image should NOT be present because the primary model lacks vision.
 	for _, def := range receivedToolDefs {
 		if def.Function.Name == "read_image" {
 			t.Fatal("Expected read_image tool to be hidden when primary model does not support vision")
@@ -363,52 +317,24 @@ func TestRunLLMIteration_ReadImageHiddenWhenPrimaryLacksVision(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// buildLLMOptions — reasoning / thinking option resolution
-// ============================================================================
-//
-// These tests lock the semantics of the per-session thinking override
-// (`/think off|low|medium|high`) against the agent-level reasoning config.
-//
-// The bug they guard against: `/think off` used to emit NO `reasoning` key at
-// all. A transparent proxy (llmproxy) then applied its own server-side default
-// — thinking ON — so disabling reasoning was indistinguishable from enabling
-// it. The fix makes "off" send an explicit `{"enabled": false}` (same payload
-// the goal judge ships in production, see goal.go).
-
 func strPtr(s string) *string { return &s }
 
 func TestBuildLLMOptions_Reasoning(t *testing.T) {
-	// maxTok is referenced by the low-with-config merge case.
 	maxTok := 2048
 
 	tests := []struct {
-		name string
-		// sessionLevel is the in-memory per-session override stored in
-		// al.sessionThinking ("" means no override).
-		sessionLevel string
-		// persistedLevel, when non-empty, is written to the session manager
-		// instead of the in-memory map to exercise the persisted fallback path
-		// (the path that survives a gateway restart).
+		name           string
+		sessionLevel   string
 		persistedLevel string
-		// agentLevel is assigned to AgentInstance.ThinkingLevel, simulating
-		// what resolveAgentThinkingLevel produced at instance construction
-		// ("off"/"low"/"medium"/"high"; "" means no config-level default).
-		agentLevel string
-		reasoning  *config.ReasoningConfig
-		model      string
+		agentLevel     string
+		reasoning      *config.ReasoningConfig
+		model          string
 
-		// wantReasoning, when non-nil, is compared against the whole
-		// `reasoning` map (exact key set and values).
-		wantReasoning map[string]interface{}
-		// wantReasoningAbsent asserts the `reasoning` key is not emitted.
+		wantReasoning       map[string]interface{}
 		wantReasoningAbsent bool
-		// wantThinking, when non-nil, is compared against `thinking`.
-		wantThinking interface{}
-		// wantThinkingAbsent asserts the DeepSeek `thinking` key is not emitted.
-		wantThinkingAbsent bool
+		wantThinking        interface{}
+		wantThinkingAbsent  bool
 	}{
-		// --- off: explicit disable, unconditional -------------------------
 		{
 			name:          "off without agent config emits explicit disable",
 			sessionLevel:  "off",
@@ -432,7 +358,6 @@ func TestBuildLLMOptions_Reasoning(t *testing.T) {
 			wantThinkingAbsent: true,
 		},
 
-		// --- no override: config path unchanged ---------------------------
 		{
 			name:                "no override and no config emits no reasoning",
 			sessionLevel:        "",
@@ -448,17 +373,14 @@ func TestBuildLLMOptions_Reasoning(t *testing.T) {
 			wantReasoning: map[string]interface{}{"enabled": true, "effort": "medium"},
 		},
 		{
-			name:         "no override keeps DeepSeek thinking adapter",
-			sessionLevel: "",
-			reasoning:    &config.ReasoningConfig{Enable: true},
-			model:        "deepseek-chat",
-			// Config path emits enabled:true (no effort configured)...
+			name:          "no override keeps DeepSeek thinking adapter",
+			sessionLevel:  "",
+			reasoning:     &config.ReasoningConfig{Enable: true},
+			model:         "deepseek-chat",
 			wantReasoning: map[string]interface{}{"enabled": true},
-			// ...plus the DeepSeek wire adapter.
-			wantThinking: true,
+			wantThinking:  true,
 		},
 
-		// --- session override low/medium/high -----------------------------
 		{
 			name:          "low without config still emits enabled true",
 			sessionLevel:  "low",
@@ -485,7 +407,6 @@ func TestBuildLLMOptions_Reasoning(t *testing.T) {
 			wantReasoning: map[string]interface{}{"effort": "high", "enabled": true},
 		},
 
-		// --- persisted fallback (survives restarts) -----------------------
 		{
 			name:           "persisted off emits explicit disable",
 			persistedLevel: "off",
@@ -494,7 +415,6 @@ func TestBuildLLMOptions_Reasoning(t *testing.T) {
 			wantReasoning:  map[string]interface{}{"enabled": false},
 		},
 
-		// --- agent-level thinking_level (config layer) --------------------
 		{
 			name:          "agent medium without session override emits effort",
 			agentLevel:    "medium",
@@ -534,9 +454,6 @@ func TestBuildLLMOptions_Reasoning(t *testing.T) {
 			wantReasoning: map[string]interface{}{"effort": "high", "enabled": true},
 		},
 		{
-			// An invalid config value must behave exactly like "unset":
-			// resolveAgentThinkingLevel is what NewAgentInstance stores on the
-			// instance, so run it for real here instead of hardcoding "".
 			name:          "agent invalid level falls back to legacy config path",
 			agentLevel:    resolveAgentThinkingLevel(&config.AgentConfig{ThinkingLevel: strPtr("ultra")}, &config.AgentDefaults{}),
 			reasoning:     &config.ReasoningConfig{Enable: true, Effort: strPtr("high")},
@@ -553,9 +470,6 @@ func TestBuildLLMOptions_Reasoning(t *testing.T) {
 			agent.Reasoning = tc.reasoning
 			agent.ThinkingLevel = tc.agentLevel
 
-			// buildLLMOptions resolves the override through the loop's
-			// registry, so the agent under test must be the one the loop
-			// returns for the session key.
 			al.registry.mu.Lock()
 			al.registry.agents["main"] = agent
 			al.registry.mu.Unlock()
@@ -581,7 +495,6 @@ func TestBuildLLMOptions_Reasoning(t *testing.T) {
 
 			got := caller.buildLLMOptions(opts)
 
-			// reasoning map
 			reasoningRaw, hasReasoning := got["reasoning"]
 			if tc.wantReasoningAbsent {
 				if hasReasoning {
@@ -610,7 +523,6 @@ func TestBuildLLMOptions_Reasoning(t *testing.T) {
 				}
 			}
 
-			// thinking key (DeepSeek wire adapter)
 			thinkingRaw, hasThinking := got["thinking"]
 			switch {
 			case tc.wantThinkingAbsent:
@@ -633,18 +545,6 @@ func TestBuildLLMOptions_Reasoning(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// Conversation-scoped wire session id (OpenCode Go routing header)
-// ============================================================================
-
-// TestBuildLLMOptions_StampsWireSessionID pins the stamp on buildLLMOptions —
-// the single source of options every main-loop egress takes from (direct call,
-// both fallback paths, streaming, group turns, retries): the returned map
-// carries wire_session_id with the exact value providers.WireSessionID(key)
-// derives. The value must be deterministic for the same key (two consecutive
-// turns of one conversation are indistinguishable to the gateway) and change
-// when the key rotates (/new), or the gateway would keep routing both
-// conversations together.
 func TestBuildLLMOptions_StampsWireSessionID(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -673,13 +573,11 @@ func TestBuildLLMOptions_StampsWireSessionID(t *testing.T) {
 		t.Fatalf("%s = %v (%T), want %q", providers.OptWireSessionID, stamped, stamped, want)
 	}
 
-	// Determinism: a later turn of the same conversation derives the same id.
 	again := lc.buildLLMOptions(opts)
 	if again[providers.OptWireSessionID] != want {
 		t.Fatalf("second turn stamped %v, want the same %q", again[providers.OptWireSessionID], want)
 	}
 
-	// Rotation: a different session key must produce a different id.
 	rotated := al.nextConversationSessionKey(base)
 	if rotated == sessionKey {
 		t.Fatal("test setup: rotation must yield a different session key")
@@ -694,11 +592,6 @@ func TestBuildLLMOptions_StampsWireSessionID(t *testing.T) {
 	}
 }
 
-// TestBuildLLMOptions_StampsUnkeyedBucketWithoutSessionKey: FIX-C — the
-// stamp is unconditional. With no session key the option is present with the
-// shared unkeyed bucket (providers.UnkeyedSessionBucket) — never absent — so
-// unkeyed egresses (cron jobs, standalone loops) satisfy providers that
-// require the session header instead of failing locally.
 func TestBuildLLMOptions_StampsUnkeyedBucketWithoutSessionKey(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)

@@ -5,17 +5,6 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import '../../test/i18n'
 import { BackButton } from './BackButton'
 
-/**
- * Back affordance of the pages that only live in the chat's Tools drawer
- * (skills, scheduled jobs, background processes, secrets).
- *
- * Two paths matter:
- *   - there IS in-app history → pop it (returns to the chat, or to the agent
- *     tab when the page was reached from /settings/agents/:id/skills);
- *   - the page was opened cold (reload / pasted link) → `navigate(-1)` would
- *     do nothing, so it falls back to the chat.
- */
-
 function LocationProbe() {
   const location = useLocation()
   return <div data-testid="location">{location.pathname}</div>
@@ -81,7 +70,6 @@ describe('BackButton', () => {
         <BackButton />
       </MemoryRouter>,
     )
-    // es locale
     expect(view.getByLabelText('Atrás')).not.toBeNull()
   })
 })

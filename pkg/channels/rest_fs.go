@@ -7,20 +7,14 @@ import (
 	"strings"
 )
 
-// fsListMaxEntries caps the number of directories returned per listing so a
-// folder picker cannot be pointed at a huge tree and balloon the response.
 const fsListMaxEntries = 500
 
-// FsListEntry is a single navigable directory in a listing.
 type FsListEntry struct {
 	Name  string `json:"name"`
 	Path  string `json:"path"`
 	IsDir bool   `json:"is_dir"`
 }
 
-// FsListResponse is the payload of GET /api/v1/fs/list. It carries enough
-// context for the WebUI to render a folder picker: the current directory, its
-// children, where it can go back to and which roots it may jump to.
 type FsListResponse struct {
 	Path      string        `json:"path"`
 	Parent    string        `json:"parent"`
@@ -30,19 +24,8 @@ type FsListResponse struct {
 	Truncated bool          `json:"truncated"`
 }
 
-// fsBrowseSandboxRoots mirrors the sandbox trees isAllowedWorkspacePath trusts
-// via prefix matching ("/tmp/", "/var/folders/"). Listing them explicitly lets
-// the bare root itself be browsed, which the prefix check would reject.
 var fsBrowseSandboxRoots = []string{"/tmp", "/var/folders"}
 
-// isListableFsPath reports whether an absolute path may be browsed.
-//
-// It delegates to isAllowedWorkspacePath (user home, sandbox dirs, cwd) and
-// only adds the sandbox roots themselves plus their macOS "/private" spelling:
-// on Darwin /tmp and /var/folders are symlinks into /private/..., so the
-// EvalSymlinks-resolved form of an allowed path would otherwise be rejected.
-// This never widens the reachable set beyond trees isAllowedWorkspacePath
-// already trusts.
 func isListableFsPath(absPath string) bool {
 	if isAllowedWorkspacePath(absPath) {
 		return true
@@ -57,8 +40,6 @@ func isListableFsPath(absPath string) bool {
 	return false
 }
 
-// pathAliases returns the equivalent spellings of a cleaned absolute path,
-// collapsing the macOS "/private" prefix that symlink resolution introduces.
 func pathAliases(cleanPath string) []string {
 	if rest, ok := strings.CutPrefix(cleanPath, "/private/"); ok {
 		return []string{cleanPath, string(filepath.Separator) + rest}
@@ -66,12 +47,6 @@ func pathAliases(cleanPath string) []string {
 	return []string{cleanPath}
 }
 
-// handleFsList lists server-side directories for the WebUI folder picker.
-// GET /api/v1/fs/list?path=<absolute-path>  ("?" or empty path => user home)
-//
-// Security: this endpoint reads the host filesystem, so every request is
-// gated by isAllowedWorkspacePath on BOTH the requested path and the
-// symlink-resolved path, which blocks escaping an allowed tree via symlink.
 func (n *NativeChannel) handleFsList(w http.ResponseWriter, r *http.Request) {
 	requested := strings.TrimSpace(getQueryParam(r, "path"))
 
@@ -91,14 +66,11 @@ func (n *NativeChannel) handleFsList(w http.ResponseWriter, r *http.Request) {
 	}
 	abs = filepath.Clean(abs)
 
-	// Gate the literal path first so traversal ("../") never reaches the OS.
 	if !isListableFsPath(abs) {
 		writeError(w, http.StatusForbidden, "access denied", "fs_forbidden")
 		return
 	}
 
-	// Then gate the real path: a symlink (or ".." through one) must not land
-	// outside the allowed trees.
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "path not found", "fs_not_found")
@@ -126,12 +98,10 @@ func (n *NativeChannel) handleFsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// os.ReadDir returns entries in lexical order, so the listing is stable.
 	entries := make([]FsListEntry, 0, fsListMaxEntries)
 	truncated := false
 	for _, de := range dirEntries {
 		name := de.Name()
-		// The picker only offers directories, and hidden ones are noise.
 		if !de.IsDir() || strings.HasPrefix(name, ".") {
 			continue
 		}
@@ -168,8 +138,6 @@ func homeOrEmpty(err error, home string) string {
 	return home
 }
 
-// fsListRoots returns the navigable seed directories (home, /tmp, cwd),
-// keeping only the ones that exist, are directories and are allowed.
 func fsListRoots(home string, homeErr error) []string {
 	cwd, _ := os.Getwd()
 	candidates := make([]string, 0, 3)
@@ -186,7 +154,7 @@ func fsListRoots(home string, homeErr error) []string {
 		}
 		resolved, err := filepath.EvalSymlinks(filepath.Clean(c))
 		if err != nil {
-			continue // does not exist
+			continue
 		}
 		info, err := os.Stat(resolved)
 		if err != nil || !info.IsDir() {

@@ -10,35 +10,10 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// This file pins the KEYBOARD and RENDER-ROUTING contract of the native
-// /connect OAuth modal (ModalConnectOAuth). Unlike connect_oauth_test.go
-// (which drives the engine seam and the state machine), every test here goes
-// through the REAL modal key dispatcher `m.handleModalKey(...)` — the point is
-// to prove the generic modal switch does NOT steal a key that belongs to the
-// modal (or that belongs to the shared text input), and that renderActiveModal
-// dispatches to the OAuth surface rather than the generic wizard form.
-//
-// Invariants pinned here (each maps to a guard in production):
-//   1. ctrl+y copies the authorization URL / reports failure with no URL.
-//   2. "q" is TEXT, not a close key (isFormModal(ModalConnectOAuth) == true).
-//   3. ENTER is inert unless a live flow is pending — and it NEVER clears the
-//      input in that case (the SetValue("") sits BELOW the state guard).
-//   4. ESC cancels, releases the listener and returns to the /connect picker.
-//   5. renderActiveModal routes to renderConnectOAuth, not renderFormModal.
-//   6. up/down/k/j never move the invisible list cursor
-//      (isListModal(ModalConnectOAuth) == false).
-
-// qKey builds a rune key message ("q") the way bubbletea does.
 func qKey(r rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
 }
 
-// ── 1. ctrl+y copies the authorization URL (OSC 52 on stdout) ─────────
-
-// TestConnectOAuthKey_CtrlYCopiesTheAuthorizationURL pins the copy branch of
-// handleConnectOAuthKey as reached through handleModalKey: handled, no cmd,
-// localized "copied" feedback, no error, and the OSC 52 payload carrying the
-// URL (clipboard.go writes the payload synchronously to os.Stdout).
 func TestConnectOAuthKey_CtrlYCopiesTheAuthorizationURL(t *testing.T) {
 	m, flow := connectOAuthEnterPending(t, "anthropic")
 
@@ -69,11 +44,6 @@ func TestConnectOAuthKey_CtrlYCopiesTheAuthorizationURL(t *testing.T) {
 	}
 }
 
-// ── 2. ctrl+y with no URL reports failure ─────────────────────────────
-
-// TestConnectOAuthKey_CtrlYWithNoURLReportsFailure pins the empty-URL branch:
-// handled, no cmd, no success feedback and the localized "copy failed" error.
-// The model is built bare (no pending flow) so connectOAuthURL is "".
 func TestConnectOAuthKey_CtrlYWithNoURLReportsFailure(t *testing.T) {
 	m := &Model{modalMode: ModalConnectOAuth, connectOAuthState: connectOAuthIdle}
 
@@ -89,18 +59,9 @@ func TestConnectOAuthKey_CtrlYWithNoURLReportsFailure(t *testing.T) {
 	}
 }
 
-// ── 3. "q" is TEXT, not a close key ───────────────────────────────────
-
-// TestConnectOAuthKey_QIsTextNotClose pins isFormModal(ModalConnectOAuth)
-// == true. If the generic switch ever treated ModalConnectOAuth as a
-// non-form modal, `case "esc", "q"` would close it — so this asserts the
-// modal stays open, the flow survives, and "q" reaches the shared input.
 func TestConnectOAuthKey_QIsTextNotClose(t *testing.T) {
 	m, _ := connectOAuthEnterPending(t, "openai")
 
-	// The returned cmd may be the textinput's blink command (that is what
-	// "forwarded to the widget" looks like); the invariants that matter are
-	// the three below.
 	_, _ = m.handleModalKey(qKey('q'))
 	if m.modalMode != ModalConnectOAuth {
 		t.Errorf("mode = %v, want ModalConnectOAuth (\"q\" must not close the form)", m.modalMode)
@@ -114,13 +75,6 @@ func TestConnectOAuthKey_QIsTextNotClose(t *testing.T) {
 	}
 }
 
-// ── 4. ENTER is inert when there is no live pending flow ──────────────
-
-// TestConnectOAuthKey_EnterIsInertWithoutAPendingFlow pins that ENTER only
-// emits a submit command when state == pending AND a flow is live. Both
-// sub-cases pre-fill the input with "SIN-USAR" and assert it is NOT cleared:
-// the production SetValue("") sits BELOW the state guard, so moving it above
-// (or dropping the guard) would be caught here (input cleared / submit fired).
 func TestConnectOAuthKey_EnterIsInertWithoutAPendingFlow(t *testing.T) {
 	states := map[string]int{
 		"idle":   connectOAuthIdle,
@@ -129,8 +83,6 @@ func TestConnectOAuthKey_EnterIsInertWithoutAPendingFlow(t *testing.T) {
 	for name, state := range states {
 		t.Run(name, func(t *testing.T) {
 			m := &Model{modalMode: ModalConnectOAuth, connectOAuthState: state}
-			// A fake flow with NO live engine underneath: if ENTER were NOT
-			// inert it would call flow.Submit and record it.
 			flow := &fakeConnectOAuthFlow{}
 			m.connectOAuthFlow = flow
 			m.textInput.SetValue("SIN-USAR")
@@ -149,11 +101,6 @@ func TestConnectOAuthKey_EnterIsInertWithoutAPendingFlow(t *testing.T) {
 	}
 }
 
-// ── 5. ENTER with an empty box still hands the input to the engine ────
-
-// TestConnectOAuthKey_EnterOnEmptyBoxSubmitsEmptyInput pins that the modal
-// does NOT pre-validate the box: ENTER emits the submit command (the engine
-// decides the input is empty) and clears the credential-shaped widget.
 func TestConnectOAuthKey_EnterOnEmptyBoxSubmitsEmptyInput(t *testing.T) {
 	m, flow := connectOAuthEnterPending(t, "anthropic")
 	m.textInput.SetValue("")
@@ -175,12 +122,6 @@ func TestConnectOAuthKey_EnterOnEmptyBoxSubmitsEmptyInput(t *testing.T) {
 	}
 }
 
-// ── 6. ESC cancels and returns to the /connect picker ─────────────────
-
-// TestConnectOAuthKey_EscCancelsAndReturnsToThePicker pins the ESC branch of
-// handleConnectOAuthKey: it cancels (releasing the loopback listener), clears
-// every auth field, and re-opens the /connect picker — WITHOUT persisting any
-// credential.
 func TestConnectOAuthKey_EscCancelsAndReturnsToThePicker(t *testing.T) {
 	m, flow := connectOAuthEnterPending(t, "anthropic")
 
@@ -212,14 +153,6 @@ func TestConnectOAuthKey_EscCancelsAndReturnsToThePicker(t *testing.T) {
 	}
 }
 
-// ── 7. render routing: the OAuth surface, not the wizard form ─────────
-
-// TestConnectOAuthRender_RoutesToTheOAuthSurface pins the renderActiveModal
-// dispatcher: ModalConnectOAuth must render connectOAuthBox (title, paste
-// placeholder, ESC hint) and NEVER the generic provider wizard form (whose
-// title is tui.addProvider). The second phase flips modalMode to
-// ModalAddProvider and asserts the opposite, proving the test discriminates
-// and cannot pass by accident.
 func TestConnectOAuthRender_RoutesToTheOAuthSurface(t *testing.T) {
 	m, _ := connectOAuthEnterPending(t, "anthropic")
 	m.width, m.height = 120, 40
@@ -241,8 +174,6 @@ func TestConnectOAuthRender_RoutesToTheOAuthSurface(t *testing.T) {
 		t.Errorf("render fell through to the generic wizard step marker:\n%s", out)
 	}
 
-	// Discriminating flip: the SAME model with a different modalMode must
-	// render the wizard form (title + step marker) and NOT the OAuth title.
 	m.modalMode = ModalAddProvider
 	out = ansi.Strip(m.renderActiveModal())
 	if !strings.Contains(out, i18n.T("tui.addProvider")) {
@@ -256,19 +187,6 @@ func TestConnectOAuthRender_RoutesToTheOAuthSurface(t *testing.T) {
 	}
 }
 
-// ── 8. navigation keys never move the invisible list cursor ───────────
-
-// TestConnectOAuthKey_NavigationDoesNotMoveTheListCursor pins
-// isListModal(ModalConnectOAuth) == false. The modal has no rows, so up/k/
-// down/j must not move the shared list cursor behind it.
-//
-// The UP branch is the discriminating one: the production "up" arm has no
-// secondary bounds guard, so it is gated ONLY by isListModal. (The "down" arm
-// is additionally bounded by `modalSelectedIdx < len(modalItems)-1`, which is
-// false for an empty modalItems and would mask an isListModal regression — a
-// defensive redundancy, not something this test can force red.) The direct
-// isListModal assertion below is the primary pin and fails immediately on the
-// same mutation.
 func TestConnectOAuthKey_NavigationDoesNotMoveTheListCursor(t *testing.T) {
 	if isListModal(ModalConnectOAuth) {
 		t.Fatal("isListModal(ModalConnectOAuth) = true, want false (the modal has no rows)")

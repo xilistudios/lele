@@ -57,7 +57,6 @@ func TestParseSkillMetadata_NewlineBeforeOpening(t *testing.T) {
 }
 
 func TestParseSkillMetadata_DashesInMiddleOfContent(t *testing.T) {
-	// --- inside a value (not on its own line) should not close frontmatter
 	input := "---\nname: test\ndescription: use --- for emphasis\n---"
 	meta := parseSkillMetadata(input)
 	want := "use --- for emphasis"

@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -21,22 +15,18 @@ import (
 	"github.com/xilistudios/lele/pkg/session"
 )
 
-// commandHandler is the internal interface for command handling.
 type commandHandler interface {
 	handleCommand(ctx context.Context, msg bus.InboundMessage) (string, bool)
 }
 
-// commandHandlerImpl implements the commandHandler interface.
 type commandHandlerImpl struct {
 	al *AgentLoop
 }
 
-// newCommandHandler creates a new command handler.
 func newCommandHandler(al *AgentLoop) *commandHandlerImpl {
 	return &commandHandlerImpl{al: al}
 }
 
-// handleCommand is the main command dispatcher.
 func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.InboundMessage) (string, bool) {
 	content := strings.TrimSpace(msg.Content)
 	if !strings.HasPrefix(content, "/") {
@@ -63,21 +53,12 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 	if !ok {
 		agent = ch.al.registry.GetDefaultAgent()
 	}
-	// Use the routed session key, but honor the message's explicit session key
-	// when set. This must match message_processor.processMessage, which honors
-	// msg.SessionKey unconditionally — otherwise session-scoped commands (e.g.
-	// /goal, /model, /clear) would operate on a different key than the one the
-	// LLM runner and goal loop use, and the command would appear to do nothing.
 	sessionKey := route.SessionKey
 	if msg.SessionKey != "" {
 		sessionKey = msg.SessionKey
 	}
 	baseSessionKey := sessionKey
 	sessionKey = ch.al.ResolveSessionKey(sessionKey)
-	// Only an explicit pin (from /agent or a channel API) may override the
-	// route. getSessionAgent falls back to the default agent, which would make
-	// every bound channel resolve to the default agent here — and /new would
-	// then persist that wrong agent as a pin on the fresh session key.
 	if sessionAgentID, pinned := ch.al.sessionAgentOverride(sessionKey); pinned {
 		if sessionAgent, ok := ch.al.registry.GetAgent(sessionAgentID); ok {
 			agent = sessionAgent
@@ -109,8 +90,6 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 	case "/subagents":
 		return formatSubagentsCommand(ctx, ch.al.toolCoordinator, sessionKey, args), true
 	case "/stop":
-		// Cancel the whole session tree (subagents, groups, background
-		// processes) and the session's own in-flight turn (#230).
 		subagentCount, groupCount, procCount := ch.al.toolCoordinator.cancelSessionTree(sessionKey)
 		ch.al.toolCoordinator.cancelSession(sessionKey)
 		return formatStopAgentResponse(subagentCount, groupCount, procCount), true
@@ -191,7 +170,6 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 		if agent.Sessions.GetTotalMessageCount(sessionKey) <= 4 {
 			return "📭 Not enough messages to compact (need 5+).", true
 		}
-		// Send feedback message before starting compaction (LLM call can take seconds)
 		ch.al.bus.PublishOutbound(bus.OutboundMessage{
 			Channel: msg.Channel,
 			ChatID:  msg.ChatID,
@@ -205,8 +183,6 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 			stats.BeforeMessages, stats.AfterMessages, stats.DroppedMessages,
 			stats.BeforeTokens, stats.AfterTokens, stats.SavedTokens), true
 	case "/group":
-		// Use the resolved agent's ID (not route.AgentID which may be "main"
-		// and not exist in the registry) so permission checks work correctly.
 		callerID := route.AgentID
 		if agent != nil {
 			callerID = agent.ID
@@ -219,8 +195,6 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 	return "", false
 }
 
-// handleNewCommand handles the /new command.
-// It preserves the selected agent while switching the chat to a fresh session.
 func (ch *commandHandlerImpl) handleNewCommand(agent *AgentInstance, sessionKey string) string {
 	if agent == nil {
 		return "No default agent configured"
@@ -230,8 +204,6 @@ func (ch *commandHandlerImpl) handleNewCommand(agent *AgentInstance, sessionKey 
 		agentModel = ch.al.cfg().Agents.Defaults.Model
 	}
 	ch.al.startFreshConversation(sessionKey, agent.ID, agentModel)
-	// Invalidate caches so the fresh conversation re-reads the bootstrap files
-	// from disk and rebuilds its system prompt.
 	if agent.ContextBuilder != nil {
 		agent.ContextBuilder.ResetMemoryContext()
 	}
@@ -251,7 +223,6 @@ func (ch *commandHandlerImpl) handleToggleCommand(args []string) string {
 	}
 }
 
-// handleModelCommand handles the /model command.
 func (ch *commandHandlerImpl) handleModelCommand(agent *AgentInstance, sessionKey string, args []string) string {
 	if agent == nil {
 		return "No default agent configured"
@@ -268,7 +239,6 @@ func (ch *commandHandlerImpl) handleModelCommand(agent *AgentInstance, sessionKe
 	return fmt.Sprintf("Model changed for this chat: %s -> %s", currentModel, next)
 }
 
-// handleVerboseCommand handles the /verbose command.
 func (ch *commandHandlerImpl) handleVerboseCommand(sessionKey string) string {
 	if sessionKey == "" {
 		return "Verbose mode requires a session context. Please start a conversation first."
@@ -285,10 +255,8 @@ func (ch *commandHandlerImpl) handleVerboseCommand(sessionKey string) string {
 	return "Unknown verbose level"
 }
 
-// thinkLevels is the ordered cycle for /think: off → low → medium → high → off.
 var thinkLevels = []string{"off", "low", "medium", "high"}
 
-// handleThinkCommand handles the /think command, cycling or setting the reasoning effort level.
 func (ch *commandHandlerImpl) handleThinkCommand(sessionKey string, args []string) string {
 	if sessionKey == "" {
 		return "Think mode requires a session context. Please start a conversation first."
@@ -296,7 +264,6 @@ func (ch *commandHandlerImpl) handleThinkCommand(sessionKey string, args []strin
 
 	providable := ch.al.GetProvidable()
 
-	// If an explicit level is provided, set it directly.
 	if len(args) > 0 {
 		level := strings.ToLower(args[0])
 		if !providable.SetThinkLevel(sessionKey, level) {
@@ -305,7 +272,6 @@ func (ch *commandHandlerImpl) handleThinkCommand(sessionKey string, args []strin
 		return thinkLevelResponse(level)
 	}
 
-	// Cycle to the next level.
 	current := providable.GetThinkLevel(sessionKey)
 	next := "low"
 	for i, l := range thinkLevels {
@@ -334,13 +300,11 @@ func thinkLevelResponse(level string) string {
 	return "Unknown think level"
 }
 
-// handleAgentCommand handles the /agent command.
 func (ch *commandHandlerImpl) handleAgentCommand(sessionKey string, args []string) string {
 	if sessionKey == "" {
 		return "Agent switching requires a session context. Please start a conversation first."
 	}
 
-	// List available agents if no argument provided
 	if len(args) == 0 {
 		agentList := ch.al.registry.ListAgentIDs()
 		if len(agentList) == 0 {
@@ -365,13 +329,11 @@ func (ch *commandHandlerImpl) handleAgentCommand(sessionKey string, args []strin
 
 	agentID := args[0]
 
-	// Validate agent exists
 	agent, ok := ch.al.registry.GetAgent(agentID)
 	if !ok {
 		return fmt.Sprintf("❌ Agent not found: %s", agentID)
 	}
 
-	// Get agent model
 	agentModel := agent.Model
 	if agentModel == "" {
 		agentModel = ch.al.cfg().Agents.Defaults.Model
@@ -386,7 +348,6 @@ func (ch *commandHandlerImpl) handleAgentCommand(sessionKey string, args []strin
 	return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s", agentName, agentModel)
 }
 
-// formatStatusResponse formats the status response.
 func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, sessionKey, originChannel string) string {
 	if agent == nil {
 		return "No default agent configured"
@@ -404,11 +365,9 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 		}
 	}
 
-	// Get token counts from session
 	inputTokens, outputTokens := agent.Sessions.GetTokenCounts(sessionKey)
 	totalTokens := inputTokens + outputTokens
 
-	// Calculate context tokens including system prompt (initial context)
 	history := agent.Sessions.GetHistoryView(sessionKey)
 	historyTokens := ch.al.sessionManager.EstimateTokens(history)
 	summary := agent.Sessions.GetSummary(sessionKey)
@@ -417,11 +376,9 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 		summaryTokens = ch.al.sessionManager.EstimateTokens([]providers.Message{{Role: "user", Content: summary}})
 	}
 
-	// Build system prompt to get accurate token count
 	systemPrompt := agent.ContextBuilder.BuildSystemPromptForSessionWithFolder(sessionKey, originChannel)
 	systemTokens := ch.al.sessionManager.EstimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
 
-	// Total context = system prompt + summary (if any) + history
 	contextTokens := systemTokens + summaryTokens + historyTokens
 
 	contextWindow := ch.al.getSessionContextWindow(sessionKey)
@@ -430,27 +387,16 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 		contextPercent = 100
 	}
 
-	// Get think level for session. GetEffectiveThinkLevel mirrors exactly what
-	// buildLLMOptions will apply (session override → agent.ThinkingLevel →
-	// "default"), so /status can never lie about the wire payload. The old
-	// code read only the in-memory sync.Map and fell back to
-	// agent.Reasoning.Effort, a third definition of "current level" that
-	// ignored both the persisted override and the agent thinking_level.
 	thinkLevel := ch.al.GetProvidable().GetEffectiveThinkLevel(sessionKey)
 
 	return fmt.Sprintf("🦞 lele %s\nGateway version: %s\n🧠 Model: %s · 🔑 api-key %s\n🧮 Tokens: ~%d in / ~%d out (~%d total)\n📚 Context: ~%d/%d (%d%%)\n🧵 Session: %s\n⚙️ Runtime: %s · Think: %s",
 		gatewayVersion(), gatewayVersion(), currentModel, apiKey, inputTokens, outputTokens, totalTokens, contextTokens, contextWindow, contextPercent, sessionKey, originChannel, thinkLevel)
 }
 
-// gatewayVersion returns the gateway version.
-//
-// Thin alias to the exported helper (DRY): both /status renderers must show
-// exactly the same string as the TUI sidebar.
 func gatewayVersion() string {
 	return GatewayVersion()
 }
 
-// extractPeer extracts the routing peer from inbound message metadata.
 func extractPeer(msg bus.InboundMessage) *routing.RoutePeer {
 	peerKind := msg.Metadata["peer_kind"]
 	if peerKind == "" {
@@ -467,7 +413,6 @@ func extractPeer(msg bus.InboundMessage) *routing.RoutePeer {
 	return &routing.RoutePeer{Kind: peerKind, ID: peerID}
 }
 
-// extractParentPeer extracts the parent peer (reply-to) from inbound message metadata.
 func extractParentPeer(msg bus.InboundMessage) *routing.RoutePeer {
 	parentKind := msg.Metadata["parent_peer_kind"]
 	parentID := msg.Metadata["parent_peer_id"]
@@ -477,12 +422,7 @@ func extractParentPeer(msg bus.InboundMessage) *routing.RoutePeer {
 	return &routing.RoutePeer{Kind: parentKind, ID: parentID}
 }
 
-// handleGroupCommand dispatches /group subcommands.
-// callerAgentID is the resolved agent ID of the user issuing the command (used for spawn permission checks).
 func (ch *commandHandlerImpl) handleGroupCommand(ctx context.Context, msg bus.InboundMessage, callerAgentID, args string) string {
-	// Feature gate (B10): when groups are disabled the command must not create
-	// any state or start anything — it answers with a clear, actionable notice
-	// instead of the confusing half-working behaviour it had before.
 	if !ch.al.cfg().GroupsFeatureEnabled() {
 		return "❌ groups are disabled — enable them in config: groups.enabled = true"
 	}
@@ -520,9 +460,6 @@ func (ch *commandHandlerImpl) handleGroupCommand(ctx context.Context, msg bus.In
 	}
 }
 
-// tagGroupSession creates a SessionManager session for the group so it shows
-// up in the Group mode history (filtered by mode=group). The task is stored as
-// the first user message. Best-effort: errors are logged, not fatal.
 func (ch *commandHandlerImpl) tagGroupSession(groupID, task, targetChatID string) {
 	sessionKey := "group:" + groupID
 	p := ch.al.GetProvidable()
@@ -539,7 +476,6 @@ func (ch *commandHandlerImpl) tagGroupSession(groupID, task, targetChatID string
 	}
 }
 
-// handleGroupListCommand lists all active groups.
 func (ch *commandHandlerImpl) handleGroupListCommand() string {
 	states := ch.al.GroupManager().List()
 	if len(states) == 0 {
@@ -554,7 +490,6 @@ func (ch *commandHandlerImpl) handleGroupListCommand() string {
 	return strings.Join(lines, "\n")
 }
 
-// handleGroupStatusCommand shows status of a specific group or lists active groups.
 func (ch *commandHandlerImpl) handleGroupStatusCommand(id string) string {
 	if id == "" {
 		return ch.handleGroupListCommand()
@@ -588,7 +523,6 @@ func (ch *commandHandlerImpl) handleGroupStatusCommand(id string) string {
 	return strings.Join(lines, "\n")
 }
 
-// handleGroupStopCommand stops a group by ID.
 func (ch *commandHandlerImpl) handleGroupStopCommand(id string) string {
 	if id == "" {
 		return "Uso: /group stop <grupo_id>"
@@ -599,7 +533,6 @@ func (ch *commandHandlerImpl) handleGroupStopCommand(id string) string {
 	return fmt.Sprintf("❌ Grupo no encontrado: %s", id)
 }
 
-// handleGroupStartCommand starts a group from a profile or ad-hoc flags.
 func (ch *commandHandlerImpl) handleGroupStartCommand(ctx context.Context, msg bus.InboundMessage, callerAgentID, args string) string {
 	args = strings.TrimSpace(args)
 	if args == "" {
@@ -612,7 +545,6 @@ func (ch *commandHandlerImpl) handleGroupStartCommand(ctx context.Context, msg b
 		return "Uso: /group start <profileID> <task>"
 	}
 
-	// Check if ad-hoc mode (--agents flag present)
 	isAdHoc := false
 	for _, p := range parts {
 		if p == "--agents" {
@@ -627,7 +559,6 @@ func (ch *commandHandlerImpl) handleGroupStartCommand(ctx context.Context, msg b
 	return ch.handleGroupStartProfile(ctx, msg, callerAgentID, parts)
 }
 
-// handleGroupStartAdHoc starts a group from ad-hoc flags.
 func (ch *commandHandlerImpl) handleGroupStartAdHoc(ctx context.Context, msg bus.InboundMessage, callerAgentID string, parts []string) string {
 	agentsFlag := ""
 	strategy := config.StrategyRoundRobin
@@ -688,7 +619,6 @@ func (ch *commandHandlerImpl) handleGroupStartAdHoc(ctx context.Context, msg bus
 		return "❌ Se requiere una tarea. Ejemplo: /group start --agents a,b --strategy moa <task>"
 	}
 
-	// Permission check
 	var denied []string
 	for _, aid := range agentIDs {
 		if !ch.al.registry.CanSpawnSubagent(callerAgentID, aid) {
@@ -699,7 +629,6 @@ func (ch *commandHandlerImpl) handleGroupStartAdHoc(ctx context.Context, msg bus
 		return fmt.Sprintf("❌ Sin permiso para participar con: %s", strings.Join(denied, ", "))
 	}
 
-	// Build participants
 	participants := make([]group.Participant, 0, len(agentIDs))
 	for _, aid := range agentIDs {
 		role := ""
@@ -735,7 +664,6 @@ func (ch *commandHandlerImpl) handleGroupStartAdHoc(ctx context.Context, msg bus
 		groupID, strategy, len(participants), groupID)
 }
 
-// handleGroupStartProfile starts a group from a config GroupProfile.
 func (ch *commandHandlerImpl) handleGroupStartProfile(ctx context.Context, msg bus.InboundMessage, callerAgentID string, parts []string) string {
 	profileID := parts[0]
 	task := ""
@@ -746,7 +674,6 @@ func (ch *commandHandlerImpl) handleGroupStartProfile(ctx context.Context, msg b
 		return fmt.Sprintf("❌ Se requiere una tarea. Uso: /group start %s <task>", profileID)
 	}
 
-	// Find the profile in config
 	var profile *config.GroupProfile
 	for i := range ch.al.cfg().Groups.List {
 		if ch.al.cfg().Groups.List[i].ID == profileID {
@@ -758,7 +685,6 @@ func (ch *commandHandlerImpl) handleGroupStartProfile(ctx context.Context, msg b
 		return fmt.Sprintf("❌ Perfil de grupo no encontrado: %s\nUsa /group start --agents a,b --strategy moa <task> para ad-hoc.", profileID)
 	}
 
-	// Permission check
 	var denied []string
 	for _, aid := range profile.Participants {
 		if !ch.al.registry.CanSpawnSubagent(callerAgentID, aid) {
@@ -769,7 +695,6 @@ func (ch *commandHandlerImpl) handleGroupStartProfile(ctx context.Context, msg b
 		return fmt.Sprintf("❌ Sin permiso para participar con: %s", strings.Join(denied, ", "))
 	}
 
-	// Build participants with roles
 	participants := make([]group.Participant, 0, len(profile.Participants))
 	for _, aid := range profile.Participants {
 		role := ""
@@ -809,14 +734,6 @@ func (ch *commandHandlerImpl) handleGroupStartProfile(ctx context.Context, msg b
 		groupID, profile.Strategy, len(participants), groupID)
 }
 
-// handleGoalCommand dispatches /goal subcommands.
-// Subcommands:
-//
-//	/goal <text>       - Set a persistent goal
-//	/goal status       - Show current goal status
-//	/goal pause        - Pause the goal loop
-//	/goal resume       - Resume a paused goal
-//	/goal clear        - Remove the goal
 func (ch *commandHandlerImpl) handleGoalCommand(ctx context.Context, channel, chatID, sessionKey string, args []string) string {
 	gm := ch.al.GoalManager()
 	if gm == nil {
@@ -824,7 +741,6 @@ func (ch *commandHandlerImpl) handleGoalCommand(ctx context.Context, channel, ch
 	}
 
 	if len(args) == 0 {
-		// Show usage or current goal status
 		goal := gm.Get(sessionKey)
 		if goal != nil {
 			return goal.FormatStatus()
@@ -868,17 +784,15 @@ func (ch *commandHandlerImpl) handleGoalCommand(ctx context.Context, channel, ch
 		return "❌ No hay objetivo activo para eliminar."
 
 	default:
-		// Treat everything as goal text
 		goalText := strings.Join(args, " ")
 		maxTurns := DefaultGoalMaxTurns
 
-		// Check for --turns flag
 		parts := strings.Fields(goalText)
 		var textParts []string
 		for i := 0; i < len(parts); i++ {
 			if parts[i] == "--turns" && i+1 < len(parts) {
 				fmt.Sscanf(parts[i+1], "%d", &maxTurns)
-				i++ // skip the value
+				i++
 			} else {
 				textParts = append(textParts, parts[i])
 			}
@@ -890,26 +804,13 @@ func (ch *commandHandlerImpl) handleGoalCommand(ctx context.Context, channel, ch
 		}
 
 		goal := gm.Set(sessionKey, goalText, maxTurns)
-		// Kick off an agent turn so the autonomous goal loop starts immediately.
-		// Without this, the goal would be persisted but never acted upon because
-		// the continuation trigger only fires at the end of a normal turn.
 		ch.kickoffGoalTurn(ctx, "", channel, chatID, sessionKey, goalText)
 		return fmt.Sprintf("🎯 Objetivo establecido:\n%s\n\nEl agente continuará trabajando automáticamente hacia este objetivo después de cada turno.\nCualquier mensaje tuyo interrumpirá el loop. Usa /goal clear para cancelarlo.",
 			goal.FormatStatus())
 	}
 }
 
-// kickoffGoalTurn publishes an inbound message that triggers a fresh normal
-// agent turn for the session (and the originating channel/chat). The goal
-// continuation loop then runs at the end of that turn, making the autonomous
-// goal loop start immediately after /goal.
-//
-// senderID is optional; when empty it defaults to "tui" so the kickoff is
-// treated as a regular inbound user message.
 func (ch *commandHandlerImpl) kickoffGoalTurn(ctx context.Context, senderID, channel, chatID, sessionKey, goalText string) {
-	// Route the kickoff back through the originating message's channel/chat so
-	// the result is delivered to the same place the /goal was issued (TUI,
-	// WebUI, Telegram, etc.).
 	if channel == "" {
 		channel = "native"
 	}

@@ -8,10 +8,6 @@ import (
 	"testing"
 )
 
-// --- prune-on-save helpers for tests ---------------------------------------
-
-// readSavedJSON parses the raw JSON written by SaveEditableDocument so tests
-// can assert on the actual file shape (absence of keys), not just round-trips.
 func readSavedJSON(t *testing.T, path string) map[string]interface{} {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -25,8 +21,6 @@ func readSavedJSON(t *testing.T, path string) map[string]interface{} {
 	return parsed
 }
 
-// savedSection returns the raw object stored under key at the top level of a
-// saved file, failing when it is absent or not an object.
 func savedSection(t *testing.T, parsed map[string]interface{}, key string) map[string]interface{} {
 	t.Helper()
 	raw, ok := parsed[key]
@@ -40,8 +34,6 @@ func savedSection(t *testing.T, parsed map[string]interface{}, key string) map[s
 	return section
 }
 
-// savedBlock returns a nested block and asserts its exact key set. It works on
-// any parent object (channels, tools, tools.web).
 func savedBlock(t *testing.T, parent map[string]interface{}, name string, wantKeys ...string) map[string]interface{} {
 	t.Helper()
 	raw, ok := parent[name]
@@ -63,7 +55,6 @@ func savedBlock(t *testing.T, parent map[string]interface{}, name string, wantKe
 	return block
 }
 
-// hasKey asserts that a scalar key is present in an object.
 func hasKey(t *testing.T, obj map[string]interface{}, key string) interface{} {
 	t.Helper()
 	value, ok := obj[key]
@@ -90,10 +81,6 @@ func saveDoc(t *testing.T, dir string, doc *EditableDocument) string {
 	return path
 }
 
-// --- pruning: a document equal to the defaults writes nothing ---------------
-
-// prunableSections are the sections toSerializable now emits key-by-key
-// instead of unconditionally.
 var prunableSections = []string{"session", "tools", "heartbeat", "devices", "logs", "channels", "gateway"}
 
 func TestPrune_DefaultsWriteOnlyAgents(t *testing.T) {
@@ -107,20 +94,14 @@ func TestPrune_DefaultsWriteOnlyAgents(t *testing.T) {
 			t.Errorf("saved JSON must not contain a %q section when everything equals the defaults, got: %v", section, raw)
 		}
 	}
-	// The whole file is agents and nothing else: onboarding's minimal
-	// config.json has no dead weight left in it.
 	if got := keysOf(parsed); len(got) != 1 || got[0] != "agents" {
 		t.Errorf("saved top-level keys = %v, want exactly [agents]", got)
 	}
-	// Sanity: the document really was serialized (other sections present).
 	if _, ok := parsed["agents"]; !ok {
 		t.Fatal("expected an \"agents\" section to still be written")
 	}
 }
 
-// TestPrune_DefaultsRoundTripKeepsRuntimeDefaults is the safety net for the
-// test above: everything the pruned sections used to spell out must still come
-// back as the code default after a save + reload of the minimal file.
 func TestPrune_DefaultsRoundTripKeepsRuntimeDefaults(t *testing.T) {
 	def := DefaultConfig()
 	path := saveDoc(t, t.TempDir(), defaultEditableDocument())
@@ -129,10 +110,6 @@ func TestPrune_DefaultsRoundTripKeepsRuntimeDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)
 	}
-	// The session comparison uses the file defaults: DefaultConfig() holds
-	// ephemeral:true, but a file that omits session.ephemeral reloads as false
-	// (LoadConfig's special handling), which is exactly what the pruned
-	// document means. See TestPrune_SessionEphemeralAbsentMeansFalse.
 	fileDefaults := DefaultConfig()
 	fileDefaults.Session.Ephemeral = false
 	if !reflect.DeepEqual(loaded.Session, fileDefaults.Session) {
@@ -152,16 +129,11 @@ func TestPrune_DefaultsRoundTripKeepsRuntimeDefaults(t *testing.T) {
 	}
 }
 
-// TestPrune_SessionEphemeralAbsentMeansFalse pins the one field whose prune
-// value is NOT DefaultConfig(): LoadConfig forces session.ephemeral=false when
-// the key is missing (DefaultConfig() says true), so false must be omitted and
-// true must still be written — omitting it would silently flip the feature off.
 func TestPrune_SessionEphemeralAbsentMeansFalse(t *testing.T) {
 	dir := t.TempDir()
 
-	// false (the effective file default) writes no key at all.
 	doc := defaultEditableDocument()
-	doc.Session.CompactionModel = "openrouter:gemini" // force a session section
+	doc.Session.CompactionModel = "openrouter:gemini"
 	path := saveDoc(t, dir, doc)
 
 	session := savedSection(t, readSavedJSON(t, path), "session")
@@ -179,7 +151,6 @@ func TestPrune_SessionEphemeralAbsentMeansFalse(t *testing.T) {
 	if loaded.Session.Ephemeral {
 		t.Error("LoadConfig on a file without session.ephemeral = true, want false")
 	}
-	// ToConfig must agree with LoadConfig on the same file.
 	reloaded, _, err := LoadEditableDocument(path)
 	if err != nil {
 		t.Fatalf("LoadEditableDocument failed: %v", err)
@@ -220,10 +191,7 @@ func TestPrune_SessionEphemeralTrueIsARealDifference(t *testing.T) {
 }
 
 func TestPrune_DefaultNativeAndWebWriteNothing(t *testing.T) {
-	// Default native is enabled:true and default web is enabled:true:
-	// neither may appear in a saved default document.
 	doc := defaultEditableDocument()
-	// Touch one unrelated channel so the channels section exists at all.
 	doc.Channels.Discord.Enabled = true
 	path := saveDoc(t, t.TempDir(), doc)
 
@@ -237,8 +205,6 @@ func TestPrune_DefaultNativeAndWebWriteNothing(t *testing.T) {
 	savedBlock(t, channels, "discord", "enabled")
 }
 
-// --- pruning: disabled native / web ------------------------------------------
-
 func TestPrune_DisabledNativeWritesOnlyEnabledFalse(t *testing.T) {
 	doc := defaultEditableDocument()
 	doc.Channels.Native.Enabled = false
@@ -249,7 +215,6 @@ func TestPrune_DisabledNativeWritesOnlyEnabledFalse(t *testing.T) {
 	if native["enabled"] != false {
 		t.Errorf("native.enabled = %v, want false", native["enabled"])
 	}
-	// Nothing else was customized, so native is the only channel block.
 	if len(channels) != 1 {
 		t.Errorf("expected only the native block, got channels: %v", keysOf(channels))
 	}
@@ -262,14 +227,12 @@ func TestPrune_DisabledWebRoundTrip(t *testing.T) {
 	doc.Channels.Web.Enabled = false
 	path := saveDoc(t, dir, doc)
 
-	// Raw shape: exactly {"web":{"enabled":false}} inside channels.
 	channels := savedSection(t, readSavedJSON(t, path), "channels")
 	web := savedBlock(t, channels, "web", "enabled")
 	if web["enabled"] != false {
 		t.Errorf("web.enabled = %v, want false", web["enabled"])
 	}
 
-	// LoadEditableDocument -> ToConfig must keep the explicit false.
 	loaded, _, err := LoadEditableDocument(path)
 	if err != nil {
 		t.Fatalf("LoadEditableDocument failed: %v", err)
@@ -285,8 +248,6 @@ func TestPrune_DisabledWebRoundTrip(t *testing.T) {
 		t.Error("ToConfig web.enabled = true, want false")
 	}
 
-	// Native was never customized and is absent from the pruned file, so
-	// LoadConfig must restore its code default (enabled: true).
 	runtime, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)
@@ -301,7 +262,7 @@ func TestPrune_DisabledWebRoundTrip(t *testing.T) {
 
 func TestPrune_EnabledWebWritesNothing(t *testing.T) {
 	doc := defaultEditableDocument()
-	doc.Channels.Native.Enabled = false // force a channels section
+	doc.Channels.Native.Enabled = false
 	path := saveDoc(t, t.TempDir(), doc)
 
 	channels := savedSection(t, readSavedJSON(t, path), "channels")
@@ -309,8 +270,6 @@ func TestPrune_EnabledWebWritesNothing(t *testing.T) {
 		t.Errorf("web equals its default (enabled:true) and must write nothing, got %v", channels["web"])
 	}
 }
-
-// --- pruning: per-channel keys ----------------------------------------------
 
 func TestPrune_TelegramEnabledWithTokenWritesOnlyNeededKeys(t *testing.T) {
 	doc := defaultEditableDocument()
@@ -344,9 +303,6 @@ func TestPrune_WhatsAppDisabledWithCustomBridgeURLWritesOnlyBridgeURL(t *testing
 }
 
 func TestPrune_PlaceholderSecretAlwaysCountsAsDifference(t *testing.T) {
-	// A keyring/env placeholder on an otherwise-default channel must be
-	// written even though the channel is disabled and every plain field
-	// matches the default.
 	doc := defaultEditableDocument()
 	doc.Channels.Discord.Token = SecretValue{Mode: SecretModeKeyring, SecretName: "discord.token"}
 	path := saveDoc(t, t.TempDir(), doc)
@@ -361,7 +317,6 @@ func TestPrune_PlaceholderSecretAlwaysCountsAsDifference(t *testing.T) {
 func TestPrune_GatewayCustomizedWritesOnlyDiffingKeys(t *testing.T) {
 	doc := defaultEditableDocument()
 	def := DefaultConfig()
-	// Change only the port; host stays at its default.
 	doc.Gateway.Port = def.Gateway.Port + 1
 	path := saveDoc(t, t.TempDir(), doc)
 
@@ -378,13 +333,7 @@ func TestPrune_GatewayCustomizedWritesOnlyDiffingKeys(t *testing.T) {
 	}
 }
 
-// --- full round-trip pin -----------------------------------------------------
-
 func TestPrune_RichDocumentFullRoundTrip(t *testing.T) {
-	// Start from the runtime defaults, customize every channel and the
-	// gateway (except QQ, which stays default and must vanish from the
-	// file), then pin: save -> LoadEditableDocument -> ToConfig gives back
-	// exactly the original runtime channels/gateway.
 	cfg := DefaultConfig()
 
 	cfg.Channels.Telegram = TelegramConfig{
@@ -413,7 +362,6 @@ func TestPrune_RichDocumentFullRoundTrip(t *testing.T) {
 		ReconnectInterval: 9, GroupTriggerPrefix: []string{"@bot", "/lele"},
 		AllowFrom: FlexibleStringSlice{"group1"},
 	}
-	// QQ intentionally left at defaults.
 	cfg.Channels.DingTalk = DingTalkConfig{
 		Enabled: true, ClientID: "dt-client", ClientSecret: "dt-secret",
 		AllowFrom: FlexibleStringSlice{"dt-user"},
@@ -426,8 +374,6 @@ func TestPrune_RichDocumentFullRoundTrip(t *testing.T) {
 		Enabled: true, Host: "192.168.1.50", Port: 18888,
 		AllowFrom: FlexibleStringSlice{"cam1"},
 	}
-	// Customize native field-by-field so NativeConfig.LeleDir (a runtime-only
-	// field the document does not carry) keeps its default on both sides.
 	cfg.Channels.Native.Host = "0.0.0.0"
 	cfg.Channels.Native.Port = 19000
 	cfg.Channels.Native.TokenExpiryDays = 7
@@ -443,7 +389,6 @@ func TestPrune_RichDocumentFullRoundTrip(t *testing.T) {
 	doc := editableDocumentFromConfig(cfg)
 	path := saveDoc(t, t.TempDir(), doc)
 
-	// The untouched channel must be absent from the file entirely.
 	channels := savedSection(t, readSavedJSON(t, path), "channels")
 	if _, ok := channels["qq"]; ok {
 		t.Errorf("default QQ channel must be pruned, got %v", channels["qq"])
@@ -465,8 +410,6 @@ func TestPrune_RichDocumentFullRoundTrip(t *testing.T) {
 		t.Errorf("gateway round-trip mismatch:\n got=%#v\nwant=%#v", got.Gateway, cfg.Gateway)
 	}
 }
-
-// --- web channel wiring ------------------------------------------------------
 
 func TestWebChannel_DocumentExposesDefaultTrue(t *testing.T) {
 	doc := editableDocumentFromConfig(DefaultConfig())
@@ -510,11 +453,6 @@ func TestWebChannel_FileWithExplicitFalseSurvivesLoad(t *testing.T) {
 	}
 }
 
-// TestPrune_PromptCacheRoundTrip verifies that prompt_cache in agents.defaults
-// survives a full prune round-trip (save minimal → load). This is a regression
-// test for the bug where PromptCacheConfig was missing from
-// EditableAgentDefaults, causing the WebUI to silently drop the setting on
-// every save cycle.
 func TestPrune_PromptCacheRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
@@ -523,7 +461,6 @@ func TestPrune_PromptCacheRoundTrip(t *testing.T) {
 	doc := editableDocumentFromConfig(cfg)
 	path := saveDoc(t, dir, doc)
 
-	// The saved JSON must contain prompt_cache in agents.defaults.
 	parsed := readSavedJSON(t, path)
 	agentsRaw, ok := parsed["agents"]
 	if !ok {
@@ -556,7 +493,6 @@ func TestPrune_PromptCacheRoundTrip(t *testing.T) {
 		t.Errorf("prompt_cache.ttl = %v, want \"1h\"", pc["ttl"])
 	}
 
-	// Reload via LoadEditableDocument → ToConfig and verify the field survived.
 	loaded, _, err := LoadEditableDocument(path)
 	if err != nil {
 		t.Fatalf("LoadEditableDocument failed: %v", err)
@@ -568,7 +504,6 @@ func TestPrune_PromptCacheRoundTrip(t *testing.T) {
 		t.Errorf("reloaded document prompt_cache.ttl = %q, want \"1h\"", loaded.Agents.Defaults.PromptCache.TTL)
 	}
 
-	// Also verify through the runtime Config path.
 	runtime, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)
@@ -581,9 +516,6 @@ func TestPrune_PromptCacheRoundTrip(t *testing.T) {
 	}
 }
 
-// TestPrune_AgentsDefaultsIncludedInRoundTrip extends the defaults round-trip
-// safety net to verify that agents.defaults (including prompt_cache) survives
-// a save + reload of the minimal file.
 func TestPrune_AgentsDefaultsIncludedInRoundTrip(t *testing.T) {
 	def := DefaultConfig()
 	path := saveDoc(t, t.TempDir(), defaultEditableDocument())

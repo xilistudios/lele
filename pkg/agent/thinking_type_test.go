@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -14,8 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// thinkingTypeFixture wires a config with a single provider-model entry that
-// carries a thinking_type, plus the usual test agent loop/instance pair.
 func thinkingTypeFixture(t *testing.T, modelAlias, thinkingType string) (*AgentLoop, *AgentInstance, func()) {
 	t.Helper()
 
@@ -96,11 +88,9 @@ func TestBuildLLMOptions_ThinkingType(t *testing.T) {
 
 			caller := newLLMCaller(al)
 			got := caller.buildLLMOptions(llmCallOptions{
-				ctx:   context.Background(),
-				agent: agent,
-				model: tc.model,
-				// The thinking_type lookup must not depend on any session
-				// thinking override.
+				ctx:        context.Background(),
+				agent:      agent,
+				model:      tc.model,
 				sessionKey: "test-session",
 			})
 
@@ -115,10 +105,6 @@ func TestBuildLLMOptions_ThinkingType(t *testing.T) {
 	}
 }
 
-// TestSummaryGoalJudge_ThinkingTypePassthrough pins that the goal judge ships
-// the per-model think system alongside its explicit reasoning disable, so the
-// provider can render the disable in the endpoint's dialect (e.g. MiMo/DeepSeek
-// `thinking: {"type": "disabled"}`).
 func TestSummaryGoalJudge_ThinkingTypePassthrough(t *testing.T) {
 	provider := &mockProvider{mockResponse: "DONE"}
 	judge := NewSummaryGoalJudge(provider, "xiaomi:mimo-v2.5-pro", &mockSummaryProvider{summary: ""}, nil)
@@ -151,8 +137,6 @@ func TestSummaryGoalJudge_ThinkingTypePassthrough(t *testing.T) {
 	}
 }
 
-// TestGetThinkingType_Resolution covers the config lookup helper directly,
-// including the "auto means unset" contract and invalid values.
 func TestGetThinkingType_Resolution(t *testing.T) {
 	cfg := &config.Config{
 		Providers: &config.ProvidersConfig{
@@ -163,7 +147,7 @@ func TestGetThinkingType_Resolution(t *testing.T) {
 						"a": {ThinkingType: "deepseek"},
 						"b": {ThinkingType: "auto"},
 						"c": {ThinkingType: ""},
-						"d": {ThinkingType: "banana"}, // invalid: treated as unset
+						"d": {ThinkingType: "banana"},
 					},
 				},
 			},

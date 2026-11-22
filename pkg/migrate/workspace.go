@@ -10,11 +10,6 @@ type migrateableFile struct {
 	Sources     []string
 }
 
-// migrateableFiles are the workspace files an import carries over. The persona
-// files (SOUL.md, USER.md) are DEPRECATED — lele no longer creates them for new
-// workspaces (see context.DeprecatedContextFiles) — but they stay here on
-// purpose: an existing workspace being imported must keep its persona instead
-// of losing it to the deprecation.
 var migrateableFiles = []migrateableFile{
 	{Destination: "AGENT.md", Sources: []string{"AGENT.md", "AGENTS.md"}},
 	{Destination: "SOUL.md", Sources: []string{"SOUL.md"}},
@@ -118,7 +113,6 @@ func planDirCopy(srcDir, dstDir string, force bool) ([]Action, error) {
 			return nil
 		}
 
-		// Skip MEMORY.md in memory/ directory - it's handled as migrateableFile to root
 		if filepath.Base(srcDir) == "memory" && filepath.Base(path) == "MEMORY.md" {
 			return nil
 		}

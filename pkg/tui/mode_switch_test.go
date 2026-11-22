@@ -9,9 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// newModeSwitchTestModel builds a TUI Model backed by a real agent loop whose
-// registry is populated from cfg.Agents.List, so TAB cycling has real agents to
-// walk. Groups are enabled/disabled per test.
 func newModeSwitchTestModel(t *testing.T, agentIDs []string, groupsEnabled bool) *Model {
 	t.Helper()
 	cfg := testModelConfig(t)
@@ -29,15 +26,12 @@ func newModeSwitchTestModel(t *testing.T, agentIDs []string, groupsEnabled bool)
 	return m
 }
 
-// pressTab sends a TAB key through Update, exactly like the terminal does.
 func pressTab(t *testing.T, m *Model) *Model {
 	t.Helper()
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	return updated.(*Model)
 }
 
-// pressCommand runs a slash command through Update (the same entry point as
-// typing it in the composer).
 func pressCommand(t *testing.T, m *Model, cmd string) *Model {
 	t.Helper()
 	m.chatInput.SetValue(cmd)
@@ -54,7 +48,6 @@ func TestTabCyclesAgentsCircularly(t *testing.T) {
 		t.Fatalf("initial agent = %q, want alpha", got)
 	}
 
-	// Sorted order is alpha → beta → gamma → alpha (wrap).
 	want := []string{"beta", "gamma", "alpha"}
 	for _, expected := range want {
 		m = pressTab(t, m)
@@ -102,7 +95,6 @@ func TestTabOnWelcomeScreenCyclesPendingAgent(t *testing.T) {
 	m.showWelcome = true
 	m.pendingAgent = ""
 
-	// No session: the cycle resolves the default agent and moves past it.
 	m = pressTab(t, m)
 	if m.pendingAgent != "beta" {
 		t.Fatalf("pendingAgent = %q, want beta", m.pendingAgent)
@@ -111,7 +103,6 @@ func TestTabOnWelcomeScreenCyclesPendingAgent(t *testing.T) {
 		t.Errorf("TAB created a session (%q); it must only select the agent", m.currentKey)
 	}
 
-	// A chat created from here starts on the selected agent.
 	m.createNewChat()
 	if got := m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey); got != "beta" {
 		t.Errorf("new chat agent = %q, want beta", got)
@@ -170,7 +161,7 @@ func TestModeCommandSwitchesToNamedMode(t *testing.T) {
 		{"/mode chat", ModeChat},
 		{"/mode agent", ModeAgent},
 		{"/mode group", ModeGroup},
-		{"/mode CHAT", ModeChat}, // case-insensitive
+		{"/mode CHAT", ModeChat},
 	}
 	for _, tt := range tests {
 		m = pressCommand(t, m, tt.command)
@@ -244,8 +235,6 @@ func TestWelcomeScreenAdvertisesSwitchingShortcuts(t *testing.T) {
 
 	out := m.View()
 
-	// The welcome screen is where new users land: it must name both shortcuts
-	// (TAB cycles agents, /mode switches the chat/agent/group filter).
 	if !strings.Contains(out, i18n.T("tui.tabHint")) {
 		t.Errorf("welcome view missing the shortcut hint %q", i18n.T("tui.tabHint"))
 	}
@@ -256,7 +245,7 @@ func TestCycledAgentCarriesIntoNextChat(t *testing.T) {
 	m.createNewChat()
 	firstKey := m.currentKey
 
-	m = pressTab(t, m) // alpha → beta
+	m = pressTab(t, m)
 
 	m.createNewChat()
 	if m.currentKey == firstKey {

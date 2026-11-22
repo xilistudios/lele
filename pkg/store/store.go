@@ -5,10 +5,6 @@ import (
 	"fmt"
 )
 
-// Store provides SQLite-backed persistence for lele service state.
-//
-// It owns a single *sql.DB connection pool limited to one connection
-// (single writer) and exposes the repositories built on top of it.
 type Store struct {
 	db       *sql.DB
 	kv       *KVRepo
@@ -21,17 +17,6 @@ type Store struct {
 	spool    *SpoolRepo
 }
 
-// Open opens (or creates) the SQLite database at path, applies any
-// pending schema migrations and returns a ready-to-use Store.
-//
-// The connection is configured with:
-//   - busy_timeout(5000): wait up to 5s on locked database
-//   - journal_mode(WAL): concurrent readers with a single writer
-//   - synchronous(NORMAL): safe with WAL, faster than FULL
-//   - foreign_keys(1): enforce FK constraints
-//
-// The pool is limited to a single connection: one writer at a time is
-// a requirement of the storage plan.
 func Open(path string) (*Store, error) {
 	if !sqliteSupported {
 		return nil, fmt.Errorf("%w: SQLite is not supported on this platform (linux/mips64); use the legacy JSON backends", ErrUnsupportedPlatform)
@@ -48,7 +33,6 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("open sqlite database %q: %w", path, err)
 	}
 
-	// Single writer: avoid lock contention between goroutines.
 	db.SetMaxOpenConns(1)
 
 	if err := migrate(db); err != nil {
@@ -69,53 +53,42 @@ func Open(path string) (*Store, error) {
 	}, nil
 }
 
-// DB exposes the underlying database handle. Intended for tests and
-// future one-off data migration helpers.
 func (s *Store) DB() *sql.DB {
 	return s.db
 }
 
-// KV returns the key/value repository.
 func (s *Store) KV() *KVRepo {
 	return s.kv
 }
 
-// Cron returns the cron jobs repository.
 func (s *Store) Cron() *CronRepo {
 	return s.cron
 }
 
-// Goals returns the goals repository.
 func (s *Store) Goals() *GoalRepo {
 	return s.goals
 }
 
-// Groups returns the group state repository.
 func (s *Store) Groups() *GroupRepo {
 	return s.groups
 }
 
-// Auth returns the authentication credentials repository.
 func (s *Store) Auth() *AuthRepo {
 	return s.auth
 }
 
-// NativeClients returns the native clients repository.
 func (s *Store) NativeClients() *NativeClientRepo {
 	return s.clients
 }
 
-// Sessions returns the sessions repository.
 func (s *Store) Sessions() *SessionRepo {
 	return s.sessions
 }
 
-// Spool returns the durable message spool repository.
 func (s *Store) Spool() *SpoolRepo {
 	return s.spool
 }
 
-// Close closes the underlying database connection.
 func (s *Store) Close() error {
 	if err := s.db.Close(); err != nil {
 		return fmt.Errorf("close store: %w", err)

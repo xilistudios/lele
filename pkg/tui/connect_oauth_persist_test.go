@@ -9,50 +9,14 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// Persistence suite for the native /connect OAuth login (the success
-// transition of ModalConnectOAuth: connectOAuthFinishDone →
-// connectOAuthPersistProvider). It reuses the fake engine seam of the
-// connect_oauth_test.go helpers (startConnectOAuthFlow), so no browser,
-// listener, network or credential store is involved.
-//
-// The invariants pinned here are about the TWO config copies of the same
-// provider — Providers.Named[key] (the copy MarshalJSON persists) and the
-// typed field Providers.<Name> (the copy load paths and factory.go's first
-// pre-check still read) — plus the file they are written to:
-//
-//  1. requiresEmptyAPIKey (today: gemini) must clear the API key in BOTH
-//     copies, otherwise they disagree and the typed pre-check in
-//     pkg/providers/factory.go fails on the stale key.
-//  2. openai (Codex) and anthropic (Claude subscription) select their
-//     transport from auth_method ALONE, so their developer API key MUST
-//     survive in both copies (clearing it is data loss).
-//  3. Pre-existing models/proxy are preserved in both copies.
-//  4. The JSON on disk is coherent: no "providers": null, both copies in the
-//     same state.
-
-// ── pre-seed helpers ──────────────────────────────────────────────────
-
-// connectOAuthSeedModels is the pre-existing model map of a provider the
-// user configured BEFORE the OAuth login (the "already usable" shape).
-// Losing it on login is the data-loss bug the assertions pin. Models live
-// ONLY on the Named copy — config.ProviderConfig (the typed copy) has no
-// Models field, so the mirror carries key/proxy only.
 func connectOAuthSeedModels() map[string]config.ProviderModelConfig {
 	return map[string]config.ProviderModelConfig{
 		"gemini-2.5-pro": {Model: "gemini-2.5-pro", ContextWindow: 1048576, MaxTokens: 8192},
 	}
 }
 
-// connectOAuthSeedProxy is the pre-existing proxy of the seeded provider.
 const connectOAuthSeedProxy = "http://proxy.test:8080"
 
-// connectOAuthSeedProvider writes BOTH copies of an existing API-key
-// provider (Named + typed), i.e. the state a developer reaches by running
-// /connect with an API key first and then re-logging in with OAuth.
-//
-// The typed copy is only seeded for the providers that HAVE one
-// (anthropic/gemini: config.ProviderConfig; openai: config.OpenAIProviderConfig
-// embedding it); google-antigravity has none. Returns the config type used.
 func connectOAuthSeedProvider(t *testing.T, m *Model, key string) string {
 	t.Helper()
 	if m.cfg == nil || m.cfg.Providers == nil {
@@ -82,11 +46,6 @@ func connectOAuthSeedProvider(t *testing.T, m *Model, key string) string {
 	return named.Type
 }
 
-// connectOAuthComplete drives a picked OAuth row to a COMPLETED flow through
-// the real Update path: the poll notices status "done" and runs the one-shot
-// success transition (credential store + connectOAuthPersistProvider + wizard
-// hand-off). It returns the model, the fake flow and the config type of the
-// seeded provider.
 func connectOAuthComplete(t *testing.T, key string) (*Model, *fakeConnectOAuthFlow, string) {
 	t.Helper()
 	m, flow := connectOAuthEnterPending(t, key)
@@ -97,9 +56,6 @@ func connectOAuthComplete(t *testing.T, key string) (*Model, *fakeConnectOAuthFl
 	return m, flow, configType
 }
 
-// connectOAuthRequireSuccess is the shared precondition of every assertion
-// below: without a completed transition nothing has been persisted, so a
-// green test here would say nothing about the code under test.
 func connectOAuthRequireSuccess(t *testing.T, m *Model, key string) {
 	t.Helper()
 	if m.connectOAuthState != connectOAuthIdle || m.modalMode != ModalAddProvider {
@@ -111,9 +67,6 @@ func connectOAuthRequireSuccess(t *testing.T, m *Model, key string) {
 	}
 }
 
-// assertConnectOAuthNamed pins the persisted copy of an existing provider:
-// type, auth method, API key (cleared or kept per the transport rule) and
-// the pre-existing models/proxy (losing them is data loss).
 func assertConnectOAuthNamed(t *testing.T, m *Model, key, configType, wantAPIKey string) {
 	t.Helper()
 	if m.cfg == nil || m.cfg.Providers == nil {
@@ -143,10 +96,6 @@ func assertConnectOAuthNamed(t *testing.T, m *Model, key, configType, wantAPIKey
 	}
 }
 
-// assertConnectOAuthTyped pins the typed mirror of an existing provider: it
-// must carry the same auth method AND the same API key decision as the named
-// copy (the two copies are one provider and must not disagree). wantProxy is
-// the seeded proxy, "" for a provider that had no typed copy seeded.
 func assertConnectOAuthTyped(t *testing.T, m *Model, key, wantAPIKey, wantProxy string) {
 	t.Helper()
 	if m.cfg == nil || m.cfg.Providers == nil {
@@ -169,18 +118,11 @@ func assertConnectOAuthTyped(t *testing.T, m *Model, key, wantAPIKey, wantProxy 
 	if got.APIKey != wantAPIKey {
 		t.Errorf("typed %s.APIKey = %q, want %q (the two copies must agree)", key, got.APIKey, wantAPIKey)
 	}
-	// Models exist only on the Named copy; the typed one must at least keep
-	// the proxy (its only other seeded field).
 	if got.Proxy != wantProxy {
 		t.Errorf("typed %s.Proxy = %q, want %q (data loss)", key, got.Proxy, wantProxy)
 	}
 }
 
-// assertConnectOAuthOnDisk reloads config.json from LELE_CONFIG_DIR and pins
-// that BOTH copies come back in the same state as in memory. It also checks
-// the raw file for the known "providers": null regression of
-// ProvidersConfig.MarshalJSON (a null section makes LoadConfig nil the whole
-// Providers config, silently dropping every provider on the next load).
 func assertConnectOAuthOnDisk(t *testing.T, key, configType, wantAPIKey string) {
 	t.Helper()
 	path := filepath.Join(os.Getenv("LELE_CONFIG_DIR"), "config.json")
@@ -198,42 +140,23 @@ func assertConnectOAuthOnDisk(t *testing.T, key, configType, wantAPIKey string) 
 	if reloaded.Providers == nil {
 		t.Fatalf("reloaded providers = nil, want a section (file: %s)", raw)
 	}
-	// Both helpers assert on the RELOADED config, so the in-memory state and
-	// the serialized state cannot drift apart unnoticed.
 	m := &Model{cfg: reloaded}
 	assertConnectOAuthNamed(t, m, key, configType, wantAPIKey)
 	assertConnectOAuthTyped(t, m, key, wantAPIKey, connectOAuthSeedProxy)
 }
 
-// ── 1. gemini: requiresEmptyAPIKey clears BOTH copies ─────────────────
-
-// TestConnectOAuthPersist_GeminiClearsAPIKeyInBothCopies pins the
-// requiresEmptyAPIKey contract for gemini: the OAuth login must leave
-// Providers.Named["gemini"] AND Providers.Gemini keyless (a stale key in the
-// typed field would fail factory.go's first-evaluated pre-check
-// `Gemini.AuthMethod == "oauth" && Gemini.APIKey == ""` and push the
-// transport onto the Named-entry path), while auth_method becomes "oauth"
-// and the pre-existing models/proxy survive in both copies.
 func TestConnectOAuthPersist_GeminiClearsAPIKeyInBothCopies(t *testing.T) {
 	m, _, configType := connectOAuthComplete(t, "gemini")
 	connectOAuthRequireSuccess(t, m, "gemini")
 
 	assertConnectOAuthNamed(t, m, "gemini", configType, "")
 	assertConnectOAuthTyped(t, m, "gemini", "", connectOAuthSeedProxy)
-	// The invariant itself, spelled out: the two copies of one provider must
-	// not disagree about the key.
 	if m.cfg.Providers.Named["gemini"].APIKey != m.cfg.Providers.Gemini.APIKey {
 		t.Errorf("copies disagree: Named=%q typed=%q",
 			m.cfg.Providers.Named["gemini"].APIKey, m.cfg.Providers.Gemini.APIKey)
 	}
 }
 
-// ── 2/3. anthropic + openai: auth_method alone, the key is kept ───────
-
-// TestConnectOAuthPersist_AnthropicKeepsAPIKey is the data-loss guard for
-// the Claude subscription transport: factory.go selects
-// providerTypeClaudeAuth from auth_method ALONE, so the developer API key in
-// BOTH copies must survive an OAuth login (models/proxy too).
 func TestConnectOAuthPersist_AnthropicKeepsAPIKey(t *testing.T) {
 	m, _, configType := connectOAuthComplete(t, "anthropic")
 	connectOAuthRequireSuccess(t, m, "anthropic")
@@ -242,8 +165,6 @@ func TestConnectOAuthPersist_AnthropicKeepsAPIKey(t *testing.T) {
 	assertConnectOAuthTyped(t, m, "anthropic", "sk-stale-anthropic", connectOAuthSeedProxy)
 }
 
-// TestConnectOAuthPersist_OpenAIKeepsAPIKey is the same data-loss guard for
-// the Codex transport (auth_method alone at factory.go:208/:472).
 func TestConnectOAuthPersist_OpenAIKeepsAPIKey(t *testing.T) {
 	m, _, configType := connectOAuthComplete(t, "openai")
 	connectOAuthRequireSuccess(t, m, "openai")
@@ -252,12 +173,6 @@ func TestConnectOAuthPersist_OpenAIKeepsAPIKey(t *testing.T) {
 	assertConnectOAuthTyped(t, m, "openai", "sk-stale-openai", connectOAuthSeedProxy)
 }
 
-// ── 4. round-trip to disk ─────────────────────────────────────────────
-
-// TestConnectOAuthPersist_RoundTripToDisk proves the JSON written by
-// connectOAuthPersistProvider reloads into BOTH copies in the same state
-// (key cleared for gemini, kept for anthropic; auth_method oauth; models and
-// proxy intact) and that the providers section is never serialized as null.
 func TestConnectOAuthPersist_RoundTripToDisk(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -276,20 +191,11 @@ func TestConnectOAuthPersist_RoundTripToDisk(t *testing.T) {
 	}
 }
 
-// ── 5. fresh entry: no invented data ──────────────────────────────────
-
-// TestConnectOAuthPersist_FreshOpenAIEntryInventsNothing pins the
-// anti-oracle behaviour for a provider the user had never configured: the
-// entry must be created from the catalog metadata alone (type + auth
-// method), with an empty API key and ZERO invented models — a preset model
-// leaking in here would make an unconfigured provider look usable.
 func TestConnectOAuthPersist_FreshOpenAIEntryInventsNothing(t *testing.T) {
 	m, _ := connectOAuthEnterPending(t, "openai")
 	if m.cfg == nil || m.cfg.Providers == nil {
 		t.Fatal("test model has no providers config")
 	}
-	// Precondition: no openai entry at all (newTestModel seeds a pristine
-	// config, so the placeholder may exist but must carry no user data).
 	if prev, ok := m.cfg.Providers.Named["openai"]; ok && !prev.IsEmpty() {
 		t.Fatalf("precondition: openai already configured: %+v", prev)
 	}
@@ -317,19 +223,9 @@ func TestConnectOAuthPersist_FreshOpenAIEntryInventsNothing(t *testing.T) {
 	if len(entry.Models) != 0 {
 		t.Errorf("Models = %v, want no invented models", entry.Models)
 	}
-	// The typed mirror must exist for the fresh entry too (openai is one of
-	// the three providers with a typed copy).
-	// No typed copy was seeded (fresh entry), so the mirror must exist but
-	// carry no invented proxy/key beyond the auth method.
 	assertConnectOAuthTyped(t, m, "openai", "", "")
 }
 
-// ── 6. catalog rule: the gemini-only API-key requirement ──────────────
-
-// TestConnectOAuthCatalogRequiresEmptyAPIKeyOnlyForGemini pins the documented
-// transport rule behind the whole file: only gemini needs a keyless entry,
-// openai/anthropic must keep the developer key. Flipping the flag here would
-// silently turn a data-loss bug into the default behaviour.
 func TestConnectOAuthCatalogRequiresEmptyAPIKeyOnlyForGemini(t *testing.T) {
 	for typ, meta := range connectOAuthCatalog {
 		want := typ == "gemini"

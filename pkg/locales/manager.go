@@ -13,12 +13,10 @@ import (
 	"time"
 )
 
-// Manager downloads, caches, and serves language packs.
 type Manager struct {
-	repo   string
-	branch string
-	client *http.Client
-	// cacheDir is ~/.lele/locales (or override for tests).
+	repo     string
+	branch   string
+	client   *http.Client
 	cacheDir string
 
 	mu       sync.RWMutex
@@ -26,8 +24,6 @@ type Manager struct {
 	catalogT time.Time
 }
 
-// DefaultLeleDir mirrors pkg/config.GetLeleDir without importing config
-// (config depends on tui/i18n; locales must stay a leaf).
 func DefaultLeleDir() string {
 	if envDir := os.Getenv("LELE_CONFIG_DIR"); envDir != "" {
 		if strings.HasPrefix(envDir, "~") {
@@ -44,12 +40,10 @@ func DefaultLeleDir() string {
 	return filepath.Join(home, ".lele")
 }
 
-// NewManager creates a Manager with defaults (GitHub main branch, ~/.lele/locales).
 func NewManager() *Manager {
 	return NewManagerWithCacheDir(JoinCacheDir(DefaultLeleDir()))
 }
 
-// NewManagerWithCacheDir creates a Manager writing under cacheDir.
 func NewManagerWithCacheDir(cacheDir string) *Manager {
 	return &Manager{
 		repo:     DefaultRepo,
@@ -60,14 +54,12 @@ func NewManagerWithCacheDir(cacheDir string) *Manager {
 	}
 }
 
-// SetHTTPClient overrides the HTTP client (tests).
 func (m *Manager) SetHTTPClient(c *http.Client) {
 	if c != nil {
 		m.client = c
 	}
 }
 
-// SetSource overrides repo/branch (tests or mirrors).
 func (m *Manager) SetSource(repo, branch string) {
 	if repo != "" {
 		m.repo = repo
@@ -77,26 +69,21 @@ func (m *Manager) SetSource(repo, branch string) {
 	}
 }
 
-// CacheDir returns the on-disk cache root.
 func (m *Manager) CacheDir() string { return m.cacheDir }
 
-// JoinCacheDir returns <leleDir>/locales.
 func JoinCacheDir(leleDir string) string {
 	return filepath.Join(leleDir, "locales")
 }
 
-// rawURL builds a raw.githubusercontent.com URL for a path under locales/.
 func (m *Manager) rawURL(rel string) string {
 	rel = strings.TrimPrefix(rel, "/")
 	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/locales/%s", m.repo, m.branch, rel)
 }
 
-// TUIPath returns the cached TUI pack path for code.
 func (m *Manager) TUIPath(code string) string {
 	return filepath.Join(m.cacheDir, "tui", NormalizeCode(code)+".json")
 }
 
-// WebPath returns the cached WebUI pack path for code.
 func (m *Manager) WebPath(code string) string {
 	return filepath.Join(m.cacheDir, "web", NormalizeCode(code)+".json")
 }
@@ -105,7 +92,6 @@ func (m *Manager) catalogPath() string {
 	return filepath.Join(m.cacheDir, CatalogFile)
 }
 
-// IsInstalled reports whether a non-builtin pack is fully cached (TUI + Web).
 func (m *Manager) IsInstalled(code string) bool {
 	code = NormalizeCode(code)
 	if isBuiltin(code) {
@@ -116,7 +102,6 @@ func (m *Manager) IsInstalled(code string) bool {
 	return errT == nil && errW == nil
 }
 
-// InstalledCodes returns non-builtin languages present on disk.
 func (m *Manager) InstalledCodes() []string {
 	dir := filepath.Join(m.cacheDir, "tui")
 	entries, err := os.ReadDir(dir)
@@ -148,16 +133,13 @@ func sortStrings(s []string) {
 	}
 }
 
-// LoadCachedCatalog reads the on-disk catalog if present.
 func (m *Manager) LoadCachedCatalog() (*Catalog, error) {
 	return loadCatalogFile(m.catalogPath())
 }
 
-// RefreshCatalog fetches locales/index.json from GitHub and caches it.
 func (m *Manager) RefreshCatalog(ctx context.Context) (*Catalog, error) {
 	data, err := m.fetch(ctx, m.rawURL(CatalogFile))
 	if err != nil {
-		// Fall back to cache, then builtins.
 		if c, cerr := m.LoadCachedCatalog(); cerr == nil {
 			m.mu.Lock()
 			m.catalog = c
@@ -175,7 +157,6 @@ func (m *Manager) RefreshCatalog(ctx context.Context) (*Catalog, error) {
 		return nil, fmt.Errorf("remote catalog has no languages")
 	}
 	if err := saveCatalogFile(m.catalogPath(), &c); err != nil {
-		// Non-fatal: still usable in memory.
 		_ = err
 	}
 	m.mu.Lock()
@@ -185,7 +166,6 @@ func (m *Manager) RefreshCatalog(ctx context.Context) (*Catalog, error) {
 	return &c, nil
 }
 
-// Catalog returns the current catalog (memory, else disk, else builtins).
 func (m *Manager) Catalog() *Catalog {
 	m.mu.RLock()
 	c := m.catalog
@@ -204,14 +184,11 @@ func (m *Manager) Catalog() *Catalog {
 
 func (m *Manager) snapshotCatalog() *Catalog {
 	c := m.Catalog()
-	// Shallow copy of languages slice.
 	out := *c
 	out.Languages = append([]Language(nil), c.Languages...)
 	return &out
 }
 
-// EnsureCatalog returns a usable catalog, refreshing from GitHub when stale
-// or empty. Network failure is non-fatal: builtins/cached catalog still work.
 func (m *Manager) EnsureCatalog(ctx context.Context) *Catalog {
 	m.mu.RLock()
 	age := time.Since(m.catalogT)
@@ -226,12 +203,10 @@ func (m *Manager) EnsureCatalog(ctx context.Context) *Catalog {
 	return m.Catalog()
 }
 
-// List returns catalog languages with install flags.
 func (m *Manager) List(ctx context.Context) []Status {
 	cat := m.EnsureCatalog(ctx)
 	langs := append([]Language(nil), cat.Languages...)
 
-	// Merge builtins that the remote catalog might have omitted.
 	have := map[string]bool{}
 	for _, l := range langs {
 		have[NormalizeCode(l.Code)] = true
@@ -242,7 +217,6 @@ func (m *Manager) List(ctx context.Context) []Status {
 		}
 	}
 
-	// Merge installed extras not listed (e.g. local drop-in).
 	for _, code := range m.InstalledCodes() {
 		if !have[code] {
 			langs = append(langs, Language{
@@ -266,9 +240,6 @@ func (m *Manager) List(ctx context.Context) []Status {
 	return out
 }
 
-// GetTUI returns TUI translations for code: builtin codes read from a
-// caller-provided embedded map; extras load from disk cache.
-// embedded, when non-nil, maps code → flat translation map for builtins.
 func (m *Manager) GetTUI(code string, embedded map[string]map[string]string) (map[string]string, error) {
 	code = NormalizeCode(code)
 	if embedded != nil {
@@ -294,7 +265,6 @@ func (m *Manager) readTUICache(code string) (map[string]string, error) {
 	return t, nil
 }
 
-// GetWeb returns the nested WebUI resource for code from the disk cache.
 func (m *Manager) GetWeb(code string) (json.RawMessage, error) {
 	code = NormalizeCode(code)
 	data, err := os.ReadFile(m.WebPath(code))
@@ -307,8 +277,6 @@ func (m *Manager) GetWeb(code string) (json.RawMessage, error) {
 	return json.RawMessage(data), nil
 }
 
-// Install downloads TUI + Web packs for code into the cache.
-// Builtin languages are a no-op success.
 func (m *Manager) Install(ctx context.Context, code string) error {
 	code = NormalizeCode(code)
 	if code == "" {
@@ -347,7 +315,6 @@ func (m *Manager) Install(ctx context.Context, code string) error {
 	return nil
 }
 
-// Uninstall removes a cached pack. Builtins cannot be removed.
 func (m *Manager) Uninstall(code string) error {
 	code = NormalizeCode(code)
 	if isBuiltin(code) {

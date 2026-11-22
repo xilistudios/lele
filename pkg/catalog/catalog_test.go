@@ -50,8 +50,6 @@ func TestModelsForProvider_LoadsPerProviderFile(t *testing.T) {
 	ResetLive()
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
-	// Point cache under temp home.
-	// CacheDir uses UserHomeDir which reads $HOME on unix.
 	provDir := filepath.Join(CacheDir(), "providers")
 	if err := os.MkdirAll(provDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -116,7 +114,6 @@ func TestRefresh_DownloadsIndexAndProviders(t *testing.T) {
 	if len(models) != 1 || models[0].ID != "grok-4" {
 		t.Fatalf("models after refresh: %+v", models)
 	}
-	// Only xai file was requested — ensure openai was not written.
 	if HasCachedProvider("openai") {
 		t.Fatal("unexpected openai cache file")
 	}
@@ -227,9 +224,6 @@ func TestSetCacheDir_OverrideAndReset(t *testing.T) {
 	}
 }
 
-// TestNormalizeType_OpenCodeGo verifies the opencode-go alias maps to the
-// canonical opencode_go type (aliases kept in sync with config.normalizeProviderKey
-// and providers.NormalizeProvider).
 func TestNormalizeType_OpenCodeGo(t *testing.T) {
 	tests := []struct {
 		input string
@@ -238,7 +232,6 @@ func TestNormalizeType_OpenCodeGo(t *testing.T) {
 		{"opencode-go", "opencode_go"},
 		{"OpenCode-Go", "opencode_go"},
 		{"opencode_go", "opencode_go"},
-		// Existing aliases must keep working (no regression).
 		{"zen", "opencode"},
 		{"opencode-zen", "opencode"},
 	}
@@ -250,8 +243,6 @@ func TestNormalizeType_OpenCodeGo(t *testing.T) {
 	}
 }
 
-// TestProviderCachePath_OpenCodeGoSpellings verifies both spellings of the
-// OpenCode Go provider resolve to the same cache file.
 func TestProviderCachePath_OpenCodeGoSpellings(t *testing.T) {
 	dashed := ProviderCachePath("opencode-go")
 	snake := ProviderCachePath("opencode_go")
@@ -263,14 +254,6 @@ func TestProviderCachePath_OpenCodeGoSpellings(t *testing.T) {
 	}
 }
 
-// TestProvidersCarryAPIBaseForEveryKnownType is the drift guard behind issue
-// #404: the WebUI pre-fills the endpoint of every provider it offers from
-// GET /api/v1/catalog/providers, so a known provider id without an api_base
-// would ship a tile the user cannot complete without typing the URL by hand.
-//
-// The complement is asserted too: a type outside BaseLessProviderTypes MUST
-// resolve, so adding an id to hardcodedProviderIDs without a default endpoint
-// fails here instead of reaching a user.
 func TestProvidersCarryAPIBaseForEveryKnownType(t *testing.T) {
 	ResetLive()
 	providers := Providers()
@@ -297,8 +280,6 @@ func TestProvidersCarryAPIBaseForEveryKnownType(t *testing.T) {
 		}
 	}
 
-	// The base-less list must not name ids the catalog does not know: that
-	// would silently excuse a typo in a future id.
 	for _, id := range BaseLessProviderTypes() {
 		if _, ok := providers[id]; ok {
 			continue
@@ -306,7 +287,6 @@ func TestProvidersCarryAPIBaseForEveryKnownType(t *testing.T) {
 		if _, ok := ProviderByID(id); ok {
 			continue
 		}
-		// custom / claude-code / codex-cli are WebUI-only types, not catalog ids.
 		switch id {
 		case "custom", "claude-code", "codex-cli":
 			continue
@@ -315,8 +295,6 @@ func TestProvidersCarryAPIBaseForEveryKnownType(t *testing.T) {
 	}
 }
 
-// TestBaseLessProviderTypesNormalize pins the alias handling: the UI sends the
-// type it writes to config, and the endpoint answers for its aliases too.
 func TestBaseLessProviderTypesNormalize(t *testing.T) {
 	cases := map[string]bool{
 		"azure":          true,
@@ -339,9 +317,6 @@ func TestBaseLessProviderTypesNormalize(t *testing.T) {
 	}
 }
 
-// TestProvidersFillsAPIBaseFromHardcodedTableWhenIndexIsSilent covers the disk
-// index path: an index entry that carries no api_base (older catalog builds)
-// must still reach the UI with the hardcoded default.
 func TestProvidersFillsAPIBaseFromHardcodedTableWhenIndexIsSilent(t *testing.T) {
 	ResetLive()
 	SetCacheDir(t.TempDir())
@@ -360,7 +335,6 @@ func TestProvidersFillsAPIBaseFromHardcodedTableWhenIndexIsSilent(t *testing.T) 
 		t.Errorf("Providers()[xai].APIBase = %q, want %q (hardcoded fallback)", xai.APIBase, want)
 	}
 
-	// An index api_base still wins over the hardcoded table.
 	setIndex(&Index{Providers: map[string]IndexEntry{
 		"xai": {ID: "xai", Name: "xAI", Type: "openai", APIBase: "https://proxy.example/v1"},
 	}})

@@ -14,17 +14,6 @@ import type { ApiClient } from '../../../services/http/client'
 import { makeState, tr } from '../../../test/agentsHarness'
 import { AgentCommandsSection } from './AgentCommandsSection'
 
-/**
- * The Commands tab beyond its three load states (those are pinned by the
- * sibling `AgentCommandsSection.test.tsx`, which goes through the real HTTP
- * client). This file drives the TABLE and the EDITOR against a recorded fake
- * API: what the server decides must be shown (shadowing, deletability,
- * built-ins) and what a write must send (plan T-F4..T-F7).
- *
- * `screen` is unusable in this environment (see agentsHarness header): every
- * query comes from the render result.
- */
-
 const AGENT: EditableAgentConfig = { id: 'coder', name: 'Coder' }
 const WS_DIR = '/home/u/.lele/workspace-coder/commands'
 
@@ -44,8 +33,6 @@ function command(overrides: Partial<AgentCommandInfo>): AgentCommandInfo {
   }
 }
 
-/** Winner + its shadowed loser + a read-only config command: one of each
- *  shape the backend can report. */
 const RESPONSE: AgentCommandsResponse = {
   agent_id: 'coder',
   workspace: '/home/u/.lele/workspace-coder',
@@ -77,7 +64,6 @@ const RESPONSE: AgentCommandsResponse = {
   ],
 }
 
-/** The markdown the fake server serves when the editor loads a file. */
 const DEPLOY_MARKDOWN = [
   '---',
   'description: "Deploy the current branch"',
@@ -145,7 +131,6 @@ function setup(options: { failCreate?: boolean; detail?: string } = {}) {
     return element as HTMLElement
   }
   const callsOf = (kind: Call['kind']) => calls.filter((call) => call.kind === kind)
-  /** The FIRST call of `kind`, narrowed to its variant (no blind casts). */
   const firstCall = <K extends Call['kind']>(kind: K) => {
     const call = calls.find((entry) => entry.kind === kind)
     if (!call) throw new Error(`expected a "${kind}" call`)
@@ -155,13 +140,11 @@ function setup(options: { failCreate?: boolean; detail?: string } = {}) {
     fireEvent.change(requireTestId(id), { target: { value } })
   }
   const field = <T extends HTMLElement>(id: string) => requireTestId(id) as T
-  /** SegmentedControl renders a plain `id` on its radiogroup (no test id). */
   const group = (id: string): HTMLElement => {
     const element = utils.container.querySelector(`#${id}`)
     if (!element) throw new Error(`expected element with id="${id}"`)
     return element as HTMLElement
   }
-  /** Click one segment of a SegmentedControl (segments carry title=label). */
   const clickSegment = (groupId: string, label: string) => {
     const button = group(groupId).querySelector(`button[title="${label}"]`)
     if (!button) throw new Error(`expected segment "${label}" in ${groupId}`)
@@ -183,13 +166,11 @@ function setup(options: { failCreate?: boolean; detail?: string } = {}) {
   }
 }
 
-/** Wait for the list, then open the editor of `name`. */
 async function openEditor(u: ReturnType<typeof setup>, name: string) {
   await waitFor(() => expect(u.byTestId(`command-row-${name}`)).toBeTruthy())
   fireEvent.click(u.requireTestId(`command-edit-${name}`))
 }
 
-/** Fill the three required fields of the create form. */
 function fillNewCommand(u: ReturnType<typeof setup>, name = 'hotfix') {
   u.setValue('command-editor-name', name)
   u.setValue('command-editor-description', 'Run the hotfix flow')
@@ -200,8 +181,6 @@ describe('AgentCommandsSection — the table (T-F4)', () => {
     const u = setup()
     await waitFor(() => expect(u.byTestId('commands-list')).toBeTruthy())
 
-    // Both levels of `deploy` appear: the server flattens, the client only
-    // explains. Here the LOSER is the global one (workspace wins precedence).
     const rows = u.container.querySelectorAll('[data-testid="command-row-deploy"]')
     expect(rows.length).toBe(2)
     const loser = Array.from(rows).find((row) => row.textContent?.includes('Global')) as Element
@@ -209,13 +188,10 @@ describe('AgentCommandsSection — the table (T-F4)', () => {
     expect(loser.getAttribute('title')).toBe(
       tr('settings.agentPage.commands.shadowedBy', { source: 'workspace' }),
     )
-    // Reads and writes are addressed BY NAME and resolve to the winner, so a
-    // shadowed row must not offer actions: they would hit the OTHER file.
     expect(loser.querySelector('[data-testid="command-edit-deploy"]')).toBeNull()
     expect(loser.querySelector('[data-testid="command-remove-deploy"]')).toBeNull()
     expect(loser.textContent).toContain(tr('settings.agentPage.commands.shadowedNoActions'))
 
-    // The winner keeps its controls and no dimming.
     const winner = Array.from(rows).find((row) => row !== loser) as Element
     expect(winner.getAttribute('class') ?? '').not.toContain('opacity-60')
     expect(winner.querySelector('[data-testid="command-remove-deploy"]')).toBeTruthy()
@@ -228,7 +204,6 @@ describe('AgentCommandsSection — the table (T-F4)', () => {
     const remove = u.requireTestId('command-remove-review') as HTMLButtonElement
     expect(remove.disabled).toBe(true)
     expect(remove.getAttribute('title')).toBe(tr('settings.agentPage.commands.notDeletable'))
-    // config-level commands stay viewable, and the deletable row is enabled.
     expect((u.requireTestId('command-edit-review') as HTMLButtonElement).disabled).toBe(false)
     expect((u.requireTestId('command-remove-deploy') as HTMLButtonElement).disabled).toBe(false)
   })
@@ -236,7 +211,6 @@ describe('AgentCommandsSection — the table (T-F4)', () => {
   test('the shared-workspace banner and the missing-folder chip follow the payload', async () => {
     const u = setup()
     await waitFor(() => expect(u.byTestId('commands-list')).toBeTruthy())
-    // shared_by = 1 → no warning; commands_dir_exists = true → no chip.
     expect(u.byTestId('commands-shared-banner')).toBeNull()
     expect(u.byTestId('commands-dir-missing')).toBeNull()
     expect(u.requireTestId('commands-dir').textContent).toBe(WS_DIR)
@@ -249,7 +223,6 @@ describe('AgentCommandsSection — the table (T-F4)', () => {
     expect(block.textContent).toContain('harness.allow_shell')
     expect(block.textContent).toContain('harness.allow_absolute_files')
     expect(block.textContent).toContain(tr('common.disabled'))
-    // Informative block: nothing inside it is a control.
     expect(block.querySelector('button, input, select')).toBeNull()
   })
 })
@@ -259,7 +232,7 @@ describe('AgentCommandsSection — built-in block (T-F7)', () => {
     const u = setup()
     await waitFor(() => expect(u.byTestId('commands-builtin')).toBeTruthy())
     const block = u.requireTestId('commands-builtin')
-    expect(block.getAttribute('open')).toBeNull() // collapsed by default
+    expect(block.getAttribute('open')).toBeNull()
     expect(block.textContent).toContain('/model [name]')
     expect(block.textContent).toContain('Show or set the model')
     expect(block.textContent).toContain(tr('settings.agentPage.commands.builtinNote'))
@@ -275,23 +248,18 @@ describe('AgentCommandEditorDialog — create (T-F5)', () => {
     await waitFor(() => expect(u.byTestId('commands-list')).toBeTruthy())
     fireEvent.click(u.requireTestId('commands-new'))
 
-    // Everything else VALID: the only thing that may block the save is the
-    // name (a form with an empty description would be blocked anyway).
     u.setValue('command-editor-description', 'Run the hotfix flow')
     u.setValue('command-editor-template', 'Fix $1 now')
     u.setValue('command-editor-name', 'Bad Name')
 
     expect(u.requireTestId('command-editor-save').hasAttribute('disabled')).toBe(true)
-    // The inline message of the field — not a server round trip.
     expect(u.container.textContent).toContain(tr('settings.agentPage.commands.editor.nameInvalid'))
     expect(u.callsOf('create').length).toBe(0)
 
-    // A path separator is the dangerous case: the name becomes a file stem.
     u.setValue('command-editor-name', '../../escape')
     expect(u.requireTestId('command-editor-save').hasAttribute('disabled')).toBe(true)
     expect(u.callsOf('create').length).toBe(0)
 
-    // Fixing the name unblocks it: the gate is the name and nothing else.
     u.setValue('command-editor-name', 'hotfix')
     expect(u.requireTestId('command-editor-save').hasAttribute('disabled')).toBe(false)
     expect(u.container.textContent).not.toContain(
@@ -330,10 +298,7 @@ describe('AgentCommandEditorDialog — create (T-F5)', () => {
     expect(call.agentId).toBe('coder')
     expect(call.body.name).toBe('hotfix')
     expect(call.body.scope).toBe('workspace')
-    // Frontmatter: description quoted, and BOTH permission keys omitted (false
-    // allow_shell and inherit absolute are never written).
     expect(call.body.content).toBe('---\ndescription: "Run the hotfix flow"\n---\nFix $1 now')
-    // The dialog closes after a success.
     await waitFor(() => expect(u.byTestId('command-editor-save')).toBeNull())
   })
 
@@ -363,20 +328,16 @@ describe('AgentCommandEditorDialog — create (T-F5)', () => {
   })
 
   test('create states the workspace destination and always posts that scope', async () => {
-    // The API refuses a global create (400 invalid_scope), so the dialog shows
-    // the folder instead of offering a choice it cannot honour: a picker whose
-    // second option always failed would be a bug wearing a UI.
     const u = setup()
     await waitFor(() => expect(u.byTestId('commands-list')).toBeTruthy())
     fireEvent.click(u.requireTestId('commands-new'))
     fillNewCommand(u)
 
     const destination = u.requireTestId('command-editor-destination')
-    expect(destination.textContent).toContain(WS_DIR) // the concrete dir from the GET
+    expect(destination.textContent).toContain(WS_DIR)
     expect(destination.textContent).toContain(
       tr('settings.agentPage.commands.editor.destinationHint'),
     )
-    // The old picker is gone.
     expect(u.byTestId('command-editor-scope')).toBeNull()
 
     fireEvent.click(u.requireTestId('command-editor-save'))
@@ -385,8 +346,6 @@ describe('AgentCommandEditorDialog — create (T-F5)', () => {
   })
 
   test('the two extra name rules the server enforces block the save inline', async () => {
-    // agentCommandName() also bounds the length and rejects a reserved
-    // extension; predicting both keeps the form from sending a doomed POST.
     const u = setup()
     await waitFor(() => expect(u.byTestId('commands-list')).toBeTruthy())
     fireEvent.click(u.requireTestId('commands-new'))
@@ -405,7 +364,6 @@ describe('AgentCommandEditorDialog — create (T-F5)', () => {
       tr('settings.agentPage.commands.editor.nameTooLong', { max: 64 }),
     )
 
-    // 64 characters is the boundary and stays valid.
     u.setValue('command-editor-name', 'a'.repeat(64))
     expect(u.requireTestId('command-editor-save').hasAttribute('disabled')).toBe(false)
     expect(u.callsOf('create').length).toBe(0)
@@ -419,7 +377,6 @@ describe('AgentCommandEditorDialog — create (T-F5)', () => {
     fireEvent.click(u.requireTestId('command-editor-save'))
 
     await waitFor(() => expect(u.byTestId('command-editor-error')).toBeTruthy())
-    // The dialog stays open: the user's text must survive the failure.
     expect(u.byTestId('command-editor-save')).toBeTruthy()
     expect(u.requireTestId('command-editor-error').textContent).toContain(
       'command name already exists',
@@ -433,7 +390,6 @@ describe('AgentCommandEditorDialog — edit (T-F6)', () => {
     const u = setup()
     await openEditor(u, 'deploy')
 
-    // The detail request fires only for an editable level, with the real id.
     await waitFor(() => expect(u.callsOf('detail').length).toBe(1))
     expect(u.callsOf('detail')[0]).toEqual({ kind: 'detail', agentId: 'coder', name: 'deploy' })
 
@@ -447,12 +403,10 @@ describe('AgentCommandEditorDialog — edit (T-F6)', () => {
     expect(u.field<HTMLTextAreaElement>('command-editor-template').value).toBe(
       'Ship $1 from @src/main.ts',
     )
-    // allow_shell: true in the file → "yes"; the absent absolute key stays inherit.
     expect(u.selectedSegment('command-allow-shell')).toBe(tr('common.yes'))
     expect(u.selectedSegment('command-allow-absolute')).toBe(
       tr('settings.agentPage.commands.editor.inherit'),
     )
-    // The name of an existing command is not editable (it IS the file stem).
     expect(u.byTestId('command-editor-name')).toBeNull()
   })
 
@@ -471,8 +425,6 @@ describe('AgentCommandEditorDialog — edit (T-F6)', () => {
     await waitFor(() => expect(u.callsOf('update').length).toBe(1))
     const call = u.firstCall('update')
     expect(call.name).toBe('deploy')
-    // description/model/allow_shell survive the round trip; the omitted
-    // allow_absolute_files is NOT resurrected.
     expect(call.body.content).toBe(
       [
         '---',
@@ -489,8 +441,6 @@ describe('AgentCommandEditorDialog — edit (T-F6)', () => {
   test('switching absolute files to "yes" writes the key explicitly', async () => {
     const u = setup()
     await openEditor(u, 'deploy')
-    // Wait for the file to be APPLIED before touching a segment: a click that
-    // lands before the load resolves would be overwritten by it.
     await waitFor(() =>
       expect(u.field<HTMLInputElement>('command-editor-model').value).toBe('gpt-5'),
     )
@@ -512,7 +462,6 @@ describe('AgentCommandEditorDialog — edit (T-F6)', () => {
       ),
     )
     expect(u.field<HTMLInputElement>('command-editor-description').value).toBe('')
-    // Required description missing → the save stays blocked, not a silent write.
     expect(u.requireTestId('command-editor-save').hasAttribute('disabled')).toBe(true)
   })
 })
@@ -522,12 +471,9 @@ describe('AgentCommandEditorDialog — view (config / directory)', () => {
     const u = setup()
     await openEditor(u, 'review')
 
-    // The server would answer 403 not_editable: the decision is made from the
-    // row's source, so the request never leaves the page.
     expect(u.callsOf('detail').length).toBe(0)
     expect(u.byTestId('command-editor-readonly')).toBeTruthy()
     expect(u.byTestId('command-editor-save')).toBeNull()
-    // Pre-filled from the flattened row (the only data available).
     expect(u.field<HTMLInputElement>('command-editor-description').value).toBe(
       'Deploy the current branch',
     )
@@ -537,7 +483,6 @@ describe('AgentCommandEditorDialog — view (config / directory)', () => {
       true,
     )
     expect(u.field<HTMLTextAreaElement>('command-editor-template').readOnly).toBe(true)
-    // No destination block either: a read-only command is written nowhere.
     expect(u.byTestId('command-editor-destination')).toBeNull()
   })
 })
@@ -548,7 +493,6 @@ describe('AgentCommandsSection — delete', () => {
     await waitFor(() => expect(u.byTestId('command-row-deploy')).toBeTruthy())
 
     fireEvent.click(u.requireTestId('command-remove-deploy'))
-    // Asks first: the row swaps its trash for an explicit confirm.
     expect(u.byTestId('command-remove-confirm-deploy')).toBeTruthy()
     expect(u.callsOf('remove').length).toBe(0)
 
@@ -576,10 +520,6 @@ describe('AgentCommandsSection — delete', () => {
 })
 describe('AgentCommandsSection — cache invalidation', () => {
   test('a mutation re-issues the list GET (the file on disk is the truth)', async () => {
-    // The fake API answers the list from a counter so the refetch is visible:
-    // the hook must invalidate `agentCommands/coder` after every write instead
-    // of patching the cached rows (the server may merge or shadow in ways the
-    // client cannot recompute).
     const listCalls: number[] = []
     const { api, calls } = makeApi()
     const counting = {

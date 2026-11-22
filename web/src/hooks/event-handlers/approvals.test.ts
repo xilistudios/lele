@@ -20,11 +20,6 @@ function msg(
   }
 }
 
-/**
- * Minimal fake MessageEventContext: setStreamingMessages applies updater
- * functions against a local array so we can inspect the result, and every
- * other field is a vi.fn()-style spy (call recorder).
- */
 function makeCtx(initialStreaming: ChatMessage[]) {
   let streaming = initialStreaming
   const calls: Array<{ sessionKey: string; processing: boolean }> = []
@@ -79,7 +74,6 @@ describe('handleSubscribeAck', () => {
     })
 
     expect(syncCalls).toEqual([{ sessionKey: 's1', processing: false }])
-    // No placeholder was created: the backend already finished.
     expect(getStreaming().some((m) => m.role === 'assistant')).toBe(false)
     expect(getStreaming().some((m) => m.streaming)).toBe(false)
   })
@@ -100,7 +94,6 @@ describe('handleSubscribeAck', () => {
     expect(restored?.streaming).toBe(true)
     expect(restored?.content).toBe('partial answer')
     expect(restored?.reasoningContent).toBe('thinking')
-    // Inserted after the session's last user message (chronological position)
     const roles = getStreaming().map((m) => m.role)
     expect(roles).toEqual(['user', 'assistant'])
   })
@@ -130,7 +123,6 @@ describe('handleSubscribeAck', () => {
     handleSubscribeAck(ctx, { session_key: 's1', processing: false })
 
     expect(getStreaming().find((m) => m.id === 'a-stale')?.streaming).toBe(false)
-    // Other sessions are untouched
     expect(getStreaming().find((m) => m.id === 'a-other')?.streaming).toBe(true)
   })
 
@@ -144,7 +136,6 @@ describe('handleSubscribeAck', () => {
 
     handleSubscribeAck(ctx, { session_key: 's1', processing: false })
 
-    // Nothing changed → same array reference (no spurious re-render)
     expect(getStreaming()).toHaveLength(2)
     expect(getStreaming().find((m) => m.id === 'a-other')?.streaming).toBe(true)
   })

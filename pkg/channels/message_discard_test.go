@@ -1,19 +1,5 @@
 package channels
 
-// Tests for the message.discard event on the native channel.
-//
-// The agent streams every LLM iteration under its own message id and, when it
-// throws an iteration away (empty-response retry, plain-text tool call, invalid
-// tool calls), publishes message.discard carrying that iteration's id. The
-// native channel has exactly one job with it: forward it to the clients of the
-// session, with the id they already know, so they can drop the bubble that
-// history will never confirm.
-//
-// Two properties are pinned here: the wire payload ({"event":"message.discard",
-// "data":{"message_id":...,"session_key":...,"reason":...}}) and the fact that
-// the event does NOT touch the session — nothing of a discarded iteration may be
-// appended or finalized on its way out.
-
 import (
 	"strings"
 	"testing"
@@ -21,9 +7,6 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
-// TestDispatchOutboundDiscardForwardsToClient is the core contract test: a
-// message.discard outbound message reaches the WebSocket client of the session
-// as a single frame with the exact payload shape the frontend parses.
 func TestDispatchOutboundDiscardForwardsToClient(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -63,22 +46,15 @@ func TestDispatchOutboundDiscardForwardsToClient(t *testing.T) {
 		t.Errorf("reason = %q, want empty_response", payload.Reason)
 	}
 
-	// Freeze the serialized shape: the web client reads these three snake_case
-	// keys, and message_id is the only one it needs to act on.
 	want := `{"message_id":"` + discardID + `","session_key":"` + sessionKey + `","reason":"empty_response"}`
 	if string(discard.Data) != want {
 		t.Errorf("payload JSON = %s\nwant            %s", discard.Data, want)
 	}
-	// The frame is the protocol envelope, not a bare payload.
 	if discard.Version != WSProtocolVersion {
 		t.Errorf("frame version = %d, want %d", discard.Version, WSProtocolVersion)
 	}
 }
 
-// TestDispatchOutboundDiscardLeavesSessionUntouched pins the "no session side
-// effect" half: unlike message.stream (append/finalize) and message.thinking
-// (append reasoning), a discard must not write anything. A bug that routed it
-// through the streaming path would resurrect the very bubble it drops.
 func TestDispatchOutboundDiscardLeavesSessionUntouched(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -106,16 +82,11 @@ func TestDispatchOutboundDiscardLeavesSessionUntouched(t *testing.T) {
 		t.Errorf("discard must not attach files, got %+v", ts.loop.attachCalls())
 	}
 
-	// And it must still be forwarded (the checks above are the side-effect
-	// half, not an early return that swallows the event).
 	if findWSEvent(drainWSEvents(t, client), "message.discard") == nil {
 		t.Fatal("message.discard was not forwarded to the client")
 	}
 }
 
-// TestDispatchOutboundDiscardWithoutReasonKeepsShape covers a producer that
-// forgot the metadata: the key is still present (empty) instead of vanishing, so
-// the client parser never has to guess a shape.
 func TestDispatchOutboundDiscardWithoutReasonKeepsShape(t *testing.T) {
 	ts := newNativeTestServer(t)
 

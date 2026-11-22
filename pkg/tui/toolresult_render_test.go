@@ -8,13 +8,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Regression tests for tool-result / tool-call row rendering. These rows are
-// composed pre-styled and MUST fit within the pane width: lineViewport renders
-// its lines through a lipgloss Width() pass which word-wraps any over-wide
-// styled row mid-content (reflow breaks at hyphens), dropping the "  → "
-// prefix and the box border on continuation rows and shifting every row below
-// (the bottom bar fell off screen). See renderToolResultBlock.
-
 const timedOutSummary = "Timed out waiting for subagent subagent-3 after 600 seconds (current status: running)"
 
 func resultRows(block string) []string {
@@ -113,9 +106,6 @@ func TestToolCallRow_LongNameArgs(t *testing.T) {
 	}
 }
 
-// TestToolResultRow_FitsWidthUnchangedWhenSmall pins the common case: a short
-// summary at a wide pane must render byte-identical to the previous
-// composition (label + box) — no visual change for content that already fits.
 func TestToolResultRow_FitsWidthUnchangedWhenSmall(t *testing.T) {
 	summary := "grep returned 3 matches"
 	want := ToolResultLabel.Render("  → ") + ToolResultBox.Render(summary)
@@ -125,9 +115,6 @@ func TestToolResultRow_FitsWidthUnchangedWhenSmall(t *testing.T) {
 	}
 }
 
-// TestView_ToolResultLongSummary_NoRowOverflow is the frame-level cascade
-// guard: a very long tool message must not push any frame row past the
-// terminal width, and the summary text must not be re-wrapped mid-word.
 func TestView_ToolResultLongSummary_NoRowOverflow(t *testing.T) {
 	forceTrueColor(t)
 	m := newTestModel(t)

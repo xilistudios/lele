@@ -1,15 +1,5 @@
-/**
- * Schemes que pueden acabar en un `href`. Cualquier otra cosa (javascript:, data:,
- * vbscript:, file:) se descarta y el enlace se renderiza como texto sin destino.
- * Sin allowlist, el parser es el punto donde cualquier consumidor puede fallar.
- */
 const SAFE_LINK_SCHEME = /^(?:https?:|mailto:|tel:|#|\/)/i
 
-/**
- * Rechaza URLs que contengan whitespace o caracteres de control (\x00-\x1f).
- * Los navegadores pueden recortar estos caracteres antes de resolver el scheme,
- * lo que permite eludir la allowlist (p.ej. " javascript:alert").
- */
 const URL_CONTROL_OR_WS = /[\s\x00-\x1f]/
 
 export type ContentBlock = {

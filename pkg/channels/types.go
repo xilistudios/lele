@@ -20,31 +20,10 @@ type ClientInfo struct {
 	LastSeen    time.Time `json:"last_seen"`
 	SessionKeys []string  `json:"session_keys,omitempty"`
 
-	// PrevTokenHash / PrevRefreshHash / RotatedAt describe the LAST rotation
-	// of this client: the hashes that were superseded and when. They exist so
-	// a client whose rotation response was lost (network drop, killed tab)
-	// can still be served inside the rotationGrace window instead of being
-	// told its refresh token is invalid and logging itself out.
-	//
-	// Only the hashes are stored, never the raw credentials; omitempty keeps
-	// blobs written before these fields existed byte-comparable in shape (a
-	// legacy blob simply deserialises with empty values and no rotation
-	// history, in which case the grace window has nothing to match).
 	PrevRefreshHash string    `json:"prev_refresh_hash,omitempty"`
 	PrevTokenHash   string    `json:"prev_token_hash,omitempty"`
 	RotatedAt       time.Time `json:"rotated_at,omitempty"`
 
-	// lastSeenNanos holds the hot-path last-seen timestamp (UnixNano) so
-	// AuthManager.UpdateLastSeen can publish it WITHOUT the manager's
-	// exclusive lock, on every authenticated request. LastSeen above stays
-	// the plain, JSON-facing field, written only before the client is
-	// published (construction + deserialisation); the effective value is
-	// max(LastSeen, lastSeenNanos), see (*ClientInfo).effectiveLastSeen in
-	// auth.go.
-	//
-	// Excluded from JSON on purpose: an atomic.Int64 does not marshal like an
-	// int64 (it has unexported fields), so (*ClientInfo).MarshalJSON in
-	// auth.go folds this value into the "last_seen" key instead.
 	lastSeenNanos atomic.Int64 `json:"-"`
 }
 
@@ -99,12 +78,6 @@ type WSStreamPayload struct {
 	Chunk      string `json:"chunk"`
 	Done       bool   `json:"done"`
 
-	// Streaming throughput metrics of the current stream segment, mirrored
-	// from the agent's message.stream Metadata (see stream_metrics.go). They
-	// are DELIBERATELY not omitempty: the frontend parses a deterministic
-	// shape and decides on its own whether to hide the indicator (it does
-	// when every metric is 0 and Estimated is false), so a missing key must
-	// mean "producer did not send it", never "value happens to be zero".
 	Tokens    int     `json:"tokens"`
 	ElapsedMS int64   `json:"elapsed_ms"`
 	TokPerSec float64 `json:"tok_per_sec"`
@@ -116,28 +89,12 @@ type WSThinkingPayload struct {
 	SessionKey string `json:"session_key,omitempty"`
 	Chunk      string `json:"chunk"`
 
-	// Streaming throughput metrics of the current reasoning segment, mirrored
-	// from the agent's message.thinking Metadata (see stream_metrics.go). Same
-	// contract as WSStreamPayload: they describe the REASONING surface, not the
-	// answer, and are DELIBERATELY not omitempty so a missing key always means
-	// "producer did not send it", never "value happens to be zero".
 	Tokens    int     `json:"tokens"`
 	ElapsedMS int64   `json:"elapsed_ms"`
 	TokPerSec float64 `json:"tok_per_sec"`
 	Estimated bool    `json:"estimated"`
 }
 
-// WSMessageDiscardPayload is the payload of a message.discard event: it tells
-// the client that the streaming bubble identified by MessageID belongs to an
-// iteration the agent THREW AWAY (empty-response retry, plain-text tool call,
-// all-tool-calls-invalid) and must be removed.
-//
-// It carries no content on purpose — nothing of that iteration survives — and
-// Reason is advisory (logs/debugging): the client only needs MessageID, the one
-// id that ties the event to the bubble it built from message.thinking /
-// message.stream chunks. Deliberately not omitempty, mirroring the stream
-// payloads: a deterministic shape means a missing key always signals a producer
-// bug, never "value happens to be zero".
 type WSMessageDiscardPayload struct {
 	MessageID  string `json:"message_id"`
 	SessionKey string `json:"session_key,omitempty"`
@@ -149,11 +106,7 @@ type WSMessageCompletePayload struct {
 	SessionKey  string                   `json:"session_key,omitempty"`
 	Content     string                   `json:"content"`
 	Attachments []map[string]interface{} `json:"attachments,omitempty"`
-	// Error marks a completion whose turn ended in a provider/tool failure
-	// (outbound Metadata "error"="true", see pkg/agent/loop.go). The client uses
-	// it to render the live failure as an error box straight away instead of
-	// waiting for the history refetch that carries the persisted error_detail.
-	Error bool `json:"error,omitempty"`
+	Error       bool                     `json:"error,omitempty"`
 }
 
 type WSApprovalRequestPayload struct {
@@ -179,37 +132,33 @@ type WSToolResultPayload struct {
 	ToolCallID         string `json:"tool_call_id,omitempty"`
 }
 
-// WSGroupStatusPayload reports group lifecycle changes (started/done/stopped/error).
 type WSGroupStatusPayload struct {
 	SessionKey   string `json:"session_key,omitempty"`
 	GroupID      string `json:"group_id"`
-	Status       string `json:"status"`       // started|done|stopped|error
-	Participants string `json:"participants"` // comma-joined agent IDs
+	Status       string `json:"status"`
+	Participants string `json:"participants"`
 }
 
-// WSGroupTurnPayload carries a single group turn (one agent's intervention).
 type WSGroupTurnPayload struct {
 	SessionKey string `json:"session_key,omitempty"`
 	GroupID    string `json:"group_id"`
-	Speaker    string `json:"speaker"` // agent ID
-	Label      string `json:"label"`   // display name
-	Role       string `json:"role"`    // proposer|aggregator|moderator|critic
+	Speaker    string `json:"speaker"`
+	Label      string `json:"label"`
+	Role       string `json:"role"`
 	Layer      int    `json:"layer"`
 	TurnIndex  int    `json:"turn_index"`
 	Content    string `json:"content"`
 }
 
-// WSGroupCompletePayload carries the final aggregated synthesis of a group.
 type WSGroupCompletePayload struct {
 	SessionKey  string `json:"session_key,omitempty"`
 	GroupID     string `json:"group_id"`
 	Strategy    string `json:"strategy"`
 	Layers      int    `json:"layers"`
 	TotalTokens int    `json:"total_tokens"`
-	Content     string `json:"content"` // final synthesis
+	Content     string `json:"content"`
 }
 
-// WSGroupToolPayload carries a group tool-call event (one agent's tool invocation).
 type WSGroupToolPayload struct {
 	SessionKey string `json:"session_key"`
 	GroupID    string `json:"group_id"`
@@ -224,16 +173,6 @@ type WSGroupToolPayload struct {
 	Result     string `json:"result,omitempty"`
 }
 
-// WSCommandAppliedPayload reports that the backend expanded a user-defined
-// (harness) slash command into the prompt for this turn. Emitted from the
-// "command.applied" outbound event (pkg/agent publishes it after expansion).
-//
-// Command carries the name WITHOUT the leading slash (that is what the agent
-// publishes in bus.OutboundMessage.Metadata["command"]); UIs render "/"+command.
-// Agent/Model are the per-turn overrides ("" when the command defines none) and
-// Source is the discovery level the definition came from.
-//
-// Mirrored on the client side as web/src/lib/types.ts WSCommandAppliedPayload.
 type WSCommandAppliedPayload struct {
 	SessionKey  string `json:"session_key"`
 	Command     string `json:"command"`
@@ -318,18 +257,9 @@ type ChatHistoryMessage struct {
 	ToolName           string                        `json:"tool_name,omitempty"`
 	ExcludeFromContext bool                          `json:"exclude_from_context,omitempty"`
 	Attachments        []providers.MessageAttachment `json:"attachments,omitempty"`
-	// DisplayContent, when set, is what the UI should render instead of
-	// Content (harness commands store the expanded prompt in Content).
-	DisplayContent string `json:"display_content,omitempty"`
-	// Command is the harness slash command that produced this message, so the
-	// UI can re-render the command chip from history. nil = not command-driven.
-	Command *providers.CommandApplied `json:"harness_command,omitempty"`
-	// ErrorDetail marks this message as a FAILED turn and carries the failure
-	// detail: the UI renders it as an error box instead of a normal assistant
-	// bubble, and skips the "archived from context" label. The message is
-	// persisted with exclude_from_context=true (it is UI-only), so Content keeps
-	// the legacy "❌ Error …" text for plain-text channels.
-	ErrorDetail string `json:"error_detail,omitempty"`
+	DisplayContent     string                        `json:"display_content,omitempty"`
+	Command            *providers.CommandApplied     `json:"harness_command,omitempty"`
+	ErrorDetail        string                        `json:"error_detail,omitempty"`
 }
 
 type HistoryToolCall struct {
@@ -344,30 +274,21 @@ type ChatSession struct {
 	Key     string    `json:"key"`
 	Name    string    `json:"name,omitempty"`
 	Mode    string    `json:"mode,omitempty"`
-	Kind    string    `json:"kind,omitempty"` // "chat", "heartbeat", "cron", "cron-spawn", "subagent"
+	Kind    string    `json:"kind,omitempty"`
 	Folder  string    `json:"folder,omitempty"`
 	Created time.Time `json:"created"`
 	Updated time.Time `json:"updated"`
 }
 
-// SessionKindInfo is a lightweight summary of a persisted session used by
-// the session-history endpoint to surface system sessions (heartbeat, cron,
-// subagents) that are not tied to a native client.
 type SessionKindInfo struct {
-	Key     string
-	Name    string
-	Mode    string
-	Kind    string
-	Folder  string
-	Created time.Time
-	Updated time.Time
-	// Resident reports whether the session's messages are loaded in memory.
-	Resident bool
-	// HasMessages mirrors AgentProvidable.HasMessages: the session has at
-	// least one user/assistant message in memory or evicted/persisted. It is
-	// resolved for all sessions in one pass (one batched store query covers
-	// every non-resident session), so listing endpoints never call HasMessages
-	// per session.
+	Key         string
+	Name        string
+	Mode        string
+	Kind        string
+	Folder      string
+	Created     time.Time
+	Updated     time.Time
+	Resident    bool
 	HasMessages bool
 }
 
@@ -379,7 +300,7 @@ type ChatSessionsResponse struct {
 
 type CreateSessionRequest struct {
 	SessionKey string `json:"session_key"`
-	Mode       string `json:"mode,omitempty"` // "chat", "agent", "group"
+	Mode       string `json:"mode,omitempty"`
 }
 
 type CreateSessionResponse struct {
@@ -480,38 +401,24 @@ type AgentStatusResponse struct {
 	ActiveSessions int    `json:"active_sessions"`
 }
 
-// AgentCatalogTool is one entry of the per-agent tool catalog.
-// Derived from the agent's real ToolRegistry (Tool.Name()/Tool.Description()).
 type AgentCatalogTool struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 }
 
-// AgentCatalogSkill is one entry of the per-agent skill catalog.
-// Source is "workspace" | "global" | "builtin"; Enabled reflects the
-// workspace skill config (disabled skills are listed with enabled=false).
 type AgentCatalogSkill struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Source      string `json:"source"`
 	Enabled     bool   `json:"enabled"`
-	// Deletable is computed server-side: true only for a skill installed in
-	// THIS agent's workspace dir. The UI hides the remove control when false
-	// instead of letting a click fail on the server.
-	Deletable bool `json:"deletable"`
+	Deletable   bool   `json:"deletable"`
 }
 
-// AgentCatalogResponse is the payload of GET /api/v1/agents/{agentID}/catalog.
-// Both slices are always non-nil (they marshal as [] not null) and sorted by
-// name so the frontend can render them without extra normalization.
 type AgentCatalogResponse struct {
-	AgentID string              `json:"agent_id"`
-	Tools   []AgentCatalogTool  `json:"tools"`
-	Skills  []AgentCatalogSkill `json:"skills"`
-	// Workspace is the directory whose skills/ subfolder this agent installs
-	// into and reads workspace-scoped skills from ("" when unknown). The
-	// install dialog shows it so the scope choice is never abstract.
-	Workspace string `json:"workspace"`
+	AgentID   string              `json:"agent_id"`
+	Tools     []AgentCatalogTool  `json:"tools"`
+	Skills    []AgentCatalogSkill `json:"skills"`
+	Workspace string              `json:"workspace"`
 }
 
 type ConfigResponse struct {
@@ -576,7 +483,7 @@ type ModelOption struct {
 
 type ProviderModelsResponse struct {
 	Provider string              `json:"provider"`
-	Source   string              `json:"source,omitempty"` // "live" or "catalog"
+	Source   string              `json:"source,omitempty"`
 	Models   []ProviderModelInfo `json:"models"`
 }
 
@@ -586,7 +493,6 @@ type ProviderModelInfo struct {
 	Created int64  `json:"created"`
 	OwnedBy string `json:"owned_by"`
 
-	// Optional catalog metadata (models.dev / embedded catalog).
 	Name           string   `json:"name,omitempty"`
 	ContextWindow  int      `json:"context_window,omitempty"`
 	MaxOutput      int      `json:"max_output,omitempty"`
@@ -615,13 +521,8 @@ type SkillInfo struct {
 	Source      string `json:"source,omitempty"`
 }
 
-// SkillInstallRequest is the body of POST /api/v1/skills.
 type SkillInstallRequest struct {
-	URL string `json:"url"`
-	// Scope selects the install destination, resolved by installTarget:
-	// "workspace" (the default) installs into the default workspace skills dir,
-	// "global" into <leleDir>/skills, the directory shared by every agent.
-	// Anything else is rejected with 400 invalid_scope.
+	URL   string `json:"url"`
 	Scope string `json:"scope,omitempty"`
 }
 
@@ -630,13 +531,11 @@ type SkillInstallResponse struct {
 	Message string `json:"message"`
 }
 
-// ScanSkillsResponse is the response from scanning a repo for skills.
 type ScanSkillsResponse struct {
 	Skills []ScannedSkill `json:"skills"`
 	Repo   string         `json:"repo"`
 }
 
-// ScannedSkill represents a skill found in a GitHub repo.
 type ScannedSkill struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -644,20 +543,16 @@ type ScannedSkill struct {
 	HasSKILL    bool   `json:"has_skill"`
 }
 
-// SkillScanRequest is the request body for scanning a repo.
 type SkillScanRequest struct {
 	Repo string `json:"repo"`
 }
 
-// SkillInstallBatchRequest is the request body for batch installing skills.
 type SkillInstallBatchRequest struct {
 	Repo   string   `json:"repo"`
 	Skills []string `json:"skills"`
-	// Scope is the install destination; see SkillInstallRequest.Scope.
-	Scope string `json:"scope,omitempty"`
+	Scope  string   `json:"scope,omitempty"`
 }
 
-// SkillToggleRequest is the request body for toggling a skill.
 type SkillToggleRequest struct {
 	Enabled bool `json:"enabled"`
 }
@@ -668,20 +563,11 @@ type SystemStatusResponse struct {
 	Agents   []map[string]interface{} `json:"agents"`
 	Channels []map[string]interface{} `json:"channels"`
 	Version  string                   `json:"version"`
-	// Storage tells the caller which backend holds the gateway's client and
-	// pairing state. It exists so a gateway that silently fell back to JSON is
-	// visible from the outside instead of only in its own log (#330).
-	Storage *StorageStatus `json:"storage,omitempty"`
+	Storage  *StorageStatus           `json:"storage,omitempty"`
 }
 
-// StorageStatus is the storage block of SystemStatusResponse.
-//
-// Degraded is true ONLY for the broken case: a SQLite-capable binary whose
-// shared store could not be opened (lock, permissions, full disk, corrupted
-// file). A no-SQLite platform legitimately runs Backend "json" with
-// Degraded false, because there JSON is the backend every process shares.
 type StorageStatus struct {
-	Backend  string `json:"backend"` // "sqlite" | "json"
+	Backend  string `json:"backend"`
 	Degraded bool   `json:"degraded"`
 	Error    string `json:"error,omitempty"`
 }
@@ -730,26 +616,22 @@ type UploadedFile struct {
 	Size     int64  `json:"size"`
 }
 
-// ApproveRequest is the request body for approving/rejecting a command via HTTP.
 type ApproveRequest struct {
 	RequestID string `json:"request_id"`
 	Approved  bool   `json:"approved"`
 }
 
-// ApproveResponse is the response for an approval action.
 type ApproveResponse struct {
 	RequestID string `json:"request_id"`
 	Approved  bool   `json:"approved"`
 	Message   string `json:"message,omitempty"`
 }
 
-// FetchModelsRequest is the request body for fetching remote model lists.
 type FetchModelsRequest struct {
 	APIBase string `json:"api_base"`
 	APIKey  string `json:"api_key,omitempty"`
 }
 
-// FetchModelsResponse returns the list of model IDs from a provider's /models endpoint.
 type FetchModelsResponse struct {
 	Models []string `json:"models"`
 }

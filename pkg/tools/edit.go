@@ -7,14 +7,11 @@ import (
 	"strings"
 )
 
-// EditFileTool edits a file by replacing old_text with new_text.
-// The old_text must exist exactly in the file.
 type EditFileTool struct {
 	allowedDir string
 	restrict   bool
 }
 
-// NewEditFileTool creates a new EditFileTool with optional directory restriction.
 func NewEditFileTool(allowedDir string, restrict bool) *EditFileTool {
 	return &EditFileTool{
 		allowedDir: allowedDir,

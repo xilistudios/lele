@@ -47,13 +47,11 @@ describe('isSectionDirty', () => {
     for (const suffix of ['name', 'description', 'default', 'workspace']) {
       expect(isSectionDirty(dirty(`agents.list.1.${suffix}`), 1, 'general')).toBe(true)
     }
-    // temperature is the model tab's, not general's
     expect(isSectionDirty(dirty('agents.list.1.temperature'), 1, 'general')).toBe(false)
     expect(isSectionDirty(dirty('agents.list.1.temperature'), 1, 'model')).toBe(true)
   })
 
   test('sibling index is never matched by prefix', () => {
-    // agents.list.1.model must not light up agent 12.
     expect(isSectionDirty(dirty('agents.list.1.model'), 12, 'model')).toBe(false)
     expect(isSectionDirty(dirty('agents.list.12.model'), 1, 'model')).toBe(false)
   })

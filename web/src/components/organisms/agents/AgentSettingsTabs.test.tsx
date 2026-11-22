@@ -32,7 +32,6 @@ function setup(overrides: Props = {}) {
   return { ...utils, tabs: utils.getAllByRole('tab'), calls }
 }
 
-/** Which tabs show a dot of the given kind? Returns their ids. */
 function dotted(tabs: HTMLElement[], kind: 'dirty' | 'error'): string[] {
   return tabs
     .filter((tab) => tab.querySelector(`[data-testid="tab-dot-${kind}"]`))
@@ -104,14 +103,9 @@ describe('AgentSettingsTabs', () => {
   })
 
   test('every AGENT_TABS entry has TAB_META and an order slot (T-F1: F1-F3 sync)', () => {
-    // TAB_META is module-private; a missing entry would crash the render
-    // (`const { labelKey, Icon } = TAB_META[tab]`), so rendering all tabs and
-    // finding a translated label + icon per tab is the meta-coverage proof.
     const { tabs } = setup()
-    // Length sync: the strip renders exactly one button per declared tab.
     expect(tabs).toHaveLength(AGENT_TABS.length)
     expect(AGENT_TAB_ORDER).toHaveLength(AGENT_TABS.length)
-    // mcp sits right after skills; commands sits between mcp and tools (plan §4.1 final order).
     expect(AGENT_TAB_ORDER).toEqual([
       'general',
       'model',

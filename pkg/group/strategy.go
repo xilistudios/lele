@@ -5,20 +5,11 @@ import (
 	"sync"
 )
 
-// Strategy is the interface that all group collaboration strategies must implement.
-// A strategy determines who speaks next and when the group is done.
-//
-// Next returns the AgentIDs of the next speakers (more than one if turns are
-// parallel within a layer), whether the group conversation has finished, and
-// any error encountered during decision-making.
 type Strategy interface {
 	Name() string
-	// Next returns the next speakers, whether the group is done, and any error.
-	// speakers may contain multiple AgentIDs when the strategy supports parallel turns.
 	Next(state *GroupState) (speakers []string, done bool, err error)
 }
 
-// StrategyFactory is a constructor function that creates a new Strategy instance.
 type StrategyFactory func() Strategy
 
 var (
@@ -26,8 +17,6 @@ var (
 	strategyRegistry = make(map[string]StrategyFactory)
 )
 
-// RegisterStrategy registers a strategy factory under the given name.
-// It is safe to call from init() functions. Panics if the name is already registered.
 func RegisterStrategy(name string, f StrategyFactory) {
 	strategyMu.Lock()
 	defer strategyMu.Unlock()
@@ -37,17 +26,12 @@ func RegisterStrategy(name string, f StrategyFactory) {
 	strategyRegistry[name] = f
 }
 
-// UnregisterStrategy removes a strategy from the registry. It is a no-op if
-// the name was never registered. Intended for tests that need to clean up
-// after themselves when running with -count>1 or in parallel.
 func UnregisterStrategy(name string) {
 	strategyMu.Lock()
 	defer strategyMu.Unlock()
 	delete(strategyRegistry, name)
 }
 
-// NewStrategy creates a new Strategy instance by looking up the factory registered
-// under the given name. Returns an error if no strategy is registered with that name.
 func NewStrategy(name string) (Strategy, error) {
 	strategyMu.RLock()
 	f, ok := strategyRegistry[name]

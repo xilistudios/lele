@@ -12,7 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 )
 
-// IsAudioFile checks if a file is an audio file based on its filename extension and content type.
 func IsAudioFile(filename, contentType string) bool {
 	audioExtensions := []string{".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac", ".wma"}
 	audioTypes := []string{"audio/", "application/ogg", "application/x-ogg"}
@@ -32,13 +31,9 @@ func IsAudioFile(filename, contentType string) bool {
 	return false
 }
 
-// SanitizeFilename removes potentially dangerous characters from a filename
-// and returns a safe version for local filesystem storage.
 func SanitizeFilename(filename string) string {
-	// Get the base filename without path
 	base := filepath.Base(filename)
 
-	// Remove any directory traversal attempts
 	base = strings.ReplaceAll(base, "..", "")
 	base = strings.ReplaceAll(base, "/", "_")
 	base = strings.ReplaceAll(base, "\\", "_")
@@ -46,17 +41,13 @@ func SanitizeFilename(filename string) string {
 	return base
 }
 
-// DownloadOptions holds optional parameters for downloading files
 type DownloadOptions struct {
 	Timeout      time.Duration
 	ExtraHeaders map[string]string
 	LoggerPrefix string
 }
 
-// DownloadFile downloads a file from URL to a local temp directory.
-// Returns the local file path or empty string on error.
 func DownloadFile(url, filename string, opts DownloadOptions) string {
-	// Set defaults
 	if opts.Timeout == 0 {
 		opts.Timeout = 60 * time.Second
 	}
@@ -72,11 +63,9 @@ func DownloadFile(url, filename string, opts DownloadOptions) string {
 		return ""
 	}
 
-	// Generate unique filename with UUID prefix to prevent conflicts
 	safeName := SanitizeFilename(filename)
 	localPath := filepath.Join(mediaDir, uuid.New().String()[:8]+"_"+safeName)
 
-	// Create HTTP request
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		logger.ErrorCF(opts.LoggerPrefix, "Failed to create download request", map[string]interface{}{
@@ -85,7 +74,6 @@ func DownloadFile(url, filename string, opts DownloadOptions) string {
 		return ""
 	}
 
-	// Add extra headers (e.g., Authorization for Slack)
 	for key, value := range opts.ExtraHeaders {
 		req.Header.Set(key, value)
 	}
@@ -134,7 +122,6 @@ func DownloadFile(url, filename string, opts DownloadOptions) string {
 	return localPath
 }
 
-// DownloadFileSimple is a simplified version of DownloadFile without options
 func DownloadFileSimple(url, filename string) string {
 	return DownloadFile(url, filename, DownloadOptions{
 		LoggerPrefix: "media",

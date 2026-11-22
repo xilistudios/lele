@@ -21,11 +21,11 @@ func TestNewerVersion(t *testing.T) {
 		{"0.9", "0.9.1", true},
 		{"0.10.0", "0.9.9", false},
 		{"1.0.0", "0.99.99", false},
-		{"dev", "1.0.0", false}, // dev builds never auto-update
+		{"dev", "1.0.0", false},
 		{"", "1.0.0", false},
 		{"1.0.0", "", false},
-		{"1.0.0-rc1", "1.0.0", false}, // same base version
-		{"1.0.0", "1.0.1-beta", true}, // base 1.0.1 > 1.0.0
+		{"1.0.0-rc1", "1.0.0", false},
+		{"1.0.0", "1.0.1-beta", true},
 		{"2.0", "10.0", true},
 	}
 	for _, tt := range tests {
@@ -69,8 +69,6 @@ func TestCheckerLatest(t *testing.T) {
 	defer srv.Close()
 
 	c := NewChecker("owner/repo")
-	// Point at test server by overriding fetch via URL injection:
-	// simplest approach — use a custom checker that hits the test server.
 	got, err := fetchFrom(c, srv.URL+"/repos/owner/repo/releases/latest")
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
@@ -86,7 +84,6 @@ func TestCheckerLatest(t *testing.T) {
 	}
 }
 
-// fetchFrom exercises the decode path against an arbitrary URL.
 func fetchFrom(c *Checker, url string) (*Release, error) {
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 	if err != nil {

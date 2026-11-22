@@ -9,18 +9,11 @@ import (
 	"syscall"
 )
 
-// Windows execution state is PER THREAD, so the state must be set and cleared
-// on one dedicated goroutine pinned with runtime.LockOSThread(): the
-// assertion lives and dies with that thread, and therefore with the process —
-// there is no orphan risk if lele dies without calling Stop.
 var (
 	kernel32                    = syscall.NewLazyDLL("kernel32.dll")
 	procSetThreadExecutionState = kernel32.NewProc("SetThreadExecutionState")
 )
 
-// setThreadExecutionState wraps kernel32!SetThreadExecutionState. A zero
-// return value means failure; the errno from Call's third return is used when
-// non-zero, otherwise a generic error is produced.
 func setThreadExecutionState(flags uint32) error {
 	r, _, callErr := procSetThreadExecutionState.Call(uintptr(flags))
 	if r == 0 {
@@ -32,9 +25,6 @@ func setThreadExecutionState(flags uint32) error {
 	return nil
 }
 
-// platformStart pins a dedicated goroutine, applies the continuous execution
-// state (system + display required) and only returns once the state has been
-// confirmed — so Start never reports success before the inhibition exists.
 func platformStart() (func(), error) {
 	ready := make(chan error, 1)
 	stop := make(chan struct{})
@@ -51,10 +41,6 @@ func platformStart() (func(), error) {
 			return
 		}
 		<-stop
-		// Reset to a plain continuous state, clearing both requirements.
-		// The error is deliberately ignored: the thread (and therefore the
-		// assertion) disappears with the process anyway, so a failed reset on
-		// teardown must not surface or block anything.
 		_ = setThreadExecutionState(esContinuous)
 		close(done)
 	}()

@@ -1,23 +1,5 @@
 package session
 
-// Lock-scope regression tests for the full-rewrite persistence path (T10).
-//
-// saveFullUnlocked is the path that runs right after every compaction
-// (firstInMemorySeq > 0) and inside the LRU-eviction cascades. It used to do
-// the evicted-prefix SQLite read, a json.Unmarshal per evicted row and a
-// json.Marshal per resident message while holding sm.mu, which froze every
-// concurrent GetHistoryView (a TUI frame) for the whole duration.
-//
-// The tests below pin the new contract:
-//   - TestSaveFullDoesNotHoldLockDuringIO: no I/O and no marshalling happens
-//     under sm.mu (a blocking fake repository parks the save mid-flight and a
-//     lock watchdog measures the longest read-lock wait any reader suffered).
-//   - TestSaveFullConcurrentMutationsNoLostUpdate: concurrent appends during
-//     overlapping full rewrites are never lost (epoch guard), -race clean.
-//   - TestSaveFullPersistedBytesParity: the rows written are byte-identical to
-//     the ones the pre-T10 implementation wrote (same seqs, roles, JSON and
-//     excluded flags), plus a round-trip check.
-
 import (
 	"database/sql"
 	"encoding/json"
@@ -32,13 +14,6 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// ---------------------------------------------------------------------------
-// Test doubles / helpers
-// ---------------------------------------------------------------------------
-
-// blockingRepo is a sessionRepo that parks the full-save I/O until the test
-// releases it, and records whether sm.mu looked held when the call was made.
-// The embedded interface delegates everything to the real repository.
 type blockingRepo struct {
 	sessionRepo
 	gate *ioGate
@@ -64,14 +39,13 @@ func (b *blockingRepo) PruneExcluded(sessionKey string, keepCount int) (int, err
 	return b.sessionRepo.PruneExcluded(sessionKey, keepCount)
 }
 
-// ioGate is the parking handshake between the fake repository and the test.
 type ioGate struct {
-	entered  chan struct{} // closed when the first repository call arrives
-	release  chan struct{} // closed by the test to let calls through
+	entered  chan struct{}
+	release  chan struct{}
 	firstOne sync.Once
 	releaseO sync.Once
-	mu       *sync.RWMutex // the manager lock under test
-	muHeld   atomic.Bool   // a repository call ran while sm.mu was held
+	mu       *sync.RWMutex
+	muHeld   atomic.Bool
 }
 
 func newIOGate(mu *sync.RWMutex) *ioGate {
@@ -82,14 +56,7 @@ func newIOGate(mu *sync.RWMutex) *ioGate {
 	}
 }
 
-// enter records the arrival, checks that sm.mu is NOT held at this moment and
-// waits for the test to release it. A write lock held by the calling goroutine
-// makes TryRLock fail forever, so an in-lock repository call is detected
-// deterministically instead of by timing.
 func (g *ioGate) enter() {
-	// Probe BEFORE signalling: the test reads muHeld as soon as `entered` is
-	// closed, so the flag has to be decided first (the channel close gives the
-	// happens-before edge). The probe is instant when the lock is free.
 	if !lockIsFreeWithin(g.mu, 250*time.Millisecond) {
 		g.muHeld.Store(true)
 	}
@@ -97,11 +64,8 @@ func (g *ioGate) enter() {
 	<-g.release
 }
 
-// unlock lets every parked (and future) repository call through.
 func (g *ioGate) unlock() { g.releaseO.Do(func() { close(g.release) }) }
 
-// useBlockingRepo swaps repoFor for a blocking fake wrapping the real
-// repository, and restores it when the test finishes.
 func useBlockingRepo(t *testing.T, sm *SessionManager, gate *ioGate) {
 	t.Helper()
 	fake := &blockingRepo{sessionRepo: sm.sessionRepo, gate: gate}
@@ -110,7 +74,6 @@ func useBlockingRepo(t *testing.T, sm *SessionManager, gate *ioGate) {
 	t.Cleanup(func() { repoFor = prev })
 }
 
-// lockIsFreeWithin reports whether sm.mu can be read-locked before timeout.
 func lockIsFreeWithin(mu *sync.RWMutex, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for {
@@ -125,11 +88,8 @@ func lockIsFreeWithin(mu *sync.RWMutex, timeout time.Duration) bool {
 	}
 }
 
-// lockWaitWatchdog stands in for the TUI render loop: it hammers sm.mu with
-// read locks and remembers the longest wait it ever had to endure. Any save
-// path that holds sm.mu across real work shows up as a long wait here.
 type lockWaitWatchdog struct {
-	maxWait atomic.Int64 // nanoseconds
+	maxWait atomic.Int64
 	stop    chan struct{}
 	done    chan struct{}
 }
@@ -162,9 +122,6 @@ func (w *lockWaitWatchdog) stopAndWait() time.Duration {
 	return time.Duration(w.maxWait.Load())
 }
 
-// liveSnapshot reads, under the read lock, the session's eviction boundary and
-// a private copy of its resident messages. Everything it returns is owned by
-// the caller, so it is race-free.
 func liveSnapshot(t *testing.T, sm *SessionManager, key string) (firstInMemorySeq int, msgs []providers.Message, epoch, snapshotEpoch uint64) {
 	t.Helper()
 	sm.mu.RLock()
@@ -182,10 +139,6 @@ func liveSnapshot(t *testing.T, sm *SessionManager, key string) (firstInMemorySe
 	return session.firstInMemorySeq, msgs, epoch, snapshotEpoch
 }
 
-// forceFullRewrite simulates the state compaction leaves behind: a resident
-// session that must be rewritten from scratch on the next Save
-// (lastPersistedSeq == -1 is what TruncateHistory/SetHistory set). A no-op for
-// a non-resident session; callers assert residency where it matters.
 func forceFullRewrite(sm *SessionManager, key string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -194,14 +147,9 @@ func forceFullRewrite(sm *SessionManager, key string) {
 	}
 }
 
-// seedPostCompactionSession builds the fixture the reported freezes came from:
-// a persisted conversation whose excluded prefix was evicted from memory
-// (firstInMemorySeq > 0, the evicted rows still live in SQLite) and whose
-// resident tail is still in RAM. Returns the number of evicted rows.
 func seedPostCompactionSession(t *testing.T, sm *SessionManager, key string) int {
 	t.Helper()
 	sm.GetOrCreate(key)
-	// index 0 is pinned by compaction, so build a few turns it can exclude.
 	roles := []string{"user", "assistant", "user", "assistant", "user", "assistant"}
 	for i, role := range roles {
 		sm.AddFullMessage(key, providers.Message{Role: role, Content: fmt.Sprintf("turn-%d", i)})
@@ -227,10 +175,6 @@ func seedPostCompactionSession(t *testing.T, sm *SessionManager, key string) int
 	return evicted
 }
 
-// ---------------------------------------------------------------------------
-// (a) the regression test: no I/O, no marshalling under sm.mu
-// ---------------------------------------------------------------------------
-
 func TestSaveFullDoesNotHoldLockDuringIO(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping lock-scope timing test in -short mode")
@@ -242,9 +186,6 @@ func TestSaveFullDoesNotHoldLockDuringIO(t *testing.T) {
 
 	evicted := seedPostCompactionSession(t, sm, key)
 
-	// Resident payload big enough that a marshal performed under sm.mu would
-	// hold the lock for well over maxLockWait: measured throughput is ~630 MB/s
-	// for these messages, so 78 MB of JSON is ~125 ms of lock hold.
 	fat := make([]providers.Message, 300)
 	blob := strings.Repeat("x", 256*1024)
 	for i := range fat {
@@ -252,9 +193,6 @@ func TestSaveFullDoesNotHoldLockDuringIO(t *testing.T) {
 	}
 	sm.SetHistory(key, fat)
 
-	// SetHistory publishes a fresh view snapshot, so the collect phase is a
-	// pure map/struct read (no O(n) copy under the lock). Assert it, because
-	// the measurement below depends on it.
 	_, resident, epoch, snapshotEpoch := liveSnapshot(t, sm, key)
 	if epoch != snapshotEpoch {
 		t.Fatalf("view snapshot is stale (epoch %d vs saveEpoch %d): the collect phase would copy under the lock",
@@ -274,9 +212,6 @@ func TestSaveFullDoesNotHoldLockDuringIO(t *testing.T) {
 	saveErr := make(chan error, 1)
 	go func() { saveErr <- sm.Save(key) }()
 
-	// The save must reach the repository without holding sm.mu: if it does the
-	// repository work under the lock it still gets here, but the gate flag
-	// below will be set and the watchdog will have recorded a long wait.
 	select {
 	case <-gate.entered:
 	case err := <-saveErr:
@@ -285,16 +220,10 @@ func TestSaveFullDoesNotHoldLockDuringIO(t *testing.T) {
 		t.Fatal("Save never reached the repository: it is stuck (holding sm.mu?) before its first I/O")
 	}
 
-	// Deterministic half: the repository call is parked right now, so a
-	// concurrent read lock must be available immediately. Reintroducing I/O
-	// under sm.mu fails here (TryRLock never succeeds while the writer holds
-	// the lock).
 	if gate.muHeld.Load() {
 		t.Fatal("repository I/O ran while sm.mu was held: the write lock must cover collection only")
 	}
 
-	// The user-visible property: a TUI frame (GetHistoryView) is served while
-	// the save is parked in the middle of its I/O.
 	viewDone := make(chan int, 1)
 	go func() { viewDone <- len(sm.GetHistoryView(key)) }()
 	select {
@@ -316,10 +245,6 @@ func TestSaveFullDoesNotHoldLockDuringIO(t *testing.T) {
 		t.Fatal("Save did not finish after the repository was released")
 	}
 
-	// Timing half: the watchdog covered the whole save, including the
-	// marshalling of the resident messages. With the marshalling under the
-	// lock its longest wait is ~125 ms; outside the lock it is scheduling
-	// noise. maxLockWait sits between the two with margin on both sides.
 	const maxLockWait = 60 * time.Millisecond
 	observed := watchdog.stopAndWait()
 	t.Logf("longest read-lock wait during the full save: %v (limit %v)", observed, maxLockWait)
@@ -327,8 +252,6 @@ func TestSaveFullDoesNotHoldLockDuringIO(t *testing.T) {
 		t.Fatalf("a reader waited %v for sm.mu during a full save (limit %v): the lock is held across the collect/marshal phase", observed, maxLockWait)
 	}
 
-	// Sanity check: the rewrite really did persist the evicted prefix plus the
-	// resident messages.
 	rows, err := s.Sessions().LoadMessagesWithSeq(key)
 	if err != nil {
 		t.Fatalf("LoadMessagesWithSeq: %v", err)
@@ -337,10 +260,6 @@ func TestSaveFullDoesNotHoldLockDuringIO(t *testing.T) {
 		t.Fatalf("persisted %d rows, want %d (evicted prefix %d + resident %d)", len(rows), evicted+len(fat), evicted, len(fat))
 	}
 }
-
-// ---------------------------------------------------------------------------
-// (b) concurrent mutations during full rewrites: no lost update
-// ---------------------------------------------------------------------------
 
 func TestSaveFullConcurrentMutationsNoLostUpdate(t *testing.T) {
 	s := newTestStore(t)
@@ -368,9 +287,6 @@ func TestSaveFullConcurrentMutationsNoLostUpdate(t *testing.T) {
 		go func(w int) {
 			defer wg.Done()
 			for i := 0; i < perWriter; i++ {
-				// Every round forces the destructive full-rewrite path, so the
-				// overlapping writers race on ReplaceMessages as hard as the
-				// post-compaction path does in production.
 				forceFullRewrite(sm, key)
 				sm.AddFullMessage(key, providers.Message{
 					Role:    "assistant",
@@ -385,7 +301,6 @@ func TestSaveFullConcurrentMutationsNoLostUpdate(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Final flush and the assertion: whatever is resident now must be on disk.
 	forceFullRewrite(sm, key)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("final Save: %v", err)
@@ -425,17 +340,6 @@ func TestSaveFullConcurrentMutationsNoLostUpdate(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// (c) byte parity with the pre-T10 implementation
-// ---------------------------------------------------------------------------
-
-// TestSaveFullPersistedBytesParity pins the exact bytes a full rewrite leaves
-// in SQLite. The expected rows are rebuilt the way the pre-T10 implementation
-// built them inline: the evicted prefix is carried over verbatim from SQLite
-// (role decoded from the stored JSON, excluded column preserved, seqs re-based
-// from 0) and each resident message is re-marshalled. The comparison is
-// column-by-column against a direct SELECT, so a change in json output,
-// ordering, seq re-basing or the excluded flag fails here.
 func TestSaveFullPersistedBytesParity(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -469,7 +373,6 @@ func TestSaveFullPersistedBytesParity(t *testing.T) {
 	}
 	sm.SetHistory(key, rich)
 
-	// Expected prefix rows: exactly what the old implementation re-materialized.
 	prefix, err := s.Sessions().LoadMessagesFullBeforeSeq(key, evicted)
 	if err != nil {
 		t.Fatalf("LoadMessagesFullBeforeSeq: %v", err)
@@ -513,13 +416,6 @@ func TestSaveFullPersistedBytesParity(t *testing.T) {
 		}
 	}
 
-	// Round-trip: the stored JSON must decode back to the resident messages.
-	// The comparison zeroes ContentParts/Media first: json.Marshal on a VALUE
-	// never reaches Message's pointer-receiver MarshalJSON (encoding/json only
-	// uses it for addressable pointers), so those two fields are persisted
-	// through their struct tags and UnmarshalJSON — deliberately, pre-existing
-	// behaviour — does not read them back. The byte-parity check above still
-	// covers their exact stored form.
 	cold := make([]providers.Message, 0, len(rich))
 	for i := range rich {
 		var msg providers.Message
@@ -540,17 +436,12 @@ func TestSaveFullPersistedBytesParity(t *testing.T) {
 	}
 }
 
-// storageComparable drops the fields the storage encoding does not round-trip
-// (see the round-trip comment above).
 func storageComparable(m providers.Message) providers.Message {
 	m.ContentParts = nil
 	m.Media = nil
 	return m
 }
 
-// readSessionMessageRows reads the raw session_messages columns so the parity
-// test can assert on all four of them (seq, role, message, excluded), which
-// the repository API does not expose together.
 func readSessionMessageRows(t *testing.T, db *sql.DB, key string) []store.MessageRow {
 	t.Helper()
 	rows, err := db.Query(

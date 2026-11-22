@@ -56,19 +56,16 @@ func TestNormalizeCacheUsage(t *testing.T) {
 	if u.CacheReadInputTokens != 800 {
 		t.Errorf("CacheReadInputTokens = %d, want 800", u.CacheReadInputTokens)
 	}
-	// Anthropic-style fields must not be overwritten by the OpenAI fold.
 	v := &UsageInfo{PromptTokens: 1000, CacheReadInputTokens: 500, PromptTokensDetails: &PromptTokensDetails{CachedTokens: 800}}
 	v.NormalizeCacheUsage()
 	if v.CacheReadInputTokens != 500 {
 		t.Errorf("existing value must win: got %d, want 500", v.CacheReadInputTokens)
 	}
-	// nil-safe
 	(*UsageInfo)(nil).NormalizeCacheUsage()
 	(&UsageInfo{}).NormalizeCacheUsage()
 }
 
 func TestOpenAIUsageParsesCachedTokens(t *testing.T) {
-	// Wire format emitted by OpenAI / OpenRouter / DeepSeek endpoints.
 	raw := `{"prompt_tokens": 1000, "completion_tokens": 50, "total_tokens": 1050,
 		"prompt_tokens_details": {"cached_tokens": 768}}`
 	var u UsageInfo
@@ -85,8 +82,6 @@ func TestOpenAIUsageParsesCachedTokens(t *testing.T) {
 }
 
 func TestMessageMarshalHasNoCacheFields(t *testing.T) {
-	// Generic message marshaling must never emit cache_control — breakpoints
-	// are applied inside Anthropic-style providers, not on the wire protocol.
 	b, err := json.Marshal(Message{Role: "user", Content: "hi"})
 	if err != nil {
 		t.Fatal(err)

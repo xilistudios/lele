@@ -20,22 +20,7 @@ import { ApiError } from '../../../services/http/errors'
 import { type Write, makeState, tr } from '../../../test/agentsHarness'
 import { AgentMCPSection } from './AgentMCPSection'
 
-/**
- * Harness style of AgentSkillsSection.test.tsx (SettingsProvider + makeState
- * + testid helpers), with one addition the Skills panel does not need: the
- * MCP hooks talk to the house ApiClient on AuthContext (`api.mcpInventory`,
- * `api.mcpToggle`), so the provider carries a recording fake of exactly those
- * two methods. The recording is how the assertions check the toggle contract
- * (ROW layer, never `auto`; `force: true` on the 409 retry) and that no call
- * beyond the inventory read ever leaves the page — in particular nothing that
- * could fetch a secret VALUE (the API only ships key NAMES).
- *
- * `screen` is unusable in this environment (agentsHarness header): all
- * queries come from the render result.
- */
-
 afterEach(() => {
-  // @testing-library/react does not auto-cleanup under bun.
   cleanup()
 })
 
@@ -53,7 +38,6 @@ const TOGGLE_OK: MCPToggleResponse = {
   effective_layer: 'global',
 }
 
-/** What the fake serves for the GET raw route (literal bytes, NEVER expanded). */
 const RAW_GLOBAL: MCPRawFileResponse = {
   layer: 'global',
   path: '/home/u/.lele/mcp.json',
@@ -61,11 +45,6 @@ const RAW_GLOBAL: MCPRawFileResponse = {
   content: '{\n  "mcpServers": {}\n}',
 }
 
-/**
- * Fixture with everything the panel must render — and two value-shaped fields
- * (`env`, `headers`) that the real API NEVER sends, smuggled in on purpose:
- * if any code path ever rendered a value, the leak assertions would catch it.
- */
 const INVENTORY: MCPInventoryResponse = {
   agent_id: 'coder',
   layers: [
@@ -76,7 +55,6 @@ const INVENTORY: MCPInventoryResponse = {
       exists: false,
       aliased_with: ['project'],
     },
-    // No `path` ⇔ disabled layer: the panel must say so explicitly.
     { layer: 'project', exists: false },
   ],
   servers: [
@@ -123,7 +101,6 @@ const INVENTORY: MCPInventoryResponse = {
   warnings: ['project layer disabled: no workspace root'],
 }
 
-/** One recorded call against the MCP ApiClient seam. */
 type FakeCall =
   | { kind: 'inventory'; agentId: string }
   | { kind: 'raw'; agentId: string; layer: MCPLayerName }
@@ -159,7 +136,6 @@ function setup(
     options.handler ??
     ((call) => (call.kind === 'toggle' ? TOGGLE_OK : call.kind === 'raw' ? RAW_GLOBAL : inventory))
 
-  /** Recording ApiClient: only the two methods the MCP hooks call. */
   const calls: FakeCall[] = []
   const authApi = {
     getToken: () => 'token-test',
@@ -219,7 +195,6 @@ function setup(
 
   const byTestId = (id: string) => utils.container.querySelector(`[data-testid="${id}"]`)
 
-  /** Query a testid, failing loudly (not silently on null) when missing. */
   const need = (id: string) => {
     const el = byTestId(id)
     if (!el) throw new Error(`expected element with data-testid="${id}"`)
@@ -236,7 +211,6 @@ function setup(
   return { ...utils, calls, toggles, writes, byTestId, need, clickTestId }
 }
 
-/** Wait until the inventory resolves and the row list is on screen. */
 async function ready(utils: ReturnType<typeof setup>) {
   await waitFor(() => {
     expect(utils.byTestId('mcp-rows')).toBeTruthy()
@@ -248,18 +222,14 @@ describe('AgentMCPSection — rows', () => {
   test('render state glyph, winning layer tag, RAW command, args and shadow chip', async () => {
     const u = await ready(setup())
     expect(u.byTestId('mcp-row-github')).toBeTruthy()
-    // state: enabled ● / disabled ○ / invalid ⚠ + sr-only label (§10.5)
     expect(u.byTestId('mcp-state-github')?.textContent).toBe('●')
     expect(u.byTestId('mcp-state-postgres')?.textContent).toBe('○')
     expect(u.byTestId('mcp-state-broken')?.textContent).toBe('⚠')
-    // winning layer tag
     expect(u.byTestId('mcp-layer-tag-github')?.textContent).toBe(tr('mcp.layer.global'))
     expect(u.byTestId('mcp-layer-tag-postgres')?.textContent).toBe(tr('mcp.layer.agent'))
-    // command rendered RAW: ${VAR} shows literally, never interpolated
     expect(u.byTestId('mcp-command-github')?.textContent).toBe('npx ${TOOLS_DIR}/mcp-github')
     expect(u.byTestId('mcp-args-github')?.textContent).toBe(tr('mcp.row.args', { n: 2 }))
-    expect(u.byTestId('mcp-args-postgres')).toBeNull() // args: 0 → no chip
-    // url row + shadow chip with the server's reason
+    expect(u.byTestId('mcp-args-postgres')).toBeNull()
     expect(u.byTestId('mcp-url-wiki')?.textContent).toBe('https://mcp.example.com/sse')
     const shadow = u.need('mcp-shadow-github-agent')
     expect(shadow.textContent).toContain(tr('mcp.layer.agent'))
@@ -268,13 +238,10 @@ describe('AgentMCPSection — rows', () => {
 
   test('env/header key NAMES render as chips; no VALUE text ever renders', async () => {
     const u = await ready(setup())
-    // names are displayed…
     expect(u.need('mcp-envkey-github-GITHUB_TOKEN').textContent).toBe('GITHUB_TOKEN')
     expect(u.need('mcp-headerkey-wiki-Authorization').textContent).toBe('Authorization')
-    // …values are not, even though the fixture smuggles them through `env`/`headers`
     expect(u.container.textContent).not.toContain('ghp_LEAKED_SECRET_VALUE')
     expect(u.container.textContent).not.toContain('Bearer LEAKED_BEARER_TOKEN')
-    // and no call ever leaves to fetch one: only the inventory read happened
     expect(u.calls.map((call) => call.kind)).toEqual(['inventory'])
   })
 
@@ -287,7 +254,6 @@ describe('AgentMCPSection — rows', () => {
     expect(u.byTestId('mcp-row-postgres')).toBeTruthy()
     expect(u.byTestId('mcp-row-github')).toBeNull()
     expect(u.byTestId('mcp-row-wiki')).toBeNull()
-    // layer rows are NOT filtered — they are context, not results
     expect(u.byTestId('mcp-layer-global')).toBeTruthy()
     u.clickTestId('mcp-filter-project')
     expect(u.byTestId('mcp-row-broken')).toBeTruthy()
@@ -301,7 +267,6 @@ describe('AgentMCPSection — rows', () => {
 describe('AgentMCPSection — toggle', () => {
   test('calls mcpToggle with the ROW layer (never auto) and the right enabled', async () => {
     const u = await ready(setup())
-    // enabled winner → disable
     u.clickTestId('mcp-toggle-github')
     await waitFor(() => expect(u.toggles()).toHaveLength(1))
     expect(u.toggles()[0]).toEqual({
@@ -313,13 +278,11 @@ describe('AgentMCPSection — toggle', () => {
       force: undefined,
     })
     expect(u.toggles().every((call) => call.layer !== 'auto')).toBe(true)
-    // disabled row → enable, through ITS layer
     u.clickTestId('mcp-toggle-postgres')
     await waitFor(() => expect(u.toggles()).toHaveLength(2))
     expect(u.toggles()[1].layer).toBe('agent')
     expect(u.toggles()[1].name).toBe('postgres')
     expect(u.toggles()[1].enabled).toBe(true)
-    // the MCP tab is file-backed: no draft path was ever written
     expect(u.writes).toHaveLength(0)
   })
 
@@ -364,17 +327,14 @@ describe('AgentMCPSection — toggle', () => {
       }),
     )
     u.clickTestId('mcp-toggle-github')
-    // the error surfaces ON the affected row, with the force affordance
     await waitFor(() => expect(u.byTestId('mcp-force-github')).toBeTruthy())
     expect(u.need('mcp-row-error-github').textContent).toContain('shadowed by layer "project"')
     u.clickTestId('mcp-force-github')
     await waitFor(() => expect(u.toggles()).toHaveLength(2))
-    // same row/layer/enabled, now forced
     expect(u.toggles()[1].layer).toBe('global')
     expect(u.toggles()[1].name).toBe('github')
     expect(u.toggles()[1].enabled).toBe(false)
     expect(u.toggles()[1].force).toBe(true)
-    // once the forced write succeeds the conflict banner is gone
     await waitFor(() => expect(u.byTestId('mcp-force-github')).toBeNull())
   })
 
@@ -402,7 +362,6 @@ describe('AgentMCPSection — layers', () => {
     expect(u.byTestId('mcp-layer-project')).toBeTruthy()
     expect(u.byTestId('mcp-layer-path-project')).toBeNull()
     expect(u.need('mcp-layer-disabled-project').textContent).toBe(tr('mcp.layers.disabled'))
-    // layers WITH a path show it, plus existence and aliases
     expect(u.need('mcp-layer-path-global').textContent).toBe('/home/u/.lele/mcp.json')
     expect(u.need('mcp-layer-exists-global').textContent).toBe(tr('mcp.layers.exists'))
     expect(u.need('mcp-layer-exists-agent').textContent).toBe(tr('mcp.layers.missing'))
@@ -413,27 +372,15 @@ describe('AgentMCPSection — layers', () => {
 })
 
 describe('AgentMCPSection — invalid rows', () => {
-  // NOTE: the previous test here — 'an invalid row shows its message and is
-  // still toggleable' — asserted the MENOR-1 defect itself: a WORKING toggle
-  // on an invalid row whose plan produces nil edits (200 `changed:false`, a
-  // silent no-op). It is replaced by the contract below; the pre-existing
-  // enabled/disabled toggle tests (row layer, pending, 409 force, generic
-  // failure) are untouched.
   test('an invalid row offers no working toggle and points at the raw editor', async () => {
     const u = await ready(setup())
     expect(u.need('mcp-invalid-broken').textContent).toContain('missing "command" field')
-    // The toggle that used to sit here asked to ENABLE an entry the server
-    // cannot edit — it is now inert, with the reason as tooltip AND as a
-    // visible hint (tooltips alone are not accessible, §10.5).
     const toggleBtn = u.need('mcp-toggle-broken') as HTMLButtonElement
     expect(toggleBtn.disabled).toBe(true)
     expect(toggleBtn.title).toBe(tr('mcp.toggle.invalidHint'))
     expect(u.need('mcp-repair-hint-broken').textContent).toBe(tr('mcp.toggle.invalidHint'))
-    // Even a programmatic click must reach no route: the no-op is structural.
     fireEvent.click(toggleBtn)
     expect(u.toggles()).toHaveLength(0)
-    // Repair mirrors the layers block's Edit affordance exactly: project has
-    // no path → nothing to edit (same disabled rule as mcp-edit-project).
     const repair = u.need('mcp-repair-broken') as HTMLButtonElement
     expect(repair.disabled).toBe(true)
     expect(repair.title).toBe(tr('mcp.editor.noPath'))
@@ -460,8 +407,6 @@ describe('AgentMCPSection — invalid rows', () => {
     const repair = u.need('mcp-repair-badtool') as HTMLButtonElement
     expect(repair.disabled).toBe(false)
     fireEvent.click(repair)
-    // The GET raw route fires for THAT row's layer and the editor opens —
-    // the same onEdit handler as the layers block's mcp-edit-<layer>.
     await waitFor(() => expect(u.calls.filter((call) => call.kind === 'raw')).toHaveLength(1))
     expect(u.calls.filter((call) => call.kind === 'raw')[0]).toEqual({
       kind: 'raw',
@@ -469,7 +414,6 @@ describe('AgentMCPSection — invalid rows', () => {
       layer: 'global',
     })
     expect(u.byTestId('mcp-editor')).toBeTruthy()
-    // …and still no toggle call was ever made for the invalid entry.
     expect(u.toggles()).toHaveLength(0)
   })
 
@@ -489,26 +433,15 @@ describe('AgentMCPSection — invalid rows', () => {
     await waitFor(() => expect(u.byTestId('mcp-row-nochange-postgres')).toBeTruthy())
     const banner = u.need('mcp-row-nochange-postgres')
     expect(banner.textContent).toContain(tr('mcp.toggle.noChange'))
-    // House idiom: inline banner + machine code chip (never a toast).
     expect(u.need('mcp-row-nochange-postgres-code').textContent).toBe('changed:false')
-    // The row did NOT change: verdict still disabled, no success/error claim.
     expect(u.need('mcp-state-postgres')?.textContent).toBe('○')
     expect(u.byTestId('mcp-row-error-postgres')).toBeNull()
   })
 })
 
-/**
- * INFO-1 (negative half): the test above proves the banner CAN appear; the
- * tests below prove the `!toggle.data.changed` guard actually turns it OFF.
- * Flipping that guard to `true` (banner after every settled toggle) must
- * fail here — a guard that never turns off is the same class of bug as a
- * banner that never shows.
- */
 describe('AgentMCPSection — no-change banner (negative)', () => {
   test('a toggle answered changed:true renders NO banner; verdict comes from the inventory refetch', async () => {
     let inventoryCalls = 0
-    // Server truth after the disable: the refetched inventory is the ONLY
-    // source of the row verdict (the hook invalidates, never patches).
     const AFTER_DISABLE: MCPInventoryResponse = {
       ...INVENTORY,
       servers: (INVENTORY.servers ?? []).map((row) =>
@@ -518,7 +451,7 @@ describe('AgentMCPSection — no-change banner (negative)', () => {
     const u = await ready(
       setup({
         handler: (call) => {
-          if (call.kind === 'toggle') return TOGGLE_OK // the normal path: changed:true
+          if (call.kind === 'toggle') return TOGGLE_OK
           inventoryCalls++
           return inventoryCalls > 1 ? AFTER_DISABLE : INVENTORY
         },
@@ -526,12 +459,8 @@ describe('AgentMCPSection — no-change banner (negative)', () => {
     )
     u.clickTestId('mcp-toggle-github')
     await waitFor(() => expect(u.toggles()).toHaveLength(1))
-    // The verdict is NOT a client-side guess: the mutation invalidated the
-    // inventory, a second GET happened, and the glyph flipped only to what
-    // THAT refetch served (enabled → disabled).
     await waitFor(() => expect(u.calls.filter((call) => call.kind === 'inventory')).toHaveLength(2))
     await waitFor(() => expect(u.need('mcp-state-github')?.textContent).toBe('○'))
-    // THE negative assertion: changed:true ⇒ no banner, anywhere.
     expect(u.byTestId('mcp-row-nochange-github')).toBeNull()
     expect(u.container.querySelector('[data-testid^="mcp-row-nochange-"]')).toBeNull()
     expect(u.byTestId('mcp-row-error-github')).toBeNull()
@@ -548,9 +477,7 @@ describe('AgentMCPSection — no-change banner (negative)', () => {
         handler: (call) => {
           if (call.kind === 'toggle') {
             toggleCount++
-            // 1st attempt: wiki answers changed:false — the banner case…
             if (toggleCount === 1) return { ...TOGGLE_OK, name: 'wiki', changed: false }
-            // …2nd attempt: a DIFFERENT row, held in flight, then failed.
             return secondToggle
           }
           return INVENTORY
@@ -559,10 +486,6 @@ describe('AgentMCPSection — no-change banner (negative)', () => {
     )
     u.clickTestId('mcp-toggle-wiki')
     await waitFor(() => expect(u.byTestId('mcp-row-nochange-wiki')).toBeTruthy())
-    // Next attempt on another row: `toggle.data` still pairs (wiki,
-    // changed:false) with attempt = postgres — a stale pairing. While the
-    // attempt is in flight it must render NOTHING: not on the attempted
-    // row, not on the stale one.
     u.clickTestId('mcp-toggle-postgres')
     await waitFor(() => expect(u.toggles()).toHaveLength(2))
     await waitFor(() =>
@@ -570,8 +493,6 @@ describe('AgentMCPSection — no-change banner (negative)', () => {
     )
     expect(u.byTestId('mcp-row-nochange-postgres')).toBeNull()
     expect(u.byTestId('mcp-row-nochange-wiki')).toBeNull()
-    // The attempt fails: same stale (wiki, changed:false) data under the
-    // error guard — still nothing.
     rejectSecond(new ApiError('boom: disk full', 400, 'invalid_layer'))
     await waitFor(() => expect(u.byTestId('mcp-row-error-postgres')).toBeTruthy())
     expect(u.byTestId('mcp-row-nochange-postgres')).toBeNull()
@@ -586,7 +507,6 @@ describe('AgentMCPSection — no-change banner (negative)', () => {
         handler: (call) => {
           if (call.kind === 'toggle') {
             toggleCount++
-            // 1st: changed:false (banner up) — 2nd: changed:true (must clear).
             return { ...TOGGLE_OK, name: 'wiki', changed: toggleCount !== 1 }
           }
           return INVENTORY
@@ -644,7 +564,6 @@ describe('AgentMCPSection — loading / empty / error', () => {
         return call.kind === 'toggle' ? TOGGLE_OK : INVENTORY
       },
     })
-    // the inventory query retries once internally, so allow for that cycle
     await waitFor(() => expect(u.byTestId('mcp-retry')).toBeTruthy(), { timeout: 4000 })
     expect(u.container.textContent).toContain(tr('mcp.loadError'))
     failing = false

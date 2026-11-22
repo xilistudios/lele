@@ -4,15 +4,9 @@ import (
 	"strings"
 )
 
-// SplitMessage splits long messages into chunks, preserving code block integrity.
-// The function reserves a buffer (10% of maxLen, min 50) to leave room for closing code blocks,
-// but may extend to maxLen when needed.
-// Call SplitMessage with the full text content and the maximum allowed length of a single message;
-// it returns a slice of message chunks that each respect maxLen and avoid splitting fenced code blocks.
 func SplitMessage(content string, maxLen int) []string {
 	var messages []string
 
-	// Dynamic buffer: 10% of maxLen, but at least 50 chars if possible
 	codeBlockBuffer := maxLen / 10
 	if codeBlockBuffer < 50 {
 		codeBlockBuffer = 50
@@ -27,13 +21,11 @@ func SplitMessage(content string, maxLen int) []string {
 			break
 		}
 
-		// Effective split point: maxLen minus buffer, to leave room for code blocks
 		effectiveLimit := maxLen - codeBlockBuffer
 		if effectiveLimit < maxLen/2 {
 			effectiveLimit = maxLen / 2
 		}
 
-		// Find natural split point within the effective limit
 		msgEnd := findLastNewline(content[:effectiveLimit], 200)
 		if msgEnd <= 0 {
 			msgEnd = findLastSpace(content[:effectiveLimit], 100)
@@ -42,21 +34,15 @@ func SplitMessage(content string, maxLen int) []string {
 			msgEnd = effectiveLimit
 		}
 
-		// Check if this would end with an incomplete code block
 		candidate := content[:msgEnd]
 		unclosedIdx := findLastUnclosedCodeBlock(candidate)
 
 		if unclosedIdx >= 0 {
-			// Message would end with incomplete code block
-			// Try to extend up to maxLen to include the closing ```
 			if len(content) > msgEnd {
 				closingIdx := findNextClosingCodeBlock(content, msgEnd)
 				if closingIdx > 0 && closingIdx <= maxLen {
-					// Extend to include the closing ```
 					msgEnd = closingIdx
 				} else {
-					// Code block is too long to fit in one chunk or missing closing fence.
-					// Try to split inside by injecting closing and reopening fences.
 					headerEnd := strings.Index(content[unclosedIdx:], "\n")
 					if headerEnd == -1 {
 						headerEnd = unclosedIdx + 3
@@ -65,10 +51,8 @@ func SplitMessage(content string, maxLen int) []string {
 					}
 					header := strings.TrimSpace(content[unclosedIdx:headerEnd])
 
-					// If we have a reasonable amount of content after the header, split inside
 					if msgEnd > headerEnd+20 {
-						// Find a better split point closer to maxLen
-						innerLimit := maxLen - 5 // Leave room for "\n```"
+						innerLimit := maxLen - 5
 						betterEnd := findLastNewline(content[:innerLimit], 200)
 						if betterEnd > headerEnd {
 							msgEnd = betterEnd
@@ -80,7 +64,6 @@ func SplitMessage(content string, maxLen int) []string {
 						continue
 					}
 
-					// Otherwise, try to split before the code block starts
 					newEnd := findLastNewline(content[:unclosedIdx], 200)
 					if newEnd <= 0 {
 						newEnd = findLastSpace(content[:unclosedIdx], 100)
@@ -88,7 +71,6 @@ func SplitMessage(content string, maxLen int) []string {
 					if newEnd > 0 {
 						msgEnd = newEnd
 					} else {
-						// If we can't split before, we MUST split inside (last resort)
 						if unclosedIdx > 20 {
 							msgEnd = unclosedIdx
 						} else {
@@ -113,17 +95,13 @@ func SplitMessage(content string, maxLen int) []string {
 	return messages
 }
 
-// findLastUnclosedCodeBlock finds the last opening ``` that doesn't have a closing ```
-// Returns the position of the opening ``` or -1 if all code blocks are complete
 func findLastUnclosedCodeBlock(text string) int {
 	inCodeBlock := false
 	lastOpenIdx := -1
 
 	for i := 0; i < len(text); i++ {
 		if i+2 < len(text) && text[i] == '`' && text[i+1] == '`' && text[i+2] == '`' {
-			// Toggle code block state on each fence
 			if !inCodeBlock {
-				// Entering a code block: record this opening fence
 				lastOpenIdx = i
 			}
 			inCodeBlock = !inCodeBlock
@@ -137,8 +115,6 @@ func findLastUnclosedCodeBlock(text string) int {
 	return -1
 }
 
-// findNextClosingCodeBlock finds the next closing ``` starting from a position
-// Returns the position after the closing ``` or -1 if not found
 func findNextClosingCodeBlock(text string, startIdx int) int {
 	for i := startIdx; i < len(text); i++ {
 		if i+2 < len(text) && text[i] == '`' && text[i+1] == '`' && text[i+2] == '`' {
@@ -148,8 +124,6 @@ func findNextClosingCodeBlock(text string, startIdx int) int {
 	return -1
 }
 
-// findLastNewline finds the last newline character within the last N characters
-// Returns the position of the newline or -1 if not found
 func findLastNewline(s string, searchWindow int) int {
 	searchStart := len(s) - searchWindow
 	if searchStart < 0 {
@@ -163,8 +137,6 @@ func findLastNewline(s string, searchWindow int) int {
 	return -1
 }
 
-// findLastSpace finds the last space character within the last N characters
-// Returns the position of the space or -1 if not found
 func findLastSpace(s string, searchWindow int) int {
 	searchStart := len(s) - searchWindow
 	if searchStart < 0 {

@@ -8,7 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// newConfigSwapLoop builds a minimal AgentLoop for config-pointer tests.
 func newConfigSwapLoop(t *testing.T, cfg *config.Config) *AgentLoop {
 	t.Helper()
 	tmpDir, err := os.MkdirTemp("", "cfg-swap-test-*")
@@ -29,14 +28,9 @@ func testCfgWithModel(model string) *config.Config {
 	}
 }
 
-// TestUpdateConfigSnapshot_SwapsConfigPointer verifies that
-// UpdateConfigSnapshot atomically replaces the config the loop reads through
-// cfgPtr (via al.cfg() and GetProvidable().GetConfigSnapshot()) without
-// rebuilding registries.
 func TestUpdateConfigSnapshot_SwapsConfigPointer(t *testing.T) {
 	al := newConfigSwapLoop(t, testCfgWithModel("model-A"))
 
-	// Initial state: the loop reads cfg A.
 	if got := al.cfg().Agents.Defaults.Model; got != "model-A" {
 		t.Fatalf("initial model = %q, want %q", got, "model-A")
 	}
@@ -58,8 +52,6 @@ func TestUpdateConfigSnapshot_SwapsConfigPointer(t *testing.T) {
 	}
 }
 
-// TestUpdateConfigSnapshot_NilIsNoOp verifies a nil argument never wipes the
-// loop's current config (which would fall back to DefaultConfig()).
 func TestUpdateConfigSnapshot_NilIsNoOp(t *testing.T) {
 	al := newConfigSwapLoop(t, testCfgWithModel("model-A"))
 

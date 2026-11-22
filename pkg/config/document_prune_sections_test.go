@@ -5,12 +5,6 @@ import (
 	"testing"
 )
 
-// --- pruning: tools ----------------------------------------------------------
-
-// TestPrune_ToolsCronTimeoutWritesOnlyThatKey pins the goal of the tools
-// prune: one customized nested value must not resurrect the sibling defaults
-// (exec, brave, duckduckgo, perplexity and searxng used to be written with
-// every field on every save).
 func TestPrune_ToolsCronTimeoutWritesOnlyThatKey(t *testing.T) {
 	doc := defaultEditableDocument()
 	doc.Tools.Cron.ExecTimeoutMinutes = 42
@@ -25,12 +19,10 @@ func TestPrune_ToolsCronTimeoutWritesOnlyThatKey(t *testing.T) {
 	if cron["exec_timeout_minutes"] != float64(42) {
 		t.Errorf("cron.exec_timeout_minutes = %v, want 42", cron["exec_timeout_minutes"])
 	}
-	// The file is agents + that one value, nothing else.
 	if got := keysOf(parsed); len(got) != 2 {
 		t.Errorf("saved top-level keys = %v, want exactly [agents tools]", got)
 	}
 
-	// The untouched siblings reload with their code defaults.
 	loaded, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)
@@ -47,9 +39,6 @@ func TestPrune_ToolsCronTimeoutWritesOnlyThatKey(t *testing.T) {
 	}
 }
 
-// TestPrune_ToolsWebSearchKeyringPlaceholderStillSerialized pins that a
-// placeholder secret is never pruned away, even though every plain field of
-// the engine still equals its default.
 func TestPrune_ToolsWebSearchKeyringPlaceholderStillSerialized(t *testing.T) {
 	doc := defaultEditableDocument()
 	doc.Tools.Web.Perplexity.Enabled = true
@@ -69,7 +58,6 @@ func TestPrune_ToolsWebSearchKeyringPlaceholderStillSerialized(t *testing.T) {
 		t.Errorf("tools keys = %v, want exactly [web]", got)
 	}
 
-	// The document keeps the placeholder (not a resolved value) on reload.
 	loaded, _, err := LoadEditableDocument(path)
 	if err != nil {
 		t.Fatalf("LoadEditableDocument failed: %v", err)
@@ -80,16 +68,11 @@ func TestPrune_ToolsWebSearchKeyringPlaceholderStillSerialized(t *testing.T) {
 	if !loaded.Tools.Web.Perplexity.Enabled {
 		t.Error("reloaded perplexity.enabled = false, want true")
 	}
-	// An engine that was never customized keeps its defaults through the
-	// overlay even though the pruned file says nothing about it.
 	if ddg := loaded.Tools.Web.DuckDuckGo; !ddg.Enabled || ddg.MaxResults != 5 {
 		t.Errorf("reloaded duckduckgo = %#v, want the code default {true 5}", ddg)
 	}
 }
 
-// TestPrune_ToolsEngineWithOnlyPlaceholderWritesOnlyAPIKey covers the disabled
-// engine case: a key alone counts as configured and must not drag the
-// default-valued "enabled: false" into the file.
 func TestPrune_ToolsEngineWithOnlyPlaceholderWritesOnlyAPIKey(t *testing.T) {
 	doc := defaultEditableDocument()
 	doc.Tools.Web.Brave.APIKey = SecretValue{Mode: SecretModeEnv, EnvName: "LELE_BRAVE_KEY"}
@@ -103,9 +86,6 @@ func TestPrune_ToolsEngineWithOnlyPlaceholderWritesOnlyAPIKey(t *testing.T) {
 	}
 }
 
-// TestPrune_ExecTimeoutSecondsZeroIsARealDifference guards the "0 means no
-// timeout" contract of tools.exec.timeout_seconds: 0 differs from the 60s
-// default, so it must keep being written.
 func TestPrune_ExecTimeoutSecondsZeroIsARealDifference(t *testing.T) {
 	doc := defaultEditableDocument()
 	doc.Tools.Exec.TimeoutSeconds = 0
@@ -126,8 +106,6 @@ func TestPrune_ExecTimeoutSecondsZeroIsARealDifference(t *testing.T) {
 	}
 }
 
-// TestPrune_ExecWhitelistWritesOnlyItsOwnKey checks a slice key is pruned
-// independently of the flags next to it.
 func TestPrune_ExecWhitelistWritesOnlyItsOwnKey(t *testing.T) {
 	doc := defaultEditableDocument()
 	doc.Tools.Exec.WhitelistCommands = []string{"git status", "ls"}
@@ -151,12 +129,6 @@ func TestPrune_ExecWhitelistWritesOnlyItsOwnKey(t *testing.T) {
 	}
 }
 
-// --- pruning: heartbeat / devices / logs -------------------------------------
-
-// TestPrune_ClearingADefaultedListStillWritesEmptyArray covers the one place
-// where a pruned list has a non-empty code default (native.cors_origins). The
-// clear must be written as [], because JSON null makes encoding/json skip the
-// field and resurrect the defaults.
 func TestPrune_ClearingADefaultedListStillWritesEmptyArray(t *testing.T) {
 	doc := defaultEditableDocument()
 	if len(doc.Channels.Native.CORSOrigins) == 0 {
@@ -192,11 +164,8 @@ func TestPrune_ClearingADefaultedListStillWritesEmptyArray(t *testing.T) {
 func TestPrune_HeartbeatDevicesLogsCustomizedWriteOnlyDiffingKeys(t *testing.T) {
 	doc := defaultEditableDocument()
 	def := DefaultConfig()
-	// Only the interval differs: heartbeat.enabled stays at its default true.
 	doc.Heartbeat.Interval = 15
-	// Only enabled differs: devices.monitor_usb stays at its default true.
 	doc.Devices.Enabled = true
-	// Only max_days and rotation differ.
 	doc.Logs.MaxDays = 30
 	doc.Logs.Rotation = "weekly"
 	path := saveDoc(t, t.TempDir(), doc)
@@ -224,7 +193,7 @@ func TestPrune_HeartbeatDevicesLogsCustomizedWriteOnlyDiffingKeys(t *testing.T) 
 
 func TestPrune_DisabledHeartbeatWritesOnlyEnabledFalse(t *testing.T) {
 	doc := defaultEditableDocument()
-	doc.Heartbeat.Enabled = false // interval stays at its default
+	doc.Heartbeat.Enabled = false
 	path := saveDoc(t, t.TempDir(), doc)
 
 	heartbeat := savedBlock(t, readSavedJSON(t, path), "heartbeat", "enabled")
@@ -233,12 +202,7 @@ func TestPrune_DisabledHeartbeatWritesOnlyEnabledFalse(t *testing.T) {
 	}
 }
 
-// --- pruning: session --------------------------------------------------------
-
 func TestPrune_SessionTriStateFalseIsStillWritten(t *testing.T) {
-	// An explicit false on a tri-state pointer is a user decision: the key
-	// keeps being written, because nil and false are runtime-equivalent but
-	// not document-equivalent (correctness beats minimalism).
 	doc := defaultEditableDocument()
 	yes, no := true, false
 	doc.Session.DurableInbound = &yes
@@ -270,13 +234,11 @@ func TestPrune_SessionTriStateFalseIsStillWritten(t *testing.T) {
 }
 
 func TestPrune_SessionEvictExcludedFromMemoryDefaultsToTrue(t *testing.T) {
-	// DefaultConfig() has evict_excluded_from_memory:true and LoadConfig has
-	// no override for it, so the key is pruned and still reloads as true.
 	doc := defaultEditableDocument()
 	if !doc.Session.EvictExcludedFromMemory {
 		t.Fatal("test precondition: the document default must be true")
 	}
-	doc.Session.DMScope = "channel" // force a session section
+	doc.Session.DMScope = "channel"
 	path := saveDoc(t, t.TempDir(), doc)
 
 	session := savedSection(t, readSavedJSON(t, path), "session")
@@ -311,8 +273,6 @@ func TestPrune_SessionThresholdsCustomizedWriteOnlyThemselves(t *testing.T) {
 			loaded.Session.CompactionThresholdPercent, DefaultCompactionThresholdPercent)
 	}
 }
-
-// --- full round-trip pin for the newly pruned sections -----------------------
 
 func TestPrune_RichSessionToolsHeartbeatDevicesLogsRoundTrip(t *testing.T) {
 	yes, no := true, false
@@ -375,8 +335,6 @@ func TestPrune_RichSessionToolsHeartbeatDevicesLogsRoundTrip(t *testing.T) {
 		}
 	}
 
-	// The same values must come back through the plain runtime loader, which is
-	// what the gateway and the config watcher use.
 	runtime, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)
@@ -393,17 +351,10 @@ func TestPrune_RichSessionToolsHeartbeatDevicesLogsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestPrune_OverlayKeepsDefaultsForPrunedKeys is the regression guard for the
-// bug the tools prune exposed: the placeholder overlay used to replace a whole
-// section with a zero-valued struct whenever the file mentioned it, so every
-// default-valued key pruned by toSerializable came back as its zero value
-// (duckduckgo disabled, searxng without categories/language, telegram without
-// a verbose level, the LINE webhook emptied...).
 func TestPrune_OverlayKeepsDefaultsForPrunedKeys(t *testing.T) {
 	def := DefaultConfig()
 
 	doc := defaultEditableDocument()
-	// One key per section, everything else left at its default.
 	doc.Tools.Web.Brave.APIKey = SecretValue{Mode: SecretModeLiteral, Value: "brave-key"}
 	doc.Tools.Exec.CustomDenyPatterns = []string{"rm -rf"}
 	doc.Heartbeat.Interval = 15
@@ -419,7 +370,6 @@ func TestPrune_OverlayKeepsDefaultsForPrunedKeys(t *testing.T) {
 		t.Fatalf("LoadEditableDocument failed: %v", err)
 	}
 
-	// Tools: engines the file never mentions keep their non-zero defaults.
 	if ddg := loaded.Tools.Web.DuckDuckGo; !reflect.DeepEqual(ddg, def.Tools.Web.DuckDuckGo) {
 		t.Errorf("duckduckgo = %#v, want the default %#v", ddg, def.Tools.Web.DuckDuckGo)
 	}
@@ -432,7 +382,6 @@ func TestPrune_OverlayKeepsDefaultsForPrunedKeys(t *testing.T) {
 	if got := loaded.Tools.Exec; !got.EnableDenyPatterns || got.TimeoutSeconds != 60 {
 		t.Errorf("exec = %#v, want the untouched defaults", got)
 	}
-	// Channels: same rule for the sections that were already pruned.
 	if got := loaded.Channels.Telegram; got.Verbose != def.Channels.Telegram.Verbose {
 		t.Errorf("telegram.verbose = %q, want the default %q", got.Verbose, def.Channels.Telegram.Verbose)
 	}
@@ -444,7 +393,6 @@ func TestPrune_OverlayKeepsDefaultsForPrunedKeys(t *testing.T) {
 		t.Errorf("onebot = %#v, want the default ws_url plus the custom interval", got)
 	}
 
-	// And saving that document again must be a no-op on the file.
 	reSaved := saveDoc(t, t.TempDir(), loaded)
 	if !reflect.DeepEqual(readSavedJSON(t, path), readSavedJSON(t, reSaved)) {
 		t.Errorf("re-saving the reloaded document changed the file:\n first=%v\n second=%v",

@@ -348,8 +348,6 @@ func TestHandleSessionCompact(t *testing.T) {
 func TestHandleSession_Forbidden(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// Native sessions are shared across all clients, so accessing
-	// another client's session should succeed (200) instead of 403.
 	sessionKey := "native:other-client-id"
 	req, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.PathEscape(sessionKey)+"/model", nil)
 	req.Header.Set("Authorization", "Bearer "+ts.token)
@@ -399,7 +397,6 @@ func TestHandleSessionSubagents_WithData(t *testing.T) {
 
 	sessionKey := "native:" + ts.clientID
 
-	// Seed the mock with subagent tasks
 	ts.loop.sessionSubagents[sessionKey] = []SubagentTaskInfo{
 		{
 			TaskID:     "subagent-1",
@@ -460,7 +457,6 @@ func TestHandleSessionSubagents_WithData(t *testing.T) {
 		t.Fatalf("expected 3 subagents, got %d", len(payload.Subagents))
 	}
 
-	// Should be sorted by Created descending (newest first)
 	if payload.Subagents[0].TaskID != "subagent-1" {
 		t.Fatalf("first subagent = %q, want %q", payload.Subagents[0].TaskID, "subagent-1")
 	}
@@ -471,7 +467,6 @@ func TestHandleSessionSubagents_WithData(t *testing.T) {
 		t.Fatalf("third subagent = %q, want %q", payload.Subagents[2].TaskID, "subagent-3")
 	}
 
-	// Verify fields
 	first := payload.Subagents[0]
 	if first.Label != "Research Go logging" {
 		t.Fatalf("label = %q, want %q", first.Label, "Research Go logging")
@@ -508,7 +503,6 @@ func TestHandleSessionSubagents_SortedByCreated(t *testing.T) {
 
 	sessionKey := "native:" + ts.clientID
 
-	// Insert tasks out of order
 	ts.loop.sessionSubagents[sessionKey] = []SubagentTaskInfo{
 		{TaskID: "oldest", SessionKey: sessionKey + ":oldest", Status: "completed", Created: 1000},
 		{TaskID: "newest", SessionKey: sessionKey + ":newest", Status: "running", Created: 3000},
@@ -576,7 +570,6 @@ func TestHandleSessionSubagents_AllStatuses(t *testing.T) {
 		t.Fatalf("expected %d subagents, got %d", len(statuses), len(payload.Subagents))
 	}
 
-	// Verify all statuses are present (sorted descending by Created, so reversed order)
 	gotStatuses := make(map[string]bool)
 	for _, s := range payload.Subagents {
 		gotStatuses[s.Status] = true

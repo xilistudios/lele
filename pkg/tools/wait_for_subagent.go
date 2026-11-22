@@ -7,13 +7,6 @@ import (
 	"time"
 )
 
-// WaitForSubagentTool blocks until a previously spawned subagent reaches a
-// terminal state (completed, failed, not_done, cancelled, or needs_context)
-// or the specified timeout expires.
-//
-// This complements the async SpawnTool: spawn returns immediately and the
-// result is delivered later via callback. WaitForSubagent lets the parent
-// agent explicitly block and collect the result in the same tool-call turn.
 type WaitForSubagentTool struct {
 	manager *SubagentManager
 }
@@ -71,25 +64,13 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 		return ErrorResult("Subagent manager not configured")
 	}
 
-	// Verify the task exists.
 	task, ok := t.manager.GetTask(taskID)
 	if !ok {
 		return ErrorResult(fmt.Sprintf("Subagent task not found: %s", taskID))
 	}
 
-	// Register interest BEFORE the terminal fast path and before blocking on
-	// the done channel. The injector decides whether to publish the result as a
-	// system message by looking at this count, so the registration must be
-	// visible before the task can complete (SignalDone fires after the
-	// completion callback).
 	t.manager.AddResultWaiter(taskID)
 
-	// The release is also the atomic final check of the timeout-vs-completion
-	// window: the injector refuses to publish while this waiter is registered,
-	// so if we give up (timeout) on a task that turned terminal in the
-	// meantime, the release claims the result and hands it back here. Returning
-	// a timeout error to a model that asked a direct question while the answer
-	// is sitting in the task would be the loss this prevents.
 	defer func() {
 		if raced := t.manager.ReleaseResultWaiterAndClaim(taskID); raced != nil {
 			if result == nil || result.IsError {
@@ -98,18 +79,15 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 		}
 	}()
 
-	// If already in a terminal/paused state, return immediately.
 	if isSubagentTerminal(task.Status) {
 		t.manager.ClaimResult(taskID)
 		return SilentResult(formatSubagentTaskResult(task))
 	}
 
-	// Poll until terminal, timeout, or context cancellation.
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
-	// Try event-driven waiting via DoneChannel first
 	doneCh := task.DoneChannel()
 	if doneCh != nil {
 		for {
@@ -117,16 +95,11 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 			case <-ctx.Done():
 				return ErrorResult(fmt.Sprintf("Wait for subagent %s interrupted", taskID))
 			case <-timer.C:
-				// No final check here: the deferred release above performs the
-				// atomic terminal check + claim, so there is no window between
-				// deciding "still running" and dropping the registration. The
-				// status is read only to keep the message informative.
 				return ErrorResult(fmt.Sprintf(
 					"Timed out waiting for subagent %s after %d seconds (current status: %s)",
 					taskID, timeoutSeconds, currentSubagentStatus(t.manager, taskID),
 				))
 			case <-doneCh:
-				// Task reached terminal state, fetch final state
 				task, ok := t.manager.GetTask(taskID)
 				if !ok {
 					return ErrorResult(fmt.Sprintf("Subagent task disappeared: %s", taskID))
@@ -137,7 +110,6 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 		}
 	}
 
-	// Fallback to polling if DoneChannel not initialized (backward compat)
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -146,8 +118,6 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 		case <-ctx.Done():
 			return ErrorResult(fmt.Sprintf("Wait for subagent %s interrupted", taskID))
 		case <-timer.C:
-			// See the event-driven branch: the deferred release claims a result
-			// that landed while we were registered.
 			return ErrorResult(fmt.Sprintf(
 				"Timed out waiting for subagent %s after %d seconds (current status: %s)",
 				taskID, timeoutSeconds, currentSubagentStatus(t.manager, taskID),
@@ -165,9 +135,6 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 	}
 }
 
-// currentSubagentStatus reads a task's status for an error message. It is
-// purely informational: the authoritative terminal check happens inside
-// ReleaseResultWaiterAndClaim, under the task's lock.
 func currentSubagentStatus(manager *SubagentManager, taskID string) string {
 	if task, ok := manager.GetTask(taskID); ok && task != nil {
 		return task.Status
@@ -175,9 +142,6 @@ func currentSubagentStatus(manager *SubagentManager, taskID string) string {
 	return "unknown"
 }
 
-// isSubagentTerminal returns true for all statuses where the subagent is no
-// longer actively executing (completed, failed, not_done, cancelled, or
-// paused waiting for context).
 func isSubagentTerminal(status string) bool {
 	switch status {
 	case SubagentStatusCompleted,
@@ -191,8 +155,6 @@ func isSubagentTerminal(status string) bool {
 	}
 }
 
-// formatSubagentTaskResult builds a human-readable summary of a subagent
-// task's final state for the LLM.
 func formatSubagentTaskResult(task *SubagentTask) string {
 	lines := []string{
 		fmt.Sprintf("Subagent task %s finished.", task.ID),

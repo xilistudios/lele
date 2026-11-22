@@ -16,7 +16,6 @@ import (
 )
 
 func TestRecordLastChannel(t *testing.T) {
-	// Create temp workspace
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -24,7 +23,6 @@ func TestRecordLastChannel(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
-	// Create test config
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
@@ -36,24 +34,20 @@ func TestRecordLastChannel(t *testing.T) {
 		},
 	}
 
-	// Create agent loop
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Test RecordLastChannel
 	testChannel := "test-channel"
 	err = al.RecordLastChannel(testChannel)
 	if err != nil {
 		t.Fatalf("RecordLastChannel failed: %v", err)
 	}
 
-	// Verify channel was saved
 	lastChannel := al.state.GetLastChannel()
 	if lastChannel != testChannel {
 		t.Errorf("Expected channel '%s', got '%s'", testChannel, lastChannel)
 	}
 
-	// Verify persistence by creating a new agent loop
 	al2 := NewAgentLoop(cfg, msgBus)
 	if al2.state.GetLastChannel() != testChannel {
 		t.Errorf("Expected persistent channel '%s', got '%s'", testChannel, al2.state.GetLastChannel())
@@ -61,7 +55,6 @@ func TestRecordLastChannel(t *testing.T) {
 }
 
 func TestRecordLastChatID(t *testing.T) {
-	// Create temp workspace
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -69,7 +62,6 @@ func TestRecordLastChatID(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
-	// Create test config
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
@@ -81,24 +73,20 @@ func TestRecordLastChatID(t *testing.T) {
 		},
 	}
 
-	// Create agent loop
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Test RecordLastChatID
 	testChatID := "test-chat-id-123"
 	err = al.RecordLastChatID(testChatID)
 	if err != nil {
 		t.Fatalf("RecordLastChatID failed: %v", err)
 	}
 
-	// Verify chat ID was saved
 	lastChatID := al.state.GetLastChatID()
 	if lastChatID != testChatID {
 		t.Errorf("Expected chat ID '%s', got '%s'", testChatID, lastChatID)
 	}
 
-	// Verify persistence by creating a new agent loop
 	al2 := NewAgentLoop(cfg, msgBus)
 	if al2.state.GetLastChatID() != testChatID {
 		t.Errorf("Expected persistent chat ID '%s', got '%s'", testChatID, al2.state.GetLastChatID())
@@ -106,7 +94,6 @@ func TestRecordLastChatID(t *testing.T) {
 }
 
 func TestNewAgentLoop_StateInitialized(t *testing.T) {
-	// Create temp workspace
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -114,7 +101,6 @@ func TestNewAgentLoop_StateInitialized(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
-	// Create test config
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
@@ -126,16 +112,13 @@ func TestNewAgentLoop_StateInitialized(t *testing.T) {
 		},
 	}
 
-	// Create agent loop
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Verify state manager is initialized
 	if al.state == nil {
 		t.Error("Expected state manager to be initialized")
 	}
 
-	// Verify state directory was created
 	stateDir := filepath.Join(tmpDir, "state")
 	if _, err := os.Stat(stateDir); os.IsNotExist(err) {
 		t.Error("Expected state directory to exist")
@@ -212,7 +195,6 @@ func TestProcessMessage_StartsFreshEphemeralSessionAfterInactivity(t *testing.T)
 		t.Fatal("No default agent found")
 	}
 
-	// Set up a mock provider that returns a valid response for testing
 	agent.Provider = &llmRunnerMockLLMProvider{
 		response: &providers.LLMResponse{
 			Content:   "Fresh response from model",
@@ -226,7 +208,6 @@ func TestProcessMessage_StartsFreshEphemeralSessionAfterInactivity(t *testing.T)
 	agent.Sessions.SetSummary(sessionKey, "old summary")
 	agent.Sessions.GetOrCreate(sessionKey).Updated = time.Now().Add(-2 * time.Minute)
 
-	// Process in goroutine and consume from bus simultaneously
 	var response string
 	var processErr error
 	processDone := make(chan struct{})
@@ -235,7 +216,6 @@ func TestProcessMessage_StartsFreshEphemeralSessionAfterInactivity(t *testing.T)
 		close(processDone)
 	}()
 
-	// Get outbound message (model response)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	outbound, ok := msgBus.SubscribeOutbound(ctx)
@@ -243,7 +223,6 @@ func TestProcessMessage_StartsFreshEphemeralSessionAfterInactivity(t *testing.T)
 		t.Fatal("Expected outbound message")
 	}
 
-	// Wait for processing to complete
 	select {
 	case <-processDone:
 		if processErr != nil {
@@ -253,12 +232,10 @@ func TestProcessMessage_StartsFreshEphemeralSessionAfterInactivity(t *testing.T)
 		t.Fatal("Timeout waiting for ProcessDirectWithChannel")
 	}
 
-	// Check ephemeral notice in return value
 	if !strings.Contains(response, "New ephemeral session created") {
 		t.Fatalf("expected ephemeral notice, got: %s", response)
 	}
 
-	// Check model response in outbound message
 	if !strings.Contains(outbound.Content, "Fresh response") {
 		t.Fatalf("expected model response in outbound, got: %s", outbound.Content)
 	}
@@ -275,7 +252,6 @@ func TestProcessMessage_StartsFreshEphemeralSessionAfterInactivity(t *testing.T)
 	}
 }
 
-// TestToolRegistry_ToolRegistration verifies tools can be registered and retrieved
 func TestToolRegistry_ToolRegistration(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
@@ -298,17 +274,13 @@ func TestToolRegistry_ToolRegistration(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Register a custom tool
 	customTool := &mockCustomTool{}
 	al.RegisterTool(customTool)
 
-	// Verify tool is registered by checking it doesn't panic on GetStartupInfo
-	// (actual tool retrieval is tested in tools package tests)
 	info := al.GetStartupInfo()
 	toolsInfo := info["tools"].(map[string]interface{})
 	toolsList := toolsInfo["names"].([]string)
 
-	// Check that our custom tool name is in the list
 	found := false
 	for _, name := range toolsList {
 		if name == "mock_custom" {
@@ -321,7 +293,6 @@ func TestToolRegistry_ToolRegistration(t *testing.T) {
 	}
 }
 
-// TestToolContext_Updates verifies tool context is updated with channel/chatID
 func TestToolContext_Updates(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
@@ -344,15 +315,11 @@ func TestToolContext_Updates(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	_ = NewAgentLoop(cfg, msgBus)
 
-	// Verify that ContextualTool interface is defined and can be implemented
-	// This test validates the interface contract exists
 	ctxTool := &mockContextualTool{}
 
-	// Verify the tool implements the interface correctly
 	var _ tools.ContextualTool = ctxTool
 }
 
-// TestToolRegistry_GetDefinitions verifies tool definitions can be retrieved
 func TestToolRegistry_GetDefinitions(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
@@ -375,7 +342,6 @@ func TestToolRegistry_GetDefinitions(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Register a test tool and verify it shows up in startup info
 	testTool := &mockCustomTool{}
 	al.RegisterTool(testTool)
 
@@ -383,7 +349,6 @@ func TestToolRegistry_GetDefinitions(t *testing.T) {
 	toolsInfo := info["tools"].(map[string]interface{})
 	toolsList := toolsInfo["names"].([]string)
 
-	// Check that our custom tool name is in the list
 	found := false
 	for _, name := range toolsList {
 		if name == "mock_custom" {
@@ -396,7 +361,6 @@ func TestToolRegistry_GetDefinitions(t *testing.T) {
 	}
 }
 
-// TestAgentLoop_GetStartupInfo verifies startup info contains tools
 func TestAgentLoop_GetStartupInfo(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
@@ -421,7 +385,6 @@ func TestAgentLoop_GetStartupInfo(t *testing.T) {
 
 	info := al.GetStartupInfo()
 
-	// Verify tools info exists
 	toolsInfo, ok := info["tools"]
 	if !ok {
 		t.Fatal("Expected 'tools' key in startup info")
@@ -437,13 +400,11 @@ func TestAgentLoop_GetStartupInfo(t *testing.T) {
 		t.Fatal("Expected 'count' in tools info")
 	}
 
-	// Should have default tools registered
 	if count.(int) == 0 {
 		t.Error("Expected at least some tools to be registered")
 	}
 }
 
-// TestAgentLoop_Stop verifies Stop() sets running to false
 func TestAgentLoop_Stop(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
@@ -466,18 +427,12 @@ func TestAgentLoop_Stop(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Note: running is only set to true when Run() is called
-	// We can't test that without starting the event loop
-	// Instead, verify the Stop method can be called safely
 	al.Stop()
 
-	// Verify running is false (initial state or after Stop)
 	if al.running.Load() {
 		t.Error("Expected agent to be stopped (or never started)")
 	}
 }
-
-// Mock implementations for testing
 
 type simpleMockProvider struct {
 	response string
@@ -495,7 +450,6 @@ func (m *simpleMockProvider) GetDefaultModel() string {
 	return "mock-model"
 }
 
-// mockCustomTool is a simple mock tool for registration testing
 type mockCustomTool struct{}
 
 func (m *mockCustomTool) Name() string {
@@ -517,7 +471,6 @@ func (m *mockCustomTool) Execute(ctx context.Context, args map[string]interface{
 	return tools.SilentResult("Custom tool executed")
 }
 
-// mockContextualTool tracks context updates
 type mockContextualTool struct {
 	lastChannel string
 	lastChatID  string
@@ -547,14 +500,12 @@ func (m *mockContextualTool) SetContext(channel, chatID string) {
 	m.lastChatID = chatID
 }
 
-// testHelper executes a message and returns the response
 type testHelper struct {
 	al     *AgentLoop
 	msgBus *bus.MessageBus
 }
 
 func (h testHelper) executeAndGetResponse(tb testing.TB, ctx context.Context, msg bus.InboundMessage) string {
-	// Use a short timeout to avoid hanging
 	timeoutCtx, cancel := context.WithTimeout(ctx, responseTimeout)
 	defer cancel()
 
@@ -563,7 +514,6 @@ func (h testHelper) executeAndGetResponse(tb testing.TB, ctx context.Context, ms
 		tb.Fatalf("message processor is not *messageProcessorImpl")
 	}
 
-	// Process message in goroutine and consume from bus simultaneously
 	var processErr error
 	var returnedResponse string
 	processDone := make(chan struct{})
@@ -572,12 +522,9 @@ func (h testHelper) executeAndGetResponse(tb testing.TB, ctx context.Context, ms
 		close(processDone)
 	}()
 
-	// When SendResponse is true (default for non-command messages),
-	// the response goes to the outbound bus and processMessage returns empty
 	if h.msgBus != nil {
 		outbound, ok := h.msgBus.SubscribeOutbound(timeoutCtx)
 		if ok && outbound.Content != "" {
-			// Wait for processing to complete to catch any errors
 			select {
 			case <-processDone:
 				if processErr != nil {
@@ -590,7 +537,6 @@ func (h testHelper) executeAndGetResponse(tb testing.TB, ctx context.Context, ms
 		}
 	}
 
-	// Wait for processing to complete
 	select {
 	case <-processDone:
 		if processErr != nil {
@@ -605,7 +551,6 @@ func (h testHelper) executeAndGetResponse(tb testing.TB, ctx context.Context, ms
 
 const responseTimeout = 3 * time.Second
 
-// TestToolResult_SilentToolDoesNotSendUserMessage verifies silent tools don't trigger outbound
 func TestToolResult_SilentToolDoesNotSendUserMessage(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
@@ -643,7 +588,6 @@ func TestToolResult_SilentToolDoesNotSendUserMessage(t *testing.T) {
 	}
 	helper := testHelper{al: al, msgBus: msgBus}
 
-	// ReadFileTool returns SilentResult, which should not send user message
 	ctx := context.Background()
 	msg := bus.InboundMessage{
 		Channel:    "test",
@@ -655,13 +599,11 @@ func TestToolResult_SilentToolDoesNotSendUserMessage(t *testing.T) {
 
 	response := helper.executeAndGetResponse(t, ctx, msg)
 
-	// Silent tool should return the LLM's response directly
 	if response != "File operation complete" {
 		t.Errorf("Expected 'File operation complete', got: %s", response)
 	}
 }
 
-// TestToolResult_UserFacingToolDoesSendMessage verifies user-facing tools trigger outbound
 func TestToolResult_UserFacingToolDoesSendMessage(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
@@ -699,7 +641,6 @@ func TestToolResult_UserFacingToolDoesSendMessage(t *testing.T) {
 	}
 	helper := testHelper{al: al, msgBus: msgBus}
 
-	// ExecTool returns UserResult, which should send user message
 	ctx := context.Background()
 	msg := bus.InboundMessage{
 		Channel:    "test",
@@ -711,13 +652,11 @@ func TestToolResult_UserFacingToolDoesSendMessage(t *testing.T) {
 
 	response := helper.executeAndGetResponse(t, ctx, msg)
 
-	// User-facing tool should include the output in final response
 	if response != "Command output: hello world" {
 		t.Errorf("Expected 'Command output: hello world', got: %s", response)
 	}
 }
 
-// failFirstMockProvider fails on the first N calls with a specific error
 type failFirstMockProvider struct {
 	failures    int
 	currentCall int
@@ -759,7 +698,6 @@ func (m *failFirstMockProvider) GetDefaultModel() string {
 	return "mock-fail-model"
 }
 
-// TestAgentLoop_ContextExhaustionRetry verify that the agent retries on context errors
 func TestAgentLoop_ContextExhaustionRetry(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
@@ -786,7 +724,6 @@ func TestAgentLoop_ContextExhaustionRetry(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 
-	// Create a provider that fails once with a context error
 	contextErr := fmt.Errorf("InvalidParameter: Total tokens of image and text exceed max message tokens")
 	provider := &failFirstMockProvider{
 		failures:    1,
@@ -796,9 +733,7 @@ func TestAgentLoop_ContextExhaustionRetry(t *testing.T) {
 
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Inject some history to simulate a full context
 	sessionKey := "test-session-context"
-	// Create dummy history
 	history := []providers.Message{
 		{Role: "system", Content: "System prompt"},
 		{Role: "user", Content: "Old message 1"},
@@ -814,7 +749,6 @@ func TestAgentLoop_ContextExhaustionRetry(t *testing.T) {
 	defaultAgent.Provider = provider
 	defaultAgent.Sessions.SetHistory(sessionKey, history)
 
-	// Process in goroutine and consume from bus simultaneously
 	var processErr error
 	processDone := make(chan struct{})
 	go func() {
@@ -822,25 +756,21 @@ func TestAgentLoop_ContextExhaustionRetry(t *testing.T) {
 		close(processDone)
 	}()
 
-	// Get first outbound message (context window notification)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	outbound1, ok := msgBus.SubscribeOutbound(ctx)
 	if !ok {
 		t.Fatal("Expected first outbound message")
 	}
-	// First message should be the notification
 	if outbound1.Content != "Context window exceeded. Summarizing history and retrying..." {
 		t.Errorf("Expected context window notification first, got '%s'", outbound1.Content)
 	}
 
-	// Get second outbound message (final model response)
 	outbound2, ok := msgBus.SubscribeOutbound(ctx)
 	if !ok {
 		t.Fatal("Expected second outbound message")
 	}
 
-	// Wait for processing to complete
 	select {
 	case <-processDone:
 		if processErr != nil {
@@ -854,27 +784,16 @@ func TestAgentLoop_ContextExhaustionRetry(t *testing.T) {
 		t.Errorf("Expected 'Recovered from context error', got '%s'", outbound2.Content)
 	}
 
-	// We expect 2 calls: 1st failed, 2nd succeeded
 	if provider.currentCall != 2 {
 		t.Errorf("Expected 2 calls (1 fail + 1 success), got %d", provider.currentCall)
 	}
 
-	// Check final history length
 	finalHistory := defaultAgent.Sessions.GetHistory(sessionKey)
-	// We verify that the history has been modified (compressed)
-	// Original length: 6
-	// Expected behavior: compression drops ~50% of history (mid slice)
-	// We can assert that the length is NOT what it would be without compression.
-	// Without compression: 6 + 1 (new user msg) + 1 (assistant msg) = 8
 	if len(finalHistory) >= 8 {
 		t.Errorf("Expected history to be compressed (len < 8), got %d", len(finalHistory))
 	}
 }
 
-// TestAgentLoop_Run_SkipsFinalMessageOnSessionCancel pins both halves of the
-// cancelled-turn contract: the user must NOT receive a final message (the turn
-// was stopped), but the channel MUST receive the terminal turn.end signal —
-// otherwise Telegram's typing indicator would never stop (#240).
 func TestAgentLoop_Run_SkipsFinalMessageOnSessionCancel(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
@@ -1046,11 +965,9 @@ func TestHandleCommand_NewResetsTokenCounts(t *testing.T) {
 	}
 
 	sessionKey := "agent:main:test:direct:user1"
-	// Add some messages and token counts
 	agent.Sessions.AddMessage(sessionKey, "user", "hello")
 	agent.Sessions.AddTokenCounts(sessionKey, 1000, 500)
 
-	// Verify tokens were added
 	inputTokens, outputTokens := agent.Sessions.GetTokenCounts(sessionKey)
 	if inputTokens != 1000 || outputTokens != 500 {
 		t.Fatalf("Expected tokens (1000, 500), got (%d, %d)", inputTokens, outputTokens)
@@ -1078,7 +995,6 @@ func TestHandleCommand_NewResetsTokenCounts(t *testing.T) {
 		t.Fatal("Expected /new to switch to a fresh session key")
 	}
 
-	// Verify token counts are zero in the new chat while the old chat remains intact.
 	inputTokens, outputTokens = agent.Sessions.GetTokenCounts(sessionKey)
 	if inputTokens != 1000 || outputTokens != 500 {
 		t.Fatalf("Expected old session tokens to remain (1000, 500), got (%d, %d)", inputTokens, outputTokens)
@@ -1114,13 +1030,11 @@ func TestResetAgentSession_ClearsTokenCounts(t *testing.T) {
 	}
 
 	sessionKey := "telegram:123456"
-	// Add messages, summary, and token counts
 	agent.Sessions.AddMessage(sessionKey, "user", "hello")
 	agent.Sessions.AddMessage(sessionKey, "assistant", "hi there")
 	agent.Sessions.SetSummary(sessionKey, "previous conversation summary")
 	agent.Sessions.AddTokenCounts(sessionKey, 1500, 800)
 
-	// Verify initial state
 	if got := len(agent.Sessions.GetHistory(sessionKey)); got != 2 {
 		t.Fatalf("Expected 2 messages, got %d", got)
 	}
@@ -1132,12 +1046,10 @@ func TestResetAgentSession_ClearsTokenCounts(t *testing.T) {
 		t.Fatalf("Expected tokens (1500, 800), got (%d, %d)", inputTokens, outputTokens)
 	}
 
-	// Reset the session
 	if err := al.resetAgentSession(agent, sessionKey); err != nil {
 		t.Fatalf("resetAgentSession failed: %v", err)
 	}
 
-	// Verify everything was cleared including token counts
 	if got := len(agent.Sessions.GetHistory(sessionKey)); got != 0 {
 		t.Fatalf("Expected empty history, got %d", got)
 	}
@@ -1150,9 +1062,6 @@ func TestResetAgentSession_ClearsTokenCounts(t *testing.T) {
 	}
 }
 
-// newThinkingClearTestLoop builds an AgentLoop with a default agent and no
-// reasoning config, isolated in a throwaway LELE_CONFIG_DIR so persisted
-// session meta (SQLite) never touches the real store.
 func newThinkingClearTestLoop(t *testing.T) (*AgentLoop, *AgentInstance) {
 	t.Helper()
 	tmpDir, err := os.MkdirTemp("", "agent-thinking-clear-*")
@@ -1183,14 +1092,7 @@ func newThinkingClearTestLoop(t *testing.T) (*AgentLoop, *AgentInstance) {
 	return al, agent
 }
 
-// TestResetAgentSession_ClearsPersistedThinking locks the fix for the
-// "/clear resurrection" bug: resetAgentSession used to delete only the
-// in-memory sessionThinking entry, so buildLLMOptions' persisted-meta
-// fallback (Sessions.GetThinkingLevel) brought the old level — including
-// "off" — back on the very next turn.
 func TestResetAgentSession_ClearsPersistedThinking(t *testing.T) {
-	// Both priors matter: "high" (a level the user set) and "off" (the
-	// explicit-disable sentinel). /clear must wipe either one.
 	for _, prior := range []string{"high", "off"} {
 		t.Run("prior_"+prior, func(t *testing.T) {
 			al, agent := newThinkingClearTestLoop(t)
@@ -1202,8 +1104,6 @@ func TestResetAgentSession_ClearsPersistedThinking(t *testing.T) {
 			if got := agent.Sessions.GetThinkingLevel(sessionKey); got != prior {
 				t.Fatalf("precondition: persisted level = %q, want %q", got, prior)
 			}
-			// Mirror what SetThinkLevel does: the in-memory entry is the
-			// primary source, persisted meta is the fallback.
 			al.sessionThinking.Store(sessionKey, prior)
 
 			if err := al.resetAgentSession(agent, sessionKey); err != nil {
@@ -1217,10 +1117,6 @@ func TestResetAgentSession_ClearsPersistedThinking(t *testing.T) {
 				t.Fatal("in-memory sessionThinking entry survived reset")
 			}
 
-			// No resurrection: with the override cleared and no agent
-			// reasoning config, buildLLMOptions must not emit a "reasoning"
-			// key at all (and in particular must not emit {"enabled":false}
-			// from a stale persisted "off").
 			caller := newLLMCaller(al)
 			opts := llmCallOptions{
 				ctx:        context.Background(),
@@ -1236,11 +1132,6 @@ func TestResetAgentSession_ClearsPersistedThinking(t *testing.T) {
 	}
 }
 
-// TestStartFreshConversation_LegacyKeyClearsPersistedThinking covers the
-// backward-compatible native:<uuid>:<digits> in-place-reset branch of
-// startFreshConversation, which resets the session on the existing key. The
-// persisted thinking override must be cleared there too, not just the
-// in-memory entry.
 func TestStartFreshConversation_LegacyKeyClearsPersistedThinking(t *testing.T) {
 	al, agent := newThinkingClearTestLoop(t)
 	const legacyKey = "native:11112222-3333-4444-5555-666677778888:123"
@@ -1278,9 +1169,6 @@ func TestStartFreshConversation_LegacyKeyClearsPersistedThinking(t *testing.T) {
 		t.Fatalf("reasoning key emitted after legacy reset: %v", got["reasoning"])
 	}
 
-	// Contrast: the new-key branch rotates to a key with no persisted meta,
-	// so nothing needs clearing there — GetThinkingLevel must simply report
-	// "" for the fresh key.
 	newKey := al.startFreshConversation("telegram:4242", "", "")
 	if newKey == "" || newKey == "telegram:4242" {
 		t.Fatalf("expected a rotated new key, got %q", newKey)
@@ -1326,13 +1214,11 @@ func TestProcessMessage_EphemeralSessionResetsTokenCounts(t *testing.T) {
 	}
 
 	sessionKey := "telegram:123"
-	// Add old conversation with token counts
 	agent.Sessions.AddMessage(sessionKey, "user", "old question")
 	agent.Sessions.AddMessage(sessionKey, "assistant", "old answer")
 	agent.Sessions.AddTokenCounts(sessionKey, 20000, 10000)
 	agent.Sessions.GetOrCreate(sessionKey).Updated = time.Now().Add(-2 * time.Minute)
 
-	// Verify tokens exist before ephemeral reset
 	inputTokens, outputTokens := agent.Sessions.GetTokenCounts(sessionKey)
 	if inputTokens != 20000 || outputTokens != 10000 {
 		t.Fatalf("Expected tokens (20000, 10000) before ephemeral reset, got (%d, %d)", inputTokens, outputTokens)
@@ -1346,8 +1232,6 @@ func TestProcessMessage_EphemeralSessionResetsTokenCounts(t *testing.T) {
 		t.Fatalf("expected ephemeral notice, got: %s", response)
 	}
 
-	// Verify token counts were reset after ephemeral session creation
-	// Note: New tokens are added from the fresh LLM response, so we verify they are much less than original (20000, 10000)
 	inputTokens, outputTokens = agent.Sessions.GetTokenCounts(sessionKey)
 	if inputTokens >= 20000 || outputTokens >= 10000 {
 		t.Fatalf("Expected token counts to be reset and lower than original (20000, 10000), got (%d, %d)", inputTokens, outputTokens)
@@ -1507,12 +1391,6 @@ func TestFormatProviderModel(t *testing.T) {
 	}
 }
 
-// ============================================
-// Tests de Subagentes con Acceso a Tools
-// Plan 2: Herramientas del Sistema para Subagentes
-// ============================================
-
-// TestSubagentManager_InheritsParentTools verifica que los subagentes heredan las tools del agente padre salvo message
 func TestSubagentManager_InheritsParentTools(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "subagent-test-*")
 	if err != nil {
@@ -1534,22 +1412,18 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 
-	// Crear AgentLoop - esto registra las tools y configura subagents
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Verificar que el subagent manager tiene las tools del agente padre
 	defaultAgent := al.registry.GetDefaultAgent()
 	if defaultAgent == nil {
 		t.Fatal("No default agent found")
 	}
 
-	// Obtener el subagent manager para el agente por defecto
 	subagentManager, ok := al.GetSubagents()[defaultAgent.ID]
 	if !ok {
 		t.Fatal("No subagent manager found for default agent")
 	}
 
-	// Verificar que el ToolRegistry del subagente tiene las mismas herramientas que el padre
 	parentTools := defaultAgent.Tools.List()
 	subagentTools := subagentManager.GetToolRegistry().List()
 
@@ -1578,7 +1452,6 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 			expectedTools, len(subagentTools))
 	}
 
-	// Verificar que el subagente no tiene las tools excluidas
 	excludedTools := []string{"send_file", "wait_for_subagent", "list_active_subagents", "cancel_subagent"}
 	for _, toolName := range excludedTools {
 		if subagentManager.HasTool(toolName) {
@@ -1586,20 +1459,12 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 		}
 	}
 
-	// The background-exec tools must be inherited. They are bound to the
-	// agent's single BackgroundProcessManager and CloneWithout shares tool
-	// instances, so a subagent's backgrounded commands register in that
-	// manager anyway; withholding the tools only made the subagent unable to
-	// observe or stop its own processes. Per-session isolation is enforced by
-	// OwnerSessionKey/VisibleTo inside the tools, not by registry exclusion.
 	for _, toolName := range []string{"list_background_execs", "get_background_exec_output", "stop_background_exec"} {
 		if !subagentManager.HasTool(toolName) {
 			t.Errorf("Subagent should have the %s tool (visibility is scoped per-session by the tool itself)", toolName)
 		}
 	}
 
-	// Verificar herramientas específicas que debe tener el subagente
-	// Nota: Algunas requieren configuración, verificamos las base disponibles
 	baseTools := []string{"read_file", "write_file", "list_dir"}
 	for _, toolName := range baseTools {
 		if !subagentManager.HasTool(toolName) {
@@ -1607,7 +1472,6 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 		}
 	}
 
-	// Verificar herramientas avanzadas si están configuradas
 	optionalTools := []string{"web_search", "spawn"}
 	for _, toolName := range optionalTools {
 		if subagentManager.HasTool(toolName) {
@@ -1616,7 +1480,6 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 	}
 }
 
-// TestSubagentManager_ToolExecution verifies that subagent has tools registry configured
 func TestSubagentManager_ToolExecution(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "subagent-exec-test-*")
 	if err != nil {
@@ -1650,20 +1513,17 @@ func TestSubagentManager_ToolExecution(t *testing.T) {
 		t.Fatal("No subagent manager found")
 	}
 
-	// Verificar que el registry de tools está configurado y tiene herramientas
 	registry := subagentManager.GetToolRegistry()
 	if registry == nil {
 		t.Fatal("Tool registry should not be nil")
 	}
 
-	// Verificar que el subagente tiene herramientas de archivo disponibles
 	testFile := filepath.Join(tmpDir, "testfile.txt")
 	testContent := "test content for subagent"
 	if err := os.WriteFile(testFile, []byte(testContent), 0644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	// Ejecutar read_file directamente usando el registry
 	result := registry.ExecuteWithContext(
 		context.Background(),
 		"read_file",
@@ -1682,7 +1542,6 @@ func TestSubagentManager_ToolExecution(t *testing.T) {
 	}
 }
 
-// TestSubagentManager_WebTools verifies web tools are inherited from parent agent
 func TestSubagentManager_WebTools(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "subagent-web-test-*")
 	if err != nil {
@@ -1712,13 +1571,10 @@ func TestSubagentManager_WebTools(t *testing.T) {
 
 	subagentManager := al.GetSubagents()[defaultAgent.ID]
 
-	// Verificar herramientas de fetching web disponibles
-	// (web_search requiere configuración API key)
 	if !subagentManager.HasTool("web_fetch") {
 		t.Error("Subagent should have web_fetch tool")
 	}
 
-	// Verificar web_search si está configurado
 	if subagentManager.HasTool("web_search") {
 		t.Log("web_search tool available (configured)")
 	} else {
@@ -1726,7 +1582,6 @@ func TestSubagentManager_WebTools(t *testing.T) {
 	}
 }
 
-// TestSubagentManager_HardwareTools verifies I2C/SPI tools are available to subagents on Linux
 func TestSubagentManager_HardwareTools(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "subagent-hw-test-*")
 	if err != nil {
@@ -1756,7 +1611,6 @@ func TestSubagentManager_HardwareTools(t *testing.T) {
 
 	subagentManager := al.GetSubagents()[defaultAgent.ID]
 
-	// Verificar herramientas hardware
 	hwTools := []string{"i2c", "spi"}
 	for _, toolName := range hwTools {
 		if !subagentManager.HasTool(toolName) {
@@ -1765,8 +1619,6 @@ func TestSubagentManager_HardwareTools(t *testing.T) {
 	}
 }
 
-// TestSubagentManager_EditingTools verifies advanced editing tools are available
-// and the legacy FMOD preview/apply flow stays deprecated.
 func TestSubagentManager_EditingTools(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "subagent-editing-test-*")
 	if err != nil {
@@ -1796,7 +1648,6 @@ func TestSubagentManager_EditingTools(t *testing.T) {
 
 	subagentManager := al.GetSubagents()[defaultAgent.ID]
 
-	// Verificar herramientas de edición avanzadas
 	editingTools := []string{"smart_edit", "patch", "sequential_replace"}
 	for _, toolName := range editingTools {
 		if !subagentManager.HasTool(toolName) {
@@ -1804,7 +1655,6 @@ func TestSubagentManager_EditingTools(t *testing.T) {
 		}
 	}
 
-	// Verificar que el flujo legacy de FMOD siga deprecado
 	deprecatedTools := []string{"preview", "apply"}
 	for _, toolName := range deprecatedTools {
 		if subagentManager.HasTool(toolName) {
@@ -1813,7 +1663,6 @@ func TestSubagentManager_EditingTools(t *testing.T) {
 	}
 }
 
-// TestSubagentManager_NestedSpawn verifies subagents can spawn other subagents
 func TestSubagentManager_NestedSpawn(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "subagent-nested-test-*")
 	if err != nil {
@@ -1843,14 +1692,12 @@ func TestSubagentManager_NestedSpawn(t *testing.T) {
 
 	subagentManager := al.GetSubagents()[defaultAgent.ID]
 
-	// Verificar que el subagente tiene acceso a spawn
 	if !subagentManager.HasTool("spawn") {
 		t.Error("Subagent should have spawn tool for nested subagent creation")
 	}
 
 }
 
-// TestSubagentManager_WorkspaceSecurity verifies subagent respects workspace boundaries
 func TestSubagentManager_WorkspaceSecurity(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "subagent-security-test-*")
 	if err != nil {
@@ -1880,7 +1727,6 @@ func TestSubagentManager_WorkspaceSecurity(t *testing.T) {
 
 	subagentManager := al.GetSubagents()[defaultAgent.ID]
 
-	// Verificar que read_file existe (el workspace validate workspace check by try)
 	result := subagentManager.GetToolRegistry().ExecuteWithContext(
 		context.Background(),
 		"read_file",
@@ -1892,18 +1738,15 @@ func TestSubagentManager_WorkspaceSecurity(t *testing.T) {
 		nil,
 	)
 
-	// Debería fallar porque el archivo no existe, pero el tool debe estar disponible
 	if result.IsError {
 		t.Logf("Expected error (file doesn't exist): %s", result.ForLLM)
 	}
 
-	// Lo importante es verificar que el subagente tiene acceso al registro de tools
 	if !subagentManager.HasTool("read_file") {
 		t.Error("Subagent should have read_file tool for workspace access")
 	}
 }
 
-// TestSubagentManager_SetLLMOptions verifies LLM options are passed to subagent
 func TestSubagentManager_SetLLMOptions(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "subagent-opts-test-*")
 	if err != nil {
@@ -1933,19 +1776,12 @@ func TestSubagentManager_SetLLMOptions(t *testing.T) {
 
 	subagentManager := al.GetSubagents()[defaultAgent.ID]
 
-	// Ver configuración de LLM
 	if subagentManager == nil {
 		t.Fatal("Subagent manager should be initialized")
 	}
 
-	// Las opciones de LLM deberían estar configuradas desde el agente padre
-	// Nota: No podemos verificar directamente los valores internos sin exponerlos,
-	// pero el hecho de que no haya errores indica que la configuración se aplicó
 }
 
-// TestAgentLoop_ReloadRegistry_PreservesSpawnTool verifies that spawn tool is registered
-// after agent reload. This is the key fix for the issue where ReloadRegistry only calls
-// registry.ReloadAgents(cfg) without re-registering shared tools.
 func TestAgentLoop_ReloadRegistry_PreservesSpawnTool(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "reload-spawn-test-*")
 	if err != nil {
@@ -1968,7 +1804,6 @@ func TestAgentLoop_ReloadRegistry_PreservesSpawnTool(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Verify spawn is registered initially
 	defaultAgent := al.registry.GetDefaultAgent()
 	if defaultAgent == nil {
 		t.Fatal("No default agent found")
@@ -1977,7 +1812,6 @@ func TestAgentLoop_ReloadRegistry_PreservesSpawnTool(t *testing.T) {
 		t.Fatal("Spawn tool should be registered initially")
 	}
 
-	// Reload with changed config (different model)
 	newCfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
@@ -1991,7 +1825,6 @@ func TestAgentLoop_ReloadRegistry_PreservesSpawnTool(t *testing.T) {
 
 	al.ReloadRegistry(newCfg)
 
-	// Verify spawn is still registered after reload
 	reloadedAgent := al.registry.GetDefaultAgent()
 	if reloadedAgent == nil {
 		t.Fatal("Default agent should exist after reload")
@@ -2001,10 +1834,6 @@ func TestAgentLoop_ReloadRegistry_PreservesSpawnTool(t *testing.T) {
 	}
 }
 
-// TestSetSessionAgent_PreservesModelWhenAgentUnchanged verifies that SetSessionAgent
-// does not clear the session model when the agent ID is the same as the current agent.
-// This fixes a bug where sending a message would reset the model to the agent's default
-// because the frontend always sends agent_id with each message.
 func TestSetSessionAgent_PreservesModelWhenAgentUnchanged(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
@@ -2045,31 +1874,24 @@ func TestSetSessionAgent_PreservesModelWhenAgentUnchanged(t *testing.T) {
 	al := NewAgentLoop(cfg, bus.NewMessageBus())
 	sessionKey := "test-session:model-preserve"
 
-	// Set initial agent
 	al.providable.SetSessionAgent(sessionKey, "agent1")
 
-	// Set custom model (different from agent's default)
 	al.providable.SetSessionModel(sessionKey, "custom-model")
 
-	// Verify model is set (resolved with provider prefix)
 	model := al.providable.GetSessionModel(sessionKey)
 	if model != "test:custom-model" {
 		t.Fatalf("Expected model 'test:custom-model', got '%s'", model)
 	}
 
-	// Call SetSessionAgent with the SAME agent ID (simulates frontend sending agent_id with message)
 	al.providable.SetSessionAgent(sessionKey, "agent1")
 
-	// Verify model is STILL preserved (not reset to agent1-model)
 	modelAfter := al.providable.GetSessionModel(sessionKey)
 	if modelAfter != "test:custom-model" {
 		t.Fatalf("Expected model to remain 'test:custom-model', got '%s' - SetSessionAgent incorrectly cleared model", modelAfter)
 	}
 
-	// Now change to a different agent
 	al.providable.SetSessionAgent(sessionKey, "agent2")
 
-	// Verify model IS cleared when agent actually changes
 	modelAfterChange := al.providable.GetSessionModel(sessionKey)
 	if modelAfterChange != "test:agent2-model" {
 		t.Fatalf("Expected model 'test:agent2-model' after agent change, got '%s'", modelAfterChange)
@@ -2115,23 +1937,19 @@ func TestGetSessionAgent_SubagentSessionReturnsCorrectAgent(t *testing.T) {
 
 	al := NewAgentLoop(cfg, bus.NewMessageBus())
 
-	// Simulate subagent session registration — this is what SetSessionKeyCallback does
 	subagentSessionKey := "subagent:task-123"
 	al.subagentSessionAgent.Store(subagentSessionKey, "coder")
 
-	// Verify getSessionAgent returns the correct agent for the subagent session
 	agentID := al.getSessionAgent(subagentSessionKey)
 	if agentID != "coder" {
 		t.Fatalf("Expected getSessionAgent to return 'coder' for subagent session, got '%s'", agentID)
 	}
 
-	// Verify GetSessionAgent (providable) also returns the correct agent
 	providableAgentID := al.providable.GetSessionAgent(subagentSessionKey)
 	if providableAgentID != "coder" {
 		t.Fatalf("Expected GetSessionAgent to return 'coder' for subagent session, got '%s'", providableAgentID)
 	}
 
-	// Verify agentForSession resolves to the correct agent instance
 	agent := al.agentForSession(subagentSessionKey)
 	if agent == nil {
 		t.Fatal("Expected agentForSession to return non-nil for subagent session")
@@ -2140,13 +1958,11 @@ func TestGetSessionAgent_SubagentSessionReturnsCorrectAgent(t *testing.T) {
 		t.Fatalf("Expected agentForSession to return 'coder' agent, got '%s'", agent.ID)
 	}
 
-	// Verify GetSessionModel returns the subagent's model, not the parent's
 	model := al.providable.GetSessionModel(subagentSessionKey)
 	if model != "test:coder-model" {
 		t.Fatalf("Expected GetSessionModel to return 'test:coder-model' for subagent session, got '%s'", model)
 	}
 
-	// Verify a regular session still returns the default agent
 	regularSessionKey := "native:chat:regular-session"
 	regularAgent := al.getSessionAgent(regularSessionKey)
 	defaultAgentID := "main"
@@ -2155,14 +1971,6 @@ func TestGetSessionAgent_SubagentSessionReturnsCorrectAgent(t *testing.T) {
 	}
 }
 
-// TestSubagentSessionAgent_MapsToTargetAgent is a regression test for the TUI
-// bug where navigating into a spawned subagent's chat showed the OWNER agent
-// (e.g. "software-engineer") instead of the TARGET agent (e.g. "coder").
-//
-// The SetSessionKeyCallback in the agent loop must store the subagent's target
-// agent (task.AgentID), not the agent that owns the subagent manager. This test
-// performs a real spawn and verifies the resulting session maps to the target
-// agent via getSessionAgent.
 func TestSubagentSessionAgent_MapsToTargetAgent(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "subagent-session-agent-test-*")
 	if err != nil {
@@ -2199,16 +2007,12 @@ func TestSubagentSessionAgent_MapsToTargetAgent(t *testing.T) {
 
 	al := NewAgentLoop(cfg, bus.NewMessageBus())
 
-	// Give both agents a mock provider so the subagent run completes without a
-	// real LLM call.
 	for _, id := range []string{"main", "coder"} {
 		if agent, ok := al.registry.GetAgent(id); ok && agent != nil {
 			agent.Provider = &mockProvider{mockResponse: "DONE"}
 		}
 	}
 
-	// Spawn a subagent targeting the "coder" agent from the "main" agent's
-	// subagent manager.
 	mainAgent := al.registry.GetDefaultAgent()
 	if mainAgent == nil {
 		t.Fatal("No default agent found")
@@ -2224,7 +2028,7 @@ func TestSubagentSessionAgent_MapsToTargetAgent(t *testing.T) {
 		context.Background(),
 		"Implement the fix",
 		"goal-system-fix",
-		"coder", // target agent
+		"coder",
 		originChannel,
 		originChatID,
 		nil,
@@ -2232,16 +2036,11 @@ func TestSubagentSessionAgent_MapsToTargetAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn failed: %v", err)
 	}
-	// Spawn returns a human-readable string like
-	// "Spawned subagent task subagent-1 ('goal-system-fix') for task: ..."
-	// Extract the task ID (subagent-N) from it.
 	taskID = extractSpawnTaskIDForTest(taskID)
 	if taskID == "" {
 		t.Fatalf("Could not extract task ID from spawn result: %q", taskID)
 	}
 
-	// The session key callback runs inside runTask (async). Wait for the
-	// mapping to appear.
 	subagentSessionKey := originChannel + ":" + originChatID + ":" + taskID
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -2255,14 +2054,11 @@ func TestSubagentSessionAgent_MapsToTargetAgent(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	// Verify the providable path (used by the TUI bottom bar) also resolves.
 	if got := al.providable.GetSessionAgent(subagentSessionKey); got != "coder" {
 		t.Fatalf("GetSessionAgent(%s) = %q, want 'coder'", subagentSessionKey, got)
 	}
 }
 
-// extractSpawnTaskIDForTest extracts the "subagent-N" task ID from a spawn
-// result string (mirrors tools.extractSpawnTaskID).
 func extractSpawnTaskIDForTest(result string) string {
 	idx := strings.Index(result, "subagent-")
 	if idx < 0 {

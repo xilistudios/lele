@@ -9,28 +9,6 @@ import (
 	"time"
 )
 
-// ---------------------------------------------------------------------------
-// Regression tests for B2 and B3.
-//
-// B2 (critical): an unresolvable speaker used to be logged and skipped, so the
-// transcript never grew and any transcript-driven strategy (round_robin, moa,
-// moderator) kept re-requesting the same speaker until the loop burned its
-// whole budget — up to maxGroupIterations iterations for a single turn.
-//
-// B3 (high): Start validated participants and strategy but never that
-// opts.Moderator was one of them. MoAAggregator then falls back to a speaker
-// that can never talk, and synthesisLocked returned the last *proposer's* turn
-// as if it were the synthesis. config.GroupProfile.Validate() has always
-// required moderator ∈ participants; Start() now enforces the same rule, and
-// synthesisLocked flags any surviving "aggregator never spoke" result instead
-// of hiding it.
-// ---------------------------------------------------------------------------
-
-// --- test doubles -----------------------------------------------------------
-
-// toggleResolver resolves agents listed in `alive` and can revoke one of them
-// mid-run, emulating an agent unregistered after Start's validation pass — the
-// window B2 lived in.
 type toggleResolver struct {
 	mu    sync.Mutex
 	alive map[string]bool
@@ -57,16 +35,12 @@ func (r *toggleResolver) resolve(agentID string) (AgentContext, bool) {
 	}, true
 }
 
-// revoke makes agentID unresolvable from now on.
 func (r *toggleResolver) revoke(agentID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.alive, agentID)
 }
 
-// scriptedExecutor records every attempt and answers from per-speaker rules. It
-// can park selected speakers until a channel is closed — so a test can change
-// the world in the middle of a turn — and can fail selected speakers outright.
 type scriptedExecutor struct {
 	mu      sync.Mutex
 	calls   []string
@@ -76,7 +50,6 @@ type scriptedExecutor struct {
 }
 
 func (e *scriptedExecutor) execute(ctx context.Context, req TurnRequest) (string, int, error) {
-	// Record the attempt before gating so "calls" means "turns requested".
 	e.mu.Lock()
 	e.calls = append(e.calls, req.Speaker)
 	e.mu.Unlock()
@@ -115,8 +88,6 @@ func (e *scriptedExecutor) spoke(speaker string) bool {
 	return false
 }
 
-// waitGroup runs gm.Wait in a goroutine and returns its result, failing the test
-// if the group never reaches a terminal state.
 func waitGroup(t *testing.T, gm *GroupManager, groupID string, d time.Duration) (string, error) {
 	t.Helper()
 	type outcome struct {
@@ -137,12 +108,6 @@ func waitGroup(t *testing.T, gm *GroupManager, groupID string, d time.Duration) 
 	}
 }
 
-// --- B2: an unresolvable speaker must fail the turn -------------------------
-
-// TestRegression_UnresolvableParticipantFailsFast covers the public path: the
-// group starts with every participant resolvable, one agent disappears while
-// another turn is in flight, and the run must fail fast through
-// finalize(StatusError) instead of skipping the dead speaker forever.
 func TestRegression_UnresolvableParticipantFailsFast(t *testing.T) {
 	res := newToggleResolver("a", "b", "agg")
 	hold := make(chan struct{})
@@ -157,8 +122,6 @@ func TestRegression_UnresolvableParticipantFailsFast(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	// a's turn is parked; drop b, then let a finish. b is asked for next, so it
-	// is unresolvable exactly when its turn comes up.
 	res.revoke("b")
 	close(hold)
 
@@ -172,15 +135,12 @@ func TestRegression_UnresolvableParticipantFailsFast(t *testing.T) {
 	if want := fmt.Sprintf("participant %q not resolvable", "b"); !strings.Contains(waitErr.Error(), want) {
 		t.Errorf("Wait err = %v, want it to contain %q", waitErr, want)
 	}
-	// Pre-fix the loop ran to the end of its budget; that error must never
-	// surface now.
 	if strings.Contains(waitErr.Error(), "iterations exhausted") {
 		t.Errorf("Wait err = %v, must not be the iteration-exhaustion error", waitErr)
 	}
 	if elapsed > 2*time.Second {
 		t.Errorf("group took %s to fail, want < 2s (fail fast, not %d loops)", elapsed, maxGroupIterations)
 	}
-	// Only a's turn may run; the loop stops at b.
 	if exec.callCount() != 1 {
 		t.Errorf("executor calls = %d, want 1 (b's turn must abort the run)", exec.callCount())
 	}
@@ -198,12 +158,8 @@ func TestRegression_UnresolvableParticipantFailsFast(t *testing.T) {
 	}
 }
 
-// TestRegression_UnresolvableSpeakerFromLoopStart covers a state that never went
-// through Start's validation — a group rehydrated from the store after its agent
-// disappeared, or any caller that builds a GroupState directly. Before B2 this
-// burned all maxGroupIterations iterations to produce a single turn.
 func TestRegression_UnresolvableSpeakerFromLoopStart(t *testing.T) {
-	res := newToggleResolver("a", "agg") // "b" is unknown from the start
+	res := newToggleResolver("a", "agg")
 	exec := &scriptedExecutor{}
 	rec := newLifecycleRecorder()
 	gm := NewGroupManager(res.resolve, exec.execute, rec.publish)
@@ -246,27 +202,23 @@ func TestRegression_UnresolvableSpeakerFromLoopStart(t *testing.T) {
 	}
 }
 
-// TestRegression_UnresolvableSpeakerFailsFastForEveryStrategy pins that the rule
-// lives in the runner, not in one strategy: all four derive their speakers from
-// the transcript, so all of them used to loop on a dead speaker.
 func TestRegression_UnresolvableSpeakerFailsFastForEveryStrategy(t *testing.T) {
 	for _, strategy := range []string{"round_robin", "pipeline", "moderator", "moa"} {
 		t.Run(strategy, func(t *testing.T) {
-			res := newToggleResolver("a") // only "a" exists
+			res := newToggleResolver("a")
 			exec := &scriptedExecutor{}
 			rec := newLifecycleRecorder()
 			gm := NewGroupManager(res.resolve, exec.execute, rec.publish)
 
 			state := &GroupState{
-				ID:        "b2-" + strategy,
-				Task:      "solve X",
-				Strategy:  strategy,
-				Status:    StatusRunning,
-				CreatedAt: time.Now(),
-				UpdatedAt: time.Now(),
-				Rounds:    3,
-				MaxTurns:  MaxGroupTurnsCeiling,
-				// "b" is a participant but never resolvable, and it speaks first.
+				ID:           "b2-" + strategy,
+				Task:         "solve X",
+				Strategy:     strategy,
+				Status:       StatusRunning,
+				CreatedAt:    time.Now(),
+				UpdatedAt:    time.Now(),
+				Rounds:       3,
+				MaxTurns:     MaxGroupTurnsCeiling,
 				Participants: []Participant{plainParticipant("b"), plainParticipant("a")},
 			}
 			mg := newManaged(state)
@@ -281,8 +233,6 @@ func TestRegression_UnresolvableSpeakerFailsFastForEveryStrategy(t *testing.T) {
 			if want := fmt.Sprintf("participant %q not resolvable", "b"); !strings.Contains(waitErr.Error(), want) {
 				t.Errorf("Wait err = %v, want it to contain %q", waitErr, want)
 			}
-			// At most one healthy turn may be spent before the abort: the loop
-			// must not grind through its iteration budget.
 			if exec.callCount() > 1 {
 				t.Errorf("executor calls = %d, want at most 1", exec.callCount())
 			}
@@ -294,12 +244,6 @@ func TestRegression_UnresolvableSpeakerFailsFastForEveryStrategy(t *testing.T) {
 	}
 }
 
-// --- B3: moderator membership ------------------------------------------------
-
-// TestRegression_StartRejectsModeratorNotInParticipants asserts Start refuses a
-// moderator/aggregator outside the participants list and launches nothing. This
-// is the old audit repro B (ghost moderator): it must now fail in Start instead
-// of running a group whose "synthesis" is really a raw proposal.
 func TestRegression_StartRejectsModeratorNotInParticipants(t *testing.T) {
 	pub := &mockPublisher{}
 	exec := &scriptedExecutor{}
@@ -319,7 +263,6 @@ func TestRegression_StartRejectsModeratorNotInParticipants(t *testing.T) {
 		t.Errorf("Start err = %v, want it to name the offending moderator", err)
 	}
 
-	// Nothing may have been registered, executed or announced.
 	if _, ok := gm.Status("b3-ghost-1"); ok {
 		t.Error("group was registered despite Start returning an error")
 	}
@@ -336,7 +279,6 @@ func TestRegression_StartRejectsModeratorNotInParticipants(t *testing.T) {
 		t.Error("Wait on a rejected group returned nil error, want 'not found'")
 	}
 
-	// The same call with a valid moderator must succeed and synthesise normally.
 	okID, err := gm.Start(context.Background(), "b3-valid-1", "p1", "solve X", "moa",
 		[]Participant{proposer("a"), proposer("b"), aggregator("agg")},
 		GroupOptions{Rounds: 1, Moderator: "agg"}, "ch", "chat")
@@ -358,9 +300,6 @@ func TestRegression_StartRejectsModeratorNotInParticipants(t *testing.T) {
 	}
 }
 
-// TestRegression_ModeratorStrategySameRule asserts the "moderator" strategy is
-// covered by the same Start validation — its decider is custom, which is the
-// path where a stray moderator is easiest to introduce.
 func TestRegression_ModeratorStrategySameRule(t *testing.T) {
 	pub := &mockPublisher{}
 	exec := &scriptedExecutor{}
@@ -389,7 +328,6 @@ func TestRegression_ModeratorStrategySameRule(t *testing.T) {
 		t.Errorf("group.status events = %d, want 0 (a rejected group stays silent)", n)
 	}
 
-	// A moderator that IS a participant is accepted.
 	if _, err := gm.Start(context.Background(), "b3-mod-2", "p1", "solve X", "moderator",
 		participants, GroupOptions{MaxTurns: 2, Moderator: "b"}, "ch", "chat"); err != nil {
 		t.Fatalf("Start with in-participants moderator: %v", err)
@@ -399,9 +337,6 @@ func TestRegression_ModeratorStrategySameRule(t *testing.T) {
 	}
 }
 
-// TestRegression_EmptyModeratorStillAllowed pins the boundary: an empty
-// moderator is legal for every strategy (mirrors GroupProfile.Validate, which
-// only checks membership when Moderator != "").
 func TestRegression_EmptyModeratorStillAllowed(t *testing.T) {
 	for _, strategy := range []string{"moa", "moderator", "round_robin", "pipeline"} {
 		gm := NewGroupManager(mockResolve, (&scriptedExecutor{}).execute, (&mockPublisher{}).publish)
@@ -418,13 +353,6 @@ func TestRegression_EmptyModeratorStillAllowed(t *testing.T) {
 	}
 }
 
-// --- B3: "aggregator never spoke" safety net --------------------------------
-
-// TestRegression_MoAFlagsUnsynthesizedOnConvergedStop is the case that stays
-// reachable through Start: the group converges on a stop keyword after the
-// proposers speak, so the aggregator never gets a turn. Convergence is a
-// legitimate completion — mg.err stays nil — but the fallback text is a raw
-// proposal, so it must be marked instead of being presented as the synthesis.
 func TestRegression_MoAFlagsUnsynthesizedOnConvergedStop(t *testing.T) {
 	pub := &mockPublisher{}
 	exec := &scriptedExecutor{content: map[string]string{
@@ -463,8 +391,6 @@ func TestRegression_MoAFlagsUnsynthesizedOnConvergedStop(t *testing.T) {
 		t.Errorf("state.Status = %q, want %q", st.Status, StatusDone)
 	}
 
-	// The marker must reach clients through group.complete as well, not only
-	// through Wait's return value.
 	complete := pub.byEvent("group.complete")
 	if len(complete) != 1 {
 		t.Fatalf("group.complete events = %d, want 1", len(complete))
@@ -474,10 +400,6 @@ func TestRegression_MoAFlagsUnsynthesizedOnConvergedStop(t *testing.T) {
 	}
 }
 
-// TestRegression_MoAFailedAggregatorStillReportsError documents what happens
-// when the aggregator's own turn fails: the run aborts with an error (it does
-// NOT continue and quietly return a proposal), and the partial result that
-// finalize still publishes is marked as unsynthesized.
 func TestRegression_MoAFailedAggregatorStillReportsError(t *testing.T) {
 	aggErr := fmt.Errorf("provider exploded")
 	exec := &scriptedExecutor{errFor: map[string]error{"agg": aggErr}}
@@ -507,11 +429,6 @@ func TestRegression_MoAFailedAggregatorStillReportsError(t *testing.T) {
 	}
 }
 
-// TestSynthesisLocked_FlagsGhostModeratorState covers the residual B3 shape — a
-// Moderator outside participants — which Start now refuses. It can only arrive
-// through a state built elsewhere (a persisted group rehydrated after its
-// moderator was renamed), so the check is exercised directly on finalize to keep
-// the safety net under test rather than unreachable-by-construction.
 func TestSynthesisLocked_FlagsGhostModeratorState(t *testing.T) {
 	exec := &scriptedExecutor{}
 	rec := newLifecycleRecorder()
@@ -525,7 +442,7 @@ func TestSynthesisLocked_FlagsGhostModeratorState(t *testing.T) {
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 		Rounds:       1,
-		Moderator:    "ghost", // not a participant: Start would reject this
+		Moderator:    "ghost",
 		Participants: []Participant{proposer("a"), aggregator("agg")},
 		Transcript: []Turn{
 			{Index: 0, Layer: 0, Speaker: "a", Content: "proposal from a"},
@@ -534,8 +451,6 @@ func TestSynthesisLocked_FlagsGhostModeratorState(t *testing.T) {
 	mg := newManaged(state)
 	startManaged(gm, mg)
 
-	// MoAAggregator resolves to "ghost", which has no turn, so the raw
-	// proposal must be flagged rather than returned as the synthesis.
 	gm.finalize(mg, StatusDone, nil)
 
 	synthesis, waitErr := waitGroup(t, gm, state.ID, 5*time.Second)
@@ -548,11 +463,7 @@ func TestSynthesisLocked_FlagsGhostModeratorState(t *testing.T) {
 	assertExactlyOnePair(t, rec, state.ID)
 }
 
-// TestSynthesisLocked_MarksOnlyWhenAggregatorSilent keeps the marker narrow: an
-// aggregator that did speak wins even when a later proposer turn exists, and
-// non-moa strategies are never marked.
 func TestSynthesisLocked_MarksOnlyWhenAggregatorSilent(t *testing.T) {
-	// A publisher is required: finalize always emits the terminal pair.
 	gm := NewGroupManager(mockResolve, nil, (&mockPublisher{}).publish)
 
 	t.Run("aggregator turn wins over later proposer turn", func(t *testing.T) {

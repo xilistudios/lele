@@ -11,8 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/group"
 )
 
-// --- test helpers (mirror pkg/group/manager_test.go patterns) ---
-
 func testResolve(agentID string) (group.AgentContext, bool) {
 	known := map[string]string{
 		"a": "Agent A",
@@ -52,8 +50,6 @@ func (p *testPublisher) publish(msg bus.OutboundMessage) {
 	defer p.mu.Unlock()
 	p.messages = append(p.messages, msg)
 }
-
-// --- tests ---
 
 func TestGroupChatTool_Success(t *testing.T) {
 	exec := &testExecutor{}
@@ -203,7 +199,7 @@ func TestGroupChatTool_AllowlistAllAllowed(t *testing.T) {
 
 	tool := NewGroupChatTool(gm)
 	tool.SetAllowlistChecker(func(id string) bool {
-		return true // all allowed
+		return true
 	})
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
@@ -225,16 +221,10 @@ func TestGroupChatTool_InterfaceCompliance(t *testing.T) {
 
 	tool := NewGroupChatTool(gm)
 
-	// Tool interface
 	var _ Tool = tool
-	// ContextualTool interface
 	var _ ContextualTool = tool
 }
 
-// --- B4 regression: origin must come from the invocation ctx, not shared state ---
-
-// newB4Tool builds a GroupChatTool over a real manager with stub deps and
-// returns the tool plus a publisher recorder.
 func newB4Tool(execDelay func(speaker string)) (*GroupChatTool, *testPublisher, *group.GroupManager) {
 	resolve := func(id string) (group.AgentContext, bool) {
 		return group.AgentContext{AgentID: id, Name: id, SystemPrompt: "p"}, true
@@ -250,7 +240,6 @@ func newB4Tool(execDelay func(speaker string)) (*GroupChatTool, *testPublisher, 
 	return NewGroupChatTool(gm), pub, gm
 }
 
-// groupEvents returns only the group.* events captured by the publisher.
 func groupEvents(p *testPublisher) []bus.OutboundMessage {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -272,8 +261,6 @@ func b4Args(task string) map[string]interface{} {
 	}
 }
 
-// TestRegression_GroupChatUsesCtxOrigin proves the group's events are routed
-// to the channel/chatID carried by the invocation ctx.
 func TestRegression_GroupChatUsesCtxOrigin(t *testing.T) {
 	tool, pub, _ := newB4Tool(nil)
 	ctx := WithToolContext(context.Background(), "native", "chatA")
@@ -292,12 +279,7 @@ func TestRegression_GroupChatUsesCtxOrigin(t *testing.T) {
 	}
 }
 
-// TestRegression_GroupChatConcurrentSessionsIsolated interleaves two sessions
-// through the SAME tool instance: with the old shared-field design, A's group
-// could be stamped with B's chatID.
 func TestRegression_GroupChatConcurrentSessionsIsolated(t *testing.T) {
-	// Gate both executions so A's Start happens strictly after B's ctx was
-	// already in play — the exact window that used to leak.
 	var mu sync.Mutex
 	tool, pub, _ := newB4Tool(func(string) {
 		mu.Lock()
@@ -330,9 +312,6 @@ func TestRegression_GroupChatConcurrentSessionsIsolated(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Every published group event must target exactly one of the two chats,
-	// and both chats must have received traffic (no cross-talk verification
-	// happens structurally: origin is read from ctx at Start time).
 	seen := map[string]int{}
 	for _, e := range groupEvents(pub) {
 		if e.Channel != "native" || (e.ChatID != "chatA" && e.ChatID != "chatB") {
@@ -345,10 +324,9 @@ func TestRegression_GroupChatConcurrentSessionsIsolated(t *testing.T) {
 	}
 }
 
-// TestRegression_GroupChatFallsBackWhenNoCtx keeps the legacy default.
 func TestRegression_GroupChatFallsBackWhenNoCtx(t *testing.T) {
 	tool, pub, _ := newB4Tool(nil)
-	tool.SetContext("stale", "should-be-ignored") // must be a no-op now
+	tool.SetContext("stale", "should-be-ignored")
 	res := tool.Execute(context.Background(), b4Args("hello"))
 	_ = res
 	for _, e := range groupEvents(pub) {

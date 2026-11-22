@@ -1,10 +1,5 @@
 package channels
 
-// End-to-end tests for send_file attachment handling in
-// dispatchOutboundMessage: staging outside paths under the lele dir,
-// persisting the staged attachments on the assistant message, and emitting
-// message.complete with a servable path.
-
 import (
 	"encoding/json"
 	"io"
@@ -22,7 +17,7 @@ import (
 func TestDispatchStagesAttachmentAndServesIt(t *testing.T) {
 	ts := newStagingTestServer(t)
 
-	src := filepath.Join(t.TempDir(), "result.csv") // outside leleDir
+	src := filepath.Join(t.TempDir(), "result.csv")
 	if err := os.WriteFile(src, []byte("a,b\n1,2\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -45,13 +40,10 @@ func TestDispatchStagesAttachmentAndServesIt(t *testing.T) {
 		Attachments: out,
 	})
 
-	// 1) The caller's slice must not be mutated (the same OutboundMessage can
-	//    be delivered to other channel subscribers sharing the backing array).
 	if out[0].Path != src {
 		t.Errorf("dispatch mutated caller attachment path: %q, want %q", out[0].Path, src)
 	}
 
-	// 2) WS message.complete must carry the STAGED path (servable) + original name.
 	events := drainWSEvents(t, client)
 	complete := findWSEvent(events, "message.complete")
 	if complete == nil {
@@ -81,8 +73,6 @@ func TestDispatchStagesAttachmentAndServesIt(t *testing.T) {
 		t.Errorf("attachment caption = %v, want 'here you go'", got)
 	}
 
-	// 3) Persistence hook was called with the staged attachment (same key the
-	//    history refetch uses).
 	calls := ts.loop.attachCalls()
 	if len(calls) != 1 {
 		t.Fatalf("AttachFilesToLastAssistant calls = %d, want 1", len(calls))
@@ -97,9 +87,6 @@ func TestDispatchStagesAttachmentAndServesIt(t *testing.T) {
 		t.Errorf("persisted name = %q, want result.csv", calls[0].attachments[0].Name)
 	}
 
-	// 4) The staged copy is downloadable through the view endpoint. The WebUI
-	//    sends name=<original attachment name> (MessageBubble buildDownloadUrl)
-	//    so the browser saves "result.csv", not the uuid-prefixed staged name.
 	resp, body := getView(t, ts, url.Values{
 		"path": {stagedPath}, "download": {"1"}, "name": {"result.csv"},
 	})
@@ -116,9 +103,6 @@ func TestDispatchStagesAttachmentAndServesIt(t *testing.T) {
 }
 
 func TestDispatchInsideLeleDirCopiedToStaging(t *testing.T) {
-	// FIX-1: files under leleDir but outside the staging directory ARE now
-	// copied to staging so the public endpoint can serve them (invariant:
-	// "public == staging").
 	ts := newStagingTestServer(t)
 
 	uploadDir := filepath.Join(ts.channel.cfg.LeleDir, "tmp", "uploads")
@@ -155,7 +139,6 @@ func TestDispatchInsideLeleDirCopiedToStaging(t *testing.T) {
 	if len(payload.Attachments) != 1 {
 		t.Fatalf("attachments = %v, want 1", payload.Attachments)
 	}
-	// After FIX-1: the path must have been rewritten to the staging dir.
 	got := payload.Attachments[0]["path"]
 	if got == src {
 		t.Errorf("path = %v, expected staging copy (not the original)", got)
@@ -216,15 +199,10 @@ func TestDispatchMissingFileKeepsOriginalPath(t *testing.T) {
 	if len(payload.Attachments) != 1 {
 		t.Fatalf("attachments = %v, want 1", payload.Attachments)
 	}
-	// Staging failed → original path preserved (view endpoint will 403/404 it,
-	// but the message itself must not be dropped).
 	if got := payload.Attachments[0]["path"]; got != ghost {
 		t.Errorf("path = %v, want original %q", got, ghost)
 	}
 }
-
-// --- REST history exposes persisted attachments (contract: JSON field
-// "attachments" on ChatHistoryMessage, omitempty) ---
 
 func TestChatHistoryReturnsAttachments(t *testing.T) {
 	ts := newNativeTestServer(t)
@@ -259,7 +237,6 @@ func TestChatHistoryReturnsAttachments(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 
-	// Decode generically to pin the WIRE field names (contract), not the Go struct.
 	var raw struct {
 		Messages []map[string]interface{} `json:"messages"`
 	}
@@ -270,7 +247,6 @@ func TestChatHistoryReturnsAttachments(t *testing.T) {
 	if len(raw.Messages) != 2 {
 		t.Fatalf("messages = %d, want 2 (%s)", len(raw.Messages), body)
 	}
-	// User message must omit the field entirely (omitempty).
 	if _, ok := raw.Messages[0]["attachments"]; ok {
 		t.Errorf("attachment-less message carries \"attachments\" key: %s", body)
 	}

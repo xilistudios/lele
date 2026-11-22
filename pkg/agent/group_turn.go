@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -18,34 +12,10 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// maxGroupToolIterations is the maximum number of tool-call iterations
-// within a single group turn before forcing a final response.
 const maxGroupToolIterations = 10
 
-// groupTurnExcludedTools are never offered to group participants:
-// group_chat would allow unbounded nested group trees (B8).
-//
-// A participant whose toolset still advertises group_chat can invoke it from
-// inside a group turn and spawn sub-groups, recursively, with no depth limit —
-// an unbounded tree of panels burning tokens. The tool is therefore stripped
-// from the definitions sent to the model (the same guard spawn/subagents have
-// via CloneWithout in tool_coordinator.go).
 var groupTurnExcludedTools = map[string]bool{"group_chat": true}
 
-// filterToolDefs returns the tool definitions a model should actually be
-// offered, dropping anything it cannot serve:
-//
-//   - when hasVision is false, read_image is removed (the model could not
-//     interpret the returned image content);
-//   - when hasVideo is false AND hasVision is false, read_video is removed
-//     (the model could serve neither native video nor the keyframes
-//     fallback);
-//   - every name present as true in excluded is removed regardless of
-//     vision/video support.
-//
-// It is a pure function so the policy can be unit-tested without building a
-// full runner. A nil excluded map simply means "only apply the vision and
-// video filters".
 func filterToolDefs(defs []providers.ToolDefinition, hasVision, hasVideo bool, excluded map[string]bool) []providers.ToolDefinition {
 	filtered := make([]providers.ToolDefinition, 0, len(defs))
 	for _, def := range defs {
@@ -64,37 +34,18 @@ func filterToolDefs(defs []providers.ToolDefinition, hasVision, hasVideo bool, e
 	return filtered
 }
 
-// runGroupTurn executes a single group turn: builds the messages (persona+role
-// system prompt, shared transcript as context, and the strategy instruction),
-// acquires the session semaphore with a key derived as group:<groupID>:<speaker>
-// so that different speakers in the same group do not block each other, and
-// makes an LLM call. If EnableTools is true, it runs a bounded tool loop:
-// the LLM may request tool calls, which are executed and fed back, repeating
-// until the LLM produces a final text response or the iteration cap is reached.
-// Returns the produced content and tokens used.
 func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest) (string, int, error) {
-	// a. Resolve the speaking agent.
 	agent, ok := lr.al.registry.GetAgent(req.Speaker)
 	if !ok {
 		return "", 0, fmt.Errorf("group turn: agent %q not found in registry", req.Speaker)
 	}
 
-	// b. Session key for the semaphore — unique per group+speaker.
 	sessionKey := "group:" + req.GroupID + ":" + req.Speaker
 
-	// c. Acquire semaphore (same pattern as runAgentLoop).
 	sem, _ := lr.al.sessionProcessing.LoadOrStore(sessionKey, make(chan struct{}, 1))
 	semCh := sem.(chan struct{})
 	select {
 	case semCh <- struct{}{}:
-		// Release the token, then drop the map entry if nobody else holds or
-		// waits on it (B6). Without the Delete, every (group, speaker) pair
-		// ever seen left a channel in the sync.Map for the lifetime of the
-		// process. Concurrent turns for the same key do not exist by design
-		// (one speaker per turn; Parallel means distinct speakers, hence
-		// distinct keys), and the len check keeps the cleanup safe even if a
-		// second holder queues up: it only deletes an idle channel, while a
-		// racing LoadOrStore simply creates a fresh one.
 		defer func() {
 			<-semCh
 			if len(semCh) == 0 {
@@ -105,14 +56,12 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 		return "", 0, ctx.Err()
 	}
 
-	// d. Respect per-turn MaxTokens without mutating the shared AgentInstance.
 	if req.MaxTokens > 0 {
 		agentCopy := *agent
 		agentCopy.MaxTokens = req.MaxTokens
 		agent = &agentCopy
 	}
 
-	// e. Build initial messages.
 	system := req.SystemPrompt
 	userContent := req.Instruction
 	if req.Transcript != "" {
@@ -123,16 +72,9 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 		{Role: "user", Content: userContent},
 	}
 
-	// f. Build tool definitions if tools are enabled.
-	// Vision and native video are determined by the primary model only. When
-	// the fallback chain fails over to a weaker model, image/video content is
-	// stripped per-candidate in callWithFallback (see llm_caller.go).
 	var providerToolDefs []providers.ToolDefinition
 	modelHasVision := getSupportsImages(lr.al.cfg(), agent.Model, extractProviderFromModel(agent.Model, lr.al.cfg().Agents.Defaults.Provider))
 	modelHasVideo := getSupportsVideo(lr.al.cfg(), agent.Model, extractProviderFromModel(agent.Model, lr.al.cfg().Agents.Defaults.Provider))
-	// The session's tool view (see toolCoordinator.sessionTools): a group turn
-	// gets the agent's base registry plus only the MCP tools ITS session
-	// loaded, never the ones another chat loaded.
 	registry := lr.al.toolCoordinator.sessionTools(agent, sessionKey)
 	if registry == nil {
 		registry = agent.Tools
@@ -140,23 +82,13 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 	if req.EnableTools {
 		providerToolDefs = registry.ToProviderDefs()
 
-		// Drop tools the model must not be offered during a group turn:
-		// read_image when the primary model has no vision (it could not
-		// understand the returned image content), read_video when it has
-		// neither native video nor vision (no delivery mode available), and
-		// group_chat, which would let a participant spawn nested group trees
-		// (B8). Only the definitions handed to the provider are filtered — a
-		// model cannot call what it does not see, so no second guard is
-		// needed in the executor.
 		providerToolDefs = filterToolDefs(providerToolDefs, modelHasVision, modelHasVideo, groupTurnExcludedTools)
 	}
 
-	// g. Update tool contexts so tools know which channel/chat they're serving.
 	if req.EnableTools && req.OriginChannel != "" {
 		lr.al.toolCoordinator.updateToolContexts(agent, req.OriginChannel, req.OriginChatID, sessionKey)
 	}
 
-	// h. Bounded tool loop.
 	caller := newLLMCaller(lr.al)
 	if lr.retryWait != nil {
 		caller.retryWait = lr.retryWait
@@ -168,9 +100,6 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 			return "", totalTokens, err
 		}
 
-		// Keep the payload under the request-size budget: a participant's read_image
-		// merges base64 parts into these messages, and an oversized request is
-		// rejected by the transport before the model ever sees it.
 		if reduced, evicted := tools.EnforceImageBudget(messages); evicted > 0 {
 			messages = reduced
 			logger.InfoCF("agent", "Group turn request image budget enforced", map[string]interface{}{
@@ -188,7 +117,6 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 			candidates: agent.Candidates,
 			sessionKey: sessionKey,
 			iteration:  iteration,
-			// stream handlers nil — no streaming for group turns
 		}
 
 		response, updatedMessages, err := caller.executeWithRetry(callOpts, messages)
@@ -197,12 +125,10 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 		}
 		messages = updatedMessages
 
-		// Track token usage.
 		if response != nil && response.Usage != nil {
 			totalTokens += response.Usage.TotalTokens
 		}
 
-		// No tool calls — we have the final response.
 		if response == nil || len(response.ToolCalls) == 0 {
 			content := ""
 			if response != nil {
@@ -211,8 +137,6 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 			return content, totalTokens, nil
 		}
 
-		// Tool calls present — execute them.
-		// Build assistant message with tool calls.
 		assistantMsg := providers.Message{
 			Role:             "assistant",
 			Content:          response.Content,
@@ -220,10 +144,6 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 		}
 		assistantMsg.ToolCalls = providers.CanonicalToolCalls(response.ToolCalls)
 
-		// Every call was rejected by canonicalisation. Running them anyway
-		// would append tool results whose ids match nothing in the assistant
-		// message above, and the next iteration would be sent a request the
-		// provider rejects outright. Ask for a retry instead.
 		if len(assistantMsg.ToolCalls) == 0 {
 			logger.WarnCF("agent", "group turn returned only invalid tool calls",
 				map[string]interface{}{
@@ -233,10 +153,6 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 					"rejected":    len(response.ToolCalls),
 					"session_key": sessionKey,
 				})
-			// Keep the assistant turn in the live context so the guidance below
-			// stays a valid user message: providers reject two consecutive
-			// messages of the same role. A blank assistant is kept in memory
-			// only, mirroring the empty-response handling in the main loop.
 			if strings.TrimSpace(response.Content) != "" {
 				messages = append(messages, assistantMsg)
 			} else {
@@ -257,15 +173,12 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 
 		messages = append(messages, assistantMsg)
 
-		// Execute each tool call and collect results. Iterating the canonical
-		// list keeps every tool result aligned with a persisted tool_call id.
 		executor := newToolExecutor(lr.al)
 		for _, tc := range assistantMsg.ToolCalls {
 			if err := ctx.Err(); err != nil {
 				return "", totalTokens, err
 			}
 
-			// Serialize tool call arguments for the OnToolCall callback.
 			argsJSON := ""
 			if tc.Arguments != nil {
 				if b, mErr := json.Marshal(tc.Arguments); mErr == nil {
@@ -273,28 +186,21 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 				}
 			}
 
-			// Emit "executing" event before running the tool.
 			if req.OnToolCall != nil {
 				req.OnToolCall(tc.ID, tc.Name, argsJSON, "executing", "")
 			}
 
 			toolResult, err := executor.Execute(toolExecOptions{
-				ctx:      ctx,
-				agent:    agent,
-				registry: registry,
-				tc:       tc,
-				channel:  req.OriginChannel,
-				chatID:   req.OriginChatID,
-				// Use the group turn session key so tool execution is attributed
-				// to the group turn session (group:<groupID>:<speaker>), not the
-				// origin chat. This prevents cross-contamination of session state
-				// (verbose level, mode checks, approval tracking, subagent routing)
-				// between the user's regular chat and the group turn.
+				ctx:        ctx,
+				agent:      agent,
+				registry:   registry,
+				tc:         tc,
+				channel:    req.OriginChannel,
+				chatID:     req.OriginChatID,
 				sessionKey: sessionKey,
 				iteration:  iteration,
 			})
 
-			// Emit "completed" or "error" event after the tool finishes.
 			if req.OnToolCall != nil {
 				status := "completed"
 				resultStr := ""
@@ -311,7 +217,6 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 				return "", totalTokens, fmt.Errorf("group turn tool execution failed: %w", err)
 			}
 
-			// Append tool result message.
 			contentForLLM := lr.al.redactor.Redact(buildToolResultContent(toolResult))
 			toolResultMsg := providers.Message{
 				Role:       "tool",
@@ -320,7 +225,6 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 			}
 			messages = append(messages, toolResultMsg)
 
-			// Append any context messages from the tool result.
 			if toolResult != nil && len(toolResult.ContextMessages) > 0 {
 				ctxMsgs := toolResult.ContextMessages
 				if !modelHasVision || !modelHasVideo {
@@ -339,8 +243,6 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 			})
 	}
 
-	// If we exhausted all iterations, make one final call without tools
-	// to force a text response.
 	logger.WarnCF("agent", "Group turn tool loop exhausted, forcing final response",
 		map[string]interface{}{
 			"speaker":  req.Speaker,
@@ -351,15 +253,12 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 		ctx:        ctx,
 		agent:      agent,
 		messages:   messages,
-		toolDefs:   nil, // no tools — force a text response
+		toolDefs:   nil,
 		model:      agent.Model,
 		candidates: agent.Candidates,
 		sessionKey: sessionKey,
 		iteration:  maxGroupToolIterations + 1,
 	}
-	// Keep the payload under the request-size budget: a participant's read_image
-	// merges base64 parts into these messages, and an oversized request is
-	// rejected by the transport before the model ever sees it.
 	if reduced, evicted := tools.EnforceImageBudget(messages); evicted > 0 {
 		messages = reduced
 		logger.InfoCF("agent", "Group turn request image budget enforced", map[string]interface{}{

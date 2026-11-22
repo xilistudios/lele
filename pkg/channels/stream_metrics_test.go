@@ -1,18 +1,5 @@
 package channels
 
-// Tests for the streaming throughput metrics (tokens / elapsed_ms / tok_per_sec
-// / estimated) mirrored from the agent's message.stream (answer surface) and
-// message.thinking (reasoning surface) Metadata onto the WebSocket and SSE
-// payloads.
-//
-// The agent's stream handler (pkg/agent/llm_stream.go) publishes them inside
-// bus.OutboundMessage.Metadata, which is a map[string]string, so the numbers
-// travel pre-formatted with strconv. native.go only has to read them back and
-// put them on the wire; the frontend (web/src/hooks/event-handlers/streaming.ts)
-// owns the presentation decision (it hides the indicator while every metric is
-// zero and estimated is false). These tests pin the JSON contract, so a change
-// here is a breaking change for that consumer.
-
 import (
 	"context"
 	"encoding/json"
@@ -24,8 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
-// fullStreamMetrics is the metadata shape a real message.stream event carries,
-// exactly as the agent formats it (strconv outputs).
 func fullStreamMetrics() map[string]string {
 	return map[string]string{
 		"done":        "false",
@@ -36,9 +21,6 @@ func fullStreamMetrics() map[string]string {
 	}
 }
 
-// fullThinkingMetrics is the metadata shape a real message.thinking event
-// carries, exactly as the agent formats it (strconv outputs). It has no "done"
-// key: reasoning has no terminal chunk.
 func fullThinkingMetrics() map[string]string {
 	return map[string]string{
 		"tokens":      "96",
@@ -48,8 +30,6 @@ func fullThinkingMetrics() map[string]string {
 	}
 }
 
-// streamEventPayload reads the single message.stream frame queued on a fake
-// client and returns its decoded payload plus the raw JSON body.
 func streamEventPayload(t *testing.T, client *WSClient) (WSStreamPayload, string) {
 	t.Helper()
 
@@ -63,8 +43,6 @@ func streamEventPayload(t *testing.T, client *WSClient) (WSStreamPayload, string
 	return payload, string(stream.Data)
 }
 
-// thinkingEventPayload reads the single message.thinking frame queued on a fake
-// client and returns its decoded payload plus the raw JSON body.
 func thinkingEventPayload(t *testing.T, client *WSClient) (WSThinkingPayload, string) {
 	t.Helper()
 
@@ -78,10 +56,6 @@ func thinkingEventPayload(t *testing.T, client *WSClient) (WSThinkingPayload, st
 	return payload, string(thinking.Data)
 }
 
-// TestDispatchOutboundStreamCarriesThroughputMetrics is the core contract test:
-// a message.stream with full Metadata must reach the WebSocket payload with
-// every metric populated, and the serialized JSON must expose the exact snake_case
-// keys the frontend reads.
 func TestDispatchOutboundStreamCarriesThroughputMetrics(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -134,9 +108,6 @@ func TestDispatchOutboundStreamCarriesThroughputMetrics(t *testing.T) {
 	}
 }
 
-// TestDispatchOutboundStreamWithoutMetricsDefaultsToZero pins the absent-metadata
-// path: no panic, metrics at their zero values, and the four keys STILL present
-// in the JSON (no omitempty) so the frontend shape never changes.
 func TestDispatchOutboundStreamWithoutMetricsDefaultsToZero(t *testing.T) {
 	cases := []struct {
 		name string
@@ -183,9 +154,6 @@ func TestDispatchOutboundStreamWithoutMetricsDefaultsToZero(t *testing.T) {
 	}
 }
 
-// TestDispatchOutboundStreamDoneEventKeepsFinalMetrics covers the terminal
-// chunk: done=true must still be honoured AND the payload must carry the final
-// cumulative metrics of the segment.
 func TestDispatchOutboundStreamDoneEventKeepsFinalMetrics(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -220,9 +188,6 @@ func TestDispatchOutboundStreamDoneEventKeepsFinalMetrics(t *testing.T) {
 	}
 }
 
-// TestWSStreamPayloadJSONShapeIsDeterministic freezes the wire shape: the
-// frontend parser and the backwards-compatibility guarantee both depend on the
-// four metric keys always being present, in this order, with no omitempty.
 func TestWSStreamPayloadJSONShapeIsDeterministic(t *testing.T) {
 	payload := WSStreamPayload{
 		MessageID:  "m1",
@@ -256,9 +221,6 @@ func TestWSStreamPayloadJSONShapeIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestSSEFrameCarriesStreamMetrics proves the SSE fan-out serializes the SAME
-// struct (and therefore the same keys): writeSSE marshals the payload the
-// channel mirrored into the restStreamEvent, with no separate SSE-only format.
 func TestSSEFrameCarriesStreamMetrics(t *testing.T) {
 	payload := newWSStreamPayload("m1", "s1", "hola", false, map[string]string{
 		"tokens":      "40",
@@ -288,9 +250,6 @@ func TestSSEFrameCarriesStreamMetrics(t *testing.T) {
 	}
 }
 
-// TestStreamMetricsFanoutToRESTSubscriber is the fan-out integration check: the
-// subscriber that feeds /chat/send/stream receives the metrics-bearing payload
-// (the same value the SSE writer above serializes).
 func TestStreamMetricsFanoutToRESTSubscriber(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -324,10 +283,6 @@ func TestStreamMetricsFanoutToRESTSubscriber(t *testing.T) {
 	}
 }
 
-// TestMetadataCoercionIsTolerant covers the type-tolerant helpers: the metrics
-// can arrive as a strconv-formatted string (today's bus encoding), as a native
-// number, or as a float64 after a JSON round-trip (durable spool). Nothing may
-// panic, and anything unrecognised degrades to the zero value.
 func TestMetadataCoercionIsTolerant(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -345,20 +300,12 @@ func TestMetadataCoercionIsTolerant(t *testing.T) {
 		{name: "float32", value: float32(1.5), wantInt: 1, wantInt64: 1, wantFloat: 1.5, wantBool: true},
 		{name: "bool true", value: true, wantInt: 1, wantInt64: 1, wantFloat: 1, wantBool: true},
 		{name: "bool false", value: false},
-		// A numeric string is a valid number but NOT a truthiness token:
-		// coerceBool only accepts strconv.ParseBool's vocabulary, so the
-		// "estimated" flag can never be switched on by a stray counter.
 		{name: "string int", value: "132", wantInt: 132, wantInt64: 132, wantFloat: 132, wantBool: false},
 		{name: "string float", value: "88.5", wantInt: 88, wantInt64: 88, wantFloat: 88.5, wantBool: false},
 		{name: "string bool", value: "true", wantBool: true},
 		{name: "string bool false", value: "false", wantBool: false},
 		{name: "string with spaces", value: "  64  ", wantInt: 64, wantInt64: 64, wantFloat: 64, wantBool: false},
 		{name: "json number int", value: json.Number("1500"), wantInt: 1500, wantInt64: 1500, wantFloat: 1500, wantBool: true},
-		// Non-finite values: strconv.ParseFloat accepts "NaN"/"Inf"/"+Inf"/
-		// "-Inf" without error and a native float can hold them too, but a
-		// metric is never legitimately non-finite. They must degrade to the
-		// zero value: int(NaN) would be an implementation-defined huge negative
-		// number and a NaN/Inf float is not even JSON-encodable.
 		{name: "string NaN", value: "NaN"},
 		{name: "string Inf", value: "Inf"},
 		{name: "string +Inf", value: "+Inf"},
@@ -392,11 +339,6 @@ func TestMetadataCoercionIsTolerant(t *testing.T) {
 	}
 }
 
-// TestNonFiniteMetricsKeepPayloadMarshalable closes the loop opened by the
-// coercion guards: before them a metadata value of "NaN"/"Inf" reached
-// WSStreamPayload verbatim, json.Marshal failed and native.go's mustMarshal
-// swallowed the error, publishing "data": null to the client. The guards make
-// the payload always marshalable, with the offending metric at 0.
 func TestNonFiniteMetricsKeepPayloadMarshalable(t *testing.T) {
 	meta := map[string]string{
 		"tokens":      "NaN",
@@ -423,8 +365,6 @@ func TestNonFiniteMetricsKeepPayloadMarshalable(t *testing.T) {
 	}
 }
 
-// TestMetadataAccessorsDefaultOnMissingKey pins the map-level accessors: a
-// missing key (or a nil map) yields the zero value instead of a parse error.
 func TestMetadataAccessorsDefaultOnMissingKey(t *testing.T) {
 	var nilMeta map[string]string
 
@@ -467,9 +407,6 @@ func TestMetadataAccessorsDefaultOnMissingKey(t *testing.T) {
 	}
 }
 
-// TestStreamMetricsOnFullMessagePath guarantees the legacy full-message path
-// (no explicit message.stream event, content present) still emits a payload
-// with the four keys, so no client ever sees two different stream shapes.
 func TestStreamMetricsOnFullMessagePath(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -500,11 +437,6 @@ func TestStreamMetricsOnFullMessagePath(t *testing.T) {
 	}
 }
 
-// TestDispatchOutboundThinkingCarriesThroughputMetrics is the reasoning-surface
-// counterpart of the stream contract test: a message.thinking with full Metadata
-// must reach the WebSocket payload with every metric populated (so the UI can
-// show a live tok/s while the model is still thinking) and the exact snake_case
-// keys the frontend reads.
 func TestDispatchOutboundThinkingCarriesThroughputMetrics(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -550,10 +482,6 @@ func TestDispatchOutboundThinkingCarriesThroughputMetrics(t *testing.T) {
 	}
 }
 
-// TestDispatchOutboundThinkingWithoutMetricsDefaultsToZero pins the
-// absent-metadata path for reasoning: no panic, metrics at their zero values,
-// and the four keys STILL present in the JSON (no omitempty) so the frontend
-// shape never changes.
 func TestDispatchOutboundThinkingWithoutMetricsDefaultsToZero(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -586,9 +514,6 @@ func TestDispatchOutboundThinkingWithoutMetricsDefaultsToZero(t *testing.T) {
 	}
 }
 
-// TestWSThinkingPayloadJSONShapeIsDeterministic freezes the reasoning wire
-// shape: the same four metric keys as the stream payload, always present, with
-// no omitempty and no extra "done" field.
 func TestWSThinkingPayloadJSONShapeIsDeterministic(t *testing.T) {
 	payload := WSThinkingPayload{
 		MessageID:  "m1",
@@ -621,9 +546,6 @@ func TestWSThinkingPayloadJSONShapeIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestNonFiniteThinkingMetricsKeepPayloadMarshalable mirrors the stream test:
-// the shared coercion guards make the reasoning payload always marshalable, with
-// the offending metric at 0.
 func TestNonFiniteThinkingMetricsKeepPayloadMarshalable(t *testing.T) {
 	meta := map[string]string{
 		"tokens":      "NaN",
@@ -644,9 +566,6 @@ func TestNonFiniteThinkingMetricsKeepPayloadMarshalable(t *testing.T) {
 	}
 }
 
-// TestThinkingMetricsFanoutToRESTSubscriber proves the reasoning payload rides
-// the same REST/SSE fan-out as the answer one: the SSE writer serializes this
-// exact value, so the stream contract covers both surfaces.
 func TestThinkingMetricsFanoutToRESTSubscriber(t *testing.T) {
 	ts := newNativeTestServer(t)
 

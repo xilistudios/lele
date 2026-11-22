@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package channels
 
 import (
@@ -25,8 +19,6 @@ import (
 	"github.com/xilistudios/lele/pkg/harness"
 )
 
-// commandsGet performs GET /api/v1/chat/commands and returns status + raw body
-// so callers can decode either the success payload or an APIError.
 func commandsGet(t *testing.T, ts *nativeTestServer, method string) (int, []byte) {
 	t.Helper()
 
@@ -49,9 +41,6 @@ func commandsGet(t *testing.T, ts *nativeTestServer, method string) (int, []byte
 	return resp.StatusCode, body
 }
 
-// TestChatCommandsEndpoint_GetReturnsRegistry drives the real mux and asserts
-// the palette payload: 200, decodes, every built-in command present with each
-// field populated, in stable (sorted) order.
 func TestChatCommandsEndpoint_GetReturnsRegistry(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -82,18 +71,12 @@ func TestChatCommandsEndpoint_GetReturnsRegistry(t *testing.T) {
 		}
 	}
 
-	// The exact wire format the WebUI consumes (writeJSON terminates with a
-	// newline, so trim it before comparing). Note the \u003c/\u003e: writeJSON uses
-	// the default json.Encoder, which HTML-escapes < and >, so the "<text>" in
-	// /goal's Usage reaches the wire escaped (any JSON client decodes it back).
 	const want = `{"commands":[{"name":"/clear","description":"Clear the conversation history for this session.","usage":"/clear"},{"name":"/compact","description":"Summarize and compact the conversation history (needs 5+ messages).","usage":"/compact"},{"name":"/goal","description":"Set a persistent goal the agent works toward autonomously, or check/pause/resume/clear it (/goal status|pause|resume|clear).","usage":"/goal \u003ctext\u003e"}]}`
 	if got := strings.TrimSuffix(string(body), "\n"); got != want {
 		t.Errorf("payload mismatch:\n got %s\nwant %s", got, want)
 	}
 }
 
-// TestChatCommandsEndpoint_RejectsOtherMethods covers the route registration:
-// the mux itself answers 405 for a method with no handler on that path.
 func TestChatCommandsEndpoint_RejectsOtherMethods(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -105,8 +88,6 @@ func TestChatCommandsEndpoint_RejectsOtherMethods(t *testing.T) {
 	}
 }
 
-// TestChatCommandsEndpoint_RequiresAuth guards the withAuth wrapper at route
-// registration: the command list is not public.
 func TestChatCommandsEndpoint_RequiresAuth(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -125,10 +106,6 @@ func TestChatCommandsEndpoint_RequiresAuth(t *testing.T) {
 	}
 }
 
-// TestHandleChatCommands_WorksWithoutAgentLoop pins the property that makes the
-// handler trivially safe: the registry is package data, so the handler must
-// never dereference n.agentLoop. A NativeChannel with no agent loop, no config
-// and no auth manager must still serve the list.
 func TestHandleChatCommands_WorksWithoutAgentLoop(t *testing.T) {
 	n := &NativeChannel{}
 
@@ -151,9 +128,6 @@ func TestHandleChatCommands_WorksWithoutAgentLoop(t *testing.T) {
 	}
 }
 
-// TestHandleChatCommands_NonGetIsMethodNotAllowed exercises the in-handler guard
-// directly. Through the mux the router already answers 405, so this is what
-// actually covers the defensive branch.
 func TestHandleChatCommands_NonGetIsMethodNotAllowed(t *testing.T) {
 	n := &NativeChannel{}
 
@@ -173,12 +147,6 @@ func TestHandleChatCommands_NonGetIsMethodNotAllowed(t *testing.T) {
 	}
 }
 
-// --- custom (harness) command merging --------------------------------------
-
-// harnessLoopFake wraps the shared agent-loop fake and adds the OPTIONAL
-// customCommandProvider capability, i.e. exactly what *agent.Loop implements in
-// production. Embedding keeps it a full AgentProvidable without duplicating the
-// ~40 methods of nativeTestAgentLoop.
 type harnessLoopFake struct {
 	*nativeTestAgentLoop
 	calls int
@@ -190,8 +158,6 @@ func (h *harnessLoopFake) HarnessCommands() []*harness.Command {
 	return h.cmds
 }
 
-// newHarnessCommandsServer returns a test server whose agent loop advertises the
-// given harness commands through the optional provider interface.
 func newHarnessCommandsServer(t *testing.T, cmds ...*harness.Command) (*nativeTestServer, *harnessLoopFake) {
 	t.Helper()
 
@@ -201,7 +167,6 @@ func newHarnessCommandsServer(t *testing.T, cmds ...*harness.Command) (*nativeTe
 	return ts, provider
 }
 
-// chatCommandsGet decodes the palette payload for a test server.
 func chatCommandsGet(t *testing.T, ts *nativeTestServer) []agentcommands.CommandInfo {
 	t.Helper()
 
@@ -216,15 +181,9 @@ func chatCommandsGet(t *testing.T, ts *nativeTestServer) []agentcommands.Command
 	return payload.Commands
 }
 
-// TestChatCommandsEndpoint_LoopWithoutProviderServesBuiltinsOnly pins the safe
-// degradation path: the default test loop does NOT implement HarnessCommands, so
-// the type assertion fails and the response must be exactly the built-in list
-// (no "source" key on the wire, byte-identical to the pre-harness payload).
 func TestChatCommandsEndpoint_LoopWithoutProviderServesBuiltinsOnly(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// Sanity: the fake really lacks the capability, otherwise this test proves
-	// nothing about the assertion.
 	if _, ok := interface{}(ts.loop).(customCommandProvider); ok {
 		t.Fatal("nativeTestAgentLoop unexpectedly implements customCommandProvider; this test would be vacuous")
 	}
@@ -233,18 +192,12 @@ func TestChatCommandsEndpoint_LoopWithoutProviderServesBuiltinsOnly(t *testing.T
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want %d (body=%s)", status, http.StatusOK, body)
 	}
-	// Byte-identical built-in payload, including the \u003ctext\u003e HTML escaping
-	// that the default json.Encoder applies (see the note in the GET test above).
 	const want = `{"commands":[{"name":"/clear","description":"Clear the conversation history for this session.","usage":"/clear"},{"name":"/compact","description":"Summarize and compact the conversation history (needs 5+ messages).","usage":"/compact"},{"name":"/goal","description":"Set a persistent goal the agent works toward autonomously, or check/pause/resume/clear it (/goal status|pause|resume|clear).","usage":"/goal \u003ctext\u003e"}]}`
 	if got := strings.TrimSuffix(string(body), "\n"); got != want {
 		t.Errorf("payload mismatch:\n got %s\nwant %s", got, want)
 	}
 }
 
-// TestChatCommandsEndpoint_MergesHarnessCommands covers the merged palette: a
-// custom command colliding with a built-in ("/clear") must be dropped, a new one
-// ("/review") must appear with its source and synthesised usage, and the list
-// must stay sorted by name.
 func TestChatCommandsEndpoint_MergesHarnessCommands(t *testing.T) {
 	ts, provider := newHarnessCommandsServer(t,
 		&harness.Command{
@@ -267,7 +220,6 @@ func TestChatCommandsEndpoint_MergesHarnessCommands(t *testing.T) {
 		t.Fatalf("got %d commands, want 4 (built-ins + /review): %+v", len(got), got)
 	}
 
-	// Sorted, built-in collision dropped.
 	wantNames := []string{"/clear", "/compact", "/goal", "/review"}
 	for i, cmd := range got {
 		if cmd.Name != wantNames[i] {
@@ -275,7 +227,6 @@ func TestChatCommandsEndpoint_MergesHarnessCommands(t *testing.T) {
 		}
 	}
 
-	// The surviving /clear is the BUILT-IN: same description, no source.
 	if got[0].Description != "Clear the conversation history for this session." || got[0].Source != "" {
 		t.Errorf("/clear = %+v, want the built-in entry with empty source", got[0])
 	}
@@ -295,9 +246,6 @@ func TestChatCommandsEndpoint_MergesHarnessCommands(t *testing.T) {
 	}
 }
 
-// TestChatCommandsEndpoint_CustomNameIsNormalized proves the slash-less harness
-// names reach the wire as slashed names (what the palette inserts into the
-// composer) and that uppercase input still collides with the built-in.
 func TestChatCommandsEndpoint_CustomNameIsNormalized(t *testing.T) {
 	ts, _ := newHarnessCommandsServer(t,
 		&harness.Command{Name: "Review", Template: "t", Source: harness.SourceConfig},
@@ -314,15 +262,11 @@ func TestChatCommandsEndpoint_CustomNameIsNormalized(t *testing.T) {
 	if got[3].Usage != "/review [args]" {
 		t.Errorf("custom usage = %q, want %q", got[3].Usage, "/review [args]")
 	}
-	// "/CLEAR" (custom) must not displace the built-in "/clear".
 	if got[0].Name != "/clear" || got[0].Source != "" {
 		t.Errorf("/clear = %+v, want the built-in entry", got[0])
 	}
 }
 
-// TestChatCommandsEndpoint_EmptyAndJunkCustomCommands covers a provider that is
-// present but has nothing useful to say: nil/empty results must fall back to the
-// built-ins, and nameless entries must be skipped instead of leaking a bare "/".
 func TestChatCommandsEndpoint_EmptyAndJunkCustomCommands(t *testing.T) {
 	t.Run("nil slice", func(t *testing.T) {
 		ts, _ := newHarnessCommandsServer(t)
@@ -354,8 +298,6 @@ func TestChatCommandsEndpoint_EmptyAndJunkCustomCommands(t *testing.T) {
 	})
 }
 
-// TestChatCommandsEndpoint_ResponseIsFreshCopy guards the encoder against a
-// mutated package registry: two consecutive requests must be independent slices.
 func TestChatCommandsEndpoint_ResponseIsFreshCopy(t *testing.T) {
 	ts, _ := newHarnessCommandsServer(t, &harness.Command{
 		Name: "review", Description: "d", Template: "t", Source: harness.SourceWorkspace,
@@ -370,12 +312,6 @@ func TestChatCommandsEndpoint_ResponseIsFreshCopy(t *testing.T) {
 	}
 }
 
-// --- WS command.applied ------------------------------------------------------
-
-// TestNativeChannelWebSocketCommandAppliedEvent mirrors the tool.executing WS
-// test for the new event: an outbound "command.applied" message must reach the
-// subscribed session as a command.applied frame whose payload carries every
-// metadata field plus the resolved session key.
 func TestNativeChannelWebSocketCommandAppliedEvent(t *testing.T) {
 	ts := newNativeTestServer(t)
 	sessionKey := ts.clientID
@@ -392,8 +328,6 @@ func TestNativeChannelWebSocketCommandAppliedEvent(t *testing.T) {
 		t.Fatalf("first event = %q, want welcome", welcome.Event)
 	}
 
-	// This is exactly the shape pkg/agent publishes from publishCommandApplied:
-	// command WITHOUT the leading slash.
 	ts.channel.Send(context.Background(), bus.OutboundMessage{
 		Channel: ChannelName,
 		ChatID:  sessionKey,
@@ -435,10 +369,6 @@ func TestNativeChannelWebSocketCommandAppliedEvent(t *testing.T) {
 	}
 }
 
-// TestNativeChannelWebSocketCommandAppliedMinimalOverrides pins the omitempty
-// contract for a command that overrides neither agent nor model and takes no
-// arguments: the frame must still arrive (command + session_key only) so the UI
-// renders the chip without null-checking every field.
 func TestNativeChannelWebSocketCommandAppliedMinimalOverrides(t *testing.T) {
 	ts := newNativeTestServer(t)
 	sessionKey := ts.clientID
@@ -466,7 +396,6 @@ func TestNativeChannelWebSocketCommandAppliedMinimalOverrides(t *testing.T) {
 		t.Fatalf("event = %q, want command.applied", frame.Event)
 	}
 
-	// The omitted fields must be absent from the JSON, not null/empty.
 	var raw map[string]interface{}
 	decodeWSData(t, frame.Data, &raw)
 	for _, key := range []string{"description", "args", "agent", "model"} {
@@ -482,14 +411,9 @@ func TestNativeChannelWebSocketCommandAppliedMinimalOverrides(t *testing.T) {
 	}
 }
 
-// TestNativeChannelCommandAppliedNeedsNoAgentLoop pins the design constraint
-// behind the event branch: the payload comes entirely from Metadata, so a
-// NativeChannel with no agent loop must still translate the event (Send derives
-// sessionKey straight from ChatID when agentLoop is nil).
 func TestNativeChannelCommandAppliedNeedsNoAgentLoop(t *testing.T) {
 	n := &NativeChannel{wsClients: make(map[string]*WSClient)}
 
-	// No client connected: the emit is a no-op broadcast that must not panic.
 	if err := n.Send(context.Background(), bus.OutboundMessage{
 		Channel:  ChannelName,
 		ChatID:   "native:orphan",
@@ -500,9 +424,6 @@ func TestNativeChannelCommandAppliedNeedsNoAgentLoop(t *testing.T) {
 	}
 }
 
-// TestConsumesEventIncludesCommandApplied keeps the dispatcher guard honest for
-// the new contentless signal: native declares it consumes every protocol event,
-// and command.applied is now one of them.
 func TestConsumesEventIncludesCommandApplied(t *testing.T) {
 	n := &NativeChannel{}
 	if !n.ConsumesEvent("command.applied") {
@@ -510,13 +431,6 @@ func TestConsumesEventIncludesCommandApplied(t *testing.T) {
 	}
 }
 
-// --- per-agent palette scoping (?agent_id=) --------------------------------
-
-// harnessCommandsLoopFake combines the multi-workspace agent fake (GetAgentInfo
-// per agent, real config snapshot) with the optional customCommandProvider
-// capability, i.e. exactly the surface of the production *agent.Loop that
-// chatCommands touches. defaultCmds models the loop-wide default-workspace view
-// used by every fallback path.
 type harnessCommandsLoopFake struct {
 	*commandsWorkspaceLoop
 	defaultCmds []*harness.Command
@@ -526,8 +440,6 @@ func (h *harnessCommandsLoopFake) HarnessCommands() []*harness.Command {
 	return h.defaultCmds
 }
 
-// newScopedCommandsServer gives agents "alpha" and "beta" real workspaces, each
-// with one command of its own on disk, plus a distinguishable default view.
 func newScopedCommandsServer(t *testing.T) (*nativeTestServer, *harnessCommandsLoopFake) {
 	t.Helper()
 
@@ -552,7 +464,6 @@ func newScopedCommandsServer(t *testing.T) (*nativeTestServer, *harnessCommandsL
 	return ts, provider
 }
 
-// chatCommandsURL fetches the palette with an arbitrary query string.
 func chatCommandsURL(t *testing.T, ts *nativeTestServer, rawQuery string) []agentcommands.CommandInfo {
 	t.Helper()
 
@@ -582,7 +493,6 @@ func chatCommandsURL(t *testing.T, ts *nativeTestServer, rawQuery string) []agen
 	return payload.Commands
 }
 
-// findCommand looks a command up by wire name in a palette payload.
 func findCommand(cmds []agentcommands.CommandInfo, name string) (agentcommands.CommandInfo, bool) {
 	i := slices.IndexFunc(cmds, func(c agentcommands.CommandInfo) bool { return c.Name == name })
 	if i < 0 {
@@ -591,10 +501,6 @@ func findCommand(cmds []agentcommands.CommandInfo, name string) (agentcommands.C
 	return cmds[i], true
 }
 
-// TestChatCommandsEndpoint_AgentIDScopesCustomCommands is the core of the
-// feature: the palette must show what the ANSWERING agent can run. Commands are
-// read from that agent's own workspace on disk — not from the loop-wide default
-// view, which would show another agent's commands (or hide this agent's).
 func TestChatCommandsEndpoint_AgentIDScopesCustomCommands(t *testing.T) {
 	ts, _ := newScopedCommandsServer(t)
 
@@ -608,7 +514,6 @@ func TestChatCommandsEndpoint_AgentIDScopesCustomCommands(t *testing.T) {
 				t.Errorf("alpha palette leaked %q (beta or default-workspace command): %+v", forbidden, got)
 			}
 		}
-		// Built-ins ride along regardless of scope.
 		if _, ok := findCommand(got, "/clear"); !ok {
 			t.Error("alpha palette lost the built-ins")
 		}
@@ -628,19 +533,13 @@ func TestChatCommandsEndpoint_AgentIDScopesCustomCommands(t *testing.T) {
 	})
 
 	t.Run("agent_id is URL-decoded", func(t *testing.T) {
-		// An id with reserved characters must resolve like any other, proving
-		// the handler reads the query value and not a raw string match.
-		got := chatCommandsURL(t, ts, "agent_id=al%70ha") // "alpha" with 'p' escaped
+		got := chatCommandsURL(t, ts, "agent_id=al%70ha")
 		if _, ok := findCommand(got, "/alpha-only"); !ok {
 			t.Errorf("escaped agent_id did not resolve to alpha's palette: %+v", got)
 		}
 	})
 }
 
-// TestChatCommandsEndpoint_AgentIDFallbacks pins the degradation contract: an
-// empty or unknown agent_id must answer with the loop-wide default view (the
-// pre-scoping behavior) instead of failing or showing an empty palette — the
-// chat must keep working even when the scope cannot be resolved.
 func TestChatCommandsEndpoint_AgentIDFallbacks(t *testing.T) {
 	ts, provider := newScopedCommandsServer(t)
 
@@ -657,8 +556,6 @@ func TestChatCommandsEndpoint_AgentIDFallbacks(t *testing.T) {
 			if _, ok := findCommand(got, "/legacy"); !ok {
 				t.Errorf("palette = %+v, want the default-workspace view (/legacy)", got)
 			}
-			// The workspace-scoped files must NOT leak into the fallback: that
-			// would mean the default path was silently re-discovered per agent.
 			for _, leak := range []string{"/alpha-only", "/beta-only"} {
 				if _, ok := findCommand(got, leak); ok {
 					t.Errorf("fallback palette leaked %q: %+v", leak, got)
@@ -667,8 +564,6 @@ func TestChatCommandsEndpoint_AgentIDFallbacks(t *testing.T) {
 		})
 	}
 
-	// Sanity: the provider really is the fallback source (assertion above would
-	// pass vacuously if the handler returned built-ins only).
 	if len(provider.defaultCmds) == 0 {
 		t.Fatal("test server has no default-view commands; fallback assertions would be vacuous")
 	}

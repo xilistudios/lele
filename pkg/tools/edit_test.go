@@ -8,7 +8,6 @@ import (
 	"testing"
 )
 
-// TestEditTool_EditFile_Success verifies successful file editing
 func TestEditTool_EditFile_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
@@ -24,22 +23,18 @@ func TestEditTool_EditFile_Success(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Success should not be an error
 	if result.IsError {
 		t.Errorf("Expected success, got IsError=true: %s", result.ForLLM)
 	}
 
-	// Should return SilentResult
 	if !result.Silent {
 		t.Errorf("Expected Silent=true for EditFile, got false")
 	}
 
-	// ForUser should be empty (silent result)
 	if result.ForUser != "" {
 		t.Errorf("Expected ForUser to be empty for SilentResult, got: %s", result.ForUser)
 	}
 
-	// Verify file was actually edited
 	content, err := os.ReadFile(testFile)
 	if err != nil {
 		t.Fatalf("Failed to read edited file: %v", err)
@@ -53,7 +48,6 @@ func TestEditTool_EditFile_Success(t *testing.T) {
 	}
 }
 
-// TestEditTool_EditFile_NotFound verifies error handling for non-existent file
 func TestEditTool_EditFile_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "nonexistent.txt")
@@ -68,18 +62,15 @@ func TestEditTool_EditFile_NotFound(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error for non-existent file")
 	}
 
-	// Should mention file not found
 	if !strings.Contains(result.ForLLM, "not found") && !strings.Contains(result.ForUser, "not found") {
 		t.Errorf("Expected 'file not found' message, got ForLLM: %s", result.ForLLM)
 	}
 }
 
-// TestEditTool_EditFile_OldTextNotFound verifies error when old_text doesn't exist
 func TestEditTool_EditFile_OldTextNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
@@ -95,18 +86,15 @@ func TestEditTool_EditFile_OldTextNotFound(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error when old_text not found")
 	}
 
-	// Should mention old_text not found
 	if !strings.Contains(result.ForLLM, "not found") && !strings.Contains(result.ForUser, "not found") {
 		t.Errorf("Expected 'not found' message, got ForLLM: %s", result.ForLLM)
 	}
 }
 
-// TestEditTool_EditFile_MultipleMatches verifies error when old_text appears multiple times
 func TestEditTool_EditFile_MultipleMatches(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
@@ -122,25 +110,22 @@ func TestEditTool_EditFile_MultipleMatches(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error when old_text appears multiple times")
 	}
 
-	// Should mention multiple occurrences
 	if !strings.Contains(result.ForLLM, "times") && !strings.Contains(result.ForUser, "times") {
 		t.Errorf("Expected 'multiple times' message, got ForLLM: %s", result.ForLLM)
 	}
 }
 
-// TestEditTool_EditFile_OutsideAllowedDir verifies error when path is outside allowed directory
 func TestEditTool_EditFile_OutsideAllowedDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	otherDir := t.TempDir()
 	testFile := filepath.Join(otherDir, "test.txt")
 	os.WriteFile(testFile, []byte("content"), 0644)
 
-	tool := NewEditFileTool(tmpDir, true) // Restrict to tmpDir
+	tool := NewEditFileTool(tmpDir, true)
 	ctx := context.Background()
 	args := map[string]interface{}{
 		"path":     testFile,
@@ -150,18 +135,15 @@ func TestEditTool_EditFile_OutsideAllowedDir(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error when path is outside allowed directory")
 	}
 
-	// Should mention outside allowed directory
 	if !strings.Contains(result.ForLLM, "outside") && !strings.Contains(result.ForUser, "outside") {
 		t.Errorf("Expected 'outside allowed' message, got ForLLM: %s", result.ForLLM)
 	}
 }
 
-// TestEditTool_EditFile_MissingPath verifies error handling for missing path
 func TestEditTool_EditFile_MissingPath(t *testing.T) {
 	tool := NewEditFileTool("", false)
 	ctx := context.Background()
@@ -172,13 +154,11 @@ func TestEditTool_EditFile_MissingPath(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error when path is missing")
 	}
 }
 
-// TestEditTool_EditFile_MissingOldText verifies error handling for missing old_text
 func TestEditTool_EditFile_MissingOldText(t *testing.T) {
 	tool := NewEditFileTool("", false)
 	ctx := context.Background()
@@ -189,13 +169,11 @@ func TestEditTool_EditFile_MissingOldText(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error when old_text is missing")
 	}
 }
 
-// TestEditTool_EditFile_MissingNewText verifies error handling for missing new_text
 func TestEditTool_EditFile_MissingNewText(t *testing.T) {
 	tool := NewEditFileTool("", false)
 	ctx := context.Background()
@@ -206,13 +184,11 @@ func TestEditTool_EditFile_MissingNewText(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error when new_text is missing")
 	}
 }
 
-// TestEditTool_AppendFile_Success verifies successful file appending
 func TestEditTool_AppendFile_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
@@ -227,22 +203,18 @@ func TestEditTool_AppendFile_Success(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Success should not be an error
 	if result.IsError {
 		t.Errorf("Expected success, got IsError=true: %s", result.ForLLM)
 	}
 
-	// Should return SilentResult
 	if !result.Silent {
 		t.Errorf("Expected Silent=true for AppendFile, got false")
 	}
 
-	// ForUser should be empty (silent result)
 	if result.ForUser != "" {
 		t.Errorf("Expected ForUser to be empty for SilentResult, got: %s", result.ForUser)
 	}
 
-	// Verify content was actually appended
 	content, err := os.ReadFile(testFile)
 	if err != nil {
 		t.Fatalf("Failed to read file: %v", err)
@@ -256,7 +228,6 @@ func TestEditTool_AppendFile_Success(t *testing.T) {
 	}
 }
 
-// TestEditTool_AppendFile_MissingPath verifies error handling for missing path
 func TestEditTool_AppendFile_MissingPath(t *testing.T) {
 	tool := NewAppendFileTool("", false)
 	ctx := context.Background()
@@ -266,13 +237,11 @@ func TestEditTool_AppendFile_MissingPath(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error when path is missing")
 	}
 }
 
-// TestEditTool_AppendFile_MissingContent verifies error handling for missing content
 func TestEditTool_AppendFile_MissingContent(t *testing.T) {
 	tool := NewAppendFileTool("", false)
 	ctx := context.Background()
@@ -282,7 +251,6 @@ func TestEditTool_AppendFile_MissingContent(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error when content is missing")
 	}

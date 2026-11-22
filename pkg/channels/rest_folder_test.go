@@ -13,8 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// folderPatch performs PATCH .../folder with the given raw folder value and
-// returns the status, decoded payload (on 200) and API error code (on failure).
 func folderPatch(t *testing.T, ts *nativeTestServer, sessionKey, folder string) (int, SessionFolderResponse, string) {
 	t.Helper()
 
@@ -81,9 +79,6 @@ func folderGet(t *testing.T, ts *nativeTestServer, sessionKey string) (int, Sess
 	return resp.StatusCode, SessionFolderResponse{}, apiErr.Code
 }
 
-// TestSessionFolder_SetGetClear exercises the happy path against the real
-// allow-list: fsTestRoot creates a directory inside a tree
-// isAllowedWorkspacePath trusts, so the handler runs its full validation.
 func TestSessionFolder_SetGetClear(t *testing.T) {
 	ts := newNativeTestServer(t)
 	sessionKey := "native:" + ts.clientID
@@ -100,14 +95,11 @@ func TestSessionFolder_SetGetClear(t *testing.T) {
 	if payload.SessionKey != sessionKey {
 		t.Errorf("session_key = %q, want %q", payload.SessionKey, sessionKey)
 	}
-	// The handler stores the symlink-resolved absolute path (on macOS the
-	// tmp/home trees may themselves resolve through /private).
 	want := resolve(t, dir)
 	if payload.Folder != want {
 		t.Errorf("folder = %q, want %q", payload.Folder, want)
 	}
 
-	// GET reflects the stored value.
 	status, got, code := folderGet(t, ts, sessionKey)
 	if status != http.StatusOK {
 		t.Fatalf("GET status = %d (code=%s), want 200", status, code)
@@ -116,7 +108,6 @@ func TestSessionFolder_SetGetClear(t *testing.T) {
 		t.Errorf("GET folder = %q, want %q", got.Folder, want)
 	}
 
-	// Empty folder clears the selection.
 	status, cleared, code := folderPatch(t, ts, sessionKey, "")
 	if status != http.StatusOK {
 		t.Fatalf("PATCH \"\" status = %d (code=%s), want 200", status, code)
@@ -129,8 +120,6 @@ func TestSessionFolder_SetGetClear(t *testing.T) {
 	}
 }
 
-// TestSessionFolder_AcceptsTrailingSlashAndHome normalises the input: a
-// trailing slash and a "~/" prefix must both resolve to the same stored path.
 func TestSessionFolder_AcceptsTrailingSlashAndHome(t *testing.T) {
 	ts := newNativeTestServer(t)
 	sessionKey := "native:" + ts.clientID
@@ -142,7 +131,6 @@ func TestSessionFolder_AcceptsTrailingSlashAndHome(t *testing.T) {
 		t.Errorf("trailing slash folder = %q, want %q", payload.Folder, got)
 	}
 
-	// "~" expansion: $HOME itself is an allowed workspace path.
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Skipf("no home dir: %v", err)
@@ -154,7 +142,6 @@ func TestSessionFolder_AcceptsTrailingSlashAndHome(t *testing.T) {
 	}
 }
 
-// TestSessionFolder_RejectsFile: a regular file is not a folder.
 func TestSessionFolder_RejectsFile(t *testing.T) {
 	ts := newNativeTestServer(t)
 	sessionKey := "native:" + ts.clientID
@@ -173,7 +160,6 @@ func TestSessionFolder_RejectsFile(t *testing.T) {
 	}
 }
 
-// TestSessionFolder_RejectsMissing: an unknown path is a 404.
 func TestSessionFolder_RejectsMissing(t *testing.T) {
 	ts := newNativeTestServer(t)
 	sessionKey := "native:" + ts.clientID
@@ -188,9 +174,6 @@ func TestSessionFolder_RejectsMissing(t *testing.T) {
 	}
 }
 
-// TestSessionFolder_ForbiddenOutsideAllowed covers both gates: a system tree
-// rejected as a literal path, and a symlink inside an allowed tree that points
-// outside it (rejected only after EvalSymlinks).
 func TestSessionFolder_ForbiddenOutsideAllowed(t *testing.T) {
 	ts := newNativeTestServer(t)
 	sessionKey := "native:" + ts.clientID
@@ -216,8 +199,6 @@ func TestSessionFolder_ForbiddenOutsideAllowed(t *testing.T) {
 	}
 }
 
-// TestSessionFolder_PathTraversalIsRejected checks that "../" cannot climb out
-// of an allowed tree before the OS is consulted.
 func TestSessionFolder_PathTraversalIsRejected(t *testing.T) {
 	ts := newNativeTestServer(t)
 	sessionKey := "native:" + ts.clientID
@@ -233,9 +214,6 @@ func TestSessionFolder_PathTraversalIsRejected(t *testing.T) {
 	}
 }
 
-// TestSessionFolder_RequiresOwnership: an unauthenticated request is refused
-// by the auth middleware, and an unknown session key is refused by the
-// ownership check (same contract as the model endpoint).
 func TestSessionFolder_RequiresOwnership(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -254,8 +232,6 @@ func TestSessionFolder_RequiresOwnership(t *testing.T) {
 	}
 }
 
-// TestSessionFolder_RoutesRegistered pins the wiring in RegisterRoutes: both
-// verbs exist, and an unsupported verb is not silently routed elsewhere.
 func TestSessionFolder_RoutesRegistered(t *testing.T) {
 	ts := newNativeTestServer(t)
 	sessionKey := "native:" + ts.clientID
@@ -291,8 +267,6 @@ func TestSessionFolder_RoutesRegistered(t *testing.T) {
 	}
 }
 
-// TestSessionFolder_AppearsInSessionPayloads verifies the WebUI read paths
-// expose the folder: GET /sessions/{key} and the listing endpoints.
 func TestSessionFolder_AppearsInSessionPayloads(t *testing.T) {
 	ts := newNativeTestServer(t)
 	sessionKey := "native:" + ts.clientID
@@ -302,7 +276,6 @@ func TestSessionFolder_AppearsInSessionPayloads(t *testing.T) {
 		t.Fatalf("PATCH failed: code=%s", code)
 	}
 
-	// Single-session GET.
 	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.PathEscape(sessionKey), nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
@@ -321,8 +294,6 @@ func TestSessionFolder_AppearsInSessionPayloads(t *testing.T) {
 		t.Errorf("session GET folder = %v, want %q", single["folder"], dir)
 	}
 
-	// Listing: the session must be tracked to the client and have messages,
-	// otherwise the list endpoints skip it by design.
 	ts.channel.auth.TrackSessionKey(ts.clientID, sessionKey)
 	ts.loop.histories[sessionKey] = append(ts.loop.histories[sessionKey], providers.Message{Role: "user", Content: "hi"})
 	for _, path := range []string{"/api/v1/chat/sessions", "/api/v1/chat/sessions/meta"} {

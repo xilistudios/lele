@@ -7,35 +7,20 @@ import (
 	"time"
 )
 
-// SessionRepo provides SQLite-backed persistence for sessions and their messages.
-//
-// It replaces the JSON file-based storage with incremental message appending.
-// Session metadata lives in the `sessions` table; individual messages in
-// `session_messages`. Messages are stored as opaque JSON strings — this
-// package never interprets their contents.
 type SessionRepo struct {
 	db *sql.DB
 }
 
-// SessionMeta holds lightweight session metadata (no messages).
 type SessionMeta struct {
-	Key           string
-	Name          string
-	Mode          string
-	Summary       string
-	VerboseLevel  string
-	Model         string
-	ThinkingLevel string
-	Folder        string
-	// AgentID is the agent that executes the session. For a subagent session it
-	// is the spawn's target agent (tools.SubagentTask.AgentID), which is NOT
-	// necessarily the agent whose SessionManager holds the history: in
-	// production every agent shares one manager. Empty for non-subagent
-	// sessions and rows created before migration v8.
-	AgentID string
-	// SubagentStatus persists the terminal status of subagent sessions
-	// ("completed", "failed", ...). Empty for non-subagent sessions and
-	// rows created before migration v6.
+	Key              string
+	Name             string
+	Mode             string
+	Summary          string
+	VerboseLevel     string
+	Model            string
+	ThinkingLevel    string
+	Folder           string
+	AgentID          string
 	SubagentStatus   string
 	InputTokens      int
 	OutputTokens     int
@@ -45,7 +30,6 @@ type SessionMeta struct {
 	UpdatedAt        time.Time
 }
 
-// UpsertSession inserts or updates session metadata.
 func (r *SessionRepo) UpsertSession(meta SessionMeta) error {
 	if _, err := r.db.Exec(
 		`INSERT INTO sessions(key, name, mode, summary, verbose_level, model,
@@ -89,7 +73,6 @@ func (r *SessionRepo) UpsertSession(meta SessionMeta) error {
 	return nil
 }
 
-// GetSessionMeta returns the metadata for a session, or (nil, nil) if not found.
 func (r *SessionRepo) GetSessionMeta(key string) (*SessionMeta, error) {
 	var meta SessionMeta
 	var createdAt, updatedAt string
@@ -117,7 +100,6 @@ func (r *SessionRepo) GetSessionMeta(key string) (*SessionMeta, error) {
 	return &meta, nil
 }
 
-// ListSessionMeta returns metadata for all sessions, sorted by updated_at descending.
 func (r *SessionRepo) ListSessionMeta() ([]SessionMeta, error) {
 	rows, err := r.db.Query(
 		`SELECT key, name, mode, summary, verbose_level, model,
@@ -154,10 +136,7 @@ func (r *SessionRepo) ListSessionMeta() ([]SessionMeta, error) {
 	return metas, nil
 }
 
-// ListSessionMetaByMode returns metadata for sessions with the given mode,
-// sorted by updated_at descending. Empty mode matches "agent" sessions.
 func (r *SessionRepo) ListSessionMetaByMode(mode string) ([]SessionMeta, error) {
-	// Normalize: empty mode matches "agent"
 	queryMode := mode
 	if queryMode == "" {
 		queryMode = "agent"
@@ -198,7 +177,6 @@ func (r *SessionRepo) ListSessionMetaByMode(mode string) ([]SessionMeta, error) 
 	return metas, nil
 }
 
-// DeleteSession removes a session and all its messages (via FK cascade).
 func (r *SessionRepo) DeleteSession(key string) error {
 	if _, err := r.db.Exec(`DELETE FROM sessions WHERE key = ?`, key); err != nil {
 		return fmt.Errorf("delete session %q: %w", key, err)
@@ -206,7 +184,6 @@ func (r *SessionRepo) DeleteSession(key string) error {
 	return nil
 }
 
-// SessionExists reports whether a session exists in the database.
 func (r *SessionRepo) SessionExists(key string) (bool, error) {
 	var exists bool
 	err := r.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM sessions WHERE key = ?)`, key).Scan(&exists)
@@ -216,7 +193,6 @@ func (r *SessionRepo) SessionExists(key string) (bool, error) {
 	return exists, nil
 }
 
-// MessageRow holds the data needed to insert a message row.
 type MessageRow struct {
 	Seq      int
 	Role     string
@@ -224,11 +200,6 @@ type MessageRow struct {
 	Excluded bool
 }
 
-// ReplaceMessages atomically replaces all messages for a session inside a
-// transaction. This is used by saveToSQLite to sync the full message list
-// in a crash-safe way (the old delete-then-insert-outside-tx pattern could
-// lose all messages if the process crashed between the DELETE and the last
-// INSERT).
 func (r *SessionRepo) ReplaceMessages(sessionKey string, messages []MessageRow) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -265,9 +236,6 @@ func (r *SessionRepo) ReplaceMessages(sessionKey string, messages []MessageRow) 
 	return tx.Commit()
 }
 
-// InsertMessage appends a message to the session. The seq number determines
-// the ordering within the session. The messageJSON is the serialized
-// providers.Message. The excluded flag marks messages excluded from context.
 func (r *SessionRepo) InsertMessage(sessionKey string, seq int, role, messageJSON string, excluded bool) error {
 	exclInt := 0
 	if excluded {
@@ -289,8 +257,6 @@ func (r *SessionRepo) InsertMessage(sessionKey string, seq int, role, messageJSO
 	return nil
 }
 
-// InsertMessages batch-inserts multiple messages in a single transaction.
-// Used by the incremental save path to avoid per-message lock release.
 func (r *SessionRepo) InsertMessages(sessionKey string, messages []MessageRow) error {
 	if len(messages) == 0 {
 		return nil
@@ -323,7 +289,6 @@ func (r *SessionRepo) InsertMessages(sessionKey string, messages []MessageRow) e
 	return tx.Commit()
 }
 
-// UpdateMessage updates an existing message in-place (used for streaming).
 func (r *SessionRepo) UpdateMessage(sessionKey string, seq int, role, messageJSON string, excluded bool) error {
 	exclInt := 0
 	if excluded {
@@ -344,9 +309,6 @@ func (r *SessionRepo) UpdateMessage(sessionKey string, seq int, role, messageJSO
 	return nil
 }
 
-// UpdateMessages updates a batch of existing messages in-place in a single
-// transaction (used for streaming finalization where tool_calls arrive after
-// the partial content was already persisted).
 func (r *SessionRepo) UpdateMessages(sessionKey string, messages []MessageRow) error {
 	if len(messages) == 0 {
 		return nil
@@ -378,8 +340,6 @@ func (r *SessionRepo) UpdateMessages(sessionKey string, messages []MessageRow) e
 	return tx.Commit()
 }
 
-// UpdateMessagesExcluded updates the excluded flag for a range of messages.
-// Used by ExcludeOldMessagesFromContext.
 func (r *SessionRepo) UpdateMessagesExcluded(sessionKey string, fromSeq, toSeq int, excluded bool) error {
 	exclInt := 0
 	if excluded {
@@ -395,10 +355,6 @@ func (r *SessionRepo) UpdateMessagesExcluded(sessionKey string, fromSeq, toSeq i
 	return nil
 }
 
-// UpdateMessagesExcludedWithJSON updates both the excluded flag and the
-// serialized JSON for a batch of messages in a single transaction. Used by
-// the incremental save path when the excluded flag changes on existing messages,
-// keeping the denormalized excluded column and the JSON blob in sync.
 func (r *SessionRepo) UpdateMessagesExcludedWithJSON(sessionKey string, messages []MessageRow) error {
 	if len(messages) == 0 {
 		return nil
@@ -430,8 +386,6 @@ func (r *SessionRepo) UpdateMessagesExcludedWithJSON(sessionKey string, messages
 	return tx.Commit()
 }
 
-// DeleteMessagesFrom removes all messages with seq >= fromSeq.
-// Used for TruncateHistory.
 func (r *SessionRepo) DeleteMessagesFrom(sessionKey string, fromSeq int) error {
 	if _, err := r.db.Exec(
 		`DELETE FROM session_messages WHERE session_key = ? AND seq >= ?`,
@@ -442,8 +396,6 @@ func (r *SessionRepo) DeleteMessagesFrom(sessionKey string, fromSeq int) error {
 	return nil
 }
 
-// DeleteLastMessage removes the message with the highest seq for a session.
-// Returns the deleted seq, or -1 if no messages exist.
 func (r *SessionRepo) DeleteLastMessage(sessionKey string) (int, error) {
 	var seq int
 	err := r.db.QueryRow(
@@ -465,9 +417,6 @@ func (r *SessionRepo) DeleteLastMessage(sessionKey string) (int, error) {
 	return seq, nil
 }
 
-// UpdateFirstInMemorySeq persists the in-memory eviction boundary for a
-// session without touching messages. Memory-only eviction/lazy-load call this
-// to keep the boundary durable across restarts.
 func (r *SessionRepo) UpdateFirstInMemorySeq(sessionKey string, seq int) error {
 	if _, err := r.db.Exec(
 		`UPDATE sessions SET first_in_memory_seq = ? WHERE key = ?`,
@@ -478,7 +427,6 @@ func (r *SessionRepo) UpdateFirstInMemorySeq(sessionKey string, seq int) error {
 	return nil
 }
 
-// LoadMessages returns all messages as JSON strings for a session in seq order.
 func (r *SessionRepo) LoadMessages(sessionKey string) ([]string, error) {
 	rows, err := r.db.Query(
 		`SELECT message FROM session_messages WHERE session_key = ?
@@ -503,9 +451,6 @@ func (r *SessionRepo) LoadMessages(sessionKey string) ([]string, error) {
 	return messages, nil
 }
 
-// LoadMessagesBeforeSeq returns the JSON of all messages with seq strictly
-// less than beforeSeq, ordered by seq ASC. Used to lazy-load evicted
-// (excluded) messages that precede the first in-memory message.
 func (r *SessionRepo) LoadMessagesBeforeSeq(sessionKey string, beforeSeq int) ([]string, error) {
 	rows, err := r.db.Query(
 		`SELECT message FROM session_messages WHERE session_key = ? AND seq < ?
@@ -530,9 +475,6 @@ func (r *SessionRepo) LoadMessagesBeforeSeq(sessionKey string, beforeSeq int) ([
 	return messages, nil
 }
 
-// LoadMessagesFromSeq returns the JSON of all messages with seq >= fromSeq,
-// ordered by seq ASC. Used for cold-load to skip evicted rows
-// (seq < first_in_memory_seq) so they are not re-inflated into RAM.
 func (r *SessionRepo) LoadMessagesFromSeq(sessionKey string, fromSeq int) ([]string, error) {
 	rows, err := r.db.Query(
 		`SELECT message FROM session_messages WHERE session_key = ? AND seq >= ?
@@ -557,16 +499,12 @@ func (r *SessionRepo) LoadMessagesFromSeq(sessionKey string, fromSeq int) ([]str
 	return messages, nil
 }
 
-// MessageRowFull is a loaded message row including its seq and excluded flag.
 type MessageRowFull struct {
 	Seq      int
 	JSON     string
 	Excluded bool
 }
 
-// LoadMessagesWithSeq returns all messages for a session with their seq and
-// excluded flag, ordered by seq ASC. Used to recover firstInMemorySeq after
-// reload and for in-context-only cold loads.
 func (r *SessionRepo) LoadMessagesWithSeq(sessionKey string) ([]MessageRowFull, error) {
 	rows, err := r.db.Query(
 		`SELECT seq, message, excluded FROM session_messages WHERE session_key = ?
@@ -593,7 +531,6 @@ func (r *SessionRepo) LoadMessagesWithSeq(sessionKey string) ([]MessageRowFull, 
 	return messages, nil
 }
 
-// CountExcludedMessages returns the number of messages marked excluded for a session.
 func (r *SessionRepo) CountExcludedMessages(sessionKey string) (int, error) {
 	var count int
 	err := r.db.QueryRow(
@@ -606,7 +543,6 @@ func (r *SessionRepo) CountExcludedMessages(sessionKey string) (int, error) {
 	return count, nil
 }
 
-// MessageCount returns the number of messages for a session.
 func (r *SessionRepo) MessageCount(sessionKey string) (int, error) {
 	var count int
 	err := r.db.QueryRow(
@@ -618,7 +554,6 @@ func (r *SessionRepo) MessageCount(sessionKey string) (int, error) {
 	return count, nil
 }
 
-// MaxSeq returns the maximum seq number for a session, or -1 if no messages.
 func (r *SessionRepo) MaxSeq(sessionKey string) (int, error) {
 	var seq sql.NullInt64
 	err := r.db.QueryRow(
@@ -633,10 +568,7 @@ func (r *SessionRepo) MaxSeq(sessionKey string) (int, error) {
 	return int(seq.Int64), nil
 }
 
-// PruneExcluded removes excluded messages beyond the keepCount limit.
-// Returns the number of messages pruned.
 func (r *SessionRepo) PruneExcluded(sessionKey string, keepCount int) (int, error) {
-	// Get total count
 	total, err := r.MessageCount(sessionKey)
 	if err != nil {
 		return 0, err
@@ -645,7 +577,6 @@ func (r *SessionRepo) PruneExcluded(sessionKey string, keepCount int) (int, erro
 		return 0, nil
 	}
 
-	// Delete oldest excluded messages
 	toDelete := total - keepCount
 	result, err := r.db.Exec(
 		`DELETE FROM session_messages WHERE session_key = ? AND excluded = 1
@@ -662,14 +593,6 @@ func (r *SessionRepo) PruneExcluded(sessionKey string, keepCount int) (int, erro
 	return int(affected), nil
 }
 
-// SessionKeysWithMessages returns the set of persisted session keys that have
-// at least one message row, in a single query. Listing endpoints use it to
-// answer "does this session have messages?" for every non-resident session
-// without issuing one COUNT per session.
-//
-// Written as an EXISTS semi-join rather than DISTINCT over session_messages:
-// the probe stops at the first index hit (idx_messages_session) instead of
-// scanning every message row, which matters once history grows past ~100k rows.
 func (r *SessionRepo) SessionKeysWithMessages() (map[string]bool, error) {
 	rows, err := r.db.Query(`
 		SELECT s.key FROM sessions s
@@ -693,9 +616,6 @@ func (r *SessionRepo) SessionKeysWithMessages() (map[string]bool, error) {
 	return keys, nil
 }
 
-// AllMessageCounts returns a map of session_key → message count for all
-// sessions in a single query. This avoids N+1 queries when listing sessions
-// for the WebUI sidebar/history.
 func (r *SessionRepo) AllMessageCounts() (map[string]int, error) {
 	rows, err := r.db.Query(
 		`SELECT session_key, COUNT(*) FROM session_messages GROUP BY session_key`,
@@ -720,59 +640,14 @@ func (r *SessionRepo) AllMessageCounts() (map[string]int, error) {
 	return counts, nil
 }
 
-// sessionListingStatsChunk bounds how many keys go into one IN (...) clause.
-// SQLite's default parameter limit is 999 (32766 on newer builds), so a few
-// hundred keys per statement is safe everywhere while still collapsing the
-// common case (one parent with a handful of subagents) into one query.
 const sessionListingStatsChunk = 200
 
-// SessionListingStats carries the handful of message-shape facts a session
-// listing needs without materialising any message body.
 type SessionListingStats struct {
-	// Summary is the persisted sessions.summary ("" when unset).
-	Summary string
-	// AssistantCount is the number of in-context (non-evicted) assistant
-	// messages, the iteration proxy the subagent listing reports.
-	AssistantCount int
-	// LastAssistantJSON is the raw stored JSON of the highest-seq in-context
-	// assistant message, "" when there is none. It is the fallback source for
-	// the listing summary, which only needs the message's text.
+	Summary           string
+	AssistantCount    int
 	LastAssistantJSON string
 }
 
-// SessionListingStats returns one entry per requested key that still has a
-// sessions row (keys with no row are absent from the map, so the caller can
-// tell "gone" from "empty"). It replaces loading each session's whole message
-// list — the subagent listing endpoint used to deserialize ~27 MB of JSON for
-// one parent with 94 subagents — with two correlated index lookups per key:
-// a COUNT over the assistant rows and a "newest assistant row" probe that
-// stops at the first index hit. Keys are batched so N subagents cost one
-// query per chunk of keys instead of N queries on the store's single
-// connection.
-//
-// Both per-key lookups select the same rows a cold load (loadFromSQLite) would
-// restore into memory, which is the only way the numbers can match the listing
-// for a resident session:
-//
-//   - rows below sessions.first_in_memory_seq were evicted (or pruned), so the
-//     in-memory slice never sees them; counting the full history would silently
-//     inflate the reported iteration count;
-//   - a stored boundary of 0 does not mean "everything is in context":
-//     loadFromSQLite then prunes a LEADING run of excluded rows (and rewrites
-//     the boundary), so excluded rows in that shape were not resident either
-//     and counting them inflated the iteration count. The predicate below drops
-//     every excluded row when the boundary is 0, which matches the prune
-//     because eviction/compaction exclude a run starting at seq 0; a sporadic
-//     excluded row ABOVE that run survives a load and is the one shape this
-//     under-counts.
-//   - a row the loader cannot unmarshal is dropped ("skip corrupted
-//     messages"), so a non-JSON message is neither an iteration nor the
-//     summary fallback. json_valid(m.message) is the SQLite-side equivalent of
-//     that skip; the residual gap is a row that is valid JSON but does not
-//     decode into providers.Message (a type mismatch), which the loader skips
-//     and this count still counts. It cannot be expressed in SQL and is not
-//     produced by any write path here (messages are always marshalled from
-//     providers.Message).
 func (r *SessionRepo) SessionListingStats(keys []string) (map[string]SessionListingStats, error) {
 	out := make(map[string]SessionListingStats, len(keys))
 	for start := 0; start < len(keys); start += sessionListingStatsChunk {
@@ -787,42 +662,17 @@ func (r *SessionRepo) SessionListingStats(keys []string) (map[string]SessionList
 	return out, nil
 }
 
-// sessionListingStatsChunk runs one batched query for up to
-// sessionListingStatsChunk keys and merges the rows into out.
-//
-// Caller must pass 1..sessionListingStatsChunk non-empty keys.
 func (r *SessionRepo) sessionListingStatsChunk(out map[string]SessionListingStats, keys []string) error {
 	if len(keys) == 0 {
 		return nil
 	}
 
-	// One placeholder per key; the values themselves are always bound, never
-	// interpolated.
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",")
 	args := make([]any, 0, len(keys))
 	for _, key := range keys {
 		args = append(args, key)
 	}
 
-	// Driving the query from `sessions` (not from session_messages) is
-	// deliberate: a session row with zero messages must still be reported as
-	// "0 iterations, no summary", which the pre-change code did after loading
-	// an empty session.
-	//
-	// The correlated shape is what makes this cheap: (session_key, seq) drives
-	// idx_messages_session, so the newest-row probe is an index hit (DESC LIMIT
-	// 1) and the COUNT scans only the key's rows. The COUNT is NOT index-only
-	// though: `role` is not part of idx_messages_session, so every in-context
-	// row of the session is visited to test role/excluded. Measured cost with
-	// the current schema: ~24 ms for a 94-subagent parent (~17.3k rows).
-	// A covering index on (session_key, role, seq) would make the COUNT
-	// index-only; the schema is left alone on purpose (migration cost is not
-	// worth 24 ms, and the query stays correct either way).
-	//
-	// Both subqueries carry the same row predicate so the count and the
-	// "newest assistant row" can never disagree about which rows are in
-	// context (json_valid is JSON1, compiled in by the pure-Go driver:
-	// modernc.org/sqlite v1.56.0 / SQLite 3.53.3).
 	rows, err := r.db.Query(`
 		SELECT s.key, s.summary,
 		       (SELECT COUNT(*) FROM session_messages m
@@ -861,9 +711,6 @@ func (r *SessionRepo) sessionListingStatsChunk(out map[string]SessionListingStat
 	return nil
 }
 
-// LoadMessagesBeforeLimited returns up to limit message rows with seq <
-// beforeSeq, ordered by seq DESC (newest first). Used by the session manager
-// to page through messages that are not resident in memory.
 func (r *SessionRepo) LoadMessagesBeforeLimited(sessionKey string, beforeSeq, limit int) ([]MessageRowFull, error) {
 	rows, err := r.db.Query(
 		`SELECT seq, message, excluded FROM session_messages
@@ -889,9 +736,6 @@ func (r *SessionRepo) LoadMessagesBeforeLimited(sessionKey string, beforeSeq, li
 	return out, nil
 }
 
-// LoadMessagesBetweenLimited returns up to limit message rows with
-// afterSeq < seq < beforeSeq (beforeSeq < 0 means unbounded above), ordered
-// by seq ASC (oldest first).
 func (r *SessionRepo) LoadMessagesBetweenLimited(sessionKey string, afterSeq, beforeSeq, limit int) ([]MessageRowFull, error) {
 	var (
 		rows *sql.Rows
@@ -927,8 +771,6 @@ func (r *SessionRepo) LoadMessagesBetweenLimited(sessionKey string, afterSeq, be
 	return out, nil
 }
 
-// CountMessagesBefore returns the number of persisted rows with seq <
-// beforeSeq (beforeSeq < 0 counts everything).
 func (r *SessionRepo) CountMessagesBefore(sessionKey string, beforeSeq int) (int, error) {
 	var count int
 	var err error
@@ -947,13 +789,6 @@ func (r *SessionRepo) CountMessagesBefore(sessionKey string, beforeSeq int) (int
 	return count, nil
 }
 
-// LoadMessagesFullBeforeSeq returns seq + JSON + excluded flag of all
-// messages with seq strictly less than beforeSeq, ordered by seq ASC. Unlike
-// LoadMessagesBeforeSeq it preserves the persisted excluded state, which a
-// full rewrite must carry over: the evicted prefix can contain non-excluded
-// rows (e.g. the original request folded into a summary but never excluded),
-// and hardcoding excluded=true would silently drop them from future context
-// rebuilds that filter on the flag.
 func (r *SessionRepo) LoadMessagesFullBeforeSeq(sessionKey string, beforeSeq int) ([]MessageRowFull, error) {
 	rows, err := r.db.Query(
 		`SELECT seq, message, excluded FROM session_messages WHERE session_key = ? AND seq < ?

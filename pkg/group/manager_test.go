@@ -11,9 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
-// --- mocks ---
-
-// mockResolve returns known agents "a", "b", "c" (and "agg" for moa tests).
 func mockResolve(agentID string) (AgentContext, bool) {
 	known := map[string]string{
 		"a":   "Agent A",
@@ -32,8 +29,6 @@ func mockResolve(agentID string) (AgentContext, bool) {
 	}, true
 }
 
-// mockExecutor returns deterministic content and 10 tokens per turn.
-// It is thread-safe.
 type mockExecutor struct {
 	mu        sync.Mutex
 	callCount int
@@ -47,7 +42,6 @@ func (e *mockExecutor) execute(_ context.Context, req TurnRequest) (string, int,
 	return fmt.Sprintf("turn-%d-%s", n, req.Speaker), 10, nil
 }
 
-// mockPublisher captures published messages. Thread-safe.
 type mockPublisher struct {
 	mu       sync.Mutex
 	messages []bus.OutboundMessage
@@ -77,8 +71,6 @@ func (p *mockPublisher) count() int {
 	return len(p.messages)
 }
 
-// --- helpers ---
-
 func proposer(id string) Participant {
 	return Participant{AgentID: id, Role: RoleProposer, Label: id}
 }
@@ -90,8 +82,6 @@ func aggregator(id string) Participant {
 func plainParticipant(id string) Participant {
 	return Participant{AgentID: id, Label: id}
 }
-
-// --- tests ---
 
 func TestRoundRobin_BasicFlow(t *testing.T) {
 	exec := &mockExecutor{}
@@ -120,7 +110,6 @@ func TestRoundRobin_BasicFlow(t *testing.T) {
 		t.Fatal("expected non-empty synthesis")
 	}
 
-	// Verify 3 turns in order a, b, c.
 	st, ok := gm.Status(groupID)
 	if !ok {
 		t.Fatal("group not found after Wait")
@@ -137,7 +126,6 @@ func TestRoundRobin_BasicFlow(t *testing.T) {
 		}
 	}
 
-	// Verify events: 1 started + 3 turns + 1 complete = 5.
 	started := pub.byEvent("group.status")
 	turns := pub.byEvent("group.turn")
 	complete := pub.byEvent("group.complete")
@@ -191,25 +179,21 @@ func TestMoA_ParallelProposers(t *testing.T) {
 		t.Errorf("status = %s, want done", st.Status)
 	}
 
-	// MoA with 2 proposers + 1 aggregator, 1 round = 3 turns total.
 	if len(st.Transcript) != 3 {
 		t.Fatalf("transcript length = %d, want 3", len(st.Transcript))
 	}
 
-	// Proposers (a, b) should be in layer 0, aggregator also in layer 0.
 	for _, turn := range st.Transcript {
 		if turn.Layer != 0 {
 			t.Errorf("turn %s has layer %d, want 0", turn.Speaker, turn.Layer)
 		}
 	}
 
-	// Aggregator should be last.
 	last := st.Transcript[len(st.Transcript)-1]
 	if last.Speaker != "agg" {
 		t.Errorf("last speaker = %s, want agg", last.Speaker)
 	}
 
-	// Verify group.complete published with strategy=moa.
 	complete := pub.byEvent("group.complete")
 	if len(complete) != 1 {
 		t.Fatalf("expected 1 group.complete, got %d", len(complete))
@@ -219,8 +203,6 @@ func TestMoA_ParallelProposers(t *testing.T) {
 	}
 }
 
-// blockingExecutor blocks until unblockCh is closed or context is done.
-// Thread-safe.
 type blockingExecutor struct {
 	unblockCh chan struct{}
 }
@@ -252,7 +234,6 @@ func TestStop(t *testing.T) {
 		t.Fatalf("Start failed: %v", err)
 	}
 
-	// Let the goroutine get scheduled and block on the first executor call.
 	time.Sleep(50 * time.Millisecond)
 
 	stopped := gm.Stop(groupID)
@@ -260,7 +241,6 @@ func TestStop(t *testing.T) {
 		t.Fatal("Stop returned false")
 	}
 
-	// Wait should return quickly after stop.
 	done := make(chan struct{})
 	go func() {
 		gm.Wait(groupID)
@@ -270,7 +250,6 @@ func TestStop(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		// Unblock if somehow stuck.
 		close(be.unblockCh)
 		t.Fatal("Wait did not return after Stop (deadlock?)")
 	}
@@ -283,7 +262,6 @@ func TestStop(t *testing.T) {
 		t.Errorf("status = %s, want stopped", st.Status)
 	}
 
-	// Should have a stopped event.
 	statuses := pub.byEvent("group.status")
 	foundStopped := false
 	for _, s := range statuses {
@@ -303,7 +281,7 @@ func TestStart_NonExistentParticipant(t *testing.T) {
 
 	participants := []Participant{
 		plainParticipant("a"),
-		plainParticipant("ghost"), // not in mockResolve
+		plainParticipant("ghost"),
 	}
 
 	_, err := gm.Start(context.Background(), "bad-1", "p1", "task", "round_robin",
@@ -345,7 +323,6 @@ func TestStopAll(t *testing.T) {
 		t.Errorf("StopAll = %d, want 2", count)
 	}
 
-	// Wait for both to finish.
 	for _, id := range []string{"g1", "g2"} {
 		done := make(chan struct{})
 		go func(gid string) {
@@ -360,7 +337,6 @@ func TestStopAll(t *testing.T) {
 		}
 	}
 
-	// Both should be stopped.
 	for _, id := range []string{"g1", "g2"} {
 		st, ok := gm.Status(id)
 		if !ok {
@@ -406,7 +382,6 @@ func TestMaxTurns_HardStop(t *testing.T) {
 		t.Errorf("status = %s, want done", st.Status)
 	}
 
-	// With MaxTurns=2, should have exactly 2 turns.
 	if len(st.Transcript) != 2 {
 		t.Errorf("transcript length = %d, want 2", len(st.Transcript))
 	}
@@ -473,8 +448,6 @@ func TestInvalidStrategy(t *testing.T) {
 	}
 }
 
-// slowExecutor sleeps briefly before returning, giving concurrent readers
-// time to race with writer goroutines when run with -race.
 type slowExecutor struct {
 	delay time.Duration
 }
@@ -502,16 +475,12 @@ func TestStatusList_ConcurrentAccessNoRace(t *testing.T) {
 		t.Fatalf("Start failed: %v", err)
 	}
 
-	// While the group is running, hammer Status() and List() from a
-	// separate goroutine. With the old code (returning the live pointer)
-	// the race detector would fire.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for i := 0; i < 50; i++ {
 			gs, ok := gm.Status(groupID)
 			if ok {
-				// Read fields that the runner mutates under lock.
 				_ = gs.Status
 				_ = len(gs.Transcript)
 				_ = gs.TotalTokens
@@ -526,19 +495,16 @@ func TestStatusList_ConcurrentAccessNoRace(t *testing.T) {
 		}
 	}()
 
-	// Wait for the group to finish.
 	if _, err := gm.Wait(groupID); err != nil {
 		t.Fatalf("Wait failed: %v", err)
 	}
 
-	// Ensure the reader goroutine completed.
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("reader goroutine did not finish in time")
 	}
 
-	// Final sanity: status should be done.
 	gs, ok := gm.Status(groupID)
 	if !ok {
 		t.Fatal("group not found after Wait")
@@ -557,7 +523,7 @@ func TestStart_AppliesDefaultRoundsWhenUnset(t *testing.T) {
 		plainParticipant("a"),
 		plainParticipant("b"),
 		plainParticipant("c"),
-		plainParticipant("a"), // 4th participant (duplicate agentID is fine for this test)
+		plainParticipant("a"),
 	}
 
 	ctx := context.Background()
@@ -576,7 +542,6 @@ func TestStart_AppliesDefaultRoundsWhenUnset(t *testing.T) {
 	if st.Rounds != DefaultGroupRounds {
 		t.Errorf("Rounds = %d, want %d (DefaultGroupRounds)", st.Rounds, DefaultGroupRounds)
 	}
-	// Rounds=2, 4 participants → MaxTurns = 8
 	if st.MaxTurns != 8 {
 		t.Errorf("MaxTurns = %d, want 8", st.MaxTurns)
 	}
@@ -608,7 +573,6 @@ func TestStart_DerivesMaxTurnsFromRounds(t *testing.T) {
 	if st.Rounds != 3 {
 		t.Errorf("Rounds = %d, want 3", st.Rounds)
 	}
-	// Rounds=3, 2 participants → MaxTurns = 6
 	if st.MaxTurns != 6 {
 		t.Errorf("MaxTurns = %d, want 6", st.MaxTurns)
 	}
@@ -637,7 +601,6 @@ func TestStart_RespectsExplicitMaxTurns(t *testing.T) {
 		t.Fatal("group not found")
 	}
 
-	// MaxTurns was explicitly set to 5, Rounds was 0 → no default should apply.
 	if st.MaxTurns != 5 {
 		t.Errorf("MaxTurns = %d, want 5", st.MaxTurns)
 	}
@@ -661,7 +624,7 @@ func TestStart_ClampsToCeiling(t *testing.T) {
 		plainParticipant("a"),
 		plainParticipant("b"),
 		plainParticipant("c"),
-		plainParticipant("a"), // 10 participants
+		plainParticipant("a"),
 	}
 
 	ctx := context.Background()
@@ -677,17 +640,13 @@ func TestStart_ClampsToCeiling(t *testing.T) {
 		t.Fatal("group not found")
 	}
 
-	// Rounds=100, 10 participants → derived MaxTurns=1000 → clamped to ceiling.
 	if st.MaxTurns != MaxGroupTurnsCeiling {
 		t.Errorf("MaxTurns = %d, want %d (MaxGroupTurnsCeiling)", st.MaxTurns, MaxGroupTurnsCeiling)
 	}
-	// Rounds should remain 100 (we only clamp MaxTurns, not Rounds).
 	if st.Rounds != 100 {
 		t.Errorf("Rounds = %d, want 100", st.Rounds)
 	}
 }
-
-// --- StopByOrigin tests ---
 
 func TestStopByOrigin_StopsMatchingGroup(t *testing.T) {
 	be := &blockingExecutor{unblockCh: make(chan struct{})}
@@ -710,7 +669,6 @@ func TestStopByOrigin_StopsMatchingGroup(t *testing.T) {
 		t.Errorf("StopByOrigin returned %d, want 1", count)
 	}
 
-	// Wait for goroutine to drain.
 	done := make(chan struct{})
 	go func() { gm.Wait(groupID); close(done) }()
 	select {
@@ -758,7 +716,6 @@ func TestStopByOrigin_IgnoresOtherChat(t *testing.T) {
 		t.Error("group should NOT have been stopped for a different chatID")
 	}
 
-	// Cleanup.
 	gm.StopAll()
 	close(be.unblockCh)
 	gm.Wait(groupID)
@@ -780,14 +737,11 @@ func TestStopByOrigin_EmptyChannelMatchesAny(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Empty channel should match any origin channel.
 	count := gm.StopByOrigin("", "chat-X")
 	if count != 1 {
 		t.Errorf("StopByOrigin returned %d, want 1", count)
 	}
 
-	// Drain first: StopByOrigin only requests the stop (it cancels the
-	// context); the run loop converges the status asynchronously via finalize.
 	done := make(chan struct{})
 	go func() { gm.Wait(groupID); close(done) }()
 	select {
@@ -835,7 +789,6 @@ func TestStopByOrigin_EmptyChatIDReturnsZero(t *testing.T) {
 		t.Error("group should NOT have been stopped by empty chatID")
 	}
 
-	// Cleanup.
 	gm.StopAll()
 	close(be.unblockCh)
 	gm.Wait(groupID)
@@ -867,7 +820,6 @@ func TestStopByOrigin_StopsMultipleGroups(t *testing.T) {
 		t.Errorf("StopByOrigin returned %d, want 2", count)
 	}
 
-	// Drain both.
 	for _, id := range []string{"sbo-multi-1", "sbo-multi-2"} {
 		done := make(chan struct{})
 		go func(gid string) { gm.Wait(gid); close(done) }(id)

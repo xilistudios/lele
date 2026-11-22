@@ -63,7 +63,6 @@ export function CanvasBlock({ content, language }: Props) {
     }
   }, [])
 
-  // Fallback: if onLoad never fires, force loaded after timeout
   useEffect(() => {
     if (loadState !== 'loading') return
     loadTimeoutRef.current = setTimeout(() => {
@@ -78,9 +77,7 @@ export function CanvasBlock({ content, language }: Props) {
   const handleCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(content)
-    } catch {
-      // Clipboard not available
-    }
+    } catch {}
     setCopied(true)
     if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current)
     copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000)

@@ -8,20 +8,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// handleTickMsg drives animations: the busy spinner, the onboarding verify
-// spinner, background-exec output refresh and the ESC-hint timeout.
 func (m *Model) handleTickMsg(msg tickMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
-	// Reset tick pending flag to allow the next tick to be scheduled
 	m.tickPending = false
-	// Clear selection feedback after timeout
 	m.clearSelectionFeedback()
-	// Onboarding verify spinner — animate while we wait for the async
-	// key validation result.
 	if m.obVerifying {
 		m.animationTick++
 		cmds = append(cmds, m.tickCmd())
 	}
-	// Refresh background exec output if viewing a process
 	if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode && m.bgExecViewID != "" {
 		output, status, _, _ := m.agentLoop.GetProvidable().GetBackgroundExecOutput(m.bgExecViewID, 5000)
 		m.bgExecViewOutput = output
@@ -29,8 +22,7 @@ func (m *Model) handleTickMsg(msg tickMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) 
 		if status == "running" {
 			cmds = append(cmds, m.tickCmd())
 		}
-		// Don't fall through to the session processing tick
-		return m.finishUpdate(msg, cmds) // bg-exec view refresh: skip the session-processing tick
+		return m.finishUpdate(msg, cmds)
 	}
 	if m.isSessionProcessing() {
 		m.elapsedTime = time.Since(m.startTime)
@@ -45,16 +37,7 @@ func (m *Model) handleTickMsg(msg tickMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) 
 	return m.finishUpdate(msg, cmds)
 }
 
-// handleOutboundMsg consumes one event from the agent's outbound channel:
-// approval requests, streaming updates, tool progress, subagent results and
-// group-mode transcripts. The listener is always re-armed before returning.
-// The inner event switch keeps its original `break` semantics: those break
-// back to the listener re-arm below, never out of this handler.
 func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
-	// Approval prompts must never be dropped by the currentKey gate below:
-	// the blocked agent waits on ApprovalManager's full timeout otherwise.
-	// Requests for the visible session surface immediately; requests for
-	// background sessions are stashed and restored on switch.
 	if msg.msg.Event == "approval.request" {
 		id := msg.msg.Metadata["id"]
 		command := msg.msg.Metadata["command"]
@@ -65,38 +48,15 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 			m.stashApprovalForSession(msg.msg.ChatID, id, command, reason)
 		}
 		m.updateViewport()
-		// Re-arm the listener exactly like the tail of this case does;
-		// a bare break here would leave the TUI deaf to every later event.
 		cmds = append(cmds, m.startOutboundListener())
-		return m.finishUpdate(msg, cmds) // approval.request re-arms the listener above
+		return m.finishUpdate(msg, cmds)
 	}
 	if msg.msg.ChatID == m.currentKey {
 		switch msg.msg.Event {
 		case "subagent.result":
-			// The task is finished: drop its real-time progress line so the
-			// overlay does not keep showing stale activity for a completed
-			// subagent (TUI-M4). This happens for EVERY terminal outcome — the
-			// backend publishes the event unconditionally and reports in
-			// metadata["resumed"]/["injected"] whether the parent owns the
-			// result and how it receives it.
 			if taskID := msg.msg.Metadata["task_id"]; taskID != "" {
 				delete(m.subagentProgress, taskID)
 			}
-			// Only a claimed result that is delivered by a NEW continuation turn
-			// (resumed=true, injected absent/false) owes a turn, so only then
-			// must the TUI hold the loading state across it. Two other cases
-			// must leave the turn state alone:
-			//   - resumed=false: wait_for_subagent consumed the result in-turn,
-			//     so there is no turn to wait for.
-			//   - injected=true: the running turn's queue accepted the result,
-			//     so the running turn's own turn end (stream end / completeMsg)
-			//     clears loading. Note this is ACCEPTANCE, not guaranteed
-			//     mid-turn delivery: if that turn exits before draining (error,
-			//     cancellation, iteration limit), the result is re-published as
-			//     an ordinary inbound and its fallback continuation renders its
-			//     own stream/complete events — handleCompleteMsg clears the
-			//     state unconditionally — so arming the flag here would still be
-			//     wrong (it would wait for a turn that starts on its own).
 			if msg.msg.Metadata["resumed"] == "true" && msg.msg.Metadata["injected"] != "true" {
 				m.subagentContinuationPending = true
 				m.processing = true
@@ -104,28 +64,18 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 				m.lastDuration = 0
 				cmds = append(cmds, m.tickCmd())
 			}
-			// No cache invalidation here: the listing is TTL-refreshed from
-			// Update() (T6), so a burst of completions costs one lookup per
-			// window instead of one per result.
 			m.updateViewport()
 		case "message.stream":
-			// Clear pending user message on first stream chunk — by the time
-			// the LLM starts streaming, the user message is already in history.
 			if m.pendingUserMessage != "" {
 				m.pendingUserMessage = ""
-				m.renderedBaseKey = "" // invalidate cache so history re-renders without duplicate
+				m.renderedBaseKey = ""
 			}
-			m.currentToolAction = "" // streaming text means tool call is done
-			// Only reset streaming state if the MessageID is truly different.
+			m.currentToolAction = ""
 			if msg.msg.MessageID != "" && msg.msg.MessageID != m.currentAssistantMsgID {
 				m.currentAssistantMsgID = msg.msg.MessageID
 				m.resetStreamState()
 			}
 			m.currentStream += msg.msg.Content
-			// Throughput metrics of the segment: tolerant parse of the
-			// (string-encoded on the wire) counters. "done" marks the final
-			// chunk of the segment, whose rate becomes the figure retained for
-			// the "Done in" line.
 			m.applyStreamMetrics(msg.msg.Metadata)
 			if metadataBool(msg.msg.Metadata["done"]) {
 				m.lastTokPerSec = m.streamTokPerSec
@@ -134,43 +84,27 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 				cmds = append(cmds, cmd)
 			}
 		case "message.thinking":
-			// Only reset streaming state if the MessageID is truly different.
 			if msg.msg.MessageID != "" && msg.msg.MessageID != m.currentAssistantMsgID {
 				m.currentAssistantMsgID = msg.msg.MessageID
 				m.resetStreamState()
 			}
 			m.currentThinking += msg.msg.Content
-			// Reasoning chunks carry the same throughput metrics as the answer
-			// (see agent/llm_stream.go), metered on the reasoning surface. Feeding
-			// them into the live counters is what keeps "42.5 tok/s" on the status
-			// line from the first thinking token, instead of only once the answer
-			// starts streaming.
 			m.applyStreamMetrics(msg.msg.Metadata)
 			if cmd := m.throttledUpdateViewport(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		case "command.applied":
-			// A custom (harness) slash command was expanded by the backend
-			// for this turn. Render it like a tool activity line: the
-			// overlay shows it until the stream resumes (same lifecycle and
-			// styling as "tool.executing" below).
 			m.currentToolAction = formatCommandApplied(msg.msg.Metadata)
 			m.updateViewport()
 		case "tool.executing":
-			// Only clear streaming state if it's a different message.
 			if msg.msg.MessageID != "" && msg.msg.MessageID != m.currentAssistantMsgID {
 				m.currentStream = ""
 				m.currentThinking = ""
 				m.currentAssistantMsgID = msg.msg.MessageID
 			}
 
-			// Show the currently executing tool call in the viewport.
-			// Use the compact "tool: action" format from metadata.
 			toolName := msg.msg.Metadata["tool"]
 			action := msg.msg.Metadata["action"]
-			// action/tool come from tool.executing event metadata (LLM
-			// controlled): sanitize at ingress so control/bidi chars never
-			// reach the overlay row.
 			if action != "" {
 				m.currentToolAction = sanitizeDisplayText(action)
 			} else if toolName != "" {
@@ -178,16 +112,10 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 			}
 			m.updateViewport()
 		case "tool.result":
-			// Tool completed; clear the active tool action display.
 			m.currentToolAction = ""
-			// Clear any approval result feedback when the tool completes.
 			m.approvalResult = ""
-			// When a spawn tool completes, clear its subagent progress entry.
 			if msg.msg.Metadata["tool"] == "spawn" {
-				// The new task shows up in the sidebar through the TTL refresh
-				// in Update() (T6); nothing to invalidate per event.
 				if saKey := msg.msg.Metadata["subagent_session_key"]; saKey != "" {
-					// Extract the task ID suffix (e.g. "subagent-1") from the session key
 					if idx := strings.LastIndex(saKey, ":"); idx >= 0 {
 						delete(m.subagentProgress, saKey[idx+1:])
 					}
@@ -195,7 +123,6 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 			}
 			m.updateViewport()
 		case "group.status":
-			// Group status event: started/done/stopped/error
 			groupID := msg.msg.Metadata["group_id"]
 			if groupID == "" {
 				break
@@ -205,7 +132,6 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 				m.groupStatus = make(map[string]string)
 			}
 			m.groupStatus[groupID] = status
-			// Track active group and store participants metadata
 			if status == "started" {
 				if m.activeGroupID == "" {
 					m.activeGroupID = groupID
@@ -223,13 +149,11 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 					}
 				}
 			}
-			// Stop processing when the group finishes
 			if status == "done" || status == "stopped" || status == "error" {
 				m.processing = false
 			}
 			m.updateViewport()
 		case "group.turn":
-			// Group turn: an agent produced a response within the group
 			groupID := msg.msg.Metadata["group_id"]
 			if groupID == "" {
 				break
@@ -254,7 +178,6 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 			}
 			m.updateViewport()
 		case "group.complete":
-			// Group complete: final synthesis available
 			groupID := msg.msg.Metadata["group_id"]
 			if groupID == "" {
 				break
@@ -274,13 +197,7 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 			m.recordGroupCompleteStatus(groupID)
 			m.updateViewport()
 		case "":
-			// Stream finished — flush any pending throttled viewport update
-			// so the final content is visible immediately.
 			m.flushStreamUpdate()
-			// Retain the finishing segment's throughput for the "Done in" line.
-			// handleCompleteMsg also carries it across clearStreamingState, but
-			// this branch covers the cases where the stream end is the last
-			// event the client sees (no completion follows).
 			if m.streamTokPerSec > 0 {
 				m.lastTokPerSec = m.streamTokPerSec
 			}
@@ -293,9 +210,6 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 			}
 		}
 	} else if m.isSubagentOfCurrentChat(msg.msg.ChatID) {
-		// Events from subagents spawned by the current parent chat.
-		// Capture their tool.executing / tool.result events to show
-		// real-time progress in the parent viewport.
 		taskID := m.currentSubagentTaskID(msg.msg.ChatID)
 		if taskID != "" {
 			switch msg.msg.Event {
@@ -309,7 +223,6 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 					m.updateViewport()
 				}
 			case "message.stream":
-				// Subagent is streaming a final response — update progress label.
 				m.recordSubagentProgress(taskID, "finalizing…")
 				m.updateViewport()
 			}

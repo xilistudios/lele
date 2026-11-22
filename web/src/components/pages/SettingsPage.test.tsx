@@ -9,21 +9,6 @@ import { useSettings } from '../../contexts/SettingsContext'
 import type { ApiClient } from '../../services/http/client'
 import { SettingsPage } from './SettingsPage'
 
-/**
- * Settings shell contract.
- *
- * `SettingsPage` is the layout for the whole `/settings` subtree: it owns the
- * single `useSettingsConfig` draft and renders children through `<Outlet/>`.
- * That includes the agent detail pages, because Agents and Providers are
- * Settings sections now. Two invariants are pinned here:
- *
- * 1. One config load for the whole subtree — navigating between a tab and an
- *    agent detail page must NOT remount the hook (a remount would silently
- *    drop the unsaved draft).
- * 2. The tab strip is visible on every settings tab and hidden on agent detail
- *    pages, which own their own tab strip.
- */
-
 function TabProbe() {
   const settings = useSettings()
   return <div data-testid="probe-tab">{JSON.stringify({ hasDraft: !!settings.draftConfig })}</div>
@@ -142,8 +127,6 @@ describe('SettingsPage — layout & tab strip', () => {
     expect(buttons.length).toBeGreaterThan(0)
 
     const glyphs = buttons.map((button) => button.querySelector('svg')?.innerHTML ?? null)
-    // An icon per entry, and no two entries sharing one: the glyph has to
-    // disambiguate the entry, not repeat the label.
     expect(glyphs).not.toContain(null)
     expect(new Set(glyphs).size).toBe(buttons.length)
   })
@@ -164,16 +147,12 @@ describe('SettingsPage — layout & tab strip', () => {
     const view = renderLayout('/settings/agents/coder/tools', { config: 0 })
     await waitFor(() => expect(view.getByTestId('probe-detail')).not.toBeNull())
 
-    // The agent page owns its own tab strip; two side by side would leave the
-    // content a narrow column.
     expect(tabStrip(view.container)).toBeNull()
     expect(view.container.querySelector('h1')?.textContent).toBe('Agentes')
   })
 
   test('an unknown tab redirects to general', async () => {
     const view = renderLayout('/settings/nope', { config: 0 })
-    // The content normalises the URL with `replace`, so the address bar always
-    // describes what is on screen.
     await waitFor(() => expect(view.getByTestId('location').textContent).toBe('/settings/general'))
   })
 })
@@ -185,7 +164,6 @@ describe('SettingsPage — one draft for the whole subtree', () => {
     await waitFor(() => expect(view.getByTestId('probe-tab')).not.toBeNull())
     await waitFor(() => expect(counters.config).toBe(1))
 
-    // Tab → agent detail (the agent list's "Configure" link).
     act(() => {
       if (!navigateRef) throw new Error('navigate not captured')
       navigateRef('/settings/agents/coder/tools')
@@ -194,7 +172,6 @@ describe('SettingsPage — one draft for the whole subtree', () => {
     expect(counters.config).toBe(1)
     expect(view.getByTestId('probe-detail').textContent).toContain('"hasDraft":true')
 
-    // Agent detail → another tab.
     act(() => {
       if (!navigateRef) throw new Error('navigate not captured')
       navigateRef('/settings/providers')

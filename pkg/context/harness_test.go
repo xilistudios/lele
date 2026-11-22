@@ -10,16 +10,13 @@ import (
 )
 
 func TestBuildHarnessContext(t *testing.T) {
-	// Save current working directory
 	originalCwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("failed to get original cwd: %v", err)
 	}
 
-	// Create temporary directory
 	tempDir := t.TempDir()
 
-	// Change to temporary directory
 	if err := os.Chdir(tempDir); err != nil {
 		t.Fatalf("failed to change cwd: %v", err)
 	}
@@ -27,7 +24,6 @@ func TestBuildHarnessContext(t *testing.T) {
 		_ = os.Chdir(originalCwd)
 	}()
 
-	// Create some files and directories
 	if err := os.Mkdir(filepath.Join(tempDir, "subdir"), 0755); err != nil {
 		t.Fatalf("failed to create subdir: %v", err)
 	}
@@ -38,13 +34,11 @@ func TestBuildHarnessContext(t *testing.T) {
 		t.Fatalf("failed to create AGENTS.md: %v", err)
 	}
 
-	// Build context
 	ctxStr, err := BuildHarnessContext()
 	if err != nil {
 		t.Fatalf("BuildHarnessContext failed: %v", err)
 	}
 
-	// Verify contents
 	if !strings.Contains(ctxStr, "## Harness Module") {
 		t.Errorf("expected output to contain Harness Module heading")
 	}
@@ -77,7 +71,6 @@ func TestBuildHarnessContext_DirEntriesLimit(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(originalCwd) }()
 
-	// Create 150 files with predictable sorted names: file_0001.txt .. file_0150.txt
 	for i := 1; i <= 150; i++ {
 		fname := filepath.Join(tempDir, fmt.Sprintf("file_%04d.txt", i))
 		if err := os.WriteFile(fname, []byte("x"), 0644); err != nil {
@@ -90,17 +83,14 @@ func TestBuildHarnessContext_DirEntriesLimit(t *testing.T) {
 		t.Fatalf("BuildHarnessContext failed: %v", err)
 	}
 
-	// Should contain truncation notice
 	if !strings.Contains(ctxStr, "... and 50 more") {
 		t.Errorf("expected output to contain '... and 50 more'")
 	}
 
-	// File #1 (file_0001.txt) should be present — it's in the first 100
 	if !strings.Contains(ctxStr, "file_0001.txt") {
 		t.Errorf("expected file_0001.txt to be listed (within first 100)")
 	}
 
-	// File #130 (file_0130.txt) is beyond the 100-entry limit and should NOT appear
 	if strings.Contains(ctxStr, "file_0130.txt") {
 		t.Errorf("file_0130.txt should NOT appear in output (beyond 100-entry limit)")
 	}
@@ -118,7 +108,6 @@ func TestBuildHarnessContext_AgentsMdTruncation(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(originalCwd) }()
 
-	// Create an AGENTS.md larger than maxAgentsFileBytes (16384)
 	bigContent := strings.Repeat("A", maxAgentsFileBytes+5000)
 	if err := os.WriteFile(filepath.Join(tempDir, "AGENTS.md"), []byte(bigContent), 0644); err != nil {
 		t.Fatalf("failed to create AGENTS.md: %v", err)
@@ -129,26 +118,20 @@ func TestBuildHarnessContext_AgentsMdTruncation(t *testing.T) {
 		t.Fatalf("BuildHarnessContext failed: %v", err)
 	}
 
-	// Must contain truncation marker
 	if !strings.Contains(ctxStr, "[AGENTS.md truncated]") {
 		t.Errorf("expected output to contain '[AGENTS.md truncated]'")
 	}
 
-	// The content portion after "### AGENTS.md\n\n" should be at most maxAgentsFileBytes
-	// plus the truncation notice. The full output should be bounded.
-	// Extract the AGENTS.md section to check its size.
 	idx := strings.Index(ctxStr, "### AGENTS.md\n\n")
 	if idx < 0 {
 		t.Fatal("AGENTS.md section not found")
 	}
 	agentsSection := ctxStr[idx+len("### AGENTS.md\n\n"):]
-	// agentsSection should be <= maxAgentsFileBytes + len("\n\n... [AGENTS.md truncated]\n")
 	maxAllowed := maxAgentsFileBytes + len("\n\n... [AGENTS.md truncated]\n")
 	if len(agentsSection) > maxAllowed {
 		t.Errorf("AGENTS.md section too large: got %d bytes, max allowed %d", len(agentsSection), maxAllowed)
 	}
 
-	// Verify the embedded content is exactly maxAgentsFileBytes of 'A's
 	embedded := agentsSection[:maxAgentsFileBytes]
 	if embedded != strings.Repeat("A", maxAgentsFileBytes) {
 		t.Errorf("embedded content mismatch")
@@ -167,24 +150,18 @@ func TestTruncateUTF8(t *testing.T) {
 		{"truncate ASCII", "hello world", 5, "hello"},
 		{
 			"truncate at valid rune boundary (multi-byte UTF-8)",
-			// "é" is 2 bytes (0xC3 0xA9), "a" is 1 byte
-			// "éaé" = 2+1+2 = 5 bytes; truncate at 3 should give "éa" (3 bytes)
 			"\u00e9a\u00e9", 3, "\u00e9a",
 		},
 		{
 			"truncate avoids splitting 2-byte rune",
-			// "é" = 2 bytes; truncate at 1 should give "" (back off the continuation byte)
 			"\u00e9", 1, "",
 		},
 		{
 			"truncate avoids splitting 3-byte rune (emoji-ish)",
-			// "€" is 3 bytes (0xE2 0x82 0xAC)
 			"\u20ac", 2, "",
 		},
 		{
 			"truncate with 4-byte rune",
-			// "𐍈" (U+10348) is 4 bytes; total string = 5+4+5 = 14 bytes
-			// truncate at 7: walk back from idx=7 past continuation bytes → idx=5 → "hello"
 			"hello" + "\U00010348" + "world", 7, "hello",
 		},
 	}
@@ -194,7 +171,6 @@ func TestTruncateUTF8(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("truncateUTF8(%q, %d) = %q (len=%d), want %q (len=%d)", tt.s, tt.max, got, len(got), tt.want, len(tt.want))
 			}
-			// Also verify the result is valid UTF-8
 			if !utf8.ValidString(got) {
 				t.Errorf("truncateUTF8(%q, %d) returned invalid UTF-8: %q", tt.s, tt.max, got)
 			}
@@ -214,15 +190,13 @@ func TestBuildHarnessContext_Skills(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(originalCwd) }()
 
-	// Set HOME env var to point to a temporary home directory inside tempDir
 	tempHome := filepath.Join(tempDir, "home")
 	if err := os.MkdirAll(tempHome, 0755); err != nil {
 		t.Fatalf("failed to create temp home: %v", err)
 	}
 	t.Setenv("HOME", tempHome)
-	t.Setenv("USERPROFILE", tempHome) // Windows compatibility
+	t.Setenv("USERPROFILE", tempHome)
 
-	// 1. Create skill under .agents/skills
 	skill1Dir := filepath.Join(tempDir, ".agents", "skills", "skill-one")
 	if err := os.MkdirAll(skill1Dir, 0755); err != nil {
 		t.Fatalf("failed to create .agents/skills/skill-one: %v", err)
@@ -232,7 +206,6 @@ func TestBuildHarnessContext_Skills(t *testing.T) {
 		t.Fatalf("failed to write skill-one SKILL.md: %v", err)
 	}
 
-	// 2. Create skill under .lele/skills
 	skill2Dir := filepath.Join(tempDir, ".lele", "skills", "skill-two")
 	if err := os.MkdirAll(skill2Dir, 0755); err != nil {
 		t.Fatalf("failed to create .lele/skills/skill-two: %v", err)
@@ -242,7 +215,6 @@ func TestBuildHarnessContext_Skills(t *testing.T) {
 		t.Fatalf("failed to write skill-two skill.md: %v", err)
 	}
 
-	// 3. Create skill under ~/.agents/skill/plan
 	skill3Dir := filepath.Join(tempHome, ".agents", "skill", "plan", "skill-three")
 	if err := os.MkdirAll(skill3Dir, 0755); err != nil {
 		t.Fatalf("failed to create ~/.agents/skill/plan/skill-three: %v", err)
@@ -257,7 +229,6 @@ func TestBuildHarnessContext_Skills(t *testing.T) {
 		t.Fatalf("BuildHarnessContext failed: %v", err)
 	}
 
-	// Verify all three skills are present in the output
 	if !strings.Contains(ctxStr, "### Available Skills") {
 		t.Errorf("expected output to contain Available Skills heading")
 	}
@@ -390,7 +361,6 @@ func TestBuildHarnessContext_SkillWithoutDescription(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(originalCwd) }()
 
-	// Create a skill with frontmatter that has name but NO description field
 	skillDir := filepath.Join(tempDir, ".agents", "skills", "no-desc-skill")
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		t.Fatalf("failed to create skill dir: %v", err)
@@ -427,7 +397,6 @@ func TestBuildHarnessContext_SkillFrontmatterNameOverridesDir(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(originalCwd) }()
 
-	// Create a skill directory named "dir-name" but with "name: parsed-name" in SKILL.md
 	skillDir := filepath.Join(tempDir, ".agents", "skills", "dir-name")
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		t.Fatalf("failed to create skill dir: %v", err)
@@ -446,13 +415,11 @@ func TestBuildHarnessContext_SkillFrontmatterNameOverridesDir(t *testing.T) {
 		t.Errorf("expected output to contain Available Skills heading")
 	}
 
-	// Should use parsed-name from frontmatter, NOT dir-name from directory
 	expected := "- **parsed-name** (source: `.agents/skills`): Overridden by frontmatter"
 	if !strings.Contains(ctxStr, expected) {
 		t.Errorf("expected output to contain:\n%s\nGot output:\n%s", expected, ctxStr)
 	}
 
-	// Should NOT contain the directory name as a skill name
 	if strings.Contains(ctxStr, "- **dir-name**") {
 		t.Errorf("output should NOT contain directory name 'dir-name' as skill name")
 	}
@@ -470,7 +437,6 @@ func TestBuildHarnessContext_NoSkillsDir(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(originalCwd) }()
 
-	// No skills directories created at all
 	ctxStr, err := BuildHarnessContext()
 	if err != nil {
 		t.Fatalf("BuildHarnessContext failed: %v", err)
@@ -493,12 +459,10 @@ func TestBuildHarnessContext_SkillsWithFiles(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(originalCwd) }()
 
-	// Create .agents/skills/ with a FILE inside (not a directory)
 	skillsDir := filepath.Join(tempDir, ".agents", "skills")
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
 		t.Fatalf("failed to create .agents/skills: %v", err)
 	}
-	// This should be ignored by scanSkillsDir since it's a file, not a directory
 	if err := os.WriteFile(filepath.Join(skillsDir, "not-a-skill.md"), []byte("fake skill"), 0644); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
@@ -508,7 +472,6 @@ func TestBuildHarnessContext_SkillsWithFiles(t *testing.T) {
 		t.Fatalf("BuildHarnessContext failed: %v", err)
 	}
 
-	// Should not crash and should not list any skills
 	if strings.Contains(ctxStr, "### Available Skills") {
 		t.Errorf("expected output NOT to contain '### Available Skills' when only files (not dirs) exist in skills dir")
 	}
@@ -530,10 +493,6 @@ func TestBuildHarnessContext_DuplicateSkills(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(originalCwd) }()
 
-	// Create the same skill name in .agents/skills AND .lele/skills
-	// .agents/skills has priority (scanned first)
-
-	// 1. .agents/skills/my-skill
 	skill1Dir := filepath.Join(tempDir, ".agents", "skills", "my-skill")
 	if err := os.MkdirAll(skill1Dir, 0755); err != nil {
 		t.Fatalf("failed to create .agents/skills/my-skill: %v", err)
@@ -543,7 +502,6 @@ func TestBuildHarnessContext_DuplicateSkills(t *testing.T) {
 		t.Fatalf("failed to write skill1 SKILL.md: %v", err)
 	}
 
-	// 2. .lele/skills/my-skill (same name, different description)
 	skill2Dir := filepath.Join(tempDir, ".lele", "skills", "my-skill")
 	if err := os.MkdirAll(skill2Dir, 0755); err != nil {
 		t.Fatalf("failed to create .lele/skills/my-skill: %v", err)
@@ -562,19 +520,16 @@ func TestBuildHarnessContext_DuplicateSkills(t *testing.T) {
 		t.Errorf("expected output to contain Available Skills heading")
 	}
 
-	// Should appear with .agents/skills source (first priority) and its description
 	expected := "- **my-skill** (source: `.agents/skills`): From agents"
 	if !strings.Contains(ctxStr, expected) {
 		t.Errorf("expected output to contain:\n%s\nGot output:\n%s", expected, ctxStr)
 	}
 
-	// Should NOT appear with .lele/skills source (deduplication)
 	unexpected := "- **my-skill** (source: `.lele/skills`)"
 	if strings.Contains(ctxStr, unexpected) {
 		t.Errorf("expected duplicate with .lele/skills source to be deduplicated, but found:\n%s", unexpected)
 	}
 
-	// Count occurrences of "**my-skill**" to verify it appears exactly once
 	count := strings.Count(ctxStr, "**my-skill**")
 	if count != 1 {
 		t.Errorf("expected 'my-skill' to appear exactly once, got %d occurrences", count)

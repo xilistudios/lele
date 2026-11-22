@@ -14,21 +14,6 @@ import {
 import { AuthContext, type AuthContextValue } from '../../contexts/AuthContext'
 import { ChatPage } from './ChatPage'
 
-/**
- * Layout contract of the chat shell (see ChatPage.tsx / ChatHeader.tsx).
- *
- * The shell owns the viewport height (`app-shell` → `--app-vh`), so the flex
- * column inside it must never be allowed to overflow: the header and the
- * composer are pinned (`shrink-0`) and the message list absorbs the leftover
- * (`flex-1 min-h-0`). Without that discipline the column grows past the shell
- * and the browser scrolls the document, which pans the header out of view and
- * clips the first bubble — the reported mobile bug.
- *
- * jsdom has no layout engine, so these tests assert the class contract: they
- * fail if a `shrink-0` / `min-h-0` is dropped, if the shell goes back to
- * `h-screen`, or if mobile-only layout leaks into the shared shell.
- */
-
 const authValue = {
   session: { device_name: 'Phone' },
   apiUrl: 'http://localhost',
@@ -128,7 +113,6 @@ function contains(el: Element | null, ...tokens: string[]) {
 
 const shellOf = (container: HTMLElement) => container.querySelector('.app-shell')
 const mainOf = (container: HTMLElement) => container.querySelector('.app-shell > main')
-/** The flex item that holds the message list (main → header, banners, list, composer). */
 const listWrapperOf = (container: HTMLElement) =>
   mainOf(container)?.querySelector(':scope > div.flex-1') ?? null
 const composerWrapperOf = (container: HTMLElement) =>

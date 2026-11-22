@@ -15,10 +15,8 @@ type Props = {
 export function StepIndicator({ steps, currentStep, onStepClick }: Props) {
   return (
     <div className="relative">
-      {/* Progress line background */}
       <div className="absolute top-5 left-0 right-0 h-0.5 bg-border" />
 
-      {/* Progress line fill */}
       <div
         className="absolute top-5 left-0 h-0.5 bg-gradient-to-r from-focus to-focus-hover transition-all duration-300"
         style={{ width: `${((currentStep - 1) / (steps.length - 1)) * 100}%` }}

@@ -9,19 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/group"
 )
 
-// ---------------------------------------------------------------------------
-// sessionGroupSnapshots rewiring (#239, read path).
-//
-// The channel used to filter AllGroupSnapshots() — memory only — so anything
-// the retention sweep had evicted, or any group from before a daemon restart,
-// was invisible to the welcome/reconnected/history payloads even though its
-// transcript was still persisted. It now delegates the whole lookup to the
-// agent loop, which unions memory with the store and resolves session aliases.
-//
-// These tests pin the channel side of that contract: it must call the session
-// API with the caller's session key and forward the result untouched.
-// ---------------------------------------------------------------------------
-
 func sessionSnap(id, originChat, status string) group.GroupSnapshot {
 	return group.GroupSnapshot{
 		GroupID:       id,
@@ -32,9 +19,6 @@ func sessionSnap(id, originChat, status string) group.GroupSnapshot {
 	}
 }
 
-// TestSessionGroupSnapshots_DelegatesToAgentLoop pins that the channel asks the
-// loop for the session's snapshots instead of filtering memory itself, and
-// forwards exactly what it got.
 func TestSessionGroupSnapshots_DelegatesToAgentLoop(t *testing.T) {
 	loop := newNativeTestAgentLoop(config.DefaultConfig())
 	want := []group.GroupSnapshot{
@@ -55,14 +39,11 @@ func TestSessionGroupSnapshots_DelegatesToAgentLoop(t *testing.T) {
 	if loop.groupSnapshotCallCount() != 1 {
 		t.Errorf("loop calls = %d, want 1 — the channel is not delegating", loop.groupSnapshotCallCount())
 	}
-	// The channel must never reach for the memory-only API any more.
 	if loop.allGroupSnapshotsCallCount() != 0 {
 		t.Errorf("AllGroupSnapshots called %d times, want 0 (memory-only path must not be used)", loop.allGroupSnapshotsCallCount())
 	}
 }
 
-// TestSessionGroupSnapshots_NilAgentLoopIsSafe pins the guard: a channel built
-// without a loop answers with nothing instead of panicking on the WS handshake.
 func TestSessionGroupSnapshots_NilAgentLoopIsSafe(t *testing.T) {
 	native := &NativeChannel{}
 	if got := native.sessionGroupSnapshots("chat-1"); got != nil {
@@ -70,8 +51,6 @@ func TestSessionGroupSnapshots_NilAgentLoopIsSafe(t *testing.T) {
 	}
 }
 
-// TestSessionGroupSnapshots_BlankSessionGetsNothing documents the contract for a
-// blank key: the loop decides, the channel does not widen it.
 func TestSessionGroupSnapshots_BlankSessionGetsNothing(t *testing.T) {
 	loop := newNativeTestAgentLoop(config.DefaultConfig())
 	loop.setGroupSnapshotsForSession("chat-1", sessionSnap("group:alpha", "chat-1", group.StatusDone))
@@ -82,9 +61,6 @@ func TestSessionGroupSnapshots_BlankSessionGetsNothing(t *testing.T) {
 	}
 }
 
-// TestChatHistoryCarriesSessionGroups drives the real HTTP route to prove
-// store-backed groups reach the /history payload the WebUI reads on a session
-// switch.
 func TestChatHistoryCarriesSessionGroups(t *testing.T) {
 	ts := newNativeTestServer(t)
 

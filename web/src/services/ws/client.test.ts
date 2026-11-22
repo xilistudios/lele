@@ -3,12 +3,6 @@ import { LeleSocket } from './client'
 
 type Listener = (ev: Record<string, unknown>) => void
 
-/**
- * Minimal WebSocket mock that records every instance created.
- * The duplication bug (streaming chunks appearing twice) happened when two
- * live WebSocket instances coexisted: each delivered every server event, so
- * the UI appended each chunk twice.
- */
 class MockWebSocket {
   static instances: MockWebSocket[] = []
   static CONNECTING = 0
@@ -56,19 +50,16 @@ class MockWebSocket {
     this.dispatch('close')
   }
 
-  /** Simulate a successful connection. */
   openNow() {
     this.readyState = MockWebSocket.OPEN
     this.dispatch('open')
   }
 
-  /** Simulate a server-initiated close. */
   serverClose() {
     this.readyState = MockWebSocket.CLOSED
     this.dispatch('close')
   }
 
-  /** Simulate an incoming server event. */
   message(payload: unknown) {
     this.dispatch('message', { data: JSON.stringify(payload) })
   }
@@ -94,8 +85,6 @@ describe('LeleSocket single-connection guarantee', () => {
   })
 
   afterEach(() => {
-    // Guarantee cleanup even when an assertion fails mid-test, so pending
-    // timers/handlers from one test never leak into the next.
     activeClient?.close()
     activeClient = null
     MockWebSocket.instances = []
@@ -111,16 +100,12 @@ describe('LeleSocket single-connection guarantee', () => {
     s1.openNow()
     expect(client.state).toBe('connected')
 
-    // Connection drops → reconnect timer scheduled.
     s1.serverClose()
     expect(client.state).toBe('connecting')
 
-    // User returns to the tab before the timer fires.
     fireVisibilityChange('visible')
     expect(MockWebSocket.instances.length).toBe(2)
 
-    // Wait well past the reconnect delay: the old timer must NOT spawn a
-    // third socket (that was the duplication bug).
     await Bun.sleep(200)
     expect(MockWebSocket.instances.length).toBe(2)
   })
@@ -137,19 +122,15 @@ describe('LeleSocket single-connection guarantee', () => {
     s1.message({ event: 'message.stream', data: { delta: 'a' } })
     expect(events).toEqual(['message.stream'])
 
-    // Drop and let the reconnect timer create a replacement.
     s1.serverClose()
     await Bun.sleep(200)
     expect(MockWebSocket.instances.length).toBe(2)
     const s2 = MockWebSocket.instances[1]
     s2.openNow()
 
-    // The stale socket somehow delivers buffered/duplicated data: ignored.
     s1.message({ event: 'message.stream', data: { delta: 'a' } })
     expect(events).toEqual(['message.stream'])
 
-    // A duplicated close event from the stale socket must not schedule
-    // yet another reconnect.
     s1.dispatch('close')
     await Bun.sleep(200)
     expect(MockWebSocket.instances.length).toBe(2)
@@ -162,7 +143,7 @@ describe('LeleSocket single-connection guarantee', () => {
 
     const s1 = MockWebSocket.instances[0]
     s1.openNow()
-    s1.serverClose() // schedules reconnect
+    s1.serverClose()
     client.close()
 
     await Bun.sleep(200)
@@ -185,7 +166,6 @@ describe('LeleSocket single-connection guarantee', () => {
     s2.openNow()
     expect(client.state).toBe('connected')
 
-    // Events flow exactly once per chunk.
     const events: string[] = []
     client.on('event', (e) => events.push(e.event))
     s2.message({ event: 'message.thinking', data: { delta: 'Let me check' } })

@@ -1,10 +1,5 @@
 package session
 
-// Session loading: materialising a Session from SQLite.
-//
-// One-time metadata bootstrap plus the lazy full-session load used when a
-// known session is accessed but is not resident in memory.
-
 import (
 	"encoding/json"
 	"time"
@@ -13,8 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// ensureLoaded triggers loadSessionMetadata exactly once, on the first call.
-// Must be called BEFORE acquiring sm.mu to avoid deadlock.
 func (sm *SessionManager) ensureLoaded() {
 	sm.loadOnce.Do(func() {
 		if sm.sessionRepo != nil {
@@ -25,27 +18,12 @@ func (sm *SessionManager) ensureLoaded() {
 	})
 }
 
-// loadSessionFromDisk loads a full session (including messages) from SQLite
-// into the sessions map. Called when a session is accessed that exists in
-// metadata but not in the in-memory map.
-// Caller must hold sm.mu (write lock).
 func (sm *SessionManager) loadSessionFromDisk(key string) (*Session, bool) {
-	// Check if already loaded
 	if s, ok := sm.sessions[key]; ok {
 		return s, true
 	}
 
-	// Check if we have metadata for this session
 	if _, ok := sm.sessionMeta[key]; !ok {
-		// The metadata index is bootstrapped once per manager (loadOnce →
-		// loadSessionMetadataFromSQLite). When multiple SessionManagers share
-		// one SQLite store — each agent has its own — a manager whose index
-		// was populated before another manager created a session will never
-		// see that session's key in its local map. Fall back to the store so
-		// cross-manager reads of sessions created later do not silently
-		// return zero/empty (real prod bug: subagent child sessions written
-		// by the spawner agent's manager and read through the executing
-		// agent's manager).
 		if sm.sessionRepo == nil {
 			return nil, false
 		}
@@ -53,8 +31,6 @@ func (sm *SessionManager) loadSessionFromDisk(key string) (*Session, bool) {
 		if err != nil || meta == nil {
 			return nil, false
 		}
-		// Register the metadata locally so subsequent accesses skip the
-		// store round-trip.
 		sm.sessionMeta[key] = &sessionMetadata{
 			Key:            meta.Key,
 			Name:           meta.Name,
@@ -67,7 +43,6 @@ func (sm *SessionManager) loadSessionFromDisk(key string) (*Session, bool) {
 		}
 	}
 
-	// Load from SQLite if available
 	if sm.sessionRepo != nil {
 		return sm.loadFromSQLite(key)
 	}
@@ -75,43 +50,24 @@ func (sm *SessionManager) loadSessionFromDisk(key string) (*Session, bool) {
 	return nil, false
 }
 
-// loadFromSQLite loads a session from the SQLite store.
-// Caller must hold sm.mu (write lock).
 func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 	repo := sm.sessionRepo
 
-	// Load metadata
 	meta, err := repo.GetSessionMeta(key)
 	if err != nil || meta == nil {
 		return nil, false
 	}
 
-	// Restore the persisted eviction boundary. SQLite seqs are 0-based and
-	// contiguous within the non-evicted region, so the number of evicted rows
-	// equals firstInMemorySeq. EvictExcludedMessages maintains the invariant
-	// evictedTotal == firstInMemorySeq; they can only diverge transiently after
-	// a pruned full rewrite, where the pruned rows no longer exist in SQLite
-	// anyway, so treating them as equal on cold load is the correct durable
-	// boundary.
 	boundary := meta.FirstInMemorySeq
 	if boundary < 0 {
 		boundary = 0
 	}
 
-	// Load only non-evicted messages (seq >= boundary) so evicted rows are not
-	// inflated into RAM.
 	msgJSONs, err := repo.LoadMessagesFromSeq(key, boundary)
 	if err != nil {
 		return nil, false
 	}
 
-	// Validate contiguity of rows AT/ABOVE the boundary using MaxSeq, not
-	// MessageCount. MessageCount - boundary wrongly assumes rows are contiguous
-	// from seq 0, but saveFullUnlocked calls PruneExcluded for oversized
-	// sessions, physically deleting the OLDEST excluded rows and leaving a gap
-	// BELOW the boundary. Those gaps are expected and must NOT trigger the
-	// fallback. Rows at/above the boundary are valid iff the number of loaded
-	// rows equals maxSeq - boundary + 1. If MaxSeq errors, trust the boundary.
 	if boundary > 0 {
 		if maxSeq, seqErr := repo.MaxSeq(key); seqErr == nil {
 			if len(msgJSONs) != maxSeq-boundary+1 {
@@ -122,8 +78,6 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 					"expected_rows":   maxSeq - boundary + 1,
 					"loaded_rows":     len(msgJSONs),
 				})
-				// Genuine corruption above the boundary: rebuild from persisted rows
-				// and anchor the boundary to the first non-excluded in-context message.
 				fullRows, fErr := repo.LoadMessagesWithSeq(key)
 				if fErr != nil {
 					return nil, false
@@ -155,14 +109,11 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 	for _, msgJSON := range msgJSONs {
 		var msg providers.Message
 		if err := json.Unmarshal([]byte(msgJSON), &msg); err != nil {
-			continue // skip corrupted messages
+			continue
 		}
 		messages = append(messages, msg)
 	}
 
-	// If boundary was 0 (e.g. unmigrated session or fallback), check if the
-	// loaded messages have an excluded prefix. If so, prune the excluded prefix
-	// so only in-context messages are kept resident in memory.
 	if boundary == 0 && len(messages) > 0 {
 		hasExcluded := false
 		for _, m := range messages {
@@ -184,11 +135,6 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 		}
 	}
 
-	// Count rows still persisted but not resident in memory (evicted +
-	// lazy-loadable). Computed from the FINAL msgJSONs (after any fallback
-	// above); rows pruned below the boundary are no longer in SQLite and thus
-	// not counted as evicted. This matches saveFullUnlocked's post-prune
-	// semantics (evictedTotal = len(evictedJSONs) - pruned).
 	evictedPersisted := 0
 	if total, tErr := repo.MessageCount(key); tErr == nil {
 		evictedPersisted = total - len(messages)
@@ -197,13 +143,6 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 		}
 	}
 
-	// Deliberately NO publishViewLocked() here. A cold load materializes a
-	// brand-new Session whose viewSnapshot is nil, and GetHistoryView's
-	// epoch-check treats nil as "rebuild me": the first read copies once and
-	// publishes, so readers are O(1) from then on. Publishing eagerly would
-	// instead charge an O(n) history copy to every cold load — including the
-	// ones triggered by write paths (getOrCreateUnlocked → AddFullMessage),
-	// which never read the view.
 	session := &Session{
 		Key:              meta.Key,
 		Name:             meta.Name,
@@ -223,21 +162,17 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 		Messages:         messages,
 		firstInMemorySeq: boundary,
 		evictedTotal:     evictedPersisted,
-		lastPersistedSeq: len(messages) - 1, // all messages are persisted
+		lastPersistedSeq: len(messages) - 1,
 	}
 
-	// Enforce memory limit before adding a new session
 	sm.evictIfNeeded()
 
 	sm.sessions[key] = session
 	sm.accessTimes[key] = time.Now()
-	// Cold load restores Name/Mode/Updated from SQLite; keep the listing
-	// index in step so a later idle eviction cannot resurrect an empty shell.
 	sm.syncSessionMetaLocked(session)
 	return session, true
 }
 
-// loadSessionMetadataFromSQLite loads session metadata from the SQLite store.
 func (sm *SessionManager) loadSessionMetadataFromSQLite() error {
 	repo := sm.sessionRepo
 	metas, err := repo.ListSessionMeta()

@@ -38,8 +38,6 @@ export function ProviderModelsEditor({ name, models, onChange, providerType }: P
   const { t } = useTranslation()
   const modelNames = Object.keys(models)
 
-  // Technical wire-dialect names — see config.ThinkingType* in Go. The raw
-  // value doubles as the label: they are identifiers, not prose.
   const THINKING_TYPES: Array<{ value: string; label: string }> = [
     { value: 'auto', label: 'auto' },
     { value: 'deepseek', label: 'deepseek' },
@@ -49,9 +47,6 @@ export function ProviderModelsEditor({ name, models, onChange, providerType }: P
     { value: 'none', label: 'none' },
   ]
 
-  // Reasoning overrides (config.ReasoningConfig in Go). "" is the "unset"
-  // sentinel of every reasoning select: an absent key lets the provider/model
-  // decide, which is what the user sees as the default option.
   const REASONING_EFFORTS: Array<{ value: string; label: string }> = [
     { value: '', label: t('settings.options.reasoningDefault') },
     { value: 'low', label: t('settings.options.thinkingLow') },
@@ -59,8 +54,6 @@ export function ProviderModelsEditor({ name, models, onChange, providerType }: P
     { value: 'high', label: t('settings.options.thinkingHigh') },
   ]
 
-  // OpenAI o-series reasoning summary levels — wire identifiers, same
-  // reasoning as THINKING_TYPES: they are API values, not prose.
   const REASONING_SUMMARIES: Array<{ value: string; label: string }> = [
     { value: '', label: t('settings.options.reasoningDefault') },
     { value: 'auto', label: 'auto' },
@@ -68,16 +61,12 @@ export function ProviderModelsEditor({ name, models, onChange, providerType }: P
     { value: 'concise', label: 'concise' },
   ]
 
-  // Tri-state: a BooleanInput cannot express "unset" (undefined = let the
-  // provider decide), so exclude goes through a select.
   const REASONING_EXCLUDE: Array<{ value: string; label: string }> = [
     { value: '', label: t('settings.options.reasoningDefault') },
     { value: 'yes', label: t('common.yes') },
     { value: 'no', label: t('common.no') },
   ]
 
-  // Merge a reasoning patch into a model, creating the ReasoningConfig when
-  // the model has none yet (spreading undefined yields an empty object).
   const withReasoning = (m: ProviderModelConfig, patch: ReasoningConfig): ProviderModelConfig => ({
     ...m,
     reasoning: { ...m.reasoning, ...patch },
@@ -208,7 +197,6 @@ export function ProviderModelsEditor({ name, models, onChange, providerType }: P
                   onChange={(v) =>
                     onChange({
                       ...models,
-                      // "" is the default — omit the key instead of writing it.
                       [key]: withReasoning(m, {
                         effort: v === '' ? undefined : (v as ReasoningConfig['effort']),
                       }),
@@ -246,7 +234,6 @@ export function ProviderModelsEditor({ name, models, onChange, providerType }: P
                   onChange={(v) =>
                     onChange({
                       ...models,
-                      // 0 means "no cap" — drop the key so the config stays clean.
                       [key]: withReasoning(m, { max_tokens: v || undefined }),
                     })
                   }
@@ -285,8 +272,6 @@ export function ProviderModelsEditor({ name, models, onChange, providerType }: P
                   onChange={(v) =>
                     onChange({
                       ...models,
-                      // "auto" is the default — keep the config clean by
-                      // omitting the key instead of writing it explicitly.
                       [key]: {
                         ...m,
                         thinking_type:

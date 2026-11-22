@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -17,15 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// Turn-marker tests for the Fase 2 resume checkpoints (turn_state.go). The
-// loops are built with newDurableInboundTestLoop (real bus + real SQLite in a
-// throwaway LELE_CONFIG_DIR), and durability is wired with the same
-// fakeDurability double the consume-side spool tests use: the gate only needs
-// a non-nil InboundDurability, not the real spool.
-
-// resumeOn flips both feature flags on a live loop: resume_enabled in the
-// config (the gate reads al.cfg() per turn, so the store swap takes effect)
-// and durability already wired by the caller.
 func resumeOn(t *testing.T, al *AgentLoop) {
 	t.Helper()
 	yes := true
@@ -35,9 +20,6 @@ func resumeOn(t *testing.T, al *AgentLoop) {
 	al.cfgPtr.Store(cfg)
 }
 
-// turnMarkerKV reads the raw marker row straight from the KV store, bypassing
-// the gate, so "no marker" assertions prove absence of the row and not just
-// the gate refusing to read it.
 func turnMarkerKV(t *testing.T, al *AgentLoop, sessionKey string) (string, bool) {
 	t.Helper()
 	repo := al.sessionStateKV()
@@ -51,7 +33,6 @@ func turnMarkerKV(t *testing.T, al *AgentLoop, sessionKey string) (string, bool)
 	return raw, ok
 }
 
-// countTurnKeys counts every sess:turn: row in the KV store.
 func countTurnKeys(t *testing.T, al *AgentLoop) int {
 	t.Helper()
 	repo := al.sessionStateKV()
@@ -64,10 +45,6 @@ func countTurnKeys(t *testing.T, al *AgentLoop) int {
 	}
 	return len(keys)
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Gate + helpers
-// ──────────────────────────────────────────────────────────────────────────────
 
 func TestTurnMarker_GateRequiresBothFlags(t *testing.T) {
 	provider := &countingMockProvider{response: "x"}
@@ -143,9 +120,6 @@ func TestTurnMarker_UpdateOnlyOutsideInbound(t *testing.T) {
 	resumeOn(t, al)
 
 	const sk = "telegram:7"
-	// Mid-turn phases without a seeded inbound_start must not create a marker:
-	// ProcessDirect/goal/cron turns never went through the spool, so there is
-	// nothing to replay them.
 	al.writeTurnMarker(sk, turnPhaseLLMWait, 3, nil)
 	if _, ok := turnMarkerKV(t, al, sk); ok {
 		t.Fatal("llm_wait created a marker with no inbound_start")
@@ -155,8 +129,6 @@ func TestTurnMarker_UpdateOnlyOutsideInbound(t *testing.T) {
 		t.Fatal("tools_running created a marker with no inbound_start")
 	}
 
-	// Once inbound_start exists, the same calls advance it in place and keep
-	// the seeded fields.
 	al.writeTurnMarker(sk, turnPhaseInbound, 0, func(m *TurnMarker) { m.DedupeID = "d-keep" })
 	al.writeTurnMarker(sk, turnPhaseLLMWait, 2, nil)
 
@@ -186,7 +158,6 @@ func TestTurnMarker_CorruptPayloadTreatedAsAbsent(t *testing.T) {
 	if _, ok := al.getTurnMarker(sk); ok {
 		t.Fatal("corrupt marker reported as present")
 	}
-	// getTurnMarker deletes the unreadable row.
 	if _, ok := turnMarkerKV(t, al, sk); ok {
 		t.Fatal("corrupt marker row was not deleted")
 	}
@@ -201,17 +172,14 @@ func TestClearTurnMarker_DedupeGuard(t *testing.T) {
 	const sk = "telegram:9"
 	al.writeTurnMarker(sk, turnPhaseInbound, 0, func(m *TurnMarker) { m.DedupeID = "turn-A" })
 
-	// A different turn announcing its end must not delete this marker.
 	al.clearTurnMarker(sk, "turn-B")
 	if _, ok := al.getTurnMarker(sk); !ok {
 		t.Fatal("clear with foreign dedupe deleted the marker")
 	}
-	// The matching turn may.
 	al.clearTurnMarker(sk, "turn-A")
 	if _, ok := al.getTurnMarker(sk); ok {
 		t.Fatal("clear with matching dedupe kept the marker")
 	}
-	// Empty dedupe is the unconditional reset.
 	al.writeTurnMarker(sk, turnPhaseInbound, 0, func(m *TurnMarker) { m.DedupeID = "turn-C" })
 	al.clearTurnMarker(sk, "")
 	if _, ok := al.getTurnMarker(sk); ok {
@@ -241,13 +209,6 @@ func TestSetResumeNoticeSent_PersistsFlag(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Integration through the real message pipeline
-// ──────────────────────────────────────────────────────────────────────────────
-
-// runTurnToCompletion drives one spooled inbound through AgentLoop.Run with a
-// provider that answers immediately, consuming the bus until the response and
-// turn.end are out.
 func runTurnToCompletion(t *testing.T, al *AgentLoop, msgBus *bus.MessageBus) bus.InboundMessage {
 	t.Helper()
 
@@ -260,8 +221,6 @@ func runTurnToCompletion(t *testing.T, al *AgentLoop, msgBus *bus.MessageBus) bu
 	if !msgBus.PublishInbound(msg) {
 		t.Fatal("inbound publish rejected")
 	}
-	// drainUntil stops exactly at turn.end, which Run's per-message defers
-	// publish last, so by then the turn (and its Finish) has fully unwound.
 	if !drainUntil(t, msgBus, 15*time.Second, "final answer") {
 		t.Fatal("turn produced no response")
 	}
@@ -273,7 +232,6 @@ func TestTurnMarker_FeatureOffWritesNoKeys(t *testing.T) {
 	provider := &countingMockProvider{response: "final answer"}
 	al, msgBus := newDurableInboundTestLoop(t, provider)
 	al.SetInboundDurability(&fakeDurability{})
-	// resume_enabled left at its default (off).
 
 	runTurnToCompletion(t, al, msgBus)
 
@@ -290,16 +248,11 @@ func TestTurnMarker_CompletedTurnClearsMarker(t *testing.T) {
 
 	msg := runTurnToCompletion(t, al, msgBus)
 
-	// The turn ended normally: the checkpoint must be gone, otherwise a future
-	// replay of any message on this session could be mistaken for a resume.
 	if _, ok := turnMarkerKV(t, al, msg.SessionKey); ok {
 		t.Fatal("marker still present after a completed turn")
 	}
 }
 
-// interruptedLoop runs a turn whose provider blocks forever, then tears the
-// loop down the way Shutdown does (running=false, then cancel) so the turn
-// dies mid-flight exactly like a crash would.
 func TestTurnMarker_CancelledTurnKeepsMarker(t *testing.T) {
 	provider := &blockingMockProvider{started: make(chan struct{})}
 	al, msgBus := newDurableInboundTestLoop(t, provider)
@@ -321,16 +274,12 @@ func TestTurnMarker_CancelledTurnKeepsMarker(t *testing.T) {
 		t.Fatal("provider never started the turn")
 	}
 
-	// Teardown ordering that means "crash": the flag drops first, then the
-	// context goes away.
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancelDrain()
 	_ = al.Shutdown(drainCtx)
 	cancelRun()
 	<-done
 
-	// The turn never finished, so the checkpoint must survive with the phase
-	// the loop had reached (llm_wait: the provider call was outstanding).
 	raw, ok := turnMarkerKV(t, al, msg.SessionKey)
 	if !ok {
 		t.Fatal("marker missing after a cancelled turn")
@@ -344,10 +293,6 @@ func TestTurnMarker_CancelledTurnKeepsMarker(t *testing.T) {
 	}
 }
 
-// TestTurnMarker_SurvivesStoreReopen proves the checkpoint really is durable:
-// a brand-new handle over the same SQLite file (what a restarted gateway
-// gets) reads back the marker the previous process wrote. The loop is built
-// on a caller-owned config dir so the test knows the database path.
 func TestTurnMarker_SurvivesStoreReopen(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", dir)
@@ -378,7 +323,6 @@ func TestTurnMarker_SurvivesStoreReopen(t *testing.T) {
 	const sk = "telegram:re-open"
 	al.writeTurnMarker(sk, turnPhaseInbound, 0, func(m *TurnMarker) { m.DedupeID = "d-reopen" })
 
-	// Same file, fresh handle: the state a restart would see.
 	reopened, err := store.Open(dir + "/lele.db")
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)

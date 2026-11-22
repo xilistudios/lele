@@ -1,23 +1,3 @@
-/**
- * SecretsPage — editing a stored secret.
- *
- * Before this, `/secrets` could create, reveal and delete a secret but not edit
- * one: fixing a typo in a description meant deleting and re-typing the secret.
- * Editing is now first class:
- *
- *  1. every card has an *Edit* button that opens the form prefilled with the
- *     secret's metadata (its value is never fetched to fill the form);
- *  2. the name is the keyring key, so it is shown but not editable;
- *  3. an empty value means "keep the stored secret", so the PUT carries the
- *     metadata only and the plaintext never round-trips through the browser;
- *  4. a non-empty value replaces it;
- *  5. the page sends the edit as `PUT /api/v1/secrets/{name}` — never the
- *     create endpoint, and never with a changed name.
- *
- * The test env boots i18n in Spanish, so labels are resolved through the same
- * keys the component uses (the house pattern).
- */
-
 import '../../test/setup'
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
@@ -50,7 +30,6 @@ const SECRET: SecretMeta = {
   created_by: 'tui',
 }
 
-/** Find a field by DOM id; throws instead of non-null asserting. */
 function field(id: string): HTMLInputElement {
   const el = document.getElementById(id)
   if (!el) throw new Error(`#${id} not found`)
@@ -65,7 +44,6 @@ function findButton(container: HTMLElement, label: string): HTMLButtonElement {
   return btn as HTMLButtonElement
 }
 
-/** Flush the mocked promises a component chain awaits (no timers). */
 async function flush(times = 4): Promise<void> {
   for (let i = 0; i < times; i++) {
     await act(async () => {
@@ -73,10 +51,6 @@ async function flush(times = 4): Promise<void> {
     })
   }
 }
-
-// ---------------------------------------------------------------------------
-// Modal contract
-// ---------------------------------------------------------------------------
 
 function renderModal(initial: SecretMeta | null = null) {
   const onSubmit = mock(async (_input: SecretInput) => {})
@@ -107,16 +81,13 @@ describe('SecretFormModal — edit mode', () => {
     expect(field('secret-name').disabled).toBe(true)
     expect(field('secret-desc').value).toBe('OpenAI key')
     expect(field('secret-tags').value).toBe('provider')
-    // The scope comes from the chips, preselected from the stored scope.
     expect(
       Array.from(container.querySelectorAll('[role="checkbox"]')).map((c) =>
         c.getAttribute('aria-checked'),
       ),
     ).toEqual(['true', 'false'])
-    // The value is deliberately not fetched: it starts empty and blank = keep.
     expect(field('secret-value').value).toBe('')
     expect(field('secret-value').placeholder).toBe(tr('secrets.valueKeepPlaceholder'))
-    // Edit submits with Save, not Create.
     expect(findButton(container, tr('common.save'))).not.toBeNull()
   })
 
@@ -153,8 +124,8 @@ describe('SecretFormModal — edit mode', () => {
 
   test('the scope can be edited from the chips', async () => {
     const view = renderModal(SECRET)
-    fireEvent.click(view.chips[0]) // coder off
-    fireEvent.click(view.chips[1]) // lele on
+    fireEvent.click(view.chips[0])
+    fireEvent.click(view.chips[1])
     await act(async () => clickLabel(view.container, tr('common.save')))
 
     expect(view.onSubmit.mock.calls[0][0].scope).toEqual(['lele'])
@@ -170,10 +141,6 @@ describe('SecretFormModal — edit mode', () => {
     expect(view.container.textContent).toContain(tr('secrets.errorValue'))
   })
 })
-
-// ---------------------------------------------------------------------------
-// Page wiring: Edit button → PUT
-// ---------------------------------------------------------------------------
 
 type UpdateCall = { name: string; input: Omit<SecretInput, 'name'> }
 
@@ -241,7 +208,6 @@ async function renderPage() {
       ),
     ),
   )
-  // Wait for the mounted hook to land the secret card.
   await flush()
   return { ...view, calls }
 }
@@ -285,7 +251,6 @@ describe('SecretsPage — editing a card', () => {
     await act(async () => clickLabel(view.container, tr('common.edit')))
     await flush()
 
-    // Revealing is what calls GET /secrets/{name}; opening the editor must not.
     expect(view.calls.get).toHaveLength(0)
     expect(field('secret-value').value).toBe('')
   })

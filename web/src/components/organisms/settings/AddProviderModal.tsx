@@ -7,23 +7,6 @@ import { Modal } from '../../atoms'
 import { CheckIcon, ChevronRightIcon } from '../../atoms/Icons'
 import { BooleanInput, SecretInput } from '../../molecules'
 
-// Source of truth for the Add-provider screen: the selectable types (curated,
-// in muscle-memory order) and the api_base pre-filled when a tile is picked.
-// Both are exported for tests.
-//
-// This list is NOT the full set of selectable providers: the grid is
-// `PROVIDER_TYPES ∪ catalog`, so every provider the backend knows
-// (`GET /api/v1/catalog/providers`, which serves `catalog.hardcodedProviderIDs`
-// offline) is selectable even when it is missing here (issue #404). The entries
-// below only earn their place by carrying something the catalog cannot:
-//
-//   - a curated label (the catalog says `OpenCode`/`Google` where the product
-//     says `OpenCode Zen`/`Gemini`),
-//   - a deliberate api_base override (see DEFAULT_API_BASE), or
-//   - no catalog id at all (`custom`, `claude-code`, `codex-cli`).
-//
-// Adding a provider type in Go therefore cannot hide it from this screen; see
-// TestCatalogProvidersEndpointServesEveryKnownType in pkg/channels.
 export const PROVIDER_TYPES = [
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
@@ -51,13 +34,6 @@ export const PROVIDER_TYPES = [
   { value: 'custom', label: 'OpenAI Compatible' },
 ]
 
-// Curated api_base overrides. A non-empty value here WINS over the catalog
-// (see the merge below); an empty or missing entry falls through to
-// `CatalogProvider.api_base`, which the backend fills from
-// `catalog.DefaultAPIBaseByType` for every known provider. Keeping only the
-// overrides here is what stops this table from drifting into a second copy of
-// the Go one (issue #404): a provider added in Go reaches the UI with its
-// endpoint, no matter what this map says.
 export const DEFAULT_API_BASE: Record<string, string> = {
   anthropic: 'https://api.anthropic.com/v1',
   openai: 'https://api.openai.com/v1',
@@ -75,10 +51,6 @@ export const DEFAULT_API_BASE: Record<string, string> = {
   alibaba: 'https://coding-intl.dashscope.aliyuncs.com/v1',
   alibaba_coding_plan: 'https://coding-intl.dashscope.aliyuncs.com/v1',
   shengsuanyun: 'https://router.shengsuanyun.com/api/v1',
-  // `zai` has no static tile: under the curated-first merge below, this value
-  // wins for the catalog entry (both carry the same URL today). It pairs with
-  // the coding plan below and must stay distinct from it: the coding plan
-  // lives under /api/coding/, NOT /api/.
   zai: 'https://api.z.ai/api/paas/v4',
   zai_coding_plan: 'https://api.z.ai/api/coding/paas/v4',
   modelark_coding_plan: 'https://ark.ap-southeast.bytepluses.com/api/coding/v3',
@@ -90,20 +62,9 @@ export const DEFAULT_API_BASE: Record<string, string> = {
   custom: '',
 }
 
-/**
- * The key field starts in `literal` mode so `#new-provider-api-key` is in the DOM
- * the moment the modal opens (SecretInput renders no input at all in `empty`
- * mode). A blank literal is normalised back to `empty` at add time, see
- * `handleAdd`.
- */
 const INITIAL_API_KEY: SecretValue = { mode: 'literal', value: '', has_env_var: false }
 
-/**
- * One chooser tile. Derived from the static list plus the (optional) catalog,
- * never stored in state.
- */
 type ProviderTile = {
-  /** The config provider type: a static value or a catalog `id`. */
   type: string
   label: string
   apiBase: string
@@ -116,7 +77,6 @@ type Props = {
   onClose: () => void
 }
 
-/** `Claude Code (CLI)` -> `claude-code-cli`; `''` when nothing alphanumeric is left. */
 function toSlug(value: string): string {
   return value
     .toLowerCase()
@@ -124,7 +84,6 @@ function toSlug(value: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
-/** Append `-2`, `-3`, ... until `base` is free among `existingNames`. */
 function dedupeName(base: string, existingNames: string[]): string {
   const taken = new Set(existingNames)
   let name = base
@@ -136,32 +95,10 @@ function dedupeName(base: string, existingNames: string[]): string {
   return name
 }
 
-/**
- * Keep only `[A-Za-z0-9_-]` from a typed provider name. A `.` would split the
- * dotted path (`providers.<name>.api_base`) that `setValueAtPath` walks on the
- * next edit of this provider (useSettingsConfig.ts), silently corrupting the
- * entry; the other dropped characters are removed, not replaced.
- */
 function sanitizeProviderName(raw: string): string {
   return raw.replace(/[^A-Za-z0-9_-]/g, '').trim()
 }
 
-/**
- * Derive the config key (`providers.<name>`) for a new provider: slug the *type*
- * (the stable identifier the user will see next to the entry in ProvidersSettings),
- * fall back to the label, then to `provider`, and de-duplicate against the names
- * already in the draft with a `-2`, `-3` suffix.
- *
- * Pure so it can be unit-tested. Note the dedupe runs against *every* existing
- * key, including the empty stubs a shipped config carries: adding Anthropic on
- * top of an existing `anthropic` stub yields `anthropic-2` rather than silently
- * overwriting it.
- *
- * The type wins over the label on purpose: `('claude-code', 'Claude Code (CLI)')`
- * must yield `claude-code`, not `claude-code-cli`. For the `custom` tile the
- * caller passes `effectiveType` — the user-typed type — so a private gateway
- * gets its own name instead of the "OpenAI Compatible" brand slug.
- */
 export function uniqueProviderName(type: string, label: string, existingNames: string[]): string {
   const slug = toSlug(type) || toSlug(label) || 'provider'
   return dedupeName(slug, existingNames)
@@ -171,9 +108,6 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
   const { api, draftConfig, updateField, t } = useSettings()
 
   const [query, setQuery] = useState('')
-  // A key prefix only *mirrors* a selection: until the user clicks a tile the
-  // selection is `detectProviderFromKey(key)`, so clearing the key clears the
-  // tile too. A manual click freezes the choice for the rest of the session.
   const [pickedType, setPickedType] = useState('')
   const [userPicked, setUserPicked] = useState(false)
   const [customType, setCustomType] = useState('')
@@ -185,16 +119,10 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
   const [webSearch, setWebSearch] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [catalog, setCatalog] = useState<CatalogProvider[]>([])
-  // SecretInput is remounted (via React `key`) whenever a tile is clicked: React
-  // only honours `autoFocus` at mount, so bumping this counter is what actually
-  // moves the caret into the key field.
   const [keyFieldMount, setKeyFieldMount] = useState(0)
 
   const searchRef = useRef<HTMLInputElement>(null)
 
-  // The catalog only enriches the static list; a failure is silent because the
-  // static tiles are enough to add a provider. ApiClient takes no AbortSignal,
-  // hence the `cancelled` flag for resolves that land after close.
   useEffect(() => {
     if (!isOpen) return
     let cancelled = false
@@ -203,15 +131,12 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
       .then((res) => {
         if (!cancelled) setCatalog(res.providers ?? [])
       })
-      .catch(() => {
-        /* silent by contract: the static list stays */
-      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
   }, [isOpen, api])
 
-  // Only setters inside, so the identity is stable and the effect below can list it.
   const resetForm = useCallback(() => {
     setQuery('')
     setPickedType('')
@@ -227,17 +152,12 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
     setKeyFieldMount(0)
   }, [])
 
-  // Reset on open as well as on close: a session cancelled via Escape/backdrop
-  // from a parent that keeps the component mounted must not leak its edits.
   useEffect(() => {
     if (!isOpen) return
     resetForm()
     searchRef.current?.focus()
   }, [isOpen, resetForm])
 
-  // Derived first because the tile grid can depend on it (detected-tile
-  // synthesis below). A key prefix only *mirrors* a selection until the user
-  // clicks a tile; `userPicked` freezes it for the rest of the session.
   const selectedType = userPicked ? pickedType : detectProviderFromKey(apiKey.value ?? '') || ''
   const effectiveType = selectedType === 'custom' ? customType.trim() : selectedType
 
@@ -251,30 +171,7 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
         source: 'static',
       })
     }
-    // The catalog `id` IS the config provider type. Its `type` field is only a
-    // transport hint and is never read here.
-    //
-    // Precedence: the curated static values WIN, the catalog only fills gaps —
-    // `label` = static label -> catalog name -> display-name fallback;
-    // `apiBase` = non-empty DEFAULT_API_BASE -> catalog api_base. The catalog
-    // still supplies `modelCount`, and everything for catalog-only ids (that
-    // is the point of the merge). Catalog-first was a regression: the curated
-    // `github_copilot` base (`localhost:4321`) is the gRPC CLI bridge passed to
-    // `copilot.ClientOptions{CLIUrl}`, while the catalog's
-    // `https://api.githubcopilot.com/v1` is an HTTP endpoint — feeding it to
-    // the provider makes it unable to start. Labels drift the same way (the
-    // catalog says `OpenCode`/`Google` where the curated list says
-    // `OpenCode Zen`/`Gemini`).
-    //
-    // The catalog api_base is what makes a provider added in Go selectable AND
-    // completable here without touching this file (issue #404): the backend
-    // fills it from `catalog.DefaultAPIBaseByType` for every known id, so a
-    // catalog-only tile pre-fills its endpoint instead of an empty field.
     for (const provider of catalog) {
-      // A blank id would make a tile with an empty `data-provider-type`, and an
-      // empty tile type matches the unselected `selectedType === ''` — the tile
-      // would render permanently pressed. There is no provider to add without
-      // an id, so the entry is dropped instead.
       if (!provider.id) continue
       const current = byType.get(provider.id)
       byType.set(provider.id, {
@@ -288,12 +185,6 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
         source: current ? 'both' : 'catalog',
       })
     }
-    // A key-detected provider can outpace the grid: `xai`/`perplexity` are
-    // catalog-only, so while the fetch is pending (or failed) there is no tile
-    // to light up even though Add is enabled. Synthesize one right after the
-    // static tiles so the selection is visible and filterable; once the
-    // catalog supplies the real entry the merge above wins and this branch
-    // stops firing — deduped through the same map, never a second tile.
     if (selectedType !== '' && !byType.has(selectedType)) {
       byType.set(selectedType, {
         type: selectedType,
@@ -318,28 +209,16 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
   }, [tiles, query])
 
   const selectedTile = tiles.find((tile) => tile.type === selectedType)
-  // The API key never gates Add: keyless local/CLI providers are first class and
-  // the backend decides at use time.
-  //
-  // Never let Add act on a tile the filter hid: a selection that is not in
-  // `filteredTiles` is invisible, so the button would write a provider the user
-  // cannot see (paste an Anthropic key, filter to `groq`, click Add ->
-  // Anthropic). Gated on the *tile*, not on `effectiveType`, because the custom
-  // tile's written type is the user-typed string and never appears in the grid.
   const canAdd =
     !!draftConfig &&
     effectiveType !== '' &&
     filteredTiles.some((tile) => tile.type === selectedType)
 
-  // The name the add would use while the Advanced field is left empty. Shown
-  // as that field's placeholder so the live default is visible (spec §2.5).
   const providersDraft = draftConfig?.providers ?? {}
   const tileLabel =
     selectedType === 'custom' ? effectiveType : (selectedTile?.label ?? effectiveType)
   const derivedName = uniqueProviderName(effectiveType, tileLabel, Object.keys(providersDraft))
 
-  // api_base follows the tile until the user types their own, so switching tiles
-  // cannot clobber a hand-written endpoint.
   useEffect(() => {
     if (apiBaseEdited) return
     setApiBase(selectedTile?.apiBase ?? '')
@@ -352,11 +231,6 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
   }
 
   const handleSecretChange = (next: SecretValue) => {
-    // SecretInput clears `value` when the mode flips (literal -> env/empty),
-    // which would silently drop a key-detected selection mid-flow and grey
-    // out Add. A mode change therefore freezes the current selection; typing
-    // within one mode keeps the mirror (C8: clearing the text still clears a
-    // detected pick).
     if (next.mode !== apiKey.mode && selectedType !== '') {
       setUserPicked(true)
       setPickedType(selectedType)
@@ -372,9 +246,6 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
   const handleAdd = () => {
     if (!canAdd || !draftConfig) return
 
-    // Normalise before writing: ProvidersSettings classifies a provider as empty
-    // by `api_key.mode === 'empty'`, so a blank literal/env must be persisted as
-    // "no secret" instead of an empty secret.
     const secret: SecretValue =
       apiKey.mode === 'literal' && (apiKey.value ?? '').trim() !== ''
         ? { mode: 'literal', value: apiKey.value, has_env_var: false }
@@ -382,11 +253,6 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
           ? { mode: 'env', env_name: apiKey.env_name, has_env_var: true }
           : { mode: 'empty', has_env_var: false }
 
-    // A typed draft is sanitized (a dot would corrupt the dotted paths the
-    // next ProvidersSettings edit walks) and then deduped with the same
-    // -2/-3 rule as the derived name, so typing an existing provider's name
-    // creates `anthropic-2` instead of silently overwriting `anthropic`.
-    // A draft that sanitizes to nothing falls back to the derived name.
     const draftName = sanitizeProviderName(nameDraft)
     const name = draftName ? dedupeName(draftName, Object.keys(providersDraft)) : derivedName
 
@@ -421,7 +287,6 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
       size="lg"
     >
       <div className="space-y-4 p-6">
-        {/* The tile grid owns the only scrollbar (R3), so the modal body itself does not scroll in the normal case and the filter needs no sticky. */}
         <div className="-mx-6 -mt-6 mb-2 border-b border-border bg-background-primary px-6 py-3">
           <input
             ref={searchRef}
@@ -517,9 +382,6 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
             <p className="text-xs text-text-tertiary">
               {t('settings.addProviderModal.apiKeyHint')}
             </p>
-            {/* The key field sits below the grid, so a key-detected tile can be
-                off-screen when it lights up: name the detected provider right
-                here instead. No new locale key — the label is the tile's own. */}
             {selectedType !== '' && (
               <span
                 data-detected-provider={selectedType}
@@ -580,7 +442,6 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
                   type="text"
                   value={apiBase}
                   onChange={(e) => {
-                    // Once the user owns the value, tile switches must not touch it.
                     setApiBaseEdited(true)
                     setApiBase(e.target.value)
                   }}

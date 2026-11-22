@@ -22,7 +22,6 @@ func TestBuildParams_NoCacheControlByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildParams: %v", err)
 	}
-	// Zero cache_control must appear anywhere in the serialized payload.
 	b, _ := json.Marshal(params)
 	if got := string(b); containsCacheControl(got) {
 		t.Errorf("cache_control present without prompt_cache option: %s", got)
@@ -49,7 +48,6 @@ func TestBuildParams_CacheBreakpoints(t *testing.T) {
 		t.Fatalf("buildParams: %v", err)
 	}
 
-	// System: last block carries the breakpoint.
 	if n := len(params.System); n == 0 {
 		t.Fatal("no system blocks")
 	} else {
@@ -62,7 +60,6 @@ func TestBuildParams_CacheBreakpoints(t *testing.T) {
 		}
 	}
 
-	// Tools: breakpoint only on the last tool.
 	if len(params.Tools) != 2 {
 		t.Fatalf("tools = %d, want 2", len(params.Tools))
 	}
@@ -73,7 +70,6 @@ func TestBuildParams_CacheBreakpoints(t *testing.T) {
 		t.Error("last tool must carry the breakpoint")
 	}
 
-	// History: breakpoint on last text block of the final message.
 	lastMsg := params.Messages[len(params.Messages)-1]
 	tb := lastMsg.Content[len(lastMsg.Content)-1].OfText
 	if tb == nil || tb.CacheControl.Type != "ephemeral" {
@@ -87,7 +83,6 @@ func TestBuildParams_CacheBreakpoints(t *testing.T) {
 		}
 	}
 
-	// Wire format check: cache_control objects serialize with type+ttl.
 	b, _ := json.Marshal(params)
 	if !containsCacheControl(string(b)) {
 		t.Fatalf("serialized params missing cache_control: %s", b)
@@ -95,8 +90,6 @@ func TestBuildParams_CacheBreakpoints(t *testing.T) {
 }
 
 func TestApplyCacheBreakpoints_SkipsToolResultTail(t *testing.T) {
-	// Final message is a tool result (no text blocks): no history breakpoint,
-	// but system/tools breakpoints must still be applied.
 	params := anthropic.MessageNewParams{}
 	params.System = []anthropic.TextBlockParam{{Text: "sys"}}
 	params.Messages = []anthropic.MessageParam{
@@ -140,7 +133,6 @@ func TestParseResponse_UsageCacheTokens(t *testing.T) {
 	if u.CacheCreationInputTokens != 500 {
 		t.Errorf("CacheCreationInputTokens = %d, want 500", u.CacheCreationInputTokens)
 	}
-	// PromptTokens must include cached input (true context size).
 	if u.PromptTokens != 100+8000+500 {
 		t.Errorf("PromptTokens = %d, want 8600", u.PromptTokens)
 	}

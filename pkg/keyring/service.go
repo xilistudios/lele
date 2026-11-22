@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// Common errors returned by the Service.
 var (
 	ErrNotFound      = errors.New("keyring: secret not found")
 	ErrAccessDenied  = errors.New("keyring: access denied by scope")
@@ -16,22 +15,16 @@ var (
 	ErrDisabled      = errors.New("keyring: module is disabled")
 )
 
-// ServiceConfig holds the tunables for a Service.
 type ServiceConfig struct {
 	Enabled          bool
 	VaultPath        string
-	Backend          string // "auto", "keychain", "file"
+	Backend          string
 	AuditLogSize     int
 	AllowAgentSet    bool
 	AllowAgentDelete bool
 	LeleDir          string
 }
 
-// Service is the business-logic layer for the keyring. It owns the store and
-// key provider, enforces scoped access control, and records an audit trail.
-//
-// The store is opened lazily on first access; there is no interactive unlock
-// step because the master key comes from the OS keychain or a protected file.
 type Service struct {
 	cfg     ServiceConfig
 	store   Store
@@ -43,8 +36,6 @@ type Service struct {
 	openErr    error
 }
 
-// NewService creates a Service from the given configuration. The store and key
-// provider are constructed but not opened until first use.
 func NewService(cfg ServiceConfig) *Service {
 	if cfg.AuditLogSize <= 0 {
 		cfg.AuditLogSize = 1000
@@ -60,8 +51,6 @@ func NewService(cfg ServiceConfig) *Service {
 	}
 }
 
-// NewServiceWithDeps creates a Service with explicit store and key provider.
-// Primarily useful for tests.
 func NewServiceWithDeps(cfg ServiceConfig, store Store, keyProv KeyProvider) *Service {
 	if cfg.AuditLogSize <= 0 {
 		cfg.AuditLogSize = 1000
@@ -81,7 +70,6 @@ func defaultVaultPath(leleDir string) string {
 	return leleDir + "/keyring.enc"
 }
 
-// EnsureOpen lazily opens the store on first access.
 func (s *Service) EnsureOpen() error {
 	if !s.cfg.Enabled {
 		return ErrDisabled
@@ -97,7 +85,6 @@ func (s *Service) EnsureOpen() error {
 	return s.openErr
 }
 
-// Backend returns the active key provider backend name ("keychain" or "file").
 func (s *Service) Backend() string {
 	if s.keyProv == nil {
 		return ""
@@ -105,20 +92,10 @@ func (s *Service) Backend() string {
 	return s.keyProv.Backend()
 }
 
-// Enabled reports whether the module is enabled in configuration. A disabled
-// Service answers ErrDisabled from every operation, so a subsystem that adapts
-// it (an internal vault, a resolver) checks this FIRST and degrades to its own
-// unencrypted path instead of failing every write. A nil receiver is not
-// enabled.
 func (s *Service) Enabled() bool {
 	return s != nil && s.cfg.Enabled
 }
 
-// LeleDir returns the lele directory this Service was built for: the directory
-// its vault file and master key default to, and the identity a caller compares
-// against before handing the Service to a subsystem that only knows a directory
-// string. It is NOT the vault path (that one may be configured elsewhere), so a
-// caller never mistakes "this vault" for "this installation".
 func (s *Service) LeleDir() string {
 	if s == nil {
 		return ""
@@ -126,8 +103,6 @@ func (s *Service) LeleDir() string {
 	return s.cfg.LeleDir
 }
 
-// GetForAgent retrieves a secret value on behalf of an agent, enforcing scope
-// restrictions and recording an audit entry.
 func (s *Service) GetForAgent(name, agentID, sessionKey string) (string, error) {
 	if err := s.EnsureOpen(); err != nil {
 		return "", err
@@ -154,8 +129,6 @@ func (s *Service) GetForAgent(name, agentID, sessionKey string) (string, error) 
 	return sec.Value, nil
 }
 
-// GetRaw retrieves a secret value without scope checks. Intended for UI
-// "reveal" actions and config placeholder resolution, not for agent access.
 func (s *Service) GetRaw(name string) (string, error) {
 	if err := s.EnsureOpen(); err != nil {
 		return "", err
@@ -172,23 +145,14 @@ func (s *Service) GetRaw(name string) (string, error) {
 	return sec.Value, nil
 }
 
-// SetFromUI stores or updates a secret from a UI source ("tui" or "webui").
 func (s *Service) SetFromUI(name, value, description string, tags, scope []string, source string) error {
 	return s.set(name, value, description, tags, scope, source, false)
 }
 
-// UpdateFromUI edits an existing secret from a UI source ("tui" or "webui").
-// Unlike SetFromUI it never creates one: a name that is not stored returns
-// ErrNotFound. An empty value keeps the stored plaintext, so the UI can edit
-// the metadata (description, tags, scope) without a round trip of the secret
-// value through the browser, and the original creator is preserved because
-// editing is not creating.
 func (s *Service) UpdateFromUI(name, value, description string, tags, scope []string, source string) error {
 	return s.set(name, value, description, tags, scope, source, true)
 }
 
-// SetFromAgent stores a secret on behalf of an agent. It is gated by the
-// AllowAgentSet configuration flag.
 func (s *Service) SetFromAgent(name, value, description string, tags, scope []string, agentID, sessionKey string) error {
 	if !s.cfg.AllowAgentSet {
 		s.record(name, agentID, sessionKey, "set", false)
@@ -202,11 +166,6 @@ func (s *Service) SetFromAgent(name, value, description string, tags, scope []st
 	return nil
 }
 
-// set writes a secret under the service lock. When mustExist is true the call
-// is an edit: the secret has to be stored already, an empty value means "keep
-// the stored one", and the original CreatedAt/CreatedBy survive. When it is
-// false the call is a store-or-update, which is what creating a secret from the
-// UIs and from an agent does.
 func (s *Service) set(name, value, description string, tags, scope []string, source string, mustExist bool) error {
 	if err := s.EnsureOpen(); err != nil {
 		return err
@@ -243,8 +202,6 @@ func (s *Service) set(name, value, description string, tags, scope []string, sou
 			sec.CreatedBy = existing.CreatedBy
 		}
 		if mustExist {
-			// Editing: the creator is immutable and an empty value means the
-			// editor did not touch the plaintext.
 			sec.CreatedBy = existing.CreatedBy
 			if sec.Value == "" {
 				sec.Value = existing.Value
@@ -260,13 +217,10 @@ func (s *Service) set(name, value, description string, tags, scope []string, sou
 	return s.store.Flush()
 }
 
-// DeleteFromUI removes a secret from a UI source.
 func (s *Service) DeleteFromUI(name, source string) error {
 	return s.delete(name)
 }
 
-// DeleteFromAgent removes a secret on behalf of an agent. It is gated by the
-// AllowAgentDelete configuration flag.
 func (s *Service) DeleteFromAgent(name, agentID, sessionKey string) error {
 	if !s.cfg.AllowAgentDelete {
 		s.record(name, agentID, sessionKey, "delete", false)
@@ -296,8 +250,6 @@ func (s *Service) delete(name string) error {
 	return s.store.Flush()
 }
 
-// ListForAgent returns metadata for all secrets visible to the given agent.
-// Secrets with a non-empty scope that excludes the agent are omitted.
 func (s *Service) ListForAgent(agentID string) ([]SecretMeta, error) {
 	if err := s.EnsureOpen(); err != nil {
 		return nil, err
@@ -326,7 +278,6 @@ func (s *Service) ListForAgent(agentID string) ([]SecretMeta, error) {
 	return out, nil
 }
 
-// ListAll returns metadata for all secrets regardless of scope.
 func (s *Service) ListAll() ([]SecretMeta, error) {
 	if err := s.EnsureOpen(); err != nil {
 		return nil, err
@@ -336,7 +287,6 @@ func (s *Service) ListAll() ([]SecretMeta, error) {
 	return s.store.List()
 }
 
-// Search finds secrets matching a query across name, tags, and description.
 func (s *Service) Search(query string) ([]SecretMeta, error) {
 	if err := s.EnsureOpen(); err != nil {
 		return nil, err
@@ -346,12 +296,10 @@ func (s *Service) Search(query string) ([]SecretMeta, error) {
 	return s.store.Search(query)
 }
 
-// AuditLog returns the recorded access records in chronological order.
 func (s *Service) AuditLog() []AccessRecord {
 	return s.audit.Records()
 }
 
-// Count returns the number of stored secrets.
 func (s *Service) Count() int {
 	if err := s.EnsureOpen(); err != nil {
 		return 0
@@ -365,7 +313,6 @@ func (s *Service) Count() int {
 	return len(metas)
 }
 
-// Status returns a small summary suitable for UI status bars / API responses.
 func (s *Service) Status() map[string]interface{} {
 	return map[string]interface{}{
 		"enabled": s.cfg.Enabled,
@@ -374,7 +321,6 @@ func (s *Service) Status() map[string]interface{} {
 	}
 }
 
-// record appends an audit entry.
 func (s *Service) record(secretName, agentID, sessionKey, action string, granted bool) {
 	if s.audit == nil {
 		return

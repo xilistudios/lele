@@ -4,21 +4,6 @@ import { cleanup, renderHook } from '@testing-library/react'
 import { type ReactNode, StrictMode, createElement } from 'react'
 import { useAppViewportHeight } from './useAppViewportHeight'
 
-/**
- * Contract of `useAppViewportHeight` (see the hook's doc comment).
- *
- * The hook owns exactly one side effect: an inline `--app-vh` on
- * `<html>` that exists ONLY while an on-screen keyboard shrinks the visual
- * viewport below the layout viewport. Everything else — no keyboard, pinch
- * zoom, unsupported browser, unmount — must leave the property absent so the
- * stylesheet's `dvh` value stands. Each case below is written so that the
- * mutation named in its comment turns it red.
- *
- * The property is process-wide (`document.documentElement` outlives the test),
- * so every case starts from a clean slate and `afterEach` removes it: a leak
- * would poison `App.test.tsx`, which renders `App` and therefore this hook.
- */
-
 type Listener = () => void
 
 type VvStub = {

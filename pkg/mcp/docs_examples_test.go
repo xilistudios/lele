@@ -1,14 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-//
-// T12: documentation guard. Every ```json block in docs/mcp.md must parse as
-// a real mcp.json document, validate cleanly and, as a set, cover the four
-// documented shapes (stdio, http, sse, disabled) — the reference cannot rot
-// silently.
-
 package mcp
 
 import (
@@ -18,9 +7,6 @@ import (
 	"testing"
 )
 
-// fenceMarker reports whether trimmed starts a fenced block. It returns the
-// length of the backtick run and the info string after it ("" for a bare
-// closing fence).
 func fenceMarker(trimmed string) (n int, info string, ok bool) {
 	if !strings.HasPrefix(trimmed, "```") {
 		return 0, "", false
@@ -31,11 +17,6 @@ func fenceMarker(trimmed string) (n int, info string, ok bool) {
 	return n, strings.TrimSpace(trimmed[n:]), true
 }
 
-// jsonFencedBlocks extracts the contents of every ```json fenced block in
-// doc, honouring CommonMark fence lengths: a fence opened with N backticks
-// closes only with a bare line of >= N backticks, so sample outputs that nest
-// ```json blocks (which must be opened with 4+ backticks) never leak their
-// inner fences into the result.
 func jsonFencedBlocks(doc string) []string {
 	var (
 		blocks   []string
@@ -62,11 +43,6 @@ func jsonFencedBlocks(doc string) []string {
 	return blocks
 }
 
-// TestDocsMCPExamplesAreValidMCPConfigs reads ../../docs/mcp.md and treats
-// every ```json fence as an mcp.json example: it must unmarshal into File,
-// contain at least one mcpServers entry and pass validation. Across the file
-// all four documented shapes must appear (stdio command, http url, sse type,
-// disabled flag), so the examples can neither break nor quietly disappear.
 func TestDocsMCPExamplesAreValidMCPConfigs(t *testing.T) {
 	const docPath = "../../docs/mcp.md"
 	data, err := os.ReadFile(docPath)

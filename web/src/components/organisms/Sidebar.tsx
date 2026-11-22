@@ -69,7 +69,6 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
     )
   }, [sessions, selectedKey, chatMode])
 
-  // Only show current session on chat pages
   const currentSession = isOnChatPage
     ? (sortedSessions.find((s) => s.key === selectedKey) ?? sortedSessions[0] ?? null)
     : null
@@ -132,7 +131,6 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
     </button>
   )
 
-  // Icon-only rail row (collapsed sidebar) with a hover tooltip.
   const renderRailRow = (item: NavRowItem) => (
     <div key={item.path} className="group relative flex items-center justify-center">
       <IconButton
@@ -202,7 +200,6 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
               </span>
             </div>
           )}
-          {/* Mobile-only close button */}
           <IconButton
             onClick={onClose}
             ariaLabel={t('common.close')}

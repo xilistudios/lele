@@ -1,12 +1,3 @@
-/**
- * Upload failures must be visible — including the PARTIAL ones.
- *
- * `POST /api/v1/upload` walks the files and `continue`s past the ones it cannot
- * store (`pkg/channels/upload.go`), so its response may carry FEWER paths than
- * were requested. The composer only warned when NOTHING uploaded, which made
- * "2 of 3 files landed" indistinguishable from success: the user saw the chips
- * appear, not the silent loss of the third file.
- */
 import '../../test/setup'
 import '../../test/i18n'
 
@@ -21,7 +12,6 @@ function fileInput(): HTMLInputElement {
   return input as HTMLInputElement
 }
 
-/** The component only counts the File objects; their content is irrelevant. */
 function fakeFiles(count: number): File[] {
   return Array.from({ length: count }, (_, i) => new File(['x'], `file-${i}.png`))
 }
@@ -30,10 +20,6 @@ function alertText(): string | null {
   return document.querySelector('[role="alert"]')?.textContent ?? null
 }
 
-/**
- * Pick `count` files and let the async upload settle. `act` is required because
- * the handler updates state after its `await`.
- */
 async function pickFiles(count: number) {
   await act(async () => {
     fireEvent.change(fileInput(), { target: { files: fakeFiles(count) } })
@@ -41,7 +27,6 @@ async function pickFiles(count: number) {
   })
 }
 
-/** Render the input with an upload stub and record what gets attached. */
 function renderInput(onUpload: () => Promise<string[]>) {
   const attached: string[][] = []
   render(<AttachmentInput onUpload={onUpload} onAttach={(paths) => attached.push(paths)} />)
@@ -65,9 +50,7 @@ describe('AttachmentInput — upload outcomes', () => {
 
     await pickFiles(3)
 
-    // The warning names the loss…
     expect(alertText()).toBe(i18n.t('chat.uploadPartial', { failed: 1, total: 3 }) as string)
-    // …and the files that DID upload are still attached (never discarded).
     expect(attached).toEqual([['/a/one.png', '/a/two.png']])
   })
 

@@ -1,9 +1,3 @@
-// Command smokeserver is a minimal MCP stdio server used by the manual T12
-// smoke documented in docs/mcp.md ("Manual smoke"). It exposes a single
-// "echo" tool that answers "smoke:<message>", which is what the smoke
-// asserts end to end through lele's production dialer.
-//
-// It lives under testdata so `go build ./...`, vet and CI never pick it up.
 package main
 
 import (

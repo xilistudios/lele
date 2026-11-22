@@ -20,7 +20,6 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		return fmt.Errorf("message is nil")
 	}
 
-	// Deduplication: check if we've already processed this message
 	messageKey := fmt.Sprintf("%d:%d", message.Chat.ID, message.MessageID)
 	if c.isDuplicate(messageKey) {
 		logger.DebugCF("telegram", "Duplicate message ignored", map[string]interface{}{
@@ -189,7 +188,6 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 
 	metadata := buildTelegramMetadata(message.MessageID, user, message.Chat)
 
-	// Resolve session key through the routing system (unified cross-channel).
 	peerKind := metadata["peer_kind"]
 	peerID := metadata["peer_id"]
 	sessionKey := c.resolveSessionKey(peerKind, peerID)
@@ -198,13 +196,7 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	return nil
 }
 
-// handleInboundDropped undoes the user-visible side effects that handleMessage
-// starts before publishing to the bus (typing indicator + "Thinking... 💭"
-// placeholder). When the bus rejects a message there will never be an outbound
-// reply to clean them up, so the user would see a stuck indicator/placeholder.
-// Wired as BaseChannel.InboundDroppedHook in NewTelegramChannel.
 func (c *TelegramChannel) handleInboundDropped(msg bus.InboundMessage) {
-	// metadata["message_id"] carries the user message id as a string.
 	var messageID string
 	if msg.Metadata != nil {
 		messageID = msg.Metadata["message_id"]
@@ -217,7 +209,6 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		return fmt.Errorf("message is nil")
 	}
 
-	// Deduplication: check if we've already processed this message
 	messageKey := fmt.Sprintf("%d:%d", message.Chat.ID, message.MessageID)
 	if c.isDuplicate(messageKey) {
 		logger.DebugCF("telegram", "Duplicate command ignored", map[string]interface{}{
@@ -236,7 +227,6 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 	senderID := fmt.Sprintf("%d", user.ID)
 	chatID := message.Chat.ID
 
-	// Resolve session key through the routing system (unified cross-channel).
 	peerKind, peerID := telegramPeerInfo(message)
 	sessionKey := c.resolveSessionKey(peerKind, peerID)
 
@@ -343,7 +333,6 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 }
 
 func (c *TelegramChannel) sendReplyText(ctx context.Context, message *telego.Message, text string) error {
-	// Convert Markdown to HTML for proper formatting
 	htmlText := markdownToTelegramHTML(text)
 	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
 		ChatID:    telego.ChatID{ID: message.Chat.ID},
@@ -393,8 +382,6 @@ func telegramSenderID(userID int64, username string) string {
 	return senderID
 }
 
-// resolveSessionKey resolves the session key through the routing system.
-// Falls back to legacy telegram:<chatID> format if agentLoop is nil.
 func (c *TelegramChannel) resolveSessionKey(peerKind, peerID string) string {
 	if c.agentLoop != nil {
 		return c.agentLoop.ResolveRoute("telegram", peerKind, peerID)
@@ -402,8 +389,6 @@ func (c *TelegramChannel) resolveSessionKey(peerKind, peerID string) string {
 	return telegramSessionKeyLegacy(peerKind, peerID)
 }
 
-// telegramSessionKeyLegacy generates the legacy session key when the routing
-// system is not available (e.g. in tests without agentLoop).
 func telegramSessionKeyLegacy(peerKind, peerID string) string {
 	if peerKind == "group" {
 		return fmt.Sprintf("telegram:%s", peerID)
@@ -411,7 +396,6 @@ func telegramSessionKeyLegacy(peerKind, peerID string) string {
 	return fmt.Sprintf("telegram:%s", peerID)
 }
 
-// telegramPeerInfo extracts peer kind and peer ID from a Telegram message.
 func telegramPeerInfo(message *telego.Message) (peerKind string, peerID string) {
 	if message == nil {
 		return "direct", ""

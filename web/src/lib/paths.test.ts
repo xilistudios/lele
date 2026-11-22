@@ -20,7 +20,7 @@ describe('expandHomeDisplay (display only)', () => {
     setHomeDir('/home/alfredo')
     expect(expandHomeDisplay('/srv/lele')).toBe('/srv/lele')
     expect(expandHomeDisplay('relative/dir')).toBe('relative/dir')
-    expect(expandHomeDisplay('~user/x')).toBe('~user/x') // backend does not support it either
+    expect(expandHomeDisplay('~user/x')).toBe('~user/x')
     expect(expandHomeDisplay('')).toBe('')
   })
 

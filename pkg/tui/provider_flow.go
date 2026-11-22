@@ -6,21 +6,16 @@ import (
 	"github.com/xilistudios/lele/pkg/catalog"
 )
 
-// providerPreset describes a known provider type offered in the /connect
-// flow. Choosing a preset fills in the API base URL automatically and gives
-// the user a hint about what API key is expected.
 type providerPreset struct {
-	typ               string // value stored in config (NamedProviderConfig.Type)
-	label             string // human-friendly label shown in the picker
-	apiBase           string // default API base URL ("" = leave blank)
-	keyHint           string // hint shown next to the API Key step
-	modelHint         string // hint shown next to the Model alias step
-	defaultModel      string // default actual model name to pre-fill
-	defaultModelAlias string // default model alias to pre-fill
+	typ               string
+	label             string
+	apiBase           string
+	keyHint           string
+	modelHint         string
+	defaultModel      string
+	defaultModelAlias string
 }
 
-// catalogPreset builds a providerPreset from the catalog, pulling the default
-// API base and the first catalog model when available.
 func catalogPreset(typ, label, keyHint, modelHint string) providerPreset {
 	p := providerPreset{
 		typ:       typ,
@@ -36,9 +31,6 @@ func catalogPreset(typ, label, keyHint, modelHint string) providerPreset {
 	return p
 }
 
-// providerPresets is the ordered list of known providers offered in /connect.
-// Keep in sync with pkg/providers/factory.go defaultAPIBaseByType so the
-// auto-filled base URL matches what the backend would use.
 var providerPresets = []providerPreset{
 	{typ: "openai", label: "OpenAI", apiBase: "https://api.openai.com/v1", keyHint: "sk-...", modelHint: "gpt-4o, gpt-4o-mini, o3...", defaultModel: "gpt-4o", defaultModelAlias: "gpt-4o"},
 	{typ: "anthropic", label: "Anthropic", apiBase: "https://api.anthropic.com/v1", keyHint: "sk-ant-...", modelHint: "claude-sonnet-4, claude-opus-4...", defaultModel: "claude-sonnet-4-20250514", defaultModelAlias: "claude-sonnet"},
@@ -50,7 +42,6 @@ var providerPresets = []providerPreset{
 	{typ: "moonshot", label: "Moonshot (Kimi)", apiBase: "https://api.moonshot.cn/v1", keyHint: "sk-...", modelHint: "moonshot-v1-8k, kimi-k2...", defaultModel: "moonshot-v1-8k", defaultModelAlias: "kimi"},
 	{typ: "nvidia", label: "NVIDIA", apiBase: "https://integrate.api.nvidia.com/v1", keyHint: "nvapi-...", modelHint: "meta/llama-3.3-70b-instruct...", defaultModel: "meta/llama-3.1-8b-instruct", defaultModelAlias: "llama-8b"},
 	{typ: "ollama", label: "Ollama (local)", apiBase: "http://localhost:11434/v1", keyHint: "none (local)", modelHint: "llama3.2, qwen2.5...", defaultModel: "llama3.2", defaultModelAlias: "llama"},
-	// Catalog-backed providers (pending hermes-agent set).
 	catalogPreset("xai", "xAI (Grok)", "xai-...", "grok-4, grok-3-mini..."),
 	catalogPreset("nous", "Nous Portal", "API key", "Hermes-4-405B..."),
 	catalogPreset("lmstudio", "LM Studio (local)", "none (local)", "qwen/qwen3-30b-a3b..."),
@@ -77,7 +68,6 @@ var providerPresets = []providerPreset{
 	catalogPreset("alibaba_token_plan_cn", "Qwen Cloud Token Plan (CN)", "API key", "qwen3.7-max, deepseek-v4-pro..."),
 }
 
-// providerPresetByType returns the preset matching typ, or nil.
 func providerPresetByType(typ string) *providerPreset {
 	typ = strings.ToLower(strings.TrimSpace(typ))
 	for i := range providerPresets {
@@ -88,7 +78,6 @@ func providerPresetByType(typ string) *providerPreset {
 	return nil
 }
 
-// isKnownProviderType reports whether typ is one of the preset types.
 func isKnownProviderType(typ string) bool {
 	return providerPresetByType(typ) != nil
 }

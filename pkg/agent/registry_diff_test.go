@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -11,13 +5,6 @@ import (
 
 	"github.com/xilistudios/lele/pkg/config"
 )
-
-// B3: the reload diff in agentConfigChanged must compare Skills and Tools by
-// CONTENT (order-insensitive), not by length. These tests go through
-// ReloadAgents (the only production caller) and assert on instance identity:
-// changed=true => new instance, changed=false => same pointer.
-
-// --- helpers unit ------------------------------------------------------------
 
 func TestSameStringSet(t *testing.T) {
 	cases := []struct {
@@ -44,7 +31,6 @@ func TestSameStringSet(t *testing.T) {
 			if got := sameStringSet(tc.a, tc.b); got != tc.want {
 				t.Errorf("sameStringSet(%v, %v) = %v, want %v", tc.a, tc.b, got, tc.want)
 			}
-			// Symmetry: the diff must not depend on argument order.
 			if got := sameStringSet(tc.b, tc.a); got != tc.want {
 				t.Errorf("sameStringSet(%v, %v) [swapped] = %v, want %v", tc.b, tc.a, got, tc.want)
 			}
@@ -52,12 +38,6 @@ func TestSameStringSet(t *testing.T) {
 	}
 }
 
-// --- skills content diff -----------------------------------------------------
-
-// TestAgentConfigChanged_SkillsSameLenDiffContent is the regression this task
-// exists for: ["a","b"] -> ["c","d"] kept the same length, so the old
-// length-only check reported "unchanged" and the agent kept serving stale
-// skills until a full restart.
 func TestAgentConfigChanged_SkillsSameLenDiffContent(t *testing.T) {
 	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Skills: []string{"a", "b"}},
@@ -132,8 +112,6 @@ func TestAgentConfigChanged_SkillsNilToEmpty(t *testing.T) {
 		t.Error("expected instance preserved when skills went from nil to [] (both = all skills), got new instance")
 	}
 }
-
-// --- tools content diff ------------------------------------------------------
 
 func TestAgentConfigChanged_ToolsNilToEmpty(t *testing.T) {
 	cfg := testCfg(t, []config.AgentConfig{
@@ -237,12 +215,6 @@ func TestAgentConfigChanged_ToolsShrinkToNil(t *testing.T) {
 	}
 }
 
-// TestAgentConfigChanged_ToolsBaselineIsConfigNotLiveRegistry locks WHY the
-// diff compares against the recorded allowlist instead of the instance's live
-// ToolRegistry: NewAgentInstance registers base tools (read_file, exec, ...)
-// and the tool coordinator layers shared tools (spawn, web_search, sleep, ...)
-// on top, so the live registry is never equal to the config allowlist. A diff
-// against it would recreate the instance on every single reload.
 func TestAgentConfigChanged_ToolsBaselineIsConfigNotLiveRegistry(t *testing.T) {
 	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Tools: []string{"exec", "read_file"}},
@@ -250,9 +222,6 @@ func TestAgentConfigChanged_ToolsBaselineIsConfigNotLiveRegistry(t *testing.T) {
 	registry := NewAgentRegistry(cfg)
 	first, _ := registry.GetAgent("alpha")
 
-	// The live registry has more names than the allowlist (base tools survive
-	// the filter only when allowed; here exactly the two do — but shared tools
-	// registered later by the coordinator are not part of ac.Tools either way).
 	names := first.Tools.List()
 	if len(names) < 2 {
 		t.Fatalf("precondition: expected the filtered registry to keep the allowed tools, got %v", names)
@@ -263,8 +232,6 @@ func TestAgentConfigChanged_ToolsBaselineIsConfigNotLiveRegistry(t *testing.T) {
 		}
 	}
 
-	// Byte-identical config reloaded twice: must preserve the instance. If the
-	// diff compared ac.Tools against the live registry this would flap forever.
 	sameCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Tools: []string{"exec", "read_file"}},
 	})
@@ -273,8 +240,6 @@ func TestAgentConfigChanged_ToolsBaselineIsConfigNotLiveRegistry(t *testing.T) {
 		t.Error("expected instance preserved on identical tools config, got new instance (diff must use the recorded allowlist)")
 	}
 }
-
-// --- cloneStrings ------------------------------------------------------------
 
 func TestCloneStrings(t *testing.T) {
 	if cloneStrings(nil) != nil {
@@ -288,15 +253,6 @@ func TestCloneStrings(t *testing.T) {
 	}
 }
 
-// --- preserved builder carries the NEW skills filter -------------------------
-
-// TestReloadAgents_SkillsChangeReachesPreservedBuilder closes the gap the
-// content diff would otherwise leave open: when agentConfigChanged reports a
-// skills change, ReloadAgents recreates the instance but deliberately keeps the
-// OLD ContextBuilder (it owns live prompt/session state). That builder still
-// holds the previous allowlist, so without an explicit refresh the agent keeps
-// rendering the old <skills> block forever — the diff fires, the log says
-// "recreated", and nothing changes for the model.
 func TestReloadAgents_SkillsChangeReachesPreservedBuilder(t *testing.T) {
 	registry := NewAgentRegistry(testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Skills: []string{"a", "b"}},
@@ -307,7 +263,6 @@ func TestReloadAgents_SkillsChangeReachesPreservedBuilder(t *testing.T) {
 	}
 	builder := first.ContextBuilder
 
-	// Same length, different content — the case the old length-only check missed.
 	registry.ReloadAgents(testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Skills: []string{"c", "d"}},
 	}))
@@ -325,16 +280,12 @@ func TestReloadAgents_SkillsChangeReachesPreservedBuilder(t *testing.T) {
 	}
 }
 
-// TestReloadAgents_SkillsClearedOnPreservedBuilder covers the reverse direction:
-// dropping the allowlist must restore the historical "all skills" behaviour
-// (nil/empty) on the builder that survives the reload.
 func TestReloadAgents_SkillsClearedOnPreservedBuilder(t *testing.T) {
 	registry := NewAgentRegistry(testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Skills: []string{"a", "b"}},
 	}))
 	first, _ := registry.GetAgent("alpha")
 
-	// Model change forces recreation while Skills goes back to unset.
 	registry.ReloadAgents(testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 	}))
@@ -348,9 +299,6 @@ func TestReloadAgents_SkillsClearedOnPreservedBuilder(t *testing.T) {
 	}
 }
 
-// TestReloadAgents_UnchangedSkillsKeepsInstance is the guard against the
-// opposite mistake: refreshing the builder must not become a reason to
-// recreate. A no-op reload with skills set has to preserve the instance.
 func TestReloadAgents_UnchangedSkillsKeepsInstance(t *testing.T) {
 	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Skills: []string{"a", "b"}},
@@ -367,12 +315,6 @@ func TestReloadAgents_UnchangedSkillsKeepsInstance(t *testing.T) {
 	}
 }
 
-// TestAgentConfigChanged_IdentityFieldsRecreate covers the WebUI agent pages:
-// name, description and the default flag are editable and surface through
-// GetAgentInfo, which reads the live instance. Without these comparisons an
-// agent renamed from the UI kept reporting its stale name until a full
-// restart, and toggling `default` alone left the wrong agent reported as the
-// default one.
 func TestAgentConfigChanged_IdentityFieldsRecreate(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -420,9 +362,6 @@ func TestAgentConfigChanged_IdentityFieldsRecreate(t *testing.T) {
 	}
 }
 
-// TestAgentConfigChanged_IdentityUnchangedDoesNotRecreate is the other half of
-// the contract: identical identity fields must NOT recreate on every reload
-// (the reconciler runs on every config PUT).
 func TestAgentConfigChanged_IdentityUnchangedDoesNotRecreate(t *testing.T) {
 	agents := []config.AgentConfig{
 		{ID: "alpha", Default: true, Name: "Alpha", Description: "same"},

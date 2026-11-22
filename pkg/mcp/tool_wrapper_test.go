@@ -12,8 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// mgrWithConn returns a manager over the basic fixture whose "srv" connection
-// is already installed (no dialing involved).
 func mgrWithConn(t *testing.T, conn ClientConn) *Manager {
 	t.Helper()
 	mgr := NewManager(basicFixture(t), &fakeDialer{})
@@ -21,9 +19,6 @@ func mgrWithConn(t *testing.T, conn ClientConn) *Manager {
 	return mgr
 }
 
-// --- T6: naming -------------------------------------------------------------
-
-// TestNamespacedName covers clean passthrough, sanitization and trimming.
 func TestNamespacedName(t *testing.T) {
 	cases := []struct {
 		server, tool, want string
@@ -51,8 +46,6 @@ func TestNamespacedName(t *testing.T) {
 	}
 }
 
-// TestNamespacedNameLongTruncatesWithHash: >64 chars ⇒ cut + "_" + 6-hex
-// FNV-1a, deterministic and distinguishing tools that differ only past the cut.
 func TestNamespacedNameLongTruncatesWithHash(t *testing.T) {
 	server := strings.Repeat("a", 60)
 
@@ -73,16 +66,12 @@ func TestNamespacedNameLongTruncatesWithHash(t *testing.T) {
 	if !strings.HasPrefix(first, "mcp_aaaa") {
 		t.Errorf("truncated name should keep its prefix, got %q", first)
 	}
-	// A second truncation-style server with separators still fits.
 	noisy := NamespacedName(strings.Repeat("x.y", 30), "tool")
 	if len(noisy) > maxToolNameLen {
 		t.Errorf("noisy long name is %d chars, cap is %d", len(noisy), maxToolNameLen)
 	}
 }
 
-// --- T6: schema extraction --------------------------------------------------
-
-// TestSchemaFromMCPTool covers structured, raw and empty schemas.
 func TestSchemaFromMCPTool(t *testing.T) {
 	t.Run("structured", func(t *testing.T) {
 		got := SchemaFromMCPTool(remoteTool("read"))
@@ -130,9 +119,6 @@ func TestSchemaFromMCPTool(t *testing.T) {
 	})
 }
 
-// --- T6: result mapping -----------------------------------------------------
-
-// TestMapCallResult pins the MCP result → tools.ToolResult translation.
 func TestMapCallResult(t *testing.T) {
 	t.Run("single text", func(t *testing.T) {
 		res := &mcp.CallToolResult{
@@ -208,9 +194,6 @@ func TestMapCallResult(t *testing.T) {
 	})
 }
 
-// --- T6: RemoteTool ---------------------------------------------------------
-
-// TestRemoteToolContract: identity comes straight from the spec.
 func TestRemoteToolContract(t *testing.T) {
 	spec := tools.LoadedMCPTool{
 		Name:        "mcp_srv_read",
@@ -230,7 +213,6 @@ func TestRemoteToolContract(t *testing.T) {
 		t.Errorf("Parameters = %v, want the spec schema", rt.Parameters())
 	}
 
-	// A spec without schema still yields a valid object schema.
 	rtNoSchema := NewRemoteTool(nil, "srv", tools.LoadedMCPTool{Name: "x"})
 	if rtNoSchema.Parameters()["type"] != "object" {
 		t.Errorf("nil schema fallback = %v, want type object", rtNoSchema.Parameters())
@@ -249,8 +231,6 @@ func reflectSameSchema(a, b map[string]interface{}) bool {
 	return true
 }
 
-// TestRemoteToolExecuteSuccess forwards to the manager, returns the mapped
-// result and passes the original remote name.
 func TestRemoteToolExecuteSuccess(t *testing.T) {
 	conn := &fakeConn{
 		callResult: &mcp.CallToolResult{
@@ -277,8 +257,6 @@ func TestRemoteToolExecuteSuccess(t *testing.T) {
 	}
 }
 
-// TestRemoteToolExecuteMCPError: application errors surface as ErrorResult
-// with the tool name and cause (no reconnect: this is not a transport error).
 func TestRemoteToolExecuteMCPError(t *testing.T) {
 	conn := &fakeConn{callErrs: []error{errors.New("invalid arguments")}}
 	mgr := mgrWithConn(t, conn)
@@ -304,7 +282,6 @@ func TestRemoteToolExecuteMCPError(t *testing.T) {
 	}
 }
 
-// TestRemoteToolExecuteGuards: missing manager / unresolved server.
 func TestRemoteToolExecuteGuards(t *testing.T) {
 	rtNoMgr := NewRemoteTool(nil, "srv", tools.LoadedMCPTool{Name: "mcp_srv_read", RemoteName: "read"})
 	if out := rtNoMgr.Execute(context.Background(), nil); !out.IsError || !strings.Contains(out.ForLLM, "no manager") {
@@ -319,11 +296,6 @@ func TestRemoteToolExecuteGuards(t *testing.T) {
 	}
 }
 
-// TestToolFactoryBindsServer covers the DEFENSIVE fallback of the factory: a
-// foreign spec with no Server of its own (built by a non-pkg/mcp loader) is
-// bound through the manager's loaded set, and a miss there leaves the server
-// unresolved so Execute asks for a reload. Specs stamped by buildSpecs bind
-// via spec.Server instead — see TestToolFactoryPrefersSpecServerOverLoadedCache.
 func TestToolFactoryBindsServer(t *testing.T) {
 	conn := &fakeConn{
 		callResult: &mcp.CallToolResult{
@@ -351,19 +323,12 @@ func TestToolFactoryBindsServer(t *testing.T) {
 		t.Errorf("execute through factory: %+v", out)
 	}
 
-	// Unknown spec: the server cannot be recovered, Execute asks for a reload.
 	unknown := factory(tools.LoadedMCPTool{Name: "mcp_other_ping", RemoteName: "ping"})
 	if out := unknown.Execute(context.Background(), nil); !out.IsError || !strings.Contains(out.ForLLM, tools.GetMCPToolName) {
 		t.Errorf("unknown-spec guard: %+v", out)
 	}
 }
 
-// --- minor m2: ForLLM result cap --------------------------------------------
-
-// TestMapCallResultTruncation: the total ForLLM text of a remote result is
-// capped at maxCallResultChars (the pkg/tools/web.go convention); anything
-// under the cap is untouched, anything over it carries the explicit
-// truncation marker with the number of dropped bytes.
 func TestMapCallResultTruncation(t *testing.T) {
 	textResult := func(body string) *mcp.CallToolResult {
 		return &mcp.CallToolResult{
@@ -419,25 +384,13 @@ func TestMapCallResultTruncation(t *testing.T) {
 	})
 }
 
-// --- N5: UTF-8-safe result cap ----------------------------------------------
-
-// TestCapCallResultNeverSplitsRune is the N5 regression: a 3-byte rune
-// straddling the byte boundary must not be cut in half. The kept prefix backs
-// off to the rune start, so the truncated output stays valid UTF-8 — pre-fix
-// the raw byte slice left a dangling continuation byte at the end (and one
-// byte fewer was counted as dropped).
 func TestCapCallResultNeverSplitsRune(t *testing.T) {
-	// 49999 ASCII bytes + three 3-byte runes (CJK ideographs, built from
-	// code points so the source stays ASCII — see gosmopolitan): the byte at
-	// index 49999 starts a rune that straddles the maxCallResultChars
-	// boundary (50000).
 	prefix := strings.Repeat("a", maxCallResultChars-1)
 	cjk := string(rune(0x4E2D)) + string(rune(0x6587)) + string(rune(0x5B57))
 	body := prefix + cjk
 	if len(body) <= maxCallResultChars {
 		t.Fatalf("test body must exceed the cap: len(body) = %d", len(body))
 	}
-	// Sanity: the boundary really lands inside the first rune.
 	if utf8.RuneStart(body[maxCallResultChars]) {
 		t.Fatal("test setup: the cut does not straddle a rune (fix the body)")
 	}
@@ -447,7 +400,7 @@ func TestCapCallResultNeverSplitsRune(t *testing.T) {
 	if !utf8.ValidString(got) {
 		t.Fatalf("truncated output is not valid UTF-8: the cut split a multi-byte rune")
 	}
-	marker := "\n…[truncated, 9 more bytes]…" // all 9 bytes of the three runes are dropped
+	marker := "\n…[truncated, 9 more bytes]…"
 	kept, found := strings.CutSuffix(got, marker)
 	if !found {
 		t.Fatalf("result must end with %q, got tail %q", marker, got[len(got)-40:])

@@ -10,20 +10,8 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/theme"
 )
 
-// handleModalKey processes a keystroke while a modal dialog is open. It owns
-// every modal surface: picker navigation, list selection, form-based modals,
-// the theme picker and the settings editors. The block is terminal — a key
-// consumed by a modal never reaches the normal input handlers — which is why
-// the caller can return its result unconditionally.
 func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Audit M2: universal sync point for every keystroke while a modal
-	// is open. The forwarding block below also syncs, but transitions
-	// that END on a secret step (ESC-close, Enter-advance, success
-	// screen) return before reaching it — syncing at the top of the
-	// block guarantees the last processed event always leaves the
-	// echo mode consistent with the state it ended in.
 	m.syncTextInputEcho()
-	// Subagent multi-select picker navigation/toggle/confirm.
 	if m.subagentPickerActive {
 		switch msg.String() {
 		case "up", "k":
@@ -50,7 +38,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	// Settings inline selector navigation.
 	if m.settingsSelectorActive {
 		switch msg.String() {
 		case "up", "k", "down", "j":
@@ -65,10 +52,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	// Catalog model picker (filter-as-you-type) for /add-model and the
-	// connect-flow model-name step. up/down move the highlight, tab accepts
-	// the highlighted ID into the text input, esc hides suggestions without
-	// closing the form. Typing falls through to textInput and re-filters.
 	if m.addModelCatalogActive {
 		switch msg.String() {
 		case "up":
@@ -88,18 +71,10 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "esc":
-			// Hide suggestions; a second ESC still closes the form.
 			m.closeCatalogPicker()
 			return m, nil
 		}
-		// enter and printable keys fall through — enter is handled by the
-		// form enter path below (after applyCatalogSelectionOnEnter), and
-		// printable keys reach textInput at the bottom of this handler.
 	}
-	// Provider-type picker navigation (up/down within the row list). The
-	// bounds are providerTypePickerMax in BOTH modes: the row-driven flow
-	// sets it to len(connectRows()), the free-text-name path (step 0 → type
-	// picker) still sets len(providerPresets)+1.
 	if m.modalMode == ModalAddProvider && m.providerTypePicker {
 		max := m.providerTypePickerMax
 		if max <= 0 {
@@ -140,15 +115,8 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.providerTypePickerIdx = max - 1
 			return m, nil
 		case "esc":
-			// Cancel the picker. The ROW-DRIVEN /connect flow starts ON the
-			// picker (there is no previous form step to return to), so ESC
-			// closes the modal. The legacy free-text-name path (and
-			// onboarding's "Other/custom", which reuses it) opened the
-			// picker from a form step: ESC there falls through to the free-
-			// form TYPE entry (step 1) instead of closing.
 			m.modalScrollOffset = 0
 			if !m.connectRowPicker {
-				// Legacy picker: back to the type step, keep the modal.
 				m.providerTypePicker = false
 				m.formStepIndex = 1
 				m.textInput.SetValue("")
@@ -161,24 +129,13 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.formValues = nil
 			m.formStepIndex = 0
 			m.modalMode = ModalNone
-			m.syncTextInputEcho() // audit M2: clear stale echo on close
+			m.syncTextInputEcho()
 			return m, nil
 		case "q":
-			// "q" must NOT cancel the picker — only ESC does.
-			// Swallow it so it doesn't fall through to the global
-			// modal-close handler.
 			return m, nil
 		}
-		// Fall through to textInput forwarding below for typing.
 	}
-	// When a settings field is being edited, list navigation must not fire —
-	// j/k/up/down are regular characters in the text input. Without this
-	// guard the cursor drifts behind the invisible list and the next Enter
-	// acts on the wrong row.
 	if m.settingsEditField != "" && !m.settingsSelectorActive && !m.subagentPickerActive {
-		// Fall through to the textInput forwarding at the end of this handler.
-		// ESC/q still need to reach their normal cancel paths below, so only
-		// navigation keys are swallowed here.
 		switch msg.String() {
 		case "up", "k", "down", "j", "pgup", "pgdown":
 			if isFormModal(m.modalMode, true) {
@@ -188,21 +145,9 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	// /mcp list: toggle (space/t), source filter (f), no-op enter and close
-	// (esc/q) are owned by handleMCPKey; navigation and the remaining keys
-	// fall through to the generic switch below. The MCP-add wizard
-	// (ModalMCPAdd) is handled by the same dispatch: handleMCPAddKey owns
-	// enter/esc, and the isFormModal registration forwards the rest to the
-	// shared text input at the bottom of this handler.
 	if cmd, handled := m.handleMCPKey(msg); handled {
 		return m, cmd
 	}
-	// ModalConnectOAuth (native /connect provider login): owns its own
-	// ENTER/CTRL+Y/ESC and passes every other key through so the shared
-	// input can receive a pasted code/redirect URL (see isFormModal /
-	// isListModal in modal_state.go). It has no rows, so it must be handled
-	// before the generic list/form switch, which would otherwise try to move
-	// an invisible list cursor or treat "q" as a close key.
 	if m.modalMode == ModalConnectOAuth {
 		if cmd, handled := m.handleConnectOAuthKey(msg); handled {
 			return m, cmd
@@ -218,8 +163,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clearCommandDeleteConfirm()
 			m.clearProviderDeleteConfirm()
 		}
-		// Theme picker live preview: after navigation, preview the
-		// highlighted theme without persisting. Esc reverts.
 		if m.modalMode == ModalSettingsTUI && m.themePickerActive && m.modalSelectedIdx < len(m.themePickerItems) {
 			item := m.themePickerItems[m.modalSelectedIdx]
 			if item.kind == "builtin" {
@@ -233,7 +176,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.modalSelectedIdx++
 			m.clearCommandDeleteConfirm()
 			m.clearProviderDeleteConfirm()
-			maxVisible := m.height - 8 // title + borders + padding
+			maxVisible := m.height - 8
 			if maxVisible < 3 {
 				maxVisible = 3
 			}
@@ -241,8 +184,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.modalScrollOffset = m.modalSelectedIdx - maxVisible + 1
 			}
 		}
-		// Theme picker live preview: after navigation, preview the
-		// highlighted theme without persisting. Esc reverts.
 		if m.modalMode == ModalSettingsTUI && m.themePickerActive && m.modalSelectedIdx < len(m.themePickerItems) {
 			item := m.themePickerItems[m.modalSelectedIdx]
 			if item.kind == "builtin" {
@@ -252,32 +193,24 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "enter":
-		// Catalog picker: accept the highlighted suggestion (when the input
-		// is empty) and prefill context_window / max_tokens / vision from
-		// catalog metadata before the form enter handlers run.
 		if m.addModelCatalogActive {
 			m.applyCatalogSelectionOnEnter()
 		}
-		// TUI settings inline edit: save value and return to list.
 		if m.modalMode == ModalSettingsTUI && m.settingsEditField != "" {
 			m.handleTUISettingsInput(m.textInput.Value())
 			return m, nil
 		}
-		// Handle form-based modals first — they don't use m.modalItems.
 		if m.modalMode == ModalAddProvider {
-			// ── Success screen — any Enter/ESC closes the modal ──
 			if m.connectSuccess {
 				m.connectSuccess = false
 				m.providerSavedInFlow = false
 				m.formStepIndex = 0
 				m.formValues = nil
 				m.modalMode = ModalNone
-				m.syncTextInputEcho() // audit M2: clear stale echo on close
+				m.syncTextInputEcho()
 				m.reloadSessions()
 				return m, nil
 			}
-			// ── Provider picker (row-driven; also reused by the
-			// free-text name step 0 and onboarding's custom path) ──
 			if m.providerTypePicker {
 				sel := m.providerTypePickerIdx
 				max := m.providerTypePickerMax
@@ -285,17 +218,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					max = len(connectRows())
 				}
 				if sel >= 0 && sel < max {
-					// Resolve the row BEFORE closing the picker. A stale index
-					// (providerTypePickerMax larger than a catalogue that has
-					// since shrunk) used to fall through the `ok == false` arm
-					// and close the modal with nothing selected: no provider,
-					// no error, silently. Report it instead and keep the
-					// picker open so the user can pick again.
-					//
-					// connectRowPicker tells the two index spaces apart: the
-					// row-first list dispatches through applyConnectRow, the
-					// legacy providerPresets+custom list through
-					// applyLegacyTypePreset.
 					rowFirst := m.connectRowPicker
 					var row connectRow
 					if rowFirst {
@@ -312,8 +234,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					if !rowFirst {
 						m.applyLegacyTypePreset(sel)
 					} else if cmd := m.applyConnectRow(sel, row); cmd != nil {
-						// An OAuth row hands off to an async engine flow and
-						// returns a command; every other row is synchronous.
 						return m, cmd
 					}
 					return m, nil
@@ -322,19 +242,10 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			// Form-based modal: validate and advance steps
 			val := strings.TrimSpace(m.textInput.Value())
-			// If the input is empty but a default was already
-			// pre-filled for this step (e.g. onboarding pre-fills the
-			// model steps from the chosen preset), accept the default
-			// so pressing Enter through the flow works.
 			if val == "" && m.formStepIndex < len(m.formValues) && m.formValues[m.formStepIndex] != "" {
 				val = m.formValues[m.formStepIndex]
 			}
-			// API Key (step 2) is optional — local providers (ollama)
-			// and custom endpoints may not require authentication.
-			// The think-system step (9) is optional (Enter = auto) and the
-			// review step (10) has no input — any Enter confirms.
 			allowEmpty := (m.formStepIndex == 2 && !m.providerSavedInFlow) ||
 				(m.formStepIndex >= 9 && m.providerSavedInFlow)
 			if val == "" && !allowEmpty {
@@ -344,14 +255,8 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.formError = ""
 			m.formValues[m.formStepIndex] = val
 
-			// ── Provider steps (0-3) ──────────────────────────────
 			if !m.providerSavedInFlow {
 				if m.formStepIndex == 0 {
-					// Provider name — validate duplicates early and
-					// offer the type picker on the next step. The
-					// duplicate check only applies to a name the user
-					// TYPED (the API-key-only rows pre-fill the name
-					// from the preset and never land here).
 					key := strings.ToLower(strings.TrimSpace(val))
 					if m.cfg != nil && m.cfg.Providers != nil && m.cfg.Providers.Named != nil {
 						if p, exists := m.cfg.Providers.Named[key]; exists && !p.IsEmpty() {
@@ -359,16 +264,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 							return m, nil
 						}
 					}
-					// Row-driven flows: a custom row (OpenAI/Anthropic
-					// compatible) already knows the provider type, so the
-					// type step is SKIPPED and the user goes straight to
-					// the API-key step (numbers unchanged: key is 2, base
-					// is 3). The free-type row keeps the legacy path:
-					// open the type picker with the legacy index space
-					// (providerPresets + custom) AND the legacy dispatch
-					// (connectRowIdx = -1), so selecting an entry there
-					// routes through applyLegacyTypePreset — not through
-					// applyConnectRow, whose index space is connectRows().
 					if row := connectRowAt(m.connectRowIdx); row != nil {
 						switch row.kind {
 						case connectRowCustomOpenAI, connectRowCustomAnthropic:
@@ -384,21 +279,17 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						}
 					}
 					m.formStepIndex = 1
-					m.connectRowIdx = -1 // legacy picker index space from here on
+					m.connectRowIdx = -1
 					m.connectRowPicker = false
 					m.providerTypePicker = true
 					m.providerTypePickerIdx = 0
 					m.modalScrollOffset = 0
-					// providerPresets + a trailing "custom" entry (the
-					// legacy index space of the free-text path).
 					m.providerTypePickerMax = len(providerPresets) + 1
 					m.textInput.SetValue("")
 					m.textInput.Placeholder = ""
 					return m, nil
 				}
 				if m.formStepIndex == 1 {
-					// Free-form provider type (only reached when the
-					// user chose "custom" and typed a type).
 					typ := strings.ToLower(val)
 					if p := providerPresetByType(typ); p != nil {
 						m.providerTypeFromPreset = true
@@ -413,9 +304,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				if m.formStepIndex == 2 {
-					// API key — optional for local providers (e.g. ollama).
-					// Non-local providers require a non-empty key during onboarding
-					// to ensure HasUsableProvider() returns true after saving.
 					providerType := strings.ToLower(strings.TrimSpace(m.formValues[1]))
 					isLocal := providerType == "ollama"
 					if strings.TrimSpace(val) == "" && !isLocal {
@@ -423,11 +311,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						return m, nil
 					}
 					m.formValues[2] = val
-					// API-key-only rows (known providers picked from the
-					// row-driven picker) have no API-base step to answer:
-					// the base came from the preset, so save NOW and jump
-					// straight to the model steps (4). Everything else falls
-					// through to the API-base step (3) exactly as before.
 					if m.connectSkipAPIBase {
 						if !m.connectSaveProvider() {
 							return m, nil
@@ -442,7 +325,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					if m.providerTypeFromPreset {
 						p := providerPresetByType(m.formValues[1])
 						if p != nil && p.apiBase != "" {
-							// Pre-filled from preset; keep it.
 							m.textInput.SetValue(p.apiBase)
 							m.textInput.Placeholder = "API Base URL (default for this provider)"
 						} else {
@@ -454,7 +336,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				if m.formStepIndex >= 3 {
-					// Last provider step — save provider
 					if !m.connectSaveProvider() {
 						return m, nil
 					}
@@ -463,7 +344,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 					return m, nil
 				}
-				// Advance to next provider step
 				m.formStepIndex++
 				m.textInput.SetValue("")
 				switch m.formStepIndex {
@@ -477,13 +357,8 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			// ── Model steps (4-8) ────────────────────────────────
 			if m.formStepIndex <= 8 {
-				// Validate model fields before advancing
 				if m.formStepIndex == 6 || m.formStepIndex == 7 {
-					// Context window and max tokens must be integers when
-					// provided. Empty is allowed — catalog.DefaultsFor fills
-					// them in addModelToProvider when the model is known.
 					if val != "" {
 						if _, err := strconv.Atoi(val); err != nil {
 							m.formError = "Must be a valid integer"
@@ -492,22 +367,18 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 				}
 				if m.formStepIndex == 8 {
-					// Vision must be yes/no
 					lower := strings.ToLower(val)
 					if lower != "yes" && lower != "no" {
 						m.formError = "Enter 'yes' or 'no'"
 						return m, nil
 					}
 					m.formValues[m.formStepIndex] = lower
-					// Advance to the think-system step
 					m.formStepIndex = 9
 					m.textInput.SetValue("")
 					m.textInput.Placeholder = "auto, deepseek, openai, openrouter, qwen or none"
 					m.closeCatalogPicker()
 					return m, nil
 				}
-				// Advance to next model step. Show any catalog-prefilled
-				// value in the input so the user can edit or just press Enter.
 				m.formStepIndex++
 				nextVal := ""
 				if m.formStepIndex < len(m.formValues) {
@@ -531,7 +402,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			// ── Think system step (9) ────────────────────────────
 			if m.formStepIndex == 9 {
 				thinkType, err := thinkSystemFieldValue(val)
 				if err != nil {
@@ -539,14 +409,12 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.formValues[9] = thinkType
-				// Advance to review step
 				m.formStepIndex = 10
 				m.textInput.SetValue("")
 				m.textInput.Placeholder = ""
 				return m, nil
 			}
 
-			// ── Review step (10) — save model & close ─────────────
 			ctxWin, _ := strconv.Atoi(m.formValues[6])
 			maxTok, _ := strconv.Atoi(m.formValues[7])
 			vision := m.formValues[8] == "yes"
@@ -554,55 +422,33 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.formError = err.Error()
 				return m, nil
 			}
-			// If onboarding, route back to the verify step instead of
-			// staying in (or closing) the connect modal. The provider
-			// and model are already saved above.
 			if m.onboardingActive {
 				m.modalMode = ModalNone
 				m.connectSuccess = false
 				m.providerSavedInFlow = false
 				m.formStepIndex = 0
 				m.formValues = nil
-				m.syncTextInputEcho() // audit M2: clear stale echo on close
+				m.syncTextInputEcho()
 				m.onboardingStep = obVerify
 				m.obVerifying = true
-				m.obFinalizeSetup()                                  // set defaults + persist
-				return m, tea.Batch(m.obVerifyKeyCmd(), m.tickCmd()) // start async validation + spinner
+				m.obFinalizeSetup()
+				return m, tea.Batch(m.obVerifyKeyCmd(), m.tickCmd())
 			}
-			// Show the success screen instead of closing abruptly.
 			m.connectSuccess = true
 			m.providerSavedInFlow = false
 			m.formStepIndex = 10
 			return m, nil
 		} else if m.modalMode == ModalAddModel || m.modalMode == ModalEditModel {
-			// Form-based modal: validate and advance steps. The two modes share
-			// their first six steps; the edit form appends the five reasoning
-			// steps (see addModelStepCount / editModelStepCount), so the last
-			// step — the one that saves — is mode-dependent.
 			lastStep := modelFormLastStep(m.modalMode)
 			val := strings.TrimSpace(m.textInput.Value())
-			// Accept a pre-filled form value when the input is empty (catalog
-			// prefill after selecting a model, matching ModalAddProvider).
 			if val == "" && m.formStepIndex < len(m.formValues) && m.formValues[m.formStepIndex] != "" {
 				val = m.formValues[m.formStepIndex]
 			}
-			// Context window / max tokens may be omitted — catalog.DefaultsFor
-			// fills them in addModelToProvider when the model is known. The
-			// think-system step may also be empty (Enter = auto = leave unset),
-			// and so may the four optional reasoning overrides of the edit form
-			// (blank = keep the override unset).
 			if val == "" && !modelFormAllowsEmptyValue(m.modalMode, m.formStepIndex) {
 				m.formError = "This field is required"
 				return m, nil
 			}
 			m.formError = ""
-			// Validate the value-typed steps on advance, so a typo surfaces on
-			// the step that caused it instead of on the final save (the same
-			// rule the provider edit form follows). The answers that are
-			// keywords (yes/no + the effort/summary enums) are canonicalized
-			// to lowercase BEFORE they are stored, so the completed-step list
-			// reads back exactly what will be saved. A rejected answer is not
-			// stored: formValues only ever holds validated answers.
 			switch m.formStepIndex {
 			case addModelContextWindowStep, addModelMaxTokensStep:
 				if val != "" {
@@ -643,9 +489,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.formValues[m.formStepIndex] = val
 			if m.formStepIndex >= lastStep {
-				// Last step — save model. Empty/zero context_window and
-				// max_tokens are filled from the catalog inside
-				// addModelToProvider when the model is known.
 				thinkType, err := thinkSystemFieldValue(m.formValues[addModelThinkSystemStep])
 				if err != nil {
 					m.formError = err.Error()
@@ -671,10 +514,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				vision := m.formValues[addModelVisionStep] == "yes"
 				if m.modalMode == ModalEditModel {
-					// Edit flow: update in place (Temperature/Video and any
-					// other field the form does not ask about survive, the
-					// reasoning config is rebuilt from its five steps), then
-					// land back on the provider detail with the row highlighted.
 					reasoning, err := reasoningFromFormValues(m.formValues)
 					if err != nil {
 						m.formError = err.Error()
@@ -682,7 +521,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 					if err := m.updateModelInProvider(m.providerSelectedName, m.modelEditAlias, m.formValues[addModelAliasStep], m.formValues[addModelModelNameStep], ctxWin, maxTok, vision, thinkType, reasoning); err != nil {
 						m.formError = err.Error()
-						return m, nil // stay in the form; typed values are kept
+						return m, nil
 					}
 					saved := strings.ToLower(strings.TrimSpace(m.formValues[addModelAliasStep]))
 					m.enterProviderDetail(m.providerSelectedName, saved)
@@ -690,19 +529,15 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.syncTextInputEcho()
 					return m, nil
 				}
-				// Add flow: the reasoning config keeps being seeded from the
-				// catalog by addModelToProvider — the add form never asks.
 				if err := m.addModelToProvider(m.providerSelectedName, m.formValues[addModelAliasStep], m.formValues[addModelModelNameStep], ctxWin, maxTok, vision, thinkType); err != nil {
 					m.formError = err.Error()
 					return m, nil
 				}
 				m.modalMode = ModalNone
 				m.closeCatalogPicker()
-				m.syncTextInputEcho() // audit M2: clear stale echo on close
+				m.syncTextInputEcho()
 				return m, nil
 			}
-			// Advance to next step. Show any catalog-prefilled value in the
-			// input so the user can edit or just press Enter.
 			m.formStepIndex++
 			nextVal := ""
 			if m.formStepIndex < len(m.formValues) {
@@ -743,14 +578,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		} else if m.modalMode == ModalEditProvider {
-			// Form-based modal: one step per editable provider config field
-			// (see editProviderStepCount). Only the type is required: the form
-			// cannot show a stored secret back, so a blank API key / base URL /
-			// headers blob means "keep the stored value" (see updateProvider).
 			val := strings.TrimSpace(m.textInput.Value())
-			// An empty input still accepts a pre-filled value (the type, the
-			// base URL and the optional middle fields are seeded from the
-			// stored provider), so Enter-through cannot wipe them.
 			if val == "" && m.formStepIndex < len(m.formValues) && m.formValues[m.formStepIndex] != "" {
 				val = m.formValues[m.formStepIndex]
 			}
@@ -758,8 +586,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.formError = "Provider type is required"
 				return m, nil
 			}
-			// Validate the two value-typed steps on advance, so a typo surfaces
-			// on the step that caused it instead of on the final save.
 			switch m.formStepIndex {
 			case editProviderWebSearchStep:
 				token, err := parseWebSearchToken(val)
@@ -767,7 +593,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.formError = err.Error()
 					return m, nil
 				}
-				val = token // canonical lowercase, so the step reads back what was stored
+				val = token
 			case editProviderHeadersStep:
 				if _, _, err := parseHeaderEditValue(nil, val); err != nil {
 					m.formError = err.Error()
@@ -777,9 +603,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.formError = ""
 			m.formValues[m.formStepIndex] = val
 			if m.formStepIndex < len(m.formValues)-1 {
-				// Advance: the next step shows its pre-filled value (empty for
-				// the API key and the headers blob) so it can be edited in
-				// place.
 				m.formStepIndex++
 				m.textInput.SetValue(m.formValues[m.formStepIndex])
 				switch m.formStepIndex {
@@ -798,13 +621,9 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				case editProviderHeadersStep:
 					m.textInput.Placeholder = `Headers JSON, e.g. {"X-Title":"lele"}`
 				}
-				// Audit M2: the API-key and headers steps collect secrets, so
-				// the echo mode must be re-derived BEFORE the next frame paints
-				// the widget.
 				m.syncTextInputEcho()
 				return m, nil
 			}
-			// Last step — save in place and land back on the provider detail.
 			values := providerEditValues{
 				Type:        m.formValues[editProviderTypeStep],
 				APIKey:      m.formValues[editProviderAPIKeyStep],
@@ -817,30 +636,24 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			if err := m.updateProvider(m.providerSelectedName, values); err != nil {
 				m.formError = err.Error()
-				return m, nil // stay in the form; typed values are kept
+				return m, nil
 			}
 			m.providerFeedback = i18n.T("tui.providerUpdated")
 			m.enterProviderDetail(m.providerSelectedName, "")
 			m.syncTextInputEcho()
 			return m, nil
 		} else if m.modalMode == ModalAddSecret {
-			// Form-based modal: name, value, description, tags, scope
 			val := m.textInput.Value()
-			// Name and value are required; the rest are optional.
 			if m.formStepIndex <= 1 && strings.TrimSpace(val) == "" {
 				m.formError = "This field is required"
 				return m, nil
 			}
 			m.formError = ""
-			// Name must be stored trimmed — trailing spaces become part of
-			// the keyring name and break later lookup/delete. The secret
-			// value (step 1) is intentionally left untrimmed.
 			if m.formStepIndex == 0 {
 				val = strings.TrimSpace(val)
 			}
 			m.formValues[m.formStepIndex] = val
 			if m.formStepIndex >= 4 {
-				// Last step — save secret
 				svc := m.keyringSvc()
 				if svc == nil {
 					m.formError = i18n.T("tui.secretsUnavailable")
@@ -858,7 +671,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.reselectSecret(secretName)
 				return m, nil
 			}
-			// Advance to next step
 			m.formStepIndex++
 			m.textInput.SetValue("")
 			switch m.formStepIndex {
@@ -873,28 +685,15 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		} else if m.modalMode == ModalAddCommand {
-			// Command wizard (create/edit): a form modal, so it is handled
-			// BEFORE the list fallthrough below — the wizard does not own
-			// modalItems and would otherwise be swallowed by them. On the
-			// template step plain ENTER means "finish" (alt+enter inserts a
-			// newline via the KeyMap); the single-line steps validate and
-			// advance.
 			if m.formStepIndex == commandTemplateStep {
 				return m, m.saveCommandForm()
 			}
 			return m, m.advanceCommandWizard(strings.TrimSpace(m.textInput.Value()))
 		} else if len(m.modalItems) > 0 {
-			// Defensive clamp: a list reload that shrank the modal (e.g.
-			// deleting the last cron job) can leave modalSelectedIdx past
-			// the end. Fix the cursor here too so indexing below can never
-			// panic; if the list is empty we simply do nothing.
 			m.clampModalCursor()
 			if m.modalSelectedIdx >= 0 && m.modalSelectedIdx < len(m.modalItems) {
 				selectedVal := m.modalItems[m.modalSelectedIdx]
 				if m.modalMode == ModalAgent {
-					// Shared with the TAB cycle: pins the agent to the current
-					// session (if any), remembers it as the pending selection
-					// and drops the cached frames that render the agent name.
 					m.applyAgentSelection(selectedVal)
 				} else if m.modalMode == ModalModel {
 					if m.showWelcome {
@@ -903,7 +702,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					if m.currentKey != "" {
 						m.agentLoop.GetProvidable().SetSessionModel(m.currentKey, selectedVal)
 					}
-					// Model name is rendered in the bottom bar — re-render.
 					m.lastViewportKey = ""
 					m.renderedBaseKey = ""
 				} else if m.modalMode == ModalThink {
@@ -913,7 +711,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					if m.currentKey != "" {
 						m.agentLoop.GetProvidable().SetThinkLevel(m.currentKey, selectedVal)
 					}
-					// Think level is rendered in the bottom bar — re-render.
 					m.lastViewportKey = ""
 					m.renderedBaseKey = ""
 				} else if m.modalMode == ModalSessions {
@@ -921,13 +718,10 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						m.setCurrentChatKey(m.modalSessionKeys[m.modalSelectedIdx])
 						m.showWelcome = false
 						m.clearStreamingState()
-						// Sync pendingModel to the target session's model so
-						// that creating a new chat from here inherits it.
 						m.pendingModel = m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
 					}
 				} else if m.modalMode == ModalSubagents {
 					if m.modalSelectedIdx < len(m.modalSubagentKeys) {
-						// Remember the parent chat so the user can navigate back (ctrl+b)
 						if m.parentSessionKey == "" {
 							m.parentSessionKey = m.currentKey
 						}
@@ -936,13 +730,11 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						m.clearStreamingState()
 					}
 				} else if m.modalMode == ModalLang {
-					// Prefer parallel code map; fall back to "Name (code)" parse.
 					langCode := ""
 					if m.modalSelectedIdx < len(m.modalLangCodes) {
 						langCode = m.modalLangCodes[m.modalSelectedIdx]
 					}
 					if langCode == "" {
-						// "Download more" action or legacy parse.
 						if idx := strings.LastIndex(selectedVal, "("); idx != -1 {
 							langCode = strings.TrimRight(selectedVal[idx+1:], ")")
 						}
@@ -958,7 +750,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				} else if m.modalMode == ModalLangRemote {
 					return m, m.handleLangInstallSelect()
 				} else if m.modalMode == ModalProviders {
-					// "+ Connect a provider" action entry.
 					if m.modalSelectedIdx < len(m.modalItems) &&
 						m.modalItems[m.modalSelectedIdx] == i18n.T("tui.connectAction") {
 						return m, m.executeCommand("/connect")
@@ -969,25 +760,14 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				} else if m.modalMode == ModalProviderDetail {
 					if m.modalSelectedIdx < len(m.modalItems) {
-						// Action rows are matched by the indexes reported by
-						// providerDetailList (labels are localized), so info rows
-						// (Type:/API Base:/API Key:) and "---" separators match
-						// neither index and stay inert.
 						if m.modalSelectedIdx == m.providerDetailEditIdx {
-							// Provider-level edit: type / API key / API base URL.
-							// The model list is preserved (updateProvider edits the
-							// entry in place), so this is the only path that can fix
-							// a wrong key on a provider that already has models.
 							m.clearProviderDeleteConfirm()
 							m.openProviderEditFlow()
 							return m, nil
 						} else if m.modalSelectedIdx == m.providerDetailAddIdx {
-							// Keep providerSelectedName intact: ModalAddModel's save
-							// path calls addModelToProvider(m.providerSelectedName, ...).
 							m.clearProviderDeleteConfirm()
 							m.modalMode = ModalAddModel
 							m.formStepIndex = 0
-							// addModelStepCount: the add form has no reasoning steps.
 							m.formValues = make([]string, addModelStepCount)
 							m.formError = ""
 							m.formConfirmMode = false
@@ -1003,9 +783,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 							m.modalMode = ModalNone
 							return m, nil
 						} else if alias, ok := m.providerDetailRows[m.modalSelectedIdx]; ok {
-							// Model row: ENTER edits the model. Deleting is the separate,
-							// double-confirmed "d" action — a stray Enter on a data row
-							// must never destroy config.
 							m.clearProviderDeleteConfirm()
 							m.openModelEditFlow(alias)
 							return m, nil
@@ -1014,7 +791,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				} else if m.modalMode == ModalBackgroundExecs {
 					if m.bgExecViewMode {
-						// We're in output view mode - go back to list
 						m.bgExecViewMode = false
 						m.bgExecViewOutput = ""
 						m.bgExecViewStatus = ""
@@ -1024,7 +800,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						procID := m.bgExecModalKeys[m.modalSelectedIdx]
 						m.bgExecViewMode = true
 						m.bgExecViewID = procID
-						// Fetch initial output
 						output, status, _, err := m.agentLoop.GetProvidable().GetBackgroundExecOutput(procID, 5000)
 						if err == nil {
 							m.bgExecViewOutput = output
@@ -1034,7 +809,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 				} else if m.modalMode == ModalCron {
 					if m.cronDetailMode {
-						// In detail view - go back to list
 						m.cronDetailMode = false
 						m.cronDetailJobID = ""
 						m.loadCronJobs()
@@ -1047,7 +821,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 				} else if m.modalMode == ModalSecrets {
 					if m.secretsDetailMode {
-						// In detail view - go back to list
 						m.secretsDetailMode = false
 						m.secretsDetailName = ""
 						m.secretsReveal = false
@@ -1061,26 +834,18 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						return m, m.tickCmd()
 					}
 				} else if m.modalMode == ModalSkills {
-					// Shared with handleSkillsEnter so install/toggle cannot drift.
 					return m, m.handleSkillsEnter()
 				} else if m.modalMode == ModalSkillInstall {
-					// Submit repo URL for scanning
 					return m, m.handleSkillInstallSubmit()
 				} else if m.modalMode == ModalSkillPicker {
-					// Install selected skills
 					return m, m.handleSkillPickerEnter()
 				} else if m.modalMode == ModalCommands {
-					// Custom-command list: open the detail of the row under
-					// the cursor (shared with the "d"/write flow later).
 					m.clearCommandDeleteConfirm()
 					return m, m.handleCommandsEnter()
 				} else if m.modalMode == ModalCommandDetail {
-					// Detail view: ENTER and ESC both go back to the list.
 					m.exitCommandDetail()
 					return m, m.tickCmd()
 				} else if m.modalMode == ModalSettings {
-					// Top-level settings menu: navigate to sub-menu based on selection.
-					// Items correspond to: Agents / System / Interface.
 					switch m.modalSelectedIdx {
 					case 0:
 						m.resetModal(ModalSettingsAgents)
@@ -1099,7 +864,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.modalScrollOffset = 0
 					return m, nil
 				} else if m.modalMode == ModalSettingsSystem {
-					// Navigate into the selected sub-group.
 					groupIdx := m.modalSelectedIdx
 					m.resetModal(ModalSettingsSystemEdit)
 					m.settingsSection = sysSubViewName(groupIdx)
@@ -1119,8 +883,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 					return m, nil
 				} else if m.modalMode == ModalSettingsSystemEdit {
-					// System sub-view: inline edit (save), selector confirm,
-					// or row action.
 					if m.settingsSelectorActive {
 						return m, m.handleSelectorConfirm()
 					}
@@ -1130,16 +892,12 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 					return m, m.handleSystemSubEnter()
 				} else if m.modalMode == ModalSettingsAgents {
-					// Agent list: navigate to detail, defaults, or start
-					// the add-agent flow.
 					if m.settingsEditField != "" {
 						m.handleAgentSettingsInput(m.textInput.Value())
 						return m, nil
 					}
 					return m, m.handleAgentsEnter()
 				} else if m.modalMode == ModalSettingsAgentEdit {
-					// Agent detail: save inline edit, selector confirm,
-					// or handle row action.
 					if m.settingsSelectorActive {
 						return m, m.handleSelectorConfirm()
 					}
@@ -1149,7 +907,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 					return m, m.handleAgentEditEnter()
 				} else if m.modalMode == ModalSettingsTUI {
-					// Theme picker is active — handle selection.
 					if m.themePickerActive {
 						if m.modalSelectedIdx < len(m.themePickerItems) {
 							item := m.themePickerItems[m.modalSelectedIdx]
@@ -1163,7 +920,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 								return m, nil
 							case "community":
 								if theme.IsInstalledCommunity(item.name, m.installedCommunity) {
-									// Already installed — just apply
 									m.applyThemeByName(item.name)
 									m.themePreviewName = ""
 									m.themePickerActive = false
@@ -1171,7 +927,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 									m.modalSelectedIdx = 0
 									return m, nil
 								}
-								// Not installed — download and install
 								m.communityLoading = true
 								m.loadThemePickerItems()
 								return m, m.installCommunityThemeCmd(item.name)
@@ -1182,16 +937,12 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 								return m, m.fetchCommunityIndexCmd()
 							}
 						}
-						// For headers, loading, error — do nothing
 						return m, nil
 					}
-					// Interface settings: handle row action.
 					cmd := m.handleTUISettingsEnter()
-					// If theme picker was activated, just return with the fetch cmd
 					if m.themePickerActive {
 						return m, cmd
 					}
-					// Mouse toggle returns a cmd
 					if m.modalSelectedIdx == tuiSettingRowMouse {
 						return m, m.toggleTUIMouse()
 					}
@@ -1204,20 +955,11 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "esc", "q":
-		// "q" must not close form-based modals — it's a regular
-		// character while typing in a text field. Fall through to the
-		// textInput forwarding at the end of the modal handler.
-		// ESC always closes.
 		if msg.String() == "q" && isFormModal(m.modalMode, m.settingsEditField != "") {
 			break
 		}
-		// Any ESC/q leaving a provider view (detail, add/edit form, list)
-		// disarms a pending model delete so it can never carry over to
-		// another row or view.
 		m.clearProviderDeleteConfirm()
-		// Theme picker: ESC cancels and returns to the settings list.
 		if m.modalMode == ModalSettingsTUI && m.themePickerActive {
-			// Revert to the original theme if a preview was active
 			if m.themePreviewName != "" {
 				m.previewTheme(m.themePreviewName)
 				m.currentThemeName = m.themePreviewName
@@ -1228,7 +970,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.modalSelectedIdx = 0
 			return m, nil
 		}
-		// TUI settings inline edit: ESC cancels and returns to the list.
 		if m.modalMode == ModalSettingsTUI && m.settingsEditField != "" {
 			m.settingsEditField = ""
 			m.formError = ""
@@ -1236,7 +977,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode {
-			// In output view mode: go back to list
 			if msg.String() == "q" || msg.String() == "esc" {
 				m.bgExecViewMode = false
 				m.bgExecViewOutput = ""
@@ -1245,14 +985,12 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if m.modalMode == ModalCron && m.cronDetailMode {
-			// In detail view: go back to list
 			m.cronDetailMode = false
 			m.cronDetailJobID = ""
 			m.loadCronJobs()
 			return m, m.tickCmd()
 		}
 		if m.modalMode == ModalSecrets && m.secretsDetailMode {
-			// In detail view: go back to list
 			m.secretsDetailMode = false
 			m.secretsDetailName = ""
 			m.secretsReveal = false
@@ -1260,8 +998,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.tickCmd()
 		}
 		if m.modalMode == ModalSettingsSystemEdit {
-			// System sub-view: ESC cancels selector or inline edit,
-			// or if not editing goes back to the system group list.
 			if m.settingsSelectorActive {
 				m.handleSelectorCancel()
 				return m, nil
@@ -1280,8 +1016,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.tickCmd()
 		}
 		if m.modalMode == ModalSettingsAgentEdit {
-			// Agent detail: ESC cancels selector or inline edit, or
-			// if not editing goes back to the agents list.
 			if m.settingsSelectorActive {
 				m.handleSelectorCancel()
 				return m, nil
@@ -1292,7 +1026,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.loadAgentDetail(m.settingsAgentID)
 				return m, nil
 			}
-			// Go back to agents list
 			m.modalMode = ModalSettingsAgents
 			m.settingsAgentID = ""
 			m.loadAgentsSettings()
@@ -1304,8 +1037,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.modalMode == ModalSettingsSystem ||
 			m.modalMode == ModalSettingsTUI ||
 			m.modalMode == ModalSettingsSystemEdit {
-			// Back-navigation: settings sub-menus return to the top-level
-			// settings menu (Agents / System / Interface).
 			m.modalMode = ModalSettings
 			m.settingsSection = ""
 			m.settingsEditField = ""
@@ -1320,8 +1051,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.tickCmd()
 		}
 		if m.modalMode == ModalAddCommand {
-			// Wizard: discard the draft and go back to the list. The edited
-			// row (if any) is reselected so the user lands where they left off.
 			key := m.commandsEditKey
 			m.exitCommandWizard()
 			m.loadCommandsList()
@@ -1329,13 +1058,10 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.tickCmd()
 		}
 		if m.modalMode == ModalCommandDetail {
-			// Detail view: back to the command list (the list is reloaded so a
-			// file edited outside the TUI shows up immediately).
 			m.exitCommandDetail()
 			return m, m.tickCmd()
 		}
 		if m.modalMode == ModalSkillInstall {
-			// Go back to skills list
 			m.modalMode = ModalSkills
 			m.textInput.SetValue("")
 			m.formError = ""
@@ -1343,7 +1069,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.tickCmd()
 		}
 		if m.modalMode == ModalSkillPicker {
-			// Go back to install modal
 			m.modalMode = ModalSkillInstall
 			m.skillsScanResults = nil
 			m.skillsSelectedMap = nil
@@ -1351,8 +1076,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.tickCmd()
 		}
 		if m.modalMode == ModalEditModel {
-			// Edit-model form: ESC discards the draft and returns to the
-			// provider detail with the edited row reselected.
 			provider, alias := m.providerSelectedName, m.modelEditAlias
 			m.closeCatalogPicker()
 			m.formError = ""
@@ -1361,21 +1084,13 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.modalMode == ModalEditProvider {
-			// Edit-provider form: ESC discards the draft and returns to the
-			// provider detail (the list is rebuilt by enterProviderDetail).
 			provider := m.providerSelectedName
 			m.formError = ""
 			m.enterProviderDetail(provider, "")
 			m.syncTextInputEcho()
 			return m, nil
 		}
-		// Reset provider-in-flow state when leaving AddProvider modal
 		if m.modalMode == ModalAddProvider {
-			// The ESC branch of the provider picker (above) already left the
-			// picker: it either returned to the free-form type step (legacy
-			// name path / onboarding's "Other/custom") or closed the modal.
-			// Reaching here means the picker was still open when ESC was
-			// pressed (e.g. the row catalogue frame): the flow ends.
 			if m.providerTypePicker {
 				m.providerTypePicker = false
 				m.modalScrollOffset = 0
@@ -1387,8 +1102,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.providerSavedInFlow = false
 			m.connectSuccess = false
 			m.modalScrollOffset = 0
-			// During onboarding, ESC leaves the connect flow and heads
-			// back to the provider picker (it never exits the wizard).
 			if m.onboardingActive && m.onboardingStep == obConnect {
 				m.modalMode = ModalNone
 				m.formValues = nil
@@ -1396,37 +1109,27 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.onboardingStep = obProviderPicker
 				m.modalSelectedIdx = 0
 				m.closeCatalogPicker()
-				// Audit M2: leaving the form from a secret step must
-				// not leave a stale password echo on the widget.
 				m.syncTextInputEcho()
 				return m, nil
 			}
 		}
 		m.closeCatalogPicker()
 		m.modalMode = ModalNone
-		// Audit M2: ESC-close of a form modal — reset echo so a stale
-		// password mode can't affect any later text-input render.
 		m.syncTextInputEcho()
 	case "s":
 		if m.modalMode == ModalBackgroundExecs && !m.bgExecViewMode {
 			if m.modalSelectedIdx < len(m.bgExecModalKeys) {
 				procID := m.bgExecModalKeys[m.modalSelectedIdx]
 				_ = m.agentLoop.GetProvidable().StopBackgroundExec(procID)
-				// Refresh the list
 				return m, m.executeCommand("/bg")
 			}
 		}
 	case "e":
-		// Edit the selected provider's type / API key / API base URL from the
-		// provider detail view. Like the "Edit provider" action row, this keeps
-		// the model list intact (updateProvider edits the entry in place).
 		if m.modalMode == ModalProviderDetail {
 			m.clearProviderDeleteConfirm()
 			m.openProviderEditFlow()
 			return m, m.tickCmd()
 		}
-		// Edit a custom command (list or detail view). Directory-level rows
-		// are refused inside startCommandEdit with a feedback line.
 		if m.modalMode == ModalCommands {
 			if key := m.selectedCommandKey(); key != "" && key != commandsNewKey {
 				m.startCommandEdit(key)
@@ -1439,7 +1142,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.startCommandEdit(key)
 			return m, m.tickCmd()
 		}
-		// Toggle enable/disable for a cron job
 		if m.modalMode == ModalCron && m.cronService != nil {
 			jobID := m.selectedCronJobID()
 			if jobID != "" {
@@ -1449,14 +1151,12 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						m.cronDetailJobID = jobID
 					}
 					m.loadCronJobs()
-					// Re-select the same job and restore detail mode if needed.
 					m.reselectCronJob(jobID)
 					return m, m.tickCmd()
 				}
 			}
 		}
 	case "r":
-		// Run a cron job now
 		if m.modalMode == ModalCron && m.cronService != nil {
 			jobID := m.selectedCronJobID()
 			if jobID != "" {
@@ -1466,20 +1166,16 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.tickCmd()
 			}
 		}
-		// Reveal/hide a secret value in the detail view
 		if m.modalMode == ModalSecrets && m.secretsDetailMode {
 			m.secretsReveal = !m.secretsReveal
 			return m, m.tickCmd()
 		}
 	case "n":
-		// Create a new custom command (list view only; the wizard has its
-		// own text input, where "n" is a regular character).
 		if m.modalMode == ModalCommands {
 			m.startCommandCreate()
 			return m, m.tickCmd()
 		}
 	case "a":
-		// Add a new secret
 		if m.modalMode == ModalSecrets && !m.secretsDetailMode {
 			if m.keyringSvc() != nil {
 				m.startAddSecret()
@@ -1487,28 +1183,19 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "d":
-		// Delete a model from the provider detail. Double-confirm: the
-		// first press arms, the second one within the window deletes.
 		if m.modalMode == ModalProviderDetail {
 			if alias, ok := m.providerDetailRows[m.modalSelectedIdx]; ok {
 				return m, m.requestProviderModelDelete(m.providerSelectedName, alias)
 			}
-			m.providerFeedback = i18n.T("tui.modelDeleteNoRow") // cursor not on a model row
+			m.providerFeedback = i18n.T("tui.modelDeleteNoRow")
 			return m, nil
 		}
-		// Interface settings ⚠ row: "d" cancels the keep-awake REQUEST
-		// (deliberate "stop asking for this" — ENTER only retries). The
-		// guards mirror the other modal keys: while an inline edit field is
-		// active or the theme picker is open, "d" is a regular character and
-		// must fall through to the text input; and outside the ⚠ state the
-		// key is not consumed either (no cancel to perform).
 		if m.modalMode == ModalSettingsTUI &&
 			m.settingsEditField == "" && !m.themePickerActive &&
 			m.keepAwakeRequestedButFailed() {
 			m.cancelKeepAwake()
 			return m, nil
 		}
-		// Delete a cron job
 		if m.modalMode == ModalCron && m.cronService != nil {
 			jobID := m.selectedCronJobID()
 			if jobID != "" {
@@ -1519,7 +1206,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.tickCmd()
 			}
 		}
-		// Delete a secret
 		if m.modalMode == ModalSecrets && m.keyringSvc() != nil {
 			name := m.selectedSecretName()
 			if name != "" {
@@ -1531,7 +1217,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.tickCmd()
 			}
 		}
-		// Delete a skill
 		if m.modalMode == ModalSkills {
 			if m.modalSelectedIdx < len(m.skillsModalKeys) {
 				skillName := m.skillsModalKeys[m.modalSelectedIdx]
@@ -1540,8 +1225,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		// Delete a custom command (list or detail view). Double-confirm: the
-		// first press arms, the second one within the window deletes.
 		if m.modalMode == ModalCommands {
 			if key := m.selectedCommandKey(); key != "" && key != commandsNewKey {
 				return m, m.requestCommandDelete(key)
@@ -1551,31 +1234,20 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.requestCommandDelete(m.commandsDetailKey)
 		}
 	case " ":
-		// Toggle checkbox in skill picker
 		if m.modalMode == ModalSkillPicker {
 			m.handleSkillPickerToggle()
 			return m, m.tickCmd()
 		}
 	}
-	// Forward keystrokes to textInput for form-based modals
-	// so users can type in the input fields.
 	if isFormModal(m.modalMode, m.settingsEditField != "") {
-		// The command wizard's template step is multi-line: keystrokes go to
-		// the textarea, not the single-line input. ENTER/ESC were already
-		// consumed by the switch above (enter saves, esc backs out).
 		if m.modalMode == ModalAddCommand && m.formStepIndex == commandTemplateStep {
 			var cmd tea.Cmd
 			m.templateInput, cmd = m.templateInput.Update(msg)
 			return m, cmd
 		}
-		// Audit M2: re-derive echo mode from modalMode+formStepIndex
-		// before forwarding — single choke point, self-heals across
-		// every step transition.
 		m.syncTextInputEcho()
 		var cmd tea.Cmd
 		m.textInput, cmd = m.textInput.Update(msg)
-		// Filter-as-you-type: re-filter catalog suggestions while the
-		// model-name field is active.
 		if m.addModelCatalogActive && m.isModelNameFormStep() {
 			m.refreshCatalogSuggestions(m.textInput.Value())
 		}
@@ -1584,8 +1256,6 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	}
-	// Restart tick animation if the target session is actively processing.
-	// This keeps the loading dots when switching to a busy session/subagent.
 	if m.isSessionProcessing() {
 		return m, m.tickCmd()
 	}
@@ -1593,47 +1263,28 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 }
 
-// ── Row-driven /connect picker helpers ──────────────────────────────────────
-
-// applyConnectRow applies the selected connectRow to the /connect form and
-// routes to the first step that row needs to answer. Step NUMBERS are the
-// legacy ones (0 name, 1 type, 2 API key, 3 API base, 4+ models): a row only
-// decides which of them the user is sent to, so the masking/autocomplete/
-// review rules keyed on absolute indices keep working unchanged.
-//
-// It returns a tea.Cmd only for rows that hand off to an async engine flow
-// (today: the OAuth row); every other row returns nil and continues the
-// ordinary synchronous form.
 func (m *Model) applyConnectRow(idx int, row connectRow) tea.Cmd {
 	m.connectRowIdx = idx
 	m.providerTypeFromPreset = false
 	m.connectSkipAPIBase = false
 	m.formError = ""
-	// Re-assert the mode in case the model was driven directly (tests) —
-	// applyConnectRow is only ever called from the /connect picker dispatch,
-	// so this is a no-op in the app.
 	m.modalMode = ModalAddProvider
 
 	switch row.kind {
 	case connectRowCustomOpenAI, connectRowCustomAnthropic:
-		// Full flow: name → API key → API base → model steps. The provider
-		// type is known, so the free-text type step (1) is skipped later.
 		m.formValues[1] = row.typ
 		m.providerTypeFromPreset = true
-		m.formStepIndex = 0 // ask the name
+		m.formStepIndex = 0
 		m.textInput.SetValue("")
 		m.textInput.Placeholder = i18n.T("tui.connectProviderNamePlaceholder")
 
 	case connectRowAPIKey:
-		// Known provider: only the API key is asked. The name derives from
-		// the provider type and the base comes from the preset, so both the
-		// type (1) and base (3) steps are skipped.
 		m.formValues[0] = row.name
 		m.formValues[1] = row.typ
 		m.formValues[3] = row.apiBase
 		m.providerTypeFromPreset = true
 		m.connectSkipAPIBase = true
-		m.formStepIndex = 2 // API key
+		m.formStepIndex = 2
 		m.textInput.SetValue("")
 		m.textInput.Placeholder = "API Key"
 		if row.keyHint != "" {
@@ -1641,48 +1292,22 @@ func (m *Model) applyConnectRow(idx int, row connectRow) tea.Cmd {
 		}
 
 	case connectRowFreeType:
-		// Legacy flow, exactly as before the row-first restructure: ask for
-		// the name, then open the type picker on the next Enter.
 		m.formValues[1] = ""
 		m.providerTypeFromPreset = false
 		m.connectSkipAPIBase = false
-		m.formStepIndex = 0 // ask the name
+		m.formStepIndex = 0
 		m.textInput.SetValue("")
 		m.textInput.Placeholder = i18n.T("tui.connectProviderNamePlaceholder")
 
 	case connectRowOAuth:
-		// Native provider OAuth login: hand off to the pkg/auth flow
-		// (startConnectOAuthFlow). The engine resolves the registry config
-		// by row.oauthName, binds the loopback callback, and the returned
-		// tea.Cmd drives the rest of the state machine (start → poll →
-		// success) without any further interaction on this form. There is
-		// nothing to pre-fill into formValues: the credential is not typed
-		// into this form, it is produced by the flow itself.
-		//
-		// The dispatch already ran connectRowPicker = false and reset
-		// providerTypePicker (see the enter branch above); we only flip the
-		// modal to ModalConnectOAuth so the render/key paths know which
-		// surface owns the screen from here on.
-		m.connectOAuthCancel() // release any previous flow's listener/fields
+		m.connectOAuthCancel()
 		return m.connectOAuthStartFromRow(row)
 	}
-	// Audit M2: the API-key step is a secret step; sync the echo before the
-	// first frame renders the widget.
 	m.syncTextInputEcho()
 	return nil
 }
 
-// connectSaveProvider persists the provider part of the /connect form. It is
-// the single save point for the row-driven flow (right after the API key of
-// an API-key-only row) AND for the legacy last-provider-step path. It returns
-// false when it set m.formError (the caller keeps the user on the form so the
-// message is visible).
 func (m *Model) connectSaveProvider() bool {
-	// On a first run the in-memory config may already contain an empty
-	// placeholder for every known provider name (ensureNamedDefaults adds
-	// openai, anthropic, … with no key/model). During onboarding a preset
-	// pre-fills one of those names, so replace the empty placeholder instead
-	// of failing with "already exists".
 	if m.onboardingActive && m.cfg != nil && m.cfg.Providers != nil && m.cfg.Providers.Named != nil {
 		pnameKey := strings.ToLower(strings.TrimSpace(m.formValues[0]))
 		if existing, ok := m.cfg.Providers.Named[pnameKey]; ok && existing.IsEmpty() {
@@ -1690,9 +1315,6 @@ func (m *Model) connectSaveProvider() bool {
 		}
 	}
 	if m.connectRowIdx >= 0 {
-		// Row-driven flow: ensureProvider also replaces empty placeholders
-		// and updates the key/base of an existing provider in place, so
-		// re-running /connect for a configured provider is not an error.
 		alreadyUsable, err := m.ensureProvider(m.formValues[0], m.formValues[1], m.formValues[2], m.formValues[3], m.connectSkipAPIBase)
 		if err != nil {
 			m.formError = err.Error()
@@ -1708,16 +1330,8 @@ func (m *Model) connectSaveProvider() bool {
 	return true
 }
 
-// connectRouteAfterProviderSave routes the flow right after the provider was
-// saved: an already-usable provider (it already had models) goes straight to
-// the success screen — re-running /connect just refreshed the key — while any
-// other save enters the model-configuration steps (4+) with the prefill.
-// It returns false when it closed/redirected the flow (nothing left to do),
-// true when the caller may continue with the model steps.
 func (m *Model) connectRouteAfterProviderSave() bool {
 	if m.connectRowIdx >= 0 && m.connectAlreadyUsable {
-		// Success screen: the provider keeps its models and only the
-		// credentials changed.
 		m.connectSuccess = true
 		m.providerSavedInFlow = false
 		m.formStepIndex = 10
@@ -1726,7 +1340,6 @@ func (m *Model) connectRouteAfterProviderSave() bool {
 	}
 	m.providerSavedInFlow = true
 	m.providerSelectedName = strings.ToLower(strings.TrimSpace(m.formValues[0]))
-	// Transition to model configuration steps
 	m.formStepIndex = 4
 	m.textInput.SetValue("")
 	m.textInput.Placeholder = "Model alias (e.g. gpt-4o)"
@@ -1734,18 +1347,14 @@ func (m *Model) connectRouteAfterProviderSave() bool {
 	if p := providerPresetByType(m.formValues[1]); p != nil && p.modelHint != "" {
 		m.textInput.Placeholder = "Model alias (" + p.modelHint + ")"
 	}
-	// Pre-fill model defaults from the preset chosen during onboarding so
-	// the user can just press Enter through (still editable).
 	if m.onboardingActive && m.obSelectedPreset >= 0 && m.obSelectedPreset < len(providerPresets) {
 		preset := &providerPresets[m.obSelectedPreset]
 		if m.formValues[4] == "" && preset.defaultModelAlias != "" {
-			m.formValues[4] = preset.defaultModelAlias // model alias
+			m.formValues[4] = preset.defaultModelAlias
 		}
 		if m.formValues[5] == "" && preset.defaultModel != "" {
-			m.formValues[5] = preset.defaultModel // actual model name
+			m.formValues[5] = preset.defaultModel
 		}
-		// Pre-fill the integer/vision steps too so a
-		// straight Enter run works end to end.
 		if m.formValues[6] == "" {
 			m.formValues[6] = "128000"
 		}
@@ -1756,9 +1365,6 @@ func (m *Model) connectRouteAfterProviderSave() bool {
 			m.formValues[8] = "no"
 		}
 	}
-	// Row-driven prefill: the picked row carries the catalog default model
-	// for that provider, so Enter-through works there too. The onboarding
-	// prefill above is untouched (it wins when both are active).
 	if m.connectRowIdx >= 0 {
 		if row, ok := connectRowByIndex(m.connectRowIdx); ok {
 			if m.formValues[4] == "" && row.defaultModelAlias != "" {
@@ -1781,22 +1387,13 @@ func (m *Model) connectRouteAfterProviderSave() bool {
 	return true
 }
 
-// applyLegacyTypePreset keeps the pre-row-first behaviour of the picker when
-// it is opened by the free-text NAME step (step 0): the index space is the
-// legacy providerPresets list plus a trailing "custom" entry (see the
-// providerTypePickerMax assignment in the step-0 handler). Presets pre-fill
-// the type + API base and jump straight to the API-key step (2); the trailing
-// "custom" entry falls through to the free-form TYPE step (1). It is also
-// what onboarding's "Other / custom" path uses when the user presses Enter
-// without typing anything on step 0.
 func (m *Model) applyLegacyTypePreset(sel int) {
 	if sel < len(providerPresets) {
 		p := providerPresets[sel]
 		m.formValues[1] = p.typ
 		m.providerTypeFromPreset = true
-		// Pre-fill the API base from the preset.
 		m.formValues[3] = p.apiBase
-		m.formStepIndex = 2 // next: API Key
+		m.formStepIndex = 2
 		m.textInput.SetValue("")
 		m.textInput.Placeholder = "API Key"
 		if p.keyHint != "" {
@@ -1804,10 +1401,9 @@ func (m *Model) applyLegacyTypePreset(sel int) {
 		}
 		return
 	}
-	// "custom" entry — free-form type
 	m.formValues[1] = ""
 	m.providerTypeFromPreset = false
-	m.formStepIndex = 1 // stay on type step for free text
+	m.formStepIndex = 1
 	m.textInput.SetValue("")
 	m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
 }

@@ -8,11 +8,6 @@ type Props = {
   onChange: (value: SecretValue) => void
   placeholder?: string
   disabled?: boolean
-  /**
-   * Focus the literal input on mount. The input only exists in `literal` mode
-   * (`empty` renders a description, `env` renders a different field), so a
-   * parent that switches mode needs this to move focus to the key after the switch.
-   */
   autoFocus?: boolean
 }
 

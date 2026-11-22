@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// TestOAuthProviderNamesSortedAndComplete pins the registry contents: the CLI
-// derives its help/error text from this list, so a missing or renamed entry is a
-// user-visible regression.
 func TestOAuthProviderNamesSortedAndComplete(t *testing.T) {
 	got := OAuthProviderNames()
 	want := []string{"anthropic", "gemini", "google-antigravity", "openai"}
@@ -23,9 +20,6 @@ func TestOAuthProviderNamesSortedAndComplete(t *testing.T) {
 	}
 }
 
-// TestOAuthProviderNamesFreshSlicePerCall guards the "slice nueva en cada
-// llamada" contract: a caller mutating the returned slice must not affect the
-// registry or another caller.
 func TestOAuthProviderNamesFreshSlicePerCall(t *testing.T) {
 	first := OAuthProviderNames()
 	if len(first) == 0 {
@@ -43,7 +37,6 @@ func TestOAuthProviderNamesFreshSlicePerCall(t *testing.T) {
 		t.Errorf("OAuthProviderNames() slices share state: second call [0] = %q, want %q", second[0], canonical)
 	}
 
-	// The second slice must be independent too (no cached slice handed out twice).
 	second[0] = "pwned again"
 	if third := OAuthProviderNames(); third[0] != canonical {
 		t.Errorf("OAuthProviderNames() reused a previously returned slice: third call [0] = %q, want %q", third[0], canonical)
@@ -97,11 +90,6 @@ func TestOAuthProviderConfigByName(t *testing.T) {
 	}
 }
 
-// TestClaudeAliasResolvesToAnthropicPreset pins the `claude` alias contract:
-// the alias selects the Claude OAuth flow, but the canonical registry and
-// credential-store key stays `anthropic`. It must therefore resolve to the
-// verbatim ClaudeOAuthConfig() preset (Name == "anthropic", not "claude"), which
-// is what pkg/providers and the credential store look up.
 func TestClaudeAliasResolvesToAnthropicPreset(t *testing.T) {
 	cfg, ok := OAuthProviderConfigByName("claude")
 	if !ok {
@@ -115,11 +103,6 @@ func TestClaudeAliasResolvesToAnthropicPreset(t *testing.T) {
 	}
 }
 
-// TestOAuthProviderConfigByNameClonesExtraAuthParams is the map-leak test:
-// OAuthProviderConfig embeds a map, so an accessor that returned the stored
-// preset as-is would let any caller rewrite shared state
-// (cfg.ExtraAuthParams["pwned"] = "1") and change the behavior of every other
-// consumer.
 func TestOAuthProviderConfigByNameClonesExtraAuthParams(t *testing.T) {
 	for _, name := range OAuthProviderNames() {
 		t.Run(name, func(t *testing.T) {
@@ -136,8 +119,6 @@ func TestOAuthProviderConfigByNameClonesExtraAuthParams(t *testing.T) {
 				want[key] = value
 			}
 
-			// Corrupt the returned copy on purpose: add an unknown key and wipe
-			// the declared ones.
 			cfg.ExtraAuthParams["pwned"] = "1"
 			for key := range want {
 				delete(cfg.ExtraAuthParams, key)
@@ -154,7 +135,6 @@ func TestOAuthProviderConfigByNameClonesExtraAuthParams(t *testing.T) {
 				t.Errorf("stored ExtraAuthParams of %q changed: got %v, want %v; the accessor must clone the map per call", name, again.ExtraAuthParams, want)
 			}
 
-			// The alias path must observe the same (intact) preset.
 			alias := name
 			switch name {
 			case "anthropic":
@@ -176,8 +156,6 @@ func TestOAuthProviderConfigByNameClonesExtraAuthParams(t *testing.T) {
 		})
 	}
 
-	// The constructors themselves are stateless: a value obtained directly from
-	// OpenAIOAuthConfig must carry the declared params, not the caller's edits.
 	if got := OpenAIOAuthConfig().ExtraAuthParams; !reflect.DeepEqual(got, map[string]string{
 		"id_token_add_organizations": "true",
 		"codex_cli_simplified_flow":  "true",
@@ -186,10 +164,6 @@ func TestOAuthProviderConfigByNameClonesExtraAuthParams(t *testing.T) {
 	}
 }
 
-// TestOAuthProviderConfigByNameMatchesConstructor makes sure the registry hands
-// out the real presets: the key fields must match the constructor's output
-// byte for byte, so adding a provider to the registry cannot silently downgrade
-// its configuration.
 func TestOAuthProviderConfigByNameMatchesConstructor(t *testing.T) {
 	presets := map[string]OAuthProviderConfig{
 		"anthropic":          ClaudeOAuthConfig(),
@@ -209,7 +183,6 @@ func TestOAuthProviderConfigByNameMatchesConstructor(t *testing.T) {
 				t.Errorf("OAuthProviderConfigByName(%q) = %+v, want the constructor output %+v", name, cfg, want)
 			}
 
-			// Key fields spelled out, so a failure is readable.
 			if cfg.Name != want.Name {
 				t.Errorf("Name = %q, want %q", cfg.Name, want.Name)
 			}
@@ -229,13 +202,6 @@ func TestOAuthProviderConfigByNameMatchesConstructor(t *testing.T) {
 	}
 }
 
-// TestGeminiAliasResolvesToGeminiPreset pins the `gemini-cli` alias contract:
-// the alias selects the Google Code Assist OAuth flow, but the canonical
-// registry and credential-store key stays `gemini` (the name the preset
-// advertises in Name and the key pkg/providers looks up), so both spellings must
-// resolve to the verbatim GeminiOAuthConfig() preset. Because the alias is an
-// input-only spelling, the advertised list must keep exactly one entry per
-// provider: `gemini` once, `gemini-cli` never.
 func TestGeminiAliasResolvesToGeminiPreset(t *testing.T) {
 	cfg, ok := OAuthProviderConfigByName("gemini-cli")
 	if !ok {
@@ -266,12 +232,6 @@ func TestGeminiAliasResolvesToGeminiPreset(t *testing.T) {
 	}
 }
 
-// TestGeminiPresetClonesExtraAuthParams is the Gemini arm of the map-leak canary
-// (TestOAuthProviderConfigByNameClonesExtraAuthParams covers every preset; this
-// one also walks the `gemini-cli` alias path). The Code Assist preset's
-// ExtraAuthParams (access_type=offline + prompt=consent) are what make Google
-// return a refresh_token, so a caller mutating the returned map must not be able
-// to strip them for the next caller — through the canonical name or the alias.
 func TestGeminiPresetClonesExtraAuthParams(t *testing.T) {
 	want := map[string]string{
 		"access_type": "offline",
@@ -288,8 +248,6 @@ func TestGeminiPresetClonesExtraAuthParams(t *testing.T) {
 				t.Fatalf("OAuthProviderConfigByName(%q).ExtraAuthParams = %v, want %v", name, cfg.ExtraAuthParams, want)
 			}
 
-			// Corrupt the returned copy on purpose: add an unknown key and wipe
-			// the declared ones.
 			cfg.ExtraAuthParams["pwned"] = "1"
 			for key := range want {
 				delete(cfg.ExtraAuthParams, key)
@@ -306,7 +264,6 @@ func TestGeminiPresetClonesExtraAuthParams(t *testing.T) {
 				t.Errorf("stored ExtraAuthParams seen through %q changed: got %v, want %v; the accessor must clone the map per call", name, again.ExtraAuthParams, want)
 			}
 
-			// The constructor itself is stateless too.
 			if got := GeminiOAuthConfig().ExtraAuthParams; !reflect.DeepEqual(got, want) {
 				t.Errorf("GeminiOAuthConfig().ExtraAuthParams = %v, want the declared map %v", got, want)
 			}
@@ -314,10 +271,6 @@ func TestGeminiPresetClonesExtraAuthParams(t *testing.T) {
 	}
 }
 
-// TestOAuthProviderPresetNameMatchesRegistryKey documents an invariant the CLI
-// relies on: the registry key is the canonical provider name, and each preset
-// advertises it in Name (the CLI stores credentials under that name). It also
-// makes reflect.DeepEqual against the constructor meaningful.
 func TestOAuthProviderPresetNameMatchesRegistryKey(t *testing.T) {
 	for _, name := range OAuthProviderNames() {
 		cfg, ok := OAuthProviderConfigByName(name)

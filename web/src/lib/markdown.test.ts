@@ -208,7 +208,6 @@ describe('isDiffStatLine / isFileDiffRow', () => {
 })
 
 describe('link scheme allowlist (WEB-M12)', () => {
-  // Helper: extract href from the first link token in parsed output
   const linkHref = (text: string): string | undefined => {
     const parts = parseInlineMarkdown(text)
     const link = parts.find((p) => p.token?.type === 'link')
@@ -217,7 +216,6 @@ describe('link scheme allowlist (WEB-M12)', () => {
 
   describe('blocked schemes → href must be undefined', () => {
     test('javascript: basic', () => {
-      // parens truncate at first ')' — known parser limitation, not in scope
       expect(linkHref('[x](javascript:alert)')).toBeUndefined()
     })
 
@@ -244,7 +242,6 @@ describe('link scheme allowlist (WEB-M12)', () => {
     })
 
     test('javascript with control char in URL', () => {
-      // \x01 is a control char inside the URL
       expect(linkHref('[x](javascript\x01:alert)')).toBeUndefined()
     })
 

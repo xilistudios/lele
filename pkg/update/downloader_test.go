@@ -15,7 +15,6 @@ import (
 	"testing"
 )
 
-// makeTarGz builds a tar.gz archive containing a single file.
 func makeTarGz(t *testing.T, name string, content []byte) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -138,8 +137,6 @@ func TestDownloadMissingAsset(t *testing.T) {
 
 func cleanupTemp(dir string) { _ = os.RemoveAll(dir) }
 
-// TestExtractFromTarGz verifies that extractFromTarGz extracts the binary to
-// dst without error and with the original content.
 func TestExtractFromTarGz(t *testing.T) {
 	outDir := t.TempDir()
 	binaryContent := []byte("#!/bin/sh\necho lele test\n")
@@ -166,7 +163,6 @@ func TestExtractFromTarGz(t *testing.T) {
 		t.Errorf("extracted content mismatch: got %q, want %q", got, binaryContent)
 	}
 
-	// File must be executable (0755).
 	info, err := os.Stat(dst)
 	if err != nil {
 		t.Fatal(err)
@@ -176,8 +172,6 @@ func TestExtractFromTarGz(t *testing.T) {
 	}
 }
 
-// TestExtractFromTarGz_MissingBinary verifies the error when the archive does
-// not contain the expected binary.
 func TestExtractFromTarGz_MissingBinary(t *testing.T) {
 	outDir := t.TempDir()
 	archivePath := filepath.Join(outDir, "empty.tar.gz")

@@ -1,22 +1,7 @@
-/**
- * Unit tests for the render-level collapse of adjacent thinking cards
- * (lib/thinkingRows.ts).
- *
- * The contract under test is visible behaviour, not the implementation: a run
- * of 2+ rows that each render as a bare "Thinking…" card must become ONE card
- * whose body is the concatenation of the run's reasoning, and every row that
- * shows anything else (prose, a tool card, a user bubble, an attachment, the
- * archived-from-context banner) must break the run.
- *
- * The fixtures are built through `msg()` so each case states only the fields it
- * cares about; `ChatMessage` requires `id`, `role`, `content`, `streaming`,
- * `createdAt`, which is exactly what the helper defaults.
- */
 import { describe, expect, test } from 'bun:test'
 import { collapseThinkingRuns, isThinkingOnlyRow } from './thinkingRows'
 import type { ChatMessage } from './types'
 
-/** Minimal ChatMessage builder — override only what the case is about. */
 function msg(overrides: Partial<ChatMessage> & { id: string }): ChatMessage {
   return {
     role: 'assistant',
@@ -27,7 +12,6 @@ function msg(overrides: Partial<ChatMessage> & { id: string }): ChatMessage {
   }
 }
 
-/** An assistant iteration that carries reasoning and no visible text. */
 function thinking(
   id: string,
   reasoning: string,
@@ -246,7 +230,6 @@ describe('collapseThinkingRuns — identity preservation', () => {
       msg({ id: 'x', content: 'text' }),
       lone,
     ])
-    // Only the pair collapses; `lone` is a run of 1 and keeps its identity.
     expect(out.map((m) => m.id)).toEqual(['a', 'x', 'lone'])
     expect(out[2]).toBe(lone)
   })
@@ -262,8 +245,6 @@ describe('collapseThinkingRuns — identity preservation', () => {
 
 describe('collapseThinkingRuns — a realistic turn', () => {
   test('discarded retry + guidance + tool step collapse to one card, tool cards kept', () => {
-    // Shape produced by one turn: iteration 1 thinks and calls a tool, the
-    // retry thinks again with no text, the tool result lands, then the answer.
     const out = collapseThinkingRuns([
       msg({ id: 'u', role: 'user', content: 'check the disk' }),
       thinking('i1', 'I should run df'),
@@ -276,15 +257,12 @@ describe('collapseThinkingRuns — a realistic turn', () => {
     ])
     expect(out.map((m) => m.id)).toEqual(['u', 'i1', 't1', 'i2', 't2', 'i4', 'a'])
     expect(out[3].reasoningContent).toBe('empty response, retrying\n\nstill no text')
-    // The assistant WITH text kept its own reasoning card untouched.
     expect(out[6].reasoningContent).toBe('summarizing')
   })
 })
 
 describe('collapseThinkingRuns — array identity without a run', () => {
   test('a list holding ONE thinking-only row still returns the SAME array', () => {
-    // Documented contract: only a run of 2+ may allocate a new array, otherwise
-    // every `useMemo` downstream of the collapse is defeated on each stream tick.
     const lone = thinking('a', 'one')
     const input = [msg({ id: 'u', role: 'user', content: 'hi' }), lone]
     expect(collapseThinkingRuns(input) as ChatMessage[]).toBe(input)

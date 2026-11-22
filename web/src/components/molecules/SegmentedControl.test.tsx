@@ -27,11 +27,9 @@ function setup(
   return { ...utils, onChange }
 }
 
-/** Options as rendered, in DOM order. */
 const radios = (container: HTMLElement) =>
   Array.from(container.querySelectorAll<HTMLElement>('[role="radio"]'))
 
-/** Last value reported to onChange. */
 const lastCall = (onChange: ReturnType<typeof mock>) =>
   (onChange.mock.calls.at(-1) as [string] | undefined)?.[0]
 

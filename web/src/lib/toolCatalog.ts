@@ -1,17 +1,5 @@
-/**
- * Tool catalog grouping for the agent "Tools" tab (spec §7.5).
- *
- * The backend exposes a flat tool list (`GET /api/v1/tools`) with no category
- * information, so this grouping is 100% presentation. Names are the real ones
- * registered in `pkg/tools/`.
- *
- * Fallback rule: a tool that is not listed here lands in `other` — unknown or
- * newly added tools are never lost from the UI.
- */
-
 export type ToolCategory = 'files' | 'system' | 'web' | 'agents' | 'hardware' | 'other'
 
-/** Display order of the category groups in the Tools tab. */
 export const CATEGORY_ORDER: ToolCategory[] = [
   'files',
   'system',
@@ -21,7 +9,6 @@ export const CATEGORY_ORDER: ToolCategory[] = [
   'other',
 ]
 
-/** i18n key for a category label (namespace `settings.agentPage`). */
 export const CATEGORY_LABEL_KEYS: Record<ToolCategory, string> = {
   files: 'settings.agentPage.category.files',
   system: 'settings.agentPage.category.system',
@@ -64,28 +51,19 @@ export const TOOL_CATEGORIES: Record<ToolCategory, string[]> = {
     'message',
   ],
   hardware: ['i2c', 'spi'],
-  // `secret` has no natural home among the functional groups; anything the
-  // backend adds later also lands here until it is classified.
   other: ['secret'],
 }
 
-/** tool name -> category, derived once from TOOL_CATEGORIES. */
 const CATEGORY_BY_TOOL: Map<string, ToolCategory> = new Map(
   Object.entries(TOOL_CATEGORIES).flatMap(([category, tools]) =>
     tools.map((tool) => [tool, category as ToolCategory]),
   ),
 )
 
-/** Category of a tool name; unknown names fall back to `other`. */
 export function categorize(toolName: string): ToolCategory {
   return CATEGORY_BY_TOOL.get(toolName) ?? 'other'
 }
 
-/**
- * Minimum autonomous operating set: read/write/edit files, list a directory,
- * run commands, search and fetch the web, deliver a file, wait. Offered as the
- * "Essentials" batch button in the Tools tab (§4.6.3).
- */
 export const ESSENTIAL_TOOLS: string[] = [
   'read_file',
   'write_file',
@@ -98,10 +76,8 @@ export const ESSENTIAL_TOOLS: string[] = [
   'sleep',
 ]
 
-/** Every known tool name (catalog of the static map, without the fallback bucket). */
 export const KNOWN_TOOLS: string[] = CATEGORY_ORDER.flatMap((category) => TOOL_CATEGORIES[category])
 
-/** Group a list of tool names by category, in CATEGORY_ORDER, dropping empty groups. */
 export function groupToolsByCategory(tools: string[]): Array<{
   category: ToolCategory
   tools: string[]

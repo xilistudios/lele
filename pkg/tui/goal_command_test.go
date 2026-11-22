@@ -8,7 +8,6 @@ import (
 func TestGoalCommand_NewChatCreatesSession(t *testing.T) {
 	m := newTestModel(t)
 
-	// Fresh TUI on the welcome screen: no active session yet.
 	if m.currentKey != "" {
 		t.Fatalf("expected fresh model with empty currentKey, got %q", m.currentKey)
 	}
@@ -16,11 +15,8 @@ func TestGoalCommand_NewChatCreatesSession(t *testing.T) {
 		t.Fatal("expected welcome screen to be shown initially")
 	}
 
-	// Execute /goal on the welcome screen (no session).
 	m.executeCommand("/goal Establece un objetivo de prueba")
 
-	// A session must have been created and the welcome screen dismissed so
-	// the feedback is actually rendered.
 	if m.currentKey == "" {
 		t.Fatal("expected /goal to create a session on a new chat")
 	}
@@ -28,10 +24,6 @@ func TestGoalCommand_NewChatCreatesSession(t *testing.T) {
 		t.Fatal("expected /goal to dismiss the welcome screen so feedback renders")
 	}
 
-	// The feedback should reflect the goal being set, not the "no active
-	// session" error. The current TUI shows the goal as a tool-call-style
-	// badge via currentToolAction, so assert that it is set and that no
-	// "No hay sesión activa" error is shown.
 	if m.currentToolAction == "" {
 		t.Fatal("expected currentToolAction to be set after setting a goal")
 	}
@@ -46,7 +38,6 @@ func TestGoalCommand_NewChatCreatesSession(t *testing.T) {
 func TestGoalCommand_ExistingChatKeepsSession(t *testing.T) {
 	m := newTestModel(t)
 
-	// Simulate an existing chat by creating one first.
 	m.executeCommand("/new")
 	origKey := m.currentKey
 	if origKey == "" {

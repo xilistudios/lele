@@ -8,9 +8,6 @@ import (
 	"testing"
 )
 
-// openRawDB opens a raw *sql.DB (without running migrations) at the
-// given path. Useful for tests that need to manipulate the schema
-// directly (e.g., simulating an older schema version).
 func openRawDB(path string) (*sql.DB, error) {
 	dsn := path +
 		"?_pragma=busy_timeout(5000)" +
@@ -20,8 +17,6 @@ func openRawDB(path string) (*sql.DB, error) {
 	return sql.Open("sqlite", dsn)
 }
 
-// openTestStore opens a fresh Store in a temporary directory and
-// registers cleanup to close it.
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 
@@ -102,12 +97,10 @@ func TestKV_SetGetDeleteKeys(t *testing.T) {
 	s := openTestStore(t)
 	kv := s.KV()
 
-	// Get on a missing key returns not found without error.
 	if _, ok, err := kv.Get("missing"); err != nil || ok {
 		t.Fatalf("Get(missing) = (_, %v, %v), want (_, false, nil)", ok, err)
 	}
 
-	// Set + Get.
 	if err := kv.Set("telegram_offset", "42"); err != nil {
 		t.Fatalf("Set(telegram_offset) failed: %v", err)
 	}
@@ -116,7 +109,6 @@ func TestKV_SetGetDeleteKeys(t *testing.T) {
 		t.Fatalf("Get(telegram_offset) = (%q, %v, %v), want (\"42\", true, nil)", val, ok, err)
 	}
 
-	// Set again upserts the value.
 	if err := kv.Set("telegram_offset", "43"); err != nil {
 		t.Fatalf("Set(telegram_offset) upsert failed: %v", err)
 	}
@@ -125,7 +117,6 @@ func TestKV_SetGetDeleteKeys(t *testing.T) {
 		t.Fatalf("Get(telegram_offset) after upsert = (%q, %v, %v), want (\"43\", true, nil)", val, ok, err)
 	}
 
-	// Keys with prefix.
 	for k, v := range map[string]string{
 		"workspace:foo": "1",
 		"workspace:bar": "2",
@@ -144,7 +135,6 @@ func TestKV_SetGetDeleteKeys(t *testing.T) {
 		t.Errorf("Keys(workspace:) = %v, want %v", keys, wantKeys)
 	}
 
-	// Delete removes the key; deleting again is not an error.
 	if err := kv.Delete("telegram_offset"); err != nil {
 		t.Fatalf("Delete(telegram_offset) failed: %v", err)
 	}
@@ -177,10 +167,6 @@ func TestOpen_PragmasApplied(t *testing.T) {
 }
 
 func TestMigrations_UpgradeV6ToV7_PreservesClients(t *testing.T) {
-	// Open a fresh store (v7), insert a native client, then simulate a
-	// v6 database by dropping the native_pending_pins table and resetting
-	// the schema version. Re-open should re-run migration 7 without
-	// losing the existing client row.
 	path := filepath.Join(t.TempDir(), "test.db")
 
 	s, err := Open(path)
@@ -194,10 +180,6 @@ func TestMigrations_UpgradeV6ToV7_PreservesClients(t *testing.T) {
 		t.Fatalf("Close() failed: %v", err)
 	}
 
-	// Simulate v6: drop native_pending_pins and downgrade schema version.
-	// Everything later migrations add must go too — the reopen replays every
-	// migration above the recorded version, so a column added by v8 would
-	// otherwise collide with the one this fresh store already created.
 	db, err := openRawDB(path)
 	if err != nil {
 		t.Fatalf("openRawDB(%q) failed: %v", path, err)
@@ -218,7 +200,6 @@ func TestMigrations_UpgradeV6ToV7_PreservesClients(t *testing.T) {
 	}
 	db.Close()
 
-	// Re-open: migrate 6→7 runs.
 	s2, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open(%q) after downgrade failed: %v", path, err)
@@ -229,20 +210,16 @@ func TestMigrations_UpgradeV6ToV7_PreservesClients(t *testing.T) {
 		}
 	}()
 
-	// Verify schema version.
 	var version string
 	if err := s2.DB().QueryRow(
 		`SELECT value FROM schema_meta WHERE key = 'schema_version'`,
 	).Scan(&version); err != nil {
 		t.Fatalf("read schema_version: %v", err)
 	}
-	// The reopen replays every migration above the recorded version, so the
-	// store ends up at the build's latest, not necessarily at 7.
 	if want := strconv.Itoa(SchemaVersion); version != want {
 		t.Errorf("schema_version = %q, want %q", version, want)
 	}
 
-	// Verify native_pending_pins table exists.
 	var tableName string
 	if err := s2.DB().QueryRow(
 		`SELECT name FROM sqlite_master WHERE type='table' AND name='native_pending_pins'`,
@@ -250,7 +227,6 @@ func TestMigrations_UpgradeV6ToV7_PreservesClients(t *testing.T) {
 		t.Fatalf("native_pending_pins table missing: %v", err)
 	}
 
-	// Verify existing client survived.
 	client, found, err := s2.NativeClients().GetClient("client-1")
 	if err != nil {
 		t.Fatalf("GetClient(client-1) error: %v", err)

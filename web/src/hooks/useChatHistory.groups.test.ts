@@ -1,15 +1,3 @@
-/**
- * Group-card rehydration from cached chat history (issue #239, layer 1).
- *
- * Regression contract:
- *  - queryFn must return the snapshot-converted groups INSIDE the cached query
- *    data (groups are part of the data shape, not a fire-and-forget side
- *    effect), so a cache hit can still re-apply them.
- *  - Hydration must happen from a useEffect on [query.data, sessionKey], so a
- *    remount served from the react-query cache (A→B→A within staleTime,
- *    queryFn NOT re-run) still refills the group Map after clearGroups().
- *  - loadMore / pagination must not clobber the cached groups.
- */
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
@@ -30,8 +18,6 @@ afterEach(() => {
   localStorage.clear()
 })
 
-/** Mimics the production defaults (web/src/lib/queryClient.ts): staleTime 10s
- *  is exactly what makes the cache-hit path skip queryFn. */
 function createTestQueryClient() {
   return new QueryClient({
     defaultOptions: {
@@ -139,7 +125,6 @@ describe('useChatHistory group rehydration (#239)', () => {
 
     const api = setupApi()
 
-    // Mount 1: fetch runs, groups land in the Map.
     const first = renderHook(
       () => {
         const gs = useGroupState()
@@ -160,10 +145,6 @@ describe('useChatHistory group rehydration (#239)', () => {
     })
     expect(fetchCount).toBe(1)
 
-    // Simulate a session switch away and back: useMessages.clearStreaming()
-    // empties the group Map (fresh hook instance = fresh Map), but the react-
-    // query cache still holds fresh data (same client, same key, < staleTime)
-    // so queryFn must NOT run again — hydration has to come from the cache.
     first.unmount()
     const second = renderHook(
       () => {
@@ -184,7 +165,7 @@ describe('useChatHistory group rehydration (#239)', () => {
     await waitFor(() => {
       expect(second.result.current.groups.size).toBe(1)
     })
-    expect(fetchCount).toBe(1) // served from cache — no refetch happened
+    expect(fetchCount).toBe(1)
 
     const g = second.result.current.groups.get('g1') as GroupInfo
     expect(g.status).toBe('done')
@@ -223,7 +204,6 @@ describe('useChatHistory group rehydration (#239)', () => {
     expect(g.turns[0].groupID).toBe('g1')
     expect(g.turns[1].turnIndex).toBe(1)
     expect(g.turns[1].toolCalls?.[0]?.tool).toBe('web_search')
-    // hydrate received the same converted infos (no raw snapshots)
     expect(hydrate.mock.calls[0][0][0].groupID).toBe('g1')
     expect(result.current.messages.length).toBe(2)
   })
@@ -232,7 +212,6 @@ describe('useChatHistory group rehydration (#239)', () => {
     const queryClient = createTestQueryClient()
     const wrapper = createWrapper(queryClient)
 
-    // Response WITHOUT the groups key (omitted by backend when no groups).
     globalThis.fetch = mock(async () =>
       makeHistoryResponse('session-1', makeMessages(2), false),
     ) as unknown as typeof fetch
@@ -245,7 +224,6 @@ describe('useChatHistory group rehydration (#239)', () => {
     await waitFor(() => {
       expect(queryClient.getQueryData(buildChatHistoryQueryKey('session-1'))).toBeDefined()
     })
-    // Never invoked with garbage — not even with an empty array.
     expect(hydrate).not.toHaveBeenCalled()
     const data = queryClient.getQueryData<{ groups?: GroupInfo[] }>(
       buildChatHistoryQueryKey('session-1'),
@@ -257,8 +235,6 @@ describe('useChatHistory group rehydration (#239)', () => {
     const queryClient = createTestQueryClient()
     const wrapper = createWrapper(queryClient)
 
-    // 51 messages > DEFAULT_LIMIT (50) so the cached-data merge branch runs on
-    // the second fetch.
     globalThis.fetch = mock(async () =>
       makeHistoryResponse('session-1', makeMessages(51), true, [makeSnapshot('g1')]),
     ) as unknown as typeof fetch
@@ -298,7 +274,6 @@ describe('useChatHistory group rehydration (#239)', () => {
       const url = String(input)
       const beforeId = new URL(url).searchParams.get('before_id')
       if (beforeId) {
-        // Older page carries its own (fresh session-level) snapshot too.
         return makeHistoryResponse('session-1', page1, false, [
           makeSnapshot('g1'),
           makeSnapshot('g0'),
@@ -328,14 +303,13 @@ describe('useChatHistory group rehydration (#239)', () => {
       buildChatHistoryQueryKey('session-1'),
     )
     const ids = (data?.groups ?? []).map((g) => g.groupID).sort()
-    expect(ids).toEqual(['g0', 'g1']) // existing g1 not clobbered, g0 appended
+    expect(ids).toEqual(['g0', 'g1'])
   })
 
   test('hydrate overwrites per group and coexists with WS upserts (key symmetry)', async () => {
     const queryClient = createTestQueryClient()
     const wrapper = createWrapper(queryClient)
 
-    // Initial snapshot says 'started'.
     globalThis.fetch = mock(async () =>
       makeHistoryResponse('session-1', makeMessages(2), false, [
         makeSnapshot('g1', { status: 'started', synthesis: '' }),
@@ -363,8 +337,6 @@ describe('useChatHistory group rehydration (#239)', () => {
     })
     expect(result.current.groups.get('g1')?.status).toBe('started')
 
-    // A WS group.status event upserts the SAME id (upsert keys by groupId,
-    // hydrate by info.groupID — both must address the same Map entry).
     act(() => {
       result.current.upsertGroup('g1', (existing) => ({
         ...(existing as GroupInfo),
@@ -372,7 +344,7 @@ describe('useChatHistory group rehydration (#239)', () => {
         synthesis: 'live ws synthesis',
       }))
     })
-    expect(result.current.groups.size).toBe(1) // no duplicate entry
+    expect(result.current.groups.size).toBe(1)
     expect(result.current.groups.get('g1')?.status).toBe('done')
   })
 })

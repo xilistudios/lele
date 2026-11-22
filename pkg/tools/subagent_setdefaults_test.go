@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package tools
 
 import (
@@ -10,10 +5,6 @@ import (
 	"testing"
 )
 
-// TestSetDefaults_ReplacesConstructorFields verifies that SetDefaults updates
-// the provider/model/workspace/iteration budget on an existing manager — the
-// config-reload path re-uses managers so running tasks keep a home, and the
-// manager must still pick up the recreated agent's new defaults.
 func TestSetDefaults_ReplacesConstructorFields(t *testing.T) {
 	sm := NewSubagentManager(nil, "old-model", "/old/workspace", nil, 5)
 
@@ -34,14 +25,11 @@ func TestSetDefaults_ReplacesConstructorFields(t *testing.T) {
 	if sm.maxIterations != 9 {
 		t.Errorf("maxIterations = %d, want 9", sm.maxIterations)
 	}
-	// The running task must survive the defaults swap untouched.
 	if got := sm.tasks["subagent-1"]; got != first {
 		t.Errorf("running task was replaced or dropped by SetDefaults")
 	}
 }
 
-// TestSetDefaults_ConcurrentWithListTasks is a minimal data-race guard: the
-// reload path writes defaults while the parent agent polls task status.
 func TestSetDefaults_ConcurrentWithListTasks(t *testing.T) {
 	sm := NewSubagentManager(nil, "m", "/w", nil, 5)
 	task := &SubagentTask{ID: "subagent-1", Task: "work", Status: SubagentStatusRunning}

@@ -10,16 +10,6 @@ import { createApiClient } from '../../lib/api'
 import type { ChatSession } from '../../lib/types'
 import { CHAT_PAGE_SIZE, ChatHistoryPage } from './ChatHistoryPage'
 
-// ---------------------------------------------------------------------------
-// Contract: the chat list requests 50 chats per page by default.
-//
-// The backend (parsePagination, pkg/channels/rest_system.go) already defaults
-// to 50 and caps a page at 200, but the WebUI used to send limit=200 explicitly
-// — the server maximum — so opening the chat history with a large session count
-// pulled everything at once. These tests pin the request page size so a
-// regression back to 200 fails loudly.
-// ---------------------------------------------------------------------------
-
 const originalFetch = globalThis.fetch
 
 const TOTAL_SESSIONS = 120
@@ -37,8 +27,6 @@ type PageRequest = { offset: number; limit: number }
 function installSessionServer(requests: PageRequest[]) {
   globalThis.fetch = mock(async (input: RequestInfo | URL) => {
     const url = String(input)
-    // Only the paginated list endpoint is served; anything else 404s so an
-    // unexpected call fails fast instead of being retried into the next test.
     if (!url.split('?')[0].endsWith('/api/v1/chat/sessions')) {
       return new Response(JSON.stringify({ error: `unexpected fetch: ${url}` }), { status: 404 })
     }
@@ -67,8 +55,6 @@ const authValue = {
   session: { token: 'token', client_id: 'client-1' },
 } as unknown as AuthContextValue
 
-// ChatHistoryPage renders <Sidebar> and reads the cold app state; the fields it
-// never touches are cast away so the fixture stays focused on pagination.
 const logicValue = {
   sessions: [],
   currentSessionKey: null,
@@ -102,14 +88,12 @@ function renderPage() {
   )
 }
 
-/** The "Load more (N of M)" button, or undefined while there is nothing left. */
 function loadMoreButton(container: HTMLElement): HTMLButtonElement | undefined {
   return Array.from(container.querySelectorAll('button')).find((b) =>
     (b.textContent ?? '').includes('Cargar'),
   )
 }
 
-/** How many chat rows are currently rendered. */
 function renderedChatCount(container: HTMLElement): number {
   const main = container.querySelector('main')
   return ALL_SESSIONS.filter((s) => (main?.textContent ?? '').includes(s.name ?? '')).length
@@ -133,12 +117,10 @@ describe('ChatHistoryPage pagination', () => {
     const requests: PageRequest[] = []
     installSessionServer(requests)
 
-    // Mount the page; the assertion is about the outgoing request, not the DOM.
     renderPage()
 
     await waitFor(() => expect(requests.length).toBeGreaterThan(0))
     expect(requests[0]).toEqual({ offset: 0, limit: CHAT_PAGE_SIZE })
-    // Nothing else was fetched on mount — no eager second page.
     expect(requests.length).toBe(1)
   })
 
@@ -167,7 +149,6 @@ describe('ChatHistoryPage pagination', () => {
     await waitFor(() => expect(renderedChatCount(view.container)).toBe(100))
     expect(requests).toContainEqual({ offset: 50, limit: CHAT_PAGE_SIZE })
 
-    // Last page is partial and clears has_more, so the button disappears.
     const lastButton = loadMoreButton(view.container) as HTMLButtonElement
     await act(async () => {
       fireEvent.click(lastButton)

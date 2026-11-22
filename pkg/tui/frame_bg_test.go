@@ -11,8 +11,6 @@ import (
 	"github.com/muesli/termenv"
 )
 
-// forceTrueColor switches lipgloss to TrueColor for the duration of a test so
-// background sequences are actually emitted (the default test profile is Ascii).
 func forceTrueColor(t *testing.T) {
 	t.Helper()
 	old := lipgloss.ColorProfile()
@@ -20,9 +18,6 @@ func forceTrueColor(t *testing.T) {
 	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
 }
 
-// resetFollowers returns, for every full ANSI reset in s, the escape sequence
-// (or raw byte description) that immediately follows it. A follower that is
-// not a background-setting SGR sequence means unpainted cells.
 func resetFollowers(s string) []string {
 	var out []string
 	idx := 0
@@ -52,9 +47,6 @@ func resetFollowers(s string) []string {
 	}
 }
 
-// assertNoUnpaintedCells verifies that every full reset is immediately
-// followed by a background-setting SGR sequence (or end of line/frame), so no
-// cell is ever left unpainted after an inner style reset.
 func assertNoUnpaintedCells(t *testing.T, out string) {
 	t.Helper()
 
@@ -74,8 +66,6 @@ func assertNoUnpaintedCells(t *testing.T, out string) {
 func TestPaintFrame_ReappliesBackgroundAfterInnerResets(t *testing.T) {
 	forceTrueColor(t)
 
-	// Content with inner styled elements (foreground + inner background) that
-	// terminate with full ANSI resets, mimicking logo/input/badge rendering.
 	content := WelcomeLogo.Render("LELE") + "\n" +
 		InputBarContainer.Width(60).Render("hola") + "\n" +
 		ModelSelectorStyle.Render("badge")
@@ -92,20 +82,14 @@ func TestPaintFrame_ReappliesBackgroundAfterInnerResets(t *testing.T) {
 	}
 }
 
-// TestReapplyBackground_ContextAware verifies that raw cells following a
-// reset are painted with the innermost enclosing background: the container
-// background inside a container that owns its own background, and the app
-// background at top level.
 func TestReapplyBackground_ContextAware(t *testing.T) {
 	forceTrueColor(t)
 
 	const (
-		appBgParams   = "48;2;24;24;36" // BgColor #181824
-		inputBgParams = "48;2;32;32;48" // InputBgColor #212130
+		appBgParams   = "48;2;24;24;36"
+		inputBgParams = "48;2;32;32;48"
 	)
 
-	// Raw text (" raw") after a styled run inside the input container: the
-	// cells after the logo reset must be painted with the INPUT background.
 	inner := reapplyBackground(
 		AppContainer.Width(60).Height(3).Render(
 			InputBarContainer.Width(40).Render(WelcomeLogo.Render("hola") + " raw"),
@@ -116,8 +100,6 @@ func TestReapplyBackground_ContextAware(t *testing.T) {
 	}
 	assertNoUnpaintedCells(t, inner)
 
-	// Same at top level: raw cells after the logo reset must be painted with
-	// the APP background (the re-emitted sequence may carry extra attributes).
 	top := reapplyBackground(
 		AppContainer.Width(60).Height(3).Render(WelcomeLogo.Render("hola") + " raw"),
 	)
@@ -127,8 +109,6 @@ func TestReapplyBackground_ContextAware(t *testing.T) {
 	}
 	assertNoUnpaintedCells(t, top)
 
-	// Nested fg-only run inside a bg run: closing the fg run must not pop the
-	// enclosing background context.
 	nested := reapplyBackground(
 		AppContainer.Width(60).Height(3).Render(
 			InputBarContainer.Width(40).Render(WelcomeLogo.Render("a") + WelcomeLogo.Render("b") + " tail"),
@@ -169,11 +149,6 @@ func TestView_ChatFrame_UniformBackground(t *testing.T) {
 	assertNoUnpaintedCells(t, out)
 }
 
-// TestInput_NoRawBasicANSIColors verifies that the textarea and textinput
-// widgets no longer emit raw basic ANSI colors (e.g. \x1b[40m black
-// background, \x1b[37m white foreground) from the bubbles stock defaults.
-// Those sequences clash with the app theme and, after paintFrame's per-reset
-// background re-emission, show up as black patches inside the input box.
 func TestInput_NoRawBasicANSIColors(t *testing.T) {
 	forceTrueColor(t)
 
@@ -187,12 +162,6 @@ func TestInput_NoRawBasicANSIColors(t *testing.T) {
 	}
 }
 
-// TestView_WelcomeInput_NoBackgroundBleed verifies that the input box
-// background (InputBgColor) never extends beyond the welcome box: on every
-// frame line, the cells to the right of the centered welcome content must be
-// painted with the app background, not the input background. Regression test
-// for the textarea being wider than the 60-col welcome box, which made
-// InputBgColor bands run to the right edge of the screen.
 func TestView_WelcomeInput_NoBackgroundBleed(t *testing.T) {
 	forceTrueColor(t)
 
@@ -202,8 +171,8 @@ func TestView_WelcomeInput_NoBackgroundBleed(t *testing.T) {
 	m.showWelcome = true
 
 	const (
-		inputBgParams = "48;2;32;32;48" // InputBgColor #212130
-		appBgParams   = "48;2;24;24;36" // BgColor #181824
+		inputBgParams = "48;2;32;32;48"
+		appBgParams   = "48;2;24;24;36"
 	)
 
 	out := m.View()
@@ -215,19 +184,13 @@ func TestView_WelcomeInput_NoBackgroundBleed(t *testing.T) {
 		if len(cells) != m.width {
 			t.Fatalf("line %d: %d cells, want %d", i, len(cells), m.width)
 		}
-		// Rightmost 60 columns must be the app background: the welcome box
-		// is 60 cols wide and centered, so nothing with its own background
-		// may reach the right screen edge.
 		for col := m.width - 60; col < m.width; col++ {
 			if cells[col].bg != appBgParams {
 				t.Fatalf("line %d col %d: background %q, want app background %q (input background bleed)",
 					i, col, cells[col].bg, appBgParams)
 			}
 		}
-		// Sanity: the input box itself still paints its own background
-		// somewhere (the placeholder lines).
 		if strings.Contains(line, inputBgParams) {
-			// InputBg cells must be confined to the centered 60-col box.
 			for col, c := range cells {
 				if c.bg == inputBgParams && (col < (m.width-60)/2 || col >= (m.width+60)/2) {
 					t.Fatalf("line %d col %d: input background outside welcome box", i, col)
@@ -237,12 +200,10 @@ func TestView_WelcomeInput_NoBackgroundBleed(t *testing.T) {
 	}
 }
 
-// ansiCell is a single screen cell with the SGR state that paints it.
 type ansiCell struct {
-	bg string // background parameters in effect (e.g. "48;2;24;24;36"; "" = none)
+	bg string
 }
 
-// ansiCells expands a styled line into per-cell background state.
 func ansiCells(line string) ([]ansiCell, error) {
 	var cells []ansiCell
 	bg := ""
@@ -268,7 +229,7 @@ func ansiCells(line string) ([]ansiCell, error) {
 		r, size := utf8.DecodeRuneInString(line[i:])
 		w := runewidth.RuneWidth(r)
 		if w == 0 {
-			w = 1 // zero-width runes still occupy the cell they combine with
+			w = 1
 		}
 		for k := 0; k < w; k++ {
 			cells = append(cells, ansiCell{bg: bg})
@@ -278,9 +239,6 @@ func ansiCells(line string) ([]ansiCell, error) {
 	return cells, nil
 }
 
-// backgroundParams extracts the background portion of an SGR parameter list
-// ("48;2;R;G;B" for extended colors, "4x" for basic backgrounds), or "" when
-// the sequence does not set a background.
 func backgroundParams(params string) string {
 	parts := strings.Split(params, ";")
 	for i, p := range parts {

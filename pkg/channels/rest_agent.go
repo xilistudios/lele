@@ -61,15 +61,6 @@ func (n *NativeChannel) handleAgentInfo(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// handleAgentCatalog serves GET /api/v1/agents/{agentID}/catalog.
-//
-// It reports what the agent CAN actually use right now, derived from live
-// runtime state (never hardcoded):
-//   - tools:  the agent instance's real ToolRegistry via agentLoop.ListAgentTools
-//   - skills: the agent's OWN skills loader (see skillLoaderFor), so the list
-//     matches the <skills> block of this agent's system prompt.
-//
-// Returns 404 when the agent does not exist (same pattern as handleAgentInfo).
 func (n *NativeChannel) handleAgentCatalog(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentID")
 	if agentID == "" {
@@ -77,17 +68,11 @@ func (n *NativeChannel) handleAgentCatalog(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// 404 if the agent doesn't exist. GetAgentInfo is the existence check used
-	// by every other /agents/{id} endpoint.
 	if _, ok := n.agentLoop.GetAgentInfo(agentID); !ok {
 		writeError(w, http.StatusNotFound, "agent not found", "agent_not_found")
 		return
 	}
 
-	// Resolve the catalog from the agent's live tool registry. The existence
-	// check above passed, so a missing/false result here means the agent loop
-	// implementation cannot expose tools; treat it as 404 rather than 500 so
-	// clients see a stable "unknown agent" answer.
 	agentTools, ok := n.agentLoop.ListAgentTools(agentID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "agent not found", "agent_not_found")
@@ -100,13 +85,6 @@ func (n *NativeChannel) handleAgentCatalog(w http.ResponseWriter, r *http.Reques
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 
-	// Skills come from THIS agent's loader — the same instance that renders its
-	// <skills> prompt block — so the catalog can never disagree with what the
-	// agent actually sees. Before this, every agent's catalog was answered from
-	// the channel's default-workspace loader, which hid each agent's own
-	// <workspace>/skills entirely (the bug this feature fixes). skillLoaderFor
-	// falls back to that channel loader when no per-agent instance exists, so
-	// the answer degrades to the old behaviour instead of failing.
 	catalogSkills := []AgentCatalogSkill{}
 	workspace := ""
 	if loader, _, ok := n.skillLoaderFor(agentID); ok {
@@ -122,11 +100,6 @@ func (n *NativeChannel) handleAgentCatalog(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// buildAgentCatalogSkills converts a loader's view into catalog entries,
-// marking a skill deletable only when it comes from the agent's own workspace
-// directory (global and built-in skills are shared with other agents, so they
-// must not be removable "through" one). Sorted by name; the frontend renders
-// without re-sorting.
 func buildAgentCatalogSkills(loaded []skills.SkillInfo, workspace string) []AgentCatalogSkill {
 	out := make([]AgentCatalogSkill, 0, len(loaded))
 	for _, s := range loaded {
@@ -174,7 +147,6 @@ func (n *NativeChannel) resolveAgentWorkspace(agentID string) (string, error) {
 		return "", err
 	}
 
-	// Initialize workspace if needed
 	if err := lelectx.InitializeWorkspace(absWorkspace); err != nil {
 		return "", fmt.Errorf("failed to initialize workspace: %w", err)
 	}
@@ -182,11 +154,6 @@ func (n *NativeChannel) resolveAgentWorkspace(agentID string) (string, error) {
 	return absWorkspace, nil
 }
 
-// agentWorkspaceDir turns the raw workspace of an agent config into the absolute
-// path the agent works in: empty means the shared default, "~" is expanded, and
-// the result must stay inside the allowed roots. Split out of
-// resolveAgentWorkspace so read-only callers (listing, counting the agents that
-// share a workspace) can resolve the path WITHOUT creating the folder.
 func agentWorkspaceDir(raw string) (string, error) {
 	workspace := raw
 	if workspace == "" {
@@ -307,8 +274,6 @@ func (n *NativeChannel) handleAgentFileSave(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Bound the read: context files are small; an authenticated caller (or a
-	// CSRF'd one) must not force unbounded allocation. 1MB matches native.go.
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {

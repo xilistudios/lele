@@ -24,7 +24,6 @@ func TestBuildRequestBody_NoCacheByDefault(t *testing.T) {
 	if strings.Contains(string(b), "cache_control") {
 		t.Errorf("cache_control without opt-in: %s", b)
 	}
-	// System stays a plain string when caching is off.
 	if _, ok := body["system"].(string); !ok {
 		t.Errorf("system should remain string, got %T", body["system"])
 	}
@@ -44,7 +43,6 @@ func TestBuildRequestBody_CacheBreakpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// System became a block array with a breakpoint.
 	sysBlocks, ok := body["system"].([]map[string]any)
 	if !ok || len(sysBlocks) != 1 {
 		t.Fatalf("system not converted to blocks: %#v", body["system"])
@@ -54,7 +52,6 @@ func TestBuildRequestBody_CacheBreakpoints(t *testing.T) {
 		t.Errorf("system cache_control = %v", cc)
 	}
 
-	// Only the last tool carries the breakpoint.
 	toolsOut := body["tools"].([]any)
 	if _, exists := toolsOut[0].(map[string]any)["cache_control"]; exists {
 		t.Error("first tool must not be marked")
@@ -63,7 +60,6 @@ func TestBuildRequestBody_CacheBreakpoints(t *testing.T) {
 		t.Error("last tool must carry the breakpoint")
 	}
 
-	// Last message (plain string content) is upgraded to a text block with breakpoint.
 	msgs := body["messages"].([]any)
 	last := msgs[len(msgs)-1].(map[string]any)
 	content, ok := last["content"].([]map[string]any)
@@ -87,13 +83,11 @@ func TestBuildRequestBody_CacheSkipsToolResultTail(t *testing.T) {
 	}
 	msgs := body["messages"].([]any)
 	last := msgs[len(msgs)-1].(map[string]any)
-	// tool_result content must not receive a breakpoint.
 	for _, blk := range last["content"].([]map[string]any) {
 		if blk["type"] == "tool_result" && blk["cache_control"] != nil {
 			t.Error("tool_result must not carry a breakpoint")
 		}
 	}
-	// System breakpoint still applied.
 	if _, ok := body["system"].([]map[string]any); !ok {
 		t.Error("system should still be converted with breakpoint")
 	}

@@ -96,18 +96,7 @@ describe('getAgentCatalog', () => {
   })
 })
 
-/**
- * Per-agent skill administration (workspace writes).
- *
- * The routes themselves are covered server-side in
- * `pkg/channels/rest_agent_skills_test.go`; what is covered here is the wire
- * contract the frontend depends on: WHICH path each call hits, WHICH verb, and
- * that the body carries the fields the handler decodes. A typo in `scope` or a
- * missing `enabled` is invisible to the component tests (they stub this layer),
- * so it has to be pinned at the client.
- */
 describe('per-agent skill mutations', () => {
-  /** Captures the last request as {url, method, body}. */
   function captureFetch(payload: unknown = { message: 'ok' }) {
     const seen: { url: string; method?: string; body?: BodyInit | null }[] = []
     globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -132,8 +121,6 @@ describe('per-agent skill mutations', () => {
   })
 
   test('agentToggleSkill encodes both the agent id and the skill name', async () => {
-    // Skill names come from disk and agent ids are user-authored: a name with
-    // a slash must not escape the route it belongs to.
     const seen = captureFetch()
     await api().agentToggleSkill('a b', 'c/d', true)
 
@@ -162,8 +149,6 @@ describe('per-agent skill mutations', () => {
   })
 
   test('agentInstallSkill without a scope sends scope undefined (server default)', async () => {
-    // Omitting must mean "whatever the server defaults to" (workspace), not
-    // "global": the JSON key is simply absent.
     const seen = captureFetch()
     await api().agentInstallSkill('coder', 'owner/repo/skill')
 
@@ -189,8 +174,6 @@ describe('per-agent skill mutations', () => {
   })
 
   test('a rejected mutation surfaces the server error code', async () => {
-    // The delete guard (global/builtin skills) answers 400 with a code; the
-    // panel prints `error.message`, so the message must survive this layer.
     globalThis.fetch = mock(
       async (_input: RequestInfo | URL) =>
         new Response(
@@ -207,8 +190,6 @@ describe('per-agent skill mutations', () => {
     })
   })
 
-  // The page-level global skill endpoints; same wire contract, pinned here
-  // because the modal/component tests stub this layer.
   test('installSkill POSTs url + scope', async () => {
     const seen = captureFetch({ skill_id: 'tmux', message: 'ok' })
     const response = await api().installSkill('sipeed/lele-skills/tmux', 'global')
@@ -223,8 +204,6 @@ describe('per-agent skill mutations', () => {
   })
 
   test('installSkill without a scope omits the key exactly', async () => {
-    // Regression guard for every existing caller (useSkills, InstallSkillModal):
-    // `undefined` must be dropped by JSON.stringify so the body is unchanged.
     const seen = captureFetch()
     await api().installSkill('owner/repo/skill')
 
@@ -246,17 +225,7 @@ describe('per-agent skill mutations', () => {
   })
 })
 
-/**
- * Per-agent slash commands (brief §6 wire contract).
- *
- * Same rationale as the skill-mutation block above: the component tests stub
- * this layer, so WHICH path/verb/body each call hits must be pinned here.
- * `content` is the full markdown file (frontmatter serialised by the frontend,
- * parsed by the Go handler), and `allow_absolute_files` is tri-state — null
- * means "inherit", so the client must move whatever the caller gives it.
- */
 describe('per-agent command endpoints', () => {
-  /** Captures the last request as {url, method, body}. */
   function captureFetch(payload: unknown = { ok: true }) {
     const seen: { url: string; method?: string; body?: BodyInit | null }[] = []
     globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -324,8 +293,6 @@ describe('per-agent command endpoints', () => {
   })
 
   test('a rejected write surfaces the server error code', async () => {
-    // 403 not_editable (config/directory level) must survive this layer: the
-    // dialog prints error.message.
     globalThis.fetch = mock(
       async () =>
         new Response(
@@ -340,16 +307,7 @@ describe('per-agent command endpoints', () => {
   })
 })
 
-/**
- * Per-agent MCP routes (T5 UI wire contract).
- *
- * Same rationale as the skill/command blocks above: the hooks stub this layer
- * (useAgentMCP calls `api.mcpX`), so WHICH path/verb/body each MCP call hits
- * has to be pinned here — including that `force` only appends `&force=true`
- * and that the raw PUT carries the literal `content` bytes.
- */
 describe('per-agent MCP endpoints', () => {
-  /** Captures the last request as {url, method, body}. */
   function captureFetch(payload: unknown = { ok: true }) {
     const seen: { url: string; method?: string; body?: BodyInit | null }[] = []
     globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -412,10 +370,6 @@ describe('per-agent MCP endpoints', () => {
     expect(JSON.parse(String(seen[0]?.body))).toEqual({ layer: 'project', content: '{}' })
   })
 
-  /**
-   * Captures the last request and answers 204 with no body — the shape of the
-   * two DELETE routes of the OAuth contract.
-   */
   function captureFetch204() {
     const seen: { url: string; method?: string; body?: BodyInit | null }[] = []
     globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -434,9 +388,6 @@ describe('per-agent MCP endpoints', () => {
     })
     const start = await api().mcpAuthStart('a b', 'srv/ice')
 
-    // Both the agent id and the server name are encoded; the route starts the
-    // flow, so nothing is carried in the body (start is applyBodyLimit'd
-    // server-side for symmetry only).
     expect(seen[0]?.url).toBe(
       'http://127.0.0.1:18793/api/v1/mcp/servers/srv%2Fice/auth?agent_id=a%20b',
     )
@@ -471,8 +422,6 @@ describe('per-agent MCP endpoints', () => {
   })
 
   test('mcpAuthComplete without a state sends it undefined (server default)', async () => {
-    // `state` is optional in the contract: omitting the key must reach the
-    // server as absent, not as the string "undefined".
     const seen = captureFetch({ flow_id: 'f1', server: 'srv', state: 'done', authenticated: true })
     await api().mcpAuthComplete('main', 'f1', { code: 'c0de' })
 
@@ -485,8 +434,6 @@ describe('per-agent MCP endpoints', () => {
 
     expect(seen[0]?.url).toBe('http://127.0.0.1:18793/api/v1/mcp/auth/f1?agent_id=main')
     expect(seen[0]?.method).toBe('DELETE')
-    // 204 → undefined, like every other 204 path of the client (callers treat
-    // "resolved" as success and never read a body).
     expect(result).toBeUndefined()
   })
 
@@ -502,8 +449,6 @@ describe('per-agent MCP endpoints', () => {
   })
 
   test('a rejected MCP write surfaces the server error code', async () => {
-    // 409 mcp_entry_shadowed must survive this layer: conflict handling
-    // branches on the code via mcpErrorCode.
     globalThis.fetch = mock(
       async () =>
         new Response(
@@ -520,15 +465,6 @@ describe('per-agent MCP endpoints', () => {
   })
 })
 
-/**
- * Session survival on refresh failure.
- *
- * The refresh token is single-use and the endpoint is rate limited, so the
- * answer to a refresh attempt is not always "this credential is dead": a 429,
- * a 5xx or a dropped request all leave the credential untouched. Before this,
- * every one of those wiped the session, and because localStorage is shared by
- * all tabs a single transient failure logged the whole browser out.
- */
 describe('refresh failure and session survival', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -540,15 +476,9 @@ describe('refresh failure and session survival', () => {
       headers: { 'Content-Type': 'application/json', ...headers },
     })
 
-  /**
-   * Protected endpoint answers 401 for the first `deny` calls, then succeeds.
-   * `refreshes` are handed out in order; an Error/null entry simulates a
-   * request that never got an answer.
-   */
   function mockServer(opts: {
     refreshes: (() => Response | Error | null)[]
     deny?: number
-    /** Bearer values that always succeed, used to model another tab's token. */
     accept?: string[]
   }) {
     const calls: { url: string; auth: string | null }[] = []
@@ -598,8 +528,6 @@ describe('refresh failure and session survival', () => {
   test('classifies only an explicit auth rejection as fatal', () => {
     expect(isFatalRefreshFailure(400, 'refresh_error')).toBe(true)
     expect(isFatalRefreshFailure(401, 'refresh_error')).toBe(true)
-    // Rate limit, server errors, network (status 0) and unrelated 400s must
-    // never destroy a session.
     expect(isFatalRefreshFailure(429, 'rate_limit_exceeded')).toBe(false)
     expect(isFatalRefreshFailure(500, undefined)).toBe(false)
     expect(isFatalRefreshFailure(502, undefined)).toBe(false)
@@ -644,9 +572,6 @@ describe('refresh failure and session survival', () => {
     })
     const { api } = client()
 
-    // Several requests in a row must not keep hammering a limited endpoint:
-    // the access token is still the rejected one, so each retry would trigger
-    // yet another refresh and deepen the rate-limit hole.
     for (let i = 0; i < 5; i++) {
       await expect(api.getAgentCatalog('coder')).rejects.toBeInstanceOf(ApiError)
     }
@@ -655,8 +580,6 @@ describe('refresh failure and session survival', () => {
   })
 
   test('concurrent 401s share a single refresh attempt', async () => {
-    // The refresh token is single-use: two parallel rotations would make the
-    // second one look like a revoked credential and log the session out.
     const server = mockServer({
       refreshes: [() => json({ token: 'access-2', refresh_token: 'refresh-2' })],
       deny: 999,
@@ -670,9 +593,6 @@ describe('refresh failure and session survival', () => {
   })
 
   test('a zero-second Retry-After does not switch the backoff off', async () => {
-    // A proxy or a buggy upstream can advertise Retry-After: 0. Taking it at
-    // face value would clear the cooldown and send the client straight back
-    // into the request that was just rate limited.
     const server = mockServer({
       refreshes: [
         () =>
@@ -703,8 +623,6 @@ describe('refresh failure and session survival', () => {
     const { api } = client()
 
     await expect(api.getAgentCatalog('coder')).rejects.toBeInstanceOf(ApiError)
-    // Still backed off, and the block must expire within a minute, not a
-    // decade: renewal cannot be disabled remotely.
     expect(server.refreshCount()).toBe(1)
   })
 
@@ -737,9 +655,6 @@ describe('refresh failure and session survival', () => {
   })
 
   test('adopts a session another tab rotated instead of logging out', async () => {
-    // Two tabs held the same refresh token; the other one already rotated it
-    // and persisted the result. Our copy is now rejected as invalid, but the
-    // browser session is very much alive.
     saveSession({
       client_id: 'client-1',
       device_name: 'other-tab',
@@ -758,13 +673,10 @@ describe('refresh failure and session survival', () => {
     expect(catalog.agent_id).toBe('coder')
     expect(wasLoggedOut()).toBe(false)
     expect(server.calls.some((c) => c.auth === 'Bearer access-from-other-tab')).toBe(true)
-    // The stale token must not be written back over the fresh one.
     expect(loadSession()?.refresh_token).toBe('refresh-from-other-tab')
   })
 
   test('adopts a rotation made by another tab of the same client', async () => {
-    // The legitimate case the guard must not block: same client, rotated
-    // token. Two tabs of one device are the ordinary situation.
     saveSession({
       client_id: 'client-MINE',
       device_name: 'My Desktop',
@@ -793,10 +705,6 @@ describe('refresh failure and session survival', () => {
   })
 
   test('refuses to adopt a session belonging to a different client', async () => {
-    // localStorage holds exactly one session slot, so a differing client_id
-    // means another client signed into this browser -- not that our credential
-    // was rotated. Adopting it would silently re-point this tab at a device it
-    // never signed into.
     saveSession({
       client_id: 'client-OTHER',
       device_name: 'some other device',
@@ -820,18 +728,12 @@ describe('refresh failure and session survival', () => {
 
     await expect(api.getAgentCatalog('coder')).rejects.toBeInstanceOf(ApiError)
 
-    // Signed out rather than continuing as the other device.
     expect(failed).toBe(true)
-    // And no request ever went out carrying the foreign access token.
     expect(server.calls.some((c) => c.auth === 'Bearer access-of-other-client')).toBe(false)
-    // The foreign session itself is left untouched for the tab that owns it.
     expect(loadSession()?.client_id).toBe('client-OTHER')
   })
 
   test('adoption happens once: a second rejection ends the session', async () => {
-    // Adoption is a rescue for a token another tab already rotated, not a way
-    // to keep a dead credential alive. Once we are using the stored session,
-    // that session IS the token under test, so there is nothing left to adopt.
     saveSession({
       client_id: 'client-1',
       device_name: 'other-tab',
@@ -851,33 +753,20 @@ describe('refresh failure and session survival', () => {
       failed++
     })
 
-    // The stored session differs from this tab's token, so adoption happens
-    // eagerly: no refresh request is wasted discovering what localStorage
-    // already says. The adopted token is then rejected by the server, but the
-    // session is not torn down yet -- this tab has not been told its own
-    // credential is dead.
     await expect(api.getAgentCatalog('coder')).rejects.toBeInstanceOf(ApiError)
     expect(failed).toBe(0)
     expect(server.refreshCount()).toBe(0)
 
-    // Now this tab holds the stored token, so there is nothing left to adopt:
-    // the refresh round-trip happens, the server rejects it, and the session
-    // ends instead of adopting in a loop.
     await expect(api.getAgentCatalog('coder')).rejects.toBeInstanceOf(ApiError)
     expect(failed).toBe(1)
     expect(server.refreshCount()).toBe(1)
 
-    // Credentials were dropped, so the next call goes out unauthenticated.
     await expect(api.getAgentCatalog('coder')).rejects.toBeInstanceOf(ApiError)
     expect(failed).toBe(1)
     expect(server.calls.at(-1)?.auth).toBeNull()
   })
 
   test("the cooldown does not block adopting another tab's rotation", async () => {
-    // After a rate limited refresh this tab is backing off. If a second tab
-    // then rotates the token, the good credential is already in localStorage:
-    // making this tab wait out a backoff it never needed would keep it failing
-    // for no reason.
     mockServer({
       refreshes: [() => json({ error: 'too many requests', code: 'rate_limit_exceeded' }, 429)],
       deny: 999,
@@ -901,8 +790,6 @@ describe('refresh failure and session survival', () => {
   })
 
   test('a new credential does not inherit the previous cooldown', async () => {
-    // Re-pairing or signing in as another client must be able to renew
-    // immediately, even seconds after a rate limited refresh.
     const server = mockServer({
       refreshes: [
         () => json({ error: 'too many requests', code: 'rate_limit_exceeded' }, 429),
@@ -917,14 +804,10 @@ describe('refresh failure and session survival', () => {
 
     api.setToken('access-new', 'refresh-new')
     await expect(api.getAgentCatalog('coder')).rejects.toBeInstanceOf(ApiError)
-    // Blocked by the cooldown, this second call would not have tried at all and
-    // the fresh token would sit unused until the window passed.
     expect(server.refreshCount()).toBe(2)
   })
 
   test('a rejection with no stored session ends the session immediately', async () => {
-    // The other half of the adoption guard: with nothing in localStorage there
-    // is no rescue to attempt, and a genuinely dead credential must sign out.
     localStorage.clear()
     mockServer({
       refreshes: [() => json({ error: 'invalid refresh token', code: 'refresh_error' }, 400)],
@@ -938,18 +821,9 @@ describe('refresh failure and session survival', () => {
     })
 
     await expect(api.getAgentCatalog('coder')).rejects.toBeInstanceOf(ApiError)
-    // Nothing stored means nothing to preserve: erasing is allowed.
     expect(wipe).toEqual([true])
   })
 
-  /**
-   * The stored session decides whether shared storage may be erased.
-   *
-   * One localStorage slot is shared by every tab and by every client that
-   * signed into this browser. When the credential that just failed is not the
-   * one sitting in that slot, the failure says nothing about the stored
-   * session, and deleting it would log a device out that never failed here.
-   */
   const foreignSession = {
     client_id: 'client-OTHER',
     device_name: 'some other device',
@@ -975,17 +849,13 @@ describe('refresh failure and session survival', () => {
 
     await expect(api.getAgentCatalog('coder')).rejects.toBeInstanceOf(ApiError)
 
-    // This tab is disconnected...
     expect(wipe).toEqual([false])
     expect(api.getToken()).toBeNull()
-    // ...but the session in shared storage is not this tab's to delete.
     expect(loadSession()?.client_id).toBe('client-OTHER')
     expect(loadSession()?.refresh_token).toBe('refresh-of-other-client')
   })
 
   test('a fatal refresh may erase storage when the stored session is ours', async () => {
-    // Same client, same rejected refresh token stored: this is our own dead
-    // credential, so the whole browser should be signed out.
     saveSession({
       client_id: 'client-MINE',
       device_name: 'My Desktop',
@@ -1013,10 +883,6 @@ describe('refresh failure and session survival', () => {
   })
 
   test('adopts a rotation that lands during the second adoption look', async () => {
-    // The losing tab of a rotation race can read localStorage before the
-    // winner's `saveSession` has run: the first look sees the stale token and
-    // finds nothing to adopt. The winner writes a moment later, so the delayed
-    // retry is the difference between adopting a live session and wiping it.
     saveSession({
       client_id: 'client-MINE',
       device_name: 'My Desktop',
@@ -1060,23 +926,11 @@ describe('refresh failure and session survival', () => {
     const catalog = await api.getAgentCatalog('coder')
 
     expect(catalog.agent_id).toBe('coder')
-    // No sign-out: the request was replayed with the winner's token.
     expect(wipe).toEqual([])
     expect(seen).toContain('Bearer access-from-winner')
-    // The fresh pair survives in storage instead of being wiped.
     expect(loadSession()?.refresh_token).toBe('refresh-from-winner')
   })
 })
-/**
- * The renewed credential's deadline.
- *
- * The old client stamped `expires: now + 1h` on every refreshed session and
- * nobody looked at it, while the server's real answer is 30 days. Since the
- * UI now renews BEFORE the deadline instead of after a 401, the fabricated
- * value would make every browser believe it is about to expire and refresh in
- * a loop. These tests pin that the server's own `expires` is what gets
- * persisted, and that a degenerate answer still lands on the old fallback.
- */
 describe('the renewed credential carries the server deadline', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -1088,7 +942,6 @@ describe('the renewed credential carries the server deadline', () => {
       headers: { 'Content-Type': 'application/json' },
     })
 
-  /** 401 on the first protected call, then success; /auth/refresh answers `body`. */
   function mockOnceExpiredRefresh(body: () => unknown) {
     let denied = 0
     globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1104,7 +957,6 @@ describe('the renewed credential carries the server deadline', () => {
     }) as unknown as typeof fetch
   }
 
-  /** Mirrors what the provider does in `onTokenRefresh`: merge and persist. */
   function trackingClient() {
     const api = createApiClient('http://127.0.0.1:18793')
     const persisted: AuthSession[] = []
@@ -1135,9 +987,6 @@ describe('the renewed credential carries the server deadline', () => {
   })
 
   test('keeps the old near-future fallback when the answer has no usable expires', async () => {
-    // A proxy or an older gateway could answer without the field. That must not
-    // turn into an unparsable stored deadline, so the previous fabricated value
-    // is kept -- degenerate responses change nothing.
     const before = Date.now()
     mockOnceExpiredRefresh(() => ({ token: 'access-2', refresh_token: 'refresh-2' }))
 
@@ -1147,8 +996,6 @@ describe('the renewed credential carries the server deadline', () => {
     const fallback = Date.parse(persisted[0]?.expires ?? '')
     expect(Number.isFinite(fallback)).toBe(true)
     expect(fallback - before).toBeGreaterThan(0)
-    // Exactly the old one-hour fallback, within the couple of milliseconds the
-    // refresh round-trip and the clock may add.
     expect(fallback - before).toBeLessThan(3600_000 + 5_000)
   })
 
@@ -1166,11 +1013,6 @@ describe('the renewed credential carries the server deadline', () => {
   })
 })
 
-/**
- * `refreshNow` is the same refresh the 401 path uses, exposed so the UI can
- * renew a credential before it is ever rejected. It must not grow its own
- * logic: single-flight, cooldown and adoption all live behind `refreshToken`.
- */
 describe('refreshNow', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -1243,16 +1085,6 @@ describe('refreshNow', () => {
   })
 })
 
-/**
- * A successful refresh ROTATES the access token and the server stops
- * validating the previous one immediately -- there is no grace for requests
- * already in flight that were sent with it (unlike refresh tokens, which got a
- * 60 s replay window in #354). So a 401 whose `Authorization` header is a
- * credential we no longer hold must be replayed as-is, never refreshed: the
- * token it rejected was superseded before the answer came back, and rotating
- * would spend a second single-use rotation on a credential that was never
- * dead.
- */
 describe('a 401 for a superseded credential', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -1264,15 +1096,7 @@ describe('a 401 for a superseded credential', () => {
       headers: { 'Content-Type': 'application/json' },
     })
 
-  /**
-   * Protected endpoint answers 401 for any bearer outside `accepted`, 200 for
-   * the ones inside it; `/auth/refresh` answers `refreshBody` and is counted.
-   * `onAttempt` runs inside the handler, i.e. while the request is in flight,
-   * which is how the tests model a rotation landing before the answer is
-   * processed.
-   */
   function mockServer(opts: {
-    /** Bearer values the protected endpoint accepts. */
     accepted: string[]
     refreshBody?: () => unknown
     onAttempt?: (call: { url: string; auth: string | null }) => void
@@ -1304,19 +1128,11 @@ describe('a 401 for a superseded credential', () => {
   }
 
   test('a 401 for a token a rotation already replaced is replayed without a second refresh', async () => {
-    // The attempt leaves with access-1; while it is in flight a rotation
-    // installs access-2 (proactive renewal on mount or the 24 h interval,
-    // another tab's rotation adopted here, or the refresh of a neighbouring
-    // request). The 401 that comes back therefore speaks about a token that
-    // was already superseded when it was produced -- replaying with what we
-    // hold now is the whole fix, and no /auth/refresh may be spent on it.
     const api = createApiClient('http://127.0.0.1:18793')
     api.setToken('access-1', 'refresh-1')
 
     let rotated = false
     const server = mockServer({
-      // access-3 models "a refresh would have produced a usable token": it
-      // must never be requested, let alone used.
       accepted: ['access-2', 'access-3'],
       refreshBody: () => ({ token: 'access-3', refresh_token: 'refresh-3' }),
       onAttempt: () => {
@@ -1335,11 +1151,6 @@ describe('a 401 for a superseded credential', () => {
   })
 
   test('a superseded replay does not hide a dead credential', async () => {
-    // Same rotation landing mid-flight, but this time access-2 is rejected
-    // too: the replay is not a licence to skip the refresh budget, so exactly
-    // one refresh must still follow it and the request must finish with the
-    // refreshed token. That is the pinned `refreshTried` semantics -- a
-    // superseded replay may never mask a genuinely dead credential.
     const api = createApiClient('http://127.0.0.1:18793')
     api.setToken('access-1', 'refresh-1')
 
@@ -1363,7 +1174,6 @@ describe('a 401 for a superseded credential', () => {
       'Bearer access-2',
       'Bearer access-3',
     ])
-    // The refresh comes AFTER the replay, not instead of it.
     const refreshIndex = server.calls.findIndex((c) => c.url.endsWith('/auth/refresh'))
     const replayIndex = server.calls.findIndex((c) => c.auth === 'Bearer access-2')
     expect(replayIndex).toBeGreaterThan(-1)

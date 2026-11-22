@@ -1,13 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-//
-// Tests for the remote-tool usage counter: the usageStore itself (persistence,
-// corruption tolerance, concurrency, file mode) and the Manager seam that feeds
-// it (ToolUsage + CallRemote counting rules).
-
 package mcp
 
 import (
@@ -25,16 +15,12 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// --- usageStore ------------------------------------------------------------
-
-// usagePath returns the counter file path inside a fresh temp dir.
 func usagePath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	return filepath.Join(dir, "mcp_usage.json")
 }
 
-// readUsageFile returns the raw bytes of the counter file.
 func readUsageFile(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -44,9 +30,6 @@ func readUsageFile(t *testing.T, path string) string {
 	return string(data)
 }
 
-// TestUsageStorePersistsAcrossReload is the round trip: counters written by one
-// store are visible to a second store built on the same path — that is what
-// makes the ranking survive a restart.
 func TestUsageStorePersistsAcrossReload(t *testing.T) {
 	path := usagePath(t)
 
@@ -69,15 +52,12 @@ func TestUsageStorePersistsAcrossReload(t *testing.T) {
 		t.Errorf("reloaded counts = %v, want %v", got, want)
 	}
 
-	// A further increment on the reloaded store must build on the loaded
-	// values instead of resetting them.
 	second.inc("srv", "echo")
 	if got := second.countsFor("srv")["echo"]; got != 3 {
 		t.Errorf("echo = %d after reload+inc, want 3", got)
 	}
 }
 
-// countsOf renders every server's counts for whole-store comparisons.
 func countsOf(s *usageStore) map[string]map[string]uint64 {
 	out := make(map[string]map[string]uint64)
 	s.mu.Lock()
@@ -92,8 +72,6 @@ func countsOf(s *usageStore) map[string]map[string]uint64 {
 	return out
 }
 
-// TestUsageStoreMemoryOnly pins the empty-path contract: counters work, and no
-// file is ever created.
 func TestUsageStoreMemoryOnly(t *testing.T) {
 	dir := t.TempDir()
 	store := loadUsageStore("")
@@ -116,7 +94,6 @@ func TestUsageStoreMemoryOnly(t *testing.T) {
 	}
 }
 
-// entryNames lists directory entry names for failure messages.
 func entryNames(entries []os.DirEntry) []string {
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -125,14 +102,12 @@ func entryNames(entries []os.DirEntry) []string {
 	return out
 }
 
-// TestUsageStoreLoad covers every start-up shape of the counter file: absent,
-// unreadable-as-JSON, structurally odd and valid.
 func TestUsageStoreLoad(t *testing.T) {
 	cases := []struct {
 		name    string
-		content string // empty means "do not create the file"
+		content string
 		create  bool
-		want    map[string]uint64 // counts expected for server "srv"
+		want    map[string]uint64
 	}{
 		{
 			name: "missing file starts empty",
@@ -181,8 +156,6 @@ func TestUsageStoreLoad(t *testing.T) {
 				t.Errorf("counts after load = %v, want %v", got, want)
 			}
 
-			// Whatever the file looked like, the store must be usable: an
-			// increment works and rewrites the file as valid JSON.
 			store.inc("srv", "echo")
 			store.inc("srv", "probe")
 			reloaded := loadUsageStore(path)
@@ -197,8 +170,6 @@ func TestUsageStoreLoad(t *testing.T) {
 	}
 }
 
-// TestUsageStoreCorruptFileOverwritten proves the corrupt file is replaced by a
-// readable one on the next increment.
 func TestUsageStoreCorruptFileOverwritten(t *testing.T) {
 	path := usagePath(t)
 	writeFileAt(t, path, "garbage{{{")
@@ -212,8 +183,6 @@ func TestUsageStoreCorruptFileOverwritten(t *testing.T) {
 	}
 }
 
-// TestUsageStorePerServerIsolation: one server's counts never leak into
-// another's.
 func TestUsageStorePerServerIsolation(t *testing.T) {
 	path := usagePath(t)
 	store := loadUsageStore(path)
@@ -231,14 +200,12 @@ func TestUsageStorePerServerIsolation(t *testing.T) {
 		t.Errorf("countsFor(unknown) = %v, want an empty map", got)
 	}
 
-	// The isolation must also hold on disk.
 	reloaded := loadUsageStore(path)
 	if got := reloaded.countsFor("a"); len(got) != 1 || got["echo"] != 1 {
 		t.Errorf("reloaded countsFor(a) = %v, want echo:1 only", got)
 	}
 }
 
-// TestUsageStoreCountsForReturnsCopy: the caller owns the returned map.
 func TestUsageStoreCountsForReturnsCopy(t *testing.T) {
 	store := loadUsageStore(usagePath(t))
 	store.inc("srv", "echo")
@@ -252,8 +219,6 @@ func TestUsageStoreCountsForReturnsCopy(t *testing.T) {
 	}
 }
 
-// TestUsageStoreConcurrentInc hammers one key from many goroutines (run under
-// -race): the count must be exact and the file must stay loadable.
 func TestUsageStoreConcurrentInc(t *testing.T) {
 	path := usagePath(t)
 	store := loadUsageStore(path)
@@ -285,21 +250,12 @@ func TestUsageStoreConcurrentInc(t *testing.T) {
 	}
 }
 
-// TestUsageStoreConcurrentManagersKeepEveryIncrement is the CONCURRENT half of
-// the shared-file contract, the case the sequential manager test cannot reach:
-// several stores over the same path (two managers in one process, or two lele
-// processes) each read the file, merge their own deltas and rename. Without a
-// cross-process lock on the file, two of them can read the same snapshot and
-// the last rename drops the other's increments — so the totals below are the
-// assertion that the lock (see lockUsageFile) is what protects them.
 func TestUsageStoreConcurrentManagersKeepEveryIncrement(t *testing.T) {
 	path := usagePath(t)
 
 	const writers = 6
 	const perWriter = 20
 
-	// One store per writer: separate snapshots and separate mu, exactly like
-	// separate managers/processes sharing the file.
 	stores := make([]*usageStore, writers)
 	for i := range stores {
 		stores[i] = loadUsageStore(path)
@@ -320,8 +276,6 @@ func TestUsageStoreConcurrentManagersKeepEveryIncrement(t *testing.T) {
 	close(start)
 	wg.Wait()
 
-	// Every writer's own tool must have kept EVERY increment, and the file (the
-	// restart view) must agree.
 	persisted := loadUsageStore(path).countsFor("srv")
 	for i := 0; i < writers; i++ {
 		name := fmt.Sprintf("tool%d", i)
@@ -329,25 +283,18 @@ func TestUsageStoreConcurrentManagersKeepEveryIncrement(t *testing.T) {
 			t.Errorf("persisted %s = %d, want %d (a concurrent write was lost)", name, got, perWriter)
 		}
 	}
-	// No writer may have invented counts for another writer's tool.
 	if got := len(persisted); got > writers {
 		t.Errorf("%d distinct tools persisted, want at most %d: %v", got, writers, persisted)
 	}
-	// And the counters file must be gone with its sidecar (no stale lock left).
 	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
 		t.Error("the usage lock sidecar must be released after the last write")
 	}
 }
 
-// TestUsageLockReclaimsStaleSidecar: a sidecar left behind by a process that
-// died while holding the lock must not degrade every later write to unlocked
-// (or block it): an old sidecar is taken over, the counter still lands on disk
-// and the sidecar is released again.
 func TestUsageLockReclaimsStaleSidecar(t *testing.T) {
 	path := usagePath(t)
 	lockPath := path + ".lock"
 
-	// A sidecar with an old mtime == a holder that crashed long ago.
 	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
 		t.Fatalf("seed the sidecar: %v", err)
 	}
@@ -367,9 +314,6 @@ func TestUsageLockReclaimsStaleSidecar(t *testing.T) {
 	}
 }
 
-// TestUsageStoreRetriesFailedWrites pins the delta bookkeeping: a write that
-// fails must keep its increments pending so the next call applies them, instead
-// of silently dropping them (or, worse, re-applying them twice).
 func TestUsageStoreRetriesFailedWrites(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
@@ -378,12 +322,12 @@ func TestUsageStoreRetriesFailedWrites(t *testing.T) {
 	path := filepath.Join(dir, "mcp_usage.json")
 	store := loadUsageStore(path)
 
-	store.inc("srv", "echo") // creates the file with echo=1
+	store.inc("srv", "echo")
 
 	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatalf("chmod dir read-only: %v", err)
 	}
-	store.inc("srv", "echo") // the write fails; the increment stays in memory
+	store.inc("srv", "echo")
 	if got := store.countsFor("srv")["echo"]; got != 2 {
 		t.Errorf("in-memory echo = %d after a failed write, want 2", got)
 	}
@@ -391,23 +335,20 @@ func TestUsageStoreRetriesFailedWrites(t *testing.T) {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatalf("restore dir permissions: %v", err)
 	}
-	store.inc("srv", "echo") // retried: applies BOTH pending increments
+	store.inc("srv", "echo")
 	if got := loadUsageStore(path).countsFor("srv")["echo"]; got != 3 {
 		t.Errorf("persisted echo = %d, want 3 (the failed increment must be retried exactly once)", got)
 	}
 }
 
-// TestUsageStoreNilReceiver: a Manager built without a store still works.
 func TestUsageStoreNilReceiver(t *testing.T) {
 	var store *usageStore
-	store.inc("srv", "echo") // must not panic
+	store.inc("srv", "echo")
 	if got := store.countsFor("srv"); got != nil {
 		t.Errorf("nil store countsFor = %v, want nil", got)
 	}
 }
 
-// TestUsageStoreFileMode: the counter file stays user-private and no temp file
-// survives a write.
 func TestUsageStoreFileMode(t *testing.T) {
 	path := usagePath(t)
 	store := loadUsageStore(path)
@@ -430,11 +371,6 @@ func TestUsageStoreFileMode(t *testing.T) {
 	}
 }
 
-// TestToolUsageFileLocation pins the on-disk convention through the Manager:
-// the counters live next to mcp.json inside the lele directory, exactly where a
-// restarted process looks for them. (The empty-LeleDir case — memory-only
-// counting, no file at all — is covered end to end by
-// TestToolUsageMemoryOnlyWithoutLeleDir.)
 func TestToolUsageFileLocation(t *testing.T) {
 	paths := basicFixture(t)
 	d := &fakeDialer{setup: func(n int, conn *fakeConn) { conn.callResult = okResult("ok") }}
@@ -454,24 +390,18 @@ func TestToolUsageFileLocation(t *testing.T) {
 	}
 }
 
-// --- Manager seam ----------------------------------------------------------
-
-// okResult is a plain successful tool result (no application error).
 func okResult(text string) *mcp.CallToolResult {
 	return &mcp.CallToolResult{Content: []mcp.Content{mcp.TextContent{Type: "text", Text: text}}}
 }
 
-// TestToolUsageCallOutcomes pins exactly which calls are counted: a call that
-// reaches the server counts once (application errors included), while a
-// failure that never produced a result counts nothing.
 func TestToolUsageCallOutcomes(t *testing.T) {
 	cases := []struct {
 		name      string
-		server    string // defaults to "srv"
+		server    string
 		dialErrs  []error
 		setup     func(n int, conn *fakeConn)
 		cancelled bool
-		want      uint64 // expected count of srv.echo
+		want      uint64
 		wantDials int
 	}{
 		{
@@ -568,9 +498,6 @@ func TestToolUsageCallOutcomes(t *testing.T) {
 	}
 }
 
-// TestToolUsageKeysAreRemoteNames: counts are keyed by the REMOTE tool name,
-// which is what a discovery ranking needs (the namespaced registry name is
-// derived later).
 func TestToolUsageKeysAreRemoteNames(t *testing.T) {
 	d := &fakeDialer{setup: func(n int, conn *fakeConn) { conn.callResult = okResult("ok") }}
 	mgr := NewManager(basicFixture(t), d)
@@ -600,9 +527,6 @@ func TestToolUsageKeysAreRemoteNames(t *testing.T) {
 	}
 }
 
-// TestToolUsagePersistsToLeleDir proves the Manager wires the store to
-// <LeleDir>/mcp_usage.json and that a fresh Manager over the same directory
-// sees the counts (restart survival).
 func TestToolUsagePersistsToLeleDir(t *testing.T) {
 	paths := basicFixture(t)
 	d := &fakeDialer{setup: func(n int, conn *fakeConn) { conn.callResult = okResult("ok") }}
@@ -628,17 +552,10 @@ func TestToolUsagePersistsToLeleDir(t *testing.T) {
 	}
 }
 
-// TestToolUsageSharedLeleDirKeepsEveryManagerIncrements is THE shared-file
-// test: two managers over the same lele directory (an agent's manager plus a
-// probe, or a second process) both start with an empty snapshot, so writing a
-// per-manager snapshot verbatim would make the second call overwrite the
-// first one's counts. The merged write must keep both.
 func TestToolUsageSharedLeleDirKeepsEveryManagerIncrements(t *testing.T) {
 	paths := basicFixture(t)
 	callOK := func(n int, conn *fakeConn) { conn.callResult = okResult("ok") }
 
-	// Both managers open the directory BEFORE either records usage: neither
-	// has the other's counts in memory.
 	first := NewManager(paths, &fakeDialer{setup: callOK})
 	second := NewManager(paths, &fakeDialer{setup: callOK})
 	t.Cleanup(func() { _ = first.Close(); _ = second.Close() })
@@ -652,11 +569,9 @@ func TestToolUsageSharedLeleDirKeepsEveryManagerIncrements(t *testing.T) {
 	}
 
 	want := map[string]uint64{"echo": 1, "summary": 1}
-	// The writing manager adopts the merged file, so its own view keeps both.
 	if got := second.ToolUsage("srv"); !reflect.DeepEqual(got, want) {
 		t.Errorf("ToolUsage(srv) after the merge = %v, want %v", got, want)
 	}
-	// And the merge is what survived on disk (the restart view).
 	restarted := NewManager(paths, &fakeDialer{})
 	t.Cleanup(func() { _ = restarted.Close() })
 	if got := restarted.ToolUsage("srv"); !reflect.DeepEqual(got, want) {
@@ -664,9 +579,6 @@ func TestToolUsageSharedLeleDirKeepsEveryManagerIncrements(t *testing.T) {
 	}
 }
 
-// TestToolUsageMemoryOnlyWithoutLeleDir: a Manager with no lele directory (a
-// probe or a manager built by hand) keeps counting in memory and writes nothing
-// — the counters are served from the project layer only.
 func TestToolUsageMemoryOnlyWithoutLeleDir(t *testing.T) {
 	proj := t.TempDir()
 	writeFileAt(t, filepath.Join(proj, ".lele", "mcp.json"),

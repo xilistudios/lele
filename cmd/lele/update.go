@@ -12,7 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/update"
 )
 
-// updateCmd implements `lele update` for self-updating the binary/service.
 func updateCmd() {
 	args := os.Args[2:]
 
@@ -87,7 +86,6 @@ func updateCmd() {
 }
 
 func buildUpdater() (*update.Updater, *config.Config, error) {
-	// Config is optional; fall back to defaults if it can't be loaded.
 	cfg, _ := loadConfig()
 
 	repo := ""
@@ -134,7 +132,6 @@ func runApply(ctx context.Context, updater *update.Updater, pinVer string, assum
 	fmt.Printf("Current: %s\n", formatVersion())
 	fmt.Println("Checking for updates...")
 
-	// When pinning a version, skip the "is there an update" gate.
 	if pinVer == "" {
 		info, err := updater.Check(ctx)
 		if err != nil {
@@ -172,7 +169,7 @@ func runApply(ctx context.Context, updater *update.Updater, pinVer string, assum
 
 	newVer, err := updater.Apply(ctx, update.Options{
 		Version:  pinVer,
-		Restart:  false, // CLI handles restart externally below
+		Restart:  false,
 		Progress: progress,
 	})
 	if err != nil {
@@ -191,7 +188,6 @@ func runApply(ctx context.Context, updater *update.Updater, pinVer string, assum
 		return
 	}
 
-	// Restart the managed service from outside the gateway process.
 	method, err := updater.Restarter.RestartService()
 	if err != nil {
 		fmt.Printf("Binary updated, but could not restart service: %v\n", err)

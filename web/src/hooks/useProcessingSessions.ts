@@ -1,9 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
 
-/**
- * Tracks which sessions are currently being processed by the backend.
- * Used to show spinners in the sidebar.
- */
 export function useProcessingSessions() {
   const [processingSessions, setProcessingSessions] = useState<Set<string>>(new Set())
   const processingSessionKeyRef = useRef<string | null>(null)

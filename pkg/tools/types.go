@@ -51,7 +51,6 @@ type ToolFunctionDefinition struct {
 	Parameters  map[string]interface{} `json:"parameters"`
 }
 
-// ApprovalInfo contains information about a command that requires user approval
 type ApprovalInfo struct {
 	Command string `json:"command"`
 	Reason  string `json:"reason"`

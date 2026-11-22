@@ -38,7 +38,6 @@ func TestHandleTools(t *testing.T) {
 		t.Fatal("expected at least one tool")
 	}
 
-	// Verify common tools are present
 	expectedTools := []string{"read_file", "write_file", "list_dir", "exec", "web_search", "web_fetch", "spawn"}
 	toolNames := make(map[string]bool)
 	for _, t := range payload.Tools {
@@ -198,14 +197,12 @@ func TestHandleSkillRemove_NoName(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodDelete, ts.server.URL+"/api/v1/skills/name/ ", nil)
 	req.Header.Set("Authorization", "Bearer "+ts.token)
 
-	// No name in path will route to 404
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Do() error = %v", err)
 	}
 	defer resp.Body.Close()
 
-	// A request without a name will match a different route or 404
 	if resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
@@ -223,7 +220,6 @@ func TestHandleSkillsAvailable(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// This may fail if there's no network, but it must return a valid response
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 200 or 500", resp.StatusCode)
 	}
@@ -336,7 +332,6 @@ func TestHandleSkillToggle_NoConfigManager(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// Test server has no config manager initialized, so it returns 500
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusInternalServerError)
 	}
@@ -380,7 +375,6 @@ func TestHandleSkillWorkspaceConfig(t *testing.T) {
 		t.Fatalf("Decode error = %v", err)
 	}
 
-	// Should have a "skills" key with enabled/disabled
 	skills, ok := payload["skills"].(map[string]interface{})
 	if !ok {
 		t.Fatal("expected 'skills' key in response")
@@ -400,12 +394,12 @@ func TestIsAllowedProviderURL(t *testing.T) {
 	}{
 		{"https://api.openai.com/v1", true},
 		{"https://api.groq.com/openai/v1", true},
-		{"http://api.openai.com/v1", false}, // no HTTPS
+		{"http://api.openai.com/v1", false},
 		{"https://localhost:11434/v1", false},
 		{"https://127.0.0.1:8080", false},
-		{"https://192.168.1.1/v1", false}, // private IP
-		{"https://10.0.0.1/v1", false},    // private IP
-		{"https://[::1]:11434/v1", false}, // loopback
+		{"https://192.168.1.1/v1", false},
+		{"https://10.0.0.1/v1", false},
+		{"https://[::1]:11434/v1", false},
 		{"", false},
 		{"not-a-url", false},
 	}
@@ -428,7 +422,7 @@ func TestParsePagination(t *testing.T) {
 		{"", "", 0, 50},
 		{"10", "", 10, 50},
 		{"", "5", 0, 5},
-		{"-5", "300", 0, 50}, // negative offset → 0, over limit 200 → default 50
+		{"-5", "300", 0, 50},
 		{"0", "100", 0, 100},
 	}
 
@@ -455,7 +449,6 @@ func TestDefaultAPIBaseByTypePublic(t *testing.T) {
 		{"deepseek", "https://api.deepseek.com/v1"},
 		{"ollama", "http://localhost:11434/v1"},
 		{"unknown", ""},
-		// Catalog-backed providers
 		{"xai", "https://api.x.ai/v1"},
 		{"nous", "https://inference-api.nousresearch.com/v1"},
 		{"vercel", "https://ai-gateway.vercel.sh/v1"},
@@ -472,26 +465,11 @@ func TestDefaultAPIBaseByTypePublic(t *testing.T) {
 	}
 }
 
-// --- scoped install / source-aware remove ----------------------------------
-//
-// The global skills endpoints (POST /api/v1/skills, POST
-// /api/v1/skills/install-batch, DELETE /api/v1/skills/{name}) used to be wired
-// to a single installer anchored on the default workspace, which made a global
-// install impossible and a global remove a 500. These tests pin the scope
-// resolution and the source-aware dispatch added on top of installTarget.
-//
-// None of them hit the network: an install that finds its target directory
-// already populated fails inside InstallFromGitHub before the fetch (F4), and
-// one test stubs the github raw host to observe a real install end-to-end.
-
-// scopedSkillsFixture is a native test server whose channel loader sees all
-// three skill scopes: the default workspace, the shared global dir and lele's
-// built-ins. That is exactly what the global endpoints resolve against.
 type scopedSkillsFixture struct {
 	ts         *nativeTestServer
-	workspace  string // default agent workspace
-	globalDir  string // <parent>/skills, shared by every agent
-	builtinDir string // <parent>/skills, shipped with lele
+	workspace  string
+	globalDir  string
+	builtinDir string
 }
 
 func newScopedSkillsFixture(t *testing.T) scopedSkillsFixture {
@@ -499,8 +477,6 @@ func newScopedSkillsFixture(t *testing.T) scopedSkillsFixture {
 
 	ts := newNativeTestServer(t)
 	workspace := t.TempDir()
-	// The installer re-appends "skills", so the shared dirs are handed to the
-	// loader as <parent>/skills.
 	globalDir := filepath.Join(t.TempDir(), "skills")
 	builtinDir := filepath.Join(t.TempDir(), "skills")
 	ts.channel.skillsLoader = skills.NewSkillsLoader(workspace, globalDir, builtinDir)
@@ -508,9 +484,6 @@ func newScopedSkillsFixture(t *testing.T) scopedSkillsFixture {
 	return scopedSkillsFixture{ts: ts, workspace: workspace, globalDir: globalDir, builtinDir: builtinDir}
 }
 
-// skillsRoutePayload covers every field these tests assert across the skills
-// routes: the install success body (skill_id/message), the batch body
-// (scope/installed/count) and the error body (code/message/error).
 type skillsRoutePayload struct {
 	SkillID   string   `json:"skill_id"`
 	Message   string   `json:"message"`
@@ -537,15 +510,10 @@ func postSkillsPayload(t *testing.T, ts *nativeTestServer, path, body string) (i
 	return resp.StatusCode, payload
 }
 
-// testSkillMarkdown is a minimal SKILL.md with valid frontmatter.
 func testSkillMarkdown(name, description string) string {
 	return "---\nname: " + name + "\ndescription: " + description + "\n---\nbody\n"
 }
 
-// githubStubTransport answers raw.githubusercontent.com with a canned SKILL.md
-// so the install endpoints can be exercised end-to-end without network egress.
-// Every other host is delegated to the real transport, which keeps the test's
-// own calls to the httptest server working.
 type githubStubTransport struct {
 	real   http.RoundTripper
 	body   string
@@ -566,10 +534,6 @@ func (t *githubStubTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	}, nil
 }
 
-// stubGitHubInstall swaps http.DefaultTransport for a canned github raw host
-// for the duration of the test. The skills installer builds its own
-// http.Client, so the transport is the only seam available. The returned stub
-// lets the caller change the served body between installs.
 func stubGitHubInstall(t *testing.T) *githubStubTransport {
 	t.Helper()
 
@@ -585,9 +549,6 @@ func stubGitHubInstall(t *testing.T) *githubStubTransport {
 	return stub
 }
 
-// fanoutSkillsTestLoop widens skillsTestLoop's agent list so the invalidation
-// fan-out of a GLOBAL mutation (which walks ListAvailableAgentIDs) covers more
-// than the base fake's single "main" agent.
 type fanoutSkillsTestLoop struct {
 	*skillsTestLoop
 	ids []string
@@ -597,11 +558,6 @@ func (l *fanoutSkillsTestLoop) ListAvailableAgentIDs() []string {
 	return l.ids
 }
 
-// TestHandleSkillInstall_ScopeGlobalTargetsSharedDir proves the scope resolves
-// to the shared dir without any network call: InstallFromGitHub stats the
-// target directory before it builds its request, so a copy pre-seeded in the
-// GLOBAL dir surfaces as "already exists" only because the request resolved
-// there.
 func TestHandleSkillInstall_ScopeGlobalTargetsSharedDir(t *testing.T) {
 	fx := newScopedSkillsFixture(t)
 	writeTestSkill(t, filepath.Dir(fx.globalDir), "weather", "shared weather")
@@ -618,8 +574,6 @@ func TestHandleSkillInstall_ScopeGlobalTargetsSharedDir(t *testing.T) {
 	}
 }
 
-// TestHandleSkillInstall_NoScopeKeepsDefaultWorkspace pins backward
-// compatibility: omitting scope still writes to the default workspace.
 func TestHandleSkillInstall_NoScopeKeepsDefaultWorkspace(t *testing.T) {
 	fx := newScopedSkillsFixture(t)
 	writeTestSkill(t, fx.workspace, "weather", "workspace weather")
@@ -636,8 +590,6 @@ func TestHandleSkillInstall_NoScopeKeepsDefaultWorkspace(t *testing.T) {
 	}
 }
 
-// TestHandleSkillInstall_UnknownScopeIs400 checks the rejection names both
-// valid values and writes nothing anywhere.
 func TestHandleSkillInstall_UnknownScopeIs400(t *testing.T) {
 	fx := newScopedSkillsFixture(t)
 
@@ -660,14 +612,8 @@ func TestHandleSkillInstall_UnknownScopeIs400(t *testing.T) {
 	}
 }
 
-// TestHandleSkillInstall_GlobalScopeInvalidatesEveryAgentPrompt drives a real
-// (stubbed) install and asserts the shared dir received the file while every
-// agent's cached prompt is dropped afterwards. A workspace-scope install must
-// not fan out: it changes one agent's view, not everyone's.
 func TestHandleSkillInstall_GlobalScopeInvalidatesEveryAgentPrompt(t *testing.T) {
 	ts, loop, dirs := newSkillsTestServer(t)
-	// Give the CHANNEL loader a shared dir too: this is the loader the global
-	// endpoints resolve against.
 	globalDir := filepath.Join(t.TempDir(), "skills")
 	ts.channel.skillsLoader = skills.NewSkillsLoader(dirs["default"], globalDir, "")
 
@@ -706,7 +652,6 @@ func TestHandleSkillInstall_GlobalScopeInvalidatesEveryAgentPrompt(t *testing.T)
 		t.Fatalf("invalidations after a global install = %v, want [alpha beta]", got)
 	}
 
-	// Removing the shared skill must fan out again.
 	resp, err := http.DefaultClient.Do(authedBodyRequest(t, http.MethodDelete,
 		ts.server.URL+"/api/v1/skills/weather", ts.token, ""))
 	if err != nil {
@@ -724,9 +669,6 @@ func TestHandleSkillInstall_GlobalScopeInvalidatesEveryAgentPrompt(t *testing.T)
 	}
 }
 
-// TestHandleSkillInstallBatch_EchoesResolvedScope pins the batch response's
-// scope echo. Existing skills are skipped before any fetch (F5), which is what
-// keeps both cases network-free.
 func TestHandleSkillInstallBatch_EchoesResolvedScope(t *testing.T) {
 	t.Run("global scope is echoed and used", func(t *testing.T) {
 		fx := newScopedSkillsFixture(t)
@@ -763,8 +705,6 @@ func TestHandleSkillInstallBatch_EchoesResolvedScope(t *testing.T) {
 	})
 }
 
-// TestHandleSkillInstallBatch_UnknownScopeIs400 mirrors the single-install
-// rejection on the batch route.
 func TestHandleSkillInstallBatch_UnknownScopeIs400(t *testing.T) {
 	fx := newScopedSkillsFixture(t)
 
@@ -786,16 +726,13 @@ func TestHandleSkillInstallBatch_UnknownScopeIs400(t *testing.T) {
 	}
 }
 
-// TestHandleSkillRemove_BySource is the regression test for the 500 that a
-// global skill used to produce: the handler now resolves the name through the
-// loader's own view and dispatches to the directory that actually holds it.
 func TestHandleSkillRemove_BySource(t *testing.T) {
 	cases := []struct {
 		name     string
-		source   string // which dir gets seeded; "" leaves the name uninstalled
+		source   string
 		want     int
 		wantCode string
-		direct   bool // call the handler with a path value the router would rewrite
+		direct   bool
 	}{
 		{"workspace skill is removed from its own dir", "workspace", http.StatusOK, "", false},
 		{"global skill is removed from the shared dir", "global", http.StatusOK, "", false},
@@ -817,9 +754,6 @@ func TestHandleSkillRemove_BySource(t *testing.T) {
 				writeTestSkill(t, filepath.Dir(fx.builtinDir), skillName, "builtin copy")
 			}
 			if tc.direct {
-				// A raw "../evil" never reaches the handler through ServeMux
-				// (it cleans the path first), so inject the path value the
-				// router would have produced for an unescaped traversal.
 				skillName = "../evil"
 			}
 

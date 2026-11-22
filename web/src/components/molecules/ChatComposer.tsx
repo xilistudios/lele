@@ -32,18 +32,11 @@ function isImageByExtension(name: string): boolean {
   return ext ? IMAGE_EXTENSIONS.has(`.${ext}`) : false
 }
 
-// Pending uploads live in tmp/uploads (public endpoint, no auth needed), so
-// they use the public /api/v1/files/view path via the endpoints constant.
 function buildFileUrl(apiUrl: string, path: string): string {
   const base = apiUrl.replace(/\/$/, '')
   return `${base}${endpoints.files.view}?path=${encodeURIComponent(path)}`
 }
 
-/**
- * Folder chip: the session folder plus its clear button. Rendered twice — in
- * the toolbar row (md+) and at the start of the controls row (mobile, where the
- * toolbar row is hidden) — so the markup lives here instead of being duplicated.
- */
 function FolderChip({
   folder,
   onClear,
@@ -103,33 +96,19 @@ export function ChatComposer() {
 
   const [draft, setDraft] = useState('')
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
-  // Set when a submit was refused because this session's queue is full; cleared
-  // by the next accepted submit (or by editing the draft).
   const [queueFullHint, setQueueFullHint] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lastTypingSentRef = useRef(0)
-  // In-flight send counter. A boolean would be reset by the first send's
-  // finally-block while a second overlapping send is still pending; a counter
-  // keeps the guard armed until ALL concurrent sends complete.
   const inFlightRef = useRef(0)
   const lastSubmittedContentRef = useRef('')
 
-  // "/" slash-command palette. The palette only assists composing: accepting a
-  // row inserts "<name> " into the draft and the command itself runs on the
-  // backend once the text is sent as a normal message (handleCommand there).
-  // Scoped to the agent that will answer, because custom commands live in each
-  // agent's own workspace (the built-in half is global and unaffected).
   const { commands } = useSlashCommands(api, currentAgent?.id)
   const [paletteIdx, setPaletteIdx] = useState(0)
-  // Escape hides the palette until the next edit of the trigger text (the
-  // textarea change handler re-arms it).
   const [paletteDismissed, setPaletteDismissed] = useState(false)
 
   const paletteTriggered = isPaletteTrigger(draft)
   const paletteItems = useMemo(() => filterCommands(commands, draft), [commands, draft])
   const paletteOpen = paletteTriggered && !paletteDismissed && paletteItems.length > 0
-  // Items can shrink asynchronously (commands load once, late), so clamp the
-  // highlight instead of trusting paletteIdx to stay in range.
   const activePaletteIdx = Math.min(paletteIdx, Math.max(paletteItems.length - 1, 0))
 
   const selectCommand = (command: SlashCommandInfo) => {
@@ -139,9 +118,6 @@ export function ChatComposer() {
     textareaRef.current?.focus()
   }
 
-  // The composer is not remounted on session switch, so draft/palette/queue
-  // state must be cleared explicitly — otherwise text typed in one chat would
-  // bleed into the next.
   // biome-ignore lint/correctness/useExhaustiveDependencies: currentSessionKey is the trigger, not a read — the effect must run exactly when the session changes.
   useEffect(() => {
     setDraft('')
@@ -157,18 +133,11 @@ export function ChatComposer() {
     e?.preventDefault()
     const content = draft.trim()
     if (!content && pendingAttachments.length === 0) return
-    // Guard against rapid double-submit of the same content (e.g., double-click).
-    // Different content is allowed through for queue operations while the agent
-    // is busy — the counter blocks same-content duplicates while ANY send is
-    // in flight, content comparison permits distinct messages.
     if (inFlightRef.current > 0 && content === lastSubmittedContentRef.current) return
     inFlightRef.current += 1
     lastSubmittedContentRef.current = content
 
     try {
-      // While the agent is busy onSend enqueues instead of sending, and returns
-      // false when that session's queue is full — keep the draft so nothing is
-      // silently lost. Same contract applies when session/agent creation fails.
       const accepted = await onSend(content, pendingAttachments)
       if (accepted === false) {
         setQueueFullHint(true)
@@ -185,8 +154,6 @@ export function ChatComposer() {
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // IME safety: while composing (CJK candidates), every key belongs to the
-    // input method — the palette must not swallow them.
     if (e.nativeEvent.isComposing) return
 
     if (paletteOpen) {
@@ -221,8 +188,6 @@ export function ChatComposer() {
 
   const handleTextareaChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     setDraft(e.target.value)
-    // Any edit restarts the highlight, and typing a new trigger re-arms the
-    // palette after an Escape dismissal.
     setPaletteIdx(0)
     if (isPaletteTrigger(e.target.value)) setPaletteDismissed(false)
     if (queueFullHint && e.target.value.trim()) setQueueFullHint(false)
@@ -245,20 +210,15 @@ export function ChatComposer() {
 
   const composerTheme = getModeTheme(chatMode)
 
-  // Check if the currently selected model has reasoning enabled
   const thinkingEnabled = useMemo(() => {
     if (!selectedModel) return false
 
-    // Normalize model names for comparison (with/without provider prefix)
     const normalizeModelName = (modelName: string): string => {
       const parts = modelName.split('/')
       return parts.length > 1 ? parts[parts.length - 1] : modelName
     }
     const normalizedSelectedModel = normalizeModelName(selectedModel)
 
-    // Build a lookup set of models with reasoning enabled.
-    // Only store models that actually have reasoning — flat availableModels
-    // lack reasoning metadata, so they must not overwrite grouped model data.
     const modelsWithReasoning = new Set<string>()
 
     for (const group of groupedModels ?? []) {
@@ -289,8 +249,6 @@ export function ChatComposer() {
   ]
   return (
     <form onSubmit={submit}>
-      {/* Messages typed while the agent was busy. Rendered inside the form but
-          above the attachments strip; QueuedMessages hides itself when empty. */}
       <QueuedMessages />
       {queueFullHint && (
         <p className="mb-2 px-1 text-xs text-state-error" role="alert">
@@ -375,7 +333,6 @@ export function ChatComposer() {
       )}
       <div className="rounded-lg border border-border bg-background-secondary transition-all duration-fast focus-within:border-border focus-within:ring-1 focus-within:ring-accent-primary/40">
         <div className={`h-0.5 w-full rounded-t-lg ${composerTheme.accentBar}`} />
-        {/* Top toolbar: folder picker above the input, folder chip when set */}
         <div className="flex items-center gap-1 px-2 pt-1.5 max-md:hidden">
           <IconButton
             onClick={() => setFolderPickerOpen(true)}
@@ -407,18 +364,6 @@ export function ChatComposer() {
           disabled={false}
           rows={1}
         />
-        {/* The control strip is two-tiered below `md` and one line from `md` up.
-            The send button lives OUTSIDE the wrapping group, so no tier split can
-            ever push it to a second line. The group is `md:contents`, so at ≥768px
-            its box disappears and its children become direct flex items of this
-            row — the exact pre-fix geometry, where StreamMetricsChip's ml-auto
-            shares the free space with send's ml-auto.
-            The tiered layout is a `max-md`-only construct, and `max-md` is the
-            ONLY boundary the tiers use: the thinking/agent wrapper is `md:contents`
-            too, so it collapses at the same 768px the group does. A `sm:contents`
-            wrapper would dissolve the second tier while the `max-md:` utilities
-            still apply, leaving 640–767px with five selectors fighting for one
-            line (the model trigger collapses to a blank pill there). */}
         <div className="flex flex-wrap items-center gap-2 px-3 pb-2 pt-1 max-md:gap-1.5 sm:gap-3">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 max-md:gap-1.5 md:contents">
             <IconButton
@@ -447,27 +392,6 @@ export function ChatComposer() {
               searchPlaceholder={t('chat.model')}
               value={selectedModel}
             />
-            {/* Second tier below `md`: the session-folder chip, then the thinking
-                and agent selectors, on a full-width line (or two) of their own.
-                The chip belongs HERE and not on the primary line: the primary line
-                is `+` (folder picker) · attach · model · send, and every one of
-                those but the model is a fixed 44px touch target, so a chip there
-                made the model trigger the only shrinkable item — measured with a
-                folder set, before this arrangement: 26px wide with a 0px value
-                span at 360 (a blank pill) and 56px with a 20px span at 390.
-                Three cases below `md`:
-                  - no folder  => one tier line, thinking + agent side by side;
-                  - folder     => the chip takes a line of its own (`basis-full`,
-                    hence the wrapper's `flex-wrap`), thinking + agent share the
-                    next one, so the chip can never eat their width — sharing the
-                    line with them crushed the pair to 50px/64px at 320, where the
-                    rendered labels read `Def…` / `Main A…`;
-                  - 768px up   => the wrapper is `md:contents` and the chip wrapper
-                    is `md:hidden`, so everything collapses back onto the single
-                    desktop row.
-                The `+` button stays on the primary line because it is the control
-                a finger reaches for. The tier exists whenever it has something to
-                hold. */}
             {(thinkingEnabled || agentsOptions.length > 1 || Boolean(sessionFolder)) && (
               <div className="max-md:flex max-md:min-w-0 max-md:basis-full max-md:flex-wrap max-md:items-center max-md:gap-2 md:contents">
                 {sessionFolder && (
@@ -517,10 +441,6 @@ export function ChatComposer() {
                 )}
               </div>
             )}
-            {/* Token-speed chip: sits just before the send button (ml-auto pins
-                it right; the button keeps its own ml-auto so it stays right when
-                the chip is hidden). Hidden entirely when there is no valid
-                rate, so it never displaces the controls or renders "0.0 tok/s". */}
             <StreamMetricsChip className="ml-auto" />
           </div>
           <button

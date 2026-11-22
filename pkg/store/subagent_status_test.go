@@ -5,10 +5,6 @@ import (
 	"time"
 )
 
-// TestSubagentStatus_MetaRoundTrip verifies the subagent_status column
-// survives a metadata write/read cycle (migration v6). This is the persistence
-// backing for the WebUI subagents sidebar: without it, every evicted or
-// restarted subagent falls back to "completed" regardless of its real outcome.
 func TestSubagentStatus_MetaRoundTrip(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Sessions()
@@ -36,7 +32,6 @@ func TestSubagentStatus_MetaRoundTrip(t *testing.T) {
 		t.Errorf("SubagentStatus = %q, want %q", got.SubagentStatus, "failed")
 	}
 
-	// Update to another terminal status; the upsert must overwrite it.
 	meta.SubagentStatus = "cancelled"
 	if err := repo.UpsertSession(*meta); err != nil {
 		t.Fatalf("UpsertSession (update): %v", err)
@@ -50,10 +45,6 @@ func TestSubagentStatus_MetaRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSubagentStatus_ListSessionMetaIncludesColumn checks that the list and
-// by-mode queries carry the status through — GetSessionMeta is not the only
-// reader: loadSessionMetadataFromSQLite uses ListSessionMeta, and the WebUI
-// session listing uses ListSessionMetaByMode.
 func TestSubagentStatus_ListSessionMetaIncludesColumn(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Sessions()
@@ -99,9 +90,6 @@ func TestSubagentStatus_ListSessionMetaIncludesColumn(t *testing.T) {
 	}
 }
 
-// TestSubagentStatus_DefaultEmpty verifies rows created without a status
-// (non-subagent sessions, or anything predating migration v6) read back as
-// empty, which the reader layer translates to the historical "completed".
 func TestSubagentStatus_DefaultEmpty(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Sessions()

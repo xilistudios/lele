@@ -17,74 +17,57 @@ import (
 )
 
 type SubagentManager struct {
-	tasks                 map[string]*SubagentTask
-	cancels               map[string]context.CancelFunc
-	mu                    sync.RWMutex
-	provider              providers.LLMProvider
-	defaultModel          string
-	bus                   *bus.MessageBus
-	workspace             string
-	tools                 *ToolRegistry
-	getAgentContext       func(agentID string) AgentContextInfo
-	modelOverrideResolver func(model string) (providers.LLMProvider, string, int, error) // resolves a per-task model override to (provider, model, contextWindow, error)
-	visionChecker         func(model string) bool                                        // reports whether a model supports vision
-	videoChecker          func(model string) bool                                        // reports whether a model supports native video
-	maxIterations         int
-	maxTokens             int
-	temperature           float64
-	hasMaxTokens          bool
-	hasTemperature        bool
-	thinkingLevel         string        // manager-default reasoning level (parent's resolved config level); "" = no opinion, see SetThinkingLevel
-	timeout               time.Duration // 0 means no timeout
-	retentionPeriod       time.Duration // how long to keep terminal tasks before cleanup (0 = no cleanup)
-	retentionMu           sync.Mutex    // guards the sweeper fields below; never sm.mu — the sweeper takes sm.mu itself
-	retentionExited       chan struct{} // closed by the sweeper goroutine when it returns (nil = never started)
-	retentionStopCh       chan struct{} // closed by the stopper to ask the sweeper to return (nil = never started)
-	retentionStopOnce     *sync.Once    // makes closing retentionStopCh idempotent across stopper callers
-	retentionStopFn       func()        // idempotent stop shared by StartRetentionCleanup callers and StopRetentionCleanup
-	retentionDetached     atomic.Bool   // set when a bounded stop gave up on the sweeper (see StopRetentionCleanupWithin)
-	nextID                int
-	sessionRecorder       SessionRecorder
-	sessionKeyCallback    func(sessionKey, agentID string)                          // called when subagent session key is created
-	registerSessionCancel func(sessionKey string, cancel context.CancelFunc) func() // registers cancel function on session manager
-	sessionEvictCallback  func(sessionKey string)                                   // called when a terminal task is cleaned up to evict its session from memory
-	sessionStatusCallback func(sessionKey, status string)                           // called when a task reaches a terminal status, to persist it on the subagent session
-	// sessionExists and persistedLister are installed together by
-	// SetLedgerWiring and are nil together: listing a persisted task ID is only
-	// safe while the probe makes claimTaskID skip an ID whose session exists.
-	// Never set one without the other.
-	sessionExists              func(sessionKey string) bool                           // reports whether a session key already exists (memory, metadata, or disk); nil = no check
-	persistedLister            func(parentPrefixes []string) []PersistedSubagentTask  // disk-side source of the subagent ledger; nil = memory-only (see SetLedgerWiring)
-	persistedDetail            func(keys []string) map[string]PersistedSubagentDetail // windowed summary/iterations source for persisted rows; nil = label only (see SetPersistedTaskDetail)
-	persistedExecutor          func(sessionKey string) string                         // spawn-time executor pin for persisted rows with an empty AgentID; nil = no fallback (see SetPersistedTaskExecutorFallback)
-	maxConcurrent              int                                                    // max concurrent running tasks (0 = unlimited)
-	defaultMaxRetries          int                                                    // default max retry attempts for transient failures
-	compactionThresholdPercent int                                                    // percentage of context window triggering intra-loop compaction (0 = default)
-	// defaultAgentID is the id of the agent that OWNS this manager (the agent
-	// whose toolset contains the spawn tool). Every agent gets its own manager,
-	// so this is unambiguous. It is the last-resort identity for a task whose
-	// AgentID is still empty at run time, so a subagent's tool loop never runs
-	// owner-less (issue #234: identity-scoped tools such as the secret lookup
-	// key their grants by agent id). Set via SetDefaultAgentID; empty when the
-	// manager is constructed standalone (tests).
-	defaultAgentID          string
-	redactor                *keyring.Redactor // redacts secret values from tool results before they enter the subagent LLM context
-	sessionCompactor        SessionCompactor  // syncs loop compaction to the persisted subagent session
-	compactionModel         string            // dedicated compaction model (empty = agent model)
-	evictExcludedFromMemory bool              // evict excluded messages from in-memory session cache on compaction sync
-	// tokenUsageReporter records subagent LLM consumption into the sessions the
-	// runner bills: the owning (parent) session so cumulative token counters
-	// include subagent work, and the subagent's own child session so its chat
-	// shows its own counters.
-	// Set via SetTokenUsageReporter; nil = subagent spend is not tracked.
-	tokenUsageReporter func(sessionKey string, inputTokens, outputTokens int)
+	tasks                      map[string]*SubagentTask
+	cancels                    map[string]context.CancelFunc
+	mu                         sync.RWMutex
+	provider                   providers.LLMProvider
+	defaultModel               string
+	bus                        *bus.MessageBus
+	workspace                  string
+	tools                      *ToolRegistry
+	getAgentContext            func(agentID string) AgentContextInfo
+	modelOverrideResolver      func(model string) (providers.LLMProvider, string, int, error)
+	visionChecker              func(model string) bool
+	videoChecker               func(model string) bool
+	maxIterations              int
+	maxTokens                  int
+	temperature                float64
+	hasMaxTokens               bool
+	hasTemperature             bool
+	thinkingLevel              string
+	timeout                    time.Duration
+	retentionPeriod            time.Duration
+	retentionMu                sync.Mutex
+	retentionExited            chan struct{}
+	retentionStopCh            chan struct{}
+	retentionStopOnce          *sync.Once
+	retentionStopFn            func()
+	retentionDetached          atomic.Bool
+	nextID                     int
+	sessionRecorder            SessionRecorder
+	sessionKeyCallback         func(sessionKey, agentID string)
+	registerSessionCancel      func(sessionKey string, cancel context.CancelFunc) func()
+	sessionEvictCallback       func(sessionKey string)
+	sessionStatusCallback      func(sessionKey, status string)
+	sessionExists              func(sessionKey string) bool
+	persistedLister            func(parentPrefixes []string) []PersistedSubagentTask
+	persistedDetail            func(keys []string) map[string]PersistedSubagentDetail
+	persistedExecutor          func(sessionKey string) string
+	maxConcurrent              int
+	defaultMaxRetries          int
+	compactionThresholdPercent int
+	defaultAgentID             string
+	redactor                   *keyring.Redactor
+	sessionCompactor           SessionCompactor
+	compactionModel            string
+	evictExcludedFromMemory    bool
+	tokenUsageReporter         func(sessionKey string, inputTokens, outputTokens int)
 }
 
-// SpawnOptions holds optional parameters for spawning a subagent.
 type SpawnOptions struct {
-	Dependencies  []string // task IDs that must complete before this task starts
-	MaxRetries    int      // maximum automatic retry attempts for transient failures
-	ModelOverride string   // optional model to use instead of the agent's default
+	Dependencies  []string
+	MaxRetries    int
+	ModelOverride string
 }
 
 func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace string, bus *bus.MessageBus, maxIterations int) *SubagentManager {
@@ -102,11 +85,6 @@ func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace 
 	}
 }
 
-// SetDefaults replaces the provider, model, workspace and iteration budget that
-// NewSubagentManager receives. It exists for the config-reload path: a manager
-// whose owner agent was recreated is re-used (so its running tasks keep a live
-// home) but must pick up the agent's new defaults. Tasks that are already
-// running resolved their provider/model at start time and are unaffected.
 func (sm *SubagentManager) SetDefaults(provider providers.LLMProvider, defaultModel, workspace string, maxIterations int) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -116,7 +94,6 @@ func (sm *SubagentManager) SetDefaults(provider providers.LLMProvider, defaultMo
 	sm.maxIterations = maxIterations
 }
 
-// SetLLMOptions sets max tokens and temperature for subagent LLM calls.
 func (sm *SubagentManager) SetLLMOptions(maxTokens int, temperature float64) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -126,95 +103,44 @@ func (sm *SubagentManager) SetLLMOptions(maxTokens int, temperature float64) {
 	sm.hasTemperature = true
 }
 
-// SetThinkingLevel sets the default reasoning level for subagent LLM calls.
-// It is the owner (parent) agent's resolved config thinking_level and is used
-// only as a fallback when a task has no agent-context callback; "" means
-// "inherit" (no reasoning key is emitted). The per-session /think override of
-// the parent deliberately does NOT flow here — it belongs to the parent's user
-// conversation, not to the subagent's.
 func (sm *SubagentManager) SetThinkingLevel(level string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.thinkingLevel = level
 }
 
-// SetMaxIterations sets the maximum number of tool iterations for subagent execution.
 func (sm *SubagentManager) SetMaxIterations(maxIterations int) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.maxIterations = maxIterations
 }
 
-// SetCompactionThresholdPercent sets the percentage of the context window at
-// which intra-loop compaction triggers for subagent tool loops. 0 = default.
 func (sm *SubagentManager) SetCompactionThresholdPercent(p int) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.compactionThresholdPercent = p
 }
 
-// getCompactionThresholdPercent returns the configured compaction threshold
-// percent (0 = use pkg/config.DefaultCompactionThresholdPercent).
 func (sm *SubagentManager) getCompactionThresholdPercent() int {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.compactionThresholdPercent
 }
 
-// SetTimeout sets the maximum execution time for subagent tasks.
-// A value of 0 means no timeout (subagent runs until completion or iteration limit).
 func (sm *SubagentManager) SetTimeout(timeout time.Duration) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.timeout = timeout
 }
 
-// SetRetentionPeriod sets how long terminal tasks are kept before cleanup.
-// A value of 0 disables automatic cleanup.
-// It may be called at any time: CleanupTerminalTasks — and therefore the
-// periodic sweeper started by StartRetentionCleanup — re-reads the period on
-// every pass.
 func (sm *SubagentManager) SetRetentionPeriod(period time.Duration) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.retentionPeriod = period
 }
 
-// DefaultSubagentRetentionSweepInterval is how often the periodic retention
-// sweeper (StartRetentionCleanup) calls CleanupTerminalTasks.
-//
-// It is deliberately only a poll cadence: the retention window itself
-// (retentionPeriod — 5m by default, configurable through
-// agents.defaults.subagent_retention_minutes) decides which tasks are
-// eligible, so an expired task lingers at most one extra interval. One minute
-// keeps a manager whose owner stopped spawning tidy at a negligible cost,
-// which is exactly the leak the spawn-triggered cleanup could not cover.
 const DefaultSubagentRetentionSweepInterval = time.Minute
 
-// StartRetentionCleanup launches the periodic retention sweeper: a background
-// goroutine that calls CleanupTerminalTasks every interval, so terminal tasks
-// (and the sessions they pin) are reaped even when nobody spawns again.
-// CleanupTerminalTasks was previously only called from SpawnWithOptions and
-// ContinueTask, so a chat that stopped spawning kept every finished task and
-// its "native:<parent>:subagent-N" session in memory forever.
-//
-// The sweeper only ever reaps tasks CleanupTerminalTasks already considers
-// eligible (terminal status + retention window elapsed) and it fires the same
-// session-evict callback the spawn-triggered sweep fires, so the two paths are
-// interchangeable.
-//
-// Idempotent: the first call starts the goroutine, later calls (e.g. the
-// config-reload path re-using this manager) are no-ops and return the same
-// stop function. interval <= 0 falls back to
-// DefaultSubagentRetentionSweepInterval.
-//
-// The returned stop function is idempotent and safe to call from several
-// goroutines, and it blocks (bounded by DefaultRetentionStopGrace, see
-// StopRetentionCleanupWithin) until the sweeper goroutine has exited: callers
-// (see AgentLoop.StopWithin and StopRetentionCleanup) rely on that to
-// guarantee no sweep touches the task map or evicts sessions after teardown.
-// It must never be called while holding sm.mu — the sweeper may be inside
-// CleanupTerminalTasks, which needs that same lock.
 func (sm *SubagentManager) StartRetentionCleanup(interval time.Duration) func() {
 	sm.retentionMu.Lock()
 	defer sm.retentionMu.Unlock()
@@ -234,10 +160,6 @@ func (sm *SubagentManager) StartRetentionCleanup(interval time.Duration) func() 
 	sm.retentionStopCh = stop
 	sm.retentionStopOnce = &stopOnce
 	sm.retentionStopFn = func() {
-		// The handle is deliberately bounded: a sweeper stuck inside
-		// CleanupTerminalTasks -> sessionEvictCallback (synchronous SQLite per
-		// session) must not be able to hang whoever stops the manager. Giving
-		// up detaches the manager, so the sweeper stops sweeping.
 		_ = sm.StopRetentionCleanupWithin(DefaultRetentionStopGrace)
 	}
 
@@ -250,9 +172,6 @@ func (sm *SubagentManager) StartRetentionCleanup(interval time.Duration) func() 
 			case <-stop:
 				return
 			case <-ticker.C:
-				// A bounded stop that gave up on this goroutine marked the
-				// manager detached; return instead of sweeping, so an
-				// abandoned sweeper never mutates the task map again.
 				if sm.retentionDetached.Load() {
 					return
 				}
@@ -264,47 +183,12 @@ func (sm *SubagentManager) StartRetentionCleanup(interval time.Duration) func() 
 	return sm.retentionStopFn
 }
 
-// DefaultRetentionStopGrace bounds how long StopRetentionCleanup (and the stop
-// function returned by StartRetentionCleanup) waits for the sweeper goroutine
-// to exit before abandoning it. Sized like the turn drain in
-// AgentLoop.StopWithin: long enough for a sweep's session evictions to finish,
-// short enough that a sweeper blocked indefinitely on a callback cannot keep
-// the process alive until systemd's TimeoutStopUSec fires.
 const DefaultRetentionStopGrace = 3 * time.Second
 
-// StopRetentionCleanup stops the sweeper started by StartRetentionCleanup and
-// waits for its goroutine to exit, giving up after DefaultRetentionStopGrace.
-// It is safe to call when the sweeper was never started and safe to call
-// repeatedly.
-//
-// A stopped manager stays stopped: StartRetentionCleanup after a stop returns
-// the (already used) stop function instead of resurrecting the goroutine. A
-// manager lives as long as the agent that owns it, so its teardown is final;
-// restarting it would let the sweeper reap tasks after the session layer it
-// evicts into has gone away.
 func (sm *SubagentManager) StopRetentionCleanup() {
 	_ = sm.StopRetentionCleanupWithin(DefaultRetentionStopGrace)
 }
 
-// StopRetentionCleanupWithin is StopRetentionCleanup with an explicit wait
-// budget. grace <= 0 waits forever (the unbounded form, mirroring
-// AgentLoop.Stop/StopWithin). Otherwise it returns nil as soon as the sweeper
-// goroutine has exited, and an error if it gave up on it after grace.
-//
-// Giving up DETACHES the manager, which is what makes abandonment safe for the
-// caller:
-//
-//   - the sweeper goroutine returns without starting another sweep (it checks
-//     the detach flag on every tick);
-//   - CleanupTerminalTasks refuses to touch the task map or fire a
-//     session-evict callback once detached, and a sweep that is abandoned
-//     half-way through its eviction batch fires no further callbacks.
-//
-// The one thing abandonment cannot undo is the callback the sweeper is blocked
-// inside right now: that call is in progress and will run to completion. So the
-// caller must treat a non-nil error as "a session eviction may still be in
-// flight" and keep whatever the sweeper evicts into alive — AgentLoop.StopWithin
-// reacts by abandoning its own teardown and leaving the store open.
 func (sm *SubagentManager) StopRetentionCleanupWithin(grace time.Duration) error {
 	sm.retentionMu.Lock()
 	exited := sm.retentionExited
@@ -313,16 +197,11 @@ func (sm *SubagentManager) StopRetentionCleanupWithin(grace time.Duration) error
 	sm.retentionMu.Unlock()
 
 	if exited == nil {
-		return nil // sweeper never started
-	}
-	if sm.retentionDetached.Load() {
-		// A previous bounded stop already gave up on this sweeper: it can no
-		// longer sweep, so there is nothing left to join (and its goroutine may
-		// be the one blocked in a callback that never returns).
 		return nil
 	}
-	// Signal the stop without waiting: stopOnce makes it idempotent, so
-	// concurrent stoppers close the same channel exactly once.
+	if sm.retentionDetached.Load() {
+		return nil
+	}
 	if stopOnce != nil {
 		stopOnce.Do(func() { close(stopCh) })
 	}
@@ -344,88 +223,60 @@ func (sm *SubagentManager) StopRetentionCleanupWithin(grace time.Duration) error
 	return fmt.Errorf("subagent retention sweeper did not exit within %s", grace)
 }
 
-// SetMaxConcurrent sets the maximum number of subagent tasks that can run
-// concurrently. A value of 0 means unlimited.
 func (sm *SubagentManager) SetMaxConcurrent(max int) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.maxConcurrent = max
 }
 
-// SetDefaultMaxRetries sets the default maximum number of automatic retry
-// attempts for transient failures.
 func (sm *SubagentManager) SetDefaultMaxRetries(maxRetries int) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.defaultMaxRetries = maxRetries
 }
 
-// SetTools sets the tool registry for subagent execution.
-// If not set, subagent will have access to the provided tools.
 func (sm *SubagentManager) SetTools(tools *ToolRegistry) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.tools = tools
 }
 
-// SetAgentContextCallback sets a callback function that returns the context info
-// for a specific agent ID. Each subagent type gets its own context, workspace, and name.
 func (sm *SubagentManager) SetAgentContextCallback(callback func(agentID string) AgentContextInfo) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.getAgentContext = callback
 }
 
-// SetDefaultAgentID records the id of the agent that owns this manager.
-// The agent layer calls it while wiring the manager into an agent's toolset so
-// tasks without an explicit target agent can still be attributed to a real
-// identity (issue #234).
 func (sm *SubagentManager) SetDefaultAgentID(agentID string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.defaultAgentID = strings.TrimSpace(agentID)
 }
 
-// getDefaultAgentID returns the owning agent id ("" when unset).
 func (sm *SubagentManager) getDefaultAgentID() string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.defaultAgentID
 }
 
-// SetModelOverrideResolver registers a callback that resolves a per-task model
-// override (e.g. "anthropic:claude-opus") into a provider, model name, and
-// context window. When a task carries a model override and the resolver is nil
-// or reports a failure (error, nil provider, or empty model), the task FAILS
-// instead of silently falling back to the agent's (or manager's) default model.
 func (sm *SubagentManager) SetModelOverrideResolver(resolver func(model string) (providers.LLMProvider, string, int, error)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.modelOverrideResolver = resolver
 }
 
-// SetVisionChecker registers a callback that reports whether a given model
-// supports vision. When the checker reports false (or is nil), the
-// read_image tool is filtered out of subagent tool definitions.
 func (sm *SubagentManager) SetVisionChecker(checker func(model string) bool) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.visionChecker = checker
 }
 
-// SetVideoChecker registers a callback that reports whether a given model
-// supports native video. When the checker reports false (or is nil), the
-// read_video tool is filtered out of subagent tool definitions.
 func (sm *SubagentManager) SetVideoChecker(checker func(model string) bool) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.videoChecker = checker
 }
 
-// getVideoChecker returns the registered video-capability checker (nil when
-// unset) under the manager lock. Callers use it to decide whether the
-// subagent's model should be offered read_video: a nil checker means the
-// tool stays filtered (same semantics as the vision checker).
 func (sm *SubagentManager) getVideoChecker() func(model string) bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -438,35 +289,18 @@ func (sm *SubagentManager) SetSessionRecorder(rec SessionRecorder) {
 	sm.sessionRecorder = rec
 }
 
-// SetTokenUsageReporter attaches a callback that bills token consumption
-// produced inside subagent loops. It receives a session key plus the
-// input/output token delta of a single LLM response; the runner calls it once
-// with the owner (parent) key and once with the child key. Implemented at
-// wiring time by the agent layer with SessionManager.AddTokenCounts (see
-// pkg/agent/tool_coordinator.go).
-//
-// Without it, subagent spend is invisible: RunToolLoop has no session manager
-// of its own, so only the main agent loop's own responses would ever reach the
-// cumulative counters the TUI, /status and the WebUI report.
 func (sm *SubagentManager) SetTokenUsageReporter(report func(sessionKey string, inputTokens, outputTokens int)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.tokenUsageReporter = report
 }
 
-// SetSessionCompactor attaches a session compactor used to sync loop
-// compaction results (proactive and reactive) to the subagent's persisted
-// session. Implemented by *session.Manager.
 func (sm *SubagentManager) SetSessionCompactor(sc SessionCompactor) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.sessionCompactor = sc
 }
 
-// SetCompactionConfig configures the subagent loop's context-compaction
-// behavior: threshold percent of the context window (0 = default 75%),
-// optional dedicated compaction model, and whether synced compaction evicts
-// excluded messages from the in-memory session cache.
 func (sm *SubagentManager) SetCompactionConfig(thresholdPercent int, compactionModel string, evictExcluded bool) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -475,46 +309,30 @@ func (sm *SubagentManager) SetCompactionConfig(thresholdPercent int, compactionM
 	sm.evictExcludedFromMemory = evictExcluded
 }
 
-// SetSessionKeyCallback sets a callback function that is called whenever a
-// subagent session key is created. The callback receives the session key and
-// the agent ID of the agent whose session storage holds the history.
-// This enables the owner to build a lookup map for O(1) session history retrieval.
 func (sm *SubagentManager) SetSessionKeyCallback(callback func(sessionKey, agentID string)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.sessionKeyCallback = callback
 }
 
-// SetRegisterSessionCancelCallback sets a callback function that registers a subagent session cancel function.
 func (sm *SubagentManager) SetRegisterSessionCancelCallback(callback func(sessionKey string, cancel context.CancelFunc) func()) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.registerSessionCancel = callback
 }
 
-// SetSessionEvictCallback sets a callback that is called when a terminal
-// subagent task is cleaned up. The callback receives the subagent's session
-// key so the owner can evict the session from the in-memory SessionManager,
-// freeing RAM. The session data remains on disk.
 func (sm *SubagentManager) SetSessionEvictCallback(callback func(sessionKey string)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.sessionEvictCallback = callback
 }
 
-// SetSessionStatusCallback sets a callback that is called when a task reaches
-// a terminal status. The callback persists the status on the subagent's
-// session so the WebUI can show the real outcome after eviction or restart,
-// instead of falling back to "completed".
 func (sm *SubagentManager) SetSessionStatusCallback(callback func(sessionKey, status string)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.sessionStatusCallback = callback
 }
 
-// persistTerminalStatus reports a terminal status transition to the session
-// layer via the status callback. Best-effort: it is called with sm.mu held,
-// so the callback itself must not re-enter the manager.
 func (sm *SubagentManager) persistTerminalStatus(task *SubagentTask) {
 	if sm.sessionStatusCallback == nil {
 		return
@@ -525,29 +343,24 @@ func (sm *SubagentManager) persistTerminalStatus(task *SubagentTask) {
 	}
 }
 
-// SetRedactor attaches a redactor used to strip secret values from tool
-// results before they enter the subagent LLM context.
 func (sm *SubagentManager) SetRedactor(r *keyring.Redactor) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.redactor = r
 }
 
-// getRedactor returns the currently attached redactor, or nil if none is set.
 func (sm *SubagentManager) getRedactor() *keyring.Redactor {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.redactor
 }
 
-// RegisterTool registers a tool for subagent execution.
 func (sm *SubagentManager) RegisterTool(tool Tool) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.tools.Register(tool)
 }
 
-// countRunning returns the number of tasks currently in "running" status.
 func (sm *SubagentManager) countRunning() int {
 	count := 0
 	for _, task := range sm.tasks {
@@ -558,12 +371,11 @@ func (sm *SubagentManager) countRunning() int {
 	return count
 }
 
-// checkDependencies returns true if all dependency tasks have reached terminal state.
 func (sm *SubagentManager) checkDependencies(task *SubagentTask) bool {
 	for _, depID := range task.Dependencies {
 		dep, ok := sm.tasks[depID]
 		if !ok {
-			continue // dependency doesn't exist, treat as satisfied
+			continue
 		}
 		if !dep.IsTerminal() {
 			return false
@@ -576,10 +388,6 @@ func (sm *SubagentManager) Spawn(ctx context.Context, task, label, agentID, orig
 	return sm.SpawnWithDeps(ctx, task, label, agentID, originChannel, originChatID, callback, nil, 0)
 }
 
-// SpawnWithDeps is like Spawn but also accepts dependency task IDs and max retries.
-// If dependencies are specified and not yet satisfied, the task starts in "pending"
-// status and a background goroutine polls until all dependencies are met before
-// transitioning to "running".
 func (sm *SubagentManager) SpawnWithDeps(ctx context.Context, task, label, agentID, originChannel, originChatID string, callback AsyncCallback, dependencies []string, maxRetries int) (string, error) {
 	return sm.SpawnWithOptions(ctx, task, label, agentID, originChannel, originChatID, callback, SpawnOptions{
 		Dependencies: dependencies,
@@ -587,18 +395,6 @@ func (sm *SubagentManager) SpawnWithDeps(ctx context.Context, task, label, agent
 	})
 }
 
-// claimTaskID returns a fresh, unique task ID ("subagent-N").
-//
-// It advances sm.nextID under the lock, then probes whether the resulting
-// session key ({originSessionKey}:subagent-N) already exists. If it does —
-// e.g. after a restart, when nextID resets to 1 but persisted session files
-// from previous runs remain — it keeps incrementing until it finds an unused
-// ID. This prevents unrelated runs from merging into the same persisted
-// session file.
-//
-// The existence probe runs OUTSIDE sm.mu: the sessionExists callback may take
-// the SessionManager lock and do disk I/O, and holding sm.mu across it would
-// recreate the lock-ordering hazard documented in CleanupTerminalTasks.
 func (sm *SubagentManager) claimTaskID(originSessionKey string) string {
 	for {
 		sm.mu.Lock()
@@ -610,23 +406,9 @@ func (sm *SubagentManager) claimTaskID(originSessionKey string) string {
 		if exists == nil || !exists(originSessionKey+":"+taskID) {
 			return taskID
 		}
-		// Session key already in use (stale file from a previous run);
-		// try the next ID.
 	}
 }
 
-// BuildOriginSessionKey returns the canonical session key recorded as a
-// subagent task's OriginSessionKey. Callers that need to match a task's
-// origin (e.g. the list_active_subagents tool) must derive their own key
-// with this same function so both sides share one invariant.
-//
-// Rules:
-//   - chatID already embedding the channel prefix ("<channel>:...") is
-//     returned as-is (subagent toolloops pass the full session key as chatID).
-//   - channel empty -> chatID alone (never a stray ":<chatID>").
-//   - chatID empty -> channel alone (never "<channel>:").
-//   - both empty -> "" so no phantom key is fabricated.
-//   - otherwise -> "<channel>:<chatID>".
 func BuildOriginSessionKey(channel, chatID string) string {
 	switch {
 	case chatID == "" && channel == "":
@@ -642,28 +424,13 @@ func BuildOriginSessionKey(channel, chatID string) string {
 	}
 }
 
-// safeGoroutine launches a subagent goroutine with panic recovery that ensures
-// the task always reaches a terminal state and SignalDone is called, preventing
-// hung waiters.  The pattern mirrors pkg/group/runner.go:44 and :182.
-//
-// Deferred order is critical: SignalDone is registered first so it runs LAST
-// (LIFO), guaranteeing it executes whether fn panics or returns normally.
-// The recover defer runs first on unwind, marking the task as failed and
-// persisting the terminal status so the parent can observe the panic.
 func (sm *SubagentManager) safeGoroutine(task *SubagentTask, fn func()) {
 	go func() {
-		// Registered FIRST → runs LAST: SignalDone always fires.
 		defer task.SignalDone()
-		// Registered SECOND → runs FIRST on panic: marks failed + reports.
 		defer func() {
 			if r := recover(); r != nil {
 				stack := debug.Stack()
 				log.Printf("subagent %s: panic in goroutine: %v\n%s", task.ID, r, stack)
-				// Defense-in-depth: use TryLock so the recover can never
-				// deadlock the process, even if a caller violates the
-				// "never hold sm.mu across panicable code" invariant.
-				// A short retry loop handles the (unlikely) case where
-				// the lock is transiently held by stack-unwinding defers.
 				locked := false
 				for attempt := 0; attempt < 3; attempt++ {
 					if sm.mu.TryLock() {
@@ -679,9 +446,6 @@ func (sm *SubagentManager) safeGoroutine(task *SubagentTask, fn func()) {
 					task.Updated = time.Now().UnixMilli()
 					sm.mu.Unlock()
 				} else {
-					// Last resort: write without the lock and log the hazard.
-					// This can only happen if a defer in the unwinding stack
-					// held sm.mu longer than expected — a bug in the caller.
 					log.Printf("subagent %s: WARNING — could not acquire sm.mu during recover; writing task state unsafely", task.ID)
 					task.Status = SubagentStatusFailed
 					task.Summary = fmt.Sprintf("Subagent panic: %v", r)
@@ -695,51 +459,31 @@ func (sm *SubagentManager) safeGoroutine(task *SubagentTask, fn func()) {
 	}()
 }
 
-// SpawnWithOptions is like SpawnWithDeps but accepts a SpawnOptions struct,
-// which additionally supports a per-task model override.
 func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, agentID, originChannel, originChatID string, callback AsyncCallback, opts SpawnOptions) (string, error) {
-	sm.CleanupTerminalTasks() // Prevent unbounded growth of terminal tasks
+	sm.CleanupTerminalTasks()
 
 	originSessionKey := BuildOriginSessionKey(originChannel, originChatID)
 
-	// The runtime session key of the calling agent loop, when available.
-	// Used for cancellation matching (see SubagentTask.SpawnerSessionKey).
 	spawnerAgentID, spawnerSessionKey := AgentToolContextFromCtx(ctx)
 
-	// Issue #234: when the spawner does not name a target agent, the new
-	// subagent inherits the spawner's own identity (agent id) from the tool
-	// context. This keeps identity-scoped tools (secret lookup, nested spawn
-	// attribution) working for subagents spawned without an explicit agent_id —
-	// the previous behavior left task.AgentID empty, which propagated an empty
-	// OwnerAgentID into the subagent's tool loop.
-	// Explicit agentID always wins; the manager's configured default agent
-	// remains the last fallback in the runner (see runTaskImpl).
 	if agentID == "" {
 		agentID = spawnerAgentID
 	}
 
-	// Claim a unique task ID BEFORE taking sm.mu. The session-existence probe
-	// inside claimTaskID may call into the SessionManager (its own lock + disk
-	// I/O); running it while holding sm.mu would recreate the lock-ordering
-	// hazard (SubagentManager.mu -> SessionManager.mu) that caused the spawn
-	// deadlock fixed in the evict-callback change.
 	taskID := sm.claimTaskID(originSessionKey)
 
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	// Enforce concurrency limit
 	if sm.maxConcurrent > 0 && sm.countRunning() >= sm.maxConcurrent {
 		return "", fmt.Errorf("maximum concurrent subagents reached (%d running, limit %d)", sm.countRunning(), sm.maxConcurrent)
 	}
 
-	// Determine initial status based on dependencies
 	initialStatus := SubagentStatusRunning
 	if len(opts.Dependencies) > 0 && !sm.checkDependencies(&SubagentTask{Dependencies: opts.Dependencies}) {
 		initialStatus = SubagentStatusPending
 	}
 
-	// Use default max retries if not explicitly set
 	maxRetries := opts.MaxRetries
 	if maxRetries <= 0 {
 		maxRetries = sm.defaultMaxRetries
@@ -765,18 +509,10 @@ func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, ag
 	subagentTask.InitDoneChannel()
 	sm.tasks[taskID] = subagentTask
 
-	// Use context.Background() to decouple from parent agent's context
-	// This allows the subagent to continue running even after the parent agent finishes
 	taskCtx, cancel := context.WithCancel(context.Background())
 	sm.cancels[taskID] = cancel
 
 	if initialStatus == SubagentStatusPending {
-		// Start a lightweight goroutine that polls until dependencies are met.
-		// Each critical section is wrapped in its own closure with
-		// defer sm.mu.Unlock() so the lock is ALWAYS released on unwind,
-		// even if checkDependencies or any mutation panics. Without this,
-		// a panic with sm.mu held would deadlock the safeGoroutine recover
-		// handler (which also needs sm.mu) — the exact R-1 bug.
 		sm.safeGoroutine(subagentTask, func() {
 			ticker := time.NewTicker(2 * time.Second)
 			defer ticker.Stop()
@@ -784,8 +520,6 @@ func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, ag
 			for {
 				select {
 				case <-taskCtx.Done():
-					// Task was cancelled while waiting for dependencies.
-					// Wrap in closure so defer sm.mu.Unlock() fires even on panic.
 					cancelledWhilePending := func() bool {
 						sm.mu.Lock()
 						defer sm.mu.Unlock()
@@ -799,16 +533,10 @@ func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, ag
 						return false
 					}()
 					if cancelledWhilePending {
-						// This task never runs, so nothing else persists its
-						// terminal status for it.
 						sm.reportTerminalStatus(subagentTask)
 					}
 					return
 				case <-ticker.C:
-					// Wrap the dependency check and state transition in a
-					// closure with defer. sm.mu MUST be released before
-					// runTask (which does RLock inside resolveAgentConfig),
-					// and the defer guarantees release even on panic.
 					allMet := func() bool {
 						sm.mu.Lock()
 						defer sm.mu.Unlock()
@@ -845,7 +573,7 @@ func (sm *SubagentManager) ContinueTask(ctx context.Context, taskID, guidance st
 		return "", fmt.Errorf("guidance is required")
 	}
 
-	sm.CleanupTerminalTasks() // Prevent unbounded growth of terminal tasks
+	sm.CleanupTerminalTasks()
 	sm.mu.Lock()
 	task, ok := sm.tasks[taskID]
 	if !ok {
@@ -860,25 +588,16 @@ func (sm *SubagentManager) ContinueTask(ctx context.Context, taskID, guidance st
 
 	task.Guidance = append(task.Guidance, guidance)
 	task.Status = SubagentStatusRunning
-	// A resumed run starts clean: the previous needs_context outcome is not a
-	// failure, and a stale lastErr must never influence a later retry decision.
 	task.lastErr = nil
 	task.Updated = time.Now().UnixMilli()
-	// Reset the done channel so wait_for_subagent does not immediately
-	// observe the closed channel from the previous run and return stale
-	// results. Each (re)execution gets a fresh completion signal.
 	if task.mu == nil {
 		task.mu = &sync.Mutex{}
 	}
 	task.mu.Lock()
 	task.doneCh = make(chan struct{})
-	// Reset the delivery bookkeeping so the resumed run's result is injectable
-	// again: the previous needs_context outcome was already claimed, and a
-	// stale waiter count must not make the injector skip the new result.
 	task.resultClaimed = false
 	task.resultWaiters = 0
 	task.mu.Unlock()
-	// Use context.Background() to decouple from parent agent's context
 	taskCtx, cancel := context.WithCancel(context.Background())
 	sm.cancels[taskID] = cancel
 	sm.mu.Unlock()
@@ -900,43 +619,24 @@ func (sm *SubagentManager) GetTask(taskID string) (*SubagentTask, bool) {
 	return task.Snapshot(), true
 }
 
-// ClaimResult atomically marks a task's result as consumed by
-// wait_for_subagent. Returns true if the result was ALREADY claimed (i.e., this
-// call lost the race), false if this call made the claim.
-//
-// The return value is advisory: all callers ignore it, because the model asked
-// a direct question and must get an answer even when another party already read
-// the result (the injector, or an earlier wait). What the claim guarantees is
-// that the injector in pkg/agent will NOT also publish the same result as a
-// system inbound message.
-//
-// Locking: sm.mu is taken only to look the task up and released before task.mu
-// is taken — the two locks are never held together.
 func (sm *SubagentManager) ClaimResult(taskID string) bool {
 	sm.mu.RLock()
 	task, ok := sm.tasks[taskID]
 	sm.mu.RUnlock()
 	if !ok || task == nil {
-		return false // Task not found: nothing to claim (edge case)
+		return false
 	}
 	if task.mu != nil {
 		task.mu.Lock()
 		defer task.mu.Unlock()
 	}
 	if task.resultClaimed {
-		return true // Already claimed
+		return true
 	}
 	task.resultClaimed = true
-	return false // First claim
+	return false
 }
 
-// ClaimResultForInjection is the injector's single atomic decision point. It
-// returns false when a wait_for_subagent waiter is registered (the parent will
-// read the result in-turn, so injecting would double-report) or when the result
-// is already claimed; otherwise it claims the result and returns true.
-//
-// An unknown task ID returns false: with no task there is no dedup, so
-// injecting would be unguarded.
 func (sm *SubagentManager) ClaimResultForInjection(taskID string) bool {
 	sm.mu.RLock()
 	task, ok := sm.tasks[taskID]
@@ -955,12 +655,6 @@ func (sm *SubagentManager) ClaimResultForInjection(taskID string) bool {
 	return true
 }
 
-// AddResultWaiter registers a wait_for_subagent call as interested in this
-// task's result. It MUST be called before the waiter blocks on the task's done
-// channel: the injector decides whether to publish by looking at this count,
-// and SignalDone fires after the completion callback, so a waiter that
-// registered late could complete the task's injection first and then also
-// return the result in-turn (the double report this counter exists to stop).
 func (sm *SubagentManager) AddResultWaiter(taskID string) {
 	sm.mu.RLock()
 	task, ok := sm.tasks[taskID]
@@ -975,9 +669,6 @@ func (sm *SubagentManager) AddResultWaiter(taskID string) {
 	task.resultWaiters++
 }
 
-// ReleaseResultWaiter unregisters a wait_for_subagent call. The count is
-// clamped at zero so a double release cannot go negative. After the last waiter
-// leaves on a still-running task, a later completion is injected normally.
 func (sm *SubagentManager) ReleaseResultWaiter(taskID string) {
 	sm.mu.RLock()
 	task, ok := sm.tasks[taskID]
@@ -994,20 +685,6 @@ func (sm *SubagentManager) ReleaseResultWaiter(taskID string) {
 	}
 }
 
-// ReleaseResultWaiterAndClaim is the release path wait_for_subagent actually
-// uses: it unregisters the waiter and, when the last waiter leaves without
-// having claimed a result that is now terminal, claims it and returns the task
-// so the caller can still hand the answer back to the model.
-//
-// This is the fix for the timeout-vs-completion loss window. The injector
-// refuses to publish while a waiter is registered, so a waiter that gives up
-// (timeout) must not simply drop its registration: if the task turned terminal
-// in the meantime and nobody claimed it, nobody ever would. Deciding
-// "terminal?" and "release" while holding the same lock (task.mu) removes the
-// window between the two that a separate check-then-release would leave open.
-//
-// Returns nil when there is nothing to hand back: not the last waiter, already
-// claimed, unknown task, or the task is not terminal yet.
 func (sm *SubagentManager) ReleaseResultWaiterAndClaim(taskID string) *SubagentTask {
 	sm.mu.RLock()
 	task, ok := sm.tasks[taskID]
@@ -1032,14 +709,6 @@ func (sm *SubagentManager) ReleaseResultWaiterAndClaim(taskID string) *SubagentT
 	return task.Snapshot()
 }
 
-// SealResult claims a task's result unconditionally, ignoring registered
-// waiters. It is used by the /stop path: a cancelled task's completion callback
-// still fires ("Task cancelled during execution"), and letting it start a fresh
-// parent turn would resurrect the session the user just stopped.
-//
-// It is deliberately NOT ClaimResultForInjection: honouring waiters here would
-// let a concurrent wait_for_subagent block the seal and let the cancellation
-// turn through.
 func (sm *SubagentManager) SealResult(taskID string) {
 	sm.mu.RLock()
 	task, ok := sm.tasks[taskID]
@@ -1054,12 +723,6 @@ func (sm *SubagentManager) SealResult(taskID string) {
 	task.resultClaimed = true
 }
 
-// reportTerminalStatus persists a task's terminal status on its session via
-// the status callback, so the WebUI shows the real outcome (failed,
-// cancelled, ...) after the in-memory task is evicted or the server restarts.
-// It must be called WITHOUT holding sm.mu: the callback takes the
-// SessionManager lock and does disk I/O, and holding sm.mu across it recreates
-// the lock-ordering hazard documented in CleanupTerminalTasks.
 func (sm *SubagentManager) reportTerminalStatus(task *SubagentTask) {
 	sm.mu.RLock()
 	callback := sm.sessionStatusCallback
@@ -1073,17 +736,6 @@ func (sm *SubagentManager) reportTerminalStatus(task *SubagentTask) {
 	callback(sessionKey, status)
 }
 
-// CleanupTerminalTasks removes tasks that have been in a terminal state
-// (completed, failed, cancelled, not_done) for longer than the retention
-// period. This prevents the tasks map from growing indefinitely.
-// It is called by SpawnWithOptions and ContinueTask, and periodically by the
-// sweeper started with StartRetentionCleanup.
-// Returns the number of tasks removed.
-//
-// A detached manager (one whose sweeper a bounded stop gave up on, see
-// StopRetentionCleanupWithin) is a no-op: the session layer the evictions go
-// into may already be gone, so no sweep may mutate the task map or fire an
-// evict callback after detachment.
 func (sm *SubagentManager) CleanupTerminalTasks() int {
 	sm.mu.Lock()
 
@@ -1101,26 +753,12 @@ func (sm *SubagentManager) CleanupTerminalTasks() int {
 	thresholdMs := int64(sm.retentionPeriod / time.Millisecond)
 	removed := 0
 
-	// Collect the session keys to evict, but do NOT invoke the callback while
-	// holding sm.mu. The callback calls SessionManager.EvictSession, which takes
-	// the session manager lock and does synchronous disk I/O. Holding sm.mu across
-	// that call creates a lock-ordering hazard (SubagentManager.mu -> SessionManager.mu)
-	// that can deadlock with the reverse path (session cancel -> SubagentManager.mu),
-	// permanently blocking all subsequent spawns.
 	var toEvict []string
-	// Cancels of evicted tasks, invoked after sm.mu is released (AGT-02):
-	// a terminal task's entry in sm.cancels pins the CancelFunc and its
-	// whole context tree alive. runTask's defer normally removes it, but a
-	// lingering entry can outlive the task map entry (eviction racing the
-	// goroutine's deferred cleanup, or a terminal task registered without a
-	// runner goroutine). Sweep it here so CleanupTerminalTasks is the single
-	// authority for reaping terminal tasks.
 	var toCancel []context.CancelFunc
 	for taskID, task := range sm.tasks {
 		if !isSubagentTerminalStatus(task.Status) {
 			continue
 		}
-		// Use Updated timestamp — it's set when the task reaches terminal state
 		if now-task.Updated > thresholdMs {
 			toEvict = append(toEvict, task.OriginSessionKey+":"+taskID)
 			delete(sm.tasks, taskID)
@@ -1134,19 +772,12 @@ func (sm *SubagentManager) CleanupTerminalTasks() int {
 	evictCallback := sm.sessionEvictCallback
 	sm.mu.Unlock()
 
-	// Release the evicted tasks' context resources outside the lock. The
-	// tasks are terminal, so cancelling is pure resource reclamation.
 	for _, cancel := range toCancel {
 		cancel()
 	}
 
-	// Evict sessions outside the lock.
 	if evictCallback != nil {
 		for _, sessionKey := range toEvict {
-			// A stop that gave up on the sweeper detaches the manager while
-			// this batch is being evicted; the remaining sessions must not be
-			// handed to a session layer the caller may already be tearing
-			// down. The tasks themselves are already out of the map.
 			if sm.retentionDetached.Load() {
 				break
 			}
@@ -1189,25 +820,17 @@ func (sm *SubagentManager) StopTask(taskID string) bool {
 		cancel()
 	}
 	if canStop {
-		// canStop tasks may have had no running goroutine (needs_context /
-		// pending waiters), so nothing else reports the status for them.
 		sm.reportTerminalStatus(task)
 	}
 	return ok || canStop
 }
 
-// StopAll stops all running subagent tasks.
 func (sm *SubagentManager) StopAll() int {
 	sm.mu.Lock()
 
 	stoppedCount := 0
 	cancelled := make([]*SubagentTask, 0, len(sm.cancels))
 	handled := make(map[string]struct{}, len(sm.cancels))
-	// Collect cancel funcs and invoke them AFTER releasing sm.mu (same
-	// hygiene as StopTask): cancel() unblocks waiter goroutines whose paths
-	// take sm.mu (runTask's ctx.Done branch, runTaskImpl's deferred cleanup),
-	// so calling it under the lock serializes every concurrent GetTask/
-	// ListTasks/SpawnWithOptions behind the whole fan-out.
 	pendingCancels := make([]context.CancelFunc, 0, len(sm.cancels))
 	for taskID, cancel := range sm.cancels {
 		if cancel != nil {
@@ -1245,15 +868,10 @@ func (sm *SubagentManager) StopAll() int {
 	}
 	sm.mu.Unlock()
 
-	// Cancel outside the lock (see comment above): unblocked subagent
-	// goroutines can now acquire sm.mu freely.
 	for _, cancel := range pendingCancels {
 		cancel()
 	}
 
-	// Persist the cancellations outside sm.mu (SessionManager I/O; see
-	// reportTerminalStatus for the lock-ordering rationale). Running tasks
-	// report their own cancellation through runTask's context path.
 	for _, task := range cancelled {
 		sm.reportTerminalStatus(task)
 	}
@@ -1261,19 +879,12 @@ func (sm *SubagentManager) StopAll() int {
 	return stoppedCount
 }
 
-// GetToolRegistry returns the tool registry available to subagents.
-// This allows tests and callers to inspect what tools subagents can use.
 func (sm *SubagentManager) GetToolRegistry() *ToolRegistry {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.tools
 }
 
-// AgentContextForTest invokes the agent-context callback installed by the
-// owner (see SetAgentContextCallback) and returns its result. It exists so
-// tests in other packages — specifically the agent wiring tests — can assert
-// what the callback surfaces for a given target agent without running a task.
-// Returns the zero AgentContextInfo when no callback is set.
 func (sm *SubagentManager) AgentContextForTest(agentID string) AgentContextInfo {
 	sm.mu.RLock()
 	cb := sm.getAgentContext
@@ -1284,17 +895,12 @@ func (sm *SubagentManager) AgentContextForTest(agentID string) AgentContextInfo 
 	return cb(agentID)
 }
 
-// ThinkingLevelForTest returns the manager-level default thinking level (see
-// SetThinkingLevel). Test-only, same rationale as AgentContextForTest: it lets
-// the agent wiring test pin that the parent's resolved level reaches the
-// manager fallback.
 func (sm *SubagentManager) ThinkingLevelForTest() string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.thinkingLevel
 }
 
-// HasTool checks if a tool with the given name is available to subagents.
 func (sm *SubagentManager) HasTool(name string) bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -1302,12 +908,6 @@ func (sm *SubagentManager) HasTool(name string) bool {
 	return ok
 }
 
-// AddTaskForTest registers a pre-built task in the manager without starting a
-// run. It exists so tests (including tests in other packages) can set up
-// precise task identities - origin/spawner session keys, status - without
-// racing a real subagent execution. The task is initialised the same way
-// SpawnWithOptions initialises its tasks, and an optional cancel function is
-// stored so StopTask behaves as it would for a running task.
 func (sm *SubagentManager) AddTaskForTest(task *SubagentTask, cancel context.CancelFunc) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()

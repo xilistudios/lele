@@ -7,21 +7,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// Reproduces the cron-spawn/subagent WebUI invisibility bug: a subagent
-// session is written by the tool loop through AddFullMessage (the loop's
-// SessionRecorder), saved, and then evicted when its task reaches a terminal
-// state. The session must remain listed by ListSessions — the source for
-// ListAllSessions, which the WebUI session-history endpoints merge in — and
-// must stay reloadable, because its rows are persisted in SQLite and never
-// deleted.
-//
-// Before the fix this failed twice over:
-//   - AddFullMessage materialized the session in sm.sessions without a
-//     sessionMeta entry, so once evicted it was in neither index;
-//   - EvictSession additionally deleted the sessionMeta entry for any
-//     ":subagent-" key, guaranteeing invisibility until restart (which
-//     rebuilds metadata from SQLite via loadSessionMetadataFromSQLite).
-
 func cronSpawnSessionKey() string {
 	return "native:cron-dbcb45b8f62b875d:subagent-26"
 }
@@ -35,10 +20,6 @@ func findSessionByKey(list []*Session, key string) *Session {
 	return nil
 }
 
-// TestAddFullMessage_RegistersSessionMeta is the invariant test: every path
-// that makes a session resident must also register it in sessionMeta, so the
-// session survives eviction in the listing index and stays reloadable
-// (loadSessionFromDisk is gated on sessionMeta).
 func TestAddFullMessage_RegistersSessionMeta(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -61,10 +42,6 @@ func TestAddFullMessage_RegistersSessionMeta(t *testing.T) {
 	}
 }
 
-// TestEvictSession_SubagentStaysListedAndReloadable covers the full cron-spawn
-// lifecycle end-to-end at the manager level: create via the recorder path,
-// persist, evict on task cleanup, then verify the session still appears in
-// ListSessions and its history can be lazily reloaded from SQLite.
 func TestEvictSession_SubagentStaysListedAndReloadable(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -81,7 +58,6 @@ func TestEvictSession_SubagentStaysListedAndReloadable(t *testing.T) {
 		t.Fatalf("EvictSession(%q) returned false", key)
 	}
 
-	// 1. Still listed (this is what the WebUI cron-spawn view reads).
 	listed := findSessionByKey(sm.ListSessions(), key)
 	if listed == nil {
 		t.Fatal("evicted subagent session disappeared from ListSessions (the WebUI bug)")
@@ -90,7 +66,6 @@ func TestEvictSession_SubagentStaysListedAndReloadable(t *testing.T) {
 		t.Errorf("listed session should be metadata-only (no messages loaded)")
 	}
 
-	// 2. Still reloadable: lazy load must find it from the metadata index.
 	hist := sm.GetHistory(key)
 	if len(hist) != 2 {
 		t.Fatalf("GetHistory after eviction = %d messages, want 2 (session must reload from SQLite)", len(hist))
@@ -100,9 +75,6 @@ func TestEvictSession_SubagentStaysListedAndReloadable(t *testing.T) {
 	}
 }
 
-// TestEvictSession_KeepsSessionMetaMirrorsStore asserts sessionMeta is treated
-// as a mirror of the persisted rows: eviction removes residency only. A fresh
-// manager over the same store must see exactly the same listing.
 func TestEvictSession_KeepsSessionMetaMirrorsStore(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -134,9 +106,6 @@ func TestEvictSession_KeepsSessionMetaMirrorsStore(t *testing.T) {
 	}
 }
 
-// TestSetSummary_NonExistentDoesNotCreate guards against the delegation
-// refactor turning read-only/return-early paths into accidental creators:
-// SetSummary on an unknown session must stay a no-op.
 func TestSetSummary_NonExistentDoesNotCreate(t *testing.T) {
 	sm := NewSessionManager()
 	sm.SetSummary("ghost:session", "summary")
@@ -151,9 +120,6 @@ func TestSetSummary_NonExistentDoesNotCreate(t *testing.T) {
 	}
 }
 
-// TestGetOrCreate_SetsUpdatedOnCreation documents the unification: the shared
-// creation path stamps Updated at creation (previously only GetOrCreate did),
-// so metadata-only listings have a valid sort key for every session.
 func TestGetOrCreate_SetsUpdatedOnCreation(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()

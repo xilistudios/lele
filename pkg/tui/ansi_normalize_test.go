@@ -16,26 +16,6 @@ const (
 	normBgOpen = "\x1b[48;5;236m"
 )
 
-// Expectations below mirror the exact semantics of mergeAdjacentSGR:
-//   - the merge tracks the set of OPENs accumulated since the last effective
-//     RESET, because SGR is cumulative in a terminal.
-//   - rule 1 (RESET + identical OPEN → drop both) only applies when that OPEN
-//     is the SOLE one in effect: with stacked opens (BOLD+FG) the RESET also
-//     clears the other attribute, so it must be kept.
-//   - rule 2 (OPEN + RESET with no text) drops the pair when nothing else is
-//     in effect (the RESET then has no run left to terminate), and keeps the
-//     RESET when another OPEN is still in effect (it terminates that outer
-//     run). The pair is always dropped together because reapplyBackground
-//     (style.go) is a stack machine that pops one run per RESET: an orphan
-//     RESET is an over-pop that loses the container background, a lone dropped
-//     RESET an under-pop that leaks it.
-//   - a RESET outside those rules is NEVER dropped, even with no OPEN in effect
-//     within the line: inside a frame the lines are concatenated and
-//     lipgloss/reapplyBackground leave SGR state inherited across line breaks,
-//     so that RESET is observable — it wipes the inherited attributes.
-//   - text between RESET and OPEN does not block rule 1; a non-SGR escape
-//     (tokenized as text) does.
-//   - a trailing RESET is kept when a run is open (it terminates it at EOL).
 func TestMergeAdjacentSGR(t *testing.T) {
 	tests := []struct {
 		name string
@@ -58,9 +38,6 @@ func TestMergeAdjacentSGR(t *testing.T) {
 			want: "",
 		},
 		{
-			// Kept: inside a frame lines are concatenated with SGR state
-			// inherited across line breaks, so this RESET is observable — it
-			// wipes whatever the previous line left behind.
 			name: "stray reset with no open in effect is kept",
 			in:   "hello" + normReset,
 			want: "hello" + normReset,
@@ -71,9 +48,6 @@ func TestMergeAdjacentSGR(t *testing.T) {
 			want: normOpen1 + "ab" + normReset,
 		},
 		{
-			// Nothing is droppable: the first RESET terminates the O1 run (so O2
-			// is not an exact restore), O2 styles "b" (non-empty run → rule 2
-			// does not apply) and the trailing RESET terminates the O2 run.
 			name: "rule1 not applied when next open differs from run open",
 			in:   normOpen1 + "a" + normReset + normOpen2 + "b" + normReset,
 			want: normOpen1 + "a" + normReset + normOpen2 + "b" + normReset,
@@ -89,11 +63,6 @@ func TestMergeAdjacentSGR(t *testing.T) {
 			want: normOpen1 + "a" + normReset + "b" + normReset,
 		},
 		{
-			// The OPEN paints nothing, and its RESET then has nothing left to
-			// clear within the line — the pair goes together. Keeping the lone
-			// RESET would break the OPEN/RESET balance that reapplyBackground
-			// (style.go) relies on: it pops one run per RESET, so an orphan RESET
-			// discards the container background and leaks the frame colours.
 			name: "rule2 empty styled run",
 			in:   "x" + normOpen1 + normReset + "y",
 			want: "xy",
@@ -164,8 +133,6 @@ func TestMergeAdjacentSGR(t *testing.T) {
 			want: normOpen1 + "a" + "\x1b[38;5",
 		},
 		{
-			// First RESET terminates the O1 run, second is kept as well (it
-			// clears state inherited from the previous line — see above).
 			name: "double reset: both kept (first terminates the run, second clears inherited state)",
 			in:   normOpen1 + "a" + normReset + normReset + normOpen1 + "b",
 			want: normOpen1 + "a" + normReset + normReset + normOpen1 + "b",
@@ -182,8 +149,6 @@ func TestMergeAdjacentSGR(t *testing.T) {
 	}
 }
 
-// TestMergeAdjacentSGRVisibleTextIdentical checks the invariant that must hold
-// for ANY input: stripping all escapes yields the same visible text.
 func TestMergeAdjacentSGRVisibleTextIdentical(t *testing.T) {
 	inputs := []string{
 		normOpen1 + "a" + normReset + normOpen1 + "b" + normReset,
@@ -216,9 +181,6 @@ func TestMergeLines(t *testing.T) {
 	}
 }
 
-// TestMergeAdjacentSGRIdempotent guards against the merge introducing new
-// mergeable pairs (cache-build sites may re-flow already-merged content, e.g.
-// after a width change).
 func TestMergeAdjacentSGRIdempotent(t *testing.T) {
 	in := normOpen1 + "a" + normReset + normOpen1 + "b" + normReset +
 		normOpen2 + "c" + normReset + normOpen2 + normReset + "d" + normReset

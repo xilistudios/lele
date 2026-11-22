@@ -13,26 +13,16 @@ import type { AuthSession, ChatMode, ClientEvent } from '../lib/types'
 import type { ClientCommand } from '../services/ws/events'
 import { useAuthContext } from './AuthContext'
 
-// Re-export types for convenience
 export type { SocketStatus }
 export type SendFn = (event: ClientCommand['event'], data: Record<string, unknown>) => void
 
 type UseApp = ReturnType<typeof useAppLogicHook>
 
-/**
- * COLD context — exposed to every consumer under the ProtectedLayout. Contains
- * app state and handlers that change rarely (sessions, agents, sidebar, model
- * selection, handlers). The `value` object is memoized so that cold-only
- * consumers (Sidebar, Settings, ChatHeader, composer, ...) do NOT re-render
- * when streaming hot state changes every tick.
- */
 export type AppLogicContextValue = {
-  // Connection & socket
   wsStatus: SocketStatus
   wsSend: SendFn
   wsClose: () => void
 
-  // State from useAppLogic
   error: string | null
   agents: UseApp['agents']
   currentAgent: UseApp['currentAgent']
@@ -53,17 +43,14 @@ export type AppLogicContextValue = {
   approvalRequest: UseApp['approvalRequest']
   approvalResult: UseApp['approvalResult']
   pendingAttachments: UseApp['pendingAttachments']
-  /** Messages typed while the agent was busy, waiting for the turn to end. */
   queuedMessages: UseApp['queuedMessages']
   groups: UseApp['groups']
   groupsEnabled: boolean
   sendTyping: UseApp['sendTyping']
 
-  // Handlers from useAppLogic
   handleEvent: UseApp['handleEvent']
   onSend: UseApp['onSend']
   removeQueuedMessage: UseApp['removeQueuedMessage']
-  /** Send one queued message immediately; cancels a busy turn first. */
   sendNowQueuedMessage: UseApp['sendNowQueuedMessage']
   clearQueue: UseApp['clearQueue']
   queueCount: UseApp['queueCount']
@@ -88,48 +75,23 @@ export type AppLogicContextValue = {
   onOpenMobileSidebar: UseApp['onOpenMobileSidebar']
   onCloseMobileSidebar: UseApp['onCloseMobileSidebar']
 
-  // Pagination
   loadMore: UseApp['loadMore']
   hasMore: UseApp['hasMore']
   isLoadingMore: UseApp['isLoadingMore']
-  /** True while the first history page for the current session is loading. */
   isHistoryLoading: UseApp['isHistoryLoading']
 
-  // For event handler ref access
   eventHandlerRef: MutableRefObject<(event: ClientEvent) => void>
 }
 
-/**
- * HOT context — perched in a nested Provider so only the consumers that truly
- * need per-tick streaming data (MessageList, ChatPageContext) subscribe to it.
- * These fields change on every typewriter tick; keeping them out of the cold
- * value prevents a re-render of the whole tree on each tick.
- */
 export type AppStreamingContextValue = {
   messages: UseApp['messages']
   toolStatus: UseApp['toolStatus']
   typingIndicator: UseApp['typingIndicator']
 }
 
-// Exported for tests that need to mount a consumer without the full provider tree.
 export const AppLogicContext = createContext<AppLogicContextValue | null>(null)
-// Same reason as above: exported so tests can mount a consumer (or a fake hot
-// value) without the full provider tree.
 export const AppStreamingContext = createContext<AppStreamingContextValue | null>(null)
 
-/**
- * METRICS context — token-generation speed (tok/s) for the session on screen.
- *
- * It lives in its own provider for two reasons:
- *  1. it changes per STREAM CHUNK, so it must not enter the memoized cold
- *     `value` (that would re-render every cold consumer on each chunk);
- *  2. isolating it lets ONLY the tiny `StreamMetricsChip` re-render when the
- *     rate updates — the composer and the rest of the toolbar stay put.
- *
- * The default is `null` (no metrics → chip hidden), so a consumer mounted
- * without a provider (isolated component tests) renders the empty state instead
- * of throwing.
- */
 export const StreamMetricsContext = createContext<StreamMetrics | null>(null)
 
 export function useStreamMetricsContext(): StreamMetrics | null {
@@ -155,19 +117,14 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     persistSession(s as AuthSession | null),
   )
 
-  // Expose the event handler via ref
   eventHandlerRef.current = app.handleEvent
 
-  // ── COLD value: memoized so cold-only consumers skip re-renders when the
-  //    streaming hot state (messages/toolStatus/typingIndicator) updates.
   const value = useMemo<AppLogicContextValue>(
     () => ({
-      // Connection & socket
       wsStatus,
       wsSend,
       wsClose,
 
-      // State from useAppLogic
       error: app.error,
       agents: app.agents,
       currentAgent: app.currentAgent,
@@ -193,7 +150,6 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       groupsEnabled: app.groupsEnabled,
       sendTyping: app.sendTyping,
 
-      // Handlers from useAppLogic
       handleEvent: app.handleEvent,
       onSend: app.onSend,
       removeQueuedMessage: app.removeQueuedMessage,
@@ -221,13 +177,11 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       onOpenMobileSidebar: app.onOpenMobileSidebar,
       onCloseMobileSidebar: app.onCloseMobileSidebar,
 
-      // Pagination
       loadMore: app.loadMore,
       hasMore: app.hasMore,
       isLoadingMore: app.isLoadingMore,
       isHistoryLoading: app.isHistoryLoading,
 
-      // Ref for internal wiring
       eventHandlerRef,
     }),
     [
@@ -291,14 +245,6 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     ],
   )
 
-  // ── HOT value: streaming fields only. Its identity changes every tick, but
-  //    only MessageList & ChatPageContext subscribe to it.
-  //
-  //    Memoized on the three fields alone: without this, every re-render of the
-  //    provider (any cold state change: sidebar, model load, approvals, …) built
-  //    a brand-new object and pushed it through the context, re-rendering every
-  //    hot consumer — including ChatPageContext and therefore ChatHeader and the
-  //    composer — even when nothing streaming-related had changed.
   const streamingValue = useMemo<AppStreamingContextValue>(
     () => ({
       messages: app.messages,

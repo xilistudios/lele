@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { type LanguagePackStatus, fetchLanguageCatalog, loadLanguagePack } from '../i18n'
 
-/** Loads the language catalog (builtin + downloadable) and exposes install/switch helpers. */
 export function useLanguageCatalog() {
   const [languages, setLanguages] = useState<LanguagePackStatus[]>([])
   const [loading, setLoading] = useState(true)

@@ -10,8 +10,6 @@ import { queryClient } from './lib/queryClient'
 import './i18n'
 import './styles/index.css'
 
-// Mark the document as desktop early (before React renders) so CSS can target
-// the Tauri shell without a flash of untargeted styling.
 if (isDesktop()) {
   document.documentElement.classList.add('desktop')
 }

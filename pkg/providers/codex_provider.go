@@ -265,7 +265,6 @@ func buildCodexParams(messages []Message, tools []ToolDefinition, model string, 
 	if instructions != "" {
 		params.Instructions = openai.Opt(instructions)
 	} else {
-		// ChatGPT Codex backend requires instructions to be present.
 		params.Instructions = openai.Opt(defaultCodexInstructions)
 	}
 
@@ -363,10 +362,9 @@ func parseCodexResponse(resp *responses.Response) *LLMResponse {
 	var usage *UsageInfo
 	if resp.Usage.TotalTokens > 0 {
 		usage = &UsageInfo{
-			PromptTokens:     int(resp.Usage.InputTokens),
-			CompletionTokens: int(resp.Usage.OutputTokens),
-			TotalTokens:      int(resp.Usage.TotalTokens),
-			// OpenAI reports cache hits as a subset of input_tokens.
+			PromptTokens:         int(resp.Usage.InputTokens),
+			CompletionTokens:     int(resp.Usage.OutputTokens),
+			TotalTokens:          int(resp.Usage.TotalTokens),
 			CacheReadInputTokens: int(resp.Usage.InputTokensDetails.CachedTokens),
 		}
 	}

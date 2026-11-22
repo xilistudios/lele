@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package harness
 
 import (
@@ -29,7 +23,7 @@ func names(cs []*Command) string {
 func TestRegistryRegisterOverwrite(t *testing.T) {
 	r := NewRegistry()
 	r.Register(cmd("foo", "first"))
-	r.Register(cmd("FOO", "second")) // same name, case-insensitive overwrite
+	r.Register(cmd("FOO", "second"))
 	got, ok := r.Get("foo")
 	if !ok || got.Description != "second" {
 		t.Fatalf("Get(foo) = %+v %v, want description \"second\"", got, ok)
@@ -76,7 +70,7 @@ func TestRegistryAllSortedCopy(t *testing.T) {
 	if got := names(all); got != "alpha mike zulu" {
 		t.Errorf("All() = %q, want sorted", got)
 	}
-	all[0] = nil // mutating the copy must not affect the registry
+	all[0] = nil
 	if r.All()[0].Name != "alpha" {
 		t.Error("All() slice is not a copy")
 	}

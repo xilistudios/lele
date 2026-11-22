@@ -1,21 +1,12 @@
 import { spawnSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
-/**
- * Playwright globalSetup: build the message-ordering harness bundle BEFORE any
- * test runs.
- *
- * Shells out to `bun build` (cwd = the directory containing playwright.config.ts)
- * and THROWS with the captured stderr on a non-zero exit, so a broken build
- * fails loudly instead of silently testing a stale `dist/harness.js`.
- */
 import type { FullConfig } from '@playwright/test'
 
 const ENTRY = 'e2e/harness/ordering-harness.ts'
 const OUTFILE = 'e2e/harness/dist/harness.js'
 
 export default function globalSetup(config: FullConfig): void {
-  // Resolve the web/ dir from the config file path — no hardcoded machine paths.
   const webDir = config.configFile ? path.dirname(config.configFile) : process.cwd()
   mkdirSync(path.dirname(path.join(webDir, OUTFILE)), { recursive: true })
 

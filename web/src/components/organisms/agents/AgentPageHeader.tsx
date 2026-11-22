@@ -11,34 +11,13 @@ import { IconButton } from '../../atoms/IconButton'
 import { ChatBubbleIcon, ChevronLeftIcon } from '../../atoms/Icons'
 import { AgentBadges, MetaDot } from './AgentBadges'
 
-/**
- * Header of the per-agent config page (spec §4.2).
- *
- * Breadcrumb (back + "Agents" / id) above an identity row: 48px avatar, name
- * with the same badges the list card uses, a one-line meta summary
- * (`model · temp · thinking · workspace`) and the description.
- *
- * Deliberate omissions:
- * - **No local Save.** The global `SettingsFooter` in `SettingsPage` is
- *   the only place that persists (§4.2.3 — brief requirement).
- * - **"Open chat" hidden, not disabled.** §4.2.3 allows that button only when
- *   a real per-agent chat entry point exists; `AppLogicContext.onCreateSession`
- *   takes no agentId today, so `CAN_OPEN_CHAT_WITH_AGENT` is false and the
- *   action is not rendered (a button that does nothing is noise). Flipping the
- *   constant is all the backend will need — no layout change.
- */
-
-/** Gate for the "Open chat with this agent" action (§4.2.3). */
 export const CAN_OPEN_CHAT_WITH_AGENT = false
 
-/** One piece of the meta line: shortened text + full value as tooltip. */
 type Segment = { key: string; text: string; title: string }
 
 type Props = {
   agent: EditableAgentConfig
-  /** Any dirty path starts with `agents.list.{index}.` (§5.3). */
   isModified: boolean
-  /** `agents.defaults.model` — the "inherits" badge names it. */
   defaultsModel: string
 }
 
@@ -52,8 +31,6 @@ export function AgentPageHeader({ agent, isModified, defaultsModel }: Props) {
 
   const segments: Segment[] = []
 
-  // The model is always informative: an explicit one, or the inherited one
-  // prefixed with `≈` so the line never reads as a choice (§3.4.4).
   if (primary) {
     segments.push({ key: 'model', text: shortModelName(primary), title: primary })
   } else if (inherited) {
@@ -64,8 +41,6 @@ export function AgentPageHeader({ agent, isModified, defaultsModel }: Props) {
     })
   }
 
-  // Unset fields are left out instead of spelled as "inherits": the line is a
-  // single truncated row, and `≈` already says it for the model.
   if (typeof agent.temperature === 'number') {
     segments.push({
       key: 'temperature',
@@ -87,7 +62,6 @@ export function AgentPageHeader({ agent, isModified, defaultsModel }: Props) {
 
   return (
     <header className="mb-5 border-b border-border pb-4">
-      {/* 1 — breadcrumb. Going back keeps the draft: it lives in the parent. */}
       <div className="mb-2 flex items-center gap-1.5 text-xs">
         <IconButton
           variant="ghost"
@@ -111,7 +85,6 @@ export function AgentPageHeader({ agent, isModified, defaultsModel }: Props) {
         </span>
       </div>
 
-      {/* 2 — identity row */}
       <div className="flex items-start gap-3">
         <AgentAvatar id={agent.id} name={agent.name} size="xl" className="flex-none" />
 
@@ -142,7 +115,6 @@ export function AgentPageHeader({ agent, isModified, defaultsModel }: Props) {
           )}
         </div>
 
-        {/* 3 — actions (hidden until a per-agent chat entry point exists) */}
         {CAN_OPEN_CHAT_WITH_AGENT && (
           <div className="ml-auto flex flex-none items-center gap-2">
             <Button

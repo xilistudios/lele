@@ -11,13 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// Tests for audit H2: approvals raised by a session that is not on screen
-// must be queued (stashed per session) instead of dropped by the currentKey
-// gate, and restored when the user switches to the owning session.
-
-// deliverOutbound pulls one message from the outbound listener and feeds it
-// through m.Update, mimicking the bubbletea event loop. Model mutates in
-// place (pointer receiver), so the returned model is discarded.
 func deliverOutbound(t *testing.T, m *Model) outboundMsg {
 	t.Helper()
 	cmd := m.startOutboundListener()
@@ -30,14 +23,11 @@ func deliverOutbound(t *testing.T, m *Model) outboundMsg {
 	return om
 }
 
-// setupApprovalModel builds a model with two sessions and currentKey=A.
 func setupApprovalModel(t *testing.T) (*Model, string, string) {
 	t.Helper()
 	m := newTestModelWithDenyPatterns(t)
 	up, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
 	m = up.(*Model)
-	// NewModel may apply the config default language; pin English so the
-	// expired-approval assertion below is locale-stable.
 	i18n.InitWithLanguage("en")
 
 	const a, b = "tui:chat:A", "tui:chat:B"
@@ -48,8 +38,6 @@ func setupApprovalModel(t *testing.T) (*Model, string, string) {
 	return m, a, b
 }
 
-// createAndPublish creates an approval in the shared ApprovalManager and
-// publishes the corresponding approval.request event for chatID.
 func createAndPublish(t *testing.T, m *Model, chatID, command, reason string) string {
 	t.Helper()
 	am := m.agentLoop.GetApprovalManager()
@@ -114,14 +102,12 @@ func TestApprovalSurfacesOnSwitch(t *testing.T) {
 func TestApprovalStashedOnSwitchAway(t *testing.T) {
 	m, a, b := setupApprovalModel(t)
 
-	// Request for the CURRENT session surfaces immediately.
 	id := createAndPublish(t, m, a, "drop table users", "irreversible")
 	deliverOutbound(t, m)
 	if m.pendingApprovalID != id {
 		t.Fatalf("visible approval not set: pendingApprovalID=%q, want %q", m.pendingApprovalID, id)
 	}
 
-	// Switch away: the prompt must be stashed under A, visible state cleared.
 	m.setCurrentChatKey(b)
 	m.clearStreamingState()
 	if m.pendingApprovalID != "" || m.pendingApprovalCmd != "" || m.pendingApprovalReason != "" {
@@ -132,7 +118,6 @@ func TestApprovalStashedOnSwitchAway(t *testing.T) {
 		t.Fatalf("A's snapshot missing or wrong: %+v ok=%v", snap, ok)
 	}
 
-	// Switch back: restored visible, map clean.
 	m.setCurrentChatKey(a)
 	m.clearStreamingState()
 	if m.pendingApprovalID != id {
@@ -149,14 +134,12 @@ func TestAnsweredApprovalNotResurrected(t *testing.T) {
 	id := createAndPublish(t, m, b, "rm -rf /", "dangerous")
 	deliverOutbound(t, m)
 
-	// Switch to B so the prompt surfaces, then answer it.
 	m.setCurrentChatKey(b)
 	m.clearStreamingState()
 	if m.pendingApprovalID != id {
 		t.Fatalf("precondition: pendingApprovalID=%q, want %q", m.pendingApprovalID, id)
 	}
 
-	// The blocked agent (simulated) waits for the answer and must unblock.
 	res := make(chan bool, 1)
 	approval := m.agentLoop.GetApprovalManager().GetApproval(id)
 	if approval == nil {
@@ -188,7 +171,6 @@ func TestAnsweredApprovalNotResurrected(t *testing.T) {
 		t.Fatal("handleApproval did not unblock the waiting agent")
 	}
 
-	// Switch away and back: nothing may be restored.
 	m.setCurrentChatKey(b)
 	m.clearStreamingState()
 	m.setCurrentChatKey("tui:chat:A")
@@ -203,15 +185,10 @@ func TestAnsweredApprovalNotResurrected(t *testing.T) {
 func TestHandleApprovalExpiredWarns(t *testing.T) {
 	m, a, _ := setupApprovalModel(t)
 
-	// A bogus id: never registered in the ApprovalManager, so HandleApproval
-	// returns "approval not found" — the same path as an expired/cleaned-up
-	// approval or one answered on another channel.
 	const bogus = "nonexistent-approval-id"
 	m.pendingApprovalID = bogus
 	m.pendingApprovalCmd = "rm -rf /"
 	m.pendingApprovalReason = "stale"
-	// A snapshot for the current session mirroring the same (dead) request
-	// must also be cleaned up defensively.
 	m.pendingApprovals = map[string]pendingApprovalSnapshot{
 		a: {id: bogus, cmd: "rm -rf /", reason: "stale"},
 	}
@@ -231,7 +208,6 @@ func TestHandleApprovalExpiredWarns(t *testing.T) {
 		t.Fatalf("matching snapshot not deleted after answering")
 	}
 
-	// A snapshot belonging to a NEWER request must NOT be nuked.
 	m.pendingApprovalID = bogus
 	m.pendingApprovals = map[string]pendingApprovalSnapshot{
 		a: {id: "newer-id", cmd: "ls", reason: "fresh"},
@@ -243,8 +219,6 @@ func TestHandleApprovalExpiredWarns(t *testing.T) {
 }
 
 func TestInvertedAuditRepro(t *testing.T) {
-	// Exact flow of zz_audit_approval_test.go (audit H2 repro), inverted:
-	// the background-session approval must be queued instead of dropped.
 	m := newTestModelWithDenyPatterns(t)
 	up, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
 	m = up.(*Model)
@@ -272,7 +246,6 @@ func TestInvertedAuditRepro(t *testing.T) {
 	up, _ = m.Update(om)
 	m = up.(*Model)
 
-	// Original bug: prompt silently dropped. Fix: queued under the owner.
 	if m.pendingApprovalID != "" {
 		t.Fatalf("background approval surfaced on the wrong session: %q", m.pendingApprovalID)
 	}
@@ -284,8 +257,6 @@ func TestInvertedAuditRepro(t *testing.T) {
 		t.Fatalf("queued id=%q, want %q", snap.id, approval.ID)
 	}
 
-	// Switching to the owning session surfaces the prompt and the blocked
-	// agent can be unblocked by answering it.
 	m.setCurrentChatKey(other)
 	m.clearStreamingState()
 	if m.pendingApprovalID != approval.ID {

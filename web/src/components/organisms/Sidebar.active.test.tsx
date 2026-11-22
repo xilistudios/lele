@@ -8,7 +8,6 @@ import { AppLogicContext, type AppLogicContextValue } from '../../contexts/AppLo
 import { AuthContext, type AuthContextValue } from '../../contexts/AuthContext'
 import { Sidebar } from './Sidebar'
 
-// The active nav item is marked with these classes (expanded sidebar rows).
 const ACTIVE_CLASS = 'bg-surface-selected'
 
 const authValue = { session: { device_name: 'Desktop' } } as unknown as AuthContextValue
@@ -39,7 +38,6 @@ function renderAt(path: string) {
         createElement(
           MemoryRouter,
           { initialEntries: [path] },
-          // collapsed=false → full sidebar with labelled rows (desktop).
           createElement(Sidebar, { collapsed: false, mobileOpen: false, onClose: () => undefined }),
         ),
       ),
@@ -79,9 +77,6 @@ describe('Sidebar — isActiveRoute prefix matching', () => {
   })
 
   test('nothing in the sidebar lights up on the pages that moved out', () => {
-    // Agents/Providers are Settings tabs; skills/cron/secrets/background-exec
-    // live in the Tools drawer. None of them owns a sidebar row any more, so
-    // no nav item may claim the route.
     for (const path of [
       '/settings/agents',
       '/settings/agents/coder/tools',

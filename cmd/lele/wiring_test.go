@@ -12,13 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/skills"
 )
 
-// Structural mirrors of the four OPTIONAL capabilities pkg/channels resolves
-// with runtime type assertions on the value gateway.go hands NewManager. They
-// are unexported in pkg/channels (rest_mcp.go:76, rest_agent_skills.go:68,
-// rest_commands.go:38, rest_agent_commands.go:847) and pkg/channels can never
-// import pkg/agent to name the real ones — pkg/agent imports pkg/channels at
-// agent_providable.go:16, so that is a real import cycle. Declaring the same
-// method sets here keeps the check honest without breaking the cycle.
 type mcpPathsSeam interface {
 	MCPPathsFor(agentID string) (mcp.Paths, bool)
 }
@@ -35,15 +28,7 @@ type invalidatorSeam interface {
 	InvalidateHarnessWorkspace(workspace string)
 }
 
-// TestChannelProvidable_SatisfiesChannelsSeams pins the contract of the ONE
-// expression the gateway uses to build the channels package's agent loop: the
-// value channelProvidable returns must satisfy every optional capability
-// pkg/channels asserts at runtime, or the real binary silently degrades (or
-// 500s) while fake-backed tests stay green.
 func TestChannelProvidable_SatisfiesChannelsSeams(t *testing.T) {
-	// Same construction as pkg/channels/gateway_wiring_test.go: the gateway's
-	// constructor with a temp config; store nil is the documented JSON fallback
-	// and irrelevant to the method set under test.
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Workspace = t.TempDir()
@@ -56,9 +41,9 @@ func TestChannelProvidable_SatisfiesChannelsSeams(t *testing.T) {
 
 	for _, seam := range []struct {
 		name   string
-		site   string // where pkg/channels asserts this capability
+		site   string
 		checks func(channels.AgentProvidable) bool
-		breaks string // what silently breaks in production when absent
+		breaks string
 	}{
 		{
 			name:   "mcpPathsSource",

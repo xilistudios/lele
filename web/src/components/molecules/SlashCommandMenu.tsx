@@ -17,10 +17,6 @@ type RowProps = {
   index: number
 }
 
-/**
- * One palette row. Split out of the list only so the ARIA suppressions below
- * attach to the element (biome 1.x needs them directly above the returned JSX).
- */
 function CommandRow({ command, active, rowId, onSelect, onHover, index }: RowProps) {
   return (
     // biome-ignore lint/a11y/useFocusableInteractive: rows must never take focus from the textarea (aria-activedescendant pattern); the composer drives the keyboard
@@ -29,7 +25,6 @@ function CommandRow({ command, active, rowId, onSelect, onHover, index }: RowPro
       // biome-ignore lint/a11y/useSemanticElements: option rows belong to the parent listbox; <option> is valid only inside a native select, which cannot render styled name+description rows
       role="option"
       aria-selected={active}
-      // mousedown, not click: clicking must not blur the textarea first.
       onMouseDown={(event) => {
         event.preventDefault()
         onSelect(command)
@@ -41,7 +36,6 @@ function CommandRow({ command, active, rowId, onSelect, onHover, index }: RowPro
     >
       <code className="flex-shrink-0 font-mono text-xs font-semibold">{command.name}</code>
       <span className="min-w-0 truncate text-xs text-text-tertiary">{command.description}</span>
-      {/* Custom (harness-defined) commands carry `source`; built-ins do not. */}
       {command.source ? (
         <span
           data-testid={`slash-command-source-${command.name}`}
@@ -54,19 +48,6 @@ function CommandRow({ command, active, rowId, onSelect, onHover, index }: RowPro
   )
 }
 
-/**
- * Popup list shown above the composer textarea while the draft is a "/" trigger.
- *
- * Display-only regarding focus: the textarea keeps the caret so typing continues
- * to filter, and the menu is never in the tab order (tabIndex={-1} only makes it
- * addressable for aria-activedescendant). Keyboard navigation is driven by the
- * composer (ArrowUp/Down/Tab/Enter) and reflected through `activeIndex`; mouse
- * users get hover + click, mirroring the TUI palette.
- *
- * Descriptions come from the backend in English and are rendered verbatim:
- * custom commands will not have i18n keys, so translating them client-side is
- * not an option.
- */
 export function SlashCommandMenu({ items, activeIndex, onSelect, onHover }: Props) {
   const { t } = useTranslation()
   const hint = t('chat.commandsHint')
@@ -78,8 +59,6 @@ export function SlashCommandMenu({ items, activeIndex, onSelect, onHover }: Prop
       id="slash-command-menu"
       aria-label={hint}
       title={hint}
-      // Focus (and aria-activedescendant) stays in the textarea; -1 keeps the
-      // list out of the tab order.
       tabIndex={-1}
       className="mx-2 mb-1 max-h-48 max-md:max-h-[min(12rem,25dvh)] overflow-y-auto rounded-lg border border-border bg-background-secondary shadow-lg"
       data-testid="slash-command-menu"

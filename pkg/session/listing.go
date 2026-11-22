@@ -1,10 +1,5 @@
 package session
 
-// Session inventory and read-only queries.
-//
-// Everything here answers "what sessions exist / how big are they" for the
-// WebUI, cron and subagent machinery, without mutating session state.
-
 import (
 	"encoding/json"
 	"sort"
@@ -16,15 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// GetEvictedMessageCount returns the number of messages that have been evicted
-// from memory (excluded + persisted in SQLite but not in the in-memory slice).
-// Consumers use this to decide when to lazy-load evicted history.
-//
-// For a non-resident session (LRU/TTL-evicted, metadata only), the eviction
-// boundary persisted in the sessions table defines the prefix: rows with
-// seq < first_in_memory_seq exist in SQLite but not in memory. Without this
-// fallback a fully evicted session would report 0 and frontends would never
-// page into its history.
 func (sm *SessionManager) GetEvictedMessageCount(key string) int {
 	sm.ensureLoaded()
 	sm.mu.RLock()
@@ -50,10 +36,6 @@ func (sm *SessionManager) GetEvictedMessageCount(key string) int {
 	return n
 }
 
-// HasMessages returns true if the session has any persisted messages (in-memory
-// slice or evicted), WITHOUT loading/deserializing the full history. Lightweight
-// check used by the session-listing hot path (WebUI sidebar) to avoid the N+1
-// full history load that GetHistory/GetHistoryView would trigger.
 func (sm *SessionManager) HasMessages(key string) bool {
 	if key == "" {
 		return false
@@ -64,9 +46,6 @@ func (sm *SessionManager) HasMessages(key string) bool {
 	if session, ok := sm.sessions[key]; ok {
 		return len(session.Messages) > 0 || session.evictedTotal > 0
 	}
-	// Cold session (metadata only): query the store count without materializing.
-	// Safe under RLock: SessionRepo.MessageCount only touches the SQLite
-	// connection (database/sql is goroutine-safe) and never acquires sm.mu.
 	if sm.sessionRepo != nil {
 		if n, err := sm.sessionRepo.MessageCount(key); err == nil {
 			return n > 0
@@ -75,10 +54,6 @@ func (sm *SessionManager) HasMessages(key string) bool {
 	return false
 }
 
-// GetTotalMessageCount returns the total number of messages for a session:
-// the in-memory slice length plus any evicted (excluded) messages still
-// persisted in SQLite. Used for compaction threshold guards and session
-// counters so eviction doesn't make a session look smaller than it is.
 func (sm *SessionManager) GetTotalMessageCount(key string) int {
 	sm.ensureLoaded()
 	sm.mu.RLock()
@@ -87,7 +62,6 @@ func (sm *SessionManager) GetTotalMessageCount(key string) int {
 	if session, ok := sm.sessions[key]; ok {
 		return len(session.Messages) + session.evictedTotal
 	}
-	// Not in memory: fall back to the store count if available.
 	if sm.sessionRepo != nil {
 		if n, err := sm.sessionRepo.MessageCount(key); err == nil {
 			return n
@@ -124,11 +98,7 @@ func (sm *SessionManager) GetCreated(key string) time.Time {
 	return time.Time{}
 }
 
-// ListSessionsByMode returns sessions whose effective mode matches the given mode.
-// The parameter mode is normalized: "" is treated as "agent".
-// For each session, its effective mode is session.Mode; if "" it is treated as "agent".
 func (sm *SessionManager) ListSessionsByMode(mode string) []*Session {
-	// Normalize requested mode: "" -> "agent"
 	normalizedMode := mode
 	if normalizedMode == "" {
 		normalizedMode = "agent"
@@ -175,14 +145,6 @@ func (sm *SessionManager) ListSessionsByMode(mode string) []*Session {
 	return res
 }
 
-// SessionExists reports whether a session exists for the given key in any
-// layer: in-memory, metadata index, or on disk. The disk check matters
-// because a session created before the metadata mirror was fixed (or by a
-// concurrent process) can exist in SQLite without an in-memory entry.
-//
-// This is used to detect subagent session-key collisions (e.g. after a
-// restart, when in-memory ID counters reset). It only performs a cheap
-// query — it never loads the session.
 func (sm *SessionManager) SessionExists(key string) bool {
 	if key == "" {
 		return false
@@ -196,7 +158,6 @@ func (sm *SessionManager) SessionExists(key string) bool {
 		return true
 	}
 
-	// Check SQLite if available
 	if sm.sessionRepo != nil {
 		exists, err := sm.sessionRepo.SessionExists(key)
 		if err == nil && exists {
@@ -208,30 +169,20 @@ func (sm *SessionManager) SessionExists(key string) bool {
 	return false
 }
 
-// ActiveCount returns the number of sessions that exist (have metadata on disk).
-// This is useful for detecting agents with active conversations.
 func (sm *SessionManager) ActiveCount() int {
 	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	// Count sessions that have metadata (exist on disk)
 	return len(sm.sessionMeta)
 }
 
-// ListSessions returns a slice of all sessions (including metadata-only sessions
-// not yet fully loaded into memory), sorted by updated time descending.
-// Sessions only in metadata have nil Messages — they are loaded on-demand
-// when accessed via GetOrCreate or GetHistory.
 func (sm *SessionManager) ListSessions() []*Session {
 	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	// For sessions in memory, return the full session
-	// For sessions only in metadata, create a lightweight Session with no messages
 	res := make([]*Session, 0, len(sm.sessionMeta))
 
-	// Collect all keys from both maps
 	seen := make(map[string]bool)
 	for key := range sm.sessions {
 		seen[key] = true
@@ -246,7 +197,6 @@ func (sm *SessionManager) ListSessions() []*Session {
 				Folder:  meta.Folder,
 				Created: meta.Created,
 				Updated: meta.Updated,
-				// Messages is nil — not loaded
 			})
 		}
 	}
@@ -256,12 +206,6 @@ func (sm *SessionManager) ListSessions() []*Session {
 	return res
 }
 
-// AllMessageCounts returns a map of session_key → message count for every
-// persisted session. For sessions in memory, it counts user+assistant messages
-// directly. For sessions only in metadata (evicted or not yet loaded), it
-// queries SQLite in a single batch query. This avoids loading full session
-// history just to count messages, which is critical for the WebUI sidebar
-// that lists all sessions.
 func (sm *SessionManager) AllMessageCounts() map[string]int {
 	sm.ensureLoaded()
 	sm.mu.RLock()
@@ -269,12 +213,10 @@ func (sm *SessionManager) AllMessageCounts() map[string]int {
 
 	counts := make(map[string]int, len(sm.sessionMeta))
 
-	// Count messages for in-memory sessions directly (accurate, no I/O)
 	for key, session := range sm.sessions {
 		count := 0
 		for _, msg := range session.Messages {
 			if msg.Role == "user" || msg.Role == "assistant" {
-				// Skip injected context messages (e.g. from read_image tool)
 				if msg.Role == "user" && msg.Content == "" && len(msg.ContentParts) > 0 {
 					continue
 				}
@@ -284,8 +226,6 @@ func (sm *SessionManager) AllMessageCounts() map[string]int {
 		counts[key] = count
 	}
 
-	// For sessions only in metadata (not in memory), take the batched SQLite
-	// counts (cached: see storeCountsCache).
 	if sm.sessionRepo != nil && sm.hasColdSessionsLocked() {
 		storeCounts := sm.coldStoreCounts()
 		for key := range sm.sessionMeta {
@@ -301,53 +241,16 @@ func (sm *SessionManager) AllMessageCounts() map[string]int {
 	return counts
 }
 
-// storeCountsCache memoizes the batched store-side message-count query behind
-// AllMessageCounts / AllTotalMessageCounts.
-//
-// The cached query is `SELECT session_key, COUNT(*) FROM session_messages
-// GROUP BY session_key` — a scan of the whole message table. At 200 sessions it
-// measures 0.34 ms / 33 KB / 609 allocs per call, and the TUI used to run it on
-// every reloadSessions (every completed turn, keystroke and sidebar click).
-//
-// Only the COLD half is cached. Sessions resident in memory are counted from
-// their live slice (`len(Messages) + evictedTotal`), which is O(1) per session
-// and exact, so the count of the chat the user is looking at is never stale —
-// appending a message updates it immediately, with no invalidation hook. The
-// cache only answers for metadata-only keys, and it is invalidated by:
-//
-//   - a change in the cold-key set: loading, evicting or deleting a session
-//     changes which keys the query must answer for (and an evicted session's
-//     stored count is exactly what the query provides). Checked exactly, in
-//     O(cold) map probes, without allocating a fresh key set;
-//   - a short TTL, which bounds how long a count written by ANOTHER process
-//     (the server/WebUI sharing the same SQLite file) can be served.
-//
-// Guarded by its own mutex: the query runs with sm.mu released, so sm.mu cannot
-// guard this state. The mutex is never held while acquiring sm.mu.
 type storeCountsCache struct {
 	mu     sync.Mutex
-	counts map[string]int      // last query result (read-only once published)
-	cold   map[string]struct{} // cold-key set that result describes
-	at     time.Time           // when the query ran
-	valid  bool                // counts/cold/at describe a real query
+	counts map[string]int
+	cold   map[string]struct{}
+	at     time.Time
+	valid  bool
 }
 
-// storeCountsTTL bounds how long a cached store-side count may be served. The
-// manager's own writes are covered by the cold-set check (any write materializes
-// the session, changing the set), so this only guards against a concurrent
-// writer outside this process.
 const storeCountsTTL = time.Second
 
-// coldStoreCounts returns the store-side message counts for the sessions that
-// are NOT resident in memory, executing the batched query at most once per
-// storeCountsTTL or cold-set change.
-//
-// Caller MUST hold sm.mu for reading. The SQL runs with the lock RELEASED and is
-// re-acquired before returning (the existing pattern: the connection is
-// goroutine-safe and the scan is the slow part), so the caller's critical
-// section is interrupted, never broken. On error the previous (or empty) map is
-// returned: callers treat missing keys as "no stored messages", exactly as they
-// did when the query failed before.
 func (sm *SessionManager) coldStoreCounts() map[string]int {
 	c := &sm.countsCache
 	c.mu.Lock()
@@ -358,7 +261,6 @@ func (sm *SessionManager) coldStoreCounts() map[string]int {
 	}
 	c.mu.Unlock()
 
-	// Release lock for I/O
 	sm.mu.RUnlock()
 	storeCounts, err := sm.sessionRepo.AllMessageCounts()
 	sm.mu.RLock()
@@ -366,8 +268,6 @@ func (sm *SessionManager) coldStoreCounts() map[string]int {
 		return nil
 	}
 
-	// Stamp the cache with the state the result answers for, recomputed after
-	// the I/O so a concurrent load/eviction cannot be recorded as covered.
 	c.mu.Lock()
 	c.counts = storeCounts
 	c.cold = sm.coldKeySetLocked()
@@ -377,13 +277,6 @@ func (sm *SessionManager) coldStoreCounts() map[string]int {
 	return storeCounts
 }
 
-// coldSetMatchesLocked reports whether the current set of metadata-only keys is
-// exactly the cached one. The number of cold keys is compared too, so a missing
-// or extra key in either direction invalidates the cache.
-//
-// Allocation-free on purpose: rebuilding the key set on every call would
-// reintroduce one O(sessions) allocation per refresh, the cost this cache
-// exists to remove.
 func (sm *SessionManager) coldSetMatchesLocked(cached map[string]struct{}) bool {
 	if cached == nil {
 		return false
@@ -401,8 +294,6 @@ func (sm *SessionManager) coldSetMatchesLocked(cached map[string]struct{}) bool 
 	return cold == len(cached)
 }
 
-// coldKeySetLocked is the allocating companion of coldSetMatchesLocked, used
-// once per query (never per refresh) to record what the result covers.
 func (sm *SessionManager) coldKeySetLocked() map[string]struct{} {
 	cold := make(map[string]struct{})
 	for key := range sm.sessionMeta {
@@ -414,8 +305,6 @@ func (sm *SessionManager) coldKeySetLocked() map[string]struct{} {
 	return cold
 }
 
-// hasColdSessionsLocked reports whether any metadata-only session exists, i.e.
-// whether the store-side counts are needed at all.
 func (sm *SessionManager) hasColdSessionsLocked() bool {
 	for key := range sm.sessionMeta {
 		if _, ok := sm.sessions[key]; !ok {
@@ -425,13 +314,6 @@ func (sm *SessionManager) hasColdSessionsLocked() bool {
 	return false
 }
 
-// AllTotalMessageCounts returns a map of session_key → total message count
-// for every known session, using the same semantics as GetTotalMessageCount:
-// in-memory sessions report len(Messages) + evictedTotal (no I/O); sessions
-// only present in metadata are counted via a single batched SQLite query
-// (all rows, including evicted ones). This is the batch alternative to
-// calling GetTotalMessageCount in a loop, avoiding N+1 queries when UIs
-// list all sessions.
 func (sm *SessionManager) AllTotalMessageCounts() map[string]int {
 	sm.ensureLoaded()
 	sm.mu.RLock()
@@ -439,14 +321,10 @@ func (sm *SessionManager) AllTotalMessageCounts() map[string]int {
 
 	counts := make(map[string]int, len(sm.sessionMeta))
 
-	// In-memory sessions: accurate count without I/O.
 	for key, session := range sm.sessions {
 		counts[key] = len(session.Messages) + session.evictedTotal
 	}
 
-	// Cold sessions (metadata only): one batched store query, cached (see
-	// storeCountsCache) so a burst of refreshes does not re-scan the message
-	// table per event.
 	if sm.sessionRepo != nil && sm.hasColdSessionsLocked() {
 		storeCounts := sm.coldStoreCounts()
 		for key := range sm.sessionMeta {
@@ -462,37 +340,18 @@ func (sm *SessionManager) AllTotalMessageCounts() map[string]int {
 	return counts
 }
 
-// SubagentSessionInfo contains metadata about a persisted subagent session.
 type SubagentSessionInfo struct {
 	Key        string
 	TaskID     string
 	Created    time.Time
 	Updated    time.Time
-	Iterations int    // number of assistant messages
-	Summary    string // session summary if available
-	Name       string // session name if available
-	// AgentID is the agent that executed the subagent, as persisted on its
-	// session. Empty means unknown (the session predates agent_id
-	// persistence); readers fall back to the agent whose session storage
-	// reported the row.
-	AgentID string
-	// Status is the persisted terminal status of the subagent task
-	// ("completed", "failed", ...). Empty means unknown (the session row is
-	// created at spawn and subagent_status is written only on a terminal
-	// transition, so the task was interrupted or re-pinned). The two readers
-	// resolve it differently on purpose: the ledger (ledgerEntryFromPersisted)
-	// renders tools.SubagentStatusUnknown because it feeds the system prompt
-	// and must not guess, while the WebUI listing
-	// (agentProvidableImpl.GetSessionSubagents) keeps its historical
-	// "completed" fallback for rows that predate this model.
-	Status string
+	Iterations int
+	Summary    string
+	Name       string
+	AgentID    string
+	Status     string
 }
 
-// subagentSummary returns the summary a subagent listing reports: the
-// session's stored summary when set, otherwise the text of its last assistant
-// message, trimmed and truncated to 200 bytes. Kept byte-identical to the
-// historical inline fallback so resident, evicted and restarted sessions all
-// report the same string.
 func subagentSummary(summary, lastAssistantContent string) string {
 	if summary != "" {
 		return summary
@@ -504,13 +363,6 @@ func subagentSummary(summary, lastAssistantContent string) string {
 	return content
 }
 
-// decodeLastAssistantContent extracts the text of an assistant message from
-// its raw SQLite JSON. Rows that did not come back are empty and unreadable
-// rows decode to "", matching the "skip corrupted messages" policy of the
-// cold-load path (loadFromSQLite). The store-side query already filters
-// non-JSON payloads with json_valid (SessionRepo.SessionListingStats), so this
-// is the defensive half of that contract: what the loader would drop must not
-// become a summary either.
 func decodeLastAssistantContent(messageJSON string) string {
 	if messageJSON == "" {
 		return ""
@@ -522,9 +374,6 @@ func decodeLastAssistantContent(messageJSON string) string {
 	return msg.Content
 }
 
-// subagentInfoFromSession builds the listing entry for a session that is
-// RESIDENT in memory, whose message slice is exactly the in-context suffix
-// (seq >= firstInMemorySeq) that the store-side count queries too.
 func subagentInfoFromSession(key, parentPrefix string, session *Session) SubagentSessionInfo {
 	iterations := 0
 	lastAssistantContent := ""
@@ -541,7 +390,7 @@ func subagentInfoFromSession(key, parentPrefix string, session *Session) Subagen
 	}
 	return SubagentSessionInfo{
 		Key:        key,
-		TaskID:     key[len(parentPrefix)+1:], // everything after "{parent}:"
+		TaskID:     key[len(parentPrefix)+1:],
 		Created:    session.Created,
 		Updated:    session.Updated,
 		Iterations: iterations,
@@ -552,50 +401,24 @@ func subagentInfoFromSession(key, parentPrefix string, session *Session) Subagen
 	}
 }
 
-// FindSubagentSessions returns persisted subagent sessions whose keys start
-// with the given parent prefix followed by ":subagent-". This allows the API
-// to surface past subagents even after a server restart when the in-memory
-// SubagentManager no longer tracks them.
-//
-// Lock discipline: every in-memory read (the key scan, the metadata mirror and
-// the resident sessions' message slices) happens under sm.mu.RLock(); the
-// exclusive lock is never taken, and the store query runs with no lock held at
-// all. This path deliberately does NOT call loadSessionFromDisk: that needs the
-// write lock, deserializes whole message histories and inserts the loaded
-// sessions into the LRU, evicting live chats on every poll. Measured on this
-// repository's store with 94 subagents / 17.3k messages (~24 MB of JSON):
-// 654 ms with 51 sessions pulled into the LRU before, 24 ms with no residency
-// change after. The two facts that the metadata mirror does not carry — the
-// assistant-message count and the summary fallback — come from one batched
-// read-only store query.
-//
-// The LRU (sessions/accessTimes) is left untouched on purpose: a read-only
-// listing must neither make a session resident nor change eviction order.
 func (sm *SessionManager) FindSubagentSessions(parentPrefix string) []SubagentSessionInfo {
 	sm.ensureLoaded()
 
 	prefix := parentPrefix + ":subagent-"
 
 	var (
-		results []SubagentSessionInfo
-		// Metadata-only entries (parallel to coldKeys): their name, timestamps
-		// and status are already known, iterations/summary are not.
+		results  []SubagentSessionInfo
 		cold     []SubagentSessionInfo
 		coldKeys []string
 	)
 
 	sm.mu.RLock()
-	// Resident sessions: everything is in memory, including the message
-	// derived fields.
 	for key, session := range sm.sessions {
 		if session == nil || !strings.HasPrefix(key, prefix) {
 			continue
 		}
 		results = append(results, subagentInfoFromSession(key, parentPrefix, session))
 	}
-	// Metadata-only sessions: sessionMeta is the lightweight listing index
-	// built precisely to avoid loading sessions. Resident keys are skipped
-	// here because they were already reported above.
 	for key, meta := range sm.sessionMeta {
 		if meta == nil || !strings.HasPrefix(key, prefix) {
 			continue
@@ -615,20 +438,14 @@ func (sm *SessionManager) FindSubagentSessions(parentPrefix string) []SubagentSe
 		coldKeys = append(coldKeys, key)
 	}
 	repo := sm.sessionRepo
-	sm.mu.RUnlock() // store I/O below must not run under the session lock
+	sm.mu.RUnlock()
 
 	if len(coldKeys) == 0 || repo == nil {
-		// Without a store these sessions could not have been loaded by the
-		// pre-change code either (loadSessionFromDisk returns false), so they
-		// are still omitted rather than reported as empty shells.
 		return results
 	}
 
 	stats, err := repo.SessionListingStats(coldKeys)
 	if err != nil {
-		// Same policy as the load this replaces: a session whose rows cannot be
-		// read is omitted (not reported with empty fields) and the next poll
-		// retries.
 		logger.WarnCF("session", "Failed to read subagent listing stats; omitting metadata-only subagents", map[string]interface{}{
 			"error": err.Error(),
 			"count": len(coldKeys),
@@ -639,7 +456,7 @@ func (sm *SessionManager) FindSubagentSessions(parentPrefix string) []SubagentSe
 	for i, key := range coldKeys {
 		stat, ok := stats[key]
 		if !ok {
-			continue // sessions row is gone (deleted); the old load failed too
+			continue
 		}
 		info := cold[i]
 		info.Iterations = stat.AssistantCount
@@ -650,34 +467,17 @@ func (sm *SessionManager) FindSubagentSessions(parentPrefix string) []SubagentSe
 	return results
 }
 
-// SessionIndexEntry is one row of the session index used by listing endpoints.
-// It carries every field the WebUI sidebar needs (name, mode, folder, kind
-// inputs, timestamps) plus whether the session has any messages, so a handler
-// can build a full response from a single pass over the manager instead of
-// calling one getter per session. Each getter previously took sm.mu, ran
-// ensureLoaded and walked the agent registry, which made the sidebar endpoint
-// O(N_total) per page.
 type SessionIndexEntry struct {
-	Key      string
-	Name     string
-	Mode     string
-	Folder   string
-	Created  time.Time
-	Updated  time.Time
-	Resident bool
-	// HasMessages mirrors SessionManager.HasMessages: user/assistant messages
-	// in memory, or evicted/persisted ones. For non-resident sessions it is
-	// only known once the caller consults the store, so it is left false here
-	// and Resident is set to false — callers resolve the cold ones with one
-	// batched query (see SessionKeysWithMessages).
+	Key         string
+	Name        string
+	Mode        string
+	Folder      string
+	Created     time.Time
+	Updated     time.Time
+	Resident    bool
 	HasMessages bool
 }
 
-// ListSessionIndex returns one lightweight entry per known session (resident
-// and metadata-only) in a single pass under one lock. It never loads message
-// bodies: resident sessions are counted from the in-memory slice, and
-// non-resident sessions come back with Resident=false so the caller can
-// resolve emptiness with one batched store query instead of N.
 func (sm *SessionManager) ListSessionIndex() []SessionIndexEntry {
 	sm.ensureLoaded()
 	sm.mu.RLock()
@@ -692,14 +492,13 @@ func (sm *SessionManager) ListSessionIndex() []SessionIndexEntry {
 		}
 		seen[key] = true
 		res = append(res, SessionIndexEntry{
-			Key:      key,
-			Name:     session.Name,
-			Mode:     session.Mode,
-			Folder:   session.Folder,
-			Created:  session.Created,
-			Updated:  session.Updated,
-			Resident: true,
-			// Same expression as HasMessages for resident sessions.
+			Key:         key,
+			Name:        session.Name,
+			Mode:        session.Mode,
+			Folder:      session.Folder,
+			Created:     session.Created,
+			Updated:     session.Updated,
+			Resident:    true,
 			HasMessages: len(session.Messages) > 0 || session.evictedTotal > 0,
 		})
 	}
@@ -716,18 +515,12 @@ func (sm *SessionManager) ListSessionIndex() []SessionIndexEntry {
 			Created:  meta.Created,
 			Updated:  meta.Updated,
 			Resident: false,
-			// Unknown without the store; caller resolves it.
 		})
 	}
 
 	return res
 }
 
-// SessionKeysWithMessages returns the set of session keys that have at least
-// one persisted message row, in a single store query. It is the batched
-// alternative to calling HasMessages per non-resident session. Returns nil when
-// no store is configured (callers should then treat unknown as empty, matching
-// HasMessages).
 func (sm *SessionManager) SessionKeysWithMessages() map[string]bool {
 	sm.ensureLoaded()
 	sm.mu.RLock()
@@ -744,48 +537,25 @@ func (sm *SessionManager) SessionKeysWithMessages() map[string]bool {
 	return keys
 }
 
-// SubagentSessionMeta is the metadata-only row of a persisted subagent session.
-// Every field is available from the resident session or the sessionMeta
-// mirror, so producing it performs NO store I/O and never makes a session
-// resident. It is the cheap half of the subagent ledger: enough to identify,
-// order and paginate tasks, and to render the per-turn system-prompt digest.
-// Summary and Iterations are deliberately absent — they need the store (see
-// SubagentSessionDetails).
 type SubagentSessionMeta struct {
-	Key       string // full session key, "{parent}:subagent-N"
-	TaskID    string // everything after "{parent}:"
-	ParentKey string // the origin session key the task was spawned from
-	Name      string // session name; doubles as the label fallback
-	Status    string // persisted terminal status; "" = unknown (pre-migration rows)
-	AgentID   string // executor persisted on the session; "" = unknown
+	Key       string
+	TaskID    string
+	ParentKey string
+	Name      string
+	Status    string
+	AgentID   string
 	Created   time.Time
 	Updated   time.Time
-	Resident  bool // true when the row came from sm.sessions, false from sessionMeta
+	Resident  bool
 }
 
-// SubagentSessionDetail carries the two fields that only the store can answer
-// for a non-resident subagent session: the iteration proxy and the summary.
-// Fetched in one batched query for a bounded key set (a page), never for the
-// whole history.
 type SubagentSessionDetail struct {
-	Iterations int    // in-context assistant messages; an undercount after compaction
-	Summary    string // stored summary, else the last assistant text truncated to 200 bytes
+	Iterations int
+	Summary    string
 }
 
-// subagentSessionMarker is the separator every persisted subagent session key
-// carries ("{parent}:subagent-{N}"). It is what subagentParentKey cuts at to
-// recover the parent key of a row.
 const subagentSessionMarker = ":subagent-"
 
-// subagentParentKey returns the parent (origin) session key of a subagent
-// session key "parent:subagent-N", or "" when the key does not have that shape.
-//
-// It is the arithmetic FindSubagentSessions does inline (key[len(parent)+1:]).
-// Here the parent is not known up front — the caller passes a prefix set — so
-// it is recovered by cutting at the LAST ":subagent-" separator. Task IDs are
-// always "subagent-<digits>" (claimTaskID), so the last separator is the right
-// one even for a parent key that itself contains ":subagent-" (a subagent that
-// spawned a subagent).
 func subagentParentKey(key string) string {
 	i := strings.LastIndex(key, subagentSessionMarker)
 	if i <= 0 {
@@ -794,55 +564,11 @@ func subagentParentKey(key string) string {
 	return key[:i]
 }
 
-// ListSubagentSessionMeta returns the metadata-only rows of every persisted
-// subagent session whose parent key is one of parentPrefixes, deduplicated by
-// session key. It is the zero-I/O half of the subagent ledger.
-//
-// Lock discipline mirrors FindSubagentSessions: ensureLoaded, then a single
-// sm.mu.RLock() pass over sm.sessions and sm.sessionMeta. The exclusive lock is
-// never taken, no store query runs, and the LRU (sessions/accessTimes) is left
-// untouched — a listing must neither make a session resident nor change
-// eviction order.
-//
-// Unlike FindSubagentSessions this reports metadata-only rows even when no
-// store is configured: their name, status and timestamps are already known, and
-// omitting them would hide retention-reaped tasks in JSON-only deployments.
-// FindSubagentSessions keeps its historical omit-without-store behaviour.
-//
-// Matching is prefix-based ("{parent}:subagent-") because pkg/session cannot
-// import pkg/tools (import cycle); the caller derives the prefix set with
-// tools.SubagentScopePrefixes, which is the closed form of the symmetric
-// SessionKeysRelated relation.
-//
-// Cost: this runs on the per-turn prompt path (2-4 times per turn), so the
-// scan is a plain prefix loop and nothing else. Measured on arm64 with the
-// benchmark below (1050 sessions: 1000 ordinary chats + 50 subagents):
-// 361-396 µs/op and ~26 KB of garbage per call. At 2-4 calls per turn that is
-// ~0.7-1.6 ms of CPU and ~50-100 KB of garbage per turn, and the scan is
-// linear in the TOTAL number of sessions, not in the number of subagents
-// (1.84 ms at 5000 sessions). Acceptable for a loop whose turns are seconds;
-// an index is not needed yet, but the number must be read in µs, not ns.
-//
-// A ":subagent-" substring prefilter was measured and REMOVED: it is a
-// pessimization (+18%: 441-457 µs/op with it, 376-383 µs/op without, 1050
-// sessions), because the prefix loop already rejects an ordinary session after
-// about one byte — the first candidate is the key itself, the longest — while
-// strings.Contains has to scan the whole key. See
-// listing_subagents_scan_bench_test.go; do not re-add it. There is
-// deliberately no TTL cache either: a prompt path must not be
-// time-dependent.
-//
-// Returns nil when parentPrefixes is empty or when no prefix is a subagent
-// prefix at all (a blank prefix is dropped rather than honoured because it
-// would match every subagent of every session). Order is unspecified — the
-// caller sorts.
 func (sm *SessionManager) ListSubagentSessionMeta(parentPrefixes []string) []SubagentSessionMeta {
 	if len(parentPrefixes) == 0 {
 		return nil
 	}
 
-	// A blank prefix would turn into ":subagent-" and match every subagent of
-	// every session, so it is dropped rather than honoured.
 	prefixes := make([]string, 0, len(parentPrefixes))
 	for _, parent := range parentPrefixes {
 		if parent != "" {
@@ -868,7 +594,6 @@ func (sm *SessionManager) ListSubagentSessionMeta(parentPrefixes []string) []Sub
 	seen := make(map[string]bool, len(prefixes))
 
 	sm.mu.RLock()
-	// Resident sessions first: they carry the freshest name/status/agent.
 	for key, session := range sm.sessions {
 		if session == nil || !matches(key) {
 			continue
@@ -890,9 +615,6 @@ func (sm *SessionManager) ListSubagentSessionMeta(parentPrefixes []string) []Sub
 			Resident:  true,
 		})
 	}
-	// Metadata-only sessions: sessionMeta is the lightweight listing index
-	// built precisely to avoid loading sessions. Resident keys were already
-	// reported above and win, so they are skipped here.
 	for key, meta := range sm.sessionMeta {
 		if meta == nil || seen[key] || !matches(key) {
 			continue
@@ -919,23 +641,12 @@ func (sm *SessionManager) ListSubagentSessionMeta(parentPrefixes []string) []Sub
 	return results
 }
 
-// SubagentSessionDetails returns the store-derived fields for the given session
-// keys, in one batched read-only query. Resident sessions are answered from
-// their in-memory slice without I/O. Keys with no row (deleted, or unreadable)
-// are omitted rather than reported with empty fields, matching
-// FindSubagentSessions' policy.
-//
-// The caller MUST bound len(keys) — this is the windowed half of the ledger and
-// is only ever called for a returned page, never for a whole history. The query
-// runs with sm.mu released. Returns an empty map when no store is configured.
 func (sm *SessionManager) SubagentSessionDetails(keys []string) map[string]SubagentSessionDetail {
 	out := make(map[string]SubagentSessionDetail, len(keys))
 	if len(keys) == 0 {
 		return out
 	}
 
-	// Deduplicate and drop blanks: a repeated key would otherwise be counted
-	// twice in the batched query.
 	unique := make([]string, 0, len(keys))
 	seen := make(map[string]bool, len(keys))
 	for _, key := range keys {
@@ -951,8 +662,6 @@ func (sm *SessionManager) SubagentSessionDetails(keys []string) map[string]Subag
 
 	sm.ensureLoaded()
 
-	// Read the repository through the repoFor seam, like the save paths: it is
-	// the only way a test can observe that this query is windowed.
 	repo := repoFor(sm)
 
 	var coldKeys []string
@@ -963,8 +672,6 @@ func (sm *SessionManager) SubagentSessionDetails(keys []string) map[string]Subag
 			coldKeys = append(coldKeys, key)
 			continue
 		}
-		// Same counting and summary expression as subagentInfoFromSession, so
-		// the tool and the UI report identical strings for a resident session.
 		iterations := 0
 		lastAssistantContent := ""
 		haveLastAssistant := false
@@ -983,7 +690,7 @@ func (sm *SessionManager) SubagentSessionDetails(keys []string) map[string]Subag
 			Summary:    subagentSummary(session.Summary, lastAssistantContent),
 		}
 	}
-	sm.mu.RUnlock() // store I/O below must not run under the session lock
+	sm.mu.RUnlock()
 
 	if len(coldKeys) == 0 || repo == nil {
 		return out
@@ -991,9 +698,6 @@ func (sm *SessionManager) SubagentSessionDetails(keys []string) map[string]Subag
 
 	stats, err := repo.SessionListingStats(coldKeys)
 	if err != nil {
-		// Same policy as FindSubagentSessions: a session whose rows cannot be
-		// read is omitted (not reported with empty fields) and the next call
-		// retries.
 		logger.WarnCF("session", "Failed to read subagent session details; omitting metadata-only subagents", map[string]interface{}{
 			"error": err.Error(),
 			"count": len(coldKeys),
@@ -1004,7 +708,7 @@ func (sm *SessionManager) SubagentSessionDetails(keys []string) map[string]Subag
 	for _, key := range coldKeys {
 		stat, ok := stats[key]
 		if !ok {
-			continue // sessions row is gone (deleted)
+			continue
 		}
 		out[key] = SubagentSessionDetail{
 			Iterations: stat.AssistantCount,

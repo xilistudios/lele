@@ -1,41 +1,5 @@
 package session
 
-// Lock-scope + durability regression tests for the excluded-message eviction
-// path (T9).
-//
-// EvictExcludedMessages is what every compaction calls
-// (evict_excluded_from_memory): it drops the excluded prefix from
-// session.Messages and persists the new boundary. It used to run its SQLite
-// round trip — UpsertSession (fold) or UpdateFirstInMemorySeq (targeted) —
-// while holding sm.mu, so every compaction blocked GetHistoryView for the
-// duration of the write; that is the "freeze after compacting" symptom this
-// change removes.
-//
-// The tests below pin the three-phase contract (collect under the lock → I/O
-// with the lock released → relock + guards), mirroring persist_lock_test.go
-// for saveFullUnlocked:
-//
-//   - TestEvictExcludedDoesNotHoldLockDuringIO: no repository call happens
-//     under sm.mu (a blocking fake parks the write and a read-lock probe
-//     decides it deterministically), a TUI frame is served while the write is
-//     parked, and a lock watchdog bounds the longest reader wait — for BOTH
-//     persistence shapes the eviction can take.
-//   - TestEvictExcludedPublishesViewUnderLock: the phase-1 mutation already
-//     published a fresh snapshot while the I/O is parked (the copy-on-write
-//     invariant of view.go) and the served view is exactly the resident suffix.
-//   - TestEvictExcludedHealsConcurrentMutation: a mutation landing in the
-//     unlocked window is never lost — the epoch guard forces the next Save to
-//     rebuild the history from memory — and memory == SQLite afterwards.
-//   - TestEvictExcludedConcurrentRacersStayConsistent: racing writers (append +
-//     chunk) against a compacting goroutine; -race clean, no marker lost,
-//     final memory/SQLite consistent.
-//   - TestEvictExcludedPersistsSameBoundary: parity of the persisted boundary
-//     (FirstInMemorySeq), the in-memory boundary/totals and the resident suffix
-//     with the pre-T9 implementation, plus a cold-load round trip.
-//   - TestEvictExcludedBoundaryWriteFailureIsNonFatal: a failing boundary write
-//     is logged, the in-memory eviction still succeeds, and the folded summary
-//     is retried by the next Save (metaDirty contract).
-
 import (
 	"encoding/json"
 	"fmt"
@@ -49,21 +13,8 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
-// evictionFoldRoles is the alternating turn shape the compaction fixture uses.
-// ExcludeOldMessagesFromContext pins index 0 (and the recent human turns), so
-// the evicted region contains a preserved, non-excluded hole: the fold path
-// runs and the boundary is persisted together with the rewritten summary
-// (UpsertSession) instead of the targeted UpdateFirstInMemorySeq.
 var evictionFoldRoles = []string{"user", "assistant", "user", "assistant", "user", "assistant"}
 
-// seedPreEvictionSession builds the state EvictExcludedMessages documents as
-// its precondition: a persisted session whose excluded prefix is ready to be
-// dropped from memory (ExcludeOldMessagesFromContext + Save). It returns the
-// eviction length and the resident size the eviction must report.
 func seedPreEvictionSession(t *testing.T, sm *SessionManager, key string, roles []string, keep int) (wantEvicted, wantResident int) {
 	t.Helper()
 	sm.GetOrCreate(key)
@@ -80,11 +31,6 @@ func seedPreEvictionSession(t *testing.T, sm *SessionManager, key string, roles 
 	return len(roles) - keep, keep
 }
 
-// seedTargetedEvictionSession builds a session whose evicted front contains no
-// preserved hole: every message in it is excluded, so nothing is folded into
-// the summary and the eviction takes the targeted UpdateFirstInMemorySeq path
-// (the shape a cold load / direct call produces: excludeBoundary == 0, so the
-// contiguity fallback decides the region).
 func seedTargetedEvictionSession(t *testing.T, sm *SessionManager, key string) (wantEvicted, wantResident int) {
 	t.Helper()
 	const total, excluded = 8, 4
@@ -102,7 +48,7 @@ func seedTargetedEvictionSession(t *testing.T, sm *SessionManager, key string) (
 		session.Messages[i].ExcludeFromContext = true
 	}
 	session.excludeBoundary = 0
-	session.lastPersistedSeq = -1 // persist the new flags with a full rewrite
+	session.lastPersistedSeq = -1
 	session.bumpEpoch()
 	sm.mu.Unlock()
 	if err := sm.Save(key); err != nil {
@@ -111,33 +57,17 @@ func seedTargetedEvictionSession(t *testing.T, sm *SessionManager, key string) (
 	return excluded, total - excluded
 }
 
-// ---------------------------------------------------------------------------
-// Test doubles
-// ---------------------------------------------------------------------------
-
-// Which boundary statement the eviction issued (recorded by the fake below).
 const (
 	boundaryMethodNone int32 = iota
 	boundaryMethodTargeted
 	boundaryMethodUpsert
 )
 
-// evictionBlockingRepo parks the eviction boundary write until the test
-// releases it, and records whether sm.mu looked held at that moment.
-//
-// It reuses the ioGate handshake of persist_lock_test.go (T10): entering the
-// gate probes sm.mu with TryRLock, which fails deterministically while a writer
-// holds it, so an in-lock repository call is detected without racing a timer.
-//
-// Which of the two metadata statements is parked is configurable: the fake
-// wraps the real repository, so parking UpsertSession would also park the
-// writes of any concurrent Save (they share that statement), and the
-// concurrency tests must be able to write to SQLite during the parked window.
 type evictionBlockingRepo struct {
 	sessionRepo
 	gate        *ioGate
-	blockSeq    bool // park UpdateFirstInMemorySeq
-	blockUpsert bool // park UpsertSession
+	blockSeq    bool
+	blockUpsert bool
 	method      atomic.Int32
 }
 
@@ -157,8 +87,6 @@ func (b *evictionBlockingRepo) UpsertSession(meta store.SessionMeta) error {
 	return b.sessionRepo.UpsertSession(meta)
 }
 
-// useBlockingEvictionRepo swaps repoFor for the eviction-blocking fake until
-// the test finishes.
 func useBlockingEvictionRepo(t *testing.T, sm *SessionManager, gate *ioGate, blockSeq, blockUpsert bool) *evictionBlockingRepo {
 	t.Helper()
 	fake := &evictionBlockingRepo{
@@ -173,17 +101,12 @@ func useBlockingEvictionRepo(t *testing.T, sm *SessionManager, gate *ioGate, blo
 	return fake
 }
 
-// evictAsync runs EvictExcludedMessages in its own goroutine and reports the
-// evicted count.
 func evictAsync(sm *SessionManager, key string) <-chan int {
 	done := make(chan int, 1)
 	go func() { done <- sm.EvictExcludedMessages(key) }()
 	return done
 }
 
-// awaitGate waits for the parked boundary write. Reaching the repository is
-// itself part of the contract: if the collect phase were still holding sm.mu,
-// this call would never arrive.
 func awaitGate(t *testing.T, gate *ioGate, done <-chan int) {
 	t.Helper()
 	select {
@@ -195,7 +118,6 @@ func awaitGate(t *testing.T, gate *ioGate, done <-chan int) {
 	}
 }
 
-// awaitEviction collects the parked eviction after the gate was released.
 func awaitEviction(t *testing.T, done <-chan int) int {
 	t.Helper()
 	select {
@@ -206,10 +128,6 @@ func awaitEviction(t *testing.T, done <-chan int) int {
 		return 0
 	}
 }
-
-// ---------------------------------------------------------------------------
-// (a) the regression test: the boundary write does not run under sm.mu
-// ---------------------------------------------------------------------------
 
 func TestEvictExcludedDoesNotHoldLockDuringIO(t *testing.T) {
 	if testing.Short() {
@@ -226,8 +144,6 @@ func TestEvictExcludedDoesNotHoldLockDuringIO(t *testing.T) {
 		wantResidentCnt int
 	}{
 		{
-			// The fold rewrites the whole metadata row (summary included), so it
-			// is the heavier — and more realistic — of the two writes.
 			name: "fold persists the full metadata (UpsertSession)",
 			seed: func(t *testing.T, sm *SessionManager, key string) (int, int) {
 				return seedPreEvictionSession(t, sm, key, evictionFoldRoles, 2)
@@ -269,10 +185,6 @@ func TestEvictExcludedDoesNotHoldLockDuringIO(t *testing.T) {
 			done := evictAsync(sm, key)
 			awaitGate(t, gate, done)
 
-			// Deterministic half: the repository call is parked right now, so a
-			// concurrent read lock must be available immediately. Reintroducing
-			// the I/O under sm.mu fails here (TryRLock never succeeds while the
-			// writer holds the lock).
 			if gate.muHeld.Load() {
 				t.Fatal("repository I/O ran while sm.mu was held: the write lock must cover collection only")
 			}
@@ -280,9 +192,6 @@ func TestEvictExcludedDoesNotHoldLockDuringIO(t *testing.T) {
 				t.Fatalf("eviction issued boundary method %d, want %d (parity: fold → UpsertSession, no fold → UpdateFirstInMemorySeq)", got, tc.wantMethod)
 			}
 
-			// The user-visible property: a TUI frame (GetHistoryView) is served
-			// while the eviction is parked in the middle of its write, and it
-			// already reflects the trimmed slice.
 			viewDone := make(chan int, 1)
 			go func() { viewDone <- len(sm.GetHistoryView(key)) }()
 			select {
@@ -294,9 +203,6 @@ func TestEvictExcludedDoesNotHoldLockDuringIO(t *testing.T) {
 				t.Fatal("GetHistoryView blocked while an eviction was doing I/O: the lock is held across the I/O")
 			}
 
-			// Park long enough that the timing half below has a signal to
-			// compare against: with the write inside the lock, a reader waits
-			// the whole parked window.
 			time.Sleep(400 * time.Millisecond)
 
 			gate.unlock()
@@ -309,8 +215,6 @@ func TestEvictExcludedDoesNotHoldLockDuringIO(t *testing.T) {
 				t.Fatalf("a reader waited %v for sm.mu during the eviction (limit %v): the lock is held across the I/O", observed, maxLockWait)
 			}
 
-			// The boundary really landed in SQLite and the resident slice is the
-			// kept suffix.
 			firstInMemorySeq, resident, _, _ := liveSnapshot(t, sm, key)
 			if firstInMemorySeq != wantEvicted {
 				t.Errorf("firstInMemorySeq = %d, want %d", firstInMemorySeq, wantEvicted)
@@ -329,18 +233,6 @@ func TestEvictExcludedDoesNotHoldLockDuringIO(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// (d) the copy-on-write snapshot invariant
-// ---------------------------------------------------------------------------
-
-// TestEvictExcludedPublishesViewUnderLock pins the invariant view.go rests on:
-// publishViewLocked() must run under sm.mu immediately after the slice swap —
-// BEFORE the boundary I/O. Moving it after the I/O (or into the free phase-2
-// helper) would leave the published view stale for the whole round trip and
-// push an O(n) rebuild onto the first reader of every TUI frame.
-//
-// The observation point is the parked window: phase 1 is over and phase 3 has
-// not run, so the snapshot must already belong to the trimmed slice.
 func TestEvictExcludedPublishesViewUnderLock(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -366,8 +258,6 @@ func TestEvictExcludedPublishesViewUnderLock(t *testing.T) {
 			firstInMemorySeq, len(resident), wantEvicted, wantResident)
 	}
 
-	// The served view is exactly the resident suffix: no excluded prefix, no
-	// extras. Read it while the eviction is still parked.
 	view := sm.GetHistoryView(key)
 	if len(view) != wantResident {
 		t.Fatalf("view len = %d, want %d (the evicted prefix must be gone)", len(view), wantResident)
@@ -381,15 +271,12 @@ func TestEvictExcludedPublishesViewUnderLock(t *testing.T) {
 			t.Errorf("view[%d] exposes an excluded message: %q", i, view[i].Content)
 		}
 	}
-	// The non-vacuous half: the evicted messages really left the view.
 	for _, msg := range view {
 		if strings.Contains(msg.Content, "turn-0") {
 			t.Errorf("view still holds an evicted message: %q", msg.Content)
 		}
 	}
 
-	// The view handed out is the published snapshot, and it must not be touched
-	// by the phase-3 bookkeeping that runs after the gate is released.
 	heldCopy := cloneMessages(view)
 
 	gate.unlock()
@@ -406,24 +293,8 @@ func TestEvictExcludedPublishesViewUnderLock(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// (b) concurrency
-// ---------------------------------------------------------------------------
-
-// concurrentMutationAppend is the marker the deterministic window test appends
-// while the eviction's boundary write is in flight.
 const concurrentMutationAppend = "appended-during-eviction-io"
 
-// TestEvictExcludedHealsConcurrentMutation proves that a mutation landing in the
-// unlocked window is never lost, and that the eviction does not claim it was
-// persisted.
-//
-// The eviction only mutates memory (the slice swap) and writes a non-destructive
-// boundary statement (UPDATE / idempotent UPSERT), so it is safe to release the
-// lock around it — provided the post-I/O bookkeeping is guarded. The guards are
-// the same as saveFullUnlocked's: an epoch mismatch forces the next Save to
-// rebuild the whole history from memory (lastPersistedSeq == -1), which heals
-// any ordering damage between the boundary write and the concurrent save.
 func TestEvictExcludedHealsConcurrentMutation(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -434,8 +305,6 @@ func TestEvictExcludedHealsConcurrentMutation(t *testing.T) {
 
 	gate := newIOGate(&sm.mu)
 	defer gate.unlock()
-	// Only the eviction's boundary write is parked: the concurrent mutation
-	// below still has to be able to reach SQLite.
 	useBlockingEvictionRepo(t, sm, gate, true, false)
 
 	done := evictAsync(sm, key)
@@ -444,8 +313,6 @@ func TestEvictExcludedHealsConcurrentMutation(t *testing.T) {
 		t.Fatal("repository I/O ran while sm.mu was held")
 	}
 
-	// Mutations in the window where the lock is released: an append and a
-	// streaming chunk.
 	sm.AddFullMessage(key, providers.Message{Role: "user", Content: concurrentMutationAppend})
 	sm.AppendAssistantChunk(key, "chunk-during-eviction-io")
 
@@ -458,9 +325,7 @@ func TestEvictExcludedHealsConcurrentMutation(t *testing.T) {
 	if firstInMemorySeq != wantEvicted {
 		t.Errorf("firstInMemorySeq = %d, want %d", firstInMemorySeq, wantEvicted)
 	}
-	// The eviction kept its own mutation (the prefix trim) and the concurrent
-	// ones: nothing was clobbered by the phase-3 bookkeeping.
-	wantResident := 4 + 2 // targeted fixture tail + appended user + streaming message
+	wantResident := 4 + 2
 	if len(resident) != wantResident {
 		t.Fatalf("resident messages = %d, want %d (the concurrent mutations must not be lost): %+v",
 			len(resident), wantResident, contentsOf(resident))
@@ -472,8 +337,6 @@ func TestEvictExcludedHealsConcurrentMutation(t *testing.T) {
 		t.Errorf("resident[5] = %q, want it to carry the streaming chunk", got)
 	}
 
-	// Epoch guard: the eviction must NOT claim the concurrent mutation was
-	// persisted — it forces a healing full rewrite instead.
 	sm.mu.RLock()
 	healed := sm.sessions[key].lastPersistedSeq
 	sm.mu.RUnlock()
@@ -481,8 +344,6 @@ func TestEvictExcludedHealsConcurrentMutation(t *testing.T) {
 		t.Errorf("lastPersistedSeq = %d after a concurrent mutation, want -1 (the eviction must force a healing full rewrite)", healed)
 	}
 
-	// Behavioural half: the next Save persists exactly what is resident,
-	// including the mutation that raced the eviction.
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("healing Save: %v", err)
 	}
@@ -507,12 +368,6 @@ func TestEvictExcludedHealsConcurrentMutation(t *testing.T) {
 	}
 }
 
-// TestEvictExcludedConcurrentRacersStayConsistent races appending writers
-// (append + streaming chunk + their own Saves) against a goroutine that keeps
-// compacting: exclude → Save → evict. It is the -race companion of the
-// deterministic window test above: it must report no data race, must not lose
-// any written marker entirely, and must end with memory and SQLite in
-// agreement.
 func TestEvictExcludedConcurrentRacersStayConsistent(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -542,8 +397,6 @@ func TestEvictExcludedConcurrentRacersStayConsistent(t *testing.T) {
 				return
 			default:
 			}
-			// The documented precondition: the excluded flags are persisted
-			// before the eviction drops them from memory.
 			sm.ExcludeOldMessagesFromContext(key, 2)
 			if err := sm.Save(key); err != nil {
 				t.Errorf("compactor Save: %v", err)
@@ -579,9 +432,6 @@ func TestEvictExcludedConcurrentRacersStayConsistent(t *testing.T) {
 	close(stop)
 	<-compactorDone
 
-	// Flush whatever bookkeeping the racing compactor left pending, then assert
-	// the two sources of truth agree. forceFullRewrite only pins the path; the
-	// content is what is under test.
 	forceFullRewrite(sm, key)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("final Save: %v", err)
@@ -593,7 +443,6 @@ func TestEvictExcludedConcurrentRacersStayConsistent(t *testing.T) {
 	}
 	firstInMemorySeq, resident, _, _ := liveSnapshot(t, sm, key)
 
-	// Seq contiguity: the persisted history is one dense block.
 	for i, row := range rows {
 		if row.Seq != i {
 			t.Fatalf("row %d has seq %d: the persisted seqs must stay contiguous", i, row.Seq)
@@ -602,7 +451,6 @@ func TestEvictExcludedConcurrentRacersStayConsistent(t *testing.T) {
 	if len(rows) < len(resident) {
 		t.Fatalf("persisted %d rows for %d resident messages", len(rows), len(resident))
 	}
-	// The resident block is the tail of the persisted history, byte for byte.
 	for i, msg := range resident {
 		row := rows[len(rows)-len(resident)+i]
 		wantJSON, mErr := json.Marshal(msg)
@@ -618,9 +466,6 @@ func TestEvictExcludedConcurrentRacersStayConsistent(t *testing.T) {
 		t.Errorf("firstInMemorySeq = %d but only %d rows are persisted", firstInMemorySeq, len(rows))
 	}
 
-	// No marker may vanish entirely. A marker can legitimately end up in the
-	// session summary (a fold of a compacted prefix) instead of in a message
-	// row, but it must be somewhere.
 	meta, err := s.Sessions().GetSessionMeta(key)
 	if err != nil || meta == nil {
 		t.Fatalf("GetSessionMeta: %v (meta=%v)", err, meta)
@@ -643,7 +488,6 @@ func TestEvictExcludedConcurrentRacersStayConsistent(t *testing.T) {
 	}
 }
 
-// contentsOf renders the resident messages for failure output.
 func contentsOf(msgs []providers.Message) []string {
 	out := make([]string, 0, len(msgs))
 	for _, m := range msgs {
@@ -652,17 +496,6 @@ func contentsOf(msgs []providers.Message) []string {
 	return out
 }
 
-// ---------------------------------------------------------------------------
-// (c) parity with the pre-T9 implementation, plus a cold-load round trip
-// ---------------------------------------------------------------------------
-
-// TestEvictExcludedPersistsSameBoundary pins the observable state the eviction
-// leaves behind, so the T9 split cannot change any of it:
-//   - the in-memory boundary (firstInMemorySeq) and the evicted total;
-//   - the resident slice: exactly the tail of the pre-eviction history, with
-//     `seq = firstInMemorySeq + sliceIndex` and no excluded message left;
-//   - the persisted boundary (FirstInMemorySeq) and the folded summary;
-//   - a cold load (fresh manager, same store) rebuilding the same state.
 func TestEvictExcludedPersistsSameBoundary(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -706,8 +539,6 @@ func TestEvictExcludedPersistsSameBoundary(t *testing.T) {
 		t.Errorf("in-memory evictedTotal = %d, want %d", evictedTotal, wantEvicted)
 	}
 
-	// Persisted parity: same boundary, and (fold path) the same summary carrying
-	// the pinned hole that left memory.
 	meta, err := s.Sessions().GetSessionMeta(key)
 	if err != nil || meta == nil {
 		t.Fatalf("GetSessionMeta: %v (meta=%v)", err, meta)
@@ -719,7 +550,6 @@ func TestEvictExcludedPersistsSameBoundary(t *testing.T) {
 		t.Errorf("persisted summary lost the folded hole: %q", meta.Summary)
 	}
 
-	// Cold-load round trip: a fresh manager must rebuild the identical state.
 	rowsAfter, err := s.Sessions().LoadMessagesWithSeq(key)
 	if err != nil {
 		t.Fatalf("LoadMessagesWithSeq after eviction: %v", err)
@@ -753,12 +583,6 @@ func TestEvictExcludedPersistsSameBoundary(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// error path: the boundary write is best-effort
-// ---------------------------------------------------------------------------
-
-// failingBoundaryRepo fails every metadata write, so the test can pin the
-// "logged, not fatal" contract of the eviction's persistence phase.
 type failingBoundaryRepo struct {
 	sessionRepo
 	err error
@@ -767,11 +591,6 @@ type failingBoundaryRepo struct {
 func (b *failingBoundaryRepo) UpdateFirstInMemorySeq(string, int) error { return b.err }
 func (b *failingBoundaryRepo) UpsertSession(store.SessionMeta) error    { return b.err }
 
-// TestEvictExcludedBoundaryWriteFailureIsNonFatal: a failed boundary write must
-// not fail the eviction (the in-memory eviction is the operation; the write only
-// makes the boundary durable), and when the fold rewrote the summary the retry
-// must be armed via metaDirty so the next Save persists it — the pre-T9
-// semantics, unchanged by the phase split.
 func TestEvictExcludedBoundaryWriteFailureIsNonFatal(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -797,7 +616,6 @@ func TestEvictExcludedBoundaryWriteFailureIsNonFatal(t *testing.T) {
 		t.Fatalf("resident messages = %d, want %d: the failed write must not undo the in-memory eviction", len(resident), wantResident)
 	}
 
-	// The boundary was NOT persisted, but the retry is armed.
 	meta, err := s.Sessions().GetSessionMeta(key)
 	if err != nil {
 		t.Fatalf("GetSessionMeta: %v", err)
@@ -812,8 +630,6 @@ func TestEvictExcludedBoundaryWriteFailureIsNonFatal(t *testing.T) {
 		t.Error("metaDirty is not set after a failed folded-summary write: the next Save would silently drop the folded text")
 	}
 
-	// The retry: a Save with a working repository persists the folded summary
-	// and the boundary.
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("retry Save: %v", err)
 	}

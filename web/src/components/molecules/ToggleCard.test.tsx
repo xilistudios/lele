@@ -24,7 +24,6 @@ describe('ToggleCard', () => {
     const { card, input } = setup()
     expect(card).toBeTruthy()
     expect(input.className).toContain('sr-only')
-    // The whole card is the click target: the label points at the input.
     expect(card.getAttribute('for')).toBe(input.id)
   })
 

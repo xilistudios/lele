@@ -1,7 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Tests for the /group command handler.
-// License: MIT
-
 package agent
 
 import (
@@ -13,7 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// newTestGroupHandler creates a commandHandlerImpl with a GroupManager wired up.
 func newTestGroupHandler(cfg *config.Config) (*commandHandlerImpl, *AgentLoop) {
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
@@ -32,8 +27,6 @@ func TestGroupCommand_NoArgs_ShowsUsage(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -68,8 +61,6 @@ func TestGroupCommand_Help_ShowsUsage(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -101,8 +92,6 @@ func TestGroupCommand_List_NoGroups(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -134,8 +123,6 @@ func TestGroupCommand_Status_NoGroups(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -151,7 +138,6 @@ func TestGroupCommand_Status_NoGroups(t *testing.T) {
 	if !handled {
 		t.Fatal("Expected /group status to be handled")
 	}
-	// Without a specific ID, status falls back to list
 	if !strings.Contains(result, "No hay grupos activos") {
 		t.Errorf("Expected no active groups, got: %s", result)
 	}
@@ -168,8 +154,6 @@ func TestGroupCommand_Status_NotFound(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -204,8 +188,6 @@ func TestGroupCommand_Stop_NoID(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -237,8 +219,6 @@ func TestGroupCommand_Stop_NotFound(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -270,8 +250,6 @@ func TestGroupCommand_Start_NoArgs(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -303,8 +281,6 @@ func TestGroupCommand_Start_ProfileNotFound(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -342,8 +318,6 @@ func TestGroupCommand_Start_ProfileMissingTask(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -359,7 +333,6 @@ func TestGroupCommand_Start_ProfileMissingTask(t *testing.T) {
 	if !handled {
 		t.Fatal("Expected /group start to be handled")
 	}
-	// Without a task, it should error (either missing task or profile not found)
 	if !strings.Contains(result, "❌") {
 		t.Errorf("Expected error message, got: %s", result)
 	}
@@ -376,8 +349,6 @@ func TestGroupCommand_Start_AdHoc_MissingAgents(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -409,8 +380,6 @@ func TestGroupCommand_Start_AdHoc_MissingTask(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -442,8 +411,6 @@ func TestGroupCommand_Start_AdHoc_InvalidStrategy(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -475,8 +442,6 @@ func TestGroupCommand_Start_AdHoc_Success(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 
@@ -488,7 +453,6 @@ func TestGroupCommand_Start_AdHoc_Success(t *testing.T) {
 		}
 	}()
 
-	// Ensure the default agent ("main") exists in registry
 	defaultAgent := al.registry.GetDefaultAgent()
 	if defaultAgent == nil {
 		t.Fatal("Expected default agent to exist")
@@ -514,7 +478,6 @@ func TestGroupCommand_Start_AdHoc_Success(t *testing.T) {
 		t.Errorf("Expected group ID in response, got: %s", result)
 	}
 
-	// Verify the group was actually created
 	groups := al.GroupManager().List()
 	if len(groups) != 1 {
 		t.Fatalf("Expected 1 active group, got %d", len(groups))
@@ -570,7 +533,6 @@ func TestGroupCommand_Start_Profile_Success(t *testing.T) {
 		t.Errorf("Expected profile ID in group ID, got: %s", result)
 	}
 
-	// Verify group was created
 	groups := al.GroupManager().List()
 	if len(groups) != 1 {
 		t.Fatalf("Expected 1 active group, got %d", len(groups))
@@ -591,8 +553,6 @@ func TestGroupCommand_UnknownSubcommand(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
-		// These tests exercise the /group subcommands themselves; the feature
-		// gate (B10) is covered in group_gating_test.go.
 		Groups: config.GroupsConfig{Enabled: true},
 	}
 

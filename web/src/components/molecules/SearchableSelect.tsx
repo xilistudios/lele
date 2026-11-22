@@ -31,12 +31,6 @@ type Props = {
 
 const ANIMATION_MS = 200
 
-/**
- * Display form of a model id. The implementation now lives in
- * `lib/modelName.ts` (`shortModelName`) so the agents list/header badges and
- * this trigger button cannot drift apart (spec §3.8). Kept as a local alias to
- * avoid touching every call site in this file.
- */
 const formatDisplayValue = shortModelName
 
 export function SearchableSelect({
@@ -109,14 +103,12 @@ export function SearchableSelect({
     if (!isMounted) return undefined
 
     const frame = window.requestAnimationFrame(() => {
-      // Check if there's enough space below
       if (rootRef.current) {
         const rect = rootRef.current.getBoundingClientRect()
         const viewportHeight = window.visualViewport?.height ?? window.innerHeight
         const spaceBelow = viewportHeight - rect.bottom
-        const popupHeight = 256 // max-h-64
+        const popupHeight = 256
 
-        // If not enough space below, open upwards
         setIsOpenUp(spaceBelow < popupHeight + 20)
       }
 
@@ -174,8 +166,6 @@ export function SearchableSelect({
     [],
   )
 
-  // Recalculate direction on window resize and on visual-viewport resize
-  // (the on-screen keyboard shrinks only the visual viewport on iOS)
   useEffect(() => {
     if (!isMounted) return
 

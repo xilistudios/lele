@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -19,15 +14,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// These tests pin the invariant that made the agent die in production: the
-// tool calls a turn writes to the session and the tool results it writes next
-// to them must describe the same calls. A provider that rejects the request
-// with 400 "function.arguments must be in JSON format" is bad enough, but the
-// real damage was that the rejected message was persisted, so every later turn
-// replayed it and the session never recovered.
-
-// wireToolCalls returns the tool calls of a persisted message as the provider
-// would see them.
 func wireToolCalls(t *testing.T, m providers.Message) []struct {
 	ID       string `json:"id"`
 	Function struct {
@@ -53,12 +39,6 @@ func wireToolCalls(t *testing.T, m providers.Message) []struct {
 	return calls
 }
 
-// assertSessionWireClean fails if anything persisted would be rejected by a
-// strict provider. It checks the RAW stored values, not the marshaled wire,
-// because the wire is normalized on write by design: a session that still holds
-// function.arguments "null" in the store is only saved from the 400 by the
-// sanitizer running again on every turn, which is exactly the fragility that
-// broke production. Stored tool calls must already be canonical.
 func assertSessionWireClean(t *testing.T, history []providers.Message) {
 	t.Helper()
 
@@ -100,12 +80,6 @@ func assertSessionWireClean(t *testing.T, history []providers.Message) {
 	}
 }
 
-// assertStoreHasNoPoisonedToolCalls reads the persisted rows directly, bypassing
-// the session manager, because loading a message runs it through
-// ToolCall.UnmarshalJSON, which normalises arguments on read. A store that still
-// holds "arguments":"null" would keep producing 400s for any consumer that reads
-// the rows as they are - the API, an export, a different build - so healing has
-// to be written back, not merely applied to the in-memory copy.
 func assertStoreHasNoPoisonedToolCalls(t *testing.T, s *store.Store, sessionKey string) {
 	t.Helper()
 
@@ -128,9 +102,6 @@ func assertStoreHasNoPoisonedToolCalls(t *testing.T, s *store.Store, sessionKey 
 		if !strings.Contains(message, "tool_calls") {
 			continue
 		}
-		// The legacy shape wrote the decoded map as a second top-level
-		// "arguments" next to function.arguments, and json.Marshal of a nil map
-		// wrote "null" inside it.
 		if strings.Contains(message, `"arguments":"null"`) || strings.Contains(message, `"arguments":null`) {
 			t.Fatalf("store still holds null arguments for %s: %s", sessionKey, message)
 		}
@@ -175,8 +146,6 @@ func assertStoreHasNoPoisonedToolCalls(t *testing.T, s *store.Store, sessionKey 
 	}
 }
 
-// A nameless tool call with nil arguments is the exact shape that poisoned
-// sessions in production. It must never reach the session store.
 func TestRunLLMIteration_NamelessToolCallIsNeverPersisted(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -201,7 +170,6 @@ func TestRunLLMIteration_NamelessToolCallIsNeverPersisted(t *testing.T) {
 				return &providers.LLMResponse{
 					Content: "",
 					ToolCalls: []providers.ToolCall{
-						// The production shape: no name, nil arguments.
 						{ID: "call_dead", Type: "function", Arguments: nil},
 					},
 				}, nil
@@ -240,8 +208,6 @@ func TestRunLLMIteration_NamelessToolCallIsNeverPersisted(t *testing.T) {
 		}
 	}
 
-	// The model must be told to retry, otherwise it repeats the same malformed
-	// call forever and the turn burns every iteration.
 	var guided bool
 	for _, m := range history {
 		if m.Role == "user" && strings.Contains(m.Content, "malformed") {
@@ -253,9 +219,6 @@ func TestRunLLMIteration_NamelessToolCallIsNeverPersisted(t *testing.T) {
 	}
 }
 
-// When one call in a batch is rejected, the surviving call must be the one
-// executed and the tool result must reference the id that was persisted - a
-// mismatch is an orphan tool message, which is a 400 in a different shape.
 func TestRunLLMIteration_ToolResultsMatchPersistedCalls(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -279,7 +242,7 @@ func TestRunLLMIteration_ToolResultsMatchPersistedCalls(t *testing.T) {
 			if callCount == 1 {
 				return &providers.LLMResponse{
 					ToolCalls: []providers.ToolCall{
-						{ID: "call_bad", Type: "function"}, // nameless, nil arguments
+						{ID: "call_bad", Type: "function"},
 						{ID: "call_good", Type: "function", Name: "exec",
 							Arguments: map[string]interface{}{"command": "ls"}},
 					},
@@ -321,8 +284,6 @@ func TestRunLLMIteration_ToolResultsMatchPersistedCalls(t *testing.T) {
 	}
 }
 
-// Arguments that are not a JSON object must be normalised before persisting,
-// and the decoded map tools execute from must be rebuilt from them.
 func TestRunLLMIteration_PersistedToolCallsAreCanonical(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -347,10 +308,9 @@ func TestRunLLMIteration_PersistedToolCallsAreCanonical(t *testing.T) {
 				return &providers.LLMResponse{
 					ToolCalls: []providers.ToolCall{
 						{
-							ID:   "call_1",
-							Type: "function",
-							Name: "read_file",
-							// The legacy shape: arguments already stringified.
+							ID:        "call_1",
+							Type:      "function",
+							Name:      "read_file",
 							Function:  &providers.FunctionCall{Name: "read_file", Arguments: `{"path":"/tmp/x"}`},
 							Arguments: map[string]interface{}{"path": "/tmp/x"},
 						},
@@ -399,8 +359,6 @@ func TestRunLLMIteration_PersistedToolCallsAreCanonical(t *testing.T) {
 		t.Fatalf("arguments were rewritten: %q", got)
 	}
 
-	// The whole request must be marshalable without emitting a duplicate
-	// top-level "arguments", which is what strict gateways reject.
 	full, err := json.Marshal(assistant.ToolCalls)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -417,8 +375,6 @@ func TestRunLLMIteration_PersistedToolCallsAreCanonical(t *testing.T) {
 	}
 }
 
-// A session already poisoned on disk must be repaired on load, so the agent can
-// answer again without the user having to /new.
 func TestRunAgentLoop_HealsPoisonedSessionOnLoad(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
@@ -442,9 +398,6 @@ func TestRunAgentLoop_HealsPoisonedSessionOnLoad(t *testing.T) {
 		Function:  &providers.FunctionCall{Name: "exec", Arguments: "null"},
 		Arguments: nil,
 	}
-	// A second call with no name cannot be repaired by the reader-side
-	// normalisation - there is no tool to name - so it only disappears if
-	// healing is written back to the store.
 	nameless := providers.ToolCall{
 		ID:       "call_dead",
 		Type:     "function",
@@ -479,7 +432,6 @@ func TestRunAgentLoop_HealsPoisonedSessionOnLoad(t *testing.T) {
 		t.Fatalf("runAgentLoop: %v", err)
 	}
 
-	// What went to the provider must be clean, or the 400 comes back.
 	var sawToolCall bool
 	for _, m := range sentMessages {
 		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
@@ -496,8 +448,6 @@ func TestRunAgentLoop_HealsPoisonedSessionOnLoad(t *testing.T) {
 		t.Fatal("the poisoned turn disappeared from the context instead of being repaired")
 	}
 
-	// The repair must reach the store, not just the in-memory copy, otherwise
-	// the session is broken again after a restart.
 	reopened := session.NewSessionManager()
 	reopened.SetSessionRepo(s.Sessions())
 	assertSessionWireClean(t, reopened.GetHistory(sessionKey))

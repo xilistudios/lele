@@ -6,16 +6,6 @@ import { loadSession, saveSession } from '../lib/storage'
 import type { AuthSession } from '../lib/types'
 import { type AuthContextValue, AuthProvider, useAuthContext } from './AuthContext'
 
-/**
- * Who is allowed to erase the shared session.
- *
- * `localStorage['lele.session']` is one slot shared by every tab and by every
- * client paired with this browser. The HTTP client reports a fatal refresh by
- * calling the auth-failure handler with `mayClearStorage`; these tests pin that
- * the provider honours it -- a dead credential of ours signs the whole browser
- * out, a dead credential of someone else only disconnects this tab.
- */
-
 const API_URL = 'http://127.0.0.1:18793'
 const originalFetch = globalThis.fetch
 
@@ -35,7 +25,6 @@ const session = (over: Partial<AuthSession> = {}): AuthSession => ({
   ...over,
 })
 
-/** Protected routes answer 401 and /auth/refresh rejects the presented token. */
 function mockExpiredCredential() {
   globalThis.fetch = mock(async (input: RequestInfo | URL) => {
     const url = String(input)
@@ -64,7 +53,6 @@ const auth = (): AuthContextValue => {
   return captured
 }
 
-/** Drives a request all the way into the fatal-refresh path. */
 async function expireSession() {
   const client = auth().api
   await act(async () => {
@@ -89,8 +77,6 @@ describe('auth failure and the shared session slot', () => {
     mountProvider()
     expect(auth().session?.client_id).toBe('client-MINE')
 
-    // Another client signs into this browser (another tab, same origin) while
-    // our tab is open: the slot now holds a session we never owned.
     saveSession(
       session({
         client_id: 'client-OTHER',
@@ -102,9 +88,7 @@ describe('auth failure and the shared session slot', () => {
 
     await expireSession()
 
-    // This tab is signed out from React state...
     expect(auth().session).toBeNull()
-    // ...but the other device's session is still there for its own tab.
     expect(loadSession()?.client_id).toBe('client-OTHER')
     expect(loadSession()?.refresh_token).toBe('refresh-of-other-client')
   })
@@ -120,22 +104,11 @@ describe('auth failure and the shared session slot', () => {
     expect(loadSession()).toBeNull()
   })
 })
-/**
- * Renewing before the deadline, not after the rejection.
- *
- * A browser that has been idle for longer than the credential's life used to
- * find out the hard way: the first request 401'd, the refresh token had already
- * expired server-side, the client was deleted and the user was signed out ('My
- * Desktop', paired on the 5th, expired on the 4th, without a single refresh).
- * These tests pin the proactive renewal the provider now runs on mount, driven
- * by the REAL `expires` the server persisted with the session.
- */
 
 const DAY_MS = 24 * 3600 * 1000
 const THIRTY_DAYS_MS = 30 * DAY_MS
 
 describe('proactive session renewal', () => {
-  /** Answers /auth/refresh with a fresh 30-day credential; records every call. */
   function mockRefreshServer() {
     const calls: { url: string; body: unknown }[] = []
     const serverExpires = new Date(Date.now() + THIRTY_DAYS_MS).toISOString()
@@ -163,16 +136,13 @@ describe('proactive session renewal', () => {
     mountProvider()
 
     await waitFor(() => expect(calls).toHaveLength(1))
-    // The rotation must present the refresh token this tab holds.
     expect(calls[0]?.body).toEqual({ refresh_token: 'refresh-1' })
 
     await act(async () => {})
     expect(loadSession()?.token).toBe('access-2')
     expect(loadSession()?.refresh_token).toBe('refresh-2')
-    // The server's own deadline is what gets persisted, not a fabricated one.
     expect(loadSession()?.expires).toBe(serverExpires)
     expect(auth().session?.expires).toBe(serverExpires)
-    // Renewal keeps the device identity it was paired with.
     expect(loadSession()?.client_id).toBe('client-MINE')
     expect(loadSession()?.device_name).toBe('My Desktop')
   })
@@ -191,8 +161,6 @@ describe('proactive session renewal', () => {
   })
 
   test('does not attempt renewal without a refresh token', async () => {
-    // Desktop sessions are injected with a token only: there is nothing to
-    // renew with, so a check must not turn into a doomed request.
     saveSession(
       session({ refresh_token: '', expires: new Date(Date.now() + 60_000).toISOString() }),
     )

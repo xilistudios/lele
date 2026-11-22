@@ -30,8 +30,6 @@ func NewSendFileTool() *SendFileTool {
 	return &SendFileTool{}
 }
 
-// SetWorkspaceRestrictions configures the workspace boundary and whether file
-// paths must be restricted to it (mirrors ExecTool's restriction pattern).
 func (t *SendFileTool) SetWorkspaceRestrictions(workspace string, restrict bool) {
 	t.workspace = workspace
 	t.restrict = restrict

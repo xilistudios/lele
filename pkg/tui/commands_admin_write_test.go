@@ -11,19 +11,10 @@ import (
 	"github.com/xilistudios/lele/pkg/harness"
 )
 
-// Part B tests: the create/edit/delete write flow of the /commands panel.
-// testModelConfig points LELE_CONFIG_DIR and the defaults workspace at temp
-// dirs, so config.json rewrites and command files can never touch the real
-// user state.
-
-// keyMsg builds a tea.KeyMsg with a single rune key (the same shape bubbletea
-// produces for typed characters).
 func keyMsg(r rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
 }
 
-// runWizardKeys drives handleModalKey with a list of key strings, mirroring how
-// the real event loop would deliver them.
 func runWizardKeys(t *testing.T, m *Model, keys ...string) {
 	t.Helper()
 	for _, k := range keys {
@@ -39,32 +30,26 @@ func runWizardKeys(t *testing.T, m *Model, keys ...string) {
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 		}
 		_, cmd := m.handleModalKey(msg)
-		_ = cmd // commands are tick/side-effect hints; state is what we assert
+		_ = cmd
 	}
 }
 
-// fillWizard types each step's text and presses enter, ending with the
-// template step (typed into the textarea directly, then enter to save). It
-// tolerates a wizard that stops early (validation tests) — the save is only
-// attempted when the template step is actually reached.
 func fillWizard(t *testing.T, m *Model, name, description, template string) {
 	t.Helper()
 	m.textInput.SetValue(name)
-	runWizardKeys(t, m, "enter") // step 0 -> 1
+	runWizardKeys(t, m, "enter")
 	m.textInput.SetValue(description)
-	runWizardKeys(t, m, "enter") // 1 -> 2 (agent)
-	runWizardKeys(t, m, "enter") // 2 -> 3 (model)
-	runWizardKeys(t, m, "enter") // 3 -> 4 (allow_shell)
-	runWizardKeys(t, m, "enter") // 4 default "no" -> 5
-	runWizardKeys(t, m, "enter") // 5 default "inherit" -> 6 (template)
+	runWizardKeys(t, m, "enter")
+	runWizardKeys(t, m, "enter")
+	runWizardKeys(t, m, "enter")
+	runWizardKeys(t, m, "enter")
+	runWizardKeys(t, m, "enter")
 	if m.formStepIndex != commandTemplateStep || m.modalMode != ModalAddCommand {
-		return // the wizard stopped on a validation error; caller asserts
+		return
 	}
 	m.templateInput.SetValue(template)
-	runWizardKeys(t, m, "enter") // save
+	runWizardKeys(t, m, "enter")
 }
-
-// --- serialization ----------------------------------------------------------
 
 func TestSerializeCommandMarkdown_RoundTrip(t *testing.T) {
 	abs := false
@@ -105,8 +90,6 @@ func TestSerializeCommandMarkdown_QuotesColonValues(t *testing.T) {
 	}
 }
 
-// --- name validation ---------------------------------------------------------
-
 func TestValidateCommandName(t *testing.T) {
 	for _, good := range []string{"review", "my.cmd", "a_b-1", "deploy"} {
 		if _, err := validateCommandName(good); err != nil {
@@ -120,8 +103,6 @@ func TestValidateCommandName(t *testing.T) {
 	}
 }
 
-// --- create (workspace scope) -------------------------------------------------
-
 func TestCommandsCreate_WritesWorkspaceFile(t *testing.T) {
 	m := commandsTestModel(t)
 	m.executeCommand("/new")
@@ -133,12 +114,11 @@ func TestCommandsCreate_WritesWorkspaceFile(t *testing.T) {
 	m.resetModal(ModalCommands)
 	m.loadCommandsList()
 
-	// The create action must be the last row.
 	if got := m.commandsModalKeys[len(m.commandsModalKeys)-1]; got != commandsNewKey {
 		t.Fatalf("last row key = %q, want %q", got, commandsNewKey)
 	}
 	m.modalSelectedIdx = len(m.modalItems) - 1
-	runWizardKeys(t, m, "enter") // open the wizard via the "+ New command" row
+	runWizardKeys(t, m, "enter")
 	if m.modalMode != ModalAddCommand || m.commandsEditScope != "workspace" {
 		t.Fatalf("wizard not open: mode=%v scope=%q", m.modalMode, m.commandsEditScope)
 	}
@@ -156,15 +136,12 @@ func TestCommandsCreate_WritesWorkspaceFile(t *testing.T) {
 	if !strings.Contains(string(raw), "description: Say hi") || !strings.Contains(string(raw), "say hello to $ARGUMENTS") {
 		t.Errorf("unexpected file content:\n%s", raw)
 	}
-	// The saved command must be immediately visible and effective in the list.
 	if _, _, ok := m.lookupCommandRow("workspace:greet"); !ok {
 		t.Errorf("row not in list: %v", m.modalItems)
 	}
 	if m.commandsFeedback == "" {
 		t.Error("save must surface a feedback line")
 	}
-	// ...and immediately runnable: the manager was invalidated, so the merged
-	// registry contains it (this is what /greet would expand from).
 	mgr := m.commandsManager(ws)
 	if cmd, ok := mgr.Registry().Get("greet"); !ok || cmd == nil {
 		t.Fatal("registry miss after create — cache invalidation broken")
@@ -199,16 +176,14 @@ func TestCommandsCreate_RejectsEmptyTemplate(t *testing.T) {
 	m.textInput.SetValue("x")
 	runWizardKeys(t, m, "enter")
 	m.textInput.SetValue("desc")
-	runWizardKeys(t, m, "enter", "enter", "enter", "enter", "enter") // -> template step
+	runWizardKeys(t, m, "enter", "enter", "enter", "enter", "enter")
 	m.templateInput.SetValue("   ")
-	runWizardKeys(t, m, "enter") // save attempt
+	runWizardKeys(t, m, "enter")
 
 	if m.formError == "" || m.modalMode != ModalAddCommand {
 		t.Fatalf("empty template accepted: err=%q mode=%v", m.formError, m.modalMode)
 	}
 }
-
-// --- edit ---------------------------------------------------------------------
 
 func TestCommandsEdit_ConfigPersists(t *testing.T) {
 	m := commandsTestModel(t)
@@ -220,7 +195,6 @@ func TestCommandsEdit_ConfigPersists(t *testing.T) {
 	if m.modalMode != ModalAddCommand || m.commandsEditScope != "config" {
 		t.Fatalf("edit wizard not open: mode=%v scope=%q err=%q", m.modalMode, m.commandsEditScope, m.commandsFeedback)
 	}
-	// The wizard must be pre-filled from the definition being edited.
 	if m.formValues[0] != "review" || m.formValues[1] != "Review the diff" {
 		t.Errorf("prefill wrong: %q/%q", m.formValues[0], m.formValues[1])
 	}
@@ -229,15 +203,15 @@ func TestCommandsEdit_ConfigPersists(t *testing.T) {
 	}
 
 	m.textInput.SetValue("review")
-	runWizardKeys(t, m, "enter") // 0 -> 1 (name unchanged)
+	runWizardKeys(t, m, "enter")
 	m.textInput.SetValue("Tweak")
-	runWizardKeys(t, m, "enter") // 1 -> 2 (agent)
-	runWizardKeys(t, m, "enter") // 2 -> 3 (model)
-	runWizardKeys(t, m, "enter") // 3 -> 4 (allow_shell)
-	runWizardKeys(t, m, "enter") // 4 -> 5 (abs files)
-	runWizardKeys(t, m, "enter") // 5 -> 6 (template)
+	runWizardKeys(t, m, "enter")
+	runWizardKeys(t, m, "enter")
+	runWizardKeys(t, m, "enter")
+	runWizardKeys(t, m, "enter")
+	runWizardKeys(t, m, "enter")
 	m.templateInput.SetValue("new body")
-	runWizardKeys(t, m, "enter") // save
+	runWizardKeys(t, m, "enter")
 
 	def, ok := m.cfg.Commands["review"]
 	if !ok {
@@ -246,7 +220,6 @@ func TestCommandsEdit_ConfigPersists(t *testing.T) {
 	if def.Description != "Tweak" || def.Template != "new body" {
 		t.Errorf("config not updated: %+v", def)
 	}
-	// saveConfigToDisk must have persisted to the (temp) config.json.
 	raw, err := os.ReadFile(config.DefaultConfigPath())
 	if err != nil {
 		t.Fatalf("config not written: %v", err)
@@ -270,13 +243,13 @@ func TestCommandsEdit_RenameWorkspaceFile(t *testing.T) {
 
 	m.startCommandEdit("workspace:oldname")
 	m.textInput.SetValue("newname")
-	runWizardKeys(t, m, "enter") // 0 -> 1 (name accepted)
+	runWizardKeys(t, m, "enter")
 	m.textInput.SetValue("desc")
-	runWizardKeys(t, m, "enter")          // 1 -> 2
-	runWizardKeys(t, m, "enter", "enter") // agent, model
-	runWizardKeys(t, m, "enter", "enter") // shell, abs
+	runWizardKeys(t, m, "enter")
+	runWizardKeys(t, m, "enter", "enter")
+	runWizardKeys(t, m, "enter", "enter")
 	m.templateInput.SetValue("body")
-	runWizardKeys(t, m, "enter") // save
+	runWizardKeys(t, m, "enter")
 
 	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
 		t.Error("old file survives a rename")
@@ -289,8 +262,6 @@ func TestCommandsEdit_RenameWorkspaceFile(t *testing.T) {
 func TestCommandsEdit_DirectoryReadOnly(t *testing.T) {
 	m := commandsTestModel(t)
 	m.executeCommand("/new")
-	// A directory row cannot be produced without polluting the package cwd, so
-	// inject one directly into the cached slices and exercise the guard.
 	m.resetModal(ModalCommands)
 	m.loadCommandsList()
 	m.modalItems = append(m.modalItems, "● dir-cmd [directory]")
@@ -305,13 +276,11 @@ func TestCommandsEdit_DirectoryReadOnly(t *testing.T) {
 	if m.commandsFeedback == "" {
 		t.Error("no feedback for the refused edit")
 	}
-	runWizardKeys(t, m, "d") // delete attempt on the same row
+	runWizardKeys(t, m, "d")
 	if m.commandsFeedback == "" {
 		t.Error("no feedback for the refused delete")
 	}
 }
-
-// --- delete -------------------------------------------------------------------
 
 func TestCommandsDelete_WorkspaceFile(t *testing.T) {
 	m := commandsTestModel(t)
@@ -330,7 +299,6 @@ func TestCommandsDelete_WorkspaceFile(t *testing.T) {
 	m.modalSelectedIdx = idx
 	runWizardKeys(t, m, "d")
 
-	// The first press only arms the confirmation; the file must survive.
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("file removed by a single unconfirmed 'd': %v", err)
 	}
@@ -358,8 +326,8 @@ func TestCommandsDelete_ConfigEntry(t *testing.T) {
 
 	idx := commandRowIndexByKey(t, m, "config:deploy")
 	m.modalSelectedIdx = idx
-	runWizardKeys(t, m, "d") // arm
-	runWizardKeys(t, m, "d") // confirm
+	runWizardKeys(t, m, "d")
+	runWizardKeys(t, m, "d")
 
 	if _, ok := m.cfg.Commands["deploy"]; ok {
 		t.Error("config entry still present after delete")
@@ -372,8 +340,6 @@ func TestCommandsDelete_ConfigEntry(t *testing.T) {
 		t.Error("deleted command persisted in config.json")
 	}
 }
-
-// --- navigation ---------------------------------------------------------------
 
 func TestCommandsWizard_ESCReturnsToList(t *testing.T) {
 	m := commandsTestModel(t)
@@ -389,7 +355,6 @@ func TestCommandsWizard_ESCReturnsToList(t *testing.T) {
 	if m.commandsEditKey != "" || m.formValues != nil {
 		t.Error("wizard state not cleared")
 	}
-	// The list must be intact and the cursor back on the edited row.
 	if _, _, ok := m.lookupCommandRow("config:review"); !ok {
 		t.Fatal("list lost the row")
 	}
@@ -407,8 +372,6 @@ func TestCommandsList_NewKeyOpensWizard(t *testing.T) {
 	if m.modalMode != ModalAddCommand || m.commandsEditKey != "" {
 		t.Fatalf("n did not open the create wizard: mode=%v editKey=%q", m.modalMode, m.commandsEditKey)
 	}
-	// While the wizard is open, "n" is just a character: the modal must not
-	// re-open or reset.
 	before := m.formStepIndex
 	runWizardKeys(t, m, "n")
 	if m.formStepIndex != before || m.modalMode != ModalAddCommand {
@@ -422,13 +385,13 @@ func TestCommandsWizard_RejectsBadShellAnswer(t *testing.T) {
 	m.resetModal(ModalCommands)
 	m.startCommandCreate()
 	m.textInput.SetValue("ok")
-	runWizardKeys(t, m, "enter") // name
+	runWizardKeys(t, m, "enter")
 	m.textInput.SetValue("d")
-	runWizardKeys(t, m, "enter") // description
-	runWizardKeys(t, m, "enter") // agent
-	runWizardKeys(t, m, "enter") // model
+	runWizardKeys(t, m, "enter")
+	runWizardKeys(t, m, "enter")
+	runWizardKeys(t, m, "enter")
 	m.textInput.SetValue("maybe")
-	runWizardKeys(t, m, "enter") // allow_shell — invalid
+	runWizardKeys(t, m, "enter")
 	if m.formError == "" || m.formStepIndex != 4 {
 		t.Fatalf("bad shell answer accepted: err=%q step=%d", m.formError, m.formStepIndex)
 	}
@@ -449,12 +412,12 @@ func TestCommandsWizard_ShellCommandPersists(t *testing.T) {
 	runWizardKeys(t, m, "enter")
 	m.textInput.SetValue("runs stuff")
 	runWizardKeys(t, m, "enter")
-	runWizardKeys(t, m, "enter", "enter") // agent, model
+	runWizardKeys(t, m, "enter", "enter")
 	m.textInput.SetValue("yes")
-	runWizardKeys(t, m, "enter") // allow_shell
-	runWizardKeys(t, m, "enter") // abs files -> inherit
+	runWizardKeys(t, m, "enter")
+	runWizardKeys(t, m, "enter")
 	m.templateInput.SetValue("do it")
-	runWizardKeys(t, m, "enter") // save
+	runWizardKeys(t, m, "enter")
 
 	raw, err := os.ReadFile(filepath.Join(ws, "commands", "run.md"))
 	if err != nil {
@@ -484,17 +447,12 @@ func TestCommandsWizard_RendersAllSteps(t *testing.T) {
 				t.Errorf("template step missing hints:\n%s", out)
 			}
 		}
-		// advance so the next iteration has valid data
 		m.textInput.SetValue("x")
 		m.formValues[step] = "x"
 	}
 }
 
-// --- review hardening (C1/M1/M2/C2) -------------------------------------------
-
 func TestSerializeCommandMarkdown_FlattensNewlineValues(t *testing.T) {
-	// C1: a value carrying a newline must never become a second frontmatter
-	// line — that is how allow_shell could be smuggled in.
 	md := serializeCommandMarkdown("evil\ndescription: x\nallow_shell: true", "", "", false, nil, "body")
 	cmd, err := harness.ParseCommandMarkdown("x", "x.md", []byte(md))
 	if err != nil {
@@ -512,7 +470,6 @@ func TestSerializeCommandMarkdown_FlattensNewlineValues(t *testing.T) {
 }
 
 func TestSerializeCommandMarkdown_EscapesBackslashes(t *testing.T) {
-	// M1: backslashes must be escaped so the closing quote is not swallowed.
 	md := serializeCommandMarkdown(`he said "hi"\path`, "", "", false, nil, "body")
 	cmd, err := harness.ParseCommandMarkdown("x", "x.md", []byte(md))
 	if err != nil {
@@ -521,14 +478,12 @@ func TestSerializeCommandMarkdown_EscapesBackslashes(t *testing.T) {
 	if strings.Contains(cmd.Description, "\n") || cmd.Description == "" {
 		t.Errorf("description round-trip broke: %q", cmd.Description)
 	}
-	// The serialized line must still be a single "description: ..." entry.
 	if lines := strings.Split(md, "\n"); len(lines) < 2 || !strings.HasPrefix(lines[1], "description: ") {
 		t.Errorf("frontmatter shape broke: %q", md)
 	}
 }
 
 func TestCommandsCreate_RejectsTemplateStartingWithFrontmatter(t *testing.T) {
-	// M2: a body that opens with --- would sit next to the real block.
 	m := commandsTestModel(t)
 	m.executeCommand("/new")
 	m.resetModal(ModalCommands)
@@ -543,7 +498,6 @@ func TestCommandsCreate_RejectsTemplateStartingWithFrontmatter(t *testing.T) {
 }
 
 func TestCommandFileWithinScope(t *testing.T) {
-	// C2: deletes are gated to direct markdown children of the scope dir.
 	dir := filepath.Join(string(filepath.Separator), "ws", "commands")
 	okRow := commandRow{Path: filepath.Join(dir, "review.md")}
 	if err := commandFileWithinScope(okRow, "workspace", dir); err != nil {
@@ -578,7 +532,6 @@ func TestCommandsDelete_ArmingIsClearedByNavigation(t *testing.T) {
 	if m.commandsDeleteKey != "" {
 		t.Error("clear must disarm the pending delete")
 	}
-	// After disarming, a single press only re-arms: nothing is deleted.
 	m.modalSelectedIdx = idx
 	runWizardKeys(t, m, "d")
 	if _, ok := m.cfg.Commands["deploy"]; !ok {

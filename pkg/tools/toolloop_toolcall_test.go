@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package tools
 
 import (
@@ -16,13 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// The subagent tool loop shares the failure mode the main agent loop has: a
-// malformed tool call that gets recorded makes every later request for that
-// session fail with 400 "function.arguments must be in JSON format", and a tool
-// result recorded for a call that was dropped leaves an orphan message, which is
-// rejected too. These tests pin the two invariants for RunToolLoop.
-
-// toolCallTestRecorder captures everything the loop writes to the session.
 type toolCallTestRecorder struct {
 	mu       sync.Mutex
 	messages []providers.Message
@@ -42,7 +30,6 @@ func (r *toolCallTestRecorder) all() []providers.Message {
 	return append([]providers.Message(nil), r.messages...)
 }
 
-// toolCallScriptProvider replays a canned sequence of responses.
 type toolCallScriptProvider struct {
 	mu        sync.Mutex
 	responses []*providers.LLMResponse
@@ -62,7 +49,6 @@ func (p *toolCallScriptProvider) Chat(ctx context.Context, messages []providers.
 
 func (p *toolCallScriptProvider) GetDefaultModel() string { return "test-model" }
 
-// countingTool records how many times it was executed.
 type countingTool struct {
 	name     string
 	mu       sync.Mutex
@@ -105,9 +91,6 @@ func newToolCallLoopConfig(p providers.LLMProvider, toolList ...Tool) ToolLoopCo
 	}
 }
 
-// assertNoPoisonedToolCalls checks the raw recorded values: a stored
-// "null"/empty/non-object arguments payload or a nameless call reproduces the
-// production 400 on the next turn.
 func assertNoPoisonedToolCalls(t *testing.T, msgs []providers.Message) {
 	t.Helper()
 
@@ -142,8 +125,6 @@ func assertNoPoisonedToolCalls(t *testing.T, msgs []providers.Message) {
 	}
 }
 
-// A nameless call with nil arguments is what killed sessions in production. It
-// must not be recorded, must not run, and the model must be asked to retry.
 func TestRunToolLoop_NamelessToolCallIsNeverRecorded(t *testing.T) {
 	rec := &toolCallTestRecorder{}
 	tool := &countingTool{name: "leaky"}
@@ -183,8 +164,6 @@ func TestRunToolLoop_NamelessToolCallIsNeverRecorded(t *testing.T) {
 	}
 }
 
-// Mixed batch: the valid call must be the one executed and recorded, and its
-// result must reference the id that was recorded.
 func TestRunToolLoop_ToolResultsMatchRecordedCalls(t *testing.T) {
 	rec := &toolCallTestRecorder{}
 	tool := &countingTool{name: "good"}
@@ -222,8 +201,6 @@ func TestRunToolLoop_ToolResultsMatchRecordedCalls(t *testing.T) {
 	}
 }
 
-// Arguments that are not a JSON object must be normalised before recording,
-// otherwise the subagent session is poisoned for good.
 func TestRunToolLoop_RecordsCanonicalArguments(t *testing.T) {
 	rec := &toolCallTestRecorder{}
 	tool := &countingTool{name: "good"}

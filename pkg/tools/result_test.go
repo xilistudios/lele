@@ -124,19 +124,16 @@ func TestToolResultJSONSerialization(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Marshal to JSON
 			data, err := json.Marshal(tt.result)
 			if err != nil {
 				t.Fatalf("Failed to marshal: %v", err)
 			}
 
-			// Unmarshal back
 			var decoded ToolResult
 			if err := json.Unmarshal(data, &decoded); err != nil {
 				t.Fatalf("Failed to unmarshal: %v", err)
 			}
 
-			// Verify fields match (Err should be excluded)
 			if decoded.ForLLM != tt.result.ForLLM {
 				t.Errorf("ForLLM mismatch: got '%s', want '%s'", decoded.ForLLM, tt.result.ForLLM)
 			}
@@ -167,7 +164,6 @@ func TestToolResultWithErrors(t *testing.T) {
 		t.Errorf("Expected Err message 'underlying error', got '%s'", result.Err.Error())
 	}
 
-	// Verify Err is not serialized
 	data, marshalErr := json.Marshal(result)
 	if marshalErr != nil {
 		t.Fatalf("Failed to marshal: %v", marshalErr)
@@ -191,13 +187,11 @@ func TestToolResultJSONStructure(t *testing.T) {
 		t.Fatalf("Failed to marshal: %v", err)
 	}
 
-	// Verify JSON structure
 	var parsed map[string]interface{}
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("Failed to parse JSON: %v", err)
 	}
 
-	// Check expected keys exist
 	if _, ok := parsed["for_llm"]; !ok {
 		t.Error("Expected 'for_llm' key in JSON")
 	}
@@ -214,12 +208,10 @@ func TestToolResultJSONStructure(t *testing.T) {
 		t.Error("Expected 'async' key in JSON")
 	}
 
-	// Check that 'err' is NOT present (it should have json:"-" tag)
 	if _, ok := parsed["err"]; ok {
 		t.Error("Expected 'err' key to be excluded from JSON")
 	}
 
-	// Verify values
 	if parsed["for_llm"] != "test content" {
 		t.Errorf("Expected for_llm 'test content', got %v", parsed["for_llm"])
 	}

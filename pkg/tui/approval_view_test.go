@@ -7,8 +7,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// TestApproval_ViewRenders verifies the approval prompt appears in View()
-// output when an approval is pending.
 func TestApproval_ViewRenders(t *testing.T) {
 	m := newTestModel(t)
 
@@ -22,16 +20,13 @@ func TestApproval_ViewRenders(t *testing.T) {
 	m.showWelcome = false
 	m.reloadSessions()
 
-	// Set pending approval state
 	m.pendingApprovalID = "approval-view-1"
 	m.pendingApprovalCmd = "rm -rf /tmp/test"
 	m.pendingApprovalReason = "deny pattern"
 	m.processing = true
 
-	// Render the view
 	view := m.View()
 
-	// Check the approval text is visible
 	if !strings.Contains(view, "rm -rf /tmp/test") {
 		t.Fatalf("BUG: approval command not visible in View(). view:\n%s", view)
 	}
@@ -40,7 +35,6 @@ func TestApproval_ViewRenders(t *testing.T) {
 	}
 }
 
-// TestApproval_ViewRendersWide verifies the approval renders in a wider terminal.
 func TestApproval_ViewRendersWide(t *testing.T) {
 	m := newTestModel(t)
 
@@ -66,9 +60,6 @@ func TestApproval_ViewRendersWide(t *testing.T) {
 	}
 }
 
-// TestApproval_ViewSanitizesControlChars verifies that terminal control
-// characters and ANSI escapes in the pending approval command are stripped
-// from the rendered output (terminal-injection guard).
 func TestApproval_ViewSanitizesControlChars(t *testing.T) {
 	m := newTestModel(t)
 

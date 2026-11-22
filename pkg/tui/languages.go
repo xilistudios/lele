@@ -11,7 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// getLocalesMgr returns the model's language-pack manager, creating it lazily.
 func (m *Model) getLocalesMgr() *locales.Manager {
 	if m.localesMgr == nil {
 		m.localesMgr = locales.NewManagerWithCacheDir(locales.JoinCacheDir(config.GetLeleDir()))
@@ -19,8 +18,6 @@ func (m *Model) getLocalesMgr() *locales.Manager {
 	return m.localesMgr
 }
 
-// openRemoteLanguageBrowser fetches the GitHub catalog and lists languages
-// that are not yet installed. On network failure it shows a short error.
 func (m *Model) openRemoteLanguageBrowser() tea.Cmd {
 	m.langInstallMsg = ""
 	m.langInstallBusy = true
@@ -42,19 +39,16 @@ func (m *Model) openRemoteLanguageBrowser() tea.Cmd {
 	}
 }
 
-// langCatalogMsg carries the remote catalog (or an error).
 type langCatalogMsg struct {
 	statuses []locales.Status
 	err      error
 }
 
-// langInstallResultMsg reports the outcome of a pack download.
 type langInstallResultMsg struct {
 	code string
 	err  error
 }
 
-// handleLangCatalogMsg populates the remote language picker.
 func (m *Model) handleLangCatalogMsg(msg langCatalogMsg) tea.Cmd {
 	m.langInstallBusy = false
 	if msg.err != nil && len(msg.statuses) == 0 {
@@ -82,7 +76,6 @@ func (m *Model) handleLangCatalogMsg(msg langCatalogMsg) tea.Cmd {
 	return nil
 }
 
-// handleLangInstallSelect downloads the selected pack, then activates it.
 func (m *Model) handleLangInstallSelect() tea.Cmd {
 	if m.modalSelectedIdx >= len(m.modalLangCodes) {
 		return nil
@@ -102,15 +95,12 @@ func (m *Model) handleLangInstallSelect() tea.Cmd {
 	}
 }
 
-// handleLangInstallResult applies a finished download.
 func (m *Model) handleLangInstallResult(msg langInstallResultMsg) tea.Cmd {
 	m.langInstallBusy = false
 	if msg.err != nil {
 		m.langInstallMsg = i18n.T("tui.languages.downloadFailed") + ": " + msg.err.Error()
-		// Stay in remote browser so the user can retry.
 		return nil
 	}
-	// Register the pack and switch.
 	i18n.LoadExternalPacks()
 	i18n.RegisterExternal(msg.code, loadPackMap(m.getLocalesMgr(), msg.code))
 	m.cfg.Language = msg.code
@@ -121,7 +111,6 @@ func (m *Model) handleLangInstallResult(msg langInstallResultMsg) tea.Cmd {
 	m.modalMode = ModalLang
 	m.modalSelectedIdx = 0
 	m.loadLanguageSettings()
-	// Force a re-render of translated chrome.
 	m.lastViewportKey = ""
 	m.renderedBaseKey = ""
 	return nil
@@ -135,7 +124,6 @@ func loadPackMap(mgr *locales.Manager, code string) map[string]string {
 	return tui
 }
 
-// ensureLocalePack installs a pack if missing (used by onboarding /lang).
 func (m *Model) ensureLocalePack(code string) error {
 	code = locales.NormalizeCode(code)
 	if code == "es" || code == "en" || code == "pt" {
@@ -158,7 +146,6 @@ func (m *Model) ensureLocalePack(code string) error {
 	return nil
 }
 
-// applyLanguage switches UI language, downloading the pack first if needed.
 func (m *Model) applyLanguage(code string) error {
 	if err := m.ensureLocalePack(code); err != nil {
 		return err
@@ -170,7 +157,6 @@ func (m *Model) applyLanguage(code string) error {
 	return nil
 }
 
-// renderLangRemoteHint returns a one-line status for the remote browser header.
 func (m *Model) renderLangRemoteHint() string {
 	if m.langInstallBusy {
 		return i18n.T("tui.languages.downloading")
@@ -181,7 +167,6 @@ func (m *Model) renderLangRemoteHint() string {
 	return i18n.T("tui.languages.remoteHint")
 }
 
-// syncLangFeedback is a tiny helper used by tests and status rendering.
 func formatLangFeedback(code string, err error) string {
 	if err != nil {
 		return fmt.Sprintf("%s (%s): %v", i18n.T("tui.languages.downloadFailed"), code, err)

@@ -10,9 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// System settings groups (indices in ModalSettingsSystem list). Each group maps
-// to a sub-view rendered in ModalSettingsSystemEdit and identified by the
-// settingsSection value "sys_<idx>".
 const (
 	sysGroupSession  = 0
 	sysGroupTools    = 1
@@ -22,7 +19,6 @@ const (
 	sysGroupUpdates  = 5
 )
 
-// valueOr returns s when non-empty, otherwise fallback.
 func valueOr(s, fallback string) string {
 	if s == "" {
 		return fallback
@@ -30,9 +26,6 @@ func valueOr(s, fallback string) string {
 	return s
 }
 
-// checkMark returns "✓" when cond is true, otherwise an empty string. Used for
-// simple single-select lists (e.g. language). For toggles the full "✓/✗" pair
-// is displayed inline via load*Settings.
 func checkMark(cond bool) string {
 	if cond {
 		return "✓"
@@ -40,13 +33,10 @@ func checkMark(cond bool) string {
 	return ""
 }
 
-// sysSubViewName returns "sys_<idx>" for a system group index.
 func sysSubViewName(idx int) string {
 	return fmt.Sprintf("sys_%d", idx)
 }
 
-// sysGroupFromSection returns the group index for a settingsSection value like
-// "sys_0". Returns -1 if the section is not a valid system sub-view.
 func sysGroupFromSection(section string) int {
 	if !strings.HasPrefix(section, "sys_") {
 		return -1
@@ -58,7 +48,6 @@ func sysGroupFromSection(section string) int {
 	return idx
 }
 
-// loadSystemSettings populates the system settings group list (6 groups).
 func (m *Model) loadSystemSettings() {
 	m.modalItems = []string{
 		i18n.T("tui.settings.session"),
@@ -70,7 +59,6 @@ func (m *Model) loadSystemSettings() {
 	}
 }
 
-// loadSessionSettings populates the Session sub-view.
 func (m *Model) loadSessionSettings() {
 	ephemeralStatus := "✗"
 	if m.cfg.Session.Ephemeral {
@@ -84,7 +72,6 @@ func (m *Model) loadSessionSettings() {
 	}
 }
 
-// loadToolsSettings populates the Tools sub-view.
 func (m *Model) loadToolsSettings() {
 	denyStatus := "✗"
 	if m.cfg.Tools.Exec.EnableDenyPatterns {
@@ -97,7 +84,6 @@ func (m *Model) loadToolsSettings() {
 	}
 }
 
-// loadLogsSettings populates the Logs sub-view.
 func (m *Model) loadLogsSettings() {
 	enabledStatus := "✗"
 	if m.cfg.Logs.Enabled {
@@ -111,12 +97,8 @@ func (m *Model) loadLogsSettings() {
 	}
 }
 
-// languageDownloadMoreItem is the sentinel label for "download more languages".
 const languageDownloadMoreItem = "tui.languages.downloadMore"
 
-// buildLanguageModalItems lists installed languages (builtin + downloaded)
-// plus a trailing action to browse remote packs from GitHub.
-// Returns display labels and the parallel language codes ("" for the action).
 func buildLanguageModalItems(current string) (labels []string, codes []string) {
 	langs := i18n.InstalledLanguages()
 	for _, code := range langs {
@@ -128,8 +110,6 @@ func buildLanguageModalItems(current string) (labels []string, codes []string) {
 	return labels, codes
 }
 
-// remoteLanguageLabels builds picker rows for catalog languages that are not
-// installed yet, with an "(install)" hint.
 func remoteLanguageLabels(statuses []locales.Status) (labels []string, codes []string) {
 	installed := map[string]bool{}
 	for _, c := range i18n.InstalledLanguages() {
@@ -152,8 +132,6 @@ func remoteLanguageLabels(statuses []locales.Status) (labels []string, codes []s
 	return labels, codes
 }
 
-// loadLanguageSettings populates the Language sub-view. Current language is
-// marked with ✓. Downloaded packs appear alongside builtins.
 func (m *Model) loadLanguageSettings() {
 	m.modalItems = nil
 	m.modalLangCodes = nil
@@ -165,7 +143,6 @@ func (m *Model) loadLanguageSettings() {
 	m.modalLangCodes = append(m.modalLangCodes, "")
 }
 
-// loadGoalSettings populates the Goal sub-view.
 func (m *Model) loadGoalSettings() {
 	m.modalItems = []string{
 		fmt.Sprintf("%s: %s", i18n.T("tui.settings.goalJudgeMode"), valueOr(m.cfg.Goal.Judge.Mode, "inline")),
@@ -173,7 +150,6 @@ func (m *Model) loadGoalSettings() {
 	}
 }
 
-// loadUpdatesSettings populates the Updates sub-view.
 func (m *Model) loadUpdatesSettings() {
 	enabledStatus := "✗"
 	if m.cfg.Updates.Enabled {
@@ -185,9 +161,6 @@ func (m *Model) loadUpdatesSettings() {
 	}
 }
 
-// handleSystemSubEnter handles enter on a system sub-view item and returns a
-// tea.Cmd for any immediate actions (e.g. language change). The active sub-view
-// is determined by m.settingsSection (e.g. "sys_0" for Session).
 func (m *Model) handleSystemSubEnter() tea.Cmd {
 	switch m.settingsSection {
 	case sysSubViewName(sysGroupSession):
@@ -206,25 +179,23 @@ func (m *Model) handleSystemSubEnter() tea.Cmd {
 	return nil
 }
 
-// handleSessionEnter handles enter on Session settings items.
 func (m *Model) handleSessionEnter() tea.Cmd {
 	switch m.modalSelectedIdx {
-	case 0: // Ephemeral toggle
+	case 0:
 		m.cfg.Session.Ephemeral = !m.cfg.Session.Ephemeral
 		m.saveConfigToDisk()
 		m.loadSessionSettings()
-	case 1: // Ephemeral threshold
+	case 1:
 		m.settingsEditField = "ephemeralThreshold"
 		m.textInput.SetValue(strconv.Itoa(m.cfg.Session.EphemeralThreshold))
 		m.textInput.Focus()
-	case 2: // Compaction percent
+	case 2:
 		m.settingsEditField = "compactionPercent"
 		m.textInput.SetValue(strconv.Itoa(m.cfg.Session.CompactionThresholdPercent))
 		m.textInput.Focus()
-	case 3: // Compaction model — selector over all configured providers' models
+	case 3:
 		labels, values := m.modelSelectorOptions(m.cfg.Session.CompactionModel)
 		if len(values) == 0 {
-			// No providers configured — fall back to text input
 			m.settingsEditField = "compactionModel"
 			m.textInput.SetValue(m.cfg.Session.CompactionModel)
 			m.textInput.Focus()
@@ -235,18 +206,17 @@ func (m *Model) handleSessionEnter() tea.Cmd {
 	return nil
 }
 
-// handleToolsEnter handles enter on Tools settings items.
 func (m *Model) handleToolsEnter() tea.Cmd {
 	switch m.modalSelectedIdx {
-	case 0: // Exec timeout
+	case 0:
 		m.settingsEditField = "execTimeout"
 		m.textInput.SetValue(strconv.Itoa(m.cfg.Tools.Exec.TimeoutSeconds))
 		m.textInput.Focus()
-	case 1: // Deny patterns toggle
+	case 1:
 		m.cfg.Tools.Exec.EnableDenyPatterns = !m.cfg.Tools.Exec.EnableDenyPatterns
 		m.saveConfigToDisk()
 		m.loadToolsSettings()
-	case 2: // Custom deny patterns
+	case 2:
 		m.settingsEditField = "customDenyPatterns"
 		m.textInput.SetValue(strings.Join(m.cfg.Tools.Exec.CustomDenyPatterns, ", "))
 		m.textInput.Focus()
@@ -254,22 +224,21 @@ func (m *Model) handleToolsEnter() tea.Cmd {
 	return nil
 }
 
-// handleLogsEnter handles enter on Logs settings items.
 func (m *Model) handleLogsEnter() tea.Cmd {
 	switch m.modalSelectedIdx {
-	case 0: // Enabled toggle
+	case 0:
 		m.cfg.Logs.Enabled = !m.cfg.Logs.Enabled
 		m.saveConfigToDisk()
 		m.loadLogsSettings()
-	case 1: // Path
+	case 1:
 		m.settingsEditField = "logsPath"
 		m.textInput.SetValue(m.cfg.Logs.Path)
 		m.textInput.Focus()
-	case 2: // Max days
+	case 2:
 		m.settingsEditField = "logsMaxDays"
 		m.textInput.SetValue(strconv.Itoa(m.cfg.Logs.MaxDays))
 		m.textInput.Focus()
-	case 3: // Rotation — selector: daily / weekly
+	case 3:
 		labels := []string{"daily", "weekly"}
 		values := []string{"daily", "weekly"}
 		m.startSettingsSelector("logsRotation", m.cfg.Logs.Rotation, labels, values)
@@ -277,9 +246,6 @@ func (m *Model) handleLogsEnter() tea.Cmd {
 	return nil
 }
 
-// handleLanguageEnter handles enter on a language selection. It persists the
-// change and switches the i18n locale immediately. Selecting "download more"
-// opens the remote language browser.
 func (m *Model) handleLanguageEnter() tea.Cmd {
 	if m.modalSelectedIdx >= len(m.modalLangCodes) {
 		return nil
@@ -295,14 +261,13 @@ func (m *Model) handleLanguageEnter() tea.Cmd {
 	return nil
 }
 
-// handleGoalEnter handles enter on Goal settings items.
 func (m *Model) handleGoalEnter() tea.Cmd {
 	switch m.modalSelectedIdx {
-	case 0: // Judge mode — selector: inline / subagent
+	case 0:
 		labels := []string{"inline", "subagent"}
 		values := []string{"inline", "subagent"}
 		m.startSettingsSelector("goalJudgeMode", m.cfg.Goal.Judge.Mode, labels, values)
-	case 1: // Judge agent — selector from configured agents
+	case 1:
 		labels := []string{"(default)"}
 		values := []string{""}
 		for _, a := range m.cfg.Agents.List {
@@ -318,14 +283,13 @@ func (m *Model) handleGoalEnter() tea.Cmd {
 	return nil
 }
 
-// handleUpdatesEnter handles enter on Updates settings items.
 func (m *Model) handleUpdatesEnter() tea.Cmd {
 	switch m.modalSelectedIdx {
-	case 0: // Enabled toggle
+	case 0:
 		m.cfg.Updates.Enabled = !m.cfg.Updates.Enabled
 		m.saveConfigToDisk()
 		m.loadUpdatesSettings()
-	case 1: // Channel — selector: stable
+	case 1:
 		labels := []string{"stable"}
 		values := []string{"stable"}
 		m.startSettingsSelector("updatesChannel", m.cfg.Updates.Channel, labels, values)
@@ -333,9 +297,6 @@ func (m *Model) handleUpdatesEnter() tea.Cmd {
 	return nil
 }
 
-// handleSystemSettingsInput saves an edited system setting from the text input.
-// On invalid input it sets m.formError and leaves edit mode active so the user
-// can correct the value. Otherwise it persists and reloads the sub-view.
 func (m *Model) handleSystemSettingsInput(value string) {
 	value = strings.TrimSpace(value)
 
@@ -401,7 +362,6 @@ func (m *Model) handleSystemSettingsInput(value string) {
 	m.reloadSystemSubView()
 }
 
-// reloadSystemSubView reloads the current system sub-view after a change.
 func (m *Model) reloadSystemSubView() {
 	switch m.settingsSection {
 	case sysSubViewName(sysGroupSession):

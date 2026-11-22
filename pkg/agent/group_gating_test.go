@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Tests for B10: the groups feature must be gated from a single source of
-// truth (config.Config.GroupsFeatureEnabled) at three enforcement points:
-// tool registration, the /group command, and GroupManager.Start.
-// License: MIT
-
 package agent
 
 import (
@@ -17,7 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/group"
 )
 
-// gatingCfg builds a minimal config with the groups flag set as requested.
 func gatingCfg(tmpDir string, groupsEnabled bool) *config.Config {
 	return &config.Config{
 		Agents: config.AgentsConfig{
@@ -31,10 +24,6 @@ func gatingCfg(tmpDir string, groupsEnabled bool) *config.Config {
 		Groups: config.GroupsConfig{Enabled: groupsEnabled},
 	}
 }
-
-// ---------------------------------------------------------------------------
-// single source of truth
-// ---------------------------------------------------------------------------
 
 func TestGroupsFeatureEnabled_ConfigHelper(t *testing.T) {
 	var nilCfg *config.Config
@@ -68,10 +57,6 @@ func TestAgentLoop_GroupsEnabled(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// (a) registration: group_chat must not be in any toolset when off
-// ---------------------------------------------------------------------------
-
 func TestGroupChatTool_RegisteredOnlyWhenEnabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
@@ -86,7 +71,6 @@ func TestGroupChatTool_RegisteredOnlyWhenEnabled(t *testing.T) {
 			t.Errorf("groups OFF: agent %q must not have group_chat registered", id)
 		}
 	}
-	// The subagent toolset is a clone of the parent's — it must be clean too.
 	if sm, ok := off.GetSubagents()["main"]; ok {
 		if _, exists := sm.GetToolRegistry().Get("group_chat"); exists {
 			t.Error("groups OFF: subagent toolset must not include group_chat")
@@ -103,9 +87,6 @@ func TestGroupChatTool_RegisteredOnlyWhenEnabled(t *testing.T) {
 	}
 }
 
-// TestSyncGroupChatTool covers the reload path directly: the helper must add
-// the tool when the flag flips on and remove it when it flips off, without
-// touching unrelated tools.
 func TestSyncGroupChatTool(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
@@ -121,13 +102,11 @@ func TestSyncGroupChatTool(t *testing.T) {
 		return group.AgentContext{AgentID: "main"}, true
 	}, nil, nil)
 
-	// ON → registered.
 	syncGroupChatTool(agent, cfg, registry, "main", gm)
 	if _, exists := agent.Tools.Get("group_chat"); !exists {
 		t.Fatal("groups ON: syncGroupChatTool should register group_chat")
 	}
 
-	// OFF → removed, other tools untouched.
 	cfgOff := gatingCfg(tmpDir, false)
 	syncGroupChatTool(agent, cfgOff, registry, "main", gm)
 	if _, exists := agent.Tools.Get("group_chat"); exists {
@@ -137,17 +116,12 @@ func TestSyncGroupChatTool(t *testing.T) {
 		t.Error("syncGroupChatTool must not remove unrelated tools")
 	}
 
-	// Nil manager (no group wiring at all) → stays removed.
 	agent.Tools.Register(&llmRunnerMockCustomTool{name: "group_chat"})
 	syncGroupChatTool(agent, cfg, registry, "main", nil)
 	if _, exists := agent.Tools.Get("group_chat"); exists {
 		t.Error("nil group manager must not leave group_chat registered")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// (c) GroupManager.Start rejects when the loop wires the gate off
-// ---------------------------------------------------------------------------
 
 func TestLoopGroupManager_StartRejectedWhenDisabled(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -188,10 +162,6 @@ func TestLoopGroupManager_StartAllowedWhenEnabled(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// (b) /group command: clear notice, no state, nothing started
-// ---------------------------------------------------------------------------
-
 func TestGroupCommand_DisabledFeature(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
@@ -227,7 +197,6 @@ func TestGroupCommand_DisabledFeature(t *testing.T) {
 		}
 	}
 
-	// No state was created by any of those calls (notably the /group start one).
 	if groups := al.GroupManager().List(); len(groups) != 0 {
 		t.Errorf("disabled /group must not start anything, got %d group(s)", len(groups))
 	}

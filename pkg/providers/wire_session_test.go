@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package providers
 
 import (
@@ -25,12 +20,6 @@ func TestWireSessionID(t *testing.T) {
 	if got := WireSessionID("native:951a0f6e:chat:4"); got == id {
 		t.Fatal("WireSessionID() same value for different session keys")
 	}
-	// FIX-C: empty/blank keys are NOT "no id" — they map to the shared
-	// unkeyed bucket (now the named symbol UnkeyedSessionBucket, NIT-3: a
-	// reader who sees e3b0c442… in a log can grep it), so unkeyed egresses
-	// (cron, standalone tool loops) still satisfy required providers instead
-	// of aborting. The literal below pins the symbol itself: a change of the
-	// empty-key scheme fails here.
 	const unkeyedBucket = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 	if UnkeyedSessionBucket != unkeyedBucket {
 		t.Fatalf("UnkeyedSessionBucket = %q, want the sha256-of-empty literal %q", UnkeyedSessionBucket, unkeyedBucket)
@@ -44,8 +33,6 @@ func TestWireSessionID(t *testing.T) {
 	if !hex64.MatchString(UnkeyedSessionBucket) {
 		t.Fatal("test setup: the unkeyed bucket must have the same 64-hex shape")
 	}
-	// Known vectors: sha256("abc") and sha256("") — the second one pins the
-	// unkeyed bucket itself so a change of the empty-key scheme fails here.
 	if got := WireSessionID("abc"); got != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" {
 		t.Fatalf("WireSessionID(%q) = %q, want known sha256 vector", "abc", got)
 	}
@@ -70,8 +57,6 @@ func TestWithWireSessionID(t *testing.T) {
 	})
 
 	t.Run("empty key still stamps the unkeyed bucket", func(t *testing.T) {
-		// FIX-C: presence of the option = "this egress remembered to stamp";
-		// there is no skip-on-empty path anymore.
 		in := map[string]interface{}{"max_tokens": 1234}
 		out := WithWireSessionID(in, "")
 		got, ok := out[protocoltypes.OptWireSessionID]

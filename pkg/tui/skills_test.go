@@ -174,7 +174,6 @@ func TestSortSkillsByName_CaseInsensitive(t *testing.T) {
 }
 
 func TestSkillsFeedbackState(t *testing.T) {
-	// Test that skills feedback is preserved in the model
 	m := Model{
 		skillsFeedback: "Installed 2 skill(s): weather, github",
 	}
@@ -185,14 +184,12 @@ func TestSkillsFeedbackState(t *testing.T) {
 }
 
 func TestSkillsSelectedMap(t *testing.T) {
-	// Test multi-select state management
 	selectedMap := map[int]bool{
 		0: true,
 		1: false,
 		2: true,
 	}
 
-	// Count selected
 	selected := 0
 	for _, v := range selectedMap {
 		if v {
@@ -203,13 +200,11 @@ func TestSkillsSelectedMap(t *testing.T) {
 		t.Errorf("expected 2 selected, got %d", selected)
 	}
 
-	// Toggle
 	selectedMap[1] = !selectedMap[1]
 	if !selectedMap[1] {
 		t.Error("expected index 1 to be toggled to true")
 	}
 
-	// Toggle back
 	selectedMap[1] = !selectedMap[1]
 	if selectedMap[1] {
 		t.Error("expected index 1 to be toggled back to false")

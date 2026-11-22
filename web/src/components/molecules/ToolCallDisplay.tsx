@@ -14,7 +14,6 @@ const FILE_OPS = new Set([
   'list_dir',
 ])
 
-// Map tool names to icon configs only (labels come from i18n)
 const TOOL_ICONS: Record<string, IconConfig> = {
   read_file: {
     icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8',
@@ -116,17 +115,14 @@ const TOOL_ICONS: Record<string, IconConfig> = {
     icon: 'M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z',
     color: 'text-state-success',
   },
-  // Custom slash command applied by the backend (pkg/harness) — bolt.
   command: {
     icon: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z',
     color: 'text-brand-amarillo',
   },
-  // /goal autonomous-loop review — target.
   goal: {
     icon: 'M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z M12 6v6l4 2',
     color: 'text-accent-primary',
   },
-  // Synthetic system notice ([System: <sender>] …) rendered as a tool card.
   system_notice: {
     icon: 'M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z M12 7v6 M12 16h.01',
     color: 'text-state-info',
@@ -191,20 +187,16 @@ function getToolLabel(toolName: string | undefined, t: (key: string) => string):
 function parseArgsSummary(toolName?: string, args?: string): string {
   if (!args) return ''
 
-  // args format is "toolName {json}" or just "{json}" or raw text
   const lines = args.split('\n')
   const firstLine = lines[0].trim()
 
-  // Extract JSON portion: find first '{' and try to parse from there
   const jsonStart = firstLine.indexOf('{')
   if (jsonStart !== -1) {
-    // Try to find the matching closing brace for robust parsing
     const jsonStr = firstLine.slice(jsonStart)
     let parsed: Record<string, unknown> | null = null
     try {
       parsed = JSON.parse(jsonStr)
     } catch {
-      // JSON might be truncated in display; try to extract key fields via regex
       const idMatch = jsonStr.match(/"id"\s*:\s*"([^"]+)"/)
       const secondsMatch = jsonStr.match(/"seconds"\s*:\s*(\d+)/)
       const pathMatch = jsonStr.match(/"path"\s*:\s*"([^"]+)"/)
@@ -223,38 +215,30 @@ function parseArgsSummary(toolName?: string, args?: string): string {
     }
 
     if (parsed) {
-      // File operations
       if (parsed.path) return parsed.path as string
       if (parsed.url) return parsed.url as string
 
-      // Exec commands
       if (parsed.command) {
         const cmd = parsed.command as string
         return cmd.length > 60 ? `${cmd.slice(0, 57)}...` : cmd
       }
 
-      // Web search
       if (parsed.query) return parsed.query as string
 
-      // Messaging / cron
       if (parsed.message) {
         const msg = parsed.message as string
         return msg.length > 50 ? `${msg.slice(0, 47)}...` : msg
       }
 
-      // Spawn / subagent tasks
       if (parsed.task) {
         const task = parsed.task as string
         return task.length > 50 ? `${task.slice(0, 47)}...` : task
       }
 
-      // Background exec operations
       if (parsed.id) return `#${parsed.id}`
 
-      // Sleep
       if (parsed.seconds !== undefined) return `${parsed.seconds}s`
 
-      // Generic: show first meaningful string value
       const values = Object.values(parsed)
       for (const v of values) {
         if (typeof v === 'string' && v.length > 0 && v.length <= 60) return v
@@ -263,15 +247,12 @@ function parseArgsSummary(toolName?: string, args?: string): string {
     }
   }
 
-  // Fallback: if the first line has no JSON or parsing failed,
-  // strip the tool name prefix if present and show the rest
   const toolPrefix = toolName ? firstLine.indexOf(toolName) : -1
   if (toolPrefix === 0 && toolName) {
     const rest = firstLine.slice(toolName.length).trim()
     if (rest && rest.length <= 60) return rest
   }
 
-  // Last resort: truncate the line
   if (firstLine.length > 50) return `${firstLine.slice(0, 47)}...`
   return firstLine
 }
@@ -285,12 +266,6 @@ type CommandArgs = {
   description: string
 }
 
-/**
- * Parse the `arguments` object written by the command.applied handler
- * (hooks/event-handlers/command.ts) out of the "toolName {json}" toolArgs
- * string. Returns null for anything that is not a well-formed command payload,
- * so the caller can fall back to the generic rendering.
- */
 export function parseCommandArgs(args?: string): CommandArgs | null {
   if (!args) return null
 
@@ -320,7 +295,6 @@ export function parseCommandArgs(args?: string): CommandArgs | null {
   }
 }
 
-/** Small pill used for the agent/model/source badges on the command card. */
 function ToolBadge({ text }: { text: string }) {
   return (
     <span className="inline-flex flex-shrink-0 items-center rounded-md border border-border bg-background-tertiary px-1.5 py-0.5 text-2xs font-medium text-text-tertiary">
@@ -356,10 +330,6 @@ export function ToolCallDisplay({
   const argsSummary = parseArgsSummary(toolName, toolArgs)
   const isFileOp = toolName ? FILE_OPS.has(toolName.toLowerCase()) : false
 
-  // Custom slash command (backend pkg/harness): "/name args" up front plus small
-  // badges for the per-turn agent/model overrides. Rendered as a static card —
-  // the command already expanded the prompt, so there is nothing to expand and
-  // no result payload.
   const commandArgs = toolName?.toLowerCase() === 'command' ? parseCommandArgs(toolArgs) : null
   if (commandArgs) {
     const summary = commandArgs.args
@@ -369,7 +339,6 @@ export function ToolCallDisplay({
       <div className="group" data-testid="command-applied-card">
         <div className="rounded-lg border border-border bg-background-secondary/50 overflow-hidden">
           <div className="flex w-full items-center gap-2 px-3 py-1.5 text-left">
-            {/* Tool icon */}
             <div className={`flex-shrink-0 rounded-md p-1 ${iconConfig.color}`}>
               <svg
                 className="h-4 w-4"
@@ -393,7 +362,6 @@ export function ToolCallDisplay({
 
             <span className="text-xs text-text-secondary flex-shrink-0">{label}</span>
 
-            {/* "/name args" — the command itself is the interesting part */}
             <span
               className="min-w-0 truncate font-mono text-xs font-semibold text-text-primary"
               title={commandArgs.description || summary}
@@ -401,7 +369,6 @@ export function ToolCallDisplay({
               {summary}
             </span>
 
-            {/* Per-turn overrides (only when set) */}
             {commandArgs.agent ? <ToolBadge text={commandArgs.agent} /> : null}
             {commandArgs.model ? <ToolBadge text={commandArgs.model} /> : null}
             {commandArgs.source ? <ToolBadge text={commandArgs.source} /> : null}
@@ -411,13 +378,11 @@ export function ToolCallDisplay({
     )
   }
 
-  // For file ops: show path only, no expansion
   if (isFileOp) {
     return (
       <div className="group">
         <div className="rounded-lg border border-border bg-background-secondary/50 overflow-hidden">
           <div className="flex w-full items-center gap-2 px-3 py-1.5 text-left">
-            {/* Tool icon */}
             <div className={`flex-shrink-0 rounded-md p-1 ${iconConfig.color}`}>
               <svg
                 className="h-4 w-4"
@@ -439,7 +404,6 @@ export function ToolCallDisplay({
               </svg>
             </div>
 
-            {/* Label + path summary */}
             {argsSummary ? (
               <span className="min-w-0 flex items-center gap-1 text-xs">
                 <span className="text-text-secondary">{label}</span>
@@ -449,7 +413,6 @@ export function ToolCallDisplay({
               <span className="text-sm text-text-secondary">{label}</span>
             )}
 
-            {/* Error badge */}
             {toolStatus === 'error' && (
               <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs font-medium bg-state-error/10 text-state-error border border-state-error/30 ml-auto">
                 {t('toolCalls.error')}
@@ -461,13 +424,10 @@ export function ToolCallDisplay({
     )
   }
 
-  // For non-file ops, show result when expanded
   const showResult = toolResult
 
   return (
     <div className="group">
-      {/* Header — same style as thinking block. Expand and subagent nav are
-          sibling controls so no <button> is nested inside another. */}
       <div
         className={`rounded-lg border border-border bg-background-secondary/50 overflow-hidden transition-colors ${
           expanded ? '' : 'hover:bg-background-secondary'
@@ -480,7 +440,6 @@ export function ToolCallDisplay({
             aria-expanded={expanded}
             onClick={onToggleExpand}
           >
-            {/* Tool icon */}
             <div className={`flex-shrink-0 rounded-md p-1 ${iconConfig.color}`}>
               <svg
                 className="h-4 w-4"
@@ -502,24 +461,20 @@ export function ToolCallDisplay({
               </svg>
             </div>
 
-            {/* Label */}
             <span className="text-sm text-text-secondary">{label}</span>
 
-            {/* Summary: command for exec, path for files, etc. */}
             {argsSummary && (
               <span className="min-w-0 truncate text-xs text-text-tertiary font-mono">
                 {argsSummary}
               </span>
             )}
 
-            {/* Error badge only */}
             {toolStatus === 'error' && (
               <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs font-medium bg-state-error/10 text-state-error border border-state-error/30">
                 {t('toolCalls.error')}
               </span>
             )}
 
-            {/* Chevron */}
             <svg
               className={`h-3 w-3 flex-shrink-0 text-text-tertiary transition-transform ml-auto ${
                 expanded ? 'rotate-90' : ''
@@ -534,7 +489,6 @@ export function ToolCallDisplay({
             </svg>
           </button>
 
-          {/* Subagent nav — sibling of the expand control, never nested */}
           {subagentSessionKey && toolStatus !== 'executing' && onNavigateToSession && (
             <button
               type="button"
@@ -557,7 +511,6 @@ export function ToolCallDisplay({
           )}
         </div>
 
-        {/* Expanded: result only for non-file ops */}
         {expanded && showResult && (
           <div className="border-t border-border bg-background-primary/30">
             <pre className="w-full max-w-full text-xs text-text-tertiary font-mono whitespace-pre-wrap overflow-x-auto max-h-[300px] px-4 py-3 leading-5">

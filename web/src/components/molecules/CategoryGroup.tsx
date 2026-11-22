@@ -1,28 +1,12 @@
 import { type ReactNode, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-/**
- * Collapsible category group (spec §7.4) — header of each tool category in the
- * Tools tab.
- *
- * Uses the same open/close mechanism as `NamedItemCard` (a CSS grid whose row
- * template animates between `0fr` and `1fr`), so collapsing stays consistent
- * with the rest of the settings UI and needs no measured heights.
- */
-
 type Props = {
   title: string
   activeCount: number
   totalCount: number
-  /** Default true: users need the whole state at a glance (§4.6.4). */
   defaultOpen?: boolean
-  /** Force the open state (search auto-expands every group with results). */
   open?: boolean
-  /**
-   * Counter text override. Defaults to the i18n unit
-   * `settings.agentPage.categoryCount` ("{{active}} de {{total}}"); pass it
-   * when the caller already composed the label.
-   */
   countLabel?: string
   children: ReactNode
   icon?: ReactNode
@@ -48,8 +32,6 @@ export function CategoryGroup({
   const panelId = `category-panel-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
   const [collapsed, setCollapsed] = useState(!defaultOpen)
 
-  // `open` (when provided) wins over local state; it is expressed inverted so
-  // the internal state keeps meaning "collapsed".
   const isExpanded = open !== undefined ? open : !collapsed
 
   const counterText =
@@ -77,7 +59,6 @@ export function CategoryGroup({
           </span>
         ) : null}
         <span className={TITLE_CLS}>{title}</span>
-        {/* Spec §7.4: the counter is shown wrapped in parentheses. */}
         <span className={`${COUNT_CLS} ml-auto whitespace-nowrap`}>({counterText})</span>
         <svg
           aria-hidden="true"

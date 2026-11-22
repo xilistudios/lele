@@ -11,23 +11,11 @@ import { SettingsField } from '../../molecules/SettingsField'
 import { SettingsSection } from '../../molecules/SettingsSection'
 import { TextInput } from '../../molecules/TextInput'
 
-/**
- * `tab=general` — identity fields (spec §4.3).
- *
- * Writes go straight to the shared draft owned by `SettingsPage`, under
- * `agents.list.{index}.…`; the global footer is what persists them. `id` is
- * read-only on purpose (§4.3): renaming an agent means editing config.json by
- * hand, so the UI only offers "select" and "copy".
- */
-
-/** How long the copy button shows its "Copied" confirmation. */
 const COPIED_FEEDBACK_MS = 1500
 
 type Props = {
   agent: EditableAgentConfig
-  /** Position in `agents.list` — dirty/validation paths are positional. */
   index: number
-  /** The whole list, only to warn about several defaults (§4.3). */
   agents: EditableAgentConfig[]
 }
 
@@ -37,7 +25,6 @@ export function AgentGeneralSection({ agent, index, agents }: Props) {
   const [copied, setCopied] = useState(false)
   const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Clear the "Copied" feedback timer if the component unmounts mid-toast.
   useEffect(() => {
     return () => {
       if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
@@ -51,10 +38,7 @@ export function AgentGeneralSection({ agent, index, agents }: Props) {
   const copyId = async () => {
     try {
       await navigator.clipboard.writeText(agent.id)
-    } catch {
-      // Clipboard is unavailable over plain http / without focus. The field is
-      // `select-all`, so the user can still copy by hand: never throw here.
-    }
+    } catch {}
     setCopied(true)
     if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
     copiedTimeoutRef.current = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS)
@@ -64,7 +48,6 @@ export function AgentGeneralSection({ agent, index, agents }: Props) {
 
   return (
     <SettingsSection title={t('settings.agentPage.tab.general')}>
-      {/* ID — read-only, select-all, copy button */}
       <SettingsField
         label="ID"
         path={path('id')}
@@ -134,8 +117,6 @@ export function AgentGeneralSection({ agent, index, agents }: Props) {
           value={agent.default ?? false}
           onChange={(value) => updateField(path('default'), value || undefined)}
         />
-        {/* The backend resolves duplicates by order, so the UI only warns
-            instead of silently flipping the others off (§4.3). */}
         {moreThanOneDefault && (
           <p className="mt-1 text-xs text-state-warning" data-testid="multiple-defaults-warning">
             {t('settings.agentPage.multipleDefaults')}
@@ -156,7 +137,6 @@ export function AgentGeneralSection({ agent, index, agents }: Props) {
           onChange={(value) => updateField(path('workspace'), value || undefined)}
           placeholder="~/.lele/workspace"
         />
-        {/* Presentation only: the real expansion happens server-side. */}
         {agent.workspace?.includes('~') && (
           <p data-testid="workspace-preview" className="mt-1 font-mono text-xs text-text-muted">
             {expandHomeDisplay(agent.workspace)}

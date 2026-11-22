@@ -1,18 +1,7 @@
-/**
- * Tests for the page-visibility primitives used by the interval pollers.
- *
- * jsdom does not implement visibility changes: `document.visibilityState` is a
- * getter on `Document.prototype` and no `visibilitychange` event is ever
- * dispatched. Both are therefore simulated here — shadowing the getter with an
- * own data property (same trick as `services/ws/client.test.ts`) and firing the
- * event by hand — so the hook is exercised exactly the way a browser drives it.
- */
-
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { isPageVisible, useOnPageVisible, usePageVisible } from './usePageVisible'
 
-/** Set `document.visibilityState` and fire the event the browser would fire. */
 function setVisibility(state: DocumentVisibilityState) {
   Object.defineProperty(document, 'visibilityState', { value: state, configurable: true })
   document.dispatchEvent(new window.Event('visibilitychange'))
@@ -20,7 +9,6 @@ function setVisibility(state: DocumentVisibilityState) {
 
 afterEach(() => {
   cleanup()
-  // Reset the shadowed getter so a hidden state never leaks into another test.
   Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
 })
 
@@ -37,7 +25,6 @@ describe('isPageVisible', () => {
 
   test('is SSR safe: no document means "visible" instead of throwing', () => {
     const doc = globalThis.document
-    // Simulating the server: the global is simply absent.
     Reflect.deleteProperty(globalThis, 'document')
     try {
       expect(isPageVisible()).toBe(true)
@@ -108,13 +95,10 @@ describe('usePageVisible', () => {
 
       const visibilityListeners = added.filter((entry) => entry.type === 'visibilitychange')
       expect(visibilityListeners.length).toBe(1)
-      // Passive: the listener never calls preventDefault, and passive listeners
-      // cannot block the browser's own visibility handling.
       expect(visibilityListeners[0].options).toEqual({ passive: true })
 
       unmount()
 
-      // Identical handler reference — a fresh closure would leak the listener.
       expect(removed).toContain(visibilityListeners[0].handler)
     } finally {
       document.addEventListener = originalAdd
@@ -135,7 +119,6 @@ describe('useOnPageVisible', () => {
     act(() => setVisibility('visible'))
     expect(onVisible.mock.calls.length).toBe(1)
 
-    // Already visible: another event is not a transition and must not refresh.
     act(() => document.dispatchEvent(new window.Event('visibilitychange')))
     expect(onVisible.mock.calls.length).toBe(1)
 
@@ -166,7 +149,6 @@ describe('useOnPageVisible', () => {
     act(() => setVisibility('hidden'))
     act(() => setVisibility('visible'))
 
-    // The callback of the last render ran, so pollers see fresh state/props.
     expect(seen).toEqual([2])
   })
 })

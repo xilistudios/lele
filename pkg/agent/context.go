@@ -21,18 +21,11 @@ import (
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
-// subagentInfo holds the ID and description of an available subagent for
-// inclusion in the system prompt.
 type subagentInfo struct {
 	ID          string
 	Description string
 }
 
-// mcpDiscoveryPerms mirrors which of the two lazy MCP discovery tools the
-// agent's allowlist keeps. The "## MCP Servers" prompt section must only
-// describe tools the model can actually call: telling an agent that allows
-// only list_mcp_tools to "then call get_mcp_tool" sends it after a tool that
-// does not exist for it.
 type mcpDiscoveryPerms struct {
 	List bool
 	Get  bool
@@ -45,68 +38,26 @@ type ContextBuilder struct {
 	tools              *tools.ToolRegistry
 	availableSubagents []subagentInfo
 
-	// mcpServers lists the MCP servers configured for this agent, rendered as
-	// the "## MCP Servers" prompt section (name + description only — never
-	// tool schemas). Guarded by initialMu: the setter writes it under the
-	// same lock that clears the cached initial context, which keeps readers
-	// in GetInitialContext race-free.
 	mcpServers []tools.MCPServerInfo
 
-	// mcpDiscovery records which of the two lazy discovery tools the agent's
-	// allowlist actually keeps, so the "## MCP Servers" section documents only
-	// tools the model can call. Guarded by initialMu for the same reason as
-	// mcpServers: the setter clears the cached prompt, which is what makes the
-	// read in GetInitialContext race-free.
 	mcpDiscovery mcpDiscoveryPerms
 
-	// harnessContext caches the harness module context (working directory
-	// listing + AGENTS.md + skills directories). It depends only on the
-	// process working directory, so it is identical for every session and is
-	// cached once globally instead of once per session. Invalidated by
-	// ResetMemoryContext (on /new) so a fresh conversation picks up edits.
 	harnessContext      string
 	harnessContextValid bool
 	harnessMu           sync.RWMutex
 
-	// initialContext caches the result of GetInitialContext() (identity +
-	// bootstrap files + skills summary). It is constant for the lifetime of
-	// the process, so this avoids re-reading files on every token estimation.
 	initialContext string
 	initialMu      sync.RWMutex
 
-	// visionSupported indicates whether the current model supports vision.
-	// When false, the read_image tool is hidden from the system prompt's
-	// tools section. Defaults to false (safe default).
 	visionSupported bool
 
-	// videoSupported indicates whether the current model supports native
-	// video input. read_video is hidden from the system prompt's tools
-	// section only when this AND visionSupported are false (native mode needs
-	// video; the keyframes fallback needs vision). Defaults to false (safe default).
 	videoSupported bool
 
-	// skillsFilter is the per-agent allowlist of skill names (from
-	// AgentConfig.Skills) applied to the <skills> block of the system prompt.
-	// nil/empty = all enabled skills. Written once at construction via
-	// SetSkillsFilter and read by GetInitialContext, so it is guarded by
-	// initialMu: the setter takes the write lock precisely because it clears
-	// the cached prompt, which makes the read under the same lock safe.
 	skillsFilter []string
 
-	// folderResolver maps a session key to the folder the user selected for
-	// that session (WebUI "per-session folder context"). When set, the
-	// resolved folder's path + first-level listing are appended to the
-	// session's system prompt. Guarded by folderMu because the loop wires it
-	// after construction and prompt builders read it concurrently.
 	folderResolver func(sessionKey string) string
 	folderMu       sync.RWMutex
 
-	// subagentLedgerResolver maps a session key to the rendered "## Subagent
-	// Tasks" digest for that session. When set, the digest is appended to the
-	// session's system prompt on every turn, which is what makes the subagent
-	// ledger survive context compaction: the system prompt is rebuilt per turn
-	// and is never persisted nor summarized. Guarded by ledgerMu for the same
-	// reason as folderMu — the loop wires it after construction.
 	subagentLedgerResolver func(sessionKey string) string
 	ledgerMu               sync.RWMutex
 }
@@ -129,16 +80,10 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 	}
 }
 
-// SetToolsRegistry sets the tools registry for dynamic tool summary generation.
 func (cb *ContextBuilder) SetToolsRegistry(registry *tools.ToolRegistry) {
 	cb.tools = registry
 }
 
-// SetVisionSupported sets whether the current model supports vision.
-// When false, the read_image tool is hidden from the system prompt's
-// tools section. Invalidates cached prompts so the next turn rebuilds.
-// The flag read/write and the cache invalidation are done under initialMu,
-// the same mutex buildToolsSection reads the flag under (via GetInitialContext).
 func (cb *ContextBuilder) SetVisionSupported(v bool) {
 	cb.initialMu.Lock()
 	if cb.visionSupported == v {
@@ -146,19 +91,10 @@ func (cb *ContextBuilder) SetVisionSupported(v bool) {
 		return
 	}
 	cb.visionSupported = v
-	// Invalidate caches so the tools section is rebuilt. The invalidation is
-	// a plain field write — no other method taking initialMu is called here,
-	// so this stays deadlock-free.
 	cb.initialContext = ""
 	cb.initialMu.Unlock()
 }
 
-// SetVideoSupported sets whether the current model supports native video.
-// read_video is hidden from the system prompt's tools section only when this
-// AND the vision flag are false (frames mode fallback keeps it visible).
-// Invalidates cached prompts so the next turn rebuilds.
-// Like SetVisionSupported, the flag and the cache are both guarded by
-// initialMu to avoid a data race with buildToolsSection readers.
 func (cb *ContextBuilder) SetVideoSupported(v bool) {
 	cb.initialMu.Lock()
 	if cb.videoSupported == v {
@@ -166,29 +102,17 @@ func (cb *ContextBuilder) SetVideoSupported(v bool) {
 		return
 	}
 	cb.videoSupported = v
-	// Invalidate caches so the tools section is rebuilt. Plain field write
-	// under the already-held lock — no re-entrant acquisition.
 	cb.initialContext = ""
 	cb.initialMu.Unlock()
 }
 
-// SetAvailableSubagents sets the list of subagents that this agent can delegate
-// tasks to. The list is rendered in the system prompt so the LLM knows which
-// agent_id values are valid for the spawn tool.
 func (cb *ContextBuilder) SetAvailableSubagents(subagents []subagentInfo) {
 	cb.availableSubagents = subagents
-	// Invalidate the cached initial context so the next turn picks up the new list.
 	cb.initialMu.Lock()
 	cb.initialContext = ""
 	cb.initialMu.Unlock()
 }
 
-// SetMCPServers sets the MCP server summaries rendered in the "## MCP
-// Servers" section of the system prompt (fed by the tool coordinator after
-// every sync pass). The cached initial context is dropped ONLY when the
-// name+description+layer set actually changed: sync passes run on every
-// config reload, and clearing the cache unconditionally would force a
-// needless prompt rebuild (identity + bootstrap + skills) for a no-op.
 func (cb *ContextBuilder) SetMCPServers(servers []tools.MCPServerInfo) {
 	cb.initialMu.Lock()
 	defer cb.initialMu.Unlock()
@@ -196,18 +120,9 @@ func (cb *ContextBuilder) SetMCPServers(servers []tools.MCPServerInfo) {
 		return
 	}
 	cb.mcpServers = servers
-	// Partial invalidation: MCP summaries live in the static prompt only, so
-	// the cached initial context is all that needs dropping (the harness
-	// context knows nothing about MCP).
 	cb.initialContext = ""
 }
 
-// SetMCPDiscovery records which discovery tools the agent's allowlist keeps.
-// The "## MCP Servers" section renders instructions for exactly those tools,
-// so a restricted agent is never told to call a tool it does not have.
-//
-// The cached initial context is dropped only when the value changes, for the
-// same reason as SetMCPServers: sync passes run on every config reload.
 func (cb *ContextBuilder) SetMCPDiscovery(list, get bool) {
 	next := mcpDiscoveryPerms{List: list, Get: get}
 	cb.initialMu.Lock()
@@ -219,11 +134,6 @@ func (cb *ContextBuilder) SetMCPDiscovery(list, get bool) {
 	cb.initialContext = ""
 }
 
-// mcpServersSection renders the "## MCP Servers" block: the instruction line
-// matching the permitted discovery tools (none, one, or both) followed by the
-// server names and their descriptions. Server names are always listed — they
-// are configuration, not tools — while the instructions never name a tool the
-// caller cannot use.
 func mcpServersSection(servers []tools.MCPServerInfo, perms mcpDiscoveryPerms) string {
 	var sb strings.Builder
 	sb.WriteString("## MCP Servers\n\n")
@@ -248,11 +158,6 @@ func mcpServersSection(servers []tools.MCPServerInfo, perms mcpDiscoveryPerms) s
 	return sb.String()
 }
 
-// mcpServersEqual reports whether two server lists carry the same
-// name+description+layer tuples. Order-insensitive (the coordinator feeds a
-// sorted list, but a cheap set comparison here keeps the setter robust);
-// disabled servers never appear in either list (the coordinator feeds the
-// list built by Manager.Servers(), which already excludes them).
 func mcpServersEqual(a, b []tools.MCPServerInfo) bool {
 	if len(a) != len(b) {
 		return false
@@ -274,15 +179,6 @@ func mcpServersEqual(a, b []tools.MCPServerInfo) bool {
 	return true
 }
 
-// SetSkillsFilter sets the per-agent allowlist of skill names rendered in the
-// <skills> block of the system prompt (sourced from AgentConfig.Skills).
-// nil or empty means "all enabled skills", which is the historical behaviour.
-//
-// Like SetAvailableSubagents it MUST invalidate the cached initial context:
-// GetInitialContext caches the whole static prompt (identity + bootstrap files +
-// skills summary) behind initialMu, so without the reset a filter set after the
-// first prompt build would never reach the LLM. The filter itself is written
-// under the same lock that GetInitialContext holds while reading it.
 func (cb *ContextBuilder) SetSkillsFilter(filter []string) {
 	cb.initialMu.Lock()
 	cb.skillsFilter = filter
@@ -290,20 +186,10 @@ func (cb *ContextBuilder) SetSkillsFilter(filter []string) {
 	cb.initialMu.Unlock()
 }
 
-// SkillsLoader returns the skills loader bound to this agent's workspace. It
-// is the same instance that backs the <skills> block of the system prompt, so
-// callers that list or toggle skills through it act on exactly what the agent
-// sees. The loader is created with the context builder and never reassigned,
-// so no lock is needed.
 func (cb *ContextBuilder) SkillsLoader() *skills.SkillsLoader {
 	return cb.skillsLoader
 }
 
-// InvalidatePromptCache drops the cached static prompt (identity + bootstrap
-// files + skills summary) and the cached harness context so the next turn
-// rebuilds them from disk. Call it after anything the prompt reads changes at
-// runtime — installing or removing a skill on disk, or toggling a skill in the
-// workspace config.
 func (cb *ContextBuilder) InvalidatePromptCache() {
 	cb.initialMu.Lock()
 	cb.initialContext = ""
@@ -315,16 +201,7 @@ func (cb *ContextBuilder) InvalidatePromptCache() {
 	cb.harnessMu.Unlock()
 }
 
-// GetInitialContext returns the initial context files (AGENT.md, SOUL.md, etc.)
-// to be loaded at session start. This ensures consistent context across /new and subagents.
 func (cb *ContextBuilder) GetInitialContext() string {
-	// Fast path: the static system prompt (identity + bootstrap + skills
-	// summary) is constant per process, so cache it. The only dynamic part is
-	// the tools section, which is appended in buildSystemPromptForTurn via
-	// GetSystemPromptForSession. This makes the very hot TUI path
-	// (GetCurrentContextUsage → BuildSystemPromptForSession) read a single
-	// cached string instead of re-reading all bootstrap files and re-scanning
-	// skills directories on every sidebar refresh.
 	cb.initialMu.RLock()
 	if cb.initialContext != "" {
 		cached := cb.initialContext
@@ -335,26 +212,19 @@ func (cb *ContextBuilder) GetInitialContext() string {
 
 	cb.initialMu.Lock()
 	defer cb.initialMu.Unlock()
-	// Double-check under the write lock: another goroutine may have built it
-	// while we waited.
 	if cb.initialContext != "" {
 		return cb.initialContext
 	}
 
 	parts := []string{}
 
-	// Core identity section
 	parts = append(parts, cb.getIdentity())
 
-	// Bootstrap files - ALWAYS included for consistent context
 	bootstrapContent := cb.LoadBootstrapFiles()
 	if bootstrapContent != "" {
 		parts = append(parts, bootstrapContent)
 	}
 
-	// Skills summary — restricted to this agent's allowlist when configured.
-	// cb.skillsFilter is read here while the write lock is held (see the
-	// deferred Unlock above), which is what keeps it in step with SetSkillsFilter.
 	skillsSummary := cb.skillsLoader.BuildSkillsSummary(cb.skillsFilter)
 	if skillsSummary != "" {
 		parts = append(parts, fmt.Sprintf(`# Skills
@@ -364,7 +234,6 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 %s`, skillsSummary))
 	}
 
-	// Subagents section
 	if len(cb.availableSubagents) > 0 {
 		var sb strings.Builder
 		sb.WriteString("## Subagents Available\n\n")
@@ -379,12 +248,6 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 		parts = append(parts, sb.String())
 	}
 
-	// MCP servers section — name + description only, never tool schemas
-	// (they are huge and the model discovers them lazily through the
-	// list_mcp_tools/get_mcp_tool pair), and instructions for the discovery
-	// tools this agent may actually call. cb.mcpServers and cb.mcpDiscovery
-	// are read here while the write lock is held, which pairs with
-	// SetMCPServers/SetMCPDiscovery writing them under the same lock.
 	if len(cb.mcpServers) > 0 {
 		servers := make([]tools.MCPServerInfo, len(cb.mcpServers))
 		copy(servers, cb.mcpServers)
@@ -392,7 +255,6 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 		parts = append(parts, mcpServersSection(servers, cb.mcpDiscovery))
 	}
 
-	// Join with "---" separator
 	cb.initialContext = strings.Join(parts, "\n\n---\n\n")
 	return cb.initialContext
 }
@@ -401,7 +263,6 @@ func (cb *ContextBuilder) getIdentity() string {
 	workspacePath, _ := filepath.Abs(filepath.Join(cb.workspace))
 	rt := fmt.Sprintf("%s %s, Go %s", runtime.GOOS, runtime.GOARCH, runtime.Version())
 
-	// Build tools section dynamically
 	toolsSection := cb.buildToolsSection()
 
 	return fmt.Sprintf(`# lele 🦞
@@ -444,15 +305,9 @@ func (cb *ContextBuilder) buildToolsSection() string {
 	sb.WriteString("**CRITICAL**: You MUST use tools to perform actions. Do NOT pretend to execute commands or schedule tasks.\n\n")
 	sb.WriteString("You have access to the following tools:\n\n")
 	for _, s := range summaries {
-		// Hide read_image when the model doesn't support vision
 		if !cb.visionSupported && strings.Contains(s, "`read_image`") {
 			continue
 		}
-		// Hide read_video when the model supports neither native video nor
-		// vision: native mode needs the video capability, the keyframes
-		// fallback needs vision — either one keeps the tool visible.
-		// "`read_video`" is a distinct backticked name — it is not a substring
-		// of "`read_image`" — so the two checks can never match the same line.
 		if !cb.videoSupported && !cb.visionSupported && strings.Contains(s, "`read_video`") {
 			continue
 		}
@@ -467,8 +322,6 @@ func (cb *ContextBuilder) BuildSystemPrompt() string {
 	return cb.GetInitialContext()
 }
 
-// BuildSystemPromptForSession returns the system prompt, appending harness module context
-// if the session runs on the native/TUI channel.
 func (cb *ContextBuilder) BuildSystemPromptForSession(sessionKey, channel string) string {
 	prompt := cb.BuildSystemPrompt()
 	isNative := channel == "native" || strings.HasPrefix(sessionKey, "tui:") || strings.HasPrefix(sessionKey, "native:")
@@ -480,16 +333,12 @@ func (cb *ContextBuilder) BuildSystemPromptForSession(sessionKey, channel string
 	return prompt
 }
 
-// SetFolderResolver wires a function that maps a session key to the folder the
-// user selected for that session. Passing nil disables folder injection.
 func (cb *ContextBuilder) SetFolderResolver(fn func(sessionKey string) string) {
 	cb.folderMu.Lock()
 	defer cb.folderMu.Unlock()
 	cb.folderResolver = fn
 }
 
-// resolveFolder reads the folder resolver under the guard. Returns "" when no
-// resolver is wired or the session has no folder selected.
 func (cb *ContextBuilder) resolveFolder(sessionKey string) string {
 	cb.folderMu.RLock()
 	resolver := cb.folderResolver
@@ -500,18 +349,12 @@ func (cb *ContextBuilder) resolveFolder(sessionKey string) string {
 	return resolver(sessionKey)
 }
 
-// SetSubagentLedgerResolver wires a function that maps a session key to the
-// rendered subagent-ledger digest for that session. Passing nil disables the
-// section, which keeps the prompt byte-identical for sessions that never spawn
-// subagents. Mirrors SetFolderResolver.
 func (cb *ContextBuilder) SetSubagentLedgerResolver(fn func(sessionKey string) string) {
 	cb.ledgerMu.Lock()
 	defer cb.ledgerMu.Unlock()
 	cb.subagentLedgerResolver = fn
 }
 
-// resolveSubagentLedger reads the ledger resolver under the guard. Returns ""
-// when no resolver is wired or the session has no subagent tasks.
 func (cb *ContextBuilder) resolveSubagentLedger(sessionKey string) string {
 	cb.ledgerMu.RLock()
 	resolver := cb.subagentLedgerResolver
@@ -522,19 +365,6 @@ func (cb *ContextBuilder) resolveSubagentLedger(sessionKey string) string {
 	return resolver(sessionKey)
 }
 
-// BuildSystemPromptForSessionWithFolder returns the session's system prompt
-// with the "## Selected Folder" and "## Subagent Tasks" sections appended when
-// they apply: the folder the user selected for the session, and the digest of
-// the subagent tasks spawned from it. It extends BuildSystemPromptForSession
-// (harness context included) so the turn prompt and every token estimation
-// agree.
-//
-// Both sections are rendered fresh on every call, never cached: the ledger
-// section has to change when the ledger changes, and the folder section has to
-// change when the user picks another folder. They are appended at the END so
-// the static prefix of the prompt stays byte-identical across turns
-// (prompt-cache friendly), and a session with neither gets exactly the prompt
-// BuildSystemPromptForSession returns.
 func (cb *ContextBuilder) BuildSystemPromptForSessionWithFolder(sessionKey, channel string) string {
 	prompt := cb.BuildSystemPromptForSession(sessionKey, channel)
 	if folder := cb.resolveFolder(sessionKey); folder != "" {
@@ -548,30 +378,17 @@ func (cb *ContextBuilder) BuildSystemPromptForSessionWithFolder(sessionKey, chan
 	return prompt
 }
 
-// ResetMemoryContext clears the in-memory cache of the memory store
-// to force a fresh reload of memory files on next access.
-// Used when creating a new session with /new.
 func (cb *ContextBuilder) ResetMemoryContext() {
-	// Memory store reads from disk each time, so no cache to clear.
-	// The initial context cache must be invalidated here too: /new re-reads
-	// bootstrap files (AGENT.md, SOUL.md, ...) from disk so the fresh
-	// conversation reflects any edits made while the process was running.
 	cb.initialMu.Lock()
 	cb.initialContext = ""
 	cb.initialMu.Unlock()
 
-	// Same for the harness context (cwd listing + AGENTS.md): re-read it so a
-	// fresh conversation reflects any files created/removed while running.
 	cb.harnessMu.Lock()
 	cb.harnessContext = ""
 	cb.harnessContextValid = false
 	cb.harnessMu.Unlock()
 }
 
-// getHarnessContext returns the harness module context (cwd listing + AGENTS.md
-// + skills directories), caching it globally. It is identical for every session
-// in the process (depends only on os.Getwd()), so building it once and reusing
-// the cached string avoids re-reading the directory and AGENTS.md on every turn.
 func (cb *ContextBuilder) getHarnessContext() string {
 	cb.harnessMu.RLock()
 	if cb.harnessContextValid {
@@ -591,11 +408,6 @@ func (cb *ContextBuilder) getHarnessContext() string {
 	return cb.harnessContext
 }
 
-// LoadBootstrapFiles inlines the workspace context files into the system
-// prompt, in lelecontext.BootstrapFiles order. The list still carries the
-// deprecated persona files (SOUL.md, USER.md, IDENTITY.md): they are no longer
-// created, but a workspace that has them keeps their content in the prompt.
-// Files that are absent are skipped, so a fresh workspace costs nothing.
 func (cb *ContextBuilder) LoadBootstrapFiles() string {
 	bootstrapFiles := lelecontext.BootstrapFiles
 
@@ -613,8 +425,6 @@ func (cb *ContextBuilder) LoadBootstrapFiles() string {
 	return result
 }
 
-// BuildMinimalSystemPrompt returns a lightweight system prompt for "chat" mode
-// sessions, where only web_search and web_fetch tools are available.
 func (cb *ContextBuilder) BuildMinimalSystemPrompt() string {
 	return "You are a helpful AI assistant. You can search the web and fetch web pages to answer questions.\n\n" +
 		"## Available Tools\n\n" +
@@ -626,23 +436,10 @@ func (cb *ContextBuilder) BuildMinimalSystemPrompt() string {
 		"3. Cite sources when using web search results."
 }
 
-// BuildMessages constructs the full message list for the LLM.
-//
-// The expensive parts of the system prompt (identity, bootstrap files, skills,
-// subagents, and the harness context) are cached globally by GetInitialContext
-// and getHarnessContext, so building the prompt per turn is cheap. The session
-// context (channel and chat ID) is stable per session and is appended fresh on
-// every call. There is no per-turn timestamp in the prompt, so the system
-// message is byte-identical across turns within a session (prompt-cache
-// friendly).
 func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary string, currentMessage string, attachments []bus.FileAttachment, channel, chatID, sessionKey string, mode string) []providers.Message {
 	messages := []providers.Message{}
 	renderedUserMessage := cb.BuildCurrentUserMessage(currentMessage, attachments, channel, chatID)
 
-	// --- Build the system prompt ---
-	// The static parts (identity + bootstrap + skills + subagents + harness)
-	// are cached globally, so this is cheap. The session context (channel +
-	// chat ID) is stable per session and is appended fresh.
 	var systemPrompt string
 	if mode == "chat" {
 		systemPrompt = cb.BuildMinimalSystemPrompt()
@@ -650,7 +447,6 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 		systemPrompt = cb.buildSystemPromptForTurn(channel, chatID, sessionKey)
 	}
 
-	// Debug logging
 	logger.DebugCF("agent", "System prompt ready",
 		map[string]interface{}{
 			"total_chars":   len(systemPrompt),
@@ -669,9 +465,6 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 		Content: systemPrompt,
 	})
 
-	// Pairing is repaired at the call site (llmCaller.call), not here: every
-	// provider request goes through that one function, including the group-turn
-	// and subagent loops that build their messages without this builder.
 	messages = append(messages, filterContextMessages(history)...)
 
 	if summary != "" && !hasSummaryMessage(history, summary) {
@@ -743,13 +536,6 @@ func filterContextMessages(history []providers.Message) []providers.Message {
 	return filtered
 }
 
-// dropBlankAssistantMessages removes persisted assistant messages that carry
-// neither content nor tool calls. Such blanks are the footprint of an older
-// bug (empty responses were saved to the session before the empty-retry
-// check), and models imitate them: replaying blanks triggers fresh blanks,
-// permanently stalling the session. Dropping them is safe for the API because
-// reasoning_content is never re-serialized to providers. Returns the cleaned
-// slice and whether anything was removed.
 func dropBlankAssistantMessages(history []providers.Message) ([]providers.Message, bool) {
 	isBlank := func(m providers.Message) bool {
 		return m.Role == "assistant" && strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0
@@ -769,27 +555,6 @@ func dropBlankAssistantMessages(history []providers.Message) ([]providers.Messag
 	return cleaned, true
 }
 
-// healAssistantToolCalls rewrites persisted assistant tool calls into the
-// canonical wire shape and drops the ones that can never be canonicalised
-// (a tool call without a tool name).
-//
-// Older builds saved whatever the provider streamed, so sessions on disk
-// contain tool calls that make every subsequent request fail:
-//
-//   - function.arguments:"null" (400 invalid_parameter_error: the parameter
-//     must be in JSON format), and
-//   - a duplicate top-level "arguments" object, rejected by strict gateways.
-//
-// Because the poisoned message is replayed on every turn, the session is stuck
-// permanently: the agent stops answering and only a /new recovers it. Repairing
-// in place keeps the conversation - the alternative is losing the whole session.
-//
-// A nameless tool call cannot be repaired (there is no tool to name) so it is
-// dropped, and its matching tool-result message is dropped with it: an orphan
-// tool message referencing a call the model never made is itself a 400.
-//
-// Returns the healed history and whether anything changed, so the caller can
-// skip rewriting an untouched session.
 func healAssistantToolCalls(history []providers.Message) ([]providers.Message, bool) {
 	droppedIDs := make(map[string]struct{})
 	changed := false
@@ -802,7 +567,6 @@ func healAssistantToolCalls(history []providers.Message) ([]providers.Message, b
 		}
 		canonical := providers.CanonicalToolCalls(m.ToolCalls)
 
-		// Record calls that disappeared during canonicalisation.
 		if len(canonical) != len(m.ToolCalls) {
 			kept := make(map[string]struct{}, len(canonical))
 			for _, tc := range canonical {
@@ -818,8 +582,6 @@ func healAssistantToolCalls(history []providers.Message) ([]providers.Message, b
 			changed = true
 		}
 
-		// Detect in-place repairs (arguments normalised, fields populated) by
-		// comparing the canonical serialisation with the stored one.
 		if len(canonical) == len(m.ToolCalls) && !sameToolCalls(m.ToolCalls, canonical) {
 			changed = true
 		}
@@ -836,7 +598,6 @@ func healAssistantToolCalls(history []providers.Message) ([]providers.Message, b
 		return cleaned, true
 	}
 
-	// Second pass: remove the orphaned tool results of dropped calls.
 	final := make([]providers.Message, 0, len(cleaned))
 	for _, m := range cleaned {
 		if m.Role == "tool" && m.ToolCallID != "" {
@@ -844,8 +605,6 @@ func healAssistantToolCalls(history []providers.Message) ([]providers.Message, b
 				continue
 			}
 		}
-		// An assistant message left with neither tool calls nor text is the
-		// blank the empty-response guard already refuses to persist.
 		if m.Role == "assistant" && len(m.ToolCalls) == 0 && strings.TrimSpace(m.TextContent()) == "" {
 			continue
 		}
@@ -854,13 +613,6 @@ func healAssistantToolCalls(history []providers.Message) ([]providers.Message, b
 	return final, true
 }
 
-// sameToolCalls reports whether a stored tool-call slice already matches the
-// canonical one field by field, using the raw stored values rather than their
-// normalised form. Comparing raw values is what makes the check useful: a
-// session that holds function.arguments:"null" is only repaired once it is
-// rewritten, so the difference must be visible here or the store never gets
-// cleaned. Sessions that are already canonical return true, which keeps every
-// turn from rewriting (and bumping the epoch of) the history it loads.
 func sameToolCalls(stored, canonical []providers.ToolCall) bool {
 	for i := range stored {
 		a, b := stored[i], canonical[i]
@@ -886,8 +638,6 @@ func sameToolCalls(stored, canonical []providers.ToolCall) bool {
 	return true
 }
 
-// rawArguments returns the stored function.arguments string without touching
-// its content, or the sentinel "\x00nil" when there is no Function at all.
 func rawArguments(tc providers.ToolCall) string {
 	if tc.Function == nil {
 		return "\x00nil"
@@ -895,8 +645,6 @@ func rawArguments(tc providers.ToolCall) string {
 	return tc.Function.Arguments
 }
 
-// jsonEqual compares two decoded JSON values by their encoding, which avoids
-// the float/interface pitfalls of reflect.DeepEqual for this purpose.
 func jsonEqual(a, b interface{}) bool {
 	ab, err1 := json.Marshal(a)
 	bb, err2 := json.Marshal(b)
@@ -906,8 +654,6 @@ func jsonEqual(a, b interface{}) bool {
 	return string(ab) == string(bb)
 }
 
-// ensureSummaryMaterialized ensures the summary is materialized as a message in the history.
-// Returns the updated history (may be the same slice if no changes needed).
 func ensureSummaryMaterialized(agent *AgentInstance, sessionKey string, history []providers.Message, summary string) []providers.Message {
 	if agent == nil || agent.Sessions == nil || sessionKey == "" || summary == "" || hasSummaryMessage(history, summary) {
 		return history
@@ -955,7 +701,6 @@ func normalizeNativeChatID(chatID string) string {
 		return chatID
 	}
 
-	// Strip :chat: alias if present
 	if len(parts) >= 4 && parts[len(parts)-2] == "chat" {
 		return strings.Join(parts[:len(parts)-2], ":")
 	}
@@ -988,26 +733,16 @@ func (cb *ContextBuilder) AddAssistantMessage(messages []providers.Message, cont
 		Role:    "assistant",
 		Content: content,
 	}
-	// Always add assistant message, whether or not it has tool calls
 	messages = append(messages, msg)
 	return messages
 }
 
-// currentSkillsFilter reads the skills allowlist under the guard. Callers
-// outside GetInitialContext (which already holds the write lock and must read
-// cb.skillsFilter directly to avoid a recursive lock) use this so a concurrent
-// SetSkillsFilter can never be observed mid-write.
 func (cb *ContextBuilder) currentSkillsFilter() []string {
 	cb.initialMu.RLock()
 	defer cb.initialMu.RUnlock()
 	return cb.skillsFilter
 }
 
-// loadSkills renders the full text of every skill for direct injection into
-// the context. It is currently dead code — only context_test.go exercises it,
-// the live prompt path is the <skills> summary in GetInitialContext — but it
-// honours cb.skillsFilter as well, so reviving it can never leak skills the
-// agent was not configured to see.
 func (cb *ContextBuilder) loadSkills() string {
 	allSkills := cb.skillsLoader.ListSkills()
 	if len(allSkills) == 0 {
@@ -1034,7 +769,6 @@ func (cb *ContextBuilder) loadSkills() string {
 	return "# Skill Definitions\n\n" + content
 }
 
-// GetSkillsInfo returns information about loaded skills.
 func (cb *ContextBuilder) GetSkillsInfo() map[string]interface{} {
 	allSkills := cb.skillsLoader.ListSkills()
 	skillNames := make([]string, 0, len(allSkills))

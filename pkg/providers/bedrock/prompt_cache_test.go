@@ -32,7 +32,6 @@ func TestApplyBedrockCacheBreakpoints(t *testing.T) {
 		"prompt_cache_ttl": "1h",
 	})
 
-	// System cache point appended.
 	if len(input.System) != 2 {
 		t.Fatalf("system blocks = %d, want 2", len(input.System))
 	}
@@ -44,7 +43,6 @@ func TestApplyBedrockCacheBreakpoints(t *testing.T) {
 		t.Errorf("system cache TTL = %q, want 1h", cp.Value.Ttl)
 	}
 
-	// Tools: cache point after the last spec.
 	if len(input.ToolConfig.Tools) != 3 {
 		t.Fatalf("tools = %d, want 3 (2 specs + cache point)", len(input.ToolConfig.Tools))
 	}
@@ -56,7 +54,6 @@ func TestApplyBedrockCacheBreakpoints(t *testing.T) {
 		t.Errorf("tools cache TTL = %q, want 1h", tp.Value.Ttl)
 	}
 
-	// History: cache point on the last message.
 	last := input.Messages[0]
 	if len(last.Content) != 2 {
 		t.Fatalf("last message blocks = %d, want 2", len(last.Content))

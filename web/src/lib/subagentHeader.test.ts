@@ -6,10 +6,6 @@ import {
 } from './subagentHeader'
 import type { Agent, SubagentTaskInfo } from './types'
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
 const makeSubagent = (overrides: Partial<SubagentTaskInfo> = {}): SubagentTaskInfo => ({
   task_id: 't-1',
   session_key: 'abc-123:subagent-1',
@@ -36,10 +32,6 @@ const reviewerAgent: Agent = {
   workspace: '/tmp',
   model: 'claude-sonnet',
 }
-
-// ---------------------------------------------------------------------------
-// selectSubagentForSession
-// ---------------------------------------------------------------------------
 
 describe('selectSubagentForSession', () => {
   test('returns matching entry by exact session_key', () => {
@@ -74,10 +66,6 @@ describe('selectSubagentForSession', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// resolveHeaderTitle
-// ---------------------------------------------------------------------------
-
 describe('resolveHeaderTitle', () => {
   test('returns trimmed label when non-empty', () => {
     const entry = makeSubagent({ label: '  Fix build  ' })
@@ -98,10 +86,6 @@ describe('resolveHeaderTitle', () => {
     expect(resolveHeaderTitle(null, 'fallback title')).toBe('fallback title')
   })
 })
-
-// ---------------------------------------------------------------------------
-// resolveHeaderAgentName
-// ---------------------------------------------------------------------------
 
 describe('resolveHeaderAgentName', () => {
   test('returns agent name when agent_id found in agents list', () => {

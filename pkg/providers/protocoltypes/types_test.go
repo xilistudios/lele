@@ -26,7 +26,6 @@ func TestTextOnlyContent_ContentPartsWithImage(t *testing.T) {
 	if got != want {
 		t.Errorf("TextOnlyContent() = %q, want %q", got, want)
 	}
-	// Must never contain base64 payload data.
 	if strings.Contains(got, "base64") || strings.Contains(got, "iVBORw0KGgo") {
 		t.Errorf("TextOnlyContent() leaked image data: %q", got)
 	}
@@ -66,8 +65,6 @@ func TestTextOnlyContent_ContentAndPartsCombined(t *testing.T) {
 		t.Errorf("TextOnlyContent() = %q, want %q", got, want)
 	}
 }
-
-// --- send_file attachments persistence (WebUI file download) ---
 
 func TestMessageAttachmentsRoundTrip(t *testing.T) {
 	m := Message{
@@ -109,15 +106,11 @@ func TestMessageOmitsEmptyAttachments(t *testing.T) {
 	}
 }
 
-// TestMessageDisplayFieldsRoundTrip pins the harness-command display metadata:
-// the session store must persist DisplayContent and Command losslessly (they
-// re-render the user bubble and the command chip from history) and omit them
-// entirely from plain messages so stored JSON stays byte-compatible.
 func TestMessageDisplayFieldsRoundTrip(t *testing.T) {
 	m := Message{
 		Role:           "user",
-		Content:        "review the src dir please", // expanded prompt (what the LLM sees)
-		DisplayContent: "/review src",               // what the user typed
+		Content:        "review the src dir please",
+		DisplayContent: "/review src",
 		Command: &CommandApplied{
 			Name: "review", Description: "Review code", Args: "src",
 			Agent: "coder", Model: "fast", Source: "workspace",
@@ -143,7 +136,6 @@ func TestMessageDisplayFieldsRoundTrip(t *testing.T) {
 		t.Errorf("round-trip lost command metadata: %+v", got.Command)
 	}
 
-	// Plain messages must not grow the keys (omitempty contract).
 	plain, err := json.Marshal(Message{Role: "user", Content: "hi"})
 	if err != nil {
 		t.Fatal(err)
@@ -155,12 +147,6 @@ func TestMessageDisplayFieldsRoundTrip(t *testing.T) {
 	}
 }
 
-// --- video_url content parts (read_video tool) ---
-
-// TestMessageVideoPartRoundTrip pins persistence of video content parts:
-// the session store round-trips messages through Message.MarshalJSON /
-// UnmarshalJSON, so type, url and fps must survive, while fps stays off the
-// wire entirely when unset (omitempty).
 func TestMessageVideoPartRoundTrip(t *testing.T) {
 	m := Message{
 		Role: "user",
@@ -201,7 +187,6 @@ func TestMessageVideoPartRoundTrip(t *testing.T) {
 		t.Errorf("fps = %v, want 2.0", video.VideoURL.FPS)
 	}
 
-	// fps must be omitted from the wire when zero.
 	plainMsg := Message{
 		Role:         "user",
 		ContentParts: []ContentPart{{Type: "video_url", VideoURL: &VideoURL{URL: "data:video/mp4;base64,AAAA"}}},
@@ -215,10 +200,6 @@ func TestMessageVideoPartRoundTrip(t *testing.T) {
 	}
 }
 
-// TestTextFromParts_VideoPlaceholder pins the reload path: when a persisted
-// message's content is a parts array, UnmarshalJSON rebuilds Content through
-// textFromParts, which must keep a "[video]" placeholder (mirroring "[image]")
-// so a reloaded message never loses the fact that media was attached.
 func TestTextFromParts_VideoPlaceholder(t *testing.T) {
 	data := `{"role":"user","content":[` +
 		`{"type":"text","text":"Analyze the video"},` +
@@ -237,7 +218,6 @@ func TestTextFromParts_VideoPlaceholder(t *testing.T) {
 		t.Errorf("Content leaked media payload: %q", m.Content)
 	}
 
-	// TextContent falls back to textFromParts when Content is empty.
 	empty := Message{Role: "user", ContentParts: m.ContentParts}
 	if got, want := empty.TextContent(), want; got != want {
 		t.Errorf("TextContent() = %q, want %q", got, want)
@@ -291,9 +271,6 @@ func TestHasVideoContent(t *testing.T) {
 	}
 }
 
-// TestTextOnlyContent_ContentPartsWithVideo pins the compaction contract:
-// video parts render as a "[video]" placeholder and neither the base64
-// payload nor the URL ever reaches the summarization model.
 func TestTextOnlyContent_ContentPartsWithVideo(t *testing.T) {
 	dataURL := "data:video/mp4;base64,AAAA"
 	m := Message{
@@ -316,19 +293,12 @@ func TestTextOnlyContent_ContentPartsWithVideo(t *testing.T) {
 	}
 }
 
-// TestMessageErrorDetailRoundTrip pins the LLM-failure metadata: the session
-// store must persist ErrorDetail losslessly (both UIs re-render the failure box
-// from history after a refetch or a session switch) and omit the key entirely
-// from messages that did not fail, so stored JSON stays byte-compatible.
 func TestMessageErrorDetailRoundTrip(t *testing.T) {
 	cases := []struct {
-		name string
-		msg  Message
-		// wantErrorDetail is what must survive the round-trip.
+		name            string
+		msg             Message
 		wantErrorDetail string
-		// wantPersisted says whether "error_detail" must appear in the JSON.
-		// False is the omitempty contract for messages that did not fail.
-		wantPersisted bool
+		wantPersisted   bool
 	}{
 		{
 			name: "failed turn keeps the detail and stays out of context",
@@ -342,8 +312,6 @@ func TestMessageErrorDetailRoundTrip(t *testing.T) {
 			wantPersisted:   true,
 		},
 		{
-			// Ordinary assistant text must not grow the key, so stored JSON
-			// stays byte-compatible with sessions written before this field.
 			name:            "ordinary message omits the key",
 			msg:             Message{Role: "assistant", Content: "hi"},
 			wantErrorDetail: "",

@@ -6,9 +6,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// TestCompactSession_Basic verifies that CompactSession stores the summary,
-// excludes all but the last keepCount messages, and increments the compaction
-// counter.
 func TestCompactSession_Basic(t *testing.T) {
 	sm := NewSessionManager()
 	key := "test:compact-basic"
@@ -34,16 +31,12 @@ func TestCompactSession_Basic(t *testing.T) {
 		t.Fatalf("expected 10 messages retained in storage, got %d", len(session.Messages))
 	}
 	excluded := countExcluded(session.Messages)
-	// Index 0 always preserved, indices 6 and 8 are the last preservedUserMessages
-	// human turns → also preserved. Indices 1, 2, 3, 4, 5 excluded (5 total).
 	if excluded != 5 {
 		t.Errorf("expected 5 excluded messages, got %d", excluded)
 	}
-	// First message must never be excluded.
 	if session.Messages[0].ExcludeFromContext {
 		t.Errorf("message[0] should never be excluded")
 	}
-	// Last keepCount messages must remain in context.
 	for i := 7; i < 10; i++ {
 		if session.Messages[i].ExcludeFromContext {
 			t.Errorf("message[%d] should remain in context", i)
@@ -51,8 +44,6 @@ func TestCompactSession_Basic(t *testing.T) {
 	}
 }
 
-// TestCompactSession_KeepCountLargerThanMessages verifies the no-op case: when
-// keepCount covers all messages, nothing is excluded and no error is returned.
 func TestCompactSession_KeepCountLargerThanMessages(t *testing.T) {
 	sm := NewSessionManager()
 	key := "test:compact-large-keep"
@@ -74,8 +65,6 @@ func TestCompactSession_KeepCountLargerThanMessages(t *testing.T) {
 	}
 }
 
-// TestCompactSession_CompactionCount verifies the compaction counter is
-// incremented exactly once per call.
 func TestCompactSession_CompactionCount(t *testing.T) {
 	sm := NewSessionManager()
 	key := "test:compact-count"
@@ -95,9 +84,6 @@ func TestCompactSession_CompactionCount(t *testing.T) {
 	}
 }
 
-// TestCompactSession_EvictWithoutStore verifies that evict=true is a safe no-op
-// when there is no persistent store backing the manager (eviction is only
-// allowed when SQLite is the source of truth).
 func TestCompactSession_EvictWithoutStore(t *testing.T) {
 	sm := NewSessionManager()
 	key := "test:compact-evict"
@@ -111,7 +97,6 @@ func TestCompactSession_EvictWithoutStore(t *testing.T) {
 	}
 
 	session := sm.GetOrCreate(key)
-	// Without a store, eviction must not drop messages permanently.
 	if len(session.Messages) != 8 {
 		t.Errorf("expected 8 messages retained without store, got %d", len(session.Messages))
 	}

@@ -31,7 +31,6 @@ func TestInstallAtomicSwapAndBackup(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
-	// Target now has new content.
 	data, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +39,6 @@ func TestInstallAtomicSwapAndBackup(t *testing.T) {
 		t.Errorf("target content = %q, want new-binary", data)
 	}
 
-	// Backup exists with old content.
 	if backupPath == "" {
 		t.Fatal("expected a backup path")
 	}
@@ -52,7 +50,6 @@ func TestInstallAtomicSwapAndBackup(t *testing.T) {
 		t.Errorf("backup content = %q, want old-binary", bdata)
 	}
 
-	// Backup is executable.
 	info, _ := os.Stat(target)
 	if info.Mode().Perm()&0100 == 0 {
 		t.Error("installed binary should be executable")

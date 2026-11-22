@@ -8,40 +8,16 @@ import i18n from '../i18n'
 import type { EditableAgentConfig, EditableConfig } from '../lib/types'
 import type { ApiClient } from '../services/http/client'
 
-/**
- * Shared harness for the agent config pages/sections (spec §4).
- *
- * Every section reads and writes the settings draft through `SettingsContext`,
- * so they can only be rendered inside a `SettingsProvider`. This builds a
- * `SettingsConfigState` by hand — no network — and records the `updateField`
- * calls, which is exactly what the sections must get right (the paths they
- * write and the values they store).
- *
- * `screen` is unusable in this environment (its global-document binding is
- * captured before the JSDOM setup runs), so queries come from the helpers
- * returned here.
- */
-
-/** The test env boots in Spanish; resolve labels through i18n (house pattern). */
 export function tr(key: string, options?: Record<string, unknown>): string {
   return i18n.t(key, options) as string
 }
 
-/**
- * Fake API. `models()` feeds `useAvailableModels`, which `SettingsProvider`
- * turns into `getOptionsForAgent` / `getGroupsForAgent`; tests that need a
- * populated model list call `withModels()` before rendering.
- */
 let servedModels: string[] = []
 
 export function withModels(models: string[]): void {
   servedModels = models
 }
 
-/**
- * Skills and tools the fake API serves. Set before rendering: the sections
- * fetch them on mount (`useSkills` / `api.system.tools()`).
- */
 let servedSkills: unknown[] = []
 let servedTools: unknown[] = []
 let toolsShouldFail = false
@@ -56,9 +32,6 @@ export function withTools(tools: unknown[], shouldFail = false): void {
 }
 
 const api = {
-  // `model_groups` must be non-empty when there are models: SearchableSelect
-  // prefers `groups` over `options`, and SettingsProvider maps the API shape
-  // ({provider, models}) to ({label, options}).
   models: async () => ({
     models: servedModels,
     model_groups: servedModels.length
@@ -76,7 +49,6 @@ const api = {
   },
 } as unknown as ApiClient
 
-/** Files the fake API serves per agent id (Files tab). */
 let servedFiles: Record<string, unknown[]> = {}
 let filesShouldFail = false
 
@@ -95,7 +67,6 @@ export type Write = [path: string, value: unknown]
 export type Harness = {
   state: SettingsConfigState
   writes: Write[]
-  /** Last `updateField(path, …)` call for `path`, or undefined. */
   lastWrite: (path: string) => Write | undefined
 }
 
@@ -106,9 +77,7 @@ export function makeState(
     dirtyPaths?: string[]
     validationErrors?: SettingsConfigState['validationErrors']
     writes?: Write[]
-    /** Agents the config exposes as defaults (used by the Skills/Tools tabs). */
     extraConfig?: Partial<EditableConfig>
-    /** Initial config load still in flight → the page shows skeletons, not a 404 (§5.2). */
     isLoading?: boolean
   } = {},
 ): SettingsConfigState {
@@ -142,7 +111,6 @@ export function makeState(
   return state
 }
 
-/** Render `ui` inside SettingsProvider + MemoryRouter. */
 export function renderWithSettings(
   ui: ReactNode,
   agents: EditableAgentConfig[],
@@ -163,16 +131,10 @@ export function renderWithSettings(
   }
 }
 
-/** Unmount between tests: `@testing-library/react` does not auto-cleanup under bun. */
 export function autoCleanup() {
   afterEach(cleanup)
 }
 
-/**
- * Let pending effects settle (model list fetch, dropdown animation frames).
- * `SettingsProvider` loads models asynchronously, so anything that opens a
- * `SearchableSelect` must wait first or the popup renders empty.
- */
 export async function settle(ms = 50): Promise<void> {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, ms))

@@ -6,7 +6,6 @@ import type { ScannedSkill } from '../../lib/types'
 import i18n from '../../test/i18n'
 import { InstallSkillModal } from './InstallSkillModal'
 
-
 const tr = (key: string, options?: Record<string, unknown>) => i18n.t(key, options) as string
 
 const DESTINATION = tr('skills.installIntoTarget', {
@@ -48,14 +47,12 @@ describe('InstallSkillModal — destination caption', () => {
     const caption = byTestId(utils, 'install-destination') as HTMLElement
     expect(caption).toBeTruthy()
     expect(caption.textContent).toBe(DESTINATION)
-    // The browse tab is the default view: its list is on screen too.
     expect(byTestId(utils, 'install-scope')).toBeNull()
   })
 
   test('renders the fixed destination in the scan-picker view (second branch)', () => {
     const utils = setup({ destinationLabel: DESTINATION, scanResults: SCAN_RESULTS })
 
-    // Prove we are in the OTHER branch: the scan list replaced the tabs.
     expect(utils.container.querySelectorAll('input[type="checkbox"]')).toHaveLength(1)
     expect(utils.container.querySelector('#github-repo-input')).toBeNull()
 
@@ -72,8 +69,6 @@ describe('InstallSkillModal — destination caption', () => {
   })
 
   test('an empty scanResults list falls back to the browse/URL view', () => {
-    // `[]` is length 0, so the scan branch is not taken and the caption sits in
-    // the browse/URL branch instead.
     const utils = setup({ destinationLabel: DESTINATION, scanResults: [] })
     expect(byTestId(utils, 'install-destination')).toBeTruthy()
     const urlTab = Array.from(utils.container.querySelectorAll('button')).find(
@@ -86,7 +81,6 @@ describe('InstallSkillModal — destination caption', () => {
 
 describe('InstallSkillModal — render rule (C3 guard)', () => {
   test('no scope props at all: neither picker nor caption', () => {
-    // Regression guard shared with AgentSkillsSection.workspace.test.tsx:369.
     const utils = setup()
     expect(byTestId(utils, 'install-scope')).toBeNull()
     expect(byTestId(utils, 'install-destination')).toBeNull()
@@ -97,7 +91,6 @@ describe('InstallSkillModal — render rule (C3 guard)', () => {
 
     expect(byTestId(utils, 'install-scope')).toBeNull()
     expect(byTestId(utils, 'install-scope-workspace')).toBeNull()
-    // The caption wins, because it is the only expressible destination.
     expect((byTestId(utils, 'install-destination') as HTMLElement).textContent).toBe(DESTINATION)
   })
 

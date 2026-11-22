@@ -24,7 +24,6 @@ func TestLoadEditableDocument_FileNotExist(t *testing.T) {
 		t.Fatal("expected metadata, got nil")
 	}
 
-	// Verify defaults.
 	cfg, err := doc.ToConfig()
 	if err != nil {
 		t.Fatalf("ToConfig failed: %v", err)
@@ -147,7 +146,6 @@ func TestLoadEditableDocument_WithSecretPlaceholder(t *testing.T) {
 }
 
 func TestSecretValue_ResolveKeyring(t *testing.T) {
-	// Install a test resolver and restore the previous one afterwards.
 	prev := keyringResolver
 	defer RegisterKeyringResolver(prev)
 	RegisterKeyringResolver(func(name string) (string, error) {
@@ -162,7 +160,6 @@ func TestSecretValue_ResolveKeyring(t *testing.T) {
 		t.Errorf("resolve() = %q, want sk-from-keyring", got)
 	}
 
-	// Unknown secret resolves to empty string (no panic).
 	missing := SecretValue{Mode: SecretModeKeyring, SecretName: "does.not.exist"}
 	if got := missing.resolve(); got != "" {
 		t.Errorf("resolve() missing = %q, want empty", got)
@@ -302,8 +299,6 @@ func TestValidateEditableDocument_MissingRequired(t *testing.T) {
 		t.Error("expected validation errors")
 	}
 
-	// There should be errors for workspace, provider, model, and max_tokens.
-	// max_tool_iterations=0 is valid (means unlimited).
 	if len(errors) < 4 {
 		t.Errorf("expected at least 4 validation errors, got %d", len(errors))
 	}
@@ -323,7 +318,7 @@ func TestValidateEditableDocument_InvalidPort(t *testing.T) {
 		Channels: EditableChannelsConfig{
 			Native: EditableNativeConfig{
 				Enabled: true,
-				Port:    99999, // Invalid port
+				Port:    99999,
 			},
 		},
 	}
@@ -388,7 +383,7 @@ func TestValidateEditableDocument_InvalidRotation(t *testing.T) {
 			},
 		},
 		Logs: EditableLogsConfig{
-			Rotation: "monthly", // Invalid
+			Rotation: "monthly",
 		},
 	}
 
@@ -447,7 +442,6 @@ func TestEditableDocument_Roundtrip(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "config.json")
 
-	// Create a document with multiple secret types.
 	doc := &EditableDocument{
 		Agents: EditableAgentsConfig{
 			Defaults: EditableAgentDefaults{
@@ -474,18 +468,15 @@ func TestEditableDocument_Roundtrip(t *testing.T) {
 		},
 	}
 
-	// Save.
 	if err := SaveEditableDocument(path, doc); err != nil {
 		t.Fatalf("SaveEditableDocument failed: %v", err)
 	}
 
-	// Load again.
 	loadedDoc, _, err := LoadEditableDocument(path)
 	if err != nil {
 		t.Fatalf("LoadEditableDocument failed: %v", err)
 	}
 
-	// Verify that the secret type was preserved.
 	if loadedDoc.Channels.Telegram.Token.Mode != SecretModeEnv {
 		t.Errorf("telegram token mode = %q, want env", loadedDoc.Channels.Telegram.Token.Mode)
 	}
@@ -502,7 +493,6 @@ func TestEditableDocument_Roundtrip(t *testing.T) {
 
 func TestSaveEditableDocument_CreatesDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
-	// Path in a subdirectory that does not exist.
 	path := filepath.Join(tmpDir, "nested", "deep", "config.json")
 
 	doc := defaultEditableDocument()
@@ -510,7 +500,6 @@ func TestSaveEditableDocument_CreatesDirectory(t *testing.T) {
 		t.Fatalf("SaveEditableDocument failed: %v", err)
 	}
 
-	// Verify that the file exists.
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("config file should exist: %v", err)
 	}
@@ -653,8 +642,8 @@ func TestValidateEditableDocument_DuplicateProviderNames(t *testing.T) {
 		},
 		Providers: EditableProvidersConfig{
 			"my-provider": {Type: "openai"},
-			"My-Provider": {Type: "anthropic"}, // Duplicado (case insensitive)
-			"MY-PROVIDER": {Type: "gemini"},    // Duplicado
+			"My-Provider": {Type: "anthropic"},
+			"MY-PROVIDER": {Type: "gemini"},
 		},
 	}
 
@@ -685,7 +674,7 @@ func TestValidateEditableDocument_DuplicateAgentIDs(t *testing.T) {
 			},
 			List: []EditableAgentConfig{
 				{ID: "agent1", Name: "Agent 1"},
-				{ID: "agent1", Name: "Agent 2"}, // Duplicado
+				{ID: "agent1", Name: "Agent 2"},
 			},
 		},
 	}
@@ -731,14 +720,12 @@ func TestEditableDocument_Serialization(t *testing.T) {
 
 	serializable := doc.toSerializable()
 
-	// Verify that ENV placeholders are preserved.
 	channels := serializable["channels"].(map[string]interface{})
 	telegram := channels["telegram"].(map[string]interface{})
 	if telegram["token"] != "{{ENV_BOT_TOKEN}}" {
 		t.Errorf("telegram token = %q, want {{ENV_BOT_TOKEN}}", telegram["token"])
 	}
 
-	// Verify that literal values are preserved.
 	providers := serializable["providers"].(map[string]interface{})
 	openai := providers["openai"].(map[string]interface{})
 	if openai["api_key"] != "sk-test" {
@@ -764,25 +751,21 @@ func TestEditableDocument_SerializationKeyring(t *testing.T) {
 }
 
 func TestSecretValue_Resolve(t *testing.T) {
-	// Literal
 	literal := SecretValue{Mode: SecretModeLiteral, Value: "test-value"}
 	if literal.resolve() != "test-value" {
 		t.Errorf("literal resolve = %q, want test-value", literal.resolve())
 	}
 
-	// Empty
 	empty := SecretValue{Mode: SecretModeEmpty}
 	if empty.resolve() != "" {
 		t.Errorf("empty resolve = %q, want empty string", empty.resolve())
 	}
 
-	// Env (sin variable seteada)
 	env := SecretValue{Mode: SecretModeEnv, EnvName: "NONEXISTENT_VAR"}
 	if env.resolve() != "" {
 		t.Errorf("env resolve = %q, want empty string", env.resolve())
 	}
 
-	// Env (with the variable set).
 	os.Setenv("TEST_RESOLVE_VAR", "resolved-value")
 	defer os.Unsetenv("TEST_RESOLVE_VAR")
 	envWithValue := SecretValue{Mode: SecretModeEnv, EnvName: "TEST_RESOLVE_VAR"}
@@ -833,7 +816,6 @@ func TestEditableDocument_WithToolsConfig(t *testing.T) {
 		t.Fatalf("LoadEditableDocument failed: %v", err)
 	}
 
-	// Verify Brave.
 	if !doc.Tools.Web.Brave.Enabled {
 		t.Error("expected brave to be enabled")
 	}
@@ -844,12 +826,10 @@ func TestEditableDocument_WithToolsConfig(t *testing.T) {
 		t.Errorf("brave max_results = %d, want 10", doc.Tools.Web.Brave.MaxResults)
 	}
 
-	// Verify cron.
 	if doc.Tools.Cron.ExecTimeoutMinutes != 10 {
 		t.Errorf("cron exec_timeout_minutes = %d, want 10", doc.Tools.Cron.ExecTimeoutMinutes)
 	}
 
-	// Verify exec.
 	if !doc.Tools.Exec.EnableDenyPatterns {
 		t.Error("expected exec enable_deny_patterns to be true")
 	}
@@ -861,10 +841,6 @@ func TestEditableDocument_WithToolsConfig(t *testing.T) {
 	}
 }
 
-// TestEditableDocument_ExecWhitelistRoundTrip pins the WebUI save path: a
-// whitelist persisted by the TUI ("always allow") must survive an
-// editable-document load→ToConfig cycle untouched. Without this, editing any
-// other setting in the WebUI would silently drop the user's approved commands.
 func TestEditableDocument_ExecWhitelistRoundTrip(t *testing.T) {
 	cfg := &Config{}
 	cfg.Tools.Exec.EnableDenyPatterns = true
@@ -885,7 +861,6 @@ func TestEditableDocument_ExecWhitelistRoundTrip(t *testing.T) {
 		t.Errorf("whitelist[1] = %q (raw form must be preserved)", got.Tools.Exec.WhitelistCommands[1])
 	}
 
-	// toSerializable (the map actually written to disk) must carry the field.
 	serialized, ok := doc.toSerializable()["tools"].(map[string]interface{})
 	if !ok {
 		t.Fatal("tools section missing from serializable doc")
@@ -1056,10 +1031,6 @@ func TestEditableDocument_JSONSerialization(t *testing.T) {
 }
 
 func TestEditableDocument_CompactionModel_Roundtrip(t *testing.T) {
-	// Regression: compaction_model was lost on save when no other session
-	// fields (dm_scope, ephemeral, identity_links) were set, because
-	// toSerializable() only emitted the session block if one of those
-	// three fields was non-zero.
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "config.json")
 
@@ -1074,7 +1045,6 @@ func TestEditableDocument_CompactionModel_Roundtrip(t *testing.T) {
 			},
 		},
 		Session: EditableSessionConfig{
-			// Only compaction_model set — dm_scope empty, ephemeral false, identity_links nil.
 			CompactionModel: "openai:gpt-4o-mini",
 		},
 		Channels: EditableChannelsConfig{
@@ -1086,7 +1056,6 @@ func TestEditableDocument_CompactionModel_Roundtrip(t *testing.T) {
 		t.Fatalf("SaveEditableDocument failed: %v", err)
 	}
 
-	// Read raw JSON to verify the session block was written.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile failed: %v", err)
@@ -1103,7 +1072,6 @@ func TestEditableDocument_CompactionModel_Roundtrip(t *testing.T) {
 		t.Errorf("saved compaction_model = %v, want openai:gpt-4o-mini", session["compaction_model"])
 	}
 
-	// Load and verify roundtrip.
 	loaded, _, err := LoadEditableDocument(path)
 	if err != nil {
 		t.Fatalf("LoadEditableDocument failed: %v", err)
@@ -1117,7 +1085,6 @@ func TestLoadEditableDocument_InvalidJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "config.json")
 
-	// Invalid JSON.
 	config := `{ invalid json }`
 
 	if err := os.WriteFile(path, []byte(config), 0600); err != nil {

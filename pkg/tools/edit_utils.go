@@ -8,44 +8,34 @@ import (
 	"strings"
 )
 
-// Encoding detection and BOM handling
-
-// DetectEncoding detects encoding from BOM and removes it if present
 func DetectEncoding(buffer []byte) (string, []byte) {
 	if len(buffer) >= 4 {
-		// UTF-32 BE: 00 00 FE FF
 		if buffer[0] == 0x00 && buffer[1] == 0x00 && buffer[2] == 0xFE && buffer[3] == 0xFF {
 			return "UTF-32BE", buffer[4:]
 		}
-		// UTF-32 LE: FF FE 00 00
 		if buffer[0] == 0xFF && buffer[1] == 0xFE && buffer[2] == 0x00 && buffer[3] == 0x00 {
 			return "UTF-32LE", buffer[4:]
 		}
 	}
 
 	if len(buffer) >= 2 {
-		// UTF-16 BE: FE FF
 		if buffer[0] == 0xFE && buffer[1] == 0xFF {
 			return "UTF-16BE", buffer[2:]
 		}
-		// UTF-16 LE: FF FE
 		if buffer[0] == 0xFF && buffer[1] == 0xFE {
 			return "UTF-16LE", buffer[2:]
 		}
 	}
 
 	if len(buffer) >= 3 {
-		// UTF-8 BOM: EF BB BF
 		if buffer[0] == 0xEF && buffer[1] == 0xBB && buffer[2] == 0xBF {
 			return "UTF-8-BOM", buffer[3:]
 		}
 	}
 
-	// Default to UTF-8 without BOM
 	return "UTF-8", buffer
 }
 
-// GetBOM returns the BOM bytes for a given encoding
 func GetBOM(encoding string) []byte {
 	switch strings.ToUpper(encoding) {
 	case "UTF-8-BOM":
@@ -62,7 +52,6 @@ func GetBOM(encoding string) []byte {
 	return nil
 }
 
-// ReadFileWithEncoding reads a file and returns content, encoding, and BOM
 func ReadFileWithEncoding(path string) (string, string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -73,34 +62,27 @@ func ReadFileWithEncoding(path string) (string, string, error) {
 	return string(content), encoding, nil
 }
 
-// WriteFileWithEncoding writes content to file with proper BOM
 func WriteFileWithEncoding(path, content, encoding string) error {
 	bom := GetBOM(encoding)
 	data := append(bom, []byte(content)...)
 	return os.WriteFile(path, data, 0644)
 }
 
-// Match and replacement utilities
-
-// Match represents a match position
 type Match struct {
 	Start int
 	End   int
-	Line  int // for error reporting
+	Line  int
 }
 
-// MatchStrategy interface for different matching strategies
 type MatchStrategy interface {
 	FindMatches(content, pattern string) []Match
 }
 
-// ExactMatchStrategy finds exact literal matches
 type ExactMatchStrategy struct{}
 
 func (s *ExactMatchStrategy) FindMatches(content, oldStr string) []Match {
 	var matches []Match
 
-	// Handle empty search string
 	if len(oldStr) == 0 {
 		return matches
 	}
@@ -124,7 +106,6 @@ func (s *ExactMatchStrategy) FindMatches(content, oldStr string) []Match {
 	return matches
 }
 
-// RegexMatchStrategy finds matches using regex
 type RegexMatchStrategy struct {
 	Flags string
 }
@@ -169,16 +150,12 @@ func (s *RegexMatchStrategy) FindMatches(content, pattern string) []Match {
 	return matches
 }
 
-// ReplacementPair represents an old/new replacement pair
 type ReplacementPair struct {
 	Old string `json:"old"`
 	New string `json:"new"`
 }
 
-// ApplyReplacements applies multiple replacements to content
-// Returns the modified content or error if overlaps detected
 func ApplyReplacements(content string, pairs []ReplacementPair, strategy MatchStrategy) (string, error) {
-	// Find all matches for all pairs
 	type replacementMatch struct {
 		Pair  ReplacementPair
 		Match Match
@@ -200,7 +177,6 @@ func ApplyReplacements(content string, pairs []ReplacementPair, strategy MatchSt
 		})
 	}
 
-	// Check for overlaps
 	for i := 0; i < len(allMatches); i++ {
 		for j := i + 1; j < len(allMatches); j++ {
 			if matchesOverlap(allMatches[i].Match, allMatches[j].Match) {
@@ -210,7 +186,6 @@ func ApplyReplacements(content string, pairs []ReplacementPair, strategy MatchSt
 		}
 	}
 
-	// Sort by position (descending) so we can apply from end to start
 	for i := 0; i < len(allMatches); i++ {
 		for j := i + 1; j < len(allMatches); j++ {
 			if allMatches[i].Match.Start < allMatches[j].Match.Start {
@@ -219,7 +194,6 @@ func ApplyReplacements(content string, pairs []ReplacementPair, strategy MatchSt
 		}
 	}
 
-	// Apply replacements
 	result := content
 	for _, rm := range allMatches {
 		result = ReplaceRange(result, rm.Match, rm.Pair.New)
@@ -228,7 +202,6 @@ func ApplyReplacements(content string, pairs []ReplacementPair, strategy MatchSt
 	return result, nil
 }
 
-// ReplaceRange replaces a range in content with new text
 func ReplaceRange(content string, match Match, newText string) string {
 	var buf bytes.Buffer
 	buf.WriteString(content[:match.Start])
@@ -237,7 +210,6 @@ func ReplaceRange(content string, match Match, newText string) string {
 	return buf.String()
 }
 
-// DetectOverlaps checks if any matches overlap
 func DetectOverlaps(matches []Match) bool {
 	for i := 0; i < len(matches); i++ {
 		for j := i + 1; j < len(matches); j++ {
@@ -253,7 +225,6 @@ func matchesOverlap(a, b Match) bool {
 	return (a.Start < b.End && a.End > b.Start)
 }
 
-// WhitespaceTolerantStrategy normalizes whitespace before matching
 type WhitespaceTolerantStrategy struct{}
 
 func (s *WhitespaceTolerantStrategy) FindMatches(content, oldStr string) []Match {
@@ -269,7 +240,6 @@ func (s *WhitespaceTolerantStrategy) FindMatches(content, oldStr string) []Match
 		}
 		matchStart := start + idx
 
-		// Map normalized position back to original
 		origStart := mapNormalizedToOriginal(content, matchStart)
 		origEnd := mapNormalizedToOriginal(content, matchStart+len(normalizedOld))
 
@@ -282,14 +252,11 @@ func (s *WhitespaceTolerantStrategy) FindMatches(content, oldStr string) []Match
 	return matches
 }
 
-// normalizeWhitespace replaces all consecutive whitespace with single space
 func normalizeWhitespace(s string) string {
-	// Replace all whitespace sequences with single space
 	re := regexp.MustCompile(`\s+`)
 	return re.ReplaceAllString(s, " ")
 }
 
-// mapNormalizedToOriginal maps a position in normalized string back to original
 func mapNormalizedToOriginal(original string, normalizedPos int) int {
 	if normalizedPos <= 0 {
 		return 0
@@ -300,14 +267,11 @@ func mapNormalizedToOriginal(original string, normalizedPos int) int {
 	originalIndex := 0
 
 	for originalIndex < len(original) && normalizedIndex < normalizedPos {
-		// Check if we're at whitespace
 		loc := whitespacePattern.FindStringIndex(original[originalIndex:])
 		if loc != nil && loc[0] == 0 {
-			// Count as one space in normalized
 			normalizedIndex++
 			originalIndex += loc[1]
 		} else {
-			// Regular character
 			normalizedIndex++
 			originalIndex++
 		}
@@ -320,14 +284,12 @@ func mapNormalizedToOriginal(original string, normalizedPos int) int {
 	return originalIndex
 }
 
-// ReadLines reads a file and returns lines with their line numbers
 func ReadLines(content string, from, to int) ([]struct {
 	Number int
 	Text   string
 }, error) {
 	lines := strings.Split(content, "\n")
 
-	// Validate range
 	if from < 1 {
 		from = 1
 	}

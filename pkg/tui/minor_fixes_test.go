@@ -13,12 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// --- FIX 1: obVerifyKeyCmd body inspection ---
-
-// newVerifyTestModel builds a minimal model whose config carries a single
-// named provider pointing at baseURL, as obVerifyKeyCmd expects. It also
-// injects an HTTP client whose transport redirects every request to srv
-// (bypassing the localhost skip, since httptest always binds to 127.0.0.1).
 func newVerifyTestModel(t *testing.T, baseURL string) *Model {
 	t.Helper()
 	cfg := testModelConfig(t)
@@ -34,8 +28,6 @@ func newVerifyTestModel(t *testing.T, baseURL string) *Model {
 	return m
 }
 
-// redirectTransport redirects all requests to the given test server while
-// keeping the original URL (so the provider's APIBase never looks local).
 type redirectTransport struct{ srv *httptest.Server }
 
 func (rt redirectTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -44,8 +36,6 @@ func (rt redirectTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	return http.DefaultTransport.RoundTrip(req)
 }
 
-// TestObVerifyKeyCmd_ErrorBodyFails verifies a 200 response carrying a JSON
-// error object is reported as a validation failure.
 func TestObVerifyKeyCmd_ErrorBodyFails(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -70,8 +60,6 @@ func TestObVerifyKeyCmd_ErrorBodyFails(t *testing.T) {
 	}
 }
 
-// TestObVerifyKeyCmd_ValidModelsBodySucceeds verifies a 200 response with a
-// well-formed models list is reported as success.
 func TestObVerifyKeyCmd_ValidModelsBodySucceeds(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -92,8 +80,6 @@ func TestObVerifyKeyCmd_ValidModelsBodySucceeds(t *testing.T) {
 	}
 }
 
-// TestObVerifyKeyCmd_NonJSONBodySucceeds verifies a 200 response with a plain
-// (non-JSON) body is tolerated as success.
 func TestObVerifyKeyCmd_NonJSONBodySucceeds(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("OK - all systems go"))
@@ -113,8 +99,6 @@ func TestObVerifyKeyCmd_NonJSONBodySucceeds(t *testing.T) {
 	}
 }
 
-// TestObVerifyKeyCmd_403Succeeds verifies the documented behavior that a 403
-// on /models is treated as a valid key.
 func TestObVerifyKeyCmd_403Succeeds(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
@@ -134,8 +118,6 @@ func TestObVerifyKeyCmd_403Succeeds(t *testing.T) {
 	}
 }
 
-// TestCheckVerifyBody_Table covers checkVerifyBody directly, including the
-// error-as-object variants.
 func TestCheckVerifyBody_Table(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -150,7 +132,7 @@ func TestCheckVerifyBody_Table(t *testing.T) {
 		{"error object error", `{"error":{"error":"denied"}}`, true},
 		{"error empty string", `{"error":""}`, false},
 		{"error empty object", `{"error":{}}`, false},
-		{"malformed json", `{"error": "unclosed`, false}, // tolerated, not JSON
+		{"malformed json", `{"error": "unclosed`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -162,10 +144,6 @@ func TestCheckVerifyBody_Table(t *testing.T) {
 	}
 }
 
-// --- FIX 2: clipboard command timeout ---
-
-// TestRunClipboardCmd_Timeout verifies runClipboardCmd returns promptly when
-// the underlying command hangs, instead of blocking until the command exits.
 func TestRunClipboardCmd_Timeout(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not available")
@@ -185,8 +163,6 @@ func TestRunClipboardCmd_Timeout(t *testing.T) {
 	}
 }
 
-// TestRunClipboardCmd_MissingBinary verifies a command that is not on PATH
-// simply reports failure without panicking.
 func TestRunClipboardCmd_MissingBinary(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -196,9 +172,6 @@ func TestRunClipboardCmd_MissingBinary(t *testing.T) {
 	}
 }
 
-// --- FIX 3: wrapText hard-breaking ---
-
-// maxLineWidth returns the maximum visual width across all lines of s.
 func maxLineWidth(s string) int {
 	max := 0
 	for _, line := range strings.Split(s, "\n") {
@@ -209,11 +182,9 @@ func maxLineWidth(s string) int {
 	return max
 }
 
-// TestWrapText_HardBreaksOverwideWord verifies a word wider than the limit is
-// split into chunks that each fit within the limit.
 func TestWrapText_HardBreaksOverwideWord(t *testing.T) {
 	const limit = 10
-	got := wrapText("aaaaaaaaaaaaaaaaaaaa", limit) // 20 a's
+	got := wrapText("aaaaaaaaaaaaaaaaaaaa", limit)
 
 	if maxLineWidth(got) > limit {
 		t.Fatalf("wrapText produced a line wider than %d:\n%s", limit, got)
@@ -224,13 +195,8 @@ func TestWrapText_HardBreaksOverwideWord(t *testing.T) {
 	}
 }
 
-// TestWrapText_OverwideWordFollowedByShortWord verifies the remainder of a
-// hard-broken word stays on the current line and a following short word joins
-// it when it fits.
 func TestWrapText_OverwideWordFollowedByShortWord(t *testing.T) {
 	const limit = 10
-	// 13-char word: chunks to 10 + remainder "bbb"; "cc" (2 cols) then joins
-	// the remainder ("bbb cc" = 6 cols <= 10).
 	got := wrapText("aaaaaaaaaabbb cc", limit)
 
 	if maxLineWidth(got) > limit {
@@ -241,8 +207,6 @@ func TestWrapText_OverwideWordFollowedByShortWord(t *testing.T) {
 	}
 }
 
-// TestWrapText_ExactLimitWordNotSplit verifies a word exactly as wide as the
-// limit is left intact.
 func TestWrapText_ExactLimitWordNotSplit(t *testing.T) {
 	got := wrapText("abcdefghij", 10)
 	if got != "abcdefghij" {
@@ -250,24 +214,19 @@ func TestWrapText_ExactLimitWordNotSplit(t *testing.T) {
 	}
 }
 
-// TestWrapText_WideCJKRunesNotSplitMidRune verifies wide (width-2) runes are
-// never cut in half and each output line fits the limit.
 func TestWrapText_WideCJKRunesNotSplitMidRune(t *testing.T) {
 	const limit = 5
-	text := "\u4f60\u597d\u4e16\u754c\u6d4b\u8bd5" // 6 CJK runes, width 2 each = 12 columns
+	text := "\u4f60\u597d\u4e16\u754c\u6d4b\u8bd5"
 	got := wrapText(text, limit)
 
 	if maxLineWidth(got) > limit {
 		t.Fatalf("wrapText produced a line wider than %d:\n%s", limit, got)
 	}
-	// Re-joining the chunks must reproduce the original text exactly.
 	if strings.ReplaceAll(got, "\n", "") != text {
 		t.Fatalf("chunks lost runes: got %q, want %q", got, text)
 	}
 }
 
-// TestWrapText_LongURLInSentence verifies a long URL inside a sentence is
-// hard-broken and surrounding words still wrap normally.
 func TestWrapText_LongURLInSentence(t *testing.T) {
 	const limit = 20
 	got := wrapText("see https://example.com/very/long/path/that/keeps/going/on forever", limit)
@@ -275,7 +234,6 @@ func TestWrapText_LongURLInSentence(t *testing.T) {
 	if maxLineWidth(got) > limit {
 		t.Fatalf("wrapText produced a line wider than %d:\n%s", limit, got)
 	}
-	// All content preserved (modulo wrapping).
 	if strings.Count(strings.ReplaceAll(got, "\n", ""), "a") == 0 {
 		t.Fatal("content lost during wrapping")
 	}

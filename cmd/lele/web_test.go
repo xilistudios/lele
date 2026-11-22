@@ -14,8 +14,6 @@ func TestParseWebServerOptions_Defaults(t *testing.T) {
 	if opts.Host != "0.0.0.0" {
 		t.Errorf("Host = %q, want %q", opts.Host, "0.0.0.0")
 	}
-	// Default port comes from EffectiveServerPort() which falls back to
-	// Server.Port (default 8080) or legacy Gateway.Port (18790)
 	if opts.Port <= 0 {
 		t.Errorf("Port = %d, should be > 0", opts.Port)
 	}
@@ -165,7 +163,6 @@ func TestServeEmbeddedWebApp_TrailingSlash(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	// Trailing slash should fall back to index.html
 	if rec.Code == 200 {
 		ct := rec.Header().Get("Content-Type")
 		if ct != "text/html; charset=utf-8" {
@@ -175,7 +172,6 @@ func TestServeEmbeddedWebApp_TrailingSlash(t *testing.T) {
 }
 
 func TestServeEmbeddedWebApp_NoEmbeddedFiles(t *testing.T) {
-	// Create an empty in-memory filesystem
 	emptyFS := fstest.MapFS{}
 	handler := serveEmbeddedWebApp(emptyFS)
 
@@ -183,7 +179,6 @@ func TestServeEmbeddedWebApp_NoEmbeddedFiles(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	// Should return 404 when no files exist
 	if rec.Code != 404 {
 		t.Errorf("Empty FS: status = %d, want 404", rec.Code)
 	}

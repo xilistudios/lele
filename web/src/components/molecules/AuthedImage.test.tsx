@@ -41,7 +41,6 @@ afterEach(() => {
 
 describe('AuthedImage', () => {
   test('loads immediately without IntersectionObserver and renders <img>', async () => {
-    // Remove IntersectionObserver to simulate jsdom
     // @ts-expect-error removing for test
     globalThis.IntersectionObserver = undefined
 
@@ -102,14 +101,11 @@ describe('AuthedImage', () => {
       ctx,
     )
 
-    // fileBlob should NOT have been called yet
     expect(fileBlob).toHaveBeenCalledTimes(0)
 
-    // Should show loading state
     const loadingEl = container.querySelector('[data-state="loading"]')
     expect(loadingEl).toBeTruthy()
 
-    // Simulate intersection
     const cb = savedCallback as ((entries: unknown[]) => void) | null
     cb?.([{ isIntersecting: true, target: container.firstChild }])
 
@@ -169,7 +165,6 @@ describe('AuthedImage', () => {
       expect(imgs.length).toBe(2)
     })
 
-    // fileBlob should only be called once due to deduplication
     expect(fileBlob).toHaveBeenCalledTimes(1)
   })
 
@@ -182,7 +177,6 @@ describe('AuthedImage', () => {
     const ctx = makeAuthCtx(fileBlob)
     const path = '/home/user/.lele/wk/attachments/20260919/abc_def_photo.png'
 
-    // --- First render: triggers a real fetch ---
     const { container, unmount } = renderWithAuth(<AuthedImage path={path} alt="a" />, ctx)
 
     await waitFor(() => {
@@ -195,7 +189,6 @@ describe('AuthedImage', () => {
 
     unmount()
 
-    // --- Second render: same path, module-level cache must still hold the entry ---
     const { container: container2 } = renderWithAuth(<AuthedImage path={path} alt="a" />, ctx)
 
     await waitFor(() => {
@@ -204,7 +197,6 @@ describe('AuthedImage', () => {
       expect(img2?.getAttribute('src')).toBe('blob:test-url/abc')
     })
 
-    // fileBlob must STILL have been called exactly once (cache hit, no refetch)
     expect(fileBlob).toHaveBeenCalledTimes(1)
   })
 
@@ -237,7 +229,6 @@ describe('AuthedImage', () => {
 
     const path = '/home/user/.lele/wk/attachments/20260919/retry_photo.png'
 
-    // --- First render: fileBlob rejects on call #1 ---
     const { container, unmount } = renderWithAuth(<AuthedImage path={path} alt="retry.png" />, ctx)
 
     await waitFor(() => {
@@ -250,7 +241,6 @@ describe('AuthedImage', () => {
 
     unmount()
 
-    // --- Second render: same path, fileBlob now resolves on call #2 ---
     const { container: container2 } = renderWithAuth(
       <AuthedImage path={path} alt="retry.png" />,
       ctx,
@@ -262,7 +252,6 @@ describe('AuthedImage', () => {
       expect(img?.getAttribute('src')).toBe('blob:test-url/abc')
     })
 
-    // fileBlob must have been called twice (once per render)
     expect(fileBlob).toHaveBeenCalledTimes(2)
     expect(callCount).toBe(2)
   })

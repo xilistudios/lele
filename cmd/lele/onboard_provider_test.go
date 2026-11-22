@@ -4,16 +4,13 @@ import (
 	"testing"
 )
 
-// TestProviderRegistry verifies the provider registry count
 func TestProviderRegistry(t *testing.T) {
 	registry := providerRegistry()
-	// 15 original + 24 optional catalog-backed providers + custom
 	if len(registry) != 40 {
 		t.Errorf("Expected 40 providers, got %d", len(registry))
 	}
 }
 
-// TestProviderRegistry_OpenCodeGo verifies the OpenCode Go entry.
 func TestProviderRegistry_OpenCodeGo(t *testing.T) {
 	registry := providerRegistry()
 
@@ -44,7 +41,6 @@ func TestProviderRegistry_OpenCodeGo(t *testing.T) {
 	}
 }
 
-// TestProviderRegistry_LocalProvider verifies Ollama is local
 func TestProviderRegistry_LocalProvider(t *testing.T) {
 	registry := providerRegistry()
 
@@ -63,21 +59,18 @@ func TestProviderRegistry_LocalProvider(t *testing.T) {
 	}
 }
 
-// TestProviderRegistry_DisplayNames verifies all providers have display names
 func TestProviderRegistry_DisplayNames(t *testing.T) {
 	providers := providerRegistry()
 	for _, p := range providers {
 		if p.displayName == "" {
 			t.Errorf("Provider %s has empty displayName", p.name)
 		}
-		// vllm and custom providers intentionally have empty apiBase (user-configured)
 		if p.apiBase == "" && p.name != "vllm" && p.name != "custom" {
 			t.Errorf("Provider %s has empty apiBase", p.name)
 		}
 	}
 }
 
-// TestProviderRegistry_TypeKeys verifies all providers have type keys (except custom)
 func TestProviderRegistry_TypeKeys(t *testing.T) {
 	registry := providerRegistry()
 
@@ -88,11 +81,9 @@ func TestProviderRegistry_TypeKeys(t *testing.T) {
 	}
 }
 
-// TestProviderRegistry_APIBaseURLs verifies API base URLs
 func TestProviderRegistry_APIBaseURLs(t *testing.T) {
 	registry := providerRegistry()
 
-	// Check specific providers
 	expectedBases := map[string]string{
 		"anthropic": "https://api.anthropic.com/v1",
 		"openai":    "https://api.openai.com/v1",
@@ -110,11 +101,9 @@ func TestProviderRegistry_APIBaseURLs(t *testing.T) {
 	}
 }
 
-// TestProviderRegistry_AuthHeaders verifies auth headers
 func TestProviderRegistry_AuthHeaders(t *testing.T) {
 	registry := providerRegistry()
 
-	// Anthropic should use x-api-key
 	for _, p := range registry {
 		if p.name == "anthropic" {
 			if p.authHeader != "x-api-key" {
@@ -124,7 +113,6 @@ func TestProviderRegistry_AuthHeaders(t *testing.T) {
 		}
 	}
 
-	// Others should use Bearer
 	for _, p := range registry {
 		if p.name != "anthropic" {
 			if p.authHeader != "Bearer" {
@@ -134,43 +122,34 @@ func TestProviderRegistry_AuthHeaders(t *testing.T) {
 	}
 }
 
-// TestValidateProvider_EdgeCases tests validateProvider edge cases
 func TestValidateProvider_EdgeCases(t *testing.T) {
-	// Empty apiKey returns false immediately (before localhost check)
 	if validateProvider("ollama", "", "localhost:11434/v1", "Bearer") {
 		t.Error("validateProvider with empty apiKey should return false")
 	}
 
-	// Empty apiBase returns false immediately
 	if validateProvider("ollama", "somekey", "", "Bearer") {
 		t.Error("validateProvider with empty apiBase should return false")
 	}
 
-	// Localhost with valid key returns true
 	if !validateProvider("ollama", "somekey", "localhost:11434/v1", "Bearer") {
 		t.Error("validateProvider with localhost and key should return true")
 	}
 
-	// http://localhost with valid key returns true
 	if !validateProvider("ollama", "somekey", "http://localhost:11434/v1", "Bearer") {
 		t.Error("validateProvider with http://localhost and key should return true")
 	}
 }
 
-// TestValidateProvider_FalseCases tests validateProvider returning false
 func TestValidateProvider_FalseCases(t *testing.T) {
-	// Empty API base should return false
 	if validateProvider("anthropic", "sk-test", "", "x-api-key") {
 		t.Error("validateProvider with empty apiBase should return false")
 	}
 
-	// Empty apiKey should return false (even with valid apiBase)
 	if validateProvider("anthropic", "", "https://api.anthropic.com/v1", "x-api-key") {
 		t.Error("validateProvider with empty apiKey should return false")
 	}
 }
 
-// TestProviderRegistry_CustomProvider verifies custom provider
 func TestProviderRegistry_CustomProvider(t *testing.T) {
 	registry := providerRegistry()
 
@@ -192,7 +171,6 @@ func TestProviderRegistry_CustomProvider(t *testing.T) {
 	}
 }
 
-// TestProviderRegistry_NoDuplicates verifies no duplicate provider names
 func TestProviderRegistry_NoDuplicates(t *testing.T) {
 	registry := providerRegistry()
 	seen := make(map[string]int, len(registry))
@@ -204,7 +182,6 @@ func TestProviderRegistry_NoDuplicates(t *testing.T) {
 	}
 }
 
-// TestProviderRegistry_ValidAuthHeaders verifies all auth headers are valid
 func TestProviderRegistry_ValidAuthHeaders(t *testing.T) {
 	registry := providerRegistry()
 	validHeaders := map[string]bool{
@@ -219,7 +196,6 @@ func TestProviderRegistry_ValidAuthHeaders(t *testing.T) {
 	}
 }
 
-// TestProviderRegistry_AllHaveDisplayName verifies all providers have display names
 func TestProviderRegistry_AllHaveDisplayName(t *testing.T) {
 	registry := providerRegistry()
 

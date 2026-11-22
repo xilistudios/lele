@@ -11,7 +11,7 @@ import (
 
 type GitHubCopilotProvider struct {
 	uri         string
-	connectMode string // `stdio` or `grpc``
+	connectMode string
 
 	client  *copilot.Client
 	session *copilot.Session
@@ -27,7 +27,6 @@ func NewGitHubCopilotProvider(uri string, connectMode string, model string) (*Gi
 	switch connectMode {
 
 	case "stdio":
-		//todo
 	case "grpc":
 		client = copilot.NewClient(&copilot.ClientOptions{
 			CLIUrl: uri,
@@ -55,14 +54,12 @@ func NewGitHubCopilotProvider(uri string, connectMode string, model string) (*Gi
 	}, nil
 }
 
-// Close stops the underlying copilot client, if any.
 func (p *GitHubCopilotProvider) Close() {
 	if p.client != nil {
 		p.client.Stop()
 	}
 }
 
-// Chat sends a chat request to GitHub Copilot
 func (p *GitHubCopilotProvider) Chat(ctx context.Context, messages []Message, tools []ToolDefinition, model string, options map[string]interface{}) (*LLMResponse, error) {
 	if p.session == nil {
 		return nil, fmt.Errorf("copilot session not initialized")

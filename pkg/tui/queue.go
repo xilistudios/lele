@@ -10,22 +10,10 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// maxQueuedMessages caps the client-side queue so a stuck backend cannot grow
-// the list without bound. 10 matches the WebUI queue cap.
 const maxQueuedMessages = 10
 
-// queueRetryInterval bounds how often a deferred flush is re-checked while the
-// session is idle but the UI cannot accept a turn (modal open, approval
-// pending, autocomplete showing). A session that is actually working already
-// ticks faster, so this only has to be quick enough to feel instant once the
-// blocker clears — without spinning a 10 Hz re-render loop for a modal the user
-// left open.
 const queueRetryInterval = 500 * time.Millisecond
 
-// queueRetryCmd arms the deferred-flush retry. It reuses tickMsg and the shared
-// tickPending latch so a session that is already animating does not get a
-// second tick chain, and the existing tick handler stays the single place that
-// resets the latch.
 func (m *Model) queueRetryCmd() tea.Cmd {
 	if m.tickPending {
 		return nil
@@ -34,24 +22,14 @@ func (m *Model) queueRetryCmd() tea.Cmd {
 	return tea.Tick(queueRetryInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
-// queuedMessage is a message the user submitted while the agent was busy.
-// Messages are stored per session key (Model.messageQueue) and flushed FIFO
-// once that session is idle.
 type queuedMessage struct {
 	Content string
 }
 
-// enqueueMessage appends content to the current session's FIFO queue. It
-// returns false when the queue is already at maxQueuedMessages, and surfaces
-// why in queueFeedback so the caller can leave the text where it is instead of
-// dropping it silently.
 func (m *Model) enqueueMessage(content string) bool {
 	return m.enqueueMessageTo(m.currentKey, content)
 }
 
-// enqueueMessageTo appends content to the FIFO queue of an explicit session
-// key. It exists for callers that must queue into a session other than the one
-// on screen; Enter paths use enqueueMessage (current session).
 func (m *Model) enqueueMessageTo(key, content string) bool {
 	if len(m.messageQueue[key]) >= maxQueuedMessages {
 		m.queueFeedback = fmt.Sprintf(i18n.T("tui.queue.full"), maxQueuedMessages)
@@ -65,23 +43,10 @@ func (m *Model) enqueueMessageTo(key, content string) bool {
 	return true
 }
 
-// groupStartCommand wraps a group-mode task into the exact string
-// submitGroupStart publishes to the bus ("/group start <profileID> <task>").
-// Sharing the format between the live submit and the busy-enqueue path is what
-// keeps a queued group turn identical to one started while idle.
 func groupStartCommand(profileID, task string) string {
 	return fmt.Sprintf("/group start %s %s", profileID, task)
 }
 
-// enqueueCurrentInputWhileBusy is the busy-time enqueue for the composer
-// content: the text is parked in the current session's queue, cleared from the
-// composer (so it cannot be edited or duplicated by further typing) and the
-// animation tick is armed. It returns the command the Enter handler should
-// batch, mirroring enqueueCurrentInput.
-//
-// The tick matters because the busy flag that routed the message here can be
-// stale, and without a live tick chain nothing would ever drain the queue.
-// tickCmd() is a no-op when a tick is already pending.
 func (m *Model) enqueueCurrentInputWhileBusy(content string) tea.Cmd {
 	if !m.enqueueMessage(content) {
 		return nil
@@ -90,9 +55,6 @@ func (m *Model) enqueueCurrentInputWhileBusy(content string) tea.Cmd {
 	return m.tickCmd()
 }
 
-// removeLastQueued drops the most recently queued message of the current
-// session (LIFO undo of an accidental Enter while busy). It only acts when
-// there is a backlog and reports the result through queueFeedback.
 func (m *Model) removeLastQueued() {
 	q := m.messageQueue[m.currentKey]
 	if len(q) == 0 {
@@ -106,11 +68,6 @@ func (m *Model) removeLastQueued() {
 	m.messageQueue[m.currentKey] = q[:len(q)-1]
 }
 
-// pruneQueueToSessions drops queued backlogs for sessions that no longer
-// exist, so messages of a deleted chat cannot linger in memory forever or be
-// resurrected under a reused key. The current session is always kept — a fresh
-// chat is only registered in the session list after its first turn, and
-// pruning it would wipe the backlog the user just typed.
 func (m *Model) pruneQueueToSessions(liveKeys []string) {
 	if len(m.messageQueue) == 0 {
 		return
@@ -129,19 +86,6 @@ func (m *Model) pruneQueueToSessions(liveKeys []string) {
 	}
 }
 
-// enqueueCurrentInput handles Enter while the agent is busy: the composer
-// content is parked in the current session's FIFO queue and cleared, so the
-// message cannot be edited or duplicated by further typing. A full queue keeps
-// the text in the composer and surfaces queueFeedback instead.
-//
-// Enter with an empty composer attempts an immediate flush instead, which is a
-// no-op unless the session really is idle (only the local busy flags were set).
-//
-// A successful enqueue arms the animation tick: the busy flag that routed the
-// message here can be stale (m.processing outlives the turn past its startup
-// grace), and without a live tick chain nothing would ever drain the queue.
-// tickCmd() is a no-op when a tick is already pending, so a genuinely busy
-// session does not get a second chain.
 func (m *Model) enqueueCurrentInput() tea.Cmd {
 	content := strings.TrimSpace(m.chatInput.Value())
 	if content == "" {
@@ -154,28 +98,13 @@ func (m *Model) enqueueCurrentInput() tea.Cmd {
 	return m.tickCmd()
 }
 
-// maybeFlushQueue pops the oldest queued message for the current session and
-// starts a turn with it, unless the session is busy or the UI cannot accept a
-// new turn right now. A deferred flush returns a retry tick so the queue always
-// drains eventually, even if the blocking condition clears without another
-// queue-aware event.
-//
-// Returns nil when there is nothing pending or the head was published.
 func (m *Model) maybeFlushQueue() tea.Cmd {
 	if len(m.messageQueue[m.currentKey]) == 0 {
 		return nil
 	}
-	// An open modal, autocomplete popup or pending approval owns the screen
-	// and the input path, so flushing now would interleave a turn with the UI.
-	// The slower retry cadence keeps a left-open modal from spinning a re-render
-	// loop while its backlog waits.
 	if m.modalMode != ModalNone || m.showAutocomplete || m.pendingApprovalID != "" {
 		return m.queueRetryCmd()
 	}
-	// Re-checking busy state here makes every call site safe by construction.
-	// isSessionProcessing() covers m.processing (startup grace + stale reset)
-	// and the backend's own busy flag; running subagents are deliberately NOT
-	// part of it, so background work cannot hold the queue closed.
 	if m.isSessionProcessing() {
 		return m.tickCmd()
 	}
@@ -185,14 +114,9 @@ func (m *Model) maybeFlushQueue() tea.Cmd {
 		return nil
 	}
 	m.queueFeedback = ""
-	// publishUserMessage renders the message in the transcript (pendingUser-
-	// Message cache key) and returns the tick chain that drives the next flush
-	// when this turn completes.
 	return m.publishUserMessage(content)
 }
 
-// popQueuedMessage removes and returns the oldest message for the given
-// session key. Messages for other keys stay queued untouched.
 func (m *Model) popQueuedMessage(key string) (string, bool) {
 	q := m.messageQueue[key]
 	if len(q) == 0 {
@@ -207,16 +131,6 @@ func (m *Model) popQueuedMessage(key string) (string, bool) {
 	return content, true
 }
 
-// forceSendNextQueued pops the oldest queued message and starts a turn with it
-// immediately (/flushq, alt+enter). Unlike maybeFlushQueue it does not defer
-// while the agent is busy: the current turn is cancelled first so the queued
-// message can go out at once — but only after a deliberate double press, the
-// same confirmation ESC uses for a destructive cancel. An empty queue is a
-// no-op with feedback so the command never looks like it swallowed the input.
-//
-// UI-exclusivity (modal / autocomplete / approval) is still honoured: a force
-// send must never start a turn under an open overlay, even though callers such
-// as handleNormalKey already sit outside those surfaces today.
 func (m *Model) forceSendNextQueued() tea.Cmd {
 	if m.queueDepth() == 0 {
 		m.queueFeedback = i18n.T("tui.queue.empty")
@@ -226,8 +140,6 @@ func (m *Model) forceSendNextQueued() tea.Cmd {
 		return m.queueRetryCmd()
 	}
 	if m.isSessionProcessing() {
-		// StopAgent is destructive (subagent tree, group runs, background
-		// processes). Mirror ESC: first press only asks for confirmation.
 		now := time.Now()
 		if now.Sub(m.flushLastPress) >= escHintTimeout {
 			m.flushLastPress = now
@@ -235,9 +147,6 @@ func (m *Model) forceSendNextQueued() tea.Cmd {
 			return nil
 		}
 		m.flushLastPress = time.Time{}
-		// Cancel the in-flight turn, then force the local busy flags off so
-		// publishUserMessage can start the queued turn without racing the
-		// (now cancelled) backend loop.
 		if m.agentLoop != nil && m.agentLoop.GetProvidable() != nil {
 			m.agentLoop.GetProvidable().StopAgent(m.currentKey)
 		}
@@ -253,20 +162,15 @@ func (m *Model) forceSendNextQueued() tea.Cmd {
 	return m.publishUserMessage(content)
 }
 
-// clearQueue drops all pending messages for the current session (/clearq).
-// Other sessions keep their backlog and flush when they become active.
 func (m *Model) clearQueue() {
 	delete(m.messageQueue, m.currentKey)
 	m.queueFeedback = ""
 }
 
-// queueDepth returns the number of pending messages for the current session.
 func (m *Model) queueDepth() int {
 	return len(m.messageQueue[m.currentKey])
 }
 
-// queuePreview returns the content of the oldest pending message for the
-// current session, or "" when the queue is empty.
 func (m *Model) queuePreview() string {
 	q := m.messageQueue[m.currentKey]
 	if len(q) == 0 {
@@ -275,43 +179,14 @@ func (m *Model) queuePreview() string {
 	return q[0].Content
 }
 
-// queueRemoveKey is the key that removes the last queued message. It is
-// declared here so the handler, the tests and the status-line hint cannot
-// drift apart. bubbletea reports it as "alt+delete" (ESC [ 3 ; 3 ~).
 const queueRemoveKey = "alt+delete"
 
-// queueFlushKey is the key that force-sends the next queued message. Declared
-// next to the other queue key so the handler and the hint stay in sync.
-// bubbletea reports alt+enter (KeyEnter + Alt) as "alt+enter"; plain ctrl+enter
-// is indistinguishable from enter on most terminals.
 const queueFlushKey = "alt+enter"
 
-// queueRowLine renders the band that sits between the transcript and the
-// process indicator: the depth of the current session's queue plus the oldest
-// pending message, so the user can see *what* is about to be sent without
-// opening anything. The depth is scoped to the session on screen, so switching
-// sessions cannot display a stale count.
-//
-// This band is the only place the queue surfaces in the TUI — the status line
-// belongs to the process indicator — so the transient queue feedback ("queue
-// full", "removed last …") is rendered here as well, and it takes over the band
-// even when the queue is empty (e.g. after the last message was removed).
-//
-// It returns "" when there is nothing to say. An empty band costs zero lines:
-// calculateViewportHeight measures the rendered string, so an idle queue leaves
-// the transcript its full height.
-//
-// The preview is sanitized, collapsed to a single line and truncated to the
-// cells that remain after the prefix. A multi-line message must not wrap: the
-// viewport budget reserves exactly one line for this band, so an overflow would
-// push the input bar past the terminal height. The locale template carries the
-// separator itself, so the prefix is joined to the preview verbatim.
 func (m *Model) queueRowLine(available int) string {
 	if available < 1 {
 		return ""
 	}
-	// Feedback is time-sensitive (a rejected or removed message) and outranks
-	// the depth/preview pair, which comes back as soon as it clears.
 	if m.queueFeedback != "" {
 		return truncateRightCells(m.queueFeedback, available)
 	}
@@ -321,12 +196,7 @@ func (m *Model) queueRowLine(available int) string {
 		return ""
 	}
 
-	// The locale template already ends with the " · " separator (same
-	// convention as tui.queue.removeHint), so no separator is added here.
 	prefix := fmt.Sprintf(i18n.T("tui.queue.row"), n)
-	// Remaining cells for the preview after the prefix. When even the prefix
-	// alone does not fit, the depth still wins over the message text: the
-	// count is the load-bearing information.
 	budget := available - lipgloss.Width(prefix)
 	if budget < 1 {
 		return truncateRightCells(strings.TrimRight(prefix, " "), available)

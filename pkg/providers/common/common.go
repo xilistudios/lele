@@ -1,10 +1,3 @@
-// PicoClaw - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 PicoClaw contributors
-
-// Package common provides shared utilities used by multiple LLM provider
-// implementations (openai_compat, azure, etc.).
 package common
 
 import (
@@ -23,7 +16,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
 
-// Re-export protocol types used across providers.
 type (
 	ToolCall               = protocoltypes.ToolCall
 	FunctionCall           = protocoltypes.FunctionCall
@@ -39,30 +31,12 @@ type (
 
 const DefaultRequestTimeout = 120 * time.Second
 
-// DefaultResponseHeaderTimeout is how long to wait for the server to send
-// response headers before giving up (detects a hung/dead server).
 const DefaultResponseHeaderTimeout = DefaultRequestTimeout
 
-// DefaultStreamIdleTimeout is the maximum time allowed between streamed
-// bytes before the connection is considered stalled. This is the guard used
-// for long-reasoning models: the request may run for many minutes as long as
-// data keeps flowing.
-//
-// It must stay well above DefaultRequestTimeout: some gateways buffer a
-// reasoning model's thinking tokens and emit nothing until the answer starts,
-// so a tight idle window would reintroduce the very failure this replaces.
 const DefaultStreamIdleTimeout = 5 * time.Minute
 
-// MaxRequestLifetime is an absolute upper bound on a single LLM request,
-// applied on top of the idle timeout. An idle timeout alone cannot detect a
-// misbehaving upstream that dribbles a byte every few seconds forever, so this
-// acts as defence in depth. It is deliberately far above any legitimate
-// reasoning time.
 const MaxRequestLifetime = 30 * time.Minute
 
-// newTransport builds an *http.Transport cloning http.DefaultTransport and
-// applying an optional proxy. headerTimeout is the ResponseHeaderTimeout; pass
-// 0 to leave it unset.
 func newTransport(proxy string, headerTimeout time.Duration) *http.Transport {
 	if base, ok := http.DefaultTransport.(*http.Transport); ok {
 		tr := base.Clone()
@@ -79,7 +53,6 @@ func newTransport(proxy string, headerTimeout time.Duration) *http.Transport {
 		}
 		return tr
 	}
-	// Fallback: minimal transport if DefaultTransport is not *http.Transport.
 	tr := &http.Transport{}
 	if headerTimeout > 0 {
 		tr.ResponseHeaderTimeout = headerTimeout
@@ -93,7 +66,6 @@ func newTransport(proxy string, headerTimeout time.Duration) *http.Transport {
 	return tr
 }
 
-// NewHTTPClient creates an *http.Client with an optional proxy and the default timeout.
 func NewHTTPClient(proxy string) *http.Client {
 	client := &http.Client{
 		Timeout: DefaultRequestTimeout,
@@ -104,10 +76,6 @@ func NewHTTPClient(proxy string) *http.Client {
 	return client
 }
 
-// NewStreamingHTTPClient creates an *http.Client tuned for long-lived
-// streaming responses: no total timeout (a reasoning model may stream for
-// minutes), but a ResponseHeaderTimeout so a hung/dead server is still
-// detected quickly.
 func NewStreamingHTTPClient(proxy string) *http.Client {
 	return &http.Client{
 		Timeout:   0,
@@ -115,10 +83,6 @@ func NewStreamingHTTPClient(proxy string) *http.Client {
 	}
 }
 
-// IdleTimeoutReader enforces a maximum idle time between reads. If no data
-// arrives within `timeout`, the underlying reader is closed and Read returns a
-// descriptive error. Long-lived streams can run indefinitely as long as data
-// keeps flowing, while a stalled connection is still detected.
 type IdleTimeoutReader struct {
 	r       io.ReadCloser
 	timeout time.Duration
@@ -127,8 +91,6 @@ type IdleTimeoutReader struct {
 	err     error
 }
 
-// NewIdleTimeoutReader wraps r with an idle timeout. If timeout <= 0, r is
-// returned unchanged (no idle timeout).
 func NewIdleTimeoutReader(r io.ReadCloser, timeout time.Duration) io.ReadCloser {
 	if timeout <= 0 {
 		return r
@@ -170,7 +132,6 @@ func (itr *IdleTimeoutReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// Close closes the underlying reader, stopping the idle timeout timer.
 func (itr *IdleTimeoutReader) Close() error {
 	itr.mu.Lock()
 	if itr.timer != nil {
@@ -187,11 +148,6 @@ func (itr *IdleTimeoutReader) Close() error {
 	return err
 }
 
-// --- Message serialization ---
-
-// openaiMessage is the wire-format message for OpenAI-compatible APIs.
-// It mirrors protocoltypes.Message but omits SystemParts, which is an
-// internal field that would be unknown to third-party endpoints.
 type openaiMessage struct {
 	Role             string     `json:"role"`
 	Content          any        `json:"content"`
@@ -200,16 +156,9 @@ type openaiMessage struct {
 	ToolCallID       string     `json:"tool_call_id,omitempty"`
 }
 
-// SerializeMessages converts internal Message structs to the OpenAI wire format.
-//   - Strips SystemParts (unknown to third-party endpoints)
-//   - Converts messages with ContentParts to multipart content (text + image_url + video_url)
-//   - Converts messages with Media to multipart content format (text + image_url/video_url/input_audio parts)
-//   - If both ContentParts and Media are present, merges them (ContentParts first)
-//   - Preserves ToolCallID, ToolCalls, and ReasoningContent for all messages
 func SerializeMessages(messages []Message) []any {
 	out := make([]any, 0, len(messages))
 	for _, m := range messages {
-		// Determine if we need multipart content
 		hasContentParts := len(m.ContentParts) > 0
 		hasMedia := len(m.Media) > 0
 
@@ -224,10 +173,8 @@ func SerializeMessages(messages []Message) []any {
 			continue
 		}
 
-		// Multipart content format for messages with images/media
 		parts := make([]map[string]any, 0, 1+len(m.ContentParts)+len(m.Media))
 
-		// First, add ContentParts if present (from read_image tool etc.)
 		for _, part := range m.ContentParts {
 			switch part.Type {
 			case "text":
@@ -262,11 +209,9 @@ func SerializeMessages(messages []Message) []any {
 					"video_url": videoURL,
 				})
 			case "input_audio":
-				// Input audio is only available via Media path
 			}
 		}
 
-		// Then, add text content if present (and not already added via ContentParts)
 		if m.Content != "" {
 			parts = append(parts, map[string]any{
 				"type": "text",
@@ -274,7 +219,6 @@ func SerializeMessages(messages []Message) []any {
 			})
 		}
 
-		// Then, add Media if present (from channel attachments)
 		for _, mediaURL := range m.Media {
 			if strings.HasPrefix(mediaURL, "data:image/") {
 				parts = append(parts, map[string]any{
@@ -318,9 +262,6 @@ func SerializeMessages(messages []Message) []any {
 			msg["tool_calls"] = m.ToolCalls
 		}
 		if m.Role == "assistant" {
-			// Always include reasoning_content for assistant messages.
-			// Some providers (e.g. Moonshot AI) require it when reasoning/thinking is
-			// enabled, even if the content is empty. Missing the field causes 400 errors.
 			msg["reasoning_content"] = m.ReasoningContent
 		}
 		out = append(out, msg)
@@ -348,9 +289,6 @@ func parseDataAudioURL(mediaURL string) (format, data string, ok bool) {
 	return format, data, true
 }
 
-// --- Response parsing ---
-
-// ParseResponse parses a JSON chat completion response body into an LLMResponse.
 func ParseResponse(body io.Reader) (*LLMResponse, error) {
 	var apiResponse struct {
 		Choices []struct {
@@ -395,7 +333,6 @@ func ParseResponse(body io.Reader) (*LLMResponse, error) {
 		arguments := make(map[string]any)
 		name := ""
 
-		// Extract thought_signature from Gemini/Google-specific extra content
 		thoughtSignature := ""
 		if tc.ExtraContent != nil && tc.ExtraContent.Google != nil {
 			thoughtSignature = tc.ExtraContent.Google.ThoughtSignature
@@ -437,8 +374,6 @@ func ParseResponse(body io.Reader) (*LLMResponse, error) {
 	}, nil
 }
 
-// normalizeFinishReason normalizes finish_reason values across providers.
-// Converts "length" to "truncated" for consistent handling.
 func normalizeFinishReason(reason string) string {
 	if reason == "length" {
 		return "truncated"
@@ -446,20 +381,11 @@ func normalizeFinishReason(reason string) string {
 	return reason
 }
 
-// DecodeToolCallArguments decodes a tool call's arguments from raw JSON.
 func DecodeToolCallArguments(raw json.RawMessage, name string) map[string]any {
 	arguments, _ := DecodeToolCallArgumentsTruncated(raw, name)
 	return arguments
 }
 
-// DecodeToolCallArgumentsTruncated decodes a tool call's arguments and reports
-// whether the payload arrived cut off mid-write.
-//
-// A provider that stops the stream inside a value (the model spent its output
-// budget) leaves a JSON object that never closed. The repair pass keeps what
-// completed, so the result is valid JSON and nothing downstream can tell that
-// the tail - usually a large "content" field - is missing. The flag carries
-// that knowledge to the agent loop, which must not execute such a call.
 func DecodeToolCallArgumentsTruncated(raw json.RawMessage, name string) (map[string]any, bool) {
 	arguments := make(map[string]any)
 	raw = bytes.TrimSpace(raw)
@@ -473,8 +399,6 @@ func DecodeToolCallArgumentsTruncated(raw json.RawMessage, name string) (map[str
 			return repaired, true
 		}
 		log.Printf("common: failed to decode tool call arguments payload for %q: %v", name, err)
-		// It opened like an object but could not be rebuilt: the payload was
-		// incomplete, even though there is nothing salvageable in it.
 		return arguments, raw[0] == '{'
 	}
 
@@ -497,8 +421,6 @@ func DecodeToolCallArgumentsTruncated(raw json.RawMessage, name string) (map[str
 	}
 }
 
-// decodeJSONObjectTruncated decodes an object payload and reports whether it
-// had to be repaired because it arrived cut off.
 func decodeJSONObjectTruncated(raw []byte) (map[string]any, bool) {
 	var arguments map[string]any
 	trimmed := bytes.TrimSpace(raw)
@@ -512,10 +434,6 @@ func decodeJSONObjectTruncated(raw []byte) (map[string]any, bool) {
 	return repaired, true
 }
 
-// repairTruncatedJSONObject recovers the fields from an object cut off by a
-// provider at the end of a response. It deliberately returns an empty map
-// when recovery is not safe instead of passing a synthetic "raw" argument to
-// the tool, since raw is not part of any tool schema.
 func repairTruncatedJSONObject(raw []byte) (map[string]any, bool) {
 	truncated := bytes.TrimSpace(raw)
 	if len(truncated) == 0 || truncated[0] != '{' {
@@ -578,12 +496,6 @@ func repairTruncatedJSONObject(raw []byte) (map[string]any, bool) {
 	return repaired, true
 }
 
-// --- HTTP response helpers ---
-
-// HandleErrorResponse reads a non-200 response body and returns an appropriate
-// error. HTML responses keep their dedicated descriptive error; everything else
-// becomes a structured *APIError so the status code and the Retry-After hint
-// survive down to the classifier instead of being rebuilt from the message.
 func HandleErrorResponse(resp *http.Response, apiBase string) error {
 	contentType := resp.Header.Get("Content-Type")
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 256))
@@ -593,13 +505,9 @@ func HandleErrorResponse(resp *http.Response, apiBase string) error {
 	if LooksLikeHTML(body, contentType) {
 		return WrapHTMLResponseError(resp.StatusCode, body, contentType, apiBase)
 	}
-	// Truncation stays here (not in NewAPIError) so providers that render the
-	// full body keep their current observable error text.
 	return NewAPIError(resp, []byte(ResponsePreview(body, 128)), apiBase)
 }
 
-// ReadAndParseResponse peeks at the response body to detect HTML errors,
-// then parses the JSON response into an LLMResponse.
 func ReadAndParseResponse(resp *http.Response, apiBase string) (*LLMResponse, error) {
 	contentType := resp.Header.Get("Content-Type")
 	reader := bufio.NewReader(resp.Body)
@@ -617,7 +525,6 @@ func ReadAndParseResponse(resp *http.Response, apiBase string) (*LLMResponse, er
 	return out, nil
 }
 
-// LooksLikeHTML checks if the response body appears to be HTML.
 func LooksLikeHTML(body []byte, contentType string) bool {
 	contentType = strings.ToLower(strings.TrimSpace(contentType))
 	if strings.Contains(contentType, "text/html") || strings.Contains(contentType, "application/xhtml+xml") {
@@ -630,7 +537,6 @@ func LooksLikeHTML(body []byte, contentType string) bool {
 		bytes.HasPrefix(prefix, []byte("<body"))
 }
 
-// WrapHTMLResponseError creates a descriptive error for HTML responses.
 func WrapHTMLResponseError(statusCode int, body []byte, contentType, apiBase string) error {
 	respPreview := ResponsePreview(body, 128)
 	return fmt.Errorf(
@@ -642,7 +548,6 @@ func WrapHTMLResponseError(statusCode int, body []byte, contentType, apiBase str
 	)
 }
 
-// ResponsePreview returns a truncated preview of response body for error messages.
 func ResponsePreview(body []byte, maxLen int) string {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 {
@@ -654,9 +559,6 @@ func ResponsePreview(body []byte, maxLen int) string {
 	return string(trimmed[:maxLen]) + "..."
 }
 
-// SanitizeToolCallID ensures a tool call ID is valid for all providers.
-// Anthropic requires IDs to match ^[a-zA-Z0-9_-]+$. Any character outside
-// this set is replaced with '_'. If the result is empty, a fallback ID is returned.
 func SanitizeToolCallID(id string) string {
 	if id == "" {
 		return "tool_call_0"
@@ -694,9 +596,6 @@ func leadingTrimmedPrefix(body []byte, maxLen int) []byte {
 	return nil
 }
 
-// --- Numeric helpers ---
-
-// AsInt converts various numeric types to int.
 func AsInt(v any) (int, bool) {
 	switch val := v.(type) {
 	case int:
@@ -712,7 +611,6 @@ func AsInt(v any) (int, bool) {
 	}
 }
 
-// AsFloat converts various numeric types to float64.
 func AsFloat(v any) (float64, bool) {
 	switch val := v.(type) {
 	case float64:

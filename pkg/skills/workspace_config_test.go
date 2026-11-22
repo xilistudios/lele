@@ -79,7 +79,6 @@ func TestSaveWorkspaceConfig_CreateDir(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify file was created
 	cfgPath := filepath.Join(tmpDir, ".lele", "workspace.json")
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
@@ -112,7 +111,6 @@ func TestSaveWorkspaceConfig_PreservesOtherFields(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Write existing config with non-skills fields
 	existingData := `{"skills":{"enabled":["old"]},"other_field":"preserved"}`
 	if err := os.WriteFile(filepath.Join(leleDir, "workspace.json"), []byte(existingData), 0644); err != nil {
 		t.Fatal(err)
@@ -127,7 +125,6 @@ func TestSaveWorkspaceConfig_PreservesOtherFields(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify other field is preserved
 	data, err := os.ReadFile(filepath.Join(leleDir, "workspace.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +144,6 @@ func TestSaveWorkspaceConfig_PreservesOtherFields(t *testing.T) {
 func TestIsEnabled_Default(t *testing.T) {
 	cfg := &WorkspaceSkillsConfig{}
 
-	// Unknown skills should default to enabled
 	if !cfg.IsEnabled("unknown-skill") {
 		t.Error("expected unknown skill to be enabled by default")
 	}
@@ -187,13 +183,11 @@ func TestSetEnabled_FromDisabled(t *testing.T) {
 	if !cfg.IsEnabled("github") {
 		t.Error("expected 'github' to be enabled after SetEnabled")
 	}
-	// Should be removed from disabled
 	for _, d := range cfg.Disabled {
 		if d == "github" {
 			t.Error("'github' should have been removed from disabled list")
 		}
 	}
-	// Should be in enabled list
 	found := false
 	for _, e := range cfg.Enabled {
 		if e == "github" {
@@ -217,13 +211,11 @@ func TestSetDisabled_FromEnabled(t *testing.T) {
 	if cfg.IsEnabled("github") {
 		t.Error("expected 'github' to be disabled after SetDisabled")
 	}
-	// Should be removed from enabled
 	for _, e := range cfg.Enabled {
 		if e == "github" {
 			t.Error("'github' should have been removed from enabled list")
 		}
 	}
-	// Should be in disabled list
 	found := false
 	for _, d := range cfg.Disabled {
 		if d == "github" {
@@ -239,7 +231,6 @@ func TestSetDisabled_FromEnabled(t *testing.T) {
 func TestToggle(t *testing.T) {
 	cfg := &WorkspaceSkillsConfig{}
 
-	// Toggle unknown skill -> disabled
 	enabled := cfg.Toggle("github")
 	if enabled {
 		t.Error("expected 'github' to be disabled after first toggle")
@@ -248,7 +239,6 @@ func TestToggle(t *testing.T) {
 		t.Error("expected 'github' to be disabled")
 	}
 
-	// Toggle again -> enabled
 	enabled = cfg.Toggle("github")
 	if !enabled {
 		t.Error("expected 'github' to be enabled after second toggle")
@@ -263,9 +253,8 @@ func TestSetEnabled_Idempotent(t *testing.T) {
 		Enabled: []string{"github"},
 	}
 
-	cfg.SetEnabled("github") // Already enabled
+	cfg.SetEnabled("github")
 
-	// Should not duplicate
 	count := 0
 	for _, e := range cfg.Enabled {
 		if e == "github" {
@@ -282,9 +271,8 @@ func TestSetDisabled_Idempotent(t *testing.T) {
 		Disabled: []string{"hardware"},
 	}
 
-	cfg.SetDisabled("hardware") // Already disabled
+	cfg.SetDisabled("hardware")
 
-	// Should not duplicate
 	count := 0
 	for _, d := range cfg.Disabled {
 		if d == "hardware" {
@@ -334,12 +322,10 @@ func TestWorkspaceConfigManager(t *testing.T) {
 		t.Fatalf("failed to create manager: %v", err)
 	}
 
-	// Default: everything enabled
 	if !mgr.IsEnabled("github") {
 		t.Error("expected 'github' to be enabled by default")
 	}
 
-	// Disable a skill
 	if err := mgr.SetDisabled("github"); err != nil {
 		t.Fatalf("failed to disable: %v", err)
 	}
@@ -347,7 +333,6 @@ func TestWorkspaceConfigManager(t *testing.T) {
 		t.Error("expected 'github' to be disabled")
 	}
 
-	// Verify persistence
 	mgr2, err := NewWorkspaceConfigManager(tmpDir)
 	if err != nil {
 		t.Fatalf("failed to create second manager: %v", err)
@@ -356,7 +341,6 @@ func TestWorkspaceConfigManager(t *testing.T) {
 		t.Error("expected 'github' to be disabled after reload")
 	}
 
-	// Toggle
 	enabled, err := mgr2.Toggle("github")
 	if err != nil {
 		t.Fatalf("failed to toggle: %v", err)
@@ -365,7 +349,6 @@ func TestWorkspaceConfigManager(t *testing.T) {
 		t.Error("expected 'github' to be enabled after toggle")
 	}
 
-	// GetConfig returns a copy
 	cfg := mgr2.GetConfig()
 	if len(cfg.Disabled) != 0 {
 		t.Error("expected empty disabled list after toggle")

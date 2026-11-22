@@ -18,7 +18,6 @@ export function useAvailableModels(api: ApiClient | null) {
     isReloading: false,
     error: null,
   })
-  // Guards against out-of-order responses when `api` changes mid-flight.
   const generationRef = useRef(0)
 
   useEffect(() => {
@@ -27,7 +26,6 @@ export function useAvailableModels(api: ApiClient | null) {
     const generation = ++generationRef.current
 
     const loadModels = async () => {
-      // Distinguish first load (no data yet) from background refetch.
       setState((prev) => {
         const isFirstLoad = prev.available.length === 0 && prev.groups.length === 0
         return {

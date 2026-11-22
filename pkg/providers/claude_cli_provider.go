@@ -9,13 +9,11 @@ import (
 	"strings"
 )
 
-// ClaudeCliProvider implements LLMProvider using the claude CLI as a subprocess.
 type ClaudeCliProvider struct {
 	command   string
 	workspace string
 }
 
-// NewClaudeCliProvider creates a new Claude CLI provider.
 func NewClaudeCliProvider(workspace string) *ClaudeCliProvider {
 	return &ClaudeCliProvider{
 		command:   "claude",
@@ -23,7 +21,6 @@ func NewClaudeCliProvider(workspace string) *ClaudeCliProvider {
 	}
 }
 
-// Chat implements LLMProvider.Chat by executing the claude CLI.
 func (p *ClaudeCliProvider) Chat(ctx context.Context, messages []Message, tools []ToolDefinition, model string, options map[string]interface{}) (*LLMResponse, error) {
 	systemPrompt := p.buildSystemPrompt(messages, tools)
 	prompt := p.messagesToPrompt(messages)
@@ -35,7 +32,7 @@ func (p *ClaudeCliProvider) Chat(ctx context.Context, messages []Message, tools 
 	if model != "" && model != "claude-code" {
 		args = append(args, "--model", model)
 	}
-	args = append(args, "-") // read from stdin
+	args = append(args, "-")
 
 	cmd := exec.CommandContext(ctx, p.command, args...)
 	if p.workspace != "" {
@@ -57,19 +54,16 @@ func (p *ClaudeCliProvider) Chat(ctx context.Context, messages []Message, tools 
 	return p.parseClaudeCliResponse(stdout.String())
 }
 
-// GetDefaultModel returns the default model identifier.
 func (p *ClaudeCliProvider) GetDefaultModel() string {
 	return "claude-code"
 }
 
-// messagesToPrompt converts messages to a CLI-compatible prompt string.
 func (p *ClaudeCliProvider) messagesToPrompt(messages []Message) string {
 	var parts []string
 
 	for _, msg := range messages {
 		switch msg.Role {
 		case "system":
-			// handled via --system-prompt flag
 		case "user":
 			parts = append(parts, "User: "+msg.Content)
 		case "assistant":
@@ -79,7 +73,6 @@ func (p *ClaudeCliProvider) messagesToPrompt(messages []Message) string {
 		}
 	}
 
-	// Simplify single user message
 	if len(parts) == 1 && strings.HasPrefix(parts[0], "User: ") {
 		return strings.TrimPrefix(parts[0], "User: ")
 	}
@@ -87,7 +80,6 @@ func (p *ClaudeCliProvider) messagesToPrompt(messages []Message) string {
 	return strings.Join(parts, "\n")
 }
 
-// buildSystemPrompt combines system messages and tool definitions.
 func (p *ClaudeCliProvider) buildSystemPrompt(messages []Message, tools []ToolDefinition) string {
 	var parts []string
 
@@ -104,7 +96,6 @@ func (p *ClaudeCliProvider) buildSystemPrompt(messages []Message, tools []ToolDe
 	return strings.Join(parts, "\n\n")
 }
 
-// buildToolsPrompt creates the tool definitions section for the system prompt.
 func (p *ClaudeCliProvider) buildToolsPrompt(tools []ToolDefinition) string {
 	var sb strings.Builder
 
@@ -134,7 +125,6 @@ func (p *ClaudeCliProvider) buildToolsPrompt(tools []ToolDefinition) string {
 	return sb.String()
 }
 
-// parseClaudeCliResponse parses the JSON output from the claude CLI.
 func (p *ClaudeCliProvider) parseClaudeCliResponse(output string) (*LLMResponse, error) {
 	var resp claudeCliJSONResponse
 	if err := json.Unmarshal([]byte(output), &resp); err != nil {
@@ -171,19 +161,14 @@ func (p *ClaudeCliProvider) parseClaudeCliResponse(output string) (*LLMResponse,
 	}, nil
 }
 
-// extractToolCalls delegates to the shared extractToolCallsFromText function.
 func (p *ClaudeCliProvider) extractToolCalls(text string) []ToolCall {
 	return extractToolCallsFromText(text)
 }
 
-// stripToolCallsJSON delegates to the shared stripToolCallsFromText function.
 func (p *ClaudeCliProvider) stripToolCallsJSON(text string) string {
 	return stripToolCallsFromText(text)
 }
 
-// findMatchingBrace finds the index after the closing brace matching the opening brace at pos.
-// It is string-aware: braces inside JSON string literals (delimited by double quotes,
-// with backslash-escaped characters) are ignored.
 func findMatchingBrace(text string, pos int) int {
 	depth := 0
 	inString := false
@@ -203,7 +188,6 @@ func findMatchingBrace(text string, pos int) int {
 			}
 			continue
 		}
-		// not in a string
 		if text[i] == '"' {
 			inString = true
 		} else if text[i] == '{' {
@@ -218,8 +202,6 @@ func findMatchingBrace(text string, pos int) int {
 	return pos
 }
 
-// claudeCliJSONResponse represents the JSON output from the claude CLI.
-// Matches the real claude CLI v2.x output format.
 type claudeCliJSONResponse struct {
 	Type         string             `json:"type"`
 	Subtype      string             `json:"subtype"`
@@ -233,7 +215,6 @@ type claudeCliJSONResponse struct {
 	Usage        claudeCliUsageInfo `json:"usage"`
 }
 
-// claudeCliUsageInfo represents token usage from the claude CLI response.
 type claudeCliUsageInfo struct {
 	InputTokens              int `json:"input_tokens"`
 	OutputTokens             int `json:"output_tokens"`

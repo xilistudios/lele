@@ -8,10 +8,6 @@ import (
 	"testing"
 )
 
-// The tests here cover the per-provider `headers` field: it must survive every
-// JSON path a config takes (load, clone/Save, MarshalJSON) and bad maps must
-// fail at unmarshal, naming both the provider and the header.
-
 func TestProvidersConfig_UnmarshalCustomHeaders(t *testing.T) {
 	cfg := DefaultConfig()
 	data := []byte(`{
@@ -42,8 +38,6 @@ func TestProvidersConfig_UnmarshalCustomHeaders(t *testing.T) {
 
 func TestProvidersConfig_CustomHeadersRoundTrip(t *testing.T) {
 	cfg := DefaultConfig()
-	// "gw" carries ONLY headers: it must still be persisted, which is what the
-	// len(p.Headers) clause in IsEmpty guarantees (MarshalJSON skips empty).
 	data := []byte(`{
 		"providers": {
 			"llmproxy": {
@@ -81,7 +75,6 @@ func TestProvidersConfig_CustomHeadersRoundTrip(t *testing.T) {
 		}
 	}
 
-	// And the marshalled JSON unmarshals back to the same maps.
 	back := DefaultConfig()
 	if err := json.Unmarshal(out, &back.Providers); err != nil {
 		t.Fatalf("re-unmarshal providers: %v", err)
@@ -99,13 +92,9 @@ func TestProvidersConfig_CustomHeadersTypedSection(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	// The typed field keeps the map...
 	if got := cfg.Providers.Anthropic.Headers["anthropic-beta"]; got != "foo" {
 		t.Fatalf("typed anthropic headers = %q, want %q", got, "foo")
 	}
-	// ...and so does the named entry the factory reads (ensureNamedDefaults
-	// seeds typed sections into Named; this is what makes legacy typed fields
-	// reach the provider selection).
 	named, ok := cfg.Providers.GetNamed("anthropic")
 	if !ok {
 		t.Fatal("expected named provider anthropic")
@@ -114,8 +103,6 @@ func TestProvidersConfig_CustomHeadersTypedSection(t *testing.T) {
 		t.Fatalf("named anthropic headers = %v, want anthropic-beta=foo", named.Headers)
 	}
 
-	// A typed section set programmatically (no JSON involved) must also become
-	// visible through GetNamed.
 	p := &ProvidersConfig{}
 	p.Anthropic.Headers = map[string]string{"anthropic-beta": "bar"}
 	got, ok := p.GetNamed("anthropic")
@@ -143,7 +130,7 @@ func TestProvidersConfig_UnmarshalRejectsInvalidCustomHeaders(t *testing.T) {
 	tests := []struct {
 		name     string
 		json     string
-		wantErr  string // full message; "" = only check the substrings below
+		wantErr  string
 		contains []string
 	}{
 		{
@@ -205,19 +192,6 @@ func TestProvidersConfig_UnmarshalEmptyOrAbsentHeaders(t *testing.T) {
 	}
 }
 
-// TestProvidersConfig_EnvPlaceholderHeadersLoad pins the load half of the
-// MAJOR-1 fix: {{ENV_NAME}} / {{ENV_NAME:default}} is the documented way to
-// keep a secret out of config.json (pkg/config expandEnvVars), so it must be a
-// legal token in a header value.
-//
-// Both paths are asserted because they differ in what the validator sees:
-//   - LoadConfig expands the placeholder BEFORE parsing, so the runtime config
-//     holds the secret and the validator never sees the token;
-//   - the editable document keeps the RAW token (GET /api/v1/config must echo
-//     it back, or the secret leaks to the browser), and every save feeds that
-//     raw value through this parser via EditableDocument.ToConfig. That second
-//     door is the one that 422'd: rejecting the token there made even an
-//     unrelated edit (agents.defaults.model) impossible to save.
 func TestProvidersConfig_EnvPlaceholderHeadersLoad(t *testing.T) {
 	t.Setenv("LELE_TEST_GW_TOKEN", "s3cr3t")
 
@@ -245,9 +219,6 @@ func TestProvidersConfig_EnvPlaceholderHeadersLoad(t *testing.T) {
 		t.Fatalf("x-gw-team = %q, want the default of an unset env var", got)
 	}
 
-	// The RAW token through this parser — exactly what a document save does.
-	// It must be accepted AND left unexpanded: substitution is LoadConfig's
-	// job, and the document round-trip has to preserve what the user wrote.
 	raw := DefaultConfig()
 	data := `{"providers":{"llmproxy":{"api_key":"k","headers":{` +
 		`"x-gw-token":"{{ENV_LELE_TEST_GW_TOKEN}}",` +
@@ -271,9 +242,6 @@ func TestProvidersConfig_EnvPlaceholderHeadersLoad(t *testing.T) {
 	}
 }
 
-// The env grammar is a whitelist, not a wildcard: anything shaped like a token
-// but outside {{session}} / {{ENV_NAME}} / {{ENV_NAME:default}} stays rejected,
-// so a typo cannot ride all the way to the wire as literal text.
 func TestProvidersConfig_UnmarshalRejectsMalformedEnvPlaceholder(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -282,11 +250,10 @@ func TestProvidersConfig_UnmarshalRejectsMalformedEnvPlaceholder(t *testing.T) {
 		{"empty name", "{{ENV_}}"},
 		{"not the ENV_ prefix", "{{ENV-1}}"},
 		{"leading digit in the name", "{{ENV_1FOO}}"},
-		{"missing braces", "ENV_FOO"}, // legal literal, see below
+		{"missing braces", "ENV_FOO"},
 	}
 	for _, tt := range tests {
 		if tt.name == "missing braces" {
-			// A single brace pair is literal text: it must LOAD.
 			cfg := DefaultConfig()
 			data := `{"providers":{"llmproxy":{"api_key":"k","headers":{"x-a":"` + tt.value + `"}}}}`
 			if err := json.Unmarshal([]byte(data), cfg); err != nil {

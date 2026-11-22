@@ -45,7 +45,6 @@ function ProcessOutput({ processId }: { processId: string }) {
   const { output, status, elapsedMs, done } = useBackgroundExecStream(processId)
   const outputRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll to bottom
   useEffect(() => {
     if (outputRef.current) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight
@@ -182,7 +181,6 @@ export function BackgroundExecsPage() {
         onClose={() => onCloseMobileSidebar()}
       />
       <main className="flex flex-1 flex-col overflow-hidden">
-        {/* Header */}
         <header className="flex items-center justify-between border-b border-border px-4 py-3 md:px-6 md:py-4 shrink-0 bg-background-secondary">
           <div className="flex items-center gap-3">
             <button
@@ -231,7 +229,6 @@ export function BackgroundExecsPage() {
           </button>
         </header>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto">
           {error && <ErrorBanner message={error} />}
 
@@ -242,7 +239,6 @@ export function BackgroundExecsPage() {
               </div>
             )}
 
-            {/* A failed fetch is an error, not an empty-but-successful list. */}
             {!loading && !error && processes.length === 0 && (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <svg

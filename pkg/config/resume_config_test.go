@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package config
 
 import (
@@ -12,12 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 )
-
-// resume_enabled is tri-state (nil = "not configured"), exactly like
-// durable_inbound, so it must survive the whole editable-document cycle
-// without being flattened to false, and stay out of the file while unset so
-// the code default keeps owning it. The helpers it leans on (sessionKey,
-// ptrBoolEqual, formatTri) live in durable_inbound_config_test.go.
 
 func TestResumeDefaultIsOff(t *testing.T) {
 	cfg := DefaultConfig()
@@ -73,7 +61,6 @@ func TestResumeRoundTrip(t *testing.T) {
 					formatTri(back.Session.Resume), formatTri(tc.in))
 			}
 
-			// Full save/reload cycle, the path a user's edit actually takes.
 			path := filepath.Join(t.TempDir(), "config.json")
 			if err := SaveEditableDocument(path, doc); err != nil {
 				t.Fatalf("SaveEditableDocument: %v", err)
@@ -90,9 +77,6 @@ func TestResumeRoundTrip(t *testing.T) {
 	}
 }
 
-// TestResumeKeyAbsentWhenUnset pins the "unset means inherit" rule: an
-// untouched config must not gain a resume_enabled: false that would pin the
-// feature off for every future release.
 func TestResumeKeyAbsentWhenUnset(t *testing.T) {
 	doc := editableDocumentFromConfig(DefaultConfig())
 
@@ -105,15 +89,11 @@ func TestResumeKeyAbsentWhenUnset(t *testing.T) {
 	}
 }
 
-// TestResumeEmittedAlone guards the emission gate: a config whose ONLY
-// non-default session value is resume_enabled must still be persisted,
-// otherwise enabling resume silently evaporates on the next save.
 func TestResumeEmittedAlone(t *testing.T) {
 	for name, want := range map[string]bool{"on": true, "off": false} {
 		t.Run(name, func(t *testing.T) {
 			value := want
 			src := DefaultConfig()
-			// Strip every other session override so resume_enabled is alone.
 			src.Session = SessionConfig{Resume: &value}
 
 			doc := editableDocumentFromConfig(src)
@@ -144,11 +124,6 @@ func TestResumeEmittedAlone(t *testing.T) {
 	}
 }
 
-// TestResumeIndependentOfDurability is the tri-state cross-check the three
-// flags need now that they coexist: resume_enabled is configured on its own
-// and the document round-trip never lets it imply (or get implied by) the
-// durable flags — even though the resume FEATURE requires durable_inbound at
-// runtime, the config layer keeps them orthogonal.
 func TestResumeIndependentOfDurability(t *testing.T) {
 	yes, no := true, false
 	cases := []struct {

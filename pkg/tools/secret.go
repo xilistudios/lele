@@ -8,15 +8,10 @@ import (
 	"github.com/xilistudios/lele/pkg/keyring"
 )
 
-// SecretTool gives agents scoped access to stored secrets by name. Values are
-// returned to the LLM in the tool result (so the agent can use them in API
-// calls or shell commands), but every access is audit-logged and the result is
-// flagged sensitive so UIs can mask it.
 type SecretTool struct {
 	svc *keyring.Service
 }
 
-// NewSecretTool creates a SecretTool backed by the given keyring service.
 func NewSecretTool(svc *keyring.Service) *SecretTool {
 	return &SecretTool{svc: svc}
 }
@@ -71,9 +66,6 @@ func (t *SecretTool) Execute(ctx context.Context, args map[string]interface{}) *
 	}
 }
 
-// maskSecretValue returns a masked version of a secret value showing only
-// the first 3 characters followed by "****". If the value is 3 characters
-// or shorter, only "****" is returned.
 func maskSecretValue(value string) string {
 	if len(value) <= 3 {
 		return "****"

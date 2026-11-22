@@ -9,14 +9,11 @@ import (
 	"time"
 )
 
-// openTestPendingPINRepo is a convenience helper that returns the
-// NativeClientRepo from a fresh test store.
 func openTestPendingPINRepo(t *testing.T) *NativeClientRepo {
 	t.Helper()
 	return openTestStore(t).NativeClients()
 }
 
-// Test 1: insert + get round-trip preserves the opaque blob byte-for-byte.
 func TestNativePendingPIN_InsertGetRoundTrip(t *testing.T) {
 	repo := openTestPendingPINRepo(t)
 
@@ -42,7 +39,6 @@ func TestNativePendingPIN_InsertGetRoundTrip(t *testing.T) {
 	}
 }
 
-// Test 2: TakePendingPIN is single-use; second take returns found=false.
 func TestNativePendingPIN_TakeIsSingleUse(t *testing.T) {
 	repo := openTestPendingPINRepo(t)
 
@@ -64,7 +60,6 @@ func TestNativePendingPIN_TakeIsSingleUse(t *testing.T) {
 		t.Errorf("first TakePendingPIN pending = %q, want %q", pending, `{"pin":"abc123"}`)
 	}
 
-	// Second take must return found=false (PIN was consumed).
 	_, found, err = repo.TakePendingPIN("abc123", now)
 	if err != nil {
 		t.Fatalf("second TakePendingPIN failed: %v", err)
@@ -74,15 +69,12 @@ func TestNativePendingPIN_TakeIsSingleUse(t *testing.T) {
 	}
 }
 
-// Test 3: TakePendingPIN with an expired PIN returns found=false.
-// The expired row is NOT deleted by TakePendingPIN (cleanup is
-// explicit via DeleteExpiredPendingPINs).
 func TestNativePendingPIN_TakeRespectsExpiryInSameStatement(t *testing.T) {
 	repo := openTestPendingPINRepo(t)
 
-	createdAt := int64(1_000_000_000)             // well in the past
-	expiresAt := createdAt + int64(5*time.Minute) // expired by now
-	now := expiresAt + int64(time.Second)         // 1s after expiry
+	createdAt := int64(1_000_000_000)
+	expiresAt := createdAt + int64(5*time.Minute)
+	now := expiresAt + int64(time.Second)
 
 	if err := repo.InsertPendingPIN("expired", `{"pin":"expired"}`, createdAt, expiresAt); err != nil {
 		t.Fatalf("InsertPendingPIN failed: %v", err)
@@ -96,8 +88,6 @@ func TestNativePendingPIN_TakeRespectsExpiryInSameStatement(t *testing.T) {
 		t.Errorf("TakePendingPIN(expired): found=true, want false")
 	}
 
-	// Document the design decision: the expired row survives TakePendingPIN.
-	// DeleteExpiredPendingPINs is the explicit cleanup mechanism.
 	_, _, stillExists, err := repo.GetPendingPIN("expired")
 	if err != nil {
 		t.Fatalf("GetPendingPIN failed: %v", err)
@@ -107,13 +97,10 @@ func TestNativePendingPIN_TakeRespectsExpiryInSameStatement(t *testing.T) {
 	}
 }
 
-// Test 4: concurrent TakePendingPIN from two distinct store.Open
-// handles over the same path — exactly 1 winner out of 12 goroutines.
 func TestNativePendingPIN_TakeConcurrentExactlyOneWinner(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "concurrent.db")
 
-	// First handle: insert the PIN.
 	s1, err := Open(dbPath)
 	if err != nil {
 		t.Fatalf("Open(%q) handle 1: %v", dbPath, err)
@@ -126,7 +113,6 @@ func TestNativePendingPIN_TakeConcurrentExactlyOneWinner(t *testing.T) {
 		t.Fatalf("InsertPendingPIN: %v", err)
 	}
 
-	// Second handle: independent connection (simulates another process).
 	s2, err := Open(dbPath)
 	if err != nil {
 		t.Fatalf("Open(%q) handle 2: %v", dbPath, err)
@@ -168,17 +154,16 @@ func TestNativePendingPIN_TakeConcurrentExactlyOneWinner(t *testing.T) {
 	}
 }
 
-// Test 5: ListPendingPINs excludes expired rows.
 func TestNativePendingPIN_ListExcludesExpired(t *testing.T) {
 	repo := openTestPendingPINRepo(t)
 
-	now := int64(1_000_000_000_000_000_000) // fixed reference point
-	live1 := now - int64(time.Minute)       // created 1 min ago
-	live2 := now - int64(30*time.Second)    // created 30s ago
-	exp1 := now - int64(10*time.Minute)     // created 10 min ago
-	exp2 := now - int64(20*time.Minute)     // created 20 min ago
-	liveExp := now + int64(5*time.Minute)   // expires in 5 min (live)
-	pastExp := now - int64(time.Second)     // already expired
+	now := int64(1_000_000_000_000_000_000)
+	live1 := now - int64(time.Minute)
+	live2 := now - int64(30*time.Second)
+	exp1 := now - int64(10*time.Minute)
+	exp2 := now - int64(20*time.Minute)
+	liveExp := now + int64(5*time.Minute)
+	pastExp := now - int64(time.Second)
 
 	if err := repo.InsertPendingPIN("live1", `"live1"`, live1, liveExp); err != nil {
 		t.Fatalf("Insert live1: %v", err)
@@ -208,7 +193,6 @@ func TestNativePendingPIN_ListExcludesExpired(t *testing.T) {
 	}
 }
 
-// Test 6: ListPendingPINs returns results ordered by (created_at ASC, pin ASC).
 func TestNativePendingPIN_ListOrderedByCreatedThenPIN(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.NativeClients()
@@ -216,7 +200,6 @@ func TestNativePendingPIN_ListOrderedByCreatedThenPIN(t *testing.T) {
 	now := int64(1_000_000_000_000_000_000)
 	expires := now + int64(5*time.Minute)
 
-	// Insert in reverse order to ensure SQL ordering matters.
 	if err := repo.InsertPendingPIN("zzz", `"zzz"`, now+3, expires); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +218,6 @@ func TestNativePendingPIN_ListOrderedByCreatedThenPIN(t *testing.T) {
 		t.Fatalf("count = %d, want 3", len(pins))
 	}
 
-	// Verify ordering via a direct query on the SAME database handle.
 	rows, err := s.DB().Query(
 		`SELECT pin FROM native_pending_pins ORDER BY created_at ASC, pin ASC`,
 	)
@@ -265,7 +247,6 @@ func TestNativePendingPIN_ListOrderedByCreatedThenPIN(t *testing.T) {
 	}
 }
 
-// Test 7: DeleteExpiredPendingPINs returns the correct RowsAffected count.
 func TestNativePendingPIN_DeleteExpiredReturnsCount(t *testing.T) {
 	repo := openTestPendingPINRepo(t)
 
@@ -273,7 +254,6 @@ func TestNativePendingPIN_DeleteExpiredReturnsCount(t *testing.T) {
 	pastExp := now - int64(time.Second)
 	futureExp := now + int64(5*time.Minute)
 
-	// 2 expired + 1 live.
 	repo.InsertPendingPIN("e1", `"e1"`, now-100, pastExp)
 	repo.InsertPendingPIN("e2", `"e2"`, now-200, pastExp)
 	repo.InsertPendingPIN("l1", `"l1"`, now-50, futureExp)
@@ -286,7 +266,6 @@ func TestNativePendingPIN_DeleteExpiredReturnsCount(t *testing.T) {
 		t.Errorf("DeleteExpiredPendingPINs deleted %d rows, want 2", n)
 	}
 
-	// Verify only the live one remains.
 	pins, err := repo.ListPendingPINs(now)
 	if err != nil {
 		t.Fatalf("ListPendingPINs: %v", err)
@@ -299,16 +278,12 @@ func TestNativePendingPIN_DeleteExpiredReturnsCount(t *testing.T) {
 	}
 }
 
-// Test 8: EvictOldestPendingPIN is deterministic — evicts the PIN
-// with the smallest (created_at, pin). With identical created_at
-// the pin lexicographic tiebreaker applies.
 func TestNativePendingPIN_EvictOldestIsDeterministic(t *testing.T) {
 	repo := openTestPendingPINRepo(t)
 
 	now := int64(1_000_000_000_000_000_000)
 	expires := now + int64(5*time.Minute)
 
-	// Scenario A: distinct created_at → evicts the oldest.
 	repo.InsertPendingPIN("oldest", `"oldest"`, now-300, expires)
 	repo.InsertPendingPIN("middle", `"middle"`, now-200, expires)
 	repo.InsertPendingPIN("newest", `"newest"`, now-100, expires)
@@ -321,11 +296,9 @@ func TestNativePendingPIN_EvictOldestIsDeterministic(t *testing.T) {
 		t.Errorf("evicted %q, want %q (distinct created_at)", evicted, "oldest")
 	}
 
-	// Clean slate for scenario B: remove remaining rows.
 	repo.DeletePendingPIN("middle")
 	repo.DeletePendingPIN("newest")
 
-	// Scenario B: same created_at, different pin → pin tiebreaker.
 	repo.InsertPendingPIN("zzz", `"zzz"`, now+100, expires)
 	repo.InsertPendingPIN("aaa", `"aaa"`, now+100, expires)
 	repo.InsertPendingPIN("mmm", `"mmm"`, now+100, expires)
@@ -338,7 +311,6 @@ func TestNativePendingPIN_EvictOldestIsDeterministic(t *testing.T) {
 		t.Errorf("evicted %q, want %q (same created_at, pin tiebreaker)", evicted, "aaa")
 	}
 
-	// Scenario C: evict until empty → ("", nil) when nothing remains.
 	repo.EvictOldestPendingPIN(now)
 	repo.EvictOldestPendingPIN(now)
 	evicted, err = repo.EvictOldestPendingPIN(now)
@@ -350,8 +322,6 @@ func TestNativePendingPIN_EvictOldestIsDeterministic(t *testing.T) {
 	}
 }
 
-// Test 9: InsertPendingPIN with a duplicate pin returns an error
-// (no silent upsert).
 func TestNativePendingPIN_InsertDuplicatePINErrors(t *testing.T) {
 	repo := openTestPendingPINRepo(t)
 
@@ -370,12 +340,10 @@ func TestNativePendingPIN_InsertDuplicatePINErrors(t *testing.T) {
 	}
 }
 
-// Test 10: CountClients matches the number of clients from ListClients.
 func TestNativePendingPIN_CountClientsMatchesListClients(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.NativeClients()
 
-	// Empty.
 	count, err := repo.CountClients()
 	if err != nil {
 		t.Fatalf("CountClients (empty): %v", err)
@@ -384,7 +352,6 @@ func TestNativePendingPIN_CountClientsMatchesListClients(t *testing.T) {
 		t.Errorf("CountClients (empty) = %d, want 0", count)
 	}
 
-	// Insert 2 clients.
 	repo.SetClient("c1", `{"k":"v1"}`)
 	repo.SetClient("c2", `{"k":"v2"}`)
 
@@ -405,39 +372,21 @@ func TestNativePendingPIN_CountClientsMatchesListClients(t *testing.T) {
 	}
 }
 
-// Test 11: the D2 trap — expiry comparison must be numeric (INTEGER
-// unix-nanoseconds), not lexicographic (TEXT RFC3339). This test
-// constructs two timestamps where RFC3339Nano text ordering is WRONG
-// and verifies the integer ordering is correct.
-//
-// Mechanism:
-//
-//	T0 = 1000000000.000000000s → RFC3339Nano: "...T01:46:40Z"       (no frac)
-//	T1 = 1000000000.500000000s → RFC3339Nano: "...T01:46:40.5Z"     (has frac)
-//
-// Text: '.5Z' < 'Z' → T1 sorts BEFORE T0 (WRONG).
-// INTEGER: 1000000000500000000 > 1000000000000000000 → T1 sorts AFTER T0 (CORRECT).
 func TestNativePendingPIN_ExpiryComparisonIsNumericNotTextual(t *testing.T) {
 	repo := openTestPendingPINRepo(t)
 
-	// T0: whole seconds (no fractional part in RFC3339Nano).
 	t0 := time.Unix(1_000_000_000, 0).UTC()
-	n0 := t0.UnixNano() // 1000000000000000000
+	n0 := t0.UnixNano()
 
-	// T0 + 0.5s: has a fractional part when formatted as RFC3339Nano.
 	t1 := time.Unix(1_000_000_000, 500_000_000).UTC()
-	n1 := t1.UnixNano() // 1000000000500000000
+	n1 := t1.UnixNano()
 
-	// Sanity: the text representation would sort incorrectly.
 	s0 := t0.Format(time.RFC3339Nano)
 	s1 := t1.Format(time.RFC3339Nano)
 	if s0 < s1 {
-		// If text happens to sort correctly, the trap isn't exercised.
 		t.Logf("WARNING: text sort is already correct (%q vs %q); D2 trap not fully exercised", s0, s1)
 	}
 
-	// expires_at = T1 (the larger nanosecond value, smaller text).
-	// We query with now = T0. The row should be visible (T1 > T0 as integers).
 	repo.InsertPendingPIN("d2check", `"d2"`, n0, n1)
 
 	pins, err := repo.ListPendingPINs(n0)
@@ -449,7 +398,6 @@ func TestNativePendingPIN_ExpiryComparisonIsNumericNotTextual(t *testing.T) {
 			"expiry comparison is TEXT (D2 trap hit); expected INTEGER (expires_at=T1 > now=T0)")
 	}
 
-	// Also verify TakePendingPIN sees it as non-expired.
 	_, found, err := repo.TakePendingPIN("d2check", n0)
 	if err != nil {
 		t.Fatalf("TakePendingPIN: %v", err)
@@ -460,8 +408,6 @@ func TestNativePendingPIN_ExpiryComparisonIsNumericNotTextual(t *testing.T) {
 	}
 }
 
-// Test 12: InsertPendingPIN duplicate returns ErrDuplicate (typed sentinel),
-// while other errors (e.g. closed DB) do NOT match ErrDuplicate.
 func TestNativePendingPIN_InsertDuplicateReturnsErrDuplicate(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.NativeClients()
@@ -473,7 +419,6 @@ func TestNativePendingPIN_InsertDuplicateReturnsErrDuplicate(t *testing.T) {
 		t.Fatalf("first InsertPendingPIN: %v", err)
 	}
 
-	// Second insert with the same PK ⇒ UNIQUE violation.
 	err := repo.InsertPendingPIN("dup1", `"second"`, now+1, expires+1)
 	if err == nil {
 		t.Fatal("second InsertPendingPIN(dup1) expected error, got nil")
@@ -482,8 +427,6 @@ func TestNativePendingPIN_InsertDuplicateReturnsErrDuplicate(t *testing.T) {
 		t.Errorf("duplicate insert: errors.Is(err, ErrDuplicate) = false; want true (err: %v)", err)
 	}
 
-	// A different kind of error must NOT match ErrDuplicate.
-	// Close the underlying DB to trigger a non-UNIQUE error on next op.
 	if err := s.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -494,7 +437,6 @@ func TestNativePendingPIN_InsertDuplicateReturnsErrDuplicate(t *testing.T) {
 	if errors.Is(err, ErrDuplicate) {
 		t.Errorf("closed-DB error must NOT be ErrDuplicate, but errors.Is returned true (err: %v)", err)
 	}
-	// Sanity: the error is about the closed database.
 	if !strings.Contains(err.Error(), "database is closed") {
 		t.Logf("NOTE: closed-DB error text is %q (expected 'database is closed' substring)", err.Error())
 	}

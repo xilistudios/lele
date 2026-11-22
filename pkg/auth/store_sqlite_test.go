@@ -47,12 +47,10 @@ func TestUseStore_CRUD(t *testing.T) {
 		AuthMethod:   "oauth",
 	}
 
-	// Set credential
 	if err := SetCredential("openai", cred); err != nil {
 		t.Fatalf("SetCredential() error: %v", err)
 	}
 
-	// Get credential
 	loaded, err := GetCredential("openai")
 	if err != nil {
 		t.Fatalf("GetCredential() error: %v", err)
@@ -85,7 +83,6 @@ func TestUseStore_CRUD(t *testing.T) {
 		t.Errorf("ExpiresAt = %v, want %v", loaded.ExpiresAt, cred.ExpiresAt)
 	}
 
-	// Get missing credential
 	missing, err := GetCredential("missing")
 	if err != nil {
 		t.Fatalf("GetCredential(\"missing\") error: %v", err)
@@ -94,7 +91,6 @@ func TestUseStore_CRUD(t *testing.T) {
 		t.Errorf("GetCredential(\"missing\") = %v, want nil", missing)
 	}
 
-	// Delete credential
 	if err := DeleteCredential("openai"); err != nil {
 		t.Fatalf("DeleteCredential() error: %v", err)
 	}
@@ -106,7 +102,6 @@ func TestUseStore_CRUD(t *testing.T) {
 		t.Errorf("GetCredential() after delete = %v, want nil", deleted)
 	}
 
-	// Set multiple and delete all
 	if err := SetCredential("openai", cred); err != nil {
 		t.Fatalf("SetCredential(\"openai\") error: %v", err)
 	}
@@ -129,7 +124,6 @@ func TestUseStore_LazyMigration(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
-	// Use legacy JSON backend (authRepo is nil by default)
 	UseStore(nil)
 
 	legacyStore := &AuthStore{
@@ -150,16 +144,13 @@ func TestUseStore_LazyMigration(t *testing.T) {
 		t.Fatalf("SaveStore() legacy error: %v", err)
 	}
 
-	// Verify auth.json exists
 	if _, err := os.Stat(filepath.Join(tmpDir, "auth.json")); err != nil {
 		t.Fatalf("auth.json should exist: %v", err)
 	}
 
-	// Switch to SQLite backend
 	s := openSQLiteStore(t)
 	useTestAuthRepo(t, s.Auth())
 
-	// GetCredential should trigger migration and return migrated data
 	loaded, err := GetCredential("openai")
 	if err != nil {
 		t.Fatalf("GetCredential(\"openai\") error: %v", err)
@@ -171,7 +162,6 @@ func TestUseStore_LazyMigration(t *testing.T) {
 		t.Errorf("AccessToken = %q, want %q", loaded.AccessToken, "legacy-token-openai")
 	}
 
-	// Verify both credentials exist in SQLite
 	rows, err := s.Auth().ListCredentials()
 	if err != nil {
 		t.Fatalf("ListCredentials() error: %v", err)
@@ -180,7 +170,6 @@ func TestUseStore_LazyMigration(t *testing.T) {
 		t.Errorf("ListCredentials() len = %d, want 2", len(rows))
 	}
 
-	// Verify legacy auth.json still exists on disk (migration never deletes it)
 	if _, err := os.Stat(filepath.Join(tmpDir, "auth.json")); err != nil {
 		t.Errorf("auth.json should still exist after migration: %v", err)
 	}
@@ -201,12 +190,10 @@ func TestUseStore_NilFallback(t *testing.T) {
 		t.Fatalf("SetCredential() error: %v", err)
 	}
 
-	// Verify auth.json exists on disk
 	if _, err := os.Stat(filepath.Join(tmpDir, "auth.json")); err != nil {
 		t.Fatalf("auth.json should exist: %v", err)
 	}
 
-	// Round-trip through GetCredential
 	loaded, err := GetCredential("openai")
 	if err != nil {
 		t.Fatalf("GetCredential() error: %v", err)

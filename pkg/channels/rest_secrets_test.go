@@ -10,8 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/keyring"
 )
 
-// newSecretsTestServer creates a native test server with a file-backed keyring
-// service attached, so tests never touch the OS keychain.
 func newSecretsTestServer(t *testing.T) *nativeTestServer {
 	t.Helper()
 	ts := newNativeTestServer(t)
@@ -55,7 +53,6 @@ func doSecretsRequest(t *testing.T, ts *nativeTestServer, method, path string, b
 func TestSecretsAPI_CRUD(t *testing.T) {
 	ts := newSecretsTestServer(t)
 
-	// Create a secret.
 	resp := doSecretsRequest(t, ts, http.MethodPost, "/api/v1/secrets", secretInput{
 		Name:        "openai.api_key",
 		Value:       "sk-test-123",
@@ -67,7 +64,6 @@ func TestSecretsAPI_CRUD(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// List secrets — value must not be present.
 	resp = doSecretsRequest(t, ts, http.MethodGet, "/api/v1/secrets", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -86,7 +82,6 @@ func TestSecretsAPI_CRUD(t *testing.T) {
 		t.Error("list response must not include secret value")
 	}
 
-	// Get secret value.
 	resp = doSecretsRequest(t, ts, http.MethodGet, "/api/v1/secrets/openai.api_key", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -102,14 +97,12 @@ func TestSecretsAPI_CRUD(t *testing.T) {
 		t.Errorf("value = %q, want sk-test-123", getPayload.Value)
 	}
 
-	// Delete the secret.
 	resp = doSecretsRequest(t, ts, http.MethodDelete, "/api/v1/secrets/openai.api_key", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("delete status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 	resp.Body.Close()
 
-	// Get after delete → 404.
 	resp = doSecretsRequest(t, ts, http.MethodGet, "/api/v1/secrets/openai.api_key", nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("get-after-delete status = %d, want %d", resp.StatusCode, http.StatusNotFound)
@@ -120,20 +113,16 @@ func TestSecretsAPI_CRUD(t *testing.T) {
 func TestSecretsAPI_StatusAndAudit(t *testing.T) {
 	ts := newSecretsTestServer(t)
 
-	// Create a secret, then access it via the agent path to generate an audit
-	// entry (UI operations are trusted and not audited by design).
 	resp := doSecretsRequest(t, ts, http.MethodPost, "/api/v1/secrets", secretInput{
 		Name:  "github.token",
 		Value: "ghp_x",
 	})
 	resp.Body.Close()
 
-	// Seed an audit record through the agent-scoped getter.
 	if _, err := ts.channel.keyringService.GetForAgent("github.token", "coder", "sess-1"); err != nil {
 		t.Fatalf("GetForAgent: %v", err)
 	}
 
-	// Status endpoint.
 	resp = doSecretsRequest(t, ts, http.MethodGet, "/api/v1/secrets/status", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -147,7 +136,6 @@ func TestSecretsAPI_StatusAndAudit(t *testing.T) {
 		t.Errorf("backend = %v, want %q", status["backend"], keyring.BackendFile)
 	}
 
-	// Audit endpoint.
 	resp = doSecretsRequest(t, ts, http.MethodGet, "/api/v1/secrets/audit", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("audit status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -167,14 +155,12 @@ func TestSecretsAPI_StatusAndAudit(t *testing.T) {
 func TestSecretsAPI_CreateValidation(t *testing.T) {
 	ts := newSecretsTestServer(t)
 
-	// Missing name.
 	resp := doSecretsRequest(t, ts, http.MethodPost, "/api/v1/secrets", secretInput{Value: "x"})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("missing-name status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 	resp.Body.Close()
 
-	// Missing value.
 	resp = doSecretsRequest(t, ts, http.MethodPost, "/api/v1/secrets", secretInput{Name: "foo"})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("missing-value status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -182,9 +168,6 @@ func TestSecretsAPI_CreateValidation(t *testing.T) {
 	resp.Body.Close()
 }
 
-// PUT /api/v1/secrets/{name} edits an existing secret: the value is optional
-// (blank keeps the stored plaintext) and the name in the path is the key, so an
-// edit can never create a second secret.
 func TestSecretsAPI_Update(t *testing.T) {
 	ts := newSecretsTestServer(t)
 
@@ -199,7 +182,6 @@ func TestSecretsAPI_Update(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// Metadata-only edit: no value in the body.
 	resp = doSecretsRequest(t, ts, http.MethodPut, "/api/v1/secrets/openai.api_key", secretInput{
 		Description: "OpenAI key (prod)",
 		Tags:        []string{"provider", "prod"},
@@ -222,7 +204,6 @@ func TestSecretsAPI_Update(t *testing.T) {
 		t.Errorf("scope = %v, want [coder]", updatePayload.Secret.Scope)
 	}
 
-	// The plaintext is untouched...
 	resp = doSecretsRequest(t, ts, http.MethodGet, "/api/v1/secrets/openai.api_key", nil)
 	var getPayload struct {
 		Value string `json:"value"`
@@ -235,7 +216,6 @@ func TestSecretsAPI_Update(t *testing.T) {
 		t.Errorf("value after metadata edit = %q, want sk-original", getPayload.Value)
 	}
 
-	// ...and no second secret was created.
 	resp = doSecretsRequest(t, ts, http.MethodGet, "/api/v1/secrets", nil)
 	var listPayload struct {
 		Secrets []keyring.SecretMeta `json:"secrets"`
@@ -248,7 +228,6 @@ func TestSecretsAPI_Update(t *testing.T) {
 		t.Fatalf("secret count after edit = %d, want 1", len(listPayload.Secrets))
 	}
 
-	// An explicit value replaces the stored one.
 	resp = doSecretsRequest(t, ts, http.MethodPut, "/api/v1/secrets/openai.api_key", secretInput{
 		Value: "sk-rotated",
 	})
@@ -267,8 +246,6 @@ func TestSecretsAPI_Update(t *testing.T) {
 	}
 }
 
-// Editing a secret that does not exist is a 404 — the endpoint must not behave
-// as an upsert, or a stale WebUI card could recreate a deleted secret.
 func TestSecretsAPI_UpdateMissing(t *testing.T) {
 	ts := newSecretsTestServer(t)
 
@@ -293,7 +270,6 @@ func TestSecretsAPI_UpdateMissing(t *testing.T) {
 	}
 }
 
-// The update route is authenticated like the rest of the secrets API.
 func TestSecretsAPI_UpdateRequiresAuth(t *testing.T) {
 	ts := newSecretsTestServer(t)
 

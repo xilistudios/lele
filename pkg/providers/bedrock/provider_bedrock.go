@@ -1,13 +1,5 @@
 //go:build bedrock
 
-// PicoClaw - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 PicoClaw contributors
-
-// Package bedrock implements the LLM provider interface for AWS Bedrock.
-// It uses the Bedrock Runtime Converse API for unified access to multiple
-// model families (Claude, Llama, Mistral, etc.) with tool/function calling support.
 package bedrock
 
 import (
@@ -40,14 +32,12 @@ type (
 	ToolFunctionDefinition = protocoltypes.ToolFunctionDefinition
 )
 
-// Provider implements the LLM provider interface for AWS Bedrock.
 type Provider struct {
 	client         *bedrockruntime.Client
 	region         string
 	requestTimeout time.Duration
 }
 
-// Option configures the Bedrock Provider.
 type Option func(*providerConfig)
 
 type providerConfig struct {
@@ -57,44 +47,36 @@ type providerConfig struct {
 	requestTimeout time.Duration
 }
 
-// WithRegion sets the AWS region for Bedrock requests.
 func WithRegion(region string) Option {
 	return func(c *providerConfig) {
 		c.region = region
 	}
 }
 
-// WithProfile sets the AWS profile to use for credentials.
 func WithProfile(profile string) Option {
 	return func(c *providerConfig) {
 		c.profile = profile
 	}
 }
 
-// WithBaseEndpoint sets a custom Bedrock endpoint URL.
-// Example: https://bedrock-runtime.us-east-1.amazonaws.com
 func WithBaseEndpoint(endpoint string) Option {
 	return func(c *providerConfig) {
 		c.baseEndpoint = endpoint
 	}
 }
 
-// WithRequestTimeout sets the timeout for Bedrock API requests.
 func WithRequestTimeout(timeout time.Duration) Option {
 	return func(c *providerConfig) {
 		c.requestTimeout = timeout
 	}
 }
 
-// NewProvider creates a new AWS Bedrock provider.
-// It uses the default AWS credential chain (env vars, shared config, IAM roles, etc.).
 func NewProvider(ctx context.Context, opts ...Option) (*Provider, error) {
 	pc := &providerConfig{}
 	for _, opt := range opts {
 		opt(pc)
 	}
 
-	// Build AWS config options
 	var configOpts []func(*config.LoadOptions) error
 
 	if pc.region != "" {
@@ -105,20 +87,17 @@ func NewProvider(ctx context.Context, opts ...Option) (*Provider, error) {
 		configOpts = append(configOpts, config.WithSharedConfigProfile(pc.profile))
 	}
 
-	// Load AWS config with automatic credential discovery
 	cfg, err := config.LoadDefaultConfig(ctx, configOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("loading AWS config: %w", err)
 	}
 
-	// Validate region is set - required for Bedrock request signing
 	if cfg.Region == "" {
 		return nil, fmt.Errorf(
 			"AWS region not configured: set AWS_REGION, AWS_DEFAULT_REGION, or use WithRegion option",
 		)
 	}
 
-	// Build client options
 	var clientOpts []func(*bedrockruntime.Options)
 	if pc.baseEndpoint != "" {
 		clientOpts = append(clientOpts, func(o *bedrockruntime.Options) {
@@ -135,7 +114,6 @@ func NewProvider(ctx context.Context, opts ...Option) (*Provider, error) {
 	}, nil
 }
 
-// Chat sends messages to AWS Bedrock using the Converse API.
 func (p *Provider) Chat(
 	ctx context.Context,
 	messages []Message,
@@ -143,8 +121,6 @@ func (p *Provider) Chat(
 	model string,
 	options map[string]any,
 ) (*LLMResponse, error) {
-	// Apply request timeout if context doesn't already have a deadline.
-	// Use explicit timeout if set, otherwise fall back to common default.
 	effectiveTimeout := p.requestTimeout
 	if effectiveTimeout <= 0 {
 		effectiveTimeout = common.DefaultRequestTimeout
@@ -155,28 +131,23 @@ func (p *Provider) Chat(
 		defer cancel()
 	}
 
-	// Build the Converse API input
 	input := &bedrockruntime.ConverseInput{
 		ModelId: aws.String(model),
 	}
 
-	// Convert messages to Bedrock format
 	bedrockMessages, systemPrompts := convertMessages(messages)
 	input.Messages = bedrockMessages
 
-	// Set system prompts if any
 	if len(systemPrompts) > 0 {
 		input.System = systemPrompts
 	}
 
-	// Set inference configuration only when options are provided
 	var inferenceConfig *types.InferenceConfiguration
 
 	if maxTokens, ok := common.AsInt(options["max_tokens"]); ok && maxTokens > 0 {
 		if inferenceConfig == nil {
 			inferenceConfig = &types.InferenceConfiguration{}
 		}
-		// Clamp to int32 range to avoid overflow
 		if maxTokens > math.MaxInt32 {
 			maxTokens = math.MaxInt32
 		}
@@ -187,8 +158,6 @@ func (p *Provider) Chat(
 		input.InferenceConfig = inferenceConfig
 	}
 
-	// Convert tools to Bedrock format
-	// Only set ToolConfig if at least one valid tool was produced
 	if len(tools) > 0 {
 		toolConfig := convertTools(tools)
 		if len(toolConfig.Tools) > 0 {
@@ -196,45 +165,32 @@ func (p *Provider) Chat(
 		}
 	}
 
-	// Explicit prompt caching: append cache points after the stable prefixes
-	// (system, tools, history) when enabled for the agent.
 	applyBedrockCacheBreakpoints(input, options)
 
-	// Call Bedrock Converse API
 	output, err := p.client.Converse(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("bedrock converse: %w", err)
 	}
 
-	// Parse the response
 	return parseResponse(output)
 }
 
-// GetDefaultModel returns an empty string as Bedrock models are user-configured.
 func (p *Provider) GetDefaultModel() string {
 	return ""
 }
 
-// Region returns the AWS region configured for this Provider.
 func (p *Provider) Region() string {
 	return p.region
 }
 
-// convertMessages converts internal messages to Bedrock Converse format.
-// Returns the conversation messages and any system prompts separately.
-// Note: Bedrock requires all tool results for a given assistant turn to be in a single
-// user message with multiple ToolResultBlock content blocks. This function merges
-// consecutive tool result messages accordingly.
 func convertMessages(messages []Message) ([]types.Message, []types.SystemContentBlock) {
 	var bedrockMessages []types.Message
 	var systemPrompts []types.SystemContentBlock
 
-	// Helper to check if a message is a tool result
 	isToolResult := func(msg Message) bool {
 		return (msg.Role == "tool" || (msg.Role == "user" && msg.ToolCallID != "")) && msg.ToolCallID != ""
 	}
 
-	// Helper to create a tool result content block
 	makeToolResultBlock := func(msg Message) types.ContentBlock {
 		return &types.ContentBlockMemberToolResult{
 			Value: types.ToolResultBlock{
@@ -254,15 +210,12 @@ func convertMessages(messages []Message) ([]types.Message, []types.SystemContent
 
 		switch {
 		case msg.Role == "system":
-			// System messages go to the System field
 			systemPrompts = append(systemPrompts, &types.SystemContentBlockMemberText{
 				Value: msg.Content,
 			})
 			i++
 
 		case isToolResult(msg):
-			// Collect all consecutive tool results into a single user message
-			// Bedrock requires all tool results for a turn in one message
 			var toolResultBlocks []types.ContentBlock
 			for i < len(messages) && isToolResult(messages[i]) {
 				toolResultBlocks = append(toolResultBlocks, makeToolResultBlock(messages[i]))
@@ -274,7 +227,6 @@ func convertMessages(messages []Message) ([]types.Message, []types.SystemContent
 			})
 
 		case msg.Role == "user":
-			// Regular user message (no ToolCallID)
 			content := buildUserContent(msg)
 			bedrockMessages = append(bedrockMessages, types.Message{
 				Role:    types.ConversationRoleUser,
@@ -291,7 +243,6 @@ func convertMessages(messages []Message) ([]types.Message, []types.SystemContent
 			i++
 
 		case msg.Role == "tool" && msg.ToolCallID == "":
-			// Tool message without ToolCallID - treat as regular user message
 			content := buildUserContent(msg)
 			bedrockMessages = append(bedrockMessages, types.Message{
 				Role:    types.ConversationRoleUser,
@@ -300,7 +251,6 @@ func convertMessages(messages []Message) ([]types.Message, []types.SystemContent
 			i++
 
 		default:
-			// Unknown role - skip
 			i++
 		}
 	}
@@ -308,11 +258,9 @@ func convertMessages(messages []Message) ([]types.Message, []types.SystemContent
 	return bedrockMessages, systemPrompts
 }
 
-// buildUserContent builds Bedrock content blocks for a user message.
 func buildUserContent(msg Message) []types.ContentBlock {
 	var content []types.ContentBlock
 
-	// If the message has ContentParts (from read_image tool), use those first
 	if len(msg.ContentParts) > 0 {
 		for _, part := range msg.ContentParts {
 			switch part.Type {
@@ -329,27 +277,22 @@ func buildUserContent(msg Message) []types.ContentBlock {
 				blocks := dataURLToBedrockImages(part.ImageURL.URL)
 				content = append(content, blocks...)
 			case "video_url":
-				// Bedrock Claude models have no native video input; video parts are gated upstream (model config video flag) and dropped here defensively.
 				continue
 			}
 		}
 
-		// Bedrock requires at least one content block
 		if len(content) == 0 {
 			content = append(content, &types.ContentBlockMemberText{Value: ""})
 		}
 		return content
 	}
 
-	// Fallback to legacy text + Media field (from channel attachments)
-	// Add text content
 	if msg.Content != "" {
 		content = append(content, &types.ContentBlockMemberText{
 			Value: msg.Content,
 		})
 	}
 
-	// Add images from Media field
 	for _, mediaURL := range msg.Media {
 		if strings.HasPrefix(mediaURL, "data:image/") {
 			blocks := dataURLToBedrockImages(mediaURL)
@@ -357,7 +300,6 @@ func buildUserContent(msg Message) []types.ContentBlock {
 		}
 	}
 
-	// Bedrock requires at least one content block; add empty text if needed
 	if len(content) == 0 {
 		content = append(content, &types.ContentBlockMemberText{Value: ""})
 	}
@@ -365,14 +307,12 @@ func buildUserContent(msg Message) []types.ContentBlock {
 	return content
 }
 
-// dataURLToBedrockImages parses a data:image/... URL and returns Bedrock image content blocks.
 func dataURLToBedrockImages(dataURL string) []types.ContentBlock {
 	parts := strings.SplitN(dataURL, ",", 2)
 	if len(parts) != 2 {
 		return nil
 	}
 
-	// Extract media type from "data:image/jpeg;base64"
 	mediaType := ""
 	header := parts[0]
 	if idx := strings.Index(header, "/"); idx != -1 {
@@ -383,12 +323,10 @@ func dataURLToBedrockImages(dataURL string) []types.ContentBlock {
 		mediaType = header[idx+1 : idx+end]
 	}
 
-	// Verify this is base64 encoded
 	if !strings.Contains(header, ";base64") {
-		return nil // Skip non-base64 encoded data
+		return nil
 	}
 
-	// Map media type to Bedrock format
 	var format types.ImageFormat
 	switch mediaType {
 	case "jpeg", "jpg":
@@ -400,11 +338,9 @@ func dataURLToBedrockImages(dataURL string) []types.ContentBlock {
 	case "webp":
 		format = types.ImageFormatWebp
 	default:
-		return nil // Skip unsupported formats
+		return nil
 	}
 
-	// Check size before decoding to prevent excessive memory allocation
-	// Bedrock has a ~20MB request limit; cap decoded images at 10MB
 	const maxImageSize = 10 * 1024 * 1024
 	decodedLen := base64.StdEncoding.DecodedLen(len(parts[1]))
 	if decodedLen > maxImageSize {
@@ -412,7 +348,6 @@ func dataURLToBedrockImages(dataURL string) []types.ContentBlock {
 		return nil
 	}
 
-	// Decode base64 data
 	imageData, err := base64.StdEncoding.DecodeString(parts[1])
 	if err != nil {
 		log.Printf("bedrock: failed to decode base64 image data: %v", err)
@@ -431,27 +366,21 @@ func dataURLToBedrockImages(dataURL string) []types.ContentBlock {
 	}
 }
 
-// buildAssistantContent builds Bedrock content blocks for an assistant message.
 func buildAssistantContent(msg Message) []types.ContentBlock {
 	var content []types.ContentBlock
 
-	// Add text content if present
 	if msg.Content != "" {
 		content = append(content, &types.ContentBlockMemberText{
 			Value: msg.Content,
 		})
 	}
 
-	// Add tool use blocks
 	for _, tc := range msg.ToolCalls {
-		// Validate tool call ID - Bedrock requires non-empty ToolUseId
 		if strings.TrimSpace(tc.ID) == "" {
 			log.Printf("bedrock: skipping tool call with empty ID (name: %q)", tc.Name)
 			continue
 		}
 
-		// Resolve tool name: prefer tc.Name, fallback to tc.Function.Name
-		// (tc.Name/tc.Arguments are json:"-" and may be empty when from JSON)
 		toolName := tc.Name
 		if toolName == "" && tc.Function != nil {
 			toolName = tc.Function.Name
@@ -460,7 +389,6 @@ func buildAssistantContent(msg Message) []types.ContentBlock {
 			continue
 		}
 
-		// Resolve arguments: prefer tc.Arguments, fallback to parsing tc.Function.Arguments
 		args := tc.Arguments
 		if args == nil && tc.Function != nil && tc.Function.Arguments != "" {
 			args = common.DecodeToolCallArguments(json.RawMessage(tc.Function.Arguments), toolName)
@@ -469,7 +397,6 @@ func buildAssistantContent(msg Message) []types.ContentBlock {
 			args = map[string]any{}
 		}
 
-		// Convert arguments to a Bedrock document using NewLazyDocument
 		inputDoc := document.NewLazyDocument(args)
 
 		content = append(content, &types.ContentBlockMemberToolUse{
@@ -481,7 +408,6 @@ func buildAssistantContent(msg Message) []types.ContentBlock {
 		})
 	}
 
-	// Bedrock requires at least one content block; add empty text if needed
 	if len(content) == 0 {
 		content = append(content, &types.ContentBlockMemberText{Value: ""})
 	}
@@ -489,17 +415,14 @@ func buildAssistantContent(msg Message) []types.ContentBlock {
 	return content
 }
 
-// convertTools converts tool definitions to Bedrock format.
 func convertTools(tools []ToolDefinition) *types.ToolConfiguration {
 	bedrockTools := make([]types.Tool, 0, len(tools))
 
 	for _, tool := range tools {
-		// Skip tools with empty names
 		if strings.TrimSpace(tool.Function.Name) == "" {
 			continue
 		}
 
-		// Ensure parameters is not nil - default to minimal object schema
 		params := tool.Function.Parameters
 		if params == nil {
 			params = map[string]any{
@@ -508,7 +431,6 @@ func convertTools(tools []ToolDefinition) *types.ToolConfiguration {
 			}
 		}
 
-		// Convert parameters schema to a Bedrock document
 		inputSchema := document.NewLazyDocument(params)
 
 		bedrockTools = append(bedrockTools, &types.ToolMemberToolSpec{
@@ -527,12 +449,10 @@ func convertTools(tools []ToolDefinition) *types.ToolConfiguration {
 	}
 }
 
-// parseResponse converts Bedrock Converse output to LLMResponse.
 func parseResponse(output *bedrockruntime.ConverseOutput) (*LLMResponse, error) {
 	var content strings.Builder
 	toolCalls := make([]ToolCall, 0)
 
-	// Process output content blocks
 	if output.Output != nil {
 		if msgOutput, ok := output.Output.(*types.ConverseOutputMemberMessage); ok {
 			for _, block := range msgOutput.Value.Content {
@@ -541,7 +461,6 @@ func parseResponse(output *bedrockruntime.ConverseOutput) (*LLMResponse, error) 
 					content.WriteString(b.Value)
 
 				case *types.ContentBlockMemberToolUse:
-					// Unmarshal the document interface to a map
 					args := make(map[string]any)
 					if b.Value.Input != nil {
 						if err := b.Value.Input.UnmarshalSmithyDocument(&args); err != nil {
@@ -554,7 +473,6 @@ func parseResponse(output *bedrockruntime.ConverseOutput) (*LLMResponse, error) 
 						}
 					}
 
-					// Serialize arguments to JSON string for FunctionCall
 					argsJSON, err := json.Marshal(args)
 					if err != nil {
 						log.Printf("bedrock: failed to marshal tool arguments for tool %q (id %q): %v",
@@ -579,7 +497,6 @@ func parseResponse(output *bedrockruntime.ConverseOutput) (*LLMResponse, error) 
 		}
 	}
 
-	// Map stop reason
 	finishReason := "stop"
 	switch output.StopReason {
 	case types.StopReasonToolUse:
@@ -594,11 +511,6 @@ func parseResponse(output *bedrockruntime.ConverseOutput) (*LLMResponse, error) 
 		finishReason = "content_filter"
 	}
 
-	// Build usage info.
-	// Bedrock (like the Anthropic API) reports input_tokens excluding cached
-	// tokens, so fold cache reads/writes into PromptTokens to reflect the true
-	// input size, and derive TotalTokens rather than trusting the API field
-	// (which may omit cached tokens depending on the model).
 	var usage *UsageInfo
 	if output.Usage != nil {
 		cacheRead := int(aws.ToInt32(output.Usage.CacheReadInputTokens))

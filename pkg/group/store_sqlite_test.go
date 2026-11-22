@@ -71,7 +71,6 @@ func TestUseStore_SaveLoadRoundTrip(t *testing.T) {
 		t.Errorf("loaded state does not match original\ngot:  %+v\nwant: %+v", loaded, state)
 	}
 
-	// Verify no legacy JSON file was written.
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
@@ -82,7 +81,6 @@ func TestUseStore_SaveLoadRoundTrip(t *testing.T) {
 }
 
 func TestUseStore_LazyMigration(t *testing.T) {
-	// Start with legacy backend.
 	UseStore(nil)
 	dir := t.TempDir()
 
@@ -94,22 +92,18 @@ func TestUseStore_LazyMigration(t *testing.T) {
 		UpdatedAt: time.Date(2025, 3, 1, 10, 5, 0, 0, time.UTC),
 	}
 
-	// Save via legacy.
 	if err := SaveGroup(dir, state); err != nil {
 		t.Fatalf("SaveGroup legacy: %v", err)
 	}
 
-	// Verify the legacy file exists.
 	legacyFile := filepath.Join(dir, sanitizeGroupID(state.ID)+".json")
 	if _, err := os.Stat(legacyFile); err != nil {
 		t.Fatalf("legacy JSON file should exist: %v", err)
 	}
 
-	// Switch to SQLite.
 	s := openSQLiteStore(t)
 	useTestGroupRepo(t, s.Groups())
 
-	// LoadGroup should trigger lazy migration.
 	loaded, err := LoadGroup(dir, state.ID)
 	if err != nil {
 		t.Fatalf("LoadGroup: %v", err)
@@ -118,7 +112,6 @@ func TestUseStore_LazyMigration(t *testing.T) {
 		t.Errorf("ID = %q, want %q", loaded.ID, state.ID)
 	}
 
-	// Verify migration inserted into the repo.
 	m, err := s.Groups().ListGroupStates()
 	if err != nil {
 		t.Fatalf("ListGroupStates: %v", err)
@@ -152,7 +145,6 @@ func TestUseStore_ListGroups(t *testing.T) {
 		UpdatedAt: now.Add(-2 * time.Hour),
 	}
 
-	// dir is ignored for SQLite backend.
 	dir := t.TempDir()
 	if err := SaveGroup(dir, s1); err != nil {
 		t.Fatalf("SaveGroup s1: %v", err)
@@ -177,7 +169,6 @@ func TestUseStore_ListGroups(t *testing.T) {
 }
 
 func TestUseStore_NilFallback(t *testing.T) {
-	// Explicitly ensure no SQLite backend.
 	UseStore(nil)
 	t.Cleanup(func() { UseStore(nil) })
 
@@ -195,13 +186,11 @@ func TestUseStore_NilFallback(t *testing.T) {
 		t.Fatalf("SaveGroup: %v", err)
 	}
 
-	// Verify the JSON file exists.
 	expectedFile := filepath.Join(dir, sanitizeGroupID(state.ID)+".json")
 	if _, err := os.Stat(expectedFile); err != nil {
 		t.Fatalf("legacy JSON file should exist: %v", err)
 	}
 
-	// Load and verify.
 	loaded, err := LoadGroup(dir, state.ID)
 	if err != nil {
 		t.Fatalf("LoadGroup: %v", err)
@@ -210,7 +199,6 @@ func TestUseStore_NilFallback(t *testing.T) {
 		t.Errorf("ID = %q, want %q", loaded.ID, state.ID)
 	}
 
-	// ListGroups should return 1.
 	list, err := ListGroups(dir)
 	if err != nil {
 		t.Fatalf("ListGroups: %v", err)

@@ -8,18 +8,6 @@ import (
 	"time"
 )
 
-// TestRegression_ConcurrentSweepsAreSafe hammers the lazy eviction path
-// (B6/aaf49d7) with concurrent readers while every group is expired
-// (retention ~0). Two properties must hold under concurrency:
-//
-//  1. No panic and no double close: eviction only drops groups whose done is
-//     already closed, and finalize owns the close, so concurrent sweeps can
-//     never race a close — this test would crash loudly if that changed.
-//  2. Convergence: once retention has elapsed, any reader (List,
-//     AllSnapshots, Status, Wait) performs the sweep, so the map ends empty.
-//
-// Wait on an already-evicted group must return a clean error, not block: the
-// goroutines below mix Wait calls with the other readers on purpose.
 func TestRegression_ConcurrentSweepsAreSafe(t *testing.T) {
 	rec := newLifecycleRecorder()
 	gm := NewGroupManager(mockResolve, (&mockExecutor{}).execute, rec.publish)
@@ -40,7 +28,6 @@ func TestRegression_ConcurrentSweepsAreSafe(t *testing.T) {
 		})
 	}
 
-	// Everything is expired from now on.
 	gm.SetRetention(time.Nanosecond)
 	time.Sleep(5 * time.Millisecond)
 
@@ -58,16 +45,10 @@ func TestRegression_ConcurrentSweepsAreSafe(t *testing.T) {
 				case 2:
 					gm.Status(ids[j%groups])
 				case 3:
-					// Wait on an expired (possibly mid- or post-eviction)
-					// group: must return, never hang, never panic.
 					if _, err := gm.Wait(ids[j%groups]); err != nil {
-						// Evicted is a legitimate outcome; do not fail, but
-						// the error must be the "not found or evicted" one,
-						// not a nil-result lie.
 						t.Log("wait after eviction:", err)
 					}
 				case 4:
-					// Stop on an expired group must not resurrect it.
 					gm.Stop(ids[j%groups])
 				}
 			}

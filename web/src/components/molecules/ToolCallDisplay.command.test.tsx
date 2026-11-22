@@ -3,11 +3,8 @@ import { render } from '@testing-library/react'
 import i18n from '../../test/i18n'
 import { ToolCallDisplay, parseCommandArgs } from './ToolCallDisplay'
 
-// The shared test i18n instance boots in Spanish; read the label through the
-// same key the component uses so the assertion holds for any active locale.
 const LABEL = i18n.t('toolCalls.commandApplied')
 
-// toolArgs as written by hooks/event-handlers/command.ts: "command {json}".
 function commandArgs(overrides: Record<string, string> = {}): string {
   return `command ${JSON.stringify({
     command: '/review',

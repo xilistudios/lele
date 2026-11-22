@@ -11,14 +11,10 @@ import (
 	"testing"
 )
 
-// newMemoryTool is a helper building an UpdateMemoryTool rooted at dir with
-// the workspace restriction on (inside-workspace regular files keep working;
-// symlink escapes are denied — see TestUpdateMemoryTool_RejectsSymlinkEscape).
 func newMemoryTool(dir string, maxLines int) *UpdateMemoryTool {
 	return NewUpdateMemoryTool(dir, maxLines, true)
 }
 
-// writeMemoryFile seeds MEMORY.md in the workspace dir.
 func writeMemoryFile(t *testing.T, dir, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, MemoryFileName), []byte(content), 0644); err != nil {
@@ -26,7 +22,6 @@ func writeMemoryFile(t *testing.T, dir, content string) {
 	}
 }
 
-// readMemoryFile reads MEMORY.md from the workspace dir.
 func readMemoryFile(t *testing.T, dir string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(dir, MemoryFileName))
@@ -36,7 +31,6 @@ func readMemoryFile(t *testing.T, dir string) string {
 	return string(data)
 }
 
-// memoryFileExists reports whether MEMORY.md exists in the workspace dir.
 func memoryFileExists(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, MemoryFileName))
 	return err == nil
@@ -143,7 +137,6 @@ func TestUpdateMemoryTool_DefaultModeIsAppend(t *testing.T) {
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
 		"content": "b",
-		// no "mode" key
 	})
 
 	if result.IsError {
@@ -250,7 +243,6 @@ func TestUpdateMemoryTool_CapExceededAppendWritesNothing(t *testing.T) {
 			t.Errorf("expected cap error to contain %q, got: %s", want, result.ForLLM)
 		}
 	}
-	// Nothing may have been written: byte-compare before/after.
 	if got := readMemoryFile(t, dir); got != "a\nb\n" {
 		t.Errorf("expected file untouched after cap rejection, got %q", got)
 	}
@@ -299,7 +291,6 @@ func TestUpdateMemoryTool_CapExceededThenCompactedRecovers(t *testing.T) {
 	writeMemoryFile(t, dir, "a\nb\nc\n")
 	tool := newMemoryTool(dir, 3)
 
-	// Over-cap append is rejected...
 	rejected := tool.Execute(context.Background(), map[string]interface{}{
 		"content": "d",
 	})
@@ -310,7 +301,6 @@ func TestUpdateMemoryTool_CapExceededThenCompactedRecovers(t *testing.T) {
 		t.Fatalf("expected file untouched after rejection, got %q", got)
 	}
 
-	// ...then a compacting replace under the cap succeeds.
 	recovered := tool.Execute(context.Background(), map[string]interface{}{
 		"content": "a\nb",
 		"mode":    "replace",
@@ -325,7 +315,7 @@ func TestUpdateMemoryTool_CapExceededThenCompactedRecovers(t *testing.T) {
 
 func TestUpdateMemoryTool_UnlimitedCap(t *testing.T) {
 	dir := t.TempDir()
-	tool := newMemoryTool(dir, 0) // unlimited
+	tool := newMemoryTool(dir, 0)
 
 	var lines []string
 	for i := 0; i < 1000; i++ {
@@ -455,13 +445,6 @@ func TestUpdateMemoryTool_DescriptionMentionsCap(t *testing.T) {
 	}
 }
 
-// --- M1: workspace confinement (restrict_to_workspace) ---------------------
-
-// TestUpdateMemoryTool_RejectsSymlinkEscape mirrors
-// TestFilesystemTool_ReadFile_RejectsSymlinkEscape: with restrict on, a
-// MEMORY.md symlinked outside the workspace must be denied for BOTH modes,
-// exactly like write_file/append_file deny it, and the symlink target must
-// stay untouched.
 func TestUpdateMemoryTool_RejectsSymlinkEscape(t *testing.T) {
 	root := t.TempDir()
 	workspace := filepath.Join(root, "workspace")
@@ -502,9 +485,6 @@ func TestUpdateMemoryTool_RejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
-// TestUpdateMemoryTool_RestrictAllowsRegularFile pins the other half of the
-// policy: restrict=true must not break the normal case — a regular
-// in-workspace MEMORY.md keeps working.
 func TestUpdateMemoryTool_RestrictAllowsRegularFile(t *testing.T) {
 	dir := t.TempDir()
 	writeMemoryFile(t, dir, "a\n")
@@ -522,15 +502,9 @@ func TestUpdateMemoryTool_RestrictAllowsRegularFile(t *testing.T) {
 	}
 }
 
-// --- M2: hard byte ceiling --------------------------------------------------
-
-// TestUpdateMemoryTool_CapExceededBytesWritesNothing: the line cap alone
-// cannot stop flooding — a single 2 MiB line passes any line count. The hard
-// byte ceiling must reject it with nothing written, regardless of the line
-// cap being disabled (0) or generous (10000).
 func TestUpdateMemoryTool_CapExceededBytesWritesNothing(t *testing.T) {
 	const seed = "seed\n"
-	hugeLine := strings.Repeat("a", 2*1024*1024) // one single 2 MiB line
+	hugeLine := strings.Repeat("a", 2*1024*1024)
 
 	for _, tc := range []struct {
 		name     string
@@ -557,7 +531,6 @@ func TestUpdateMemoryTool_CapExceededBytesWritesNothing(t *testing.T) {
 					t.Errorf("expected byte-cap error to contain %q, got: %s", want, result.ForLLM)
 				}
 			}
-			// Nothing may have been written: byte-compare before/after.
 			if got := readMemoryFile(t, dir); got != seed {
 				t.Errorf("expected file untouched after byte-cap rejection, got %q", got)
 			}
@@ -565,22 +538,18 @@ func TestUpdateMemoryTool_CapExceededBytesWritesNothing(t *testing.T) {
 	}
 }
 
-// TestUpdateMemoryTool_ByteCapBoundaryAllowed: content that lands exactly at
-// (and just under) the 512 KiB ceiling is accepted — the cap is `>` not `>=`.
 func TestUpdateMemoryTool_ByteCapBoundaryAllowed(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		bytes int // total resulting file size (joined), newline included
+		bytes int
 	}{
 		{"just under the cap", maxMemoryBytes - 1},
 		{"exactly at the cap", maxMemoryBytes},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			tool := newMemoryTool(dir, 0) // uncapped lines: bytes are the only limit
+			tool := newMemoryTool(dir, 0)
 
-			// Replace mode: joined == content, so seed content of exactly the
-			// target size ending in a newline.
 			content := strings.Repeat("x", tc.bytes-1) + "\n"
 
 			result := tool.Execute(context.Background(), map[string]interface{}{
@@ -598,16 +567,10 @@ func TestUpdateMemoryTool_ByteCapBoundaryAllowed(t *testing.T) {
 	}
 }
 
-// --- M3: read-modify-write race ---------------------------------------------
-
-// TestUpdateMemoryTool_ConcurrentAppendsNoLostUpdates: subagents share the
-// parent's tool instance, so N concurrent appends must serialize on the
-// tool's mutex — every one of the N distinct lines has to survive (the review
-// probe lost 198 of 200 without the lock) and the file must stay under caps.
 func TestUpdateMemoryTool_ConcurrentAppendsNoLostUpdates(t *testing.T) {
 	const n = 50
 	dir := t.TempDir()
-	tool := newMemoryTool(dir, 100) // generous but real cap: 50 lines must fit
+	tool := newMemoryTool(dir, 100)
 
 	var wg sync.WaitGroup
 	errs := make(chan string, n)
@@ -648,11 +611,6 @@ func TestUpdateMemoryTool_ConcurrentAppendsNoLostUpdates(t *testing.T) {
 	}
 }
 
-// --- L1: malformed mode must error, not silently append ---------------------
-
-// TestUpdateMemoryTool_NonStringModeRejected: a present-but-non-string mode
-// (e.g. a JSON number) is a malformed tool call and must error; only an absent
-// or nil mode falls back to the append default.
 func TestUpdateMemoryTool_NonStringModeRejected(t *testing.T) {
 	dir := t.TempDir()
 	writeMemoryFile(t, dir, "unchanged\n")
@@ -672,7 +630,6 @@ func TestUpdateMemoryTool_NonStringModeRejected(t *testing.T) {
 		t.Errorf("expected file untouched after malformed mode, got %q", got)
 	}
 
-	// A nil mode (JSON null) is "unset" and keeps the append default.
 	nilMode := tool.Execute(context.Background(), map[string]interface{}{
 		"content": "payload",
 		"mode":    nil,

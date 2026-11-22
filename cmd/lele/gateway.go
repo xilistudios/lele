@@ -38,15 +38,8 @@ import (
 	"github.com/xilistudios/lele/pkg/voice"
 )
 
-// gatewayOut is the destination for human-readable gateway output. In normal
-// (non-desktop) mode it defaults to os.Stdout. In desktop mode it is switched
-// to os.Stderr so stdout stays reserved for machine-readable LELE_READY and
-// LELE_ERROR lines.
 var gatewayOut io.Writer = os.Stdout
 
-// parseGatewayFlags extracts gateway flags from raw args.
-// Returns desktop mode (--desktop or LELE_DESKTOP=1 env), port override
-// (--port N; -1 means "not specified"), and debug flag.
 func parseGatewayFlags(args []string) (desktop bool, port int, debug bool) {
 	port = -1
 	for i := 0; i < len(args); i++ {
@@ -71,12 +64,6 @@ func parseGatewayFlags(args []string) (desktop bool, port int, debug bool) {
 	return desktop, port, debug
 }
 
-// shouldServeWebUI decides whether the gateway serves the Web UI SPA.
-// Desktop mode ALWAYS serves the SPA: the Tauri shell loads its interface
-// from this server, so disabling it there would break the desktop app
-// regardless of the config flag. Everywhere else the channels.web.enabled
-// flag decides. A nil config is treated as enabled, matching the
-// DefaultConfig value (zero friction for callers without a config).
 func shouldServeWebUI(cfg *config.Config, desktop bool) bool {
 	if desktop {
 		return true
@@ -87,9 +74,6 @@ func shouldServeWebUI(cfg *config.Config, desktop bool) bool {
 	return cfg.Channels.Web.Enabled
 }
 
-// emitDesktopError writes a machine-readable error line to stdout. It is only
-// used in desktop mode; the JSON is built with encoding/json so the error
-// field is properly escaped.
 func emitDesktopError(code string, extra map[string]interface{}) {
 	payload := make(map[string]interface{}, len(extra)+1)
 	for k, v := range extra {
@@ -120,26 +104,15 @@ func gatewayCmd() {
 		os.Exit(1)
 	}
 
-	// Desktop mode serves the web UI and API exclusively through the native
-	// channel, so it must be enabled regardless of the user's config.
 	if desktop {
 		cfg.Channels.Native.Enabled = true
 	}
 
 	setupFileLogging(cfg)
 
-	// Root context for every long-running gateway service. The graceful
-	// teardown runs its hooks first and only then cancels this context (see
-	// runGracefulShutdown), so in-flight turns get the drain budget before
-	// being interrupted; cancelling before the hooks is what used to kill them
-	// mid-request, because the agent loop derives its work from this context.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// In desktop mode a single gateway instance must be running; a lockfile
-	// guards against a second instance being launched while the first lives.
-	// The lock is released by the "lock-release" shutdown hook (last hook to
-	// run), not by a defer, so a restarting child never sees a stale holder.
 	var instanceLock *lockfile.Lock
 	if desktop {
 		lockPath := filepath.Join(getLeleDir(), "gateway.lock")
@@ -156,16 +129,10 @@ func gatewayCmd() {
 		instanceLock = lock
 	}
 
-	// Single teardown plan for the whole process. Both the signal path and the
-	// self-update restart path drive it through runGracefulShutdown, so the
-	// gateway can never be half-torn-down by two competing stop sequences. The
-	// hooks themselves are registered further below, once every service they
-	// stop exists.
 	coord := update.NewShutdownCoordinator(update.DefaultShutdownBudget)
 
 	msgBus := bus.NewMessageBus()
 
-	// Open the shared SQLite store via the single helper.
 	dbPath := defaultDBPath()
 	s, storeCleanup, storeErr := openSharedStore(dbPath, "gateway")
 	if storeErr != nil {
@@ -197,7 +164,6 @@ func gatewayCmd() {
 	execTimeout := time.Duration(cfg.Tools.Cron.ExecTimeoutMinutes) * time.Minute
 	cronService := setupCronTool(agentLoop.GetProvidable(), agentLoop, msgBus, cfg.WorkspacePath(), cfg.Agents.Defaults.RestrictToWorkspace, execTimeout, cfg)
 
-	// Wire SQLite store into cron service for persistent storage.
 	if s := agentLoop.Store(); s != nil {
 		cronService.SetStore(s.Cron())
 	}
@@ -230,52 +196,23 @@ func gatewayCmd() {
 
 	agentLoop.SetChannelManager(channelManager)
 
-	// Wire the SQLite KV store into the Telegram channel so the last
-	// processed update offset is persisted there instead of a flat file.
 	if s := agentLoop.Store(); s != nil {
 		if tc, ok := channelManager.GetChannel("telegram"); ok {
 			if tgc, ok := tc.(*channels.TelegramChannel); ok {
 				tgc.SetKVRepo(s.KV())
 			}
 		}
-		// Wire SQLite store into native channel for client persistence.
 		channelManager.SetNativeClientStore(s.NativeClients())
 	} else if storeErr != nil && !errors.Is(storeErr, store.ErrUnsupportedPlatform) {
-		// Degraded gateway (#330): a SQLite-capable binary could not open the
-		// shared store, and the warning above is the only trace of it. Without
-		// this the native channel answers a plain 400 "invalid PIN" forever for
-		// PINs a healthy CLI did write to that database — the error points at
-		// the user's credential instead of at this process's storage. Marking
-		// the manager makes pairing answer 503 store_unavailable and shows up
-		// in GET /api/v1/system/status.
-		//
-		// ErrUnsupportedPlatform is excluded on purpose: there JSON is the real
-		// shared backend, PINs minted here ARE redeemable, and pairing must
-		// keep working exactly as before.
 		channelManager.SetNativeStoreUnavailable(storeErr)
 	}
 
-	// Durable inbound spool (feature-flagged). Built here, after the channel
-	// manager exists and before StartAll, because the two setters it calls
-	// must run before channels accept traffic and before the agent loop
-	// starts consuming. Returns nil when the flag is off or there is no
-	// store, in which case every di.* call below is a no-op and the gateway
-	// behaves exactly as it did before this feature existed.
 	var spoolRepo *store.SpoolRepo
 	if s := agentLoop.Store(); s != nil {
 		spoolRepo = s.Spool()
 	}
 	di := setupDurableInbound(cfg.Session.DurableInboundEnabled(), spoolRepo, msgBus, agentLoop, channelManager)
 
-	// Durable outbound spool (feature-flagged), the mirror of the block above.
-	// Same construction point on purpose: msgBus and channelManager both exist,
-	// and the two setters setupDurableOutbound calls must run before anything
-	// publishes an outbound message. The spool repo is NOT gated by the inbound
-	// flag - it is store-gated only - so one store backs both directions.
-	// deliver is the single place in the system where the two vocabularies meet:
-	// durable knows a Delivery, the channel layer knows a SendOutcome, and the
-	// pump only ever has the channel NAME from the queued row, so the closure
-	// goes through SendToPeer rather than SendNow.
 	deliver := func(ctx context.Context, msg bus.OutboundMessage) durable.Delivery {
 		o := channelManager.SendToPeer(ctx, msg.Channel, msg)
 		return durable.Delivery{Delivered: o.Delivered, SentAnyChunk: o.SentAnyChunk, Err: o.Err}
@@ -317,18 +254,14 @@ func gatewayCmd() {
 		fmt.Fprintln(gatewayOut, "⚠ Warning: No channels enabled")
 	}
 
-	// --- Unified Server Setup ---
 	serverHost := cfg.EffectiveServerHost()
 	serverPort := cfg.EffectiveServerPort()
 
 	if desktop {
-		// In desktop mode the server must only be reachable from the local
-		// machine (the Tauri shell), regardless of the configured host.
 		serverHost = "127.0.0.1"
 		if portOverride >= 0 {
 			serverPort = portOverride
 		} else {
-			// Dynamic port by default so multiple desktop sessions never clash.
 			serverPort = 0
 		}
 	} else if portOverride >= 0 {
@@ -345,11 +278,8 @@ func gatewayCmd() {
 		Port: serverPort,
 	})
 
-	// Register health endpoints
 	srv.RegisterHealth()
 
-	// Register web UI (SPA). Gated by channels.web.enabled; desktop mode
-	// always serves it because the Tauri shell loads the UI from this server.
 	if shouldServeWebUI(cfg, desktop) {
 		distFS, err := fs.Sub(embeddedFiles, "web/dist")
 		if err != nil {
@@ -358,10 +288,6 @@ func gatewayCmd() {
 			srv.RegisterWebUI(http.FS(distFS))
 		}
 
-		// Misconfiguration guard: the SPA's API and WebSocket calls are served
-		// by the native channel. With web on but native off, the UI would load
-		// with no backend behind it. Warn only; the operator may enable native
-		// later or prefer serving assets over a loopback-only tool.
 		if _, ok := channelManager.GetChannel("native"); !ok {
 			logger.WarnC("server", "Web UI is enabled (channels.web.enabled=true) but the native channel is disabled; the SPA would have no API/WebSocket backend. Enable channels.native or set channels.web.enabled=false")
 		}
@@ -369,36 +295,22 @@ func gatewayCmd() {
 		logger.InfoCF("server", "Web UI disabled by config (channels.web.enabled=false); serving API only", nil)
 	}
 
-	// Register native channel API routes
 	if nativeCh, ok := channelManager.GetChannel("native"); ok {
 		if nc, ok := nativeCh.(*channels.NativeChannel); ok {
 			nc.RegisterRoutes(srv.Mux())
-			// Expose the cron service through the API so the Web UI and TUI
-			// can view and manage scheduled jobs.
 			nc.SetCronService(cronService)
-			// Expose the keyring service so the Web UI can manage secrets.
-			// Uses the same instance as the agent tool for a shared audit log.
 			if ks := agentLoop.KeyringService(); ks != nil {
 				nc.SetKeyringService(ks)
 			}
-			// Expose the self-update service so the Web UI can check for and
-			// apply updates. Backups live under <leleDir>/backups.
 			channels.SetBuildInfo(version, gitCommit, buildTime)
 			updateBackupDir := filepath.Join(getLeleDir(), "backups")
 			updater := update.NewUpdater(cfg.Updates.Repo, updateBackupDir, version)
 			nc.SetUpdateService(updater)
-			// A self-update restart terminates this process from inside the
-			// native channel (self-exec path). Route it through the very same
-			// teardown the signal path uses: sessions get saved, the instance
-			// lock is released, and the replacement child (LELE_RESTART_CHILD=1)
-			// can take the lock over as soon as we let go of it.
 			if updater.Restarter != nil {
 				updater.Restarter.OnRestart = func(string) {
 					runGracefulShutdown(coord, agentLoop, cancel)
 				}
 			}
-			// Set up a reload callback so config changes via the API trigger
-			// an immediate runtime reload (not waiting for fsnotify/kqueue).
 			nc.SetReloadConfig(func() error {
 				updated, err := config.LoadConfig(getConfigPath())
 				if err != nil {
@@ -412,8 +324,6 @@ func gatewayCmd() {
 				return nil
 			})
 			nc.SetReloadMCP(agentLoop.SyncMCPServers)
-			// In desktop mode the Tauri shell authenticates with a fixed
-			// trusted client. Register it so desktop auto-auth works.
 			if desktop {
 				token := os.Getenv("LELE_DESKTOP_TOKEN")
 				if token != "" {
@@ -434,16 +344,12 @@ func gatewayCmd() {
 		}
 	}
 
-	// Register LINE webhook
 	if lineCh, ok := channelManager.GetChannel("line"); ok {
 		if lc, ok := lineCh.(*channels.LINEChannel); ok {
 			lc.RegisterWebhook(srv.Mux())
 		}
 	}
 
-	// Start unified server immediately so the Web UI and WebSocket endpoint
-	// are available while channels initialize (some channels block in Start).
-	// We bind the listener first so we can report the actual (dynamic) address.
 	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", serverHost, serverPort))
 	if err != nil {
 		if desktop {
@@ -503,34 +409,17 @@ func gatewayCmd() {
 		fmt.Fprintln(gatewayOut, "✓ Device event service started")
 	}
 
-	// Replay everything the previous process left in the spool BEFORE the
-	// channels accept any traffic. Ordering matters twice over: the restored
-	// messages must reach the loop ahead of new ones, and once channels are
-	// live every message they spool is a pending row that this pass would
-	// happily replay as if it were left over from a dead process. Drain on a
-	// nil di (feature off) is a no-op.
 	di.Drain(ctx)
 
 	if err := channelManager.StartAll(ctx); err != nil {
 		fmt.Fprintf(gatewayOut, "Error starting channels: %v\n", err)
 	}
 
-	// Replay replies the previous process never got out. This is the DUAL of the
-	// inbound Drain above and it sits on the other side of StartAll on purpose:
-	// an inbound row only has to reach the bus, so it must be replayed BEFORE
-	// channels accept traffic (ordering vs. new messages), while an outbound row
-	// has to reach a CHANNEL, so replaying it before StartAll would just fail
-	// every send against a channel that is not running yet and leave the rows for
-	// the pump. Double delivery is still impossible: Enqueue writes a live row
-	// already claimed by this instance and ClaimBatch only selects unclaimed
-	// rows, so nothing published after the wiring step can be seen by this pass.
-	// Drain on a nil do (feature off) is a no-op.
 	do.Drain(ctx)
 
 	configWatcher := config.NewConfigWatcher(getConfigPath())
 	go func() {
 		if err := configWatcher.Start(ctx, func(updated *config.Config) error {
-			// Reload registry first to pick up new agents
 			agentLoop.ReloadRegistry(updated)
 			if err := channelManager.ReloadConfig(updated); err != nil {
 				return err
@@ -545,82 +434,16 @@ func gatewayCmd() {
 
 	go agentLoop.Run(ctx)
 
-	// The pump exists to catch rows a full bus refused while the gateway was
-	// live. Such a row is handed back to the pending set by
-	// BaseChannel.publishInbound (spooler Release), and a live in-flight row is
-	// born claimed, so the pump only ever sees rows nobody is working on and
-	// cannot duplicate a message whose turn is still running.
 	di.StartPump(ctx)
 
-	// Same job on the reply side: rows a full outbound queue or a transient send
-	// failure handed back to the pending set get picked up on the next tick, and
-	// FlushPeer wakes this pump the moment a native peer reconnects.
 	do.StartPump(ctx)
 
-	// --- Graceful teardown plan -------------------------------------------
-	//
-	// The coordinator runs hooks LIFO (last registered, first to run), so the
-	// registrations below are written in the REVERSE of the desired stop order.
-	// Effective order on shutdown:
-	//
-	//	1. agent-drain     : let in-flight turns finish (10s budget)
-	//	2. durable-outbound-shutdown : stop the pump, release our spool claims
-	//	3. durable-inbound-shutdown  : stop the pump, release our spool claims
-	//	4. sessions-save   : persist every session to disk
-	//	5. channels-stop   : stop accepting new inbound messages
-	//	6. http-stop       : stop the unified server (API + Web UI)
-	//	7. services-stop   : stop watchers/schedulers that may enqueue work
-	//	8. mcp-stop        : critical phase (after the budgeted pass) — close
-	//	                     MCP stdio children, after the drain AND after the
-	//	                     config watcher stopped, never skipped by budget
-	//	9. lock-release    : last, so a restarting child never sees a live holder
-	//
-	// Outbound releases before inbound. Both hooks do the same three things
-	// (stop pump, wait for the goroutine, ReleaseClaims) and both directions
-	// share one spool table whose stale-reclaim path, ReclaimStale, is
-	// direction-agnostic: it frees ANY claim older than StaleClaimTimeout,
-	// whoever held it. So whenever two instances do overlap - a chained restart
-	// whose predecessor is still tearing down while the successor already
-	// drains - the successor can grab rows the predecessor is still sending.
-	// Freeing the reply rows first shrinks that double-claim window to the
-	// inbound hook's own duration (hooks run one at a time) instead of the full
-	// timeout, which is what a chain of restarts would otherwise compound.
-	//
-	// A hook that fails is recorded by the coordinator and does not abort the
-	// rest: the process must never keep the instance lock because one stop step
-	// returned an error.
-
-	// Registered first => runs last. Critical: the lock release must not be
-	// skipped by budget exhaustion, or a restarting child would have to steal a
-	// still-held lock and fall back to the stale-timeout path.
 	if desktop && instanceLock != nil {
 		lock := instanceLock
 		coord.RegisterCritical("lock-release", 2*time.Second, func(context.Context) error {
 			return lock.Release()
 		})
 	}
-	// Two deliberate choices, both verified against pkg/update/shutdown.go:
-	//
-	//  1. RegisterCritical: critical hooks run in the coordinator's
-	//     guaranteed phase AFTER the whole budgeted pass — a 10 s agent-drain
-	//     that eats the budget can no longer skip this step and orphan the
-	//     stdio children. It still honors its own 5 s timeout.
-	//  2. Registered BEFORE services-stop in source: among critical hooks the
-	//     LIFO order keeps mcp-stop ahead of lock-release (the lock must still
-	//     go away last), and it documents that mcp-stop runs AFTER
-	//     services-stop. Note that stopping the config watcher does NOT join
-	//     its goroutine (pkg/config/watcher.go Stop only closes the stop
-	//     channel), so a reload already in flight can still reach
-	//     syncMCPTools after services-stop; the mcpManagerSet's stopped flag
-	//     guarantees such a late sync cannot install a manager nobody closes
-	//     (sync early-returns, put refuses the entry and closes it). (The
-	//     critical phase already runs after every budgeted hook,
-	//     including services-stop; the position also keeps that ordering if
-	//     the hook is ever demoted back to Register.)
-	//
-	// AgentLoop.Shutdown also closes managers on its drained path; both entry
-	// points funnel into the same idempotent closeAll, so children are
-	// terminated exactly once whether the drain finished or timed out.
 	coord.RegisterCritical("mcp-stop", 5*time.Second, func(context.Context) error {
 		return agentLoop.CloseMCPManagers()
 	})
@@ -647,23 +470,12 @@ func gatewayCmd() {
 		}
 		return nil
 	})
-	// Registered before agent-drain and after durable-outbound-shutdown => runs
-	// third, right after in-flight turns have finished their spool rows and the
-	// reply rows have been handed back, and before sessions are persisted.
-	// Stopping the pump first is what makes the release meaningful: a pump
-	// still ticking could claim rows again after they were handed back.
 	coord.Register("durable-inbound-shutdown", 3*time.Second, func(context.Context) error {
 		return di.Shutdown()
 	})
-	// Registered after durable-inbound-shutdown => runs second (LIFO), directly
-	// after agent-drain has let the in-flight turns complete their rows, so the
-	// only claims left here are genuinely ours: the outbound pump's and any row
-	// the dispatcher is still holding. Same stop-then-wait-then-release shape as
-	// the inbound hook.
 	coord.Register("durable-outbound-shutdown", 3*time.Second, func(context.Context) error {
 		return do.Shutdown()
 	})
-	// Registered last => runs first.
 	coord.Register("agent-drain", 10*time.Second, func(hookCtx context.Context) error {
 		return agentLoop.Shutdown(hookCtx)
 	})
@@ -677,57 +489,14 @@ func gatewayCmd() {
 	fmt.Fprintln(gatewayOut, "✓ Gateway stopped")
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Durable inbound wiring
-// ──────────────────────────────────────────────────────────────────────────────
-
-// durableInbound is the gateway's handle on the durable inbound spool: the
-// service itself plus the pump's lifecycle. Every method is nil-safe, so the
-// gateway can call Drain/StartPump/Shutdown unconditionally and a nil handle
-// (feature off, no store) simply means "nothing happens".
-//
-// The pump is owned here rather than inside setupDurableInbound so the wiring
-// step stays free of background goroutines: a unit test can build the handle
-// and assert on it without a hidden ticker writing to the spool, and the
-// gateway decides when replay starts and when the pump may run.
 type durableInbound struct {
 	inbound *durable.Inbound
 
-	// mu guards the pump lifecycle. StartPump runs on the gateway goroutine
-	// while Shutdown can arrive from the self-restart callback inside the
-	// native channel, so the two must not read and clear cancel/done at the
-	// same time.
 	mu     sync.Mutex
-	cancel context.CancelFunc // cancels the pump's context; nil until StartPump
-	done   chan struct{}      // closed when StartPump returns; nil until StartPump
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
-// setupDurableInbound wires the durable inbound spool into the agent loop and
-// the channel manager. It returns nil when the feature is off, which is the
-// signal for the gateway to keep its pre-durability behaviour: nothing is
-// touched on agentLoop or channelManager in that case.
-//
-// The publish function handed to durable.NewInbound is the bus's own
-// PublishInbound, and that is deliberate: NewInbound only ever publishes
-// through it while REPLAYING a row it claimed, while live traffic is spooled
-// and published by BaseChannel.publishInbound.
-//
-// The two paths are disjoint because of how the live row is claimed. Enqueue
-// writes the row already claimed by this instance, so ClaimBatch - which only
-// selects rows whose claimed_by is empty - never sees a message the agent loop
-// is working on and cannot double-publish it. If the bus refuses that live
-// publish, the channel calls Release, which hands exactly that one row back to
-// the pending set for the pump to retry on its next tick. A replay pass only
-// ever releases the ids it claimed itself, so it cannot touch a live row
-// either. The blanket ReleaseClaims at shutdown stays: the pump is already
-// stopped by then, so every claim still held is genuinely orphaned work for the
-// successor to replay.
-//
-// Both setters must run before their consumer starts: SetInboundSpooler before
-// channelManager.StartAll (channels read the field without a lock once they
-// accept traffic) and SetInboundDurability before agentLoop.Run, for the same
-// reason. This function only writes fields; it starts no goroutines and touches
-// no rows.
 func setupDurableInbound(
 	enabled bool,
 	spool *store.SpoolRepo,
@@ -735,7 +504,6 @@ func setupDurableInbound(
 	agentLoop *agent.AgentLoop,
 	channelManager *channels.Manager,
 ) *durableInbound {
-	// Flag off, no persistence, or no bus: leave both consumers untouched.
 	if !enabled || spool == nil || msgBus == nil {
 		return nil
 	}
@@ -754,12 +522,6 @@ func setupDurableInbound(
 	return &durableInbound{inbound: d}
 }
 
-// Drain replays persisted-but-unconsumed rows. The gateway calls it once, after
-// the channels are wired and before channelManager.StartAll, so restored
-// traffic reaches the loop ahead of anything new and no live message can be
-// mistaken for a leftover mid-replay. The count it returns is logged inside
-// durable.Inbound.Drain; a failed replay leaves the rows in the spool for the
-// pump, so there is nothing for the caller to handle.
 func (di *durableInbound) Drain(ctx context.Context) {
 	if di == nil {
 		return
@@ -770,12 +532,6 @@ func (di *durableInbound) Drain(ctx context.Context) {
 	}
 }
 
-// StartPump launches the background pump that re-publishes rows a full bus
-// refused, and returns immediately. It derives its own cancellable context from
-// ctx so Shutdown can stop the pump without tearing down the gateway root
-// context, and records the channel that lets Shutdown wait for the goroutine to
-// actually leave. Calling it twice is a bug, not a supported state: the second
-// pump would race the first over the same claims, so it is refused.
 func (di *durableInbound) StartPump(ctx context.Context) {
 	if di == nil {
 		return
@@ -799,22 +555,11 @@ func (di *durableInbound) StartPump(ctx context.Context) {
 	}()
 }
 
-// Shutdown stops the pump, waits for its goroutine to exit, and returns this
-// instance's claims to the pending set so the next process re-drains them
-// immediately instead of waiting out durable.StaleClaimTimeout. It is safe to
-// call when the pump never started or when called twice.
-//
-// The order matters: releasing before the pump is gone would let a tick in
-// flight re-claim the rows this shutdown is handing back.
 func (di *durableInbound) Shutdown() error {
 	if di == nil {
 		return nil
 	}
 
-	// Hand the pump's handles over to this caller alone, then stop waiting on
-	// them without holding the lock: a concurrent StartPump must not be able
-	// to claim rows behind our back, and a second Shutdown finds nothing to
-	// wait for.
 	di.mu.Lock()
 	cancel, done := di.cancel, di.done
 	di.cancel, di.done = nil, nil
@@ -838,57 +583,14 @@ func (di *durableInbound) Shutdown() error {
 	return nil
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Durable outbound wiring
-// ──────────────────────────────────────────────────────────────────────────────
-
-// durableOutbound is the gateway's handle on the durable outbound spool: the
-// service itself plus the pump's lifecycle. It is deliberately its own type
-// rather than a second instance of durableInbound even though the two are
-// structurally identical today: they are two separate LIFO shutdown hooks and
-// they will diverge (outbound wants pruning of dead-lettered rows and a send
-// backoff, inbound does not), and cloning now keeps that divergence from
-// turning one hook's change into the other's regression.
-//
-// Every method is nil-safe, so the gateway calls Drain/StartPump/Shutdown
-// unconditionally and a nil handle (feature off, no store) means "nothing
-// happens".
-//
-// As on the inbound side, the pump is owned here rather than inside
-// setupDurableOutbound so the wiring step starts no goroutines: a unit test can
-// build the handle and assert on it without a hidden ticker writing to the spool.
 type durableOutbound struct {
 	outbound *durable.Outbound
 
-	// mu guards the pump lifecycle. StartPump runs on the gateway goroutine
-	// while Shutdown can arrive from the self-restart callback inside the native
-	// channel, so the two must not read and clear cancel/done at the same time.
 	mu     sync.Mutex
-	cancel context.CancelFunc // cancels the pump's context; nil until StartPump
-	done   chan struct{}      // closed when StartPump returns; nil until StartPump
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
-// setupDurableOutbound wires the durable outbound spool into the message bus
-// (producer side: every PublishOutbound writes its row first) and into the
-// channel manager (consumer side: the dispatcher completes or forgets the row
-// behind what it sent, and a reconnecting peer wakes the pump). It returns nil
-// when the feature is off, which is the signal for the gateway to keep its
-// pre-durability behaviour: neither consumer is touched in that case.
-//
-// The row lifecycle it relies on, and why no message is sent twice:
-//
-//   - Enqueue writes the row BORN CLAIMED by this instance, so a live reply is
-//     invisible to ClaimBatch and neither Drain nor the pump can replay it.
-//   - The bus hands a refused publish back with Release; the dispatcher deletes
-//     a fully delivered row with Complete and dead-letters a partial one with
-//     Forget, which is what keeps a replay from re-sending chunks already out.
-//   - A replay pass only ever releases the ids it claimed itself, so it cannot
-//     disturb a live row either.
-//
-// Both setters must run before their consumer starts: SetOutboundSpooler on the
-// bus before anything publishes, and on the manager before StartAll spawns the
-// dispatchers. This function only writes fields; it starts no goroutines and
-// touches no rows.
 func setupDurableOutbound(
 	enabled bool,
 	spool *store.SpoolRepo,
@@ -900,10 +602,6 @@ func setupDurableOutbound(
 		return nil
 	}
 
-	// The spool repo is store-gated and independent of the inbound flag, so the
-	// only way to get here without one is a store-less installation. Say so
-	// loudly: silently running without the durability the user asked for is the
-	// failure mode a log line exists to prevent.
 	if spool == nil {
 		logger.WarnCF("gateway", "Durable outbound requested but spool unavailable",
 			map[string]interface{}{"reason": "no SQLite store configured; outbound stays non-durable"})
@@ -923,13 +621,6 @@ func setupDurableOutbound(
 	return &durableOutbound{outbound: d}
 }
 
-// Drain replays persisted-but-undelivered replies. The gateway calls it once,
-// AFTER channelManager.StartAll, because unlike an inbound row a reply is only
-// done when a live channel has accepted it: draining before the channels run
-// would fail every send and leave the rows for the pump. Rows that still fail
-// here are left pending for the pump, so there is nothing for the caller to
-// handle, and a row this instance is already sending cannot be picked up
-// because it is born claimed.
 func (do *durableOutbound) Drain(ctx context.Context) {
 	if do == nil {
 		return
@@ -940,13 +631,6 @@ func (do *durableOutbound) Drain(ctx context.Context) {
 	}
 }
 
-// StartPump launches the background pump that delivers rows a full outbound
-// queue or a failed send left behind, and returns immediately. It derives its
-// own cancellable context from ctx so Shutdown can stop the pump without
-// tearing down the gateway root context, and records the channel that lets
-// Shutdown wait for the goroutine to actually leave. Calling it twice is a bug,
-// not a supported state: the second pump would race the first over the same
-// claims and double-send, so it is refused.
 func (do *durableOutbound) StartPump(ctx context.Context) {
 	if do == nil {
 		return
@@ -970,23 +654,11 @@ func (do *durableOutbound) StartPump(ctx context.Context) {
 	}()
 }
 
-// Shutdown stops the pump, waits for its goroutine to exit, and returns this
-// instance's outbound claims to the pending set so the next process re-drains
-// them at once instead of waiting out durable.StaleClaimTimeout. It is safe to
-// call when the pump never started or when called twice.
-//
-// The order matters: releasing before the pump is gone would let a tick in
-// flight re-claim the rows this shutdown is handing back - and on the outbound
-// side a re-claim can mean a second send of a message a peer is about to get.
 func (do *durableOutbound) Shutdown() error {
 	if do == nil {
 		return nil
 	}
 
-	// Hand the pump's handles over to this caller alone, then stop waiting on
-	// them without holding the lock: a concurrent StartPump must not be able to
-	// claim rows behind our back, and a second Shutdown finds nothing to wait
-	// for.
 	do.mu.Lock()
 	cancel, done := do.cancel, do.done
 	do.cancel, do.done = nil, nil
@@ -1010,19 +682,8 @@ func (do *durableOutbound) Shutdown() error {
 	return nil
 }
 
-// teardownOnce maps a coordinator to the sync.Once that guards its teardown.
-//
-// The once is keyed by coordinator rather than being a single package-level
-// value because idempotency is a property of a specific teardown plan: the
-// signal path and the restart path share one coordinator (so the second trigger
-// must be a no-op) while an unrelated coordinator must still run its own hooks.
-// The gateway creates exactly one coordinator for its whole lifetime, so the
-// single entry this map holds lives as long as the process.
-var teardownOnce sync.Map // *update.ShutdownCoordinator -> *sync.Once
+var teardownOnce sync.Map
 
-// teardownGuard returns the sync.Once owned by coord, creating it on first use.
-// It fast-paths a Load so the steady state (the guard already exists) does not
-// allocate a throwaway Once on every call.
 func teardownGuard(coord *update.ShutdownCoordinator) *sync.Once {
 	if actual, ok := teardownOnce.Load(coord); ok {
 		return actual.(*sync.Once)
@@ -1031,41 +692,14 @@ func teardownGuard(coord *update.ShutdownCoordinator) *sync.Once {
 	return actual.(*sync.Once)
 }
 
-// turnJoiner is the part of the agent loop the teardown needs: the bounded
-// final join on in-flight turns. *agent.AgentLoop implements it; tests can
-// substitute a fake to pin the ordering around the join.
 type turnJoiner interface {
 	StopWithin(grace time.Duration) error
 }
 
-// runGracefulShutdown performs the gateway's ordered teardown exactly once:
-// first every registered shutdown hook (LIFO, budget-bounded, failures recorded
-// and never fatal), then the root context is cancelled, and only then the
-// in-flight turns are joined for a last bounded grace.
-//
-// The position of the cancel is the whole point. A turn runs on the root
-// context, so cancelling it is the only way to release a turn that outlived the
-// agent-drain budget; and the join is the only thing that waits for that turn.
-// Cancelling after the join therefore deadlocks: the join waits for the turn,
-// the turn waits for the cancel, and the cancel sits behind the join. That
-// deadlock is what made the service hang for exactly TimeoutStopUSec and get
-// SIGKILLed on every self-update restart with a busy agent.
-//
-// Hooks still run before the cancel, so an ordinary turn keeps the graceful
-// handoff the drain was built for; only turns that blew the drain budget are
-// interrupted here, and they leave their inbound spool row for the successor
-// process to replay (see AgentLoop.Run).
-//
-// Idempotent per coordinator: a repeat call (the SIGTERM path firing right
-// after a self-restart did the teardown) skips the hooks, the cancel and the
-// join. sync.Once.Do blocks that second caller until the first teardown has
-// returned, so the process never races two stop sequences - and never waits on
-// a turn the first sequence already released.
 func runGracefulShutdown(coord *update.ShutdownCoordinator, al turnJoiner, cancel func()) {
 	once := teardownGuard(coord)
 	once.Do(func() {
 		results := coord.RunAll(context.Background())
-		// A failing hook is reported here and never aborts the teardown.
 		for name, err := range results {
 			if err != nil {
 				logger.WarnCF("gateway", "Shutdown hook reported an error", map[string]interface{}{
@@ -1074,10 +708,6 @@ func runGracefulShutdown(coord *update.ShutdownCoordinator, al turnJoiner, cance
 				})
 			}
 		}
-		// Release the turns the drain could not finish before joining them.
-		// sync.Once.Do blocks a concurrent second caller until this function
-		// returns, so the cancel lives inside the once: every path that runs
-		// the teardown cancels exactly once, and no path can skip it.
 		if cancel != nil {
 			cancel()
 		}
@@ -1091,40 +721,12 @@ func runGracefulShutdown(coord *update.ShutdownCoordinator, al turnJoiner, cance
 	})
 }
 
-// finalTurnJoinGrace bounds the last join on in-flight turns, run after the
-// hooks and after the root context was cancelled. It is a safety net for a turn
-// that ignores cancellation entirely (a blocking tool call, a subagent with its
-// own context), so the process must not wait on it indefinitely.
-//
-// Sized against the restart budget: DefaultShutdownBudget (15 s) plus this
-// grace stays well under systemd's TimeoutStopUSec (90 s) and does not delay
-// the desktop lock handoff, which is released by the "lock-release" hook inside
-// RunAll, before this join begins.
-//
-// A var (not a const) so tests can shrink it, matching instanceLockHandoffTimeout.
 var finalTurnJoinGrace = 5 * time.Second
 
-// instanceLockHandoffTimeout bounds how long a self-restart child waits for the
-// previous instance to release the desktop lock. It must comfortably exceed the
-// shutdown budget (update.DefaultShutdownBudget) plus the agent drain.
 var instanceLockHandoffTimeout = 20 * time.Second
 
-// instanceLockHandoffPoll is the retry interval while waiting for the handoff.
 var instanceLockHandoffPoll = 100 * time.Millisecond
 
-// acquireInstanceLock takes the desktop instance lock at path.
-//
-// Behaviour depends on why this process is starting:
-//
-//   - Normal start (LELE_RESTART_CHILD unset): a single attempt. A live holder
-//     is reported immediately as *lockfile.AlreadyRunningError so the desktop
-//     shell can show "already running" instead of hanging.
-//   - Self-restart child (LELE_RESTART_CHILD=1): the parent deliberately keeps
-//     the lock while it drains in-flight turns, so the child retries until the
-//     parent's lock-release hook runs or instanceLockHandoffTimeout expires.
-//
-// Staleness is never decided here: lockfile.Acquire already steals a lock whose
-// holder is dead, so this function only retries while it reports a live holder.
 func acquireInstanceLock(path string) (*lockfile.Lock, error) {
 	if os.Getenv(update.RestartChildEnvKey) != "1" {
 		return lockfile.Acquire(path)
@@ -1162,9 +764,6 @@ func setupCronTool(executor tools.JobExecutor, al *agent.AgentLoop, msgBus *bus.
 	cronService := cron.NewCronService(cronStorePath, nil)
 
 	cronTool := tools.NewCronTool(cronService, executor, msgBus, workspace, restrict, execTimeout, config)
-	// Let ExecuteJob detect when a job's `to` field designates an existing
-	// session so notifications land in that chat instead of a synthetic
-	// cron-<jobID> session.
 	cronTool.SetSessionExistsCallback(func(sessionKey string) bool {
 		sm := al.SessionManager()
 		if sm == nil {

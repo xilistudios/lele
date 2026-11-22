@@ -11,9 +11,6 @@ import (
 	"time"
 )
 
-// setupRefreshTestStore points the auth package at a throwaway SQLite store
-// (single-connection pool, so writes are serialized) and returns a fresh,
-// isolated environment for each test.
 func setupRefreshTestStore(t *testing.T) {
 	t.Helper()
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
@@ -21,8 +18,6 @@ func setupRefreshTestStore(t *testing.T) {
 	useTestAuthRepo(t, s.Auth())
 }
 
-// refreshTestServer is a fake token endpoint that counts requests and, on
-// success, rotates the refresh token (rot-<n>) exactly like a real provider.
 type refreshTestServer struct {
 	*httptest.Server
 	hits   atomic.Int32
@@ -46,15 +41,12 @@ func newRefreshTestServer(t *testing.T, status int) *refreshTestServer {
 	return rs
 }
 
-// withServer returns a copy of cfg pointed at the fake token endpoint.
 func withServer(cfg OAuthProviderConfig, rs *refreshTestServer) OAuthProviderConfig {
 	cfg.HTTPClient = rs.Client()
 	cfg.TokenURL = rs.URL
 	return cfg
 }
 
-// expiredCred builds a stored credential that NeedsRefresh() and carries the
-// given refresh token.
 func expiredCred(provider string, refreshToken string) *AuthCredential {
 	return &AuthCredential{
 		AccessToken:  "old-access",
@@ -65,8 +57,6 @@ func expiredCred(provider string, refreshToken string) *AuthCredential {
 	}
 }
 
-// A — the central test: 16 concurrent callers sharing a key must produce
-// exactly ONE token request; all of them observe the same fresh token.
 func TestEnsureFreshCredentialSingleFlight(t *testing.T) {
 	setupRefreshTestStore(t)
 	rs := newRefreshTestServer(t, http.StatusOK)
@@ -122,8 +112,6 @@ func TestEnsureFreshCredentialSingleFlight(t *testing.T) {
 	}
 }
 
-// B — a follow-up call on an already-fresh credential must not touch the
-// network (fast path).
 func TestEnsureFreshCredentialSecondCallUsesStoredToken(t *testing.T) {
 	setupRefreshTestStore(t)
 	rs := newRefreshTestServer(t, http.StatusOK)
@@ -152,7 +140,6 @@ func TestEnsureFreshCredentialSecondCallUsesStoredToken(t *testing.T) {
 	}
 }
 
-// C — no stored credential yields (nil, nil) and no network call.
 func TestEnsureFreshCredentialReturnsNilWhenNoCredential(t *testing.T) {
 	setupRefreshTestStore(t)
 	rs := newRefreshTestServer(t, http.StatusOK)
@@ -170,8 +157,6 @@ func TestEnsureFreshCredentialReturnsNilWhenNoCredential(t *testing.T) {
 	}
 }
 
-// D — NeedsRefresh but no refresh token: return the stored credential
-// untouched and make no network call.
 func TestEnsureFreshCredentialWithoutRefreshTokenReturnsStored(t *testing.T) {
 	setupRefreshTestStore(t)
 	rs := newRefreshTestServer(t, http.StatusOK)
@@ -197,8 +182,6 @@ func TestEnsureFreshCredentialWithoutRefreshTokenReturnsStored(t *testing.T) {
 	}
 }
 
-// E — a failed refresh returns an error and must leave the stored credential
-// untouched (no persistence of a partially-consumed token).
 func TestEnsureFreshCredentialRefreshErrorKeepsStoreIntact(t *testing.T) {
 	setupRefreshTestStore(t)
 	rs := newRefreshTestServer(t, http.StatusBadRequest)
@@ -231,7 +214,6 @@ func TestEnsureFreshCredentialRefreshErrorKeepsStoreIntact(t *testing.T) {
 	}
 }
 
-// F — identity metadata survives a refresh whose response omits it.
 func TestEnsureFreshCredentialPreservesMetadata(t *testing.T) {
 	setupRefreshTestStore(t)
 	rs := newRefreshTestServer(t, http.StatusOK)
@@ -280,8 +262,6 @@ func TestEnsureFreshCredentialPreservesMetadata(t *testing.T) {
 	}
 }
 
-// G — RequireOAuthMethod mirrors codex's guard: non-oauth credentials are
-// returned untouched, while the zero policy refreshes them.
 func TestEnsureFreshCredentialPolicySkipsNonOAuth(t *testing.T) {
 	setupRefreshTestStore(t)
 	rs := newRefreshTestServer(t, http.StatusOK)
@@ -309,7 +289,6 @@ func TestEnsureFreshCredentialPolicySkipsNonOAuth(t *testing.T) {
 		t.Errorf("token endpoint hits with RequireOAuthMethod = %d, want 0", got)
 	}
 
-	// Zero policy: the refreshable credential is refreshed.
 	cred, err = EnsureFreshCredential("openai", cfg, RefreshPolicy{})
 	if err != nil {
 		t.Fatalf("EnsureFreshCredential(zero policy) error: %v", err)
@@ -322,8 +301,6 @@ func TestEnsureFreshCredentialPolicySkipsNonOAuth(t *testing.T) {
 	}
 }
 
-// H — locks are per key: concurrent refreshes of two different providers each
-// hit the endpoint exactly once and both succeed.
 func TestEnsureFreshCredentialKeysAreIndependent(t *testing.T) {
 	setupRefreshTestStore(t)
 	rs := newRefreshTestServer(t, http.StatusOK)
@@ -371,24 +348,6 @@ func TestEnsureFreshCredentialKeysAreIndependent(t *testing.T) {
 	}
 }
 
-// --- Error-context parity -------------------------------------------------
-//
-// Before the coordinator owned the error context, each provider built the
-// message inline around the raw error returned by GetCredential /
-// RefreshAccessToken / SetCredential, i.e. at c993e50e:
-//
-//	GetCredential:      fmt.Errorf("loading auth credentials: %w", err)
-//	RefreshAccessToken: fmt.Errorf("refreshing token: %w", err)
-//	SetCredential:      fmt.Errorf("saving refreshed token: %w", err)
-//
-// EnsureFreshCredential now applies exactly those wrappers itself, so the final
-// strings the providers return must stay byte-for-byte identical. The tests
-// below rebuild the OLD string from the very same raw error and assert full
-// equality (not just a prefix), plus the required prefix assertion.
-
-// assertProviderErrorParity asserts that got.Error() is byte-for-byte the
-// message the providers used to produce at c993e50e for the same raw error,
-// i.e. `<prefix>: <rawErr>`, and that the prefix is present.
 func assertProviderErrorParity(t *testing.T, got error, prefix string, rawErr error) {
 	t.Helper()
 	if rawErr == nil {
@@ -398,25 +357,19 @@ func assertProviderErrorParity(t *testing.T, got error, prefix string, rawErr er
 	if got == nil {
 		t.Fatalf("EnsureFreshCredential() error = nil, want %q", want)
 	}
-	// Literal parity: the new string must equal the old inline wrapping.
 	if got.Error() != want {
 		t.Errorf("error = %q\n  want (c993e50e provider wrapping) %q", got.Error(), want)
 	}
-	// Required explicit prefix assertion.
 	if !strings.Contains(got.Error(), prefix+":") {
 		t.Errorf("error = %q, want it to contain %q", got.Error(), prefix+":")
 	}
 }
 
-// I1 — store read failure: EnsureFreshCredential must yield
-// "loading auth credentials: <err>".
 func TestEnsureFreshCredentialErrorContextLoadingCredentials(t *testing.T) {
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	s := openSQLiteStore(t)
 	useTestAuthRepo(t, s.Auth())
 
-	// Force the store read to fail deterministically and network-free: drop the
-	// table the repository reads from.
 	if _, err := s.DB().Exec(`DROP TABLE auth_credentials`); err != nil {
 		t.Fatalf("DROP TABLE: %v", err)
 	}
@@ -432,7 +385,6 @@ func TestEnsureFreshCredentialErrorContextLoadingCredentials(t *testing.T) {
 		t.Errorf("EnsureFreshCredential() = %+v, want nil", cred)
 	}
 
-	// Rebuild the raw error the old provider wrapped.
 	_, rawErr := GetCredential("openai")
 	assertProviderErrorParity(t, err, "loading auth credentials", rawErr)
 
@@ -441,8 +393,6 @@ func TestEnsureFreshCredentialErrorContextLoadingCredentials(t *testing.T) {
 	}
 }
 
-// I2 — refresh failure: EnsureFreshCredential must yield
-// "refreshing token: <err>".
 func TestEnsureFreshCredentialErrorContextRefreshingToken(t *testing.T) {
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	s := openSQLiteStore(t)
@@ -463,14 +413,10 @@ func TestEnsureFreshCredentialErrorContextRefreshingToken(t *testing.T) {
 		t.Errorf("EnsureFreshCredential() = %+v, want nil", cred)
 	}
 
-	// Rebuild the raw error the old provider wrapped (the 400 body is static, so
-	// the message is identical on every call).
 	_, rawErr := RefreshAccessToken(expiredCred("openai", "rot-0"), cfg)
 	assertProviderErrorParity(t, err, "refreshing token", rawErr)
 }
 
-// I3 — persist failure: EnsureFreshCredential must yield
-// "saving refreshed token: <err>".
 func TestEnsureFreshCredentialErrorContextSavingRefreshedToken(t *testing.T) {
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	s := openSQLiteStore(t)
@@ -483,8 +429,6 @@ func TestEnsureFreshCredentialErrorContextSavingRefreshedToken(t *testing.T) {
 		t.Fatalf("SetCredential() error: %v", err)
 	}
 
-	// Force the write to fail deterministically while leaving reads intact: a
-	// BEFORE UPDATE trigger aborts every upsert.
 	if _, err := s.DB().Exec(
 		`CREATE TRIGGER t_fail_set BEFORE UPDATE ON auth_credentials
 		 BEGIN SELECT RAISE(ABORT, 'injected set failure'); END`,
@@ -500,27 +444,14 @@ func TestEnsureFreshCredentialErrorContextSavingRefreshedToken(t *testing.T) {
 		t.Errorf("EnsureFreshCredential() = %+v, want nil", cred)
 	}
 
-	// Rebuild the raw error the old provider wrapped.
 	rawErr := SetCredential("openai", expiredCred("openai", "rot-1"))
 	assertProviderErrorParity(t, err, "saving refreshed token", rawErr)
 
-	// The refresh did happen before the failed persist.
 	if got := rs.hits.Load(); got != 1 {
 		t.Errorf("token endpoint hits = %d, want 1", got)
 	}
 }
 
-// --- Rotated-token ordering (anti-bug port) -------------------------------
-//
-// The reference implementation (jcode) runs its inference-scope gate BEFORE
-// persisting the rotated refresh token, so a rotation that answers with
-// non-inference scopes consumes the old refresh token and throws the new one
-// away, bricking the account. EnsureFreshCredential must therefore persist the
-// credential carried by the *inferenceScopeError before surfacing it.
-
-// claudeGateCfg builds the Claude-like config used by the two tests below: a
-// hand-built JSON token request that enforces the inference-scope gate against
-// the given fake endpoint.
 func claudeGateCfg(srv *httptest.Server) OAuthProviderConfig {
 	return OAuthProviderConfig{
 		Name:                  "anthropic",
@@ -532,9 +463,6 @@ func claudeGateCfg(srv *httptest.Server) OAuthProviderConfig {
 	}
 }
 
-// J1 — the whole point of the task: the endpoint rotates the refresh token and
-// answers with non-inference scopes. The gate fails, but the ROTATED refresh
-// token must already be persisted when the error comes back.
 func TestEnsureFreshCredentialPersistsRotatedTokenOnInferenceGateFailure(t *testing.T) {
 	setupRefreshTestStore(t)
 
@@ -579,15 +507,12 @@ func TestEnsureFreshCredentialPersistsRotatedTokenOnInferenceGateFailure(t *test
 	t.Logf("stored credential after the call:  access=%q refresh=%q expires_at=%v provider=%q auth_method=%q scopes=%v",
 		stored.AccessToken, stored.RefreshToken, stored.ExpiresAt, stored.Provider, stored.AuthMethod, stored.Scopes)
 
-	// The rotated refresh token must survive the gate failure: the old one is
-	// already consumed, so losing this one bricks the account (the jcode bug).
 	if stored.RefreshToken != "rotated" {
 		t.Errorf("persisted RefreshToken = %q, want %q (rotated token was lost)", stored.RefreshToken, "rotated")
 	}
 	if stored.AccessToken != "new-access" {
 		t.Errorf("persisted AccessToken = %q, want %q", stored.AccessToken, "new-access")
 	}
-	// Same metadata carry-over the success path applies.
 	if stored.Provider != "anthropic" {
 		t.Errorf("persisted Provider = %q, want %q", stored.Provider, "anthropic")
 	}
@@ -600,8 +525,6 @@ func TestEnsureFreshCredentialPersistsRotatedTokenOnInferenceGateFailure(t *test
 	}
 }
 
-// J2 — negative control: a non-gate refresh failure carries no credential and
-// must NOT touch the stored one (the current behavior, unchanged).
 func TestEnsureFreshCredentialKeepsStoredTokenOnNonGateRefreshError(t *testing.T) {
 	setupRefreshTestStore(t)
 

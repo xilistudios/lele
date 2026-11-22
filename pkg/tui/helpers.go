@@ -12,20 +12,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// streamThrottleMsg is sent by tea.Tick to trigger deferred updates.
 type streamThrottleMsg struct{}
 
-// throttledUpdateViewport queues a viewport refresh for streaming events.
-// Instead of rendering on every chunk, it coalesces updates so at most one
-// render happens per streamThrottleInterval.
 func (m *Model) throttledUpdateViewport() tea.Cmd {
 	if m.streamThrottleActive {
-		// A throttle is already scheduled — just mark that a new chunk arrived.
 		m.streamPendingUpdate = true
 		return nil
 	}
 
-	// Render the first chunk immediately for responsiveness!
 	m.updateViewport()
 	m.streamThrottleActive = true
 	m.streamPendingUpdate = false
@@ -35,8 +29,6 @@ func (m *Model) throttledUpdateViewport() tea.Cmd {
 	})
 }
 
-// flushStreamUpdate forces an immediate viewport render.
-// Called when streaming ends so the user always sees the complete response immediately.
 func (m *Model) flushStreamUpdate() {
 	if m.streamPendingUpdate {
 		m.streamPendingUpdate = false
@@ -45,15 +37,6 @@ func (m *Model) flushStreamUpdate() {
 	m.streamThrottleActive = false
 }
 
-// completeCmd builds the command that finalizes a streaming turn.
-//
-// bubbletea executes tea.Cmd functions asynchronously on a separate goroutine
-// ("this can be long"), so mutable per-session Model state MUST be captured at
-// closure creation time and never read at execution time. Capturing late would
-// both race on m.currentKey and misattribute the completion to whatever
-// session the user switched to in the meantime (the `msg.sessionKey ==
-// m.currentKey` guard in the completeMsg handler would then pass for the wrong
-// session, clearing its loading state while the real completion is lost).
 func (m *Model) completeCmd() tea.Cmd {
 	key := m.currentKey
 	return func() tea.Msg {
@@ -78,9 +61,6 @@ func (m *Model) startOutboundListener() tea.Cmd {
 	}
 }
 
-// tickCmd returns a tea.Cmd that schedules the next animation tick.
-// It returns nil if a tick is already pending to prevent multiple tick chains
-// from accumulating (which causes the spinner to accelerate).
 func (m *Model) tickCmd() tea.Cmd {
 	if m.tickPending {
 		return nil
@@ -91,9 +71,6 @@ func (m *Model) tickCmd() tea.Cmd {
 	})
 }
 
-// submitMessage reads the composer, clears it and publishes its content as a
-// user turn. The input clear is caller-owned so queued messages (which never
-// lived in the composer at flush time) can reuse publishUserMessage directly.
 func (m *Model) submitMessage() tea.Cmd {
 	content := strings.TrimSpace(m.chatInput.Value())
 	if content == "" {
@@ -103,12 +80,7 @@ func (m *Model) submitMessage() tea.Cmd {
 	return m.publishUserMessage(content)
 }
 
-// publishUserMessage starts a turn with the given content: it sets the local
-// processing state, resets streaming fields and publishes the inbound message
-// on the bus. Behavior is identical to the old inline submitMessage body
-// minus reading/clearing the composer.
 func (m *Model) publishUserMessage(content string) tea.Cmd {
-	// If we're on the welcome screen with no session, create one now
 	if m.currentKey == "" {
 		m.createNewChat()
 	}
@@ -126,13 +98,6 @@ func (m *Model) publishUserMessage(content string) tea.Cmd {
 	m.currentThinking = ""
 	m.currentToolAction = ""
 
-	// Store the user message so it renders immediately in the viewport.
-	// The LLM runner will also add it to the session; we clear our copy
-	// once we see it appear in the session history (on reloadSessions).
-	// TrimSpace matches the normalization applied by the agent's
-	// RenderUserMessage before the message is stored in history, so the
-	// equality checks in viewport.go/model.go succeed and the pending
-	// copy is cleared as soon as the message lands in history.
 	m.pendingUserMessage = strings.TrimSpace(content)
 	m.reloadSessions()
 
@@ -148,25 +113,12 @@ func (m *Model) publishUserMessage(content string) tea.Cmd {
 	return m.tickCmd()
 }
 
-// customCommandsRefreshTTL is how long the snapshot of backend custom (harness)
-// slash commands stays valid before the TUI asks the agent loop again. Custom
-// commands are defined in markdown files that users can edit at any time, so a
-// short TTL keeps the palette fresh without hitting the registry on every
-// keystroke.
 const customCommandsRefreshTTL = 30 * time.Second
 
-// harnessCommandSource is the subset of the agent loop the TUI needs to list
-// custom slash commands. It is asserted dynamically (not declared on Model) so
-// the TUI keeps working against backends that predate the harness.
 type harnessCommandSource interface {
 	HarnessCommands() []*harness.Command
 }
 
-// customCommands returns the backend-defined slash commands (config.json,
-// ~/.lele/commands, <workspace>/commands, ./.lele/commands) as commandInfo
-// entries whose names include the leading slash. The result is cached for
-// customCommandsRefreshTTL and is nil when the agent loop is unavailable or
-// does not support harness commands.
 func (m *Model) customCommands() []commandInfo {
 	if m.agentLoop == nil {
 		return nil
@@ -191,14 +143,11 @@ func (m *Model) customCommands() []commandInfo {
 		list = append(list, commandInfo{name: "/" + c.Name, description: harnessCommandDescription(c)})
 	}
 
-	// Non-nil slice (even empty) so the cache is honoured between refreshes.
 	m.customCmds = list
 	m.customCmdsAt = time.Now()
 	return list
 }
 
-// harnessCommandDescription builds the one-line palette description for a
-// custom command, appending its agent/model overrides when set.
 func harnessCommandDescription(c *harness.Command) string {
 	desc := c.Description
 	var suffix []string
@@ -217,14 +166,8 @@ func harnessCommandDescription(c *harness.Command) string {
 	return desc
 }
 
-// commandAppliedArgsRunes caps how many runes of the raw command arguments are
-// shown on the "command applied" activity line.
 const commandAppliedArgsRunes = 60
 
-// formatCommandApplied renders the single-line activity entry for a
-// "command.applied" bus event (custom slash command expanded by the backend).
-// It is a pure function of the event metadata so it can be unit-tested without
-// a bubbletea runtime. Shape: "⚡ /name args · agent: X · model: Y".
 func formatCommandApplied(meta map[string]string) string {
 	name := meta["command"]
 	if name == "" {
@@ -248,14 +191,9 @@ func formatCommandApplied(meta map[string]string) string {
 	if model := meta["model"]; model != "" {
 		line += " · model: " + model
 	}
-	// Metadata arrives from the bus (command expansion is backend/LLM
-	// controlled): sanitize so control/bidi chars cannot desync paint vs
-	// measured width in the overlay activity row.
 	return sanitizeDisplayText(line)
 }
 
-// isCustomCommand reports whether name (with or without leading slash, any
-// case) matches one of the custom commands.
 func (m *Model) isCustomCommand(name string) bool {
 	want := strings.ToLower(strings.TrimPrefix(name, "/"))
 	if want == "" {
@@ -276,8 +214,6 @@ func (m *Model) filterAutocomplete(val string) {
 			m.autocompleteItems = append(m.autocompleteItems, cmd)
 		}
 	}
-	// Then the backend custom commands. Built-ins win on name collision, and
-	// the registry already returns them sorted by name.
 	for _, cmd := range m.customCommands() {
 		if !strings.HasPrefix(cmd.name, val) {
 			continue
@@ -294,16 +230,12 @@ func (m *Model) filterAutocomplete(val string) {
 		}
 		m.autocompleteItems = append(m.autocompleteItems, cmd)
 	}
-	// Most-used first; ties keep the declared order (built-ins) or the
-	// registry's alphabetical order (customs). Empty history = no reorder.
 	sortCommandsByUsage(m.autocompleteItems, m.cmdUsage)
 	if m.autocompleteIdx < 0 || m.autocompleteIdx >= len(m.autocompleteItems) {
 		m.autocompleteIdx = 0
 	}
 }
 
-// getGroupProfiles returns the list of configured group profiles from the
-// config snapshot. Returns nil if the snapshot or groups are unavailable.
 func (m *Model) getGroupProfiles() []config.GroupProfile {
 	snapshot := m.agentLoop.GetProvidable().GetConfigSnapshot()
 	if snapshot == nil {
@@ -312,9 +244,6 @@ func (m *Model) getGroupProfiles() []config.GroupProfile {
 	return snapshot.Groups.List
 }
 
-// submitGroupStart constructs a /group start command and publishes it to the
-// message bus so the backend command handler processes it. It handles session
-// creation, UI state cleanup, and returns a tick command for the loading animation.
 func (m *Model) submitGroupStart(profileID, task string) tea.Cmd {
 	groupCmd := groupStartCommand(profileID, task)
 
@@ -347,23 +276,12 @@ func (m *Model) submitGroupStart(profileID, task string) tea.Cmd {
 	return m.tickCmd()
 }
 
-// recordGroupCompleteStatus updates the tracked status of a group when a
-// group.complete event arrives.
-//
-// The backend guarantees exactly one terminal signal pair per group: a terminal
-// group.status (done | stopped | error) immediately followed by one
-// group.complete — including on failure paths. So group.complete is NOT itself
-// proof of success. Preserve the terminal status already recorded instead of
-// hardcoding "done", which would mislabel failed or stopped groups as
-// successful. Fall back to "done" only when no terminal status was seen yet
-// (e.g. a lost/misordered status event or a legacy backend).
 func (m *Model) recordGroupCompleteStatus(groupID string) {
 	if m.groupStatus == nil {
 		m.groupStatus = make(map[string]string)
 	}
 	switch m.groupStatus[groupID] {
 	case "done", "stopped", "error":
-		// Keep the terminal status already reported by group.status.
 	case "started", "":
 		m.groupStatus[groupID] = "done"
 	default:

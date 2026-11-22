@@ -1,8 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -15,16 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// Regression tests for spontaneous subagent cancellation on config reload.
-//
-// Before the fix, AgentLoop.ReloadRegistry (invoked by every channels reload
-// and by the config file watcher) called cancelAll(), which StopAll()ed every
-// SubagentManager in the process — killing running subagents of agents whose
-// configuration had not changed at all. The reload path must now only cancel
-// the work of agents that were removed from the config.
-
-// newSubagentSurvivalLoop builds an AgentLoop with agents "main" and "worker"
-// isolated from the user's config dir.
 func newSubagentSurvivalLoop(t *testing.T, workerName string) (*AgentLoop, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -49,8 +34,6 @@ func newSubagentSurvivalLoop(t *testing.T, workerName string) (*AgentLoop, strin
 	return al, tmpDir
 }
 
-// addFakeRunningTask registers a task that is not actually running (its cancel
-// only flips a flag) so tests can assert on cancellation without a real LLM.
 func addFakeRunningTask(t *testing.T, sm *tools.SubagentManager, id string) *bool {
 	t.Helper()
 	_, cancel := context.WithCancel(context.Background())
@@ -75,9 +58,6 @@ func mustAgentManager(t *testing.T, al *AgentLoop, agentID string) *tools.Subage
 	return sm
 }
 
-// TestReloadRegistry_KeepsSubagentsOfUnchangedAgent is the core regression
-// test: a reload whose config is byte-for-byte identical must not touch a
-// running subagent task.
 func TestReloadRegistry_KeepsSubagentsOfUnchangedAgent(t *testing.T) {
 	al, _ := newSubagentSurvivalLoop(t, "Worker")
 	sm := mustAgentManager(t, al, "worker")
@@ -98,17 +78,11 @@ func TestReloadRegistry_KeepsSubagentsOfUnchangedAgent(t *testing.T) {
 	}
 }
 
-// TestReloadRegistry_RecreatedAgentKeepsRunningTasks covers the subtler half
-// of the fix: "worker" changes name, so the registry recreates the agent
-// instance and shared tools are re-registered for it. The OLD manager (with
-// its running task) must be re-used, not replaced, or the task would be
-// orphaned — invisible to wait/cancel/list tools afterwards.
 func TestReloadRegistry_RecreatedAgentKeepsRunningTasks(t *testing.T) {
 	al, _ := newSubagentSurvivalLoop(t, "Worker")
 	sm := mustAgentManager(t, al, "worker")
 	stopped := addFakeRunningTask(t, sm, "subagent-1")
 
-	// Changing Name makes agentConfigChanged() recreate the instance.
 	newCfg := al.cfg().Snapshot()
 	for i := range newCfg.Agents.List {
 		if newCfg.Agents.List[i].ID == "worker" {
@@ -128,8 +102,6 @@ func TestReloadRegistry_RecreatedAgentKeepsRunningTasks(t *testing.T) {
 	if *stopped {
 		t.Fatal("task cancel func was invoked when its agent was recreated")
 	}
-	// The agent's toolset must still expose the subagent tools bound to the
-	// same manager — otherwise wait_for_subagent could never find the task.
 	agent, ok := al.registry.GetAgent("worker")
 	if !ok {
 		t.Fatal("worker agent missing after reload")
@@ -141,9 +113,6 @@ func TestReloadRegistry_RecreatedAgentKeepsRunningTasks(t *testing.T) {
 	}
 }
 
-// TestReloadRegistry_CancelsRemovedAgentWork verifies the fix does not swing
-// the other way: an agent that leaves the config must have its running tasks
-// cancelled and its manager dropped, or they would leak forever.
 func TestReloadRegistry_CancelsRemovedAgentWork(t *testing.T) {
 	al, _ := newSubagentSurvivalLoop(t, "Worker")
 	workerSM := mustAgentManager(t, al, "worker")
@@ -181,11 +150,6 @@ func TestReloadRegistry_CancelsRemovedAgentWork(t *testing.T) {
 	}
 }
 
-// TestReloadRegistry_PreservesBackgroundProcessesOfRecreatedAgent guards the
-// companion leak: a subagent's backgrounded command lives in the agent's
-// BackgroundProcessManager. Replacing that manager on reload made running
-// processes invisible (and un-stoppable) while their goroutines kept the old
-// manager alive.
 func TestReloadRegistry_PreservesBackgroundProcessesOfRecreatedAgent(t *testing.T) {
 	al, _ := newSubagentSurvivalLoop(t, "Worker")
 
@@ -213,9 +177,6 @@ func TestReloadRegistry_PreservesBackgroundProcessesOfRecreatedAgent(t *testing.
 	after.Stop(proc.ID)
 }
 
-// TestReloadRegistry_TwoAgentLoopSmoke keeps the original production scenario
-// honest: with several agents configured, an identical reload (what the
-// channels watcher fires) leaves every manager and task in place.
 func TestReloadRegistry_TwoAgentLoopSmoke(t *testing.T) {
 	al, _ := newSubagentSurvivalLoop(t, "Worker")
 	before := al.toolCoordinator.GetSubagents()

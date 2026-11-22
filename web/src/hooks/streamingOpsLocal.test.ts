@@ -33,9 +33,7 @@ describe('finalizeStreamingAssistantsForSession', () => {
 
     expect(next.find((m) => m.id === 'a1')?.streaming).toBe(false)
     expect(next.find((m) => m.id === 'a2')?.streaming).toBe(false)
-    // Content is preserved, only the flag flips
     expect(next.find((m) => m.id === 'a1')?.content).toBe('partial')
-    // Non-assistant roles are untouched (user placeholder keeps its flag)
     expect(next.find((m) => m.id === 'u1')?.streaming).toBe(true)
   })
 

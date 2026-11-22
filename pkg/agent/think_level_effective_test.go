@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -17,9 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// newThinkLevelTestLoop builds an AgentLoop whose default agent carries the
-// given resolved thinking level, isolated in a throwaway LELE_CONFIG_DIR so
-// persisted session meta (SQLite) never touches the real store.
 func newThinkLevelTestLoop(t *testing.T, agentLevel string) (*AgentLoop, *AgentInstance) {
 	t.Helper()
 	tmpDir, err := os.MkdirTemp("", "think-level-test-*")
@@ -55,13 +46,11 @@ func strPtrOrNil(s string) *string {
 	return &s
 }
 
-// TestGetEffectiveThinkLevel covers the three-layer contract: session override
-// wins, then the agent's resolved config level, then "default".
 func TestGetEffectiveThinkLevel(t *testing.T) {
 	tests := []struct {
 		name       string
-		agentLevel string // resolved level on the default agent (config)
-		sessionSet string // level passed to SetThinkLevel ("" = never set)
+		agentLevel string
+		sessionSet string
 		want       string
 	}{
 		{"nothing set", "", "", "default"},
@@ -92,8 +81,6 @@ func TestGetEffectiveThinkLevel(t *testing.T) {
 	}
 }
 
-// TestGetThinkLevel_ContractUnchanged guards R7: the session-override getter
-// used by /think and the WebUI chip must NOT resolve the agent level.
 func TestGetThinkLevel_ContractUnchanged(t *testing.T) {
 	al, _ := newThinkLevelTestLoop(t, "high")
 	providable := al.GetProvidable()
@@ -106,8 +93,6 @@ func TestGetThinkLevel_ContractUnchanged(t *testing.T) {
 	}
 }
 
-// TestStatusRenderers_ShowEffectiveLevel asserts both /status renderers show
-// exactly the level buildLLMOptions will apply (agent config layer).
 func TestStatusRenderers_ShowEffectiveLevel(t *testing.T) {
 	al, agent := newThinkLevelTestLoop(t, "medium")
 	const sessionKey = "telegram:4242"
@@ -130,7 +115,6 @@ func TestStatusRenderers_ShowEffectiveLevel(t *testing.T) {
 		t.Errorf("message_processor /status does not show effective level: %s", status2)
 	}
 
-	// Session override must win in the display too, matching buildLLMOptions.
 	if !al.GetProvidable().SetThinkLevel(sessionKey, "low") {
 		t.Fatal("SetThinkLevel failed")
 	}
@@ -142,16 +126,10 @@ func TestStatusRenderers_ShowEffectiveLevel(t *testing.T) {
 	}
 }
 
-// TestResetAgentSession_ClearsPersistedModelAndThink locks the /reset fix:
-// after /clear, neither the in-memory sync.Maps nor the persisted session meta
-// may keep an override — otherwise buildLLMOptions (thinking) or
-// syncSessionModel (model) resurrects it on the very next turn.
 func TestResetAgentSession_ClearsPersistedModelAndThink(t *testing.T) {
 	al, agent := newThinkLevelTestLoop(t, "")
 	sessionKey := "telegram:777"
 
-	// Go through the real user path: SetThinkLevel persists "off" (and only
-	// deletes the sync.Map entry), SetModel persists the model override.
 	if !al.GetProvidable().SetThinkLevel(sessionKey, "off") {
 		t.Fatal("SetThinkLevel(off) failed")
 	}
@@ -181,10 +159,6 @@ func TestResetAgentSession_ClearsPersistedModelAndThink(t *testing.T) {
 		t.Error("in-memory sessionModels survived reset")
 	}
 
-	// No resurrection: with the agent having no thinking level and no model
-	// ReasoningConfig, the next request must carry no reasoning key at all —
-	// in particular NOT the {"enabled": false} a stale persisted "off" would
-	// produce.
 	caller := newLLMCaller(al)
 	opts := llmCallOptions{
 		ctx:        context.Background(),
@@ -198,17 +172,13 @@ func TestResetAgentSession_ClearsPersistedModelAndThink(t *testing.T) {
 	}
 }
 
-// TestSetThinkLevel_CanonicalLevels locks the review fix: SetThinkLevel must
-// validate against config.NormalizeThinkingLevel instead of a duplicated
-// inline whitelist, keeping strict parity for the empty string (rejected) while
-// accepting "none" as an alias of "default" (clears the override, persists "").
 func TestSetThinkLevel_CanonicalLevels(t *testing.T) {
 	tests := []struct {
 		name        string
 		level       string
 		wantOK      bool
-		wantGet     string // GetThinkLevel after the call
-		wantPersist string // persisted session-meta value
+		wantGet     string
+		wantPersist string
 	}{
 		{"empty rejected", "", false, "default", ""},
 		{"bogus rejected", "bogus", false, "default", ""},
@@ -226,7 +196,6 @@ func TestSetThinkLevel_CanonicalLevels(t *testing.T) {
 			providable := al.GetProvidable()
 			const sessionKey = "telegram:5000"
 
-			// Start from a real override so "clear" cases are meaningful.
 			if !providable.SetThinkLevel(sessionKey, "low") {
 				t.Fatal("precondition: SetThinkLevel(low) failed")
 			}
@@ -236,7 +205,6 @@ func TestSetThinkLevel_CanonicalLevels(t *testing.T) {
 				t.Fatalf("SetThinkLevel(%q) = %v, want %v", tc.level, ok, tc.wantOK)
 			}
 			if !tc.wantOK {
-				// Rejected calls must leave the previous override untouched.
 				if got := providable.GetThinkLevel(sessionKey); got != "low" {
 					t.Errorf("rejected SetThinkLevel(%q) mutated state: GetThinkLevel = %q, want \"low\"", tc.level, got)
 				}
@@ -248,7 +216,6 @@ func TestSetThinkLevel_CanonicalLevels(t *testing.T) {
 			if got := agent.Sessions.GetThinkingLevel(sessionKey); got != tc.wantPersist {
 				t.Errorf("persisted thinking = %q, want %q", got, tc.wantPersist)
 			}
-			// An override-free session must fall through to the agent level.
 			wantEffective := tc.wantGet
 			if wantEffective == "default" {
 				wantEffective = "high"
@@ -260,9 +227,6 @@ func TestSetThinkLevel_CanonicalLevels(t *testing.T) {
 	}
 }
 
-// TestThinkCommand_AcceptsNoneAlias guards the user-facing half of the "none"
-// alias: /think none must clear the override and report it (not "Unknown think
-// level"), and the rejection message must list "default" among valid levels.
 func TestThinkCommand_AcceptsNoneAlias(t *testing.T) {
 	al, agent := newThinkLevelTestLoop(t, "medium")
 	ch, ok := al.commandHandler.(*commandHandlerImpl)

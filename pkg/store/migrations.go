@@ -7,11 +7,8 @@ import (
 	"strconv"
 )
 
-// SchemaVersion is the latest schema version known to this build.
 const SchemaVersion = 8
 
-// migrations lists schema migrations in version order. Each entry is
-// applied atomically inside a single transaction by migrate.
 var migrations = []struct {
 	Version int
 	DDL     string
@@ -216,9 +213,6 @@ ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT '';
 	},
 }
 
-// migrate brings db up to SchemaVersion. It is idempotent: if the
-// database is already at the latest version it does nothing. All
-// pending migrations are applied inside a single transaction.
 func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
 		return fmt.Errorf("create schema_meta table: %w", err)
@@ -262,8 +256,6 @@ func migrate(db *sql.DB) error {
 	return nil
 }
 
-// schemaVersion reads the current schema version from schema_meta.
-// A missing entry means version 0 (fresh database).
 func schemaVersion(db *sql.DB) (int, error) {
 	var value string
 	err := db.QueryRow(`SELECT value FROM schema_meta WHERE key = 'schema_version'`).Scan(&value)

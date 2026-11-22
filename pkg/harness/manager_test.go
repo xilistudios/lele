@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package harness
 
 import (
@@ -14,7 +8,6 @@ import (
 	"time"
 )
 
-// writeCmdFile creates dir/name with body, failing the test on error.
 func writeCmdFile(t *testing.T, dir, name, body string) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -27,7 +20,6 @@ func writeCmdFile(t *testing.T, dir, name, body string) string {
 	return path
 }
 
-// cmdFileBody builds a markdown command file whose template is identifiable.
 func cmdFileBody(desc, tmpl string) string {
 	return "---\ndescription: " + desc + "\n---\n" + tmpl + "\n"
 }
@@ -72,7 +64,6 @@ func TestManagerLoadsAllFourLevels(t *testing.T) {
 			t.Errorf("command %q stored with name %q", name, cmd.Name)
 		}
 	}
-	// config-defined commands carry no path; file ones do.
 	if c, _ := m.Registry().Get("c"); c.Path != "" {
 		t.Errorf("config command path = %q, want empty", c.Path)
 	}
@@ -87,7 +78,6 @@ func TestManagerPrecedenceDirectoryBeatsAll(t *testing.T) {
 	ws := filepath.Join(root, "ws")
 	dir := filepath.Join(root, "dir")
 
-	// Same name at every level; template marks the winner.
 	writeCmdFile(t, filepath.Join(global, "commands"), "dup.md", cmdFileBody("g", "GLOBAL"))
 	writeCmdFile(t, filepath.Join(ws, "commands"), "dup.md", cmdFileBody("w", "WORKSPACE"))
 	writeCmdFile(t, dir, "dup.md", cmdFileBody("d", "DIRECTORY"))
@@ -107,19 +97,16 @@ func TestManagerPrecedenceDirectoryBeatsAll(t *testing.T) {
 		t.Fatalf("directory must win, got template=%q source=%q", cmd.Template, cmd.Source)
 	}
 
-	// Drop the directory level: workspace wins.
 	m2 := NewManager(ManagerConfig{LeleDir: global, Workspace: ws, Commands: m.cfg.Commands})
 	if c2, _ := m2.Registry().Get("dup"); c2.Template != "WORKSPACE" || c2.Source != SourceWorkspace {
 		t.Fatalf("workspace must win without dir, got %q/%q", c2.Template, c2.Source)
 	}
 
-	// Only global + config: global wins.
 	m3 := NewManager(ManagerConfig{LeleDir: global, Commands: m.cfg.Commands})
 	if c3, _ := m3.Registry().Get("dup"); c3.Template != "GLOBAL" || c3.Source != SourceGlobal {
 		t.Fatalf("global must win over config, got %q/%q", c3.Template, c3.Source)
 	}
 
-	// Config only.
 	m4 := NewManager(ManagerConfig{Commands: m.cfg.Commands})
 	if c4, _ := m4.Registry().Get("dup"); c4.Template != "CONFIG" || c4.Source != SourceConfig {
 		t.Fatalf("config fallback wrong, got %q/%q", c4.Template, c4.Source)
@@ -133,28 +120,24 @@ func TestManagerEnsureFresh(t *testing.T) {
 		t.Fatalf("fresh manager should be empty, got %v", registeredNames(m))
 	}
 
-	// A brand-new file must not appear while the TTL has not passed.
 	writeCmdFile(t, root, "late.md", cmdFileBody("late", "LATE"))
 	m.EnsureFresh(time.Hour)
 	if _, ok := m.Registry().Get("late"); ok {
 		t.Fatal("command appeared before TTL expired")
 	}
 
-	// With an expired TTL it is picked up.
 	time.Sleep(2 * time.Millisecond)
 	m.EnsureFresh(time.Microsecond)
 	if _, ok := m.Registry().Get("late"); !ok {
 		t.Fatal("command not picked up after TTL expired")
 	}
 
-	// ttl <= 0 always reloads.
 	writeCmdFile(t, root, "now.md", cmdFileBody("now", "NOW"))
 	m.EnsureFresh(0)
 	if _, ok := m.Registry().Get("now"); !ok {
 		t.Fatal("ttl<=0 must force a reload")
 	}
 
-	// Removal is observed on the next refresh too.
 	if err := os.Remove(filepath.Join(root, "now.md")); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +177,7 @@ func TestManagerMissingDirsAreFine(t *testing.T) {
 	if m.Registry().Len() != 1 {
 		t.Fatalf("expected only the config command, got %v", registeredNames(m))
 	}
-	m.EnsureFresh(0) // must not panic or error out visibly
+	m.EnsureFresh(0)
 	if _, ok := m.Registry().Get("ok"); !ok {
 		t.Fatal("config command lost")
 	}
@@ -236,20 +219,16 @@ func TestManagerAllowShell(t *testing.T) {
 		t.Error("nil command with default false should deny shell")
 	}
 
-	// Harness-wide default turns everything on.
 	m2 := NewManager(ManagerConfig{AllowShellDefault: true})
 	if !m2.AllowShell(off) {
 		t.Error("AllowShellDefault must apply to commands without the flag")
 	}
 
-	// Explicit override wins over both the flag and the default, and names are
-	// normalized on both sides.
 	m3 := NewManager(ManagerConfig{AllowShellDefault: true})
 	m3.SetAllowShell("ON", false)
 	if m3.AllowShell(on) {
 		t.Error("override to false must win over AllowShellDefault")
 	}
-	// Overriding "on" must not leak into other commands.
 	if !m3.AllowShell(off) {
 		t.Error("default must still apply to non-overridden commands")
 	}
@@ -257,11 +236,11 @@ func TestManagerAllowShell(t *testing.T) {
 	if !m3.AllowShell(off) {
 		t.Error("override to true must win")
 	}
-	m3.SetAllowShell("off", false) // pin false beats the default
+	m3.SetAllowShell("off", false)
 	if m3.AllowShell(off) {
 		t.Error("pin to false must win over AllowShellDefault")
 	}
-	m3.ClearAllowShell("off") // dropping the pin restores the default
+	m3.ClearAllowShell("off")
 	if !m3.AllowShell(off) {
 		t.Error("clearing the pin must fall back to AllowShellDefault")
 	}
@@ -277,7 +256,6 @@ func TestManagerLowercasesConfigNames(t *testing.T) {
 	}
 }
 
-// names returns the registered command names for failure messages.
 func registeredNames(m *Manager) []string {
 	var out []string
 	for _, c := range m.Registry().All() {
@@ -289,7 +267,6 @@ func registeredNames(m *Manager) []string {
 func TestManagerAllowAbsoluteFiles(t *testing.T) {
 	yes, no := true, false
 
-	// nil tri-state inherits the default, in both directions.
 	mOff := NewManager(ManagerConfig{AllowAbsoluteFilesDefault: false})
 	if mOff.AllowAbsoluteFiles(&Command{Name: "x"}) {
 		t.Error("nil flag with default false must deny")
@@ -302,8 +279,6 @@ func TestManagerAllowAbsoluteFiles(t *testing.T) {
 		t.Error("nil flag with default true must allow")
 	}
 
-	// Explicit tri-state overrides the default in BOTH directions (this is
-	// the deliberate difference from AllowShell's OR merge).
 	if !mOff.AllowAbsoluteFiles(&Command{Name: "y", AllowAbsoluteFiles: &yes}) {
 		t.Error("explicit true must beat default false")
 	}
@@ -311,7 +286,6 @@ func TestManagerAllowAbsoluteFiles(t *testing.T) {
 		t.Error("explicit false must beat default true")
 	}
 
-	// Runtime pin wins over tri-state and default; clearing restores them.
 	mOn.SetAllowAbsoluteFiles("Z", true)
 	if !mOn.AllowAbsoluteFiles(&Command{Name: "z", AllowAbsoluteFiles: &no}) {
 		t.Error("pin true must beat explicit false")
@@ -329,8 +303,6 @@ func TestManagerAllowAbsoluteFiles(t *testing.T) {
 	}
 }
 
-// levelNames returns "source:name" pairs for one level of a Levels() map,
-// used in assertions and failure messages.
 func levelNames(levels map[Source][]*Command, src Source) []string {
 	var out []string
 	for _, c := range levels[src] {
@@ -339,18 +311,12 @@ func levelNames(levels map[Source][]*Command, src Source) []string {
 	return out
 }
 
-// T-B2: Levels() reports every discovery level WITHOUT merging, so a name that
-// exists in two levels shows up in BOTH, while Reload()/Registry().All() keep
-// the last-write-wins precedence (workspace beats global).
 func TestManagerLevelsShowsShadowedCommands(t *testing.T) {
 	root := t.TempDir()
 	global := filepath.Join(root, "global")
 	ws := filepath.Join(root, "ws")
 	dir := filepath.Join(root, "dir")
 
-	// "dup" lives in global AND workspace (and config, lowest precedence);
-	// "solo" only in global. Template marks the level so the winner is
-	// identifiable.
 	writeCmdFile(t, filepath.Join(global, "commands"), "dup.md", cmdFileBody("g", "GLOBAL"))
 	writeCmdFile(t, filepath.Join(global, "commands"), "solo.md", cmdFileBody("g", "GLOBAL-SOLO"))
 	writeCmdFile(t, filepath.Join(ws, "commands"), "dup.md", cmdFileBody("w", "WORKSPACE"))
@@ -368,16 +334,12 @@ func TestManagerLevelsShowsShadowedCommands(t *testing.T) {
 		t.Fatalf("Levels: %v", err)
 	}
 
-	// Every level must be present as a key, even when empty.
 	for _, src := range levelOrder {
 		if _, ok := levels[src]; !ok {
 			t.Fatalf("Levels() missing key %q", src)
 		}
 	}
 
-	// dup appears in ALL FOUR levels — nothing is merged away. Each level's
-	// file carries its own level name as the template, so the entry can be
-	// attributed to the level that produced it (config uses "CONFIG" too).
 	for _, src := range levelOrder {
 		found := false
 		for _, c := range levels[src] {
@@ -396,7 +358,6 @@ func TestManagerLevelsShowsShadowedCommands(t *testing.T) {
 			t.Errorf("level %q missing shadowed command dup, have %v", src, levelNames(levels, src))
 		}
 	}
-	// solo only exists at global level.
 	if got := levelNames(levels, SourceGlobal); len(got) != 2 {
 		t.Errorf("global level = %v, want [dup solo]", got)
 	}
@@ -404,8 +365,6 @@ func TestManagerLevelsShowsShadowedCommands(t *testing.T) {
 		t.Errorf("workspace level = %v, want [dup]", got)
 	}
 
-	// Precedence is untouched: the merged registry keeps last-write-wins
-	// (directory > workspace > global > config).
 	cmd, ok := m.Registry().Get("dup")
 	if !ok {
 		t.Fatal("dup missing from registry")
@@ -413,14 +372,11 @@ func TestManagerLevelsShowsShadowedCommands(t *testing.T) {
 	if cmd.Source != SourceDirectory || cmd.Template != "DIRECTORY" {
 		t.Errorf("merged dup = %q/%q, want directory/DIRECTORY", cmd.Source, cmd.Template)
 	}
-	// Registry().All() agrees with the registry view.
 	all := m.Registry().All()
-	if len(all) != 2 { // dup + solo
+	if len(all) != 2 {
 		t.Fatalf("registry has %d commands (%v), want 2", len(all), registeredNames(m))
 	}
 
-	// Drop the directory level: workspace must win, and Reload() must reflect
-	// the change with the same last-write-wins rule.
 	m2 := NewManager(ManagerConfig{
 		LeleDir:   global,
 		Workspace: ws,
@@ -441,8 +397,6 @@ func TestManagerLevelsShowsShadowedCommands(t *testing.T) {
 		t.Errorf("disabled dir level should be empty, got %v", levelNames(l2, SourceDirectory))
 	}
 
-	// Levels() must not mutate the registry or the load timestamp: a stale
-	// snapshot on disk is still what Reload applied.
 	before := m.Registry().Len()
 	if _, err := m.Levels(); err != nil {
 		t.Fatal(err)
@@ -452,18 +406,16 @@ func TestManagerLevelsShowsShadowedCommands(t *testing.T) {
 	}
 }
 
-// T-B3: disabled levels (empty path) map to an empty slice and never produce
-// an error, and Levels() must not create directories as a side effect.
 func TestManagerLevelsDisabledLevels(t *testing.T) {
 	root := t.TempDir()
 	ws := filepath.Join(root, "ws")
 	writeCmdFile(t, filepath.Join(ws, "commands"), "only.md", cmdFileBody("o", "ONLY"))
 
 	m := NewManager(ManagerConfig{
-		LeleDir:   "",  // global disabled
-		Workspace: ws,  // workspace enabled
-		Dir:       "",  // directory disabled
-		Commands:  nil, // config level has no entries at all
+		LeleDir:   "",
+		Workspace: ws,
+		Dir:       "",
+		Commands:  nil,
 	})
 
 	levels, err := m.Levels()
@@ -486,7 +438,6 @@ func TestManagerLevelsDisabledLevels(t *testing.T) {
 		t.Errorf("workspace level = %v, want [only]", got)
 	}
 
-	// A missing (not disabled) directory is also not an error.
 	m2 := NewManager(ManagerConfig{LeleDir: filepath.Join(root, "does-not-exist")})
 	levels2, err := m2.Levels()
 	if err != nil {
@@ -496,7 +447,6 @@ func TestManagerLevelsDisabledLevels(t *testing.T) {
 		t.Errorf("missing global dir produced commands: %v", levelNames(levels2, SourceGlobal))
 	}
 
-	// Levels() is read-only: it must not create the commands dir.
 	fresh := filepath.Join(root, "fresh-ws")
 	m3 := NewManager(ManagerConfig{Workspace: fresh})
 	if _, err := m3.Levels(); err != nil {
@@ -507,16 +457,11 @@ func TestManagerLevelsDisabledLevels(t *testing.T) {
 	}
 }
 
-// reloadLocked and Levels must agree on per-level errors: a level whose dir is
-// unreadable reports the error while the levels that loaded are still
-// returned. Uses a file where a directory is expected to force a read failure.
 func TestManagerLevelsReportsPerLevelErrors(t *testing.T) {
 	root := t.TempDir()
 	ws := filepath.Join(root, "ws")
 	writeCmdFile(t, filepath.Join(ws, "commands"), "good.md", cmdFileBody("g", "GOOD"))
 
-	// Global level: point LeleDir at a location whose "commands" entry is a
-	// regular file, so os.ReadDir(<lele>/commands) fails.
 	broken := filepath.Join(root, "broken")
 	if err := os.MkdirAll(broken, 0o755); err != nil {
 		t.Fatal(err)
@@ -534,17 +479,13 @@ func TestManagerLevelsReportsPerLevelErrors(t *testing.T) {
 	if !strings.Contains(err.Error(), "commands") {
 		t.Errorf("error should mention the failing dir: %v", err)
 	}
-	// The level that loaded is still included.
 	if got := levelNames(levels, SourceWorkspace); len(got) != 1 || got[0] != "good" {
 		t.Errorf("workspace level = %v, want [good] despite global failure", got)
 	}
-	// The failed level is empty, not partially populated.
 	if len(levels[SourceGlobal]) != 0 {
 		t.Errorf("failed level should be empty, got %v", levelNames(levels, SourceGlobal))
 	}
 
-	// reloadLocked keeps the same behaviour: Reload surfaces the joined error
-	// and the good level is still registered.
 	if err := m.Reload(); err == nil {
 		t.Fatal("Reload() must report the failing level")
 	}

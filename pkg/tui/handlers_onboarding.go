@@ -6,28 +6,22 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/theme"
 )
 
-// handleOnboardingKey handles key presses while the first-run onboarding
-// wizard is active. Esc never quits the app here — it only opens the skip
-// confirmation or steps back to the previous wizard step.
 func (m *Model) handleOnboardingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.onboardingStep {
 	case obWelcome:
 		if m.obSkipConfirm {
-			// Skip confirmation dialog
 			switch msg.String() {
 			case "up", "k":
-				m.obSelectedPreset = 0 // toggle selection
+				m.obSelectedPreset = 0
 			case "down", "j":
 				m.obSelectedPreset = 1
 			case "enter":
 				if m.obSelectedPreset == 0 {
-					// "Yes, skip" — exit onboarding
 					m.onboardingActive = false
 					m.obSkipConfirm = false
 					m.cfg.TUI.OnboardingCompleted = true
 					m.saveConfigToDisk()
 				} else {
-					// "No, continue" — dismiss confirmation
 					m.obSkipConfirm = false
 				}
 			case "esc":
@@ -41,12 +35,10 @@ func (m *Model) handleOnboardingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.modalSelectedIdx = 0
 		case "esc":
 			m.obSkipConfirm = true
-			m.obSelectedPreset = 1 // default to "No, continue"
+			m.obSelectedPreset = 1
 		}
 
 	case obLanguage:
-		// Installed languages (builtins + any already-downloaded packs).
-		// Onboarding stays offline: only show what is already available.
 		langs := []string{"en", "es", "pt"}
 		for _, c := range i18n.InstalledLanguages() {
 			found := false
@@ -73,8 +65,7 @@ func (m *Model) handleOnboardingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			lang := langs[m.modalSelectedIdx]
 			_ = m.applyLanguage(lang)
 			m.onboardingStep = obTheme
-			m.themePreviewName = m.currentThemeName // save for Esc revert
-			// Pre-select the current theme in the picker
+			m.themePreviewName = m.currentThemeName
 			names := theme.Builtins()
 			m.modalSelectedIdx = 0
 			for i, n := range names {
@@ -95,22 +86,19 @@ func (m *Model) handleOnboardingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.modalSelectedIdx > 0 {
 				m.modalSelectedIdx--
 			}
-			// Live preview
 			m.previewTheme(names[m.modalSelectedIdx])
 		case "down", "j":
 			if m.modalSelectedIdx < len(names)-1 {
 				m.modalSelectedIdx++
 			}
-			// Live preview
 			m.previewTheme(names[m.modalSelectedIdx])
 		case "enter":
 			name := names[m.modalSelectedIdx]
-			m.applyThemeByName(name) // persist
+			m.applyThemeByName(name)
 			m.themePreviewName = ""
 			m.onboardingStep = obProviderPicker
 			m.modalSelectedIdx = 0
 		case "esc":
-			// Revert to the saved theme
 			if m.themePreviewName != "" {
 				m.previewTheme(m.themePreviewName)
 				m.currentThemeName = m.themePreviewName
@@ -121,7 +109,6 @@ func (m *Model) handleOnboardingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case obProviderPicker:
-		// Total items: len(providerPresets) + 2 (other/custom + skip)
 		totalItems := len(providerPresets) + 2
 		switch msg.String() {
 		case "up", "k":
@@ -134,17 +121,14 @@ func (m *Model) handleOnboardingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			if m.modalSelectedIdx < len(providerPresets) {
-				// Selected a preset — pre-fill the connect flow.
 				m.obSelectedPreset = m.modalSelectedIdx
 				m.onboardingStep = obConnect
 				m.startConnectFlow(&providerPresets[m.modalSelectedIdx])
 			} else if m.modalSelectedIdx == len(providerPresets) {
-				// "Other / custom" — set a sentinel, no pre-fill.
 				m.obSelectedPreset = -1
 				m.onboardingStep = obConnect
 				m.startConnectFlow(nil)
 			} else {
-				// "Skip for now" — exit onboarding
 				m.onboardingActive = false
 				m.cfg.TUI.OnboardingCompleted = true
 				m.saveConfigToDisk()
@@ -152,7 +136,6 @@ func (m *Model) handleOnboardingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.modalSelectedIdx = 0
 		case "esc":
 			m.onboardingStep = obTheme
-			// Restore theme selection index
 			names := theme.Builtins()
 			m.modalSelectedIdx = 0
 			for i, n := range names {
@@ -164,17 +147,14 @@ func (m *Model) handleOnboardingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case obVerify:
-		// During verification, only Esc to skip ahead to the done screen.
 		if msg.String() == "esc" {
 			m.onboardingStep = obDone
 			m.obVerifying = false
-			m.obFinalizeSetup() // set defaults + persist before showing done
+			m.obFinalizeSetup()
 		}
 
 	case obDone:
 		if msg.String() == "enter" {
-			// Clear onboarding, return to the welcome screen so the user
-			// can start chatting from the normal entry point.
 			m.onboardingActive = false
 			m.showWelcome = true
 			m.obVerifying = false
@@ -184,8 +164,3 @@ func (m *Model) handleOnboardingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
-
-// isEscapeSequenceFragment detects and consumes fragments of CSI escape
-// sequences that leak through as tea.KeyMsg (common with mouse scroll in
-// terminals like Konsole). It uses a state machine to track multi-rune
-// sequences, with a 200ms safety timeout to avoid blocking legitimate input.

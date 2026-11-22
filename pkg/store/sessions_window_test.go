@@ -36,12 +36,10 @@ func TestLoadMessagesBeforeLimited(t *testing.T) {
 	if len(rows) != 5 {
 		t.Fatalf("expected 5 rows, got %d", len(rows))
 	}
-	// Newest first (DESC).
 	if rows[0].Seq != 6 || rows[4].Seq != 2 {
 		t.Errorf("expected seqs 6..2 DESC, got %d..%d", rows[0].Seq, rows[4].Seq)
 	}
 
-	// Limit larger than the region returns everything below beforeSeq.
 	rows, err = repo.LoadMessagesBeforeLimited("win:s1", 7, 100)
 	if err != nil {
 		t.Fatalf("LoadMessagesBeforeLimited full: %v", err)
@@ -50,7 +48,6 @@ func TestLoadMessagesBeforeLimited(t *testing.T) {
 		t.Errorf("expected 7 rows ending at seq 0, got %d rows ending at %d", len(rows), rows[len(rows)-1].Seq)
 	}
 
-	// Empty region.
 	rows, err = repo.LoadMessagesBeforeLimited("win:s1", 0, 5)
 	if err != nil {
 		t.Fatalf("LoadMessagesBeforeLimited empty: %v", err)
@@ -63,7 +60,6 @@ func TestLoadMessagesBeforeLimited(t *testing.T) {
 func TestLoadMessagesBetweenLimited(t *testing.T) {
 	repo := newWindowTestRepo(t)
 
-	// Bounded: 3 < seq < 7 → rows 4,5,6 ASC.
 	rows, err := repo.LoadMessagesBetweenLimited("win:s1", 3, 7, 10)
 	if err != nil {
 		t.Fatalf("LoadMessagesBetweenLimited: %v", err)
@@ -72,7 +68,6 @@ func TestLoadMessagesBetweenLimited(t *testing.T) {
 		t.Fatalf("expected seqs 4..6, got %+v", rows)
 	}
 
-	// Unbounded above: seq > 8 → rows 9.
 	rows, err = repo.LoadMessagesBetweenLimited("win:s1", 8, -1, 10)
 	if err != nil {
 		t.Fatalf("LoadMessagesBetweenLimited unbounded: %v", err)
@@ -81,7 +76,6 @@ func TestLoadMessagesBetweenLimited(t *testing.T) {
 		t.Fatalf("expected seq 9, got %+v", rows)
 	}
 
-	// Limit respected and applied to the OLDEST side (ASC).
 	rows, err = repo.LoadMessagesBetweenLimited("win:s1", 0, 7, 2)
 	if err != nil {
 		t.Fatalf("LoadMessagesBetweenLimited limit: %v", err)
@@ -119,8 +113,6 @@ func TestCountMessagesBefore(t *testing.T) {
 func TestLoadMessagesFullBeforeSeq(t *testing.T) {
 	repo := newWindowTestRepo(t)
 
-	// Mixed excluded flags in the fixture (seq < 7 excluded, 7..9 not): the
-	// reader must surface the persisted flag per row, in seq ASC order.
 	rows, err := repo.LoadMessagesFullBeforeSeq("win:s1", 7)
 	if err != nil {
 		t.Fatalf("LoadMessagesFullBeforeSeq: %v", err)
@@ -141,8 +133,6 @@ func TestLoadMessagesFullBeforeSeq(t *testing.T) {
 		}
 	}
 
-	// Non-excluded rows below the boundary must NOT be reported as excluded
-	// (the exact bug class saveFullUnlocked used to hardcode).
 	if err := repo.InsertMessage("win:s1", 11, "user", `{"role":"user","content":"m11"}`, false); err != nil {
 		t.Fatalf("insert seq 11 (not excluded): %v", err)
 	}
@@ -161,7 +151,6 @@ func TestLoadMessagesFullBeforeSeq(t *testing.T) {
 		t.Errorf("row 0 excluded = false, want true (fixture excludes seq 0..6)")
 	}
 
-	// Empty region.
 	rows, err = repo.LoadMessagesFullBeforeSeq("win:s1", 0)
 	if err != nil {
 		t.Fatalf("LoadMessagesFullBeforeSeq empty: %v", err)

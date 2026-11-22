@@ -9,14 +9,11 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// TestRenderConnectPicker verifies the row catalogue renders the custom rows,
-// a known provider row with its API base, and the trailing free-type row.
 func TestRenderConnectPicker(t *testing.T) {
 	m := newTestModel(t)
 	m.width = 80
 	m.height = 40
 
-	// /connect opens the picker on the first frame — no name step first.
 	m.executeCommand("/connect")
 	if !m.providerTypePicker {
 		t.Fatal("expected picker active")
@@ -29,12 +26,10 @@ func TestRenderConnectPicker(t *testing.T) {
 	if !strings.Contains(out, "Anthropic") {
 		t.Fatalf("picker missing Anthropic preset:\n%s", out)
 	}
-	// The API base should be visible for presets.
 	if !strings.Contains(out, "https://api.openai.com/v1") {
 		t.Fatalf("picker missing openai api base:\n%s", out)
 	}
 
-	// Jump to the last entry (free-type row) so it scrolls into view.
 	m.providerTypePickerIdx = len(connectRows()) - 1
 	out = m.renderFormModal("Add Provider", m.formStepNames())
 	if !strings.Contains(out, "Custom") && !strings.Contains(out, "Personalizado") {
@@ -42,23 +37,16 @@ func TestRenderConnectPicker(t *testing.T) {
 	}
 }
 
-// TestRenderConnectPickerScroll verifies the long preset list is windowed:
-// earlier items scroll out of view when the selection moves past the
-// visible page, and the custom entry becomes reachable at the end.
 func TestRenderConnectPickerScroll(t *testing.T) {
 	m := newTestModel(t)
 	m.width = 120
-	m.height = 30 // matches a typical compact TUI frame
+	m.height = 30
 
-	// The picker is open on the first frame.
 	m.executeCommand("/connect")
 	if !m.providerTypePicker {
 		t.Fatal("expected picker active")
 	}
 
-	// At the top, the custom OpenAI row (the first row) is visible and the
-	// last row is not. The last ROW's label is what must stay off-screen at
-	// the top.
 	rows := connectRows()
 	out := m.renderFormModal("Add Provider", m.formStepNames())
 	if !strings.Contains(out, rows[0].label) {
@@ -72,11 +60,6 @@ func TestRenderConnectPickerScroll(t *testing.T) {
 		t.Fatalf("expected scroll-down indicator:\n%s", out)
 	}
 
-	// Move selection to the last row — it must scroll into view and the top
-	// of the catalogue should scroll away. The check must look at the rows
-	// in the WINDOW (not a raw substring): the free-type row's label also
-	// contains "OpenAI" ("OpenAI compatible (custom)"), so a plain
-	// strings.Contains would match it while the window is at the end.
 	m.providerTypePickerIdx = len(rows) - 1
 	out = m.renderFormModal("Add Provider", m.formStepNames())
 	if !strings.Contains(out, lastRow.label) {
@@ -89,7 +72,6 @@ func TestRenderConnectPickerScroll(t *testing.T) {
 		t.Fatalf("expected scroll-up indicator:\n%s", out)
 	}
 
-	// Keyboard down past the fold updates the offset so selection stays visible.
 	m.providerTypePickerIdx = 0
 	m.modalScrollOffset = 0
 	for i := 0; i < 20; i++ {
@@ -102,23 +84,17 @@ func TestRenderConnectPickerScroll(t *testing.T) {
 	if m.modalScrollOffset <= 0 {
 		t.Fatalf("expected positive scroll offset after moving past fold, got %d", m.modalScrollOffset)
 	}
-	// The selected row must be in the rendered window.
 	selLabel := rows[m.providerTypePickerIdx].label
 	if !strings.Contains(out, selLabel) {
 		t.Fatalf("selected row %q not visible:\n%s", selLabel, out)
 	}
 }
 
-// TestRenderConnectSuccess verifies the success screen shows the saved
-// provider and model.
 func TestRenderConnectSuccess(t *testing.T) {
 	m := newTestModel(t)
 	m.width = 80
 	m.height = 40
 
-	// The row catalogue is open on the first frame: pick the OpenAI API-key
-	// row, then the flow asks only for the key (base is pre-filled and the
-	// base step is skipped).
 	m.executeCommand("/connect")
 	m = pickConnectRow(t, m, connectAPIKeyRowIdx(t, "openai"))
 	m.textInput.SetValue("sk-test-key")
@@ -133,8 +109,8 @@ func TestRenderConnectSuccess(t *testing.T) {
 	m = sendKeys(m, "\r")
 	m.textInput.SetValue("yes")
 	m = sendKeys(m, "\r")
-	m = sendKeys(m, "\r") // think system (auto) → review
-	m = sendKeys(m, "\r") // review → save → success
+	m = sendKeys(m, "\r")
+	m = sendKeys(m, "\r")
 
 	if !m.connectSuccess {
 		t.Fatalf("expected success screen, got step %d saved=%v", m.formStepIndex, m.providerSavedInFlow)
@@ -152,13 +128,9 @@ func TestRenderConnectSuccess(t *testing.T) {
 	}
 }
 
-// TestConnectFlow_SuccessScreenCloses verifies Enter on the success screen
-// closes the modal.
 func TestConnectFlow_SuccessScreenCloses(t *testing.T) {
 	m := newTestModel(t)
 
-	// /connect opens the picker; pick the OpenAI API-key row: key → (base
-	// skipped) → model steps.
 	m.executeCommand("/connect")
 	m = pickConnectRow(t, m, connectAPIKeyRowIdx(t, "openai"))
 	m.textInput.SetValue("sk-test-key")
@@ -173,13 +145,12 @@ func TestConnectFlow_SuccessScreenCloses(t *testing.T) {
 	m = sendKeys(m, "\r")
 	m.textInput.SetValue("yes")
 	m = sendKeys(m, "\r")
-	m = sendKeys(m, "\r") // think system (auto) → review
-	m = sendKeys(m, "\r") // review → success
+	m = sendKeys(m, "\r")
+	m = sendKeys(m, "\r")
 
 	if !m.connectSuccess {
 		t.Fatalf("expected success screen")
 	}
-	// ESC also closes.
 	m = sendKeys(m, tea.KeyEsc.String())
 	if m.modalMode != ModalNone {
 		t.Fatalf("expected modal closed after ESC on success, got %v", m.modalMode)
@@ -189,8 +160,6 @@ func TestConnectFlow_SuccessScreenCloses(t *testing.T) {
 	}
 }
 
-// TestProvidersModal_ConnectAction verifies the /providers modal exposes a
-// "+ Connect a provider" action that starts the /connect flow.
 func TestProvidersModal_ConnectAction(t *testing.T) {
 	m := newTestModel(t)
 
@@ -198,8 +167,6 @@ func TestProvidersModal_ConnectAction(t *testing.T) {
 	if m.modalMode != ModalProviders {
 		t.Fatalf("expected ModalProviders, got %v", m.modalMode)
 	}
-	// No providers configured → item 0 is the empty message, then separator,
-	// then the connect action.
 	if len(m.modalItems) < 3 {
 		t.Fatalf("expected at least 3 items, got %d: %v", len(m.modalItems), m.modalItems)
 	}
@@ -208,7 +175,6 @@ func TestProvidersModal_ConnectAction(t *testing.T) {
 		t.Fatalf("expected connect action at end, got %q", last)
 	}
 
-	// Select the connect action and press Enter.
 	m.modalSelectedIdx = len(m.modalItems) - 1
 	m = sendKeys(m, "\r")
 	if m.modalMode != ModalAddProvider {
@@ -216,7 +182,6 @@ func TestProvidersModal_ConnectAction(t *testing.T) {
 	}
 }
 
-// TestProvidersModal_SelectProvider shows the detail view on Enter.
 func TestProvidersModal_SelectProvider(t *testing.T) {
 	m := newTestModel(t)
 	if m.cfg.Providers.Named == nil {
@@ -237,7 +202,6 @@ func TestProvidersModal_SelectProvider(t *testing.T) {
 	if m.modalMode != ModalProviders {
 		t.Fatalf("expected ModalProviders, got %v", m.modalMode)
 	}
-	// Item 0 is test-provider, then separator, then connect action.
 	if m.modalSelectedIdx >= len(m.providerModalKeys) {
 		t.Fatal("no provider keys")
 	}

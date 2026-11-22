@@ -24,7 +24,6 @@ func parseWebServerOptions(args []string) webServerOptions {
 
 	cfg, err := loadConfig()
 	if err == nil {
-		// Use unified server port as default
 		effectivePort := cfg.EffectiveServerPort()
 		if effectivePort != 0 {
 			opts.Port = effectivePort

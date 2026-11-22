@@ -10,11 +10,6 @@ import (
 	"time"
 )
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ──────────────────────────────────────────────────────────────────────────────
-
-// mustEnqueue enqueues a row and fails the test on error.
 func mustEnqueue(t *testing.T, repo *SpoolRepo, direction, sessionKey, msgID, payload string) int64 {
 	t.Helper()
 
@@ -25,7 +20,6 @@ func mustEnqueue(t *testing.T, repo *SpoolRepo, direction, sessionKey, msgID, pa
 	return id
 }
 
-// spoolIDs maps a claim result onto its ids, keeping assertions readable.
 func spoolIDs(items []SpoolItem) []int64 {
 	ids := make([]int64, 0, len(items))
 	for _, it := range items {
@@ -34,17 +28,10 @@ func spoolIDs(items []SpoolItem) []int64 {
 	return ids
 }
 
-// testNow is the reference instant used by every time-controlled assertion.
-// It is deliberately far in the past relative to the wall clock so rows
-// written by MarkProcessed (which uses time.Now) never collide with it.
 func testNow() time.Time {
 	return time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
 }
 
-// insertLedger writes a processed_messages row directly so tests control
-// processed_at, which the public MarkProcessed always stamps with now. It
-// uses the repository's own layout so the rows look exactly like the ones
-// production writes.
 func insertLedger(t *testing.T, s *Store, channel, msgID string, at time.Time) {
 	t.Helper()
 
@@ -57,18 +44,12 @@ func insertLedger(t *testing.T, s *Store, channel, msgID string, at time.Time) {
 	}
 }
 
-// spoolPath returns a database path inside a temp dir, for the tests that
-// need to close a store and reopen the same file.
 func spoolPath(t *testing.T) string {
 	t.Helper()
 
 	return filepath.Join(t.TempDir(), "spool.db")
 }
 
-// openStoreAtPath opens (or reopens) the store at path. Unlike openTestStore
-// it takes the path, so a test can simulate a gateway restart: close the
-// store, then open a new one over the same file. sql.DB.Close is idempotent,
-// so the cleanup below tolerates a manual Close earlier in the test.
 func openStoreAtPath(t *testing.T, path string) *Store {
 	t.Helper()
 
@@ -84,8 +65,6 @@ func openStoreAtPath(t *testing.T, path string) *Store {
 	return s
 }
 
-// mustClose closes a store and fails the test on error. It marks the store
-// as closed so a test cannot accidentally keep using a dead handle.
 func mustClose(t *testing.T, s *Store) {
 	t.Helper()
 
@@ -94,8 +73,6 @@ func mustClose(t *testing.T, s *Store) {
 	}
 }
 
-// countSpoolRows returns the total number of rows in the spool table,
-// pending and claimed together.
 func countSpoolRows(t *testing.T, s *Store) int {
 	t.Helper()
 
@@ -106,7 +83,6 @@ func countSpoolRows(t *testing.T, s *Store) int {
 	return n
 }
 
-// claimedBy returns the distinct non-empty claimed_by values in the table.
 func claimedBy(t *testing.T, s *Store) []string {
 	t.Helper()
 
@@ -130,7 +106,6 @@ func claimedBy(t *testing.T, s *Store) []string {
 	return owners
 }
 
-// mustStats calls Stats and fails the test on error.
 func mustStats(t *testing.T, repo *SpoolRepo) SpoolStats {
 	t.Helper()
 
@@ -141,15 +116,10 @@ func mustStats(t *testing.T, repo *SpoolRepo) SpoolStats {
 	return stats
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Queue behaviour
-// ──────────────────────────────────────────────────────────────────────────────
-
 func TestSpoolEnqueueClaimComplete(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Spool()
 
-	// Enqueue returns strictly increasing ids.
 	var ids []int64
 	for i := range 4 {
 		id := mustEnqueue(t, repo, SpoolInbound, "telegram:main", "m-1", `{"n":`+string(rune('0'+i))+`}`)
@@ -159,7 +129,6 @@ func TestSpoolEnqueueClaimComplete(t *testing.T) {
 		ids = append(ids, id)
 	}
 
-	// FIFO: the first batch holds the two oldest ids.
 	batch, err := repo.ClaimBatch(SpoolInbound, 2, "gw-1", testNow())
 	if err != nil {
 		t.Fatalf("ClaimBatch() failed: %v", err)
@@ -168,7 +137,6 @@ func TestSpoolEnqueueClaimComplete(t *testing.T) {
 		t.Fatalf("ClaimBatch() ids = %v, want %v", got, want)
 	}
 
-	// All columns round-trip, attempts starts at zero.
 	first := batch[0]
 	if first.Direction != SpoolInbound || first.Channel != "telegram" ||
 		first.ChatID != "chat-1" || first.SessionKey != "telegram:main" || first.MsgID != "m-1" {
@@ -184,12 +152,10 @@ func TestSpoolEnqueueClaimComplete(t *testing.T) {
 		t.Errorf("ClaimBatch() created_at is zero")
 	}
 
-	// Claiming removes rows from the pending set but keeps them in the queue.
 	if got, want := mustPending(t, s), 2; got != want {
 		t.Fatalf("pending after claim = %d, want %d", got, want)
 	}
 
-	// Complete deletes the delivered rows for good.
 	if err := repo.Complete(ids[:2]); err != nil {
 		t.Fatalf("Complete() failed: %v", err)
 	}
@@ -201,8 +167,6 @@ func TestSpoolEnqueueClaimComplete(t *testing.T) {
 		t.Fatalf("ClaimBatch() after complete = %v, want %v", got, want)
 	}
 
-	// The completed ids are gone: they are not returned by any later claim
-	// and are physically deleted from the table.
 	if err := repo.Complete(ids[:1]); err != nil {
 		t.Fatalf("Complete(unknown id) failed: %v", err)
 	}
@@ -231,7 +195,6 @@ func TestSpoolClaimIsExclusive(t *testing.T) {
 		t.Fatalf("ClaimBatch(gw-a) returned %d items, want 3", len(first))
 	}
 
-	// A second instance sees nothing: the rows belong to gw-a.
 	second, err := repo.ClaimBatch(SpoolInbound, 3, "gw-b", testNow())
 	if err != nil {
 		t.Fatalf("ClaimBatch(gw-b) failed: %v", err)
@@ -240,7 +203,6 @@ func TestSpoolClaimIsExclusive(t *testing.T) {
 		t.Errorf("ClaimBatch(gw-b) returned %d items, want 0", len(second))
 	}
 
-	// Not even the original owner may re-claim them.
 	again, err := repo.ClaimBatch(SpoolInbound, 3, "gw-a", testNow())
 	if err != nil {
 		t.Fatalf("ClaimBatch(gw-a, retry) failed: %v", err)
@@ -249,7 +211,6 @@ func TestSpoolClaimIsExclusive(t *testing.T) {
 		t.Errorf("re-claim by owner returned %d items, want 0", len(again))
 	}
 
-	// Once completed, the next row the same instance claims is a fresh one.
 	if err := repo.Complete(spoolIDs(first)); err != nil {
 		t.Fatalf("Complete() failed: %v", err)
 	}
@@ -280,8 +241,6 @@ func TestSpoolReleaseClaims(t *testing.T) {
 		t.Fatalf("ClaimBatch() = %d items, want 2", len(held))
 	}
 
-	// Releasing only touches the given instance: the inbound row was never
-	// claimed and stays pending.
 	n, err := repo.ReleaseClaims("gw-a")
 	if err != nil {
 		t.Fatalf("ReleaseClaims(gw-a) failed: %v", err)
@@ -293,7 +252,6 @@ func TestSpoolReleaseClaims(t *testing.T) {
 		t.Errorf("ReleaseClaims(unknown) = (%d, %v), want (0, nil)", n, err)
 	}
 
-	// Anyone can pick them up again, and claims were cleared.
 	reclaimed, err := repo.ClaimBatch(SpoolOutbound, 5, "gw-b", testNow())
 	if err != nil {
 		t.Fatalf("ClaimBatch(gw-b) failed: %v", err)
@@ -312,15 +270,10 @@ func TestSpoolReleaseClaims(t *testing.T) {
 	}
 }
 
-// TestSpoolEnqueueClaimedIsInvisibleToClaimBatch pins the reason
-// EnqueueClaimed exists: a row born claimed is not pending, so a replay pass
-// cannot pick it up and cannot double-publish the live message behind it.
 func TestSpoolEnqueueClaimedIsInvisibleToClaimBatch(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Spool()
 
-	// The claim is at INSERT time, so there is no window in which the row is
-	// pending and a steady pump could see it.
 	if _, err := repo.EnqueueClaimed(SpoolInbound, "telegram", "chat-1", "sess", "m1", "payload", "instA", time.Now()); err != nil {
 		t.Fatalf("EnqueueClaimed() failed: %v", err)
 	}
@@ -337,8 +290,6 @@ func TestSpoolEnqueueClaimedIsInvisibleToClaimBatch(t *testing.T) {
 		t.Errorf("claimed_by = %v, want [instA]", owners)
 	}
 
-	// An unknown direction is rejected before anything is written, exactly like
-	// Enqueue does.
 	if _, err := repo.EnqueueClaimed("sideways", "telegram", "chat-1", "sess", "m", "p", "instA", testNow()); !errors.Is(err, ErrUnknownDirection) {
 		t.Errorf("EnqueueClaimed(sideways) error = %v, want ErrUnknownDirection", err)
 	}
@@ -347,9 +298,6 @@ func TestSpoolEnqueueClaimedIsInvisibleToClaimBatch(t *testing.T) {
 	}
 }
 
-// TestSpoolReleaseIDsScopedToInstance is the half of the protocol that lets a
-// caller undo its own claim: the release is limited both to the given ids and to
-// rows the given instance still holds.
 func TestSpoolReleaseIDsScopedToInstance(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Spool()
@@ -359,7 +307,6 @@ func TestSpoolReleaseIDsScopedToInstance(t *testing.T) {
 		t.Fatalf("EnqueueClaimed() failed: %v", err)
 	}
 
-	// Another instance cannot hand back a row it does not own.
 	if n, err := repo.ReleaseIDs([]int64{id}, "instB"); err != nil || n != 0 {
 		t.Fatalf("ReleaseIDs(%d, instB) = (%d, %v), want (0, nil)", id, n, err)
 	}
@@ -370,7 +317,6 @@ func TestSpoolReleaseIDsScopedToInstance(t *testing.T) {
 		t.Fatalf("claimed_by = %v, want still [instA] after a foreign release", owners)
 	}
 
-	// The owner can, and then anybody may claim it again.
 	if n, err := repo.ReleaseIDs([]int64{id}, "instA"); err != nil || n != 1 {
 		t.Fatalf("ReleaseIDs(%d, instA) = (%d, %v), want (1, nil)", id, n, err)
 	}
@@ -386,14 +332,10 @@ func TestSpoolReleaseIDsScopedToInstance(t *testing.T) {
 	}
 }
 
-// TestSpoolReleaseIDsEmptyIsNoop keeps a caller from having to guard its own
-// slice: releasing nothing must not touch the database or fail.
 func TestSpoolReleaseIDsEmptyIsNoop(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Spool()
 
-	// A row claimed by somebody else, so a no-op release cannot be confused
-	// with a release that matched nothing by accident.
 	held, err := repo.EnqueueClaimed(SpoolInbound, "telegram", "chat-1", "sess", "m1", "p", "instA", testNow())
 	if err != nil {
 		t.Fatalf("EnqueueClaimed() failed: %v", err)
@@ -420,7 +362,6 @@ func TestSpoolReclaimStale(t *testing.T) {
 
 	now := testNow()
 
-	// Two crashed workers, one recent claim, one 60s old.
 	if _, err := repo.ClaimBatch(SpoolInbound, 1, "dead-a", now.Add(-60*time.Second)); err != nil {
 		t.Fatalf("claim stale row failed: %v", err)
 	}
@@ -436,7 +377,6 @@ func TestSpoolReclaimStale(t *testing.T) {
 		t.Fatalf("ReclaimStale(30s) = %d rows, want 1", n)
 	}
 
-	// Only the stale row came back, and it keeps its session key.
 	pending, err := repo.PendingBySession(SpoolInbound)
 	if err != nil {
 		t.Fatalf("PendingBySession() failed: %v", err)
@@ -453,14 +393,10 @@ func TestSpoolReclaimStale(t *testing.T) {
 		t.Fatalf("reclaimed rows = %v, want [%d]", spoolIDs(items), staleID)
 	}
 
-	// Nothing else crossed the 30s line: gw-c holds the reclaimed row and
-	// alive-b still holds the fresh one.
 	if n, err := repo.ReclaimStale(30*time.Second, now); err != nil || n != 0 {
 		t.Errorf("ReclaimStale() again = (%d, %v), want (0, nil)", n, err)
 	}
 
-	// A 10ms cutoff frees alive-b's row (claimed 5s ago) but not the row
-	// gw-c claimed at `now` itself, which is 0ms old.
 	if n, err := repo.ReclaimStale(10*time.Millisecond, now); err != nil || n != 1 {
 		t.Fatalf("ReclaimStale(10ms) = (%d, %v), want (1, nil)", n, err)
 	}
@@ -472,7 +408,6 @@ func TestSpoolReclaimStale(t *testing.T) {
 		t.Errorf("pending after 10ms reclaim = %v, want {telegram:fresh:1}", relaxed)
 	}
 
-	// gw-c keeps its claim: it is still the only owner of the stale row.
 	held, err := repo.ClaimBatch(SpoolInbound, 5, "gw-d", now)
 	if err != nil {
 		t.Fatalf("ClaimBatch(gw-d) failed: %v", err)
@@ -496,13 +431,10 @@ func TestSpoolDirectionValidation(t *testing.T) {
 		t.Errorf("PendingBySession error = %v, want ErrUnknownDirection", err)
 	}
 
-	// Nothing was written while rejecting bad directions.
 	if n, err := repo.PendingBySession(SpoolInbound); err != nil || len(n) != 0 {
 		t.Errorf("pending after rejected enqueues = (%v, %v), want (empty, nil)", n, err)
 	}
 
-	// The CHECK constraint backs up the Go-side validation for any other
-	// writer that bypasses the repository.
 	if _, err := s.DB().Exec(
 		`INSERT INTO spool(direction, payload, created_at) VALUES('lateral', '{}', ?)`,
 		testNow().Format(time.RFC3339Nano),
@@ -559,13 +491,11 @@ func TestSpoolClaimBatchNonPositiveLimit(t *testing.T) {
 		}
 	}
 
-	// The row is untouched and still pending.
 	if n, err := repo.PendingBySession(SpoolInbound); err != nil || n["telegram:main"] != 1 {
 		t.Errorf("pending after zero-limit claims = (%v, %v), want {telegram:main:1}", n, err)
 	}
 }
 
-// mustPending returns the total number of unclaimed inbound rows.
 func mustPending(t *testing.T, s *Store) int {
 	t.Helper()
 
@@ -577,10 +507,6 @@ func mustPending(t *testing.T, s *Store) int {
 	}
 	return n
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Attempts
-// ──────────────────────────────────────────────────────────────────────────────
 
 func TestSpoolIncAttempt(t *testing.T) {
 	s := openTestStore(t)
@@ -601,8 +527,6 @@ func TestSpoolIncAttempt(t *testing.T) {
 		}
 	}
 
-	// The next claim reports the accumulated attempts so the caller can
-	// decide to park the message.
 	if _, err := repo.ClaimBatch(SpoolInbound, 1, "gw", testNow()); err != nil {
 		t.Fatalf("ClaimBatch() failed: %v", err)
 	}
@@ -620,21 +544,15 @@ func TestSpoolIncAttempt(t *testing.T) {
 		t.Fatalf("claimed attempts = %d, want 3", items[0].Attempts)
 	}
 
-	// A missing id is not an error (the row may have been completed).
 	if err := repo.IncAttempt(9999); err != nil {
 		t.Errorf("IncAttempt(missing) failed: %v", err)
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Dedupe ledger
-// ──────────────────────────────────────────────────────────────────────────────
-
 func TestProcessedLedger(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Spool()
 
-	// Unknown pair.
 	if got, err := repo.WasProcessed("telegram", "42"); err != nil || got {
 		t.Fatalf("WasProcessed(telegram, 42) = (%v, %v), want (false, nil)", got, err)
 	}
@@ -646,11 +564,9 @@ func TestProcessedLedger(t *testing.T) {
 		t.Fatalf("WasProcessed() after mark = (%v, %v), want (true, nil)", got, err)
 	}
 
-	// Idempotent: marking twice keeps one row and is not an error.
 	if err := repo.MarkProcessed("telegram", "42"); err != nil {
 		t.Errorf("second MarkProcessed() failed: %v", err)
 	}
-	// The same msg id on another channel is a different message.
 	if err := repo.MarkProcessed("discord", "42"); err != nil {
 		t.Errorf("MarkProcessed(discord) failed: %v", err)
 	}
@@ -668,7 +584,6 @@ func TestProcessedLedger(t *testing.T) {
 		t.Errorf("WasProcessed(telegram, 43) = (%v, %v), want (false, nil)", got, err)
 	}
 
-	// No dedupe key: both methods short-circuit without touching the DB.
 	if got, err := repo.WasProcessed("telegram", ""); err != nil || got {
 		t.Errorf("WasProcessed(telegram, \"\") = (%v, %v), want (false, nil)", got, err)
 	}
@@ -703,11 +618,6 @@ func TestPruneProcessed(t *testing.T) {
 		t.Fatalf("PruneProcessed(2h) = %d rows, want 1", n)
 	}
 
-	// The boundary row is *exactly* 2h old, so the cutoff has not passed it
-	// yet: PruneProcessed removes strictly-older rows only. With the trimmed
-	// RFC3339Nano layout this comparison was a coin flip (a whole-second
-	// "...:00Z" sorts after a fractional "...:00.5Z"), which is why the
-	// spool stores fixed-width timestamps.
 	if got, err := repo.WasProcessed("telegram", "edge"); err != nil || !got {
 		t.Fatalf("edge row pruned too early: (%v, %v)", got, err)
 	}
@@ -726,8 +636,6 @@ func TestPruneProcessed(t *testing.T) {
 		t.Fatalf("PruneProcessed(90m) = %d rows, want 1", n)
 	}
 
-	// The 90m cutoff sits at 10:30, past old-2 (10:00) but not past edge
-	// (11:00), so exactly the boundary row goes now.
 	if got, err := repo.WasProcessed("telegram", "old-2"); err != nil || got {
 		t.Errorf("old-2 survived the 90m prune: (%v, %v)", got, err)
 	}
@@ -742,14 +650,6 @@ func TestPruneProcessed(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Observability: Stats / PendingBySession
-// ──────────────────────────────────────────────────────────────────────────────
-
-// checkStats asserts the *exact* queue depth reported by Stats. Every field
-// is compared on purpose: Stats is the only window the restart feature has
-// onto the queue, so a counter that quietly drifts would mislead operators
-// even though no call ever returned an error.
 func checkStats(t *testing.T, repo *SpoolRepo, want SpoolStats) {
 	t.Helper()
 
@@ -758,10 +658,6 @@ func checkStats(t *testing.T, repo *SpoolRepo, want SpoolStats) {
 	}
 }
 
-// checkStatsMatchesTable cross-checks Stats against the table using an
-// invariant the implementation cannot satisfy by copying its own query: the
-// four depth counters must add up to the number of rows, and the ledger
-// counter to the number of processed_messages rows.
 func checkStatsMatchesTable(t *testing.T, s *Store, repo *SpoolRepo) {
 	t.Helper()
 
@@ -780,8 +676,6 @@ func checkStatsMatchesTable(t *testing.T, s *Store, repo *SpoolRepo) {
 	}
 }
 
-// mustClaimedIDs returns the ids currently held by any instance for one
-// direction, so a test can complete rows it does not own.
 func mustClaimedIDs(t *testing.T, s *Store, direction string) []int64 {
 	t.Helper()
 
@@ -812,11 +706,8 @@ func TestSpoolStats(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Spool()
 
-	// A fresh store reports zeros rather than an error: the gateway polls
-	// Stats before any message has ever been spooled.
 	checkStats(t, repo, SpoolStats{})
 
-	// N inbound + M outbound, everything pending.
 	for i := range 3 {
 		mustEnqueue(t, repo, SpoolInbound, "telegram:main", "in", `{"i":`+string(rune('0'+i))+`}`)
 	}
@@ -826,8 +717,6 @@ func TestSpoolStats(t *testing.T) {
 	checkStats(t, repo, SpoolStats{PendingInbound: 3, PendingOutbound: 2})
 	checkStatsMatchesTable(t, s, repo)
 
-	// A claim moves rows from pending to claimed inside its own direction
-	// only: the outbound counters must not budge.
 	if _, err := repo.ClaimBatch(SpoolInbound, 2, "gw-1", testNow()); err != nil {
 		t.Fatalf("ClaimBatch(inbound) failed: %v", err)
 	}
@@ -839,8 +728,6 @@ func TestSpoolStats(t *testing.T) {
 	checkStats(t, repo, SpoolStats{PendingInbound: 1, ClaimedInbound: 2, ClaimedOutbound: 2})
 	checkStatsMatchesTable(t, s, repo)
 
-	// The dedupe ledger is counted independently of the queue depth: three
-	// distinct pairs, one repeat (idempotent) and one keyless write (no-op).
 	for _, msgID := range []string{"m-1", "m-2", "m-1", ""} {
 		if err := repo.MarkProcessed("telegram", msgID); err != nil {
 			t.Fatalf("MarkProcessed(telegram, %q) failed: %v", msgID, err)
@@ -851,7 +738,6 @@ func TestSpoolStats(t *testing.T) {
 	}
 	checkStats(t, repo, SpoolStats{PendingInbound: 1, ClaimedInbound: 2, ClaimedOutbound: 2, ProcessedCount: 3})
 
-	// Completing delivered rows takes them out of the claimed set for good.
 	claimedIn := mustClaimedIDs(t, s, SpoolInbound)
 	if len(claimedIn) != 2 {
 		t.Fatalf("claimed inbound ids = %v, want 2 rows", claimedIn)
@@ -861,8 +747,6 @@ func TestSpoolStats(t *testing.T) {
 	}
 	checkStats(t, repo, SpoolStats{PendingInbound: 1, ClaimedOutbound: 2, ProcessedCount: 3})
 
-	// A graceful release moves claimed rows back to pending, so the total
-	// depth stays the same while the split changes.
 	n, err := repo.ReleaseClaims("gw-1")
 	if err != nil {
 		t.Fatalf("ReleaseClaims(gw-1) failed: %v", err)
@@ -873,8 +757,6 @@ func TestSpoolStats(t *testing.T) {
 	checkStats(t, repo, SpoolStats{PendingInbound: 1, PendingOutbound: 2, ProcessedCount: 3})
 	checkStatsMatchesTable(t, s, repo)
 
-	// Draining the queue returns the depth counters to zero while the ledger
-	// keeps its size: dedupe has to outlive the rows it protects.
 	left, err := repo.ClaimBatch(SpoolInbound, 10, "gw-2", testNow())
 	if err != nil {
 		t.Fatalf("ClaimBatch(inbound) failed: %v", err)
@@ -894,9 +776,6 @@ func TestSpoolPendingBySession(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Spool()
 
-	// Empty table: an empty map, never nil. The resume layer ranges over the
-	// result right after a restart, and the documented contract promises a
-	// map, so a nil here would be a (silent) lie rather than a crash.
 	empty, err := repo.PendingBySession(SpoolInbound)
 	if err != nil {
 		t.Fatalf("PendingBySession(inbound) on empty table failed: %v", err)
@@ -908,8 +787,6 @@ func TestSpoolPendingBySession(t *testing.T) {
 		t.Fatalf("PendingBySession(inbound) on empty table = %v, want empty map", empty)
 	}
 
-	// Three sessions of different depth, two rows with no session key at all,
-	// plus outbound rows that must stay out of the inbound answer.
 	for range 2 {
 		mustEnqueue(t, repo, SpoolInbound, "telegram:a", "m", `{"s":"a"}`)
 	}
@@ -922,7 +799,6 @@ func TestSpoolPendingBySession(t *testing.T) {
 		mustEnqueue(t, repo, SpoolOutbound, "telegram:a", "m", `{"out":true}`)
 	}
 
-	// Per-session counts, keyless rows grouped under "".
 	got, err := repo.PendingBySession(SpoolInbound)
 	if err != nil {
 		t.Fatalf("PendingBySession(inbound) failed: %v", err)
@@ -931,7 +807,6 @@ func TestSpoolPendingBySession(t *testing.T) {
 		t.Fatalf("PendingBySession(inbound) = %v, want %v", got, want)
 	}
 
-	// The direction filter is strict: the same session is reported apart.
 	out, err := repo.PendingBySession(SpoolOutbound)
 	if err != nil {
 		t.Fatalf("PendingBySession(outbound) failed: %v", err)
@@ -940,9 +815,6 @@ func TestSpoolPendingBySession(t *testing.T) {
 		t.Fatalf("PendingBySession(outbound) = %v, want %v", out, want)
 	}
 
-	// Claimed rows are not pending. The two oldest inbound rows are both
-	// "telegram:a", so that session disappears from the map entirely instead
-	// of showing a misleading zero.
 	held, err := repo.ClaimBatch(SpoolInbound, 2, "gw-1", testNow())
 	if err != nil {
 		t.Fatalf("ClaimBatch() failed: %v", err)
@@ -958,7 +830,6 @@ func TestSpoolPendingBySession(t *testing.T) {
 		t.Errorf("pending map still counts fully claimed session telegram:a: %v", got)
 	}
 
-	// Releasing hands the rows back and the session reappears with its count.
 	if n, err := repo.ReleaseClaims("gw-1"); err != nil || n != 2 {
 		t.Fatalf("ReleaseClaims(gw-1) = (%d, %v), want (2, nil)", n, err)
 	}
@@ -970,8 +841,6 @@ func TestSpoolPendingBySession(t *testing.T) {
 		t.Fatalf("pending after release = %v, want %v", got, want)
 	}
 
-	// Completing them removes the session for good: a completed row is gone
-	// from the table, so it is neither pending nor claimed.
 	if err := repo.Complete(spoolIDs(held)); err != nil {
 		t.Fatalf("Complete() failed: %v", err)
 	}
@@ -983,8 +852,6 @@ func TestSpoolPendingBySession(t *testing.T) {
 		t.Fatalf("pending after complete = %v, want %v", got, want)
 	}
 
-	// A second claim takes the keyless rows and telegram:b, leaving only
-	// telegram:c pending - a session with one row behaves like any other.
 	second, err := repo.ClaimBatch(SpoolInbound, 3, "gw-2", testNow())
 	if err != nil {
 		t.Fatalf("ClaimBatch() failed: %v", err)
@@ -1000,7 +867,6 @@ func TestSpoolPendingBySession(t *testing.T) {
 		t.Fatalf("pending after second claim = %v, want %v", got, want)
 	}
 
-	// Unknown direction: sentinel error and a nil map.
 	bad, err := repo.PendingBySession("in")
 	if !errors.Is(err, ErrUnknownDirection) {
 		t.Errorf("PendingBySession(\"in\") error = %v, want ErrUnknownDirection", err)
@@ -1010,18 +876,12 @@ func TestSpoolPendingBySession(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Crash recovery: the reason the spool exists
-// ──────────────────────────────────────────────────────────────────────────────
-
 func TestSpoolSurvivesReopen(t *testing.T) {
 	path := spoolPath(t)
 
 	s := openStoreAtPath(t, path)
 	repo := s.Spool()
 
-	// Two inbound rows and one outbound row go in flight with the gateway
-	// that is about to die; one inbound row is left pending on purpose.
 	in1 := mustEnqueue(t, repo, SpoolInbound, "telegram:main", "m-1", `{"i":1}`)
 	in2 := mustEnqueue(t, repo, SpoolInbound, "telegram:main", "m-2", `{"i":2}`)
 	out1 := mustEnqueue(t, repo, SpoolOutbound, "telegram:main", "m-3", `{"i":3}`)
@@ -1042,14 +902,11 @@ func TestSpoolSurvivesReopen(t *testing.T) {
 		t.Fatalf("ClaimBatch(outbound) = %v, want %v", got, want)
 	}
 
-	// Hard stop: no ReleaseClaims, no graceful drain. This is a crash.
 	mustClose(t, s)
 
-	// A restart: a brand new Store over the same file.
 	s2 := openStoreAtPath(t, path)
 	repo2 := s2.Spool()
 
-	// (a) Nothing was lost: every unfinished row survived the restart.
 	if got, want := countSpoolRows(t, s2), 4; got != want {
 		t.Fatalf("spool rows after reopen = %d, want %d", got, want)
 	}
@@ -1057,8 +914,6 @@ func TestSpoolSurvivesReopen(t *testing.T) {
 		t.Fatalf("Stats() after reopen = %+v, want %+v", got, want)
 	}
 
-	// (b) They are still owned by the instance that died, claim timestamps
-	// included - that is exactly what lets ReclaimStale find them later.
 	if got, want := claimedBy(t, s2), []string{"gw-old"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("claimed_by after reopen = %v, want %v", got, want)
 	}
@@ -1072,9 +927,6 @@ func TestSpoolSurvivesReopen(t *testing.T) {
 		t.Fatalf("%d orphaned rows kept their claimed_at, want 3", stamped)
 	}
 
-	// Until they are reclaimed, a new instance may only pick up what nobody
-	// owns: the orphaned work stays invisible, so nothing is delivered twice
-	// by accident.
 	if items, err := repo2.ClaimBatch(SpoolInbound, 5, "gw-new", testNow().Add(time.Hour)); err != nil {
 		t.Fatalf("ClaimBatch(inbound) after reopen failed: %v", err)
 	} else if len(items) != 1 || items[0].ID != pending {
@@ -1086,10 +938,6 @@ func TestSpoolSurvivesReopen(t *testing.T) {
 		t.Fatalf("ClaimBatch(outbound) after reopen = %v, want nothing (row is orphaned)", spoolIDs(items))
 	}
 
-	// (c) The recovery sweep. The orphans were claimed at testNow(), so a
-	// sweep two hours later with a one-hour window puts the cutoff exactly on
-	// gw-new's claim: the comparison is strict, so gw-new keeps its row while
-	// everything the dead instance held comes back.
 	n, err := repo2.ReclaimStale(time.Hour, testNow().Add(2*time.Hour))
 	if err != nil {
 		t.Fatalf("ReclaimStale(1h) failed: %v", err)
@@ -1104,7 +952,6 @@ func TestSpoolSurvivesReopen(t *testing.T) {
 		t.Fatalf("claimed_by after reclaim = %v, want %v (the live claim must survive)", got, want)
 	}
 
-	// The recovered rows are claimable again, with their contents intact.
 	recovered, err := repo2.ClaimBatch(SpoolInbound, 5, "gw-new-2", testNow().Add(2*time.Hour))
 	if err != nil {
 		t.Fatalf("ClaimBatch(inbound) after reclaim failed: %v", err)
@@ -1116,9 +963,6 @@ func TestSpoolSurvivesReopen(t *testing.T) {
 		t.Errorf("recovered row lost its contents: %+v", recovered[0])
 	}
 
-	// (d) And the cycle closes: the successor completes the work it inherited,
-	// including the row it had already claimed before the sweep, so the queue
-	// empties exactly as it would have without the crash.
 	if err := repo2.Complete(spoolIDs(recovered)); err != nil {
 		t.Fatalf("Complete() after reclaim failed: %v", err)
 	}
@@ -1148,17 +992,10 @@ func TestSpoolSurvivesReopen(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Cheap invariants that callers rely on
-// ──────────────────────────────────────────────────────────────────────────────
-
-// TestSpoolClaimBatchLimitExceedsRows checks the "take everything" case:
-// asking for more rows than exist is neither an error nor a failure.
 func TestSpoolClaimBatchLimitExceedsRows(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Spool()
 
-	// Nothing pending at all: an empty slice, not nil, no error.
 	items, err := repo.ClaimBatch(SpoolInbound, 1000, "gw", testNow())
 	if err != nil {
 		t.Fatalf("ClaimBatch(empty table) failed: %v", err)
@@ -1175,7 +1012,6 @@ func TestSpoolClaimBatchLimitExceedsRows(t *testing.T) {
 		mustEnqueue(t, repo, SpoolInbound, "telegram:main", "m-2", `{"i":2}`),
 	}
 
-	// A limit far above the row count returns exactly the two rows, in order.
 	got, err := repo.ClaimBatch(SpoolInbound, 1<<20, "gw", testNow())
 	if err != nil {
 		t.Fatalf("ClaimBatch(huge limit) failed: %v", err)
@@ -1184,7 +1020,6 @@ func TestSpoolClaimBatchLimitExceedsRows(t *testing.T) {
 		t.Fatalf("ClaimBatch(huge limit) = %v, want %v", spoolIDs(got), ids)
 	}
 
-	// And it claims nothing extra: a second pass finds an empty queue.
 	again, err := repo.ClaimBatch(SpoolInbound, 1<<20, "gw", testNow())
 	if err != nil {
 		t.Fatalf("second ClaimBatch(huge limit) failed: %v", err)
@@ -1193,19 +1028,15 @@ func TestSpoolClaimBatchLimitExceedsRows(t *testing.T) {
 		t.Errorf("second ClaimBatch(huge limit) = %v, want nothing", spoolIDs(again))
 	}
 
-	// Complete with ids that never existed (or were already deleted) is not
-	// an error: a caller replaying ids it no longer owns must not break.
 	if err := repo.Complete([]int64{999998, 999999}); err != nil {
 		t.Errorf("Complete(unknown ids) failed: %v", err)
 	}
-	// A mix of live and unknown ids deletes what exists and ignores the rest.
 	if err := repo.Complete([]int64{ids[0], 999998}); err != nil {
 		t.Fatalf("Complete(mixed ids) failed: %v", err)
 	}
 	if got, want := countSpoolRows(t, s), 1; got != want {
 		t.Fatalf("spool rows after mixed Complete = %d, want %d", got, want)
 	}
-	// Repeating an id is harmless too.
 	if err := repo.Complete([]int64{ids[1], ids[1]}); err != nil {
 		t.Errorf("Complete(repeated id) failed: %v", err)
 	}
@@ -1214,23 +1045,13 @@ func TestSpoolClaimBatchLimitExceedsRows(t *testing.T) {
 	}
 }
 
-// TestSpoolTimestampsSortChronologically guards the invariant the SQL-side
-// comparisons bet on: claimed_at is TEXT compared byte-wise, so rows stamped
-// with different sub-second offsets - including an exact whole second - must
-// order as strings the same way they order as times.
-//
-// This is a regression test. With time.RFC3339Nano, which trims trailing
-// zeros, a whole second is stored as "...12:00:00Z" while a fractional one is
-// "...12:00:00.5Z": byte-wise the whole second sorts *after* the fractional
-// one ('Z' = 0x5A > '.' = 0x2E), so a single sweep could both resurrect a
-// live claim and leave a genuinely stale row orphaned forever.
 func TestSpoolTimestampsSortChronologically(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Spool()
 
 	base := time.Date(2026, 3, 4, 12, 0, 0, 0, time.UTC)
 	offsets := []time.Duration{
-		0, // exact whole second: the width that used to be trimmed away
+		0,
 		time.Nanosecond,
 		250 * time.Millisecond,
 		500 * time.Millisecond,
@@ -1239,9 +1060,6 @@ func TestSpoolTimestampsSortChronologically(t *testing.T) {
 		mustEnqueue(t, repo, SpoolInbound, "telegram:main", "m", `{"i":`+string(rune('0'+i))+`}`)
 	}
 
-	// resetClaims puts every row back under a dedicated owner stamped at its
-	// own offset. ClaimBatch hands out rows in id order, so row i always
-	// receives offsets[i].
 	resetClaims := func() {
 		t.Helper()
 		for i := range offsets {
@@ -1256,25 +1074,19 @@ func TestSpoolTimestampsSortChronologically(t *testing.T) {
 		}
 	}
 
-	// Sweeps run with an ascending cutoff and a zero window: a row is stale
-	// when its claim is strictly older than the cutoff. Each round starts
-	// from the same state, so the expected count is simply the number of
-	// offsets below the cutoff.
 	sweeps := []struct {
 		cutoff time.Duration
 		want   int
 	}{
-		{0, 0},                      // nothing is strictly older than base
-		{time.Nanosecond, 1},        // the whole-second claim
-		{250 * time.Millisecond, 2}, // + the 1ns claim
-		{500 * time.Millisecond, 3}, // + the .25s claim
-		{time.Second, 4},            // + the .5s claim
+		{0, 0},
+		{time.Nanosecond, 1},
+		{250 * time.Millisecond, 2},
+		{500 * time.Millisecond, 3},
+		{time.Second, 4},
 	}
 	ky := time.FixedZone("Asia/Seoul", 9*60*60)
 	for _, sw := range sweeps {
 		resetClaims()
-		// The cutoff is expressed in a +09:00 zone: the instant, not the
-		// zone, must decide the outcome.
 		n, err := repo.ReclaimStale(0, base.Add(sw.cutoff).In(ky))
 		if err != nil {
 			t.Fatalf("ReclaimStale(cutoff %v) failed: %v", sw.cutoff, err)
@@ -1284,7 +1096,6 @@ func TestSpoolTimestampsSortChronologically(t *testing.T) {
 		}
 	}
 
-	// After the last sweep everything is pending again.
 	resetClaims()
 	if n, err := repo.ReclaimStale(0, base.Add(time.Hour).UTC()); err != nil || n != len(offsets) {
 		t.Fatalf("final ReclaimStale() = (%d, %v), want (%d, nil)", n, err, len(offsets))
@@ -1293,9 +1104,6 @@ func TestSpoolTimestampsSortChronologically(t *testing.T) {
 		t.Fatalf("Stats() after full sweep = %+v, want %+v", got, want)
 	}
 
-	// processed_at is pruned by the same byte-wise comparison, so the ledger
-	// has to keep the same property. Pruning is destructive, so each round
-	// rebuilds the same four timestamps from scratch.
 	resetLedger := func() {
 		t.Helper()
 		if _, err := s.DB().Exec(`DELETE FROM processed_messages`); err != nil {
@@ -1324,9 +1132,6 @@ func TestSpoolTimestampsSortChronologically(t *testing.T) {
 	}
 }
 
-// TestSpoolReclaimStaleNonUTCNow is the narrow version of the same promise,
-// phrased the way the gateway uses it: claim with a local-time now, sweep
-// with a local-time now, and the row still comes back.
 func TestSpoolReclaimStaleNonUTCNow(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Spool()
@@ -1355,8 +1160,6 @@ func TestSpoolReclaimStaleNonUTCNow(t *testing.T) {
 			t.Fatalf("claimed_at %q is not the instant %v", stored, claimedAt)
 		}
 
-		// Too recent to be stale, then stale an hour later - both sweeps
-		// asked in the same non-UTC zone.
 		if n, err := repo.ReclaimStale(time.Hour, claimedAt.Add(time.Minute).In(zone)); err != nil || n != 0 {
 			t.Fatalf("ReclaimStale(zone %v, fresh) = (%d, %v), want (0, nil)", zone, n, err)
 		}
@@ -1365,8 +1168,6 @@ func TestSpoolReclaimStaleNonUTCNow(t *testing.T) {
 			t.Fatalf("ReclaimStale(zone %v, stale) = (%d, %v), want (1, nil)", zone, n, err)
 		}
 
-		// Drain it so the next round starts from an empty queue and its
-		// single-row claim cannot land on this row instead.
 		if err := repo.Complete([]int64{id}); err != nil {
 			t.Fatalf("Complete(%d) failed: %v", id, err)
 		}

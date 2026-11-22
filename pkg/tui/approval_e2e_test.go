@@ -13,8 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// execCallProvider returns a tool call to exec with a dangerous command first,
-// then a normal response afterwards.
 type execCallProvider struct {
 	calls int
 }
@@ -47,10 +45,6 @@ func (m *execCallProvider) GetDefaultModel() string {
 	return "mock-model"
 }
 
-// TestApproval_E2EExecDangerousCommand verifies the full flow:
-// mock provider requests an exec of a dangerous command → agent loop detects
-// it requires approval → publishes approval.request → TUI receives it and
-// shows the prompt.
 func TestApproval_E2EExecDangerousCommand(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
@@ -82,7 +76,6 @@ func TestApproval_E2EExecDangerousCommand(t *testing.T) {
 	defer cancel()
 	go al.Run(ctx)
 
-	// Inject mock provider so the agent can respond
 	defaultAgent := al.GetDefaultAgent()
 	if defaultAgent == nil {
 		t.Fatal("no default agent")
@@ -95,7 +88,6 @@ func TestApproval_E2EExecDangerousCommand(t *testing.T) {
 	}
 
 	m := NewModel(cfg, al, sessionMgr)
-	// Onboarding wizard disabled for feature tests (see newTestModel).
 	m.onboardingActive = false
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
 	m = updated.(*Model)
@@ -108,7 +100,6 @@ func TestApproval_E2EExecDangerousCommand(t *testing.T) {
 	m.reloadSessions()
 	m.viewport.Width = 118
 
-	// Publish an inbound message that triggers the exec tool
 	m.agentLoop.MessageBus().PublishInbound(bus.InboundMessage{
 		Channel:    "native",
 		SenderID:   "tui",
@@ -117,7 +108,6 @@ func TestApproval_E2EExecDangerousCommand(t *testing.T) {
 		SessionKey: key,
 	})
 
-	// Drain outbound events until we see approval.request
 	deadline := time.Now().Add(8 * time.Second)
 	gotApproval := false
 	for time.Now().Before(deadline) {
@@ -139,21 +129,18 @@ func TestApproval_E2EExecDangerousCommand(t *testing.T) {
 			gotApproval = true
 			break
 		}
-		// Allow the agent loop to progress
 		time.Sleep(10 * time.Millisecond)
 	}
 	if !gotApproval {
 		t.Fatal("BUG: TUI never received approval.request for dangerous command")
 	}
 
-	// Verify the approval prompt is rendered
 	m.updateViewport()
 	overlayText := strings.Join(m.viewport.overlayLines, "\n")
 	if !strings.Contains(overlayText, "rm -rf /tmp/approval-e2e") {
 		t.Fatalf("BUG: approval prompt missing command. overlay:\n%s", overlayText)
 	}
 
-	// Approve with 'y'
 	m = sendKeys(m, "y")
 	if m.pendingApprovalID != "" {
 		t.Fatalf("pendingApprovalID not cleared after y: %q", m.pendingApprovalID)

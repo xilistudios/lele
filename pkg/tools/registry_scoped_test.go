@@ -1,10 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Tests for the scoped (layered) ToolRegistry used to keep MCP tools
-// session-local.
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package tools
 
 import (
@@ -12,7 +5,6 @@ import (
 	"testing"
 )
 
-// scopedTestTool is a minimal Tool for registry tests.
 type scopedTestTool struct {
 	name string
 	desc string
@@ -50,8 +42,6 @@ func containsName(names []string, want string) bool {
 	return false
 }
 
-// TestScopedRegistry_RegistrationsStayInTheLayer pins the core isolation
-// invariant: what is registered on a scoped registry never reaches its base.
 func TestScopedRegistry_RegistrationsStayInTheLayer(t *testing.T) {
 	base := NewToolRegistry()
 	base.Register(&scopedTestTool{name: "read_file", desc: "read"})
@@ -78,15 +68,11 @@ func TestScopedRegistry_RegistrationsStayInTheLayer(t *testing.T) {
 	if got := layer.Count(); got != 2 {
 		t.Errorf("layer Count() = %d, want 2 (own + inherited)", got)
 	}
-	// The base tool is still reachable through the layer.
 	if _, ok := layer.Get("read_file"); !ok {
 		t.Error("the layer must fall back to the base registry")
 	}
 }
 
-// TestScopedRegistry_LayerShadowsBase verifies the resolution order (own layer
-// first) and that unregistering from the layer unmasks — never deletes — the
-// base entry.
 func TestScopedRegistry_LayerShadowsBase(t *testing.T) {
 	base := NewToolRegistry()
 	baseTool := &scopedTestTool{name: "exec", desc: "base exec"}
@@ -112,9 +98,6 @@ func TestScopedRegistry_LayerShadowsBase(t *testing.T) {
 	}
 }
 
-// TestScopedRegistry_DefinitionsMerge checks that the provider-facing views
-// (ToProviderDefs / GetDefinitions / GetSummaries) expose the merged set with
-// shadowing resolved, in a deterministic (sorted) order.
 func TestScopedRegistry_DefinitionsMerge(t *testing.T) {
 	base := NewToolRegistry()
 	base.Register(&scopedTestTool{name: "web_fetch", desc: "fetch"})
@@ -128,7 +111,6 @@ func TestScopedRegistry_DefinitionsMerge(t *testing.T) {
 	if len(defs) != 3 {
 		t.Fatalf("GetDefinitions() = %v, want 3 entries", defs)
 	}
-	// Sorted, and read_file appears exactly once (layer version wins).
 	if defs[0] != "mcp_fs_read" || defs[1] != "read_file" || defs[2] != "web_fetch" {
 		t.Errorf("GetDefinitions() order = %v, want [mcp_fs_read read_file web_fetch]", defs)
 	}
@@ -150,15 +132,11 @@ func TestScopedRegistry_DefinitionsMerge(t *testing.T) {
 		t.Errorf("GetSummaries() = %v, want 3 entries", summaries)
 	}
 
-	// The base keeps its own (unpolluted) view.
 	if got := scopedTestNames(t, base.GetDefinitions()); containsName(got, "mcp_fs_read") {
 		t.Errorf("base GetDefinitions() = %v, must not contain the layer tool", got)
 	}
 }
 
-// TestScopedRegistry_BaseChangesAreVisibleLive pins that the base is read live,
-// not snapshotted: a reload that adds or removes a base tool is reflected in
-// every existing layer.
 func TestScopedRegistry_BaseChangesAreVisibleLive(t *testing.T) {
 	base := NewToolRegistry()
 	layer := NewScopedRegistry(base)
@@ -174,8 +152,6 @@ func TestScopedRegistry_BaseChangesAreVisibleLive(t *testing.T) {
 	}
 }
 
-// TestScopedRegistry_ExecuteResolvesThroughLayer makes sure execution follows
-// the same resolution as Get (this is the path toolExecutor uses).
 func TestScopedRegistry_ExecuteResolvesThroughLayer(t *testing.T) {
 	base := NewToolRegistry()
 	base.Register(&scopedTestTool{name: "base_tool", desc: "base"})
@@ -196,9 +172,6 @@ func TestScopedRegistry_ExecuteResolvesThroughLayer(t *testing.T) {
 	}
 }
 
-// TestCloneWithout_FlattensLayers pins that a subagent clone taken from a layer
-// is a plain registry with the merged view: it keeps working after the layer is
-// gone, and it never shares state back with the layer.
 func TestCloneWithout_FlattensLayers(t *testing.T) {
 	base := NewToolRegistry()
 	base.Register(&scopedTestTool{name: "read_file", desc: "read"})
@@ -221,7 +194,6 @@ func TestCloneWithout_FlattensLayers(t *testing.T) {
 		t.Error("CloneWithout must honour its exclusion list")
 	}
 
-	// Dropping the layer (session reset) must not affect the clone.
 	layer.Unregister("mcp_fs_read")
 	if _, ok := clone.Get("mcp_fs_read"); !ok {
 		t.Error("the flattened clone must not follow later layer changes")

@@ -525,7 +525,6 @@ describe('command chip (harness commands in history)', () => {
       source: 'workspace',
       description: '',
     })
-    // An already-slashed name is not doubled, and surrounding space is trimmed.
     expect(normalizeCommandArgs({ command: ' /Review ' }).command).toBe('/Review')
   })
 
@@ -542,9 +541,7 @@ describe('command chip (harness commands in history)', () => {
       {
         id: '0',
         role: 'user',
-        // Content is the EXPANDED prompt (what the model sees on replay)...
         content: 'review the src dir please',
-        // ...while the bubble shows what the user typed.
         display_content: '/review src',
         harness_command: {
           command: 'review',
@@ -561,8 +558,6 @@ describe('command chip (harness commands in history)', () => {
     expect(result[0].role).toBe('user')
     expect(result[0].content).toBe('/review src')
 
-    // The chip is a completed 'command' tool card right after the user bubble,
-    // byte-identical to what the live command.applied event inserts.
     expect(result[1].role).toBe('tool')
     expect(result[1].toolName).toBe(COMMAND_TOOL_NAME)
     expect(result[1].toolStatus).toBe('completed')
@@ -586,8 +581,6 @@ describe('command chip (harness commands in history)', () => {
   })
 
   test('display_content without harness_command still shows the original text', () => {
-    // Defensive: a message could carry one field without the other (older
-    // server, partial write). The bubble must never show the raw expansion.
     const history: RawHistoryMessage[] = [
       { id: '0', role: 'user', content: 'expanded prompt', display_content: '/mystery' },
     ]
@@ -660,15 +653,11 @@ describe('parseSystemNotice', () => {
     },
     {
       name: 'sender is bounded by the first `]`',
-      // The sender group is `[^\]]+`: the FIRST `]` closes it, so "b]c" is body.
-      // A greedy `(.+)` would swallow "b]c" into the sender and break this row.
       input: '[System: a]b]c',
       want: { sender: 'a', body: 'b]c' },
     },
     {
       name: 'body is trimmed',
-      // The backend emits the synthetic content with a trailing newline; the
-      // parser `.trim()`s the body. Removing that `.trim()` breaks this row.
       input: '[System: cron] x \n',
       want: { sender: 'cron', body: 'x' },
     },
@@ -688,8 +677,6 @@ test("toChatMessages: un aviso de sistema mantiene role 'user' y content intacto
   const result = toChatMessages(history, 'session:1')
 
   expect(result).toHaveLength(1)
-  // NO debe convertirse a 'tool': el merge cuenta usuarios base (messageMerge
-  // compara conteos de role 'user') y rompería la aritmética de orden.
   expect(result[0].role).toBe('user')
   expect(result[0].content).toBe(content)
   expect(result[0].systemNotice).toEqual({
@@ -708,9 +695,6 @@ test('toChatMessages: plain user text is not marked with systemNotice', () => {
   expect(result[0].content).toBe('hola')
   expect(result[0].systemNotice).toBeUndefined()
 })
-// ---------------------------------------------------------------------------
-// LLM failures (error_detail → ChatMessage.error)
-// ---------------------------------------------------------------------------
 
 describe('toChatMessages: LLM failure messages', () => {
   test("maps error_detail onto the message's error field", () => {
@@ -719,7 +703,6 @@ describe('toChatMessages: LLM failure messages', () => {
       {
         id: 'h2',
         role: 'assistant',
-        // The persisted legacy text plain-text channels read.
         content: '❌ Error processing message: LLM call failed after retries',
         error_detail: 'LLM call failed after retries: 429 Too Many Requests',
         exclude_from_context: true,
@@ -736,8 +719,6 @@ describe('toChatMessages: LLM failure messages', () => {
   })
 
   test('keeps a failure that carries no visible content of its own', () => {
-    // A failure row must never be dropped for lacking content: that is the
-    // disappearing-error bug (the box is the only thing it has to show).
     const history: RawHistoryMessage[] = [
       { id: 'h1', role: 'assistant', content: '', error_detail: 'boom' },
     ]

@@ -10,13 +10,6 @@ import {
   serializeCommandMarkdown,
 } from './commandMarkdown'
 
-/**
- * The wire contract of a command file (brief decision 9): TypeScript builds
- * the markdown, Go (`pkg/harness/loader.go`) parses it. These tests pin the
- * shape the Go parser must keep accepting — key order, quoting, and above all
- * which keys are OMITTED, because omission is how "inherit" travels.
- */
-
 function fields(overrides: Partial<CommandFields> = {}): CommandFields {
   return { ...emptyCommandFields(), ...overrides }
 }
@@ -56,17 +49,12 @@ describe('commandNameError', () => {
   test('names the rule that failed, so the form can explain it inline', () => {
     expect(commandNameError('Bad Name')).toBe('invalid')
     expect(commandNameError('')).toBe('invalid')
-    // Both bounds of the length rule: 65 fails, 64 passes (checked above).
     expect(commandNameError('a'.repeat(COMMAND_NAME_MAX_LEN + 1))).toBe('tooLong')
-    // The stem doubles up once ".md" is appended.
     expect(commandNameError('review.md')).toBe('reservedExt')
     expect(commandNameError('notes.markdown')).toBe('reservedExt')
   })
 
   test('reports the length before the extension, as the server does', () => {
-    // agentCommandName() checks size, then grammar, then the extension: one
-    // message at a time, in the same order, so the form never contradicts the
-    // 400 it would have received.
     expect(commandNameError(`${'a'.repeat(70)}.md`)).toBe('tooLong')
   })
 
@@ -116,24 +104,17 @@ describe('serializeCommandMarkdown', () => {
     expect(serializeCommandMarkdown(fields({ allow_absolute_files: false }), 'b')).toContain(
       'allow_absolute_files: false',
     )
-    // allow_shell has no inherit meaning (the harness ORs it), so false is
-    // omitted instead of written.
     expect(serializeCommandMarkdown(fields({ allow_shell: false }), 'b')).not.toContain(
       'allow_shell',
     )
   })
 
   test('wraps values in quotes WITHOUT escaping — Go only strips one pair', () => {
-    // `unquote` never unescapes, so an escaped file would reach the agent with
-    // the backslashes in it. Verbatim-between-quotes is the lossless form.
     const content = serializeCommandMarkdown(fields({ description: 'say "hi" \\ go' }), 'b')
     expect(content).toContain('description: "say "hi" \\ go"')
   })
 
   test('a field value never leaks a fake frontmatter line', () => {
-    // Pasted text with a newline is flattened: the parser reads one `key:
-    // value` per line, so a raw break would split the description into a
-    // second, meaningless line.
     const content = serializeCommandMarkdown(fields({ description: 'multi\nline' }), 'b')
     expect(content).toBe('---\ndescription: "multi line"\n---\nb')
   })
@@ -183,21 +164,14 @@ describe('parseCommandMarkdown', () => {
   })
 
   test('the LAST occurrence of a key wins (Go parser parity)', () => {
-    // parseFrontmatter assigns the field on every matching line, so a later
-    // duplicate overwrites the earlier one — the editor must show what the
-    // agent will actually use.
     const parsed = parseCommandMarkdown('---\ndescription: one\ndescription: two\n---\nbody')
     expect(parsed.fields.description).toBe('two')
   })
 
   test('escape sequences stay literal \u2014 Go unquote does not unescape', () => {
-    // The one place a hand-written file and the editor could disagree: if the
-    // TS parser unescaped, the form would show text the agent never receives.
-    const bs = '\\' // exactly one backslash
+    const bs = '\\'
     const quoted = ['---', `description: "say ${bs}${bs}\"hi"`, '---', 'b'].join('\n')
     expect(parseCommandMarkdown(quoted).fields.description).toBe(`say ${bs}${bs}"hi`)
-    // A value ending in backslashes keeps them all: the outer pair is the only
-    // thing Go removes.
     const trailing = ['---', `description: "C:${bs}${bs}"`, '---', 'b'].join('\n')
     expect(parseCommandMarkdown(trailing).fields.description).toBe(`C:${bs}${bs}`)
   })
@@ -213,14 +187,10 @@ describe('parseCommandMarkdown', () => {
   })
 
   test('fence parity with the Go regex: a one-line block does not match, an empty one does', () => {
-    // Go: \A---\r?\n(.*?)(?:\r?\n)---(\r?\n|\z) — the closing fence needs its
-    // own line, so "---\n---\n…" has NO frontmatter and the fences are body.
     const oneLine = parseCommandMarkdown('---\n---\nbody only')
     expect(oneLine.hasFrontmatter).toBe(false)
     expect(oneLine.body).toBe('---\n---\nbody only')
 
-    // An empty block (blank line between the fences) parses: fields keep their
-    // defaults and the body survives.
     const emptyBlock = parseCommandMarkdown('---\n\n---\nbody only')
     expect(emptyBlock.hasFrontmatter).toBe(true)
     expect(emptyBlock.fields).toEqual(emptyCommandFields())

@@ -9,26 +9,6 @@ import { type SettingsTab, isSettingsTab } from '../../lib/settingsTabs'
 import { SettingsFooter, SettingsHeader, SettingsTabs } from '../molecules'
 import { Sidebar } from '../organisms/Sidebar'
 
-/**
- * `/settings` — the settings shell (sidebar + header + scrollable content +
- * save footer) and the single owner of the settings draft.
- *
- * Children are rendered through `<Outlet/>`:
- *
- *   /settings/:tab                 → `SettingsTabContent` (one tab)
- *   /settings/agents/:id/:tab?     → `AgentConfigPage` (agent detail)
- *
- * Why the draft lives HERE and not in each page: `useSettingsConfig` holds the
- * unsaved draft in component state, and navigating between routes that mount
- * *different* instances would remount the hook and silently drop it. Keeping
- * one instance in the layout is what lets the user edit an agent, go back to
- * the list, open another one and still save everything in one go.
- *
- * The tab strip is hidden while an agent detail page is open: that page owns
- * its own tab strip, and stacking two of them would leave the content a narrow
- * column on desktop. The agent page header's breadcrumb ("‹ Agents / id") is
- * the way back.
- */
 export function SettingsPage() {
   const { t } = useTranslation()
   const { api } = useAuthContext()
@@ -36,16 +16,12 @@ export function SettingsPage() {
     useAppLogicContext()
   const navigate = useNavigate()
 
-  // `/settings/:tab` matches exactly one segment; `/settings/agents/coder` does
-  // not, which is precisely the "agent detail" case.
   const tabMatch = useMatch('/settings/:tab')
   const activeTab: SettingsTab | null = isSettingsTab(tabMatch?.params.tab)
     ? (tabMatch?.params.tab as SettingsTab)
     : null
   const isAgentDetail = !!useMatch('/settings/agents/:agentId/:tab?')
 
-  // A `:tab` segment that is not a known tab is a redirect, never a broken
-  // page: the address bar must always describe what is on screen.
   const rawTab = tabMatch?.params.tab
   useEffect(() => {
     if (rawTab !== undefined && !isSettingsTab(rawTab)) {

@@ -14,8 +14,6 @@ import (
 	"github.com/xilistudios/lele/pkg/update"
 )
 
-// shrinkHandoff makes the restart-child wait loop testable: production uses a
-// 20s timeout with 100ms polls, which no test can wait through.
 func shrinkHandoff(t *testing.T, timeout, poll time.Duration) {
 	t.Helper()
 	origTimeout, origPoll := instanceLockHandoffTimeout, instanceLockHandoffPoll
@@ -25,11 +23,6 @@ func shrinkHandoff(t *testing.T, timeout, poll time.Duration) {
 	})
 }
 
-// liveFlockHolder mimics a running gateway instance: it takes the real
-// kernel flock on the lock file (the authoritative guard since CHT-03 — a
-// bare PID file no longer blocks acquisition) and writes its PID. The
-// returned function releases the flock and closes the file, like a previous
-// instance finishing its shutdown.
 func liveFlockHolder(t *testing.T, path string) func() {
 	t.Helper()
 
@@ -61,8 +54,6 @@ func liveFlockHolder(t *testing.T, path string) func() {
 	}
 }
 
-// TestAcquireInstanceLockPlainStartSucceeds covers the normal case: no lock file
-// yet, so the lock is taken immediately.
 func TestAcquireInstanceLockPlainStartSucceeds(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gateway.lock")
 
@@ -75,9 +66,6 @@ func TestAcquireInstanceLockPlainStartSucceeds(t *testing.T) {
 	}
 }
 
-// TestAcquireInstanceLockSecondInstanceFailsFast is the whole point of the lock:
-// without the restart marker, a second gateway must report already_running
-// immediately instead of waiting.
 func TestAcquireInstanceLockSecondInstanceFailsFast(t *testing.T) {
 	t.Setenv(update.RestartChildEnvKey, "")
 	path := filepath.Join(t.TempDir(), "gateway.lock")
@@ -96,9 +84,6 @@ func TestAcquireInstanceLockSecondInstanceFailsFast(t *testing.T) {
 	}
 }
 
-// TestAcquireInstanceLockRestartChildWaitsForHandoff is the self-exec fix: the
-// replacement process must tolerate the parent still holding the lock while it
-// drains, and take over as soon as it is released.
 func TestAcquireInstanceLockRestartChildWaitsForHandoff(t *testing.T) {
 	t.Setenv(update.RestartChildEnvKey, "1")
 	shrinkHandoff(t, 5*time.Second, 10*time.Millisecond)
@@ -106,7 +91,6 @@ func TestAcquireInstanceLockRestartChildWaitsForHandoff(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gateway.lock")
 	holder := liveFlockHolder(t, path)
 
-	// Release the holder shortly after the child starts waiting.
 	go func() {
 		time.Sleep(150 * time.Millisecond)
 		holder()
@@ -127,9 +111,6 @@ func TestAcquireInstanceLockRestartChildWaitsForHandoff(t *testing.T) {
 	}
 }
 
-// TestAcquireInstanceLockRestartChildGivesUp bounds the wait: if the previous
-// instance never releases, the child must fail with a clear error rather than
-// hang forever holding a half-started gateway.
 func TestAcquireInstanceLockRestartChildGivesUp(t *testing.T) {
 	t.Setenv(update.RestartChildEnvKey, "1")
 	shrinkHandoff(t, 200*time.Millisecond, 10*time.Millisecond)

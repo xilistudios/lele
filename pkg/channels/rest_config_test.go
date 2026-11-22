@@ -180,13 +180,11 @@ func TestRestConfig_PutInvalidConfig(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// Empty config should still pass validation (empty is valid)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 200 or 422; body=%s", resp.StatusCode, readBody(resp))
 	}
 }
 
-// writeTempConfig creates a temporary lele config JSON file and returns its path.
 func writeTempConfig(t *testing.T) string {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -198,18 +196,9 @@ func writeTempConfig(t *testing.T) string {
 	return configPath
 }
 
-// TestRestConfig_PutPartialPreservesUnsentSections is a regression test for
-// the bug where a partial PUT (e.g. only touching agents) would silently wipe
-// channels.web.enabled and native.cors_origins because the handler decoded
-// into a zero-valued EditableDocument instead of overlaying on the current
-// on-disk document.
 func TestRestConfig_PutPartialPreservesUnsentSections(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := tmpDir + "/config.json"
-	// Seed a config with web enabled (explicitly), custom cors_origins.
-	// Note: web.enabled=true is the code default, so the prune-on-save
-	// logic will drop it from the raw file. We verify correctness through
-	// LoadConfig (the runtime path), which restores the default.
 	seedConfig := `{
   "channels": {
     "native": {
@@ -240,7 +229,6 @@ func TestRestConfig_PutPartialPreservesUnsentSections(t *testing.T) {
 
 	ts := newNativeTestServerWithConfigPath(t, configPath)
 
-	// PUT a payload that ONLY touches agents — no channels key at all.
 	body, _ := json.Marshal(ConfigUpdateRequest{
 		Config: map[string]interface{}{
 			"agents": map[string]interface{}{
@@ -248,7 +236,7 @@ func TestRestConfig_PutPartialPreservesUnsentSections(t *testing.T) {
 					"workspace":                "/tmp/workspace",
 					"provider":                 "openrouter",
 					"model":                    "deepseek-v4-pro",
-					"max_tokens":               4096, // changed
+					"max_tokens":               4096,
 					"max_tool_iterations":      20,
 					"max_read_lines":           500,
 					"subagent_timeout_minutes": 30,
@@ -270,19 +258,15 @@ func TestRestConfig_PutPartialPreservesUnsentSections(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, readBody(resp))
 	}
 
-	// Verify through LoadConfig (the runtime path used by the gateway).
 	runtime, err := config.LoadConfig(configPath)
 	if err != nil {
 		t.Fatalf("LoadConfig error = %v", err)
 	}
 
-	// channels.web.enabled must still be true — the partial PUT must not
-	// have wiped it to the zero value (false).
 	if !runtime.Channels.Web.Enabled {
 		t.Error("channels.web.enabled = false after partial PUT, want true (overlay must preserve it)")
 	}
 
-	// native.cors_origins must still have the custom values (not the default 6).
 	if len(runtime.Channels.Native.CORSOrigins) != 2 {
 		t.Errorf("cors_origins has %d entries, want 2 (partial PUT must not wipe to default); got %v",
 			len(runtime.Channels.Native.CORSOrigins), runtime.Channels.Native.CORSOrigins)
@@ -291,14 +275,10 @@ func TestRestConfig_PutPartialPreservesUnsentSections(t *testing.T) {
 		t.Errorf("cors_origins[0] = %q, want \"http://example.local\"", runtime.Channels.Native.CORSOrigins[0])
 	}
 
-	// Verify the agents change DID take effect.
 	if runtime.Agents.Defaults.MaxTokens != 4096 {
 		t.Errorf("agents.defaults.max_tokens = %d, want 4096 (the change from PUT)", runtime.Agents.Defaults.MaxTokens)
 	}
 
-	// Also verify the raw file does NOT contain web.enabled:false (the bug
-	// symptom). With the overlay fix, web.enabled=true is the default and
-	// gets pruned, so the web block should be absent entirely.
 	savedData, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatalf("ReadFile error = %v", err)

@@ -5,78 +5,50 @@
 :root {
   color-scheme: light dark;
 
-  /* 
-   * Color System - Lele Brand Palette
-   * 
-   * Neutros (60% - Fondos)
-   * UI Elements (30% - Surfaces)
-   * Acentos (10% - CTAs & Highlights):
-   *   Rosa Lele #E83E8C - Branding principal
-   *   Naranja #FF6B35 - CTAs principales
-   *   Turquesa #17B3B8 - Interacción
-   */
-
-  /* ═══════════════ DARK (default) ═══════════════ */
-  /* 60% - Neutros Oscuros (Fondos) */
   --color-bg-primary: 15 17 21;
   --color-bg-secondary: 30 33 40;
   --color-bg-tertiary: 42 46 53;
   --color-bg-elevated: 58 63 70;
 
-  /* 30% - Surfaces/UI Elements */
   --color-surface-hover: 52 57 64;
   --color-surface-selected: 29 53 60;
-  --color-surface-sunken: 11 13 16;  /* #0B0D10 — spec §2.1 */
+  --color-surface-sunken: 11 13 16;
 
-  /* 10% - Acentos Primarios */
   --color-accent-primary: 200 31 116;
   --color-accent-hover: 216 46 131;
   --color-accent-active: 184 30 106;
   --color-accent-subtle: rgb(232 62 140 / 0.08);
-  --color-accent-tint: 54 36 52;        /* #362434 — fondo suave de identidad, equivale a accent/12 sobre L1 */
-  --color-accent-text: 240 106 168;     /* #F06AA8 — texto acento (spec §2.2) */
+  --color-accent-tint: 54 36 52;
+  --color-accent-text: 240 106 168;
 
-  /* Brand Colors */
   --color-brand-rosa: 232 62 140;
   --color-brand-morado: 157 78 221;
   --color-brand-amarillo: 255 193 7;
   --color-brand-naranja: 255 107 53;
 
-  /* Secondary Palette */
-
-  /* CTA Colors */
-
-  /* Interaction Colors */
-    --color-mode-chat: 34 211 238;  /* #22D3EE — spec §2.4 */
-  --color-mode-agent: 192 132 252;  /* #C084FC — spec §2.4 */
-  --color-mode-group: 255 138 92;  /* #FF8A5C — spec §2.4 */
+  --color-mode-chat: 34 211 238;
+  --color-mode-agent: 192 132 252;
+  --color-mode-group: 255 138 92;
   --color-focus-hover: 31 201 206;
-  --color-focus: 23 179 184;            /* #17B3B8 — indicador de foco (no textual, ≥3:1) */
+  --color-focus: 23 179 184;
 
-  /* Borders */
   --color-border-default: 44 49 58;
   --color-border-strong: 130 137 147;
 
-  /* Text Colors */
   --color-text-primary: 242 244 247;
   --color-text-secondary: 182 188 196;
   --color-text-tertiary: 162 169 180;
   --color-text-muted: 147 153 159;
   --color-text-on-accent: 255 255 255;
 
-  /* State Colors */
   --color-state-success: 123 201 67;
   --color-state-warning: 255 193 7;
   --color-state-error: 248 113 113;
-  --color-state-error-fill: 209 52 46;  /* #D1342E — botón destructivo relleno, blanco sobre él = 4.95 */
+  --color-state-error-fill: 209 52 46;
   --color-state-info: 96 165 250;
 
-  /* Overlay */
   --color-overlay: rgb(15 17 21 / 0.75);
 
-  /* Glass Effect */
-
-  /* Spacing (4pt grid) */
   --spacing-1: 4px;
   --spacing-2: 8px;
   --spacing-3: 12px;
@@ -85,28 +57,23 @@
   --spacing-6: 24px;
   --spacing-8: 32px;
 
-  /* Border Radius */
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
 
-  /* Typography */
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", ui-monospace, monospace;
 
-  /* Transitions */
   --transition-fast: 150ms ease;
   --transition-normal: 200ms ease;
   --transition-slow: 300ms ease;
 
-  /* Elevation — dark theme: very subtle black shadows */
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.25);
   --shadow-pop: 0 4px 12px rgb(0 0 0 / 0.35);
   --shadow-float: 0 8px 24px rgb(0 0 0 / 0.45);
 }
 
-/* System preference: light (when no data-theme is set) */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     --color-bg-primary: 245 246 248;
@@ -116,19 +83,19 @@
 
     --color-surface-hover: 232 235 239;
     --color-surface-selected: 226 239 240;
-    --color-surface-sunken: 236 238 242;  /* #ECEEF2 — spec §2.1 */
+    --color-surface-sunken: 236 238 242;
 
     --color-accent-primary: 200 31 116;
     --color-accent-hover: 184 30 106;
     --color-accent-active: 168 27 95;
     --color-accent-subtle: rgb(232 62 140 / 0.06);
-    --color-accent-tint: 253 236 244;      /* #FDECF4 */
-    --color-accent-text: 184 30 106;      /* #B81E6A — texto acento (spec §2.2) */
-      --color-mode-chat: 8 117 122;  /* #08757A — spec §2.4 */
-    --color-mode-agent: 124 58 237;  /* #7C3AED — spec §2.4 */
-    --color-mode-group: 194 65 12;  /* #C2410C — spec §2.4 */
+    --color-accent-tint: 253 236 244;
+    --color-accent-text: 184 30 106;
+    --color-mode-chat: 8 117 122;
+    --color-mode-agent: 124 58 237;
+    --color-mode-group: 194 65 12;
     --color-focus-hover: 23 179 184;
-    --color-focus: 10 124 128;             /* #0A7C80 */
+    --color-focus: 10 124 128;
 
     --color-border-default: 223 227 232;
     --color-border-strong: 112 120 129;
@@ -142,20 +109,17 @@
     --color-state-success: 22 101 52;
     --color-state-warning: 138 83 0;
     --color-state-error: 200 30 30;
-    --color-state-error-fill: 200 30 30;   /* #C81E1E */
+    --color-state-error-fill: 200 30 30;
     --color-state-info: 29 78 216;
 
     --color-overlay: rgb(15 17 21 / 0.55);
 
-
-    /* Elevation — light theme: soft diffuse shadows */
     --shadow-card: 0 1px 3px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);
     --shadow-pop: 0 4px 12px rgb(0 0 0 / 0.12), 0 2px 4px rgb(0 0 0 / 0.06);
     --shadow-float: 0 12px 32px rgb(0 0 0 / 0.16), 0 4px 8px rgb(0 0 0 / 0.06);
   }
 }
 
-/* Forced light mode via data-theme */
 [data-theme="light"] {
   color-scheme: light;
 
@@ -166,25 +130,24 @@
 
   --color-surface-hover: 232 235 239;
   --color-surface-selected: 226 239 240;
-  --color-surface-sunken: 236 238 242;  /* #ECEEF2 — spec §2.1 */
+  --color-surface-sunken: 236 238 242;
 
   --color-accent-primary: 200 31 116;
   --color-accent-hover: 184 30 106;
   --color-accent-active: 168 27 95;
   --color-accent-subtle: rgb(232 62 140 / 0.06);
-  --color-accent-tint: 253 236 244;      /* #FDECF4 */
-  --color-accent-text: 184 30 106;      /* #B81E6A — texto acento (spec §2.2) */
+  --color-accent-tint: 253 236 244;
+  --color-accent-text: 184 30 106;
 
-  /* Brand - se mantienen */
   --color-brand-rosa: 232 62 140;
   --color-brand-morado: 157 78 221;
   --color-brand-amarillo: 255 193 7;
   --color-brand-naranja: 255 107 53;
-    --color-mode-chat: 8 117 122;  /* #08757A — spec §2.4 */
-  --color-mode-agent: 124 58 237;  /* #7C3AED — spec §2.4 */
-  --color-mode-group: 194 65 12;  /* #C2410C — spec §2.4 */
+  --color-mode-chat: 8 117 122;
+  --color-mode-agent: 124 58 237;
+  --color-mode-group: 194 65 12;
   --color-focus-hover: 23 179 184;
-  --color-focus: 10 124 128;             /* #0A7C80 */
+  --color-focus: 10 124 128;
 
   --color-border-default: 223 227 232;
   --color-border-strong: 112 120 129;
@@ -198,24 +161,16 @@
   --color-state-success: 22 101 52;
   --color-state-warning: 138 83 0;
   --color-state-error: 200 30 30;
-  --color-state-error-fill: 200 30 30;   /* #C81E1E */
+  --color-state-error-fill: 200 30 30;
   --color-state-info: 29 78 216;
 
   --color-overlay: rgb(15 17 21 / 0.55);
 
-
-  /* Elevation — light theme: soft diffuse shadows */
   --shadow-card: 0 1px 3px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);
   --shadow-pop: 0 4px 12px rgb(0 0 0 / 0.12), 0 2px 4px rgb(0 0 0 / 0.06);
   --shadow-float: 0 12px 32px rgb(0 0 0 / 0.16), 0 4px 8px rgb(0 0 0 / 0.06);
 }
 
-/* Single source of truth for the app shell height.
- * 100vh on mobile = LARGE viewport (toolbars retracted) -> the shell overflows
- * the visible area by the browser-chrome height and the document scrolls the
- * header away. dvh tracks the dynamic (visible) viewport. The px override is
- * written by useAppViewportHeight ONLY while an on-screen keyboard shrinks the
- * visual viewport below the layout viewport (iOS); it is removed otherwise. */
 :root {
   --app-vh: 100vh;
 }
@@ -225,29 +180,15 @@
   }
 }
 
-/* Replaces `h-screen overflow-hidden` on every full-height page shell.
- * Keep the `flex` utility in markup; this class owns only height + overflow. */
 .app-shell {
   height: var(--app-vh);
   overflow: hidden;
-  /* Notch / home-indicator / status-bar insets. env() = 0px without
-   * viewport-fit=cover and on desktop -> pixel-identical there. The shell has
-   * no Tailwind padding utilities, so these cannot fight the px and py
-   * utilities (a plain .pb-safe next to py-3 would OVERRIDE the 12px with 0). */
   padding-top: env(safe-area-inset-top, 0px);
   padding-right: env(safe-area-inset-right, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
   padding-left: env(safe-area-inset-left, 0px);
 }
 
-/* For fixed-position drawers that escape .app-shell's padding box: below md the
- * sidebar/subagent/quick-chat drawers are `fixed`, so they own no shell padding
- * and must carry the insets themselves. At `md:` they become `md:relative` (or
- * are inside .app-shell), which already applies the same env() insets —
- * applying both would double them on an iPad in landscape. Hence mobile-only.
- * Applies to the PANEL, never to the `fixed inset-0` backdrop behind it: a
- * backdrop has to dim the whole screen, edges and notch included. Only apply to
- * elements with NO competing padding utilities. */
 @media (max-width: 767.98px) {
   .safe-area-y {
     padding-top: env(safe-area-inset-top, 0px);
@@ -255,17 +196,10 @@
   }
 }
 
-/* Replaces `min-h-screen` on scrollable centered pages (auth, error, loading). */
 .app-shell-min {
   min-height: var(--app-vh);
 }
 
-/* The document must never be taller than the shell: a 100%-tall `html` floors
- * the document at the layout-viewport height even when the shell shrinks for
- * the keyboard, which leaves a blank pannable region and scrolls the header
- * away again. `auto` lets the document height equal the body height.
- * `body` tracks the same single source as the shell; `#root` percentages then
- * resolve against a definite height, exactly as they did before. */
 html {
   height: auto;
 }
@@ -290,7 +224,6 @@ body {
   box-sizing: border-box;
 }
 
-/* Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -309,26 +242,22 @@ body {
   background: rgb(var(--color-text-tertiary));
 }
 
-/* Monospace for code */
 code,
 pre,
 .font-mono {
   font-family: var(--font-mono);
 }
 
-/* Focus states */
 :focus-visible {
   outline: 2px solid rgb(var(--color-focus));
   outline-offset: 2px;
 }
 
-/* Selection */
 ::selection {
   background: rgb(var(--color-brand-rosa));
   color: rgb(var(--color-text-on-accent));
 }
 
-/* Animations */
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -430,7 +359,6 @@ pre,
     border-radius: var(--radius-md);
   }
 
-
   .hover-highlight {
     transition: background-color 150ms ease, color 150ms ease;
     cursor: pointer;
@@ -488,12 +416,6 @@ pre,
     background: rgb(var(--color-bg-secondary));
   }
 
-
-
-  /* --- Temperature slider (spec §9: the only new CSS of the agents feature) ---
-   * Tailwind cannot target ::-webkit-slider-thumb / ::-moz-range-thumb without a
-   * plugin, so the native <input type="range"> is styled here once and shared.
-   * Colors come exclusively from existing tokens. */
   .lele-range {
     -webkit-appearance: none;
     appearance: none;
@@ -545,7 +467,6 @@ pre,
     transform: scale(1.1);
   }
 
-  /* §10.1: the thumb is small, so it gets a ring on top of the global outline. */
   .lele-range:focus-visible {
     outline: 2px solid rgb(var(--color-focus));
     outline-offset: 2px;
@@ -557,7 +478,6 @@ pre,
     cursor: not-allowed;
   }
 
-  /* Value not set: the thumb shows the model default, dimmed and dashed. */
   .lele-range--inherit {
     opacity: 0.6;
   }
@@ -571,7 +491,6 @@ pre,
   }
 }
 
-/* Modal animations */
 @keyframes modal-backdrop-in {
   from {
     opacity: 0;
@@ -628,7 +547,6 @@ pre,
   animation: modal-content-out 0.2s ease-in forwards;
 }
 
-/* Step transition */
 @keyframes step-enter {
   from {
     opacity: 0;
@@ -644,13 +562,10 @@ pre,
   animation: step-enter 0.2s ease-out forwards;
 }
 
-
-/* Progress bar transition */
 .progress-bar {
   transition: background-color 0.3s ease, width 0.3s ease;
 }
 
-/* Panel / Sidebar slide animations — slides from right */
 @keyframes panel-slide-in {
   from {
     transform: translateX(100%);
@@ -703,7 +618,6 @@ pre,
   animation: panel-slide-out 0.2s ease-in forwards;
 }
 
-/* Overlay fade */
 .modal-backdrop-in {
   animation: modal-backdrop-in 0.2s ease-out forwards;
   background: rgb(0 0 0 / 0.2);
@@ -713,14 +627,10 @@ pre,
   animation: modal-backdrop-out 0.2s ease-in forwards;
   background: rgb(0 0 0 / 0.2);
 }
-/* --- Desktop (Tauri) mode --- */
 html.desktop {
-  /* native window: no overscroll bounce, no text cursor on chrome */
   overscroll-behavior: none;
 }
 
-/* Match the global scrollbar styling but slightly wider for mouse-driven
- * desktop windows. Track/thumb colors are inherited from the global rules. */
 html.desktop ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -735,7 +645,6 @@ html.desktop textarea,
 html.desktop [contenteditable] {
   user-select: text;
 }
-/* Text diff colors (used by MessageBubble / MarkdownText) */
 .text-diff-addition {
   color: rgb(var(--color-state-success));
 }

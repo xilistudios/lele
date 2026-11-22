@@ -9,9 +9,6 @@ import (
 	"testing"
 )
 
-// rawFixture is a hand-formatted mcp.json: 2-space indent, an unknown
-// top-level key, an entry with unknown fields and messy inner spacing. Every
-// raw-span assertion below depends on this exact byte layout.
 const rawFixture = "{\n" +
 	"  \"mcpServers\": {\n" +
 	"    \"first\": { \"command\" : \"c1\" ,\n" +
@@ -23,7 +20,6 @@ const rawFixture = "{\n" +
 	"}\n"
 
 func TestParseRawDocCapturesSpansAndOrder(t *testing.T) {
-	// Even with CANARY set in the environment, parseRawDoc must never expand.
 	t.Setenv("SECRET", "top-secret-value")
 	data := []byte(rawFixture)
 
@@ -32,7 +28,6 @@ func TestParseRawDocCapturesSpansAndOrder(t *testing.T) {
 		t.Fatalf("parseRawDoc() error = %v", err)
 	}
 
-	// Top-level member order is file order.
 	var keys []string
 	for _, m := range doc.members {
 		keys = append(keys, m.key)
@@ -40,15 +35,12 @@ func TestParseRawDocCapturesSpansAndOrder(t *testing.T) {
 	if want := []string{"mcpServers", "extra", "note"}; !reflect.DeepEqual(keys, want) {
 		t.Fatalf("top-level member order = %v, want %v", keys, want)
 	}
-	// Every captured span is the document's own bytes at those offsets.
 	for _, m := range doc.members {
 		if m.start < 0 || m.end > len(data) || !bytes.Equal(data[m.start:m.end], m.raw) {
 			t.Errorf("member %q span [%d,%d] does not match document bytes", m.key, m.start, m.end)
 		}
 	}
 
-	// mcpServers: member order is file order, raw bytes keep inner whitespace
-	// verbatim (including the literal ${SECRET}, which must not be expanded).
 	if doc.servers == nil {
 		t.Fatal("servers object not captured")
 	}
@@ -126,8 +118,6 @@ func TestParseRawDocAccepts(t *testing.T) {
 }
 
 func TestParseRawDocRejects(t *testing.T) {
-	// The rejection set must match ParseFile's (json.Unmarshal into File):
-	// anything ParseFile would skip, parseRawDoc must refuse too.
 	tests := []struct {
 		name string
 		data string
@@ -168,11 +158,9 @@ func TestRawDocSummaryNoExpansion(t *testing.T) {
 	if !ok {
 		t.Fatal("Summary(\"svc\") ok = false, want true")
 	}
-	// ${VAR} stays literal everywhere it is exposed.
 	if s.Command != "run ${CANARY}" {
 		t.Errorf("Command = %q, want the literal placeholder", s.Command)
 	}
-	// Env/header VALUES are never exposed; KEYS are, sorted, and complete.
 	if want := []string{"TOKEN", "ZED"}; !reflect.DeepEqual(s.EnvKeys, want) {
 		t.Errorf("EnvKeys = %v, want %v", s.EnvKeys, want)
 	}
@@ -213,10 +201,10 @@ func TestRawDocSummaryValidationReusesRule(t *testing.T) {
 		wantArgs    int
 		wantType    string
 		wantDis     bool
-		wantInvalid string // substring; "" means the entry must validate
+		wantInvalid string
 	}{
 		{name: "stdio", wantKind: kindStdio, wantArgs: 2, wantType: ""},
-		{name: "remote", wantKind: kindRemote, wantType: typeHTTP}, // normalized by validate()
+		{name: "remote", wantKind: kindRemote, wantType: typeHTTP},
 		{name: "sse", wantKind: kindRemote, wantType: typeSSE},
 		{name: "badtype", wantKind: kindRemote, wantType: "ftp", wantInvalid: `unknown type "ftp"`},
 		{name: "mixed", wantKind: kindStdio, wantInvalid: "mixes stdio and remote fields"},
@@ -253,8 +241,6 @@ func TestRawDocSummaryValidationReusesRule(t *testing.T) {
 }
 
 func TestRawDocDuplicateMembersLastWins(t *testing.T) {
-	// Duplicate top-level "mcpServers": encoding/json's map keeps the last
-	// occurrence, so Summary must too (both raw spans stay captured).
 	data := []byte(`{"mcpServers":{"a":{"command":"first"}},` +
 		`"mcpServers":{"a":{"url":"https://second/mcp"}}}`)
 	doc, err := parseRawDoc(data)
@@ -269,7 +255,6 @@ func TestRawDocDuplicateMembersLastWins(t *testing.T) {
 		t.Errorf("Summary = %+v, want the LAST mcpServers occurrence to win", s)
 	}
 
-	// Duplicate entry name inside one object: same rule.
 	data = []byte(`{"mcpServers":{"a":{"command":"first"},"a":{"command":"second"}}}`)
 	doc, err = parseRawDoc(data)
 	if err != nil {
@@ -283,11 +268,6 @@ func TestRawDocDuplicateMembersLastWins(t *testing.T) {
 	}
 }
 
-// runtimeEnvelope decodes data exactly the way ParseFile's decode step does
-// — json.Unmarshal into File — and returns each name's winning copy (its
-// Command) or the decode error. It is the ORACLE the raw reader is compared
-// against: whatever this returns, parseRawDoc's name set and winner must
-// match for the same bytes.
 func runtimeEnvelope(data string) (map[string]string, error) {
 	var f File
 	if err := json.Unmarshal([]byte(data), &f); err != nil {
@@ -300,10 +280,6 @@ func runtimeEnvelope(data string) (map[string]string, error) {
 	return out, nil
 }
 
-// rawEnvelope is parseRawDoc's verdict for the same bytes: name → winning
-// copy's Command (via Summary, i.e. the fold's last-in-file-order winner),
-// or the parse error. It also asserts byte-faithfulness of every captured
-// fold span while it walks the members.
 func rawEnvelope(t *testing.T, data string) (map[string]string, error) {
 	t.Helper()
 	doc, err := parseRawDoc([]byte(data))
@@ -316,7 +292,7 @@ func rawEnvelope(t *testing.T, data string) (map[string]string, error) {
 	}
 	for i, m := range doc.servers.members {
 		if doc.servers.index[m.key] != i {
-			continue // not the winning copy of this name
+			continue
 		}
 		if m.start < 0 || m.end > len(data) || !bytes.Equal([]byte(data[m.start:m.end]), m.raw) {
 			t.Errorf("entry %q span [%d,%d] does not match document bytes", m.key, m.start, m.end)
@@ -331,13 +307,6 @@ func rawEnvelope(t *testing.T, data string) (map[string]string, error) {
 	return out, nil
 }
 
-// TestRawDocEnvelopeMatchesRuntime pins the raw reader's NAME SET (and the
-// winning copy per name) to the runtime decoder's for the same bytes, over
-// the document classes encoding/json accepts and honours but a naive reader
-// diverges on: duplicate envelope members (union vs replace), null first /
-// null second (clear semantics), case-variant envelope keys (case-insensitive
-// struct-field matching) and a case-variant duplicate. Error verdicts are
-// compared too: a document ParseFile rejects, parseRawDoc must reject.
 func TestRawDocEnvelopeMatchesRuntime(t *testing.T) {
 	tests := []struct {
 		name string
@@ -415,11 +384,6 @@ func TestRawDocEnvelopeMatchesRuntime(t *testing.T) {
 	}
 }
 
-// TestRawDocSummaryAuthProjection pins the auth projection rule: the summary
-// carries the auth TYPE, the scope COUNT and whether a client id is present,
-// and never a value. client_id / client_secret are secrets that sit in the
-// same class as env and header values, so they must not survive the trip into
-// the management UI payload — rawbytes only keep them in literal ${VAR} form.
 func TestRawDocSummaryAuthProjection(t *testing.T) {
 	data := []byte(`{"mcpServers":{` +
 		`"full":{"url":"https://h/mcp","auth":{"type":"oauth","scopes":["a","b"],` +
@@ -465,8 +429,6 @@ func TestRawDocSummaryAuthProjection(t *testing.T) {
 		})
 	}
 
-	// CANARY: neither the client id nor the client secret may appear anywhere
-	// in the summary — not in the formatted struct, not in any string field.
 	full, _ := doc.Summary("full")
 	for _, canary := range []string{"CID", "CANARY-SECRET", "http://127.0.0.1:9/cb"} {
 		if formatted := fmt.Sprintf("%+v", full); strings.Contains(formatted, canary) {
@@ -480,9 +442,6 @@ func TestRawDocSummaryAuthProjection(t *testing.T) {
 	}
 }
 
-// TestRawDocSummaryAuthSecretNotExpanded: a ${VAR} client_secret stays
-// literal — never expanded, never surfaced in the summary — matching the
-// env/header rule that this package expands nothing when listing.
 func TestRawDocSummaryAuthSecretNotExpanded(t *testing.T) {
 	t.Setenv("MY_SECRET", "auth-canary-value")
 	data := []byte(`{"mcpServers":{"svc":{"url":"https://h/mcp",` +
@@ -495,7 +454,6 @@ func TestRawDocSummaryAuthSecretNotExpanded(t *testing.T) {
 	if !ok {
 		t.Fatal("Summary(\"svc\") ok = false, want true")
 	}
-	// A literal placeholder still counts as "present": the field is set.
 	if !s.AuthClientIDSet {
 		t.Errorf("AuthClientIDSet = %v, want true for the literal placeholder", s.AuthClientIDSet)
 	}
@@ -512,9 +470,6 @@ func TestRawDocSummaryAuthSecretNotExpanded(t *testing.T) {
 	}
 }
 
-// summaryStringFields returns every string-valued field of a ServerSummary
-// (including slice elements), so the canary assertions above cover the whole
-// payload instead of the handful of fields a test happens to know about.
 func summaryStringFields(s ServerSummary) []string {
 	var out []string
 	v := reflect.ValueOf(s)

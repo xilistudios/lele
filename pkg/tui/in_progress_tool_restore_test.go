@@ -6,11 +6,6 @@ import (
 	"github.com/xilistudios/lele/pkg/session"
 )
 
-// TestFormatInProgressToolAction pins the row the session-switch restore
-// paints for a recorded in-flight tool: the backend's pre-formatted action is
-// preferred over the bare tool name (so the row matches what the live
-// tool.executing handler showed), and the value is sanitized because it is
-// LLM-controlled (tool arguments echoed back by the model).
 func TestFormatInProgressToolAction(t *testing.T) {
 	cases := []struct {
 		name string
@@ -54,11 +49,6 @@ func TestFormatInProgressToolAction(t *testing.T) {
 	}
 }
 
-// TestInProgressToolAction_NoRecord is the glue such as it can be tested from
-// here: with a real loop and no in-flight tool (the loop's record is only ever
-// populated by an actual tool execution — see pkg/agent's in_progress_tool
-// tests), the lookup must yield an empty row instead of panicking or inventing
-// one, and an empty session key must short-circuit.
 func TestInProgressToolAction_NoRecord(t *testing.T) {
 	m := newTestModel(t)
 	m.executeCommand("/new")
@@ -74,10 +64,6 @@ func TestInProgressToolAction_NoRecord(t *testing.T) {
 	}
 }
 
-// TestClearStreamingState_DoesNotResurrectToolRowWhenIdle: switching to (or
-// re-rendering) an idle session must leave the overlay without a tool row even
-// if the outgoing session had one, so a stale "running tool" row cannot leak
-// across chats.
 func TestClearStreamingState_DoesNotResurrectToolRowWhenIdle(t *testing.T) {
 	m := newTestModel(t)
 	m.executeCommand("/new")
@@ -94,10 +80,6 @@ func TestClearStreamingState_DoesNotResurrectToolRowWhenIdle(t *testing.T) {
 	}
 }
 
-// TestViewportContentKey_IncludesRestoredToolRow guards the render cache: the
-// viewport content fingerprint must include the running tool row, otherwise a
-// chat switched back to a still-running tool would keep the previous (row-less)
-// frame until some other state changed.
 func TestViewportContentKey_IncludesRestoredToolRow(t *testing.T) {
 	m := newTestModel(t)
 	m.executeCommand("/new")

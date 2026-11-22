@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package config
 
 import (
@@ -12,11 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 )
-
-// durable_outbound is tri-state (nil = "not configured"), so it has to survive
-// the whole editable-document cycle without being flattened to false, and must
-// stay out of the file while unset so the code default keeps owning it. Mirror
-// of durable_inbound_config_test.go: same guarantees, reply side.
 
 func TestDurableOutboundDefaultIsOff(t *testing.T) {
 	cfg := DefaultConfig()
@@ -72,7 +61,6 @@ func TestDurableOutboundRoundTrip(t *testing.T) {
 					formatTri(back.Session.DurableOutbound), formatTri(tc.in))
 			}
 
-			// Full save/reload cycle, the path a user's edit actually takes.
 			path := filepath.Join(t.TempDir(), "config.json")
 			if err := SaveEditableDocument(path, doc); err != nil {
 				t.Fatalf("SaveEditableDocument: %v", err)
@@ -89,9 +77,6 @@ func TestDurableOutboundRoundTrip(t *testing.T) {
 	}
 }
 
-// TestDurableOutboundKeyAbsentWhenUnset pins the "unset means inherit" rule: an
-// untouched config must not gain a durable_outbound: false that would pin the
-// feature off for every future release.
 func TestDurableOutboundKeyAbsentWhenUnset(t *testing.T) {
 	doc := editableDocumentFromConfig(DefaultConfig())
 
@@ -104,16 +89,11 @@ func TestDurableOutboundKeyAbsentWhenUnset(t *testing.T) {
 	}
 }
 
-// TestDurableOutboundEmittedAlone guards the emission gate: the session block is
-// only written when something in it is set, so a config whose ONLY non-default
-// session value is durable_outbound must still be persisted. Otherwise enabling
-// durability silently evaporates on the next save.
 func TestDurableOutboundEmittedAlone(t *testing.T) {
 	for name, want := range map[string]bool{"on": true, "off": false} {
 		t.Run(name, func(t *testing.T) {
 			value := want
 			src := DefaultConfig()
-			// Strip every other session override so durable_outbound is alone.
 			src.Session = SessionConfig{DurableOutbound: &value}
 
 			doc := editableDocumentFromConfig(src)
@@ -144,9 +124,6 @@ func TestDurableOutboundEmittedAlone(t *testing.T) {
 	}
 }
 
-// TestDurableOutboundIndependentOfInbound is the tri-state cross-check the two
-// flags need now that they coexist: each one is configured on its own and the
-// document round-trip never lets one imply the other.
 func TestDurableOutboundIndependentOfInbound(t *testing.T) {
 	yes, no := true, false
 	cases := []struct {

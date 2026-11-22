@@ -13,27 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// ---------------------------------------------------------------------------
-// e2e write-path persistence test (issue #239, layer 3).
-//
-// Production symptom: on a live daemon (build 8054806) the groups_state table
-// had ZERO rows even though the SQLite store opened fine and
-// gm.SetStore(dbStore.Groups()) is wired in pkg/agent/loop.go. Group cards
-// therefore vanished on session switch / restart because there was nothing to
-// rehydrate from.
-//
-// This test replicates the production wiring EXACTLY — store.Open →
-// NewGroupManager → SetStoreDir → SetStore → SetEnabledHook → Start → Wait —
-// and then verifies from a FRESH connection to the same db file that the final
-// state really landed on disk. If this passes, the write path itself is sound
-// and the bug must live in how production wires (or re-wires) the
-// package-level store; if it fails, we have reproduced the bug.
-// ---------------------------------------------------------------------------
-
-// openSQLiteStoreAt opens (or creates) the SQLite store at a fixed path.
-// Unlike openSQLiteStore (store_sqlite_test.go) it does not use t.TempDir,
-// so a second, independent connection can be opened against the same file —
-// exactly what we need to prove durability beyond the writer's pool.
 func openSQLiteStoreAt(t *testing.T, path string) *store.Store {
 	t.Helper()
 	s, err := store.Open(path)
@@ -49,24 +28,19 @@ func openSQLiteStoreAt(t *testing.T, path string) *store.Store {
 }
 
 func TestE2E_GroupWritePath_PersistsToSQLite(t *testing.T) {
-	// The SQLite repo behind SaveGroup is a package-level global (UseStore);
-	// reset it so we don't poison the rest of the package. Safe without
-	// t.Parallel discipline here because no test in this package parallelizes.
 	prevRepo := getGroupRepo()
 	t.Cleanup(func() { UseStore(prevRepo) })
 
 	dbPath := filepath.Join(t.TempDir(), "lele.db")
 	s := openSQLiteStoreAt(t, dbPath)
 
-	// --- production wiring, same order as pkg/agent/loop.go ---
 	exec := &mockExecutor{}
 	pub := &mockPublisher{}
 	gm := NewGroupManager(mockResolve, exec.execute, pub.publish)
-	gm.SetStoreDir(t.TempDir())                    // loop.go:490 — dir first...
-	gm.SetStore(s.Groups())                        // loop.go:492 — ...then SQLite repo (sets the global)
-	gm.SetEnabledHook(func() bool { return true }) // loop.go:489
+	gm.SetStoreDir(t.TempDir())
+	gm.SetStore(s.Groups())
+	gm.SetEnabledHook(func() bool { return true })
 
-	// --- run a group to completion ---
 	ctx := context.Background()
 	const groupID = "group:wtest"
 	if _, err := gm.Start(ctx, groupID, "", "task", "round_robin",
@@ -82,10 +56,6 @@ func TestE2E_GroupWritePath_PersistsToSQLite(t *testing.T) {
 	}
 	finish := time.Now()
 
-	// --- assert durability from a FRESH connection to the same db file ---
-	// A separate store.Open gives its own *sql.DB pool; if the row is visible
-	// here, it is committed on disk (WAL included), not just sitting in the
-	// writer's connection.
 	reader := openSQLiteStoreAt(t, dbPath)
 
 	stateJSON, found, err := reader.Groups().GetGroupState(groupID)
@@ -108,13 +78,6 @@ func TestE2E_GroupWritePath_PersistsToSQLite(t *testing.T) {
 		t.Errorf("persisted Transcript has %d turns, want >= 1", len(persisted.Transcript))
 	}
 
-	// The "started" save is hard to time from here, so instead we prove the
-	// FINAL save happened AFTER finalize: finalize stamps state.UpdatedAt
-	// under gm.mu before emitting the terminal pair, and Wait only returns
-	// once that is done — so UpdatedAt must not be in the future relative to
-	// the instant we observed completion, and the row we just read carries
-	// that terminal timestamp (a row only holding the "started" snapshot
-	// would have Status running and a stale UpdatedAt).
 	if persisted.UpdatedAt.IsZero() {
 		t.Error("persisted UpdatedAt is zero")
 	}
@@ -122,8 +85,6 @@ func TestE2E_GroupWritePath_PersistsToSQLite(t *testing.T) {
 		t.Errorf("persisted UpdatedAt = %v, after test finish %v — terminal save not consistent", persisted.UpdatedAt, finish)
 	}
 
-	// Cross-check through the domain read path too (ListGroups on the same
-	// global repo the reader connection uses).
 	all, err := reader.Groups().ListGroupStates()
 	if err != nil {
 		t.Fatalf("ListGroupStates: %v", err)
@@ -133,17 +94,6 @@ func TestE2E_GroupWritePath_PersistsToSQLite(t *testing.T) {
 	}
 }
 
-// TestE2E_GroupWritePath_SQLiteNeedsNoLegacyDir pins the structural invariant
-// that motivated issue #239's investigation: when a SQLite repository is
-// configured, group state must persist even if the legacy per-file JSON
-// directory was never set.
-//
-// Before the fix, both write sites gated persistence on storeDir != ""
-// (Start's "started" save and saveStateBestEffort), while the SQLite backend
-// in SaveGroup ignores dir entirely. A manager wired with SetStore(repo) but
-// without SetStoreDir therefore persisted NOTHING — a silent data-loss trap
-// for any caller that drops the obsolete JSON dir. loop.go happens to set
-// both today, which is why production never hit it.
 func TestE2E_GroupWritePath_SQLiteNeedsNoLegacyDir(t *testing.T) {
 	prevRepo := getGroupRepo()
 	t.Cleanup(func() { UseStore(prevRepo) })
@@ -154,7 +104,6 @@ func TestE2E_GroupWritePath_SQLiteNeedsNoLegacyDir(t *testing.T) {
 	exec := &mockExecutor{}
 	pub := &mockPublisher{}
 	gm := NewGroupManager(mockResolve, exec.execute, pub.publish)
-	// Deliberately NO SetStoreDir: only the SQLite backend is configured.
 	gm.SetStore(s.Groups())
 	gm.SetEnabledHook(func() bool { return true })
 
@@ -194,22 +143,6 @@ func TestE2E_GroupWritePath_SQLiteNeedsNoLegacyDir(t *testing.T) {
 	}
 }
 
-// TestE2E_GroupWritePath_DurableBeforeTerminalSignal pins the ordering
-// invariant that makes group cards survive a client re-read or a process
-// restart: the terminal state must already be on disk by the time the client
-// is told the group finished (terminal group.status / group.complete, and by
-// extension the close of done that Wait() unblocks).
-//
-// Before the fix, finalize published the terminal pair and closed done, and
-// only afterwards did runGroup's deferred saveStateBestEffort write the row.
-// A client that refreshed history as soon as it saw group.complete — exactly
-// what the WebUI does on session switch — could therefore read a store with no
-// row at all (issue #239's "cards vanish"), and a restart in that window lost
-// the group permanently.
-//
-// The check is deterministic: the assertion runs inside the publisher, on the
-// same goroutine that emits the terminal events, so it observes the store at
-// the exact instant the signal is delivered.
 func TestE2E_GroupWritePath_DurableBeforeTerminalSignal(t *testing.T) {
 	prevRepo := getGroupRepo()
 	t.Cleanup(func() { UseStore(prevRepo) })
@@ -221,8 +154,6 @@ func TestE2E_GroupWritePath_DurableBeforeTerminalSignal(t *testing.T) {
 
 	const groupID = "group:order"
 
-	// terminalSeen records, for each terminal event delivered, whether the
-	// durable row was already readable at that moment.
 	type observation struct {
 		event  string
 		status string
@@ -248,10 +179,6 @@ func TestE2E_GroupWritePath_DurableBeforeTerminalSignal(t *testing.T) {
 		observations = append(observations, observation{event: msg.Event, status: status})
 		obsMu.Unlock()
 
-		// Observe the store exactly as a client re-reading history would.
-		// The row must carry the TERMINAL status, not merely exist: Start
-		// already persisted a "running" snapshot, so an existence check alone
-		// would pass even with the final save still pending.
 		stateJSON, found, err := reader.Groups().GetGroupState(groupID)
 		if err != nil {
 			t.Errorf("GetGroupState during %s: %v", msg.Event, err)
@@ -266,9 +193,6 @@ func TestE2E_GroupWritePath_DurableBeforeTerminalSignal(t *testing.T) {
 			}
 			persistedStatus = st.Status
 		}
-		// Requirement: the durable row must already be terminal, and — when the
-		// event names the status (group.status does; group.complete does not) —
-		// it must be the SAME status being announced.
 		ok := isTerminalGroupStatus(persistedStatus) &&
 			(status == "" || persistedStatus == status)
 		if !ok {

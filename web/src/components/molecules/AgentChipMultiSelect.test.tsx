@@ -3,8 +3,6 @@ import { fireEvent, render } from '@testing-library/react'
 import i18n from '../../test/i18n'
 import { AgentChipMultiSelect } from './AgentChipMultiSelect'
 
-// The shared test i18n boots in Spanish; read labels through the same keys the
-// component uses so the assertions hold for any active locale.
 const NO_OTHER_AGENTS = i18n.t('settings.agentPage.noOtherAgents', {
   defaultValue: 'No other agents to delegate to yet.',
 })
@@ -39,7 +37,6 @@ function setup(overrides: Overrides = {}) {
 describe('AgentChipMultiSelect', () => {
   test('renders one chip per candidate, in the order received (positional dirty paths)', () => {
     const { chips } = setup()
-    // The visible text is the avatar initial + the id; compare ids via aria-label.
     expect(chips.map((chip) => chip.getAttribute('aria-label'))).toEqual([
       'coder (Coder Agent)',
       'lele',
@@ -55,9 +52,8 @@ describe('AgentChipMultiSelect', () => {
   test('each chip shows the avatar and the id (never the name as label)', () => {
     const { chips } = setup()
     const first = chips[0]
-    expect(first.querySelector('[aria-hidden="true"]')).toBeTruthy() // AgentAvatar
+    expect(first.querySelector('[aria-hidden="true"]')).toBeTruthy()
     expect(first.textContent).toContain('coder')
-    // name is available as tooltip/accessible name, not as visible duplicate text
     expect(first.getAttribute('title')).toBe('Coder Agent')
     expect(first.getAttribute('aria-label')).toBe('coder (Coder Agent)')
   })
@@ -107,7 +103,7 @@ describe('AgentChipMultiSelect', () => {
 
   test('Space/Enter work natively on buttons (keyboard toggle)', () => {
     const { chips, onChange } = setup({ value: [] })
-    fireEvent.click(chips[2]) // what Space/Enter dispatch on a <button>
+    fireEvent.click(chips[2])
     expect(onChange.mock.calls[0][0]).toEqual(['research'])
   })
 

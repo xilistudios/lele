@@ -10,9 +10,6 @@ import (
 
 var placeSink string
 
-// BenchmarkPaintFrameVsPlace isolates the paintFrame overhead (Place +
-// AppContainer render + reapplyBackground) against the pre-#188 behavior
-// (Place + AppContainer render only).
 func BenchmarkPaintFrameVsPlace(b *testing.B) {
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -22,9 +19,6 @@ func BenchmarkPaintFrameVsPlace(b *testing.B) {
 	m.width = 200
 	m.height = 50
 
-	// Render the chat layout once WITHOUT the final paintFrame step by
-	// capturing what View() produces and stripping the outer container.
-	// Simpler: render a representative inner layout via the real viewport.
 	m.updateViewport()
 	inner := m.viewport.View()
 

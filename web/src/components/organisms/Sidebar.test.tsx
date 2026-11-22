@@ -7,20 +7,6 @@ import { AppLogicContext, type AppLogicContextValue } from '../../contexts/AppLo
 import { AuthContext, type AuthContextValue } from '../../contexts/AuthContext'
 import { Sidebar } from './Sidebar'
 
-/**
- * Sidebar navigation contract.
- *
- * "Chats" is the only destination left in the sidebar. Everything else moved
- * out of it:
- *   - Agents and Providers are tabs of Settings (`/settings/agents`,
- *     `/settings/providers`).
- *   - Skills, scheduled jobs, background processes and secrets live in the
- *     right-hand Tools drawer of the chat (organisms/ToolsSidebar).
- *
- * These tests pin the absence of the old "System" group so it cannot grow back
- * silently, and keep the rail/expanded variants honest.
- */
-
 const authValue = { session: { device_name: 'Desktop' } } as unknown as AuthContextValue
 
 const logicValue = {
@@ -38,7 +24,6 @@ const logicValue = {
   onLogout: async () => undefined,
 } as unknown as AppLogicContextValue
 
-/** Spanish labels of the destinations that used to live under "System". */
 const MOVED_LABELS = ['Agentes', 'Proveedores', 'Habilidades', 'Tareas programadas', 'Secretos']
 
 function LocationProbe() {
@@ -121,15 +106,12 @@ describe('Sidebar — new chat + search share one row', () => {
     const newChat = view.getByLabelText('Nuevo chat')
     const search = view.getByLabelText('Buscar')
 
-    // Same parent: they are siblings of one `flex` row (jsdom has no layout
-    // engine, so the class contract is what pins "same line").
     const row = newChat.parentElement
     expect(row).not.toBeNull()
     expect(search.parentElement?.parentElement).toBe(row)
     const classes = (row?.getAttribute('class') ?? '').split(/\s+/)
     expect(classes).toContain('flex')
     expect(classes).toContain('items-center')
-    // A `flex-col` here would stack them again, which is the bug this pins.
     expect(classes).not.toContain('flex-col')
   })
 
@@ -138,11 +120,8 @@ describe('Sidebar — new chat + search share one row', () => {
     const newChat = view.getByLabelText('Nuevo chat')
     const classes = (newChat.getAttribute('class') ?? '').split(/\s+/)
 
-    // `flex-1 min-w-0` + `truncate` is what lets a long localized label shrink
-    // inside the 280px drawer without overflowing the search button.
     expect(classes).toContain('flex-1')
     expect(classes).toContain('min-w-0')
-    // `truncate` lives on the label itself, not on the row.
     const label = Array.from(newChat.querySelectorAll('span')).find((el) =>
       (el.textContent ?? '').includes('Nuevo chat'),
     )
@@ -155,7 +134,6 @@ describe('Sidebar — collapsed rail', () => {
   test('renders Chat as an icon button behind a tooltip', () => {
     const view = renderSidebar({ collapsed: true })
 
-    // Rail rows have title=<label>; the expanded rows do not.
     expect(view.container.querySelectorAll('button[title="Chats"]').length).toBe(1)
     expect(view.queryByTestId('sidebar-system-toggle')).toBeNull()
   })
@@ -171,9 +149,6 @@ describe('Sidebar — collapsed rail', () => {
   test('the collapsed nav is not a scroll container, so the tooltip is not clipped', () => {
     const view = renderSidebar({ collapsed: true })
     const nav = view.getByTestId('sidebar-nav-section')
-    // Any `overflow` utility here forces the computed `overflow-x` to `auto`
-    // as well, clipping the absolutely positioned Chats tooltip at the 59px
-    // rail edge (jsdom has no layout engine, so this pins the class contract).
     for (const c of (nav.getAttribute('class') ?? '').split(/\s+/)) {
       expect(c).not.toMatch(/overflow/)
     }

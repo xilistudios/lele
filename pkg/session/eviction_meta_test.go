@@ -5,11 +5,6 @@ import (
 	"time"
 )
 
-// Idle LRU/TTL eviction must leave a listing shell that still names the chat
-// and sorts by its real Updated time. ListSessions serves non-resident keys
-// from sessionMeta; without syncing that index before delete, the TUI lost
-// every chat that had been idle long enough for CleanupIdleSessions while
-// SQLite still held the full history.
 func TestCleanupIdleSessions_KeepsNameAndUpdatedInMeta(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -24,7 +19,6 @@ func TestCleanupIdleSessions_KeepsNameAndUpdatedInMeta(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	// Force the session to look idle beyond the TTL, then run cleanup.
 	sm.SetEvictionTTL(time.Minute)
 	stale := time.Now().Add(-time.Hour)
 	sm.mu.Lock()
@@ -35,7 +29,6 @@ func TestCleanupIdleSessions_KeepsNameAndUpdatedInMeta(t *testing.T) {
 		t.Fatalf("CleanupIdleSessions = %d, want 1", n)
 	}
 
-	// Session must be non-resident.
 	sm.mu.RLock()
 	_, resident := sm.sessions[key]
 	sm.mu.RUnlock()
@@ -43,7 +36,6 @@ func TestCleanupIdleSessions_KeepsNameAndUpdatedInMeta(t *testing.T) {
 		t.Fatal("session still resident after idle cleanup")
 	}
 
-	// Listing shell must keep the generated name and updated timestamp.
 	found := false
 	for _, listed := range sm.ListSessions() {
 		if listed.Key != key {
@@ -64,7 +56,6 @@ func TestCleanupIdleSessions_KeepsNameAndUpdatedInMeta(t *testing.T) {
 		t.Fatal("session missing from ListSessions after idle eviction")
 	}
 
-	// SQLite still has every message and cold GetHistoryView reloads them.
 	counts := sm.AllTotalMessageCounts()
 	if counts[key] != 2 {
 		t.Fatalf("AllTotalMessageCounts[%q] = %d, want 2", key, counts[key])
@@ -77,8 +68,6 @@ func TestCleanupIdleSessions_KeepsNameAndUpdatedInMeta(t *testing.T) {
 		t.Errorf("reloaded first message = %q", hist[0].Content)
 	}
 
-	// Cold load must also refresh the listing index so a second eviction
-	// cannot resurrect an empty shell.
 	sm.SetEvictionTTL(time.Minute)
 	sm.mu.Lock()
 	sm.accessTimes[key] = time.Now().Add(-time.Hour)
@@ -93,8 +82,6 @@ func TestCleanupIdleSessions_KeepsNameAndUpdatedInMeta(t *testing.T) {
 	}
 }
 
-// EvictSession is the explicit (non-idle) eviction path used by tests and
-// callers that force a drop; it must leave the same listing shell.
 func TestEvictSession_SyncsMetaName(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()

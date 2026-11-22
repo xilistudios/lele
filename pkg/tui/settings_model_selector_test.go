@@ -9,10 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// newModelSelectorTestModel builds a Model that reproduces the user's
-// real-world broken setup: stale default provider + model referencing a
-// provider without a models map; agentLoop nil so configSource() falls back
-// to m.cfg.
 func newModelSelectorTestModel(t *testing.T) *Model {
 	t.Helper()
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
@@ -21,7 +17,7 @@ func newModelSelectorTestModel(t *testing.T) *Model {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				Workspace: t.TempDir(),
-				Provider:  "nanogpt", // intentionally NOT in Providers.Named (stale)
+				Provider:  "nanogpt",
 				Model:     "openrouter:deepseek/deepseek-v4-flash",
 				MaxTokens: 4096,
 			},
@@ -39,7 +35,7 @@ func newModelSelectorTestModel(t *testing.T) *Model {
 				"llmproxy": {Type: "llmproxy", Models: map[string]config.ProviderModelConfig{
 					"deepseek-flash": {}, "h3": {}, "luna-pro": {},
 				}},
-				"openrouter": {Type: "openrouter"}, // no models map
+				"openrouter": {Type: "openrouter"},
 			},
 		},
 	}
@@ -51,7 +47,6 @@ func newModelSelectorTestModel(t *testing.T) *Model {
 	return &Model{cfg: cfg, textInput: ti}
 }
 
-// TestConfigSelectorOptionsPure tests the pure configSelectorOptions function.
 func TestConfigSelectorOptionsPure(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		l, v := configSelectorOptions("", nil)
@@ -84,7 +79,6 @@ func TestConfigSelectorOptionsPure(t *testing.T) {
 
 	t.Run("current_in_list_no_duplicate", func(t *testing.T) {
 		_, values := configSelectorOptions("x:y", []string{"x:y", "z:w"})
-		// "x:y" should appear exactly once (in the configured list, not prepended)
 		count := 0
 		for _, v := range values {
 			if v == "x:y" {
@@ -116,7 +110,6 @@ func TestConfigSelectorOptionsPure(t *testing.T) {
 				t.Errorf("values[%d] = %q, want %q", i, values[i], w)
 			}
 		}
-		// labels should have "(default)", "x:y", custom
 		if len(labels) != 3 {
 			t.Fatalf("label count mismatch: got %d want 3", len(labels))
 		}
@@ -126,8 +119,6 @@ func TestConfigSelectorOptionsPure(t *testing.T) {
 	})
 }
 
-// TestModelSelectorOptionsStaleSetup verifies the stale-provider scenario:
-// current value is prepended because openrouter has no models map.
 func TestModelSelectorOptionsStaleSetup(t *testing.T) {
 	m := newModelSelectorTestModel(t)
 	labels, values := m.modelSelectorOptions("openrouter:deepseek/deepseek-v4-flash")
@@ -135,16 +126,13 @@ func TestModelSelectorOptionsStaleSetup(t *testing.T) {
 	if len(values) == 0 {
 		t.Fatal("expected non-empty options")
 	}
-	// values[0] == "" (default)
 	if values[0] != "" {
 		t.Errorf("values[0] = %q, want empty (default)", values[0])
 	}
-	// values[1] == current value (prepended because not in configured list)
 	if values[1] != "openrouter:deepseek/deepseek-v4-flash" {
 		t.Errorf("values[1] = %q, want openrouter:deepseek/deepseek-v4-flash", values[1])
 	}
 
-	// Check all expected models are present
 	wantPresent := []string{
 		"antigravity:antigravity-gemini-3.6-flash",
 		"llmproxy:deepseek-flash",
@@ -164,7 +152,6 @@ func TestModelSelectorOptionsStaleSetup(t *testing.T) {
 		}
 	}
 
-	// Check relative order: llmproxy models should be deepseek-flash, h3, luna-pro
 	llmproxyIdx := make([]int, 0)
 	for i, v := range values {
 		if strings.HasPrefix(v, "llmproxy:") {
@@ -182,25 +169,19 @@ func TestModelSelectorOptionsStaleSetup(t *testing.T) {
 		})
 	}
 
-	// Last value == modelCustomValue
 	if values[len(values)-1] != modelCustomValue {
 		t.Errorf("last value = %q, want modelCustomValue", values[len(values)-1])
 	}
 
-	// Total: "(default)", the prepended current value, 1 antigravity model,
-	// 3 llmproxy models, and the custom sentinel = 7.
 	if len(values) != 7 {
 		t.Errorf("expected 7 values, got %d: %v", len(values), values)
 	}
 
-	// Verify labels match values in length
 	if len(labels) != len(values) {
 		t.Errorf("labels/values length mismatch: %d vs %d", len(labels), len(values))
 	}
 }
 
-// TestModelSelectorOptionsNoDuplicateWhenCurrentInList verifies that when the
-// current value IS in the configured list, it appears exactly once.
 func TestModelSelectorOptionsNoDuplicateWhenCurrentInList(t *testing.T) {
 	m := newModelSelectorTestModel(t)
 	labels, values := m.modelSelectorOptions("llmproxy:h3")
@@ -215,8 +196,6 @@ func TestModelSelectorOptionsNoDuplicateWhenCurrentInList(t *testing.T) {
 		t.Errorf("expected llmproxy:h3 exactly once, got %d times in values %v", count, values)
 	}
 
-	// "", "antigravity:...", "llmproxy:deepseek-flash", "llmproxy:h3",
-	// "llmproxy:luna-pro", modelCustomValue = 6
 	if len(values) != 6 {
 		t.Errorf("expected 6 values, got %d: %v", len(values), values)
 	}
@@ -225,23 +204,17 @@ func TestModelSelectorOptionsNoDuplicateWhenCurrentInList(t *testing.T) {
 	}
 }
 
-// TestProviderSelectorOptionsIncludesStaleCurrent verifies that the provider
-// selector includes the current value even when it's not in the configured
-// providers.
 func TestProviderSelectorOptionsIncludesStaleCurrent(t *testing.T) {
 	m := newModelSelectorTestModel(t)
 	labels, values := m.providerSelectorOptions("nanogpt")
 
-	// values[0] == "" (default)
 	if values[0] != "" {
 		t.Errorf("values[0] = %q, want empty (default)", values[0])
 	}
-	// values[1] == "nanogpt" (stale current prepended)
 	if values[1] != "nanogpt" {
 		t.Errorf("values[1] = %q, want nanogpt", values[1])
 	}
 
-	// All three provider names should be present
 	wantPresent := []string{"antigravity", "llmproxy", "openrouter"}
 	for _, w := range wantPresent {
 		found := false
@@ -256,7 +229,6 @@ func TestProviderSelectorOptionsIncludesStaleCurrent(t *testing.T) {
 		}
 	}
 
-	// Last == modelCustomValue
 	if values[len(values)-1] != modelCustomValue {
 		t.Errorf("last value = %q, want modelCustomValue", values[len(values)-1])
 	}
@@ -266,14 +238,11 @@ func TestProviderSelectorOptionsIncludesStaleCurrent(t *testing.T) {
 	}
 }
 
-// TestDefaultsProviderEnterOpensSelector verifies that pressing Enter on the
-// Provider field in the defaults view opens the selector with the stale
-// current value pre-selected.
 func TestDefaultsProviderEnterOpensSelector(t *testing.T) {
 	m := newModelSelectorTestModel(t)
 	m.settingsAgentID = ""
 	m.loadAgentDetail("")
-	m.modalSelectedIdx = 0 // Provider
+	m.modalSelectedIdx = 0
 	m.handleDefaultsEditEnter()
 
 	if !m.settingsSelectorActive {
@@ -283,7 +252,6 @@ func TestDefaultsProviderEnterOpensSelector(t *testing.T) {
 		t.Errorf("field = %q, want defaultProvider", m.settingsSelectorField)
 	}
 
-	// Pre-selected index should point to "nanogpt"
 	nanogptIdx := -1
 	for i, v := range m.settingsSelectorValues {
 		if v == "nanogpt" {
@@ -299,14 +267,11 @@ func TestDefaultsProviderEnterOpensSelector(t *testing.T) {
 	}
 }
 
-// TestDefaultsModelEnterOpensSelector verifies that pressing Enter on the
-// Model field in the defaults view opens the selector with the current model
-// pre-selected.
 func TestDefaultsModelEnterOpensSelector(t *testing.T) {
 	m := newModelSelectorTestModel(t)
 	m.settingsAgentID = ""
 	m.loadAgentDetail("")
-	m.modalSelectedIdx = 1 // Model
+	m.modalSelectedIdx = 1
 	m.handleDefaultsEditEnter()
 
 	if !m.settingsSelectorActive {
@@ -316,7 +281,6 @@ func TestDefaultsModelEnterOpensSelector(t *testing.T) {
 		t.Errorf("field = %q, want defaultModel", m.settingsSelectorField)
 	}
 
-	// Pre-selected index should point to "openrouter:deepseek/deepseek-v4-flash"
 	modelIdx := -1
 	for i, v := range m.settingsSelectorValues {
 		if v == "openrouter:deepseek/deepseek-v4-flash" {
@@ -332,14 +296,11 @@ func TestDefaultsModelEnterOpensSelector(t *testing.T) {
 	}
 }
 
-// TestAgentModelEnterOpensSelector verifies that pressing Enter on the Model
-// field for a specific agent opens the selector with the agent's model
-// pre-selected.
 func TestAgentModelEnterOpensSelector(t *testing.T) {
 	m := newModelSelectorTestModel(t)
 	m.settingsAgentID = "coder"
 	m.loadAgentDetail("coder")
-	m.modalSelectedIdx = agentFieldModel // 4
+	m.modalSelectedIdx = agentFieldModel
 	m.handleAgentEditEnter()
 
 	if !m.settingsSelectorActive {
@@ -349,7 +310,6 @@ func TestAgentModelEnterOpensSelector(t *testing.T) {
 		t.Errorf("field = %q, want agentModel", m.settingsSelectorField)
 	}
 
-	// Pre-selected index should point to "llmproxy:h3"
 	modelIdx := -1
 	for i, v := range m.settingsSelectorValues {
 		if v == "llmproxy:h3" {
@@ -365,9 +325,6 @@ func TestAgentModelEnterOpensSelector(t *testing.T) {
 	}
 }
 
-// TestCompactionModelEnterOpensSelector verifies that pressing Enter on the
-// Compaction model field opens the selector with the current compaction model
-// pre-selected.
 func TestCompactionModelEnterOpensSelector(t *testing.T) {
 	m := newModelSelectorTestModel(t)
 	m.cfg.Session.CompactionModel = "llmproxy:luna-pro"
@@ -382,7 +339,6 @@ func TestCompactionModelEnterOpensSelector(t *testing.T) {
 		t.Errorf("field = %q, want compactionModel", m.settingsSelectorField)
 	}
 
-	// Pre-selected index should point to "llmproxy:luna-pro"
 	modelIdx := -1
 	for i, v := range m.settingsSelectorValues {
 		if v == "llmproxy:luna-pro" {
@@ -398,21 +354,18 @@ func TestCompactionModelEnterOpensSelector(t *testing.T) {
 	}
 }
 
-// TestSelectorConfirmSavesModel verifies that confirming a model selection
-// in the selector saves it to config and persists to disk.
 func TestSelectorConfirmSavesModel(t *testing.T) {
 	m := newModelSelectorTestModel(t)
 	m.modalMode = ModalSettingsAgentEdit
 	m.settingsAgentID = ""
 	m.loadAgentDetail("")
-	m.modalSelectedIdx = 1 // Model
+	m.modalSelectedIdx = 1
 	m.handleDefaultsEditEnter()
 
 	if !m.settingsSelectorActive {
 		t.Fatal("expected selector active")
 	}
 
-	// Find the index of "llmproxy:luna-pro" in the selector values
 	lunaIdx := -1
 	for i, v := range m.settingsSelectorValues {
 		if v == "llmproxy:luna-pro" {
@@ -437,7 +390,6 @@ func TestSelectorConfirmSavesModel(t *testing.T) {
 		t.Errorf("editField = %q, want empty", m.settingsEditField)
 	}
 
-	// Verify persistence
 	reloaded, err := config.LoadConfig(config.DefaultConfigPath())
 	if err != nil {
 		t.Fatalf("reload config: %v", err)
@@ -447,21 +399,18 @@ func TestSelectorConfirmSavesModel(t *testing.T) {
 	}
 }
 
-// TestSelectorConfirmCustomOpensTextInput verifies that selecting "(custom…)"
-// opens the free-text input pre-filled with the original value.
 func TestSelectorConfirmCustomOpensTextInput(t *testing.T) {
 	m := newModelSelectorTestModel(t)
 	m.modalMode = ModalSettingsAgentEdit
 	m.settingsAgentID = ""
 	m.loadAgentDetail("")
-	m.modalSelectedIdx = 1 // Model
+	m.modalSelectedIdx = 1
 	m.handleDefaultsEditEnter()
 
 	if !m.settingsSelectorActive {
 		t.Fatal("expected selector active")
 	}
 
-	// Find the index of modelCustomValue
 	customIdx := -1
 	for i, v := range m.settingsSelectorValues {
 		if v == modelCustomValue {
@@ -490,17 +439,14 @@ func TestSelectorConfirmCustomOpensTextInput(t *testing.T) {
 	}
 }
 
-// TestSelectorConfirmCustomThenSave verifies the full flow: select custom,
-// type a new value, and save.
 func TestSelectorConfirmCustomThenSave(t *testing.T) {
 	m := newModelSelectorTestModel(t)
 	m.modalMode = ModalSettingsAgentEdit
 	m.settingsAgentID = ""
 	m.loadAgentDetail("")
-	m.modalSelectedIdx = 1 // Model
+	m.modalSelectedIdx = 1
 	m.handleDefaultsEditEnter()
 
-	// Select custom
 	customIdx := -1
 	for i, v := range m.settingsSelectorValues {
 		if v == modelCustomValue {
@@ -514,7 +460,6 @@ func TestSelectorConfirmCustomThenSave(t *testing.T) {
 	m.settingsSelectorIdx = customIdx
 	m.handleSelectorConfirm()
 
-	// Now simulate the user typing a new value and submitting
 	m.textInput.SetValue("openrouter:anthropic/claude-x")
 	m.handleAgentSettingsInput("openrouter:anthropic/claude-x")
 
@@ -523,10 +468,6 @@ func TestSelectorConfirmCustomThenSave(t *testing.T) {
 	}
 }
 
-// TestModelEnterNoProvidersWithCurrentValueOpensSelector verifies that when
-// there are no configured providers but there IS a current value, the
-// selector still opens (showing the current value + custom), because
-// configSelectorOptions returns non-nil when currentValue is non-empty.
 func TestModelEnterNoProvidersWithCurrentValueOpensSelector(t *testing.T) {
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	cfg := &config.Config{
@@ -546,18 +487,15 @@ func TestModelEnterNoProvidersWithCurrentValueOpensSelector(t *testing.T) {
 	ti.Focus()
 	m := &Model{cfg: cfg, textInput: ti}
 
-	m.modalSelectedIdx = 1 // Model
+	m.modalSelectedIdx = 1
 	m.handleDefaultsEditEnter()
 
-	// With a non-empty current value and no configured providers, the selector
-	// still opens showing "(default)", the current value, and "(custom…)".
 	if !m.settingsSelectorActive {
 		t.Error("expected selector active (current value present)")
 	}
 	if m.settingsSelectorField != "defaultModel" {
 		t.Errorf("field = %q, want defaultModel", m.settingsSelectorField)
 	}
-	// The current value should be in the selector values
 	found := false
 	for _, v := range m.settingsSelectorValues {
 		if v == "some-model" {
@@ -570,10 +508,6 @@ func TestModelEnterNoProvidersWithCurrentValueOpensSelector(t *testing.T) {
 	}
 }
 
-// TestModelEnterNoProvidersNoCurrentValueShowsMinimalSelector verifies that when
-// there are no configured providers AND no current value, the selector still
-// opens with a minimal "(default)" + "(custom...)" set instead of falling back
-// to text input. This ensures a consistent selector experience for model fields.
 func TestModelEnterNoProvidersNoCurrentValueShowsMinimalSelector(t *testing.T) {
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	cfg := &config.Config{
@@ -593,10 +527,9 @@ func TestModelEnterNoProvidersNoCurrentValueShowsMinimalSelector(t *testing.T) {
 	ti.Focus()
 	m := &Model{cfg: cfg, textInput: ti}
 
-	m.modalSelectedIdx = 1 // Model
+	m.modalSelectedIdx = 1
 	m.handleDefaultsEditEnter()
 
-	// No providers AND no current value → minimal selector with (default) + (custom...)
 	if !m.settingsSelectorActive {
 		t.Error("expected selector active with minimal options")
 	}

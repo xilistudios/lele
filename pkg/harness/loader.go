@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package harness
 
 import (
@@ -17,21 +11,10 @@ import (
 	"strings"
 )
 
-// frontmatterRe matches an optional leading YAML-ish block delimited by lines
-// of exactly "---". (?s) lets "." span newlines; the block is non-greedy so the
-// first closing "---" wins. If a file does not start with "---" it has no
-// frontmatter and the whole file is the template.
 var frontmatterRe = regexp.MustCompile("(?s)\\A---\\r?\\n(.*?)(?:\\r?\\n)---(\\r?\\n|\\z)")
 
-// markdownExts are the file extensions LoadDir considers, lowercased.
 var markdownExts = map[string]bool{".md": true, ".markdown": true}
 
-// LoadMarkdownFile parses a single command markdown file. The command name is
-// derived from the file stem (lowercased); the body after optional frontmatter
-// becomes the template. Invalid files return an error; callers such as LoadDir
-// decide whether to skip or fail. Parsing itself lives in
-// ParseCommandMarkdown so the exact same logic can validate bytes that never
-// touched the disk (e.g. REST request bodies).
 func LoadMarkdownFile(path string, source Source) (*Command, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -45,12 +28,6 @@ func LoadMarkdownFile(path string, source Source) (*Command, error) {
 	return cmd, nil
 }
 
-// ParseCommandMarkdown parses the contents of a command markdown file without
-// touching the filesystem. name is the file stem (filename without extension);
-// it is lowercased and validated here, matching LoadMarkdownFile's behaviour.
-// path is used only in error messages and as the returned command's Path. The
-// returned command carries no Source: the caller tags it (LoadMarkdownFile
-// does). Behaviour is identical to the disk-reading part of LoadMarkdownFile.
 func ParseCommandMarkdown(name, path string, raw []byte) (*Command, error) {
 	content := string(raw)
 
@@ -72,10 +49,6 @@ func ParseCommandMarkdown(name, path string, raw []byte) (*Command, error) {
 	return def.ToCommand(name, "", path), nil
 }
 
-// LoadDir loads every *.md / *.markdown file directly inside dir (non
-// recursive), sorted by filename for deterministic precedence behaviour.
-// A missing directory is not an error: it returns (nil, nil). Files that fail
-// to parse are skipped with a slog warning.
 func LoadDir(dir string, source Source) ([]*Command, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -95,14 +68,11 @@ func LoadDir(dir string, source Source) ([]*Command, error) {
 		}
 		files = append(files, e.Name())
 	}
-	// os.ReadDir already sorts by filename, but sort explicitly so the
-	// guarantee survives future refactors.
 	slices.Sort(files)
 
 	cmds := make([]*Command, 0, len(files))
 	for _, name := range files {
 		path := filepath.Join(dir, name)
-		// Re-check the regular-file bit after join (symlinks, races).
 		info, err := os.Stat(path)
 		if err != nil || !info.Mode().IsRegular() {
 			continue
@@ -117,10 +87,6 @@ func LoadDir(dir string, source Source) ([]*Command, error) {
 	return cmds, nil
 }
 
-// parseFrontmatter reads simple "key: value" lines. Values are trimmed and
-// stripped of one layer of surrounding quotes; blank lines and #-comments are
-// ignored; unknown keys are ignored. An invalid allow_shell is a hard error so
-// a typo cannot silently disable shell expansion.
 func parseFrontmatter(block, path string) (CommandDef, error) {
 	var def CommandDef
 	for _, line := range strings.Split(block, "\n") {
@@ -148,21 +114,17 @@ func parseFrontmatter(block, path string) (CommandDef, error) {
 			}
 			def.AllowShell = b
 		case "allow_absolute_files":
-			// Tri-state: an explicit value always wins over the harness
-			// default (in either direction), unlike allow_shell.
 			b, err := strconv.ParseBool(value)
 			if err != nil {
 				return def, fmt.Errorf("harness: invalid allow_absolute_files %q in %s: %w", value, path, err)
 			}
 			def.AllowAbsoluteFiles = &b
 		default:
-			// Unknown keys are ignored on purpose: forward compatibility.
 		}
 	}
 	return def, nil
 }
 
-// unquote strips one matching pair of surrounding single or double quotes.
 func unquote(s string) string {
 	if len(s) >= 2 {
 		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
@@ -172,8 +134,6 @@ func unquote(s string) string {
 	return s
 }
 
-// validateName rejects names that could escape the registry namespace or the
-// workspace when interpolated into paths.
 func validateName(name, path string) error {
 	switch {
 	case name == "" || name == "." || name == "..":

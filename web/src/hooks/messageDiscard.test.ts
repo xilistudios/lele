@@ -1,18 +1,3 @@
-/**
- * `message.discard` — the backend streamed an LLM iteration to this client and
- * then THREW IT AWAY.
- *
- * Why this needs its own cover: the discarded iteration is never persisted, so
- * `mergeMessages` has no twin to pair the live bubble with and appends it AFTER
- * the canonical history. That is the stray "Thinking…" card rendered below the
- * final answer (or two thinking cards in a row). `message.discard` is the only
- * signal that retracts it, and it must do so WITHOUT touching anything else: the
- * turn is still running, and the sibling bubbles (and their order) must survive.
- *
- * The handler is driven directly against a `MessageEventContext` fake, the same
- * way `historyUpdated.test.ts` / `aliasSessionKeys.test.ts` do it, so the pure
- * transition and the session guard are exercised without React or a socket.
- */
 import { describe, expect, mock, test } from 'bun:test'
 import type { QueryClient } from '@tanstack/react-query'
 import type { ChatMessage } from '../lib/types'
@@ -119,8 +104,6 @@ function makeCtx(
   return { ctx, getStreaming: () => streaming, calls }
 }
 
-// ── removeDiscardedMessage (pure transition) ────────────────────────────────
-
 describe('removeDiscardedMessage', () => {
   test('removes the named assistant bubble and preserves the order of the rest', () => {
     const before = [
@@ -133,7 +116,6 @@ describe('removeDiscardedMessage', () => {
     const after = removeDiscardedMessage(before, 'a1', SESSION)
 
     expect(after.map((m) => m.id)).toEqual(['u1', 't1', 'a2'])
-    // Same instances survive untouched (no accidental cloning/shuffling).
     expect(after[0]).toBe(before[0])
     expect(after[1]).toBe(before[2])
     expect(after[2]).toBe(before[3])
@@ -166,7 +148,6 @@ describe('removeDiscardedMessage', () => {
   })
 
   test('matches the base key against its conversation alias', () => {
-    // Events after /new or /agent carry `base:chat:N`: the same conversation.
     const before = [
       msg('a1', 'assistant', 'discarded', { sessionKey: SESSION }),
       msg('a2', 'assistant', 'kept'),
@@ -183,8 +164,6 @@ describe('removeDiscardedMessage', () => {
     expect(removeDiscardedMessage(before, '', SESSION)).toBe(before)
   })
 })
-
-// ── handleMessageDiscard (handler) ──────────────────────────────────────────
 
 describe('handleMessageDiscard — current session', () => {
   test('(a) retracts only the discarded iteration, keeping the others in order', () => {
@@ -215,8 +194,6 @@ describe('handleMessageDiscard — current session', () => {
 
     handleMessageDiscard(ctx, { message_id: 'ghost', session_key: SESSION })
 
-    // Queued chunks for that id would otherwise re-create the bubble on the
-    // next tick of the shared animation loop.
     expect(calls.clearQueue.mock.calls.map((c) => c[0])).toEqual(['ghost'])
   })
 
@@ -236,13 +213,10 @@ describe('handleMessageDiscard — current session', () => {
     expect(calls.removeProcessingSession.mock.calls.length).toBe(0)
     expect(calls.debouncedSessionRefresh.mock.calls.length).toBe(0)
     expect(calls.invalidateQueries.mock.calls.length).toBe(0)
-    // Still processing: the retry iteration is on its way.
     expect(ctx.processingSessionKeyRef.current).toBe(SESSION)
   })
 
   test('re-tags an aliased event key to the session on screen', () => {
-    // Backend resolves `base` -> `base:chat:N` before emitting; UI state is
-    // keyed by the base key, so the bubble must still be found.
     const { ctx, getStreaming } = makeCtx([
       msg('ghost', 'assistant', 'partial', { streaming: true }),
       msg('kept', 'assistant', 'final'),
@@ -265,7 +239,6 @@ describe('handleMessageDiscard — ignored events', () => {
     handleMessageDiscard(ctx, { message_id: 'ghost', session_key: 'native:other:chat:1' })
 
     expect(getStreaming().map((m) => m.id)).toEqual(['ghost', 'u1'])
-    // Guard fires before anything is scheduled or drained.
     expect(calls.setStreamingMessages.mock.calls.length).toBe(0)
     expect(calls.clearQueue.mock.calls.length).toBe(0)
   })
@@ -287,8 +260,6 @@ describe('handleMessageDiscard — ignored events', () => {
 
     handleMessageDiscard(ctx, { message_id: 'never-streamed', session_key: SESSION })
 
-    // The updater ran, but the state value is the very same array: React sees
-    // an identical reference and skips the re-render.
     expect(calls.setStreamingMessages.mock.calls.length).toBe(1)
     expect(getStreaming()).toBe(before)
   })
@@ -333,8 +304,6 @@ describe('handleMessageDiscard — ignored events', () => {
     const afterFirst = getStreaming()
     expect(afterFirst.map((m) => m.id)).toEqual(['u1', 'answer'])
 
-    // Second copy (or one that arrives after the turn completed): nothing left
-    // to remove, so the state keeps the exact same array.
     discard()
     expect(getStreaming()).toBe(afterFirst)
     expect(getStreaming().map((m) => m.id)).toEqual(['u1', 'answer'])

@@ -1,20 +1,3 @@
-/**
- * Regression cover: tool cards vanish live and only reappear after a reload.
- *
- * Root cause: the backend resolves the conversation alias BEFORE publishing
- * every outbound event — `dispatchOutboundMessage`
- * (pkg/channels/native.go) does
- * `sessionKey = agentLoop.ResolveSessionKey(msg.ChatID)` for tool.executing /
- * tool.result / subagent.result too, so after `/new` or `/agent` those events
- * carry `base:chat:N` while the UI session key is `base`.
- *
- * The streaming handlers already re-tagged aliased events with the current key
- * (effectiveSessionKey); the tool handlers did not, so the tool message was
- * stored under the aliased key and dropped by the session filter in
- * useChatHistory — the card disappeared until a reload brought it back from
- * REST history. Thinking cards survived because reasoning lives inside the
- * (re-tagged) assistant placeholder.
- */
 import { describe, expect, mock, test } from 'bun:test'
 import { QueryClient } from '@tanstack/react-query'
 import type { ChatMessage } from '../../lib/types'
@@ -79,8 +62,6 @@ function makeCtx(initialStreaming: ChatMessage[], currentSessionKey: string | nu
   return { ctx, getStreaming: () => streaming }
 }
 
-// ── effectiveSessionKey ─────────────────────────────────────────────────────
-
 describe('effectiveSessionKey', () => {
   const ref = (current: string | null) => ({ currentSessionKeyRef: { current } })
 
@@ -103,8 +84,6 @@ describe('effectiveSessionKey', () => {
   })
 })
 
-// ── handleToolExecuting ─────────────────────────────────────────────────────
-
 describe('handleToolExecuting with aliased session key', () => {
   test('tool message is tagged with the CURRENT key, not the alias', () => {
     const assistant = msg('a1', 'assistant', 'let me check', { streaming: true })
@@ -120,14 +99,10 @@ describe('handleToolExecuting with aliased session key', () => {
     const tool = getStreaming().find((m) => m.role === 'tool')
     expect(tool).toBeDefined()
     expect(tool?.sessionKey).toBe(BASE)
-    // Same rule as the streaming handlers: it must survive the strict
-    // session filter in useChatHistory.
     expect(getStreaming().filter((m) => m.sessionKey === BASE).length).toBe(2)
   })
 
   test('marks the preceding assistant of the CURRENT session as done', () => {
-    // Regression: the comparison used the (aliased) tool key, so the assistant
-    // bubble kept a stuck streaming spinner for the whole tool call.
     const assistant = msg('a1', 'assistant', 'let me check', { streaming: true })
     const { ctx, getStreaming } = makeCtx([assistant])
 
@@ -169,8 +144,6 @@ describe('handleToolExecuting with aliased session key', () => {
     expect(getStreaming().filter((m) => m.role === 'tool').length).toBe(0)
   })
 })
-
-// ── handleToolResult / handleSubagentResult ─────────────────────────────────
 
 describe('handleToolResult with aliased session key', () => {
   test('resolves the card created under the current key', () => {

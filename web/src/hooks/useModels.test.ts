@@ -41,11 +41,9 @@ describe('useModels', () => {
 
     const { result } = renderHook(() => useModels(mockApi as never, 'token-123'))
 
-    // Estado inicial
     expect(result.current.modelState.current).toBe('')
     expect(result.current.modelState.available).toHaveLength(0)
 
-    // Cargar modelos sin sesión (usa models())
     await act(async () => {
       await result.current.loadModels('main', null, false)
     })
@@ -55,7 +53,6 @@ describe('useModels', () => {
     })
     expect(result.current.modelState.current).toBe('gpt-4')
 
-    // Cargar modelos con sesión y conversación (usa sessionModel())
     await act(async () => {
       await result.current.loadModels('main', 'native:client:1', true)
     })
@@ -110,7 +107,6 @@ describe('useModels', () => {
 
     const { result } = renderHook(() => useModels(mockApi as never, 'token'))
 
-    // Cargar algo
     await act(async () => {
       await result.current.loadModels('main', null, false)
     })
@@ -119,7 +115,6 @@ describe('useModels', () => {
       expect(result.current.modelState.current).toBe('gpt-4')
     })
 
-    // Reset
     act(() => {
       result.current.reset()
     })

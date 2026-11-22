@@ -13,12 +13,10 @@ import (
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
-// JobExecutor is the interface for executing cron jobs through the agent
 type JobExecutor interface {
 	ProcessDirectWithChannel(ctx context.Context, content, sessionKey, channel, chatID string) (string, error)
 }
 
-// CronTool provides scheduling capabilities for the agent
 type CronTool struct {
 	cronService   *cron.CronService
 	executor      JobExecutor
@@ -27,12 +25,10 @@ type CronTool struct {
 	channel       string
 	chatID        string
 	sessionKey    string
-	sessionExists func(sessionKey string) bool // reports whether a session key exists; nil = no check
+	sessionExists func(sessionKey string) bool
 	mu            sync.RWMutex
 }
 
-// NewCronTool creates a new CronTool
-// execTimeout: 0 means no timeout, >0 sets the timeout duration
 func NewCronTool(cronService *cron.CronService, executor JobExecutor, msgBus *bus.MessageBus, workspace string, restrict bool, execTimeout time.Duration, config *config.Config) *CronTool {
 	execTool := NewExecToolWithConfig(workspace, restrict, config)
 	execTool.SetTimeout(execTimeout)
@@ -44,17 +40,14 @@ func NewCronTool(cronService *cron.CronService, executor JobExecutor, msgBus *bu
 	}
 }
 
-// Name returns the tool name
 func (t *CronTool) Name() string {
 	return "cron"
 }
 
-// Description returns the tool description
 func (t *CronTool) Description() string {
 	return "Schedule reminders, tasks, or system commands. IMPORTANT: When user asks to be reminded or scheduled, you MUST call this tool. Use 'at_seconds' for one-time reminders (e.g., 'remind me in 10 minutes' → at_seconds=600). Use 'every_seconds' ONLY for recurring tasks (e.g., 'every 2 hours' → every_seconds=7200). Use 'cron_expr' for complex recurring schedules. Use 'command' to execute shell commands directly."
 }
 
-// Parameters returns the tool parameters schema
 func (t *CronTool) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
@@ -133,7 +126,6 @@ func (t *CronTool) Parameters() map[string]interface{} {
 	}
 }
 
-// SetContext sets the current session context for job creation
 func (t *CronTool) SetContext(channel, chatID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -141,8 +133,6 @@ func (t *CronTool) SetContext(channel, chatID string) {
 	t.chatID = chatID
 }
 
-// SetSessionContext sets the full session context including session key.
-// Implements SessionAwareTool interface.
 func (t *CronTool) SetSessionContext(channel, chatID, sessionKey string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -151,31 +141,17 @@ func (t *CronTool) SetSessionContext(channel, chatID, sessionKey string) {
 	t.sessionKey = sessionKey
 }
 
-// SetSessionExistsCallback sets a callback that reports whether a session key
-// already exists (in memory, metadata, or on disk). It is used by ExecuteJob
-// to decide whether a job's `to` field designates an existing session — in
-// which case the job should run in that session instead of a synthetic
-// `cron-<jobID>` session. Mirrors SubagentManager.SetSessionExistsCallback.
 func (t *CronTool) SetSessionExistsCallback(callback func(sessionKey string) bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.sessionExists = callback
 }
 
-// designatedSessionKey returns the job's designated session key when the
-// payload's `to` field refers to an existing native session. For native
-// jobs, `to` may be a raw session key (UUID or prefixed) — the checker
-// probes both the raw value and the `native:`-prefixed form. Returns ""
-// when there is no designated existing session (non-native channels,
-// missing checker, or unknown key), in which case callers keep their
-// synthetic session keys.
 func (t *CronTool) designatedSessionKey(channel, to string) string {
 	if to == "" {
 		return ""
 	}
 	if channel != "" && channel != "native" {
-		// Non-native channels (telegram, etc.) use numeric chat IDs resolved
-		// by the channel itself; `to` is not a session key there.
 		return ""
 	}
 	t.mu.RLock()
@@ -193,7 +169,6 @@ func (t *CronTool) designatedSessionKey(channel, to string) string {
 	return ""
 }
 
-// Execute runs the tool with the given arguments
 func (t *CronTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
 	action, ok := args["action"].(string)
 	if !ok {
@@ -217,9 +192,6 @@ func (t *CronTool) Execute(ctx context.Context, args map[string]interface{}) *To
 }
 
 func (t *CronTool) addJob(ctx context.Context, args map[string]interface{}) *ToolResult {
-	// Issue #234: remember which agent created this job so execution-time
-	// tools (exec command path, spawn) run with a valid identity-scoped
-	// context (keyring secrets, etc.).
 	creatorAgentID, _ := AgentToolContextFromCtx(ctx)
 
 	t.mu.RLock()
@@ -239,12 +211,10 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]interface{}) *Too
 
 	var schedule cron.CronSchedule
 
-	// Check for at_seconds (one-time), every_seconds (recurring), or cron_expr
 	atSeconds, hasAt := args["at_seconds"].(float64)
 	everySeconds, hasEvery := args["every_seconds"].(float64)
 	cronExpr, hasCron := args["cron_expr"].(string)
 
-	// Priority: at_seconds > every_seconds > cron_expr
 	if hasAt {
 		atMS := time.Now().UnixMilli() + int64(atSeconds)*1000
 		schedule = cron.CronSchedule{
@@ -266,7 +236,6 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]interface{}) *Too
 		return ErrorResult("one of at_seconds, every_seconds, or cron_expr is required")
 	}
 
-	// Read deliver parameter, default to true
 	deliver := true
 	if d, ok := args["deliver"].(bool); ok {
 		deliver = d
@@ -274,14 +243,9 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]interface{}) *Too
 
 	command, _ := args["command"].(string)
 	if command != "" {
-		// Commands must be processed by agent/exec tool, so deliver must be false (or handled specifically)
-		// Actually, let's keep deliver=false to let the system know it's not a simple chat message
-		// But for our new logic in ExecuteJob, we can handle it regardless of deliver flag if Payload.Command is set.
-		// However, logically, it's not "delivered" to chat directly as is.
 		deliver = false
 	}
 
-	// Parse spawn configuration if present
 	var spawnConfig *cron.SpawnConfig
 	if spawnRaw, ok := args["spawn"].(map[string]interface{}); ok && spawnRaw != nil {
 		spawnConfig = &cron.SpawnConfig{}
@@ -300,17 +264,12 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]interface{}) *Too
 		if model, ok := spawnRaw["model"].(string); ok {
 			spawnConfig.Model = model
 		}
-		// Issue #234: a spawn without an explicit target agent inherits the
-		// creating agent, so the SYSTEM_SPAWN message carries AGENT_ID and
-		// handleSystemSpawn propagates it to the SubagentTask.
 		if spawnConfig.AgentID == "" && creatorAgentID != "" {
 			spawnConfig.AgentID = creatorAgentID
 		}
-		// When spawn is configured, deliver must be false
 		deliver = false
 	}
 
-	// Parse scope and session_key
 	scope := "global"
 	if s, ok := args["scope"].(string); ok && s != "" {
 		scope = s
@@ -321,17 +280,14 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]interface{}) *Too
 		sessionKey = sk
 	}
 
-	// If a session_key is provided, the job is inherently session-scoped.
 	if sessionKey != "" && scope == "global" {
 		scope = "session"
 	}
 
-	// Validate session scope requirements
 	if scope == "session" && sessionKey == "" {
 		return ErrorResult("session_key is required for session-scoped jobs")
 	}
 
-	// Truncate message for job name (max 30 chars)
 	messagePreview := utils.Truncate(message, 30)
 
 	job, err := t.cronService.AddJobWithOptions(
@@ -348,10 +304,6 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]interface{}) *Too
 		return ErrorResult(fmt.Sprintf("Error adding job: %v", err))
 	}
 
-	// Issue #234: enrich the job payload in memory (creator agent identity,
-	// exec command, spawn config) and persist it with a single UpdateJob so
-	// execution-time tools (exec, spawn) run with a valid identity-scoped
-	// context (keyring secrets, etc.).
 	payloadSet := false
 	if command != "" {
 		job.Payload.Command = command
@@ -438,35 +390,20 @@ func (t *CronTool) enableJob(args map[string]interface{}, enable bool) *ToolResu
 	return SilentResult(fmt.Sprintf("Cron job '%s' %s", job.Name, status))
 }
 
-// ExecuteJob executes a cron job through the agent
 func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
-	// Issue #234: restore the creating agent's identity so tools executed by
-	// the scheduler (exec command path, spawn) are identity-scoped. Cron's
-	// session key is synthetic unless the job is session-scoped; the agent id
-	// is what matters for scoped secrets.
 	if job.Payload.AgentID != "" {
 		ctx = WithAgentToolContext(ctx, job.Payload.AgentID, job.Payload.SessionKey)
 	}
 
-	// Get channel/chatID from job payload
 	channel := job.Payload.Channel
 	chatID := job.Payload.To
 
-	// Determine the session key to use for processing and notification.
-	// Session-scoped jobs use their stored session key; global jobs use a
-	// synthetic key derived from the job ID.  A job is treated as
-	// session-scoped when it carries a SessionKey — the explicit scope
-	// field is a secondary indicator (legacy jobs may have scope="" but
-	// still carry a session key).
 	isSessionScoped := job.Payload.SessionKey != ""
 	effectiveSessionKey := job.Payload.SessionKey
 	if effectiveSessionKey == "" {
 		effectiveSessionKey = fmt.Sprintf("cron-%s", job.ID)
 	}
 
-	// Default values if not set. Use "native" so results are delivered to
-	// the WebUI (the native channel). The old default "cli" was an internal
-	// channel that the channel manager silently dropped.
 	if channel == "" {
 		channel = "native"
 	}
@@ -474,7 +411,6 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		chatID = effectiveSessionKey
 	}
 
-	// Execute command if present
 	if job.Payload.Command != "" {
 		args := map[string]interface{}{
 			"command": job.Payload.Command,
@@ -494,14 +430,12 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 			Content: output,
 		})
 
-		// Notify the originating session for session-scoped jobs
 		if isSessionScoped {
 			t.notifySession(ctx, job, effectiveSessionKey, channel, chatID, output, result.IsError)
 		}
 		return "ok"
 	}
 
-	// If deliver=true, send message directly without agent processing
 	if job.Payload.Deliver {
 		t.msgBus.PublishOutbound(bus.OutboundMessage{
 			Channel: channel,
@@ -509,19 +443,14 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 			Content: job.Payload.Message,
 		})
 
-		// Notify the originating session for session-scoped jobs
 		if isSessionScoped {
 			t.notifySession(ctx, job, effectiveSessionKey, channel, chatID, job.Payload.Message, false)
 		}
 		return "ok"
 	}
 
-	// If spawn config is present, generate SYSTEM_SPAWN: message
 	if job.Payload.Spawn != nil {
 		spawnMsg := formatSystemSpawnMessage(job)
-		// If the job designates an existing native session via `to`, use it
-		// as the spawn origin so the subagent nests under that chat (like a
-		// user-initiated spawn) instead of a synthetic cron session.
 		sessionKey := t.designatedSessionKey(channel, chatID)
 		if sessionKey == "" {
 			sessionKey = fmt.Sprintf("cron-spawn-%s", job.ID)
@@ -542,20 +471,12 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 			return fmt.Sprintf("Error: %v", err)
 		}
 
-		// Notify the originating session for session-scoped jobs
 		if isSessionScoped {
 			t.notifySession(ctx, job, effectiveSessionKey, channel, chatID, response, false)
 		}
-		// Return the real outcome so the cron service records accurate status.
 		return response
 	}
 
-	// For deliver=false, process through agent (for complex tasks).
-	// Session-scoped jobs use the originating session key so the agent has
-	// full conversation context; global jobs use a synthetic key — unless
-	// the job designates an existing native session via `to`, in which case
-	// the message is processed in that session so the agent sees the chat's
-	// context and the response lands in the designated chat.
 	sessionKey := effectiveSessionKey
 	if !isSessionScoped {
 		sessionKey = fmt.Sprintf("cron-%s", job.ID)
@@ -564,7 +485,6 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		}
 	}
 
-	// Call agent with job's message
 	response, err := t.executor.ProcessDirectWithChannel(
 		ctx,
 		job.Payload.Message,
@@ -580,8 +500,6 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		return fmt.Sprintf("Error: %v", err)
 	}
 
-	// For session-scoped jobs, inject the result back into the originating
-	// session so the agent (and user) see the outcome in context.
 	if isSessionScoped {
 		t.notifySession(ctx, job, effectiveSessionKey, channel, chatID, response, false)
 	}
@@ -589,10 +507,6 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 	return "ok"
 }
 
-// notifySession sends a completion notification to the originating session of
-// a session-scoped cron job. It publishes the result as an outbound message so
-// the user sees it in their conversation, and injects a system message into the
-// session history so the agent is aware of the completed task.
 func (t *CronTool) notifySession(ctx context.Context, job *cron.CronJob, sessionKey, channel, chatID, result string, isError bool) {
 	status := "✅"
 	if isError {
@@ -601,7 +515,6 @@ func (t *CronTool) notifySession(ctx context.Context, job *cron.CronJob, session
 
 	notification := fmt.Sprintf("%s Cron job '%s' (%s) completed:\n%s", status, job.Name, job.ID, result)
 
-	// Publish notification to the session's channel/chat
 	t.msgBus.PublishOutbound(bus.OutboundMessage{
 		Channel: channel,
 		ChatID:  chatID,
@@ -609,7 +522,6 @@ func (t *CronTool) notifySession(ctx context.Context, job *cron.CronJob, session
 	})
 }
 
-// formatSystemSpawnMessage formats a SYSTEM_SPAWN: message from spawn config
 func formatSystemSpawnMessage(job *cron.CronJob) string {
 	spawn := job.Payload.Spawn
 	if spawn == nil {
@@ -636,7 +548,6 @@ func formatSystemSpawnMessage(job *cron.CronJob) string {
 		parts = append(parts, fmt.Sprintf("MODEL: %s", spawn.Model))
 	}
 
-	// Add original job message as context if different from task
 	if job.Payload.Message != spawn.Task && job.Payload.Message != "" {
 		parts = append(parts, fmt.Sprintf("CONTEXT: %s", job.Payload.Message))
 	}

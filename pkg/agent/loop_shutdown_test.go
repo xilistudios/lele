@@ -13,12 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// --- Shutdown / Stop -------------------------------------------------------
-
-// newShutdownTestLoop builds a minimal AgentLoop for teardown tests. It uses
-// NewAgentLoop so the wiring matches production, and the caller only exercises
-// the fields Shutdown and Stop touch (running, wg, stopOnce, goalStopCancel,
-// stopSessionCleanup, dbStore).
 func newShutdownTestLoop(t *testing.T) *AgentLoop {
 	t.Helper()
 
@@ -40,8 +34,6 @@ func newShutdownTestLoop(t *testing.T) *AgentLoop {
 	return NewAgentLoop(cfg, bus.NewMessageBus())
 }
 
-// TestAgentLoop_Shutdown_Graceful verifies that Shutdown reports a clean drain
-// when no turn is in flight, and that it flips the loop to "not running".
 func TestAgentLoop_Shutdown_Graceful(t *testing.T) {
 	al := newShutdownTestLoop(t)
 	al.running.Store(true)
@@ -54,16 +46,9 @@ func TestAgentLoop_Shutdown_Graceful(t *testing.T) {
 	}
 }
 
-// TestAgentLoop_Shutdown_WaitsForInFlightTurn is the core guarantee of the
-// drain: a turn that is still running must be allowed to finish, and Shutdown
-// must not return before it does. It also pins the invariant that Shutdown does
-// NOT close the store, so the drained turn can still persist its session.
 func TestAgentLoop_Shutdown_WaitsForInFlightTurn(t *testing.T) {
 	al := newShutdownTestLoop(t)
 
-	// Simulate a turn exactly the way processMessage does: it is tracked on
-	// al.wg and inherits the root context, which the gateway only cancels
-	// after Shutdown returns.
 	turnDone := make(chan struct{})
 	al.wg.Add(1)
 	go func() {
@@ -86,8 +71,6 @@ func TestAgentLoop_Shutdown_WaitsForInFlightTurn(t *testing.T) {
 		t.Fatal("Shutdown returned while the in-flight turn was still running")
 	}
 
-	// Shutdown must leave durable state alone: closing the store here would
-	// break the sessions the drained turns are still writing.
 	if al.dbStore != nil {
 		if err := al.dbStore.DB().Ping(); err != nil {
 			t.Errorf("Store was closed by Shutdown (ping: %v); only Stop may close it", err)
@@ -95,9 +78,6 @@ func TestAgentLoop_Shutdown_WaitsForInFlightTurn(t *testing.T) {
 	}
 }
 
-// TestAgentLoop_Shutdown_Timeout verifies the drain is bounded: when a turn
-// outlives the caller's deadline, Shutdown gives up and reports the context
-// error instead of hanging the whole teardown.
 func TestAgentLoop_Shutdown_Timeout(t *testing.T) {
 	al := newShutdownTestLoop(t)
 
@@ -116,16 +96,11 @@ func TestAgentLoop_Shutdown_Timeout(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Shutdown() = %v, want context.DeadlineExceeded", err)
 	}
-	// The loop must still be marked as not running: new inbound work has to be
-	// rejected even though the drain gave up.
 	if al.running.Load() {
 		t.Error("Expected running to be false after a timed-out Shutdown")
 	}
 }
 
-// TestAgentLoop_Shutdown_CancelledContext verifies a caller that cancels
-// instead of setting a deadline gets its cancellation back promptly, without
-// waiting for the stuck turn.
 func TestAgentLoop_Shutdown_CancelledContext(t *testing.T) {
 	al := newShutdownTestLoop(t)
 
@@ -145,15 +120,9 @@ func TestAgentLoop_Shutdown_CancelledContext(t *testing.T) {
 	}
 }
 
-// TestAgentLoop_StopIsIdempotent guards the sync.Once around Stop's cleanup.
-// The pre-existing code closed the session-cleanup stop channel unconditionally,
-// so a second call (or Stop after a restart-triggered Stop) panicked; the
-// gateway now calls Stop from a path that can be entered twice.
 func TestAgentLoop_StopIsIdempotent(t *testing.T) {
 	al := newShutdownTestLoop(t)
 
-	// A real cleanup-channel stopper, matching what
-	// session.StartCleanupGoroutine returns: func(){ close(stop) }.
 	stopped := 0
 	cleanupStop := make(chan struct{})
 	al.stopSessionCleanup = func() {
@@ -177,10 +146,6 @@ func TestAgentLoop_StopIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestAgentLoop_StopAfterShutdown verifies the two-phase teardown the gateway
-// relies on: Shutdown drains, then Stop releases the resources. Neither may
-// panic or double-run, and Stop must still join a turn that outlived the drain
-// budget.
 func TestAgentLoop_StopAfterShutdown(t *testing.T) {
 	al := newShutdownTestLoop(t)
 
@@ -198,7 +163,6 @@ func TestAgentLoop_StopAfterShutdown(t *testing.T) {
 		t.Fatalf("Shutdown() = %v, want context.DeadlineExceeded", err)
 	}
 
-	// Stop is the safety net: it waits unconditionally for the straggler.
 	al.Stop()
 	select {
 	case <-finished:
@@ -207,10 +171,6 @@ func TestAgentLoop_StopAfterShutdown(t *testing.T) {
 	}
 }
 
-// --- StopWithin ------------------------------------------------------------
-
-// TestAgentLoop_StopWithin_Graceful verifies the bounded join returns nil and
-// closes the store when the in-flight turn exits inside the grace.
 func TestAgentLoop_StopWithin_Graceful(t *testing.T) {
 	al := newShutdownTestLoop(t)
 
@@ -237,10 +197,6 @@ func TestAgentLoop_StopWithin_Graceful(t *testing.T) {
 	}
 }
 
-// TestAgentLoop_StopWithin_TimeoutAbandonsJoin is the guard against the 90 s
-// systemd SIGKILL: a turn that ignores cancellation must NOT be able to hold
-// the teardown hostage. StopWithin gives up after the grace, reports it, and
-// leaves the store open for the abandoned turn instead of closing it mid-write.
 func TestAgentLoop_StopWithin_TimeoutAbandonsJoin(t *testing.T) {
 	al := newShutdownTestLoop(t)
 
@@ -248,7 +204,7 @@ func TestAgentLoop_StopWithin_TimeoutAbandonsJoin(t *testing.T) {
 	al.wg.Add(1)
 	go func() {
 		defer al.wg.Done()
-		<-release // never observes any context: the worst-case tool
+		<-release
 	}()
 	t.Cleanup(func() { close(release) })
 
@@ -263,7 +219,6 @@ func TestAgentLoop_StopWithin_TimeoutAbandonsJoin(t *testing.T) {
 	if al.running.Load() {
 		t.Error("Expected running to be false after a timed-out StopWithin")
 	}
-	// The abandoned turn may still write: the store must stay open.
 	if al.dbStore != nil {
 		if perr := al.dbStore.DB().Ping(); perr != nil {
 			t.Errorf("Store was closed while a turn was still in flight: %v", perr)
@@ -271,24 +226,13 @@ func TestAgentLoop_StopWithin_TimeoutAbandonsJoin(t *testing.T) {
 	}
 }
 
-// TestAgentLoop_StopWithin_SharesOneDeadlineAcrossStages pins that grace is a
-// bound on the WHOLE teardown, not a per-stage budget. Two stages here: a
-// retention sweeper that stops late but healthily (inside the budget), then a
-// turn that never stops. With one sharing deadline the second stage gets only
-// what the first left over, so the call returns at ≈grace; with a per-stage
-// budget it would wait the full grace again and return at ≈1.6×grace.
 func TestAgentLoop_StopWithin_SharesOneDeadlineAcrossStages(t *testing.T) {
 	al := newShutdownTestLoop(t)
 
-	// The loop's own managers are replaced below; stop their sweepers first so
-	// the test leaves no ticker running (same as the retention wiring tests).
 	for _, wired := range al.toolCoordinator.GetSubagents() {
 		wired.StopRetentionCleanup()
 	}
 
-	// Stage 1: a real sweeper blocked in the session-evict callback, released
-	// late — but well inside the grace, so this stage reports success and the
-	// budget it spent must be visible to the next stage.
 	sm := tools.NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
 	sm.SetRetentionPeriod(time.Millisecond)
 	addOldTerminalTaskForTest(sm, time.Hour)
@@ -296,7 +240,7 @@ func TestAgentLoop_StopWithin_SharesOneDeadlineAcrossStages(t *testing.T) {
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	releaseSweeper := func() { releaseOnce.Do(func() { close(release) }) }
-	t.Cleanup(releaseSweeper) // never leave the sweeper blocked if the test fails early
+	t.Cleanup(releaseSweeper)
 	sm.SetSessionEvictCallback(func(string) {
 		select {
 		case entered <- struct{}{}:
@@ -308,8 +252,6 @@ func TestAgentLoop_StopWithin_SharesOneDeadlineAcrossStages(t *testing.T) {
 	t.Cleanup(stopSweeper)
 	al.toolCoordinator = newToolCoordinatorWithSubagents(al, map[string]*tools.SubagentManager{"main": sm}, nil, nil)
 
-	// Wait until the sweeper is provably INSIDE the callback: that is the
-	// state in which the retention stage blocks and spends the budget.
 	waitUntil := time.Now().Add(3 * time.Second)
 	for {
 		select {
@@ -324,8 +266,6 @@ func TestAgentLoop_StopWithin_SharesOneDeadlineAcrossStages(t *testing.T) {
 		break
 	}
 
-	// Stage 2: a turn that ignores cancellation entirely (the worst-case tool
-	// the bounded join exists for). Released only by the test cleanup.
 	turnRelease := make(chan struct{})
 	t.Cleanup(func() { close(turnRelease) })
 	al.wg.Add(1)
@@ -335,8 +275,6 @@ func TestAgentLoop_StopWithin_SharesOneDeadlineAcrossStages(t *testing.T) {
 	}()
 
 	const grace = 300 * time.Millisecond
-	// Free the sweeper at 2/3 of the budget: it finishes healthily, but only
-	// a third of the grace is left for the turn join.
 	go func() {
 		time.Sleep(grace * 2 / 3)
 		releaseSweeper()
@@ -349,17 +287,12 @@ func TestAgentLoop_StopWithin_SharesOneDeadlineAcrossStages(t *testing.T) {
 	if err == nil {
 		t.Fatal("StopWithin() = nil, want an error: the turn never observes cancellation, so the join must be abandoned")
 	}
-	// 300 ms budget vs ≈500 ms for a per-stage budget. The 100 ms slack is for
-	// a shared CI machine, and still fails loudly if the join waits a second
-	// full grace.
 	if elapsed > grace+100*time.Millisecond {
 		t.Errorf("StopWithin took %s with a %s budget; each stage must consume the shared deadline, not get its own (per-stage budgeting returns at ≈%s)",
 			elapsed, grace, grace+grace*2/3)
 	}
 	t.Logf("teardown returned in %s with a %s budget: %v", elapsed, grace, err)
 
-	// Same abandonment contract as a mid-wait timeout: nothing may be closed
-	// under the turn that is still running.
 	if al.dbStore != nil {
 		if perr := al.dbStore.DB().Ping(); perr != nil {
 			t.Errorf("Store was closed while a turn was still in flight: %v", perr)
@@ -367,10 +300,6 @@ func TestAgentLoop_StopWithin_SharesOneDeadlineAcrossStages(t *testing.T) {
 	}
 }
 
-// TestAgentLoop_StopWithin_Idempotent pins that Stop and StopWithin share one
-// stopOnce: the gateway's bounded join and any later unbounded Stop (the
-// deferred safety net in the TUI, a second teardown trigger) must not
-// double-close channels or panic.
 func TestAgentLoop_StopWithin_Idempotent(t *testing.T) {
 	al := newShutdownTestLoop(t)
 
@@ -384,22 +313,13 @@ func TestAgentLoop_StopWithin_Idempotent(t *testing.T) {
 	if err := al.StopWithin(time.Second); err != nil {
 		t.Fatalf("StopWithin() = %v, want nil on an idle loop", err)
 	}
-	al.Stop() // the unbounded form must be a no-op afterwards
+	al.Stop()
 
 	if stopped != 1 {
 		t.Errorf("session cleanup stopper called %d times, want 1", stopped)
 	}
 }
 
-// TestAgentLoop_GatewayTeardownSequenceReleasesTurn is the end-to-end shape of
-// the self-update restart hang, run against a real loop and a real WaitGroup.
-//
-// It replays the exact sequence cmd/lele's runGracefulShutdown performs:
-// Shutdown with a drain budget the turn does not fit, then cancel the root
-// context the turn runs on, then the bounded final join. The turn below is a
-// faithful stand-in for processMessage: it is tracked on al.wg and can only be
-// ended by the root context, which is precisely the dependency that deadlocked
-// when the gateway joined before cancelling.
 func TestAgentLoop_GatewayTeardownSequenceReleasesTurn(t *testing.T) {
 	al := newShutdownTestLoop(t)
 
@@ -412,18 +332,15 @@ func TestAgentLoop_GatewayTeardownSequenceReleasesTurn(t *testing.T) {
 	go func() {
 		defer al.wg.Done()
 		defer close(turnFinished)
-		<-ctx.Done() // what processMessage does between LLM/tool iterations
+		<-ctx.Done()
 	}()
 
-	// 1. The drain hook loses the race, as it does for any turn longer than its
-	//    budget. This is the state in which the hang used to begin.
 	drainCtx, drainCancel := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer drainCancel()
 	if err := al.Shutdown(drainCtx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("drain Shutdown() = %v, want context.DeadlineExceeded", err)
 	}
 
-	// 2+3. Cancel, then join. Done in the other order this blocks forever.
 	cancel()
 	joined := make(chan error, 1)
 	go func() { joined <- al.StopWithin(5 * time.Second) }()
@@ -442,7 +359,6 @@ func TestAgentLoop_GatewayTeardownSequenceReleasesTurn(t *testing.T) {
 	default:
 		t.Error("the in-flight turn was abandoned instead of released")
 	}
-	// A clean join means the store was closed normally, not abandoned open.
 	if al.dbStore != nil {
 		if err := al.dbStore.DB().Ping(); err == nil {
 			t.Error("store still open after a completed join")

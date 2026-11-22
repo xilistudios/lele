@@ -8,14 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
-// TUI-M4: subagentProgress (taskID → latest action) was written on subagent
-// tool.executing / message.stream events but never rendered and never
-// cleared on session switch. These tests cover the render path, the
-// session-switch lifecycle, completion-driven deletion, and the map cap.
-
-// setupSubagentProgressModel builds a model viewing a parent chat session,
-// sized so updateViewport produces a real frame. The sidebar is visible by
-// default (showWelcome=false, onboardingActive=false, modalMode=ModalNone).
 func setupSubagentProgressModel(t *testing.T) (*Model, string) {
 	t.Helper()
 	m := newTestModelWithDenyPatterns(t)
@@ -30,8 +22,6 @@ func setupSubagentProgressModel(t *testing.T) (*Model, string) {
 	return m, key
 }
 
-// publishAndDrain publishes one outbound event and feeds it through the
-// model's outbound listener (same drain pattern as approval_test.go).
 func publishAndDrain(t *testing.T, m *Model, ev bus.OutboundMessage) {
 	t.Helper()
 	m.agentLoop.MessageBus().PublishOutbound(ev)
@@ -51,7 +41,6 @@ func publishAndDrain(t *testing.T, m *Model, ev bus.OutboundMessage) {
 	*m = *up.(*Model)
 }
 
-// overlayContent calls updateViewport and returns the joined overlay lines.
 func overlayContent(m *Model) string {
 	m.updateViewport()
 	return strings.Join(m.viewport.overlayLines, "\n")
@@ -60,7 +49,6 @@ func overlayContent(m *Model) string {
 func TestSubagentProgressRenderedInOverlay(t *testing.T) {
 	m, key := setupSubagentProgressModel(t)
 	m.processing = true
-	// Hide sidebar so the inline progress block renders.
 	m.showWelcome = true
 
 	publishAndDrain(t, m, bus.OutboundMessage{
@@ -90,15 +78,11 @@ func TestSubagentProgressRenderedInOverlay(t *testing.T) {
 	}
 }
 
-// TestSubagentProgressRenderedWithoutStreaming verifies the overlay also shows
-// when the parent has nothing streaming (e.g. waiting on wait_for_subagent) —
-// the hasOverlay gate must include the progress map, not just hasStreaming.
 func TestSubagentProgressRenderedWithoutStreaming(t *testing.T) {
 	m, _ := setupSubagentProgressModel(t)
 	m.processing = false
 	m.currentStream = ""
 	m.currentToolAction = ""
-	// Hide sidebar so the inline progress block renders.
 	m.showWelcome = true
 
 	m.subagentProgress = map[string]string{"subagent-2": "scanning files"}
@@ -155,8 +139,6 @@ func TestSubagentProgressCappedAt16(t *testing.T) {
 	if len(m.subagentProgress) != subagentProgressCap {
 		t.Fatalf("subagentProgress should be capped at %d, got %d", subagentProgressCap, len(m.subagentProgress))
 	}
-	// FIFO eviction: the lowest-numbered (oldest) tasks are gone; 20 inserts
-	// against a cap of 16 evict exactly subagent-01..subagent-04.
 	if _, ok := m.subagentProgress["subagent-01"]; ok {
 		t.Error("oldest entry subagent-01 should have been evicted")
 	}
@@ -173,7 +155,6 @@ func TestSubagentProgressCappedAt16(t *testing.T) {
 
 func TestSubagentProgressShowsPlusNMore(t *testing.T) {
 	m, _ := setupSubagentProgressModel(t)
-	// Hide sidebar so the inline progress block renders.
 	m.showWelcome = true
 
 	for i := 1; i <= 5; i++ {
@@ -194,12 +175,8 @@ func TestSubagentProgressShowsPlusNMore(t *testing.T) {
 	}
 }
 
-// TestSubagentProgressHiddenWhenSidebarVisible verifies that the inline
-// "⏳ subagents" overlay block is NOT rendered when the chat sidebar is
-// visible (normal chat layout).
 func TestSubagentProgressHiddenWhenSidebarVisible(t *testing.T) {
 	m, _ := setupSubagentProgressModel(t)
-	// Sidebar is visible: showWelcome=false (default from setup), no modal.
 	if !m.isChatSidebarVisible() {
 		t.Fatal("precondition: sidebar should be visible in default setup")
 	}
@@ -214,9 +191,6 @@ func TestSubagentProgressHiddenWhenSidebarVisible(t *testing.T) {
 	}
 }
 
-// TestSubagentProgressShownWhenSidebarHidden verifies that renderSubagentProgress
-// returns a non-empty string containing expected content when the sidebar is not
-// visible (e.g. welcome screen).
 func TestSubagentProgressShownWhenSidebarHidden(t *testing.T) {
 	m, _ := setupSubagentProgressModel(t)
 	m.showWelcome = true

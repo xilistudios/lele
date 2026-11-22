@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -17,7 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/version"
 )
 
-// FormatMessagesForLog formats messages for logging
 func FormatMessagesForLog(messages []providers.Message) string {
 	if len(messages) == 0 {
 		return "[]"
@@ -53,7 +46,6 @@ func FormatMessagesForLog(messages []providers.Message) string {
 					}
 					result += fmt.Sprintf("    - image_url: %s\n", imageRef)
 				case "video_url":
-					// Never log the URL/base64 — it can be huge.
 					result += "    - video_url: [video]\n"
 				}
 			}
@@ -67,7 +59,6 @@ func FormatMessagesForLog(messages []providers.Message) string {
 	return result
 }
 
-// FormatToolsForLog formats tool definitions for logging
 func FormatToolsForLog(tools []providers.ToolDefinition) string {
 	if len(tools) == 0 {
 		return "[]"
@@ -86,7 +77,6 @@ func FormatToolsForLog(tools []providers.ToolDefinition) string {
 	return result
 }
 
-// FormatProviderModel formats provider:model string
 func FormatProviderModel(provider, model string) string {
 	provider = strings.TrimSpace(provider)
 	model = strings.TrimSpace(model)
@@ -99,7 +89,6 @@ func FormatProviderModel(provider, model string) string {
 	return provider + ":" + model
 }
 
-// ExtractPeer extracts the routing peer from inbound message metadata
 func ExtractPeer(msg bus.InboundMessage) *routing.RoutePeer {
 	peerKind := msg.Metadata["peer_kind"]
 	if peerKind == "" {
@@ -116,7 +105,6 @@ func ExtractPeer(msg bus.InboundMessage) *routing.RoutePeer {
 	return &routing.RoutePeer{Kind: peerKind, ID: peerID}
 }
 
-// ExtractParentPeer extracts the parent peer (reply-to) from inbound message metadata
 func ExtractParentPeer(msg bus.InboundMessage) *routing.RoutePeer {
 	parentKind := msg.Metadata["parent_peer_kind"]
 	parentID := msg.Metadata["parent_peer_id"]
@@ -126,11 +114,6 @@ func ExtractParentPeer(msg bus.InboundMessage) *routing.RoutePeer {
 	return &routing.RoutePeer{Kind: parentKind, ID: parentID}
 }
 
-// GatewayVersion returns the gateway version from build info.
-//
-// Delegates to pkg/version, the single source of truth: it prefers the
-// ldflags-injected value and strips the toolchain's VCS "+dirty" marker from
-// build-info fallbacks, so released builds never display "x.y.z-dirty".
 func GatewayVersion() string {
 	return version.Get()
 }

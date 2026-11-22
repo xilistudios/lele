@@ -12,40 +12,25 @@ import (
 	"github.com/zalando/go-keyring"
 )
 
-// masterKeySize is the size of the AES-256 master key in bytes.
 const masterKeySize = 32
 
-// KeyProvider retrieves or creates the master encryption key used to protect
-// the secret vault. Implementations must be safe for the key to be generated
-// lazily on first use.
 type KeyProvider interface {
-	// GetKey returns the 32-byte master key, creating and persisting it if
-	// necessary.
 	GetKey() ([]byte, error)
-	// Backend returns the active backend name ("keychain" or "file").
 	Backend() string
-	// Available reports whether this provider can function in the current
-	// environment.
 	Available() bool
 }
 
-// Backend name constants.
 const (
 	BackendKeychain = "keychain"
 	BackendFile     = "file"
 	BackendAuto     = "auto"
 )
 
-// OSKeychainProvider stores the master key in the operating system's native
-// secret store (macOS Keychain, GNOME Keyring / KWallet via the freedesktop
-// Secret Service, or Windows Credential Manager).
 type OSKeychainProvider struct {
-	service string // keyring service name, e.g. "lele"
-	account string // keyring account name, e.g. "keyring-master-key"
+	service string
+	account string
 }
 
-// NewOSKeychainProvider creates an OSKeychainProvider with the default
-// service/account identifiers.
 func NewOSKeychainProvider() *OSKeychainProvider {
 	return &OSKeychainProvider{
 		service: "lele",
@@ -53,15 +38,12 @@ func NewOSKeychainProvider() *OSKeychainProvider {
 	}
 }
 
-// GetKey returns the master key from the OS keychain, generating and storing a
-// new one if it does not yet exist.
 func (p *OSKeychainProvider) GetKey() ([]byte, error) {
 	encoded, err := keyring.Get(p.service, p.account)
 	if err == nil {
 		if key, decErr := base64.StdEncoding.DecodeString(encoded); decErr == nil && len(key) == masterKeySize {
 			return key, nil
 		}
-		// Stored entry is corrupt or the wrong size; fall through and regenerate.
 	} else if !errors.Is(err, keyring.ErrNotFound) {
 		return nil, fmt.Errorf("keyring: keychain read failed: %w", err)
 	}
@@ -76,35 +58,24 @@ func (p *OSKeychainProvider) GetKey() ([]byte, error) {
 	return key, nil
 }
 
-// Backend returns "keychain".
 func (p *OSKeychainProvider) Backend() string { return BackendKeychain }
 
-// Available probes the OS keychain. It returns true when the keychain is
-// reachable (even if no entry exists yet) and false when the underlying
-// secret service is unavailable (e.g. no D-Bus session on a headless host).
 func (p *OSKeychainProvider) Available() bool {
 	_, err := keyring.Get(p.service, p.account)
 	if err == nil {
 		return true
 	}
-	// ErrNotFound means the keychain responded but has no entry yet.
 	return errors.Is(err, keyring.ErrNotFound)
 }
 
-// FileKeyProvider stores the master key in a local file. It is the fallback
-// for systems without a usable OS keychain (containers, headless servers).
 type FileKeyProvider struct {
-	path string // e.g. ~/.lele/keyring.key
+	path string
 }
 
-// NewFileKeyProvider creates a FileKeyProvider that stores the master key at
-// the given path.
 func NewFileKeyProvider(path string) *FileKeyProvider {
 	return &FileKeyProvider{path: path}
 }
 
-// GetKey returns the master key from the key file, generating and writing a
-// new one (with 0600 permissions) if it does not yet exist.
 func (p *FileKeyProvider) GetKey() ([]byte, error) {
 	data, err := os.ReadFile(p.path)
 	if err == nil {
@@ -136,10 +107,8 @@ func (p *FileKeyProvider) GetKey() ([]byte, error) {
 	return key, nil
 }
 
-// Backend returns "file".
 func (p *FileKeyProvider) Backend() string { return BackendFile }
 
-// Available reports whether the key file's parent directory can be created.
 func (p *FileKeyProvider) Available() bool {
 	dir := filepath.Dir(p.path)
 	if dir == "" || dir == "." {
@@ -151,12 +120,6 @@ func (p *FileKeyProvider) Available() bool {
 	return true
 }
 
-// NewKeyProvider returns the best available key provider for the given lele
-// directory and configured backend ("auto", "keychain", or "file").
-//
-// In "auto" mode the OS keychain is preferred and the file backend is used
-// only when no keychain is detected. An explicit "keychain" or "file" backend
-// is honored directly.
 func NewKeyProvider(leleDir, backend string) KeyProvider {
 	keyFilePath := filepath.Join(leleDir, "keyring.key")
 
@@ -165,7 +128,7 @@ func NewKeyProvider(leleDir, backend string) KeyProvider {
 		return NewFileKeyProvider(keyFilePath)
 	case BackendKeychain:
 		return NewOSKeychainProvider()
-	default: // "auto" or empty
+	default:
 		osProvider := NewOSKeychainProvider()
 		if osProvider.Available() {
 			return osProvider
@@ -174,7 +137,6 @@ func NewKeyProvider(leleDir, backend string) KeyProvider {
 	}
 }
 
-// generateMasterKey returns a cryptographically random 32-byte key.
 func generateMasterKey() ([]byte, error) {
 	key := make([]byte, masterKeySize)
 	if _, err := rand.Read(key); err != nil {

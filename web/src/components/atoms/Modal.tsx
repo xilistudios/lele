@@ -37,15 +37,11 @@ export function Modal({
   const titleId = useId()
   const previouslyFocused = useRef<HTMLElement | null>(null)
 
-  // Keep the latest onClose in a ref so identity changes (inline closures from
-  // parents that re-render, e.g. per keystroke in a form) don't re-run the
-  // open/close effect below. Re-running it would steal focus from inputs.
   const onCloseRef = useRef(onClose)
   useEffect(() => {
     onCloseRef.current = onClose
   }, [onClose])
 
-  // Keep Tab focus inside the dialog while it is open.
   const trapFocus = useCallback((e: KeyboardEvent) => {
     if (e.key !== 'Tab') return
     const dialog = dialogRef.current
@@ -70,14 +66,11 @@ export function Modal({
   useEffect(() => {
     if (!isOpen) return
 
-    // Remember the previously focused element so we can restore it on close.
     previouslyFocused.current = document.activeElement as HTMLElement | null
 
-    // Lock body scroll while the modal is open.
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
 
-    // Move initial focus into the dialog.
     const dialog = dialogRef.current
     if (dialog) {
       const focusable = dialog.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
@@ -103,7 +96,6 @@ export function Modal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
-      {/* Decorative backdrop: Escape (document listener) is the keyboard path to close. */}
       <div
         className="absolute inset-0 bg-overlay backdrop-blur-sm transition-opacity"
         onClick={onClose}

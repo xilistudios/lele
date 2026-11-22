@@ -16,42 +16,13 @@ import { CheckIcon, CopyIcon, EditIcon, PlusIcon, TrashIcon } from '../../atoms/
 import { SettingsSection } from '../../molecules/SettingsSection'
 import { AgentCommandEditorDialog, type CommandEditorTarget } from './AgentCommandEditorDialog'
 
-/**
- * `tab=commands` — the slash commands THIS agent sees (brief decision 9).
- *
- * One source of truth: `GET /api/v1/agents/{id}/commands`. The backend
- * flattens the four harness discovery levels (config → global → workspace →
- * directory), decides `deletable`, and tags the losers of a name collision
- * with `shadowed_by` — the client never recomputes any of that.
- *
- * Layout, top to bottom:
- * 1. header — the commands dir (`<code>` + copy) with a chip while the folder
- *    does not exist yet, plus the "New command" CTA;
- * 2. shared-workspace banner (`shared_by > 1`): writes here affect N agents;
- * 3. the table: name | description | source | agent | model | shell | actions;
- * 4. the global harness permissions (informative — they live in config.json,
- *    there is no per-agent field; plan D7/L2);
- * 5. built-in gateway commands, collapsed.
- *
- * Editor: `AgentCommandEditorDialog` (create/edit/view). Delete is confirmed
- * inline in the row (same pattern as the skills cards): a delete is the one
- * action here that a discarded form cannot undo.
- *
- * Like `files`, this section never writes config → it can never be dirty
- * (agentDirty: SECTION_PATHS.commands = []).
- */
-
 type Props = {
-  /** Unused by the reads; kept for the page contract (and future defaults). */
   agent: EditableAgentConfig
-  /** Real id from the draft (not the URL param), so casing cannot drift. */
   agentId: string
 }
 
-/** How long the copy button and the delete toast show their confirmation. */
 const FEEDBACK_MS = 1500
 
-/** §5.1 geometry: one card skeleton, same shape as the files tab. */
 function CommandsSkeleton() {
   const { t } = useTranslation()
   return (
@@ -69,7 +40,6 @@ function CommandsSkeleton() {
   )
 }
 
-/** Copy button next to a path, mirroring the agent-ID field (§ general tab). */
 function PathCopy({ value, testId }: { value: string; testId: string }) {
   const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
@@ -84,10 +54,7 @@ function PathCopy({ value, testId }: { value: string; testId: string }) {
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(value)
-    } catch {
-      // Clipboard is unavailable over plain http: never throw, the <code> is
-      // select-all so copying by hand still works.
-    }
+    } catch {}
     setCopied(true)
     if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
     copiedTimeoutRef.current = setTimeout(() => setCopied(false), FEEDBACK_MS)
@@ -105,8 +72,6 @@ function PathCopy({ value, testId }: { value: string; testId: string }) {
   )
 }
 
-/** One row of the table. Actions live in the row itself (not a subcomponent)
- *  so the test ids stay flat: command-row-<name> wraps everything. */
 function CommandRow({
   command,
   confirming,
@@ -134,7 +99,6 @@ function CommandRow({
     <tr
       data-testid={`command-row-${command.name}`}
       title={rowTitle}
-      // A shadowed file has no effect for THIS agent: dim it, keep it readable.
       className={shadowed ? 'opacity-60' : undefined}
     >
       <td className="px-3 py-2 align-top">
@@ -166,9 +130,6 @@ function CommandRow({
         {command.model || '—'}
       </td>
       <td className="px-3 py-2 align-top text-center">
-        {/* allow_shell is a plain bool (OR-merged with the global default);
-            absolute files is tri-state and belongs to the editor, not to a
-            narrow column. */}
         {command.allow_shell ? (
           <CheckIcon size={14} />
         ) : (
@@ -180,11 +141,6 @@ function CommandRow({
       <td className="px-3 py-2 align-top">
         <div className="flex items-center justify-end gap-1">
           {shadowed ? (
-            /* Reads and writes are addressed BY NAME and the server resolves
-               the name to the level that wins precedence: acting from a
-               shadowed row would edit or delete a DIFFERENT file than the one
-               this row describes. So a hidden command has no actions — the
-               winner row is the only place to touch that name. */
             <span
               data-testid={`command-shadowed-${command.name}`}
               className="text-xs text-text-tertiary"
@@ -214,9 +170,6 @@ function CommandRow({
             </span>
           ) : (
             <>
-              {/* Edit ALWAYS opens the dialog; the dialog decides (from
-                  source) whether it is editable or read-only — a config or
-                  directory command cannot be fetched at all. */}
               <IconButton
                 dataTestId={`command-edit-${command.name}`}
                 title={t('settings.agentPage.commands.edit')}
@@ -252,11 +205,8 @@ export function AgentCommandsSection({ agentId }: Props) {
   const { data, isLoading, isError, refetch, commands, builtin, create, update, remove } =
     useAgentCommands(api, { agentId })
 
-  /** null = closed. One dialog instance for the whole panel. */
   const [target, setTarget] = useState<CommandEditorTarget | null>(null)
-  /** Row awaiting a delete confirmation (inline, like the skills cards). */
   const [pendingRemove, setPendingRemove] = useState<string | null>(null)
-  /** Transient success notice after a delete (creates/edits close the dialog). */
   const [notice, setNotice] = useState<string | null>(null)
   const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -266,9 +216,6 @@ export function AgentCommandsSection({ agentId }: Props) {
     }
   }, [])
 
-  // The dialog owns its create/update errors (its own banner); the section
-  // only passes the mutations through so the whole commands API stays in one
-  // place. Delete happens inline in the rows → its error is the section's.
   const submitCreate = useCallback(
     (body: AgentCommandWriteRequest) => create.mutateAsync(body),
     [create],
@@ -278,10 +225,6 @@ export function AgentCommandsSection({ agentId }: Props) {
     [update],
   )
 
-  // A failed REST write has nowhere else to surface: this tab never touches
-  // the config draft, so the page's save banner is about something else. Only
-  // the delete happens inline in the row — create/update errors belong to the
-  // dialog's own banner, which is open while they can occur.
   const actionError = remove.error
 
   const showNotice = (message: string) => {
@@ -297,8 +240,6 @@ export function AgentCommandsSection({ agentId }: Props) {
     })
   }
 
-  // Error FIRST (files-tab rule): retry must not swap the banner for a fake
-  // skeleton while the query refetches.
   if (isError) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-surface-sunken px-4 py-8 text-center">
@@ -321,8 +262,6 @@ export function AgentCommandsSection({ agentId }: Props) {
   const agentOptions = (draftConfig?.agents?.list ?? []).map((entry) => entry.id)
 
   const openEditor = (command: AgentCommandInfo) => {
-    // config/directory files are neither readable nor writable through this
-    // API (403 not_editable) → open in view mode WITHOUT fetching.
     const viewOnly = command.source === 'config' || command.source === 'directory'
     setTarget({
       mode: viewOnly ? 'view' : 'edit',
@@ -345,7 +284,6 @@ export function AgentCommandsSection({ agentId }: Props) {
     />
   )
 
-  // ---------- Empty: no command at any level (still offer creation) ----------
   if (commands.length === 0) {
     return (
       <div className="space-y-6">
@@ -394,7 +332,6 @@ export function AgentCommandsSection({ agentId }: Props) {
             : undefined
         }
       >
-        {/* ---------- header: destination dir + chip + CTA ---------- */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <code
@@ -429,7 +366,6 @@ export function AgentCommandsSection({ agentId }: Props) {
           </Button>
         </div>
 
-        {/* ---------- shared workspace: writes here affect several agents ---------- */}
         {response && response.shared_by > 1 && (
           <div
             data-testid="commands-shared-banner"
@@ -455,9 +391,6 @@ export function AgentCommandsSection({ agentId }: Props) {
         )}
 
         {notice && (
-          /* aria-live (not role="status"): the same polite announcement for a
-             transient toast, without the semantic-element lint fighting the
-             multi-attribute JSX the rule flags. */
           <p
             data-testid="commands-notice"
             aria-live="polite"
@@ -467,7 +400,6 @@ export function AgentCommandsSection({ agentId }: Props) {
           </p>
         )}
 
-        {/* ---------- the table ---------- */}
         <div className="overflow-x-auto" data-testid="commands-list">
           <table className="w-full text-left text-sm">
             <thead>
@@ -512,7 +444,6 @@ export function AgentCommandsSection({ agentId }: Props) {
           </table>
         </div>
 
-        {/* ---------- global harness permissions (informative) ---------- */}
         {response && (
           <div
             data-testid="commands-harness"
@@ -549,10 +480,6 @@ export function AgentCommandsSection({ agentId }: Props) {
   )
 }
 
-/**
- * Built-in gateway commands (`/new`, `/model`, …), collapsed by default: they
- * belong to the dispatcher, not to this agent, and cannot be edited here.
- */
 function BuiltinBlock({ builtin }: { builtin: AgentCommandsResponse['builtin'] }) {
   const { t } = useTranslation()
   if (builtin.length === 0) return null

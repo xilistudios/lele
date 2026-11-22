@@ -12,28 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// TestFrameInvariant_ExactWidthAndHeight asserts the two invariants the
-// renderer depends on for every screen and terminal size:
-//
-//  1. View() returns exactly m.height lines. A taller frame is trimmed from the
-//     top by bubbletea (the whole UI shifts up and the last rows are lost), a
-//     shorter one leaves rows painted by the previous frame on screen.
-//  2. Every line is at most m.width display cells. A wider line wraps in the
-//     terminal, which desyncs the renderer's per-row model: every row after the
-//     wrap point is drawn one row lower than intended and the rows the frame
-//     skips keep whatever the older frame left there (the "duplicated input"
-//     artifact).
-//
-// This test can only check the width the TUI itself measures with. A terminal
-// that draws an East Asian "ambiguous" glyph (●, →, ·) two cells wide measures
-// the same line wider than ansi.StringWidth does, and no amount of clamping
-// here can see that — which is why the TUI also turns the terminal's autowrap
-// off for the session (nowrap.go): the frame stays aligned even when the two
-// measurements disagree by a cell.
-//
-// The matrix intentionally mixes the states that change the vertical band
-// structure (status line, queue band, autocomplete, modal) with the sizes where
-// the responsive branches kick in (contentHeight < 20 and < 16).
 func TestFrameInvariant_ExactWidthAndHeight(t *testing.T) {
 	i18n.InitWithLanguage("en")
 	m := newTestModel(t)
@@ -109,7 +87,6 @@ func TestFrameInvariant_ExactWidthAndHeight(t *testing.T) {
 	for _, st := range states {
 		for _, size := range sizes {
 			t.Run(fmt.Sprintf("%s/%dx%d", st.name, size.w, size.h), func(t *testing.T) {
-				// Reset the state that individual cases toggle.
 				m.showWelcome = false
 				m.onboardingActive = false
 				m.modalMode = ModalNone

@@ -15,14 +15,8 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 	if len(parts) == 0 {
 		return nil
 	}
-	// Normalize the command token once, before anything looks at it: typed
-	// input can preserve casing ("/Models"), and the ranking, the custom-
-	// command lookup and the built-in switch below must all agree on the same
-	// key — otherwise a command could be counted without being dispatched.
 	parts[0] = normalizeCommandKey(parts[0])
 
-	// Rank the autocomplete palette by real usage. Only commands the TUI can
-	// actually run are counted, so a typo never pollutes the ranking.
 	if m.isKnownCommand(parts[0]) {
 		m.cmdUsage.Record(parts[0])
 	}
@@ -30,19 +24,11 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 	switch parts[0] {
 	case "/sessions":
 		m.resetModal(ModalSessions)
-		// T8: the picker exists to list the chats as they are right now, so it
-		// goes through the listing's single refresh point with the window
-		// bypassed (freshSessionListing) instead of calling ListSessions
-		// directly — that keeps "the heavy walk happens in exactly one place"
-		// true and warms the snapshot the frames that follow will read.
 		allSessions := m.freshSessionListing()
 		for _, s := range allSessions {
-			// Exclude subagent sessions from the session list — they have
-			// their own navigation via /subagents and are not top-level chats.
 			if isSubagentSessionKey(s.Key) {
 				continue
 			}
-			// Filter by current mode (empty mode = "agent" for backward compat).
 			sessionMode := s.Mode
 			if sessionMode == "" {
 				sessionMode = "agent"
@@ -55,10 +41,8 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 				name = i18n.T("tui.newChatDefault")
 			}
 
-			// Check if session is currently processing
 			isProcessing := m.agentLoop.GetProvidable().IsSessionProcessing(s.Key)
 
-			// Format session item (with loading indicator if processing)
 			item := name
 			if isProcessing {
 				item = fmt.Sprintf("[%s] %s", i18n.T("tui.loading"), item)
@@ -83,9 +67,6 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		return nil
 
 	case "/mode":
-		// TAB cycles agents; the chat/agent/group filter is a command so it
-		// stays out of the keyboard hot path. Bare "/mode" advances to the
-		// next mode, "/mode <name>" switches to that one.
 		m.handleModeCommand(parts[1:])
 		return nil
 
@@ -114,18 +95,12 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		if len(m.modalItems) == 0 {
 			m.modalItems = append(m.modalItems, i18n.T("tui.noneConfigured"))
 		}
-		// Pre-select the current session's model so the cursor lands on it.
-		// GetSessionModel returns the resolved provider:modelID value, while
-		// modalItems are provider:alias entries, so resolve each item before
-		// comparing.
 		if m.currentKey != "" {
 			curModel := m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
 			if curModel != "" && cfgSnapshot != nil && cfgSnapshot.Providers != nil {
 				for i, item := range m.modalItems {
 					if cfgSnapshot.Providers.ResolveModelAlias(item, "") == curModel {
 						m.modalSelectedIdx = i
-						// Keep scroll offset at 0; the view layer already
-						// clamps the visible window around the selection.
 						break
 					}
 				}
@@ -138,26 +113,17 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		if m.pendingModel != "" && m.currentKey != "" {
 			m.agentLoop.GetProvidable().SetSessionModel(m.currentKey, m.pendingModel)
 		}
-		// ClearSession erases the session history; the archived prefix in
-		// memory now references messages that no longer exist. Reset it
-		// explicitly rather than relying on refreshArchivedHistory's
-		// staleness detection (evictedTotal may or may not change depending
-		// on whether the evicted table was also cleared).
 		m.resetArchivedHistory()
 		m.reloadSessions()
 		return nil
 
 	case "/clearq":
-		// Drop the client-side queue for the current session only. Other
-		// sessions keep their backlog and flush when they become active.
 		n := m.queueDepth()
 		m.clearQueue()
 		m.queueFeedback = fmt.Sprintf(i18n.T("tui.queue.dropped"), n)
 		return nil
 
 	case "/flushq":
-		// Force-send the next queued message, cancelling a busy turn first.
-		// Returns the publish/tick command so the turn starts this frame.
 		return m.forceSendNextQueued()
 
 	case "/think":
@@ -172,14 +138,6 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 
 	case "/subagents":
 		m.resetModal(ModalSubagents)
-		// Subagent tasks store OriginSessionKey as "native:<chatID>", so we
-		// must pass the prefixed key for the lookup to match correctly.
-		//
-		// This deliberate fresh load (instead of the TUI's 3 s listing cache,
-		// T6) is the "load the heavy listing when the user opens the modal" side
-		// of the contract: it runs from an Update()-path command, never from a
-		// frame, and it is what makes the modal show the truth at open time
-		// rather than a snapshot up to subagentsCacheTTL old.
 		subagentQueryKey := m.currentKey
 		if !strings.HasPrefix(subagentQueryKey, "native:") {
 			subagentQueryKey = "native:" + subagentQueryKey
@@ -288,8 +246,6 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 	case "/add-model":
 		m.resetModal(ModalAddModel)
 		m.formStepIndex = 0
-		// alias, model_name, context_window, max_tokens, vision, thinking_type
-		// (see addModelStepCount — the add form has no reasoning steps).
 		m.formValues = make([]string, addModelStepCount)
 		m.formError = ""
 		m.formConfirmMode = false
@@ -318,9 +274,6 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		return tea.Batch(compactCmd, m.tickCmd())
 
 	case "/status":
-		// If we're on the welcome screen with no session, create one now —
-		// the same behavior as /goal so the report renders instead of being
-		// invisible behind the welcome screen.
 		if m.currentKey == "" {
 			m.createNewChat()
 			m.showWelcome = false
@@ -331,8 +284,6 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		return nil
 
 	case "/goal":
-		// If we're on the welcome screen with no session, create one now —
-		// the same behavior as submitMessage and submitGroupStart.
 		if m.currentKey == "" {
 			m.createNewChat()
 			m.showWelcome = false
@@ -341,18 +292,11 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		result := m.agentLoop.HandleGoalCommand(m.currentKey, parts[1:])
 		m.updateViewport()
 
-		// Setting a new goal (as opposed to status/pause/resume/clear) kicks
-		// off an autonomous agent turn via the message bus. Mark the session
-		// as processing and start the tick chain so the loading indicator
-		// appears and stays in sync with the backend.
 		if isGoalSetCommand(parts[1:]) {
 			goalText := strings.Join(parts[1:], " ")
-			// Strip --turns flag from display
 			if idx := strings.Index(goalText, "--turns"); idx > 0 {
 				goalText = strings.TrimSpace(goalText[:idx])
 			}
-			// Goal text is user-typed: sanitize before it becomes an overlay
-			// activity row (control/bidi chars must not reach the frame).
 			m.currentToolAction = "🎯 Goal set: " + sanitizeDisplayText(goalText)
 			m.processing = true
 			m.startTime = time.Now()
@@ -361,7 +305,6 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 			m.currentThinking = ""
 			return m.tickCmd()
 		}
-		// For status/pause/resume/clear, show result as tool action briefly
 		m.currentToolAction = sanitizeDisplayText(result)
 		return nil
 
@@ -370,11 +313,6 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		return tea.Quit
 	}
 
-	// Unknown to the built-in switch: it may be a custom (harness) slash
-	// command defined in config.json or a commands/*.md file. The backend
-	// expands these, so publish the raw "/name args" text exactly like a
-	// normal user message (queue it while a turn is running, same as the
-	// non-slash send path). Anything else keeps the previous behavior.
 	if m.isCustomCommand(parts[0]) {
 		content := strings.TrimSpace(cmd)
 		if m.processing {
@@ -385,18 +323,6 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 	return nil
 }
 
-// startConnectFlow initializes the /connect modal wizard. If preset is
-// non-nil it pre-fills the provider name, type and API base URL, skipping the
-// name and type steps so the user lands directly on the API Key (or, for local
-// providers like ollama with no key, on the API Base which is already
-// pre-filled). That path is UNCHANGED (onboarding still drives it).
-//
-// When preset is nil the flow is ROW-FIRST: the provider picker is shown on
-// the very first frame and the selected connectRow decides which steps are
-// skipped (the two custom rows ask for a name and run the full flow, known
-// providers ask only for the API key, the trailing free-type row reproduces
-// the legacy name → type → key → base flow). Step NUMBERS are never changed:
-// the picker only routes between them.
 func (m *Model) startConnectFlow(preset *providerPreset) {
 	m.resetModal(ModalAddProvider)
 	m.providerEditMode = false
@@ -409,27 +335,19 @@ func (m *Model) startConnectFlow(preset *providerPreset) {
 	m.providerTypePickerMax = 0
 	m.connectSuccess = false
 	m.providerTypeFromPreset = false
-	// Which picker (if any) is open is declared explicitly: connectRowPicker
-	// is set below only by the row-first /connect entry frame, and the legacy
-	// provider-TYPE picker clears it. connectRowIdx therefore keeps its
-	// honest meaning — -1 = nothing picked yet — instead of doubling as a
-	// "row-driven" flag (see types.go).
 	m.connectRowPicker = false
 	m.connectRowIdx = -1
 	m.connectSkipAPIBase = false
 	m.connectAlreadyUsable = false
-	m.formValues = make([]string, 11) // 0-3: provider, 4-8: model, 9: thinking_type, 10: review
+	m.formValues = make([]string, 11)
 
 	if preset != nil {
-		// Pre-fill from the chosen preset.
-		m.formValues[0] = preset.label   // provider name
-		m.formValues[1] = preset.typ     // provider type
-		m.formValues[3] = preset.apiBase // API base URL
+		m.formValues[0] = preset.label
+		m.formValues[1] = preset.typ
+		m.formValues[3] = preset.apiBase
 		m.providerTypeFromPreset = true
-		m.formStepIndex = 2 // skip to API Key step
+		m.formStepIndex = 2
 		m.providerSelectedName = strings.ToLower(strings.TrimSpace(preset.label))
-		// For local providers (ollama) the API key is optional, so skip to the
-		// API Base step (which is already pre-filled from the preset).
 		if preset.typ == "ollama" {
 			m.formStepIndex = 3
 		}
@@ -443,32 +361,18 @@ func (m *Model) startConnectFlow(preset *providerPreset) {
 			m.textInput.Placeholder = "API Base URL (default for this provider)"
 		}
 	} else {
-		// Row-first: the picker is the first frame. providerTypePickerMax is
-		// the number of ROWS (len(connectRows())), which includes the
-		// trailing free-type row — so the two legacy "+1" off-by-ones are
-		// gone by construction.
 		m.formStepIndex = 0
 		m.providerTypePicker = true
-		m.connectRowPicker = true // ROW-FIRST frame: the list is connectRows()
+		m.connectRowPicker = true
 		m.providerTypePickerIdx = 0
 		m.modalScrollOffset = 0
 		m.providerTypePickerMax = len(connectRows())
-		// The text input is not the interaction on the picker frame: keep
-		// both value AND placeholder empty so nothing stale renders behind
-		// the row list.
 		m.textInput.SetValue("")
 		m.textInput.Placeholder = ""
 	}
-	// Audit M2: the preset path lands directly on the API-key step (2), so
-	// sync the echo mode before the first frame renders the widget.
 	m.syncTextInputEcho()
 }
 
-// isGoalSetCommand reports whether the /goal arguments set a new goal
-// (free-form goal text) as opposed to invoking a subcommand
-// (status/pause/resume/clear) or showing usage. Only a new goal triggers
-// the autonomous kickoff turn, so only then should the TUI enter the
-// processing state.
 func isGoalSetCommand(args []string) bool {
 	if len(args) == 0 {
 		return false
@@ -480,13 +384,7 @@ func isGoalSetCommand(args []string) bool {
 	return true
 }
 
-// buildStatusReport returns a multi-line context usage report for the current
-// session. It is rendered in the viewport overlay so the stats remain visible
-// even when the sidebar is hidden.
 func (m *Model) buildStatusReport() string {
-	// /status runs on an Update() route (outside a render frame), so the count
-	// is hoisted here: one history read for the report, shared by the token
-	// cache key below.
 	current, window, cumInput, cumOutput := m.getTokenUsage(m.getHistoryMessageCount())
 	compactions := m.agentLoop.GetProvidable().GetCompactionCount(m.currentKey)
 

@@ -114,11 +114,9 @@ func TestExtractFrontmatter(t *testing.T) {
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Extract frontmatter
 			frontmatter := sl.extractFrontmatter(tc.content)
 			assert.NotEmpty(t, frontmatter, "Frontmatter should be extracted for %s line endings", tc.lineEndingType)
 
-			// Parse YAML to get name and description (parseSimpleYAML now handles all line ending types)
 			yamlMeta := sl.parseSimpleYAML(frontmatter)
 			assert.Equal(t, tc.expectedName, yamlMeta["name"], "Name should be correctly parsed from frontmatter with %s line endings", tc.lineEndingType)
 			assert.Equal(t, tc.expectedDesc, yamlMeta["description"], "Description should be correctly parsed from frontmatter with %s line endings", tc.lineEndingType)
@@ -181,12 +179,9 @@ func TestStripFrontmatter(t *testing.T) {
 	}
 }
 
-// TestSkillsLoader_LoadSkillTraversal verifies that malicious skill names with
-// path separators or traversal sequences are rejected without reading files.
 func TestSkillsLoader_LoadSkillTraversal(t *testing.T) {
 	workspace := t.TempDir()
 
-	// Place a sensitive file outside the skills dir that must not be readable.
 	secret := filepath.Join(workspace, "secret.txt")
 	if err := os.WriteFile(secret, []byte("TOPSECRET"), 0644); err != nil {
 		t.Fatal(err)
@@ -215,7 +210,6 @@ func TestSkillsLoader_LoadSkillTraversal(t *testing.T) {
 	}
 }
 
-// TestSkillsLoader_LoadSkillValidName verifies legitimate skills still load.
 func TestSkillsLoader_LoadSkillValidName(t *testing.T) {
 	workspace := t.TempDir()
 	skillDir := filepath.Join(workspace, "skills", "good-skill")
@@ -237,11 +231,6 @@ func TestSkillsLoader_LoadSkillValidName(t *testing.T) {
 	}
 }
 
-// --- BuildSkillsSummary allowlist filtering ---------------------------------
-
-// newSummaryLoader builds a loader rooted at a temp workspace containing the
-// given skills, with global and builtin dirs disabled so the result is fully
-// deterministic regardless of the machine running the tests.
 func newSummaryLoader(t *testing.T, names ...string) *SkillsLoader {
 	t.Helper()
 	workspace := t.TempDir()
@@ -258,7 +247,6 @@ func newSummaryLoader(t *testing.T, names ...string) *SkillsLoader {
 	return NewSkillsLoader(workspace, "", "")
 }
 
-// summaryNames extracts the <name> entries of a rendered summary.
 func summaryNames(t *testing.T, summary string) []string {
 	t.Helper()
 	var out []string
@@ -304,7 +292,6 @@ func TestBuildSkillsSummary_FilterSemantics(t *testing.T) {
 			}
 
 			if len(tc.expected) == 0 {
-				// Nothing to list → no empty <skills> block at all.
 				if summary != "" {
 					t.Errorf("expected empty summary, got:\n%s", summary)
 				}
@@ -313,7 +300,6 @@ func TestBuildSkillsSummary_FilterSemantics(t *testing.T) {
 			if !strings.HasPrefix(summary, "<skills>\n") || !strings.HasSuffix(summary, "\n</skills>") {
 				t.Errorf("summary lost its wrapper:\n%s", summary)
 			}
-			// Descriptions/paths must survive filtering.
 			for _, n := range tc.expected {
 				if !strings.Contains(summary, "<description>desc of "+n+"</description>") {
 					t.Errorf("expected description for %q in:\n%s", n, summary)
@@ -323,13 +309,9 @@ func TestBuildSkillsSummary_FilterSemantics(t *testing.T) {
 	}
 }
 
-// TestBuildSkillsSummary_SkipsDisabledSkillsEvenIfFiltered verifies the
-// allowlist narrows the enabled set instead of overriding it: a disabled skill
-// listed in the filter must stay out of the prompt.
 func TestBuildSkillsSummary_SkipsDisabledSkillsEvenIfFiltered(t *testing.T) {
 	sl := newSummaryLoader(t, "alpha", "beta")
 
-	// A config manager that disables "alpha" (beta stays enabled by default).
 	cfg := &WorkspaceSkillsConfig{Disabled: []string{"alpha"}}
 	sl.SetConfigManager(&WorkspaceConfigManager{workspace: "test", config: cfg})
 
@@ -340,7 +322,6 @@ func TestBuildSkillsSummary_SkipsDisabledSkillsEvenIfFiltered(t *testing.T) {
 	}
 }
 
-// TestBuildSkillsSummary_NoSkillsInstalled verifies the empty loader case.
 func TestBuildSkillsSummary_NoSkillsInstalled(t *testing.T) {
 	sl := newSummaryLoader(t)
 	if s := sl.BuildSkillsSummary(nil); s != "" {

@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-// Phase describes the current stage of an update.
 type Phase string
 
 const (
@@ -24,27 +23,21 @@ const (
 	PhaseFailed      Phase = "failed"
 )
 
-// State is a snapshot of the update pipeline.
 type State struct {
 	Phase     Phase     `json:"phase"`
-	Progress  float64   `json:"progress"` // 0-100 during download
+	Progress  float64   `json:"progress"`
 	From      string    `json:"from"`
 	To        string    `json:"to"`
 	Error     string    `json:"error,omitempty"`
 	StartedAt time.Time `json:"started_at,omitempty"`
 }
 
-// Options control an Apply run.
 type Options struct {
-	// Version pins a specific version ("" = latest).
-	Version string
-	// Restart controls whether the service is restarted after install.
-	Restart bool
-	// Progress receives state updates (optional).
+	Version  string
+	Restart  bool
 	Progress func(State)
 }
 
-// UpdateInfo is the result of a check.
 type UpdateInfo struct {
 	Current         string    `json:"current"`
 	Latest          string    `json:"latest"`
@@ -54,15 +47,12 @@ type UpdateInfo struct {
 	HTMLURL         string    `json:"html_url,omitempty"`
 }
 
-// Updater orchestrates check/download/install/restart.
-// It is safe for concurrent use; only one update runs at a time.
 type Updater struct {
 	Checker    *Checker
 	Downloader *Downloader
 	Installer  *Installer
 	Restarter  *Restarter
 
-	// CurrentVersion is the running version (from build ldflags).
 	CurrentVersion string
 
 	mu    sync.Mutex
@@ -70,7 +60,6 @@ type Updater struct {
 	busy  bool
 }
 
-// NewUpdater creates an Updater with all components wired.
 func NewUpdater(repo, backupDir, currentVersion string) *Updater {
 	return &Updater{
 		Checker:        NewChecker(repo),
@@ -82,14 +71,12 @@ func NewUpdater(repo, backupDir, currentVersion string) *Updater {
 	}
 }
 
-// State returns a copy of the current pipeline state.
 func (u *Updater) State() State {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return u.state
 }
 
-// Busy reports whether an update is in progress.
 func (u *Updater) Busy() bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -109,7 +96,6 @@ func (u *Updater) emit(opts Options, s State) {
 	}
 }
 
-// Check queries the latest release and compares with the current version.
 func (u *Updater) Check(ctx context.Context) (*UpdateInfo, error) {
 	rel, err := u.Checker.Latest(ctx)
 	if err != nil {
@@ -125,7 +111,6 @@ func (u *Updater) Check(ctx context.Context) (*UpdateInfo, error) {
 	}, nil
 }
 
-// Apply runs the full update pipeline. Returns the new version on success.
 func (u *Updater) Apply(ctx context.Context, opts Options) (string, error) {
 	u.mu.Lock()
 	if u.busy {
@@ -142,7 +127,6 @@ func (u *Updater) Apply(ctx context.Context, opts Options) (string, error) {
 
 	started := time.Now()
 
-	// 1. Resolve target release.
 	u.emit(opts, State{Phase: PhaseChecking, From: u.CurrentVersion, StartedAt: started})
 	var rel *Release
 	var err error
@@ -158,10 +142,9 @@ func (u *Updater) Apply(ctx context.Context, opts Options) (string, error) {
 
 	if !NewerVersion(u.CurrentVersion, rel.Tag) && opts.Version == "" {
 		u.emit(opts, State{Phase: PhaseDone, From: u.CurrentVersion, To: rel.Version(), StartedAt: started})
-		return u.CurrentVersion, nil // already up to date
+		return u.CurrentVersion, nil
 	}
 
-	// 2. Download + verify + extract.
 	var lastPct float64
 	u.emit(opts, State{Phase: PhaseDownloading, From: u.CurrentVersion, To: rel.Version(), StartedAt: started})
 	result, err := u.Downloader.Download(ctx, rel, func(downloaded, total int64) {
@@ -169,7 +152,7 @@ func (u *Updater) Apply(ctx context.Context, opts Options) (string, error) {
 			return
 		}
 		pct := float64(downloaded) / float64(total) * 100
-		if pct-lastPct >= 1 || pct >= 100 { // throttle callbacks
+		if pct-lastPct >= 1 || pct >= 100 {
 			lastPct = pct
 			u.emit(opts, State{Phase: PhaseDownloading, Progress: pct, From: u.CurrentVersion, To: rel.Version(), StartedAt: started})
 		}
@@ -180,14 +163,12 @@ func (u *Updater) Apply(ctx context.Context, opts Options) (string, error) {
 	}
 	defer os.RemoveAll(result.TempDir)
 
-	// 3. Validate the new binary before touching the real one.
 	u.emit(opts, State{Phase: PhaseVerifying, From: u.CurrentVersion, To: rel.Version(), StartedAt: started})
 	if err := validateBinary(result.BinaryPath, rel.Version()); err != nil {
 		u.fail(opts, fmt.Errorf("binary validation failed: %w", err))
 		return "", err
 	}
 
-	// 4. Install.
 	u.emit(opts, State{Phase: PhaseInstalling, From: u.CurrentVersion, To: rel.Version(), StartedAt: started})
 	targetPath, err := CurrentBinaryPath()
 	if err != nil {
@@ -199,17 +180,9 @@ func (u *Updater) Apply(ctx context.Context, opts Options) (string, error) {
 		return "", err
 	}
 
-	// 5. Restart (optional).
-	//
-	// Note on the self-exec path: Restarter.Restart spawns the replacement
-	// process, runs OnRestart (the gateway wires its shutdown coordinator) and
-	// then terminates this process, so the lines below may never be reached —
-	// that is intended, the new binary reports the updated version. The systemd
-	// paths return normally because systemd SIGTERMs us.
 	if opts.Restart {
 		u.emit(opts, State{Phase: PhaseRestarting, From: u.CurrentVersion, To: rel.Version(), StartedAt: started})
 		if _, err := u.Restarter.Restart(); err != nil {
-			// Install succeeded; restart failed. Not fatal for the update itself.
 			u.emit(opts, State{Phase: PhaseDone, From: u.CurrentVersion, To: rel.Version(), Error: "restart failed: " + err.Error(), StartedAt: started})
 			return rel.Version(), nil
 		}
@@ -219,7 +192,6 @@ func (u *Updater) Apply(ctx context.Context, opts Options) (string, error) {
 	return rel.Version(), nil
 }
 
-// Rollback restores the most recent backup over the current binary.
 func (u *Updater) Rollback(ctx context.Context) (string, error) {
 	backup, err := u.Installer.LatestBackup()
 	if err != nil {
@@ -232,8 +204,6 @@ func (u *Updater) Rollback(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Install the backup as the "new" binary (this also backs up the
-	// current one, so rollback is itself reversible).
 	if _, err := u.Installer.Install(backup, targetPath, u.CurrentVersion+"-rollback"); err != nil {
 		return "", err
 	}
@@ -244,8 +214,6 @@ func (u *Updater) fail(opts Options, err error) {
 	u.emit(opts, State{Phase: PhaseFailed, From: u.CurrentVersion, Error: err.Error()})
 }
 
-// validateBinary runs "<binary> version" and checks it reports the
-// expected version. This catches corrupt or wrong-arch binaries early.
 func validateBinary(path, expectedVersion string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

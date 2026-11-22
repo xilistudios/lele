@@ -7,23 +7,14 @@ export type ModeTheme = {
   labelKey: string
   descKey: string
   Icon: ComponentType<{ size?: number; className?: string }>
-  /** identity text color, e.g. 'text-mode-chat' (§2.4) */
   text: string
-  /** bg for dots/indicators, e.g. 'bg-mode-chat' (§2.4) */
   dot: string
-  /** soft translucent bg, e.g. 'bg-mode-chat/14' (§2.4) */
   softBg: string
-  /** translucent border, e.g. 'border-mode-chat/30' (§2.4) */
   border: string
-  /** full class string for the header mode chip */
   chip: string
-  /** active mode tab: tint+text+underline, never solid fill (§2.4/§5.7) */
   tabActive: string
-  /** full class string for a selected session item in the sidebar */
   selectedItem: string
-  /** full class string for the composer top accent bar */
   accentBar: string
-  /** full class string for the empty-state icon circle */
   iconCircle: string
 }
 
@@ -38,12 +29,7 @@ const THEMES: Record<ChatMode, ModeTheme> = {
     softBg: 'bg-mode-chat/10',
     border: 'border-mode-chat/30',
     chip: 'bg-mode-chat/10 border border-mode-chat/30 text-mode-chat',
-    // §2.4 tabActive: tint/10 over L2 (bg-background-tertiary).
-    // chat identity passes dark (6.16 ✅) but fails light (4.20 ❌) → dark: variant.
-    // agent identity fails both (4.39 D / 4.33 L) → text-primary only (intentional asymmetry
-    // with selectedItem, which uses the §2.4 dark: pattern for chat/group but not agent).
     tabActive: 'bg-mode-chat/10 text-text-primary dark:text-mode-chat border-b-2 border-mode-chat',
-    // §2.4 excepción extendida (F1): chat claro sobre tinte/14 = 4.498 < 4.5 → texto primary en claro
     selectedItem:
       'bg-mode-chat/14 text-text-primary dark:text-mode-chat border border-mode-chat/40',
     accentBar: 'bg-mode-chat/60',
@@ -59,8 +45,6 @@ const THEMES: Record<ChatMode, ModeTheme> = {
     softBg: 'bg-mode-agent/10',
     border: 'border-mode-agent/30',
     chip: 'bg-mode-agent/10 border border-mode-agent/30 text-mode-agent',
-    // §2.4 tabActive: tint/10 over L2; agent identity fails AA in both themes
-    // (4.39 dark / 4.33 light) → text-primary only; no dark: variant may be added.
     tabActive: 'bg-mode-agent/10 text-text-primary border-b-2 border-mode-agent',
     selectedItem: 'bg-mode-agent/14 text-mode-agent border border-mode-agent/40',
     accentBar: 'bg-mode-agent/60',
@@ -71,23 +55,13 @@ const THEMES: Record<ChatMode, ModeTheme> = {
     labelKey: 'mode.group',
     descKey: 'mode.groupDescription',
     Icon: GroupsIcon,
-    // §2.4 excepción group-claro (F1-review N1): los otros 3 roles de texto (chip,
-    // selectedItem, iconCircle) ya usaban text-primary en claro; .text quedó fuera y su
-    // único consumidor (MessageList status badge) pinta softBg/10 DENTRO de un contenedor
-    // softBg/10 → tinte doble = 3.91 ❌ bajo AA. Mismo tratamiento: tinta en claro,
-    // color en oscuro.
     text: 'text-text-primary dark:text-mode-group',
     dot: 'bg-mode-group',
     softBg: 'bg-mode-group/10',
     border: 'border-mode-group/30',
-    // §2.4 group-claro: 4.48 sobre tinte/10 → texto primary en claro, color en borde
     chip: 'bg-mode-group/10 border border-mode-group/30 text-text-primary dark:text-mode-group',
-    // §2.4 tabActive: tint/10 over L2; group identity passes dark (4.96 ✅) but fails
-    // light (3.95 ❌) → dark: variant, same pattern as selectedItem/iconCircle.
     tabActive:
       'bg-mode-group/10 text-text-primary dark:text-mode-group border-b-2 border-mode-group',
-    // §2.4 excepción group-claro: #C2410C sobre su tinte = 4.48 (<4.5) → el texto del
-    // item seleccionado usa text-primary en claro; el color queda en dot/borde.
     selectedItem:
       'bg-mode-group/14 text-text-primary dark:text-mode-group border border-mode-group/40',
     accentBar: 'bg-mode-group/60',
@@ -101,7 +75,6 @@ export function getModeTheme(mode: ChatMode | undefined | null): ModeTheme {
 
 export const ALL_MODES: ChatMode[] = ['chat', 'agent', 'group']
 
-/** @deprecated Use getModeList() instead for feature-flag-aware filtering */
 export const MODE_LIST: ChatMode[] = ALL_MODES
 
 export function getModeList(groupsEnabled: boolean): ChatMode[] {

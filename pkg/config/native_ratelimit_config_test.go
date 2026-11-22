@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package config
 
 import (
@@ -13,9 +7,6 @@ import (
 	"testing"
 )
 
-// TestNativeRateLimitDefaultsToDisabled verifies that DefaultConfig ships with
-// rate limiting OFF and the five traffic rates equal to the exported constants
-// (a single source of truth for the numbers).
 func TestNativeRateLimitDefaultsToDisabled(t *testing.T) {
 	rl := DefaultConfig().Channels.Native.RateLimit
 
@@ -39,10 +30,6 @@ func TestNativeRateLimitDefaultsToDisabled(t *testing.T) {
 	}
 }
 
-// TestNativeRateLimitRoundTripsThroughSerializable pins the most critical
-// door: toSerializable() (the map that SaveEditableDocument writes to disk)
-// must carry the whole rate_limit struct.  Without it, every WebUI save
-// silently deletes the block from config.json.
 func TestNativeRateLimitRoundTripsThroughSerializable(t *testing.T) {
 	doc := defaultEditableDocument()
 	doc.Channels.Native.RateLimit = NativeRateLimitConfig{
@@ -69,8 +56,6 @@ func TestNativeRateLimitRoundTripsThroughSerializable(t *testing.T) {
 	}
 }
 
-// TestNativeRateLimitSurvivesSaveEditableDocument exercises the real disk
-// path: SaveEditableDocument → read back → JSON must contain the block.
 func TestNativeRateLimitSurvivesSaveEditableDocument(t *testing.T) {
 	doc := defaultEditableDocument()
 	doc.Channels.Native.RateLimit = NativeRateLimitConfig{
@@ -91,7 +76,6 @@ func TestNativeRateLimitSurvivesSaveEditableDocument(t *testing.T) {
 		t.Fatalf("saved config is not valid JSON: %s", raw)
 	}
 
-	// Dig into the native channel block.
 	var parsed map[string]any
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		t.Fatalf("unmarshal top-level: %v", err)
@@ -116,8 +100,6 @@ func TestNativeRateLimitSurvivesSaveEditableDocument(t *testing.T) {
 	}
 }
 
-// TestNativeRateLimitToConfigPreservesBlock verifies that ToConfig (the
-// runtime path via toSerializable + unmarshal) carries the rate limit block.
 func TestNativeRateLimitToConfigPreservesBlock(t *testing.T) {
 	doc := defaultEditableDocument()
 	doc.Channels.Native.RateLimit = NativeRateLimitConfig{
@@ -155,9 +137,6 @@ func TestNativeRateLimitToConfigPreservesBlock(t *testing.T) {
 	}
 }
 
-// TestNativeRateLimitEditableDocumentFromConfig verifies that
-// editableDocumentFromConfig copies the rate limit block from the runtime
-// config into the editable document (the GET path that feeds the WebUI).
 func TestNativeRateLimitEditableDocumentFromConfig(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Channels.Native.RateLimit.PinPerMinute = 7
@@ -169,14 +148,10 @@ func TestNativeRateLimitEditableDocumentFromConfig(t *testing.T) {
 	}
 }
 
-// TestNativeRateLimitApplyDefaultsFillsZeroRates checks that applyDefaults
-// fills zero-valued rates with the built-in defaults, but does NOT touch
-// Enabled (bool false is indistinguishable from unset).
 func TestNativeRateLimitApplyDefaultsFillsZeroRates(t *testing.T) {
 	doc := defaultEditableDocument()
 	doc.Channels.Native.RateLimit = NativeRateLimitConfig{
 		Enabled: true,
-		// all five rates left at zero
 	}
 
 	applyDefaults(doc)
@@ -202,8 +177,6 @@ func TestNativeRateLimitApplyDefaultsFillsZeroRates(t *testing.T) {
 	}
 }
 
-// TestNativeRateLimitApplyDefaultsKeepsDisabled verifies that a document with
-// Enabled=false and all rates at zero remains disabled after applyDefaults.
 func TestNativeRateLimitApplyDefaultsKeepsDisabled(t *testing.T) {
 	doc := defaultEditableDocument()
 	doc.Channels.Native.RateLimit = NativeRateLimitConfig{
@@ -217,15 +190,11 @@ func TestNativeRateLimitApplyDefaultsKeepsDisabled(t *testing.T) {
 	}
 }
 
-// TestNativeRateLimitEnvOverrides pins the env-var recursion contract:
-// caarlos0/env v11 recurses into untagged parent structs, so
-// LELE_CHANNELS_NATIVE_RATE_LIMIT_ENABLED must reach the nested field.
 func TestNativeRateLimitEnvOverrides(t *testing.T) {
 	t.Setenv("LELE_CHANNELS_NATIVE_RATE_LIMIT_ENABLED", "true")
 	t.Setenv("LELE_CHANNELS_NATIVE_RATE_LIMIT_PIN_PER_MINUTE", "3")
 
 	path := filepath.Join(t.TempDir(), "config.json")
-	// Write a minimal valid config without the rate_limit block.
 	if err := os.WriteFile(path, []byte(`{}`), 0600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -244,8 +213,6 @@ func TestNativeRateLimitEnvOverrides(t *testing.T) {
 	}
 }
 
-// TestNativeRateLimitValidateRejectsNegative checks that negative rate values
-// are always rejected (regardless of enabled flag), while 0 is accepted.
 func TestNativeRateLimitValidateRejectsNegative(t *testing.T) {
 	t.Run("negative_pin", func(t *testing.T) {
 		doc := defaultEditableDocument()

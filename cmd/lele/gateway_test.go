@@ -50,7 +50,6 @@ func TestParseGatewayFlags(t *testing.T) {
 }
 
 func TestEmitDesktopError(t *testing.T) {
-	// Redirect stdout to capture the emitted machine-readable line.
 	old := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -82,13 +81,11 @@ func TestEmitDesktopError(t *testing.T) {
 	if m["code"] != "already_running" {
 		t.Errorf("code = %v, want already_running", m["code"])
 	}
-	// pid may be a float64 after JSON round-trip.
 	if pid, ok := m["pid"].(float64); !ok || pid != 1234 {
 		t.Errorf("pid = %v, want 1234", m["pid"])
 	}
 }
 func TestShouldServeWebUI(t *testing.T) {
-	// cfg builds a config with the given channel flags.
 	cfg := func(webEnabled, nativeEnabled bool) *config.Config {
 		c := config.DefaultConfig()
 		c.Channels.Web.Enabled = webEnabled

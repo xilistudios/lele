@@ -35,7 +35,6 @@ type RenderItem =
 
 const START_INDEX = 10000
 
-
 function messageKey(m: ChatMessage): string {
   return m.stableId ?? m.id
 }
@@ -123,7 +122,6 @@ export function MessageList() {
     [handleLoadMoreScroll],
   )
 
-  // Clean up scroll listener on unmount
   useEffect(() => {
     return () => {
       if (scrollerRef.current && loadMoreScrollAttached.current) {
@@ -151,7 +149,6 @@ export function MessageList() {
 
   const hasActiveGroup = Array.from(groups.values()).some((g) => g.status === 'started')
 
-  // ── Build a merged timeline of messages and group blocks ──
   const renderItems: RenderItem[] = useMemo(() => {
     const items: RenderItem[] = []
     for (let i = 0; i < displayMessages.length; i++) {
@@ -177,7 +174,6 @@ export function MessageList() {
         )
       }
 
-      // ── Group block: header + turns + synthesis ──
       const group = item.group
       const groupTheme = getModeTheme('group')
       const highestTurn = group.turns.reduce(
@@ -191,7 +187,6 @@ export function MessageList() {
 
       return (
         <div key={`group-block-${group.groupID}`}>
-          {/* Group header */}
           <div className="py-2">
             <div
               className={`rounded-lg border ${groupTheme.border} ${groupTheme.softBg} px-3 py-2`}
@@ -228,7 +223,6 @@ export function MessageList() {
             </div>
           </div>
 
-          {/* Group turns */}
           {group.turns.map((turn) => (
             <div key={`group-turn-${turn.groupID}-${turn.turnIndex}`} className="py-2">
               <div className="mb-1 flex items-center gap-2">
@@ -249,7 +243,6 @@ export function MessageList() {
             </div>
           ))}
 
-          {/* Group synthesis */}
           {group.synthesis && (
             <div className="py-2">
               <div className="mb-1 flex items-center gap-2">
@@ -280,10 +273,7 @@ export function MessageList() {
     })
   }, [firstItemIndex, renderItems])
 
-  // ── Empty state (AFTER all hooks to satisfy Rules of Hooks) ──
   if (renderItems.length === 0) {
-    // History is still loading for this session — show a spinner instead of
-    // flashing the empty-chat state.
     if (isHistoryLoading) {
       return (
         <div className="flex h-full items-center justify-center">
@@ -408,7 +398,6 @@ export function MessageList() {
                   </div>
                 </div>
               )}
-              {/* Group execution loading indicator — shown when a group is actively running */}
               {hasActiveGroup && !messages.some((m) => m.streaming) && (
                 <div className="flex items-center gap-2 py-3 text-text-tertiary text-sm">
                   <span className="inline-block h-2 w-2 rounded-full bg-mode-group animate-pulse" />
@@ -417,7 +406,6 @@ export function MessageList() {
                   <span className="ml-1 text-xs">{t('groups.executing')}</span>
                 </div>
               )}
-              {/* Regular loading dots — hidden when a group is active to avoid duplication */}
               {isProcessing && !hasActiveGroup && !messages.some((m) => m.streaming) && (
                 <div className="flex items-center gap-2 py-3 text-text-tertiary text-sm">
                   <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse" />
@@ -425,7 +413,6 @@ export function MessageList() {
                   <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse [animation-delay:0.4s]" />
                 </div>
               )}
-              {/* Typing indicator from another device */}
               {typingIndicator && typingIndicator.deviceId !== session?.client_id && (
                 <div className="flex items-center gap-2 px-4 py-2 text-xs text-text-tertiary animate-pulse">
                   <span className="flex gap-0.5">

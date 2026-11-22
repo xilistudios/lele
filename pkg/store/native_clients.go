@@ -8,15 +8,10 @@ import (
 	"time"
 )
 
-// NativeClientRepo provides CRUD operations on the native_clients table.
-// The client column stores an opaque JSON string serialised by the domain
-// layer; this package never interprets its contents.
 type NativeClientRepo struct {
 	db *sql.DB
 }
 
-// GetClient returns the client JSON for the given id. If no row exists
-// the found return is false with a nil error.
 func (r *NativeClientRepo) GetClient(id string) (string, bool, error) {
 	var client string
 	err := r.db.QueryRow(
@@ -31,9 +26,6 @@ func (r *NativeClientRepo) GetClient(id string) (string, bool, error) {
 	return client, true, nil
 }
 
-// SetClient inserts or updates the client for the given id. On insert
-// created_at is set to the current time; on update only the client
-// column is changed (created_at is preserved).
 func (r *NativeClientRepo) SetClient(id, clientJSON string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := r.db.Exec(
@@ -47,7 +39,6 @@ func (r *NativeClientRepo) SetClient(id, clientJSON string) error {
 	return nil
 }
 
-// DeleteClient removes the client with the given id.
 func (r *NativeClientRepo) DeleteClient(id string) error {
 	if _, err := r.db.Exec(`DELETE FROM native_clients WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("store: delete native client %q: %w", id, err)
@@ -55,7 +46,6 @@ func (r *NativeClientRepo) DeleteClient(id string) error {
 	return nil
 }
 
-// DeleteAllClients removes all native clients.
 func (r *NativeClientRepo) DeleteAllClients() error {
 	if _, err := r.db.Exec(`DELETE FROM native_clients`); err != nil {
 		return fmt.Errorf("store: delete all native clients: %w", err)
@@ -63,8 +53,6 @@ func (r *NativeClientRepo) DeleteAllClients() error {
 	return nil
 }
 
-// ListClients returns all native clients keyed by id. The returned map
-// is never nil.
 func (r *NativeClientRepo) ListClients() (map[string]string, error) {
 	rows, err := r.db.Query(`SELECT id, client FROM native_clients`)
 	if err != nil {
@@ -86,13 +74,6 @@ func (r *NativeClientRepo) ListClients() (map[string]string, error) {
 	return clients, nil
 }
 
-// ---------------------------------------------------------------------------
-// Pending native pairing PINs (native_pending_pins table)
-// ---------------------------------------------------------------------------
-
-// InsertPendingPIN stores a new pending PIN. The caller owns the JSON
-// serialisation of pendingJSON and the unix-nanosecond timestamps.
-// A duplicate pin propagates as an error (no silent upsert).
 func (r *NativeClientRepo) InsertPendingPIN(pin, pendingJSON string, createdAt, expiresAt int64) error {
 	_, err := r.db.Exec(
 		`INSERT INTO native_pending_pins(pin, pending, created_at, expires_at)
@@ -100,11 +81,6 @@ func (r *NativeClientRepo) InsertPendingPIN(pin, pendingJSON string, createdAt, 
 		pin, pendingJSON, createdAt, expiresAt,
 	)
 	if err != nil {
-		// Detect UNIQUE constraint violation by error text. We cannot
-		// use errors.As with modernc.org/sqlite types here because
-		// driver_sqlite.go is excluded on linux/mips64 (see
-		// driver_stub.go); importing the driver type in a universally
-		// compiled file would break the mips64 cross-compile CI job.
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return fmt.Errorf("store: insert pending PIN %q: %w", pin, ErrDuplicate)
 		}
@@ -113,8 +89,6 @@ func (r *NativeClientRepo) InsertPendingPIN(pin, pendingJSON string, createdAt, 
 	return nil
 }
 
-// GetPendingPIN retrieves a pending PIN. When the pin does not exist
-// found is false with a nil error (same contract as GetClient).
 func (r *NativeClientRepo) GetPendingPIN(pin string) (pendingJSON string, expiresAt int64, found bool, err error) {
 	err = r.db.QueryRow(
 		`SELECT pending, expires_at FROM native_pending_pins WHERE pin = ?`, pin,
@@ -128,11 +102,6 @@ func (r *NativeClientRepo) GetPendingPIN(pin string) (pendingJSON string, expire
 	return pendingJSON, expiresAt, true, nil
 }
 
-// TakePendingPIN atomically deletes and returns a non-expired pending
-// PIN in a single statement. This is the core single-use guarantee:
-// two concurrent callers on different connections see exactly one
-// winner. Uses an explicit transaction so the caller can distinguish
-// "pin not found or expired" (found=false, err=nil) from real errors.
 func (r *NativeClientRepo) TakePendingPIN(pin string, nowNanos int64) (string, bool, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -158,8 +127,6 @@ func (r *NativeClientRepo) TakePendingPIN(pin string, nowNanos int64) (string, b
 	return pendingJSON, true, nil
 }
 
-// DeletePendingPIN removes a pending PIN. Deleting a non-existent pin
-// is not an error (consistent with KVRepo.Delete).
 func (r *NativeClientRepo) DeletePendingPIN(pin string) error {
 	if _, err := r.db.Exec(`DELETE FROM native_pending_pins WHERE pin = ?`, pin); err != nil {
 		return fmt.Errorf("store: delete pending PIN: %w", err)
@@ -167,9 +134,6 @@ func (r *NativeClientRepo) DeletePendingPIN(pin string) error {
 	return nil
 }
 
-// ListPendingPINs returns all non-expired pending PINs keyed by pin.
-// The returned map is never nil. Results are ordered by created_at ASC,
-// pin ASC for deterministic FIFO eviction.
 func (r *NativeClientRepo) ListPendingPINs(nowNanos int64) (map[string]string, error) {
 	rows, err := r.db.Query(
 		`SELECT pin, pending FROM native_pending_pins
@@ -195,8 +159,6 @@ func (r *NativeClientRepo) ListPendingPINs(nowNanos int64) (map[string]string, e
 	return pins, nil
 }
 
-// DeleteExpiredPendingPINs removes all expired pending PINs and returns
-// the number of rows deleted.
 func (r *NativeClientRepo) DeleteExpiredPendingPINs(nowNanos int64) (int64, error) {
 	res, err := r.db.Exec(
 		`DELETE FROM native_pending_pins WHERE expires_at <= ?`, nowNanos,
@@ -211,7 +173,6 @@ func (r *NativeClientRepo) DeleteExpiredPendingPINs(nowNanos int64) (int64, erro
 	return n, nil
 }
 
-// CountPendingPINs returns the number of non-expired pending PINs.
 func (r *NativeClientRepo) CountPendingPINs(nowNanos int64) (int, error) {
 	var count int
 	err := r.db.QueryRow(
@@ -223,10 +184,6 @@ func (r *NativeClientRepo) CountPendingPINs(nowNanos int64) (int, error) {
 	return count, nil
 }
 
-// EvictOldestPendingPIN deletes and returns the non-expired pending PIN
-// with the smallest (created_at, pin) — deterministic FIFO order.
-// Uses an explicit transaction for atomicity. Returns ("", nil) when
-// there is nothing to evict.
 func (r *NativeClientRepo) EvictOldestPendingPIN(nowNanos int64) (string, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -257,9 +214,6 @@ func (r *NativeClientRepo) EvictOldestPendingPIN(nowNanos int64) (string, error)
 	return pin, nil
 }
 
-// CountClients returns the number of rows in native_clients. This is
-// the authoritative inter-process counter for the MaxClients check
-// (the in-memory map of the gateway is stale against other processes).
 func (r *NativeClientRepo) CountClients() (int, error) {
 	var count int
 	err := r.db.QueryRow(`SELECT COUNT(*) FROM native_clients`).Scan(&count)

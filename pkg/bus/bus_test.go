@@ -19,7 +19,6 @@ func TestMessageBus_PublishInboundNonBlocking(t *testing.T) {
 		}
 	}
 
-	// The first cap(inbound) publishes must be accepted, the rest rejected.
 	if accepted != cap(mb.inbound) {
 		t.Errorf("expected %d accepted publishes, got %d", cap(mb.inbound), accepted)
 	}
@@ -30,10 +29,6 @@ func TestMessageBus_PublishInboundNonBlocking(t *testing.T) {
 	}
 }
 
-// TestMessageBus_PublishInboundReturnValues pins down the acceptance
-// contract: true when enqueued, false when the queue is full, false after
-// Close. Callers rely on false to roll back side effects (typing
-// indicators, placeholders).
 func TestMessageBus_PublishInboundReturnValues(t *testing.T) {
 	t.Run("accepted returns true", func(t *testing.T) {
 		mb := NewMessageBus()
@@ -184,22 +179,12 @@ func TestMessageBus_SubscribeOutboundWithContextCancel(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Outbound spooler seam (B1-B4)
-// ──────────────────────────────────────────────────────────────────────────────
-
-// fakeOutboundSpooler records every call the bus makes on the seam. tag is
-// the stand-in for "this implementation wrote a row": when it is true Enqueue
-// assigns a fresh SpoolID, when it is false the message is left untouched
-// exactly as an ineligible or durability-off Enqueue behaves.
 type fakeOutboundSpooler struct {
-	mu       sync.Mutex
-	tag      bool
-	enqueued []OutboundMessage
-	released []int64
-	nextID   int64
-	// enqueueOrder, when set, is called while Enqueue runs so a test can
-	// observe the bus state at that instant.
+	mu           sync.Mutex
+	tag          bool
+	enqueued     []OutboundMessage
+	released     []int64
+	nextID       int64
 	enqueueOrder func()
 }
 
@@ -237,7 +222,6 @@ func (f *fakeOutboundSpooler) releasedIDs() []int64 {
 	return append([]int64(nil), f.released...)
 }
 
-// B1: without a spooler the outbound path is exactly what it always was.
 func TestMessageBus_PublishOutboundWithoutSpoolerUnchanged(t *testing.T) {
 	mb := NewMessageBus()
 	defer mb.Close()
@@ -264,15 +248,11 @@ func TestMessageBus_PublishOutboundWithoutSpoolerUnchanged(t *testing.T) {
 	}
 }
 
-// B2: Enqueue runs before the channel handoff and the SpoolID it tags reaches
-// the consumer, because msg is a value parameter and the tagged copy is what
-// goes into the queue.
 func TestMessageBus_PublishOutboundEnqueuesBeforeChannel(t *testing.T) {
 	mb := NewMessageBus()
 	defer mb.Close()
 
 	sp := &fakeOutboundSpooler{tag: true, enqueueOrder: func() {
-		// At this instant nothing has been queued yet.
 		if _, _, _, outLen, _, _ := mb.Stats(); outLen != 0 {
 			t.Errorf("outbound queue length = %d during Enqueue, want 0", outLen)
 		}
@@ -296,8 +276,6 @@ func TestMessageBus_PublishOutboundEnqueuesBeforeChannel(t *testing.T) {
 	}
 }
 
-// B3: a full queue releases the row the spooler wrote, so the replay pump -
-// not the silent drop counter - owns the message.
 func TestMessageBus_PublishOutboundReleasesOnFullQueue(t *testing.T) {
 	mb := NewMessageBus()
 	defer mb.Close()
@@ -327,8 +305,6 @@ func TestMessageBus_PublishOutboundReleasesOnFullQueue(t *testing.T) {
 	}
 }
 
-// B4: after Close the row is released too. Close() takes mu.Lock, so this also
-// pins down that the spooler call never happens under mu.
 func TestMessageBus_PublishOutboundReleasesWhenClosed(t *testing.T) {
 	mb := NewMessageBus()
 
@@ -346,9 +322,6 @@ func TestMessageBus_PublishOutboundReleasesWhenClosed(t *testing.T) {
 	}
 }
 
-// A spooler that declines (durability off, or an ineligible message) leaves
-// SpoolID at 0, so even a dropped publish must not call Release: there is no
-// row to hand back.
 func TestMessageBus_PublishOutboundDeclinedSkipsRelease(t *testing.T) {
 	mb := NewMessageBus()
 	defer mb.Close()
@@ -370,7 +343,6 @@ func TestMessageBus_PublishOutboundDeclinedSkipsRelease(t *testing.T) {
 	}
 }
 
-// A nil spooler wired explicitly is the same as wiring nothing.
 func TestMessageBus_SetNilSpoolerKeepsOldPath(t *testing.T) {
 	mb := NewMessageBus()
 	defer mb.Close()
@@ -390,10 +362,6 @@ func TestMessageBus_SetNilSpoolerKeepsOldPath(t *testing.T) {
 		t.Errorf("SpoolID = %d with a nil spooler, want 0", got.SpoolID)
 	}
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Closed-channel consumer tests (CORE-05)
-// ──────────────────────────────────────────────────────────────────────────────
 
 func TestConsumeInbound_ReturnsFalseAfterClose(t *testing.T) {
 	mb := NewMessageBus()
@@ -418,8 +386,6 @@ func TestSubscribeOutbound_ReturnsFalseAfterClose(t *testing.T) {
 func TestConsumeInbound_LoopTerminatesAfterClose(t *testing.T) {
 	mb := NewMessageBus()
 
-	// Pre-fill the queue so the consumer has messages to read before
-	// observing the closed state.
 	for i := 0; i < 10; i++ {
 		mb.PublishInbound(InboundMessage{Channel: "test", Content: "msg"})
 	}
@@ -439,8 +405,6 @@ func TestConsumeInbound_LoopTerminatesAfterClose(t *testing.T) {
 			t.Fatalf("consumer loop did not terminate after 200 iterations (likely busy-spinning on closed channel)")
 		}
 	}
-	// The loop terminated — that's the assertion. A pre-fix bus would
-	// busy-spin forever and hit the 200-iteration cap.
 }
 
 func TestSubscribeOutbound_LoopTerminatesAfterClose(t *testing.T) {

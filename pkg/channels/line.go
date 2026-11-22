@@ -37,22 +37,18 @@ type replyTokenEntry struct {
 	timestamp time.Time
 }
 
-// LINEChannel implements the Channel interface for LINE Official Account
-// using the LINE Messaging API with HTTP webhook for receiving messages
-// and REST API for sending messages.
 type LINEChannel struct {
 	*BaseChannel
 	config         config.LINEConfig
-	botUserID      string   // Bot's user ID
-	botBasicID     string   // Bot's basic ID (e.g. @216ru...)
-	botDisplayName string   // Bot's display name for text-based mention detection
-	replyTokens    sync.Map // chatID -> replyTokenEntry
-	quoteTokens    sync.Map // chatID -> quoteToken (string)
+	botUserID      string
+	botBasicID     string
+	botDisplayName string
+	replyTokens    sync.Map
+	quoteTokens    sync.Map
 	ctx            context.Context
 	cancel         context.CancelFunc
 }
 
-// NewLINEChannel creates a new LINE channel instance.
 func NewLINEChannel(cfg config.LINEConfig, messageBus *bus.MessageBus) (*LINEChannel, error) {
 	if cfg.ChannelSecret == "" || cfg.ChannelAccessToken == "" {
 		return nil, fmt.Errorf("line channel_secret and channel_access_token are required")
@@ -66,13 +62,10 @@ func NewLINEChannel(cfg config.LINEConfig, messageBus *bus.MessageBus) (*LINECha
 	}, nil
 }
 
-// Start initializes state but doesn't listen — webhook routes are registered
-// via RegisterWebhook on the unified server.
 func (c *LINEChannel) Start(ctx context.Context) error {
 
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
-	// Fetch bot profile to get bot's userId for mention detection
 	if err := c.fetchBotInfo(); err != nil {
 		logger.WarnCF("line", "Failed to fetch bot info (mention detection disabled)", map[string]interface{}{
 			"error": err.Error(),
@@ -89,7 +82,6 @@ func (c *LINEChannel) Start(ctx context.Context) error {
 	return nil
 }
 
-// fetchBotInfo retrieves the bot's userId, basicId, and displayName from the LINE API.
 func (c *LINEChannel) fetchBotInfo() error {
 	req, err := http.NewRequest(http.MethodGet, lineBotInfoEndpoint, nil)
 	if err != nil {
@@ -123,7 +115,6 @@ func (c *LINEChannel) fetchBotInfo() error {
 	return nil
 }
 
-// Stop gracefully shuts down the LINE channel.
 func (c *LINEChannel) Stop(ctx context.Context) error {
 
 	if c.cancel != nil {
@@ -134,7 +125,6 @@ func (c *LINEChannel) Stop(ctx context.Context) error {
 	return nil
 }
 
-// RegisterWebhook registers the LINE webhook handler on the given mux.
 func (c *LINEChannel) RegisterWebhook(mux *http.ServeMux) {
 	path := c.config.WebhookPath
 	if path == "" {
@@ -143,16 +133,12 @@ func (c *LINEChannel) RegisterWebhook(mux *http.ServeMux) {
 	mux.HandleFunc(path, c.webhookHandler)
 }
 
-// webhookHandler handles incoming LINE webhook requests.
 func (c *LINEChannel) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Cap the body BEFORE reading: the signature is verified after the read,
-	// so an unauthenticated caller must not be able to force unbounded memory
-	// consumption. LINE webhook payloads are small JSON; 1MB is generous.
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -181,7 +167,6 @@ func (c *LINEChannel) webhookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return 200 immediately, process events asynchronously
 	w.WriteHeader(http.StatusOK)
 
 	for _, event := range payload.Events {
@@ -189,7 +174,6 @@ func (c *LINEChannel) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// verifySignature validates the X-Line-Signature using HMAC-SHA256.
 func (c *LINEChannel) verifySignature(body []byte, signature string) bool {
 	if signature == "" {
 		return false
@@ -202,7 +186,6 @@ func (c *LINEChannel) verifySignature(body []byte, signature string) bool {
 	return hmac.Equal([]byte(expected), []byte(signature))
 }
 
-// LINE webhook event types
 type lineEvent struct {
 	Type       string          `json:"type"`
 	ReplyToken string          `json:"replyToken"`
@@ -212,7 +195,7 @@ type lineEvent struct {
 }
 
 type lineSource struct {
-	Type    string `json:"type"` // "user", "group", "room"
+	Type    string `json:"type"`
 	UserID  string `json:"userId"`
 	GroupID string `json:"groupId"`
 	RoomID  string `json:"roomId"`
@@ -220,7 +203,7 @@ type lineSource struct {
 
 type lineMessage struct {
 	ID         string `json:"id"`
-	Type       string `json:"type"` // "text", "image", "video", "audio", "file", "sticker"
+	Type       string `json:"type"`
 	Text       string `json:"text"`
 	QuoteToken string `json:"quoteToken"`
 	Mention    *struct {
@@ -234,7 +217,7 @@ type lineMessage struct {
 type lineMentionee struct {
 	Index  int    `json:"index"`
 	Length int    `json:"length"`
-	Type   string `json:"type"` // "user", "all"
+	Type   string `json:"type"`
 	UserID string `json:"userId"`
 }
 
@@ -258,7 +241,6 @@ func (c *LINEChannel) processEvent(event lineEvent) {
 		return
 	}
 
-	// In group chats, only respond when the bot is mentioned
 	if isGroup && !c.isBotMentioned(msg) {
 		logger.DebugCF("line", "Ignoring group message without mention", map[string]interface{}{
 			"chat_id": chatID,
@@ -266,7 +248,6 @@ func (c *LINEChannel) processEvent(event lineEvent) {
 		return
 	}
 
-	// Store reply token for later use
 	if event.ReplyToken != "" {
 		c.replyTokens.Store(chatID, replyTokenEntry{
 			token:     event.ReplyToken,
@@ -274,7 +255,6 @@ func (c *LINEChannel) processEvent(event lineEvent) {
 		})
 	}
 
-	// Store quote token for quoting the original message in reply
 	if msg.QuoteToken != "" {
 		c.quoteTokens.Store(chatID, msg.QuoteToken)
 	}
@@ -297,7 +277,6 @@ func (c *LINEChannel) processEvent(event lineEvent) {
 	switch msg.Type {
 	case "text":
 		content = msg.Text
-		// Strip bot mention from text in group chats
 		if isGroup {
 			content = c.stripBotMention(content, msg)
 		}
@@ -340,7 +319,6 @@ func (c *LINEChannel) processEvent(event lineEvent) {
 		"message_id":  msg.ID,
 	}
 
-	// Routing metadata: group/room → group, user → direct.
 	peerKind := "direct"
 	if isGroup {
 		peerKind = "group"
@@ -356,18 +334,12 @@ func (c *LINEChannel) processEvent(event lineEvent) {
 		"preview":      utils.Truncate(content, 50),
 	})
 
-	// Show typing/loading indicator (requires user ID, not group ID)
 	c.sendLoading(senderID)
 
 	c.HandleMessage(senderID, chatID, content, mediaPaths, metadata)
 }
 
-// isBotMentioned checks if the bot is mentioned in the message.
-// It first checks the mention metadata (userId match), then falls back
-// to text-based detection using the bot's display name, since LINE may
-// not include userId in mentionees for Official Accounts.
 func (c *LINEChannel) isBotMentioned(msg lineMessage) bool {
-	// Check mention metadata
 	if msg.Mention != nil {
 		for _, m := range msg.Mention.Mentionees {
 			if m.Type == "all" {
@@ -377,9 +349,6 @@ func (c *LINEChannel) isBotMentioned(msg lineMessage) bool {
 				return true
 			}
 		}
-		// Mention metadata exists with mentionees but bot not matched by userId.
-		// The bot IS likely mentioned (LINE includes mention struct when bot is @-ed),
-		// so check if any mentionee overlaps with bot display name in text.
 		if c.botDisplayName != "" {
 			for _, m := range msg.Mention.Mentionees {
 				if m.Index >= 0 && m.Length > 0 {
@@ -396,7 +365,6 @@ func (c *LINEChannel) isBotMentioned(msg lineMessage) bool {
 		}
 	}
 
-	// Fallback: text-based detection with display name
 	if c.botDisplayName != "" && strings.Contains(msg.Text, "@"+c.botDisplayName) {
 		return true
 	}
@@ -404,16 +372,13 @@ func (c *LINEChannel) isBotMentioned(msg lineMessage) bool {
 	return false
 }
 
-// stripBotMention removes the @BotName mention text from the message.
 func (c *LINEChannel) stripBotMention(text string, msg lineMessage) string {
 	stripped := false
 
-	// Try to strip using mention metadata indices
 	if msg.Mention != nil {
 		runes := []rune(text)
 		for i := len(msg.Mention.Mentionees) - 1; i >= 0; i-- {
 			m := msg.Mention.Mentionees[i]
-			// Strip if userId matches OR if the mention text contains the bot display name
 			shouldStrip := false
 			if c.botUserID != "" && m.UserID == c.botUserID {
 				shouldStrip = true
@@ -440,7 +405,6 @@ func (c *LINEChannel) stripBotMention(text string, msg lineMessage) string {
 		}
 	}
 
-	// Fallback: strip @DisplayName from text
 	if c.botDisplayName != "" {
 		text = strings.ReplaceAll(text, "@"+c.botDisplayName, "")
 	}
@@ -448,8 +412,6 @@ func (c *LINEChannel) stripBotMention(text string, msg lineMessage) string {
 	return strings.TrimSpace(text)
 }
 
-// resolveChatID determines the chat ID from the event source.
-// For group/room messages, use the group/room ID; for 1:1, use the user ID.
 func (c *LINEChannel) resolveChatID(source lineSource) string {
 	switch source.Type {
 	case "group":
@@ -461,20 +423,16 @@ func (c *LINEChannel) resolveChatID(source lineSource) string {
 	}
 }
 
-// Send sends a message to LINE. It first tries the Reply API (free)
-// using a cached reply token, then falls back to the Push API.
 func (c *LINEChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	if !c.IsRunning() {
 		return fmt.Errorf("line channel not running")
 	}
 
-	// Load and consume quote token for this chat
 	var quoteToken string
 	if qt, ok := c.quoteTokens.LoadAndDelete(msg.ChatID); ok {
 		quoteToken = qt.(string)
 	}
 
-	// Try reply token first (free, valid for ~25 seconds)
 	if entry, ok := c.replyTokens.LoadAndDelete(msg.ChatID); ok {
 		tokenEntry := entry.(replyTokenEntry)
 		if time.Since(tokenEntry.timestamp) < lineReplyTokenMaxAge {
@@ -489,11 +447,9 @@ func (c *LINEChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 		}
 	}
 
-	// Fall back to Push API
 	return c.sendPush(ctx, msg.ChatID, msg.Content, quoteToken)
 }
 
-// buildTextMessage creates a text message object, optionally with quoteToken.
 func buildTextMessage(content, quoteToken string) map[string]string {
 	msg := map[string]string{
 		"type": "text",
@@ -505,7 +461,6 @@ func buildTextMessage(content, quoteToken string) map[string]string {
 	return msg
 }
 
-// sendReply sends a message using the LINE Reply API.
 func (c *LINEChannel) sendReply(ctx context.Context, replyToken, content, quoteToken string) error {
 	payload := map[string]interface{}{
 		"replyToken": replyToken,
@@ -515,7 +470,6 @@ func (c *LINEChannel) sendReply(ctx context.Context, replyToken, content, quoteT
 	return c.callAPI(ctx, lineReplyEndpoint, payload)
 }
 
-// sendPush sends a message using the LINE Push API.
 func (c *LINEChannel) sendPush(ctx context.Context, to, content, quoteToken string) error {
 	payload := map[string]interface{}{
 		"to":       to,
@@ -525,7 +479,6 @@ func (c *LINEChannel) sendPush(ctx context.Context, to, content, quoteToken stri
 	return c.callAPI(ctx, linePushEndpoint, payload)
 }
 
-// sendLoading sends a loading animation indicator to the chat.
 func (c *LINEChannel) sendLoading(chatID string) {
 	payload := map[string]interface{}{
 		"chatId":         chatID,
@@ -538,7 +491,6 @@ func (c *LINEChannel) sendLoading(chatID string) {
 	}
 }
 
-// callAPI makes an authenticated POST request to the LINE API.
 func (c *LINEChannel) callAPI(ctx context.Context, endpoint string, payload interface{}) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -561,8 +513,6 @@ func (c *LINEChannel) callAPI(ctx context.Context, endpoint string, payload inte
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		// Error bodies are tiny JSON; bound the read against a hostile or
-		// misconfigured endpoint returning an unbounded response.
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("LINE API error (status %d): %s", resp.StatusCode, string(respBody))
 	}
@@ -570,7 +520,6 @@ func (c *LINEChannel) callAPI(ctx context.Context, endpoint string, payload inte
 	return nil
 }
 
-// downloadContent downloads media content from the LINE API.
 func (c *LINEChannel) downloadContent(messageID, filename string) string {
 	url := fmt.Sprintf(lineContentEndpoint, messageID)
 	return utils.DownloadFile(url, filename, utils.DownloadOptions{

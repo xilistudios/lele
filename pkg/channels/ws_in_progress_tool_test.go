@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package channels
 
 import (
@@ -16,10 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/session"
 )
 
-// dialWS dials the test server's WebSocket endpoint and returns the connection
-// plus the welcome payload it read on connect. sessionKey is passed as the
-// `session_key` query parameter ("" leaves it out, in which case the welcome
-// targets the client's bare client id, exactly like a fresh page load).
 func dialWS(t *testing.T, ts *nativeTestServer, sessionKey string) (*websocket.Conn, map[string]interface{}) {
 	t.Helper()
 
@@ -61,10 +51,6 @@ func subscribeWS(t *testing.T, conn *websocket.Conn, sessionKey string) map[stri
 	return payload
 }
 
-// TestSubscribeAck_IncludesInProgressTool is the WebUI half of the
-// "running tool vanished on chat reload" fix: re-subscribing to a session that
-// is mid-tool must hand the client the tool it is running, so the card can be
-// rebuilt (the in-flight call never reaches the message history).
 func TestSubscribeAck_IncludesInProgressTool(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -109,14 +95,11 @@ func TestSubscribeAck_IncludesInProgressTool(t *testing.T) {
 	}
 }
 
-// TestSubscribeAck_OmitsInProgressToolWhenNotProcessing pins the safety gate:
-// the record is in-memory turn state, so a stale one (turn already finished)
-// must never be replayed as an executing tool.
 func TestSubscribeAck_OmitsInProgressToolWhenNotProcessing(t *testing.T) {
 	ts := newNativeTestServer(t)
 
 	sessionKey := "native:" + ts.clientID
-	ts.loop.processing[sessionKey] = false // turn already over
+	ts.loop.processing[sessionKey] = false
 	ts.loop.inProgressTools = map[string]*session.InProgressTool{
 		sessionKey: {Tool: "sleep", Action: "sleep: 600s"},
 	}
@@ -129,14 +112,9 @@ func TestSubscribeAck_OmitsInProgressToolWhenNotProcessing(t *testing.T) {
 	}
 }
 
-// TestWelcome_IncludesInProgressTool covers the page-reload path: the fresh
-// WebSocket's welcome must restore the running tool of the session it opens on.
 func TestWelcome_IncludesInProgressTool(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// A reconnecting client passes its session key on the WS URL, so the
-	// welcome targets that session (a fresh page load gets the bare client id
-	// instead, which is what the reconnect-with-key path is pinned to here).
 	baseKey := "native:" + ts.clientID
 	ts.loop.processing[baseKey] = true
 	ts.loop.inProgressTools = map[string]*session.InProgressTool{
@@ -162,8 +140,6 @@ func TestWelcome_IncludesInProgressTool(t *testing.T) {
 	}
 }
 
-// TestWelcome_OmitsInProgressToolWhenIdle: an idle session must not carry the
-// key at all, so clients can treat its absence as "nothing to restore".
 func TestWelcome_OmitsInProgressToolWhenIdle(t *testing.T) {
 	ts := newNativeTestServer(t)
 

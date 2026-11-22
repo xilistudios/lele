@@ -42,8 +42,6 @@ func (n *NativeChannel) handleTools(w http.ResponseWriter, r *http.Request) {
 		tools = append(tools, ToolInfo{Name: "read_image", Description: "Read and analyze images", Enabled: true})
 	}
 
-	// read_video serves two modes: native video_url needs the video
-	// capability, keyframes+transcript needs vision — list it for either.
 	if supportsVideo || supportsImages {
 		tools = append(tools, ToolInfo{Name: "read_video", Description: "Read and analyze videos (native video_url or keyframe+transcript mode)", Enabled: true})
 	}
@@ -119,7 +117,6 @@ func (n *NativeChannel) handleSkillInstall(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to install skill: %v", err), "install_failed")
 		return
 	}
-	// A global install changes what every agent's loader reports.
 	if scope == globalSkillScope {
 		n.invalidateAllAgentPrompts()
 	}
@@ -177,9 +174,6 @@ func (n *NativeChannel) handleSkillRemove(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Resolve the name through the loader's own view and dispatch on its
-	// source: a global skill lives in <leleDir>/skills, not in the default
-	// workspace, and built-ins are shared, shipped with lele.
 	var found *skills.SkillInfo
 	loaded := n.skillsLoader.ListSkills()
 	for i := range loaded {
@@ -203,10 +197,6 @@ func (n *NativeChannel) handleSkillRemove(w http.ResponseWriter, r *http.Request
 	isGlobal := found.Source == "global"
 	var installer *skills.SkillInstaller
 	if isGlobal {
-		// One single source of truth for scope -> directory resolution: reuse the
-		// same helper the install endpoints use instead of hand-rolling
-		// `filepath.Dir(GlobalSkillsDir())` here (the guard it would need is
-		// unreachable: a "global" source proves the loader read a non-empty dir).
 		var badRequest string
 		installer, _, badRequest = installTarget(n.skillsLoader, globalSkillScope)
 		if badRequest != "" {
@@ -217,7 +207,6 @@ func (n *NativeChannel) handleSkillRemove(w http.ResponseWriter, r *http.Request
 		installer = skills.NewSkillInstaller(n.skillsLoader.WorkspaceDir())
 	}
 
-	// Uninstall keeps its own path-traversal guard; do not re-implement it here.
 	if err := installer.Uninstall(skillName); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to remove skill: %v", err), "remove_failed")
 		return
@@ -231,10 +220,6 @@ func (n *NativeChannel) handleSkillRemove(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// invalidateAllAgentPrompts drops the cached system prompt of every agent after
-// a change to a skill state every agent reads (the shared <leleDir>/skills
-// directory). Workspace-scoped writes affect a single agent and are handled by
-// their own endpoint, so they do not need this fan-out.
 func (n *NativeChannel) invalidateAllAgentPrompts() {
 	if n.agentLoop == nil {
 		return
@@ -246,7 +231,6 @@ func (n *NativeChannel) invalidateAllAgentPrompts() {
 	}
 }
 
-// handleSkillScan scans a GitHub repo for skills.
 func (n *NativeChannel) handleSkillScan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Repo string `json:"repo"`
@@ -270,7 +254,6 @@ func (n *NativeChannel) handleSkillScan(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Convert skills.ScannedSkill to channels.ScannedSkill
 	result := make([]ScannedSkill, 0, len(scanned))
 	for _, s := range scanned {
 		result = append(result, ScannedSkill{
@@ -287,7 +270,6 @@ func (n *NativeChannel) handleSkillScan(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// handleSkillInstallBatch installs multiple skills from a scanned repo.
 func (n *NativeChannel) handleSkillInstallBatch(w http.ResponseWriter, r *http.Request) {
 	var req SkillInstallBatchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -323,7 +305,6 @@ func (n *NativeChannel) handleSkillInstallBatch(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to install skills: %v", err), "install_failed")
 		return
 	}
-	// A global install changes what every agent's loader reports.
 	if scope == globalSkillScope {
 		n.invalidateAllAgentPrompts()
 	}
@@ -336,7 +317,6 @@ func (n *NativeChannel) handleSkillInstallBatch(w http.ResponseWriter, r *http.R
 	})
 }
 
-// handleSkillToggle enables or disables a skill in workspace config.
 func (n *NativeChannel) handleSkillToggle(w http.ResponseWriter, r *http.Request) {
 	skillName := r.PathValue("name")
 	if skillName == "" {
@@ -352,7 +332,6 @@ func (n *NativeChannel) handleSkillToggle(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Get workspace config manager from skills loader
 	configMgr := n.skillsLoader.GetConfigManager()
 	if configMgr == nil {
 		writeError(w, http.StatusInternalServerError, "workspace config not available", "config_unavailable")
@@ -378,7 +357,6 @@ func (n *NativeChannel) handleSkillToggle(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// handleSkillWorkspaceConfig returns the workspace skills config.
 func (n *NativeChannel) handleSkillWorkspaceConfig(w http.ResponseWriter, r *http.Request) {
 	configMgr := n.skillsLoader.GetConfigManager()
 	if configMgr == nil {
@@ -429,10 +407,6 @@ func (n *NativeChannel) handleStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// storageStatus reports the backend that holds this gateway's client and
-// pairing state, flagging the degraded case (SQLite-capable binary whose store
-// failed to open) so a JSON-mode gateway is diagnosable from the outside
-// instead of answering "invalid PIN" for PINs it simply cannot read (#330).
 func (n *NativeChannel) storageStatus() *StorageStatus {
 	st := &StorageStatus{Backend: n.auth.StorageBackend()}
 	if reason, degraded := n.auth.StoreUnavailable(); degraded {
@@ -464,11 +438,6 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 	cfg := n.cfgSnapshot()
 	named, ok := cfg.Providers.GetNamed(providerName)
 	if !ok {
-		// Not configured yet: the Add-provider screen asks for the model list of
-		// a type the user has not saved (issue #404 — the wizard offers every
-		// catalog provider). Serve the catalog answer for the type instead of a
-		// 404, so the picker is populated before the provider exists. A name
-		// the catalog does not know is still a 404.
 		if models := lookupCatalogModels([]string{providerName}); len(models) > 0 {
 			writeJSON(w, http.StatusOK, ProviderModelsResponse{
 				Provider: providerName,
@@ -488,7 +457,6 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 		providerType = providerName
 	}
 
-	// Catalog lookup keys: type first (aliases normalize), then instance name.
 	catalogKeys := []string{providerType, providerName}
 	catalogModels := lookupCatalogModels(catalogKeys)
 
@@ -496,7 +464,6 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 		apiBase = defaultAPIBaseByTypePublic(providerType)
 	}
 
-	// Offline autocomplete: no usable live credentials, but catalog knows models.
 	if apiKey == "" || apiBase == "" {
 		if len(catalogModels) > 0 {
 			writeJSON(w, http.StatusOK, ProviderModelsResponse{
@@ -514,9 +481,6 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// SSRF guard: validate the provider URL before making any outbound request.
-	// Block requests to private/internal IPs and enforce HTTPS. Catalog fallback
-	// is not subject to this guard (it never opens a network connection).
 	if !isAllowedProviderURL(apiBase) {
 		if len(catalogModels) > 0 {
 			writeJSON(w, http.StatusOK, ProviderModelsResponse{
@@ -541,7 +505,6 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		// Live fetch failed; fall back to catalog for offline autocomplete.
 		if len(catalogModels) > 0 {
 			writeJSON(w, http.StatusOK, ProviderModelsResponse{
 				Provider: providerName,
@@ -623,8 +586,6 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// lookupCatalogModels returns the first non-empty catalog model list for the
-// given provider keys (type, then instance name).
 func lookupCatalogModels(keys []string) []catalog.Model {
 	for _, key := range keys {
 		if key == "" {
@@ -637,26 +598,21 @@ func lookupCatalogModels(keys []string) []catalog.Model {
 	return nil
 }
 
-// isAllowedProviderURL validates that a provider API base URL is safe to connect to.
-// It blocks SSRF attacks by rejecting private/internal IPs and non-HTTPS schemes.
 func isAllowedProviderURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
 	}
 
-	// Only allow HTTPS to prevent man-in-the-middle and credential leakage.
 	if u.Scheme != "https" {
 		return false
 	}
 
 	host := u.Hostname()
-	// Block hostnames that resolve to localhost.
 	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
 		return false
 	}
 
-	// Block private, loopback, and link-local IP addresses.
 	ip := net.ParseIP(host)
 	if ip != nil && (ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()) {
 		return false
@@ -784,8 +740,6 @@ func (n *NativeChannel) cfgSnapshot() *config.Config {
 	return cfg
 }
 
-// defaultAPIBaseByTypePublic returns the public default API base for a
-// provider type. Backed by the catalog (single source of truth).
 func defaultAPIBaseByTypePublic(providerType string) string {
 	return catalog.DefaultAPIBaseByType(providerType)
 }

@@ -10,7 +10,6 @@ type Props = {
   primaryModel: string
   fallbacks: string[]
   temperature: number
-  /** Per-agent thinking level; ''/undefined = inherit (row hidden). */
   thinkingLevel?: string
   skills: string[]
   enableThinking: boolean
@@ -50,7 +49,6 @@ export function AgentPreview({
 
   return (
     <div className="rounded-lg border border-border bg-background-secondary/50 overflow-hidden">
-      {/* Header with avatar and name */}
       <div className="p-4 bg-gradient-to-br from-background-secondary to-background-tertiary border-b border-border">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-focus to-brand-morado flex items-center justify-center text-2xl shadow-lg">
@@ -70,9 +68,7 @@ export function AgentPreview({
         </div>
       </div>
 
-      {/* Specs */}
       <div className="p-4 space-y-3">
-        {/* Model */}
         {primaryModel && (
           <div className="flex items-center justify-between">
             <span className="text-xs text-text-tertiary">
@@ -84,7 +80,6 @@ export function AgentPreview({
           </div>
         )}
 
-        {/* Fallbacks */}
         {fallbacks.length > 0 && (
           <div className="flex items-start justify-between gap-2">
             <span className="text-xs text-text-tertiary shrink-0">
@@ -96,7 +91,6 @@ export function AgentPreview({
           </div>
         )}
 
-        {/* Temperature */}
         <div className="flex items-center justify-between">
           <span className="text-xs text-text-tertiary">
             {t('settings.fields.agentTemperature')}
@@ -114,7 +108,6 @@ export function AgentPreview({
           </div>
         </div>
 
-        {/* Thinking level (only when explicitly set; '' = inherit) */}
         {thinkingLevel && (
           <div className="flex items-center justify-between">
             <span className="text-xs text-text-tertiary">
@@ -126,7 +119,6 @@ export function AgentPreview({
           </div>
         )}
 
-        {/* Features badges */}
         <div className="flex flex-wrap gap-1.5 pt-1">
           {enableThinking && (
             <span className="text-2xs px-2 py-1 rounded-full bg-brand-morado/20 text-brand-morado">

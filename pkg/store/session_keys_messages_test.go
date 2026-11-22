@@ -1,10 +1,5 @@
 package store
 
-// Contract test for SessionRepo.SessionKeysWithMessages, the single batched
-// query that backs the WebUI sidebar listing endpoint. The sidebar used to
-// issue one COUNT per non-resident session; this query replaces all of them,
-// so its result set must match MessageCount(key) > 0 exactly for every key.
-
 import (
 	"path/filepath"
 	"testing"
@@ -23,9 +18,6 @@ func newKeysRepo(t *testing.T) *SessionRepo {
 func TestSessionKeysWithMessages(t *testing.T) {
 	repo := newKeysRepo(t)
 
-	// a: session row + messages → present
-	// b: session row, zero messages → absent
-	// c: deleted session → absent (message rows cascade with it)
 	if err := repo.UpsertSession(SessionMeta{Key: "a", Mode: "agent"}); err != nil {
 		t.Fatalf("upsert a: %v", err)
 	}
@@ -62,7 +54,6 @@ func TestSessionKeysWithMessages(t *testing.T) {
 		t.Errorf(`got["b"] = true, want false (session row without messages)`)
 	}
 
-	// The set must agree with the per-key count it replaces.
 	for _, k := range []string{"a", "b"} {
 		n, err := repo.MessageCount(k)
 		if err != nil {
@@ -73,7 +64,6 @@ func TestSessionKeysWithMessages(t *testing.T) {
 		}
 	}
 
-	// Empty database → empty non-nil map.
 	empty := newKeysRepo(t)
 	none, err := empty.SessionKeysWithMessages()
 	if err != nil {

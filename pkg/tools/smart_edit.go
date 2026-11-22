@@ -8,14 +8,11 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 )
 
-// SmartEditTool edits a file using intelligent fallback strategies.
-// It writes changes directly to the original file while preserving encoding.
 type SmartEditTool struct {
 	workspace string
 	restrict  bool
 }
 
-// NewSmartEditTool creates a new SmartEditTool
 func NewSmartEditTool(workspace string, restrict bool) *SmartEditTool {
 	return &SmartEditTool{
 		workspace: workspace,
@@ -86,7 +83,6 @@ func (t *SmartEditTool) Execute(ctx context.Context, args map[string]interface{}
 		flags = v
 	}
 
-	// Validate path
 	resolvedPath, err := validatePath(path, t.workspace, t.restrict)
 	if err != nil {
 		logger.ErrorCF("smart_edit", "Path validation failed",
@@ -94,12 +90,10 @@ func (t *SmartEditTool) Execute(ctx context.Context, args map[string]interface{}
 		return ErrorResult(err.Error())
 	}
 
-	// Check if file exists
 	if _, err := os.Stat(resolvedPath); os.IsNotExist(err) {
 		return ErrorResult(fmt.Sprintf("file not found: %s", path))
 	}
 
-	// Read file with encoding detection
 	content, encoding, err := ReadFileWithEncoding(resolvedPath)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to read file: %v", err))
@@ -117,25 +111,21 @@ func (t *SmartEditTool) Execute(ctx context.Context, args map[string]interface{}
 	var strategyName string
 
 	if useRegex {
-		// Use regex strategy
 		strategy := &RegexMatchStrategy{Flags: flags}
 		matches = strategy.FindMatches(content, oldText)
 		strategyName = "regex"
 
-		// If no match, fail immediately (no fallback for regex)
 		if len(matches) == 0 {
 			logger.ErrorCF("smart_edit", "Regex match failed",
 				map[string]interface{}{"pattern": oldText, "flags": flags})
 			return ErrorResult(fmt.Sprintf("regex pattern not found: %s", oldText))
 		}
 	} else {
-		// Try exact match first
 		exactStrategy := &ExactMatchStrategy{}
 		matches = exactStrategy.FindMatches(content, oldText)
 		strategyName = "exact"
 
 		if len(matches) == 0 {
-			// Fallback to whitespace-tolerant
 			wsStrategy := &WhitespaceTolerantStrategy{}
 			matches = wsStrategy.FindMatches(content, oldText)
 			strategyName = "whitespace-tolerant"
@@ -148,7 +138,6 @@ func (t *SmartEditTool) Execute(ctx context.Context, args map[string]interface{}
 		}
 	}
 
-	// Check for multiple matches
 	if len(matches) > 1 {
 		logger.ErrorCF("smart_edit", "Multiple matches found",
 			map[string]interface{}{
@@ -158,7 +147,6 @@ func (t *SmartEditTool) Execute(ctx context.Context, args map[string]interface{}
 		return ErrorResult(fmt.Sprintf("old_text appears %d times. Please provide more context to make it unique", len(matches)))
 	}
 
-	// Apply replacement
 	match := matches[0]
 	newContent := ReplaceRange(content, match, newText)
 

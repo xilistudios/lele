@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package main
 
 import (
@@ -20,20 +14,6 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// The gateway cannot be started in a unit test (config, network, providers), so
-// these tests cover the wiring step on its own: the exact function the gateway
-// calls, against a real SQLite store and a real message bus. What they pin down
-// is the two-sided contract of the gateway integration: with the flag off
-// nothing is touched and every lifecycle call is a no-op, and with the flag on
-// the spool is drained before consumption, pumped while live, and released at
-// shutdown.
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Fixtures
-// ──────────────────────────────────────────────────────────────────────────────
-
-// spoolStore opens a throwaway database and returns its spool repo. The handle
-// is closed by the cleanup; tests never need it.
 func spoolStore(t *testing.T) *store.SpoolRepo {
 	t.Helper()
 
@@ -50,9 +30,6 @@ func spoolStore(t *testing.T) *store.SpoolRepo {
 	return s.Spool()
 }
 
-// durableTestConfig is the minimum config a real AgentLoop and a real channel
-// Manager accept without any network access: a temp workspace, no provider
-// keys, no channel enabled.
 func durableTestConfig(t *testing.T) *config.Config {
 	t.Helper()
 
@@ -66,8 +43,6 @@ func durableTestConfig(t *testing.T) *config.Config {
 	}
 }
 
-// spoolChannel is a Channel that is nothing but a BaseChannel, so a test can
-// read the spooler field that Manager.SetInboundSpooler is supposed to fill.
 type spoolChannel struct {
 	*channels.BaseChannel
 }
@@ -77,8 +52,6 @@ func (s *spoolChannel) Stop(context.Context) error  { return nil }
 
 func (s *spoolChannel) Send(context.Context, bus.OutboundMessage) error { return nil }
 
-// durableFixture is the whole wiring surface a test needs: real store, real bus,
-// real agent loop, and a real channel manager holding one registered channel.
 type durableFixture struct {
 	di     *durableInbound
 	msgBus *bus.MessageBus
@@ -109,13 +82,11 @@ func newDurableFixture(t *testing.T, enabled bool) *durableFixture {
 	}
 }
 
-// pending counts the inbound rows still waiting to be replayed.
 func (f *durableFixture) pending(t *testing.T) int {
 	t.Helper()
 	return f.stats(t).PendingInbound
 }
 
-// claimed counts the inbound rows handed to an instance and still in flight.
 func (f *durableFixture) claimed(t *testing.T) int {
 	t.Helper()
 	return f.stats(t).ClaimedInbound
@@ -131,8 +102,6 @@ func (f *durableFixture) stats(t *testing.T) store.SpoolStats {
 	return stats
 }
 
-// recvInbound reads one inbound message off the bus, reporting false on
-// timeout. It is the only way to observe what a replay actually published.
 func recvInbound(t *testing.T, msgBus *bus.MessageBus, timeout time.Duration) (bus.InboundMessage, bool) {
 	t.Helper()
 
@@ -141,14 +110,6 @@ func recvInbound(t *testing.T, msgBus *bus.MessageBus, timeout time.Duration) (b
 	return msgBus.ConsumeInbound(ctx)
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Flag off: the gateway must behave exactly as before this feature existed
-// ──────────────────────────────────────────────────────────────────────────────
-
-// TestSetupDurableInboundDisabledTouchesNothing is the regression guard for the
-// default configuration: with the flag off the helper returns nil AND neither
-// the agent loop nor the channels are given a spooler, so inbound keeps going
-// straight to the bus exactly as it did before durability existed.
 func TestSetupDurableInboundDisabledTouchesNothing(t *testing.T) {
 	f := newDurableFixture(t, false)
 
@@ -160,9 +121,6 @@ func TestSetupDurableInboundDisabledTouchesNothing(t *testing.T) {
 	}
 }
 
-// TestSetupDurableInboundNeedsStoreAndBus pins the other off-switches: no
-// persistence (a store-less gateway) or no bus means no durability, whatever
-// the flag says.
 func TestSetupDurableInboundNeedsStoreAndBus(t *testing.T) {
 	cfg := durableTestConfig(t)
 	msgBus := bus.NewMessageBus()
@@ -187,8 +145,6 @@ func TestSetupDurableInboundNeedsStoreAndBus(t *testing.T) {
 	}
 }
 
-// TestNilDurableInboundIsInert is what lets the gateway call the lifecycle
-// methods unconditionally: a nil handle (feature off) must not panic anywhere.
 func TestNilDurableInboundIsInert(t *testing.T) {
 	var di *durableInbound
 
@@ -203,13 +159,6 @@ func TestNilDurableInboundIsInert(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Flag on: wiring
-// ──────────────────────────────────────────────────────────────────────────────
-
-// TestSetupDurableInboundEnabledWiresBothSides checks that one call reaches the
-// producer side: the channel manager got a spooler, and the handle carries a
-// live service with an identity of its own for the gateway to drain and pump.
 func TestSetupDurableInboundEnabledWiresBothSides(t *testing.T) {
 	f := newDurableFixture(t, true)
 
@@ -227,9 +176,6 @@ func TestSetupDurableInboundEnabledWiresBothSides(t *testing.T) {
 	}
 }
 
-// TestSetupDurableInboundAcceptsNilConsumers documents that the helper is safe
-// to drive from a partially built gateway: a nil agent loop or manager must not
-// panic, since both setters are plain field writes.
 func TestSetupDurableInboundAcceptsNilConsumers(t *testing.T) {
 	repo := spoolStore(t)
 	msgBus := bus.NewMessageBus()
@@ -243,14 +189,6 @@ func TestSetupDurableInboundAcceptsNilConsumers(t *testing.T) {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Flag on: drain, pump, shutdown
-// ──────────────────────────────────────────────────────────────────────────────
-
-// TestDurableInboundDrainReplaysPersistedRow is the crash scenario the feature
-// exists for: a message was accepted by a channel, written to the spool, and
-// handed back (the bus was full, or the process left its claims at shutdown) but
-// never consumed. Drain must put it back on the bus and clear the row.
 func TestDurableInboundDrainReplaysPersistedRow(t *testing.T) {
 	f := newDurableFixture(t, true)
 
@@ -267,9 +205,6 @@ func TestDurableInboundDrainReplaysPersistedRow(t *testing.T) {
 	if msg.SpoolID == 0 || msg.DedupeID == "" {
 		t.Fatalf("Enqueue tagged spool id %d / dedupe id %q, want both set", msg.SpoolID, msg.DedupeID)
 	}
-	// A live Enqueue claims its row, so the leftover of a previous process has
-	// to be handed back before any pass can see it - exactly what Release does
-	// when the bus refuses the publish, and what shutdown does for the rest.
 	if !f.di.inbound.Release(&msg) {
 		t.Fatal("Release reported the row was not handed back")
 	}
@@ -291,7 +226,6 @@ func TestDurableInboundDrainReplaysPersistedRow(t *testing.T) {
 	if got.Content != msg.Content || got.Channel != "telegram" {
 		t.Errorf("replayed message = %q on %q, want %q on telegram", got.Content, got.Channel, msg.Content)
 	}
-	// The replay must carry the row identity, or the consumer cannot complete it.
 	if got.SpoolID == 0 {
 		t.Error("replayed message lost its spool id; the consumer cannot finish the row")
 	}
@@ -300,9 +234,6 @@ func TestDurableInboundDrainReplaysPersistedRow(t *testing.T) {
 	}
 }
 
-// TestDurableInboundDrainSkipsAlreadyProcessedRow covers the other half of the
-// guarantee: a row whose answer was already produced must not run a second
-// time. The ledger is the authority, so the row is dropped, not replayed.
 func TestDurableInboundDrainSkipsAlreadyProcessedRow(t *testing.T) {
 	f := newDurableFixture(t, true)
 
@@ -328,10 +259,6 @@ func TestDurableInboundDrainSkipsAlreadyProcessedRow(t *testing.T) {
 	}
 }
 
-// TestDurableInboundPumpRecoversPendingRow covers the steady-state path the
-// gateway starts after Run: a row that never reached the bus (a full buffer at
-// publish time) is handed back to pending by Release and picked up by the pump
-// on its own, with no drain involved.
 func TestDurableInboundPumpRecoversPendingRow(t *testing.T) {
 	f := newDurableFixture(t, true)
 
@@ -344,7 +271,6 @@ func TestDurableInboundPumpRecoversPendingRow(t *testing.T) {
 	if !f.di.inbound.Enqueue(&msg) {
 		t.Fatal("Enqueue reported the row was not persisted")
 	}
-	// What publishInbound does when the bus rejects the message.
 	if !f.di.inbound.Release(&msg) {
 		t.Fatal("Release reported the row was not handed back")
 	}
@@ -365,11 +291,6 @@ func TestDurableInboundPumpRecoversPendingRow(t *testing.T) {
 	}
 }
 
-// TestDurableInboundShutdownReleasesClaims pins what a self-restart depends on:
-// rows this instance claimed but had not finished go back to the pending set, so
-// the successor replays them at once instead of waiting out the stale-claim
-// timeout. Live traffic is already claimed by Enqueue, which is exactly the set
-// the blanket release at shutdown has to hand over.
 func TestDurableInboundShutdownReleasesClaims(t *testing.T) {
 	f := newDurableFixture(t, true)
 
@@ -394,15 +315,11 @@ func TestDurableInboundShutdownReleasesClaims(t *testing.T) {
 		t.Errorf("pending rows after shutdown = %d, want 2", got)
 	}
 
-	// Idempotent: the restart path may drive the teardown twice.
 	if err := f.di.Shutdown(); err != nil {
 		t.Errorf("second Shutdown = %v, want nil", err)
 	}
 }
 
-// TestDurableInboundShutdownStopsPump makes sure Shutdown really waits for the
-// goroutine: once it returns, a new pending row must stay in the spool, because
-// nothing is left to pump it.
 func TestDurableInboundShutdownStopsPump(t *testing.T) {
 	f := newDurableFixture(t, true)
 
@@ -422,7 +339,6 @@ func TestDurableInboundShutdownStopsPump(t *testing.T) {
 		t.Fatal("Release reported the row was not handed back")
 	}
 
-	// Several pump intervals' worth of time, and the row must still be there.
 	time.Sleep(4 * durable.PumpInterval)
 	if got, ok := recvInbound(t, f.msgBus, 200*time.Millisecond); ok {
 		t.Errorf("pump published %q after shutdown; its goroutine is still alive", got.Content)
@@ -432,9 +348,6 @@ func TestDurableInboundShutdownStopsPump(t *testing.T) {
 	}
 }
 
-// TestDurableInboundStartPumpIsSingleton documents the guard against two pumps
-// racing over the same claims: a second start is ignored, not fatal, and the one
-// pump still running is the one Shutdown stops.
 func TestDurableInboundStartPumpIsSingleton(t *testing.T) {
 	f := newDurableFixture(t, true)
 
@@ -459,8 +372,6 @@ func TestDurableInboundStartPumpIsSingleton(t *testing.T) {
 		t.Fatalf("Shutdown: %v", err)
 	}
 
-	// A duplicate start that leaked a second goroutine would still be pumping
-	// now, so a fresh row must survive untouched.
 	again := bus.InboundMessage{Channel: "telegram", ChatID: "11", Content: "after shutdown"}
 	if !f.di.inbound.Enqueue(&again) {
 		t.Fatal("Enqueue reported the row was not persisted")
@@ -474,9 +385,6 @@ func TestDurableInboundStartPumpIsSingleton(t *testing.T) {
 	}
 }
 
-// TestDurableInboundDrainReclaimsStaleClaims is the restart handover: a row the
-// previous process claimed and never released (a crash) is older than the stale
-// timeout, so Drain must take it back and replay it.
 func TestDurableInboundDrainReclaimsStaleClaims(t *testing.T) {
 	f := newDurableFixture(t, true)
 
@@ -485,9 +393,6 @@ func TestDurableInboundDrainReclaimsStaleClaims(t *testing.T) {
 		t.Fatal("Enqueue reported the row was not persisted")
 	}
 
-	// Hand the row back to pending and claim it as a different instance, in the
-	// past, like a dead predecessor: a live Enqueue claims its own row, so the
-	// orphan a crash leaves behind has to be staged through the pending set.
 	if !f.di.inbound.Release(&msg) {
 		t.Fatal("Release reported the row was not handed back")
 	}
@@ -519,18 +424,6 @@ func TestDurableInboundDrainReclaimsStaleClaims(t *testing.T) {
 	}
 }
 
-// TestDurableInboundPumpDoesNotReplayInFlightLiveMessage is the hard
-// no-double-delivery guarantee: a message that a channel spooled and published
-// normally, and whose turn is still in flight (nothing has been Finished), must
-// never be published a second time by the pump.
-//
-// The mechanism that makes this true is the claim on the live row: Enqueue
-// writes it already claimed by this instance, and SpoolRepo.ClaimBatch only
-// selects rows whose claimed_by is empty, so the pump cannot see a message the
-// agent loop is working on. Before that, a live row and a row left behind by a
-// dead process were indistinguishable and any turn slower than one pump tick got
-// re-published - the consumer's ledger could not absorb the copy either, because
-// ShouldSkip only answers "already finished" and Finish had not run yet.
 func TestDurableInboundPumpDoesNotReplayInFlightLiveMessage(t *testing.T) {
 	f := newDurableFixture(t, true)
 
@@ -543,7 +436,6 @@ func TestDurableInboundPumpDoesNotReplayInFlightLiveMessage(t *testing.T) {
 		}
 	}()
 
-	// The channel path exactly as BaseChannel.publishInbound runs it.
 	msg := bus.InboundMessage{
 		Channel: "telegram", ChatID: "17", Content: "delivered live",
 		Metadata: map[string]string{"message_id": "m-live"},
@@ -555,8 +447,6 @@ func TestDurableInboundPumpDoesNotReplayInFlightLiveMessage(t *testing.T) {
 		t.Fatal("live publish rejected")
 	}
 
-	// The loop consumes it and starts a turn that takes longer than one pump
-	// tick. Nothing is Finished: the row is still the only copy of the message.
 	first, ok := recvInbound(t, f.msgBus, 2*time.Second)
 	if !ok {
 		t.Fatal("the live message never reached the bus")
@@ -565,9 +455,6 @@ func TestDurableInboundPumpDoesNotReplayInFlightLiveMessage(t *testing.T) {
 		t.Fatalf("live delivery spool id = %d, want %d", first.SpoolID, msg.SpoolID)
 	}
 
-	// Several pump ticks go by while the turn is still in flight. This sleep is
-	// the test: a negative assertion needs the pump to have had every chance to
-	// re-claim the row and must not be shortened.
 	time.Sleep(4 * durable.PumpInterval)
 	second, dup := recvInbound(t, f.msgBus, time.Second)
 

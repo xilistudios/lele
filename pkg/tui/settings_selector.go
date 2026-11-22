@@ -8,9 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// startSettingsSelector activates the inline selector picker for the given
-// field. It populates selectorItems/selectorValues from the provided options
-// and pre-selects the current value.
 func (m *Model) startSettingsSelector(field, currentValue string, labels, values []string) {
 	m.settingsSelectorActive = true
 	m.settingsSelectorField = field
@@ -19,7 +16,6 @@ func (m *Model) startSettingsSelector(field, currentValue string, labels, values
 	m.settingsSelectorIdx = 0
 	m.settingsSelectorOrig = currentValue
 
-	// Pre-select the current value if it matches one of the options.
 	for i, v := range values {
 		if v == currentValue {
 			m.settingsSelectorIdx = i
@@ -28,7 +24,6 @@ func (m *Model) startSettingsSelector(field, currentValue string, labels, values
 	}
 }
 
-// closeSettingsSelector deactivates the selector and clears its state.
 func (m *Model) closeSettingsSelector() {
 	m.settingsSelectorActive = false
 	m.settingsSelectorItems = nil
@@ -38,9 +33,6 @@ func (m *Model) closeSettingsSelector() {
 	m.settingsSelectorOrig = ""
 }
 
-// renderSettingsSelector renders the inline selector picker. It shows a
-// scrollable list of options with ✓ marking the current value and > marking
-// the highlighted row. Returns the painted frame.
 func (m *Model) renderSettingsSelector(title string) string {
 	var sb strings.Builder
 	sb.WriteString(TitleStyle.Render(title) + "\n\n")
@@ -62,7 +54,6 @@ func (m *Model) renderSettingsSelector(title string) string {
 
 	for i := scrollOffset; i < endIdx; i++ {
 		label := m.settingsSelectorItems[i]
-		// Mark the current config value with ✓
 		isCurrent := false
 		if i < len(m.settingsSelectorValues) && m.settingsSelectorValues[i] == m.settingsSelectorOrig {
 			isCurrent = true
@@ -83,8 +74,6 @@ func (m *Model) renderSettingsSelector(title string) string {
 	return m.paintFrame(modalView)
 }
 
-// handleSelectorNavigation handles up/down/j/k navigation within the selector.
-// Returns true if the key was consumed.
 func (m *Model) handleSelectorNavigation(msg tea.KeyMsg) bool {
 	if !m.settingsSelectorActive {
 		return false
@@ -104,9 +93,6 @@ func (m *Model) handleSelectorNavigation(msg tea.KeyMsg) bool {
 	return false
 }
 
-// handleSelectorConfirm handles Enter in the selector. It saves the selected
-// value to config and closes the selector. The field name determines which
-// config field to update.
 func (m *Model) handleSelectorConfirm() tea.Cmd {
 	if !m.settingsSelectorActive || m.settingsSelectorIdx >= len(m.settingsSelectorValues) {
 		return nil
@@ -116,22 +102,17 @@ func (m *Model) handleSelectorConfirm() tea.Cmd {
 	field := m.settingsSelectorField
 	orig := m.settingsSelectorOrig
 
-	// The "(custom...)" option opens a text input instead of saving.
 	if value == "__custom__" {
 		m.closeSettingsSelector()
 		m.settingsEditField = field
 		m.formError = ""
-		// Pre-fill the input with the original value so users can tweak it.
 		m.textInput.SetValue(m.settingsSelectorOrig)
 		m.textInput.Focus()
 		return nil
 	}
 
-	// Close selector first so the save handlers see a clean state.
 	m.closeSettingsSelector()
 
-	// "(custom…)" — don't save; open the free-text input pre-filled with the
-	// current value so the user can type an arbitrary reference.
 	if value == modelCustomValue {
 		m.settingsEditField = field
 		m.textInput.SetValue(orig)
@@ -139,11 +120,8 @@ func (m *Model) handleSelectorConfirm() tea.Cmd {
 		return nil
 	}
 
-	// Delegate to the existing save handlers by setting settingsEditField
-	// and calling the appropriate input handler.
 	m.settingsEditField = field
 
-	// Determine which handler to use based on the current modal.
 	switch m.modalMode {
 	case ModalSettingsSystemEdit:
 		m.handleSystemSettingsInput(value)
@@ -155,8 +133,6 @@ func (m *Model) handleSelectorConfirm() tea.Cmd {
 	return nil
 }
 
-// handleSelectorCancel handles Esc in the selector. It closes the selector
-// and reloads the current view.
 func (m *Model) handleSelectorCancel() {
 	if !m.settingsSelectorActive {
 		return
@@ -173,16 +149,12 @@ func (m *Model) handleSelectorCancel() {
 	}
 }
 
-// renderSubagentPicker renders the multi-select picker for the current agent's
-// subagent allow-list. Each row shows [✓]/[ ] and the highlighted row is
-// marked with >. Returns the painted frame.
 func (m *Model) renderSubagentPicker(modalTitle string) string {
 	maxVisible := m.maxModalVisible()
 	if maxVisible < 3 {
 		maxVisible = 3
 	}
 
-	// Clamp scroll so the highlighted row is always visible.
 	if m.subagentPickerIdx < m.modalScrollOffset {
 		m.modalScrollOffset = m.subagentPickerIdx
 	}

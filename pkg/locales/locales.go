@@ -1,20 +1,3 @@
-// Package locales manages downloadable language packs for lele.
-//
-// The binary embeds only the three core locales (es, en, pt). Additional
-// languages live in the GitHub repository under locales/ and are downloaded
-// on demand into ~/.lele/locales/ so the binary size stays constant.
-//
-// Source layout (repo):
-//
-//	locales/index.json       catalog of available languages
-//	locales/tui/<code>.json  TUI strings (flat key→string map)
-//	locales/web/<code>.json  WebUI strings (nested i18next resource)
-//
-// Cache layout (disk):
-//
-//	~/.lele/locales/index.json
-//	~/.lele/locales/tui/<code>.json
-//	~/.lele/locales/web/<code>.json
 package locales
 
 import (
@@ -27,25 +10,16 @@ import (
 )
 
 const (
-	// DefaultRepo is the GitHub repository that hosts language packs.
-	DefaultRepo = "xilistudios/lele"
-	// DefaultBranch is the branch used for raw content downloads.
-	DefaultBranch = "main"
-	// DefaultUserAgent identifies lele when fetching packs.
-	DefaultUserAgent = "lele-locales"
-	// CatalogFile is the catalog file name under the locales root.
-	CatalogFile = "index.json"
-	// MaxCatalogAgeSeconds is how long a cached catalog is considered fresh.
-	// After this, List may refresh from GitHub when online.
+	DefaultRepo          = "xilistudios/lele"
+	DefaultBranch        = "main"
+	DefaultUserAgent     = "lele-locales"
+	CatalogFile          = "index.json"
 	MaxCatalogAgeSeconds = 24 * 3600
-	// MaxPackBytes limits a single language pack download (2 MiB).
-	MaxPackBytes = 2 << 20
+	MaxPackBytes         = 2 << 20
 )
 
-// Builtins are the locales compiled into the binary. They never need download.
 var Builtins = []string{"es", "en", "pt"}
 
-// Language describes one entry in the catalog.
 type Language struct {
 	Code       string `json:"code"`
 	Name       string `json:"name"`
@@ -54,20 +28,17 @@ type Language struct {
 	RTL        bool   `json:"rtl,omitempty"`
 }
 
-// Catalog is the root document of locales/index.json.
 type Catalog struct {
 	Version   int        `json:"version"`
 	UpdatedAt string     `json:"updated_at,omitempty"`
 	Languages []Language `json:"languages"`
 }
 
-// Status is the per-language install state returned by List.
 type Status struct {
 	Language
 	Installed bool `json:"installed"`
 }
 
-// defaultBuiltinCatalog is used offline before the remote catalog loads.
 func defaultBuiltinCatalog() *Catalog {
 	return &Catalog{
 		Version: 1,
@@ -88,10 +59,8 @@ func isBuiltin(code string) bool {
 	return false
 }
 
-// NormalizeCode lowercases and trims a language code, mapping common aliases.
 func NormalizeCode(code string) string {
 	c := strings.ToLower(strings.TrimSpace(code))
-	// Strip region suffixes we do not ship separately (pt-BR → pt for builtins).
 	switch c {
 	case "español", "spanish", "es-es", "es-419":
 		return "es"
@@ -103,7 +72,6 @@ func NormalizeCode(code string) string {
 		return "fr"
 	case "deutsch", "german", "de-de":
 		return "de"
-	// Native-name aliases use unicode escapes so gosmopolitan stays quiet.
 	case "\u65e5\u672c\u8a9e", "japanese", "ja-jp":
 		return "ja"
 	case "\u4e2d\u6587", "chinese", "zh-cn", "zh-hans":
@@ -123,7 +91,6 @@ func NormalizeCode(code string) string {
 	return c
 }
 
-// DisplayLabel returns "NativeName (code)" for UI pickers.
 func DisplayLabel(l Language) string {
 	name := l.NativeName
 	if name == "" {
@@ -135,7 +102,6 @@ func DisplayLabel(l Language) string {
 	return fmt.Sprintf("%s (%s)", name, l.Code)
 }
 
-// SortLanguages orders: builtins first (stable es/en/pt), then extras by native name.
 func SortLanguages(langs []Language) {
 	builtinOrder := map[string]int{"es": 0, "en": 1, "pt": 2}
 	sort.SliceStable(langs, func(i, j int) bool {

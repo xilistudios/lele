@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package agent
 
 import (
@@ -17,25 +11,11 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// ---------------------------------------------------------------------------
-// Scaffolding
-// ---------------------------------------------------------------------------
-//
-// session_state.go keeps each piece of routing state in two places: the SQLite
-// KV table (the durable half, the only half that survives a restart) and an
-// in-memory map or counter (the half the running loop reads). Every test below
-// asserts on BOTH halves: a write that lands in only one of them behaves
-// correctly while the process runs and silently diverges on restart, which is
-// the exact class of bug this file exists to prevent.
-
-// sessionKVSnapshot is the durable state read straight out of the kv table.
-// It is built with raw Keys()/Get() calls rather than through the code under
-// test, so a bug in the read path cannot mask a bug in the write path.
 type sessionKVSnapshot struct {
-	aliases map[string]string // sess:alias:<base>    -> active session key
-	agents  map[string]string // sess:agent:<session> -> agent ID
-	seqs    map[string]uint64 // sess:seq:<base>      -> last chat:N handed out
-	others  []string          // keys outside the three namespaces
+	aliases map[string]string
+	agents  map[string]string
+	seqs    map[string]uint64
+	others  []string
 }
 
 func captureSessionKV(t *testing.T, st *store.Store) sessionKVSnapshot {
@@ -72,7 +52,6 @@ func captureSessionKV(t *testing.T, st *store.Store) sessionKVSnapshot {
 	return snap
 }
 
-// count returns the total number of rows the snapshot covers.
 func (s sessionKVSnapshot) count() int {
 	return len(s.aliases) + len(s.agents) + len(s.seqs) + len(s.others)
 }
@@ -87,34 +66,22 @@ func openSessionStateStore(t *testing.T) *store.Store {
 	return st
 }
 
-// newSessionStateLoop returns a loop backed by its own database.
 func newSessionStateLoop(t *testing.T) (*AgentLoop, *store.Store) {
 	t.Helper()
 	st := openSessionStateStore(t)
 	return newSessionStateLoopOn(st), st
 }
 
-// newSessionStateLoopOn returns a loop wired to an existing store. Handing the
-// same store to two loops is how a test simulates "write in one process, read
-// in the next".
 func newSessionStateLoopOn(st *store.Store) *AgentLoop {
-	// registry is only dereferenced by getSessionAgent's default-agent fallback;
-	// an empty one makes that path return nil without panicking.
 	return &AgentLoop{dbStore: st, registry: &AgentRegistry{}}
 }
 
-// silenceSessionStateLogs keeps the loop's warn/info chatter out of test
-// output. The failure-path tests trigger KV errors on purpose, and the code
-// under test logs on each one.
 func silenceSessionStateLogs(t *testing.T) {
 	t.Helper()
 	prev := logger.GetLevel()
 	logger.SetLevel(logger.FATAL)
 	t.Cleanup(func() { logger.SetLevel(prev) })
 }
-
-// Direct, logic-free accessors for the in-memory half. Using the accessors
-// under test here would let a broken read path certify a broken write path.
 
 func rawAlias(al *AgentLoop, baseKey string) (string, bool) {
 	v, ok := al.sessionAliases.Load(baseKey)
@@ -172,13 +139,6 @@ func persistedSnapshot(al *AgentLoop) map[string]uint64 {
 	return out
 }
 
-// ---------------------------------------------------------------------------
-// Key namespace
-// ---------------------------------------------------------------------------
-
-// TestSessionStateKeyNamespace pins the durable contract. Renaming a prefix
-// would orphan every existing row in production databases, so the values are
-// asserted literally on purpose.
 func TestSessionStateKeyNamespace(t *testing.T) {
 	prefixes := map[string]string{
 		"alias": sessAliasKeyPrefix,
@@ -199,9 +159,6 @@ func TestSessionStateKeyNamespace(t *testing.T) {
 		seen[prefix] = name
 	}
 
-	// No namespace may be a prefix of another: Keys() matches by prefix, and if
-	// one namespace nested inside another, enumerating the outer one would pull
-	// in the inner one's rows and mis-route them.
 	for a, pa := range prefixes {
 		for b, pb := range prefixes {
 			if a != b && strings.HasPrefix(pb, pa) {
@@ -226,8 +183,6 @@ func TestSessionStateWritesStayInTheirNamespace(t *testing.T) {
 	if got := snap.aliases["base"]; got != "base:chat:1" {
 		t.Errorf("sess:alias:base = %q, want %q", got, "base:chat:1")
 	}
-	// Both agent flavours share the sess:agent namespace, separated only by the
-	// reserved "subagent" segment in the key.
 	if got := snap.agents["base:chat:1"]; got != "main" {
 		t.Errorf("user agent row = %q, want %q", got, "main")
 	}
@@ -238,10 +193,6 @@ func TestSessionStateWritesStayInTheirNamespace(t *testing.T) {
 		t.Errorf("sess:seq:base = %d, want 1", got)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// sessionStateKV
-// ---------------------------------------------------------------------------
 
 func TestSessionStateKV(t *testing.T) {
 	t.Run("no store returns nil", func(t *testing.T) {
@@ -263,10 +214,6 @@ func TestSessionStateKV(t *testing.T) {
 		}
 	})
 }
-
-// ---------------------------------------------------------------------------
-// setSessionAlias
-// ---------------------------------------------------------------------------
 
 func TestSetSessionAlias(t *testing.T) {
 	t.Run("mirrors memory and KV", func(t *testing.T) {
@@ -296,8 +243,6 @@ func TestSetSessionAlias(t *testing.T) {
 				al, st := newSessionStateLoop(t)
 				al.setSessionAlias(tc.base, tc.active)
 
-				// An empty base key would produce the bare prefix "sess:alias:",
-				// which no lookup can ever name. It must not be written at all.
 				if n := captureSessionKV(t, st).count(); n != 0 {
 					t.Errorf("wrote %d KV rows for (%q,%q), want 0", n, tc.base, tc.active)
 				}
@@ -325,10 +270,6 @@ func TestSetSessionAlias(t *testing.T) {
 	})
 
 	t.Run("keys that contain LIKE wildcards round-trip", func(t *testing.T) {
-		// KV.Keys() enumerates by prefix using LIKE, so a session key holding
-		// '%', '_' or '\' only survives a load if the store escapes them.
-		// Session-state keys embed channel-provided session keys verbatim, so
-		// this must hold for arbitrary text.
 		al, st := newSessionStateLoop(t)
 
 		bases := []string{"ch%at", "ch_at", "ch\\at", "pct:100%:chat"}
@@ -367,10 +308,6 @@ func TestSetSessionAlias(t *testing.T) {
 	})
 }
 
-// ---------------------------------------------------------------------------
-// nextConversationSessionKey / nextChatSession
-// ---------------------------------------------------------------------------
-
 func TestNextConversationSessionKey(t *testing.T) {
 	t.Run("empty base returns empty", func(t *testing.T) {
 		al, st := newSessionStateLoop(t)
@@ -378,8 +315,6 @@ func TestNextConversationSessionKey(t *testing.T) {
 		if got := al.nextConversationSessionKey(""); got != "" {
 			t.Errorf("nextConversationSessionKey(\"\") = %q, want \"\"", got)
 		}
-		// The guard must come before the counter, otherwise repeated empty calls
-		// burn sequence numbers forever.
 		if n := al.sessionKeySeq.Load(); n != 0 {
 			t.Errorf("global sequence advanced to %d on an empty base, want 0", n)
 		}
@@ -403,9 +338,6 @@ func TestNextConversationSessionKey(t *testing.T) {
 	})
 
 	t.Run("counter is global across bases", func(t *testing.T) {
-		// sessionKeySeq is one counter shared by every base, so numbers are
-		// unique process-wide, not merely per base. That keeps two bases from
-		// colliding if one is later aliased onto the other.
 		al, _ := newSessionStateLoop(t)
 
 		first := al.nextConversationSessionKey("a")
@@ -428,8 +360,6 @@ func TestNextConversationSessionKey(t *testing.T) {
 			if got != want {
 				t.Fatalf("call %d = %q, want %q", i, got, want)
 			}
-			// The returned key and the durable seed must never disagree: the
-			// seed is all the next process has to go on.
 			if seed := captureSessionKV(t, st).seqs["base"]; seed != uint64(i) {
 				t.Fatalf("after %q, durable seed = %d, want %d", got, seed, i)
 			}
@@ -437,8 +367,6 @@ func TestNextConversationSessionKey(t *testing.T) {
 	})
 
 	t.Run("one row per base no matter how many keys", func(t *testing.T) {
-		// The seed is a high-water mark, not a log: 50 conversations must leave
-		// exactly one row, or the kv table grows with every /new forever.
 		al, st := newSessionStateLoop(t)
 
 		for i := 1; i <= 50; i++ {
@@ -459,10 +387,6 @@ func TestNextConversationSessionKey(t *testing.T) {
 	})
 
 	t.Run("no KV write when the number does not move", func(t *testing.T) {
-		// seqSeedPersisted exists so the first /new after a restart does not
-		// rewrite the number it just loaded. The state below is exactly what a
-		// load leaves behind when the base's seed sits above the (reset) global
-		// counter, so it is built directly.
 		al, st := newSessionStateLoop(t)
 
 		al.seqSeedMu.Lock()
@@ -470,7 +394,6 @@ func TestNextConversationSessionKey(t *testing.T) {
 		al.seqSeedPersisted = map[string]uint64{"base": 40}
 		al.seqSeedMu.Unlock()
 
-		// Remove the row so a write would be visible as its reappearance.
 		if err := st.KV().Delete(sessSeqKeyPrefix + "base"); err != nil {
 			t.Fatalf("delete seed row: %v", err)
 		}
@@ -482,8 +405,6 @@ func TestNextConversationSessionKey(t *testing.T) {
 			t.Errorf("the reloaded number was re-persisted as %d, want no write at all", got)
 		}
 
-		// The base's seed must also have raised the global counter, so an
-		// unrelated base cannot be leapfrogged back into a used number.
 		if got := al.sessionKeySeq.Load(); got < 40 {
 			t.Errorf("global counter = %d, want at least the seeded 40", got)
 		}
@@ -498,7 +419,6 @@ func TestNextConversationSessionKey(t *testing.T) {
 	t.Run("base key containing colons", func(t *testing.T) {
 		al, st := newSessionStateLoop(t)
 
-		// Real bases look like "agent:main:tg:123:direct:456".
 		base := "agent:main:tg:123:direct:456"
 		if got := al.nextConversationSessionKey(base); got != base+":chat:1" {
 			t.Errorf("key = %q, want %q", got, base+":chat:1")
@@ -511,8 +431,6 @@ func TestNextConversationSessionKey(t *testing.T) {
 }
 
 func TestNextChatSessionConcurrent(t *testing.T) {
-	// Two /new calls for the same base must never be handed the same number:
-	// the whole read-modify-write runs under seqSeedMu.
 	al, st := newSessionStateLoop(t)
 
 	const goroutines = 32
@@ -542,7 +460,6 @@ func TestNextChatSessionConcurrent(t *testing.T) {
 		}
 	}
 
-	// Every number issued must be reflected in the durable high-water mark.
 	seed := captureSessionKV(t, st).seqs["base"]
 	if seed != goroutines*perGoroutine {
 		t.Errorf("durable seed = %d, want %d", seed, goroutines*perGoroutine)
@@ -551,7 +468,6 @@ func TestNextChatSessionConcurrent(t *testing.T) {
 		t.Errorf("global counter %d is below the durable seed %d", got, seed)
 	}
 
-	// The next key after contention must still be fresh.
 	want := fmt.Sprintf("base:chat:%d", goroutines*perGoroutine+1)
 	if got := al.nextConversationSessionKey("base"); got != want {
 		t.Errorf("key after contention = %q, want %q", got, want)
@@ -581,23 +497,12 @@ func TestBumpSessionKeySeq(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Restart round-trips
-// ---------------------------------------------------------------------------
-
-// TestSessionStateSurvivesRestart is the end-to-end contract of the file: the
-// routing state a user built up must be intact in a process that starts from
-// the same database.
 func TestSessionStateSurvivesRestart(t *testing.T) {
 	base := "agent:main:tg:123:direct:456"
 	subagentKey := "agent:coder:subagent:task-1"
 
 	st := openSessionStateStore(t)
 
-	// --- process 1: the user switches agent, starts a new conversation, and a
-	// subagent gets bound to an agent. Note the agent override is written under
-	// the *active* key, which is what the /agent command does after resolving
-	// the alias (agentProvidableImpl.SetSessionAgent).
 	first := newSessionStateLoopOn(st)
 	first.setSessionAlias(base, first.nextConversationSessionKey(base))
 	first.setSessionAgent(base+":chat:1", "coder")
@@ -608,7 +513,6 @@ func TestSessionStateSurvivesRestart(t *testing.T) {
 		t.Fatalf("process 1 alias = %q, want %q", wantAlias, base+":chat:1")
 	}
 
-	// --- process 2: same database, empty memory.
 	second := newSessionStateLoopOn(st)
 	aliases, agents := second.loadDurableSessionState()
 	if aliases != 1 {
@@ -627,15 +531,12 @@ func TestSessionStateSurvivesRestart(t *testing.T) {
 	if got := second.getSessionAgent(subagentKey); got != "fixer" {
 		t.Errorf("subagent agent after restart = %q, want %q", got, "fixer")
 	}
-	// The next conversation must not collide with the pre-restart one.
 	if got := second.nextConversationSessionKey(base); got != base+":chat:2" {
 		t.Errorf("first conversation key after restart = %q, want %q", got, base+":chat:2")
 	}
-	// What startFreshConversation would do for a /new that carries an agent.
 	second.setSessionAlias(base, base+":chat:2")
 	second.setSessionAgent(base+":chat:2", "coder")
 
-	// --- process 3: what process 2 wrote is itself durable.
 	third := newSessionStateLoopOn(st)
 	third.loadDurableSessionState()
 	if got := third.ResolveSessionKey(base); got != base+":chat:2" {
@@ -649,9 +550,6 @@ func TestSessionStateSurvivesRestart(t *testing.T) {
 	}
 }
 
-// TestSessionStateRestartKeepsIndependentBases checks that durability is
-// per-base: one session's high-water mark must not be the only thing restored,
-// and one base's deletes must not erase another's numbering.
 func TestSessionStateRestartKeepsIndependentBases(t *testing.T) {
 	st := openSessionStateStore(t)
 
@@ -670,15 +568,12 @@ func TestSessionStateRestartKeepsIndependentBases(t *testing.T) {
 	second := newSessionStateLoopOn(st)
 	second.loadDurableSessionState()
 
-	// a keeps its own mark, c keeps its own, and b starts over.
 	if got := second.nextConversationSessionKey("a"); got != "a:chat:5" {
 		t.Errorf("a after restart = %q, want %q (must exceed a:chat:3)", got, "a:chat:5")
 	}
 	if got := second.nextConversationSessionKey("c"); got != "c:chat:6" {
 		t.Errorf("c after restart = %q, want %q", got, "c:chat:6")
 	}
-	// b's seed was deleted, but the global counter is still a lower bound, so b
-	// cannot be handed a number another base already used.
 	bKey := second.nextConversationSessionKey("b")
 	if bKey == "b:chat:1" || bKey == "b:chat:2" {
 		t.Errorf("b after its reset got %q, want a number no base has used", bKey)
@@ -687,7 +582,6 @@ func TestSessionStateRestartKeepsIndependentBases(t *testing.T) {
 		t.Errorf("b got a malformed key %q", bKey)
 	}
 
-	// No two bases in the whole run may share a conversation key.
 	seen := map[string]bool{}
 	for _, k := range append(keys, second.nextConversationSessionKey("a"), bKey) {
 		if seen[k] {
@@ -697,13 +591,6 @@ func TestSessionStateRestartKeepsIndependentBases(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Degradation without SQLite
-// ---------------------------------------------------------------------------
-
-// TestSessionStateDegradesWithoutStore documents the fallback that makes the
-// whole feature optional: with no database the maps still work, so routing
-// behaves exactly as it did before durability existed.
 func TestSessionStateDegradesWithoutStore(t *testing.T) {
 	silenceSessionStateLogs(t)
 	al := &AgentLoop{registry: &AgentRegistry{}}
@@ -732,7 +619,6 @@ func TestSessionStateDegradesWithoutStore(t *testing.T) {
 		t.Errorf("second conversation key = %q, want %q", got, "base:chat:2")
 	}
 
-	// Loads and deletes must be safe too — NewAgentLoop calls load unconditionally.
 	aliases, agents := al.loadDurableSessionState()
 	if aliases != 0 || agents != 0 {
 		t.Errorf("load without a store = (%d,%d), want (0,0)", aliases, agents)
@@ -744,31 +630,21 @@ func TestSessionStateDegradesWithoutStore(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// KV failures must not break the running session
-// ---------------------------------------------------------------------------
-
-// TestSessionStateSurvivesKVFailure closes the database underneath the loop:
-// every durable write then errors. The in-memory half must still be updated,
-// because losing durability is recoverable while losing the live session is not.
 func TestSessionStateSurvivesKVFailure(t *testing.T) {
 	silenceSessionStateLogs(t)
 
 	st := openSessionStateStore(t)
 	al := newSessionStateLoopOn(st)
 
-	// Warm state while the store is healthy.
 	al.setSessionAgent("warm", "main")
 
 	if err := st.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
 
-	// None of these may panic.
 	al.setSessionAlias("base", "base:chat:1")
 	al.setSessionAgent("base:chat:1", "coder")
 	al.setSubagentSessionAgent("agent:main:subagent:1", "fixer")
-	// The alias/agent writes above do not consume numbers, so this is chat:1.
 	if got := al.nextConversationSessionKey("base"); got != "base:chat:1" {
 		t.Errorf("conversation key = %q, want %q", got, "base:chat:1")
 	}
@@ -779,13 +655,9 @@ func TestSessionStateSurvivesKVFailure(t *testing.T) {
 	if aliases != 0 || agents != 0 {
 		t.Errorf("load against a dead store = (%d,%d), want (0,0)", aliases, agents)
 	}
-	// The delete that ran while the store was dead still cleared memory, so a
-	// live session is never left pointing at an agent it no longer has.
 	if _, ok := rawAgent(al, "base:chat:1"); ok {
 		t.Error("delete did not clear the in-memory agent map")
 	}
-	// Writes after the failure still populate memory: losing durability is
-	// recoverable, losing the running session is not.
 	al.setSessionAgent("base:chat:2", "researcher")
 	if got, ok := rawAgent(al, "base:chat:2"); !ok || got != "researcher" {
 		t.Errorf("in-memory agent after KV failure = %q/%t, want %q/true", got, ok, "researcher")
@@ -793,21 +665,13 @@ func TestSessionStateSurvivesKVFailure(t *testing.T) {
 	if got, ok := rawSubagentAgent(al, "agent:main:subagent:1"); !ok || got != "fixer" {
 		t.Errorf("in-memory subagent agent = %q/%t, want %q/true", got, ok, "fixer")
 	}
-	// Numbering keeps advancing rather than restarting at a used number, even
-	// though the alias delete dropped this base's own seed.
 	if got := al.nextConversationSessionKey("base"); got != "base:chat:2" {
 		t.Errorf("conversation key after KV failure = %q, want %q", got, "base:chat:2")
 	}
-	// The warm row is still addressable in memory even though it can no longer
-	// be read from or written to disk.
 	if got, ok := rawAgent(al, "warm"); !ok || got != "main" {
 		t.Errorf("pre-existing in-memory state was lost: %q/%t", got, ok)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 func equalUint64Maps(got, want map[string]uint64) bool {
 	if len(got) != len(want) {

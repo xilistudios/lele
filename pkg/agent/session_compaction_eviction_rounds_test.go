@@ -1,18 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Multi-round compaction eviction tests. These verify that the eviction
-// boundary (excludeBoundary) survives across multiple compaction rounds
-// and that SetHistory (called by summarizeSessionCore to un-exclude the
-// summary message) does not clear the boundary, which would disable the
-// eviction clamp in every round ≥ 2.
-//
-// N1 review finding: in the production path (summarizeSessionCore),
-// SetHistory is called between ExcludeOldMessagesFromContext and
-// EvictExcludedMessages. With the unconditional excludeBoundary = 0, the
-// clamp was disabled on every round ≥ 2, falling back to the contiguous-run
-// heuristic and leaving excluded messages resident in RAM.
-
 package agent
 
 import (
@@ -27,25 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/store"
 )
 
-// TestCompaction_SecondRoundEvictsExcludedFromMemory drives the production
-// path (summarizeSessionWithError) through two compaction rounds and asserts
-// that after round 2:
-//
-//	(a) no message with ExcludeFromContext == true remains in memory
-//	    (the E2E invariant — the boundary clamp keeps the resident slice clean);
-//	(b) the history resident is not empty and there are messages in context
-//	    (filterContextMessages is not vacuous);
-//	(c) the summary is bounded (does not grow without limit between rounds).
-//
-// Production flow simulated:
-//   - Round 1: summarizeSessionCore → summary produced, stored in session.Summary.
-//   - Between rounds: summary message materialized into session history (as
-//     ensureSummaryMaterialized does in llm_caller.go:438 and llm_runner.go:207).
-//     This triggers the SetHistory call inside summarizeSessionCore for round 2,
-//     which is the exact point where the bug manifests (boundary cleared).
-//   - Round 2: summarizeSessionCore finds the summary message excluded,
-//     calls SetHistory to un-exclude it → with the bug, boundary is cleared
-//     to 0; with the fix, boundary survives and the eviction clamp applies.
 func TestCompaction_SecondRoundEvictsExcludedFromMemory(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "rounds-e2e-*")
 	if err != nil {
@@ -85,7 +51,6 @@ func TestCompaction_SecondRoundEvictsExcludedFromMemory(t *testing.T) {
 		t.Fatal("No default agent found")
 	}
 
-	// Set up a real SQLite store so eviction works.
 	storePath := filepath.Join(tmpDir, "rounds-e2e.db")
 	s, err := store.Open(storePath)
 	if err != nil {
@@ -106,49 +71,47 @@ func TestCompaction_SecondRoundEvictsExcludedFromMemory(t *testing.T) {
 	const human2 = "FOLLOWUP ONE: does the routing table accept new nodes?"
 	const human8 = "FOLLOWUP TWO: show me the failing test"
 
-	// --- Seed 20 messages: human at 0, 2, 8; rest assistant/tool ---
-	agent.Sessions.AddMessage(sessionKey, "user", human0)                                    // 0
-	agent.Sessions.AddMessage(sessionKey, "assistant", "I'll help you build a DHT crawler.") // 1
-	agent.Sessions.AddMessage(sessionKey, "user", human2)                                    // 2
-	agent.Sessions.AddFullMessage(sessionKey, providers.Message{                             // 3
+	agent.Sessions.AddMessage(sessionKey, "user", human0)
+	agent.Sessions.AddMessage(sessionKey, "assistant", "I'll help you build a DHT crawler.")
+	agent.Sessions.AddMessage(sessionKey, "user", human2)
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
 		Role:      "assistant",
 		Content:   "Let me search for DHT implementations.",
 		ToolCalls: []providers.ToolCall{{ID: "call_search", Function: &providers.FunctionCall{Name: "web_search"}}},
 	})
-	agent.Sessions.AddFullMessage(sessionKey, providers.Message{ // 4
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
 		Role:       "tool",
 		Content:    "Found 3 DHT implementations on GitHub",
 		ToolCallID: "call_search",
 	})
-	agent.Sessions.AddMessage(sessionKey, "assistant", "The routing table accepts new nodes via Kademlia XOR distance.") // 5
-	agent.Sessions.AddMessage(sessionKey, "assistant", "Here is the architecture overview.")                             // 6
-	agent.Sessions.AddMessage(sessionKey, "assistant", "I can also check the test suite for you.")                       // 7
-	agent.Sessions.AddMessage(sessionKey, "user", human8)                                                                // 8
-	agent.Sessions.AddMessage(sessionKey, "assistant", "Let me look at the tests.")                                      // 9
-	agent.Sessions.AddFullMessage(sessionKey, providers.Message{                                                         // 10
+	agent.Sessions.AddMessage(sessionKey, "assistant", "The routing table accepts new nodes via Kademlia XOR distance.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Here is the architecture overview.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "I can also check the test suite for you.")
+	agent.Sessions.AddMessage(sessionKey, "user", human8)
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Let me look at the tests.")
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
 		Role:      "assistant",
 		Content:   "Searching for test files...",
 		ToolCalls: []providers.ToolCall{{ID: "call_grep", Function: &providers.FunctionCall{Name: "exec"}}},
 	})
-	agent.Sessions.AddFullMessage(sessionKey, providers.Message{ // 11
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
 		Role:       "tool",
 		Content:    "Found: dht_test.go:42 TestBootstrapNode",
 		ToolCallID: "call_grep",
 	})
-	agent.Sessions.AddMessage(sessionKey, "assistant", "The failing test is TestBootstrapNode.")             // 12
-	agent.Sessions.AddMessage(sessionKey, "assistant", "It fails because the mock peer returns stale data.") // 13
-	agent.Sessions.AddMessage(sessionKey, "assistant", "You need to update the mock in setup_test.go.")      // 14
-	agent.Sessions.AddMessage(sessionKey, "assistant", "Specifically line 87 where the peer ID is set.")     // 15
-	agent.Sessions.AddMessage(sessionKey, "assistant", "Changing it to the new format should fix it.")       // 16
-	agent.Sessions.AddMessage(sessionKey, "assistant", "Would you like me to show the exact diff?")          // 17
-	agent.Sessions.AddMessage(sessionKey, "assistant", "Here is a summary of what we covered so far.")       // 18
-	agent.Sessions.AddMessage(sessionKey, "assistant", "Let me know if you have more questions.")            // 19
+	agent.Sessions.AddMessage(sessionKey, "assistant", "The failing test is TestBootstrapNode.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "It fails because the mock peer returns stale data.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "You need to update the mock in setup_test.go.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Specifically line 87 where the peer ID is set.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Changing it to the new format should fix it.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Would you like me to show the exact diff?")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Here is a summary of what we covered so far.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Let me know if you have more questions.")
 
 	if err := agent.Sessions.Save(sessionKey); err != nil {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// --- Round 1: compact + evict ---
 	stats1, err := sm.summarizeSessionWithError(agent, sessionKey)
 	if err != nil {
 		t.Fatalf("round 1 summarizeSessionWithError failed: %v", err)
@@ -165,39 +128,24 @@ func TestCompaction_SecondRoundEvictsExcludedFromMemory(t *testing.T) {
 	summary1Len := len(summary1)
 	t.Logf("Round 1 summary length: %d chars", summary1Len)
 
-	// --- Materialize the summary message into the session history ---
-	// This simulates what ensureSummaryMaterialized does in production
-	// (llm_caller.go:438, llm_runner.go:207): the summary message is added
-	// as a "user" message with the summaryMessageHeader prefix. In
-	// summarizeSessionCore for round 2, this message will be found by
-	// isSummaryMessage, and if it was excluded by ExcludeOldMessagesFromContext,
-	// SetHistory will be called to un-exclude it — the exact point where the
-	// bug manifests (boundary cleared to 0).
 	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
 		Role:    "user",
 		Content: summaryMessageHeader + summary1,
 	})
 
-	// --- Add messages for round 2 ---
-	// After materializing the summary, the in-memory slice is:
-	//   [m18, m19, summary_msg, m20, m21, ..., m27]
-	// where m18 and m19 are the kept tail from round 1, summary_msg is the
-	// materialized summary, and m20-m27 are new messages.
-	// Human turns: index 0 = m18, index 3 = m21, index 7 = m25.
-	agent.Sessions.AddMessage(sessionKey, "assistant", "After round 1, let me continue the analysis.") // index 3
-	agent.Sessions.AddMessage(sessionKey, "user", "What about the DHT bucket refresh interval?")       // index 4, human
-	agent.Sessions.AddMessage(sessionKey, "assistant", "The bucket refresh is configurable.")          // index 5
-	agent.Sessions.AddMessage(sessionKey, "assistant", "Default is every hour.")                       // index 6
-	agent.Sessions.AddMessage(sessionKey, "assistant", "You can set it in config.yaml.")               // index 7
-	agent.Sessions.AddMessage(sessionKey, "user", "Show me the config example.")                       // index 8, human
-	agent.Sessions.AddMessage(sessionKey, "assistant", "Here is the YAML snippet.")                    // index 9
-	agent.Sessions.AddMessage(sessionKey, "assistant", "That should get you started.")                 // index 10
+	agent.Sessions.AddMessage(sessionKey, "assistant", "After round 1, let me continue the analysis.")
+	agent.Sessions.AddMessage(sessionKey, "user", "What about the DHT bucket refresh interval?")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "The bucket refresh is configurable.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Default is every hour.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "You can set it in config.yaml.")
+	agent.Sessions.AddMessage(sessionKey, "user", "Show me the config example.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "Here is the YAML snippet.")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "That should get you started.")
 
 	if err := agent.Sessions.Save(sessionKey); err != nil {
 		t.Fatalf("round 2 pre-save failed: %v", err)
 	}
 
-	// --- Round 2: compact + evict ---
 	agent.Provider = &llmRunnerMockLLMProvider{
 		response: &providers.LLMResponse{
 			Content:   "Summary: User is building a DHT crawler, debugging tests, and configuring bucket refresh.",
@@ -211,7 +159,6 @@ func TestCompaction_SecondRoundEvictsExcludedFromMemory(t *testing.T) {
 	}
 	t.Logf("Round 2 stats: before=%d after=%d dropped=%d", stats2.BeforeMessages, stats2.AfterMessages, stats2.DroppedMessages)
 
-	// --- (a) NO message with ExcludeFromContext == true remains in memory ---
 	hist2 := agent.Sessions.GetHistory(sessionKey)
 	t.Log("=== Round 2 post-eviction in-memory history ===")
 	for i, m := range hist2 {
@@ -221,7 +168,6 @@ func TestCompaction_SecondRoundEvictsExcludedFromMemory(t *testing.T) {
 		}
 	}
 
-	// --- (b) History is not empty and context is non-empty ---
 	if len(hist2) == 0 {
 		t.Fatal("(b) history is empty after round 2 — eviction wiped everything")
 	}
@@ -230,39 +176,15 @@ func TestCompaction_SecondRoundEvictsExcludedFromMemory(t *testing.T) {
 		t.Error("(b) filterContextMessages is empty — no context reaches the model")
 	}
 
-	// --- (c) Summary is bounded (does not grow without limit) ---
 	summary2 := agent.Sessions.GetSummary(sessionKey)
 	summary2Len := len(summary2)
 	t.Logf("Summary: round1=%d chars, round2=%d chars", summary1Len, summary2Len)
 
-	// The summary should not more than double between rounds. With the
-	// summary-message-skip fix, the growth comes only from the new content
-	// (not from nesting the header + duplicating the body).
 	if summary2Len > summary1Len*3 {
 		t.Errorf("(c) summary grew too much: round1=%d, round2=%d (> 3× growth)", summary1Len, summary2Len)
 	}
 }
 
-// TestCompaction_TailToolResultsDoesNotEmptyContext exercises the production
-// path (summarizeSessionWithError) in 2 rounds where round 2 ends with a
-// tool-result tail (assistant with 2 tool_calls + 2 tool results, no
-// ContextMessages).
-//
-// It anchors the #343 retention policy: the guard moves the boundary BACK to
-// the assistant that owns the tool-result tail (located by ToolCallID), so the
-// whole tool group stays in the kept tail. Under the previous forward-push this
-// degenerate shape walked excludeUpTo to len(Messages): the #340 no-emptying
-// invariant then capped eviction at the last in-context message, a no-op that
-// left 3 excluded rows resident in RAM (cost #1 of #343) and reached the model
-// with a single message. Option A removes both — excluded_resident == 0 and the
-// whole kept tail (the tool group included) reaches the model.
-//
-// The token price of keeping the group live was measured before adopting the
-// policy (#343 T1): at most 2412 tokens = 1.88% of the 128k context window.
-//
-// The structural no-emptying invariant (boundary == len) is no longer reached
-// through this shape; it is covered directly in pkg/session
-// (TestEvictExcluded_BoundaryEqualToLenKeepsContext).
 func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "tail-tools-e2e-*")
 	if err != nil {
@@ -319,7 +241,6 @@ func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 
 	const sessionKey = "test:tail-tools-e2e"
 
-	// --- Seed 20 messages: human at 0, 2, 8; rest assistant/tool ---
 	agent.Sessions.AddMessage(sessionKey, "user", "ORIGINAL GOAL: build the DHT crawler")
 	agent.Sessions.AddMessage(sessionKey, "assistant", "I'll help you build a DHT crawler.")
 	agent.Sessions.AddMessage(sessionKey, "user", "FOLLOWUP ONE: does the routing table accept new nodes?")
@@ -361,7 +282,6 @@ func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
-	// --- Round 1: compact + evict ---
 	stats1, err := sm.summarizeSessionWithError(agent, sessionKey)
 	if err != nil {
 		t.Fatalf("round 1 summarizeSessionWithError failed: %v", err)
@@ -374,19 +294,13 @@ func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 	hist1 := agent.Sessions.GetHistory(sessionKey)
 	t.Logf("Round 1 resident: %d messages", len(hist1))
 
-	// --- Materialize summary (ensureSummaryMaterialized pattern) ---
 	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
 		Role:    "user",
 		Content: summaryMessageHeader + summary1,
 	})
 
-	// --- Add messages for round 2, ending with a tool-result tail ---
-	// The tail is assistant with 2 tool_calls + 2 tool results, no
-	// ContextMessages. The move-back guard in ExcludeOldMessagesFromContext
-	// resolves the owner of the first kept tool result (by ToolCallID) and
-	// keeps the whole group in the kept tail.
-	agent.Sessions.AddMessage(sessionKey, "user", "search for DHT implementations and grep for test files") // human
-	agent.Sessions.AddFullMessage(sessionKey, providers.Message{                                            // assistant + 2 tool_calls
+	agent.Sessions.AddMessage(sessionKey, "user", "search for DHT implementations and grep for test files")
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
 		Role:    "assistant",
 		Content: "Let me search and grep.",
 		ToolCalls: []providers.ToolCall{
@@ -394,12 +308,12 @@ func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 			{ID: "call_grep2", Function: &providers.FunctionCall{Name: "exec"}},
 		},
 	})
-	agent.Sessions.AddFullMessage(sessionKey, providers.Message{ // tool result call_search2
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
 		Role:       "tool",
 		Content:    "Found 5 DHT implementations",
 		ToolCallID: "call_search2",
 	})
-	agent.Sessions.AddFullMessage(sessionKey, providers.Message{ // tool result call_grep2
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
 		Role:       "tool",
 		Content:    "Found 3 test files matching DHT",
 		ToolCallID: "call_grep2",
@@ -412,7 +326,6 @@ func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 	histPreR2 := agent.Sessions.GetHistory(sessionKey)
 	t.Logf("Round 2 pre-compact: %d messages", len(histPreR2))
 
-	// --- Round 2: compact + evict ---
 	agent.Provider = &llmRunnerMockLLMProvider{
 		response: &providers.LLMResponse{
 			Content:   "Summary: User is building a DHT crawler with test configuration.",
@@ -426,7 +339,6 @@ func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 	}
 	t.Logf("Round 2 stats: before=%d after=%d dropped=%d", stats2.BeforeMessages, stats2.AfterMessages, stats2.DroppedMessages)
 
-	// --- Inspect post-round-2 state ---
 	hist2 := agent.Sessions.GetHistory(sessionKey)
 
 	excludedResident := 0
@@ -439,35 +351,17 @@ func TestCompaction_TailToolResultsDoesNotEmptyContext(t *testing.T) {
 	t.Logf("Round 2 post-eviction: len(hist)=%d, excluded_resident=%d, in_context=%d",
 		len(hist2), excludedResident, len(ctx2))
 
-	// --- (a) At least one context message must reach the model ---
 	if len(ctx2) == 0 {
 		t.Errorf("(a) filterContextMessages is empty after round 2 — model gets no conversation messages (in_context=0)")
 	}
-	// --- (b) History must not be empty ---
 	if len(hist2) == 0 {
 		t.Errorf("(b) history is empty after round 2 — eviction wiped all resident context")
 	}
 
-	// --- (c) #343 lock-in: pin the Option A retention policy through the
-	// production path. The guard keeps the whole tool group in the kept tail,
-	// so no excluded row is left resident. Under the previous forward-push the
-	// same layout produced excluded_resident=3 / in_context=1 / len(hist)=4
-	// (measured, #343 T1), so this assertion fails if the policy is reverted.
 	if excludedResident != 0 {
 		t.Errorf("(c) #343: excluded_resident = %d, want 0 — Option A keeps the whole tool group, so no excluded row may stay resident", excludedResident)
 	}
 
-	// --- (d) #343 lock-in: what reaches the model must be the tool group
-	// itself, not merely "as many messages as the history". The pair
-	// (excluded_resident == 0, len(ctx2) == len(hist2)) is one predicate
-	// written twice — filterContextMessages drops exactly the rows marked
-	// ExcludeFromContext — and a regression that kept only one message in
-	// context would still satisfy both. So locate the seeded round-2 tool
-	// group — the owner assistant carrying its two tool_calls and both
-	// results — in the resident history by ToolCallID and require every one
-	// of its messages to be present in the filtered context. Matching by
-	// ToolCallID (the same key the retention policy uses) keeps this
-	// structural rather than literal, so it survives layout edits.
 	groupCallIDs := []string{"call_search2", "call_grep2"}
 
 	ownerInContext := false

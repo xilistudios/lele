@@ -113,7 +113,6 @@ func TestUpdatesApplyWithoutServiceReturns503(t *testing.T) {
 
 func TestUpdatesRollbackWithoutBackupFails(t *testing.T) {
 	ts := newNativeTestServer(t)
-	// Empty backup dir → rollback should fail with 500.
 	ts.channel.SetUpdateService(update.NewUpdater("", filepath.Join(t.TempDir(), "no-backups"), "0.1.0"))
 
 	req, _ := http.NewRequest("POST", ts.server.URL+"/api/v1/system/updates/rollback", nil)
@@ -130,7 +129,6 @@ func TestUpdatesRollbackWithoutBackupFails(t *testing.T) {
 }
 
 func TestUpdatesDisabledReturns403(t *testing.T) {
-	// Write a config with updates disabled.
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.json")
 	cfgContent := `{"updates": {"enabled": false}}`

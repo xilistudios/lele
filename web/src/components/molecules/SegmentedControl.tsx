@@ -1,15 +1,5 @@
 import { type KeyboardEvent, type ReactNode, useRef } from 'react'
 
-/**
- * Segmented control (spec §7.1) — 2..5 mutually exclusive options where every
- * option must be visible at once (thinking level, tools mode).
- *
- * Deliberately not a `<select>`: the active value has to be readable without
- * interacting. Implemented as a WAI-ARIA radio group with roving tabindex:
- * ←/→ move the selection (and focus) and activate immediately, Home/End jump to
- * the ends, Enter/Space activate the focused option.
- */
-
 export type SegmentOption<T extends string> = {
   value: T
   label: string
@@ -19,15 +9,11 @@ export type SegmentOption<T extends string> = {
 type Props<T extends string> = {
   id: string
   options: SegmentOption<T>[]
-  /** Current value. `''` is allowed and means "inherit / not set". */
   value: T
   onChange: (value: T) => void
   disabled?: boolean
-  /** sm: h-7 text-xs · md (default): h-9 text-sm */
   size?: 'sm' | 'md'
-  /** Stretch every segment to the container width. */
   fullWidth?: boolean
-  /** Required when no <label htmlFor={id}> is associated. */
   ariaLabel?: string
 }
 
@@ -71,8 +57,6 @@ export function SegmentedControl<T extends string>({
   const focusItem = (index: number) => {
     const target = itemRefs.current[index]
     target?.focus()
-    // Radio groups move the selection together with the focus (§7.1: arrows
-    // "navegan y activan"), so focusing through the keyboard also commits.
     activate(index)
   }
 
@@ -127,7 +111,6 @@ export function SegmentedControl<T extends string>({
             // biome-ignore lint/a11y/useSemanticElements: spec §7.1 requires a radiogroup of visible segments; native <input type=radio> cannot render the raised-surface pill styling and would submit with the surrounding form
             role="radio"
             aria-checked={checked}
-            // Roving tabindex: only the selected option is in the tab order.
             tabIndex={index === selectedIndex ? 0 : -1}
             disabled={disabled}
             title={option.label}

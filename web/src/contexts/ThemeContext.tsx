@@ -25,9 +25,7 @@ export function getStoredThemeSetting(): ThemeSetting {
   try {
     const stored = localStorage.getItem(THEME_STORAGE_KEY)
     if (stored === 'dark' || stored === 'light' || stored === 'auto') return stored
-  } catch {
-    // localStorage not available
-  }
+  } catch {}
   return 'dark'
 }
 
@@ -55,9 +53,7 @@ function applyTheme(theme: Theme) {
 function persistThemeSetting(setting: ThemeSetting) {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, setting)
-  } catch {
-    // localStorage not available
-  }
+  } catch {}
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null)
@@ -66,17 +62,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [themeSetting, setThemeSettingState] = useState<ThemeSetting>(() => getStoredThemeSetting())
   const [theme, setThemeState] = useState<Theme>(() => resolveTheme(getStoredThemeSetting()))
 
-  // Track the media query listener ref so we can clean up
   const mediaQueryRef = useRef<MediaQueryList | null>(null)
 
-  // Sync resolved theme when setting changes
   useEffect(() => {
     const resolved = resolveTheme(themeSetting)
     setThemeState(resolved)
     applyTheme(resolved)
     persistThemeSetting(themeSetting)
 
-    // Set up listener for system preference changes when in auto mode
     if (themeSetting === 'auto') {
       const mq = window.matchMedia('(prefers-color-scheme: dark)')
       mediaQueryRef.current = mq
@@ -99,7 +92,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const toggleTheme = useCallback(() => {
     setThemeSettingState((prev) => {
-      if (prev === 'auto') return 'dark' // toggle from auto goes to dark
+      if (prev === 'auto') return 'dark'
       return prev === 'dark' ? 'light' : 'dark'
     })
   }, [])

@@ -15,8 +15,6 @@ func TestStatusCommand_SessionKeyWithoutAgentPrefix(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
-	// Isolate the SQLite store (and thus durable session state) in a throwaway
-	// config dir so this test never reads or writes the real ~/.lele/lele.db.
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
@@ -33,14 +31,11 @@ func TestStatusCommand_SessionKeyWithoutAgentPrefix(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
 
-	// Use a session key without agent prefix (e.g., "telegram:12345")
 	sessionKey := "telegram:12345"
 
-	// Add some token counts directly to simulate LLM usage
 	defaultAgent := al.registry.GetDefaultAgent()
 	defaultAgent.Sessions.AddTokenCounts(sessionKey, 100, 50)
 
-	// Create command handler and test /status
 	ch := newCommandHandler(al)
 	response, handled := ch.handleCommand(context.TODO(), bus.InboundMessage{
 		Channel:    "telegram",
@@ -53,7 +48,6 @@ func TestStatusCommand_SessionKeyWithoutAgentPrefix(t *testing.T) {
 		t.Fatal("Expected /status to be handled")
 	}
 
-	// Verify tokens are shown in the response
 	if !contains(response, "~100 in / ~50 out") {
 		t.Errorf("Expected token counts in status response, got: %s", response)
 	}

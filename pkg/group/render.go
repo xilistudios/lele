@@ -5,23 +5,11 @@ import (
 	"strings"
 )
 
-// RenderTranscript renders the shared transcript as labelled speaker blocks
-// in order. Each turn is formatted as:
-//
-//	[label]: content
-//
-// When the layer (Turn.Layer) changes relative to the previous turn, a layer
-// separator is inserted (e.g. "--- layer 1 ---"), but only if there is more
-// than one distinct layer present. For strategies that always use Layer=0
-// (round_robin, pipeline), no separators are emitted.
-//
-// Returns "" if turns is empty.
 func RenderTranscript(turns []Turn) string {
 	if len(turns) == 0 {
 		return ""
 	}
 
-	// Check whether multiple layers exist so we only add separators when needed.
 	minLayer, maxLayer := turns[0].Layer, turns[0].Layer
 	for _, t := range turns[1:] {
 		if t.Layer < minLayer {
@@ -51,10 +39,6 @@ func RenderTranscript(turns []Turn) string {
 	return b.String()
 }
 
-// GroupRoleAnnex returns the group-role annex text appended to the agent's
-// persona. It describes that the agent is in a collaborative multi-agent panel,
-// lists all participants with their roles, states self's role, and includes
-// the group task/objective.
 func GroupRoleAnnex(self Participant, participants []Participant, task string) string {
 	var b strings.Builder
 
@@ -84,9 +68,6 @@ func GroupRoleAnnex(self Participant, participants []Participant, task string) s
 	return b.String()
 }
 
-// BuildTurnSystemPrompt builds the full system prompt for a group turn by
-// concatenating the agent's persona with the group-role annex. If persona
-// is empty, only the annex is returned.
 func BuildTurnSystemPrompt(persona string, self Participant, participants []Participant, task string) string {
 	annex := GroupRoleAnnex(self, participants, task)
 	if persona == "" {

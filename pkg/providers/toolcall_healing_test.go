@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package providers
 
 import "testing"
@@ -26,7 +20,6 @@ func result(id, content string) Message {
 
 func user(content string) Message { return Message{Role: "user", Content: content} }
 
-// countResults returns how many tool messages answer callID.
 func countResults(msgs []Message, callID string) int {
 	n := 0
 	for _, m := range msgs {
@@ -39,16 +32,12 @@ func countResults(msgs []Message, callID string) int {
 
 func TestHealToolCallPairs_Cases(t *testing.T) {
 	tests := []struct {
-		name string
-		in   []Message
-		// wantRoles is the expected role sequence after healing.
-		wantRoles []string
-		// wantResultFor: each of these call ids must have exactly one result.
-		wantResultFor []string
-		// wantNoResultFor: these ids must have none.
+		name            string
+		in              []Message
+		wantRoles       []string
+		wantResultFor   []string
 		wantNoResultFor []string
-		// wantContentFor: id -> exact content that must survive untouched.
-		wantContentFor map[string]string
+		wantContentFor  map[string]string
 	}{
 		{
 			name:      "clean history is untouched",
@@ -87,10 +76,8 @@ func TestHealToolCallPairs_Cases(t *testing.T) {
 			wantContentFor: map[string]string{"c1": "ok"},
 		},
 		{
-			name: "result interrupted by a user message stays attached",
-			in:   []Message{asst("c1"), user("stop"), result("c1", "late"), assistantText("resumed")},
-			// The real output has to survive: the placeholder would tell the
-			// model to re-run a tool that already ran.
+			name:           "result interrupted by a user message stays attached",
+			in:             []Message{asst("c1"), user("stop"), result("c1", "late"), assistantText("resumed")},
 			wantRoles:      []string{"assistant", "tool", "user", "assistant"},
 			wantResultFor:  []string{"c1"},
 			wantContentFor: map[string]string{"c1": "late"},
@@ -164,8 +151,6 @@ func roles(msgs []Message) string {
 	return out
 }
 
-// Healing must be a fixed point: running it twice must not change the output,
-// otherwise each turn would keep appending synthetic results.
 func TestHealToolCallPairs_IsIdempotent(t *testing.T) {
 	in := []Message{user("hi"), asst("c1", "c2"), result("c1", "ok"), result("orphan", "x")}
 
@@ -188,14 +173,11 @@ func TestHealToolCallPairs_IsIdempotent(t *testing.T) {
 			t.Fatalf("message %d differs between passes", i)
 		}
 	}
-	// c2 must be answered exactly once, by the first pass.
 	if n := countResults(once, "c2"); n != 1 {
 		t.Fatalf("c2 results after first pass: got %d, want 1", n)
 	}
 }
 
-// A clean history must be returned unchanged, message-for-message, so the
-// healing never rewrites sessions that are already valid.
 func TestHealToolCallPairs_CleanIsIdentity(t *testing.T) {
 	clean := []Message{
 		user("hi"),
@@ -220,8 +202,6 @@ func TestHealToolCallPairs_CleanIsIdentity(t *testing.T) {
 	}
 }
 
-// The synthetic result must carry the call id it answers: providers match
-// results to calls by that id, so a mismatched id is still a 400.
 func TestMissingResultMessage_CarriesCallID(t *testing.T) {
 	m := missingResultMessage("call_abc")
 	if m.ToolCallID != "call_abc" {
@@ -235,9 +215,6 @@ func TestMissingResultMessage_CarriesCallID(t *testing.T) {
 	}
 }
 
-// A call with no ID can never be answered (no result can reference it) and a
-// call with no name is the 400 some gateways raise outright. Both exist in
-// histories written before CanonicalToolCalls, so healing must remove them.
 func TestHealToolCallPairs_DropsUnanswerableCalls(t *testing.T) {
 	in := []Message{
 		user("hi"),
@@ -266,16 +243,11 @@ func TestHealToolCallPairs_DropsUnanswerableCalls(t *testing.T) {
 	if n := countResults(got, "c_good"); n != 1 {
 		t.Errorf("healthy call: got %d results, want 1", n)
 	}
-	// The dropped calls must not have synthetic results invented for them:
-	// their assistant message no longer announces them.
 	if n := countResults(got, "c_noname"); n != 0 {
 		t.Errorf("dropped call got a synthetic result (%d)", n)
 	}
 }
 
-// Stripping an assistant message's only call can leave a blank turn - no tool
-// calls, no text - which is the shape the empty-response guard refuses to
-// persist because the model imitates it into a loop.
 func TestHealToolCallPairs_BlankAssistantAfterStripIsDropped(t *testing.T) {
 	in := []Message{
 		user("hi"),
@@ -296,8 +268,6 @@ func TestHealToolCallPairs_BlankAssistantAfterStripIsDropped(t *testing.T) {
 	}
 }
 
-// Reasoning-only turns are not blank: providers accept them and dropping them
-// would lose the model's chain of thought.
 func TestHealToolCallPairs_KeepsReasoningOnlyAssistant(t *testing.T) {
 	in := []Message{
 		{Role: "assistant", ReasoningContent: "thinking", ToolCalls: []ToolCall{
@@ -310,9 +280,6 @@ func TestHealToolCallPairs_KeepsReasoningOnlyAssistant(t *testing.T) {
 	}
 }
 
-// Healing is given the session's live slice, so it must never write through it.
-// Dropping a call from a message has to build a new slice, not shift the
-// caller's array in place.
 func TestHealToolCallPairs_DoesNotMutateInput(t *testing.T) {
 	in := []Message{
 		{Role: "assistant", Content: "working", ToolCalls: []ToolCall{
@@ -331,18 +298,8 @@ func TestHealToolCallPairs_DoesNotMutateInput(t *testing.T) {
 	}
 }
 
-// syntheticResult is the placeholder the healer writes for a call that stayed
-// unanswered. Its text is pinned by TestMissingResultMessage_CarriesCallID;
-// tests use this helper so they assert pairing and order, not wording.
 func syntheticResult(id string) string { return missingResultMessage(id).Content }
 
-// Issue #337: a human message recorded while a tool call is in flight does not
-// cancel the call - the result is written to the session right after it. The
-// healer must therefore pair that result with its call instead of declaring the
-// call unanswered: the model has to see the real output, not a placeholder
-// inviting it to re-run a tool that already ran (possibly one with side
-// effects). The interleaved message is not lost either; it moves after the
-// result, which is the only place a provider accepts it.
 func TestHealToolCallPairs_InterleavedUserMessageKeepsRealResult(t *testing.T) {
 	in := []Message{
 		user("q0"),
@@ -373,20 +330,13 @@ func TestHealToolCallPairs_InterleavedUserMessageKeepsRealResult(t *testing.T) {
 		t.Fatalf("interleaved message = %q, want PIN", got[3].Content)
 	}
 
-	// Healing must stay a fixed point, or every later turn would keep
-	// rewriting the request it just produced.
 	if again, stillChanged := HealToolCallPairs(got); stillChanged {
 		t.Fatalf("healed history is not stable, second pass rewrote it: %s", roles(again))
 	}
 }
 
-// wantResult describes one tool message of an expected output: the call it
-// answers and its content.
 type wantResult struct{ id, content string }
 
-// checkHealed asserts the exact shape of a healed history: role sequence, every
-// tool result in order (id and content) and the text of every other message in
-// order, so a message that got dropped or moved cannot slip through.
 func checkHealed(t *testing.T, got []Message, wantRoles []string, wantResults []wantResult, wantTexts []string) {
 	t.Helper()
 	if len(got) != len(wantRoles) {
@@ -423,10 +373,6 @@ func checkHealed(t *testing.T, got []Message, wantRoles []string, wantResults []
 	}
 }
 
-// Holding a block open for an interleaved message must not widen what that
-// block may answer: orphans, duplicates and results that belong to an earlier,
-// already closed block are still rejected, and a call whose result never
-// arrives still gets its synthetic one.
 func TestHealToolCallPairs_InterleavedMessageCases(t *testing.T) {
 	tests := []struct {
 		name        string

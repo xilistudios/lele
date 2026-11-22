@@ -58,15 +58,12 @@ export function useAppLogic(
   })
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(() => loadSidebarOpen())
-  // Mobile drawer state — independent from desktop collapse. Always starts closed.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [chatMode, setChatMode] = useState<ChatMode>(() => {
     return (localStorage.getItem('lele_chat_mode') as ChatMode) || 'agent'
   })
   const [parentSessionKey, setParentSessionKey] = useState<string | null>(null)
   const [thinkLevel, setThinkLevel] = useState('default')
-  // Server folder attached to the current session (injected into the agent
-  // context by the backend). '' means "no folder".
   const [sessionFolder, setSessionFolder] = useState('')
   const navigate = useNavigate()
 
@@ -79,8 +76,6 @@ export function useAppLogic(
     sessionsHook.currentSessionKeyRef,
     sessionsHook.refreshSessions,
     parentSessionKey,
-    // Server-side send refusals are surfaced in the chat error banner instead
-    // of being dropped (see handleServerError / lib/sendErrors.ts).
     setError,
   )
   const chatHistory = useChatHistory(
@@ -103,59 +98,20 @@ export function useAppLogic(
   const sessionAgentSeqRef = useRef(0)
   const modelLoadKeyRef = useRef<string | null>(null)
 
-  // Reset subscription tracking on WebSocket reconnection to force re-subscribe.
-  // This fixes the bug where the frontend thinks it's subscribed but the backend
-  // has already cleaned up the client (e.g., after >30s disconnect).
   const prevWsStatusRef = useRef(wsStatus)
-  // Tracks whether the socket has EVER reached `connected` in this mount. It
-  // distinguishes the very first connection (the bootstrap) from a real
-  // reconnection: `prevWsStatusRef` starts as 'disconnected', so the initial
-  // `disconnected|connecting → connected` transition would otherwise look
-  // exactly like a reconnect.
   const hadWsConnectedRef = useRef(false)
-  // Outcome of the bootstrap (`initSession` below): `pending` until it settles,
-  // then `ok` or `failed`. It exists because the FIRST WebSocket connection is
-  // not a reconnect (see `hadWsConnectedRef`) but it still has to recover when
-  // the bootstrap never produced a session list — the socket retries forever
-  // while nothing retries `initSession`, so without this the sidebar would stay
-  // empty until a manual reload whenever the page loads before the backend is
-  // ready.
   const bootstrapOutcomeRef = useRef<'pending' | 'ok' | 'failed'>('pending')
   // biome-ignore lint/correctness/useExhaustiveDependencies: the reconnect actions use stable dispatchers/current-session reads that must not re-trigger the transition-guarded effect
   useEffect(() => {
     if (prevWsStatusRef.current !== 'connected' && wsStatus === 'connected') {
       subscribedSessionRef.current = null
-      // A real reconnect = we had been connected before, so there WAS a
-      // disconnect window to recover from. Read BEFORE flipping the flag.
       const isReconnect = hadWsConnectedRef.current
       hadWsConnectedRef.current = true
-      // Recovery is needed after a real reconnection, and also on the FIRST
-      // connection when the bootstrap FAILED: the page loaded before the
-      // backend was ready, and while the socket retries forever nothing retries
-      // `initSession`, so this is the only path that can fill the sidebar
-      // without a manual reload.
-      // The `pending` state is deliberately NOT recovered from: the bootstrap
-      // is already walking the paginated `/sessions/meta` endpoint right now,
-      // so a second `refreshSessions()` would merely join it and then the
-      // trailing pass would walk it a second time — and `useChatHistory` is
-      // already loading on mount, so `invalidateHistory()` would only duplicate
-      // a request. The `ok` state has nothing to recover either: there was no
-      // disconnect window.
       if (isReconnect || bootstrapOutcomeRef.current === 'failed') {
-        // Refresh sessions on reconnect to pick up changes made during disconnect
         sessionsHook.refreshSessions().catch((err) => {
           console.warn('[useAppLogic] Failed to refresh sessions on reconnect:', err)
         })
-        // Refetch chat history to recover messages that arrived during the
-        // disconnect window. The WS reconnected event includes in_progress
-        // content, but completed messages are only available via HTTP.
         chatHistory.invalidateHistory()
-        // Force-finalize any streaming assistant messages for the current session.
-        // Without this, a message that completed while the WS was down (and
-        // processing never observed true→false) would keep its streaming spinner
-        // stuck until a manual session switch or a page reload. If the turn is
-        // actually still running the backend's subscribe.ack / restored
-        // in_progress_messages will re-create the streaming state.
         messagesHook.setStreamingMessages((prev) =>
           finalizeStreamingAssistantsForSession(prev, sessionsHook.currentSessionKey),
         )
@@ -164,16 +120,6 @@ export function useAppLogic(
     prevWsStatusRef.current = wsStatus
   }, [wsStatus, sessionsHook.refreshSessions, chatHistory.invalidateHistory])
 
-  // The session-list refresh is event-driven and throttled (see
-  // SESSION_REFRESH_THROTTLE_MS in useMessages), so a chat created from
-  // another channel (Telegram/WhatsApp/cron) while this tab was in the
-  // background could otherwise stay invisible until the next WS event.
-  // Refreshing once when the tab becomes visible again restores the liveness
-  // the throttle took away, at a cost the user controls: ONE paginated pass
-  // per tab focus, and the single-flight coordinator collapses it if a pass is
-  // already running. This mirrors what `refetchOnWindowFocus: true` already
-  // does for the react-query endpoints (chat history, settings, skills).
-  // Hidden tabs fire nothing, so no background polling is introduced.
   useOnPageVisible(() => {
     void sessionsHook.refreshSessions().catch((err) => {
       console.warn('[useAppLogic] Failed to refresh sessions on tab focus:', err)
@@ -194,11 +140,6 @@ export function useAppLogic(
     if (!token) return
 
     const initSession = async () => {
-      // Load sessions and agents IN PARALLEL. The sessions list powers the
-      // sidebar and the agent list is needed to resolve the session's agent.
-      // Previously these were loaded sequentially (sessions first, then agents
-      // with retries), which serialized two network round-trips on every
-      // bootstrap.
       const [sessionKey, agentsResult] = await Promise.all([
         sessionsHook.refreshSessions().catch((err) => {
           setError((err as Error).message)
@@ -210,15 +151,11 @@ export function useAppLogic(
         }),
       ])
 
-      // `refreshSessions()` returns null only when it refused to run (no
-      // credentials) or when its pass was invalidated; a successful pass always
-      // resolves with a session key (the list falls back to the default one).
       bootstrapOutcomeRef.current = sessionKey === null ? 'failed' : 'ok'
 
       const agentsList = agentsResult?.agents ?? []
       setAgents(agentsList)
 
-      // Resolve agent for current session
       if (sessionKey && !currentAgentIdRef.current) {
         try {
           const agentResult = await api.sessionAgent(sessionKey)
@@ -275,10 +212,6 @@ export function useAppLogic(
 
     const alreadySubscribed = subscribedSessionRef.current === sessionsHook.currentSessionKey
     if (!alreadySubscribed) {
-      // Don't unsubscribe from previous sessions — the backend manages stale
-      // subscriptions via TTL, so we avoid unnecessary unsub/resub chatter and
-      // keep receiving background events (e.g., message.complete) for sessions
-      // that are still processing.
       wsDebug('[AppLogic] Subscribing to session', {
         sessionKey: sessionsHook.currentSessionKey,
         agentId: currentAgentId,
@@ -295,13 +228,8 @@ export function useAppLogic(
     }
 
     modelLoadKeyRef.current = modelLoadKey
-    loadModels(currentAgentId, sessionsHook.currentSessionKey, hasConversation).catch(() => {
-      // Model loading is best-effort; a failure here must not surface as an
-      // unhandled rejection (it would crash the app / pollute unrelated flows).
-    })
+    loadModels(currentAgentId, sessionsHook.currentSessionKey, hasConversation).catch(() => {})
 
-    // Guard against the session changing while the request is in flight: the
-    // response must only apply to the session that was current when it started.
     const thinkingKey = sessionsHook.currentSessionKey
     api
       .sessionThinking(thinkingKey)
@@ -313,10 +241,6 @@ export function useAppLogic(
         if (sessionsHook.currentSessionKeyRef.current !== thinkingKey) return
       })
 
-    // Rehydrate the session folder the same way thinking level is rehydrated.
-    // A 404 (session without folder yet) silently resolves to "no folder".
-    // Guard against the session changing while the request is in flight: the
-    // response must only apply to the session that was current when it started.
     const folderKey = sessionsHook.currentSessionKey
     api
       .sessionFolder(folderKey)
@@ -339,7 +263,6 @@ export function useAppLogic(
     chatHistory.rawMessages.length,
   ])
 
-  // No session selected → no folder chip (e.g. after deleting the last chat).
   useEffect(() => {
     if (!sessionsHook.currentSessionKey) {
       setSessionFolder('')
@@ -347,20 +270,12 @@ export function useAppLogic(
   }, [sessionsHook.currentSessionKey])
 
   const handleLogout = useCallback(async () => {
-    // Revoke token server-side first
     await api.logout()
     subscribedSessionRef.current = null
     modelLoadKeyRef.current = null
     wsClose()
     messagesHook.clearAll()
-    // Drop the session list and invalidate any pass still in flight, so a slow
-    // /sessions/meta response can never write another user's chats into the
-    // post-logout UI (the coordinator drops it and the generation guard skips
-    // the state write).
     sessionsHook.reset()
-    // Back to a clean slate, so a later login's bootstrap is the one that
-    // decides the outcome again (a stale `failed` would otherwise make the next
-    // first connection re-run the history/streaming recovery).
     bootstrapOutcomeRef.current = 'pending'
     persistSession(null)
     clearCurrentSessionKey()
@@ -377,7 +292,6 @@ export function useAppLogic(
       if (!sessionKey) {
         sessionKey = await sessionsHook.createSession(chatMode)
         if (!sessionKey) {
-          // Keep the draft: the caller treats false as "not accepted".
           setError('Failed to create session')
           return false
         }
@@ -394,15 +308,9 @@ export function useAppLogic(
         currentAgentId,
       )
       if (!accepted) {
-        // Nothing was sent (empty message, or the turn could not be accepted):
-        // keep the draft AND the attachment chips so the user can act, and do
-        // not touch the session activity/title for a turn that never happened.
         return false
       }
       messagesHook.setPendingAttachments([])
-      // Optimistic update: bump updated timestamp immediately so the sidebar
-      // shows the session activity instead of "New Chat"
-      // Also generate a title from the first message so we don't show a UUID
       const title = content
         .replace(/[\n\r\t]+/g, ' ')
         .replace(/[.,!?;:'"`]+/g, '')
@@ -428,18 +336,14 @@ export function useAppLogic(
       const { id: requestId, command } = messagesHook.approvalRequest
       const sessionKey = sessionsHook.currentSessionKey
 
-      // Optimistic UI update: show feedback immediately
       messagesHook.approveRequest(approved, requestId, command)
 
-      // Send via HTTP as primary method (persists in history).
-      // If HTTP fails, fall back to WebSocket (which also persists on the backend).
       if (sessionKey) {
         api.approve(sessionKey, requestId, approved).catch((err) => {
           console.warn('[Approve] HTTP failed, falling back to WS:', err)
           wsSend('approve', { request_id: requestId, approved })
         })
       } else {
-        // No session key available, use WebSocket directly
         wsSend('approve', { request_id: requestId, approved })
       }
     },
@@ -453,8 +357,6 @@ export function useAppLogic(
   )
 
   const handleCancel = useCallback(() => {
-    // Scope the cancel to the active session so a background session's turn
-    // is not aborted when the user cancels from another chat.
     const sessionKey = sessionsHook.currentSessionKey
     wsSend('cancel', sessionKey ? { session_key: sessionKey } : {})
   }, [wsSend, sessionsHook.currentSessionKey])
@@ -467,8 +369,6 @@ export function useAppLogic(
       ) {
         return
       }
-      // Keep all session subscriptions active so we receive
-      // events (like message.complete) for background sessions
       subscribedSessionRef.current = null
       setParentSessionKey(options?.parentSessionKey ?? null)
       sessionsHook.selectSession(sessionKey)
@@ -504,15 +404,10 @@ export function useAppLogic(
       setParentSessionKey(null)
       messagesHook.clearStreaming()
       const targetMode = modeOverride ?? chatMode
-      // Await backend session registration before navigating, so the subsequent
-      // WebSocket subscribe passes ownership validation on the first attempt.
       const sessionKey = await sessionsHook.createSession(targetMode)
       if (sessionKey) {
         navigate(`/chat/${encodeURIComponent(sessionKey)}`, { replace: true })
 
-        // Set currentAgentId so the WebSocket subscription useEffect can fire.
-        // Try to get the agent assigned to the new session; fall back to the
-        // existing currentAgentId or the first available agent.
         try {
           const agentResult = await api.sessionAgent(sessionKey)
           const validAgent = agentsRef.current.find((a) => a.id === agentResult.agent_id)
@@ -524,7 +419,6 @@ export function useAppLogic(
             setCurrentAgentId(agentsRef.current[0].id)
           }
         } catch {
-          // New session may not have an agent assigned yet — use current or first agent
           if (currentAgentIdRef.current) {
             setCurrentAgentId(currentAgentIdRef.current)
           } else if (agentsRef.current.length > 0) {
@@ -541,7 +435,6 @@ export function useAppLogic(
     localStorage.setItem('lele_chat_mode', mode)
   }, [])
 
-  // Reset chatMode to 'agent' if group mode is selected but groups are disabled
   const groupsEnabled = messagesHook.groupsEnabled
   useEffect(() => {
     if (chatMode === 'group' && !groupsEnabled) {
@@ -571,7 +464,6 @@ export function useAppLogic(
         try {
           await api.updateSessionAgent(sessionsHook.currentSessionKey, agentId)
         } catch (err) {
-          // Revert so the UI does not show an agent the backend never saved.
           setCurrentAgentId(previousAgentId)
           setError((err as Error).message)
         }
@@ -627,9 +519,6 @@ export function useAppLogic(
   const handleUploadAttachments = useCallback(
     async (files: File[]): Promise<string[]> => {
       if (!token) {
-        // No token, no upload — and NO silence either: the composer clears the
-        // chips on success only, so the user would otherwise watch the file
-        // disappear with no explanation (AttachmentInput's [] is a failure).
         setError(i18n.t('chat.notAuthenticated'))
         return []
       }
@@ -675,8 +564,6 @@ export function useAppLogic(
     if (!sessionKey) return
 
     if (chatHistory.processing) {
-      // Agent is processing - ensure session is tracked in processingSessions.
-      // This is a safety net for when message.ack hasn't fired yet (e.g., reconnect).
       if (!prevProcessingRef.current) {
         messagesHook.setProcessingSessions((prev: Set<string>) => {
           if (!prev.has(sessionKey)) {
@@ -688,26 +575,12 @@ export function useAppLogic(
         })
       }
     } else if (prevProcessingRef.current) {
-      // Backend reports processing has ended (HTTP poll is the ground truth
-      // after the deferred cleanup in runAgentLoop removes sessionCancels).
-      // Clean up processingSessions as a safety net in case the WebSocket
-      // message.complete event was lost (e.g., reconnect after the 30s buffer
-      // window expired). Without this, the loading indicator stays stuck
-      // indefinitely until the user reloads the page.
-      //
-      // We only act on the true→false transition (prevProcessingRef) to avoid
-      // spurious removals on initial load when processing is already false.
       messagesHook.setProcessingSessions((prev: Set<string>) => {
         if (!prev.has(sessionKey)) return prev
         const next = new Set(prev)
         next.delete(sessionKey)
         return next
       })
-      // Backstop for the session-scoped streaming term of isProcessing: the
-      // backend is no longer processing this session (HTTP ground truth), so
-      // any assistant still flagged streaming:true for it is stale (e.g. a
-      // placeholder orphaned by a lost message.complete). Finalize them here,
-      // otherwise the loading dots would stay lit until a page reload.
       messagesHook.setStreamingMessages((prev) =>
         finalizeStreamingAssistantsForSession(prev, sessionKey),
       )
@@ -718,27 +591,10 @@ export function useAppLogic(
 
   const currentAgent = agents.find((a) => a.id === currentAgentId) ?? null
   const processingSessions = messagesHook.processingSessions
-  // isProcessing covers both active SSE streaming and agent thinking/tool-calls.
-  // It drives the loading indicator (dots) and scroll-pin behavior in MessageList.
-  // processingSessions is the primary driver (WebSocket events: message.ack adds,
-  // message.complete removes). The HTTP poll (chatHistory.processing) acts as a
-  // safety net: when it transitions true→false, the session is removed from
-  // processingSessions in case the WebSocket event was lost (e.g., reconnect
-  // after the 30s buffer window expired).
-  // hasActiveGroup ensures the loading indicator stays visible during group
-  // execution, even after message.complete removes the session from
-  // processingSessions (race condition between message.complete and
-  // group.status events).
   const hasActiveGroup = Array.from(messagesHook.groups.values()).some(
     (g) => g.status === 'started',
   )
 
-  // Loading is scoped PER SESSION: the first term only counts streaming
-  // messages whose sessionKey matches the session currently being viewed
-  // (an orphan placeholder left over from a background conversation, or from
-  // a missed message.complete after a chat switch, must not light the dots
-  // here). If no session is selected the term is false. Per-session spinners
-  // in the sidebar are driven independently by processingSessions.
   const isProcessing =
     hasStreamingMessageForSession(messagesHook.streamingMessages, sessionsHook.currentSessionKey) ||
     (sessionsHook.currentSessionKey
@@ -746,15 +602,6 @@ export function useAppLogic(
       : false) ||
     hasActiveGroup
 
-  // ── Message queue ───────────────────────────────────────────────────────
-  // Enter-submit while the agent is busy must not lose the message: it lands in
-  // the per-session FIFO queue and is replayed through the normal send path when
-  // the turn ends. Slash commands are NOT special-cased here — the backend runs
-  // them when the message is delivered, so queueing them is enough.
-  //
-  // The busy check reads isProcessing through a ref so the callback identity
-  // stays stable across streaming ticks (isProcessing is derived from hot state
-  // and would otherwise rebuild onMessage every tick).
   const busyRef = useRef(isProcessing)
   busyRef.current = isProcessing
 
@@ -765,12 +612,7 @@ export function useAppLogic(
     async (content: string, attachments: string[]): Promise<boolean> => {
       const sessionKey = currentSessionKeyRef.current
       if (busyRef.current && sessionKey) {
-        // False when this session's queue is at QUEUE_CAP: the caller keeps the
-        // draft so the message is not lost.
         const accepted = queueHook.enqueueMessage(sessionKey, content, attachments)
-        // The queue entry now owns those attachments (they are sent with it on
-        // flush). Clearing avoids the second queued message inheriting the first
-        // one's files, mirroring what handleSend does after a real send.
         if (accepted && attachments.length > 0) messagesHook.setPendingAttachments([])
         return accepted
       }
@@ -779,27 +621,14 @@ export function useAppLogic(
     [handleSend, queueHook.enqueueMessage, messagesHook.setPendingAttachments],
   )
 
-  // Auto-flush: one queued message per processing falling edge. The replayed
-  // message raises isProcessing again, so the rest of the queue drains on the
-  // following turn ends — paced by real agent turns instead of firing at once.
-  //
-  // prev is tracked per session key so switching chats does not look like a
-  // falling edge of the session we just left.
   const prevQueueProcessingRef = useRef<{ key: string | null; value: boolean } | null>(null)
   const flushingIdRef = useRef<string | null>(null)
-  // Message the user asked to send NOW while the agent was busy: it was taken
-  // out of the FIFO and is parked here until cancel settles (isProcessing
-  // falls). Sent instead of the normal queue head on the next idle edge.
-  // sessionKey is captured at park time so a chat switch cannot deliver it
-  // into the wrong session.
   const forceSendRef = useRef<{
     content: string
     attachments: string[]
     sessionKey: string
   } | null>(null)
 
-  // Restore a taken entry when handleSend refuses it, so the message stays
-  // visible in the queue instead of vanishing (no agent / failed session).
   const restoreQueued = useCallback(
     (msg: { sessionKey: string; content: string; attachments: string[] }) => {
       queueHook.enqueueMessage(msg.sessionKey, msg.content, msg.attachments)
@@ -813,36 +642,19 @@ export function useAppLogic(
     const wasProcessing = previous !== null && previous.key === sessionKey && previous.value
     const switchedToThisSession = previous === null || previous.key !== sessionKey
 
-    // Never flush while the agent is busy on this session. The state IS recorded
-    // here so the next run can detect the true→false (falling) edge.
     if (!sessionKey || isProcessing) {
       prevQueueProcessingRef.current = { key: sessionKey, value: isProcessing }
       return
     }
 
-    // handleSend needs the session's agent, otherwise it returns early and the
-    // popped message would be lost. Deliberately do NOT write
-    // prevQueueProcessingRef here: the ref keeps the previous (processing=true)
-    // value, so the true→false falling edge stays unconsumed. currentAgentId is
-    // a dependency, so as soon as it arrives this effect re-runs, still sees the
-    // edge, and flushes then. Overwriting the ref with the current value would
-    // swallow the edge and the queued message would sit until the next turn end
-    // (or a session switch).
     if (!currentAgentId) return
 
     prevQueueProcessingRef.current = { key: sessionKey, value: isProcessing }
 
-    // Trigger: this session's turn just ended, or the user switched onto an
-    // idle session that still holds a backlog.
     if (!wasProcessing && !switchedToThisSession) return
 
-    // A dequeue is already in flight (its message.ack may not have arrived yet).
     if (flushingIdRef.current) return
 
-    // Force-send wins over the FIFO head: the user already picked this message
-    // and cancelled the previous turn to make room for it. A park belonging to
-    // another session is left untouched — switching chats must never deliver it
-    // into the session now on screen.
     const forced = forceSendRef.current
     if (forced) {
       if (forced.sessionKey !== sessionKey) return
@@ -880,24 +692,12 @@ export function useAppLogic(
     restoreQueued,
   ])
 
-  /**
-   * Send one queued message immediately (the "Send now" button).
-   *
-   * Idle: dequeued and sent through the normal path this frame; a refused send
-   * is put back in the queue so nothing is lost.
-   * Busy: the entry is pulled out of the FIFO and parked, the current turn is
-   * cancelled, and the parked message is sent as soon as isProcessing falls
-   * (the auto-flush edge above). A second click while a park is already waiting
-   * re-queues the taken message instead of clobbering the park.
-   */
   const sendNowQueuedMessage = useCallback(
     (id: string) => {
       const msg = queueHook.takeQueuedMessage(id)
       if (!msg) return
       if (busyRef.current) {
         if (forceSendRef.current) {
-          // One in-flight force-send at a time. Put this one back so a double
-          // click during the cancel window cannot drop it.
           restoreQueued(msg)
           return
         }

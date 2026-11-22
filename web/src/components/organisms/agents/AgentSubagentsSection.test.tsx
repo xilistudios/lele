@@ -12,14 +12,6 @@ import {
 } from '../../../test/agentsHarness'
 import { AgentSubagentsSection } from './AgentSubagentsSection'
 
-/**
- * `tab=subagents` (spec §4.7). The whole section writes ONE node —
- * `agents.list.{i}.subagents` — so every assertion is about the shape of that
- * object: enabling creates it, disabling removes it, and each control must
- * spread the node it replaces instead of clobbering its siblings. `0` is a real
- * value here (the backend reads it as "no limit"), never normalised away.
- */
-
 const CODER: EditableAgentConfig = { id: 'coder', name: 'Coder' }
 
 function setup(
@@ -44,7 +36,6 @@ describe('AgentSubagentsSection', () => {
   test('an agent without the subagents node renders only the toggle', () => {
     const u = setup()
     expect(u.container.textContent).toContain(tr('settings.agentPage.subagentsEnable'))
-    // Hidden while off: neither the chips group nor the limit fields exist.
     expect(u.queryByRole('group')).toBeNull()
     expect(u.queryByLabelText(tr('settings.agentPage.subagentsTimeout'))).toBeNull()
   })
@@ -68,7 +59,6 @@ describe('AgentSubagentsSection', () => {
     })
     const group = u.getByRole('group', { name: tr('settings.agentPage.subagentsAllowed') })
     const chips = Array.from(group.querySelectorAll('button'))
-    // `id (name)` when a name exists, bare `id` otherwise (AgentChipMultiSelect).
     expect(chips.map((chip) => chip.getAttribute('aria-label'))).toEqual([
       'researcher (Researcher)',
       'fixer',
@@ -161,7 +151,7 @@ describe('AgentSubagentsSection', () => {
     expect(trigger.textContent).toContain(tr('settings.agentPage.inherit'))
 
     fireEvent.click(trigger)
-    await settle(250) // the popup opens on an animation frame
+    await settle(250)
     fireEvent.click(u.getByRole('button', { name: 'llama-3.1' }))
     expect(u.lastWrite('agents.list.0.subagents')?.[1]).toEqual({
       allow_agents: [],
@@ -174,7 +164,6 @@ describe('AgentSubagentsSection', () => {
       agent: { ...CODER, subagents: { allow_agents: [] } },
       dirtyPaths: ['agents.list.0.subagents.allow_agents'],
     })
-    // SettingsField renders the shared "Modified" badge next to the label.
     expect(u.container.textContent).toContain(tr('settings.modified'))
   })
 

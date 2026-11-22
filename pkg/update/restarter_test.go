@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package update
 
 import (
@@ -12,8 +6,6 @@ import (
 	"testing"
 )
 
-// newTestRestarter returns a Restarter that never touches the real service
-// manager and never terminates the test binary.
 func newTestRestarter(supervisor Supervisor) *Restarter {
 	r := NewRestarter()
 	r.Detect = func() Supervisor { return supervisor }
@@ -24,13 +16,8 @@ func newTestRestarter(supervisor Supervisor) *Restarter {
 	return r
 }
 
-// TestRestartSelfExecOrder is the core of the self-exec fix: Restart must
-// spawn the replacement, run OnRestart (the gateway wires its shutdown
-// coordinator here), and only then exit the parent. Exiting before the
-// teardown - or not exiting at all - is what left the old process running
-// alongside the new one.
 func TestRestartSelfExecOrder(t *testing.T) {
-	t.Setenv("LELE_RESTART_DRY_RUN", "1") // spawn nothing, never really exit
+	t.Setenv("LELE_RESTART_DRY_RUN", "1")
 
 	var events []string
 	r := newTestRestarter(SupervisorNone)
@@ -51,9 +38,6 @@ func TestRestartSelfExecOrder(t *testing.T) {
 	}
 }
 
-// TestRestartSpawnFailureKeepsParentRunning is the safety half of the ordering:
-// if the replacement cannot be spawned, the parent must not run its teardown and
-// must not exit, because then there would be no instance at all.
 func TestRestartSpawnFailureKeepsParentRunning(t *testing.T) {
 	t.Setenv("LELE_RESTART_DRY_RUN", "")
 
@@ -74,10 +58,6 @@ func TestRestartSpawnFailureKeepsParentRunning(t *testing.T) {
 	}
 }
 
-// TestRestartSystemdDoesNotExit documents why the systemd paths never call
-// OnRestart or Exit: the supervisor sends SIGTERM, which runs the normal
-// signal-driven graceful path. Exiting here would cut systemd's restart short,
-// so the contract is "issue the restart, return, let systemd do its job".
 func TestRestartSystemdDoesNotExit(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -92,8 +72,6 @@ func TestRestartSystemdDoesNotExit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var restarts []string
 			r := newTestRestarter(tc.supervisor)
-			// findUnit probes units before restarting, so only the actual
-			// restart calls are recorded here.
 			r.runSystemctl = func(userScope bool, args ...string) (string, error) {
 				if len(args) > 0 && args[0] == "restart" {
 					restarts = append(restarts, strings.Join(args, " "))
@@ -117,10 +95,6 @@ func TestRestartSystemdDoesNotExit(t *testing.T) {
 	}
 }
 
-// TestRestartChildEnvMarksReplacement verifies the marker that makes the handoff
-// work: the child must be told it is a restart replacement so it waits for the
-// desktop instance lock instead of reporting "already_running" and exiting while
-// the parent is still draining.
 func TestRestartChildEnvMarksReplacement(t *testing.T) {
 	t.Setenv(RestartChildEnvKey, "")
 
@@ -139,9 +113,6 @@ func TestRestartChildEnvMarksReplacement(t *testing.T) {
 	}
 }
 
-// TestRestartSelfExecSkippedInDryRun confirms dry-run leaves the process alive
-// while still reporting the self-exec method, so the update flow can be
-// exercised end to end without killing the gateway.
 func TestRestartSelfExecSkippedInDryRun(t *testing.T) {
 	t.Setenv("LELE_RESTART_DRY_RUN", "1")
 
@@ -156,8 +127,6 @@ func TestRestartSelfExecSkippedInDryRun(t *testing.T) {
 	if _, err := r.Restart(); err != nil {
 		t.Fatalf("Restart() error = %v", err)
 	}
-	// The injected Exit always runs: it is the seam tests use to observe the
-	// sequence, and in dry-run the real os.Exit is what gets skipped.
 	if !exited {
 		t.Error("Exit seam was not called")
 	}

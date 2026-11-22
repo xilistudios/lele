@@ -9,7 +9,6 @@ import App from './App'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { queryClient } from './lib/queryClient'
 
-// Helper to render with required providers
 const renderWithProviders = (ui: ReactElement, initialEntries = ['/']) => {
   return render(
     <ThemeProvider>
@@ -52,11 +51,6 @@ class MockWebSocket {
     this.emit('close', new Event('close'))
   }
 
-  /**
-   * Simulates the server dropping the connection: the socket is closed and the
-   * `close` event reaches `LeleSocket`, which starts its reconnect backoff and
-   * eventually builds a NEW MockWebSocket instance.
-   */
   simulateDisconnect() {
     this.close()
   }
@@ -81,11 +75,6 @@ const originalWebSocket = globalThis.WebSocket
 
 afterEach(() => {
   cleanup()
-  // Cancel any in-flight queries and their scheduled retry timers. Now that
-  // the App fully mounts in these tests, React Query hooks (useModels, etc.)
-  // schedule retries (retry: 2, delays >= 1s) that would otherwise outlive
-  // the test, fire against the real network once `fetch` is restored, and
-  // leak unhandled rejections into the next test file.
   queryClient.clear()
 })
 
@@ -103,28 +92,17 @@ const jsonResponse = (body: FetchResponseBody) =>
     headers: { 'Content-Type': 'application/json' },
   })
 
-// Match the list-sessions endpoints regardless of query params (?offset=&limit=).
-// Includes both the plain /api/v1/chat/sessions and the lightweight meta variant
-// /api/v1/chat/sessions/meta.
 const isSessionsEndpoint = (url: string) => {
   const path = url.split('?')[0]
   return path.endsWith('/api/v1/chat/sessions') || path.endsWith('/api/v1/chat/sessions/meta')
 }
 
-// Return a 404 (not a thrown Error) for unhandled URLs. A thrown non-ApiError
-// is retried by requestWithRetry after ~1s — by which time afterEach has
-// restored the real fetch, so the retry hits the network and the rejection
-// leaks into the next test file. A 404 becomes an ApiError(404) that is thrown
-// immediately with no retry.
 const notFoundResponse = (url: string) =>
   new Response(JSON.stringify({ error: `Unexpected fetch: ${url}` }), {
     status: 404,
     headers: { 'Content-Type': 'application/json' },
   })
 
-// One agent as it appears inside `config.agents.list` — what the agent detail
-// pages read (they resolve the id from the config, not the agents endpoint).
-// Kept minimal: the pages only need identity fields to render.
 const AGENT_CONFIG_FIXTURE = {
   id: 'coder',
   name: 'Coder',
@@ -134,7 +112,6 @@ const AGENT_CONFIG_FIXTURE = {
 const mockConfigResponse = (agents?: unknown[]) => ({
   config: {
     agents: {
-      // Empty by default: the agents list page then shows its own empty state.
       ...(agents ? { list: agents } : {}),
       defaults: {
         workspace: '~/.lele',
@@ -377,7 +354,6 @@ describe('App', () => {
 
     const view = renderWithProviders(<App />)
 
-    // Wait for sessions to load - look for the session by its position in the list
     await waitFor(() => {
       const sessionItems = view.container.querySelectorAll('nav [role="button"]')
       expect(sessionItems.length).toBeGreaterThanOrEqual(2)
@@ -555,7 +531,6 @@ describe('App', () => {
       fireEvent.click(sessionBtn)
     })
 
-    // Wait for session switch to settle
     await new Promise((resolve) => setTimeout(resolve, 100))
 
     const socket = MockWebSocket.instances[0]
@@ -572,7 +547,7 @@ describe('App', () => {
         event: 'tool.executing',
         data: { session_key: 'native:client-1:2', tool: 'exec', action: 'Running active session' },
       })
-    }) // Wait longer for the UI to update
+    })
     await waitFor(() => expect(view.getByText('Running active session')).not.toBeNull(), {
       timeout: 3000,
     })
@@ -585,11 +560,6 @@ describe('App', () => {
       })
     })
 
-    // The tool message for the ACTIVE session stays rendered as a completed
-    // record (tool results are persisted, not removed). The important part of
-    // this test — that tool events from a DIFFERENT session are dropped — is
-    // already asserted above via `Running old session` being null. Just make
-    // sure the active session's record is still there.
     expect(view.queryByText('Running active session')).not.toBeNull()
   })
 })
@@ -608,7 +578,6 @@ describe('Routing', () => {
 
   const createFetchMock = (overrides?: {
     sessions?: Array<Record<string, unknown>>
-    /** When set, `agents.list` in the config — what the detail pages read. */
     configAgents?: unknown[]
   }) =>
     mock((input: RequestInfo | URL) => {
@@ -755,7 +724,6 @@ describe('Routing', () => {
 
     const view = renderWithProviders(<App />)
 
-    // Wait for auth form to appear - look for the submit button instead of translated text
     await waitFor(() => {
       expect(view.container.querySelector('button[type="submit"]')).not.toBeNull()
     })
@@ -766,7 +734,6 @@ describe('Routing', () => {
 
     const view = renderWithProviders(<App />)
 
-    // Look for submit button instead of translated text
     await waitFor(() => {
       expect(view.container.querySelector('button[type="submit"]')).not.toBeNull()
     })
@@ -791,7 +758,6 @@ describe('Routing', () => {
 
     const view = renderWithProviders(<App />, ['/settings/general'])
 
-    // Wait for settings page to load by looking for settings tabs
     await waitFor(
       () => {
         const settingsButtons = view.container.querySelectorAll('aside nav button')
@@ -809,13 +775,11 @@ describe('Routing', () => {
 
     await waitFor(
       () => {
-        // Config mock has no agents.list → the real page shows its empty state.
         expect(view.container.querySelector('[data-testid="agents-search"]')).not.toBeNull()
         expect(view.container.querySelector('[data-testid="agents-empty"]')).not.toBeNull()
       },
       { timeout: 3000 },
     )
-    // It is a Settings tab: the sidebar and the shared footer are both there.
     expect(view.container.querySelector('aside')).not.toBeNull()
     expect(view.container.querySelector('[data-testid="settings-tabs"]')).not.toBeNull()
   })
@@ -832,8 +796,6 @@ describe('Routing', () => {
       },
       { timeout: 3000 },
     )
-    // The legacy URL lands on the Agents tab, so the address bar and the tab
-    // strip agree.
     expect(
       view.container
         .querySelector('[data-testid="settings-tab-agents"]')
@@ -843,8 +805,6 @@ describe('Routing', () => {
 
   test('renders the real agent config page with its tabs under /settings/agents/:agentId/:tab', async () => {
     localStorage.setItem('lele.session', JSON.stringify(authSession))
-    // The detail page reads `agents.list` out of the config (not the agents
-    // endpoint), so the config mock has to carry the agent for it to render it.
     globalThis.fetch = createFetchMock({
       configAgents: [AGENT_CONFIG_FIXTURE],
     }) as unknown as typeof fetch
@@ -857,8 +817,6 @@ describe('Routing', () => {
       },
       { timeout: 3000 },
     )
-    // Eight section tabs; the one the URL names is the selected one and the
-    // panel points back at it (§6).
     expect(view.container.querySelectorAll('[role="tab"]')).toHaveLength(8)
     const selected = view.container.querySelector('[role="tab"][aria-selected="true"]')
     expect(selected?.id).toBe('agent-tab-tools')
@@ -917,7 +875,6 @@ describe('Routing', () => {
 
     const view = renderWithProviders(<App />, ['/chat/native:client-1:1/subagent/subagent:task-1'])
 
-    // Wait for subagent chat to load
     await waitFor(
       () => {
         const content = view.container.textContent
@@ -925,9 +882,6 @@ describe('Routing', () => {
       },
       { timeout: 3000 },
     )
-    // The heading is derived from the first non-tool message via a useMemo that
-    // depends on `messages`. It may not be rendered in the same tick as the
-    // message content, so wait for it explicitly.
     await waitFor(
       () => {
         expect(view.getByRole('heading', { name: 'Verifying subagent task' })).not.toBeNull()
@@ -946,7 +900,6 @@ describe('Routing', () => {
 
     const view = renderWithProviders(<App />)
 
-    // Should redirect to home and show the selected fallback session
     await waitFor(() => expect(view.getByText('mensaje B')).not.toBeNull())
   })
 
@@ -961,7 +914,6 @@ describe('Routing', () => {
       expect(sessionItems.some((item) => item.textContent === 'Session 2')).toBe(true)
     })
 
-    // Find and click on session item (the span element in the sidebar)
     const sessionItems = view.container.querySelectorAll('nav span')
     for (const item of sessionItems) {
       if (item.textContent === 'Session 2') {
@@ -980,7 +932,6 @@ describe('Routing', () => {
 
     const view = renderWithProviders(<App />)
 
-    // Wait for initial session to load
     await waitFor(
       () => {
         const content = view.container.textContent
@@ -991,7 +942,6 @@ describe('Routing', () => {
 
     const ws = MockWebSocket.instances[0]
 
-    // Emit WebSocket events for tool execution
     await act(async () => {
       ws?.emitJSON({
         event: 'tool.executing',
@@ -1029,7 +979,6 @@ describe('Routing', () => {
       })
     })
 
-    // Wait for the parent response message
     await waitFor(
       () => {
         const content = view.container.textContent
@@ -1067,8 +1016,6 @@ describe('Routing', () => {
     const historyFetchMock = mock((input: RequestInfo | URL) => {
       const url = String(input)
 
-      // Check the subagent history URL FIRST — it is a more specific path
-      // (`.../history/task-1`) that also contains the parent history prefix.
       if (url.includes('/api/v1/chat/sessions/native:client-1:1/history/task-1')) {
         return Promise.resolve(
           jsonResponse({
@@ -1103,7 +1050,6 @@ describe('Routing', () => {
 
     const view = renderWithProviders(<App />)
 
-    // Wait for parent chat with subagent link to load
     await waitFor(
       () => {
         const content = view.container.textContent
@@ -1156,7 +1102,6 @@ describe('Routing', () => {
 
     const view = renderWithProviders(<App />)
 
-    // Wait for initial session
     await waitFor(
       () => {
         const content = view.container.textContent
@@ -1167,7 +1112,6 @@ describe('Routing', () => {
 
     const ws = MockWebSocket.instances[0]
 
-    // Emit spawn events without subagent_session_key initially
     await act(async () => {
       ws?.emitJSON({
         event: 'tool.executing',
@@ -1187,7 +1131,6 @@ describe('Routing', () => {
       })
     })
 
-    // Wait for subagent button to appear
     await waitFor(
       () => {
         const buttons = view.container.querySelectorAll('button')
@@ -1348,10 +1291,8 @@ describe('Auto-pairing', () => {
 
     const view = renderWithProviders(<App />, ['/pair?code=999999'])
 
-    // Wait for auto-pairing to be called with longer timeout
     await waitFor(() => expect(pairCalled).toBe(true), { timeout: 5000 })
 
-    // Wait for the app to complete loading
     await waitFor(
       () => {
         const hasLoading =
@@ -1426,7 +1367,6 @@ describe('Auto-pairing', () => {
 
     const view = renderWithProviders(<App />, ['/pair?code=999999'])
 
-    // Wait for loading state to finish and form to appear
     await waitFor(
       () => {
         const hasForm = view.container.querySelector('form') !== null
@@ -1437,13 +1377,11 @@ describe('Auto-pairing', () => {
       { timeout: 3000 },
     )
 
-    // PIN should be pre-filled - look for numeric input
     const pinInput = view.container.querySelector('input[inputmode="numeric"]') as HTMLInputElement
     if (pinInput?.value) {
       expect(pinInput.value).toBe('999999')
     }
 
-    // Error should be visible
     await waitFor(
       () => {
         expect(view.container.textContent).toContain('Invalid PIN')
@@ -1471,8 +1409,6 @@ describe('Auto-pairing', () => {
 
     const view = renderWithProviders(<App />, ['/pair?code=654321'])
 
-    // Auto-pair runs first (spinner); after the mocked pair rejection the form
-    // must appear with the PIN pre-filled. Allow extra time under full-suite load.
     await waitFor(
       () => {
         const pinInput = view.container.querySelector(
@@ -1603,10 +1539,6 @@ describe('Session deletion', () => {
           jsonResponse({ agent_id: 'main', model: 'gpt-4', models: ['gpt-4'] }),
         )
       }
-      // Subagent polling endpoint — now that the App fully mounts, useSubagents
-      // fires this request. Return an empty list so no retry is scheduled
-      // (a thrown "Unexpected fetch" would be retried against the real network
-      // after `fetch` is restored, leaking a rejection into the next test file).
       if (url.includes('/subagents')) {
         return Promise.resolve(jsonResponse({ subagents: [] }))
       }
@@ -1644,11 +1576,9 @@ describe('Session deletion', () => {
     })
     if (sessionOneDeleteButton) {
       const btn = sessionOneDeleteButton
-      // First click arms the confirmation state (aria-label becomes confirmDelete)
       await act(async () => {
         fireEvent.click(btn)
       })
-      // Second click on the now-armed button actually deletes
       const confirmButton = view.container.querySelector(
         'button[aria-label="Haz clic de nuevo para confirmar"]',
       ) as HTMLElement | null
@@ -1759,20 +1689,12 @@ describe('Session deletion', () => {
 
     renderWithProviders(<App />)
 
-    // Test that the component renders without errors
     await waitFor(() => {
       expect(document.querySelector('.app-shell')).not.toBeNull()
     })
   })
 })
 
-/**
- * Connection-lifecycle tests: the sessions/history recovery work must run on a
- * REAL reconnection only, never on the first connection (which the bootstrap
- * already covered).
- */
-
-/** 250 sessions → two pages at the backend page size (200). */
 const buildPaginatedSessions = (count: number) =>
   Array.from({ length: count }, (_, index) => ({
     key: `native:client-1:${index + 1}`,
@@ -1780,7 +1702,6 @@ const buildPaginatedSessions = (count: number) =>
     updated: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),
   }))
 
-/** Slices the page requested in `url` and reports `has_more` correctly. */
 const paginatedSessionsBody = (allSessions: Array<Record<string, unknown>>, url: string) => {
   const params = new URL(url).searchParams
   const offset = Number(params.get('offset') ?? '0')
@@ -1793,15 +1714,6 @@ const paginatedSessionsBody = (allSessions: Array<Record<string, unknown>>, url:
   }
 }
 
-/**
- * Bootstrap fetch mock with a PAGINATED metadata endpoint, so a duplicated
- * refresh pass shows up as duplicated `offset=` requests. Returns the mock so
- * tests can inspect the requested URLs.
- *
- * `metaResponse` optionally takes over the sessions/meta page itself, which is
- * how a test holds a paginated pass IN FLIGHT (a promise it resolves by hand)
- * instead of letting it finish. Every other endpoint keeps its normal answer.
- */
 const createConnectionLifecycleFetchMock = (
   allSessions: Array<Record<string, unknown>>,
   metaResponse?: (url: string) => Promise<Response>,
@@ -1868,7 +1780,6 @@ const createConnectionLifecycleFetchMock = (
       return Promise.resolve(jsonResponse(paginatedSessionsBody(allSessions, url)))
     }
     if (url.includes('/api/v1/chat/sessions/')) {
-      // Session detail/agent/model/thinking/folder sub-resources.
       return Promise.resolve(
         jsonResponse({
           session_key: 'native:client-1:1',
@@ -1889,26 +1800,17 @@ const createConnectionLifecycleFetchMock = (
 
 type ConnectionLifecycleFetchMock = ReturnType<typeof createConnectionLifecycleFetchMock>
 
-/** `offset` values requested from the paginated sessions/meta endpoint, in order. */
 const requestedMetaOffsets = (fetchMock: ConnectionLifecycleFetchMock): string[] =>
   fetchMock.mock.calls
     .map(([input]) => String(input))
     .filter((url) => url.includes('/api/v1/chat/sessions/meta?'))
     .map((url) => new URL(url).searchParams.get('offset') ?? '')
 
-/** How many chat-history requests were issued. */
 const requestedHistoryCount = (fetchMock: ConnectionLifecycleFetchMock): number =>
   fetchMock.mock.calls
     .map(([input]) => String(input))
     .filter((url) => url.includes('/api/v1/chat/sessions/') && url.includes('/history')).length
 
-/**
- * Model lookups driven by `useAppLogic`: `loadModels` is only called from the
- * effect guarded by `wsStatus === 'connected'` (agent-level
- * `/models?agent_id=…` or, once the history is known, the per-session
- * `/sessions/<key>/model`). Seeing one is the observable proof that the app
- * APPLIED the connected transition.
- */
 const requestedModelLookupCount = (fetchMock: ConnectionLifecycleFetchMock): number =>
   fetchMock.mock.calls
     .map(([input]) => String(input))
@@ -1918,10 +1820,6 @@ const requestedModelLookupCount = (fetchMock: ConnectionLifecycleFetchMock): num
         (url.includes('/api/v1/chat/sessions/') && url.endsWith('/model')),
     ).length
 
-/**
- * Waits until the app has applied `wsStatus === 'connected'` (see
- * `requestedModelLookupCount`) and returns the single app socket.
- */
 const waitForConnectionObserved = async (
   fetchMock: ConnectionLifecycleFetchMock,
 ): Promise<MockWebSocket> => {
@@ -1936,7 +1834,6 @@ const waitForConnectionObserved = async (
   return socket
 }
 
-/** Lets the fetch/effect work triggered by the last transition settle. */
 const settleEffects = async (ms = 150) => {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, ms))
@@ -1967,19 +1864,12 @@ describe('WebSocket connection lifecycle', () => {
     await waitForConnectionObserved(fetchMock)
     await settleEffects()
 
-    // Exactly ONE paginated pass: one request per page. Before the fix the
-    // "recovery" effect also ran on the first connection, so every page was
-    // requested twice (['0','200','0','200']).
     expect(requestedMetaOffsets(fetchMock)).toEqual(['0', '200'])
   })
 
   test('a bootstrap that failed recovers on the FIRST connection, exactly once', async () => {
     const allSessions = buildPaginatedSessions(250)
     let metaRequests = 0
-    // The backend is not ready while the page boots: the bootstrap's very FIRST
-    // page fails (404 → ApiError, thrown without retry, so the pass fails fast
-    // and the sidebar ends up empty) and every later request is answered
-    // normally. Counting requests is what makes the pass boundary observable.
     const fetchMock = createConnectionLifecycleFetchMock(allSessions, (url) => {
       metaRequests += 1
       if (metaRequests === 1) return Promise.resolve(notFoundResponse(url))
@@ -1989,17 +1879,9 @@ describe('WebSocket connection lifecycle', () => {
 
     renderWithProviders(<App />)
 
-    // The first connection: `hadWsConnectedRef` only proves this is NOT a
-    // reconnect, so the recovery here can only be driven by the bootstrap
-    // having FAILED.
     await waitForConnectionObserved(fetchMock)
     await settleEffects()
 
-    // One extra paginated pass, both pages, exactly once: the failed bootstrap
-    // is retried by the connection that the page was waiting for. Without the
-    // `bootstrapOutcomeRef.current === 'failed'` condition the walk would stop
-    // at the failed request (['0']) and the sidebar would stay empty until a
-    // manual reload; a repeated or per-page recovery would add further offsets.
     expect(requestedMetaOffsets(fetchMock)).toEqual(['0', '0', '200'])
   })
 
@@ -2015,16 +1897,12 @@ describe('WebSocket connection lifecycle', () => {
     expect(requestedMetaOffsets(fetchMock)).toEqual(['0', '200'])
     expect(requestedHistoryCount(fetchMock)).toBe(1)
 
-    // The server drops the connection; LeleSocket reconnects after its backoff
-    // and builds a SECOND MockWebSocket instance.
     act(() => {
       socket.simulateDisconnect()
     })
 
     await waitFor(() => expect(MockWebSocket.instances.length).toBe(2), { timeout: 3000 })
 
-    // The recovery work is still wired: sessions re-walked (both pages) and the
-    // history query revalidated (invalidating an active query refetches it).
     await waitFor(() => expect(requestedHistoryCount(fetchMock)).toBe(2), { timeout: 3000 })
     await settleEffects()
 
@@ -2032,28 +1910,15 @@ describe('WebSocket connection lifecycle', () => {
   })
 })
 
-/**
- * Simulates a tab switch. jsdom implements `document.visibilityState` as a
- * getter on `Document.prototype` and never fires `visibilitychange`, so the
- * getter is shadowed with an own data property and the event is dispatched by
- * hand — the same trick as `hooks/usePageVisible.test.ts`.
- */
 const setDocumentVisibility = (state: DocumentVisibilityState) => {
   Object.defineProperty(document, 'visibilityState', { value: state, configurable: true })
   document.dispatchEvent(new window.Event('visibilitychange'))
 }
 
-/** Puts the document back in its visible default so nothing leaks to other tests. */
 const restoreDocumentVisibility = () => {
   Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
 }
 
-/**
- * Tab-visibility revalidation: returning to a hidden tab must re-walk the
- * paginated sessions/meta endpoint ONCE, because the session-list refresh is
- * event-driven and throttled — a chat created from another channel while the
- * tab sat in the background would otherwise stay invisible.
- */
 describe('Tab visibility: session-list revalidation', () => {
   beforeEach(() => {
     queryClient.clear()
@@ -2079,17 +1944,12 @@ describe('Tab visibility: session-list revalidation', () => {
     await waitForConnectionObserved(fetchMock)
     await settleEffects()
 
-    // Bootstrap: one pass over the two pages.
     expect(requestedMetaOffsets(fetchMock)).toEqual(['0', '200'])
 
-    // Going to the background fetches nothing at all...
     act(() => setDocumentVisibility('hidden'))
     await settleEffects()
     expect(requestedMetaOffsets(fetchMock)).toEqual(['0', '200'])
 
-    // ...and coming back re-walks the endpoint EXACTLY once (one request per
-    // page, in order). A missing revalidation, a duplicated one, or a pass per
-    // page all break this single expectation.
     act(() => setDocumentVisibility('visible'))
 
     await waitFor(() => expect(requestedMetaOffsets(fetchMock).length).toBe(4), { timeout: 3000 })
@@ -2098,18 +1958,6 @@ describe('Tab visibility: session-list revalidation', () => {
   })
 })
 
-/**
- * Logout must drop the session list AND invalidate any paginated pass that is
- * still in flight (`sessionsHook.reset()` inside `handleLogout`), so a slow
- * `/sessions/meta` answer can never write another user's chats — nor their
- * session key — into the post-logout state.
- *
- * Note on what is observable here: the cleared `sessions` state itself cannot
- * be asserted from the DOM, because logging out also unmounts the chat UI (the
- * app navigates to /pair). What IS observable, and is exactly what `reset()`
- * buys, is the cancelled pass: the answer that lands after the logout must
- * neither re-list the chats nor restore the persisted session key.
- */
 describe('Logout', () => {
   beforeEach(() => {
     queryClient.clear()
@@ -2130,8 +1978,6 @@ describe('Logout', () => {
     const pendingMetaPasses: Array<(value: Response) => void> = []
     let pendingMetaUrl = ''
 
-    // The bootstrap pass hangs until this test releases it, so it is still in
-    // flight while the user logs out.
     const fetchMock = createConnectionLifecycleFetchMock(allSessions, (url) => {
       pendingMetaUrl = url
       return new Promise<Response>((resolve) => {
@@ -2142,24 +1988,15 @@ describe('Logout', () => {
 
     const view = renderWithProviders(<App />)
 
-    // i18n is pinned to `es` in test/i18n.ts, hence the Spanish label.
     const logoutButton = await waitFor(() => view.getByLabelText('Cerrar sesión'))
     await waitFor(() => expect(requestedMetaOffsets(fetchMock)).toEqual(['0']))
     expect(pendingMetaPasses).toHaveLength(1)
     const [releaseMetaPass] = pendingMetaPasses
 
-    // fireEvent ignores the closed Popover's `pointer-events-none`, so the
-    // button is clickable without opening the device menu first.
     fireEvent.click(logoutButton)
 
-    // The logout round-trip (server revoke -> reset -> unmount of the chat
-    // tree) is not instantaneous, and `waitFor`'s polling budget is shared with
-    // the act() work it has to flush, so give the UI a beat to settle before
-    // asserting. Without it the first poll can observe the pre-logout tree and
-    // the test's own 5s budget expires under a loaded run.
     await settleEffects()
 
-    // Logged out: the chat UI is gone and both stored keys were cleared.
     await waitFor(() => expect(view.queryByLabelText('Cerrar sesión')).toBeNull(), {
       timeout: 5000,
     })
@@ -2167,10 +2004,6 @@ describe('Logout', () => {
     expect(localStorage.getItem('lele.session')).toBeNull()
     expect(localStorage.getItem('lele.currentSessionKey')).toBeNull()
 
-    // The hung pass now lands, AFTER the logout. Its result must be discarded:
-    // without `reset()` (generation bump + coordinator cancel) the pass applies
-    // it and writes the stale session key back, so the next mount would reopen
-    // the previous chat.
     await act(async () => {
       releaseMetaPass?.(jsonResponse(paginatedSessionsBody(allSessions, pendingMetaUrl)))
       await new Promise((resolve) => setTimeout(resolve, 0))

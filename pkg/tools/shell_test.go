@@ -12,7 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/keyring"
 )
 
-// TestShellTool_Success verifies successful command execution
 func TestShellTool_Success(t *testing.T) {
 	tool := NewExecTool("", false)
 
@@ -23,23 +22,19 @@ func TestShellTool_Success(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Success should not be an error
 	if result.IsError {
 		t.Errorf("Expected success, got IsError=true: %s", result.ForLLM)
 	}
 
-	// ForUser should contain command output
 	if !strings.Contains(result.ForUser, "hello world") {
 		t.Errorf("Expected ForUser to contain 'hello world', got: %s", result.ForUser)
 	}
 
-	// ForLLM should contain full output
 	if !strings.Contains(result.ForLLM, "hello world") {
 		t.Errorf("Expected ForLLM to contain 'hello world', got: %s", result.ForLLM)
 	}
 }
 
-// TestShellTool_Failure verifies failed command execution
 func TestShellTool_Failure(t *testing.T) {
 	tool := NewExecTool("", false)
 
@@ -50,23 +45,19 @@ func TestShellTool_Failure(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Failure should be marked as error
 	if !result.IsError {
 		t.Errorf("Expected error for failed command, got IsError=false")
 	}
 
-	// ForUser should contain error information
 	if result.ForUser == "" {
 		t.Errorf("Expected ForUser to contain error info, got empty string")
 	}
 
-	// ForLLM should contain exit code or error
 	if !strings.Contains(result.ForLLM, "Exit code") && result.ForUser == "" {
 		t.Errorf("Expected ForLLM to contain exit code or error, got: %s", result.ForLLM)
 	}
 }
 
-// TestShellTool_Timeout verifies command timeout handling
 func TestShellTool_Timeout(t *testing.T) {
 	tool := NewExecTool("", false)
 	tool.SetTimeout(100 * time.Millisecond)
@@ -78,20 +69,16 @@ func TestShellTool_Timeout(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Timeout should be marked as error
 	if !result.IsError {
 		t.Errorf("Expected error for timeout, got IsError=false")
 	}
 
-	// Should mention timeout
 	if !strings.Contains(result.ForLLM, "timed out") && !strings.Contains(result.ForUser, "timed out") {
 		t.Errorf("Expected timeout message, got ForLLM: %s, ForUser: %s", result.ForLLM, result.ForUser)
 	}
 }
 
-// TestShellTool_WorkingDir verifies custom working directory
 func TestShellTool_WorkingDir(t *testing.T) {
-	// Create temp directory
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
 	os.WriteFile(testFile, []byte("test content"), 0644)
@@ -115,7 +102,6 @@ func TestShellTool_WorkingDir(t *testing.T) {
 	}
 }
 
-// TestShellTool_DangerousCommand verifies safety guard blocks dangerous commands
 func TestShellTool_DangerousCommand(t *testing.T) {
 	tool := NewExecTool("", false)
 
@@ -126,7 +112,6 @@ func TestShellTool_DangerousCommand(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Dangerous command should be blocked
 	if !result.IsError {
 		t.Errorf("Expected dangerous command to be blocked (IsError=true)")
 	}
@@ -136,7 +121,6 @@ func TestShellTool_DangerousCommand(t *testing.T) {
 	}
 }
 
-// TestShellTool_MissingCommand verifies error handling for missing command
 func TestShellTool_MissingCommand(t *testing.T) {
 	tool := NewExecTool("", false)
 
@@ -145,13 +129,11 @@ func TestShellTool_MissingCommand(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Should return error result
 	if !result.IsError {
 		t.Errorf("Expected error when command is missing")
 	}
 }
 
-// TestShellTool_StderrCapture verifies stderr is captured and included
 func TestShellTool_StderrCapture(t *testing.T) {
 	tool := NewExecTool("", false)
 
@@ -162,7 +144,6 @@ func TestShellTool_StderrCapture(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Both stdout and stderr should be in output
 	if !strings.Contains(result.ForLLM, "stdout") {
 		t.Errorf("Expected stdout in output, got: %s", result.ForLLM)
 	}
@@ -171,14 +152,10 @@ func TestShellTool_StderrCapture(t *testing.T) {
 	}
 }
 
-// TestShellTool_OutputTruncation verifies long output is truncated with
-// head+tail preservation at 64KB (AGT-04).
 func TestShellTool_OutputTruncation(t *testing.T) {
 	tool := NewExecTool("", false)
 
 	ctx := context.Background()
-	// Generate ~1MB of output (well over 64KB cap).
-	// seq 1 60000 produces ~360KB; seq 1 200000 produces ~1.2MB.
 	args := map[string]interface{}{
 		"command": "seq 1 200000",
 	}
@@ -189,37 +166,29 @@ func TestShellTool_OutputTruncation(t *testing.T) {
 		t.Fatalf("command failed: %s", result.ForLLM)
 	}
 
-	// Total output should be <= 64KB + marker overhead.
-	const maxOutput = 64*1024 + 200 // 200 bytes slack for the marker string
+	const maxOutput = 64*1024 + 200
 	if len(result.ForLLM) > maxOutput {
 		t.Errorf("Expected output <= %d bytes, got %d", maxOutput, len(result.ForLLM))
 	}
 
-	// Must contain the truncation marker.
 	if !strings.Contains(result.ForLLM, "bytes truncated") {
 		t.Errorf("Expected truncation marker in output, got: %s", result.ForLLM[:200])
 	}
 
-	// Output must start with "1" (the real beginning).
 	if !strings.HasPrefix(result.ForLLM, "1") {
 		t.Errorf("Expected output to start with '1', got: %q", result.ForLLM[:50])
 	}
 
-	// Output must end with the real tail (last line of seq 1 200000 is "200000").
 	if !strings.Contains(result.ForLLM, "200000") {
 		t.Errorf("Expected output to contain '200000' (tail preservation), got last 200 bytes: %q",
 			result.ForLLM[len(result.ForLLM)-200:])
 	}
 }
 
-// TestShellTool_TruncationKeepsValidUTF8 ensures truncation backs off to a UTF-8
-// rune boundary so multi-byte characters are never split in the middle.
 func TestShellTool_TruncationKeepsValidUTF8(t *testing.T) {
 	tool := NewExecTool("", false)
 
 	ctx := context.Background()
-	// Emit >64KB bytes of multibyte UTF-8 ("café" = 5 bytes each).
-	// seq 1 20000 | xargs -I{} echo café produces ~100KB of multibyte text.
 	args := map[string]interface{}{
 		"command": "seq 1 20000 | while read _; do echo café; done",
 	}
@@ -230,7 +199,6 @@ func TestShellTool_TruncationKeepsValidUTF8(t *testing.T) {
 		t.Fatalf("command failed: %s", result.ForLLM)
 	}
 
-	// ForLLM and ForUser should both be valid UTF-8 after truncation.
 	if !utf8.ValidString(result.ForLLM) {
 		t.Errorf("ForLLM output is not valid UTF-8 after truncation (len=%d)", len(result.ForLLM))
 	}
@@ -239,7 +207,6 @@ func TestShellTool_TruncationKeepsValidUTF8(t *testing.T) {
 	}
 }
 
-// TestShellTool_RestrictToWorkspace verifies workspace restriction
 func TestShellTool_RestrictToWorkspace(t *testing.T) {
 	tmpDir := t.TempDir()
 	tool := NewExecTool(tmpDir, false)
@@ -252,7 +219,6 @@ func TestShellTool_RestrictToWorkspace(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Path traversal should be blocked
 	if !result.IsError {
 		t.Errorf("Expected path traversal to be blocked with restrictToWorkspace=true")
 	}
@@ -262,7 +228,6 @@ func TestShellTool_RestrictToWorkspace(t *testing.T) {
 	}
 }
 
-// newTestKeyring builds an in-memory (file-backed, temp dir) keyring service for tests.
 func newTestKeyring(t *testing.T) *keyring.Service {
 	t.Helper()
 	dir := t.TempDir()
@@ -275,8 +240,6 @@ func newTestKeyring(t *testing.T) *keyring.Service {
 	})
 }
 
-// TestShellTool_SecretSubstitution verifies {{SECRET:name}} is replaced with the
-// keyring value at run time.
 func TestShellTool_SecretSubstitution(t *testing.T) {
 	svc := newTestKeyring(t)
 	if err := svc.SetFromUI("test.token", "s3cr3t-value", "test", nil, nil, "tui"); err != nil {
@@ -302,7 +265,6 @@ func TestShellTool_SecretSubstitution(t *testing.T) {
 	}
 }
 
-// TestShellTool_SecretSubstitution_Multiple verifies several placeholders in one command.
 func TestShellTool_SecretSubstitution_Multiple(t *testing.T) {
 	svc := newTestKeyring(t)
 	if err := svc.SetFromUI("a", "AAA", "", nil, nil, "tui"); err != nil {
@@ -328,7 +290,6 @@ func TestShellTool_SecretSubstitution_Multiple(t *testing.T) {
 	}
 }
 
-// TestShellTool_SecretSubstitution_Unknown verifies an unknown secret aborts the command.
 func TestShellTool_SecretSubstitution_Unknown(t *testing.T) {
 	svc := newTestKeyring(t)
 
@@ -348,8 +309,6 @@ func TestShellTool_SecretSubstitution_Unknown(t *testing.T) {
 	}
 }
 
-// TestShellTool_SecretSubstitution_Disabled verifies substitution can be turned off,
-// leaving the placeholder literal.
 func TestShellTool_SecretSubstitution_Disabled(t *testing.T) {
 	svc := newTestKeyring(t)
 	if err := svc.SetFromUI("test.token", "s3cr3t-value", "", nil, nil, "tui"); err != nil {
@@ -376,8 +335,6 @@ func TestShellTool_SecretSubstitution_Disabled(t *testing.T) {
 	}
 }
 
-// TestShellTool_SecretSubstitution_NoKeyring verifies commands without a keyring
-// attached run unchanged (placeholders left literal, no crash).
 func TestShellTool_SecretSubstitution_NoKeyring(t *testing.T) {
 	tool := NewExecTool("", false)
 
@@ -394,11 +351,8 @@ func TestShellTool_SecretSubstitution_NoKeyring(t *testing.T) {
 	}
 }
 
-// TestShellTool_SecretSubstitution_ScopeDenied verifies a secret scoped to another
-// agent cannot be resolved by this agent.
 func TestShellTool_SecretSubstitution_ScopeDenied(t *testing.T) {
 	svc := newTestKeyring(t)
-	// Scoped to "other-agent" only.
 	if err := svc.SetFromUI("restricted", "hidden", "", nil, []string{"other-agent"}, "tui"); err != nil {
 		t.Fatal(err)
 	}
@@ -419,13 +373,9 @@ func TestShellTool_SecretSubstitution_ScopeDenied(t *testing.T) {
 	}
 }
 
-// TestShellTool_WorkingDirOutsideWorkspace verifies that a working_dir outside
-// the workspace is rejected when restrictToWorkspace is enabled. Without this
-// check, the guard validates command paths relative to cwd, but cwd itself
-// could point anywhere — a total bypass of workspace restriction.
 func TestShellTool_WorkingDirOutsideWorkspace(t *testing.T) {
 	workspace := t.TempDir()
-	outside := t.TempDir() // different directory, outside the workspace
+	outside := t.TempDir()
 
 	tool := NewExecTool(workspace, true)
 	tool.SetRestrictToWorkspace(true)
@@ -446,8 +396,6 @@ func TestShellTool_WorkingDirOutsideWorkspace(t *testing.T) {
 	}
 }
 
-// TestShellTool_WorkingDirInsideWorkspace verifies that a working_dir inside
-// the workspace is still allowed when restrictToWorkspace is enabled.
 func TestShellTool_WorkingDirInsideWorkspace(t *testing.T) {
 	workspace := t.TempDir()
 	inner := filepath.Join(workspace, "sub")
@@ -478,7 +426,6 @@ func TestShellTool_WorkingDirInsideWorkspace(t *testing.T) {
 	}
 }
 
-// TestShellTool_WorkingDirTraversal verifies traversal via working_dir is blocked.
 func TestShellTool_WorkingDirTraversal(t *testing.T) {
 	workspace := t.TempDir()
 

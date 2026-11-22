@@ -6,12 +6,6 @@ import (
 	"testing"
 )
 
-// TestIsAllowedWorkspacePath_ExportedWrapperMatchesTheRESTGuard pins the
-// exported face pkg/tui consumes: it must be the SAME predicate the REST
-// handlers gate path-bearing requests on (rest_mcp.go mcpGuardLayerFile →
-// isAllowedWorkspacePath), not a copy that can drift. The unexported
-// predicate's own behaviour and its 12 call sites are untouched by the
-// export.
 func TestIsAllowedWorkspacePath_ExportedWrapperMatchesTheRESTGuard(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -22,7 +16,7 @@ func TestIsAllowedWorkspacePath_ExportedWrapperMatchesTheRESTGuard(t *testing.T)
 	cases := []string{
 		"/tmp/lele-probe/mcp.json",
 		"/var/folders/lele-probe/mcp.json",
-		"/var/tmp/lele-probe/mcp.json", // NOT a root: must not match "/tmp/"
+		"/var/tmp/lele-probe/mcp.json",
 		"/lele-probe/mcp.json",
 		filepath.Join(cwd, "sub", "mcp.json"),
 		"",
@@ -37,8 +31,6 @@ func TestIsAllowedWorkspacePath_ExportedWrapperMatchesTheRESTGuard(t *testing.T)
 		}
 	}
 
-	// The concrete case the TUI refusal relies on: /var/tmp must be
-	// rejected here (cwd is this package under $HOME, home is not /var/tmp).
 	probe := filepath.Join("/var/tmp", "lele-probe", "mcp.json")
 	if IsAllowedWorkspacePath(probe) {
 		wd, _ := os.Getwd()

@@ -96,8 +96,7 @@ export function SessionItem({
         className={`ml-auto flex h-8 w-8 items-center justify-center rounded-md transition-all ${
           confirmingDelete
             ? 'opacity-100 bg-state-error/10 text-state-error'
-            : // Always visible on touch (no hover); desktop keeps the hover reveal.
-              'text-text-tertiary opacity-100 hover:bg-state-error/10 hover:text-state-error md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100'
+            : 'text-text-tertiary opacity-100 hover:bg-state-error/10 hover:text-state-error md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100'
         }`}
       >
         <TrashIcon size={12} />

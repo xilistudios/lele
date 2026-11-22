@@ -1,10 +1,3 @@
-// Tests for the per-agent skills endpoints (rest_agent_skills.go).
-//
-// The central risk these tests target is the bug the feature fixes: a skill
-// request for agent X must never be answered from the DEFAULT workspace loader.
-// So the tests run two agents with two real on-disk workspaces and assert that
-// list / toggle / remove each touch only the addressed agent's directory.
-
 package channels
 
 import (
@@ -20,9 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/skills"
 )
 
-// authedBodyRequest builds a request with a JSON body and bearer token
-// (newAuthedRequest in rest_agent_test.go is bodyless, which install/toggle
-// endpoints cannot use).
 func authedBodyRequest(t *testing.T, method, url, token, body string) *http.Request {
 	t.Helper()
 	req, err := http.NewRequest(method, url, strings.NewReader(body))
@@ -34,19 +24,13 @@ func authedBodyRequest(t *testing.T, method, url, token, body string) *http.Requ
 	return req
 }
 
-// skillsTestLoop is a fake agent loop that also implements agentSkillsSource,
-// handing each agent its own real loader over a temp workspace. invalidations
-// records which agent had its prompt cache dropped, proving mutations bust the
-// cache of the RIGHT agent.
 type skillsTestLoop struct {
 	*nativeTestAgentLoop
 	loaders       map[string]*skills.SkillsLoader
 	invalidations []string
-	extraAgents   map[string]bool // agentIDs that exist but have no loader (unknown-builder case)
+	extraAgents   map[string]bool
 }
 
-// GetAgentInfo widens the base fake (which only knows "main") so the agents
-// this test creates pass the handler's existence check.
 func (l *skillsTestLoop) GetAgentInfo(agentID string) (AgentBasicInfo, bool) {
 	if _, ok := l.loaders[agentID]; ok {
 		return AgentBasicInfo{ID: agentID, Name: agentID, Workspace: l.loaders[agentID].WorkspaceDir()}, true
@@ -57,8 +41,6 @@ func (l *skillsTestLoop) GetAgentInfo(agentID string) (AgentBasicInfo, bool) {
 	return l.nativeTestAgentLoop.GetAgentInfo(agentID)
 }
 
-// ListAgentTools mirrors GetAgentInfo so the catalog endpoint (which needs
-// both) recognises the same set of agents.
 func (l *skillsTestLoop) ListAgentTools(agentID string) ([]AgentToolInfo, bool) {
 	if _, ok := l.loaders[agentID]; ok || l.extraAgents[agentID] {
 		return []AgentToolInfo{{Name: "exec", Description: "Execute a shell command"}}, true
@@ -72,16 +54,11 @@ func (l *skillsTestLoop) AgentSkills(agentID string) (loader *skills.SkillsLoade
 		return loader, func() { l.invalidations = append(l.invalidations, agentID) }, true
 	}
 	if l.extraAgents[agentID] {
-		// Agent exists but exposes no context builder -> caller must fall back.
 		return nil, nil, false
 	}
 	return nil, nil, false
 }
 
-// newSkillsTestServer builds a server whose loop knows agents "alpha" and
-// "beta", each with its own workspace, plus a channel-level loader anchored on
-// a THIRD directory (the default workspace). Any response that mentions the
-// default workspace's skills proves the fallback leaked into an agent request.
 func newSkillsTestServer(t *testing.T) (*nativeTestServer, *skillsTestLoop, map[string]string) {
 	t.Helper()
 
@@ -95,7 +72,6 @@ func newSkillsTestServer(t *testing.T) (*nativeTestServer, *skillsTestLoop, map[
 	writeTestSkill(t, beta, "other-beta-skill", "beta private 2")
 
 	ts := newNativeTestServer(t)
-	// The channel's own loader models the pre-feature state: default workspace.
 	ts.channel.skillsLoader = skills.NewSkillsLoader(defaultWorkspace, "", "")
 
 	loop := &skillsTestLoop{
@@ -106,7 +82,6 @@ func newSkillsTestServer(t *testing.T) (*nativeTestServer, *skillsTestLoop, map[
 		},
 		extraAgents: map[string]bool{"builderless": true},
 	}
-	// GetAgentInfo in the base fake only knows "main"; widen it for this test.
 	loop.nativeTestAgentLoop.workspace = defaultWorkspace
 	ts.channel.agentLoop = loop
 	ts.loop = loop.nativeTestAgentLoop
@@ -114,9 +89,6 @@ func newSkillsTestServer(t *testing.T) (*nativeTestServer, *skillsTestLoop, map[
 	return ts, loop, map[string]string{"alpha": alpha, "beta": beta, "default": defaultWorkspace}
 }
 
-// agentCatalogPayload mirrors GET /api/v1/agents/{id}/catalog — the single read
-// endpoint of this feature (it carries skills with source/enabled/deletable, so
-// no separate list route is needed).
 type agentCatalogPayload struct {
 	AgentID   string              `json:"agent_id"`
 	Workspace string              `json:"workspace"`
@@ -150,11 +122,6 @@ func skillNames(infos []AgentCatalogSkill) []string {
 	return names
 }
 
-// --- listing ---------------------------------------------------------------
-
-// TestAgentCatalogSkills_ArePerAgent is the core regression test: listing agent
-// alpha's skills must return alpha's workspace skills only, never the default
-// workspace's (which is what the endpoint returned before this feature).
 func TestAgentCatalogSkills_ArePerAgent(t *testing.T) {
 	ts, _, dirs := newSkillsTestServer(t)
 
@@ -174,8 +141,6 @@ func TestAgentCatalogSkills_ArePerAgent(t *testing.T) {
 	}
 }
 
-// TestAgentCatalogSkills_UnknownAgentIs404 keeps the existence check consistent
-// with the rest of the /agents/{id} family.
 func TestAgentCatalogSkills_UnknownAgentIs404(t *testing.T) {
 	ts, _, _ := newSkillsTestServer(t)
 
@@ -185,9 +150,6 @@ func TestAgentCatalogSkills_UnknownAgentIs404(t *testing.T) {
 	}
 }
 
-// TestAgentCatalogSkills_FallsBackToChannelLoader covers a loop without the
-// optional capability: the request must still answer (with the channel's
-// loader) rather than 500, preserving the old behaviour for other builds.
 func TestAgentCatalogSkills_FallsBackToChannelLoader(t *testing.T) {
 	ts := newNativeTestServer(t)
 	defaultWorkspace := t.TempDir()
@@ -203,16 +165,12 @@ func TestAgentCatalogSkills_FallsBackToChannelLoader(t *testing.T) {
 	}
 }
 
-// TestAgentCatalogSkills_DeletableFalseForGlobalSkills proves the server, not
-// the client, decides what may be removed: a global skill visible to the agent
-// is listed but flagged non-deletable.
 func TestAgentCatalogSkills_DeletableFalseForGlobalSkills(t *testing.T) {
 	ts, loop, dirs := newSkillsTestServer(t)
 
 	globalDir := t.TempDir()
 	writeTestSkill(t, globalDir, "shared-global", "shared with everyone")
 	loop.loaders["gamma"] = skills.NewSkillsLoader(dirs["alpha"], filepath.Join(globalDir, "skills"), "")
-	// gamma must be a known agent for the handler's existence check.
 	loop.extraAgents["gamma"] = true
 
 	status, payload := getAgentCatalog(t, ts, "gamma")
@@ -238,11 +196,6 @@ func TestAgentCatalogSkills_DeletableFalseForGlobalSkills(t *testing.T) {
 	}
 }
 
-// --- toggling --------------------------------------------------------------
-
-// readWorkspaceDisabled reads <workspace>/skills-skills.json (the per-workspace
-// skills config) and returns the disabled list, proving on disk which workspace
-// a toggle actually wrote.
 func readWorkspaceDisabled(t *testing.T, workspace string) []string {
 	t.Helper()
 	cfg, err := skills.LoadWorkspaceConfig(workspace)
@@ -264,9 +217,6 @@ func toggleAgentSkill(t *testing.T, ts *nativeTestServer, agentID, skill string,
 	return resp.StatusCode
 }
 
-// TestAgentSkillToggle_WritesAgentWorkspaceOnly is the write-path counterpart
-// of the per-agent listing test: disabling a skill on beta must land in beta's
-// config file and leave alpha's untouched.
 func TestAgentSkillToggle_WritesAgentWorkspaceOnly(t *testing.T) {
 	ts, _, dirs := newSkillsTestServer(t)
 
@@ -282,7 +232,6 @@ func TestAgentSkillToggle_WritesAgentWorkspaceOnly(t *testing.T) {
 		t.Fatalf("alpha config was written by a beta toggle: %v", alphaDisabled)
 	}
 
-	// Re-enabling removes it from the disabled list again.
 	if status := toggleAgentSkill(t, ts, "beta", "beta-skill", true); status != http.StatusOK {
 		t.Fatalf("toggle on status = %d, want 200", status)
 	}
@@ -291,9 +240,6 @@ func TestAgentSkillToggle_WritesAgentWorkspaceOnly(t *testing.T) {
 	}
 }
 
-// TestAgentSkillToggle_InvalidatesAgentPromptCache guards the second half of
-// the fix: without invalidation the toggle would only take effect after a
-// restart, because the <skills> block is baked into a cached prompt.
 func TestAgentSkillToggle_InvalidatesAgentPromptCache(t *testing.T) {
 	ts, loop, _ := newSkillsTestServer(t)
 
@@ -305,8 +251,6 @@ func TestAgentSkillToggle_InvalidatesAgentPromptCache(t *testing.T) {
 	}
 }
 
-// TestAgentSkillToggle_UnknownAgentIs404 ensures a typo in the agent id cannot
-// silently write the default workspace's config.
 func TestAgentSkillToggle_UnknownAgentIs404(t *testing.T) {
 	ts, _, dirs := newSkillsTestServer(t)
 
@@ -317,8 +261,6 @@ func TestAgentSkillToggle_UnknownAgentIs404(t *testing.T) {
 		t.Fatalf("unknown agent wrote the default workspace config: %v", d)
 	}
 }
-
-// --- removing --------------------------------------------------------------
 
 func removeAgentSkill(t *testing.T, ts *nativeTestServer, agentID, skill string) int {
 	t.Helper()
@@ -331,8 +273,6 @@ func removeAgentSkill(t *testing.T, ts *nativeTestServer, agentID, skill string)
 	return resp.StatusCode
 }
 
-// TestAgentSkillRemove_DeletesFromAgentWorkspaceOnly deletes through beta and
-// asserts alpha's skill survives: the whole point of a per-agent remove.
 func TestAgentSkillRemove_DeletesFromAgentWorkspaceOnly(t *testing.T) {
 	ts, loop, dirs := newSkillsTestServer(t)
 
@@ -342,23 +282,17 @@ func TestAgentSkillRemove_DeletesFromAgentWorkspaceOnly(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dirs["beta"], "skills", "beta-skill")); !os.IsNotExist(err) {
 		t.Fatalf("beta-skill still on disk after removal: %v", err)
 	}
-	// The sibling skill of the same agent survives.
 	if _, err := os.Stat(filepath.Join(dirs["beta"], "skills", "other-beta-skill")); err != nil {
 		t.Fatalf("other-beta-skill was collateral damage: %v", err)
 	}
-	// Another agent's workspace is untouched.
 	if _, err := os.Stat(filepath.Join(dirs["alpha"], "skills", "alpha-skill")); err != nil {
 		t.Fatalf("alpha's skill must survive a beta removal: %v", err)
 	}
-	// The removal busts the prompt cache of the agent that changed, so the next
-	// turn no longer advertises the deleted skill.
 	if len(loop.invalidations) != 1 || loop.invalidations[0] != "beta" {
 		t.Fatalf("invalidations = %v, want exactly [beta]", loop.invalidations)
 	}
 }
 
-// TestAgentSkillRemove_RefusesGlobalSkill covers the shared-state hazard: a
-// global skill visible to the agent must not be deletable through it.
 func TestAgentSkillRemove_RefusesGlobalSkill(t *testing.T) {
 	ts, loop, dirs := newSkillsTestServer(t)
 
@@ -374,8 +308,6 @@ func TestAgentSkillRemove_RefusesGlobalSkill(t *testing.T) {
 	}
 }
 
-// TestAgentSkillRemove_UnknownSkillIs404 distinguishes "not yours" from
-// "not allowed".
 func TestAgentSkillRemove_UnknownSkillIs404(t *testing.T) {
 	ts, _, _ := newSkillsTestServer(t)
 
@@ -384,12 +316,6 @@ func TestAgentSkillRemove_UnknownSkillIs404(t *testing.T) {
 	}
 }
 
-// --- install scope ---------------------------------------------------------
-
-// TestInstallTarget covers scope resolution without touching the network: the
-// workspace scope must write into the AGENT's dir and global into the shared
-// dir, which is the difference between "install for this agent" and "install
-// for everyone".
 func TestInstallTarget(t *testing.T) {
 	agentWorkspace := t.TempDir()
 	globalDir := filepath.Join(t.TempDir(), "skills")
@@ -416,7 +342,6 @@ func TestInstallTarget(t *testing.T) {
 		if scope != globalSkillScope {
 			t.Fatalf("scope = %q, want %q", scope, globalSkillScope)
 		}
-		// The installer appends "skills" itself, so it must be handed the parent.
 		if installer.Workspace() != filepath.Dir(globalDir) {
 			t.Fatalf("installer workspace = %q, want %q", installer.Workspace(), filepath.Dir(globalDir))
 		}
@@ -450,8 +375,6 @@ func TestInstallTarget(t *testing.T) {
 	})
 }
 
-// TestAgentSkillInstall_RejectsBeforeNetwork checks every guard that must fire
-// before InstallFromGitHub is attempted (these tests never hit GitHub).
 func TestAgentSkillInstall_RejectsBeforeNetwork(t *testing.T) {
 	ts, _, _ := newSkillsTestServer(t)
 	base := ts.server.URL + "/api/v1/agents/"
@@ -482,7 +405,6 @@ func TestAgentSkillInstall_RejectsBeforeNetwork(t *testing.T) {
 	}
 }
 
-// TestAgentSkillInstallBatch_RejectsBeforeNetwork, same for the batch route.
 func TestAgentSkillInstallBatch_RejectsBeforeNetwork(t *testing.T) {
 	ts, _, _ := newSkillsTestServer(t)
 	base := ts.server.URL + "/api/v1/agents/"

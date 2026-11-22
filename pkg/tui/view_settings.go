@@ -9,9 +9,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// renderTUISettings renders the Interface settings modal. When an inline edit
-// is active (settingsEditField set) it shows the text input for the field;
-// otherwise it renders the list of toggleable/editable settings.
 func (m *Model) renderTUISettings(modalTitle string) string {
 	if m.themePickerActive {
 		return m.renderModal(i18n.T("tui.settings.themePickerTitle"))
@@ -40,12 +37,9 @@ func (m *Model) renderTUISettings(modalTitle string) string {
 		return m.paintFrame(modalView)
 	}
 
-	// List mode — reuse the standard scrollable modal renderer.
 	return m.renderModal(modalTitle)
 }
 
-// systemSettingsTitle returns the localized title for the active system
-// settings sub-view, or the generic System title when none is active.
 func (m *Model) systemSettingsTitle() string {
 	switch m.settingsSection {
 	case sysSubViewName(sysGroupSession):
@@ -64,9 +58,6 @@ func (m *Model) systemSettingsTitle() string {
 	return i18n.T("tui.settings.system")
 }
 
-// renderSystemSettingsEdit renders a system settings inline-edit view for the
-// currently editing field (settingsEditField). It shows the text input plus an
-// optional validation error.
 func (m *Model) renderSystemSettingsEdit(title string) string {
 	var sb strings.Builder
 	sb.WriteString(TitleStyle.Render(title) + "\n\n")
@@ -84,9 +75,6 @@ func (m *Model) renderSystemSettingsEdit(title string) string {
 	return m.paintFrame(modalView)
 }
 
-// renderAgentEditInput renders the inline edit view for the currently editing
-// agent field (settingsEditField set). For delete confirmation it shows the
-// confirm prompt instead of a text input. Returns to the list once committed.
 func (m *Model) renderAgentEditInput() string {
 	title := i18n.T("tui.settings.agents")
 	if m.settingsAgentID != "" {
@@ -126,7 +114,6 @@ func (m *Model) renderAgentEditInput() string {
 	return m.paintFrame(modalView)
 }
 
-// renderBgExecOutput renders the output view for a background process.
 func (m *Model) renderBgExecOutput() string {
 	statusColor := CommentColor
 	switch m.bgExecViewStatus {
@@ -175,7 +162,6 @@ func (m *Model) renderBgExecOutput() string {
 	return m.paintFrame(outputBox)
 }
 
-// renderSkillPicker renders a multi-select modal for choosing skills to install.
 func (m *Model) renderSkillPicker(modalTitle string) string {
 	maxVisible := m.maxModalVisible()
 

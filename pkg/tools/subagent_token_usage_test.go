@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package tools
 
 import (
@@ -15,21 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// ============================================================================
-// Subagent token accounting.
-//
-// Subagent LLM calls run through RunToolLoop, which has no session manager of
-// its own. Without a reporter wired, only the main agent loop's own responses
-// reach the cumulative token counters the TUI /status and WebUI display - the
-// subagent's spend is invisible. These tests pin the contract of the reporter:
-// every response a subagent loop produces is billed, incrementally, to the
-// session that OWNS the task (spawner runtime key, falling back to the routing
-// origin key) AND to the subagent's own child session ("<origin>:<taskID>"),
-// so that opening a subagent chat in the WebUI shows its own counters.
-// ============================================================================
-
-// usageBilledProvider answers each conversation with a tool-free completion
-// carrying a fixed usage block.
 type usageBilledProvider struct{}
 
 func (usageBilledProvider) Chat(_ context.Context, _ []providers.Message, _ []providers.ToolDefinition, _ string, _ map[string]interface{}) (*providers.LLMResponse, error) {
@@ -41,8 +20,6 @@ func (usageBilledProvider) Chat(_ context.Context, _ []providers.Message, _ []pr
 
 func (usageBilledProvider) GetDefaultModel() string { return "test-model" }
 
-// billingCollector records (sessionKey, in, out) triples reported by the
-// subagent token-usage reporter.
 type billingCollector struct {
 	mu     sync.Mutex
 	billed []billingEntry
@@ -67,10 +44,6 @@ func (c *billingCollector) snapshot() []billingEntry {
 	return out
 }
 
-// awaitTaskDone waits for a subagent task to reach a terminal state. The task
-// returned is a fresh snapshot taken AFTER the done signal: the manager mutates
-// the live task under its lock, so a snapshot captured before completion still
-// reads "running".
 func awaitTaskDone(t *testing.T, sm *SubagentManager, id string) *SubagentTask {
 	t.Helper()
 	task, ok := sm.GetTask(id)
@@ -102,10 +75,6 @@ func totalBilled(entries []billingEntry) (in, out int, keys []string) {
 	return
 }
 
-// TestSubagentTokens_BilledToSpawnerSession covers the primary fix: an async
-// spawn made from inside an agent turn (tool context carries the parent's
-// runtime session key) must bill the parent session AND the child session, not
-// only the parent.
 func TestSubagentTokens_BilledToSpawnerSession(t *testing.T) {
 	sm := NewSubagentManager(usageBilledProvider{}, "test-model", t.TempDir(), nil, 10)
 	collector := &billingCollector{}
@@ -122,7 +91,6 @@ func TestSubagentTokens_BilledToSpawnerSession(t *testing.T) {
 	entries := collector.snapshot()
 	in, out, keys := totalBilled(entries)
 
-	// Owner key receives the full amount; child key also receives it.
 	ownerKey := "agent:main:telegram:42"
 	childKey := "telegram:42:" + taskID
 	if len(keys) != 2 {
@@ -138,16 +106,11 @@ func TestSubagentTokens_BilledToSpawnerSession(t *testing.T) {
 	if !keySet[childKey] {
 		t.Errorf("child key %q not in billed keys %v", childKey, keys)
 	}
-	// Each key receives the full per-response amount; totalBilled sums both.
 	if in != 222 || out != 44 {
 		t.Errorf("total billed (%d, %d), want (222, 44) [2×(111,22)]", in, out)
 	}
 }
 
-// TestSubagentTokens_BilledToOriginWithoutSpawnerKey covers tasks spawned
-// outside an agent turn (no tool context): billing falls back to the
-// routing-derived origin key so the spend still lands on the parent family
-// instead of vanishing. The child key also receives its own bill.
 func TestSubagentTokens_BilledToOriginWithoutSpawnerKey(t *testing.T) {
 	sm := NewSubagentManager(usageBilledProvider{}, "test-model", t.TempDir(), nil, 10)
 	collector := &billingCollector{}
@@ -163,7 +126,6 @@ func TestSubagentTokens_BilledToOriginWithoutSpawnerKey(t *testing.T) {
 	entries := collector.snapshot()
 	_, _, keys := totalBilled(entries)
 
-	// Owner is the origin key; child is "telegram:42:<taskID>".
 	ownerKey := "telegram:42"
 	childKey := "telegram:42:" + taskID
 	if len(keys) != 2 {
@@ -181,8 +143,6 @@ func TestSubagentTokens_BilledToOriginWithoutSpawnerKey(t *testing.T) {
 	}
 }
 
-// TestSubagentTokens_NotBilledWithoutReporter pins opt-in behavior: a manager
-// with no reporter (standalone, tests) runs tasks unchanged.
 func TestSubagentTokens_NotBilledWithoutReporter(t *testing.T) {
 	sm := NewSubagentManager(usageBilledProvider{}, "test-model", t.TempDir(), nil, 10)
 
@@ -196,15 +156,11 @@ func TestSubagentTokens_NotBilledWithoutReporter(t *testing.T) {
 	}
 }
 
-// TestSubagentTokens_BilledPerAttempt verifies retries are billed for each
-// attempt they make: two provider responses with usage means double billing.
 func TestSubagentTokens_BilledPerAttempt(t *testing.T) {
 	sm := NewSubagentManager(usageBilledProvider{}, "test-model", t.TempDir(), nil, 10)
 	collector := &billingCollector{}
 	sm.SetTokenUsageReporter(collector.report)
 
-	// Drive the loop directly with two iterations (tool call + final answer)
-	// so one run produces two billable responses.
 	task := &SubagentTask{
 		ID:               "multi-1",
 		Task:             "do work",
@@ -248,10 +204,6 @@ func TestSubagentTokens_BilledPerAttempt(t *testing.T) {
 	}
 }
 
-// TestSubagentTokens_SyncToolBillsCallerSession covers the synchronous
-// `subagent` tool: its loop must bill the caller's session (from the tool
-// context), same as the async path. The sync path runs inline (no child
-// session), so only the owner key is billed.
 func TestSubagentTokens_SyncToolBillsCallerSession(t *testing.T) {
 	sm := NewSubagentManager(usageBilledProvider{}, "test-model", t.TempDir(), nil, 10)
 	collector := &billingCollector{}
@@ -274,11 +226,6 @@ func TestSubagentTokens_SyncToolBillsCallerSession(t *testing.T) {
 	}
 }
 
-// TestSubagentTokens_OwnerAndChildReceiveIdenticalAmounts is a focused
-// assertion that for an async spawn through SpawnWithOptions, the owner key
-// and the child key each receive exactly the same per-response (in, out)
-// amounts. This is the specific contract the WebUI relies on: a subagent
-// chat must see non-zero cumulative tokens.
 func TestSubagentTokens_OwnerAndChildReceiveIdenticalAmounts(t *testing.T) {
 	sm := NewSubagentManager(usageBilledProvider{}, "test-model", t.TempDir(), nil, 10)
 	collector := &billingCollector{}
@@ -300,15 +247,12 @@ func TestSubagentTokens_OwnerAndChildReceiveIdenticalAmounts(t *testing.T) {
 	ownerKey := "agent:main:telegram:42"
 	childKey := "telegram:42:" + taskID
 
-	// Both entries must have identical (in, out) amounts.
 	if entries[0].in != entries[1].in || entries[0].out != entries[1].out {
 		t.Errorf("owner and child amounts differ: %v vs %v", entries[0], entries[1])
 	}
-	// Both must be the exact usage reported by usageBilledProvider (111, 22).
 	if entries[0].in != 111 || entries[0].out != 22 {
 		t.Errorf("billed amount = (%d, %d), want (111, 22)", entries[0].in, entries[0].out)
 	}
-	// Keys must be the expected owner and child.
 	keySet := map[string]bool{}
 	for _, e := range entries {
 		keySet[e.sessionKey] = true

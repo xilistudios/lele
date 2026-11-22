@@ -21,7 +21,6 @@ export function LogsViewer() {
   } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Fetch available dates on mount
   useEffect(() => {
     api.logs
       .dates()
@@ -29,7 +28,6 @@ export function LogsViewer() {
       .catch(() => {})
   }, [api])
 
-  // Fetch logs when params change
   const fetchLogs = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -48,7 +46,6 @@ export function LogsViewer() {
     fetchLogs()
   }, [fetchLogs])
 
-  // Auto-scroll to bottom
   useEffect(() => {
     if (containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight
@@ -71,7 +68,6 @@ export function LogsViewer() {
 
   return (
     <div className="space-y-4">
-      {/* Controls */}
       <div className="flex flex-wrap items-center gap-3">
         <select
           value={selectedDate}
@@ -122,14 +118,12 @@ export function LogsViewer() {
         )}
       </div>
 
-      {/* Error */}
       {error && (
         <div className="rounded-md border border-state-error bg-state-error/10 px-3 py-2 text-xs text-state-error">
           {error}
         </div>
       )}
 
-      {/* Log entries */}
       <div className="rounded-lg border border-border bg-background-secondary overflow-hidden">
         <div
           ref={containerRef}

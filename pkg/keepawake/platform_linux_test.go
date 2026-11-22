@@ -14,10 +14,7 @@ import (
 func TestLinuxInhibitCommandShape(t *testing.T) {
 	cmd := linuxInhibitCommand()
 
-	// cmd.Path is what exec.Command resolved; basename must be systemd-inhibit.
 	if base := filepath.Base(cmd.Path); base != "systemd-inhibit" {
-		// exec.Command resolves through LookPath; accept a full resolved path
-		// as long as the basename matches.
 		t.Errorf("cmd.Path = %q, want basename systemd-inhibit", cmd.Path)
 	}
 
@@ -25,7 +22,6 @@ func TestLinuxInhibitCommandShape(t *testing.T) {
 	if len(args) < 8 {
 		t.Fatalf("args too short: %q", args)
 	}
-	// args[0] is the program name as passed ("systemd-inhibit").
 	if !strings.Contains(args[0], "systemd-inhibit") {
 		t.Errorf("args[0] = %q, want systemd-inhibit", args[0])
 	}
@@ -41,7 +37,6 @@ func TestLinuxInhibitCommandShape(t *testing.T) {
 		}
 	}
 
-	// `sh`, `-c` and the loop must be present, in that order, with the pid.
 	shIdx := indexOfArg(args, "sh")
 	cIdx := indexOfArg(args, "-c")
 	if shIdx < 0 || cIdx < 0 || cIdx != shIdx+1 {
@@ -78,7 +73,6 @@ func TestPlatformStartWithoutSystemdInhibit(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("linux-only test")
 	}
-	// Empty PATH => LookPath("systemd-inhibit") fails deterministically.
 	t.Setenv("PATH", t.TempDir())
 
 	release, err := platformStart()

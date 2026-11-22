@@ -708,7 +708,6 @@ export function EyeIcon({ size = 14 }: { size?: number }) {
   )
 }
 
-/** Eye with a slash — the "disabled in this workspace" counterpart of EyeIcon. */
 export function EyeOffIcon({ size = 14 }: { size?: number }) {
   return (
     <svg
@@ -775,10 +774,6 @@ export function HomeIcon({
   )
 }
 
-/**
- * MCP tab icon — a plug: mcp.json servers are the agent's external sockets
- * (Model Context Protocol). Distinct per tab per §4.1 "Diferencia 1".
- */
 export function McpIcon({
   size = DEFAULT_ICON_SIZE,
   className,
@@ -803,10 +798,6 @@ export function McpIcon({
     </svg>
   )
 }
-/**
- * "Tools" icon — a wrench. Opens the right-hand tools drawer from the chat
- * header (Skills, scheduled jobs, background processes, secrets).
- */
 export function ToolsIcon({
   size = DEFAULT_ICON_SIZE,
   className,
@@ -829,10 +820,6 @@ export function ToolsIcon({
   )
 }
 
-/**
- * "Updates" icon — arrow into a tray: download/install the new build.
- * Used by the Settings tab strip (`settings/updates`).
- */
 export function DownloadIcon({
   size = DEFAULT_ICON_SIZE,
   className,
@@ -857,10 +844,6 @@ export function DownloadIcon({
   )
 }
 
-/**
- * "Diagnostics" icon — heartbeat/pulse line: live status of the running
- * system (channels, tools, config). Used by the Settings tab strip.
- */
 export function ActivityIcon({
   size = DEFAULT_ICON_SIZE,
   className,
@@ -883,10 +866,6 @@ export function ActivityIcon({
   )
 }
 
-/**
- * "Logs" icon — a text page: the raw log lines the Logs tab streams.
- * Distinct from `TerminalIcon` (interactive CLI/native clients).
- */
 export function FileTextIcon({
   size = DEFAULT_ICON_SIZE,
   className,

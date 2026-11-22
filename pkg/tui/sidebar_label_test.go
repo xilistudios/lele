@@ -7,16 +7,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// TestSidebarLabelValueFitsLocaleLabels guards the sidebar metric row layout.
-// Spanish "Ventana de contexto" is 19 cells and used to overflow the old
-// %-18s pad: the value shifted one column and, on narrow sidebars, that
-// single row wrapped and pushed the rest of the panel down.
 func TestSidebarLabelValueFitsLocaleLabels(t *testing.T) {
 	labels := []string{
-		"Current context",     // en
-		"Context window",      // en
-		"Ventana de contexto", // es — longest shipped label (19)
-		"Janela de contexto",  // pt
+		"Current context",
+		"Context window",
+		"Ventana de contexto",
+		"Janela de contexto",
 		"Contexto actual",
 		"Compactações",
 	}
@@ -28,9 +24,8 @@ func TestSidebarLabelValueFitsLocaleLabels(t *testing.T) {
 		}
 
 		row := SidebarLabelValue(label, "1,234")
-		// Value must start on the same column for every label.
 		plain := lipgloss.Width(row)
-		want := sidebarLabelWidth + 1 /* PaddingLeft */ + lipgloss.Width("1,234")
+		want := sidebarLabelWidth + 1 + lipgloss.Width("1,234")
 		if plain != want {
 			t.Errorf("SidebarLabelValue(%q) width = %d, want %d (label must pad to %d)",
 				label, plain, want, sidebarLabelWidth)
@@ -38,8 +33,6 @@ func TestSidebarLabelValueFitsLocaleLabels(t *testing.T) {
 	}
 }
 
-// TestSidebarLabelValueTruncatesOverlongLabel ensures a future locale string
-// longer than the column is cut instead of wrapping.
 func TestSidebarLabelValueTruncatesOverlongLabel(t *testing.T) {
 	long := strings.Repeat("W", sidebarLabelWidth+8)
 	row := SidebarLabelValue(long, "9")
@@ -52,19 +45,13 @@ func TestSidebarLabelValueTruncatesOverlongLabel(t *testing.T) {
 	}
 }
 
-// TestSidebarMetricRowsDoNotWrapAtNarrowContentWidth reproduces the layout
-// shift: at the measurement width used by view.go (contentWidth), every
-// Spanish metric row must stay a single line even with a wide token count.
 func TestSidebarMetricRowsDoNotWrapAtNarrowContentWidth(t *testing.T) {
-	// contentWidth for a ~120-col terminal: rightWidth=31 → contentWidth=27.
-	// The old 19-char label + pad + a 9-digit value wrapped and shifted
-	// Workspace/Estado down by one line.
 	const contentWidth = 27
 
 	var b strings.Builder
 	for _, tc := range []struct{ label, value string }{
 		{"Contexto actual", "28,482"},
-		{"Ventana de contexto", "1,220,000"}, // 9-digit value, previously wrapped
+		{"Ventana de contexto", "1,220,000"},
 		{"Entrada enviada", "155,030"},
 		{"Salida recibida", "1,567"},
 		{"Total enviado", "156,597"},
@@ -91,10 +78,6 @@ func TestSidebarMetricRowsDoNotWrapAtNarrowContentWidth(t *testing.T) {
 	}
 }
 
-// TestSidebarSectionSpacingIsSingleBlankLine guards against MarginTop/Bottom
-// stacking with the explicit newlines in view.go. A double blank between
-// Compacciones and Workspace made the panel taller than the height budget so
-// the bottom sections jumped when anything was clipped.
 func TestSidebarSectionSpacingIsSingleBlankLine(t *testing.T) {
 	var b strings.Builder
 	b.WriteString(SidebarTitle.Render("session") + "\n\n")
@@ -108,7 +91,6 @@ func TestSidebarSectionSpacingIsSingleBlankLine(t *testing.T) {
 	b.WriteString(" " + SidebarConnectedDot.Render("●") + " Lele 0.0.0\n")
 
 	lines := strings.Split(b.String(), "\n")
-	// Find "Compacciones" and "Workspace"; exactly one blank between them.
 	compIdx, wsIdx := -1, -1
 	for i, line := range lines {
 		plain := stripANSI(line)
@@ -136,9 +118,6 @@ func TestSidebarSectionSpacingIsSingleBlankLine(t *testing.T) {
 	}
 }
 
-// TestSidebarVersionLineKeepsForegroundAfterDot: nested SidebarValue.Render(
-// SidebarConnectedDot.Render("●") + ...) emitted an inner SGR reset that left
-// "Lele <ver>" on the terminal default (the intermittent colour shift).
 func TestSidebarVersionLineKeepsForegroundAfterDot(t *testing.T) {
 	forceTrueColor(t)
 	line := " " + SidebarConnectedDot.Render("●") +
@@ -146,7 +125,6 @@ func TestSidebarVersionLineKeepsForegroundAfterDot(t *testing.T) {
 	if strings.Count(line, "\x1b[0m") < 2 {
 		t.Fatalf("expected dot and text each to close their own SGR run, got %q", line)
 	}
-	// After the dot's reset the text run must re-open a foreground.
 	dotReset := strings.Index(line, "\x1b[0m")
 	rest := line[dotReset+4:]
 	if !strings.HasPrefix(rest, "\x1b[") {

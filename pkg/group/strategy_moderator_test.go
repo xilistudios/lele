@@ -36,7 +36,6 @@ func TestModeratorStrategy_DelegatesToDecider(t *testing.T) {
 
 	s := &ModeratorStrategy{Decider: decider}
 
-	// First call: decider says A.
 	speakers, done, err := s.Next(state)
 	if err != nil {
 		t.Fatalf("call 1: error: %v", err)
@@ -49,7 +48,6 @@ func TestModeratorStrategy_DelegatesToDecider(t *testing.T) {
 	}
 	state.AddTurn(Turn{Index: 0, Speaker: "A", Content: "x"})
 
-	// Second call: decider says B.
 	speakers, done, err = s.Next(state)
 	if err != nil {
 		t.Fatalf("call 2: error: %v", err)
@@ -62,7 +60,6 @@ func TestModeratorStrategy_DelegatesToDecider(t *testing.T) {
 	}
 	state.AddTurn(Turn{Index: 1, Speaker: "B", Content: "y"})
 
-	// Third call: decider says done.
 	_, done, err = s.Next(state)
 	if err != nil {
 		t.Fatalf("call 3: error: %v", err)
@@ -73,9 +70,8 @@ func TestModeratorStrategy_DelegatesToDecider(t *testing.T) {
 }
 
 func TestModeratorStrategy_MaxTurnsHardStop(t *testing.T) {
-	// The decider never says done, but MaxTurns should hard-stop.
 	decider := func(state *GroupState) (string, bool, error) {
-		return "A", false, nil // never done
+		return "A", false, nil
 	}
 
 	state := &GroupState{
@@ -88,21 +84,18 @@ func TestModeratorStrategy_MaxTurnsHardStop(t *testing.T) {
 
 	s := &ModeratorStrategy{Decider: decider}
 
-	// Turn 0
 	speakers, done, _ := s.Next(state)
 	if done {
 		t.Fatal("turn 0: done=true prematurely")
 	}
 	state.AddTurn(Turn{Index: 0, Speaker: speakers[0], Content: "x"})
 
-	// Turn 1
 	speakers, done, _ = s.Next(state)
 	if done {
 		t.Fatal("turn 1: done=true prematurely")
 	}
 	state.AddTurn(Turn{Index: 1, Speaker: speakers[0], Content: "x"})
 
-	// Turn 2: MaxTurns=2, len(transcript)=2 → hard stop.
 	_, done, _ = s.Next(state)
 	if !done {
 		t.Fatal("turn 2: expected done=true (MaxTurns hard-stop)")
@@ -144,7 +137,6 @@ func TestModeratorStrategy_DeciderError(t *testing.T) {
 }
 
 func TestModeratorStrategy_StopKeywordHardStop(t *testing.T) {
-	// Even though decider never says done, stop keyword should trigger.
 	decider := func(state *GroupState) (string, bool, error) {
 		return "A", false, nil
 	}

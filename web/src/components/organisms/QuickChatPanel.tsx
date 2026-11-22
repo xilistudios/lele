@@ -24,11 +24,9 @@ export function QuickChatPanel({
   const { query, setQuery, sortMode, setSortMode, grouped } = useChatFilters(sessions)
   const searchRef = useRef<HTMLInputElement>(null)
 
-  // Animation state: track if component should render (for exit animation)
   const [closing, setClosing] = useState(false)
   const [mounted, setMounted] = useState(false)
 
-  // On open
   useEffect(() => {
     if (isOpen) {
       setMounted(true)
@@ -36,21 +34,19 @@ export function QuickChatPanel({
     }
   }, [isOpen])
 
-  // Focus search on open
   useEffect(() => {
     if (mounted && !closing && initialFocusSearch && searchRef.current) {
       searchRef.current.focus()
     }
   }, [mounted, closing, initialFocusSearch])
 
-  // Keyboard handler
   const handleClose = useCallback(() => {
     setClosing(true)
     setTimeout(() => {
       setMounted(false)
       setClosing(false)
       onClose()
-    }, 200) // match animation duration
+    }, 200)
   }, [onClose])
 
   useEffect(() => {
@@ -88,7 +84,6 @@ export function QuickChatPanel({
     <div
       className={`fixed inset-0 z-50 flex ${closing ? 'animate-panel-out' : 'animate-panel-in'}`}
     >
-      {/* Overlay — left side */}
       <div
         className={`flex-1 cursor-pointer ${closing ? 'modal-backdrop-out' : 'modal-backdrop-in'}`}
         onClick={handleClose}
@@ -100,11 +95,9 @@ export function QuickChatPanel({
         aria-hidden="true"
       />
 
-      {/* Panel — right side */}
       <aside
         className={`flex h-full w-full max-w-sm flex-shrink-0 safe-area-y flex-col border-l border-border bg-background-primary shadow-2xl ${closing ? 'animate-panel-slide-out' : 'animate-panel-slide-in'}`}
       >
-        {/* Header */}
         <div className="flex items-center gap-3 border-b border-border px-4 py-3">
           <ChatSearchBar
             query={query}
@@ -134,7 +127,6 @@ export function QuickChatPanel({
           </button>
         </div>
 
-        {/* List */}
         <div className="flex-1 overflow-y-auto">
           <ChatListView
             groups={grouped}
@@ -145,7 +137,6 @@ export function QuickChatPanel({
           />
         </div>
 
-        {/* Footer */}
         <div className="border-t border-border px-4 py-3">
           <button
             type="button"

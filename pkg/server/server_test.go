@@ -11,7 +11,7 @@ import (
 func TestNew(t *testing.T) {
 	cfg := &Config{
 		Host: "127.0.0.1",
-		Port: 0, // Use random port for testing
+		Port: 0,
 	}
 
 	s := New(cfg)
@@ -32,16 +32,12 @@ func TestNew(t *testing.T) {
 func TestServerTimeouts(t *testing.T) {
 	s := New(&Config{Host: "127.0.0.1", Port: 0})
 
-	// ReadHeaderTimeout is the slowloris guard: a client that stalls while
-	// sending its request head must not hold a connection slot open.
 	if got := s.http.ReadHeaderTimeout; got != 10*time.Second {
 		t.Errorf("ReadHeaderTimeout = %v, want 10s", got)
 	}
 	if got := s.http.ReadTimeout; got != 30*time.Second {
 		t.Errorf("ReadTimeout = %v, want 30s", got)
 	}
-	// WriteTimeout is deliberately untouched: long-lived SSE streams clear it
-	// per request through http.ResponseController.
 	if got := s.http.WriteTimeout; got != 30*time.Second {
 		t.Errorf("WriteTimeout = %v, want 30s (streams rely on the headroom)", got)
 	}
@@ -74,7 +70,6 @@ func TestRegisterHealth(t *testing.T) {
 	s := New(&Config{Host: "127.0.0.1", Port: 0})
 	s.RegisterHealth()
 
-	// Test /health endpoint
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
@@ -86,7 +81,6 @@ func TestRegisterHealth(t *testing.T) {
 		t.Error("/health response body is empty")
 	}
 
-	// Test /ready endpoint (not ready yet)
 	req = httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rec = httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
@@ -100,7 +94,6 @@ func TestSetReady(t *testing.T) {
 	s := New(&Config{Host: "127.0.0.1", Port: 0})
 	s.RegisterHealth()
 
-	// Initially not ready
 	s.mu.RLock()
 	ready := s.ready
 	s.mu.RUnlock()
@@ -108,7 +101,6 @@ func TestSetReady(t *testing.T) {
 		t.Error("server should not be ready initially")
 	}
 
-	// Set ready
 	s.SetReady(true)
 
 	s.mu.RLock()
@@ -118,7 +110,6 @@ func TestSetReady(t *testing.T) {
 		t.Error("server should be ready after SetReady(true)")
 	}
 
-	// Test /ready returns OK
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
@@ -135,7 +126,6 @@ func TestRegisterCheck(t *testing.T) {
 	s.RegisterCheck("database", "ok", "connected")
 	s.RegisterCheck("cache", "fail", "connection refused")
 
-	// Ready should fail because one check is failing
 	s.SetReady(true)
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rec := httptest.NewRecorder()
@@ -145,7 +135,6 @@ func TestRegisterCheck(t *testing.T) {
 		t.Errorf("/ready status = %d, want %d (should fail due to failing check)", rec.Code, http.StatusServiceUnavailable)
 	}
 
-	// Update check to pass
 	s.RegisterCheck("cache", "ok", "connected")
 
 	req = httptest.NewRequest(http.MethodGet, "/ready", nil)
@@ -158,16 +147,12 @@ func TestRegisterCheck(t *testing.T) {
 }
 
 func TestRegisterWebUI(t *testing.T) {
-	// Create a simple in-memory filesystem for testing
-	// This is a minimal test - real SPA testing would require actual files
 	s := New(&Config{Host: "127.0.0.1", Port: 0})
 
-	// Create a simple test filesystem
-	distFS := http.Dir("testdata") // Will fail if no testdata, but tests the registration
+	distFS := http.Dir("testdata")
 
 	s.RegisterWebUI(distFS)
 
-	// Just verify it doesn't panic - actual SPA serving is tested separately
 }
 
 func TestRegisterWebhook(t *testing.T) {
@@ -289,7 +274,6 @@ func TestCORSMiddleware_OptionsRequest(t *testing.T) {
 		t.Errorf("OPTIONS status = %d, want %d", rec.Code, http.StatusOK)
 	}
 
-	// Verify CORS headers are set
 	if rec.Header().Get("Access-Control-Allow-Methods") == "" {
 		t.Error("Access-Control-Allow-Methods not set")
 	}
@@ -333,21 +317,18 @@ func TestIsOriginAllowed(t *testing.T) {
 func TestStartStop(t *testing.T) {
 	cfg := &Config{
 		Host: "127.0.0.1",
-		Port: 0, // Random port
+		Port: 0,
 	}
 	s := New(cfg)
 	s.RegisterHealth()
 
-	// Start server in goroutine
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- s.Start()
 	}()
 
-	// Give server time to start
 	time.Sleep(50 * time.Millisecond)
 
-	// Stop server
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer stopCancel()
 
@@ -355,7 +336,6 @@ func TestStartStop(t *testing.T) {
 		t.Errorf("Stop() error = %v", err)
 	}
 
-	// Wait for Start to return
 	select {
 	case err := <-errCh:
 		if err != nil && err != http.ErrServerClosed {
@@ -367,7 +347,6 @@ func TestStartStop(t *testing.T) {
 }
 
 func TestSPAHandler(t *testing.T) {
-	// Test that isAPIPath correctly identifies API paths
 	tests := []struct {
 		path     string
 		expected bool

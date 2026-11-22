@@ -24,15 +24,11 @@ const (
 	antigravityVersion      = "1.15.8"
 )
 
-// AntigravityProvider implements LLMProvider using Google's Cloud Code Assist (Antigravity) API.
-// This provider authenticates via Google OAuth and provides access to models like Claude and Gemini
-// through Google's infrastructure.
 type AntigravityProvider struct {
-	tokenSource func() (string, string, error) // Returns (accessToken, projectID, error)
+	tokenSource func() (string, string, error)
 	httpClient  *http.Client
 }
 
-// NewAntigravityProvider creates a new Antigravity provider using stored auth credentials.
 func NewAntigravityProvider() *AntigravityProvider {
 	return &AntigravityProvider{
 		tokenSource: createAntigravityTokenSource(),
@@ -42,9 +38,6 @@ func NewAntigravityProvider() *AntigravityProvider {
 	}
 }
 
-// Chat implements LLMProvider.Chat using the Cloud Code Assist v1internal API.
-// The v1internal endpoint wraps the standard Gemini request in an envelope with
-// project, model, request, requestType, userAgent, and requestId fields.
 func (p *AntigravityProvider) Chat(
 	ctx context.Context,
 	messages []Message,
@@ -60,7 +53,6 @@ func (p *AntigravityProvider) Chat(
 	if model == "" || model == "antigravity" || model == "google-antigravity" {
 		model = antigravityDefaultModel
 	}
-	// Strip provider prefixes if present
 	model = strings.TrimPrefix(model, "google-antigravity/")
 	model = strings.TrimPrefix(model, "antigravity/")
 
@@ -70,10 +62,8 @@ func (p *AntigravityProvider) Chat(
 		"requestId": fmt.Sprintf("agent-%d-%s", time.Now().UnixMilli(), randomString(9)),
 	})
 
-	// Build the inner Gemini-format request
 	innerRequest := p.buildRequest(messages, tools, model, options)
 
-	// Wrap in v1internal envelope (matches pi-ai SDK format)
 	envelope := map[string]any{
 		"project":     projectID,
 		"model":       model,
@@ -88,7 +78,6 @@ func (p *AntigravityProvider) Chat(
 		return nil, fmt.Errorf("marshaling request: %w", err)
 	}
 
-	// Build API URL — uses Cloud Code Assist v1internal streaming endpoint
 	apiURL := fmt.Sprintf("%s/v1internal:streamGenerateContent?alt=sse", antigravityBaseURL)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(bodyBytes))
@@ -96,7 +85,6 @@ func (p *AntigravityProvider) Chat(
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	// Headers matching the pi-ai SDK antigravity format
 	clientMetadata, _ := json.Marshal(map[string]string{
 		"ideType":    "IDE_UNSPECIFIED",
 		"platform":   "PLATFORM_UNSPECIFIED",
@@ -130,14 +118,11 @@ func (p *AntigravityProvider) Chat(
 		return nil, p.parseAntigravityError(resp.StatusCode, respBody)
 	}
 
-	// Response is always SSE from streamGenerateContent — each line is "data: {...}"
-	// with a "response" wrapper containing the standard Gemini response
 	llmResp, err := p.parseSSEResponse(string(respBody))
 	if err != nil {
 		return nil, err
 	}
 
-	// Check for empty response (some models might return valid success but empty text)
 	if llmResp.Content == "" && len(llmResp.ToolCalls) == 0 {
 		return nil, fmt.Errorf(
 			"antigravity: model returned an empty response (this model might be invalid or restricted)",
@@ -147,12 +132,9 @@ func (p *AntigravityProvider) Chat(
 	return llmResp, nil
 }
 
-// GetDefaultModel returns the default model identifier.
 func (p *AntigravityProvider) GetDefaultModel() string {
 	return antigravityDefaultModel
 }
-
-// --- Request building ---
 
 type antigravityRequest struct {
 	Contents     []antigravityContent     `json:"contents"`
@@ -212,7 +194,6 @@ func (p *AntigravityProvider) buildRequest(
 	req := antigravityRequest{}
 	toolCallNames := make(map[string]string)
 
-	// Build contents from messages
 	for _, msg := range messages {
 		switch msg.Role {
 		case "system":
@@ -222,7 +203,6 @@ func (p *AntigravityProvider) buildRequest(
 		case "user":
 			if msg.ToolCallID != "" {
 				toolName := resolveToolResponseName(msg.ToolCallID, toolCallNames)
-				// Tool result
 				req.Contents = append(req.Contents, antigravityContent{
 					Role: "user",
 					Parts: []antigravityPart{{
@@ -290,7 +270,6 @@ func (p *AntigravityProvider) buildRequest(
 		}
 	}
 
-	// Build tools (sanitize schemas for Gemini compatibility)
 	if len(tools) > 0 {
 		var funcDecls []antigravityFuncDecl
 		for _, t := range tools {
@@ -309,7 +288,6 @@ func (p *AntigravityProvider) buildRequest(
 		}
 	}
 
-	// Generation config
 	config := &antigravityGenConfig{}
 	if val, ok := options["max_tokens"]; ok {
 		if maxTokens, ok := val.(int); ok && maxTokens > 0 {
@@ -382,8 +360,6 @@ func inferToolNameFromCallID(toolCallID string) string {
 	return toolCallID
 }
 
-// --- Response parsing ---
-
 type antigravityJSONResponse struct {
 	Candidates []struct {
 		Content struct {
@@ -421,7 +397,6 @@ func (p *AntigravityProvider) parseSSEResponse(body string) (*LLMResponse, error
 			break
 		}
 
-		// v1internal SSE wraps the Gemini response in a "response" field
 		var sseChunk struct {
 			Response antigravityJSONResponse `json:"response"`
 		}
@@ -492,9 +467,6 @@ func extractPartThoughtSignature(thoughtSignature string, thoughtSignatureSnake 
 	return ""
 }
 
-// --- Schema sanitization ---
-
-// Google/Gemini doesn't support many JSON Schema keywords that other providers accept.
 var geminiUnsupportedKeywords = map[string]bool{
 	"patternProperties":    true,
 	"additionalProperties": true,
@@ -528,7 +500,6 @@ func sanitizeSchemaForGemini(schema map[string]any) map[string]any {
 		if geminiUnsupportedKeywords[k] {
 			continue
 		}
-		// Recursively sanitize nested objects
 		switch val := v.(type) {
 		case map[string]any:
 			result[k] = sanitizeSchemaForGemini(val)
@@ -547,7 +518,6 @@ func sanitizeSchemaForGemini(schema map[string]any) map[string]any {
 		}
 	}
 
-	// Ensure top-level has type: "object" if properties are present
 	if _, hasProps := result["properties"]; hasProps {
 		if _, hasType := result["type"]; !hasType {
 			result["type"] = "object"
@@ -556,8 +526,6 @@ func sanitizeSchemaForGemini(schema map[string]any) map[string]any {
 
 	return result
 }
-
-// --- Token source ---
 
 func createAntigravityTokenSource() func() (string, string, error) {
 	return func() (string, string, error) {
@@ -577,13 +545,12 @@ func createAntigravityTokenSource() func() (string, string, error) {
 
 		projectID := cred.ProjectID
 		if projectID == "" {
-			// Try to fetch project ID from API
 			fetchedID, err := FetchAntigravityProjectID(cred.AccessToken)
 			if err != nil {
 				logger.WarnCF("provider.antigravity", "Could not fetch project ID, using fallback", map[string]any{
 					"error": err.Error(),
 				})
-				projectID = "rising-fact-p41fc" // Default fallback (same as OpenCode)
+				projectID = "rising-fact-p41fc"
 			} else {
 				projectID = fetchedID
 				cred.ProjectID = projectID
@@ -595,7 +562,6 @@ func createAntigravityTokenSource() func() (string, string, error) {
 	}
 }
 
-// FetchAntigravityProjectID retrieves the Google Cloud project ID from the loadCodeAssist endpoint.
 func FetchAntigravityProjectID(accessToken string) (string, error) {
 	reqBody, _ := json.Marshal(map[string]any{
 		"metadata": map[string]any{
@@ -643,7 +609,6 @@ func FetchAntigravityProjectID(accessToken string) (string, error) {
 	return result.CloudAICompanionProject, nil
 }
 
-// FetchAntigravityModels fetches available models from the Cloud Code Assist API.
 func FetchAntigravityModels(accessToken, projectID string) ([]AntigravityModelInfo, error) {
 	reqBody, _ := json.Marshal(map[string]any{
 		"project": projectID,
@@ -700,7 +665,6 @@ func FetchAntigravityModels(accessToken, projectID string) ([]AntigravityModelIn
 		})
 	}
 
-	// Ensure gemini-3-flash-preview and gemini-3-flash are in the list if they aren't already
 	hasFlashPreview := false
 	hasFlash := false
 	for _, m := range models {
@@ -732,8 +696,6 @@ type AntigravityModelInfo struct {
 	DisplayName string `json:"display_name"`
 	IsExhausted bool   `json:"is_exhausted"`
 }
-
-// --- Helpers ---
 
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
@@ -767,7 +729,6 @@ func (p *AntigravityProvider) parseAntigravityError(statusCode int, body []byte)
 
 	msg := errResp.Error.Message
 	if statusCode == 429 {
-		// Try to extract quota reset info
 		for _, detail := range errResp.Error.Details {
 			if typeVal, ok := detail["@type"].(string); ok && strings.HasSuffix(typeVal, "ErrorInfo") {
 				if metadata, ok := detail["metadata"].(map[string]any); ok {

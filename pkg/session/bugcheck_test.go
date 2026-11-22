@@ -8,13 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// TestSQLite_GapAware_FullRewriteThenAppend_PersistsSubsequentAppend verifies
-// that after a full rewrite with re-materialized evicted rows, a subsequent
-// append is still persisted. Regression test for the bookkeeping bug where a
-// full rewrite reset firstInMemorySeq/evictedTotal to 0 while the evicted rows
-// were still absent from the in-memory slice, breaking the
-// `seq = firstInMemorySeq + sliceIndex` invariant and silently dropping the
-// next incremental append.
 func TestSQLite_GapAware_FullRewriteThenAppend_PersistsSubsequentAppend(t *testing.T) {
 	s := newTestStore(t)
 	sm := NewSessionManager()
@@ -33,8 +26,6 @@ func TestSQLite_GapAware_FullRewriteThenAppend_PersistsSubsequentAppend(t *testi
 		t.Fatalf("initial Save: %v", err)
 	}
 
-	// Exclude first 7, save, evict → gap: firstInMemorySeq=6, evictedTotal=6.
-	// Index 6 (user) is one of the last preservedUserMessages human turns → preserved.
 	sm.ExcludeOldMessagesFromContext(key, 3)
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("exclude Save: %v", err)
@@ -47,7 +38,6 @@ func TestSQLite_GapAware_FullRewriteThenAppend_PersistsSubsequentAppend(t *testi
 	t.Logf("post-evict: firstInMemorySeq=%d evictedTotal=%d lastPersistedSeq=%d len(Messages)=%d",
 		sess.firstInMemorySeq, sess.evictedTotal, sess.lastPersistedSeq, len(sess.Messages))
 
-	// Simulate ensureSummaryMaterialized: SetHistory forces full rewrite.
 	updated := append([]providers.Message{}, sess.Messages...)
 	updated = append(updated, providers.Message{Role: "user", Content: "summary-msg"})
 	sm.SetHistory(key, updated)
@@ -61,7 +51,6 @@ func TestSQLite_GapAware_FullRewriteThenAppend_PersistsSubsequentAppend(t *testi
 	rows, _ := s.Sessions().LoadMessagesWithSeq(key)
 	t.Logf("SQLite rows after rewrite: %d", len(rows))
 
-	// Now append a new user message (the next turn).
 	sm.AddMessage(key, "user", "next-turn")
 	if err := sm.Save(key); err != nil {
 		t.Fatalf("append Save: %v", err)
@@ -70,7 +59,6 @@ func TestSQLite_GapAware_FullRewriteThenAppend_PersistsSubsequentAppend(t *testi
 	rows2, _ := s.Sessions().LoadMessagesWithSeq(key)
 	t.Logf("SQLite rows after append: %d", len(rows2))
 
-	// The appended message must be persisted. Check the last row.
 	lastRow := rows2[len(rows2)-1]
 	var lastMsg providers.Message
 	json.Unmarshal([]byte(lastRow.JSON), &lastMsg)
@@ -78,7 +66,6 @@ func TestSQLite_GapAware_FullRewriteThenAppend_PersistsSubsequentAppend(t *testi
 		t.Errorf("last persisted row content = %q, want %q (append was LOST)", lastMsg.Content, "next-turn")
 	}
 
-	// Also verify total count is consistent.
 	total := sm.GetTotalMessageCount(key)
 	t.Logf("GetTotalMessageCount=%d, SQLite rows=%d, in-memory=%d, evictedTotal=%d",
 		total, len(rows2), len(sess.Messages), sess.evictedTotal)

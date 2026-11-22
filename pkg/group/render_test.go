@@ -36,7 +36,6 @@ func TestRenderTranscript_MultipleTurnsSameLayer(t *testing.T) {
 	if got != want {
 		t.Errorf("got:\n%s\n\nwant:\n%s", got, want)
 	}
-	// No layer separator should appear.
 	if strings.Contains(got, "--- layer") {
 		t.Errorf("unexpected layer separator in single-layer transcript:\n%s", got)
 	}
@@ -51,14 +50,12 @@ func TestRenderTranscript_TwoLayers(t *testing.T) {
 	}
 	got := RenderTranscript(turns)
 
-	// Layer separator must appear once for layer 1.
 	if !strings.Contains(got, "--- layer 0 ---") {
 		t.Errorf("expected layer 0 separator:\n%s", got)
 	}
 	if !strings.Contains(got, "--- layer 1 ---") {
 		t.Errorf("expected layer 1 separator:\n%s", got)
 	}
-	// Check order.
 	idx0 := strings.Index(got, "--- layer 0 ---")
 	idx1 := strings.Index(got, "--- layer 1 ---")
 	if idx0 >= idx1 {
@@ -83,25 +80,21 @@ func TestGroupRoleAnnex_Basic(t *testing.T) {
 
 	annex := GroupRoleAnnex(self, participants, task)
 
-	// Must contain self role.
 	if !strings.Contains(annex, "proposer") {
 		t.Errorf("annex missing self role:\n%s", annex)
 	}
 	if !strings.Contains(annex, "(you)") {
 		t.Errorf("annex missing (you) marker:\n%s", annex)
 	}
-	// Must list all participants.
 	if !strings.Contains(annex, "Alice") || !strings.Contains(annex, "Bob") || !strings.Contains(annex, "Carol") {
 		t.Errorf("annex missing participant names:\n%s", annex)
 	}
-	// Must include roles.
 	if !strings.Contains(annex, "aggregator") {
 		t.Errorf("annex missing aggregator role:\n%s", annex)
 	}
 	if !strings.Contains(annex, "critic") {
 		t.Errorf("annex missing critic role:\n%s", annex)
 	}
-	// Must include task.
 	if !strings.Contains(annex, task) {
 		t.Errorf("annex missing task:\n%s", annex)
 	}
@@ -144,7 +137,6 @@ func TestBuildTurnSystemPrompt_EmptyPersona(t *testing.T) {
 
 	got := BuildTurnSystemPrompt("", self, participants, task)
 
-	// Should not start with a separator.
 	if strings.HasPrefix(got, "---") {
 		t.Errorf("unexpected leading separator when persona is empty:\n%s", got)
 	}

@@ -9,23 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// ============================================================================
-// Issue #234, part C: identity inheritance for nested spawns.
-//
-// A subagent task's AgentID is the identity that reaches its tool loop as
-// ToolLoopConfig.OwnerAgentID (pkg/tools/subagent_runner.go). Identity-scoped
-// tools — the keyring secret lookup, nested spawn attribution — key on it, so
-// an empty AgentID silently breaks them. Two layers guard against that:
-//   - SpawnWithOptions inherits the spawner's own agent id from the tool
-//     context when the caller passes no agent_id (change 1);
-//   - the runner falls back to the manager's owning agent id when a task still
-//     arrives without one, e.g. a legacy cron spawn job stored before its
-//     creator was recorded (change 2).
-// ============================================================================
-
-// identitySpawnProvider answers with a completed outcome. It exists so the
-// spawn path can be exercised without a real LLM or network when the test only
-// cares about the task recorded at spawn time.
 type identitySpawnProvider struct{}
 
 func (identitySpawnProvider) Chat(_ context.Context, _ []providers.Message, _ []providers.ToolDefinition, _ string, _ map[string]interface{}) (*providers.LLMResponse, error) {
@@ -34,9 +17,6 @@ func (identitySpawnProvider) Chat(_ context.Context, _ []providers.Message, _ []
 
 func (identitySpawnProvider) GetDefaultModel() string { return "test-model" }
 
-// spawnCtxProbeTool records the agent identity the subagent's tool loop hands
-// to the tools it executes. Registered as "ctxprobe" so identityCallProvider
-// can trigger it.
 type spawnCtxProbeTool struct {
 	mu     sync.Mutex
 	agent  string
@@ -62,8 +42,6 @@ func (p *spawnCtxProbeTool) identity() (agent string, called bool) {
 	return p.agent, p.called
 }
 
-// identityCallProvider drives exactly one tool call and then finishes, so the
-// probe above runs inside the subagent's own tool loop.
 type identityCallProvider struct {
 	mu    sync.Mutex
 	calls int
@@ -85,8 +63,6 @@ func (p *identityCallProvider) Chat(_ context.Context, _ []providers.Message, _ 
 
 func (p *identityCallProvider) GetDefaultModel() string { return "test-model" }
 
-// spawnTaskID extracts the task id from a SpawnWithOptions result message so
-// tests can look the task up with GetTask.
 func spawnTaskID(t *testing.T, result string) string {
 	t.Helper()
 	id := ExtractSpawnTaskID(result)
@@ -96,9 +72,6 @@ func spawnTaskID(t *testing.T, result string) string {
 	return id
 }
 
-// awaitIdentityTask polls GetTask until the task is registered or the deadline
-// passes. SpawnWithOptions registers the task synchronously, but the poll keeps
-// the tests honest if that ever changes.
 func awaitIdentityTask(t *testing.T, sm *SubagentManager, id string) *SubagentTask {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -112,9 +85,6 @@ func awaitIdentityTask(t *testing.T, sm *SubagentManager, id string) *SubagentTa
 	return nil
 }
 
-// TestC1_SpawnWithoutAgentIDInheritsSpawnerIdentity covers change 1: a spawn
-// that names no target agent must inherit the spawner's identity from the tool
-// context instead of storing an empty AgentID.
 func TestC1_SpawnWithoutAgentIDInheritsSpawnerIdentity(t *testing.T) {
 	sm := NewSubagentManager(identitySpawnProvider{}, "test-model", t.TempDir(), nil, 10)
 
@@ -133,9 +103,6 @@ func TestC1_SpawnWithoutAgentIDInheritsSpawnerIdentity(t *testing.T) {
 	}
 }
 
-// TestC2_SpawnWithExplicitAgentIDWins verifies change 1 never overrides an
-// explicit target agent — nested spawns must still be routable to an agent
-// other than the spawner.
 func TestC2_SpawnWithExplicitAgentIDWins(t *testing.T) {
 	sm := NewSubagentManager(identitySpawnProvider{}, "test-model", t.TempDir(), nil, 10)
 
@@ -149,17 +116,11 @@ func TestC2_SpawnWithExplicitAgentIDWins(t *testing.T) {
 	if task.AgentID != "reviewer" {
 		t.Errorf("task.AgentID = %q, want explicit %q (must not be overwritten)", task.AgentID, "reviewer")
 	}
-	// The spawner session is still recorded: it is what cancellation cascades
-	// match on (#230) and is independent of the target identity.
 	if task.SpawnerSessionKey != "sess-9" {
 		t.Errorf("task.SpawnerSessionKey = %q, want %q", task.SpawnerSessionKey, "sess-9")
 	}
 }
 
-// TestC3_SpawnWithoutAnyIdentityStaysEmpty pins the boundary of change 1: with
-// neither an agent_id nor a tool context (cron-spawned jobs, direct manager
-// use) the task keeps an empty AgentID. That case is handled at run time by
-// change 2, not at spawn time.
 func TestC3_SpawnWithoutAnyIdentityStaysEmpty(t *testing.T) {
 	sm := NewSubagentManager(identitySpawnProvider{}, "test-model", t.TempDir(), nil, 10)
 
@@ -174,9 +135,6 @@ func TestC3_SpawnWithoutAnyIdentityStaysEmpty(t *testing.T) {
 	}
 }
 
-// TestC4_OwnerAgentIDResolution covers change 2's decision table directly: the
-// runner's owner is the task identity when present, the manager's owning agent
-// otherwise.
 func TestC4_OwnerAgentIDResolution(t *testing.T) {
 	sm := NewSubagentManager(identitySpawnProvider{}, "test-model", t.TempDir(), nil, 10)
 	sm.SetDefaultAgentID("planner")
@@ -198,15 +156,11 @@ func TestC4_OwnerAgentIDResolution(t *testing.T) {
 		})
 	}
 
-	// A manager with no configured owner (standalone construction, tests) must
-	// not invent an identity: it stays empty and RunToolLoop keeps whatever
-	// identity its context carries.
 	bare := NewSubagentManager(identitySpawnProvider{}, "test-model", t.TempDir(), nil, 10)
 	if got := bare.ownerAgentID(&SubagentTask{}); got != "" {
 		t.Errorf("ownerAgentID without configured owner = %q, want empty", got)
 	}
 
-	// SetDefaultAgentID trims: config files routinely carry padded values.
 	padded := NewSubagentManager(identitySpawnProvider{}, "test-model", t.TempDir(), nil, 10)
 	padded.SetDefaultAgentID("  coder  ")
 	if got := padded.ownerAgentID(nil); got != "coder" {
@@ -214,10 +168,6 @@ func TestC4_OwnerAgentIDResolution(t *testing.T) {
 	}
 }
 
-// TestC5_LegacyTaskWithoutIdentityRunsOwnedToolLoop is the end-to-end guard for
-// change 2: a task that reaches the runner with no AgentID (a cron spawn job
-// stored before its creator was recorded) must still expose a real identity to
-// the tools it executes, otherwise the scoped secret lookup fails.
 func TestC5_LegacyTaskWithoutIdentityRunsOwnedToolLoop(t *testing.T) {
 	probe := &spawnCtxProbeTool{}
 	reg := NewToolRegistry()
@@ -253,9 +203,6 @@ func TestC5_LegacyTaskWithoutIdentityRunsOwnedToolLoop(t *testing.T) {
 	}
 }
 
-// TestC6_InheritedIdentityReachesToolLoop proves the two changes compose: a
-// spawn without agent_id inherits the spawner identity at spawn time, and that
-// identity — not the manager default — is what the tool loop reports.
 func TestC6_InheritedIdentityReachesToolLoop(t *testing.T) {
 	probe := &spawnCtxProbeTool{}
 	reg := NewToolRegistry()
@@ -263,7 +210,6 @@ func TestC6_InheritedIdentityReachesToolLoop(t *testing.T) {
 
 	sm := NewSubagentManager(&identityCallProvider{}, "test-model", t.TempDir(), nil, 10)
 	sm.SetTools(reg)
-	// Deliberately a different agent: the task identity must win over this.
 	sm.SetDefaultAgentID("other")
 
 	ctx := WithAgentToolContext(context.Background(), "planner", "sess-9")

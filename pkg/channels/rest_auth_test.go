@@ -17,7 +17,6 @@ func TestHandleGetPIN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRequest() error = %v", err)
 	}
-	// FIX-2: /auth/pin is behind withAuth — must send Authorization header.
 	req.Header.Set("Authorization", "Bearer "+ts.token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -44,7 +43,6 @@ func TestHandleGetPIN(t *testing.T) {
 func TestHandlePairAndRefresh(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// 1. Get a PIN (requires authentication after FIX-2)
 	pinReq, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/auth/pin?device_name=test-device", nil)
 	pinReq.Header.Set("Authorization", "Bearer "+ts.token)
 	pinResp, err := http.DefaultClient.Do(pinReq)
@@ -62,7 +60,6 @@ func TestHandlePairAndRefresh(t *testing.T) {
 		t.Fatalf("Decode PIN error = %v", err)
 	}
 
-	// 2. Pair with the PIN
 	pairBody := mustMarshal(AuthPairRequest{PIN: pinPayload.PIN, DeviceName: "test-device"})
 	pairReq, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/auth/pair", strings.NewReader(string(pairBody)))
 	pairResp, err := http.DefaultClient.Do(pairReq)
@@ -89,7 +86,6 @@ func TestHandlePairAndRefresh(t *testing.T) {
 		t.Fatal("expected non-empty client ID")
 	}
 
-	// 3. Refresh the token
 	refreshBody := mustMarshal(AuthRefreshRequest{RefreshToken: pairPayload.RefreshToken})
 	refreshReq, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/auth/refresh", strings.NewReader(string(refreshBody)))
 	refreshResp, err := http.DefaultClient.Do(refreshReq)
@@ -114,13 +110,11 @@ func TestHandlePairAndRefresh(t *testing.T) {
 func TestHandlePairWithoutDeviceName_WhenPINIssuedWithoutOne(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// Generate PIN via auth manager directly (without device_name).
 	pending, err := ts.channel.auth.GeneratePIN("")
 	if err != nil {
 		t.Fatalf("GeneratePIN() error = %v", err)
 	}
 
-	// Pair without device_name — must be rejected.
 	body := mustMarshal(AuthPairRequest{PIN: pending.PIN, DeviceName: ""})
 	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/auth/pair", strings.NewReader(string(body)))
 	resp, err := http.DefaultClient.Do(req)
@@ -150,7 +144,6 @@ func TestHandlePairWithDeviceName_WhenPINIssuedWithoutOne(t *testing.T) {
 		t.Fatalf("GeneratePIN() error = %v", err)
 	}
 
-	// Pair WITH device_name — should succeed.
 	body := mustMarshal(AuthPairRequest{PIN: pending.PIN, DeviceName: "CLI-Device"})
 	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/auth/pair", strings.NewReader(string(body)))
 	resp, err := http.DefaultClient.Do(req)
@@ -191,12 +184,10 @@ func TestHandlePairInvalidPIN(t *testing.T) {
 func TestHandleGetPIN_UnauthenticatedReturns401(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// FIX-2: /auth/pin must be behind withAuth.
 	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/auth/pin", nil)
 	if err != nil {
 		t.Fatalf("NewRequest() error = %v", err)
 	}
-	// No Authorization header.
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Do() error = %v", err)
@@ -224,10 +215,6 @@ func TestHandleRefreshInvalidToken(t *testing.T) {
 	}
 }
 
-// newNativeTestServerSQLite builds the standard test server and switches its
-// auth manager to the shared SQLite backend (repo != nil). That is the only
-// mode in which the slow-path reload — and therefore its per-manager budget —
-// exists, so it is what a test of the suppressed-reload path needs.
 func newNativeTestServerSQLite(t *testing.T) (*nativeTestServer, *store.NativeClientRepo) {
 	t.Helper()
 
@@ -239,29 +226,18 @@ func newNativeTestServerSQLite(t *testing.T) (*nativeTestServer, *store.NativeCl
 	}
 	t.Cleanup(func() { s.Close() })
 
-	// SetStore migrates the clients the server already holds (the paired
-	// "Test Desktop" client) into the DB and reloads from it.
 	ts.channel.auth.SetStore(s.NativeClients())
 	return ts, s.NativeClients()
 }
 
-// A refresh whose store reload was suppressed by the per-manager budget must
-// be answered 429 + Retry-After / code refresh_unavailable, NOT 400:
-// isFatalRefreshFailure only treats 400/401 as session-ending, so a 400 here
-// would expel a WebUI session whose token is valid in the shared DB (another
-// process rotated it inside slowReloadMinInterval).
 func TestHandleRefresh_SlowReloadSuppressedResponds429(t *testing.T) {
 	ts, repo := newNativeTestServerSQLite(t)
 
-	// Control: a client that exists ONLY in the shared DB is adopted by the
-	// reload while the budget is intact — the handler's normal behaviour.
 	control := seedForeignClient(t, repo, "handler-control")
 	if resp := postRefresh(t, ts.server.URL, control.ClientID+"-refresh"); resp.StatusCode != http.StatusOK {
 		t.Fatalf("a DB-only client must be adopted on an intact budget, status = %d", resp.StatusCode)
 	}
 
-	// A second DB-only client appears after that reload, and the manager's
-	// budget is spent, so the reload is suppressed this time.
 	busy := seedForeignClient(t, repo, "handler-busy")
 	spendReloadBudget(t, ts.channel.auth)
 
@@ -284,7 +260,6 @@ func TestHandleRefresh_SlowReloadSuppressedResponds429(t *testing.T) {
 func TestHandleListAndRemoveClients(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// 1. Get a PIN (requires authentication after FIX-2)
 	pinReq, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/auth/pin?device_name=test-device", nil)
 	pinReq.Header.Set("Authorization", "Bearer "+ts.token)
 	pinResp, err := http.DefaultClient.Do(pinReq)
@@ -302,7 +277,6 @@ func TestHandleListAndRemoveClients(t *testing.T) {
 		t.Fatalf("Decode PIN error = %v", err)
 	}
 
-	// 2. Pair with the PIN
 	pairBody := mustMarshal(AuthPairRequest{PIN: pinPayload.PIN, DeviceName: "test-device"})
 	pairReq, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/auth/pair", strings.NewReader(string(pairBody)))
 	pairResp, err := http.DefaultClient.Do(pairReq)
@@ -316,7 +290,6 @@ func TestHandleListAndRemoveClients(t *testing.T) {
 		t.Fatalf("Decode pair error = %v", err)
 	}
 
-	// 3. List clients (requires authorization)
 	listReq, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/auth/clients", nil)
 	listReq.Header.Set("Authorization", "Bearer "+pairPayload.Token)
 	listResp, err := http.DefaultClient.Do(listReq)
@@ -357,7 +330,6 @@ func TestHandleListAndRemoveClients(t *testing.T) {
 		t.Fatal("expected to find default Test Desktop client in the list")
 	}
 
-	// 4. Remove the new client
 	removeReq, _ := http.NewRequest(http.MethodDelete, ts.server.URL+"/api/v1/auth/clients/"+pairPayload.ClientID, nil)
 	removeReq.Header.Set("Authorization", "Bearer "+pairPayload.Token)
 	removeResp, err := http.DefaultClient.Do(removeReq)
@@ -370,7 +342,6 @@ func TestHandleListAndRemoveClients(t *testing.T) {
 		t.Fatalf("remove status = %d, want %d", removeResp.StatusCode, http.StatusOK)
 	}
 
-	// 5. Try to list again using default token (since the new one is revoked/unauthorized)
 	listReq2, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/auth/clients", nil)
 	listReq2.Header.Set("Authorization", "Bearer "+ts.token)
 	listResp2, err := http.DefaultClient.Do(listReq2)
@@ -395,7 +366,6 @@ func TestHandleListAndRemoveClients(t *testing.T) {
 		t.Fatalf("remaining client device name = %s, want %s", clientsAfter[0].DeviceName, "Test Desktop")
 	}
 
-	// 6. Try to list using the revoked token (should fail with 401)
 	listReq3, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/auth/clients", nil)
 	listReq3.Header.Set("Authorization", "Bearer "+pairPayload.Token)
 	listResp3, err := http.DefaultClient.Do(listReq3)

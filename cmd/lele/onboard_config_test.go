@@ -10,12 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// --- minimal-save test helpers ----------------------------------------------
-
-// saveMinimalAndParse writes cfg with config.SaveMinimalConfig and parses the
-// resulting file, so tests can assert on the actual JSON shape (absence of
-// keys), not just on the reloaded struct. Returns the file path and the raw
-// parsed document.
 func saveMinimalAndParse(t *testing.T, cfg *config.Config) (string, map[string]interface{}) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")
@@ -33,8 +27,6 @@ func saveMinimalAndParse(t *testing.T, cfg *config.Config) (string, map[string]i
 	return path, parsed
 }
 
-// jsonSection returns the object stored under key, failing when the key is
-// absent or not an object.
 func jsonSection(t *testing.T, parsed map[string]interface{}, key string) map[string]interface{} {
 	t.Helper()
 	raw, ok := parsed[key]
@@ -56,12 +48,6 @@ func jsonKeys(m map[string]interface{}) []string {
 	return out
 }
 
-// --- onboarding config shaping ------------------------------------------------
-
-// TestSetWebUIEnabled verifies the pure helper behind the "Enable Web UI +
-// native channel?" answer: declining must genuinely disable BOTH channels
-// (the code defaults are enabled, so a missing else-branch made the old
-// prompt a no-op), and enabling must set both back.
 func TestSetWebUIEnabled(t *testing.T) {
 	cfg := config.DefaultConfig()
 	if !cfg.Channels.Web.Enabled || !cfg.Channels.Native.Enabled {
@@ -82,9 +68,6 @@ func TestSetWebUIEnabled(t *testing.T) {
 	}
 }
 
-// TestOnboard_SaveMinimalConfig_DefaultsWriteNoChannelsOrGateway verifies a
-// defaults-only config (user accepted every default) writes NO channels and
-// NO gateway keys at all.
 func TestOnboard_SaveMinimalConfig_DefaultsWriteNoChannelsOrGateway(t *testing.T) {
 	_, parsed := saveMinimalAndParse(t, config.DefaultConfig())
 
@@ -94,16 +77,11 @@ func TestOnboard_SaveMinimalConfig_DefaultsWriteNoChannelsOrGateway(t *testing.T
 	if _, ok := parsed["gateway"]; ok {
 		t.Errorf("saved JSON must not contain \"gateway\" when it equals the default, got: %v", parsed["gateway"])
 	}
-	// Sanity: the file really was serialized (other sections present).
 	if _, ok := parsed["agents"]; !ok {
 		t.Fatal("expected an \"agents\" section to still be written")
 	}
 }
 
-// TestOnboard_SaveMinimalConfig_DeclinedWebUIWritesOnlyFalseFlags verifies the
-// onboarding decline path produces exactly {"channels":{"web":{"enabled":
-// false},"native":{"enabled":false}}} and nothing else under channels, and
-// that LoadConfig restores the two explicit false values.
 func TestOnboard_SaveMinimalConfig_DeclinedWebUIWritesOnlyFalseFlags(t *testing.T) {
 	cfg := config.DefaultConfig()
 	setWebUIEnabled(cfg, false)
@@ -141,10 +119,6 @@ func TestOnboard_SaveMinimalConfig_DeclinedWebUIWritesOnlyFalseFlags(t *testing.
 	}
 }
 
-// TestOnboard_SaveMinimalConfig_GatewayPortOnly verifies a custom gateway
-// port (what configureWebUI now writes instead of server.*) is the ONLY key
-// under gateway in the saved file, and that the effective port survives a
-// reload.
 func TestOnboard_SaveMinimalConfig_GatewayPortOnly(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Gateway.Port = 9999
@@ -158,7 +132,6 @@ func TestOnboard_SaveMinimalConfig_GatewayPortOnly(t *testing.T) {
 	if gateway["port"] != float64(9999) {
 		t.Errorf("gateway.port = %v, want 9999", gateway["port"])
 	}
-	// A custom port alone must not resurrect a channels section.
 	if _, ok := parsed["channels"]; ok {
 		t.Errorf("saved JSON must not contain \"channels\", got: %v", parsed["channels"])
 	}
@@ -172,11 +145,6 @@ func TestOnboard_SaveMinimalConfig_GatewayPortOnly(t *testing.T) {
 	}
 }
 
-// TestOnboard_SaveMinimalConfig_ProviderKeyAndAgentsRoundTrip verifies that
-// what onboarding actually configures — a provider with a literal API key and
-// extra agents — survives SaveMinimalConfig -> LoadConfig unchanged, while
-// untouched channels stay pruned and reload with their code defaults (web and
-// native enabled).
 func TestOnboard_SaveMinimalConfig_ProviderKeyAndAgentsRoundTrip(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Provider = "anthropic"
@@ -203,7 +171,6 @@ func TestOnboard_SaveMinimalConfig_ProviderKeyAndAgentsRoundTrip(t *testing.T) {
 
 	path, parsed := saveMinimalAndParse(t, cfg)
 
-	// Providers present with the literal key; channels/gateway pruned.
 	providers := jsonSection(t, parsed, "providers")
 	anthropic := jsonSection(t, providers, "anthropic")
 	if got := anthropic["api_key"]; got != "sk-anthropic-literal-key-12345" {
@@ -234,8 +201,6 @@ func TestOnboard_SaveMinimalConfig_ProviderKeyAndAgentsRoundTrip(t *testing.T) {
 	if model, ok := prov.Models["opus"]; !ok || model.Model != "claude-opus-4-1" || !model.Vision {
 		t.Errorf("reloaded models = %v, want opus -> claude-opus-4-1 [vision]", prov.Models)
 	}
-	// The legacy struct field is fed from the same JSON key; onboarding used
-	// to write it via SaveConfig, so it must not regress.
 	if loaded.Providers.Anthropic.APIKey != "sk-anthropic-literal-key-12345" {
 		t.Errorf("reloaded legacy Providers.Anthropic.APIKey = %q, want the literal key", loaded.Providers.Anthropic.APIKey)
 	}
@@ -254,21 +219,17 @@ func TestOnboard_SaveMinimalConfig_ProviderKeyAndAgentsRoundTrip(t *testing.T) {
 		t.Errorf("reloaded agent defaults = %q/%q", loaded.Agents.Defaults.Provider, loaded.Agents.Defaults.Model)
 	}
 
-	// Channels were never customized, so they reload with code defaults:
-	// web AND native enabled.
 	if !loaded.Channels.Web.Enabled {
 		t.Error("reloaded web.enabled = false, want true (default)")
 	}
 	if !loaded.Channels.Native.Enabled {
 		t.Error("reloaded native.enabled = false, want true (default)")
 	}
-	// The default effective port stays the gateway default.
 	if got := loaded.EffectiveServerPort(); got != config.DefaultConfig().Gateway.Port {
 		t.Errorf("EffectiveServerPort = %d, want %d", got, config.DefaultConfig().Gateway.Port)
 	}
 }
 
-// TestConfigureAgentDefaults_Config tests agent default configuration
 func TestConfigureAgentDefaults_Config(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -299,7 +260,6 @@ func TestConfigureAgentDefaults_Config(t *testing.T) {
 	}
 }
 
-// TestAgentConfig_Struct tests the AgentConfig structure
 func TestAgentConfig_Struct(t *testing.T) {
 	model := &config.AgentModelConfig{Primary: "test-model"}
 	cfg := config.AgentConfig{
@@ -320,7 +280,6 @@ func TestAgentConfig_Struct(t *testing.T) {
 	}
 }
 
-// TestProviderModelConfig_Struct tests the ProviderModelConfig structure
 func TestProviderModelConfig_Struct(t *testing.T) {
 	mcfg := config.ProviderModelConfig{
 		Model:         "claude-3-opus",
@@ -339,7 +298,6 @@ func TestProviderModelConfig_Struct(t *testing.T) {
 	}
 }
 
-// TestNamedProviderConfig_Struct tests the NamedProviderConfig structure
 func TestNamedProviderConfig_Struct(t *testing.T) {
 	cfg := config.NamedProviderConfig{
 		Type: "anthropic",
@@ -360,7 +318,6 @@ func TestNamedProviderConfig_Struct(t *testing.T) {
 	}
 }
 
-// TestWebConfig_Struct tests the WebConfig structure
 func TestWebConfig_Struct(t *testing.T) {
 	cfg := config.WebConfig{
 		Enabled: true,
@@ -371,7 +328,6 @@ func TestWebConfig_Struct(t *testing.T) {
 	}
 }
 
-// TestDefaultConfig tests the default configuration
 func TestDefaultConfig(t *testing.T) {
 	cfg := config.DefaultConfig()
 
@@ -379,8 +335,6 @@ func TestDefaultConfig(t *testing.T) {
 		t.Fatal("DefaultConfig returned nil")
 	}
 
-	// Check some defaults
-	// MaxTokens: 0 means "use provider/model fallback" (valid default)
 	if cfg.Agents.Defaults.MaxTokens < 0 {
 		t.Error("MaxTokens should not be negative")
 	}
@@ -389,7 +343,6 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
-// TestConfig_WorkspacePath tests the workspace path function
 func TestConfig_WorkspacePath(t *testing.T) {
 	tmpDir := "/tmp/test-workspace"
 	cfg := &config.Config{
@@ -404,13 +357,11 @@ func TestConfig_WorkspacePath(t *testing.T) {
 	if workspace == "" {
 		t.Error("WorkspacePath() returned empty string")
 	}
-	// Verify the path is non-empty and exists or is a valid path
 	if !filepath.IsAbs(workspace) && !strings.HasPrefix(workspace, "~/") {
 		t.Errorf("WorkspacePath() = %q, expected absolute or home-relative path", workspace)
 	}
 }
 
-// TestConfig_LogsPath tests the logs path function
 func TestConfig_LogsPath(t *testing.T) {
 	cfg := config.DefaultConfig()
 
@@ -420,12 +371,9 @@ func TestConfig_LogsPath(t *testing.T) {
 	}
 }
 
-// TestConfig_Defaults tests the default agent configuration
 func TestConfig_Defaults(t *testing.T) {
 	cfg := config.DefaultConfig()
 
-	// Verify defaults have reasonable values
-	// MaxTokens: 0 means "use provider/model fallback" (valid default)
 	if cfg.Agents.Defaults.MaxTokens < 0 {
 		t.Error("MaxTokens should not be negative")
 	}
@@ -437,41 +385,32 @@ func TestConfig_Defaults(t *testing.T) {
 			t.Error("Temperature should be between 0 and 2")
 		}
 	}
-	// Temperature may be nil in default config, which is acceptable
 }
 
-// TestConfig_Providers tests the providers configuration structure
 func TestConfig_Providers(t *testing.T) {
 	cfg := config.DefaultConfig()
 
-	// Verify providers config exists
-	// Default config may have empty API keys and nil Named map
 	if cfg.Providers.Anthropic.APIKey == "" {
 		t.Log("Anthropic API key is empty (expected for default config)")
 	}
 
-	// Named providers map may be nil in default config
 	if cfg.Providers.Named == nil {
 		t.Log("Named providers map is nil (expected for default config)")
 	}
 }
 
-// TestConfig_Agents tests the agents configuration structure
 func TestConfig_Agents(t *testing.T) {
 	cfg := config.DefaultConfig()
 
-	// Verify defaults exist
 	if cfg.Agents.Defaults.Model == "" {
 		t.Error("Default model should be set")
 	}
 
-	// Agent list may be nil in default config
 	if cfg.Agents.List == nil {
 		t.Log("Agent list is nil (expected for default config)")
 	}
 }
 
-// TestConfig_Channels tests the channels configuration structure
 func TestConfig_Channels(t *testing.T) {
 	cfg := config.DefaultConfig()
 
@@ -490,7 +429,6 @@ func TestConfig_Channels(t *testing.T) {
 	}
 }
 
-// TestNativeConfig_Struct tests the NativeConfig structure
 func TestNativeConfig_Struct(t *testing.T) {
 	cfg := config.NativeConfig{
 		Enabled:          true,
@@ -512,7 +450,6 @@ func TestNativeConfig_Struct(t *testing.T) {
 	}
 }
 
-// TestProviderConfig_Struct tests the ProviderConfig structure
 func TestProviderConfig_Struct(t *testing.T) {
 	cfg := config.ProviderConfig{
 		APIKey:  "sk-test-key",
@@ -527,7 +464,6 @@ func TestProviderConfig_Struct(t *testing.T) {
 	}
 }
 
-// TestOpenAIProviderConfig_Struct tests the OpenAIProviderConfig structure
 func TestOpenAIProviderConfig_Struct(t *testing.T) {
 	cfg := config.OpenAIProviderConfig{
 		ProviderConfig: config.ProviderConfig{
@@ -541,7 +477,6 @@ func TestOpenAIProviderConfig_Struct(t *testing.T) {
 	}
 }
 
-// TestAgentModelConfig tests the AgentModelConfig structure
 func TestAgentModelConfig(t *testing.T) {
 	cfg := config.AgentModelConfig{
 		Primary: "anthropic/claude-3-opus",
@@ -552,7 +487,6 @@ func TestAgentModelConfig(t *testing.T) {
 	}
 }
 
-// TestFormatTemperature tests temperature formatting
 func TestFormatTemperature(t *testing.T) {
 	temp := 0.7
 	cfg := config.AgentDefaults{Temperature: &temp}
@@ -564,20 +498,17 @@ func TestFormatTemperature(t *testing.T) {
 	}
 }
 
-// TestFormatTemperature_Rounding tests temperature rounding
 func TestFormatTemperature_Rounding(t *testing.T) {
 	temp := 0.7345
 	cfg := config.AgentDefaults{Temperature: &temp}
 	if cfg.Temperature == nil {
 		t.Fatal("Temperature is nil")
 	}
-	// Verify the value is stored correctly
 	if *cfg.Temperature != 0.7345 {
 		t.Errorf("Temperature = %g, want %g", *cfg.Temperature, 0.7345)
 	}
 }
 
-// TestFormatFloat tests float formatting
 func TestFormatFloat(t *testing.T) {
 	f := 0.12345
 	if f <= 0 {
@@ -585,7 +516,6 @@ func TestFormatFloat(t *testing.T) {
 	}
 }
 
-// TestFormatInt tests integer formatting
 func TestFormatInt(t *testing.T) {
 	i := 8192
 	if i <= 0 {
@@ -593,7 +523,6 @@ func TestFormatInt(t *testing.T) {
 	}
 }
 
-// TestFormatIntWithDefault tests integer with default
 func TestFormatIntWithDefault(t *testing.T) {
 	i := 0
 	if i != 0 {
@@ -601,7 +530,6 @@ func TestFormatIntWithDefault(t *testing.T) {
 	}
 }
 
-// TestPrintProviderSummary tests the provider summary output
 func TestPrintProviderSummary(t *testing.T) {
 	cfg := &config.Config{
 		Providers: &config.ProvidersConfig{
@@ -620,15 +548,12 @@ func TestPrintProviderSummary(t *testing.T) {
 		},
 	}
 
-	// Verify maskAPIKey works with provider summary
-	// "sk-test-key-123" -> first 4: "sk-t", last 4: "-123"
 	keyDisplay := maskAPIKey(cfg.Providers.Named["anthropic"].APIKey)
 	if keyDisplay != "sk-t...-123" {
 		t.Errorf("Key display = %q, want %q", keyDisplay, "sk-t...-123")
 	}
 }
 
-// TestPrintAgentSummary tests the agent summary output
 func TestPrintAgentSummary(t *testing.T) {
 	temp := 0.7
 	cfg := &config.Config{
@@ -647,7 +572,6 @@ func TestPrintAgentSummary(t *testing.T) {
 	}
 }
 
-// TestPrintWebUIEnabled tests Web UI enabled output
 func TestPrintWebUIEnabled(t *testing.T) {
 	cfg := &config.Config{
 		Channels: config.ChannelsConfig{

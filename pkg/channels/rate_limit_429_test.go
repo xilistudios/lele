@@ -13,17 +13,10 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 )
 
-// Tests for SURV-07: when a channel Send returns a RateLimitError carrying an
-// explicit retry-after hint, sendChunkWithRetry must wait THAT long (capped
-// at maxRetryAfter) before retrying instead of the default 1s/2s backoff.
-// Also covers the telego → RateLimitError mapping.
-
-// fakeSender counts Send calls and plays back scripted errors. Embeds
-// BaseChannel for the interface's Start/Stop/IsRunning/IsAllowed.
 type fakeSender struct {
 	*BaseChannel
 	calls  int
-	script []error // error for call N; nil (or exhausted) means success
+	script []error
 }
 
 func newFakeSender(script ...error) *fakeSender {
@@ -33,9 +26,6 @@ func newFakeSender(script ...error) *fakeSender {
 	}
 }
 
-// TestSendChunkWithRetry_HonorsRetryAfterHint is the SURV-07 assertion: with
-// a 30ms hint, the retry fires in tens of milliseconds — the default backoff
-// (1s) would make this test take a second or more.
 func TestSendChunkWithRetry_HonorsRetryAfterHint(t *testing.T) {
 	logger.SetLevel(logger.ERROR)
 	sender := newFakeSender(&RateLimitError{Channel: "test", RetryAfter: 30 * time.Millisecond})
@@ -62,7 +52,6 @@ func TestSendChunkWithRetry_HonorsRetryAfterHint(t *testing.T) {
 	}
 }
 
-// stubChannel adapts a bare Send func to the Channel interface.
 type stubChannel struct {
 	sendFn func(ctx context.Context, msg bus.OutboundMessage) error
 }
@@ -76,7 +65,6 @@ func (s stubChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	return s.sendFn(ctx, msg)
 }
 
-// TestRetryWaitTime_PrefersHintOverBackoff unit-tests the wait decision.
 func TestRetryWaitTime_PrefersHintOverBackoff(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -100,8 +88,6 @@ func TestRetryWaitTime_PrefersHintOverBackoff(t *testing.T) {
 	}
 }
 
-// TestTelegramRateLimitError_Mapping covers the telego 429 → RateLimitError
-// mapping, including passthrough of non-429 errors.
 func TestTelegramRateLimitError_Mapping(t *testing.T) {
 	t.Run("429 with retry_after", func(t *testing.T) {
 		orig := &telegoapi.Error{ErrorCode: 429, Parameters: &telegoapi.ResponseParameters{RetryAfter: 7}}

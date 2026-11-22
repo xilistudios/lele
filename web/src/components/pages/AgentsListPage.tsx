@@ -8,26 +8,6 @@ import { CloseIcon, PlusIcon, SearchIcon } from '../atoms/Icons'
 import { AgentCard } from '../organisms/agents/AgentCard'
 import { AddAgentModal } from '../organisms/settings/AddAgentWizard'
 
-/**
- * Agents master list — design spec §3.
- *
- * Rendered by the "agents" tab of `SettingsPage` (`/settings/agents`), which
- * owns the shared `useSettingsConfig` draft via `SettingsProvider`. Everything
- * here reads and writes that draft: the cards reflect unsaved edits live, and
- * the page's `SettingsFooter` is what actually persists them.
- *
- * Layout: toolbar (search + count + "Add agent") above a responsive card
- * grid — 1 column on mobile, 2 at `lg`, 3 at `2xl` — with three states:
- * skeleton while loading, empty CTA when there are no agents, and a "no
- * matches" message when the search filters everything out.
- *
- * Search matches `id`, `name` and `description` (case-insensitive substring).
- * Filtering never renumbers the agents: `isModified` is computed against the
- * ORIGINAL position in `agents.list`, because dirty paths are positional
- * (`agents.list.{index}.…`, see `lib/agentDirty.ts`).
- */
-
-/** Placeholder card matching AgentCard's footprint (avatar row + meta + actions). */
 function AgentCardSkeleton() {
   return (
     <div
@@ -51,7 +31,6 @@ function AgentCardSkeleton() {
   )
 }
 
-/** Row shown while the config draft loads (keeps the grid shape stable). */
 function LoadingGrid() {
   const { t } = useTranslation()
   return (
@@ -87,9 +66,6 @@ export function AgentsListPage() {
   }, [agents, normalizedQuery])
 
   const removeAgent = (index: number) => {
-    // Same semantics as AgentsSettings: rewrite `agents.list` without the
-    // removed position (positional dirty paths shift — accepted, saving is
-    // what persists the list).
     updateField(
       'agents.list',
       agents.filter((_a, i) => i !== index),
@@ -103,7 +79,6 @@ export function AgentsListPage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl">
-      {/* Toolbar */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="relative min-w-0 flex-1 basis-56">
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted">
@@ -142,7 +117,6 @@ export function AgentsListPage() {
         </Button>
       </div>
 
-      {/* States */}
       {isLoading ? (
         <LoadingGrid />
       ) : agents.length === 0 ? (
@@ -187,7 +161,6 @@ export function AgentsListPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           {filtered.map((agent) => {
-            // Positional dirty lookup against the UNFILTERED list (§3.3).
             const originalIndex = agents.indexOf(agent)
             return (
               <AgentCard

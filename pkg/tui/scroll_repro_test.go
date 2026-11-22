@@ -11,8 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// seedScrollSession creates a session with enough history to overflow the
-// viewport and opens it in the model.
 func seedScrollSession(t *testing.T, m *Model) {
 	t.Helper()
 
@@ -32,18 +30,13 @@ func seedScrollSession(t *testing.T, m *Model) {
 	m.reloadSessions()
 }
 
-// renderLines returns the rendered view split into lines.
 func renderLines(m *Model) []string {
 	return strings.Split(m.View(), "\n")
 }
 
-// TestScroll_InputFieldRemainsVisible verifies that after scrolling up with
-// the mouse wheel, the input field (placeholder or prompt) is still rendered
-// and the total layout does not exceed the terminal height.
 func TestScroll_InputFieldRemainsVisible(t *testing.T) {
 	m := newTestModel(t)
 
-	// Simulate initial window size
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
 	m = updated.(*Model)
 
@@ -51,7 +44,6 @@ func TestScroll_InputFieldRemainsVisible(t *testing.T) {
 
 	placeholder := i18n.T("tui.placeholder")
 
-	// Initial render: input must be visible.
 	out := m.View()
 	if !strings.Contains(out, placeholder) {
 		t.Fatalf("initial render missing input placeholder.\nview lines=%d", len(renderLines(m)))
@@ -60,7 +52,6 @@ func TestScroll_InputFieldRemainsVisible(t *testing.T) {
 		t.Fatalf("initial render exceeds terminal height: %d lines > %d", got, m.height)
 	}
 
-	// Scroll up with the mouse wheel (several notches).
 	for i := 0; i < 10; i++ {
 		updated, _ := m.Update(tea.MouseMsg{
 			X:      10,
@@ -87,8 +78,6 @@ func TestScroll_InputFieldRemainsVisible(t *testing.T) {
 	}
 }
 
-// TestScroll_KeyboardScrollKeepsInput verifies pgup/home scrolling keeps the
-// input field visible.
 func TestScroll_KeyboardScrollKeepsInput(t *testing.T) {
 	m := newTestModel(t)
 
@@ -99,7 +88,6 @@ func TestScroll_KeyboardScrollKeepsInput(t *testing.T) {
 
 	placeholder := i18n.T("tui.placeholder")
 
-	// Send proper key messages for scrolling.
 	for _, kt := range []tea.KeyType{tea.KeyPgUp, tea.KeyHome, tea.KeyUp} {
 		updated, _ := m.Update(tea.KeyMsg{Type: kt})
 		m = updated.(*Model)
@@ -112,8 +100,6 @@ func TestScroll_KeyboardScrollKeepsInput(t *testing.T) {
 	}
 }
 
-// TestScroll_WithSubagentsAndToolCalls verifies that scrolling in a session
-// with active subagents and tool calls never drops the input or exceeds terminal height.
 func TestScroll_WithSubagentsAndToolCalls(t *testing.T) {
 	m := newTestModel(t)
 
@@ -134,7 +120,6 @@ func TestScroll_WithSubagentsAndToolCalls(t *testing.T) {
 	m.showWelcome = false
 	m.forceGotoBottom = true
 
-	// Add 10 subagents
 	var subagents []channels.SubagentTaskInfo
 	for i := 0; i < 10; i++ {
 		subagents = append(subagents, channels.SubagentTaskInfo{
@@ -154,7 +139,6 @@ func TestScroll_WithSubagentsAndToolCalls(t *testing.T) {
 		placeholderPrefix = placeholder[:min(20, len(placeholder))]
 	}
 
-	// Scroll up and down repeatedly using both mouse wheel and keys
 	for i := 0; i < 15; i++ {
 		updated, _ := m.Update(tea.MouseMsg{
 			X:      10,

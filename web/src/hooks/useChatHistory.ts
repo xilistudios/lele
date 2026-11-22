@@ -10,19 +10,8 @@ import { useOnPageVisible, usePageVisible } from './usePageVisible'
 
 const DEFAULT_LIMIT = 50
 
-/**
- * Reconciliation poll period while a turn is processing (or this session still
- * has streaming messages to merge).
- */
 const HISTORY_POLL_INTERVAL_MS = 4000
 
-/**
- * Grace window after the last live activity (processing / streaming) during
- * which the reconciliation poll keeps running for an unconfirmed optimistic
- * user bubble. Long enough to recover a missed/failed final history refetch
- * (a few 4s ticks), short enough that a never-confirmable bubble (a built-in
- * command answered without persistence) cannot poll forever.
- */
 const OPTIMISTIC_RECONCILE_GRACE_MS = 20_000
 
 export type HistoryMessage = Array<RawHistoryMessage>
@@ -36,10 +25,6 @@ export function buildChatHistoryQueryKey(sessionKey: string, parentSessionKey?: 
   return chatHistoryQueryKey(sessionKey)
 }
 
-/** Merge two GroupInfo lists by group id: entries from `incoming` overwrite
- *  same-id entries of `existing`; existing-only ids are kept. Mirrors the
- *  per-id overwrite semantics of the useGroupState 'hydrate' reducer so the
- *  cached data and the group Map stay consistent. */
 function mergeGroupsById(existing: GroupInfo[], incoming: GroupInfo[]): GroupInfo[] {
   if (!incoming.length) return existing
   const byId = new Map(existing.map((g) => [g.groupID, g] as const))
@@ -47,19 +32,9 @@ function mergeGroupsById(existing: GroupInfo[], incoming: GroupInfo[]): GroupInf
   return Array.from(byId.values())
 }
 
-// Merge logic lives in its own pure module (see messageMerge.ts) so the
-// reconciliation rules can be unit-tested without React. Re-exported here
-// to preserve the existing import path used by consumers and tests.
 import { mergeMessages } from './messageMerge'
 export { mergeMessages }
 
-// Shape of the cached chat-history query data. `groups` holds the group
-// snapshots (already converted to the internal GroupInfo shape) that back the
-// group cards. Keeping them INSIDE the cached data — instead of hydrating the
-// group Map from a side-effect inside queryFn — is what makes rehydration work
-// on cache hits: queryFn does not run when fresh cache data is served (see
-// staleTime in lib/queryClient.ts), so a session switch that clears the group
-// Map must be repaired by the useEffect below reading `groups` off the cache.
 export type ChatHistoryData = {
   sessionKey: string
   messages: ChatMessage[]
@@ -69,67 +44,24 @@ export type ChatHistoryData = {
   groups?: GroupInfo[]
 }
 
-/** Convert the optional groups payload of a history response to GroupInfos. */
 function historyGroupsToInfos(history: { groups?: GroupSnapshot[] }): GroupInfo[] {
   return (history.groups ?? []).map(snapshotToGroupInfo)
 }
 
-/**
- * Identity of a message that SURVIVES a change of the value of its `id`.
- *
- * The history payload carries no timestamp and no per-message uuid
- * (`RawHistoryMessage`), and `ChatMessage.createdAt` is minted locally on every
- * conversion, so neither is usable to recognise a message across responses.
- * What is stable is the tuple the server itself derives the id from — role +
- * content, plus the tool identity for tool cards. That matters because the id
- * DERIVATION changed (content digest → bounded hash) while keeping the same id
- * format, so the very same message comes back under a different id and only an
- * id-based dedupe cannot see it.
- */
 function chatMessageIdentity(message: ChatMessage): string {
   return message.role === 'tool'
     ? ['tool', message.toolCallId ?? '', message.toolName ?? '', message.toolArgs ?? ''].join('\0')
     : [message.role, message.content].join('\0')
 }
 
-/** Raw-payload twin of `chatMessageIdentity` (see there for the rationale). */
 function rawMessageIdentity(message: RawHistoryMessage): string {
   return message.role === 'tool'
     ? ['tool', message.tool_call_id ?? '', message.tool_name ?? '', message.content].join('\0')
     : [message.role, message.content].join('\0')
 }
 
-/**
- * A single coincidentally equal message is not proof of a re-serve, and
- * dropping a genuinely older message is worse than leaving a duplicate on
- * screen, so a window of at least this many messages must match.
- */
 const RE_SERVED_MIN_RUN = 2
 
-/**
- * How many leading messages of `incoming` are a RE-SERVE of the window already
- * displayed — i.e. the page the server returned is not actually older than what
- * is on screen.
- *
- * WHY: message ids are content-derived, and their derivation changed while
- * keeping the same format (content digest → bounded hash). A cursor minted
- * before that change no longer resolves, and the server's documented fallback
- * then answers with the NEWEST page (see pkg/channels/rest_chat.go) — the very
- * messages that are already rendered under their previous id. An id-based
- * dedupe misses all of them and prepends a second copy of each.
- *
- * HOW it is proven: `RawHistoryMessage` carries no timestamp and no per-message
- * uuid, and `ChatMessage.createdAt` is minted locally on every conversion, so
- * the only identity available is role + content (+ the tool identity, see
- * `chatMessageIdentity`). Content identity alone cannot distinguish "the same
- * message under a new id" from "another message with the same text" — the
- * issue-#324 case, where repeated content is legitimate. So the match has to
- * repeat EVERY message of the displayed window, in order, as the leading part
- * of the incoming page. A genuinely older page starts BEFORE our oldest
- * message, so it could only ever reach our window by a coincidence spanning the
- * whole thing. Anything shorter is left alone on purpose: a duplicate bubble
- * heals on the next refetch, a dropped message does not.
- */
 function countReServedMessages<T>(
   displayed: T[],
   incoming: T[],
@@ -155,22 +87,11 @@ export function useChatHistory(
   const isLoadingMoreRef = useRef(false)
   const pageVisible = usePageVisible()
 
-  // Keep a ref to streamingMessages so the refetchInterval callback always
-  // reads the latest value without depending on React Query re-evaluating
-  // the query options on every render.
   const streamingMessagesRef = useRef(streamingMessages)
   streamingMessagesRef.current = streamingMessages
 
-  // Last time this session had LIVE activity (processing or a streaming
-  // assistant). Anchors the bounded grace window below so the reconciliation
-  // poll keeps running for a short while AFTER a turn ends, without polling
-  // forever for a bubble that can never be confirmed.
   const lastLiveActivityRef = useRef(0)
 
-  // Would this session be polling over HTTP right now? True while the turn is
-  // processing, or while this session still has WS-driven streaming messages to
-  // reconcile. Shared by `refetchInterval` and the tab-visible refresh below so
-  // both agree on when polling is wanted (and on when it is not).
   const wantsPolling = useCallback(
     (processing: boolean | undefined) => {
       const live =
@@ -182,23 +103,6 @@ export function useChatHistory(
         lastLiveActivityRef.current = Date.now()
         return true
       }
-      // RECONCILIATION SAFETY NET for the sent (optimistic) user bubble.
-      //
-      // The turn-end signal (message.complete) clears processing and finalizes
-      // the assistant BEFORE the last history.updated refetch lands, so `live`
-      // is already false at that point. If that final refetch is missed (query
-      // momentarily inactive) or fails (the query uses `retry: false`), the
-      // optimistic user bubble is never confirmed and `mergeMessages` strands
-      // it at the END of the list — below newer answers: "the first message I
-      // sent shows up as the newest", until a reload. The 4s poll is the
-      // documented safety net for exactly this, but it used to stop the instant
-      // processing ended, ignoring the very bubble that still needs reconciling.
-      //
-      // Keep polling while an unconfirmed, non-failed optimistic user bubble
-      // exists, bounded by a grace window measured from the last live activity
-      // so a never-confirmable bubble (a built-in command that was answered
-      // without ever being persisted) cannot poll forever. A failed/refused
-      // bubble is excluded: it waits for a user retry, not a refetch.
       const hasPendingUser = streamingMessagesRef.current.some(
         (m) =>
           m.role === 'user' &&
@@ -229,38 +133,22 @@ export function useChatHistory(
         }
       }
 
-      // Groups ride along in the cached data (see ChatHistoryData). The
-      // hydrate side-effect that used to live here is what made cache hits
-      // lose group cards: queryFn never runs when fresh cache data is served,
-      // so hydration now happens in a useEffect on [query.data, sessionKey].
       const groups = historyGroupsToInfos(history)
 
-      // This page is the TAIL of the session, which is the only place a
-      // durable stableId may be re-attached by rank (see ToChatMessagesOptions).
       const newMessages = toChatMessages(history.messages, history.session_key, {
         bindStableIds: true,
       })
-      // Opt-in instrumentation: the ids of the newest page are what the merge
-      // treats as canonical, so keeping one snapshot per poll is what proves an
-      // id changed between two polls (see lib/orderingMonitor.ts).
       noteHistorySnapshot(history.session_key ?? sessionKey, newMessages)
 
-      // Merge with previously loaded older messages (from loadMore) so polling
-      // doesn't wipe out paginated history. Without this, a polling refetch
-      // replaces the entire cache with only the latest DEFAULT_LIMIT messages,
-      // discarding any older messages the user loaded by scrolling up.
       const queryKey = buildChatHistoryQueryKey(sessionKey, parentSessionKey)
       const cachedData = queryClient.getQueryData<ChatHistoryData>(queryKey)
 
       if (cachedData && cachedData.messages.length > DEFAULT_LIMIT) {
         const newMessageIds = new Set(newMessages.map((m) => m.id))
-        // Keep cached messages that are older than the oldest new message
-        // (i.e., messages not present in the latest batch, excluding ephemeral optimistic messages)
         const olderCachedMessages = cachedData.messages.filter(
           (m) => !m.optimistic && !newMessageIds.has(m.id),
         )
 
-        // Also merge rawMessages preserving order
         const newRawIds = new Set(history.messages.map((m: { id: string }) => m.id))
         const olderRawMessages = (cachedData.rawMessages || []).filter(
           (m: { id: string }) => !newRawIds.has(m.id),
@@ -289,70 +177,19 @@ export function useChatHistory(
       sessionKey !== null &&
       token !== null &&
       !(sessionKey.startsWith('subagent:') && !parentSessionKey),
-    refetchOnWindowFocus: true, // safety net: recovers from WS gaps after tab switch
-    // HTTP reconciliation poll while the session is live (see the callback).
+    refetchOnWindowFocus: true,
     refetchInterval: (query) => {
-      // Hidden tab: return `false` so React Query CLEARS the interval instead
-      // of leaving it armed. React Query already skips the FETCH of a tick
-      // that fires while the document is unfocused (`focusManager.isFocused()`
-      // gate in @tanstack/query-core's queryObserver, `#updateRefetchInterval`),
-      // so for THIS query the gate is defence in depth rather than the request
-      // saving: hidden tabs already issued no request. What the pair of gates
-      // adds is that no timer runs at all while hidden, plus the immediate
-      // `useOnPageVisible` refresh below instead of waiting up to one interval
-      // for the next tick. React Query compares the returned value, so a steady
-      // 4000 does not restart the timer.
       if (!pageVisible) return false
-      // Poll while the session is processing so that if the WebSocket drops
-      // events (reconnect, tab throttle, etc.) the UI still updates via HTTP.
-      // Stops polling automatically once processing ends.
-      //
-      // This polling is the authoritative safety net for message reconciliation.
-      // handleHistoryUpdated (streaming.ts) conditionally retains completed
-      // streaming messages until the HTTP cache catches up, but if that check
-      // misses (e.g., content normalization), the next poll brings the message
-      // into baseMessages and mergeMessages' position-based dedup removes the
-      // stale streaming copy.
-      //
-      // Also poll if THIS session has streaming messages (WS-driven) to
-      // reconcile. Scoped to sessionKey so an unrelated session streaming in
-      // the background doesn't keep this query polling. Uses a ref to avoid
-      // stale closures during batched state updates.
       return wantsPolling(query.state.data?.processing) ? HISTORY_POLL_INTERVAL_MS : false
     },
     retry: false,
   })
 
-  // Refresh once when the tab becomes visible again: the interval above was
-  // cleared for the whole time the tab was hidden, so a turn that finished — or
-  // messages that streamed — during that period would otherwise stay invisible
-  // until the next tick, or forever if processing had already ended. Only fires
-  // when this query would be polling anyway (`wantsPolling`), so nothing is
-  // fetched for a session that is neither processing nor streaming; the
-  // WebSocket path and `refetchOnWindowFocus` stay untouched.
-  //
-  // `cancelRefetch: false` on purpose. This refresh races React Query's own
-  // focus-driven refetch of the same query (and any in-flight interval tick):
-  // the default `cancelRefetch: true` would ABORT that request and start a
-  // second GET /api/v1/chat/history, so returning to the tab cost two requests
-  // and threw one away. Joining the in-flight request instead keeps it at one.
-  // (`refetchOnWindowFocus`'s internal path passes `cancelRefetch: false` for
-  // exactly the same reason — see query.js in @tanstack/query-core.)
   useOnPageVisible(() => {
     if (!wantsPolling(query.data?.processing)) return
     void query.refetch({ cancelRefetch: false })
   })
 
-  // Rehydrate group cards from the query data instead of from a side-effect
-  // inside queryFn. queryFn does not run on cache hits (staleTime 10s), so the
-  // old side-effect left the group Map empty after a session switch
-  // (clearStreaming() empties it) when the history was still fresh in cache —
-  // cards vanished despite cached data. Driving hydration off
-  // [query.data, sessionKey] covers every data source: fresh fetches,
-  // cache-served remounts, polling refetches, and loadMore's setQueryData.
-  // Idempotent: the reducer's 'hydrate' branch overwrites per groupID (the
-  // same key 'upsert' uses), so re-applying the same infos changes nothing.
-  // Empty/missing groups never dispatch — no garbage hydration.
   useEffect(() => {
     if (!sessionKey) return
     const groups = query.data?.groups
@@ -361,14 +198,10 @@ export function useChatHistory(
     }
   }, [query.data, sessionKey, hydrateGroups])
 
-  // Default to false while there is no data yet so the UI does not flash a
-  // "load more" affordance before the first history response arrives.
   const hasMore = query.data?.hasMore ?? false
 
   const loadMore = useCallback(async () => {
     if (!sessionKey || !token || isLoadingMoreRef.current) return
-    // Read the latest cache data directly to avoid stale closures.
-    // query.data in the useCallback deps may lag one render behind.
     const queryKey = buildChatHistoryQueryKey(sessionKey, parentSessionKey)
     const currentData = queryClient.getQueryData<ChatHistoryData>(queryKey)
     if (!currentData || !currentData.messages.length || currentData.hasMore === false) return
@@ -390,16 +223,8 @@ export function useChatHistory(
         return
       }
 
-      // An OLDER page: the registry holds the ids of NEWER copies (still on
-      // screen), so binding by rank here would steal them. Every older copy
-      // keeps its content-derived history id, which is stable on its own.
       const olderMessages = toChatMessages(history.messages, history.session_key)
 
-      // Drop the re-served window (unresolvable cursor, see
-      // countReServedMessages) from BOTH array views, so the prepended result
-      // and the pagination cursor stay consistent. When it covers the whole page
-      // this leaves nothing to merge and the `uniqueOlderMessages.length === 0`
-      // path below just stops pagination.
       const reServedMessages = countReServedMessages(
         currentData.messages,
         olderMessages,
@@ -423,9 +248,6 @@ export function useChatHistory(
         return
       }
 
-      // The backend attaches the session's CURRENT group snapshots to every
-      // page, so per-id overwrite (keeping cached-only ids) is safe and never
-      // clobbers the session-level groups.
       const pageGroups = historyGroupsToInfos(history)
       const mergedGroups = pageGroups.length
         ? mergeGroupsById(currentData.groups ?? [], pageGroups)
@@ -449,14 +271,6 @@ export function useChatHistory(
 
   const baseMessages = query.data?.messages ?? []
 
-  // Filter streaming messages to only include those for the current session.
-  // Without this, messages from the previous session can briefly appear when
-  // switching chats because clearStreaming() runs asynchronously (in useEffect)
-  // while the URL/sessionKey changes immediately.
-  // Matching is alias-tolerant: handlers re-tag transient messages with the
-  // current key (effectiveSessionKey), but a stray `base:chat:N` event that
-  // predates a session-key switch must still render for its own conversation
-  // instead of silently vanishing (see sessionKeysLooselyMatch).
   const sessionStreamingMessages = useMemo(
     () =>
       sessionKey
@@ -504,13 +318,10 @@ export function updateChatHistoryFromRaw(
   processing?: boolean,
   parentSessionKey?: string,
 ) {
-  // Preserve the cached `groups` payload (catchup responses carry messages
-  // only); dropping it here would re-break cache-hit group rehydration.
   queryClient.setQueryData(
     buildChatHistoryQueryKey(sessionKey, parentSessionKey),
     (old: ChatHistoryData | undefined) => ({
       sessionKey,
-      // Catchup carries the same newest window as a refetch, so it is a tail.
       messages: toChatMessages(rawMessages, sessionKey, { bindStableIds: true }),
       rawMessages,
       processing,

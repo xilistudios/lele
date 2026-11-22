@@ -11,7 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/channels"
 )
 
-// seedSubagentSidebarModel opens a chat whose sidebar shows n subagent rows.
 func seedSubagentSidebarModel(t *testing.T, n int) *Model {
 	t.Helper()
 
@@ -36,20 +35,11 @@ func seedSubagentSidebarModel(t *testing.T, n int) *Model {
 			SessionKey: fmt.Sprintf("subagent-key-%d", i),
 		})
 	}
-	// All rows are "running", so the seeded listing also carries a running
-	// count — the shape a real refresh would have produced.
 	seedSubagentListing(m, key, time.Now(), subagents)
 
 	return m
 }
 
-// TestSidebarSubagentClickTargetsAlignWithRenderedRows is the regression guard
-// for the sidebar offset bug: the click target Y-coordinates used to be one
-// row below the rendered subagent item, so clicking an item selected the row
-// underneath (and the last item needed a click below the panel).
-//
-// It renders the sidebar, locates each "SubClickN" item row, and asserts the
-// target recorded for that subagent starts exactly on that row.
 func TestSidebarSubagentClickTargetsAlignWithRenderedRows(t *testing.T) {
 	const n = 3
 	m := seedSubagentSidebarModel(t, n)
@@ -57,7 +47,6 @@ func TestSidebarSubagentClickTargetsAlignWithRenderedRows(t *testing.T) {
 	out := m.View()
 	lines := strings.Split(out, "\n")
 
-	// rowForLabel returns the rendered row index of the subagent label, or -1.
 	rowForLabel := func(label string) int {
 		for i, line := range lines {
 			if strings.Contains(ansi.Strip(line), label) {
@@ -71,15 +60,12 @@ func TestSidebarSubagentClickTargetsAlignWithRenderedRows(t *testing.T) {
 		t.Fatalf("expected %d click targets, got %d", n, len(m.subagentClickTargets))
 	}
 
-	// Each target's yStart must match the rendered row of its own item, and the
-	// target must span exactly one row.
 	for _, target := range m.subagentClickTargets {
 		if target.yEnd != target.yStart+1 {
 			t.Errorf("target %s spans %d..%d, expected a single row",
 				target.key, target.yStart, target.yEnd)
 			continue
 		}
-		// target.key == "subagent-key-<i>" → label "SubClick<i>"
 		idx := strings.TrimPrefix(target.key, "subagent-key-")
 		label := "SubClick" + idx
 		row := rowForLabel(label)
@@ -93,9 +79,6 @@ func TestSidebarSubagentClickTargetsAlignWithRenderedRows(t *testing.T) {
 	}
 }
 
-// TestSidebarSubagentClickSelectsClickedItem is an end-to-end check: a mouse
-// press on an item's rendered row must switch the current chat to that
-// subagent's session key.
 func TestSidebarSubagentClickSelectsClickedItem(t *testing.T) {
 	const n = 3
 	m := seedSubagentSidebarModel(t, n)
@@ -103,7 +86,6 @@ func TestSidebarSubagentClickSelectsClickedItem(t *testing.T) {
 	out := m.View()
 	lines := strings.Split(out, "\n")
 
-	// Find the rendered row of the middle subagent.
 	row := -1
 	for i, line := range lines {
 		if strings.Contains(ansi.Strip(line), "SubClick1") {
@@ -115,7 +97,6 @@ func TestSidebarSubagentClickSelectsClickedItem(t *testing.T) {
 		t.Fatal("SubClick1 not rendered in the sidebar")
 	}
 
-	// Derive the sidebar start X the same way handlers_mouse.go does.
 	leftWidth := int(float64(m.width) * leftColumnRatio)
 	sidebarStartX := leftWidth + chatSidebarGutter
 

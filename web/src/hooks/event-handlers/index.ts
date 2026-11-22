@@ -1,13 +1,3 @@
-/**
- * Event-handlers barrel & dispatcher.
- *
- * Re-exports every domain handler, builds the `HANDLERS` routing table,
- * and provides the single `dispatchMessageEvent` entry-point that the
- * rest of the application calls.
- */
-
-// ── Re-exports ──────────────────────────────────────────────────────────────
-
 export type { ClientEvent, MessageEventContext } from './types'
 export {
   snapshotToGroupInfo,
@@ -61,8 +51,6 @@ export {
   handleGroupComplete,
 } from './groups'
 
-// ── Imports for dispatcher ──────────────────────────────────────────────────
-
 import {
   handleApprovalRequest,
   handleApproveResult,
@@ -89,8 +77,6 @@ import {
 import { handleSubagentResult, handleToolExecuting, handleToolResult } from './tools'
 import type { ClientEvent, MessageEventContext } from './types'
 
-// ── Dispatcher ──────────────────────────────────────────────────────────────
-
 const HANDLERS: Record<string, (ctx: MessageEventContext, event: ClientEvent) => void> = {
   welcome: (ctx, e) => handleWelcome(ctx, e.data as Record<string, unknown>),
   reconnected: (ctx, e) => handleWelcome(ctx, e.data as Record<string, unknown>),
@@ -98,8 +84,6 @@ const HANDLERS: Record<string, (ctx: MessageEventContext, event: ClientEvent) =>
   'message.thinking': (ctx, e) => handleMessageThinking(ctx, e.data as Record<string, unknown>),
   'message.ack': (ctx, e) => handleMessageAck(ctx, e.data as Record<string, unknown>),
   'message.complete': (ctx, e) => handleMessageComplete(ctx, e.data as Record<string, unknown>),
-  // An iteration that was streamed and then dropped by the backend: retract its
-  // bubble, which no history copy will ever confirm (see handleMessageDiscard).
   'message.discard': (ctx, e) => handleMessageDiscard(ctx, e.data as Record<string, unknown>),
   'history.updated': (ctx, e) => handleHistoryUpdated(ctx, e.data as Record<string, unknown>),
   'messages.catchup': (ctx, e) => handleMessagesCatchup(ctx, e.data as Record<string, unknown>),
@@ -114,10 +98,6 @@ const HANDLERS: Record<string, (ctx: MessageEventContext, event: ClientEvent) =>
   'subscribe.ack': (ctx, e) => handleSubscribeAck(ctx, e.data as Record<string, unknown>),
   'message.error': (ctx, e) => handleMessageError(ctx, e.data as Record<string, unknown>),
   'stream.error': (ctx, e) => handleStreamError(ctx, e.data as Record<string, unknown>),
-  // Server send refusal. The SOCKET-level failure is a different channel
-  // (`services/ws/client.ts` emits `'error'` on the client object for the DOM
-  // event); only parsed `{event:'error', data:{code,message}}` envelopes land
-  // here — see handleServerError.
   error: (ctx, e) => handleServerError(ctx, e.data as Record<string, unknown>),
   'group.status': (ctx, e) => handleGroupStatus(ctx, e.data as Record<string, unknown>),
   'group.turn': (ctx, e) => handleGroupTurn(ctx, e.data as Record<string, unknown>),
@@ -126,10 +106,6 @@ const HANDLERS: Record<string, (ctx: MessageEventContext, event: ClientEvent) =>
   'typing.indicator': (ctx, e) => handleTypingIndicator(ctx, e.data as Record<string, unknown>),
 }
 
-/**
- * Dispatches a WebSocket client event to the appropriate handler.
- * Each event type maps to a focused, single-responsibility function.
- */
 export function dispatchMessageEvent(ctx: MessageEventContext, event: ClientEvent): void {
   const handler = HANDLERS[event.event]
   handler?.(ctx, event)

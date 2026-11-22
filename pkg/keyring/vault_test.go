@@ -7,8 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestOpaqueVaultAbsentIsNotAnError pins the contract downstream subsystems
-// rely on: a secret that was never stored reads as an empty string.
 func TestOpaqueVaultAbsentIsNotAnError(t *testing.T) {
 	v := NewOpaqueVault(newTestService(t), "mcp")
 
@@ -27,8 +25,6 @@ func TestOpaqueVaultRoundTrip(t *testing.T) {
 	assert.Equal(t, "access-1", val)
 }
 
-// SetSecret is an upsert: a second call replaces the value and bumps UpdatedAt
-// while keeping the creation lineage.
 func TestOpaqueVaultSetIsUpsert(t *testing.T) {
 	svc := newTestService(t)
 	v := NewOpaqueVault(svc, "mcp")
@@ -51,8 +47,6 @@ func TestOpaqueVaultSetIsUpsert(t *testing.T) {
 	assert.False(t, after[0].UpdatedAt.Before(before[0].UpdatedAt))
 }
 
-// The metadata SetSecret writes is part of the contract: the UI shows who owns
-// the secret, and the ["system"] scope keeps it away from agents.
 func TestOpaqueVaultStoresOriginMetadata(t *testing.T) {
 	svc := newTestService(t)
 	v := NewOpaqueVault(svc, "mcp")
@@ -78,13 +72,10 @@ func TestOpaqueVaultDeleteIsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "", val)
 
-	// Deleting again (and deleting a name that never existed) succeeds.
 	require.NoError(t, v.DeleteSecret("mcp.oauth.token"))
 	require.NoError(t, v.DeleteSecret("never.stored"))
 }
 
-// The ["system"] scope is what hides internal secrets from agents: agent-facing
-// access is denied and listing omits them, while raw/UI access still works.
 func TestOpaqueVaultIsHiddenFromAgents(t *testing.T) {
 	svc := newTestService(t)
 	v := NewOpaqueVault(svc, "mcp")
@@ -97,13 +88,10 @@ func TestOpaqueVaultIsHiddenFromAgents(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, agentList)
 
-	// Only an agent literally named "system" would see it — which is why the
-	// scope value is a reserved name rather than a real agent ID.
 	internalList, err := svc.ListForAgent(systemScope)
 	require.NoError(t, err)
 	assert.Len(t, internalList, 1)
 
-	// Raw and UI access are unaffected.
 	raw, err := svc.GetRaw("mcp.oauth.token")
 	require.NoError(t, err)
 	assert.Equal(t, "access-1", raw)

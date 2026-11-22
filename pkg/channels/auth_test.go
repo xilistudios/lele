@@ -55,15 +55,12 @@ func TestAuthManager_GeneratePIN_MaxPending(t *testing.T) {
 		t.Fatalf("failed to create auth manager: %v", err)
 	}
 
-	// Generate PINs up to the internal limit (10 pending max).
 	for i := 0; i < 10; i++ {
 		if _, err := auth.GeneratePIN("Device"); err != nil {
 			t.Fatalf("failed to generate PIN %d: %v", i, err)
 		}
 	}
 
-	// GW-M8: the 11th no longer fails — the oldest pending PIN is evicted
-	// (FIFO) so a new pairing always succeeds.
 	auth.mu.Lock()
 	countBefore := len(auth.store.PendingPINs)
 	auth.mu.Unlock()
@@ -83,9 +80,6 @@ func TestAuthManager_GeneratePIN_MaxPending(t *testing.T) {
 	}
 }
 
-// TestAuthManager_GeneratePIN_PurgesExpiredFirst verifies that on GeneratePIN
-// expired PINs are removed before the cap is applied, so abandoned requests
-// cannot starve new pairings (GW-M8).
 func TestAuthManager_GeneratePIN_PurgesExpiredFirst(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.NativeConfig{
@@ -98,8 +92,6 @@ func TestAuthManager_GeneratePIN_PurgesExpiredFirst(t *testing.T) {
 		t.Fatalf("failed to create auth manager: %v", err)
 	}
 
-	// Fill the store to the cap, then backdate every entry so all are
-	// expired (as if the expiry window had elapsed with nobody redeeming).
 	for i := 0; i < 10; i++ {
 		if _, err := auth.GeneratePIN("Device"); err != nil {
 			t.Fatalf("failed to generate PIN %d: %v", i, err)
@@ -113,8 +105,6 @@ func TestAuthManager_GeneratePIN_PurgesExpiredFirst(t *testing.T) {
 	}
 	auth.mu.Unlock()
 
-	// The next mint must succeed via lazy expiry purge — and the resulting
-	// pending count must be 1 (only the fresh PIN survives).
 	pending, err := auth.GeneratePIN("FreshDevice")
 	if err != nil {
 		t.Fatalf("expected mint to succeed after purging expired PINs, got error: %v", err)
@@ -131,10 +121,6 @@ func TestAuthManager_GeneratePIN_PurgesExpiredFirst(t *testing.T) {
 	}
 }
 
-// TestAuthManager_GeneratePIN_EvictsOldestNotNewest verifies that when the
-// cap is hit with all entries still unexpired, the entry with the oldest
-// Created timestamp is the one evicted (FIFO), keeping newer legitimate
-// pairings intact (GW-M8).
 func TestAuthManager_GeneratePIN_EvictsOldestNotNewest(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.NativeConfig{
@@ -147,7 +133,6 @@ func TestAuthManager_GeneratePIN_EvictsOldestNotNewest(t *testing.T) {
 		t.Fatalf("failed to create auth manager: %v", err)
 	}
 
-	// First PIN is explicitly the oldest (backdated, still unexpired).
 	first, err := auth.GeneratePIN("OldestDevice")
 	if err != nil {
 		t.Fatalf("failed to generate first PIN: %v", err)
@@ -156,7 +141,6 @@ func TestAuthManager_GeneratePIN_EvictsOldestNotNewest(t *testing.T) {
 	auth.store.PendingPINs[first.PIN].Created = time.Now().Add(-4 * time.Minute)
 	auth.mu.Unlock()
 
-	// Fill the remaining slots with newer entries.
 	for i := 0; i < 9; i++ {
 		if _, err := auth.GeneratePIN("NewerDevice"); err != nil {
 			t.Fatalf("failed to generate PIN %d: %v", i, err)
@@ -170,7 +154,6 @@ func TestAuthManager_GeneratePIN_EvictsOldestNotNewest(t *testing.T) {
 		t.Fatal("setup error: oldest PIN vanished before eviction could be observed")
 	}
 
-	// One more mint: the oldest unexpired entry must be evicted to make room.
 	extra, err := auth.GeneratePIN("LatestDevice")
 	if err != nil {
 		t.Fatalf("expected mint to succeed via eviction, got error: %v", err)
@@ -534,11 +517,6 @@ func TestAuthManager_Persistence(t *testing.T) {
 	}
 }
 
-// TestAuthManager_UpdateLastSeen asserts the observable effect of the
-// last-seen update through the public readers (GetClient / ListClients). The
-// timestamp is no longer written into the shared LastSeen field (that write
-// needed the manager's exclusive lock on every authenticated request); it goes
-// into the client's atomic field and the readers fold it back into LastSeen.
 func TestAuthManager_UpdateLastSeen(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.NativeConfig{
@@ -588,11 +566,6 @@ func TestAuthManager_UpdateLastSeen(t *testing.T) {
 	}
 }
 
-// TestAuthManager_UpdateLastSeen_DoesNotTakeWriteLock is the regression guard
-// for the latency finding: UpdateLastSeen runs on every authenticated HTTP
-// request and every WebSocket connect, so it must never need am.mu
-// exclusively. Holding a read lock for the whole call proves it — with the
-// previous implementation (am.mu.Lock()) this test times out.
 func TestAuthManager_UpdateLastSeen_DoesNotTakeWriteLock(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.NativeConfig{PinExpiryMinutes: 5, MaxClients: 5, TokenExpiryDays: 30}
@@ -631,11 +604,6 @@ func TestAuthManager_UpdateLastSeen_DoesNotTakeWriteLock(t *testing.T) {
 	}
 }
 
-// TestAuthManager_UpdateLastSeen_ConcurrentReaders races the hot-path writer
-// against every reader that shares the client struct (GetClient, ListClients,
-// ValidateToken). Run with -race it proves the atomic field replaced the
-// lock-protected field write; without -race it still catches panics and
-// lost/degraded values.
 func TestAuthManager_UpdateLastSeen_ConcurrentReaders(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.NativeConfig{PinExpiryMinutes: 5, MaxClients: 5, TokenExpiryDays: 30}
@@ -700,10 +668,6 @@ func TestAuthManager_UpdateLastSeen_ConcurrentReaders(t *testing.T) {
 	}
 }
 
-// TestClientInfo_MarshalJSON_UsesFreshestLastSeen pins the JSON contract the
-// hot-path field must not break: an atomic.Int64 does not marshal like an
-// int64, so (*ClientInfo).MarshalJSON folds it into "last_seen" instead of
-// leaking a nested object or dropping the value.
 func TestClientInfo_MarshalJSON_UsesFreshestLastSeen(t *testing.T) {
 	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	touched := time.Date(2026, 6, 7, 8, 9, 10, 123456789, time.UTC)
@@ -734,9 +698,6 @@ func TestClientInfo_MarshalJSON_UsesFreshestLastSeen(t *testing.T) {
 	if err := json.Unmarshal(decoded["last_seen"], &lastSeen); err != nil {
 		t.Fatalf("last_seen missing or not a string: %s", raw)
 	}
-	// Compare instants, not strings: time.Unix (used by touchLastSeen) yields a
-	// local-zone time, exactly like the time.Now() values this field held
-	// before, so the rendered offset is the machine's, not the test's.
 	parsedSeen, err := time.Parse(time.RFC3339Nano, lastSeen)
 	if err != nil {
 		t.Fatalf("last_seen %q is not RFC3339Nano: %v", lastSeen, err)
@@ -745,7 +706,6 @@ func TestClientInfo_MarshalJSON_UsesFreshestLastSeen(t *testing.T) {
 		t.Errorf("last_seen = %q (%v), want the touched instant %v", lastSeen, parsedSeen, touched)
 	}
 
-	// Round-trip: the value must survive a reload into the plain field.
 	var roundTripped ClientInfo
 	if err := json.Unmarshal(raw, &roundTripped); err != nil {
 		t.Fatalf("json.Unmarshal(raw) error = %v", err)
@@ -757,8 +717,6 @@ func TestClientInfo_MarshalJSON_UsesFreshestLastSeen(t *testing.T) {
 		t.Errorf("round-tripped effectiveLastSeen = %v, want %v", roundTripped.effectiveLastSeen(), touched)
 	}
 
-	// The plain field is still the fallback when nothing was touched (clients
-	// persisted by an older version only have "last_seen").
 	plain := &ClientInfo{ClientID: "cli-2", LastSeen: created}
 	if !plain.effectiveLastSeen().Equal(created) {
 		t.Errorf("effectiveLastSeen = %v, want the plain field %v", plain.effectiveLastSeen(), created)
@@ -839,8 +797,6 @@ func TestAuthManager_SQLitePicksUpCLIPendingPIN(t *testing.T) {
 		TokenExpiryDays:  30,
 	}
 
-	// Simulate CLI: creates an AuthManager with SQLite store (same wiring as
-	// cmd/lele/client.go:39-52). The CLI uses the same shared DB as the server.
 	dbPath := filepath.Join(tmpDir, "lele.db")
 
 	cliAuth, err := NewAuthManager(cfg, tmpDir)
@@ -857,10 +813,8 @@ func TestAuthManager_SQLitePicksUpCLIPendingPIN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CLI: failed to generate PIN: %v", err)
 	}
-	cliStore.Close() // simulate CLI process exit
+	cliStore.Close()
 
-	// Server creates its own AuthManager and opens the same DB independently
-	// (separate connection, like a real separate process).
 	serverStore, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("server: failed to open store: %v", err)
@@ -873,9 +827,6 @@ func TestAuthManager_SQLitePicksUpCLIPendingPIN(t *testing.T) {
 	}
 	serverAuth.SetStore(serverStore.NativeClients())
 
-	// Pair with the PIN generated by the CLI — must succeed.
-	// Use empty deviceName to skip the name-match check (mirrors webui behavior
-	// where the browser doesn't know the CLI's device name).
 	client, token, refreshToken, err := serverAuth.PairWithPIN(pending.PIN, "")
 	if err != nil {
 		t.Fatalf("server: PairWithPIN failed: %v", err)
@@ -890,7 +841,6 @@ func TestAuthManager_SQLitePicksUpCLIPendingPIN(t *testing.T) {
 		t.Error("expected non-empty refresh token")
 	}
 
-	// Token must be valid.
 	_, valid := serverAuth.ValidateToken(token)
 	if !valid {
 		t.Error("expected token to be valid after cross-process pairing")
@@ -918,13 +868,11 @@ func TestAuthManager_SQLiteServerPINWithPairInSameProcess(t *testing.T) {
 	}
 	auth.SetStore(dbStore.NativeClients())
 
-	// Generate PIN via server (same process, SQLite active).
 	pending, err := auth.GeneratePIN("Server-Device")
 	if err != nil {
 		t.Fatalf("GeneratePIN failed: %v", err)
 	}
 
-	// Pair immediately — PINs generated in-process must still work.
 	client, token, _, err := auth.PairWithPIN(pending.PIN, "Server-Device")
 	if err != nil {
 		t.Fatalf("PairWithPIN failed: %v", err)
@@ -937,12 +885,6 @@ func TestAuthManager_SQLiteServerPINWithPairInSameProcess(t *testing.T) {
 	}
 }
 
-// TestAuthManager_SQLitePairAfterCLIGeneratesPIN tests the real-world
-// scenario: server starts (SetStore called), THEN the CLI generates a
-// PIN (via the shared SQLite store), THEN the webui tries to pair with
-// that PIN. This is the exact flow that caused "invalid PIN" before the
-// fix: the CLI stopped writing to native_clients.json (PR #326) but the
-// server still only read PINs from there.
 func TestAuthManager_SQLitePairAfterCLIGeneratesPIN(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.NativeConfig{
@@ -951,10 +893,8 @@ func TestAuthManager_SQLitePairAfterCLIGeneratesPIN(t *testing.T) {
 		TokenExpiryDays:  30,
 	}
 
-	// Both CLI and server share the same DB path (independent connections).
 	dbPath := filepath.Join(tmpDir, "lele.db")
 
-	// Step 1: Server starts. SetStore is called during initialization.
 	serverStore, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("server: failed to open store: %v", err)
@@ -967,9 +907,6 @@ func TestAuthManager_SQLitePairAfterCLIGeneratesPIN(t *testing.T) {
 	}
 	serverAuth.SetStore(serverStore.NativeClients())
 
-	// Step 2: CLI generates a PIN AFTER the server started.
-	// The CLI is a separate process with its own store.Open on the same DB
-	// (same wiring as cmd/lele/client.go:39-52).
 	cliAuth, err := NewAuthManager(cfg, tmpDir)
 	if err != nil {
 		t.Fatalf("CLI: failed to create auth manager: %v", err)
@@ -985,8 +922,6 @@ func TestAuthManager_SQLitePairAfterCLIGeneratesPIN(t *testing.T) {
 	}
 	cliStore.Close()
 
-	// Step 3: Webui tries to pair with the CLI's PIN.
-	// PairWithPIN must read the PIN from the shared SQLite store.
 	client, token, _, err := serverAuth.PairWithPIN(pending.PIN, "")
 	if err != nil {
 		t.Fatalf("server: PairWithPIN failed: %v — PIN was %s", err, pending.PIN)
@@ -998,22 +933,12 @@ func TestAuthManager_SQLitePairAfterCLIGeneratesPIN(t *testing.T) {
 		t.Error("expected non-empty token")
 	}
 
-	// Token must be valid.
 	_, valid := serverAuth.ValidateToken(token)
 	if !valid {
 		t.Error("expected token to be valid after cross-process pairing")
 	}
 }
 
-// TestAuthManager_SQLiteSetStoreReloadsClientsAfterRestart simulates the
-// real-world restart scenario where:
-//  1. Server starts, SQLite store is wired via SetStore
-//  2. Client pairs → client exists only in SQLite (JSON is stale)
-//  3. Server restarts → NewAuthManager loads from stale JSON (missing client)
-//  4. SetStore is called again → must reload from SQLite to recover the client
-//
-// Before the fix, SetStore did NOT reload from SQLite, so the client was lost
-// and ValidateToken returned false → 401 → session cleared in WebUI.
 func TestAuthManager_SQLiteSetStoreReloadsClientsAfterRestart(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.NativeConfig{
@@ -1024,7 +949,6 @@ func TestAuthManager_SQLiteSetStoreReloadsClientsAfterRestart(t *testing.T) {
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	// --- First server run: pair a client via SQLite ---
 	dbStore1, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("run 1: failed to open store: %v", err)
@@ -1036,7 +960,6 @@ func TestAuthManager_SQLiteSetStoreReloadsClientsAfterRestart(t *testing.T) {
 	}
 	auth1.SetStore(dbStore1.NativeClients())
 
-	// Generate PIN and pair — client is saved to SQLite only.
 	pending, err := auth1.GeneratePIN("Desktop")
 	if err != nil {
 		t.Fatalf("run 1: GeneratePIN failed: %v", err)
@@ -1049,28 +972,21 @@ func TestAuthManager_SQLiteSetStoreReloadsClientsAfterRestart(t *testing.T) {
 		t.Fatal("run 1: expected valid client and token")
 	}
 
-	// Verify the token works before restart.
 	if _, valid := auth1.ValidateToken(token); !valid {
 		t.Fatal("run 1: token should be valid")
 	}
 
-	// Close the store (simulates process exit).
 	dbStore1.Close()
 
-	// --- Second server run (restart) ---
-	// NewAuthManager loads from the JSON file, which is stale because
-	// saveStoreUnlocked skips the JSON write when SQLite is active.
 	auth2, err := NewAuthManager(cfg, tmpDir)
 	if err != nil {
 		t.Fatalf("run 2: failed to create auth manager: %v", err)
 	}
 
-	// Before SetStore, the token is NOT valid (client only in SQLite).
 	if _, valid := auth2.ValidateToken(token); valid {
 		t.Fatal("run 2: token should NOT be valid before SetStore (stale JSON)")
 	}
 
-	// Open the same SQLite store and wire it in.
 	dbStore2, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("run 2: failed to open store: %v", err)
@@ -1079,12 +995,10 @@ func TestAuthManager_SQLiteSetStoreReloadsClientsAfterRestart(t *testing.T) {
 
 	auth2.SetStore(dbStore2.NativeClients())
 
-	// After SetStore, the token MUST be valid — SetStore must reload from SQLite.
 	if _, valid := auth2.ValidateToken(token); !valid {
 		t.Fatal("run 2: token MUST be valid after SetStore reloads from SQLite")
 	}
 
-	// Also verify the client metadata is preserved.
 	clients := auth2.ListClients()
 	if len(clients) != 1 {
 		t.Fatalf("run 2: expected 1 client, got %d", len(clients))
@@ -1222,9 +1136,6 @@ func TestRegisterDesktopClient_RefreshWorks(t *testing.T) {
 	}
 }
 
-// FIX-2: PairWithPIN must reject pairing when both the PIN's DeviceName and
-// the caller's deviceName are empty. This closes the bypass where an attacker
-// could pair without any device identification.
 func TestAuthManager_PairWithPIN_RequiresDeviceNameWhenPINIssuedWithoutOne(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.NativeConfig{
@@ -1238,13 +1149,11 @@ func TestAuthManager_PairWithPIN_RequiresDeviceNameWhenPINIssuedWithoutOne(t *te
 		t.Fatalf("failed to create auth manager: %v", err)
 	}
 
-	// Generate PIN without a device name (e.g. CLI flow).
 	pending, err := auth.GeneratePIN("")
 	if err != nil {
 		t.Fatalf("GeneratePIN failed: %v", err)
 	}
 
-	// Pairing without providing a device name must fail.
 	_, _, _, err = auth.PairWithPIN(pending.PIN, "")
 	if err == nil {
 		t.Fatal("expected error when pairing without device_name and PIN issued without one")
@@ -1253,7 +1162,6 @@ func TestAuthManager_PairWithPIN_RequiresDeviceNameWhenPINIssuedWithoutOne(t *te
 		t.Fatalf("error = %q, want 'device_name is required'", err.Error())
 	}
 
-	// Pairing WITH a device name should succeed.
 	client, token, _, err := auth.PairWithPIN(pending.PIN, "My Device")
 	if err != nil {
 		t.Fatalf("pairing with device_name should succeed: %v", err)
@@ -1266,8 +1174,6 @@ func TestAuthManager_PairWithPIN_RequiresDeviceNameWhenPINIssuedWithoutOne(t *te
 	}
 }
 
-// When the PIN was issued WITH a device name, pairing with the same name
-// should still work (existing behaviour preserved).
 func TestAuthManager_PairWithPIN_DeviceNameMatch(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.NativeConfig{
@@ -1286,7 +1192,6 @@ func TestAuthManager_PairWithPIN_DeviceNameMatch(t *testing.T) {
 		t.Fatalf("GeneratePIN failed: %v", err)
 	}
 
-	// Pair with matching device name.
 	client, token, _, err := auth.PairWithPIN(pending.PIN, "Server-Device")
 	if err != nil {
 		t.Fatalf("pairing with matching device_name: %v", err)
@@ -1296,8 +1201,6 @@ func TestAuthManager_PairWithPIN_DeviceNameMatch(t *testing.T) {
 	}
 }
 
-// When the PIN was issued WITH a device name, pairing with mismatched name
-// should fail (existing behaviour preserved).
 func TestAuthManager_PairWithPIN_DeviceNameMismatch(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.NativeConfig{
@@ -1316,7 +1219,6 @@ func TestAuthManager_PairWithPIN_DeviceNameMismatch(t *testing.T) {
 		t.Fatalf("GeneratePIN failed: %v", err)
 	}
 
-	// Pair with mismatched device name.
 	_, _, _, err = auth.PairWithPIN(pending.PIN, "Evil-Device")
 	if err == nil {
 		t.Fatal("expected error for device name mismatch")
@@ -1326,9 +1228,6 @@ func TestAuthManager_PairWithPIN_DeviceNameMismatch(t *testing.T) {
 	}
 }
 
-// When the PIN was issued WITH a device name, pairing with empty device name
-// should use the PIN's device name (existing behaviour: the finalDeviceName
-// falls back to pending.DeviceName).
 func TestAuthManager_PairWithPIN_EmptyCallerWithPINDeviceName(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.NativeConfig{
@@ -1347,7 +1246,6 @@ func TestAuthManager_PairWithPIN_EmptyCallerWithPINDeviceName(t *testing.T) {
 		t.Fatalf("GeneratePIN failed: %v", err)
 	}
 
-	// Pair with empty device name — should use the PIN's device name.
 	client, token, _, err := auth.PairWithPIN(pending.PIN, "")
 	if err != nil {
 		t.Fatalf("pairing with empty device_name should succeed when PIN has one: %v", err)
@@ -1358,8 +1256,6 @@ func TestAuthManager_PairWithPIN_EmptyCallerWithPINDeviceName(t *testing.T) {
 	_ = token
 }
 
-// PairWithPIN must reject expired and nonexistent PINs (existing tests
-// consolidated here for completeness).
 func TestAuthManager_PairWithPIN_InvalidAndExpiredPIN(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.NativeConfig{
@@ -1373,19 +1269,15 @@ func TestAuthManager_PairWithPIN_InvalidAndExpiredPIN(t *testing.T) {
 		t.Fatalf("failed to create auth manager: %v", err)
 	}
 
-	// Nonexistent PIN.
 	_, _, _, err = auth.PairWithPIN("999999", "Test")
 	if err == nil {
 		t.Fatal("expected error for nonexistent PIN")
 	}
 
-	// Expired PIN: generate one and force its expiry to the past, then save
-	// to disk so that PairWithPIN's internal loadStore picks up the change.
 	pending, err := auth.GeneratePIN("Test")
 	if err != nil {
 		t.Fatalf("GeneratePIN failed: %v", err)
 	}
-	// Force expiry to the past and persist.
 	auth.mu.Lock()
 	if p, ok := auth.store.PendingPINs[pending.PIN]; ok {
 		p.Expires = time.Now().Add(-1 * time.Minute)
@@ -1399,9 +1291,6 @@ func TestAuthManager_PairWithPIN_InvalidAndExpiredPIN(t *testing.T) {
 	}
 }
 
-// TestPlanClientWrites_SkipsUnchangedRows unit-tests the store-write
-// de-duplication: only rows whose payload actually differs from the persisted
-// blob are returned (new rows always are).
 func TestPlanClientWrites_SkipsUnchangedRows(t *testing.T) {
 	unchanged := &ClientInfo{ClientID: "cli-unchanged", DeviceName: "Same", SessionKeys: []string{"native:a"}}
 	changed := &ClientInfo{ClientID: "cli-changed", DeviceName: "Renamed", SessionKeys: []string{"native:b"}}
@@ -1415,7 +1304,6 @@ func TestPlanClientWrites_SkipsUnchangedRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal changed: %v", err)
 	}
-	// Persisted copy of the changed client differs by one session key.
 	staleChanged, err := json.Marshal(&ClientInfo{
 		ClientID:    changed.ClientID,
 		DeviceName:  changed.DeviceName,
@@ -1430,8 +1318,6 @@ func TestPlanClientWrites_SkipsUnchangedRows(t *testing.T) {
 		changed.ClientID:   changed,
 		fresh.ClientID:     fresh,
 	}
-	// "cli-gone" exists only in the DB; it is not part of clients, so it is
-	// never a write candidate (the caller deletes it instead).
 	stored := map[string]string{
 		unchanged.ClientID: string(unchangedJSON),
 		changed.ClientID:   string(staleChanged),
@@ -1460,14 +1346,6 @@ func TestPlanClientWrites_SkipsUnchangedRows(t *testing.T) {
 	}
 }
 
-// TestAuthManager_TrackSessionKey_RewritesOnlyChangedClientRows is the
-// end-to-end guard for the write amplification: appending a session key used
-// to rewrite EVERY paired client row (one SetClient transaction each, against
-// a single-connection SQLite pool) while holding AuthManager.mu.
-//
-// The number of row writes is observed with an AFTER UPDATE trigger on
-// native_clients rather than a mock, so the real repo and real SQL are
-// exercised.
 func TestAuthManager_TrackSessionKey_RewritesOnlyChangedClientRows(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "writes.db")
@@ -1504,7 +1382,6 @@ func TestAuthManager_TrackSessionKey_RewritesOnlyChangedClientRows(t *testing.T)
 		t.Fatalf("GetClient(second) found=%v err=%v", found, err)
 	}
 
-	// Log every UPDATE on native_clients from here on.
 	if _, err := dbStore.DB().Exec(`CREATE TABLE client_write_log(id TEXT NOT NULL)`); err != nil {
 		t.Fatalf("create write log table: %v", err)
 	}
@@ -1534,7 +1411,6 @@ func TestAuthManager_TrackSessionKey_RewritesOnlyChangedClientRows(t *testing.T)
 		rows.Close()
 		t.Fatalf("read write log: %v", err)
 	}
-	// Close before any further query: the pool has a single connection.
 	rows.Close()
 
 	if len(written) != 1 || written[0] != paired[0].ClientID {
@@ -1542,7 +1418,6 @@ func TestAuthManager_TrackSessionKey_RewritesOnlyChangedClientRows(t *testing.T)
 			written, paired[0].ClientID)
 	}
 
-	// The changed client must really be persisted with the new key.
 	firstBlob, found, err := repo.GetClient(paired[0].ClientID)
 	if err != nil || !found {
 		t.Fatalf("GetClient(first) found=%v err=%v", found, err)
@@ -1555,7 +1430,6 @@ func TestAuthManager_TrackSessionKey_RewritesOnlyChangedClientRows(t *testing.T)
 		t.Errorf("persisted session keys = %v, want %q tracked", firstStored.SessionKeys, newKey)
 	}
 
-	// The untouched client must be byte-identical (skipped, not rewritten).
 	secondBlobAfter, found, err := repo.GetClient(paired[1].ClientID)
 	if err != nil || !found {
 		t.Fatalf("GetClient(second, after) found=%v err=%v", found, err)
@@ -1565,9 +1439,6 @@ func TestAuthManager_TrackSessionKey_RewritesOnlyChangedClientRows(t *testing.T)
 	}
 }
 
-// TestAuthManager_SQLitePersistsLockFreeLastSeen proves the hot-path last-seen
-// value still reaches the persisted blob (via (*ClientInfo).MarshalJSON) and
-// that UpdateLastSeen itself costs no disk write.
 func TestAuthManager_SQLitePersistsLockFreeLastSeen(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "lastseen.db")
@@ -1610,7 +1481,6 @@ func TestAuthManager_SQLitePersistsLockFreeLastSeen(t *testing.T) {
 
 	beforePair := persisted()
 
-	// Hot path: updates memory only.
 	time.Sleep(5 * time.Millisecond)
 	touchedFrom := time.Now()
 	auth.UpdateLastSeen(client.ClientID)
@@ -1619,7 +1489,6 @@ func TestAuthManager_SQLitePersistsLockFreeLastSeen(t *testing.T) {
 		t.Errorf("UpdateLastSeen wrote to disk: last_seen %v -> %v", beforePair.LastSeen, afterTouch.LastSeen)
 	}
 
-	// A real (locked) save must fold the lock-free value into the blob.
 	if err := auth.saveStore(); err != nil {
 		t.Fatalf("saveStore failed: %v", err)
 	}
@@ -1628,7 +1497,6 @@ func TestAuthManager_SQLitePersistsLockFreeLastSeen(t *testing.T) {
 		t.Errorf("persisted last_seen = %v, want >= %v (the lock-free update)", stored.LastSeen, touchedFrom)
 	}
 
-	// A restarted gateway must observe the same value.
 	auth2, err := NewAuthManager(cfg, tmpDir)
 	if err != nil {
 		t.Fatalf("failed to create second auth manager: %v", err)

@@ -28,11 +28,10 @@ const (
 	ChatViewPane
 )
 
-// chatMode represents the active TUI mode (Agent, Chat, or Group).
 type chatMode int
 
 const (
-	ModeAgent chatMode = iota // default
+	ModeAgent chatMode = iota
 	ModeChat
 	ModeGroup
 )
@@ -48,16 +47,9 @@ func (m chatMode) String() string {
 	}
 }
 
-// leftColumnRatio is the fraction of the terminal width used by the left
-// (chat) column. The right sidebar takes the remaining space. Shared by
-// view.go (layout) and handlers.go (mouse hit-testing) so they stay in sync.
-// chatSidebarGutter is a blank band between the panes: macOS Terminal.app
-// often measures VS16 emoji one cell off from ansi.StringWidth, and without
-// a gutter that paints over the sidebar border on scroll.
 const leftColumnRatio = 0.72
 const chatSidebarGutter = 2
 
-// groupTurn represents a single turn in a group chat (Mixture of Agents).
 type groupTurn struct {
 	index   int
 	layer   int
@@ -67,98 +59,38 @@ type groupTurn struct {
 	content string
 }
 
-// groupMeta stores accumulated metadata for a completed group session.
 type groupMeta struct {
 	strategy     string
 	layers       int
 	totalTokens  int
-	participants string // comma-separated participant list
-	synthesis    string // final synthesis content from group.complete
+	participants string
+	synthesis    string
 }
 
-// subagentClickTarget tracks a clickable row for mouse click handling: a
-// subagent item in the sidebar, or the status line's "back to parent chat"
-// affordance while a subagent session is on screen.
 type subagentClickTarget struct {
-	yStart int    // Starting Y position in the frame (0-indexed from top of content area)
-	yEnd   int    // Ending Y position in the frame
-	key    string // Session key for this target
+	yStart int
+	yEnd   int
+	key    string
 }
 
-// subagentsCacheState is the subagent listing the render path serves (T6).
-//
-// GetSessionSubagents is expensive: it walks every manager's task list
-// (deep-copying each task) and every agent's session storage, plus one SQLite
-// stats query per 200 cold keys — 2.0 ms/414 KB at 200 subagents, 6.9 ms/1.2 MB
-// at 500 cold ones (docs/perf/tui-long-chat-baseline.md). It used to be
-// recomputed from View() (the sidebar and the status line both went through it)
-// and invalidated by every subagent lifecycle event, i.e. once per finished
-// subagent during a burst — exactly the many-finished-subagents case that was
-// reported as slow.
-//
-// Since T6 there is exactly one writer (refreshSubagentsCache, called from
-// Update() at most once per subagentsCacheTTL) and the frame only READS this
-// struct: no backend call, no copy, no sort. list is sorted once at refresh
-// time so the render path can never mutate the cached slice, and running is
-// materialized there so the status line can ask "is anything running?" in O(1)
-// instead of building (and scanning) the whole listing.
-//
-// The heavy fields are deliberately NOT split out of the listing: no TUI
-// surface renders Summary or Iterations at all (the sidebar draws status dot +
-// label + status, the /subagents modal draws task ID + status + label), so the
-// store-side stats query they come from has no per-frame consumer to satisfy.
-// It is paid by this refresh — off the frame, ≤ once per subagentsCacheTTL —
-// and by opening /subagents, which by design loads a fresh listing at that
-// moment (an Update()-path command: the user asking "what is there right now"
-// gets the truth, not a 3 s old snapshot).
 type subagentsCacheState struct {
-	key     string                      // query key list was loaded for ("" = never loaded)
-	list    []channels.SubagentTaskInfo // last known listing, sorted by sortSubagents
-	running int                         // entries of list whose Status is "running"
-	at      time.Time                   // when list was loaded: refresh-cadence clock
+	key     string
+	list    []channels.SubagentTaskInfo
+	running int
+	at      time.Time
 }
 
-// sessionsCacheState is the session listing the TUI serves (T8).
-//
-// reloadSessions() is the "the session list may have changed" choke point and it
-// used to rebuild the whole listing on every one of its ~14 call sites: a
-// ListSessions() walk (at 200 sessions: 55 µs / 64 KB / 157 allocs — one shell
-// allocation per cold session, the seen map and the sort) plus
-// AllTotalMessageCounts(), whose cold half is a full scan of session_messages
-// (339 µs / 33 KB / 609 allocs). 444 µs / 179 KB / 815 allocs per event, and the
-// events that trigger it come in bursts — every completed turn of the visible
-// chat (the parent restarts a turn for each finished subagent), every tab/ESC,
-// every sidebar click.
-//
-// Since T8 the listing lives here and refreshSessionsCache is its single writer:
-// a refresh happens at most once per sessionsRefreshTTL, so a burst of
-// completion events collapses into one walk. The listing is read by
-// reloadSessions (and directly by the /sessions picker, which forces an exact
-// one) — never by View(), which reads visibleSessions.
-//
-// all holds the live *session.Session pointers of the resident sessions, so the
-// message content behind a cached entry is never stale: only the SET of entries
-// (a chat created, deleted or renamed within the window) and the cold shells'
-// Name/Updated are up to the window old. Correctness-relevant switches bypass
-// the window (see setCurrentChatKey) and so does anything the user asks for
-// explicitly, so the staleness the user can observe is a chat appearing in the
-// sidebar list up to sessionsRefreshTTL late.
 type sessionsCacheState struct {
-	all    []*session.Session // last ListSessions() result ("" set before the first refresh)
-	at     time.Time          // when the listing was loaded: refresh-cadence clock
-	loaded bool               // a listing has been loaded (false = never refreshed)
+	all    []*session.Session
+	at     time.Time
+	loaded bool
 }
 
-// historyCountMemo is the memoized result of countHistoryMessages (T12) for one
-// history slice. head/n are that slice's identity: the address of its first
-// element and its length. A memo whose key does not match the slice passed in is
-// a miss, never a hit — see Model.historyMessageCount for why the identity
-// determines the count.
 type historyCountMemo struct {
-	valid bool               // whether head/n/count describe a counted slice
-	head  *providers.Message // &history[0] of the counted snapshot
-	n     int                // len(history) of the counted snapshot
-	count int                // user+assistant messages in that snapshot
+	valid bool
+	head  *providers.Message
+	n     int
+	count int
 }
 
 type modalType int
@@ -170,35 +102,35 @@ const (
 	ModalModel
 	ModalThink
 	ModalLang
-	ModalLangRemote // browse downloadable language packs from GitHub
+	ModalLangRemote
 	ModalSubagents
 	ModalBackgroundExecs
-	ModalProviders          // list of providers
-	ModalProviderDetail     // provider detail (edit/delete/add model)
-	ModalAddProvider        // form to add a new provider
-	ModalAddModel           // form to add a new model to a provider
-	ModalEditModel          // form to edit an existing model of a provider
-	ModalEditProvider       // form to edit an existing provider (every field but the name)
-	ModalCron               // list of cron jobs
-	ModalSecrets            // list of keyring secrets
-	ModalAddSecret          // form to add a new secret
-	ModalSkills             // list of installed skills with actions
-	ModalSkillInstall       // form to enter GitHub repo URL for scanning
-	ModalSkillPicker        // multi-select which skills to install from scanned repo
-	ModalCommands           // list of custom slash commands of the current agent
-	ModalCommandDetail      // read-only detail view of one command
-	ModalAddCommand         // wizard to create/edit a custom command
-	ModalSettings           // top-level: Agents / System / Interface
-	ModalSettingsAgents     // agent list + defaults + add
-	ModalSettingsAgentEdit  // detail/edit for one agent (or defaults)
-	ModalSettingsSystem     // system settings list
-	ModalSettingsSystemEdit // form for a system setting group
-	ModalSettingsTUI        // TUI settings list (toggles/values)
-	ModalMCP                // list of MCP servers (space/t toggle, f filter)
-	ModalMCPDetail          // detail view of one MCP server (rendered from the stored inventory)
-	ModalMCPAuth            // interactive OAuth authorization of one MCP server (a from the detail)
-	ModalMCPAdd             // step-by-step wizard to add an MCP server ("n" in the /mcp list); a form modal with a kind-dependent (dynamic) step set, rendered by its own renderer (renderMCPAddModal) rather than renderFormModal
-	ModalConnectOAuth       // interactive OAuth login for one native /connect OAuth row
+	ModalProviders
+	ModalProviderDetail
+	ModalAddProvider
+	ModalAddModel
+	ModalEditModel
+	ModalEditProvider
+	ModalCron
+	ModalSecrets
+	ModalAddSecret
+	ModalSkills
+	ModalSkillInstall
+	ModalSkillPicker
+	ModalCommands
+	ModalCommandDetail
+	ModalAddCommand
+	ModalSettings
+	ModalSettingsAgents
+	ModalSettingsAgentEdit
+	ModalSettingsSystem
+	ModalSettingsSystemEdit
+	ModalSettingsTUI
+	ModalMCP
+	ModalMCPDetail
+	ModalMCPAuth
+	ModalMCPAdd
+	ModalConnectOAuth
 )
 
 type formStep int
@@ -208,7 +140,6 @@ const (
 	formStepConfirm
 )
 
-// Timeout for ESC hint display (double-press to cancel)
 const escHintTimeout = 1 * time.Second
 
 type commandInfo struct {
@@ -244,7 +175,6 @@ var allCommands = []commandInfo{
 	{name: "/quit", description: "Exit TUI"},
 }
 
-// Messages for Bubbletea loop
 type sessionListMsg []*session.Session
 type outboundMsg struct {
 	msg bus.OutboundMessage
@@ -258,30 +188,27 @@ type compactResultMsg struct {
 	sessionKey string
 }
 
-// communityIndexMsg is sent when the community theme index has been fetched.
 type communityIndexMsg struct {
 	entries []theme.CommunityThemeEntry
 	err     string
 }
 
-// installThemeMsg is sent when a community theme download completes.
 type installThemeMsg struct {
 	name  string
 	theme theme.Theme
 	err   string
 }
 
-// onboardStep represents the current step in the first-run onboarding wizard.
 type onboardStep int
 
 const (
-	obWelcome        onboardStep = iota // welcome screen
-	obLanguage                          // language picker
-	obTheme                             // theme picker
-	obProviderPicker                    // provider preset selection
-	obConnect                           // guided connect (reuses /connect flow)
-	obVerify                            // async key validation + set defaults
-	obDone                              // success screen with tips
+	obWelcome onboardStep = iota
+	obLanguage
+	obTheme
+	obProviderPicker
+	obConnect
+	obVerify
+	obDone
 )
 
 type Model struct {
@@ -291,209 +218,127 @@ type Model struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 
-	// UI state
 	activePane         paneType
 	selectedSessionIdx int
 	visibleSessions    []*session.Session
 	currentKey         string
-	currentMode        chatMode    // current mode filter: Agent (default), Chat, or Group
-	groupProfileIdx    int         // selected profile index in Group mode welcome screen
-	showWelcome        bool        // true when showing the welcome/new-chat screen
-	onboardingActive   bool        // true when onboarding wizard is running
-	onboardingStep     onboardStep // current wizard step
-	obSelectedPreset   int         // index into providerPresets for the chosen provider
-	obSkipConfirm      bool        // true when "skip setup?" confirmation is showing
-	obVerifying        bool        // true while async key validation is running
-	obVerifyFailed     bool        // true if validation returned a warning
-	obProviderName     string      // name of the provider that was just configured (for success screen)
-	obModelName        string      // model alias that was just configured
-	obMaskedKey        string      // masked API key for display
+	currentMode        chatMode
+	groupProfileIdx    int
+	showWelcome        bool
+	onboardingActive   bool
+	onboardingStep     onboardStep
+	obSelectedPreset   int
+	obSkipConfirm      bool
+	obVerifying        bool
+	obVerifyFailed     bool
+	obProviderName     string
+	obModelName        string
+	obMaskedKey        string
 
-	// Theme state
-	currentThemeName  string // active theme name (e.g. "dracula")
-	themePickerActive bool   // true when theme picker overlay is open
-	themePreviewName  string // saved theme name before preview navigation (Esc reverts to this)
+	currentThemeName  string
+	themePickerActive bool
+	themePreviewName  string
 
-	// Community theme state
-	customThemes       map[string]theme.Theme      // user-defined + installed community themes
-	installedCommunity []string                    // names of themes installed from the community repo
-	communityIndex     []theme.CommunityThemeEntry // cached community index from awesome-lele
-	communityLoading   bool                        // true while fetching community index
-	communityErr       string                      // error message if community fetch failed
-	themePickerItems   []themePickerItem           // structured items for the theme picker
+	customThemes       map[string]theme.Theme
+	installedCommunity []string
+	communityIndex     []theme.CommunityThemeEntry
+	communityLoading   bool
+	communityErr       string
+	themePickerItems   []themePickerItem
 
-	// Autocomplete dropdown menu state
 	showAutocomplete  bool
 	autocompleteItems []commandInfo
 	autocompleteIdx   int
 
-	// Custom (harness) slash commands discovered by the backend, cached for
-	// customCommandsRefreshTTL. Names already include the leading slash.
 	customCmds   []commandInfo
 	customCmdsAt time.Time
 
-	// cmdUsage ranks the slash-command autocomplete by how often each command
-	// has been executed (persisted in ~/.lele/command_usage.json).
 	cmdUsage *commandUsageStore
 
-	// Selection modals
 	modalMode         modalType
 	modalItems        []string
-	modalSessionKeys  []string // maps modal items to session keys (for /sessions)
-	modalSubagentKeys []string // maps modal items to subagent session keys (for /subagents)
-	modalLangCodes    []string // maps modal items to language codes ("" = download-more action)
+	modalSessionKeys  []string
+	modalSubagentKeys []string
+	modalLangCodes    []string
 	modalSelectedIdx  int
-	modalScrollOffset int // scroll offset for long modal lists
+	modalScrollOffset int
 
-	// localesMgr downloads language packs from GitHub on demand.
-	localesMgr *locales.Manager
-	// langInstallBusy is true while a pack download is in-flight (sync).
+	localesMgr      *locales.Manager
 	langInstallBusy bool
-	// langInstallMsg is transient feedback shown after a download attempt.
-	langInstallMsg string
+	langInstallMsg  string
 
-	// Background exec view state
-	bgExecViewMode   bool     // true when showing output of a selected process
-	bgExecViewID     string   // ID of the process being viewed
-	bgExecViewOutput string   // current output text
-	bgExecViewStatus string   // current status
-	bgExecModalKeys  []string // maps modal items to process IDs
+	bgExecViewMode   bool
+	bgExecViewID     string
+	bgExecViewOutput string
+	bgExecViewStatus string
+	bgExecModalKeys  []string
 
-	// Cron job management state
-	cronService     *cron.CronService // read/manage access to the cron store
-	cronModalKeys   []string          // maps modal items to job IDs
-	cronDetailMode  bool              // true when showing detail of a selected job
-	cronDetailJobID string            // ID of the job being viewed in detail
+	cronService     *cron.CronService
+	cronModalKeys   []string
+	cronDetailMode  bool
+	cronDetailJobID string
 
-	// Secrets (keyring) management state
-	secretsModalKeys  []string // maps modal items to secret names
-	secretsDetailMode bool     // true when showing detail of a selected secret
-	secretsDetailName string   // name of the secret being viewed in detail
-	secretsReveal     bool     // true when the secret value is temporarily revealed
+	secretsModalKeys  []string
+	secretsDetailMode bool
+	secretsDetailName string
+	secretsReveal     bool
 
-	// Skills management state
-	skillsModalKeys   []string                // maps modal items to skill names
-	skillsScanResults []channels.ScannedSkill // results from repo scan
-	skillsScanRepo    string                  // repo being scanned
-	skillsSelectedMap map[int]bool            // multi-select state for skill picker
-	skillsFeedback    string                  // brief feedback after install/remove/toggle
+	skillsModalKeys   []string
+	skillsScanResults []channels.ScannedSkill
+	skillsScanRepo    string
+	skillsSelectedMap map[int]bool
+	skillsFeedback    string
 
-	// MCP server management state (/mcp): mcpModalKeys maps modal items to
-	// server names ("" for the empty-state row), mcpFilter is the source
-	// filter index (mcpFilterAll…mcpFilterProject) cycled by "f", and
-	// mcpFeedback is the line rendered under the list.
-	mcpModalKeys []string
-	mcpFilter    int
-	mcpFeedback  string
-	// mcpInventory is the EXACT inventory the visible list rows were built
-	// from (set by loadMCPListWith, cleared by resetModal), mcpInventoryValid
-	// guards it and mcpDetailName is the row ModalMCPDetail is open on. The
-	// detail renders only from this snapshot — it never re-reads the disk, so
-	// it can never describe a different winner than the row the user selected.
+	mcpModalKeys      []string
+	mcpFilter         int
+	mcpFeedback       string
 	mcpInventory      mcp.Inventory
 	mcpInventoryValid bool
 	mcpDetailName     string
-	// mcpAuth maps each listed server name to its auth verdict (pkg/mcp's
-	// CheckAuth, read through the same in-process store the authorization
-	// flow uses). It is resolved together with mcpInventory so the row marker,
-	// the detail block and the sign-out action all describe exactly the rows
-	// that were shown; a name with no entry (a stdio server, or one Discover
-	// excludes) renders no auth state at all. Rebuilt by loadMCPListWith,
-	// dropped wherever the inventory snapshot is dropped.
-	mcpAuth map[string]mcp.AuthStatus
-	// MCP OAuth authorization state (ModalMCPAuth, "a" in the detail):
-	// mcpAuthFlow is the live engine flow (nil when none — it also owns the
-	// loopback listener, which is why mcpAuthCancel exists), mcpAuthState is
-	// the modal's own state machine (mcpAuthIdle…mcpAuthFailed), mcpAuthURL
-	// is the authorization URL to display/copy, mcpAuthName is the server
-	// being authorized, and the two feedback fields are the inline lines the
-	// detail screen and the auth modal share: mcpAuthFeedback carries the
-	// informational/success text and mcpAuthError the error text (including
-	// the "auth does not apply to a stdio entry" refusal hint). mcpAuthSeq is
-	// a generation counter: every message the start/poll/submit commands
-	// produce carries the sequence it was created under, so a message of a
-	// flow that is gone is dropped instead of being applied to a new one (and
-	// a late flow is cancelled, never orphaned).
-	mcpAuthFlow     mcpAuthFlow
-	mcpAuthState    int
-	mcpAuthURL      string
-	mcpAuthName     string
-	mcpAuthFeedback string
-	mcpAuthError    string
-	mcpAuthSeq      int
-	// mcpAuthOpener launches the authorization URL for the user. NewModel
-	// installs the platform browser launcher; it is a FIELD (not a package
-	// variable) so the dependency is supplied at construction and a nil value
-	// simply means "this model never opens a browser" — the modal still shows
-	// the URL and CTRL+Y still copies it. It is read in Update (before the
-	// start command is built) and never from a command goroutine.
-	mcpAuthOpener func(string) error
+	mcpAuth           map[string]mcp.AuthStatus
+	mcpAuthFlow       mcpAuthFlow
+	mcpAuthState      int
+	mcpAuthURL        string
+	mcpAuthName       string
+	mcpAuthFeedback   string
+	mcpAuthError      string
+	mcpAuthSeq        int
+	mcpAuthOpener     func(string) error
 
-	// Custom (harness) slash-command administration state. commandsModalKeys
-	// maps modal items to composite "source:name" keys ("" for separators and
-	// for the empty-state row); commandsRows mirrors modalItems 1:1 so the
-	// detail view can recover the structured data of the selected row.
-	commandsModalKeys  []string     // composite "source:name" key per modal item
-	commandsRows       []commandRow // structured row per modal item (parallel)
-	commandsDetailMode bool         // true while the detail view is open
-	commandsDetailKey  string       // composite key of the command in detail
-	commandsFeedback   string       // brief feedback line shown under the list
-	commandsEditKey    string       // composite key of the command being edited; "" when creating
-	commandsEditScope  string       // "config" | "workspace" | "global" (target of the write)
-	// Double-confirm delete state: the first "d" arms commandsDeleteKey, the
-	// second within commandsDeleteConfirmWindow executes it.
-	commandsDeleteKey   string         // composite key of the pending delete, "" when disarmed
-	commandsDeleteArmed time.Time      // when the pending delete was armed
-	templateInput       textarea.Model // multi-line input for the /commands template step
+	commandsModalKeys   []string
+	commandsRows        []commandRow
+	commandsDetailMode  bool
+	commandsDetailKey   string
+	commandsFeedback    string
+	commandsEditKey     string
+	commandsEditScope   string
+	commandsDeleteKey   string
+	commandsDeleteArmed time.Time
+	templateInput       textarea.Model
 
-	// Settings management state
-	settingsSection   string   // current section: "agents", "system", "tui"
-	settingsEditField string   // currently editing field name
-	settingsAgentID   string   // agent ID being edited
-	settingsAgentKeys []string // maps modal items to agent IDs (empty = defaults, "__add__" = new agent)
+	settingsSection   string
+	settingsEditField string
+	settingsAgentID   string
+	settingsAgentKeys []string
 
-	// Settings inline selector state — when settingsSelectorActive is true,
-	// the modal shows a scrollable list of options (like the language picker)
-	// instead of a text input. Used for fields with a known set of valid values
-	// (provider, model, rotation, judge mode, etc.).
-	settingsSelectorActive bool     // true while a selector picker is open
-	settingsSelectorItems  []string // option labels shown in the picker
-	settingsSelectorValues []string // raw values mapped 1:1 to selectorItems
-	settingsSelectorIdx    int      // currently highlighted option
-	settingsSelectorField  string   // which settingsEditField triggered the selector
-	settingsSelectorOrig   string   // original config value when selector opened (for ✓ mark)
+	settingsSelectorActive bool
+	settingsSelectorItems  []string
+	settingsSelectorValues []string
+	settingsSelectorIdx    int
+	settingsSelectorField  string
+	settingsSelectorOrig   string
 
-	// Subagent multi-select picker state — when subagentPickerActive is true
-	// the modal shows a scrollable list of all configured agents (except the
-	// current one) with checkboxes that can be toggled with Space. Enter saves
-	// the selection to agent.Subagents.AllowAgents, Esc cancels.
-	subagentPickerActive   bool         // true while the subagent picker is open
-	subagentPickerItems    []string     // agent IDs shown in the picker (in picker order)
-	subagentPickerLabels   []string     // display labels (Name (ID) or ID) for each item
-	subagentPickerSelected map[int]bool // index → selected state
-	subagentPickerIdx      int          // currently highlighted row
+	subagentPickerActive   bool
+	subagentPickerItems    []string
+	subagentPickerLabels   []string
+	subagentPickerSelected map[int]bool
+	subagentPickerIdx      int
 
-	// Provider management state
-	providerModalKeys    []string // maps modal items to provider names (for /providers)
-	providerSelectedName string   // currently selected provider name in detail view
-	providerEditMode     bool     // true when editing an existing provider
-	providerSavedInFlow  bool     // true after /connect saves provider (enables model config steps)
+	providerModalKeys    []string
+	providerSelectedName string
+	providerEditMode     bool
+	providerSavedInFlow  bool
 
-	// Native /connect OAuth login state (ModalConnectOAuth). This mirrors
-	// the mcpAuth* block above, and the same three invariants apply (see
-	// connect_oauth.go): the flow owns a loopback listener until cancelled,
-	// Update never blocks on it, and no credential-shaped input survives in
-	// a reused widget. connectOAuthFlow is the live engine flow (nil when
-	// none — it also owns the loopback listener, which is why
-	// connectOAuthCancel exists), connectOAuthState is this modal's own state
-	// machine (connectOAuthIdle…connectOAuthFailed), connectOAuthURL is the
-	// authorization URL to display/copy, connectOAuthName is the provider
-	// being signed in, and the two feedback fields are the inline lines the
-	// modal renders. connectOAuthSeq is a generation counter: every message
-	// the start/poll/submit commands produce carries the sequence it was
-	// created under, so a message of a flow that is gone is dropped instead
-	// of being applied to a new one (and a late flow is cancelled, never
-	// orphaned).
 	connectOAuthFlow     connectOAuthFlow
 	connectOAuthState    int
 	connectOAuthURL      string
@@ -502,461 +347,213 @@ type Model struct {
 	connectOAuthError    string
 	connectOAuthSeq      int
 
-	// Model edit flow state (ModalEditModel) + provider-detail row map.
-	modelEditAlias     string         // alias of the model being edited (original map key)
-	modelEditOrigModel string         // stored model name when the edit flow was opened
-	providerDetailRows map[int]string // ModalProviderDetail: item index -> model alias
-	// ModalProviderDetail action-row indices (from providerDetailList) so the
-	// ENTER branch compares indexes instead of localized label strings.
-	// resetModal clears them to -1; enterProviderDetail always sets valid values.
-	providerDetailEditIdx int // item index of the edit-provider action row (-1 when absent)
-	providerDetailAddIdx  int // item index of the add-model action row (-1 when absent)
-	providerDetailDelIdx  int // item index of the delete-provider action row (-1 when absent)
-	// Double-confirm delete state for models: the first "d" arms
-	// providerDeleteKey, the second within providerDeleteConfirmWindow
-	// executes it (mirrors commandsDeleteKey/commandsDeleteArmed).
-	providerDeleteKey   string    // model alias armed for deletion, "" when disarmed
-	providerDeleteArmed time.Time // when the pending model delete was armed
-	// providerFeedback is the feedback line rendered under the provider
-	// detail list (delete confirmations, delete results, errors).
-	providerFeedback string
+	modelEditAlias        string
+	modelEditOrigModel    string
+	providerDetailRows    map[int]string
+	providerDetailEditIdx int
+	providerDetailAddIdx  int
+	providerDetailDelIdx  int
+	providerDeleteKey     string
+	providerDeleteArmed   time.Time
+	providerFeedback      string
 
-	// Form state for add-provider / add-model flows
-	formStepIndex   int      // current step in the form
-	formValues      []string // collected values per step
-	formError       string   // validation error to display
-	formConfirmMode bool     // true when showing confirmation step
+	formStepIndex   int
+	formValues      []string
+	formError       string
+	formConfirmMode bool
 
-	// Catalog-backed model picker for /add-model and the connect-flow model
-	// name step. When active, typing filters catalog.SearchModels and a
-	// suggestion list is rendered below the form's text input.
-	addModelCatalogActive bool     // true while catalog suggestions are shown
-	addModelCatalogIDs    []string // model IDs (values), parallel to labels
-	addModelCatalogLabels []string // display labels for the suggestion list
-	addModelCatalogIdx    int      // highlighted suggestion
-	addModelCatalogThink  string   // thinking-levels hint for the selected model
+	addModelCatalogActive bool
+	addModelCatalogIDs    []string
+	addModelCatalogLabels []string
+	addModelCatalogIdx    int
+	addModelCatalogThink  string
 
-	// Provider-type picker state (step 2 of /connect). When true, the form
-	// shows a selectable list of known provider presets instead of a raw text
-	// input; up/down + enter pick a preset, "custom" allows a free-form type.
-	providerTypePicker    bool // true while picking a provider type from the preset list
-	providerTypePickerIdx int  // currently highlighted preset index
-	providerTypePickerMax int  // number of rows shown (len(providerPresets)+1 on the free-text path, len(connectRows()) on the row-driven path)
+	providerTypePicker    bool
+	providerTypePickerIdx int
+	providerTypePickerMax int
 
-	// Row-first /connect picker state. /connect (startConnectFlow(nil)) now
-	// opens the picker on the FIRST frame and the picked connectRow decides
-	// which form steps are SKIPPED — never renumbered: API key is still step
-	// 2, API base step 3 and the model steps still start at 4, so the
-	// hardcoded masking/autocomplete/review indices keep working unchanged.
-	// connectRowPicker is true ONLY while the ROW-FIRST picker (the /connect
-	// entry frame) is open. providerTypePicker alone cannot distinguish the
-	// two pickers: the legacy provider-TYPE picker (free-text name path and
-	// onboarding's "Other/custom") uses the same widget but a different list
-	// (providerPresets + trailing custom) and a different dispatch
-	// (applyLegacyTypePreset). Keeping the distinction explicit means
-	// connectRowIdx never has to double as a flag, so "-1 = nothing picked"
-	// stays true on the row-first frame.
 	connectRowPicker     bool
-	connectRowIdx        int  // index into connectRows() of the picked row (-1 = nothing picked / not row-driven)
-	connectSkipAPIBase   bool // true for API-key-only rows: save right after the key (step 2) and jump to the model steps
-	connectAlreadyUsable bool // set by connectSaveProvider: the provider already had models, so routing skips the model wizard
+	connectRowIdx        int
+	connectSkipAPIBase   bool
+	connectAlreadyUsable bool
 
-	// Success screen shown after the /connect flow completes. When true, the
-	// form modal renders a confirmation with the provider/model that was saved
-	// instead of the step list.
-	connectSuccess bool // true when showing the post-save success screen
+	connectSuccess bool
 
-	// providerTypeFromPreset remembers whether the chosen provider type came
-	// from a preset picker selection. When true, the API Base step is
-	// pre-filled and optional; a custom type requires an explicit base URL.
-	providerTypeFromPreset bool // true when the type was picked from the preset list
+	providerTypeFromPreset bool
 
-	// Sub-components
 	viewport  lineViewport
-	textInput textinput.Model // single-line input for modal forms (AddProvider, AddModel)
-	chatInput textarea.Model  // multi-line input for chat messages
+	textInput textinput.Model
+	chatInput textarea.Model
 
-	// Pending user message (shown immediately before agent responds)
 	pendingUserMessage string
 
-	// Navigation: non-empty when viewing a subagent chat (stores the parent key)
 	parentSessionKey string
 
-	// Subagent progress: taskID -> last action string (for real-time display in parent)
 	subagentProgress map[string]string
 
-	// Group chat (Mixture of Agents) state
-	groupTranscripts map[string][]groupTurn // groupID -> ordered turns
-	groupStatus      map[string]string      // groupID -> status (started/done/stopped/error)
-	activeGroupID    string                 // group currently being displayed
-	groupMeta        map[string]groupMeta   // groupID -> accumulated metadata
+	groupTranscripts map[string][]groupTurn
+	groupStatus      map[string]string
+	activeGroupID    string
+	groupMeta        map[string]groupMeta
 
-	// Message processing / streaming
-	processing bool
-	// Client-side FIFO message queue per session (see queue.go). While the
-	// agent is busy, Enter enqueues the input instead of swallowing it; the
-	// front item is auto-submitted when the turn ends.
-	messageQueue          map[string][]queuedMessage
-	queueFeedback         string // transient notice shown in the queue strip (e.g. "queue full")
-	currentMessageID      string
-	currentAssistantMsgID string
-	// subagentContinuationPending records that a subagent.result arrived and a
-	// continuation turn is therefore owed on this session. It exists because a
-	// backend-initiated turn carries no m.currentMessageID (that uuid is minted
-	// only on a local submit — helpers.go:123, :329), so the idMatches test in
-	// the stream-finished branch cannot recognise its final message. Set only
-	// when a continuation is genuinely owed: publishSubagentAsyncResult claims
-	// the result BEFORE publishing the event and stamps metadata["resumed"], so
-	// a result consumed in-turn by wait_for_subagent arrives with resumed=false
-	// and must not arm a turn. A result accepted into a turn that is ALREADY
-	// running arrives with resumed=true and injected=true: that turn's own end
-	// clears the loading state, so the event must not arm anything either.
-	// injected=true is queue ACCEPTANCE, not guaranteed mid-turn delivery — if
-	// the running turn exits before draining its queue, the result comes back as
-	// an ordinary inbound and that fallback continuation renders its own
-	// stream/complete events, which clear the state via handleCompleteMsg.
-	// Cleared by handleCompleteMsg and by clearStreamingState (session switch).
+	processing                  bool
+	messageQueue                map[string][]queuedMessage
+	queueFeedback               string
+	currentMessageID            string
+	currentAssistantMsgID       string
 	subagentContinuationPending bool
 	currentStream               string
 	currentThinking             string
-	currentToolAction           string // active tool call shown during streaming ("tool: args")
+	currentToolAction           string
 	startTime                   time.Time
 	elapsedTime                 time.Duration
 	lastDuration                time.Duration
-	// Stream throughput metrics of the segment currently streaming, parsed from
-	// message.stream AND message.thinking metadata (see stream_metrics.go). Both
-	// surfaces feed the same live counters, so streamTokPerSec drives the "tok/s"
-	// readout next to the spinner from the first reasoning token onward;
-	// lastTokPerSec preserves the final segment's rate so the status line can
-	// keep showing it next to "Done in Xs" after the turn ends. A turn with no
-	// visible stream leaves these at zero, which is what hides the readout for
-	// error/tool-only turns.
-	streamTokens           int
-	streamElapsedMs        int64
-	streamTokPerSec        float64
-	streamMetricsEstimated bool
-	lastTokPerSec          float64
-	animationTick          int
-	tickPending            bool // prevents multiple tick chains from accumulating
+	streamTokens                int
+	streamElapsedMs             int64
+	streamTokPerSec             float64
+	streamMetricsEstimated      bool
+	lastTokPerSec               float64
+	animationTick               int
+	tickPending                 bool
 
-	// Double-ESC cancel tracking
 	escPressCount int
 	escLastPress  time.Time
-	escHint       bool // true when showing "press ESC again to cancel" hint
+	escHint       bool
 
-	// Double-confirm for force-send while busy (alt+enter / /flushq), which
-	// also cancels the running turn including subagents.
 	flushLastPress time.Time
 
-	// Text selection state (in-app click+drag selection in the viewport)
-	selecting           bool      // whether a selection drag is in progress
-	selStartX           int       // screen X (column) where selection started
-	selStartY           int       // screen Y where selection started
-	selEndX             int       // screen X (column) where selection currently ends
-	selEndY             int       // screen Y where selection currently ends
-	selectionFeedback   bool      // show brief "Copied!" feedback
-	selectionFeedbackAt time.Time // when the feedback was triggered
+	selecting           bool
+	selStartX           int
+	selStartY           int
+	selEndX             int
+	selEndY             int
+	selectionFeedback   bool
+	selectionFeedbackAt time.Time
 
-	// Workspace Git info
 	gitBranch     string
 	workspacePath string
 
-	// Pending model/agent for welcome screen (applied on session creation)
 	pendingModel string
 	pendingAgent string
 	pendingThink string
 
-	// Session summary tracking
 	lastEscTime      time.Time
 	sessionStartTime time.Time
 
-	// CSI escape sequence parser state — filters leaked mouse/escape
-	// fragments that bubbletea fails to parse as tea.MouseMsg.
 	escSeqActive   bool
 	escSeqLastRune time.Time
-	escBuffer      []rune // accumulates incomplete SGR mouse escape fragments
+	escBuffer      []rune
 
-	// Terminal size
 	width  int
 	height int
 
-	// Stream rendering throttle — avoids re-rendering the viewport on every
-	// single streaming chunk (which can arrive dozens of times per second).
-	// Only message.stream and message.thinking are throttled; tool events
-	// and subagent progress continue to update immediately.
-	streamThrottleActive   bool
-	streamPendingUpdate    bool
-	streamThrottleInterval time.Duration
-	streamRenderedLines    []string
-	thinkingRenderedLines  []string
-	// Width the stream/thinking line caches were rendered for. When the
-	// terminal width changes, the caches must be invalidated and rebuilt.
+	streamThrottleActive     bool
+	streamPendingUpdate      bool
+	streamThrottleInterval   time.Duration
+	streamRenderedLines      []string
+	thinkingRenderedLines    []string
 	streamRenderCacheWidth   int
 	thinkingRenderCacheWidth int
-	// Accumulated joined string of completed rendered lines. Avoids O(n²)
-	// strings.Join on every streaming chunk — new lines are appended in O(1).
-	streamRenderedJoined   string
-	thinkingRenderedJoined string
+	streamRenderedJoined     string
+	thinkingRenderedJoined   string
 
-	// Cached glamour renderer (keyed by width and light/dark style)
 	cachedRenderer      *glamour.TermRenderer
 	cachedRendererWidth int
-	cachedRendererStyle string // "light" or "dark"
+	cachedRendererStyle string
 
-	// themeIsLight is derived from the active theme background luminance
-	// and drives glamour's markdown style selection.
 	themeIsLight bool
 
-	// Per-message render cache. Avoids re-rendering unchanged messages
-	// through glamour when the message count changes (e.g., a new message
-	// arrives). Key: FNV-64a content fingerprint. Value: rendered lines.
-	// Cleared on terminal width change or session switch. NOT cleared on
-	// message count change — that's the whole point.
-	msgRenderCacheLines map[string][]string // lines form (used for fast assembly)
-	msgRenderCacheWidth int                 // width the cache was built for
+	msgRenderCacheLines map[string][]string
+	msgRenderCacheWidth int
 
-	// Cached rendered base lines for completed messages. SetBaseLines pushes
-	// these to the viewport. Only rebuilt when messages change or width changes.
-	renderedBaseValid         bool   // whether viewport.baseLines is populated
-	renderedBaseKey           string // session key the cache belongs to
-	renderedBaseMsgCount      int    // number of history messages when cache was built
-	renderedBaseLastStreaming bool   // whether the last msg was Streaming=true when cache was built
-	// renderedBaseHistoryLen is len(history) when the base was built. The
-	// rendered base includes tool/system rows that renderedBaseMsgCount
-	// deliberately does not count, so an appended tool result (count unchanged)
-	// still changes the base — and the render-path freshness check must see it
-	// too, or a frame would serve the base built before that message arrived.
-	renderedBaseHistoryLen int
-	// renderedBaseArchiveKey fingerprints the display-only archived prefix at
-	// the time the base was built. Kept separate from renderedBaseKey because
-	// that key also gates msgRenderCacheLines, which must survive archive
-	// paging. See updateViewport for why the message count alone cannot cover
-	// an archived-prefix change.
-	renderedBaseArchiveKey string
+	renderedBaseValid         bool
+	renderedBaseKey           string
+	renderedBaseMsgCount      int
+	renderedBaseLastStreaming bool
+	renderedBaseHistoryLen    int
+	renderedBaseArchiveKey    string
 
-	// lastViewportKey is the fingerprint of the model state the viewport
-	// content currently on screen was materialized from (see
-	// viewportContentKey / noteViewportMaterialized). Both the render path
-	// (syncViewportForFrame) and the Update path (shouldSkipViewportUpdate)
-	// compare the live fingerprint against it: equal means "a rebuild would
-	// produce what is already materialized" and the O(lines) work is skipped.
-	// An explicit "" invalidates it (force a rebuild) — several settings paths
-	// rely on that.
 	lastViewportKey string
 
-	// viewportBuiltWidth/Height are the layout dimensions (viewport.Width,
-	// viewport.Height) the materialized base lines were wrapped for. View()
-	// owns the viewport dimensions — they derive from the rendered heights of
-	// the status line, queue row and input bar — so a frame rendered at other
-	// dimensions is the only case the render path must always rebuild for, and
-	// it is never deferred by the streaming throttle (see
-	// viewportGeometryChanged / syncViewportForFrame).
 	viewportBuiltWidth  int
 	viewportBuiltHeight int
 
-	// viewportBuiltAt is when the viewport content was last materialized. It
-	// bounds the streaming throttle: the render path never serves content older
-	// than streamThrottleInterval, even if the throttle's scheduled tick is
-	// lost (see viewportRebuildDeferred).
 	viewportBuiltAt time.Time
 
-	// onViewportRebuild, when non-nil, is called on every viewport
-	// materialization (updateViewportWithHistory) with whether it ran inside a
-	// View() render frame (frameOpen). Test-only hook: it pins the T3 contract
-	// that View() does not rebuild the viewport — the rebuild belongs to the
-	// Update paths plus the O(1) render-path guards. Production leaves it nil
-	// (the hot path pays one nil check).
 	onViewportRebuild func(inFrame bool)
 
-	// Virtualized rendering: only render messages visible in the viewport
-	// plus a small buffer above/below for smooth scrolling.
-	renderedMsgStartIdx int // first message index included in renderedBase
-	renderedMsgEndIdx   int // last message index included in renderedBase (exclusive)
-	maxRenderedMessages int // max messages to render at once (0 = unlimited, backward compat)
-	// renderStartIdx is the index into session.Messages of the first message
-	// currently rendered in the chat viewport. Enables lazy loading of older
-	// messages on scroll-up. A value of -1 means uninitialized; 0 means all
-	// messages are rendered.
-	renderStartIdx int
+	renderedMsgStartIdx int
+	renderedMsgEndIdx   int
+	maxRenderedMessages int
+	renderStartIdx      int
 
-	// renderWindowSessionKey tracks which session renderStartIdx belongs to.
-	// When the session changes, the render window resets to the default.
 	renderWindowSessionKey string
 
-	// Archived (display-only) history prefix — messages that have been
-	// evicted from the agent context but are still shown in the TUI for
-	// reference. These messages are NEVER re-injected into the LLM context.
-	// Loaded lazily from SQLite via LoadMessagesWindow.
-	archivedPrefix       []providers.Message // display-only, chronological (oldest first)
-	archivedKey          string              // session to which archivedPrefix belongs
-	archivedTotal        int                 // evicted messages count at last read
-	archivedOldestSeq    int                 // seq of archivedPrefix[0]; cursor for older pages
-	archivedHasOlder     bool                // older archived rows exist beyond archivedOldestSeq
-	archivedVisibleCount int                 // user/assistant messages in archivedPrefix (O(1) render fingerprint)
+	archivedPrefix       []providers.Message
+	archivedKey          string
+	archivedTotal        int
+	archivedOldestSeq    int
+	archivedHasOlder     bool
+	archivedVisibleCount int
 
-	// Cached token/context usage for the sidebar. GetCurrentContextUsage is
-	// expensive (it rebuilds the system prompt from disk and estimates tokens
-	// over the whole history), so it must NOT run on every View() render.
-	// The cache is refreshed at most once per tokenCacheTTL and is invalidated
-	// immediately when the history message count changes.
-	tokenCacheKey       string    // sessionKey:msgCount the cache belongs to
-	tokenCacheTime      time.Time // when the cache was last refreshed
-	tokenCacheCurrent   int       // cached current context tokens
-	tokenCacheWindow    int       // cached context window
-	tokenCacheCumInput  int       // cached cumulative input tokens
-	tokenCacheCumOutput int       // cached cumulative output tokens
+	tokenCacheKey       string
+	tokenCacheTime      time.Time
+	tokenCacheCurrent   int
+	tokenCacheWindow    int
+	tokenCacheCumInput  int
+	tokenCacheCumOutput int
 
-	// Per-render-frame history snapshot. View() reads the session history
-	// (GetHistoryView) at most ONCE per frame and every consumer in that frame
-	// — viewport rebuild, token/context readouts, sidebar — reuses this
-	// snapshot instead of reading again. Before this, a single frame performed
-	// three reads and two of them (both getTokenUsage call sites) only ever
-	// needed the message count.
-	//
-	// The snapshot is NEVER reused across frames: the history can be mutated in
-	// place without its length changing (the streaming assistant message is
-	// replaced by its final version), so a slice kept across frames would keep
-	// serving the previous content and freeze the finished turn out of the
-	// transcript. The render entry point opens a frame (beginRenderFrame) and
-	// closes it when View() returns; outside a frame every read is fresh.
-	frameOpen  bool                // a View() render frame is currently open
-	frameValid bool                // frameView/frameCount belong to this frame
-	frameKey   string              // session key the snapshot was read for
-	frameView  []providers.Message // read-only shared snapshot (never mutated)
-	frameCount int                 // user+assistant messages in frameView
-	// frameHistoryLen/frameLastStreaming are the O(1) terms of that same
-	// snapshot that the viewport fingerprint is built from: its total length
-	// (any role) and whether its last message is still streaming. They come
-	// from the frame's single history read, so count/terms always describe the
-	// same snapshot. The length catches an appended tool/result message —
-	// which frameCount deliberately does not count — and frameLastStreaming
-	// catches "the assistant message was finalized in place" (same count,
-	// changed content).
+	frameOpen          bool
+	frameValid         bool
+	frameKey           string
+	frameView          []providers.Message
+	frameCount         int
 	frameHistoryLen    int
 	frameLastStreaming bool
 
-	// countMemo memoizes countHistoryMessages for the message SEQUENCE it was
-	// last computed from (T12), keyed by the identity of the slice the count
-	// belongs to: the address of its first element plus its length.
-	//
-	// The frame's single read (historyView) and the rebuild that consumes it
-	// (updateViewportWithHistory) resolve the SAME snapshot, so the rolescan
-	// runs once per snapshot instead of once per consumer — and a frame over an
-	// unchanged snapshot runs none at all. The key is valid because the count is
-	// a pure function of the roles and the length of the slice, and pkg/session
-	// republishes a fresh copy on every structural mutation (rebuilding one
-	// after an in-place streaming chunk), so a different slice always means a
-	// different key. See Model.historyMessageCount for the full argument.
 	countMemo historyCountMemo
 
-	// onHistoryRead, when non-nil, is called with the session key of every
-	// history read the TUI performs (see historyView). Test-only hook: it lets
-	// a test assert the "one history read per frame" contract with a counter.
-	// Production leaves it nil (the hot path pays one nil check).
 	onHistoryRead func(sessionKey string)
 
-	// onHistoryCountScan, when non-nil, is called every time the memoized
-	// history count (Model.historyMessageCount) has to run the O(n) rolescan
-	// instead of serving the memo. Test-only hook: it lets a test assert the
-	// O(1)-amortized contract — N accesses to one snapshot cost one scan.
-	// Production leaves it nil (a miss pays one nil check).
 	onHistoryCountScan func()
 
-	// onSubagentsRefresh, when non-nil, is called every time the subagent
-	// listing cache is refreshed from the backend (see refreshSubagentsCache).
-	// Test-only hook: it lets a test assert that View() never refreshes the
-	// listing and that a burst of lifecycle events coalesces into a single
-	// lookup. Production leaves it nil (the refresh path pays one nil check).
 	onSubagentsRefresh func()
 
-	// Cached subagent listing served by the render path. Written ONLY by
-	// refreshSubagentsCache (Update() routes, ≤ once per subagentsCacheTTL);
-	// View() reads it as-is and may therefore show data up to that TTL stale —
-	// see subagentsCacheState for the full contract and the measured cost it
-	// takes off the frame.
 	subagentsCache subagentsCacheState
 
-	// onSessionsRefresh, when non-nil, is called every time the session listing
-	// is actually reloaded (see refreshSessionsCache). Test-only hook: it lets a
-	// test assert that a burst of events inside the window collapses into a
-	// single ListSessions/AllTotalMessageCounts pass, and that the call sites
-	// documented as "must be exact" (session switch, /sessions picker) do refresh.
-	// Production leaves it nil (the refresh path pays one nil check).
 	onSessionsRefresh func()
 
-	// Cached session listing. Written ONLY by refreshSessionsCache (Update()
-	// routes, ≤ once per sessionsRefreshTTL); reloadSessions re-derives the
-	// visible list from it, so the O(sessions) walk + the batched store counts
-	// are off the per-event path — see sessionsCacheState for the contract.
 	sessionsCache sessionsCacheState
 
-	// Subagent click targets in sidebar — tracks Y positions for mouse clicks
 	subagentClickTargets []subagentClickTarget
 
-	// backToParentClick is the status-line row carrying the "back to parent
-	// chat" affordance while a subagent session is on screen. renderLeftColumn
-	// recomputes it on every chat frame; View() clears the flag first, so
-	// hasBackToParentClick is only true while the row it describes is actually
-	// on screen (never on welcome/modals-over-welcome frames).
 	backToParentClick    subagentClickTarget
 	hasBackToParentClick bool
 
-	// mouseEnabled tracks whether mouse capture is active (default: true).
-	// When enabled, scroll-wheel and sidebar clicks work; users hold Shift
-	// to bypass capture for native text selection. ctrl+t toggles as fallback.
-	mouseEnabled bool
-	// keepAwakeEnabled mirrors the persisted tui.keep_awake INTENT (what the
-	// user asked for). The effective state is keepAwake.Active(): a platform
-	// with no mechanism, or a failed Start, keeps the intent set while the
-	// inhibition stays off, and keepAwakeErr explains why.
+	mouseEnabled     bool
 	keepAwakeEnabled bool
 	keepAwake        *keepawake.Inhibitor
 	keepAwakeErr     string
 
-	// forceGotoBottom forces the viewport to scroll to bottom on the next
-	// render. Set when switching sessions or creating a new chat.
 	forceGotoBottom bool
 
-	// frameLayout is the vertical structure of the frame being rendered, filled
-	// in by View() (see frame_layout.go). lastPaintedLayout is the value the
-	// renderer was last told to repaint, so a layout change can force one full
-	// repaint without repainting on every frame.
 	frameLayout          frameLayout
 	lastPaintedLayout    frameLayout
 	frameLayoutRepainted bool
 
-	// compactFeedback holds the result of /compact to display in the viewport.
-	// Cleared when the user sends the next message.
 	compactFeedback string
 
-	// statusFeedback holds the /status report until the user sends the next
-	// message. It is surfaced in the viewport overlay so the context stats
-	// remain visible even when the sidebar is hidden.
 	statusFeedback string
 
-	// Pending command approval state — set when the agent requests approval
-	// for a potentially dangerous exec command. The user must approve (y) or
-	// reject (n) before the agent can continue.
 	pendingApprovalID     string
 	pendingApprovalCmd    string
 	pendingApprovalReason string
-	// approvalShowFull toggles the command display between a one-line preview
-	// (default — keeps the prompt box intact at any terminal width) and the
-	// full wrapped command ("v" key).
-	approvalShowFull bool
-	approvalResult   string // brief feedback after user decision ("✅ ..." or "❌ ...")
+	approvalShowFull      bool
+	approvalResult        string
 
-	// pendingApprovals stashes approval prompts that belong to sessions other
-	// than the one currently on screen (background/subagent sessions) as well
-	// as prompts abandoned by a session switch, keyed by session key. They are
-	// restored when the user navigates back to the owning session, so an
-	// approval is never silently dropped (the blocked agent would otherwise
-	// sit in WaitForResponse until the ApprovalManager timeout).
 	pendingApprovals map[string]pendingApprovalSnapshot
 }
 
-// pendingApprovalSnapshot is a frozen approval prompt (id/command/reason)
-// stored per session while it is not the visible one.
 type pendingApprovalSnapshot struct {
 	id     string
 	cmd    string

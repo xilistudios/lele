@@ -4,7 +4,6 @@ import type { ReactNode } from 'react'
 import React from 'react'
 import { ThemeProvider, useTheme } from './ThemeContext'
 
-// Helper component that exposes theme controls for testing
 function ThemeControls({ onReady }: { onReady?: (api: ReturnType<typeof useTheme>) => void }) {
   const api = useTheme()
   React.useEffect(() => {
@@ -29,7 +28,11 @@ describe('applyTheme — .dark class sync', () => {
     let themeApi: ReturnType<typeof useTheme> | undefined
 
     renderWithTheme(
-      <ThemeControls onReady={(api) => { themeApi = api }} />,
+      <ThemeControls
+        onReady={(api) => {
+          themeApi = api
+        }}
+      />,
     )
 
     act(() => {
@@ -41,16 +44,18 @@ describe('applyTheme — .dark class sync', () => {
   })
 
   test('removes class "dark" when theme is light', () => {
-    // Start with dark in localStorage so initial theme is dark
     localStorage.setItem('lele-theme', 'dark')
 
     let themeApi: ReturnType<typeof useTheme> | undefined
 
     renderWithTheme(
-      <ThemeControls onReady={(api) => { themeApi = api }} />,
+      <ThemeControls
+        onReady={(api) => {
+          themeApi = api
+        }}
+      />,
     )
 
-    // Confirm dark was applied initially
     expect(document.documentElement.classList.contains('dark')).toBe(true)
 
     act(() => {
@@ -67,7 +72,11 @@ describe('applyTheme — .dark class sync', () => {
     let themeApi: ReturnType<typeof useTheme> | undefined
 
     renderWithTheme(
-      <ThemeControls onReady={(api) => { themeApi = api }} />,
+      <ThemeControls
+        onReady={(api) => {
+          themeApi = api
+        }}
+      />,
     )
 
     expect(document.documentElement.classList.contains('dark')).toBe(true)
@@ -76,7 +85,6 @@ describe('applyTheme — .dark class sync', () => {
       themeApi!.toggleTheme()
     })
 
-    // toggle from dark → light
     expect(document.documentElement.classList.contains('dark')).toBe(false)
     expect(document.documentElement.getAttribute('data-theme')).toBe('light')
   })
