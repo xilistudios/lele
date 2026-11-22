@@ -72,7 +72,7 @@ function FolderChip({
 
 export function ChatComposer() {
   const { t } = useTranslation()
-  const { canCancel, hasConversation, availableModels, groupedModels, selectedModel, thinkLevel } =
+  const { canCancel, availableModels, groupedModels, selectedModel, thinkLevel } =
     useChatPageContext()
   const {
     currentAgent,
@@ -452,8 +452,7 @@ export function ChatComposer() {
             shape="pill"
             ariaLabel={t('chat.agent')}
             buttonLabel={t('chat.agent')}
-            disabled={hasConversation}
-            emptyLabel={t('chat.agentLocked')}
+            emptyLabel={t('chat.default')}
             onChange={onSelectAgent}
             options={agentsOptions}
             placeholder={
