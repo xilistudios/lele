@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useSettings } from '../../../contexts/SettingsContext'
+import { defaultAgentId, selectableAgents } from '../../../lib/agentSelection'
 import { SelectInput } from '../../molecules'
 import { AgentMCPSection } from '../agents/AgentMCPSection'
 
@@ -18,15 +19,15 @@ export function MCPSettings() {
 
   if (!draftConfig) return null
 
-  const list = draftConfig.agents?.list ?? []
-  const options: Option[] = list.length
-    ? list.map((entry) => agentOption(entry.id, entry.name))
+  const selectable = selectableAgents(draftConfig.agents?.list ?? [])
+  const options: Option[] = selectable.length
+    ? selectable.map((entry) => agentOption(entry.id, entry.agent.name))
     : [{ value: 'main', label: 'main' }]
-  const fallbackId = list.find((entry) => entry.default)?.id ?? list[0]?.id ?? 'main'
+  const fallbackId = defaultAgentId(selectable) ?? 'main'
   const activeId =
     selectedId && options.some((option) => option.value === selectedId) ? selectedId : fallbackId
-  const savedIds = new Set((remoteConfig?.agents?.list ?? []).map((entry) => entry.id))
-  const unsaved = list.length > 0 && !savedIds.has(activeId)
+  const savedIds = new Set((remoteConfig?.agents?.list ?? []).map((entry) => entry.id.trim()))
+  const unsaved = selectable.length > 0 && !savedIds.has(activeId)
 
   return (
     <div data-testid="mcp-settings-page" className="space-y-4">
@@ -44,7 +45,7 @@ export function MCPSettings() {
         </div>
       </div>
 
-      {list.length === 0 && (
+      {selectable.length === 0 && (
         <p className="text-xs text-text-tertiary">{t('settings.mcpPage.implicitMain')}</p>
       )}
 

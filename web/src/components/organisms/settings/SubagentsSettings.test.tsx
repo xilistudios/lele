@@ -174,6 +174,21 @@ describe('SubagentsSettings — agent selector', () => {
     expect(searchInput()).toBeNull()
   })
 
+  test('a blank default entry does not win the selection', () => {
+    const u = setup([{ id: '   ', default: true }, CODER])
+    expect(selectOf(u.container)?.value).toBe('coder')
+  })
+
+  test('a padded id is trimmed and still writes its own index', () => {
+    const u = setup([{ id: ' coder ', name: 'Coder', default: true }])
+    expect(selectOf(u.container)?.value).toBe('coder')
+    fireEvent.click(u.getByLabelText(tr('settings.agentPage.subagentsEnable')))
+    expect(u.lastWrite('agents.list.0.subagents')).toEqual([
+      'agents.list.0.subagents',
+      { allow_agents: [] },
+    ])
+  })
+
   test('a deleted selection falls back to the default agent', () => {
     const view = render(pageTree(AGENTS, { defaults: DEFAULTS }))
     fireEvent.change(view.getByLabelText(tr('settings.subagentsPage.agentLabel')), {

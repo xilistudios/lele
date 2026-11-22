@@ -212,6 +212,21 @@ describe('MCPSettings — agent selection', () => {
     expect(u.need('mcp-filter-global').getAttribute('aria-pressed')).toBe('false')
   })
 
+  test('a blank agent id falls back to the implicit main agent', async () => {
+    const u = await ready(setup([{ id: '   ', name: 'Ghost', default: true }]))
+    expect(u.selectOf().value).toBe('main')
+    expect(u.selectOf().options).toHaveLength(1)
+    expect(u.inventories()[0]).toEqual({ kind: 'inventory', agentId: 'main' })
+    expect(u.container.textContent).toContain(tr('settings.mcpPage.implicitMain'))
+    expect(u.byTestId('mcp-unsaved-agent')).toBeNull()
+  })
+
+  test('a blank default entry does not win the selection', async () => {
+    const u = await ready(setup([{ id: ' ', default: true }, CODER]))
+    expect(u.selectOf().value).toBe('coder')
+    expect(u.inventories()[0]).toEqual({ kind: 'inventory', agentId: 'coder' })
+  })
+
   test('a deleted selection falls back to the default agent', async () => {
     const u = await ready(setup())
     fireEvent.change(u.selectOf(), { target: { value: 'coder' } })

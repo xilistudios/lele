@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useSettings } from '../../../contexts/SettingsContext'
 import { getErrorForPath, isDirtyPath } from '../../../hooks/useSettingsHelpers'
+import { defaultAgentId, selectableAgents } from '../../../lib/agentSelection'
 import type { EditableAgentDefaults } from '../../../lib/types'
 import { NumberInput, SelectInput, SettingsField, SettingsSection } from '../../molecules'
 import { AgentSubagentsSection } from '../agents/AgentSubagentsSection'
@@ -50,12 +51,11 @@ export function SubagentsSettings() {
   if (!draftConfig) return null
 
   const defaults: Partial<EditableAgentDefaults> | undefined = draftConfig.agents?.defaults
-  const list = draftConfig.agents?.list ?? []
-  const fallbackId = list.find((entry) => entry.default)?.id ?? list[0]?.id ?? null
+  const selectable = selectableAgents(draftConfig.agents?.list ?? [])
+  const fallbackId = defaultAgentId(selectable)
   const activeId =
-    selectedId && list.some((entry) => entry.id === selectedId) ? selectedId : fallbackId
-  const index = list.findIndex((entry) => entry.id === activeId)
-  const agent = index >= 0 ? list[index] : undefined
+    selectedId && selectable.some((entry) => entry.id === selectedId) ? selectedId : fallbackId
+  const selection = selectable.find((entry) => entry.id === activeId)
 
   return (
     <div data-testid="subagents-settings-page" className="mx-auto w-full max-w-[820px] space-y-6">
@@ -85,7 +85,7 @@ export function SubagentsSettings() {
         })}
       </SettingsSection>
 
-      {agent ? (
+      {selection ? (
         <>
           <div className="flex flex-wrap items-end gap-3">
             <div className="w-56">
@@ -97,24 +97,29 @@ export function SubagentsSettings() {
               </label>
               <SelectInput
                 id="subagents-agent-select"
-                value={activeId ?? ''}
+                value={selection.id}
                 onChange={setSelectedId}
-                options={list.map((entry) => ({
+                options={selectable.map((entry) => ({
                   value: entry.id,
-                  label: agentLabel(entry.id, entry.name),
+                  label: agentLabel(entry.id, entry.agent.name),
                 }))}
               />
             </div>
             <Link
               data-testid="subagents-open-agent"
-              to={`/settings/agents/${encodeURIComponent(agent.id)}/subagents`}
+              to={`/settings/agents/${encodeURIComponent(selection.id)}/subagents`}
               className="text-xs text-accent-primary hover:underline"
             >
               {t('settings.subagentsPage.openAgent')}
             </Link>
           </div>
 
-          <AgentSubagentsSection key={agent.id} agent={agent} index={index} agents={list} />
+          <AgentSubagentsSection
+            key={selection.id}
+            agent={selection.agent}
+            index={selection.index}
+            agents={selectable.map((entry) => entry.agent)}
+          />
         </>
       ) : (
         <div
