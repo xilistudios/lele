@@ -1,7 +1,5 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-// Source badge palette lives in lib/skillSource.ts (single source of truth,
-// spec §4.5.3): the per-agent Skills tab renders the exact same badge.
 import { sourceBadgeClassNames, sourceBadgeLabel } from '../../lib/skillSource'
 import type { SkillInfo } from '../../lib/types'
 import { IconButton } from '../atoms/IconButton'
@@ -12,15 +10,8 @@ type Props = {
   isRemoving: string | null
   onRemove: (name: string) => void
   onToggle?: (name: string, enabled: boolean) => void
-  /**
-   * Whether a card offers a control. Both default to today's rule
-   * (`source !== 'builtin'`), so a caller that passes neither gets exactly the
-   * same list as before. The scope tabs override them per view: the Global
-   * view hides every Remove, the By-agent view decides per skill.
-   */
   canRemove?: (skill: SkillInfo) => boolean
   canToggle?: (skill: SkillInfo) => boolean
-  /** Empty-state copy. Omitted = the original `skills.noSkills*` strings. */
   emptyTitle?: string
   emptyDescription?: string
 }
@@ -38,14 +29,8 @@ export function SkillsList({
 }: Props) {
   const { t } = useTranslation()
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
-
-  // Today's rule, kept visible (and overridable) here instead of inline:
-  // built-ins are shared with every agent and this list does not own them.
   const allowRemove = canRemove ?? ((skill: SkillInfo) => skill.source !== 'builtin')
   const allowToggle = canToggle ?? ((skill: SkillInfo) => skill.source !== 'builtin')
-
-  // `name` alone can repeat across sources (a workspace `memory` shadowing a
-  // built-in one), so the confirmation and the React key use the composite.
   const cardKey = (skill: SkillInfo) => `${skill.source ?? 'unknown'}:${skill.name}`
 
   const handleRemoveClick = (skill: SkillInfo) => {

@@ -24,7 +24,6 @@ import { QuickChatPanel } from './QuickChatPanel'
 
 const MAX_VISIBLE_SESSIONS = 5
 
-/** Shape of a sidebar destination (label + route + icon). */
 type NavRowItem = { path: string; label: string; icon: typeof ChatBubbleIcon }
 
 type SidebarProps = {
@@ -50,14 +49,6 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
     onLogout,
   } = useAppLogicContext()
   const isMobile = useIsMobile()
-
-  // `collapsed` is a desktop-only preference (persisted in localStorage) that
-  // renders the rail: 60px wide, icons only, labels revealed via hover
-  // tooltips. On mobile the sidebar is an overlay drawer: a hover tooltip
-  // cannot be triggered by touch, so a collapsed drawer shows a strip of
-  // unlabeled icons the user cannot read. Therefore the drawer always renders
-  // full (280px, labels visible); the preference only applies from md up,
-  // where the sidebar is static and hover works.
   const collapsed = collapsedPref && !isMobile
 
   const deviceName = session?.device_name ?? 'lele'
@@ -107,17 +98,9 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
     navigate('/pair', { replace: true })
   }, [onLogout, navigate, isMobile, onClose])
 
-  // A nav item stays active on its own route AND on nested routes below it.
-  // The trailing '/' in the prefix keeps the match segment-aligned, so sibling
-  // paths that merely share a textual prefix cannot light up: '/chats' does
-  // NOT match '/chat/…' (startsWith('/chats/') is false).
   const isActiveRoute = (path: string) =>
     location.pathname === path || location.pathname.startsWith(`${path}/`)
 
-  // "Chats" is the only destination left in the sidebar. Everything else moved
-  // out: Agents and Providers are Settings tabs now, and the tooling pages
-  // (skills, cron, background processes, secrets) live in the right-hand Tools
-  // drawer of the chat (see organisms/ToolsSidebar).
   const navItems = [
     {
       path: '/chats',
@@ -126,9 +109,6 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
     },
   ]
 
-  // Full-width labelled row (expanded sidebar). `aria-current="page"` marks
-  // the active destination for assistive tech without the `role="button"`
-  // attribute that the shared App.test.tsx selectors rely on NOT being present.
   const renderExpandedRow = (item: NavRowItem) => (
     <button
       key={item.path}
@@ -185,23 +165,6 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
         onKeyDown={(e) => e.key === 'Escape' && onClose()}
         aria-hidden={!mobileOpen}
       />
-
-      {/* The drawer is `fixed inset-y-0`, so its height is the viewport height
-          and every section below competes for that fixed budget. On mobile the
-          nav menu is `shrink-0` (never smaller than its natural height), which
-          (1) starved the chat-history section to zero — its `shrink-0` header
-          and "show more" button then spilled out of the section and painted
-          over the first menu entries, the "Chats / Show more (507)" overlap in
-          the bug screenshot — and (2) on short viewports pushed the last
-          entries (Secrets, device footer) past the bottom edge with nothing to
-          scroll to them. Fix: below md the drawer itself is the single scroll
-          surface (`max-md:overflow-y-auto`) and both sections keep their
-          natural height (history gets `max-md:flex-none`, the menu stays
-          `shrink-0`), so one gesture reaches everything and no section is
-          starved. Deliberately no nested `overflow-y-auto` on the sections in
-          mobile: two stacked scrollers each capture the touch gesture and the
-          drawer can no longer be scrolled past the first one. On md+ the
-          sidebar is static and the inner list scrolls as before. */}
       <aside
         className={`fixed inset-y-0 left-0 z-50 flex flex-col max-md:overflow-y-auto safe-area-y border-r border-border bg-background-secondary transition-all duration-300 ease-in-out md:relative md:translate-x-0 ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
@@ -296,12 +259,6 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
               </div>
             </>
           ) : (
-            /* One single row: the primary "New chat" action takes the leftover
-               width and the secondary "Search" action is an icon button pinned
-               to its right, so both sit on the same line instead of stacking as
-               two full-width rows. `min-w-0` + `truncate` let a long localized
-               label shrink instead of pushing the search button out of the
-               280px drawer. */
             <div className="flex items-center gap-1">
               <button
                 type="button"
@@ -323,11 +280,6 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
                 >
                   <SearchIcon size={16} />
                 </IconButton>
-                {/* The icon-only button keeps its label in a tooltip, using the
-                    same `left-full` anchoring as the rest of the sidebar's
-                    icon buttons. Opening it downwards (`top-full`) instead
-                    would cover the Chat/Agent mode selector that sits right
-                    below this row. */}
                 <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
                   {t('chat.search')}
                 </span>
@@ -341,19 +293,6 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
             <ModeSelector />
           </div>
         )}
-
-        {/* Chat history. On desktop `flex-1 min-h-0` makes this the grow
-            section: it takes the leftover height and its inner list scrolls.
-            On mobile that same math collapsed it to whatever the `shrink-0`
-            nav menu left over — zero on a phone — and because its header and
-            "show more" button are `shrink-0`, they overflowed the section
-            bounds and painted over the first menu entries (the overlap in the
-            bug screenshot). `max-md:flex-none` gives the section its natural
-            height instead: it no longer depends on what the menu leaves, and
-            since the drawer scrolls as a whole there is no need for a second,
-            nested scroller here. The list is capped at MAX_VISIBLE_SESSIONS
-            rows until "show more" is tapped, so natural height stays bounded.
-            Mobile-only variant, so the desktop flex math is untouched. */}
         <div
           data-testid="sidebar-history-section"
           className={collapsed ? 'px-2' : 'flex min-h-0 flex-1 flex-col px-3 py-3 max-md:flex-none'}
@@ -464,16 +403,6 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
             </>
           )}
         </div>
-
-        {/* Navigation ("Chats" is the only row).
-            `shrink-0` stays: this menu must always keep its natural height,
-            otherwise the history section above squeezes it. On a phone the
-            drawer itself scrolls (see <aside>), so nothing can be cut off at
-            the bottom edge.
-            The rail variant keeps the same rule: no overflow on this nav. An
-            `overflow-y-auto` here forces the computed `overflow-x` to `auto`
-            too, which clips the absolutely positioned tooltip children at the
-            59px rail edge. */}
         <nav
           data-testid="sidebar-nav-section"
           className={

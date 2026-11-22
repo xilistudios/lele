@@ -1,25 +1,3 @@
-/**
- * Regression tests for the LLM-failure error box.
- *
- * DEFECT: when an LLM request failed after every retry, the WebUI flashed the
- * backend's plain "❌ Error …" text as a normal assistant bubble and then the
- * history refetch DELETED it (the failure was never persisted) — so the user saw
- * the error appear and vanish. The backend now persists the failure with
- * `error_detail` and the builder maps it onto `ChatMessage.error`; this row
- * renders it as the red error box instead of a normal bubble.
- *
- * What MUST hold:
- *   - the box is an alert (role="alert") carrying the failure text, so it is
- *     announced to assistive tech and is queryable by its accessible name,
- *   - normal content/reasoning/tool rendering is skipped (the legacy ❌ text is
- *     not repeated, the box replaces the bubble),
- *   - the "archived from context" label is skipped (the message is excluded from
- *     context precisely because it is an error),
- *   - an error-only message with EMPTY content is not null-rendered (that is the
- *     disappearing-error bug this path exists to fix).
- *
- * Conventions (imports/mocks/i18n/helpers) mirror MessageBubble.test.tsx.
- */
 import '../../test/setup'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { render } from '@testing-library/react'
@@ -67,9 +45,6 @@ function makeAssistantMessage(overrides: Partial<ChatMessage> = {}): ChatMessage
 }
 
 const DETAIL = 'LLM call failed after retries: 429 Too Many Requests'
-
-// The box's accessible name is the localized title, so the queries below match
-// what a screen reader announces instead of a wrapper attribute.
 const ERROR_TITLE = i18n.t('chat.llmErrorTitle')
 
 beforeEach(() => {
