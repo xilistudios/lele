@@ -10,8 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// loadCronJobs refreshes the cron modal list from the cron store. It reloads
-// the store from disk so the list reflects jobs created/edited by the gateway.
 func (m *Model) loadCronJobs() {
 	m.modalItems = nil
 	m.cronModalKeys = nil
@@ -23,10 +21,9 @@ func (m *Model) loadCronJobs() {
 		return
 	}
 
-	// Reload from disk to pick up external changes.
 	_ = m.cronService.Load()
 
-	jobs := m.cronService.ListJobs(true) // include disabled
+	jobs := m.cronService.ListJobs(true)
 	if len(jobs) == 0 {
 		m.modalItems = append(m.modalItems, i18n.T("tui.noCronJobs"))
 		return
@@ -37,14 +34,11 @@ func (m *Model) loadCronJobs() {
 		m.cronModalKeys = append(m.cronModalKeys, j.ID)
 	}
 
-	// The list may have shrunk (e.g. a job was deleted while the cursor was on
-	// the last row) — keep the cursor within bounds.
 	m.clampModalCursor()
 }
 
-// formatCronJobLine renders a single cron job as a compact list line.
 func formatCronJobLine(j cron.CronJob) string {
-	state := "●" // enabled
+	state := "●"
 	stateColor := SecondaryColor
 	if !j.Enabled {
 		state = "○"
@@ -61,7 +55,6 @@ func formatCronJobLine(j cron.CronJob) string {
 	if name == "" {
 		name = j.ID
 	}
-	// Truncate long names for the list view (rune-safe, not byte-safe).
 	name = truncateRightCells(name, 40)
 
 	sched := formatCronSchedule(j.Schedule)
@@ -69,7 +62,6 @@ func formatCronJobLine(j cron.CronJob) string {
 	return fmt.Sprintf("%s %s  %s", prefix, name, CommentColorStyle.Render("["+sched+"]"))
 }
 
-// formatCronSchedule returns a short human-readable description of a schedule.
 func formatCronSchedule(s cron.CronSchedule) string {
 	switch s.Kind {
 	case "at":
@@ -94,7 +86,6 @@ func formatCronSchedule(s cron.CronSchedule) string {
 	}
 }
 
-// shortDuration renders a duration compactly (e.g. "30s", "5m", "2h", "1d").
 func shortDuration(d time.Duration) string {
 	switch {
 	case d < time.Minute:
@@ -108,11 +99,9 @@ func shortDuration(d time.Duration) string {
 	}
 }
 
-// renderCronDetail renders the detail view for the currently selected cron job.
 func (m *Model) renderCronDetail() string {
 	job := m.cronService.GetJob(m.cronDetailJobID)
 	if job == nil {
-		// Job was deleted; fall back to the list.
 		m.cronDetailMode = false
 		m.loadCronJobs()
 		return m.renderModal(i18n.T("tui.cronJobs"))
@@ -120,7 +109,6 @@ func (m *Model) renderCronDetail() string {
 
 	var sb strings.Builder
 
-	// Title line: name + enabled state
 	name := job.Name
 	if name == "" {
 		name = job.ID
@@ -138,7 +126,6 @@ func (m *Model) renderCronDetail() string {
 	)
 	sb.WriteString(titleLine + "\n\n")
 
-	// Detail fields
 	labelStyle := lipgloss.NewStyle().Foreground(AccentColor)
 	addField := func(label, value string) {
 		sb.WriteString(labelStyle.Render(label+": ") + value + "\n")
@@ -189,8 +176,6 @@ func (m *Model) renderCronDetail() string {
 	return m.paintFrame(box)
 }
 
-// selectedCronJobID returns the ID of the currently selected cron job in the
-// modal list, or "" if none is selected (e.g. empty list).
 func (m *Model) selectedCronJobID() string {
 	if m.cronDetailMode && m.cronDetailJobID != "" {
 		return m.cronDetailJobID
@@ -201,8 +186,6 @@ func (m *Model) selectedCronJobID() string {
 	return ""
 }
 
-// reselectCronJob restores the selection cursor (and detail mode) to the job
-// with the given ID after the list has been reloaded.
 func (m *Model) reselectCronJob(jobID string) {
 	for i, id := range m.cronModalKeys {
 		if id == jobID {
@@ -213,7 +196,6 @@ func (m *Model) reselectCronJob(jobID string) {
 			return
 		}
 	}
-	// Job no longer present; reset selection.
 	if m.modalSelectedIdx >= len(m.cronModalKeys) && len(m.cronModalKeys) > 0 {
 		m.modalSelectedIdx = len(m.cronModalKeys) - 1
 	}

@@ -15,45 +15,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return model, cmd
 	}
-	// T6: the subagent listing is refreshed HERE — the single choke point every
-	// message funnels through, so no early-returning handler can skip it — and
-	// nowhere else on the frame path. refreshSubagentsCache coalesces to at most
-	// one backend lookup per subagentsCacheTTL, which is what keeps a burst of
-	// subagent.result events (many subagents finishing at once) from turning
-	// into one expensive listing scan per event.
 	mm.refreshSubagentsCache()
-	// Safety net for the client-side queue: every event path — including the
-	// many early returns inside the modal branch — funnels through here, so a
-	// pending backlog can never be left without a live retry chain (e.g. ESC
-	// closing the modal that had deferred a flush). maybeFlushQueue is a no-op
-	// on an empty queue, re-checks the busy state itself, and its retry tick
-	// is deduped by tickPending, so it can never start a second turn or a
-	// second tick chain.
 	if flushCmd := mm.maybeFlushQueue(); flushCmd != nil {
 		cmd = tea.Batch(cmd, flushCmd)
 	}
 	if focusCmd := mm.syncChatInputFocus(); focusCmd != nil {
 		cmd = tea.Batch(cmd, focusCmd)
 	}
-	// A frame whose layout changed (the status band appearing or disappearing,
-	// the queue band, the autocomplete list, a resize, welcome <-> chat) moves
-	// the bottom block by one or more rows. Ask the renderer to repaint every
-	// row in that case: its per-row cache only knows the strings it wrote, so
-	// without this the rows that changed meaning can keep the old frame's text
-	// (a duplicated status line or input placeholder above the real one).
 	if repaintCmd := mm.consumeLayoutRepaint(); repaintCmd != nil {
 		cmd = tea.Batch(cmd, repaintCmd)
 	}
 	return mm, cmd
 }
 
-// syncChatInputFocus aligns the chat textarea's focus state with the app
-// state. The input is considered active only when no modal is open, no
-// command approval is pending, and the onboarding wizard is not running.
-// Blurring hides the blinking cursor; focusing restores it and restarts the
-// blink loop via the returned command. Returns a non-nil tea.Cmd only when
-// the focus state transitions from blurred to focused, so callers can batch
-// it without spamming blink commands on every update.
 func (m *Model) syncChatInputFocus() tea.Cmd {
 	shouldFocus := m.modalMode == ModalNone &&
 		m.pendingApprovalID == "" &&
@@ -133,15 +107,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// handleKeyMsg routes a keystroke through the input surfaces in priority
-// order: onboarding wizard, open modal, pending approval, autocomplete
-// dropdown, then the main input keys. An unconsumed key still falls through
-// to finishUpdate so typing reaches the chat textarea — the same order the
-// original inline switch relied on.
 func (m *Model) handleKeyMsg(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
-	// Handle onboarding wizard keys. The obConnect step reuses the
-	// ModalAddProvider form modal, so its keys are delegated to the
-	// normal modal handler below (it must NOT be intercepted here).
 	if m.onboardingActive && m.onboardingStep != obConnect {
 		return m.handleOnboardingKey(msg)
 	}
@@ -149,10 +115,6 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd
 		return m.handleModalKey(msg)
 	}
 
-	// Handle command approval when pending — intercept keys before normal
-	// input. The agent is blocked waiting for the user's decision, so this
-	// takes priority over typing new messages. Scrolling is still allowed to
-	// review context.
 	if m.pendingApprovalID != "" && m.modalMode == ModalNone {
 		return m.handleApprovalKey(msg)
 	}
@@ -167,45 +129,23 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd
 	if consumed {
 		return mm, cmd
 	}
-	// Not consumed: forward the (possibly accumulated) cmd together with the
-	// message to finishUpdate so typing still reaches the textarea, exactly
-	// like the original inline switch falling through to the post-switch
-	// block. tea.Batch inside finishUpdate skips nil commands.
 	return mm.finishUpdate(msg, []tea.Cmd{cmd})
 }
 
-// finishUpdate is update()'s shared tail: it forwards the message to the
-// chat textarea (unless a modal owns the input), refreshes slash-command
-// autocomplete and returns the batched commands. Key handling reaches it
-// only when no key case consumed the event; message handlers reach it by
-// falling out of their original switch, so they call it explicitly. The
-// skip list keeps custom TUI messages out of the textarea so they cannot
-// inject garbage runes.
 func (m *Model) finishUpdate(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
-	// The command wizard's template textarea must service its own blink:
-	// while a modal is open nothing else forwards non-key messages to any
-	// widget, so without this the cursor freezes and the blink chain dies
-	// the moment the wizard reaches the template step.
 	if m.modalMode == ModalAddCommand && m.formStepIndex == commandTemplateStep {
 		if _, ok := msg.(cursor.BlinkMsg); ok {
 			m.templateInput, _ = m.templateInput.Update(msg)
-			// textarea.Blink is func() tea.Msg — already a valid tea.Cmd.
 			return m, tea.Cmd(textarea.Blink)
 		}
 	}
 	if m.modalMode == ModalNone {
-		// Only forward message types the textarea knows how to handle.
-		// Custom TUI messages (outboundMsg, tickMsg, completeMsg, streamThrottleMsg, tea.MouseMsg) must be
-		// excluded to prevent garbage characters in the input field.
 		switch msg := msg.(type) {
 		case outboundMsg, completeMsg, tickMsg, streamThrottleMsg, tea.MouseMsg, compactResultMsg, skillsScanResultMsg, skillsInstallResultMsg, skillToggleResultMsg, skillDeleteResultMsg, mcpToggleResultMsg, mcpAddResultMsg, mcpAuthStartMsg, mcpAuthPollMsg, mcpAuthSubmitMsg, connectOAuthStartMsg, connectOAuthPollMsg, connectOAuthSubmitMsg:
-			// skip — not relevant to textarea
 		case tea.KeyMsg:
 			if m.isEscapeSequenceFragment(msg) {
 				break
 			}
-			// For rune messages, filter out SGR mouse escape sequences
-			// that bubbletea may have failed to parse as tea.MouseMsg.
 			if msg.Type == tea.KeyRunes {
 				cleaned, consume := filterAndBufferEscapes(m, msg)
 				if !consume {
@@ -213,8 +153,6 @@ func (m *Model) finishUpdate(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 				}
 				msg.Runes = cleaned
 			}
-			// Do NOT forward "enter" to textarea — it's handled above for sending.
-			// Do NOT forward "ctrl+m" — it's used for /models.
 			if msg.String() == "enter" || msg.String() == "ctrl+m" {
 				break
 			}
@@ -223,7 +161,6 @@ func (m *Model) finishUpdate(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			// Defensive: strip any mouse escape sequences that slipped through.
 			if cleaned := stripMouseEscapeSequences(m.chatInput.Value()); cleaned != m.chatInput.Value() {
 				m.chatInput.SetValue(cleaned)
 			}

@@ -8,7 +8,6 @@ import (
 )
 
 var (
-	// BgColor and other Dracula / Terminal-based premium color palette colors.
 	BgColor        lipgloss.Color
 	InputBgColor   lipgloss.Color
 	PrimaryColor   lipgloss.Color
@@ -21,20 +20,15 @@ var (
 	SelectionBg    lipgloss.Color
 	YellowColor    lipgloss.Color
 
-	// AppContainer is the main container style.
 	AppContainer lipgloss.Style
 
 	StatusRunning   lipgloss.Style
 	StatusCompleted lipgloss.Style
 	StatusFailed    lipgloss.Style
 
-	// BouncingDot is the styled dot used by the loading animation. It is a
-	// package-level style because the animation runs ~10 times per second and
-	// allocating a new lipgloss style per dot per frame was measurable overhead.
 	BouncingDot     lipgloss.Style
 	bouncingDotChar string
 
-	// RightSidebar styles for the right column.
 	RightSidebar lipgloss.Style
 
 	SidebarTitle  lipgloss.Style
@@ -45,30 +39,22 @@ var (
 	SidebarConnectedDot lipgloss.Style
 	SidebarDisabledDot  lipgloss.Style
 
-	// LeftColumnStyle is the left chat column layout.
 	LeftColumnStyle lipgloss.Style
 
-	// HeaderStyle is the top header style.
 	HeaderStyle lipgloss.Style
 
-	// ViewportStyle is the chat history viewport.
 	ViewportStyle lipgloss.Style
 
-	// InputBarContainer is the text input box (full-width bar, no borders, highlighted background).
 	InputBarContainer lipgloss.Style
 
-	// StatusLineStyle is the active status / duration line.
 	StatusLineStyle lipgloss.Style
 
-	// QueueRowStyle is the queued-message preview band under the status line.
 	QueueRowStyle lipgloss.Style
 
-	// BottomBarLeft is the left side of the bottom bar.
 	BottomBarLeft lipgloss.Style
 
 	BottomBarRight lipgloss.Style
 
-	// UserRoleStyle styles user messages.
 	UserRoleStyle lipgloss.Style
 
 	UserMessageStyle lipgloss.Style
@@ -85,7 +71,6 @@ var (
 
 	ThinkingContentStyle lipgloss.Style
 
-	// ToolCallLabel styles tool call labels.
 	ToolCallLabel lipgloss.Style
 
 	ToolCallName lipgloss.Style
@@ -96,24 +81,18 @@ var (
 
 	ToolResultBox lipgloss.Style
 
-	// ErrorTitle and ErrorBox render an LLM request that failed after retries
-	// (see error_box.go). PrimaryColor is the theme's red, the same colour
-	// StatusFailed uses for a failed row.
 	ErrorTitle lipgloss.Style
 
 	ErrorBox lipgloss.Style
 
-	// SubagentProgressLabel displays real-time subagent progress in parent chat.
 	SubagentProgressLabel lipgloss.Style
 
 	SubagentProgressStyle lipgloss.Style
 
-	// WelcomeLogo is the welcome page logo style.
 	WelcomeLogo lipgloss.Style
 
 	WelcomeTip lipgloss.Style
 
-	// ModalContainer styles modals and command autocompletes.
 	ModalContainer lipgloss.Style
 
 	ModalItemActive   lipgloss.Style
@@ -123,52 +102,37 @@ var (
 	CommentColorStyle lipgloss.Style
 	TitleStyle        lipgloss.Style
 
-	// ModelSelectorStyle is the model selector on the welcome screen.
 	ModelSelectorStyle lipgloss.Style
 
 	ModelSelectorLabel lipgloss.Style
 
-	// ApprovalBox styles the pending command approval prompt in the viewport.
 	ApprovalBox lipgloss.Style
 
-	// ApprovalApproved styles the "approved" result message.
 	ApprovalApproved lipgloss.Style
 
-	// SuccessStyle styles success confirmation messages in modals.
 	SuccessStyle lipgloss.Style
 
-	// ApprovalRejected styles the "rejected" result message.
 	ApprovalRejected lipgloss.Style
 
-	// GroupTurnHeader renders the turn header line (┌ [label · Layer N · role]).
 	GroupTurnHeader lipgloss.Style
 
-	// GroupTurnBorder renders the left border for group turn content.
 	GroupTurnBorder lipgloss.Style
 
-	// GroupLayerSeparator renders layer separator lines.
 	GroupLayerSeparator lipgloss.Style
 
-	// GroupSynthesisLabel renders the synthesis section label.
 	GroupSynthesisLabel lipgloss.Style
 
-	// GroupSynthesisBorder renders the border around the final synthesis.
 	GroupSynthesisBorder lipgloss.Style
 )
 
-// init initializes the package with the Dracula default theme at startup.
 func init() {
 	rebuildStyles(theme.DraculaDefault)
 }
 
-// ApplyTheme re-applies the given theme to all package-level styles. It is
-// the public API for live theme switching.
 func ApplyTheme(t theme.Theme) {
 	rebuildStyles(t)
 }
 
-// rebuildStyles (re)assigns every package-level color and style var from the
-// given theme. The style expressions mirror the previous inline initializers.
 func rebuildStyles(t theme.Theme) {
 	BgColor = lipgloss.Color(t.Background)
 	InputBgColor = lipgloss.Color(t.InputBackground)
@@ -182,7 +146,6 @@ func rebuildStyles(t theme.Theme) {
 	SelectionBg = lipgloss.Color(t.SelectionBackground)
 	YellowColor = lipgloss.Color(t.Yellow)
 
-	// AppContainer is the main container style.
 	AppContainer = lipgloss.NewStyle().
 		Background(BgColor).
 		Foreground(Foreground)
@@ -191,13 +154,9 @@ func rebuildStyles(t theme.Theme) {
 	StatusCompleted = lipgloss.NewStyle().Foreground(SecondaryColor)
 	StatusFailed = lipgloss.NewStyle().Foreground(PrimaryColor)
 
-	// BouncingDot is the styled dot used by the loading animation. It is a
-	// package-level style because the animation runs ~10 times per second and
-	// allocating a new lipgloss style per dot per frame was measurable overhead.
 	BouncingDot = lipgloss.NewStyle().Foreground(SecondaryColor)
 	bouncingDotChar = BouncingDot.Render("●")
 
-	// RightSidebar styles for the right column.
 	RightSidebar = lipgloss.NewStyle().
 		Border(lipgloss.Border{Left: "│"}, false, false, false, true).
 		BorderForeground(CommentColor).
@@ -208,10 +167,6 @@ func rebuildStyles(t theme.Theme) {
 		Foreground(Foreground).
 		Bold(true)
 
-	// SidebarHeader intentionally has no MarginTop: view.go already emits an
-	// explicit blank line between sections. A margin here stacked with that
-	// newline produced two blank rows and made the panel taller than the
-	// height budget (content then jumped when a section was clipped).
 	SidebarHeader = lipgloss.NewStyle().
 		Foreground(CommentColor).
 		Bold(true)
@@ -229,45 +184,36 @@ func rebuildStyles(t theme.Theme) {
 	SidebarDisabledDot = lipgloss.NewStyle().
 		Foreground(PrimaryColor)
 
-	// LeftColumnStyle is the left chat column layout.
 	LeftColumnStyle = lipgloss.NewStyle().
 		PaddingRight(1)
 
-	// HeaderStyle is the top header style.
 	HeaderStyle = lipgloss.NewStyle().
 		Foreground(CommentColor).
 		MarginBottom(1)
 
-	// ViewportStyle is the chat history viewport.
 	ViewportStyle = lipgloss.NewStyle()
 
-	// InputBarContainer is the text input box (full-width bar, no borders, highlighted background).
 	InputBarContainer = lipgloss.NewStyle().
 		Background(InputBgColor).
 		Padding(0, 1).
 		MarginTop(1).
 		MarginBottom(1)
 
-	// StatusLineStyle is the active status / duration line.
 	StatusLineStyle = lipgloss.NewStyle().
 		Foreground(CommentColor).
 		MarginTop(1).
 		MarginBottom(1)
 
-	// QueueRowStyle is the queued-message preview band under the status line:
-	// the oldest pending message, dimmed so it reads as "not sent yet".
 	QueueRowStyle = lipgloss.NewStyle().
 		Foreground(CommentColor).
 		Italic(true)
 
-	// BottomBarLeft is the left side of the bottom bar.
 	BottomBarLeft = lipgloss.NewStyle().
 		Foreground(CommentColor)
 
 	BottomBarRight = lipgloss.NewStyle().
 		Foreground(CommentColor)
 
-	// UserRoleStyle styles user messages.
 	UserRoleStyle = lipgloss.NewStyle().
 		Foreground(AccentColor).
 		Bold(true)
@@ -301,7 +247,6 @@ func rebuildStyles(t theme.Theme) {
 		Border(lipgloss.Border{Left: "│"}, false, false, false, true).
 		BorderForeground(CommentColor)
 
-	// ToolCallLabel styles tool call labels.
 	ToolCallLabel = lipgloss.NewStyle().
 		Foreground(OrangeColor).
 		Bold(true)
@@ -339,7 +284,6 @@ func rebuildStyles(t theme.Theme) {
 		Border(lipgloss.Border{Left: "│"}, false, false, false, true).
 		BorderForeground(PrimaryColor)
 
-	// SubagentProgressLabel displays real-time subagent progress in parent chat.
 	SubagentProgressLabel = lipgloss.NewStyle().
 		Foreground(OrangeColor).
 		Bold(true)
@@ -348,7 +292,6 @@ func rebuildStyles(t theme.Theme) {
 		Foreground(OrangeColor).
 		Italic(true)
 
-	// WelcomeLogo is the welcome page logo style.
 	WelcomeLogo = lipgloss.NewStyle().
 		Foreground(PrimaryColor).
 		Bold(true)
@@ -358,7 +301,6 @@ func rebuildStyles(t theme.Theme) {
 		Italic(true).
 		Align(lipgloss.Center)
 
-	// ModalContainer styles modals and command autocompletes.
 	ModalContainer = lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(PurpleColor).
@@ -386,7 +328,6 @@ func rebuildStyles(t theme.Theme) {
 		Foreground(PurpleColor).
 		Bold(true)
 
-	// ModelSelectorStyle is the model selector on the welcome screen.
 	ModelSelectorStyle = lipgloss.NewStyle().
 		Foreground(AccentColor).
 		Background(SelectionBg).
@@ -396,7 +337,6 @@ func rebuildStyles(t theme.Theme) {
 	ModelSelectorLabel = lipgloss.NewStyle().
 		Foreground(CommentColor)
 
-	// ApprovalBox styles the pending command approval prompt in the viewport.
 	ApprovalBox = lipgloss.NewStyle().
 		Foreground(YellowColor).
 		Border(lipgloss.NormalBorder()).
@@ -404,60 +344,46 @@ func rebuildStyles(t theme.Theme) {
 		Background(InputBgColor).
 		Padding(1, 2)
 
-	// ApprovalApproved styles the "approved" result message.
 	ApprovalApproved = lipgloss.NewStyle().
 		Foreground(SecondaryColor).
 		Bold(true)
 
-	// SuccessStyle styles success confirmation messages in modals.
 	SuccessStyle = lipgloss.NewStyle().
 		Foreground(SecondaryColor).
 		Bold(true)
 
-	// ApprovalRejected styles the "rejected" result message.
 	ApprovalRejected = lipgloss.NewStyle().
 		Foreground(PrimaryColor).
 		Bold(true)
 
-	// GroupTurnHeader renders the turn header line (┌ [label · Layer N · role]).
 	GroupTurnHeader = lipgloss.NewStyle().
 		Foreground(PurpleColor).
 		Bold(true)
 
-	// GroupTurnBorder renders the left border for group turn content.
 	GroupTurnBorder = lipgloss.NewStyle().
 		Foreground(PurpleColor).
 		PaddingLeft(1).
 		Border(lipgloss.Border{Left: "│"}, false, false, false, true).
 		BorderForeground(PurpleColor)
 
-	// GroupLayerSeparator renders layer separator lines.
 	GroupLayerSeparator = lipgloss.NewStyle().
 		Foreground(PurpleColor).
 		Bold(true).
 		Align(lipgloss.Center)
 
-	// GroupSynthesisLabel renders the synthesis section label.
 	GroupSynthesisLabel = lipgloss.NewStyle().
 		Foreground(SecondaryColor).
 		Bold(true)
 
-	// GroupSynthesisBorder renders the border around the final synthesis.
 	GroupSynthesisBorder = lipgloss.NewStyle().
 		Foreground(SecondaryColor).
 		PaddingLeft(1).
 		Border(lipgloss.Border{Left: "│"}, false, false, false, true).
 		BorderForeground(SecondaryColor)
 
-	// SelectionStyle is the highlight applied to selected text in the viewport.
 	SelectionStyle = lipgloss.NewStyle().Background(SelectionBg)
 }
 
-// sidebarLabelWidth is the display-cell column width for sidebar metric
-// labels. It must fit the longest locale string ("Ventana de contexto" /
-// es = 19 cells) so every value starts on the same column and no single
-// row is longer than its peers (which used to wrap on narrow sidebars and
-// push Workspace/Estado down).
 const sidebarLabelWidth = 19
 
 func SidebarLabelValue(label, value string) string {
@@ -471,9 +397,6 @@ func SidebarLabelValue(label, value string) string {
 	return labelPart + valuePart
 }
 
-// clampSidebarRow keeps a sidebar row within contentWidth display cells.
-// Without this, a long label or a wide token count wraps inside the
-// RightSidebar and shifts every section below it by one line.
 func clampSidebarRow(row string, contentWidth int) string {
 	if contentWidth > 0 && lipgloss.Width(row) > contentWidth {
 		return truncateRightCells(row, contentWidth)
@@ -481,39 +404,11 @@ func clampSidebarRow(row string, contentWidth int) string {
 	return row
 }
 
-// paintFrame renders a full-screen frame: the content is placed (centered)
-// in the terminal, then the app background is painted over the whole frame
-// and re-applied after every inner ANSI reset so no cell is left unpainted.
-//
-// Every View() exit path MUST return paintFrame(...) so the background is
-// uniform across all screens (welcome, chat, modals, detail views).
 func (m *Model) paintFrame(content string) string {
 	placed := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
-	// Place already pads content to exactly m.width x m.height, so Width/Height
-	// here would force a redundant re-measure/re-pad of every line (~200k ns on
-	// a 200x50 frame). MaxWidth/MaxHeight only clamp oversized content, which is
-	// a no-op for the normal (already-fitting) case.
 	return reapplyBackground(AppContainer.MaxWidth(m.width).MaxHeight(m.height).Render(placed))
 }
 
-// reapplyBackground re-emits the correct background color after every full
-// ANSI reset in a rendered frame.
-//
-// Inner lipgloss styles terminate their text with "\x1b[0m", which cancels
-// ALL attributes — including the background set by an enclosing container.
-// Any cell printed after such a reset is therefore left unpainted and the
-// terminal's own (often translucent) background bleeds through, producing
-// visible color bands next to styled content.
-//
-// The re-emission is context-aware: lipgloss output is well formed (every
-// styled run is "OPEN … \x1b[0m" and runs nest lexically), so we track a
-// stack of background-setting sequences. After a reset we re-emit the
-// innermost still-open background — the app background at top level, and the
-// container background (input bar, modal, tool box, …) for cells inside a
-// container that owns its own background. Re-emitting the full opening
-// sequence (fg+bg) is safe: foreground is invisible on the space cells that
-// follow a reset, and raw text inside a container legitimately inherits the
-// container colors.
 func reapplyBackground(s string) string {
 	appSeq := backgroundOpenSeq(BgColor)
 	if appSeq == "" {
@@ -523,11 +418,8 @@ func reapplyBackground(s string) string {
 	var sb strings.Builder
 	sb.Grow(len(s) + 128)
 
-	// Lipgloss output is well formed: every styled run is "OPEN … \x1b[0m"
-	// and runs nest lexically. Track the run nesting so each reset knows
-	// whether it closes a background-owning run.
-	var bgStack []string // opening seqs of open runs that set a background
-	var runHasBg []bool  // per open run, whether it set a background
+	var bgStack []string
+	var runHasBg []bool
 	open := func(hasBg bool, seq string) {
 		runHasBg = append(runHasBg, hasBg)
 		if hasBg {
@@ -552,7 +444,6 @@ func reapplyBackground(s string) string {
 		}
 		esc += i
 
-		// Attempt to parse an SGR sequence: ESC '[' <digits/semicolons> 'm'.
 		j := esc + 1
 		if j >= n || s[j] != '[' {
 			i = esc + 1
@@ -563,13 +454,11 @@ func reapplyBackground(s string) string {
 			k++
 		}
 		if k >= n || s[k] != 'm' {
-			// Not a valid SGR sequence — skip just the ESC, matching the
-			// regex's non-match behavior on that byte.
 			i = esc + 1
 			continue
 		}
 		seq := s[esc : k+1]
-		params := s[j+1 : k] // bytes between '[' and 'm'
+		params := s[j+1 : k]
 
 		sb.WriteString(s[last:esc])
 
@@ -586,8 +475,6 @@ func reapplyBackground(s string) string {
 			}
 			sb.WriteString(top)
 		default:
-			// Foreground-only or attribute sequence: opens a run whose reset
-			// must not pop the enclosing background context.
 			open(false, seq)
 			sb.WriteString(seq)
 		}
@@ -598,16 +485,11 @@ func reapplyBackground(s string) string {
 	return sb.String()
 }
 
-// backgroundOpenSeq returns the opening ANSI sequence for a background color
-// under the current color profile (e.g. "\x1b[48;2;24;24;36m"), without a
-// trailing reset. Empty when the profile cannot render colors.
 func backgroundOpenSeq(c lipgloss.Color) string {
 	seq := lipgloss.NewStyle().Background(c).Render("")
 	return strings.TrimSuffix(seq, "\x1b[0m")
 }
 
-// paramsHasBackground reports whether an SGR parameter list sets a background
-// (ANSI 48 = extended background, 40-47 = basic backgrounds).
 func paramsHasBackground(params string) bool {
 	for _, p := range strings.Split(params, ";") {
 		if p == "48" || (len(p) == 2 && p[0] == '4' && p[1] >= '0' && p[1] <= '7') {
@@ -617,7 +499,6 @@ func paramsHasBackground(params string) bool {
 	return false
 }
 
-// isFullReset reports whether an SGR parameter list is a full reset.
 func isFullReset(params string) bool {
 	return params == "0" || params == "00" || params == ""
 }

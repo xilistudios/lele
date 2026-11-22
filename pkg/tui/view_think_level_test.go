@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package tui
 
 import (
@@ -11,11 +5,6 @@ import (
 	"testing"
 )
 
-// TestView_BottomBarShowsEffectiveThinkLevel guards the review fix: the status
-// bar must render the EFFECTIVE level (session override → agent thinking_level →
-// "default"), the same value /status shows and buildLLMOptions applies. Before
-// the fix it read the override-only getter, so an agent configured with
-// thinking_level "medium" displayed "default" while actually reasoning.
 func TestView_BottomBarShowsEffectiveThinkLevel(t *testing.T) {
 	cfg := testModelConfig(t)
 	medium := "medium"
@@ -39,7 +28,6 @@ func TestView_BottomBarShowsEffectiveThinkLevel(t *testing.T) {
 		t.Errorf("status bar still renders the override-only 'default' while agent level is medium:\n%s", out)
 	}
 
-	// A session override must win over the agent level, exactly like /think.
 	if !m.agentLoop.GetProvidable().SetThinkLevel(key, "high") {
 		t.Fatal("SetThinkLevel(high) failed")
 	}

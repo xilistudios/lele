@@ -11,17 +11,10 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// newCatalogTestModel builds a Model with a configured openai provider so the
-// catalog-backed /add-model picker can resolve provider type → catalog key.
-// agentLoop is nil (configSource falls back to m.cfg) — enough for picker and
-// addModelToProvider unit tests. chatInput/width/height are initialized so
-// Update()/sendKeys does not panic on focus sync.
 func newCatalogTestModel(t *testing.T) *Model {
 	t.Helper()
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
-	// Same as pkg/channels seedCatalogForTest: prevent background provider
-	// downloads from writing into test temp dirs (cleanup races).
 	t.Setenv("LELE_CATALOG_OFFLINE", "1")
 	catalog.ResetLive()
 	seedCatalogProviders(t)
@@ -33,7 +26,6 @@ func newCatalogTestModel(t *testing.T) *Model {
 		},
 		Providers: &config.ProvidersConfig{
 			Named: map[string]config.NamedProviderConfig{
-				// Custom name with Type "openai" — catalog key must use Type.
 				"my-openai": {
 					Type:           "openai",
 					ProviderConfig: config.ProviderConfig{APIKey: "sk-test"},
@@ -56,8 +48,6 @@ func newCatalogTestModel(t *testing.T) *Model {
 	return &Model{cfg: cfg, textInput: ti, chatInput: ta, width: 100, height: 40}
 }
 
-// seedCatalogProviders plants minimal catalog models on disk so picker tests
-// do not depend on an embedded catalog or network download.
 func seedCatalogProviders(t *testing.T) {
 	t.Helper()
 	mustSeed := func(p catalog.Provider) {
@@ -83,8 +73,6 @@ func seedCatalogProviders(t *testing.T) {
 	})
 }
 
-// openAddModelOnModelName opens /add-model against "my-openai" and advances
-// past the alias step so the catalog picker is active on model_name.
 func openAddModelOnModelName(t *testing.T, m *Model) {
 	t.Helper()
 	m.executeCommand("/add-model")
@@ -95,7 +83,6 @@ func openAddModelOnModelName(t *testing.T, m *Model) {
 	m.textInput.SetValue("gpt-4o")
 	m.formValues[0] = "gpt-4o"
 	m.formStepIndex = 0
-	// Advance alias → model_name via the enter handler.
 	m = sendKeys(m, "\r")
 	if m.formStepIndex != 1 {
 		t.Fatalf("formStepIndex = %d, want 1 (model_name); formError=%q", m.formStepIndex, m.formError)
@@ -111,7 +98,6 @@ func TestCatalogProviderKeyResolvesTypeFromNamedMap(t *testing.T) {
 	if got := m.catalogProviderKey("my-openai"); got != "openai" {
 		t.Errorf("catalogProviderKey(my-openai) = %q, want openai", got)
 	}
-	// Unknown name falls back to the name itself (catalog.normalizeType aliasing).
 	if got := m.catalogProviderKey("anthropic"); got != "anthropic" {
 		t.Errorf("catalogProviderKey(anthropic) = %q, want anthropic", got)
 	}
@@ -127,7 +113,6 @@ func TestCurrentCatalogProviderKeyPrefersConfiguredType(t *testing.T) {
 		t.Errorf("currentCatalogProviderKey = %q, want openai", got)
 	}
 
-	// Connect-flow fallback: type in formValues[1].
 	m2 := newCatalogTestModel(t)
 	m2.providerSelectedName = ""
 	m2.formValues = make([]string, 11)
@@ -160,7 +145,6 @@ func TestBuildCatalogSuggestions(t *testing.T) {
 		t.Errorf("labels[2] = %q, want think marker for reasoning model", labels[2])
 	}
 
-	// Cap at maxCatalogSuggestions.
 	big := make([]catalog.Model, maxCatalogSuggestions+5)
 	for i := range big {
 		big[i] = catalog.Model{ID: "m" + strconv.Itoa(i)}
@@ -170,7 +154,6 @@ func TestBuildCatalogSuggestions(t *testing.T) {
 		t.Errorf("capped len = %d, want %d", len(ids), maxCatalogSuggestions)
 	}
 
-	// Empty input.
 	ids, labels = buildCatalogSuggestions(nil)
 	if ids != nil || labels != nil {
 		t.Errorf("empty input should return nil,nil; got %v %v", ids, labels)
@@ -203,14 +186,10 @@ func TestRefreshCatalogSuggestionsFilters(t *testing.T) {
 	for _, id := range m.addModelCatalogIDs {
 		if !strings.Contains(strings.ToLower(id), "gpt-4o") &&
 			!strings.Contains(strings.ToLower(id), "gpt-4o") {
-			// SearchModels matches ID or Name; IDs shown should typically
-			// contain the query. Allow name-only matches by not failing hard
-			// if one slips through — just require at least one match.
 			_ = id
 		}
 	}
 
-	// Unknown provider type → picker closes.
 	m.providerSelectedName = "custom-llm"
 	m.refreshCatalogSuggestions("")
 	if m.addModelCatalogActive {
@@ -224,21 +203,18 @@ func TestStartCatalogPickerIfNeededOnlyOnModelNameStep(t *testing.T) {
 	m.providerSelectedName = "my-openai"
 	m.formValues = make([]string, addModelStepCount)
 
-	// Alias step — picker off.
 	m.formStepIndex = 0
 	m.startCatalogPickerIfNeeded()
 	if m.addModelCatalogActive {
 		t.Error("picker must not activate on alias step")
 	}
 
-	// Model name step — picker on.
 	m.formStepIndex = 1
 	m.startCatalogPickerIfNeeded()
 	if !m.addModelCatalogActive {
 		t.Error("picker must activate on model_name step")
 	}
 
-	// Context window step — picker off again.
 	m.formStepIndex = 2
 	m.startCatalogPickerIfNeeded()
 	if m.addModelCatalogActive {
@@ -250,7 +226,6 @@ func TestApplyCatalogSelectionOnEnterPrefillsForm(t *testing.T) {
 	m := newCatalogTestModel(t)
 	openAddModelOnModelName(t, m)
 
-	// Clear input so the highlighted suggestion is taken.
 	m.textInput.SetValue("")
 	if m.addModelCatalogIdx >= len(m.addModelCatalogIDs) {
 		t.Fatalf("idx %d out of range (len=%d)", m.addModelCatalogIdx, len(m.addModelCatalogIDs))
@@ -299,8 +274,6 @@ func TestAddModelCatalogEnterSelectsAndPrefillsViaKeys(t *testing.T) {
 	m := newCatalogTestModel(t)
 	openAddModelOnModelName(t, m)
 
-	// Type a narrow filter so the list is small, then Enter selects the
-	// highlighted match and prefills remaining form values.
 	m = sendKeys(m, "gpt-4o")
 	if !m.addModelCatalogActive {
 		t.Fatal("picker should stay active while typing")
@@ -320,11 +293,9 @@ func TestAddModelCatalogEnterSelectsAndPrefillsViaKeys(t *testing.T) {
 	if m.formValues[2] == "" || m.formValues[3] == "" {
 		t.Errorf("expected prefilled context/max tokens, got %q / %q", m.formValues[2], m.formValues[3])
 	}
-	// Prefill is shown in the input for the next step.
 	if m.textInput.Value() != m.formValues[2] {
 		t.Errorf("textInput = %q, want prefilled context_window %q", m.textInput.Value(), m.formValues[2])
 	}
-	// Picker closed after leaving model_name.
 	if m.addModelCatalogActive {
 		t.Error("picker should close after advancing past model_name")
 	}
@@ -334,25 +305,23 @@ func TestAddModelFullFlowWithCatalogPrefill(t *testing.T) {
 	m := newCatalogTestModel(t)
 	openAddModelOnModelName(t, m)
 
-	// Select highlighted catalog model.
-	m = sendKeys(m, "\r") // model_name → context_window (prefilled)
+	m = sendKeys(m, "\r")
 	if m.formStepIndex != 2 {
 		t.Fatalf("step = %d, want 2; err=%q", m.formStepIndex, m.formError)
 	}
-	// Accept prefilled context_window, max_tokens, vision.
-	m = sendKeys(m, "\r") // → max_tokens
+	m = sendKeys(m, "\r")
 	if m.formStepIndex != 3 {
 		t.Fatalf("step = %d, want 3; err=%q", m.formStepIndex, m.formError)
 	}
-	m = sendKeys(m, "\r") // → vision
+	m = sendKeys(m, "\r")
 	if m.formStepIndex != 4 {
 		t.Fatalf("step = %d, want 4; err=%q", m.formStepIndex, m.formError)
 	}
-	m = sendKeys(m, "\r") // → think system
+	m = sendKeys(m, "\r")
 	if m.formStepIndex != 5 {
 		t.Fatalf("step = %d, want 5 (think system); err=%q", m.formStepIndex, m.formError)
 	}
-	m = sendKeys(m, "\r") // save (empty think system = auto)
+	m = sendKeys(m, "\r")
 
 	if m.modalMode != ModalNone {
 		t.Fatalf("modal should close after save; mode=%v err=%q", m.modalMode, m.formError)
@@ -385,7 +354,6 @@ func TestAddModelFullFlowWithCatalogPrefill(t *testing.T) {
 func TestAddModelToProviderCatalogPrefillZeros(t *testing.T) {
 	m := newCatalogTestModel(t)
 
-	// Look up a real catalog model with thinking levels.
 	models := catalog.ModelsForProvider("openai")
 	if len(models) == 0 {
 		t.Fatal("no openai catalog models")
@@ -401,7 +369,6 @@ func TestAddModelToProviderCatalogPrefillZeros(t *testing.T) {
 		t.Skip("no openai model with thinking levels + positive sizes")
 	}
 
-	// Zero context/max tokens must be filled from catalog.
 	if err := m.addModelToProvider("my-openai", pick.ID, pick.ID, 0, 0, pick.Vision, ""); err != nil {
 		t.Fatalf("addModelToProvider: %v", err)
 	}
@@ -509,14 +476,12 @@ func TestCatalogPickerNavigationKeys(t *testing.T) {
 		t.Errorf("after up idx=%d, want %d", m.addModelCatalogIdx, start)
 	}
 
-	// Tab accepts the highlighted ID into the text input.
 	m = sendKeys(m, "tab")
 	want := m.addModelCatalogIDs[m.addModelCatalogIdx]
 	if m.textInput.Value() != want {
 		t.Errorf("after tab textInput=%q, want %q", m.textInput.Value(), want)
 	}
 
-	// ESC hides suggestions without closing the form.
 	m = sendKeys(m, "\x1b")
 	if m.addModelCatalogActive {
 		t.Error("esc should hide catalog suggestions")
@@ -530,7 +495,6 @@ func TestCatalogPickerTypingFiltersViaKeys(t *testing.T) {
 	m := newCatalogTestModel(t)
 	openAddModelOnModelName(t, m)
 
-	// Clear and type a filter character by character.
 	m.textInput.SetValue("")
 	m.refreshCatalogSuggestions("")
 	all := len(m.addModelCatalogIDs)
@@ -538,22 +502,18 @@ func TestCatalogPickerTypingFiltersViaKeys(t *testing.T) {
 		t.Fatal("expected catalog models")
 	}
 
-	// Type "claude" — anthropic models exist but provider is openai, so this
-	// should shrink the openai list (possibly to empty).
 	for _, r := range "claude" {
 		m = sendKeys(m, string(r))
 	}
 	if m.addModelCatalogIdx != 0 {
 		t.Errorf("idx should reset on filter, got %d", m.addModelCatalogIdx)
 	}
-	// Either fewer matches or none — never more than the full list.
 	if len(m.addModelCatalogIDs) > all {
 		t.Errorf("filter grew list: %d > %d", len(m.addModelCatalogIDs), all)
 	}
 }
 
 func TestRenderCatalogSuggestionsEmptyAndList(t *testing.T) {
-	// Empty list: some no-matches hint (locale-dependent string).
 	out := renderCatalogSuggestions(nil, 0, 10)
 	if strings.TrimSpace(out) == "" {
 		t.Error("empty list render should still emit a hint")

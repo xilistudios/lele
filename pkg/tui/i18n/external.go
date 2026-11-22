@@ -12,7 +12,6 @@ import (
 	"golang.org/x/text/language"
 )
 
-// externalMu guards external pack registration and the pack directory.
 var (
 	externalMu     sync.RWMutex
 	packDir        string
@@ -20,14 +19,10 @@ var (
 	externalLoaded bool
 )
 
-// BuiltinLanguages are the locales compiled into the binary.
 func BuiltinLanguages() []string {
 	return []string{"es", "en", "pt"}
 }
 
-// SetPackDir sets the directory that holds downloaded language packs
-// (<dir>/tui/<code>.json). Call before Init/InitWithLanguage so the
-// configured language can load a downloaded pack. Empty clears it.
 func SetPackDir(dir string) {
 	externalMu.Lock()
 	defer externalMu.Unlock()
@@ -36,15 +31,12 @@ func SetPackDir(dir string) {
 	externalLangs = map[string]localeMap{}
 }
 
-// PackDir returns the configured pack directory (may be empty).
 func PackDir() string {
 	externalMu.RLock()
 	defer externalMu.RUnlock()
 	return packDir
 }
 
-// DefaultPackDir returns ~/.lele/locales (honors LELE_CONFIG_DIR).
-// Kept free of pkg/config imports to avoid a dependency cycle.
 func DefaultPackDir() string {
 	if envDir := os.Getenv("LELE_CONFIG_DIR"); envDir != "" {
 		if strings.HasPrefix(envDir, "~") {
@@ -61,8 +53,6 @@ func DefaultPackDir() string {
 	return filepath.Join(home, ".lele", "locales")
 }
 
-// LoadExternalPacks scans packDir/tui/*.json and registers each language.
-// Missing directory is not an error. Returns the codes that loaded.
 func LoadExternalPacks() []string {
 	externalMu.Lock()
 	dir := packDir
@@ -113,8 +103,6 @@ func LoadExternalPacks() []string {
 	return loaded
 }
 
-// RegisterExternal installs an in-memory translation map for code (tests
-// and post-download activation without a re-scan).
 func RegisterExternal(code string, translations map[string]string) {
 	code = normalizeLangCode(code)
 	if code == "" || len(translations) == 0 {
@@ -133,7 +121,6 @@ func RegisterExternal(code string, translations map[string]string) {
 	}
 }
 
-// EnsureLoadedPacks loads external packs once if not already done.
 func ensureExternalLoaded() {
 	externalMu.RLock()
 	done := externalLoaded
@@ -156,7 +143,6 @@ func normalizeLangCode(lang string) string {
 	return strings.ToLower(strings.TrimSpace(lang))
 }
 
-// InstalledLanguages returns builtin + downloaded language codes.
 func InstalledLanguages() []string {
 	ensureExternalLoaded()
 	externalMu.RLock()
@@ -167,7 +153,6 @@ func InstalledLanguages() []string {
 		out = append(out, code)
 	}
 	sort.Strings(out)
-	// Keep builtins first in a stable preferred order, extras alphabetical.
 	builtins := BuiltinLanguages()
 	extras := make([]string, 0, len(out))
 	for _, c := range out {
@@ -179,14 +164,10 @@ func InstalledLanguages() []string {
 	return append(append([]string{}, builtins...), extras...)
 }
 
-// AvailableLanguages returns builtin + installed language codes.
-// Prefer this over the historical hard-coded three-language list.
 func AvailableLanguages() []string {
 	return InstalledLanguages()
 }
 
-// LanguageDisplayNames maps codes to native display names for pickers.
-// Non-Latin names use unicode escapes to satisfy gosmopolitan.
 var LanguageDisplayNames = map[string]string{
 	"es": "Español",
 	"en": "English",
@@ -210,7 +191,6 @@ var LanguageDisplayNames = map[string]string{
 	"uk": "\u0423\u043a\u0440\u0430\u0457\u043d\u0441\u044c\u043a\u0430",
 }
 
-// DisplayName returns the native name for a language code.
 func DisplayName(code string) string {
 	code = normalizeLangCode(code)
 	if n, ok := LanguageDisplayNames[code]; ok {
@@ -219,7 +199,6 @@ func DisplayName(code string) string {
 	return strings.ToUpper(code)
 }
 
-// FormatLanguageOption renders "NativeName (code)" with a status suffix.
 func FormatLanguageOption(code, statusSuffix string) string {
 	base := fmt.Sprintf("%s (%s)", DisplayName(code), code)
 	if statusSuffix == "" {

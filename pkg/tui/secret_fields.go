@@ -6,40 +6,11 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 )
 
-// Secret-input masking (audit M2). API keys and secret values collected in
-// the /connect (ModalAddProvider) and add-secret (ModalAddSecret) forms must
-// never render in clear text. The predicates below are data-driven from
-// modalMode+formStepIndex so the ~24 formStepIndex transition sites need no
-// per-transition bookkeeping — syncTextInputEcho is the single choke point
-// that re-derives the widget state on every keystroke.
-
-// isSecretInputStep reports whether the CURRENT form step collects a secret
-// (API key / secret value / secret-bearing blob). ModalAddProvider step 2 is
-// "API Key" and ModalAddSecret step 1 is "Secret value"; the onboarding connect
-// flow (onboardingStep==obConnect) reuses ModalAddProvider with identical step
-// numbering, so it is covered by the same rule.
-//
-// The provider edit form (ModalEditProvider) has TWO such steps: the API key
-// (step 1) and the custom headers JSON (step 7). Headers may carry credentials
-// — an Authorization override, a gateway token — so the blob is masked while it
-// is typed and in the completed-step list, exactly like the key.
-//
-// The MCP-add wizard (ModalMCPAdd) masks the env/headers steps too: those
-// lines hold `KEY=VALUE` pairs (a bearer token, an API key) and docs/mcp.md
-// promises the values are masked as they are typed. plan D9 flagged the
-// opposite choice (keep the echo) as the single judgement call and offered
-// this exact one-liner; masking wins because the promise is in the shipped
-// docs and the completed/review lines already mask, so an unmasked live line
-// would be the only surface showing the value. The KEY the user is typing
-// still reads back in the step list's `▶ label: [KEY=•••••]` line via
-// mcpMaskPairs (the input bar itself shows bullets only).
 func (m *Model) isSecretInputStep() bool {
 	switch m.modalMode {
 	case ModalAddProvider:
 		return m.formStepIndex == 2
 	case ModalEditProvider:
-		// Step 1 rewrites the API key, step 7 the custom headers blob; both can
-		// carry credentials.
 		return m.formStepIndex == editProviderAPIKeyStep || m.formStepIndex == editProviderHeadersStep
 	case ModalAddSecret:
 		return m.formStepIndex == 1
@@ -49,8 +20,6 @@ func (m *Model) isSecretInputStep() bool {
 	return false
 }
 
-// isSecretFormValue reports whether the stored value for a completed form
-// step is a secret and must be masked in step-list / review displays.
 func (m *Model) isSecretFormValue(stepIdx int) bool {
 	switch m.modalMode {
 	case ModalAddProvider:
@@ -63,11 +32,6 @@ func (m *Model) isSecretFormValue(stepIdx int) bool {
 	return false
 }
 
-// maskSecretDisplay renders a secret value for display without leaking it.
-// Empty stays empty (callers keep their own "…" placeholder); short values
-// are fully hidden (maskSecretValue would echo 4+4 of a ≤8-char secret,
-// which is the whole secret); long values reuse the exact 4+8+4 policy of
-// maskSecretValue in secrets.go.
 func maskSecretDisplay(v string) string {
 	if v == "" {
 		return ""
@@ -78,12 +42,6 @@ func maskSecretDisplay(v string) string {
 	return maskSecretValue(v)
 }
 
-// syncTextInputEcho re-derives the shared textinput's echo mode from the
-// current modal/step state. Called before every keystroke forwarded to the
-// widget and whenever a form modal is entered, so the mode self-heals across
-// all transitions and a stale password echo can never leak into the chat
-// input (which uses a separate textarea widget, but the reset keeps the
-// shared textinput clean for non-form renderers).
 func (m *Model) syncTextInputEcho() {
 	if m.isSecretInputStep() {
 		m.textInput.EchoMode = textinput.EchoPassword
@@ -93,10 +51,6 @@ func (m *Model) syncTextInputEcho() {
 	}
 }
 
-// textInputView is the only safe way to paint the shared textinput widget:
-// it re-derives the echo mode from the current modal/step first, so no
-// renderer can show a secret in clear text (or hide a non-secret behind
-// stale bullets) regardless of which transition last touched the widget.
 func (m *Model) textInputView() string {
 	m.syncTextInputEcho()
 	return m.textInput.View()

@@ -9,22 +9,11 @@ import (
 	"github.com/muesli/termenv"
 )
 
-// oldPaintFrame is the pre-optimization implementation, kept here as the
-// reference for the equivalence guard.
 func oldPaintFrame(m *Model, content string) string {
 	placed := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 	return reapplyBackground(AppContainer.Width(m.width).Height(m.height).MaxHeight(m.height).Render(placed))
 }
 
-// TestPaintFrameEquivalence verifies that the optimized paintFrame produces
-// byte-identical output to the old implementation for all content that fits
-// within the frame (the entire hot path: chat viewport, welcome, modals — all
-// pre-sized by their callers to fit m.width x m.height).
-//
-// lipgloss.Place pads content to exactly m.width x m.height, so the old
-// Width(m.width)/Height(m.height) sizing was a redundant re-measure/re-pad of
-// every line. MaxWidth/MaxHeight only clamp oversized content, which is a
-// no-op for fitting content — hence byte-identical output.
 func TestPaintFrameEquivalence(t *testing.T) {
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -35,8 +24,6 @@ func TestPaintFrameEquivalence(t *testing.T) {
 	m.height = 50
 	m.updateViewport()
 
-	// All of these fit within 200x50 (callers pre-size them), so the output
-	// must be byte-identical.
 	fitting := map[string]string{
 		"viewport":   m.viewport.View(),
 		"empty":      "",
@@ -60,11 +47,6 @@ func TestPaintFrameEquivalence(t *testing.T) {
 	}
 }
 
-// TestPaintFrameOversized verifies the intentional behavior change for content
-// wider than the frame: the old Width() word-wrapped it (splitting bordered
-// modal boxes mid-border — broken rendering), while MaxWidth() truncates each
-// line cleanly. Truncation is the better degradation for the rare oversized
-// modal (e.g. a very long session title).
 func TestPaintFrameOversized(t *testing.T) {
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)

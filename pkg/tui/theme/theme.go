@@ -1,7 +1,3 @@
-// Package theme defines TUI color themes as plain color strings.
-//
-// It is a pure package with no TUI dependencies (no lipgloss, no
-// bubbletea). It only deals with color strings and files.
 package theme
 
 import (
@@ -9,9 +5,6 @@ import (
 	"strings"
 )
 
-// Theme holds the color palette of a TUI theme as raw color strings.
-// Colors may be hex like "#181824", short hex like "#ff0", or numeric
-// ANSI-256 values like "39" or "240".
 type Theme struct {
 	Background          string `json:"background"`
 	InputBackground     string `json:"input_background"`
@@ -26,8 +19,6 @@ type Theme struct {
 	Yellow              string `json:"yellow"`
 }
 
-// DraculaDefault is the default Dracula palette used as a fallback for
-// every missing or invalid field.
 var DraculaDefault = Theme{
 	Background:          "#181824",
 	InputBackground:     "#212130",
@@ -48,17 +39,12 @@ var (
 	ansiColorRe     = regexp.MustCompile(`^[0-9]{1,3}$`)
 )
 
-// isValidColor reports whether s is a valid color value: full hex,
-// short hex, or a numeric ANSI-256 value.
 func isValidColor(s string) bool {
 	return hexColorRe.MatchString(s) ||
 		shortHexColorRe.MatchString(s) ||
 		ansiColorRe.MatchString(s)
 }
 
-// Normalize fills any empty field of t with the corresponding Dracula
-// default and replaces any invalid color value with the Dracula default
-// for that field. It mutates and returns the receiver.
 func (t *Theme) Normalize() *Theme {
 	if t == nil {
 		return t
@@ -77,8 +63,6 @@ func (t *Theme) Normalize() *Theme {
 	return t
 }
 
-// normalizeField returns v trimmed of whitespace; if that yields an
-// empty or invalid color it falls back to def.
 func normalizeField(v, def string) string {
 	v = strings.TrimSpace(v)
 	if v == "" || !isValidColor(v) {
@@ -87,13 +71,6 @@ func normalizeField(v, def string) string {
 	return v
 }
 
-// Get returns the theme named name. Resolution order:
-//
-//  1. if custom[name] exists, start from it;
-//  2. else if name is a built-in theme, start from it;
-//  3. else fall back to Dracula.
-//
-// The result is always Normalize()d before being returned.
 func Get(name string, custom map[string]Theme) Theme {
 	var t Theme
 

@@ -10,27 +10,10 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// Tests for the provider-detail action rows (index-based ENTER handling) and
-// the double-confirmed "d" model deletion:
-//
-//   - the action rows are matched by providerDetailAddIdx/providerDetailDelIdx
-//     (never by localized label strings),
-//   - deleting a model requires TWO "d" presses on the SAME row within
-//     providerDeleteConfirmWindow (mirrors requestCommandDelete),
-//   - an armed delete never follows the cursor to another row,
-//   - the view renders a feedback line + localized hints.
-//
-// Helpers (newEditModelTestModel / openProviderDetail / selectModelRow) come
-// from provider_edit_test.go — same package.
-
-// detailModels is a shorthand for the models map of the fixture provider.
 func detailModels(m *Model) map[string]config.ProviderModelConfig {
 	return m.cfg.Providers.Named["test-provider"].Models
 }
 
-// TestProviderDetailDeleteRequiresTwoPresses: the first "d" on a model row
-// only arms the confirmation — nothing is removed, feedback is shown and the
-// armed alias is recorded.
 func TestProviderDetailDeleteRequiresTwoPresses(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
@@ -63,9 +46,6 @@ func TestProviderDetailDeleteRequiresTwoPresses(t *testing.T) {
 	}
 }
 
-// TestProviderDetailDeleteSecondPressRemovesModel: a second "d" on the same
-// row within the window removes the model from config AND from the rebuilt
-// detail list, leaves its sibling untouched and keeps the detail view open.
 func TestProviderDetailDeleteSecondPressRemovesModel(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
@@ -87,7 +67,6 @@ func TestProviderDetailDeleteSecondPressRemovesModel(t *testing.T) {
 		t.Error("gpt-4o-mini must be untouched by the delete")
 	}
 
-	// Gone from the rebuilt list too.
 	for _, item := range m.modalItems {
 		if item == "  gpt-4o" {
 			t.Errorf("rebuilt modalItems still contains the deleted row: %v", m.modalItems)
@@ -106,7 +85,6 @@ func TestProviderDetailDeleteSecondPressRemovesModel(t *testing.T) {
 		t.Errorf("providerFeedback = %q, want %q", m.providerFeedback, wantFeedback)
 	}
 
-	// Persisted to disk.
 	reloaded, err := config.LoadConfig(config.DefaultConfigPath())
 	if err != nil {
 		t.Fatalf("reload config: %v", err)
@@ -119,20 +97,17 @@ func TestProviderDetailDeleteSecondPressRemovesModel(t *testing.T) {
 	}
 }
 
-// TestProviderDetailDeleteArmingIsRowScoped: an armed delete must not follow
-// the cursor. After navigating away, a single "d" on another model only arms
-// THAT model — nothing is deleted, and the armed key tracks the new row.
 func TestProviderDetailDeleteArmingIsRowScoped(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
 	selectModelRow(t, m, "gpt-4o")
 
-	m = sendKeys(m, "d") // arm gpt-4o
+	m = sendKeys(m, "d")
 	if m.providerDeleteKey != "gpt-4o" {
 		t.Fatalf("providerDeleteKey = %q, want gpt-4o", m.providerDeleteKey)
 	}
 
-	m = sendKeys(m, "j") // navigate down to gpt-4o-mini (disarms)
+	m = sendKeys(m, "j")
 	if m.providerDeleteKey != "" {
 		t.Fatalf("providerDeleteKey = %q after navigation, want disarmed", m.providerDeleteKey)
 	}
@@ -140,7 +115,7 @@ func TestProviderDetailDeleteArmingIsRowScoped(t *testing.T) {
 		t.Fatalf("cursor on idx %d (%q), want gpt-4o-mini", m.modalSelectedIdx, alias)
 	}
 
-	m = sendKeys(m, "d") // first press on row B: arm B, do NOT delete
+	m = sendKeys(m, "d")
 
 	models := detailModels(m)
 	if len(models) != 2 {
@@ -151,14 +126,10 @@ func TestProviderDetailDeleteArmingIsRowScoped(t *testing.T) {
 	}
 }
 
-// TestProviderDetailDeleteOnNonModelRowIsInert: pressing "d" on an info row
-// or a "---" separator never touches the config and explains itself via the
-// feedback line.
 func TestProviderDetailDeleteOnNonModelRowIsInert(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
 
-	// Info row (first item is "Type: ...").
 	m.modalSelectedIdx = 0
 	m = sendKeys(m, "d")
 	if len(detailModels(m)) != 2 {
@@ -171,7 +142,6 @@ func TestProviderDetailDeleteOnNonModelRowIsInert(t *testing.T) {
 		t.Errorf("providerDeleteKey = %q on a non-model row, want disarmed", m.providerDeleteKey)
 	}
 
-	// Separator row.
 	sepIdx := -1
 	for i, item := range m.modalItems {
 		if item == "---" {
@@ -192,10 +162,6 @@ func TestProviderDetailDeleteOnNonModelRowIsInert(t *testing.T) {
 	}
 }
 
-// TestProviderDetailActionRowsUseIndexes: the action rows are located via
-// providerDetailAddIdx/providerDetailDelIdx, carry the localized labels, and
-// ENTER on the add row opens ModalAddModel with providerSelectedName intact
-// (its save path calls addModelToProvider with it).
 func TestProviderDetailActionRowsUseIndexes(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
@@ -226,9 +192,6 @@ func TestProviderDetailActionRowsUseIndexes(t *testing.T) {
 	}
 }
 
-// TestProviderDetailHintsRender: the provider-detail view renders the
-// localized hints line (and the feedback line when present) and survives a
-// provider with zero models.
 func TestProviderDetailHintsRender(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m.width = 120
@@ -246,14 +209,12 @@ func TestProviderDetailHintsRender(t *testing.T) {
 		t.Errorf("detail view missing title:\n%s", out)
 	}
 
-	// Feedback line renders when set.
 	m.providerFeedback = "FEEDBACK-CANARY"
 	out = ansi.Strip(m.renderActiveModal())
 	if !strings.Contains(out, "FEEDBACK-CANARY") {
 		t.Errorf("detail view missing feedback line:\n%s", out)
 	}
 
-	// Provider with zero models: must render (and show the hints) without panicking.
 	empty := newProviderHelpersTestModel(t)
 	empty.width = 120
 	empty.height = 40

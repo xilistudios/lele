@@ -8,19 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
-// B1 — the subagent continuation protocol. A subagent.result is delivered
-// through the real outbound-listener path and the tests assert the resulting
-// client state (continuation flag, processing flag, tick, progress row) and the
-// stream-end gate that finalises a backend-initiated continuation turn.
-//
-// The AM2 amendment (see the plan) is the load-bearing rule here: the backend
-// publishes subagent.result on EVERY terminal outcome and stamps
-// metadata["resumed"] = "true"|"false" to say whether the result was claimed
-// for injection (i.e. a continuation turn is owed). The TUI must delete the
-// progress row always, but only arm the turn when resumed == "true".
-
-// setupContinuationModel builds a model on a real, unstarted agent loop with
-// the composer focused (so Update does not batch an extra focus command).
 func setupContinuationModel(t *testing.T) (*Model, string) {
 	t.Helper()
 	key := "tui:chat:continuation"
@@ -29,8 +16,6 @@ func setupContinuationModel(t *testing.T) (*Model, string) {
 	return m, key
 }
 
-// resumedSubagentResult builds the event the backend publishes when a subagent
-// result was claimed for injection (a continuation turn is owed).
 func resumedSubagentResult(chatID, taskID string) bus.OutboundMessage {
 	return bus.OutboundMessage{
 		Channel:  "native",
@@ -40,10 +25,6 @@ func resumedSubagentResult(chatID, taskID string) bus.OutboundMessage {
 	}
 }
 
-// deliverEvent publishes one outbound event and feeds it through the real
-// Update path, discarding the returned commands. The batch's last member is the
-// re-armed outbound listener, which must never be executed — it blocks until
-// the next event.
 func deliverEvent(t *testing.T, m *Model, ev bus.OutboundMessage) {
 	t.Helper()
 	m.agentLoop.MessageBus().PublishOutbound(ev)
@@ -56,11 +37,6 @@ func deliverEvent(t *testing.T, m *Model, ev bus.OutboundMessage) {
 	_, _ = m.Update(om)
 }
 
-// streamEndSchedulesCompletion reports whether delivering a stream-end event
-// produces a command that yields a completeMsg. It cancels the model context
-// first so the re-armed outbound listener — which may be the batch's sole
-// member because tea.Batch collapses a one-command batch — returns immediately
-// instead of blocking when the returned command is invoked.
 func streamEndSchedulesCompletion(t *testing.T, m *Model, ev bus.OutboundMessage) bool {
 	t.Helper()
 	m.agentLoop.MessageBus().PublishOutbound(ev)
@@ -97,9 +73,6 @@ func TestSubagentResult_SetsContinuationPendingOnce(t *testing.T) {
 	m.processing = false
 	m.subagentProgress = map[string]string{"subagent-1": "finalizing…"}
 
-	// Two results for the same task must not accumulate state: the boolean is
-	// idempotent, unlike the counter it replaced (which reached 2 and needed two
-	// completions to drain).
 	deliverEvent(t, m, resumedSubagentResult(key, "subagent-1"))
 	deliverEvent(t, m, resumedSubagentResult(key, "subagent-1"))
 
@@ -113,7 +86,6 @@ func TestSubagentResult_SetsContinuationPendingOnce(t *testing.T) {
 		t.Fatal("subagent.result must delete the task's progress row")
 	}
 
-	// A single completion clears the flag and the processing state.
 	_, _ = m.Update(completeMsg{sessionKey: key})
 	if m.subagentContinuationPending {
 		t.Fatal("one completeMsg must clear subagentContinuationPending")
@@ -123,10 +95,6 @@ func TestSubagentResult_SetsContinuationPendingOnce(t *testing.T) {
 	}
 }
 
-// TestSubagentResult_WaitConsumed_DoesNotArmContinuation is the AM2 mutation
-// test: dropping the `resumed == "true"` check in the TUI handler must fail
-// here. A result consumed in-turn by wait_for_subagent arrives with
-// resumed=false; the row is still dropped, but no turn may be armed.
 func TestSubagentResult_WaitConsumed_DoesNotArmContinuation(t *testing.T) {
 	m, key := setupContinuationModel(t)
 	m.processing = false
@@ -152,8 +120,6 @@ func TestSubagentResult_WaitConsumed_DoesNotArmContinuation(t *testing.T) {
 
 func TestStreamFinished_FiresCompleteForBackendInitiatedTurn(t *testing.T) {
 	m, key := setupContinuationModel(t)
-	// A backend-initiated continuation carries no id minted on a local submit,
-	// so idMatches cannot recognise its stream-end — the flag is the only signal.
 	m.processing = false
 	m.currentMessageID = "msg-local"
 	m.subagentContinuationPending = true
@@ -161,7 +127,7 @@ func TestStreamFinished_FiresCompleteForBackendInitiatedTurn(t *testing.T) {
 	ok := streamEndSchedulesCompletion(t, m, bus.OutboundMessage{
 		Channel:   "native",
 		ChatID:    key,
-		Event:     "", // stream finished
+		Event:     "",
 		MessageID: "backend-turn",
 	})
 	if !ok {
@@ -210,8 +176,6 @@ func TestSessionSwitch_ClearsContinuationPending(t *testing.T) {
 	m.parentSessionKey = "tui:chat:parent"
 	m.subagentContinuationPending = true
 
-	// ctrl+b returns to the parent chat: the real switch path that runs
-	// setCurrentChatKey + clearStreamingState (where the flag is reset).
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
 
 	if m.currentKey != "tui:chat:parent" {
@@ -238,12 +202,6 @@ func TestSubagentResult_ArmsTick(t *testing.T) {
 	}
 }
 
-// TestSubagentResult_InjectedMidTurn_DoesNotArmContinuation is the mid-turn
-// counterpart of the AM2 test above. A result injected into a turn that is
-// ALREADY running arrives with resumed=true AND injected=true: the parent turn
-// is the one that will clear the loading state when it ends, so arming
-// subagentContinuationPending here would leave the TUI waiting for a
-// continuation turn that never comes. The progress row must still be dropped.
 func TestSubagentResult_InjectedMidTurn_DoesNotArmContinuation(t *testing.T) {
 	m, key := setupContinuationModel(t)
 	m.processing = false
@@ -276,9 +234,6 @@ func TestSubagentResult_InjectedMidTurn_DoesNotArmContinuation(t *testing.T) {
 	}
 }
 
-// TestSubagentResult_ResumedWithoutInjected_StillArmsContinuation is the
-// positive control for the check above: an idle parent's resume (resumed=true,
-// no injected stamp) must keep arming the turn exactly as before.
 func TestSubagentResult_ResumedWithoutInjected_StillArmsContinuation(t *testing.T) {
 	m, key := setupContinuationModel(t)
 	m.processing = false

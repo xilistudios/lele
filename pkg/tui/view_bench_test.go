@@ -16,8 +16,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// newBenchModel mirrors newTestModel but accepts testing.TB so it can be
-// used from benchmarks.
 func newBenchModel(tb testing.TB) *Model {
 	tb.Helper()
 	tmpDir := tb.TempDir()
@@ -53,8 +51,6 @@ func newBenchModel(tb testing.TB) *Model {
 	return NewModel(cfg, al, sessionMgr)
 }
 
-// buildBenchModel creates a model with a realistic conversation: N user and
-// assistant message pairs with markdown-ish content.
 func buildBenchModel(tb testing.TB, pairs int) *Model {
 	tb.Helper()
 	m := newBenchModel(tb)
@@ -81,13 +77,6 @@ func buildBenchModel(tb testing.TB, pairs int) *Model {
 			SessionKey: fmt.Sprintf("subagent-session-%d", i),
 		})
 	}
-	// Seed the listing the render path serves (T6): the backend exposes no
-	// subagents to re-fetch (the loop is torn down right after newBenchModel
-	// returns), so the sidebar rows here can only come from the cache. Frames
-	// no longer expire it — only an Update() past the TTL window refreshes, and
-	// this helper never dispatches one — so frame-to-frame comparison tests
-	// (e.g. TestMergeAdjacentSGRCellEquivalence) can no longer lose these rows
-	// mid-test.
 	seedSubagentListing(m, key, time.Now(), subagents)
 
 	return m
@@ -113,9 +102,6 @@ func BenchmarkView_TrueColor(b *testing.B) {
 
 		b.Run(fmt.Sprintf("%dx%d_msgs%d", tc.w, tc.h, tc.pairs*2), func(b *testing.B) {
 			b.ReportAllocs()
-			// Warm the viewport cache so we measure steady-state per-frame
-			// cost (what the user feels during streaming/scrolling), not the
-			// one-time cold markdown render.
 			_ = m.View()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -125,8 +111,6 @@ func BenchmarkView_TrueColor(b *testing.B) {
 	}
 }
 
-// TestViewFrameSize reports the byte size of a rendered frame so the
-// reapplyBackground benchmark can be correlated.
 func TestViewFrameSize(t *testing.T) {
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)

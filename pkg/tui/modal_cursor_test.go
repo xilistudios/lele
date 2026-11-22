@@ -8,8 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/cron"
 )
 
-// ── clampModalCursor unit tests ─────────────────────────────────────────
-
 func TestClampModalCursor(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -72,14 +70,6 @@ func TestClampModalCursor(t *testing.T) {
 	}
 }
 
-// ── Regression: audit C2 — delete last cron job then Enter must not panic ──
-
-// TestCronDeleteLastJobThenEnterNoPanic ports the audit repro
-// (zz_audit_panic_test.go): with the real cron service and real keypresses,
-// pressing "d" on the LAST row of the cron modal reloads the list (N-1 items)
-// but previously left modalSelectedIdx at N-1, so the next Enter panicked at
-// handlers.go ("index out of range [N-1] with length N-1"). The fix clamps
-// the cursor inside loadCronJobs (plus a defensive clamp on Enter).
 func TestCronDeleteLastJobThenEnterNoPanic(t *testing.T) {
 	m := newTestModelWithDenyPatterns(t)
 	up, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
@@ -103,18 +93,15 @@ func TestCronDeleteLastJobThenEnterNoPanic(t *testing.T) {
 		t.Fatalf("setup: items=%d keys=%d, want 2/2", len(m.modalItems), len(m.cronModalKeys))
 	}
 
-	// Down -> move onto the LAST job (real key path).
 	up, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = up.(*Model)
 	if m.modalSelectedIdx != len(m.modalItems)-1 {
 		t.Fatalf("cursor not on last row after Down: idx=%d items=%d", m.modalSelectedIdx, len(m.modalItems))
 	}
 
-	// "d" -> delete that job.
 	up, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = up.(*Model)
 
-	// Post-conditions of the fix: list shrank and the cursor is in range.
 	if len(m.modalItems) != 1 {
 		t.Fatalf("list length = %d after delete, want 1", len(m.modalItems))
 	}
@@ -122,7 +109,6 @@ func TestCronDeleteLastJobThenEnterNoPanic(t *testing.T) {
 		t.Fatalf("cursor out of range after delete: idx=%d items=%d", m.modalSelectedIdx, len(m.modalItems))
 	}
 
-	// Enter on the remaining row must not panic (pre-fix: index out of range).
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -133,9 +119,6 @@ func TestCronDeleteLastJobThenEnterNoPanic(t *testing.T) {
 	}()
 }
 
-// TestCronDeleteOnlyJobEmptyListNoPanic covers the shrink-to-empty edge: the
-// list reload falls back to the "no jobs" placeholder row and Enter must be a
-// no-op (no panic).
 func TestCronDeleteOnlyJobEmptyListNoPanic(t *testing.T) {
 	m := newTestModelWithDenyPatterns(t)
 	up, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
@@ -156,7 +139,6 @@ func TestCronDeleteOnlyJobEmptyListNoPanic(t *testing.T) {
 		t.Fatalf("setup: items=%d, want 1", len(m.modalItems))
 	}
 
-	// "d" deletes the only job.
 	up, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = up.(*Model)
 	if len(m.cronModalKeys) != 0 {
@@ -176,16 +158,6 @@ func TestCronDeleteOnlyJobEmptyListNoPanic(t *testing.T) {
 	}()
 }
 
-// ── Regression: same flow in the secrets modal (real file-backed keyring) ──
-
-// TestSecretsDeleteLastSecretThenEnterNoPanic mirrors the cron repro for
-// ModalSecrets: delete on the last row reloads via loadSecrets(), which now
-// clamps the cursor; Enter must not panic.
-//
-// Harness note: m.keyringSvc() is taken from the agent loop, which builds the
-// keyring service from cfg at NewAgentLoop time, so the test enables the
-// keyring in the config up front and pins the "file" backend (same approach
-// as pkg/keyring's own tests) so no OS keychain is touched.
 func TestSecretsDeleteLastSecretThenEnterNoPanic(t *testing.T) {
 	cfg := testModelConfig(t)
 	cfg.Keyring = config.KeyringConfig{Enabled: true, Backend: "file", AuditLogSize: 50}
@@ -211,7 +183,6 @@ func TestSecretsDeleteLastSecretThenEnterNoPanic(t *testing.T) {
 	}
 	last := len(m.modalItems) - 1
 
-	// Down until the cursor reaches the LAST row (real key path).
 	for i := 0; i < last; i++ {
 		up, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 		m = up.(*Model)
@@ -221,7 +192,6 @@ func TestSecretsDeleteLastSecretThenEnterNoPanic(t *testing.T) {
 	}
 	target := m.secretsModalKeys[m.modalSelectedIdx]
 
-	// "d" -> delete the last secret.
 	up, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = up.(*Model)
 

@@ -8,8 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-// loopConfig returns the config pointer the agent loop currently reads from
-// (the same value its goroutines see via cfgPtr.Load()).
 func loopConfig(t *testing.T, m *Model) *config.Config {
 	t.Helper()
 	if m.agentLoop == nil {
@@ -22,29 +20,21 @@ func loopConfig(t *testing.T, m *Model) *config.Config {
 	return cfg
 }
 
-// TestSaveConfigToDisk_PublishesPrivateSnapshotToLoop verifies the C1 fix
-// end to end: a successful save persists to the (temp-dir) config file AND
-// publishes a private deep copy to the agent loop, so later mutations of
-// m.cfg.Providers.Named by the TUI are invisible to the loop.
 func TestSaveConfigToDisk_PublishesPrivateSnapshotToLoop(t *testing.T) {
-	m := newTestModel(t) // LELE_CONFIG_DIR points at a temp dir — no real config touched
+	m := newTestModel(t)
 
 	if err := m.addProvider("alphaprov", "openai", "sk-key-one", "https://api.example/v1"); err != nil {
 		t.Fatalf("addProvider: %v", err)
 	}
 
-	// The provider must be visible through the loop's snapshot...
 	loopCfg := loopConfig(t, m)
 	if p, ok := loopCfg.Providers.GetNamed("alphaprov"); !ok || p.APIKey != "sk-key-one" {
 		t.Fatalf("loop snapshot missing saved provider (ok=%v)", ok)
 	}
-	// ...and the loop must NOT hold the pointer the TUI mutates.
 	if loopCfg == m.cfg {
 		t.Fatal("loop config pointer is the same as m.cfg after saveConfigToDisk (shared-pointer race)")
 	}
 
-	// Mutate the TUI's copy without saving: the loop's snapshot must keep the
-	// old map contents.
 	m.cfg.Providers.Named["betaprov"] = config.NamedProviderConfig{
 		Type:           "openai",
 		ProviderConfig: config.ProviderConfig{APIKey: "sk-mutation-only"},
@@ -62,8 +52,6 @@ func TestSaveConfigToDisk_PublishesPrivateSnapshotToLoop(t *testing.T) {
 	}
 }
 
-// TestSaveConfigToDisk_FailureDoesNotPublish verifies that a failed save does
-// not publish a new snapshot: the loop keeps the last known-good config.
 func TestSaveConfigToDisk_FailureDoesNotPublish(t *testing.T) {
 	m := newTestModel(t)
 
@@ -72,8 +60,6 @@ func TestSaveConfigToDisk_FailureDoesNotPublish(t *testing.T) {
 	}
 	before := loopConfig(t, m)
 
-	// Break the config path: point LELE_CONFIG_DIR at a regular file so
-	// SaveConfig's MkdirAll fails.
 	blocker := filepath.Join(t.TempDir(), "not-a-dir")
 	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
 		t.Fatalf("write blocker: %v", err)
@@ -97,11 +83,6 @@ func TestSaveConfigToDisk_FailureDoesNotPublish(t *testing.T) {
 	}
 }
 
-// TestUpdateConfigSnapshot_LoopIsolatedFromTUIMutations exercises the
-// publishing mechanism directly (per fix plan T1): after
-// UpdateConfigSnapshot(m.cfg.Snapshot()), mutating m.cfg.Providers.Named
-// leaves the loop's snapshot with the OLD contents and the two pointers
-// differ.
 func TestUpdateConfigSnapshot_LoopIsolatedFromTUIMutations(t *testing.T) {
 	m := newTestModel(t)
 
@@ -119,7 +100,6 @@ func TestUpdateConfigSnapshot_LoopIsolatedFromTUIMutations(t *testing.T) {
 		t.Fatalf("snapshot missing pre-publish provider (ok=%v)", ok)
 	}
 
-	// Mutate the TUI's live map after publishing.
 	m.cfg.Providers.Named["snapme"] = config.NamedProviderConfig{
 		Type:           "openai",
 		ProviderConfig: config.ProviderConfig{APIKey: "sk-after"},
@@ -135,20 +115,17 @@ func TestUpdateConfigSnapshot_LoopIsolatedFromTUIMutations(t *testing.T) {
 	}
 }
 
-// TestApplyAgentReload_PassesSnapshot verifies settings_agents.go's reload
-// path hands the loop a private copy, not the TUI's mutable pointer.
 func TestApplyAgentReload_PassesSnapshot(t *testing.T) {
 	m := newTestModel(t)
 
 	m.cfg.Agents.List = []config.AgentConfig{{ID: "solo", Name: "Solo"}}
-	m.applyAgentReload() // ReloadRegistry(m.cfg.Snapshot())
+	m.applyAgentReload()
 
 	loopCfg := loopConfig(t, m)
 	if loopCfg == m.cfg {
 		t.Fatal("applyAgentReload shared m.cfg pointer with the loop")
 	}
 
-	// Mutate the agents list in the TUI copy; loop snapshot must be unchanged.
 	m.cfg.Agents.List[0].Name = "Renamed"
 	loopCfg = loopConfig(t, m)
 	if len(loopCfg.Agents.List) != 1 || loopCfg.Agents.List[0].Name != "Solo" {

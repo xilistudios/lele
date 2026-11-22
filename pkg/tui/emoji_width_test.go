@@ -8,45 +8,25 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Emoji width normalization tests for clampPaneLine/normalizeEmojiWidth.
-//
-// Context: the sidebar border │ is positioned by measured width
-// (ansi.StringWidth via lipgloss JoinHorizontal). Any row where the measured
-// width disagrees with what the terminal paints displaces the border by the
-// delta on that row only — the reported "separator line break". The
-// normalization policy lives in normalizeEmojiWidth (pkg/tui/truncate.go):
-//
-//   - keycap [0-9#*] U+FE0F? U+20E3: measured 1, painted 2 → replaced by
-//     base rune + space ("1️⃣" → "1 "), measured 2 == painted 2;
-//   - U+FE0F after an already width-2 rune: stripped (measured no-op);
-//   - U+FE0F after a width-1 rune ("❤️", "☺️"): kept (it is what makes the
-//     cluster the 2 cells emoji presentation paints);
-//   - everything else ansi already measures at painted width: untouched.
 const (
-	keycap1 = "1\uFE0F\u20E3"              // 1️⃣
-	keycap2 = "2\uFE0F\u20E3"              // 2️⃣
-	keycapH = "#\uFE0F\u20E3"              // #️⃣
-	keycapS = "*\uFE0F\u20E3"              // *️⃣
-	heart   = "\u2764\uFE0F"               // ❤️ (U+2764 width 1 + VS16 → 2)
-	coffee  = "\u2615\uFE0F"               // ☕️ (U+2615 already width 2 → VS16 stripped)
-	smiley  = "\u263A\uFE0F"               // ☺️ (U+263A width 1 + VS16 → 2)
-	grin    = "\U0001F600"                 // 😀
-	flagES  = "\U0001F1EA\U0001F1F8"       // 🇪🇸
-	zwjTech = "\U0001F468\u200D\U0001F4BB" // 👨‍💻
+	keycap1 = "1\uFE0F\u20E3"
+	keycap2 = "2\uFE0F\u20E3"
+	keycapH = "#\uFE0F\u20E3"
+	keycapS = "*\uFE0F\u20E3"
+	heart   = "\u2764\uFE0F"
+	coffee  = "\u2615\uFE0F"
+	smiley  = "\u263A\uFE0F"
+	grin    = "\U0001F600"
+	flagES  = "\U0001F1EA\U0001F1F8"
+	zwjTech = "\U0001F468\u200D\U0001F4BB"
 )
 
-// TestNormalizeEmojiWidth_MeasuredMatchesPainted is the policy table: for
-// every normalized form we produce, ansi.StringWidth of the FINAL string must
-// equal the width the terminal is assumed to paint (the "painted" column).
-// The painted widths are the documented assumptions of the fix:
-// keycap=2, VS16-after-wide stripped width=2, VS16-after-narrow kept width=2,
-// plain wide/flag/ZWJ emoji=2, ASCII per byte.
 func TestNormalizeEmojiWidth_MeasuredMatchesPainted(t *testing.T) {
 	tests := []struct {
 		name    string
 		in      string
-		want    string // exact normalized output (documents rewrites)
-		painted int    // width the terminal is assumed to paint
+		want    string
+		painted int
 	}{
 		{"keycap digit", keycap1, "1 ", 2},
 		{"keycap digit without VS16", "1\u20E3", "1 ", 2},
@@ -80,11 +60,6 @@ func TestNormalizeEmojiWidth_MeasuredMatchesPainted(t *testing.T) {
 	}
 }
 
-// TestClampPaneLine_ExactWidthWithEmoji asserts the clampPaneLine invariant:
-// the returned row measures exactly `cells` columns for every input class
-// from the acceptance criteria, and content is never silently deleted —
-// except the documented keycap replacement (sequence → base + space) and the
-// documented no-op VS16 strip after already-wide runes.
 func TestClampPaneLine_ExactWidthWithEmoji(t *testing.T) {
 	const cells = 20
 	tests := []struct {
@@ -129,9 +104,6 @@ func TestClampPaneLine_ExactWidthWithEmoji(t *testing.T) {
 	}
 }
 
-// TestClampPaneLine_TruncationStaysExact exercises the too-wide path: after
-// normalization the row is truncated and then padded back, so even a wide
-// rune at the cut point cannot leave the row a cell short of `cells`.
 func TestClampPaneLine_TruncationStaysExact(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -159,9 +131,6 @@ func TestClampPaneLine_TruncationStaysExact(t *testing.T) {
 	}
 }
 
-// TestClampPaneLines_UniformWidthWithEmoji covers the pane-level helper used
-// by the sidebar layout: every row of a mixed pane comes out at the same
-// exact width so JoinHorizontal keeps the │ on one column.
 func TestClampPaneLines_UniformWidthWithEmoji(t *testing.T) {
 	const cells = 24
 	pane := strings.Join([]string{
@@ -170,7 +139,7 @@ func TestClampPaneLines_UniformWidthWithEmoji(t *testing.T) {
 		heart + " heart",
 		"step " + keycap1 + " done",
 		zwjTech + " " + flagES,
-		"", // empty row must be padded too
+		"",
 	}, "\n")
 	out := clampPaneLines(pane, cells)
 	for i, line := range strings.Split(out, "\n") {
@@ -180,12 +149,6 @@ func TestClampPaneLines_UniformWidthWithEmoji(t *testing.T) {
 	}
 }
 
-// TestView_BorderColumnStableWithKeycapAndVS16Emoji is a variant of
-// border_stable_test.go's TestView_BorderColumnStableWithLongPathsAndEmoji
-// with the sequences that measured 1 but paint 2 (keycap) and the VS16
-// heart in the message text: the sidebar border must sit on the same
-// display-cell column on every row, and no raw keycap sequence may reach
-// the frame un-normalized.
 func TestView_BorderColumnStableWithKeycapAndVS16Emoji(t *testing.T) {
 	forceTrueColor(t)
 	m := newTestModel(t)
@@ -220,7 +183,6 @@ func TestView_BorderColumnStableWithKeycapAndVS16Emoji(t *testing.T) {
 		t.Fatal("empty frame")
 	}
 
-	// Discover the border column from a line that definitely has it.
 	borderCol := -1
 	borderLine := -1
 	for i, line := range lines {
@@ -236,13 +198,12 @@ func TestView_BorderColumnStableWithKeycapAndVS16Emoji(t *testing.T) {
 		t.Fatalf("no sidebar border found in frame (%d lines)", len(lines))
 	}
 
-	// Every row that contains a border must put it on the same column.
 	bad := 0
 	for i, line := range lines {
 		plain := ansi.Strip(line)
 		col := cellIndex(plain, '│')
 		if col < 0 {
-			continue // rows outside the pane area (vertical centering blanks)
+			continue
 		}
 		if col != borderCol {
 			t.Errorf("line %d: border at cell %d, want %d\n  plain=%q", i, col, borderCol, clipStr(plain, 120))
@@ -253,15 +214,12 @@ func TestView_BorderColumnStableWithKeycapAndVS16Emoji(t *testing.T) {
 		t.Fatalf("%d rows have the sidebar border on the wrong column (first found line=%d col=%d)", bad, borderLine, borderCol)
 	}
 
-	// No row may exceed the terminal width.
 	for i, line := range lines {
 		if w := ansi.StringWidth(line); w > m.width {
 			t.Errorf("line %d width=%d > terminal %d: %q", i, w, m.width, clipStr(ansi.Strip(line), 80))
 		}
 	}
 
-	// The keycap sequences must have been normalized before measuring, so no
-	// raw U+20E3 may survive into the frame.
 	if strings.Contains(frame, "\u20E3") {
 		t.Errorf("frame still contains raw U+20E3 (keycap not normalized): %q", clipStr(ansi.Strip(frame), 200))
 	}

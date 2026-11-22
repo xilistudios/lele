@@ -16,8 +16,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// drainInbound reads one inbound message from the bus, failing the test when
-// none arrives within the timeout.
 func drainInbound(t *testing.T, m *Model) bus.InboundMessage {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -29,7 +27,6 @@ func drainInbound(t *testing.T, m *Model) bus.InboundMessage {
 	return msg
 }
 
-// expectNoInbound asserts that nothing is published to the bus for a moment.
 func expectNoInbound(t *testing.T, m *Model) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
@@ -39,9 +36,6 @@ func expectNoInbound(t *testing.T, m *Model) {
 	}
 }
 
-// newQuietQueueModel builds a Model around a real (but deliberately not
-// started) agent loop: nothing consumes the inbound bus besides the test, so
-// every published turn can be observed deterministically.
 func newQuietQueueModel(t *testing.T, key string) *Model {
 	t.Helper()
 	cfg := testModelConfig(t)
@@ -61,8 +55,6 @@ func newQuietQueueModel(t *testing.T, key string) *Model {
 	m.showWelcome = false
 	return m
 }
-
-// --- pure queue logic -------------------------------------------------------
 
 func newQueueTestModel() *Model {
 	m := &Model{currentKey: "tui:chat:a", chatInput: textarea.New()}
@@ -108,7 +100,6 @@ func TestQueueIsScopedPerSession(t *testing.T) {
 	}
 	m.enqueueMessage("for-b")
 
-	// Popping b must leave a untouched.
 	if got, _ := m.popQueuedMessage("tui:chat:b"); got != "for-b" {
 		t.Fatalf("pop b = %q, want for-b", got)
 	}
@@ -150,11 +141,8 @@ func TestQueueEnforceMaxDepth(t *testing.T) {
 	}
 }
 
-// The queue band is the queue's only surface in the TUI: it carries both the
-// depth/preview pair and the transient feedback that used to ride in the status
-// line, and it is silent when it has nothing to say.
 func TestQueueRowLineFeedback(t *testing.T) {
-	i18n.InitWithLanguage("en") // the host locale must not decide the assertions
+	i18n.InitWithLanguage("en")
 	m := newQueueTestModel()
 	if got := m.queueRowLine(80); got != "" {
 		t.Fatalf("empty queue row = %q, want empty", got)
@@ -165,14 +153,11 @@ func TestQueueRowLineFeedback(t *testing.T) {
 		t.Fatalf("queue row = %q, want depth and preview", got)
 	}
 
-	// Feedback (e.g. queue full) takes precedence over the depth/preview pair.
 	m.queueFeedback = "queue full"
 	if got := m.queueRowLine(80); got != "queue full" {
 		t.Fatalf("queue row = %q, want the feedback text", got)
 	}
 
-	// Feedback also has to show at depth 0 (e.g. right after the last queued
-	// message was removed), and it must respect the width budget.
 	m = newQueueTestModel()
 	m.queueFeedback = i18n.T("tui.queue.removed")
 	if got := m.queueRowLine(80); got != m.queueFeedback {
@@ -184,19 +169,13 @@ func TestQueueRowLineFeedback(t *testing.T) {
 		t.Fatalf("feedback row = %q (%d cells), want <= 30", got, lipgloss.Width(got))
 	}
 
-	// Nothing fits: the band yields an empty line so it costs no row.
 	if got := m.queueRowLine(0); got != "" {
 		t.Fatalf("queue row at width 0 = %q, want empty", got)
 	}
 }
 
-// --- queue preview band -----------------------------------------------------
-
-// The band under the status line must say *what* is about to be sent, stay one
-// line tall no matter the payload, and disappear entirely when idle — the
-// viewport budget only reserves a line for it when it is non-empty.
 func TestQueueRowLine(t *testing.T) {
-	i18n.InitWithLanguage("en") // the host locale must not decide the assertions
+	i18n.InitWithLanguage("en")
 	m := newQueueTestModel()
 
 	if got := m.queueRowLine(80); got != "" {
@@ -211,28 +190,21 @@ func TestQueueRowLine(t *testing.T) {
 	if !strings.Contains(got, "deploy the staging build") {
 		t.Fatalf("queue row %q does not preview the oldest pending message", got)
 	}
-	// The locale template carries its own trailing separator; joining it with
-	// another one would render "· ·".
 	if strings.Contains(got, "· ·") {
 		t.Fatalf("queue row %q rendered a doubled separator", got)
 	}
 
-	// The preview must show the message that will be sent *first*, not the
-	// freshest one.
 	m.enqueueMessage("second message")
 	if got := m.queueRowLine(80); !strings.Contains(got, "deploy the staging build") || strings.Contains(got, "second message") {
 		t.Fatalf("queue row %q should preview the FIFO head", got)
 	}
 
-	// A multi-line payload must collapse: the band is budgeted exactly one
-	// line, so a newline here would push the composer off the screen.
 	m2 := newQueueTestModel()
 	m2.enqueueMessage("first line\nsecond line\twith tabs")
 	if got := m2.queueRowLine(80); strings.Contains(got, "\n") || !strings.Contains(got, "first line second line") {
 		t.Fatalf("queue row %q was not collapsed to a single line", got)
 	}
 
-	// Control sequences must never reach the terminal.
 	m3 := newQueueTestModel()
 	m3.enqueueMessage("\x1b[31mred\x1b[0m\x07bell")
 	if got := m3.queueRowLine(80); strings.Contains(got, "\x1b") || strings.Contains(got, "\x07") {
@@ -240,8 +212,6 @@ func TestQueueRowLine(t *testing.T) {
 	}
 }
 
-// Whatever the terminal width, the band occupies at most the cells it is
-// given, and it yields a whole line (empty string) rather than a sliver.
 func TestQueueRowLineRespectsWidthBudget(t *testing.T) {
 	i18n.InitWithLanguage("en")
 	m := newQueueTestModel()
@@ -250,7 +220,7 @@ func TestQueueRowLineRespectsWidthBudget(t *testing.T) {
 	for _, avail := range []int{1, 2, 3, 5, 10, 40, 200} {
 		got := m.queueRowLine(avail)
 		if got == "" {
-			continue // legitimate: nothing meaningful fits
+			continue
 		}
 		if w := lipgloss.Width(got); w > avail {
 			t.Errorf("queue row at avail=%d renders %d cells: %q", avail, w, got)
@@ -264,23 +234,17 @@ func TestQueueRowLineRespectsWidthBudget(t *testing.T) {
 	}
 }
 
-// --- busy Enter path --------------------------------------------------------
-
 func TestEnterWhileBusyEnqueuesAndClearsInput(t *testing.T) {
 	m := newQueueTestModel()
 	m.chatInput.SetValue("  queued text  ")
-	m.processing = true // busy agent
+	m.processing = true
 
-	// The tick arms the retry path: m.processing can be stale, and without a
-	// live tick chain a queued message would never drain.
 	if cmd := m.enqueueCurrentInput(); cmd == nil {
 		t.Fatal("enqueue returned no cmd; the queue needs a retry tick")
 	}
 	if got := m.queuePreview(); got != "queued text" {
 		t.Fatalf("queued %q, want %q", got, "queued text")
 	}
-	// The composer must be cleared so the parked message cannot be corrupted
-	// by further typing.
 	if got := m.chatInput.Value(); got != "" {
 		t.Fatalf("input value after enqueue = %q, want empty", got)
 	}
@@ -290,7 +254,6 @@ func TestEnterWhileBusyWithEmptyInputDoesNotQueue(t *testing.T) {
 	m := newQueueTestModel()
 	m.processing = true
 
-	// Enter with an empty composer must not create a phantom queue entry.
 	if cmd := m.enqueueCurrentInput(); cmd != nil {
 		t.Fatalf("empty Enter returned a cmd (%v), want nil", cmd)
 	}
@@ -321,13 +284,11 @@ func TestEnqueueWhenQueueFullKeepsInputAndWarns(t *testing.T) {
 	}
 }
 
-// --- flush guards -----------------------------------------------------------
-
 func TestFlushQueueDeferredWhileBusy(t *testing.T) {
 	m := newQueueTestModel()
 	m.enqueueMessage("pending")
 	m.processing = true
-	m.startTime = time.Now() // inside the startup-grace window
+	m.startTime = time.Now()
 
 	cmd := m.maybeFlushQueue()
 	if cmd == nil {
@@ -384,13 +345,10 @@ func TestFlushQueueEmptyQueueIsNoop(t *testing.T) {
 	}
 }
 
-// --- end-to-end through Update() -------------------------------------------
-
 func TestQueueEndToEndEnqueueThenFlushOnIdle(t *testing.T) {
 	key := "tui:chat:queue-e2e"
 	m := newQuietQueueModel(t, key)
 
-	// Simulate a live turn: Enter must park the message instead of sending it.
 	m.processing = true
 	m.startTime = time.Now()
 	m.chatInput.SetValue("queued while busy")
@@ -404,7 +362,6 @@ func TestQueueEndToEndEnqueueThenFlushOnIdle(t *testing.T) {
 		t.Fatalf("input = %q, want cleared after enqueue", got)
 	}
 
-	// Turn ends and the session is idle: the next tick flushes FIFO.
 	m.processing = false
 	m.startTime = time.Time{}
 	updated, cmd := m.Update(tickMsg(time.Now()))
@@ -423,8 +380,6 @@ func TestQueueEndToEndEnqueueThenFlushOnIdle(t *testing.T) {
 	if got := m.queueDepth(); got != 0 {
 		t.Fatalf("depth after flush = %d, want 0", got)
 	}
-	// The flush must render the message once (as a pending user message) and
-	// restart the busy state so the next turn cannot interleave.
 	if m.pendingUserMessage != "queued while busy" {
 		t.Fatalf("pendingUserMessage = %q, want the flushed content", m.pendingUserMessage)
 	}
@@ -448,8 +403,6 @@ func TestQueueEndToEndTwoMessagesDrainInOrder(t *testing.T) {
 		t.Fatalf("depth = %d, want 2", got)
 	}
 
-	// Only one message may be in flight per turn: the flush must pop the head
-	// and leave the rest queued for the following turn.
 	m.processing = false
 	m.startTime = time.Time{}
 	updated, cmd := m.Update(tickMsg(time.Now()))
@@ -476,7 +429,6 @@ func TestQueueEndToEndSecondEnterWhileFlushedTurnIsBusy(t *testing.T) {
 	m.processing = false
 	m.startTime = time.Time{}
 
-	// Flush starts a turn (processing = true).
 	updated, cmd := m.Update(tickMsg(time.Now()))
 	m = updated.(*Model)
 	if cmd == nil {
@@ -484,8 +436,6 @@ func TestQueueEndToEndSecondEnterWhileFlushedTurnIsBusy(t *testing.T) {
 	}
 	drainInbound(t, m)
 
-	// While that turn is live, Enter must queue rather than publish a second
-	// inbound message that the backend would have to interleave.
 	m.chatInput.SetValue("tail")
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(*Model)
@@ -513,7 +463,6 @@ func TestQueueEndToEndTickWhileModalOpenKeepsQueueAlive(t *testing.T) {
 		t.Fatalf("depth = %d, want 1 (nothing may flush while a modal is open)", got)
 	}
 
-	// Closing the modal lets a later tick drain it.
 	m.modalMode = ModalNone
 	updated, cmd = m.Update(tickMsg(time.Now()))
 	m = updated.(*Model)
@@ -554,29 +503,22 @@ func TestClearQueueSlashCommand(t *testing.T) {
 	if got := m.queueDepth(); got != 0 {
 		t.Fatalf("depth after /clearq = %d, want 0", got)
 	}
-	// The command reports what it dropped and must not send anything inbound.
 	if m.queueFeedback == "" {
 		t.Fatal("queueFeedback empty; /clearq should report the dropped count")
 	}
 	expectNoInbound(t, m)
 }
 
-// The busy flag that routes Enter into the queue can be stale: m.processing
-// stays true after a turn ends until isSessionProcessing() resets it past its
-// startup grace. A queued message must never be stranded, so the flush path
-// re-checks the real state and sends it as soon as the stale flag is cleared.
 func TestQueueEndToEndRecoversFromStaleProcessingFlag(t *testing.T) {
 	key := "tui:chat:queue-stale"
 	m := newQuietQueueModel(t, key)
 
 	m.processing = true
-	m.startTime = time.Now().Add(-time.Minute) // grace window long over
+	m.startTime = time.Now().Add(-time.Minute)
 	m.chatInput.SetValue("stale busy")
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(*Model)
 
-	// Either the flush already ran, or a tick chain is armed to run it — the
-	// queue may not simply sit there with nobody watching it.
 	if msg := drainInbound(t, m); msg.Content != "stale busy" {
 		t.Fatalf("published %q, want %q", msg.Content, "stale busy")
 	}
@@ -585,10 +527,6 @@ func TestQueueEndToEndRecoversFromStaleProcessingFlag(t *testing.T) {
 	}
 }
 
-// --- Fix 1: group mode must respect the busy gate ----------------------------
-
-// groupQueueModel builds a quiet model switched to group mode with one profile
-// ("alpha") selected, mirroring how the welcome screen sets groupProfileIdx.
 func groupQueueModel(t *testing.T, key string) *Model {
 	t.Helper()
 	m := newQuietQueueModel(t, key)
@@ -600,9 +538,6 @@ func groupQueueModel(t *testing.T, key string) *Model {
 	return m
 }
 
-// While the agent is busy, Enter in group mode must not start a second,
-// concurrent group run: the input is queued as the exact wrapped command
-// submitGroupStart would have published, and it is sent on flush.
 func TestGroupModeEnterWhileBusyEnqueues(t *testing.T) {
 	key := "tui:chat:group-busy"
 	m := groupQueueModel(t, key)
@@ -620,11 +555,8 @@ func TestGroupModeEnterWhileBusyEnqueues(t *testing.T) {
 	if got := m.chatInput.Value(); got != "" {
 		t.Fatalf("input = %q, want cleared after enqueue", got)
 	}
-	// Nothing may reach the bus while the live turn is running.
 	expectNoInbound(t, m)
 
-	// Once the session is idle the wrapped command is published verbatim, so
-	// the queued turn behaves exactly like one started while idle.
 	m.processing = false
 	m.startTime = time.Time{}
 	updated, cmd := m.Update(tickMsg(time.Now()))
@@ -641,8 +573,6 @@ func TestGroupModeEnterWhileBusyEnqueues(t *testing.T) {
 	}
 }
 
-// The same input on an idle session must still start the group immediately —
-// the gate may not swallow the fast path.
 func TestGroupModeEnterWhileIdleSubmitsDirectly(t *testing.T) {
 	key := "tui:chat:group-idle"
 	m := groupQueueModel(t, key)
@@ -660,14 +590,11 @@ func TestGroupModeEnterWhileIdleSubmitsDirectly(t *testing.T) {
 	}
 }
 
-// Group mode with no configured profiles falls through to the normal submit
-// path, so while busy it queues the raw text — not a command naming a profile
-// that does not exist.
 func TestGroupModeEnterWhileBusyWithoutProfilesQueuesRaw(t *testing.T) {
 	key := "tui:chat:group-noprofile"
 	m := newQuietQueueModel(t, key)
 	m.currentMode = ModeGroup
-	m.groupProfileIdx = 0 // no profiles configured
+	m.groupProfileIdx = 0
 
 	m.processing = true
 	m.startTime = time.Now()
@@ -681,16 +608,10 @@ func TestGroupModeEnterWhileBusyWithoutProfilesQueuesRaw(t *testing.T) {
 	expectNoInbound(t, m)
 }
 
-// --- Fix 3: per-item removal -------------------------------------------------
-
-// alt+delete with an empty composer removes the last queued message (LIFO
-// undo of an accidental Enter while busy) and reports it.
 func TestQueueRemoveLastKeybinding(t *testing.T) {
 	i18n.InitWithLanguage("en")
 	key := "tui:chat:queue-remove"
 	m := newQuietQueueModel(t, key)
-	// The session stays busy so the Update safety net cannot flush the
-	// backlog while the test is still editing it.
 	m.processing = true
 	m.startTime = time.Now()
 	m.enqueueMessage("keep")
@@ -702,14 +623,12 @@ func TestQueueRemoveLastKeybinding(t *testing.T) {
 	if got := m.queueDepth(); got != 1 {
 		t.Fatalf("depth after removal = %d, want 1", got)
 	}
-	// The oldest message must survive — only the last one is removed.
 	if got := m.queuePreview(); got != "keep" {
 		t.Fatalf("preview = %q, want %q", got, "keep")
 	}
 	if got, want := m.queueFeedback, i18n.T("tui.queue.removed"); got != want {
 		t.Fatalf("queueFeedback = %q, want %q", got, want)
 	}
-	// The remaining message is untouched and flushes normally once idle.
 	m.processing = false
 	m.startTime = time.Time{}
 	updated, cmd := m.Update(tickMsg(time.Now()))
@@ -722,9 +641,6 @@ func TestQueueRemoveLastKeybinding(t *testing.T) {
 	}
 }
 
-// The removal only acts on an empty composer so it can never eat text the user
-// is still editing, and on an empty queue it is a no-op that leaves no
-// misleading feedback.
 func TestQueueRemoveLastIgnoredWithTextOrEmptyQueue(t *testing.T) {
 	key := "tui:chat:queue-remove-guard"
 	m := newQuietQueueModel(t, key)
@@ -743,7 +659,6 @@ func TestQueueRemoveLastIgnoredWithTextOrEmptyQueue(t *testing.T) {
 		t.Fatalf("input = %q, want the draft untouched", got)
 	}
 
-	// Empty queue: nothing to remove, no feedback.
 	m2 := newQuietQueueModel(t, "tui:chat:queue-remove-empty")
 	m2.processing = true
 	m2.startTime = time.Now()
@@ -754,7 +669,6 @@ func TestQueueRemoveLastIgnoredWithTextOrEmptyQueue(t *testing.T) {
 	}
 }
 
-// The removal is scoped to the session on screen.
 func TestQueueRemoveLastOnlyAffectsCurrentSession(t *testing.T) {
 	m := newQueueTestModel()
 	m.enqueueMessage("a1")
@@ -772,10 +686,6 @@ func TestQueueRemoveLastOnlyAffectsCurrentSession(t *testing.T) {
 	}
 }
 
-// --- Fix 2: localized strings ------------------------------------------------
-
-// The three user-facing queue strings come from the locale files, in every
-// supported language, with their placeholders intact.
 func TestQueueStringsAreLocalized(t *testing.T) {
 	keys := []string{
 		"tui.queue.full",
@@ -794,8 +704,6 @@ func TestQueueStringsAreLocalized(t *testing.T) {
 				t.Errorf("key %s missing in %s", key, lang)
 			}
 		}
-		// The rendered strings must be built from the locale templates, not
-		// leftovers of the original hardcoded English.
 		m := newQueueTestModel()
 		m.enqueueMessage("hello")
 		if got, want := m.queueRowLine(200), fmt.Sprintf(i18n.T("tui.queue.row"), 1); !strings.HasPrefix(got, want) {
@@ -818,17 +726,11 @@ func TestQueueStringsAreLocalized(t *testing.T) {
 	i18n.InitWithLanguage("en")
 }
 
-// --- Fix 3: cap aligned with the WebUI ---------------------------------------
-
-// The client-side cap matches the WebUI queue (10) so both front-ends reject
-// the same backlog size.
 func TestQueueCapMatchesWebUI(t *testing.T) {
 	if maxQueuedMessages != 10 {
 		t.Fatalf("maxQueuedMessages = %d, want 10 (WebUI parity)", maxQueuedMessages)
 	}
 }
-
-// --- Fix 4: queue cleanup for deleted sessions --------------------------------
 
 func TestPruneQueueToSessions(t *testing.T) {
 	m := newQueueTestModel()
@@ -836,9 +738,6 @@ func TestPruneQueueToSessions(t *testing.T) {
 	m.enqueueMessageTo("tui:chat:gone", "g1")
 	m.enqueueMessageTo("tui:chat:sub", "s1")
 
-	// "tui:chat:a" is the session on screen and must never be pruned (a fresh
-	// chat only joins the session list after its first turn). "gone" is not
-	// live anymore; "sub" stays because subagent keys are not in the list.
 	m.pruneQueueToSessions([]string{"tui:chat:a", "tui:chat:sub"})
 
 	if got := len(m.messageQueue["tui:chat:a"]); got != 1 {
@@ -852,8 +751,6 @@ func TestPruneQueueToSessions(t *testing.T) {
 	}
 }
 
-// reloadSessions runs the prune, so a session that vanished from the list
-// (deleted from another client) loses its queue.
 func TestReloadSessionsPrunesDeletedSessionQueue(t *testing.T) {
 	key := "tui:chat:alive"
 	m := newQuietQueueModel(t, key)
@@ -871,10 +768,6 @@ func TestReloadSessionsPrunesDeletedSessionQueue(t *testing.T) {
 	}
 }
 
-// --- Force send (/flushq, alt+enter) ---------------------------------------
-
-// Idle session with a backlog: force-send publishes the oldest message at once
-// without waiting for a falling processing edge.
 func TestForceSendNextQueuedWhileIdle(t *testing.T) {
 	key := "tui:chat:flush-idle"
 	m := newQuietQueueModel(t, key)
@@ -897,9 +790,6 @@ func TestForceSendNextQueuedWhileIdle(t *testing.T) {
 	}
 }
 
-// Busy session: force-send asks for a double press first (StopAgent is
-// destructive), then cancels the in-flight turn and publishes the queued
-// message this frame once confirmed.
 func TestForceSendNextQueuedWhileBusy(t *testing.T) {
 	i18n.InitWithLanguage("en")
 	key := "tui:chat:flush-busy"
@@ -909,7 +799,6 @@ func TestForceSendNextQueuedWhileBusy(t *testing.T) {
 	m.enqueueMessage("urgent")
 	m.enqueueMessage("queue")
 
-	// First press: confirmation only. Queue untouched, nothing published.
 	cmd := m.forceSendNextQueued()
 	if cmd != nil {
 		t.Fatal("first force-send while busy should confirm, not publish")
@@ -922,7 +811,6 @@ func TestForceSendNextQueuedWhileBusy(t *testing.T) {
 		t.Fatalf("queueFeedback = %q, want confirm hint %q", got, want)
 	}
 
-	// Second press within escHintTimeout: cancel + publish.
 	cmd = m.forceSendNextQueued()
 	if cmd == nil {
 		t.Fatal("forceSendNextQueued returned nil after confirming while busy")
@@ -939,8 +827,6 @@ func TestForceSendNextQueuedWhileBusy(t *testing.T) {
 	}
 }
 
-// An open modal / approval / autocomplete must defer a force-send the same way
-// maybeFlushQueue does — never start a turn under an overlay.
 func TestForceSendNextQueuedDefersWhenUIBusy(t *testing.T) {
 	key := "tui:chat:flush-ui"
 	m := newQuietQueueModel(t, key)
@@ -956,8 +842,6 @@ func TestForceSendNextQueuedDefersWhenUIBusy(t *testing.T) {
 	}
 }
 
-// Empty queue: the command is a no-op that reports why instead of looking
-// like it silently swallowed the keystroke.
 func TestForceSendNextQueuedEmptyQueue(t *testing.T) {
 	i18n.InitWithLanguage("en")
 	key := "tui:chat:flush-empty"
@@ -973,7 +857,6 @@ func TestForceSendNextQueuedEmptyQueue(t *testing.T) {
 	}
 }
 
-// /flushq routes through the command switch to forceSendNextQueued.
 func TestFlushqCommand(t *testing.T) {
 	key := "tui:chat:flushq-cmd"
 	m := newQuietQueueModel(t, key)
@@ -988,9 +871,6 @@ func TestFlushqCommand(t *testing.T) {
 	}
 }
 
-// alt+enter on an empty composer force-sends. With a draft the key is not
-// consumed here, so the textarea keeps its own alt+enter binding (insert
-// newline) and the queue stays untouched.
 func TestQueueFlushKeybinding(t *testing.T) {
 	key := "tui:chat:flush-key"
 	m := newQuietQueueModel(t, key)
@@ -1002,7 +882,6 @@ func TestQueueFlushKeybinding(t *testing.T) {
 		t.Fatalf("published %q, want %q", msg.Content, "keyed")
 	}
 
-	// With a draft the force-send path must not fire; the queue keeps its head.
 	m.enqueueMessage("draft-blocked")
 	m.chatInput.SetValue("editing")
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
@@ -1010,6 +889,5 @@ func TestQueueFlushKeybinding(t *testing.T) {
 	if got := m.queuePreview(); got != "draft-blocked" {
 		t.Fatalf("queue head = %q, want the message left queued", got)
 	}
-	// Nothing new on the bus — only the earlier "keyed" publish.
 	expectNoInbound(t, m)
 }

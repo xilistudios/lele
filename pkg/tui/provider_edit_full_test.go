@@ -12,26 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// Tests for the full-field "edit provider" form (ModalEditProvider): besides
-// the type, API key and API base URL it also edits proxy, auth method, connect
-// mode, web search and custom headers. The rules under test:
-//
-//   - blank keeps the stored value (the form is a plain text widget and never
-//     renders a stored secret back);
-//   - "-" clears the three optional middle fields;
-//   - web search takes yes / no / default (unset) and rejects anything else;
-//   - headers take a JSON object of string→string, "{}" clears them, and
-//     transport-owned headers are rejected by protocoltypes.ValidateCustomHeaders;
-//   - the headers and API-key steps are both masked;
-//   - a CHANGED field is mirrored into the typed provider copy, an untouched
-//     one only fills an empty typed copy (env-carrier rule), and a failed save
-//     rolls every copy back.
-
-// walkProviderEditForm presses ENTER through every remaining step of the edit
-// form, overriding the text input of the steps named in overrides (step index →
-// value). The ENTER on the last step saves and closes the form. It fails the
-// test if a step advances into an error, so a rejected value can never be
-// mistaken for a silent save.
 func walkProviderEditForm(t *testing.T, m *Model, overrides map[int]string) *Model {
 	t.Helper()
 	for step := m.formStepIndex; step < editProviderStepCount; step++ {
@@ -46,9 +26,6 @@ func walkProviderEditForm(t *testing.T, m *Model, overrides map[int]string) *Mod
 	return m
 }
 
-// newProviderEditFullModel builds a cfg-only Model (no agent loop, so
-// configSource falls back to m.cfg) whose provider carries EVERY editable field
-// plus a model, so a full Enter-through can prove nothing is lost.
 func newProviderEditFullModel(t *testing.T) *Model {
 	t.Helper()
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
@@ -81,19 +58,11 @@ func newProviderEditFullModel(t *testing.T) *Model {
 		t.Fatalf("saving initial config: %v", err)
 	}
 	m := &Model{cfg: cfg}
-	// A Model built by NewModel gets a ready, focused text input; a hand-built
-	// one has to do it explicitly, otherwise bubbles' textinput drops every
-	// keystroke (its Update returns early when unfocused) and a cursor that was
-	// never initialized panics on Focus.
 	m.textInput = textinput.New()
 	m.textInput.Focus()
 	return m
 }
 
-// TestProviderEditEnterThroughEightStepsChangesNothing is the safety net of the
-// wider form: pressing ENTER through all eight pre-filled steps must not change
-// a single stored field (type, key, base, proxy, auth, connect, web search,
-// headers and models), and must not clobber the typed mirror either.
 func TestProviderEditEnterThroughEightStepsChangesNothing(t *testing.T) {
 	m := newProviderEditFullModel(t)
 	before := m.cfg.Providers.Named["fullprov"]
@@ -107,7 +76,6 @@ func TestProviderEditEnterThroughEightStepsChangesNothing(t *testing.T) {
 	if got := len(m.formValues); got != editProviderStepCount {
 		t.Fatalf("formValues has %d entries, want %d: %q", got, editProviderStepCount, m.formValues)
 	}
-	// Secrets are never pre-filled: the key and the headers blob stay blank.
 	if m.formValues[editProviderAPIKeyStep] != "" {
 		t.Errorf("API-key step pre-filled: %q", m.formValues[editProviderAPIKeyStep])
 	}
@@ -132,8 +100,7 @@ func TestProviderEditEnterThroughEightStepsChangesNothing(t *testing.T) {
 	if got := m.cfg.Providers.OpenAI.WebSearch; got != typedWebSearchBefore {
 		t.Errorf("typed OpenAI.WebSearch = %v, want %v", got, typedWebSearchBefore)
 	}
-} // TestProviderEditNewFieldsPersist covers one edit per new field: the value
-// reaches the named entry, survives the reload from disk and nothing else moves.
+}
 func TestProviderEditNewFieldsPersist(t *testing.T) {
 	cases := []struct {
 		label  string
@@ -268,8 +235,6 @@ func TestProviderEditNewFieldsPersist(t *testing.T) {
 
 			provider := m.cfg.Providers.Named["fullprov"]
 			tc.assert(t, provider)
-			// Nothing else moved: the model list, the key and the base URL are
-			// the fields a rebuild of the entry would drop.
 			if len(provider.Models) != 1 || provider.Models["alpha"].Model != "model-alpha-1" {
 				t.Errorf("Models = %v, want the original alpha model", provider.Models)
 			}
@@ -280,7 +245,6 @@ func TestProviderEditNewFieldsPersist(t *testing.T) {
 				t.Errorf("APIBase = %q, want it preserved", provider.APIBase)
 			}
 
-			// And the change really reached the file, not just memory.
 			saved, err := config.LoadConfig(config.DefaultConfigPath())
 			if err != nil {
 				t.Fatalf("reloading the saved config: %v", err)
@@ -288,10 +252,7 @@ func TestProviderEditNewFieldsPersist(t *testing.T) {
 			tc.assert(t, saved.Providers.Named["fullprov"])
 		})
 	}
-} // TestProviderEditHeadersValidation covers the headers step's rejection cases
-// (invalid JSON, a non-object, a non-string value, a transport-owned header): a
-// rejected value must leave the user on the step with a helpful error and must
-// never reach the config.
+}
 func TestProviderEditHeadersValidation(t *testing.T) {
 	cases := []struct {
 		label    string
@@ -312,14 +273,12 @@ func TestProviderEditHeadersValidation(t *testing.T) {
 			if !m.openProviderEditFlow() {
 				t.Fatalf("openProviderEditFlow() = false: %s", m.providerFeedback)
 			}
-			// Walk to the headers step (the last one).
 			for m.formStepIndex < editProviderHeadersStep {
 				m = sendKeys(m, "\r")
 			}
 			if m.formStepIndex != editProviderHeadersStep {
 				t.Fatalf("formStepIndex = %d, want the headers step", m.formStepIndex)
 			}
-			// The headers step must be masked while typing.
 			if !m.isSecretInputStep() {
 				t.Error("the headers step must be a secret input step")
 			}
@@ -343,9 +302,6 @@ func TestProviderEditHeadersValidation(t *testing.T) {
 	}
 }
 
-// TestProviderEditHeadersNeverPreFilled pins the secret rule: even when the
-// provider HAS headers, step 7 starts empty — the values may be credentials (an
-// Authorization override, a gateway token) and must not be rendered back.
 func TestProviderEditHeadersNeverPreFilled(t *testing.T) {
 	m := newProviderEditFullModel(t)
 	m.width, m.height = 120, 40
@@ -364,14 +320,11 @@ func TestProviderEditHeadersNeverPreFilled(t *testing.T) {
 		t.Fatalf("headers input = %q, want empty", got)
 	}
 
-	// Typing a secret-bearing blob must not reach the frame in clear text.
 	const blob = `{"Authorization":"Bearer super-secret-token"}`
 	m = sendKeys(m, blob)
 	if m.textInput.Value() != blob {
 		t.Fatalf("forwarding broke input: %q", m.textInput.Value())
 	}
-	// renderActiveModal is the part of View() that paints the form; the rest of
-	// the frame needs a live agent loop, which this cfg-only fixture has not got.
 	frame := m.renderActiveModal()
 	if strings.Contains(frame, "super-secret-token") {
 		t.Errorf("the rendered headers step leaks the value:\n%s", frame)
@@ -381,9 +334,6 @@ func TestProviderEditHeadersNeverPreFilled(t *testing.T) {
 	}
 }
 
-// TestProviderEditWebSearchInvalidValueStaysInForm verifies the yes/no/default
-// validation happens on advance, not on save: a typo keeps the user on the step
-// and leaves the config untouched.
 func TestProviderEditWebSearchInvalidValueStaysInForm(t *testing.T) {
 	m := newProviderEditFullModel(t)
 	before := m.cfg.Providers.Named["fullprov"]
@@ -413,9 +363,7 @@ func TestProviderEditWebSearchInvalidValueStaysInForm(t *testing.T) {
 	if after := m.cfg.Providers.Named["fullprov"]; !reflect.DeepEqual(after, before) {
 		t.Errorf("a rejected web-search edit changed the config:\n got %+v\nwant %+v", after, before)
 	}
-} // TestUpdateProviderNewFieldSemantics drives the save point directly (no form)
-// for the rules the handler cannot express alone: validation errors, the
-// "-"/"{}" clear syntax and the "keep" default.
+}
 func TestUpdateProviderNewFieldSemantics(t *testing.T) {
 	t.Run("invalid web search is rejected", func(t *testing.T) {
 		m := newProviderEditFullModel(t)
@@ -465,10 +413,6 @@ func TestUpdateProviderNewFieldSemantics(t *testing.T) {
 	})
 }
 
-// TestUpdateProviderMirrorsNewFieldsIntoTheTypedSlot covers the mirror rules for
-// the new fields on a provider that HAS a typed slot (anthropic): a changed
-// field wins outright, an untouched one does not clobber a non-empty typed copy
-// (the env-carrier rule), and headers are deep-copied rather than aliased.
 func TestUpdateProviderMirrorsNewFieldsIntoTheTypedSlot(t *testing.T) {
 	t.Run("changed fields reach the typed slot", func(t *testing.T) {
 		m := newProviderHelpersTestModel(t)
@@ -497,8 +441,6 @@ func TestUpdateProviderMirrorsNewFieldsIntoTheTypedSlot(t *testing.T) {
 		if typed.Headers["X-Title"] != "lele" {
 			t.Errorf("typed Headers = %v, want X-Title: lele", typed.Headers)
 		}
-		// Two copies of one provider must not share the map: mutating one must
-		// not be visible in the other.
 		typed.Headers["X-Title"] = "mutated"
 		if got := m.cfg.Providers.Named["anthropic"].Headers["X-Title"]; got != "lele" {
 			t.Errorf("named Headers aliases the typed map: X-Title = %q, want lele", got)
@@ -515,8 +457,6 @@ func TestUpdateProviderMirrorsNewFieldsIntoTheTypedSlot(t *testing.T) {
 				Headers:    map[string]string{"X-From": "json"},
 			},
 		}
-		// Simulates LELE_PROVIDERS_ANTHROPIC_AUTH_METHOD / _PROXY, applied by
-		// env.Parse after the JSON is decoded.
 		m.cfg.Providers.Anthropic = config.ProviderConfig{
 			AuthMethod: "oauth",
 			Proxy:      "http://from-env:8080",
@@ -552,10 +492,7 @@ func TestUpdateProviderMirrorsNewFieldsIntoTheTypedSlot(t *testing.T) {
 			t.Errorf("typed AuthMethod = %q, want it cleared", got)
 		}
 	})
-} // TestUpdateProviderMirrorsOpenAIWebSearch covers the one field that is not a
-// ProviderConfig member: the typed OpenAI slot keeps web_search as a plain bool
-// and the transports read that copy, so a changed answer has to be projected
-// onto it in BOTH directions.
+}
 func TestUpdateProviderMirrorsOpenAIWebSearch(t *testing.T) {
 	cases := []struct {
 		label   string
@@ -596,8 +533,6 @@ func TestUpdateProviderMirrorsOpenAIWebSearch(t *testing.T) {
 	t.Run("an untouched answer leaves the typed bool alone", func(t *testing.T) {
 		m := newProviderHelpersTestModel(t)
 		m.cfg.Providers.Named["openai"] = config.NamedProviderConfig{Type: "openai"}
-		// The typed copy is the carrier (an env override, or the JSON under
-		// providers.openai); pressing Enter over "default" must not clear it.
 		m.cfg.Providers.OpenAI.WebSearch = true
 
 		if err := m.updateProvider("openai", providerEditValues{WebSearch: "default"}); err != nil {
@@ -609,9 +544,6 @@ func TestUpdateProviderMirrorsOpenAIWebSearch(t *testing.T) {
 	})
 }
 
-// TestUpdateProviderRollsBackEveryCopyWhenSaveFails extends the rollback
-// contract to the new fields: a failed save must restore the named entry, the
-// typed ProviderConfig AND the typed OpenAI web_search bool.
 func TestUpdateProviderRollsBackEveryCopyWhenSaveFails(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 	on := true
@@ -626,8 +558,6 @@ func TestUpdateProviderRollsBackEveryCopyWhenSaveFails(t *testing.T) {
 	}
 	m.cfg.Providers.OpenAI.WebSearch = true
 
-	// A regular file where the config directory should be: MkdirAll fails, so
-	// SaveConfig cannot write and updateProvider must roll back.
 	blocked := filepath.Join(t.TempDir(), "blocked")
 	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
 		t.Fatalf("preparing the blocked config dir: %v", err)
@@ -658,10 +588,7 @@ func TestUpdateProviderRollsBackEveryCopyWhenSaveFails(t *testing.T) {
 	if got := m.cfg.Providers.OpenAI.WebSearch; !got {
 		t.Error("typed OpenAI.WebSearch not rolled back: got false, want true")
 	}
-} // TestProviderDetailShowsOptionalInfoRows covers the detail view's extra rows:
-// they appear only for fields that are actually set, the header row lists NAMES
-// (never values), and the model/action-index maps still resolve with the
-// additional rows in place.
+}
 func TestProviderDetailShowsOptionalInfoRows(t *testing.T) {
 	m := newProviderEditFullModel(t)
 	layout := m.providerDetailList("fullprov")
@@ -674,7 +601,7 @@ func TestProviderDetailShowsOptionalInfoRows(t *testing.T) {
 		"Auth method: oauth",
 		"Connect mode: stdio",
 		"Web search: yes",
-		"Headers: X-Title, X-Trace", // sorted names, never values
+		"Headers: X-Title, X-Trace",
 	}
 	if len(layout.Items) < len(wantInfo) {
 		t.Fatalf("items = %q, want at least %d info rows", layout.Items, len(wantInfo))
@@ -685,8 +612,6 @@ func TestProviderDetailShowsOptionalInfoRows(t *testing.T) {
 		}
 	}
 
-	// The maps are computed from the growing list, so they must still resolve:
-	// the model row sits right after the separator that follows the info rows.
 	if alias, ok := layout.ModelRows[len(wantInfo)+1]; !ok || alias != "alpha" {
 		t.Errorf("ModelRows[%d] = %q, %v; want alpha", len(wantInfo)+1, alias, ok)
 	}
@@ -703,9 +628,6 @@ func TestProviderDetailShowsOptionalInfoRows(t *testing.T) {
 	}
 }
 
-// TestProviderDetailHidesUnsetOptionalRows is the other half: a provider with no
-// optional fields keeps exactly the three original info rows, so the extra rows
-// never turn into a row of empty labels.
 func TestProviderDetailHidesUnsetOptionalRows(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
 	layout := m.providerDetailList("myprov")
@@ -725,11 +647,8 @@ func TestProviderDetailHidesUnsetOptionalRows(t *testing.T) {
 	}
 }
 
-// TestProviderDetailShowsWebSearchNo covers the *bool rendering: an explicit
-// "no" is a set value and must be shown (only nil means "unset").
 func TestProviderDetailShowsWebSearchNo(t *testing.T) {
 	m := newProviderHelpersTestModel(t)
-	// Same shape as the withWebSearch test helper, but an explicit "no".
 	off := false
 	empty := m.cfg.Providers.Named["emptyprov"]
 	empty.WebSearch = &off
@@ -747,10 +666,6 @@ func TestProviderDetailShowsWebSearchNo(t *testing.T) {
 	}
 }
 
-// TestProviderEditFormShapeMatchesConstants guards the one invariant the whole
-// edit flow rests on: formValues, formStepNames() and editProviderStepCount must
-// describe the same eight steps. If they drift, the ENTER handler either saves
-// too early or reads a value that was never collected.
 func TestProviderEditFormShapeMatchesConstants(t *testing.T) {
 	m := newProviderEditFullModel(t)
 	m.providerSelectedName = "fullprov"
@@ -766,7 +681,6 @@ func TestProviderEditFormShapeMatchesConstants(t *testing.T) {
 		t.Fatalf("formValues has %d entries, want %d: %q", len(m.formValues), editProviderStepCount, m.formValues)
 	}
 
-	// Every step must be reachable by pressing ENTER, and the last one saves.
 	for step := 0; step < editProviderStepCount-1; step++ {
 		if m.formStepIndex != step {
 			t.Fatalf("at step %d, want %d (formError = %q)", m.formStepIndex, step, m.formError)

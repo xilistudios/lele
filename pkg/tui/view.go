@@ -11,50 +11,26 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// View is the top-level render function called by bubbletea after every
-// Update. It delegates to either the welcome screen or the split-column
-// chat layout, and overlays modals on top of either.
 func (m *Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return i18n.T("tui.initializing")
 	}
 
-	// Audit M2: universal render-side sync — bubbletea always calls View()
-	// after Update(), so re-deriving the echo mode here guarantees every
-	// renderer that paints the text input via m.textInputView() (form modals,
-	// settings edit fields) shows the correct mode even when an Enter/ESC
-	// transition returned before the Update-side sync could run.
 	m.syncTextInputEcho()
 
-	// Perf: a render frame reads the session history at most once (historyView)
-	// and every consumer inside the frame — viewport rebuild, token/context
-	// readouts, sidebar — reuses that single snapshot. The snapshot is dropped
-	// when the frame ends: history can be mutated in place with an unchanged
-	// length (a finalized streaming assistant message), so reusing it across
-	// frames would render stale content.
 	m.beginRenderFrame()
 	defer m.endRenderFrame()
 
-	// The "back to parent" click target points at a row of the chat layout's
-	// status line. Clear it here — before the screen branch — so screens that
-	// do not draw that line (welcome, onboarding) can never leave a stale row
-	// behind for the mouse handler to hit.
 	m.hasBackToParentClick = false
 
 	if m.showWelcome {
-		// The welcome screen has no viewport band; record its (flat) structure
-		// so returning from it to the chat layout — or opening a modal on top
-		// of it — also counts as a layout change and gets a full repaint.
 		m.noteFrameLayout(m.width, m.height, 0, 0, 0)
 		return m.renderWelcome()
 	}
 	return m.renderChatLayout()
 }
 
-// renderWelcome renders the welcome/home screen with the lele ASCII logo,
-// input bar, model/agent selector, mode tabs, and optional modal overlay.
 func (m *Model) renderWelcome() string {
-	// First-run onboarding wizard rendering
 	if m.onboardingActive {
 		return m.paintFrame(m.renderOnboarding())
 	}
@@ -69,14 +45,12 @@ func (m *Model) renderWelcome() string {
 		" |______|______|______|______|"
 	contentBuilder.WriteString(WelcomeLogo.Render(logo) + "\n\n")
 
-	// Autocomplete overlay
 	if m.showAutocomplete && len(m.autocompleteItems) > 0 {
 		contentBuilder.WriteString(m.renderAutocompleteBlock(60) + "\n")
 	}
 
 	contentBuilder.WriteString(InputBarContainer.Width(60).Render(m.chatInput.View()) + "\n\n")
 
-	// Model/agent selector line
 	agentID, modelName := m.resolveWelcomeAgentModel()
 	selectorLine := fmt.Sprintf("%s %s  %s %s",
 		ModelSelectorLabel.Render(i18n.T("tui.model")),
@@ -86,20 +60,15 @@ func (m *Model) renderWelcome() string {
 	)
 	contentBuilder.WriteString(selectorLine + "\n")
 
-	// Mode tabs
 	contentBuilder.WriteString(m.renderModeTabs() + "\n")
 
-	// Group mode: show group profile selector
 	if m.currentMode == ModeGroup {
 		contentBuilder.WriteString(m.renderGroupProfileSelector())
 	}
 
 	contentBuilder.WriteString(WelcomeTip.Render(i18n.T("tui.typeMessage")) + "\n")
-	// Discoverability for the two switching shortcuts: TAB cycles agents and
-	// /mode changes the chat/agent/group filter.
 	contentBuilder.WriteString(WelcomeTip.Render(i18n.T("tui.tabHint")) + "\n")
 
-	// Modal overlay on welcome screen
 	if m.modalMode != ModalNone {
 		return m.renderActiveModal()
 	}
@@ -107,8 +76,6 @@ func (m *Model) renderWelcome() string {
 	return m.paintFrame(contentBuilder.String())
 }
 
-// resolveWelcomeAgentModel returns the agent ID and model name for the
-// welcome screen, considering pending overrides and session state.
 func (m *Model) resolveWelcomeAgentModel() (agentID, modelName string) {
 	if m.currentKey != "" {
 		agentID = m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey)
@@ -130,8 +97,6 @@ func (m *Model) resolveWelcomeAgentModel() (agentID, modelName string) {
 	return
 }
 
-// renderModeTabs renders the Chat/Agent/Group mode tabs for the welcome
-// screen, highlighting the active mode.
 func (m *Model) renderModeTabs() string {
 	modeTabChat := i18n.T("tui.modeChat")
 	modeTabAgent := i18n.T("tui.modeAgent")
@@ -151,7 +116,7 @@ func (m *Model) renderModeTabs() string {
 				ModelSelectorLabel.Render(modeTabAgent),
 				ModelSelectorStyle.Render(modeTabGroup),
 			)
-		default: // ModeAgent
+		default:
 			return fmt.Sprintf("%s   %s   %s",
 				ModelSelectorLabel.Render(modeTabChat),
 				ModelSelectorStyle.Render(modeTabAgent),
@@ -160,14 +125,13 @@ func (m *Model) renderModeTabs() string {
 		}
 	}
 
-	// Groups disabled: only show Chat and Agent tabs
 	switch m.currentMode {
 	case ModeChat:
 		return fmt.Sprintf("%s   %s",
 			ModelSelectorStyle.Render(modeTabChat),
 			ModelSelectorLabel.Render(modeTabAgent),
 		)
-	default: // ModeAgent
+	default:
 		return fmt.Sprintf("%s   %s",
 			ModelSelectorLabel.Render(modeTabChat),
 			ModelSelectorStyle.Render(modeTabAgent),
@@ -175,8 +139,6 @@ func (m *Model) renderModeTabs() string {
 	}
 }
 
-// renderGroupProfileSelector renders the group profile picker for the
-// welcome screen when in Group mode.
 func (m *Model) renderGroupProfileSelector() string {
 	var sb strings.Builder
 	profiles := m.getGroupProfiles()
@@ -199,8 +161,6 @@ func (m *Model) renderGroupProfileSelector() string {
 	return sb.String()
 }
 
-// renderAutocompleteBlock renders the autocomplete suggestion list at the
-// given width.
 func (m *Model) renderAutocompleteBlock(width int) string {
 	var sb strings.Builder
 	for i, cmd := range m.autocompleteItems {
@@ -214,8 +174,6 @@ func (m *Model) renderAutocompleteBlock(width int) string {
 	return ModalContainer.Width(width).Render(sb.String())
 }
 
-// renderChatLayout renders the split-column conversational layout with the
-// chat viewport on the left and the sidebar panel on the right.
 func (m *Model) renderChatLayout() string {
 	leftWidth := int(float64(m.width) * leftColumnRatio)
 	rightWidth := m.width - leftWidth - chatSidebarGutter - 3
@@ -224,38 +182,22 @@ func (m *Model) renderChatLayout() string {
 	}
 	contentHeight := m.height
 
-	// ── History (hoisted: ONE read per frame) ──
-	// Every history-derived value of this frame comes from this single
-	// snapshot: the message count feeds the token/context cache key (used by
-	// both the bottom bar and the sidebar), the resident+archived count is the
-	// viewport fingerprint's count (syncViewportForFrame), and the slice is
-	// handed to the viewport rebuild. Reading it here instead of inside each
-	// consumer is what takes the frame from three GetHistoryView calls down to
-	// one.
 	history := m.historyView()
-	msgCount := m.historyCount() // O(1): resolved from the snapshot above
+	msgCount := m.historyCount()
 
 	agentID := m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey)
 	modelName := m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
 	thinkLevel := m.agentLoop.GetProvidable().GetEffectiveThinkLevel(m.currentKey)
 
-	// ── Status line ──
 	statusLine := m.renderStatusLine(leftWidth)
 
-	// ── Queue row ──
-	// The pending-message band sits above the process indicator, between the
-	// transcript and the status line. It is resolved here because it both
-	// costs a line in the viewport budget and is rendered into the left
-	// column. Empty when the queue is idle, so the common case pays nothing.
 	queueRow := m.queueRowLine(leftWidth - 2)
 
-	// ── Autocomplete ──
 	var autocompleteView string
 	if m.showAutocomplete && len(m.autocompleteItems) > 0 {
 		autocompleteView = m.renderAutocompleteBlock(leftWidth - 4)
 	}
 
-	// ── Status line rendered ──
 	var statusLineRendered string
 	if contentHeight < 20 {
 		statusLineRendered = lipgloss.NewStyle().Foreground(CommentColor).Render(statusLine)
@@ -263,15 +205,11 @@ func (m *Model) renderChatLayout() string {
 		statusLineRendered = StatusLineStyle.Render(statusLine)
 	}
 
-	// ── Queue row rendered ──
-	// Styled only when non-empty: lipgloss.Height("") is 1, so passing a bare
-	// empty string to the budget would silently reserve a phantom line.
 	var queueRowRendered string
 	if queueRow != "" {
 		queueRowRendered = QueueRowStyle.Render(queueRow)
 	}
 
-	// ── Input bar ──
 	m.chatInput.SetWidth(leftWidth - 4)
 	var inputBar string
 	if contentHeight < 16 {
@@ -284,7 +222,6 @@ func (m *Model) renderChatLayout() string {
 		inputBar = InputBarContainer.Width(leftWidth - 2).Render(m.chatInput.View())
 	}
 
-	// ── Token usage ──
 	currentTokens, contextWindow, _, _ := m.getTokenUsage(msgCount)
 
 	pct := 0.0
@@ -330,10 +267,6 @@ func (m *Model) renderChatLayout() string {
 		BottomBarRight.Width(availRight).MaxWidth(availRight).Align(lipgloss.Right).Render(tokensText),
 	)
 
-	// ── Viewport ──
-	// lipgloss.Height("") reports 1, so every optional band is measured from
-	// its own rendered string: a band that renders as "" passes 0 and costs no
-	// line, while a non-empty one reserves exactly what it draws.
 	autocompleteHeight := 0
 	if autocompleteView != "" {
 		autocompleteHeight = lipgloss.Height(autocompleteView)
@@ -351,28 +284,15 @@ func (m *Model) renderChatLayout() string {
 		lipgloss.Height(inputBar),
 		lipgloss.Height(bottomBar),
 	)
-	// Record the frame's vertical structure: the message pump turns a change
-	// into one full repaint, so rows that change meaning (a status line that
-	// becomes a blank margin, an input bar that moves up a row) can never keep
-	// the previous frame's text. See frame_layout.go.
 	m.noteFrameLayout(m.width, m.height, m.viewport.Height, queueRowHeight, autocompleteHeight)
-	// The viewport rebuild consumes the frame snapshot hoisted above: it must
-	// not read the history again (passing it is what removes the extra copy the
-	// baseline measured at 6000 messages). T3: View() does NOT rebuild the
-	// viewport unconditionally — syncViewportForFrame runs the render path's
-	// O(1) freshness checks and reaches the rebuild only when the content on
-	// screen is stale for this state/geometry (see the T3 block in viewport.go).
 	m.syncViewportForFrame(history, msgCount)
 
-	// ── Left Column (Chat Contents) ──
 	leftPane := m.renderLeftColumn(leftWidth, contentHeight, statusLineRendered, queueRowRendered, autocompleteView, inputBar, bottomBar)
 
-	// ── Right Column (Sidebar Panel) ──
 	rightPane := m.renderRightColumn(rightWidth, contentWidth(rightWidth), contentHeight, msgCount)
 
-	// ── Final layout ──
 	leftPane = clampPaneLines(leftPane, leftWidth)
-	rightPane = clampPaneLines(rightPane, rightWidth+1) // +1 left border
+	rightPane = clampPaneLines(rightPane, rightWidth+1)
 
 	gutterPane := lipgloss.NewStyle().
 		Width(chatSidebarGutter).
@@ -390,7 +310,6 @@ func (m *Model) renderChatLayout() string {
 	return m.paintFrame(mainLayout)
 }
 
-// contentWidth returns the usable content width inside the right sidebar.
 func contentWidth(rightWidth int) int {
 	cw := rightWidth - 4
 	if cw < 1 {
@@ -399,10 +318,6 @@ func contentWidth(rightWidth int) int {
 	return cw
 }
 
-// renderStatusLine builds the process indicator shown above the input bar.
-// It owns the loading state (spinner, selection feedback, timing) and the goal
-// badge, and nothing else: the pending queue lives in its own band above this
-// line (see queueRowLine), so the two never compete for the same cells.
 func (m *Model) renderStatusLine(leftWidth int) string {
 	isProcessing := m.isSessionProcessing()
 
@@ -427,22 +342,13 @@ func (m *Model) renderStatusLine(leftWidth int) string {
 		} else {
 			statusLine = fmt.Sprintf("%s %s", m.getBouncingDots(), i18n.T("tui.processing"))
 		}
-		// Live throughput next to the spinner, e.g. "Processing... · 42.5 tok/s".
-		// Omitted entirely while no valid rate is known (start of the turn, or a
-		// stream-less turn) so the line never reads "0.0 tok/s".
 		if tok := formatTokPerSec(m.streamTokPerSec); tok != "" {
 			statusLine = fmt.Sprintf("%s · %s", statusLine, tok)
 		}
 	} else if !m.isSubagentSession(m.currentKey) && m.hasRunningSubagents() {
-		// Background work: subagents are still running but the parent is idle
-		// and the composer is NOT blocked. Deliberately no spinner and no ESC
-		// hint — this line must not read as "busy". Placed after the
-		// isProcessing branches so a real turn always wins.
 		statusLine = fmt.Sprintf(i18n.T("tui.subagentsRunning"), m.subagentsCache.running)
 	} else if m.lastDuration > 0 {
 		statusLine = fmt.Sprintf(i18n.T("tui.doneIn"), m.lastDuration.Seconds())
-		// Final throughput of the last segment, e.g. "● Done in 3.2s · 42.5 tok/s".
-		// Hidden when the finished turn produced no visible stream.
 		if tok := formatTokPerSec(m.lastTokPerSec); tok != "" {
 			statusLine = fmt.Sprintf("%s · %s", statusLine, tok)
 		}
@@ -450,7 +356,6 @@ func (m *Model) renderStatusLine(leftWidth int) string {
 		statusLine = i18n.T("tui.ready")
 	}
 
-	// Goal badge
 	if m.currentKey != "" && m.agentLoop != nil {
 		if goal := m.agentLoop.GoalManager().Get(m.currentKey); goal != nil {
 			statusWidth := lipgloss.Width(statusLine)
@@ -473,7 +378,6 @@ func (m *Model) renderStatusLine(leftWidth int) string {
 		}
 	}
 
-	// Clamp by cells to avoid cutting mid-ANSI
 	if maxSW := leftWidth - 2; maxSW > 0 && lipgloss.Width(statusLine) > maxSW {
 		statusLine = truncateRightCells(statusLine, maxSW)
 	}
@@ -481,9 +385,6 @@ func (m *Model) renderStatusLine(leftWidth int) string {
 	return statusLine
 }
 
-// renderLeftColumn assembles the left pane of the split-column layout:
-// viewport, queue row, status line, autocomplete, input bar, and bottom bar.
-// queueRow may be empty, in which case it contributes no line at all.
 func (m *Model) renderLeftColumn(leftWidth, contentHeight int, statusLineRendered, queueRow, autocompleteView, inputBar, bottomBar string) string {
 	var leftBuilder strings.Builder
 
@@ -492,18 +393,9 @@ func (m *Model) renderLeftColumn(leftWidth, contentHeight int, statusLineRendere
 		viewportContent = m.applySelectionHighlight(viewportContent)
 	}
 	leftBuilder.WriteString(ViewportStyle.Render(viewportContent) + "\n")
-	// The queue band sits *above* the process indicator: it describes work that
-	// is waiting (not yet started), while the line under it describes the turn
-	// that is running right now. Reading order then matches chronology.
 	if queueRow != "" {
 		leftBuilder.WriteString(queueRow + "\n")
 	}
-	// While a subagent session is on screen, the status line carries the
-	// "◄ back to parent chat" affordance. Track its row so a mouse click on it
-	// returns to the parent chat (the same route as ctrl+b). The target is
-	// measured from the rows written so far — the same convention
-	// renderSidebarSubagents uses for the sidebar targets — plus the blank
-	// rows the status line's own top margin renders above the text.
 	if m.parentSessionKey != "" {
 		y := lipgloss.Height(leftBuilder.String()) - 1 + leadingBlankRows(statusLineRendered)
 		m.backToParentClick = subagentClickTarget{yStart: y, yEnd: y + 1, key: m.parentSessionKey}
@@ -519,13 +411,6 @@ func (m *Model) renderLeftColumn(leftWidth, contentHeight int, statusLineRendere
 	return LeftColumnStyle.Width(leftWidth).Height(contentHeight).MaxHeight(contentHeight).Render(leftBuilder.String())
 }
 
-// renderRightColumn assembles the right sidebar pane with session info,
-// token usage, workspace path, subagent list, and click targets.
-//
-// msgCount is the frame's hoisted history message count (see
-// renderChatLayout): it keys the token/context cache, so the sidebar and the
-// bottom bar always show the same value for the same frame without either of
-// them reading the history.
 func (m *Model) renderRightColumn(rightWidth, cw, contentHeight, msgCount int) string {
 	var rightBuilder strings.Builder
 
@@ -533,10 +418,8 @@ func (m *Model) renderRightColumn(rightWidth, cw, contentHeight, msgCount int) s
 		rightBuilder.WriteString(clampSidebarRow(row, cw) + "\n")
 	}
 
-	// Session name
 	rightBuilder.WriteString(m.renderSidebarSessionName(cw) + "\n\n")
 
-	// Context section
 	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.context")) + "\n")
 	currentTokens, contextWindow, cumInput, cumOutput := m.getTokenUsage(msgCount)
 	writeSidebarRow(SidebarLabelValue(i18n.T("tui.currentContext"), formatNumber(currentTokens)))
@@ -550,7 +433,6 @@ func (m *Model) renderRightColumn(rightWidth, cw, contentHeight, msgCount int) s
 	}
 	rightBuilder.WriteString("\n")
 
-	// Workspace section
 	if contentHeight >= 16 {
 		rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.workspace")) + "\n")
 		wsPath := m.workspacePath
@@ -568,7 +450,6 @@ func (m *Model) renderRightColumn(rightWidth, cw, contentHeight, msgCount int) s
 		rightBuilder.WriteString("\n")
 	}
 
-	// Status section
 	if contentHeight >= 14 {
 		rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.status")) + "\n")
 		versionLine := " " + SidebarConnectedDot.Render("●") +
@@ -576,22 +457,16 @@ func (m *Model) renderRightColumn(rightWidth, cw, contentHeight, msgCount int) s
 		rightBuilder.WriteString(clampSidebarRow(versionLine, cw) + "\n\n")
 	}
 
-	// Subagents section
 	m.renderSidebarSubagents(&rightBuilder, cw, contentHeight)
 
 	return RightSidebar.Width(rightWidth).Height(contentHeight).MaxHeight(contentHeight).Render(rightBuilder.String())
 }
 
-// renderSidebarSessionName returns the formatted session name for the
-// sidebar title, with a subagent indicator prefix when applicable.
 func (m *Model) renderSidebarSessionName(cw int) string {
 	sessionName := m.sessionMgr.GetName(m.currentKey)
 	if sessionName == "" {
 		sessionName = i18n.T("tui.newChatDefault")
 	}
-	// Sanitize before the prefix/truncation below: the name is user-controlled
-	// and Cf/control chars would measure 0 cells yet repaint wider or reorder,
-	// breaking truncateRightCells' cell accounting.
 	sessionName = sanitizeDisplayText(sessionName)
 	if m.parentSessionKey != "" {
 		sessionName = "⇗ " + sessionName
@@ -602,15 +477,6 @@ func (m *Model) renderSidebarSessionName(cw int) string {
 	return SidebarTitle.Render(sessionName)
 }
 
-// renderSidebarSubagents appends the subagent list to the sidebar builder
-// and tracks click targets for mouse handling.
-//
-// The rows come from the subagent listing cache (T6): the frame serves the last
-// listing loaded by Update() — O(1), never a backend call — so the sidebar can
-// show data up to subagentsCacheTTL stale. The listing is sorted and its running
-// count materialized at refresh time, so nothing here touches the shared slice
-// beyond reading it. Only three fields are drawn per row (status dot, label,
-// status); Summary/Iterations have no consumer in the TUI at all.
 func (m *Model) renderSidebarSubagents(rightBuilder *strings.Builder, cw, contentHeight int) {
 	subagents := m.cachedSessionSubagents()
 	m.subagentClickTargets = nil
@@ -639,11 +505,6 @@ func (m *Model) renderSidebarSubagents(rightBuilder *strings.Builder, cw, conten
 	}
 
 	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.sidebar.subagents")) + "\n")
-	// currentSidebarHeight is lipgloss.Height(prefix) == (rendered rows)+1
-	// because the prefix ends with a newline. The header fills that trailing
-	// slot (row index Height-1) and the first item starts at row index Height,
-	// so currentY must be currentSidebarHeight, not currentSidebarHeight+1.
-	// The previous +1 shifted every click target one row below its item row.
 	currentY := currentSidebarHeight
 
 	for i := 0; i < maxItems; i++ {
@@ -652,9 +513,6 @@ func (m *Model) renderSidebarSubagents(rightBuilder *strings.Builder, cw, conten
 		if label == "" {
 			label = sa.TaskID
 		}
-		// Sanitize before truncation: label/status are agent-controlled and
-		// get interpolated into the row text below ("(status)"), so Cf/control
-		// chars must not survive into the frame or the width math.
 		label = sanitizeDisplayText(label)
 		status := sanitizeDisplayText(sa.Status)
 

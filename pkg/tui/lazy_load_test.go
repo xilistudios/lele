@@ -11,9 +11,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// seedLazySession creates a session with the given number of user+assistant
-// message pairs, opens it in the model, and triggers a render so the lazy-load
-// render window is initialized.
 func seedLazySession(t *testing.T, m *Model, key string, pairs int) {
 	t.Helper()
 
@@ -32,8 +29,6 @@ func seedLazySession(t *testing.T, m *Model, key string, pairs int) {
 	m.reloadSessions()
 }
 
-// renderLazyModel applies a window size and renders once so the viewport has
-// real dimensions and the render window is initialized.
 func renderLazyModel(t *testing.T, m *Model) {
 	t.Helper()
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
@@ -42,19 +37,15 @@ func renderLazyModel(t *testing.T, m *Model) {
 	m.View()
 }
 
-// TestLazyLoad_InitialWindow verifies that with more messages than the render
-// cap, the initial render window starts at the default index and shows the
-// "earlier messages" header.
 func TestLazyLoad_InitialWindow(t *testing.T) {
 	m := newTestModel(t)
-	seedLazySession(t, m, "tui:chat:lazy-a", 160) // 320 messages > 200 cap
+	seedLazySession(t, m, "tui:chat:lazy-a", 160)
 	renderLazyModel(t, m)
 
 	if m.renderStartIdx != 120 {
 		t.Fatalf("expected renderStartIdx=120, got %d", m.renderStartIdx)
 	}
 
-	// Scroll to top so the header line is visible in the rendered view.
 	m.viewport.GotoTop()
 	out := m.View()
 	want := fmt.Sprintf(i18n.T("tui.earlierMessages"), 120)
@@ -63,19 +54,15 @@ func TestLazyLoad_InitialWindow(t *testing.T) {
 	}
 }
 
-// TestLazyLoad_ExpandOnScrollUp verifies that scrolling to the top expands the
-// render window backwards by lazyLoadBatchSize, compensates YOffset, and stops
-// once all messages are loaded.
 func TestLazyLoad_ExpandOnScrollUp(t *testing.T) {
 	m := newTestModel(t)
-	seedLazySession(t, m, "tui:chat:lazy-b", 160) // 320 messages
+	seedLazySession(t, m, "tui:chat:lazy-b", 160)
 	renderLazyModel(t, m)
 
 	if m.renderStartIdx != 120 {
 		t.Fatalf("expected initial renderStartIdx=120, got %d", m.renderStartIdx)
 	}
 
-	// First expansion: 120 -> 70
 	m.viewport.GotoTop()
 	if !m.maybeExpandRenderWindow() {
 		t.Fatal("expected maybeExpandRenderWindow to return true on first expansion")
@@ -92,7 +79,6 @@ func TestLazyLoad_ExpandOnScrollUp(t *testing.T) {
 		t.Fatalf("expected header %q, got:\n%s", want70, out)
 	}
 
-	// Second expansion: 70 -> 20
 	m.viewport.GotoTop()
 	if !m.maybeExpandRenderWindow() {
 		t.Fatal("expected maybeExpandRenderWindow to return true on second expansion")
@@ -101,7 +87,6 @@ func TestLazyLoad_ExpandOnScrollUp(t *testing.T) {
 		t.Fatalf("expected renderStartIdx=20 after second expand, got %d", m.renderStartIdx)
 	}
 
-	// Third expansion: 20 -> 0, header disappears
 	m.viewport.GotoTop()
 	if !m.maybeExpandRenderWindow() {
 		t.Fatal("expected maybeExpandRenderWindow to return true on third expansion")
@@ -114,18 +99,15 @@ func TestLazyLoad_ExpandOnScrollUp(t *testing.T) {
 		t.Fatalf("expected header to be absent when renderStartIdx=0, got:\n%s", out)
 	}
 
-	// Fourth call: nothing left to load
 	m.viewport.GotoTop()
 	if m.maybeExpandRenderWindow() {
 		t.Fatal("expected maybeExpandRenderWindow to return false when nothing left to load")
 	}
 }
 
-// TestLazyLoad_NoExpandWhenNotAtTop verifies that the window does not expand
-// when the user is not scrolled to the very top.
 func TestLazyLoad_NoExpandWhenNotAtTop(t *testing.T) {
 	m := newTestModel(t)
-	seedLazySession(t, m, "tui:chat:lazy-c", 160) // 320 messages
+	seedLazySession(t, m, "tui:chat:lazy-c", 160)
 	renderLazyModel(t, m)
 
 	if m.renderStartIdx != 120 {
@@ -141,20 +123,16 @@ func TestLazyLoad_NoExpandWhenNotAtTop(t *testing.T) {
 	}
 }
 
-// TestLazyLoad_SessionSwitchResets verifies that switching sessions resets the
-// render window to the default for the new session, and switching back restores
-// the previous default.
 func TestLazyLoad_SessionSwitchResets(t *testing.T) {
 	m := newTestModel(t)
 	keyA := "tui:chat:lazy-d"
-	seedLazySession(t, m, keyA, 160) // 320 messages
+	seedLazySession(t, m, keyA, 160)
 	renderLazyModel(t, m)
 
 	if m.renderStartIdx != 120 {
 		t.Fatalf("expected initial renderStartIdx=120 for A, got %d", m.renderStartIdx)
 	}
 
-	// Expand once so the window is no longer at the default.
 	m.viewport.GotoTop()
 	if !m.maybeExpandRenderWindow() {
 		t.Fatal("expected expansion to succeed before switching")
@@ -163,7 +141,6 @@ func TestLazyLoad_SessionSwitchResets(t *testing.T) {
 		t.Fatalf("expected renderStartIdx=70 after expand, got %d", m.renderStartIdx)
 	}
 
-	// Create and switch to a small session B.
 	keyB := "tui:chat:lazy-e"
 	m.sessionMgr.GetOrCreate(keyB)
 	_ = m.sessionMgr.SetMode(keyB, "agent")
@@ -180,7 +157,6 @@ func TestLazyLoad_SessionSwitchResets(t *testing.T) {
 		t.Fatalf("expected renderStartIdx=0 for small session B, got %d", m.renderStartIdx)
 	}
 
-	// Switch back to A — the render window should reset to A's default.
 	m.currentKey = keyA
 	m.forceGotoBottom = true
 	m.updateViewport()
@@ -193,9 +169,6 @@ func TestLazyLoad_SessionSwitchResets(t *testing.T) {
 	}
 }
 
-// newEvictionTestModel builds a TUI model like newTestModel but attaches a real
-// SQLite store to the session manager so eviction and lazy-load of evicted
-// messages are enabled.
 func newEvictionTestModel(t *testing.T) *Model {
 	t.Helper()
 	m := newTestModel(t)
@@ -208,10 +181,6 @@ func newEvictionTestModel(t *testing.T) *Model {
 	return m
 }
 
-// seedEvictionSession seeds a session with the given number of user+assistant
-// pairs, excludes the older prefix from context (keeping `keep` messages), and
-// evicts the excluded messages from memory. The excluded prefix remains in
-// SQLite and can be lazy-loaded. Returns the number of messages evicted.
 func seedEvictionSession(t *testing.T, m *Model, key string, pairs, keep int) int {
 	t.Helper()
 
@@ -241,18 +210,10 @@ func seedEvictionSession(t *testing.T, m *Model, key string, pairs, keep int) in
 	return evicted
 }
 
-// TestLazyLoad_EvictedMessagesStayOutOfMemory verifies that when a session
-// has evicted messages (e.g. 19 evicted, 5 kept in context in memory), the TUI
-// only loads in-context messages into RAM. Scrolling to top does NOT inflate
-// evicted messages into the session history, and does NOT show an 'earlier
-// messages' header when all in-context messages are visible AND no archived
-// prefix is loaded. After an explicit refreshArchivedHistory call, the evicted
-// messages DO appear in View() via the display-only archived prefix.
 func TestLazyLoad_EvictedMessagesStayOutOfMemory(t *testing.T) {
 	m := newEvictionTestModel(t)
 	const key = "tui:chat:evict-a"
 
-	// 12 pairs = 24 messages; keep 5 → 19 excluded/evicted.
 	evicted := seedEvictionSession(t, m, key, 12, 5)
 	if evicted != 19 {
 		t.Fatalf("expected 19 evicted, got %d", evicted)
@@ -264,7 +225,6 @@ func TestLazyLoad_EvictedMessagesStayOutOfMemory(t *testing.T) {
 	m.reloadSessions()
 	renderLazyModel(t, m)
 
-	// Few in-memory messages (5) are below the render cap, so the window starts at 0.
 	if m.renderStartIdx != 0 {
 		t.Fatalf("expected renderStartIdx=0, got %d", m.renderStartIdx)
 	}
@@ -275,16 +235,11 @@ func TestLazyLoad_EvictedMessagesStayOutOfMemory(t *testing.T) {
 		t.Fatalf("in-memory message count before scroll = %d, want 5", inMemCount)
 	}
 
-	// Scrolling to the top does not trigger lazy-loading of evicted messages into memory.
 	m.viewport.GotoTop()
-	// Without archived prefix loaded, renderStartIdx=0 and no archive → should return false.
-	// (archivedHasOlder is false because refreshArchivedHistory was never called,
-	// and archivedHiddenCount is 0 because archivedKey != currentKey.)
 	if m.maybeExpandRenderWindow() {
 		t.Fatal("expected maybeExpandRenderWindow to return false (no archived prefix loaded)")
 	}
 
-	// Evicted messages remain evicted in SQLite and are not inflated into memory.
 	if got := m.sessionMgr.GetEvictedMessageCount(key); got != evicted {
 		t.Fatalf("GetEvictedMessageCount after scroll = %d, want %d", got, evicted)
 	}
@@ -292,14 +247,11 @@ func TestLazyLoad_EvictedMessagesStayOutOfMemory(t *testing.T) {
 		t.Fatalf("in-memory message count after scroll = %d, want 5", inMemCount)
 	}
 
-	// Without archived prefix, View should NOT show earlier messages header
-	// (all in-context messages are rendered, no archive loaded).
 	outBefore := m.View()
 	if strings.Contains(outBefore, "earlier messages") {
 		t.Fatalf("expected view not to contain earlier messages header without archive, got:\n%s", outBefore)
 	}
 
-	// After explicit refresh, evicted messages appear in View via display-only prefix.
 	m.refreshArchivedHistory()
 	renderLazyModel(t, m)
 	m.viewport.GotoTop()
@@ -307,7 +259,6 @@ func TestLazyLoad_EvictedMessagesStayOutOfMemory(t *testing.T) {
 	if !strings.Contains(outAfter, "Evict question 0?") {
 		t.Fatalf("expected view to contain evicted message 'Evict question 0?' after refresh, got:\n%s", outAfter)
 	}
-	// No earlier-messages header when everything (resident + archived) is visible.
 	if strings.Contains(outAfter, "earlier messages") {
 		t.Fatalf("expected no earlier messages header when all loaded, got:\n%s", outAfter)
 	}

@@ -10,36 +10,27 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// Agent edit field indices (for ModalSettingsAgentEdit). For the agent detail
-// view the first 10 indices correspond to read-only/editable fields and the
-// last two are actions (set as default / delete). These constants MUST stay
-// 1:1 with the row order built in loadAgentDetail's agent branch — inserting
-// or reordering a row there requires updating this block (the row-alignment
-// test in settings_agents_test.go guards it).
 const (
-	agentFieldID                     = iota // 0: ID (read-only)
-	agentFieldName                          // 1: Name
-	agentFieldDescription                   // 2: Description
-	agentFieldWorkspace                     // 3: Workspace
-	agentFieldModel                         // 4: Model (provider/alias)
-	agentFieldTemperature                   // 5: Temperature
-	agentFieldThinkingLevel                 // 6: Thinking level (selector)
-	agentFieldSkills                        // 7: Skills (read-only)
-	agentFieldSubagentsAllow                // 8: Subagents Allow (multi-select)
-	agentFieldSubagentsMaxConcurrent        // 9: Subagents MaxConcurrent (text input)
-	agentFieldSetDefault                    // 10: Action: set as default
-	agentFieldDelete                        // 11: Action: delete agent
+	agentFieldID = iota
+	agentFieldName
+	agentFieldDescription
+	agentFieldWorkspace
+	agentFieldModel
+	agentFieldTemperature
+	agentFieldThinkingLevel
+	agentFieldSkills
+	agentFieldSubagentsAllow
+	agentFieldSubagentsMaxConcurrent
+	agentFieldSetDefault
+	agentFieldDelete
 )
 
-// Defaults view field indices (for ModalSettingsAgentEdit when
-// settingsAgentID is empty). These MUST stay 1:1 with the row order built in
-// loadAgentDetail's defaults branch.
 const (
-	defaultsFieldProvider      = iota // 0: Provider (selector)
-	defaultsFieldModel                // 1: Model (selector)
-	defaultsFieldMaxTokens            // 2: MaxTokens (text input)
-	defaultsFieldTemperature          // 3: Temperature (text input)
-	defaultsFieldThinkingLevel        // 4: Thinking level (selector)
+	defaultsFieldProvider = iota
+	defaultsFieldModel
+	defaultsFieldMaxTokens
+	defaultsFieldTemperature
+	defaultsFieldThinkingLevel
 	defaultsFieldMaxToolIterations
 	defaultsFieldMaxReadLines
 	defaultsFieldMemoryMaxLines
@@ -48,31 +39,20 @@ const (
 	defaultsFieldLLMLoopTimeout
 )
 
-// thinkingLevelSelectorOptions returns the label/value pair lists for the
-// thinking-level selector. The first option "(default)" carries the empty
-// value, which means "inherit" (clears the field to nil) — without it the
-// field would be sticky once set (review R4).
 func thinkingLevelSelectorOptions() (labels, values []string) {
 	return []string{"(default)", "off", "low", "medium", "high"},
 		[]string{"", "off", "low", "medium", "high"}
 }
 
-// settingsAgentAddKey is the synthetic key in settingsAgentKeys that maps to
-// the "Add Agent" action row.
 const settingsAgentAddKey = "__add__"
 
-// loadAgentsSettings populates the agents list with "Defaults" + each agent
-// + the "Add Agent" action. settingsAgentKeys maps each row to an agent ID
-// (empty string = defaults view, "__add__" = new agent flow).
 func (m *Model) loadAgentsSettings() {
 	m.modalItems = nil
-	m.settingsAgentKeys = nil // maps items to agent IDs (empty = defaults)
+	m.settingsAgentKeys = nil
 
-	// Defaults entry
 	m.modalItems = append(m.modalItems, fmt.Sprintf("📋 %s", i18n.T("tui.settings.agentDefaults")))
 	m.settingsAgentKeys = append(m.settingsAgentKeys, "")
 
-	// Agent entries
 	for _, agent := range m.cfg.Agents.List {
 		label := agent.ID
 		if agent.Name != "" {
@@ -85,18 +65,14 @@ func (m *Model) loadAgentsSettings() {
 		m.settingsAgentKeys = append(m.settingsAgentKeys, agent.ID)
 	}
 
-	// Add "new agent" action
 	m.modalItems = append(m.modalItems, fmt.Sprintf("+ %s", i18n.T("tui.settings.addAgent")))
 	m.settingsAgentKeys = append(m.settingsAgentKeys, settingsAgentAddKey)
 }
 
-// loadAgentDetail populates the detail view for a single agent. When agentID
-// is empty it renders the agent-defaults view.
 func (m *Model) loadAgentDetail(agentID string) {
 	m.settingsAgentID = agentID
 
 	if agentID == "" {
-		// Defaults view
 		d := m.cfg.Agents.Defaults
 		m.modalItems = []string{
 			fmt.Sprintf("Provider: %s", valueOr(d.Provider, "default")),
@@ -114,7 +90,6 @@ func (m *Model) loadAgentDetail(agentID string) {
 		return
 	}
 
-	// Agent view
 	agent := m.findAgent(agentID)
 	if agent == nil {
 		m.modalItems = []string{i18n.T("tui.settings.agentNotFound")}
@@ -173,7 +148,6 @@ func (m *Model) loadAgentDetail(agentID string) {
 	}
 }
 
-// handleAgentsEnter handles enter on the agents list.
 func (m *Model) handleAgentsEnter() tea.Cmd {
 	if m.modalSelectedIdx >= len(m.settingsAgentKeys) {
 		return nil
@@ -181,14 +155,12 @@ func (m *Model) handleAgentsEnter() tea.Cmd {
 	key := m.settingsAgentKeys[m.modalSelectedIdx]
 
 	if key == settingsAgentAddKey {
-		// Start add-agent flow
 		m.settingsEditField = "newAgentID"
 		m.textInput.SetValue("")
 		m.textInput.Focus()
 		return nil
 	}
 
-	// Navigate to agent detail
 	m.resetModal(ModalSettingsAgentEdit)
 	m.settingsAgentID = key
 	m.loadAgentDetail(key)
@@ -197,51 +169,47 @@ func (m *Model) handleAgentsEnter() tea.Cmd {
 	return nil
 }
 
-// handleAgentEditEnter handles enter on agent detail items.
 func (m *Model) handleAgentEditEnter() tea.Cmd {
 	agentID := m.settingsAgentID
 
 	if agentID == "" {
-		// Defaults view — editable fields
 		return m.handleDefaultsEditEnter()
 	}
 
-	// Agent view
 	agent := m.findAgent(agentID)
 	if agent == nil {
 		return nil
 	}
 
 	switch m.modalSelectedIdx {
-	case agentFieldID: // 0: ID — not editable
+	case agentFieldID:
 		return nil
-	case agentFieldName: // 1: Name
+	case agentFieldName:
 		m.settingsEditField = "agentName"
 		m.textInput.SetValue(agent.Name)
 		m.textInput.Focus()
-	case agentFieldDescription: // 2: Description
+	case agentFieldDescription:
 		m.settingsEditField = "agentDescription"
 		m.textInput.SetValue(agent.Description)
 		m.textInput.Focus()
-	case agentFieldWorkspace: // 3: Workspace
+	case agentFieldWorkspace:
 		m.settingsEditField = "agentWorkspace"
 		m.textInput.SetValue(agent.Workspace)
 		m.textInput.Focus()
-	case agentFieldModel: // 4: Model — always a selector with (default) and (custom...)
+	case agentFieldModel:
 		modelStr := ""
 		if agent.Model != nil {
 			modelStr = agent.Model.Primary
 		}
 		labels, values := m.modelSelectorOptions(modelStr)
 		if len(values) == 0 {
-			// No providers configured — build minimal selector
 			labels = []string{"(default)"}
 			values = []string{""}
 		}
 		labels = append(labels, "(custom...)")
 		values = append(values, "__custom__")
 		m.startSettingsSelector("agentModel", modelStr, labels, values)
-	case agentFieldTemperature: // 5: Temperature
+	case agentFieldTemperature:
 		m.settingsEditField = "agentTemperature"
 		tempStr := ""
 		if agent.Temperature != nil {
@@ -249,18 +217,18 @@ func (m *Model) handleAgentEditEnter() tea.Cmd {
 		}
 		m.textInput.SetValue(tempStr)
 		m.textInput.Focus()
-	case agentFieldThinkingLevel: // 6: Thinking level — selector with (default)/off/low/medium/high
+	case agentFieldThinkingLevel:
 		current := ""
 		if agent.ThinkingLevel != nil {
 			current = *agent.ThinkingLevel
 		}
 		labels, values := thinkingLevelSelectorOptions()
 		m.startSettingsSelector("agentThinkingLevel", current, labels, values)
-	case agentFieldSkills: // 7: Skills — not editable (managed by /skills)
+	case agentFieldSkills:
 		return nil
-	case agentFieldSubagentsAllow: // 8: Subagents Allow — multi-select picker
+	case agentFieldSubagentsAllow:
 		m.startSubagentPicker(agent)
-	case agentFieldSubagentsMaxConcurrent: // 9: Subagents MaxConcurrent — text input
+	case agentFieldSubagentsMaxConcurrent:
 		m.settingsEditField = "agentSubagentsMaxConcurrent"
 		maxStr := ""
 		if agent.Subagents != nil && agent.Subagents.MaxConcurrent > 0 {
@@ -268,9 +236,9 @@ func (m *Model) handleAgentEditEnter() tea.Cmd {
 		}
 		m.textInput.SetValue(maxStr)
 		m.textInput.Focus()
-	case agentFieldSetDefault: // 10: Set as default
+	case agentFieldSetDefault:
 		m.setAgentDefault(agentID)
-	case agentFieldDelete: // 11: Delete
+	case agentFieldDelete:
 		m.settingsEditField = "confirmDelete"
 		m.formError = i18n.T("tui.settings.confirmDelete")
 		m.textInput.SetValue("")
@@ -279,67 +247,63 @@ func (m *Model) handleAgentEditEnter() tea.Cmd {
 	return nil
 }
 
-// handleDefaultsEditEnter handles enter on defaults detail items (indices
-// correspond to the order in loadAgentDetail's defaults branch).
 func (m *Model) handleDefaultsEditEnter() tea.Cmd {
 	d := &m.cfg.Agents.Defaults
 	switch m.modalSelectedIdx {
-	case defaultsFieldProvider: // Provider — selector from all configured providers
+	case defaultsFieldProvider:
 		labels, values := m.providerSelectorOptions(d.Provider)
 		if len(values) == 0 {
-			// No providers configured — fall back to text input
 			m.settingsEditField = "defaultProvider"
 			m.textInput.SetValue(d.Provider)
 			m.textInput.Focus()
 		} else {
 			m.startSettingsSelector("defaultProvider", d.Provider, labels, values)
 		}
-	case defaultsFieldModel: // Model — always a selector with (default) and (custom...)
+	case defaultsFieldModel:
 		labels, values := m.modelSelectorOptions(d.Model)
 		if len(values) == 0 {
-			// No providers configured — build minimal selector
 			labels = []string{"(default)"}
 			values = []string{""}
 		}
 		labels = append(labels, "(custom...)")
 		values = append(values, "__custom__")
 		m.startSettingsSelector("defaultModel", d.Model, labels, values)
-	case defaultsFieldMaxTokens: // MaxTokens
+	case defaultsFieldMaxTokens:
 		m.settingsEditField = "defaultMaxTokens"
 		m.textInput.SetValue(strconv.Itoa(d.MaxTokens))
 		m.textInput.Focus()
-	case defaultsFieldTemperature: // Temperature
+	case defaultsFieldTemperature:
 		m.settingsEditField = "defaultTemperature"
 		m.textInput.SetValue(formatFloatPtr(d.Temperature))
 		m.textInput.Focus()
-	case defaultsFieldThinkingLevel: // Thinking level — selector with (default)/off/low/medium/high
+	case defaultsFieldThinkingLevel:
 		current := ""
 		if d.ThinkingLevel != nil {
 			current = *d.ThinkingLevel
 		}
 		labels, values := thinkingLevelSelectorOptions()
 		m.startSettingsSelector("defaultThinkingLevel", current, labels, values)
-	case defaultsFieldMaxToolIterations: // MaxToolIterations
+	case defaultsFieldMaxToolIterations:
 		m.settingsEditField = "defaultMaxToolIterations"
 		m.textInput.SetValue(strconv.Itoa(d.MaxToolIterations))
 		m.textInput.Focus()
-	case defaultsFieldMaxReadLines: // MaxReadLines
+	case defaultsFieldMaxReadLines:
 		m.settingsEditField = "defaultMaxReadLines"
 		m.textInput.SetValue(strconv.Itoa(d.MaxReadLines))
 		m.textInput.Focus()
-	case defaultsFieldMemoryMaxLines: // MemoryMaxLines
+	case defaultsFieldMemoryMaxLines:
 		m.settingsEditField = "defaultMemoryMaxLines"
 		m.textInput.SetValue(strconv.Itoa(d.MemoryMaxLines))
 		m.textInput.Focus()
-	case defaultsFieldSubagentTimeout: // SubagentTimeout
+	case defaultsFieldSubagentTimeout:
 		m.settingsEditField = "defaultSubagentTimeout"
 		m.textInput.SetValue(strconv.Itoa(d.SubagentTimeoutMinutes))
 		m.textInput.Focus()
-	case defaultsFieldSubagentMaxConcurrent: // SubagentMaxConcurrent
+	case defaultsFieldSubagentMaxConcurrent:
 		m.settingsEditField = "defaultSubagentMaxConcurrent"
 		m.textInput.SetValue(strconv.Itoa(d.SubagentMaxConcurrent))
 		m.textInput.Focus()
-	case defaultsFieldLLMLoopTimeout: // LLMLoopTimeout
+	case defaultsFieldLLMLoopTimeout:
 		m.settingsEditField = "defaultLLMLoopTimeout"
 		m.textInput.SetValue(strconv.Itoa(d.LLMLoopTimeoutMinutes))
 		m.textInput.Focus()
@@ -347,29 +311,24 @@ func (m *Model) handleDefaultsEditEnter() tea.Cmd {
 	return nil
 }
 
-// handleAgentSettingsInput saves an edited agent setting. It handles the
-// add-agent flow, delete confirmation, agent field edits, and defaults edits.
 func (m *Model) handleAgentSettingsInput(value string) {
 	value = strings.TrimSpace(value)
 
-	// Handle new agent creation
 	if m.settingsEditField == "newAgentID" {
 		if value == "" {
 			m.formError = i18n.T("tui.settings.agentIDRequired")
 			return
 		}
-		// Check for duplicate
 		for _, a := range m.cfg.Agents.List {
 			if a.ID == value {
 				m.formError = i18n.T("tui.settings.agentIDDuplicate")
 				return
 			}
 		}
-		// Create new agent
 		newAgent := config.AgentConfig{
 			ID:      value,
 			Name:    value,
-			Default: len(m.cfg.Agents.List) == 0, // first agent is default
+			Default: len(m.cfg.Agents.List) == 0,
 		}
 		m.cfg.Agents.List = append(m.cfg.Agents.List, newAgent)
 		m.saveConfigToDisk()
@@ -380,7 +339,6 @@ func (m *Model) handleAgentSettingsInput(value string) {
 		return
 	}
 
-	// Handle delete confirmation
 	if m.settingsEditField == "confirmDelete" {
 		if value == "y" || value == "yes" {
 			m.deleteAgent(m.settingsAgentID)
@@ -390,29 +348,21 @@ func (m *Model) handleAgentSettingsInput(value string) {
 		return
 	}
 
-	// Handle agent field edits
 	agent := m.findAgent(m.settingsAgentID)
 	if agent != nil {
 		m.handleAgentFieldEdit(agent, value)
 		return
 	}
 
-	// Handle defaults field edits
 	m.handleDefaultsFieldEdit(value)
 }
 
-// applyAgentReload hot-reloads the agent registry when the model instance is
-// wired to an agent loop (never in unit tests where it is nil).
 func (m *Model) applyAgentReload() {
 	if m.agentLoop != nil {
-		// Pass a private deep copy: ReloadRegistry stores the pointer, and the
-		// TUI continues to mutate m.cfg (audit C1 data race).
 		m.agentLoop.ReloadRegistry(m.cfg.Snapshot())
 	}
 }
 
-// handleAgentFieldEdit saves an edited field for an agent in-place (findAgent
-// returns a pointer into cfg.Agents.List so mutations persist).
 func (m *Model) handleAgentFieldEdit(agent *config.AgentConfig, value string) {
 	switch m.settingsEditField {
 	case "agentName":
@@ -422,8 +372,6 @@ func (m *Model) handleAgentFieldEdit(agent *config.AgentConfig, value string) {
 	case "agentWorkspace":
 		agent.Workspace = value
 	case "agentModel":
-		// The AgentModelConfig struct stores Primary/Fallbacks (not the
-		// provider/alias split), so the whole value is the primary model.
 		if value == "" {
 			agent.Model = nil
 		} else {
@@ -441,8 +389,6 @@ func (m *Model) handleAgentFieldEdit(agent *config.AgentConfig, value string) {
 			agent.Temperature = &f
 		}
 	case "agentThinkingLevel":
-		// "" comes from the "(default)" selector option (or a cleared input)
-		// and means "inherit": store nil so the key is omitted from config.
 		level, ok := config.NormalizeThinkingLevel(value)
 		if !ok {
 			m.formError = i18n.T("tui.settings.invalidThinkingLevel")
@@ -472,7 +418,6 @@ func (m *Model) handleAgentFieldEdit(agent *config.AgentConfig, value string) {
 	m.loadAgentDetail(m.settingsAgentID)
 }
 
-// handleDefaultsFieldEdit saves an edited field for the agent defaults in-place.
 func (m *Model) handleDefaultsFieldEdit(value string) {
 	d := &m.cfg.Agents.Defaults
 	switch m.settingsEditField {
@@ -499,8 +444,6 @@ func (m *Model) handleDefaultsFieldEdit(value string) {
 			d.Temperature = &f
 		}
 	case "defaultThinkingLevel":
-		// "" comes from the "(default)" selector option and means "inherit"
-		// (nil). Same normalization as the per-agent path.
 		level, ok := config.NormalizeThinkingLevel(value)
 		if !ok {
 			m.formError = i18n.T("tui.settings.invalidThinkingLevel")
@@ -562,7 +505,6 @@ func (m *Model) handleDefaultsFieldEdit(value string) {
 	m.loadAgentDetail(m.settingsAgentID)
 }
 
-// setAgentDefault marks an agent as default and unsets all others.
 func (m *Model) setAgentDefault(agentID string) {
 	for i := range m.cfg.Agents.List {
 		m.cfg.Agents.List[i].Default = (m.cfg.Agents.List[i].ID == agentID)
@@ -572,11 +514,7 @@ func (m *Model) setAgentDefault(agentID string) {
 	m.loadAgentDetail(agentID)
 }
 
-// deleteAgent removes an agent from the config. If the deleted agent was the
-// default, the first remaining agent becomes the default. Afterwards it
-// returns to the agents list.
 func (m *Model) deleteAgent(agentID string) {
-	// Find if it's the default
 	isDefault := false
 	for _, a := range m.cfg.Agents.List {
 		if a.ID == agentID && a.Default {
@@ -585,7 +523,6 @@ func (m *Model) deleteAgent(agentID string) {
 		}
 	}
 
-	// Remove from list
 	newList := make([]config.AgentConfig, 0, len(m.cfg.Agents.List)-1)
 	for _, a := range m.cfg.Agents.List {
 		if a.ID != agentID {
@@ -594,7 +531,6 @@ func (m *Model) deleteAgent(agentID string) {
 	}
 	m.cfg.Agents.List = newList
 
-	// If deleted was default, make first agent default
 	if isDefault && len(m.cfg.Agents.List) > 0 {
 		m.cfg.Agents.List[0].Default = true
 	}
@@ -602,13 +538,10 @@ func (m *Model) deleteAgent(agentID string) {
 	m.saveConfigToDisk()
 	m.applyAgentReload()
 
-	// Go back to agents list
 	m.settingsAgentID = ""
 	m.loadAgentsSettings()
 }
 
-// findAgent finds an agent by ID in the config and returns a pointer to the
-// element inside the slice (for in-place editing).
 func (m *Model) findAgent(agentID string) *config.AgentConfig {
 	for i := range m.cfg.Agents.List {
 		if m.cfg.Agents.List[i].ID == agentID {
@@ -618,10 +551,6 @@ func (m *Model) findAgent(agentID string) *config.AgentConfig {
 	return nil
 }
 
-// startSubagentPicker opens the multi-select picker for the current agent's
-// subagent allow-list. It lists every configured agent except the current one
-// (an agent cannot be its own subagent). Each row shows [✓]/[ ] depending on
-// whether the agent is in agent.Subagents.AllowAgents.
 func (m *Model) startSubagentPicker(agent *config.AgentConfig) {
 	m.subagentPickerActive = true
 	m.subagentPickerIdx = 0
@@ -639,7 +568,7 @@ func (m *Model) startSubagentPicker(agent *config.AgentConfig) {
 
 	for _, a := range m.cfg.Agents.List {
 		if a.ID == m.settingsAgentID {
-			continue // don't list self
+			continue
 		}
 		idx := len(m.subagentPickerItems)
 		m.subagentPickerItems = append(m.subagentPickerItems, a.ID)
@@ -652,7 +581,6 @@ func (m *Model) startSubagentPicker(agent *config.AgentConfig) {
 	}
 }
 
-// toggleSubagentPicker toggles the selection state of the highlighted row.
 func (m *Model) toggleSubagentPicker() {
 	if !m.subagentPickerActive || m.subagentPickerIdx >= len(m.subagentPickerItems) {
 		return
@@ -660,9 +588,6 @@ func (m *Model) toggleSubagentPicker() {
 	m.subagentPickerSelected[m.subagentPickerIdx] = !m.subagentPickerSelected[m.subagentPickerIdx]
 }
 
-// saveSubagentPicker writes the selected agents to agent.Subagents.AllowAgents
-// and closes the picker. If nothing is selected, agent.Subagents is set to nil
-// (when it has no other meaningful fields) to keep the config clean.
 func (m *Model) saveSubagentPicker() {
 	if !m.subagentPickerActive {
 		return
@@ -677,8 +602,6 @@ func (m *Model) saveSubagentPicker() {
 			}
 		}
 		if len(selected) == 0 {
-			// Clear the allow-list. If the Subagents struct has no other
-			// meaningful fields, drop it entirely to keep config clean.
 			if agent.Subagents != nil && agent.Subagents.MaxConcurrent == 0 &&
 				agent.Subagents.TimeoutMin == 0 && agent.Subagents.MaxIterations == 0 &&
 				agent.Subagents.Model == nil {
@@ -700,7 +623,6 @@ func (m *Model) saveSubagentPicker() {
 	m.loadAgentDetail(m.settingsAgentID)
 }
 
-// cancelSubagentPicker closes the subagent picker without saving.
 func (m *Model) cancelSubagentPicker() {
 	m.subagentPickerActive = false
 	m.subagentPickerItems = nil
@@ -710,7 +632,6 @@ func (m *Model) cancelSubagentPicker() {
 	m.modalScrollOffset = 0
 }
 
-// formatFloatPtr formats a *float64 for display; nil renders as "default".
 func formatFloatPtr(f *float64) string {
 	if f == nil {
 		return "default"
@@ -718,9 +639,6 @@ func formatFloatPtr(f *float64) string {
 	return fmt.Sprintf("%.2f", *f)
 }
 
-// thinkingLevelStr formats a *string thinking level for display; nil or empty
-// renders as "default" (meaning: inherit from the global default / model
-// reasoning config).
 func thinkingLevelStr(s *string) string {
 	if s == nil || *s == "" {
 		return "default"

@@ -10,9 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// seedSubagentViewWithParent points the model at a subagent session whose
-// parent chat is remembered in parentSessionKey — the state in which the
-// status line shows the "back to parent chat" affordance.
 func seedSubagentViewWithParent(t *testing.T) (m *Model, parentKey, childKey string) {
 	t.Helper()
 
@@ -32,8 +29,6 @@ func seedSubagentViewWithParent(t *testing.T) (m *Model, parentKey, childKey str
 	return m, parentKey, childKey
 }
 
-// renderedBackToParentRow returns the rendered row index of the "back to
-// parent chat" text inside the current frame, or fails the test.
 func renderedBackToParentRow(t *testing.T, m *Model) int {
 	t.Helper()
 	text := i18n.T("tui.backToParent")
@@ -46,10 +41,6 @@ func renderedBackToParentRow(t *testing.T, m *Model) int {
 	return -1
 }
 
-// TestBackToParentClickTargetAlignsWithRenderedText is the regression guard for
-// the click-target geometry: the tracked row must be exactly the row where the
-// "back to parent chat" text is rendered (idle variant), not its style margin
-// or a neighbouring band.
 func TestBackToParentClickTargetAlignsWithRenderedText(t *testing.T) {
 	m, parentKey, _ := seedSubagentViewWithParent(t)
 
@@ -67,13 +58,9 @@ func TestBackToParentClickTargetAlignsWithRenderedText(t *testing.T) {
 	}
 }
 
-// TestBackToParentClickTargetAlignsWhileProcessing repeats the geometry check
-// on the processing variant of the status line (spinner + hint + affordance):
-// the extra leading text must not shift the tracked row.
 func TestBackToParentClickTargetAlignsWhileProcessing(t *testing.T) {
 	m, _, _ := seedSubagentViewWithParent(t)
 
-	// Force the processing branch of renderStatusLine.
 	m.processing = true
 	m.startTime = time.Now()
 
@@ -88,9 +75,6 @@ func TestBackToParentClickTargetAlignsWhileProcessing(t *testing.T) {
 	}
 }
 
-// TestBackToParentClickReturnsToParent is the end-to-end check: a mouse press
-// on the rendered "back to parent chat" row must switch back to the parent
-// chat and clear the parent marker — the same route ctrl+b takes.
 func TestBackToParentClickReturnsToParent(t *testing.T) {
 	m, parentKey, _ := seedSubagentViewWithParent(t)
 
@@ -113,8 +97,6 @@ func TestBackToParentClickReturnsToParent(t *testing.T) {
 	}
 }
 
-// TestBackToParentClickIgnoredOutsideRow guards the hit area: a click on any
-// other row of the left pane must not navigate away from the subagent view.
 func TestBackToParentClickIgnoredOutsideRow(t *testing.T) {
 	m, _, childKey := seedSubagentViewWithParent(t)
 
@@ -137,9 +119,6 @@ func TestBackToParentClickIgnoredOutsideRow(t *testing.T) {
 	}
 }
 
-// TestBackToParentClickTargetAbsentWithoutParent: when no parent is remembered
-// (plain chat view) the affordance is not on screen and no click target may be
-// registered.
 func TestBackToParentClickTargetAbsentWithoutParent(t *testing.T) {
 	m, _, _ := seedSubagentViewWithParent(t)
 	m.parentSessionKey = ""

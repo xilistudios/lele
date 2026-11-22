@@ -2,7 +2,6 @@ package theme
 
 import "sort"
 
-// builtins is the registry of built-in themes keyed by name.
 var builtins = map[string]Theme{
 	"dracula":         DraculaDefault,
 	"nord":            nordTheme,
@@ -19,7 +18,6 @@ var builtins = map[string]Theme{
 	"matrix-red":      matrixRedTheme,
 }
 
-// Builtins returns the sorted list of built-in theme names.
 func Builtins() []string {
 	names := make([]string, 0, len(builtins))
 	for name := range builtins {

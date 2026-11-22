@@ -54,7 +54,6 @@ func TestMissingKey(t *testing.T) {
 func TestSetLanguage(t *testing.T) {
 	Init()
 
-	// Test valid languages
 	validLangs := []string{"es", "en", "pt"}
 	for _, lang := range validLangs {
 		SetLanguage(lang)
@@ -63,7 +62,6 @@ func TestSetLanguage(t *testing.T) {
 		}
 	}
 
-	// Test invalid language falls back to Spanish
 	SetLanguage("invalid")
 	if GetLanguage() != "es" {
 		t.Errorf("SetLanguage('invalid') should fallback to 'es', got %s", GetLanguage())
@@ -71,7 +69,6 @@ func TestSetLanguage(t *testing.T) {
 }
 
 func TestDetectLanguage(t *testing.T) {
-	// Save original env vars
 	origLang := os.Getenv("LANG")
 	origLeleLang := os.Getenv("LELE_LANG")
 	origLcAll := os.Getenv("LC_ALL")
@@ -81,7 +78,6 @@ func TestDetectLanguage(t *testing.T) {
 		os.Setenv("LC_ALL", origLcAll)
 	}()
 
-	// Clear all env vars to test default behavior
 	os.Unsetenv("LANG")
 	os.Unsetenv("LELE_LANG")
 	os.Unsetenv("LC_ALL")
@@ -91,14 +87,12 @@ func TestDetectLanguage(t *testing.T) {
 		t.Errorf("detectLanguage() with no env vars = %s, want 'es'", lang)
 	}
 
-	// Test with LELE_LANG set
 	os.Setenv("LELE_LANG", "pt")
 	lang = detectLanguage()
 	if lang != "pt" {
 		t.Errorf("detectLanguage() with LELE_LANG=pt = %s, want 'pt'", lang)
 	}
 
-	// Test with LANG set
 	os.Unsetenv("LELE_LANG")
 	os.Setenv("LANG", "en_US.UTF-8")
 	lang = detectLanguage()
@@ -108,14 +102,12 @@ func TestDetectLanguage(t *testing.T) {
 }
 
 func TestAvailableLanguages(t *testing.T) {
-	// Isolate from any downloaded packs on the host machine.
 	SetPackDir(t.TempDir())
 	langs := AvailableLanguages()
 	if len(langs) != 3 {
 		t.Errorf("AvailableLanguages() returned %d languages, want 3 (builtins only)", len(langs))
 	}
 
-	// Check all expected languages are present
 	langMap := make(map[string]bool)
 	for _, l := range langs {
 		langMap[l] = true
@@ -131,7 +123,6 @@ func TestAvailableLanguages(t *testing.T) {
 func TestInstalledLanguagesIncludesExternal(t *testing.T) {
 	dir := t.TempDir()
 	SetPackDir(dir)
-	// Write a fake downloaded pack.
 	if err := os.MkdirAll(dir+"/tui", 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +139,6 @@ func TestInstalledLanguagesIncludesExternal(t *testing.T) {
 	if !found {
 		t.Fatalf("InstalledLanguages() = %v, want fr included", langs)
 	}
-	// Reset for other tests.
 	SetPackDir("")
 }
 
@@ -163,7 +153,6 @@ func TestGetLanguageTag(t *testing.T) {
 }
 
 func TestAllKeysExist(t *testing.T) {
-	// Test that all required keys exist in all languages
 	requiredKeys := []string{
 		"tui.title",
 		"tui.welcome",
@@ -249,23 +238,10 @@ func TestAllKeysExist(t *testing.T) {
 	}
 }
 
-// TestMCPAuthKeysExistInAllBuiltinLanguages covers the /mcp auth surface: the
-// OAuth modal (ModalMCPAuth, "a" in the server detail), the visibility markers
-// and sign-out lines of the list/detail, and the paste-refusal messages.
-// TestAllKeysExist only checks its own hardcoded list, so it would NOT catch a
-// key added to one locale and forgotten in the other two — which is exactly
-// the mistake this table of new keys is here to catch. Every key must be
-// present VERBATIM in each builtin locale's JSON (T() alone cannot prove that:
-// a missing key silently falls back to the default locale), and the format
-// verbs must be identical across locales (a %v dropped in one translation
-// would render a raw argument, or a %s added would consume a missing one).
 func TestMCPAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 	keys := []string{
 		"tui.mcpAuth",
 		"tui.mcpAuthStarting",
-		// The browser launch is automatic now: the modal reports whether it
-		// fired and why it could not, while the URL stays on screen and
-		// copyable (the instructions sentence is the copy path's fallback).
 		"tui.mcpAuthBrowserOpened",
 		"tui.mcpAuthBrowserFailed",
 		"tui.mcpAuthURLLabel",
@@ -274,8 +250,6 @@ func TestMCPAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 		"tui.mcpAuthHintEnter",
 		"tui.mcpAuthHintCopy",
 		"tui.mcpAuthHintClose",
-		// The close hint is split by state: the cancel wording while the flow
-		// is live, the mere-close wording once it is over.
 		"tui.mcpAuthHintClosed",
 		"tui.mcpAuthCopied",
 		"tui.mcpAuthCopyFailed",
@@ -292,15 +266,9 @@ func TestMCPAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 		"tui.mcpAuthErrStoreDisabled",
 		"tui.mcpAuthErrCanceled",
 		"tui.mcpAuthErrTimedOut",
-		// The transport/probe sentinel: an unreachable server. Its engine text
-		// is English, so it MUST have its own key or es/pt would show it.
 		"tui.mcpAuthErrProbeFailed",
-		// The paste parser refuses a denial redirect and an unreadable query
-		// with messages of its own; the outcomes themselves come from the
-		// engine (mcp.ParseAuthPaste), not from a TUI copy of the rule.
 		"tui.mcpAuthRefused",
 		"tui.mcpAuthRefusedUnknown",
-		// Auth visibility in the list and the detail, and the sign out.
 		"tui.mcpAuthRequired",
 		"tui.mcpAuthOK",
 		"tui.mcpAuthLogoutDone",
@@ -310,9 +278,6 @@ func TestMCPAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 		"tui.mcpDetailAuth",
 		"tui.mcpDetailAuthState",
 		"tui.mcpDetailNone",
-		// The detail hint was extended to advertise the new key, and so was
-		// the LIST hint ("D: sign out" between the toggle and the filter), so
-		// both footers must carry it in every locale.
 		"tui.mcpDetailHints",
 		"tui.mcpListHints",
 		"tui.mcpLogoutHint",
@@ -323,8 +288,6 @@ func TestMCPAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 	if len(langs) == 0 {
 		t.Fatal("BuiltinLanguages() is empty")
 	}
-	// The three builtins must really be there, or this test would pass on an
-	// empty iteration.
 	for _, want := range []string{"en", "es", "pt"} {
 		found := false
 		for _, l := range langs {
@@ -340,9 +303,6 @@ func TestMCPAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 	prev := GetLanguage()
 	t.Cleanup(func() { SetLanguage(prev) })
 
-	// The raw per-locale maps: a key deleted from exactly one builtin file
-	// would still resolve through the default-locale fallback, so presence is
-	// asserted against the file itself, not against T().
 	rawByLang := map[string]localeMap{}
 	for _, lang := range []string{"en", "es", "pt"} {
 		tag, err := language.Parse(lang)
@@ -387,15 +347,6 @@ func TestMCPAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 	}
 }
 
-// TestConnectPickerKeysExistInAllBuiltinLanguages covers the row-first
-// /connect picker surface: the picker title, the two custom (bring-your-own
-// endpoint) rows and the provider-name placeholder. Modelled on
-// TestMCPAuthKeysExistInAllBuiltinLanguages — TestAllKeysExist only checks
-// its own hardcoded list and would miss a key added to one locale and
-// formatVerbs extracts the printf verbs of a translated string ("%s", "%v",
-// …) in order, ignoring the literal text around them. Two locales agree for a
-// key when their verb sequences match: a translation that reorders or drops a
-// verb would panic (or print %!v(MISSING)) at render time.
 func formatVerbs(s string) string {
 	var out []rune
 	for i := 0; i < len(s); i++ {
@@ -407,7 +358,6 @@ func formatVerbs(s string) string {
 	return string(out)
 }
 
-// forgotten in the other two.
 func TestConnectPickerKeysExistInAllBuiltinLanguages(t *testing.T) {
 	keys := []string{
 		"tui.connectPickProvider",
@@ -469,12 +419,6 @@ func TestConnectPickerKeysExistInAllBuiltinLanguages(t *testing.T) {
 	}
 }
 
-// TestConnectOAuthKeysExistInAllBuiltinLanguages covers the native /connect
-// OAuth login surface (ModalConnectOAuth, rendered by connect_oauth.go): the
-// three OAuth row labels and every inline/modal string the flow can render,
-// from the authorization-URL instructions through each terminal sentinel
-// error. Modelled on TestConnectPickerKeysExistInAllBuiltinLanguages so a key
-// added to one locale and forgotten in the other two is caught here.
 func TestConnectOAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 	keys := []string{
 		"tui.connectRowOAuthOpenAI",
@@ -503,8 +447,6 @@ func TestConnectOAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 		"tui.connectOAuthErrClosed",
 		"tui.connectOAuthErrNoManualRedirect",
 		"tui.connectOAuthErrStateMismatch",
-		// Reasons substituted into the tui.connectOAuthStartFailed template
-		// when a picked row cannot be started at all (catalog/registry drift).
 		"tui.connectOAuthErrUnknownProvider",
 		"tui.connectOAuthErrUnregisteredProvider",
 		"tui.connectOAuthErrInconsistentRow",
@@ -563,24 +505,10 @@ func TestConnectOAuthKeysExistInAllBuiltinLanguages(t *testing.T) {
 	}
 }
 
-// TestMCPAddKeysExistInAllBuiltinLanguages covers the /mcp add wizard's
-// surface: the wizard title, the per-slot labels and placeholders, the
-// per-slot validation errors, the review warnings and hints, and the
-// result-handler feedback lines. TestAllKeysExist only checks its own
-// hardcoded list, so it would NOT catch a key added to one locale and
-// forgotten in the other two — which is exactly the mistake this table of
-// new keys is here to catch. Every key must be present VERBATIM in each
-// builtin locale's JSON (T() alone cannot prove that: a missing key
-// silently falls back to the default locale), and the format verbs must be
-// identical across locales (a %s dropped in one translation would render a
-// raw argument, or a %v added would consume a missing one). The two
-// MODIFIED keys (mcpListHints, mcpNoServers) are listed too so a fragment
-// dropped from one translation is caught per-file.
 func TestMCPAddKeysExistInAllBuiltinLanguages(t *testing.T) {
 	keys := []string{
 		"tui.mcpAdd",
 		"tui.mcpAddHint",
-		// Slot labels.
 		"tui.mcpAddStepName",
 		"tui.mcpAddStepKind",
 		"tui.mcpAddStepCommand",
@@ -592,7 +520,6 @@ func TestMCPAddKeysExistInAllBuiltinLanguages(t *testing.T) {
 		"tui.mcpAddStepDescription",
 		"tui.mcpAddStepLayer",
 		"tui.mcpAddStepReview",
-		// Placeholders.
 		"tui.mcpAddNamePlaceholder",
 		"tui.mcpAddKindPlaceholder",
 		"tui.mcpAddCommandPlaceholder",
@@ -604,7 +531,6 @@ func TestMCPAddKeysExistInAllBuiltinLanguages(t *testing.T) {
 		"tui.mcpAddDescriptionPlaceholder",
 		"tui.mcpAddLayerPlaceholder",
 		"tui.mcpAddConfirmPlaceholder",
-		// Per-slot validation errors.
 		"tui.mcpAddErrNameRequired",
 		"tui.mcpAddErrNameSlash",
 		"tui.mcpAddErrKind",
@@ -617,14 +543,12 @@ func TestMCPAddKeysExistInAllBuiltinLanguages(t *testing.T) {
 		"tui.mcpAddErrLayerNoPath",
 		"tui.mcpAddErrPathNotAllowed",
 		"tui.mcpAddErrConfirm",
-		// Review warnings and hints.
 		"tui.mcpAddReviewWarnReplace",
 		"tui.mcpAddReviewWarnShadowed",
 		"tui.mcpAddReviewNoteShadows",
 		"tui.mcpAddReviewAuthHint",
 		"tui.mcpAddHints",
 		"tui.mcpAddReviewHints",
-		// Result-handler feedback lines.
 		"tui.mcpAddSuccess",
 		"tui.mcpAddReplaced",
 		"tui.mcpAddNoChange",
@@ -632,8 +556,6 @@ func TestMCPAddKeysExistInAllBuiltinLanguages(t *testing.T) {
 		"tui.mcpAddFailed",
 		"tui.mcpAddLayerNoPath",
 		"tui.mcpAddPathNotAllowed",
-		// The two MODIFIED keys: the "N" fragment and the empty-state row
-		// advertise the wizard, so both must carry it in every locale.
 		"tui.mcpListHints",
 		"tui.mcpNoServers",
 	}
@@ -713,13 +635,6 @@ func TestMCPAddKeysExistInAllBuiltinLanguages(t *testing.T) {
 	}
 }
 
-// TestKeepAwakeKeysExistInAllBuiltinLanguages guards the Interface settings
-// keep-awake surface: the row LABEL and the new "d" cancel HINT (both added by
-// the keep-awake feature). TestAllKeysExist only checks its own hardcoded
-// list, and T() would mask a key deleted from a single locale via the
-// default-locale fallback, so presence is asserted against the raw map of
-// each builtin locale file — the same protection TestMCPAuthKeys... gives the
-// MCP keys.
 func TestKeepAwakeKeysExistInAllBuiltinLanguages(t *testing.T) {
 	keys := []string{
 		"tui.settings.keepAwake",
@@ -753,25 +668,15 @@ func TestKeepAwakeKeysExistInAllBuiltinLanguages(t *testing.T) {
 	}
 }
 
-// TestProviderEditKeysExistInAllBuiltinLanguages guards the provider edit
-// surface (ModalEditProvider): the form title, the "Edit provider" action row
-// of the detail view, the keep-blank hint + placeholder and the save
-// confirmation. TestAllKeysExist only checks its own hardcoded list, and T()
-// would mask a key deleted from a single locale via the default-locale
-// fallback, so presence is asserted against the raw map of each builtin locale
-// file — the same protection TestKeepAwakeKeys... gives the keep-awake keys.
 func TestProviderEditKeysExistInAllBuiltinLanguages(t *testing.T) {
 	keys := []string{
 		"tui.editProvider",
 		"tui.editProviderAction",
 		"tui.editProviderKeepHint",
-		// The full-field form (8 steps) adds a hint per value-typed step, so a
-		// missing translation would silently fall back to English mid-form.
 		"tui.editProviderOptionalHint",
 		"tui.editProviderWebSearchHint",
 		"tui.editProviderHeadersHint",
 		"tui.providerUpdated",
-		// The detail hint line must advertise the new "e" shortcut.
 		"tui.providerDetailHints",
 	}
 
@@ -805,12 +710,6 @@ func TestProviderEditKeysExistInAllBuiltinLanguages(t *testing.T) {
 	}
 }
 
-// TestEditModelReasoningKeysExistInAllBuiltinLanguages guards the reasoning
-// steps of the edit-model form (ModalEditModel): its four optional steps show
-// the "default clears the override" hint and the max-tokens step its own, so a
-// missing translation would silently fall back to English mid-form — a subtler
-// bug than a missing key T() would mask. Presence is asserted against the raw
-// map of each builtin locale file, exactly like the provider-edit keys above.
 func TestEditModelReasoningKeysExistInAllBuiltinLanguages(t *testing.T) {
 	keys := []string{
 		"tui.editModelReasoningDefaultHint",

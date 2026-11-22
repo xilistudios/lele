@@ -10,8 +10,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// renderOnboarding renders the first-run onboarding wizard based on the
-// current onboardingStep. Each step builds its own centered layout.
 func (m *Model) renderOnboarding() string {
 	var b strings.Builder
 	width := m.width
@@ -41,9 +39,6 @@ func (m *Model) renderOnboarding() string {
 	return b.String()
 }
 
-// renderObConnect renders the guided-connect step (step 5 of 6). It delegates
-// to the shared /connect form-modal content so the flow stays in sync with
-// ModalAddProvider, and wraps it with the onboarding progress dots.
 func (m *Model) renderObConnect(width int) string {
 	var inner strings.Builder
 	inner.WriteString(lipgloss.Place(width, 0, lipgloss.Center, lipgloss.Top,
@@ -53,9 +48,6 @@ func (m *Model) renderObConnect(width int) string {
 	return inner.String()
 }
 
-// renderObWelcome renders the first onboarding step: the lele ASCII logo, the
-// welcome message, progress dots and the keyboard hints. When the user has
-// pressed Esc a skip-confirmation is overlaid on top instead.
 func (m *Model) renderObWelcome(width int) string {
 	var b strings.Builder
 
@@ -86,9 +78,6 @@ func (m *Model) renderObWelcome(width int) string {
 	return b.String()
 }
 
-// renderSkipConfirm renders the two-option skip confirmation list, using
-// obSelectedPreset to highlight the active choice ("Yes, skip" = 0 / "No,
-// continue" = 1).
 func (m *Model) renderSkipConfirm(width int) string {
 	var sb strings.Builder
 	sb.WriteString(lipgloss.Place(width, 0, lipgloss.Center, lipgloss.Top, i18n.T("tui.onboard.skipConfirm")) + "\n\n")
@@ -107,8 +96,6 @@ func (m *Model) renderSkipConfirm(width int) string {
 	return lipgloss.Place(width, 0, lipgloss.Center, lipgloss.Top, ModalContainer.Render(sb.String()))
 }
 
-// renderObLanguage renders the language picker step (step 2 of 6). The list
-// mirrors the /lang modal and uses modalSelectedIdx for navigation.
 func (m *Model) renderObLanguage(width int) string {
 	var b strings.Builder
 
@@ -144,8 +131,6 @@ func (m *Model) renderObLanguage(width int) string {
 	return b.String()
 }
 
-// renderObTheme renders the theme picker step (step 3 of 6). The list shows
-// all built-in themes; the current theme is pre-selected.
 func (m *Model) renderObTheme(width int) string {
 	var b strings.Builder
 
@@ -171,9 +156,6 @@ func (m *Model) renderObTheme(width int) string {
 	return b.String()
 }
 
-// renderObProviderPicker renders the provider preset selection step (step 4 of
-// 6). It lists all providerPresets, an "Other / custom" entry and a "Skip for
-// now" entry.
 func (m *Model) renderObProviderPicker(width int) string {
 	var b strings.Builder
 
@@ -221,10 +203,6 @@ func (m *Model) renderObProviderPicker(width int) string {
 	return b.String()
 }
 
-// renderObVerify renders the verification step (step 6 of 6). While the async
-// key validation runs it shows a spinner; on failure it shows a warning (the
-// key can still be used) and, when skipped via Esc, an explainer that
-// verification was skipped.
 func (m *Model) renderObVerify(width int) string {
 	var b strings.Builder
 
@@ -251,9 +229,6 @@ func (m *Model) renderObVerify(width int) string {
 	return b.String()
 }
 
-// renderObDone renders the success screen (after obVerify). It shows a green
-// checkmark, a summary box of the configured provider/model/key, a warning if
-// verification failed, and a quick-tips cheat sheet.
 func (m *Model) renderObDone(width int) string {
 	var b strings.Builder
 
@@ -297,8 +272,6 @@ func (m *Model) renderObDone(width int) string {
 	return b.String()
 }
 
-// renderProgressDots renders the onboarding progress indicator: filled dots
-// (●) for completed steps and empty dots (○) for upcoming steps.
 func (m *Model) renderProgressDots(step int) string {
 	const total = 6
 	dots := make([]rune, total)

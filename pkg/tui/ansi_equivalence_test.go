@@ -11,13 +11,6 @@ import (
 	"github.com/muesli/termenv"
 )
 
-// ---------------------------------------------------------------------------
-// A minimal terminal emulator: paints a string into a cell grid honouring SGR
-// state. This is the correctness gate for mergeAdjacentSGR — two frames are
-// equivalent iff they paint the same rune with the same effective fg/bg/attrs
-// in every cell. (Ported from the audit evidence bank zz_exp9_test.go.)
-// ---------------------------------------------------------------------------
-
 type gridCell struct {
 	r     rune
 	fg    string
@@ -48,7 +41,6 @@ func applySGRState(params string, fg, bg, attrs *string) {
 		case p == "49":
 			*bg = ""
 		case p == "38" || p == "48":
-			// extended color: 38;2;r;g;b | 38;5;n
 			var spec string
 			if i+1 < len(parts) {
 				switch parts[i+1] {
@@ -77,8 +69,6 @@ func applySGRState(params string, fg, bg, attrs *string) {
 	}
 }
 
-// paintGrid renders s into a w×h cell grid, honouring SGR state and skipping
-// non-SGR CSI sequences the way a terminal would.
 func paintGrid(s string, w, h int) []gridCell {
 	grid := make([]gridCell, w*h)
 	for i := range grid {
@@ -98,7 +88,6 @@ func paintGrid(s string, w, h int) []gridCell {
 				i = k + 1
 				continue
 			}
-			// Other CSI (cursor moves etc.) — skip the whole sequence.
 			for k < len(s) && s[k] >= '@' && s[k] <= '~' {
 				k++
 				break
@@ -139,7 +128,6 @@ func paintGrid(s string, w, h int) []gridCell {
 	return grid
 }
 
-// countSGRSeqs counts SGR sequences in s (same scanner as the audit banks).
 func countSGRSeqs(s string) (n, bytes int) {
 	for i := 0; i < len(s); {
 		if s[i] == 0x1b {
@@ -179,12 +167,6 @@ func diffGrids(a, b []gridCell) (int, []string) {
 	return diffs, samples
 }
 
-// TestMergeAdjacentSGRCellEquivalence is the hard correctness gate: render a
-// realistic conversation through glamour WITHOUT the merge (raw lines), merge
-// them, paint both FINAL frames into a cell grid and require zero diffs. Also
-// asserts per-line ansi.Strip equality and a real byte reduction. The
-// production hooks themselves are covered by TestCachedHistoryLinesAreMerged
-// and TestRenderedStreamLinesAreMerged.
 func TestMergeAdjacentSGRCellEquivalence(t *testing.T) {
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -201,8 +183,6 @@ func TestMergeAdjacentSGRCellEquivalence(t *testing.T) {
 		_ = m.View()
 		m.updateViewport()
 
-		// raw = same conversation rendered through the glamour path WITHOUT
-		// the merge (the pre-PR-1 state); norm = merge of those lines.
 		raw := rawRenderedHistoryLines(t, m, tc.pairs)
 		if len(raw) == 0 {
 			t.Fatal("no raw lines produced")
@@ -246,9 +226,6 @@ func TestMergeAdjacentSGRCellEquivalence(t *testing.T) {
 	}
 }
 
-// TestMergeAdjacentSGRCellEquivalenceStreaming paints frames while a stream
-// overlay is on screen, with the overlay lines merged the same way the
-// production hooks do (getRenderedStream + overlay), and requires zero diffs.
 func TestMergeAdjacentSGRCellEquivalenceStreaming(t *testing.T) {
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -286,10 +263,6 @@ func TestMergeAdjacentSGRCellEquivalenceStreaming(t *testing.T) {
 	}
 }
 
-// TestMergeAdjacentSGRStreamingTriplesEquivalence exercises the pathological
-// glamour/chroma pattern directly: many repeated OPEN/text/RESET triples per
-// line (as produced token-by-token while streaming), merged and painted
-// through the grid emulator.
 func TestMergeAdjacentSGRStreamingTriplesEquivalence(t *testing.T) {
 	triples := []string{
 		strings.Repeat(normOpen1+"x"+normReset, 200),
@@ -332,9 +305,6 @@ func TestMergeAdjacentSGRStreamingTriplesEquivalence(t *testing.T) {
 	}
 }
 
-// TestRenderedStreamLinesAreMerged checks the production hook itself: lines
-// coming out of getRenderedStream must already be merged (no OPEN+RESET empty
-// runs, no duplicated adjacent opens) without the test applying the merge.
 func TestRenderedStreamLinesAreMerged(t *testing.T) {
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -343,7 +313,6 @@ func TestRenderedStreamLinesAreMerged(t *testing.T) {
 	m := buildBenchModel(t, 2)
 	m.width, m.height = 200, 50
 	m.processing = true
-	// A stream with code so renderSingleLine goes through the highlighter.
 	m.currentStream = "line one\n```go\nfunc x() error {\n\treturn nil\n}\n```\n"
 	out := m.getRenderedStream(120)
 
@@ -362,8 +331,6 @@ func TestRenderedStreamLinesAreMerged(t *testing.T) {
 	}
 }
 
-// TestCachedHistoryLinesAreMerged checks hook (a): the per-message render
-// cache must store already-merged lines.
 func TestCachedHistoryLinesAreMerged(t *testing.T) {
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -371,7 +338,7 @@ func TestCachedHistoryLinesAreMerged(t *testing.T) {
 
 	m := buildBenchModel(t, 5)
 	m.width, m.height = 200, 50
-	_ = m.View() // warms caches through the production path
+	_ = m.View()
 
 	if len(m.msgRenderCacheLines) == 0 {
 		t.Fatal("expected per-message render cache to be populated")
@@ -390,19 +357,6 @@ func TestCachedHistoryLinesAreMerged(t *testing.T) {
 	}
 }
 
-// TestMergedFrameSizeRegression is the size budget for the optimization: a
-// warm 200x50 frame (100 message pairs, TrueColor) must stay under 30 KB of
-// total View() bytes. Before PR-1 the same frame measured 131,504 bytes and
-// 7,461 SGR sequences.
-//
-// SGR budget note: the spec's ≤500 target was measured against the merged
-// BASE LINES (−95% SGR holds there: 7,461 → ~380). The final View() string
-// additionally contains chrome (header/statusbar/input styles) plus the SGR
-// re-emitted by reapplyBackground and AppContainer — stages PR-1 deliberately
-// does not touch — so the final-frame floor with merged content is ~780. We
-// assert both: the viewport content (what PR-1 controls) ≤ 300 SGR, and the
-// final frame ≤ 1000 SGR (regression guard vs the 7,461 baseline). The
-// chat/sidebar gutter adds one background run per row (~50 at 50 lines).
 func TestMergedFrameSizeRegression(t *testing.T) {
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -431,10 +385,6 @@ func TestMergedFrameSizeRegression(t *testing.T) {
 	}
 }
 
-// rawRenderedHistoryLines re-renders the bench conversation through the same
-// glamour path buildRenderedHistoryLines uses, but WITHOUT mergeAdjacentSGR —
-// i.e. exactly the pre-PR-1 line content. Used as the "original" side of the
-// cell-equivalence gate.
 func rawRenderedHistoryLines(t *testing.T, m *Model, pairs int) []string {
 	t.Helper()
 	hist := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)

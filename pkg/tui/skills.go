@@ -13,8 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// ── Message types for async skill operations ────────────────────────────
-
 type skillsScanMsg struct {
 	repo string
 }
@@ -55,8 +53,6 @@ type skillDeleteResultMsg struct {
 	err       error
 }
 
-// ── Skills loader access ────────────────────────────────────────────────
-
 func (m *Model) skillsLoader() *skills.SkillsLoader {
 	if m.agentLoop == nil {
 		return nil
@@ -70,8 +66,6 @@ func (m *Model) skillInstaller() *skills.SkillInstaller {
 	}
 	return m.agentLoop.SkillInstaller()
 }
-
-// ── loadSkillsList refreshes the installed skills list in the modal ─────
 
 func (m *Model) loadSkillsList() {
 	m.modalItems = nil
@@ -88,7 +82,6 @@ func (m *Model) loadSkillsList() {
 		m.modalItems = append(m.modalItems, i18n.T("tui.noSkillsInstalled"))
 		m.skillsModalKeys = append(m.skillsModalKeys, "")
 	} else {
-		// Sort by name for stable display
 		sort.Slice(allSkills, func(i, j int) bool {
 			return strings.ToLower(allSkills[i].Name) < strings.ToLower(allSkills[j].Name)
 		})
@@ -98,15 +91,12 @@ func (m *Model) loadSkillsList() {
 		}
 	}
 
-	// Separator + action — keys must stay 1:1 with items so Enter/D index correctly.
 	m.modalItems = append(m.modalItems, i18n.T("tui.actionsSeparator"))
 	m.skillsModalKeys = append(m.skillsModalKeys, "")
 	m.modalItems = append(m.modalItems, i18n.T("tui.installFromGitHub"))
 	m.skillsModalKeys = append(m.skillsModalKeys, "__install__")
 	m.clampModalCursor()
 }
-
-// ── handleSkillsEnter handles Enter on the skills list ──────────────────
 
 func (m *Model) handleSkillsEnter() tea.Cmd {
 	if m.modalSelectedIdx < 0 || m.modalSelectedIdx >= len(m.skillsModalKeys) {
@@ -123,15 +113,11 @@ func (m *Model) handleSkillsEnter() tea.Cmd {
 		m.formError = ""
 		return m.tickCmd()
 	case "":
-		// Section header, ignore
 		return nil
 	default:
-		// Toggle skill enabled/disabled
 		return m.toggleSkillCmd(selectedKey)
 	}
 }
-
-// ── toggleSkillCmd returns a command that toggles a skill ───────────────
 
 func (m *Model) toggleSkillCmd(skillName string) tea.Cmd {
 	return func() tea.Msg {
@@ -149,8 +135,6 @@ func (m *Model) toggleSkillCmd(skillName string) tea.Cmd {
 		return skillToggleResultMsg{skillName: skillName, enabled: enabled, err: err}
 	}
 }
-
-// ── handleSkillInstallSubmit handles repo URL submission ────────────────
 
 func (m *Model) handleSkillInstallSubmit() tea.Cmd {
 	repo := strings.TrimSpace(m.textInput.Value())
@@ -183,7 +167,6 @@ func (m *Model) handleSkillInstallSubmit() tea.Cmd {
 			return skillsScanResultMsg{repo: repo, err: err}
 		}
 
-		// Convert skills.ScannedSkill to channels.ScannedSkill
 		result := make([]channels.ScannedSkill, 0, len(scanned))
 		for _, s := range scanned {
 			result = append(result, channels.ScannedSkill{
@@ -196,8 +179,6 @@ func (m *Model) handleSkillInstallSubmit() tea.Cmd {
 		return skillsScanResultMsg{skills: result, repo: repo}
 	}
 }
-
-// ── handleSkillPickerEnter installs selected skills ─────────────────────
 
 func (m *Model) handleSkillPickerEnter() tea.Cmd {
 	if len(m.skillsScanResults) == 0 {
@@ -216,9 +197,6 @@ func (m *Model) handleSkillPickerEnter() tea.Cmd {
 		return nil
 	}
 
-	// Capture mutable Model state at creation time: bubbletea runs this Cmd
-	// asynchronously, and a second /skills scan could overwrite
-	// m.skillsScanRepo before the install executes.
 	repo := m.skillsScanRepo
 	return func() tea.Msg {
 		installer := m.skillInstaller()
@@ -234,16 +212,12 @@ func (m *Model) handleSkillPickerEnter() tea.Cmd {
 	}
 }
 
-// ── handleSkillPickerToggle toggles a checkbox in the picker ────────────
-
 func (m *Model) handleSkillPickerToggle() {
 	if m.skillsSelectedMap == nil {
 		m.skillsSelectedMap = make(map[int]bool)
 	}
 	m.skillsSelectedMap[m.modalSelectedIdx] = !m.skillsSelectedMap[m.modalSelectedIdx]
 }
-
-// ── deleteSkillCmd returns a command that deletes a skill ───────────────
 
 func (m *Model) deleteSkillCmd(skillName string) tea.Cmd {
 	return func() tea.Msg {
@@ -256,8 +230,6 @@ func (m *Model) deleteSkillCmd(skillName string) tea.Cmd {
 		return skillDeleteResultMsg{skillName: skillName, err: err}
 	}
 }
-
-// ── handleSkillScanResult processes the scan result ─────────────────────
 
 func (m *Model) handleSkillScanResult(msg skillsScanResultMsg) tea.Cmd {
 	if msg.err != nil {
@@ -274,7 +246,6 @@ func (m *Model) handleSkillScanResult(msg skillsScanResultMsg) tea.Cmd {
 	m.skillsScanRepo = msg.repo
 	m.formError = ""
 
-	// If only one skill found, install it directly
 	if len(msg.skills) == 1 {
 		return func() tea.Msg {
 			installer := m.skillInstaller()
@@ -290,18 +261,15 @@ func (m *Model) handleSkillScanResult(msg skillsScanResultMsg) tea.Cmd {
 		}
 	}
 
-	// Multiple skills: show picker
 	m.skillsSelectedMap = make(map[int]bool)
 	for i := range msg.skills {
-		m.skillsSelectedMap[i] = true // pre-select all
+		m.skillsSelectedMap[i] = true
 	}
 	m.modalMode = ModalSkillPicker
 	m.modalSelectedIdx = 0
 	m.modalScrollOffset = 0
 	return m.tickCmd()
 }
-
-// ── handleSkillInstallResult processes the install result ───────────────
 
 func (m *Model) handleSkillInstallResult(msg skillsInstallResultMsg) tea.Cmd {
 	if msg.err != nil {
@@ -317,15 +285,12 @@ func (m *Model) handleSkillInstallResult(msg skillsInstallResultMsg) tea.Cmd {
 			strings.Join(msg.installed, ", "))
 	}
 
-	// Go back to skills list
 	m.skillsScanResults = nil
 	m.skillsSelectedMap = nil
 	m.modalMode = ModalSkills
 	m.loadSkillsList()
 	return m.tickCmd()
 }
-
-// ── handleSkillToggleResult processes a toggle result ────────────────────
 
 func (m *Model) handleSkillToggleResult(msg skillToggleResultMsg) tea.Cmd {
 	if msg.err != nil {
@@ -341,8 +306,6 @@ func (m *Model) handleSkillToggleResult(msg skillToggleResultMsg) tea.Cmd {
 	return m.tickCmd()
 }
 
-// ── handleSkillDeleteResult processes a delete result ────────────────────
-
 func (m *Model) handleSkillDeleteResult(msg skillDeleteResultMsg) tea.Cmd {
 	if msg.err != nil {
 		m.skillsFeedback = fmt.Sprintf("Delete failed: %v", msg.err)
@@ -350,13 +313,9 @@ func (m *Model) handleSkillDeleteResult(msg skillDeleteResultMsg) tea.Cmd {
 		m.skillsFeedback = fmt.Sprintf("Removed: %s", msg.skillName)
 	}
 	m.loadSkillsList()
-	// The list may have shrunk after the delete — keep the cursor within
-	// bounds so the next Enter cannot index past the end.
 	m.clampModalCursor()
 	return m.tickCmd()
 }
-
-// ── Formatting helpers ──────────────────────────────────────────────────
 
 func formatSkillItem(name, description string, enabled bool, source string) string {
 	status := "●"
@@ -385,8 +344,6 @@ func formatPickerItem(name, description string, selected bool) string {
 	return fmt.Sprintf("%s %-15s — %s", checkbox, name, desc)
 }
 
-// ── cleanRepoURL extracts owner/repo from various GitHub URL formats ────
-
 func cleanRepoURL(input string) string {
 	input = strings.TrimSpace(input)
 	input = strings.TrimRight(input, "/")
@@ -411,8 +368,6 @@ func cleanRepoURL(input string) string {
 
 	return ""
 }
-
-// ── sortSkillsByName sorts skills by name ────────────────────────────────
 
 func sortSkillsByName(skills []channels.ScannedSkill) {
 	sort.Slice(skills, func(i, j int) bool {

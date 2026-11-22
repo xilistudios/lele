@@ -18,7 +18,6 @@ func TestTruncateRunes_NoSplitMultibyte(t *testing.T) {
 	if !utf8.ValidString(got) {
 		t.Fatalf("truncateRunes result %q is not valid UTF-8", got)
 	}
-	// Verify the exact rune count.
 	if gotRunes := len([]rune(got)); gotRunes != 7 {
 		t.Fatalf("truncateRunes(%q, 7) produced %d runes, want 7", input, gotRunes)
 	}

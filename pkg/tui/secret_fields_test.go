@@ -9,11 +9,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// Tests for audit M2: API keys / secret values must never render in clear
-// text in the /connect (ModalAddProvider) or add-secret (ModalAddSecret)
-// forms — neither via the textinput widget echo, the current-step line, nor
-// the completed-step / review lines.
-
 func TestIsSecretInputStep(t *testing.T) {
 	cases := []struct {
 		mode  modalType
@@ -29,8 +24,6 @@ func TestIsSecretInputStep(t *testing.T) {
 		{ModalAddSecret, 1, true, "secret step 1 = value"},
 		{ModalAddSecret, 0, false, "secret step 0 = name"},
 		{ModalAddSecret, 2, false, "secret step 2 = description"},
-		// Provider edit form: step 1 is the API key, step 7 the headers blob
-		// (which may carry an Authorization override); the rest are plain text.
 		{ModalEditProvider, 1, true, "edit-provider step 1 = API key"},
 		{ModalEditProvider, 7, true, "edit-provider step 7 = headers JSON"},
 		{ModalEditProvider, 0, false, "edit-provider step 0 = type"},
@@ -65,7 +58,6 @@ func TestIsSecretFormValue(t *testing.T) {
 		{ModalAddProvider, 3, false},
 		{ModalAddSecret, 1, true},
 		{ModalAddSecret, 0, false},
-		// The provider edit form masks the API key and the headers blob only.
 		{ModalEditProvider, editProviderAPIKeyStep, true},
 		{ModalEditProvider, editProviderHeadersStep, true},
 		{ModalEditProvider, editProviderTypeStep, false},
@@ -89,14 +81,12 @@ func TestMaskSecretDisplay(t *testing.T) {
 	if got := maskSecretDisplay(""); got != "" {
 		t.Fatalf("empty must stay empty, got %q", got)
 	}
-	// Short secrets are fully hidden (maskSecretValue would echo the whole value).
 	if got := maskSecretDisplay("abc123"); got != "••••••••" {
 		t.Fatalf("short secret = %q, want 8 bullets", got)
 	}
 	if got := maskSecretDisplay("12345678"); got != "••••••••" {
 		t.Fatalf("8-char secret = %q, want 8 bullets", got)
 	}
-	// Long secrets reuse the exact 4+8+4 policy of maskSecretValue.
 	v := "sk-abcdefghijklmnopqrstuvwxyz"
 	want := v[:4] + strings.Repeat("•", 8) + v[len(v)-4:]
 	if got := maskSecretDisplay(v); got != want {
@@ -104,28 +94,20 @@ func TestMaskSecretDisplay(t *testing.T) {
 	}
 }
 
-// newFormTestModel builds a sized model pinned to English, ready to render a
-// form modal through the real View() path.
 func newFormTestModel(t *testing.T) *Model {
 	t.Helper()
 	m := newTestModel(t)
-	i18n.InitWithLanguage("en") // NewModel may pick up the host locale
+	i18n.InitWithLanguage("en")
 	up, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = up.(*Model)
 	m.showWelcome = false
 	return m
 }
 
-// TestFormModalHidesSecretTyping drives the real Update path: after entering
-// /connect and landing on the API-key step, typed characters must switch the
-// widget to password echo, and the rendered frame must not contain the raw
-// value.
 func TestFormModalHidesSecretTyping(t *testing.T) {
 	m := newFormTestModel(t)
 
 	m.executeCommand("/connect")
-	// The picker is open on the first frame: pick the OpenAI API-key row so
-	// the flow lands directly on the API-key step (2).
 	if m.modalMode != ModalAddProvider || !m.providerTypePicker {
 		t.Fatalf("expected /connect with the picker open, got mode=%v picker=%v", m.modalMode, m.providerTypePicker)
 	}
@@ -152,8 +134,6 @@ func TestFormModalHidesSecretTyping(t *testing.T) {
 	}
 }
 
-// TestCompletedStepMasked: after advancing past the API-key step, the stored
-// key must render masked in the completed-step line.
 func TestCompletedStepMasked(t *testing.T) {
 	m := newFormTestModel(t)
 	m.modalMode = ModalAddProvider
@@ -169,8 +149,6 @@ func TestCompletedStepMasked(t *testing.T) {
 	}
 }
 
-// TestReviewStepSecretMasked: the review step must use the shared masking
-// predicate (previously a bespoke i==2 rule that skipped short keys).
 func TestReviewStepSecretMasked(t *testing.T) {
 	m := newFormTestModel(t)
 	m.modalMode = ModalAddProvider
@@ -187,8 +165,6 @@ func TestReviewStepSecretMasked(t *testing.T) {
 	}
 }
 
-// TestAddSecretValueStepMasked: the add-secret form must password-echo on
-// step 1 and hide the raw value in the render.
 func TestAddSecretValueStepMasked(t *testing.T) {
 	m := newFormTestModel(t)
 	m.modalMode = ModalAddSecret
@@ -196,13 +172,11 @@ func TestAddSecretValueStepMasked(t *testing.T) {
 	m.formValues[0] = "my.api_key"
 	m.formStepIndex = 1
 
-	// Typing on the value step switches the widget to password echo.
 	m = sendKeys(m, "h", "u", "n", "t", "e", "r")
 	if m.textInput.EchoMode != textinput.EchoPassword {
 		t.Fatalf("EchoMode = %v, want EchoPassword on secret-value step", m.textInput.EchoMode)
 	}
 
-	// Advance stores the value; completed-step line must mask it too.
 	m = sendKeys(m, "\r")
 	if m.formStepIndex != 2 {
 		t.Fatalf("expected step 2 after value, got %d", m.formStepIndex)
@@ -210,10 +184,6 @@ func TestAddSecretValueStepMasked(t *testing.T) {
 	if m.formValues[1] != "hunter" {
 		t.Fatalf("formValues[1] = %q, want hunter", m.formValues[1])
 	}
-	// View() is the universal render-side sync point that closes the gap
-	// left by Enter-transitions returning before the Update-side sync; in
-	// the real app bubbletea always calls View() after Update, so the
-	// widget a user ever sees is already in the correct echo mode.
 	if out := m.View(); strings.Contains(out, "hunter") {
 		t.Fatalf("secret value leaked in render:\n%s", out)
 	}
@@ -230,29 +200,22 @@ func TestAddSecretValueStepMasked(t *testing.T) {
 	}
 }
 
-// TestEchoResetOnNormalStep: keystrokes on non-secret steps keep/restore
-// normal echo.
 func TestEchoResetOnNormalStep(t *testing.T) {
 	m := newFormTestModel(t)
 	m.modalMode = ModalAddProvider
 	m.formValues = make([]string, 11)
-	m.formStepIndex = 3 // API Base URL — not a secret
+	m.formStepIndex = 3
 
-	m.textInput.EchoMode = textinput.EchoPassword // simulate stale password echo
+	m.textInput.EchoMode = textinput.EchoPassword
 	m = sendKeys(m, "x")
 	if m.textInput.EchoMode != textinput.EchoNormal {
 		t.Fatalf("EchoMode = %v, want EchoNormal on non-secret step", m.textInput.EchoMode)
 	}
 }
 
-// TestConnectFlowPresetSecretStep: the onboarding /connect preset path jumps
-// directly to the API-key step (formStepIndex=2, or 3 for ollama). The echo
-// must already be correct on the first frame — before any keystroke reaches
-// the forwarding block.
 func TestConnectFlowPresetSecretStep(t *testing.T) {
 	m := newFormTestModel(t)
 
-	// Preset with a key: lands on step 2 (API Key).
 	m.startConnectFlow(&providerPresets[0])
 	if m.formStepIndex != 2 {
 		t.Fatalf("expected preset flow at step 2, got %d", m.formStepIndex)
@@ -261,7 +224,6 @@ func TestConnectFlowPresetSecretStep(t *testing.T) {
 		t.Fatalf("EchoMode = %v, want EchoPassword right after startConnectFlow (preset)", m.textInput.EchoMode)
 	}
 
-	// Local provider preset (ollama) skips the key step → normal echo.
 	var ollama *providerPreset
 	for i := range providerPresets {
 		if providerPresets[i].typ == "ollama" {
@@ -280,30 +242,22 @@ func TestConnectFlowPresetSecretStep(t *testing.T) {
 		t.Fatalf("EchoMode = %v, want EchoNormal on ollama (no key step)", m.textInput.EchoMode)
 	}
 
-	// No preset: starts at step 0 → normal echo.
 	m.startConnectFlow(nil)
 	if m.textInput.EchoMode != textinput.EchoNormal {
 		t.Fatalf("EchoMode = %v, want EchoNormal at step 0", m.textInput.EchoMode)
 	}
 }
 
-// TestEchoResetAfterFormClosed: leaving the modal (ESC from a secret step)
-// must restore normal echo so a stale password mode can't affect the next
-// text input render.
 func TestEchoResetAfterFormClosed(t *testing.T) {
 	m := newFormTestModel(t)
 	m.executeCommand("/connect")
-	// The picker is open on the first frame: the OpenAI API-key row lands
-	// directly on the secret step (2).
 	m = pickConnectRow(t, m, connectAPIKeyRowIdx(t, "openai"))
-	// bubbletea always runs View() after Update(); View() is the universal
-	// render-side echo sync, so assert state after a full turn.
 	m.View()
 	if m.textInput.EchoMode != textinput.EchoPassword {
 		t.Fatalf("precondition: expected EchoPassword on step 2, got %v", m.textInput.EchoMode)
 	}
 
-	m = sendKeys(m, "\x1b") // ESC closes the modal
+	m = sendKeys(m, "\x1b")
 	m.View()
 	if m.modalMode != ModalNone {
 		t.Fatalf("expected modal closed, got %v", m.modalMode)

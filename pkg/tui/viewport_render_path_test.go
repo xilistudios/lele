@@ -1,53 +1,5 @@
 package tui
 
-// T3 regression tests: the render path does not rebuild the viewport.
-//
-// Context: bubbletea calls View() after EVERY Update — every streaming chunk,
-// spinner tick, mouse move and keypress. pkg/tui rebuilt the whole viewport
-// (base lines + ephemeral overlay, O(history) with glamour over the render
-// window) inside View(), which made the streaming throttle pointless: the
-// 32 ms window was defeated by the very next frame, and a long chat paid
-// O(history) on every frame.
-//
-// The contract pinned here:
-//
-//  1. a frame whose model state has not changed since the last materialization
-//     does ZERO rebuilds (TestView_UpToDateFrameDoesNotRebuild);
-//  2. streaming chunks are coalesced: inside the throttle window a frame keeps
-//     serving what the burst's leading edge materialized
-//     (TestView_StreamingChunksAreCoalesced), the scheduled tick materializes
-//     the whole burst (TestView_StreamingTickMaterializesBurst) and the window
-//     is bounded, so content can never be older than streamThrottleInterval
-//     even if that tick is lost (TestView_StaleContentIsNeverDeferred);
-//  3. state that no Update handler routes through a rebuild still reaches the
-//     render path when it can change what is drawn: a geometry change is never
-//     deferred (TestView_GeometryChangeIsNeverDeferred), an in-place history
-//     finalization (TestView_ObservesInPlaceHistoryFinalization), an appended
-//     non-counted message (TestView_ObservesAppendedToolMessage) and a pending
-//     forced scroll (TestView_HonorsPendingForcedScroll) are observed;
-//  4. the Update-side skip guard and the render-path freshness check are ONE
-//     fingerprint (TestShouldSkipViewportUpdate_UsesMaterializedFingerprint),
-//     so a rebuild decision cannot drift between the two sides.
-//
-// Red-checks — each one was verified by reverting that single piece of the T3
-// change and confirming the test fails, then restoring it:
-//
-//	a) View() back to `m.updateViewportWithHistory(history)` (unconditional
-//	   rebuild) ⇒ (1) fails (every frame rebuilds) and (2) fails (the throttle
-//	   window is defeated);
-//	b) dropping the viewportRebuildDeferred() check from syncViewportForFrame ⇒
-//	   (2) fails;
-//	c) dropping the viewportGeometryChanged() bypass ⇒ (3)-geometry fails;
-//	d) dropping frameLastStreaming from viewportContentKey ⇒ (3)-finalization
-//	   fails (the frame keeps rendering the pre-finalization base);
-//	e) dropping frameHistoryLen (and the matching base term) ⇒ (3)-appended-tool
-//	   fails;
-//	f) restoring the old Update-side-only getViewportContentKey body ⇒ (4) fails
-//	   as soon as a rebuild has recorded its own fingerprint;
-//	g) dropping forceGotoBottom from the fingerprint ⇒
-//	   TestView_HonorsPendingForcedScroll fails (the frame leaves the forced
-//	   jump pending) and the "forced scroll" case of (4) fails.
-
 import (
 	"strings"
 	"testing"
@@ -56,10 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// viewportRebuildCounter installs the model's viewport-rebuild hook and returns
-// a function reporting the inFrame flag of every rebuild since. The hook fires
-// in updateViewportWithHistory — the single O(lines) rebuild — so the count is
-// exhaustive for both the render and the Update path.
 func viewportRebuildCounter(t *testing.T, m *Model) func() []bool {
 	t.Helper()
 	var frames []bool
@@ -68,37 +16,26 @@ func viewportRebuildCounter(t *testing.T, m *Model) func() []bool {
 	return func() []bool { return append([]bool(nil), frames...) }
 }
 
-// viewportOverlayText returns the ephemeral overlay currently materialized in
-// the viewport with ANSI stripped, so assertions can look at text only.
 func viewportOverlayText(m *Model) string {
 	return stripAnsi(strings.Join(m.viewport.overlayLines, "\n"))
 }
 
-// viewportBaseText returns the materialized base lines with ANSI stripped.
 func viewportBaseText(m *Model) string {
 	return stripAnsi(strings.Join(m.viewport.baseLines, "\n"))
 }
 
-// startStreamingChunk puts the model in the state a stream chunk leaves behind:
-// local processing state within its startup grace period — without startTime the
-// status line classifies the local processing as stale and clears it
-// (isSessionProcessing) — plus the accumulated stream text.
 func startStreamingChunk(m *Model, text string) {
 	m.processing = true
 	m.startTime = time.Now()
 	m.currentStream = text
 }
 
-// TestView_UpToDateFrameDoesNotRebuild is the core T3 contract: once the
-// materialized content matches the current state, View() must not rebuild it —
-// no matter how many frames are rendered (spinner ticks, mouse moves, redraws
-// all call View()).
 func TestView_UpToDateFrameDoesNotRebuild(t *testing.T) {
 	const key = "tui:chat:t3-idle"
 	m := newFrameReadTestModel(t, key, 3)
 
-	_ = m.View()       // cold frame: materializes dimensions and content
-	m.updateViewport() // exactly what every Update handler does before rendering
+	_ = m.View()
+	m.updateViewport()
 
 	rebuilds := viewportRebuildCounter(t, m)
 	for i := 0; i < 5; i++ {
@@ -111,30 +48,21 @@ func TestView_UpToDateFrameDoesNotRebuild(t *testing.T) {
 			len(got), got)
 	}
 
-	// A state change that an Update handler would route through the rebuild
-	// must still be served correctly by the NEXT frame (the frame rebuilds it
-	// once, then goes quiet again).
 	m.sessionMgr.AddMessage(key, "user", "a brand new question")
 	if frame := stripAnsi(m.View()); !strings.Contains(frame, "a brand new question") {
 		t.Fatalf("frame after a history change does not render the new message:\n%s", frame)
 	}
-	// 5 idle frames + the change + the verification frame: exactly one rebuild.
 	if got := rebuilds(); len(got) != 1 || got[0] != true {
 		t.Fatalf("rebuilds = %v, want exactly one in-frame rebuild (the changed state)", got)
 	}
 }
 
-// TestView_StreamingChunksAreCoalesced is the throttle half of T3: the burst's
-// leading edge renders immediately, and every chunk inside the window must be
-// served from that materialization instead of forcing a new rebuild — which is
-// exactly what View() rebuilding unconditionally used to prevent.
 func TestView_StreamingChunksAreCoalesced(t *testing.T) {
 	const key = "tui:chat:t3-throttle"
 	m := newFrameReadTestModel(t, key, 2)
 	m.streamThrottleInterval = 200 * time.Millisecond
 	_ = m.View()
 
-	// First chunk of a turn: the leading edge materializes it immediately.
 	startStreamingChunk(m, "first chunk")
 	if cmd := m.throttledUpdateViewport(); cmd == nil {
 		t.Fatal("the leading edge of a burst must materialize immediately and schedule the tick")
@@ -143,7 +71,6 @@ func TestView_StreamingChunksAreCoalesced(t *testing.T) {
 		t.Fatalf("leading edge did not render the first chunk:\n%s", got)
 	}
 
-	// Second chunk inside the window: coalesced.
 	m.currentStream = "first chunk and second chunk"
 	if cmd := m.throttledUpdateViewport(); cmd != nil {
 		t.Fatal("a chunk inside the throttle window must not schedule a second tick")
@@ -170,10 +97,6 @@ func TestView_StreamingChunksAreCoalesced(t *testing.T) {
 	}
 }
 
-// TestView_StreamingTickMaterializesBurst covers the other end of the throttle:
-// when the scheduled tick arrives, the whole coalesced burst is materialized
-// once and the pending flag is cleared, so the frames that follow are quiet
-// again (the rebuild owns the flag, see noteViewportMaterialized).
 func TestView_StreamingTickMaterializesBurst(t *testing.T) {
 	const key = "tui:chat:t3-throttle-tick"
 	m := newFrameReadTestModel(t, key, 2)
@@ -185,7 +108,6 @@ func TestView_StreamingTickMaterializesBurst(t *testing.T) {
 	m.currentStream = "first chunk and second chunk"
 	_ = m.throttledUpdateViewport()
 
-	// The tick is what materializes the burst.
 	updated, _ := m.Update(streamThrottleMsg{})
 	m = updated.(*Model)
 	if m.streamPendingUpdate {
@@ -202,11 +124,6 @@ func TestView_StreamingTickMaterializesBurst(t *testing.T) {
 	}
 }
 
-// TestView_StaleContentIsNeverDeferred is the safety bound of the throttle: the
-// deferral is only legal while the pending tick can still arrive within
-// streamThrottleInterval. If the tick is lost (early-returned handler, dropped
-// command), the render path must materialize the content itself instead of
-// serving it forever.
 func TestView_StaleContentIsNeverDeferred(t *testing.T) {
 	const key = "tui:chat:t3-throttle-bound"
 	m := newFrameReadTestModel(t, key, 2)
@@ -216,10 +133,8 @@ func TestView_StaleContentIsNeverDeferred(t *testing.T) {
 	startStreamingChunk(m, "first chunk")
 	_ = m.throttledUpdateViewport()
 	m.currentStream = "first chunk and second chunk"
-	_ = m.throttledUpdateViewport() // pending, tick scheduled, then lost
+	_ = m.throttledUpdateViewport()
 
-	// Rewind the materialization beyond the window: the frame may no longer
-	// assume the tick is coming.
 	m.viewportBuiltAt = time.Now().Add(-2 * m.streamThrottleInterval)
 
 	rebuilds := viewportRebuildCounter(t, m)
@@ -237,18 +152,12 @@ func TestView_StaleContentIsNeverDeferred(t *testing.T) {
 	}
 }
 
-// TestView_GeometryChangeIsNeverDeferred pins the one stale state only the
-// render path can see: the base lines were wrapped for the viewport dimensions
-// of a previous frame. That must rebuild immediately — a base wrapped for other
-// dimensions is visibly wrong, not 32 ms stale — even while the streaming
-// throttle owns the content rebuild.
 func TestView_GeometryChangeIsNeverDeferred(t *testing.T) {
 	const key = "tui:chat:t3-geometry"
 	m := newFrameReadTestModel(t, key, 2)
 	m.streamThrottleInterval = 200 * time.Millisecond
 	_ = m.View()
 
-	// A pending, still-fresh streaming rebuild: the deferral IS legal here…
 	startStreamingChunk(m, "first chunk")
 	_ = m.throttledUpdateViewport()
 	m.currentStream = "first chunk and second chunk"
@@ -257,8 +166,6 @@ func TestView_GeometryChangeIsNeverDeferred(t *testing.T) {
 		t.Fatal("precondition: the streaming rebuild should be deferred in this window")
 	}
 
-	// …but the terminal resized, so the materialized base no longer matches the
-	// layout and must be rebuilt for the new geometry.
 	widthBefore := m.viewport.Width
 	m.width -= 40
 
@@ -276,11 +183,6 @@ func TestView_GeometryChangeIsNeverDeferred(t *testing.T) {
 	}
 }
 
-// TestView_ObservesInPlaceHistoryFinalization locks down the frameLastStreaming
-// term of the fingerprint. A finalized assistant message keeps the message count
-// and the model state identical — only the history content (and the streaming
-// flag that marks it) changes in place — so the fingerprint has to carry that
-// flag or the frame would keep serving the base built before finalization.
 func TestView_ObservesInPlaceHistoryFinalization(t *testing.T) {
 	const key = "tui:chat:t3-finalize"
 	m := newFrameReadTestModel(t, key, 0)
@@ -293,7 +195,6 @@ func TestView_ObservesInPlaceHistoryFinalization(t *testing.T) {
 		t.Fatalf("cold frame does not render the history:\n%s", frame)
 	}
 
-	// Same count (2), same model state: the message is finalized in place.
 	m.sessionMgr.SetHistory(key, []providers.Message{
 		{Role: "user", Content: "Question"},
 		{Role: "assistant", Content: "final answer"},
@@ -312,11 +213,6 @@ func TestView_ObservesInPlaceHistoryFinalization(t *testing.T) {
 	}
 }
 
-// TestView_ObservesAppendedToolMessage covers the frameHistoryLen term. A tool
-// result is rendered in the base but is deliberately NOT part of the counted
-// user/assistant total, so without a length term an append that only adds such a
-// message would look like "nothing changed" to the fingerprint — and the frame
-// would keep the base built before it arrived.
 func TestView_ObservesAppendedToolMessage(t *testing.T) {
 	const key = "tui:chat:t3-tool-append"
 	m := newFrameReadTestModel(t, key, 0)
@@ -326,7 +222,6 @@ func TestView_ObservesAppendedToolMessage(t *testing.T) {
 	})
 	_ = m.View()
 
-	// Append a tool result: the counted total stays 2.
 	m.sessionMgr.SetHistory(key, []providers.Message{
 		{Role: "user", Content: "Question"},
 		{Role: "assistant", Content: "answer"},
@@ -343,21 +238,16 @@ func TestView_ObservesAppendedToolMessage(t *testing.T) {
 	}
 }
 
-// TestView_HonorsPendingForcedScroll pins the forceGotoBottom term. The forced
-// scroll is consumed BY the rebuild, so a frame that considers its content up to
-// date must still rebuild to honor it — otherwise a session switch / new chat /
-// compaction that only flags the jump would leave the view at the old offset
-// until some unrelated change happened to arrive.
 func TestView_HonorsPendingForcedScroll(t *testing.T) {
 	const key = "tui:chat:t3-forced-scroll"
-	m := newFrameReadTestModel(t, key, 30) // long enough to be scrollable
+	m := newFrameReadTestModel(t, key, 30)
 	_ = m.View()
 	if m.viewport.totalLines() <= m.viewport.Height {
 		t.Fatalf("precondition: the chat must overflow the viewport (lines=%d height=%d)",
 			m.viewport.totalLines(), m.viewport.Height)
 	}
 
-	m.viewport.YOffset = 0 // user scrolled to the top
+	m.viewport.YOffset = 0
 	_ = m.View()
 	if m.viewport.AtBottom() {
 		t.Fatal("precondition: the viewport should not be at the bottom")
@@ -374,17 +264,11 @@ func TestView_HonorsPendingForcedScroll(t *testing.T) {
 	}
 }
 
-// TestShouldSkipViewportUpdate_UsesMaterializedFingerprint pins the DRY half of
-// the design: the Update-side skip guard compares the very fingerprint a rebuild
-// records (noteViewportMaterialized), so "up to date" cannot mean two different
-// things on the two sides. With a separate Update-side key the guard would
-// rebuild on every event even though the render path considers the content
-// fresh — and, worse, the two sides could disagree about what is visible.
 func TestShouldSkipViewportUpdate_UsesMaterializedFingerprint(t *testing.T) {
 	const key = "tui:chat:t3-shared-key"
 	m := newFrameReadTestModel(t, key, 2)
 
-	m.updateViewport() // materialize, as an event handler does
+	m.updateViewport()
 	if m.lastViewportKey != m.getViewportContentKey() {
 		t.Fatalf("Update-side fingerprint %q differs from the materialized one %q",
 			m.getViewportContentKey(), m.lastViewportKey)
@@ -393,12 +277,6 @@ func TestShouldSkipViewportUpdate_UsesMaterializedFingerprint(t *testing.T) {
 		t.Fatal("an unchanged state must be skipped by the Update-side guard after a rebuild")
 	}
 
-	// Any input the viewport draws from must invalidate the guard — checked one
-	// at a time so a missing term is reported by name. The two history terms
-	// (frameHistoryLen/frameLastStreaming) are absent here on purpose: they are
-	// re-derived from the history on every read (frameHistoryTerms), so a direct
-	// mutation is overwritten before it could be compared. Their effect on the
-	// render path is asserted by TestRenderPath_HistoryTermsAreFingerprinted.
 	cases := []struct {
 		name   string
 		mutate func()
@@ -443,12 +321,6 @@ func TestShouldSkipViewportUpdate_UsesMaterializedFingerprint(t *testing.T) {
 	}
 }
 
-// TestRenderPath_HistoryTermsAreFingerprinted covers the two history terms the
-// render path cannot re-derive from the counted total: the snapshot's length
-// (an appended tool result) and its last-message streaming flag (an in-place
-// finalization). Both are asserted through viewportContentUpToDate — the O(1)
-// check that decides whether a frame rebuilds — because the Update-side
-// fingerprint always re-reads them from the history.
 func TestRenderPath_HistoryTermsAreFingerprinted(t *testing.T) {
 	const key = "tui:chat:t3-history-terms"
 	m := newFrameReadTestModel(t, key, 0)

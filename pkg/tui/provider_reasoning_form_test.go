@@ -10,17 +10,6 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-// Tests for the five reasoning steps of the edit-model form (ModalEditModel):
-// the form must let the user override every config.ReasoningConfig field of a
-// model, round-trip the stored config on Enter-through, clear an override with
-// "default", collapse back to a nil config when nothing is set, and reject an
-// invalid answer on the step that caused it. The add-model form and the
-// /connect wizard keep their old step counts and their catalog seeding.
-
-// ── helpers ──
-
-// openEditForm opens the pre-filled ModalEditModel form for alias from the
-// provider detail view.
 func openEditForm(t *testing.T, m *Model, alias string) *Model {
 	t.Helper()
 	selectModelRow(t, m, alias)
@@ -31,9 +20,6 @@ func openEditForm(t *testing.T, m *Model, alias string) *Model {
 	return m
 }
 
-// walkSteps advances from the current step to lastStep inclusive, accepting the
-// pre-filled answer unless override holds a value for that step index. It
-// returns the model after the ENTER on lastStep (which usually saves).
 func walkSteps(t *testing.T, m *Model, lastStep int, override map[int]string) *Model {
 	t.Helper()
 	for step := m.formStepIndex; step <= lastStep; step++ {
@@ -48,8 +34,6 @@ func walkSteps(t *testing.T, m *Model, lastStep int, override map[int]string) *M
 	return m
 }
 
-// finishEdit answers every remaining step of the edit form (overriding the
-// answers present in override) and returns the saved model.
 func finishEdit(t *testing.T, m *Model, override map[int]string) *Model {
 	t.Helper()
 	m = walkSteps(t, m, editModelStepCount-1, override)
@@ -59,7 +43,6 @@ func finishEdit(t *testing.T, m *Model, override map[int]string) *Model {
 	return m
 }
 
-// savedModel returns the stored config of a model alias in the test provider.
 func savedModel(t *testing.T, m *Model, alias string) config.ProviderModelConfig {
 	t.Helper()
 	mc, ok := m.cfg.Providers.Named["test-provider"].Models[alias]
@@ -69,9 +52,6 @@ func savedModel(t *testing.T, m *Model, alias string) config.ProviderModelConfig
 	return mc
 }
 
-// reasoningVals builds a formValues-sized slice whose five reasoning steps hold
-// the given answers (every other step stays empty — only the reasoning indexes
-// are read).
 func reasoningVals(enable, effort, maxTokens, exclude, summary string) []string {
 	vals := make([]string, editModelStepCount)
 	vals[editModelReasoningEnableStep] = enable
@@ -82,18 +62,11 @@ func reasoningVals(enable, effort, maxTokens, exclude, summary string) []string 
 	return vals
 }
 
-// ── 1. Enter-through round-trip ──
-
-// TestEditModelEnterThroughPreservesReasoning walks all 11 steps with Enter and
-// proves nothing is lost: a fully-loaded ReasoningConfig comes back field by
-// field, the Temperature/Video fields the form never asks about survive, and the
-// result is persisted to disk.
 func TestEditModelEnterThroughPreservesReasoning(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
 	m = openEditForm(t, m, "gpt-4o")
 
-	// Nothing overridden: every step accepts its pre-filled answer.
 	m = finishEdit(t, m, nil)
 
 	mc := savedModel(t, m, "gpt-4o")
@@ -108,7 +81,6 @@ func TestEditModelEnterThroughPreservesReasoning(t *testing.T) {
 		t.Errorf("entry = %+v, want the stored values unchanged", mc)
 	}
 
-	// Persisted to disk, not only in memory.
 	reloaded, err := config.LoadConfig(config.DefaultConfigPath())
 	if err != nil {
 		t.Fatalf("reload config: %v", err)
@@ -120,15 +92,11 @@ func TestEditModelEnterThroughPreservesReasoning(t *testing.T) {
 	}
 }
 
-// TestEditModelEnterThroughKeepsNilReasoning proves the neutral pre-fill
-// (disabled + every override "default") round-trips to nil, so an edit can never
-// invent a reasoning config for a model that had none.
 func TestEditModelEnterThroughKeepsNilReasoning(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
 	m = openEditForm(t, m, "gpt-4o-mini")
 
-	// The neutral answers are pre-filled.
 	wantReasoningPrefill := map[int]string{
 		editModelReasoningEnableStep:    "no",
 		editModelReasoningEffortStep:    reasoningFormDefault,
@@ -153,10 +121,6 @@ func TestEditModelEnterThroughKeepsNilReasoning(t *testing.T) {
 	}
 }
 
-// TestEditModelReasoningEnableCreatesConfigFromNil covers the enable option on a
-// model that had no ReasoningConfig at all: answering "yes" alone must
-// produce a non-nil config with only the flag set, and that config must survive
-// the next edit round-trip.
 func TestEditModelReasoningEnableCreatesConfigFromNil(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
@@ -167,8 +131,6 @@ func TestEditModelReasoningEnableCreatesConfigFromNil(t *testing.T) {
 	want := &config.ReasoningConfig{Enable: true}
 	assertReasoningEqual(t, savedModel(t, m, "gpt-4o-mini").Reasoning, want)
 
-	// Re-open: the stored flag is now the pre-filled answer, and Enter-through
-	// keeps it.
 	m = openEditForm(t, m, "gpt-4o-mini")
 	if got := m.formValues[editModelReasoningEnableStep]; got != "yes" {
 		t.Errorf("formValues[%d] = %q, want yes", editModelReasoningEnableStep, got)
@@ -177,15 +139,9 @@ func TestEditModelReasoningEnableCreatesConfigFromNil(t *testing.T) {
 	assertReasoningEqual(t, savedModel(t, m, "gpt-4o-mini").Reasoning, want)
 }
 
-// ── 2. Per-option edits ──
-
-// TestEditModelReasoningOptionEdits is the table-driven check of every reasoning
-// step: a real answer is persisted (and normalized), "default" clears the
-// pointer, and disabling with everything else cleared collapses to nil.
 func TestEditModelReasoningOptionEdits(t *testing.T) {
 	tests := []struct {
-		name string
-		// answers overrides the pre-filled reasoning answers (indexed by step).
+		name    string
 		answers map[int]string
 		want    *config.ReasoningConfig
 	}{
@@ -296,15 +252,11 @@ func TestEditModelReasoningOptionEdits(t *testing.T) {
 	}
 }
 
-// TestEditModelReasoningAnswersCanonicalizedOnAdvance proves a mixed-case
-// keyword answer is stored lowercase in the form state, so the completed-step
-// list reads back exactly what will be saved.
 func TestEditModelReasoningAnswersCanonicalizedOnAdvance(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
 	m = openEditForm(t, m, "gpt-4o")
 
-	// Step 6 answered "YES" → stored "yes".
 	m = walkSteps(t, m, editModelReasoningEnableStep, map[int]string{
 		editModelReasoningEnableStep: "YES",
 	})
@@ -312,7 +264,6 @@ func TestEditModelReasoningAnswersCanonicalizedOnAdvance(t *testing.T) {
 		t.Errorf("formValues[%d] = %q, want yes (canonical)", editModelReasoningEnableStep, got)
 	}
 
-	// Step 7 answered "MEDIUM" → stored "medium".
 	m.textInput.SetValue("MEDIUM")
 	m = sendKeys(m, "\r")
 	if m.formStepIndex != editModelReasoningMaxTokensStep {
@@ -323,11 +274,6 @@ func TestEditModelReasoningAnswersCanonicalizedOnAdvance(t *testing.T) {
 	}
 }
 
-// ── 3. Invalid answers ──
-
-// TestEditModelReasoningInvalidAnswersRejected walks to each reasoning step,
-// types an answer the config would reject and asserts the form stays open with
-// an error and the stored model is untouched (no partial save).
 func TestEditModelReasoningInvalidAnswersRejected(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -353,7 +299,6 @@ func TestEditModelReasoningInvalidAnswersRejected(t *testing.T) {
 			m = openProviderDetail(m)
 			m = openEditForm(t, m, "gpt-4o")
 
-			// Accept everything up to (not including) the offending step.
 			m = walkSteps(t, m, tc.step-1, nil)
 			if m.formStepIndex != tc.step {
 				t.Fatalf("step = %d, want %d (formError = %q)", m.formStepIndex, tc.step, m.formError)
@@ -382,17 +327,13 @@ func TestEditModelReasoningInvalidAnswersRejected(t *testing.T) {
 	}
 }
 
-// ── 4. reasoningFromFormValues unit table ──
-
-// TestReasoningFromFormValues covers the pure conversion helper: unset/default
-// handling, case-insensitivity, trimming and the nil-collapse rule.
 func TestReasoningFromFormValues(t *testing.T) {
 	tests := []struct {
 		name     string
 		vals     []string
 		want     *config.ReasoningConfig
-		wantErr  string // substring; "" means no error
-		wantNils bool   // want is nil
+		wantErr  string
+		wantNils bool
 	}{
 		{
 			name: "everything_default_is_nil",
@@ -406,7 +347,7 @@ func TestReasoningFromFormValues(t *testing.T) {
 			name:     "enable_yes_alone_yields_config",
 			vals:     reasoningVals("yes", "default", "", "default", "default"),
 			want:     &config.ReasoningConfig{Enable: true},
-			wantNils: true, // assert the four pointers stay nil
+			wantNils: true,
 		},
 		{
 			name: "everything_set",
@@ -470,13 +411,11 @@ func TestReasoningFromFormValues(t *testing.T) {
 		},
 		{
 			name:    "short_slice_reads_missing_steps_as_blank",
-			vals:    []string{}, // no steps at all: enable "" is invalid
+			vals:    []string{},
 			wantErr: "must be yes or no",
 		},
 		{
 			name: "only_enable_step_present",
-			// A slice that stops right after the enable step: the four optional
-			// steps read as blank (= unset).
 			vals: append(make([]string, editModelReasoningEnableStep), "yes"),
 			want: &config.ReasoningConfig{Enable: true},
 		},
@@ -510,13 +449,6 @@ func TestReasoningFromFormValues(t *testing.T) {
 	}
 }
 
-// ── 5. Add-model / connect regressions ──
-
-// TestAddModelFormKeepsSixSteps pins the add form: ModalAddModel shows the six
-// original steps, saves on the think-system step and offers no reasoning step
-// (the reasoning config of an ADDED model keeps being seeded from the catalog by
-// addModelToProvider). The /connect wizard (ModalAddProvider) is untouched and
-// keeps its own eleven steps.
 func TestAddModelFormKeepsSixSteps(t *testing.T) {
 	m := newEditModelTestModel(t)
 
@@ -538,21 +470,17 @@ func TestAddModelFormKeepsSixSteps(t *testing.T) {
 		t.Errorf("modelFormLastStep(ModalEditModel) = %d, want %d", got, editModelReasoningSummaryStep)
 	}
 
-	// The reasoning steps are never "allowed empty" in the add form.
 	for step := editModelReasoningEnableStep; step < editModelStepCount; step++ {
 		if modelFormAllowsEmptyValue(ModalAddModel, step) {
 			t.Errorf("step %d: the add form must not accept a blank reasoning answer", step)
 		}
 	}
 
-	// /connect is untouched: its own eleven-step wizard still renders 11 steps.
 	m.modalMode = ModalAddProvider
 	if got := len(m.formStepNames()); got != 11 {
 		t.Errorf("ModalAddProvider formStepNames() = %d steps, want 11", got)
 	}
 
-	// And the catalog seeding of Reasoning.Effort on ADD is unchanged: the add
-	// flow still lets addModelToProvider derive it from the catalog.
 	m.modalMode = ModalNone
 	var pick catalog.Model
 	for _, cm := range catalog.ModelsForProvider("openai") {
@@ -573,16 +501,12 @@ func TestAddModelFormKeepsSixSteps(t *testing.T) {
 	}
 }
 
-// TestEditModelFormRendersReasoningSteps covers the painted surface: the modal
-// title, the five reasoning step labels and the step hint must reach the frame,
-// so a user can see what the new steps ask and how to clear an override.
 func TestEditModelFormRendersReasoningSteps(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m.width, m.height = 120, 60
 	m = openProviderDetail(m)
 	m = openEditForm(t, m, "gpt-4o")
 
-	// Land on the reasoning-effort step (7) so its hint is painted.
 	m = walkSteps(t, m, editModelReasoningEffortStep-1, nil)
 
 	frame := m.View()
@@ -601,12 +525,6 @@ func TestEditModelFormRendersReasoningSteps(t *testing.T) {
 	}
 }
 
-// ── 6/7. Form shape and ESC ──
-
-// TestModelFormStepLabelsMatchStepIndexes pins the ORDER of the labels to the
-// step constants: a reordered append (or a step slipped into the middle) would
-// otherwise ask the user one thing and store another without any length
-// mismatch to catch it.
 func TestModelFormStepLabelsMatchStepIndexes(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m.modalMode = ModalAddModel
@@ -620,7 +538,6 @@ func TestModelFormStepLabelsMatchStepIndexes(t *testing.T) {
 	if len(editSteps) != editModelStepCount {
 		t.Fatalf("edit steps = %d, want %d: %q", len(editSteps), editModelStepCount, editSteps)
 	}
-	// Both forms ask the same first six questions, in the same order.
 	for step := 0; step < addModelStepCount; step++ {
 		if editSteps[step] != addSteps[step] {
 			t.Errorf("step %d: edit label %q, want the add label %q", step, editSteps[step], addSteps[step])
@@ -638,8 +555,6 @@ func TestModelFormStepLabelsMatchStepIndexes(t *testing.T) {
 			t.Errorf("edit step %d label = %q, want %q", step, editSteps[step], want)
 		}
 	}
-	// The catalog "(thinking: …)" decoration stays on the model-name label of
-	// BOTH modes.
 	m.addModelCatalogThink = "low/medium/high"
 	m.modalMode = ModalAddModel
 	addSteps = m.formStepNames()
@@ -653,10 +568,6 @@ func TestModelFormStepLabelsMatchStepIndexes(t *testing.T) {
 	}
 }
 
-// TestModelFormShapeMatchesConstants guards the invariant both model forms rest
-// on: formValues, formStepNames() and the step-count constants must describe the
-// same steps for EACH mode. If they drift, the ENTER handler either saves too
-// early or reads a value that was never collected.
 func TestModelFormShapeMatchesConstants(t *testing.T) {
 	tests := []struct {
 		mode      modalType
@@ -674,8 +585,6 @@ func TestModelFormShapeMatchesConstants(t *testing.T) {
 				m = openEditForm(t, m, "gpt-4o")
 			} else {
 				m.resetModal(ModalAddModel)
-				// The add flow saves into the provider the detail view is on;
-				// the "+ Add model" action row keeps it set.
 				m.providerSelectedName = "test-provider"
 				m.formValues = make([]string, addModelStepCount)
 				m.textInput.SetValue("alias")
@@ -688,9 +597,6 @@ func TestModelFormShapeMatchesConstants(t *testing.T) {
 			if len(m.formValues) != tc.wantSteps {
 				t.Fatalf("formValues has %d entries, want %d: %q", len(m.formValues), tc.wantSteps, m.formValues)
 			}
-			// Every step must be reachable by pressing ENTER, and the last one
-			// saves (the add form closes the modal, the edit form returns to the
-			// provider detail).
 			for step := 0; step < tc.wantSteps-1; step++ {
 				if step == 0 && tc.mode == ModalAddModel {
 					m.textInput.SetValue("shape-alias")
@@ -699,7 +605,6 @@ func TestModelFormShapeMatchesConstants(t *testing.T) {
 					m.textInput.SetValue("shape-model-001")
 				}
 				if step == addModelVisionStep && tc.mode == ModalAddModel {
-					// The vision step carries a required yes/no answer.
 					m.textInput.SetValue("no")
 				}
 				if m.formStepIndex != step {
@@ -725,9 +630,6 @@ func TestModelFormShapeMatchesConstants(t *testing.T) {
 	}
 }
 
-// TestEditModelEscFromEveryStepReturnsToDetail verifies ESC from ANY of the 11
-// steps — the reasoning steps included — discards the draft and lands back on
-// the provider detail with the edited row selected and the config untouched.
 func TestEditModelEscFromEveryStepReturnsToDetail(t *testing.T) {
 	for step := 0; step < editModelStepCount; step++ {
 		t.Run(fmt.Sprintf("step_%d", step), func(t *testing.T) {
@@ -736,7 +638,6 @@ func TestEditModelEscFromEveryStepReturnsToDetail(t *testing.T) {
 			m = openProviderDetail(m)
 			m = openEditForm(t, m, "gpt-4o")
 
-			// Walk to the step, then type a change that must be discarded.
 			if step > 0 {
 				m = walkSteps(t, m, step-1, nil)
 			}
@@ -745,9 +646,6 @@ func TestEditModelEscFromEveryStepReturnsToDetail(t *testing.T) {
 			}
 			m.textInput.SetValue("bogus")
 
-			// The model-name step may show catalog suggestions, and ESC hides
-			// those first (documented behavior: the picker is dismissed before
-			// the form); a second ESC then leaves the form.
 			pickerActive := m.addModelCatalogActive
 			m = sendKeys(m, "\x1b")
 			if pickerActive && m.modalMode == ModalEditModel {
@@ -772,9 +670,6 @@ func TestEditModelEscFromEveryStepReturnsToDetail(t *testing.T) {
 	}
 }
 
-// TestEditModelReasoningHintsAndPlaceholders verifies the new steps are usable:
-// every reasoning step carries a placeholder, and the optional ones show the
-// "default" hint (steps 7, 9, 10), max tokens its own (8).
 func TestEditModelReasoningHintsAndPlaceholders(t *testing.T) {
 	m := newEditModelTestModel(t)
 	m = openProviderDetail(m)
@@ -814,10 +709,6 @@ func TestEditModelReasoningHintsAndPlaceholders(t *testing.T) {
 	}
 }
 
-// ── assertion helpers ──
-
-// assertReasoningEqual compares two reasoning configs field by field, failing on
-// both the value and the presence of every pointer.
 func assertReasoningEqual(t *testing.T, got, want *config.ReasoningConfig) {
 	t.Helper()
 	if got == nil || want == nil {
@@ -835,7 +726,6 @@ func assertReasoningEqual(t *testing.T, got, want *config.ReasoningConfig) {
 	assertPtrEqual(t, "Summary", got.Summary, want.Summary)
 }
 
-// assertPtrEqual compares two optional values, treating "unset" as a value.
 func assertPtrEqual[T comparable](t *testing.T, field string, got, want *T) {
 	t.Helper()
 	if got == nil || want == nil {
@@ -849,7 +739,6 @@ func assertPtrEqual[T comparable](t *testing.T, field string, got, want *T) {
 	}
 }
 
-// deref renders an optional value for failure messages (nil reads as "<unset>").
 func deref[T any](p *T) any {
 	if p == nil {
 		return "<unset>"
@@ -857,7 +746,6 @@ func deref[T any](p *T) any {
 	return *p
 }
 
-// ptrString / ptrInt / ptrBool build the expected pointers of a test table.
 func ptrString(v string) *string { return &v }
 func ptrInt(v int) *int          { return &v }
 func ptrBool(v bool) *bool       { return &v }

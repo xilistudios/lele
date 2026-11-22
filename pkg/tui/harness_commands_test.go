@@ -13,10 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/harness"
 )
 
-// harnessTestModel builds a TUI model whose backend loop exposes two custom
-// (harness) commands: "hola" (plain) and "tests" (with agent+model overrides).
-// The commands are declared through config.Commands, the lowest-precedence
-// discovery level, so no fixture files are needed.
 func harnessTestModel(t *testing.T) *Model {
 	t.Helper()
 	cfg := testModelConfig(t)
@@ -27,8 +23,6 @@ func harnessTestModel(t *testing.T) *Model {
 	return newTestModelWithConfig(t, cfg, true)
 }
 
-// --- customCommands() -------------------------------------------------------
-
 func TestCustomCommands_ListsHarnessCommands(t *testing.T) {
 	m := harnessTestModel(t)
 
@@ -36,14 +30,12 @@ func TestCustomCommands_ListsHarnessCommands(t *testing.T) {
 	if len(customs) != 2 {
 		t.Fatalf("customCommands() = %d entries, want 2: %+v", len(customs), customs)
 	}
-	// Registry.All() is sorted by name, so "hola" comes first.
 	if customs[0].name != "/hola" || customs[0].description != "Saluda" {
 		t.Errorf("first entry = %+v, want /hola Saluda", customs[0])
 	}
 	if customs[1].name != "/tests" {
 		t.Fatalf("second entry name = %q, want /tests", customs[1].name)
 	}
-	// Agent/model overrides are appended to the description.
 	for _, want := range []string{"Corre tests", "agent: coder", "model: openai/gpt-5"} {
 		if !strings.Contains(customs[1].description, want) {
 			t.Errorf("description %q missing %q", customs[1].description, want)
@@ -68,13 +60,10 @@ func TestCustomCommands_CachesResult(t *testing.T) {
 	if len(first) != 2 {
 		t.Fatalf("want 2 customs, got %d", len(first))
 	}
-	// Mutate the cache; a cached read must return the slice as-is instead of
-	// re-querying the backend (which would rebuild it from config).
 	m.customCmds = []commandInfo{{name: "/cached"}}
 	if got := m.customCommands(); len(got) != 1 || got[0].name != "/cached" {
 		t.Fatalf("cache not honoured, got %+v", got)
 	}
-	// Forcing the snapshot older than the TTL triggers a refresh.
 	m.customCmdsAt = m.customCmdsAt.Add(-2 * customCommandsRefreshTTL)
 	if got := m.customCommands(); len(got) != 2 {
 		t.Fatalf("stale cache not refreshed, got %+v", got)
@@ -96,12 +85,9 @@ func TestIsCustomCommand_CaseInsensitiveAndSlashOptional(t *testing.T) {
 	}
 }
 
-// --- filterAutocomplete -----------------------------------------------------
-
 func TestFilterAutocomplete_MergesCustomsAfterBuiltins(t *testing.T) {
 	m := harnessTestModel(t)
 
-	// A prefix that matches no built-in still finds the custom command.
 	m.filterAutocomplete("/ho")
 	names := autocompleteNames(m.autocompleteItems)
 	if len(names) != 1 || names[0] != "/hola" {
@@ -114,7 +100,6 @@ func TestFilterAutocomplete_MergesCustomsAfterBuiltins(t *testing.T) {
 		t.Fatalf("autocomplete for /h = %v, want [/hola]", names)
 	}
 
-	// Full listing: builtins keep priority order, customs come last.
 	m.filterAutocomplete("/")
 	names = autocompleteNames(m.autocompleteItems)
 	if names[len(names)-2] != "/hola" || names[len(names)-1] != "/tests" {
@@ -129,7 +114,6 @@ func TestFilterAutocomplete_MergesCustomsAfterBuiltins(t *testing.T) {
 
 func TestFilterAutocomplete_BuiltinWinsOverCustom(t *testing.T) {
 	cfg := testModelConfig(t)
-	// A custom command shadowing a built-in name must not be offered twice.
 	cfg.Commands = map[string]config.CommandDefinition{
 		"clear": {Description: "custom clear", Template: "please clear"},
 	}
@@ -146,15 +130,12 @@ func TestFilterAutocomplete_BuiltinWinsOverCustom(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("/clear appears %d times, want 1 (built-in wins): %v", count, names)
 	}
-	// The surviving entry is the built-in description.
 	for _, it := range m.autocompleteItems {
 		if it.name == "/clear" && strings.Contains(it.description, "custom") {
 			t.Errorf("custom entry leaked into autocomplete: %+v", it)
 		}
 	}
 }
-
-// --- executeCommand pass-through -------------------------------------------
 
 func TestExecuteCommand_UnknownCustomPublishes(t *testing.T) {
 	m := harnessTestModel(t)
@@ -163,8 +144,6 @@ func TestExecuteCommand_UnknownCustomPublishes(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("executeCommand on a custom command must return a command (tick), not nil")
 	}
-	// Mirrors publishUserMessage: the raw text becomes the pending user
-	// message (so it shows in the transcript) and the turn starts.
 	if m.pendingUserMessage != "/hola mundo" {
 		t.Errorf("pendingUserMessage = %q, want %q", m.pendingUserMessage, "/hola mundo")
 	}
@@ -182,7 +161,7 @@ func TestExecuteCommand_UnknownCustomPublishes(t *testing.T) {
 func TestExecuteCommand_CustomWhileBusyQueues(t *testing.T) {
 	m := harnessTestModel(t)
 	m.executeCommand("/new")
-	m.processing = true // a turn is in flight
+	m.processing = true
 
 	if cmd := m.executeCommand("/tests -v"); cmd == nil {
 		t.Fatal("expected a tick command for the queued message")
@@ -205,7 +184,6 @@ func TestExecuteCommand_UnknownNonCustomFallsThrough(t *testing.T) {
 	if m.pendingUserMessage != "" {
 		t.Errorf("unknown command must not publish, pendingUserMessage = %q", m.pendingUserMessage)
 	}
-	// Built-ins keep their local behavior (no publish).
 	if cmd := m.executeCommand("/clear"); cmd != nil {
 		t.Errorf("/clear should stay local, got %v", cmd)
 	}
@@ -213,8 +191,6 @@ func TestExecuteCommand_UnknownNonCustomFallsThrough(t *testing.T) {
 		t.Errorf("/clear must not be published as a message, pendingUserMessage = %q", m.pendingUserMessage)
 	}
 }
-
-// --- command.applied event --------------------------------------------------
 
 func TestFormatCommandApplied(t *testing.T) {
 	tests := []struct {
@@ -274,8 +250,6 @@ func TestCommandAppliedEvent_RendersActivityLine(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
 	m = updated.(*Model)
 
-	// The card is an activity line for the turn in flight (identical
-	// lifecycle to tool.executing), so the backend has marked it processing.
 	m.processing = true
 
 	_, _ = m.Update(outboundMsg{msg: bus.OutboundMessage{
@@ -291,8 +265,6 @@ func TestCommandAppliedEvent_RendersActivityLine(t *testing.T) {
 	if m.currentToolAction != want {
 		t.Errorf("currentToolAction = %q, want %q", m.currentToolAction, want)
 	}
-	// The line must actually reach the rendered overlay (same path as
-	// tool.executing), not just the state field.
 	joined := strings.Join(m.viewport.overlayLines, "\n")
 	if !strings.Contains(joined, "/tests applied") {
 		t.Fatalf("overlay does not contain the command card:\n%s", joined)
@@ -314,8 +286,6 @@ func TestCommandAppliedEvent_OtherSessionIgnored(t *testing.T) {
 	}
 }
 
-// --- helpers ----------------------------------------------------------------
-
 func autocompleteNames(items []commandInfo) []string {
 	out := make([]string, 0, len(items))
 	for _, it := range items {
@@ -333,16 +303,6 @@ func containsName(names []string, want string) bool {
 	return false
 }
 
-// TestQueueFlush_CustomCommandReachesBackendExpanded is the integration pin
-// for the queued-custom-command path: enqueue while busy, flush when idle, and
-// verify (a) the TUI publishes the RAW "/hola mundo" text (no prefix or
-// rewrite that could block expansion) and (b) the real backend loop expands it
-// and emits command.applied with the harness metadata. Steps (a) and (b) are
-// each covered in isolation elsewhere; this test pins the seam between them.
-//
-// It deliberately does NOT reuse newTestModelWithConfig: that helper cancels
-// the loop context when it returns, so no test could ever observe the backend
-// processing a message.
 func TestQueueFlush_CustomCommandReachesBackendExpanded(t *testing.T) {
 	cfg := testModelConfig(t)
 	cfg.Commands = map[string]config.CommandDefinition{
@@ -367,7 +327,6 @@ func TestQueueFlush_CustomCommandReachesBackendExpanded(t *testing.T) {
 		t.Fatal("/new did not create a session")
 	}
 
-	// Busy: the custom command must land in the queue, not on the bus.
 	m.processing = true
 	if cmd := m.executeCommand("/hola mundo"); cmd == nil {
 		t.Fatal("expected tick command for queued message")
@@ -377,9 +336,6 @@ func TestQueueFlush_CustomCommandReachesBackendExpanded(t *testing.T) {
 		t.Fatalf("queue = %+v, want raw '/hola mundo'", q)
 	}
 
-	// Idle again: flush pops the raw text and publishes it. The returned cmd
-	// may legitimately be nil (the tick chain armed at enqueue time still
-	// counts as pending), so assert on the publish side effects instead.
 	m.processing = false
 	m.startTime = time.Time{}
 	if cmd := m.maybeFlushQueue(); cmd != nil {
@@ -396,8 +352,6 @@ func TestQueueFlush_CustomCommandReachesBackendExpanded(t *testing.T) {
 		t.Errorf("queue not drained: %+v", m.messageQueue[m.currentKey])
 	}
 
-	// The real agent loop consumes the inbound message, applyHarnessCommand
-	// expands it, and command.applied shows up on the outbound bus.
 	mb := m.agentLoop.MessageBus()
 	deadline := time.After(8 * time.Second)
 	for {

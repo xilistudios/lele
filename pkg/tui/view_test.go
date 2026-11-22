@@ -67,9 +67,6 @@ func TestCalculateViewportHeight(t *testing.T) {
 	}
 }
 
-// The queue preview band adds a line to the left column, so it is a new way
-// for the frame to overshoot the terminal height. This asserts the exact-height
-// invariant with a full queue, the autocomplete overlay, or both on screen.
 func TestView_HeightExactWithQueueAndAutocomplete(t *testing.T) {
 	m := newTestModel(t)
 
@@ -121,10 +118,6 @@ func TestView_HeightExactWithQueueAndAutocomplete(t *testing.T) {
 	}
 }
 
-// Queue work is *waiting*, the status line is the turn *running now*: the band
-// belongs above the process indicator so the pane reads chronologically, and
-// the indicator must not carry queue text of its own (it used to, which put the
-// pending count next to the loading state and duplicated the band's depth).
 func TestQueueRowSitsAboveStatusLine(t *testing.T) {
 	i18n.InitWithLanguage("en")
 	m := newTestModel(t)
@@ -137,7 +130,6 @@ func TestQueueRowSitsAboveStatusLine(t *testing.T) {
 	m.showWelcome = false
 	m.width, m.height = 120, 30
 
-	// A live turn, so the loading indicator is rendered alongside the band.
 	m.processing = true
 	m.startTime = time.Now()
 
@@ -181,7 +173,6 @@ func TestView_HeightNeverExceedsTerminalHeight(t *testing.T) {
 	m.sessionMgr.GetOrCreate(key)
 	_ = m.sessionMgr.SetMode(key, "agent")
 
-	// Add messages with long lines, tool calls, markdown
 	m.sessionMgr.AddMessage(key, "user", "Run some tools and write code")
 	m.sessionMgr.AddMessage(key, "assistant",
 		"Here is some thinking and tool execution:\n"+
@@ -191,7 +182,6 @@ func TestView_HeightNeverExceedsTerminalHeight(t *testing.T) {
 	m.currentKey = key
 	m.showWelcome = false
 
-	// Add subagents to sidebar
 	var subagents []channels.SubagentTaskInfo
 	for i := 0; i < 15; i++ {
 		subagents = append(subagents, channels.SubagentTaskInfo{

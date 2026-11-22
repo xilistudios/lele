@@ -7,9 +7,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// TestClampMarkdownWidth_CutsUnbreakableTokens: glamour's WithWordWrap does
-// not cut long paths/URLs. Those overflow lines paint over the sidebar border
-// on scroll (Terminal.app shows a short Accent-coloured bar).
 func TestClampMarkdownWidth_CutsUnbreakableTokens(t *testing.T) {
 	longPath := "/Users/alfredo/Documents/Development/xilistudios/lele/pkg/tui/view.go/and/more"
 	line := "\x1b[38;2;139;233;253m" + longPath + "\x1b[0m"
@@ -35,9 +32,6 @@ func TestClampMarkdownWidth_EmptyAndShortUnchanged(t *testing.T) {
 	}
 }
 
-// TestRenderMarkdown_LongPathDoesNotExceedWidth is the end-to-end guard:
-// a real filesystem path in markdown must not produce a line wider than the
-// requested render width (glamour would leave it unwrapped).
 func TestRenderMarkdown_LongPathDoesNotExceedWidth(t *testing.T) {
 	m := newTestModel(t)
 	const width = 50
