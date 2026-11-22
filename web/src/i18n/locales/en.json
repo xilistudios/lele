@@ -482,6 +482,17 @@
       "skillsEnableAria": "Enable {{name}} in this workspace",
       "skillsDisableAria": "Disable {{name}} in this workspace"
     },
+    "mcpPage": {
+      "agentLabel": "Agent",
+      "intro": "MCP servers extend the agent's tools. The global layer is shared by all agents; the agent and project layers belong to the selected agent. Changes here apply immediately and are not part of the configuration draft.",
+      "unsavedAgent": "This agent exists only in the unsaved draft. Save the configuration before managing its MCP servers.",
+      "implicitMain": "No agents are configured; showing the implicit main agent."
+    },
+    "subagentsPage": {
+      "agentLabel": "Agent",
+      "openAgent": "Open agent page",
+      "noAgents": "No agents are configured yet. Create one on the Agents tab to manage its subagents."
+    },
     "selectModel": "Select model",
     "loading": "Loading...",
     "tabs": {
@@ -537,7 +548,8 @@
       "skills": "Skills",
       "subagents": "Subagents",
       "groupsList": "Group Profiles",
-      "limits": "Limits"
+      "limits": "Limits",
+      "subagentDefaults": "Subagent global defaults"
     },
     "fields": {
       "gatewayHost": "Host",
@@ -700,7 +712,12 @@
       "groupMaxTokensPerTurn": "Max tokens per turn",
       "groupTotalTokenBudget": "Total token budget",
       "groupStopKeywords": "Stop keywords",
-      "groupParallel": "Parallel"
+      "groupParallel": "Parallel",
+      "subagentTimeout": "Timeout (minutes)",
+      "subagentMaxConcurrent": "Max concurrent",
+      "subagentMaxRetries": "Max retries",
+      "subagentMaxIterations": "Max iterations",
+      "subagentRetention": "Retention (minutes)"
     },
     "descriptions": {
       "ephemeralThreshold": "Time in seconds before messages are removed",
@@ -748,7 +765,13 @@
       "groupMaxTokensPerTurn": "Token cap per turn",
       "groupTotalTokenBudget": "Cumulative token budget",
       "groupStopKeywords": "Keywords that trigger convergence",
-      "groupParallel": "Run turns in parallel within a layer"
+      "groupParallel": "Run turns in parallel within a layer",
+      "subagentDefaults": "Apply to every agent unless the agent overrides them on its Subagents tab. Retries and retention are global only. Environment variables (LELE_AGENTS_DEFAULTS_SUBAGENT_*) take precedence.",
+      "subagentTimeout": "Minutes before a running subagent is stopped. 0 restores the built-in default (30) on the next load.",
+      "subagentMaxConcurrent": "Maximum subagents running at the same time per parent agent. 0 = unlimited.",
+      "subagentMaxRetries": "Automatic retries for a failed subagent task. 0 restores the built-in default (2) on the next load.",
+      "subagentMaxIterations": "Tool-loop iterations per subagent. 0 = each agent's own limit applies.",
+      "subagentRetention": "Minutes a finished subagent stays in memory before cleanup. 0 restores the default (5); the cleanup sweep cannot be disabled."
     },
     "placeholders": {
       "agentDescription": "Agent description..."
