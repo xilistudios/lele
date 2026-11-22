@@ -3,67 +3,78 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useChatFilters } from '../../hooks/useChatFilters'
+import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { ChatSearchBar } from '../molecules/ChatSearchBar'
 import { ChatListView } from './ChatListView'
 
-interface QuickChatPanelProps {
+const EXIT_ANIMATION_MS = 200
+
+interface ChatSearchModalProps {
   isOpen: boolean
   onClose: () => void
-  initialFocusSearch?: boolean
 }
 
-export function QuickChatPanel({
-  isOpen,
-  onClose,
-  initialFocusSearch = false,
-}: QuickChatPanelProps) {
+/**
+ * Centered chat-search dialog. Rendered while `isOpen` is true and for
+ * EXIT_ANIMATION_MS after it turns false, so the closing animation plays
+ * before unmount.
+ */
+export function ChatSearchModal({ isOpen, onClose }: ChatSearchModalProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { sessions, currentSessionKey, processingSessions, onSelectSession, onDeleteSession } =
     useAppLogicContext()
   const { query, setQuery, sortMode, setSortMode, grouped } = useChatFilters(sessions)
-  const searchRef = useRef<HTMLInputElement>(null)
 
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+
+  const [mounted, setMounted] = useState(isOpen)
   const [closing, setClosing] = useState(false)
-  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
     if (isOpen) {
       setMounted(true)
       setClosing(false)
+      return
     }
-  }, [isOpen])
+    if (!mounted) return
 
-  useEffect(() => {
-    if (mounted && !closing && initialFocusSearch && searchRef.current) {
-      searchRef.current.focus()
-    }
-  }, [mounted, closing, initialFocusSearch])
-
-  const handleClose = useCallback(() => {
     setClosing(true)
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       setMounted(false)
       setClosing(false)
-      onClose()
-    }, 200)
-  }, [onClose])
+    }, EXIT_ANIMATION_MS)
+    return () => clearTimeout(timer)
+  }, [isOpen, mounted])
+
+  useFocusTrap(dialogRef, mounted && !closing)
+
+  useEffect(() => {
+    if (!mounted || closing) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    searchInputRef.current?.focus()
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [mounted, closing])
 
   useEffect(() => {
     if (!mounted || closing) return
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleClose()
+      if (e.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', handleKey)
     return () => document.removeEventListener('keydown', handleKey)
-  }, [mounted, closing, handleClose])
+  }, [mounted, closing, onClose])
 
   const handleSelect = useCallback(
     (key: string) => {
       onSelectSession(key)
-      handleClose()
+      onClose()
     },
-    [onSelectSession, handleClose],
+    [onSelectSession, onClose],
   )
 
   const handleDelete = useCallback(
@@ -74,29 +85,32 @@ export function QuickChatPanel({
   )
 
   const goToAdmin = useCallback(() => {
-    handleClose()
+    onClose()
     navigate('/chats')
-  }, [handleClose, navigate])
+  }, [onClose, navigate])
 
   if (!mounted) return null
 
   return (
-    <div
-      className={`fixed inset-0 z-50 flex ${closing ? 'animate-panel-out' : 'animate-panel-in'}`}
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
       <div
-        className={`flex-1 cursor-pointer ${closing ? 'modal-backdrop-out' : 'modal-backdrop-in'}`}
-        onClick={handleClose}
+        className={`absolute inset-0 bg-overlay backdrop-blur-sm ${closing ? 'modal-backdrop-out' : 'modal-backdrop-in'}`}
+        onClick={onClose}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') handleClose()
+          if (e.key === 'Escape') onClose()
         }}
-        role="button"
-        tabIndex={-1}
         aria-hidden="true"
       />
 
-      <aside
-        className={`flex h-full w-full max-w-sm flex-shrink-0 safe-area-y flex-col border-l border-border bg-background-primary shadow-2xl ${closing ? 'animate-panel-slide-out' : 'animate-panel-slide-in'}`}
+      <dialog
+        ref={dialogRef}
+        open
+        aria-modal="true"
+        aria-label={t('chat.search')}
+        tabIndex={-1}
+        className={`relative z-10 flex max-h-[min(80vh,44rem)] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-background-primary shadow-2xl outline-none ${
+          closing ? 'modal-content-out' : 'modal-content-in'
+        }`}
       >
         <div className="flex items-center gap-3 border-b border-border px-4 py-3">
           <ChatSearchBar
@@ -104,12 +118,13 @@ export function QuickChatPanel({
             onQueryChange={setQuery}
             sortMode={sortMode}
             onSortChange={setSortMode}
+            inputRef={searchInputRef}
             className="flex-1"
           />
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1.5 text-text-tertiary hover:bg-background-secondary"
+            className="rounded-md p-1.5 text-text-tertiary transition-colors hover:bg-background-secondary"
             aria-label={t('chat.closePanel')}
           >
             <svg
@@ -127,7 +142,7 @@ export function QuickChatPanel({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <ChatListView
             groups={grouped}
             selectedKey={currentSessionKey}
@@ -141,12 +156,12 @@ export function QuickChatPanel({
           <button
             type="button"
             onClick={goToAdmin}
-            className="w-full rounded-lg border border-border bg-background-secondary px-4 py-2.5 text-sm font-medium text-text-primary hover:bg-background-secondary/80 transition-colors"
+            className="w-full rounded-lg border border-border bg-background-secondary px-4 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-background-secondary/80"
           >
             {t('chat.manageChats')}
           </button>
         </div>
-      </aside>
+      </dialog>
     </div>
   )
 }
