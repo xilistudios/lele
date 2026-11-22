@@ -1073,24 +1073,31 @@ func TestClaudeBridgeDirDefaultRespectsLeleConfigDir(t *testing.T) {
 }
 
 // TestClaudeBridgeDirMissingBridgeIsPlainActionableError pins the failure
-// contract: the message names the install one-liner and the env knob, and it is
-// a plain error, never a FailoverError (another provider cannot fix a missing
-// install).
+// contract: the message names the directory, the exact list of files that are
+// missing, the install one-liner and the env knob, and it is a plain error,
+// never a FailoverError (another provider cannot fix a missing install).
 func TestClaudeBridgeDirMissingBridgeIsPlainActionableError(t *testing.T) {
 	empty := t.TempDir()
 	onlyFirst := t.TempDir()
 	writeClaudeBridgeStub(t, onlyFirst, "bridge.mjs")
 	onlySecond := t.TempDir()
 	writeClaudeBridgeStub(t, onlySecond, "bridge_lib.mjs")
+	bothDirs := t.TempDir()
+	for _, name := range claudeBridgeRequiredFiles {
+		if err := os.MkdirAll(filepath.Join(bothDirs, name), 0o755); err != nil {
+			t.Fatalf("creating a directory named %q: %v", name, err)
+		}
+	}
 
 	tests := []struct {
 		name    string
 		dir     string
 		missing string
 	}{
-		{name: "absent install", dir: filepath.Join(empty, "never-installed"), missing: "bridge.mjs"},
+		{name: "absent install", dir: filepath.Join(empty, "never-installed"), missing: "bridge.mjs, bridge_lib.mjs"},
 		{name: "half install without bridge_lib", dir: onlyFirst, missing: "bridge_lib.mjs"},
 		{name: "half install without bridge", dir: onlySecond, missing: "bridge.mjs"},
+		{name: "directories instead of modules", dir: bothDirs, missing: "bridge.mjs, bridge_lib.mjs"},
 	}
 
 	for _, test := range tests {
@@ -1103,7 +1110,12 @@ func TestClaudeBridgeDirMissingBridgeIsPlainActionableError(t *testing.T) {
 			}
 
 			message := err.Error()
-			for _, want := range []string{test.dir, "install.sh", claudeBridgeEnvBridgePath, test.missing} {
+			for _, want := range []string{
+				test.dir,
+				"(missing " + test.missing + ")",
+				"lele-claude-bridge/main/install.sh",
+				claudeBridgeEnvBridgePath,
+			} {
 				if !strings.Contains(message, want) {
 					t.Errorf("error %q does not mention %q", message, want)
 				}
