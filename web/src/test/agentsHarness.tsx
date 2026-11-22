@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { SettingsProvider } from '../contexts/SettingsContext'
 import type { SettingsConfigState } from '../hooks/useSettingsConfig'
 import i18n from '../i18n'
-import type { EditableAgentConfig, EditableConfig } from '../lib/types'
+import type { EditableAgentConfig, EditableAgentDefaults, EditableConfig } from '../lib/types'
 import type { ApiClient } from '../services/http/client'
 
 export function tr(key: string, options?: Record<string, unknown>): string {
@@ -74,6 +74,8 @@ export function makeState(
   agents: EditableAgentConfig[],
   options: {
     defaultsModel?: string
+    defaults?: Partial<EditableAgentDefaults>
+    remoteList?: EditableAgentConfig[]
     dirtyPaths?: string[]
     validationErrors?: SettingsConfigState['validationErrors']
     writes?: Write[]
@@ -83,14 +85,21 @@ export function makeState(
 ): SettingsConfigState {
   const draft = {
     agents: {
-      defaults: { model: options.defaultsModel ?? '' },
+      defaults: { model: options.defaultsModel ?? '', ...options.defaults },
       list: agents,
     },
     ...options.extraConfig,
   } as unknown as EditableConfig
 
+  const remoteConfig = options.remoteList
+    ? ({
+        ...draft,
+        agents: { ...draft.agents, list: options.remoteList },
+      } as unknown as EditableConfig)
+    : draft
+
   const state: SettingsConfigState = {
-    remoteConfig: draft,
+    remoteConfig,
     draftConfig: draft,
     metadata: null,
     dirtyPaths: new Set(options.dirtyPaths ?? []),
