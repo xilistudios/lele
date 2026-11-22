@@ -8,18 +8,13 @@ import (
 	"unsafe"
 )
 
-// SPI ioctl constants from Linux kernel headers.
-// Calculated from _IOW('k', nr, size) macro:
-//
-//	direction(1)<<30 | size<<16 | type(0x6B)<<8 | nr
 const (
-	spiIocWrMode        = 0x40016B01 // _IOW('k', 1, __u8)
-	spiIocWrBitsPerWord = 0x40016B03 // _IOW('k', 3, __u8)
-	spiIocWrMaxSpeedHz  = 0x40046B04 // _IOW('k', 4, __u32)
-	spiIocMessage1      = 0x40206B00 // _IOW('k', 0, struct spi_ioc_transfer) — 32 bytes
+	spiIocWrMode        = 0x40016B01
+	spiIocWrBitsPerWord = 0x40016B03
+	spiIocWrMaxSpeedHz  = 0x40046B04
+	spiIocMessage1      = 0x40206B00
 )
 
-// spiTransfer matches Linux kernel struct spi_ioc_transfer (32 bytes on all architectures).
 type spiTransfer struct {
 	txBuf       uint64
 	rxBuf       uint64
@@ -34,28 +29,24 @@ type spiTransfer struct {
 	pad         uint8
 }
 
-// configureSPI opens an SPI device and sets mode, bits per word, and speed
 func configureSPI(devPath string, mode uint8, bits uint8, speed uint32) (int, *ToolResult) {
 	fd, err := syscall.Open(devPath, syscall.O_RDWR, 0)
 	if err != nil {
 		return -1, ErrorResult(fmt.Sprintf("failed to open %s: %v (check permissions and spidev module)", devPath, err))
 	}
 
-	// Set SPI mode
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), spiIocWrMode, uintptr(unsafe.Pointer(&mode)))
 	if errno != 0 {
 		syscall.Close(fd)
 		return -1, ErrorResult(fmt.Sprintf("failed to set SPI mode %d: %v", mode, errno))
 	}
 
-	// Set bits per word
 	_, _, errno = syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), spiIocWrBitsPerWord, uintptr(unsafe.Pointer(&bits)))
 	if errno != 0 {
 		syscall.Close(fd)
 		return -1, ErrorResult(fmt.Sprintf("failed to set bits per word %d: %v", bits, errno))
 	}
 
-	// Set max speed
 	_, _, errno = syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), spiIocWrMaxSpeedHz, uintptr(unsafe.Pointer(&speed)))
 	if errno != 0 {
 		syscall.Close(fd)
@@ -65,7 +56,6 @@ func configureSPI(devPath string, mode uint8, bits uint8, speed uint32) (int, *T
 	return fd, nil
 }
 
-// transfer performs a full-duplex SPI transfer
 func (t *SPITool) transfer(args map[string]interface{}) *ToolResult {
 	confirm, _ := args["confirm"].(bool)
 	if !confirm {
@@ -122,7 +112,6 @@ func (t *SPITool) transfer(args map[string]interface{}) *ToolResult {
 		return ErrorResult(fmt.Sprintf("SPI transfer failed: %v", errno))
 	}
 
-	// Format received bytes
 	hexBytes := make([]string, len(rxBuf))
 	intBytes := make([]int, len(rxBuf))
 	for i, b := range rxBuf {
@@ -139,7 +128,6 @@ func (t *SPITool) transfer(args map[string]interface{}) *ToolResult {
 	return SilentResult(string(result))
 }
 
-// readDevice reads bytes from SPI by sending zeros (read-only, no confirm needed)
 func (t *SPITool) readDevice(args map[string]interface{}) *ToolResult {
 	dev, speed, mode, bits, errMsg := parseSPIArgs(args)
 	if errMsg != "" {
@@ -161,7 +149,7 @@ func (t *SPITool) readDevice(args map[string]interface{}) *ToolResult {
 	}
 	defer syscall.Close(fd)
 
-	txBuf := make([]byte, length) // zeros
+	txBuf := make([]byte, length)
 	rxBuf := make([]byte, length)
 
 	xfer := spiTransfer{

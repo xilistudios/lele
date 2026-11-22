@@ -12,7 +12,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// waitForClaim polls cond until it holds or the budget is spent.
 func waitForClaim(within time.Duration, cond func() bool) bool {
 	deadline := time.Now().Add(within)
 	for {
@@ -26,8 +25,6 @@ func waitForClaim(within time.Duration, cond func() bool) bool {
 	}
 }
 
-// taskIDFromSpawnMessage extracts the task id out of the message Spawn returns
-// ("Spawned subagent task subagent-1 ...").
 func taskIDFromSpawnMessage(t *testing.T, msg string) string {
 	t.Helper()
 	idx := strings.Index(msg, "subagent-")
@@ -41,25 +38,11 @@ func taskIDFromSpawnMessage(t *testing.T, msg string) string {
 	return rest
 }
 
-// ============================================================================
-// Result-claim bookkeeping (A1)
-//
-// The claim is the single arbiter of "the parent's LLM context saw this result
-// exactly once". Two parties contest it: wait_for_subagent (in-turn read) and
-// the async injector in pkg/agent (system inbound message). These tests pin the
-// primitives; the end-to-end races are covered in pkg/agent.
-// ============================================================================
-
-// newClaimTestManager builds a manager with no provider: these tests only
-// exercise the bookkeeping, never a run. t.TempDir keeps the workspace off the
-// real one.
 func newClaimTestManager(t *testing.T) *SubagentManager {
 	t.Helper()
 	return NewSubagentManager(nil, "test-model", t.TempDir(), nil, 5)
 }
 
-// addClaimTestTask registers a task in the given state. It returns the live
-// (non-snapshot) task so a test can drive terminal transitions directly.
 func addClaimTestTask(t *testing.T, sm *SubagentManager, id, status string) *SubagentTask {
 	t.Helper()
 	task := &SubagentTask{
@@ -73,8 +56,6 @@ func addClaimTestTask(t *testing.T, sm *SubagentManager, id, status string) *Sub
 	return task
 }
 
-// liveTask returns the manager's live task (not a Snapshot) so tests can read
-// the claim counters without going through the copy.
 func liveTask(t *testing.T, sm *SubagentManager, id string) *SubagentTask {
 	t.Helper()
 	sm.mu.RLock()
@@ -86,7 +67,6 @@ func liveTask(t *testing.T, sm *SubagentManager, id string) *SubagentTask {
 	return task
 }
 
-// resultWaitersOf reads the waiter counter under the task lock.
 func resultWaitersOf(t *testing.T, sm *SubagentManager, id string) int {
 	t.Helper()
 	task := liveTask(t, sm, id)
@@ -97,9 +77,6 @@ func resultWaitersOf(t *testing.T, sm *SubagentManager, id string) int {
 	return task.resultWaiters
 }
 
-// markTerminal simulates a runner writing a terminal outcome: the status and
-// result are set under sm.mu exactly as runTaskImpl does, but the done channel
-// is deliberately left open so a test can control when (whether) waiters wake.
 func markTerminal(t *testing.T, sm *SubagentManager, id, status, summary, result string) {
 	t.Helper()
 	sm.mu.Lock()
@@ -116,8 +93,6 @@ func markTerminal(t *testing.T, sm *SubagentManager, id, status, summary, result
 	}
 }
 
-// TestClaimResultForInjection_FirstWins proves the claim is winner-takes-all:
-// with two goroutines racing, exactly one gets true.
 func TestClaimResultForInjection_FirstWins(t *testing.T) {
 	sm := newClaimTestManager(t)
 	addClaimTestTask(t, sm, "subagent-1", SubagentStatusCompleted)
@@ -143,8 +118,6 @@ func TestClaimResultForInjection_FirstWins(t *testing.T) {
 	}
 }
 
-// TestClaimResultForInjection_BlockedByWaiter proves the injector yields to a
-// registered wait_for_subagent waiter, and reclaims the chance once it leaves.
 func TestClaimResultForInjection_BlockedByWaiter(t *testing.T) {
 	sm := newClaimTestManager(t)
 	addClaimTestTask(t, sm, "subagent-1", SubagentStatusCompleted)
@@ -160,8 +133,6 @@ func TestClaimResultForInjection_BlockedByWaiter(t *testing.T) {
 	}
 }
 
-// TestClaimResultForInjection_UnknownTask pins the unguarded-injection guard:
-// with no task there is no dedup, so the injector must not claim.
 func TestClaimResultForInjection_UnknownTask(t *testing.T) {
 	sm := newClaimTestManager(t)
 	if sm.ClaimResultForInjection("does-not-exist") {
@@ -169,9 +140,6 @@ func TestClaimResultForInjection_UnknownTask(t *testing.T) {
 	}
 }
 
-// TestClaimResult_Idempotent proves both claim entry points are idempotent and
-// report their outcome distinctly: ClaimResult says "already claimed", while
-// ClaimResultForInjection says "I won".
 func TestClaimResult_Idempotent(t *testing.T) {
 	sm := newClaimTestManager(t)
 	addClaimTestTask(t, sm, "subagent-1", SubagentStatusCompleted)
@@ -192,9 +160,6 @@ func TestClaimResult_Idempotent(t *testing.T) {
 	}
 }
 
-// TestSealResult_IgnoresWaiters pins the /stop path: a registered waiter must
-// not be able to block the seal, or a cancelled task could still resume the
-// parent with a "cancelled" turn.
 func TestSealResult_IgnoresWaiters(t *testing.T) {
 	sm := newClaimTestManager(t)
 	task := addClaimTestTask(t, sm, "subagent-1", SubagentStatusCancelled)
@@ -210,8 +175,6 @@ func TestSealResult_IgnoresWaiters(t *testing.T) {
 	}
 }
 
-// TestContinueTask_ResetsClaimAndWaiters covers R9, the easiest thing to forget:
-// a resumed task must be injectable again, with no stale waiter count.
 func TestContinueTask_ResetsClaimAndWaiters(t *testing.T) {
 	provider := &scriptedSubagentProvider{responses: []string{
 		"STATUS: completed\nSUMMARY: Resumed\nDETAILS:\nResumed and finished.",
@@ -236,14 +199,11 @@ func TestContinueTask_ResetsClaimAndWaiters(t *testing.T) {
 	waitForSubagentDone(t, task)
 }
 
-// TestReleaseResultWaiterAndClaim_ClaimsTerminalOnLastWaiter covers the release
-// primitive directly: the last waiter out claims a terminal, unclaimed result.
 func TestReleaseResultWaiterAndClaim_ClaimsTerminalOnLastWaiter(t *testing.T) {
 	sm := newClaimTestManager(t)
 	addClaimTestTask(t, sm, "subagent-1", SubagentStatusRunning)
 	sm.AddResultWaiter("subagent-1")
 
-	// Still running: nothing to hand back, and the registration is dropped.
 	if task := sm.ReleaseResultWaiterAndClaim("subagent-1"); task != nil {
 		t.Fatalf("ReleaseResultWaiterAndClaim on a running task = %+v, want nil", task)
 	}
@@ -251,7 +211,6 @@ func TestReleaseResultWaiterAndClaim_ClaimsTerminalOnLastWaiter(t *testing.T) {
 		t.Fatalf("resultWaiters = %d after release, want 0", got)
 	}
 
-	// The task turns terminal after the release: a later injector claims it.
 	markTerminal(t, sm, "subagent-1", SubagentStatusCompleted, "Done", "the answer")
 
 	sm.AddResultWaiter("subagent-1")
@@ -270,9 +229,6 @@ func TestReleaseResultWaiterAndClaim_ClaimsTerminalOnLastWaiter(t *testing.T) {
 	}
 }
 
-// TestReleaseResultWaiterAndClaim_KeepsRegistrationUntilLastWaiter proves the
-// clamp/last-waiter rule: an inner waiter leaving must not open the injection
-// window while another waiter is still registered.
 func TestReleaseResultWaiterAndClaim_KeepsRegistrationUntilLastWaiter(t *testing.T) {
 	sm := newClaimTestManager(t)
 	addClaimTestTask(t, sm, "subagent-1", SubagentStatusCompleted)
@@ -290,7 +246,6 @@ func TestReleaseResultWaiterAndClaim_KeepsRegistrationUntilLastWaiter(t *testing
 	if task := sm.ReleaseResultWaiterAndClaim("subagent-1"); task == nil {
 		t.Fatal("last release did not claim the terminal result")
 	}
-	// A spurious extra release must not go negative nor re-claim.
 	if task := sm.ReleaseResultWaiterAndClaim("subagent-1"); task != nil {
 		t.Fatal("extra release re-handed the result, want nil")
 	}
@@ -299,13 +254,6 @@ func TestReleaseResultWaiterAndClaim_KeepsRegistrationUntilLastWaiter(t *testing
 	}
 }
 
-// ============================================================================
-// wait_for_subagent × the claim
-// ============================================================================
-
-// gatedSubagentProvider blocks inside Chat until release is closed, so a test
-// can hold a real subagent in the running state while it inspects the waiter
-// bookkeeping.
 type gatedSubagentProvider struct {
 	release chan struct{}
 	once    sync.Once
@@ -324,10 +272,6 @@ func (p *gatedSubagentProvider) unblock() {
 	p.once.Do(func() { close(p.release) })
 }
 
-// TestWaitForSubagent_RegistersWaiterBeforeBlocking is the C12 guard: the
-// waiter registration must be visible BEFORE the wait blocks, so the injector
-// sees "the parent is about to read this in-turn" instead of racing the
-// completion callback.
 func TestWaitForSubagent_RegistersWaiterBeforeBlocking(t *testing.T) {
 	provider := &gatedSubagentProvider{release: make(chan struct{})}
 	t.Cleanup(provider.unblock)
@@ -377,9 +321,6 @@ func TestWaitForSubagent_RegistersWaiterBeforeBlocking(t *testing.T) {
 	}
 }
 
-// TestWaitForSubagent_TimeoutReleasesWaiterWithoutClaiming proves nothing is
-// lost when a wait gives up on a STILL-RUNNING task: the registration is
-// dropped without claiming, so a later completion is injectable.
 func TestWaitForSubagent_TimeoutReleasesWaiterWithoutClaiming(t *testing.T) {
 	sm := newClaimTestManager(t)
 	addClaimTestTask(t, sm, "subagent-1", SubagentStatusRunning)
@@ -404,11 +345,6 @@ func TestWaitForSubagent_TimeoutReleasesWaiterWithoutClaiming(t *testing.T) {
 	}
 }
 
-// TestWaitForSubagent_TimeoutRaceWithCompletion_ClaimOnRelease is the AM1
-// regression test for the loss window: the injector refuses to publish while a
-// waiter is registered, so a waiter that times out on a task that became
-// terminal in the meantime must claim the result on its way out and return it
-// as a SUCCESS. The model asked a direct question and must get the answer.
 func TestWaitForSubagent_TimeoutRaceWithCompletion_ClaimOnRelease(t *testing.T) {
 	sm := newClaimTestManager(t)
 	addClaimTestTask(t, sm, "subagent-1", SubagentStatusRunning)
@@ -429,11 +365,6 @@ func TestWaitForSubagent_TimeoutRaceWithCompletion_ClaimOnRelease(t *testing.T) 
 		t.Fatalf("resultWaiters never reached 1 (got %d)", resultWaitersOf(t, sm, "subagent-1"))
 	}
 
-	// The task completes while the waiter is registered and before its timer
-	// fires — exactly the window in which the injector gives up (a waiter is
-	// registered) and the waiter used to give up too (it only checked once).
-	// The done channel is intentionally NOT closed: the release path must be
-	// the one that notices.
 	markTerminal(t, sm, "subagent-1", SubagentStatusCompleted, "Done", "the answer that raced the timeout")
 
 	var result *ToolResult
@@ -463,9 +394,6 @@ func TestWaitForSubagent_TimeoutRaceWithCompletion_ClaimOnRelease(t *testing.T) 
 	}
 }
 
-// TestWaitForSubagent_ImmediateTerminal_ClaimsOnce pins the fast path: a task
-// that is already terminal is claimed (so the injector will not also publish
-// it) but still answered to the model.
 func TestWaitForSubagent_ImmediateTerminal_ClaimsOnce(t *testing.T) {
 	sm := newClaimTestManager(t)
 	addClaimTestTask(t, sm, "subagent-1", SubagentStatusCompleted)
@@ -488,11 +416,6 @@ func TestWaitForSubagent_ImmediateTerminal_ClaimsOnce(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// One callback per task run (C10)
-// ============================================================================
-
-// recordingCallback collects the payloads delivered to the async callback.
 type recordingCallback struct {
 	mu      sync.Mutex
 	results []*ToolResult
@@ -510,9 +433,6 @@ func (r *recordingCallback) snapshot() []*ToolResult {
 	return append([]*ToolResult(nil), r.results...)
 }
 
-// newCallbackTestTask mirrors what SpawnWithOptions builds: the retry policy
-// lives on the task, and runTask is invoked directly so the test can observe
-// the callback without going through the manager's goroutine plumbing.
 func newCallbackTestTask(id string, maxRetries int) *SubagentTask {
 	return &SubagentTask{
 		ID:               id,
@@ -526,16 +446,10 @@ func newCallbackTestTask(id string, maxRetries int) *SubagentTask {
 	}
 }
 
-// TestRunTask_CallbackFiresOnlyForFinalAttempt is the C10 guard: a transient
-// failure that is about to be retried must NOT be delivered, or the parent
-// would resume on "failed [rate_limit]" and the claim would suppress the
-// successful retry.
 func TestRunTask_CallbackFiresOnlyForFinalAttempt(t *testing.T) {
 	withNoRetrySleep(t)
 
 	provider := &flakySubagentProvider{
-		// Burn the inner per-call retry budget so the OUTER runTask retry is
-		// what recovers the task.
 		failAt:  DefaultRetryConfig().MaxRetries + 1,
 		failErr: transportErr(),
 		final:   "STATUS: completed\nSUMMARY: Done\nDETAILS:\nCompleted after retry",
@@ -559,8 +473,6 @@ func TestRunTask_CallbackFiresOnlyForFinalAttempt(t *testing.T) {
 	}
 }
 
-// TestRunTask_CallbackFiresOnceOnTerminalFailure pins the non-retried path: a
-// terminal failure is the task's outcome and must be delivered exactly once.
 func TestRunTask_CallbackFiresOnceOnTerminalFailure(t *testing.T) {
 	withNoRetrySleep(t)
 
@@ -592,8 +504,6 @@ func TestRunTask_CallbackFiresOnceOnTerminalFailure(t *testing.T) {
 	}
 }
 
-// TestRunTask_CallbackFiresOnceOnExhaustedRetries pins the retry-exhaustion
-// path: only the last attempt's failure may be delivered.
 func TestRunTask_CallbackFiresOnceOnExhaustedRetries(t *testing.T) {
 	withNoRetrySleep(t)
 

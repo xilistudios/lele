@@ -9,7 +9,6 @@ import (
 	"runtime"
 )
 
-// I2CTool provides I2C bus interaction for reading sensors and controlling peripherals.
 type I2CTool struct{}
 
 func NewI2CTool() *I2CTool {
@@ -87,7 +86,6 @@ func (t *I2CTool) Execute(ctx context.Context, args map[string]interface{}) *Too
 	}
 }
 
-// detect lists available I2C buses by globbing /dev/i2c-*
 func (t *I2CTool) detect() *ToolResult {
 	matches, err := filepath.Glob("/dev/i2c-*")
 	if err != nil {
@@ -115,13 +113,11 @@ func (t *I2CTool) detect() *ToolResult {
 	return SilentResult(fmt.Sprintf("Found %d I2C bus(es):\n%s", len(buses), string(result)))
 }
 
-// isValidBusID checks that a bus identifier is a simple number (prevents path injection)
 func isValidBusID(id string) bool {
 	matched, _ := regexp.MatchString(`^\d+$`, id)
 	return matched
 }
 
-// parseI2CAddress extracts and validates an I2C address from args
 func parseI2CAddress(args map[string]interface{}) (int, *ToolResult) {
 	addrFloat, ok := args["address"].(float64)
 	if !ok {
@@ -134,7 +130,6 @@ func parseI2CAddress(args map[string]interface{}) (int, *ToolResult) {
 	return addr, nil
 }
 
-// parseI2CBus extracts and validates an I2C bus from args
 func parseI2CBus(args map[string]interface{}) (string, *ToolResult) {
 	bus, ok := args["bus"].(string)
 	if !ok || bus == "" {

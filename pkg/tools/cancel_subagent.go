@@ -6,10 +6,6 @@ import (
 	"strings"
 )
 
-// CancelSubagentTool cancels a running or pending subagent task by its ID.
-// This exposes the SubagentManager.StopTask method to the LLM so agents can
-// proactively cancel subagents that are stuck, no longer needed, or should be
-// restarted with different parameters.
 type CancelSubagentTool struct {
 	manager *SubagentManager
 }
@@ -49,13 +45,11 @@ func (t *CancelSubagentTool) Execute(ctx context.Context, args map[string]interf
 		return ErrorResult("Subagent manager not configured")
 	}
 
-	// Check if the task exists first for a better error message.
 	task, ok := t.manager.GetTask(taskID)
 	if !ok {
 		return ErrorResult(fmt.Sprintf("Subagent task not found: %s", taskID))
 	}
 
-	// If already terminal, inform the user instead of attempting to cancel.
 	if isSubagentTerminal(task.Status) {
 		return SilentResult(fmt.Sprintf(
 			"Subagent task %s is already in terminal status (%s) and cannot be cancelled.",
@@ -63,7 +57,6 @@ func (t *CancelSubagentTool) Execute(ctx context.Context, args map[string]interf
 		))
 	}
 
-	// Attempt to cancel.
 	if t.manager.StopTask(taskID) {
 		return SilentResult(fmt.Sprintf(
 			"Subagent task %s has been cancelled.",

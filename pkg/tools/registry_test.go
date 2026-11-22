@@ -106,6 +106,5 @@ func TestToolRegistry_Unregister(t *testing.T) {
 	if _, ok := r.Get("keep"); !ok {
 		t.Error("Unregister must not affect other tools")
 	}
-	// No-op for unknown names.
 	r.Unregister("does-not-exist")
 }

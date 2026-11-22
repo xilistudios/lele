@@ -119,7 +119,6 @@ func TestReadImageTool_Execute_SmallImageUnchanged(t *testing.T) {
 		t.Fatalf("small image payload was altered: in=%d bytes out=%d bytes", len(fileBytes), len(payload))
 	}
 
-	// Detail and part ordering must be untouched by the bound.
 	if len(msg.ContentParts) != 2 {
 		t.Fatalf("ContentParts len = %d, want 2", len(msg.ContentParts))
 	}

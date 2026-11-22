@@ -103,10 +103,8 @@ func TestWaitForSubagentTool_AlreadyCompleted(t *testing.T) {
 		t.Fatalf("Spawn failed: %v", err)
 	}
 
-	// Wait for subagent to complete.
 	<-resultCh
 
-	// Now wait_for_subagent should return immediately.
 	tool := NewWaitForSubagentTool(manager)
 	args := map[string]interface{}{"task_id": "subagent-1"}
 	waitResult := tool.Execute(context.Background(), args)
@@ -123,7 +121,6 @@ func TestWaitForSubagentTool_AlreadyCompleted(t *testing.T) {
 }
 
 func TestWaitForSubagentTool_WaitForCompletion(t *testing.T) {
-	// Use a provider that takes a moment to respond.
 	provider := &delayedSubagentProvider{delay: 200 * time.Millisecond}
 	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
 	resultCh := make(chan *ToolResult, 1)
@@ -134,7 +131,6 @@ func TestWaitForSubagentTool_WaitForCompletion(t *testing.T) {
 		t.Fatalf("Spawn failed: %v", err)
 	}
 
-	// Wait for subagent in a separate tool call.
 	tool := NewWaitForSubagentTool(manager)
 	args := map[string]interface{}{
 		"task_id":         "subagent-1",
@@ -149,15 +145,13 @@ func TestWaitForSubagentTool_WaitForCompletion(t *testing.T) {
 		t.Errorf("Expected 'completed' status, got: %s", waitResult.ForLLM)
 	}
 
-	// Also drain the callback channel.
 	<-resultCh
 }
 
 func TestWaitForSubagentTool_Timeout(t *testing.T) {
-	// Provider that never completes (long delay).
 	provider := &delayedSubagentProvider{delay: 10 * time.Second}
 	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
-	_ = manager // suppress unused warning
+	_ = manager
 	resultCh := make(chan *ToolResult, 1)
 
 	_, err := manager.Spawn(context.Background(), "Very slow task", "very-slow", "", "telegram", "chat-1",
@@ -169,7 +163,7 @@ func TestWaitForSubagentTool_Timeout(t *testing.T) {
 	tool := NewWaitForSubagentTool(manager)
 	args := map[string]interface{}{
 		"task_id":         "subagent-1",
-		"timeout_seconds": float64(1), // 1 second timeout
+		"timeout_seconds": float64(1),
 	}
 	start := time.Now()
 	waitResult := tool.Execute(context.Background(), args)
@@ -181,12 +175,10 @@ func TestWaitForSubagentTool_Timeout(t *testing.T) {
 	if !strings.Contains(waitResult.ForLLM, "Timed out") {
 		t.Errorf("Expected 'Timed out' message, got: %s", waitResult.ForLLM)
 	}
-	// Should timeout around 1 second, not 10.
 	if elapsed > 3*time.Second {
 		t.Errorf("Expected timeout around 1s, took %v", elapsed)
 	}
 
-	// Clean up: stop the subagent.
 	manager.StopTask("subagent-1")
 }
 
@@ -219,7 +211,6 @@ func TestWaitForSubagentTool_NeedsContext(t *testing.T) {
 	}
 }
 
-// delayedSubagentProvider is a test provider that sleeps before responding.
 type delayedSubagentProvider struct {
 	delay time.Duration
 	once  bool
@@ -281,8 +272,6 @@ func TestWaitForSubagent_AfterContinue_ReturnsFinalResult(t *testing.T) {
 		t.Fatalf("ContinueTask returned error: %v", err)
 	}
 
-	// wait_for_subagent must block until the resumed run completes and return
-	// the final result, NOT a stale "running" snapshot from the previous run.
 	tool := NewWaitForSubagentTool(manager)
 	waitResult := tool.Execute(context.Background(), map[string]interface{}{"task_id": task.ID})
 
@@ -299,6 +288,5 @@ func TestWaitForSubagent_AfterContinue_ReturnsFinalResult(t *testing.T) {
 		t.Errorf("Expected no stale 'running' status in result, got: %s", waitResult.ForLLM)
 	}
 
-	// Drain the resumed run's async callback.
 	<-resultCh
 }

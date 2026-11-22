@@ -20,14 +20,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// ---------------------------------------------------------------------------
-// T6: origin-side image payload bound (boundImagePayload / read_image wiring).
-// Another task appends unrelated tests below this marker.
-// ---------------------------------------------------------------------------
-
-// makeNoisyNRGBA builds a deterministic pseudo-random NRGBA image. Random
-// noise makes PNG/JPEG poorly compressible, which is what forces the budget
-// paths; with alpha set, every pixel gets a translucent random alpha.
 func makeNoisyNRGBA(t *testing.T, width, height int, alpha bool) *image.NRGBA {
 	t.Helper()
 
@@ -49,8 +41,6 @@ func makeNoisyNRGBA(t *testing.T, width, height int, alpha bool) *image.NRGBA {
 	return img
 }
 
-// makeNoisyJPEG builds a deterministic pseudo-random RGB JPEG. Random noise
-// makes the JPEG poorly compressible, which is what forces the budget path.
 func makeNoisyJPEG(t *testing.T, width, height, quality int) []byte {
 	t.Helper()
 
@@ -61,9 +51,6 @@ func makeNoisyJPEG(t *testing.T, width, height, quality int) []byte {
 	return buf.Bytes()
 }
 
-// makeNoisyPNG builds a deterministic pseudo-random RGB PNG (alpha=false) or
-// RGBA PNG (alpha=true). Noise makes it poorly compressible, which is what
-// puts a small fixture into the encoded-size bands the tests inject.
 func makeNoisyPNG(t *testing.T, width, height int, alpha bool) []byte {
 	t.Helper()
 
@@ -133,7 +120,6 @@ func TestBoundImagePayload_DownscalesAndHitsTarget(t *testing.T) {
 }
 
 func TestBoundImagePayload_NoUpscaleAndPassthrough(t *testing.T) {
-	// A tiny 32x32 PNG well under the encodedBytes budget and long-side target.
 	img := image.NewNRGBA(image.Rect(0, 0, 32, 32))
 	for i := 0; i < len(img.Pix); i += 4 {
 		img.Pix[i] = byte(i)
@@ -178,19 +164,13 @@ func TestBoundImagePayload_LowDetailSmallerTarget(t *testing.T) {
 }
 
 func TestBoundImagePayload_PngWithAlphaStaysPng(t *testing.T) {
-	// Injected limits drive the fixture through the encoder: 64x64 is over
-	// the injected 32 px target, so the fast path cannot take it, and the
-	// re-encoded 32x32 PNG (~256 bytes) fits under the 512-byte ceiling.
-	// Alpha must survive as PNG — never a JPEG fallback. (The old fixture
-	// was 64x64 with default limits, i.e. under the fast path, so it never
-	// reached the encoder at all — proven vacuous by mutation.)
 	limits := imageLimits{longSide: 32, longSideLow: 16, encodedBytes: 8, encodedCeiling: 512, decodePixels: 1_000_000}
 	img := image.NewNRGBA(image.Rect(0, 0, 64, 64))
 	for i := 0; i < len(img.Pix); i += 4 {
 		img.Pix[i] = byte(i)
 		img.Pix[i+1] = 200
 		img.Pix[i+2] = 40
-		img.Pix[i+3] = byte(i % 200) // some pixels translucent
+		img.Pix[i+3] = byte(i % 200)
 	}
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
@@ -214,7 +194,6 @@ func TestBoundImagePayload_PngWithAlphaStaysPng(t *testing.T) {
 	if _, format, err := image.DecodeConfig(bytes.NewReader(data)); err != nil || format != "png" {
 		t.Fatalf("output does not decode as PNG: format=%q err=%v", format, err)
 	}
-	// Transparency must survive the re-encode (no white flatten).
 	out, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("decode output: %v", err)
@@ -223,23 +202,16 @@ func TestBoundImagePayload_PngWithAlphaStaysPng(t *testing.T) {
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
 			if _, _, _, a := out.At(x, y).RGBA(); a < 0xffff {
-				return // translucent pixel found: alpha preserved
+				return
 			}
 		}
 	}
 	t.Fatal("alpha channel was flattened away")
 }
 
-// TestBoundImagePayload_InBandPngPassesThroughByteIdentical pins the fix for
-// review H1.1: a PNG between encodedBytes and encodedCeiling whose pixels are
-// within the target already satisfies every stated bound, so it must not be
-// decoded or re-encoded at all — byte-identical output, resized=false. Before
-// the fix the fast path was gated on encodedBytes, so this image was decoded
-// (up to 30 MP) and re-encoded for byte-identical output with resized=true,
-// which made read_image claim "resized to ..." when nothing happened.
 func TestBoundImagePayload_InBandPngPassesThroughByteIdentical(t *testing.T) {
 	limits := imageLimits{longSide: 1568, longSideLow: 768, encodedBytes: 64 << 10, encodedCeiling: 512 << 10, decodePixels: 30_000_000}
-	src := makeNoisyPNG(t, 300, 300, false) // ~270 KB: inside the injected band
+	src := makeNoisyPNG(t, 300, 300, false)
 	if len(src) <= limits.encodedBytes || len(src) > limits.encodedCeiling {
 		t.Fatalf("fixture precondition: len(src)=%d not in (%d, %d]", len(src), limits.encodedBytes, limits.encodedCeiling)
 	}
@@ -262,14 +234,9 @@ func TestBoundImagePayload_InBandPngPassesThroughByteIdentical(t *testing.T) {
 	}
 }
 
-// TestBoundImagePayload_OverCeilingPngKeepsTargetDimensionsAsJpeg pins the
-// fix for review H1.2 (order): a PNG over the ceiling WITHOUT alpha falls
-// back to a full-size JPEG before any canvas shrink, so the pixel count the
-// vision model sees is the target, not 3/4 of it per ladder pass. Before the
-// fix the canvas ladder ran first and this input came back at 144x144 PNG.
 func TestBoundImagePayload_OverCeilingPngKeepsTargetDimensionsAsJpeg(t *testing.T) {
 	limits := imageLimits{longSide: 256, longSideLow: 128, encodedBytes: 1024, encodedCeiling: 64 << 10, decodePixels: 1_000_000}
-	src := makeNoisyPNG(t, 256, 256, false) // ~193 KB PNG vs ~43 KB full-size JPEG q80
+	src := makeNoisyPNG(t, 256, 256, false)
 	if len(src) <= limits.encodedCeiling {
 		t.Fatalf("fixture precondition: len(src)=%d must exceed the ceiling %d", len(src), limits.encodedCeiling)
 	}
@@ -295,24 +262,9 @@ func TestBoundImagePayload_OverCeilingPngKeepsTargetDimensionsAsJpeg(t *testing.
 	}
 }
 
-// TestBoundImagePayload_OverCeilingPngWithAlphaFlattensToJpegAtTarget pins
-// the fix for review H1.2 for alpha sources: the transparent PNG cannot fit,
-// so it is flattened onto white and re-encoded as a full-size JPEG — same
-// target dimensions, no canvas shrink. Transparency is traded away only when
-// the PNG itself did not fit. The white corner (review N5) pins the trade
-// itself, not just the prose: flattenOnWhite composites every translucent
-// pixel with the exact alpha-over-white formula (c*a + 255*(255-a) + 127)/255,
-// which yields exactly 255 on every channel when a == 0 and forces a = 255 —
-// a full opaque white target pixel. jpeg.Encode then reads that pixel through
-// the premultiplied color.NRGBA.RGBA() path, so white survives encoding; had
-// the flatten been skipped (reviewer mutation T3), a == 0 would premultiply
-// R = G = B = 0 and this corner would come back near-black instead.
 func TestBoundImagePayload_OverCeilingPngWithAlphaFlattensToJpegAtTarget(t *testing.T) {
 	limits := imageLimits{longSide: 256, longSideLow: 128, encodedBytes: 1024, encodedCeiling: 64 << 10, decodePixels: 1_000_000}
-	img := makeNoisyNRGBA(t, 256, 256, true) // ~257 KB with alpha vs ~39 KB flattened JPEG q80
-	// Deterministically force pixel (0,0) fully transparent: makeNoisyNRGBA's
-	// random alpha (rng.Intn(256)) may or may not already yield 0 here, so set
-	// it explicitly — the white-corner assertion below depends on it.
+	img := makeNoisyNRGBA(t, 256, 256, true)
 	img.Pix[img.PixOffset(0, 0)+3] = 0
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
@@ -343,11 +295,6 @@ func TestBoundImagePayload_OverCeilingPngWithAlphaFlattensToJpegAtTarget(t *test
 		t.Fatalf("output does not decode as JPEG: format=%q err=%v", format, err)
 	}
 
-	// N5: the "flattened onto white" claim must be an assertion, not prose.
-	// Lossy JPEG coding will not reproduce the exact 255 (DCT rounding and
-	// 4:2:0 chroma subsampling), so allow a tolerance: every channel >= 200
-	// still proves the transparent corner was composited onto white rather
-	// than premultiplied to black.
 	out, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("decode output jpeg: %v", err)
@@ -360,14 +307,9 @@ func TestBoundImagePayload_OverCeilingPngWithAlphaFlattensToJpegAtTarget(t *test
 	}
 }
 
-// TestBoundImagePayload_FullSizeJpegOverCeilingShrinksCanvas pins the last
-// resort of review H1.2: when not even a full-size JPEG fits the ceiling
-// (tiny injected limits), the 3/4-per-pass canvas ladder still runs and its
-// final flatten-to-JPEG step keeps the payload under the ceiling at reduced
-// dimensions (72x72 here, below the 128 px target).
 func TestBoundImagePayload_FullSizeJpegOverCeilingShrinksCanvas(t *testing.T) {
 	limits := imageLimits{longSide: 128, longSideLow: 64, encodedBytes: 512, encodedCeiling: 6_000, decodePixels: 1_000_000}
-	src := makeNoisyPNG(t, 128, 128, false) // ~48 KB; even the q50 full-size JPEG (~7.1 KB) exceeds the ceiling
+	src := makeNoisyPNG(t, 128, 128, false)
 
 	data, outMIME, w, h, resized, err := boundImagePayload(src, "image/png", "auto", limits)
 	if err != nil {
@@ -392,7 +334,6 @@ func TestBoundImagePayload_FullSizeJpegOverCeilingShrinksCanvas(t *testing.T) {
 
 func TestBoundImagePayload_UndecodableWithinCeilingPassesThrough(t *testing.T) {
 	limits := imageLimits{longSide: 64, longSideLow: 32, encodedBytes: 8, encodedCeiling: 1024, decodePixels: 1_000_000}
-	// Fake webp: stdlib cannot decode it, but payload is under the ceiling.
 	src := append([]byte("RIFF"), 0x10, 0x00, 0x00, 0x00)
 	src = append(src, []byte("WEBPVP8 ")...)
 	src = append(src, make([]byte, 16)...)
@@ -414,7 +355,6 @@ func TestBoundImagePayload_UndecodableWithinCeilingPassesThrough(t *testing.T) {
 
 func TestBoundImagePayload_UndecodableOverCeilingErrors(t *testing.T) {
 	limits := imageLimits{longSide: 64, longSideLow: 32, encodedBytes: 8, encodedCeiling: 32, decodePixels: 1_000_000}
-	// Fake webp larger than the ceiling -> no decoder and too big to pass through.
 	src := append([]byte("RIFF"), 0x40, 0x00, 0x00, 0x00)
 	src = append(src, []byte("WEBPVP8 ")...)
 	src = append(src, make([]byte, 128)...)
@@ -429,8 +369,6 @@ func TestBoundImagePayload_UndecodableOverCeilingErrors(t *testing.T) {
 }
 
 func TestBoundImagePayload_PixelBombRejected(t *testing.T) {
-	// Hand-craft a PNG whose IHDR declares 20000x20000 (400 MP) but the file is
-	// tiny. Patch a real small PNG's IHDR width/height and fix the CRC.
 	small := image.NewNRGBA(image.Rect(0, 0, 2, 2))
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, small); err != nil {
@@ -438,14 +376,12 @@ func TestBoundImagePayload_PixelBombRejected(t *testing.T) {
 	}
 	src := buf.Bytes()
 
-	const widthOff = 16 // 8 sig + 4 len + 4 "IHDR"
+	const widthOff = 16
 	binary.BigEndian.PutUint32(src[widthOff:], 20000)
 	binary.BigEndian.PutUint32(src[widthOff+4:], 20000)
-	// Recompute IHDR CRC over bytes [12, 29) and store at [29, 33).
 	crc := crc32.ChecksumIEEE(src[12:29])
 	binary.BigEndian.PutUint32(src[29:], crc)
 
-	// Must error (not panic / not OOM) before decoding any pixels.
 	_, _, _, _, _, err := boundImagePayload(src, "image/png", "auto", defaultImageLimits)
 	if err == nil {
 		t.Fatal("expected pixel-bomb rejection")
@@ -455,15 +391,6 @@ func TestBoundImagePayload_PixelBombRejected(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// T4: request image/byte budget (EnforceImageBudget / RequestOverBudget).
-// ---------------------------------------------------------------------------
-
-// makeHeavyImageMessages builds count user messages, each carrying a text part
-// and one data: image part whose URL is payloadBytes long (filler from the
-// base64 alphabet — no real image is allocated). Content is left empty so
-// eviction replaces the heavy part with the text placeholder instead of
-// deleting it.
 func makeHeavyImageMessages(count, payloadBytes int) []providers.Message {
 	payload := strings.Repeat("A", payloadBytes)
 	msgs := make([]providers.Message, 0, count)
@@ -480,12 +407,6 @@ func makeHeavyImageMessages(count, payloadBytes int) []providers.Message {
 }
 
 func TestEnforceImageBudget_DropsOldestFirst(t *testing.T) {
-	// Just under 2 MiB per part: 4 survivors plus their JSON overhead stay
-	// under the 8 MiB budget, so the count cap alone decides and the four
-	// newest parts must survive byte-identical. Exactly 2 MiB (2,097,152)
-	// per part would make 4 survivors exceed the budget by themselves and
-	// trigger the byte-driven pass (covered by
-	// TestEnforceImageBudget_ByteDrivenBeyondCount).
 	const partBytes = 2_000_000
 	in := makeHeavyImageMessages(6, partBytes)
 
@@ -498,18 +419,15 @@ func TestEnforceImageBudget_DropsOldestFirst(t *testing.T) {
 	if live != 4 {
 		t.Fatalf("live heavy parts = %d, want 4 (count cap only)", live)
 	}
-	// The eviction count must equal the number of replaced parts.
 	if placeholders := 6 - live; evicted != placeholders {
 		t.Fatalf("evicted = %d, want %d (the number of replaced parts)", evicted, placeholders)
 	}
-	// The four newest parts are byte-identical to the input ones.
 	for i := 2; i < 6; i++ {
 		got, want := out[i].ContentParts[1].ImageURL, in[i].ContentParts[1].ImageURL
 		if got == nil || want == nil || got.URL != want.URL {
 			t.Fatalf("message %d: newest image part must survive byte-identical", i)
 		}
 	}
-	// The two oldest carry the text placeholder and no heavy part.
 	for i := 0; i < 2; i++ {
 		if out[i].ContentParts[1].ImageURL != nil {
 			t.Fatalf("message %d: expected the image part to be replaced", i)
@@ -524,10 +442,7 @@ func TestEnforceImageBudget_DropsOldestFirst(t *testing.T) {
 }
 
 func TestEnforceImageBudget_ByteDrivenBeyondCount(t *testing.T) {
-	// 4 parts x 2.5 MiB ~ 10 MiB: the count cap alone (MaxLiveImages=4) would
-	// keep them all, but the byte estimate busts the 8 MiB budget, so the
-	// byte-driven pass must evict more (oldest first).
-	const partBytes = 2_621_440 // 2.5 MiB
+	const partBytes = 2_621_440
 	in := makeHeavyImageMessages(4, partBytes)
 
 	out, evicted := EnforceImageBudget(in)
@@ -545,7 +460,6 @@ func TestEnforceImageBudget_ByteDrivenBeyondCount(t *testing.T) {
 	if est := providers.EstimateRequestBytes(out); est > config.DefaultMaxRequestBytes {
 		t.Fatalf("estimate %d exceeds budget %d", est, config.DefaultMaxRequestBytes)
 	}
-	// The newest part survives; the oldest was replaced.
 	if out[3].ContentParts[1].ImageURL == nil {
 		t.Fatal("newest image part should survive")
 	}
@@ -576,7 +490,7 @@ func TestEnforceImageBudget_NoImagesIsNoop(t *testing.T) {
 
 func TestRequestOverBudget(t *testing.T) {
 	over := []providers.Message{
-		{Role: "user", Content: strings.Repeat("X", 9<<20)}, // 9 MiB text body
+		{Role: "user", Content: strings.Repeat("X", 9<<20)},
 	}
 	if !RequestOverBudget(over) {
 		t.Fatal("a message above config.DefaultMaxRequestBytes must be reported over budget")

@@ -6,9 +6,6 @@ import (
 	"time"
 )
 
-// SleepTool allows the agent to wait for a specified number of seconds.
-// It respects context cancellation so that /stop or session cancellation
-// can interrupt the sleep early.
 type SleepTool struct{}
 
 func NewSleepTool() *SleepTool {
@@ -41,7 +38,6 @@ func (t *SleepTool) Parameters() map[string]interface{} {
 func (t *SleepTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
 	seconds, ok := args["seconds"].(float64)
 	if !ok {
-		// Some providers may send integers as float64; if the key is missing entirely, error.
 		return ErrorResult("seconds is required")
 	}
 

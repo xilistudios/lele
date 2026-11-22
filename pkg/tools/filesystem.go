@@ -9,7 +9,6 @@ import (
 	"strings"
 )
 
-// validatePath ensures the given path is within the workspace if restrict is true.
 func validatePath(path, workspace string, restrict bool) (string, error) {
 	if workspace == "" {
 		return path, nil
@@ -128,13 +127,11 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]interface{})
 		return ErrorResult(err.Error())
 	}
 
-	// Check if file exists and get info
 	fileInfo, err := os.Stat(resolvedPath)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to read file: %v", err))
 	}
 
-	// Get explicit line range from args
 	var fromLine, toLine int
 	if fromVal, ok := args["from"].(float64); ok {
 		fromLine = int(fromVal)
@@ -143,7 +140,6 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]interface{})
 		toLine = int(toVal)
 	}
 
-	// If no explicit range and file is large, auto-limit
 	autoLimited := false
 	if fromLine == 0 && toLine == 0 {
 		lineCount := estimateLineCount(resolvedPath, fileInfo.Size())
@@ -159,7 +155,6 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]interface{})
 		return ErrorResult(fmt.Sprintf("failed to read file: %v", err))
 	}
 
-	// Build result with line range indicator
 	var result strings.Builder
 	if autoLimited {
 		result.WriteString(fmt.Sprintf("(showing lines %d-%d of %d - file is large, use from/to to read specific lines)\n\n", actualFrom, actualTo, estimateLineCount(resolvedPath, fileInfo.Size())))
@@ -171,8 +166,6 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]interface{})
 	return NewToolResult(result.String())
 }
 
-// estimateLineCount quickly estimates the number of lines in a file
-// by sampling the first part of the file
 func estimateLineCount(path string, fileSize int64) int {
 	file, err := os.Open(path)
 	if err != nil {
@@ -180,7 +173,6 @@ func estimateLineCount(path string, fileSize int64) int {
 	}
 	defer file.Close()
 
-	// Sample first 64KB to estimate average line length
 	const sampleSize = 64 * 1024
 	buf := make([]byte, sampleSize)
 	n, err := file.Read(buf)
@@ -189,7 +181,6 @@ func estimateLineCount(path string, fileSize int64) int {
 	}
 	buf = buf[:n]
 
-	// Count newlines in sample
 	newlines := 0
 	for _, b := range buf {
 		if b == '\n' {
@@ -201,13 +192,10 @@ func estimateLineCount(path string, fileSize int64) int {
 		return 1
 	}
 
-	// Estimate total lines based on sample
 	avgLineLength := float64(len(buf)) / float64(newlines)
 	return int(float64(fileSize) / avgLineLength)
 }
 
-// readFileChunk reads a specific range of lines from a file
-// Returns the content and the actual line range read
 func readFileChunk(path string, fromLine, toLine int) (string, int, int, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -215,7 +203,6 @@ func readFileChunk(path string, fromLine, toLine int) (string, int, int, error) 
 	}
 	defer file.Close()
 
-	// If no range specified, read entire file
 	if fromLine == 0 && toLine == 0 {
 		content, err := os.ReadFile(path)
 		if err != nil {
@@ -225,7 +212,6 @@ func readFileChunk(path string, fromLine, toLine int) (string, int, int, error) 
 		return string(content), 1, len(lines), nil
 	}
 
-	// Normalize line numbers (1-indexed)
 	if fromLine < 1 {
 		fromLine = 1
 	}
@@ -239,12 +225,10 @@ func readFileChunk(path string, fromLine, toLine int) (string, int, int, error) 
 	for scanner.Scan() {
 		lineNum++
 
-		// Skip lines before fromLine
 		if lineNum < fromLine {
 			continue
 		}
 
-		// Stop if we've reached toLine
 		if toLine > 0 && lineNum > toLine {
 			break
 		}
@@ -261,7 +245,6 @@ func readFileChunk(path string, fromLine, toLine int) (string, int, int, error) 
 		return "", 0, 0, err
 	}
 
-	// Handle case where fromLine is beyond file length
 	if lineNum < fromLine {
 		actualFrom = lineNum
 		actualTo = lineNum

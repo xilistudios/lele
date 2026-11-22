@@ -28,16 +28,12 @@ func TestNormalizeWhitelistKey(t *testing.T) {
 	}
 }
 
-// TestExecWhitelist_BypassesDenyGuard is the core promise of the "always allow"
-// approval option: a whitelisted command must not be blocked by deny patterns,
-// while non-whitelisted commands still are.
 func TestExecWhitelist_BypassesDenyGuard(t *testing.T) {
 	tool := newGuardedExecTool(t, []string{"rm -rf /tmp/whitelisted"})
 
 	if msg := tool.guardCommand("rm -rf /tmp/whitelisted", ""); msg != "" {
 		t.Errorf("whitelisted command was blocked: %q", msg)
 	}
-	// Normalization must apply on both sides of the comparison.
 	if msg := tool.guardCommand("  RM   -RF /tmp/whitelisted ", ""); msg != "" {
 		t.Errorf("whitelisted command with different case/spacing was blocked: %q", msg)
 	}
@@ -68,8 +64,6 @@ func TestExecWhitelist_SetAndAdd(t *testing.T) {
 	}
 }
 
-// TestNewExecTool_InitializesWhitelistFromConfig guards the persistence path:
-// entries saved to config.json by the TUI must be active on the next startup.
 func TestNewExecTool_InitializesWhitelistFromConfig(t *testing.T) {
 	tool := newGuardedExecTool(t, []string{"rm -rf /tmp/from-config"})
 	if !tool.Whitelisted("rm -rf /tmp/from-config") {

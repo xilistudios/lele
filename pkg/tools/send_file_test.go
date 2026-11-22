@@ -8,13 +8,9 @@ import (
 	"testing"
 )
 
-// TestSendFileTool_AbsolutePathBlockedWhenRestricted verifies that absolute
-// paths outside the workspace (e.g. /etc/passwd) are rejected when restrict
-// is enabled, preventing arbitrary file exfiltration.
 func TestSendFileTool_AbsolutePathBlockedWhenRestricted(t *testing.T) {
 	workspace := t.TempDir()
 
-	// Create a readable file outside the workspace.
 	outside := t.TempDir()
 	outsideFile := filepath.Join(outside, "secret.txt")
 	if err := os.WriteFile(outsideFile, []byte("secret"), 0644); err != nil {
@@ -41,8 +37,6 @@ func TestSendFileTool_AbsolutePathBlockedWhenRestricted(t *testing.T) {
 	}
 }
 
-// TestSendFileTool_EtcPasswdBlockedWhenRestricted verifies the canonical
-// exfiltration target /etc/passwd is rejected.
 func TestSendFileTool_EtcPasswdBlockedWhenRestricted(t *testing.T) {
 	tool := NewSendFileTool()
 	tool.SetWorkspaceRestrictions(t.TempDir(), true)
@@ -61,8 +55,6 @@ func TestSendFileTool_EtcPasswdBlockedWhenRestricted(t *testing.T) {
 	}
 }
 
-// TestSendFileTool_PathInsideWorkspaceAllowed verifies legitimate workspace
-// files can still be sent when restrict=true.
 func TestSendFileTool_PathInsideWorkspaceAllowed(t *testing.T) {
 	workspace := t.TempDir()
 	okFile := filepath.Join(workspace, "report.txt")
@@ -94,8 +86,6 @@ func TestSendFileTool_PathInsideWorkspaceAllowed(t *testing.T) {
 	}
 }
 
-// TestSendFileTool_NoRestrictionAllowsOutsidePaths verifies behavior is
-// unchanged when no workspace restriction is configured (backwards compat).
 func TestSendFileTool_NoRestrictionAllowsOutsidePaths(t *testing.T) {
 	outside := t.TempDir()
 	outsideFile := filepath.Join(outside, "file.txt")
@@ -103,7 +93,7 @@ func TestSendFileTool_NoRestrictionAllowsOutsidePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tool := NewSendFileTool() // no SetWorkspaceRestrictions -> restrict=false
+	tool := NewSendFileTool()
 	tool.SetSendCallback(func(channel, chatID string, payload SendFilePayload) error {
 		return nil
 	})
@@ -119,8 +109,6 @@ func TestSendFileTool_NoRestrictionAllowsOutsidePaths(t *testing.T) {
 	}
 }
 
-// TestSendFileTool_RelativePathTraversalBlocked verifies ../ traversal inside
-// file_paths is blocked when restrict=true.
 func TestSendFileTool_RelativePathTraversalBlocked(t *testing.T) {
 	workspace := t.TempDir()
 

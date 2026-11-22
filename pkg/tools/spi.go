@@ -9,7 +9,6 @@ import (
 	"runtime"
 )
 
-// SPITool provides SPI bus interaction for high-speed peripheral communication.
 type SPITool struct{}
 
 func NewSPITool() *SPITool {
@@ -89,7 +88,6 @@ func (t *SPITool) Execute(ctx context.Context, args map[string]interface{}) *Too
 	}
 }
 
-// list finds available SPI devices by globbing /dev/spidev*
 func (t *SPITool) list() *ToolResult {
 	matches, err := filepath.Glob("/dev/spidev*")
 	if err != nil {
@@ -117,7 +115,6 @@ func (t *SPITool) list() *ToolResult {
 	return SilentResult(fmt.Sprintf("Found %d SPI device(s):\n%s", len(devices), string(result)))
 }
 
-// parseSPIArgs extracts and validates common SPI parameters
 func parseSPIArgs(args map[string]interface{}) (device string, speed uint32, mode uint8, bits uint8, errMsg string) {
 	dev, ok := args["device"].(string)
 	if !ok || dev == "" {
@@ -128,7 +125,7 @@ func parseSPIArgs(args map[string]interface{}) (device string, speed uint32, mod
 		return "", 0, 0, 0, "invalid device identifier: must be in format \"X.Y\" (e.g. \"2.0\")"
 	}
 
-	speed = 1000000 // default 1 MHz
+	speed = 1000000
 	if s, ok := args["speed"].(float64); ok {
 		if s < 1 || s > 125000000 {
 			return "", 0, 0, 0, "speed must be between 1 Hz and 125 MHz"

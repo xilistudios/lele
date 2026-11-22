@@ -1,9 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
 package tools
 
 import (
@@ -21,7 +15,6 @@ import (
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
-// VerboseCallback is called when verbose mode is enabled to notify about tool execution progress.
 type VerboseCallback func(iteration int, toolName string, args map[string]interface{}, result *ToolResult)
 
 type SessionRecorder interface {
@@ -29,87 +22,43 @@ type SessionRecorder interface {
 	Save(sessionKey string) error
 }
 
-// recordMessage persists msg to the subagent session when a recorder is wired.
 func recordMessage(config ToolLoopConfig, msg providers.Message) {
 	if config.SessionRecorder != nil && config.SessionKey != "" {
 		config.SessionRecorder.AddFullMessage(config.SessionKey, msg)
 	}
 }
 
-// SessionCompactor applies a loop-compaction result to the persisted session
-// of a subagent. It is implemented by *session.Manager (CompactSession) and
-// keeps the persisted summary/exclusion state in sync with the in-memory
-// compacted message list, so compaction survives restarts and the persisted
-// session does not grow unbounded. Optional: when nil, compaction still runs
-// in memory but is not persisted.
 type SessionCompactor interface {
 	CompactSession(key string, summary string, keepCount int, evict bool) error
 }
 
-// ToolLoopConfig configures the tool execution loop.
 type ToolLoopConfig struct {
-	Provider        providers.LLMProvider
-	Model           string
-	Tools           *ToolRegistry
-	MaxIterations   int
-	LLMOptions      map[string]any
-	VerboseCallback VerboseCallback
-	SessionRecorder SessionRecorder
-	SessionKey      string
-	Retry           *RetryConfig // Retry config for LLM calls. nil = no retry.
-	ContextWindow   int          // Max tokens for context. 0 = no compaction.
-	// CompactionThresholdPercent is the percentage of ContextWindow at which
-	// intra-loop compaction triggers. 0 (or out of range) = use the default
-	// (pkg/config.DefaultCompactionThresholdPercent).
+	Provider                   providers.LLMProvider
+	Model                      string
+	Tools                      *ToolRegistry
+	MaxIterations              int
+	LLMOptions                 map[string]any
+	VerboseCallback            VerboseCallback
+	SessionRecorder            SessionRecorder
+	SessionKey                 string
+	Retry                      *RetryConfig
+	ContextWindow              int
 	CompactionThresholdPercent int
-	MessageBus                 *bus.MessageBus // Optional: publish real-time events to TUI.
-	Channel                    string          // Origin channel for events.
-	ChatID                     string          // Origin chatID for events (subagent sessionKey).
-	VisionSupported            bool            // Whether the model supports vision. When false, read_image is filtered from tool defs.
-	// VideoSupported: whether the model supports native video. VisionSupported
-	// doubles as the frames-mode capability: read_video is filtered from tool
-	// defs only when BOTH are false (native needs video, keyframes need vision).
-	VideoSupported bool
-	Redactor       *keyring.Redactor // Optional: redacts secret values from tool results before they enter context.
-	// RetryWait optionally overrides the wait function used between
-	// empty-response retries (nil means time.After). Used by tests to
-	// avoid real sleeps.
-	RetryWait func(time.Duration) <-chan time.Time
-	// CompactionModel optionally overrides the model used for summarization
-	// during context compaction (proactive and reactive). Empty = use Model.
-	CompactionModel string
-	// SessionCompactor optionally syncs compaction results to the persisted
-	// session (implemented by *session.Manager). nil = in-memory only.
-	SessionCompactor SessionCompactor
-	// EvictExcludedFromMemory controls whether session-synced compaction also
-	// evicts excluded messages from the in-memory session cache.
-	EvictExcludedFromMemory bool
-	// OwnerAgentID and OwnerSessionKey identify the agent loop that owns this
-	// tool loop. When OwnerSessionKey is set, RunToolLoop injects them into
-	// the tool-execution context (tools.WithAgentToolContext) so tools run
-	// inside the loop can attribute their work - spawned subagents, background
-	// processes - to the owning session for cancellation (issue #230). The
-	// main agent loop gets this via the agent tool executor; standalone tool
-	// loops (subagents, sync subagent tool) must set it explicitly.
-	OwnerAgentID    string
-	OwnerSessionKey string
-	// OnTokenUsage, when set, is called with the (input, output) token counts
-	// of every successful LLM response produced by this loop, as computed by
-	// providers.ResponseTokenCounts. It is the hook through which loops that
-	// have no session manager of their own - subagent tool loops - bill their
-	// spend to their owner. The call happens after each response (not once at
-	// the end) so work done before an error, cancellation or timeout is still
-	// accounted for. It must be cheap and non-blocking; implementations that
-	// mutate shared state do so under their own locks.
-	OnTokenUsage func(inputTokens, outputTokens int)
+	MessageBus                 *bus.MessageBus
+	Channel                    string
+	ChatID                     string
+	VisionSupported            bool
+	VideoSupported             bool
+	Redactor                   *keyring.Redactor
+	RetryWait                  func(time.Duration) <-chan time.Time
+	CompactionModel            string
+	SessionCompactor           SessionCompactor
+	EvictExcludedFromMemory    bool
+	OwnerAgentID               string
+	OwnerSessionKey            string
+	OnTokenUsage               func(inputTokens, outputTokens int)
 }
 
-// syncCompactionToSession persists a loop-compaction result to the subagent's
-// session via the optional SessionCompactor. The summary is the second
-// message of the compacted list ("[Context compacted — summary of ...]");
-// keepCount=6 matches the loop's keepLast so the persisted exclusion window
-// mirrors the in-memory one. Failures are logged and swallowed: compaction
-// is an optimization, and a persistence error must not kill a running task.
 func syncCompactionToSession(config ToolLoopConfig, summary string) {
 	if config.SessionCompactor == nil || config.SessionKey == "" || summary == "" {
 		return
@@ -122,37 +71,14 @@ func syncCompactionToSession(config ToolLoopConfig, summary string) {
 	}
 }
 
-// maxReactiveCompactions is the maximum number of reactive compaction attempts
-// (context-overflow recovery) allowed between successful LLM responses. It
-// prevents infinite compact-fail loops when even the compacted context exceeds
-// the model's window.
 const maxReactiveCompactions = 3
 
-// maxConsecutiveEmptyResponses bounds how many consecutive blank assistant
-// responses the tool loop tolerates before ending the run. Thinking models
-// can exhaust their token budget on reasoning and return content:"" with
-// finish_reason:length; retrying forever with unlimited MaxIterations would
-// hang the subagent until the LLM loop timeout kills it.
 const maxConsecutiveEmptyResponses = 5
 
-// toolLoopMaxIterationsContent is the synthetic final message the tool loop
-// emits when the iteration budget ran out while the model was still calling
-// tools. The parent receives this text as the subagent result, so it declares
-// its own status: parseSubagentOutcome must keep reading it as not_done no
-// matter how the outcome heuristics change.
 const toolLoopMaxIterationsContent = "STATUS: not_done\nSUMMARY: Maximum iterations reached without completing the task\nDETAILS:\nThe subagent ran out of iterations while still using tools. The task may require more steps to complete."
 
-// toolLoopEmptyResponseContent is the synthetic final message the tool loop
-// emits when the provider kept returning blank content. The parent receives
-// this text as the subagent result, so -- like the max-iterations guard -- it
-// is a status declaration rather than prose.
 const toolLoopEmptyResponseContent = "STATUS: not_done\nSUMMARY: The model returned empty responses repeatedly\nDETAILS:\nThe provider kept returning blank content (likely a thinking model exhausting its token budget on reasoning). The run was stopped to avoid an infinite retry loop."
 
-// toolLoopEmptyRetryBackoff returns the wait duration before the given
-// empty-response retry attempt (1s, 2s, 3s, capped at 3s). Empty responses
-// are retried up to maxConsecutiveEmptyResponses times, bounded by context
-// cancellation (user abort / task cancel); after the limit the run ends with
-// a not_done status.
 func toolLoopEmptyRetryBackoff(attempt int) time.Duration {
 	backoffs := []time.Duration{1 * time.Second, 2 * time.Second, 3 * time.Second}
 	if attempt >= len(backoffs) {
@@ -161,26 +87,11 @@ func toolLoopEmptyRetryBackoff(attempt int) time.Duration {
 	return backoffs[attempt]
 }
 
-// ToolLoopResult contains the result of running the tool loop.
 type ToolLoopResult struct {
 	Content    string
 	Iterations int
 }
 
-// EstimateLoopTokens estimates the number of tokens in a message list using
-// the 2.5 chars/token heuristic. It shares the accounting rule with the
-// session manager's EstimateTokens: both sum providers.MessageCharCost
-// (pkg/providers/image_budget.go), the single per-message rule covering
-// Content, ReasoningContent, tool-call names/arguments, Media entries,
-// content parts and a per-message structural overhead. Image/video content
-// parts are charged a fixed char cost (providers.ImagePartCharCost /
-// VideoPartCharCost), NOT their real byte length: bytes are budgeted
-// separately by providers.EstimateRequestBytes, and billing base64 bytes as
-// tokens would trip intra-loop compaction on every image read. Unlike
-// EstimateTokens (pkg/agent/session_manager.go) this estimator does NOT skip
-// ExcludeFromContext messages — the loop's messages are the live ones. The
-// shared rule lives in pkg/providers because pkg/tools must not import
-// pkg/agent (that would be an import cycle).
 func EstimateLoopTokens(messages []providers.Message) int {
 	totalChars := 0
 	for _, m := range messages {
@@ -189,22 +100,11 @@ func EstimateLoopTokens(messages []providers.Message) int {
 	return totalChars * 2 / 5
 }
 
-// CompactLoopMessages reduces context size by summarizing old tool interactions.
-// Keeps the system prompt (first message) and the last keepLast messages.
-// Everything in between is summarized via LLM and replaced with a single message.
-// sessionKey is stamped as the conversation-scoped wire session id (see
-// providers.WithWireSessionID); pass "" when unknown — the stamp then lands in
-// the shared unkeyed bucket (providers.WireSessionID("")) rather than being
-// skipped.
 func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, model string, messages []providers.Message, keepLast int, sessionKey string) ([]providers.Message, bool) {
 	if len(messages) <= keepLast+2 {
 		return messages, false
 	}
 
-	// Already compacted with nothing new added since (messages[1] is our
-	// summary message and the context is exactly the compacted shape
-	// [system, summary, continue, tail×keepLast]): re-summarizing would
-	// waste an LLM call and cannot shrink below the compacted size.
 	if len(messages) <= keepLast+3 &&
 		strings.HasPrefix(messages[1].Content, "[Context compacted") {
 		return messages, false
@@ -214,10 +114,6 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 	tail := messages[len(messages)-keepLast:]
 	middle := messages[1 : len(messages)-keepLast]
 
-	// Build summary prompt from middle messages.
-	// Use text-only content so multimodal messages (e.g. from read_image)
-	// never leak base64 image data into the summarization prompt. The
-	// compaction model may not support vision.
 	var parts []string
 	for _, m := range middle {
 		content := m.TextOnlyContent()
@@ -267,8 +163,6 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 		summaryInput
 
 	apiModel := providers.StripProviderPrefix(model)
-	// The summarizer is an inference call: same conversation-scoped wire identity
-	// as the loop it is compacting for.
 	compactOpts := providers.WithWireSessionID(map[string]interface{}{
 		"max_tokens":  1024,
 		"temperature": 0.3,
@@ -287,23 +181,14 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 		Content: "[Context compacted — summary of previous " + fmt.Sprintf("%d", len(middle)) + " messages]\n" + resp.Content,
 	}
 
-	// Nudge the LLM to continue the in-progress task after compaction.
 	continueMsg := providers.Message{
 		Role:    "user",
 		Content: "[The context was compacted to save space. You were in the middle of a multi-step task. Review the summary above and the recent tool results below, then CONTINUE executing the task using the available tools. Do not stop or ask for confirmation — resume where you left off.]",
 	}
 
-	// Trim the tail to a safe boundary. The kept tail must not start with a
-	// tool message whose assistant tool_calls message was summarized away,
-	// nor with an assistant tool_calls message whose tool results were cut
-	// off — providers reject both sequences. See safeTailBoundary for the
-	// boundary rules.
 	if bi := safeTailBoundary(tail); bi > 0 {
 		tail = tail[bi:]
 	} else if bi < 0 {
-		// No safe boundary exists in the tail (e.g. it is all orphaned tool
-		// results). Compacting would produce an invalid message sequence, so
-		// skip compaction entirely for this round.
 		logger.WarnCF("toolloop", "Compaction skipped: no safe tail boundary", map[string]any{
 			"tail_len": len(tail),
 		})
@@ -320,23 +205,7 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 	return compacted, true
 }
 
-// safeTailBoundary returns the index of the first safe boundary in the given
-// tail slice, or -1 if none exists. A boundary at index i means the slice may
-// start at i without producing an invalid assistant/tool sequence:
-//
-//   - The message at i must not be a tool result (role "tool"): its assistant
-//     tool_calls message would precede the boundary and be summarized away.
-//   - The remaining slice tail[i:] must be self-consistent: every tool result
-//     must be preceded (within the remaining slice) by the assistant message
-//     carrying the matching tool_calls ID, and every assistant tool_calls
-//     message must have all of its results present in the remaining slice.
-//
-// The first (smallest) safe boundary is returned so the tail keeps as much
-// recent context as possible. Tails are short (keepLast is typically 6), so
-// the O(n²) self-consistency rescan is negligible.
 func safeTailBoundary(tail []providers.Message) int {
-	// isSelfConsistent reports whether every tool result in msgs is preceded
-	// by its assistant tool_calls message and every tool call is answered.
 	isSelfConsistent := func(msgs []providers.Message) bool {
 		pending := map[string]bool{}
 		for _, m := range msgs {
@@ -349,12 +218,12 @@ func safeTailBoundary(tail []providers.Message) int {
 				}
 			case "tool":
 				if !pending[m.ToolCallID] {
-					return false // orphaned result: assistant was trimmed
+					return false
 				}
 				delete(pending, m.ToolCallID)
 			}
 		}
-		return len(pending) == 0 // false when calls lack their results
+		return len(pending) == 0
 	}
 
 	for i := 0; i < len(tail); i++ {
@@ -368,45 +237,19 @@ func safeTailBoundary(tail []providers.Message) int {
 	return -1
 }
 
-// RunToolLoop executes the LLM + tool call iteration loop.
-// This is the core agent logic that can be reused by both main agent and subagents.
 func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []providers.Message, channel, chatID string) (*ToolLoopResult, error) {
 	iteration := 0
 	emptyRetries := 0
 	reactiveCompactions := 0
 	var finalContent string
 
-	// Attribute tool executions inside this loop to the owning session so
-	// nested spawns/background processes can be cancelled with it (#230).
-	// When the config does not name an owner explicitly at all, inherit the
-	// agent tool context already carried by ctx (a synchronous subagent tool
-	// runs inside its caller's context, so the caller owns whatever it spawns).
-	// A partially named owner is kept as-is: it is the caller's intent.
 	if config.OwnerAgentID == "" && config.OwnerSessionKey == "" {
 		config.OwnerAgentID, config.OwnerSessionKey = AgentToolContextFromCtx(ctx)
 	}
-	// Issue #234: standalone tool loops (subagent tool, cron, cron spawn) must
-	// carry their owning agent identity in the context so identity-scoped tools
-	// (secret lookup, spawn attribution) work. The main agent loop already gets
-	// this via the agent tool executor; here we cover loop-owned executions.
-	// The owner may be known by agent id alone (cron jobs without a session key
-	// yet), so either field being set is enough to inject.
 	if config.OwnerAgentID != "" || config.OwnerSessionKey != "" {
 		ctx = WithAgentToolContext(ctx, config.OwnerAgentID, config.OwnerSessionKey)
 	}
 
-	// Conversation-scoped wire identity, same rule as the main loop
-	// (pkg/agent/llm_caller.go buildLLMOptions). A subagent has its own session
-	// key; the synchronous in-context subagent (subagent_tool.go:152-169)
-	// deliberately passes none — it sets only OwnerSessionKey (`:168`) — so fall
-	// back to the owner's session: those turns belong to the parent conversation
-	// and must still be routable. Empty everywhere ⇒ the stamp falls back to
-	// the shared unkeyed bucket (providers.WireSessionID("")) so unkeyed
-	// egresses (cron jobs, standalone loops) still satisfy required providers
-	// instead of aborting locally. Hoisted out of the loop so the reactive
-	// compaction calls below share the exact same value. Computed AFTER the
-	// owner inheritance above so a loop that inherits its owner from ctx gets
-	// the same fallback.
 	wireSessionKey := config.SessionKey
 	if wireSessionKey == "" {
 		wireSessionKey = config.OwnerSessionKey
@@ -421,7 +264,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		}
 	}
 
-	// MaxIterations <= 0 means unlimited (timeout is the real safety guard)
 	for config.MaxIterations <= 0 || iteration < config.MaxIterations {
 		iteration++
 
@@ -431,16 +273,11 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				"max":       config.MaxIterations,
 			})
 
-		// 1. Build tool definitions
 		var providerToolDefs []providers.ToolDefinition
 		if config.Tools != nil {
 			providerToolDefs = config.Tools.ToProviderDefs()
 		}
 
-		// Filter out read_image when the model doesn't support vision, and
-		// read_video when it supports neither native video nor vision
-		// (frames-mode fallback needs vision).
-		// Mirrors the filtering in the main agent loop (pkg/agent/llm_runner.go).
 		if !config.VisionSupported || !config.VideoSupported {
 			filtered := make([]providers.ToolDefinition, 0, len(providerToolDefs))
 			for _, def := range providerToolDefs {
@@ -455,28 +292,16 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			providerToolDefs = filtered
 		}
 
-		// 2. Set default LLM options
 		llmOpts := config.LLMOptions
 		if llmOpts == nil {
 			llmOpts = map[string]any{}
 		}
 		llmOpts = providers.WithWireSessionID(llmOpts, wireSessionKey)
-		// 3. Call LLM
-		// Strip provider prefix from model for API calls.
-		// The provider prefix (e.g., "openrouter:") is for internal routing only
-		// and must not be sent to the external LLM API.
 		apiModel := providers.StripProviderPrefix(config.Model)
 
 		var response *providers.LLMResponse
 		var err error
 		for {
-			// Heal dangling tool-call pairs on the way to the provider. This
-			// sits inside the retry loop on purpose: reactive compaction below
-			// can cut a call from its result and then re-issues the request, so
-			// every outgoing slice must pass here. It also covers history
-			// inherited from a persisted session where a turn died mid-flight.
-			// Left unhealed, strict providers answer with a 400 that replays on
-			// every turn and bricks the session.
 			if healed, changed := providers.HealToolCallPairs(messages); changed {
 				messages = healed
 			}
@@ -484,22 +309,12 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			if config.Retry != nil {
 				response, err = ChatWithRetry(ctx, config.Provider, messages, providerToolDefs, apiModel, llmOpts, *config.Retry)
 			} else {
-				// Streaming transport: bounded by an idle timeout so a
-				// long-reasoning subagent is not killed at 120s of wall clock.
 				response, err = providers.ChatIdle(ctx, config.Provider, messages, providerToolDefs, apiModel, llmOpts)
 			}
 			if err == nil {
-				// Success resets the reactive compaction budget so a later
-				// overflow in the same run gets a fresh set of attempts.
 				reactiveCompactions = 0
 				break
 			}
-			// Reactive compaction: when the API rejects the prompt because it
-			// exceeds the model's context window, summarize old messages and
-			// retry instead of failing the whole subagent task. Mirrors the
-			// main agent loop's executeWithRetry behavior (pkg/agent/llm_caller.go).
-			// The budget (3 attempts per successful response) prevents infinite
-			// compact-fail loops when even the compacted context is too large.
 			if config.ContextWindow > 0 &&
 				reactiveCompactions < maxReactiveCompactions &&
 				providers.IsContextOverflowError(err) {
@@ -531,9 +346,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 					syncCompactionToSession(config, compacted[1].Content)
 					continue
 				}
-				// Compaction could not reduce the context (e.g. nothing left
-				// to summarize or the summarizer failed) — fall through to
-				// returning the error.
 			}
 			logger.ErrorCF("toolloop", "LLM call failed",
 				map[string]any{
@@ -543,16 +355,11 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			return nil, fmt.Errorf("LLM call failed: %w", err)
 		}
 
-		// 3b. Bill this response's tokens to whoever owns the loop (subagent
-		// runners pass a reporter that charges the parent session). Called
-		// per response, before any branch below can error out or break, so a
-		// run that dies mid-flight still pays for the LLM calls it made.
 		if config.OnTokenUsage != nil {
 			in, out := providers.ResponseTokenCounts(messages, response)
 			config.OnTokenUsage(in, out)
 		}
 
-		// 4. If no tool calls, we're done
 		if len(response.ToolCalls) == 0 {
 			finalContent = response.Content
 			logger.InfoCF("toolloop", "LLM response without tool calls (direct answer)",
@@ -561,12 +368,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 					"content_chars": len(finalContent),
 				})
 
-			// If the response is empty, do NOT persist it and retry a bounded
-			// number of times. Persisting blank assistant messages (a thinking
-			// model that burns its token budget on reasoning returns content:""
-			// with finish_reason:length) poisons the subagent session history,
-			// and retrying forever with unlimited MaxIterations hangs the
-			// subagent until the (often 90-minute) timeout kills it.
 			if len(strings.TrimSpace(finalContent)) == 0 {
 				emptyRetries++
 				if emptyRetries > maxConsecutiveEmptyResponses {
@@ -576,9 +377,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 							"retries":   emptyRetries,
 							"max":       maxConsecutiveEmptyResponses,
 						})
-					// End with an explicit not_done instead of looping or
-					// persisting blanks. The parent receives this as the
-					// subagent result.
 					finalContent = toolLoopEmptyResponseContent
 					if config.SessionRecorder != nil && config.SessionKey != "" {
 						config.SessionRecorder.AddFullMessage(config.SessionKey, providers.Message{
@@ -593,8 +391,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 						"iteration": iteration,
 						"retry":     emptyRetries,
 					})
-				// Keep the blank turn in the in-memory context only (preserves
-				// role alternation) but never persist it to the session.
 				messages = append(messages, providers.Message{
 					Role:             "assistant",
 					Content:          response.Content,
@@ -616,13 +412,8 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				})
 				continue
 			}
-			// Non-empty final content: reset the consecutive-empty counter so the
-			// backoff restarts small after a real response.
 			emptyRetries = 0
 
-			// Save assistant message with reasoning content (important for thinking
-			// models). Only reached for non-empty content, so blanks never enter
-			// the persisted session.
 			assistantMsg := providers.Message{
 				Role:             "assistant",
 				Content:          response.Content,
@@ -632,7 +423,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				config.SessionRecorder.AddFullMessage(config.SessionKey, assistantMsg)
 			}
 
-			// Publish final response as stream event if bus is available
 			if config.MessageBus != nil && finalContent != "" {
 				config.MessageBus.PublishOutbound(bus.OutboundMessage{
 					Event:   "message.stream",
@@ -642,7 +432,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			}
 			break
 		}
-		// 5. Log tool calls
 		toolNames := make([]string, 0, len(response.ToolCalls))
 		for _, tc := range response.ToolCalls {
 			toolNames = append(toolNames, tc.Name)
@@ -654,7 +443,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				"iteration": iteration,
 			})
 
-		// 6. Build assistant message with tool calls
 		assistantMsg := providers.Message{
 			Role:             "assistant",
 			Content:          response.Content,
@@ -662,9 +450,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		}
 		assistantMsg.ToolCalls = providers.CanonicalToolCalls(response.ToolCalls)
 
-		// Nothing survived canonicalization: do not run the tool phase, or the
-		// tool results would reference ids absent from the persisted assistant
-		// message (the same 400, different shape). Ask for a retry instead.
 		if len(assistantMsg.ToolCalls) == 0 {
 			logger.WarnCF("toolloop", "all tool calls from response were invalid, requesting a retry", map[string]any{
 				"iteration": iteration,
@@ -694,8 +479,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		messages = append(messages, assistantMsg)
 		recordMessage(config, assistantMsg)
 
-		// 7. Execute tool calls (canonical list, so result ids match the
-		// tool_calls that were appended and recorded above).
 		for _, tc := range assistantMsg.ToolCalls {
 			argsJSON, _ := json.Marshal(tc.Arguments)
 			argsPreview := utils.Truncate(string(argsJSON), 200)
@@ -705,10 +488,8 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 					"iteration": iteration,
 				})
 
-			// Execute tool (no async callback for subagents - they run independently)
 			var toolResult *ToolResult
 
-			// Publish tool.executing event if bus is available
 			if config.MessageBus != nil {
 				action := tc.Name
 				if argsPreview != "" {
@@ -720,9 +501,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 					"arguments": string(argsJSON),
 				}
 				if tc.ArgumentsTruncated {
-					// The preview above is only what survived the cut; say so,
-					// otherwise the UI shows a plausible-looking call that is
-					// about to be rejected.
 					metadata["truncated"] = "true"
 				}
 				config.MessageBus.PublishOutbound(bus.OutboundMessage{
@@ -734,10 +512,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			}
 
 			if tc.ArgumentsTruncated {
-				// Arguments arrived cut off (output token limit hit mid-write);
-				// the payload the tool needs is not there. Executing would fail
-				// on a missing parameter and send the model chasing the wrong
-				// cause, so report the real one.
 				toolResult = TruncatedArgumentsError(tc)
 			} else if config.Tools != nil {
 				toolResult = config.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, channel, chatID, nil)
@@ -749,7 +523,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				toolResult = ErrorResult(fmt.Sprintf("tool %s returned no result", tc.Name))
 			}
 
-			// Publish tool.result event if bus is available
 			if config.MessageBus != nil {
 				config.MessageBus.PublishOutbound(bus.OutboundMessage{
 					Event:   "tool.result",
@@ -761,31 +534,25 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				})
 			}
 
-			// Call verbose callback if provided
 			if config.VerboseCallback != nil {
 				config.VerboseCallback(iteration, tc.Name, tc.Arguments, toolResult)
 			}
 
-			// Determine content for LLM
 			contentForLLM := toolResult.ForLLM
 			if contentForLLM == "" && toolResult.Err != nil {
 				contentForLLM = toolResult.Err.Error()
 			}
 
-			// Redact known secret values before they enter the LLM context.
 			if config.Redactor != nil {
 				contentForLLM = config.Redactor.Redact(contentForLLM)
 			}
 
-			// Truncate tool results to prevent unbounded memory growth
-			// when many tool calls accumulate in the message history.
 			const maxToolResultChars = 50000
 			if len(contentForLLM) > maxToolResultChars {
 				truncated := contentForLLM[:maxToolResultChars]
 				contentForLLM = truncated + fmt.Sprintf("\n... (truncated, %d more chars)", len(contentForLLM)-maxToolResultChars)
 			}
 
-			// Add tool result message
 			toolResultMsg := providers.Message{
 				Role:       "tool",
 				Content:    contentForLLM,
@@ -798,12 +565,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			}
 		}
 
-		// 8. Image/byte budget (unconditional) + context compaction — the byte
-		// budget is enforced even without a configured context window (an
-		// oversized payload would be rejected by the transport before the model
-		// ever sees it); when we exceed the byte budget or the configured
-		// threshold percent, summarize old messages to prevent hitting the
-		// model's token limit.
 		if reduced, evicted := EnforceImageBudget(messages); evicted > 0 {
 			messages = reduced
 			logger.InfoCF("toolloop", "Request image budget enforced", map[string]any{
@@ -827,7 +588,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 					"threshold_percent": percent,
 					"iteration":         iteration,
 				})
-				// Keep last 6 messages (3 tool call/result pairs) for continuity
 				compactModel := config.Model
 				if config.CompactionModel != "" {
 					compactModel = config.CompactionModel
@@ -851,7 +611,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		}
 	}
 
-	// Handle case where max iterations was reached without a final response
 	if finalContent == "" {
 		finalContent = toolLoopMaxIterationsContent
 		logger.WarnCF("toolloop", "Max iterations reached without final response",
@@ -860,8 +619,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				"max":        config.MaxIterations,
 			})
 
-		// Only save the synthetic final message when max iterations reached
-		// (normal exit with no tool calls already saves inside the loop above)
 		if config.SessionRecorder != nil && config.SessionKey != "" {
 			config.SessionRecorder.AddFullMessage(config.SessionKey, providers.Message{
 				Role:    "assistant",

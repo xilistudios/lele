@@ -27,7 +27,6 @@ func TestSendFileTool_Execute_Success(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Verify message was sent with correct parameters
 	if sentChannel != "test-channel" {
 		t.Errorf("Expected channel 'test-channel', got '%s'", sentChannel)
 	}
@@ -38,23 +37,18 @@ func TestSendFileTool_Execute_Success(t *testing.T) {
 		t.Errorf("Expected content 'Hello, world!', got '%s'", sentContent)
 	}
 
-	// Verify ToolResult meets criteria:
-	// - Send success returns SilentResult (Silent=true)
 	if !result.Silent {
 		t.Error("Expected Silent=true for successful send")
 	}
 
-	// - ForLLM contains send status description
 	if result.ForLLM != "Files sent to test-channel:test-chat-id" {
 		t.Errorf("Expected ForLLM 'Files sent to test-channel:test-chat-id', got '%s'", result.ForLLM)
 	}
 
-	// - ForUser is empty (user already received message directly)
 	if result.ForUser != "" {
 		t.Errorf("Expected ForUser to be empty, got '%s'", result.ForUser)
 	}
 
-	// - IsError should be false
 	if result.IsError {
 		t.Error("Expected IsError=false for successful send")
 	}
@@ -80,7 +74,6 @@ func TestSendFileTool_Execute_WithCustomChannel(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Verify custom channel/chatID were used instead of defaults
 	if sentChannel != "custom-channel" {
 		t.Errorf("Expected channel 'custom-channel', got '%s'", sentChannel)
 	}
@@ -112,19 +105,15 @@ func TestSendFileTool_Execute_SendFailure(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Verify ToolResult for send failure:
-	// - Send failure returns ErrorResult (IsError=true)
 	if !result.IsError {
 		t.Error("Expected IsError=true for failed send")
 	}
 
-	// - ForLLM contains error description
 	expectedErrMsg := "sending file(s): network error"
 	if result.ForLLM != expectedErrMsg {
 		t.Errorf("Expected ForLLM '%s', got '%s'", expectedErrMsg, result.ForLLM)
 	}
 
-	// - Err field should contain original error
 	if result.Err == nil {
 		t.Error("Expected Err to be set")
 	}
@@ -138,11 +127,10 @@ func TestSendFileTool_Execute_MissingContent(t *testing.T) {
 	tool.SetContext("test-channel", "test-chat-id")
 
 	ctx := context.Background()
-	args := map[string]interface{}{} // content missing
+	args := map[string]interface{}{}
 
 	result := tool.Execute(ctx, args)
 
-	// Verify error result for missing content
 	if !result.IsError {
 		t.Error("Expected IsError=true for missing content")
 	}
@@ -153,7 +141,6 @@ func TestSendFileTool_Execute_MissingContent(t *testing.T) {
 
 func TestSendFileTool_Execute_NoTargetChannel(t *testing.T) {
 	tool := NewSendFileTool()
-	// No SetContext called, so defaultChannel and defaultChatID are empty
 
 	tool.SetSendCallback(func(channel, chatID string, payload SendFilePayload) error {
 		return nil
@@ -166,7 +153,6 @@ func TestSendFileTool_Execute_NoTargetChannel(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Verify error when no target channel specified
 	if !result.IsError {
 		t.Error("Expected IsError=true when no target channel")
 	}
@@ -178,7 +164,6 @@ func TestSendFileTool_Execute_NoTargetChannel(t *testing.T) {
 func TestSendFileTool_Execute_NotConfigured(t *testing.T) {
 	tool := NewSendFileTool()
 	tool.SetContext("test-channel", "test-chat-id")
-	// No SetSendCallback called
 
 	ctx := context.Background()
 	args := map[string]interface{}{
@@ -187,7 +172,6 @@ func TestSendFileTool_Execute_NotConfigured(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// Verify error when send callback not configured
 	if !result.IsError {
 		t.Error("Expected IsError=true when send callback not configured")
 	}
@@ -247,7 +231,6 @@ func TestSendFileTool_Parameters(t *testing.T) {
 	tool := NewSendFileTool()
 	params := tool.Parameters()
 
-	// Verify parameters structure
 	typ, ok := params["type"].(string)
 	if !ok || typ != "object" {
 		t.Error("Expected type 'object'")
@@ -263,7 +246,6 @@ func TestSendFileTool_Parameters(t *testing.T) {
 		t.Error("Expected no hard-required fields")
 	}
 
-	// Check content property
 	contentProp, ok := props["content"].(map[string]interface{})
 	if !ok {
 		t.Error("Expected 'content' property")
@@ -280,7 +262,6 @@ func TestSendFileTool_Parameters(t *testing.T) {
 		t.Error("Expected file_paths type to be 'array'")
 	}
 
-	// Check channel property (optional)
 	channelProp, ok := props["channel"].(map[string]interface{})
 	if !ok {
 		t.Error("Expected 'channel' property")
@@ -289,7 +270,6 @@ func TestSendFileTool_Parameters(t *testing.T) {
 		t.Error("Expected channel type to be 'string'")
 	}
 
-	// Check chat_id property (optional)
 	chatIDProp, ok := props["chat_id"].(map[string]interface{})
 	if !ok {
 		t.Error("Expected 'chat_id' property")

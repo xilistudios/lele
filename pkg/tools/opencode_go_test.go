@@ -1,21 +1,3 @@
-// Lele - Ultra-lightweight personal AI agent
-// License: MIT
-//
-// Copyright (c) 2026 Lele contributors
-
-// T2 of the OpenCode Go support plan: every LLM egress in pkg/tools stamps the
-// conversation-scoped wire session id (providers.WireSessionID).
-//
-// RunToolLoop is stamped from the fallback chain SessionKey → OwnerSessionKey
-// (C7/D8): an async subagent sets SessionKey (subagent_runner.go), the
-// synchronous in-context subagent sets only OwnerSessionKey (subagent_tool.go),
-// and when neither key is set the stamp falls back to the shared unkeyed
-// bucket (providers.UnkeyedSessionBucket) — it is never skipped, so unkeyed
-// egresses still satisfy required providers (FIX-C). The tests below cover both
-// real chains, the exported CompactLoopMessages helper (whose session key is a
-// compile-enforced parameter, C6), the exact value, and the non-mutation of
-// the caller-owned LLMOptions map.
-
 package tools
 
 import (
@@ -31,9 +13,6 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
-// optionsCaptureProvider records the options of every Chat call (a copy: the
-// loop-owned map must never be observed mutating under us) and answers with a
-// direct completion so RunToolLoop exits after one iteration.
 type optionsCaptureProvider struct {
 	mu      sync.Mutex
 	options []map[string]interface{}
@@ -52,7 +31,6 @@ func (p *optionsCaptureProvider) Chat(_ context.Context, _ []providers.Message, 
 
 func (p *optionsCaptureProvider) GetDefaultModel() string { return "test-model" }
 
-// lastOptions returns the options of the most recent Chat call.
 func (p *optionsCaptureProvider) lastOptions(t *testing.T) map[string]interface{} {
 	t.Helper()
 	p.mu.Lock()
@@ -63,9 +41,6 @@ func (p *optionsCaptureProvider) lastOptions(t *testing.T) map[string]interface{
 	return p.options[len(p.options)-1]
 }
 
-// stampedSessionID extracts the wire_session_id option; ok=false only when the
-// key was never stamped at all (WithWireSessionID always stamps, so production
-// call sites produce ok=true even for the unkeyed bucket).
 func stampedSessionID(opts map[string]interface{}) (string, bool) {
 	v, ok := opts[providers.OptWireSessionID]
 	if !ok {
@@ -75,9 +50,6 @@ func stampedSessionID(opts map[string]interface{}) (string, bool) {
 	return s, true
 }
 
-// ocgoToolsRecorder records x-opencode-session headers (copied inside the
-// handler — post-handler request reads race) and answers with an SSE
-// completion, the transport ChatIdle prefers.
 type ocgoToolsRecorder struct {
 	mu      sync.Mutex
 	headers []http.Header
@@ -99,7 +71,6 @@ func newOCGOToolsServer(t *testing.T) (*ocgoToolsRecorder, string) {
 	return rec, srv.URL
 }
 
-// lastSessionHeader returns the session header of the most recent request.
 func (rec *ocgoToolsRecorder) lastSessionHeader(t *testing.T) string {
 	t.Helper()
 	rec.mu.Lock()
@@ -116,7 +87,6 @@ func (rec *ocgoToolsRecorder) count() int {
 	return len(rec.headers)
 }
 
-// registerToolsNamedProvider wires a named provider entry in cfg.
 func registerToolsNamedProvider(cfg *leleconfig.Config, name, typ, apiBase string) {
 	if cfg.Providers == nil {
 		cfg.Providers = &leleconfig.ProvidersConfig{}
@@ -133,11 +103,6 @@ func registerToolsNamedProvider(cfg *leleconfig.Config, name, typ, apiBase strin
 	}
 }
 
-// TestRunToolLoopSendsSessionHeader runs the loop through the REAL factory
-// OpenCode Go transport and applies the anti-hollowness guard: the wire value
-// must equal providers.WireSessionID(sessionKey). This is also the async
-// subagent shape (subagent_runner.go sets SessionKey). The caller-owned
-// LLMOptions map must come back untouched (WithWireSessionID copies).
 func TestRunToolLoopSendsSessionHeader(t *testing.T) {
 	rec, baseURL := newOCGOToolsServer(t)
 	cfg := leleconfig.DefaultConfig()
@@ -170,17 +135,11 @@ func TestRunToolLoopSendsSessionHeader(t *testing.T) {
 	if h := rec.lastSessionHeader(t); h != want {
 		t.Fatalf("x-opencode-session = %q, want %q", h, want)
 	}
-	// Non-mutation: the map came from the caller and is shared with it.
 	if _, ok := llmOptions[providers.OptWireSessionID]; ok {
 		t.Fatalf("RunToolLoop mutated the caller's LLMOptions map: %#v", llmOptions)
 	}
 }
 
-// TestRunToolLoopFallsBackToOwnerSessionKey is the synchronous-subagent shape
-// (C7): subagent_tool.go passes ONLY OwnerSessionKey, never SessionKey, so the
-// loop must resolve the stamp through the SessionKey → OwnerSessionKey
-// fallback — otherwise every sync subagent would trip OpenCode Go's local
-// ErrMissingWireSession / upstream 400.
 func TestRunToolLoopFallsBackToOwnerSessionKey(t *testing.T) {
 	provider := &optionsCaptureProvider{}
 	ownerSessionKey := "owner:native:chat:1"
@@ -189,7 +148,7 @@ func TestRunToolLoopFallsBackToOwnerSessionKey(t *testing.T) {
 		Provider:        provider,
 		Model:           "test-model",
 		MaxIterations:   2,
-		OwnerSessionKey: ownerSessionKey, // sync subagent: no SessionKey at all
+		OwnerSessionKey: ownerSessionKey,
 	}, []providers.Message{{Role: "user", Content: "hi"}}, "cli", "direct")
 	if err != nil {
 		t.Fatalf("RunToolLoop: %v", err)
@@ -207,13 +166,6 @@ func TestRunToolLoopFallsBackToOwnerSessionKey(t *testing.T) {
 	}
 }
 
-// TestRunToolLoopNoSessionStampsUnkeyedBucket: FIX-C — neither SessionKey
-// nor OwnerSessionKey ⇒ the stamp is the shared unkeyed bucket
-// (providers.UnkeyedSessionBucket), never absent, and the REAL OpenCode Go
-// transport accepts the call (this was the cron/unkeyed abort path before the
-// fix). The negative control shows the same machinery through a plain openai
-// provider sends no header at all — so the positive tests cannot pass on "the
-// handler sees everything".
 func TestRunToolLoopNoSessionStampsUnkeyedBucket(t *testing.T) {
 	t.Run("no keys stamps the shared unkeyed bucket", func(t *testing.T) {
 		provider := &optionsCaptureProvider{}
@@ -268,7 +220,7 @@ func TestRunToolLoopNoSessionStampsUnkeyedBucket(t *testing.T) {
 			Provider:      provider,
 			Model:         "test-model",
 			MaxIterations: 1,
-			SessionKey:    "native:anything", // stamped, but a non-OpenCode transport must not send it
+			SessionKey:    "native:anything",
 		}, []providers.Message{{Role: "user", Content: "hi"}}, "cli", "direct"); err != nil {
 			t.Fatalf("RunToolLoop: %v", err)
 		}
@@ -281,9 +233,6 @@ func TestRunToolLoopNoSessionStampsUnkeyedBucket(t *testing.T) {
 	})
 }
 
-// TestCompactLoopMessagesSendsSessionHeader covers the exported compaction
-// helper (its own ChatIdle with a private options map, C6). The session key is
-// a parameter, so the compiler forces every call site to decide what to pass.
 func TestCompactLoopMessagesSendsSessionHeader(t *testing.T) {
 	messages := []providers.Message{
 		{Role: "system", Content: "system prompt"},
@@ -324,10 +273,6 @@ func TestCompactLoopMessagesSendsSessionHeader(t *testing.T) {
 	})
 }
 
-// TestSubagentTool_SyncPathStampsOwnerWireSession exercises the REAL
-// synchronous subagent chain (subagent_tool.Execute → RunToolLoop): the tool
-// reads the owner from the tool context and passes it as OwnerSessionKey only,
-// so the stamp must come out as WireSessionID(ownerSessionKey).
 func TestSubagentTool_SyncPathStampsOwnerWireSession(t *testing.T) {
 	provider := &optionsCaptureProvider{}
 	manager := NewSubagentManager(provider, "test-model", t.TempDir(), nil, 20)
@@ -350,10 +295,6 @@ func TestSubagentTool_SyncPathStampsOwnerWireSession(t *testing.T) {
 	}
 }
 
-// TestSubagentRunner_AsyncPathStampsChildWireSession exercises the REAL async
-// chain (SubagentManager.runTask → RunToolLoop): the runner derives the child
-// session key as "<OriginSessionKey>:<TaskID>" and passes it as SessionKey, so
-// the stamp must equal WireSessionID of that derived key.
 func TestSubagentRunner_AsyncPathStampsChildWireSession(t *testing.T) {
 	provider := &optionsCaptureProvider{}
 	manager := NewSubagentManager(provider, "test-model", t.TempDir(), nil, 20)
@@ -375,7 +316,6 @@ func TestSubagentRunner_AsyncPathStampsChildWireSession(t *testing.T) {
 
 	manager.runTask(context.Background(), task, nil)
 
-	// The async runner derives sessionKey = OriginSessionKey + ":" + TaskID.
 	want := providers.WireSessionID("native:chat-1:task-1")
 	stamped, ok := stampedSessionID(provider.lastOptions(t))
 	if !ok {

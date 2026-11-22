@@ -6,20 +6,6 @@ import (
 	"time"
 )
 
-// These tests cover the PERIODIC retention sweeper (StartRetentionCleanup).
-//
-// Before it existed, CleanupTerminalTasks ran only from SpawnWithOptions and
-// ContinueTask: an owner that stopped spawning kept every finished task in
-// sm.tasks — and its "native:<parent>:subagent-N" session resident — forever,
-// so memory grew without bound and every TUI frame got more expensive.
-//
-// The sweeper polls on a short interval here (a couple of milliseconds) while
-// the retention window is 1ms, so the tests exercise the real production path
-// (tick -> CleanupTerminalTasks) without sleeping for minutes.
-
-// addRetentionTask registers a task the way a finished run leaves one behind:
-// done channel initialised, a cancel func registered, and a Created/Updated
-// stamp well past the retention window.
 func addRetentionTask(sm *SubagentManager, id, status string) *SubagentTask {
 	finished := time.Now().Add(-time.Hour).UnixMilli()
 	task := &SubagentTask{
@@ -37,7 +23,6 @@ func addRetentionTask(sm *SubagentManager, id, status string) *SubagentTask {
 	return task
 }
 
-// retentionTaskIDs returns the IDs currently tracked by the manager.
 func retentionTaskIDs(sm *SubagentManager) map[string]bool {
 	ids := make(map[string]bool)
 	for _, task := range sm.ListTasks() {
@@ -46,7 +31,6 @@ func retentionTaskIDs(sm *SubagentManager) map[string]bool {
 	return ids
 }
 
-// waitForCondition polls cond until it holds or the timeout expires.
 func waitForCondition(t *testing.T, timeout time.Duration, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -59,9 +43,6 @@ func waitForCondition(t *testing.T, timeout time.Duration, what string, cond fun
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-// waitSweeperExit blocks until the sweeper goroutine has returned. The sweeper
-// closes retentionExited on exit, so this is a deterministic leak check (the
-// stop path itself also waits on it).
 func waitSweeperExit(t *testing.T, sm *SubagentManager) {
 	t.Helper()
 	sm.retentionMu.Lock()
@@ -77,10 +58,6 @@ func waitSweeperExit(t *testing.T, sm *SubagentManager) {
 	}
 }
 
-// TestSubagentManager_RetentionSweeperReapsTerminalTasks covers the core of the
-// change: after tasks reach a terminal state, the ticker alone removes them —
-// no new spawn, no manual CleanupTerminalTasks call — and it fires the same
-// session-evict callback the spawn-triggered sweep fires.
 func TestSubagentManager_RetentionSweeperReapsTerminalTasks(t *testing.T) {
 	sm := NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
 	sm.SetRetentionPeriod(time.Millisecond)
@@ -118,8 +95,6 @@ func TestSubagentManager_RetentionSweeperReapsTerminalTasks(t *testing.T) {
 		}
 	}
 
-	// CleanupTerminalTasks also reaps the evicted tasks' cancel funcs; the two
-	// survivors must keep theirs (StopTask/StopAll still need them).
 	sm.mu.RLock()
 	cancels := len(sm.cancels)
 	sm.mu.RUnlock()
@@ -127,8 +102,6 @@ func TestSubagentManager_RetentionSweeperReapsTerminalTasks(t *testing.T) {
 		t.Errorf("cancel funcs left = %d, want 2 (one per surviving task)", cancels)
 	}
 
-	// Consistency with the spawn-triggered path: the evict callback must run
-	// once per reaped task, keyed by its session key.
 	evictedMu.Lock()
 	defer evictedMu.Unlock()
 	for _, id := range terminal {
@@ -142,8 +115,6 @@ func TestSubagentManager_RetentionSweeperReapsTerminalTasks(t *testing.T) {
 	}
 }
 
-// TestSubagentManager_RetentionSweeperKeepsNonTerminalTasks pins the sweeper's
-// scope: only terminal tasks are eligible, no matter how old the timestamp is.
 func TestSubagentManager_RetentionSweeperKeepsNonTerminalTasks(t *testing.T) {
 	sm := NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
 	sm.SetRetentionPeriod(time.Millisecond)
@@ -160,7 +131,6 @@ func TestSubagentManager_RetentionSweeperKeepsNonTerminalTasks(t *testing.T) {
 	stop := sm.StartRetentionCleanup(time.Millisecond)
 	defer stop()
 
-	// 1ms ticks over 100ms: ~100 sweeps must leave every task untouched.
 	time.Sleep(100 * time.Millisecond)
 
 	ids := retentionTaskIDs(sm)
@@ -174,9 +144,6 @@ func TestSubagentManager_RetentionSweeperKeepsNonTerminalTasks(t *testing.T) {
 	}
 }
 
-// TestSubagentManager_RetentionSweeperStop covers the lifecycle: start is
-// idempotent, the stopper stops the goroutine (no leak), stop is idempotent,
-// and a stopped manager stays stopped.
 func TestSubagentManager_RetentionSweeperStop(t *testing.T) {
 	sm := NewSubagentManager(nil, "test-model", t.TempDir(), nil, 10)
 	sm.SetRetentionPeriod(time.Millisecond)
@@ -184,9 +151,6 @@ func TestSubagentManager_RetentionSweeperStop(t *testing.T) {
 	stop := sm.StartRetentionCleanup(2 * time.Millisecond)
 	defer stop()
 
-	// A config reload re-uses the manager and calls Start again: it must not
-	// stack a second goroutine and must hand back the same stopper. Stopping
-	// through the second handle proves it is the same sweeper.
 	again := sm.StartRetentionCleanup(time.Hour)
 	if again == nil {
 		t.Fatal("StartRetentionCleanup returned a nil stopper")
@@ -194,22 +158,16 @@ func TestSubagentManager_RetentionSweeperStop(t *testing.T) {
 	again()
 	waitSweeperExit(t, sm)
 
-	// Idempotent: neither the returned stopper nor StopRetentionCleanup may
-	// panic or block when called again.
 	stop()
 	sm.StopRetentionCleanup()
 	sm.StopRetentionCleanup()
 
-	// Once stopped, the goroutine is gone: a terminal task added afterwards
-	// must survive, even though it is already past the retention window.
 	addRetentionTask(sm, "subagent-1", SubagentStatusCompleted)
 	time.Sleep(50 * time.Millisecond)
 	if ids := retentionTaskIDs(sm); !ids["subagent-1"] {
 		t.Fatal("a stopped sweeper still reaped a terminal task")
 	}
 
-	// Start after stop does not resurrect the goroutine (the manager's
-	// teardown is final — see StopRetentionCleanup).
 	stopAfterStop := sm.StartRetentionCleanup(time.Millisecond)
 	stopAfterStop()
 	time.Sleep(10 * time.Millisecond)

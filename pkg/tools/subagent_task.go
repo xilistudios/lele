@@ -14,9 +14,6 @@ func (task *SubagentTask) displayLabel() string {
 	return task.Label
 }
 
-// ResultClaimed reports whether this task's result has already been claimed
-// (consumed by wait_for_subagent or injected as a system message). The claim is
-// the single arbiter of "exactly one delivery" (see SubagentManager.ClaimResult).
 func (task *SubagentTask) ResultClaimed() bool {
 	if task.mu != nil {
 		task.mu.Lock()

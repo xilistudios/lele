@@ -11,14 +11,11 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 )
 
-// PatchTool applies a unified diff to a file.
-// It supports standard unified diff format with multiple hunks.
 type PatchTool struct {
 	workspace string
 	restrict  bool
 }
 
-// NewPatchTool creates a new PatchTool
 func NewPatchTool(workspace string, restrict bool) *PatchTool {
 	return &PatchTool{
 		workspace: workspace,
@@ -51,16 +48,14 @@ func (t *PatchTool) Parameters() map[string]interface{} {
 	}
 }
 
-// Hunk represents a single hunk in a unified diff
 type Hunk struct {
 	OldStart int
 	OldCount int
 	NewStart int
 	NewCount int
-	Lines    []string // Lines with prefix (+, -, space)
+	Lines    []string
 }
 
-// DiffInfo represents a parsed unified diff
 type DiffInfo struct {
 	OldFile string
 	NewFile string
@@ -78,19 +73,15 @@ func (t *PatchTool) Execute(ctx context.Context, args map[string]interface{}) *T
 		return ErrorResult("diff is required")
 	}
 
-	// Validate path
 	resolvedPath, err := validatePath(path, t.workspace, t.restrict)
 	if err != nil {
 		return ErrorResult(err.Error())
 	}
 
-	// Check if file exists
 	if _, err := os.Stat(resolvedPath); os.IsNotExist(err) {
 		return ErrorResult(fmt.Sprintf("file not found: %s", path))
 	}
 
-	// If diff starts with a single '@', read it from a file.
-	// Unified diff hunks start with '@@' and should be parsed directly.
 	if strings.HasPrefix(diffContent, "@") && !strings.HasPrefix(diffContent, "@@") {
 		diffPath := strings.TrimPrefix(diffContent, "@")
 		diffPath = strings.TrimSpace(diffPath)
@@ -107,13 +98,11 @@ func (t *PatchTool) Execute(ctx context.Context, args map[string]interface{}) *T
 		diffContent = string(data)
 	}
 
-	// Read file with encoding detection
 	content, encoding, err := ReadFileWithEncoding(resolvedPath)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to read file: %v", err))
 	}
 
-	// Parse the diff
 	diff, err := parseUnifiedDiff(diffContent)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to parse diff: %v", err))
@@ -127,7 +116,6 @@ func (t *PatchTool) Execute(ctx context.Context, args map[string]interface{}) *T
 			"hunk_count": len(diff.Hunks),
 		})
 
-	// Apply the diff
 	newContent, err := applyDiff(content, diff)
 	if err != nil {
 		logger.ErrorCF("patch", "Failed to apply patch",
@@ -145,7 +133,6 @@ func (t *PatchTool) Execute(ctx context.Context, args map[string]interface{}) *T
 	return SilentResult("Patch applied successfully.")
 }
 
-// parseUnifiedDiff parses a unified diff string
 func parseUnifiedDiff(diff string) (*DiffInfo, error) {
 	lines := strings.Split(diff, "\n")
 	info := &DiffInfo{}
@@ -156,12 +143,10 @@ func parseUnifiedDiff(diff string) (*DiffInfo, error) {
 	for i, line := range lines {
 		line = strings.TrimRight(line, "\r")
 
-		// Skip empty lines at the start
 		if !inHunk && line == "" {
 			continue
 		}
 
-		// Diff header lines
 		if strings.HasPrefix(line, "--- ") {
 			info.OldFile = strings.TrimPrefix(line, "--- ")
 			continue
@@ -171,14 +156,12 @@ func parseUnifiedDiff(diff string) (*DiffInfo, error) {
 			continue
 		}
 
-		// Hunk header: @@ -oldStart,oldCount +newStart,newCount @@
 		if strings.HasPrefix(line, "@@") {
 			inHunk = true
 			if currentHunk != nil {
 				info.Hunks = append(info.Hunks, currentHunk)
 			}
 
-			// Parse hunk header
 			re := regexp.MustCompile(`@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
 			matches := re.FindStringSubmatch(line)
 			if matches == nil {
@@ -207,16 +190,12 @@ func parseUnifiedDiff(diff string) (*DiffInfo, error) {
 			continue
 		}
 
-		// Hunk content lines
 		if inHunk && currentHunk != nil {
-			// Check if it's a valid hunk line
 			if len(line) > 0 && (line[0] == '+' || line[0] == '-' || line[0] == ' ') {
 				currentHunk.Lines = append(currentHunk.Lines, line)
 			} else if line == "" {
-				// Empty line in hunk is treated as context
 				currentHunk.Lines = append(currentHunk.Lines, " "+line)
 			} else if strings.HasPrefix(line, "\\") {
-				// \ No newline at end of file - skip this marker
 				continue
 			}
 		}
@@ -233,16 +212,13 @@ func parseUnifiedDiff(diff string) (*DiffInfo, error) {
 	return info, nil
 }
 
-// applyDiff applies a diff to content and returns the new content
 func applyDiff(content string, diff *DiffInfo) (string, error) {
 	lines := strings.Split(content, "\n")
 
-	// Convert 1-indexed to 0-indexed
 	for _, hunk := range diff.Hunks {
 		hunk.OldStart--
 	}
 
-	// Validate and apply from bottom to top to maintain line numbers
 	for i := len(diff.Hunks) - 1; i >= 0; i-- {
 		hunk := diff.Hunks[i]
 
@@ -256,21 +232,18 @@ func applyDiff(content string, diff *DiffInfo) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
-// applyHunk validates that a hunk can be applied
 func applyHunk(lines []string, hunk *Hunk) error {
 	start := hunk.OldStart
 	if start < 0 || start > len(lines) {
 		return fmt.Errorf("hunk starts outside file (line %d, file has %d lines)", start+1, len(lines))
 	}
 
-	// Count context and removal lines
 	contextCount := 0
 	removalCount := 0
 
 	for _, line := range hunk.Lines {
 		switch line[0] {
 		case ' ', '-':
-			// Context or removal - must exist in original
 			if line[0] == ' ' {
 				contextCount++
 			} else {
@@ -294,7 +267,6 @@ func applyHunk(lines []string, hunk *Hunk) error {
 	return nil
 }
 
-// rebuildLines rebuilds the lines array after applying a hunk
 func rebuildLines(lines []string, hunk *Hunk) []string {
 	start := hunk.OldStart
 
@@ -307,19 +279,15 @@ func rebuildLines(lines []string, hunk *Hunk) []string {
 	for _, line := range hunk.Lines {
 		switch line[0] {
 		case ' ':
-			// Context - copy from original
 			newLines = append(newLines, line[1:])
 			contextSeen++
 		case '-':
-			// Removal - skip
 			removalSeen++
 		case '+':
-			// Addition - include new line
 			newLines = append(newLines, line[1:])
 		}
 	}
 
-	// Append remaining lines after the hunk
 	afterIdx := start + contextSeen + removalSeen
 	if afterIdx < len(lines) {
 		newLines = append(newLines, lines[afterIdx:]...)

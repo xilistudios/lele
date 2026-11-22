@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-// fakeSessionCompactor records CompactSession calls.
 type fakeSessionCompactor struct {
 	calls     int
 	lastKey   string
@@ -47,12 +46,9 @@ func TestSyncCompactionToSession_CallsCompactor(t *testing.T) {
 }
 
 func TestSyncCompactionToSession_SkipsWhenNilOrEmpty(t *testing.T) {
-	// Nil compactor: must not panic.
 	syncCompactionToSession(ToolLoopConfig{SessionKey: "k"}, "summary")
-	// Empty session key: must not call.
 	sc := &fakeSessionCompactor{}
 	syncCompactionToSession(ToolLoopConfig{SessionCompactor: sc}, "summary")
-	// Empty summary: must not call.
 	syncCompactionToSession(ToolLoopConfig{SessionCompactor: sc, SessionKey: "k"}, "")
 	if sc.calls != 0 {
 		t.Errorf("expected 0 CompactSession calls, got %d", sc.calls)
@@ -62,7 +58,6 @@ func TestSyncCompactionToSession_SkipsWhenNilOrEmpty(t *testing.T) {
 func TestSyncCompactionToSession_SwallowsErrors(t *testing.T) {
 	sc := &fakeSessionCompactor{err: errors.New("disk full")}
 	cfg := ToolLoopConfig{SessionKey: "k", SessionCompactor: sc}
-	// Must not panic or propagate — compaction is an optimization.
 	syncCompactionToSession(cfg, "summary")
 	if sc.calls != 1 {
 		t.Errorf("expected the call to be attempted, got %d", sc.calls)
