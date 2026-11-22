@@ -1,8 +1,9 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { GroupInfo, GroupTurn } from '../../lib/types'
 import { IconButton } from '../atoms/IconButton'
 import { CloseIcon } from '../atoms/Icons'
+import { SideDrawer } from '../atoms/SideDrawer'
 import { MarkdownText } from '../molecules/MarkdownText'
 
 interface GroupChatPanelProps {
@@ -10,8 +11,6 @@ interface GroupChatPanelProps {
   isOpen: boolean
   onClose: () => void
 }
-
-const ANIMATION_DURATION_MS = 300
 
 function getRoleBadgeClass(role: string): string {
   switch (role) {
@@ -185,34 +184,7 @@ export const GroupChatPanel = memo(function GroupChatPanel({
   onClose,
 }: GroupChatPanelProps) {
   const { t } = useTranslation()
-  const [visible, setVisible] = useState(false)
-  const [animate, setAnimate] = useState(false)
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
-  const rafRef = useRef<number>(0)
-
-  useEffect(() => {
-    if (isOpen) {
-      setVisible(true)
-      rafRef.current =
-        typeof requestAnimationFrame !== 'undefined'
-          ? requestAnimationFrame(() => {
-              rafRef.current =
-                typeof requestAnimationFrame !== 'undefined'
-                  ? requestAnimationFrame(() => setAnimate(true))
-                  : 0
-            })
-          : 0
-      return () => {
-        if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(rafRef.current)
-      }
-    }
-    setAnimate(false)
-    const timer = setTimeout(() => setVisible(false), ANIMATION_DURATION_MS)
-    return () => {
-      clearTimeout(timer)
-      if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(rafRef.current)
-    }
-  }, [isOpen])
 
   const selectedGroup = selectedGroupId
     ? groups.find((g) => g.groupID === selectedGroupId)
@@ -225,88 +197,81 @@ export const GroupChatPanel = memo(function GroupChatPanel({
     onClose()
   }, [onClose])
 
-  if (!visible) return null
-
   return (
-    <>
-      <button
-        type="button"
-        className={`fixed inset-0 z-40 bg-overlay transition-opacity duration-300 ease-out ${animate ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-        onClick={handleClose}
-        aria-label={t('common.close')}
-      />
+    <SideDrawer
+      isOpen={isOpen}
+      onClose={handleClose}
+      ariaLabel={t('groups.title')}
+      widthClassName="w-96"
+      testId="group-chat-panel"
+    >
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <h3 className="text-sm font-medium text-text-primary">{t('groups.title')}</h3>
+        <IconButton
+          onClick={handleClose}
+          className="rounded p-1 text-text-tertiary hover:bg-surface-hover hover:text-text-secondary transition-colors"
+          aria-label={t('common.close')}
+        >
+          <CloseIcon size={16} />
+        </IconButton>
+      </div>
 
-      <div
-        className={`bg-background-secondary fixed right-0 top-0 z-50 h-full w-96 max-w-[90vw] safe-area-y border-l border-border shadow-lg flex flex-col transition-transform duration-300 ease-out ${animate ? 'translate-x-0' : 'translate-x-full'}`}
-      >
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h3 className="text-sm font-medium text-text-primary">{t('groups.title')}</h3>
-          <IconButton
-            onClick={handleClose}
-            className="rounded p-1 text-text-tertiary hover:bg-surface-hover hover:text-text-secondary transition-colors"
-            aria-label={t('common.close')}
-          >
-            <CloseIcon size={16} />
-          </IconButton>
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {groups.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-text-tertiary">
-              <p className="text-sm">{t('groups.noGroups')}</p>
-            </div>
-          ) : (
-            <div className="p-4 space-y-4">
-              {groups.length > 1 && !selectedGroup && (
-                <ul className="divide-y divide-border border border-border rounded-md overflow-hidden">
-                  {groups.map((group) => (
-                    <li key={group.groupID}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedGroupId(group.groupID)}
-                        className="w-full px-3 py-2.5 text-left hover:bg-surface-hover transition-colors"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium text-text-primary truncate">
-                            {group.groupID}
-                          </span>
-                          <GroupStatusBadge status={group.status} />
-                        </div>
-                        {group.participants && (
-                          <p className="text-xs text-text-tertiary mt-0.5 truncate">
-                            {group.participants}
-                          </p>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {selectedGroup && (
-                <>
-                  {groups.length > 1 && (
+      <div className="flex-1 overflow-y-auto">
+        {groups.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-text-tertiary">
+            <p className="text-sm">{t('groups.noGroups')}</p>
+          </div>
+        ) : (
+          <div className="p-4 space-y-4">
+            {groups.length > 1 && !selectedGroup && (
+              <ul className="divide-y divide-border border border-border rounded-md overflow-hidden">
+                {groups.map((group) => (
+                  <li key={group.groupID}>
                     <button
                       type="button"
-                      onClick={() => setSelectedGroupId(null)}
-                      className="text-xs text-text-tertiary hover:text-text-secondary transition-colors"
+                      onClick={() => setSelectedGroupId(group.groupID)}
+                      className="w-full px-3 py-2.5 text-left hover:bg-surface-hover transition-colors"
                     >
-                      ← {t('groups.backToList')}
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-text-primary truncate">
+                          {group.groupID}
+                        </span>
+                        <GroupStatusBadge status={group.status} />
+                      </div>
+                      {group.participants && (
+                        <p className="text-xs text-text-tertiary mt-0.5 truncate">
+                          {group.participants}
+                        </p>
+                      )}
                     </button>
-                  )}
-                  <div className="flex items-center gap-2 mb-1">
-                    <h4 className="text-sm font-medium text-text-primary truncate">
-                      {selectedGroup.groupID}
-                    </h4>
-                    <GroupStatusBadge status={selectedGroup.status} />
-                  </div>
-                  <GroupDetail group={selectedGroup} />
-                </>
-              )}
-            </div>
-          )}
-        </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {selectedGroup && (
+              <>
+                {groups.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGroupId(null)}
+                    className="text-xs text-text-tertiary hover:text-text-secondary transition-colors"
+                  >
+                    ← {t('groups.backToList')}
+                  </button>
+                )}
+                <div className="flex items-center gap-2 mb-1">
+                  <h4 className="text-sm font-medium text-text-primary truncate">
+                    {selectedGroup.groupID}
+                  </h4>
+                  <GroupStatusBadge status={selectedGroup.status} />
+                </div>
+                <GroupDetail group={selectedGroup} />
+              </>
+            )}
+          </div>
+        )}
       </div>
-    </>
+    </SideDrawer>
   )
 })
