@@ -1,4 +1,4 @@
-.PHONY: all build install uninstall clean help test test-claude-bridge web-build dev
+.PHONY: all build install uninstall clean help test web-build dev
 
 # Build variables
 BINARY_NAME=lele
@@ -151,10 +151,6 @@ vet:
 ## fmt: Format Go code
 test:
 	@$(GO) test ./...
-
-## test-claude-bridge: Run the embedded Claude Code bridge's Node unit tests (no SDK, no login)
-test-claude-bridge:
-	@node --test pkg/providers/claudecode/bridge_test.mjs
 
 ## bench: Run the TUI performance benchmarks (scale harness)
 # Baselines are recorded in docs/perf/tui-long-chat-baseline.md. Keep the

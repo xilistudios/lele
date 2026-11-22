@@ -15,24 +15,29 @@ import (
 	"time"
 )
 
-// These tests drive the REAL stack: node -> claudecode/bridge.mjs ->
-// @anthropic-ai/claude-agent-sdk -> claude CLI, authenticated with the user's
-// Claude Code subscription.
+// These tests drive the REAL stack: node -> the installed bridge (bridge.mjs
+// from xilistudios/lele-claude-bridge) -> @anthropic-ai/claude-agent-sdk ->
+// claude CLI, authenticated with the user's Claude Code subscription.
 //
 // Run with: go test -tags=integration ./pkg/providers/ -run ClaudeCode -v
 //
-// Three things must hold on the machine, and each one that does not turns the
-// suite into a skip with an actionable message instead of a failure:
-//  1. a node binary (LELE_NODE_BIN, else `node`) — the bridge is JavaScript;
-//  2. a resolvable Agent SDK (CLAUDE_AGENT_SDK_PATH, `npm root -g`, the usual
-//     global prefixes, or NODE_PATH) — lele never npm-installs anything;
-//  3. live credentials: a logged-in `claude` (the CLI or the one bundled with
+// Four things must hold on the machine, checked in this order, and each one
+// that does not turns the suite into a skip with an actionable message instead
+// of a failure:
+//  1. the bridge installed (its install.sh one-liner, or LELE_CLAUDE_BRIDGE_PATH
+//     pointing at the directory holding bridge.mjs and bridge_lib.mjs);
+//  2. a node binary (LELE_NODE_BIN, else `node`) >= 18.14 — the bridge is
+//     JavaScript;
+//  3. a resolvable Agent SDK (CLAUDE_AGENT_SDK_PATH, the bridge's own
+//     node_modules, `npm root -g`, the usual global prefixes, or NODE_PATH) —
+//     lele never npm-installs anything;
+//  4. live credentials: a logged-in `claude` (the CLI or the one bundled with
 //     the SDK). Credentials are probed with one short Chat because there is no
 //     reliable file-level way to ask "is this subscription logged in?".
 //
 // Everything else (protocol, streaming, cancellation, env sanitization) is
 // covered without node by claude_code_provider_test.go and by
-// `node --test pkg/providers/claudecode/bridge_test.mjs`.
+// `node --test bridge_test.mjs` in xilistudios/lele-claude-bridge.
 
 // claudeIntegrationTimeout bounds a single Chat/ChatStream against the real
 // model. A cold CLI start plus one turn comfortably fits; anything longer is a
@@ -78,9 +83,15 @@ func requireClaudeCodeIntegration(t *testing.T) {
 	}
 }
 
-// probeClaudeCodeIntegration checks node, the SDK and the subscription, in that
-// order, and reports what a human has to fix when something is missing.
+// probeClaudeCodeIntegration checks the installed bridge, node, the SDK and the
+// subscription, in that order, and reports what a human has to fix when
+// something is missing.
 func probeClaudeCodeIntegration() claudeIntegrationOutcome {
+	// The resolution error already names the install one-liner and the env knob.
+	if _, err := claudeBridgeDir(); err != nil {
+		return claudeIntegrationOutcome{skip: err.Error()}
+	}
+
 	nodeBin := claudeBridgeNodeBin()
 	nodePath, err := exec.LookPath(nodeBin)
 	if err != nil {
@@ -94,8 +105,9 @@ func probeClaudeCodeIntegration() claudeIntegrationOutcome {
 	if sdkDir == "" {
 		return claudeIntegrationOutcome{skip: fmt.Sprintf(
 			"the Claude Agent SDK (@anthropic-ai/claude-agent-sdk) is not resolvable; "+
-				"install it with `npm install -g @anthropic-ai/claude-agent-sdk` or set CLAUDE_AGENT_SDK_PATH "+
-				"to the node_modules directory that contains it (searched: %s)",
+				"re-run the bridge installer "+
+				"(`curl -fsSL https://raw.githubusercontent.com/xilistudios/lele-claude-bridge/main/install.sh | sh`) "+
+				"or set CLAUDE_AGENT_SDK_PATH to the node_modules directory that contains it (searched: %s)",
 			strings.Join(searchPaths, ", "))}
 	}
 
@@ -152,7 +164,11 @@ func claudeIntegrationSkipReason(nodePath, sdkDir string, err error) string {
 	}
 
 	if strings.Contains(message, "claude agent sdk not found") {
-		return fmt.Sprintf("the Claude Agent SDK at %s could not be imported by node %s: %v", sdkDir, nodePath, err)
+		return fmt.Sprintf(
+			"the Claude Agent SDK at %s could not be imported by node %s; re-run the bridge install.sh "+
+				"(`curl -fsSL https://raw.githubusercontent.com/xilistudios/lele-claude-bridge/main/install.sh | sh`) "+
+				"or set CLAUDE_AGENT_SDK_PATH: %v",
+			sdkDir, nodePath, err)
 	}
 
 	return ""

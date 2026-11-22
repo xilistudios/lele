@@ -7,11 +7,7 @@ package providers
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"embed"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,26 +21,28 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers/common"
 )
 
-// The bridge is two ES modules. They are embedded (never written by hand at
-// runtime) so lele stays a single binary, and extracted side by side because
-// bridge.mjs imports ./bridge_lib.mjs relatively:
+// The bridge lives in its own repository, xilistudios/lele-claude-bridge,
+// installed by its install.sh into <lele-dir>/claude-bridge (override with
+// LELE_CLAUDE_BRIDGE_PATH). lele spawns it as a persistent child; the two ES
+// modules must sit side by side because bridge.mjs imports ./bridge_lib.mjs
+// relatively:
 //
 //	lele agent loop (Go)
 //	  └─ persistent child: node bridge.mjs   (JSON lines over stdio)
 //	       └─ @anthropic-ai/claude-agent-sdk query()
 //	            └─ claude CLI (subscription auth)
 //
-// bridge_test.mjs is deliberately NOT embedded: it is a node unit test.
-//
-//go:embed claudecode/bridge.mjs claudecode/bridge_lib.mjs
-var claudeBridgeAssets embed.FS
+// The wire contract is co-owned with the bridge repo: protocol changes must
+// land in both (the fake-bridge suite here pins Go's side).
 
 // Bridge protocol constants. Wire documentation lives in the spec and in
-// claudecode/bridge.mjs; these names are the only strings Go needs.
+// xilistudios/lele-claude-bridge (bridge.mjs); these names are the only strings
+// Go needs.
 const (
 	claudeBridgeModel = "claude-code"
 
@@ -60,7 +58,9 @@ const (
 	claudeBridgeRequestChat   = "chat"
 	claudeBridgeRequestCancel = "cancel"
 
-	claudeBridgeDirPrefix = "lele-claude-bridge-"
+	// claudeBridgeSubdir is the install dir under config.GetLeleDir(); it must
+	// match install.sh's default in xilistudios/lele-claude-bridge.
+	claudeBridgeSubdir = "claude-bridge"
 
 	// claudeBridgeInitTimeout bounds the init -> ready handshake. Node + ESM
 	// resolution of a globally installed SDK is fast on a warm cache and a few
@@ -83,6 +83,7 @@ const (
 	claudeBridgeEnvSDKPath    = "CLAUDE_AGENT_SDK_PATH"
 	claudeBridgeEnvClaudePath = "CLAUDE_CODE_PATH"
 	claudeBridgeEnvNodePath   = "NODE_PATH"
+	claudeBridgeEnvBridgePath = "LELE_CLAUDE_BRIDGE_PATH"
 )
 
 // claudeBridgeStrippedEnvVars are removed from the child environment.
@@ -532,7 +533,7 @@ func (p *ClaudeCodeProvider) forgetBridge(proc *claudeProc) {
 	p.mu.Unlock()
 }
 
-// startBridge extracts the assets, spawns the child and performs the
+// startBridge resolves the installed bridge, spawns the child and performs the
 // init -> ready handshake.
 //
 // The command is deliberately not exec.CommandContext: the child serves many
@@ -948,65 +949,42 @@ func truncateForLog(text string, limit int) string {
 		return text
 	}
 	return text[:limit] + "…"
-} // --- embedded assets -------------------------------------------------------
+} // --- bridge resolution -----------------------------------------------------
 
-// claudeBridgeAssetFiles are extracted in this order; the directory name covers
-// both so a change to either invalidates the cache.
-var claudeBridgeAssetFiles = []string{"bridge.mjs", "bridge_lib.mjs"}
+// claudeBridgeRequiredFiles must sit side by side: bridge.mjs imports
+// ./bridge_lib.mjs relatively.
+var claudeBridgeRequiredFiles = []string{"bridge.mjs", "bridge_lib.mjs"}
 
-var (
-	claudeBridgeDirOnce sync.Once
-	claudeBridgeDirPath string
-	errClaudeBridgeDir  error
-)
-
-// claudeBridgeDir extracts the embedded bridge once per process and returns the
-// directory holding bridge.mjs and bridge_lib.mjs side by side.
+// claudeBridgeDir resolves the externally installed bridge directory:
+// LELE_CLAUDE_BRIDGE_PATH (a directory, or a direct path to bridge.mjs), else
+// <config.GetLeleDir()>/claude-bridge. Pure and uncached: it depends on env that
+// tests (and users) can change between providers, and it costs two stats per
+// bridge start.
 //
-// The embedded assets are compile-time constants, so caching the result in a
-// package-level sync.Once is safe and keeps two providers (or a restart) from
-// rewriting the same files.
+// A missing installation is a plain (non-failover) error naming the install
+// one-liner: another provider cannot fix a missing install.
 func claudeBridgeDir() (string, error) {
-	claudeBridgeDirOnce.Do(func() {
-		claudeBridgeDirPath, errClaudeBridgeDir = extractClaudeBridge()
-	})
-	return claudeBridgeDirPath, errClaudeBridgeDir
-}
-
-// extractClaudeBridge writes the bridge into
-// <os.TempDir()>/lele-claude-bridge-<sha256[:12]>/ (0700, files 0600).
-//
-// Content-addressing makes concurrent lele processes converge on the same
-// directory, and comparing before writing means an already-correct checkout is
-// left untouched.
-func extractClaudeBridge() (string, error) {
-	contents := make([][]byte, len(claudeBridgeAssetFiles))
-	digest := sha256.New()
-	for i, name := range claudeBridgeAssetFiles {
-		data, err := claudeBridgeAssets.ReadFile("claudecode/" + name)
-		if err != nil {
-			return "", fmt.Errorf("reading the embedded bridge asset %q: %w", name, err)
+	dir := strings.TrimSpace(os.Getenv(claudeBridgeEnvBridgePath))
+	if dir != "" {
+		if filepath.Base(filepath.Clean(dir)) == "bridge.mjs" {
+			dir = filepath.Dir(filepath.Clean(dir))
 		}
-		contents[i] = data
-		digest.Write([]byte(name))
-		digest.Write([]byte{0})
-		digest.Write(data)
-		digest.Write([]byte{0})
+	} else {
+		dir = filepath.Join(config.GetLeleDir(), claudeBridgeSubdir)
 	}
 
-	dir := filepath.Join(os.TempDir(), claudeBridgeDirPrefix+hex.EncodeToString(digest.Sum(nil))[:12])
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("creating the Claude Code bridge directory %q: %w", dir, err)
+	var missing []string
+	for _, name := range claudeBridgeRequiredFiles {
+		if info, err := os.Stat(filepath.Join(dir, name)); err != nil || info.IsDir() {
+			missing = append(missing, name)
+		}
 	}
-
-	for i, name := range claudeBridgeAssetFiles {
-		path := filepath.Join(dir, name)
-		if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, contents[i]) {
-			continue
-		}
-		if err := os.WriteFile(path, contents[i], 0o600); err != nil {
-			return "", fmt.Errorf("writing the Claude Code bridge asset %q: %w", path, err)
-		}
+	if len(missing) > 0 {
+		return "", fmt.Errorf(
+			"the Claude Code bridge is not installed in %s (missing %s): "+
+				"install it with `curl -fsSL https://raw.githubusercontent.com/xilistudios/lele-claude-bridge/main/install.sh | sh`, "+
+				"or set %s to the directory containing bridge.mjs and bridge_lib.mjs",
+			dir, strings.Join(missing, ", "), claudeBridgeEnvBridgePath)
 	}
 
 	return dir, nil
@@ -1050,11 +1028,18 @@ func (p *ClaudeCodeProvider) sdkSearchPaths() []string {
 	return p.sdkPaths
 }
 
-// discoverClaudeSDKSearchPaths builds the candidate list, most specific first.
+// discoverClaudeSDKSearchPaths builds the candidate list, most specific first:
+// CLAUDE_AGENT_SDK_PATH, the installed bridge's own node_modules (the canonical
+// layout; the bridge's bare import resolves it anyway, but the list also feeds
+// the integration probe and the re-exported NODE_PATH), then npm's global root
+// and the usual global prefixes.
 func discoverClaudeSDKSearchPaths() []string {
-	paths := make([]string, 0, 5)
+	paths := make([]string, 0, 6)
 	if configured := strings.TrimSpace(os.Getenv(claudeBridgeEnvSDKPath)); configured != "" {
 		paths = append(paths, configured)
+	}
+	if dir, err := claudeBridgeDir(); err == nil {
+		paths = append(paths, filepath.Join(dir, "node_modules"))
 	}
 	if root := npmGlobalRoot(); root != "" {
 		paths = append(paths, root)

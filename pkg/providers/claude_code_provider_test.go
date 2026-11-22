@@ -21,11 +21,12 @@ import (
 // These tests exercise the Go side of the Claude Code provider without node, the
 // Agent SDK or the claude CLI: the provider is pointed at *this test binary*
 // re-executed as a helper process that speaks the same JSON-lines protocol as
-// pkg/providers/claudecode/bridge.mjs (the stdlib helper-process pattern).
+// the external bridge (xilistudios/lele-claude-bridge, bridge.mjs) (the stdlib
+// helper-process pattern).
 //
-// The bridge protocol itself is covered by node --test bridge_test.mjs; the
-// contract tested here is the one Go depends on: handshake, dispatch by id,
-// streaming, cancellation, crash recovery and env sanitization.
+// The bridge protocol itself is covered by `node --test bridge_test.mjs` in that
+// repository; the contract tested here is the one Go depends on: handshake,
+// dispatch by id, streaming, cancellation, crash recovery and env sanitization.
 
 const (
 	claudeFakeBridgeEnv    = "GO_WANT_CLAUDE_BRIDGE_HELPER"
@@ -1013,57 +1014,115 @@ func TestClaudeCodeExecutablePathHonoursEnv(t *testing.T) {
 	}
 }
 
-// --- tests: bridge assets --------------------------------------------------
+// --- tests: bridge resolution ----------------------------------------------
 
-// TestClaudeBridgeDirExtractsBothModules asserts the embedded assets land side
-// by side in one 0700 directory: bridge.mjs imports ./bridge_lib.mjs relatively.
-func TestClaudeBridgeDirExtractsBothModules(t *testing.T) {
-	dir, err := claudeBridgeDir()
+// TestClaudeBridgeDirHonoursEnvOverride pins LELE_CLAUDE_BRIDGE_PATH: a
+// directory, a direct path to bridge.mjs, and whitespace-only (= unset).
+func TestClaudeBridgeDirHonoursEnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	writeClaudeBridgeStub(t, dir, claudeBridgeRequiredFiles...)
+
+	t.Setenv(claudeBridgeEnvBridgePath, dir)
+	got, err := claudeBridgeDir()
 	if err != nil {
 		t.Fatalf("claudeBridgeDir() error = %v", err)
 	}
-	if base := filepath.Base(dir); !strings.HasPrefix(base, claudeBridgeDirPrefix) || len(base) != len(claudeBridgeDirPrefix)+12 {
-		t.Fatalf("directory = %q, want %s<12 hex chars>", base, claudeBridgeDirPrefix)
-	}
-	if filepath.Dir(dir) != filepath.Clean(os.TempDir()) {
-		t.Fatalf("directory = %q, want it under %q", dir, os.TempDir())
+	if got != dir {
+		t.Fatalf("claudeBridgeDir() = %q, want %q", got, dir)
 	}
 
-	info, err := os.Stat(dir)
-	if err != nil {
-		t.Fatalf("stat %q: %v", dir, err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o700 {
-		t.Errorf("directory permissions = %o, want 700", perm)
+	// Both spellings are natural: the env value may point at the script.
+	t.Setenv(claudeBridgeEnvBridgePath, filepath.Join(dir, "bridge.mjs"))
+	if got, err = claudeBridgeDir(); err != nil || got != dir {
+		t.Fatalf("claudeBridgeDir() = (%q, %v), want (%q, nil)", got, err, dir)
 	}
 
-	for _, name := range claudeBridgeAssetFiles {
-		path := filepath.Join(dir, name)
-		fileInfo, err := os.Stat(path)
-		if err != nil {
-			t.Fatalf("stat %q: %v", path, err)
-		}
-		if perm := fileInfo.Mode().Perm(); perm != 0o600 {
-			t.Errorf("%s permissions = %o, want 600", name, perm)
-		}
-		if fileInfo.Size() == 0 {
-			t.Errorf("%s is empty", name)
-		}
-	}
-
-	// Idempotent: a second call must return the same directory.
-	again, err := claudeBridgeDir()
-	if err != nil {
-		t.Fatalf("second claudeBridgeDir() error = %v", err)
-	}
-	if again != dir {
-		t.Errorf("second call returned %q, want %q", again, dir)
+	// Blank means "not configured", so the default layout decides.
+	leleDir := t.TempDir()
+	defaultDir := filepath.Join(leleDir, claudeBridgeSubdir)
+	writeClaudeBridgeStub(t, defaultDir, claudeBridgeRequiredFiles...)
+	t.Setenv("LELE_CONFIG_DIR", leleDir)
+	t.Setenv(claudeBridgeEnvBridgePath, "   ")
+	if got, err = claudeBridgeDir(); err != nil || got != defaultDir {
+		t.Fatalf("claudeBridgeDir() = (%q, %v), want (%q, nil)", got, err, defaultDir)
 	}
 }
 
-// TestClaudeCodeProvider_BridgeCommandUsesNodeAndExtractedDir pins the default
-// argv (`node <tmp>/bridge.mjs`).
-func TestClaudeCodeProvider_BridgeCommandUsesNodeAndExtractedDir(t *testing.T) {
+// TestClaudeBridgeDirDefaultRespectsLeleConfigDir pins the default install dir:
+// <lele-dir>/claude-bridge, with LELE_CONFIG_DIR relocating lele's state.
+func TestClaudeBridgeDirDefaultRespectsLeleConfigDir(t *testing.T) {
+	leleDir := t.TempDir()
+	t.Setenv("LELE_CONFIG_DIR", leleDir)
+	t.Setenv(claudeBridgeEnvBridgePath, "")
+
+	// Negative control: without the files the same layout must not resolve, so
+	// the assertion below proves resolution rather than an inherited env value.
+	if got, err := claudeBridgeDir(); err == nil {
+		t.Fatalf("claudeBridgeDir() = %q, want an error when the bridge is absent", got)
+	}
+
+	want := filepath.Join(leleDir, claudeBridgeSubdir)
+	writeClaudeBridgeStub(t, want, claudeBridgeRequiredFiles...)
+	got, err := claudeBridgeDir()
+	if err != nil {
+		t.Fatalf("claudeBridgeDir() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("claudeBridgeDir() = %q, want %q", got, want)
+	}
+}
+
+// TestClaudeBridgeDirMissingBridgeIsPlainActionableError pins the failure
+// contract: the message names the install one-liner and the env knob, and it is
+// a plain error, never a FailoverError (another provider cannot fix a missing
+// install).
+func TestClaudeBridgeDirMissingBridgeIsPlainActionableError(t *testing.T) {
+	empty := t.TempDir()
+	onlyFirst := t.TempDir()
+	writeClaudeBridgeStub(t, onlyFirst, "bridge.mjs")
+	onlySecond := t.TempDir()
+	writeClaudeBridgeStub(t, onlySecond, "bridge_lib.mjs")
+
+	tests := []struct {
+		name    string
+		dir     string
+		missing string
+	}{
+		{name: "absent install", dir: filepath.Join(empty, "never-installed"), missing: "bridge.mjs"},
+		{name: "half install without bridge_lib", dir: onlyFirst, missing: "bridge_lib.mjs"},
+		{name: "half install without bridge", dir: onlySecond, missing: "bridge.mjs"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(claudeBridgeEnvBridgePath, test.dir)
+
+			got, err := claudeBridgeDir()
+			if err == nil {
+				t.Fatalf("claudeBridgeDir() = %q, want an error", got)
+			}
+
+			message := err.Error()
+			for _, want := range []string{test.dir, "install.sh", claudeBridgeEnvBridgePath, test.missing} {
+				if !strings.Contains(message, want) {
+					t.Errorf("error %q does not mention %q", message, want)
+				}
+			}
+
+			var failover *FailoverError
+			if errors.As(err, &failover) {
+				t.Errorf("error %v is a FailoverError, want a plain error", err)
+			}
+		})
+	}
+}
+
+// TestClaudeCodeProvider_BridgeCommandUsesNodeAndResolvedDir pins the argv:
+// <node> <install dir>/bridge.mjs, and that a missing install never yields one.
+func TestClaudeCodeProvider_BridgeCommandUsesNodeAndResolvedDir(t *testing.T) {
+	dir := t.TempDir()
+	writeClaudeBridgeStub(t, dir, claudeBridgeRequiredFiles...)
+	t.Setenv(claudeBridgeEnvBridgePath, dir)
 	t.Setenv(claudeBridgeEnvNodeBin, "/custom/node")
 
 	p := NewClaudeCodeProvider("/workspace")
@@ -1077,11 +1136,54 @@ func TestClaudeCodeProvider_BridgeCommandUsesNodeAndExtractedDir(t *testing.T) {
 	if command[0] != "/custom/node" {
 		t.Errorf("command[0] = %q, want %q", command[0], "/custom/node")
 	}
-	if filepath.Base(command[1]) != "bridge.mjs" {
-		t.Errorf("command[1] = %q, want .../bridge.mjs", command[1])
+	if want := filepath.Join(dir, "bridge.mjs"); command[1] != want {
+		t.Errorf("command[1] = %q, want %q", command[1], want)
 	}
 	if _, err := os.Stat(command[1]); err != nil {
-		t.Errorf("the bridge script was not extracted: %v", err)
+		t.Errorf("the resolved bridge script is missing on disk: %v", err)
+	}
+
+	// A missing install fails before any argv exists.
+	t.Setenv(claudeBridgeEnvBridgePath, filepath.Join(t.TempDir(), "never-installed"))
+	if command, err := p.bridgeCommand(); err == nil {
+		t.Fatalf("bridgeCommand() = %v, want an error when the bridge is absent", command)
+	}
+}
+
+// TestClaudeCodeProvider_SDKSearchPathsIncludeInstalledBridge pins the
+// candidate order around the installed bridge: CLAUDE_AGENT_SDK_PATH first, then
+// the bridge's own node_modules, which is where install.sh puts the SDK.
+func TestClaudeCodeProvider_SDKSearchPathsIncludeInstalledBridge(t *testing.T) {
+	dir := t.TempDir()
+	writeClaudeBridgeStub(t, dir, claudeBridgeRequiredFiles...)
+	bridgeNodeModules := filepath.Join(dir, "node_modules")
+	if err := os.MkdirAll(bridgeNodeModules, 0o755); err != nil {
+		t.Fatalf("creating %q: %v", bridgeNodeModules, err)
+	}
+
+	t.Setenv(claudeBridgeEnvBridgePath, dir)
+	t.Setenv(claudeBridgeEnvSDKPath, "/from/env")
+
+	paths := NewClaudeCodeProvider("/workspace").sdkSearchPaths()
+	if len(paths) < 2 {
+		t.Fatalf("sdkSearchPaths() = %v, want at least 2 entries", paths)
+	}
+	if paths[0] != "/from/env" {
+		t.Errorf("paths[0] = %q, want %q", paths[0], "/from/env")
+	}
+	if paths[1] != bridgeNodeModules {
+		t.Errorf("paths[1] = %q, want %q", paths[1], bridgeNodeModules)
+	}
+
+	// Without an install the candidate must not appear: a stray path would make
+	// the integration probe claim an SDK it cannot import.
+	leleDir := t.TempDir()
+	t.Setenv(claudeBridgeEnvBridgePath, "")
+	t.Setenv("LELE_CONFIG_DIR", leleDir)
+	for _, path := range NewClaudeCodeProvider("/workspace").sdkSearchPaths() {
+		if strings.Contains(path, claudeBridgeSubdir) {
+			t.Errorf("sdkSearchPaths() = %v, want no bridge candidate when the bridge is absent", path)
+		}
 	}
 }
 
@@ -1095,6 +1197,22 @@ func lookupEnv(env []string, name string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// writeClaudeBridgeStub lays out an install: the named files under dir, with
+// dummy content.
+func writeClaudeBridgeStub(t *testing.T, dir string, names ...string) {
+	t.Helper()
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("creating %q: %v", dir, err)
+	}
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("// stub\n"), 0o644); err != nil {
+			t.Fatalf("writing %q: %v", path, err)
+		}
+	}
 }
 
 // firstLines keeps failure output readable.
