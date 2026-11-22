@@ -9,6 +9,7 @@ import {
   GeneralSettings,
   GroupsSettings,
   LogsViewer,
+  MCPSettings,
   NativeClientsSettings,
   ProvidersSettings,
   SessionSettings,
@@ -55,6 +56,8 @@ export function SettingsTabContent() {
       return <GroupsSettings />
     case 'tools':
       return <ToolsSettings />
+    case 'mcp':
+      return <MCPSettings />
     case 'system':
       return <SystemSettings />
     case 'updates':
