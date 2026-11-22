@@ -64,6 +64,21 @@ describe('SubagentsSettings — global defaults', () => {
     expect(u.getByLabelText(tr('settings.fields.subagentRetention'))).toHaveProperty('value', '5')
   })
 
+  test('the 0-semantics help texts render as translated text, not raw keys', () => {
+    const u = setup()
+    for (const key of [
+      'settings.descriptions.subagentDefaults',
+      'settings.descriptions.subagentTimeout',
+      'settings.descriptions.subagentMaxConcurrent',
+      'settings.descriptions.subagentMaxRetries',
+      'settings.descriptions.subagentMaxIterations',
+      'settings.descriptions.subagentRetention',
+    ]) {
+      expect(u.container.textContent).toContain(tr(key))
+      expect(u.container.textContent).not.toContain(key)
+    }
+  })
+
   test('editing a default writes its dotted path', () => {
     const u = setup()
     fireEvent.change(u.getByLabelText(tr('settings.fields.subagentTimeout')), {
