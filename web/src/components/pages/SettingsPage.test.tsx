@@ -181,3 +181,45 @@ describe('SettingsPage — one draft for the whole subtree', () => {
     expect(view.getByTestId('probe-tab').textContent).toContain('"hasDraft":true')
   })
 })
+
+describe('SettingsPage — new tabs', () => {
+  const tabIds = (container: HTMLElement) =>
+    Array.from(tabStrip(container)?.querySelectorAll('button') ?? []).map((button) =>
+      button.getAttribute('data-testid'),
+    )
+
+  test('subagents is a settings tab: strip visible, highlighted, no redirect', async () => {
+    const view = renderLayout('/settings/subagents', { config: 0 })
+    await waitFor(() => expect(view.getByTestId('probe-tab')).not.toBeNull())
+
+    expect(view.getByTestId('location').textContent).toBe('/settings/subagents')
+    expect(tabStrip(view.container)).not.toBeNull()
+    expect(
+      view.container
+        .querySelector('[data-testid="settings-tab-subagents"]')
+        ?.getAttribute('aria-current'),
+    ).toBe('page')
+  })
+
+  test('mcp is a settings tab: strip visible, highlighted, no redirect', async () => {
+    const view = renderLayout('/settings/mcp', { config: 0 })
+    await waitFor(() => expect(view.getByTestId('probe-tab')).not.toBeNull())
+
+    expect(view.getByTestId('location').textContent).toBe('/settings/mcp')
+    expect(tabStrip(view.container)).not.toBeNull()
+    expect(
+      view.container
+        .querySelector('[data-testid="settings-tab-mcp"]')
+        ?.getAttribute('aria-current'),
+    ).toBe('page')
+  })
+
+  test('the strip places subagents after agents and mcp after tools', async () => {
+    const view = renderLayout('/settings/general', { config: 0 })
+    await waitFor(() => expect(view.getByTestId('probe-tab')).not.toBeNull())
+
+    const ids = tabIds(view.container)
+    expect(ids[ids.indexOf('settings-tab-agents') + 1]).toBe('settings-tab-subagents')
+    expect(ids[ids.indexOf('settings-tab-tools') + 1]).toBe('settings-tab-mcp')
+  })
+})
