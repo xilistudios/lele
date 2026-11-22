@@ -487,11 +487,13 @@
     "tabs": {
       "general": "General",
       "agents": "Agentes",
+      "subagents": "Subagentes",
       "session": "Sesión",
       "providers": "Proveedores",
       "channels": "Canales",
       "native": "Clientes Native",
       "tools": "Herramientas",
+      "mcp": "MCP",
       "system": "Sistema",
       "updates": "Actualizaciones",
       "advanced": "Avanzado",
