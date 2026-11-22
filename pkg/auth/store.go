@@ -22,10 +22,7 @@ type AuthCredential struct {
 	ExpiresAt    time.Time `json:"expires_at,omitempty"`
 	Provider     string    `json:"provider"`
 	AuthMethod   string    `json:"auth_method"`
-	// Scopes holds the OAuth `scope` values granted by the token endpoint,
-	// split into individual scope strings. It is additive JSON: legacy
-	// credentials that lack the field simply unmarshal to nil.
-	Scopes []string `json:"scopes,omitempty"`
+	Scopes       []string  `json:"scopes,omitempty"`
 }
 
 type AuthStore struct {
@@ -51,9 +48,6 @@ var (
 	authRepo *store.AuthRepo
 )
 
-// UseStore configures the auth package to persist credentials in the
-// given SQLite repository. Until called (or if called with nil), the
-// legacy auth.json file backend is used.
 func UseStore(repo *store.AuthRepo) {
 	storeMu.Lock()
 	defer storeMu.Unlock()
@@ -70,8 +64,6 @@ func authFilePath() string {
 	return filepath.Join(config.GetLeleDir(), "auth.json")
 }
 
-// loadJSONStore loads the legacy auth.json file. It returns (nil, nil)
-// when the file does not exist.
 func loadJSONStore() (*AuthStore, error) {
 	path := authFilePath()
 	data, err := os.ReadFile(path)
@@ -91,18 +83,13 @@ func loadJSONStore() (*AuthStore, error) {
 	return &s, nil
 }
 
-// migrateFromJSONIfNeeded copies credentials from the legacy auth.json
-// file into the SQLite repository the first time it is used. It is
-// best-effort: failures are logged and swallowed so a migration problem
-// never blocks authentication, except for ListCredentials errors which
-// are propagated. The legacy file is never deleted or moved.
 func migrateFromJSONIfNeeded(repo *store.AuthRepo) error {
 	creds, err := repo.ListCredentials()
 	if err != nil {
 		return fmt.Errorf("auth: list credentials during migration check: %w", err)
 	}
 	if len(creds) > 0 {
-		return nil // already migrated (or already has data)
+		return nil
 	}
 
 	legacy, err := loadJSONStore()
@@ -111,7 +98,7 @@ func migrateFromJSONIfNeeded(repo *store.AuthRepo) error {
 		return nil //nolint:nilerr // best-effort migration: a broken legacy file must never block authentication
 	}
 	if legacy == nil {
-		return nil // no legacy file, nothing to migrate
+		return nil
 	}
 
 	for key, cred := range legacy.Credentials {
@@ -149,7 +136,6 @@ func LoadStore() (*AuthStore, error) {
 		return &AuthStore{Credentials: creds}, nil
 	}
 
-	// Legacy JSON backend
 	s, err := loadJSONStore()
 	if err != nil {
 		return nil, err
@@ -160,10 +146,6 @@ func LoadStore() (*AuthStore, error) {
 	return s, nil
 }
 
-// SaveStore persists the given AuthStore. When the SQLite backend is
-// active this behaves as an upsert: credentials present in store are
-// written, but credentials absent from store are NOT removed from the
-// repository.
 func SaveStore(store *AuthStore) error {
 	repo := currentRepo()
 	if repo != nil {
@@ -182,7 +164,6 @@ func SaveStore(store *AuthStore) error {
 		return nil
 	}
 
-	// Legacy JSON backend
 	path := authFilePath()
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -216,7 +197,6 @@ func GetCredential(provider string) (*AuthCredential, error) {
 		return &cred, nil
 	}
 
-	// Legacy JSON backend
 	store, err := LoadStore()
 	if err != nil {
 		return nil, err
@@ -244,7 +224,6 @@ func SetCredential(provider string, cred *AuthCredential) error {
 		return nil
 	}
 
-	// Legacy JSON backend
 	store, err := LoadStore()
 	if err != nil {
 		return err
@@ -262,7 +241,6 @@ func DeleteCredential(provider string) error {
 		return nil
 	}
 
-	// Legacy JSON backend
 	store, err := LoadStore()
 	if err != nil {
 		return err
@@ -280,7 +258,6 @@ func DeleteAllCredentials() error {
 		return nil
 	}
 
-	// Legacy JSON backend
 	path := authFilePath()
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
