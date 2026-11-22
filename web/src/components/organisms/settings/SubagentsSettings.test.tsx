@@ -106,6 +106,17 @@ describe('SubagentsSettings — agent selector', () => {
     expect(u.getByRole('group', { name: tr('settings.agentPage.subagentsAllowed') })).not.toBeNull()
   })
 
+  test('the default selection writes to its own agent index', () => {
+    const u = setup()
+    expect(selectOf(u.container)?.value).toBe('researcher')
+    fireEvent.click(u.getByLabelText(tr('settings.agentPage.subagentsEnable')))
+    expect(u.lastWrite('agents.list.1.subagents')).toEqual([
+      'agents.list.1.subagents',
+      { allow_agents: [] },
+    ])
+    expect(u.lastWrite('agents.list.0.subagents')).toBeUndefined()
+  })
+
   test('switching the selector edits the chosen agent index', () => {
     const u = setup()
     fireEvent.change(u.getByLabelText(tr('settings.subagentsPage.agentLabel')), {
