@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
+import { useInfiniteScroll } from '../../hooks/useInfiniteScroll'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { getModeTheme } from '../../lib/modeTheme'
 import { IconButton } from '../atoms/IconButton'
@@ -22,7 +23,7 @@ import { ModeSelector } from '../molecules/ModeSelector'
 import { SessionItem } from '../molecules/SessionItem'
 import { ChatSearchModal } from './ChatSearchModal'
 
-const MAX_VISIBLE_SESSIONS = 5
+const SESSIONS_PAGE_SIZE = 15
 
 type NavRowItem = { path: string; label: string; icon: typeof ChatBubbleIcon }
 
@@ -74,11 +75,14 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
     : null
 
   const [panelOpen, setPanelOpen] = useState(false)
-  const [recentExpanded, setRecentExpanded] = useState(false)
 
-  const recentSessions = recentExpanded
-    ? sortedSessions
-    : sortedSessions.slice(0, MAX_VISIBLE_SESSIONS)
+  const sessionList = useInfiniteScroll({
+    total: sortedSessions.length,
+    pageSize: SESSIONS_PAGE_SIZE,
+    resetKey: chatMode,
+  })
+
+  const visibleSessions = sortedSessions.slice(0, sessionList.visibleCount)
 
   const handleSessionSelect = (key: string) => {
     navigate(`/chat/${encodeURIComponent(key)}`)
@@ -319,7 +323,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
                   <p className="text-xs text-text-tertiary px-3 py-2">{t('chat.noSessions')}</p>
                 ) : (
                   <>
-                    {recentSessions.map((s) => (
+                    {visibleSessions.map((s) => (
                       <button
                         key={s.key}
                         type="button"
@@ -333,23 +337,17 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
                         <span className="truncate">{s.name || s.key}</span>
                       </button>
                     ))}
+                    {sessionList.hasMore && (
+                      <div
+                        ref={sessionList.sentinelRef}
+                        data-testid="sidebar-recent-sentinel"
+                        aria-hidden="true"
+                        className="h-4 shrink-0"
+                      />
+                    )}
                   </>
                 )}
               </div>
-              {sortedSessions.length > MAX_VISIBLE_SESSIONS && (
-                <button
-                  type="button"
-                  onClick={() => setRecentExpanded((v) => !v)}
-                  className="flex items-center justify-center gap-1 w-full mt-2 pt-2 border-t border-border text-xs text-accent-text hover:text-accent-text/80 transition-colors px-2 py-1"
-                >
-                  <span>{recentExpanded ? t('chat.showLess') : t('chat.showMore')}</span>
-                  {!recentExpanded && (
-                    <span className="text-text-tertiary">
-                      ({sortedSessions.length - MAX_VISIBLE_SESSIONS})
-                    </span>
-                  )}
-                </button>
-              )}
             </Popover>
           ) : (
             <>
@@ -359,37 +357,29 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
                 </p>
               </div>
               {sortedSessions.length > 0 && (
-                <>
-                  <nav className="mt-2 min-h-0 flex-1 space-y-0.5 overflow-y-auto">
-                    {recentSessions.map((s) => (
-                      <SessionItem
-                        key={s.key}
-                        sessionKey={s.key}
-                        sessionName={s.name}
-                        selected={s.key === currentSession?.key}
-                        isProcessing={processingSessions.has(s.key)}
-                        onSelect={() => handleSessionSelect(s.key)}
-                        onDelete={() => onDeleteSession(s.key)}
-                        collapsed={false}
-                        mode={s.mode}
-                      />
-                    ))}
-                  </nav>
-                  {sortedSessions.length > MAX_VISIBLE_SESSIONS && (
-                    <button
-                      type="button"
-                      onClick={() => setRecentExpanded((v) => !v)}
-                      className="flex shrink-0 items-center justify-center gap-1 w-full mt-2 pt-2 border-t border-border text-xs text-accent-text hover:text-accent-text/80 transition-colors px-2 py-1"
-                    >
-                      <span>{recentExpanded ? t('chat.showLess') : t('chat.showMore')}</span>
-                      {!recentExpanded && (
-                        <span className="text-text-tertiary">
-                          ({sortedSessions.length - MAX_VISIBLE_SESSIONS})
-                        </span>
-                      )}
-                    </button>
+                <nav className="mt-2 min-h-0 flex-1 space-y-0.5 overflow-y-auto">
+                  {visibleSessions.map((s) => (
+                    <SessionItem
+                      key={s.key}
+                      sessionKey={s.key}
+                      sessionName={s.name}
+                      selected={s.key === currentSession?.key}
+                      isProcessing={processingSessions.has(s.key)}
+                      onSelect={() => handleSessionSelect(s.key)}
+                      onDelete={() => onDeleteSession(s.key)}
+                      collapsed={false}
+                      mode={s.mode}
+                    />
+                  ))}
+                  {sessionList.hasMore && (
+                    <div
+                      ref={sessionList.sentinelRef}
+                      data-testid="sidebar-history-sentinel"
+                      aria-hidden="true"
+                      className="h-4 shrink-0"
+                    />
                   )}
-                </>
+                </nav>
               )}
             </>
           )}
