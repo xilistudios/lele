@@ -120,7 +120,7 @@ export function AgentCard({
   const displayName = agent.name && agent.name !== agent.id ? agent.name : ''
   const confirmName = agent.name?.trim() || agent.id
 
-  const openConfig = () => navigate(`/agents/${encodeURIComponent(agent.id)}`)
+  const openConfig = () => navigate(`/settings/agents/${encodeURIComponent(agent.id)}`)
   const openFiles = () => navigate(`/settings/agent/${encodeURIComponent(agent.id)}`)
 
   return (
@@ -136,7 +136,7 @@ export function AgentCard({
           {/* Row 1 — id (stretched link) + badges */}
           <div className="flex items-center gap-1.5">
             <Link
-              to={`/agents/${encodeURIComponent(agent.id)}`}
+              to={`/settings/agents/${encodeURIComponent(agent.id)}`}
               aria-label={agent.id}
               title={agent.description || agent.id}
               className="truncate font-mono text-sm font-medium text-text-primary after:absolute after:inset-0 after:content-[''] hover:text-accent-primary"

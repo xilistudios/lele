@@ -1,4 +1,3 @@
-export { AgentEntityLayout } from './AgentEntityLayout'
 export { AgentCard } from './AgentCard'
 /** Commands tab: the section, its editor dialog, and its query key. */
 export { AgentCommandsSection } from './AgentCommandsSection'

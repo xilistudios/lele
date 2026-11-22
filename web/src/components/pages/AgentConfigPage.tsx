@@ -22,10 +22,11 @@ import { AgentSubagentsSection } from '../organisms/agents/AgentSubagentsSection
 import { AgentToolsSection } from '../organisms/agents/AgentToolsSection'
 
 /**
- * `/agents/:agentId/:tab?` — the per-agent configuration page (spec §4.1, §5).
+ * `/settings/agents/:agentId/:tab?` — the per-agent configuration page
+ * (spec §4.1, §5).
  *
  * Composition only: the draft lives in the `SettingsProvider` mounted by
- * `AgentEntityLayout`, so navigating between tabs (and back to the list) keeps
+ * `SettingsPage`, so navigating between tabs (and back to the list) keeps
  * unsaved changes. This component owns exactly three decisions:
  *
  * 1. **URL → tab** (§5.1): a missing or unknown `:tab` is normalised to
@@ -104,7 +105,7 @@ function AgentNotFound({ agentId }: { agentId: string }) {
         {t('settings.agentPage.notFoundDesc')}
       </p>
       <div className="mt-5">
-        <Button variant="secondary" size="md" onClick={() => navigate('/agents')}>
+        <Button variant="secondary" size="md" onClick={() => navigate('/settings/agents')}>
           {t('settings.agentPage.backToList')}
         </Button>
       </div>
@@ -133,7 +134,7 @@ export function AgentConfigPage() {
     const valid = AGENT_TABS.includes(activeTab) ? activeTab : 'general'
     // `replace` keeps the back button pointing at the agents list, and the
     // guard above (only invalid tabs) is what prevents an endless loop.
-    navigate(`/agents/${agentId}/${valid}`, { replace: true })
+    navigate(`/settings/agents/${agentId}/${valid}`, { replace: true })
   }, [tab, agentId, activeTab, navigate])
 
   if (isLoading) return <DetailSkeleton />
@@ -177,7 +178,7 @@ export function AgentConfigPage() {
         activeTab={activeTab}
         dirtyPaths={dirtyPaths}
         validationErrors={validationErrors}
-        onTabChange={(next) => navigate(`/agents/${agentId}/${next}`)}
+        onTabChange={(next) => navigate(`/settings/agents/${agentId}/${next}`)}
       />
       <div
         id={AGENT_TAB_PANEL_ID}

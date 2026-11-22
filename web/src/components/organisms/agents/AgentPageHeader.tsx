@@ -19,7 +19,7 @@ import { AgentBadges, MetaDot } from './AgentBadges'
  * (`model · temp · thinking · workspace`) and the description.
  *
  * Deliberate omissions:
- * - **No local Save.** The global `SettingsFooter` in `AgentEntityLayout` is
+ * - **No local Save.** The global `SettingsFooter` in `SettingsPage` is
  *   the only place that persists (§4.2.3 — brief requirement).
  * - **"Open chat" hidden, not disabled.** §4.2.3 allows that button only when
  *   a real per-agent chat entry point exists; `AppLogicContext.onCreateSession`
@@ -93,11 +93,14 @@ export function AgentPageHeader({ agent, isModified, defaultsModel }: Props) {
           variant="ghost"
           className="h-6 w-6 flex-none p-0"
           ariaLabel={t('settings.agentPage.breadcrumb')}
-          onClick={() => navigate('/agents')}
+          onClick={() => navigate('/settings/agents')}
         >
           <ChevronLeftIcon size={14} />
         </IconButton>
-        <Link to="/agents" className="text-text-tertiary transition-colors hover:text-text-primary">
+        <Link
+          to="/settings/agents"
+          className="text-text-tertiary transition-colors hover:text-text-primary"
+        >
           {t('settings.agentPage.breadcrumb')}
         </Link>
         <span aria-hidden="true" className="text-text-muted">

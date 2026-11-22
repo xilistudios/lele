@@ -5,24 +5,15 @@ import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { getModeTheme } from '../../lib/modeTheme'
-import { loadSystemNavOpen, saveSystemNavOpen } from '../../lib/storage'
 import { IconButton } from '../atoms/IconButton'
 import {
-  AgentsIcon,
   ChatBubbleIcon,
-  ChevronLeftIcon,
-  ClockIcon,
   HistoryIcon,
-  LockIcon,
   LogoutIcon,
   PlusCircleIcon,
-  ProvidersIcon,
   SearchIcon,
-  ServerIcon,
   SettingsIcon,
   SidebarToggleIcon,
-  SkillsIcon,
-  TerminalIcon,
   UserIcon,
 } from '../atoms/Icons'
 import { Logo } from '../atoms/Logo'
@@ -32,9 +23,6 @@ import { SessionItem } from '../molecules/SessionItem'
 import { QuickChatPanel } from './QuickChatPanel'
 
 const MAX_VISIBLE_SESSIONS = 5
-
-/** `aria-controls` target for the collapsible "System" subnav group. */
-const SYSTEM_NAV_LIST_ID = 'sidebar-system-nav'
 
 /** Shape of a sidebar destination (label + route + icon). */
 type NavRowItem = { path: string; label: string; icon: typeof ChatBubbleIcon }
@@ -98,13 +86,6 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
   const [panelOpen, setPanelOpen] = useState(false)
   const [panelFocusSearch, setPanelFocusSearch] = useState(false)
   const [recentExpanded, setRecentExpanded] = useState(false)
-  // Expanded/collapsed state of the "System" subnav group, persisted across
-  // reloads (default open).
-  const [systemNavOpen, setSystemNavOpen] = useState(() => loadSystemNavOpen())
-  // Open state of the System popover in the collapsed rail. The Popover atom
-  // can own it, but the group's rows must be able to close it right after
-  // navigating, so the sidebar controls it explicitly.
-  const [systemPopoverOpen, setSystemPopoverOpen] = useState(false)
 
   const openPanel = (focusSearch = false) => {
     setPanelFocusSearch(focusSearch)
@@ -126,16 +107,17 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
     navigate('/pair', { replace: true })
   }, [onLogout, navigate, isMobile, onClose])
 
-  // A nav item stays active on its own route AND on nested routes below it
-  // (e.g. "Agents" on /agents/coder/tools). The trailing '/' in the prefix
-  // keeps the match segment-aligned, so sibling paths that merely share a
-  // textual prefix cannot light up: '/chats' does NOT match '/chat/…'
-  // (startsWith('/chats/') is false) and '/background-exec' does not match
-  // a hypothetical '/background-exec-foo'. Verified against every navigation
-  // path: /chats /agents /providers /skills /background-exec /cron /secrets.
+  // A nav item stays active on its own route AND on nested routes below it.
+  // The trailing '/' in the prefix keeps the match segment-aligned, so sibling
+  // paths that merely share a textual prefix cannot light up: '/chats' does
+  // NOT match '/chat/…' (startsWith('/chats/') is false).
   const isActiveRoute = (path: string) =>
     location.pathname === path || location.pathname.startsWith(`${path}/`)
 
+  // "Chats" is the only destination left in the sidebar. Everything else moved
+  // out: Agents and Providers are Settings tabs now, and the tooling pages
+  // (skills, cron, background processes, secrets) live in the right-hand Tools
+  // drawer of the chat (see organisms/ToolsSidebar).
   const navItems = [
     {
       path: '/chats',
@@ -144,66 +126,9 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
     },
   ]
 
-  // The six destinations that are not the chat list live under a collapsible
-  // "System" subnav group. "Chats" stays the only top-level row. Routes are
-  // unchanged: this is purely a grouping of the sidebar entries.
-  const systemNavItems = [
-    {
-      path: '/agents',
-      label: t('sidebar.agents'),
-      icon: AgentsIcon,
-    },
-    {
-      path: '/providers',
-      label: t('sidebar.providers'),
-      icon: ProvidersIcon,
-    },
-    {
-      path: '/skills',
-      label: t('sidebar.skills'),
-      icon: SkillsIcon,
-    },
-    {
-      path: '/background-exec',
-      label: t('sidebar.backgroundExecs'),
-      icon: TerminalIcon,
-    },
-    {
-      path: '/cron',
-      label: t('sidebar.cron'),
-      icon: ClockIcon,
-    },
-    {
-      path: '/secrets',
-      label: t('sidebar.secrets'),
-      icon: LockIcon,
-    },
-  ]
-
-  // The group renders expanded whenever one of its children is the active
-  // route, even if the persisted preference says collapsed: the user must
-  // still see where they are. That auto-expansion does NOT touch the stored
-  // preference — only an explicit toggle writes it. This mirrors the
-  // classNames used by the collapsed rail so the icon can light up too.
-  const isSystemChildActive = systemNavItems.some((item) => isActiveRoute(item.path))
-  const systemExpanded = systemNavOpen || isSystemChildActive
-
-  const toggleSystemNav = () => {
-    // While a child route is active the group is force-expanded, so a toggle
-    // would render no change yet silently persist a "closed" preference the
-    // user never saw (and the group would collapse as soon as they left the
-    // child route). Keep it a visual no-op instead of writing that unseen
-    // state.
-    if (isSystemChildActive) return
-    const next = !systemNavOpen
-    setSystemNavOpen(next)
-    saveSystemNavOpen(next)
-  }
-
-  // Full-width labelled row (expanded sidebar). The active child keeps the
-  // exact same classes it had as a flat entry; `aria-current="page"` marks it
-  // for assistive tech without the `role="button"` attribute that the shared
-  // App.test.tsx selectors rely on NOT being present.
+  // Full-width labelled row (expanded sidebar). `aria-current="page"` marks
+  // the active destination for assistive tech without the `role="button"`
+  // attribute that the shared App.test.tsx selectors rely on NOT being present.
   const renderExpandedRow = (item: NavRowItem) => (
     <button
       key={item.path}
@@ -527,21 +452,15 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
           )}
         </div>
 
-        {/* Agents & Providers navigation.
+        {/* Navigation ("Chats" is the only row).
             `shrink-0` stays: this menu must always keep its natural height,
-            otherwise the history section above squeezes it (that squeeze was
-            half of the bug). What made the last entries unreachable was that
-            nothing could absorb the leftover height on a phone, so the
-            overflow was cut off at the bottom edge of the drawer — the drawer
-            itself now scrolls (see <aside>), which keeps every entry reachable
-            with a single gesture. Deliberately no `overflow-y-auto` here: a
-            short inner scroller would capture the touch gesture and the drawer
-            could no longer be scrolled past the menu.
+            otherwise the history section above squeezes it. On a phone the
+            drawer itself scrolls (see <aside>), so nothing can be cut off at
+            the bottom edge.
             The rail variant keeps the same rule: no overflow on this nav. An
             `overflow-y-auto` here forces the computed `overflow-x` to `auto`
-            too, which clips the absolutely positioned popover/tooltip children
-            (the System popover and the Chats tooltip) at the 59px rail edge.
-            The rail holds two rows, so it never needs to scroll anyway. */}
+            too, which clips the absolutely positioned tooltip children at the
+            59px rail edge. */}
         <nav
           data-testid="sidebar-nav-section"
           className={
@@ -550,94 +469,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
               : 'flex shrink-0 flex-col gap-1 px-2 pt-1'
           }
         >
-          {collapsed ? (
-            <>
-              {navItems.map(renderRailRow)}
-              {/* The six system destinations behind one icon button. The
-                  Popover atom already owns the tooltip + outside-click
-                  behaviour; clicking a row navigates, closes the popover and
-                  (on mobile) closes the drawer, exactly like the old flat rail
-                  entries. The open state is controlled here so a row can close
-                  it after navigating. */}
-              <Popover
-                block
-                tooltip={t('sidebar.system')}
-                open={systemPopoverOpen}
-                onOpenChange={setSystemPopoverOpen}
-                trigger={
-                  <IconButton
-                    title={t('sidebar.system')}
-                    ariaLabel={t('sidebar.system')}
-                    variant="nav"
-                    className={`flex items-center justify-center h-10 w-10 ${
-                      isSystemChildActive ? 'text-accent-text bg-surface-selected' : ''
-                    }`}
-                  >
-                    <ServerIcon size={16} />
-                  </IconButton>
-                }
-                popoverWidth={200}
-                popoverHeight={260}
-              >
-                <div className="flex flex-col gap-1">
-                  {systemNavItems.map((item) => (
-                    <button
-                      key={item.path}
-                      type="button"
-                      onClick={() => {
-                        navigate(item.path)
-                        setSystemPopoverOpen(false)
-                        if (isMobile) onClose()
-                      }}
-                      aria-label={item.label}
-                      aria-current={isActiveRoute(item.path) ? 'page' : undefined}
-                      className={`flex items-center gap-2 w-full rounded-md px-3 py-2 text-sm transition-colors hover:bg-surface-hover ${
-                        isActiveRoute(item.path)
-                          ? 'bg-surface-selected text-accent-text'
-                          : 'text-text-secondary hover:text-text-primary'
-                      }`}
-                    >
-                      <item.icon size={16} />
-                      <span>{item.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </Popover>
-            </>
-          ) : (
-            <>
-              {navItems.map(renderExpandedRow)}
-              <button
-                type="button"
-                data-testid="sidebar-system-toggle"
-                aria-expanded={systemExpanded}
-                aria-controls={systemExpanded ? SYSTEM_NAV_LIST_ID : undefined}
-                aria-label={t('sidebar.system')}
-                onClick={toggleSystemNav}
-                className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm transition-colors hover:bg-surface-hover text-text-secondary hover:text-text-primary"
-              >
-                <div className="h-10 w-10 flex items-center justify-center">
-                  <ServerIcon size={16} />
-                </div>
-                <span>{t('sidebar.system')}</span>
-                <ChevronLeftIcon
-                  size={14}
-                  className={`ml-auto transition-transform duration-fast ${
-                    systemExpanded ? '-rotate-90' : 'rotate-90'
-                  }`}
-                />
-              </button>
-              {systemExpanded && (
-                <div
-                  id={SYSTEM_NAV_LIST_ID}
-                  data-testid="sidebar-system-nav"
-                  className="ml-3 flex flex-col gap-1"
-                >
-                  {systemNavItems.map(renderExpandedRow)}
-                </div>
-              )}
-            </>
-          )}
+          {collapsed ? navItems.map(renderRailRow) : navItems.map(renderExpandedRow)}
         </nav>
 
         <div

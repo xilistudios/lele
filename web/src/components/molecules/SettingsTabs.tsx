@@ -1,18 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
-
-type SettingsTab =
-  | 'general'
-  | 'session'
-  | 'channels'
-  | 'native'
-  | 'groups'
-  | 'tools'
-  | 'system'
-  | 'updates'
-  | 'advanced'
-  | 'diagnostics'
-  | 'logs'
+import type { SettingsTab } from '../../lib/settingsTabs'
 
 type Props = {
   activeTab: SettingsTab
@@ -25,6 +13,10 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
 
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: 'general', label: t('settings.tabs.general') },
+    // Agents and Providers used to be top-level sidebar destinations. They are
+    // configuration, so they live here now — same draft, same footer save.
+    { id: 'agents', label: t('settings.tabs.agents') },
+    { id: 'providers', label: t('settings.tabs.providers') },
     { id: 'session', label: t('settings.tabs.session') },
     { id: 'channels', label: t('settings.tabs.channels') },
     { id: 'native', label: t('settings.tabs.native') },
@@ -38,13 +30,18 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
   ]
 
   return (
-    <nav className="w-full md:w-[200px] flex-shrink-0 border-b md:border-b-0 md:border-r border-border bg-background-secondary p-2 md:p-4 overflow-x-auto md:overflow-x-visible no-scrollbar">
+    <nav
+      data-testid="settings-tabs"
+      className="w-full md:w-[200px] flex-shrink-0 border-b md:border-b-0 md:border-r border-border bg-background-secondary p-2 md:p-4 overflow-x-auto md:overflow-x-visible no-scrollbar"
+    >
       <div className="flex md:flex-col gap-1 md:space-y-1 min-w-max md:min-w-0">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
             type="button"
+            data-testid={`settings-tab-${tab.id}`}
+            aria-current={activeTab === tab.id ? 'page' : undefined}
             className={`rounded-md border px-3 py-1.5 md:py-2.5 text-center md:text-left text-xs md:text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
               activeTab === tab.id
                 ? 'border-accent-primary/30 bg-surface-selected text-accent-primary'

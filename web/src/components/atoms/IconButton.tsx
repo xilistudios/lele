@@ -19,6 +19,8 @@ type Props = {
   variant?: 'default' | 'nav' | 'nav-full' | 'danger' | 'ghost'
   className?: string
   ariaLabel?: string
+  /** Renders `aria-expanded` — for buttons that toggle a popover or drawer. */
+  ariaExpanded?: boolean
   dataTestId?: string
   children: ReactNode
 }
@@ -30,6 +32,7 @@ export function IconButton({
   variant = 'default',
   className = '',
   ariaLabel,
+  ariaExpanded,
   dataTestId,
   children,
 }: Props) {
@@ -41,6 +44,7 @@ export function IconButton({
       disabled={disabled}
       title={title}
       aria-label={ariaLabel ?? title}
+      aria-expanded={ariaExpanded}
       className={`${variantStyles[variant]} disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
     >
       {children}

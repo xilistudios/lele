@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useSecrets } from '../../hooks/useSecrets'
 import type { Agent, SecretAuditRecord, SecretInput, SecretMeta } from '../../lib/types'
-import { Button, ErrorBanner, Modal } from '../atoms'
+import { BackButton, Button, ErrorBanner, Modal } from '../atoms'
 import { AgentChipMultiSelect } from '../molecules'
 import { Sidebar } from '../organisms/Sidebar'
 
@@ -568,6 +568,7 @@ export function SecretsPage() {
                 <line x1="9" y1="3" x2="9" y2="21" />
               </svg>
             </button>
+            <BackButton />
             <h1 className="text-base font-semibold text-text-primary">
               {t('secrets.title', 'Secrets')}
             </h1>

@@ -5,7 +5,7 @@ import { useAuthContext } from '../../contexts/AuthContext'
 import { useAvailableModels } from '../../hooks/useAvailableModels'
 import { useCronJobs } from '../../hooks/useCronJobs'
 import type { Agent, CronJob, CronJobInput, CronSchedule } from '../../lib/types'
-import { Button, ErrorBanner } from '../atoms'
+import { BackButton, Button, ErrorBanner } from '../atoms'
 import { Sidebar } from '../organisms/Sidebar'
 
 // ---------------------------------------------------------------------------
@@ -926,6 +926,7 @@ export function CronPage() {
                 <line x1="9" y1="3" x2="9" y2="21" />
               </svg>
             </button>
+            <BackButton />
             <h1 className="text-base font-semibold text-text-primary">
               {t('cron.title', 'Scheduled Jobs')}
             </h1>

@@ -179,14 +179,14 @@ describe('Sidebar — drawer is the mobile scroll surface', () => {
 })
 
 describe('Sidebar — both sections render together (no conditional hiding)', () => {
-  test('history rows and the last nav entries are in the DOM at once', () => {
+  test('history rows and the nav entry are in the DOM at once', () => {
     setViewport(390)
     const { container } = renderSidebar(manySessions)
     expect(historyOf(container)).not.toBeNull()
     expect(navOf(container)).not.toBeNull()
-    // The entries that used to fall off the bottom edge of the drawer.
+    // The nav row must stay reachable on a short phone viewport.
     const navText = navOf(container)?.textContent ?? ''
-    expect(navText).toContain('Secretos')
+    expect(navText).toContain('Chats')
     expect(historyListOf(container)?.children.length).toBeGreaterThan(0)
   })
 })

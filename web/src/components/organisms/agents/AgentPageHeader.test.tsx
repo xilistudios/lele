@@ -24,11 +24,11 @@ function setup(
 ) {
   const full: EditableAgentConfig = { id: 'coder', ...agent }
   const utils = render(
-    <MemoryRouter initialEntries={['/agents/coder/model']}>
+    <MemoryRouter initialEntries={['/settings/agents/coder/model']}>
       <LocationProbe />
       <Routes>
         <Route
-          path="/agents/:agentId/:tab"
+          path="/settings/agents/:agentId/:tab"
           element={
             <AgentPageHeader
               agent={full}
@@ -37,7 +37,7 @@ function setup(
             />
           }
         />
-        <Route path="/agents" element={<div data-testid="list-page" />} />
+        <Route path="/settings/agents" element={<div data-testid="list-page" />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -53,14 +53,14 @@ describe('AgentPageHeader', () => {
     expect(link.closest('a')).toBeTruthy()
     fireEvent.click(link)
     expect(getByTestId('list-page')).toBeTruthy()
-    expect(getByTestId('location').textContent).toBe('/agents')
+    expect(getByTestId('location').textContent).toBe('/settings/agents')
   })
 
-  test('back arrow navigates to /agents (draft survives: the provider is in the parent)', () => {
+  test('back arrow navigates to /settings/agents (draft survives: the provider is in the parent)', () => {
     const { getByLabelText, getByTestId } = setup()
     fireEvent.click(getByLabelText('Agentes'))
     expect(getByTestId('list-page')).toBeTruthy()
-    expect(getByTestId('location').textContent).toBe('/agents')
+    expect(getByTestId('location').textContent).toBe('/settings/agents')
   })
 
   test('current agent id is marked aria-current="page"', () => {

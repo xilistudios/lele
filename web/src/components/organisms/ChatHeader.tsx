@@ -12,11 +12,12 @@ import {
   selectSubagentForSession,
 } from '../../lib/subagentHeader'
 import { formatSessionTitle } from '../../lib/utils'
-import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
 import { ContextIndicator } from '../atoms/ContextIndicator'
-import { ChevronLeftIcon, SidebarToggleIcon } from '../atoms/Icons'
+import { IconButton } from '../atoms/IconButton'
+import { ChevronLeftIcon, SidebarToggleIcon, ToolsIcon } from '../atoms/Icons'
 import { SubagentsIndicator } from '../atoms/SubagentsIndicator'
 import { SubagentsSidebar } from './SubagentsSidebar'
+import { ToolsSidebar } from './ToolsSidebar'
 
 export const ChatHeader = memo(function ChatHeader() {
   const { t } = useTranslation()
@@ -34,6 +35,7 @@ export const ChatHeader = memo(function ChatHeader() {
   const { apiUrl } = useAuthContext()
   const { currentSession, parentSession } = useChatPageContext()
   const [subagentsSidebarOpen, setSubagentsSidebarOpen] = useState(false)
+  const [toolsSidebarOpen, setToolsSidebarOpen] = useState(false)
 
   // Poll while the parent turn is live so a spawn that lands mid-turn shows
   // up even before the first refresh has seen a running task.
@@ -63,7 +65,15 @@ export const ChatHeader = memo(function ChatHeader() {
   }, [subagentsSidebarOpen, refresh])
 
   const handleToggleSubagents = useCallback(() => {
+    // The two drawers share the same right-hand slot: opening one closes the
+    // other instead of stacking two panels on top of each other.
+    setToolsSidebarOpen(false)
     setSubagentsSidebarOpen((prev) => !prev)
+  }, [])
+
+  const handleToggleTools = useCallback(() => {
+    setSubagentsSidebarOpen(false)
+    setToolsSidebarOpen((prev) => !prev)
   }, [])
 
   const handleCloseSubagents = useCallback(() => {
@@ -138,7 +148,20 @@ export const ChatHeader = memo(function ChatHeader() {
         <div className="flex items-center gap-1">
           <SubagentsIndicator count={subagents.length} onClick={handleToggleSubagents} />
           <ContextIndicator />
-          <ConnectionIndicator status={wsStatus} apiUrl={apiUrl} />
+          {/* Replaces the old connection-status icon: same spot, but it opens
+              the Tools drawer (skills, cron, background processes, secrets).
+              The connection status itself moved into that drawer's footer. */}
+          <IconButton
+            onClick={handleToggleTools}
+            ariaLabel={t('chat.tools')}
+            title={t('chat.tools')}
+            ariaExpanded={toolsSidebarOpen}
+            className={`flex items-center justify-center h-9 w-9 ${
+              toolsSidebarOpen ? 'text-accent-text bg-surface-selected' : ''
+            }`}
+          >
+            <ToolsIcon />
+          </IconButton>
         </div>
       </div>
 
@@ -148,6 +171,13 @@ export const ChatHeader = memo(function ChatHeader() {
         isOpen={subagentsSidebarOpen}
         onClose={handleCloseSubagents}
         onSelectSubagent={handleSelectSubagent}
+      />
+
+      <ToolsSidebar
+        isOpen={toolsSidebarOpen}
+        onClose={() => setToolsSidebarOpen(false)}
+        connectionStatus={wsStatus}
+        apiUrl={apiUrl}
       />
     </>
   )

@@ -11,18 +11,16 @@ import {
   useSearchParams,
 } from 'react-router-dom'
 import { DesktopDisconnectOverlay } from './components/organisms/DesktopDisconnectOverlay'
-import { AgentEntityLayout } from './components/organisms/agents'
 import { AgentConfigPage } from './components/pages/AgentConfigPage'
 import { AgentFilesPage } from './components/pages/AgentFilesPage'
-import { AgentsListPage } from './components/pages/AgentsListPage'
 import { AuthPage } from './components/pages/AuthPage'
 import { BackgroundExecsPage } from './components/pages/BackgroundExecsPage'
 import { ChatHistoryPage } from './components/pages/ChatHistoryPage'
 import { ChatPage } from './components/pages/ChatPage'
 import { CronPage } from './components/pages/CronPage'
-import { ProvidersPage } from './components/pages/ProvidersPage'
 import { SecretsPage } from './components/pages/SecretsPage'
 import { SettingsPage } from './components/pages/SettingsPage'
+import { SettingsTabContent } from './components/pages/SettingsTabContent'
 import { SkillsPage } from './components/pages/SkillsPage'
 import { AppLogicProvider, useAppLogicContext } from './contexts/AppLogicContext'
 import { AuthProvider, defaultApiUrlFromWindow, useAuthContext } from './contexts/AuthContext'
@@ -283,17 +281,22 @@ function ProtectedLayout() {
   )
 }
 
-// Settings route component (layout wrapper with shared state)
+// Settings shell: owns the single settings draft shared by every tab AND by
+// the agent detail pages mounted under it (see SettingsPage).
 function SettingsRoute() {
   return <SettingsPage />
 }
 
-// Agents route layout (Sidebar + SettingsHeader/Footer + <Outlet/>).
-// Owns the single useSettingsConfig() instance shared by the agents list and
-// every agent-detail tab, so the unsaved draft survives navigation
-// (/agents <-> /agents/:agentId/:tab). See AgentEntityLayout for details.
-function AgentsRouteShell() {
-  return <AgentEntityLayout titleKey="sidebar.agents" />
+/**
+ * Legacy section URLs kept alive after Agents and Providers moved into
+ * Settings: `/agents[/…]` → `/settings/agents[/…]`, `/providers` →
+ * `/settings/providers`. `rest` carries the nested segments (agent id + tab)
+ * so old deep links still land on the same screen.
+ */
+function LegacySectionRedirect({ base }: { base: '/agents' | '/providers' }) {
+  const location = useLocation()
+  const rest = location.pathname.slice(base.length)
+  return <Navigate to={`/settings${base}${rest}${location.search}`} replace />
 }
 
 function AppContent() {
@@ -324,21 +327,23 @@ function AppContent() {
         <Route index element={<ChatRoute />} />
         <Route path="chat/:chat_id" element={<ChatRoute />} />
         <Route path="chat/:parent_chat_id/subagent/:child_chat_id" element={<ChatRoute />} />
-        <Route path="agents" element={<AgentsRouteShell />}>
-          <Route index element={<AgentsListPage />} />
-          <Route path=":agentId" element={<AgentConfigPage />} />
-          <Route path=":agentId/:tab" element={<AgentConfigPage />} />
-        </Route>
-        <Route path="providers" element={<ProvidersPage />} />
         <Route path="skills" element={<SkillsPage />} />
         <Route path="chats" element={<ChatHistoryPage />} />
         <Route path="background-exec" element={<BackgroundExecsPage />} />
         <Route path="cron" element={<CronPage />} />
         <Route path="secrets" element={<SecretsPage />} />
-        <Route path="settings/:tab?" element={<SettingsRoute />} />
+        {/* Settings owns its draft for every child: the tabs themselves and
+            the agent detail pages (agents are a Settings section now). */}
+        <Route path="settings" element={<SettingsRoute />}>
+          <Route index element={<Navigate to="general" replace />} />
+          <Route path=":tab" element={<SettingsTabContent />} />
+          <Route path="agents/:agentId/:tab?" element={<AgentConfigPage />} />
+        </Route>
+        {/* Context-file editor: its own full-page shell (sidebar + header). */}
         <Route path="settings/agent/:agentId/:fileName?" element={<AgentFilesPage />} />
-        <Route path="settings/agents" element={<Navigate to="/agents" replace />} />
-        <Route path="settings/providers" element={<Navigate to="/providers" replace />} />
+        {/* Agents and Providers are Settings sections now. */}
+        <Route path="agents/*" element={<LegacySectionRedirect base="/agents" />} />
+        <Route path="providers/*" element={<LegacySectionRedirect base="/providers" />} />
       </Route>
 
       {/* Fallback */}

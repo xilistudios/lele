@@ -709,7 +709,23 @@ describe('SkillsPage — data coherence and edge cases', () => {
     expect(container.textContent).toContain(tr('skills.noAgentsDesc'))
     expect(byTestId<HTMLButtonElement>(container, 'skills-install-button').disabled).toBe(true)
     expect(container.querySelector('select#skills-agent')).toBeNull()
-    expect(container.querySelector('a[href="/agents"]')).toBeTruthy()
+    expect(container.querySelector('a[href="/settings/agents"]')).toBeTruthy()
+  })
+
+  test('the header shows the back arrow immediately before the title', async () => {
+    const { container } = renderPage()
+
+    const title = container.querySelector('h1')
+    const back = container.querySelector('[data-testid="back-button"]')
+    expect(title).not.toBeNull()
+    expect(back).not.toBeNull()
+
+    // Same parent (the header row) and immediately before the title: the
+    // arrow is the way out of a page that no longer has a sidebar entry.
+    const row = title?.parentElement
+    expect(back?.parentElement).toBe(row)
+    const children = Array.from(row?.children ?? [])
+    expect(children.indexOf(back as Element)).toBe(children.indexOf(title as Element) - 1)
   })
 
   test('17. the ARIA-live count reports the VISIBLE length per view', async () => {

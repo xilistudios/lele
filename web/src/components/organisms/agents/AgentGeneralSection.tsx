@@ -14,7 +14,7 @@ import { TextInput } from '../../molecules/TextInput'
 /**
  * `tab=general` — identity fields (spec §4.3).
  *
- * Writes go straight to the shared draft owned by `AgentEntityLayout`, under
+ * Writes go straight to the shared draft owned by `SettingsPage`, under
  * `agents.list.{index}.…`; the global footer is what persists them. `id` is
  * read-only on purpose (§4.3): renaming an agent means editing config.json by
  * hand, so the UI only offers "select" and "copy".
