@@ -16,6 +16,15 @@ const DEFAULT_LIMIT = 50
  */
 const HISTORY_POLL_INTERVAL_MS = 4000
 
+/**
+ * Grace window after the last live activity (processing / streaming) during
+ * which the reconciliation poll keeps running for an unconfirmed optimistic
+ * user bubble. Long enough to recover a missed/failed final history refetch
+ * (a few 4s ticks), short enough that a never-confirmable bubble (a built-in
+ * command answered without persistence) cannot poll forever.
+ */
+const OPTIMISTIC_RECONCILE_GRACE_MS = 20_000
+
 export type HistoryMessage = Array<RawHistoryMessage>
 
 export const chatHistoryQueryKey = (sessionKey: string) => ['chatHistory', sessionKey] as const
@@ -152,16 +161,55 @@ export function useChatHistory(
   const streamingMessagesRef = useRef(streamingMessages)
   streamingMessagesRef.current = streamingMessages
 
+  // Last time this session had LIVE activity (processing or a streaming
+  // assistant). Anchors the bounded grace window below so the reconciliation
+  // poll keeps running for a short while AFTER a turn ends, without polling
+  // forever for a bubble that can never be confirmed.
+  const lastLiveActivityRef = useRef(0)
+
   // Would this session be polling over HTTP right now? True while the turn is
   // processing, or while this session still has WS-driven streaming messages to
   // reconcile. Shared by `refetchInterval` and the tab-visible refresh below so
   // both agree on when polling is wanted (and on when it is not).
   const wantsPolling = useCallback(
-    (processing: boolean | undefined) =>
-      Boolean(processing) ||
-      streamingMessagesRef.current.some(
-        (m) => m.streaming && sessionKeysLooselyMatch(m.sessionKey, sessionKey),
-      ),
+    (processing: boolean | undefined) => {
+      const live =
+        Boolean(processing) ||
+        streamingMessagesRef.current.some(
+          (m) => m.streaming && sessionKeysLooselyMatch(m.sessionKey, sessionKey),
+        )
+      if (live) {
+        lastLiveActivityRef.current = Date.now()
+        return true
+      }
+      // RECONCILIATION SAFETY NET for the sent (optimistic) user bubble.
+      //
+      // The turn-end signal (message.complete) clears processing and finalizes
+      // the assistant BEFORE the last history.updated refetch lands, so `live`
+      // is already false at that point. If that final refetch is missed (query
+      // momentarily inactive) or fails (the query uses `retry: false`), the
+      // optimistic user bubble is never confirmed and `mergeMessages` strands
+      // it at the END of the list — below newer answers: "the first message I
+      // sent shows up as the newest", until a reload. The 4s poll is the
+      // documented safety net for exactly this, but it used to stop the instant
+      // processing ended, ignoring the very bubble that still needs reconciling.
+      //
+      // Keep polling while an unconfirmed, non-failed optimistic user bubble
+      // exists, bounded by a grace window measured from the last live activity
+      // so a never-confirmable bubble (a built-in command that was answered
+      // without ever being persisted) cannot poll forever. A failed/refused
+      // bubble is excluded: it waits for a user retry, not a refetch.
+      const hasPendingUser = streamingMessagesRef.current.some(
+        (m) =>
+          m.role === 'user' &&
+          m.optimistic === true &&
+          m.failed !== true &&
+          sessionKeysLooselyMatch(m.sessionKey, sessionKey),
+      )
+      return (
+        hasPendingUser && Date.now() - lastLiveActivityRef.current < OPTIMISTIC_RECONCILE_GRACE_MS
+      )
+    },
     [sessionKey],
   )
 

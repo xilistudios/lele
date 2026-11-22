@@ -1,33 +1,3 @@
-/**
- * Regression tests for the chat log's VERTICAL RHYTHM (lib/chatRowSpacing.ts as
- * seen through the real component).
- *
- * Each row wrapper ([data-testid="message"]) used to hardcode its own vertical
- * padding — user `py-1`, tool and system notice `py-1.5`, assistant `py-3` even
- * when it held nothing but a thinking card or the typing dots — so the gap
- * between two consecutive rows depended on which kinds happened to be adjacent
- * (10 / 12 / 16 / 18 / 24px). All four wrappers now ask chatRowPadding(message),
- * which yields exactly two rhythms: compact `py-1.5` (tool, user, system notice,
- * assistant with no visible text) and content `py-3` (assistant with text).
- *
- * These cases render the component so a wrapper that forgets the helper, or
- * reorders it, goes red — the pure unit tests in lib/chatRowSpacing.test.ts
- * cannot see the JSX. Which wrappers that actually means: the helper only
- * CHANGES the user row (`py-1` → compact) and the assistant row (`py-3`, plus
- * compact once it holds no visible text), so those are the ones a regression
- * here catches. The tool row and the system notice were already `py-1.5`, so
- * hard-coding that value instead of calling the helper would still be green —
- * their cases document the rhythm, they are not mutation tripwires.
- *
- * NOTE on the assertions: `toHaveClass` is a jest-dom matcher and bun's
- * `expect` does not carry its typings (tsconfig types = bun-types), so the
- * class checks go through classList.contains below — the same convention the
- * suite already uses (settings/AddProviderModal.test.tsx). They are strict
- * token checks: `py-1` never matches the `py-1.5` class.
- *
- * Conventions (imports/mocks/i18n/helpers) mirror
- * MessageBubble.visibility.test.tsx in this folder.
- */
 import '../../test/setup'
 import '../../test/i18n'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
@@ -73,15 +43,10 @@ function makeMessage(overrides: Partial<ChatMessage> & { role: ChatMessage['role
   }
 }
 
-/** The row wrapper that carries the vertical padding. */
 function rowWrapper(getByTestId: (id: string) => HTMLElement): HTMLElement {
   return getByTestId('message')
 }
 
-/** Assert the wrapper's padding token is exactly `expected`, and that the other
- *  rhythm is absent — a row must never mix both. `expected` is always a literal
- *  here on purpose: deriving it from chatRowPadding() would make the check
- *  circular (test 6 is the one that pins component ↔ helper agreement). */
 function expectPadding(row: HTMLElement, expected: 'py-1.5' | 'py-3'): void {
   const paddings = row.className
     .split(/\s+/)
@@ -196,9 +161,7 @@ describe('MessageBubble — vertical rhythm of the row wrappers', () => {
     for (const message of cases) {
       const { getByTestId, unmount } = renderBubble(message, ctx)
       const row = rowWrapper(getByTestId)
-      // Agreement with the pure helper…
       expect(row.classList.contains(chatRowPadding(message))).toBe(true)
-      // …and exactly one rhythm token on the row.
       const paddings = row.className
         .split(/\s+/)
         .filter((c) => c === CHAT_ROW_PADDING.compact || c === CHAT_ROW_PADDING.content)

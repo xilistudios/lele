@@ -218,7 +218,7 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
             })}
           </span>
           <Link
-            to={`/agents/${agentId}/subagents`}
+            to={`/settings/agents/${agentId}/subagents`}
             data-testid="tools-spawn-warning-link"
             className="font-medium text-focus underline"
           >

@@ -6,30 +6,9 @@ import type { ScannedSkill } from '../../lib/types'
 import i18n from '../../test/i18n'
 import { InstallSkillModal } from './InstallSkillModal'
 
-/**
- * The install destination of the shared dialog.
- *
- * `InstallSkillModal` has two independent view branches — the browse/URL tabs
- * and the scan-picker that replaces them once a repo has been scanned — and the
- * destination control is rendered in BOTH. The per-agent tab wires the
- * interactive `ScopePicker`; the `/skills` page (All and Global views) fixes the
- * destination instead, so it gets the read-only `DestinationCaption`.
- *
- * Three invariants are worth pinning here:
- *  - the caption is a DIFFERENT test id from the picker (`install-destination`
- *    vs `install-scope`): a scope-less caller must still see `install-scope`
- *    absent — that is the regression guard of AgentSkillsSection.workspace.test.
- *  - the render rule is `picker if wired, else caption, else nothing`, and it
- *    holds identically in both branches;
- *  - a caption never appears when the caller passes nothing.
- *
- * `screen` is unusable in this environment (see src/test/setup.ts): every query
- * comes from the render result.
- */
 
 const tr = (key: string, options?: Record<string, unknown>) => i18n.t(key, options) as string
 
-/** The exact string the All/Global views hand the modal (D10, i18n keys of T2). */
 const DESTINATION = tr('skills.installIntoTarget', {
   target: tr('skills.targetDefaultWorkspace'),
 })
@@ -137,7 +116,6 @@ describe('InstallSkillModal — render rule (C3 guard)', () => {
 
     expect(byTestId(utils, 'install-scope')).toBeTruthy()
     expect(byTestId(utils, 'install-scope-workspace')).toBeTruthy()
-    // Mutually exclusive: the interactive picker always wins.
     expect(byTestId(utils, 'install-destination')).toBeNull()
   })
 

@@ -24,7 +24,7 @@ let ChatComposer: typeof import('./ChatComposer').ChatComposer
 beforeAll(() => {
   // Only mock the two modules that are NOT imported by other test files.
   // AppLogicContext and AuthContext are provided via real context Providers so
-  // that AgentEntityLayout.test.tsx (and any other file importing them) is
+  // that SettingsPage.test.tsx (and any other file importing them) is
   // never affected.
   mock.module('../../contexts/ChatPageContext', () => ({
     useChatPageContext: () => mockChatPageCtxReturn,

@@ -152,7 +152,7 @@ export function renderWithSettings(
   const state = makeState(agents, { ...options, writes })
   const utils = render(
     <SettingsProvider settingsState={state} api={api}>
-      <MemoryRouter initialEntries={['/agents/coder']}>{ui}</MemoryRouter>
+      <MemoryRouter initialEntries={['/settings/agents/coder']}>{ui}</MemoryRouter>
     </SettingsProvider>,
   )
   return {

@@ -14,7 +14,7 @@ import { AgentsListPage } from './AgentsListPage'
 /**
  * AgentsListPage + AgentCard (spec §3). Rendered through a SettingsProvider
  * fed with a hand-made `SettingsConfigState` (same pattern as
- * AgentEntityLayout.test.tsx) so the page sees a fixed draft and we can
+ * SettingsPage.test.tsx) so the page sees a fixed draft and we can
  * assert exactly which `updateField` calls removals produce.
  *
  * House convention: `screen` is unusable here (its global-document binding
@@ -289,10 +289,10 @@ describe('AgentCard — actions & auto-cancel', () => {
 
   function renderCardInRoutes() {
     return render(
-      <MemoryRouter initialEntries={['/agents']}>
+      <MemoryRouter initialEntries={['/settings/agents']}>
         <Routes>
-          <Route path="/agents" element={renderCardNode()} />
-          <Route path="/agents/:agentId" element={<LocationProbe />} />
+          <Route path="/settings/agents" element={renderCardNode()} />
+          <Route path="/settings/agents/:agentId" element={<LocationProbe />} />
           <Route path="/settings/agent/:agentId" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>,
@@ -302,10 +302,10 @@ describe('AgentCard — actions & auto-cancel', () => {
   test('id link and Configure go to the agent config page', () => {
     const { getByText } = renderCardInRoutes()
     const link = getByText('coder').closest('a')
-    expect(link?.getAttribute('href')).toBe('/agents/coder')
+    expect(link?.getAttribute('href')).toBe('/settings/agents/coder')
     fireEvent.click(getByText(tr('settings.agentPage.configure')))
-    // /agents/coder matched the detail route (the list route unmounts).
-    expect(getByText('/agents/coder')).not.toBeNull()
+    // /settings/agents/coder matched the detail route (the list route unmounts).
+    expect(getByText('/settings/agents/coder')).not.toBeNull()
   })
 
   test('Files button goes to the agent files page', () => {

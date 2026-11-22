@@ -17,7 +17,7 @@ import {
   resolveAgentId,
 } from '../../lib/skillsScope'
 import type { SkillInfo, SkillInstallScope } from '../../lib/types'
-import { Button } from '../atoms'
+import { BackButton, Button } from '../atoms'
 import { InstallSkillModal } from '../organisms/InstallSkillModal'
 import { Sidebar } from '../organisms/Sidebar'
 import { SkillsList } from '../organisms/SkillsList'
@@ -266,6 +266,7 @@ export function SkillsPage() {
                 <line x1="9" y1="3" x2="9" y2="21" />
               </svg>
             </button>
+            <BackButton />
             <h1 className="text-base font-semibold text-text-primary">
               {t('skills.title', 'Skills')}
             </h1>
@@ -361,8 +362,8 @@ export function SkillsPage() {
               <p className="mt-1 text-xs text-text-secondary max-w-sm">
                 {t('skills.noAgentsDesc', 'Create an agent to manage its skills.')}
               </p>
-              <Link to="/agents" className="mt-3 text-sm text-focus hover:underline">
-                {t('sidebar.agents', 'Agents')}
+              <Link to="/settings/agents" className="mt-3 text-sm text-focus hover:underline">
+                {t('settings.tabs.agents', 'Agents')}
               </Link>
             </div>
           ) : (

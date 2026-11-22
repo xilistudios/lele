@@ -104,7 +104,7 @@ function setup(options: SetupOptions = {}) {
   const utils = render(
     <SettingsProvider settingsState={state} api={api}>
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/agents/coder/tools']}>
+        <MemoryRouter initialEntries={['/settings/agents/coder/tools']}>
           <AgentToolsSection agent={agent} index={1} agentId="coder" />
         </MemoryRouter>
       </QueryClientProvider>
@@ -348,7 +348,7 @@ describe('AgentToolsSection — spawn warning (§4.6.6)', () => {
     const warning = u.getByTestId('tools-spawn-warning')
     expect(warning.textContent).toContain('researcher')
     expect(u.getByTestId('tools-spawn-warning-link').getAttribute('href')).toBe(
-      '/agents/coder/subagents',
+      '/settings/agents/coder/subagents',
     )
   })
 

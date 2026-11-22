@@ -1,77 +1,57 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Outlet, useMatch, useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { SettingsProvider } from '../../contexts/SettingsContext'
 import { useSettingsConfig } from '../../hooks/useSettingsConfig'
+import { type SettingsTab, isSettingsTab } from '../../lib/settingsTabs'
 import { SettingsFooter, SettingsHeader, SettingsTabs } from '../molecules'
-import { DiagnosticsPanel } from '../organisms/DiagnosticsPanel'
 import { Sidebar } from '../organisms/Sidebar'
-import {
-  AdvancedSettings,
-  ChannelSettings,
-  GeneralSettings,
-  GroupsSettings,
-  LogsViewer,
-  NativeClientsSettings,
-  SessionSettings,
-  SystemSettings,
-  ToolsSettings,
-  UpdatesSettings,
-} from '../organisms/settings'
 
-type SettingsTab =
-  | 'general'
-  | 'session'
-  | 'channels'
-  | 'native'
-  | 'groups'
-  | 'tools'
-  | 'system'
-  | 'updates'
-  | 'advanced'
-  | 'diagnostics'
-  | 'logs'
-
-const VALID_TABS: SettingsTab[] = [
-  'general',
-  'session',
-  'channels',
-  'native',
-  'groups',
-  'tools',
-  'system',
-  'updates',
-  'advanced',
-  'diagnostics',
-  'logs',
-]
-
+/**
+ * `/settings` — the settings shell (sidebar + header + scrollable content +
+ * save footer) and the single owner of the settings draft.
+ *
+ * Children are rendered through `<Outlet/>`:
+ *
+ *   /settings/:tab                 → `SettingsTabContent` (one tab)
+ *   /settings/agents/:id/:tab?     → `AgentConfigPage` (agent detail)
+ *
+ * Why the draft lives HERE and not in each page: `useSettingsConfig` holds the
+ * unsaved draft in component state, and navigating between routes that mount
+ * *different* instances would remount the hook and silently drop it. Keeping
+ * one instance in the layout is what lets the user edit an agent, go back to
+ * the list, open another one and still save everything in one go.
+ *
+ * The tab strip is hidden while an agent detail page is open: that page owns
+ * its own tab strip, and stacking two of them would leave the content a narrow
+ * column on desktop. The agent page header's breadcrumb ("‹ Agents / id") is
+ * the way back.
+ */
 export function SettingsPage() {
   const { t } = useTranslation()
   const { api } = useAuthContext()
   const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar } =
     useAppLogicContext()
   const navigate = useNavigate()
-  const { tab: tabParam } = useParams<{ tab?: string }>()
 
-  const activeTab = useMemo<SettingsTab>(() => {
-    if (tabParam && VALID_TABS.includes(tabParam as SettingsTab)) {
-      return tabParam as SettingsTab
-    }
-    return 'general'
-  }, [tabParam])
+  // `/settings/:tab` matches exactly one segment; `/settings/agents/coder` does
+  // not, which is precisely the "agent detail" case.
+  const tabMatch = useMatch('/settings/:tab')
+  const activeTab: SettingsTab | null = isSettingsTab(tabMatch?.params.tab)
+    ? (tabMatch?.params.tab as SettingsTab)
+    : null
+  const isAgentDetail = !!useMatch('/settings/agents/:agentId/:tab?')
 
+  // A `:tab` segment that is not a known tab is a redirect, never a broken
+  // page: the address bar must always describe what is on screen.
+  const rawTab = tabMatch?.params.tab
   useEffect(() => {
-    if (!tabParam || !VALID_TABS.includes(tabParam as SettingsTab)) {
+    if (rawTab !== undefined && !isSettingsTab(rawTab)) {
       navigate('/settings/general', { replace: true })
     }
-  }, [tabParam, navigate])
-
-  const handleTabChange = (tab: SettingsTab) => {
-    navigate(`/settings/${tab}`)
-  }
+  }, [rawTab, navigate])
 
   const settingsState = useSettingsConfig(api)
 
@@ -82,41 +62,8 @@ export function SettingsPage() {
     }
   }
 
-  const renderTabContent = () => {
-    if (!settingsState.draftConfig) {
-      return (
-        <div className="flex h-64 items-center justify-center">
-          <div className="text-sm text-text-secondary">{t('common.loading')}</div>
-        </div>
-      )
-    }
-
-    switch (activeTab) {
-      case 'general':
-        return <GeneralSettings />
-      case 'session':
-        return <SessionSettings />
-      case 'channels':
-        return <ChannelSettings />
-      case 'native':
-        return <NativeClientsSettings />
-      case 'groups':
-        return <GroupsSettings />
-      case 'tools':
-        return <ToolsSettings />
-      case 'system':
-        return <SystemSettings />
-      case 'updates':
-        return <UpdatesSettings />
-      case 'advanced':
-        return <AdvancedSettings />
-      case 'diagnostics':
-        return <DiagnosticsPanel />
-      case 'logs':
-        return <LogsViewer />
-      default:
-        return null
-    }
+  const handleTabChange = (tab: SettingsTab) => {
+    navigate(`/settings/${tab}`)
   }
 
   return (
@@ -129,18 +76,19 @@ export function SettingsPage() {
         />
         <main className="flex flex-1 flex-col overflow-hidden">
           <SettingsHeader
+            title={isAgentDetail ? t('settings.tabs.agents') : undefined}
             configPath={settingsState.metadata?.config_path}
             onOpenMobileSidebar={onOpenMobileSidebar}
           />
 
           <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
-            <SettingsTabs activeTab={activeTab} onTabChange={handleTabChange} />
+            {!isAgentDetail && (
+              <SettingsTabs activeTab={activeTab ?? 'general'} onTabChange={handleTabChange} />
+            )}
 
             <div className="flex flex-1 flex-col overflow-hidden">
               <div className="flex-1 overflow-y-auto p-4 md:p-6">
-                <div key={activeTab} className="animate-step-enter">
-                  {renderTabContent()}
-                </div>
+                <Outlet />
               </div>
 
               <SettingsFooter

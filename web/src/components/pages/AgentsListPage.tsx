@@ -11,10 +11,10 @@ import { AddAgentModal } from '../organisms/settings/AddAgentWizard'
 /**
  * Agents master list — design spec §3.
  *
- * Route: `/agents` (index child of `AgentEntityLayout`, which owns the
- * shared `useSettingsConfig` draft via `SettingsProvider`). Everything here
- * reads and writes that draft: the cards reflect unsaved edits live, and the
- * layout's `SettingsFooter` is what actually persists them.
+ * Rendered by the "agents" tab of `SettingsPage` (`/settings/agents`), which
+ * owns the shared `useSettingsConfig` draft via `SettingsProvider`. Everything
+ * here reads and writes that draft: the cards reflect unsaved edits live, and
+ * the page's `SettingsFooter` is what actually persists them.
  *
  * Layout: toolbar (search + count + "Add agent") above a responsive card
  * grid — 1 column on mobile, 2 at `lg`, 3 at `2xl` — with three states:

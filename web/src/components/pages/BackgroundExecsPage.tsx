@@ -4,6 +4,7 @@ import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useBackgroundExecStream } from '../../hooks/useBackgroundExecStream'
 import { useBackgroundExecs } from '../../hooks/useBackgroundExecs'
 import type { BackgroundExecInfo } from '../../lib/types'
+import { BackButton } from '../atoms/BackButton'
 import { ErrorBanner } from '../atoms/ErrorBanner'
 import { Sidebar } from '../organisms/Sidebar'
 
@@ -203,6 +204,7 @@ export function BackgroundExecsPage() {
                 <line x1="9" y1="3" x2="9" y2="21" />
               </svg>
             </button>
+            <BackButton />
             <h1 className="text-base font-semibold text-text-primary">
               {t('backgroundExecs.title', 'Background Processes')}
             </h1>

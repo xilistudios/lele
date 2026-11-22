@@ -715,6 +715,32 @@ function filterStreamingLeftovers(
       // flight — it would vanish for up to one poll and then re-appear from
       // base. See hasRowPastSendPosition.
       if (hasRowPastSendPosition(msg, baseMessages, futureReserved)) return false
+      // FIRST-SEND STRAND: the bubble was the first send of a session whose
+      // history cache was still empty at send time (snapshot 0, no anchor), and
+      // base now holds an ASSISTANT response but ZERO confirmed user rows. The
+      // turn was answered without a persisted user copy ever reaching the cache
+      // (a built-in command whose response was persisted, or a refetch that
+      // landed the answer but not the user row). No content/positional rule can
+      // confirm this bubble, and `mergeMessages` appends it AFTER base — so it
+      // renders BELOW its own answer: "the first message I sent shows up as the
+      // newest". Drop it. If a user row lands on a later poll (a refetch race),
+      // base renders it in its canonical slot; the reconciliation poll
+      // (useChatHistory.wantsPolling) keeps refetching until then.
+      //
+      // Scoped to the FIRST send on purpose: a later send (snapshot > 0 or an
+      // anchor) always has a confirmed user at/before its send position, and an
+      // assistant after that position is the PREVIOUS turn's answer while the
+      // new turn is still in flight (optimisticAnchor.test.ts test 4 pins that
+      // bubble as KEPT). Only a base with NO confirmed user at all proves the
+      // answer belongs to this unpersisted first send.
+      if (
+        baseUserCount === 0 &&
+        (msg.optimisticBaseCount ?? 0) === 0 &&
+        !msg.optimisticAnchorId &&
+        baseMessages.some((bm) => bm.role === 'assistant')
+      ) {
+        return false
+      }
       return true
     }
 
