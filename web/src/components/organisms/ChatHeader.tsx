@@ -5,7 +5,6 @@ import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
 import { NO_POLL_MS, useSubagents } from '../../hooks/useSubagents'
-import { getModeTheme } from '../../lib/modeTheme'
 import {
   resolveHeaderAgentName,
   resolveHeaderTitle,
@@ -29,7 +28,6 @@ export const ChatHeader = memo(function ChatHeader() {
     parentSessionKey,
     agents,
     onOpenMobileSidebar,
-    chatMode,
     isProcessing,
   } = useAppLogicContext()
   const { apiUrl } = useAuthContext()
@@ -45,9 +43,6 @@ export const ChatHeader = memo(function ChatHeader() {
     () => selectSubagentForSession(parentSubagents, currentSessionKey),
     [parentSubagents, currentSessionKey],
   )
-
-  const modeTheme = getModeTheme(chatMode)
-  const ModeIcon = modeTheme.Icon
 
   useEffect(() => {
     if (subagentsSidebarOpen) {
@@ -120,12 +115,6 @@ export const ChatHeader = memo(function ChatHeader() {
             <h2 className="truncate text-sm font-medium text-text-primary">{currentTitle}</h2>
             <div className="flex items-center gap-2">
               <p className="truncate text-xs text-text-tertiary">{headerAgentName}</p>
-              <span
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium ${modeTheme.chip}`}
-              >
-                <ModeIcon size={11} />
-                {t(modeTheme.labelKey)}
-              </span>
             </div>
           </div>
         </div>

@@ -20,7 +20,7 @@ import { Logo } from '../atoms/Logo'
 import { Popover } from '../atoms/Popover'
 import { ModeSelector } from '../molecules/ModeSelector'
 import { SessionItem } from '../molecules/SessionItem'
-import { QuickChatPanel } from './QuickChatPanel'
+import { ChatSearchModal } from './ChatSearchModal'
 
 const MAX_VISIBLE_SESSIONS = 5
 
@@ -74,13 +74,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
     : null
 
   const [panelOpen, setPanelOpen] = useState(false)
-  const [panelFocusSearch, setPanelFocusSearch] = useState(false)
   const [recentExpanded, setRecentExpanded] = useState(false)
-
-  const openPanel = (focusSearch = false) => {
-    setPanelFocusSearch(focusSearch)
-    setPanelOpen(true)
-  }
 
   const recentSessions = recentExpanded
     ? sortedSessions
@@ -243,7 +237,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
               </div>
               <div className="group relative flex items-center justify-center">
                 <IconButton
-                  onClick={() => openPanel(true)}
+                  onClick={() => setPanelOpen(true)}
                   ariaLabel={t('chat.search')}
                   variant="nav"
                   className="flex items-center justify-center h-10 w-10"
@@ -270,7 +264,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
               </button>
               <div className="group relative flex items-center justify-center">
                 <IconButton
-                  onClick={() => openPanel(true)}
+                  onClick={() => setPanelOpen(true)}
                   ariaLabel={t('chat.search')}
                   variant="nav"
                   className="flex h-10 w-10 items-center justify-center"
@@ -469,11 +463,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
         </div>
       </aside>
 
-      <QuickChatPanel
-        isOpen={panelOpen}
-        onClose={() => setPanelOpen(false)}
-        initialFocusSearch={panelFocusSearch}
-      />
+      <ChatSearchModal isOpen={panelOpen} onClose={() => setPanelOpen(false)} />
     </>
   )
 }

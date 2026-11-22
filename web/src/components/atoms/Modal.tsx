@@ -1,5 +1,6 @@
-import { type ReactNode, useCallback, useEffect, useId, useRef } from 'react'
+import { type ReactNode, useEffect, useId, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { FOCUSABLE_SELECTOR, useFocusTrap } from '../../hooks/useFocusTrap'
 import { IconButton } from './IconButton'
 
 type Size = 'sm' | 'md' | 'lg' | 'xl' | 'full'
@@ -11,9 +12,6 @@ const SIZE_CLASSES: Record<Size, string> = {
   xl: 'max-w-4xl',
   full: 'max-w-[90vw]',
 }
-
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 type Props = {
   isOpen: boolean
@@ -42,26 +40,7 @@ export function Modal({
     onCloseRef.current = onClose
   }, [onClose])
 
-  const trapFocus = useCallback((e: KeyboardEvent) => {
-    if (e.key !== 'Tab') return
-    const dialog = dialogRef.current
-    if (!dialog) return
-    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-    if (focusable.length === 0) {
-      e.preventDefault()
-      return
-    }
-    const first = focusable[0]
-    const last = focusable[focusable.length - 1]
-    const active = document.activeElement as HTMLElement | null
-    if (e.shiftKey && (active === first || !dialog.contains(active))) {
-      e.preventDefault()
-      last.focus()
-    } else if (!e.shiftKey && (active === last || !dialog.contains(active))) {
-      e.preventDefault()
-      first.focus()
-    }
-  }, [])
+  useFocusTrap(dialogRef, isOpen)
 
   useEffect(() => {
     if (!isOpen) return
@@ -78,11 +57,7 @@ export function Modal({
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCloseRef.current()
-        return
-      }
-      trapFocus(e)
+      if (e.key === 'Escape') onCloseRef.current()
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => {
@@ -90,7 +65,7 @@ export function Modal({
       document.body.style.overflow = prevOverflow
       previouslyFocused.current?.focus?.()
     }
-  }, [isOpen, trapFocus])
+  }, [isOpen])
 
   if (!isOpen) return null
 
